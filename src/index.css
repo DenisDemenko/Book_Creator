@@ -1,0 +1,998 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: #f1f5f9;
+    background-color: #090d16;
+    line-height: 1.6;
+    letter-spacing: -0.01em;
+  }
+
+  h1, h2, h3, .font-heading {
+    font-family: 'Outfit', sans-serif;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+  }
+
+  .font-serif-book {
+    font-family: 'Literata', 'Cormorant Garamond', Georgia, serif;
+    letter-spacing: 0;
+  }
+
+  .font-cormorant {
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    letter-spacing: 0.01em;
+  }
+
+  .font-mono-code {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+/* ============================================================
+   NOVA GLASS — design layer
+   Frosted glass surfaces + gradient glow accents, layered on top
+   of the existing dark editorial palette (slate / amber / cyan).
+   ============================================================ */
+
+@layer base {
+  :root {
+    --glass-border: rgba(148, 163, 184, 0.12);
+    --glass-border-strong: rgba(148, 163, 184, 0.22);
+    --glass-highlight: rgba(255, 255, 255, 0.05);
+  }
+}
+
+/* Editorial & Studio Surface Guidelines (kept for compatibility) */
+.panel-surface {
+  background-color: #0f172a;
+  border: 1px solid #1e293b;
+}
+
+.panel-surface-elevated {
+  background-color: #131d35;
+  border: 1px solid #24324f;
+}
+
+.prose-editorial {
+  max-width: 68ch;
+  line-height: 1.7;
+}
+
+/* --- Glass surfaces --- */
+.glass-panel {
+  position: relative;
+  background: linear-gradient(180deg, rgba(19, 29, 53, 0.55) 0%, rgba(9, 13, 22, 0.6) 100%);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    0 12px 40px -22px rgba(0, 0, 0, 0.75),
+    var(--aurora-glow-layers);
+}
+
+.glass-panel-elevated {
+  position: relative;
+  background: linear-gradient(180deg, rgba(24, 36, 61, 0.68) 0%, rgba(10, 15, 26, 0.72) 100%);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--glass-border-strong);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    0 24px 70px -28px rgba(0, 0, 0, 0.85),
+    var(--aurora-glow-layers);
+}
+
+.glass-panel-hover {
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
+}
+.glass-panel-hover:hover {
+  border-color: rgba(34, 211, 238, 0.35);
+  box-shadow: inset 0 1px 0 var(--glass-highlight), 0 0 0 1px rgba(34, 211, 238, 0.08), 0 24px 60px -20px rgba(34, 211, 238, 0.16);
+  transform: translateY(-2px);
+}
+
+/* Gradient "aurora" text, used sparingly for hero emphasis */
+.text-aurora {
+  background: linear-gradient(90deg, #67e8f9 0%, #60a5fa 45%, #a78bfa 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.text-aurora-warm {
+  background: linear-gradient(90deg, #fbbf24 0%, #f59e0b 55%, #fb923c 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Ambient glow orbs, used behind hero / feature sections */
+.orb-field {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(90px);
+  opacity: 0.32;
+}
+.orb-cyan { background: #22d3ee; }
+.orb-violet { background: #8b5cf6; }
+.orb-amber { background: #f59e0b; }
+
+@keyframes orb-float {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(20px, -24px) scale(1.06); }
+}
+.orb-float { animation: orb-float 14s ease-in-out infinite; }
+.orb-float-slow { animation: orb-float 20s ease-in-out infinite; animation-delay: -7s; }
+
+/* Faint structural grid backdrop, echoes a blueprint / schematic feel */
+.bg-grid-faint {
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.07) 1px, transparent 1px);
+  background-size: 44px 44px;
+  -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 0%, transparent 75%);
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 0%, transparent 75%);
+}
+
+/* Glow-ring focus state for glass form fields */
+.field-glow {
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+.field-glow:focus {
+  outline: none;
+  border-color: rgba(34, 211, 238, 0.55);
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.12);
+  background-color: rgba(9, 13, 22, 0.85);
+}
+
+/* Translucent pill badge with a soft border */
+.badge-glass {
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border-strong);
+  box-shadow: var(--aurora-glow-layers);
+}
+
+/* Monospace corner index, echoes "01 / 02 / 03" style tagging */
+.corner-tag {
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.05em;
+}
+
+/* Drop Cap for Literary Book Previews */
+.drop-cap::first-letter {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  float: left;
+  font-size: 3.4em;
+  line-height: 0.8;
+  padding-top: 4px;
+  padding-right: 8px;
+  padding-bottom: 2px;
+  color: #0f172a;
+  font-weight: 700;
+}
+
+/* Custom crisp scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* ============================================================
+   AURORA GLOW — покриття всіх блоків сайту
+   ============================================================
+   Чому саме так: переважна більшість карток і панелей у застосунку
+   написана голими класами Tailwind, напр.
+     "p-6 rounded-xl bg-slate-900 border border-slate-800"
+   і НЕ використовує .glass-panel / .badge-glass. Тому сяйво, вписане
+   лише у ці кілька класів, було видно на ~26 елементах з ~600 —
+   візуально «нічого не світиться».
+
+   Замість переписування ~50 файлів компонентів тут шар атрибутних
+   селекторів — та сама техніка, що вже застосована нижче для світлої
+   теми. Блок вважається «поверхнею», якщо має скруглення + бордер +
+   будь-який фон. Цим покриті і сірі картки (bg-slate-900/40), і
+   акцентні плашки (bg-amber-500/10, bg-cyan-500/20 …), і градієнтні
+   кнопки, а дрібні інлайнові елементи — pill-беджі (rounded-full),
+   текстові span'и, обгортки без бордера — лишаються без сяйва.
+
+   Тут навмисно [class*="bg-"], а не точний токен: варіантів фону в
+   коді десятки (кожен колір × прозорість), і повний перелік застарів
+   би з першою ж новою карткою. Побічний ефект — блок, у якого лише
+   hover:bg-*, теж світитиметься; це прийнятно, бо він усе одно є
+   візуальною карткою.
+   ============================================================ */
+
+:root {
+  /* Висота фіксованої шапки сайту. Шапка та липкий сайдбар використовують
+     цю змінну, щоб сайдбар завжди починався рівно під шапкою й залишався
+     на екрані під час скролу на всіх розділах. */
+  --app-header-h: 86px;
+  /* Висота сайдбара = вся висота вікна мінус висота шапки. */
+  --app-sidebar-h: calc(100vh - var(--app-header-h));
+
+  /* Тришарова аврора: ядро → середина → зовнішній ореол.
+     Самі кольори живуть у трьох змінних, які перемикає випадаючий
+     список палітр (GlowIntensityControl.tsx → GLOW_PALETTES).
+     Формат — «R, G, B» без rgba(), щоб підставляти альфу тут.
+     Типове значення = палітра «Аврора». */
+  --glow-c1: 34, 211, 238;
+  --glow-c2: 139, 92, 246;
+  --glow-c3: 245, 158, 11;
+
+  /* Інтенсивність повзунка сяйва (GlowIntensityControl, «Сайво:»): 0..2,
+     0.6 = типова позиція 150pt/250. Поки повзунок не запустив свій rAF —
+     тримаємо типовий стан, щоб аврора не «завмирала» на першому кадрі. */
+  --glow-intensity: 0.6;
+  /* Глобальний множник світіння від сонечка (SunLightingContext): 1 =
+     повне світіння, менше — сонце вимкнене/слабше. Перемножується з
+     --glow-intensity, тож повзунок на верху панелі регулює світіння
+     НА ВСІХ розділах сайту одразу. */
+  --sun-glow-opacity: 1;
+
+  /* Самі шари сяйва — окремою змінною, щоб їх могли дописати до
+     власних тіней і скляні класи (.glass-panel, .badge-glass …),
+     не дублюючи формул. Множники:
+       --glow-intensity     — повзунок «Сайво:» (0..2);
+       --sun-glow-opacity   — глобальне світіння від сонечка (1..0.4).
+     Різнокольорову пер-елементну ауру (SunAuraManager) додаємо не тут,
+     а inline-змінними --aurora-glow-layers / --aurora-shadow на самій
+     поверхні: вкладені var() у цьому кореневому шаблоні резолвляться
+     на рівні :root, а не конкретного елемента. */
+  --aurora-glow-layers:
+    0 0 calc(22px * var(--glow-intensity) * var(--sun-glow-opacity)) calc(2px * var(--glow-intensity) * var(--sun-glow-opacity)) rgba(var(--glow-c1), 0.34),
+    0 0 calc(42px * var(--glow-intensity) * var(--sun-glow-opacity)) calc(6px * var(--glow-intensity) * var(--sun-glow-opacity)) rgba(var(--glow-c2), 0.3),
+    0 0 calc(64px * var(--glow-intensity) * var(--sun-glow-opacity)) calc(10px * var(--glow-intensity) * var(--sun-glow-opacity)) rgba(var(--glow-c3), 0.26);
+
+  /* Перший шар — звичайна глибина, щоб заміна Tailwind-класів
+     shadow-* не робила картки «пласкими». */
+  --aurora-shadow:
+    0 12px 40px -26px rgba(0, 0, 0, 0.72),
+    var(--aurora-glow-layers);
+}
+
+:is(
+  [class~="rounded-lg"],
+  [class~="rounded-xl"],
+  [class~="rounded-2xl"],
+  [class~="rounded-3xl"]
+)[class~="border"][class*="bg-"] {
+  box-shadow: var(--aurora-shadow);
+}
+
+/* ============================================================
+   NOVA GLASS — LIGHT THEME
+   Той самий фрост-скляний дизайн, інвертований на світлу основу:
+   замість темних напівпрозорих панелей — білі. Перемикається атрибутом
+   data-theme на <html> (useTheme.ts), застосовується ще до першого
+   малювання інлайн-скриптом в index.html, щоб не було спалаху теми.
+
+   Компоненти написані з хардкодженими класами Tailwind (bg-slate-900,
+   text-slate-400 тощо) — переписувати кожен з ~30 файлів під dark:-варіанти
+   було б окремим велетенським рефакторингом. Замість цього тут — шар
+   перевизначень: атрибутний селектор [class~="..."] ловить точний токен
+   класу (а не підрядок), тож hover:-варіанти не зачіпають базові стани.
+   ============================================================ */
+
+[data-theme="light"] body {
+  background-color: #f7f8fb;
+  color: #1e293b;
+}
+
+/* --- Суцільні фони --- */
+[data-theme="light"] [class~="bg-slate-950"] { background-color: #f7f8fb; }
+[data-theme="light"] [class~="bg-slate-900"] { background-color: #ffffff; }
+[data-theme="light"] [class~="bg-slate-800"] { background-color: #eef1f6; }
+[data-theme="light"] [class~="bg-slate-700"] { background-color: #dbe3ee; }
+[data-theme="light"] [class~="bg-black"]     { background-color: #0f172a; }
+
+/* --- Напівпрозорі («скляні») фони: темний скляний шар → білий скляний шар --- */
+[data-theme="light"] [class~="bg-slate-950/95"] { background-color: rgba(255,255,255,0.95); }
+[data-theme="light"] [class~="bg-slate-950/90"] { background-color: rgba(255,255,255,0.9); }
+[data-theme="light"] [class~="bg-slate-950/85"] { background-color: rgba(255,255,255,0.86); }
+[data-theme="light"] [class~="bg-slate-950/80"] { background-color: rgba(255,255,255,0.82); }
+[data-theme="light"] [class~="bg-slate-950/75"] { background-color: rgba(255,255,255,0.78); }
+[data-theme="light"] [class~="bg-slate-950/70"] { background-color: rgba(255,255,255,0.75); }
+[data-theme="light"] [class~="bg-slate-950/60"] { background-color: rgba(255,255,255,0.68); }
+[data-theme="light"] [class~="bg-slate-950/50"] { background-color: rgba(255,255,255,0.6); }
+[data-theme="light"] [class~="bg-slate-950/40"] { background-color: rgba(255,255,255,0.5); }
+[data-theme="light"] [class~="bg-slate-900/90"] { background-color: rgba(255,255,255,0.92); }
+[data-theme="light"] [class~="bg-slate-900/80"] { background-color: rgba(255,255,255,0.85); }
+[data-theme="light"] [class~="bg-slate-900/70"] { background-color: rgba(255,255,255,0.78); }
+[data-theme="light"] [class~="bg-slate-900/60"] { background-color: rgba(255,255,255,0.7); }
+[data-theme="light"] [class~="bg-slate-900/50"] { background-color: rgba(255,255,255,0.62); }
+[data-theme="light"] [class~="bg-slate-900/40"] { background-color: rgba(255,255,255,0.52); }
+[data-theme="light"] [class~="bg-slate-800/90"] { background-color: rgba(238,241,246,0.92); }
+[data-theme="light"] [class~="bg-slate-800/80"] { background-color: rgba(238,241,246,0.85); }
+[data-theme="light"] [class~="bg-slate-800/60"] { background-color: rgba(238,241,246,0.7); }
+[data-theme="light"] [class~="bg-slate-700/50"] { background-color: rgba(219,227,238,0.6); }
+[data-theme="light"] [class~="bg-white/10"]     { background-color: rgba(15,23,42,0.06); }
+
+/* --- Текст --- */
+[data-theme="light"] [class~="text-slate-100"] { color: #0f172a; }
+[data-theme="light"] [class~="text-slate-200"] { color: #1e293b; }
+[data-theme="light"] [class~="text-slate-300"] { color: #334155; }
+[data-theme="light"] [class~="text-slate-400"] { color: #64748b; }
+[data-theme="light"] [class~="text-slate-500"] { color: #64748b; }
+[data-theme="light"] [class~="text-slate-600"] { color: #475569; }
+[data-theme="light"] [class~="text-white"]     { color: #0f172a; }
+
+/* --- Рамки --- */
+[data-theme="light"] [class~="border-slate-900"] { border-color: #e2e8f0; }
+[data-theme="light"] [class~="border-slate-800"] { border-color: #e2e8f0; }
+[data-theme="light"] [class~="border-slate-700"] { border-color: #cbd5e1; }
+[data-theme="light"] [class~="border-white/[0.04]"] { border-color: rgba(15,23,42,0.05); }
+[data-theme="light"] [class~="border-white/[0.05]"] { border-color: rgba(15,23,42,0.06); }
+[data-theme="light"] [class~="border-white/[0.06]"] { border-color: rgba(15,23,42,0.08); }
+[data-theme="light"] [class~="border-white/[0.08]"] { border-color: rgba(15,23,42,0.1); }
+[data-theme="light"] [class~="border-white/[0.14]"] { border-color: rgba(15,23,42,0.14); }
+[data-theme="light"] [class~="border-white/[0.16]"] { border-color: rgba(15,23,42,0.16); }
+
+/* --- Hover-стани: окремі токени класів, тому базові правила вище їх не чіпають --- */
+[data-theme="light"] [class~="hover:bg-slate-700"]:hover { background-color: #dbe3ee; }
+[data-theme="light"] [class~="hover:bg-slate-800"]:hover { background-color: #eef1f6; }
+[data-theme="light"] [class~="hover:bg-slate-900"]:hover { background-color: #ffffff; }
+[data-theme="light"] [class~="hover:bg-slate-950"]:hover { background-color: #f7f8fb; }
+[data-theme="light"] [class~="hover:bg-slate-800/90"]:hover { background-color: rgba(238,241,246,0.92); }
+[data-theme="light"] [class~="hover:bg-slate-800/60"]:hover { background-color: rgba(238,241,246,0.7); }
+[data-theme="light"] [class~="hover:bg-slate-900/60"]:hover { background-color: rgba(255,255,255,0.7); }
+[data-theme="light"] [class~="hover:bg-slate-900/50"]:hover { background-color: rgba(255,255,255,0.62); }
+[data-theme="light"] [class~="hover:bg-slate-900/40"]:hover { background-color: rgba(255,255,255,0.52); }
+[data-theme="light"] [class~="hover:bg-slate-950/90"]:hover { background-color: rgba(255,255,255,0.9); }
+[data-theme="light"] [class~="hover:border-slate-700"]:hover { border-color: #cbd5e1; }
+[data-theme="light"] [class~="hover:text-white"]:hover     { color: #0f172a; }
+[data-theme="light"] [class~="hover:text-slate-100"]:hover { color: #0f172a; }
+[data-theme="light"] [class~="hover:text-slate-200"]:hover { color: #1e293b; }
+[data-theme="light"] [class~="hover:text-slate-300"]:hover { color: #334155; }
+
+/* --- Світла тема: СІРА ТІНЬ СОНЦЯ замість аврори на всіх сторінках ---
+   У темній темі картки світяться авророю (--glow-*), а у світлій — за
+   вимогою має бути неоморфна СІРА тінь від перетягуваного сонця, як на
+   вкладці «Майстерність & Навички». Тому в [data-theme="light"] ми:
+     • прибираємо кольорові шари аврори (--aurora-glow-layers);
+     • підставляємо тінь сонця у --aurora-shadow (споживається глобальним
+       правилом AURORA GLOW для всіх rounded-карток);
+     • скляні поверхні (.glass-panel та ін.) також отримують тінь сонця.
+   Оскільки [data-theme="light"] — це сам <html>, перевизначення змінних
+   тут успадковується вниз і правило AURORA GLOW перемикається автоматично.
+   Тінь спрямована протилежно від сонця: --sun-*-x/y задає DraggableSun. */
+[data-theme="light"] {
+  --aurora-glow-layers: 0 0 0 0 transparent;
+  --aurora-shadow:
+    var(--sun-shadow-x) var(--sun-shadow-y) 16px var(--shadow-color),
+    var(--sun-light-x) var(--sun-light-y) 16px var(--highlight-color);
+}
+
+/* --- Скляні поверхні дизайн-системи (світла тема: тінь сонця) --- */
+[data-theme="light"] .glass-panel {
+  background: linear-gradient(180deg, rgba(255,255,255,0.78) 0%, rgba(246,248,251,0.82) 100%);
+  border-color: rgba(15, 23, 42, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.9),
+    var(--sun-shadow-x) var(--sun-shadow-y) 18px var(--shadow-color),
+    var(--sun-light-x) var(--sun-light-y) 18px var(--highlight-color);
+}
+[data-theme="light"] .glass-panel-elevated {
+  background: linear-gradient(180deg, rgba(255,255,255,0.9) 0%, rgba(248,250,252,0.92) 100%);
+  border-color: rgba(15, 23, 42, 0.1);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.95),
+    var(--sun-shadow-lg-x) var(--sun-shadow-lg-y) 26px var(--shadow-color-lg),
+    var(--sun-light-lg-x) var(--sun-light-lg-y) 26px var(--highlight-color);
+}
+[data-theme="light"] .badge-glass {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(15, 23, 42, 0.1);
+  box-shadow:
+    var(--sun-shadow-soft-x) var(--sun-shadow-soft-y) 8px var(--shadow-color-soft),
+    var(--sun-light-soft-x) var(--sun-light-soft-y) 8px var(--highlight-color);
+}
+[data-theme="light"] .panel-surface {
+  background-color: #ffffff;
+  border-color: #e2e8f0;
+}
+[data-theme="light"] .panel-surface-elevated {
+  background-color: #f8fafc;
+  border-color: #e2e8f0;
+}
+[data-theme="light"] .field-glow:focus {
+  background-color: rgba(255, 255, 255, 0.95);
+}
+
+/* --- Ambient orbs: мʼякше на білому тлі, інакше засвічує --- */
+[data-theme="light"] .orb {
+  opacity: 0.16;
+}
+[data-theme="light"] .bg-grid-faint {
+  background-image:
+    linear-gradient(rgba(15, 23, 42, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.06) 1px, transparent 1px);
+}
+
+/* --- Скролбар --- */
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+}
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* --- Картка «Завдання дня» (Майстерність): у світлій темі градієнтний фон
+      (background-image) лишався темним, а текст тема робила темним → темний
+      текст на темній картці. Робимо фон світлим і переводимо бурштинові/
+      оранжеві акценти в темні тони, щоб усе читалось на білому. --- */
+[data-theme="light"] .mastery-today-card {
+  background-image: linear-gradient(135deg, #fef3c7 0%, #ffffff 55%, #ffffff 100%);
+  border-color: rgba(245, 158, 11, 0.35);
+}
+[data-theme="light"] .mastery-today-card [class~="text-amber-300"],
+[data-theme="light"] .mastery-today-card [class~="text-amber-400"] { color: #b45309; }
+[data-theme="light"] .mastery-today-card [class~="text-orange-300"] { color: #c2410c; }
+[data-theme="light"] .mastery-today-card [class~="bg-amber-500/20"] { background-color: rgba(245, 158, 11, 0.16); }
+[data-theme="light"] .mastery-today-card [class~="bg-orange-500/15"] { background-color: rgba(249, 115, 22, 0.14); }
+[data-theme="light"] .mastery-today-card [class~="border-amber-500/30"] { border-color: rgba(245, 158, 11, 0.3); }
+[data-theme="light"] .mastery-today-card [class~="border-orange-500/30"] { border-color: rgba(249, 115, 22, 0.3); }
+
+/* Print simulation */
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+}
+
+/* ============================================================
+   ONBOARDING TOUR — спливаючі довідкові вікна для нових авторів.
+   Синьо-блакитна картка з високим контрастом (білий текст) у
+   веселковій переливчастій рамці 2px, довкола якої пульсує
+   розмите "аврора"-світіння шириною до 50px. Прожектор навколо
+   цільової кнопки затемнює решту екрана величезним box-shadow.
+   ============================================================ */
+
+@keyframes nova-tour-hue-rotate {
+  0% { filter: hue-rotate(0deg); }
+  100% { filter: hue-rotate(360deg); }
+}
+
+@keyframes nova-tour-aurora-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(0.94); }
+  50% { opacity: 1; transform: scale(1.06); }
+}
+
+@keyframes nova-tour-card-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes nova-tour-ring-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(125, 211, 252, 0.65), 0 0 0 9999px rgba(2, 6, 23, 0.62); }
+  50% { box-shadow: 0 0 0 6px rgba(125, 211, 252, 0.9), 0 0 0 9999px rgba(2, 6, 23, 0.62); }
+}
+
+.nova-tour-spotlight {
+  position: fixed;
+  border-radius: 16px;
+  pointer-events: none;
+  z-index: 80;
+  animation: nova-tour-ring-pulse 2.2s ease-in-out infinite;
+  transition: top 0.25s ease, left 0.25s ease, width 0.25s ease, height 0.25s ease;
+}
+
+.nova-tour-card {
+  position: fixed;
+  isolation: isolate;
+  border-radius: 1.1rem;
+  background: linear-gradient(135deg, #1d4ed8 0%, #0e7490 55%, #0891b2 100%);
+  box-shadow: 0 25px 60px -20px rgba(2, 8, 23, 0.75);
+  animation: nova-tour-card-in 0.28s ease-out;
+}
+
+/* Веселкова переливчаста рамка шириною 2px — кільце створюється маскою
+   XOR: повний прямокутник мінус той самий прямокутник, звужений на
+   товщину рамки (content-box), лишає тільки 2px кайму. */
+.nova-tour-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  padding: 2px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from 0deg,
+    #ff5f6d, #ff9a5f, #ffe45f, #7dff5f, #5fffd0, #5fc3ff, #7a6dff, #e05fff, #ff5f6d
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: nova-tour-hue-rotate 5s linear infinite;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Аврора: розмите веселкове світіння навколо рамки, що "дихає" й
+   розширюється на 50px за межі картки. */
+.nova-tour-card::after {
+  content: '';
+  position: absolute;
+  inset: -50px;
+  border-radius: calc(1.1rem + 50px);
+  background: conic-gradient(
+    from 0deg,
+    rgba(255, 95, 109, 0.55), rgba(255, 154, 95, 0.5), rgba(255, 228, 95, 0.45),
+    rgba(125, 255, 95, 0.5), rgba(95, 255, 208, 0.55), rgba(95, 195, 255, 0.6),
+    rgba(122, 109, 255, 0.55), rgba(224, 95, 255, 0.55), rgba(255, 95, 109, 0.55)
+  );
+  filter: blur(30px);
+  opacity: 0.7;
+  z-index: -1;
+  pointer-events: none;
+  animation: nova-tour-hue-rotate 6.5s linear infinite, nova-tour-aurora-pulse 3.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nova-tour-card::before,
+  .nova-tour-card::after,
+  .nova-tour-spotlight {
+    animation: none !important;
+  }
+}
+
+/* ============================================================
+   SUN LIGHTING SYSTEM — Сонечко на всіх сторінках
+   Динамічні CSS-змінні керуються перетягуваним сонечком
+   (src/context/SunLightingContext.tsx) та задають напрямок
+   світла/тіні для неоморфних класів .neo-* нижче.
+   ============================================================ */
+:root {
+  /* Default Sun Lighting CSS Variables (Top-Right light source) */
+  --sun-shadow-x: -8px;
+  --sun-shadow-y: 8px;
+  --sun-light-x: 8px;
+  --sun-light-y: -8px;
+
+  --sun-shadow-lg-x: -14px;
+  --sun-shadow-lg-y: 14px;
+  --sun-light-lg-x: 14px;
+  --sun-light-lg-y: -14px;
+
+  --sun-shadow-soft-x: -4.5px;
+  --sun-shadow-soft-y: 4.5px;
+  --sun-light-soft-x: 4.5px;
+  --sun-light-soft-y: -4.5px;
+
+  --sun-shadow-hover-x: -11px;
+  --sun-shadow-hover-y: 11px;
+  --sun-light-hover-x: 11px;
+  --sun-light-hover-y: -11px;
+
+  --sun-inset-shadow-x: 3.5px;
+  --sun-inset-shadow-y: -3.5px;
+  --sun-inset-light-x: -3.5px;
+  --sun-inset-light-y: 3.5px;
+
+  --shadow-color: #bebebe;
+  --shadow-color-lg: #b8b8b8;
+  --shadow-color-soft: #d1d1d1;
+  --highlight-color: #ffffff;
+
+  --sun-color-primary: #006d37;
+  --sun-color-secondary: #10b981;
+  --sun-color-highlight: #a7f3d0;
+  --sun-color-glow: #10b981;
+  --sun-ambient-rgb: 0, 109, 55;
+  --sun-intensity-progress: 0;
+  --sun-pause-active: 0;
+
+  /* Темна тема = кольорове сяйво сонця; світла тема = прозоро (тільки тіні). */
+  --sun-glow-color: transparent;
+  --sun-glow-opacity: 0;
+}
+
+@layer utilities {
+  /* Dynamic Neomorphic Utility Classes Driven by Draggable Sun.
+     СВІТЛА ТЕМА (за замовчуванням): класична СІРА тінь + білий хайлайт,
+     напрямок — від сонця (тінь) і до сонця (хайлайт), як у архіві.
+     ТЕМНА ТЕМА: ефект перевизначається на АВРОРУ (--glow-c1..c3 та
+     --glow-intensity) нижче у [data-theme="dark"]. */
+  .neo-extruded {
+    box-shadow: var(--sun-shadow-x) var(--sun-shadow-y) 16px var(--shadow-color),
+                var(--sun-light-x) var(--sun-light-y) 16px var(--highlight-color);
+    transition: box-shadow 0.04s ease-out, transform 0.15s ease;
+  }
+
+  .neo-extruded-lg {
+    box-shadow: var(--sun-shadow-lg-x) var(--sun-shadow-lg-y) 24px var(--shadow-color-lg),
+                var(--sun-light-lg-x) var(--sun-light-lg-y) 24px var(--highlight-color);
+    transition: box-shadow 0.04s ease-out, transform 0.15s ease;
+  }
+
+  .neo-extruded-soft {
+    box-shadow: var(--sun-shadow-soft-x) var(--sun-shadow-soft-y) 8px var(--shadow-color-soft),
+                var(--sun-light-soft-x) var(--sun-light-soft-y) 8px var(--highlight-color);
+    transition: box-shadow 0.04s ease-out, transform 0.15s ease;
+  }
+
+  .neo-pressed {
+    box-shadow: inset var(--sun-inset-shadow-x) var(--sun-inset-shadow-y) 8px var(--shadow-color),
+                inset var(--sun-inset-light-x) var(--sun-inset-light-y) 8px var(--highlight-color);
+    transition: box-shadow 0.04s ease-out;
+  }
+
+  .neo-pressed-soft {
+    box-shadow: inset calc(var(--sun-inset-shadow-x) * 0.6) calc(var(--sun-inset-shadow-y) * 0.6) 4px var(--shadow-color-soft),
+                inset calc(var(--sun-inset-light-x) * 0.6) calc(var(--sun-inset-light-y) * 0.6) 4px var(--highlight-color);
+    transition: box-shadow 0.04s ease-out;
+  }
+
+  .neo-pressed-accent {
+    box-shadow: inset var(--sun-inset-shadow-x) var(--sun-inset-shadow-y) 6px rgba(0, 0, 0, 0.15),
+                inset var(--sun-inset-light-x) var(--sun-inset-light-y) 6px rgba(255, 255, 255, 0.7);
+    transition: box-shadow 0.04s ease-out;
+  }
+
+  .neo-button-interactive {
+    transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.04s ease-out;
+  }
+
+  .neo-button-interactive:hover {
+    box-shadow: var(--sun-shadow-hover-x) var(--sun-shadow-hover-y) 20px var(--shadow-color),
+                var(--sun-light-hover-x) var(--sun-light-hover-y) 20px var(--highlight-color);
+    transform: translateY(-1px);
+  }
+
+  .neo-button-interactive:active {
+    box-shadow: inset var(--sun-inset-shadow-x) var(--sun-inset-shadow-y) 8px var(--shadow-color),
+                inset var(--sun-inset-light-x) var(--sun-inset-light-y) 8px var(--highlight-color);
+    transform: translateY(1px);
+  }
+
+  .neo-glow-emerald {
+    box-shadow: 0 0 20px rgba(46, 204, 113, 0.35);
+  }
+}
+
+/* ============================================================
+   МАЙСТЕРНІСТЬ (.mastery-fw): неоморфні поверхні.
+   СВІТЛА ТЕМА → СІРА тінь сонця (як у архіві), тінь — протилежно сонцю.
+   ТЕМНА ТЕМА → АВРОРА застосунку (три кольори + бігунок сили).
+   !important потрібен, бо глобальне аврора-правило застосунку
+   (:is([rounded-*])[class~="border"][class*="bg-"]) інакше перебиває
+   сіру тінь сонця на світлих картках.
+   ============================================================ */
+
+/* --- СВІТЛА ТЕМА: СІРА ТІНЬ СОНЦЯ (без аврори) --- */
+.mastery-fw [class~="neo-extruded"] {
+  box-shadow: var(--sun-shadow-x) var(--sun-shadow-y) 16px var(--shadow-color),
+              var(--sun-light-x) var(--sun-light-y) 16px var(--highlight-color) !important;
+}
+.mastery-fw [class~="neo-extruded-lg"] {
+  box-shadow: var(--sun-shadow-lg-x) var(--sun-shadow-lg-y) 24px var(--shadow-color-lg),
+              var(--sun-light-lg-x) var(--sun-light-lg-y) 24px var(--highlight-color) !important;
+}
+.mastery-fw [class~="neo-extruded-soft"] {
+  box-shadow: var(--sun-shadow-soft-x) var(--sun-shadow-soft-y) 8px var(--shadow-color-soft),
+              var(--sun-light-soft-x) var(--sun-light-soft-y) 8px var(--highlight-color) !important;
+}
+.mastery-fw [class~="neo-pressed"] {
+  box-shadow: inset var(--sun-inset-shadow-x) var(--sun-inset-shadow-y) 8px var(--shadow-color),
+              inset var(--sun-inset-light-x) var(--sun-inset-light-y) 8px var(--highlight-color) !important;
+}
+.mastery-fw [class~="neo-pressed-soft"] {
+  box-shadow: inset calc(var(--sun-inset-shadow-x) * 0.6) calc(var(--sun-inset-shadow-y) * 0.6) 4px var(--shadow-color-soft),
+              inset calc(var(--sun-inset-light-x) * 0.6) calc(var(--sun-inset-light-y) * 0.6) 4px var(--highlight-color) !important;
+}
+.mastery-fw [class~="neo-pressed-accent"] {
+  box-shadow: inset var(--sun-inset-shadow-x) var(--sun-inset-shadow-y) 6px rgba(0, 0, 0, 0.15),
+              inset var(--sun-inset-light-x) var(--sun-inset-light-y) 6px rgba(255, 255, 255, 0.7) !important;
+}
+.mastery-fw [class~="neo-button-interactive"]:hover {
+  box-shadow: var(--sun-shadow-hover-x) var(--sun-shadow-hover-y) 20px var(--shadow-color),
+              var(--sun-light-hover-x) var(--sun-light-hover-y) 20px var(--highlight-color) !important;
+  transform: translateY(-1px);
+}
+.mastery-fw [class~="neo-button-interactive"]:active {
+  box-shadow: inset var(--sun-inset-shadow-x) var(--sun-inset-shadow-y) 8px var(--shadow-color),
+              inset var(--sun-inset-light-x) var(--sun-inset-light-y) 8px var(--highlight-color) !important;
+  transform: translateY(1px);
+}
+
+/* --- ТЕМНА ТЕМА: АВРОРА застосунку (ті самі --aurora-*, що й скло сайту) --- */
+[data-theme="dark"] .mastery-fw [class~="neo-extruded"],
+[data-theme="dark"] .mastery-fw [class~="neo-extruded-lg"],
+[data-theme="dark"] .mastery-fw [class~="neo-extruded-soft"] {
+  box-shadow: var(--aurora-shadow) !important;
+  transition: box-shadow 0.3s ease-out, transform 0.15s ease;
+}
+[data-theme="dark"] .mastery-fw [class~="neo-pressed"],
+[data-theme="dark"] .mastery-fw [class~="neo-pressed-soft"],
+[data-theme="dark"] .mastery-fw [class~="neo-pressed-accent"] {
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.5), var(--aurora-glow-layers) !important;
+  transition: box-shadow 0.3s ease-out;
+}
+[data-theme="dark"] .mastery-fw [class~="neo-button-interactive"]:hover {
+  box-shadow: var(--aurora-shadow) !important;
+  transform: translateY(-1px);
+}
+[data-theme="dark"] .mastery-fw [class~="neo-button-interactive"]:active {
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.5), var(--aurora-glow-layers) !important;
+  transform: translateY(1px);
+}
+
+/* Тема-залежний скролбар: світла тема — світлий, темна — темний. */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+[data-theme="light"] ::-webkit-scrollbar-track {
+  background: #f4f3f3;
+}
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: #c7c7c7;
+}
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* Приховування горизонтального скролбару (використовується в новій
+   майстерності для горизонтальних стрічок фільтрів/етапів). */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* Анімації нової майстерності (fade / zoom / slide) */
+@keyframes mastery-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-in.fade-in {
+  animation: mastery-fade-in 0.2s ease-out;
+}
+
+/* ============================================================
+   ТЕМНА ТЕМА для розділу «Майстерність & Навички» (.mastery-fw)
+   Світлий дизайн фреймворку перемикається на темні поверхні,
+   як у всьому сайті. Аврора (--glow-*) задає сяйво .neo-* елементів.
+   ============================================================ */
+[data-theme="dark"] .mastery-fw {
+  background-color: #090d16;
+  color: #e2e8f0;
+}
+
+/* --- Поверхні --- */
+[data-theme="dark"] .mastery-fw [class~="bg-[#f4f3f3]"] { background-color: #0b1120; }
+[data-theme="dark"] .mastery-fw [class~="bg-[#f4f3f3]/90"] { background-color: rgba(11, 17, 32, 0.92); }
+[data-theme="dark"] .mastery-fw [class~="bg-[#f9f9f9]"] { background-color: #121a2c; }
+[data-theme="dark"] .mastery-fw [class~="bg-[#f9f9f9]/95"] { background-color: rgba(18, 26, 44, 0.95); }
+[data-theme="dark"] .mastery-fw header { background-color: rgba(11, 17, 32, 0.92); }
+[data-theme="dark"] .mastery-fw [class~="bg-[#f0f0f0]"] { background-color: #16203a; }
+[data-theme="dark"] .mastery-fw [class~="bg-white"] { background-color: #1a2338; }
+[data-theme="dark"] .mastery-fw [class~="bg-white/70"] { background-color: rgba(19, 28, 49, 0.72); }
+[data-theme="dark"] .mastery-fw [class~="bg-white/80"] { background-color: rgba(19, 28, 49, 0.82); }
+[data-theme="dark"] .mastery-fw [class~="bg-white/90"] { background-color: rgba(19, 28, 49, 0.92); }
+[data-theme="dark"] .mastery-fw [class~="bg-gray-50"] { background-color: #101a2e; }
+[data-theme="dark"] .mastery-fw [class~="bg-gray-100"] { background-color: #1e293b; }
+[data-theme="dark"] .mastery-fw [class~="bg-gray-200"] { background-color: #273449; }
+[data-theme="dark"] .mastery-fw [class~="bg-gray-100/70"] { background-color: rgba(30, 41, 59, 0.7); }
+[data-theme="dark"] .mastery-fw [class~="bg-gray-200/60"] { background-color: rgba(39, 52, 73, 0.6); }
+[data-theme="dark"] .mastery-fw [class~="bg-black/5"] { background-color: rgba(255, 255, 255, 0.06); }
+
+/* --- Градієнт банера контексту книги --- */
+[data-theme="dark"] .mastery-fw [class~="from-[#f8faf8]"],
+[data-theme="dark"] .mastery-fw [class~="from-[#fdfefe]"] { --tw-gradient-from: #101a2e; }
+[data-theme="dark"] .mastery-fw [class~="via-[#fdfefe]"] { --tw-gradient-stops: #121a2c, #16203a; }
+[data-theme="dark"] .mastery-fw [class~="to-[#f4f7f4]"] { --tw-gradient-to: #0b1120; }
+
+/* --- Кольорові підкладки do/dont та підсвіток --- */
+[data-theme="dark"] .mastery-fw [class~="bg-emerald-50"] { background-color: rgba(16, 185, 129, 0.12); }
+[data-theme="dark"] .mastery-fw [class~="bg-emerald-50/60"] { background-color: rgba(16, 185, 129, 0.1); }
+[data-theme="dark"] .mastery-fw [class~="bg-emerald-50/70"] { background-color: rgba(16, 185, 129, 0.12); }
+[data-theme="dark"] .mastery-fw [class~="bg-emerald-100"] { background-color: rgba(16, 185, 129, 0.16); }
+[data-theme="dark"] .mastery-fw [class~="bg-emerald-100/80"] { background-color: rgba(16, 185, 129, 0.16); }
+[data-theme="dark"] .mastery-fw [class~="bg-rose-50/70"] { background-color: rgba(244, 63, 94, 0.1); }
+[data-theme="dark"] .mastery-fw [class~="bg-rose-100"] { background-color: rgba(244, 63, 94, 0.14); }
+[data-theme="dark"] .mastery-fw [class~="bg-amber-50"] { background-color: rgba(245, 158, 11, 0.1); }
+[data-theme="dark"] .mastery-fw [class~="bg-amber-50/60"] { background-color: rgba(245, 158, 11, 0.1); }
+[data-theme="dark"] .mastery-fw [class~="bg-amber-100"] { background-color: rgba(245, 158, 11, 0.15); }
+[data-theme="dark"] .mastery-fw [class~="bg-sky-50"] { background-color: rgba(14, 165, 233, 0.12); }
+[data-theme="dark"] .mastery-fw [class~="bg-sky-100"] { background-color: rgba(14, 165, 233, 0.15); }
+[data-theme="dark"] .mastery-fw [class~="bg-sky-100/60"] { background-color: rgba(14, 165, 233, 0.12); }
+[data-theme="dark"] .mastery-fw [class~="bg-purple-100"] { background-color: rgba(139, 92, 246, 0.16); }
+[data-theme="dark"] .mastery-fw [class~="bg-orange-100"] { background-color: rgba(249, 115, 22, 0.15); }
+[data-theme="dark"] .mastery-fw [class~="bg-cyan-100"] { background-color: rgba(6, 182, 212, 0.15); }
+[data-theme="dark"] .mastery-fw [class~="bg-teal-100"] { background-color: rgba(20, 184, 166, 0.15); }
+[data-theme="dark"] .mastery-fw [class~="bg-red-100"] { background-color: rgba(239, 68, 68, 0.15); }
+[data-theme="dark"] .mastery-fw [class~="bg-rose-50"] { background-color: rgba(244, 63, 94, 0.1); }
+[data-theme="dark"] .mastery-fw [class~="bg-emerald-600/10"] { background-color: rgba(16, 185, 129, 0.14); }
+
+/* --- Текст --- */
+[data-theme="dark"] .mastery-fw [class~="text-[#1a1c1c]"] { color: #e2e8f0; }
+[data-theme="dark"] .mastery-fw [class~="text-[#3d4a3e]"] { color: #94a3b8; }
+[data-theme="dark"] .mastery-fw [class~="text-[#5c6f5e]"] { color: #94a3b8; }
+[data-theme="dark"] .mastery-fw [class~="text-[#6c7b6d]"] { color: #64748b; }
+[data-theme="dark"] .mastery-fw [class~="text-[#556956]"] { color: #94a3b8; }
+[data-theme="dark"] .mastery-fw [class~="text-[#445545]"] { color: #94a3b8; }
+[data-theme="dark"] .mastery-fw [class~="text-[#2c382d]"] { color: #cbd5e1; }
+[data-theme="dark"] .mastery-fw [class~="text-[#7c2d12]"] { color: #fdba74; }
+[data-theme="dark"] .mastery-fw [class~="text-gray-400"] { color: #64748b; }
+[data-theme="dark"] .mastery-fw [class~="text-gray-500"] { color: #64748b; }
+[data-theme="dark"] .mastery-fw [class~="text-gray-600"] { color: #94a3b8; }
+[data-theme="dark"] .mastery-fw [class~="text-gray-700"] { color: #cbd5e1; }
+[data-theme="dark"] .mastery-fw [class~="text-gray-800"] { color: #e2e8f0; }
+[data-theme="dark"] .mastery-fw [class~="text-gray-900"] { color: #f1f5f9; }
+[data-theme="dark"] .mastery-fw [class~="text-emerald-800"] { color: #6ee7b7; }
+[data-theme="dark"] .mastery-fw [class~="text-emerald-900"] { color: #a7f3d0; }
+[data-theme="dark"] .mastery-fw [class~="text-emerald-950"] { color: #d1fae5; }
+[data-theme="dark"] .mastery-fw [class~="text-emerald-700"] { color: #34d399; }
+[data-theme="dark"] .mastery-fw [class~="text-rose-800"] { color: #fda4af; }
+[data-theme="dark"] .mastery-fw [class~="text-rose-950"] { color: #fecdd3; }
+[data-theme="dark"] .mastery-fw [class~="text-amber-800"] { color: #fcd34d; }
+[data-theme="dark"] .mastery-fw [class~="text-amber-950"] { color: #fde68a; }
+[data-theme="dark"] .mastery-fw [class~="text-sky-800"] { color: #7dd3fc; }
+[data-theme="dark"] .mastery-fw [class~="text-slate-500"] { color: #94a3b8; }
+[data-theme="dark"] .mastery-fw [class~="text-slate-700"] { color: #cbd5e1; }
+[data-theme="dark"] .mastery-fw [class~="text-[#006d37]"] { color: #34d399; }
+[data-theme="dark"] .mastery-fw [class~="text-[#006397]"] { color: #7dd3fc; }
+[data-theme="dark"] .mastery-fw [class~="text-[#ea580c]"] { color: #fb923c; }
+
+/* --- Межі --- */
+[data-theme="dark"] .mastery-fw [class~="border-white"] { border-color: #24324f; }
+[data-theme="dark"] .mastery-fw [class~="border-white/60"] { border-color: rgba(36, 50, 79, 0.6); }
+[data-theme="dark"] .mastery-fw [class~="border-white/80"] { border-color: rgba(36, 50, 79, 0.8); }
+[data-theme="dark"] .mastery-fw [class~="border-gray-100"] { border-color: #24324f; }
+[data-theme="dark"] .mastery-fw [class~="border-gray-200"] { border-color: #273449; }
+[data-theme="dark"] .mastery-fw [class~="border-gray-200/60"] { border-color: rgba(39, 52, 73, 0.6); }
+[data-theme="dark"] .mastery-fw [class~="border-gray-200/80"] { border-color: rgba(39, 52, 73, 0.8); }
+[data-theme="dark"] .mastery-fw [class~="border-gray-100"] { border-color: #24324f; }
+[data-theme="dark"] .mastery-fw [class~="border-emerald-100"] { border-color: rgba(16, 185, 129, 0.22); }
+[data-theme="dark"] .mastery-fw [class~="border-emerald-200"] { border-color: rgba(16, 185, 129, 0.26); }
+[data-theme="dark"] .mastery-fw [class~="border-emerald-200/50"] { border-color: rgba(16, 185, 129, 0.2); }
+[data-theme="dark"] .mastery-fw [class~="border-emerald-200/60"] { border-color: rgba(16, 185, 129, 0.22); }
+[data-theme="dark"] .mastery-fw [class~="border-emerald-200/80"] { border-color: rgba(16, 185, 129, 0.28); }
+[data-theme="dark"] .mastery-fw [class~="border-rose-200/50"] { border-color: rgba(244, 63, 94, 0.22); }
+[data-theme="dark"] .mastery-fw [class~="border-rose-200"] { border-color: rgba(244, 63, 94, 0.26); }
+[data-theme="dark"] .mastery-fw [class~="border-amber-200"] { border-color: rgba(245, 158, 11, 0.26); }
+[data-theme="dark"] .mastery-fw [class~="border-amber-200/80"] { border-color: rgba(245, 158, 11, 0.3); }
+[data-theme="dark"] .mastery-fw [class~="border-sky-100"] { border-color: rgba(14, 165, 233, 0.24); }
+[data-theme="dark"] .mastery-fw [class~="border-sky-200/60"] { border-color: rgba(14, 165, 233, 0.24); }
+[data-theme="dark"] .mastery-fw [class~="border-sky-200/80"] { border-color: rgba(14, 165, 233, 0.28); }
+[data-theme="dark"] .mastery-fw [class~="border-slate-200"] { border-color: #273449; }
+[data-theme="dark"] .mastery-fw [class~="border-gray-100"] { border-color: #24324f; }
+
+/* --- Хайлайт-зони (hero підкреслення, глоси) --- */
+[data-theme="dark"] .mastery-fw [class~="text-[#2ecc71]/40"] { color: rgba(46, 204, 113, 0.5); }
+[data-theme="dark"] .mastery-fw [class~="text-emerald-100"] { color: #a7f3d0; }
+[data-theme="dark"] .mastery-fw [class~="text-amber-300"] { color: #fcd34d; }
+[data-theme="dark"] .mastery-fw [class~="text-sky-600"] { color: #38bdf8; }
+[data-theme="dark"] .mastery-fw [class~="text-emerald-600"] { color: #34d399; }
+[data-theme="dark"] .mastery-fw [class~="text-rose-600"] { color: #fb7185; }
+[data-theme="dark"] .mastery-fw [class~="text-amber-500"] { color: #f59e0b; }
+[data-theme="dark"] .mastery-fw [class~="text-amber-600"] { color: #fbbf24; }
+
+/* --- Селектори та інпути --- */
+[data-theme="dark"] .mastery-fw select,
+[data-theme="dark"] .mastery-fw input,
+[data-theme="dark"] .mastery-fw textarea {
+  color-scheme: dark;
+}
+
+/* --- Картки з білою підкладкою всередині (BookContextBanner) --- */
+[data-theme="dark"] .mastery-fw [class~="bg-white/95"] { background-color: rgba(19, 28, 49, 0.95); }
+
+/* ============================================================
+   MANUSCRIPT EDITOR (TipTap) — живий редактор тексту розділу
+   книги, замінив звичайну textarea. Клас на .ProseMirror ставить
+   сам TipTap через editorProps.attributes.class.
+   ============================================================ */
+/* Ширина правої панелі «Персонажі і сцена» — реагує на перетягування
+   ручки (rightPanelWidth, EditorView.tsx), тягне значення з CSS-змінної
+   --panel-w, виставленої inline-style на самому <aside>. Написано звичайним
+   CSS, а не класом Tailwind `lg:w-[var(--panel-w)]`: той клас з невідомої
+   причини не потрапляв у згенерований stylesheet у цьому проєкті
+   (Tailwind v4) — перевірено напряму: жодного правила з «panel-w» в
+   document.styleSheets після збірки. Той самий симптом, що й з
+   `h-[calc(100vh-105px)]` в EditorView.tsx (там теж замінено на inline
+   style) — тож звичайний CSS тут навмисно, не експеримент. */
+@media (min-width: 1024px) {
+  .nova-char-panel {
+    width: var(--panel-w);
+  }
+}
+
+.nova-manuscript-editor {
+  outline: none;
+  min-height: 100%;
+}
+.nova-manuscript-editor p {
+  margin: 0 0 0.9em 0;
+}
+.nova-manuscript-editor p:last-child {
+  margin-bottom: 0;
+}
+.nova-manuscript-editor blockquote {
+  margin: 0.9em 0;
+  padding: 0.4em 1em;
+  border-left: 3px solid rgba(180, 130, 20, 0.6);
+  color: #475569;
+  font-style: italic;
+}
+.nova-manuscript-editor p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: #475569;
+}
+.nova-manuscript-editor figure[data-wrapped-image] {
+  margin: 0;
+}
+.nova-manuscript-editor figure[data-wrapped-image] img {
+  cursor: pointer;
+}
+/* Позначка «AI-чернетка» (AiDraftBlockNode.tsx) — навмисно інша форма, ніж
+   blockquote (суцільна пунктирна рамка + фон замість смужки зліва), щоб не
+   плутати «цитату» письменника з ще неопрацьованим AI-текстом, хоч обидва
+   й лишаються в тому самому бурштиновому тоні, що й решта AI-елементів
+   редактора (рамка виділеного фото, кубики-ручки). */
+.nova-manuscript-editor .nova-ai-draft {
+  margin: 0.9em 0;
+  padding: 1.4em 1em 0.6em;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px dashed rgba(245, 158, 11, 0.5);
+  border-radius: 8px;
+  position: relative;
+}
+.nova-manuscript-editor .nova-ai-draft-label {
+  position: absolute;
+  top: -0.6em;
+  left: 0.8em;
+  padding: 0.1em 0.6em;
+  background: #1e293b;
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  border-radius: 999px;
+  font-size: 10px;
+  color: #fbbf24;
+  user-select: none;
+}
+.nova-manuscript-editor .nova-ai-draft p:last-child {
+  margin-bottom: 0;
+}

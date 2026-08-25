@@ -1,0 +1,9 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "npx tsc": true,
+        "/^npx vite build 2>&1 \\| Select-Object -Last 20$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

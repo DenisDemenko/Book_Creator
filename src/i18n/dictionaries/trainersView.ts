@@ -1,0 +1,46 @@
+export const trainersView = {
+  uk: {
+    pageTitle: 'Пілотні тренажери',
+    pageSubtitle: 'Короткі фокусовані вправи з миттєвою AI-оцінкою за трьома критеріями.',
+    stepTheory: 'Крок 1. Теорія',
+    stepTask: 'Крок 2. Завдання',
+    stepAnswer: 'Крок 3. Ваша відповідь',
+    evaluateBtn: 'Оцінити AI',
+    evaluating: 'AI оцінює…',
+    evaluateError: 'Не вдалося оцінити вправу. Спробуйте ще раз.',
+    tipsHeading: 'Поради',
+    tryAgainBtn: 'Спробувати ще раз',
+    characterTitle: 'Персонаж',
+    characterTheory:
+      'Живий персонаж — це не список рис характеру, а людина з внутрішнім конфліктом. Три опори переконливого героя: унікальність (чим він відрізняється від інших персонажів схожого типу), мотивація (чого він хоче і чому саме зараз) та архетип (яку глибшу роль він грає в історії — і як автор або підтверджує, або свідомо ламає очікування цього архетипу).',
+    characterTask: 'Опиши персонажа через дію: одна сцена (3-6 речень), у якій ми бачимо характер героя не через опис зовнішності чи прямі твердження, а через те, що він РОБИТЬ у момент тиску чи вибору.',
+    characterPlaceholder: 'Наприклад: Коли пожежна тривога залунала, вона єдина не побігла до виходу — натомість…',
+    dialogueTitle: 'Діалог',
+    dialogueTheory:
+      'Хороший діалог рідко каже те, що персонажі насправді мають на увазі. Три опори: природність (репліки звучать як жива мова, а не як пояснення для читача), підтекст (за словами ховається щось важливіше — бажання, страх, брехня) та розкриття характеру (з реплік зрозуміло, ХТО говорить, навіть без імені).',
+    dialogueTask: 'Напиши короткий діалог (4-6 реплік) між двома персонажами, в якому один із них приховує правду — але жодного разу не скаже цього прямо. Читач має здогадатися сам.',
+    dialoguePlaceholder: '— Ти точно був удома вчора ввечері?\n— А чому питаєш?\n…',
+  },
+  en: {
+    pageTitle: 'Pilot Trainers',
+    pageSubtitle: 'Short, focused exercises with instant AI feedback across three criteria.',
+    stepTheory: 'Step 1. Theory',
+    stepTask: 'Step 2. Task',
+    stepAnswer: 'Step 3. Your answer',
+    evaluateBtn: 'Evaluate with AI',
+    evaluating: 'AI is evaluating…',
+    evaluateError: 'Could not evaluate the exercise. Please try again.',
+    tipsHeading: 'Tips',
+    tryAgainBtn: 'Try again',
+    characterTitle: 'Character',
+    characterTheory:
+      "A living character isn't a list of traits — it's a person with an inner conflict. Three pillars of a convincing hero: uniqueness (what sets them apart from similar character types), motivation (what they want, and why right now), and archetype (what deeper role they play in the story — and whether the author confirms or deliberately subverts that archetype's expectations).",
+    characterTask: 'Describe a character through action: one scene (3-6 sentences) where we see the character not through appearance or direct statements, but through what they DO under pressure or when facing a choice.',
+    characterPlaceholder: 'For example: When the fire alarm went off, she was the only one who didn\'t run for the exit — instead…',
+    dialogueTitle: 'Dialogue',
+    dialogueTheory:
+      "Good dialogue rarely says what characters actually mean. Three pillars: naturalness (lines sound like real speech, not exposition for the reader), subtext (something more important hides beneath the words — a wish, a fear, a lie), and character reveal (the lines make it clear WHO is speaking, even without a name tag).",
+    dialogueTask: "Write a short dialogue (4-6 lines) between two characters, where one of them is hiding the truth — but never states it directly. The reader should have to guess.",
+    dialoguePlaceholder: '— Were you really home last night?\n— Why do you ask?\n…',
+  },
+};

@@ -1,0 +1,6 @@
+{
+  "name": "Цифрова Майстерня Письменника",
+  "description": "AI-платформа для авторів, сценарної розробки сюжету, редагування, ілюстрацій, верстки та підготовки книг до друку.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
