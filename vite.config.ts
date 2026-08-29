@@ -5,6 +5,13 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    // Префікс шляху, під яким роздається зібраний застосунок (Фаза G3,
+    // docs/migration-plan.md маркетплейсу). У проді — '/studio/', щоб Nova
+    // жила на одному origin із маркетплейсом і ділила з ним стан входу
+    // Firebase. Порожня змінна = звичайний корінь, як і було.
+    // Vite підставляє це значення в import.meta.env.BASE_URL, звідки його
+    // читає src/utils/basePath.ts.
+    base: process.env.NOVA_BASE_PATH || '/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {

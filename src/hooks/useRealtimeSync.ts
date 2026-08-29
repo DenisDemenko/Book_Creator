@@ -10,6 +10,7 @@ import {
   AuditLogEntry 
 } from '../types';
 import { getRoleInfo } from '../utils/rbac';
+import { realtimeSocketUrl } from '../utils/basePath';
 import type { SectionPatch } from '../utils/bookDiff';
 
 /** Мінімальний проміжок між відправками одного каналу, мс. */
@@ -179,9 +180,9 @@ export function useRealtimeSync({
 
     setSyncStatus('connecting');
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/ws`;
+    // Не збираємо URL тут: під префіксом /studio (Фаза G3) WebSocket іде
+    // повз проксі, напряму на хост Nova — див. realtimeSocketUrl().
+    const wsUrl = realtimeSocketUrl();
 
     try {
       const ws = new WebSocket(wsUrl);
