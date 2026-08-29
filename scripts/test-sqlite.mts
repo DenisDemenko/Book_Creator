@@ -112,5 +112,67 @@ console.log('\nУнікальність пошти:');
   t('база не дає створити другий запис із тією ж поштою', threw);
 }
 
+// Регресія на реальний баг Фази G3: у SCHEMA був CREATE UNIQUE INDEX на
+// users(firebase_uid), який виконувався ДО міграції, що додає цю колонку.
+// Для свіжої бази все проходило (колонка є в CREATE TABLE), тож решта цього
+// файлу нічого не помічала — а от будь-яка база, створена до Фази G1, валила
+// весь initDb() з "no such column" і сховище тихо відкочувалось на JSON.
+// Тому тут база створюється саме у СТАРОМУ вигляді, а не з нуля.
+console.log('\nВідкриття бази, створеної до появи firebase_uid:');
+{
+  const OLD_DIR = '/tmp/nova-sqlite-oldshape';
+  const OLD_DB = `${OLD_DIR}/nova-studio.db`;
+  fs.rmSync(OLD_DIR, { recursive: true, force: true });
+  fs.mkdirSync(OLD_DIR, { recursive: true });
+
+  const { DatabaseSync } = await import('node:sqlite');
+  const legacy = new DatabaseSync(OLD_DB);
+  legacy.exec(`
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      name TEXT NOT NULL,
+      role TEXT NOT NULL,
+      password_hash TEXT,
+      google_id TEXT,
+      avatar_url TEXT,
+      disabled INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      last_login_at TEXT
+    );`);
+  legacy.prepare('INSERT INTO users VALUES (?,?,?,?,?,?,?,?,?,?)')
+    .run('u-legacy', 'old@example.com', 'До G1', 'writer', 'scrypt$aa$bb', null, null, 0, '2026-01-01T00:00:00Z', null);
+  legacy.close();
+
+  // Свій модуль бази, щоб не чіпати вже проініціалізований у решті файлу.
+  process.env.DATA_DIR = OLD_DIR;
+  process.env.DATABASE_PATH = OLD_DB;
+  const freshDbModule = await import(`../server/db.ts?oldshape=${Date.now()}`);
+
+  const opened = await freshDbModule.initDb();
+  t('стара база відкривається, а не падає у JSON-фолбек', opened === true);
+
+  if (opened) {
+    const handle = freshDbModule.getDb()!;
+    const cols = (handle.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map((c) => c.name);
+    t('міграція додала колонку firebase_uid', cols.includes('firebase_uid'));
+
+    const idx = (handle.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_users_firebase_uid'").all() as unknown[]);
+    t('унікальний індекс на firebase_uid створено міграцією', idx.length === 1);
+
+    const row = handle.prepare('SELECT name, role FROM users WHERE id = ?').get('u-legacy') as { name: string; role: string } | undefined;
+    t('наявні дані не втрачені', row?.name === 'До G1' && row?.role === 'writer');
+
+    // Windows не дає видалити файл, поки дескриптор відкритий.
+    handle.close?.();
+  }
+
+  try {
+    fs.rmSync(OLD_DIR, { recursive: true, force: true });
+  } catch {
+    // Прибирання тимчасової теки — не привід валити тести.
+  }
+}
+
 console.log(`\nРезультат: ${pass} пройдено, ${fail} провалено`);
 process.exit(fail ? 1 : 0);

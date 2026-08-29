@@ -55,7 +55,12 @@ CREATE TABLE IF NOT EXISTS users (
   created_at    TEXT NOT NULL,
   last_login_at TEXT
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_users_firebase_uid ON users(firebase_uid);
+-- Унікальний індекс на firebase_uid НАВМИСНО не тут, а в
+-- migrateUsersColumns(): для бази, створеної до Фази G1, колонки ще немає в
+-- момент виконання цього SCHEMA, і CREATE INDEX впав би з "no such column",
+-- завалив би весь initDb() і тихо перевів сховище на JSON-файли. Міграція
+-- йде після SCHEMA і створює індекс уже напевно маючи колонку — тож індекс
+-- має рівно одне місце створення, спільне для нових і старих баз.
 
 CREATE TABLE IF NOT EXISTS sessions (
   token      TEXT PRIMARY KEY,
