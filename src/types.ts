@@ -675,8 +675,6 @@ export interface AuthUser {
   disabled?: boolean;
   createdAt?: string;
   lastLoginAt?: string;
-  hasPassword?: boolean;
-  viaGoogle?: boolean;
 }
 
 /** Обліковий запис у списку панелі адміністратора. */

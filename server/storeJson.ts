@@ -37,10 +37,12 @@ export interface StoredUser {
   /** Відображуване імʼя. */
   name: string;
   role: StoredRole;
-  /** scrypt-хеш; відсутній у користувачів, що входять лише через Google. */
+  /** @deprecated scrypt-хеш з часів власного входу поштою (Фаза G1). */
   passwordHash?: string;
-  /** Ідентифікатор облікового запису Google, якщо вхід був через нього. */
+  /** @deprecated ідентифікатор Google з часів власного OAuth (Фаза G1). */
   googleId?: string;
+  /** UID, виданий Firebase — спосіб впізнати користувача при повторному вході (Фаза G1). */
+  firebaseUid?: string;
   avatarUrl?: string;
   /** Заблокований адміністратором користувач не може увійти. */
   disabled?: boolean;
@@ -301,6 +303,10 @@ export async function findUserByEmail(email: string): Promise<StoredUser | undef
 
 export async function findUserById(id: string): Promise<StoredUser | undefined> {
   return (await loadStore()).users.find((u) => u.id === id);
+}
+
+export async function findUserByFirebaseUid(firebaseUid: string): Promise<StoredUser | undefined> {
+  return (await loadStore()).users.find((u) => u.firebaseUid === firebaseUid);
 }
 
 export async function saveUser(user: StoredUser): Promise<StoredUser> {

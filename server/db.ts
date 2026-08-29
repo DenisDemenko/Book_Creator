@@ -46,11 +46,16 @@ CREATE TABLE IF NOT EXISTS users (
   role          TEXT NOT NULL,
   password_hash TEXT,
   google_id     TEXT,
+  -- Firebase Auth (Фаза G1) — UID виданий Firebase, замінює власні паролі
+  -- як спосіб впізнати повторний вхід. NULL для рядків, ще не привʼязаних
+  -- (див. migrateUsersColumns нижче для баз, створених до цієї колонки).
+  firebase_uid  TEXT,
   avatar_url    TEXT,
   disabled      INTEGER NOT NULL DEFAULT 0,
   created_at    TEXT NOT NULL,
   last_login_at TEXT
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_firebase_uid ON users(firebase_uid);
 
 CREATE TABLE IF NOT EXISTS sessions (
   token      TEXT PRIMARY KEY,
@@ -351,6 +356,25 @@ function migrateUsageLogColumns(instance: Database): void {
 }
 
 /**
+ * Firebase Auth (docs/migration-plan.md Фаза G1) замінила власні паролі —
+ * бази, створені до цього, не мають колонки firebase_uid. NULL дозволений:
+ * SQLite не вважає кілька NULL порушенням UNIQUE, тож старі рядки (ще не
+ * привʼязані до жодного Firebase-акаунту) співіснують з унікальним
+ * індексом без конфлікту.
+ */
+function migrateUsersColumns(instance: Database): void {
+  try {
+    const cols = instance.prepare('PRAGMA table_info(users)').all() as { name: string }[];
+    if (!cols.some((c) => c.name === 'firebase_uid')) {
+      instance.exec('ALTER TABLE users ADD COLUMN firebase_uid TEXT');
+    }
+    instance.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_firebase_uid ON users(firebase_uid)');
+  } catch (err) {
+    console.warn('[db] Не вдалося перевірити/додати колонку users.firebase_uid:', err);
+  }
+}
+
+/**
  * Відкриває базу. Виклик асинхронний, бо `node:sqlite` підвантажується
  * динамічним import: у ESM немає require, а статичний import завалив би
  * збірку на середовищах, де модуля ще немає.
@@ -368,6 +392,7 @@ export async function initDb(): Promise<boolean> {
     const instance = new sqlite.DatabaseSync(DB_PATH);
     instance.exec(SCHEMA);
     migrateUsageLogColumns(instance);
+    migrateUsersColumns(instance);
     db = instance;
     available = true;
   } catch (err) {

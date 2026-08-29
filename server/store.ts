@@ -34,8 +34,12 @@ export interface StoredUser {
   email: string;
   name: string;
   role: StoredRole;
+  /** @deprecated Мертве поле з часів власного входу поштою (Фаза G1). Лишається на прочитання старих рядків, нові його не записують. */
   passwordHash?: string;
+  /** @deprecated Мертве поле з часів власного Google OAuth (Фаза G1). */
   googleId?: string;
+  /** UID, виданий Firebase — спосіб впізнати користувача при повторному вході (Фаза G1). */
+  firebaseUid?: string;
   avatarUrl?: string;
   disabled?: boolean;
   createdAt: string;
@@ -130,7 +134,8 @@ const MAX_USAGE_RECORDS = 50000;
 
 interface UserRow {
   id: string; email: string; name: string; role: string;
-  password_hash: string | null; google_id: string | null; avatar_url: string | null;
+  password_hash: string | null; google_id: string | null; firebase_uid: string | null;
+  avatar_url: string | null;
   disabled: number; created_at: string; last_login_at: string | null;
 }
 
@@ -145,6 +150,7 @@ function rowToUser(row: UserRow): StoredUser {
   };
   if (row.password_hash) user.passwordHash = row.password_hash;
   if (row.google_id) user.googleId = row.google_id;
+  if (row.firebase_uid) user.firebaseUid = row.firebase_uid;
   if (row.avatar_url) user.avatarUrl = row.avatar_url;
   if (row.last_login_at) user.lastLoginAt = row.last_login_at;
   return user;
@@ -255,11 +261,12 @@ function useJson(): boolean {
 function insertUserRow(user: StoredUser): void {
   getDb()!
     .prepare(
-      `INSERT INTO users (id, email, name, role, password_hash, google_id, avatar_url, disabled, created_at, last_login_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO users (id, email, name, role, password_hash, google_id, firebase_uid, avatar_url, disabled, created_at, last_login_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          email = excluded.email, name = excluded.name, role = excluded.role,
          password_hash = excluded.password_hash, google_id = excluded.google_id,
+         firebase_uid = excluded.firebase_uid,
          avatar_url = excluded.avatar_url, disabled = excluded.disabled,
          last_login_at = excluded.last_login_at`
     )
@@ -270,6 +277,7 @@ function insertUserRow(user: StoredUser): void {
       user.role,
       user.passwordHash ?? null,
       user.googleId ?? null,
+      user.firebaseUid ?? null,
       user.avatarUrl ?? null,
       user.disabled ? 1 : 0,
       user.createdAt,
@@ -341,6 +349,14 @@ export async function findUserByEmail(email: string): Promise<StoredUser | undef
 export async function findUserById(id: string): Promise<StoredUser | undefined> {
   if (useJson()) return jsonStore.findUserById(id);
   const row = getDb()!.prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRow | undefined;
+  return row ? rowToUser(row) : undefined;
+}
+
+export async function findUserByFirebaseUid(firebaseUid: string): Promise<StoredUser | undefined> {
+  if (useJson()) return jsonStore.findUserByFirebaseUid(firebaseUid);
+  const row = getDb()!
+    .prepare('SELECT * FROM users WHERE firebase_uid = ?')
+    .get(firebaseUid) as UserRow | undefined;
   return row ? rowToUser(row) : undefined;
 }
 
