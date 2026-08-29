@@ -30,7 +30,7 @@ import {
   requireAuth,
   requireAdmin,
   ensureAdminExists,
-  googleConfig,
+  firebaseAuthStatus,
   ADMIN_EMAIL,
 } from './server/auth';
 import { registerAdminRoutes } from './server/adminRoutes';
@@ -198,7 +198,7 @@ async function startServer() {
   const purged = await purgeExpiredSessions();
   if (purged) console.log(`[auth] Прибрано протухлих сесій: ${purged}`);
   console.log(
-    `[auth] Адміністратор: ${ADMIN_EMAIL} | вхід через Google: ${googleConfig.enabled ? 'увімкнено' : 'вимкнено'}`
+    `[auth] Адміністратор: ${ADMIN_EMAIL} | Firebase-вхід: ${firebaseAuthStatus.enabled ? 'налаштовано' : 'НЕ налаштовано — задайте FIREBASE_* у .env'}`
   );
 
   registerAuthRoutes(app);

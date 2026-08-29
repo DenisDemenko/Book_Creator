@@ -5,34 +5,14 @@ fs.rmSync('/tmp/nova-test-data', { recursive: true, force: true });
 
 // Імпорти динамічні: інакше ESM підняв би їх вище за присвоєння DATA_DIR,
 // і тест писав би у бойову теку даних замість тимчасової.
-const { hashPassword, verifyPassword, validatePassword, validateEmail, BASE_SERVER_PERMISSIONS } = await import('../server/auth');
+const { BASE_SERVER_PERMISSIONS, findOrCreateFromFirebase, ADMIN_EMAIL } = await import('../server/auth');
 const { priceForImage, priceForText, IMAGE_PRICING, pricingSnapshot } = await import('../server/pricing');
-const { recordUsage, listUsage, saveUser, findUserByEmail, deleteUser, setRoleOverride, getRoleOverrides, resetRoleOverrides } = await import('../server/store');
+const { recordUsage, listUsage, saveUser, findUserByEmail, findUserByFirebaseUid, deleteUser, setRoleOverride, getRoleOverrides, resetRoleOverrides } = await import('../server/store');
 
 let pass = 0, fail = 0;
 const t = (n: string, c: boolean, e = '') => { c ? pass++ : fail++; console.log(`${c ? '  ✓' : '  ✗'} ${n}${e ? ' — ' + e : ''}`); };
 
-console.log('Паролі:');
-{
-  const h = hashPassword('SuperSecret123');
-  t('хеш має схему scrypt', h.startsWith('scrypt$'));
-  t('пароль у хеші не зберігається у відкритому вигляді', !h.includes('SuperSecret123'));
-  t('вірний пароль проходить', verifyPassword('SuperSecret123', h));
-  t('невірний не проходить', !verifyPassword('SuperSecret124', h));
-  t('порожній сховок не проходить', !verifyPassword('x', undefined));
-  t('сміттєвий хеш не валить процес', !verifyPassword('x', 'garbage'));
-  const h2 = hashPassword('SuperSecret123');
-  t('однакові паролі дають різні хеші (сіль)', h !== h2);
-  t('обидва хеші валідні', verifyPassword('SuperSecret123', h2));
-}
-
-console.log('\nВалідація:');
-t('короткий пароль відхиляється', validatePassword('1234567') !== null);
-t('8 символів приймається', validatePassword('12345678') === null);
-t('пошта без @ відхиляється', validateEmail('abc') !== null);
-t('нормальна пошта приймається', validateEmail('a@b.co') === null);
-
-console.log('\nБазові дозволи:');
+console.log('Базові дозволи:');
 t('гість не генерує', BASE_SERVER_PERMISSIONS.guest.canGenerateImages === false);
 t('читач не генерує', BASE_SERVER_PERMISSIONS.reader.canGenerateImages === false);
 t('письменник генерує', BASE_SERVER_PERMISSIONS.writer.canGenerateImages === true);
@@ -92,6 +72,63 @@ console.log('\nПеревизначення ролей:');
   t('перевизначення збережено', (await getRoleOverrides()).guest?.canGenerateImages === true);
   await resetRoleOverrides('guest');
   t('скидання прибирає перевизначення', (await getRoleOverrides()).guest === undefined);
+}
+
+// docs/migration-plan.md Фаза G1: Firebase замінила власні паролі. Ці тести
+// не торкаються справжнього Firebase (verifyFirebaseIdToken лишається
+// неперевіреним тут — йому потрібен живий проєкт) — вони перевіряють саме
+// логіку findOrCreateFromFirebase, тобто те, як уже ВЕРИФІКОВАНИЙ токен
+// перетворюється на локального користувача, включно з межею безпеки
+// навколо привʼязки за поштою.
+console.log('\nFirebase → локальний користувач:');
+{
+  const fakeToken = (overrides: Partial<{ uid: string; email: string; emailVerified: boolean; name?: string }>) => ({
+    uid: 'uid-1', email: 'nova-user@x.com', emailVerified: true, ...overrides,
+  });
+
+  const created = await findOrCreateFromFirebase(fakeToken({}));
+  t('новий користувач створюється', !!created.user);
+  t('нового користувача записано з firebaseUid', created.user?.firebaseUid === 'uid-1');
+  t('роль за замовчуванням — writer', created.user?.role === 'writer');
+
+  const again = await findOrCreateFromFirebase(fakeToken({}));
+  t('повторний вхід тим самим uid знаходить того самого користувача', again.user?.id === created.user?.id);
+
+  const otherUidSameEmail = await findOrCreateFromFirebase(
+    fakeToken({ uid: 'uid-2', emailVerified: false })
+  );
+  t(
+    'інший uid з тією самою поштою, але БЕЗ verified — відмова, не тихе злиття',
+    !!otherUidSameEmail.error
+  );
+
+  await saveUser({
+    id: 'legacy-1', email: 'legacy@x.com', name: 'Старий', role: 'designer',
+    passwordHash: 'scrypt$deadbeef$deadbeef', createdAt: new Date().toISOString(),
+  });
+  const linked = await findOrCreateFromFirebase(
+    fakeToken({ uid: 'uid-legacy', email: 'legacy@x.com', emailVerified: true })
+  );
+  t('верифікована пошта привʼязує наявний доFirebase акаунт', linked.user?.id === 'legacy-1');
+  t('привʼязка успадковує роль наявного акаунту', linked.user?.role === 'designer');
+  t('привʼязка записує firebaseUid у наявний рядок', (await findUserByFirebaseUid('uid-legacy'))?.id === 'legacy-1');
+
+  const hijackAttempt = await findOrCreateFromFirebase(
+    fakeToken({ uid: 'uid-attacker', email: 'legacy@x.com', emailVerified: false })
+  );
+  t(
+    'непідтверджена пошта не краде вже привʼязаний акаунт',
+    !!hijackAttempt.error
+  );
+
+  await saveUser({
+    id: 'admin-seed', email: ADMIN_EMAIL, name: 'Адмін', role: 'writer',
+    createdAt: new Date().toISOString(),
+  });
+  const adminLink = await findOrCreateFromFirebase(
+    fakeToken({ uid: 'uid-admin', email: ADMIN_EMAIL, emailVerified: true })
+  );
+  t('вхід поштою адміна підвищує роль до admin', adminLink.user?.role === 'admin');
 }
 
 console.log(`\nРезультат: ${pass} пройдено, ${fail} провалено`);

@@ -1,4 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signOut as firebaseSignOut,
+  updateProfile,
+} from 'firebase/auth';
+import { auth, googleProvider } from '../utils/firebase';
 import type { AuthUser, UserRole } from '../types';
 
 /**
@@ -7,6 +15,13 @@ import type { AuthUser, UserRole } from '../types';
  * Гість — не помилка й не «немає користувача»: сервер завжди повертає
  * когось, просто з роллю guest і без права на платні генерації. Тому
  * стан завантаження закінчується завжди, а застосунок працює одразу.
+ *
+ * Фаза G1 (docs/migration-plan.md маркетплейсу): вхід тепер завжди йде
+ * через Firebase — пошта/пароль чи Google, сервер більше не розрізняє.
+ * Після успіху у Firebase клієнт обмінює виданий ID-токен на сесію цього
+ * сервера через POST /api/auth/firebase-session; сесія далі — той самий
+ * cookie, що й раніше, тож усі інші запити застосунку лишаються
+ * незмінними.
  */
 
 export interface AuthState {
@@ -15,12 +30,53 @@ export interface AuthState {
   permissions: Record<string, boolean>;
   loading: boolean;
   error: string | null;
-  googleEnabled: boolean;
+  /** Чи налаштований Firebase-вхід на сервері — якщо ні, форма ховається. */
+  firebaseEnabled: boolean;
   /** Чи не залишився гість гостем через свідомий вибір «продовжити без входу». */
   dismissedLogin: boolean;
 }
 
 const DISMISS_KEY = 'nova_guest_dismissed_login';
+
+/** Спільна частина login/register/Google: обмінює Firebase-користувача на сесію сервера. */
+async function exchangeForSession(): Promise<{ user: AuthUser; permissions: Record<string, boolean> } | { error: string }> {
+  const current = auth.currentUser;
+  if (!current) return { error: 'Не вдалося визначити користувача Firebase.' };
+
+  const idToken = await current.getIdToken();
+  const res = await fetch('/api/auth/firebase-session', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ idToken }),
+  });
+  const data = await res.json();
+  if (!res.ok) return { error: data?.error || 'Не вдалося увійти.' };
+  return { user: { ...data.user, isGuest: false }, permissions: data.permissions || {} };
+}
+
+/** Повідомлення Firebase — англійські коди помилок, людям такого не показують. */
+function firebaseErrorMessage(err: unknown): string {
+  const code = (err as { code?: string })?.code || '';
+  switch (code) {
+    case 'auth/email-already-in-use':
+      return 'Ця пошта вже зареєстрована. Спробуйте увійти.';
+    case 'auth/invalid-email':
+      return 'Некоректна електронна пошта.';
+    case 'auth/weak-password':
+      return 'Пароль занадто простий (мінімум 8 символів).';
+    case 'auth/invalid-credential':
+    case 'auth/wrong-password':
+    case 'auth/user-not-found':
+      return 'Невірна пошта або пароль.';
+    case 'auth/popup-closed-by-user':
+      return 'Вікно входу закрито до завершення.';
+    case 'auth/network-request-failed':
+      return 'Немає звʼязку з сервером автентифікації. Перевірте інтернет.';
+    default:
+      return 'Не вдалося увійти. Спробуйте ще раз.';
+  }
+}
 
 export function useAuth() {
   const [state, setState] = useState<AuthState>({
@@ -28,7 +84,7 @@ export function useAuth() {
     permissions: {},
     loading: true,
     error: null,
-    googleEnabled: false,
+    firebaseEnabled: false,
     dismissedLogin: (() => {
       try {
         return localStorage.getItem(DISMISS_KEY) === '1';
@@ -46,7 +102,7 @@ export function useAuth() {
         ...prev,
         user: data.user,
         permissions: data.permissions || {},
-        googleEnabled: !!data.googleEnabled,
+        firebaseEnabled: !!data.firebaseEnabled,
         loading: false,
         error: null,
       }));
@@ -67,83 +123,75 @@ export function useAuth() {
     refresh();
   }, [refresh]);
 
-  const login = useCallback(
-    async (email: string, password: string): Promise<boolean> => {
+  function applySessionResult(result: { user: AuthUser; permissions: Record<string, boolean> } | { error: string }): boolean {
+    if ('error' in result) {
+      setState((p) => ({ ...p, error: result.error }));
+      return false;
+    }
+    try {
+      localStorage.removeItem(DISMISS_KEY);
+    } catch {
+      /* не критично */
+    }
+    setState((p) => ({
+      ...p,
+      user: result.user,
+      permissions: result.permissions,
+      error: null,
+      dismissedLogin: false,
+    }));
+    return true;
+  }
+
+  const login = useCallback(async (email: string, password: string): Promise<boolean> => {
+    setState((p) => ({ ...p, error: null }));
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      return applySessionResult(await exchangeForSession());
+    } catch (err) {
+      setState((p) => ({ ...p, error: firebaseErrorMessage(err) }));
+      return false;
+    }
+  }, []);
+
+  const register = useCallback(
+    async (email: string, password: string, name: string): Promise<boolean> => {
       setState((p) => ({ ...p, error: null }));
       try {
-        const res = await fetch('/api/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
-          body: JSON.stringify({ email, password }),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          setState((p) => ({ ...p, error: data?.error || 'Не вдалося увійти.' }));
-          return false;
+        const credential = await createUserWithEmailAndPassword(auth, email, password);
+        if (name.trim()) {
+          await updateProfile(credential.user, { displayName: name.trim() });
         }
-        try {
-          localStorage.removeItem(DISMISS_KEY);
-        } catch {
-          /* не критично */
-        }
-        setState((p) => ({
-          ...p,
-          user: { ...data.user, isGuest: false },
-          permissions: data.permissions || {},
-          error: null,
-          dismissedLogin: false,
-        }));
-        return true;
-      } catch {
-        setState((p) => ({ ...p, error: 'Сервер недоступний. Спробуйте пізніше.' }));
+        return applySessionResult(await exchangeForSession());
+      } catch (err) {
+        setState((p) => ({ ...p, error: firebaseErrorMessage(err) }));
         return false;
       }
     },
     []
   );
 
-  const register = useCallback(
-    async (email: string, password: string, name: string): Promise<boolean> => {
-      setState((p) => ({ ...p, error: null }));
-      try {
-        const res = await fetch('/api/auth/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
-          body: JSON.stringify({ email, password, name }),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          setState((p) => ({ ...p, error: data?.error || 'Не вдалося зареєструватися.' }));
-          return false;
-        }
-        try {
-          localStorage.removeItem(DISMISS_KEY);
-        } catch {
-          /* не критично */
-        }
-        setState((p) => ({
-          ...p,
-          user: { ...data.user, isGuest: false },
-          permissions: data.permissions || {},
-          error: null,
-          dismissedLogin: false,
-        }));
-        return true;
-      } catch {
-        setState((p) => ({ ...p, error: 'Сервер недоступний. Спробуйте пізніше.' }));
-        return false;
-      }
-    },
-    []
-  );
+  const loginWithGoogle = useCallback(async (): Promise<boolean> => {
+    setState((p) => ({ ...p, error: null }));
+    try {
+      await signInWithPopup(auth, googleProvider);
+      return applySessionResult(await exchangeForSession());
+    } catch (err) {
+      setState((p) => ({ ...p, error: firebaseErrorMessage(err) }));
+      return false;
+    }
+  }, []);
 
   const logout = useCallback(async () => {
     try {
       await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
     } catch {
       /* навіть якщо не вийшло — локально скидаємо */
+    }
+    try {
+      await firebaseSignOut(auth);
+    } catch {
+      /* не критично для локального виходу */
     }
     try {
       localStorage.removeItem(DISMISS_KEY);
@@ -184,6 +232,7 @@ export function useAuth() {
     refresh,
     login,
     register,
+    loginWithGoogle,
     logout,
     continueAsGuest,
     clearError,

@@ -22,6 +22,7 @@ export const auth = {
     themeToLight: 'Перемкнути на світлу тему',
     themeToDark: 'Перемкнути на темну тему',
     toggleTheme: 'Перемкнути тему',
+    authDisabledNotice: 'Вхід тимчасово недоступний — сервер ще не налаштовано. Можна продовжити як гість.',
   },
   en: {
     brandTitle: "Writer's Digital Studio",
@@ -46,5 +47,6 @@ export const auth = {
     themeToLight: 'Switch to light theme',
     themeToDark: 'Switch to dark theme',
     toggleTheme: 'Toggle theme',
+    authDisabledNotice: 'Sign-in is temporarily unavailable — the server isn’t configured yet. You can continue as a guest.',
   },
 };

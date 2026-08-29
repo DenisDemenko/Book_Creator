@@ -1048,10 +1048,11 @@ export default function App() {
       <AuthScreen
         onLogin={auth.login}
         onRegister={auth.register}
+        onLoginWithGoogle={auth.loginWithGoogle}
         onContinueAsGuest={auth.continueAsGuest}
         onClearError={auth.clearError}
         error={auth.error}
-        googleEnabled={auth.googleEnabled}
+        firebaseEnabled={auth.firebaseEnabled}
         theme={theme}
         onToggleTheme={toggleTheme}
       />

@@ -1,13 +1,16 @@
 /**
  * Автентифікація та авторизація NOVA STUDIO.
  *
- * Три способи потрапити всередину:
+ * Два способи потрапити всередину (Фаза G1, docs/migration-plan.md
+ * маркетплейсу — Nova втратила власні паролі й Google OAuth на користь
+ * Firebase Auth, того самого проєкту, що в маркетплейсі):
  *   1. Гість — без облікового запису. Працює одразу, але без генерації
  *      зображень: замість неї показуються заглушки.
- *   2. Пошта + пароль — власна реєстрація. Пароль зберігається як
- *      scrypt-хеш із випадковою сіллю (жодних сторонніх залежностей).
- *   3. Google — доступний, лише якщо задано GOOGLE_CLIENT_ID і
- *      GOOGLE_CLIENT_SECRET. Без них кнопка просто не показується.
+ *   2. Firebase (пошта+пароль або Google) — клієнт входить через Firebase
+ *      SDK і обмінює виданий токен на сесію цього сервера через
+ *      POST /api/auth/firebase-session. Сесія після обміну — той самий
+ *      cookie-механізм, що й раніше: жоден інший маршрут не дізнається,
+ *      що особу тепер підтверджує Firebase, а не власний scrypt-хеш.
  *
  * Адміністратор визначається поштою у ADMIN_EMAIL: цей обліковий запис
  * отримує роль admin автоматично, як тільки з'явиться в системі.
@@ -20,6 +23,7 @@ import {
   StoredRole,
   findUserByEmail,
   findUserById,
+  findUserByFirebaseUid,
   saveUser,
   createSession,
   findSession,
@@ -27,6 +31,7 @@ import {
   listUsers,
   getRoleOverrides,
 } from './store';
+import { firebaseAuthConfigured, verifyFirebaseIdToken, type VerifiedFirebaseToken } from './firebaseAdmin';
 
 export const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'tropazemli@gmail.com').toLowerCase();
 export const SESSION_COOKIE = 'nova_session';
@@ -36,46 +41,7 @@ const SESSION_TTL_DAYS = 30;
 const DEFAULT_ROLE: StoredRole = 'writer';
 
 // ---------------------------------------------------------------------------
-// Паролі
-// ---------------------------------------------------------------------------
-
-const SCRYPT_KEYLEN = 64;
-
-export function hashPassword(password: string): string {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const derived = crypto.scryptSync(password, salt, SCRYPT_KEYLEN).toString('hex');
-  return `scrypt$${salt}$${derived}`;
-}
-
-export function verifyPassword(password: string, stored?: string): boolean {
-  if (!stored) return false;
-  const [scheme, salt, expected] = stored.split('$');
-  if (scheme !== 'scrypt' || !salt || !expected) return false;
-
-  const actual = crypto.scryptSync(password, salt, SCRYPT_KEYLEN).toString('hex');
-  // Порівняння сталого часу — щоб не давати підказок за часом відповіді.
-  const a = Buffer.from(actual, 'hex');
-  const b = Buffer.from(expected, 'hex');
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
-
-export function validatePassword(password: unknown): string | null {
-  if (typeof password !== 'string' || password.length < 8) {
-    return 'Пароль має містити щонайменше 8 символів.';
-  }
-  if (password.length > 200) return 'Пароль задовгий.';
-  return null;
-}
-
-export function validateEmail(email: unknown): string | null {
-  if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim())) {
-    return 'Вкажіть коректну електронну пошту.';
-  }
-  return null;
-}
-
-// ---------------------------------------------------------------------------
-// Сесії та cookie
+// Сесії та cookie — не залежить від того, чим підтверджена особа
 // ---------------------------------------------------------------------------
 
 function parseCookies(header?: string): Record<string, string> {
@@ -237,8 +203,6 @@ export function publicUser(user: StoredUser) {
     disabled: !!user.disabled,
     createdAt: user.createdAt,
     lastLoginAt: user.lastLoginAt,
-    hasPassword: !!user.passwordHash,
-    viaGoogle: !!user.googleId,
   };
 }
 
@@ -258,27 +222,92 @@ export async function ensureAdminExists(): Promise<void> {
   }
   console.log(
     `[auth] Обліковий запис адміністратора (${ADMIN_EMAIL}) ще не створено. ` +
-      'Зареєструйтеся з цією поштою — роль admin призначиться автоматично.'
+      'Увійдіть цією поштою через Firebase — роль admin призначиться автоматично.'
   );
 }
 
 // ---------------------------------------------------------------------------
-// Google OAuth (необовʼязковий)
+// Firebase → локальний користувач
 // ---------------------------------------------------------------------------
 
-export const googleConfig = {
-  clientId: process.env.GOOGLE_CLIENT_ID || '',
-  clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+export const firebaseAuthStatus = {
   get enabled() {
-    return !!(this.clientId && this.clientSecret);
+    return firebaseAuthConfigured();
   },
 };
 
-function googleRedirectUri(req: Request): string {
-  const base =
-    process.env.APP_URL?.replace(/\/$/, '') ||
-    `${req.protocol}://${req.get('host')}`;
-  return `${base}/api/auth/google/callback`;
+/**
+ * Знаходить або створює StoredUser для верифікованого Firebase-токена.
+ *
+ * Порядок навмисний і саме в цьому — питання безпеки, не стилю:
+ *  1. Спочатку за firebaseUid. Це єдиний надійний ключ повторного входу:
+ *     раз привʼязаний, більше нікому не належить.
+ *  2. Лише якщо firebaseUid ще нема — шукаємо за поштою. Прив'язуємо
+ *     Firebase-акаунт до наявного рядка (успадковуючи роль, контент,
+ *     передплату) ТІЛЬКИ якщо Firebase підтверджує emailVerified. Firebase
+ *     дозволяє зареєструватися на будь-яку пошту паролем без миттєвої
+ *     перевірки — без цієї умови хтось міг би вписати чужу пошту й
+ *     успадкувати чужий обліковий запис Nova. Google-вхід завжди дає
+ *     emailVerified=true, тож для реальних власників це прозоро.
+ *  3. Якщо пошта вже привʼязана до ІНШОГО firebaseUid, або не верифікована
+ *     при знайденому старому акаунті — відмова, а не тихе злиття.
+ *  4. Інакше — новий користувач, роль за ADMIN_EMAIL.
+ */
+export async function findOrCreateFromFirebase(
+  token: VerifiedFirebaseToken
+): Promise<{ user: StoredUser; error?: never } | { user?: never; error: string }> {
+  const email = token.email.trim().toLowerCase();
+
+  const byUid = await findUserByFirebaseUid(token.uid);
+  if (byUid) {
+    if (byUid.disabled) return { error: 'Обліковий запис заблоковано адміністратором.' };
+    const role = email === ADMIN_EMAIL ? 'admin' : byUid.role;
+    const updated: StoredUser = {
+      ...byUid,
+      email,
+      name: byUid.name || token.name || email.split('@')[0],
+      role,
+      lastLoginAt: new Date().toISOString(),
+    };
+    await saveUser(updated);
+    return { user: updated };
+  }
+
+  const byEmail = await findUserByEmail(email);
+  if (byEmail) {
+    if (byEmail.firebaseUid && byEmail.firebaseUid !== token.uid) {
+      return { error: 'Ця пошта вже привʼязана до іншого облікового запису.' };
+    }
+    if (!token.emailVerified) {
+      return {
+        error: 'Підтвердьте цю пошту у Firebase (перейдіть за листом підтвердження), щоб увійти в наявний обліковий запис.',
+      };
+    }
+    if (byEmail.disabled) return { error: 'Обліковий запис заблоковано адміністратором.' };
+
+    const role = email === ADMIN_EMAIL ? 'admin' : byEmail.role;
+    const updated: StoredUser = {
+      ...byEmail,
+      firebaseUid: token.uid,
+      name: byEmail.name || token.name || email.split('@')[0],
+      role,
+      lastLoginAt: new Date().toISOString(),
+    };
+    await saveUser(updated);
+    return { user: updated };
+  }
+
+  const created: StoredUser = {
+    id: `usr-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+    email,
+    name: token.name || email.split('@')[0],
+    role: roleForEmail(email),
+    firebaseUid: token.uid,
+    createdAt: new Date().toISOString(),
+    lastLoginAt: new Date().toISOString(),
+  };
+  await saveUser(created);
+  return { user: created };
 }
 
 // ---------------------------------------------------------------------------
@@ -295,70 +324,41 @@ export function registerAuthRoutes(app: Express): void {
         ? { id: null, email: null, name: 'Гість', role: 'guest', isGuest: true }
         : { ...publicUser(principal as StoredUser), isGuest: false },
       permissions,
-      googleEnabled: googleConfig.enabled,
+      firebaseEnabled: firebaseAuthStatus.enabled,
       adminEmail: ADMIN_EMAIL,
     });
   });
 
-  app.post('/api/auth/register', async (req, res) => {
+  /**
+   * Обмін Firebase ID-токена (клієнт уже увійшов через Firebase SDK — поштою
+   * чи Google, сервер не розрізняє) на сесію цього застосунку.
+   */
+  app.post('/api/auth/firebase-session', async (req, res) => {
     try {
-      const { email, password, name } = req.body || {};
-
-      const emailError = validateEmail(email);
-      if (emailError) return res.status(400).json({ error: emailError });
-      const passwordError = validatePassword(password);
-      if (passwordError) return res.status(400).json({ error: passwordError });
-
-      const normalized = String(email).trim().toLowerCase();
-      if (await findUserByEmail(normalized)) {
-        return res.status(409).json({ error: 'Користувач із такою поштою вже існує.' });
+      const { idToken } = req.body || {};
+      if (typeof idToken !== 'string' || !idToken) {
+        return res.status(400).json({ error: 'Не передано idToken.' });
       }
 
-      const user: StoredUser = {
-        id: `usr-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
-        email: normalized,
-        name: (typeof name === 'string' && name.trim()) || normalized.split('@')[0],
-        role: roleForEmail(normalized),
-        passwordHash: hashPassword(String(password)),
-        createdAt: new Date().toISOString(),
-        lastLoginAt: new Date().toISOString(),
-      };
-
-      await saveUser(user);
-      await issueSession(res, user);
-      res.json({ user: publicUser(user), permissions: await effectivePermissions(user.role) });
-    } catch (err: any) {
-      console.error('[auth] register:', err);
-      res.status(500).json({ error: 'Не вдалося створити обліковий запис.' });
-    }
-  });
-
-  app.post('/api/auth/login', async (req, res) => {
-    try {
-      const { email, password } = req.body || {};
-      if (typeof email !== 'string' || typeof password !== 'string') {
-        return res.status(400).json({ error: 'Вкажіть пошту та пароль.' });
+      let verified: VerifiedFirebaseToken;
+      try {
+        verified = await verifyFirebaseIdToken(idToken);
+      } catch (err: any) {
+        const message = firebaseAuthStatus.enabled
+          ? 'Не вдалося перевірити токен Firebase. Спробуйте увійти ще раз.'
+          : err?.message || 'Вхід не налаштований на сервері.';
+        return res.status(firebaseAuthStatus.enabled ? 401 : 503).json({ error: message });
       }
 
-      const user = await findUserByEmail(email);
-      // Однакова відповідь для «немає такого» і «пароль не той» —
-      // щоб не давати змоги перебирати наявні адреси.
-      if (!user || !verifyPassword(password, user.passwordHash)) {
-        return res.status(401).json({ error: 'Невірна пошта або пароль.' });
-      }
-      if (user.disabled) {
-        return res.status(403).json({ error: 'Обліковий запис заблоковано адміністратором.' });
+      const result = await findOrCreateFromFirebase(verified);
+      if (result.error) {
+        return res.status(409).json({ error: result.error });
       }
 
-      // Якщо адмінська пошта чомусь має іншу роль — повертаємо admin.
-      const role = user.email.toLowerCase() === ADMIN_EMAIL ? 'admin' : user.role;
-      const updated = { ...user, role, lastLoginAt: new Date().toISOString() };
-      await saveUser(updated);
-      await issueSession(res, updated);
-
-      res.json({ user: publicUser(updated), permissions: await effectivePermissions(role) });
-    } catch (err: any) {
-      console.error('[auth] login:', err);
+      await issueSession(res, result.user);
+      res.json({ user: publicUser(result.user), permissions: await effectivePermissions(result.user.role) });
+    } catch (err) {
+      console.error('[auth] firebase-session:', err);
       res.status(500).json({ error: 'Не вдалося увійти.' });
     }
   });
@@ -370,106 +370,13 @@ export function registerAuthRoutes(app: Express): void {
     res.json({ ok: true });
   });
 
-  // --- Google OAuth ---
-
-  app.get('/api/auth/google', (req, res) => {
-    if (!googleConfig.enabled) {
-      return res.status(503).json({
-        error: 'Вхід через Google не налаштований. Задайте GOOGLE_CLIENT_ID і GOOGLE_CLIENT_SECRET.',
-      });
-    }
-    const state = crypto.randomBytes(16).toString('hex');
-    const params = new URLSearchParams({
-      client_id: googleConfig.clientId,
-      redirect_uri: googleRedirectUri(req),
-      response_type: 'code',
-      scope: 'openid email profile',
-      access_type: 'online',
-      prompt: 'select_account',
-      state,
-    });
-    res.setHeader('Set-Cookie', `nova_oauth_state=${state}; HttpOnly; SameSite=Lax; Path=/; Max-Age=600`);
-    res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
-  });
-
-  app.get('/api/auth/google/callback', async (req, res) => {
-    try {
-      if (!googleConfig.enabled) return res.redirect('/?auth_error=google_disabled');
-
-      const { code, state } = req.query as { code?: string; state?: string };
-      const expectedState = parseCookies(req.headers.cookie)['nova_oauth_state'];
-      if (!code || !state || state !== expectedState) {
-        return res.redirect('/?auth_error=state_mismatch');
-      }
-
-      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          code,
-          client_id: googleConfig.clientId,
-          client_secret: googleConfig.clientSecret,
-          redirect_uri: googleRedirectUri(req),
-          grant_type: 'authorization_code',
-        }),
-      });
-      if (!tokenRes.ok) return res.redirect('/?auth_error=token_exchange');
-      const tokens = (await tokenRes.json()) as { access_token?: string };
-      if (!tokens.access_token) return res.redirect('/?auth_error=no_token');
-
-      const profileRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-        headers: { Authorization: `Bearer ${tokens.access_token}` },
-      });
-      if (!profileRes.ok) return res.redirect('/?auth_error=profile');
-      const profile = (await profileRes.json()) as {
-        sub: string; email?: string; name?: string; picture?: string; email_verified?: boolean;
-      };
-
-      if (!profile.email || profile.email_verified === false) {
-        return res.redirect('/?auth_error=email_unverified');
-      }
-
-      const normalized = profile.email.trim().toLowerCase();
-      const existing = await findUserByEmail(normalized);
-
-      const user: StoredUser = existing
-        ? {
-            ...existing,
-            googleId: profile.sub,
-            name: existing.name || profile.name || normalized,
-            avatarUrl: profile.picture || existing.avatarUrl,
-            role: normalized === ADMIN_EMAIL ? 'admin' : existing.role,
-            lastLoginAt: new Date().toISOString(),
-          }
-        : {
-            id: `usr-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
-            email: normalized,
-            name: profile.name || normalized.split('@')[0],
-            role: roleForEmail(normalized),
-            googleId: profile.sub,
-            avatarUrl: profile.picture,
-            createdAt: new Date().toISOString(),
-            lastLoginAt: new Date().toISOString(),
-          };
-
-      if (user.disabled) return res.redirect('/?auth_error=disabled');
-
-      await saveUser(user);
-      await issueSession(res, user);
-      res.redirect('/');
-    } catch (err) {
-      console.error('[auth] google callback:', err);
-      res.redirect('/?auth_error=unknown');
-    }
-  });
-
   /** Скільки взагалі є користувачів — щоб показати підказку на першому запуску. */
   app.get('/api/auth/status', async (_req, res) => {
     const users = await listUsers();
     res.json({
       userCount: users.length,
       hasAdmin: users.some((u) => u.role === 'admin'),
-      googleEnabled: googleConfig.enabled,
+      firebaseEnabled: firebaseAuthStatus.enabled,
       adminEmail: ADMIN_EMAIL,
     });
   });
