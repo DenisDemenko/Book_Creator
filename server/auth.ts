@@ -228,8 +228,49 @@ export function publicUser(user: StoredUser) {
   };
 }
 
-function roleForEmail(email: string): StoredRole {
-  return email.trim().toLowerCase() === ADMIN_EMAIL ? 'admin' : DEFAULT_ROLE;
+/**
+ * Відповідність ролей маркетплейсу ролям Nova (docs/migration-plan.md
+ * маркетплейсу, H5.1).
+ *
+ * Без неї `roleForEmail` робила письменником **кожного** — тобто покупець
+ * або студент, увійшовши в Nova тим самим Firebase-акаунтом, отримував
+ * повні права на редагування, AI та публікацію, і матриця H обходилась на
+ * самому вході.
+ *
+ * `instruction_engineer` і `student` свідомо ведуть на `writer`: їм потрібен
+ * той самий набір дій із текстом. Розбіжність одна — за H4 їм не належить
+ * право на власні ключі провайдерів, а `writer` його має. Жодна наявна роль
+ * Nova не дає «писати, але без ключів», а нова роль зачепила б 12+ файлів
+ * інтерфейсу зі switch по ролях, тож це винесено окремим пунктом плану.
+ * Ризик обмежений: власний ключ користувач оплачує сам, тож це відхилення
+ * від специфікації, а не діра в безпеці.
+ */
+export const MARKETPLACE_ROLE_TO_NOVA: Record<string, StoredRole> = {
+  admin: 'admin',
+  writer: 'writer',
+  instruction_engineer: 'writer',
+  student: 'writer',
+  // Менеджер продажів = видавець: верстка, аудит KDP, експорт, публікація.
+  sales_manager: 'publisher',
+  // Ролі без стосунку до створення книг бачать Nova лише на перегляд.
+  buyer: 'reader',
+  seller: 'reader',
+  expert: 'reader',
+};
+
+/**
+ * Роль Nova за роллю маркетплейсу. Невідома роль веде на `reader`, а не на
+ * `writer`: якщо маркетплейс колись заведе роль, про яку Nova не знає,
+ * безпечніше дати найменше, ніж найбільше.
+ */
+export function novaRoleForMarketplaceRole(role: string | null | undefined): StoredRole {
+  if (!role) return DEFAULT_ROLE;
+  return MARKETPLACE_ROLE_TO_NOVA[role] ?? 'reader';
+}
+
+function roleForEmail(email: string, marketplaceRole?: string | null): StoredRole {
+  if (email.trim().toLowerCase() === ADMIN_EMAIL) return 'admin';
+  return novaRoleForMarketplaceRole(marketplaceRole);
 }
 
 /** Створює адміністратора при першому запуску, якщо його ще немає. */

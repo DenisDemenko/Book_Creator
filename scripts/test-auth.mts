@@ -5,7 +5,7 @@ fs.rmSync('/tmp/nova-test-data', { recursive: true, force: true });
 
 // Імпорти динамічні: інакше ESM підняв би їх вище за присвоєння DATA_DIR,
 // і тест писав би у бойову теку даних замість тимчасової.
-const { BASE_SERVER_PERMISSIONS, findOrCreateFromFirebase, ADMIN_EMAIL } = await import('../server/auth');
+const { BASE_SERVER_PERMISSIONS, findOrCreateFromFirebase, ADMIN_EMAIL, novaRoleForMarketplaceRole } = await import('../server/auth');
 const { priceForImage, priceForText, IMAGE_PRICING, pricingSnapshot } = await import('../server/pricing');
 const { recordUsage, listUsage, saveUser, findUserByEmail, findUserByFirebaseUid, deleteUser, setRoleOverride, getRoleOverrides, resetRoleOverrides } = await import('../server/store');
 
@@ -129,6 +129,28 @@ console.log('\nFirebase → локальний користувач:');
     fakeToken({ uid: 'uid-admin', email: ADMIN_EMAIL, emailVerified: true })
   );
   t('вхід поштою адміна підвищує роль до admin', adminLink.user?.role === 'admin');
+}
+
+console.log('\nВідповідність ролей маркетплейс → Nova (H5.1):');
+{
+  const map = novaRoleForMarketplaceRole;
+
+  t('письменник лишається письменником', map('writer') === 'writer');
+  t('адмін лишається адміном', map('admin') === 'admin');
+  t('менеджер продажів → видавець', map('sales_manager') === 'publisher');
+  t('інженер інструкцій → письменник', map('instruction_engineer') === 'writer');
+  t('студент → письменник', map('student') === 'writer');
+
+  // Головне, заради чого мапа й зʼявилась: до неї кожен ставав письменником.
+  t('покупець → читач, а не письменник', map('buyer') === 'reader');
+  t('продавець → читач', map('seller') === 'reader');
+  t('експерт → читач', map('expert') === 'reader');
+
+  // Роль, якої Nova не знає, має вести на найменші права, а не на найбільші —
+  // інакше нова роль у маркетплейсі мовчки отримає доступ до всього.
+  t('невідома роль → читач', map('ceo') === 'reader');
+
+  t('роль не вказана → дефолтна', map(null) === 'writer');
 }
 
 console.log(`\nРезультат: ${pass} пройдено, ${fail} провалено`);
