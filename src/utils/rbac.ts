@@ -38,6 +38,9 @@ export const ALL_ROLES: RoleInfo[] = [
       canViewAuditLog: true,
       canManageRoles: true,
       canGenerateImages: true,
+      canPublish: true,
+      canPublishExternal: true,
+      canManageApiKeys: true,
       isReadOnly: false,
       allowedTabs: [
         'dashboard',
@@ -115,6 +118,9 @@ export const ALL_ROLES: RoleInfo[] = [
       canViewAuditLog: true,
       canManageRoles: false,
       canGenerateImages: true,
+      canPublish: true,
+      canPublishExternal: true,
+      canManageApiKeys: true,
       isReadOnly: false,
       allowedTabs: [
         'dashboard',
@@ -183,6 +189,9 @@ export const ALL_ROLES: RoleInfo[] = [
       canViewAuditLog: false,
       canManageRoles: false,
       canGenerateImages: true,
+      canPublish: false,
+      canPublishExternal: false,
+      canManageApiKeys: false,
       isReadOnly: false,
       allowedTabs: [
         'subscription',
@@ -239,6 +248,9 @@ export const ALL_ROLES: RoleInfo[] = [
       canViewAuditLog: false,
       canManageRoles: false,
       canGenerateImages: true,
+      canPublish: false,
+      canPublishExternal: false,
+      canManageApiKeys: false,
       isReadOnly: false,
       allowedTabs: [
         'subscription',
@@ -294,6 +306,9 @@ export const ALL_ROLES: RoleInfo[] = [
       canViewAuditLog: true,
       canManageRoles: false,
       canGenerateImages: true,
+      canPublish: true,
+      canPublishExternal: true,
+      canManageApiKeys: false,
       isReadOnly: false,
       allowedTabs: [
         'subscription',
@@ -354,6 +369,9 @@ export const ALL_ROLES: RoleInfo[] = [
       canViewAuditLog: false,
       canManageRoles: false,
       canGenerateImages: false,
+      canPublish: false,
+      canPublishExternal: false,
+      canManageApiKeys: false,
       isReadOnly: true,
       allowedTabs: [
         'subscription',
@@ -405,6 +423,9 @@ export const ALL_ROLES: RoleInfo[] = [
       canViewAuditLog: false,
       canManageRoles: false,
       canGenerateImages: false,
+      canPublish: false,
+      canPublishExternal: false,
+      canManageApiKeys: false,
       isReadOnly: true,
       allowedTabs: [
         'subscription',

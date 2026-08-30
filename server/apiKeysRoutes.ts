@@ -12,7 +12,7 @@
  */
 
 import type { Express } from 'express';
-import { requireAuth } from './auth';
+import { requireAuth, requirePermission } from './auth';
 import { getUserApiKey, listUserApiKeys, upsertUserApiKey, deleteUserApiKey } from './store';
 import { encryptApiKey, apiKeyFingerprint, isApiKeyCryptoConfigured } from './userApiKeyCrypto';
 import { CHAT_MODELS, ENGINE_LABELS, engineConfigured, type EngineId } from './chatProviders';
@@ -25,7 +25,7 @@ function isEngineId(value: string): value is EngineId {
 
 export function registerApiKeysRoutes(app: Express): void {
   /** Статус ключів автора для всіх 6 провайдерів чату. */
-  app.get('/api/account/api-keys', requireAuth, async (req, res) => {
+  app.get('/api/account/api-keys', requireAuth, requirePermission('canManageApiKeys'), async (req, res) => {
     try {
       const userId = req.principal!.id as string;
       const stored = await listUserApiKeys(userId);
@@ -52,7 +52,7 @@ export function registerApiKeysRoutes(app: Express): void {
   });
 
   /** Зберігає (або замінює) власний ключ автора для одного провайдера. */
-  app.put('/api/account/api-keys/:engine', requireAuth, async (req, res) => {
+  app.put('/api/account/api-keys/:engine', requireAuth, requirePermission('canManageApiKeys'), async (req, res) => {
     try {
       const engine = req.params.engine;
       if (!isEngineId(engine)) {
@@ -94,7 +94,7 @@ export function registerApiKeysRoutes(app: Express): void {
   });
 
   /** Видаляє власний ключ — чат повертається на спільний серверний (якщо є). */
-  app.delete('/api/account/api-keys/:engine', requireAuth, async (req, res) => {
+  app.delete('/api/account/api-keys/:engine', requireAuth, requirePermission('canManageApiKeys'), async (req, res) => {
     try {
       const engine = req.params.engine;
       if (!isEngineId(engine)) {

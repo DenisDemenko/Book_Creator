@@ -18,7 +18,7 @@
 
 import type { Express, Request, Response } from 'express';
 import express from 'express';
-import { requireAuth } from './auth';
+import { requireAuth, requirePermission } from './auth';
 import {
   deleteProduct,
   getProduct,
@@ -249,7 +249,7 @@ export function registerPublishingRoutes(app: Express, deps: PublishingRoutesDep
   // Товари
   // =========================================================================
 
-  app.get('/api/publishing/products', requireAuth, async (req, res) => {
+  app.get('/api/publishing/products', requireAuth, requirePermission('canPublish'), async (req, res) => {
     try {
       const products = await listProducts(req.principal!.id as string);
       const publications = await listPublicationsForUser(req.principal!.id as string);
@@ -259,7 +259,7 @@ export function registerPublishingRoutes(app: Express, deps: PublishingRoutesDep
     }
   });
 
-  app.post('/api/publishing/products', requireAuth, async (req, res) => {
+  app.post('/api/publishing/products', requireAuth, requirePermission('canPublish'), async (req, res) => {
     try {
       const title = String(req.body?.title || '').trim();
       if (!title) return res.status(400).json({ error: 'Вкажіть назву товару.' });
@@ -288,7 +288,7 @@ export function registerPublishingRoutes(app: Express, deps: PublishingRoutesDep
     }
   });
 
-  app.get('/api/publishing/products/:id', requireAuth, async (req, res) => {
+  app.get('/api/publishing/products/:id', requireAuth, requirePermission('canPublish'), async (req, res) => {
     try {
       const product = await loadOwnProduct(req, res);
       if (!product) return;
@@ -302,7 +302,7 @@ export function registerPublishingRoutes(app: Express, deps: PublishingRoutesDep
     }
   });
 
-  app.put('/api/publishing/products/:id', requireAuth, async (req, res) => {
+  app.put('/api/publishing/products/:id', requireAuth, requirePermission('canPublish'), async (req, res) => {
     try {
       const product = await loadOwnProduct(req, res);
       if (!product) return;
@@ -326,7 +326,7 @@ export function registerPublishingRoutes(app: Express, deps: PublishingRoutesDep
     }
   });
 
-  app.delete('/api/publishing/products/:id', requireAuth, async (req, res) => {
+  app.delete('/api/publishing/products/:id', requireAuth, requirePermission('canPublish'), async (req, res) => {
     try {
       const product = await loadOwnProduct(req, res);
       if (!product) return;
@@ -342,7 +342,7 @@ export function registerPublishingRoutes(app: Express, deps: PublishingRoutesDep
   // Файли товару
   // -------------------------------------------------------------------------
 
-  app.get('/api/publishing/products/:id/files', requireAuth, async (req, res) => {
+  app.get('/api/publishing/products/:id/files', requireAuth, requirePermission('canPublish'), async (req, res) => {
     try {
       const product = await loadOwnProduct(req, res);
       if (!product) return;
@@ -359,7 +359,7 @@ export function registerPublishingRoutes(app: Express, deps: PublishingRoutesDep
    */
   app.post(
     '/api/publishing/products/:id/files',
-    requireAuth,
+    requireAuth, requirePermission('canPublish'),
     express.raw({ type: '*/*', limit: MAX_UPLOAD_BYTES }),
     async (req, res) => {
       try {
@@ -382,7 +382,7 @@ export function registerPublishingRoutes(app: Express, deps: PublishingRoutesDep
     }
   );
 
-  app.delete('/api/publishing/products/:id/files/:name', requireAuth, async (req, res) => {
+  app.delete('/api/publishing/products/:id/files/:name', requireAuth, requirePermission('canPublish'), async (req, res) => {
     try {
       const product = await loadOwnProduct(req, res);
       if (!product) return;
@@ -399,7 +399,7 @@ export function registerPublishingRoutes(app: Express, deps: PublishingRoutesDep
   // -------------------------------------------------------------------------
 
   /** Оцінка набору ДО пакування: розмір, ліміти й рекомендація сценарію А/Б. */
-  app.post('/api/publishing/products/:id/bundle/analyze', requireAuth, async (req, res) => {
+  app.post('/api/publishing/products/:id/bundle/analyze', requireAuth, requirePermission('canPublish'), async (req, res) => {
     try {
       const product = await loadOwnProduct(req, res);
       if (!product) return;
@@ -416,7 +416,7 @@ export function registerPublishingRoutes(app: Express, deps: PublishingRoutesDep
     }
   });
 
-  app.post('/api/publishing/products/:id/bundle/package', requireAuth, async (req, res) => {
+  app.post('/api/publishing/products/:id/bundle/package', requireAuth, requirePermission('canPublish'), async (req, res) => {
     try {
       const product = await loadOwnProduct(req, res);
       if (!product) return;
@@ -502,7 +502,7 @@ export function registerPublishingRoutes(app: Express, deps: PublishingRoutesDep
    * новій вкладці й лишає застосунок у поточному стані — автор не втрачає
    * незбережену роботу через перехід на сайт Etsy.
    */
-  app.post('/api/etsy/oauth/start', requireAuth, async (req, res) => {
+  app.post('/api/etsy/oauth/start', requireAuth, requirePermission('canPublishExternal'), async (req, res) => {
     try {
       const cfg = config();
       if (!cfg.configured) return res.status(503).json({ error: cfg.reasonUk });
@@ -593,7 +593,7 @@ export function registerPublishingRoutes(app: Express, deps: PublishingRoutesDep
     }
   });
 
-  app.delete('/api/etsy/connection', requireAuth, async (req, res) => {
+  app.delete('/api/etsy/connection', requireAuth, requirePermission('canPublishExternal'), async (req, res) => {
     try {
       await disconnectEtsy(req.principal!.id as string);
       res.json({ ok: true });
@@ -611,7 +611,7 @@ export function registerPublishingRoutes(app: Express, deps: PublishingRoutesDep
    * проблеми ще до натискання «Опублікувати», і жоден із цих випадків не
    * доходить до Etsy (критерій приймання 4.6).
    */
-  app.post('/api/publishing/products/:id/publish/etsy/validate', requireAuth, async (req, res) => {
+  app.post('/api/publishing/products/:id/publish/etsy/validate', requireAuth, requirePermission('canPublishExternal'), async (req, res) => {
     try {
       const product = await loadOwnProduct(req, res);
       if (!product) return;
@@ -644,7 +644,7 @@ export function registerPublishingRoutes(app: Express, deps: PublishingRoutesDep
     }
   });
 
-  app.post('/api/publishing/products/:id/publish/etsy', requireAuth, async (req, res) => {
+  app.post('/api/publishing/products/:id/publish/etsy', requireAuth, requirePermission('canPublishExternal'), async (req, res) => {
     try {
       const product = await loadOwnProduct(req, res);
       if (!product) return;
@@ -749,7 +749,7 @@ export function registerPublishingRoutes(app: Express, deps: PublishingRoutesDep
     }
   });
 
-  app.get('/api/publishing/jobs/:id', requireAuth, async (req, res) => {
+  app.get('/api/publishing/jobs/:id', requireAuth, requirePermission('canPublish'), async (req, res) => {
     try {
       const job = await getJob(req.params.id);
       if (!job || (job.userId !== req.principal?.id && !isAdmin(req))) {
@@ -762,7 +762,7 @@ export function registerPublishingRoutes(app: Express, deps: PublishingRoutesDep
     }
   });
 
-  app.get('/api/publishing/publications', requireAuth, async (req, res) => {
+  app.get('/api/publishing/publications', requireAuth, requirePermission('canPublish'), async (req, res) => {
     try {
       res.json({ publications: await listPublicationsForUser(req.principal!.id as string) });
     } catch (err) {
@@ -774,7 +774,7 @@ export function registerPublishingRoutes(app: Express, deps: PublishingRoutesDep
   // Підсистема 4 — дослідження попиту
   // =========================================================================
 
-  app.post('/api/etsy/research', requireAuth, async (req, res) => {
+  app.post('/api/etsy/research', requireAuth, requirePermission('canPublishExternal'), async (req, res) => {
     try {
       const topic = String(req.body?.topic || '').trim();
       if (!topic) return res.status(400).json({ error: 'Вкажіть тему або нішу для дослідження.' });
@@ -801,7 +801,7 @@ export function registerPublishingRoutes(app: Express, deps: PublishingRoutesDep
     }
   });
 
-  app.get('/api/etsy/research/trend', requireAuth, async (req, res) => {
+  app.get('/api/etsy/research/trend', requireAuth, requirePermission('canPublishExternal'), async (req, res) => {
     try {
       const topic = String(req.query.topic || '').trim();
       if (!topic) return res.status(400).json({ error: 'Вкажіть тему.' });

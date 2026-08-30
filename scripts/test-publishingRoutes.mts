@@ -400,6 +400,36 @@ console.log('\nВідключення крамниці:');
   t('помилка має машинний код для UI', publish.data.kind === 'etsy_not_connected');
 }
 
+// ---------------------------------------------------------------------------
+// Фаза H (docs/migration-plan.md маркетплейсу, H6). До неї всі ці маршрути
+// стояли за самим `requireAuth`: публікувати міг будь-хто автентифікований,
+// і поява ролей `reader`/`student` перетворила це на діру. Тести нижче
+// стережуть саме ґейт, а не сценарій — без них право можна зняти з роутів і
+// нічого не почервоніє.
+console.log('\nПрава на публікацію (Фаза H):');
+{
+  const asWriter = principal;
+
+  principal = { id: 'u-3', email: 'r@test.ua', name: 'Читач', role: 'reader', isGuest: false };
+  const readerList = await call('GET', '/api/publishing/products');
+  t('читач не бачить кабінет публікації → 403', readerList.status === 403, String(readerList.status));
+  t('відповідь називає бракуюче право', readerList.data.permission === 'canPublish');
+
+  const readerEtsy = await call('POST', '/api/etsy/oauth/start');
+  t('читач не підключає крамницю → 403', readerEtsy.status === 403, String(readerEtsy.status));
+
+  // Видавець = менеджер продажів маркетплейсу: публікує, але без власних
+  // ключів провайдерів (H4).
+  principal = { id: 'u-4', email: 'p@test.ua', name: 'Видавець', role: 'publisher', isGuest: false };
+  const publisherList = await call('GET', '/api/publishing/products');
+  t('видавець має доступ до публікації → 200', publisherList.status === 200, String(publisherList.status));
+
+  const publisherEtsy = await call('POST', '/api/etsy/oauth/start');
+  t('видавець підключає крамницю (не 403)', publisherEtsy.status !== 403, String(publisherEtsy.status));
+
+  principal = asWriter;
+}
+
 server.close();
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);
 process.exit(fail ? 1 : 0);

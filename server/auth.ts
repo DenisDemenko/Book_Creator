@@ -146,20 +146,42 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
 // Дозволи з урахуванням перевизначень адміністратора
 // ---------------------------------------------------------------------------
 
+type ServerPermissions = {
+  canGenerateImages: boolean;
+  canUseAi: boolean;
+  canEditContent: boolean;
+  canPublish: boolean;
+  canPublishExternal: boolean;
+  canManageApiKeys: boolean;
+};
+
 /**
  * Базові дозволи, важливі для сервера. Повний опис ролей живе на клієнті
  * (utils/rbac.ts); тут лише те, що впливає на витрату грошей і запис даних.
+ *
+ * Ці три поля дублюють однойменні в `utils/rbac.ts` — свідомо, бо сервер не
+ * має покладатись на клієнтську таблицю. Ціна дублювання: додаючи право,
+ * треба правити обидва місця, інакше ґейт мовчки віддає 403 на роль, якій
+ * клієнт право показує. Саме так і сталось при впровадженні публікації.
+ *
+ * canPublish / canPublishExternal / canManageApiKeys — Фаза H
+ * (docs/migration-plan.md маркетплейсу, H4-H6). До них маршрути публікації
+ * стояли за самим `requireAuth`, тобто публікувати міг будь-хто
+ * автентифікований.
  */
-export const BASE_SERVER_PERMISSIONS: Record<StoredRole, { canGenerateImages: boolean; canUseAi: boolean; canEditContent: boolean }> = {
-  admin:      { canGenerateImages: true,  canUseAi: true,  canEditContent: true },
-  writer:     { canGenerateImages: true,  canUseAi: true,  canEditContent: true },
-  designer:   { canGenerateImages: true,  canUseAi: true,  canEditContent: false },
-  translator: { canGenerateImages: true,  canUseAi: true,  canEditContent: false },
-  publisher:  { canGenerateImages: true,  canUseAi: true,  canEditContent: false },
+export const BASE_SERVER_PERMISSIONS: Record<StoredRole, ServerPermissions> = {
+  admin:      { canGenerateImages: true,  canUseAi: true,  canEditContent: true,  canPublish: true,  canPublishExternal: true,  canManageApiKeys: true },
+  writer:     { canGenerateImages: true,  canUseAi: true,  canEditContent: true,  canPublish: true,  canPublishExternal: true,  canManageApiKeys: true },
+  designer:   { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false },
+  translator: { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false },
+  // Видавець = менеджер продажів маркетплейсу (H5): публікує і всередині, і
+  // назовні — аудит KDP це його робота, — але власних ключів провайдерів не
+  // вводить, бо послуги йому надає Nova.
+  publisher:  { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: true,  canPublishExternal: true,  canManageApiKeys: false },
   // Бета-рідер лише читає — хай не витрачає платні генерації.
-  reader:     { canGenerateImages: false, canUseAi: false, canEditContent: false },
+  reader:     { canGenerateImages: false, canUseAi: false, canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false },
   // Гість бачить демонстраційні заглушки замість згенерованих зображень.
-  guest:      { canGenerateImages: false, canUseAi: false, canEditContent: false },
+  guest:      { canGenerateImages: false, canUseAi: false, canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false },
 };
 
 export async function effectivePermissions(role: StoredRole) {

@@ -660,6 +660,24 @@ export interface RolePermission {
   canManageRoles: boolean;
   /** Чи дозволено витрачати платні генерації зображень. Гість — ні. */
   canGenerateImages: boolean;
+  /**
+   * Публікація в межах Nova. Досі не була виражена окремим правом, через що
+   * маршрути `server/publishingRoutes.ts` стояли за самим `requireAuth` —
+   * тобто публікувати міг будь-хто автентифікований. Відповідає праву
+   * `publishing:nova` матриці маркетплейсу (docs/migration-plan.md, H1).
+   */
+  canPublish: boolean;
+  /**
+   * Зовнішні майданчики: Amazon KDP та Etsy, включно з OAuth-підключенням
+   * крамниці. Окремо від `canPublish`, бо це вихід за межі платформи.
+   * Відповідає `publishing:external`.
+   */
+  canPublishExternal: boolean;
+  /**
+   * Введення **власних** секретних ключів AI-провайдерів. Ролям, яким Nova
+   * надає послуги своїми ключами, вимкнено (H4). Відповідає `keys:manage`.
+   */
+  canManageApiKeys: boolean;
   isReadOnly: boolean;
   allowedTabs: NavigationTab[];
 }
