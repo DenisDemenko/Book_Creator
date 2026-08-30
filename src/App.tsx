@@ -287,6 +287,38 @@ export default function App() {
     }
   }, []);
 
+  // Вхід із кнопки «Створити книгу» на головній маркетплейсу
+  // (?create=book): студія відкривається одразу на створенні книги, а не на
+  // панелі, звідки її ще треба знайти. Саме це відрізняє ту кнопку від
+  // сусідньої «Відкрити студію» — інакше обидві вели б в одне місце.
+  //
+  // Намір зберігається окремо від адреси й чекає на автентифікацію. Прямо
+  // на монтуванні відкривати вікно марно: людина, яка прийшла з
+  // маркетплейсу, найчастіше ще не увійшла, і поверх екрана входу воно
+  // просто згоріло б, а параметр із адреси вже зник.
+  //
+  // Коли зʼявиться експрес-майстер (Wisart Book Crealiry.md §3.4), тут
+  // стане перемикач на вкладку `express`; поки що найближче до задуму —
+  // наявне вікно створення книги.
+  const [pendingCreateBook, setPendingCreateBook] = useState<boolean>(false);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('create') !== 'book') return;
+    setPendingCreateBook(true);
+    // Прибираємо з адреси одразу, як і `invite` нижче: інакше параметр
+    // лишиться в історії, і кнопка «назад» відкриє вікно вдруге.
+    url.searchParams.delete('create');
+    window.history.replaceState({}, '', url.toString());
+  }, []);
+
+  useEffect(() => {
+    if (!pendingCreateBook) return;
+    if (auth.loading || !auth.user || auth.user.isGuest) return;
+    setIsCreateBookModalOpen(true);
+    setPendingCreateBook(false);
+  }, [pendingCreateBook, auth.loading, auth.user]);
+
   // Перехід за посиланням cowork-запрошення (?invite=<token>) — токен читаємо
   // один раз і одразу прибираємо з адресного рядка, щоб він не залишався в
   // історії браузера й не перепрацьовувався повторно при кожному рендері.
