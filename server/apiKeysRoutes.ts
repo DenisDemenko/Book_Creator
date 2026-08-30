@@ -23,6 +23,34 @@ function isEngineId(value: string): value is EngineId {
   return KNOWN_ENGINES.has(value);
 }
 
+/** Унікальний префікс ключа Anthropic — єдина ознака, яку можна перевіряти без здогадів. */
+const ANTHROPIC_PREFIX = 'sk-ant-';
+
+/**
+ * Ловить найпоширенішу помилку в цьому вікні: ключ вставлено не в ту
+ * картку. Провайдер про це, звісно, скаже — але аж під час генерації, і
+ * формулюванням, у якому причину впізнати важко: OpenAI на ключ Claude
+ * відповідає «Incorrect API key provided: sk-ant-…», і виглядає це як
+ * зіпсований ключ, а не як переплутана картка.
+ *
+ * Перевіряється РІВНО ОДИН випадок — префікс `sk-ant-` поза карткою
+ * Claude. Він унікальний для Anthropic, тож хибного спрацювання тут
+ * бути не може. Зворотну перевірку («ключ OpenAI мусить починатися з
+ * sk-») свідомо не робимо: OpenAI-сумісні проксі та шлюзи видають ключі
+ * у власних форматах, і відхилити робочий ключ було б гірше, ніж
+ * пропустити чужий — цей випадок і так виявиться при першій генерації.
+ */
+function detectMisplacedKey(engine: EngineId, apiKey: string): string | null {
+  if (apiKey.startsWith(ANTHROPIC_PREFIX) && engine !== 'claude') {
+    return (
+      `Схоже, це ключ Anthropic Claude (починається з «${ANTHROPIC_PREFIX}»), ` +
+      `а ви зберігаєте його як ${ENGINE_LABELS[engine]}. ` +
+      `Вставте його в картку «Anthropic Claude».`
+    );
+  }
+  return null;
+}
+
 export function registerApiKeysRoutes(app: Express): void {
   /** Статус ключів автора для всіх 6 провайдерів чату. */
   app.get('/api/account/api-keys', requireAuth, requirePermission('canManageApiKeys'), async (req, res) => {
@@ -61,6 +89,11 @@ export function registerApiKeysRoutes(app: Express): void {
       const apiKey = typeof req.body?.apiKey === 'string' ? req.body.apiKey.trim() : '';
       if (!apiKey) {
         return res.status(400).json({ error: 'Введіть ключ API.' });
+      }
+
+      const misplaced = detectMisplacedKey(engine, apiKey);
+      if (misplaced) {
+        return res.status(400).json({ error: misplaced });
       }
       if (!isApiKeyCryptoConfigured()) {
         return res.status(503).json({
