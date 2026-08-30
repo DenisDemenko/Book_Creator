@@ -210,26 +210,73 @@ interface GenerateTextParams {
   bookId?: string;
 }
 
+/** Скільки РАЗІВ ПОВТОРИТИ виклик після тимчасової відмови (усього спроб — на одну більше). */
+const TRANSIENT_RETRIES = 2;
+
+/** Затримки перед повторами, мс. Ростуть, щоб не добивати вже перевантажений бік. */
+const RETRY_DELAYS_MS = [900, 2700];
+
+/**
+ * Чи має сенс повторювати цей запит.
+ *
+ * Gemini регулярно віддає `503 UNAVAILABLE — "This model is currently
+ * experiencing high demand"`. Це не помилка налаштування: той самий запит
+ * через кілька секунд проходить. Без повтору кожен такий сплеск на боці
+ * Google зупиняє експрес-майстер посеред кроку й виглядає для автора як
+ * поламаний застосунок.
+ *
+ * Помилки ключа й промпту (400/401/403, API_KEY_INVALID) навмисно НЕ
+ * повторюються: вони не самополагодяться, а повтор лише втричі подовжив
+ * би очікування перед тим самим повідомленням.
+ */
+function isTransientAiError(err: unknown): boolean {
+  const msg = String((err as { message?: unknown })?.message ?? err);
+  if (/\b(429|500|502|503|504)\b/.test(msg)) return true;
+  return /UNAVAILABLE|RESOURCE_EXHAUSTED|overloaded|high demand|ECONNRESET|ETIMEDOUT|fetch failed/i.test(
+    msg
+  );
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
  * Текстова генерація з ОБОВ'ЯЗКОВИМ логуванням — канонічна точка входу для
  * всіх нечат-текстових інструментів продукту (редагування, переклад,
  * генерація персонажа, патерни поведінки, тренування тощо).
+ *
+ * Тимчасові відмови провайдера повторюються тут, а не в кожному виклику:
+ * місць виклику десятки, і додавати повтор у кожне означало б і забути
+ * його в половині, і розмножити той самий код.
  */
 export async function generateText(
   p: GenerateTextParams
 ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
   const modelId = p.modelId || (p.engine === 'gemini' ? GEMINI_MODEL : '');
   const ctx: UsageLogCtx = { req: p.req, label: p.label, bookId: p.bookId };
-  try {
-    const result =
-      p.engine === 'gemini' && p.json
-        ? await dispatchGeminiSdk(p.prompt, p.systemInstruction, true)
-        : await dispatch(p.engine, modelId, p.prompt, p.systemInstruction || '', p.apiKeyOverride, p.images, p.json);
-    await logTextUsage(ctx, modelId, p.engine, result.inputTokens, result.outputTokens, true);
-    return result;
-  } catch (err) {
-    await logTextUsage(ctx, modelId, p.engine, 0, 0, false);
-    throw err;
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const result =
+        p.engine === 'gemini' && p.json
+          ? await dispatchGeminiSdk(p.prompt, p.systemInstruction, true)
+          : await dispatch(p.engine, modelId, p.prompt, p.systemInstruction || '', p.apiKeyOverride, p.images, p.json);
+      await logTextUsage(ctx, modelId, p.engine, result.inputTokens, result.outputTokens, true);
+      return result;
+    } catch (err) {
+      const canRetry = attempt < TRANSIENT_RETRIES && isTransientAiError(err);
+      if (!canRetry) {
+        // Лог невдачі пишеться один раз — за підсумком, а не на кожну
+        // спробу: інакше один клік автора давав би три записи «провал»
+        // у бізнес-аналітиці й спотворював би статистику надійності.
+        await logTextUsage(ctx, modelId, p.engine, 0, 0, false);
+        throw err;
+      }
+      console.warn(
+        `[aiCore] ${p.label}: тимчасова відмова ${p.engine} (спроба ${attempt + 1}/${TRANSIENT_RETRIES + 1}), ` +
+          `повтор через ${RETRY_DELAYS_MS[attempt]} мс — ${String((err as Error)?.message ?? err).slice(0, 160)}`
+      );
+      await sleep(RETRY_DELAYS_MS[attempt]);
+    }
   }
 }
 
