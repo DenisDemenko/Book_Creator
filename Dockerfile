@@ -43,11 +43,17 @@ COPY --from=build /app/node_modules node_modules
 COPY --from=build /app/dist dist
 COPY --from=build /app/package.json package.json
 
-# Обидві теки мають лежати на постійному томі Railway, інакше при кожному
+# Обидві теки мають лежати на постійному томі, інакше при кожному
 # перезапуску зникають і база, і згенеровані зображення.
+#
+# Інструкції `VOLUME ["/data"]` тут свідомо НЕМАЄ: Railway відхиляє образ
+# із нею ще на етапі розбору Dockerfile («docker VOLUME is not supported,
+# use Railway Volumes») — том підключається в самому сервісі, через
+# Settings → Volumes, з точкою монтування /data. Ці дві змінні лишаються:
+# вони лише кажуть застосунку, куди писати, і працюють однаково і з
+# томом Railway, і зі звичайним `docker run -v` у локальному запуску.
 ENV DATA_DIR=/data \
     GENERATED_IMAGES_DIR=/data/generated
-VOLUME ["/data"]
 
 EXPOSE 3000
 CMD ["node", "dist/server.mjs"]
