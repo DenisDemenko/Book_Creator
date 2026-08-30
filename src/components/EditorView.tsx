@@ -3,6 +3,7 @@ import { useEditor, useEditorState, EditorContent, type Editor } from '@tiptap/r
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { buildManuscriptExtensions } from './manuscriptEditor/extensions';
 import { PaginationPlugin } from './manuscriptEditor/PaginationPlugin';
+import { PAGE_FORMAT_QUICK_OPTIONS } from '../utils/pageFormats';
 import { PageColumn } from './manuscriptEditor/PageColumn';
 import { PageRuler } from './manuscriptEditor/PageRuler';
 import { useRealBookPages } from '../utils/useRealBookPages';
@@ -112,6 +113,8 @@ import { AiReadabilityPanel } from './AiReadabilityPanel';
 import { FontInstallModal } from './FontInstallModal';
 import { ProofingLanguageModal } from './ProofingLanguageModal';
 import { InsertImageModal } from './InsertImageModal';
+import { HeroArcPanel } from './HeroArcPanel';
+import type { HeroArcState } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
 
 /**
@@ -443,6 +446,20 @@ export const EditorView: React.FC<EditorViewProps> = ({
     return pageHeightMm - (margins?.topMm || 0) - (margins?.bottomMm || 0);
   }, []);
 
+  /**
+   * Підпис, що повторюється зверху кожного аркуша: номер глави та її назва.
+   * Номер — порядковий у книзі, а не `order` глави: `order` може мати
+   * діри після видалень, і тоді в колонтитулі стояло б «Розділ 7» там, де
+   * глава насправді четверта.
+   */
+  const getRunningHeaderText = useCallback((): string => {
+    const b = bookRef.current;
+    const idx = b.chapters.findIndex((c) => c.id === activeChapterIdRef.current);
+    const chapter = idx === -1 ? undefined : b.chapters[idx];
+    if (!chapter) return '';
+    return `Розділ ${idx + 1}: ${chapter.title}`;
+  }, []);
+
   const getVerticalMarginsMm = useCallback(() => {
     const margins = bookRef.current.layoutConfig?.margins;
     return { topMm: margins?.topMm || 0, bottomMm: margins?.bottomMm || 0 };
@@ -486,6 +503,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
   realBookPagesRef.current = realBookPages;
   const activeSectionIdRef = useRef(activeSection?.id);
   activeSectionIdRef.current = activeSection?.id;
+  const activeChapterIdRef = useRef(activeChapter?.id);
+  activeChapterIdRef.current = activeChapter?.id;
 
   const getStartPageNumber = useCallback((): number => {
     const idx = realBookPagesRef.current.findIndex((p) => p.sectionId === activeSectionIdRef.current);
@@ -499,7 +518,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
       aiDraftLabel: t('editor.aiDraftLabel'),
       aiDraftReviewLabel: t('editor.aiDraftReviewLabel'),
     }),
-    PaginationPlugin.configure({ getPageContentHeightMm, getVerticalMarginsMm, getStartPageNumber }),
+    PaginationPlugin.configure({
+      getPageContentHeightMm,
+      getVerticalMarginsMm,
+      getStartPageNumber,
+      getRunningHeaderText,
+    }),
   ]).current;
   const enManuscriptExtensions = useRef([
     ...buildManuscriptExtensions(
@@ -1048,6 +1072,39 @@ export const EditorView: React.FC<EditorViewProps> = ({
         margins: { ...book.layoutConfig.margins, ...patch },
       },
     });
+  };
+
+  /**
+   * Змінює формат аркуша просто з редактора — те саме поле, що редагує
+   * «Верстка & Поля», тож обидва місця лишаються синхронними без окремого
+   * стану (той самий підхід, що й у handleChangeMargins вище).
+   */
+  const handleChangePageFormat = (presetId: string) => {
+    const preset = PAGE_FORMAT_QUICK_OPTIONS.find((p) => p.id === presetId);
+    if (!preset) return;
+    onUpdateBook(
+      {
+        ...book,
+        layoutConfig: {
+          ...book.layoutConfig,
+          formatPreset: preset.id,
+          pageWidthMm: preset.widthMm,
+          pageHeightMm: preset.heightMm,
+        },
+      },
+      'Зміна формату верстки',
+      `Формат аркуша змінено на ${t(preset.labelKey)} (з редактора)`
+    );
+  };
+
+  /**
+   * Крива головного героя (HeroArcPanel) — правки прилітають на кожен
+   * штрих повзунка чи символ у textarea, тож без логу, як і решта
+   * дрібних правок сцени вище (title/location/conflict): один запис в
+   * журнал змін на слово геть засмітив би його.
+   */
+  const handleUpdateHeroArc = (next: HeroArcState) => {
+    onUpdateBook({ ...book, heroArc: next });
   };
 
   /** Відкриває вікно англійського тексту поруч з українським. */
@@ -2849,6 +2906,32 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 </div>
               )}
 
+              {/* Підпис аркуша: у якій главі зараз автор, і якого розміру
+                  сторінка. Обидва — те, що постійно потрібно бачити під час
+                  письма, але чого раніше не було видно, щойно текст
+                  прогортали нижче шапки модуля. */}
+              <div className="flex items-center gap-2 mb-1.5 shrink-0 px-0.5">
+                <span className="text-[11px] font-semibold tracking-wide text-[#c07784] truncate">
+                  {getRunningHeaderText()}
+                </span>
+                <div className="flex-1" />
+                <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                  <span className="hidden sm:inline">{t('editor.pageFormatLabel')}</span>
+                  <select
+                    value={book.layoutConfig.formatPreset}
+                    onChange={(e) => handleChangePageFormat(e.target.value)}
+                    className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[11px] text-slate-200 outline-none hover:border-slate-500 focus:border-emerald-500/60 cursor-pointer"
+                    title={t('editor.pageFormatTitle')}
+                  >
+                    {PAGE_FORMAT_QUICK_OPTIONS.map((p) => (
+                      <option key={p.id} value={p.id} className="bg-slate-900">
+                        {t(p.labelKey)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
               <PageRuler
                 widthMm={getPageContentWidthMm()}
                 insideMm={book.layoutConfig.margins?.insideMm || 0}
@@ -2856,6 +2939,22 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 onChangeMargins={handleChangeMargins}
               />
               <PageColumn widthMm={getPageContentWidthMm()} className="flex-1 min-h-0">
+                {/* Колонтитул першого аркуша. Плагін пагінації малює його на
+                    кожному РОЗРИВІ, тобто зверху сторінок 2, 3, … — у першої
+                    розриву перед нею немає, тож він рендериться тут. */}
+                <div
+                  className="select-none"
+                  style={{
+                    fontFamily: 'Georgia, serif',
+                    fontSize: 11,
+                    letterSpacing: '0.04em',
+                    fontWeight: 600,
+                    color: '#7a1f2b',
+                    padding: '10px 16px 0',
+                  }}
+                >
+                  {getRunningHeaderText()}
+                </div>
                 <EditorContent
                   editor={uaEditor}
                   id="book-content-editor-ua"
@@ -3262,6 +3361,22 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 {/* Scene Participants Section */}
                 {renderChapterCast()}
                 {!participantsUnpinned && renderSceneParticipants()}
+
+                {/* Крива головного героя — книжкова, не посценна: показана
+                    тут незалежно від того, яка глава/сцена зараз активна,
+                    той самий стан, що й в експрес-майстрі (heroArc). */}
+                <HeroArcPanel
+                  value={book.heroArc}
+                  onChange={handleUpdateHeroArc}
+                  heroName={
+                    book.characters.find((c) => c.role === 'protagonist')
+                      ? `${book.characters.find((c) => c.role === 'protagonist')!.name} ${
+                          book.characters.find((c) => c.role === 'protagonist')!.surname || ''
+                        }`.trim()
+                      : undefined
+                  }
+                  compact
+                />
 
                 {/* Scene Dramaturgy & Conflict Info */}
                 {activeSection?.scene ? (

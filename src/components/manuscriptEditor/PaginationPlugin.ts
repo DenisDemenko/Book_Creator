@@ -17,12 +17,20 @@ export interface PaginationOptions {
    * повний прохід по всій книзі для нього поки не варте додаткової ваги).
    */
   getStartPageNumber?: () => number;
+  /**
+   * Назва й номер глави ("Розділ N: Назва") для бордового колонтитула,
+   * що повторюється зверху кожного аркуша — той самий підпис, який над
+   * текстом видно й в шапці модуля, але тут він друкується прямо НА
+   * сторінці, як у звичайній книзі. Необов'язковий: без нього колонтитул
+   * просто не малюється (сумісність зі старими викликами плагіна).
+   */
+  getRunningHeaderText?: () => string;
 }
 
 const paginationKey = new PluginKey('novaPagination');
 
 /** Малює "розрив між аркушами" — суцільна смуга кольору полотна на всю ширину вікна (не лише колонки сторінки), заввишки в суму верхнього й нижнього полів. */
-function buildGapWidget(topMm: number, bottomMm: number, pageNumber: number): HTMLElement {
+function buildGapWidget(topMm: number, bottomMm: number, pageNumber: number, runningHeaderText: string): HTMLElement {
   const gapMm = topMm + bottomMm;
   const el = document.createElement('div');
   el.setAttribute('contenteditable', 'false');
@@ -34,6 +42,8 @@ function buildGapWidget(topMm: number, bottomMm: number, pageNumber: number): HT
     margin-left: calc(-50vw + 50%);
     height: ${gapMm}mm;
     background: #0f172a;
+    flex-direction: column;
+    gap: 2px;
     /* Обтічне зображення інакше звисає з попереднього аркуша на
        наступний: float виходить з потоку, і смуга розриву просто
        обтікала б його збоку замість того, щоб закрити сторінку. */
@@ -44,6 +54,21 @@ function buildGapWidget(topMm: number, bottomMm: number, pageNumber: number): HT
     pointer-events: none;
     user-select: none;
   `;
+  // Колонтитул зверху НАСТУПНОГО аркуша — рендериться тут-таки, у розриві,
+  // бо саме розрив і є межею між сторінками; технічно це «верх сторінки
+  // N+1», а не «низ сторінки N».
+  //
+  // Бордовий, а не бурштиновий — навмисно інший колір, ніж решта
+  // AI-акцентів редактора: це елемент верстки самої книги, присутній
+  // незалежно від того, як саме з'явився текст під ним.
+  if (runningHeaderText) {
+    const header = document.createElement('div');
+    header.textContent = runningHeaderText;
+    header.style.cssText =
+      'font-size: 11px; letter-spacing: 0.04em; color: #7a1f2b; font-weight: 600; font-family: Georgia, serif;';
+    el.appendChild(header);
+  }
+
   const label = document.createElement('span');
   label.textContent = `— ${pageNumber} —`;
   label.style.cssText = 'font-size: 10px; color: #64748b; font-family: monospace;';
@@ -150,11 +175,15 @@ export const PaginationPlugin = Extension.create<PaginationOptions>({
             const breakIndices = computeBreaksFromBounds(bounds, pageContentHeightPx, keepWithNext);
             const { topMm, bottomMm } = options.getVerticalMarginsMm();
             const startPage = options.getStartPageNumber ? options.getStartPageNumber() : 1;
+            const runningHeaderText = options.getRunningHeaderText
+              ? options.getRunningHeaderText()
+              : '';
             const decorations = breakIndices.map((i, n) =>
-              Decoration.widget(positions[i], () => buildGapWidget(topMm, bottomMm, startPage + n + 1), {
-                side: -1,
-                key: `nova-pagebreak-${i}`,
-              })
+              Decoration.widget(
+                positions[i],
+                () => buildGapWidget(topMm, bottomMm, startPage + n + 1, runningHeaderText),
+                { side: -1, key: `nova-pagebreak-${i}` }
+              )
             );
 
             const next = DecorationSet.create(editorView.state.doc, decorations);

@@ -27,7 +27,6 @@ import {
 import { NavigationTab, Book, UserRole, CollaboratorPresence, RealtimeSyncStatus, AuthUser } from '../types';
 import { ALL_ROLES, getRoleInfo } from '../utils/rbac';
 import { useLanguage } from '../i18n/LanguageContext';
-import { GlowIntensityControl } from './GlowIntensityControl';
 
 interface HeaderNavProps {
   currentTab: NavigationTab;
@@ -338,9 +337,6 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
               <MessageSquare className="w-3.5 h-3.5 text-slate-400" />
             </button>
           )}
-
-          {/* Повзунок сили аврора-сяйва скляних блоків сайту (0–500pt) */}
-          <GlowIntensityControl />
 
           {/* Перемикач мови інтерфейсу: UA / EN */}
           <button

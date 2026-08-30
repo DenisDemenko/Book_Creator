@@ -701,11 +701,20 @@ export const DraggableSun: React.FC<{ onScreenshotForAi?: (file: File) => void }
           </div>
         )}
 
-        {/* Initial First-time Helper Hint */}
+        {/* Перша підказка. Головного вона раніше не казала: що сонце можна
+            ВЗЯТИ й перенести, підсвітивши будь-яке вікно. Людина бачила
+            кульку в кутку й не здогадувалась, що це інструмент. Підказка
+            висить над сонцем, а не під ним, бо його домівка — нижній кут,
+            і знизу для неї немає місця. */}
         {!hasInteracted && (
-          <div className="absolute top-full left-1/2 -translate-x-1/2 mt-3 whitespace-nowrap bg-[#1a1c1c]/95 text-white text-[11px] font-bold px-3 py-1.5 rounded-full shadow-lg pointer-events-none animate-bounce flex items-center gap-1.5 border border-white/30">
-            <Palette className="w-3.5 h-3.5 text-amber-300" />
-            <span>Права кнопка: 12 кольорів! Перетягуйте: скрол сайту</span>
+          <div className="absolute bottom-full right-0 mb-3 w-56 bg-[#1a1c1c]/95 text-white text-[11px] font-semibold px-3 py-2 rounded-xl shadow-lg pointer-events-none animate-bounce flex items-start gap-2 border border-white/30">
+            <Move className="w-3.5 h-3.5 text-amber-300 shrink-0 mt-0.5" />
+            <span className="leading-snug">
+              Перетягніть сонце на будь-яке вікно — воно підсвітить його.
+              <span className="block mt-0.5 font-normal text-white/70">
+                Права кнопка — 12 кольорів. Сила сяйва — на панелі вище.
+              </span>
+            </span>
           </div>
         )}
       </div>

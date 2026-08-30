@@ -304,9 +304,13 @@ export const SunLightingProvider: React.FC<{
           // ignore
         }
       }
+      // Домівка сонця — правий нижній кут, під панеллю керування сяйвом:
+      // звідти його беруть і несуть туди, де треба підсвітити. Раніше воно
+      // стартувало вгорі праворуч, у відриві від власних налаштувань, і
+      // виглядало декорацією шапки, а не інструментом, який можна взяти.
       return {
-        x: Math.round(window.innerWidth * 0.78),
-        y: 160,
+        x: Math.round(window.innerWidth - 84),
+        y: Math.round(window.innerHeight - 96),
       };
     }
     return { x: 900, y: 160 };

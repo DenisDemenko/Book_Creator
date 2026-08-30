@@ -1,4 +1,5 @@
 export type NavigationTab =
+  | 'express'      // Експрес-майстер: книга за 5 хвилин (Wisart Book Crealiry.md §3.4)
   | 'dashboard'    // Фаза 1: головний інформаційний хаб (профіль, стиль, прогрес, швидкий доступ)
   | 'start'        // Стартова сторінка & налаштування задуму книги
   | 'editor'       // Текстовий редактор & дерево книги
@@ -544,6 +545,26 @@ export interface BookVersionSnapshot {
   snapshotData?: Partial<Book>;
 }
 
+/**
+ * Крива головного героя: 13-кроковий конструктор шляху героя (мономіф
+ * Кемпбелла) + 14-точкова емоційна крива, узгоджена з кроками. Той самий
+ * простір ідей, що й скіл `hero-journey`, але тут — не окремий інструмент,
+ * а частина книги: заповнюється або в експрес-майстрі (ExpressWizardView),
+ * або прямо в редакторі (панель «Персонажі і сцена», HeroArcPanel.tsx), і
+ * переноситься з майстра в книгу разом з рештою плану (App.tsx::applyExpressPlan).
+ *
+ * Статичні дані кроків/точок (назви, питання, дефолтна інтенсивність) —
+ * не тут: вони не належать книзі, а живуть у коді компонента
+ * (src/data/heroArc.ts), той самий підхід, що й у FRAMEWORKS/STEPS
+ * ExpressWizardView.tsx.
+ */
+export interface HeroArcState {
+  /** Відповіді на 13 кроків конструктора, ключ — id кроку ("s1".."s13"). */
+  answers: Record<string, string>;
+  /** Інтенсивність (-10..10) для кожної з 14 точок емоційної кривої. */
+  intensities: number[];
+}
+
 export interface Book {
   id: string;
   /**
@@ -559,6 +580,8 @@ export interface Book {
    * та порівнянь «до/після». Див. SkillSnapshot.
    */
   skillSnapshots?: SkillSnapshot[];
+  /** Крива головного героя — див. HeroArcState. */
+  heroArc?: HeroArcState;
   version: string;
   revisionNumber: number;
   versionHistory?: BookVersionSnapshot[];

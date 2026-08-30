@@ -342,6 +342,27 @@ CREATE TABLE IF NOT EXISTS etsy_research_snapshots (
   payload       TEXT NOT NULL                 -- JSON: топ-лістинги + кандидати в теги
 );
 CREATE INDEX IF NOT EXISTS idx_research_topic ON etsy_research_snapshots(topic_key, collected_at DESC);
+
+-- Експрес-майстер «Книга за 5 хвилин» (Wisart Book Crealiry.md §3.4).
+--
+-- Чернетка живе тут, а не в пам'яті процесу: майстер проходять анонімно, а
+-- реєстрацію просять аж на переході в панель створення книг — між цими
+-- двома моментами користувач може перезавантажити сторінку, і втрачати
+-- п'ять хвилин його роботи через це неприпустимо.
+--
+-- Цільова архітектура тримала б це в Redis із TTL; тут TTL емулюється полем
+-- expires_at і прибиранням простроченого при старті (purgeExpiredDrafts).
+CREATE TABLE IF NOT EXISTS express_drafts (
+  id          TEXT PRIMARY KEY,            -- UUID; віддається клієнту й лежить у localStorage
+  user_id     TEXT,                        -- NULL, поки користувач анонімний
+  step        INTEGER NOT NULL DEFAULT 1,  -- Е1..Е5 — точка відновлення майстра
+  payload     TEXT NOT NULL,               -- JSON: зерно, модель, прапорці, каст, синопсис
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL,
+  expires_at  TEXT NOT NULL                -- created_at + 24 год
+);
+CREATE INDEX IF NOT EXISTS idx_express_drafts_user ON express_drafts(user_id);
+CREATE INDEX IF NOT EXISTS idx_express_drafts_expires ON express_drafts(expires_at);
 `;
 
 /**

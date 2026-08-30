@@ -40,6 +40,7 @@ import { registerMediaRoutes } from './server/mediaRoutes';
 import { registerCollaborationRoutes } from './server/collaborationRoutes';
 import { registerChatRoutes, CHAT_USAGE_CONTEXT } from './server/chatRoutes';
 import { registerApiKeysRoutes } from './server/apiKeysRoutes';
+import { registerExpressRoutes } from './server/expressRoutes';
 import { registerPublishingRoutes } from './server/publishingRoutes';
 import { requireImageQuota, requirePlanAtLeast, checkChatQuota, resolveSubscription } from './server/subscriptions';
 import {
@@ -184,6 +185,28 @@ async function startServer() {
 
   app.use(express.json({ limit: '20mb' }));
 
+  // Nova вміє жити під префіксом шляху (Фаза G3): у проді перед нею стоїть
+  // rewrite Next.js, який `/studio` ЗРІЗАЄ, тож Express бачить `/api/...`.
+  // Але коли Nova відкривають напряму — а з NOVA_BASE_PATH клієнт усе одно
+  // надсилає `/studio/api/...` — таких маршрутів немає, і Vite віддає на них
+  // index.html із кодом 200. Клієнт отримує HTML замість JSON, вирішує, що
+  // сервер не налаштований, і показує «Вхід тимчасово недоступний».
+  //
+  // Один рядок робить обидва входи рівноцінними: якщо префікс усе-таки
+  // дійшов, знімаємо його самі. Через проксі цей код не спрацьовує ніколи,
+  // бо там префікса вже немає.
+  // trim() тут не косметика: у Windows `set VAR=/studio/ && npm run dev`
+  // кладе у значення кінцевий пробіл, і префікс тихо перестає збігатися.
+  const basePath = (process.env.NOVA_BASE_PATH || '/').trim().replace(/\/$/, '');
+  if (basePath) {
+    app.use((req, _res, next) => {
+      if (req.url === basePath || req.url.startsWith(`${basePath}/`)) {
+        req.url = req.url.slice(basePath.length) || '/';
+      }
+      next();
+    });
+  }
+
   // Кожен запит отримує req.principal: користувача сесії або гостя.
   app.use(attachPrincipal);
 
@@ -284,6 +307,7 @@ async function startServer() {
   });
 
   registerApiKeysRoutes(app);
+  registerExpressRoutes(app);
 
   // --- API Endpoints ---
 

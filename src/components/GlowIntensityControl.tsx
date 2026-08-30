@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Sparkles, Gauge } from 'lucide-react';
+import { Sparkles, Gauge, Sun } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext';
+import { useSunLighting } from '../context/SunLightingContext';
 
 /** Ключі localStorage для персистентності налаштувань сяйва. */
 const POINTS_KEY = 'nova_glow_points';
@@ -150,6 +151,10 @@ function readInitialPaletteId(): string {
  */
 export const GlowIntensityControl: React.FC = () => {
   const { lang, t } = useLanguage();
+  // Сила аури живе в контексті сонця, а не в localStorage цього компонента:
+  // її споживає SunAuraManager і кільцевий повзунок у DraggableSun, і два
+  // джерела істини для одного значення розійшлися б.
+  const { sunStrength, setSunStrength } = useSunLighting();
   const [points, setPoints] = useState<number>(readInitialPoints);
   const [paletteId, setPaletteId] = useState<string>(readInitialPaletteId);
   const [speed, setSpeed] = useState<number>(readInitialSpeed);
@@ -322,11 +327,15 @@ export const GlowIntensityControl: React.FC = () => {
   }, [getColors]);
 
   return (
-    <div className="flex flex-col gap-1 px-2.5 py-1 rounded-xl badge-glass shrink-0">
+    /* Ширина віддана контейнеру, а не зашита: панель тепер живе в сайдбарі
+       (256px розгорнутий), і фіксовані w-24 на повзунках виштовхували б
+       значення за край. Три ряди читаються як таблиця — підпис, повзунок,
+       число — тому мітки мають спільну ширину. */
+    <div className="flex w-full min-w-0 flex-col gap-1.5 px-2.5 py-2 rounded-xl badge-glass">
       {/* Ряд 1 — сила сяйва */}
       <div className="flex items-center gap-2" title={t('header.glowIntensityTitle')}>
         <Sparkles className="w-3.5 h-3.5 text-cyan-300 shrink-0" />
-        <span className="hidden md:inline text-[11px] font-semibold text-slate-300 whitespace-nowrap">
+        <span className="w-12 shrink-0 text-[11px] font-semibold text-slate-300 whitespace-nowrap">
           {t('header.glowIntensity')}
         </span>
         <input
@@ -337,10 +346,10 @@ export const GlowIntensityControl: React.FC = () => {
           step={1}
           value={points}
           onChange={(e) => setPoints(Number(e.target.value))}
-          className="w-16 sm:w-24 accent-cyan-400"
+          className="min-w-0 flex-1 accent-cyan-400"
           aria-label={t('header.glowIntensity')}
         />
-        <span className="hidden sm:inline text-[10px] font-mono text-slate-500 w-8 text-right shrink-0">
+        <span className="w-9 shrink-0 text-right text-[10px] font-mono text-slate-500">
           {Math.round(points)}
         </span>
       </div>
@@ -348,7 +357,7 @@ export const GlowIntensityControl: React.FC = () => {
       {/* Ряд 2 — швидкість переливання кольорів */}
       <div className="flex items-center gap-2" title={t('header.glowSpeedTitle')}>
         <Gauge className="w-3.5 h-3.5 text-violet-300 shrink-0" />
-        <span className="hidden md:inline text-[11px] font-semibold text-slate-300 whitespace-nowrap">
+        <span className="w-12 shrink-0 text-[11px] font-semibold text-slate-300 whitespace-nowrap">
           {t('header.glowSpeed')}
         </span>
         <input
@@ -359,16 +368,42 @@ export const GlowIntensityControl: React.FC = () => {
           step={1}
           value={speed}
           onChange={(e) => setSpeed(Number(e.target.value))}
-          className="w-16 sm:w-24 accent-violet-400"
+          className="min-w-0 flex-1 accent-violet-400"
           aria-label={t('header.glowSpeed')}
         />
         {/* Показуємо не абстрактні «пункти», а реальний період оберту */}
-        <span className="hidden sm:inline text-[10px] font-mono text-slate-500 w-8 text-right shrink-0">
+        <span className="w-9 shrink-0 text-right text-[10px] font-mono text-slate-500">
           {(speedToCycleMs(speed) / 1000).toFixed(0)}с
         </span>
       </div>
 
-      {/* Ряд 3 — палітра сяйва */}
+      {/* Ряд 3 — сила аури сонця над текстом і вікнами.
+          Досі це налаштування існувало лише кільцевим повзунком навколо
+          палітри в DraggableSun: щоб дотягнутись до нього, треба було
+          спершу здогадатись клацнути сонце правою кнопкою. Тут воно поруч
+          із двома іншими, які керують тим самим сяйвом. */}
+      <div className="flex items-center gap-2" title={t('header.sunAuraTitle')}>
+        <Sun className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+        <span className="w-12 shrink-0 text-[11px] font-semibold text-slate-300 whitespace-nowrap">
+          {t('header.sunAura')}
+        </span>
+        <input
+          id="sun-aura-slider"
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={Math.round(sunStrength * 100)}
+          onChange={(e) => setSunStrength(Number(e.target.value) / 100)}
+          className="min-w-0 flex-1 accent-amber-400"
+          aria-label={t('header.sunAura')}
+        />
+        <span className="w-9 shrink-0 text-right text-[10px] font-mono text-slate-500">
+          {Math.round(sunStrength * 100)}%
+        </span>
+      </div>
+
+      {/* Ряд 4 — палітра сяйва */}
       <div className="flex items-center gap-1.5" title={t('header.glowPaletteTitle')}>
         {/* Прев'ю трьох кольорів обраної схеми */}
         <span className="flex items-center gap-0.5 shrink-0" aria-hidden="true">

@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { initialBookData } from './data/initialBook';
-import { Book, NavigationTab, AuditLogEntry, UserRole, BookVersionSnapshot } from './types';
+import { Book, NavigationTab, AuditLogEntry, UserRole, BookVersionSnapshot, HeroArcState } from './types';
 import { HeaderNav } from './components/HeaderNav';
 import { SidebarNav } from './components/SidebarNav';
 import { StartPageView } from './components/StartPageView';
+import { ExpressWizardView } from './components/ExpressWizardView';
 import { EditorView, type PromptConstructorRequest } from './components/EditorView';
 import { MasteryFrameworkView } from './components/MasteryFrameworkView';
 import { SunLightingProvider } from './context/SunLightingContext';
@@ -314,10 +315,12 @@ export default function App() {
 
   useEffect(() => {
     if (!pendingCreateBook) return;
-    if (auth.loading || !auth.user || auth.user.isGuest) return;
-    setIsCreateBookModalOpen(true);
+    if (auth.loading) return;
+    // Гостю теж відкриваємо: за ТЗ §3.4.1 майстер проходять до реєстрації —
+    // саме в цьому його сенс як точки входу з маркетплейсу.
+    setCurrentTab('express');
     setPendingCreateBook(false);
-  }, [pendingCreateBook, auth.loading, auth.user]);
+  }, [pendingCreateBook, auth.loading]);
 
   // Перехід за посиланням cowork-запрошення (?invite=<token>) — токен читаємо
   // один раз і одразу прибираємо з адресного рядка, щоб він не залишався в
@@ -669,6 +672,112 @@ export default function App() {
   }, [hasUnsavedChanges]);
 
   // Central book update handler that tracks unsaved changes, records audit entries, and broadcasts over WebSockets
+  /**
+   * Переносить готовий план експрес-майстра (§3.4.5) у поточну книгу.
+   *
+   * Свідомо НЕ створює нову книгу, а наповнює наявну: у Nova книга — це
+   * контейнер із версією, логом і налаштуваннями верстки, і плодити другий
+   * означало б розірвати історію змін навпіл.
+   *
+   * Наявні глави й герої заміщуються, а не доповнюються: майстер дає цілісну
+   * структуру, і змішування її з попереднім чернетковим вмістом дало б
+   * книгу, де половина глав з одного задуму, а половина з іншого.
+   */
+  const applyExpressPlan = (plan: {
+    seed?: string;
+    genre?: string;
+    synopsis?: string;
+    cast?: Array<{
+      firstName: string;
+      lastName: string;
+      psychotype?: string;
+      poltiRoleName?: string;
+      hook?: string;
+    }>;
+    heroArc?: HeroArcState;
+    parts?: Array<{
+      partTitle?: string;
+      chapters?: Array<{
+        chapterTitle?: string;
+        summary?: string;
+        turningPoint?: string;
+        environmentalContext?: string | null;
+      }>;
+    }>;
+  }) => {
+    const stamp = Date.now();
+    const now = new Date().toISOString();
+
+    const characters = (plan.cast ?? []).map((c, i) => ({
+      id: `char-express-${stamp}-${i}`,
+      bookId: book.id,
+      name: c.firstName,
+      surname: c.lastName,
+      // Перший у касті — протагоніст, другий — антагоніст: майстер віддає їх
+      // у порядку ваги. Точні ролі письменник виставить на вкладці
+      // «Персонажі», де для цього є повний набір.
+      role: (i === 0 ? 'protagonist' : i === 1 ? 'antagonist' : 'ally') as
+        | 'protagonist'
+        | 'antagonist'
+        | 'ally',
+      description: [
+        c.psychotype,
+        c.poltiRoleName ? `Амплуа: ${c.poltiRoleName}` : '',
+        c.hook,
+      ]
+        .filter(Boolean)
+        .join('. '),
+    }));
+
+    // Частина майстра стає главою книги, а глава майстра — розділом
+    // усередині неї: окремого рівня «частина» в Nova немає, і так
+    // зберігаються обидві назви замість того, щоб втратити одну.
+    const chapters = (plan.parts ?? []).map((part, pi) => ({
+      id: `chap-express-${stamp}-${pi}`,
+      bookId: book.id,
+      title: part.partTitle || `Частина ${pi + 1}`,
+      order: pi + 1,
+      sections: (part.chapters ?? []).map((ch, ci) => ({
+        id: `sec-express-${stamp}-${pi}-${ci}`,
+        chapterId: `chap-express-${stamp}-${pi}`,
+        title: ch.chapterTitle || `Глава ${ci + 1}`,
+        order: ci + 1,
+        // Синопсис сцени лягає в текст відправною точкою: порожня сторінка
+        // тут звела б нанівець сенс майстра.
+        //
+        // Загорнуто в [AI-DRAFT]…[/AI-DRAFT] (utils/manuscriptDoc.ts): у
+        // редакторі цей текст показується іншим шрифтом і з позначкою
+        // «AI-чернетка», доки письменник не перепише його своїми словами
+        // й не зніме позначку через контекстне меню блоку.
+        content: [
+          '[AI-DRAFT]\n\n',
+          ch.summary ?? '',
+          ch.turningPoint ? `\n\nПоворот: ${ch.turningPoint}` : '',
+          ch.environmentalContext ? `\n\nСтихія: ${ch.environmentalContext}` : '',
+          '\n\n[/AI-DRAFT]',
+        ].join(''),
+        wordCount: (ch.summary ?? '').trim().split(/\s+/).filter(Boolean).length,
+        lastModified: now,
+      })),
+    }));
+
+    handleUpdateBook(
+      {
+        ...book,
+        genre: plan.genre || book.genre,
+        logline: plan.seed || book.logline,
+        synopsis: plan.synopsis || book.synopsis,
+        characters: characters.length
+          ? (characters as unknown as Book['characters'])
+          : book.characters,
+        chapters: chapters.length ? (chapters as unknown as Book['chapters']) : book.chapters,
+        heroArc: plan.heroArc || book.heroArc,
+      },
+      'Експрес-майстер',
+      `План перенесено в книгу: ${chapters.length} частин, ${characters.length} героїв`
+    );
+  };
+
   const handleUpdateBook = (updatedBook: Book, logAction?: string, logDetails?: string) => {
     const previousBook = book;
     setBook(updatedBook);
@@ -1224,15 +1333,26 @@ export default function App() {
       <WriterBookProvider book={book}>
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-400/20 selection:text-amber-200 relative">
 
-      {/* Сонечко на всіх сторінках сайту: динамічне освітлення + перетягуване 3D-сонце.
-          У світлій темі дає тіні, у темній — сяйво (див. SunLightingContext). */}
-      <SunAmbientOverlay />
-      <DraggableSun
-        onScreenshotForAi={(file) => {
-          setPendingSunScreenshot(file);
-          setIsQuickAiOpen(true);
-        }}
-      />
+      {/* Сонечко на сторінках студії: динамічне освітлення + перетягуване
+          3D-сонце. У світлій темі дає тіні, у темній — сяйво
+          (див. SunLightingContext).
+
+          Ховається, поки відкритий майстер створення книги: там людина
+          заповнює форму по кроках, і рухома підсвітка поверх полів — це
+          відволікання рівно в той момент, коли потрібна зосередженість.
+          Аура поверхонь (SunAuraManager) лишається — вона статична й
+          нічого не перекриває. */}
+      {!isCreateBookModalOpen && currentTab !== 'express' && (
+        <>
+          <SunAmbientOverlay />
+          <DraggableSun
+            onScreenshotForAi={(file) => {
+              setPendingSunScreenshot(file);
+              setIsQuickAiOpen(true);
+            }}
+          />
+        </>
+      )}
       <SunAuraManager />
 
       {/* Top Header Navigation */}
@@ -1374,6 +1494,22 @@ export default function App() {
           на іншу вкладку, тож застосунок відновлюється сам. */}
       <ErrorBoundary key={currentTab}>
       <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Експрес-майстер (Wisart Book Crealiry.md §3.4). Прокручується
+            власним контейнером, бо п'ять кроків не влазять у висоту
+            вкладки, а зовнішній контейнер тут із overflow-hidden. */}
+        {currentTab === 'express' && (
+          <div className="flex-1 overflow-y-auto">
+            <ExpressWizardView
+              onFinish={(payload) => {
+                // Готовий план переносимо в книгу й ведемо в редактор —
+                // саме це «перенесення заготовки до студії» з постановки.
+                applyExpressPlan(payload);
+                handleSelectTab('editor');
+              }}
+            />
+          </div>
+        )}
+
         {currentTab === 'start' && (
           <StartPageView
             book={book}

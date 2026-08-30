@@ -43,7 +43,8 @@ export const ALL_ROLES: RoleInfo[] = [
       canManageApiKeys: true,
       isReadOnly: false,
       allowedTabs: [
-        'dashboard',
+'express',
+'dashboard',
         'subscription',
         'api-keys',
         'start',
@@ -123,7 +124,8 @@ export const ALL_ROLES: RoleInfo[] = [
       canManageApiKeys: true,
       isReadOnly: false,
       allowedTabs: [
-        'dashboard',
+'express',
+'dashboard',
         'subscription',
         'api-keys',
         'start',
@@ -428,7 +430,8 @@ export const ALL_ROLES: RoleInfo[] = [
       canManageApiKeys: false,
       isReadOnly: true,
       allowedTabs: [
-        'subscription',
+'express',
+'subscription',
         'start',
         'editor',
         'toc',

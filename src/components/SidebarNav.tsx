@@ -35,6 +35,7 @@ import {
 import { NavigationTab, Book, UserRole } from '../types';
 import { canAccessTab } from '../utils/rbac';
 import { useLanguage } from '../i18n/LanguageContext';
+import { GlowIntensityControl } from './GlowIntensityControl';
 
 interface SidebarNavProps {
   currentTab: NavigationTab;
@@ -77,6 +78,7 @@ function readInitialGroups(): Record<string, boolean> {
 }
 
 const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  express: Wand2,
   dashboard: LayoutDashboard,
   start: Rocket,
   editor: BookOpen,
@@ -116,7 +118,7 @@ const NAV_GROUPS: NavGroup[] = [
     id: 'start',
     numeral: 'I',
     labelKey: 'groupStart',
-    tabs: ['dashboard', 'start', 'editor', 'toc', 'qr-footnotes', 'scenario', 'characters', 'mindboard', 'ai-studio'],
+    tabs: ['express', 'dashboard', 'start', 'editor', 'toc', 'qr-footnotes', 'scenario', 'characters', 'mindboard', 'ai-studio'],
   },
   {
     id: 'design',
@@ -363,6 +365,19 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
           </div>
         )}
       </nav>
+
+      {/* Керування сяйвом і аурою сонця.
+          Стоїть у сайдбарі, а не в шапці й не плаваючою панеллю в кутку:
+          у шапці воно тіснилось між кнопками, з якими не має спільного, а
+          в кутку перекривало контент. Тут воно частина навігації, у її
+          ширині, і доступне з будь-якої вкладки.
+          У згорнутому стані (64px) ховаємо цілком — три повзунки в таку
+          ширину не поміщаються, а обрізані виглядали б поламаними. */}
+      {!collapsed && (
+        <div className="border-t border-white/[0.06] px-2 pt-2">
+          <GlowIntensityControl />
+        </div>
+      )}
 
       {/* Перемикач згортання/розгортання сайдбара */}
       <div className="border-t border-white/[0.06] p-2">

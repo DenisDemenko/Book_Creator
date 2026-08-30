@@ -996,3 +996,43 @@
 .nova-manuscript-editor .nova-ai-draft p:last-child {
   margin-bottom: 0;
 }
+
+/* Текст, написаний моделлю, друкується ІНШИМ шрифтом, ніж текст автора:
+   книжкова антиква (Literata/Cormorant) — авторська, гротеск — машинна.
+   Шрифт, а не лише рамка, тому що рамку письменник перестає помічати
+   через півгодини роботи, а зміну накреслення в суцільному тексті — ні:
+   досить ковзнути очима по сторінці, щоб побачити, скільки в ній ще не
+   переписано своїми словами.
+
+   `!important` — бо всередині чернетки можуть лишатися власні шрифтові
+   мітки (FontSpanMark) з попереднього тексту; поки блок позначений
+   AI-чернеткою, машинне накреслення має перемагати. Після «Позначити
+   переглянутим» контейнер зникає — і текст стає звичайним авторським. */
+.nova-manuscript-editor .nova-ai-draft,
+.nova-manuscript-editor .nova-ai-draft p,
+.nova-manuscript-editor .nova-ai-draft span {
+  font-family: 'Plus Jakarta Sans', 'Outfit', system-ui, sans-serif !important;
+  letter-spacing: 0.005em;
+}
+
+/* Виділення тексту НА СТОРІНЦІ книги.
+   Глобальне правило застосунку (`selection:bg-amber-400/20
+   selection:text-amber-200` на корені в App.tsx) розраховане на темне
+   полотно студії: світло-бурштиновий текст на 20-відсотковому
+   бурштиновому фоні. На білому аркуші редактора та сама пара давала
+   майже невидиме виділення. Тут вона замінена на суцільний темно-синій
+   фон із білим текстом.
+
+   Обидва класи в селекторі (`.ProseMirror.nova-manuscript-editor`) —
+   щоб перебити специфічність Tailwind-правила, яке інакше рівне за
+   вагою; `!important` тримає це незалежно від порядку файлів у збірці. */
+.ProseMirror.nova-manuscript-editor ::selection,
+.ProseMirror.nova-manuscript-editor::selection {
+  background: #1d4ed8 !important;
+  color: #ffffff !important;
+}
+.ProseMirror.nova-manuscript-editor ::-moz-selection,
+.ProseMirror.nova-manuscript-editor::-moz-selection {
+  background: #1d4ed8;
+  color: #ffffff;
+}
