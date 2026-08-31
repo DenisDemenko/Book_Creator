@@ -41,7 +41,7 @@ import { ImportMaterialsWizardModal } from './components/ImportMaterialsWizardMo
 import { CollaborationDrawer } from './components/CollaborationDrawer';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { AuthScreen } from './components/AuthScreen';
-import { AdminPanelView } from './components/AdminPanelView';
+import { AdminOsView } from './components/adminOs/AdminOsView';
 import { SubscriptionView } from './components/SubscriptionView';
 import { ApiKeysView } from './components/ApiKeysView';
 import { ManuscriptFormatterView } from './components/ManuscriptFormatterView';
@@ -76,6 +76,8 @@ import {
   META_ROLE,
   META_COWORK_LOCK,
 } from './utils/storage';
+import { stampBookRevision, isNewerBook, describeRevisionGap } from './utils/bookVersion';
+import { otherSessionsOfSameUser } from './utils/deviceSession';
 import { AlertTriangle, CheckCircle2, Radio, Loader2, HardDriveDownload, Mail, LogOut, UserCheck, XCircle } from 'lucide-react';
 import { useLanguage } from './i18n/LanguageContext';
 
@@ -249,8 +251,21 @@ export default function App() {
     activeChapterId,
     activeSectionId,
     onRemoteBookUpdate: useCallback((remoteBook: Book, remoteLogEntry?: AuditLogEntry) => {
-      setBook(remoteBook);
-      saveBook(remoteBook).catch((e) => console.warn('[storage] remote update', e));
+      // Друга лінія захисту від затирання. Перевірка є і в самому хуку, але
+      // власником стану книги є саме App — а між надходженням повідомлення
+      // й цим колбеком локальна копія могла піти вперед (автор саме набирав
+      // текст). Функціональний setState бачить актуальний prev, тож рішення
+      // ухвалюється на найсвіжіших даних.
+      let applied = true;
+      setBook((prev) => {
+        if (!isNewerBook(remoteBook, prev)) {
+          applied = false;
+          return prev;
+        }
+        saveBook(remoteBook).catch((e) => console.warn('[storage] remote update', e));
+        return remoteBook;
+      });
+      if (!applied) return;
       setHasUnsavedChanges(false);
 
       if (remoteLogEntry) {
@@ -269,6 +284,18 @@ export default function App() {
         saveBook(next).catch((e) => console.warn('[storage] remote patch', e));
         return next;
       });
+    }, []),
+    /**
+     * Прийшла старіша копія — ми лишились на своїй. Кажемо про це прямо:
+     * мовчазне ігнорування виглядало б як «синхронізація не працює», а
+     * мовчазне застосування (як було) з'їдало б текст.
+     */
+    onStaleRemoteRejected: useCallback((_staleBook: Book, gapLabel: string) => {
+      setSyncToast(
+        `Ця книга відкрита ще в одній сесії зі старішим станом (на ${gapLabel} позаду). ` +
+          'Залишено вашу версію й надіслано її туди.'
+      );
+      setTimeout(() => setSyncToast(null), 7000);
     }, []),
     onRemoteVersionSnapshot: useCallback((snapshot: BookVersionSnapshot, remoteBook: Book) => {
       if (remoteBook) {
@@ -778,8 +805,14 @@ export default function App() {
     );
   };
 
-  const handleUpdateBook = (updatedBook: Book, logAction?: string, logDetails?: string) => {
+  const handleUpdateBook = (incomingBook: Book, logAction?: string, logDetails?: string) => {
     const previousBook = book;
+    // Позначка версії ставиться ТУТ, у єдиній точці входу будь-якої правки.
+    // Доти `updatedAt` оновлювався лише у двох місцях із десятків, тож поле
+    // фактично зберігало дату створення книги — і перевірка «чия копія
+    // новіша» під час синхронізації між пристроями порівнювала дві однакові
+    // застарілі дати, тобто не працювала взагалі.
+    const updatedBook = stampBookRevision(incomingBook);
     setBook(updatedBook);
     setHasUnsavedChanges(true);
     let logEntry: AuditLogEntry | undefined;
@@ -1468,6 +1501,26 @@ export default function App() {
       )}
 
       {/* Real-time Remote Sync Toast */}
+      {/* Та сама книга відкрита автором ще десь. Показуємо це ПОСТІЙНО, поки
+          друга сесія жива: саме розбіжність двох власних сесій і призводила
+          до втрати тексту, і автор мав про неї знати до того, як почне
+          писати, а не після. */}
+      {(() => {
+        const myUserId = auth.user?.id ?? '';
+        const mine = otherSessionsOfSameUser(collaborators, myUserId, myClientId);
+        if (mine.length === 0) return null;
+        const where = mine.map((s) => s.deviceLabel || 'інший браузер').join(', ');
+        return (
+          <div className="fixed bottom-6 right-6 z-50 max-w-sm px-4 py-3 rounded-xl bg-slate-900 text-slate-100 border border-amber-500/60 shadow-xl text-xs flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <span>
+              Ця книга відкрита у вас ще в {mine.length === 1 ? 'одній сесії' : `${mine.length} сесіях`}: {where}.
+              Правки синхронізуються, перемагає найсвіжіша версія — але надійніше працювати в одному місці.
+            </span>
+          </div>
+        );
+      })()}
+
       {syncToast && (
         <div className="fixed bottom-6 left-6 z-50 px-4 py-2 rounded-lg bg-slate-900 text-slate-100 border border-emerald-500/50 font-semibold text-xs shadow-xl flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2">
           <Radio className="w-4 h-4 text-emerald-400 animate-pulse" />
@@ -1677,7 +1730,7 @@ export default function App() {
           />
         )}
 
-        {currentTab === 'admin' && auth.isAdmin && <AdminPanelView />}
+        {currentTab === 'admin' && auth.isAdmin && <AdminOsView authUser={auth.user} />}
 
         {currentTab === 'subscription' && <SubscriptionView authUser={auth.user} />}
 

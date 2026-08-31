@@ -110,6 +110,8 @@ interface CollabUser {
   activeChapterId?: string;
   color: string;
   avatarUrl?: string;
+  /** Браузер і платформа сесії — «Chrome · Windows». */
+  deviceLabel?: string;
   lastActive: string;
   isTyping?: boolean;
 }
@@ -134,6 +136,19 @@ interface RoomData {
     tabContext?: string;
   }>;
   changelog: any[];
+}
+
+/**
+ * Позначка версії книги в мілісекундах. Дзеркалить src/utils/bookVersion.ts —
+ * свідомо продубльовано, а не винесено у спільний модуль: сервер збирається
+ * окремим бандлом (esbuild --platform=node), і тягнути в нього файл із src/
+ * означало б тягнути й весь ланцюжок типів React-застосунку.
+ */
+function bookRevisionMs(book: any): number {
+  const raw = book?.updatedAt;
+  if (!raw) return 0;
+  const ms = new Date(raw).getTime();
+  return Number.isFinite(ms) ? ms : 0;
 }
 
 const collabRooms = new Map<string, RoomData>();
@@ -3311,7 +3326,17 @@ ${JSON.stringify(bookContext || {}, null, 2)}
 
             currentBookId = bookId;
             const room = getOrCreateRoom(bookId);
+            // Кімната бере НОВІШУ копію, а не першу-ліпшу.
+            //
+            // Було: `if (!room.book && initialBook)` — тобто стан кімнати
+            // назавжди визначав той, хто підключився першим. Якщо він мав
+            // застарілу книгу (та сама книга, відкрита в іншому браузері чи
+            // на іншому пристрої), кожен наступний учасник отримував у
+            // room:sync цей старий текст. Свіжа робота зникала без сліду.
+            const clientIsNewer = initialBook && bookRevisionMs(initialBook) > bookRevisionMs(room.book);
             if (!room.book && initialBook) {
+              room.book = initialBook;
+            } else if (clientIsNewer) {
               room.book = initialBook;
             }
 
@@ -3328,6 +3353,9 @@ ${JSON.stringify(bookContext || {}, null, 2)}
               activeChapterId: user?.activeChapterId,
               color: user?.color || '#3b82f6',
               avatarUrl: user?.avatarUrl,
+              // Підпис браузера й платформи. Порожній у старих клієнтів —
+              // тоді інтерфейс просто не показує рядок пристрою.
+              deviceLabel: user?.deviceLabel,
               lastActive: new Date().toISOString(),
               isTyping: false
             };
@@ -3350,6 +3378,15 @@ ${JSON.stringify(bookContext || {}, null, 2)}
               timestamp: new Date().toISOString()
             }));
 
+            // Новоприбулий приніс свіжішу книгу — негайно віддаємо її решті,
+            // інакше вони лишились би зі старим станом до наступної правки.
+            if (clientIsNewer) {
+              broadcastToRoom(bookId, {
+                type: 'book:remote_update',
+                payload: { book: room.book }
+              }, clientId);
+            }
+
             // Notify others
             broadcastToRoom(bookId, {
               type: 'presence:update',
@@ -3368,6 +3405,22 @@ ${JSON.stringify(bookContext || {}, null, 2)}
             if (!bookId || !updatedBook) return;
 
             const room = getOrCreateRoom(bookId);
+            // Старіша копія не має відкочувати кімнату. Таке приходить від
+            // сесії, що прокинулась із застарілим станом; її власний клієнт
+            // уже отримає свіжу версію нижче.
+            if (room.book && bookRevisionMs(updatedBook) < bookRevisionMs(room.book)) {
+              const socket = ws;
+              if (socket.readyState === socket.OPEN) {
+                socket.send(
+                  JSON.stringify({
+                    type: 'book:remote_update',
+                    payload: { book: room.book },
+                    timestamp: new Date().toISOString(),
+                  })
+                );
+              }
+              break;
+            }
             room.book = updatedBook;
 
             if (logEntry) {

@@ -42,7 +42,7 @@ import {
 import type { AdminUserRow, UserRole } from '../types';
 import { getRoleInfo } from '../utils/rbac';
 
-type AdminTab = 'users' | 'roles' | 'costs' | 'business' | 'ai' | 'bridge';
+export type AdminTab = 'users' | 'roles' | 'costs' | 'business' | 'ai' | 'bridge';
 
 interface RoleRow {
   role: UserRole;
@@ -299,8 +299,26 @@ const MarketplaceBridgePanel: React.FC = () => {
   );
 };
 
-export const AdminPanelView: React.FC = () => {
-  const [tab, setTab] = useState<AdminTab>('business');
+/**
+ * Пропси зʼявились разом із новою сторінкою «Адмін панель» (AdminOsView):
+ * та сторінка сама керує тим, який розділ показано, і має власну шапку та
+ * навігацію-карту. Щоб не дублювати тисячу рядків робочих панелей, вона
+ * вбудовує ЦЕЙ компонент у керованому режимі — з зовнішньою вкладкою та
+ * прихованими власними шапкою й рядком вкладок.
+ *
+ * Без пропсів компонент поводиться точно як раніше — самостійна сторінка.
+ */
+export interface AdminPanelViewProps {
+  /** Керована вкладка. Якщо задана — внутрішній стан вкладки не використовується. */
+  tab?: AdminTab;
+  /** Сховати власні шапку й перемикач вкладок (їх малює AdminOsView). */
+  chromeless?: boolean;
+}
+
+export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ tab: controlledTab, chromeless = false }) => {
+  const [innerTab, setInnerTab] = useState<AdminTab>('business');
+  const tab = controlledTab ?? innerTab;
+  const setTab = setInnerTab;
   const [users, setUsers] = useState<AdminUserRow[]>([]);
   const [roles, setRoles] = useState<RoleRow[]>([]);
   const [usage, setUsage] = useState<UsageResponse | null>(null);
@@ -419,8 +437,15 @@ export const AdminPanelView: React.FC = () => {
   const maxDayCost = Math.max(...(usage?.byDay.map((d) => d.costUsd) || [0]), 0.0001);
 
   return (
-    <div className="flex-1 overflow-y-auto bg-slate-950 text-slate-100 p-6 lg:p-8 space-y-6">
-      {/* Шапка */}
+    <div
+      className={
+        chromeless
+          ? 'text-slate-100 space-y-6'
+          : 'flex-1 overflow-y-auto bg-slate-950 text-slate-100 p-6 lg:p-8 space-y-6'
+      }
+    >
+      {/* Шапка — лише у самостійному режимі: на новій сторінці її малює AdminOsView. */}
+      {!chromeless && (
       <div className="relative overflow-hidden p-6 rounded-2xl glass-panel-elevated">
         <div className="absolute -top-20 -right-12 w-64 h-64 rounded-full bg-amber-500/10 blur-3xl pointer-events-none" />
         <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -469,6 +494,7 @@ export const AdminPanelView: React.FC = () => {
           ))}
         </div>
       </div>
+      )}
 
       {error && (
         <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-rose-200 text-xs flex items-start gap-2" role="alert">

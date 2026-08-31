@@ -989,6 +989,8 @@ export interface CollaboratorPresence {
   avatarUrl?: string;
   lastActive: string;
   isTyping?: boolean;
+  /** Браузер і платформа сесії — «Chrome · Windows». Порожньо для старих клієнтів. */
+  deviceLabel?: string;
 }
 
 export interface CollabChatMessage {

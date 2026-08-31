@@ -12,6 +12,8 @@ import {
 import { getRoleInfo } from '../utils/rbac';
 import { realtimeSocketUrl } from '../utils/basePath';
 import type { SectionPatch } from '../utils/bookDiff';
+import { isNewerBook, describeRevisionGap } from '../utils/bookVersion';
+import { stableClientId, deviceLabel } from '../utils/deviceSession';
 
 /** Мінімальний проміжок між відправками одного каналу, мс. */
 const BROADCAST_INTERVAL_MS = 500;
@@ -34,6 +36,12 @@ interface UseRealtimeSyncProps {
   onRemoteLogEntry?: (logEntry: AuditLogEntry) => void;
   /** Точкова правка секції від співавтора. */
   onRemoteSectionPatch?: (patch: SectionPatch) => void;
+  /**
+   * Прийшла копія книги СТАРІША за нашу — ми її відхилили. Викликається, щоб
+   * інтерфейс міг попередити автора: та сама книга відкрита ще десь і там
+   * застарілий стан.
+   */
+  onStaleRemoteRejected?: (staleBook: Book, gapLabel: string) => void;
 }
 
 const COLLAB_COLORS = [
@@ -56,14 +64,17 @@ export function useRealtimeSync({
   onRemoteBookUpdate,
   onRemoteVersionSnapshot,
   onRemoteLogEntry,
-  onRemoteSectionPatch
+  onRemoteSectionPatch,
+  onStaleRemoteRejected
 }: UseRealtimeSyncProps) {
   const [syncStatus, setSyncStatus] = useState<RealtimeSyncStatus>('connecting');
   const [collaborators, setCollaborators] = useState<CollaboratorPresence[]>([]);
   const [chatMessages, setChatMessages] = useState<CollabChatMessage[]>([]);
-  const [clientId, setClientId] = useState<string>(() => {
-    return `usr-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-  });
+  // Сталий на цей браузер: інакше кожне перезавантаження сторінки
+  // створювало нового «співавтора», і список присутніх заповнювався
+  // привидами тієї самої вкладки.
+  const [clientId, setClientId] = useState<string>(() => stableClientId());
+  const deviceLabelRef = useRef<string>(deviceLabel());
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -143,6 +154,10 @@ export function useRealtimeSync({
   // Keep references to latest props to prevent stale closure issues
   const bookRef = useRef<Book>(book);
   bookRef.current = book;
+  // Колбек тримаємо в ref: обробник повідомлень живе всередині ефекту
+  // під'єднання і не має перестворюватись через зміну пропса.
+  const onStaleRemoteRejectedRef = useRef(onStaleRemoteRejected);
+  onStaleRemoteRejectedRef.current = onStaleRemoteRejected;
   const currentRoleRef = useRef<UserRole>(currentRole);
   currentRoleRef.current = currentRole;
   const currentTabRef = useRef<NavigationTab>(currentTab);
@@ -208,6 +223,7 @@ export function useRealtimeSync({
               activeChapterId,
               activeSectionId,
               color: myColorRef.current,
+              deviceLabel: deviceLabelRef.current,
               lastActive: new Date().toISOString()
             }
           }
@@ -261,7 +277,31 @@ export function useRealtimeSync({
 
             case 'book:remote_update': {
               if (payload.book && senderId !== clientId) {
-                onRemoteBookUpdate(payload.book, payload.logEntry);
+                // Копія співавтора застосовується ЛИШЕ якщо вона новіша за
+                // нашу. Доти будь-яка вхідна книга приймалась беззастережно,
+                // і сесія зі старим станом (та сама книга, відкрита в іншому
+                // браузері чи на іншому пристрої) мовчки затирала свіжий
+                // текст — саме так втрачалась робота.
+                if (isNewerBook(payload.book, bookRef.current)) {
+                  onRemoteBookUpdate(payload.book, payload.logEntry);
+                } else {
+                  // Наша копія свіжіша: не мовчимо, а віддаємо її назад, щоб
+                  // відсталий клієнт наздогнав. Інакше два пристрої лишились
+                  // би розбіжними до наступної правки.
+                  onStaleRemoteRejectedRef.current?.(payload.book, describeRevisionGap(payload.book, bookRef.current));
+                  const ws = wsRef.current;
+                  if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(
+                      JSON.stringify({
+                        type: 'book:update',
+                        payload: {
+                          bookId: bookRef.current.id || 'BK-2084-CYBER',
+                          updatedBook: bookRef.current
+                        }
+                      })
+                    );
+                  }
+                }
               }
               break;
             }
