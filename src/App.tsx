@@ -4,7 +4,7 @@ import { Book, NavigationTab, AuditLogEntry, UserRole, BookVersionSnapshot, Hero
 import { HeaderNav } from './components/HeaderNav';
 import { SidebarNav } from './components/SidebarNav';
 import { StartPageView } from './components/StartPageView';
-import { ExpressWizardView } from './components/ExpressWizardView';
+import { ExpressStartView } from './components/ExpressStartView';
 import { EditorView, type PromptConstructorRequest } from './components/EditorView';
 import { MasteryFrameworkView } from './components/MasteryFrameworkView';
 import { SunLightingProvider } from './context/SunLightingContext';
@@ -1552,7 +1552,7 @@ export default function App() {
             вкладки, а зовнішній контейнер тут із overflow-hidden. */}
         {currentTab === 'express' && (
           <div className="flex-1 overflow-y-auto">
-            <ExpressWizardView
+            <ExpressStartView
               onFinish={(payload) => {
                 // Готовий план переносимо в книгу й ведемо в редактор —
                 // саме це «перенесення заготовки до студії» з постановки.

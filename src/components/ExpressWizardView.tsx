@@ -43,7 +43,7 @@ interface CastMember {
   hook?: string;
 }
 
-interface Payload {
+export interface ExpressWizardPayload {
   seed?: string;
   genre?: string;
   framework?: string;
@@ -75,7 +75,7 @@ interface Part {
 interface Draft {
   id: string;
   step: number;
-  payload: Payload;
+  payload: ExpressWizardPayload;
 }
 
 interface EngineInfo {
@@ -111,8 +111,14 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const ExpressWizardView: React.FC<{
-  onFinish?: (payload: Payload) => void;
-}> = ({ onFinish }) => {
+  onFinish?: (payload: ExpressWizardPayload) => void;
+  /** Напрям, обраний на розвилці (Завдання 4). Іде в чернетку на сервер. */
+  track?: string;
+  /** Назва напряму для шапки — щоб було видно, у якій гілці ти зараз. */
+  trackTitle?: string;
+  /** Повернутись до вибору напряму. Без цього гілка — пастка в один бік. */
+  onChangeTrack?: () => void;
+}> = ({ onFinish, track, trackTitle, onChangeTrack }) => {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [step, setStep] = useState(1);
   const [busy, setBusy] = useState<string | null>(null);
@@ -190,7 +196,7 @@ export const ExpressWizardView: React.FC<{
       setBusy(stage);
       setError(null);
       try {
-        const r = await api<{ payload: Payload; draft: Draft }>('/api/express/suggest', {
+        const r = await api<{ payload: ExpressWizardPayload; draft: Draft }>('/api/express/suggest', {
           method: 'POST',
           body: JSON.stringify({ draftId, stage, engine }),
         });
@@ -220,7 +226,7 @@ export const ExpressWizardView: React.FC<{
     try {
       const d = await api<Draft>('/api/express/draft', {
         method: 'POST',
-        body: JSON.stringify({ seed: seed.trim(), genre: genre.trim() }),
+        body: JSON.stringify({ seed: seed.trim(), genre: genre.trim(), ...(track ? { track } : {}) }),
       });
       setDraft(d);
       try {
@@ -390,7 +396,24 @@ export const ExpressWizardView: React.FC<{
           <Wand2 className="w-5 h-5" />
           <span className="font-mono text-xs font-bold tracking-widest uppercase">Книга за 5 хвилин</span>
         </div>
-        <h1 className="mt-2 text-3xl font-bold text-slate-100">Експрес-майстер</h1>
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <h1 className="text-3xl font-bold text-slate-100">Експрес-майстер</h1>
+          {trackTitle && (
+            <span className="badge-glass rounded-lg px-2.5 py-1 text-xs font-semibold text-emerald-400">
+              {trackTitle}
+            </span>
+          )}
+          {onChangeTrack && (
+            <button
+              type="button"
+              onClick={onChangeTrack}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-400 transition-colors hover:text-slate-200"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              змінити напрям
+            </button>
+          )}
+        </div>
         <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-slate-400">
           Опишіть задум одним реченням. Далі студія пропонує — ви приймаєте або міняєте. Наприкінці
           отримаєте готовий план: частини, глави, героїв і звʼязки між ними.

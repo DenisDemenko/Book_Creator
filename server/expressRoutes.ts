@@ -36,6 +36,14 @@ import {
 /** Скільки частин генерує майстер. Три — щоб укластись у бюджет кроку Е5. */
 const TOTAL_PARTS = 3;
 
+/**
+ * Напрями розвилки (Завдання 4). Перелік навмисно продубльовано з
+ * src/data/expressTracks.ts, а не імпортовано: жоден server/*.ts не читає
+ * з src/ — сервер збирається окремо, і такий імпорт затяг би клієнтський
+ * граф у бандл сервера заради чотирьох рядків.
+ */
+const KNOWN_TRACKS = ['book', 'course', 'instruction', 'game'];
+
 const FRAMEWORKS = new Set([
   'hero_journey',
   'psychotypes',
@@ -109,9 +117,15 @@ export function registerExpressRoutes(app: Express): void {
     try {
       const seed = typeof req.body?.seed === 'string' ? req.body.seed.trim() : '';
       const genre = typeof req.body?.genre === 'string' ? req.body.genre.trim() : '';
+      // Напрям приймаємо лише зі списку відомих: сюди приходить значення
+      // з браузера, і чужий рядок у чернетці згодом виглядав би як
+      // підтримувана гілка, якої немає.
+      const rawTrack = typeof req.body?.track === 'string' ? req.body.track.trim() : '';
+      const track = KNOWN_TRACKS.includes(rawTrack) ? rawTrack : '';
       const draft = createDraft(req.principal?.id ?? null, {
         ...(seed ? { seed } : {}),
         ...(genre ? { genre } : {}),
+        ...(track ? { track } : {}),
       });
       res.status(201).json(draft);
     } catch (err) {
