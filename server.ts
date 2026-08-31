@@ -83,6 +83,7 @@ import {
   type CoreModuleKey,
   type CorePromptTemplateBundle,
 } from './server/coreAiRegistry';
+import { clampDesignPatch, parseDesignResponse } from './server/designLayoutPrompt';
 import {
   readCoreModuleModels,
   setCoreModuleModel,
@@ -1819,6 +1820,98 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
     delete current[moduleKey];
     await setAppSetting(CORE_PROMPT_TEMPLATES_META_KEY, JSON.stringify(current));
     res.json({ ok: true, module: moduleKey });
+  });
+
+  /**
+   * `/design` — підбір типографіки й полів під книгу (завдання 3в).
+   *
+   * Повертає ПАТЧ верстки, а не готову розмітку: «Розворот книги» рахує
+   * сторінки з `book.layoutConfig`, тож застосовне тут лише те, що має
+   * форму цього конфіга. Числа моделі проходять через clampDesignPatch —
+   * поля з корінцем мають фізичні наслідки на друці, і довіряти їх моделі
+   * без перевірки не можна.
+   */
+  app.post('/api/ai/design-layout', requirePermission('canUseAi'), async (req, res) => {
+    const { bookId, bookTitle, genre, audience, pageFormat, availableFonts, sampleText, modelId } = req.body || {};
+    const resolvedModelId = (await resolveModuleModelId('designLayout', modelId)) || GEMINI_MODEL;
+    const engine = resolveChatEngine(resolvedModelId);
+
+    try {
+      const fonts: string[] = Array.isArray(availableFonts)
+        ? availableFonts.filter((f: unknown): f is string => typeof f === 'string' && Boolean(f.trim()))
+        : [];
+      if (fonts.length === 0) {
+        return res.status(400).json({ error: 'Не передано жодної доступної гарнітури.', kind: 'bad_input' });
+      }
+      const sample = typeof sampleText === 'string' ? sampleText.trim() : '';
+      if (sample.length < 200) {
+        return res.status(400).json({
+          error: 'Замало тексту для оформлення — напишіть хоча б кілька абзаців книги.',
+          kind: 'not_enough_text',
+        });
+      }
+
+      const userId = req.principal?.id as string | undefined;
+      let userKey: string | undefined;
+      if (userId) {
+        const stored = await getUserApiKey(userId, engine).catch(() => undefined);
+        if (stored) {
+          try {
+            userKey = decryptApiKey(stored.encryptedKey);
+          } catch (err) {
+            console.warn('[design-layout] ключ користувача не розшифрувався, пробуємо серверний:', err);
+          }
+        }
+      }
+      if (!userKey && !engineConfigured(engine)) {
+        return res.status(503).json({
+          error: `Рушій «${ENGINE_LABELS[engine]}» не налаштований: додайте ${ENGINE_ENV_KEY[engine]} у .env сервера або власний ключ у розділі «Ключі API».`,
+          kind: 'no_key',
+        });
+      }
+
+      const adminLayer = await loadCoreAdminLayer();
+      const template = resolveCoreTemplate('designLayout', adminLayer);
+      const rendered = renderCoreTemplate('designLayout', template, {
+        bookTitle,
+        genre,
+        audience,
+        pageFormat,
+        availableFonts: fonts.join(', '),
+        sampleText: sample,
+      });
+
+      const result = await generateAiText({
+        engine,
+        modelId: resolvedModelId,
+        prompt: rendered.user,
+        systemInstruction: rendered.system,
+        apiKeyOverride: userKey,
+        json: true,
+        req,
+        label: 'Оформлення книги (/design)',
+        bookId,
+      });
+
+      let parsed: any;
+      try {
+        parsed = parseDesignResponse(result.text);
+      } catch {
+        return res.status(502).json({
+          error: 'Модель повернула не JSON — спробуйте ще раз або оберіть іншу модель у налаштуваннях модуля.',
+          kind: 'bad_model_output',
+        });
+      }
+
+      const patch = clampDesignPatch(parsed, fonts);
+      res.json({ patch, engine, modelId: resolvedModelId, timestamp: new Date().toISOString() });
+    } catch (err: any) {
+      console.error('Error in /api/ai/design-layout:', err?.message || err);
+      if (err instanceof ChatProviderError) {
+        return res.status(err.status).json({ error: err.message });
+      }
+      res.status(500).json({ error: err?.message || 'Не вдалося підібрати оформлення.', kind: 'unknown' });
+    }
   });
 
   /**

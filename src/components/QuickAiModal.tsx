@@ -708,6 +708,7 @@ const CORE_MODULE_LABELS: Record<CoreModuleKey, string> = {
   characterBioPrompt: 'Біографія персонажа',
   synopsisToChapter: 'Синопсис → глава',
   selectionToParagraphs: 'Абзац за виділеним фрагментом',
+  designLayout: 'Оформлення книги (/design)',
 };
 
 const CORE_MODULE_DESCRIPTIONS: Record<CoreModuleKey, string> = {
@@ -720,6 +721,8 @@ const CORE_MODULE_DESCRIPTIONS: Record<CoreModuleKey, string> = {
   synopsisToChapter: 'НОВИЙ модуль: синопсис → чернетка тексту глави. Поки лише тут, без кнопки в інтерфейсі письменника.',
   selectionToParagraphs:
     'Правий клік у тексті книги → «Вставити абзац за виділеним фрагментом». Модель отримує саме виділення й дописує продовження сцени; результат лягає блоком «AI-чернетка» під виділенням.',
+  designLayout:
+    'Підбір типографіки й полів під книгу перед показом у «Розвороті книги». Модель повертає JSON із версткою — схема не редагується; поля перевіряються на друкарські мінімуми вже після відповіді.',
 };
 
 /** Плейсхолдер → поле тестових вхідних даних. Одна мапа обслуговує форму й підказки одразу для всіх модулів. */
@@ -749,6 +752,9 @@ const CORE_FIELD_DEFS: Record<string, { key: string; label: string; textarea?: b
   '{КОНТЕКСТ_ПІСЛЯ}': { key: 'contextAfter', label: 'Текст одразу після виділення', textarea: true },
   '{КІЛЬКІСТЬ_АБЗАЦІВ}': { key: 'paragraphCount', label: 'Скільки абзаців (1–3)', placeholder: '1' },
   '{МОВА}': { key: 'language', label: 'Мова відповіді (uk / en)', placeholder: 'uk' },
+  '{АУДИТОРІЯ}': { key: 'audience', label: 'Цільова аудиторія', placeholder: 'дорослі, 25+' },
+  '{ФОРМАТ_СТОРІНКИ}': { key: 'pageFormat', label: 'Формат сторінки', placeholder: '152×229 мм (6×9″)' },
+  '{ШРИФТИ}': { key: 'availableFonts', label: 'Доступні гарнітури (через кому)', textarea: true },
 };
 
 /**

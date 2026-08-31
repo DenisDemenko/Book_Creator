@@ -49,6 +49,11 @@ import {
   renderSynopsisToChapterTemplate,
 } from './synopsisToChapterPrompt';
 import {
+  designLayoutSystemInstruction,
+  factoryDesignLayoutTemplate,
+  renderDesignLayoutTemplate,
+} from './designLayoutPrompt';
+import {
   selectionParagraphsSystemInstruction,
   factorySelectionParagraphsTemplate,
   renderSelectionParagraphsTemplate,
@@ -71,6 +76,7 @@ export const CORE_MODULE_KEYS = [
   'characterBioPrompt',
   'synopsisToChapter',
   'selectionToParagraphs',
+  'designLayout',
 ] as const;
 
 export type CoreModuleKey = (typeof CORE_MODULE_KEYS)[number];
@@ -122,6 +128,7 @@ export const CORE_MODULE_PLACEHOLDERS: Record<CoreModuleKey, string[]> = {
     '{ОБСЯГ}',
     '{МОВА}',
   ],
+  designLayout: ['{НАЗВА_КНИГИ}', '{ЖАНР}', '{АУДИТОРІЯ}', '{ФОРМАТ_СТОРІНКИ}', '{ШРИФТИ}', '{ФРАГМЕНТ}'],
 };
 
 /** Чи модуль повертає JSON за жорсткою схемою (схема — readonly-текст у конструкторі, не редагується). */
@@ -134,6 +141,7 @@ export const CORE_MODULE_HAS_JSON_SCHEMA: Record<CoreModuleKey, boolean> = {
   characterBioPrompt: true,
   synopsisToChapter: false,
   selectionToParagraphs: false,
+  designLayout: true,
 };
 
 /**
@@ -202,6 +210,8 @@ export function factoryCoreTemplate(module: CoreModuleKey): CorePromptTemplate {
         system: selectionParagraphsSystemInstruction(),
         user: factorySelectionParagraphsTemplate(),
       };
+    case 'designLayout':
+      return { system: designLayoutSystemInstruction(), user: factoryDesignLayoutTemplate() };
   }
 }
 
@@ -362,5 +372,20 @@ export function renderCoreTemplate(
         }),
       };
     }
+    case 'designLayout':
+      return {
+        system: template.system,
+        user: renderDesignLayoutTemplate(template.user, {
+          bookTitle: fields.bookTitle,
+          genre: fields.genre,
+          audience: fields.audience,
+          pageFormat: fields.pageFormat,
+          availableFonts: fields.availableFonts,
+          // `{ФРАГМЕНТ}` спільний із модулем «Абзац за виділенням», і форма
+          // конструктора шле його під ключем `selection`. Приймаємо обидва —
+          // інакше тестовий виклик тут ішов би з порожнім фрагментом тексту.
+          sampleText: fields.sampleText || fields.selection,
+        }),
+      };
   }
 }
