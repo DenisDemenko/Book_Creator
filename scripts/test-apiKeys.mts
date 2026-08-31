@@ -121,9 +121,31 @@ console.log('\nHTTP-роути (server/apiKeysRoutes.ts):');
 
   const initial = await call('GET', '/api/account/api-keys');
   t('GET /api-keys → 200', initial.status === 200, String(initial.status));
-  t('повертає рівно 6 провайдерів', initial.data?.keys?.length === 6, String(initial.data?.keys?.length));
+  // Шість текстових рушіїв + двигуни зображень. Перевіряємо не загальне
+  // число, а склад: інакше додавання будь-якого провайдера вимагає правити
+  // тест, нічого при цьому не доводячи.
+  const initialKeys: any[] = initial.data?.keys ?? [];
+  t(
+    'повертає рівно 6 текстових провайдерів',
+    initialKeys.filter((k) => k.kind !== 'image').length === 6,
+    String(initialKeys.filter((k) => k.kind !== 'image').length)
+  );
+  t(
+    'Seedream присутній як провайдер зображень',
+    initialKeys.some((k) => k.engine === 'seedream' && k.kind === 'image'),
+    initialKeys.map((k) => `${k.engine}:${k.kind}`).join(', ')
+  );
   t('спочатку жоден власний ключ не заданий', initial.data.keys.every((k: any) => k.configured === false));
   t('відповідь не містить сам ключ', !JSON.stringify(initial.data).includes('sk-'));
+
+  const savedImage = await call('PUT', '/api/account/api-keys/seedream', { apiKey: 'ark-user-own-key-123' });
+  t('PUT ключа Seedream → 200', savedImage.status === 200, String(savedImage.status));
+  const afterImage = await call('GET', '/api/account/api-keys');
+  t(
+    'Seedream позначений як налаштований власним ключем',
+    (afterImage.data?.keys ?? []).some((k: any) => k.engine === 'seedream' && k.configured === true)
+  );
+  await call('DELETE', '/api/account/api-keys/seedream');
 
   const badEngine = await call('PUT', '/api/account/api-keys/not-a-real-engine', { apiKey: 'sk-x' });
   t('невідомий провайдер → 400', badEngine.status === 400, String(badEngine.status));

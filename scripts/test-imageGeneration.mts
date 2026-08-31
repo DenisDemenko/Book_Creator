@@ -1,6 +1,6 @@
 import {
   normalizeAspectRatio, resolveEngine, generateImage, saveGeneratedImage,
-  IMAGE_ENGINES, listEngines, ImageGenerationError, GENERATED_DIR, seedreamConfig
+  IMAGE_ENGINES, listEngines, ImageGenerationError, GENERATED_DIR, seedreamConfig, seedreamTransportFor
 } from '../server/imageGeneration';
 import fs from 'node:fs/promises';
 
@@ -110,6 +110,95 @@ console.log('\nSeedream (підставний fetch):');
     t('engine у результаті — seedream', r.engine.id==='seedream');
   } finally {
     global.fetch = realFetch;
+  }
+}
+
+console.log('\nВибір транспорту за формою ключа:');
+{
+  const prev = process.env.SEEDREAM_TRANSPORT;
+  delete process.env.SEEDREAM_TRANSPORT;
+  t('ключ fal (id:secret) → fal', seedreamTransportFor('9a1b-c2d3:0f8e7d6c5b4a')==='fal');
+  t('ключ Ark (суцільний токен) → ark', seedreamTransportFor('4b0f9e2a-77c1-4d3e-9a11-2f6b8c0d1e33')==='ark');
+  t('порожній ключ → ark (нічого не ламає стару поведінку)', seedreamTransportFor('')==='ark');
+  process.env.SEEDREAM_TRANSPORT = 'ark';
+  t('SEEDREAM_TRANSPORT перекриває форму ключа', seedreamTransportFor('id:secret')==='ark');
+  process.env.SEEDREAM_TRANSPORT = 'FAL';
+  t('перемикач нечутливий до регістру', seedreamTransportFor('плаский-токен')==='fal');
+  if (prev===undefined) delete process.env.SEEDREAM_TRANSPORT; else process.env.SEEDREAM_TRANSPORT = prev;
+}
+
+console.log('\nSeedream через fal.ai (підставний fetch):');
+{
+  const realFetch = global.fetch;
+  const prevKey = seedreamConfig.apiKey;
+  seedreamConfig.apiKey = 'falid-123:falsecret-456';
+  const calls:any[] = [];
+  // @ts-expect-error підміна глобального fetch лише на час цього блоку тесту
+  global.fetch = async (url:string, init:any) => {
+    calls.push({ url, init });
+    if (calls.length===1) {
+      return { ok:true, status:200, json: async()=>({
+        images:[{ url:'https://v3.fal.media/files/x/out.png', content_type:'image/png' }], seed:7,
+      }) };
+    }
+    return { ok:true, status:200, arrayBuffer: async()=>Buffer.from(PNG_B64,'base64') };
+  };
+  try {
+    const r = await generateImage(null, {prompt:'лаунж-крісло', engine:'seedream', aspectRatio:'3:4'});
+    t('URL — синхронний ендпоїнт fal з моделлю Seedream',
+      calls[0].url==='https://fal.run/fal-ai/bytedance/seedream/v4/text-to-image', calls[0].url);
+    t('Authorization — схема Key, а не Bearer',
+      calls[0].init.headers.Authorization==='Key falid-123:falsecret-456', calls[0].init.headers.Authorization);
+    const body = JSON.parse(calls[0].init.body);
+    t('image_size — обʼєкт із пікселями під 3:4', body.image_size.width===1536 && body.image_size.height===2048,
+      JSON.stringify(body.image_size));
+    t('num_images = 1', body.num_images===1);
+    t('модель не дублюється в тілі (вона в URL)', body.model===undefined);
+    t('другим запитом забрано сам файл', calls.length===2 && calls[1].url==='https://v3.fal.media/files/x/out.png');
+    t('повернуто буфер PNG', Buffer.isBuffer(r.buffer) && r.buffer.subarray(1,4).toString()==='PNG');
+    t('engine у результаті — seedream', r.engine.id==='seedream');
+  } finally {
+    global.fetch = realFetch;
+    seedreamConfig.apiKey = prevKey;
+  }
+}
+
+console.log('\nfal.ai — помилки доходять до автора:');
+{
+  const realFetch = global.fetch;
+  const prevKey = seedreamConfig.apiKey;
+  seedreamConfig.apiKey = 'falid:falsecret';
+  try {
+    // @ts-expect-error підміна глобального fetch лише на час цього блоку тесту
+    global.fetch = async () => ({ ok:false, status:401, json: async()=>({ detail:'Unauthorized' }) });
+    try {
+      await generateImage(null,{prompt:'x', engine:'seedream'});
+      t('401 кидає помилку', false);
+    } catch (e:any) {
+      t('401 → no_key', e instanceof ImageGenerationError && e.kind==='no_key', e.kind);
+      t('текст помилки називає fal, а не Ark', /fal/.test(e.message), e.message);
+    }
+
+    // @ts-expect-error підміна глобального fetch лише на час цього блоку тесту
+    global.fetch = async () => ({ ok:false, status:422, json: async()=>({ detail:[{ msg:'prompt too long' }] }) });
+    try {
+      await generateImage(null,{prompt:'x', engine:'seedream'});
+      t('422 кидає помилку', false);
+    } catch (e:any) {
+      t('detail-масив розгортається у читабельний текст', /prompt too long/.test(e.message), e.message);
+    }
+
+    // @ts-expect-error підміна глобального fetch лише на час цього блоку тесту
+    global.fetch = async () => ({ ok:true, status:200, json: async()=>({ images:[] }) });
+    try {
+      await generateImage(null,{prompt:'x', engine:'seedream'});
+      t('порожній список зображень кидає помилку', false);
+    } catch (e:any) {
+      t('порожня відповідь → empty', e.kind==='empty', e.kind);
+    }
+  } finally {
+    global.fetch = realFetch;
+    seedreamConfig.apiKey = prevKey;
   }
 }
 

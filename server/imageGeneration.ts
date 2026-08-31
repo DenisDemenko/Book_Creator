@@ -94,8 +94,37 @@ export const DEFAULT_ENGINE: ImageEngineId = 'nano-banana-2';
  * для акаунтів на материковому Volcengine (ark.cn-beijing.volces.com)
  * достатньо переозначити цю змінну, код лишається той самий.
  */
+/**
+ * Як саме ми ходимо до Seedream.
+ *
+ * 'ark' — напряму в BytePlus ModelArk. 'fal' — через fal.ai, який хостить
+ * ту саму модель ByteDance за ту саму ціну ($0.03/зображення).
+ *
+ * Транспорт існує не заради вибору, а тому що ModelArk відмовляє в
+ * реєстрації цілим країнам (серед них Україна), і прямий ключ там просто
+ * неможливо отримати. fal лишається єдиним робочим шляхом до Seedream для
+ * таких авторів.
+ */
+export type SeedreamTransport = 'ark' | 'fal';
+
+/** Синхронний REST fal: віддає результат у тій самій відповіді. */
+const FAL_BASE_URL = (process.env.FAL_BASE_URL || 'https://fal.run').replace(/\/+$/, '');
+const FAL_MODEL = process.env.SEEDREAM_FAL_MODEL || 'fal-ai/bytedance/seedream/v4/text-to-image';
+
+/**
+ * Ключ fal видається у форматі "<id>:<secret>"; ключ Ark — суцільний токен
+ * без двокрапки. Це єдина видима різниця між ними, і вона стабільна, тож
+ * автор просто вставляє свій ключ у панель, не вибираючи транспорт руками.
+ * SEEDREAM_TRANSPORT лишається аварійним перемикачем.
+ */
+export function seedreamTransportFor(apiKey: string): SeedreamTransport {
+  const forced = (process.env.SEEDREAM_TRANSPORT || '').trim().toLowerCase();
+  if (forced === 'fal' || forced === 'ark') return forced;
+  return apiKey.includes(':') ? 'fal' : 'ark';
+}
+
 export const seedreamConfig = {
-  apiKey: process.env.ARK_API_KEY || process.env.SEEDREAM_API_KEY || '',
+  apiKey: process.env.ARK_API_KEY || process.env.SEEDREAM_API_KEY || process.env.FAL_KEY || '',
   baseUrl: (process.env.ARK_BASE_URL || process.env.SEEDREAM_BASE_URL || 'https://ark.ap-southeast.bytepluses.com/api/v3').replace(/\/+$/, ''),
   get enabled(): boolean {
     return !!this.apiKey;
@@ -158,6 +187,12 @@ export function resolveEngine(requested?: string): ImageEngineInfo {
 }
 
 export interface GenerateImageOptions {
+  /**
+   * Власний ключ автора для провайдера зображень (розділ «Ключі API»).
+   * Стосується лише ByteDance/Seedream: Gemini працює через SDK-клієнт,
+   * який створюється один раз на серверному ключі.
+   */
+  apiKeyOverride?: string;
   prompt: string;
   engine?: string;
   aspectRatio?: string;
@@ -236,19 +271,109 @@ function classifySeedreamError(status: number, message: string): ImageErrorKind 
  * WxH, а не всі акаунти/версії моделі однаково підтримують перші, тож тут
  * рахуємо точні пікселі (кратні 32, як заведено для дифузійних моделей).
  */
-function seedreamPixelSize(aspectRatio: SupportedRatio, imageSize: string): string {
+function seedreamPixelDims(aspectRatio: SupportedRatio, imageSize: string): { width: number; height: number } {
   const base = imageSize === '4K' ? 4096 : imageSize === '1K' ? 1024 : 2048;
   const [rw, rh] = aspectRatio.split(':').map(Number);
   const longSide = base;
   const shortSide = Math.round((base * Math.min(rw, rh)) / Math.max(rw, rh) / 32) * 32;
-  const width = rw >= rh ? longSide : shortSide;
-  const height = rw >= rh ? shortSide : longSide;
+  return rw >= rh
+    ? { width: longSide, height: shortSide }
+    : { width: shortSide, height: longSide };
+}
+
+function seedreamPixelSize(aspectRatio: SupportedRatio, imageSize: string): string {
+  const { width, height } = seedreamPixelDims(aspectRatio, imageSize);
   return `${width}x${height}`;
+}
+
+/**
+ * Виклик тієї самої моделі Seedream через fal.ai.
+ *
+ * Дві відмінності від Ark, які й змушують писати окрему функцію:
+ * заголовок «Key», а не «Bearer», і результат приходить ПОСИЛАННЯМ на файл,
+ * а не base64 — тож байти доводиться забирати другим запитом.
+ *
+ * negative_prompt у схемі fal для цієї моделі відсутній, тому він тут не
+ * приймається: мовчки проковтнути його означало б обіцяти вплив, якого нема.
+ */
+async function generateWithFal(
+  engine: ImageEngineInfo,
+  apiKey: string,
+  prompt: string,
+  aspectRatio: SupportedRatio,
+  imageSize: string
+): Promise<{ buffer: Buffer; mimeType: string }> {
+  const { width, height } = seedreamPixelDims(aspectRatio, imageSize);
+
+  let res: Response;
+  try {
+    res = await fetch(`${FAL_BASE_URL}/${FAL_MODEL}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Key ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        prompt,
+        image_size: { width, height },
+        num_images: 1,
+        enable_safety_checker: true,
+      }),
+    });
+  } catch (err) {
+    throw new ImageGenerationError('unknown', `fal.ai недоступний: ${(err as Error).message}`, engine.id, err);
+  }
+
+  const json = (await res.json().catch(() => null)) as
+    | { images?: { url?: string; content_type?: string }[]; detail?: unknown; error?: string }
+    | null;
+
+  if (!res.ok) {
+    // fal кладе причину у detail — рядком або масивом об'єктів валідації.
+    const detail = json?.detail;
+    const message =
+      typeof detail === 'string'
+        ? detail
+        : Array.isArray(detail)
+          ? detail.map((d: any) => d?.msg || JSON.stringify(d)).join('; ')
+          : json?.error || `HTTP ${res.status}`;
+    throw new ImageGenerationError(
+      classifySeedreamError(res.status, message),
+      `Seedream (fal): ${message}`,
+      engine.id
+    );
+  }
+
+  const first = json?.images?.[0];
+  if (!first?.url) {
+    throw new ImageGenerationError('empty', humanMessage('empty', engine.label), engine.id);
+  }
+
+  let fileRes: Response;
+  try {
+    fileRes = await fetch(first.url);
+  } catch (err) {
+    throw new ImageGenerationError(
+      'unknown',
+      `fal.ai: не вдалося забрати згенерований файл: ${(err as Error).message}`,
+      engine.id,
+      err
+    );
+  }
+  if (!fileRes.ok) {
+    throw new ImageGenerationError('unknown', `fal.ai: файл недоступний (HTTP ${fileRes.status}).`, engine.id);
+  }
+
+  return {
+    buffer: Buffer.from(await fileRes.arrayBuffer()),
+    mimeType: first.content_type || 'image/png',
+  };
 }
 
 /** Виклик ByteDance Seedream через OpenAI-сумісний Ark REST API (images/generations). */
 async function generateWithSeedream(
   engine: ImageEngineInfo,
+  apiKey: string,
   prompt: string,
   aspectRatio: SupportedRatio,
   imageSize: string,
@@ -259,7 +384,7 @@ async function generateWithSeedream(
     res = await fetch(`${seedreamConfig.baseUrl}/images/generations`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${seedreamConfig.apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -332,10 +457,14 @@ export async function generateImage(
 ): Promise<GeneratedImageResult> {
   const engine = resolveEngine(options.engine);
 
+  // Власний ключ автора («Ключі API») має пріоритет над серверним, як і в
+  // текстових рушіях: платить той, чий ключ підставлено.
+  const seedreamKey = options.apiKeyOverride?.trim() || seedreamConfig.apiKey;
+
   if (engine.provider === 'google' && !ai) {
     throw new ImageGenerationError('no_key', humanMessage('no_key', engine.label, 'google'), engine.id);
   }
-  if (engine.provider === 'bytedance' && !seedreamConfig.enabled) {
+  if (engine.provider === 'bytedance' && !seedreamKey) {
     throw new ImageGenerationError('no_key', humanMessage('no_key', engine.label, 'bytedance'), engine.id);
   }
   if (!options.prompt || !options.prompt.trim()) {
@@ -357,7 +486,9 @@ export async function generateImage(
   try {
     const generated =
       engine.provider === 'bytedance'
-        ? await generateWithSeedream(engine, prompt, aspectRatio, imageSize, options.negativePrompt)
+        ? seedreamTransportFor(seedreamKey) === 'fal'
+          ? await generateWithFal(engine, seedreamKey, prompt, aspectRatio, imageSize)
+          : await generateWithSeedream(engine, seedreamKey, prompt, aspectRatio, imageSize, options.negativePrompt)
         : await generateWithNanoBanana(ai as GoogleGenAI, engine, prompt, aspectRatio, imageSize);
     return { ...generated, engine, aspectRatio };
   } catch (err) {

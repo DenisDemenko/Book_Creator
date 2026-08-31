@@ -39,6 +39,8 @@ import {
   effectivePermissions,
 } from './auth';
 import { pricingSnapshot } from './pricing';
+import { IMAGE_ENGINES, seedreamConfig } from './imageGeneration';
+import { geminiClient } from './aiCore';
 import { PLANS, PLAN_ORDER, priceFor, type PlanId } from './subscriptions';
 import { paypalConfig } from './payments/paypal';
 import {
@@ -346,7 +348,47 @@ export function registerAdminRoutes(app: Express): void {
       updated_at: snapshot.updatedAt,
       note: p.note,
     }));
-    res.json({ updatedAt: snapshot.updatedAt, currency: 'USD', pricings });
+    // Двигуни ЗОБРАЖЕНЬ у тій самій таблиці тарифів.
+    //
+    // Досі сюди потрапляли лише текстові. Витрати на картинки чесно
+    // писались у usage_log і вже показувались у графіках нижче — але
+    // тарифу, за яким їх пораховано, адмін ніде не бачив: міг звірити
+    // суму, але не ціну за одиницю.
+    //
+    // Провайдер і доступність беруться з IMAGE_ENGINES та seedreamConfig —
+    // тих самих джерел, що й /api/ai/image-engines, щоб два екрани не
+    // розійшлися у відповіді на питання «чи цей двигун працює».
+    const imageProviderLabel: Record<string, string> = {
+      google: 'Google',
+      bytedance: 'ByteDance',
+    };
+    const imagePricings = snapshot.images.map((img) => {
+      const engine = IMAGE_ENGINES[img.engineId as keyof typeof IMAGE_ENGINES];
+      const sizes = Object.entries(img.perImageUsd) as [string, number][];
+      const flat = sizes.length === 1;
+      return {
+        id: `pricing-image-${img.engineId}`,
+        provider: imageProviderLabel[engine?.provider ?? ''] || 'Зображення',
+        model: img.modelId,
+        display_name: `${img.modelId} (${img.label})`,
+        // Ціна за зображення кладеться у «ціну виходу», бо саме її показує
+        // таблиця; вхідної ціни в картинок немає, тож там нуль. Щоб це не
+        // читалось як «за 1000 штук», одиницю пояснює note нижче.
+        input_price_per_1k: 0,
+        output_price_per_1k: Math.max(...sizes.map(([, v]) => v)),
+        is_active: engine?.provider === 'bytedance' ? seedreamConfig.enabled : !!geminiClient,
+        updated_at: snapshot.updatedAt,
+        note: flat
+          ? `Ціна за ОДНЕ зображення: ${sizes[0][1]} (будь-яка роздільність)`
+          : `Ціна за ОДНЕ зображення: ${sizes.map(([k, v]) => `${k} — ${v}`).join(', ')}`,
+      };
+    });
+
+    res.json({
+      updatedAt: snapshot.updatedAt,
+      currency: 'USD',
+      pricings: [...pricings, ...imagePricings],
+    });
   });
 
   /**

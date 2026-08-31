@@ -19,6 +19,29 @@ import { CHAT_MODELS, ENGINE_LABELS, engineConfigured, type EngineId } from './c
 
 const KNOWN_ENGINES = new Set<string>(Object.keys(ENGINE_LABELS));
 
+/**
+ * Провайдери ЗОБРАЖЕНЬ, для яких автор може задати власний ключ.
+ *
+ * Тримаються окремо від чатових: у них інший транспорт (Ark REST замість
+ * PROVIDERS чату), інша змінна оточення й інша одиниця тарифікації —
+ * зображення, а не токени. Спільним лишається тільки сховище ключа.
+ */
+const IMAGE_KEY_PROVIDERS = [
+  {
+    engine: 'seedream',
+    label: 'Seedream (ByteDance)',
+    envKeys: ['ARK_API_KEY', 'SEEDREAM_API_KEY', 'FAL_KEY'],
+  },
+] as const;
+
+const IMAGE_KEY_ENGINES = new Set<string>(IMAGE_KEY_PROVIDERS.map((p) => p.engine));
+
+function imageServerKeyConfigured(engine: string): boolean {
+  const p = IMAGE_KEY_PROVIDERS.find((x) => x.engine === engine);
+  if (!p) return false;
+  return p.envKeys.some((k) => !!process.env[k]);
+}
+
 function isEngineId(value: string): value is EngineId {
   return KNOWN_ENGINES.has(value);
 }
@@ -69,8 +92,26 @@ export function registerApiKeysRoutes(app: Express): void {
           configured: !!own,
           fingerprint: own?.fingerprint,
           updatedAt: own?.updatedAt,
+          kind: 'text' as const,
         };
       });
+
+      // Двигуни зображень — тим самим списком, щоб панель лишалась одним
+      // місцем для всіх ключів автора, а не двома схожими екранами.
+      const imageKeys = IMAGE_KEY_PROVIDERS.map((p) => {
+        const own = byEngine.get(p.engine);
+        return {
+          engine: p.engine,
+          label: p.label,
+          serverKeyConfigured: imageServerKeyConfigured(p.engine),
+          configured: !!own,
+          fingerprint: own?.fingerprint,
+          updatedAt: own?.updatedAt,
+          kind: 'image' as const,
+        };
+      });
+
+      keys.push(...(imageKeys as unknown as typeof keys));
 
       res.json({ keys, cryptoConfigured: isApiKeyCryptoConfigured() });
     } catch (err) {
@@ -83,7 +124,7 @@ export function registerApiKeysRoutes(app: Express): void {
   app.put('/api/account/api-keys/:engine', requireAuth, requirePermission('canManageApiKeys'), async (req, res) => {
     try {
       const engine = req.params.engine;
-      if (!isEngineId(engine)) {
+      if (!isEngineId(engine) && !IMAGE_KEY_ENGINES.has(engine)) {
         return res.status(400).json({ error: `Невідомий провайдер: ${engine}.` });
       }
       const apiKey = typeof req.body?.apiKey === 'string' ? req.body.apiKey.trim() : '';
@@ -91,7 +132,7 @@ export function registerApiKeysRoutes(app: Express): void {
         return res.status(400).json({ error: 'Введіть ключ API.' });
       }
 
-      const misplaced = detectMisplacedKey(engine, apiKey);
+      const misplaced = isEngineId(engine) ? detectMisplacedKey(engine, apiKey) : null;
       if (misplaced) {
         return res.status(400).json({ error: misplaced });
       }
@@ -130,12 +171,17 @@ export function registerApiKeysRoutes(app: Express): void {
   app.delete('/api/account/api-keys/:engine', requireAuth, requirePermission('canManageApiKeys'), async (req, res) => {
     try {
       const engine = req.params.engine;
-      if (!isEngineId(engine)) {
+      const isImage = IMAGE_KEY_ENGINES.has(engine);
+      if (!isEngineId(engine) && !isImage) {
         return res.status(400).json({ error: `Невідомий провайдер: ${engine}.` });
       }
       const userId = req.principal!.id as string;
       await deleteUserApiKey(userId, engine);
-      res.json({ ok: true, engine, serverKeyConfigured: engineConfigured(engine) });
+      res.json({
+        ok: true,
+        engine,
+        serverKeyConfigured: isEngineId(engine) ? engineConfigured(engine) : imageServerKeyConfigured(engine),
+      });
     } catch (err) {
       console.error('[api-keys] delete:', err);
       res.status(500).json({ error: 'Не вдалося видалити ключ API.' });

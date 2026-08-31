@@ -1,6 +1,10 @@
 export const apiKeysView = {
   uk: {
     title: 'Ключі API',
+    sectionText: 'Текстові моделі',
+    sectionTextHint: 'Тарифікуються за токени — окремо за вхід і вихід.',
+    sectionImage: 'Генерація зображень',
+    sectionImageHint: 'Тарифікуються за одне зображення, а не за токени. Ключ Seedream беріть на fal.ai (Dashboard → Keys) — формат «id:secret»; прямий ключ BytePlus Ark теж підходить, якщо він у вас є.',
     subtitle: 'Підставте власний ключ провайдера ШІ замість спільного серверного — запити для чат-асистента підуть саме через нього.',
     guestNotice: 'Ключі API доступні лише зареєстрованим авторам.',
     loadError: 'Не вдалося завантажити ключі API.',
@@ -22,6 +26,10 @@ export const apiKeysView = {
   },
   en: {
     title: 'API Keys',
+    sectionText: 'Text models',
+    sectionTextHint: 'Billed per token — input and output separately.',
+    sectionImage: 'Image generation',
+    sectionImageHint: 'Billed per image, not per token. Get a Seedream key at fal.ai (Dashboard → Keys) — format "id:secret"; a direct BytePlus Ark key also works if you have one.',
     subtitle: 'Supply your own AI provider key instead of the shared server one — chat assistant requests will use it directly.',
     guestNotice: 'API keys are available only to registered authors.',
     loadError: 'Failed to load API keys.',

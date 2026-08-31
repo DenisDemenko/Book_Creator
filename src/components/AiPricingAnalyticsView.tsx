@@ -27,6 +27,7 @@ import {
   Coins,
   Plus,
   Trash2,
+  Image as ImageIcon,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -100,6 +101,7 @@ const PROVIDER_ICONS: Record<string, React.ElementType> = {
   DeepSeek: Sparkles,
   Meta: Sparkles,
   Mistral: Sparkles,
+  ByteDance: ImageIcon,
 };
 
 const PROVIDER_COLORS = ['#f59e0b', '#22d3ee', '#a78bfa', '#34d399', '#fb7185', '#fbbf24'];
@@ -113,6 +115,7 @@ const PROVIDER_GLOW: Record<string, { hex: string; rgb: string }> = {
   DeepSeek:  { hex: '#4D6BFE', rgb: '77, 107, 254' },  // синьо-фіолетовий DeepSeek
   Meta:      { hex: '#A78BFA', rgb: '167, 139, 250' }, // фіолетовий Meta
   Mistral:   { hex: '#FB7185', rgb: '251, 113, 133' }, // рожевий Mistral
+  ByteDance: { hex: '#325AB4', rgb: '50, 90, 180' },   // синій ByteDance
 };
 const PROVIDER_GLOW_FALLBACK = { hex: '#22D3EE', rgb: '34, 211, 238' };
 

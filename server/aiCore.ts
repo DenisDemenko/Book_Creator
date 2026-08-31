@@ -42,7 +42,8 @@ import {
   saveGeneratedImage,
   resolveEngine as resolveImageEngine,
 } from './imageGeneration';
-import { recordUsage } from './store';
+import { recordUsage, getUserApiKey } from './store';
+import { decryptApiKey, isApiKeyCryptoConfigured } from './userApiKeyCrypto';
 import { priceForImage, priceForTextEngine } from './pricing';
 
 export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.7-flash';
@@ -342,12 +343,26 @@ export async function generateImage(p: GenerateImageParams): Promise<{
 }> {
   const ctx: UsageLogCtx = { req: p.req, label: p.label, bookId: p.bookId };
   try {
+    // Власний ключ автора для Seedream, якщо він його зберіг. Помилка
+    // читання не має валити генерацію — тоді просто працює серверний ключ.
+    const userId = p.req?.principal?.id as string | undefined;
+    let apiKeyOverride: string | undefined;
+    if (userId && isApiKeyCryptoConfigured()) {
+      try {
+        const stored = await getUserApiKey(userId, 'seedream');
+        if (stored?.encryptedKey) apiKeyOverride = decryptApiKey(stored.encryptedKey).trim() || undefined;
+      } catch {
+        apiKeyOverride = undefined;
+      }
+    }
+
     const generated = await generateImageRaw(geminiClient, {
       prompt: p.prompt,
       engine: p.engine,
       aspectRatio: p.aspectRatio,
       imageSize: p.imageSize,
       negativePrompt: p.negativePrompt,
+      apiKeyOverride,
     });
     const saved = await saveGeneratedImage(generated.buffer, generated.mimeType, p.filenameHint);
     const sizeLabel = generated.engine.maxSize === '1K' ? '1K' : p.imageSize === '1K' ? '1K' : '2K';
