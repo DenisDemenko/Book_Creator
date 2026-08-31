@@ -48,8 +48,15 @@ import {
   factorySynopsisToChapterTemplate,
   renderSynopsisToChapterTemplate,
 } from './synopsisToChapterPrompt';
+import {
+  selectionParagraphsSystemInstruction,
+  factorySelectionParagraphsTemplate,
+  renderSelectionParagraphsTemplate,
+  type SelectionParagraphCount,
+  type SelectionTextLanguage,
+} from './selectionParagraphsPrompt';
 
-/** Ключ у таблиці `meta`, під яким лежить ЄДИНИЙ адмінський шар усіх 7 модулів ядра. */
+/** Ключ у таблиці `meta`, під яким лежить ЄДИНИЙ адмінський шар усіх модулів ядра. */
 export const CORE_PROMPT_TEMPLATES_META_KEY = 'prompt_templates_core_admin';
 
 /** Та сама стеля, що й у письменницького конструктора — промпт оплачується токенами. */
@@ -63,6 +70,7 @@ export const CORE_MODULE_KEYS = [
   'characterPromptCraft',
   'characterBioPrompt',
   'synopsisToChapter',
+  'selectionToParagraphs',
 ] as const;
 
 export type CoreModuleKey = (typeof CORE_MODULE_KEYS)[number];
@@ -103,6 +111,17 @@ export const CORE_MODULE_PLACEHOLDERS: Record<CoreModuleKey, string[]> = {
   ],
   characterBioPrompt: ['{ЖАНР}', '{РОЛЬ}', '{ОПИС}'],
   synopsisToChapter: ['{НАЗВА_КНИГИ}', '{ЖАНР}', '{РОЗДІЛ}', '{СТИЛЬ}', '{СИНОПСИС}', '{ОБСЯГ}'],
+  selectionToParagraphs: [
+    '{НАЗВА_КНИГИ}',
+    '{ЖАНР}',
+    '{РОЗДІЛ}',
+    '{СТИЛЬ}',
+    '{ФРАГМЕНТ}',
+    '{КОНТЕКСТ_ПІСЛЯ}',
+    '{КІЛЬКІСТЬ_АБЗАЦІВ}',
+    '{ОБСЯГ}',
+    '{МОВА}',
+  ],
 };
 
 /** Чи модуль повертає JSON за жорсткою схемою (схема — readonly-текст у конструкторі, не редагується). */
@@ -114,6 +133,7 @@ export const CORE_MODULE_HAS_JSON_SCHEMA: Record<CoreModuleKey, boolean> = {
   characterPromptCraft: true,
   characterBioPrompt: true,
   synopsisToChapter: false,
+  selectionToParagraphs: false,
 };
 
 /**
@@ -177,6 +197,11 @@ export function factoryCoreTemplate(module: CoreModuleKey): CorePromptTemplate {
       return { system: factoryCharacterBioSystemTemplate(), user: factoryCharacterBioUserTemplate() };
     case 'synopsisToChapter':
       return { system: synopsisToChapterSystemInstruction(), user: factorySynopsisToChapterTemplate() };
+    case 'selectionToParagraphs':
+      return {
+        system: selectionParagraphsSystemInstruction(),
+        user: factorySelectionParagraphsTemplate(),
+      };
   }
 }
 
@@ -316,5 +341,26 @@ export function renderCoreTemplate(
           wordBudget: fields.wordBudget,
         }),
       };
+    case 'selectionToParagraphs': {
+      // Кількість абзаців приходить із форми рядком ('1'|'2'|'3'); усе інше
+      // трактуємо як 1 — так само, як роут відсікає сміття з тіла запиту.
+      const raw = Number(fields.paragraphCount);
+      const count = (raw === 2 || raw === 3 ? raw : 1) as SelectionParagraphCount;
+      const language = (fields.language === 'en' ? 'en' : 'uk') as SelectionTextLanguage;
+      return {
+        system: template.system,
+        user: renderSelectionParagraphsTemplate(template.user, {
+          selection: fields.selection || '',
+          language,
+          paragraphCount: count,
+          bookTitle: fields.bookTitle,
+          genre: fields.genre,
+          chapterTitle: fields.chapterTitle,
+          styleGuide: fields.styleGuide,
+          contextAfter: fields.contextAfter,
+          wordBudget: fields.wordBudget,
+        }),
+      };
+    }
   }
 }

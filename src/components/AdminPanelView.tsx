@@ -20,6 +20,7 @@ import {
   Percent,
   CreditCard,
   Coins,
+  Link2,
 } from 'lucide-react';
 import { AiPricingAnalyticsView } from './AiPricingAnalyticsView';
 import {
@@ -41,7 +42,7 @@ import {
 import type { AdminUserRow, UserRole } from '../types';
 import { getRoleInfo } from '../utils/rbac';
 
-type AdminTab = 'users' | 'roles' | 'costs' | 'business' | 'ai';
+type AdminTab = 'users' | 'roles' | 'costs' | 'business' | 'ai' | 'bridge';
 
 interface RoleRow {
   role: UserRole;
@@ -135,6 +136,168 @@ const PERMISSION_LABELS: Record<string, string> = {
 };
 
 const usd = (n: number) => `$${n.toFixed(n < 1 ? 4 : 2)}`;
+
+/**
+ * Міст до вітрини Fusion Lab — адреса API маркетплейсу і спільний ключ.
+ *
+ * Свідомо окремий компонент зі своїм завантаженням: решта вкладок тягне
+ * один спільний знімок адмінських даних, а ці налаштування читаються
+ * рідко й не мають сенсу в тому запиті. Ключ ніколи не приходить із
+ * сервера — лише відбиток, тож поле завжди порожнє, а «збережено» видно
+ * по відбитку поруч.
+ */
+const MarketplaceBridgePanel: React.FC = () => {
+  const [url, setUrl] = useState('');
+  const [key, setKey] = useState('');
+  const [view, setView] = useState<{
+    url: string;
+    keySet: boolean;
+    keyFingerprint?: string;
+    cryptoConfigured: boolean;
+  } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/marketplace-bridge', { credentials: 'same-origin' });
+      if (!res.ok) throw new Error('Не вдалося прочитати налаштування мосту.');
+      const data = await res.json();
+      setView(data);
+      setUrl(data.url || '');
+    } catch (err: any) {
+      setMessage({ tone: 'err', text: err?.message || 'Помилка завантаження.' });
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const save = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/admin/marketplace-bridge', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        // Ключ надсилаємо лише якщо адмін його вписав: порожнє поле означає
+        // «не чіпати збережений», а не «стерти».
+        body: JSON.stringify(key.trim() ? { url, key } : { url }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Не вдалося зберегти.');
+      setView(data);
+      setKey('');
+      setMessage({ tone: 'ok', text: 'Збережено.' });
+    } catch (err: any) {
+      setMessage({ tone: 'err', text: err?.message || 'Помилка збереження.' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const test = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/admin/marketplace-bridge/test', {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Маркетплейс не відповів.');
+      setMessage({
+        tone: data.ok ? 'ok' : 'err',
+        text: data.ok ? `Звʼязок є: ${data.body || 'HTTP ' + data.status}` : `HTTP ${data.status}`,
+      });
+    } catch (err: any) {
+      setMessage({ tone: 'err', text: err?.message || 'Помилка перевірки.' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4 max-w-3xl">
+      <div className="p-5 rounded-2xl bg-slate-900/60 border border-white/[0.06] space-y-4">
+        <div>
+          <h3 className="text-sm font-bold text-slate-100">Міст «Nova → вітрина Fusion Lab»</h3>
+          <p className="text-[11px] text-slate-400 leading-snug mt-1">
+            Адреса API маркетплейсу і спільний ключ <code className="text-amber-300">BRIDGE_API_KEY</code>. Той самий
+            ключ має стояти у змінних сервісу API на Railway — саме за ним маркетплейс упізнає запити Студії.
+          </p>
+        </div>
+
+        <label className="block">
+          <span className="block text-[11px] font-semibold text-slate-300 mb-1">Адреса API маркетплейсу</span>
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://api.fusionlab.in.ua"
+            className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none focus:border-amber-500/60"
+          />
+        </label>
+
+        <label className="block">
+          <span className="block text-[11px] font-semibold text-slate-300 mb-1">
+            Ключ мосту
+            {view?.keySet && (
+              <span className="ml-2 font-mono text-[10px] text-emerald-300">
+                збережено · відбиток {view.keyFingerprint || '—'}
+              </span>
+            )}
+          </span>
+          <input
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            type="password"
+            autoComplete="off"
+            placeholder={view?.keySet ? 'Залиште порожнім, щоб не міняти' : 'Вставте ключ…'}
+            className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none focus:border-amber-500/60 font-mono"
+          />
+        </label>
+
+        {view && !view.cryptoConfigured && (
+          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-amber-200 text-[11px]">
+            Не налаштований <code>USER_API_KEY_SECRET</code> — без нього ключ мосту неможливо зашифрувати, і збереження
+            буде відхилено.
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => void save()}
+            disabled={busy}
+            className="px-4 py-2 rounded-xl bg-amber-500 text-slate-950 text-xs font-bold disabled:opacity-60"
+          >
+            Зберегти
+          </button>
+          <button
+            onClick={() => void test()}
+            disabled={busy || !view?.keySet}
+            className="px-4 py-2 rounded-xl badge-glass text-slate-200 text-xs font-bold disabled:opacity-40"
+          >
+            Перевірити звʼязок
+          </button>
+        </div>
+
+        {message && (
+          <div
+            className={`p-3 rounded-xl text-[11px] border ${
+              message.tone === 'ok'
+                ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-200'
+                : 'bg-rose-500/10 border-rose-500/40 text-rose-200'
+            }`}
+          >
+            {message.text}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 export const AdminPanelView: React.FC = () => {
   const [tab, setTab] = useState<AdminTab>('business');
@@ -290,6 +453,7 @@ export const AdminPanelView: React.FC = () => {
             ['ai', 'Тарифи та аналітика ШІ', Coins],
             ['users', 'Користувачі', Users],
             ['roles', 'Права доступу', ShieldCheck],
+            ['bridge', 'Міст до вітрини', Link2],
           ] as const).map(([id, label, Icon]) => (
             <button
               key={id}
@@ -323,6 +487,8 @@ export const AdminPanelView: React.FC = () => {
       {/* --------------------------- БІЗНЕС-АНАЛІТИКА --------------------------- */}
       {/* ------------------- ТАРИФИ ТА АНАЛІТИКА ШІ ------------------- */}
       {tab === 'ai' && <AiPricingAnalyticsView />}
+
+      {tab === 'bridge' && <MarketplaceBridgePanel />}
 
       {tab === 'business' && revenue && (
         <div className="space-y-6">

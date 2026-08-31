@@ -1,0 +1,254 @@
+/**
+ * Міст «Nova → вітрина Fusion Lab».
+ *
+ * У маркетплейсі вже є приймач — `POST /bridge/books`, який створює або
+ * оновлює лістинг книги за парою (джерело, externalId) і авторизується
+ * спільним секретом у заголовку `x-bridge-key` (ADR 0001 маркетплейсу).
+ * Бракувало саме цієї половини: з боку Nova мосту не існувало.
+ *
+ * Чому адреса й ключ живуть у БД, а не в змінних оточення: власник
+ * платформи має міняти їх з адмінпанелі, не передеплоюючи Railway — так
+ * прямо й було замовлено. Ключ при цьому не лежить відкритим текстом: він
+ * шифрується тим самим AES-контуром, що й ключі API користувачів
+ * (server/userApiKeyCrypto.ts, секрет USER_API_KEY_SECRET). Якщо секрет
+ * шифрування не налаштований, міст свідомо відмовляється зберігати ключ —
+ * краще чесна помилка, ніж секрет у відкритому вигляді в `meta`.
+ */
+
+import {
+  encryptApiKey,
+  decryptApiKey,
+  apiKeyFingerprint,
+  isApiKeyCryptoConfigured,
+} from './userApiKeyCrypto';
+import { getAppSetting, setAppSetting } from './store';
+
+/** Ключі в таблиці `meta`. */
+export const BRIDGE_URL_KEY = 'marketplace_bridge_url';
+export const BRIDGE_SECRET_KEY = 'marketplace_bridge_key';
+
+export class MarketplaceBridgeError extends Error {
+  constructor(
+    message: string,
+    readonly kind:
+      | 'not_configured'
+      | 'crypto_unavailable'
+      | 'unauthorized'
+      | 'rejected'
+      | 'unreachable'
+      | 'bad_url',
+    readonly status = 500,
+    readonly details?: string
+  ) {
+    super(message);
+  }
+}
+
+export interface BridgeSettings {
+  url: string;
+  /** Розшифрований секрет. Ніколи не виходить за межі сервера. */
+  key: string;
+}
+
+export interface BridgeSettingsView {
+  url: string;
+  keySet: boolean;
+  /** Короткий відбиток — щоб адмін бачив, ЧИ ТОЙ ключ, не показуючи сам ключ. */
+  keyFingerprint?: string;
+  cryptoConfigured: boolean;
+}
+
+/**
+ * Адреса приймається лише як абсолютний https-URL (або http для localhost —
+ * розробка). Це не косметика: у цей URL піде секрет у заголовку, і
+ * помилковий `http://` на публічний домен віддав би його відкритим текстом.
+ */
+export function normalizeBridgeUrl(raw: string): string {
+  const trimmed = (raw || '').trim().replace(/\/+$/, '');
+  if (!trimmed) return '';
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new MarketplaceBridgeError('Адреса API маркетплейсу має бути повним URL.', 'bad_url', 400);
+  }
+  const isLocal = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+  if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && isLocal)) {
+    throw new MarketplaceBridgeError(
+      'Адреса має починатись з https:// — інакше ключ мосту піде мережею відкритим текстом.',
+      'bad_url',
+      400
+    );
+  }
+  return trimmed;
+}
+
+export async function readBridgeSettingsView(): Promise<BridgeSettingsView> {
+  const url = (await getAppSetting(BRIDGE_URL_KEY)) || '';
+  const stored = await getAppSetting(BRIDGE_SECRET_KEY);
+  const cryptoConfigured = isApiKeyCryptoConfigured();
+
+  let keyFingerprint: string | undefined;
+  if (stored && cryptoConfigured) {
+    try {
+      keyFingerprint = apiKeyFingerprint(decryptApiKey(stored));
+    } catch {
+      // Ключ є, але не розшифровується (змінили USER_API_KEY_SECRET) —
+      // показуємо «є, але зіпсований», а не падаємо всією сторінкою.
+      keyFingerprint = undefined;
+    }
+  }
+
+  return { url, keySet: Boolean(stored), keyFingerprint, cryptoConfigured };
+}
+
+export async function readBridgeSettings(): Promise<BridgeSettings> {
+  const url = (await getAppSetting(BRIDGE_URL_KEY)) || '';
+  const stored = await getAppSetting(BRIDGE_SECRET_KEY);
+  if (!url || !stored) {
+    throw new MarketplaceBridgeError(
+      'Міст до вітрини не налаштований: задайте адресу API та ключ в адмінпанелі.',
+      'not_configured',
+      409
+    );
+  }
+  if (!isApiKeyCryptoConfigured()) {
+    throw new MarketplaceBridgeError(
+      'USER_API_KEY_SECRET не налаштований — ключ мосту неможливо розшифрувати.',
+      'crypto_unavailable',
+      503
+    );
+  }
+  return { url, key: decryptApiKey(stored) };
+}
+
+export async function saveBridgeSettings(input: { url?: string; key?: string }): Promise<BridgeSettingsView> {
+  if (typeof input.url === 'string') {
+    await setAppSetting(BRIDGE_URL_KEY, normalizeBridgeUrl(input.url));
+  }
+
+  if (typeof input.key === 'string') {
+    const key = input.key.trim();
+    if (key) {
+      if (!isApiKeyCryptoConfigured()) {
+        throw new MarketplaceBridgeError(
+          'Не можу зберегти ключ: не налаштований USER_API_KEY_SECRET для шифрування.',
+          'crypto_unavailable',
+          503
+        );
+      }
+      await setAppSetting(BRIDGE_SECRET_KEY, encryptApiKey(key));
+    } else {
+      // Порожній рядок — свідоме прибирання ключа, а не «нічого не міняти»:
+      // поле в формі надсилається лише коли адмін його торкався.
+      await setAppSetting(BRIDGE_SECRET_KEY, '');
+    }
+  }
+
+  return readBridgeSettingsView();
+}
+
+/** Формат товару у вітрині: одна книга дає два лістинги з різною ціною. */
+export type MarketplaceFormat = 'digital' | 'print';
+
+export interface PublishBookInput {
+  /** Ідентифікатор книги в Nova — основа для externalId, тому публікація ідемпотентна. */
+  bookId: string;
+  format: MarketplaceFormat;
+  title: string;
+  subtitle?: string;
+  summary?: string;
+  description?: string;
+  /** Ціна в копійках — маркетплейс тримає гроші лише в мінорних одиницях. */
+  priceMinor: number;
+  coverUrl?: string;
+  highlights?: string[];
+  sellerSlug?: string;
+}
+
+export interface PublishBookResult {
+  externalId: string;
+  format: MarketplaceFormat;
+  listing: unknown;
+}
+
+/**
+ * `externalId` містить формат: інакше другий виклик (друкована версія)
+ * оновив би той самий лістинг, що й перший, замість створити сусідній —
+ * приймач у маркетплейсі ідемпотентний саме за цим полем.
+ */
+export function bridgeExternalId(bookId: string, format: MarketplaceFormat): string {
+  return `${bookId}:${format}`;
+}
+
+const TIMEOUT_MS = 20000;
+
+export async function publishBookToMarketplace(
+  input: PublishBookInput,
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<PublishBookResult> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+  const externalId = bridgeExternalId(input.bookId, input.format);
+
+  const body = {
+    externalId,
+    title: input.title,
+    subtitle: input.subtitle,
+    summary: input.summary,
+    description: input.description,
+    priceMinor: Math.round(input.priceMinor),
+    coverUrl: input.coverUrl,
+    highlights: input.highlights,
+    sellerSlug: input.sellerSlug,
+  };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await doFetch(`${settings.url}/bridge/books`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-bridge-key': settings.key },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const text = await response.text().catch(() => '');
+  if (response.status === 401) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401,
+      text.slice(0, 400)
+    );
+  }
+  if (!response.ok) {
+    throw new MarketplaceBridgeError(
+      `Маркетплейс відхилив публікацію (HTTP ${response.status}).`,
+      'rejected',
+      502,
+      text.slice(0, 400)
+    );
+  }
+
+  let listing: unknown = undefined;
+  try {
+    listing = text ? JSON.parse(text) : undefined;
+  } catch {
+    listing = { raw: text.slice(0, 400) };
+  }
+
+  return { externalId, format: input.format, listing };
+}

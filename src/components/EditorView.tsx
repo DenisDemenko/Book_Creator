@@ -1048,6 +1048,136 @@ export const EditorView: React.FC<EditorViewProps> = ({
     await runAiParagraphsRequest(imageId, modelId, paragraphCount, editorKind, getPos);
   };
 
+  // -------------------------------------------------------------------------
+  // «Вставити абзац згенерованого ШІ тексту на основі виділеного фрагмента»
+  // (завдання 3б). Дзеркало генерації за фото, але джерело — виділення
+  // письменника, а не картинка.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Редактор, у якому зараз лежить непорожнє виділення. Редакторів два (UA і
+   * EN), а контекстне меню одне на всю робочу область — тож перед запитом
+   * треба з'ясувати, ЗВІДКИ брати текст. Сфокусований має пріоритет: якщо
+   * автор перемикався між колонками, виділення могло лишитись у кожній, і
+   * правильна відповідь — та, де курсор.
+   */
+  const getSelectionSource = (): { editor: Editor; kind: 'ua' | 'en'; text: string; to: number } | null => {
+    const candidates: { editor: Editor | null; kind: 'ua' | 'en' }[] = [
+      { editor: uaEditor, kind: 'ua' },
+      { editor: enEditor, kind: 'en' },
+    ];
+    const ordered = [...candidates].sort(
+      (a, b) => Number(Boolean(b.editor?.isFocused)) - Number(Boolean(a.editor?.isFocused))
+    );
+    for (const candidate of ordered) {
+      const editor = candidate.editor;
+      if (!editor) continue;
+      const { from, to } = editor.state.selection;
+      if (to <= from) continue;
+      // Роздільник '\n\n' між блоками — щоб модель бачила межі абзаців так
+      // само, як їх бачить читач, а не суцільним рядком.
+      const text = editor.state.doc.textBetween(from, to, '\n\n', ' ').trim();
+      if (text) return { editor, kind: candidate.kind, text, to };
+    }
+    return null;
+  };
+
+  /** Чи є що передавати моделі — вмикає/вимикає пункт меню без запиту на сервер. */
+  const hasUsableSelection = (): boolean => {
+    const source = getSelectionSource();
+    return Boolean(source && source.text.length >= 40);
+  };
+
+  const [selectionAiBusy, setSelectionAiBusy] = useState<1 | 2 | 3 | null>(null);
+  const [showSelectionSubmenu, setShowSelectionSubmenu] = useState(false);
+
+  // Список моделей потрібен уже на першому рендері панелі (випадаючий вибір
+  // LLM), а не лише в мить генерації — тож тягнемо його одразу при відкритті
+  // розділу. ensureAiCoreModels сам кешує: другий виклик мережу не чіпає.
+  useEffect(() => {
+    void ensureAiCoreModels();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * Порожнє значення — це не «нічого не обрано», а окремий робочий стан:
+   * «хай вирішує адміністратор». Саме його сервер трактує як дозвіл узяти
+   * модель із прив'язки модуля (server/coreModuleModels.ts), тож підставляти
+   * сюди першу-ліпшу доступну модель не можна — це мовчки відібрало б у
+   * адміна керування.
+   */
+  const effectiveAiModelId = book.preferredAiModelId || '';
+
+  /**
+   * Текст, що йде ОДРАЗУ ПІСЛЯ виділення, — той самий контекст, який промпт
+   * за фото бере з абзацу-сусіда: без нього вставка ризикує суперечити
+   * наступному абзацу або дослівно його повторити.
+   */
+  const getTextAfterSelection = (editor: Editor, to: number): string => {
+    const $to = editor.state.doc.resolve(to);
+    const blockEnd = $to.depth > 0 ? $to.after(1) : to;
+    const tail = editor.state.doc.textBetween(blockEnd, Math.min(blockEnd + 900, editor.state.doc.content.size), '\n\n', ' ');
+    return tail.trim();
+  };
+
+  const runSelectionParagraphs = async (paragraphCount: 1 | 2 | 3) => {
+    const source = getSelectionSource();
+    if (!source) {
+      setAiEngineToast(t('editor.selectionAiNoSelection'));
+      setTimeout(() => setAiEngineToast(null), 4000);
+      return;
+    }
+
+    const models = await ensureAiCoreModels();
+    const modelId =
+      book.preferredAiModelId || models.find((m) => m.engine === 'gemini')?.id || 'gemini-3.7-flash';
+
+    setSelectionAiBusy(paragraphCount);
+    try {
+      const res = await fetch('/api/ai/generate-paragraphs-from-selection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          selection: source.text,
+          modelId,
+          paragraphCount,
+          language: source.kind === 'en' ? 'en' : 'uk',
+          bookTitle: book.title,
+          genre: book.genre,
+          chapterTitle: activeChapter?.title,
+          bookId: book.id,
+          contextAfter: getTextAfterSelection(source.editor, source.to),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setAiEngineToast(String(data?.error || t('editor.selectionAiFailed')));
+        setTimeout(() => setAiEngineToast(null), 6000);
+        return;
+      }
+      const text = String(data.text || '').trim();
+      if (!text) {
+        setAiEngineToast(t('editor.selectionAiFailed'));
+        setTimeout(() => setAiEngineToast(null), 4000);
+        return;
+      }
+
+      // Вставляємо ПІСЛЯ блоку, у якому закінчується виділення: «AI-чернетка»
+      // — вузол рівня документа, і вставка всередину абзацу розірвала б його
+      // навпіл замість того, щоб лягти окремим блоком під виділеним місцем.
+      const $to = source.editor.state.doc.resolve(source.to);
+      const insertAt = $to.depth > 0 ? $to.after(1) : source.to;
+      const snippet = `[AI-DRAFT]\n\n${text}\n\n[/AI-DRAFT]`;
+      source.editor.chain().focus().insertContentAt(insertAt, markerSnippetToNodes(snippet)).run();
+    } catch {
+      setAiEngineToast(t('editor.selectionAiFailed'));
+      setTimeout(() => setAiEngineToast(null), 4000);
+    } finally {
+      setSelectionAiBusy(null);
+    }
+  };
+
   // Закриває меню/пікер AI-тексту за фото при кліку/Esc поза ним.
   useEffect(() => {
     if (!aiImageMenu && !aiEnginePicker) return;
@@ -1277,6 +1407,43 @@ export const EditorView: React.FC<EditorViewProps> = ({
       >
         <Italic className="w-3.5 h-3.5" />
       </button>
+
+      {/* Вибір LLM для генерації тексту книги (завдання 3). Значення живе в
+          самій книзі (`preferredAiModelId`) — те саме поле, яким уже
+          користується генерація за фото, тож вибір діє на всі ШІ-дії
+          розділу «Книга і текст», а не лише на одну кнопку. Моделі без
+          ключа показані, але недоступні: письменник має бачити, ЩО саме
+          можна підключити, а не порожній список. */}
+      <select
+        value={effectiveAiModelId}
+        onChange={(e) => {
+          const value = e.target.value;
+          const label = aiCoreModels.find((m) => m.id === value)?.label || value;
+          onUpdateBook(
+            { ...book, preferredAiModelId: value },
+            'Рушій AI книги',
+            `Рушій AI для книги змінено на «${label}».`
+          );
+        }}
+        disabled={isReader || aiCoreModels.length === 0}
+        className="px-2.5 py-1.5 rounded-md bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed min-w-[150px]"
+        title={t('editor.aiModelSelectTitle')}
+        aria-label={t('editor.aiModelSelectTitle')}
+      >
+        <option value="" className="bg-slate-900 text-slate-100">
+          {aiCoreModels.length === 0 ? t('editor.aiModelSelectEmpty') : t('editor.aiModelSelectAuto')}
+        </option>
+        {aiCoreModels.map((m) => (
+          <option
+            key={m.id}
+            value={m.id}
+            disabled={!m.available}
+            className="bg-slate-900 text-slate-100"
+          >
+            {m.available ? m.label : `${m.label} — ${t('editor.aiModelNoKey')}`}
+          </option>
+        ))}
+      </select>
 
       {(() => {
         const selectedWrap = isEn ? enSelectedImageWrap : uaSelectedImageWrap;
@@ -4514,6 +4681,46 @@ export const EditorView: React.FC<EditorViewProps> = ({
             <ImagePlus className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
             <span className="flex-1 text-slate-200">{t('editor.contextMenuInsertImage')}</span>
           </button>
+
+          {/* Абзац(и) за виділеним фрагментом — розгортається вибором кількості.
+              Вимкнений, поки виділення немає: інакше пункт обіцяв би дію, яка
+              одразу поверне помилку. */}
+          <div>
+            <button
+              onClick={() => setShowSelectionSubmenu((v) => !v)}
+              disabled={isReader || !hasUsableSelection() || selectionAiBusy !== null}
+              className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-white/[0.06] text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              title={hasUsableSelection() ? undefined : t('editor.selectionAiNoSelection')}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-fuchsia-400 shrink-0" />
+              <span className="flex-1 text-slate-200">{t('editor.contextMenuSelectionParagraphs')}</span>
+              <ChevronDown
+                className={`w-3.5 h-3.5 text-slate-500 shrink-0 transition-transform ${showSelectionSubmenu ? 'rotate-180' : ''}`}
+              />
+            </button>
+
+            {showSelectionSubmenu && (
+              <div className="pl-6 pr-1 pb-1 flex flex-col gap-0.5">
+                {([1, 2, 3] as const).map((count) => (
+                  <button
+                    key={count}
+                    onClick={() => {
+                      setContextMenu(null);
+                      setShowSelectionSubmenu(false);
+                      void runSelectionParagraphs(count);
+                    }}
+                    disabled={selectionAiBusy !== null}
+                    className="w-full text-left px-2.5 py-1.5 rounded-lg text-slate-300 hover:bg-white/[0.06] transition-colors disabled:opacity-40"
+                  >
+                    {t('editor.selectionAiCount', { count: String(count) })}
+                  </button>
+                ))}
+                <div className="px-2.5 pt-1 text-[10px] leading-snug text-slate-500">
+                  {t('editor.selectionAiPromptHint')}
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Вставити репліку героя — розгортається переліком героїв книги */}
           <div className="pt-1 mt-1 border-t border-white/[0.06]">

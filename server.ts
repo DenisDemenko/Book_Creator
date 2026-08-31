@@ -83,6 +83,11 @@ import {
   type CoreModuleKey,
   type CorePromptTemplateBundle,
 } from './server/coreAiRegistry';
+import {
+  readCoreModuleModels,
+  setCoreModuleModel,
+  resolveModuleModelId,
+} from './server/coreModuleModels';
 import { formatManuscriptWithClaude, anthropicConfig, ClaudeManuscriptError, MAX_MANUSCRIPT_CHARS } from './server/claudeManuscript';
 import { purgeExpiredSessions, initStore, getUserStyle, upsertUserStyle, deleteUserStyle, getUserApiKey, listUserApiKeys, getUserPromptTemplates, upsertUserPromptTemplates, deleteUserPromptTemplates, getAppSetting, setAppSetting } from './server/store';
 import { decryptApiKey } from './server/userApiKeyCrypto';
@@ -1817,6 +1822,28 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
   });
 
   /**
+   * Прив'язка «модуль → модель», якою він виконується. Читає й пише лише
+   * адмін; решта сайту користується нею опосередковано, через
+   * resolveModuleModelId у самих маршрутах.
+   */
+  app.get('/api/ai/core-module-models', requireAdmin, async (_req, res) => {
+    res.json({ models: await readCoreModuleModels(), modules: CORE_MODULE_KEYS });
+  });
+
+  app.put('/api/ai/core-module-models', requireAdmin, async (req, res) => {
+    const { module, modelId } = req.body || {};
+    if (!isCoreModuleKey(module)) {
+      return res.status(400).json({ error: `Невідомий модуль ядра: ${module}`, kind: 'bad_input' });
+    }
+    if (modelId !== null && modelId !== undefined && typeof modelId !== 'string') {
+      return res.status(400).json({ error: 'modelId має бути рядком або null.', kind: 'bad_input' });
+    }
+    // Порожній рядок = «хай працює серверний дефолт», а не збережена порожнеча.
+    const models = await setCoreModuleModel(module, typeof modelId === 'string' ? modelId : null);
+    res.json({ models });
+  });
+
+  /**
    * Тестовий виклик — РЕАЛЬНИЙ запит до моделі (Q11/Q14 grilling-сесії), не
    * текстовий прев'ю: адмін підправляє шаблон і одразу бачить, як модель
    * реально відповідає, з тестовими вхідними даними, які він сам вписав
@@ -1919,8 +1946,10 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
   app.post('/api/ai/generate-manuscript-paragraphs-from-image', requirePermission('canUseAi'), async (req, res) => {
     const { imageUrl, modelId, paragraphCount, language, bookTitle, genre, chapterTitle, bookId, contextBefore, contextAfter, imageCaption } =
       req.body || {};
-    const engine = resolveChatEngine(modelId || GEMINI_MODEL);
-    const resolvedModelId = modelId || GEMINI_MODEL;
+    // Той самий ланцюжок пріоритетів, що й у генерації за виділенням:
+    // вибір автора → прив'язка адміна (модуль «Текст за фото») → дефолт.
+    const resolvedModelId = (await resolveModuleModelId('textFromImage', modelId)) || GEMINI_MODEL;
+    const engine = resolveChatEngine(resolvedModelId);
     try {
       if (!imageUrl || typeof imageUrl !== 'string') {
         return res.status(400).json({ error: 'Потрібне зображення для аналізу.' });
@@ -2026,6 +2055,103 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
       const kind = err instanceof TextFromImageError ? err.kind : 'unknown';
       const status = kind === 'no_key' ? 503 : kind === 'quota' ? 429 : kind === 'bad_image' ? 400 : 500;
       res.status(status).json({ error: err?.message || 'Не вдалося згенерувати текст за зображенням.', kind });
+    }
+  });
+
+  /**
+   * «Вставити абзац згенерованого ШІ тексту на основі виділеного фрагмента»
+   * — правий клік у тексті книги (завдання 3б).
+   *
+   * Дзеркало маршруту за зображенням вище, з двома відмінностями:
+   *   • вхід — текст, а не картинка, тож vision-рушій не потрібен і будь-яка
+   *     підключена модель годиться;
+   *   • шаблон промту береться з реєстру «Ядро AI» (модуль
+   *     `selectionToParagraphs`), тобто редагується АДМІНОМ у конструкторі —
+   *     саме цього вимагало завдання. Письменницького шару тут свідомо
+   *     немає: інструкція одна на всю платформу.
+   */
+  app.post('/api/ai/generate-paragraphs-from-selection', requirePermission('canUseAi'), async (req, res) => {
+    const { selection, modelId, paragraphCount, language, bookTitle, genre, chapterTitle, bookId, contextAfter } =
+      req.body || {};
+    // Автор → адмін → серверний дефолт. Порожній modelId з клієнта означає
+    // «хай вирішує адміністратор», а не «Gemini».
+    const resolvedModelId = (await resolveModuleModelId('selectionToParagraphs', modelId)) || GEMINI_MODEL;
+    const engine = resolveChatEngine(resolvedModelId);
+    try {
+      const selectedText = typeof selection === 'string' ? selection.trim() : '';
+      if (!selectedText) {
+        return res.status(400).json({ error: 'Спершу виділіть фрагмент тексту в книзі.', kind: 'empty_selection' });
+      }
+      // Нижня межа — щоб випадкове виділення одного слова не з'їдало токени
+      // й не давало моделі приводу вигадувати сцену з нічого.
+      if (selectedText.length < 40) {
+        return res.status(400).json({
+          error: 'Виділений фрагмент замалий — виділіть щонайменше речення (40 символів).',
+          kind: 'selection_too_short',
+        });
+      }
+
+      const count = [1, 2, 3].includes(paragraphCount) ? paragraphCount : 1;
+      const lang = language === 'en' ? 'en' : 'uk';
+
+      const userId = req.principal?.id as string | undefined;
+      let userKey: string | undefined;
+      if (userId) {
+        const stored = await getUserApiKey(userId, engine).catch(() => undefined);
+        if (stored) {
+          try {
+            userKey = decryptApiKey(stored.encryptedKey);
+          } catch (err) {
+            console.warn('[selection-paragraphs] не вдалося розшифрувати ключ користувача, пробуємо серверний:', err);
+          }
+        }
+      }
+      if (!userKey && !engineConfigured(engine)) {
+        return res.status(503).json({
+          error: `Рушій «${ENGINE_LABELS[engine]}» не налаштований: додайте ${ENGINE_ENV_KEY[engine]} у .env сервера або власний ключ у розділі «Ключі API».`,
+          kind: 'no_key',
+        });
+      }
+
+      // Файл стилю — та сама умова, що й скрізь: лише якщо автор сам
+      // увімкнув «Автоматично використовувати стиль».
+      let styleGuide: string | undefined;
+      if (userId) {
+        const style = await getUserStyle(userId).catch(() => undefined);
+        if (style?.autoUseStyle && style.contentMd) styleGuide = style.contentMd;
+      }
+
+      const adminLayer = await loadCoreAdminLayer();
+      const template = resolveCoreTemplate('selectionToParagraphs', adminLayer);
+      const rendered = renderCoreTemplate('selectionToParagraphs', template, {
+        selection: selectedText,
+        language: lang,
+        paragraphCount: String(count),
+        bookTitle,
+        genre,
+        chapterTitle,
+        styleGuide,
+        contextAfter: typeof contextAfter === 'string' ? contextAfter : undefined,
+      });
+
+      const result = await generateAiText({
+        engine,
+        modelId: resolvedModelId,
+        prompt: rendered.user,
+        systemInstruction: rendered.system,
+        apiKeyOverride: userKey,
+        req,
+        label: `AI-текст за виділенням (редактор)${chapterTitle ? `: ${chapterTitle}` : ''}`,
+        bookId,
+      });
+
+      res.json({ text: result.text, engine, modelId: resolvedModelId, timestamp: new Date().toISOString() });
+    } catch (err: any) {
+      console.error('Error in /api/ai/generate-paragraphs-from-selection:', err?.message || err);
+      if (err instanceof ChatProviderError) {
+        return res.status(err.status).json({ error: err.message });
+      }
+      res.status(500).json({ error: err?.message || 'Не вдалося згенерувати текст за виділенням.', kind: 'unknown' });
     }
   });
 

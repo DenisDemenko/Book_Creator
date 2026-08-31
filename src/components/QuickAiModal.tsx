@@ -707,6 +707,7 @@ const CORE_MODULE_LABELS: Record<CoreModuleKey, string> = {
   characterPromptCraft: 'Промпт персонажа',
   characterBioPrompt: 'Біографія персонажа',
   synopsisToChapter: 'Синопсис → глава',
+  selectionToParagraphs: 'Абзац за виділеним фрагментом',
 };
 
 const CORE_MODULE_DESCRIPTIONS: Record<CoreModuleKey, string> = {
@@ -717,6 +718,8 @@ const CORE_MODULE_DESCRIPTIONS: Record<CoreModuleKey, string> = {
   characterPromptCraft: 'Дані персонажа → англомовний промпт для генерації портрета. Схема відповіді не редагується.',
   characterBioPrompt: 'Опис ідеї → повна біографія й характеристика персонажа. Схема відповіді не редагується.',
   synopsisToChapter: 'НОВИЙ модуль: синопсис → чернетка тексту глави. Поки лише тут, без кнопки в інтерфейсі письменника.',
+  selectionToParagraphs:
+    'Правий клік у тексті книги → «Вставити абзац за виділеним фрагментом». Модель отримує саме виділення й дописує продовження сцени; результат лягає блоком «AI-чернетка» під виділенням.',
 };
 
 /** Плейсхолдер → поле тестових вхідних даних. Одна мапа обслуговує форму й підказки одразу для всіх модулів. */
@@ -742,6 +745,10 @@ const CORE_FIELD_DEFS: Record<string, { key: string; label: string; textarea?: b
   '{ПСИХОЛОГІЯ}': { key: 'personalityJson', label: 'Психологія (JSON)', textarea: true },
   '{ОПИС}': { key: 'promptDescription', label: 'Опис ідеї персонажа', textarea: true },
   '{ОБСЯГ}': { key: 'wordBudget', label: 'Обсяг (слів)', placeholder: '800-1500' },
+  '{ФРАГМЕНТ}': { key: 'selection', label: 'Виділений фрагмент книги', textarea: true },
+  '{КОНТЕКСТ_ПІСЛЯ}': { key: 'contextAfter', label: 'Текст одразу після виділення', textarea: true },
+  '{КІЛЬКІСТЬ_АБЗАЦІВ}': { key: 'paragraphCount', label: 'Скільки абзаців (1–3)', placeholder: '1' },
+  '{МОВА}': { key: 'language', label: 'Мова відповіді (uk / en)', placeholder: 'uk' },
 };
 
 /**
@@ -791,6 +798,52 @@ const CoreAiPanel: React.FC<{
   const [testFields, setTestFields] = useState<Record<string, Record<string, string>>>({});
   const [testResult, setTestResult] = useState<CoreTestCallResult | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
+
+  // Прив'язка «модуль → модель». Окремо від `selectedModel` угорі: той
+  // обслуговує ТЕСТОВИЙ виклик тут-і-зараз, а це — те, чим модуль реально
+  // працює на сайті для всіх користувачів.
+  const [moduleModels, setModuleModels] = useState<Record<string, string>>({});
+  const [moduleModelSaving, setModuleModelSaving] = useState(false);
+  const [moduleModelError, setModuleModelError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/ai/core-module-models', { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : { models: {} }))
+      .then((d) => {
+        if (!cancelled) setModuleModels((d?.models as Record<string, string>) || {});
+      })
+      .catch(() => {
+        /* нема звʼязку — лишаємо «за замовчуванням», не блокуючи вкладку */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const saveModuleModel = async (module: CoreModuleKey, modelId: string) => {
+    setModuleModelSaving(true);
+    setModuleModelError(null);
+    // Оптимістично: адмін одразу бачить свій вибір, а не «крутилку».
+    const previous = moduleModels;
+    setModuleModels({ ...previous, [module]: modelId });
+    try {
+      const res = await fetch('/api/ai/core-module-models', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ module, modelId: modelId || null }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Не вдалося зберегти вибір моделі.');
+      setModuleModels((data.models as Record<string, string>) || {});
+    } catch (err: any) {
+      setModuleModels(previous);
+      setModuleModelError(err?.message || 'Не вдалося зберегти вибір моделі.');
+    } finally {
+      setModuleModelSaving(false);
+    }
+  };
   const [testing, setTesting] = useState(false);
   /** Пікер медіатеки для «Текст за фото» — відкритий/закритий стан окремо від самих тестових полів. */
   const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
@@ -1103,7 +1156,37 @@ const CoreAiPanel: React.FC<{
           ))}
         </div>
 
-        <p className="text-[11px] text-[var(--outline)] mb-4 leading-snug">{CORE_MODULE_DESCRIPTIONS[activeModule]}</p>
+        <p className="text-[11px] text-[var(--outline)] mb-3 leading-snug">{CORE_MODULE_DESCRIPTIONS[activeModule]}</p>
+
+        {/* Якою моделлю працює ЦЕЙ модуль на сайті. Окремо від вибору моделі
+            для тестового виклику вгорі — там разова перевірка, тут постійне
+            налаштування платформи. «За замовчуванням» лишає рішення
+            серверу: так само, як було до появи цього поля. */}
+        <div className="nm-outset rounded-2xl p-3 mb-4 flex flex-wrap items-center gap-3">
+          <div className="min-w-0">
+            <div className="text-[11px] font-semibold text-[var(--on-surface)]">Модель, якою працює модуль</div>
+            <div className="text-[10px] text-[var(--outline)] leading-snug">
+              Діє для всіх користувачів. Вибір автора в панелі редактора має вищий пріоритет.
+            </div>
+          </div>
+          <select
+            value={moduleModels[activeModule] || ''}
+            disabled={moduleModelSaving}
+            onChange={(e) => void saveModuleModel(activeModule, e.target.value)}
+            className="ml-auto min-w-[220px] nm-inset rounded-lg px-2.5 py-1.5 text-[11px] font-bold text-[var(--on-surface)] bg-transparent outline-none cursor-pointer disabled:opacity-50"
+          >
+            <option value="">За замовчуванням (рішення сервера)</option>
+            {models.map((m) => (
+              <option key={m.id} value={m.id} disabled={!m.available}>
+                {m.label}
+                {m.available ? '' : ' (без ключа)'}
+              </option>
+            ))}
+          </select>
+          {moduleModelError && (
+            <div className="w-full text-[10px] text-rose-400">{moduleModelError}</div>
+          )}
+        </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
           {/* ---- Редактор шаблону ---- */}

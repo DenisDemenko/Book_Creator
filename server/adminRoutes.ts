@@ -41,6 +41,13 @@ import {
 import { pricingSnapshot } from './pricing';
 import { PLANS, PLAN_ORDER, priceFor, type PlanId } from './subscriptions';
 import { paypalConfig } from './payments/paypal';
+import {
+  readBridgeSettingsView,
+  saveBridgeSettings,
+  readBridgeSettings,
+  publishBookToMarketplace,
+  MarketplaceBridgeError,
+} from './marketplaceBridge';
 
 const ALL_ROLES: StoredRole[] = [
   'admin',
@@ -631,5 +638,86 @@ export function registerAdminRoutes(app: Express): void {
       activeSubscribersByPlan,
       costByEngine,
     });
+  });
+
+  // ---------------------------------------------------------------------
+  // Міст до вітрини Fusion Lab
+  // ---------------------------------------------------------------------
+
+  /**
+   * Адреса API маркетплейсу і спільний ключ мосту. Живуть у БД, а не в
+   * змінних оточення, щоб власник міняв їх з адмінпанелі без передеплою.
+   * Назовні ключ ніколи не віддається — лише факт наявності й відбиток.
+   */
+  app.get('/api/admin/marketplace-bridge', requireAdmin, async (_req, res) => {
+    res.json(await readBridgeSettingsView());
+  });
+
+  app.put('/api/admin/marketplace-bridge', requireAdmin, async (req, res) => {
+    const { url, key } = req.body || {};
+    try {
+      res.json(await saveBridgeSettings({ url, key }));
+    } catch (err: any) {
+      const status = err instanceof MarketplaceBridgeError ? err.status : 500;
+      res.status(status).json({ error: err?.message || 'Не вдалося зберегти налаштування мосту.', kind: err?.kind });
+    }
+  });
+
+  /**
+   * Перевірка зв'язку: свідомо б'ємо в /health маркетплейсу, а не в
+   * /bridge/books — тест не повинен створювати справжній лістинг.
+   */
+  app.post('/api/admin/marketplace-bridge/test', requireAdmin, async (_req, res) => {
+    try {
+      const settings = await readBridgeSettings();
+      const response = await fetch(`${settings.url}/health`, { signal: AbortSignal.timeout(15000) });
+      const body = await response.text().catch(() => '');
+      res.json({ ok: response.ok, status: response.status, body: body.slice(0, 300) });
+    } catch (err: any) {
+      const status = err instanceof MarketplaceBridgeError ? err.status : 502;
+      res.status(status).json({ error: err?.message || 'Маркетплейс не відповідає.', kind: err?.kind || 'unreachable' });
+    }
+  });
+
+  /**
+   * Публікація книги у вітрину. Два формати — два лістинги: у маркетплейсі
+   * одна ціна на лістинг, тож друкована й електронна версії живуть як
+   * сусідні товари, повʼязані спільним bookId у externalId.
+   */
+  app.post('/api/admin/marketplace-bridge/publish', requireAdmin, async (req, res) => {
+    const { bookId, title, subtitle, summary, description, coverUrl, highlights, sellerSlug, formats } = req.body || {};
+    if (!bookId || !title) {
+      return res.status(400).json({ error: 'Потрібні bookId і title.', kind: 'bad_input' });
+    }
+    const list = Array.isArray(formats) ? formats : [];
+    if (list.length === 0) {
+      return res.status(400).json({ error: 'Не вказано жодного формату з ціною.', kind: 'bad_input' });
+    }
+
+    try {
+      const settings = await readBridgeSettings();
+      const results = [];
+      for (const entry of list) {
+        const format = entry?.format === 'print' ? 'print' : 'digital';
+        const priceMinor = Number(entry?.priceMinor);
+        if (!Number.isFinite(priceMinor) || priceMinor < 0) {
+          return res.status(400).json({ error: `Некоректна ціна для формату «${format}».`, kind: 'bad_input' });
+        }
+        results.push(
+          await publishBookToMarketplace(
+            { bookId, format, title, subtitle, summary, description, priceMinor, coverUrl, highlights, sellerSlug },
+            { settings }
+          )
+        );
+      }
+      res.json({ published: results });
+    } catch (err: any) {
+      const status = err instanceof MarketplaceBridgeError ? err.status : 500;
+      res.status(status).json({
+        error: err?.message || 'Не вдалося опублікувати книгу у вітрині.',
+        kind: err?.kind,
+        details: err?.details,
+      });
+    }
   });
 }

@@ -112,25 +112,46 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
 /**
  * Групи бічної навігації (дерево з розкриттям). «Верстка PDF» перенесена
  * до блоку «Дизайн». Блоки підписані римськими цифрами I–V.
+ *
+ * Порядок «Книга і текст → Візуальна Біблія → Персонажі → Медіатека»
+ * задано свідомо: це один робочий цикл над книгою, і розкидані по трьох
+ * блоках розділи змушували автора стрибати навігацією на кожній ітерації
+ * «написав → проілюстрував → уточнив героя → поклав у медіатеку».
+ * «Ілюстрації» й «Медіатека» саме тому переїхали сюди з блоків
+ * «Дизайн» і «Експорт» — у тих лишилось те, що стосується вже готової
+ * книги (верстка, обкладинка, вивантаження).
  */
 const NAV_GROUPS: NavGroup[] = [
   {
     id: 'start',
     numeral: 'I',
     labelKey: 'groupStart',
-    tabs: ['express', 'dashboard', 'start', 'editor', 'toc', 'qr-footnotes', 'scenario', 'characters', 'mindboard', 'ai-studio'],
+    tabs: [
+      'express',
+      'dashboard',
+      'start',
+      'editor',
+      'illustrations',
+      'characters',
+      'media',
+      'toc',
+      'qr-footnotes',
+      'scenario',
+      'mindboard',
+      'ai-studio',
+    ],
   },
   {
     id: 'design',
     numeral: 'II',
     labelKey: 'groupDesign',
-    tabs: ['illustrations', 'layout', 'pdf-editor', 'preview', 'cover', 'changelog'],
+    tabs: ['layout', 'pdf-editor', 'preview', 'cover', 'changelog'],
   },
   {
     id: 'export',
     numeral: 'III',
     labelKey: 'groupExport',
-    tabs: ['export', 'media', 'kdp-format', 'publishing'],
+    tabs: ['export', 'kdp-format', 'publishing'],
   },
   {
     id: 'courses',
