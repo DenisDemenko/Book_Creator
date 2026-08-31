@@ -37,6 +37,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import type { GoogleGenAI } from '@google/genai';
+import { SEEDREAM_FAL_MODEL } from './pricing';
 
 export type ImageEngineId = 'nano-banana-2-lite' | 'nano-banana-2' | 'nano-banana-pro' | 'seedream';
 
@@ -109,7 +110,6 @@ export type SeedreamTransport = 'ark' | 'fal';
 
 /** Синхронний REST fal: віддає результат у тій самій відповіді. */
 const FAL_BASE_URL = (process.env.FAL_BASE_URL || 'https://fal.run').replace(/\/+$/, '');
-const FAL_MODEL = process.env.SEEDREAM_FAL_MODEL || 'fal-ai/bytedance/seedream/v4/text-to-image';
 
 /**
  * Ключ fal видається у форматі "<id>:<secret>"; ключ Ark — суцільний токен
@@ -206,6 +206,12 @@ export interface GeneratedImageResult {
   mimeType: string;
   engine: ImageEngineInfo;
   aspectRatio: SupportedRatio;
+  /**
+   * Модель, якою зображення СПРАВДІ згенеровано. Для Seedream вона не
+   * збігається з `engine.modelId`, коли запит пішов через fal, — а від
+   * неї залежить тариф.
+   */
+  modelId: string;
 }
 
 function classifyProviderError(err: unknown): ImageErrorKind {
@@ -307,7 +313,7 @@ async function generateWithFal(
 
   let res: Response;
   try {
-    res = await fetch(`${FAL_BASE_URL}/${FAL_MODEL}`, {
+    res = await fetch(`${FAL_BASE_URL}/${SEEDREAM_FAL_MODEL}`, {
       method: 'POST',
       headers: {
         Authorization: `Key ${apiKey}`,
@@ -484,13 +490,19 @@ export async function generateImage(
       : options.prompt.trim();
 
   try {
+    const viaFal = engine.provider === 'bytedance' && seedreamTransportFor(seedreamKey) === 'fal';
     const generated =
       engine.provider === 'bytedance'
-        ? seedreamTransportFor(seedreamKey) === 'fal'
+        ? viaFal
           ? await generateWithFal(engine, seedreamKey, prompt, aspectRatio, imageSize)
           : await generateWithSeedream(engine, seedreamKey, prompt, aspectRatio, imageSize, options.negativePrompt)
         : await generateWithNanoBanana(ai as GoogleGenAI, engine, prompt, aspectRatio, imageSize);
-    return { ...generated, engine, aspectRatio };
+    return {
+      ...generated,
+      engine,
+      aspectRatio,
+      modelId: viaFal ? SEEDREAM_FAL_MODEL : engine.modelId,
+    };
   } catch (err) {
     if (err instanceof ImageGenerationError) throw err;
     const kind = classifyProviderError(err);

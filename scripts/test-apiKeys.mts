@@ -100,7 +100,7 @@ console.log('\nШар сховища (server/store.ts):');
 // ---------------------------------------------------------------------------
 console.log('\nHTTP-роути (server/apiKeysRoutes.ts):');
 {
-  let currentPrincipal: any = { id: 'u-http', email: 'http@test.ua', name: 'Тест', role: 'writer', isGuest: false };
+  let currentPrincipal: any = { id: 'u-http', email: 'http@test.ua', name: 'Тест', role: 'admin', isGuest: false };
   const app = express();
   app.use(express.json());
   app.use((req: any, _res, next) => { req.principal = currentPrincipal; next(); });
@@ -147,6 +147,14 @@ console.log('\nHTTP-роути (server/apiKeysRoutes.ts):');
   );
   await call('DELETE', '/api/account/api-keys/seedream');
 
+  const prevPrincipal = currentPrincipal;
+  currentPrincipal = { id: 'u-writer', email: 'writer@test.ua', name: 'Письменник', role: 'writer', isGuest: false };
+  const writerGet = await call('GET', '/api/account/api-keys');
+  t('письменник не має доступу до ключів → 403', writerGet.status === 403, String(writerGet.status));
+  const writerPut = await call('PUT', '/api/account/api-keys/groq', { apiKey: 'gsk-writer' });
+  t('письменник не може зберегти ключ → 403', writerPut.status === 403, String(writerPut.status));
+  currentPrincipal = prevPrincipal;
+
   const badEngine = await call('PUT', '/api/account/api-keys/not-a-real-engine', { apiKey: 'sk-x' });
   t('невідомий провайдер → 400', badEngine.status === 400, String(badEngine.status));
 
@@ -164,11 +172,11 @@ console.log('\nHTTP-роути (server/apiKeysRoutes.ts):');
   t('інші провайдери лишились не заданими', afterSave.data.keys.filter((k: any) => k.engine !== 'groq').every((k: any) => k.configured === false));
 
   // Ізоляція між користувачами
-  currentPrincipal = { id: 'u-other', email: 'other@test.ua', name: 'Інший', role: 'writer', isGuest: false };
+  currentPrincipal = { id: 'u-other', email: 'other@test.ua', name: 'Інший', role: 'admin', isGuest: false };
   const otherView = await call('GET', '/api/account/api-keys');
   const otherGroq = otherView.data.keys.find((k: any) => k.engine === 'groq');
   t('чужий ключ не видно іншому користувачу', otherGroq?.configured === false);
-  currentPrincipal = { id: 'u-http', email: 'http@test.ua', name: 'Тест', role: 'writer', isGuest: false };
+  currentPrincipal = { id: 'u-http', email: 'http@test.ua', name: 'Тест', role: 'admin', isGuest: false };
 
   const deleted = await call('DELETE', '/api/account/api-keys/groq');
   t('DELETE → 200', deleted.status === 200, String(deleted.status));
@@ -189,7 +197,7 @@ console.log('\nHTTP-роути — 503 без налаштованого сек�
   delete process.env.USER_API_KEY_SECRET;
   const appNoSecret = express();
   appNoSecret.use(express.json());
-  appNoSecret.use((req: any, _res, next) => { req.principal = { id: 'u-nosecret', role: 'writer', isGuest: false }; next(); });
+  appNoSecret.use((req: any, _res, next) => { req.principal = { id: 'u-nosecret', role: 'admin', isGuest: false }; next(); });
   apiKeysRoutes.registerApiKeysRoutes(appNoSecret);
   const serverNoSecret = appNoSecret.listen(0);
   await new Promise((r) => serverNoSecret.once('listening', r));

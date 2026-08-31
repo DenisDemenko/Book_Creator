@@ -121,13 +121,13 @@ export const ALL_ROLES: RoleInfo[] = [
       canGenerateImages: true,
       canPublish: true,
       canPublishExternal: true,
-      canManageApiKeys: true,
+      // Ключі провайдерів вводить лише адміністратор (див. server/auth.ts).
+      canManageApiKeys: false,
       isReadOnly: false,
       allowedTabs: [
 'express',
 'dashboard',
         'subscription',
-        'api-keys',
         'start',
         'editor',
         'mastery',
@@ -197,7 +197,6 @@ export const ALL_ROLES: RoleInfo[] = [
       isReadOnly: false,
       allowedTabs: [
         'subscription',
-        'api-keys',
         'cover',
         'illustrations',
         'media',
@@ -256,7 +255,6 @@ export const ALL_ROLES: RoleInfo[] = [
       isReadOnly: false,
       allowedTabs: [
         'subscription',
-        'api-keys',
         'editor',
         'toc',
         'qr-footnotes',
@@ -314,7 +312,6 @@ export const ALL_ROLES: RoleInfo[] = [
       isReadOnly: false,
       allowedTabs: [
         'subscription',
-        'api-keys',
         'layout',
         'export',
         'cover',
@@ -377,7 +374,6 @@ export const ALL_ROLES: RoleInfo[] = [
       isReadOnly: true,
       allowedTabs: [
         'subscription',
-        'api-keys',
         'preview',
         'toc',
         'characters',

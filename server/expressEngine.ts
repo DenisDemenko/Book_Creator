@@ -16,8 +16,7 @@
  * модель повертає розбірний JSON.
  */
 
-import { getUserApiKey } from './store';
-import { decryptApiKey, isApiKeyCryptoConfigured } from './userApiKeyCrypto';
+import { platformKeyFor } from './platformKeys';
 import {
   CHAT_MODELS,
   ENGINE_ENV_KEY,
@@ -34,7 +33,7 @@ export interface EngineChoice {
   /** Розшифрований ключ користувача; undefined — працюємо на серверному. */
   apiKeyOverride?: string;
   /** Звідки взявся ключ — потрібне для діагностики в UI. */
-  source: 'user' | 'server';
+  source: 'platform' | 'server';
 }
 
 /** Перша модель рушія зі списку, що показується в селекторі чату. */
@@ -46,18 +45,15 @@ function defaultModelFor(engine: EngineId): string {
  * Чи має користувач власний придатний ключ для рушія. Значення ключа
  * назовні не віддається — лише сюди, у виклик провайдера.
  */
-async function userKeyFor(userId: string | null, engine: EngineId): Promise<string | undefined> {
-  if (!userId || !isApiKeyCryptoConfigured()) return undefined;
-  try {
-    const stored = await getUserApiKey(userId, engine);
-    if (!stored?.encryptedKey) return undefined;
-    const plain = decryptApiKey(stored.encryptedKey).trim();
-    return plain || undefined;
-  } catch {
-    // Пошкоджений або нерозшифровуваний ключ не має валити майстер —
-    // просто вважаємо, що власного ключа немає.
-    return undefined;
-  }
+/**
+ * Ключ, яким платформа виконує запит цього рушія.
+ *
+ * Раніше тут шукався ключ ТОГО, ХТО ВИКЛИКАЄ. За адмінської моделі
+ * ключів це означало б, що майстер працює лише в адміністратора:
+ * письменник власних ключів не вводить і не має права їх вводити.
+ */
+async function platformKey(engine: EngineId): Promise<string | undefined> {
+  return platformKeyFor(engine);
 }
 
 /**
@@ -78,9 +74,9 @@ export async function resolveEngineForWizard(
   for (const e of PREFERRED) if (!order.includes(e)) order.push(e);
 
   for (const engine of order) {
-    const key = await userKeyFor(userId, engine);
+    const key = await platformKey(engine);
     if (key) {
-      return { engine, modelId: defaultModelFor(engine), apiKeyOverride: key, source: 'user' };
+      return { engine, modelId: defaultModelFor(engine), apiKeyOverride: key, source: 'platform' };
     }
     if (engineConfigured(engine)) {
       return { engine, modelId: defaultModelFor(engine), source: 'server' };
@@ -99,12 +95,12 @@ export function noEngineMessage(): string {
 /** Перелік рушіїв для селектора в UI майстра. */
 export async function availableEngines(
   userId: string | null
-): Promise<Array<{ engine: EngineId; modelId: string; source: 'user' | 'server' }>> {
-  const out: Array<{ engine: EngineId; modelId: string; source: 'user' | 'server' }> = [];
+): Promise<Array<{ engine: EngineId; modelId: string; source: 'platform' | 'server' }>> {
+  const out: Array<{ engine: EngineId; modelId: string; source: 'platform' | 'server' }> = [];
   for (const engine of PREFERRED) {
-    const key = await userKeyFor(userId, engine);
+    const key = await platformKey(engine);
     if (key) {
-      out.push({ engine, modelId: defaultModelFor(engine), source: 'user' });
+      out.push({ engine, modelId: defaultModelFor(engine), source: 'platform' });
     } else if (engineConfigured(engine)) {
       out.push({ engine, modelId: defaultModelFor(engine), source: 'server' });
     }

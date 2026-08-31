@@ -40,6 +40,7 @@ import {
 } from './auth';
 import { pricingSnapshot } from './pricing';
 import { IMAGE_ENGINES, seedreamConfig } from './imageGeneration';
+import { SEEDREAM_FAL_MODEL } from './pricing';
 import { geminiClient } from './aiCore';
 import { PLANS, PLAN_ORDER, priceFor, type PlanId } from './subscriptions';
 import { paypalConfig } from './payments/paypal';
@@ -364,11 +365,16 @@ export function registerAdminRoutes(app: Express): void {
     };
     const imagePricings = snapshot.images.map((img) => {
       const engine = IMAGE_ENGINES[img.engineId as keyof typeof IMAGE_ENGINES];
+      // Тарифи fal стоять у прайсі під ключем МОДЕЛІ, а не двигуна:
+      // одна й та сама «seedream» коштує по-різному на 4.0 і 4.5, тож
+      // у IMAGE_ENGINES такого запису немає й бути не може.
+      const falModel = img.engineId.startsWith('fal-ai/');
+      const falActive = falModel && img.engineId === SEEDREAM_FAL_MODEL && seedreamConfig.enabled;
       const sizes = Object.entries(img.perImageUsd) as [string, number][];
       const flat = sizes.length === 1;
       return {
         id: `pricing-image-${img.engineId}`,
-        provider: imageProviderLabel[engine?.provider ?? ''] || 'Зображення',
+        provider: falModel ? 'ByteDance' : imageProviderLabel[engine?.provider ?? ''] || 'Зображення',
         model: img.modelId,
         display_name: `${img.modelId} (${img.label})`,
         // Ціна за зображення кладеться у «ціну виходу», бо саме її показує
@@ -376,7 +382,13 @@ export function registerAdminRoutes(app: Express): void {
         // читалось як «за 1000 штук», одиницю пояснює note нижче.
         input_price_per_1k: 0,
         output_price_per_1k: Math.max(...sizes.map(([, v]) => v)),
-        is_active: engine?.provider === 'bytedance' ? seedreamConfig.enabled : !!geminiClient,
+        // Активний рівно той тариф, за яким платформа справді працює:
+        // з двох версій fal одночасно діє лише налаштована.
+        is_active: falModel
+          ? falActive
+          : engine?.provider === 'bytedance'
+            ? seedreamConfig.enabled
+            : !!geminiClient,
         updated_at: snapshot.updatedAt,
         note: flat
           ? `Ціна за ОДНЕ зображення: ${sizes[0][1]} (будь-яка роздільність)`

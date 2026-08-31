@@ -171,7 +171,11 @@ type ServerPermissions = {
  */
 export const BASE_SERVER_PERMISSIONS: Record<StoredRole, ServerPermissions> = {
   admin:      { canGenerateImages: true,  canUseAi: true,  canEditContent: true,  canPublish: true,  canPublishExternal: true,  canManageApiKeys: true },
-  writer:     { canGenerateImages: true,  canUseAi: true,  canEditContent: true,  canPublish: true,  canPublishExternal: true,  canManageApiKeys: true },
+  // Письменник НЕ вводить ключів провайдерів: коди вставляє лише
+  // адміністратор, а Nova обслуговує авторів своїми ключами в межах
+  // підписки. Раніше право стояло true, і панель ключів була доступна
+  // кожному письменнику.
+  writer:     { canGenerateImages: true,  canUseAi: true,  canEditContent: true,  canPublish: true,  canPublishExternal: true,  canManageApiKeys: false },
   designer:   { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false },
   translator: { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false },
   // Видавець = менеджер продажів маркетплейсу (H5): публікує і всередині, і

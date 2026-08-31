@@ -72,7 +72,7 @@ async function ask(
   label: string,
   system: string,
   prompt: string
-): Promise<{ text: string; engine: string; source: 'user' | 'server' }> {
+): Promise<{ text: string; engine: string; source: 'platform' | 'server' }> {
   const choice = await resolveEngineForWizard(req.principal?.id ?? null, req.body?.engine);
   if (!choice) throw new Error(noEngineMessage());
 

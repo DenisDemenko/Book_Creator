@@ -42,8 +42,8 @@ import {
   saveGeneratedImage,
   resolveEngine as resolveImageEngine,
 } from './imageGeneration';
-import { recordUsage, getUserApiKey } from './store';
-import { decryptApiKey, isApiKeyCryptoConfigured } from './userApiKeyCrypto';
+import { recordUsage } from './store';
+import { platformKeyFor } from './platformKeys';
 import { priceForImage, priceForTextEngine } from './pricing';
 
 export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.7-flash';
@@ -118,7 +118,7 @@ async function logImageUsage(
       engineId,
       modelId,
       imageSize,
-      costUsd: success ? priceForImage(engineId, imageSize) : 0,
+      costUsd: success ? priceForImage(engineId, imageSize, modelId) : 0,
       context: ctx.label,
       bookId: ctx.bookId,
       success,
@@ -326,6 +326,7 @@ interface GenerateImageParams {
   bookId?: string;
 }
 
+
 /**
  * Генерація зображення + збереження файлу + ОБОВ'ЯЗКОВЕ логування — одним
  * викликом замість трьох ручних кроків, які раніше дублювались у трьох
@@ -345,16 +346,10 @@ export async function generateImage(p: GenerateImageParams): Promise<{
   try {
     // Власний ключ автора для Seedream, якщо він його зберіг. Помилка
     // читання не має валити генерацію — тоді просто працює серверний ключ.
-    const userId = p.req?.principal?.id as string | undefined;
-    let apiKeyOverride: string | undefined;
-    if (userId && isApiKeyCryptoConfigured()) {
-      try {
-        const stored = await getUserApiKey(userId, 'seedream');
-        if (stored?.encryptedKey) apiKeyOverride = decryptApiKey(stored.encryptedKey).trim() || undefined;
-      } catch {
-        apiKeyOverride = undefined;
-      }
-    }
+    // Ключ платформи, а не того, хто викликає: коди провайдерів вводить
+    // лише адміністратор, і Nova обслуговує ним усіх авторів.
+    const apiKeyOverride = await platformKeyFor('seedream');
+
 
     const generated = await generateImageRaw(geminiClient, {
       prompt: p.prompt,
@@ -366,14 +361,14 @@ export async function generateImage(p: GenerateImageParams): Promise<{
     });
     const saved = await saveGeneratedImage(generated.buffer, generated.mimeType, p.filenameHint);
     const sizeLabel = generated.engine.maxSize === '1K' ? '1K' : p.imageSize === '1K' ? '1K' : '2K';
-    await logImageUsage(ctx, generated.engine.id, generated.engine.modelId, sizeLabel, true);
+    await logImageUsage(ctx, generated.engine.id, generated.modelId, sizeLabel, true);
     return {
       url: saved.url,
       filename: saved.filename,
       bytes: saved.bytes,
       engineId: generated.engine.id,
       engineLabel: generated.engine.label,
-      modelId: generated.engine.modelId,
+      modelId: generated.modelId,
       maxSize: generated.engine.maxSize,
       aspectRatio: generated.aspectRatio,
     };

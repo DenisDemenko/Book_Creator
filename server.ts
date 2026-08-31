@@ -23,6 +23,7 @@ import {
   recordTextUsageByModel,
   GEMINI_MODEL,
 } from './server/aiCore';
+import { platformKeyFor } from './server/platformKeys';
 import {
   attachPrincipal,
   registerAuthRoutes,
@@ -330,11 +331,18 @@ async function startServer() {
   });
 
   /** Перелік доступних двигунів генерації — щоб клієнт не хардкодив назви моделей. */
-  app.get('/api/ai/image-engines', (req, res) => {
+  // Доступність двигуна залежить не лише від змінної оточення: ключ,
+  // вставлений адміністратором у розділі «Ключі API», теж робить рушій
+  // робочим — і робить його таким для ВСІХ авторів, бо обслуговує їх
+  // Nova своїми ключами.
+  app.get('/api/ai/image-engines', async (_req, res) => {
+    const adminKey = !!(await platformKeyFor('seedream'));
+    const hasSeedreamKey = seedreamConfig.enabled || adminKey;
     res.json({
-      engines: listEngines({ google: !!ai, bytedance: seedreamConfig.enabled }),
+      engines: listEngines({ google: !!ai, bytedance: hasSeedreamKey }),
       hasGeminiKey: !!ai,
-      hasSeedreamKey: seedreamConfig.enabled,
+      hasSeedreamKey,
+      seedreamKeySource: adminKey ? ('panel' as const) : seedreamConfig.enabled ? ('env' as const) : null,
     });
   });
 

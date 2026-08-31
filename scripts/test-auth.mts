@@ -28,7 +28,16 @@ t('Pro 4K = $0.24', priceForImage('nano-banana-pro', '4K') === 0.24);
 t('Lite при запиті 2K падає на єдиний наявний тариф', priceForImage('nano-banana-2-lite', '2K') === 0.0336);
 t('невідомий двигун → 0, а не NaN', priceForImage('midjourney', '2K') === 0);
 t('текст: 1 млн вх + 1 млн вих', Math.abs(priceForText(1e6, 1e6) - 4.5) < 1e-9, String(priceForText(1e6, 1e6)));
-t('прайс містить 4 двигуни (+ Seedream)', pricingSnapshot().images.length === 4);
+// Кількість тарифів зростає з кожним провайдером; перевіряємо склад,
+// бо саме він має значення, а число ламало б тест на кожному додаванні.
+t('прайс містить усі 4 двигуни зображень', (() => {
+  const ids = pricingSnapshot().images.map((i) => i.engineId);
+  return ['nano-banana-2-lite','nano-banana-2','nano-banana-pro','seedream'].every((id) => ids.includes(id));
+})());
+t('прайс містить окремий тариф Seedream через fal', (() => {
+  const ids = pricingSnapshot().images.map((i) => i.engineId);
+  return ids.some((id) => id.startsWith('fal-ai/bytedance/seedream/'));
+})());
 t('Seedream 1K = $0.03', priceForImage('seedream', '1K') === 0.03);
 t('Seedream без тарифу на 4K падає на єдиний наявний (1K)', priceForImage('seedream', '4K') === 0.03);
 

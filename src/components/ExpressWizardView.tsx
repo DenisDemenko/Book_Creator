@@ -81,7 +81,7 @@ interface Draft {
 interface EngineInfo {
   engine: string;
   modelId: string;
-  source: 'user' | 'server';
+  source: 'platform' | 'server';
 }
 
 const FRAMEWORKS: Array<{ id: string; name: string; blurb: string }> = [
@@ -482,7 +482,7 @@ export const ExpressWizardView: React.FC<{
               >
                 {engines.map((e) => (
                   <option key={e.engine} value={e.engine} className="bg-slate-900">
-                    {e.modelId} {e.source === 'user' ? '(ваш ключ)' : '(серверний ключ)'}
+                    {e.modelId} {e.source === 'platform' ? '(ключ Nova)' : '(серверний ключ)'}
                   </option>
                 ))}
               </select>

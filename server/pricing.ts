@@ -19,6 +19,16 @@ export interface ImagePriceTable {
   perImageUsd: Record<string, number>;
 }
 
+/**
+ * Ідентифікатори моделей Seedream. Живуть тут, бо тариф прив’язаний
+ * саме до моделі: v4.0 і v4.5 на fal коштують по-різному, і логувати
+ * витрату під назвою двигуна означало б занижувати рахунок на чверть,
+ * щойно хтось перемкнеться на 4.5.
+ */
+export const SEEDREAM_ARK_MODEL = process.env.SEEDREAM_MODEL || 'seedream-4-0-250828';
+export const SEEDREAM_FAL_MODEL =
+  process.env.SEEDREAM_FAL_MODEL || 'fal-ai/bytedance/seedream/v4.5/text-to-image';
+
 export const IMAGE_PRICING: Record<string, ImagePriceTable> = {
   'nano-banana-2-lite': {
     modelId: 'gemini-3.1-flash-lite-image',
@@ -36,14 +46,30 @@ export const IMAGE_PRICING: Record<string, ImagePriceTable> = {
     perImageUsd: { '1K': 0.134, '2K': 0.134, '4K': 0.24 },
   },
   seedream: {
-    modelId: process.env.SEEDREAM_MODEL || 'seedream-4-0-250828',
-    label: 'Seedream 4.0 (ByteDance)',
+    modelId: SEEDREAM_ARK_MODEL,
+    label: 'Seedream 4.0 (ByteDance, Ark)',
     // Офіційна ціна BytePlus ModelArk — флет $0.03/зображення незалежно
     // від роздільності (1K–4K). Джерело: docs.byteplus.com/en/docs/ModelArk/1544106
     // (звірено серпень 2026). До цього запису тут не було — engine_id
     // 'seedream' коректно писався в usage_log, але priceForImage()
     // мовчки повертав 0, бо не знаходив тариф.
     perImageUsd: { '1K': 0.03 },
+  },
+
+  // Та сама модель ByteDance, але через fal.ai. Ціни різні за версіями,
+  // і саме fal лишається єдиним доступом до Seedream для країн, яким
+  // ModelArk відмовляє в реєстрації.
+  'fal-ai/bytedance/seedream/v4/text-to-image': {
+    modelId: 'fal-ai/bytedance/seedream/v4/text-to-image',
+    label: 'Seedream 4.0 (ByteDance, fal.ai)',
+    perImageUsd: { '1K': 0.03 },
+  },
+  'fal-ai/bytedance/seedream/v4.5/text-to-image': {
+    modelId: 'fal-ai/bytedance/seedream/v4.5/text-to-image',
+    label: 'Seedream 4.5 (ByteDance, fal.ai)',
+    // $0.04 — дорожче за 4.0 на чверть. Джерело: сторінка моделі на
+    // fal.ai, звірено серпень 2026.
+    perImageUsd: { '1K': 0.04 },
   },
 };
 
@@ -187,8 +213,12 @@ export function priceForMistralText(inputTokens: number, outputTokens: number): 
  * Вартість одного зображення. Якщо для запитаної роздільності тарифу немає,
  * беремо найближчу меншу — краще недооцінити на копійку, ніж вигадати число.
  */
-export function priceForImage(engineId: string, imageSize = '2K'): number {
-  const table = IMAGE_PRICING[engineId];
+/**
+ * `modelId` має пріоритет над `engineId`: один двигун може ходити до
+ * різних моделей із різними цінами (Seedream через Ark і через fal).
+ */
+export function priceForImage(engineId: string, imageSize = '2K', modelId?: string): number {
+  const table = (modelId && IMAGE_PRICING[modelId]) || IMAGE_PRICING[engineId];
   if (!table) return 0;
 
   const exact = table.perImageUsd[imageSize];

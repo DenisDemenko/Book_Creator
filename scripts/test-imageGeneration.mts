@@ -3,6 +3,7 @@ import {
   IMAGE_ENGINES, listEngines, ImageGenerationError, GENERATED_DIR, seedreamConfig, seedreamTransportFor
 } from '../server/imageGeneration';
 import fs from 'node:fs/promises';
+import { priceForImage } from '../server/pricing';
 
 let pass=0, fail=0;
 const t=(n:string,c:boolean,e='')=>{c?pass++:fail++;console.log(`${c?'  ✓':'  ✗'} ${n}${e?' — '+e:''}`);};
@@ -146,7 +147,7 @@ console.log('\nSeedream через fal.ai (підставний fetch):');
   try {
     const r = await generateImage(null, {prompt:'лаунж-крісло', engine:'seedream', aspectRatio:'3:4'});
     t('URL — синхронний ендпоїнт fal з моделлю Seedream',
-      calls[0].url==='https://fal.run/fal-ai/bytedance/seedream/v4/text-to-image', calls[0].url);
+      calls[0].url==='https://fal.run/fal-ai/bytedance/seedream/v4.5/text-to-image', calls[0].url);
     t('Authorization — схема Key, а не Bearer',
       calls[0].init.headers.Authorization==='Key falid-123:falsecret-456', calls[0].init.headers.Authorization);
     const body = JSON.parse(calls[0].init.body);
@@ -157,6 +158,13 @@ console.log('\nSeedream через fal.ai (підставний fetch):');
     t('другим запитом забрано сам файл', calls.length===2 && calls[1].url==='https://v3.fal.media/files/x/out.png');
     t('повернуто буфер PNG', Buffer.isBuffer(r.buffer) && r.buffer.subarray(1,4).toString()==='PNG');
     t('engine у результаті — seedream', r.engine.id==='seedream');
+    t('modelId — модель fal, а не Ark (від неї залежить тариф)',
+      r.modelId==='fal-ai/bytedance/seedream/v4.5/text-to-image', r.modelId);
+    t('тариф v4.5 — $0.04 за зображення',
+      priceForImage('seedream','2K',r.modelId)===0.04, String(priceForImage('seedream','2K',r.modelId)));
+    t('тариф v4.0 на fal лишається $0.03',
+      priceForImage('seedream','2K','fal-ai/bytedance/seedream/v4/text-to-image')===0.03);
+    t('прямий Ark лишається $0.03', priceForImage('seedream','2K')===0.03);
   } finally {
     global.fetch = realFetch;
     seedreamConfig.apiKey = prevKey;
