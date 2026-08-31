@@ -42,6 +42,7 @@ import { registerCollaborationRoutes } from './server/collaborationRoutes';
 import { registerChatRoutes, CHAT_USAGE_CONTEXT } from './server/chatRoutes';
 import { registerApiKeysRoutes } from './server/apiKeysRoutes';
 import { registerExpressRoutes } from './server/expressRoutes';
+import { registerDiagnRoutes } from './server/diagnRoutes';
 import { registerPublishingRoutes } from './server/publishingRoutes';
 import { requireImageQuota, requirePlanAtLeast, checkChatQuota, resolveSubscription } from './server/subscriptions';
 import {
@@ -330,6 +331,14 @@ async function startServer() {
 
   registerApiKeysRoutes(app);
   registerExpressRoutes(app);
+  // Рушій і модель за замовчуванням передаємо всередину, а не імпортуємо
+  // там: resolveEngine живе в server.ts разом із рештою вибору провайдера,
+  // і другий шлях до нього рано чи пізно розійшовся б із першим.
+  registerDiagnRoutes(app, {
+    resolveEngine: resolveChatEngine as never,
+    defaultModelId: GEMINI_MODEL,
+    loadAdminLayer: () => loadCoreAdminLayer(),
+  });
 
   // --- API Endpoints ---
 

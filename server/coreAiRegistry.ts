@@ -60,6 +60,10 @@ import {
   type SelectionParagraphCount,
   type SelectionTextLanguage,
 } from './selectionParagraphsPrompt';
+import {
+  diagnSystemInstruction,
+  factoryDiagnTemplate,
+} from './diagnPrompt';
 
 /** Ключ у таблиці `meta`, під яким лежить ЄДИНИЙ адмінський шар усіх модулів ядра. */
 export const CORE_PROMPT_TEMPLATES_META_KEY = 'prompt_templates_core_admin';
@@ -77,6 +81,9 @@ export const CORE_MODULE_KEYS = [
   'synopsisToChapter',
   'selectionToParagraphs',
   'designLayout',
+  'diagnStyle',
+  'diagnStructure',
+  'diagnCompetency',
 ] as const;
 
 export type CoreModuleKey = (typeof CORE_MODULE_KEYS)[number];
@@ -129,6 +136,9 @@ export const CORE_MODULE_PLACEHOLDERS: Record<CoreModuleKey, string[]> = {
     '{МОВА}',
   ],
   designLayout: ['{НАЗВА_КНИГИ}', '{ЖАНР}', '{АУДИТОРІЯ}', '{ФОРМАТ_СТОРІНКИ}', '{ШРИФТИ}', '{ФРАГМЕНТ}'],
+  diagnStyle: ['{НАЗВА_КНИГИ}', '{ЖАНР}', '{ФРАГМЕНТ}', '{МОВА}'],
+  diagnStructure: ['{НАЗВА_КНИГИ}', '{ЖАНР}', '{ФРАГМЕНТ}', '{МОВА}'],
+  diagnCompetency: ['{НАЗВА_КНИГИ}', '{ЖАНР}', '{ФРАГМЕНТ}', '{КОМПЕТЕНЦІЇ}', '{МОВА}'],
 };
 
 /** Чи модуль повертає JSON за жорсткою схемою (схема — readonly-текст у конструкторі, не редагується). */
@@ -142,6 +152,9 @@ export const CORE_MODULE_HAS_JSON_SCHEMA: Record<CoreModuleKey, boolean> = {
   synopsisToChapter: false,
   selectionToParagraphs: false,
   designLayout: true,
+  diagnStyle: true,
+  diagnStructure: true,
+  diagnCompetency: true,
 };
 
 /**
@@ -212,6 +225,12 @@ export function factoryCoreTemplate(module: CoreModuleKey): CorePromptTemplate {
       };
     case 'designLayout':
       return { system: designLayoutSystemInstruction(), user: factoryDesignLayoutTemplate() };
+    case 'diagnStyle':
+      return { system: diagnSystemInstruction('style'), user: factoryDiagnTemplate('style') };
+    case 'diagnStructure':
+      return { system: diagnSystemInstruction('structure'), user: factoryDiagnTemplate('structure') };
+    case 'diagnCompetency':
+      return { system: diagnSystemInstruction('competency'), user: factoryDiagnTemplate('competency') };
   }
 }
 

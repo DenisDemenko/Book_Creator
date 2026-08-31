@@ -22,6 +22,7 @@ import {
   LayoutPanelTop,
   Library,
   Dumbbell,
+  Stethoscope,
   Blocks,
   Briefcase,
   ShoppingBag,
@@ -101,6 +102,7 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   'pdf-editor': LayoutPanelTop,
   knowledge: Library,
   trainers: Dumbbell,
+  diagn: Stethoscope,
   structure: Blocks,
   portfolio: Briefcase,
   publishing: ShoppingBag,
@@ -163,7 +165,7 @@ const NAV_GROUPS: NavGroup[] = [
     id: 'training',
     numeral: 'V',
     labelKey: 'groupTraining',
-    tabs: ['mastery', 'knowledge', 'trainers', 'structure', 'portfolio'],
+    tabs: ['mastery', 'knowledge', 'trainers', 'diagn', 'structure', 'portfolio'],
   },
 ];
 

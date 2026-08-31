@@ -5,6 +5,7 @@ import { HeaderNav } from './components/HeaderNav';
 import { SidebarNav } from './components/SidebarNav';
 import { StartPageView } from './components/StartPageView';
 import { ExpressStartView } from './components/ExpressStartView';
+import { DiagnosticsView } from './components/DiagnosticsView';
 import { EditorView, type PromptConstructorRequest } from './components/EditorView';
 import { MasteryFrameworkView } from './components/MasteryFrameworkView';
 import { SunLightingProvider } from './context/SunLightingContext';
@@ -1562,6 +1563,8 @@ export default function App() {
             />
           </div>
         )}
+
+        {currentTab === 'diagn' && <DiagnosticsView book={book} />}
 
         {currentTab === 'start' && (
           <StartPageView

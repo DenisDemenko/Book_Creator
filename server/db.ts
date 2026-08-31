@@ -363,6 +363,27 @@ CREATE TABLE IF NOT EXISTS express_drafts (
 );
 CREATE INDEX IF NOT EXISTS idx_express_drafts_user ON express_drafts(user_id);
 CREATE INDEX IF NOT EXISTS idx_express_drafts_expires ON express_drafts(expires_at);
+
+-- Діагностики /diagn (diagn-module-tech-spec-v1.0.md §7).
+--
+-- Звіт зберігається назавжди, а не з TTL: цінність модуля в тому, що
+-- радар компетенцій можна порівняти через три місяці. Добовий TTL із ТЗ
+-- стосується КЕШУ сирого результату, а не історії, — тому це окремі поля
+-- cache_key + created_at, а не окрема таблиця: та сама діагностика
+-- і є своїм кешем, поки їй менше доби.
+CREATE TABLE IF NOT EXISTS diagnostics (
+  id           TEXT PRIMARY KEY,            -- UUID, він же diagn_id у відповіді
+  user_id      TEXT NOT NULL,
+  book_id      TEXT,                        -- document_id у термінах ТЗ; NULL для довільного тексту
+  modules      TEXT NOT NULL,               -- JSON-масив: які підмодулі виконувались
+  result_json  TEXT NOT NULL,               -- JSON: нормалізовані результати підмодулів
+  cache_key    TEXT NOT NULL,               -- хеш (текст + склад модулів + мова)
+  word_count   INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_diagnostics_user ON diagnostics(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_diagnostics_book ON diagnostics(book_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_diagnostics_cache ON diagnostics(cache_key, created_at);
 `;
 
 /**
