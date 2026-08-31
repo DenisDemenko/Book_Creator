@@ -27,6 +27,7 @@ import {
   applyKdpOptimization 
 } from '../utils/kdpHelpers';
 import { KdpPublishingModal } from './KdpPublishingModal';
+import { DesignSuggestionPanel } from './DesignSuggestionPanel';
 import { useLanguage } from '../i18n/LanguageContext';
 
 interface LayoutViewProps {
@@ -102,7 +103,11 @@ export const LayoutView: React.FC<LayoutViewProps> = ({ book, onUpdateBook, tota
 
   return (
     <div className="flex-1 p-4 lg:p-6 overflow-y-auto bg-slate-900 text-slate-100 space-y-6">
-      
+
+      {/* Скіл /design. Стоїть перед ручними налаштуваннями навмисно:
+          спершу пропозиція під текст, далі — доведення руками. */}
+      <DesignSuggestionPanel book={book} onUpdateBook={onUpdateBook} />
+
       {/* Top Banner */}
       <div className="nova-glass-dark rounded-2xl p-6 border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
