@@ -81,7 +81,9 @@ import {
   AlignRight,
   AlignCenter,
   Spline,
-  Timer
+  Timer,
+  ZoomIn,
+  ZoomOut
 } from 'lucide-react';
 import { 
   Book, 
@@ -1172,6 +1174,21 @@ export const EditorView: React.FC<EditorViewProps> = ({
   // принцип, що вже діє для showLeftTree/showRightPanel вище.
   const [isFullscreenMode, setIsFullscreenMode] = usePersistentState<boolean>('nova_editor_fullscreenMode', false);
   const fullscreenRootRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Масштаб сторінки у фулскріні (1.0–1.6, крок 0.1). Це НЕ зміна фізичної
+   * ширини сторінки (`widthMm`, від якої залежить друкарськи точна
+   * пагінація/експорт) — суто верхня межа CSS-масштабу в usePageScale.ts,
+   * який і так уже стискає сторінку на вузьких екранах; тут лише
+   * дозволено те саме масштабування піти вище 1.0, коли фулскрін на
+   * широкому моніторі лишає порожнє тло навколо друкарськи вузької
+   * сторінки. Поза фулскріном PageColumn/PageRuler завжди отримують 1 —
+   * значення з нею не впливає на звичайний режим редагування.
+   */
+  const [fullscreenZoom, setFullscreenZoom] = usePersistentState<number>('nova_editor_fullscreenZoom', 1);
+  const adjustFullscreenZoom = (delta: number) => {
+    setFullscreenZoom((v) => Math.round(Math.min(1.6, Math.max(1, v + delta)) * 10) / 10);
+  };
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -3030,6 +3047,33 @@ export const EditorView: React.FC<EditorViewProps> = ({
           >
             {pageProgress.current}/{pageProgress.total}
           </div>
+
+          {/* Масштаб сторінки — лише CSS-збільшення понад фізичний розмір
+              (усе ще scale(), не зміна widthMm), щоб на широкому моніторі
+              друкарськи вузька сторінка не губилась у порожньому тлі. */}
+          <div className="mt-1.5 flex flex-col items-center gap-0.5 bg-slate-800/90 border border-slate-700 rounded-xl p-1 shadow-lg">
+            <button
+              onClick={() => adjustFullscreenZoom(0.1)}
+              disabled={fullscreenZoom >= 1.6}
+              className="p-1 rounded-full text-slate-300 hover:bg-slate-700 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent"
+              title={t('editor.fullscreenZoomIn')}
+              aria-label={t('editor.fullscreenZoomIn')}
+            >
+              <ZoomIn className="w-3 h-3" />
+            </button>
+            <span className="text-[9px] font-mono text-slate-400 select-none tabular-nums">
+              {Math.round(fullscreenZoom * 100)}%
+            </span>
+            <button
+              onClick={() => adjustFullscreenZoom(-0.1)}
+              disabled={fullscreenZoom <= 1}
+              className="p-1 rounded-full text-slate-300 hover:bg-slate-700 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent"
+              title={t('editor.fullscreenZoomOut')}
+              aria-label={t('editor.fullscreenZoomOut')}
+            >
+              <ZoomOut className="w-3 h-3" />
+            </button>
+          </div>
         </div>
       )}
 
@@ -3577,11 +3621,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
               <PageRuler
                 widthMm={getPageContentWidthMm()}
+                zoomFactor={isFullscreenMode ? fullscreenZoom : 1}
                 insideMm={book.layoutConfig.margins?.insideMm || 0}
                 outsideMm={book.layoutConfig.margins?.outsideMm || 0}
                 onChangeMargins={handleChangeMargins}
               />
-              <PageColumn widthMm={getPageContentWidthMm()} className="flex-1 min-h-0">
+              <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFullscreenMode ? fullscreenZoom : 1} className="flex-1 min-h-0">
                 {/* Колонтитул першого аркуша. Плагін пагінації малює його на
                     кожному РОЗРИВІ, тобто зверху сторінок 2, 3, … — у першої
                     розриву перед нею немає, тож він рендериться тут. */}
@@ -3703,11 +3748,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     />
                     <PageRuler
                       widthMm={getPageContentWidthMm()}
+                      zoomFactor={isFullscreenMode ? fullscreenZoom : 1}
                       insideMm={book.layoutConfig.margins?.insideMm || 0}
                       outsideMm={book.layoutConfig.margins?.outsideMm || 0}
                       onChangeMargins={handleChangeMargins}
                     />
-                    <PageColumn widthMm={getPageContentWidthMm()} className="flex-1 min-h-0 rounded-xl border border-slate-800/80">
+                    <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFullscreenMode ? fullscreenZoom : 1} className="flex-1 min-h-0 rounded-xl border border-slate-800/80">
                       <EditorContent
                         editor={uaEditor}
                         style={{ fontFamily: manuscriptFontStack }}
@@ -3755,11 +3801,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     />
                     <PageRuler
                       widthMm={getPageContentWidthMm()}
+                      zoomFactor={isFullscreenMode ? fullscreenZoom : 1}
                       insideMm={book.layoutConfig.margins?.insideMm || 0}
                       outsideMm={book.layoutConfig.margins?.outsideMm || 0}
                       onChangeMargins={handleChangeMargins}
                     />
-                    <PageColumn widthMm={getPageContentWidthMm()} className="flex-1 min-h-0 rounded-xl border border-slate-800/80">
+                    <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFullscreenMode ? fullscreenZoom : 1} className="flex-1 min-h-0 rounded-xl border border-slate-800/80">
                       <EditorContent
                         editor={enEditor}
                         style={{ fontFamily: manuscriptFontStack }}
@@ -3817,11 +3864,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 />
                 <PageRuler
                   widthMm={getPageContentWidthMm()}
+                  zoomFactor={isFullscreenMode ? fullscreenZoom : 1}
                   insideMm={book.layoutConfig.margins?.insideMm || 0}
                   outsideMm={book.layoutConfig.margins?.outsideMm || 0}
                   onChangeMargins={handleChangeMargins}
                 />
-                <PageColumn widthMm={getPageContentWidthMm()} className="flex-1 min-h-0 rounded-xl border border-slate-800">
+                <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFullscreenMode ? fullscreenZoom : 1} className="flex-1 min-h-0 rounded-xl border border-slate-800">
                   <EditorContent
                     editor={enEditor}
                     style={{ fontFamily: manuscriptFontStack }}
@@ -4988,11 +5036,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
             />
             <PageRuler
               widthMm={getPageContentWidthMm()}
+              zoomFactor={isFullscreenMode ? fullscreenZoom : 1}
               insideMm={book.layoutConfig.margins?.insideMm || 0}
               outsideMm={book.layoutConfig.margins?.outsideMm || 0}
               onChangeMargins={handleChangeMargins}
             />
-            <PageColumn widthMm={getPageContentWidthMm()} className="flex-1 min-h-0 rounded-xl border border-slate-800">
+            <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFullscreenMode ? fullscreenZoom : 1} className="flex-1 min-h-0 rounded-xl border border-slate-800">
               <EditorContent
                 editor={enEditor}
                 style={{ fontFamily: manuscriptFontStack }}

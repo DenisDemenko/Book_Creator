@@ -323,6 +323,8 @@ export const editor = {
     sprintPickHint: 'Тривалість спринту:',
     sprintMinutes: '{n} хв',
     sprintDoneToast: 'Спринт завершено! Написано слів: {n}.',
+    fullscreenZoomIn: 'Збільшити сторінку',
+    fullscreenZoomOut: 'Зменшити сторінку',
   },
   en: {
     tocMobile: 'Contents ({n})',
@@ -647,5 +649,7 @@ export const editor = {
     sprintPickHint: 'Sprint length:',
     sprintMinutes: '{n} min',
     sprintDoneToast: 'Sprint finished! Words written: {n}.',
+    fullscreenZoomIn: 'Zoom the page in',
+    fullscreenZoomOut: 'Zoom the page out',
   },
 };

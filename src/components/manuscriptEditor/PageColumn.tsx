@@ -5,6 +5,8 @@ interface PageColumnProps {
   children: React.ReactNode;
   widthMm: number;
   className?: string;
+  /** Стеля масштабу понад фізичний розмір сторінки — див. usePageScale.ts. За замовчуванням 1 (поведінка не змінюється). */
+  zoomFactor?: number;
 }
 
 /**
@@ -21,8 +23,8 @@ interface PageColumnProps {
  * масштабований розмір і призводив до розривів сторінок у неправильних
  * місцях.
  */
-export const PageColumn: React.FC<PageColumnProps> = ({ children, widthMm, className }) => {
-  const { outerRef, scale, widthPx } = usePageScale(widthMm);
+export const PageColumn: React.FC<PageColumnProps> = ({ children, widthMm, className, zoomFactor = 1 }) => {
+  const { outerRef, scale, widthPx } = usePageScale(widthMm, zoomFactor);
   const innerRef = useRef<HTMLDivElement>(null);
   const [naturalHeightPx, setNaturalHeightPx] = useState(0);
 

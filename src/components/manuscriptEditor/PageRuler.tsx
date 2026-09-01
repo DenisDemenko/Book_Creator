@@ -8,6 +8,8 @@ interface PageRulerProps {
   insideMm: number;
   outsideMm: number;
   onChangeMargins: (patch: { insideMm?: number; outsideMm?: number }) => void;
+  /** Той самий zoomFactor, що передається сусідньому PageColumn — інакше лінійка розійдеться з колонкою тексту під нею. */
+  zoomFactor?: number;
 }
 
 const MIN_MARGIN_MM = 5;
@@ -22,8 +24,8 @@ const MIN_MARGIN_MM = 5;
  * Той самий usePageScale, що й PageColumn.tsx, — лінійка завжди має
  * однакову ширину/масштаб із колонкою тексту під нею.
  */
-export const PageRuler: React.FC<PageRulerProps> = ({ widthMm, insideMm, outsideMm, onChangeMargins }) => {
-  const { outerRef, scale, widthPx } = usePageScale(widthMm);
+export const PageRuler: React.FC<PageRulerProps> = ({ widthMm, insideMm, outsideMm, onChangeMargins, zoomFactor = 1 }) => {
+  const { outerRef, scale, widthPx } = usePageScale(widthMm, zoomFactor);
   const dragRef = useRef<{ side: 'inside' | 'outside'; startClientX: number; startMm: number } | null>(null);
 
   const beginDrag = (side: 'inside' | 'outside') => (e: React.PointerEvent) => {
