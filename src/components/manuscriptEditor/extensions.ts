@@ -5,6 +5,7 @@ import { FontSizeMark } from './FontSizeMark';
 import { WrappedImageNode, type WrappedImageOptions } from './WrappedImageNode';
 import { AiDraftBlockNode } from './AiDraftBlockNode';
 import { FocusParagraphPlugin } from './FocusParagraphPlugin';
+import { CharacterMentionPlugin, type CharacterMentionEntry } from './CharacterMentionPlugin';
 
 export interface ManuscriptAiTextOptions {
   onRequestAiText?: WrappedImageOptions['onRequestAiText'];
@@ -30,7 +31,9 @@ export function buildManuscriptExtensions(
    * кожній транзакції ProseMirror, а не один раз при побудові масиву
    * розширень — див. коментар у FocusParagraphPlugin.ts.
    */
-  isFocusParagraphModeEnabled?: () => boolean
+  isFocusParagraphModeEnabled?: () => boolean,
+  /** Необов'язково: живий список персонажів книги — див. коментар у CharacterMentionPlugin.ts. */
+  getCharacters?: () => CharacterMentionEntry[]
 ) {
   return [
     StarterKit.configure({
@@ -65,6 +68,11 @@ export function buildManuscriptExtensions(
     FocusParagraphPlugin.configure({
       enabled: isFocusParagraphModeEnabled || (() => false),
       dimClass: 'nova-focus-dimmed',
+    }),
+    CharacterMentionPlugin.configure({
+      getCharacters: getCharacters || (() => []),
+      mentionClass: 'nova-character-mention',
+      characterIdAttr: 'data-character-id',
     }),
   ];
 }

@@ -1099,3 +1099,16 @@
 @media (prefers-reduced-motion: reduce) {
   .nova-focus-dimmed { transition: none; }
 }
+
+/* Згадування персонажа прямо в тексті рукопису (CharacterMentionPlugin.ts) —
+   тонке підкреслення пунктиром + курсор "довідка", щоб натякнути на
+   можливість навести й побачити картку з патернами поведінки персонажа
+   (та сама картка, що вже відкривається з бічної панелі "персонажі у
+   сцені" та з контекстного меню "вставити репліку" — тут лише третій
+   спосіб її відкрити, наведенням прямо в прозі). */
+.nova-character-mention {
+  text-decoration: underline dotted;
+  text-decoration-color: currentColor;
+  text-underline-offset: 2px;
+  cursor: help;
+}

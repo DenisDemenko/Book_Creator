@@ -3,6 +3,7 @@ import { useEditor, useEditorState, EditorContent, type Editor } from '@tiptap/r
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { buildManuscriptExtensions } from './manuscriptEditor/extensions';
 import { PaginationPlugin } from './manuscriptEditor/PaginationPlugin';
+import { characterMentionKey } from './manuscriptEditor/CharacterMentionPlugin';
 import { PAGE_FORMAT_QUICK_OPTIONS } from '../utils/pageFormats';
 import { PageColumn } from './manuscriptEditor/PageColumn';
 import { PageRuler } from './manuscriptEditor/PageRuler';
@@ -571,7 +572,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
         aiDraftReviewLabel: t('editor.aiDraftReviewLabel'),
         aiDraftRejectLabel: t('editor.aiDraftRejectLabel'),
       },
-      () => focusParagraphModeRef.current
+      () => focusParagraphModeRef.current,
+      () => bookRef.current.characters
     ),
     PaginationPlugin.configure({
       getPageContentHeightMm,
@@ -592,7 +594,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
         aiDraftReviewLabel: '✓ Mark as reviewed',
         aiDraftRejectLabel: 'Reject AI addition',
       },
-      () => focusParagraphModeRef.current
+      () => focusParagraphModeRef.current,
+      () => bookRef.current.characters
     ),
     PaginationPlugin.configure({ getPageContentHeightMm, getVerticalMarginsMm }),
   ]).current;
@@ -627,6 +630,56 @@ export const EditorView: React.FC<EditorViewProps> = ({
     },
     []
   );
+
+  // Освіжаємо декорації згадувань персонажів, коли ЗМІНИВСЯ САМ СПИСОК
+  // персонажів (перейменування у вкладці «Персонажі» тощо) — плагін сам
+  // перераховує їх лише на docChanged, а зміна імені персонажа НЕ чіпає
+  // жодного символу поточного розділу.
+  useEffect(() => {
+    uaEditor?.view.dispatch(uaEditor.state.tr.setMeta(characterMentionKey, true));
+    enEditor?.view.dispatch(enEditor.state.tr.setMeta(characterMentionKey, true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [book.characters]);
+
+  /**
+   * Наведення на згадування персонажа прямо в тексті — третій спосіб
+   * відкрити вже наявний поповер поведінкових шаблонів (`behaviorPopover`,
+   * той самий, що й для «учасників сцени» та підменю «Вставити репліку
+   * героя» нижче в цьому файлі). Слухач нативний (не через editorProps
+   * TipTap), бо editorProps після монтування можна оновлювати лише через
+   * `setOptions()` (див. useEffect на spellcheckEnabled вище) — для
+   * простого слухача це зайва складність, тоді як нативний addEventListener
+   * на `editor.view.dom` живе рівно стільки, скільки сам редактор.
+   */
+  useEffect(() => {
+    const doms = [uaEditor?.view.dom, enEditor?.view.dom].filter((d): d is HTMLElement => Boolean(d));
+    if (doms.length === 0) return;
+
+    const onMouseOver = (e: MouseEvent) => {
+      const target = (e.target as HTMLElement | null)?.closest?.('.nova-character-mention') as HTMLElement | null;
+      if (!target) return;
+      const charId = target.getAttribute('data-character-id');
+      if (!charId) return;
+      cancelBehaviorPopoverClose();
+      setBehaviorPopover({ charId, x: e.clientX, y: e.clientY });
+    };
+    const onMouseOut = (e: MouseEvent) => {
+      if ((e.target as HTMLElement | null)?.closest?.('.nova-character-mention')) {
+        scheduleBehaviorPopoverClose();
+      }
+    };
+
+    doms.forEach((dom) => {
+      dom.addEventListener('mouseover', onMouseOver);
+      dom.addEventListener('mouseout', onMouseOut);
+    });
+    return () => {
+      doms.forEach((dom) => {
+        dom.removeEventListener('mouseover', onMouseOver);
+        dom.removeEventListener('mouseout', onMouseOut);
+      });
+    };
+  }, [uaEditor, enEditor]);
 
   /** Режим обтікання вибраного зображення (null, якщо виділено не картинку) — керує кнопками обтікання в renderFormatToolbar. */
   const uaSelectedImageWrap = useEditorState({
