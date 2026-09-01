@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { useEditor, useEditorState, EditorContent, type Editor } from '@tiptap/react';
 import type { Node as PMNode } from '@tiptap/pm/model';
+import type { EditorView as PMView } from '@tiptap/pm/view';
+import { findSlashCandidate, matchCharacterBySlashCandidate, collectInsertablePatterns } from '../utils/slashTrigger';
 import { buildManuscriptExtensions } from './manuscriptEditor/extensions';
 import { PaginationPlugin } from './manuscriptEditor/PaginationPlugin';
 import { characterMentionKey } from './manuscriptEditor/CharacterMentionPlugin';
@@ -370,8 +372,21 @@ export const EditorView: React.FC<EditorViewProps> = ({
   const [draggedParticipantIdx, setDraggedParticipantIdx] = useState<number | null>(null);
   /** Підменю «Вставити репліку героя» у контекстному меню. */
   const [showReplicaSubmenu, setShowReplicaSubmenu] = useState<boolean>(false);
-  /** Поповер з поведінковими шаблонами героя при наведенні на картку учасника сцени. */
-  const [behaviorPopover, setBehaviorPopover] = useState<{ charId: string; x: number; y: number } | null>(null);
+  /**
+   * Поповер з поведінковими шаблонами героя. `source` розрізняє два шляхи
+   * відкриття: 'hover' — наведення на картку учасника сцени/згадування в
+   * тексті (як і раніше, вставка звичайним текстом у uaEditor), 'slash' —
+   * письменник набрав «/Ім'я» і натиснув Enter (нижче, handleSlashTrigger*)
+   * — тоді вставка курсивом точно в позицію курсора того редактора
+   * (`editorKind`), де відбувся тригер, а не завжди в uaEditor.
+   */
+  const [behaviorPopover, setBehaviorPopover] = useState<{
+    charId: string;
+    x: number;
+    y: number;
+    source?: 'hover' | 'slash';
+    editorKind?: 'ua' | 'en';
+  } | null>(null);
   /** Таймер відкладеного закриття поповера — щоб курсор встиг перейти з картки героя на сам поповер. */
   const behaviorPopoverCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -391,6 +406,24 @@ export const EditorView: React.FC<EditorViewProps> = ({
       behaviorPopoverCloseTimer.current = null;
     }
   };
+
+  // Поповер, відкритий через «/Ім'я»+Enter (behaviorPopover.source === 'slash'),
+  // не має живого курсора над собою (writer не наводив мишку) — на відміну
+  // від hover-варіанта (закривається mouseleave), тут потрібне окреме
+  // закриття по Escape чи кліку повз поповер.
+  useEffect(() => {
+    if (!behaviorPopover || behaviorPopover.source !== 'slash') return;
+    const close = () => setBehaviorPopover(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setBehaviorPopover(null);
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [behaviorPopover]);
 
   // Розташування контекстного меню. За замовчуванням воно відкривається вниз
   // від курсора, але якщо знизу недостатньо місця (курсор біля нижнього краю
@@ -637,12 +670,48 @@ export const EditorView: React.FC<EditorViewProps> = ({
     PaginationPlugin.configure({ getPageContentHeightMm, getVerticalMarginsMm }),
   ]).current;
 
+  /**
+   * «/Ім'я героя» + Enter → замість нового рядка відкриває поповер
+   * поведінкових шаблонів цього героя (behaviorPopover, той самий
+   * компонент, що й при наведенні) точно в позиції курсора. Просте
+   * розпізнавання ЛІТЕРАЛЬНОГО тексту (не жива підказка під час набору,
+   * за рішенням письменника) — зіставляється з ім'ям/«ім'я прізвище»/
+   * псевдонімом існуючого персонажа книги, регістронезалежно. Читає
+   * bookRef.current (не book із замикання) — той самий підхід, що й
+   * плейсхолдери extensions вище, бо ця функція будується ОДИН раз при
+   * ініціалізації editorProps і не оновлюється на кожен рендер.
+   */
+  const createSlashTriggerHandler = (editorKind: 'ua' | 'en') => (view: PMView, event: KeyboardEvent): boolean => {
+    if (event.key !== 'Enter' || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return false;
+    if (!view.state.selection.empty) return false;
+
+    const { $from } = view.state.selection;
+    const textBefore = $from.parent.textBetween(0, $from.parentOffset);
+    const found = findSlashCandidate(textBefore);
+    if (!found) return false;
+
+    const matched = matchCharacterBySlashCandidate(bookRef.current.characters || [], found.candidate);
+    if (!matched) return false;
+
+    const blockStart = $from.start();
+    const deleteFrom = blockStart + found.slashIndex;
+    const deleteTo = $from.pos;
+
+    view.dispatch(view.state.tr.delete(deleteFrom, deleteTo));
+
+    const coords = view.coordsAtPos(deleteFrom);
+    setBehaviorPopover({ charId: matched.id, x: coords.left, y: coords.bottom, source: 'slash', editorKind });
+
+    return true;
+  };
+
   const uaEditor = useEditor(
     {
       extensions: uaManuscriptExtensions,
       content: markerStringToTiptapDoc(activeSection?.content || ''),
       editorProps: {
         attributes: { class: 'nova-manuscript-editor', spellcheck: String(spellcheckEnabled), lang: proofingLanguage },
+        handleKeyDown: createSlashTriggerHandler('ua'),
       },
       onUpdate: ({ editor }) => {
         handleContentChangeRef.current(tiptapDocToMarkerString(editor.getJSON() as JSONContent));
@@ -660,6 +729,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
       content: markerStringToTiptapDoc(activeSection?.contentEn || ''),
       editorProps: {
         attributes: { class: 'nova-manuscript-editor', spellcheck: String(spellcheckEnabled), lang: 'en' },
+        handleKeyDown: createSlashTriggerHandler('en'),
       },
       onUpdate: ({ editor }) => {
         handleContentEnChangeRef.current(tiptapDocToMarkerString(editor.getJSON() as JSONContent));
@@ -2359,6 +2429,25 @@ export const EditorView: React.FC<EditorViewProps> = ({
     cancelBehaviorPopoverClose();
     setBehaviorPopover(null);
     setContextMenu(null);
+  };
+
+  /**
+   * Вставка через «/Ім'я героя»+Enter (createSlashTriggerHandler вище) —
+   * на відміну від handleInsertBehaviorPattern: (1) у ТОЙ редактор
+   * (ua/en), де стався тригер, а не завжди uaEditor; (2) курсивом
+   * (`*текст*`, markerSnippetToNodes розбирає цей маркер так само, як і
+   * повний документ) і БЕЗ навколишніх «\n» — фраза лягає ІНЛАЙН у місце
+   * курсора (яке вже стоїть точно там, де стояв «/Ім'я» до видалення в
+   * createSlashTriggerHandler), щоб письменник одразу продовжував той
+   * самий рядок звичайним текстом, як у прикладі завдання.
+   */
+  const handleInsertSlashPattern = (pattern: string, editorKind: 'ua' | 'en') => {
+    const editor = editorKind === 'en' ? enEditor : uaEditor;
+    if (!editor || !pattern.trim()) return;
+    editor.chain().focus().insertContent(markerSnippetToNodes(`*${pattern.trim()}*`)).run();
+
+    cancelBehaviorPopoverClose();
+    setBehaviorPopover(null);
   };
 
   // Remove individual participant from scene
@@ -5423,7 +5512,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
         (() => {
           const char = book.characters.find((c) => c.id === behaviorPopover.charId);
           if (!char) return null;
-          const patterns = char.behaviorPatterns || [];
+          // Плоский список behaviorPatterns + розгорнута бібліотека
+          // behaviorPatternLibrary (5 тригерів) — те саме джерело, що й
+          // згенероване /api/ai/generate-behavior-patterns у вкладці
+          // «Персонажі» (див. CharactersView.tsx), лише письменник туди
+          // раніше не бачив жодного шляху вставки, крім ручного копіювання.
+          const patterns = collectInsertablePatterns(char);
           const popW = 360;
           const popH = Math.min(320, 96 + patterns.length * 30 + 12);
           const left = Math.max(8, Math.min(behaviorPopover.x + 16, window.innerWidth - popW - 8));
@@ -5470,7 +5564,11 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   {patterns.map((p, i) => (
                     <li key={i}>
                       <button
-                        onClick={() => handleInsertBehaviorPattern(p)}
+                        onClick={() =>
+                          behaviorPopover.source === 'slash'
+                            ? handleInsertSlashPattern(p, behaviorPopover.editorKind || 'ua')
+                            : handleInsertBehaviorPattern(p)
+                        }
                         className="w-full text-left text-[11px] text-slate-200 leading-snug flex gap-1.5 px-1.5 py-1 rounded-lg hover:bg-violet-500/15 hover:text-white transition-colors"
                         title={t('editor.behaviorPatternInsertTitle')}
                       >
