@@ -366,9 +366,18 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
                     className={`w-3 h-3 text-slate-500 transition-transform ${isOpen ? '' : '-rotate-90'}`}
                   />
                 )}
-                <span className="text-[9px] font-bold font-mono text-amber-400/70 leading-none">{group.numeral}</span>
+                {/*
+                  Числа й назви груп (I СТАРТ ТА ЗАДУМ, II ДИЗАЙН, …) —
+                  єдина навігаційна опора у списку з двох десятків
+                  вкладок. Приглушений сірий на тлі приглушеного сірого
+                  тексту губився в загальній масі; тепер номер — на повний
+                  бурштиновий акцент і трохи крупніший, назва — світліша
+                  й теж крупніша, з тим самим бурштиновим кольором, що й
+                  номер, щоб пара читалась одним написом, а не двома.
+                */}
+                <span className="text-[11px] font-extrabold font-mono text-amber-400 leading-none">{group.numeral}</span>
                 {!collapsed && (
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 truncate">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-amber-200 truncate">
                     {t(`header.group.${group.id}`)}
                   </span>
                 )}

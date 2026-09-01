@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Sparkles, Gauge, Sun } from 'lucide-react';
+import { Sparkles, Gauge, Sun, ChevronDown } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext';
 import { useSunLighting } from '../context/SunLightingContext';
 
@@ -7,6 +7,8 @@ import { useSunLighting } from '../context/SunLightingContext';
 const POINTS_KEY = 'nova_glow_points';
 const PALETTE_KEY = 'nova_glow_palette';
 const SPEED_KEY = 'nova_glow_speed';
+/** Розгорнуто/згорнуто панель — persist, як і решта налаштувань сяйва. */
+const EXPANDED_KEY = 'nova_glow_panel_expanded';
 const DEFAULT_POINTS = 150;
 const MAX_POINTS = 500;
 /** Амплітуда автоматичної "аврора"-хвилі — рівно ±30 пунктів, як просив користувач. */
@@ -123,6 +125,21 @@ function readInitialPaletteId(): string {
   return GLOW_PALETTES[0].id;
 }
 
+function readInitialExpanded(): boolean {
+  try {
+    const stored = localStorage.getItem(EXPANDED_KEY);
+    if (stored !== null) return stored === 'true';
+  } catch {
+    /* не критично */
+  }
+  // Згорнуто за замовчуванням. Сонечко тепер стартує в тому ж куті
+  // сайдбара (SunLightingContext.tsx) — розгорнута панель на першому
+  // ж вході виявилась би наполовину під ним. Три повзунки й палітра
+  // лишаються за одним кліком, просто не займають місце, поки не
+  // знадобились.
+  return false;
+}
+
 /**
  * Глобальне керування аврора-сяйвом усіх блоків сайту, закріплене
  * у шапці (HeaderNav) — тобто видиме на кожній сторінці:
@@ -158,6 +175,7 @@ export const GlowIntensityControl: React.FC = () => {
   const [points, setPoints] = useState<number>(readInitialPoints);
   const [paletteId, setPaletteId] = useState<string>(readInitialPaletteId);
   const [speed, setSpeed] = useState<number>(readInitialSpeed);
+  const [isExpanded, setIsExpanded] = useState<boolean>(readInitialExpanded);
   const pointsRef = useRef(points);
   pointsRef.current = points;
   const speedRef = useRef(speed);
@@ -198,6 +216,15 @@ export const GlowIntensityControl: React.FC = () => {
       /* не критично */
     }
   }, [palette]);
+
+  // Персистуємо розгорнутість панелі
+  useEffect(() => {
+    try {
+      localStorage.setItem(EXPANDED_KEY, String(isExpanded));
+    } catch {
+      /* не критично */
+    }
+  }, [isExpanded]);
 
   // Запасна палітра — щоб аврора НІКОЛИ не «завмирала», навіть якщо
   // поточна палітра з якоїсь причини виявиться неповною.
@@ -330,8 +357,31 @@ export const GlowIntensityControl: React.FC = () => {
     /* Ширина віддана контейнеру, а не зашита: панель тепер живе в сайдбарі
        (256px розгорнутий), і фіксовані w-24 на повзунках виштовхували б
        значення за край. Три ряди читаються як таблиця — підпис, повзунок,
-       число — тому мітки мають спільну ширину. */
-    <div className="flex w-full min-w-0 flex-col gap-1.5 px-2.5 py-2 rounded-xl badge-glass">
+       число — тому мітки мають спільну ширину.
+
+       Згорнута за замовчуванням (readInitialExpanded) — сонечко стартує в
+       тому самому куті сайдбара (SunLightingContext.tsx), і повний блок із
+       чотирьох рядків там же, де воно сідає, лежав би прямо під ним.
+       Заголовок-перемикач лишається завжди видимим рядком-«ручкою», решта
+       ховається чи показується під ним, як і групи вкладок вище в меню. */
+    <div className="flex w-full min-w-0 flex-col rounded-xl badge-glass overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setIsExpanded((v) => !v)}
+        title={t('header.glowPanelHint')}
+        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-white/[0.04] transition-colors"
+      >
+        <Sparkles className="w-3.5 h-3.5 text-cyan-300 shrink-0" />
+        <span className="flex-1 min-w-0 truncate text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          {t('header.glowPanelTitle')}
+        </span>
+        <ChevronDown
+          className={`w-3 h-3 text-slate-500 shrink-0 transition-transform ${isExpanded ? '' : '-rotate-90'}`}
+        />
+      </button>
+
+      {isExpanded && (
+      <div className="flex w-full min-w-0 flex-col gap-1.5 px-2.5 pb-2">
       {/* Ряд 1 — сила сяйва */}
       <div className="flex items-center gap-2" title={t('header.glowIntensityTitle')}>
         <Sparkles className="w-3.5 h-3.5 text-cyan-300 shrink-0" />
@@ -429,6 +479,8 @@ export const GlowIntensityControl: React.FC = () => {
           ))}
         </select>
       </div>
+      </div>
+      )}
     </div>
   );
 };

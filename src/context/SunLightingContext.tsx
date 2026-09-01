@@ -210,7 +210,7 @@ interface SunLightingContextType {
   sunPosition: SunPosition;
   isDragging: boolean;
   setSunPosition: (pos: SunPosition) => void;
-  resetSunPosition: (preset?: "top-right" | "top-left" | "center" | "bottom-right") => void;
+  resetSunPosition: (preset?: "top-right" | "top-left" | "center" | "bottom-right" | "bottom-left") => void;
   isAutoOrbit: boolean;
   setIsAutoOrbit: React.Dispatch<React.SetStateAction<boolean>>;
 
@@ -304,12 +304,13 @@ export const SunLightingProvider: React.FC<{
           // ignore
         }
       }
-      // Домівка сонця — правий нижній кут, під панеллю керування сяйвом:
-      // звідти його беруть і несуть туди, де треба підсвітити. Раніше воно
-      // стартувало вгорі праворуч, у відриві від власних налаштувань, і
-      // виглядало декорацією шапки, а не інструментом, який можна взяти.
+      // Домівка сонця — лівий нижній кут. Правий нижній конфліктував із
+      // панеллю дій студії (кнопка «Опублікувати» та чекліст готовності до
+      // KDP на вкладці «Публікація та експорт» — сонечко лягало прямо на
+      // них). Зліва внизу під бічним меню вільно за задумом: там і живе
+      // власна панель сонечка після розгортання.
       return {
-        x: Math.round(window.innerWidth - 84),
+        x: Math.round(84),
         y: Math.round(window.innerHeight - 96),
       };
     }
@@ -650,12 +651,18 @@ export const SunLightingProvider: React.FC<{
   }, [isAutoOrbit, isDragging]);
 
   // Reset preset positions
-  const resetSunPosition = (preset: "top-right" | "top-left" | "center" | "bottom-right" = "top-right") => {
+  const resetSunPosition = (
+    preset: "top-right" | "top-left" | "center" | "bottom-right" | "bottom-left" = "top-right"
+  ) => {
     setIsAutoOrbit(false);
     let target = { x: window.innerWidth * 0.8, y: 150 };
     if (preset === "top-left") target = { x: window.innerWidth * 0.2, y: 150 };
     if (preset === "center") target = { x: window.innerWidth * 0.5, y: window.innerHeight * 0.4 };
     if (preset === "bottom-right") target = { x: window.innerWidth * 0.8, y: window.innerHeight * 0.75 };
+    // «Старт» — той самий кут, що й стартова позиція сонця за замовчуванням
+    // (вище в цьому файлі): та сама точка, до якої повертає і перший запуск
+    // студії, і власна кнопка.
+    if (preset === "bottom-left") target = { x: 84, y: window.innerHeight - 96 };
 
     setSunPosition(target);
     try {

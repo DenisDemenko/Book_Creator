@@ -838,6 +838,19 @@ export const DraggableSun: React.FC<{ onScreenshotForAi?: (file: File) => void }
                 >
                   ↘️ Низ-Право
                 </button>
+                {/*
+                  Стартова позиція сонечка — лівий нижній кут (SunLightingContext.tsx).
+                  Ця кнопка веде в ту саму точку, тому вона на всю ширину й
+                  підписана «Старт», а не просто «Низ-Ліво» — щоб було видно,
+                  що це не п'ята довільна точка, а «додому».
+                */}
+                <button
+                  onClick={() => resetSunPosition("bottom-left")}
+                  title="Позиція старту сонечка — лівий нижній кут"
+                  className="col-span-2 neo-extruded-soft neo-button-interactive px-2 py-1.5 rounded-xl text-[10px] font-bold text-[#1a1c1c] bg-white flex items-center gap-1 justify-center cursor-pointer"
+                >
+                  🏠 Старт (Низ-Ліво)
+                </button>
               </div>
             </div>
 
