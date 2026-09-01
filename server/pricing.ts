@@ -289,6 +289,36 @@ export function priceRateForModel(
 }
 
 /** Прайс у зручному для інтерфейсу вигляді. */
+/**
+ * Тариф озвучення ElevenLabs (Text-to-Speech), долари за 1000 символів.
+ * Джерело: https://elevenlabs.io/pricing/api (звірено вересень 2026) —
+ * $0.10/1000 символів для eleven_multilingual_v2 (та v3), однаково на
+ * всіх тарифних рівнях ElevenLabs; сама платформа моделі eleven_flash/
+ * turbo ($0.05/1000) не використовує — якість вимови важливіша за
+ * швидкість для аудіокниги, а не для розмовного агента.
+ *
+ * voiceId — типовий голос ElevenLabs (Rachel, мультимовний). Це не
+ * підтверджений «найкращий голос для української» — лише робочий
+ * дефолт, який адміністратор може перевизначити через ELEVENLABS_VOICE_ID
+ * після прослуховування варіантів у бібліотеці голосів ElevenLabs.
+ * Мова не прив'язана до голосу: одна eleven_multilingual_v2-модель
+ * озвучує і українську, і англійську, а `language_code` лише уточнює
+ * вимову — тому окремих голосів на мову тут немає.
+ */
+export const ELEVENLABS_MODEL = process.env.ELEVENLABS_MODEL || 'eleven_multilingual_v2';
+export const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM';
+export const NARRATION_PRICING = {
+  modelId: ELEVENLABS_MODEL,
+  label: 'ElevenLabs Text-to-Speech',
+  perThousandCharsUsd: Number(process.env.ELEVENLABS_PRICE_PER_1K) || 0.10,
+  note: 'ElevenLabs, eleven_multilingual_v2, $0.10/1000 символів (звірено вересень 2026, elevenlabs.io/pricing/api). Якщо ELEVENLABS_MODEL інша — перевірте ціну вручну.',
+};
+
+/** Вартість озвучення заданої кількості символів тексту. */
+export function priceForNarration(charCount: number): number {
+  return (charCount / 1000) * NARRATION_PRICING.perThousandCharsUsd;
+}
+
 export function pricingSnapshot() {
   return {
     updatedAt: PRICING_UPDATED_AT,
@@ -300,6 +330,7 @@ export function pricingSnapshot() {
       label: table.label,
       perImageUsd: table.perImageUsd,
     })),
+    narration: NARRATION_PRICING,
     text: TEXT_PRICING,
     textEngines: {
       gemini: TEXT_PRICING,

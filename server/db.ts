@@ -384,6 +384,26 @@ CREATE TABLE IF NOT EXISTS diagnostics (
 CREATE INDEX IF NOT EXISTS idx_diagnostics_user ON diagnostics(user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_diagnostics_book ON diagnostics(book_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_diagnostics_cache ON diagnostics(cache_key, created_at);
+
+-- Кеш озвучених фрагментів (ElevenLabs). Один запис = один синтезований
+-- mp3, знайдений/збережений за cache_key (хеш тексту+мови+голосу) —
+-- server/narrationStore.ts. Без TTL: чинний, поки текст не змінився.
+CREATE TABLE IF NOT EXISTS narrations (
+  id              TEXT PRIMARY KEY,
+  cache_key       TEXT NOT NULL,
+  book_id         TEXT,
+  chapter_id      TEXT,
+  section_id      TEXT,
+  scope           TEXT NOT NULL,             -- 'selection' | 'section'
+  lang            TEXT NOT NULL,             -- 'uk' | 'en'
+  voice_id        TEXT NOT NULL,
+  audio_data_url  TEXT NOT NULL,             -- data:audio/mpeg;base64,... (як CourseMaterial.fileUrl)
+  char_count      INTEGER NOT NULL DEFAULT 0,
+  created_at      TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_narrations_cache ON narrations(cache_key);
+CREATE INDEX IF NOT EXISTS idx_narrations_section ON narrations(section_id, lang);
+CREATE INDEX IF NOT EXISTS idx_narrations_book ON narrations(book_id, created_at);
 `;
 
 /**

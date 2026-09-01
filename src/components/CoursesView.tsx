@@ -17,11 +17,14 @@ import {
   CheckCircle2,
   Loader2,
   Package,
+  Volume2,
 } from 'lucide-react';
 import { Book, AuthUser, CourseMaterial, CourseMaterialKind, Model3DFormat } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
 import { exportCourseToZip } from '../utils/courseExporter';
 import { Model3DViewer } from './Model3DViewer';
+import { usePlanAccess } from '../hooks/usePlanAccess';
+import { synthesizeNarration, NarrationClientError, type NarrationLang } from '../utils/narrationClient';
 
 interface CoursesViewProps {
   book: Book;
@@ -58,6 +61,32 @@ export const CoursesView: React.FC<CoursesViewProps> = ({ book, onUpdateBook, on
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
   const [addModalKind, setAddModalKind] = useState<CourseMaterialKind | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // «Прослухати» на тегу курсу — той самий рушій озвучення, що й
+  // «Озвучити фрагмент» у редакторі (EditorView.tsx) і плейлист «Слухати
+  // книгу» (NarrationView.tsx): один платформний ключ ElevenLabs, той
+  // самий гейт Pro/Ultra, той самий кеш за хешем тексту на сервері.
+  const narrationAccess = usePlanAccess(authUser, ['pro', 'ultra']);
+  const [narrationBusyTagId, setNarrationBusyTagId] = useState<string | null>(null);
+  const [narrationPlayer, setNarrationPlayer] = useState<{ audioUrl: string; label: string } | null>(null);
+
+  const narrateTag = async (tagId: string, text: string, label: string, lang: NarrationLang) => {
+    if (!narrationAccess.hasAccess) {
+      setToastMessage(t('coursesView.narrationPlanRequired'));
+      setTimeout(() => setToastMessage(null), 5000);
+      return;
+    }
+    setNarrationBusyTagId(tagId);
+    try {
+      const result = await synthesizeNarration({ text, lang, scope: 'selection', bookId: book.id });
+      setNarrationPlayer({ audioUrl: result.audioUrl, label });
+    } catch (err) {
+      setToastMessage(err instanceof NarrationClientError ? err.message : t('coursesView.narrationFailed'));
+      setTimeout(() => setToastMessage(null), 6000);
+    } finally {
+      setNarrationBusyTagId(null);
+    }
+  };
   const [isUploading, setIsUploading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null);
@@ -318,6 +347,17 @@ export const CoursesView: React.FC<CoursesViewProps> = ({ book, onUpdateBook, on
         </div>
       )}
 
+      {narrationPlayer && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 text-slate-200 px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-3 border border-sky-500/40 text-xs max-w-[92vw]">
+          <Volume2 className="w-4 h-4 text-sky-400 shrink-0" />
+          <span className="truncate max-w-[160px] text-slate-400">{narrationPlayer.label}</span>
+          <audio src={narrationPlayer.audioUrl} controls autoPlay className="h-8" style={{ maxWidth: 260 }} />
+          <button onClick={() => setNarrationPlayer(null)} className="p-1 text-slate-400 hover:text-white rounded-md shrink-0">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Top Banner */}
       <div className="nova-glass-dark rounded-2xl p-6 border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="flex-1 min-w-0">
@@ -470,15 +510,36 @@ export const CoursesView: React.FC<CoursesViewProps> = ({ book, onUpdateBook, on
                           </button>
                         </div>
                       </div>
-                      {onNavigateToSection && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); onNavigateToSection(tag.chapterId, tag.sectionId); }}
-                          className="mt-2 flex items-center gap-1 text-[10px] text-amber-400 hover:underline"
-                        >
-                          {t('coursesView.goToEditorBtn')}
-                          <ArrowRight className="w-2.5 h-2.5" />
-                        </button>
-                      )}
+                      <div className="mt-2 flex items-center gap-3 flex-wrap">
+                        {onNavigateToSection && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onNavigateToSection(tag.chapterId, tag.sectionId); }}
+                            className="flex items-center gap-1 text-[10px] text-amber-400 hover:underline"
+                          >
+                            {t('coursesView.goToEditorBtn')}
+                            <ArrowRight className="w-2.5 h-2.5" />
+                          </button>
+                        )}
+                        {(['uk', 'en'] as const).map((lang) => (
+                          <button
+                            key={lang}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void narrateTag(tag.id, tag.textSnippet, tag.label, lang);
+                            }}
+                            disabled={narrationBusyTagId !== null}
+                            className="flex items-center gap-1 text-[10px] text-sky-400 hover:underline disabled:opacity-50"
+                            title={t('coursesView.narrationTooltip')}
+                          >
+                            {narrationBusyTagId === tag.id ? (
+                              <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                            ) : (
+                              <Volume2 className="w-2.5 h-2.5" />
+                            )}
+                            {lang === 'uk' ? t('coursesView.narrationLangUk') : t('coursesView.narrationLangEn')}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   );
                 })}

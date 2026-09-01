@@ -43,6 +43,7 @@ import { IMAGE_ENGINES, seedreamConfig } from './imageGeneration';
 import { SEEDREAM_FAL_MODEL } from './pricing';
 import { geminiClient } from './aiCore';
 import { PLANS, PLAN_ORDER, priceFor, type PlanId } from './subscriptions';
+import { platformKeyFor } from './platformKeys';
 import { paypalConfig } from './payments/paypal';
 import {
   readBridgeSettingsView,
@@ -328,7 +329,7 @@ export function registerAdminRoutes(app: Express): void {
    * аналітика ШІ» (та сама форма, що й у Modul_token ModelPricing): ціни
    * за 1k токенів, прапорець is_active = чи налаштований відповідний ключ.
    */
-  app.get('/api/admin/ai/pricing', requireAdmin, (_req, res) => {
+  app.get('/api/admin/ai/pricing', requireAdmin, async (_req, res) => {
     const snapshot = pricingSnapshot();
     const providerByEngine: Record<string, string> = {
       gemini: 'Google',
@@ -396,10 +397,26 @@ export function registerAdminRoutes(app: Express): void {
       };
     });
 
+    // Озвучення (ElevenLabs) — платформний ключ, як і Seedream: перевіряємо
+    // async platformKeyFor(), бо на відміну від зображень тут НЕМАЄ
+    // серверної змінної оточення як типового шляху — лише ключ адміна.
+    const elevenlabsKey = await platformKeyFor('elevenlabs');
+    const narrationPricing = {
+      id: 'pricing-audio-elevenlabs',
+      provider: 'ElevenLabs',
+      model: snapshot.narration.modelId,
+      display_name: `${snapshot.narration.modelId} (${snapshot.narration.label})`,
+      input_price_per_1k: 0,
+      output_price_per_1k: snapshot.narration.perThousandCharsUsd,
+      is_active: !!elevenlabsKey || !!process.env.ELEVENLABS_API_KEY,
+      updated_at: snapshot.updatedAt,
+      note: `Ціна за 1000 СИМВОЛІВ тексту (не зображень і не токенів): ${snapshot.narration.perThousandCharsUsd}. Доступно тарифам Pro/Ultra.`,
+    };
+
     res.json({
       updatedAt: snapshot.updatedAt,
       currency: 'USD',
-      pricings: [...pricings, ...imagePricings],
+      pricings: [...pricings, ...imagePricings, narrationPricing],
     });
   });
 

@@ -46,6 +46,7 @@ import { structureBuilder } from './structureBuilder';
 import { portfolioView } from './portfolioView';
 import { publishingHub } from './publishingHub';
 import { apiKeysView } from './apiKeysView';
+import { narration } from './narration';
 
 /**
  * Об'єднані дерева перекладів. Кожен новий словник (наступний екран) —
@@ -101,6 +102,7 @@ export const dictionaries = {
     portfolioView: portfolioView.uk,
     publishingHub: publishingHub.uk,
     apiKeysView: apiKeysView.uk,
+    narration: narration.uk,
   },
   en: {
     common: common.en,
@@ -151,5 +153,6 @@ export const dictionaries = {
     portfolioView: portfolioView.en,
     publishingHub: publishingHub.en,
     apiKeysView: apiKeysView.en,
+    narration: narration.en,
   },
 };

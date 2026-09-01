@@ -14,7 +14,7 @@ interface ApiKeyRow {
    * Текстовий рушій чи генератор зображень. Поле опційне, бо старіший
    * сервер його не віддає — тоді рядок вважається текстовим, як раніше.
    */
-  kind?: 'text' | 'image';
+  kind?: 'text' | 'image' | 'audio';
 }
 
 interface ApiKeysViewProps {
@@ -173,8 +173,9 @@ export const ApiKeysView: React.FC<ApiKeysViewProps> = ({ authUser }) => {
     );
   };
 
-  const textKeys = keys.filter((k) => k.kind !== 'image');
+  const textKeys = keys.filter((k) => k.kind !== 'image' && k.kind !== 'audio');
   const imageKeys = keys.filter((k) => k.kind === 'image');
+  const audioKeys = keys.filter((k) => k.kind === 'audio');
 
   if (!isRegistered) {
     return (
@@ -234,6 +235,18 @@ export const ApiKeysView: React.FC<ApiKeysViewProps> = ({ authUser }) => {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {imageKeys.map(renderRow)}
+              </div>
+            </section>
+          )}
+
+          {audioKeys.length > 0 && (
+            <section className="flex flex-col gap-3">
+              <div>
+                <h2 className="text-[13px] font-bold text-[var(--on-surface)]">{t('apiKeysView.sectionAudio')}</h2>
+                <p className="text-[11px] text-[var(--on-surface-variant)] mt-0.5">{t('apiKeysView.sectionAudioHint')}</p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {audioKeys.map(renderRow)}
               </div>
             </section>
           )}

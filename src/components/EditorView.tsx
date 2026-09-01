@@ -75,6 +75,7 @@ import {
   Pin,
   PinOff,
   MousePointerClick,
+  Volume2,
   AlignLeft,
   AlignRight,
   AlignCenter,
@@ -93,7 +94,8 @@ import {
   BookIllustration,
   UserRole,
   CourseTag,
-  CustomFont
+  CustomFont,
+  AuthUser
 } from '../types';
 import { 
   calculateWordCount, 
@@ -104,6 +106,8 @@ import {
 } from '../utils/helpers';
 import { getRoleInfo } from '../utils/rbac';
 import { usePersistentState } from '../hooks/usePersistentState';
+import { usePlanAccess } from '../hooks/usePlanAccess';
+import { synthesizeNarration, NarrationClientError, type NarrationLang } from '../utils/narrationClient';
 import { CharacterEditModal } from './CharacterEditModal';
 import { AddParticipantsModal } from './AddParticipantsModal';
 import { GenerateCharacterModal } from './GenerateCharacterModal';
@@ -186,6 +190,14 @@ interface EditorViewProps {
    * повторити правий клік, загубивши контекст на півдорозі.
    */
   promptGenerateTick?: number;
+  /**
+   * Повний обліковий запис (роль + тариф) — потрібен «Озвучити фрагмент»,
+   * щоб перевірити доступ Pro/Ultra ще ДО запиту на сервер, а не після
+   * 403. authUserId вище цього не дає — це лише id, без ролі й плану.
+   */
+  authUser?: AuthUser | null;
+  /** Перехід на сторінку «Підписка» — для тосту «озвучення доступне з Pro». */
+  onGoToSubscription?: () => void;
 }
 
 /** Контекст фото, з яким відкривається конструктор промтів. */
@@ -208,6 +220,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
   onSaveBook,
   currentRole = 'admin',
   authUserId = null,
+  authUser = null,
+  onGoToSubscription,
   pendingHighlight,
   onHighlightApplied,
   onOpenPromptConstructor,
@@ -1129,6 +1143,51 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
   const [selectionAiBusy, setSelectionAiBusy] = useState<1 | 2 | 3 | null>(null);
   const [showSelectionSubmenu, setShowSelectionSubmenu] = useState(false);
+
+  // «Озвучити фрагмент» — Pro/Ultra (server/subscriptions.ts requirePlanAtLeast),
+  // адмін завжди проходить (usePlanAccess сама це враховує).
+  const narrationAccess = usePlanAccess(authUser, ['pro', 'ultra']);
+  const [showNarrationSubmenu, setShowNarrationSubmenu] = useState(false);
+  const [narrationBusy, setNarrationBusy] = useState<NarrationLang | null>(null);
+  const [narrationPlayer, setNarrationPlayer] = useState<{ audioUrl: string; label: string } | null>(null);
+
+  /**
+   * Озвучує виділений фрагмент (абзац або навіть одне слово — та сама межа
+   * «будь-яке непорожнє виділення», що й для обговорення в чаті, а не 40
+   * символів генерації абзаців: людина хоче почути слово так само, як
+   * спитати про нього).
+   */
+  const narrateSelection = async (lang: NarrationLang) => {
+    const source = getSelectionSource();
+    if (!source) return;
+    if (!narrationAccess.hasAccess) {
+      setAiEngineToast(t('editor.narrationPlanRequired'));
+      setTimeout(() => setAiEngineToast(null), 5000);
+      return;
+    }
+    const chapter = book.chapters.find((c) => c.id === activeChapterId);
+    const section = chapter?.sections.find((sc) => sc.id === activeSectionId);
+    const where = [chapter?.title, section?.title].filter(Boolean).join(' → ');
+
+    setNarrationBusy(lang);
+    try {
+      const result = await synthesizeNarration({
+        text: source.text,
+        lang,
+        scope: 'selection',
+        bookId: book.id,
+        chapterId: chapter?.id,
+        sectionId: section?.id,
+      });
+      setNarrationPlayer({ audioUrl: result.audioUrl, label: where || t('editor.narrationFragmentLabel') });
+    } catch (err) {
+      const message = err instanceof NarrationClientError ? err.message : t('editor.narrationFailed');
+      setAiEngineToast(message);
+      setTimeout(() => setAiEngineToast(null), 6000);
+    } finally {
+      setNarrationBusy(null);
+    }
+  };
 
   // Список моделей потрібен уже на першому рендері панелі (випадаючий вибір
   // LLM), а не лише в мить генерації — тож тягнемо його одразу при відкритті
@@ -2646,6 +2705,23 @@ export const EditorView: React.FC<EditorViewProps> = ({
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 text-amber-200 font-semibold px-4 py-2 rounded-xl shadow-2xl flex items-center gap-2 border border-amber-500/40 text-xs">
           <Spline className="w-4 h-4" />
           <span>{wrapToast}</span>
+        </div>
+      )}
+
+      {/* Плеєр озвученого фрагмента — закритий хрестиком, а не таймером:
+          автор може слухати довше, ніж живе звичайний тост. */}
+      {narrationPlayer && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 text-slate-200 px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-3 border border-sky-500/40 text-xs max-w-[92vw]">
+          <Volume2 className="w-4 h-4 text-sky-400 shrink-0" />
+          <span className="truncate max-w-[160px] text-slate-400">{narrationPlayer.label}</span>
+          <audio src={narrationPlayer.audioUrl} controls autoPlay className="h-8" style={{ maxWidth: 260 }} />
+          <button
+            onClick={() => setNarrationPlayer(null)}
+            className="p-1 text-slate-400 hover:text-white rounded-md shrink-0"
+            title={t('editor.narrationClosePlayer')}
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
@@ -4738,6 +4814,50 @@ export const EditorView: React.FC<EditorViewProps> = ({
               <span className="flex-1 text-slate-200">{t('editor.contextMenuDiscussInChat')}</span>
             </button>
           )}
+
+          {/* Озвучити фрагмент (ElevenLabs) — будь-яке непорожнє виділення,
+              як і «Обговорити в чаті» вище: працює і на слово, і на абзац. */}
+          <div>
+            <button
+              onClick={() => setShowNarrationSubmenu((v) => !v)}
+              disabled={!hasFragmentToDiscuss() || narrationBusy !== null}
+              className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-white/[0.06] text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              title={hasFragmentToDiscuss() ? undefined : t('editor.discussInChatNoSelection')}
+            >
+              <Volume2 className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+              <span className="flex-1 text-slate-200">{t('editor.contextMenuNarrate')}</span>
+              {!narrationAccess.hasAccess && !narrationAccess.loading && (
+                <span className="text-[9px] font-mono font-bold text-amber-400 uppercase">Pro</span>
+              )}
+              <ChevronDown
+                className={`w-3.5 h-3.5 text-slate-500 shrink-0 transition-transform ${showNarrationSubmenu ? 'rotate-180' : ''}`}
+              />
+            </button>
+
+            {showNarrationSubmenu && (
+              <div className="pl-6 pr-1 pb-1 flex flex-col gap-0.5">
+                {(['uk', 'en'] as const).map((lang) => (
+                  <button
+                    key={lang}
+                    onClick={() => {
+                      setContextMenu(null);
+                      setShowNarrationSubmenu(false);
+                      void narrateSelection(lang);
+                    }}
+                    disabled={narrationBusy !== null}
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-white/[0.06] text-left transition-colors text-[12px] text-slate-300 disabled:opacity-50"
+                  >
+                    {narrationBusy === lang ? (
+                      <RotateCcw className="w-3 h-3 animate-spin shrink-0" />
+                    ) : (
+                      <Volume2 className="w-3 h-3 shrink-0 text-sky-400/70" />
+                    )}
+                    {lang === 'uk' ? t('editor.narrationLangUk') : t('editor.narrationLangEn')}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Абзац(и) за виділеним фрагментом — розгортається вибором кількості.
               Вимкнений, поки виділення немає: інакше пункт обіцяв би дію, яка

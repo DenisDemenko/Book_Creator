@@ -42,6 +42,29 @@ function imageServerKeyConfigured(engine: string): boolean {
   return p.envKeys.some((k) => !!process.env[k]);
 }
 
+/**
+ * Провайдери ОЗВУЧЕННЯ (Text-to-Speech). Окрема категорія від зображень —
+ * інший транспорт (server/narration.ts), інша одиниця тарифікації
+ * (символи тексту, а не зображення чи токени). Наразі один провайдер,
+ * але список — щоб додати другий (наприклад, запасний TTS) не міняючи
+ * форму відповіді.
+ */
+const AUDIO_KEY_PROVIDERS = [
+  {
+    engine: 'elevenlabs',
+    label: 'ElevenLabs (озвучення)',
+    envKeys: ['ELEVENLABS_API_KEY'],
+  },
+] as const;
+
+const AUDIO_KEY_ENGINES = new Set<string>(AUDIO_KEY_PROVIDERS.map((p) => p.engine));
+
+function audioServerKeyConfigured(engine: string): boolean {
+  const p = AUDIO_KEY_PROVIDERS.find((x) => x.engine === engine);
+  if (!p) return false;
+  return p.envKeys.some((k) => !!process.env[k]);
+}
+
 function isEngineId(value: string): value is EngineId {
   return KNOWN_ENGINES.has(value);
 }
@@ -113,6 +136,21 @@ export function registerApiKeysRoutes(app: Express): void {
 
       keys.push(...(imageKeys as unknown as typeof keys));
 
+      // Провайдери озвучення — тим самим списком, третя секція панелі.
+      const audioKeys = AUDIO_KEY_PROVIDERS.map((p) => {
+        const own = byEngine.get(p.engine);
+        return {
+          engine: p.engine,
+          label: p.label,
+          serverKeyConfigured: audioServerKeyConfigured(p.engine),
+          configured: !!own,
+          fingerprint: own?.fingerprint,
+          updatedAt: own?.updatedAt,
+          kind: 'audio' as const,
+        };
+      });
+      keys.push(...(audioKeys as unknown as typeof keys));
+
       res.json({ keys, cryptoConfigured: isApiKeyCryptoConfigured() });
     } catch (err) {
       console.error('[api-keys] list:', err);
@@ -124,7 +162,7 @@ export function registerApiKeysRoutes(app: Express): void {
   app.put('/api/account/api-keys/:engine', requireAuth, requirePermission('canManageApiKeys'), async (req, res) => {
     try {
       const engine = req.params.engine;
-      if (!isEngineId(engine) && !IMAGE_KEY_ENGINES.has(engine)) {
+      if (!isEngineId(engine) && !IMAGE_KEY_ENGINES.has(engine) && !AUDIO_KEY_ENGINES.has(engine)) {
         return res.status(400).json({ error: `Невідомий провайдер: ${engine}.` });
       }
       const apiKey = typeof req.body?.apiKey === 'string' ? req.body.apiKey.trim() : '';
@@ -172,7 +210,8 @@ export function registerApiKeysRoutes(app: Express): void {
     try {
       const engine = req.params.engine;
       const isImage = IMAGE_KEY_ENGINES.has(engine);
-      if (!isEngineId(engine) && !isImage) {
+      const isAudio = AUDIO_KEY_ENGINES.has(engine);
+      if (!isEngineId(engine) && !isImage && !isAudio) {
         return res.status(400).json({ error: `Невідомий провайдер: ${engine}.` });
       }
       const userId = req.principal!.id as string;
@@ -180,7 +219,11 @@ export function registerApiKeysRoutes(app: Express): void {
       res.json({
         ok: true,
         engine,
-        serverKeyConfigured: isEngineId(engine) ? engineConfigured(engine) : imageServerKeyConfigured(engine),
+        serverKeyConfigured: isEngineId(engine)
+          ? engineConfigured(engine)
+          : isAudio
+            ? audioServerKeyConfigured(engine)
+            : imageServerKeyConfigured(engine),
       });
     } catch (err) {
       console.error('[api-keys] delete:', err);

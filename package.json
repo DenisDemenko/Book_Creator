@@ -12,7 +12,7 @@
     "lint": "tsc --noEmit",
     "test:diff": "tsx scripts/test-bookDiff.mts",
     "test:images": "tsx scripts/test-imageGeneration.mts",
-    "test": "npm run test:diff && npm run test:image-wrap && npm run test:prompt-templates && npm run test:core-ai && npm run test:character-normalize && npm run test:images && npm run test:auth && npm run test:sqlite && npm run test:subscriptions && npm run test:chat && npm run test:api-keys && npm run test:book-text && npm run test:claude-manuscript && npm run test:publishing && npm run test:publishing-routes && npm run test:selection-paragraphs && npm run test:core-module-models && npm run test:design-layout && npm run test:book-version && npm run test:express-tracks && npm run test:design-suggestion && npm run test:diagn && npm run test:chat-bridge",
+    "test": "npm run test:diff && npm run test:image-wrap && npm run test:prompt-templates && npm run test:core-ai && npm run test:character-normalize && npm run test:images && npm run test:auth && npm run test:sqlite && npm run test:subscriptions && npm run test:chat && npm run test:api-keys && npm run test:book-text && npm run test:claude-manuscript && npm run test:publishing && npm run test:publishing-routes && npm run test:selection-paragraphs && npm run test:core-module-models && npm run test:design-layout && npm run test:book-version && npm run test:express-tracks && npm run test:design-suggestion && npm run test:diagn && npm run test:chat-bridge && npm run test:narration",
     "test:chat": "tsx scripts/test-chatSessions.mts",
     "test:api-keys": "tsx scripts/test-apiKeys.mts",
     "test:book-text": "tsx scripts/test-bookText.mts",
@@ -35,7 +35,8 @@
     "test:design-suggestion": "tsx scripts/test-designSuggestion.mts",
     "test:diagn": "tsx scripts/test-diagn.mts",
     "live:diagn": "tsx scripts/live-diagn.mts",
-    "test:chat-bridge": "tsx scripts/test-chatBridge.mts"
+    "test:chat-bridge": "tsx scripts/test-chatBridge.mts",
+    "test:narration": "tsx scripts/test-narration.mts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

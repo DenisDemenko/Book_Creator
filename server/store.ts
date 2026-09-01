@@ -59,7 +59,7 @@ export interface UsageRecord {
   userId: string | null;
   userEmail: string;
   role: StoredRole;
-  kind: 'image' | 'text' | 'storage';
+  kind: 'image' | 'text' | 'storage' | 'audio';
   engineId: string;
   modelId: string;
   imageSize?: string;
@@ -170,7 +170,7 @@ function rowToUsage(row: UsageRow): UsageRecord {
     userId: row.user_id,
     userEmail: row.user_email,
     role: row.role as StoredRole,
-    kind: row.kind as 'image' | 'text' | 'storage',
+    kind: row.kind as 'image' | 'text' | 'storage' | 'audio',
     engineId: row.engine_id,
     modelId: row.model_id,
     costUsd: row.cost_usd,

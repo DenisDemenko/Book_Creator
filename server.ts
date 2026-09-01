@@ -43,6 +43,7 @@ import { registerChatRoutes, CHAT_USAGE_CONTEXT } from './server/chatRoutes';
 import { registerApiKeysRoutes } from './server/apiKeysRoutes';
 import { registerExpressRoutes } from './server/expressRoutes';
 import { registerDiagnRoutes } from './server/diagnRoutes';
+import { registerNarrationRoutes } from './server/narrationRoutes';
 import { registerPublishingRoutes } from './server/publishingRoutes';
 import { requireImageQuota, requirePlanAtLeast, checkChatQuota, resolveSubscription } from './server/subscriptions';
 import {
@@ -339,6 +340,7 @@ async function startServer() {
     defaultModelId: GEMINI_MODEL,
     loadAdminLayer: () => loadCoreAdminLayer(),
   });
+  registerNarrationRoutes(app);
 
   // --- API Endpoints ---
 

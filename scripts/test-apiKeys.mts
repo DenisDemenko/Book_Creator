@@ -127,12 +127,17 @@ console.log('\nHTTP-роути (server/apiKeysRoutes.ts):');
   const initialKeys: any[] = initial.data?.keys ?? [];
   t(
     'повертає рівно 6 текстових провайдерів',
-    initialKeys.filter((k) => k.kind !== 'image').length === 6,
-    String(initialKeys.filter((k) => k.kind !== 'image').length)
+    initialKeys.filter((k) => k.kind === 'text').length === 6,
+    String(initialKeys.filter((k) => k.kind === 'text').length)
   );
   t(
     'Seedream присутній як провайдер зображень',
     initialKeys.some((k) => k.engine === 'seedream' && k.kind === 'image'),
+    initialKeys.map((k) => `${k.engine}:${k.kind}`).join(', ')
+  );
+  t(
+    'ElevenLabs присутній як провайдер озвучення',
+    initialKeys.some((k) => k.engine === 'elevenlabs' && k.kind === 'audio'),
     initialKeys.map((k) => `${k.engine}:${k.kind}`).join(', ')
   );
   t('спочатку жоден власний ключ не заданий', initial.data.keys.every((k: any) => k.configured === false));

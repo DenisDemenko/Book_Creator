@@ -47,6 +47,7 @@ import { SubscriptionView } from './components/SubscriptionView';
 import { ApiKeysView } from './components/ApiKeysView';
 import { ManuscriptFormatterView } from './components/ManuscriptFormatterView';
 import { CoursesView } from './components/CoursesView';
+import { NarrationView } from './components/NarrationView';
 import { PdfEditorView } from './components/PdfEditorView';
 import { OnboardingTour } from './onboarding/OnboardingTour';
 import { useAuth } from './hooks/useAuth';
@@ -1604,6 +1605,8 @@ export default function App() {
             onSaveBook={handleManualSave}
             currentRole={currentRole}
             authUserId={auth.user?.id ?? null}
+            authUser={auth.user}
+            onGoToSubscription={() => handleSelectTab('subscription')}
             pendingHighlight={pendingChatHighlight}
             onHighlightApplied={() => setPendingChatHighlight(null)}
             onOpenPromptConstructor={(request) => {
@@ -1761,6 +1764,14 @@ export default function App() {
             onNavigateToSection={handleNavigateToSection}
             onSaveBook={handleManualSave}
             authUser={auth.user}
+          />
+        )}
+
+        {currentTab === 'narration' && (
+          <NarrationView
+            book={book}
+            authUser={auth.user}
+            onGoToSubscription={() => handleSelectTab('subscription')}
           />
         )}
 

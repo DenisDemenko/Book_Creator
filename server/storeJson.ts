@@ -64,7 +64,7 @@ export interface UsageRecord {
   userId: string | null;
   userEmail: string;
   role: StoredRole;
-  kind: 'image' | 'text' | 'storage';
+  kind: 'image' | 'text' | 'storage' | 'audio';
   engineId: string;
   modelId: string;
   imageSize?: string;
