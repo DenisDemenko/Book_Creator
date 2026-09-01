@@ -80,7 +80,8 @@ import {
   AlignLeft,
   AlignRight,
   AlignCenter,
-  Spline
+  Spline,
+  Timer
 } from 'lucide-react';
 import { 
   Book, 
@@ -1243,6 +1244,62 @@ export const EditorView: React.FC<EditorViewProps> = ({
   }, [isFullscreenMode]);
 
   /**
+   * Таймер спринту письма — не блокує редагування, лише рахує час і
+   * скільки слів написано за сесію (activeSection.wordCount на старті
+   * проти зараз — той самий лічильник, що вже показаний у статус-барі
+   * редактора, тож не потрібен окремий підрахунок символів).
+   */
+  const [sprintDurationMin, setSprintDurationMin] = useState(25);
+  const [sprintEndAt, setSprintEndAt] = useState<number | null>(null);
+  const [sprintStartWords, setSprintStartWords] = useState(0);
+  const [sprintNow, setSprintNow] = useState(() => Date.now());
+  const [showSprintMenu, setShowSprintMenu] = useState(false);
+  const [sprintToast, setSprintToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!sprintEndAt) return;
+    const interval = window.setInterval(() => setSprintNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [sprintEndAt]);
+
+  useEffect(() => {
+    if (!sprintEndAt || sprintNow < sprintEndAt) return;
+    const wordsWritten = Math.max(0, (activeSection?.wordCount || 0) - sprintStartWords);
+    setSprintToast(t('editor.sprintDoneToast', { n: wordsWritten }));
+    setTimeout(() => setSprintToast(null), 6000);
+    setSprintEndAt(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sprintNow, sprintEndAt]);
+
+  const formatSprintTime = (totalSeconds: number) => {
+    const m = Math.floor(totalSeconds / 60);
+    const s = totalSeconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const sprintRemainingSec = sprintEndAt ? Math.max(0, Math.round((sprintEndAt - sprintNow) / 1000)) : 0;
+  const sprintWordsWritten = sprintEndAt ? Math.max(0, (activeSection?.wordCount || 0) - sprintStartWords) : 0;
+
+  const startSprint = (minutes: number) => {
+    setSprintDurationMin(minutes);
+    setSprintStartWords(activeSection?.wordCount || 0);
+    setSprintEndAt(Date.now() + minutes * 60 * 1000);
+    setSprintNow(Date.now());
+    setShowSprintMenu(false);
+  };
+
+  const stopSprint = () => {
+    setSprintEndAt(null);
+    setShowSprintMenu(false);
+  };
+
+  // Кнопка озвучення прямо на панелі — та сама функція, що раніше жила
+  // лише в контекстному меню (правий клік → «Озвучити»). Live-редагування
+  // не мало жодного способу почути виділений фрагмент одним кліком, не
+  // відриваючись від клавіатури під праву кнопку миші.
+  const [showNarrationToolbarMenu, setShowNarrationToolbarMenu] = useState(false);
+
+  /**
    * Озвучує виділений фрагмент (абзац або навіть одне слово — та сама межа
    * «будь-яке непорожнє виділення», що й для обговорення в чаті, а не 40
    * символів генерації абзаців: людина хоче почути слово так само, як
@@ -1250,7 +1307,15 @@ export const EditorView: React.FC<EditorViewProps> = ({
    */
   const narrateSelection = async (lang: NarrationLang) => {
     const source = getSelectionSource();
-    if (!source) return;
+    if (!source) {
+      // Раніше — тихий no-op: у контекстному меню кнопка й так недоступна
+      // без виділення. Тепер ця сама функція викликається і з кнопки на
+      // панелі інструментів, де такого запобіжника нема, тож людині
+      // потрібно бачити, чому нічого не відбулось.
+      setAiEngineToast(t('editor.narrationNoSelection'));
+      setTimeout(() => setAiEngineToast(null), 4000);
+      return;
+    }
     if (!narrationAccess.hasAccess) {
       setAiEngineToast(t('editor.narrationPlanRequired'));
       setTimeout(() => setAiEngineToast(null), 5000);
@@ -1679,6 +1744,86 @@ export const EditorView: React.FC<EditorViewProps> = ({
           </div>
         );
       })()}
+
+      {/* Озвучення виділеного фрагмента прямо з панелі — раніше та сама
+          дія жила лише в контекстному меню (правий клік). */}
+      <div className="relative">
+        <button
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => setShowNarrationToolbarMenu((v) => !v)}
+          disabled={narrationBusy !== null}
+          className="p-1 rounded-md ml-1 text-slate-300 hover:bg-slate-800 hover:text-white transition-colors disabled:opacity-50"
+          title={t('editor.narrateToolbarTitle')}
+          aria-label={t('editor.narrateToolbarTitle')}
+        >
+          {narrationBusy ? <RotateCcw className="w-3.5 h-3.5 animate-spin" /> : <Volume2 className="w-3.5 h-3.5" />}
+        </button>
+
+        {showNarrationToolbarMenu && (
+          <div className="absolute top-full right-0 mt-1 z-50 p-1.5 rounded-xl bg-slate-900 border border-slate-700 shadow-2xl flex flex-col gap-0.5 min-w-[110px]">
+            {(['uk', 'en'] as const).map((lang) => (
+              <button
+                key={lang}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  setShowNarrationToolbarMenu(false);
+                  void narrateSelection(lang);
+                }}
+                disabled={narrationBusy !== null}
+                className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+              >
+                <Volume2 className="w-3 h-3 text-sky-400/70" />
+                {lang === 'uk' ? t('editor.narrationLangUk') : t('editor.narrationLangEn')}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Таймер спринту письма — довільна тривалість, лічить слова,
+          написані за сесію (activeSection.wordCount на старті проти
+          зараз), не блокує редагування. Той самий перемикач у кожному
+          вигляді панелі, бо ця функція рендериться в усіх розкладках. */}
+      <div className="relative">
+        {sprintEndAt ? (
+          <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={stopSprint}
+            className="flex items-center gap-1 px-2 py-1 rounded-md ml-1 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 font-mono text-[11px] transition-colors"
+            title={t('editor.sprintStopTitle', { n: sprintDurationMin })}
+          >
+            <Timer className="w-3.5 h-3.5" />
+            <span>{formatSprintTime(sprintRemainingSec)}</span>
+            {sprintWordsWritten > 0 && <span className="text-rose-400">+{sprintWordsWritten}</span>}
+          </button>
+        ) : (
+          <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setShowSprintMenu((v) => !v)}
+            className="p-1 rounded-md ml-1 text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
+            title={t('editor.sprintStartTitle')}
+            aria-label={t('editor.sprintStartTitle')}
+          >
+            <Timer className="w-3.5 h-3.5" />
+          </button>
+        )}
+
+        {showSprintMenu && !sprintEndAt && (
+          <div className="absolute top-full right-0 mt-1 z-50 p-2 rounded-xl bg-slate-900 border border-slate-700 shadow-2xl flex flex-col gap-1 min-w-[140px]">
+            <p className="text-[10px] text-slate-500 px-1 pb-1">{t('editor.sprintPickHint')}</p>
+            {[10, 15, 25, 45].map((min) => (
+              <button
+                key={min}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => startSprint(min)}
+                className="text-left px-2 py-1 rounded-md text-xs text-slate-200 hover:bg-slate-800"
+              >
+                {t('editor.sprintMinutes', { n: min })}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Повноекранний режим — лише значок, без підпису (так попросили),
           і той самий перемикач у кожному вигляді панелі, бо ця функція
@@ -2856,6 +3001,13 @@ export const EditorView: React.FC<EditorViewProps> = ({
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 text-amber-200 font-semibold px-4 py-2 rounded-xl shadow-2xl flex items-center gap-2 border border-amber-500/40 text-xs">
           <Spline className="w-4 h-4" />
           <span>{wrapToast}</span>
+        </div>
+      )}
+
+      {sprintToast && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-rose-500/90 text-slate-950 font-bold px-4 py-2 rounded-xl shadow-2xl flex items-center gap-2 border border-rose-400 text-xs">
+          <Timer className="w-4 h-4" />
+          <span>{sprintToast}</span>
         </div>
       )}
 
