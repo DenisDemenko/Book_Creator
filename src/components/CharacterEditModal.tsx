@@ -16,6 +16,7 @@ import {
   ShieldCheck,
   AlertTriangle,
   Activity,
+  Library,
 } from 'lucide-react';
 import { Character, Book } from '../types';
 import { normalizeCharacter } from '../utils/characterNormalize';
@@ -58,6 +59,25 @@ const DRIFT_STATUS_CLS: Record<DriftPatternResult['status'], string> = {
   unclear: 'border-slate-600 bg-slate-700/40 text-slate-300',
 };
 
+/** Один запис «Автоматичного кодексу персонажа» — форма відповіді сервера (server/characterCodexPrompt.ts), продубльована тут з тієї самої причини. */
+interface CodexEntry {
+  category: 'appearance' | 'personality' | 'relationships' | 'events' | 'other';
+  fact: string;
+  location: string;
+  quote: string;
+}
+interface CodexResult {
+  summary: string;
+  entries: CodexEntry[];
+}
+const CODEX_CATEGORY_CLS: Record<CodexEntry['category'], string> = {
+  appearance: 'border-sky-500/40 bg-sky-500/10 text-sky-200',
+  personality: 'border-violet-500/40 bg-violet-500/10 text-violet-200',
+  relationships: 'border-pink-500/40 bg-pink-500/10 text-pink-200',
+  events: 'border-amber-500/40 bg-amber-500/10 text-amber-200',
+  other: 'border-slate-600 bg-slate-700/40 text-slate-300',
+};
+
 interface CharacterEditModalProps {
   character: Character;
   book: Book;
@@ -81,7 +101,7 @@ export const CharacterEditModal: React.FC<CharacterEditModalProps> = ({
   // джерела) — без нормалізації p.strengths.filter(...) і подібні виклики
   // нижче кидають TypeError, крах підхоплює ErrorBoundary.
   const [charData, setCharData] = useState<Character>(normalizeCharacter({ ...character }));
-  const [activeTab, setActiveTab] = useState<'general' | 'appearance' | 'psychology' | 'biography' | 'consistency' | 'drift'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'appearance' | 'psychology' | 'biography' | 'consistency' | 'drift' | 'codex'>('general');
   const [newTag, setNewTag] = useState<string>('');
   const [newStrength, setNewStrength] = useState<string>('');
   const [newWeakness, setNewWeakness] = useState<string>('');
@@ -101,6 +121,11 @@ export const CharacterEditModal: React.FC<CharacterEditModalProps> = ({
   const [isCheckingDrift, setIsCheckingDrift] = useState<boolean>(false);
   const [driftResult, setDriftResult] = useState<DriftResult | null>(null);
   const [driftError, setDriftError] = useState<string | null>(null);
+
+  // «Автоматичний кодекс персонажа» — компіляція фактів із згадувань у тексті (без звірки з карткою)
+  const [isBuildingCodex, setIsBuildingCodex] = useState<boolean>(false);
+  const [codexResult, setCodexResult] = useState<CodexResult | null>(null);
+  const [codexError, setCodexError] = useState<string | null>(null);
 
   const handleCheckConsistency = async () => {
     setIsCheckingConsistency(true);
@@ -191,6 +216,46 @@ export const CharacterEditModal: React.FC<CharacterEditModalProps> = ({
       setDriftError(t('characterEditModal.driftError'));
     } finally {
       setIsCheckingDrift(false);
+    }
+  };
+
+  const handleBuildCodex = async () => {
+    setIsBuildingCodex(true);
+    setCodexError(null);
+    setCodexResult(null);
+    try {
+      const { mentions, totalFound } = collectCharacterMentions(book, {
+        id: charData.id,
+        name: charData.name,
+        surname: charData.surname,
+        alias: charData.alias,
+      });
+      if (totalFound === 0) {
+        setCodexError(t('characterEditModal.codexNoMentions'));
+        return;
+      }
+      const mentionsText = formatMentionsForPrompt(mentions);
+
+      const res = await fetch('/api/ai/character-codex', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookId: book.id,
+          character: charData,
+          mentions: mentionsText,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setCodexError(data?.error || t('characterEditModal.codexError'));
+        return;
+      }
+      setCodexResult(data.result);
+    } catch (err) {
+      console.error('Error building character codex:', err);
+      setCodexError(t('characterEditModal.codexError'));
+    } finally {
+      setIsBuildingCodex(false);
     }
   };
 
@@ -348,6 +413,18 @@ export const CharacterEditModal: React.FC<CharacterEditModalProps> = ({
           >
             <Activity className="w-3.5 h-3.5" />
             <span>{t('characterEditModal.tabDrift')}</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('codex')}
+            className={`pb-2.5 px-3 text-xs font-semibold border-b-2 transition-all whitespace-nowrap flex items-center gap-1.5 ${
+              activeTab === 'codex'
+                ? 'border-amber-400 text-amber-300'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Library className="w-3.5 h-3.5" />
+            <span>{t('characterEditModal.tabCodex')}</span>
           </button>
         </div>
 
@@ -877,6 +954,69 @@ export const CharacterEditModal: React.FC<CharacterEditModalProps> = ({
                         )}
                       </div>
                     ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 7. CHARACTER CODEX TAB */}
+          {activeTab === 'codex' && (
+            <div className="space-y-4">
+              <p className="text-slate-400 leading-relaxed">{t('characterEditModal.codexIntro')}</p>
+
+              <button
+                type="button"
+                onClick={handleBuildCodex}
+                disabled={isBuildingCodex}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold transition-all shadow-sm active:scale-95 disabled:opacity-50"
+              >
+                <Library className="w-4 h-4" />
+                <span>{isBuildingCodex ? t('characterEditModal.codexBuilding') : t('characterEditModal.codexBuildBtn')}</span>
+              </button>
+
+              {codexError && (
+                <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-200 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{codexError}</span>
+                </div>
+              )}
+
+              {codexResult && (
+                <div className="space-y-3">
+                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-800">
+                    <h4 className="text-slate-400 font-semibold mb-1">{t('characterEditModal.codexSummaryTitle')}</h4>
+                    <p className="text-slate-200 leading-relaxed">{codexResult.summary}</p>
+                  </div>
+
+                  <div>
+                    <h4 className="text-slate-400 font-semibold mb-2">{t('characterEditModal.codexEntriesTitle')}</h4>
+                    {codexResult.entries.length === 0 ? (
+                      <p className="text-slate-500">{t('characterEditModal.codexNoEntries')}</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {codexResult.entries.map((e, idx) => (
+                          <div key={idx} className={`p-3 rounded-xl border ${CODEX_CATEGORY_CLS[e.category]}`}>
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <span className="px-2 py-0.5 rounded-md border border-current/40 text-[10px] uppercase tracking-wide shrink-0">
+                                {t(`characterEditModal.codexCategory${e.category.charAt(0).toUpperCase()}${e.category.slice(1)}`)}
+                              </span>
+                            </div>
+                            <p className="text-slate-300 mb-1">{e.fact}</p>
+                            {e.location && (
+                              <p className="text-[11px] text-slate-500">
+                                <span className="font-semibold">{t('characterEditModal.consistencyLocationPrefix')}</span> {e.location}
+                              </p>
+                            )}
+                            {e.quote && (
+                              <p className="text-[11px] text-slate-500 italic">
+                                <span className="font-semibold not-italic">{t('characterEditModal.consistencyQuotePrefix')}</span> «{e.quote}»
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

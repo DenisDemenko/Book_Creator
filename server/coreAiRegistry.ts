@@ -82,6 +82,12 @@ import {
   renderReaderResponseSystemTemplate,
   renderReaderResponseUserTemplate,
 } from './readerResponsePrompt';
+import {
+  characterCodexSystemInstruction,
+  factoryCharacterCodexTemplate,
+  renderCharacterCodexSystemTemplate,
+  renderCharacterCodexUserTemplate,
+} from './characterCodexPrompt';
 
 /** Ключ у таблиці `meta`, під яким лежить ЄДИНИЙ адмінський шар усіх модулів ядра. */
 export const CORE_PROMPT_TEMPLATES_META_KEY = 'prompt_templates_core_admin';
@@ -105,6 +111,7 @@ export const CORE_MODULE_KEYS = [
   'characterConsistency',
   'behaviorDrift',
   'readerResponse',
+  'characterCodex',
 ] as const;
 
 export type CoreModuleKey = (typeof CORE_MODULE_KEYS)[number];
@@ -167,6 +174,7 @@ export const CORE_MODULE_PLACEHOLDERS: Record<CoreModuleKey, string[]> = {
   ],
   behaviorDrift: ['{ІМ_Я}', '{ПРІЗВИЩЕ}', '{ПАТЕРНИ_ПОВЕДІНКИ}', '{ЗГАДУВАННЯ_У_КНИЗІ}', '{МОВА}'],
   readerResponse: ['{РОЗДІЛ}', '{ЖАНР}', '{ФРАГМЕНТ}', '{МОВА}'],
+  characterCodex: ['{ІМ_Я}', '{ПРІЗВИЩЕ}', '{ПСЕВДО}', '{ЗГАДУВАННЯ_У_КНИЗІ}', '{МОВА}'],
 };
 
 /** Чи модуль повертає JSON за жорсткою схемою (схема — readonly-текст у конструкторі, не редагується). */
@@ -186,6 +194,7 @@ export const CORE_MODULE_HAS_JSON_SCHEMA: Record<CoreModuleKey, boolean> = {
   characterConsistency: true,
   behaviorDrift: true,
   readerResponse: true,
+  characterCodex: true,
 };
 
 /**
@@ -268,6 +277,8 @@ export function factoryCoreTemplate(module: CoreModuleKey): CorePromptTemplate {
       return { system: behaviorDriftSystemInstruction(), user: factoryBehaviorDriftTemplate() };
     case 'readerResponse':
       return { system: readerResponseSystemInstruction(), user: factoryReaderResponseTemplate() };
+    case 'characterCodex':
+      return { system: characterCodexSystemInstruction(), user: factoryCharacterCodexTemplate() };
   }
 }
 
@@ -492,6 +503,20 @@ export function renderCoreTemplate(
       return {
         system: renderReaderResponseSystemTemplate(template.system, values),
         user: renderReaderResponseUserTemplate(template.user, values),
+      };
+    }
+    case 'characterCodex': {
+      const values = {
+        name: fields.characterName,
+        surname: fields.characterSurname,
+        alias: fields.characterAlias,
+        mentions: fields.mentions || '',
+        // {МОВА} — той самий плейсхолдер-токен, що й у characterConsistency/behaviorDrift вище.
+        locale: fields.language,
+      };
+      return {
+        system: renderCharacterCodexSystemTemplate(template.system, values),
+        user: renderCharacterCodexUserTemplate(template.user, values),
       };
     }
   }

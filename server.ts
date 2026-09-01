@@ -103,6 +103,10 @@ import {
   MAX_REACTION_INPUT_CHARS,
 } from './server/readerResponsePrompt';
 import {
+  parseCodexResponse,
+  normalizeCodexResult,
+} from './server/characterCodexPrompt';
+import {
   readCoreModuleModels,
   setCoreModuleModel,
   resolveModuleModelId,
@@ -2214,6 +2218,82 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
         return res.status(err.status).json({ error: err.message });
       }
       res.status(500).json({ error: err?.message || 'Не вдалося симулювати відгук читача.', kind: 'unknown' });
+    }
+  });
+
+  /**
+   * «Автоматичний кодекс персонажа» — на відміну від character-consistency
+   * й behavior-drift, нічого не звіряє з карткою: компілює з наданих
+   * згадувань структурований перелік фактів, які текст ФАКТИЧНО встановив
+   * про персонажа. Той самий захист меж (413/400), що й в інших двох
+   * модулях на згадуваннях — `MAX_MENTIONS_CHARS` спільний для всіх трьох.
+   */
+  app.post('/api/ai/character-codex', requirePermission('canUseAi'), async (req, res) => {
+    const { bookId, character, mentions, locale, modelId } = req.body || {};
+
+    if (!character || typeof character !== 'object') {
+      return res.status(400).json({ error: 'Потрібні дані картки персонажа.', kind: 'bad_input' });
+    }
+    const mentionsText = typeof mentions === 'string' ? mentions.trim() : '';
+    if (mentionsText.length < 50) {
+      return res.status(400).json({
+        error: 'У тексті книги замало згадувань цього персонажа, щоб скласти кодекс.',
+        kind: 'not_enough_text',
+      });
+    }
+    if (mentionsText.length > MAX_MENTIONS_CHARS) {
+      return res.status(413).json({
+        error: `Забагато тексту згадувань (${mentionsText.length} символів, максимум ${MAX_MENTIONS_CHARS}).`,
+        kind: 'too_much_text',
+      });
+    }
+
+    const preferredModelId = (await resolveModuleModelId('characterCodex', modelId)) || undefined;
+    const resolved = await resolveTextEngineOrFail(req, res, preferredModelId, 'автоматичний кодекс персонажа');
+    if (!resolved) return;
+    const { engine, resolvedModelId, userKey } = resolved;
+
+    try {
+      const adminLayer = await loadCoreAdminLayer();
+      const template = resolveCoreTemplate('characterCodex', adminLayer);
+      const rendered = renderCoreTemplate('characterCodex', template, {
+        characterName: character.name,
+        characterSurname: character.surname,
+        characterAlias: character.alias,
+        mentions: mentionsText,
+        language: locale,
+      });
+
+      const result = await generateAiText({
+        engine,
+        modelId: resolvedModelId,
+        prompt: rendered.user,
+        systemInstruction: rendered.system,
+        apiKeyOverride: userKey,
+        json: true,
+        req,
+        label: 'Автоматичний кодекс персонажа',
+        bookId,
+      });
+
+      let parsed: any;
+      try {
+        parsed = parseCodexResponse(result.text);
+      } catch {
+        return res.status(502).json({
+          error: 'Модель повернула не JSON — спробуйте ще раз або оберіть іншу модель у налаштуваннях модуля.',
+          kind: 'bad_model_output',
+        });
+      }
+
+      const codex = normalizeCodexResult(parsed);
+      res.json({ result: codex, engine, modelId: resolvedModelId, timestamp: new Date().toISOString() });
+    } catch (err: any) {
+      console.error('Error in /api/ai/character-codex:', err?.message || err);
+      if (err instanceof ChatProviderError) {
+        return res.status(err.status).json({ error: err.message });
+      }
+      res.status(500).json({ error: err?.message || 'Не вдалося скласти кодекс персонажа.', kind: 'unknown' });
     }
   });
 
