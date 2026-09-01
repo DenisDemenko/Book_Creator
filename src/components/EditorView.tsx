@@ -27,9 +27,10 @@ import {
   Sparkles, 
   Check, 
   X, 
-  RotateCcw, 
-  Wand2, 
-  CheckCheck, 
+  RotateCcw,
+  Wand2,
+  CheckCheck,
+  Smile,
   AlertCircle, 
   Film, 
   User, 
@@ -322,7 +323,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
     isTranslator ? 'workText' : 'scene'
   );
   // Підвкладки всередині «Робота над текстом» / «Робота з AI».
-  const [rightPanelSubTab, setRightPanelSubTab] = usePersistentState<'translation' | 'footnotes_qr' | 'course_tags' | 'ai' | 'spellcheck' | 'diff'>(
+  const [rightPanelSubTab, setRightPanelSubTab] = usePersistentState<'translation' | 'footnotes_qr' | 'course_tags' | 'ai' | 'spellcheck' | 'diff' | 'reader'>(
     'nova_editor_rightPanelSubTab',
     'translation'
   );
@@ -448,6 +449,15 @@ export const EditorView: React.FC<EditorViewProps> = ({
     'Нео-Київ', 'Печерськ', 'Сварог', 'синаптичний', 'нейролінк', 'Прометій', 'квантовий'
   ]);
   const [showIllustrationModal, setShowIllustrationModal] = useState<boolean>(false);
+
+  // «Емоційний відгук читача» — форма відповіді сервера (server/readerResponsePrompt.ts), продубльована тут: клієнт не імпортує типи з server/.
+  const [readerResponseResult, setReaderResponseResult] = useState<{
+    impression: string;
+    beats: { emotion: string; intensity: 'low' | 'medium' | 'high'; location: string; quote: string; note: string }[];
+    dropOffRisk: string;
+  } | null>(null);
+  const [isSimulatingReader, setIsSimulatingReader] = useState<boolean>(false);
+  const [readerResponseError, setReaderResponseError] = useState<string | null>(null);
 
   // Завжди свіжі версії книги/колбеків усередині довгоживучих TipTap-колбеків
   // (useEditor створює редактор один раз — без цих ref'ів onUpdate/картинки
@@ -2613,6 +2623,41 @@ export const EditorView: React.FC<EditorViewProps> = ({
     }
   };
 
+  // Симуляція живої емоційної реакції читача-бета-рідера на активну сцену.
+  // Фрагмент береться відповідно до мовного режиму редактора — той самий
+  // принцип вибору поля, що вже застосовується для інших мовно-залежних дій.
+  const handleRunReaderResponse = async () => {
+    const fragment = editorLanguageMode === 'en' ? activeSection?.contentEn : activeSection?.content;
+    if (!fragment) return;
+    setIsSimulatingReader(true);
+    setReaderResponseError(null);
+    setRightPanelTab('workAi');
+    setRightPanelSubTab('reader');
+    try {
+      const res = await fetch('/api/ai/reader-response', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookId: book.id,
+          chapterTitle: activeChapter?.title,
+          genre: book.genre,
+          fragment,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setReaderResponseError(data?.error || t('editor.readerResponseError'));
+        return;
+      }
+      setReaderResponseResult(data.result);
+    } catch (err) {
+      console.error('Error simulating reader response:', err);
+      setReaderResponseError(t('editor.readerResponseError'));
+    } finally {
+      setIsSimulatingReader(false);
+    }
+  };
+
   const handleReplaceSpellIssue = (issue: SpellCheckIssue, suggestion: string) => {
     if (!activeSection) return;
     const newContent = activeSection.content.replace(issue.word, suggestion);
@@ -3563,6 +3608,17 @@ export const EditorView: React.FC<EditorViewProps> = ({
               <span className="hidden sm:inline">{t('editor.searchBookBtn')}</span>
             </button>
 
+            {/* Симуляція емоційної реакції читача на активну сцену */}
+            <button
+              onClick={handleRunReaderResponse}
+              disabled={isSimulatingReader || !(editorLanguageMode === 'en' ? activeSection?.contentEn : activeSection?.content)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 rounded-lg transition-colors disabled:opacity-50"
+              title={t('editor.readerResponseTitle')}
+            >
+              <Smile className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{isSimulatingReader ? t('editor.readerResponseRunning') : t('editor.readerResponseBtn')}</span>
+            </button>
+
             {/* Translate Button */}
             <button
               onClick={handleTranslateToEnglish}
@@ -4246,6 +4302,17 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   <Columns className="w-3 h-3" />
                   <span>{t('editor.tabDiff')}</span>
                 </button>
+                <button
+                  onClick={() => setRightPanelSubTab('reader')}
+                  className={`flex-1 py-2 px-1 text-[11px] font-semibold rounded-lg flex items-center justify-center gap-1 transition-all whitespace-nowrap ${
+                    rightPanelSubTab === 'reader'
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Smile className="w-3 h-3" />
+                  <span>{t('editor.tabReader')}</span>
+                </button>
               </div>
             )}
 
@@ -4895,6 +4962,63 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   <div className="p-6 text-center text-slate-500 text-xs space-y-2 border border-dashed border-slate-800 rounded-xl">
                     <Sparkles className="w-6 h-6 mx-auto text-slate-600" />
                     <p>{t('editor.noActiveProposals')}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 7: EMOTIONAL READER RESPONSE */}
+            {rightPanelTab === 'workAi' && rightPanelSubTab === 'reader' && (
+              <div className="space-y-3">
+                <p className="text-[11px] text-slate-500 leading-relaxed">{t('editor.readerResponseIntro')}</p>
+
+                {readerResponseError && (
+                  <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-200 text-xs">
+                    {readerResponseError}
+                  </div>
+                )}
+
+                {!readerResponseResult && !readerResponseError && !isSimulatingReader && (
+                  <div className="p-6 text-center text-slate-500 text-xs space-y-2 border border-dashed border-slate-800 rounded-xl">
+                    <Smile className="w-6 h-6 mx-auto text-slate-600" />
+                    <p>{t('editor.readerResponseEmpty')}</p>
+                  </div>
+                )}
+
+                {readerResponseResult && (
+                  <div className="space-y-3">
+                    <div className="p-3 rounded-xl bg-slate-900 border border-slate-800">
+                      <h4 className="text-slate-400 font-semibold mb-1 text-xs">{t('editor.readerResponseImpressionTitle')}</h4>
+                      <p className="text-slate-200 leading-relaxed text-xs">{readerResponseResult.impression}</p>
+                    </div>
+
+                    {readerResponseResult.dropOffRisk && (
+                      <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs">
+                        <span className="font-semibold">{t('editor.readerResponseDropOffTitle')}:</span> {readerResponseResult.dropOffRisk}
+                      </div>
+                    )}
+
+                    <div className="space-y-2">
+                      {readerResponseResult.beats.map((b, idx) => (
+                        <div
+                          key={idx}
+                          className={`p-3 rounded-xl border text-xs ${
+                            b.intensity === 'high'
+                              ? 'border-rose-500/40 bg-rose-500/10 text-rose-100'
+                              : b.intensity === 'medium'
+                                ? 'border-amber-500/40 bg-amber-500/10 text-amber-100'
+                                : 'border-slate-600 bg-slate-800/40 text-slate-300'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2 mb-1">
+                            <span className="font-bold">{b.emotion}</span>
+                            <span className="text-[10px] text-slate-500">{b.location}</span>
+                          </div>
+                          {b.note && <p className="mb-1">{b.note}</p>}
+                          {b.quote && <p className="italic text-slate-400">«{b.quote}»</p>}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>

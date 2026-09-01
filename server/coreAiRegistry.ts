@@ -76,6 +76,12 @@ import {
   renderBehaviorDriftSystemTemplate,
   renderBehaviorDriftUserTemplate,
 } from './behaviorDriftPrompt';
+import {
+  readerResponseSystemInstruction,
+  factoryReaderResponseTemplate,
+  renderReaderResponseSystemTemplate,
+  renderReaderResponseUserTemplate,
+} from './readerResponsePrompt';
 
 /** Ключ у таблиці `meta`, під яким лежить ЄДИНИЙ адмінський шар усіх модулів ядра. */
 export const CORE_PROMPT_TEMPLATES_META_KEY = 'prompt_templates_core_admin';
@@ -98,6 +104,7 @@ export const CORE_MODULE_KEYS = [
   'diagnCompetency',
   'characterConsistency',
   'behaviorDrift',
+  'readerResponse',
 ] as const;
 
 export type CoreModuleKey = (typeof CORE_MODULE_KEYS)[number];
@@ -159,6 +166,7 @@ export const CORE_MODULE_PLACEHOLDERS: Record<CoreModuleKey, string[]> = {
     '{ЗГАДУВАННЯ_У_КНИЗІ}', '{МОВА}',
   ],
   behaviorDrift: ['{ІМ_Я}', '{ПРІЗВИЩЕ}', '{ПАТЕРНИ_ПОВЕДІНКИ}', '{ЗГАДУВАННЯ_У_КНИЗІ}', '{МОВА}'],
+  readerResponse: ['{РОЗДІЛ}', '{ЖАНР}', '{ФРАГМЕНТ}', '{МОВА}'],
 };
 
 /** Чи модуль повертає JSON за жорсткою схемою (схема — readonly-текст у конструкторі, не редагується). */
@@ -177,6 +185,7 @@ export const CORE_MODULE_HAS_JSON_SCHEMA: Record<CoreModuleKey, boolean> = {
   diagnCompetency: true,
   characterConsistency: true,
   behaviorDrift: true,
+  readerResponse: true,
 };
 
 /**
@@ -257,6 +266,8 @@ export function factoryCoreTemplate(module: CoreModuleKey): CorePromptTemplate {
       return { system: characterConsistencySystemInstruction(), user: factoryCharacterConsistencyTemplate() };
     case 'behaviorDrift':
       return { system: behaviorDriftSystemInstruction(), user: factoryBehaviorDriftTemplate() };
+    case 'readerResponse':
+      return { system: readerResponseSystemInstruction(), user: factoryReaderResponseTemplate() };
   }
 }
 
@@ -468,6 +479,19 @@ export function renderCoreTemplate(
       return {
         system: renderBehaviorDriftSystemTemplate(template.system, values),
         user: renderBehaviorDriftUserTemplate(template.user, values),
+      };
+    }
+    case 'readerResponse': {
+      const values = {
+        chapterTitle: fields.chapterTitle,
+        genre: fields.genre,
+        // {ФРАГМЕНТ} спільний із design/selectionToParagraphs — той самий подвійний фолбек.
+        fragment: fields.selection || fields.sampleText || '',
+        locale: fields.language,
+      };
+      return {
+        system: renderReaderResponseSystemTemplate(template.system, values),
+        user: renderReaderResponseUserTemplate(template.user, values),
       };
     }
   }

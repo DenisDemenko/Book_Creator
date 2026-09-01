@@ -98,6 +98,11 @@ import {
   normalizeDriftResult,
 } from './server/behaviorDriftPrompt';
 import {
+  parseReaderResponse,
+  normalizeReaderResponse,
+  MAX_REACTION_INPUT_CHARS,
+} from './server/readerResponsePrompt';
+import {
   readCoreModuleModels,
   setCoreModuleModel,
   resolveModuleModelId,
@@ -2135,6 +2140,80 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
         return res.status(err.status).json({ error: err.message });
       }
       res.status(500).json({ error: err?.message || 'Не вдалося перевірити дрейф поведінки.', kind: 'unknown' });
+    }
+  });
+
+  /**
+   * «Емоційний відгук читача» — на відміну від двох модулів вище,
+   * працює НЕ з карткою персонажа, а з фрагментом тексту розділу/сцени
+   * напряму (client шле `activeSection.content`/`.contentEn`, залежно
+   * від мовного режиму редактора). Та сама вага, що й у /design, і той
+   * самий принцип 413 на вході, що й у /diagn (тут — власна стеля
+   * `MAX_REACTION_INPUT_CHARS`, бо джерело даних інше — цілий фрагмент
+   * тексту, а не зібрані згадування персонажа).
+   */
+  app.post('/api/ai/reader-response', requirePermission('canUseAi'), async (req, res) => {
+    const { bookId, chapterTitle, genre, fragment, locale, modelId } = req.body || {};
+
+    const text = typeof fragment === 'string' ? fragment.trim() : '';
+    if (text.length < 200) {
+      return res.status(400).json({
+        error: 'Замало тексту для симуляції реакції читача — напишіть хоча б кілька абзаців сцени.',
+        kind: 'not_enough_text',
+      });
+    }
+    if (text.length > MAX_REACTION_INPUT_CHARS) {
+      return res.status(413).json({
+        error: `Забагато тексту (${text.length} символів, максимум ${MAX_REACTION_INPUT_CHARS}) — оберіть менший фрагмент.`,
+        kind: 'too_much_text',
+      });
+    }
+
+    const preferredModelId = (await resolveModuleModelId('readerResponse', modelId)) || undefined;
+    const resolved = await resolveTextEngineOrFail(req, res, preferredModelId, 'емоційний відгук читача');
+    if (!resolved) return;
+    const { engine, resolvedModelId, userKey } = resolved;
+
+    try {
+      const adminLayer = await loadCoreAdminLayer();
+      const template = resolveCoreTemplate('readerResponse', adminLayer);
+      const rendered = renderCoreTemplate('readerResponse', template, {
+        chapterTitle,
+        genre,
+        selection: text,
+        language: locale,
+      });
+
+      const result = await generateAiText({
+        engine,
+        modelId: resolvedModelId,
+        prompt: rendered.user,
+        systemInstruction: rendered.system,
+        apiKeyOverride: userKey,
+        json: true,
+        req,
+        label: 'Емоційний відгук читача',
+        bookId,
+      });
+
+      let parsed: any;
+      try {
+        parsed = parseReaderResponse(result.text);
+      } catch {
+        return res.status(502).json({
+          error: 'Модель повернула не JSON — спробуйте ще раз або оберіть іншу модель у налаштуваннях модуля.',
+          kind: 'bad_model_output',
+        });
+      }
+
+      const reaction = normalizeReaderResponse(parsed);
+      res.json({ result: reaction, engine, modelId: resolvedModelId, timestamp: new Date().toISOString() });
+    } catch (err: any) {
+      console.error('Error in /api/ai/reader-response:', err?.message || err);
+      if (err instanceof ChatProviderError) {
+        return res.status(err.status).json({ error: err.message });
+      }
+      res.status(500).json({ error: err?.message || 'Не вдалося симулювати відгук читача.', kind: 'unknown' });
     }
   });
 
