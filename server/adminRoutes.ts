@@ -50,6 +50,7 @@ import {
   saveBridgeSettings,
   readBridgeSettings,
   publishBookToMarketplace,
+  publishCourseToMarketplace,
   MarketplaceBridgeError,
 } from './marketplaceBridge';
 
@@ -786,6 +787,64 @@ export function registerAdminRoutes(app: Express): void {
       const status = err instanceof MarketplaceBridgeError ? err.status : 500;
       res.status(status).json({
         error: err?.message || 'Не вдалося опублікувати книгу у вітрині.',
+        kind: err?.kind,
+        details: err?.details,
+      });
+    }
+  });
+
+  /**
+   * Публікація КУРСУ у вітрину. На відміну від книги — приймач
+   * `/bridge/courses` на боці Fusion Lab не підтверджений цим
+   * репозиторієм (немає коду вітрини тут), тож запит може повертати
+   * `unreachable`/`rejected`, поки маркетплейс не додасть відповідний
+   * ендпоінт — це очікувана поведінка, а не ознака поломки на боці Nova.
+   */
+  app.post('/api/admin/marketplace-bridge/publish-course', requireAdmin, async (req, res) => {
+    const {
+      bookId,
+      title,
+      subtitle,
+      summary,
+      description,
+      coverUrl,
+      highlights,
+      sellerSlug,
+      priceMinor,
+      moduleCount,
+      lessonCount,
+    } = req.body || {};
+    if (!bookId || !title) {
+      return res.status(400).json({ error: 'Потрібні bookId і title.', kind: 'bad_input' });
+    }
+    const price = Number(priceMinor);
+    if (!Number.isFinite(price) || price < 0) {
+      return res.status(400).json({ error: 'Некоректна ціна курсу.', kind: 'bad_input' });
+    }
+
+    try {
+      const settings = await readBridgeSettings();
+      const result = await publishCourseToMarketplace(
+        {
+          bookId,
+          title,
+          subtitle,
+          summary,
+          description,
+          priceMinor: price,
+          coverUrl,
+          highlights,
+          sellerSlug,
+          moduleCount,
+          lessonCount,
+        },
+        { settings }
+      );
+      res.json({ published: result });
+    } catch (err: any) {
+      const status = err instanceof MarketplaceBridgeError ? err.status : 500;
+      res.status(status).json({
+        error: err?.message || 'Не вдалося опублікувати курс у вітрині.',
         kind: err?.kind,
         details: err?.details,
       });

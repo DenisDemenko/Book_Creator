@@ -252,3 +252,118 @@ export async function publishBookToMarketplace(
 
   return { externalId, format: input.format, listing };
 }
+
+/**
+ * Публікація КУРСУ у вітрину — окремий тип товару, не формат книги
+ * (як print/digital). Курс має власну структуру (модулі/уроки, а не
+ * сторінки), тож і лістинг у маркетплейсі логічно інший, ніж лістинг
+ * книги, — звідси окремий шлях `/bridge/courses`, а не третій `format`
+ * у `/bridge/books`.
+ *
+ * ВАЖЛИВО (чесне застереження, а не замовчування): на відміну від
+ * `/bridge/books`, приймач `/bridge/courses` на боці Fusion Lab НЕ
+ * підтверджений — цей репозиторій не містить коду вітрини, і його
+ * неможливо перевірити звідси. Ця функція будує СВОЮ половину контракту
+ * за тим самим взірцем (ідемпотентний externalId, той самий заголовок
+ * `x-bridge-key`, той самий формат помилок), готову до підключення, коли
+ * на боці маркетплейсу з'явиться відповідний ендпоінт. До того моменту
+ * виклик повертатиме `unreachable`/`rejected` — це очікувано, не баг.
+ */
+export interface PublishCourseInput {
+  /** Ідентифікатор книги-джерела — курс завжди прив'язаний до конкретної книги. */
+  bookId: string;
+  title: string;
+  subtitle?: string;
+  summary?: string;
+  description?: string;
+  /** Ціна в копійках — та сама мінорна одиниця, що й у книг. */
+  priceMinor: number;
+  coverUrl?: string;
+  /** Наприклад, назви модулів або «12 уроків» — вітрина показує їх як переваги товару. */
+  highlights?: string[];
+  sellerSlug?: string;
+  moduleCount?: number;
+  lessonCount?: number;
+}
+
+export interface PublishCourseResult {
+  externalId: string;
+  listing: unknown;
+}
+
+/** На відміну від книги — без формату: курс завжди один товар на книгу. */
+export function courseExternalId(bookId: string): string {
+  return `${bookId}:course`;
+}
+
+export async function publishCourseToMarketplace(
+  input: PublishCourseInput,
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<PublishCourseResult> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+  const externalId = courseExternalId(input.bookId);
+
+  const body = {
+    externalId,
+    title: input.title,
+    subtitle: input.subtitle,
+    summary: input.summary,
+    description: input.description,
+    priceMinor: Math.round(input.priceMinor),
+    coverUrl: input.coverUrl,
+    highlights: input.highlights,
+    sellerSlug: input.sellerSlug,
+    moduleCount: input.moduleCount,
+    lessonCount: input.lessonCount,
+  };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await doFetch(`${settings.url}/bridge/courses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-bridge-key': settings.key },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const text = await response.text().catch(() => '');
+  if (response.status === 401) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401,
+      text.slice(0, 400)
+    );
+  }
+  if (!response.ok) {
+    throw new MarketplaceBridgeError(
+      `Маркетплейс відхилив публікацію курсу (HTTP ${response.status}).`,
+      'rejected',
+      502,
+      text.slice(0, 400)
+    );
+  }
+
+  let listing: unknown = undefined;
+  try {
+    listing = text ? JSON.parse(text) : undefined;
+  } catch {
+    listing = { raw: text.slice(0, 400) };
+  }
+
+  return { externalId, listing };
+}

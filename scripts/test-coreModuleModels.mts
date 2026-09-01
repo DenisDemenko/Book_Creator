@@ -27,7 +27,9 @@ const {
   readBridgeSettings,
   readBridgeSettingsView,
   publishBookToMarketplace,
+  publishCourseToMarketplace,
   bridgeExternalId,
+  courseExternalId,
   MarketplaceBridgeError,
 } = await import('../server/marketplaceBridge.ts');
 const { setAppSetting } = await import('../server/store.ts');
@@ -158,6 +160,51 @@ console.log('\nПублікація у вітрину:');
     );
   } catch (e: any) { unreachable = e?.kind; }
   t('недоступний маркетплейс — окремий вид помилки', unreachable === 'unreachable');
+}
+
+console.log('\nПублікація курсу у вітрину:');
+{
+  t('externalId курсу — без формату, один товар на книгу', courseExternalId('book-1') === 'book-1:course');
+  t('externalId курсу відрізняється від externalId книги', courseExternalId('book-1') !== bridgeExternalId('book-1', 'digital'));
+
+  const calls: { url: string; init: any }[] = [];
+  const fakeFetch = (async (url: any, init: any) => {
+    calls.push({ url: String(url), init });
+    return new Response(JSON.stringify({ id: 'course-listing-1', slug: 'testovyi-kurs' }), { status: 201 });
+  }) as unknown as typeof fetch;
+
+  const result = await publishCourseToMarketplace(
+    {
+      bookId: 'book-1',
+      title: 'Тестовий курс',
+      priceMinor: 45000,
+      coverUrl: 'https://example.com/cover.png',
+      highlights: ['Модуль 1', 'Модуль 2'],
+      moduleCount: 2,
+      lessonCount: 7,
+    },
+    { fetch: fakeFetch, settings: { url: 'https://api.example.com', key: 'k' } }
+  );
+
+  t('пішов запит на /bridge/courses (окремий шлях від /bridge/books)', calls[0]?.url === 'https://api.example.com/bridge/courses');
+  t('ключ у заголовку', calls[0]?.init?.headers?.['x-bridge-key'] === 'k');
+  const sent = JSON.parse(calls[0].init.body);
+  t('externalId курсу в тілі запиту', sent.externalId === 'book-1:course');
+  t('кількість модулів і уроків передана', sent.moduleCount === 2 && sent.lessonCount === 7);
+  t('відповідь маркетплейсу повернена', (result.listing as any)?.slug === 'testovyi-kurs');
+
+  // Приймач /bridge/courses на боці Fusion Lab не підтверджений — тест
+  // фіксує, що Nova коректно повідомляє про недоступність/відмову, а не
+  // прикидається, ніби публікація вдалась.
+  const notFound = (async () => new Response('not found', { status: 404 })) as unknown as typeof fetch;
+  let notFoundKind = '';
+  try {
+    await publishCourseToMarketplace(
+      { bookId: 'b', title: 'X', priceMinor: 1 },
+      { fetch: notFound, settings: { url: 'https://api.example.com', key: 'k' } }
+    );
+  } catch (e: any) { notFoundKind = e?.kind; }
+  t('відсутній /bridge/courses на боці вітрини — чесна помилка «rejected», не мовчазний успіх', notFoundKind === 'rejected');
 }
 
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);
