@@ -1166,18 +1166,30 @@ export const EditorView: React.FC<EditorViewProps> = ({
    * (position: fixed, inset: 0), той самий підхід, що «режим без
    * відволікань» у Notion/Google Docs.
    */
-  const [isFullscreenMode, setIsFullscreenMode] = useState(false);
+  // usePersistentState, а не useState: письменник, який щоразу відкриває
+  // книгу у фулскріні, не повинен щоразу тиснути F12 наново — той самий
+  // принцип, що вже діє для showLeftTree/showRightPanel вище.
+  const [isFullscreenMode, setIsFullscreenMode] = usePersistentState<boolean>('nova_editor_fullscreenMode', false);
   const fullscreenRootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'F12') return;
-      e.preventDefault();
-      setIsFullscreenMode((v) => !v);
+      if (e.key === 'F12') {
+        e.preventDefault();
+        setIsFullscreenMode((v) => !v);
+        return;
+      }
+      // Escape — ДОДАТКОВИЙ вихід, лише вихід (не тогл і не вхід). F12 у
+      // Chrome/Firefox зарезервований під DevTools і не завжди доходить до
+      // сторінки (застереження із запису #39) — Escape лишається робочим
+      // запасним шляхом навіть тоді, коли браузер забрав F12 собі.
+      if (e.key === 'Escape' && isFullscreenMode) {
+        setIsFullscreenMode(false);
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [isFullscreenMode]);
 
   /**
    * Перехід між «розривами сторінок» (PaginationPlugin.ts малює їх як
@@ -1199,6 +1211,36 @@ export const EditorView: React.FC<EditorViewProps> = ({
         : [...breaks].reverse().find((el) => el.getBoundingClientRect().top < -threshold);
     target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
+
+  /**
+   * Індикатор прогресу сторінки в повноекранному режимі: «Сторінка N з M»
+   * — та сама техніка, що й jumpToPageBreak (getBoundingClientRect().top
+   * відносно viewport), тільки тепер рахуємо, скільки розривів вже
+   * «проскрольовано» повз верх екрана. Слухач на document у
+   * capture-фазі, бо не важливо, який саме вкладений контейнер насправді скролиться.
+   */
+  const [pageProgress, setPageProgress] = useState<{ current: number; total: number }>({ current: 1, total: 1 });
+
+  useEffect(() => {
+    if (!isFullscreenMode) return;
+    const root = fullscreenRootRef.current;
+    if (!root) return;
+
+    const recomputePageProgress = () => {
+      const breaks = Array.from(root.querySelectorAll<HTMLElement>('[data-nova-pagebreak]'));
+      const total = breaks.length + 1;
+      const passed = breaks.filter((el) => el.getBoundingClientRect().top < 120).length;
+      setPageProgress({ current: Math.min(passed + 1, total), total });
+    };
+
+    recomputePageProgress();
+    window.addEventListener('scroll', recomputePageProgress, true);
+    window.addEventListener('resize', recomputePageProgress);
+    return () => {
+      window.removeEventListener('scroll', recomputePageProgress, true);
+      window.removeEventListener('resize', recomputePageProgress);
+    };
+  }, [isFullscreenMode]);
 
   /**
    * Озвучує виділений фрагмент (абзац або навіть одне слово — та сама межа
@@ -2778,6 +2820,13 @@ export const EditorView: React.FC<EditorViewProps> = ({
           >
             <ChevronDown className="w-3 h-3" />
           </button>
+          <div
+            className="mt-0.5 text-[10px] leading-none text-center text-slate-400 bg-slate-800/90 border border-slate-700 rounded-full px-1.5 py-1 shadow-lg select-none tabular-nums"
+            title={t('editor.fullscreenPageProgress', { current: pageProgress.current, total: pageProgress.total })}
+            aria-label={t('editor.fullscreenPageProgress', { current: pageProgress.current, total: pageProgress.total })}
+          >
+            {pageProgress.current}/{pageProgress.total}
+          </div>
         </div>
       )}
 

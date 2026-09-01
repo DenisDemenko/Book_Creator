@@ -315,6 +315,7 @@ export const editor = {
     fullscreenExitTitle: 'Вийти з повноекранного режиму (F12)',
     fullscreenPrevPage: 'До попередньої сторінки',
     fullscreenNextPage: 'До наступної сторінки',
+    fullscreenPageProgress: 'Сторінка {current} з {total}',
   },
   en: {
     tocMobile: 'Contents ({n})',
@@ -631,5 +632,6 @@ export const editor = {
     fullscreenExitTitle: 'Exit fullscreen mode (F12)',
     fullscreenPrevPage: 'Previous page',
     fullscreenNextPage: 'Next page',
+    fullscreenPageProgress: 'Page {current} of {total}',
   },
 };
