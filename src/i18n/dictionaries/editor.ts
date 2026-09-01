@@ -326,6 +326,7 @@ export const editor = {
     fullscreenZoomIn: 'Збільшити сторінку',
     fullscreenZoomOut: 'Зменшити сторінку',
     focusParagraphTitle: 'Курсор-фокус на абзаці (приглушити решту тексту)',
+    readabilityHighlightTitle: 'Підсвітка читабельності (задовгі речення)',
   },
   en: {
     tocMobile: 'Contents ({n})',
@@ -653,5 +654,6 @@ export const editor = {
     fullscreenZoomIn: 'Zoom the page in',
     fullscreenZoomOut: 'Zoom the page out',
     focusParagraphTitle: 'Focus on the current paragraph (dim the rest)',
+    readabilityHighlightTitle: 'Readability highlight (overly long sentences)',
   },
 };

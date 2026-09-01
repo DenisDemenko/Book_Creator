@@ -1112,3 +1112,12 @@
   text-underline-offset: 2px;
   cursor: help;
 }
+
+/* «Підсвітка читабельності» (ReadabilityHighlightPlugin.ts) — м'який
+   тон замість жорсткого підкреслення, щоб не виглядало як помилка
+   правопису: це порада, не помилка. Той самий бурштиновий відтінок,
+   що й акцентні кнопки в панелі інструментів, лише в малій непрозорості. */
+.nova-readability-long-sentence {
+  background-color: rgba(245, 158, 11, 0.18);
+  border-radius: 2px;
+}

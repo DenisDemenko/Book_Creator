@@ -4,6 +4,7 @@ import type { Node as PMNode } from '@tiptap/pm/model';
 import { buildManuscriptExtensions } from './manuscriptEditor/extensions';
 import { PaginationPlugin } from './manuscriptEditor/PaginationPlugin';
 import { characterMentionKey } from './manuscriptEditor/CharacterMentionPlugin';
+import { readabilityKey } from './manuscriptEditor/ReadabilityHighlightPlugin';
 import { PAGE_FORMAT_QUICK_OPTIONS } from '../utils/pageFormats';
 import { PageColumn } from './manuscriptEditor/PageColumn';
 import { PageRuler } from './manuscriptEditor/PageRuler';
@@ -85,7 +86,8 @@ import {
   Timer,
   ZoomIn,
   ZoomOut,
-  Focus
+  Focus,
+  Gauge
 } from 'lucide-react';
 import { 
   Book, 
@@ -560,6 +562,25 @@ export const EditorView: React.FC<EditorViewProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusParagraphMode]);
 
+  /**
+   * «Підсвітка читабельності» — м'яко підсвічує задовгі речення
+   * (ReadabilityHighlightPlugin.ts). Той самий ref-підхід, що й
+   * focusParagraphMode вище: масив розширень редактора заморожений
+   * при монтуванні, тож плагін читає перемикач через `.current` рефа.
+   * На відміну від фокус-режиму, тут dispatch несе мету
+   * `setMeta(readabilityKey, true)`, а не порожню транзакцію — плагін
+   * перераховує декорації лише коли або документ змінився, або ця
+   * мета явно виставлена (див. коментар у самому плагіні).
+   */
+  const [readabilityHighlightMode, setReadabilityHighlightMode] = usePersistentState<boolean>('nova_editor_readabilityHighlightMode', false);
+  const readabilityHighlightModeRef = useRef(readabilityHighlightMode);
+  useEffect(() => {
+    readabilityHighlightModeRef.current = readabilityHighlightMode;
+    uaEditor?.view.dispatch(uaEditor.state.tr.setMeta(readabilityKey, true));
+    enEditor?.view.dispatch(enEditor.state.tr.setMeta(readabilityKey, true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readabilityHighlightMode]);
+
   const uaManuscriptExtensions = useRef([
     ...buildManuscriptExtensions(
       resolveImageUrl,
@@ -573,7 +594,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
         aiDraftRejectLabel: t('editor.aiDraftRejectLabel'),
       },
       () => focusParagraphModeRef.current,
-      () => bookRef.current.characters
+      () => bookRef.current.characters,
+      () => readabilityHighlightModeRef.current
     ),
     PaginationPlugin.configure({
       getPageContentHeightMm,
@@ -595,7 +617,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
         aiDraftRejectLabel: 'Reject AI addition',
       },
       () => focusParagraphModeRef.current,
-      () => bookRef.current.characters
+      () => bookRef.current.characters,
+      () => readabilityHighlightModeRef.current
     ),
     PaginationPlugin.configure({ getPageContentHeightMm, getVerticalMarginsMm }),
   ]).current;
@@ -1916,6 +1939,21 @@ export const EditorView: React.FC<EditorViewProps> = ({
         aria-label={t('editor.focusParagraphTitle')}
       >
         <Focus className="w-3.5 h-3.5" />
+      </button>
+
+      {/* «Підсвітка читабельності» — м'яко підсвічує задовгі речення
+          (ReadabilityHighlightPlugin.ts). Так само простий тогл, без
+          попапу — лише увімкнено/вимкнено. */}
+      <button
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => setReadabilityHighlightMode((v) => !v)}
+        className={`p-1 rounded-md ml-1 transition-colors ${
+          readabilityHighlightMode ? 'bg-amber-500 text-slate-950' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+        }`}
+        title={t('editor.readabilityHighlightTitle')}
+        aria-label={t('editor.readabilityHighlightTitle')}
+      >
+        <Gauge className="w-3.5 h-3.5" />
       </button>
 
       {/* Озвучення виділеного фрагмента прямо з панелі — раніше та сама

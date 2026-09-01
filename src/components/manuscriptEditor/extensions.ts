@@ -6,6 +6,7 @@ import { WrappedImageNode, type WrappedImageOptions } from './WrappedImageNode';
 import { AiDraftBlockNode } from './AiDraftBlockNode';
 import { FocusParagraphPlugin } from './FocusParagraphPlugin';
 import { CharacterMentionPlugin, type CharacterMentionEntry } from './CharacterMentionPlugin';
+import { ReadabilityHighlightPlugin } from './ReadabilityHighlightPlugin';
 
 export interface ManuscriptAiTextOptions {
   onRequestAiText?: WrappedImageOptions['onRequestAiText'];
@@ -33,7 +34,9 @@ export function buildManuscriptExtensions(
    */
   isFocusParagraphModeEnabled?: () => boolean,
   /** Необов'язково: живий список персонажів книги — див. коментар у CharacterMentionPlugin.ts. */
-  getCharacters?: () => CharacterMentionEntry[]
+  getCharacters?: () => CharacterMentionEntry[],
+  /** Необов'язково: тогл підсвітки задовгих речень — див. коментар у ReadabilityHighlightPlugin.ts. */
+  isReadabilityHighlightEnabled?: () => boolean
 ) {
   return [
     StarterKit.configure({
@@ -73,6 +76,11 @@ export function buildManuscriptExtensions(
       getCharacters: getCharacters || (() => []),
       mentionClass: 'nova-character-mention',
       characterIdAttr: 'data-character-id',
+    }),
+    ReadabilityHighlightPlugin.configure({
+      enabled: isReadabilityHighlightEnabled || (() => false),
+      longSentenceClass: 'nova-readability-long-sentence',
+      longSentenceThreshold: 30,
     }),
   ];
 }
