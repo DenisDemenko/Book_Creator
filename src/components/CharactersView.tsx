@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   Users, 
   UserPlus, 
@@ -26,12 +26,28 @@ import {
   Eye,
   Shirt,
   Sparkle,
-  Flower2
+  Flower2,
+  Gauge
 } from 'lucide-react';
 import { Book, Character, CharacterRelationship } from '../types';
 import { normalizeCharacter, normalizeCharacterOrUndefined } from '../utils/characterNormalize';
 import { GenerateCharacterModal } from './GenerateCharacterModal';
 import { useLanguage } from '../i18n/LanguageContext';
+import { computeAllCharacterDensities, type DensityLabel } from '../utils/characterDensity';
+
+/** Ключ перекладу й колір смужки-індикатора для кожного рівня густоти втілення персонажа в тексті. */
+const DENSITY_LABEL_KEY: Record<DensityLabel, string> = {
+  faint: 'charactersView.densityFaint',
+  sketch: 'charactersView.densitySketch',
+  present: 'charactersView.densityPresent',
+  vivid: 'charactersView.densityVivid',
+};
+const DENSITY_BAR_CLS: Record<DensityLabel, string> = {
+  faint: 'bg-slate-600',
+  sketch: 'bg-amber-400',
+  present: 'bg-emerald-400',
+  vivid: 'bg-violet-400',
+};
 
 interface CharactersViewProps {
   book: Book;
@@ -84,6 +100,14 @@ export const CharactersView: React.FC<CharactersViewProps> = ({
   const selectedChar = normalizeCharacterOrUndefined(
     book.characters.find((c) => c.id === selectedCharacterId) || book.characters[0]
   );
+
+  // «Густота втілення» — суто обчислювана (без AI) метрика присутності
+  // персонажа в реальному тексті книги, а не лише в картці. Рахується для
+  // ВСІХ персонажів одразу (список карток) і повторно береться для того,
+  // хто зараз відкритий у вкладці «Досьє». `useMemo` на `book` — інакше
+  // regex-прохід по всій книзі повторювався б на кожен рендер картки.
+  const densityByCharId = useMemo(() => computeAllCharacterDensities(book, book.characters), [book]);
+  const selectedCharDensity = selectedChar ? densityByCharId.get(selectedChar.id) : undefined;
 
   // Trigger manual save
   const handleSaveClick = () => {
@@ -595,6 +619,7 @@ export const CharactersView: React.FC<CharactersViewProps> = ({
           <div className="space-y-2.5">
             {book.characters.map((char) => {
               const isSel = char.id === selectedChar?.id;
+              const density = densityByCharId.get(char.id);
               return (
                 <div
                   key={char.id}
@@ -636,6 +661,22 @@ export const CharactersView: React.FC<CharactersViewProps> = ({
                       {char.alias ? `«${char.alias}» • ` : ''}
                       {char.profession || t('charactersView.noProfessionFallback')}
                     </p>
+                    {density && (
+                      <div
+                        className="mt-1.5 h-1 w-full rounded-full bg-slate-800/80 overflow-hidden"
+                        title={t('charactersView.densityTooltip', {
+                          score: density.score,
+                          mentions: density.totalMentions,
+                          chapters: density.chaptersWithMentions,
+                          total: density.totalChapters,
+                        })}
+                      >
+                        <div
+                          className={`h-full rounded-full transition-all ${DENSITY_BAR_CLS[density.label]}`}
+                          style={{ width: `${Math.max(4, density.score)}%` }}
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -747,6 +788,22 @@ export const CharactersView: React.FC<CharactersViewProps> = ({
                     <p className="text-xs text-slate-400">
                       {t('charactersView.aliasLabel')}<span className="text-amber-400 font-mono">«{selectedChar.alias || '—'}»</span> • {selectedChar.age || 30} {t('charactersView.yearsAbbr')} • {selectedChar.profession}
                     </p>
+                    {selectedCharDensity && (
+                      <div
+                        className="mt-1.5 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-slate-800/70 border border-slate-700 text-[11px] text-slate-300"
+                        title={t('charactersView.densityTooltip', {
+                          score: selectedCharDensity.score,
+                          mentions: selectedCharDensity.totalMentions,
+                          chapters: selectedCharDensity.chaptersWithMentions,
+                          total: selectedCharDensity.totalChapters,
+                        })}
+                      >
+                        <Gauge className="w-3 h-3 text-slate-400" />
+                        <span>{t('charactersView.densityLabel')}:</span>
+                        <span className="font-mono font-bold text-slate-100">{selectedCharDensity.score}</span>
+                        <span className="text-slate-500">— {t(DENSITY_LABEL_KEY[selectedCharDensity.label])}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
