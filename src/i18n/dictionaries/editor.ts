@@ -311,6 +311,10 @@ export const editor = {
     contextMenuIssues: 'Знайдені зауваження AI-перевірки',
     aiAssistantPanelTitle: 'AI Редактор',
     aiIssuesPendingHint: 'Запустіть перевірку тексту, щоб побачити зауваження AI.',
+    fullscreenEnterTitle: 'Повноекранний режим редагування (F12)',
+    fullscreenExitTitle: 'Вийти з повноекранного режиму (F12)',
+    fullscreenPrevPage: 'До попередньої сторінки',
+    fullscreenNextPage: 'До наступної сторінки',
   },
   en: {
     tocMobile: 'Contents ({n})',
@@ -623,5 +627,9 @@ export const editor = {
     contextMenuIssues: 'AI-check notes found',
     aiAssistantPanelTitle: 'AI Editor',
     aiIssuesPendingHint: 'Run the text check to see AI notes.',
+    fullscreenEnterTitle: 'Fullscreen editing mode (F12)',
+    fullscreenExitTitle: 'Exit fullscreen mode (F12)',
+    fullscreenPrevPage: 'Previous page',
+    fullscreenNextPage: 'Next page',
   },
 };

@@ -20,6 +20,7 @@ import {
   Trash2, 
   Copy, 
   ChevronDown, 
+  ChevronUp,
   ChevronRight, 
   Sparkles, 
   Check, 
@@ -1152,6 +1153,54 @@ export const EditorView: React.FC<EditorViewProps> = ({
   const [narrationPlayer, setNarrationPlayer] = useState<{ audioUrl: string; label: string } | null>(null);
 
   /**
+   * Повноекранний («фокус») режим редагування тексту — F12 або значок у
+   * шапці панелі тексту. У Chrome/Firefox F12 системно зарезервований під
+   * DevTools, і сторінка НЕ може заблокувати це на рівні браузера —
+   * preventDefault() нижче лише ловить випадки, коли браузер таки віддає
+   * подію сторінці (звичний десктопний Chrome з відкритим фокусом на
+   * сторінці зазвичай віддає). Кнопка — надійний шлях у будь-якому разі.
+   *
+   * Технічно це НЕ Fullscreen API (document.requestFullscreen): той вимагає
+   * жесту користувача під кожен виклик і виходить по Escape, що суперечило
+   * б «вихід теж за F12». Натомість — CSS-оверлей на весь viewport
+   * (position: fixed, inset: 0), той самий підхід, що «режим без
+   * відволікань» у Notion/Google Docs.
+   */
+  const [isFullscreenMode, setIsFullscreenMode] = useState(false);
+  const fullscreenRootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'F12') return;
+      e.preventDefault();
+      setIsFullscreenMode((v) => !v);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  /**
+   * Перехід між «розривами сторінок» (PaginationPlugin.ts малює їх як
+   * `[data-nova-pagebreak]` прямо в тексті) — маленькі стрілочки збоку в
+   * повноекранному режимі. getBoundingClientRect().top — навмисно
+   * відносно viewport, а не якогось конкретного контейнера прокрутки:
+   * scrollIntoView() сам знайде правильний скрол-контекст, навіть
+   * вкладений, тож не треба здогадуватись, який саме елемент прокручується.
+   */
+  const jumpToPageBreak = (direction: 1 | -1) => {
+    const root = fullscreenRootRef.current;
+    if (!root) return;
+    const breaks = Array.from(root.querySelectorAll<HTMLElement>('[data-nova-pagebreak]'));
+    if (breaks.length === 0) return;
+    const threshold = 60; // px — щоб клік не «застрягав» на розриві, який уже майже у видимій зоні
+    const target =
+      direction === 1
+        ? breaks.find((el) => el.getBoundingClientRect().top > threshold)
+        : [...breaks].reverse().find((el) => el.getBoundingClientRect().top < -threshold);
+    target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  /**
    * Озвучує виділений фрагмент (абзац або навіть одне слово — та сама межа
    * «будь-яке непорожнє виділення», що й для обговорення в чаті, а не 40
    * символів генерації абзаців: людина хоче почути слово так само, як
@@ -1506,6 +1555,15 @@ export const EditorView: React.FC<EditorViewProps> = ({
         <Italic className="w-3.5 h-3.5" />
       </button>
 
+      {/* Повноекранний режим: примусовий перенос рядка в flex-wrap
+          контейнері (flex-basis: 100% розтягує невидимий елемент на
+          всю ширину і зіштовхує наступні елементи на новий рядок) —
+          шрифт, розмір, жирний/курсив лишаються окремим верхнім рядком
+          панелі, решта (рушій AI, обтікання картинки, сам перемикач
+          фулскріну) переходить нижче. У звичайному режимі елемент не
+          рендериться — панель лишається як була, одним рядком. */}
+      {isFullscreenMode && <div className="basis-full h-0" aria-hidden="true" />}
+
       {/* Вибір LLM для генерації тексту книги (завдання 3). Значення живе в
           самій книзі (`preferredAiModelId`) — те саме поле, яким уже
           користується генерація за фото, тож вибір діє на всі ШІ-дії
@@ -1579,6 +1637,21 @@ export const EditorView: React.FC<EditorViewProps> = ({
           </div>
         );
       })()}
+
+      {/* Повноекранний режим — лише значок, без підпису (так попросили),
+          і той самий перемикач у кожному вигляді панелі, бо ця функція
+          рендериться в усіх розкладках (одна мова / розворот укр|англ). */}
+      <button
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => setIsFullscreenMode((v) => !v)}
+        className={`p-1 rounded-md ml-1 transition-colors ${
+          isFullscreenMode ? 'bg-amber-500 text-slate-950' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+        }`}
+        title={isFullscreenMode ? t('editor.fullscreenExitTitle') : t('editor.fullscreenEnterTitle')}
+        aria-label={isFullscreenMode ? t('editor.fullscreenExitTitle') : t('editor.fullscreenEnterTitle')}
+      >
+        {isFullscreenMode ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+      </button>
     </div>
   );
 
@@ -2675,9 +2748,38 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
   return (
     <div
-      className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden bg-slate-900 text-slate-100 relative"
-      style={{ height: 'calc(100vh - 105px)', maxHeight: 'calc(100vh - 105px)' }}
+      ref={fullscreenRootRef}
+      className={`flex flex-col lg:flex-row overflow-hidden bg-slate-900 text-slate-100 relative ${
+        isFullscreenMode
+          ? 'nova-fullscreen-editor fixed inset-0 z-[200] w-screen h-screen'
+          : 'flex-1 min-h-0'
+      }`}
+      style={isFullscreenMode ? undefined : { height: 'calc(100vh - 105px)', maxHeight: 'calc(100vh - 105px)' }}
     >
+      {/* Повноекранний режим: маленькі стрілочки збоку для переходу між
+          розривами сторінок (не системний Fullscreen API — просто
+          оверлей на весь viewport, тож ці кнопки лишаються звичайним
+          fixed-елементом усередині нього). */}
+      {isFullscreenMode && (
+        <div className="fixed right-3 top-1/2 -translate-y-1/2 z-[210] flex flex-col gap-1.5">
+          <button
+            onClick={() => jumpToPageBreak(-1)}
+            className="p-1 rounded-full bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700 shadow-lg"
+            title={t('editor.fullscreenPrevPage')}
+            aria-label={t('editor.fullscreenPrevPage')}
+          >
+            <ChevronUp className="w-3 h-3" />
+          </button>
+          <button
+            onClick={() => jumpToPageBreak(1)}
+            className="p-1 rounded-full bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700 shadow-lg"
+            title={t('editor.fullscreenNextPage')}
+            aria-label={t('editor.fullscreenNextPage')}
+          >
+            <ChevronDown className="w-3 h-3" />
+          </button>
+        </div>
+      )}
 
       {/* Toast Notification */}
       {translationSuccessToast && (
