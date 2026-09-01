@@ -136,6 +136,7 @@ export const TOUR_STEPS: TourStepsByTab = {
     { tabId: 'courses', step: 2, dataTour: 'courses__2', title: 'Теги розділів', text: 'Тут зʼявляються уривки книги, позначені як теги курсу. Оберіть тег, щоб додати до нього матеріали.' },
     { tabId: 'courses', step: 3, dataTour: 'courses__3', title: 'Додати матеріал', text: 'Додавайте відео з YouTube, фото, домашні завдання чи 3D-моделі до обраного тегу або загальних матеріалів.' },
     { tabId: 'courses', step: 4, dataTour: 'courses__4', title: 'Експорт курсу', text: 'Завантажте готовий курс у вигляді zip-архіву з усіма матеріалами та тегами.' },
+    { tabId: 'courses', step: 5, dataTour: 'courses__5', title: 'Модулі та уроки', text: 'Необов\'язково: впорядкуйте вже створені теги в модулі й уроки — вийде послідовний навчальний план замість плоского списку.' },
   ],
   'pdf-editor': [
     { tabId: 'pdf-editor', step: 1, dataTour: 'pdf-editor__1', title: 'Вибір глави', text: 'Оберіть главу книги, для якої хочете налаштувати верстку PDF-сторінки.' },

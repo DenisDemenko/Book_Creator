@@ -18,8 +18,12 @@ import {
   Loader2,
   Package,
   Volume2,
+  Layers,
+  ChevronUp,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
-import { Book, AuthUser, CourseMaterial, CourseMaterialKind, Model3DFormat } from '../types';
+import { Book, AuthUser, CourseMaterial, CourseMaterialKind, Model3DFormat, CourseModule } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
 import { exportCourseToZip } from '../utils/courseExporter';
 import { Model3DViewer } from './Model3DViewer';
@@ -56,11 +60,20 @@ export const CoursesView: React.FC<CoursesViewProps> = ({ book, onUpdateBook, on
   const course = book.course;
   const tags = course?.tags || [];
   const materials = course?.materials || [];
+  const modules = course?.modules || [];
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
   const [addModalKind, setAddModalKind] = useState<CourseMaterialKind | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Модулі й уроки (структура курсу) — увесь UI-стан живе лише в цьому
+  // компоненті, самі дані (CourseModule[]) — у book.course.modules, як і
+  // решта курсу.
+  const [newModuleTitle, setNewModuleTitle] = useState('');
+  const [newLessonTitleByModule, setNewLessonTitleByModule] = useState<Record<string, string>>({});
+  const [expandedModuleIds, setExpandedModuleIds] = useState<Set<string>>(new Set());
+  const [tagPickerLessonKey, setTagPickerLessonKey] = useState<string | null>(null);
 
   // «Прослухати» на тегу курсу — той самий рушій озвучення, що й
   // «Озвучити фрагмент» у редакторі (EditorView.tsx) і плейлист «Слухати
@@ -211,6 +224,112 @@ export const CoursesView: React.FC<CoursesViewProps> = ({ book, onUpdateBook, on
     setFormTitle('');
     setFormYoutubeUrl('');
     setFormHomeworkFormat('pdf');
+  };
+
+  // Модулі й уроки — курс поверх уже наявних тегів, без нового сховища
+  // контенту: урок лише посилається на CourseTag.id (масив tagIds).
+  const updateModules = (nextModules: CourseModule[], logAction?: string, logDetails?: string) => {
+    onUpdateBook(
+      {
+        ...book,
+        course: {
+          ...(course || { enabled: true, title: book.title, tags: [], materials: [] }),
+          modules: nextModules,
+        },
+      },
+      logAction,
+      logDetails
+    );
+  };
+
+  const toggleModuleExpanded = (moduleId: string) => {
+    setExpandedModuleIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(moduleId)) next.delete(moduleId);
+      else next.add(moduleId);
+      return next;
+    });
+  };
+
+  const handleAddModule = () => {
+    const title = newModuleTitle.trim();
+    if (!title) return;
+    const newModule: CourseModule = { id: `course-mod-${Date.now()}`, title, lessons: [], createdAt: new Date().toISOString() };
+    updateModules([...modules, newModule], 'Додано модуль курсу', title);
+    setExpandedModuleIds((prev) => new Set(prev).add(newModule.id));
+    setNewModuleTitle('');
+  };
+
+  const handleRenameModule = (moduleId: string, title: string) => {
+    updateModules(modules.map((m) => (m.id === moduleId ? { ...m, title } : m)));
+  };
+
+  const handleDeleteModule = (moduleId: string) => {
+    updateModules(modules.filter((m) => m.id !== moduleId));
+  };
+
+  const handleMoveModule = (index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    if (target < 0 || target >= modules.length) return;
+    const next = [...modules];
+    [next[index], next[target]] = [next[target], next[index]];
+    updateModules(next);
+  };
+
+  const handleAddLesson = (moduleId: string) => {
+    const title = (newLessonTitleByModule[moduleId] || '').trim();
+    if (!title) return;
+    updateModules(
+      modules.map((m) =>
+        m.id === moduleId
+          ? { ...m, lessons: [...m.lessons, { id: `course-lesson-${Date.now()}`, title, tagIds: [], createdAt: new Date().toISOString() }] }
+          : m
+      )
+    );
+    setNewLessonTitleByModule((prev) => ({ ...prev, [moduleId]: '' }));
+  };
+
+  const handleRenameLesson = (moduleId: string, lessonId: string, title: string) => {
+    updateModules(
+      modules.map((m) =>
+        m.id === moduleId ? { ...m, lessons: m.lessons.map((l) => (l.id === lessonId ? { ...l, title } : l)) } : m
+      )
+    );
+  };
+
+  const handleDeleteLesson = (moduleId: string, lessonId: string) => {
+    updateModules(
+      modules.map((m) => (m.id === moduleId ? { ...m, lessons: m.lessons.filter((l) => l.id !== lessonId) } : m))
+    );
+  };
+
+  const handleMoveLesson = (moduleId: string, index: number, direction: -1 | 1) => {
+    updateModules(
+      modules.map((m) => {
+        if (m.id !== moduleId) return m;
+        const target = index + direction;
+        if (target < 0 || target >= m.lessons.length) return m;
+        const nextLessons = [...m.lessons];
+        [nextLessons[index], nextLessons[target]] = [nextLessons[target], nextLessons[index]];
+        return { ...m, lessons: nextLessons };
+      })
+    );
+  };
+
+  const handleToggleLessonTag = (moduleId: string, lessonId: string, tagId: string) => {
+    updateModules(
+      modules.map((m) => {
+        if (m.id !== moduleId) return m;
+        return {
+          ...m,
+          lessons: m.lessons.map((l) => {
+            if (l.id !== lessonId) return l;
+            const has = l.tagIds.includes(tagId);
+            return { ...l, tagIds: has ? l.tagIds.filter((id) => id !== tagId) : [...l.tagIds, tagId] };
+          }),
+        };
+      })
+    );
   };
 
   const handleAddYoutube = () => {
@@ -436,6 +555,212 @@ export const CoursesView: React.FC<CoursesViewProps> = ({ book, onUpdateBook, on
             className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200"
           />
         </div>
+      </div>
+
+      {/* Структура курсу: модулі й уроки — необов'язковий шар порядку
+          поверх уже наявних тегів; урок лише посилається на CourseTag.id,
+          нового сховища контенту тут немає. */}
+      <div className="p-5 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-4" data-tour="courses__5">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+          <Layers className="w-4 h-4" />
+          {t('coursesView.modulesHeading')}
+        </h3>
+
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={newModuleTitle}
+            onChange={(e) => setNewModuleTitle(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAddModule(); }}
+            placeholder={t('coursesView.newModulePlaceholder')}
+            className="flex-1 p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200"
+          />
+          <button
+            onClick={handleAddModule}
+            disabled={!newModuleTitle.trim()}
+            className="flex items-center gap-1 px-3 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-bold text-xs shrink-0"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>{t('coursesView.addModuleBtn')}</span>
+          </button>
+        </div>
+
+        {modules.length === 0 ? (
+          <div className="p-6 text-center border border-dashed border-slate-800 rounded-xl text-slate-500 space-y-1">
+            <Layers className="w-6 h-6 mx-auto text-slate-600" />
+            <p className="text-xs">{t('coursesView.noModulesYet')}</p>
+            <p className="text-[10px] text-slate-600">{t('coursesView.noModulesHint')}</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {modules.map((mod, modIndex) => {
+              const isExpanded = expandedModuleIds.has(mod.id);
+              return (
+                <div key={mod.id} className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden">
+                  <div className="flex items-center gap-2 p-3">
+                    <button
+                      onClick={() => toggleModuleExpanded(mod.id)}
+                      className="text-slate-400 hover:text-white shrink-0"
+                      aria-label={isExpanded ? t('coursesView.collapseBtn') : t('coursesView.expandBtn')}
+                    >
+                      {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                    </button>
+                    <input
+                      type="text"
+                      value={mod.title}
+                      onChange={(e) => handleRenameModule(mod.id, e.target.value)}
+                      className="flex-1 min-w-0 bg-transparent text-xs font-bold text-white border-none focus:outline-none focus:ring-1 focus:ring-amber-500/50 rounded px-1"
+                    />
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-slate-800 text-slate-400 shrink-0">
+                      {mod.lessons.length}
+                    </span>
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <button
+                        onClick={() => handleMoveModule(modIndex, -1)}
+                        disabled={modIndex === 0}
+                        className="p-1 text-slate-500 hover:text-white disabled:opacity-30"
+                        title={t('coursesView.moveUpBtn')}
+                      >
+                        <ChevronUp className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={() => handleMoveModule(modIndex, 1)}
+                        disabled={modIndex === modules.length - 1}
+                        className="p-1 text-slate-500 hover:text-white disabled:opacity-30"
+                        title={t('coursesView.moveDownBtn')}
+                      >
+                        <ChevronDown className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteModule(mod.id)}
+                        className="p-1 text-slate-500 hover:text-rose-400"
+                        title={t('coursesView.deleteModuleBtn')}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {isExpanded && (
+                    <div className="border-t border-slate-800 p-3 space-y-2 bg-slate-950/40">
+                      {mod.lessons.length === 0 && (
+                        <p className="text-[10px] text-slate-600">{t('coursesView.noLessonsYet')}</p>
+                      )}
+                      {mod.lessons.map((lesson, lessonIndex) => {
+                        const pickerKey = `${mod.id}::${lesson.id}`;
+                        const isPickerOpen = tagPickerLessonKey === pickerKey;
+                        return (
+                          <div key={lesson.id} className="rounded-lg border border-slate-800 bg-slate-900/70 p-2.5 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={lesson.title}
+                                onChange={(e) => handleRenameLesson(mod.id, lesson.id, e.target.value)}
+                                className="flex-1 min-w-0 bg-transparent text-[11px] font-semibold text-slate-100 border-none focus:outline-none focus:ring-1 focus:ring-amber-500/50 rounded px-1"
+                              />
+                              <div className="flex items-center gap-0.5 shrink-0">
+                                <button
+                                  onClick={() => handleMoveLesson(mod.id, lessonIndex, -1)}
+                                  disabled={lessonIndex === 0}
+                                  className="p-1 text-slate-500 hover:text-white disabled:opacity-30"
+                                  title={t('coursesView.moveUpBtn')}
+                                >
+                                  <ChevronUp className="w-3 h-3" />
+                                </button>
+                                <button
+                                  onClick={() => handleMoveLesson(mod.id, lessonIndex, 1)}
+                                  disabled={lessonIndex === mod.lessons.length - 1}
+                                  className="p-1 text-slate-500 hover:text-white disabled:opacity-30"
+                                  title={t('coursesView.moveDownBtn')}
+                                >
+                                  <ChevronDown className="w-3 h-3" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteLesson(mod.id, lesson.id)}
+                                  className="p-1 text-slate-500 hover:text-rose-400"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {lesson.tagIds.map((tagId) => {
+                                const tag = tags.find((tg) => tg.id === tagId);
+                                if (!tag) return null;
+                                return (
+                                  <span
+                                    key={tagId}
+                                    className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-300 border border-amber-500/30"
+                                  >
+                                    <Tag className="w-2.5 h-2.5" />
+                                    {tag.label}
+                                    <button onClick={() => handleToggleLessonTag(mod.id, lesson.id, tagId)} className="hover:text-rose-400">
+                                      <X className="w-2.5 h-2.5" />
+                                    </button>
+                                  </span>
+                                );
+                              })}
+                              <button
+                                onClick={() => setTagPickerLessonKey(isPickerOpen ? null : pickerKey)}
+                                className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+                              >
+                                <Plus className="w-2.5 h-2.5" />
+                                {t('coursesView.addTagToLessonBtn')}
+                              </button>
+                            </div>
+
+                            {isPickerOpen && (
+                              <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-800 bg-slate-950 p-1.5 space-y-1">
+                                {tags.length === 0 ? (
+                                  <p className="text-[10px] text-slate-600 p-1">{t('coursesView.noTagsYet')}</p>
+                                ) : (
+                                  tags.map((tag) => (
+                                    <label
+                                      key={tag.id}
+                                      className="flex items-center gap-1.5 text-[10px] text-slate-300 p-1 rounded hover:bg-slate-900 cursor-pointer"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={lesson.tagIds.includes(tag.id)}
+                                        onChange={() => handleToggleLessonTag(mod.id, lesson.id, tag.id)}
+                                        className="accent-amber-500"
+                                      />
+                                      <span className="truncate">{tag.label}</span>
+                                    </label>
+                                  ))
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+
+                      <div className="flex items-center gap-2 pt-1">
+                        <input
+                          type="text"
+                          value={newLessonTitleByModule[mod.id] || ''}
+                          onChange={(e) => setNewLessonTitleByModule((prev) => ({ ...prev, [mod.id]: e.target.value }))}
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleAddLesson(mod.id); }}
+                          placeholder={t('coursesView.newLessonPlaceholder')}
+                          className="flex-1 p-2 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-200"
+                        />
+                        <button
+                          onClick={() => handleAddLesson(mod.id)}
+                          disabled={!(newLessonTitleByModule[mod.id] || '').trim()}
+                          className="flex items-center gap-1 px-2.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-amber-300 font-bold text-[11px] shrink-0"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>{t('coursesView.addLessonBtn')}</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

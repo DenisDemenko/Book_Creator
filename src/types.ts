@@ -358,6 +358,36 @@ export interface CourseMaterial {
   createdAt: string;
 }
 
+/**
+ * Урок у структурі курсу — не новий контейнер контенту, а лише
+ * впорядковане посилання на вже наявні CourseTag (кожен тег і так
+ * прив'язаний до конкретного місця в рукописі й тягне за собою свої
+ * матеріали через CourseMaterial.tagId). Один тег можна включити в
+ * кілька уроків одразу — курс лишається способом ПОДАТИ вже позначений
+ * матеріал послідовно, а не окремою копією контенту.
+ */
+export interface CourseLesson {
+  id: string;
+  title: string;
+  titleEn?: string;
+  tagIds: string[];
+  createdAt: string;
+}
+
+/**
+ * Модуль курсу — верхній рівень структури («розділ курсу»), містить
+ * впорядкований список уроків. І модулі, і уроки всередині модуля мають
+ * власний видимий порядок (масив = порядок), окремого поля order не
+ * потрібно.
+ */
+export interface CourseModule {
+  id: string;
+  title: string;
+  titleEn?: string;
+  lessons: CourseLesson[];
+  createdAt: string;
+}
+
 export interface CourseConfig {
   enabled: boolean;
   title: string;
@@ -366,6 +396,13 @@ export interface CourseConfig {
   descriptionEn?: string;
   tags: CourseTag[];
   materials: CourseMaterial[];
+  /**
+   * Необов'язково: старі курси (створені до появи модулів/уроків)
+   * лишаються плоским списком тегів+матеріалів без жодної структури
+   * зверху — і це коректний, повністю робочий стан, не «недоліковані
+   * дані». Автор сам вирішує, чи вибудовувати курс у модулі.
+   */
+  modules?: CourseModule[];
 }
 
 /**
