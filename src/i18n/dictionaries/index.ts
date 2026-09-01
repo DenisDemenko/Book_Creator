@@ -47,6 +47,7 @@ import { portfolioView } from './portfolioView';
 import { publishingHub } from './publishingHub';
 import { apiKeysView } from './apiKeysView';
 import { narration } from './narration';
+import { mediaGenerationPanel } from './mediaGenerationPanel';
 
 /**
  * Об'єднані дерева перекладів. Кожен новий словник (наступний екран) —
@@ -103,6 +104,7 @@ export const dictionaries = {
     publishingHub: publishingHub.uk,
     apiKeysView: apiKeysView.uk,
     narration: narration.uk,
+    mediaGenerationPanel: mediaGenerationPanel.uk,
   },
   en: {
     common: common.en,
@@ -154,5 +156,6 @@ export const dictionaries = {
     publishingHub: publishingHub.en,
     apiKeysView: apiKeysView.en,
     narration: narration.en,
+    mediaGenerationPanel: mediaGenerationPanel.en,
   },
 };

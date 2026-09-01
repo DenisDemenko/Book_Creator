@@ -318,6 +318,9 @@ interface GenerateImageParams {
   aspectRatio?: string;
   imageSize?: string;
   negativePrompt?: string;
+  /** Прокидається у provider-виклик лише для двигунів, які це підтримують. */
+  quality?: 'minimal' | 'high';
+  outputFormat?: 'png' | 'jpeg';
   /** Короткий хінт для імені файлу (напр. "cover", "scene", "char-Юля"). */
   filenameHint: string;
   req: any;
@@ -357,10 +360,15 @@ export async function generateImage(p: GenerateImageParams): Promise<{
       aspectRatio: p.aspectRatio,
       imageSize: p.imageSize,
       negativePrompt: p.negativePrompt,
+      quality: p.quality,
+      outputFormat: p.outputFormat,
       apiKeyOverride,
     });
     const saved = await saveGeneratedImage(generated.buffer, generated.mimeType, p.filenameHint);
-    const sizeLabel = generated.engine.maxSize === '1K' ? '1K' : p.imageSize === '1K' ? '1K' : '2K';
+    // Той самий діапазон, що й у imageGeneration.ts: 4K не згортаємо до 2K,
+    // інакше тариф і usage_log брехали б про фактичний розмір генерації.
+    const sizeLabel =
+      generated.engine.maxSize === '1K' ? '1K' : p.imageSize === '1K' || p.imageSize === '4K' ? p.imageSize : '2K';
     await logImageUsage(ctx, generated.engine.id, generated.modelId, sizeLabel, true);
     return {
       url: saved.url,
@@ -376,7 +384,8 @@ export async function generateImage(p: GenerateImageParams): Promise<{
     // Той самий формат мітки, який раніше писався вручну на кожному з 3
     // місць виклику: "Невдала спроба (<kind>)".
     const failedEngine = resolveImageEngine(p.engine);
-    const sizeLabel = failedEngine.maxSize === '1K' ? '1K' : p.imageSize === '1K' ? '1K' : '2K';
+    const sizeLabel =
+      failedEngine.maxSize === '1K' ? '1K' : p.imageSize === '1K' || p.imageSize === '4K' ? p.imageSize : '2K';
     await logImageUsage(
       { req: p.req, label: `Невдала спроба (${err?.kind || 'unknown'})`, bookId: p.bookId },
       failedEngine.id,

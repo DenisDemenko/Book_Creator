@@ -18,6 +18,7 @@ import { Book, BookIllustration, AuthUser } from '../types';
 import { downloadImageAs } from '../utils/helpers';
 import { useLanguage } from '../i18n/LanguageContext';
 import { compareByImageFormat, detectImageFormat, IMAGE_FORMAT_LABEL } from '../utils/imageFormat';
+import { MediaGenerationPanel } from './MediaGenerationPanel';
 
 interface MediaLibraryViewProps {
   book: Book;
@@ -205,9 +206,33 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
     }
   };
 
+  // Нове зображення з панелі генерації зліва — той самий шлях у книгу, що
+  // й пряме завантаження файлу вище (chapterId першої глави, style
+  // «Медіатека»), лише source: 'ai' і збережений промпт.
+  const handleGeneratedImage = (illustration: BookIllustration) => {
+    onUpdateBook(
+      {
+        ...book,
+        illustrations: [...(book.illustrations || []), illustration],
+      },
+      'Згенеровано зображення в медіатеці',
+      `Додано зображення «${illustration.caption}» (${illustration.modelUsed || 'AI'})`
+    );
+  };
+
   return (
-    <div className="flex-1 p-4 lg:p-6 overflow-y-auto bg-slate-900 text-slate-100 space-y-6">
-      
+    <div className="flex-1 flex overflow-hidden bg-slate-900 text-slate-100">
+
+      {/* Панель генерації — на всю висоту вкладки, зліва від галереї. */}
+      <MediaGenerationPanel
+        book={book}
+        isRegistered={isRegistered}
+        onGenerated={handleGeneratedImage}
+        onToast={showToast}
+      />
+
+      <div className="flex-1 p-4 lg:p-6 overflow-y-auto space-y-6">
+
       {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-cyan-500 text-slate-950 font-bold px-4 py-2 rounded-xl shadow-2xl flex items-center gap-2 border border-cyan-400 text-xs animate-bounce">
@@ -421,6 +446,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
         </div>
       )}
 
+      </div>
     </div>
   );
 };

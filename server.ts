@@ -13,6 +13,7 @@ import {
   seedreamConfig,
   GENERATED_DIR,
   GENERATED_URL_PREFIX,
+  SUPPORTED_RATIOS,
 } from './server/imageGeneration';
 import {
   geminiClient as ai,
@@ -366,6 +367,10 @@ async function startServer() {
     const hasSeedreamKey = seedreamConfig.enabled || adminKey;
     res.json({
       engines: listEngines({ google: !!ai, bytedance: hasSeedreamKey }),
+      // Той самий перелік співвідношень сторін, що й нормалізує сервер
+      // (imageGeneration.ts) — панель генерації в медіатеці малює кнопки
+      // з нього, а не з власного захардкодженого списку.
+      aspectRatios: SUPPORTED_RATIOS,
       hasGeminiKey: !!ai,
       hasSeedreamKey,
       seedreamKeySource: adminKey ? ('panel' as const) : seedreamConfig.enabled ? ('env' as const) : null,
@@ -2487,6 +2492,70 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
       res.status(status).json({
         error: err?.message || 'Помилка генерації обкладинки',
         kind: err?.kind || 'unknown'
+      });
+    }
+  });
+
+  /**
+   * Пряма генерація для медіатеки: жодного авто-складання промпту зі
+   * сцени чи книги (як у /generate-illustration-art чи /generate-cover-art) —
+   * автор сам пише промпт і сам обирає всі параметри в панелі зліва від
+   * галереї. Тому й ендпоінт «тонкий»: валідація непорожнього промпту +
+   * прямий виклик generateImageAndLog(), без жодного текстового ШІ-кроку
+   * перед картинкою.
+   */
+  app.post('/api/ai/generate-media-art', requirePermission('canGenerateImages'), requireImageQuota(), async (req, res) => {
+    try {
+      const {
+        prompt,
+        engine,
+        aspectRatio = '1:1',
+        imageSize,
+        negativePrompt,
+        quality,
+        outputFormat,
+        bookId,
+      } = req.body;
+
+      const finalPrompt = String(prompt || '').trim();
+      if (!finalPrompt) {
+        return res.status(400).json({
+          error: 'Введіть опис зображення для генерації.',
+          kind: 'empty',
+        });
+      }
+
+      const generated = await generateImageAndLog({
+        prompt: finalPrompt,
+        engine,
+        aspectRatio,
+        imageSize,
+        negativePrompt: negativePrompt ? String(negativePrompt).trim() || undefined : undefined,
+        quality,
+        outputFormat,
+        filenameHint: 'media',
+        req,
+        label: `Медіатека: ${finalPrompt.slice(0, 60)}`,
+        bookId,
+      });
+
+      res.json({
+        imageUrl: generated.url,
+        promptUsed: finalPrompt,
+        negativePrompt: negativePrompt || undefined,
+        modelUsed: generated.engineLabel,
+        modelKey: generated.engineId,
+        aspectRatio: generated.aspectRatio,
+        fileSize: `${Math.round(generated.bytes / 1024)} КБ`,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      const status = err?.kind === 'no_key' ? 503 : err?.kind === 'quota' ? 429 : 500;
+      if (err?.cause) console.error('  причина:', (err.cause as Error)?.message || err.cause);
+      console.error('Error in /api/ai/generate-media-art:', err?.message || err);
+      res.status(status).json({
+        error: err?.message || 'Помилка генерації зображення',
+        kind: err?.kind || 'unknown',
       });
     }
   });

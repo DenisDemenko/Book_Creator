@@ -50,6 +50,25 @@ export interface ImageEngineInfo {
   provider: 'google' | 'bytedance';
   /** Найбільший розмір, який приймає модель. */
   maxSize: '1K' | '2K' | '4K';
+  /**
+   * `generation_config.thinking_level` в Interactions API — офіційно
+   * документований лише для лінійки Gemini 3.1 Flash Image («minimal» —
+   * швидший чорновий прохід, «high» — повільніше, але точніше дотримання
+   * промпту). Nano Banana Pro — інша модель (gemini-3-pro-image), і в
+   * документації цей параметр для неї не згаданий, тож панель його там не
+   * пропонує, а не мовчки ігнорує непідтримуване значення.
+   * Джерело: ai.google.dev/gemini-api/docs/image-generation (звірено
+   * вересень 2026).
+   */
+  supportsQualityControl: boolean;
+  /**
+   * `response_format.mime_type` (JPEG/PNG) — документований для
+   * Interactions API загалом, не прив'язаний до конкретної моделі Gemini.
+   * Seedream (Ark) свого `output_format` тут НЕ отримує: він задокументований
+   * лише для гілки 5.0/5.0-pro, а закріплена модель — 4.0, тож обіцяти вибір
+   * формату означало б обіцяти те, що не перевірено для цієї версії.
+   */
+  supportsFormatChoice: boolean;
 }
 
 export const IMAGE_ENGINES: Record<ImageEngineId, ImageEngineInfo> = {
@@ -60,6 +79,8 @@ export const IMAGE_ENGINES: Record<ImageEngineId, ImageEngineInfo> = {
     provider: 'google',
     // Lite підтримує лише 1K.
     maxSize: '1K',
+    supportsQualityControl: true,
+    supportsFormatChoice: true,
   },
   'nano-banana-2': {
     id: 'nano-banana-2',
@@ -67,6 +88,8 @@ export const IMAGE_ENGINES: Record<ImageEngineId, ImageEngineInfo> = {
     modelId: process.env.NANO_BANANA_MODEL || 'gemini-3.1-flash-image',
     provider: 'google',
     maxSize: '4K',
+    supportsQualityControl: true,
+    supportsFormatChoice: true,
   },
   'nano-banana-pro': {
     id: 'nano-banana-pro',
@@ -74,6 +97,8 @@ export const IMAGE_ENGINES: Record<ImageEngineId, ImageEngineInfo> = {
     modelId: process.env.NANO_BANANA_PRO_MODEL || 'gemini-3-pro-image',
     provider: 'google',
     maxSize: '4K',
+    supportsQualityControl: false,
+    supportsFormatChoice: true,
   },
   seedream: {
     id: 'seedream',
@@ -81,6 +106,8 @@ export const IMAGE_ENGINES: Record<ImageEngineId, ImageEngineInfo> = {
     modelId: process.env.SEEDREAM_MODEL || 'seedream-4-0-250828',
     provider: 'bytedance',
     maxSize: '4K',
+    supportsQualityControl: false,
+    supportsFormatChoice: false,
   },
 };
 
@@ -131,8 +158,27 @@ export const seedreamConfig = {
   },
 };
 
-/** Співвідношення сторін, які приймають ці моделі. */
-const SUPPORTED_RATIOS = ['1:1', '3:4', '4:3', '9:16', '16:9'] as const;
+/**
+ * Співвідношення сторін. Раніше тут було лише 5 значень (здогад із того,
+ * що реально використовувалось у промптах книги) — звірка з офіційною
+ * документацією Interactions API (ai.google.dev/gemini-api/docs/image-generation,
+ * вересень 2026) показала, що `response_format.aspect_ratio` приймає
+ * рівно 10 значень. Seedream/Ark не обмежений токенами — рахує точні
+ * пікселі під будь-яке співвідношення (`seedreamPixelDims` нижче), тож
+ * ширший список так само коректний і для нього.
+ */
+export const SUPPORTED_RATIOS = [
+  '1:1',
+  '3:2',
+  '2:3',
+  '3:4',
+  '4:3',
+  '4:5',
+  '5:4',
+  '9:16',
+  '16:9',
+  '21:9',
+] as const;
 export type SupportedRatio = (typeof SUPPORTED_RATIOS)[number];
 
 export type ImageErrorKind = 'no_key' | 'safety' | 'quota' | 'empty' | 'unknown';
@@ -199,6 +245,15 @@ export interface GenerateImageOptions {
   /** '1K' | '2K'; за замовчуванням 2K для друкованої якості. */
   imageSize?: string;
   negativePrompt?: string;
+  /**
+   * `generation_config.thinking_level` — лише для двигунів із
+   * `supportsQualityControl`. Для решти мовчки ігнорується (а не кидає
+   * помилку), щоб клієнт міг слати те саме поле незалежно від обраного
+   * двигуна.
+   */
+  quality?: 'minimal' | 'high';
+  /** `response_format.mime_type` — лише для двигунів із `supportsFormatChoice`. */
+  outputFormat?: 'png' | 'jpeg';
 }
 
 export interface GeneratedImageResult {
@@ -432,17 +487,34 @@ async function generateWithNanoBanana(
   engine: ImageEngineInfo,
   prompt: string,
   aspectRatio: SupportedRatio,
-  imageSize: string
+  imageSize: string,
+  quality?: 'minimal' | 'high',
+  outputFormat?: 'png' | 'jpeg'
 ): Promise<{ buffer: Buffer; mimeType: string }> {
-  const interaction = await ai.interactions.create({
+  const responseFormat: Record<string, unknown> = {
+    type: 'image',
+    aspect_ratio: aspectRatio,
+    image_size: imageSize,
+  };
+  // mime_type — необов'язкове поле: не передаємо його взагалі, якщо автор
+  // не обрав формат явно, щоб модель лишалась на своєму дефолті.
+  if (outputFormat && engine.supportsFormatChoice) {
+    responseFormat.mime_type = outputFormat === 'jpeg' ? 'image/jpeg' : 'image/png';
+  }
+
+  const request: Record<string, unknown> = {
     model: engine.modelId,
     input: prompt,
-    response_format: {
-      type: 'image',
-      aspect_ratio: aspectRatio,
-      image_size: imageSize,
-    },
-  } as never);
+    response_format: responseFormat,
+  };
+  // thinking_level — задокументований лише для лінійки 3.1 Flash Image;
+  // engine.supportsQualityControl уже це відсіює на рівні виклику
+  // generateImage(), тут — друга лінія оборони на випадок прямого виклику.
+  if (quality && engine.supportsQualityControl) {
+    request.generation_config = { thinking_level: quality };
+  }
+
+  const interaction = await ai.interactions.create(request as never);
 
   const image = (interaction as { output_image?: { data?: string; mime_type?: string } })
     .output_image;
@@ -479,7 +551,14 @@ export async function generateImage(
 
   const aspectRatio = normalizeAspectRatio(options.aspectRatio);
   // Lite не вміє більше за 1K — мовчки опускаємо запит до можливостей моделі.
-  const requestedSize = options.imageSize === '1K' ? '1K' : '2K';
+  // РАНІШЕ тут будь-яке значення, окрім '1K', мовчки згорталось до '2K' —
+  // навіть якщо автор явно просив '4K' у двигуна, що його підтримує
+  // (maxSize: '4K' у трьох з чотирьох двигунів). Панель генерації в
+  // медіатеці вперше робить розмір видимим і клікабельним параметром,
+  // тож цю обмежувальну помилку довелось виправити тут же — інакше вибір
+  // «4K» у новій панелі мовчки повертав би 2K.
+  const requestedSize: '1K' | '2K' | '4K' =
+    options.imageSize === '1K' || options.imageSize === '4K' ? options.imageSize : '2K';
   const imageSize = engine.maxSize === '1K' ? '1K' : requestedSize;
 
   // Негативний промпт окремим полем моделі не приймають (крім Seedream, де
@@ -496,7 +575,15 @@ export async function generateImage(
         ? viaFal
           ? await generateWithFal(engine, seedreamKey, prompt, aspectRatio, imageSize)
           : await generateWithSeedream(engine, seedreamKey, prompt, aspectRatio, imageSize, options.negativePrompt)
-        : await generateWithNanoBanana(ai as GoogleGenAI, engine, prompt, aspectRatio, imageSize);
+        : await generateWithNanoBanana(
+            ai as GoogleGenAI,
+            engine,
+            prompt,
+            aspectRatio,
+            imageSize,
+            options.quality,
+            options.outputFormat
+          );
     return {
       ...generated,
       engine,
@@ -566,6 +653,9 @@ export function listEngines(availability: { google: boolean; bytedance: boolean 
     label: engine.label,
     modelId: engine.modelId,
     provider: engine.provider,
+    maxSize: engine.maxSize,
+    supportsQualityControl: engine.supportsQualityControl,
+    supportsFormatChoice: engine.supportsFormatChoice,
     available: engine.provider === 'bytedance' ? availability.bytedance : availability.google,
   }));
 }

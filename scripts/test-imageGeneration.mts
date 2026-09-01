@@ -15,9 +15,15 @@ console.log('normalizeAspectRatio:');
 t('16:9 → 16:9', normalizeAspectRatio('16:9')==='16:9');
 t('порожнє → 1:1', normalizeAspectRatio(undefined)==='1:1');
 t('1920x1080 → 16:9', normalizeAspectRatio('1920x1080')==='16:9');
-t('2:3 → 3:4 (найближче)', normalizeAspectRatio('2:3')==='3:4', normalizeAspectRatio('2:3'));
+// СПИСОК СПІВВІДНОШЕНЬ РОЗШИРЕНО з 5 до 10 значень (звірка з офіційною
+// документацією Google Interactions API, вересень 2026 — панель генерації
+// в медіатеці стала першим місцем, де їх усі видно й можна обрати напряму).
+// '2:3' і '21:9' раніше не входили до списку і «згорталися» до найближчого
+// підтримуваного — тепер це самі по собі підтримувані значення, і
+// normalizeAspectRatio() коректно повертає їх без жодного округлення.
+t('2:3 → 2:3 (тепер підтримується напряму)', normalizeAspectRatio('2:3')==='2:3', normalizeAspectRatio('2:3'));
 t('сміття → 1:1', normalizeAspectRatio('абв')==='1:1');
-t('21:9 → 16:9', normalizeAspectRatio('21:9')==='16:9', normalizeAspectRatio('21:9'));
+t('21:9 → 21:9 (тепер підтримується напряму)', normalizeAspectRatio('21:9')==='21:9', normalizeAspectRatio('21:9'));
 
 console.log('\nresolveEngine:');
 t('nano-banana-2', resolveEngine('nano-banana-2').id==='nano-banana-2');
