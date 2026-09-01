@@ -94,6 +94,10 @@ import {
   MAX_MENTIONS_CHARS,
 } from './server/characterConsistencyPrompt';
 import {
+  parseDriftResponse,
+  normalizeDriftResult,
+} from './server/behaviorDriftPrompt';
+import {
   readCoreModuleModels,
   setCoreModuleModel,
   resolveModuleModelId,
@@ -2045,6 +2049,92 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
         return res.status(err.status).json({ error: err.message });
       }
       res.status(500).json({ error: err?.message || 'Не вдалося перевірити цілісність персонажа.', kind: 'unknown' });
+    }
+  });
+
+  /**
+   * «Детектор дрейфу поведінки» — вужчий за character-consistency: не вся
+   * картка персонажа, а ЛИШЕ заявлені `behaviorPatterns`, кожен перевірений
+   * окремо проти уривків тексту. Та сама вага, що й у /design і в
+   * character-consistency (без сховища/кешу/рейт-ліміту) і той самий
+   * захист меж (413, а не тихе обрізання) — `MAX_MENTIONS_CHARS` спільний
+   * для обох модулів, бо джерело даних (зібрані згадування) те саме.
+   */
+  app.post('/api/ai/behavior-drift', requirePermission('canUseAi'), async (req, res) => {
+    const { bookId, character, mentions, locale, modelId } = req.body || {};
+
+    if (!character || typeof character !== 'object') {
+      return res.status(400).json({ error: 'Потрібні дані картки персонажа.', kind: 'bad_input' });
+    }
+    const declaredPatterns: string[] = Array.isArray(character.behaviorPatterns)
+      ? character.behaviorPatterns.filter((p: unknown): p is string => typeof p === 'string' && Boolean(p.trim()))
+      : [];
+    if (declaredPatterns.length === 0) {
+      return res.status(400).json({
+        error: 'У персонажа не задано жодного патерну поведінки — нема що перевіряти.',
+        kind: 'no_patterns',
+      });
+    }
+    const mentionsText = typeof mentions === 'string' ? mentions.trim() : '';
+    if (mentionsText.length < 50) {
+      return res.status(400).json({
+        error: 'У тексті книги замало згадувань цього персонажа для перевірки.',
+        kind: 'not_enough_text',
+      });
+    }
+    if (mentionsText.length > MAX_MENTIONS_CHARS) {
+      return res.status(413).json({
+        error: `Забагато тексту згадувань (${mentionsText.length} символів, максимум ${MAX_MENTIONS_CHARS}).`,
+        kind: 'too_much_text',
+      });
+    }
+
+    const preferredModelId = (await resolveModuleModelId('behaviorDrift', modelId)) || undefined;
+    const resolved = await resolveTextEngineOrFail(req, res, preferredModelId, 'детектор дрейфу поведінки');
+    if (!resolved) return;
+    const { engine, resolvedModelId, userKey } = resolved;
+
+    try {
+      const adminLayer = await loadCoreAdminLayer();
+      const template = resolveCoreTemplate('behaviorDrift', adminLayer);
+      const rendered = renderCoreTemplate('behaviorDrift', template, {
+        characterName: character.name,
+        characterSurname: character.surname,
+        behaviorPatterns: declaredPatterns.map((p, i) => `${i + 1}. ${p}`).join('\n'),
+        mentions: mentionsText,
+        language: locale,
+      });
+
+      const result = await generateAiText({
+        engine,
+        modelId: resolvedModelId,
+        prompt: rendered.user,
+        systemInstruction: rendered.system,
+        apiKeyOverride: userKey,
+        json: true,
+        req,
+        label: 'Детектор дрейфу поведінки',
+        bookId,
+      });
+
+      let parsed: any;
+      try {
+        parsed = parseDriftResponse(result.text);
+      } catch {
+        return res.status(502).json({
+          error: 'Модель повернула не JSON — спробуйте ще раз або оберіть іншу модель у налаштуваннях модуля.',
+          kind: 'bad_model_output',
+        });
+      }
+
+      const drift = normalizeDriftResult(parsed, declaredPatterns);
+      res.json({ result: drift, engine, modelId: resolvedModelId, timestamp: new Date().toISOString() });
+    } catch (err: any) {
+      console.error('Error in /api/ai/behavior-drift:', err?.message || err);
+      if (err instanceof ChatProviderError) {
+        return res.status(err.status).json({ error: err.message });
+      }
+      res.status(500).json({ error: err?.message || 'Не вдалося перевірити дрейф поведінки.', kind: 'unknown' });
     }
   });
 

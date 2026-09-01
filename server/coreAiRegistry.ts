@@ -70,6 +70,12 @@ import {
   renderCharacterConsistencySystemTemplate,
   renderCharacterConsistencyUserTemplate,
 } from './characterConsistencyPrompt';
+import {
+  behaviorDriftSystemInstruction,
+  factoryBehaviorDriftTemplate,
+  renderBehaviorDriftSystemTemplate,
+  renderBehaviorDriftUserTemplate,
+} from './behaviorDriftPrompt';
 
 /** Ключ у таблиці `meta`, під яким лежить ЄДИНИЙ адмінський шар усіх модулів ядра. */
 export const CORE_PROMPT_TEMPLATES_META_KEY = 'prompt_templates_core_admin';
@@ -91,6 +97,7 @@ export const CORE_MODULE_KEYS = [
   'diagnStructure',
   'diagnCompetency',
   'characterConsistency',
+  'behaviorDrift',
 ] as const;
 
 export type CoreModuleKey = (typeof CORE_MODULE_KEYS)[number];
@@ -151,6 +158,7 @@ export const CORE_MODULE_PLACEHOLDERS: Record<CoreModuleKey, string[]> = {
     '{ЗОВНІШНІСТЬ}', '{ХАРАКТЕР}', '{БІОГРАФІЯ}', '{СТОСУНКИ}', '{ПАТЕРНИ_ПОВЕДІНКИ}',
     '{ЗГАДУВАННЯ_У_КНИЗІ}', '{МОВА}',
   ],
+  behaviorDrift: ['{ІМ_Я}', '{ПРІЗВИЩЕ}', '{ПАТЕРНИ_ПОВЕДІНКИ}', '{ЗГАДУВАННЯ_У_КНИЗІ}', '{МОВА}'],
 };
 
 /** Чи модуль повертає JSON за жорсткою схемою (схема — readonly-текст у конструкторі, не редагується). */
@@ -168,6 +176,7 @@ export const CORE_MODULE_HAS_JSON_SCHEMA: Record<CoreModuleKey, boolean> = {
   diagnStructure: true,
   diagnCompetency: true,
   characterConsistency: true,
+  behaviorDrift: true,
 };
 
 /**
@@ -246,6 +255,8 @@ export function factoryCoreTemplate(module: CoreModuleKey): CorePromptTemplate {
       return { system: diagnSystemInstruction('competency'), user: factoryDiagnTemplate('competency') };
     case 'characterConsistency':
       return { system: characterConsistencySystemInstruction(), user: factoryCharacterConsistencyTemplate() };
+    case 'behaviorDrift':
+      return { system: behaviorDriftSystemInstruction(), user: factoryBehaviorDriftTemplate() };
   }
 }
 
@@ -443,6 +454,20 @@ export function renderCoreTemplate(
       return {
         system: renderCharacterConsistencySystemTemplate(template.system, values),
         user: renderCharacterConsistencyUserTemplate(template.user, values),
+      };
+    }
+    case 'behaviorDrift': {
+      const values = {
+        name: fields.characterName,
+        surname: fields.characterSurname,
+        behaviorPatterns: fields.behaviorPatterns || '',
+        mentions: fields.mentions || '',
+        // {МОВА} — той самий плейсхолдер-токен, що й у characterConsistency вище.
+        locale: fields.language,
+      };
+      return {
+        system: renderBehaviorDriftSystemTemplate(template.system, values),
+        user: renderBehaviorDriftUserTemplate(template.user, values),
       };
     }
   }

@@ -15,6 +15,7 @@ import {
   Tag,
   ShieldCheck,
   AlertTriangle,
+  Activity,
 } from 'lucide-react';
 import { Character, Book } from '../types';
 import { normalizeCharacter } from '../utils/characterNormalize';
@@ -37,6 +38,24 @@ const CONSISTENCY_SEVERITY_CLS: Record<ConsistencyFinding['severity'], string> =
   low: 'border-slate-600 bg-slate-700/40 text-slate-300',
   medium: 'border-amber-500/40 bg-amber-500/10 text-amber-200',
   high: 'border-red-500/40 bg-red-500/10 text-red-200',
+};
+
+/** Один пункт «Детектора дрейфу поведінки» — форма відповіді сервера (server/behaviorDriftPrompt.ts), продубльована тут з тієї самої причини. */
+interface DriftPatternResult {
+  pattern: string;
+  status: 'consistent' | 'drift' | 'unclear';
+  location: string;
+  quote: string;
+  note: string;
+}
+interface DriftResult {
+  summary: string;
+  patterns: DriftPatternResult[];
+}
+const DRIFT_STATUS_CLS: Record<DriftPatternResult['status'], string> = {
+  consistent: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200',
+  drift: 'border-red-500/40 bg-red-500/10 text-red-200',
+  unclear: 'border-slate-600 bg-slate-700/40 text-slate-300',
 };
 
 interface CharacterEditModalProps {
@@ -62,7 +81,7 @@ export const CharacterEditModal: React.FC<CharacterEditModalProps> = ({
   // джерела) — без нормалізації p.strengths.filter(...) і подібні виклики
   // нижче кидають TypeError, крах підхоплює ErrorBoundary.
   const [charData, setCharData] = useState<Character>(normalizeCharacter({ ...character }));
-  const [activeTab, setActiveTab] = useState<'general' | 'appearance' | 'psychology' | 'biography' | 'consistency'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'appearance' | 'psychology' | 'biography' | 'consistency' | 'drift'>('general');
   const [newTag, setNewTag] = useState<string>('');
   const [newStrength, setNewStrength] = useState<string>('');
   const [newWeakness, setNewWeakness] = useState<string>('');
@@ -77,6 +96,11 @@ export const CharacterEditModal: React.FC<CharacterEditModalProps> = ({
   const [isCheckingConsistency, setIsCheckingConsistency] = useState<boolean>(false);
   const [consistencyResult, setConsistencyResult] = useState<ConsistencyResult | null>(null);
   const [consistencyError, setConsistencyError] = useState<string | null>(null);
+
+  // «Детектор дрейфу поведінки» — вужча перевірка: лише заявлені behaviorPatterns
+  const [isCheckingDrift, setIsCheckingDrift] = useState<boolean>(false);
+  const [driftResult, setDriftResult] = useState<DriftResult | null>(null);
+  const [driftError, setDriftError] = useState<string | null>(null);
 
   const handleCheckConsistency = async () => {
     setIsCheckingConsistency(true);
@@ -123,6 +147,50 @@ export const CharacterEditModal: React.FC<CharacterEditModalProps> = ({
       setConsistencyError(t('characterEditModal.consistencyError'));
     } finally {
       setIsCheckingConsistency(false);
+    }
+  };
+
+  const handleCheckDrift = async () => {
+    setIsCheckingDrift(true);
+    setDriftError(null);
+    setDriftResult(null);
+    try {
+      if ((charData.behaviorPatterns || []).length === 0) {
+        setDriftError(t('characterEditModal.driftNoPatterns'));
+        return;
+      }
+      const { mentions, totalFound } = collectCharacterMentions(book, {
+        id: charData.id,
+        name: charData.name,
+        surname: charData.surname,
+        alias: charData.alias,
+      });
+      if (totalFound === 0) {
+        setDriftError(t('characterEditModal.driftNoMentions'));
+        return;
+      }
+      const mentionsText = formatMentionsForPrompt(mentions);
+
+      const res = await fetch('/api/ai/behavior-drift', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookId: book.id,
+          character: charData,
+          mentions: mentionsText,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setDriftError(data?.error || t('characterEditModal.driftError'));
+        return;
+      }
+      setDriftResult(data.result);
+    } catch (err) {
+      console.error('Error checking behavior drift:', err);
+      setDriftError(t('characterEditModal.driftError'));
+    } finally {
+      setIsCheckingDrift(false);
     }
   };
 
@@ -268,6 +336,18 @@ export const CharacterEditModal: React.FC<CharacterEditModalProps> = ({
           >
             <ShieldCheck className="w-3.5 h-3.5" />
             <span>{t('characterEditModal.tabConsistency')}</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('drift')}
+            className={`pb-2.5 px-3 text-xs font-semibold border-b-2 transition-all whitespace-nowrap flex items-center gap-1.5 ${
+              activeTab === 'drift'
+                ? 'border-amber-400 text-amber-300'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Activity className="w-3.5 h-3.5" />
+            <span>{t('characterEditModal.tabDrift')}</span>
           </button>
         </div>
 
@@ -740,6 +820,63 @@ export const CharacterEditModal: React.FC<CharacterEditModalProps> = ({
                         ))}
                       </div>
                     )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 6. BEHAVIOR DRIFT TAB */}
+          {activeTab === 'drift' && (
+            <div className="space-y-4">
+              <p className="text-slate-400 leading-relaxed">{t('characterEditModal.driftIntro')}</p>
+
+              <button
+                type="button"
+                onClick={handleCheckDrift}
+                disabled={isCheckingDrift}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold transition-all shadow-sm active:scale-95 disabled:opacity-50"
+              >
+                <Activity className="w-4 h-4" />
+                <span>{isCheckingDrift ? t('characterEditModal.driftChecking') : t('characterEditModal.driftCheckBtn')}</span>
+              </button>
+
+              {driftError && (
+                <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-200 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{driftError}</span>
+                </div>
+              )}
+
+              {driftResult && (
+                <div className="space-y-3">
+                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-800">
+                    <h4 className="text-slate-400 font-semibold mb-1">{t('characterEditModal.driftSummaryTitle')}</h4>
+                    <p className="text-slate-200 leading-relaxed">{driftResult.summary}</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    {driftResult.patterns.map((p, idx) => (
+                      <div key={idx} className={`p-3 rounded-xl border ${DRIFT_STATUS_CLS[p.status]}`}>
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <span className="font-bold">{p.pattern}</span>
+                          <span className="px-2 py-0.5 rounded-md border border-current/40 text-[10px] uppercase tracking-wide shrink-0">
+                            {t(`characterEditModal.driftStatus${p.status.charAt(0).toUpperCase()}${p.status.slice(1)}`)}
+                          </span>
+                        </div>
+                        {p.note && <p className="text-slate-300 mb-1">{p.note}</p>}
+                        {p.location && (
+                          <p className="text-[11px] text-slate-500">
+                            <span className="font-semibold">{t('characterEditModal.consistencyLocationPrefix')}</span> {p.location}
+                          </p>
+                        )}
+                        {p.quote && (
+                          <p className="text-[11px] text-slate-500 italic">
+                            <span className="font-semibold not-italic">{t('characterEditModal.consistencyQuotePrefix')}</span> «{p.quote}»
+                          </p>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
