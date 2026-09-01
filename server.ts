@@ -14,6 +14,8 @@ import {
   GENERATED_DIR,
   GENERATED_URL_PREFIX,
   SUPPORTED_RATIOS,
+  saveGeneratedImage,
+  MAX_REFERENCE_IMAGES,
 } from './server/imageGeneration';
 import {
   geminiClient as ai,
@@ -227,7 +229,10 @@ async function startServer() {
   // Cloud Run, Railway, Render та Heroku передають порт через оточення.
   const PORT = Number(process.env.PORT) || 3000;
 
-  app.use(express.json({ limit: '20mb' }));
+  // 40mb — щоб панель медіатеки могла прийняти до 10 референсних
+  // зображень base64 разом в одному запиті (задача #52): типове фото
+  // 3-4MB×10 із запасом на base64-роздування (~33%).
+  app.use(express.json({ limit: '40mb' }));
 
   // Nova вміє жити під префіксом шляху (Фаза G3): у проді перед нею стоїть
   // rewrite Next.js, який `/studio` ЗРІЗАЄ, тож Express бачить `/api/...`.
@@ -2904,6 +2909,7 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
         quality,
         outputFormat,
         bookId,
+        referenceImages,
       } = req.body;
 
       const finalPrompt = String(prompt || '').trim();
@@ -2914,6 +2920,57 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
         });
       }
 
+      // Референсні зображення (задача #52) — «завантажити з комп’ютера
+      // або по URL» з UI одним і тим самим масивом: кожен елемент або
+      // {kind:"upload", dataBase64, mimeType}, або {kind:"url", url}.
+      // Завантажені файли перетворюються на ПУБЛІЧНУ URL-адресу тут, до
+      // виклику generateImageAndLog — саме ядро (imageGeneration.ts)
+      // працює лише з готовими URL, однаковими для всіх трьох
+      // транспортів (Google `uri`, Ark `image`, fal `image_urls`).
+      let referenceImageUrls: string[] | undefined;
+      if (Array.isArray(referenceImages) && referenceImages.length > 0) {
+        if (referenceImages.length > MAX_REFERENCE_IMAGES) {
+          return res.status(400).json({
+            error: `Занадто багато референсних зображень: максимум ${MAX_REFERENCE_IMAGES}.`,
+            kind: 'empty',
+          });
+        }
+        const baseUrl = process.env.APP_URL?.replace(/\/$/, '') || `${req.protocol}://${req.get('host')}`;
+        const urls: string[] = [];
+        for (const item of referenceImages) {
+          if (item?.kind === 'url' && typeof item.url === 'string') {
+            if (!/^https?:\/\//i.test(item.url)) {
+              return res.status(400).json({
+                error: 'Посилання на референс має починатися з http:// або https://.',
+                kind: 'empty',
+              });
+            }
+            urls.push(item.url);
+          } else if (item?.kind === 'upload' && typeof item.dataBase64 === 'string') {
+            const mimeType = typeof item.mimeType === 'string' && item.mimeType.startsWith('image/')
+              ? item.mimeType
+              : 'image/png';
+            let buffer: Buffer;
+            try {
+              buffer = Buffer.from(item.dataBase64, 'base64');
+            } catch {
+              return res.status(400).json({
+                error: 'Не вдалося прочитати завантажене референсне зображення.',
+                kind: 'empty',
+              });
+            }
+            const saved = await saveGeneratedImage(buffer, mimeType, 'ref');
+            urls.push(`${baseUrl}${saved.url}`);
+          } else {
+            return res.status(400).json({
+              error: 'Некоректний формат референсного зображення.',
+              kind: 'empty',
+            });
+          }
+        }
+        referenceImageUrls = urls;
+      }
+
       const generated = await generateImageAndLog({
         prompt: finalPrompt,
         engine,
@@ -2922,6 +2979,7 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
         negativePrompt: negativePrompt ? String(negativePrompt).trim() || undefined : undefined,
         quality,
         outputFormat,
+        referenceImageUrls,
         filenameHint: 'media',
         req,
         label: `Медіатека: ${finalPrompt.slice(0, 60)}`,

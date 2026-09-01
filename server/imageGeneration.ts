@@ -37,7 +37,16 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import type { GoogleGenAI } from '@google/genai';
-import { SEEDREAM_FAL_MODEL } from './pricing';
+import { SEEDREAM_FAL_MODEL, SEEDREAM_FAL_EDIT_MODEL } from './pricing';
+
+/**
+ * Максимум референсних зображень для мультиреференсної генерації
+ * (задача #52). Google Interactions API перевірено до 10; Ark і fal
+ * технічно приймають більше (до 14/15 разом із результатом), але 10 —
+ * спільна межа, однакова для всіх трьох транспортів, щоб автор не
+ * вгадував, скільки саме дозволено під обраний двигун.
+ */
+export const MAX_REFERENCE_IMAGES = 10;
 
 export type ImageEngineId = 'nano-banana-2-lite' | 'nano-banana-2' | 'nano-banana-pro' | 'seedream';
 
@@ -254,6 +263,15 @@ export interface GenerateImageOptions {
   quality?: 'minimal' | 'high';
   /** `response_format.mime_type` — лише для двигунів із `supportsFormatChoice`. */
   outputFormat?: 'png' | 'jpeg';
+  /**
+   * Референсні зображення для мультиреференсної генерації (задача #52) —
+   * до `MAX_REFERENCE_IMAGES` штук. Кожне вже ПУБЛІЧНА URL-адреса:
+   * маршрут (`server.ts`), а не це ядро, відповідає за перетворення
+   * завантаженого файлу на URL (через `saveGeneratedImage`) — так усі
+   * три транспорти (Google `uri`, Ark `image`, fal `image_urls`)
+   * приймають ОДНЕ представлення замість трьох різних форматів даних.
+   */
+  referenceImageUrls?: string[];
 }
 
 export interface GeneratedImageResult {
@@ -362,13 +380,18 @@ async function generateWithFal(
   apiKey: string,
   prompt: string,
   aspectRatio: SupportedRatio,
-  imageSize: string
-): Promise<{ buffer: Buffer; mimeType: string }> {
+  imageSize: string,
+  referenceImageUrls?: string[]
+): Promise<{ buffer: Buffer; mimeType: string; modelId: string }> {
   const { width, height } = seedreamPixelDims(aspectRatio, imageSize);
+  const hasRefs = !!referenceImageUrls?.length;
+  // edit — окремий ендпоїнт fal, не прапорець на text-to-image: у нього
+  // інша обов’язкова схема полів (image_urls замість самого лише prompt).
+  const modelId = hasRefs ? SEEDREAM_FAL_EDIT_MODEL : SEEDREAM_FAL_MODEL;
 
   let res: Response;
   try {
-    res = await fetch(`${FAL_BASE_URL}/${SEEDREAM_FAL_MODEL}`, {
+    res = await fetch(`${FAL_BASE_URL}/${modelId}`, {
       method: 'POST',
       headers: {
         Authorization: `Key ${apiKey}`,
@@ -379,6 +402,7 @@ async function generateWithFal(
         image_size: { width, height },
         num_images: 1,
         enable_safety_checker: true,
+        ...(hasRefs ? { image_urls: referenceImageUrls } : {}),
       }),
     });
   } catch (err) {
@@ -428,6 +452,7 @@ async function generateWithFal(
   return {
     buffer: Buffer.from(await fileRes.arrayBuffer()),
     mimeType: first.content_type || 'image/png',
+    modelId,
   };
 }
 
@@ -438,7 +463,8 @@ async function generateWithSeedream(
   prompt: string,
   aspectRatio: SupportedRatio,
   imageSize: string,
-  negativePrompt?: string
+  negativePrompt?: string,
+  referenceImageUrls?: string[]
 ): Promise<{ buffer: Buffer; mimeType: string }> {
   let res: Response;
   try {
@@ -455,6 +481,12 @@ async function generateWithSeedream(
         response_format: 'b64_json',
         watermark: false,
         ...(negativePrompt ? { negative_prompt: negativePrompt } : {}),
+        // Мультиреференсна генерація (задача #52) — «image» приймає
+        // масив URL (base64 data: теж підтримується офіційним Ark REST,
+        // але URL простіше й перевіряється тим самим кодом валідації,
+        // що й для завантажених файлів — усі вони вже перетворені на
+        // публічну адресу маршрутом, а не цим ядром).
+        ...(referenceImageUrls?.length ? { image: referenceImageUrls } : {}),
       }),
     });
   } catch (err) {
@@ -489,7 +521,8 @@ async function generateWithNanoBanana(
   aspectRatio: SupportedRatio,
   imageSize: string,
   quality?: 'minimal' | 'high',
-  outputFormat?: 'png' | 'jpeg'
+  outputFormat?: 'png' | 'jpeg',
+  referenceImageUrls?: string[]
 ): Promise<{ buffer: Buffer; mimeType: string }> {
   const responseFormat: Record<string, unknown> = {
     type: 'image',
@@ -502,9 +535,18 @@ async function generateWithNanoBanana(
     responseFormat.mime_type = outputFormat === 'jpeg' ? 'image/jpeg' : 'image/png';
   }
 
+  // Референси перетворюють вхід із простого рядка на масив Content —
+  // текстова частина ({type:'text'}) і по одній {type:'image', uri} на
+  // кожен референс. Google САМ забирає файл за URI (не потребує
+  // base64), тому маршрут заздалегідь перетворює завантажені файли на
+  // публічні URL, а не шле сюди сирі байти.
+  const input: unknown = referenceImageUrls?.length
+    ? [{ type: 'text', text: prompt }, ...referenceImageUrls.map((uri) => ({ type: 'image', uri }))]
+    : prompt;
+
   const request: Record<string, unknown> = {
     model: engine.modelId,
-    input: prompt,
+    input,
     response_format: responseFormat,
   };
   // thinking_level — задокументований лише для лінійки 3.1 Flash Image;
@@ -548,6 +590,13 @@ export async function generateImage(
   if (!options.prompt || !options.prompt.trim()) {
     throw new ImageGenerationError('unknown', 'Порожній промпт для генерації зображення.', engine.id);
   }
+  if ((options.referenceImageUrls?.length || 0) > MAX_REFERENCE_IMAGES) {
+    throw new ImageGenerationError(
+      'unknown',
+      `Занадто багато референсних зображень: максимум ${MAX_REFERENCE_IMAGES}.`,
+      engine.id
+    );
+  }
 
   const aspectRatio = normalizeAspectRatio(options.aspectRatio);
   // Lite не вміє більше за 1K — мовчки опускаємо запит до можливостей моделі.
@@ -573,8 +622,16 @@ export async function generateImage(
     const generated =
       engine.provider === 'bytedance'
         ? viaFal
-          ? await generateWithFal(engine, seedreamKey, prompt, aspectRatio, imageSize)
-          : await generateWithSeedream(engine, seedreamKey, prompt, aspectRatio, imageSize, options.negativePrompt)
+          ? await generateWithFal(engine, seedreamKey, prompt, aspectRatio, imageSize, options.referenceImageUrls)
+          : await generateWithSeedream(
+              engine,
+              seedreamKey,
+              prompt,
+              aspectRatio,
+              imageSize,
+              options.negativePrompt,
+              options.referenceImageUrls
+            )
         : await generateWithNanoBanana(
             ai as GoogleGenAI,
             engine,
@@ -582,13 +639,14 @@ export async function generateImage(
             aspectRatio,
             imageSize,
             options.quality,
-            options.outputFormat
+            options.outputFormat,
+            options.referenceImageUrls
           );
     return {
       ...generated,
       engine,
       aspectRatio,
-      modelId: viaFal ? SEEDREAM_FAL_MODEL : engine.modelId,
+      modelId: viaFal ? (generated as { modelId?: string }).modelId || SEEDREAM_FAL_MODEL : engine.modelId,
     };
   } catch (err) {
     if (err instanceof ImageGenerationError) throw err;

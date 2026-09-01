@@ -79,6 +79,38 @@ console.log('\nNano Banana Pro та Lite (підставний SDK):');
   t('Lite примусово знижено до 1K', captured.response_format.image_size==='1K', captured.response_format.image_size);
 }
 
+console.log('\nМультиреференсна генерація (#52) — Nano Banana (Google):');
+{
+  let captured:any=null;
+  const fakeAi:any={ interactions:{ create:async(a:any)=>{ captured=a; return { output_image:{data:PNG_B64, mime_type:'image/png'} }; } } };
+  await generateImage(fakeAi,{
+    prompt:'портрет героя',
+    engine:'nano-banana-2',
+    referenceImageUrls:['https://example.com/ref1.png','https://example.com/ref2.png'],
+  });
+  t('без референсів input лишається рядком (уже перевірено вище) — тут із ними стає масивом', Array.isArray(captured.input), JSON.stringify(captured.input));
+  t('перший елемент — текст промпту', captured.input[0].type==='text' && captured.input[0].text==='портрет героя');
+  t('решта елементів — по одному на референс, у тому ж порядку', 
+    captured.input[1].type==='image' && captured.input[1].uri==='https://example.com/ref1.png' &&
+    captured.input[2].type==='image' && captured.input[2].uri==='https://example.com/ref2.png');
+  t('рівно 3 елементи (1 текст + 2 референси), без зайвих', captured.input.length===3, String(captured.input.length));
+
+  await generateImage(fakeAi,{prompt:'без референсів', engine:'nano-banana-2'});
+  t('без referenceImageUrls input лишається простим рядком (не ламає стару поведінку)', typeof captured.input==='string', typeof captured.input);
+}
+
+console.log('\nМультиреференсна генерація (#52) — понад ліміт:');
+{
+  const fakeAi:any={ interactions:{ create:async()=>({ output_image:{data:PNG_B64, mime_type:'image/png'} }) } };
+  const tooMany = Array.from({length:11}, (_,i)=>`https://example.com/${i}.png`);
+  try {
+    await generateImage(fakeAi,{prompt:'x', engine:'nano-banana-2', referenceImageUrls:tooMany});
+    t('11 референсів кидає помилку', false);
+  } catch (e:any) {
+    t('повідомлення називає межу (10)', /10/.test(e.message), e.message);
+  }
+}
+
 console.log('\nпорожня відповідь моделі:');
 {
   const fakeAi:any={ interactions:{ create:async()=>({}) } };
@@ -177,6 +209,40 @@ console.log('\nSeedream через fal.ai (підставний fetch):');
   }
 }
 
+console.log('\nМультиреференсна генерація (#52) — fal.ai (edit-ендпоїнт):');
+{
+  const realFetch = global.fetch;
+  const prevKey = seedreamConfig.apiKey;
+  seedreamConfig.apiKey = 'falid:falsecret';
+  const calls:any[] = [];
+  // @ts-expect-error підміна глобального fetch лише на час цього блоку тесту
+  global.fetch = async (url:string, init:any) => {
+    calls.push({ url, init });
+    if (calls.length===1) {
+      return { ok:true, status:200, json: async()=>({ images:[{ url:'https://v3.fal.media/files/x/out.png', content_type:'image/png' }] }) };
+    }
+    return { ok:true, status:200, arrayBuffer: async()=>Buffer.from(PNG_B64,'base64') };
+  };
+  try {
+    const r = await generateImage(null, {
+      prompt:'онови стиль',
+      engine:'seedream',
+      referenceImageUrls:['https://example.com/a.png','https://example.com/b.png'],
+    });
+    t('URL — edit-ендпоїнт fal, а не text-to-image',
+      calls[0].url==='https://fal.run/fal-ai/bytedance/seedream/v4.5/edit', calls[0].url);
+    const body = JSON.parse(calls[0].init.body);
+    t('image_urls несе обидва референси в тому ж порядку',
+      body.image_urls?.[0]==='https://example.com/a.png' && body.image_urls?.[1]==='https://example.com/b.png',
+      JSON.stringify(body.image_urls));
+    t('тариф edit-моделі відрізняється від text-to-image', r.modelId==='fal-ai/bytedance/seedream/v4.5/edit', r.modelId);
+    t('тариф edit — $0.04, той самий, що й text-to-image', priceForImage('seedream','2K',r.modelId)===0.04);
+  } finally {
+    global.fetch = realFetch;
+    seedreamConfig.apiKey = prevKey;
+  }
+}
+
 console.log('\nfal.ai — помилки доходять до автора:');
 {
   const realFetch = global.fetch;
@@ -213,6 +279,32 @@ console.log('\nfal.ai — помилки доходять до автора:');
   } finally {
     global.fetch = realFetch;
     seedreamConfig.apiKey = prevKey;
+  }
+}
+
+console.log('\nМультиреференсна генерація (#52) — Seedream (Ark):');
+{
+  const realFetch = global.fetch;
+  seedreamConfig.apiKey = 'test-ark-key';
+  let capturedBody:any=null;
+  // @ts-expect-error підміна глобального fetch лише на час цього блоку тесту
+  global.fetch = async (_url:string, init:any) => {
+    capturedBody = JSON.parse(init.body);
+    return { ok:true, status:200, json: async()=>({ data:[{ b64_json: PNG_B64 }] }) };
+  };
+  try {
+    await generateImage(null,{
+      prompt:'нова обкладинка за цим стилем',
+      engine:'seedream',
+      referenceImageUrls:['https://example.com/style.png'],
+    });
+    t('поле image несе масив референсів', Array.isArray(capturedBody.image) && capturedBody.image[0]==='https://example.com/style.png', JSON.stringify(capturedBody.image));
+
+    await generateImage(null,{prompt:'без референсів', engine:'seedream'});
+    t('без референсів поле image відсутнє (не ламає стару поведінку)', !('image' in capturedBody));
+  } finally {
+    global.fetch = realFetch;
+    seedreamConfig.apiKey = '';
   }
 }
 

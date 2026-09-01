@@ -321,6 +321,13 @@ interface GenerateImageParams {
   /** Прокидається у provider-виклик лише для двигунів, які це підтримують. */
   quality?: 'minimal' | 'high';
   outputFormat?: 'png' | 'jpeg';
+  /**
+   * Референсні зображення для мультиреференсної генерації (задача #52) —
+   * уже публічні URL (маршрут перетворює завантажені файли на URL ДО
+   * виклику цієї функції). Прокидається лише в `imageGeneration.ts`, тут
+   * не інтерпретується.
+   */
+  referenceImageUrls?: string[];
   /** Короткий хінт для імені файлу (напр. "cover", "scene", "char-Юля"). */
   filenameHint: string;
   req: any;
@@ -358,6 +365,7 @@ export async function generateImage(p: GenerateImageParams): Promise<{
       prompt: p.prompt,
       engine: p.engine,
       aspectRatio: p.aspectRatio,
+      referenceImageUrls: p.referenceImageUrls,
       imageSize: p.imageSize,
       negativePrompt: p.negativePrompt,
       quality: p.quality,

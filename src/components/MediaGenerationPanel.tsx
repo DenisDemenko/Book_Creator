@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { Sparkles, RefreshCw, ImageIcon, Cpu, Film, Maximize2, Gauge, FileImage, AlertCircle } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Sparkles, RefreshCw, ImageIcon, Cpu, Film, Maximize2, Gauge, FileImage, AlertCircle, Upload, X } from 'lucide-react';
 import { Book, BookIllustration } from '../types';
 import { isGuestRestriction } from '../utils/placeholders';
 import { useLanguage } from '../i18n/LanguageContext';
+import { fileToBase64 } from '../utils/extractChatFileText';
 
 /**
  * Панель налаштувань генерації зображень — постійно змонтована зліва від
@@ -47,6 +48,25 @@ interface MediaGenerationPanelProps {
 
 const ALL_SIZES: ('1K' | '2K' | '4K')[] = ['1K', '2K', '4K'];
 
+/**
+ * Максимум референсних зображень для мультиреференсної генерації
+ * (задача #52). Значення МАЄ збігатися з `MAX_REFERENCE_IMAGES` у
+ * `server/imageGeneration.ts` — той модуль не можна імпортувати в клієнт
+ * (node:fs/node:path/node:crypto на верхньому рівні), тож межа
+ * продубльована тут навмисно, а не випадково.
+ */
+const MAX_REFERENCE_IMAGES = 10;
+
+interface ReferenceImage {
+  id: string;
+  kind: 'upload' | 'url';
+  /** Завжди готове до <img src>: data: URI для завантажень, сама URL для посилань. */
+  previewUrl: string;
+  dataBase64?: string;
+  mimeType?: string;
+  url?: string;
+}
+
 export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book, isRegistered, onGenerated, onToast }) => {
   const { t } = useLanguage();
 
@@ -62,6 +82,9 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
   const [isGenerating, setIsGenerating] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<{ imageUrl: string; modelUsed: string } | null>(null);
+  const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>([]);
+  const [referenceUrlInput, setReferenceUrlInput] = useState('');
+  const referenceFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetch('/api/ai/image-engines', { credentials: 'same-origin' })
@@ -106,6 +129,57 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
     }
   }, [selectedEngine, imageSize]);
 
+  /** Додає завантажені файли як референси — до вільного місця (MAX_REFERENCE_IMAGES). */
+  const handleReferenceFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const room = MAX_REFERENCE_IMAGES - referenceImages.length;
+    if (room <= 0) {
+      onToast(t('mediaGenerationPanel.referenceImagesTooMany', { max: MAX_REFERENCE_IMAGES }));
+      return;
+    }
+    const picked = Array.from(files).slice(0, room);
+    for (const file of picked) {
+      if (!file.type.startsWith('image/')) {
+        onToast(t('mediaGenerationPanel.referenceImagesBadFile'));
+        continue;
+      }
+      const dataBase64 = await fileToBase64(file);
+      setReferenceImages((prev) => [
+        ...prev,
+        {
+          id: `ref-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          kind: 'upload',
+          dataBase64,
+          mimeType: file.type,
+          previewUrl: `data:${file.type};base64,${dataBase64}`,
+        },
+      ]);
+    }
+  };
+
+  /** Додає референс за посиланням (введеним у сусіднє поле). */
+  const handleAddReferenceUrl = () => {
+    const url = referenceUrlInput.trim();
+    if (!url) return;
+    if (!/^https?:\/\//i.test(url)) {
+      onToast(t('mediaGenerationPanel.referenceImagesBadUrl'));
+      return;
+    }
+    if (referenceImages.length >= MAX_REFERENCE_IMAGES) {
+      onToast(t('mediaGenerationPanel.referenceImagesTooMany', { max: MAX_REFERENCE_IMAGES }));
+      return;
+    }
+    setReferenceImages((prev) => [
+      ...prev,
+      { id: `ref-${Date.now()}`, kind: 'url', url, previewUrl: url },
+    ]);
+    setReferenceUrlInput('');
+  };
+
+  const removeReferenceImage = (id: string) => {
+    setReferenceImages((prev) => prev.filter((r) => r.id !== id));
+  };
+
   const handleGenerate = async () => {
     if (!prompt.trim()) {
       onToast(t('mediaGenerationPanel.toastEmptyPrompt'));
@@ -127,6 +201,14 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
           quality: quality || undefined,
           outputFormat: outputFormat || undefined,
           bookId: book.id,
+          referenceImages:
+            referenceImages.length > 0
+              ? referenceImages.map((r) =>
+                  r.kind === 'upload'
+                    ? { kind: 'upload', dataBase64: r.dataBase64, mimeType: r.mimeType }
+                    : { kind: 'url', url: r.url }
+                )
+              : undefined,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -220,6 +302,76 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
               placeholder={t('mediaGenerationPanel.negativePromptPlaceholder')}
               className="w-full p-2 rounded-xl bg-slate-900 border border-slate-800 text-[11px] text-slate-300 font-mono focus:border-amber-400 focus:outline-hidden"
             />
+          </div>
+
+          {/* Reference images — image-to-image / мультиреференсна генерація (#52) */}
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+              <span>{t('mediaGenerationPanel.referenceImagesLabel')}</span>
+              <span className="text-slate-600 font-mono normal-case">
+                {t('mediaGenerationPanel.referenceImagesCount', { count: referenceImages.length, max: MAX_REFERENCE_IMAGES })}
+              </span>
+            </label>
+            <p className="text-[10px] text-slate-600 leading-snug">
+              {t('mediaGenerationPanel.referenceImagesHint', { max: MAX_REFERENCE_IMAGES })}
+            </p>
+
+            {referenceImages.length > 0 && (
+              <div className="grid grid-cols-4 gap-1.5">
+                {referenceImages.map((r) => (
+                  <div
+                    key={r.id}
+                    className="relative group aspect-square rounded-lg overflow-hidden border border-slate-800 bg-slate-900"
+                  >
+                    <img src={r.previewUrl} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                    <button
+                      onClick={() => removeReferenceImage(r.id)}
+                      title={t('mediaGenerationPanel.referenceImagesRemoveTitle')}
+                      className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <input
+              ref={referenceFileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              hidden
+              onChange={(e) => {
+                handleReferenceFiles(e.target.files);
+                e.target.value = '';
+              }}
+            />
+            <button
+              onClick={() => referenceFileInputRef.current?.click()}
+              disabled={referenceImages.length >= MAX_REFERENCE_IMAGES}
+              className="w-full py-1.5 rounded-lg border border-slate-800 bg-slate-900 text-[10px] text-slate-400 hover:text-white hover:border-slate-700 disabled:opacity-40 flex items-center justify-center gap-1.5"
+            >
+              <Upload className="w-3 h-3" /> {t('mediaGenerationPanel.referenceImagesUploadBtn')}
+            </button>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="text"
+                value={referenceUrlInput}
+                onChange={(e) => setReferenceUrlInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddReferenceUrl()}
+                placeholder={t('mediaGenerationPanel.referenceImagesUrlPlaceholder')}
+                disabled={referenceImages.length >= MAX_REFERENCE_IMAGES}
+                className="flex-1 p-2 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-300 focus:border-amber-400 focus:outline-hidden disabled:opacity-40"
+              />
+              <button
+                onClick={handleAddReferenceUrl}
+                disabled={!referenceUrlInput.trim() || referenceImages.length >= MAX_REFERENCE_IMAGES}
+                className="px-2.5 py-2 rounded-lg border border-slate-800 bg-slate-900 text-[10px] text-slate-400 hover:text-white disabled:opacity-40 shrink-0"
+              >
+                {t('mediaGenerationPanel.referenceImagesUrlAddBtn')}
+              </button>
+            </div>
           </div>
 
           {/* Engine */}

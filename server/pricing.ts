@@ -28,6 +28,13 @@ export interface ImagePriceTable {
 export const SEEDREAM_ARK_MODEL = process.env.SEEDREAM_MODEL || 'seedream-4-0-250828';
 export const SEEDREAM_FAL_MODEL =
   process.env.SEEDREAM_FAL_MODEL || 'fal-ai/bytedance/seedream/v4.5/text-to-image';
+/**
+ * Окрема модель fal для мультиреференсної генерації (задача #52) —
+ * text-to-image і edit це РІЗНІ ендпоїнти fal з різними схемами полів
+ * (edit приймає image_urls), тож і модель для тарифу окрема.
+ */
+export const SEEDREAM_FAL_EDIT_MODEL =
+  process.env.SEEDREAM_FAL_EDIT_MODEL || 'fal-ai/bytedance/seedream/v4.5/edit';
 
 export const IMAGE_PRICING: Record<string, ImagePriceTable> = {
   'nano-banana-2-lite': {
@@ -69,6 +76,13 @@ export const IMAGE_PRICING: Record<string, ImagePriceTable> = {
     label: 'Seedream 4.5 (ByteDance, fal.ai)',
     // $0.04 — дорожче за 4.0 на чверть. Джерело: сторінка моделі на
     // fal.ai, звірено серпень 2026.
+    perImageUsd: { '1K': 0.04 },
+  },
+  // Мультиреференсна генерація (задача #52) — той самий рушій, окремий
+  // ендпоїнт fal, та сама ціна.
+  'fal-ai/bytedance/seedream/v4.5/edit': {
+    modelId: 'fal-ai/bytedance/seedream/v4.5/edit',
+    label: 'Seedream 4.5 Edit (ByteDance, fal.ai)',
     perImageUsd: { '1K': 0.04 },
   },
 };

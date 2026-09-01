@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Sparkles, Send, Bot, User, Trash2, Plus, Coins, Loader2, Search, X, Paperclip, FileText, Image as ImageIcon, BookPlus, Copy, Check, FileCode2, TerminalSquare, Cpu, Lock as LockIcon, AlertTriangle, Save, RotateCcw, Terminal, Quote, MessagesSquare } from 'lucide-react';
+import { Sparkles, Send, Bot, User, Trash2, Plus, Coins, Loader2, Search, X, Paperclip, FileText, Image as ImageIcon, BookPlus, Copy, Check, FileCode2, TerminalSquare, Cpu, Lock as LockIcon, AlertTriangle, Save, RotateCcw, Terminal, Quote, MessagesSquare, Wand2, MousePointerClick } from 'lucide-react';
 import { Book, Chapter, AuthUser } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
 import { extractChatFileText, fileToBase64 } from '../utils/extractChatFileText';
 import { formatFragmentForChat } from '../utils/bookText';
+import { findSlashCandidate, matchCharacterBySlashCandidate, collectInsertablePatterns } from '../utils/slashTrigger';
 import {
   renderTemplate,
   usedPlaceholders,
@@ -1584,6 +1585,36 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
 
   const [messages, setMessages] = useState<ChatMessage[]>([welcomeMessage]);
   const [inputText, setInputText] = useState('');
+  const chatInputRef = useRef<HTMLInputElement>(null);
+  /**
+   * Поповер поведінкових шаблонів героя, відкритий через «/Ім'я»+Enter у
+   * полі чату (задача #51) — та сама механіка, що й у Канві
+   * (`EditorView.tsx` → `createSlashTriggerHandler`/`behaviorPopover`),
+   * перенесена на звичайний `<input>` замість ProseMirror-редактора:
+   * позиція курсора береться з `selectionStart`, а видалення «/Ім'я» —
+   * простим `slice()` рядка замість транзакції редактора.
+   */
+  const [slashPopover, setSlashPopover] = useState<{
+    charId: string;
+    x: number;
+    y: number;
+    deleteFrom: number;
+    deleteTo: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!slashPopover) return;
+    const close = () => setSlashPopover(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSlashPopover(null);
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [slashPopover]);
   const [isLoading, setIsLoading] = useState(false);
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -1932,6 +1963,50 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
   const insertSections = insertChapter
     ? [...insertChapter.sections].sort((a, b) => a.order - b.order)
     : [];
+
+  /**
+   * Enter у полі чату спершу перевіряється на «/Ім'я героя»: якщо перед
+   * курсором стоїть розпізнаний тригер — відкриває поповер його
+   * поведінкових шаблонів замість надсилання повідомлення. Інакше Enter
+   * працює як завжди (handleSendMessage).
+   */
+  const handleChatInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return;
+    const cursor = e.currentTarget.selectionStart ?? inputText.length;
+    const textBeforeCursor = inputText.slice(0, cursor);
+    const found = findSlashCandidate(textBeforeCursor);
+    const matched = found ? matchCharacterBySlashCandidate(book.characters || [], found.candidate) : undefined;
+    if (found && matched) {
+      e.preventDefault();
+      const rect = e.currentTarget.getBoundingClientRect();
+      setSlashPopover({
+        charId: matched.id,
+        x: rect.left,
+        y: rect.top,
+        deleteFrom: found.slashIndex,
+        deleteTo: cursor,
+      });
+      return;
+    }
+    handleSendMessage();
+  };
+
+  /** Вставляє обраний поведінковий шаблон на місце «/Ім'я» в полі чату. */
+  const handleInsertSlashPattern = (pattern: string) => {
+    if (!slashPopover) return;
+    const clean = pattern.trim();
+    const { deleteFrom, deleteTo } = slashPopover;
+    const next = inputText.slice(0, deleteFrom) + clean + inputText.slice(deleteTo);
+    setInputText(next);
+    setSlashPopover(null);
+    const caret = deleteFrom + clean.length;
+    requestAnimationFrame(() => {
+      const el = chatInputRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(caret, caret);
+    });
+  };
 
   const handleSendMessage = async () => {
     const readyAttachments = attachedFiles.filter((a) => a.status === 'ready');
@@ -2399,10 +2474,11 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
                 </button>
               )}
               <input
+                ref={chatInputRef}
                 type="text"
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                onKeyDown={handleChatInputKeyDown}
                 placeholder={fragmentCard ? t('quickAi.fragmentQuestionPlaceholder') : t('quickAi.inputPlaceholder')}
                 className="flex-1 nm-inset rounded-xl p-2.5 text-xs text-[var(--on-surface)] placeholder:text-[var(--outline)] outline-none bg-transparent"
               />
@@ -2418,6 +2494,75 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
         </div>
           </div>
         )}
+
+        {/* Поповер поведінкових шаблонів героя, відкритий через «/Ім'я»+Enter
+            (задача #51) — клік по шаблону вставляє його в поле чату. */}
+        {slashPopover &&
+          (() => {
+            const char = book.characters.find((c) => c.id === slashPopover.charId);
+            if (!char) return null;
+            const patterns = collectInsertablePatterns(char);
+            const popW = 320;
+            const popH = Math.min(300, 96 + patterns.length * 28 + 12);
+            const left = Math.max(8, Math.min(slashPopover.x, window.innerWidth - popW - 8));
+            // Поле чату лежить унизу модалки — знизу майже завжди мало місця,
+            // тож поповер відкривається ВГОРУ від поля, а не вниз (на відміну
+            // від EditorView.tsx, де курсор посеред тексту).
+            const top = Math.max(8, slashPopover.y - popH - 8);
+            return (
+              <div
+                onMouseDown={(e) => e.stopPropagation()}
+                onContextMenu={(e) => e.preventDefault()}
+                style={{ position: 'fixed', left, top, width: popW, zIndex: 80 }}
+                className="nm-outset rounded-xl p-3 text-xs"
+              >
+                <div className="flex items-center gap-1.5 pb-2 mb-2 border-b border-[var(--outline)]/20 min-w-0">
+                  {char.avatarUrl ? (
+                    <img src={char.avatarUrl} alt="" className="w-7 h-7 rounded-lg object-cover shrink-0" />
+                  ) : (
+                    <div className="w-7 h-7 rounded-lg nm-inset flex items-center justify-center text-[10px] font-bold text-[var(--primary)] shrink-0">
+                      {char.name?.charAt(0) || '?'}
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="font-bold text-[var(--on-surface)] text-[11px] truncate">
+                      {char.name} {char.surname || ''}
+                    </div>
+                    <div className="text-[10px] text-[var(--primary)]/80 flex items-center gap-1">
+                      <Wand2 className="w-2.5 h-2.5" />
+                      {t('editor.behaviorPatternsTitle')}
+                    </div>
+                  </div>
+                </div>
+                {patterns.length === 0 ? (
+                  <p className="text-[11px] text-[var(--outline)] italic leading-relaxed">
+                    {t('editor.behaviorPatternsEmpty')}
+                  </p>
+                ) : (
+                  <ul className="space-y-1 max-h-52 overflow-y-auto pr-1">
+                    {patterns.map((p, i) => (
+                      <li key={i}>
+                        <button
+                          onClick={() => handleInsertSlashPattern(p)}
+                          className="w-full text-left text-[11px] text-[var(--on-surface)] leading-snug flex gap-1.5 px-1.5 py-1 rounded-lg nm-btn"
+                          title={t('editor.behaviorPatternInsertTitle')}
+                        >
+                          <span className="text-[var(--primary)] shrink-0 mt-0.5">•</span>
+                          <span className="min-w-0">{p}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {patterns.length > 0 && (
+                  <p className="mt-2 pt-2 border-t border-[var(--outline)]/15 text-[10px] text-[var(--outline)] flex items-center gap-1">
+                    <MousePointerClick className="w-3 h-3" />
+                    {t('editor.behaviorPatternInsertHint')}
+                  </p>
+                )}
+              </div>
+            );
+          })()}
 
         {/* Меню виділення тексту — «Передати текст у книгу» */}
         {selectionMenu && (
