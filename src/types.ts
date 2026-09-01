@@ -105,6 +105,37 @@ export interface Character {
     patterns: string[];
   }[];
   /**
+   * Дата/час/місце народження персонажа — основа для розрахунку його
+   * ведичної (сидеричної) натальної карти («задіак джйотіш»), яку можна
+   * додатково врахувати при генерації behaviorPatternLibrary вище. Час і
+   * місце — опційні: без точного часу неможливо порахувати Лагну
+   * (висхідний знак) і будинки, тож карта обмежується знаками Сонця й
+   * Місяця. Місце задається вільним текстом (геокодується сервером).
+   */
+  birthDate?: string;
+  /** HH:MM, 24-годинний формат. */
+  birthTime?: string;
+  birthPlace?: string;
+  /**
+   * Кешована ведична натальна карта, порахована сервером
+   * (server/jyotishChart.ts) з birthDate/birthTime/birthPlace. НЕ
+   * редагується вручну — перераховується кнопкою в картці персонажа при
+   * зміні дати/часу/місця народження.
+   */
+  jyotishChart?: {
+    lagna?: string;
+    moonRashi: string;
+    moonNakshatra: string;
+    moonPada: number;
+    sunRashi: string;
+    planets: Record<string, string>;
+    rahuRashi: string;
+    ketuRashi: string;
+    hasExactTime: boolean;
+    summary: string;
+    computedAt: string;
+  };
+  /**
    * П'ять скандх (буддійська модель) — якісний опис того, ЯК персонаж
    * обробляє подію: тіло реагує → виникає відчуття → розум інтерпретує →
    * спрацьовує звичний імпульс → персонаж діє. На відміну від bigFive

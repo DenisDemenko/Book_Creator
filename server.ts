@@ -106,6 +106,7 @@ import {
   parseCodexResponse,
   normalizeCodexResult,
 } from './server/characterCodexPrompt';
+import { buildJyotishChart, JyotishError } from './server/jyotishChart';
 import {
   readCoreModuleModels,
   setCoreModuleModel,
@@ -1174,6 +1175,33 @@ Translate into refined English JSON.`;
     }
   });
 
+  // 4.05 Ведична натальна карта персонажа («задіак джйотіш») — реальний
+  // астрономічний розрахунок (server/jyotishChart.ts), не текст моделі.
+  // Письменник викликає це з картки персонажа при зміні дати/часу/місця
+  // народження; результат кешується в Character.jyotishChart і може бути
+  // переданий у генерацію бібліотеки поведінкових патернів нижче.
+  app.post('/api/character/jyotish-chart', async (req, res) => {
+    const { birthDate, birthTime, birthPlace } = req.body || {};
+    if (typeof birthDate !== 'string' || !birthDate.trim()) {
+      return res.status(400).json({ error: 'Потрібна дата народження персонажа.', kind: 'bad_input' });
+    }
+    try {
+      const chart = await buildJyotishChart({
+        birthDate: birthDate.trim(),
+        birthTime: typeof birthTime === 'string' ? birthTime.trim() : undefined,
+        birthPlace: typeof birthPlace === 'string' ? birthPlace.trim() : undefined,
+      });
+      res.json({ chart });
+    } catch (err: any) {
+      if (err instanceof JyotishError) {
+        const status = err.kind === 'bad_date' ? 400 : err.kind === 'geocode_failed' ? 422 : 500;
+        return res.status(status).json({ error: err.message, kind: err.kind });
+      }
+      console.error('Error in /api/character/jyotish-chart:', err?.message || err);
+      res.status(500).json({ error: err?.message || 'Не вдалося порахувати натальну карту.', kind: 'unknown' });
+    }
+  });
+
   // 4.1 Behavior Patterns AI Generator
   // Характерні шаблони поведінки персонажа в діалогах («Він дивиться прямо
   // в очі своєму напарнику та говорить прямо»). Письменник викликає цей
@@ -1192,6 +1220,12 @@ Translate into refined English JSON.`;
         alias = '',
         profession = '',
         count = 8,
+        // Готовий текстовий підсумок ведичної натальної карти
+        // (Character.jyotishChart.summary, порахований /api/character/jyotish-chart) —
+        // опційний додатковий вхід: письменник міг ще не вказати дату
+        // народження персонажа, тож бібліотека патернів мусить генеруватись
+        // і без нього, як і раніше.
+        natalChartSummary = '',
       } = req.body;
 
       // П'ять фіксованих ситуаційних тригерів (узгоджено з письменником):
@@ -1204,7 +1238,17 @@ Translate into refined English JSON.`;
         { key: 'calm_conversation', label: 'у спокійній розмові' },
       ];
 
-      const systemPrompt = bigFive
+      // Ведична натальна карта — РАХУЄТЬСЯ окремо (server/jyotishChart.ts),
+      // сюди приходить лише готовий текстовий підсумок реальних позицій
+      // (Лагна/Раші/Накшатра). Моделі не довіряємо саму астрономію — лише
+      // просимо ЛІТЕРАТУРНО інтерпретувати вже пораховані placements у
+      // традиційній символіці джйотіш, як додатковий (не єдиний) штрих до
+      // портрета поряд із Big Five.
+      const natalChartInstruction = natalChartSummary
+        ? '\n\nПерсонажу порахована реальна ведична натальна карта (задіак джйотіш) — врахуй її традиційну символіку як ДОДАТКОВИЙ, а не єдиний штрих характеру, узгоджений із Big Five (коли він заданий), а не замість нього.'
+        : '';
+
+      const systemPrompt = (bigFive
         ? `Ти — майстер літературної майстерності та сценічної гри.
 Створи бібліотеку характерних поведінкових патернів персонажа для 5 типових сценарних ситуацій
 (тригерів) у діалогах. Кожен патерн — короткий, конкретний, образний опис того, ЯК герой тримається,
@@ -1223,14 +1267,15 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
 для письменника, на кшталт: «Він дивиться прямо в очі своєму напарнику та говорить прямо».
 Кожен шаблон — одне речення (10–25 слів), без лапок, у теперішньому часі, від третьої особи
 («Вона опускає погляд і відповідає тихо»), унікальний і не схожий на інші.
-Поверни JSON: { "patterns": ["...", "...", ...] } — рівно ${count} шаблонів.`;
+Поверни JSON: { "patterns": ["...", "...", ...] } — рівно ${count} шаблонів.`
+      ) + natalChartInstruction;
 
       const userPrompt = `Персонаж: ${name}${alias ? ` (позивний «${alias}») ` : ''}
 Роль у сюжеті: ${role}
 Професія: ${profession || 'не вказано'}
 Жанр книги: ${genre}
 Біографія: ${biography || 'не вказано'}
-Психологія: ${JSON.stringify(personality)}${bigFive ? `\nBig Five (0–100): ${JSON.stringify(bigFive)}` : ''}`;
+Психологія: ${JSON.stringify(personality)}${bigFive ? `\nBig Five (0–100): ${JSON.stringify(bigFive)}` : ''}${natalChartSummary ? `\nВедична натальна карта (джйотіш): ${natalChartSummary}` : ''}`;
 
       let patterns: string[] = [];
       let library: Record<string, string[]> | undefined;

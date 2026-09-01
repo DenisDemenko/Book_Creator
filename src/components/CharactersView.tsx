@@ -27,7 +27,9 @@ import {
   Shirt,
   Sparkle,
   Flower2,
-  Gauge
+  Gauge,
+  Moon,
+  Star
 } from 'lucide-react';
 import { Book, Character, CharacterRelationship } from '../types';
 import { normalizeCharacter, normalizeCharacterOrUndefined } from '../utils/characterNormalize';
@@ -91,6 +93,9 @@ export const CharactersView: React.FC<CharactersViewProps> = ({
   // AI генерація характерних шаблонів поведінки в діалогах
   const [isGeneratingPatterns, setIsGeneratingPatterns] = useState<boolean>(false);
   const [patternsAiError, setPatternsAiError] = useState<string | null>(null);
+  // Ведична натальна карта («задіак джйотіш») — реальний розрахунок, не AI
+  const [isComputingChart, setIsComputingChart] = useState<boolean>(false);
+  const [chartError, setChartError] = useState<string | null>(null);
 
   // normalizeCharacterOrUndefined: рятує від краху вкладки персонажі, ЯКІ
   // ВЖЕ збережені без tags/personality.goals тощо (з часів до виправлення
@@ -390,6 +395,7 @@ export const CharactersView: React.FC<CharactersViewProps> = ({
           bigFive: selectedChar.bigFive || null,
           profession: selectedChar.profession,
           count: 8,
+          natalChartSummary: selectedChar.jyotishChart?.summary || '',
         }),
       });
       const data = await res.json();
@@ -425,6 +431,46 @@ export const CharactersView: React.FC<CharactersViewProps> = ({
       setPatternsAiError(t('charactersView.patternsAiError'));
     } finally {
       setIsGeneratingPatterns(false);
+    }
+  };
+
+  /**
+   * Рахує ведичну (сидеричну) натальну карту персонажа з birthDate/
+   * birthTime/birthPlace — реальна астрономія (server/jyotishChart.ts),
+   * не текст моделі. Результат кешується в Character.jyotishChart і
+   * автоматично підхоплюється наступним викликом генерації бібліотеки
+   * патернів поведінки (handleAiGenerateBehaviorPatterns вище).
+   */
+  const handleComputeJyotishChart = async () => {
+    if (!selectedChar || isComputingChart || !selectedChar.birthDate?.trim()) return;
+    setIsComputingChart(true);
+    setChartError(null);
+    try {
+      const res = await fetch('/api/character/jyotish-chart', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          birthDate: selectedChar.birthDate,
+          birthTime: selectedChar.birthTime || '',
+          birthPlace: selectedChar.birthPlace || '',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setChartError(data?.error || t('charactersView.jyotishError'));
+        return;
+      }
+      if (data?.chart) {
+        handleUpdateCharacter(
+          { ...selectedChar, jyotishChart: data.chart },
+          `Пораховано натальну карту персонажа ${selectedChar.name}`
+        );
+      }
+    } catch (err) {
+      console.error('Error computing jyotish chart:', err);
+      setChartError(t('charactersView.jyotishError'));
+    } finally {
+      setIsComputingChart(false);
     }
   };
 
@@ -1001,6 +1047,65 @@ export const CharactersView: React.FC<CharactersViewProps> = ({
                       <Plus className="w-3.5 h-3.5" />
                     </button>
                   </div>
+                </div>
+
+                {/* Ведична натальна карта («задіак джйотіш») — реальний розрахунок, не текст AI */}
+                <div className="pt-3 border-t border-slate-800/70">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <Moon className="w-4 h-4 text-indigo-400 shrink-0" />
+                    <label className="text-slate-300 font-bold block">
+                      {t('charactersView.jyotishLabel')}
+                    </label>
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-relaxed mb-2">
+                    {t('charactersView.jyotishHint')}
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">
+                    <input
+                      type="date"
+                      value={selectedChar.birthDate || ''}
+                      onChange={(e) => handleUpdateCharacter({ ...selectedChar, birthDate: e.target.value })}
+                      className="w-full p-2 rounded-lg bg-slate-900 border border-slate-800 focus:border-indigo-400 text-slate-200 text-xs focus:outline-hidden"
+                      title={t('charactersView.birthDateLabel')}
+                    />
+                    <input
+                      type="time"
+                      value={selectedChar.birthTime || ''}
+                      onChange={(e) => handleUpdateCharacter({ ...selectedChar, birthTime: e.target.value })}
+                      className="w-full p-2 rounded-lg bg-slate-900 border border-slate-800 focus:border-indigo-400 text-slate-200 text-xs focus:outline-hidden"
+                      title={t('charactersView.birthTimeLabel')}
+                    />
+                    <input
+                      type="text"
+                      value={selectedChar.birthPlace || ''}
+                      onChange={(e) => handleUpdateCharacter({ ...selectedChar, birthPlace: e.target.value })}
+                      placeholder={t('charactersView.birthPlaceLabel')}
+                      className="w-full p-2 rounded-lg bg-slate-900 border border-slate-800 focus:border-indigo-400 text-slate-200 text-xs focus:outline-hidden"
+                      title={t('charactersView.birthPlaceLabel')}
+                    />
+                  </div>
+
+                  <button
+                    onClick={handleComputeJyotishChart}
+                    disabled={isComputingChart || !selectedChar.birthDate?.trim()}
+                    className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-400 hover:to-blue-400 text-white font-bold text-[11px] shadow-md transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed mb-2"
+                  >
+                    <Star className="w-3.5 h-3.5" />
+                    <span>{isComputingChart ? t('charactersView.jyotishComputing') : t('charactersView.jyotishComputeBtn')}</span>
+                  </button>
+
+                  {chartError && (
+                    <div className="mb-2 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[11px]">
+                      {chartError}
+                    </div>
+                  )}
+
+                  {selectedChar.jyotishChart && (
+                    <div className="px-3 py-2 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-indigo-200 text-[11px] leading-relaxed">
+                      {selectedChar.jyotishChart.summary}
+                    </div>
+                  )}
                 </div>
 
                 {/* Поведінкові шаблони персонажа в діалогах (знизу вікна) */}
