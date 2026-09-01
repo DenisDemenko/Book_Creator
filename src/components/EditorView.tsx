@@ -1300,6 +1300,60 @@ export const EditorView: React.FC<EditorViewProps> = ({
   const [showNarrationToolbarMenu, setShowNarrationToolbarMenu] = useState(false);
 
   /**
+   * Автосховання панелі інструментів у фулскріні — «режим без
+   * відволікань» ховає тулбар після паузи в активності (рух миші/клавіші)
+   * і одразу показує його назад при першому ж русі чи натисканні. Свідома
+   * обережність: НЕ ховаємо, поки відкритий будь-який попап цієї самої
+   * панелі (вибір тривалості спринту, вибір мови озвучення) чи поки фокус
+   * стоїть на елементі керування (select/input/textarea/button) — інакше
+   * тулбар зник би просто під час використання власного випадаючого
+   * списку. Поза фулскріном стан завжди false: ця сама функція
+   * рендериться і в звичайному режимі, де автосховання не потрібне.
+   */
+  const [toolbarHidden, setToolbarHidden] = useState(false);
+  const toolbarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!isFullscreenMode) {
+      setToolbarHidden(false);
+      return;
+    }
+    const HIDE_DELAY_MS = 3000;
+
+    const clearHideTimer = () => {
+      if (toolbarHideTimerRef.current) {
+        clearTimeout(toolbarHideTimerRef.current);
+        toolbarHideTimerRef.current = null;
+      }
+    };
+
+    const scheduleHide = () => {
+      clearHideTimer();
+      toolbarHideTimerRef.current = setTimeout(() => {
+        const active = document.activeElement;
+        const isFormControl =
+          active instanceof HTMLElement && ['SELECT', 'INPUT', 'TEXTAREA', 'BUTTON'].includes(active.tagName);
+        if (showSprintMenu || showNarrationToolbarMenu || isFormControl) return;
+        setToolbarHidden(true);
+      }, HIDE_DELAY_MS);
+    };
+
+    const showAndReschedule = () => {
+      setToolbarHidden(false);
+      scheduleHide();
+    };
+
+    showAndReschedule();
+    window.addEventListener('mousemove', showAndReschedule);
+    window.addEventListener('keydown', showAndReschedule);
+    return () => {
+      clearHideTimer();
+      window.removeEventListener('mousemove', showAndReschedule);
+      window.removeEventListener('keydown', showAndReschedule);
+    };
+  }, [isFullscreenMode, showSprintMenu, showNarrationToolbarMenu]);
+
+  /**
    * Озвучує виділений фрагмент (абзац або навіть одне слово — та сама межа
    * «будь-яке непорожнє виділення», що й для обговорення в чаті, а не 40
    * символів генерації абзаців: людина хоче почути слово так само, як
@@ -1569,7 +1623,11 @@ export const EditorView: React.FC<EditorViewProps> = ({
    * markdown-маркери, бо контент розділу зберігається як простий рядок.
    */
   const renderFormatToolbar = (isEn: boolean) => (
-    <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+    <div
+      className={`flex items-center gap-1.5 shrink-0 flex-wrap transition-opacity duration-300 ${
+        isFullscreenMode && toolbarHidden ? 'opacity-0 pointer-events-none' : 'opacity-100'
+      }`}
+    >
       <select
         value={book.layoutConfig.typography.bodyFont}
         onChange={(e) => {
