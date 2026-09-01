@@ -87,7 +87,8 @@ import {
   ZoomIn,
   ZoomOut,
   Focus,
-  Gauge
+  Gauge,
+  Search
 } from 'lucide-react';
 import { 
   Book, 
@@ -125,6 +126,7 @@ import { DockedEditorPanel } from './DockedEditorPanel';
 import { AiReadabilityPanel } from './AiReadabilityPanel';
 import { FontInstallModal } from './FontInstallModal';
 import { ProofingLanguageModal } from './ProofingLanguageModal';
+import { BookSearchModal } from './BookSearchModal';
 import { InsertImageModal } from './InsertImageModal';
 import { HeroArcPanel } from './HeroArcPanel';
 import type { HeroArcState } from '../types';
@@ -354,6 +356,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
   const [showFootnoteModal, setShowFootnoteModal] = useState<boolean>(false);
   const [showQrModal, setShowQrModal] = useState<boolean>(false);
   const [showFontModal, setShowFontModal] = useState<boolean>(false);
+  /** Модальне вікно пошуку й заміни ПО ВСІЙ КНИЗІ (BookSearchModal.tsx) — на відміну від решти модалок тут, шукає в усіх розділах, а не лише в поточному відкритому. */
+  const [showBookSearch, setShowBookSearch] = useState<boolean>(false);
   const [showProofingModal, setShowProofingModal] = useState<boolean>(false);
   const [showInsertImageModal, setShowInsertImageModal] = useState<boolean>(false);
   /** Герой, чию репліку щойно вставили: його панель горить яскравіше,
@@ -788,6 +792,58 @@ export const EditorView: React.FC<EditorViewProps> = ({
     onHighlightApplied?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingHighlight, activeSection?.id, uaEditor]);
+
+  /**
+   * Виділення й прокрутка до конкретного збігу з BookSearchModal.tsx —
+   * той самий принцип, що й `pendingHighlight` вище (App.tsx → чат), але
+   * стан лишається ЛОКАЛЬНИМ у EditorView.tsx, а не піднятий в App.tsx:
+   * пошук по книзі — суто дія редактора книги, тож немає потреби ділитись
+   * цим станом з іншими вкладками застосунку. На відміну від чатового
+   * виділення (завжди українською), тут `field` визначає РЕДАКТОР
+   * (uaEditor/enEditor) — клік по англійському збігу підсвічує саме
+   * англійський текст, навіть якщо мовний режим був "лише UA".
+   */
+  const [pendingSearchHighlight, setPendingSearchHighlight] = useState<
+    { sectionId: string; field: 'content' | 'contentEn'; start: number; end: number } | null
+  >(null);
+
+  const handleNavigateToSearchMatch = useCallback(
+    (chapterId: string, sectionId: string, field: 'content' | 'contentEn', start: number, end: number) => {
+      onSelectSection(chapterId, sectionId);
+      // Якщо знайдений фрагмент — англійський, а поточний режим показує
+      // лише українську (і навпаки), перемикаємось на паралельний режим,
+      // інакше редактор із підсвіткою просто не буде видимий на екрані.
+      setEditorLanguageMode((mode) => {
+        if (field === 'contentEn' && mode === 'ua') return 'parallel';
+        if (field === 'content' && mode === 'en') return 'parallel';
+        return mode;
+      });
+      setPendingSearchHighlight({ sectionId, field, start, end });
+    },
+    [onSelectSection, setEditorLanguageMode]
+  );
+
+  useEffect(() => {
+    if (!pendingSearchHighlight || !activeSection || pendingSearchHighlight.sectionId !== activeSection.id) return;
+    const { field, start, end } = pendingSearchHighlight;
+    const applySearchHighlight = () => {
+      const targetEditor = field === 'content' ? uaEditor : enEditor;
+      if (!targetEditor) return false;
+      const doc = targetEditor.state.doc;
+      const from = markerOffsetToDocPos(doc, start);
+      const to = markerOffsetToDocPos(doc, end);
+      if (from === null || to === null) return false;
+      targetEditor.chain().focus().setTextSelection({ from, to }).scrollIntoView().run();
+      return true;
+    };
+    if (!applySearchHighlight()) {
+      const timeout = setTimeout(applySearchHighlight, 50);
+      setPendingSearchHighlight(null);
+      return () => clearTimeout(timeout);
+    }
+    setPendingSearchHighlight(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSearchHighlight, activeSection?.id, uaEditor, enEditor]);
 
   // Ukrainian Content change handler
   const handleContentChange = (newContent: string) => {
@@ -3495,6 +3551,18 @@ export const EditorView: React.FC<EditorViewProps> = ({
               </button>
             </div>
 
+            {/* Пошук і заміна по всій книзі (BookSearchModal.tsx) — на
+                відміну від Ctrl+F браузера, бачить усі глави/розділи, а
+                не лише поточний відкритий. */}
+            <button
+              onClick={() => setShowBookSearch(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 rounded-lg transition-colors"
+              title={t('editor.searchBookTitle')}
+            >
+              <Search className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{t('editor.searchBookBtn')}</span>
+            </button>
+
             {/* Translate Button */}
             <button
               onClick={handleTranslateToEnglish}
@@ -4932,6 +5000,16 @@ export const EditorView: React.FC<EditorViewProps> = ({
           onInstall={handleInstallFont}
           onRemove={handleRemoveFont}
           onClose={() => setShowFontModal(false)}
+        />
+      )}
+
+      {/* ПОШУК І ЗАМІНА ПО ВСІЙ КНИЗІ */}
+      {showBookSearch && (
+        <BookSearchModal
+          book={book}
+          onUpdateBook={onUpdateBook}
+          onNavigateToMatch={handleNavigateToSearchMatch}
+          onClose={() => setShowBookSearch(false)}
         />
       )}
 
