@@ -181,6 +181,12 @@ export default function App() {
   const [activeSectionId, setActiveSectionId] = useState<string>(book.chapters[0]?.sections[0]?.id || '');
   /** Діапазон символів для виділення в EditorView одразу після «Передати текст у книгу» з AI-чату. */
   const [pendingChatHighlight, setPendingChatHighlight] = useState<{ sectionId: string; start: number; end: number } | null>(null);
+  /**
+   * Фрагмент книги, надісланий з редактора в чат на обговорення
+   * (EditorView → «Обговорити фрагмент у чаті»). App — власник і книги, і
+   * чату, тож саме тут живе передача між ними.
+   */
+  const [chatDiscussFragment, setChatDiscussFragment] = useState<{ text: string; where: string } | null>(null);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
@@ -1177,15 +1183,16 @@ export default function App() {
    * фрагмент (pendingChatHighlight → EditorView), щоб автор одразу бачив,
    * куди саме потрапив текст, і міг продовжити роботу над ним.
    */
-  const handleSendChatTextToChapter = (chapterId: string, text: string) => {
+  const handleSendChatTextToChapter = (chapterId: string, text: string, sectionId?: string) => {
     const chapter = book.chapters.find((c) => c.id === chapterId);
-    const result = appendTextToChapterEnd(book.chapters, chapterId, text);
+    const result = appendTextToChapterEnd(book.chapters, chapterId, text, sectionId);
     if (!chapter || !result) return;
 
+    const section = chapter.sections.find((sc) => sc.id === result.sectionId);
     handleUpdateBook(
       { ...book, chapters: result.chapters, updatedAt: new Date().toISOString() },
-      'Текст з AI-чату додано до глави',
-      chapter.title
+      'Текст з AI-чату додано до книги',
+      [chapter.title, section?.title].filter(Boolean).join(' → ')
     );
     handleNavigateToSection(chapter.id, result.sectionId);
     setPendingChatHighlight({ sectionId: result.sectionId, start: result.start, end: result.end });
@@ -1604,6 +1611,10 @@ export default function App() {
               setIsQuickAiOpen(true);
             }}
             promptGenerateTick={promptGenerateTick}
+            onDiscussInChat={(text, where) => {
+              setChatDiscussFragment({ text, where });
+              setIsQuickAiOpen(true);
+            }}
           />
         )}
 
@@ -1877,6 +1888,8 @@ export default function App() {
         book={book}
         authUser={auth.user}
         onSendTextToChapter={handleSendChatTextToChapter}
+        discussFragment={chatDiscussFragment}
+        onDiscussFragmentConsumed={() => setChatDiscussFragment(null)}
         pendingAttachmentFile={pendingSunScreenshot}
         onAttachmentConsumed={() => setPendingSunScreenshot(null)}
         onUpdateBook={handleUpdateBook}

@@ -10,6 +10,7 @@ export interface ManuscriptAiTextOptions {
   isGeneratingAiText?: WrappedImageOptions['isGeneratingAiText'];
   aiDraftLabel: string;
   aiDraftReviewLabel: string;
+  aiDraftRejectLabel: string;
 }
 
 /**
@@ -48,7 +49,11 @@ export function buildManuscriptExtensions(
       onRequestAiText: aiText.onRequestAiText,
       isGeneratingAiText: aiText.isGeneratingAiText,
     }),
-    AiDraftBlockNode.configure({ label: aiText.aiDraftLabel, reviewLabel: aiText.aiDraftReviewLabel }),
+    AiDraftBlockNode.configure({
+      label: aiText.aiDraftLabel,
+      reviewLabel: aiText.aiDraftReviewLabel,
+      rejectLabel: aiText.aiDraftRejectLabel,
+    }),
     Placeholder.configure({ placeholder }),
   ];
 }

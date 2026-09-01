@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Sparkles, Send, Bot, User, Trash2, Plus, Coins, Loader2, Search, X, Paperclip, FileText, Image as ImageIcon, BookPlus, Copy, Check, FileCode2, TerminalSquare, Cpu, Lock as LockIcon, AlertTriangle, Save, RotateCcw, Terminal } from 'lucide-react';
+import { Sparkles, Send, Bot, User, Trash2, Plus, Coins, Loader2, Search, X, Paperclip, FileText, Image as ImageIcon, BookPlus, Copy, Check, FileCode2, TerminalSquare, Cpu, Lock as LockIcon, AlertTriangle, Save, RotateCcw, Terminal, Quote, MessagesSquare } from 'lucide-react';
 import { Book, Chapter, AuthUser } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
 import { extractChatFileText, fileToBase64 } from '../utils/extractChatFileText';
+import { formatFragmentForChat } from '../utils/bookText';
 import {
   renderTemplate,
   usedPlaceholders,
@@ -20,7 +21,17 @@ interface QuickAiModalProps {
    * (App.tsx) сам дописує книгу, одразу відкриває редактор на цій секції й
    * виділяє вставлений фрагмент — тут лише передаємо, ЩО і КУДИ.
    */
-  onSendTextToChapter?: (chapterId: string, text: string) => void;
+  onSendTextToChapter?: (chapterId: string, text: string, sectionId?: string) => void;
+  /**
+   * Фрагмент книги, надісланий на обговорення з редактора (правий клік по
+   * виділенню → «Обговорити фрагмент у чаті»). Не надсилається сам собою:
+   * лягає карткою над полем вводу, а питання формулює автор. Модель, яка
+   * отримала уривок без питання, майже завжди починає його переписувати —
+   * а просили обговорити.
+   */
+  discussFragment?: { text: string; where: string } | null;
+  /** Викликається після того, як фрагмент прийнято карткою — щоб власник обнулив свій стан. */
+  onDiscussFragmentConsumed?: () => void;
   /**
    * Знімок "сонечка" (DraggableSun → кнопка «Скріншот для AI»), який чекає
    * прикріплення в чат — власник (App.tsx) відкриває модалку й передає файл
@@ -1533,6 +1544,8 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
   book,
   authUser,
   onSendTextToChapter,
+  discussFragment,
+  onDiscussFragmentConsumed,
   pendingAttachmentFile,
   onAttachmentConsumed,
   onUpdateBook,
@@ -1567,7 +1580,15 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
 
   // --- Виділення тексту → «Передати текст у книгу» ---
   const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number; text: string } | null>(null);
-  const [chapterPickerOpen, setChapterPickerOpen] = useState(false);
+  /**
+   * Що саме вставляємо в книгу і на якому кроці вибору ми зараз.
+   * `text` тримається тут, а не читається з виділення в мить вставки:
+   * поки автор обирає главу, виділення в чаті вже зникло — воно
+   * знімається першим же кліком по списку.
+   */
+  const [insertTarget, setInsertTarget] = useState<{ text: string; chapterId: string | null } | null>(null);
+  /** Фрагмент книги, який чекає на питання автора (з редактора). */
+  const [fragmentCard, setFragmentCard] = useState<{ text: string; where: string } | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -1725,6 +1746,21 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, pendingAttachmentFile]);
 
+  /**
+   * Фрагмент із редактора → картка над полем вводу.
+   *
+   * Одразу «споживаємо» проп: інакше повторне відкриття чату знову
+   * причепило б той самий уривок, і автор надсилав би його вдруге, не
+   * помітивши.
+   */
+  useEffect(() => {
+    if (!isOpen || !discussFragment?.text?.trim()) return;
+    setFragmentCard({ text: discussFragment.text.trim(), where: discussFragment.where || '' });
+    setActivePanel('chat');
+    onDiscussFragmentConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, discussFragment]);
+
   if (!isOpen) return null;
 
   /** Зберігає обрану модель і на сесії (як і раніше), і як «рушій книги» — decode Q10/Q14 з grilling-сесії AI-тексту за фото. */
@@ -1855,20 +1891,46 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
    * фрагментом (App.tsx → handleSendChatTextToChapter → pendingChatHighlight),
    * тож автор бачить результат без додаткового підтвердження тут.
    */
-  const sendSelectionToChapter = (chapter: Chapter) => {
-    if (!selectionMenu || !onSendTextToChapter) return;
-    onSendTextToChapter(chapter.id, selectionMenu.text);
-    setChapterPickerOpen(false);
+  const beginInsert = (text: string) => {
+    const clean = text.trim();
+    if (!clean || !onSendTextToChapter) return;
+    setInsertTarget({ text: clean, chapterId: null });
     setSelectionMenu(null);
+  };
+
+  const finishInsert = (sectionId: string) => {
+    if (!insertTarget?.chapterId || !onSendTextToChapter) return;
+    onSendTextToChapter(insertTarget.chapterId, insertTarget.text, sectionId);
+    setInsertTarget(null);
     onClose();
   };
+
+  /** Глава й розділи, обрані на першому кроці — для другого кроку пікера. */
+  const insertChapter = insertTarget?.chapterId
+    ? book.chapters.find((c) => c.id === insertTarget.chapterId)
+    : undefined;
+  const insertSections = insertChapter
+    ? [...insertChapter.sections].sort((a, b) => a.order - b.order)
+    : [];
 
   const handleSendMessage = async () => {
     const readyAttachments = attachedFiles.filter((a) => a.status === 'ready');
     const hasPendingAttachment = attachedFiles.some((a) => a.status === 'reading');
-    if ((!inputText.trim() && readyAttachments.length === 0) || isLoading || hasPendingAttachment) return;
-    const userMsg = inputText.trim() || t('quickAi.analyzeAttachmentsDefault');
+    // Прикріплений фрагмент книги — теж привід дозволити надсилання:
+    // «що скажеш про це?» без жодного слова в полі — нормальний запит.
+    if ((!inputText.trim() && readyAttachments.length === 0 && !fragmentCard) || isLoading || hasPendingAttachment) return;
+    const question = inputText.trim();
+    // Фрагмент іде ПЕРЕД питанням: модель читає уривок, потім те, що про
+    // нього питають. Зворотний порядок змушує її тримати питання в голові
+    // упродовж усього уривка — і вона регулярно відповідає на початок.
+    const userMsg = fragmentCard
+      ? [
+          formatFragmentForChat(fragmentCard.text, fragmentCard.where),
+          question || t('quickAi.fragmentDefaultQuestion'),
+        ].join('\n\n')
+      : question || t('quickAi.analyzeAttachmentsDefault');
     setInputText('');
+    setFragmentCard(null);
     setAttachedFiles([]);
     setAttachmentError(null);
     setIsLoading(true);
@@ -2162,6 +2224,27 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
                   }`}
                 >
                   {m.text}
+                  {/*
+                    Кнопка, а не лише правий клік по виділенню. Перенести
+                    відповідь у книгу можна було й раніше — але тільки якщо
+                    здогадатися виділити текст і натиснути праву кнопку.
+                    Дія, про яку треба здогадатися, для більшості авторів
+                    не існує. Виділення лишається: воно потрібне, коли з
+                    відповіді береться один абзац, а не вся.
+                  */}
+                  {m.sender === 'ai' && onSendTextToChapter && isRegistered && m.text.trim().length > 0 && (
+                    <div className="mt-2 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => beginInsert(m.text)}
+                        title={t('quickAi.addWholeReplyTooltip')}
+                        className="nm-btn inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10.5px] text-[var(--primary)]"
+                      >
+                        <BookPlus className="w-3 h-3 shrink-0" />
+                        {t('quickAi.addWholeReply')}
+                      </button>
+                    </div>
+                  )}
                   {m.sender === 'ai' && (m.inputTokens != null || m.costUsd != null || m.model) && (
                     <div className="mt-2 pt-2 border-t border-[var(--border-subtle)] flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-[var(--outline)] font-mono">
                       {m.model && <span>{m.model}</span>}
@@ -2233,6 +2316,32 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
               </div>
             )}
 
+            {/*
+              Фрагмент книги, надісланий з редактора. Показуємо, а не
+              вкидаємо в поле вводу: довгий уривок у однорядковому інпуті
+              неможливо прочитати, а питання автор має писати сам.
+            */}
+            {fragmentCard && (
+              <div className="flex items-start gap-2 px-3 py-2 rounded-xl nm-inset">
+                <Quote className="w-3.5 h-3.5 text-[var(--primary)] shrink-0 mt-0.5" />
+                <div className="min-w-0 flex-1">
+                  {fragmentCard.where && (
+                    <div className="text-[10px] text-[var(--outline)] truncate">{fragmentCard.where}</div>
+                  )}
+                  <div className="text-[11px] leading-relaxed text-[var(--on-surface)] line-clamp-2">
+                    {fragmentCard.text}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setFragmentCard(null)}
+                  title={t('quickAi.fragmentDetach')}
+                  className="text-[var(--outline)] hover:text-rose-400 shrink-0"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            )}
+
             {attachedFiles.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {attachedFiles.map((a) => (
@@ -2274,12 +2383,12 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-                placeholder={t('quickAi.inputPlaceholder')}
+                placeholder={fragmentCard ? t('quickAi.fragmentQuestionPlaceholder') : t('quickAi.inputPlaceholder')}
                 className="flex-1 nm-inset rounded-xl p-2.5 text-xs text-[var(--on-surface)] placeholder:text-[var(--outline)] outline-none bg-transparent"
               />
               <button
                 onClick={handleSendMessage}
-                disabled={isLoading || (!inputText.trim() && attachedFiles.every((a) => a.status !== 'ready')) || attachedFiles.some((a) => a.status === 'reading')}
+                disabled={isLoading || (!inputText.trim() && !fragmentCard && attachedFiles.every((a) => a.status !== 'ready')) || attachedFiles.some((a) => a.status === 'reading')}
                 className="nm-btn-primary p-2.5 rounded-xl disabled:opacity-40 transition-all shrink-0"
               >
                 <Send className="w-4 h-4" />
@@ -2298,7 +2407,7 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
             className="nm-outset rounded-xl p-1.5 min-w-[220px]"
           >
             <button
-              onClick={() => setChapterPickerOpen(true)}
+              onClick={() => beginInsert(selectionMenu.text)}
               disabled={sortedChapters.length === 0}
               className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[12px] text-[var(--on-surface)] nm-btn disabled:opacity-40"
             >
@@ -2308,10 +2417,18 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
           </div>
         )}
 
-        {/* Пікер розділу книги */}
-        {chapterPickerOpen && selectionMenu && (
+        {/*
+          Пікер «куди вставити»: спершу глава, потім розділ.
+
+          Раніше вибиралася лише глава, а текст ішов у кінець її останнього
+          розділу. У книзі на десять розділів це майже випадкове місце:
+          автор обговорив у чаті сцену з середини — і отримав її дописаною
+          у фінал глави, звідки її потім переносив руками. Два кроки замість
+          одного коштують одного зайвого кліку й прибирають цей перенос.
+        */}
+        {insertTarget && (
           <div
-            onClick={() => setChapterPickerOpen(false)}
+            onClick={() => setInsertTarget(null)}
             className="fixed inset-0 z-[71] bg-black/60 flex items-center justify-center p-4"
           >
             <div
@@ -2319,24 +2436,60 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
               className="token-module-scope nm-outset rounded-2xl w-full max-w-sm max-h-[70vh] flex flex-col overflow-hidden"
             >
               <div className="p-4 border-b border-[var(--border-subtle)]">
-                <h4 className="text-[13px] font-bold text-[var(--on-surface)]">{t('quickAi.pickChapterTitle')}</h4>
-                <p className="text-[11px] text-[var(--outline)] mt-1">{t('quickAi.pickChapterHint')}</p>
+                <h4 className="text-[13px] font-bold text-[var(--on-surface)]">
+                  {insertTarget.chapterId ? t('quickAi.pickSectionTitle') : t('quickAi.pickChapterTitle')}
+                </h4>
+                <p className="text-[11px] text-[var(--outline)] mt-1">
+                  {insertTarget.chapterId ? t('quickAi.pickSectionHint') : t('quickAi.pickChapterHint')}
+                </p>
+                {/* Що саме вставляємо — щоб не вставити не той фрагмент,
+                    коли до вибору дійшли через кілька кліків. */}
+                <p className="mt-2 px-2.5 py-1.5 rounded-lg nm-inset text-[11px] leading-relaxed text-[var(--on-surface)] line-clamp-3">
+                  {insertTarget.text.length > 160 ? insertTarget.text.slice(0, 160) + '…' : insertTarget.text}
+                </p>
               </div>
+
               <div className="flex-1 overflow-y-auto p-2 space-y-1">
-                {sortedChapters.map((chap) => (
-                  <button
-                    key={chap.id}
-                    onClick={() => sendSelectionToChapter(chap)}
-                    className="w-full text-left px-3 py-2.5 rounded-xl nm-btn text-[12.5px] text-[var(--on-surface)] truncate"
-                  >
-                    {chap.title}
-                  </button>
-                ))}
+                {!insertTarget.chapterId
+                  ? sortedChapters.map((chap) => (
+                      <button
+                        key={chap.id}
+                        onClick={() => setInsertTarget({ ...insertTarget, chapterId: chap.id })}
+                        className="w-full text-left px-3 py-2.5 rounded-xl nm-btn text-[12.5px] text-[var(--on-surface)] truncate"
+                      >
+                        {chap.title}
+                      </button>
+                    ))
+                  : insertSections.length === 0
+                    ? (
+                      <p className="px-3 py-4 text-[11.5px] text-[var(--outline)] text-center">
+                        {t('quickAi.pickSectionEmpty')}
+                      </p>
+                    )
+                    : insertSections.map((sec, i) => (
+                        <button
+                          key={sec.id}
+                          onClick={() => finishInsert(sec.id)}
+                          className="w-full text-left px-3 py-2.5 rounded-xl nm-btn text-[12.5px] text-[var(--on-surface)] flex items-center gap-2"
+                        >
+                          <span className="text-[10px] font-mono text-[var(--outline)] shrink-0">{i + 1}</span>
+                          <span className="truncate">{sec.title}</span>
+                        </button>
+                      ))}
               </div>
-              <div className="p-3 border-t border-[var(--border-subtle)]">
+
+              <div className="p-3 border-t border-[var(--border-subtle)] flex gap-2">
+                {insertTarget.chapterId && (
+                  <button
+                    onClick={() => setInsertTarget({ ...insertTarget, chapterId: null })}
+                    className="flex-1 px-3 py-2 rounded-xl nm-btn text-[12px] text-[var(--on-surface)]"
+                  >
+                    {t('quickAi.pickBack')}
+                  </button>
+                )}
                 <button
-                  onClick={() => setChapterPickerOpen(false)}
-                  className="w-full px-3 py-2 rounded-xl nm-btn text-[12px] text-[var(--outline)]"
+                  onClick={() => setInsertTarget(null)}
+                  className="flex-1 px-3 py-2 rounded-xl nm-btn text-[12px] text-[var(--outline)]"
                 >
                   {t('quickAi.cancel')}
                 </button>
@@ -2344,6 +2497,7 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
             </div>
           </div>
         )}
+
       </div>
     </div>
   );

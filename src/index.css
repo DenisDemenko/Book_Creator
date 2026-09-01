@@ -985,13 +985,50 @@
   position: absolute;
   top: -0.6em;
   left: 0.8em;
-  padding: 0.1em 0.6em;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  padding: 0.1em 0.35em 0.1em 0.6em;
   background: #1e293b;
   border: 1px solid rgba(245, 158, 11, 0.5);
   border-radius: 999px;
   font-size: 10px;
   color: #fbbf24;
   user-select: none;
+}
+/* Значок ⊘ — відхилення доповнення ШІ (AiDraftBlockNode.tsx).
+   У спокої приглушений: він живе на мітці, яку письменник бачить під час
+   читання власного тексту, і не має перетягувати на себе увагу з прози.
+   Червоним стає лише під курсором — у мить, коли рука вже на ньому й
+   намір є, а не постійно, бо постійний червоний читався б як помилка
+   в тексті. Площа натискання більша за саму іконку: 13 px промахуються
+   на дотику. */
+.nova-manuscript-editor .nova-ai-draft-reject {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35em;
+  height: 1.35em;
+  margin: -0.2em 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(251, 191, 36, 0.55);
+  cursor: pointer;
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+.nova-manuscript-editor .nova-ai-draft-reject:hover {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.16);
+}
+.nova-manuscript-editor .nova-ai-draft-reject:focus-visible {
+  outline: 2px solid #f87171;
+  outline-offset: 1px;
+  color: #f87171;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nova-manuscript-editor .nova-ai-draft-reject { transition: none; }
 }
 .nova-manuscript-editor .nova-ai-draft p:last-child {
   margin-bottom: 0;

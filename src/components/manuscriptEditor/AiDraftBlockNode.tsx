@@ -4,18 +4,20 @@ import { Node, mergeAttributes } from '@tiptap/core';
 import { Fragment } from '@tiptap/pm/model';
 import { NodeViewWrapper, NodeViewContent, ReactNodeViewRenderer } from '@tiptap/react';
 import type { ReactNodeViewProps } from '@tiptap/react';
-import { CheckCircle2 } from 'lucide-react';
+import { Ban, CheckCircle2 } from 'lucide-react';
 
 export interface AiDraftBlockOptions {
   /** Текст мітки над блоком (напр. «✨ AI-чернетка»). */
   label: string;
-  /** Текст єдиного пункту контекстного меню блоку. */
+  /** Текст пункту «прийняти» в контекстному меню блоку. */
   reviewLabel: string;
+  /** Текст пункту «відхилити» — і підказка значка ⊘ на мітці. */
+  rejectLabel: string;
 }
 
 const AiDraftBlockView: React.FC<ReactNodeViewProps> = ({ node, getPos, editor, extension }) => {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const { label, reviewLabel } = extension.options as AiDraftBlockOptions;
+  const { label, reviewLabel, rejectLabel } = extension.options as AiDraftBlockOptions;
 
   // Закриває меню при кліку/Esc поза ним — той самий патерн, що й фоновий
   // контекстне меню EditorView.tsx.
@@ -44,6 +46,32 @@ const AiDraftBlockView: React.FC<ReactNodeViewProps> = ({ node, getPos, editor, 
       .run();
   };
 
+  /**
+   * Відхилення доповнення: прибирає блок РАЗОМ із текстом.
+   *
+   * Це протилежність `markReviewed`, і різниця принципова. «Прийняти»
+   * лишає абзаци в книзі й лише знімає жовту позначку; «відхилити»
+   * означає, що автор не погодився — тоді текст ШІ не має лишатись у
+   * рукописі взагалі, інакше «відхилив» перетворилося б на «сховав
+   * підсвітку», і згенероване непомітно поїхало б у експорт.
+   *
+   * Видалення проходить звичайною транзакцією редактора, тож Ctrl+Z
+   * повертає блок — про це сказано в підказці значка. Модального
+   * підтвердження свідомо немає: автор відхиляє чернетки часто, і
+   * діалог на кожну зробив би роботу з ШІ важчою за неї саму.
+   */
+  const rejectDraft = () => {
+    const pos = getPos();
+    editor
+      .chain()
+      .focus()
+      .command(({ tr, dispatch }) => {
+        if (dispatch) tr.delete(pos, pos + node.nodeSize);
+        return true;
+      })
+      .run();
+  };
+
   return (
     <NodeViewWrapper
       as="div"
@@ -56,7 +84,28 @@ const AiDraftBlockView: React.FC<ReactNodeViewProps> = ({ node, getPos, editor, 
       }}
     >
       <div className="nova-ai-draft-label" contentEditable={false} suppressContentEditableWarning>
-        ✨ {label}
+        <span>✨ {label}</span>
+        {/*
+          Значок ⊘ на самій мітці, а не пункт меню. Прийняти доповнення
+          можна було й з контекстного меню, а відхилити — ніяк: автор
+          бачив жовтий блок і не мав видимого способу сказати «ні».
+          Значок навмисно малий і без підпису — він не має конкурувати
+          з текстом, лише бути на видноті, коли погляд уже на мітці.
+        */}
+        <button
+          type="button"
+          className="nova-ai-draft-reject"
+          title={`${rejectLabel} · Ctrl+Z поверне`}
+          aria-label={rejectLabel}
+          onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+          onClick={(e: React.MouseEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            rejectDraft();
+          }}
+        >
+          <Ban size={13} aria-hidden="true" />
+        </button>
       </div>
       <NodeViewContent />
       {menu &&
@@ -76,6 +125,17 @@ const AiDraftBlockView: React.FC<ReactNodeViewProps> = ({ node, getPos, editor, 
             >
               <CheckCircle2 size={14} className="text-amber-400 shrink-0" />
               {reviewLabel}
+            </button>
+            <button
+              type="button"
+              className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-slate-200 hover:bg-red-500/10"
+              onClick={() => {
+                rejectDraft();
+                setMenu(null);
+              }}
+            >
+              <Ban size={14} className="text-red-400 shrink-0" />
+              {rejectLabel}
             </button>
           </div>,
           document.body
@@ -100,7 +160,7 @@ export const AiDraftBlockNode = Node.create<AiDraftBlockOptions>({
   defining: true,
 
   addOptions() {
-    return { label: 'AI-чернетка', reviewLabel: '✓ Позначити переглянутим' };
+    return { label: 'AI-чернетка', reviewLabel: '✓ Позначити переглянутим', rejectLabel: 'Відхилити доповнення ШІ' };
   },
 
   parseHTML() {

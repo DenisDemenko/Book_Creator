@@ -59,6 +59,7 @@ import {
   PanelLeft,
   ExternalLink,
   MessageSquare,
+  MessagesSquare,
   Save,
   Languages,
   Globe,
@@ -173,6 +174,12 @@ interface EditorViewProps {
    */
   onOpenPromptConstructor?: (request: PromptConstructorRequest) => void;
   /**
+   * «Обговорити фрагмент у чаті»: передає виділений текст у AI-чат разом
+   * із підписом, звідки він узятий. Редактор не відкриває чат сам —
+   * власником обох (чату й книги) є App.tsx.
+   */
+  onDiscussInChat?: (text: string, where: string) => void;
+  /**
    * Лічильник, який App збільшує після «Зберегти й згенерувати» в
    * конструкторі. Редактор пам'ятає, за яким фото його викликали, і
    * запускає генерацію одразу — інакше автор мусив би закрити вікно й
@@ -204,6 +211,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
   pendingHighlight,
   onHighlightApplied,
   onOpenPromptConstructor,
+  onDiscussInChat,
   promptGenerateTick = 0,
 }) => {
   const { t } = useLanguage();
@@ -517,6 +525,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
       isGeneratingAiText,
       aiDraftLabel: t('editor.aiDraftLabel'),
       aiDraftReviewLabel: t('editor.aiDraftReviewLabel'),
+      aiDraftRejectLabel: t('editor.aiDraftRejectLabel'),
     }),
     PaginationPlugin.configure({
       getPageContentHeightMm,
@@ -535,6 +544,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
         isGeneratingAiText,
         aiDraftLabel: 'AI draft',
         aiDraftReviewLabel: '✓ Mark as reviewed',
+        aiDraftRejectLabel: 'Reject AI addition',
       }
     ),
     PaginationPlugin.configure({ getPageContentHeightMm, getVerticalMarginsMm }),
@@ -1086,6 +1096,35 @@ export const EditorView: React.FC<EditorViewProps> = ({
   const hasUsableSelection = (): boolean => {
     const source = getSelectionSource();
     return Boolean(source && source.text.length >= 40);
+  };
+
+  /**
+   * Для обговорення межа інша, ніж для генерації.
+   *
+   * Дописати абзац за трьома словами не можна — моделі нема від чого
+   * відштовхнутись, тому там мінімум 40 знаків. А от спитати «чи не надто
+   * різкий цей перехід?» можна й про півречення: у розмові автор сам
+   * пояснює, що його турбує. Спільна межа зробила б одну з двох функцій
+   * гіршою без причини.
+   */
+  const hasFragmentToDiscuss = (): boolean => {
+    const source = getSelectionSource();
+    return Boolean(source && source.text.length > 0);
+  };
+
+  /**
+   * Передає виділене в чат. Підпис «звідки» збирається тут, а не в чаті:
+   * саме редактор знає, яка глава й розділ зараз відкриті, і саме цього
+   * контексту бракує в розмові, коли автор через десять реплік уже не
+   * пам'ятає, про який шматок ішлося.
+   */
+  const discussSelectionInChat = () => {
+    const source = getSelectionSource();
+    if (!source || !onDiscussInChat) return;
+    const chapter = book.chapters.find((c) => c.id === activeChapterId);
+    const section = chapter?.sections.find((sc) => sc.id === activeSectionId);
+    const where = [chapter?.title, section?.title].filter(Boolean).join(' → ');
+    onDiscussInChat(source.text, where);
   };
 
   const [selectionAiBusy, setSelectionAiBusy] = useState<1 | 2 | 3 | null>(null);
@@ -4681,6 +4720,24 @@ export const EditorView: React.FC<EditorViewProps> = ({
             <ImagePlus className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
             <span className="flex-1 text-slate-200">{t('editor.contextMenuInsertImage')}</span>
           </button>
+
+          {/* Обговорити фрагмент у чаті. Стоїть ПЕРЕД генерацією абзаців
+              навмисно: спершу «поговорити про текст», потім «дописати
+              текст» — це порядок від легшої дії до тієї, що змінює книгу. */}
+          {onDiscussInChat && (
+            <button
+              onClick={() => {
+                setContextMenu(null);
+                discussSelectionInChat();
+              }}
+              disabled={!hasFragmentToDiscuss()}
+              className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-white/[0.06] text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              title={hasFragmentToDiscuss() ? undefined : t('editor.discussInChatNoSelection')}
+            >
+              <MessagesSquare className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span className="flex-1 text-slate-200">{t('editor.contextMenuDiscussInChat')}</span>
+            </button>
+          )}
 
           {/* Абзац(и) за виділеним фрагментом — розгортається вибором кількості.
               Вимкнений, поки виділення немає: інакше пункт обіцяв би дію, яка
