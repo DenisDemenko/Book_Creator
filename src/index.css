@@ -1086,3 +1086,16 @@
   min-height: 10px !important;
   overflow: hidden;
 }
+
+/* «Курсор-фокус на абзаці» — приглушує решту тексту розділу, лишаючи
+   чітким лише абзац із курсором (FocusParagraphPlugin.ts). Клас
+   ставиться на КОЖЕН нефокусний верхньорівневий блок (Decoration.node),
+   тож саме тут, а не інлайн-стилем у плагіні, живе сама стилістика —
+   легше підлаштувати під тему пізніше, не чіпаючи логіку плагіна. */
+.nova-focus-dimmed {
+  opacity: 0.32;
+  transition: opacity 0.25s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nova-focus-dimmed { transition: none; }
+}

@@ -4,6 +4,7 @@ import { FontSpanMark } from './FontSpanMark';
 import { FontSizeMark } from './FontSizeMark';
 import { WrappedImageNode, type WrappedImageOptions } from './WrappedImageNode';
 import { AiDraftBlockNode } from './AiDraftBlockNode';
+import { FocusParagraphPlugin } from './FocusParagraphPlugin';
 
 export interface ManuscriptAiTextOptions {
   onRequestAiText?: WrappedImageOptions['onRequestAiText'];
@@ -23,7 +24,13 @@ export function buildManuscriptExtensions(
   resolveImageUrl: (id: string) => string | undefined,
   getPageContentWidthMm: () => number,
   placeholder: string,
-  aiText: ManuscriptAiTextOptions
+  aiText: ManuscriptAiTextOptions,
+  /**
+   * Необов'язково (сумісність зі старими викликами): читається заново при
+   * кожній транзакції ProseMirror, а не один раз при побудові масиву
+   * розширень — див. коментар у FocusParagraphPlugin.ts.
+   */
+  isFocusParagraphModeEnabled?: () => boolean
 ) {
   return [
     StarterKit.configure({
@@ -55,5 +62,9 @@ export function buildManuscriptExtensions(
       rejectLabel: aiText.aiDraftRejectLabel,
     }),
     Placeholder.configure({ placeholder }),
+    FocusParagraphPlugin.configure({
+      enabled: isFocusParagraphModeEnabled || (() => false),
+      dimClass: 'nova-focus-dimmed',
+    }),
   ];
 }

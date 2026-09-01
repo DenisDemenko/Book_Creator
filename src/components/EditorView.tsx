@@ -83,7 +83,8 @@ import {
   Spline,
   Timer,
   ZoomIn,
-  ZoomOut
+  ZoomOut,
+  Focus
 } from 'lucide-react';
 import { 
   Book, 
@@ -537,14 +538,41 @@ export const EditorView: React.FC<EditorViewProps> = ({
     return idx === -1 ? 1 : idx + 1;
   }, []);
 
+  /**
+   * «Курсор-фокус на абзаці» — приглушує решту тексту розділу, лишаючи
+   * чітким лише абзац із курсором (FocusParagraphPlugin.ts). Ref поруч
+   * зі станом — той самий підхід, що й bookRef/activeSectionIdRef вище:
+   * масив розширень редактора збирається ОДИН РАЗ (useRef([...]).current
+   * нижче), тож сам плагін читає перемикач через `.current` рефа, а не
+   * замкнене значення `boolean`, інакше пізніша зміна тогла ніколи не
+   * дійшла б до вже створеного плагіна.
+   */
+  const [focusParagraphMode, setFocusParagraphMode] = usePersistentState<boolean>('nova_editor_focusParagraphMode', false);
+  const focusParagraphModeRef = useRef(focusParagraphMode);
+  useEffect(() => {
+    focusParagraphModeRef.current = focusParagraphMode;
+    // Тогл сам по собі — не транзакція ProseMirror (курсор і документ не
+    // змінились), тож без примусового no-op dispatch плагін не
+    // перерахував би декорації, поки автор реально не поворухне курсор.
+    uaEditor?.view.dispatch(uaEditor.state.tr);
+    enEditor?.view.dispatch(enEditor.state.tr);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusParagraphMode]);
+
   const uaManuscriptExtensions = useRef([
-    ...buildManuscriptExtensions(resolveImageUrl, getPageContentWidthMm, t('editor.writePlaceholder'), {
-      onRequestAiText: onRequestAiTextUa,
-      isGeneratingAiText,
-      aiDraftLabel: t('editor.aiDraftLabel'),
-      aiDraftReviewLabel: t('editor.aiDraftReviewLabel'),
-      aiDraftRejectLabel: t('editor.aiDraftRejectLabel'),
-    }),
+    ...buildManuscriptExtensions(
+      resolveImageUrl,
+      getPageContentWidthMm,
+      t('editor.writePlaceholder'),
+      {
+        onRequestAiText: onRequestAiTextUa,
+        isGeneratingAiText,
+        aiDraftLabel: t('editor.aiDraftLabel'),
+        aiDraftReviewLabel: t('editor.aiDraftReviewLabel'),
+        aiDraftRejectLabel: t('editor.aiDraftRejectLabel'),
+      },
+      () => focusParagraphModeRef.current
+    ),
     PaginationPlugin.configure({
       getPageContentHeightMm,
       getVerticalMarginsMm,
@@ -563,7 +591,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
         aiDraftLabel: 'AI draft',
         aiDraftReviewLabel: '✓ Mark as reviewed',
         aiDraftRejectLabel: 'Reject AI addition',
-      }
+      },
+      () => focusParagraphModeRef.current
     ),
     PaginationPlugin.configure({ getPageContentHeightMm, getVerticalMarginsMm }),
   ]).current;
@@ -1819,6 +1848,22 @@ export const EditorView: React.FC<EditorViewProps> = ({
           </div>
         );
       })()}
+
+      {/* «Курсор-фокус на абзаці» — приглушує решту тексту розділу, лишаючи
+          чітким лише абзац із курсором (FocusParagraphPlugin.ts). Простий
+          тогл, а не попап: тут нема параметрів для вибору, лише
+          увімкнено/вимкнено. */}
+      <button
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => setFocusParagraphMode((v) => !v)}
+        className={`p-1 rounded-md ml-1 transition-colors ${
+          focusParagraphMode ? 'bg-amber-500 text-slate-950' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+        }`}
+        title={t('editor.focusParagraphTitle')}
+        aria-label={t('editor.focusParagraphTitle')}
+      >
+        <Focus className="w-3.5 h-3.5" />
+      </button>
 
       {/* Озвучення виділеного фрагмента прямо з панелі — раніше та сама
           дія жила лише в контекстному меню (правий клік). */}

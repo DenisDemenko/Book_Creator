@@ -325,6 +325,7 @@ export const editor = {
     sprintDoneToast: 'Спринт завершено! Написано слів: {n}.',
     fullscreenZoomIn: 'Збільшити сторінку',
     fullscreenZoomOut: 'Зменшити сторінку',
+    focusParagraphTitle: 'Курсор-фокус на абзаці (приглушити решту тексту)',
   },
   en: {
     tocMobile: 'Contents ({n})',
@@ -651,5 +652,6 @@ export const editor = {
     sprintDoneToast: 'Sprint finished! Words written: {n}.',
     fullscreenZoomIn: 'Zoom the page in',
     fullscreenZoomOut: 'Zoom the page out',
+    focusParagraphTitle: 'Focus on the current paragraph (dim the rest)',
   },
 };
