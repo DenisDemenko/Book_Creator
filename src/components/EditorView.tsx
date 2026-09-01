@@ -4908,6 +4908,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
       {editingCharacter && (
         <CharacterEditModal
           character={editingCharacter}
+          book={book}
           isOpen={!!editingCharacter}
           onClose={() => setEditingCharacter(null)}
           onSave={handleSaveCharacterDossier}

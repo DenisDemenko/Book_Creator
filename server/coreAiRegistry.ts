@@ -64,6 +64,12 @@ import {
   diagnSystemInstruction,
   factoryDiagnTemplate,
 } from './diagnPrompt';
+import {
+  characterConsistencySystemInstruction,
+  factoryCharacterConsistencyTemplate,
+  renderCharacterConsistencySystemTemplate,
+  renderCharacterConsistencyUserTemplate,
+} from './characterConsistencyPrompt';
 
 /** Ключ у таблиці `meta`, під яким лежить ЄДИНИЙ адмінський шар усіх модулів ядра. */
 export const CORE_PROMPT_TEMPLATES_META_KEY = 'prompt_templates_core_admin';
@@ -84,6 +90,7 @@ export const CORE_MODULE_KEYS = [
   'diagnStyle',
   'diagnStructure',
   'diagnCompetency',
+  'characterConsistency',
 ] as const;
 
 export type CoreModuleKey = (typeof CORE_MODULE_KEYS)[number];
@@ -139,6 +146,11 @@ export const CORE_MODULE_PLACEHOLDERS: Record<CoreModuleKey, string[]> = {
   diagnStyle: ['{НАЗВА_КНИГИ}', '{ЖАНР}', '{ФРАГМЕНТ}', '{МОВА}'],
   diagnStructure: ['{НАЗВА_КНИГИ}', '{ЖАНР}', '{ФРАГМЕНТ}', '{МОВА}'],
   diagnCompetency: ['{НАЗВА_КНИГИ}', '{ЖАНР}', '{ФРАГМЕНТ}', '{КОМПЕТЕНЦІЇ}', '{МОВА}'],
+  characterConsistency: [
+    '{ІМ_Я}', '{ПРІЗВИЩЕ}', '{ПСЕВДО}', '{РОЛЬ}', '{ВІК}', '{СТАТЬ}', '{ПРОФЕСІЯ}',
+    '{ЗОВНІШНІСТЬ}', '{ХАРАКТЕР}', '{БІОГРАФІЯ}', '{СТОСУНКИ}', '{ПАТЕРНИ_ПОВЕДІНКИ}',
+    '{ЗГАДУВАННЯ_У_КНИЗІ}', '{МОВА}',
+  ],
 };
 
 /** Чи модуль повертає JSON за жорсткою схемою (схема — readonly-текст у конструкторі, не редагується). */
@@ -155,6 +167,7 @@ export const CORE_MODULE_HAS_JSON_SCHEMA: Record<CoreModuleKey, boolean> = {
   diagnStyle: true,
   diagnStructure: true,
   diagnCompetency: true,
+  characterConsistency: true,
 };
 
 /**
@@ -231,6 +244,8 @@ export function factoryCoreTemplate(module: CoreModuleKey): CorePromptTemplate {
       return { system: diagnSystemInstruction('structure'), user: factoryDiagnTemplate('structure') };
     case 'diagnCompetency':
       return { system: diagnSystemInstruction('competency'), user: factoryDiagnTemplate('competency') };
+    case 'characterConsistency':
+      return { system: characterConsistencySystemInstruction(), user: factoryCharacterConsistencyTemplate() };
   }
 }
 
@@ -406,5 +421,29 @@ export function renderCoreTemplate(
           sampleText: fields.sampleText || fields.selection,
         }),
       };
+    case 'characterConsistency': {
+      const values = {
+        name: fields.characterName,
+        surname: fields.characterSurname,
+        alias: fields.characterAlias,
+        role: fields.characterRole,
+        age: fields.characterAge,
+        gender: fields.characterGender,
+        profession: fields.characterProfession,
+        appearance: fields.appearanceJson,
+        personality: fields.personalityJson,
+        biography: fields.biography,
+        relationships: fields.relationshipsJson,
+        behaviorPatterns: fields.behaviorPatterns,
+        mentions: fields.mentions || '',
+        // {МОВА} — той самий плейсхолдер-токен, що й у модулів вибору мови
+        // (`selectionToParagraphs`), тому й ключ форми той самий ('language').
+        locale: fields.language,
+      };
+      return {
+        system: renderCharacterConsistencySystemTemplate(template.system, values),
+        user: renderCharacterConsistencyUserTemplate(template.user, values),
+      };
+    }
   }
 }

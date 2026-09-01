@@ -2,13 +2,9 @@ import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import type { Node as PMNode } from '@tiptap/pm/model';
+import { buildNameEntries, buildMentionRegex, type CharacterMentionEntry } from '../../utils/characterMentions';
 
-export interface CharacterMentionEntry {
-  id: string;
-  name: string;
-  surname?: string;
-  alias?: string;
-}
+export type { CharacterMentionEntry };
 
 export interface CharacterMentionOptions {
   /**
@@ -29,40 +25,15 @@ export interface CharacterMentionOptions {
 /** Публічний, щоб EditorView.tsx міг примусово освіжити декорації через setMeta — напр., коли книга.characters змінився ЗЗОВНІ (редагування у вкладці «Персонажі»), а не через власну транзакцію ProseMirror. */
 export const characterMentionKey = new PluginKey('novaCharacterMention');
 
-/** Екранує спецсимволи регулярного виразу — імена персонажів можуть містити будь-що (лапки, дефіси). */
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 /**
- * Ім'я/прізвище/псевдонім/«Ім'я Прізвище» — кожен варіант мінімум 3
- * символи (коротші за 3 символи дають забагато випадкових збігів
- * усередині звичайних слів). Найдовші варіанти йдуть першими в
- * альтернації регулярного виразу: «Оксана Петренко» має зловитись раніше
- * за просто «Оксана» в тому самому місці тексту.
- */
-function buildNameEntries(characters: CharacterMentionEntry[]): { text: string; id: string }[] {
-  const entries: { text: string; id: string }[] = [];
-  const seen = new Set<string>();
-  for (const c of characters) {
-    const candidates = [c.name, c.surname, c.alias, c.name && c.surname ? `${c.name} ${c.surname}` : undefined].filter(
-      (v): v is string => Boolean(v && v.trim().length >= 3)
-    );
-    for (const raw of candidates) {
-      const text = raw.trim();
-      // Той самий рядок від двох різних персонажів (тезки) — залишаємо
-      // ПЕРШОГО в списку книги, а не мовчки переписуємо; передбачувано,
-      // хай і не ідеально для рідкісного випадку тезок.
-      if (seen.has(text)) continue;
-      seen.add(text);
-      entries.push({ text, id: c.id });
-    }
-  }
-  entries.sort((a, b) => b.text.length - a.text.length);
-  return entries;
-}
-
-/**
+ * `buildNameEntries`/`escapeRegExp` тепер живуть у
+ * `src/utils/characterMentions.ts` — спільно з «Хранителем цілісності
+ * персонажа» (AI-аналіз по всій книзі, server-запит) та майбутніми
+ * фічами, яким теж потрібне «знайти кожну згадку цього персонажа» над
+ * СИРИМ рядком маркерів, а не над ProseMirror-документом. Тут лишається
+ * лише те, що специфічне саме для декорації в редакторі: прохід по
+ * doc.descendants і побудова DecorationSet.
+ *
  * Проходить усі текстові вузли документа й позначає декорацією кожне
  * входження імені персонажа як ОКРЕМЕ СЛОВО (межі `\p{L}\p{N}_` з обох
  * боків, юнікод-клас — бо звичайний `\w` у JS не охоплює кирилицю), щоб
@@ -72,8 +43,8 @@ function buildDecorations(doc: PMNode, characters: CharacterMentionEntry[], ment
   const entries = buildNameEntries(characters);
   if (entries.length === 0) return DecorationSet.empty;
 
-  const pattern = entries.map((e) => escapeRegExp(e.text)).join('|');
-  const regex = new RegExp(`(?<![\\p{L}\\p{N}_])(?:${pattern})(?![\\p{L}\\p{N}_])`, 'gu');
+  const regex = buildMentionRegex(entries);
+  if (!regex) return DecorationSet.empty;
   const idByText = new Map(entries.map((e) => [e.text, e.id]));
 
   const decorations: Decoration[] = [];

@@ -12,14 +12,36 @@ import {
   Shirt, 
   Heart, 
   Zap, 
-  Tag 
+  Tag,
+  ShieldCheck,
+  AlertTriangle,
 } from 'lucide-react';
-import { Character } from '../types';
+import { Character, Book } from '../types';
 import { normalizeCharacter } from '../utils/characterNormalize';
 import { useLanguage } from '../i18n/LanguageContext';
+import { collectCharacterMentions, formatMentionsForPrompt } from '../utils/characterMentions';
+
+/** Одна знахідка «Хранителя цілісності» — форма відповіді сервера (server/characterConsistencyPrompt.ts), продубльована тут: клієнт не імпортує типи з server/. */
+interface ConsistencyFinding {
+  severity: 'low' | 'medium' | 'high';
+  field: string;
+  location: string;
+  quote: string;
+  issue: string;
+}
+interface ConsistencyResult {
+  summary: string;
+  findings: ConsistencyFinding[];
+}
+const CONSISTENCY_SEVERITY_CLS: Record<ConsistencyFinding['severity'], string> = {
+  low: 'border-slate-600 bg-slate-700/40 text-slate-300',
+  medium: 'border-amber-500/40 bg-amber-500/10 text-amber-200',
+  high: 'border-red-500/40 bg-red-500/10 text-red-200',
+};
 
 interface CharacterEditModalProps {
   character: Character;
+  book: Book;
   isOpen: boolean;
   onClose: () => void;
   onSave: (updatedCharacter: Character) => void;
@@ -27,6 +49,7 @@ interface CharacterEditModalProps {
 
 export const CharacterEditModal: React.FC<CharacterEditModalProps> = ({
   character,
+  book,
   isOpen,
   onClose,
   onSave,
@@ -39,7 +62,7 @@ export const CharacterEditModal: React.FC<CharacterEditModalProps> = ({
   // джерела) — без нормалізації p.strengths.filter(...) і подібні виклики
   // нижче кидають TypeError, крах підхоплює ErrorBoundary.
   const [charData, setCharData] = useState<Character>(normalizeCharacter({ ...character }));
-  const [activeTab, setActiveTab] = useState<'general' | 'appearance' | 'psychology' | 'biography'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'appearance' | 'psychology' | 'biography' | 'consistency'>('general');
   const [newTag, setNewTag] = useState<string>('');
   const [newStrength, setNewStrength] = useState<string>('');
   const [newWeakness, setNewWeakness] = useState<string>('');
@@ -49,6 +72,59 @@ export const CharacterEditModal: React.FC<CharacterEditModalProps> = ({
   // AI Art generation in modal
   const [isGeneratingArt, setIsGeneratingArt] = useState<boolean>(false);
   const [selectedArtModel, setSelectedArtModel] = useState<'nano-banana-2-lite' | 'nano-banana-2' | 'nano-banana-pro'>('nano-banana-2');
+
+  // «Хранитель цілісності персонажа» — крос-книжкова перевірка суперечностей
+  const [isCheckingConsistency, setIsCheckingConsistency] = useState<boolean>(false);
+  const [consistencyResult, setConsistencyResult] = useState<ConsistencyResult | null>(null);
+  const [consistencyError, setConsistencyError] = useState<string | null>(null);
+
+  const handleCheckConsistency = async () => {
+    setIsCheckingConsistency(true);
+    setConsistencyError(null);
+    setConsistencyResult(null);
+    try {
+      const { mentions, totalFound } = collectCharacterMentions(book, {
+        id: charData.id,
+        name: charData.name,
+        surname: charData.surname,
+        alias: charData.alias,
+      });
+      if (totalFound === 0) {
+        setConsistencyError(t('characterEditModal.consistencyNoMentions'));
+        return;
+      }
+      const mentionsText = formatMentionsForPrompt(mentions);
+      const relationshipsSummary = (charData.relationships || [])
+        .map((r) => {
+          const targetChar = book.characters.find((c) => c.id === r.targetCharacterId);
+          const targetName = targetChar ? `${targetChar.name} ${targetChar.surname || ''}`.trim() : r.targetCharacterId;
+          return `${targetName} — ${r.type}${r.description ? `: ${r.description}` : ''}`;
+        })
+        .join('\n');
+
+      const res = await fetch('/api/ai/character-consistency', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookId: book.id,
+          character: charData,
+          relationshipsSummary,
+          mentions: mentionsText,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setConsistencyError(data?.error || t('characterEditModal.consistencyError'));
+        return;
+      }
+      setConsistencyResult(data.result);
+    } catch (err) {
+      console.error('Error checking character consistency:', err);
+      setConsistencyError(t('characterEditModal.consistencyError'));
+    } finally {
+      setIsCheckingConsistency(false);
+    }
+  };
 
   const handleGenerateArtInModal = async () => {
     setIsGeneratingArt(true);
@@ -180,6 +256,18 @@ export const CharacterEditModal: React.FC<CharacterEditModalProps> = ({
           >
             <Sparkles className="w-3.5 h-3.5" />
             <span>{t('characterEditModal.tabBiography')}</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('consistency')}
+            className={`pb-2.5 px-3 text-xs font-semibold border-b-2 transition-all whitespace-nowrap flex items-center gap-1.5 ${
+              activeTab === 'consistency'
+                ? 'border-amber-400 text-amber-300'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>{t('characterEditModal.tabConsistency')}</span>
           </button>
         </div>
 
@@ -591,6 +679,70 @@ export const CharacterEditModal: React.FC<CharacterEditModalProps> = ({
                 />
                 <p className="text-[10px] text-slate-500 mt-1">{t('characterEditModal.behaviorPatternsHint')}</p>
               </div>
+            </div>
+          )}
+
+          {/* 5. CONSISTENCY GUARDIAN TAB */}
+          {activeTab === 'consistency' && (
+            <div className="space-y-4">
+              <p className="text-slate-400 leading-relaxed">{t('characterEditModal.consistencyIntro')}</p>
+
+              <button
+                type="button"
+                onClick={handleCheckConsistency}
+                disabled={isCheckingConsistency}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold transition-all shadow-sm active:scale-95 disabled:opacity-50"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                <span>{isCheckingConsistency ? t('characterEditModal.consistencyChecking') : t('characterEditModal.consistencyCheckBtn')}</span>
+              </button>
+
+              {consistencyError && (
+                <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-200 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{consistencyError}</span>
+                </div>
+              )}
+
+              {consistencyResult && (
+                <div className="space-y-3">
+                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-800">
+                    <h4 className="text-slate-400 font-semibold mb-1">{t('characterEditModal.consistencySummaryTitle')}</h4>
+                    <p className="text-slate-200 leading-relaxed">{consistencyResult.summary}</p>
+                  </div>
+
+                  <div>
+                    <h4 className="text-slate-400 font-semibold mb-2">{t('characterEditModal.consistencyFindingsTitle')}</h4>
+                    {consistencyResult.findings.length === 0 ? (
+                      <p className="text-slate-500">{t('characterEditModal.consistencyNoFindings')}</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {consistencyResult.findings.map((f, idx) => (
+                          <div key={idx} className={`p-3 rounded-xl border ${CONSISTENCY_SEVERITY_CLS[f.severity]}`}>
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <span className="font-bold">{f.field}</span>
+                              <span className="px-2 py-0.5 rounded-md border border-current/40 text-[10px] uppercase tracking-wide">
+                                {t(`characterEditModal.consistencySeverity${f.severity.charAt(0).toUpperCase()}${f.severity.slice(1)}`)}
+                              </span>
+                            </div>
+                            <p className="text-slate-300 mb-1">{f.issue}</p>
+                            {f.location && (
+                              <p className="text-[11px] text-slate-500">
+                                <span className="font-semibold">{t('characterEditModal.consistencyLocationPrefix')}</span> {f.location}
+                              </p>
+                            )}
+                            {f.quote && (
+                              <p className="text-[11px] text-slate-500 italic">
+                                <span className="font-semibold not-italic">{t('characterEditModal.consistencyQuotePrefix')}</span> «{f.quote}»
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

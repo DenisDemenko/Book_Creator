@@ -723,6 +723,7 @@ const CORE_MODULE_LABELS: Record<CoreModuleKey, string> = {
   diagnStyle: 'Діагностика: стиль (/diagn)',
   diagnStructure: 'Діагностика: структура (/diagn)',
   diagnCompetency: 'Діагностика: компетенції (/diagn)',
+  characterConsistency: 'Хранитель цілісності персонажа',
 };
 
 const CORE_MODULE_DESCRIPTIONS: Record<CoreModuleKey, string> = {
@@ -743,6 +744,8 @@ const CORE_MODULE_DESCRIPTIONS: Record<CoreModuleKey, string> = {
     'Підмодуль /diagn: драматургія — 36 ситуацій Польті та стадії шляху героя. Повертає архетип, позицію на дузі й відхилення з градацією severity.',
   diagnCompetency:
     'Підмодуль /diagn: компетенції автора за картою навичок платформи. Осі радара задані кодом і не залежать від відповіді моделі — інакше діагностики різних місяців не порівняти між собою.',
+  characterConsistency:
+    'Картка персонажа + уривки з тексту книги, де він згадується → список суперечностей (зовнішність, вік, стосунки, манера поведінки). Схема відповіді не редагується.',
 };
 
 /** Плейсхолдер → поле тестових вхідних даних. Одна мапа обслуговує форму й підказки одразу для всіх модулів. */
@@ -775,6 +778,14 @@ const CORE_FIELD_DEFS: Record<string, { key: string; label: string; textarea?: b
   '{АУДИТОРІЯ}': { key: 'audience', label: 'Цільова аудиторія', placeholder: 'дорослі, 25+' },
   '{ФОРМАТ_СТОРІНКИ}': { key: 'pageFormat', label: 'Формат сторінки', placeholder: '152×229 мм (6×9″)' },
   '{ШРИФТИ}': { key: 'availableFonts', label: 'Доступні гарнітури (через кому)', textarea: true },
+  '{ПСЕВДО}': { key: 'characterAlias', label: 'Псевдонім/прізвисько персонажа' },
+  '{ВІК}': { key: 'characterAge', label: 'Вік персонажа' },
+  '{СТАТЬ}': { key: 'characterGender', label: 'Стать персонажа' },
+  '{ХАРАКТЕР}': { key: 'personalityJson', label: 'Характер (JSON)', textarea: true },
+  '{БІОГРАФІЯ}': { key: 'biography', label: 'Біографія персонажа', textarea: true },
+  '{СТОСУНКИ}': { key: 'relationshipsJson', label: 'Стосунки (JSON)', textarea: true },
+  '{ПАТЕРНИ_ПОВЕДІНКИ}': { key: 'behaviorPatterns', label: 'Заявлені патерни поведінки', textarea: true },
+  '{ЗГАДУВАННЯ_У_КНИЗІ}': { key: 'mentions', label: 'Уривки з тексту книги (згадування персонажа)', textarea: true },
 };
 
 /**

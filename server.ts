@@ -89,6 +89,11 @@ import {
 } from './server/coreAiRegistry';
 import { clampDesignPatch, parseDesignResponse } from './server/designLayoutPrompt';
 import {
+  parseConsistencyResponse,
+  normalizeConsistencyResult,
+  MAX_MENTIONS_CHARS,
+} from './server/characterConsistencyPrompt';
+import {
   readCoreModuleModels,
   setCoreModuleModel,
   resolveModuleModelId,
@@ -1950,6 +1955,96 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
         return res.status(err.status).json({ error: err.message });
       }
       res.status(500).json({ error: err?.message || 'Не вдалося підібрати оформлення.', kind: 'unknown' });
+    }
+  });
+
+  /**
+   * «Хранитель цілісності персонажа» — картка персонажа + уривки з тексту
+   * книги, де він згадується → список суперечностей. За вагою — як
+   * `/design`: без окремого сховища, кешу чи рейт-ліміту (на відміну від
+   * `/diagn`, у якого є спец. ТЗ) — це самостійний, необов'язковий
+   * інструмент автора, не частина офіційного протоколу діагностики.
+   *
+   * Клієнт сам збирає уривки згадувань (src/utils/characterMentions.ts) і
+   * шле вже готовий текст у `mentions` — сервер лише перевіряє межу
+   * символів (той самий принцип 413, що і в /diagn: автор має знати, що
+   * дані не влізли, а не отримати тихо обрізаний результат).
+   */
+  app.post('/api/ai/character-consistency', requirePermission('canUseAi'), async (req, res) => {
+    const { bookId, character, relationshipsSummary, mentions, locale, modelId } = req.body || {};
+
+    if (!character || typeof character !== 'object') {
+      return res.status(400).json({ error: 'Потрібні дані картки персонажа.', kind: 'bad_input' });
+    }
+    const mentionsText = typeof mentions === 'string' ? mentions.trim() : '';
+    if (mentionsText.length < 50) {
+      return res.status(400).json({
+        error: 'У тексті книги замало згадувань цього персонажа для перевірки.',
+        kind: 'not_enough_text',
+      });
+    }
+    if (mentionsText.length > MAX_MENTIONS_CHARS) {
+      return res.status(413).json({
+        error: `Забагато тексту згадувань (${mentionsText.length} символів, максимум ${MAX_MENTIONS_CHARS}).`,
+        kind: 'too_much_text',
+      });
+    }
+
+    const preferredModelId = (await resolveModuleModelId('characterConsistency', modelId)) || undefined;
+    const resolved = await resolveTextEngineOrFail(req, res, preferredModelId, 'хранитель цілісності персонажа');
+    if (!resolved) return;
+    const { engine, resolvedModelId, userKey } = resolved;
+
+    try {
+      const adminLayer = await loadCoreAdminLayer();
+      const template = resolveCoreTemplate('characterConsistency', adminLayer);
+      const rendered = renderCoreTemplate('characterConsistency', template, {
+        characterName: character.name,
+        characterSurname: character.surname,
+        characterAlias: character.alias,
+        characterRole: character.role,
+        characterAge: character.age != null ? String(character.age) : undefined,
+        characterGender: character.gender,
+        characterProfession: character.profession,
+        appearanceJson: JSON.stringify(character.appearance || {}),
+        personalityJson: JSON.stringify(character.personality || {}),
+        biography: typeof character.biography === 'string' ? character.biography : '',
+        relationshipsJson: typeof relationshipsSummary === 'string' ? relationshipsSummary : '',
+        behaviorPatterns: Array.isArray(character.behaviorPatterns) ? character.behaviorPatterns.join('; ') : '',
+        mentions: mentionsText,
+        language: locale,
+      });
+
+      const result = await generateAiText({
+        engine,
+        modelId: resolvedModelId,
+        prompt: rendered.user,
+        systemInstruction: rendered.system,
+        apiKeyOverride: userKey,
+        json: true,
+        req,
+        label: 'Хранитель цілісності персонажа',
+        bookId,
+      });
+
+      let parsed: any;
+      try {
+        parsed = parseConsistencyResponse(result.text);
+      } catch {
+        return res.status(502).json({
+          error: 'Модель повернула не JSON — спробуйте ще раз або оберіть іншу модель у налаштуваннях модуля.',
+          kind: 'bad_model_output',
+        });
+      }
+
+      const consistency = normalizeConsistencyResult(parsed);
+      res.json({ result: consistency, engine, modelId: resolvedModelId, timestamp: new Date().toISOString() });
+    } catch (err: any) {
+      console.error('Error in /api/ai/character-consistency:', err?.message || err);
+      if (err instanceof ChatProviderError) {
+        return res.status(err.status).json({ error: err.message });
+      }
+      res.status(500).json({ error: err?.message || 'Не вдалося перевірити цілісність персонажа.', kind: 'unknown' });
     }
   });
 
