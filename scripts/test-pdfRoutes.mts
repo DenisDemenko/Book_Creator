@@ -1,0 +1,168 @@
+/**
+ * Наскрізний тест конвеєра публікації. Запуск: npm run test:pdf-routes
+ *
+ * Перевіряє те, чого не покриє жоден модульний тест: що ланки зʼєднані в
+ * правильному порядку. Файл шлеться ПІСЛЯ публікації — у зворотному
+ * порядку приймач віддав би 404, бо прикріплювати немає до чого. Саме такі
+ * помилки складання й дали чотири вади поспіль у записах #69-#74.
+ *
+ * Мережі нема: bridge-виклики перехоплюються підміною fetch, модель
+ * інжектується.
+ */
+const DIR = '/tmp/nova-pdfroutes-test';
+process.env.DATA_DIR = DIR;
+process.env.DATABASE_PATH = `${DIR}/nova-studio.db`;
+process.env.USER_API_KEY_SECRET = 'test-secret-for-bridge-key';
+
+import fs from 'node:fs';
+fs.rmSync(DIR, { recursive: true, force: true });
+fs.mkdirSync(DIR, { recursive: true });
+
+const store = await import('../server/store');
+const bridge = await import('../server/marketplaceBridge');
+const routes = await import('../server/pdfRoutes');
+
+let pass = 0, fail = 0;
+const t = (n: string, c: boolean, e = '') => { c ? pass++ : fail++; console.log(`${c ? '  ✓' : '  ✗'} ${n}${e ? ' — ' + e : ''}`); };
+
+await store.initStore();
+await bridge.saveBridgeSettings({ url: 'https://api.example.test', key: 'bridge-secret' });
+
+const book = {
+  id: 'book-1',
+  title: 'Тестова книга конвеєра',
+  subtitle: 'Підзаголовок',
+  logline: 'Коротко про що',
+  synopsis: 'Довший опис книги для картки товару.',
+  genre: 'фантастика',
+  targetAudience: 'дорослі',
+  chapters: [
+    { title: 'Розділ 1', order: 1, sections: [{ title: 'Початок', order: 1, content: 'Текст розділу. '.repeat(50) }] },
+    { title: 'Розділ 2', order: 2, sections: [{ order: 1, content: 'Ще текст. '.repeat(40) }] },
+  ],
+  layoutConfig: {
+    formatPreset: 'A5', pageWidthMm: 148, pageHeightMm: 210,
+    margins: { topMm: 20, bottomMm: 22, insideMm: 18, outsideMm: 16, bleedMm: 0, mirrored: false },
+    typography: {
+      bodyFont: 'Georgia', headingsFont: 'Georgia', fontSizePt: 11, lineHeight: 1.45,
+      firstLineIndentMm: 5, paragraphSpacingMm: 0, textAlign: 'justify',
+      pageNumberPosition: 'bottom-center', showHeaders: false, showPageNumbers: true,
+      pageNumberStart: { mode: 'after-toc' },
+    },
+  },
+};
+
+// --- підміна мережі --------------------------------------------------------
+const calls: Array<{ url: string; method: string }> = [];
+const realFetch = globalThis.fetch;
+globalThis.fetch = (async (url: string, init: any = {}) => {
+  const u = String(url);
+  calls.push({ url: u, method: init?.method || 'GET' });
+  if (u.includes('/file')) {
+    return { ok: true, status: 201, text: async () => JSON.stringify({ attached: true, replaced: 0, media: { id: 'm1' } }) };
+  }
+  return {
+    ok: true, status: 200,
+    text: async () => JSON.stringify({ created: true, listing: { slug: 'testova-knyha-konveiera' } }),
+  };
+}) as never;
+
+// --- застосунок ------------------------------------------------------------
+const express = (await import('express')).default;
+let principal: any = { id: 'u-1', email: 'a@test.ua', role: 'admin', isGuest: false };
+let modelText = JSON.stringify({ pageSize: 'B5', baseFontSize: 12, designerNoteUk: 'Тому що проза' });
+let modelThrows = false;
+
+const app = express();
+app.use(express.json({ limit: '25mb' }));
+app.use((req: any, _res: any, next: any) => { req.principal = principal; next(); });
+routes.registerPdfRoutes(app, {
+  resolveEngine: () => 'gemini',
+  defaultModelId: 'stub-model',
+  loadAdminLayer: async () => ({}),
+  generateText: async () => {
+    if (modelThrows) throw new Error('провайдер недоступний');
+    return { text: modelText };
+  },
+});
+
+const server = app.listen(0);
+await new Promise((r) => server.once('listening', r));
+const port = (server.address() as any).port;
+// ВАЖЛИВО: власні запити тесту йдуть СПРАВЖНІМ fetch. Підмінений глобальний
+// обслуговує лише виклики мосту всередині застосунку — якби тест ходив ним
+// самим, він отримав би відповідь-заглушку замість відповіді свого ж сервера.
+const call = async (path: string, body: any) => {
+  const res = await realFetch(`http://127.0.0.1:${port}${path}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const type = res.headers.get('content-type') || '';
+  return {
+    status: res.status,
+    headers: res.headers,
+    data: type.includes('json') ? await res.json() : null,
+    buffer: type.includes('pdf') ? Buffer.from(await res.arrayBuffer()) : null,
+  };
+};
+
+console.log('Перегляд:');
+{
+  const r = await call('/api/admin/pdf/preview', { book, variant: 'code' });
+  t('віддає PDF, а не JSON', r.buffer !== null && r.buffer.subarray(0, 5).toString() === '%PDF-', String(r.status));
+  t('кількість сторінок у заголовку', Number(r.headers.get('x-pdf-pages')) > 0, r.headers.get('x-pdf-pages') || '');
+  t('пояснення макета передано', decodeURIComponent(r.headers.get('x-pdf-note') || '').includes('Верстка PDF'));
+
+  const bad = await call('/api/admin/pdf/preview', { variant: 'code' });
+  t('без книги → 400', bad.status === 400, String(bad.status));
+
+  principal = { ...principal, role: 'writer' };
+  const forbidden = await call('/api/admin/pdf/preview', { book, variant: 'code' });
+  t('не адміну → 403', forbidden.status === 403, String(forbidden.status));
+  principal = { ...principal, role: 'admin' };
+}
+
+console.log('\nМакет від моделі:');
+{
+  const r = await call('/api/admin/pdf/preview', { book, variant: 'design' });
+  t('PDF за макетом моделі зібрався', r.buffer?.subarray(0, 5).toString() === '%PDF-');
+  t('пояснення моделі дійшло', decodeURIComponent(r.headers.get('x-pdf-note') || '') === 'Тому що проза',
+    decodeURIComponent(r.headers.get('x-pdf-note') || ''));
+
+  modelText = 'вибачте, не можу';
+  const broken = await call('/api/admin/pdf/preview', { book, variant: 'design' });
+  t('не-JSON від моделі → 502, а не мовчазний заводський макет', broken.status === 502, String(broken.status));
+  t('порада взяти інший варіант у тексті', /макет із книги/.test(String(broken.data?.error)), String(broken.data?.error));
+  modelText = JSON.stringify({ pageSize: 'B5', baseFontSize: 12, designerNoteUk: 'Тому що проза' });
+
+  modelThrows = true;
+  const dead = await call('/api/admin/pdf/preview', { book, variant: 'design' });
+  t('відмова провайдера не валить процес', dead.status >= 400 && dead.status < 600, String(dead.status));
+  modelThrows = false;
+}
+
+console.log('\nПовний конвеєр:');
+{
+  calls.length = 0;
+  const r = await call('/api/admin/pdf/publish', { book, variant: 'code', priceMinor: 15000, sellerSlug: 'fusion-lab' });
+  t('успіх', r.status === 200, JSON.stringify(r.data)?.slice(0, 160));
+  t('лістинг опубліковано', r.data?.published?.slug === 'testova-knyha-konveiera', String(r.data?.published?.slug));
+  t('файл прикріплено', r.data?.attached?.attached === true);
+  t('сторінки полічені', r.data?.pdf?.pageCount > 0, String(r.data?.pdf?.pageCount));
+  t('варіант макета названо', r.data?.layout?.variant === 'code');
+
+  const publishCall = calls.findIndex((c) => c.url.endsWith('/bridge/books'));
+  const fileCall = calls.findIndex((c) => c.url.includes('/file'));
+  t('публікація ПЕРЕД надсиланням файла', publishCall >= 0 && fileCall > publishCall,
+    `публікація #${publishCall}, файл #${fileCall}`);
+
+  const noPrice = await call('/api/admin/pdf/publish', { book, variant: 'code' });
+  t('без ціни → 400', noPrice.status === 400, String(noPrice.status));
+
+  const noId = await call('/api/admin/pdf/publish', { book: { title: 'Без id' }, priceMinor: 100 });
+  t('без id книги → 400', noId.status === 400, String(noId.status));
+}
+
+server.close();
+globalThis.fetch = realFetch;
+console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);
+if (fail > 0) process.exit(1);

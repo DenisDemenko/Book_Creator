@@ -47,6 +47,7 @@ import { registerApiKeysRoutes } from './server/apiKeysRoutes';
 import { registerExpressRoutes } from './server/expressRoutes';
 import { registerDiagnRoutes } from './server/diagnRoutes';
 import { registerMarketRoutes } from './server/marketRoutes';
+import { registerPdfRoutes } from './server/pdfRoutes';
 import { registerNarrationRoutes } from './server/narrationRoutes';
 import { registerPublishingRoutes } from './server/publishingRoutes';
 import { requireImageQuota, requirePlanAtLeast, checkChatQuota, resolveSubscription } from './server/subscriptions';
@@ -379,6 +380,12 @@ async function startServer() {
   // живуть тут, у server.ts. Модуль сам не імпортує aiCore — інакше
   // з'явився б другий шлях до генерації, повз облік витрат у usage_log.
   registerMarketRoutes(app, {
+    resolveEngine: resolveChatEngine as never,
+    defaultModelId: GEMINI_MODEL,
+    loadAdminLayer: () => loadCoreAdminLayer(),
+    generateText: generateAiText as never,
+  });
+  registerPdfRoutes(app, {
     resolveEngine: resolveChatEngine as never,
     defaultModelId: GEMINI_MODEL,
     loadAdminLayer: () => loadCoreAdminLayer(),
