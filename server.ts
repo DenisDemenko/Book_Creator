@@ -3018,7 +3018,7 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
   // Кешування — на клієнті за хешем тексту (utils/competenceAnalysis.ts):
   // без нього кожне відкриття глави означало б новий платний виклик.
   // -----------------------------------------------------------------------
-  app.post('/api/ai/analyze-text-competences', async (req, res) => {
+  app.post('/api/ai/analyze-text-competences', requirePermission('canUseAi'), async (req, res) => {
     try {
       const { text, bookContext, skills } = req.body;
       if (!text || !text.trim()) {
