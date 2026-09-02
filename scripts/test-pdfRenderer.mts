@@ -107,6 +107,94 @@ console.log('\nВисячі заголовки:');
     /WIDOW_LINES/.test(io_read('server/pdf/pdfRenderer.ts')), 'константа на місці');
 }
 
+console.log('\nМакет із книги (варіант «код»):');
+{
+  const fromBook = await import('../server/pdf/pdfFromBook');
+  const mkBook = (over: any = {}) => ({
+    title: 'Книга', author: 'Автор', chapters: [],
+    layoutConfig: {
+      formatPreset: 'custom', pageWidthMm: 148, pageHeightMm: 210,
+      margins: { topMm: 20, bottomMm: 25, insideMm: 18, outsideMm: 15, bleedMm: 0, mirrored: false },
+      typography: {
+        bodyFont: 'Georgia', headingsFont: 'Montserrat', fontSizePt: 12, lineHeight: 1.5,
+        firstLineIndentMm: 5, paragraphSpacingMm: 0, textAlign: 'justify',
+        pageNumberPosition: 'bottom-outside', showHeaders: true, showPageNumbers: true,
+        pageNumberStart: { mode: 'title' },
+      },
+      ...over,
+    },
+  }) as any;
+
+  const spec = fromBook.specFromBook(mkBook());
+  t('формат узято з книги в пунктах', Math.round(spec.pageWidthPt!) === 420, String(spec.pageWidthPt));
+  t('поля переведено з міліметрів', Math.round(spec.margins.top) === 57, String(spec.margins.top));
+  t('внутрішнє поле стало лівим', Math.round(spec.margins.left) === 51, String(spec.margins.left));
+  t('кегль з книги', spec.baseFontSize === 12);
+  t('інтерліньяж з книги', spec.lineHeight === 1.5);
+  t('червоний рядок переведено з мм', Math.round(spec.paragraphIndent) === 14, String(spec.paragraphIndent));
+  t('гарнітура із засічками для Georgia', spec.bodyFont === 'serif', spec.bodyFont);
+  t('гротеск для Montserrat у заголовках', spec.chapterTitle.font === 'sans', spec.chapterTitle.font);
+  t('«зовні» → праворуч', spec.pageNumber.position === 'bottom-right', spec.pageNumber.position);
+  t('колонтитул увімкнено', spec.runningHead.show === true);
+
+  t('режим title: нумерується все', fromBook.specFromBook(mkBook()).pageNumber.skipFrontMatter === false);
+  const afterToc = fromBook.specFromBook(mkBook({ typography: { ...mkBook().layoutConfig.typography, pageNumberStart: { mode: 'after-toc' } } }));
+  t('режим after-toc: передмова без номерів', afterToc.pageNumber.skipFrontMatter === true && afterToc.pageNumber.startAt === 1);
+  const custom = fromBook.specFromBook(mkBook({ typography: { ...mkBook().layoutConfig.typography, pageNumberStart: { mode: 'custom', startNumber: 7 } } }));
+  t('режим custom: нумерація з указаного числа', custom.pageNumber.startAt === 7, String(custom.pageNumber.startAt));
+
+  const mirrored = fromBook.specFromBook(mkBook({ margins: { ...mkBook().layoutConfig.margins, mirrored: true } }));
+  t('дзеркальні поля названо в примітці, а не проігноровано мовчки',
+    /Дзеркальні поля не застосовані/.test(mirrored.designerNoteUk || ''), mirrored.designerNoteUk);
+
+  t('книга без налаштувань не падає',
+    fromBook.specFromBook({ title: 'x', chapters: [] } as any).baseFontSize > 0);
+
+  const input = fromBook.bookToPdfInput({
+    title: 'Т', chapters: [
+      { title: 'Друга', order: 2, sections: [{ title: 'б', order: 2, content: 'x' }, { title: 'а', order: 1, content: 'y' }] },
+      { title: 'Перша', order: 1, sections: [] },
+    ],
+  } as any);
+  t('розділи впорядковані за order', input.chapters[0].title === 'Перша', input.chapters[0].title);
+  t('підрозділи впорядковані за order', input.chapters[1].sections[0].title === 'а');
+}
+
+console.log('\nМакет від моделі (варіант «дизайн»):');
+{
+  const design = await import('../server/pdf/pdfDesignPrompt');
+
+  t('JSON в огорожі розбирається',
+    (design.parseBookPdfDesignResponse('```json\n{"baseFontSize":12}\n```') as any).baseFontSize === 12);
+
+  const sane = design.normalizeDesignResult({
+    pageSize: 'B5', baseFontSize: 12, lineHeight: 1.6, paragraphIndent: 14,
+    margins: { top: 50, right: 45, bottom: 60, left: 40 }, bodyAlign: 'left', bodyFont: 'sans',
+    designerNoteUk: 'Пояснення',
+  });
+  t('розумні значення пройшли', sane.pageSize === 'B5' && sane.baseFontSize === 12 && sane.bodyFont === 'sans');
+  t('пояснення збережено', sane.designerNoteUk === 'Пояснення');
+
+  const crazy = design.normalizeDesignResult({
+    pageSize: 'A0', baseFontSize: 200, lineHeight: 12, paragraphIndent: 900,
+    margins: { top: -50, right: 5000, bottom: 0, left: 'вісім' },
+  });
+  t('кегль затиснуто', crazy.baseFontSize === 16, String(crazy.baseFontSize));
+  t('інтерліньяж затиснуто', crazy.lineHeight === 2, String(crazy.lineHeight));
+  t('відступ затиснуто', crazy.paragraphIndent === 40, String(crazy.paragraphIndent));
+  t('невідомий формат → заводський', crazy.pageSize === 'A5', crazy.pageSize);
+  t('відʼємне поле затиснуто', crazy.margins.top === 20, String(crazy.margins.top));
+  t('нечислове поле стало заводським', crazy.margins.left === 48, String(crazy.margins.left));
+  t('без пояснення — чесна замітка', /пояснення вона не дала/.test(crazy.designerNoteUk || ''));
+
+  const both = design.normalizeDesignResult({ paragraphIndent: 16, paragraphSpacing: 10 });
+  t('червоний рядок і відступ разом не проходять', both.paragraphSpacing === 0 && both.paragraphIndent === 16);
+
+  // Найважливіше: макет від моделі має реально рендеритись.
+  const out = await renderer.renderBookPdf(book, sane);
+  t('PDF за макетом моделі збирається', out.pageCount >= 1 && out.bytes.length > 5000, String(out.pageCount));
+}
+
 console.log('\nПорожні випадки:');
 {
   const empty = await renderer.renderBookPdf({ title: 'Порожня', chapters: [] });

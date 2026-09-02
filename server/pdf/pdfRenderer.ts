@@ -156,7 +156,10 @@ export async function renderBookPdf(
   const pick = (choice: FontChoice, bold: boolean) =>
     bold ? (choice === 'sans' ? sansBold : serifBold) : serif;
 
-  const size = PAGE_SIZES[spec.pageSize] || PAGE_SIZES.A5;
+  const size =
+    spec.pageWidthPt && spec.pageHeightPt
+      ? { width: spec.pageWidthPt, height: spec.pageHeightPt }
+      : PAGE_SIZES[spec.pageSize] || PAGE_SIZES.A5;
   const contentWidth = size.width - spec.margins.left - spec.margins.right;
   const black = rgb(0.1, 0.09, 0.08);
   const grey = rgb(0.45, 0.43, 0.4);

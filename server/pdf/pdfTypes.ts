@@ -45,6 +45,13 @@ export interface HeadingStyle {
 
 export interface PdfLayoutSpec {
   pageSize: PageSizeName;
+  /**
+   * Явні розміри в пунктах. Мають перевагу над `pageSize`, бо книга задає
+   * формат у міліметрах і дозволяє 'custom' — іменованих розмірів на це не
+   * вистачає. Задаються разом або не задаються зовсім.
+   */
+  pageWidthPt?: number;
+  pageHeightPt?: number;
   margins: { top: number; right: number; bottom: number; left: number };
 
   /** Кегль основного тексту. */
@@ -132,6 +139,13 @@ export const DEFAULT_LAYOUT_SPEC: PdfLayoutSpec = {
   },
   runningHead: { show: false, content: 'title', fontSize: 8 },
 };
+
+/** 1 мм у типографських пунктах. */
+export const MM_TO_PT = 72 / 25.4;
+
+export function mm(value: number): number {
+  return value * MM_TO_PT;
+}
 
 /** Мінімальний зріз книги, потрібний рендереру. */
 export interface PdfBookInput {

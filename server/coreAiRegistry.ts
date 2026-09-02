@@ -94,6 +94,11 @@ import {
   factoryMarketScreenUserTemplate,
   renderMarketScreenTemplate,
 } from './market/marketScreenPrompt';
+import {
+  factoryBookPdfDesignSystemTemplate,
+  factoryBookPdfDesignUserTemplate,
+  renderBookPdfDesignTemplate,
+} from './pdf/pdfDesignPrompt';
 
 /** Ключ у таблиці `meta`, під яким лежить ЄДИНИЙ адмінський шар усіх модулів ядра. */
 export const CORE_PROMPT_TEMPLATES_META_KEY = 'prompt_templates_core_admin';
@@ -119,6 +124,7 @@ export const CORE_MODULE_KEYS = [
   'readerResponse',
   'characterCodex',
   'etsyMarketScreen',
+  'bookPdfDesign',
 ] as const;
 
 export type CoreModuleKey = (typeof CORE_MODULE_KEYS)[number];
@@ -187,6 +193,15 @@ export const CORE_MODULE_PLACEHOLDERS: Record<CoreModuleKey, string[]> = {
   // Токени навмисно НЕ перейменовані під решту реєстру — інакше шаблон у
   // конструкторі розходився б із документом, за яким його перевірятимуть.
   etsyMarketScreen: ['{{topic}}', '{{count}}', '{{language}}'],
+  bookPdfDesign: [
+    '{{title}}',
+    '{{subtitle}}',
+    '{{genre}}',
+    '{{audience}}',
+    '{{chapterCount}}',
+    '{{wordCount}}',
+    '{{sample}}',
+  ],
 };
 
 /** Чи модуль повертає JSON за жорсткою схемою (схема — readonly-текст у конструкторі, не редагується). */
@@ -208,6 +223,7 @@ export const CORE_MODULE_HAS_JSON_SCHEMA: Record<CoreModuleKey, boolean> = {
   readerResponse: true,
   characterCodex: true,
   etsyMarketScreen: true,
+  bookPdfDesign: true,
 };
 
 /**
@@ -294,6 +310,11 @@ export function factoryCoreTemplate(module: CoreModuleKey): CorePromptTemplate {
       return { system: characterCodexSystemInstruction(), user: factoryCharacterCodexTemplate() };
     case 'etsyMarketScreen':
       return { system: factoryMarketScreenSystemTemplate(), user: factoryMarketScreenUserTemplate() };
+    case 'bookPdfDesign':
+      return {
+        system: factoryBookPdfDesignSystemTemplate(),
+        user: factoryBookPdfDesignUserTemplate(),
+      };
   }
 }
 
@@ -563,6 +584,16 @@ export function renderCoreTemplate(
         topic: fields.topic || '',
         count: fields.count || '',
         language: fields.language || '',
+      });
+    case 'bookPdfDesign':
+      return renderBookPdfDesignTemplate(template, {
+        title: fields.title || '',
+        subtitle: fields.subtitle || '',
+        genre: fields.genre || '',
+        audience: fields.audience || '',
+        chapterCount: fields.chapterCount || '',
+        wordCount: fields.wordCount || '',
+        sample: fields.sample || '',
       });
   }
 }
