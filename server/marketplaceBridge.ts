@@ -193,6 +193,39 @@ export function bridgeExternalId(bookId: string, format: MarketplaceFormat): str
 const TIMEOUT_MS = 20000;
 
 /**
+ * Витягти з відповіді маркетплейсу причину відмови.
+ *
+ * Раніше користувач бачив «Маркетплейс відхилив публікацію (HTTP 400)», і
+ * це не давало жодної підказки, хоча приймач причину називав: у тілі лежало
+ * «Не знайдено продавця для книг: передайте sellerSlug або задайте
+ * BRIDGE_SELLER_SLUG». Текст ішов лише в `details`, який інтерфейс не
+ * показував. Код помилки без її причини — це не діагностика, а її імітація.
+ *
+ * NestJS віддає `{ message, error, statusCode }`, причому на помилках
+ * валідації `message` — масив рядків, по одному на поле. Обидві форми
+ * зводимо в один рядок.
+ */
+function describeRejection(status: number, body: string): string {
+  const trimmed = (body || '').trim();
+  if (!trimmed) return `HTTP ${status}`;
+  try {
+    const parsed = JSON.parse(trimmed) as { message?: unknown; error?: unknown };
+    const message = Array.isArray(parsed?.message)
+      ? parsed.message.filter((m) => typeof m === 'string').join('; ')
+      : typeof parsed?.message === 'string'
+        ? parsed.message
+        : typeof parsed?.error === 'string'
+          ? parsed.error
+          : '';
+    if (message) return `${message} (HTTP ${status})`;
+  } catch {
+    // Не JSON — віддамо як є, обрізавши: сирий HTML від проксі теж
+    // інформативніший за самий код.
+  }
+  return `${trimmed.slice(0, 200)} (HTTP ${status})`;
+}
+
+/**
  * Тестова книга мосту. Живе тут, а не в інтерфейсі, щоб публікація і
  * прибирання говорили про один і той самий `externalId`: інакше кнопка
  * «прибрати» одного дня почала б цілитись не в той лістинг.
@@ -269,7 +302,7 @@ export async function unpublishBookFromMarketplace(
   if (!response.ok) {
     const text = await response.text().catch(() => '');
     throw new MarketplaceBridgeError(
-      `Маркетплейс відхилив зняття лістинга (HTTP ${response.status}).`,
+      `Маркетплейс відхилив зняття лістинга: ${describeRejection(response.status, text)}`,
       'rejected',
       response.status,
       text.slice(0, 400)
@@ -465,7 +498,7 @@ export async function publishBookToMarketplace(
   }
   if (!response.ok) {
     throw new MarketplaceBridgeError(
-      `Маркетплейс відхилив публікацію (HTTP ${response.status}).`,
+      `Маркетплейс відхилив публікацію: ${describeRejection(response.status, text)}`,
       'rejected',
       502,
       text.slice(0, 400)
@@ -580,7 +613,7 @@ export async function publishCourseToMarketplace(
   }
   if (!response.ok) {
     throw new MarketplaceBridgeError(
-      `Маркетплейс відхилив публікацію курсу (HTTP ${response.status}).`,
+      `Маркетплейс відхилив публікацію курсу: ${describeRejection(response.status, text)}`,
       'rejected',
       502,
       text.slice(0, 400)

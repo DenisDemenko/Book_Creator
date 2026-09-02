@@ -148,6 +148,41 @@ console.log('\nЗняття лістинга з вітрини:');
   t('500 → помилка «відхилено», а не тихий успіх', rejected?.kind === 'rejected', String(rejected?.kind));
 }
 
+console.log('\nПричина відмови маркетплейсу доходить до користувача:');
+{
+  const reject = (status: number, body: string) => (async () => ({
+    status, ok: false, text: async () => body,
+  })) as never;
+  const publish = async (status: number, body: string) => {
+    try {
+      await bridge.publishBookToMarketplace(
+        { ...bridge.bridgeTestBook(), format: 'digital', priceMinor: 100 },
+        { fetch: reject(status, body), settings });
+      return '';
+    } catch (e: any) { return String(e?.message || ''); }
+  };
+
+  const noSeller = await publish(400, JSON.stringify({
+    message: 'Не знайдено продавця для книг: передайте sellerSlug або задайте BRIDGE_SELLER_SLUG',
+    error: 'Bad Request', statusCode: 400,
+  }));
+  t('причину видно, а не самий код', /Не знайдено продавця/.test(noSeller), noSeller);
+  t('код теж лишився', /400/.test(noSeller));
+
+  const validation = await publish(400, JSON.stringify({
+    message: ['title must be longer than or equal to 3 characters', 'priceMinor must be an integer'],
+    statusCode: 400,
+  }));
+  t('масив помилок валідації зведено в рядок',
+    /title must be longer/.test(validation) && /priceMinor must be/.test(validation), validation);
+
+  const html = await publish(502, '<html>Bad Gateway</html>');
+  t('не-JSON тіло теж показано', /Bad Gateway/.test(html), html);
+
+  const empty = await publish(500, '');
+  t('порожнє тіло → лишається код', /HTTP 500/.test(empty), empty);
+}
+
 console.log('\nПовідомлення «не налаштовано» називає саме те, чого бракує:');
 {
   // Працюємо зі справжнім сховищем у тимчасовій теці: підмінити експорт

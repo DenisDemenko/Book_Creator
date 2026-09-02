@@ -240,7 +240,15 @@ const MarketplaceBridgePanel: React.FC = () => {
         body: JSON.stringify(sellerSlug.trim() ? { sellerSlug: sellerSlug.trim() } : {}),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || 'Публікація не вдалася.');
+      if (!res.ok) {
+        // details містить сире тіло відповіді маркетплейсу — показуємо його,
+        // коли воно додає щось понад уже зведене повідомлення.
+        const extra = typeof data?.details === 'string' && data.details.trim()
+          && !String(data?.error || '').includes(data.details.trim().slice(0, 40))
+          ? ` — ${data.details.trim().slice(0, 300)}`
+          : '';
+        throw new Error((data?.error || 'Публікація не вдалася.') + extra);
+      }
       const listing: any = data?.published?.listing;
       const slug: string | undefined = listing?.slug;
       setPublishResult({
