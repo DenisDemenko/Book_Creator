@@ -91,7 +91,8 @@ import {
   ZoomOut,
   Focus,
   Gauge,
-  Search
+  Search,
+  BarChart3
 } from 'lucide-react';
 import { 
   Book, 
@@ -107,7 +108,8 @@ import {
   UserRole,
   CourseTag,
   CustomFont,
-  AuthUser
+  AuthUser,
+  TextCompetenceAnalysis
 } from '../types';
 import { 
   calculateWordCount, 
@@ -120,6 +122,8 @@ import { getRoleInfo } from '../utils/rbac';
 import { usePersistentState } from '../hooks/usePersistentState';
 import { usePlanAccess } from '../hooks/usePlanAccess';
 import { synthesizeNarration, NarrationClientError, type NarrationLang } from '../utils/narrationClient';
+import { analyzeSection, aggregateScores } from '../utils/competenceAnalysis';
+import { SKILL_MARKER_BY_ID } from '../data/skillMarkers';
 import { CharacterEditModal } from './CharacterEditModal';
 import { AddParticipantsModal } from './AddParticipantsModal';
 import { GenerateCharacterModal } from './GenerateCharacterModal';
@@ -241,7 +245,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
   onDiscussInChat,
   promptGenerateTick = 0,
 }) => {
-  const { t } = useLanguage();
+  const { t, lang: uiLang } = useLanguage();
   const isReader = currentRole === 'reader';
   const isTranslator = currentRole === 'translator';
   const roleInfo = getRoleInfo(currentRole);
@@ -325,7 +329,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
     isTranslator ? 'workText' : 'scene'
   );
   // Підвкладки всередині «Робота над текстом» / «Робота з AI».
-  const [rightPanelSubTab, setRightPanelSubTab] = usePersistentState<'translation' | 'footnotes_qr' | 'course_tags' | 'ai' | 'spellcheck' | 'diff' | 'reader'>(
+  const [rightPanelSubTab, setRightPanelSubTab] = usePersistentState<'translation' | 'footnotes_qr' | 'course_tags' | 'ai' | 'spellcheck' | 'diff' | 'reader' | 'metrics'>(
     'nova_editor_rightPanelSubTab',
     'translation'
   );
@@ -491,6 +495,25 @@ export const EditorView: React.FC<EditorViewProps> = ({
   } | null>(null);
   const [isSimulatingReader, setIsSimulatingReader] = useState<boolean>(false);
   const [readerResponseError, setReaderResponseError] = useState<string | null>(null);
+
+  // «Показники глави» (пошук поліпшень навичок, хвиля 2, задача 6) —
+  // зведення оцінок за 20 показниками з src/data/skillMarkers.ts по всіх
+  // розділах активної глави (aggregateScores з competenceAnalysis.ts).
+  const [chapterMetrics, setChapterMetrics] = useState<Record<string, number> | null>(null);
+  const [chapterMetricsAnalyzedAt, setChapterMetricsAnalyzedAt] = useState<string | null>(null);
+  const [isAnalyzingChapterMetrics, setIsAnalyzingChapterMetrics] = useState<boolean>(false);
+  const [chapterMetricsError, setChapterMetricsError] = useState<string | null>(null);
+
+  // «Сила початку» (хвиля 2, задача 8) — форма відповіді сервера
+  // (server/openingStrengthPrompt.ts), продубльована тут: клієнт не
+  // імпортує типи з server/, той самий принцип, що й у readerResponseResult.
+  const [openingStrengthResult, setOpeningStrengthResult] = useState<{
+    score: number;
+    summary: string;
+    checklist: { id: string; labelUk: string; labelEn: string; present: boolean; note: string; quote?: string }[];
+  } | null>(null);
+  const [isAnalyzingOpeningStrength, setIsAnalyzingOpeningStrength] = useState<boolean>(false);
+  const [openingStrengthError, setOpeningStrengthError] = useState<string | null>(null);
 
   // Завжди свіжі версії книги/колбеків усередині довгоживучих TipTap-колбеків
   // (useEditor створює редактор один раз — без цих ref'ів onUpdate/картинки
@@ -2747,6 +2770,82 @@ export const EditorView: React.FC<EditorViewProps> = ({
     }
   };
 
+  // «Показники глави» (хвиля 2, задача 6) — аналізує КОЖЕН розділ активної
+  // глави через analyzeSection (кеш за хешем тексту, той самий механізм,
+  // що вже живить майбутню підсвітку компетентностей) і зводить оцінки
+  // aggregateScores. Розділи без тексту пропускаються — краще відсутність
+  // числа, ніж вигаданий нуль.
+  const handleAnalyzeChapterMetrics = async () => {
+    if (!activeChapter) return;
+    setIsAnalyzingChapterMetrics(true);
+    setChapterMetricsError(null);
+    setRightPanelTab('workAi');
+    setRightPanelSubTab('metrics');
+    try {
+      const sections = [...activeChapter.sections].sort((a, b) => a.order - b.order);
+      const bookContext = { genre: book.genre, logline: book.logline, theme: book.theme };
+      const analyses = await Promise.all(
+        sections.map((sec) => {
+          const text = (editorLanguageMode === 'en' && sec.contentEn ? sec.contentEn : sec.content) || '';
+          if (!text.trim()) return null;
+          return analyzeSection(sec.id, text, bookContext);
+        })
+      );
+      const valid = analyses.filter((a): a is TextCompetenceAnalysis => !!a);
+      if (valid.length === 0) {
+        setChapterMetricsError(t('editor.chapterMetricsEmptyError'));
+        setChapterMetrics(null);
+        return;
+      }
+      setChapterMetrics(aggregateScores(valid));
+      setChapterMetricsAnalyzedAt(new Date().toISOString());
+    } catch (err) {
+      console.error('Error analyzing chapter metrics:', err);
+      setChapterMetricsError(t('editor.chapterMetricsError'));
+    } finally {
+      setIsAnalyzingChapterMetrics(false);
+    }
+  };
+
+  // «Сила початку» (хвиля 2, задача 8) — окрема перевірка ПЕРШОЇ сцени
+  // книги (перший розділ першої глави за order), не активного розділу:
+  // чек-лист має сенс лише для вступу книги, а не для довільного місця.
+  const handleAnalyzeOpeningStrength = async () => {
+    const sortedChapters = [...book.chapters].sort((a, b) => a.order - b.order);
+    const firstChapter = sortedChapters[0];
+    const firstSection = firstChapter ? [...firstChapter.sections].sort((a, b) => a.order - b.order)[0] : null;
+    const text = (editorLanguageMode === 'en' && firstSection?.contentEn ? firstSection.contentEn : firstSection?.content) || '';
+    if (!text.trim()) return;
+
+    setIsAnalyzingOpeningStrength(true);
+    setOpeningStrengthError(null);
+    setRightPanelTab('workAi');
+    setRightPanelSubTab('metrics');
+    try {
+      const res = await fetch('/api/ai/analyze-opening-strength', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookId: book.id,
+          genre: book.genre,
+          logline: book.logline,
+          text,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setOpeningStrengthError(data?.error || t('editor.openingStrengthError'));
+        return;
+      }
+      setOpeningStrengthResult(data.result);
+    } catch (err) {
+      console.error('Error analyzing opening strength:', err);
+      setOpeningStrengthError(t('editor.openingStrengthError'));
+    } finally {
+      setIsAnalyzingOpeningStrength(false);
+    }
+  };
+
   const handleReplaceSpellIssue = (issue: SpellCheckIssue, suggestion: string) => {
     if (!activeSection) return;
     const newContent = activeSection.content.replace(issue.word, suggestion);
@@ -3708,6 +3807,17 @@ export const EditorView: React.FC<EditorViewProps> = ({
               <span className="hidden sm:inline">{isSimulatingReader ? t('editor.readerResponseRunning') : t('editor.readerResponseBtn')}</span>
             </button>
 
+            {/* Показники глави (хвиля 2, задача 6) */}
+            <button
+              onClick={handleAnalyzeChapterMetrics}
+              disabled={isAnalyzingChapterMetrics || !activeChapter}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 rounded-lg transition-colors disabled:opacity-50"
+              title={t('editor.chapterMetricsTitle')}
+            >
+              <BarChart3 className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{isAnalyzingChapterMetrics ? t('editor.chapterMetricsRunning') : t('editor.chapterMetricsBtn')}</span>
+            </button>
+
             {/* Translate Button */}
             <button
               onClick={handleTranslateToEnglish}
@@ -4401,6 +4511,17 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 >
                   <Smile className="w-3 h-3" />
                   <span>{t('editor.tabReader')}</span>
+                </button>
+                <button
+                  onClick={() => setRightPanelSubTab('metrics')}
+                  className={`flex-1 py-2 px-1 text-[11px] font-semibold rounded-lg flex items-center justify-center gap-1 transition-all whitespace-nowrap ${
+                    rightPanelSubTab === 'metrics'
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <BarChart3 className="w-3 h-3" />
+                  <span>{t('editor.tabMetrics')}</span>
                 </button>
               </div>
             )}
@@ -5110,6 +5231,131 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* TAB 8: ПОКАЗНИКИ ГЛАВИ + СИЛА ПОЧАТКУ (хвиля 2 плану 18 навичок, pokraschennya-navychok.md) */}
+            {rightPanelTab === 'workAi' && rightPanelSubTab === 'metrics' && (
+              <div className="space-y-4">
+                {(() => {
+                  const sortedChapters = [...book.chapters].sort((a, b) => a.order - b.order);
+                  const firstChapter = sortedChapters[0];
+                  const isFirstChapter = !!firstChapter && firstChapter.id === activeChapter?.id;
+                  if (!isFirstChapter) return null;
+                  const firstSection = [...firstChapter.sections].sort((a, b) => a.order - b.order)[0];
+                  const hasText = !!(
+                    (editorLanguageMode === 'en' && firstSection?.contentEn ? firstSection.contentEn : firstSection?.content) || ''
+                  ).trim();
+                  return (
+                    <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <h4 className="text-slate-300 font-semibold text-xs flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                          {t('editor.openingStrengthTitle')}
+                        </h4>
+                        <button
+                          onClick={handleAnalyzeOpeningStrength}
+                          disabled={isAnalyzingOpeningStrength || !hasText}
+                          className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-semibold transition-colors disabled:opacity-40"
+                        >
+                          {isAnalyzingOpeningStrength ? t('editor.openingStrengthRunning') : t('editor.openingStrengthBtn')}
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-slate-500 leading-relaxed">{t('editor.openingStrengthIntro')}</p>
+
+                      {openingStrengthError && (
+                        <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-200 text-[11px]">
+                          {openingStrengthError}
+                        </div>
+                      )}
+
+                      {openingStrengthResult && (
+                        <div className="space-y-2">
+                          <div className="flex items-baseline gap-2">
+                            <span className="text-lg font-bold text-amber-300">{openingStrengthResult.score}%</span>
+                            <p className="text-[11px] text-slate-400">{openingStrengthResult.summary}</p>
+                          </div>
+                          <div className="space-y-1.5">
+                            {openingStrengthResult.checklist.map((item) => (
+                              <div
+                                key={item.id}
+                                className={`flex items-start gap-2 p-2 rounded-lg text-[11px] ${
+                                  item.present
+                                    ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-100'
+                                    : 'bg-amber-500/10 border border-amber-500/30 text-amber-100'
+                                }`}
+                              >
+                                {item.present ? (
+                                  <Check className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                                ) : (
+                                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                                )}
+                                <div className="min-w-0">
+                                  <p className="font-semibold">{uiLang === 'en' ? item.labelEn : item.labelUk}</p>
+                                  {item.note && <p className="text-slate-400">{item.note}</p>}
+                                  {item.quote && <p className="italic text-slate-500 mt-0.5">«{item.quote}»</p>}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="text-slate-300 font-semibold text-xs flex items-center gap-1.5">
+                      <BarChart3 className="w-3.5 h-3.5 text-sky-400" />
+                      {t('editor.chapterMetricsPanelTitle')}
+                    </h4>
+                    {chapterMetricsAnalyzedAt && (
+                      <span className="text-[10px] text-slate-600">
+                        {new Date(chapterMetricsAnalyzedAt).toLocaleTimeString(uiLang === 'en' ? 'en-US' : 'uk-UA', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">{t('editor.chapterMetricsIntro')}</p>
+
+                  {chapterMetricsError && (
+                    <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-200 text-[11px]">
+                      {chapterMetricsError}
+                    </div>
+                  )}
+
+                  {!chapterMetrics && !chapterMetricsError && !isAnalyzingChapterMetrics && (
+                    <div className="p-6 text-center text-slate-500 text-xs space-y-2 border border-dashed border-slate-800 rounded-xl">
+                      <BarChart3 className="w-6 h-6 mx-auto text-slate-600" />
+                      <p>{t('editor.chapterMetricsEmpty')}</p>
+                    </div>
+                  )}
+
+                  {chapterMetrics && (
+                    <div className="space-y-2">
+                      {Object.entries(chapterMetrics)
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([id, score]) => {
+                          const spec = SKILL_MARKER_BY_ID[id];
+                          if (!spec) return null;
+                          return (
+                            <div key={id} className="space-y-1">
+                              <div className="flex items-center justify-between text-[11px]">
+                                <span className="text-slate-300 font-medium">{uiLang === 'en' ? spec.titleEn : spec.titleUk}</span>
+                                <span className="text-slate-400 font-mono">{score}%</span>
+                              </div>
+                              <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                                <div className="h-full bg-sky-500 rounded-full" style={{ width: `${score}%` }} />
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

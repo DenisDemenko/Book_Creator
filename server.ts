@@ -105,6 +105,14 @@ import {
   MAX_REACTION_INPUT_CHARS,
 } from './server/readerResponsePrompt';
 import {
+  openingStrengthSystemInstruction,
+  buildOpeningStrengthUserPrompt,
+  parseOpeningStrengthResponse,
+  normalizeOpeningStrengthResult,
+  MIN_OPENING_TEXT_CHARS,
+  MAX_OPENING_TEXT_CHARS,
+} from './server/openingStrengthPrompt';
+import {
   parseCodexResponse,
   normalizeCodexResult,
 } from './server/characterCodexPrompt';
@@ -3120,6 +3128,73 @@ ${skillLines}
     } catch (err: any) {
       console.error('Error in /api/ai/analyze-text-competences:', err);
       res.status(500).json({ error: err.message || 'Помилка аналізу компетентностей' });
+    }
+  });
+
+  // -----------------------------------------------------------------------
+  // «Сила початку» — окрема перевірка першої сцени книги за фіксованим
+  // чек-листом (хвиля 2, задача 8). Той самий демо-режим без ключа, що й у
+  // analyze-text-competences вище, з тієї самої хвилі плану — щоб фічу
+  // можна було перевірити в браузері без GEMINI_API_KEY.
+  // -----------------------------------------------------------------------
+  app.post('/api/ai/analyze-opening-strength', requirePermission('canUseAi'), async (req, res) => {
+    try {
+      const { text, bookTitle, genre, logline, locale } = req.body || {};
+      const fragment = typeof text === 'string' ? text.trim() : '';
+      if (!fragment) {
+        return res.status(400).json({ error: 'Немає тексту першої сцени для перевірки.' });
+      }
+      if (fragment.length < MIN_OPENING_TEXT_CHARS) {
+        return res.status(400).json({
+          error: `Замало тексту для перевірки сили початку (${fragment.length} символів, мінімум ${MIN_OPENING_TEXT_CHARS}) — напишіть хоча б кілька абзаців першої сцени.`,
+          kind: 'not_enough_text',
+        });
+      }
+      if (fragment.length > MAX_OPENING_TEXT_CHARS) {
+        return res.status(413).json({
+          error: `Забагато тексту (${fragment.length} символів, максимум ${MAX_OPENING_TEXT_CHARS}) — перевіряється лише перша сцена, а не вся глава.`,
+          kind: 'too_much_text',
+        });
+      }
+
+      const systemPrompt = openingStrengthSystemInstruction(locale);
+      const userPrompt = buildOpeningStrengthUserPrompt({ bookTitle, genre, logline, text: fragment });
+
+      let raw: any;
+      if (ai) {
+        const rawText = await generateWithGemini(userPrompt, systemPrompt, true, {
+          req,
+          label: 'Сила початку',
+        });
+        try {
+          raw = parseOpeningStrengthResponse(rawText);
+        } catch {
+          return res.status(502).json({
+            error: 'Модель повернула не JSON — спробуйте ще раз.',
+            kind: 'bad_model_output',
+          });
+        }
+      } else {
+        // Демо-режим без ключа: структура відповіді на реальному тексті, щоб
+        // інтерфейс можна було перевірити без API (той самий принцип, що й
+        // у analyze-text-competences вище).
+        raw = {
+          score: 58,
+          summary: 'Демо-режим: перша сцена містить окремі елементи сильного початку, але без ключа AI оцінка умовна.',
+          checklist: [
+            { id: 'conflict', present: true, note: 'Демо-режим: у тексті є ознаки протистояння.', quote: fragment.slice(0, Math.min(40, fragment.length)) },
+            { id: 'question', present: false, note: 'Демо-режим: явного питання для читача не виявлено.' },
+            { id: 'promise', present: true, note: 'Демо-режим: перші речення натякають на тему книги.', quote: fragment.slice(0, Math.min(40, fragment.length)) },
+            { id: 'emotionalStake', present: false, note: 'Демо-режим: емоційна ставка героя не сформульована явно.' },
+          ],
+        };
+      }
+
+      const result = normalizeOpeningStrengthResult(raw, fragment);
+      res.json({ result });
+    } catch (err: any) {
+      console.error('Error in /api/ai/analyze-opening-strength:', err?.message || err);
+      res.status(500).json({ error: err?.message || 'Не вдалося перевірити силу початку.' });
     }
   });
 
