@@ -63,6 +63,7 @@ import {
 import {
   diagnSystemInstruction,
   factoryDiagnTemplate,
+  renderDiagnTemplate,
 } from './diagnPrompt';
 import {
   characterConsistencySystemInstruction,
@@ -454,6 +455,27 @@ export function renderCoreTemplate(
           sampleText: fields.sampleText || fields.selection,
         }),
       };
+    case 'diagnStyle':
+    case 'diagnStructure':
+    case 'diagnCompetency': {
+      // Той самий рендер, що й у продакшн-виклику /diagn
+      // (server/diagnRoutes.ts::runModule): system і user рендеряться
+      // окремо, бо {МОВА} присутнє в обох, а {ФРАГМЕНТ}/{КОМПЕТЕНЦІЇ} —
+      // лише в user (system дістає порожній фрагмент).
+      const locale = fields.language;
+      const competencies = fields.competencies;
+      const fragment = fields.selection || fields.sampleText || '';
+      return {
+        system: renderDiagnTemplate(template.system, { fragment: '', locale, competencies }),
+        user: renderDiagnTemplate(template.user, {
+          bookTitle: fields.bookTitle,
+          genre: fields.genre,
+          fragment,
+          competencies,
+          locale,
+        }),
+      };
+    }
     case 'characterConsistency': {
       const values = {
         name: fields.characterName,

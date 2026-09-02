@@ -2388,3 +2388,54 @@ edit-ендпоїнт, поле `image_urls`, тариф edit-моделі), м�
   запису — git-синхронізація `furnivision-architecture/site` (окремий
   проєкт, поза цим checkout) — свідомо НЕ досліджені в цій сесії: явний
   запит користувача був «продовжуй завдання» саме з `Book_Creality/log.md`.
+
+---
+
+## 61. Виправлено: відсутній renderCoreTemplate для трьох модулів /diagn (застаріла вада із запису #51)
+
+**Причина запису.** Автономна сесія без участі користувача: перевірити
+поточний стан проєкту (`tsc`/`build`/`npm test`) і виправити реальні
+проблеми, знайдені по дорозі, а не лише додавати нові фічі.
+
+**Що було зроблено.** Запис #51 ще раніше зафіксував відому, але не
+виправлену ваду: `renderCoreTemplate` (`server/coreAiRegistry.ts`) не мав
+`case` для `diagnStyle`/`diagnStructure`/`diagnCompetency` — `switch` без
+`default` мовчки повертав `undefined` для цих трьох ключів
+`CoreModuleKey`. Через відсутність `strict`/`noImplicitReturns` у
+`tsconfig.json` це не ловилось типчеком.
+
+**Наслідок для продакшну.** Сам робочий `/diagn` (`server/diagnRoutes.ts`)
+цю функцію взагалі не викликає — рендерить `diagnSystemInstruction`/
+`factoryDiagnTemplate` напряму через `renderDiagnTemplate`, тож звичайні
+письменники цю ваду не бачили. Постраждалий шлях — лише адмінський
+«Тест ядра AI» у конструкторі промптів
+(`POST /api/ai/core-prompt-templates/test-call`): для цих трьох модулів
+виклик `rendered.system`/`rendered.user` кидав би
+`Cannot read properties of undefined`, тобто адмін не міг перевірити
+свої правки system/user-шаблонів `/diagn` перед збереженням.
+
+**Виправлення (`server/coreAiRegistry.ts`).** Додано один спільний `case`
+на три diagn-модулі в `renderCoreTemplate`, за тим самим патерном, що вже
+коректно працює в продакшн-шляху `diagnRoutes.ts::runModule`: `system` і
+`user` рендеряться ОКРЕМИМИ викликами `renderDiagnTemplate` (імпортований
+новим рядком з `./diagnPrompt`), бо `{МОВА}` присутнє в обох, а
+`{ФРАГМЕНТ}`/`{КОМПЕТЕНЦІЇ}` — лише в user (system дістає порожній
+фрагмент, як і в продакшн-шляху). Джерела полів у `fields`-мішку:
+`bookTitle`/`genre` напряму, фрагмент — `selection || sampleText` (той
+самий подвійний фолбек, що вже є в `designLayout`/`readerResponse`),
+мова — `fields.language` (як в `characterConsistency`/`behaviorDrift`).
+
+**Юніт-тест (регресія).** `scripts/test-coreAiRegistry.mts`: новий блок
+на всі три diagn-модулі — `renderCoreTemplate` більше не повертає
+`undefined`, назва книги й фрагмент підставляються в `user`, мова
+підставляється в `system`, фрагмент коректно ВІДСУТНІЙ у `system`
+(порожній `{ФРАГМЕНТ}`), і окрема перевірка фолбеку `{КОМПЕТЕНЦІЇ}` на
+дефолтні осі (`COMPETENCY_AXES`), коли адмін не передав власний список.
+Набір `test:core-ai` зріс із 45 до 52 перевірок, усі зелені.
+
+**Перевірка:** `tsc --noEmit` — чисто. `npm run build` — збірка проходить
+без помилок (client + server bundle). `npm run test:core-ai` — 52/52. Не
+перевірено живим HTTP-викликом `/api/ai/core-prompt-templates/test-call`
+в браузері (середовище без графічного дисплея) — покриття лише
+юніт-тестом чистої функції `renderCoreTemplate`, як і решта модулів ядра
+в цьому ж файлі тестів.

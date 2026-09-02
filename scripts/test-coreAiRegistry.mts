@@ -100,6 +100,27 @@ console.log('\nrenderCoreTemplate — кожен модуль підставля
   });
   t('synopsisToChapter: синопсис підставлений', synopsis.user.includes('Герой втрачає союзника.'));
   t('synopsisToChapter: обсяг підставлений', synopsis.user.includes('1000-1500'));
+
+  // Регрес: diagnStyle/diagnStructure/diagnCompetency були відсутні як
+  // case у switch renderCoreTemplate — функція мовчки повертала undefined,
+  // і адмінський тестовий виклик у конструкторі падав (log.md #51).
+  for (const mod of ['diagnStyle', 'diagnStructure', 'diagnCompetency'] as const) {
+    const rendered = renderCoreTemplate(mod, factoryCoreTemplate(mod), {
+      bookTitle: 'Тіні Нео-Києва', genre: 'кіберпанк', selection: 'Уривок для аналізу.', language: 'en',
+    });
+    t(`${mod}: не повертає undefined`, !!rendered && typeof rendered === 'object');
+    t(`${mod}: назва книги підставлена в user`, rendered.user.includes('Тіні Нео-Києва'));
+    t(`${mod}: фрагмент підставлений в user`, rendered.user.includes('Уривок для аналізу.'));
+    t(`${mod}: мова підставлена в system`, rendered.system.includes('Мова всіх текстових полів — en.'), rendered.system);
+    t(`${mod}: у system немає фрагмента (порожній {ФРАГМЕНТ})`, !rendered.system.includes('Уривок для аналізу.'));
+  }
+  {
+    const competency = renderCoreTemplate('diagnCompetency', factoryCoreTemplate('diagnCompetency'), {
+      bookTitle: 'Тест', genre: 'проза', selection: 'Текст автора.',
+    });
+    t('diagnCompetency: без явних competencies — фолбек на дефолтні осі',
+      competency.user.includes('Автор та розвиток'), competency.user);
+  }
 }
 
 console.log('\nrenderCoreTemplate — той самий ризик регресії, що й у фото-модуля, не повторюється:');
