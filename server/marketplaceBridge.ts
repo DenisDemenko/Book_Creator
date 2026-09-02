@@ -290,6 +290,120 @@ export function bridgeTestBook(): Omit<PublishBookInput, 'format' | 'priceMinor'
   };
 }
 
+export interface BridgeBookRow {
+  externalId: string;
+  slug: string;
+  title: string;
+  status: string;
+  priceMinor: number;
+  sellerSlug: string | null;
+  publishedAt: string | null;
+  hasFile: boolean;
+  fileName: string | null;
+}
+
+/**
+ * Що зараз стоїть у вітрині від Студії.
+ *
+ * Без цього Студія знає лише те, що ВІДПРАВИЛА, а не те, що там лишилось:
+ * лістинг могли заархівувати з адмінки маркетплейсу або опублікувати з
+ * іншої машини. Перелік — єдиний спосіб зняти правильний лістинг, а не той,
+ * який ми памʼятаємо.
+ */
+export async function listBridgeBooks(
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<BridgeBookRow[]> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+
+  let response: Response;
+  try {
+    response = await doFetch(`${settings.url}/bridge/books`, {
+      headers: { 'x-bridge-key': settings.key },
+      signal: AbortSignal.timeout(20000),
+    });
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  }
+
+  const text = await response.text().catch(() => '');
+  if (response.status === 401 || response.status === 403) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401
+    );
+  }
+  if (!response.ok) {
+    throw new MarketplaceBridgeError(
+      `Маркетплейс не віддав перелік: ${describeRejection(response.status, text)}`,
+      'rejected',
+      502
+    );
+  }
+
+  try {
+    const body = JSON.parse(text) as { books?: BridgeBookRow[] };
+    return Array.isArray(body?.books) ? body.books : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Зняти лістинг за його `externalId` — тим, який показав перелік.
+ *
+ * Окремо від `unpublishBookFromMarketplace`, що збирає id з bookId і формату:
+ * знімати треба саме те, що людина бачить у списку, інакше кнопка «прибрати»
+ * поруч із рядком може влучити не в той рядок.
+ */
+export async function unpublishByExternalId(
+  externalId: string,
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<{ removed: boolean; externalId: string }> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+
+  let response: Response;
+  try {
+    response = await doFetch(`${settings.url}/bridge/books/${encodeURIComponent(externalId)}`, {
+      method: 'DELETE',
+      headers: { 'x-bridge-key': settings.key },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  }
+
+  if (response.status === 401 || response.status === 403) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401
+    );
+  }
+  if (response.status === 404) return { removed: false, externalId };
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new MarketplaceBridgeError(
+      `Маркетплейс відхилив зняття: ${describeRejection(response.status, text)}`,
+      'rejected',
+      502
+    );
+  }
+  return { removed: true, externalId };
+}
+
 /**
  * Надіслати файл книги у вітрину — другу половину товару.
  *

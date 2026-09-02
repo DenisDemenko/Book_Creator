@@ -146,6 +146,18 @@ const usd = (n: number) => `$${n.toFixed(n < 1 ? 4 : 2)}`;
  * сервера — лише відбиток, тож поле завжди порожнє, а «збережено» видно
  * по відбитку поруч.
  */
+interface BridgeBookRow {
+  externalId: string;
+  slug: string;
+  title: string;
+  status: string;
+  priceMinor: number;
+  sellerSlug: string | null;
+  publishedAt: string | null;
+  hasFile: boolean;
+  fileName: string | null;
+}
+
 const MarketplaceBridgePanel: React.FC = () => {
   const [url, setUrl] = useState('');
   const [key, setKey] = useState('');
@@ -160,6 +172,12 @@ const MarketplaceBridgePanel: React.FC = () => {
   // Прогін конвеєра окремим станом: його результат живе довше за повідомлення
   // про збереження й не має ним затиратись.
   const [sellerSlug, setSellerSlug] = useState('');
+  // Перелік того, що реально стоїть у вітрині. Окремо від publishResult:
+  // той показує наслідок ОСТАННЬОЇ дії, а цей — поточний стан.
+  const [shelf, setShelf] = useState<BridgeBookRow[] | null>(null);
+  const [shelfError, setShelfError] = useState<string | null>(null);
+  // Дворівневе підтвердження: externalId, для якого кнопка вже перепитує.
+  const [confirming, setConfirming] = useState<string | null>(null);
   const [publishResult, setPublishResult] = useState<
     { tone: 'ok' | 'err'; text: string; slug?: string } | null
   >(null);
@@ -224,6 +242,40 @@ const MarketplaceBridgePanel: React.FC = () => {
       });
     } catch (err: any) {
       setMessage({ tone: 'err', text: err?.message || 'Помилка перевірки.' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const loadShelf = async () => {
+    setShelfError(null);
+    try {
+      const res = await fetch('/api/admin/marketplace-bridge/books', { credentials: 'same-origin' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Не вдалося прочитати перелік.');
+      setShelf(data.books || []);
+    } catch (err: any) {
+      setShelf(null);
+      setShelfError(err?.message || 'Помилка читання переліку.');
+    }
+  };
+
+  const removeFromShelf = async (externalId: string) => {
+    setBusy(true);
+    setShelfError(null);
+    try {
+      const res = await fetch('/api/admin/marketplace-bridge/unpublish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ externalId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Не вдалося зняти лістинг.');
+      setConfirming(null);
+      await loadShelf();
+    } catch (err: any) {
+      setShelfError(err?.message || 'Помилка зняття.');
     } finally {
       setBusy(false);
     }
@@ -442,6 +494,101 @@ const MarketplaceBridgePanel: React.FC = () => {
             )}
           </div>
         )}
+      </div>
+
+      {/* Що стоїть у вітрині зараз. Нічого не знімається автоматично:
+          жоден інший екран і жодна дія Студії не прибирає лістинги —
+          тільки ця кнопка, і тільки у два кліки. */}
+      <div className="p-5 rounded-2xl bg-slate-900/60 border border-white/[0.06] space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-bold text-slate-100">Книги Студії у вітрині</h3>
+            <p className="text-[11px] text-slate-400 leading-snug mt-1">
+              Перелік читається з маркетплейсу, а не з памʼяті Студії: лістинг могли заархівувати
+              з іншого місця. Зняття — тільки вручну, кнопкою нижче, у два кліки. Автоматично
+              нічого не прибирається.
+            </p>
+          </div>
+          <button
+            onClick={() => void loadShelf()}
+            disabled={busy}
+            className="shrink-0 px-3 py-2 rounded-xl badge-glass text-slate-200 text-xs font-bold disabled:opacity-40"
+          >
+            Оновити
+          </button>
+        </div>
+
+        {shelfError && (
+          <p className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-rose-200 text-[11px]">
+            {shelfError}
+          </p>
+        )}
+
+        {shelf === null && !shelfError && (
+          <p className="text-[11px] text-slate-500">Натисніть «Оновити», щоб побачити поточний стан вітрини.</p>
+        )}
+
+        {shelf?.length === 0 && (
+          <p className="text-[11px] text-slate-500">У вітрині немає жодної книги зі Студії.</p>
+        )}
+
+        {shelf && shelf.length > 0 && (
+          <div className="space-y-2">
+            {shelf.map((row) => (
+              <div
+                key={row.externalId}
+                className="flex flex-wrap items-center gap-3 justify-between p-3 rounded-xl bg-slate-950 border border-slate-800"
+              >
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-slate-100 truncate">{row.title}</p>
+                  <p className="text-[10px] text-slate-500 font-mono truncate">
+                    {row.externalId} · {row.status}
+                    {row.priceMinor ? ` · ${(row.priceMinor / 100).toFixed(2)} грн` : ''}
+                    {row.sellerSlug ? ` · ${row.sellerSlug}` : ''}
+                  </p>
+                  <p className="text-[10px] mt-0.5">
+                    {row.hasFile ? (
+                      <span className="text-emerald-300">файл є{row.fileName ? `: ${row.fileName}` : ''}</span>
+                    ) : (
+                      <span className="text-amber-300">файла немає — покупцеві нічого завантажити</span>
+                    )}
+                  </p>
+                </div>
+                {row.status === 'archived' ? (
+                  <span className="text-[10px] text-slate-500 shrink-0">уже в архіві</span>
+                ) : confirming === row.externalId ? (
+                  <span className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => void removeFromShelf(row.externalId)}
+                      disabled={busy}
+                      className="px-3 py-1.5 rounded-lg bg-rose-500 text-slate-950 text-[11px] font-bold disabled:opacity-50"
+                    >
+                      Точно прибрати
+                    </button>
+                    <button
+                      onClick={() => setConfirming(null)}
+                      className="px-3 py-1.5 rounded-lg badge-glass text-slate-300 text-[11px]"
+                    >
+                      Скасувати
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => setConfirming(row.externalId)}
+                    className="shrink-0 px-3 py-1.5 rounded-lg badge-glass text-slate-200 text-[11px] font-bold"
+                  >
+                    Прибрати з вітрини
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <p className="text-[10px] text-slate-500">
+          Зняття переводить лістинг в архів, а не видаляє: на нього могла посилатися історія
+          замовлень, і покупець, який уже придбав книгу, доступу не втрачає.
+        </p>
       </div>
     </div>
   );

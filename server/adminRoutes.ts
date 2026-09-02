@@ -50,6 +50,8 @@ import {
   saveBridgeSettings,
   readBridgeSettings,
   testBridgeConnection,
+  listBridgeBooks,
+  unpublishByExternalId,
   bridgeTestBook,
   unpublishBookFromMarketplace,
   publishBookToMarketplace,
@@ -791,6 +793,33 @@ export function registerAdminRoutes(app: Express): void {
         kind: err?.kind,
         details: err?.details,
       });
+    }
+  });
+
+  /**
+   * Що зараз у вітрині від Студії. Потрібне саме для ручного зняття: без
+   * переліку адмін знімав би те, що памʼятає, а не те, що там стоїть.
+   */
+  app.get('/api/admin/marketplace-bridge/books', requireAdmin, async (_req, res) => {
+    try {
+      res.json({ books: await listBridgeBooks() });
+    } catch (err: any) {
+      const status = err instanceof MarketplaceBridgeError ? err.status : 502;
+      res.status(status).json({ error: err?.message || 'Не вдалося прочитати перелік.', kind: err?.kind });
+    }
+  });
+
+  /** Ручне зняття конкретного лістинга — за id з переліку, не за памʼяттю. */
+  app.post('/api/admin/marketplace-bridge/unpublish', requireAdmin, async (req, res) => {
+    const externalId = String(req.body?.externalId || '').trim();
+    if (!externalId) {
+      return res.status(400).json({ error: 'Не вказано externalId лістинга.', kind: 'bad_input' });
+    }
+    try {
+      res.json(await unpublishByExternalId(externalId));
+    } catch (err: any) {
+      const status = err instanceof MarketplaceBridgeError ? err.status : 500;
+      res.status(status).json({ error: err?.message || 'Не вдалося зняти лістинг.', kind: err?.kind });
     }
   });
 

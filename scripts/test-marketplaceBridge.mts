@@ -253,6 +253,42 @@ console.log('\nПричина відмови маркетплейсу доход
   t('порожнє тіло → лишається код', /HTTP 500/.test(empty), empty);
 }
 
+console.log('\nПерелік вітрини і ручне зняття:');
+{
+  const mk = (status: number, body: string) => (async (url: string, init: any = {}) => {
+    seenShelf.push({ url: String(url), method: init.method || 'GET', key: init.headers?.['x-bridge-key'] });
+    return { status, ok: status >= 200 && status < 300, text: async () => body };
+  }) as never;
+  const seenShelf: any[] = [];
+
+  const rows = await bridge.listBridgeBooks({
+    fetch: mk(200, JSON.stringify({ books: [
+      { externalId: 'b1:digital', slug: 's1', title: 'Книга', status: 'published', priceMinor: 15000, hasFile: true },
+    ] })),
+    settings,
+  });
+  t('перелік читається', rows.length === 1 && rows[0].externalId === 'b1:digital', String(rows.length));
+  t('ключ надіслано', seenShelf[0].key === 'secret-key');
+  t('метод GET', seenShelf[0].method === 'GET');
+
+  const empty = await bridge.listBridgeBooks({ fetch: mk(200, 'не json'), settings });
+  t('зіпсована відповідь → порожній перелік, а не падіння', empty.length === 0);
+
+  seenShelf.length = 0;
+  const removed = await bridge.unpublishByExternalId('b1:print', { fetch: mk(200, '{}'), settings });
+  t('знімається САМЕ той id, що показав перелік',
+    seenShelf[0].url.endsWith('/bridge/books/b1%3Aprint'), seenShelf[0].url);
+  t('метод DELETE', seenShelf[0].method === 'DELETE');
+  t('результат: знято', removed.removed === true);
+
+  const absent = await bridge.unpublishByExternalId('нема', { fetch: mk(404, ''), settings });
+  t('404 → не помилка, лістинга вже немає', absent.removed === false);
+
+  let denied: any = null;
+  try { await bridge.unpublishByExternalId('x', { fetch: mk(401, ''), settings }); } catch (e) { denied = e; }
+  t('401 → помилка про ключ', denied?.kind === 'unauthorized');
+}
+
 console.log('\nПовідомлення «не налаштовано» називає саме те, чого бракує:');
 {
   // Працюємо зі справжнім сховищем у тимчасовій теці: підмінити експорт
