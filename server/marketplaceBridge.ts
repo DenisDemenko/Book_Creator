@@ -183,6 +183,140 @@ export function bridgeExternalId(bookId: string, format: MarketplaceFormat): str
 
 const TIMEOUT_MS = 20000;
 
+/**
+ * Ідентифікатор для перевірки ключа. Формат `bookId:format` збігається з
+ * `bridgeExternalId`, але жоден справжній лістинг такого мати не може:
+ * `bookId` тут — зарезервований рядок, а `format` не є ані `digital`, ані
+ * `print`. Випадковий хвіст додано на випадок, якщо колись хтось руками
+ * заведе лістинг із таким id — тоді проба не зачепить його.
+ */
+function probeExternalId(): string {
+  return `nova-bridge-selftest-${Math.random().toString(36).slice(2, 10)}:probe`;
+}
+
+export interface BridgeTestResult {
+  /** Чи відповідає адреса взагалі. */
+  reachable: boolean;
+  healthStatus?: number;
+  healthBody?: string;
+  /** true — ключ прийнято, false — відхилено, null — визначити не вдалося. */
+  keyAccepted: boolean | null;
+  probeStatus?: number;
+  tone: 'ok' | 'warn' | 'err';
+  messageUk: string;
+}
+
+/**
+ * Перевірка мосту, що справді перевіряє КЛЮЧ, а не лише доступність адреси.
+ *
+ * Раніше тут був самий `GET /health`, і зелений результат не означав нічого
+ * про ключ: розбіжність спливала аж при першій справжній публікації. Тепер
+ * після /health робиться проба `DELETE /bridge/books/<неіснуючий id>`.
+ *
+ * Чому саме DELETE, а не POST: у маркетплейсі `assertBridgeKey` стоїть ПЕРЕД
+ * тілом обробника, тож ключ перевіряється раніше, ніж щось відбудеться. При
+ * правильному ключі обробник шукає лістинг, не знаходить і віддає 404 —
+ * тобто 404 і є доказом, що ключ прийнято. POST створив би справжній
+ * лістинг, а це перевірка, яка не має лишати слідів.
+ *
+ * Розрізнення:
+ *   401/403 → ключ не той (або на приймачі BRIDGE_API_KEY не заданий);
+ *   404     → ключ прийнято, лістинга немає — саме те, чого чекаємо;
+ *   200     → ключ прийнято, але щось архівовано: не мало статись, кажемо
+ *             про це вголос, а не мовчки зараховуємо як успіх;
+ *   решта   → висновку немає, віддаємо код як є.
+ */
+export async function testBridgeConnection(
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<BridgeTestResult> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+
+  let healthStatus: number | undefined;
+  let healthBody: string | undefined;
+  try {
+    const health = await doFetch(`${settings.url}/health`, {
+      signal: AbortSignal.timeout(15000),
+    });
+    healthStatus = health.status;
+    healthBody = (await health.text().catch(() => '')).slice(0, 300);
+  } catch (err: any) {
+    return {
+      reachable: false,
+      keyAccepted: null,
+      tone: 'err',
+      messageUk:
+        'Маркетплейс не відповідає — перевірте адресу API мосту. ' +
+        'Вона має вказувати на API напряму (https://api.fusionlab.in.ua), не на сайт.',
+    };
+  }
+
+  let probe: Response;
+  try {
+    probe = await doFetch(`${settings.url}/bridge/books/${encodeURIComponent(probeExternalId())}`, {
+      method: 'DELETE',
+      headers: { 'x-bridge-key': settings.key },
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (err: any) {
+    return {
+      reachable: true,
+      healthStatus,
+      healthBody,
+      keyAccepted: null,
+      tone: 'warn',
+      messageUk: `Адреса жива (HTTP ${healthStatus}), але сам міст не відповів — ключ перевірити не вдалося.`,
+    };
+  }
+
+  const probeStatus = probe.status;
+  const base = { reachable: true, healthStatus, healthBody, probeStatus } as const;
+
+  if (probeStatus === 401 || probeStatus === 403) {
+    return {
+      ...base,
+      keyAccepted: false,
+      tone: 'err',
+      messageUk:
+        'Адреса жива, але ключ мосту відхилено. Значення в цьому полі має збігатися ' +
+        'з BRIDGE_API_KEY у змінних сервісу API на Railway — байт у байт, без лапок і ' +
+        'пробілів. Якщо змінну щойно додали, перевірте, що сервіс після цього передеплоївся.',
+    };
+  }
+
+  if (probeStatus === 404) {
+    return {
+      ...base,
+      keyAccepted: true,
+      tone: 'ok',
+      messageUk:
+        'Ключ прийнято, міст працює. Перевірка зроблена запитом на видалення неіснуючого ' +
+        'лістинга, тож у каталозі нічого не створено й не змінено.',
+    };
+  }
+
+  if (probe.ok) {
+    return {
+      ...base,
+      keyAccepted: true,
+      tone: 'warn',
+      messageUk:
+        `Ключ прийнято, але маркетплейс відповів HTTP ${probeStatus} замість 404 — ` +
+        'тобто знайшов лістинг із тестовим ідентифікатором і міг його архівувати. ' +
+        'Такого лістинга бути не мало; перевірте каталог.',
+    };
+  }
+
+  return {
+    ...base,
+    keyAccepted: null,
+    tone: 'warn',
+    messageUk:
+      `Адреса жива, але міст відповів HTTP ${probeStatus} — про ключ це нічого не каже. ` +
+      'Перевірте журнал сервісу API.',
+  };
+}
+
 export async function publishBookToMarketplace(
   input: PublishBookInput,
   deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}

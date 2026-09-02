@@ -49,6 +49,7 @@ import {
   readBridgeSettingsView,
   saveBridgeSettings,
   readBridgeSettings,
+  testBridgeConnection,
   publishBookToMarketplace,
   publishCourseToMarketplace,
   MarketplaceBridgeError,
@@ -736,15 +737,22 @@ export function registerAdminRoutes(app: Express): void {
   });
 
   /**
-   * Перевірка зв'язку: свідомо б'ємо в /health маркетплейсу, а не в
-   * /bridge/books — тест не повинен створювати справжній лістинг.
+   * Перевірка зв'язку. Перевіряє САМЕ КЛЮЧ, а не лише доступність адреси:
+   * після /health робиться проба DELETE неіснуючого лістинга, де 404 —
+   * доказ прийнятого ключа, а 401 — доказ розбіжності. Деталі й обґрунтування
+   * вибору методу — у коментарі до testBridgeConnection.
    */
   app.post('/api/admin/marketplace-bridge/test', requireAdmin, async (_req, res) => {
     try {
-      const settings = await readBridgeSettings();
-      const response = await fetch(`${settings.url}/health`, { signal: AbortSignal.timeout(15000) });
-      const body = await response.text().catch(() => '');
-      res.json({ ok: response.ok, status: response.status, body: body.slice(0, 300) });
+      const result = await testBridgeConnection();
+      res.json({
+        ok: result.tone === 'ok',
+        tone: result.tone,
+        message: result.messageUk,
+        keyAccepted: result.keyAccepted,
+        status: result.probeStatus ?? result.healthStatus,
+        body: result.healthBody,
+      });
     } catch (err: any) {
       const status = err instanceof MarketplaceBridgeError ? err.status : 502;
       res.status(status).json({ error: err?.message || 'Маркетплейс не відповідає.', kind: err?.kind || 'unreachable' });

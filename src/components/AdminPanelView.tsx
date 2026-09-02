@@ -208,9 +208,13 @@ const MarketplaceBridgePanel: React.FC = () => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Маркетплейс не відповів.');
+      // Сервер уже сформулював висновок людською мовою й розрізнив три
+      // стани: ключ прийнято / ключ відхилено / визначити не вдалося.
+      // Клієнт його лише показує — щоб формулювання не розходились із тим,
+      // що насправді перевірялось.
       setMessage({
-        tone: data.ok ? 'ok' : 'err',
-        text: data.ok ? `Звʼязок є: ${data.body || 'HTTP ' + data.status}` : `HTTP ${data.status}`,
+        tone: data.tone === 'ok' ? 'ok' : 'err',
+        text: data.message || (data.ok ? 'Звʼязок є.' : `HTTP ${data.status}`),
       });
     } catch (err: any) {
       setMessage({ tone: 'err', text: err?.message || 'Помилка перевірки.' });
