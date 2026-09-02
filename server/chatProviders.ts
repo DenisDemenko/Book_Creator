@@ -288,30 +288,61 @@ async function generateClaude(
   // JSON-об'єкт, а не почати з преамбули на кшталт «Ось персонаж:».
   // Сам символ `{` у відповіді API не повертається (це наш префікс, а не
   // згенерований токен), тож дописуємо його назад перед парсингом.
-  const messages = json
-    ? [{ role: 'user', content: userContent }, { role: 'assistant', content: '{' }]
-    : [{ role: 'user', content: userContent }];
+  //
+  // ПРИЙОМ ПРАЦЮЄ НЕ НА ВСІХ МОДЕЛЯХ. `claude-sonnet-5` відповідає
+  // 400 invalid_request_error «This model does not support assistant message
+  // prefill. The conversation must end with a user message.» — тобто запит
+  // навіть не доходить до генерації. Виявлено живим прогоном скринінгу ринку
+  // 02.09.2026 (запис #68 у log.md): усі наявні модулі з json:true ходили
+  // через Gemini, тож ця гілка роками не виконувалась на Claude.
+  //
+  // Тому prefill — спроба, а не вимога: на цю конкретну відмову повторюємо
+  // запит без нього. Втрати невеликі, бо жорсткий JSON-контракт кожен модуль
+  // і так тримає в системній інструкції, а розбір усюди толерантний до
+  // markdown-огорожі. Перевіряти список моделей замість тексту помилки не
+  // варто: список застаріє з наступним релізом Anthropic, а поведінка
+  // «спробувати й відкотитись» лишиться правильною.
+  async function callClaude(withPrefill: boolean) {
+    const messages = withPrefill
+      ? [{ role: 'user', content: userContent }, { role: 'assistant', content: '{' }]
+      : [{ role: 'user', content: userContent }];
 
-  const upstream = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': key,
-      'anthropic-version': '2023-06-01',
-    },
-    // Без `temperature`: сучасні моделі Claude (Opus/Sonnet 5, Haiku 4.5)
-    // повертають 400 invalid_request_error «temperature is deprecated for
-    // this model», якщо параметр взагалі присутній у тілі запиту — навіть
-    // зі значенням за замовчуванням.
-    body: JSON.stringify({
-      model: modelId,
-      system: systemInstruction,
-      messages,
-      max_tokens: 4096,
-    }),
-  });
+    const upstream = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+      },
+      // Без `temperature`: сучасні моделі Claude (Opus/Sonnet 5, Haiku 4.5)
+      // повертають 400 invalid_request_error «temperature is deprecated for
+      // this model», якщо параметр взагалі присутній у тілі запиту — навіть
+      // зі значенням за замовчуванням.
+      body: JSON.stringify({
+        model: modelId,
+        system: systemInstruction,
+        messages,
+        max_tokens: 4096,
+      }),
+    });
 
-  const data = await upstream.json().catch(() => ({}));
+    const data = await upstream.json().catch(() => ({}));
+    return { upstream, data };
+  }
+
+  let prefilled = Boolean(json);
+  let { upstream, data } = await callClaude(prefilled);
+
+  if (
+    !upstream.ok &&
+    prefilled &&
+    upstream.status === 400 &&
+    /prefill/i.test(String(data?.error?.message || ''))
+  ) {
+    prefilled = false;
+    ({ upstream, data } = await callClaude(false));
+  }
+
   if (!upstream.ok) {
     const err = data?.error || {};
     const message = err.message || `Claude повернув статус ${upstream.status}.`;
@@ -323,7 +354,10 @@ async function generateClaude(
     .map((c: any) => c.text)
     .join('');
   return {
-    text: json ? `{${text}` : text,
+    // Дописуємо `{` назад лише якщо prefill реально застосований: після
+    // відкату модель повертає повний JSON сама, і зайва дужка зробила б
+    // валідну відповідь невалідною.
+    text: prefilled ? `{${text}` : text,
     inputTokens: data.usage?.input_tokens ?? 0,
     outputTokens: data.usage?.output_tokens ?? 0,
   };

@@ -87,6 +87,18 @@ console.log('\nНормалізація — межа довіри до моде�
   t('відсутня ціна названа в unavailable', noPrice.provenance.unavailable.includes('priceUsd'),
     noPrice.provenance.unavailable.join(','));
 
+  // Anthropic у режимі JSON підкладає репліку асистента з «{», тож голий
+  // масив там неможливий у принципі — контракт просить обʼєкт. Розбір мусить
+  // приймати обидві форми, інакше зміна рушія тихо ламала б модуль.
+  const asObject = prompt.normalizeMarketScreenResult(
+    { listings: [{ title: 'Літак у обгортці обʼєкта', priceUsd: 15 }] },
+    { topicKey: 'k', collectedAt: '2026-01-01T00:00:00.000Z', limit: 5 });
+  t('відповідь у формі {"listings": [...]} розбирається', asObject.length === 1, String(asObject.length));
+  const asArray = prompt.normalizeMarketScreenResult(
+    [{ title: 'Літак голим масивом', priceUsd: 15 }],
+    { topicKey: 'k', collectedAt: '2026-01-01T00:00:00.000Z', limit: 5 });
+  t('голий масив теж розбирається', asArray.length === 1, String(asArray.length));
+
   const many = Array.from({ length: 30 }, (_, i) => ({ title: `Товар ${i}` }));
   t('ліміт дотримано', prompt.normalizeMarketScreenResult(many,
     { topicKey: 'k', collectedAt: '2026-01-01T00:00:00.000Z', limit: 10 }).length === 10);

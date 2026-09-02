@@ -122,10 +122,26 @@ const screen = async (p: { topic: string; count: number }) => {
   };
 };
 
-const run = await service.runMarketScreen(
-  { topic, count, userId: 'cli-live-run', modelId, force: true, req: fakeReq },
-  { screen: screen as never }
-);
+// Помилку провайдера ловимо самі: без цього необроблена відмова валить
+// процес стеком у консоль, а на Windows ще й тягне за собою асерт libuv при
+// різкому виході — і причина губиться серед шуму.
+let run;
+try {
+  run = await service.runMarketScreen(
+    { topic, count, userId: 'cli-live-run', modelId, force: true, req: fakeReq },
+    { screen: screen as never }
+  );
+} catch (err) {
+  const msg = err instanceof Error ? err.message : String(err);
+  console.error(`\nСкринінг не вдався: ${msg}`);
+  if (/prefill/i.test(msg)) {
+    console.error('Модель не приймає режим JSON через підкладену репліку асистента. ' +
+      'Оновіть server/chatProviders.ts або оберіть іншу модель третім аргументом.');
+  } else if (/401|403|Unauthorized/i.test(msg)) {
+    console.error(`Перевірте ключ провайдера «${engine}» у .env.`);
+  }
+  process.exit(1);
+}
 
 const r = run.report;
 console.log(`\nЗвіт зібрано: ${r.items.length} позицій із ${r.requestedCount} запитаних.`);
