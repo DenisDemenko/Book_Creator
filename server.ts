@@ -46,6 +46,7 @@ import { registerChatRoutes, CHAT_USAGE_CONTEXT } from './server/chatRoutes';
 import { registerApiKeysRoutes } from './server/apiKeysRoutes';
 import { registerExpressRoutes } from './server/expressRoutes';
 import { registerDiagnRoutes } from './server/diagnRoutes';
+import { registerMarketRoutes } from './server/marketRoutes';
 import { registerNarrationRoutes } from './server/narrationRoutes';
 import { registerPublishingRoutes } from './server/publishingRoutes';
 import { requireImageQuota, requirePlanAtLeast, checkChatQuota, resolveSubscription } from './server/subscriptions';
@@ -372,6 +373,16 @@ async function startServer() {
     resolveEngine: resolveChatEngine as never,
     defaultModelId: GEMINI_MODEL,
     loadAdminLayer: () => loadCoreAdminLayer(),
+  });
+  // King Market Intelligence. Ті самі замикання, що й у діагностик, і з тієї
+  // самої причини: вибір провайдера, адмінський шар промтів і ядро AI
+  // живуть тут, у server.ts. Модуль сам не імпортує aiCore — інакше
+  // з'явився б другий шлях до генерації, повз облік витрат у usage_log.
+  registerMarketRoutes(app, {
+    resolveEngine: resolveChatEngine as never,
+    defaultModelId: GEMINI_MODEL,
+    loadAdminLayer: () => loadCoreAdminLayer(),
+    generateText: generateAiText as never,
   });
   registerNarrationRoutes(app);
 

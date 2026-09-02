@@ -404,6 +404,64 @@ CREATE TABLE IF NOT EXISTS narrations (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_narrations_cache ON narrations(cache_key);
 CREATE INDEX IF NOT EXISTS idx_narrations_section ON narrations(section_id, lang);
 CREATE INDEX IF NOT EXISTS idx_narrations_book ON narrations(book_id, created_at);
+
+-- ===========================================================================
+-- King Market Intelligence — аналітика ринку Etsy
+-- (TZ_King_Market_Intelligence_Etsy_v1_0.docx, розділи 8, 11)
+-- ===========================================================================
+
+-- Часовий ряд показників товару. Таблиця СУВОРО append-only (ТЗ 8: «кожен
+-- запуск collector створює новий snapshot; попередні значення не
+-- перезаписуються») — саме тому тут немає ані UNIQUE на product_key, ані
+-- ON CONFLICT DO UPDATE десь у сховищі: без старих рядків не буде ані
+-- Review Velocity, ані Price Change, тобто половини модуля.
+--
+-- Колонки source і confidence лежать у КОЖНОМУ рядку, а не в звіті над ним:
+-- Etsy API в цьому середовищі не налаштований, і зріз майже завжди —
+-- оцінка мовної моделі. Якщо ключ Etsy колись з'явиться, у тому самому
+-- ряду теми співіснуватимуть зрізи 'ai_screen' і 'etsy_api', і відрізнити
+-- їх можна буде лише порядково.
+--
+-- Модель ціни тут спрощена проти etsy_research_snapshots: одна валюта
+-- (USD) у price_usd, бо весь модуль порівнює товари між собою, а не веде
+-- бухгалтерію.
+CREATE TABLE IF NOT EXISTS market_snapshots (
+  id           TEXT PRIMARY KEY,
+  product_key  TEXT NOT NULL,                -- <topicKey>::<externalId|slug(title)>
+  topic_key    TEXT NOT NULL,                -- нормалізована тема (normalizeTopicKey)
+  collected_at TEXT NOT NULL,
+  price_usd    REAL,                         -- NULL = джерело не дало (ТЗ 2: не вигадуємо)
+  review_count INTEGER,
+  favorers     INTEGER,
+  rating       REAL,
+  availability TEXT,
+  title        TEXT NOT NULL,
+  source       TEXT NOT NULL,                -- etsy_api | ai_screen | manual | derived
+  confidence   REAL NOT NULL DEFAULT 0
+);
+-- Два різні запити, два різні індекси: картка товару читає історію одного
+-- product_key, а перерахунок звіту — усі зрізи теми за раз.
+CREATE INDEX IF NOT EXISTS idx_market_snap_product ON market_snapshots(product_key, collected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_market_snap_topic   ON market_snapshots(topic_key, collected_at DESC);
+
+-- Готовий звіт по темі. Служить кешем (щоб повторний клік не витрачав
+-- виклик моделі) і водночас журналом: рядки не перезаписуються, тож видно,
+-- як звіт по темі виглядав місяць тому. Денормалізовані item_count і
+-- avg_opportunity винесені з payload назовні лише заради списку тем —
+-- інакше кожен рядок довелося б розпарсювати, щоб показати два числа.
+CREATE TABLE IF NOT EXISTS market_reports (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT,                      -- NULL для планових перерахунків
+  topic_key       TEXT NOT NULL,
+  topic           TEXT NOT NULL,
+  collected_at    TEXT NOT NULL,
+  item_count      INTEGER NOT NULL DEFAULT 0,
+  avg_opportunity REAL,                      -- NULL, якщо score порахувати не було з чого
+  source          TEXT NOT NULL,             -- походження набору (Provenance.source)
+  model_id        TEXT,                      -- яка модель робила скринінг ('ai_screen')
+  payload         TEXT NOT NULL              -- JSON: MarketReport цілком
+);
+CREATE INDEX IF NOT EXISTS idx_market_reports_topic ON market_reports(topic_key, collected_at DESC);
 `;
 
 /**

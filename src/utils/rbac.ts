@@ -41,6 +41,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canPublish: true,
       canPublishExternal: true,
       canManageApiKeys: true,
+      canMarketIntel: true,
       isReadOnly: false,
       allowedTabs: [
 'express',
@@ -72,6 +73,7 @@ export const ALL_ROLES: RoleInfo[] = [
         'structure',
         'portfolio',
         'publishing',
+        'market',
         'admin'
       ]
     },
@@ -124,6 +126,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canPublishExternal: true,
       // Ключі провайдерів вводить лише адміністратор (див. server/auth.ts).
       canManageApiKeys: false,
+      canMarketIntel: true,
       isReadOnly: false,
       allowedTabs: [
 'express',
@@ -147,7 +150,8 @@ export const ALL_ROLES: RoleInfo[] = [
         'trainers',
         'structure',
         'portfolio',
-        'publishing'
+        'publishing',
+        'market'
       ]
     },
     defaultPersona: {
@@ -196,6 +200,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canPublish: false,
       canPublishExternal: false,
       canManageApiKeys: false,
+      canMarketIntel: false,
       isReadOnly: false,
       allowedTabs: [
         'subscription',
@@ -254,6 +259,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canPublish: false,
       canPublishExternal: false,
       canManageApiKeys: false,
+      canMarketIntel: false,
       isReadOnly: false,
       allowedTabs: [
         'subscription',
@@ -311,6 +317,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canPublish: true,
       canPublishExternal: true,
       canManageApiKeys: false,
+      canMarketIntel: true,
       isReadOnly: false,
       allowedTabs: [
         'subscription',
@@ -324,7 +331,8 @@ export const ALL_ROLES: RoleInfo[] = [
         'qr-footnotes',
         'kdp-format',
         'pdf-editor',
-        'publishing'
+        'publishing',
+        'market'
       ]
     },
     defaultPersona: {
@@ -373,6 +381,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canPublish: false,
       canPublishExternal: false,
       canManageApiKeys: false,
+      canMarketIntel: false,
       isReadOnly: true,
       allowedTabs: [
         'subscription',
@@ -426,6 +435,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canPublish: false,
       canPublishExternal: false,
       canManageApiKeys: false,
+      canMarketIntel: false,
       isReadOnly: true,
       allowedTabs: [
 'express',

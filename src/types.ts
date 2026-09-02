@@ -29,7 +29,8 @@ export type NavigationTab =
   | 'diagn'        // Модуль /diagn: AI-діагностика стилю, структури та компетенцій автора
   | 'structure'    // Фаза 3, 3.1: Конструктор структури книги (шаблони + AI-заголовки)
   | 'portfolio'    // Фаза 3, 3.3: Приватне портфоліо автора (лише для самого автора)
-  | 'publishing';  // Модуль публікації та експорту: Amazon KDP (файли + метадані) та Etsy (лістинг через Open API v3)
+  | 'publishing'   // Модуль публікації та експорту: Amazon KDP (файли + метадані) та Etsy (лістинг через Open API v3)
+  | 'market';      // King Market Intelligence: аналітика ринку Etsy (AI-скринінг, Opportunity Score) — Pro/Ultra
 
 export interface AuditLogEntry {
   id: string;
@@ -771,6 +772,14 @@ export interface RolePermission {
    * надає послуги своїми ключами, вимкнено (H4). Відповідає `keys:manage`.
    */
   canManageApiKeys: boolean;
+  /**
+   * Доступ до модуля King Market Intelligence (аналітика ринку Etsy).
+   * Окреме право, а не похідне від `canPublishExternal`: скринінг витрачає
+   * платні виклики моделі з ядра, тож ролі, які лише оформлюють видання
+   * (дизайнер, перекладач, читач, гість), його не отримують. Дзеркалить
+   * серверну перевірку `canMarketIntel` на маршрутах /api/market/*.
+   */
+  canMarketIntel: boolean;
   isReadOnly: boolean;
   allowedTabs: NavigationTab[];
 }

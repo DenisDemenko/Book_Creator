@@ -728,6 +728,7 @@ const CORE_MODULE_LABELS: Record<CoreModuleKey, string> = {
   behaviorDrift: 'Детектор дрейфу поведінки',
   readerResponse: 'Емоційний відгук читача',
   characterCodex: 'Автоматичний кодекс персонажа',
+  etsyMarketScreen: 'Скринінг ринку Etsy (King Market Intelligence)',
 };
 
 const CORE_MODULE_DESCRIPTIONS: Record<CoreModuleKey, string> = {
@@ -756,6 +757,8 @@ const CORE_MODULE_DESCRIPTIONS: Record<CoreModuleKey, string> = {
     'Фрагмент тексту розділу → симуляція живої емоційної реакції читача-бета-рідера (не критика, не поради): де виникає цікавість чи напруга, де увага може провиснути. Схема відповіді не редагується.',
   characterCodex:
     'Уривки з тексту книги, де персонаж згадується → структурований перелік фактів, які текст ФАКТИЧНО встановив про нього (зовнішність, характер, стосунки, події). Не звіряє з карткою — компілює з тексту. Схема відповіді не редагується.',
+  etsyMarketScreen:
+    'Тема (пошуковий запит Etsy) → зріз ринку: типові товари, ціни, відгуки, «улюблені», теги. Джерело — САМА МОДЕЛЬ, а не Etsy API (ETSY_API_KEY у проєкті немає), тому кожне число тут ОЦІНКА, а не факт про конкретний лістинг: id та URL лістингів відкидаються навіть якщо модель їх вигадає, а невідоме поле лишається порожнім, а не нулем. Схема відповіді не редагується.',
 };
 
 /** Плейсхолдер → поле тестових вхідних даних. Одна мапа обслуговує форму й підказки одразу для всіх модулів. */
@@ -796,6 +799,10 @@ const CORE_FIELD_DEFS: Record<string, { key: string; label: string; textarea?: b
   '{СТОСУНКИ}': { key: 'relationshipsJson', label: 'Стосунки (JSON)', textarea: true },
   '{ПАТЕРНИ_ПОВЕДІНКИ}': { key: 'behaviorPatterns', label: 'Заявлені патерни поведінки', textarea: true },
   '{ЗГАДУВАННЯ_У_КНИЗІ}': { key: 'mentions', label: 'Уривки з тексту книги (згадування персонажа)', textarea: true },
+  // King Market Intelligence: подвійні дужки — токени з ТЗ модуля, не з реєстру.
+  '{{topic}}': { key: 'topic', label: 'Тема (пошуковий запит Etsy)', placeholder: 'paracord bracelet' },
+  '{{count}}': { key: 'count', label: 'Скільки товарів повернути', placeholder: '20' },
+  '{{language}}': { key: 'language', label: 'Мова текстових пояснень', placeholder: 'українська' },
 };
 
 /**

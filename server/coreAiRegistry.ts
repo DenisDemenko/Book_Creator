@@ -89,6 +89,11 @@ import {
   renderCharacterCodexSystemTemplate,
   renderCharacterCodexUserTemplate,
 } from './characterCodexPrompt';
+import {
+  factoryMarketScreenSystemTemplate,
+  factoryMarketScreenUserTemplate,
+  renderMarketScreenTemplate,
+} from './market/marketScreenPrompt';
 
 /** Ключ у таблиці `meta`, під яким лежить ЄДИНИЙ адмінський шар усіх модулів ядра. */
 export const CORE_PROMPT_TEMPLATES_META_KEY = 'prompt_templates_core_admin';
@@ -113,6 +118,7 @@ export const CORE_MODULE_KEYS = [
   'behaviorDrift',
   'readerResponse',
   'characterCodex',
+  'etsyMarketScreen',
 ] as const;
 
 export type CoreModuleKey = (typeof CORE_MODULE_KEYS)[number];
@@ -176,6 +182,11 @@ export const CORE_MODULE_PLACEHOLDERS: Record<CoreModuleKey, string[]> = {
   behaviorDrift: ['{ІМ_Я}', '{ПРІЗВИЩЕ}', '{ПАТЕРНИ_ПОВЕДІНКИ}', '{ЗГАДУВАННЯ_У_КНИЗІ}', '{МОВА}'],
   readerResponse: ['{РОЗДІЛ}', '{ЖАНР}', '{ФРАГМЕНТ}', '{МОВА}'],
   characterCodex: ['{ІМ_Я}', '{ПРІЗВИЩЕ}', '{ПСЕВДО}', '{ЗГАДУВАННЯ_У_КНИЗІ}', '{МОВА}'],
+  // Єдиний модуль ядра з подвійними фігурними дужками: він прийшов із
+  // King Market Intelligence, де плейсхолдери описані в ТЗ саме так.
+  // Токени навмисно НЕ перейменовані під решту реєстру — інакше шаблон у
+  // конструкторі розходився б із документом, за яким його перевірятимуть.
+  etsyMarketScreen: ['{{topic}}', '{{count}}', '{{language}}'],
 };
 
 /** Чи модуль повертає JSON за жорсткою схемою (схема — readonly-текст у конструкторі, не редагується). */
@@ -196,6 +207,7 @@ export const CORE_MODULE_HAS_JSON_SCHEMA: Record<CoreModuleKey, boolean> = {
   behaviorDrift: true,
   readerResponse: true,
   characterCodex: true,
+  etsyMarketScreen: true,
 };
 
 /**
@@ -280,6 +292,8 @@ export function factoryCoreTemplate(module: CoreModuleKey): CorePromptTemplate {
       return { system: readerResponseSystemInstruction(), user: factoryReaderResponseTemplate() };
     case 'characterCodex':
       return { system: characterCodexSystemInstruction(), user: factoryCharacterCodexTemplate() };
+    case 'etsyMarketScreen':
+      return { system: factoryMarketScreenSystemTemplate(), user: factoryMarketScreenUserTemplate() };
   }
 }
 
@@ -541,5 +555,14 @@ export function renderCoreTemplate(
         user: renderCharacterCodexUserTemplate(template.user, values),
       };
     }
+    case 'etsyMarketScreen':
+      // Обидві половини рендеряться разом: {{language}} присутнє і в
+      // system, і в user, а {{topic}}/{{count}} — лише в user. Ключ
+      // 'language' той самий, що й у решти модулів вибору мови.
+      return renderMarketScreenTemplate(template, {
+        topic: fields.topic || '',
+        count: fields.count || '',
+        language: fields.language || '',
+      });
   }
 }

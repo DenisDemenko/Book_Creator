@@ -19,6 +19,7 @@ import { TrainersView } from './components/TrainersView';
 import { BookStructureBuilder } from './components/BookStructureBuilder';
 import { PortfolioView } from './components/PortfolioView';
 import { PublishingHubView } from './components/PublishingHubView';
+import { MarketIntelligenceView } from './components/MarketIntelligenceView';
 import { TableOfContentsView } from './components/TableOfContentsView';
 import { QRFootnotesView } from './components/QRFootnotesView';
 import { ScenarioView } from './components/ScenarioView';
@@ -1816,6 +1817,13 @@ export default function App() {
             authUser={auth.user}
             totalWords={totalWords}
             onNavigateToTab={handleSelectTab}
+          />
+        )}
+
+        {currentTab === 'market' && (
+          <MarketIntelligenceView
+            authUser={auth.user}
+            onGoToSubscription={() => handleSelectTab('subscription')}
           />
         )}
       </div>
