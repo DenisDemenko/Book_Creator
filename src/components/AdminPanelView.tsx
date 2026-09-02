@@ -249,13 +249,13 @@ const MarketplaceBridgePanel: React.FC = () => {
           : '';
         throw new Error((data?.error || 'Публікація не вдалася.') + extra);
       }
-      const listing: any = data?.published?.listing;
-      const slug: string | undefined = listing?.slug;
+      const slug: string | undefined = data?.published?.slug;
+      const created: boolean | undefined = data?.published?.created;
       setPublishResult({
         tone: 'ok',
         slug,
         text: slug
-          ? `Книга у вітрині. Адреса товару: /catalog/${slug}`
+          ? `${created === false ? 'Лістинг оновлено' : 'Книга у вітрині'}. Адреса товару: /catalog/${slug}`
           : 'Маркетплейс прийняв книгу, але не повернув slug — перевірте каталог вручну.',
       });
     } catch (err: any) {

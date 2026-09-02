@@ -148,6 +148,37 @@ console.log('\nЗняття лістинга з вітрини:');
   t('500 → помилка «відхилено», а не тихий успіх', rejected?.kind === 'rejected', String(rejected?.kind));
 }
 
+console.log('\nSlug дістається з конверта приймача:');
+{
+  const okFetch = (body: string) => (async () => ({
+    status: 200, ok: true, text: async () => body,
+  })) as never;
+  const publish = (body: string) => bridge.publishBookToMarketplace(
+    { ...bridge.bridgeTestBook(), format: 'digital', priceMinor: 100 },
+    { fetch: okFetch(body), settings });
+
+  // Реальна форма відповіді POST /bridge/books.
+  const enveloped = await publish(JSON.stringify({
+    created: true,
+    listing: { slug: 'testova-knyha-mostu-nova', title: 'Тестова книга' },
+  }));
+  t('slug витягнуто з {created, listing}', enveloped.slug === 'testova-knyha-mostu-nova', String(enveloped.slug));
+  t('created передано далі', enveloped.created === true);
+
+  const updated = await publish(JSON.stringify({ created: false, listing: { slug: 'a-b' } }));
+  t('оновлення відрізняється від створення', updated.created === false && updated.slug === 'a-b');
+
+  // Якщо приймач колись віддасть картку без конверта.
+  const bare = await publish(JSON.stringify({ slug: 'bez-konverta' }));
+  t('картка без конверта теж читається', bare.slug === 'bez-konverta', String(bare.slug));
+
+  const nothing = await publish(JSON.stringify({ created: true, listing: {} }));
+  t('без slug — undefined, а не порожній рядок', nothing.slug === undefined, String(nothing.slug));
+
+  t('повна відповідь лишилась для аудиту',
+    JSON.stringify((enveloped.listing as any)?.listing?.title) === '"Тестова книга"');
+}
+
 console.log('\nПричина відмови маркетплейсу доходить до користувача:');
 {
   const reject = (status: number, body: string) => (async () => ({

@@ -178,7 +178,12 @@ export interface PublishBookInput {
 export interface PublishBookResult {
   externalId: string;
   format: MarketplaceFormat;
+  /** Повна відповідь приймача — лишається для аудиту. */
   listing: unknown;
+  /** Витягнуте з відповіді: адреса товару у вітрині. */
+  slug?: string;
+  /** true — лістинг створено, false — оновлено наявний. */
+  created?: boolean;
 }
 
 /**
@@ -191,6 +196,35 @@ export function bridgeExternalId(bookId: string, format: MarketplaceFormat): str
 }
 
 const TIMEOUT_MS = 20000;
+
+/**
+ * Розпакувати відповідь приймача.
+ *
+ * `POST /bridge/books` повертає конверт `{ created, listing }`, де `listing`
+ * — картка товару. Міст клав увесь конверт у власне поле `listing`, тож
+ * `slug` опинявся на рівень глибше, ніж його шукали, і панель казала
+ * «маркетплейс не повернув slug», хоча повертав.
+ *
+ * Розпаковування живе тут, а не в інтерфейсі: формат дроту — справа мосту.
+ * Якщо приймач колись віддаватиме картку без конверта, друга гілка це
+ * витримає.
+ */
+function unwrapListing(body: unknown): { card?: Record<string, unknown>; created?: boolean } {
+  if (!body || typeof body !== 'object') return {};
+  const envelope = body as { created?: unknown; listing?: unknown };
+  if (envelope.listing && typeof envelope.listing === 'object') {
+    return {
+      card: envelope.listing as Record<string, unknown>,
+      created: typeof envelope.created === 'boolean' ? envelope.created : undefined,
+    };
+  }
+  return { card: body as Record<string, unknown> };
+}
+
+function listingSlug(body: unknown): string | undefined {
+  const slug = unwrapListing(body).card?.slug;
+  return typeof slug === 'string' && slug ? slug : undefined;
+}
 
 /**
  * Витягти з відповіді маркетплейсу причину відмови.
@@ -512,7 +546,7 @@ export async function publishBookToMarketplace(
     listing = { raw: text.slice(0, 400) };
   }
 
-  return { externalId, format: input.format, listing };
+  return { externalId, format: input.format, listing, slug: listingSlug(listing), created: unwrapListing(listing).created };
 }
 
 /**
@@ -551,6 +585,8 @@ export interface PublishCourseInput {
 export interface PublishCourseResult {
   externalId: string;
   listing: unknown;
+  slug?: string;
+  created?: boolean;
 }
 
 /** На відміну від книги — без формату: курс завжди один товар на книгу. */
@@ -627,5 +663,5 @@ export async function publishCourseToMarketplace(
     listing = { raw: text.slice(0, 400) };
   }
 
-  return { externalId, listing };
+  return { externalId, listing, slug: listingSlug(listing), created: unwrapListing(listing).created };
 }
