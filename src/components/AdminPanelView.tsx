@@ -157,6 +157,12 @@ const MarketplaceBridgePanel: React.FC = () => {
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
+  // Прогін конвеєра окремим станом: його результат живе довше за повідомлення
+  // про збереження й не має ним затиратись.
+  const [sellerSlug, setSellerSlug] = useState('');
+  const [publishResult, setPublishResult] = useState<
+    { tone: 'ok' | 'err'; text: string; slug?: string } | null
+  >(null);
 
   const load = useCallback(async () => {
     try {
@@ -218,6 +224,56 @@ const MarketplaceBridgePanel: React.FC = () => {
       });
     } catch (err: any) {
       setMessage({ tone: 'err', text: err?.message || 'Помилка перевірки.' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const testPublish = async () => {
+    setBusy(true);
+    setPublishResult(null);
+    try {
+      const res = await fetch('/api/admin/marketplace-bridge/test-publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(sellerSlug.trim() ? { sellerSlug: sellerSlug.trim() } : {}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Публікація не вдалася.');
+      const listing: any = data?.published?.listing;
+      const slug: string | undefined = listing?.slug;
+      setPublishResult({
+        tone: 'ok',
+        slug,
+        text: slug
+          ? `Книга у вітрині. Адреса товару: /catalog/${slug}`
+          : 'Маркетплейс прийняв книгу, але не повернув slug — перевірте каталог вручну.',
+      });
+    } catch (err: any) {
+      setPublishResult({ tone: 'err', text: err?.message || 'Помилка публікації.' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const testUnpublish = async () => {
+    setBusy(true);
+    try {
+      const res = await fetch('/api/admin/marketplace-bridge/test-unpublish', {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Не вдалося зняти лістинг.');
+      setPublishResult({
+        tone: 'ok',
+        text: data?.removed
+          ? 'Тестову книгу знято з вітрини (переведено в архів).'
+          : 'У вітрині її вже немає — знімати нічого.',
+      });
+    } catch (err: any) {
+      setPublishResult({ tone: 'err', text: err?.message || 'Помилка зняття.' });
     } finally {
       setBusy(false);
     }
@@ -304,6 +360,78 @@ const MarketplaceBridgePanel: React.FC = () => {
             }`}
           >
             {message.text}
+          </div>
+        )}
+      </div>
+
+      {/* Прогін усього конвеєра. До цього маршрути публікації існували лише на
+          сервері — жоден екран їх не викликав, тож шлях «Студія → міст →
+          каталог» ніколи не перевірявся цілком. */}
+      <div className="p-5 rounded-2xl bg-slate-900/60 border border-white/[0.06] space-y-4">
+        <div>
+          <h3 className="text-sm font-bold text-slate-100">Прогін конвеєра: тестова книга</h3>
+          <p className="text-[11px] text-slate-400 leading-snug mt-1">
+            Публікує у вітрину одну технічну книгу з назвою «Тестова книга мосту NOVA — можна видаляти»
+            за ціною 1 грн. Повторне натискання не створює дубль — лістинг оновлюється за тим самим
+            <code className="text-amber-300"> externalId</code>. Прибрати можна кнопкою нижче, коли
+            переконаєтесь, що книга видна в магазині.
+          </p>
+        </div>
+
+        <label className="block">
+          <span className="block text-[11px] font-semibold text-slate-300 mb-1">
+            Продавець (slug)
+            <span className="ml-2 font-normal text-slate-500">
+              не обовʼязково — якщо порожньо, маркетплейс візьме BRIDGE_SELLER_SLUG
+            </span>
+          </span>
+          <input
+            value={sellerSlug}
+            onChange={(e) => setSellerSlug(e.target.value)}
+            placeholder="напр. fusion-lab"
+            className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none focus:border-amber-500/60 font-mono"
+          />
+        </label>
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => void testPublish()}
+            disabled={busy || !view?.keySet || !view?.url}
+            className="px-4 py-2 rounded-xl bg-amber-500 text-slate-950 text-xs font-bold disabled:opacity-40"
+          >
+            Опублікувати тестову книгу
+          </button>
+          <button
+            onClick={() => void testUnpublish()}
+            disabled={busy || !view?.keySet || !view?.url}
+            className="px-4 py-2 rounded-xl badge-glass text-slate-200 text-xs font-bold disabled:opacity-40"
+          >
+            Прибрати тестову книгу
+          </button>
+        </div>
+
+        {publishResult && (
+          <div
+            className={`p-3 rounded-xl text-[11px] border ${
+              publishResult.tone === 'ok'
+                ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-200'
+                : 'bg-rose-500/10 border-rose-500/40 text-rose-200'
+            }`}
+          >
+            <div>{publishResult.text}</div>
+            {publishResult.slug && (
+              <div className="mt-1 text-slate-400">
+                Якщо вітрина на <code>app.fusionlab.in.ua</code>, книга тут:{' '}
+                <a
+                  href={`https://app.fusionlab.in.ua/uk/catalog/${publishResult.slug}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-amber-300 underline"
+                >
+                  /uk/catalog/{publishResult.slug}
+                </a>
+              </div>
+            )}
           </div>
         )}
       </div>

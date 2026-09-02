@@ -50,6 +50,8 @@ import {
   saveBridgeSettings,
   readBridgeSettings,
   testBridgeConnection,
+  bridgeTestBook,
+  unpublishBookFromMarketplace,
   publishBookToMarketplace,
   publishCourseToMarketplace,
   MarketplaceBridgeError,
@@ -764,6 +766,49 @@ export function registerAdminRoutes(app: Express): void {
    * одна ціна на лістинг, тож друкована й електронна версії живуть як
    * сусідні товари, повʼязані спільним bookId у externalId.
    */
+  /**
+   * Прогін усього конвеєра однією кнопкою: Студія → міст → каталог.
+   * Тіло формує сервер, а не інтерфейс, щоб публікація і зняття говорили про
+   * один і той самий externalId. Ціна символічна (1 грн): лістинг має бути
+   * справжнім товаром, інакше перевірка не пройшла б валідацію маркетплейсу,
+   * але й спокуси купити його ні в кого не викличе.
+   */
+  app.post('/api/admin/marketplace-bridge/test-publish', requireAdmin, async (req, res) => {
+    try {
+      const settings = await readBridgeSettings();
+      const sellerSlug = typeof req.body?.sellerSlug === 'string' && req.body.sellerSlug.trim()
+        ? req.body.sellerSlug.trim()
+        : undefined;
+      const result = await publishBookToMarketplace(
+        { ...bridgeTestBook(), format: 'digital', priceMinor: 100, sellerSlug },
+        { settings }
+      );
+      res.json({ published: result });
+    } catch (err: any) {
+      const status = err instanceof MarketplaceBridgeError ? err.status : 500;
+      res.status(status).json({
+        error: err?.message || 'Не вдалося опублікувати тестову книгу.',
+        kind: err?.kind,
+        details: err?.details,
+      });
+    }
+  });
+
+  /** Зняти тестову книгу з вітрини. 404 з маркетплейсу — не помилка. */
+  app.post('/api/admin/marketplace-bridge/test-unpublish', requireAdmin, async (_req, res) => {
+    try {
+      const settings = await readBridgeSettings();
+      const result = await unpublishBookFromMarketplace(
+        { bookId: bridgeTestBook().bookId, format: 'digital' },
+        { settings }
+      );
+      res.json(result);
+    } catch (err: any) {
+      const status = err instanceof MarketplaceBridgeError ? err.status : 500;
+      res.status(status).json({ error: err?.message || 'Не вдалося зняти лістинг.', kind: err?.kind });
+    }
+  });
+
   app.post('/api/admin/marketplace-bridge/publish', requireAdmin, async (req, res) => {
     const { bookId, title, subtitle, summary, description, coverUrl, highlights, sellerSlug, formats } = req.body || {};
     if (!bookId || !title) {

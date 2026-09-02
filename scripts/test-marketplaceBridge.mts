@@ -104,6 +104,50 @@ console.log('\nНормалізація адреси (секрет не має �
   t('http на публічний домен відхилено', threw);
 }
 
+console.log('\nТестова книга:');
+{
+  const book = bridge.bridgeTestBook();
+  t('ідентифікатор стабільний', book.bookId === bridge.BRIDGE_TEST_BOOK_ID, book.bookId);
+  t('назва сама каже, що це тест і його можна видаляти',
+    /тест/i.test(book.title) && /видаляти/i.test(book.title), book.title);
+  t('опис пояснює, звідки лістинг узявся', /адмінпанел/i.test(String(book.description)));
+}
+
+console.log('\nЗняття лістинга з вітрини:');
+{
+  const calls: any[] = [];
+  const mk = (status: number) => (async (url: string, init: any = {}) => {
+    calls.push({ url: String(url), method: init.method, key: init.headers?.['x-bridge-key'] });
+    return { status, ok: status >= 200 && status < 300, text: async () => 'body' };
+  }) as never;
+
+  const gone = await bridge.unpublishBookFromMarketplace(
+    { bookId: 'nova-bridge-test', format: 'digital' }, { fetch: mk(200), settings });
+  t('успіх → removed: true', gone.removed === true);
+  t('externalId склеєний як bookId:format',
+    gone.externalId === 'nova-bridge-test:digital', gone.externalId);
+  t('метод DELETE і ключ надіслано',
+    calls[0].method === 'DELETE' && calls[0].key === 'secret-key');
+
+  const absent = await bridge.unpublishBookFromMarketplace(
+    { bookId: 'nova-bridge-test', format: 'digital' }, { fetch: mk(404), settings });
+  t('404 не кидає помилку — мета вже досягнута', absent.removed === false);
+
+  let unauthorized: any = null;
+  try {
+    await bridge.unpublishBookFromMarketplace(
+      { bookId: 'x', format: 'digital' }, { fetch: mk(401), settings });
+  } catch (e) { unauthorized = e; }
+  t('401 → помилка про ключ', unauthorized?.kind === 'unauthorized', String(unauthorized?.kind));
+
+  let rejected: any = null;
+  try {
+    await bridge.unpublishBookFromMarketplace(
+      { bookId: 'x', format: 'digital' }, { fetch: mk(500), settings });
+  } catch (e) { rejected = e; }
+  t('500 → помилка «відхилено», а не тихий успіх', rejected?.kind === 'rejected', String(rejected?.kind));
+}
+
 console.log('\nПовідомлення «не налаштовано» називає саме те, чого бракує:');
 {
   // Працюємо зі справжнім сховищем у тимчасовій теці: підмінити експорт

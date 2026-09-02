@@ -193,6 +193,92 @@ export function bridgeExternalId(bookId: string, format: MarketplaceFormat): str
 const TIMEOUT_MS = 20000;
 
 /**
+ * Тестова книга мосту. Живе тут, а не в інтерфейсі, щоб публікація і
+ * прибирання говорили про один і той самий `externalId`: інакше кнопка
+ * «прибрати» одного дня почала б цілитись не в той лістинг.
+ *
+ * `bookId` навмисно не схожий на справжній ідентифікатор книги Nova, а
+ * назва прямо каже, що це тест і його можна видаляти — вітрина публічна, і
+ * якщо про цей лістинг забудуть, він має пояснювати себе сам.
+ */
+export const BRIDGE_TEST_BOOK_ID = 'nova-bridge-test';
+
+export function bridgeTestBook(): Omit<PublishBookInput, 'format' | 'priceMinor'> {
+  return {
+    bookId: BRIDGE_TEST_BOOK_ID,
+    title: 'Тестова книга мосту NOVA — можна видаляти',
+    subtitle: "Технічна публікація для перевірки зв'язку Студії з вітриною",
+    summary:
+      'Це не справжнє видання. Лістинг створено кнопкою «тестова публікація» в адмінпанелі NOVA STUDIO, ' +
+      'щоб перевірити весь конвеєр: Студія → міст → каталог маркетплейсу. Його можна безпечно видалити.',
+    description:
+      'Технічний запис. Якщо ви бачите його у вітрині — значить міст «Nova → Fusion Lab» працює: ' +
+      'книга з видавничої майстерні дійшла до каталогу магазину.\n\n' +
+      'Прибрати: адмінпанель NOVA → «Міст до вітрини» → «Прибрати тестову книгу».',
+    highlights: [
+      'Технічна перевірка мосту, не товар',
+      'Створено з адмінпанелі NOVA STUDIO',
+      'Безпечно видаляти',
+    ],
+  };
+}
+
+/**
+ * Зняти книгу з вітрини. Маркетплейс не видаляє лістинг фізично, а переводить
+ * у `archived` — історія замовлень на нього могла б лишитись, тож знищувати
+ * рядок не можна.
+ *
+ * 404 тут не помилка, а нормальний кінець: лістинга вже немає, мета досягнута.
+ * Саме тому функція повертає `{ removed: false }`, а не кидає — інакше
+ * повторне натискання кнопки лякало б користувача червоним.
+ */
+export async function unpublishBookFromMarketplace(
+  input: { bookId: string; format: MarketplaceFormat },
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<{ removed: boolean; externalId: string; format: MarketplaceFormat }> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+  const externalId = bridgeExternalId(input.bookId, input.format);
+
+  let response: Response;
+  try {
+    response = await doFetch(`${settings.url}/bridge/books/${encodeURIComponent(externalId)}`, {
+      method: 'DELETE',
+      headers: { 'x-bridge-key': settings.key },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  }
+
+  if (response.status === 401 || response.status === 403) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401
+    );
+  }
+  if (response.status === 404) {
+    return { removed: false, externalId, format: input.format };
+  }
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new MarketplaceBridgeError(
+      `Маркетплейс відхилив зняття лістинга (HTTP ${response.status}).`,
+      'rejected',
+      response.status,
+      text.slice(0, 400)
+    );
+  }
+  return { removed: true, externalId, format: input.format };
+}
+
+/**
  * Ідентифікатор для перевірки ключа. Формат `bookId:format` збігається з
  * `bridgeExternalId`, але жоден справжній лістинг такого мати не може:
  * `bookId` тут — зарезервований рядок, а `format` не є ані `digital`, ані
