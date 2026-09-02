@@ -291,6 +291,93 @@ export function bridgeTestBook(): Omit<PublishBookInput, 'format' | 'priceMinor'
 }
 
 /**
+ * Надіслати файл книги у вітрину — другу половину товару.
+ *
+ * До цього міст передавав лише картку: покупець отримував доступ і бачив
+ * «Продавець ще не додав файлів до цього матеріалу». Тобто конвеєр доводив
+ * книгу до вітрини, але не до читача.
+ *
+ * Multipart через рідні FormData/Blob (Node 18+): заголовок Content-Type
+ * навмисно НЕ задаємо — його разом із межею секцій має поставити fetch, і
+ * ручний заголовок зламав би розбір на приймачі.
+ */
+export async function attachBookFileToMarketplace(
+  input: {
+    bookId: string;
+    format: MarketplaceFormat;
+    filename: string;
+    mimeType: string;
+    bytes: Uint8Array;
+  },
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<{ attached: boolean; replaced: number; media?: unknown; externalId: string }> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+  const externalId = bridgeExternalId(input.bookId, input.format);
+
+  const form = new FormData();
+  form.append(
+    'file',
+    new Blob([input.bytes as unknown as BlobPart], { type: input.mimeType }),
+    input.filename
+  );
+
+  let response: Response;
+  try {
+    response = await doFetch(`${settings.url}/bridge/books/${encodeURIComponent(externalId)}/file`, {
+      method: 'POST',
+      headers: { 'x-bridge-key': settings.key },
+      body: form,
+      signal: AbortSignal.timeout(120_000),
+    });
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  }
+
+  const text = await response.text().catch(() => '');
+  if (response.status === 401 || response.status === 403) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401
+    );
+  }
+  if (response.status === 404) {
+    throw new MarketplaceBridgeError(
+      'Книги немає в каталозі — спершу опублікуйте її, потім надсилайте файл.',
+      'rejected',
+      404
+    );
+  }
+  if (!response.ok) {
+    throw new MarketplaceBridgeError(
+      `Маркетплейс відхилив файл: ${describeRejection(response.status, text)}`,
+      'rejected',
+      502,
+      text.slice(0, 400)
+    );
+  }
+
+  let body: any = undefined;
+  try {
+    body = text ? JSON.parse(text) : undefined;
+  } catch {
+    body = undefined;
+  }
+  return {
+    attached: Boolean(body?.attached ?? true),
+    replaced: Number(body?.replaced ?? 0),
+    media: body?.media,
+    externalId,
+  };
+}
+
+/**
  * Зняти книгу з вітрини. Маркетплейс не видаляє лістинг фізично, а переводить
  * у `archived` — історія замовлень на нього могла б лишитись, тож знищувати
  * рядок не можна.

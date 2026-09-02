@@ -113,6 +113,45 @@ console.log('\nТестова книга:');
   t('опис пояснює, звідки лістинг узявся', /адмінпанел/i.test(String(book.description)));
 }
 
+console.log('\nНадсилання файла книги:');
+{
+  const seen: any[] = [];
+  const mk = (status: number, body = '{}') => (async (url: string, init: any = {}) => {
+    seen.push({ url: String(url), method: init.method, key: init.headers?.['x-bridge-key'], body: init.body });
+    return { status, ok: status >= 200 && status < 300, text: async () => body };
+  }) as never;
+
+  const bytes = new TextEncoder().encode('%PDF-1.7 fake');
+  const ok = await bridge.attachBookFileToMarketplace(
+    { bookId: 'nova-bridge-test', format: 'digital', filename: 'kniha.pdf', mimeType: 'application/pdf', bytes },
+    { fetch: mk(201, JSON.stringify({ attached: true, replaced: 1, media: { id: 'm1' } })), settings });
+
+  t('адреса містить externalId і /file',
+    seen[0].url.endsWith('/bridge/books/nova-bridge-test%3Adigital/file'), seen[0].url);
+  t('ключ надіслано', seen[0].key === 'secret-key');
+  t('тіло — FormData, не JSON', seen[0].body instanceof FormData);
+  t('Content-Type НЕ заданий вручну (межу ставить fetch)',
+    !Object.keys(seen[0] as any).includes('content-type'));
+  t('результат: прикріплено, попередній замінено', ok.attached === true && ok.replaced === 1);
+
+  let notFound: any = null;
+  try {
+    await bridge.attachBookFileToMarketplace(
+      { bookId: 'x', format: 'digital', filename: 'a.pdf', mimeType: 'application/pdf', bytes },
+      { fetch: mk(404), settings });
+  } catch (e) { notFound = e; }
+  t('404 → зрозуміла порада опублікувати спершу',
+    /спершу опублікуйте/.test(String(notFound?.message)), String(notFound?.message));
+
+  let badType: any = null;
+  try {
+    await bridge.attachBookFileToMarketplace(
+      { bookId: 'x', format: 'digital', filename: 'a.exe', mimeType: 'application/x-msdownload', bytes },
+      { fetch: mk(400, JSON.stringify({ message: 'Тип файлу не підтримується: application/x-msdownload' })), settings });
+  } catch (e) { badType = e; }
+  t('причина відмови за типом видна', /Тип файлу не підтримується/.test(String(badType?.message)), String(badType?.message));
+}
+
 console.log('\nЗняття лістинга з вітрини:');
 {
   const calls: any[] = [];
