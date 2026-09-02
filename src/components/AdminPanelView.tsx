@@ -235,11 +235,19 @@ const MarketplaceBridgePanel: React.FC = () => {
         </div>
 
         <label className="block">
-          <span className="block text-[11px] font-semibold text-slate-300 mb-1">Адреса API маркетплейсу</span>
+          <span className="block text-[11px] font-semibold text-slate-300 mb-1">
+            Адреса API маркетплейсу
+            {/* Стан адреси видно так само, як стан ключа. Без цього порожнє
+                поле з підказкою, що виглядає як готове значення, читалось
+                як «уже налаштовано» — і міст мовчки лишався вимкненим. */}
+            {view && (view.url
+              ? <span className="ml-2 font-mono text-[10px] text-emerald-300">збережено</span>
+              : <span className="ml-2 font-mono text-[10px] text-amber-300">не задано</span>)}
+          </span>
           <input
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://api.fusionlab.in.ua"
+            placeholder="напр. https://api.fusionlab.in.ua — це підказка, а не значення"
             className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none focus:border-amber-500/60"
           />
         </label>

@@ -11,7 +11,16 @@
  *   4. невизначені відповіді НЕ зараховувались як успіх.
  * Мережі нема: fetch інжектується.
  */
+const DIR = '/tmp/nova-bridge-test';
+process.env.DATA_DIR = DIR;
+process.env.DATABASE_PATH = `${DIR}/nova-studio.db`;
+
+import fs from 'node:fs';
+fs.rmSync(DIR, { recursive: true, force: true });
+fs.mkdirSync(DIR, { recursive: true });
+
 const bridge = await import('../server/marketplaceBridge');
+const store = await import('../server/store');
 
 let pass = 0, fail = 0;
 const t = (n: string, c: boolean, e = '') => { c ? pass++ : fail++; console.log(`${c ? '  ✓' : '  ✗'} ${n}${e ? ' — ' + e : ''}`); };
@@ -93,6 +102,30 @@ console.log('\nНормалізація адреси (секрет не має �
   let threw = false;
   try { bridge.normalizeBridgeUrl('http://api.fusionlab.in.ua'); } catch { threw = true; }
   t('http на публічний домен відхилено', threw);
+}
+
+console.log('\nПовідомлення «не налаштовано» називає саме те, чого бракує:');
+{
+  // Працюємо зі справжнім сховищем у тимчасовій теці: підмінити експорт
+  // ESM-модуля не можна, та й перевіряти краще реальний шлях читання.
+  const scenario = async (url: string, key: string) => {
+    await store.setAppSetting(bridge.BRIDGE_URL_KEY, url);
+    await store.setAppSetting(bridge.BRIDGE_SECRET_KEY, key);
+    try { await bridge.readBridgeSettings(); return ''; }
+    catch (e: any) { return String(e?.message || ''); }
+  };
+
+  const both = await scenario('', '');
+  t('нічого не задано — сказано про обидва', /ані адресу/.test(both), both);
+
+  const noUrl = await scenario('', 'encrypted');
+  t('ключ є, адреси нема — сказано саме про адресу',
+    /ключ збережено/.test(noUrl) && /НЕ задано адресу/.test(noUrl), noUrl);
+
+  const noKey = await scenario('https://api.fusionlab.in.ua', '');
+  t('адреса є, ключа нема — сказано саме про ключ',
+    /ключ не збережено/.test(noKey), noKey);
+
 }
 
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);

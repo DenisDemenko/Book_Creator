@@ -106,8 +106,17 @@ export async function readBridgeSettings(): Promise<BridgeSettings> {
   const url = (await getAppSetting(BRIDGE_URL_KEY)) || '';
   const stored = await getAppSetting(BRIDGE_SECRET_KEY);
   if (!url || !stored) {
+    // Називаємо саме ту половину, якої бракує. Спільне «задайте адресу та
+    // ключ» після успішного збереження ключа читається як «нічого не
+    // збереглося» і відправляє шукати проблему не там — на цьому вже
+    // згаяно час (log.md #70).
+    const missing = !url && !stored
+      ? 'не задано ані адресу API, ані ключ'
+      : !url
+        ? 'ключ збережено, але НЕ задано адресу API маркетплейсу'
+        : 'адресу задано, але ключ не збережено';
     throw new MarketplaceBridgeError(
-      'Міст до вітрини не налаштований: задайте адресу API та ключ в адмінпанелі.',
+      `Міст до вітрини не налаштований: ${missing}.`,
       'not_configured',
       409
     );
