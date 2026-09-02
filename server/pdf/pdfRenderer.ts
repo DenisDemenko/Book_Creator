@@ -164,7 +164,16 @@ export async function renderBookPdf(
   const black = rgb(0.1, 0.09, 0.08);
   const grey = rgb(0.45, 0.43, 0.4);
 
+  /**
+   * Ліве поле поточної сторінки. При дзеркальних полях перша сторінка —
+   * права (recto), корінець у неї зліва; на звороті все навпаки.
+   */
+  const leftOfPage = (index: number) =>
+    spec.mirrorMargins && index % 2 === 1 ? spec.margins.right : spec.margins.left;
+
   let page = doc.addPage([size.width, size.height]);
+  let pageIndex = 0;
+  let curLeft = leftOfPage(0);
   let y = size.height - spec.margins.top;
   let bodyStarted = false;
   let currentChapter = '';
@@ -183,6 +192,8 @@ export async function renderBookPdf(
 
   const newPage = () => {
     page = doc.addPage([size.width, size.height]);
+    pageIndex += 1;
+    curLeft = leftOfPage(pageIndex);
     y = size.height - spec.margins.top;
   };
 
@@ -196,11 +207,15 @@ export async function renderBookPdf(
     fontSize: number,
     align: Align,
     color = black,
-    justifyWidth?: number
+    justifyWidth?: number,
+    /** Ліва межа рядка. Задається явно: при дзеркальних полях і при
+     *  червоному рядку вона відрізняється від поля сторінки. */
+    x0 = curLeft,
+    boxWidth = contentWidth
   ) => {
     const width = font.widthOfTextAtSize(text, fontSize);
-    let x = spec.margins.left;
-    if (align === 'center') x = spec.margins.left + (contentWidth - width) / 2;
+    let x = x0;
+    if (align === 'center') x = x0 + (boxWidth - width) / 2;
 
     // Вирівнювання по ширині: розсуваємо міжслівні проміжки, а не літери —
     // розрідження літер у книжковому наборі читається як дефект.
@@ -236,14 +251,12 @@ export async function renderBookPdf(
     lines.forEach((line, i) => {
       ensure(step);
       const isLast = i === lines.length - 1;
-      const x = i === 0 ? spec.margins.left + indent : spec.margins.left;
+      // Червоний рядок зсуває ЛИШЕ перший рядок абзацу; решта йде від поля
+      // сторінки, яке при дзеркальних полях залежить від її парності.
+      const x = i === 0 ? curLeft + indent : curLeft;
       const width = i === 0 ? firstWidth : contentWidth;
       const align: Align = spec.bodyAlign === 'justify' && !isLast ? 'justify' : 'left';
-      const saveLeft = spec.margins.left;
-      // Тимчасово зсуваємо ліве поле для першого рядка з відступом.
-      (spec.margins as { left: number }).left = x;
-      drawLine(line, font, spec.baseFontSize, align, black, width);
-      (spec.margins as { left: number }).left = saveLeft;
+      drawLine(line, font, spec.baseFontSize, align, black, width, x, width);
       y -= step;
     });
     y -= spec.paragraphSpacing;
@@ -351,10 +364,14 @@ export async function renderBookPdf(
     const label = String(spec.pageNumber.startAt + numbered - 1);
     const w = serif.widthOfTextAtSize(label, spec.pageNumber.fontSize);
     const pos = spec.pageNumber.position;
+    // Номер теж мусить рахуватися від поля ЦІЄЇ сторінки, інакше на
+    // дзеркальному розвороті він з'їжджає до згину.
+    const pageLeft = leftOfPage(index);
+    const pageRight = spec.margins.left + spec.margins.right - pageLeft;
     const x = pos.endsWith('left')
-      ? spec.margins.left
+      ? pageLeft
       : pos.endsWith('right')
-        ? size.width - spec.margins.right - w
+        ? size.width - pageRight - w
         : (size.width - w) / 2;
     const yy = pos.startsWith('top')
       ? size.height - spec.margins.top / 2

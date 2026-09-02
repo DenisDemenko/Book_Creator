@@ -48,7 +48,7 @@ interface PublishingHubViewProps {
   onNavigateToTab: (tab: NavigationTab) => void;
 }
 
-type SubTab = 'kdp' | 'etsy' | 'bundle' | 'research';
+type SubTab = 'kdp' | 'etsy' | 'bundle' | 'research' | 'vitryna';
 
 interface Issue {
   severity: 'blocker' | 'warning';
@@ -193,6 +193,7 @@ export const PublishingHubView: React.FC<PublishingHubViewProps> = ({
           ['etsy', t('publishingHub.tabEtsy'), Store],
           ['bundle', t('publishingHub.tabBundle'), Package],
           ['research', t('publishingHub.tabResearch'), Search],
+          ['vitryna', 'Вітрина Fusion Lab', Store],
         ] as [SubTab, string, React.ComponentType<{ className?: string }>][]).map(([id, label, Icon]) => (
           <button
             key={id}
@@ -220,6 +221,264 @@ export const PublishingHubView: React.FC<PublishingHubViewProps> = ({
       {tab === 'etsy' && <EtsyPanel book={book} isGuest={isGuest} />}
       {tab === 'bundle' && <BundlePanel isGuest={isGuest} />}
       {tab === 'research' && <ResearchPanel copy={copy} copiedKey={copiedKey} isGuest={isGuest} />}
+      {tab === 'vitryna' && <VitrynaPanel book={book} isGuest={isGuest} />}
+    </div>
+  );
+};
+
+// ===========================================================================
+// Вітрина Fusion Lab — увесь конвеєр публікації однією дією
+//
+// Кнопки живуть саме тут, а не в адмінпанелі, з простої причини: книга
+// зберігається в браузері (localStorage), а не на сервері, тож надіслати її
+// може лише той екран, який її має. Адмінпанель книги не бачить.
+// ===========================================================================
+
+interface EditionResult {
+  format: 'digital' | 'print';
+  published?: { slug?: string; created?: boolean };
+  attached?: { attached?: boolean };
+  pdf?: { pageCount?: number; sizeBytes?: number };
+  layout?: { variant?: string; noteUk?: string; trimId?: string; gutterMm?: number };
+  warningsUk?: string[];
+}
+
+const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGuest }) => {
+  const [variant, setVariant] = useState<'code' | 'design'>('code');
+  const [withPrint, setWithPrint] = useState(true);
+  const [trimId, setTrimId] = useState('6x9');
+  const [priceDigital, setPriceDigital] = useState('150');
+  const [pricePrint, setPricePrint] = useState('390');
+  const [sellerSlug, setSellerSlug] = useState('fusion-lab');
+  const [busy, setBusy] = useState<'' | 'preview' | 'publish'>('');
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<EditionResult[] | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  const preview = async (format: 'digital' | 'print') => {
+    setBusy('preview');
+    setError(null);
+    setNote(null);
+    try {
+      const res = await fetch('/api/admin/pdf/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ book, variant, format, trimId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error || `Перегляд не вдався (HTTP ${res.status}).`);
+      }
+      setNote(decodeURIComponent(res.headers.get('x-pdf-note') || ''));
+      // Файл відкриваємо у вкладці: автор має побачити верстку до того,
+      // як вона стане товаром.
+      const blob = await res.blob();
+      window.open(URL.createObjectURL(blob), '_blank');
+    } catch (err: any) {
+      setError(err?.message || 'Помилка перегляду.');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const publish = async () => {
+    setBusy('publish');
+    setError(null);
+    setResult(null);
+    try {
+      const editions: Record<string, unknown>[] = [
+        { format: 'digital', priceMinor: Math.round(Number(priceDigital) * 100), variant },
+      ];
+      if (withPrint) {
+        editions.push({
+          format: 'print',
+          priceMinor: Math.round(Number(pricePrint) * 100),
+          variant,
+          trimId,
+        });
+      }
+      const res = await fetch('/api/admin/pdf/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ book, sellerSlug: sellerSlug.trim() || undefined, editions }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Публікація не вдалася.');
+      setResult(data.editions || []);
+    } catch (err: any) {
+      setError(err?.message || 'Помилка публікації.');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  if (isGuest) {
+    return (
+      <div className="p-5 rounded-2xl bg-slate-900/60 border border-white/[0.06] text-sm text-slate-400">
+        Публікація у вітрину доступна власнику книги після входу.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="p-5 rounded-2xl bg-slate-900/60 border border-white/[0.06] space-y-4">
+        <div>
+          <h3 className="text-sm font-bold text-slate-100">Публікація у вітрину Fusion Lab</h3>
+          <p className="text-[11px] text-slate-400 leading-snug mt-1">
+            Складає PDF цієї книги і кладе його в каталог магазину разом із карткою товару.
+            Електронна й друкована редакції — два сусідні лістинги: у маркетплейсі одна ціна на
+            лістинг. Друкована верстається під Amazon KDP — інший обріз, дзеркальні поля,
+            корінець за обсягом.
+          </p>
+        </div>
+
+        <div>
+          <span className="block text-[11px] font-semibold text-slate-300 mb-1">Хто вирішує макет</span>
+          <div className="flex flex-wrap gap-2">
+            {([
+              ['code', 'Макет із книги', 'Бере налаштування «Верстки PDF»: формат, поля, кегль, нумерацію.'],
+              ['design', 'Дизайн від моделі', 'Модель пропонує макет під жанр і обсяг; числа затискаються в читабельні межі.'],
+            ] as const).map(([id, label, hint]) => (
+              <button
+                key={id}
+                onClick={() => setVariant(id)}
+                title={hint}
+                className={`px-3 py-2 rounded-xl text-xs border transition ${
+                  variant === id
+                    ? 'bg-cyan-500/15 border-cyan-500/50 text-cyan-200'
+                    : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-600'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block">
+            <span className="block text-[11px] font-semibold text-slate-300 mb-1">Ціна електронної, грн</span>
+            <input
+              value={priceDigital}
+              onChange={(e) => setPriceDigital(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none focus:border-cyan-500/60 font-mono"
+            />
+          </label>
+          <label className="block">
+            <span className="block text-[11px] font-semibold text-slate-300 mb-1">Продавець (slug)</span>
+            <input
+              value={sellerSlug}
+              onChange={(e) => setSellerSlug(e.target.value)}
+              placeholder="fusion-lab"
+              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none focus:border-cyan-500/60 font-mono"
+            />
+          </label>
+        </div>
+
+        <div className="rounded-xl border border-slate-800 p-3 space-y-3">
+          <label className="flex items-center gap-2 text-xs text-slate-200">
+            <input type="checkbox" checked={withPrint} onChange={(e) => setWithPrint(e.target.checked)} />
+            Додати друковану редакцію (макет Amazon KDP)
+          </label>
+          {withPrint && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block">
+                <span className="block text-[11px] font-semibold text-slate-300 mb-1">Ціна друкованої, грн</span>
+                <input
+                  value={pricePrint}
+                  onChange={(e) => setPricePrint(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none focus:border-cyan-500/60 font-mono"
+                />
+              </label>
+              <label className="block">
+                <span className="block text-[11px] font-semibold text-slate-300 mb-1">Обріз KDP</span>
+                <select
+                  value={trimId}
+                  onChange={(e) => setTrimId(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none focus:border-cyan-500/60"
+                >
+                  {['5x8', '5.5x8.5', '6x9', '7x10', '8.5x11'].map((id) => (
+                    <option key={id} value={id}>{id.replace('x', ' × ')}″</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => void preview('digital')}
+            disabled={busy !== ''}
+            className="px-4 py-2 rounded-xl bg-slate-800 text-slate-100 text-xs font-bold disabled:opacity-50"
+          >
+            {busy === 'preview' ? 'Складаю…' : 'Переглянути PDF'}
+          </button>
+          {withPrint && (
+            <button
+              onClick={() => void preview('print')}
+              disabled={busy !== ''}
+              className="px-4 py-2 rounded-xl bg-slate-800 text-slate-100 text-xs font-bold disabled:opacity-50"
+            >
+              Переглянути макет KDP
+            </button>
+          )}
+          <button
+            onClick={() => void publish()}
+            disabled={busy !== ''}
+            className="px-4 py-2 rounded-xl bg-cyan-500 text-slate-950 text-xs font-bold disabled:opacity-50"
+          >
+            {busy === 'publish' ? 'Публікую…' : 'Опублікувати у вітрину'}
+          </button>
+        </div>
+
+        {note && (
+          <p className="text-[11px] text-slate-400 border-l-2 border-slate-700 pl-3">{note}</p>
+        )}
+        {error && (
+          <p className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-rose-200 text-[11px]">{error}</p>
+        )}
+      </div>
+
+      {result && (
+        <div className="space-y-3">
+          {result.map((edition) => (
+            <div key={edition.format} className="p-4 rounded-2xl bg-slate-900/60 border border-emerald-500/30 space-y-2">
+              <p className="text-sm font-bold text-emerald-200">
+                {edition.format === 'print' ? 'Друкована редакція (KDP)' : 'Електронна редакція'} —{' '}
+                {edition.published?.created === false ? 'оновлено' : 'опубліковано'}
+              </p>
+              <p className="text-[11px] text-slate-300">
+                Сторінок: {edition.pdf?.pageCount} · Розмір: {Math.round((edition.pdf?.sizeBytes || 0) / 1024)} КБ
+                {edition.layout?.trimId ? ` · Обріз ${edition.layout.trimId}` : ''}
+                {edition.layout?.gutterMm ? ` · Норма корінця ${edition.layout.gutterMm} мм` : ''}
+                {edition.attached?.attached ? ' · Файл у лістингу' : ' · Файл НЕ прикріплено'}
+              </p>
+              {edition.published?.slug && (
+                <a
+                  href={`https://app.fusionlab.in.ua/uk/catalog/${edition.published.slug}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[11px] text-cyan-300 underline"
+                >
+                  /uk/catalog/{edition.published.slug}
+                </a>
+              )}
+              {edition.layout?.noteUk && (
+                <p className="text-[11px] text-slate-400 border-l-2 border-slate-700 pl-3">{edition.layout.noteUk}</p>
+              )}
+              {(edition.warningsUk || []).map((w) => (
+                <p key={w} className="text-[11px] text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+                  {w}
+                </p>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

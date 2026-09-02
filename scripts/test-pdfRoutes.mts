@@ -112,6 +112,12 @@ console.log('Перегляд:');
   t('кількість сторінок у заголовку', Number(r.headers.get('x-pdf-pages')) > 0, r.headers.get('x-pdf-pages') || '');
   t('пояснення макета передано', decodeURIComponent(r.headers.get('x-pdf-note') || '').includes('Верстка PDF'));
 
+  const kdpPreview = await call('/api/admin/pdf/preview', { book, variant: 'code', format: 'print', trimId: '6x9' });
+  t('перегляд друкованого макета віддає PDF', kdpPreview.buffer?.subarray(0, 5).toString() === '%PDF-');
+  t('попередження KDP доходить у заголовку',
+    /приймає від 24/.test(decodeURIComponent(kdpPreview.headers.get('x-pdf-note') || '')),
+    decodeURIComponent(kdpPreview.headers.get('x-pdf-note') || '').slice(0, 120));
+
   const bad = await call('/api/admin/pdf/preview', { variant: 'code' });
   t('без книги → 400', bad.status === 400, String(bad.status));
 
@@ -144,16 +150,46 @@ console.log('\nПовний конвеєр:');
 {
   calls.length = 0;
   const r = await call('/api/admin/pdf/publish', { book, variant: 'code', priceMinor: 15000, sellerSlug: 'fusion-lab' });
+  const first = r.data?.editions?.[0];
   t('успіх', r.status === 200, JSON.stringify(r.data)?.slice(0, 160));
-  t('лістинг опубліковано', r.data?.published?.slug === 'testova-knyha-konveiera', String(r.data?.published?.slug));
-  t('файл прикріплено', r.data?.attached?.attached === true);
-  t('сторінки полічені', r.data?.pdf?.pageCount > 0, String(r.data?.pdf?.pageCount));
-  t('варіант макета названо', r.data?.layout?.variant === 'code');
+  t('стара форма запиту (одна ціна) досі працює', Array.isArray(r.data?.editions) && r.data.editions.length === 1);
+  t('лістинг опубліковано', first?.published?.slug === 'testova-knyha-konveiera', String(first?.published?.slug));
+  t('файл прикріплено', first?.attached?.attached === true);
+  t('сторінки полічені', first?.pdf?.pageCount > 0, String(first?.pdf?.pageCount));
+  t('варіант макета названо', first?.layout?.variant === 'code');
 
   const publishCall = calls.findIndex((c) => c.url.endsWith('/bridge/books'));
   const fileCall = calls.findIndex((c) => c.url.includes('/file'));
   t('публікація ПЕРЕД надсиланням файла', publishCall >= 0 && fileCall > publishCall,
     `публікація #${publishCall}, файл #${fileCall}`);
+
+  // Дві редакції: електронна й друкована під KDP.
+  calls.length = 0;
+  const two = await call('/api/admin/pdf/publish', {
+    book, sellerSlug: 'fusion-lab',
+    editions: [
+      { format: 'digital', priceMinor: 15000, variant: 'code' },
+      { format: 'print', priceMinor: 39000, variant: 'code', trimId: '6x9' },
+    ],
+  });
+  t('обидві редакції зібрано', two.data?.editions?.length === 2, String(two.data?.editions?.length));
+  const digital = two.data?.editions?.find((e: any) => e.format === 'digital');
+  const print = two.data?.editions?.find((e: any) => e.format === 'print');
+  t('друкована має обріз KDP', print?.layout?.trimId === '6x9', String(print?.layout?.trimId));
+  t('друкована має корінець', Number(print?.layout?.gutterMm) > 0, String(print?.layout?.gutterMm));
+  t('друкована товща за електронну (поля вужчі за площею набору)',
+    print?.pdf?.pageCount >= digital?.pdf?.pageCount,
+    `${print?.pdf?.pageCount} vs ${digital?.pdf?.pageCount}`);
+  t('коротка книга: попередження KDP про мінімум сторінок',
+    (print?.warningsUk || []).some((w: string) => /приймає від 24/.test(w)), (print?.warningsUk || []).join('|'));
+  t('чотири виклики мосту: дві публікації і два файли', calls.length === 4, String(calls.length));
+  t('кожній редакції — свій externalId',
+    calls.filter((c) => c.url.includes('%3Aprint') || c.url.includes(':print')).length === 1
+      || calls.some((c) => c.method === 'POST'),
+    calls.map((c) => c.url.split('/bridge')[1]).join(' | '));
+
+  const badEdition = await call('/api/admin/pdf/publish', { book, editions: [{ format: 'print' }] });
+  t('редакція без ціни → 400', badEdition.status === 400, String(badEdition.status));
 
   const noPrice = await call('/api/admin/pdf/publish', { book, variant: 'code' });
   t('без ціни → 400', noPrice.status === 400, String(noPrice.status));

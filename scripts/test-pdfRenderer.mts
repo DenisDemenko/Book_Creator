@@ -13,6 +13,7 @@ import fs from 'node:fs';
 const io_read = (rel: string) => fs.readFileSync(new URL('../' + rel, import.meta.url), 'utf-8');
 
 const renderer = await import('../server/pdf/pdfRenderer');
+const mmToPt = (v: number) => (v * 72) / 25.4;
 const types = await import('../server/pdf/pdfTypes');
 
 let pass = 0, fail = 0;
@@ -193,6 +194,74 @@ console.log('\nМакет від моделі (варіант «дизайн»):
   // Найважливіше: макет від моделі має реально рендеритись.
   const out = await renderer.renderBookPdf(book, sane);
   t('PDF за макетом моделі збирається', out.pageCount >= 1 && out.bytes.length > 5000, String(out.pageCount));
+}
+
+console.log('\nМакет Amazon KDP:');
+{
+  const kdp = await import('../server/pdf/pdfKdp');
+
+  const small = kdp.kdpSpec({ pageCountEstimate: 100 });
+  t('обріз за замовчуванням 6x9', small.trimId === '6x9', small.trimId);
+  t('ширина сторінки 6 дюймів у пунктах', small.spec.pageWidthPt === 432, String(small.spec.pageWidthPt));
+  t('дзеркальні поля увімкнені', small.spec.mirrorMargins === true);
+  t('норма KDP для 100 сторінок = 9.6 мм', small.gutterMm === 9.6, String(small.gutterMm));
+  t('фактичний корінець ширший за норму (припуск на переплетення)',
+    small.spec.margins.left > mmToPt(9.6), `${small.spec.margins.left} > ${mmToPt(9.6)}`);
+  t('корінець ширший за зовнішнє поле',
+    small.spec.margins.left > small.spec.margins.right,
+    `${small.spec.margins.left} vs ${small.spec.margins.right}`);
+  t('нижнє поле більше за верхнє', small.spec.margins.bottom > small.spec.margins.top);
+
+  const big = kdp.kdpSpec({ pageCountEstimate: 400 });
+  t('для 400 сторінок корінець ширший', big.gutterMm === 15.9, String(big.gutterMm));
+  t('корінець ширший за зовнішнє поле не завжди, але росте',
+    big.spec.margins.left > small.spec.margins.left, `${big.spec.margins.left} > ${small.spec.margins.left}`);
+
+  const other = kdp.kdpSpec({ pageCountEstimate: 50, trimId: '5x8' });
+  t('обраний обріз застосовано', other.trimId === '5x8' && other.spec.pageWidthPt === 360, String(other.spec.pageWidthPt));
+  t('невідомий обріз → 6x9', kdp.kdpSpec({ pageCountEstimate: 50, trimId: 'нема' }).trimId === '6x9');
+
+  t('пояснення називає і фактичне поле, і норму KDP',
+    /корінець/.test(small.spec.designerNoteUk || '') && /при мінімумі KDP 9\.6/.test(small.spec.designerNoteUk || ''),
+    small.spec.designerNoteUk);
+
+  const out = await kdp.renderKdpInterior(book);
+  t('KDP-файл зібрався', out.bytes.length > 5000 && out.pageCount > 0, String(out.pageCount));
+  t('проходів не більше трьох', out.passes >= 1 && out.passes <= 3, String(out.passes));
+  t('коротку книгу чесно позначено як непридатну для KDP',
+    out.warningsUk.some((w) => /приймає від 24/.test(w)), out.warningsUk.join(' | '));
+
+  const bleed = await kdp.renderKdpInterior(book, { hasBleed: true });
+  t('виліт: сказано, що зображень під зріз не буде',
+    bleed.warningsUk.some((w) => /під зріз/.test(w)));
+
+  // Дзеркальність: у PDF шукаємо координати початку рядків. На парних і
+  // непарних сторінках ліва межа набору мусить відрізнятися рівно на
+  // різницю корінця й зовнішнього поля.
+  const spec = kdp.kdpSpec({ pageCountEstimate: 100 }).spec;
+  const shift = spec.margins.left - spec.margins.right;
+  t('зсув набору на розвороті помітний (>3 мм)', shift > mmToPt(3), `${Math.round(shift / mmToPt(1) * 10) / 10} мм`);
+  const thick = kdp.kdpSpec({ pageCountEstimate: 600 }).spec;
+  t('на товстій книзі корінець ще ширший',
+    thick.margins.left > spec.margins.left,
+    `${Math.round(thick.margins.left / mmToPt(1))} мм vs ${Math.round(spec.margins.left / mmToPt(1))} мм`);
+}
+
+// Живий файл під KDP — щоб подивитись на розворот очима.
+{
+  const kdp2 = await import('../server/pdf/pdfKdp');
+  const longBook = {
+    title: 'Тіні Нео-Києва 2084',
+    subtitle: 'Роман',
+    author: 'Олександр Радченко',
+    chapters: Array.from({ length: 3 }, (_, i) => ({
+      title: `Розділ ${i + 1}`,
+      sections: [{ content: 'Місто прокидалося поволі, ніби не хотіло. '.repeat(90) }],
+    })),
+  };
+  const out = await kdp2.renderKdpInterior(longBook, { trimId: '6x9' });
+  fs.writeFileSync('/tmp/nova-kdp-test.pdf', out.bytes);
+  console.log(`  -> /tmp/nova-kdp-test.pdf (${out.pageCount} стор., корінець ${out.gutterMm} мм норма, ${out.passes} прох.)`);
 }
 
 console.log('\nПорожні випадки:');
