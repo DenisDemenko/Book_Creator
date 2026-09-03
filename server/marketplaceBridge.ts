@@ -476,6 +476,9 @@ export async function unpublishByExternalId(
  * навмисно НЕ задаємо — його разом із межею секцій має поставити fetch, і
  * ручний заголовок зламав би розбір на приймачі.
  */
+/** Види файлів, які міст уміє класти в лістинг. */
+export type BridgeFileKind = 'attachment' | 'cover' | 'sample';
+
 export async function attachBookFileToMarketplace(
   input: {
     bookId: string;
@@ -483,13 +486,20 @@ export async function attachBookFileToMarketplace(
     filename: string;
     mimeType: string;
     bytes: Uint8Array;
-    /** 'cover' — публічна картинка товару; за замовчуванням файл для покупця. */
-    kind?: 'attachment' | 'cover';
+    /**
+     * Вид файла в лістингу. Різні види живуть поруч і заміняються кожен у
+     * своїх межах: нова обкладинка не витісняє книгу, новий уривок — не
+     * витісняє обкладинку.
+     *   'cover'      — публічна картинка картки;
+     *   'sample'     — публічний уривок (перші сторінки), читає будь-хто;
+     *   'attachment' — сам файл книги, лише тому, хто має право на товар.
+     */
+    kind?: BridgeFileKind;
   },
   deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
 ): Promise<{
   attached: boolean;
-  kind: 'attachment' | 'cover';
+  kind: BridgeFileKind;
   replaced: number;
   media?: unknown;
   externalId: string;
@@ -555,7 +565,7 @@ export async function attachBookFileToMarketplace(
   }
   return {
     attached: Boolean(body?.attached ?? true),
-    kind: (body?.kind as 'attachment' | 'cover') || input.kind || 'attachment',
+    kind: (body?.kind as BridgeFileKind) || input.kind || 'attachment',
     replaced: Number(body?.replaced ?? 0),
     media: body?.media,
     externalId,

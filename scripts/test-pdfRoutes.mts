@@ -146,15 +146,45 @@ console.log('\nМакет від моделі:');
   modelThrows = false;
 }
 
+/*
+  Обкладинка для тестів: не картинка, а рядок потрібного розміру. Маршрут
+  перевіряє РОЗМІР декодованих байтів, а не піксели — саме розмір відрізняє
+  намальовану сторінку від порожнього полотна, і саме його треба перевіряти.
+*/
+const COVER = 'data:image/png;base64,' + 'A'.repeat(8000);
+const TINY_COVER = 'data:image/png;base64,' + 'A'.repeat(200);
+
+console.log('\nОбкладинка як умова публікації:');
+{
+  calls.length = 0;
+  const noCover = await call('/api/admin/pdf/publish', { book, variant: 'code', priceMinor: 15000 });
+  t('без обкладинки → 400 cover_required',
+    noCover.status === 400 && noCover.data?.kind === 'cover_required',
+    `${noCover.status} ${noCover.data?.kind}`);
+  t('нічого не створено: жодного виклику мосту', calls.length === 0, String(calls.length));
+
+  calls.length = 0;
+  const blank = await call('/api/admin/pdf/publish', {
+    book, variant: 'code', priceMinor: 15000, coverBase64: TINY_COVER,
+  });
+  t('порожнє полотно → 400 cover_blank',
+    blank.status === 400 && blank.data?.kind === 'cover_blank', `${blank.status} ${blank.data?.kind}`);
+  t('порожня обкладинка теж нічого не створює', calls.length === 0, String(calls.length));
+}
+
 console.log('\nПовний конвеєр:');
 {
   calls.length = 0;
-  const r = await call('/api/admin/pdf/publish', { book, variant: 'code', priceMinor: 15000, sellerSlug: 'fusion-lab' });
+  const r = await call('/api/admin/pdf/publish', {
+    book, variant: 'code', priceMinor: 15000, sellerSlug: 'fusion-lab', coverBase64: COVER, sample: false,
+  });
   const first = r.data?.editions?.[0];
   t('успіх', r.status === 200, JSON.stringify(r.data)?.slice(0, 160));
   t('стара форма запиту (одна ціна) досі працює', Array.isArray(r.data?.editions) && r.data.editions.length === 1);
   t('лістинг опубліковано', first?.published?.slug === 'testova-knyha-konveiera', String(first?.published?.slug));
   t('файл прикріплено', first?.attached?.attached === true);
+  t('обкладинка прикріплена', first?.cover?.attached === true, JSON.stringify(first?.cover));
+  t('уривок вимкнено явно — його немає', first?.sample == null, JSON.stringify(first?.sample));
   t('сторінки полічені', first?.pdf?.pageCount > 0, String(first?.pdf?.pageCount));
   t('варіант макета названо', first?.layout?.variant === 'code');
 
@@ -166,7 +196,7 @@ console.log('\nПовний конвеєр:');
   // Дві редакції: електронна й друкована під KDP.
   calls.length = 0;
   const two = await call('/api/admin/pdf/publish', {
-    book, sellerSlug: 'fusion-lab',
+    book, sellerSlug: 'fusion-lab', coverBase64: COVER, sample: false,
     editions: [
       { format: 'digital', priceMinor: 15000, variant: 'code' },
       { format: 'print', priceMinor: 39000, variant: 'code', trimId: '6x9' },
@@ -182,19 +212,20 @@ console.log('\nПовний конвеєр:');
     `${print?.pdf?.pageCount} vs ${digital?.pdf?.pageCount}`);
   t('коротка книга: попередження KDP про мінімум сторінок',
     (print?.warningsUk || []).some((w: string) => /приймає від 24/.test(w)), (print?.warningsUk || []).join('|'));
-  t('чотири виклики мосту: дві публікації і два файли', calls.length === 4, String(calls.length));
+  t('шість викликів мосту: дві публікації, два файли, дві обкладинки',
+    calls.length === 6, String(calls.length));
   t('кожній редакції — свій externalId',
     calls.filter((c) => c.url.includes('%3Aprint') || c.url.includes(':print')).length === 1
       || calls.some((c) => c.method === 'POST'),
     calls.map((c) => c.url.split('/bridge')[1]).join(' | '));
 
-  const badEdition = await call('/api/admin/pdf/publish', { book, editions: [{ format: 'print' }] });
+  const badEdition = await call('/api/admin/pdf/publish', { book, coverBase64: COVER, editions: [{ format: 'print' }] });
   t('редакція без ціни → 400', badEdition.status === 400, String(badEdition.status));
 
-  const noPrice = await call('/api/admin/pdf/publish', { book, variant: 'code' });
+  const noPrice = await call('/api/admin/pdf/publish', { book, variant: 'code', coverBase64: COVER });
   t('без ціни → 400', noPrice.status === 400, String(noPrice.status));
 
-  const noId = await call('/api/admin/pdf/publish', { book: { title: 'Без id' }, priceMinor: 100 });
+  const noId = await call('/api/admin/pdf/publish', { book: { title: 'Без id' }, priceMinor: 100, coverBase64: COVER });
   t('без id книги → 400', noId.status === 400, String(noId.status));
 }
 

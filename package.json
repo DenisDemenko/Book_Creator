@@ -12,7 +12,7 @@
     "lint": "tsc --noEmit",
     "test:diff": "tsx scripts/test-bookDiff.mts",
     "test:images": "tsx scripts/test-imageGeneration.mts",
-    "test": "npm run test:diff && npm run test:image-wrap && npm run test:prompt-templates && npm run test:core-ai && npm run test:character-normalize && npm run test:images && npm run test:auth && npm run test:sqlite && npm run test:subscriptions && npm run test:chat && npm run test:api-keys && npm run test:book-text && npm run test:claude-manuscript && npm run test:publishing && npm run test:publishing-routes && npm run test:selection-paragraphs && npm run test:core-module-models && npm run test:design-layout && npm run test:book-version && npm run test:express-tracks && npm run test:design-suggestion && npm run test:diagn && npm run test:chat-bridge && npm run test:narration && npm run test:readability && npm run test:book-search && npm run test:character-mentions && npm run test:character-consistency && npm run test:character-density && npm run test:behavior-drift && npm run test:reader-response && npm run test:character-codex && npm run test:jyotish-chart && npm run test:slash-trigger && npm run test:opening-strength && npm run test:market && npm run test:etsy-screen && npm run test:listing-audit && npm run test:chat-providers && npm run test:bridge && npm run test:pdf && npm run test:pdf-routes && npm run test:pdf-cover",
+    "test": "npm run test:diff && npm run test:image-wrap && npm run test:prompt-templates && npm run test:core-ai && npm run test:character-normalize && npm run test:images && npm run test:auth && npm run test:sqlite && npm run test:subscriptions && npm run test:chat && npm run test:api-keys && npm run test:book-text && npm run test:claude-manuscript && npm run test:publishing && npm run test:publishing-routes && npm run test:selection-paragraphs && npm run test:core-module-models && npm run test:design-layout && npm run test:book-version && npm run test:express-tracks && npm run test:design-suggestion && npm run test:diagn && npm run test:chat-bridge && npm run test:narration && npm run test:readability && npm run test:book-search && npm run test:character-mentions && npm run test:character-consistency && npm run test:character-density && npm run test:behavior-drift && npm run test:reader-response && npm run test:character-codex && npm run test:jyotish-chart && npm run test:slash-trigger && npm run test:opening-strength && npm run test:market && npm run test:etsy-screen && npm run test:listing-audit && npm run test:chat-providers && npm run test:bridge && npm run test:pdf && npm run test:pdf-routes && npm run test:pdf-cover && npm run test:pdf-sample",
     "test:chat": "tsx scripts/test-chatSessions.mts",
     "test:api-keys": "tsx scripts/test-apiKeys.mts",
     "test:book-text": "tsx scripts/test-bookText.mts",
@@ -53,6 +53,7 @@
     "test:etsy-screen": "tsx scripts/test-etsyScreen.mts",
     "test:chat-providers": "tsx scripts/test-chatProviders.mts",
     "test:bridge": "tsx scripts/test-marketplaceBridge.mts",
+    "test:pdf-sample": "tsx scripts/test-pdfSample.mts",
     "test:pdf-cover": "tsx scripts/test-pdfCover.mts",
     "test:pdf": "tsx scripts/test-pdfRenderer.mts",
     "test:pdf-routes": "tsx scripts/test-pdfRoutes.mts"

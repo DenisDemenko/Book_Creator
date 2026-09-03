@@ -239,6 +239,9 @@ interface EditionResult {
   format: 'digital' | 'print';
   published?: { slug?: string; created?: boolean };
   attached?: { attached?: boolean };
+  cover?: { attached?: boolean };
+  /** null — уривок вимкнули; attached:false — не вдався, причина в errorUk. */
+  sample?: { pages: number; totalPages: number; attached: boolean; errorUk?: string } | null;
   pdf?: { pageCount?: number; sizeBytes?: number };
   layout?: { variant?: string; noteUk?: string; trimId?: string; gutterMm?: number };
   warningsUk?: string[];
@@ -264,6 +267,8 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
   const [result, setResult] = useState<EditionResult[] | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [coverNote, setCoverNote] = useState<string | null>(null);
+  const [withSample, setWithSample] = useState(true);
+  const [samplePages, setSamplePages] = useState(10);
 
   const preview = async (format: 'digital' | 'print') => {
     setBusy('preview');
@@ -296,7 +301,31 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
     setBusy('publish');
     setError(null);
     setResult(null);
+    setCoverNote(null);
     try {
+      /*
+        Обкладинку малюємо ПЕРЕД публікацією, а не після.
+        Порядок тут і є та сама «обовʼязкова умова»: якщо сторінка не
+        намалювалась, у вітрині не зʼявляється нічого — замість того щоб
+        зʼявилась картка з білим прямокутником і чекала на другу кнопку.
+        Малює браузер, бо серверу нічим растеризувати PDF.
+
+        Джерело — цифрова редакція: титул у неї і в друкованої той самий,
+        а зайвий рендер KDP коштував би ще одного проходу зі збіжністю
+        корінця заради тієї ж картинки.
+      */
+      const previewRes = await fetch('/api/admin/pdf/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ book, variant, format: 'digital', trimId }),
+      });
+      if (!previewRes.ok) {
+        const data = await previewRes.json().catch(() => ({}));
+        throw new Error(data?.error || `Не вдалося зібрати PDF для обкладинки (HTTP ${previewRes.status}).`);
+      }
+      const coverBase64 = await renderPdfFirstPageToPng(await previewRes.blob());
+
       const editions: Record<string, unknown>[] = [
         { format: 'digital', priceMinor: Math.round(Number(priceDigital) * 100), variant },
       ];
@@ -312,7 +341,14 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ book, sellerSlug: sellerSlug.trim() || undefined, editions }),
+        body: JSON.stringify({
+          book,
+          sellerSlug: sellerSlug.trim() || undefined,
+          editions,
+          coverBase64,
+          sample: withSample,
+          samplePages,
+        }),
       });
       try {
         if (sellerSlug.trim()) localStorage.setItem('nova_bridge_seller_slug', sellerSlug.trim());
@@ -391,6 +427,8 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
           <h3 className="text-sm font-bold text-slate-100">Публікація у вітрину Fusion Lab</h3>
           <p className="text-[11px] text-slate-400 leading-snug mt-1">
             Складає PDF цієї книги і кладе його в каталог магазину разом із карткою товару.
+            Обкладинка обовʼязкова — вона малюється з першої сторінки PDF перед публікацією, і
+            без неї у вітрині не зʼявиться нічого: порожня картка не продає, а знецінює.
             Електронна й друкована редакції — два сусідні лістинги: у маркетплейсі одна ціна на
             лістинг. Друкована верстається під Amazon KDP — інший обріз, дзеркальні поля,
             корінець за обсягом.
@@ -493,8 +531,42 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
             disabled={busy !== ''}
             className="px-4 py-2 rounded-xl bg-cyan-500 text-slate-950 text-xs font-bold disabled:opacity-50"
           >
-            {busy === 'publish' ? 'Публікую…' : 'Опублікувати у вітрину'}
+            {busy === 'publish' ? 'Малюю обкладинку й публікую…' : 'Опублікувати у вітрину'}
           </button>
+        </div>
+
+        {/*
+          Уривок — те, що продає книгу насправді: опис і обкладинка кажуть,
+          ПРО ЩО вона, а перші сторінки показують, ЯК вона написана.
+        */}
+        <div className="pt-1 border-t border-slate-800 space-y-2">
+          <label className="flex items-center gap-2 text-xs text-slate-200">
+            <input
+              type="checkbox"
+              checked={withSample}
+              onChange={(e) => setWithSample(e.target.checked)}
+              className="accent-cyan-500"
+            />
+            Відкрити безкоштовний уривок
+          </label>
+          {withSample && (
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-400">Сторінок:</span>
+              <select
+                value={samplePages}
+                onChange={(e) => setSamplePages(Number(e.target.value))}
+                className="rounded-lg bg-slate-900 border border-slate-700 px-2 py-1 text-xs text-slate-100"
+              >
+                {[5, 6, 7, 8, 9, 10].map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+              <span className="text-[11px] text-slate-500">
+                Ріжеться з того самого PDF, що йде покупцеві, — разом із титулом.
+                Якщо в книзі не більше сторінок, ніж в уривку, його не додамо.
+              </span>
+            </div>
+          )}
         </div>
 
         {/*
@@ -554,7 +626,15 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
                 {edition.layout?.trimId ? ` · Обріз ${edition.layout.trimId}` : ''}
                 {edition.layout?.gutterMm ? ` · Норма корінця ${edition.layout.gutterMm} мм` : ''}
                 {edition.attached?.attached ? ' · Файл у лістингу' : ' · Файл НЕ прикріплено'}
+                {edition.cover?.attached ? ' · Обкладинка' : ''}
               </p>
+              {edition.sample && (
+                <p className="text-[11px] text-slate-300">
+                  {edition.sample.attached
+                    ? `Уривок: ${edition.sample.pages} сторінок із ${edition.sample.totalPages} — відкритий усім.`
+                    : edition.sample.errorUk}
+                </p>
+              )}
               {edition.published?.slug && (
                 <a
                   href={`https://app.fusionlab.in.ua/uk/catalog/${edition.published.slug}`}

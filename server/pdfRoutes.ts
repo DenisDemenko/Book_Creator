@@ -19,6 +19,7 @@ import {
   attachBookFileToMarketplace,
   publishBookToMarketplace,
   readBridgeSettings,
+  unpublishBookFromMarketplace,
 } from './marketplaceBridge';
 import { resolveCoreTemplate, renderCoreTemplate, type CorePromptTemplateBundle } from './coreAiRegistry';
 import { resolveModuleModelId } from './coreModuleModels';
@@ -26,6 +27,7 @@ import { renderBookPdf } from './pdf/pdfRenderer';
 import { bookToPdfInput, specFromBook } from './pdf/pdfFromBook';
 import { normalizeDesignResult, parseBookPdfDesignResponse } from './pdf/pdfDesignPrompt';
 import { renderKdpInterior, type KdpRenderResult } from './pdf/pdfKdp';
+import { clampSamplePages, extractSamplePages } from './pdf/pdfSample';
 import type { PdfLayoutSpec } from './pdf/pdfTypes';
 
 export type LayoutVariant = 'code' | 'design';
@@ -61,6 +63,14 @@ function sampleOf(book: { chapters?: Array<{ sections?: Array<{ content?: string
   }
   return parts.join('\n\n').slice(0, SAMPLE_CHARS);
 }
+
+/**
+ * Нижня межа розміру обкладинки. Порожній canvas дає крихітний PNG —
+ * суцільна заливка стискається майже в нуль, — тож без цієї межі білий
+ * аркуш доїхав би у вітрину як валідна картинка. Клієнт має свою, таку саму
+ * за змістом: тут ловимо тих, хто прийшов повз інтерфейс.
+ */
+const MIN_COVER_BYTES = 3000;
 
 export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): void {
   /**
@@ -195,9 +205,67 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): void {
         return res.status(400).json({ error: 'Не вказано жодної редакції.', kind: 'bad_input' });
       }
 
+      /*
+        ОБКЛАДИНКА — УМОВА ПУБЛІКАЦІЇ, А НЕ ПРИКРАСА.
+        Картка без зображення — це білий прямокутник у каталозі поруч із
+        чужими оформленими товарами; вона не продає, а знецінює. Тому
+        перевірка стоїть ДО створення лістинга: без обкладинки у вітрині не
+        зʼявляється нічого, замість того щоб зʼявитись і чекати на другу
+        кнопку, яку хтось забуде натиснути.
+
+        Малює її браузер (серверу нічим растеризувати PDF), тож приходить
+        вона готовим зображенням. Межа розміру — той самий захист від
+        «успішного» порожнього полотна, що й на клієнті: суцільна заливка
+        стискається майже в нуль, і білий аркуш інакше доїхав би сюди як
+        валідна картинка.
+      */
+      const coverRaw = String(req.body?.coverBase64 || '');
+      const coverMatch = /^data:(image\/[a-z+]+);base64,(.+)$/i.exec(coverRaw);
+      const coverMime = coverMatch ? coverMatch[1] : 'image/png';
+      const coverBase64 = coverMatch ? coverMatch[2] : coverRaw;
+      if (!coverBase64) {
+        return res.status(400).json({
+          error:
+            'Публікація без обкладинки неможлива: картка книги у вітрині лишилась би порожнім прямокутником. ' +
+            'Обкладинка збирається з першої сторінки PDF у браузері — натисніть «Опублікувати» ще раз, коли сторінка домалюється.',
+          kind: 'cover_required',
+        });
+      }
+      const coverBytes = Buffer.from(coverBase64, 'base64');
+      if (coverBytes.length < MIN_COVER_BYTES) {
+        return res.status(400).json({
+          error: `Обкладинка підозріло мала (${coverBytes.length} Б) — схоже, сторінка намалювалась порожньою. Публікацію зупинено.`,
+          kind: 'cover_blank',
+        });
+      }
+
+      /*
+        Безкоштовний уривок: перші сторінки книги, відкриті всім.
+        Вимикається явно (`sample: false`) — за замовчуванням увімкнений,
+        бо саме текст, а не опис, вирішує покупку.
+      */
+      const sampleEnabled = req.body?.sample !== false;
+      const samplePages = clampSamplePages(req.body?.samplePages);
+
       const settings = await readBridgeSettings();
       const safeTitle = String(book.title).replace(/[^\p{L}\p{N}]+/gu, '_').slice(0, 60) || 'book';
       const results = [];
+
+      /*
+        Макет вирішується ОДИН раз на всю публікацію, а не в циклі редакцій.
+        Раніше `buildSpec` стояв усередині циклу — для варіанта «дизайн» це
+        означало два платні виклики моделі на одну книгу і, що гірше, два
+        РІЗНІ макети: цифрова й друкована редакції тієї самої книги могли
+        вийти з різним кеглем і полями. Друкована й далі накладає норми KDP
+        поверх цього макета — але поверх одного й того самого.
+      */
+      const variant: LayoutVariant = editions.some((e) => e.variant === 'design') ? 'design' : 'code';
+      const { spec, modelId } = await buildSpec(
+        book,
+        variant,
+        editions.find((e) => e.modelId)?.modelId as string,
+        req
+      );
 
       for (const edition of editions) {
         const format = edition.format === 'print' ? 'print' : 'digital';
@@ -205,9 +273,6 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): void {
         if (!Number.isFinite(priceMinor) || priceMinor < 0) {
           return res.status(400).json({ error: `Некоректна ціна для редакції «${format}».`, kind: 'bad_input' });
         }
-
-        const variant: LayoutVariant = edition.variant === 'design' ? 'design' : 'code';
-        const { spec, modelId } = await buildSpec(book, variant, edition.modelId as string, req);
 
         // Друкована редакція йде через KDP-верстку: базову типографіку бере
         // з обраного макета, а формат, поля й корінець — з норм KDP.
@@ -247,6 +312,86 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): void {
           { settings }
         );
 
+        /*
+          ОБКЛАДИНКА, І ВІДКІТ ЯКЩО ВОНА НЕ СІЛА.
+          Лістинг уже створений — обкладинку можна прикріпити лише до
+          наявного. Але якщо саме вона не пройшла, у вітрині лишилась би
+          рівно та порожня картка, заради відсутності якої ця перевірка й
+          робилась. Тому лістинг знімається назад в архів, і автор бачить
+          причину, а не «опубліковано» з білим прямокутником.
+        */
+        let coverAttached;
+        try {
+          coverAttached = await attachBookFileToMarketplace(
+            {
+              bookId: String(book.id),
+              format,
+              filename: `${safeTitle}_cover.${coverMime.includes('jpeg') ? 'jpg' : 'png'}`,
+              mimeType: coverMime,
+              bytes: new Uint8Array(coverBytes),
+              kind: 'cover',
+            },
+            { settings }
+          );
+        } catch (coverErr) {
+          await unpublishBookFromMarketplace({ bookId: String(book.id), format }, { settings }).catch(
+            () => {
+              // Відкіт теж міг не вдатися — але справжня причина в
+              // coverErr, і підміняти її помилкою прибирання не можна.
+            }
+          );
+          throw new MarketplaceBridgeError(
+            `Обкладинку не вдалося прикріпити (${(coverErr as Error)?.message || 'невідома причина'}). ` +
+              `Редакцію «${format}» знято з вітрини, щоб там не лишилась картка без зображення.`,
+            'rejected',
+            502
+          );
+        }
+
+        /*
+          Уривок — окремий публічний файл лістинга. Ріжеться з ТОГО САМОГО
+          PDF, який щойно пішов покупцеві: «перші десять сторінок» — наслідок
+          верстки, а не властивість тексту, тож зверстаний окремо уривок
+          обірвався б не там, де обривається десята сторінка книги.
+
+          Його збій, на відміну від обкладинки, публікацію НЕ скасовує:
+          книга без уривка продається, книга без обкладинки — ні.
+        */
+        let sample: { pages: number; totalPages: number; attached: boolean; errorUk?: string } | null = null;
+        if (sampleEnabled) {
+          try {
+            const cut = await extractSamplePages(rendered.bytes, samplePages);
+            if (!cut) {
+              sample = {
+                pages: 0,
+                totalPages: rendered.pageCount,
+                attached: false,
+                errorUk: `У книзі ${rendered.pageCount} сторінок — це не більше за розмір уривка (${samplePages}). Уривок не додано, щоб не віддати книгу цілком безкоштовно.`,
+              };
+            } else {
+              await attachBookFileToMarketplace(
+                {
+                  bookId: String(book.id),
+                  format,
+                  filename: `${safeTitle}_uryvok.pdf`,
+                  mimeType: 'application/pdf',
+                  bytes: cut.bytes,
+                  kind: 'sample',
+                },
+                { settings }
+              );
+              sample = { pages: cut.pageCount, totalPages: cut.totalPages, attached: true };
+            }
+          } catch (sampleErr) {
+            sample = {
+              pages: 0,
+              totalPages: rendered.pageCount,
+              attached: false,
+              errorUk: `Уривок не додано: ${(sampleErr as Error)?.message || 'невідома причина'}. Сама книга опублікована.`,
+            };
+          }
+        }
+
         // Звужуємо тип явно: renderKdpInterior повертає більше полів, ніж
         // звичайний рендер, і саме вони цікаві авторові друкованої редакції.
         const kdp: KdpRenderResult | null = format === 'print' ? (rendered as KdpRenderResult) : null;
@@ -254,6 +399,8 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): void {
           format,
           published,
           attached,
+          cover: coverAttached,
+          sample,
           pdf: { pageCount: rendered.pageCount, sizeBytes: rendered.bytes.length },
           layout: {
             variant,
