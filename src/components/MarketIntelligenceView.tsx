@@ -47,6 +47,7 @@ import {
 } from 'lucide-react';
 import { FeeCalculatorView } from './etsy/FeeCalculatorView';
 import { ListingAuditView } from './etsy/ListingAuditView';
+import { TopicTrendView } from './etsy/TopicTrendView';
 import { SeoTranslationsTab } from './etsy/SeoTranslationsTab';
 import type { AuthUser } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
@@ -470,7 +471,7 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({ 
    * калькулятор комісій Etsy та SEO-переклади, — тож вони не мають
    * потребувати ані звіту, ані попереднього скринінгу.
    */
-  const [tab, setTab] = useState<'screen' | 'audit' | 'fees' | 'seo'>('screen');
+  const [tab, setTab] = useState<'screen' | 'trend' | 'audit' | 'fees' | 'seo'>('screen');
 
   const [topic, setTopic] = useState('');
   const [count, setCount] = useState(10);
@@ -657,6 +658,7 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({ 
           {(
             [
               { id: 'screen' as const, label: t('marketIntel.tabScreen'), icon: LineChart },
+              { id: 'trend' as const, label: t('marketIntel.tabTrend'), icon: ArrowUpRight },
               { id: 'audit' as const, label: t('marketIntel.tabAudit'), icon: ShieldAlert },
               { id: 'fees' as const, label: t('marketIntel.tabFees'), icon: Calculator },
               { id: 'seo' as const, label: t('marketIntel.tabSeo'), icon: Languages },
@@ -682,6 +684,15 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({ 
             );
           })}
         </nav>
+
+        {tab === 'trend' && (
+          <div className="etsy-kit">
+            <TopicTrendView
+              topics={topics.map((row) => ({ topicKey: row.topicKey, topic: row.topic }))}
+              initialTopicKey={report?.topicKey ?? topics[0]?.topicKey ?? null}
+            />
+          </div>
+        )}
 
         {tab === 'audit' && (
           <div className="etsy-kit">

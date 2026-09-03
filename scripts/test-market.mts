@@ -249,6 +249,73 @@ console.log('\nОбидва бекенди дають однакові числ�
 }
 
 // ---------------------------------------------------------------------------
+console.log('\nДинаміка ніші по збережених прогонах:');
+{
+  // Три прогони однієї теми. У другому в одного товару немає ціни, у
+  // третього — немає рейтингу: саме на цьому перевіряється, що дірка
+  // лишається діркою, а не стає нулем.
+  await marketStore.saveSnapshots([
+    snap({ topicKey: 'trend test', productKey: 'trend test::a', collectedAt: '2026-03-01T00:00:00.000Z', priceUsd: 20, reviewCount: 10, rating: 4.0 }),
+    snap({ topicKey: 'trend test', productKey: 'trend test::b', collectedAt: '2026-03-01T00:00:00.000Z', priceUsd: 40, reviewCount: 20, rating: 5.0 }),
+  ]);
+  await marketStore.saveSnapshots([
+    snap({ topicKey: 'trend test', productKey: 'trend test::a', collectedAt: '2026-03-10T00:00:00.000Z', priceUsd: 30, reviewCount: 15, rating: 4.0 }),
+    snap({ topicKey: 'trend test', productKey: 'trend test::b', collectedAt: '2026-03-10T00:00:00.000Z', priceUsd: null, reviewCount: 25, rating: null }),
+  ]);
+
+  const trend = await service.topicTrend('trend test');
+  t('прогони згруповані за часом зрізу', trend.runs.length === 2, String(trend.runs.length));
+  t('прогони йдуть у хронологічному порядку',
+    trend.runs[0].collectedAt < trend.runs[1].collectedAt);
+  t('медіана першого прогону рахує обидві ціни',
+    trend.runs[0].medianPriceUsd === 30, String(trend.runs[0].medianPriceUsd));
+  t('відсутня ціна НЕ стала нулем — медіана по наявній',
+    trend.runs[1].medianPriceUsd === 30, String(trend.runs[1].medianPriceUsd));
+  t('відсутнє значення пораховане окремо',
+    trend.runs[1].missingPrice === 1 && trend.runs[1].missingRating === 1,
+    `price:${trend.runs[1].missingPrice} rating:${trend.runs[1].missingRating}`);
+  t('сума відгуків — по наявних', trend.runs[1].totalReviews === 40, String(trend.runs[1].totalReviews));
+  t('середній рейтинг — лише по наявних',
+    trend.runs[1].avgRating === 4, String(trend.runs[1].avgRating));
+  t('два прогони вважаються порівнюваними', trend.comparable === true);
+
+  await marketStore.saveSnapshots([
+    snap({ topicKey: 'trend solo', productKey: 'trend solo::a', collectedAt: '2026-04-01T00:00:00.000Z' }),
+  ]);
+  const solo = await service.topicTrend('trend solo');
+  t('один прогін — це не тренд', solo.comparable === false && solo.runs.length === 1);
+
+  // Ключ із таксономією: повторна нормалізація зрізала б «#1234» і зрізи
+  // не знайшлися б узагалі. Саме на цьому впала перша версія.
+  await marketStore.saveSnapshots([
+    snap({ topicKey: 'paracord bracelet#1234', productKey: 'p::a', collectedAt: '2026-06-01T00:00:00.000Z', priceUsd: 12 }),
+  ]);
+  const taxonomy = await service.topicTrend('paracord bracelet#1234');
+  t('ключ із таксономією не псується повторною нормалізацією',
+    taxonomy.runs.length === 1 && taxonomy.topicKey === 'paracord bracelet#1234',
+    `${taxonomy.runs.length} / ${taxonomy.topicKey}`);
+
+  // Сира тема замість ключа — запасний шлях: нормалізуємо й пробуємо ще раз.
+  const raw = await service.topicTrend('Trend Test');
+  t('сира тема знаходить зрізи через запасну нормалізацію',
+    raw.runs.length === 2, String(raw.runs.length));
+
+  const none = await service.topicTrend('ніколи-не-досліджувана');
+  t('невідома тема → порожньо, без вигаданих точок',
+    none.runs.length === 0 && none.comparable === false);
+
+  // Прогін, у якому джерело не дало жодної ціни: медіана мусить бути null,
+  // а не 0 — «немає даних» і «товар за нуль доларів» це різні факти.
+  await marketStore.saveSnapshots([
+    snap({ topicKey: 'trend empty', productKey: 'trend empty::a', collectedAt: '2026-05-01T00:00:00.000Z', priceUsd: null, reviewCount: null, rating: null }),
+  ]);
+  const empty = await service.topicTrend('trend empty');
+  t('прогін без жодної ціни → null, а не 0',
+    empty.runs[0].medianPriceUsd === null && empty.runs[0].totalReviews === null,
+    JSON.stringify(empty.runs[0]));
+}
+
+// ---------------------------------------------------------------------------
 console.log('\nДоступ до маршрутів (роль + тариф):');
 {
   const express = (await import('express')).default;

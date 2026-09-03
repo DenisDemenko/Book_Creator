@@ -25,6 +25,7 @@ import {
   getLatestReport,
   getWeights,
   listSnapshotsForProduct,
+  listSnapshotsForTopic,
   saveReport,
   saveSnapshots,
 } from './marketStore';
@@ -163,4 +164,97 @@ export async function runMarketScreen(
 export async function productTrend(productKey: string, limit = 200): Promise<MarketSnapshot[]> {
   const history = await listSnapshotsForProduct(productKey, limit);
   return history.slice().sort((a, b) => a.collectedAt.localeCompare(b.collectedAt));
+}
+
+/**
+ * Один прогін скринінгу, зведений до кількох чисел (ТЗ 8, 9).
+ *
+ * `missing*` — не службове поле, а половина сенсу. Модель раз у раз не дає
+ * ціну чи кількість відгуків; якщо порахувати медіану по тому, що лишилось,
+ * і не сказати, зі скількох, два прогони порівнюватимуться як рівні, хоча
+ * в одному було десять цін, а в другому дві.
+ */
+export interface TopicRun {
+  collectedAt: string;
+  listings: number;
+  medianPriceUsd: number | null;
+  totalReviews: number | null;
+  avgRating: number | null;
+  missingPrice: number;
+  missingReviews: number;
+  missingRating: number;
+}
+
+export interface TopicTrend {
+  topicKey: string;
+  runs: TopicRun[];
+  /**
+   * Скільки прогонів порівнюється. Один прогін — це не тренд, і клієнт має
+   * показати «потрібен другий», а не пряму лінію, яку читають як стабільність.
+   */
+  comparable: boolean;
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const value = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+  return Math.round(value * 100) / 100;
+}
+
+/**
+ * Динаміка ніші між збереженими прогонами скринінгу.
+ *
+ * Джерело — ті самі зрізи, що вже лежать у сховищі: нічого не досліджується
+ * заново й нічого не витрачається. Один прогін = одна точка; порожній
+ * показник лишається null і потрапляє в лічильник `missing*`, а не
+ * замінюється нулем — товар без ціни не є товаром за нуль доларів.
+ */
+export async function topicTrend(rawKey: string, limit = 500): Promise<TopicTrend> {
+  // Ключ береться ЯК Є, а не проганяється через normalizeTopicKey ще раз.
+  // Нормалізація вирізає все, крім літер і цифр, тож ключ із таксономією
+  // («paracord bracelet#1234») після повторного проходу став би
+  // «paracord bracelet 1234» — і зрізи по ньому просто не знайшлися б.
+  // Клієнт передає ключ, який отримав із /api/market/topics, тобто вже
+  // нормалізований. Другий прохід лишається як запасний варіант — на
+  // випадок, коли передали сиру тему, а не ключ.
+  const topicKey = String(rawKey || '').trim();
+  let snapshots = await listSnapshotsForTopic(topicKey, limit);
+  if (snapshots.length === 0) {
+    const normalized = normalizeTopicKey(topicKey);
+    if (normalized && normalized !== topicKey) {
+      snapshots = await listSnapshotsForTopic(normalized, limit);
+    }
+  }
+
+  const byRun = new Map<string, MarketSnapshot[]>();
+  for (const snapshot of snapshots) {
+    const bucket = byRun.get(snapshot.collectedAt);
+    if (bucket) bucket.push(snapshot);
+    else byRun.set(snapshot.collectedAt, [snapshot]);
+  }
+
+  const runs: TopicRun[] = [...byRun.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([collectedAt, items]) => {
+      const prices = items.map((i) => i.priceUsd).filter((v): v is number => typeof v === 'number');
+      const reviews = items.map((i) => i.reviewCount).filter((v): v is number => typeof v === 'number');
+      const ratings = items.map((i) => i.rating).filter((v): v is number => typeof v === 'number');
+      return {
+        collectedAt,
+        listings: items.length,
+        medianPriceUsd: median(prices),
+        totalReviews: reviews.length === 0 ? null : reviews.reduce((sum, v) => sum + v, 0),
+        avgRating:
+          ratings.length === 0
+            ? null
+            : Math.round((ratings.reduce((sum, v) => sum + v, 0) / ratings.length) * 100) / 100,
+        missingPrice: items.length - prices.length,
+        missingReviews: items.length - reviews.length,
+        missingRating: items.length - ratings.length,
+      };
+    });
+
+  return { topicKey, runs, comparable: runs.length >= 2 };
 }

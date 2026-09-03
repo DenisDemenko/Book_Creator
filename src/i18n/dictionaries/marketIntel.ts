@@ -13,6 +13,7 @@ export const marketIntel = {
     intro: 'Скринінг ніші, динаміка товарів і Opportunity Score 0–100 з розкладкою по компонентах. King Market Intelligence, ТЗ v1.0.',
 
     tabScreen: 'Скринінг ніші',
+    tabTrend: 'Динаміка ніші',
     tabAudit: 'Аудит лістинга',
     tabFees: 'Калькулятор комісій',
     tabSeo: 'SEO-переклади',
@@ -138,6 +139,7 @@ export const marketIntel = {
     intro: 'Niche screening, product dynamics and a 0–100 Opportunity Score broken down by component. King Market Intelligence, spec v1.0.',
 
     tabScreen: 'Niche screening',
+    tabTrend: 'Niche dynamics',
     tabAudit: 'Listing audit',
     tabFees: 'Fee calculator',
     tabSeo: 'SEO translations',

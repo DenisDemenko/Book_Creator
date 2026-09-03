@@ -33,7 +33,7 @@ import { resolveModuleModelId } from './coreModuleModels';
 import { ETSY_ADVISOR_TASKS, type EtsyAdvisorTask } from './etsyAdvisorPrompt';
 import { normalizeMarketScreenResult, parseMarketScreenResponse } from './market/marketScreenPrompt';
 import { normalizeWeights } from './market/marketScoring';
-import { productTrend, runMarketScreen, type ScreenFn } from './market/marketService';
+import { productTrend, runMarketScreen, topicTrend, type ScreenFn } from './market/marketService';
 import {
   getLatestReport,
   getScreenModelId,
@@ -278,6 +278,22 @@ export function registerMarketRoutes(app: Express, deps: MarketRoutesDeps): void
       res.json({ snapshots: await productTrend(productKey) });
     } catch (err) {
       handleError(res, err, 'Не вдалося завантажити історію товару.');
+    }
+  });
+
+  /**
+   * Динаміка ніші по збережених прогонах (ТЗ 8, 9).
+   *
+   * Нічого не витрачає: читає ті самі зрізи, що вже лежать у сховищі.
+   * Тому й ліміту на частоту тут немає — на відміну від скринінгу.
+   */
+  app.get('/api/market/topic/:topicKey/trend', ...gate, async (req: Request, res: Response) => {
+    try {
+      const topicKey = String(req.params.topicKey || '').trim();
+      if (!topicKey) return res.status(400).json({ error: 'Не вказано тему.', kind: 'bad_input' });
+      res.json(await topicTrend(topicKey));
+    } catch (err) {
+      handleError(res, err, 'Не вдалося завантажити динаміку ніші.');
     }
   });
 
