@@ -512,6 +512,38 @@ CREATE TABLE IF NOT EXISTS book_artifacts (
 );
 CREATE INDEX IF NOT EXISTS idx_book_artifacts_book ON book_artifacts(book_id, kind);
 
+-- Задачі генерації в Gamma (запит власника, 03.09.2026).
+--
+-- НАВІЩО ТАБЛИЦЯ, А НЕ ПРОСТО ВИКЛИК. Дві причини, і обидві грошові.
+--
+-- Перша: генерація асинхронна — запит повертає id, а результат доходить за
+-- 1-3 хвилини. Тримати це в памʼяті процесу означало б, що перезапуск
+-- сервера губить оплачену роботу: кредити списані, а посилання немає ніде.
+--
+-- Друга, важливіша: КОЖНА генерація коштує кредитів рахунку власника
+-- (пробний прогін: 42 кредити за дев'ять карток). Без запису, хто й на що
+-- їх витратив, баланс просто зникав би, і відповісти на питання «куди
+-- поділись кредити» було б нічим. Тому вартість лежить поруч із задачею,
+-- як витрата моделі лежить у usage_log.
+CREATE TABLE IF NOT EXISTS gamma_jobs (
+  id             TEXT PRIMARY KEY,        -- generationId від Gamma
+  user_id        TEXT,                    -- хто замовив
+  book_id        TEXT,                    -- з якою книгою повʼязано, якщо повʼязано
+  kind           TEXT NOT NULL,           -- course_deck | landing | social | document
+  format         TEXT NOT NULL,           -- presentation | document | webpage | social
+  status         TEXT NOT NULL,           -- pending | completed | failed
+  title          TEXT NOT NULL DEFAULT '',
+  gamma_url      TEXT,
+  export_url     TEXT,                    -- живе близько тижня на боці Gamma
+  export_as      TEXT,                    -- pdf | pptx | png | NULL
+  credits_used   INTEGER,                 -- NULL, поки не завершено
+  credits_left   INTEGER,                 -- баланс після списання, як його бачила Gamma
+  error_uk       TEXT,
+  created_at     TEXT NOT NULL,
+  updated_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_gamma_jobs_user ON gamma_jobs(user_id, created_at DESC);
+
 `;
 
 /**

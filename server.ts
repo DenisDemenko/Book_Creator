@@ -52,6 +52,9 @@ import { createEtsyClient } from './server/etsy/etsyClient';
 import { createTokenBucket } from './server/etsy/rateLimiter';
 import { registerPdfRoutes } from './server/pdfRoutes';
 import { registerBookRoutes } from './server/bookRoutes';
+import { registerGammaRoutes } from './server/gammaRoutes';
+import { readGammaConfig, GAMMA_RATE_LIMIT_PER_SECOND } from './server/gamma/gammaConfig';
+import { createGammaClient } from './server/gamma/gammaClient';
 import { registerNarrationRoutes } from './server/narrationRoutes';
 import { registerPublishingRoutes } from './server/publishingRoutes';
 import { requireImageQuota, requirePlanAtLeast, checkChatQuota, resolveSubscription } from './server/subscriptions';
@@ -428,6 +431,27 @@ async function startServer() {
     generateText: generateAiText as never,
   });
   registerBookRoutes(app, storedBookOps);
+
+  /*
+    Gamma. Відро власне й скромне: документованих лімітів Gamma не публікує,
+    а генерація й так триває хвилинами — бити частіше немає сенсу, зате
+    вичерпати невідому квоту легко.
+  */
+  const gammaBucket = createTokenBucket({
+    capacity: GAMMA_RATE_LIMIT_PER_SECOND,
+    ratePerSecond: GAMMA_RATE_LIMIT_PER_SECOND,
+  });
+  registerGammaRoutes(app, {
+    getClient: () => {
+      const cfg = readGammaConfig();
+      if (!cfg.configured) return null;
+      return createGammaClient({
+        apiKey: cfg.apiKey,
+        fetchImpl: fetch as never,
+        bucket: gammaBucket,
+      });
+    },
+  });
   registerNarrationRoutes(app);
 
   // --- API Endpoints ---
