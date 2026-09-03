@@ -237,10 +237,12 @@ console.log('\nChromium: рендер із підставним браузеро
   const stubBytes = await stub.save();
 
   let seenHtml = '';
+  let seenOpts: Record<string, unknown> = {};
   let closed = false;
-  __setBrowserLauncherForTests(async () => ({
-    async pdf(html: string) {
+  __setBrowserLauncherForTests(async (): Promise<any> => ({
+    async pdf(html: string, opts: Record<string, unknown>) {
       seenHtml = html;
+      seenOpts = opts;
       return stubBytes;
     },
     async close() {
@@ -264,6 +266,31 @@ console.log('\nChromium: рендер із підставним браузеро
   t('обрану тему застосовано', seenHtml.includes('DejaVu Sans'), 'modern');
   t('текст книги дійшов до сторінки', seenHtml.includes('вщухав'));
   t('ілюстрацію вбудовано як data:, а не плейсхолдером', !seenHtml.includes('nova-image-1'));
+
+  /*
+    Одиниці розміру сторінки. `page.pdf()` розуміє px, in, cm, mm — і НЕ
+    розуміє pt: справжній Chromium відповідає «Failed to parse parameter
+    value: 419.53pt» і рендер падає цілком. Саме так і сталося при першому
+    живому прогоні на розгорнутому Nova, а цей набір нічого не помітив, бо
+    підставний браузер до цієї правки навіть не отримував опцій.
+  */
+  const acceptedUnit = /(px|in|cm|mm)$/;
+  t('ширина сторінки в одиницях, які приймає Chromium',
+    acceptedUnit.test(String(seenOpts.width)), String(seenOpts.width));
+  t('висота сторінки в одиницях, які приймає Chromium',
+    acceptedUnit.test(String(seenOpts.height)), String(seenOpts.height));
+  t('розмір не в пунктах — саме на них рендер падав',
+    !/pt$/.test(String(seenOpts.width)) && !/pt$/.test(String(seenOpts.height)));
+
+  const { pageFormatFor } = await import('../server/pdf/engines/chromiumEngine');
+  t('A5 переведено в міліметри правильно (148×210)',
+    pageFormatFor('A5').width === '148mm' && pageFormatFor('A5').height === '210mm',
+    `${pageFormatFor('A5').width}×${pageFormatFor('A5').height}`);
+  t('A4 переведено в міліметри правильно (210×297)',
+    pageFormatFor('A4').width === '210mm' && pageFormatFor('A4').height === '297mm',
+    `${pageFormatFor('A4').width}×${pageFormatFor('A4').height}`);
+  t('невідомий розмір відкочується на A5, а не на порожнечу',
+    pageFormatFor('немаТакого').width === '148mm');
 }
 
 // ---------------------------------------------------------------------------

@@ -58,10 +58,23 @@ const RENDER_TIMEOUT_MS = Number(process.env.CHROMIUM_TIMEOUT_MS) || 120_000;
 /** Скільки зображень вбудовувати. Далі HTML стає завеликим для одного рядка. */
 const MAX_EMBEDDED_IMAGES = 120;
 
-function pageFormatFor(sizeName: string | undefined): { width: string; height: string } {
+/** Пункт PostScript у міліметрах: 1 pt = 1/72 дюйма, дюйм = 25.4 мм. */
+const MM_PER_PT = 25.4 / 72;
+
+export function pageFormatFor(sizeName: string | undefined): { width: string; height: string } {
   const size = PAGE_SIZES[(sizeName || 'A5') as keyof typeof PAGE_SIZES] || PAGE_SIZES.A5;
-  // Chromium приймає розміри рядком з одиницями; наш PAGE_SIZES — у пунктах.
-  return { width: `${size.width}pt`, height: `${size.height}pt` };
+  /*
+    ОДИНИЦІ ТУТ — НЕ СТИЛІСТИЧНА ДРІБНИЦЯ. `page.pdf()` розуміє лише px, in,
+    cm і mm; на `pt` він відповідає «Failed to parse parameter value:
+    419.53pt» і рендер падає цілком. Наш PAGE_SIZES — у пунктах, тож
+    переводимо в міліметри (A5 → 148×210 мм, як і має бути).
+
+    Знайдено першим ЖИВИМ прогоном на розгорнутому Nova: тест підміняє
+    запуск браузера, тому не бачив ані одиниць, ані того, що справжній
+    Chromium їх не прийме. Тепер перевірку одиниць додано і в тест.
+  */
+  const mm = (pt: number) => Math.round(pt * MM_PER_PT * 100) / 100;
+  return { width: `${mm(size.width)}mm`, height: `${mm(size.height)}mm` };
 }
 
 export function chromiumAvailableAt(execPath: string): PdfEngineAvailability {
