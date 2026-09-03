@@ -39,6 +39,7 @@ import {
 } from 'lucide-react';
 import type { AuthUser, Book, NavigationTab } from '../types';
 import { calculateWordCount, estimatePageCount } from '../utils/helpers';
+import { renderPdfFirstPageToPng } from '../utils/pdfCover';
 import { useLanguage } from '../i18n/LanguageContext';
 
 interface PublishingHubViewProps {
@@ -258,10 +259,11 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
       return 'fusion-lab';
     }
   });
-  const [busy, setBusy] = useState<'' | 'preview' | 'publish'>('');
+  const [busy, setBusy] = useState<'' | 'preview' | 'publish' | 'cover'>('');
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<EditionResult[] | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [coverNote, setCoverNote] = useState<string | null>(null);
 
   const preview = async (format: 'digital' | 'print') => {
     setBusy('preview');
@@ -322,6 +324,53 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
       setResult(data.editions || []);
     } catch (err: any) {
       setError(err?.message || 'Помилка публікації.');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  /**
+   * Обкладинка картки: перша сторінка того самого PDF, який їде у вітрину.
+   *
+   * Малює браузер, бо маркетплейс приймає для картки лише растр, а
+   * растеризувати PDF на сервері нічим — потрібен був би нативний модуль
+   * або wasm в образі заради однієї картинки.
+   *
+   * PDF беремо тим самим маршрутом перегляду й з тими самими `variant`,
+   * `format` і `trimId`, що й публікація: інакше на картці опинився б титул
+   * з іншої верстки, ніж у файлі, який купує читач.
+   */
+  const sendCover = async (format: 'digital' | 'print') => {
+    setBusy('cover');
+    setError(null);
+    setCoverNote(null);
+    try {
+      const res = await fetch('/api/admin/pdf/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ book, variant, format, trimId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error || `Не вдалося зібрати PDF (HTTP ${res.status}).`);
+      }
+      const imageBase64 = await renderPdfFirstPageToPng(await res.blob());
+
+      const sent = await fetch('/api/admin/marketplace-bridge/cover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ bookId: book.id, format, imageBase64 }),
+      });
+      const data = await sent.json().catch(() => ({}));
+      if (!sent.ok) throw new Error(data?.error || `Маркетплейс відхилив обкладинку (HTTP ${sent.status}).`);
+      setCoverNote(
+        `Обкладинку надіслано для ${format === 'print' ? 'друкованої' : 'електронної'} редакції. ` +
+          'Картка у вітрині оновиться після перезавантаження сторінки магазину.'
+      );
+    } catch (err: any) {
+      setError(err?.message || 'Не вдалося надіслати обкладинку.');
     } finally {
       setBusy('');
     }
@@ -447,6 +496,42 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
             {busy === 'publish' ? 'Публікую…' : 'Опублікувати у вітрину'}
           </button>
         </div>
+
+        {/*
+          Обкладинка — окрема дія після публікації, а не частина її.
+          Причина: малює її браузер (сервер PDF не растеризує), тож вона може
+          не вдатися сама по собі — застаріле полотно, приватний режим,
+          заблокований воркер. Зшити її з публікацією означало б, що збій
+          картинки валить публікацію книги, яка вже пройшла.
+        */}
+        <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-800">
+          <span className="text-[11px] text-slate-400 w-full">
+            Обкладинка картки — перша сторінка того самого PDF (титул із назвою й автором).
+            Надсилати після публікації редакції.
+          </span>
+          <button
+            onClick={() => void sendCover('digital')}
+            disabled={busy !== ''}
+            className="px-4 py-2 rounded-xl bg-slate-800 text-slate-100 text-xs font-bold disabled:opacity-50"
+          >
+            {busy === 'cover' ? 'Малюю…' : 'Надіслати обкладинку'}
+          </button>
+          {withPrint && (
+            <button
+              onClick={() => void sendCover('print')}
+              disabled={busy !== ''}
+              className="px-4 py-2 rounded-xl bg-slate-800 text-slate-100 text-xs font-bold disabled:opacity-50"
+            >
+              Обкладинка друкованої
+            </button>
+          )}
+        </div>
+
+        {coverNote && (
+          <p className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-emerald-200 text-[11px]">
+            {coverNote}
+          </p>
+        )}
 
         {note && (
           <p className="text-[11px] text-slate-400 border-l-2 border-slate-700 pl-3">{note}</p>

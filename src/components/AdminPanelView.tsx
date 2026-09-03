@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import {
   ShieldCheck,
   Users,
@@ -41,6 +41,7 @@ import {
 } from 'recharts';
 import type { AdminUserRow, UserRole } from '../types';
 import { getRoleInfo } from '../utils/rbac';
+import { renderPdfFirstPageToPng } from '../utils/pdfCover';
 
 export type AdminTab = 'users' | 'roles' | 'costs' | 'business' | 'ai' | 'bridge';
 
@@ -188,6 +189,9 @@ const MarketplaceBridgePanel: React.FC = () => {
   const [shelfError, setShelfError] = useState<string | null>(null);
   // Дворівневе підтвердження: externalId, для якого кнопка вже перепитує.
   const [confirming, setConfirming] = useState<string | null>(null);
+  // Рядок, для якого зараз обирають PDF під обкладинку, і поле вибору файла.
+  const [coverFor, setCoverFor] = useState<BridgeBookRow | null>(null);
+  const coverInputRef = useRef<HTMLInputElement>(null);
   const [publishResult, setPublishResult] = useState<
     { tone: 'ok' | 'err'; text: string; slug?: string } | null
   >(null);
@@ -267,6 +271,53 @@ const MarketplaceBridgePanel: React.FC = () => {
     } catch (err: any) {
       setShelf(null);
       setShelfError(err?.message || 'Помилка читання переліку.');
+    }
+  };
+
+  /**
+   * `externalId` мосту — це `${bookId}:${format}` (див. bridgeExternalId у
+   * server/marketplaceBridge.ts). Розбираємо з КІНЦЯ: формат завжди одне
+   * слово без двокрапки, а от ідентифікатор книги колись може її містити.
+   */
+  const parseExternalId = (externalId: string): { bookId: string; format: 'digital' | 'print' } => {
+    const at = externalId.lastIndexOf(':');
+    const format = at >= 0 ? externalId.slice(at + 1) : 'digital';
+    return {
+      bookId: at >= 0 ? externalId.slice(0, at) : externalId,
+      format: format === 'print' ? 'print' : 'digital',
+    };
+  };
+
+  /**
+   * Обкладинка з обраного PDF.
+   *
+   * ЧОМУ ТУТ ФАЙЛ, А НЕ КНОПКА «ЗІБРАТИ САМОМУ». Адмінпанель не має книги:
+   * рукопис живе в IndexedDB браузера автора, а сюди приходить лише перелік
+   * того, що стоїть у вітрині. Зібрати PDF звідси нема з чого — тому адмін
+   * дає той самий файл, який опублікував. Коли книга відкрита в Студії,
+   * зручніший шлях — вкладка «Вітрина», там PDF збирається сам.
+   */
+  const sendCoverFromFile = async (row: BridgeBookRow, file: File) => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const { bookId, format } = parseExternalId(row.externalId);
+      const imageBase64 = await renderPdfFirstPageToPng(file);
+      const res = await fetch('/api/admin/marketplace-bridge/cover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ bookId, format, imageBase64 }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || `Маркетплейс відхилив обкладинку (HTTP ${res.status}).`);
+      setMessage({ tone: 'ok', text: `Обкладинку надіслано для «${row.title}».` });
+      await loadShelf();
+    } catch (err: any) {
+      setMessage({ tone: 'err', text: err?.message || 'Не вдалося надіслати обкладинку.' });
+    } finally {
+      setBusy(false);
+      setCoverFor(null);
     }
   };
 
@@ -599,17 +650,57 @@ const MarketplaceBridgePanel: React.FC = () => {
                     </button>
                   </span>
                 ) : (
-                  <button
-                    onClick={() => setConfirming(row.externalId)}
-                    className="shrink-0 px-3 py-1.5 rounded-lg badge-glass text-slate-200 text-[11px] font-bold"
-                  >
-                    Прибрати з вітрини
-                  </button>
+                  <span className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => {
+                        setCoverFor(row);
+                        // Значення скидаємо, інакше вибір ТОГО САМОГО файла
+                        // вдруге не викликав би onChange, і кнопка мовчала б.
+                        if (coverInputRef.current) coverInputRef.current.value = '';
+                        coverInputRef.current?.click();
+                      }}
+                      disabled={busy}
+                      className="px-3 py-1.5 rounded-lg badge-glass text-slate-200 text-[11px] font-bold disabled:opacity-50"
+                      title="Обрати PDF цієї книги — обкладинкою стане його перша сторінка"
+                    >
+                      {busy && coverFor?.externalId === row.externalId ? 'Малюю…' : 'Обкладинка з PDF'}
+                    </button>
+                    <button
+                      onClick={() => setConfirming(row.externalId)}
+                      className="px-3 py-1.5 rounded-lg badge-glass text-slate-200 text-[11px] font-bold"
+                    >
+                      Прибрати з вітрини
+                    </button>
+                  </span>
                 )}
               </div>
             ))}
           </div>
         )}
+
+        {/*
+          Одне поле вибору на всю полицю, а не по одному в кожному рядку:
+          рядків буває багато, а відкрите вікно вибору — завжди одне.
+          Для якого саме рядка воно відкрите, памʼятає `coverFor`.
+        */}
+        <input
+          ref={coverInputRef}
+          type="file"
+          accept="application/pdf,.pdf"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            const row = coverFor;
+            if (file && row) void sendCoverFromFile(row, file);
+          }}
+        />
+
+        <p className="text-[10px] text-slate-500">
+          «Обкладинка з PDF» бере першу сторінку обраного файла — це титул із назвою й автором.
+          Малює браузер: маркетплейс приймає для картки лише зображення, а серверу нічим
+          растеризувати PDF. Коли книга відкрита в Студії, зручніше зі вкладки «Вітрина» —
+          там PDF збирається сам, і обкладинка гарантовано з того самого файла, що й товар.
+        </p>
 
         <p className="text-[10px] text-slate-500">
           Зняття переводить лістинг в архів, а не видаляє: на нього могла посилатися історія
