@@ -27,7 +27,7 @@ import {
   type PdfLayoutSpec,
 } from './pdfTypes';
 
-const FONT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fonts');
+export const FONT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fonts');
 
 export const FONT_FILES = {
   serif: 'DejaVuSerif.ttf',

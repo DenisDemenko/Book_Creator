@@ -14,11 +14,8 @@
  *     у вмісті повідомлення (vision-модель, типово gpt-4o).
  */
 
-import fs from 'node:fs/promises';
-import path from 'node:path';
 import type { GoogleGenAI } from '@google/genai';
-import { GENERATED_DIR, GENERATED_URL_PREFIX } from './imageGeneration';
-import { assetIdFromUrl, readAsset } from './media/mediaLibraryStore';
+import { loadImageBytes } from './media/imageBytes';
 import { buildTextFromImagePrompt, textFromImageSystemInstruction } from './textFromImagePrompt';
 
 export type TextEngine = 'gemini' | 'gpt';
@@ -37,79 +34,23 @@ export class TextFromImageError extends Error {
 }
 
 // ---------------------------------------------------------------------------
-// Завантаження байтів зображення з будь-якого формату посилання, який
-// використовує книга: data: URL (старі завантажені файли), /api/media/file/…
-// (медіатека автора на сервері, задача #100), /generated/... (згенероване до
-// #100 і згенероване гостями) або звичайний http(s) URL (старі приклади
-// персонажів). Усі чотири читаються з диска або мережі ТУТ, щоб решта коду
-// не знала про формат посилання.
+// Завантаження байтів зображення
+//
+// Сама логіка живе в server/media/imageBytes.ts: по ті самі байти ходять і
+// рушії PDF (#101), і тримати два розбирачі посилань означало б, що книга
+// друкується з одного зображення, а модель бачить інше.
 // ---------------------------------------------------------------------------
 
-const EXT_MIME: Record<string, string> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  webp: 'image/webp',
-};
-
-/**
- * `ownerId` потрібен ЛИШЕ для посилань на медіатеку: файл автора читає сам
- * автор. Без цього достатньо було б підставити чужий id у книгу, щоб
- * розпізнавання тексту прочитало чуже зображення й переказало його вміст.
- */
 export async function resolveImageBytes(
   imageUrl: string,
   ownerId?: string | null
 ): Promise<{ mimeType: string; base64: string }> {
-  if (!imageUrl || typeof imageUrl !== 'string') {
-    throw new TextFromImageError('bad_image', 'Немає зображення для аналізу.', 'gemini');
+  try {
+    const { mimeType, bytes } = await loadImageBytes(imageUrl, ownerId);
+    return { mimeType, base64: bytes.toString('base64') };
+  } catch (err) {
+    throw new TextFromImageError('bad_image', (err as Error).message, 'gemini');
   }
-
-  if (imageUrl.startsWith('data:')) {
-    const match = imageUrl.match(/^data:([^;]+);base64,(.+)$/);
-    if (!match) throw new TextFromImageError('bad_image', 'Непідтримуваний формат завантаженого файлу.', 'gemini');
-    return { mimeType: match[1], base64: match[2] };
-  }
-
-  const assetId = assetIdFromUrl(imageUrl);
-  if (assetId) {
-    const found = await readAsset(assetId);
-    if (!found || !ownerId || found.record.ownerId !== String(ownerId)) {
-      throw new TextFromImageError('bad_image', 'Файл медіатеки не знайдено на сервері.', 'gemini');
-    }
-    return {
-      mimeType: found.record.mimeType,
-      base64: Buffer.from(found.bytes).toString('base64'),
-    };
-  }
-
-  if (imageUrl.startsWith(`${GENERATED_URL_PREFIX}/`)) {
-    const filename = imageUrl.slice(GENERATED_URL_PREFIX.length + 1);
-    // Захист від виходу за межі каталогу згенерованих файлів.
-    const safeName = path.basename(filename);
-    const filePath = path.join(GENERATED_DIR, safeName);
-    try {
-      const buffer = await fs.readFile(filePath);
-      const ext = path.extname(safeName).slice(1).toLowerCase();
-      return { mimeType: EXT_MIME[ext] || 'image/png', base64: buffer.toString('base64') };
-    } catch {
-      throw new TextFromImageError('bad_image', 'Файл зображення не знайдено на сервері.', 'gemini');
-    }
-  }
-
-  if (/^https?:\/\//.test(imageUrl)) {
-    try {
-      const res = await fetch(imageUrl);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const mimeType = res.headers.get('content-type')?.split(';')[0] || 'image/jpeg';
-      const buffer = Buffer.from(await res.arrayBuffer());
-      return { mimeType, base64: buffer.toString('base64') };
-    } catch (err) {
-      throw new TextFromImageError('bad_image', `Не вдалося завантажити зображення за посиланням: ${(err as Error).message}`, 'gemini');
-    }
-  }
-
-  throw new TextFromImageError('bad_image', 'Невідомий формат посилання на зображення.', 'gemini');
 }
 
 // ---------------------------------------------------------------------------
