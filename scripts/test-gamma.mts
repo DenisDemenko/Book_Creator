@@ -173,6 +173,60 @@ console.log('\nСтатус генерації');
   t('кредити з відповіді доступні', st.credits?.deducted === 42 && st.credits?.remaining === 95);
 }
 
+console.log('\nОцінка вартості (цифри з документації Gamma)');
+{
+  const cost = await import('../server/gamma/gammaCost');
+
+  const deck = cost.estimateGeneration({ numCards: 9, imageTier: 'standard' });
+  // 9 карток × 1..3 = 9..27 тексту; 9 картинок × 2..15 = 18..135.
+  t('дек 9 карток зі звичайними картинками', deck.min === 27 && deck.max === 162,
+    `${deck.min}–${deck.max}`);
+  t('видно, скільки з цього — картинки', deck.imagesMin === 18 && deck.imagesMax === 135,
+    `${deck.imagesMin}–${deck.imagesMax}`);
+
+  const noImg = cost.estimateGeneration({ numCards: 9, imageTier: 'none' });
+  t('без картинок платимо лише за текст', noImg.min === 9 && noImg.max === 27,
+    `${noImg.min}–${noImg.max}`);
+  t('без картинок їхня частка нульова', noImg.imagesMax === 0);
+  // Головне, заради чого рахуємо: картинки дорожчі за текст у рази.
+  t('картинки коштують більше за текст', deck.imagesMax > noImg.max * 3,
+    `${deck.imagesMax} проти ${noImg.max}`);
+
+  const premium = cost.estimateGeneration({ numCards: 9, imageTier: 'premium' });
+  t('преміальні картинки різко дорожчі', premium.max > deck.max * 3,
+    `${premium.max} проти ${deck.max}`);
+
+  t('нуль карток → нуль', cost.estimateGeneration({ numCards: 0, imageTier: 'premium' }).max === 0);
+  t('сміття в кількості не дає NaN',
+    Number.isFinite(cost.estimateGeneration({ numCards: NaN as never, imageTier: 'standard' }).max));
+
+  const img = cost.estimateImage('premium');
+  t('окреме зображення — ціна рівня', img.min === 34 && img.max === 75, `${img.min}–${img.max}`);
+
+  // Невідома модель має вважатись дорогою: помилитись у бік «дорожче»
+  // безпечніше, ніж пообіцяти дешевину й списати втричі більше.
+  t('невідома модель → premium, а не найдешевше',
+    cost.tierOfModel('якась-нова-модель-2027') === 'premium',
+    cost.tierOfModel('якась-нова-модель-2027'));
+  t('klein/turbo → standard', cost.tierOfModel('flux-2-klein') === 'standard');
+  t('ultra → ultra', cost.tierOfModel('gemini-3-pro-image-hd') === 'ultra',
+    cost.tierOfModel('gemini-3-pro-image-hd'));
+  t('порожня модель → standard', cost.tierOfModel(null) === 'standard');
+}
+
+console.log('\nОкреме зображення й ліміти квоти');
+{
+  const { client, calls } = stub([{ status: 200, body: { imageGenerationId: 'img-1', status: 'pending' } }]);
+  const out = await clientMod.createImage(client, { prompt: 'обкладинка', sizePreset: 'social-portrait' });
+  t('адреса окремого зображення', calls[0].url.endsWith('/v1.0/images'), calls[0].url);
+  t('id повернуто', out.imageGenerationId === 'img-1');
+
+  const st = stub([{ status: 200, body: { imageGenerationId: 'img-1', status: 'completed', image: { url: 'https://cdn/x.jpg' }, credits: { deducted: 70, remaining: 60 } } }]);
+  const done = await clientMod.getImage(st.client, 'img-1');
+  t('статус зображення читається', done.status === 'completed' && done.image?.url === 'https://cdn/x.jpg');
+  t('кредити зображення доступні', done.credits?.deducted === 70);
+}
+
 console.log('\nКонфігурація');
 {
   const cfg = await import('../server/gamma/gammaConfig');

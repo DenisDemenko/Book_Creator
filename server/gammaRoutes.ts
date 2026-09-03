@@ -21,7 +21,22 @@
 import type { Express, Request, Response } from 'express';
 import { requireAuth } from './auth';
 import { requirePlanAtLeast } from './subscriptions';
-import { GammaApiError, createGeneration, getGeneration, listThemes, type GammaClient } from './gamma/gammaClient';
+import {
+  GammaApiError,
+  createGeneration,
+  createImage,
+  getGeneration,
+  getImage,
+  listThemes,
+  type GammaClient,
+} from './gamma/gammaClient';
+import {
+  LIMITS,
+  estimateGeneration,
+  estimateImage,
+  tierOfModel,
+  type ImageTier,
+} from './gamma/gammaCost';
 import { readGammaConfig } from './gamma/gammaConfig';
 import {
   createJob,
@@ -38,7 +53,14 @@ export interface GammaRoutesDeps {
   now?: () => Date;
 }
 
-/** Скільки символів має сенс віддавати Gamma. Її стеля — 400 000. */
+/**
+ * Наша стеля тексту — нижча за документовані Gamma 400 000.
+ *
+ * Причина грошова, а не технічна: 400 000 символів — це книга цілком, і
+ * Gamma розкладе її на десятки карток по 1–3 кредити кожна плюс картинки.
+ * Сто тисяч — це вже великий документ, і далі майже завжди означає, що в
+ * запит випадково потрапив увесь рукопис.
+ */
 const MAX_INPUT_CHARS = 100_000;
 
 const KINDS: Record<GammaJobKind, { format: string; label: string }> = {
@@ -46,6 +68,7 @@ const KINDS: Record<GammaJobKind, { format: string; label: string }> = {
   landing: { format: 'webpage', label: 'Лендінг' },
   social: { format: 'social', label: 'Пост у соцмережі' },
   document: { format: 'document', label: 'Документ' },
+  cover_art: { format: 'image', label: 'Арт обкладинки' },
 };
 
 function fail(res: Response, err: unknown, fallback: string): void {
@@ -92,9 +115,93 @@ export function registerGammaRoutes(app: Express, deps: GammaRoutesDeps): void {
         reasonUk: cfg.reasonUk,
         kinds: Object.entries(KINDS).map(([id, v]) => ({ id, ...v })),
         themes,
+        limits: LIMITS,
+        // Залишок денної квоти з заголовків останньої відповіді Gamma.
+        // Єдине джерело правди про те, скільки ще можна зробити сьогодні.
+        rate: client ? client.lastRate() : null,
       });
     } catch (err) {
       fail(res, err, 'Не вдалося прочитати налаштування Gamma.');
+    }
+  });
+
+  /**
+   * Скільки це коштуватиме.
+   *
+   * Окремий маршрут, а не число в інтерфейсі: ставки Gamma міняються, і
+   * зашита в клієнт константа застаріє мовчки. Рахує сервер, показує
+   * клієнт — одне джерело правди.
+   */
+  app.get('/api/gamma/estimate', ...gate, async (req: Request, res: Response) => {
+    try {
+      const kind = String(req.query.kind || 'course_deck') as GammaJobKind;
+      const tier = (String(req.query.imageTier || 'standard') as ImageTier);
+      if (kind === 'cover_art') return res.json(estimateImage(tier));
+      const numCards = Number(req.query.numCards) || 9;
+      res.json(estimateGeneration({ numCards, imageTier: tier }));
+    } catch (err) {
+      fail(res, err, 'Не вдалося порахувати вартість.');
+    }
+  });
+
+  /**
+   * Арт обкладинки — окремий шлях, бо це `POST /images`, а не генерація
+   * документа. Розмір книжкової обкладинки (≈1:1.5) серед пресетів Gamma
+   * відсутній: найближчий `social-portrait` дає 4:5, тож готовий файл
+   * потребує обрізки перед вставкою в книгу. Кажемо про це в відповіді,
+   * а не мовчимо — інакше автор вставить його як є й отримає спотворення.
+   */
+  app.post('/api/gamma/image', ...gate, async (req: Request, res: Response) => {
+    try {
+      const client = clientOr503(res);
+      if (!client) return;
+
+      const prompt = String(req.body?.prompt || '').trim();
+      if (!prompt) return res.status(400).json({ error: 'Порожній опис зображення.', kind: 'bad_input' });
+      if (prompt.length > LIMITS.imagePromptMax) {
+        return res.status(400).json({
+          error: `Опис задовгий (${prompt.length}, максимум ${LIMITS.imagePromptMax}).`,
+          kind: 'bad_input',
+        });
+      }
+      const refs = Array.isArray(req.body?.referenceImages) ? req.body.referenceImages : [];
+      if (refs.length > LIMITS.referenceImagesMax) {
+        return res.status(400).json({
+          error: `Референсів забагато (${refs.length}, максимум ${LIMITS.referenceImagesMax}).`,
+          kind: 'bad_input',
+        });
+      }
+
+      const created = await createImage(client, {
+        prompt,
+        type: req.body?.type,
+        sizePreset: req.body?.sizePreset || 'social-portrait',
+        themeId: req.body?.themeId || undefined,
+        model: req.body?.model || undefined,
+        referenceImages: refs.length ? refs : undefined,
+      });
+
+      const job = await createJob({
+        id: String(created.imageGenerationId),
+        userId: (req.principal?.id as string) ?? null,
+        bookId: req.body?.bookId ? String(req.body.bookId) : null,
+        kind: 'cover_art',
+        format: 'image',
+        status: 'pending',
+        title: req.body?.title ? String(req.body.title) : 'Арт обкладинки',
+        gammaUrl: null, exportUrl: null, exportAs: null,
+        creditsUsed: null, creditsLeft: null, errorUk: null,
+        now,
+      });
+
+      res.json({
+        job,
+        noteUk:
+          'Розмір книжкової обкладинки (1:1.5) серед пресетів Gamma відсутній — ' +
+          'найближчий дає 4:5. Перед вставкою в книгу файл треба обрізати по ширині.',
+      });
+    } catch (err) {
+      fail(res, err, 'Не вдалося поставити задачу на зображення.');
     }
   });
 
@@ -122,10 +229,25 @@ export function registerGammaRoutes(app: Express, deps: GammaRoutesDeps): void {
         });
       }
 
+      const requestedCards = Number(req.body?.numCards);
+      if (
+        req.body?.numCards !== undefined &&
+        (!Number.isFinite(requestedCards) ||
+          requestedCards < LIMITS.numCardsMin ||
+          requestedCards > LIMITS.numCardsMax)
+      ) {
+        // Ловимо тут, а не чекаємо 400 від Gamma: їхня відмова прийде
+        // англійською й без згадки про наші межі.
+        return res.status(400).json({
+          error: `Кількість карток має бути від ${LIMITS.numCardsMin} до ${LIMITS.numCardsMax}.`,
+          kind: 'bad_input',
+        });
+      }
+
       const created = await createGeneration(client, {
         inputText,
         format: KINDS[kind].format as never,
-        numCards: Number.isFinite(Number(req.body?.numCards)) ? Number(req.body.numCards) : undefined,
+        numCards: Number.isFinite(requestedCards) ? requestedCards : undefined,
         themeId: req.body?.themeId ? String(req.body.themeId) : undefined,
         title: req.body?.title ? String(req.body.title) : undefined,
         exportAs: ['pdf', 'pptx', 'png'].includes(req.body?.exportAs) ? req.body.exportAs : undefined,
@@ -175,7 +297,17 @@ export function registerGammaRoutes(app: Express, deps: GammaRoutesDeps): void {
       const client = clientOr503(res);
       if (!client) return;
 
-      const remote = await getGeneration(client, job.id);
+      // Зображення живуть за іншим ендпоінтом — і статус у них теж свій.
+      const remote =
+        job.kind === 'cover_art'
+          ? await getImage(client, job.id).then((r) => ({
+              status: r.status,
+              gammaUrl: r.image?.url ?? null,
+              exportUrl: null,
+              credits: r.credits,
+              error: r.error,
+            }))
+          : await getGeneration(client, job.id);
       if (remote.status === 'pending') return res.json(job);
 
       const updated = await updateJob(

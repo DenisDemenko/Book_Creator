@@ -79,14 +79,37 @@ function describe(status: number): { message: string; kind: GammaApiError['kind'
   return { message: `Gamma відповіла помилкою ${status}.`, kind: 'upstream' };
 }
 
+/**
+ * Залишок квоти з заголовків відповіді.
+ *
+ * Gamma віддає їх на кожен виклик, і це єдине джерело правди про те,
+ * скільки ще можна зробити СЬОГОДНІ. Без цього автор дізнавався б про
+ * вичерпання лише з відмови посеред роботи.
+ */
+export interface GammaRateInfo {
+  burst: number | null;
+  remaining: number | null;
+  daily: number | null;
+}
+
 export interface GammaClient {
   request<T>(pathname: string, options?: { method?: string; json?: unknown }): Promise<T>;
+  /** Ліміти з ОСТАННЬОЇ відповіді. null — заголовків не було. */
+  lastRate(): GammaRateInfo;
+}
+
+function headerNumber(res: any, name: string): number | null {
+  const raw = res?.headers?.get?.(name);
+  if (raw === undefined || raw === null || raw === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
 }
 
 export function createGammaClient(deps: GammaClientDeps): GammaClient {
   const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   const maxAttempts = deps.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
   const log = deps.log ?? ((line: string) => console.log(line));
+  let rate: GammaRateInfo = { burst: null, remaining: null, daily: null };
 
   async function request<T>(pathname: string, options: { method?: string; json?: unknown } = {}): Promise<T> {
     const method = options.method || 'GET';
@@ -105,6 +128,13 @@ export function createGammaClient(deps: GammaClientDeps): GammaClient {
       const startedAt = Date.now();
       try {
         const res = await deps.fetchImpl(url, { method, headers, body });
+        // Заголовки читаємо ДО перевірки статусу: вони приходять і з
+        // відмовою, а саме тоді знати залишок найпотрібніше.
+        rate = {
+          burst: headerNumber(res, 'x-ratelimit-remaining-burst'),
+          remaining: headerNumber(res, 'x-ratelimit-remaining'),
+          daily: headerNumber(res, 'x-ratelimit-remaining-daily'),
+        };
         const raw = await res.text();
         log(`[gamma] ${method} ${pathname} → ${res.status} за ${Date.now() - startedAt} мс (спроба ${attempt}/${maxAttempts})`);
 
@@ -146,7 +176,7 @@ export function createGammaClient(deps: GammaClientDeps): GammaClient {
     throw new GammaApiError('Gamma не відповіла після кількох спроб.', 504);
   }
 
-  return { request };
+  return { request, lastRate: () => rate };
 }
 
 // ---------------------------------------------------------------------------
@@ -193,4 +223,61 @@ export async function getGeneration(client: GammaClient, id: string): Promise<Ge
 
 export async function listThemes(client: GammaClient): Promise<unknown> {
   return client.request('/themes');
+}
+
+/**
+ * Окреме зображення.
+ *
+ * ВИПРАВЛЕННЯ ПОМИЛКИ. У записі #96 було сказано, що окремої генерації
+ * зображень у публічному API немає — це неправда: `POST /v1.0/images` і
+ * `GET /v1.0/images/{id}` існують і задокументовані. Помилка виникла тому,
+ * що оглядова сторінка «Explore the API» їх не перелічує, а я зупинився на
+ * ній замість повного переліку. Наслідок був не косметичний: із плану
+ * випав арт обкладинки — те, заради чого Gamma найкорисніша Студії.
+ */
+export interface CreateImageInput {
+  prompt: string;
+  type?: 'abstract' | 'illustration' | 'photo' | 'scene';
+  sizePreset?: 'banner' | 'slide' | 'social-portrait' | 'social-square' | 'story';
+  themeId?: string;
+  model?: string;
+  referenceImages?: Array<{ url: string; role?: 'subject' }>;
+}
+
+export interface ImageStatus {
+  imageGenerationId: string;
+  status: 'pending' | 'completed' | 'failed';
+  image?: { url?: string; width?: number; height?: number; aspectRatioUsed?: string };
+  credits?: { deducted?: number; remaining?: number };
+  error?: unknown;
+}
+
+export async function createImage(
+  client: GammaClient,
+  input: CreateImageInput
+): Promise<{ imageGenerationId: string; status?: string }> {
+  return client.request('/images', { method: 'POST', json: input });
+}
+
+export async function getImage(client: GammaClient, id: string): Promise<ImageStatus> {
+  return client.request(`/images/${encodeURIComponent(id)}`);
+}
+
+/** Експорт уже наявної gamma — окремий асинхронний крок. */
+export async function startExport(
+  client: GammaClient,
+  gammaId: string,
+  exportAs: GammaExportAs
+): Promise<{ exportId: string }> {
+  return client.request(`/gammas/${encodeURIComponent(gammaId)}/export`, {
+    method: 'POST',
+    json: { exportAs },
+  });
+}
+
+export async function getExport(
+  client: GammaClient,
+  exportId: string
+): Promise<{ exportId: string; status: string; url?: string; error?: unknown }> {
+  return client.request(`/exports/${encodeURIComponent(exportId)}`);
 }

@@ -20,15 +20,19 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Sparkles, ExternalLink, Loader2, AlertTriangle, Coins, RefreshCw } from 'lucide-react';
 import type { Book } from '../../types';
 
-/** Вартість за спостереженням із пробного прогону 03.09.2026. */
-const OBSERVED_COST: Record<string, string> = {
-  course_deck: '≈40–50 кредитів за 9 карток',
-  landing: '≈30–40 кредитів',
-  social: '≈10–15 кредитів',
-  document: '≈25–35 кредитів',
-};
+/*
+  Вартість БІЛЬШЕ НЕ ЗАШИТА В КЛІЄНТ. Раніше тут стояли числа з пробного
+  прогону — вони застаріли б мовчки при першій зміні ставок Gamma. Тепер
+  рахує сервер (`/api/gamma/estimate`) за документованими ставками, а тут
+  лише показ.
+*/
 
 const KIND_LABELS: Record<string, { title: string; hint: string; product: boolean }> = {
+  cover_art: {
+    title: 'Арт обкладинки',
+    hint: 'Окреме зображення. Формат книжкової обкладинки (1:1.5) Gamma не має — файл треба обрізати перед вставкою.',
+    product: false,
+  },
   course_deck: {
     title: 'Курс-презентація',
     hint: 'Складник набору для Etsy — це товар, а не реклама. Експортується у PPTX або PDF.',
@@ -139,6 +143,19 @@ function inputTextFor(kind: string, book: Book): string {
     ].filter(Boolean).join('\n');
   }
 
+  if (kind === 'cover_art') {
+    // Для зображення це не «текст сторінки», а опис сцени. Ключове —
+    // ЗАБОРОНА тексту на картинці: назву книги ставить верстка, а
+    // намальовані літери з'їхали б і не збігалися зі шрифтом книги.
+    return [
+      `Обкладинка книги${genre ? ` в жанрі «${genre}»` : ''}.`,
+      synopsis ? `Про що книга: ${synopsis}` : '',
+      '',
+      'Кінематографічна сцена, що передає настрій книги. Вільне місце у верхній',
+      'третині під назву. Без тексту, без літер, без підписів і водяних знаків.',
+    ].filter(Boolean).join('\n');
+  }
+
   return [
     `Анонс книги «${title}»${author ? ` — ${author}` : ''}.`,
     synopsis ? `Про що: ${synopsis}` : '',
@@ -158,6 +175,25 @@ export const GammaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, i
   const [error, setError] = useState<string | null>(null);
 
   const preview = useMemo(() => inputTextFor(kind, book), [kind, book]);
+
+  /*
+    Картинки — головна стаття витрат: дев'ять карток тексту це 9–27 кредитів,
+    а дев'ять зображень до них — 18–135 (і до 675 на преміальних моделях).
+    Тому вимикач стоїть на видноті, а не в «додатково».
+  */
+  const [withImages, setWithImages] = useState(true);
+  const [estimate, setEstimate] = useState<{ min: number; max: number; noteUk: string } | null>(null);
+
+  // Оцінку питаємо в сервера на кожну зміну вибору: ставки Gamma живуть
+  // там, і другого їх опису в клієнті бути не має.
+  useEffect(() => {
+    if (isGuest) return;
+    const tier = withImages ? 'standard' : 'none';
+    const q = `kind=${kind}&numCards=${numCards}&imageTier=${tier}`;
+    api<{ min: number; max: number; noteUk: string }>(`/api/gamma/estimate?${q}`)
+      .then(setEstimate)
+      .catch(() => setEstimate(null));
+  }, [kind, numCards, withImages, isGuest]);
 
   useEffect(() => {
     if (isGuest) return;
@@ -191,19 +227,35 @@ export const GammaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, i
     setBusy(true);
     setError(null);
     try {
-      const out = await api<{ job: GammaJob }>('/api/gamma/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          kind,
-          inputText: preview,
-          bookId: book.id,
-          title: `${KIND_LABELS[kind].title}: ${book.title || 'книга'}`,
-          numCards: kind === 'course_deck' ? numCards : undefined,
-          themeId: themeId || undefined,
-          exportAs: exportAs || undefined,
-        }),
-      });
+      // Арт обкладинки йде іншим маршрутом: у Gamma це окремий ендпоінт
+      // зображень, а не генерація документа.
+      const out = kind === 'cover_art'
+        ? await api<{ job: GammaJob }>('/api/gamma/image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              prompt: preview,
+              type: 'scene',
+              sizePreset: 'social-portrait',
+              bookId: book.id,
+              themeId: themeId || undefined,
+              title: `Обкладинка: ${book.title || 'книга'}`,
+            }),
+          })
+        : await api<{ job: GammaJob }>('/api/gamma/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              kind,
+              inputText: preview,
+              bookId: book.id,
+              title: `${KIND_LABELS[kind].title}: ${book.title || 'книга'}`,
+              numCards: kind === 'course_deck' ? numCards : undefined,
+              themeId: themeId || undefined,
+              exportAs: exportAs || undefined,
+              imageOptions: withImages ? undefined : { source: 'noImages' },
+            }),
+          });
       setJobs((all) => [out.job, ...all]);
     } catch (err: any) {
       setError(err?.message || 'Не вдалося поставити задачу.');
@@ -263,9 +315,11 @@ export const GammaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, i
                   )}
                 </span>
                 <span className="block text-[11px] text-slate-400 mt-1">{meta.hint}</span>
-                <span className="block text-[11px] text-amber-300/90 mt-1">
-                  <Coins className="w-3 h-3 inline" /> {OBSERVED_COST[id]}
-                </span>
+                {kind === id && estimate && (
+                  <span className="block text-[11px] text-amber-300/90 mt-1">
+                    <Coins className="w-3 h-3 inline" /> {estimate.min}–{estimate.max} кредитів
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -309,6 +363,28 @@ export const GammaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, i
           </label>
         </div>
 
+        {kind !== 'cover_art' && (
+          <label className="flex items-start gap-2 text-xs text-slate-200">
+            <input
+              type="checkbox"
+              checked={withImages}
+              onChange={(e) => setWithImages(e.target.checked)}
+              className="accent-cyan-500 mt-0.5"
+            />
+            <span>
+              Зображення в матеріалі
+              <span className="block text-[11px] text-slate-400">
+                Головна стаття витрат: текст дев'яти карток — 9–27 кредитів, зображення до них —
+                18–135. Вимкнення економить більше, ніж скорочення тексту.
+              </span>
+            </span>
+          </label>
+        )}
+
+        {estimate && (
+          <p className="text-[11px] text-slate-400 border-l-2 border-slate-700 pl-3">{estimate.noteUk}</p>
+        )}
+
         <details className="rounded-xl border border-slate-800 bg-slate-950/60">
           <summary className="px-3 py-2 text-[11px] text-slate-300 cursor-pointer">
             Що саме піде в Gamma (складено з твоєї книги)
@@ -323,7 +399,11 @@ export const GammaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, i
             className="px-4 py-2 rounded-xl bg-cyan-500 text-slate-950 text-xs font-bold disabled:opacity-50 flex items-center gap-2"
           >
             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-            {busy ? 'Ставлю задачу…' : `Згенерувати — ${OBSERVED_COST[kind]}`}
+            {busy
+              ? 'Ставлю задачу…'
+              : estimate
+                ? `Згенерувати — ${estimate.min}–${estimate.max} кредитів`
+                : 'Згенерувати'}
           </button>
           <span className="text-[11px] text-slate-500">
             Триває 1–3 хвилини. Правити згенероване Gamma не вміє — зміни означають повторну оплату.

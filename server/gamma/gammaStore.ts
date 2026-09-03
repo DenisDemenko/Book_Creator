@@ -13,7 +13,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { getDb, isAvailable, DATA_DIR } from '../db';
 
-export type GammaJobKind = 'course_deck' | 'landing' | 'social' | 'document';
+/**
+ * `cover_art` — окремий вид, бо він іде іншим ендпоінтом (`POST /images`,
+ * а не `/generations`) і статус у нього свій. Зводити його з рештою в один
+ * шлях означало б розвилку в кожному місці, де є вид.
+ */
+export type GammaJobKind = 'course_deck' | 'landing' | 'social' | 'document' | 'cover_art';
 export type GammaJobStatus = 'pending' | 'completed' | 'failed';
 
 export interface GammaJob {
