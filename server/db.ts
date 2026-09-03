@@ -462,6 +462,56 @@ CREATE TABLE IF NOT EXISTS market_reports (
   payload         TEXT NOT NULL              -- JSON: MarketReport цілком
 );
 CREATE INDEX IF NOT EXISTS idx_market_reports_topic ON market_reports(topic_key, collected_at DESC);
+
+-- Книга на сервері (запит власника, 03.09.2026).
+--
+-- ЧОМУ ЦЕ ЗʼЯВИЛОСЬ. Досі рукопис жив ЛИШЕ в IndexedDB одного браузера:
+-- очищене сховище, інший комп'ютер, приватне вікно — і книги немає ніде.
+-- Публікація теж ішла з браузера: клієнт надсилав весь обʼєкт книги в тілі
+-- запиту, тобто сервер ніколи не мав власної копії того, що продає.
+--
+-- Тут лежить ДЖЕРЕЛО книги — той самий JSON, що й у браузері, без будь-якого
+-- рендера. Зверстані файли (PDF, KDP, уривок, обкладинка) — не тут, а
+-- файлами в DATA_DIR/books/<id>/: у базі їм робити нічого, вони великі й
+-- перезбираються.
+--
+-- Колонка revision — охорона від затирання. Дві вкладки того самого автора
+-- (або автор і співавтор) інакше перезаписували б одне одного мовчки: хто
+-- зберіг останнім, той і правий, а чужі правки зникають без сліду. Запис
+-- приймається, лише якщо клієнт надіслав ревізію, яку справді бачив.
+CREATE TABLE IF NOT EXISTS books (
+  id          TEXT PRIMARY KEY,           -- id книги зі Студії
+  owner_id    TEXT,                       -- автор; NULL для книг, збережених до входу
+  title       TEXT NOT NULL DEFAULT '',   -- дубль із payload, щоб перелік не читав увесь JSON
+  revision    INTEGER NOT NULL DEFAULT 1, -- зростає на кожен прийнятий запис
+  payload     TEXT NOT NULL,              -- JSON книги як є, без рендера
+  size_bytes  INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_books_owner ON books(owner_id, updated_at DESC);
+
+-- Зверстані файли книги: що саме лежить у DATA_DIR/books/<book_id>/.
+--
+-- Рядок тут — не сам файл, а його опис: чим зібраний, скільки сторінок,
+-- коли. Без цього неможливо відповісти на просте питання «що зараз стоїть
+-- у вітрині і з чого воно зроблене», а саме воно й ставиться, коли покупець
+-- скаржиться на файл.
+CREATE TABLE IF NOT EXISTS book_artifacts (
+  id          TEXT PRIMARY KEY,           -- <book_id>:<kind>:<format>
+  book_id     TEXT NOT NULL,
+  kind        TEXT NOT NULL,              -- source | pdf | sample | cover
+  format      TEXT NOT NULL DEFAULT 'digital', -- digital | print
+  filename    TEXT NOT NULL,
+  mime_type   TEXT NOT NULL,
+  size_bytes  INTEGER NOT NULL DEFAULT 0,
+  page_count  INTEGER,                    -- NULL для обкладинки
+  variant     TEXT,                       -- code | design — чим вирішувався макет
+  book_revision INTEGER NOT NULL DEFAULT 0, -- з якої ревізії книги зібрано
+  built_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_book_artifacts_book ON book_artifacts(book_id, kind);
+
 `;
 
 /**

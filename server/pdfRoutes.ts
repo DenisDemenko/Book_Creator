@@ -28,6 +28,11 @@ import { bookToPdfInput, specFromBook } from './pdf/pdfFromBook';
 import { normalizeDesignResult, parseBookPdfDesignResponse } from './pdf/pdfDesignPrompt';
 import { renderKdpInterior, type KdpRenderResult } from './pdf/pdfKdp';
 import { clampSamplePages, extractSamplePages } from './pdf/pdfSample';
+import {
+  getBook as getStoredBook,
+  readArtifact,
+  saveArtifact,
+} from './bookStore';
 import type { PdfLayoutSpec } from './pdf/pdfTypes';
 
 export type LayoutVariant = 'code' | 'design';
@@ -72,7 +77,26 @@ function sampleOf(book: { chapters?: Array<{ sections?: Array<{ content?: string
  */
 const MIN_COVER_BYTES = 3000;
 
-export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): void {
+/** Що `registerPdfRoutes` віддає назовні для роботи з серверною копією книги. */
+export interface StoredBookOps {
+  buildArtifacts: (params: {
+    bookId: string;
+    variant: 'code' | 'design';
+    formats: Array<'digital' | 'print'>;
+    trimId?: string;
+    samplePages?: number;
+    withSample: boolean;
+    req: Request;
+  }) => Promise<unknown>;
+  publishStored: (params: {
+    bookId: string;
+    editions: Array<Record<string, unknown>>;
+    sellerSlug?: string;
+    req: Request;
+  }) => Promise<unknown>;
+}
+
+export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBookOps {
   /**
    * Специфікація макета: або переклад налаштувань книги, або пропозиція
    * моделі. Помилка моделі НЕ валить публікацію мовчки — вона піднімається
@@ -419,4 +443,241 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): void {
       fail(res, err);
     }
   });
+
+  // =========================================================================
+  // Робота з СЕРВЕРНОЮ копією книги
+  // =========================================================================
+  //
+  // Та сама послідовність, що й у маршрутах вище (макет → PDF → уривок), але
+  // книга береться зі сховища, а не з тіла запиту. Саме тому ці кроки можуть
+  // виконуватись без відкритої вкладки: серверу більше нічого не потрібно від
+  // браузера, крім обкладинки — її він намалювати не вміє, тож вона теж
+  // лежить у сховищі як артефакт.
+
+  /** Зібрати й зберегти файли книги. Нічого не публікує. */
+  async function buildArtifacts(params: {
+    bookId: string;
+    variant: 'code' | 'design';
+    formats: Array<'digital' | 'print'>;
+    trimId?: string;
+    samplePages?: number;
+    withSample: boolean;
+    req: Request;
+  }): Promise<unknown> {
+    const stored = await getStoredBook(params.bookId);
+    if (!stored) {
+      throw new MarketplaceBridgeError(
+        'Книги немає на сервері. Спершу збережіть її — Студія надсилає копію при кожному збереженні.',
+        'rejected',
+        404
+      );
+    }
+
+    const book = stored.book as Record<string, unknown>;
+    const safeTitle = String(book.title || 'book').replace(/[^\p{L}\p{N}]+/gu, '_').slice(0, 60) || 'book';
+
+    // Макет один на всі формати — з тієї самої причини, що й у публікації з
+    // браузера: інакше «дизайн» дав би різну типографіку цифровій і друкованій.
+    const { spec, modelId } = await buildSpec(book, params.variant, undefined, params.req);
+
+    const built = [];
+    for (const format of params.formats) {
+      const rendered =
+        format === 'print'
+          ? await renderKdpInterior(bookToPdfInput(book as never), {
+              base: spec,
+              trimId: params.trimId,
+            })
+          : await renderBookPdf(bookToPdfInput(book as never), spec);
+
+      const pdfRecord = await saveArtifact({
+        bookId: stored.id,
+        kind: 'pdf',
+        format,
+        filename: format === 'print' ? `${safeTitle}_KDP.pdf` : `${safeTitle}.pdf`,
+        mimeType: 'application/pdf',
+        bytes: rendered.bytes,
+        pageCount: rendered.pageCount,
+        variant: params.variant,
+        bookRevision: stored.revision,
+      });
+
+      let sampleRecord = null;
+      let sampleNoteUk: string | undefined;
+      if (params.withSample) {
+        const cut = await extractSamplePages(rendered.bytes, clampSamplePages(params.samplePages));
+        if (!cut) {
+          sampleNoteUk = `У книзі ${rendered.pageCount} сторінок — це не більше за розмір уривка. Уривок не зібрано, щоб не віддати книгу цілком безкоштовно.`;
+        } else {
+          sampleRecord = await saveArtifact({
+            bookId: stored.id,
+            kind: 'sample',
+            format,
+            filename: `${safeTitle}_uryvok.pdf`,
+            mimeType: 'application/pdf',
+            bytes: cut.bytes,
+            pageCount: cut.pageCount,
+            variant: params.variant,
+            bookRevision: stored.revision,
+          });
+        }
+      }
+
+      const kdp: KdpRenderResult | null = format === 'print' ? (rendered as KdpRenderResult) : null;
+      built.push({
+        format,
+        pdf: pdfRecord,
+        sample: sampleRecord,
+        sampleNoteUk,
+        layout: {
+          variant: params.variant,
+          modelId,
+          noteUk: kdp ? kdp.spec.designerNoteUk : spec.designerNoteUk,
+          trimId: kdp?.trimId,
+          gutterMm: kdp?.gutterMm,
+        },
+        warningsUk: kdp?.warningsUk || [],
+      });
+    }
+
+    return { bookId: stored.id, revision: stored.revision, built };
+  }
+
+  /** Опублікувати у вітрину те, що вже зібрано на сервері. */
+  async function publishStored(params: {
+    bookId: string;
+    editions: Array<Record<string, unknown>>;
+    sellerSlug?: string;
+    req: Request;
+  }): Promise<unknown> {
+    const stored = await getStoredBook(params.bookId);
+    if (!stored) {
+      throw new MarketplaceBridgeError('Книги немає на сервері.', 'rejected', 404);
+    }
+    const book = stored.book as Record<string, unknown>;
+    const settings = await readBridgeSettings();
+    const results = [];
+
+    for (const edition of params.editions) {
+      const format = edition.format === 'print' ? 'print' : 'digital';
+      const priceMinor = Number(edition.priceMinor);
+      if (!Number.isFinite(priceMinor) || priceMinor < 0) {
+        throw new MarketplaceBridgeError(`Некоректна ціна для редакції «${format}».`, 'rejected', 400);
+      }
+
+      const pdf = await readArtifact(stored.id, 'pdf', format);
+      if (!pdf) {
+        throw new MarketplaceBridgeError(
+          `Для редакції «${format}» немає зібраного PDF. Спершу складіть файли.`,
+          'rejected',
+          409
+        );
+      }
+
+      // Обкладинка так само обовʼязкова, як і при публікації з браузера — але
+      // тепер вона береться зі сховища, а не з тіла запиту.
+      const cover = (await readArtifact(stored.id, 'cover', format)) || (await readArtifact(stored.id, 'cover', 'digital'));
+      if (!cover) {
+        throw new MarketplaceBridgeError(
+          'Публікація без обкладинки неможлива: у сховищі книги її немає. ' +
+            'Відкрийте книгу в Студії й надішліть обкладинку — вона малюється з першої сторінки PDF у браузері.',
+          'rejected',
+          409
+        );
+      }
+
+      // Застарілий файл — не привід відмовити, але про це треба сказати:
+      // автор міг правити книгу після складання.
+      const staleUk =
+        pdf.record.bookRevision !== stored.revision
+          ? `Увага: PDF зібраний з ревізії ${pdf.record.bookRevision}, а книга вже ${stored.revision}. Складіть файли заново, якщо правки мають потрапити покупцеві.`
+          : undefined;
+
+      const published = await publishBookToMarketplace(
+        {
+          bookId: stored.id,
+          format,
+          title: format === 'print' ? `${String(book.title)} (друковане видання)` : String(book.title),
+          subtitle: book.subtitle ? String(book.subtitle) : undefined,
+          summary: book.logline ? String(book.logline) : undefined,
+          description: book.synopsis ? String(book.synopsis) : undefined,
+          priceMinor: Math.round(priceMinor),
+          sellerSlug: params.sellerSlug,
+        },
+        { settings }
+      );
+
+      const attached = await attachBookFileToMarketplace(
+        {
+          bookId: stored.id,
+          format,
+          filename: pdf.record.filename,
+          mimeType: pdf.record.mimeType,
+          bytes: pdf.bytes,
+        },
+        { settings }
+      );
+
+      let coverAttached;
+      try {
+        coverAttached = await attachBookFileToMarketplace(
+          {
+            bookId: stored.id,
+            format,
+            filename: cover.record.filename,
+            mimeType: cover.record.mimeType,
+            bytes: cover.bytes,
+            kind: 'cover',
+          },
+          { settings }
+        );
+      } catch (coverErr) {
+        await unpublishBookFromMarketplace({ bookId: stored.id, format }, { settings }).catch(() => {});
+        throw new MarketplaceBridgeError(
+          `Обкладинку не вдалося прикріпити (${(coverErr as Error)?.message || 'невідома причина'}). ` +
+            `Редакцію «${format}» знято з вітрини, щоб там не лишилась картка без зображення.`,
+          'rejected',
+          502
+        );
+      }
+
+      const sample = await readArtifact(stored.id, 'sample', format);
+      let sampleAttached = false;
+      let sampleErrorUk: string | undefined;
+      if (sample) {
+        try {
+          await attachBookFileToMarketplace(
+            {
+              bookId: stored.id,
+              format,
+              filename: sample.record.filename,
+              mimeType: sample.record.mimeType,
+              bytes: sample.bytes,
+              kind: 'sample',
+            },
+            { settings }
+          );
+          sampleAttached = true;
+        } catch (sampleErr) {
+          sampleErrorUk = `Уривок не додано: ${(sampleErr as Error)?.message || 'невідома причина'}. Сама книга опублікована.`;
+        }
+      }
+
+      results.push({
+        format,
+        published,
+        attached,
+        cover: coverAttached,
+        sample: sample
+          ? { pages: sample.record.pageCount, attached: sampleAttached, errorUk: sampleErrorUk }
+          : null,
+        pdf: { pageCount: pdf.record.pageCount, sizeBytes: pdf.record.sizeBytes },
+        staleUk,
+      });
+    }
+
+    return { editions: results };
+  }
+
+  return { buildArtifacts, publishStored };
 }

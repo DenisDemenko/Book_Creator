@@ -278,6 +278,64 @@ export async function saveBook(book: Book): Promise<void> {
   const record: BookRecord = { id, data: lean, updatedAt: new Date().toISOString() };
   await idbPut(STORE_BOOKS, record);
   await saveMeta(META_ACTIVE_BOOK, id);
+  void mirrorBookToServer(lean);
+}
+
+/**
+ * Ревізії книг на сервері: id → остання відома нам ревізія.
+ *
+ * Тримаємо в памʼяті вкладки, а не в IndexedDB: ревізія має значення лише в
+ * межах сеансу роботи. Після перезавантаження перший запис піде без ревізії,
+ * сервер відповість конфліктом, і ми дізнаємось поточну — це правильна
+ * поведінка, а не збій: вкладка, яка щойно відкрилась, справді не знає, що
+ * там сталося без неї.
+ */
+const serverRevisions = new Map<string, number>();
+
+/**
+ * Копія книги на сервері.
+ *
+ * НАВІЩО. Досі рукопис жив лише в IndexedDB одного браузера: очищене
+ * сховище, інший компʼютер, приватне вікно — і книги немає ніде. Тепер
+ * кожне збереження надсилає ту саму книгу на сервер, звідки її можна
+ * відновити й, головне, опублікувати без цього браузера.
+ *
+ * ЧОМУ ТИХО Й НЕ БЛОКУЮЧИ. Локальний запис уже стався — книга в безпеці на
+ * цьому компʼютері. Якщо мережі немає або сервер відмовив, автор не має
+ * побачити помилку посеред набору тексту: наступне збереження спробує
+ * знову. Мовчить лише УСПІХ і мережевий збій; конфлікт ревізій пишемо в
+ * консоль, бо він означає, що книгу правлять ще десь.
+ */
+async function mirrorBookToServer(book: Book): Promise<void> {
+  const id = book.id;
+  if (!id) return;
+  try {
+    const known = serverRevisions.get(id);
+    const res = await fetch(`/api/books/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ book, expectedRevision: known }),
+    });
+    if (res.ok) {
+      const meta = await res.json();
+      if (typeof meta?.revision === 'number') serverRevisions.set(id, meta.revision);
+      return;
+    }
+    if (res.status === 409) {
+      const data = await res.json().catch(() => ({}));
+      // Приймаємо ревізію сервера, але НЕ перезаписуємо його даних мовчки:
+      // наступне збереження піде з правильною ревізією й пройде. Автор при
+      // цьому міг затерти чужі правки — тому подія лишається в консолі.
+      if (typeof data?.current === 'number') serverRevisions.set(id, data.current);
+      console.warn('[storage] книгу правлять ще десь; ревізію оновлено на', data?.current);
+      return;
+    }
+    if (res.status === 401 || res.status === 403) return; // гість — копії на сервері не буде
+    console.warn('[storage] серверна копія не збереглась:', res.status);
+  } catch {
+    // Мережі немає — локальний запис уже відбувся, спробуємо наступного разу.
+  }
 }
 
 /** Завантажує книгу за id; без id — останню активну. */

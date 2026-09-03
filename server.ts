@@ -51,6 +51,7 @@ import { readEtsyConfig, ETSY_RATE_LIMIT_PER_SECOND } from './server/etsy/etsyCo
 import { createEtsyClient } from './server/etsy/etsyClient';
 import { createTokenBucket } from './server/etsy/rateLimiter';
 import { registerPdfRoutes } from './server/pdfRoutes';
+import { registerBookRoutes } from './server/bookRoutes';
 import { registerNarrationRoutes } from './server/narrationRoutes';
 import { registerPublishingRoutes } from './server/publishingRoutes';
 import { requireImageQuota, requirePlanAtLeast, checkChatQuota, resolveSubscription } from './server/subscriptions';
@@ -414,12 +415,19 @@ async function startServer() {
       });
     },
   });
-  registerPdfRoutes(app, {
+  /*
+    registerPdfRoutes віддає дві операції над СЕРВЕРНОЮ копією книги —
+    складання файлів і публікацію з них. Вони живуть там, бо там же рушій
+    верстки й міст; сюди повертаються, щоб bookRoutes міг їх викликати, не
+    залежачи від порядку реєстрації маршрутів.
+  */
+  const storedBookOps = registerPdfRoutes(app, {
     resolveEngine: resolveChatEngine as never,
     defaultModelId: GEMINI_MODEL,
     loadAdminLayer: () => loadCoreAdminLayer(),
     generateText: generateAiText as never,
   });
+  registerBookRoutes(app, storedBookOps);
   registerNarrationRoutes(app);
 
   // --- API Endpoints ---
