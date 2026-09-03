@@ -249,7 +249,15 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
   const [trimId, setTrimId] = useState('6x9');
   const [priceDigital, setPriceDigital] = useState('150');
   const [pricePrint, setPricePrint] = useState('390');
-  const [sellerSlug, setSellerSlug] = useState('fusion-lab');
+  // Той самий памʼятливий продавець, що й у панелі мосту: значення одне на
+  // інсталяцію, а не на екран.
+  const [sellerSlug, setSellerSlug] = useState(() => {
+    try {
+      return localStorage.getItem('nova_bridge_seller_slug') || 'fusion-lab';
+    } catch {
+      return 'fusion-lab';
+    }
+  });
   const [busy, setBusy] = useState<'' | 'preview' | 'publish'>('');
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<EditionResult[] | null>(null);
@@ -304,6 +312,11 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
         credentials: 'same-origin',
         body: JSON.stringify({ book, sellerSlug: sellerSlug.trim() || undefined, editions }),
       });
+      try {
+        if (sellerSlug.trim()) localStorage.setItem('nova_bridge_seller_slug', sellerSlug.trim());
+      } catch {
+        // приватний режим — просто не запамʼятається
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Публікація не вдалася.');
       setResult(data.editions || []);

@@ -171,7 +171,17 @@ const MarketplaceBridgePanel: React.FC = () => {
   const [message, setMessage] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
   // Прогін конвеєра окремим станом: його результат живе довше за повідомлення
   // про збереження й не має ним затиратись.
-  const [sellerSlug, setSellerSlug] = useState('');
+  // Продавця вводять щоразу той самий, а поле щоразу порожнє: перша ж
+  // публікація після перезавантаження падала з «не знайдено продавця».
+  // Запамʼятовуємо останній використаний — це не налаштування системи, а
+  // зручність одного адміна, тож localStorage тут доречніший за сервер.
+  const [sellerSlug, setSellerSlug] = useState(() => {
+    try {
+      return localStorage.getItem('nova_bridge_seller_slug') || '';
+    } catch {
+      return '';
+    }
+  });
   // Перелік того, що реально стоїть у вітрині. Окремо від publishResult:
   // той показує наслідок ОСТАННЬОЇ дії, а цей — поточний стан.
   const [shelf, setShelf] = useState<BridgeBookRow[] | null>(null);
@@ -291,15 +301,31 @@ const MarketplaceBridgePanel: React.FC = () => {
         credentials: 'same-origin',
         body: JSON.stringify(sellerSlug.trim() ? { sellerSlug: sellerSlug.trim() } : {}),
       });
+      try {
+        if (sellerSlug.trim()) localStorage.setItem('nova_bridge_seller_slug', sellerSlug.trim());
+      } catch {
+        // приватний режим — не біда, просто не запамʼятається
+      }
       const data = await res.json();
       if (!res.ok) {
-        // details містить сире тіло відповіді маркетплейсу — показуємо його,
-        // коли воно додає щось понад уже зведене повідомлення.
-        const extra = typeof data?.details === 'string' && data.details.trim()
-          && !String(data?.error || '').includes(data.details.trim().slice(0, 40))
-          ? ` — ${data.details.trim().slice(0, 300)}`
-          : '';
-        throw new Error((data?.error || 'Публікація не вдалася.') + extra);
+        // `details` — сире тіло відповіді маркетплейсу. Показуємо його лише
+        // тоді, коли воно справді додає щось нове: у типовому випадку сервер
+        // уже витягнув звідти `message`, і дописування давало один і той
+        // самий текст двічі — спершу людською мовою, потім у вигляді JSON.
+        const message = String(data?.error || 'Публікація не вдалася.');
+        let extra = '';
+        const details = typeof data?.details === 'string' ? data.details.trim() : '';
+        if (details) {
+          let inner = details;
+          try {
+            const parsed = JSON.parse(details);
+            inner = String(parsed?.message ?? parsed?.error ?? details);
+          } catch {
+            // не JSON — порівнюємо як є
+          }
+          if (inner && !message.includes(inner)) extra = ` — ${details.slice(0, 300)}`;
+        }
+        throw new Error(message + extra);
       }
       const slug: string | undefined = data?.published?.slug;
       const created: boolean | undefined = data?.published?.created;
