@@ -53,6 +53,8 @@ import {
   listBridgeBooks,
   unpublishByExternalId,
   bridgeTestBook,
+  bridgeTestBookContent,
+  attachBookFileToMarketplace,
   unpublishBookFromMarketplace,
   publishBookToMarketplace,
   publishCourseToMarketplace,
@@ -785,7 +787,28 @@ export function registerAdminRoutes(app: Express): void {
         { ...bridgeTestBook(), format: 'digital', priceMinor: 100, sellerSlug },
         { settings }
       );
-      res.json({ published: result });
+
+      // Публікація без файла лишає покупця з написом «продавець ще не додав
+      // файлів» — тобто перевірка доходила до вітрини, але не до читача.
+      // Тому тестова книга тепер верстається й прикріплюється одразу.
+      const { renderBookPdf } = await import('./pdf/pdfRenderer');
+      const pdf = await renderBookPdf(bridgeTestBookContent());
+      const attached = await attachBookFileToMarketplace(
+        {
+          bookId: bridgeTestBook().bookId,
+          format: 'digital',
+          filename: 'Testova_knyha_mostu_NOVA.pdf',
+          mimeType: 'application/pdf',
+          bytes: pdf.bytes,
+        },
+        { settings }
+      );
+
+      res.json({
+        published: result,
+        attached,
+        pdf: { pageCount: pdf.pageCount, sizeBytes: pdf.bytes.length },
+      });
     } catch (err: any) {
       const status = err instanceof MarketplaceBridgeError ? err.status : 500;
       res.status(status).json({
@@ -820,6 +843,55 @@ export function registerAdminRoutes(app: Express): void {
     } catch (err: any) {
       const status = err instanceof MarketplaceBridgeError ? err.status : 500;
       res.status(status).json({ error: err?.message || 'Не вдалося зняти лістинг.', kind: err?.kind });
+    }
+  });
+
+  /**
+   * Обкладинка лістинга.
+   *
+   * Картинку малює КЛІЄНТ: маркетплейс приймає лише растр, а растеризувати
+   * PDF на сервері нічим — це вимагало б або нативного модуля, або wasm-
+   * рендерера в образі. У браузері ж canvas є завжди, і pdfjs-dist уже
+   * стоїть у залежностях, тож перша сторінка PDF перетворюється на PNG
+   * там, де її й так показують. Сюди приходить готове зображення.
+   */
+  app.post('/api/admin/marketplace-bridge/cover', requireAdmin, async (req, res) => {
+    try {
+      const bookId = String(req.body?.bookId || '').trim();
+      const format = req.body?.format === 'print' ? 'print' : 'digital';
+      const dataUrl = String(req.body?.imageBase64 || '');
+      if (!bookId) {
+        return res.status(400).json({ error: 'Не вказано bookId.', kind: 'bad_input' });
+      }
+
+      // Приймаємо і чистий base64, і повний data:-URL, який віддає canvas.
+      const match = /^data:(image\/[a-z+]+);base64,(.+)$/i.exec(dataUrl);
+      const mimeType = match ? match[1] : 'image/png';
+      const base64 = match ? match[2] : dataUrl;
+      if (!base64) {
+        return res.status(400).json({ error: 'Порожнє зображення обкладинки.', kind: 'bad_input' });
+      }
+
+      const bytes = Buffer.from(base64, 'base64');
+      if (bytes.length < 100) {
+        return res.status(400).json({ error: 'Зображення обкладинки надто мале — схоже, воно не намалювалось.', kind: 'bad_input' });
+      }
+
+      const result = await attachBookFileToMarketplace(
+        {
+          bookId,
+          format,
+          filename: `${bookId}-cover.${mimeType.includes('jpeg') ? 'jpg' : 'png'}`,
+          mimeType,
+          bytes: new Uint8Array(bytes),
+          kind: 'cover',
+        },
+        { settings: await readBridgeSettings() }
+      );
+      res.json(result);
+    } catch (err: any) {
+      const status = err instanceof MarketplaceBridgeError ? err.status : 500;
+      res.status(status).json({ error: err?.message || 'Не вдалося надіслати обкладинку.', kind: err?.kind });
     }
   });
 

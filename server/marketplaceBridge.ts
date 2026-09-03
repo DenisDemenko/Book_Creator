@@ -290,6 +290,67 @@ export function bridgeTestBook(): Omit<PublishBookInput, 'format' | 'priceMinor'
   };
 }
 
+/**
+ * Вміст тестової книги.
+ *
+ * Порожня книга дала б PDF з титулу й порожнього аркуша — на такому файлі
+ * не видно ні верстки, ні переносів, ні нумерації, тобто перевірка нічого б
+ * не перевірила. Тому текст справжній і описує рівно те, що перевіряється.
+ */
+export function bridgeTestBookContent(): {
+  title: string;
+  subtitle?: string;
+  author?: string;
+  chapters: Array<{ title: string; sections: Array<{ title?: string; content: string }> }>;
+} {
+  const book = bridgeTestBook();
+  return {
+    title: book.title,
+    subtitle: book.subtitle,
+    author: 'NOVA STUDIO',
+    chapters: [
+      {
+        title: 'Що це за книга',
+        sections: [
+          {
+            title: 'Коротко',
+            content:
+              'Ця книга не має читача. Її склала адмінпанель NOVA STUDIO, щоб пройти весь шлях ' +
+              'публікації від початку до кінця: скласти макет, зверстати PDF, створити лістинг у ' +
+              'каталозі Fusion Lab і покласти файл у той лістинг.\n\n' +
+              'Якщо ви тримаєте цей файл у руках — значить кожна ланка спрацювала. Останньою в ' +
+              'цьому ланцюгу є саме та, що доставила файл вам: до неї книга доходила до вітрини, ' +
+              'але не до читача.',
+          },
+          {
+            title: 'Що перевіряє сама верстка',
+            content:
+              'Текст тут навмисно довший за кілька рядків, і на це є причина. Порожня книга дала б ' +
+              'титул і порожній аркуш, на якому не видно ні переносів по словах, ні вирівнювання ' +
+              'по ширині, ні того, як заголовок поводиться наприкінці сторінки.\n\n' +
+              'Кирилиця — окрема перевірка. Стандартні шрифти PDF покривають лише латиницю, тож ' +
+              'шрифт вбудовується файлом. Ось літери, на яких це видно одразу: ґанок, їжак, ' +
+              'єдність, щирість. І типографські знаки: «лапки», тире — довге, №1.',
+          },
+        ],
+      },
+      {
+        title: 'Що з нею робити',
+        sections: [
+          {
+            content:
+              'Прибрати. В адмінпанелі NOVA STUDIO є розділ «Міст до вітрини», а в ньому — перелік ' +
+              'книг Студії у вітрині з кнопкою зняття навпроти кожної. Зняття переводить лістинг в ' +
+              'архів, а не видаляє його: на лістинг могла посилатися історія замовлень, і той, хто ' +
+              'уже придбав книгу, доступу до файла не втрачає.\n\n' +
+              'Якщо ця книга опинилась у вітрині надовго — це не поломка, а забутий тест.',
+          },
+        ],
+      },
+    ],
+  };
+}
+
 export interface BridgeBookRow {
   externalId: string;
   slug: string;
@@ -422,9 +483,17 @@ export async function attachBookFileToMarketplace(
     filename: string;
     mimeType: string;
     bytes: Uint8Array;
+    /** 'cover' — публічна картинка товару; за замовчуванням файл для покупця. */
+    kind?: 'attachment' | 'cover';
   },
   deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
-): Promise<{ attached: boolean; replaced: number; media?: unknown; externalId: string }> {
+): Promise<{
+  attached: boolean;
+  kind: 'attachment' | 'cover';
+  replaced: number;
+  media?: unknown;
+  externalId: string;
+}> {
   const settings = deps.settings ?? (await readBridgeSettings());
   const doFetch = deps.fetch ?? fetch;
   const externalId = bridgeExternalId(input.bookId, input.format);
@@ -435,6 +504,7 @@ export async function attachBookFileToMarketplace(
     new Blob([input.bytes as unknown as BlobPart], { type: input.mimeType }),
     input.filename
   );
+  form.append('kind', input.kind || 'attachment');
 
   let response: Response;
   try {
@@ -485,6 +555,7 @@ export async function attachBookFileToMarketplace(
   }
   return {
     attached: Boolean(body?.attached ?? true),
+    kind: (body?.kind as 'attachment' | 'cover') || input.kind || 'attachment',
     replaced: Number(body?.replaced ?? 0),
     media: body?.media,
     externalId,
