@@ -38,52 +38,27 @@
 > прохання власника** (AGENTS.md), тому між сесіями тут завжди щось лежить —
 > і наступна сесія має знати, що саме, бо `git log` вона не памʼятає.
 
-## Book_Creality — гілка `master` збігається з `origin/master`
+## Book_Creality — 1 коміт попереду `origin/master`
 
-**Стан на 03.09.2026, після пуша власника:** `master` і `origin/master`
-обидва на `b65b1ee` («Медіатека автора на сервері»). Ті 21 коміт, що чекали
-з записів #82–#100, **поїхали** — у гілці незапушених комітів **немає**.
-
-Рядок для пуша, коли зʼявиться наступний коміт:
+**Стан на 03.09.2026:** `origin/master` на `b65b1ee`, локальний `master` на
+`b82be65` («Чотири рушії PDF»). Рядок для пуша:
 
 ```
 git push origin master
 ```
 
-## У робочій теці — незакомічена робота над #101 (чотири рушії PDF)
+**Пуш робить власник зі свого компʼютера.** З мого боку його зробити
+неможливо: у Linux-середовищі, звідки я працюю з текою, немає облікових
+даних GitHub (`could not read Username for 'https://github.com'`), і це
+правильно — токен для запису в репозиторій не має жити там, де його не
+контролює власник.
 
-Це головне, що має знати наступна сесія: робота **написана, перевірена
-тестами (83/0), але не закомічена**, тобто одним `git push` вона не поїде.
-Спершу коміт, потім пуш.
+## Що поїде комітом `b82be65`
 
-**Нові файли (6 модулів + шаблон + тест):**
-
-| Файл | Що в ньому |
-|---|---|
-| `server/pdf/engines/types.ts` | Контракт рушія: `available(context)`, `render()`, `PdfEngineError`, `PdfEngineContext` |
-| `server/pdf/engines/registry.ts` | Реєстр чотирьох рушіїв, перелік із причинами недоступності, **без тихого відкоту** |
-| `server/pdf/engines/novaEngine.ts` | Наявна верстка `pdf-lib` під спільним інтерфейсом |
-| `server/pdf/engines/chromiumEngine.ts` | Рушій HTML+CSS через `page.pdf()` — заміна мертвому `markdown-pdf` |
-| `server/pdf/engines/pandocEngine.ts` | Рушій pandoc + XeLaTeX, таймаут із SIGKILL, `markdown-raw_tex` як захист від `\input{}` у рукописі |
-| `server/pdf/engines/gammaEngine.ts` | Gamma у тому ж переліку, під ключем автора, з показом списаних кредитів |
-| `server/pdf/html/bookHtml.ts` | Markdown → HTML, три теми (`book`, `modern`, `course`) |
-| `server/pdf/bookToMarkdown.ts` | Книга й курс → Markdown; спільне джерело для chromium і pandoc |
-| `server/media/imageBytes.ts` | Читання байтів зображення за будь-яким із чотирьох форматів посилання |
-| `server/pdf/latex/eisvogel.latex` | Шаблон Eisvogel **3.5.0** з релізного архіву (у Git самого репозиторію його немає) |
-| `server/pdf/latex/EISVOGEL-LICENSE` | BSD-3, Pascal Wagler / John MacFarlane |
-| `server/pdf/latex/README.md` | Звідки взято, чому лежить у нас, а не качається при збірці |
-| `scripts/test-pdfEngines.mts` | 83 перевірки, 0 провалів |
-
-**Змінені файли:**
-
-| Файл | Що змінено |
-|---|---|
-| `package.json` | Додано `markdown-it`, `puppeteer-core`, `@types/markdown-it`; рядки `test:media-library` і `test:pdf-engines` |
-| `package-lock.json` | Оновлено `npm install --package-lock-only` — **без чіпання `node_modules`** |
-| `server/textFromImage.ts` | Розбір посилань на зображення винесено в `media/imageBytes.ts` |
-| `server/pdf/pdfRenderer.ts` | `FONT_DIR` став експортованим — потрібен для `available()` рушія nova |
-| `AGENTS.md` | Правило оновлювати цей розділ після кожного коміту |
-| `log.md` | Записи #100, #101 і цей розділ |
+Ядро задачі #101 — чотири рушії PDF. 13 нових файлів і 6 змінених, перелік
+у самому записі #101. Тести: `test:pdf-engines` 83/0; наявні набори
+(`test:pdf` 66/0, `test:pdf-routes` 35/0, `test:media-library` 59/0,
+`test:core-ai` 52/0) не поїхали.
 
 **ВАЖЛИВО ПРО `node_modules`.** Пакети `markdown-it` і `puppeteer-core`
 докладені в теку збоку, а `npm install` НЕ запускався. Причина: у власника
