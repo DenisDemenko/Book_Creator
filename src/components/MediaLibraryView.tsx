@@ -134,7 +134,17 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
     }
   };
 
-  // Direct Upload (jpg/png/svg) — з перевіркою ліміту сховища на сервері
+  /**
+   * Завантаження файлу з компʼютера (задача #100).
+   *
+   * Раніше файл ставав `data:`-URL ВСЕРЕДИНІ книги: альбом жив в IndexedDB
+   * одного браузера, а кожне збереження книги тягло ті самі мегабайти на
+   * сервер заново. Тепер байти йдуть у медіатеку на сервері, а в книзі
+   * лишається коротке посилання.
+   *
+   * Ліміт тарифу перевіряє САМ маршрут завантаження — окремий виклик
+   * check-upload тут прибрано, інакше ті самі байти списувалися б двічі.
+   */
   const handleDirectUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -147,58 +157,61 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
 
     setIsUploading(true);
     try {
-      const res = await fetch('/api/media/check-upload', {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (event) => resolve(String(event.target?.result || ''));
+        reader.onerror = () => reject(new Error('read failed'));
+        reader.readAsDataURL(file);
+      });
+
+      const res = await fetch('/api/media/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ bytes: file.size, bookId: book.id, fileName: file.name }),
+        body: JSON.stringify({
+          dataUrl,
+          filename: file.name,
+          bookId: book.id,
+          kind: 'upload',
+        }),
       });
       const data = await res.json();
-      if (!res.ok) {
-        showToast(data?.error || t('mediaLibraryView.quotaCheckFailed'));
-        if (typeof data?.usedBytes === 'number') {
-          setStorageInfo({
-            usedBytes: data.usedBytes,
-            quotaBytes: data.quotaBytes ?? null,
-            remainingBytes: data.remainingBytes ?? null,
-          });
-        }
-        return;
-      }
-      if (typeof data.usedBytes === 'number') {
+
+      const storage = data?.storage || data;
+      if (typeof storage?.usedBytes === 'number') {
         setStorageInfo({
-          usedBytes: data.usedBytes,
-          quotaBytes: data.quotaBytes ?? null,
-          remainingBytes: data.remainingBytes ?? null,
+          usedBytes: storage.usedBytes,
+          quotaBytes: storage.quotaBytes ?? null,
+          remainingBytes: storage.remainingBytes ?? null,
         });
       }
+      if (!res.ok || !data?.asset?.url) {
+        showToast(data?.error || t('mediaLibraryView.quotaCheckFailed'));
+        return;
+      }
 
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const dataUrl = event.target?.result as string;
-        const newIll: BookIllustration = {
-          id: `ill-upload-${Date.now()}`,
-          chapterId: book.chapters[0]?.id,
-          url: dataUrl,
-          caption: file.name.replace(/\.[^/.]+$/, ''),
-          aspectRatio: '16:9',
-          style: 'Медіатека',
-          source: 'upload',
-          createdAt: new Date().toISOString(),
-          fileSize: `${(file.size / 1024).toFixed(1)} KB`,
-        };
-
-        onUpdateBook(
-          {
-            ...book,
-            illustrations: [...(book.illustrations || []), newIll],
-          },
-          'Завантажено файл у медіатеку',
-          `Додано файл «${newIll.caption}»`
-        );
-        showToast(t('mediaLibraryView.uploadedToast'));
+      const asset = data.asset;
+      const newIll: BookIllustration = {
+        id: `ill-upload-${Date.now()}`,
+        chapterId: book.chapters[0]?.id,
+        url: asset.url,
+        caption: file.name.replace(/\.[^/.]+$/, ''),
+        aspectRatio: '16:9',
+        style: 'Медіатека',
+        source: 'upload',
+        createdAt: new Date().toISOString(),
+        fileSize: `${(file.size / 1024).toFixed(1)} KB`,
       };
-      reader.readAsDataURL(file);
+
+      onUpdateBook(
+        {
+          ...book,
+          illustrations: [...(book.illustrations || []), newIll],
+        },
+        'Завантажено файл у медіатеку',
+        `Додано файл «${newIll.caption}»`
+      );
+      showToast(t('mediaLibraryView.uploadedToast'));
     } catch {
       showToast(t('mediaLibraryView.quotaCheckFailed'));
     } finally {

@@ -42,6 +42,11 @@ import {
   saveGeneratedImage,
   resolveEngine as resolveImageEngine,
 } from './imageGeneration';
+import {
+  MEDIA_MIME_EXTENSIONS,
+  saveAsset,
+  type MediaKind,
+} from './media/mediaLibraryStore';
 import { recordUsage } from './store';
 import { platformKeyFor } from './platformKeys';
 import { priceForImage, priceForTextEngine } from './pricing';
@@ -338,6 +343,57 @@ interface GenerateImageParams {
 
 
 /**
+ * Куди лягає щойно згенероване зображення.
+ *
+ * Зареєстрованому авторові — у ЙОГО медіатеку на сервері (задача #100): з
+ * власником, промптом і моделлю, у DATA_DIR, тобто там, де воно переживе
+ * деплой. Гостеві власника немає, тож для нього лишається старий шлях —
+ * файл у `assets/generated`, який віддається статикою.
+ *
+ * Старі книги з URL `/generated/...` продовжують працювати: та статика
+ * нікуди не поділась, ми лише перестали класти туди НОВЕ.
+ */
+async function saveImageForOwner(
+  p: GenerateImageParams,
+  buffer: Buffer,
+  mimeType: string,
+  modelId: string
+): Promise<{ url: string; filename: string; bytes: number }> {
+  const ownerId = p.req?.principal?.id ? String(p.req.principal.id) : '';
+  if (!ownerId) {
+    return saveGeneratedImage(buffer, mimeType, p.filenameHint);
+  }
+
+  // Вид — з НАШОГО ж хінта імені файлу (їх задає код, не автор), тому це
+  // не вгадування по чужих даних.
+  const hint = String(p.filenameHint || '');
+  const kind: MediaKind = hint.startsWith('cover')
+    ? 'cover_art'
+    : hint.startsWith('char')
+      ? 'character_art'
+      : 'illustration';
+
+  try {
+    const asset = await saveAsset({
+      ownerId,
+      bookId: p.bookId ?? null,
+      kind,
+      filename: `${hint || 'art'}.${MEDIA_MIME_EXTENSIONS[mimeType] || 'png'}`,
+      mimeType,
+      bytes: new Uint8Array(buffer),
+      prompt: p.prompt,
+      model: modelId,
+    });
+    return { url: asset.url, filename: asset.filename, bytes: asset.sizeBytes };
+  } catch (err) {
+    // Збій сховища не має губити вже ОПЛАЧЕНУ генерацію: віддаємо її
+    // старим шляхом і пишемо в лог, щоб причина не зникла.
+    console.error('[aiCore] Не вдалося покласти зображення в медіатеку, лишаємо у /generated:', err);
+    return saveGeneratedImage(buffer, mimeType, p.filenameHint);
+  }
+}
+
+/**
  * Генерація зображення + збереження файлу + ОБОВ'ЯЗКОВЕ логування — одним
  * викликом замість трьох ручних кроків, які раніше дублювались у трьох
  * місцях server.ts (портрет персонажа, ілюстрація, обкладинка).
@@ -372,7 +428,7 @@ export async function generateImage(p: GenerateImageParams): Promise<{
       outputFormat: p.outputFormat,
       apiKeyOverride,
     });
-    const saved = await saveGeneratedImage(generated.buffer, generated.mimeType, p.filenameHint);
+    const saved = await saveImageForOwner(p, generated.buffer, generated.mimeType, generated.modelId);
     // Той самий діапазон, що й у imageGeneration.ts: 4K не згортаємо до 2K,
     // інакше тариф і usage_log брехали б про фактичний розмір генерації.
     const sizeLabel =

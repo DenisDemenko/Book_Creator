@@ -1740,6 +1740,7 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
         genre,
         chapterTitle,
         captionHint,
+        ownerId: req.principal?.id as string | undefined,
       });
 
       // Логування (і ціна за фактично витраченими токенами) — через ядро,
@@ -2499,7 +2500,10 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
         });
       }
       try {
-        const { mimeType, base64 } = await resolveImageBytes(fieldsObj.imageUrl);
+        const { mimeType, base64 } = await resolveImageBytes(
+          fieldsObj.imageUrl,
+          req.principal?.id as string | undefined
+        );
         testImages = [{ mimeType, dataBase64: base64 }];
       } catch (err: any) {
         return res.status(400).json({ error: err?.message || 'Не вдалося прочитати зображення для тесту.' });
@@ -2642,7 +2646,7 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
           )
         : buildFactoryPrompt(placeholderValues);
 
-      const { mimeType, base64 } = await resolveImageBytes(imageUrl);
+      const { mimeType, base64 } = await resolveImageBytes(imageUrl, userId);
       const result = await generateAiText({
         engine,
         modelId: resolvedModelId,

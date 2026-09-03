@@ -544,6 +544,35 @@ CREATE TABLE IF NOT EXISTS gamma_jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_gamma_jobs_user ON gamma_jobs(user_id, created_at DESC);
 
+-- Медіатека автора на сервері (задача #100).
+--
+-- ЧОМУ. Досі зображення жили у двох однаково ненадійних місцях: завантажені
+-- з компʼютера — як data:-URL всередині книги в IndexedDB одного браузера,
+-- згенеровані ШІ — файлами в assets/generated поруч із кодом. Перше
+-- означало, що кожне збереження книги тягне через мережу мегабайти base64
+-- (див. mirrorBookToServer), а очищене сховище браузера стирає альбом.
+-- Друге — що на хостингу з ефемерним диском усі згенеровані картинки
+-- зникають при наступному деплої, і жоден рядок бази про це не знає.
+--
+-- Тут — ОПИС файлу, самі байти лежать у DATA_DIR/media/<user>/ (як і
+-- зверстані книги: великі двійкові дані в базі не тримаємо).
+--
+-- Поля prompt і model обовʼязково поруч: без них вдале зображення неможливо
+-- ні повторити, ні пояснити, і воно перетворюється на випадкову картинку.
+CREATE TABLE IF NOT EXISTS media_assets (
+  id          TEXT PRIMARY KEY,
+  owner_id    TEXT NOT NULL,           -- чиє. Чуже віддаємо як 404, а не 403
+  book_id     TEXT,                    -- з якою книгою повʼязано, якщо повʼязано
+  kind        TEXT NOT NULL,           -- upload | illustration | character_art | cover_art
+  filename    TEXT NOT NULL,           -- як назвав автор; на диску інше, безпечне імʼя
+  mime_type   TEXT NOT NULL,
+  size_bytes  INTEGER NOT NULL,
+  prompt      TEXT,                    -- NULL лише для завантажених з компʼютера
+  model       TEXT,                    -- те саме
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_media_assets_owner ON media_assets(owner_id, created_at DESC);
+
 `;
 
 /**

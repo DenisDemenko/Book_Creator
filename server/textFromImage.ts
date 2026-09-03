@@ -18,6 +18,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { GoogleGenAI } from '@google/genai';
 import { GENERATED_DIR, GENERATED_URL_PREFIX } from './imageGeneration';
+import { assetIdFromUrl, readAsset } from './media/mediaLibraryStore';
 import { buildTextFromImagePrompt, textFromImageSystemInstruction } from './textFromImagePrompt';
 
 export type TextEngine = 'gemini' | 'gpt';
@@ -37,9 +38,11 @@ export class TextFromImageError extends Error {
 
 // ---------------------------------------------------------------------------
 // Завантаження байтів зображення з будь-якого формату посилання, який
-// використовує книга: data: URL (завантажені файли), /generated/... (наші
-// згенеровані ілюстрації — читаємо з диска, без зайвого мережевого стрибка)
-// або звичайний http(s) URL (старі приклади персонажів).
+// використовує книга: data: URL (старі завантажені файли), /api/media/file/…
+// (медіатека автора на сервері, задача #100), /generated/... (згенероване до
+// #100 і згенероване гостями) або звичайний http(s) URL (старі приклади
+// персонажів). Усі чотири читаються з диска або мережі ТУТ, щоб решта коду
+// не знала про формат посилання.
 // ---------------------------------------------------------------------------
 
 const EXT_MIME: Record<string, string> = {
@@ -49,7 +52,15 @@ const EXT_MIME: Record<string, string> = {
   webp: 'image/webp',
 };
 
-export async function resolveImageBytes(imageUrl: string): Promise<{ mimeType: string; base64: string }> {
+/**
+ * `ownerId` потрібен ЛИШЕ для посилань на медіатеку: файл автора читає сам
+ * автор. Без цього достатньо було б підставити чужий id у книгу, щоб
+ * розпізнавання тексту прочитало чуже зображення й переказало його вміст.
+ */
+export async function resolveImageBytes(
+  imageUrl: string,
+  ownerId?: string | null
+): Promise<{ mimeType: string; base64: string }> {
   if (!imageUrl || typeof imageUrl !== 'string') {
     throw new TextFromImageError('bad_image', 'Немає зображення для аналізу.', 'gemini');
   }
@@ -58,6 +69,18 @@ export async function resolveImageBytes(imageUrl: string): Promise<{ mimeType: s
     const match = imageUrl.match(/^data:([^;]+);base64,(.+)$/);
     if (!match) throw new TextFromImageError('bad_image', 'Непідтримуваний формат завантаженого файлу.', 'gemini');
     return { mimeType: match[1], base64: match[2] };
+  }
+
+  const assetId = assetIdFromUrl(imageUrl);
+  if (assetId) {
+    const found = await readAsset(assetId);
+    if (!found || !ownerId || found.record.ownerId !== String(ownerId)) {
+      throw new TextFromImageError('bad_image', 'Файл медіатеки не знайдено на сервері.', 'gemini');
+    }
+    return {
+      mimeType: found.record.mimeType,
+      base64: Buffer.from(found.bytes).toString('base64'),
+    };
   }
 
   if (imageUrl.startsWith(`${GENERATED_URL_PREFIX}/`)) {
@@ -100,6 +123,8 @@ export interface GenerateTextFromImageOptions {
   genre?: string;
   chapterTitle?: string;
   captionHint?: string;
+  /** Хто питає — для перевірки права на файл медіатеки (див. resolveImageBytes). */
+  ownerId?: string | null;
 }
 
 /**
@@ -142,7 +167,7 @@ async function generateWithGemini(
   if (!ai) {
     throw new TextFromImageError('no_key', 'Ключ Gemini не налаштований (GEMINI_API_KEY).', 'gemini');
   }
-  const { mimeType, base64 } = await resolveImageBytes(opts.imageUrl);
+  const { mimeType, base64 } = await resolveImageBytes(opts.imageUrl, opts.ownerId);
 
   try {
     const response = await ai.models.generateContent({
@@ -192,7 +217,7 @@ async function generateWithGpt(opts: GenerateTextFromImageOptions): Promise<{ te
     throw new TextFromImageError('no_key', 'Ключ OpenAI не налаштований (OPENAI_API_KEY).', 'gpt');
   }
   const model = process.env.OPENAI_MODEL || 'gpt-4o';
-  const { mimeType, base64 } = await resolveImageBytes(opts.imageUrl);
+  const { mimeType, base64 } = await resolveImageBytes(opts.imageUrl, opts.ownerId);
 
   let res: Response;
   try {
