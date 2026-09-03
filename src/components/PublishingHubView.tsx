@@ -33,6 +33,7 @@ import {
   RefreshCw,
   Search,
   ShoppingBag,
+  Sparkles,
   Store,
   Trash2,
   Upload,
@@ -40,6 +41,7 @@ import {
 import type { AuthUser, Book, NavigationTab } from '../types';
 import { calculateWordCount, estimatePageCount } from '../utils/helpers';
 import { renderPdfFirstPageToPng } from '../utils/pdfCover';
+import { GammaPanel } from './publishing/GammaPanel';
 import { useLanguage } from '../i18n/LanguageContext';
 
 interface PublishingHubViewProps {
@@ -49,7 +51,7 @@ interface PublishingHubViewProps {
   onNavigateToTab: (tab: NavigationTab) => void;
 }
 
-type SubTab = 'kdp' | 'etsy' | 'bundle' | 'research' | 'vitryna';
+type SubTab = 'kdp' | 'etsy' | 'bundle' | 'research' | 'vitryna' | 'gamma';
 
 interface Issue {
   severity: 'blocker' | 'warning';
@@ -195,6 +197,13 @@ export const PublishingHubView: React.FC<PublishingHubViewProps> = ({
           ['bundle', t('publishingHub.tabBundle'), Package],
           ['research', t('publishingHub.tabResearch'), Search],
           ['vitryna', 'Вітрина Fusion Lab', Store],
+          /*
+            Третя гілка — і навмисно НЕ названа майданчиком. На KDP і Etsy
+            книгу купують; тут робиться те, що до них веде. Рівна назва на
+            кшталт «Gamma» поруч із ними обіцяла б третє джерело доходу,
+            якого немає.
+          */
+          ['gamma', 'Матеріали (Gamma)', Sparkles],
         ] as [SubTab, string, React.ComponentType<{ className?: string }>][]).map(([id, label, Icon]) => (
           <button
             key={id}
@@ -223,6 +232,7 @@ export const PublishingHubView: React.FC<PublishingHubViewProps> = ({
       {tab === 'bundle' && <BundlePanel isGuest={isGuest} />}
       {tab === 'research' && <ResearchPanel copy={copy} copiedKey={copiedKey} isGuest={isGuest} />}
       {tab === 'vitryna' && <VitrynaPanel book={book} isGuest={isGuest} />}
+      {tab === 'gamma' && <GammaPanel book={book} isGuest={isGuest} />}
     </div>
   );
 };
