@@ -46,6 +46,7 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import { FeeCalculatorView } from './etsy/FeeCalculatorView';
+import { ListingAuditView } from './etsy/ListingAuditView';
 import { SeoTranslationsTab } from './etsy/SeoTranslationsTab';
 import type { AuthUser } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
@@ -469,7 +470,7 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({ 
    * калькулятор комісій Etsy та SEO-переклади, — тож вони не мають
    * потребувати ані звіту, ані попереднього скринінгу.
    */
-  const [tab, setTab] = useState<'screen' | 'fees' | 'seo'>('screen');
+  const [tab, setTab] = useState<'screen' | 'audit' | 'fees' | 'seo'>('screen');
 
   const [topic, setTopic] = useState('');
   const [count, setCount] = useState(10);
@@ -656,6 +657,7 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({ 
           {(
             [
               { id: 'screen' as const, label: t('marketIntel.tabScreen'), icon: LineChart },
+              { id: 'audit' as const, label: t('marketIntel.tabAudit'), icon: ShieldAlert },
               { id: 'fees' as const, label: t('marketIntel.tabFees'), icon: Calculator },
               { id: 'seo' as const, label: t('marketIntel.tabSeo'), icon: Languages },
             ]
@@ -680,6 +682,12 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({ 
             );
           })}
         </nav>
+
+        {tab === 'audit' && (
+          <div className="etsy-kit">
+            <ListingAuditView />
+          </div>
+        )}
 
         {tab === 'fees' && (
           <div className="etsy-kit">
