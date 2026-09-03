@@ -19,7 +19,7 @@ import { TrainersView } from './components/TrainersView';
 import { BookStructureBuilder } from './components/BookStructureBuilder';
 import { PortfolioView } from './components/PortfolioView';
 import { PublishingHubView } from './components/PublishingHubView';
-import { MarketIntelligenceView } from './components/MarketIntelligenceView';
+import { MarketIntelligenceWindow } from './components/MarketIntelligenceWindow';
 import { TableOfContentsView } from './components/TableOfContentsView';
 import { QRFootnotesView } from './components/QRFootnotesView';
 import { ScenarioView } from './components/ScenarioView';
@@ -1166,7 +1166,24 @@ export default function App() {
 
   // Перемикання вкладок. Окремого попередження більше не потрібно:
   // зміни зберігаються автоматично, а стан видно в шапці постійно.
+  /**
+   * «Аналітика ринку Etsy» — не вкладка, а плаваюче вікно поверх студії
+   * (`MarketIntelligenceWindow`). Пункт меню лишається на місці, але замість
+   * заміни вмісту студії він відкриває вікно: аналітику дивляться, не
+   * полишаючи роботи над книгою, і `currentTab` навмисно не змінюється —
+   * саме тому позаду видно (розмито) той екран, з якого автор прийшов.
+   */
+  const [marketOpen, setMarketOpen] = useState(false);
+
   const handleSelectTab = (targetTab: NavigationTab) => {
+    if (targetTab === 'market') {
+      setMarketOpen(true);
+      return;
+    }
+    // Перехід на будь-яку іншу вкладку закриває вікно: інакше воно висіло б
+    // поверх екрана, до якого не має стосунку. Зокрема так спрацьовує
+    // «Переглянути тарифи» зсередини самої аналітики.
+    setMarketOpen(false);
     if (targetTab === currentTab) return;
     setCurrentTab(targetTab);
   };
@@ -1407,7 +1424,11 @@ export default function App() {
         onShowLogin={() => { auth.clearError(); localStorage.removeItem('nova_guest_dismissed_login'); window.location.reload(); }}
         theme={theme}
         onToggleTheme={toggleTheme}
-        currentTab={currentTab}
+        /* Поки вікно аналітики відкрите, пункт меню має лишатись
+           підсвіченим — інакше видно вікно без жодної позначки, звідки воно
+           взялось. Сам currentTab при цьому не змінюється: за вікном стоїть
+           той екран, з якого автор прийшов. */
+        currentTab={marketOpen ? 'market' : currentTab}
         onSelectTab={handleSelectTab}
         book={book}
         totalWords={totalWords}
@@ -1544,7 +1565,9 @@ export default function App() {
           липкий сайдбар прокручувався разом зі сторінкою. */}
       <div className="flex-1 flex">
       <SidebarNav
-        currentTab={currentTab}
+        /* Та сама причина, що й у верхньому меню: поки вікно відкрите,
+           пункт лишається активним, а сам currentTab не рухається. */
+        currentTab={marketOpen ? 'market' : currentTab}
         onSelectTab={handleSelectTab}
         book={book}
         logCount={logEntries.length}
@@ -1820,15 +1843,20 @@ export default function App() {
           />
         )}
 
-        {currentTab === 'market' && (
-          <MarketIntelligenceView
-            authUser={auth.user}
-            onGoToSubscription={() => handleSelectTab('subscription')}
-          />
-        )}
+
       </div>
       </ErrorBoundary>
       </div>
+
+      {/* Аналітика ринку Etsy — плаваюче вікно поверх студії, а не вкладка.
+          Стоїть поза перемикачем вкладок навмисно: за ним лишається видимим
+          (розмито) той екран, з якого автор його відкрив. */}
+      <MarketIntelligenceWindow
+        open={marketOpen}
+        onClose={() => setMarketOpen(false)}
+        authUser={auth.user}
+        onGoToSubscription={() => handleSelectTab('subscription')}
+      />
 
       {/* Довідковий тур: спливаючі підказки біля ключових кнопок кожної
           вкладки для нових користувачів. Сам відстежує зміну currentTab

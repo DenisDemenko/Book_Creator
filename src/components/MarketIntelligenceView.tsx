@@ -61,6 +61,14 @@ import type {
 } from '../../server/market/marketTypes';
 
 interface MarketIntelligenceViewProps {
+  /**
+   * Екран живе у плаваючому вікні (`MarketIntelligenceWindow`), а не на всю
+   * ширину студії. Тоді відступи сторінки завеликі: у вікні 900×700 вони
+   * зʼїдають смугу, у якій і так тісно таблиці зі скринінгом. Змінюється
+   * лише щільність — розкладка й поведінка ті самі, щоб не мати двох
+   * різних екранів, які доведеться правити окремо.
+   */
+  embedded?: boolean;
   authUser: AuthUser | null;
   onGoToSubscription?: () => void;
 }
@@ -465,7 +473,13 @@ function downloadReportCsv(report: MarketReport): void {
 // Екран
 // ===========================================================================
 
-export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({ authUser, onGoToSubscription }) => {
+export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({
+  embedded = false,
+  authUser,
+  onGoToSubscription,
+}) => {
+  /** Щільність відступів. Один рядок на всі чотири гілки рендера нижче. */
+  const padClass = embedded ? 'p-4' : 'p-6 lg:p-8';
   const { t, lang: uiLang } = useLanguage();
   const access = usePlanAccess(authUser, ['pro', 'ultra']);
 
@@ -632,7 +646,7 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({ 
 
   if (!access.isRegistered) {
     return (
-      <div className="flex-1 overflow-y-auto bg-slate-950 text-slate-100 p-6 lg:p-8">
+      <div className={`flex-1 overflow-y-auto bg-slate-950 text-slate-100 ${padClass}`}>
         <div className="p-6 rounded-2xl glass-panel space-y-3 text-center max-w-md mx-auto mt-10">
           <Lock className="w-8 h-8 text-slate-500 mx-auto" />
           <h3 className="text-sm font-bold text-slate-100">{t('marketIntel.needRegHeading')}</h3>
@@ -648,7 +662,7 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({ 
 
   if (!access.hasAccess) {
     return (
-      <div className="flex-1 overflow-y-auto bg-slate-950 text-slate-100 p-6 lg:p-8">
+      <div className={`flex-1 overflow-y-auto bg-slate-950 text-slate-100 ${padClass}`}>
         <div className="p-6 rounded-2xl glass-panel space-y-3 text-center max-w-md mx-auto mt-10">
           <Crown className="w-8 h-8 text-amber-400 mx-auto" />
           <h3 className="text-sm font-bold text-slate-100">{t('marketIntel.upgradeHeading')}</h3>
@@ -682,7 +696,7 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({ 
   const shownNextSource = settings?.nextScreenSource ?? 'ai_screen';
 
   return (
-    <div className="flex-1 overflow-y-auto bg-slate-950 text-slate-100 p-6 lg:p-8">
+    <div className={`flex-1 overflow-y-auto bg-slate-950 text-slate-100 ${padClass}`}>
       <div className="max-w-6xl mx-auto space-y-6">
         <header>
           <h1 className="text-2xl font-semibold text-slate-100 flex items-center gap-2">
