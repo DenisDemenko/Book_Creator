@@ -442,15 +442,11 @@ async function startServer() {
     ratePerSecond: GAMMA_RATE_LIMIT_PER_SECOND,
   });
   registerGammaRoutes(app, {
-    getClient: () => {
-      const cfg = readGammaConfig();
-      if (!cfg.configured) return null;
-      return createGammaClient({
-        apiKey: cfg.apiKey,
-        fetchImpl: fetch as never,
-        bucket: gammaBucket,
-      });
-    },
+    // Ключ приходить ззовні: чий він — автора чи студії — вирішує
+    // resolveGammaKey у самих маршрутах, і це рішення не має бути
+    // розмазаним по двох файлах.
+    makeClient: (apiKey: string) =>
+      createGammaClient({ apiKey, fetchImpl: fetch as never, bucket: gammaBucket }),
   });
   registerNarrationRoutes(app);
 

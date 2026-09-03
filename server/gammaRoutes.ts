@@ -37,7 +37,10 @@ import {
   tierOfModel,
   type ImageTier,
 } from './gamma/gammaCost';
-import { readGammaConfig } from './gamma/gammaConfig';
+import { GAMMA_KEY_ENGINE, readGammaConfig } from './gamma/gammaConfig';
+import { deleteUserApiKey, upsertUserApiKey } from './store';
+import { apiKeyFingerprint, encryptApiKey, isApiKeyCryptoConfigured } from './userApiKeyCrypto';
+import { resolveGammaKey } from './gamma/gammaAccount';
 import {
   createJob,
   creditsSpent,
@@ -48,8 +51,12 @@ import {
 } from './gamma/gammaStore';
 
 export interface GammaRoutesDeps {
-  /** null — ключа немає; маршрути відповідають 503 із поясненням. */
-  getClient: () => GammaClient | null;
+  /**
+   * Клієнт для КОНКРЕТНОГО автора: ключ береться з його власної підписки
+   * Gamma. Приймає ключ, а не будує його сам, бо криптографія й доступ до
+   * сховища живуть у server.ts разом з рештою.
+   */
+  makeClient: (apiKey: string) => GammaClient;
   now?: () => Date;
 }
 
@@ -88,20 +95,34 @@ export function registerGammaRoutes(app: Express, deps: GammaRoutesDeps): void {
   const now = deps.now || (() => new Date());
   const gate = [requireAuth, requirePlanAtLeast(['pro', 'ultra'])] as const;
 
-  function clientOr503(res: Response): GammaClient | null {
-    const client = deps.getClient();
-    if (!client) {
-      res.status(503).json({ error: readGammaConfig().reasonUk, kind: 'no_key' });
+  /**
+   * Клієнт автора або чесна відмова.
+   *
+   * Ключ студії НЕ підміняє відсутній ключ автора: це списало б чужі гроші
+   * без відома обох сторін. Тому 503 із поясненням, ЩО саме зробити, а не
+   * тиха генерація коштом власника.
+   */
+  async function clientOr503(req: Request, res: Response): Promise<GammaClient | null> {
+    const resolved = await resolveGammaKey({
+      userId: (req.principal?.id as string) ?? null,
+      role: (req.principal?.role as string) ?? null,
+    });
+    if (!resolved.apiKey) {
+      res.status(503).json({ error: resolved.reasonUk, kind: 'no_key', owner: resolved.owner });
       return null;
     }
-    return client;
+    return deps.makeClient(resolved.apiKey);
   }
 
-  app.get('/api/gamma/settings', ...gate, async (_req: Request, res: Response) => {
+  app.get('/api/gamma/settings', ...gate, async (req: Request, res: Response) => {
     try {
       const cfg = readGammaConfig();
+      const resolved = await resolveGammaKey({
+        userId: (req.principal?.id as string) ?? null,
+        role: (req.principal?.role as string) ?? null,
+      });
       let themes: unknown = null;
-      const client = deps.getClient();
+      const client = resolved.apiKey ? deps.makeClient(resolved.apiKey) : null;
       if (client) {
         try {
           themes = await listThemes(client);
@@ -111,8 +132,12 @@ export function registerGammaRoutes(app: Express, deps: GammaRoutesDeps): void {
         }
       }
       res.json({
-        configured: cfg.configured,
-        reasonUk: cfg.reasonUk,
+        // «Налаштовано» тепер означає «є ЧИМ генерувати саме цьому автору»,
+        // а не «у власника є ключ у .env». Перше — правда про кнопку, друге
+        // до автора стосунку не має.
+        configured: Boolean(resolved.apiKey),
+        keyOwner: resolved.owner,
+        reasonUk: resolved.reasonUk ?? cfg.reasonUk,
         kinds: Object.entries(KINDS).map(([id, v]) => ({ id, ...v })),
         themes,
         limits: LIMITS,
@@ -153,7 +178,7 @@ export function registerGammaRoutes(app: Express, deps: GammaRoutesDeps): void {
    */
   app.post('/api/gamma/image', ...gate, async (req: Request, res: Response) => {
     try {
-      const client = clientOr503(res);
+      const client = await clientOr503(req, res);
       if (!client) return;
 
       const prompt = String(req.body?.prompt || '').trim();
@@ -205,9 +230,73 @@ export function registerGammaRoutes(app: Express, deps: GammaRoutesDeps): void {
     }
   });
 
+  /**
+   * Підключити власну підписку Gamma.
+   *
+   * Ключ одразу перевіряється справжнім викликом (`GET /themes`) — інакше
+   * автор дізнався б, що вставив не те, лише на першій генерації, уже
+   * склавши запит. Зберігається зашифрованим у тій самій таблиці, що й
+   * ключі моделей.
+   *
+   * САМ КЛЮЧ НАЗАД НЕ ВІДДАЄТЬСЯ НІКОЛИ — тільки відбиток. Це правило
+   * проєкту, а не обережність заради обережності: ключ, який можна
+   * прочитати з API, рано чи пізно опиниться в журналі браузера.
+   */
+  app.put('/api/gamma/key', ...gate, async (req: Request, res: Response) => {
+    try {
+      const userId = (req.principal?.id as string) ?? '';
+      if (!userId) return res.status(401).json({ error: 'Потрібен вхід.', kind: 'no_auth' });
+      if (!isApiKeyCryptoConfigured()) {
+        return res.status(503).json({
+          error: 'Сервер не налаштований для зберігання ключів (немає USER_API_KEY_SECRET).',
+          kind: 'no_crypto',
+        });
+      }
+      const key = String(req.body?.apiKey || '').trim();
+      if (!key) return res.status(400).json({ error: 'Порожній ключ.', kind: 'bad_input' });
+
+      // Перевірка перед збереженням: зберегти неробочий ключ означає
+      // відкласти помилку на потім і зробити її незрозумілою.
+      try {
+        await listThemes(deps.makeClient(key));
+      } catch (checkErr) {
+        const message =
+          checkErr instanceof GammaApiError
+            ? checkErr.message
+            : 'Не вдалося перевірити ключ — Gamma не відповіла.';
+        return res.status(400).json({ error: message, kind: 'bad_key' });
+      }
+
+      const at = now().toISOString();
+      const saved = await upsertUserApiKey({
+        userId,
+        engine: GAMMA_KEY_ENGINE,
+        encryptedKey: encryptApiKey(key),
+        fingerprint: apiKeyFingerprint(key),
+        createdAt: at,
+        updatedAt: at,
+      });
+      res.json({ connected: true, fingerprint: saved.fingerprint, updatedAt: saved.updatedAt });
+    } catch (err) {
+      fail(res, err, 'Не вдалося зберегти ключ Gamma.');
+    }
+  });
+
+  /** Відключити власну підписку. Ключ видаляється, задачі лишаються. */
+  app.delete('/api/gamma/key', ...gate, async (req: Request, res: Response) => {
+    try {
+      const userId = (req.principal?.id as string) ?? '';
+      if (!userId) return res.status(401).json({ error: 'Потрібен вхід.', kind: 'no_auth' });
+      const removed = await deleteUserApiKey(userId, GAMMA_KEY_ENGINE);
+      res.json({ connected: false, removed });
+    } catch (err) {
+      fail(res, err, 'Не вдалося відключити підписку Gamma.');
+    }
+  });
+
   app.post('/api/gamma/generate', ...gate, async (req: Request, res: Response) => {
     try {
-      const client = clientOr503(res);
+      const client = await clientOr503(req, res);
       if (!client) return;
 
       const kind = String(req.body?.kind || '') as GammaJobKind;
@@ -294,7 +383,7 @@ export function registerGammaRoutes(app: Express, deps: GammaRoutesDeps): void {
       }
       if (job.status !== 'pending') return res.json(job);
 
-      const client = clientOr503(res);
+      const client = await clientOr503(req, res);
       if (!client) return;
 
       // Зображення живуть за іншим ендпоінтом — і статус у них теж свій.

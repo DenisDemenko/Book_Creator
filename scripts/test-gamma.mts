@@ -227,6 +227,54 @@ console.log('\nОкреме зображення й ліміти квоти');
   t('кредити зображення доступні', done.credits?.deducted === 70);
 }
 
+console.log('\nЧия підписка працює');
+{
+  process.env.USER_API_KEY_SECRET = process.env.USER_API_KEY_SECRET || 'x'.repeat(64);
+  const account = await import('../server/gamma/gammaAccount');
+  const crypto = await import('../server/userApiKeyCrypto');
+  const st = await import('../server/store');
+
+  delete process.env.GAMMA_API_KEY;
+
+  // Автор без свого ключа й без ключа студії — чесна відмова з інструкцією.
+  const none = await account.resolveGammaKey({ userId: 'u-1', role: 'writer' });
+  t('без ключів — генерація недоступна', none.apiKey === null && none.owner === 'none');
+  t('відмова каже, ЩО зробити',
+    Boolean(none.reasonUk?.includes('Settings') && none.reasonUk?.includes('Pro')),
+    String(none.reasonUk).slice(0, 60));
+
+  // ГОЛОВНЕ: ключ студії НЕ підміняє відсутній ключ автора.
+  process.env.GAMMA_API_KEY = 'studio-key';
+  const writerWithStudioKey = await account.resolveGammaKey({ userId: 'u-1', role: 'writer' });
+  t('ключ студії не дістається авторові — чужі гроші не витрачаються',
+    writerWithStudioKey.apiKey === null, String(writerWithStudioKey.owner));
+  const admin = await account.resolveGammaKey({ userId: 'u-admin', role: 'admin' });
+  t('адміністратор працює ключем студії — це його рахунок',
+    admin.apiKey === 'studio-key' && admin.owner === 'studio');
+
+  // Власний ключ автора перемагає ключ студії.
+  const at = new Date().toISOString();
+  await st.upsertUserApiKey({
+    userId: 'u-1',
+    engine: 'gamma',
+    encryptedKey: crypto.encryptApiKey('author-own-key'),
+    fingerprint: crypto.apiKeyFingerprint('author-own-key'),
+    createdAt: at,
+    updatedAt: at,
+  });
+  const own = await account.resolveGammaKey({ userId: 'u-1', role: 'writer' });
+  t('власний ключ автора працює', own.apiKey === 'author-own-key' && own.owner === 'author');
+
+  const adminOwn = await account.resolveGammaKey({ userId: 'u-1', role: 'admin' });
+  t('власний ключ має пріоритет навіть в адміністратора',
+    adminOwn.owner === 'author', adminOwn.owner);
+
+  await st.deleteUserApiKey('u-1', 'gamma');
+  const afterRemove = await account.resolveGammaKey({ userId: 'u-1', role: 'writer' });
+  t('після відключення знову недоступно', afterRemove.apiKey === null);
+  delete process.env.GAMMA_API_KEY;
+}
+
 console.log('\nКонфігурація');
 {
   const cfg = await import('../server/gamma/gammaConfig');

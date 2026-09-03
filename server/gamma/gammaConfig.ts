@@ -22,6 +22,16 @@
 
 export const GAMMA_API_BASE = process.env.GAMMA_API_BASE || 'https://public-api.gamma.app/v1.0';
 
+/**
+ * Ідентифікатор Gamma у таблиці ключів користувача (`user_api_keys.engine`).
+ *
+ * Та сама таблиця, що зберігає ключі моделей: шифрування, відбиток і
+ * видалення там уже зроблені й перевірені. Заводити окреме сховище під
+ * один провайдер означало б повторити ту саму криптографію вдруге —
+ * найгірше місце для другої реалізації.
+ */
+export const GAMMA_KEY_ENGINE = 'gamma';
+
 export interface GammaConfig {
   apiKey: string;
   configured: boolean;

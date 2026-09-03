@@ -70,6 +70,8 @@ interface GammaJob {
 
 interface GammaSettings {
   configured: boolean;
+  /** 'author' — працює власна підписка; 'studio' — ключ власника (лише адмін). */
+  keyOwner?: 'author' | 'studio' | 'none';
   reasonUk?: string;
   themes?: { themes?: Array<{ id: string; name: string }> } | null;
 }
@@ -182,6 +184,9 @@ export const GammaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, i
     Тому вимикач стоїть на видноті, а не в «додатково».
   */
   const [withImages, setWithImages] = useState(true);
+  const [keyInput, setKeyInput] = useState('');
+  const [keyBusy, setKeyBusy] = useState(false);
+  const [keyMsg, setKeyMsg] = useState<string | null>(null);
   const [estimate, setEstimate] = useState<{ min: number; max: number; noteUk: string } | null>(null);
 
   // Оцінку питаємо в сервера на кожну зміну вибору: ставки Gamma живуть
@@ -222,6 +227,44 @@ export const GammaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, i
     }, 5000);
     return () => clearInterval(timer);
   }, [jobs]);
+
+  const reloadSettings = () =>
+    api<GammaSettings>('/api/gamma/settings').then(setSettings).catch(() => undefined);
+
+  const connectKey = async () => {
+    setKeyBusy(true);
+    setKeyMsg(null);
+    try {
+      const out = await api<{ fingerprint: string }>('/api/gamma/key', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: keyInput.trim() }),
+      });
+      // Ключ у полі не лишаємо: він більше не потрібен, а лежати у формі
+      // йому нема чого.
+      setKeyInput('');
+      setKeyMsg(`Підписку підключено (відбиток ${out.fingerprint}).`);
+      await reloadSettings();
+    } catch (err: any) {
+      setKeyMsg(err?.message || 'Не вдалося підключити.');
+    } finally {
+      setKeyBusy(false);
+    }
+  };
+
+  const disconnectKey = async () => {
+    setKeyBusy(true);
+    setKeyMsg(null);
+    try {
+      await api('/api/gamma/key', { method: 'DELETE' });
+      setKeyMsg('Підписку відключено. Створені раніше матеріали лишаються.');
+      await reloadSettings();
+    } catch (err: any) {
+      setKeyMsg(err?.message || 'Не вдалося відключити.');
+    } finally {
+      setKeyBusy(false);
+    }
+  };
 
   const start = async () => {
     setBusy(true);
@@ -286,10 +329,60 @@ export const GammaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, i
           </p>
         </div>
 
-        {settings && !settings.configured && (
+        {/*
+          Власна підписка автора.
+
+          Кнопки «Увійти через Gamma» немає навмисно: Gamma не має OAuth для
+          API, доступ дається ключем із кабінету. Малювати кнопку входу, за
+          якою відкриється прохання вставити ключ, означало б обіцяти не те.
+        */}
+        <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
+          <p className="text-xs font-bold text-slate-200">
+            {settings?.keyOwner === 'author'
+              ? 'Ваша підписка Gamma підключена'
+              : settings?.keyOwner === 'studio'
+                ? 'Працює ключ студії (ви адміністратор)'
+                : 'Підключіть свою підписку Gamma'}
+          </p>
+          <p className="text-[11px] text-slate-400 leading-snug">
+            {settings?.keyOwner === 'author'
+              ? 'Генерації списують кредити з вашого рахунку Gamma. Студія лише складає запит із книги й веде облік.'
+              : settings?.reasonUk}
+          </p>
+          {settings?.keyOwner !== 'author' && (
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="password"
+                value={keyInput}
+                onChange={(e) => setKeyInput(e.target.value)}
+                placeholder="Ключ із Gamma → Settings → API"
+                className="flex-1 min-w-[220px] rounded-lg bg-slate-900 border border-slate-700 px-2 py-1.5 text-xs text-slate-100"
+              />
+              <button
+                onClick={() => void connectKey()}
+                disabled={keyBusy || !keyInput.trim()}
+                className="px-3 py-1.5 rounded-lg bg-cyan-500 text-slate-950 text-xs font-bold disabled:opacity-50"
+              >
+                {keyBusy ? 'Перевіряю…' : 'Підключити'}
+              </button>
+            </div>
+          )}
+          {settings?.keyOwner === 'author' && (
+            <button
+              onClick={() => void disconnectKey()}
+              disabled={keyBusy}
+              className="px-3 py-1.5 rounded-lg badge-glass text-slate-300 text-[11px] disabled:opacity-50"
+            >
+              Відключити підписку
+            </button>
+          )}
+          {keyMsg && <p className="text-[11px] text-slate-300">{keyMsg}</p>}
+        </div>
+
+        {settings && !settings.configured && !settings.reasonUk && (
           <p className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-amber-200 text-[11px] flex gap-2">
             <AlertTriangle className="w-4 h-4 shrink-0" />
-            {settings.reasonUk}
+            Генерація недоступна.
           </p>
         )}
 
