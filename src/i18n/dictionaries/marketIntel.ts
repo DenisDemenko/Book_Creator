@@ -28,6 +28,13 @@ export const marketIntel = {
 
     disclaimerHeading: 'Це оцінка моделі, а не дані Etsy',
     sourceAi: 'Джерело: AI-скринінг',
+    sourceLabel: 'Джерело даних модуля',
+    sourceAuto: 'Автоматично: Etsy API, якщо налаштований',
+    sourceForceEtsy: 'Тільки Etsy Open API (без підміни моделлю)',
+    sourceForceAi: 'Тільки мовна модель (берегти квоту Etsy)',
+    sourceKeyPresent: 'ETSY_API_KEY налаштований — офіційне джерело доступне.',
+    sourceKeyMissing: 'ETSY_API_KEY не налаштований. Вибір «тільки Etsy» призведе до чесної відмови скринінгу, а не до підміни моделлю.',
+    modelUnusedOnEtsy: 'Скринінг піде в Etsy Open API — модель у цьому шляху не викликається, і вибір моделі вище ні на що не впливає.',
     sourceEtsy: 'Джерело: Etsy Open API v3',
     modelUsed: 'Модель: {model}',
 
@@ -154,6 +161,13 @@ export const marketIntel = {
 
     disclaimerHeading: 'These are model estimates, not Etsy data',
     sourceAi: 'Source: AI screening',
+    sourceLabel: 'Module data source',
+    sourceAuto: 'Automatic: Etsy API when configured',
+    sourceForceEtsy: 'Etsy Open API only (never substitute the model)',
+    sourceForceAi: 'Language model only (save the Etsy quota)',
+    sourceKeyPresent: 'ETSY_API_KEY is configured — the official source is available.',
+    sourceKeyMissing: 'ETSY_API_KEY is not configured. Choosing “Etsy only” makes screening fail honestly rather than silently fall back to the model.',
+    modelUnusedOnEtsy: 'Screening will go to the Etsy Open API — the model is not called on this path, so the model choice above has no effect.',
     sourceEtsy: 'Source: Etsy Open API v3',
     modelUsed: 'Model: {model}',
 

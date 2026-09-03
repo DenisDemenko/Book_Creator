@@ -83,6 +83,8 @@ interface MarketSettings {
   etsyApiConfigured: boolean;
   /** Чим буде зібраний НАСТУПНИЙ скринінг. */
   nextScreenSource: 'ai_screen' | 'etsy_api';
+  /** Вибір адміністратора. 'auto' — вирішує наявність ключа. */
+  screenSourceSetting: 'auto' | 'ai_screen' | 'etsy_api';
 }
 
 interface TopicRow {
@@ -476,6 +478,9 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({ 
    */
   const [tab, setTab] = useState<'screen' | 'trend' | 'audit' | 'fees' | 'seo'>('screen');
 
+  /** Збереження джерела скринінгу (лише адмін). null — нічого не зберігаємо. */
+  const [savingSource, setSavingSource] = useState(false);
+
   const [topic, setTopic] = useState('');
   const [count, setCount] = useState(10);
   const [modelId, setModelId] = useState('');
@@ -589,6 +594,31 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({ 
     [applyError]
   );
 
+  /**
+   * Зміна джерела — адмінська дія, і вона стосується ВСІХ авторів студії:
+   * від неї залежить, факти чи оцінки побачить кожен наступний звіт. Тому
+   * після збереження перечитуємо налаштування, а не вгадуємо новий стан
+   * локально: якщо сервер вирішив інакше (наприклад, ключа немає), автор має
+   * побачити рішення сервера, а не своє натискання.
+   */
+  const changeSource = useCallback(async (value: string) => {
+    setSavingSource(true);
+    setError(null);
+    try {
+      await api('/api/market/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ screenSource: value }),
+      });
+      const fresh = await api<MarketSettings>('/api/market/settings');
+      setSettings(fresh);
+    } catch (err) {
+      applyError(err as ApiError);
+    } finally {
+      setSavingSource(false);
+    }
+  }, [applyError]);
+
   const sortedItems = useMemo(
     () => (report ? [...report.items].sort((a, b) => b.opportunity.score - a.opportunity.score) : []),
     [report]
@@ -648,6 +678,8 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({ 
     звіту немає, показуємо те, чим буде зібраний наступний.
   */
   const shownSource = report?.provenance.source ?? settings?.nextScreenSource ?? 'ai_screen';
+  /** Чим буде зібраний НАСТУПНИЙ звіт — незалежно від того, що показано зараз. */
+  const shownNextSource = settings?.nextScreenSource ?? 'ai_screen';
 
   return (
     <div className="flex-1 overflow-y-auto bg-slate-950 text-slate-100 p-6 lg:p-8">
@@ -810,7 +842,39 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({ 
             </label>
           </div>
 
+          {authUser?.role === 'admin' && settings && (
+            <label className="block">
+              <span className="block text-xs uppercase tracking-wide text-slate-400 mb-1">
+                {t('marketIntel.sourceLabel')}
+              </span>
+              <select
+                className={inputClass}
+                value={settings.screenSourceSetting}
+                disabled={savingSource}
+                onChange={(event) => changeSource(event.target.value)}
+              >
+                <option value="auto">{t('marketIntel.sourceAuto')}</option>
+                <option value="etsy_api">{t('marketIntel.sourceForceEtsy')}</option>
+                <option value="ai_screen">{t('marketIntel.sourceForceAi')}</option>
+              </select>
+              <span className="block text-xs text-slate-500 mt-1">
+                {settings.etsyApiConfigured
+                  ? t('marketIntel.sourceKeyPresent')
+                  : t('marketIntel.sourceKeyMissing')}
+              </span>
+            </label>
+          )}
+
           <p className="text-xs text-slate-500">{t('marketIntel.topicHint')}</p>
+
+          {/*
+            Коли скринінг іде в Etsy, вибір моделі вище ні на що не впливає —
+            модель у цьому шляху не викликається взагалі. Мовчазний непотрібний
+            селектор змусив би автора думати, що він щось налаштовує.
+          */}
+          {shownNextSource === 'etsy_api' && (
+            <p className="text-xs text-cyan-300/80">{t('marketIntel.modelUnusedOnEtsy')}</p>
+          )}
 
           <div className="flex flex-wrap items-center gap-3">
             <label className="flex items-center gap-2 text-sm text-slate-300" title={t('marketIntel.forceHint')}>

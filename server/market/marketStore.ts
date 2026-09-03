@@ -40,6 +40,8 @@ export const MARKET_WEIGHTS_META_KEY = 'market_score_weights';
 
 /** Модель, якою робиться скринінг. null = «хай вирішує прив'язка ядра». */
 export const MARKET_SCREEN_MODEL_META_KEY = 'market_screen_model';
+/** Джерело скринінгу, обране адміном: 'auto' | 'ai_screen' | 'etsy_api'. */
+export const MARKET_SCREEN_SOURCE_META_KEY = 'market_screen_source';
 
 // ---------------------------------------------------------------------------
 // Внутрішній тип рядка журналу звітів
@@ -418,6 +420,33 @@ export async function setScreenModelId(id: string | null): Promise<string | null
   // той самий принцип, що й у setCoreModuleModel.
   await setAppSetting(MARKET_SCREEN_MODEL_META_KEY, trimmed);
   return trimmed || null;
+}
+
+/**
+ * Джерело скринінгу.
+ *
+ * 'auto' (за замовчуванням) — офіційний API, якщо він налаштований, інакше
+ * мовна модель. Адмін може прибити джерело жорстко: 'etsy_api' корисно, щоб
+ * випадкова помилка конфігурації не перевела всю студію на оцінки моделі
+ * непомітно, а 'ai_screen' — щоб не витрачати добову квоту Etsy, поки
+ * налаштовується щось інше.
+ */
+export type ScreenSourceSetting = 'auto' | 'ai_screen' | 'etsy_api';
+
+const SCREEN_SOURCE_VALUES: ScreenSourceSetting[] = ['auto', 'ai_screen', 'etsy_api'];
+
+export async function getScreenSource(): Promise<ScreenSourceSetting> {
+  const raw = ((await getAppSetting(MARKET_SCREEN_SOURCE_META_KEY)) || '').trim();
+  return (SCREEN_SOURCE_VALUES as string[]).includes(raw) ? (raw as ScreenSourceSetting) : 'auto';
+}
+
+export async function setScreenSource(value: string | null): Promise<ScreenSourceSetting> {
+  const trimmed = (value || '').trim();
+  const next: ScreenSourceSetting = (SCREEN_SOURCE_VALUES as string[]).includes(trimmed)
+    ? (trimmed as ScreenSourceSetting)
+    : 'auto';
+  await setAppSetting(MARKET_SCREEN_SOURCE_META_KEY, next);
+  return next;
 }
 
 /** Лише для тестів: скидає кеш JSON-бекенду. */

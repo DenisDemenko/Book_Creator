@@ -450,6 +450,163 @@ console.log('\nДоступ до маршрутів (роль + тариф):');
   t('без ключа: налаштованість знята', r.data?.etsyApiConfigured === false,
     String(r.data?.etsyApiConfigured));
 
+  server.close();
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nВибір джерела скринінгу (модель / Etsy API):');
+{
+  const express = (await import('express')).default;
+  const routes = await import('../server/marketRoutes');
+
+  let principal: any = { id: 'u-1', email: 'a@test.ua', name: 'Автор', role: 'admin', isGuest: false };
+  // Підставний клієнт Etsy: віддає рівно те, що треба перевірити, і рахує
+  // виклики — щоб побачити, чи шлях справді пішов у Etsy, а не в модель.
+  let etsyCalls = 0;
+  let etsyFails = false;
+  let etsyClient: any = {
+    request: async () => {
+      etsyCalls += 1;
+      if (etsyFails) throw new Error('503 від Etsy');
+      return {
+        count: 4200,
+        results: [
+          { listing_id: 11, title: 'Real listing', state: 'active', num_favorers: 7,
+            price: { amount: 2500, divisor: 100, currency_code: 'USD' }, tags: ['a b'], materials: [] },
+        ],
+      };
+    },
+  };
+  let clientAvailable = true;
+  let modelCalls = 0;
+
+  const app = express();
+  app.use(express.json({ limit: '5mb' }));
+  app.use((req: any, _res: any, next: any) => { req.principal = principal; next(); });
+  routes.registerMarketRoutes(app, {
+    resolveEngine: () => 'gemini',
+    defaultModelId: 'stub-model',
+    loadAdminLayer: async () => ({}),
+    getEtsyClient: () => (clientAvailable ? etsyClient : null),
+    generateText: async () => {
+      modelCalls += 1;
+      return {
+        text: JSON.stringify([{ title: 'Модельний', priceUsd: 30, reviewCount: 5, confidence: 0.5 }]),
+        inputTokens: 1,
+        outputTokens: 1,
+      };
+    },
+  } as any);
+
+  const server2 = app.listen(0);
+  await new Promise((r) => server2.once('listening', r));
+  const port2 = (server2.address() as any).port;
+  const call2 = async (method: string, path: string, body?: any) => {
+    const res = await fetch(`http://127.0.0.1:${port2}${path}`, {
+      method, headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    let data: any = null;
+    try { data = await res.json(); } catch { /* порожньо */ }
+    return { status: res.status, data };
+  };
+
+  const subs2 = await import('../server/subscriptions');
+  await subs2.activateSubscription('u-1', 'pro', 'monthly', 'liqpay', 'test');
+
+  // auto + клієнт є → Etsy
+  let r2 = await call2('GET', '/api/market/settings');
+  t('auto з клієнтом → наступний скринінг через Etsy',
+    r2.data?.nextScreenSource === 'etsy_api', String(r2.data?.nextScreenSource));
+  t('налаштування джерела за замовчуванням — auto',
+    r2.data?.screenSourceSetting === 'auto', String(r2.data?.screenSourceSetting));
+
+  modelCalls = 0; etsyCalls = 0;
+  r2 = await call2('POST', '/api/market/screen', { topic: 'справжні дані', count: 5, force: true });
+  t('auto: скринінг пішов у Etsy, а не в модель',
+    r2.status === 200 && etsyCalls === 1 && modelCalls === 0, `etsy:${etsyCalls} model:${modelCalls}`);
+  t('звіт позначений джерелом etsy_api',
+    r2.data?.report?.provenance?.source === 'etsy_api', String(r2.data?.report?.provenance?.source));
+  t('дисклеймер звіту — не той, що для моделі',
+    typeof r2.data?.report?.disclaimerUk === 'string' &&
+      !r2.data.report.disclaimerUk.includes('зібрані мовною моделлю'),
+    String(r2.data?.report?.disclaimerUk).slice(0, 50));
+  t('у лістингу є перевірюване посилання',
+    String(r2.data?.report?.items?.[0]?.listing?.url || '').includes('/listing/11'),
+    String(r2.data?.report?.items?.[0]?.listing?.url));
+
+  // ГОЛОВНА ПЕРЕВІРКА: збій Etsy НЕ перетворюється на тихі оцінки моделі.
+  etsyFails = true; modelCalls = 0; etsyCalls = 0;
+  r2 = await call2('POST', '/api/market/screen', { topic: 'етсі впав', count: 5, force: true });
+  t('збій Etsy → чесна помилка, а не мовчазний відкіт на модель',
+    r2.status === 502 && modelCalls === 0, `${r2.status} model:${modelCalls}`);
+  t('помилка каже, що робити далі',
+    String(r2.data?.error || '').includes('перемкніть джерело'), String(r2.data?.error).slice(0, 70));
+  etsyFails = false;
+
+  // auto без клієнта → модель, і це чесно позначено
+  clientAvailable = false;
+  r2 = await call2('GET', '/api/market/settings');
+  t('auto без клієнта → наступний скринінг моделлю',
+    r2.data?.nextScreenSource === 'ai_screen', String(r2.data?.nextScreenSource));
+  modelCalls = 0; etsyCalls = 0;
+  r2 = await call2('POST', '/api/market/screen', { topic: 'без ключа', count: 5, force: true });
+  t('auto без клієнта: працює модель', r2.status === 200 && modelCalls === 1, `model:${modelCalls}`);
+
+  // Жорстко прибите джерело 'etsy_api' без ключа — чесна відмова, не модель.
+  r2 = await call2('PUT', '/api/market/settings', { screenSource: 'etsy_api' });
+  t('джерело можна прибити жорстко', r2.status === 200 && r2.data?.screenSourceSetting === 'etsy_api',
+    String(r2.data?.screenSourceSetting));
+  modelCalls = 0;
+  r2 = await call2('POST', '/api/market/screen', { topic: 'вимагаю факти', count: 5, force: true });
+  t('прибите etsy_api без ключа → 503, і модель не викликана',
+    r2.status === 503 && modelCalls === 0, `${r2.status} model:${modelCalls}`);
+
+  // Жорстко прибите 'ai_screen' — Etsy не чіпаємо навіть за наявності ключа.
+  clientAvailable = true;
+  r2 = await call2('PUT', '/api/market/settings', { screenSource: 'ai_screen' });
+  modelCalls = 0; etsyCalls = 0;
+  r2 = await call2('POST', '/api/market/screen', { topic: 'бережу квоту', count: 5, force: true });
+  t('прибите ai_screen: квота Etsy не витрачається',
+    r2.status === 200 && modelCalls === 1 && etsyCalls === 0, `etsy:${etsyCalls} model:${modelCalls}`);
+
+  r2 = await call2('PUT', '/api/market/settings', { screenSource: 'вигадане' });
+  t('невідоме джерело → 400', r2.status === 400, String(r2.status));
+
+  server2.close();
+}
+
+{
+  const express = (await import('express')).default;
+  const routes = await import('../server/marketRoutes');
+  // Роль навмисно admin лише для першої дії (повернення джерела на auto);
+  // далі знижуємо до writer, бо саме на ньому перевіряється заборона PUT.
+  let principal: any = { id: 'u-1', email: 'a@test.ua', name: 'Автор', role: 'admin', isGuest: false };
+  const app = express();
+  app.use(express.json({ limit: '5mb' }));
+  app.use((req: any, _res: any, next: any) => { req.principal = principal; next(); });
+  routes.registerMarketRoutes(app, {
+    resolveEngine: () => 'gemini',
+    defaultModelId: 'stub-model',
+    loadAdminLayer: async () => ({}),
+    generateText: async () => ({ text: '[]', inputTokens: 1, outputTokens: 1 }),
+  } as any);
+  const server = app.listen(0);
+  await new Promise((r) => server.once('listening', r));
+  const port = (server.address() as any).port;
+  const call = async (method: string, path: string, body?: any) => {
+    const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+      method, headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    let data: any = null;
+    try { data = await res.json(); } catch { /* порожньо */ }
+    return { status: res.status, data };
+  };
+  let r = await call('PUT', '/api/market/settings', { screenSource: 'auto' });
+  t('джерело повернуто на auto', r.status === 200);
+  principal = { ...principal, role: 'writer' };
+
   r = await call('PUT', '/api/market/settings', { weights: { demand: 50 } });
   t('PUT settings не для writer', r.status === 403, String(r.status));
 

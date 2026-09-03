@@ -37,11 +37,16 @@ import { productTrend, runMarketScreen, topicTrend, type ScreenFn } from './mark
 import {
   getLatestReport,
   getScreenModelId,
+  getScreenSource,
   getWeights,
   listTrackedTopics,
   setScreenModelId,
+  setScreenSource,
   setWeights,
+  type ScreenSourceSetting,
 } from './market/marketStore';
+import { EtsyScreenUnavailable, screenViaEtsyApi } from './market/etsyScreen';
+import type { EtsyClient } from './etsy/etsyClient';
 import {
   DEFAULT_SCORE_WEIGHTS,
   MARKET_DISCLAIMER_AI_UK,
@@ -53,6 +58,13 @@ import {
 } from './market/marketTypes';
 
 export interface MarketRoutesDeps {
+  /**
+   * Клієнт Etsy на самому api-key (OAuth публічному пошуку не потрібен).
+   * `null` — ключа немає. Приходить ззовні з тієї ж причини, що й
+   * `generateText`: сервер уже вміє його будувати, і другий спосіб побудови
+   * розійшовся б із першим.
+   */
+  getEtsyClient?: () => EtsyClient | null;
   resolveEngine: (modelId: string) => string;
   defaultModelId?: string;
   loadAdminLayer: () => Promise<any>;
@@ -135,14 +147,68 @@ export function registerMarketRoutes(app: Express, deps: MarketRoutesDeps): void
   const gate = [requireAuth, requirePermission('canMarketIntel'), requirePlanAtLeast(['pro', 'ultra'])] as const;
 
   /**
-   * Скринінг: єдине місце модуля, яке справді витрачає гроші.
+   * Яким джерелом збирати наступний звіт.
    *
-   * Пріоритет моделі: явно прислана в запиті → обрана адміном саме для
-   * цього модуля (market_screen_model) → прив'язка ядра для
-   * 'etsyMarketScreen' → серверний дефолт. Тобто адмін задає поведінку за
-   * замовчуванням, але не відбирає в автора право спробувати іншу модель.
+   * Одна функція на все: її ж читає `/api/market/settings`, щоб банер обіцяв
+   * рівно те, що станеться. Розійтися вони не можуть за побудовою — саме
+   * через це розходження й з'явився дефект із прапорцем джерела.
+   */
+  async function resolveScreenSource(): Promise<{
+    setting: ScreenSourceSetting;
+    source: 'ai_screen' | 'etsy_api';
+    etsyReady: boolean;
+  }> {
+    const setting = await getScreenSource();
+    const etsyReady = Boolean(deps.getEtsyClient?.());
+    if (setting === 'etsy_api') return { setting, source: 'etsy_api', etsyReady };
+    if (setting === 'ai_screen') return { setting, source: 'ai_screen', etsyReady };
+    return { setting, source: etsyReady ? 'etsy_api' : 'ai_screen', etsyReady };
+  }
+
+  /**
+   * Скринінг. Два джерела, і перемикання між ними ніколи не мовчазне.
+   *
+   * НІЯКОГО ТИХОГО ВІДКОТУ З ФАКТІВ НА ОЦІНКИ. Спокуса очевидна: Etsy
+   * відповів 503 — візьмімо модель, автор хоч щось побачить. Але автор, який
+   * увімкнув офіційне джерело, чекає на факти й ухвалює за ними рішення про
+   * закупівлю. Підмінити їх оцінкою моделі — навіть із чесною позначкою в
+   * `provenance`, яку він може й не помітити, — означає відповісти на інше
+   * питання, ніж поставлене. Тому збій Etsy лишається збоєм із поясненням,
+   * що робити, а не перетворюється на тихо гіршу відповідь.
+   *
+   * Модель (шлях ai_screen): явно прислана в запиті → обрана адміном саме
+   * для цього модуля (market_screen_model) → прив'язка ядра для
+   * 'etsyMarketScreen' → серверний дефолт.
    */
   const screen: ScreenFn = async ({ topic, count, modelId: requestedModelId, req }) => {
+    const chosen = await resolveScreenSource();
+
+    if (chosen.source === 'etsy_api') {
+      try {
+        return await screenViaEtsyApi(
+          { getClient: () => deps.getEtsyClient?.() ?? null, now, log: (line) => console.log(line) },
+          { topic, count }
+        );
+      } catch (err) {
+        if (err instanceof EtsyScreenUnavailable) {
+          throw new MarketScreenError(
+            503,
+            chosen.setting === 'etsy_api'
+              ? `${err.message} Або перемкніть джерело модуля на мовну модель у налаштуваннях.`
+              : err.message,
+            err.kind
+          );
+        }
+        // Мережа, квота, 403 від Etsy — усе це стани джерела, а не збій коду.
+        throw new MarketScreenError(
+          502,
+          `Etsy не віддав дані: ${(err as Error)?.message || 'невідома причина'}. ` +
+            'Спробуйте ще раз пізніше або перемкніть джерело модуля на мовну модель.',
+          'etsy_failed'
+        );
+      }
+    }
+
     const preferred = (requestedModelId || '').trim() || (await getScreenModelId()) || undefined;
     const modelId = (await resolveModuleModelId('etsyMarketScreen', preferred)) || deps.defaultModelId || '';
     if (!modelId) {
@@ -418,7 +484,10 @@ export function registerMarketRoutes(app: Express, deps: MarketRoutesDeps): void
         // `report.provenance.source` — з того самого запису, який пройшов
         // увесь шлях разом із даними.
         etsyApiConfigured: etsy.configured,
-        nextScreenSource: 'ai_screen' as FieldSource,
+        // Не константа й не здогад: та сама функція, якою скринінг обирає
+        // шлях. Банер обіцяє рівно те, що станеться.
+        nextScreenSource: (await resolveScreenSource()).source as FieldSource,
+        screenSourceSetting: (await getScreenSource()) as ScreenSourceSetting,
         defaultWeights: DEFAULT_SCORE_WEIGHTS,
         disclaimerUk: MARKET_DISCLAIMER_AI_UK,
       });
@@ -460,6 +529,24 @@ export function registerMarketRoutes(app: Express, deps: MarketRoutesDeps): void
         );
       }
 
+      if (body.screenSource !== undefined) {
+        const allowed = ['auto', 'ai_screen', 'etsy_api'];
+        if (typeof body.screenSource !== 'string' || !allowed.includes(body.screenSource)) {
+          return res.status(400).json({
+            error: `screenSource має бути одним із: ${allowed.join(', ')}.`,
+            kind: 'bad_input',
+          });
+        }
+        // Прибити джерело на 'etsy_api' без ключа можна — і це не помилка
+        // введення, а спосіб заявити намір: краще побачити чесну відмову
+        // скринінгу, ніж мовчки отримати оцінки моделі там, де очікувалися
+        // факти. Але сказати про це треба одразу, а не при першому запиті.
+        if (body.screenSource === 'etsy_api' && !deps.getEtsyClient?.()) {
+          res.setHeader('X-Market-Warning', 'etsy-not-configured');
+        }
+        await setScreenSource(body.screenSource);
+      }
+
       if (body.modelId !== undefined) {
         if (body.modelId !== null && typeof body.modelId !== 'string') {
           return res.status(400).json({ error: 'modelId має бути рядком або null.', kind: 'bad_input' });
@@ -470,6 +557,8 @@ export function registerMarketRoutes(app: Express, deps: MarketRoutesDeps): void
       res.json({
         weights: await getWeights(),
         modelId: await getScreenModelId(),
+        screenSourceSetting: await getScreenSource(),
+        nextScreenSource: (await resolveScreenSource()).source,
       });
     } catch (err) {
       handleError(res, err, 'Не вдалося зберегти налаштування модуля.');

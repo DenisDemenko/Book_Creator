@@ -47,6 +47,9 @@ import { registerApiKeysRoutes } from './server/apiKeysRoutes';
 import { registerExpressRoutes } from './server/expressRoutes';
 import { registerDiagnRoutes } from './server/diagnRoutes';
 import { registerMarketRoutes } from './server/marketRoutes';
+import { readEtsyConfig, ETSY_RATE_LIMIT_PER_SECOND } from './server/etsy/etsyConfig';
+import { createEtsyClient } from './server/etsy/etsyClient';
+import { createTokenBucket } from './server/etsy/rateLimiter';
 import { registerPdfRoutes } from './server/pdfRoutes';
 import { registerNarrationRoutes } from './server/narrationRoutes';
 import { registerPublishingRoutes } from './server/publishingRoutes';
@@ -379,11 +382,37 @@ async function startServer() {
   // самої причини: вибір провайдера, адмінський шар промтів і ядро AI
   // живуть тут, у server.ts. Модуль сам не імпортує aiCore — інакше
   // з'явився б другий шлях до генерації, повз облік витрат у usage_log.
+  /*
+    Відро запитів Etsy для модуля аналітики — окреме від того, яким
+    користується публікація. Квота Etsy спільна на застосунок, тож спільне
+    відро означало б, що скринінг ніші може підвісити публікацію книги, і
+    навпаки. Одне на процес: створювати його на кожен запит означало б не
+    мати обмеження взагалі.
+  */
+  const marketEtsyBucket = createTokenBucket({
+    capacity: ETSY_RATE_LIMIT_PER_SECOND,
+    ratePerSecond: ETSY_RATE_LIMIT_PER_SECOND,
+  });
+
   registerMarketRoutes(app, {
     resolveEngine: resolveChatEngine as never,
     defaultModelId: GEMINI_MODEL,
     loadAdminLayer: () => loadCoreAdminLayer(),
     generateText: generateAiText as never,
+    // Дослідницький клієнт Etsy — на самому api-key: публічний пошук
+    // лістингів OAuth не потребує, тож скринінг ринку доступний і тим
+    // авторам, які ще не підключили крамницю. Відро власне: квота Etsy
+    // спільна на застосунок, і скринінг не має з'їдати її в публікації.
+    getEtsyClient: () => {
+      const cfg = readEtsyConfig();
+      if (!cfg.apiKey) return null;
+      return createEtsyClient({
+        apiKey: cfg.apiKey,
+        fetchImpl: fetch as never,
+        bucket: marketEtsyBucket,
+        getAccessToken: async () => '',
+      });
+    },
   });
   registerPdfRoutes(app, {
     resolveEngine: resolveChatEngine as never,
