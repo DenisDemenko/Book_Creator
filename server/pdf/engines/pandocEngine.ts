@@ -21,6 +21,7 @@
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,7 +37,34 @@ import {
   type PdfRenderResult,
 } from './types';
 
-export const LATEX_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'latex');
+/**
+ * Де лежить шаблон.
+ *
+ * Двічі, бо розкладка різна. У вихідному коді цей файл — у
+ * `server/pdf/engines/`, і шаблон поруч, на рівень вище. У зібраному
+ * застосунку весь сервер — один `dist/server.mjs`, і `..` веде вже за межі
+ * `dist`. Жорсткий шлях працював би рівно в одному з двох випадків, причому
+ * зламався б у тому, який на продакшені.
+ */
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+function firstExistingDir(candidates: string[]): string {
+  for (const dir of candidates) {
+    try {
+      if (fsSync.existsSync(dir)) return dir;
+    } catch {
+      // Недоступна тека — просто не наш випадок.
+    }
+  }
+  return candidates[0];
+}
+
+export const LATEX_DIR =
+  process.env.LATEX_TEMPLATE_DIR ||
+  firstExistingDir([
+    path.join(MODULE_DIR, '..', 'latex'), // вихідний код: server/pdf/latex
+    path.join(MODULE_DIR, 'latex'), // збірка: dist/latex
+  ]);
 export const EISVOGEL_TEMPLATE = path.join(LATEX_DIR, 'eisvogel.latex');
 
 export const PANDOC_PATH = process.env.PANDOC_PATH || 'pandoc';

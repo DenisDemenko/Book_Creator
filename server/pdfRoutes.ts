@@ -34,6 +34,9 @@ import {
   saveArtifact,
 } from './bookStore';
 import type { PdfLayoutSpec } from './pdf/pdfTypes';
+import { listPdfEngines, renderWithEngine } from './pdf/engines/registry';
+import { DEFAULT_PDF_ENGINE, PdfEngineError } from './pdf/engines/types';
+import { requireAuth } from './auth';
 
 export type LayoutVariant = 'code' | 'design';
 
@@ -158,9 +161,39 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
 
   function fail(res: Response, err: unknown) {
     const error = err as { message?: string; kind?: string; status?: number };
+
+    // Відмова рушія — не збій сервера, а стан, у якому автор може щось
+    // зробити: обрати інший рушій, спростити книгу, підключити підписку.
+    // 500 на це означав би «зламалось у нас», і автор чекав би, поки ми
+    // полагодимо те, що працює.
+    if (err instanceof PdfEngineError) {
+      const status = err.kind === 'timeout' ? 504 : err.kind === 'engine' ? 502 : 400;
+      return res.status(status).json({ error: err.message, kind: err.kind, engineId: err.engineId });
+    }
+
     const status = err instanceof MarketplaceBridgeError ? err.status : 500;
     res.status(status).json({ error: error?.message || 'Не вдалося зібрати PDF.', kind: error?.kind });
   }
+
+  /**
+   * Перелік рушіїв для інтерфейсу.
+   *
+   * Під `requireAuth`, а не публічно: доступність Gamma залежить від того,
+   * чи підключив підписку САМЕ ЦЕЙ автор, тож без особи відповідь була б
+   * або неправдою для всіх, або однаковою для всіх.
+   */
+  app.get('/api/pdf/engines', requireAuth, async (req, res) => {
+    try {
+      const principal = req.principal!;
+      const engines = await listPdfEngines({
+        ownerId: principal.id as string,
+        ownerRole: principal.role as string,
+      });
+      res.json({ engines, defaultEngineId: DEFAULT_PDF_ENGINE });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
 
   /**
    * Перегляд: віддає сам файл. Автор має побачити верстку до того, як вона
@@ -179,6 +212,35 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
       // Друкований макет дивляться тим самим переглядом: інакше автор
       // побачив би верстку KDP уперше вже після публікації.
       const isPrint = req.body?.format === 'print';
+
+      // Інший рушій — окрема гілка, а не параметр наявної. Гілка nova нижче
+      // робить те, чого не робить жоден інший: три проходи KDP, примітка
+      // дизайнера, попередження про поля. Зводити їх до спільного
+      // знаменника означало б втратити саме те, заради чого nova лишається
+      // рушієм за замовчуванням.
+      const engineId = String(req.body?.engineId || DEFAULT_PDF_ENGINE);
+      if (engineId !== DEFAULT_PDF_ENGINE) {
+        const principal = req.principal;
+        const out = await renderWithEngine(engineId, {
+          book,
+          kind: req.body?.kind === 'course' ? 'course' : 'book',
+          spec,
+          print: isPrint,
+          ownerId: (principal?.id as string) || null,
+          ownerRole: (principal?.role as string) || null,
+          theme: typeof req.body?.theme === 'string' ? req.body.theme : undefined,
+        });
+
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename="preview-${engineId}.pdf"`);
+        res.setHeader('X-Pdf-Pages', String(out.pageCount));
+        res.setHeader('X-Pdf-Engine', out.engineId);
+        // Чи виконано макет книги — окремим заголовком, бо це не примітка,
+        // а відповідь на питання «чому виглядає не так, як у налаштуваннях».
+        res.setHeader('X-Pdf-Honored-Spec', out.honoredSpec ? '1' : '0');
+        res.setHeader('X-Pdf-Note', encodeURIComponent(out.notesUk.join(' ')));
+        return res.send(Buffer.from(out.bytes));
+      }
       const out = isPrint
         ? await renderKdpInterior(bookToPdfInput(book), {
             base: spec,

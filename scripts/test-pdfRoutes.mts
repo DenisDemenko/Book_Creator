@@ -229,6 +229,82 @@ console.log('\nПовний конвеєр:');
   t('без id книги → 400', noId.status === 400, String(noId.status));
 }
 
+// GET-запит: перелік рушіїв читається, а не надсилається. Окремий помічник,
+// бо `call` вище завжди POST із тілом.
+const get = async (path: string) => {
+  const res = await realFetch(`http://127.0.0.1:${port}${path}`);
+  const type = res.headers.get('content-type') || '';
+  return { status: res.status, data: type.includes('json') ? await res.json() : null };
+};
+
+console.log('\nПерелік рушіїв (GET /api/pdf/engines):');
+{
+  const r = await get('/api/pdf/engines');
+  const engines: any[] = r.data?.engines || [];
+  const ids = engines.map((e) => e.id);
+
+  t('віддає перелік', r.status === 200 && Array.isArray(r.data?.engines), String(r.status));
+  t('усі чотири рушії присутні', ['nova', 'chromium', 'pandoc', 'gamma'].every((id) => ids.includes(id)), ids.join(','));
+  t('рушій за замовчуванням названий окремим полем', r.data?.defaultEngineId === 'nova', String(r.data?.defaultEngineId));
+  t('nova позначена типовою', engines.find((e) => e.id === 'nova')?.isDefault === true);
+  t('nova доступна завжди — вона ні від чого зовнішнього не залежить',
+    engines.find((e) => e.id === 'nova')?.available === true,
+    engines.find((e) => e.id === 'nova')?.reasonUk || '');
+
+  // Головне рішення запису #101: недоступний рушій ЛИШАЄТЬСЯ в переліку з
+  // причиною. Якби він зникав, автор бачив би три кнопки замість чотирьох і
+  // не мав би способу дізнатись, куди подівся четвертий.
+  const unavailable = engines.filter((e) => !e.available);
+  t('недоступні рушії не зникають із переліку, а називають причину',
+    unavailable.every((e) => typeof e.reasonUk === 'string' && e.reasonUk.length > 0),
+    unavailable.map((e) => `${e.id}: ${e.reasonUk || '—'}`).join(' | '));
+  t('gamma без налаштованого клієнта — недоступна, і це сказано',
+    engines.find((e) => e.id === 'gamma')?.available === false);
+
+  t('кожен рушій називає сильний бік і обмеження',
+    engines.every((e) => e.strengthUk?.length > 0 && e.limitUk?.length > 0));
+  t('друк під KDP обіцяє лише nova',
+    engines.filter((e) => e.supportsPrint).map((e) => e.id).join(',') === 'nova',
+    engines.filter((e) => e.supportsPrint).map((e) => e.id).join(','));
+
+  principal = { ...principal, isGuest: true };
+  const guest = await get('/api/pdf/engines');
+  t('гостю → 401: доступність gamma залежить від того, ЧИЙ це рахунок', guest.status === 401, String(guest.status));
+  principal = { ...principal, isGuest: false };
+}
+
+console.log('\nВибір рушія в перегляді:');
+{
+  const unknown = await call('/api/admin/pdf/preview', { book, variant: 'code', engineId: 'нема-такого' });
+  t('невідомий рушій → 400, а не 500', unknown.status === 400, String(unknown.status));
+  t('відмова називає доступні рушії, а не просто «помилка»',
+    /nova/.test(String(unknown.data?.error)), String(unknown.data?.error).slice(0, 120));
+
+  // Відмова рушія — стан, у якому автор може щось зробити (обрати інший,
+  // підключити підписку), а не збій сервера. 500 сказало б «зламалось у нас».
+  const gamma = await call('/api/admin/pdf/preview', { book, variant: 'code', engineId: 'gamma' });
+  t('недоступний рушій → відмова з причиною, а не порожній PDF',
+    gamma.status === 400 && gamma.buffer === null, `${gamma.status}`);
+  t('вид відмови переданий машинно (kind)', gamma.data?.kind === 'unavailable', String(gamma.data?.kind));
+  t('у відмові вказано, ЯКИЙ саме рушій відмовив', gamma.data?.engineId === 'gamma', String(gamma.data?.engineId));
+
+  // Друкована редакція — виняткова здатність nova (дзеркальні поля, корінець
+  // за обсягом). Інший рушій має відмовити ДО рендера, а не видати файл,
+  // непридатний для KDP.
+  const printByChromium = await call('/api/admin/pdf/preview',
+    { book, variant: 'code', format: 'print', trimId: '6x9', engineId: 'chromium' });
+  t('друкована редакція не-nova рушієм → відмова', printByChromium.status === 400, String(printByChromium.status));
+  t('відмова пояснює, що поля під KDP уміє лише nova',
+    /Nova|KDP/.test(String(printByChromium.data?.error)), String(printByChromium.data?.error).slice(0, 120));
+
+  // Явний `nova` має йти ТИМ САМИМ шляхом, що й запит без engineId, — з
+  // трьома проходами KDP і приміткою верстки, а не через спільну гілку.
+  const explicitNova = await call('/api/admin/pdf/preview', { book, variant: 'code', engineId: 'nova' });
+  t('явний nova віддає PDF', explicitNova.buffer?.subarray(0, 5).toString() === '%PDF-', String(explicitNova.status));
+  t('явний nova йде рідним шляхом (примітка верстки на місці)',
+    decodeURIComponent(explicitNova.headers.get('x-pdf-note') || '').includes('Верстка PDF'));
+}
+
 server.close();
 globalThis.fetch = realFetch;
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);

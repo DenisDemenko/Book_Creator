@@ -4,7 +4,7 @@
 # `node:sqlite`, який зʼявився у 22.5. На Node 20 модуля просто немає,
 # server/db.ts тихо відкочується на JSON-файли (див. initDb), і застосунок
 # працює, але повз базу — тож версія тут не стилістична деталь.
-FROM node:22-alpine AS build
+FROM node:22-bookworm-slim AS build
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -33,15 +33,71 @@ ENV VITE_FIREBASE_API_KEY=$VITE_FIREBASE_API_KEY \
 
 RUN npm run build
 
-FROM node:22-alpine AS runtime
+FROM node:22-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
+
+# ---------------------------------------------------------------------------
+# Рушії PDF, які живуть не в node_modules, а в системі (log.md #101).
+#
+# ЧОМУ БАЗА БІЛЬШЕ НЕ ALPINE. Образ важив десятки мегабайтів і був alpine
+# саме тому, що нічого системного не потребував. Тепер потребує: власник
+# вирішив, що письменник обирає рушій верстки, а два з чотирьох рушіїв —
+# це зовнішні програми. Chromium і TeX Live на Debian — протоптана дорога
+# з готовими пакетами; на Alpine той самий набір складався б уручну, і
+# кожен деплой залежав би від того, чи зійшлись версії musl-збірок.
+#
+# ЦІНА НАЗВАНА ЧЕСНО: образ виростає на кілька гігабайтів, і **кожен**
+# деплой Nova стає повільнішим — включно з деплоями, які до верстки не
+# мають стосунку. Це свідоме рішення власника від 03.09.2026, а не
+# недогляд.
+#
+# ПРО ПЕРЕЛІК TEXLIVE. Він не «про всяк випадок»: кожен пакет тут доданий
+# після конкретної помилки збірки шаблону Eisvogel, перевіреної запуском:
+#   lmodern                    → File `lmodern.sty' not found
+#   texlive-lang-cyrillic      → Package babel Error: Unknown option 'ukrainian'
+#   texlive-fonts-extra        → File `sourcesanspro.sty' not found
+#   texlive-fonts-recommended  → базові гарнітури, потрібні решті
+#   texlive-latex-extra        → mdframed, awesomebox та інше з шаблону
+# fonts-dejavu — та сама гарнітура, що вбудована у власний рушій PDF, тож
+# усі чотири рушії дають однакову кирилицю, а не чотири різні.
+# ---------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      chromium \
+      pandoc \
+      texlive-xetex \
+      texlive-latex-extra \
+      texlive-fonts-recommended \
+      texlive-fonts-extra \
+      texlive-lang-cyrillic \
+      lmodern \
+      fonts-dejavu \
+      fontconfig \
+    && fc-cache -f \
+    && rm -rf /var/lib/apt/lists/*
+
+# Шлях до браузера. Пакет Debian ставить його як /usr/bin/chromium, тоді як
+# усталене значення в коді — /usr/bin/chromium-browser (назва з Alpine).
+ENV CHROMIUM_PATH=/usr/bin/chromium
 
 # NODE_ENV=production вмикає в server.ts гілку роздачі готового dist/
 # замість підняття Vite у режимі middleware.
 COPY --from=build /app/node_modules node_modules
 COPY --from=build /app/dist dist
 COPY --from=build /app/package.json package.json
+
+# ---------------------------------------------------------------------------
+# Файли даних, які потрібні серверу в рантаймі.
+#
+# ЦЕ ВИПРАВЛЕННЯ ДАВНЬОЇ ВАДИ, А НЕ НОВА ПОТРЕБА. Сервер збирається в один
+# `dist/server.mjs`, і шрифти PDF шукаються поруч із ним — а сюди їх ніхто
+# ніколи не копіював. Тобто на розгорнутому Nova власна верстка PDF мала
+# падати з «Шрифти для PDF не знайдено в /app/dist/fonts», хоч локально
+# (`npm run dev`) працювала: там шлях веде у вихідну теку. Знайдено при
+# складанні цього ж Dockerfile.
+# ---------------------------------------------------------------------------
+COPY --from=build /app/server/pdf/fonts dist/fonts
+COPY --from=build /app/server/pdf/latex dist/latex
 
 # Обидві теки мають лежати на постійному томі, інакше при кожному
 # перезапуску зникають і база, і згенеровані зображення.

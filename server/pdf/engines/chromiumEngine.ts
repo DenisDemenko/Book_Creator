@@ -33,8 +33,24 @@ import {
  * тягне власну копію браузера при кожному `npm ci` (близько 300 МБ у шар
  * збірки), тоді як у образі браузер уже стоїть системним пакетом.
  */
+const CHROMIUM_CANDIDATES = [
+  '/usr/bin/chromium', // Debian/Ubuntu — так називається пакет у нашому образі
+  '/usr/bin/chromium-browser', // Alpine і старіші Debian
+  '/usr/bin/google-chrome',
+  '/opt/pw-browsers/chromium',
+];
+
+/**
+ * Шлях шукається, а не задається жорстко: назва бінарника відрізняється між
+ * дистрибутивами, і жорсткий шлях означав би, що зміна базового образу тихо
+ * вимикає рушій. Змінна оточення лишається головнішою за пошук — щоб
+ * локальний запуск можна було направити куди завгодно.
+ */
 export const CHROMIUM_PATH =
-  process.env.CHROMIUM_PATH || process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium-browser';
+  process.env.CHROMIUM_PATH ||
+  process.env.PUPPETEER_EXECUTABLE_PATH ||
+  CHROMIUM_CANDIDATES.find((p) => fs.existsSync(p)) ||
+  CHROMIUM_CANDIDATES[0];
 
 /** Скільки чекати на рендер. Книга на 300 сторінок друкується довше за лист. */
 const RENDER_TIMEOUT_MS = Number(process.env.CHROMIUM_TIMEOUT_MS) || 120_000;

@@ -245,6 +245,19 @@ export const PublishingHubView: React.FC<PublishingHubViewProps> = ({
 // може лише той екран, який її має. Адмінпанель книги не бачить.
 // ===========================================================================
 
+/** Рушій верстки в переліку з сервера (`GET /api/pdf/engines`). */
+interface PdfEngineOption {
+  id: string;
+  label: string;
+  strengthUk: string;
+  limitUk: string;
+  supportsPrint: boolean;
+  available: boolean;
+  reasonUk?: string;
+  fixUk?: string;
+  isDefault: boolean;
+}
+
 interface EditionResult {
   format: 'digital' | 'print';
   published?: { slug?: string; created?: boolean };
@@ -280,6 +293,51 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
   const [withSample, setWithSample] = useState(true);
   const [samplePages, setSamplePages] = useState(10);
 
+  /*
+    Рушій верстки (log.md #101). Перелік приходить із сервера разом із
+    ПРИЧИНОЮ недоступності кожного — і недоступні лишаються видимими.
+    Сховати кнопку простіше, але тоді автор бачить три рушії замість
+    чотирьох і не має жодного способу дізнатись, куди подівся четвертий.
+  */
+  const [engines, setEngines] = useState<PdfEngineOption[]>([]);
+  const [engineId, setEngineId] = useState('nova');
+  const [theme, setTheme] = useState<'book' | 'modern' | 'course'>('book');
+  /*
+    Стан самого ПЕРЕЛІКУ, окремо від його вмісту. Без нього порожній масив
+    означає одразу три різні речі — ще не питали, питали й не дійшло, дійшов
+    порожній — і автор бачить підпис «Чим верстати» без жодної кнопки під ним,
+    без натяку, що сталось.
+  */
+  const [enginesState, setEnginesState] = useState<'loading' | 'ready' | 'failed'>('loading');
+
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/pdf/engines', { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!alive) return;
+        if (!data?.engines?.length) {
+          setEnginesState('failed');
+          return;
+        }
+        setEngines(data.engines);
+        setEngineId(data.defaultEngineId || 'nova');
+        setEnginesState('ready');
+      })
+      .catch(() => {
+        // Перелік не прийшов — лишається рушій за замовчуванням, той
+        // єдиний, який не залежить ні від чого зовнішнього. Мовчати про це
+        // не можна: автор має знати, що вибору зараз немає не тому, що його
+        // не буває, а тому, що перелік не дійшов.
+        if (alive) setEnginesState('failed');
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const chosenEngine = engines.find((e) => e.id === engineId) || null;
+
   const preview = async (format: 'digital' | 'print') => {
     setBusy('preview');
     setError(null);
@@ -289,7 +347,11 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ book, variant, format, trimId }),
+        // Рушій іде ТІЛЬКИ сюди, у перегляд. Обкладинка нижче й публікація
+        // лишаються на власній верстці: обкладинка малюється з першої
+        // сторінки файлу, і зроблена іншим рушієм вона показувала б у
+        // вітрині сторінку, якої в проданій книзі немає.
+        body: JSON.stringify({ book, variant, format, trimId, engineId, theme }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -466,6 +528,104 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
               </button>
             ))}
           </div>
+        </div>
+
+        <div>
+          <span className="block text-[11px] font-semibold text-slate-300 mb-1">Чим верстати</span>
+
+          {enginesState === 'loading' && (
+            <p className="text-[11px] text-slate-500">Питаємо сервер, які рушії доступні…</p>
+          )}
+
+          {enginesState === 'failed' && (
+            <p className="text-[11px] leading-relaxed text-amber-300/80">
+              Перелік рушіїв не дійшов від сервера — верстаємо власним рушієм
+              Nova. Він працює завжди й ні від чого зовнішнього не залежить,
+              тож перегляд нижче доступний і зараз.
+            </p>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            {engines.map((engine) => (
+              <button
+                key={engine.id}
+                onClick={() => setEngineId(engine.id)}
+                disabled={!engine.available}
+                title={
+                  engine.available
+                    ? `${engine.strengthUk} Не вміє: ${engine.limitUk}`
+                    : [engine.reasonUk, engine.fixUk].filter(Boolean).join(' ')
+                }
+                className={`px-3 py-2 rounded-xl text-xs border transition text-left ${
+                  !engine.available
+                    ? 'bg-slate-950/60 border-slate-800 text-slate-600 cursor-not-allowed'
+                    : engineId === engine.id
+                      ? 'bg-cyan-500/15 border-cyan-500/50 text-cyan-200'
+                      : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-600'
+                }`}
+              >
+                {engine.label}
+                {engine.isDefault && <span className="ml-1 text-[10px] opacity-60">типово</span>}
+                {!engine.available && <span className="ml-1 text-[10px]">недоступний</span>}
+              </button>
+            ))}
+          </div>
+
+          {/* Причина недоступності — текстом під переліком, а не лише в
+              підказці: підказку на дотику не видно взагалі. */}
+          {engines.some((e) => !e.available) && (
+            <ul className="mt-2 space-y-1">
+              {engines
+                .filter((e) => !e.available)
+                .map((e) => (
+                  <li key={e.id} className="text-[11px] text-slate-500">
+                    <span className="text-slate-400">{e.label}:</span>{' '}
+                    {[e.reasonUk, e.fixUk].filter(Boolean).join(' ')}
+                  </li>
+                ))}
+            </ul>
+          )}
+
+          {chosenEngine && chosenEngine.available && (
+            <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
+              {chosenEngine.strengthUk}{' '}
+              <span className="text-amber-300/80">Не вміє: {chosenEngine.limitUk}</span>
+            </p>
+          )}
+
+          {/* Теми — лише в того рушія, у якого вони є. Показувати вибір,
+              який ні на що не впливає, гірше, ніж не показувати нічого. */}
+          {engineId === 'chromium' && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {([
+                ['book', 'Книжкова'],
+                ['modern', 'Сучасна'],
+                ['course', 'Навчальна'],
+              ] as const).map(([id, label]) => (
+                <button
+                  key={id}
+                  onClick={() => setTheme(id)}
+                  className={`px-2.5 py-1.5 rounded-lg text-[11px] border transition ${
+                    theme === id
+                      ? 'bg-cyan-500/15 border-cyan-500/50 text-cyan-200'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-600'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Публікація йде власним рушієм завжди — і про це треба сказати
+              ДО перегляду, інакше автор подивиться красиву верстку, натисне
+              «Опублікувати» й отримає у вітрині іншу книгу. */}
+          {engineId !== 'nova' && (
+            <p className="mt-2 text-[11px] leading-relaxed text-amber-300/80">
+              Це перегляд. У вітрину публікується власна верстка Nova: тільки
+              вона тримає поля під KDP і зводить корінець за обсягом.
+            </p>
+          )}
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">

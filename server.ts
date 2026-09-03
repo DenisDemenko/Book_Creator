@@ -53,6 +53,7 @@ import { createTokenBucket } from './server/etsy/rateLimiter';
 import { registerPdfRoutes } from './server/pdfRoutes';
 import { registerBookRoutes } from './server/bookRoutes';
 import { registerGammaRoutes } from './server/gammaRoutes';
+import { configureGammaEngine } from './server/pdf/engines/gammaEngine';
 import { readGammaConfig, GAMMA_RATE_LIMIT_PER_SECOND } from './server/gamma/gammaConfig';
 import { createGammaClient } from './server/gamma/gammaClient';
 import { registerNarrationRoutes } from './server/narrationRoutes';
@@ -441,13 +442,20 @@ async function startServer() {
     capacity: GAMMA_RATE_LIMIT_PER_SECOND,
     ratePerSecond: GAMMA_RATE_LIMIT_PER_SECOND,
   });
+  const makeGammaClient = (apiKey: string) =>
+    createGammaClient({ apiKey, fetchImpl: fetch as never, bucket: gammaBucket });
+
   registerGammaRoutes(app, {
     // Ключ приходить ззовні: чий він — автора чи студії — вирішує
     // resolveGammaKey у самих маршрутах, і це рішення не має бути
     // розмазаним по двох файлах.
-    makeClient: (apiKey: string) =>
-      createGammaClient({ apiKey, fetchImpl: fetch as never, bucket: gammaBucket }),
+    makeClient: makeGammaClient,
   });
+
+  // Той самий клієнт віддається рушію PDF «gamma» (log.md #101). Без цього
+  // виклику Gamma присутня в переліку рушіїв, але завжди недоступна — і
+  // причина була б написана так, ніби винен автор.
+  configureGammaEngine({ makeClient: makeGammaClient });
   registerNarrationRoutes(app);
 
   // --- API Endpoints ---
