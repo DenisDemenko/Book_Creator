@@ -30,6 +30,7 @@ import { readEtsyConfig } from './etsy/etsyConfig';
 import { normalizeTopicKey } from './etsy/etsyResearch';
 import { resolveCoreTemplate, renderCoreTemplate, type CorePromptTemplateBundle } from './coreAiRegistry';
 import { resolveModuleModelId } from './coreModuleModels';
+import { ETSY_ADVISOR_TASKS, type EtsyAdvisorTask } from './etsyAdvisorPrompt';
 import { normalizeMarketScreenResult, parseMarketScreenResponse } from './market/marketScreenPrompt';
 import { normalizeWeights } from './market/marketScoring';
 import { productTrend, runMarketScreen, type ScreenFn } from './market/marketService';
@@ -61,6 +62,9 @@ export interface MarketRoutesDeps {
 
 /** ТЗ 6: тема — це keyword. Та сама стеля, що й у /api/etsy/research. */
 const MAX_TOPIC_CHARS = 120;
+
+/** Стеля питання до консультанта. Достатньо для повного розрахунку з калькулятора. */
+const MAX_ADVISOR_CHARS = 6000;
 
 /** Скільки товарів просити в моделі за один прогін. */
 const MIN_COUNT = 1;
@@ -274,6 +278,90 @@ export function registerMarketRoutes(app: Express, deps: MarketRoutesDeps): void
       res.json({ snapshots: await productTrend(productKey) });
     } catch (err) {
       handleError(res, err, 'Не вдалося завантажити історію товару.');
+    }
+  });
+
+  // =========================================================================
+  // Консультант (модуль ядра `etsyAdvisor`)
+  // =========================================================================
+
+  /**
+   * Текстова порада практика: ціна, тренд, лістинг, аудит магазину.
+   *
+   * Чому тут, а не окремим файлом: це той самий модуль King Market
+   * Intelligence, той самий ґейт і той самий `deps.generateText`. Набір,
+   * з якого перенесені ці екрани, ходив у Gemini напряму з власним ключем —
+   * тобто повз `usage_log`. Тут виклик іде через ядро, тож витрата
+   * потрапляє в облік, а модель обирає адмін у налаштуваннях модуля.
+   *
+   * Відповідь — вільний текст, без JSON-схеми: це порада людині, а не дані
+   * для таблиці, і вигадувати їй структуру означало б вигадувати точність.
+   */
+  app.post('/api/market/advisor', ...gate, async (req: Request, res: Response) => {
+    try {
+      const rawTask = String(req.body?.task || '').trim();
+      if (!(rawTask in ETSY_ADVISOR_TASKS)) {
+        return res.status(400).json({
+          error: `Невідомий тип задачі «${rawTask}». Доступні: ${Object.keys(ETSY_ADVISOR_TASKS).join(', ')}.`,
+          kind: 'bad_input',
+        });
+      }
+      const task = rawTask as EtsyAdvisorTask;
+
+      const question = String(req.body?.question || '').trim();
+      if (!question) return res.status(400).json({ error: 'Порожнє питання до консультанта.', kind: 'bad_input' });
+      if (question.length > MAX_ADVISOR_CHARS) {
+        return res
+          .status(400)
+          .json({ error: `Питання задовге (максимум ${MAX_ADVISOR_CHARS} символів).`, kind: 'bad_input' });
+      }
+
+      const preferred = typeof req.body?.modelId === 'string' ? req.body.modelId.trim() : '';
+      const modelId = (await resolveModuleModelId('etsyAdvisor', preferred || undefined)) || deps.defaultModelId || '';
+      if (!modelId) {
+        return res.status(503).json({
+          error: 'Не обрано модель для консультанта Etsy. Адміністратор має задати її в налаштуваннях модуля.',
+          kind: 'no_model',
+        });
+      }
+
+      const engine = deps.resolveEngine(modelId) as EngineId;
+      if (!engineConfigured(engine)) {
+        return res.status(503).json({
+          error:
+            `Консультант недоступний: для рушія моделі «${modelId}» не налаштований ${ENGINE_ENV_KEY[engine]} ` +
+            'у .env сервера. Оберіть модель іншого провайдера або додайте ключ.',
+          kind: 'no_key',
+        });
+      }
+
+      const template = resolveCoreTemplate(
+        'etsyAdvisor',
+        (await deps.loadAdminLayer()) as CorePromptTemplateBundle | undefined
+      );
+      const rendered = renderCoreTemplate('etsyAdvisor', template, {
+        task: ETSY_ADVISOR_TASKS[task],
+        question,
+        language: 'українською',
+      });
+
+      const out = await deps.generateText({
+        engine,
+        modelId,
+        prompt: rendered.user,
+        systemInstruction: rendered.system,
+        req,
+        label: `King Market Intelligence: консультант (${task})`,
+      });
+
+      const answer = (out.text || '').trim();
+      if (!answer) {
+        return res.status(502).json({ error: 'Модель повернула порожню відповідь.', kind: 'bad_model_output' });
+      }
+
+      res.json({ answer, modelId, engine, task });
+    } catch (err) {
+      handleError(res, err, 'Не вдалося отримати пораду консультанта.');
     }
   });
 

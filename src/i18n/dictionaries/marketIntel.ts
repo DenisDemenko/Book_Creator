@@ -12,6 +12,10 @@ export const marketIntel = {
     heading: 'Аналітика ринку Etsy',
     intro: 'Скринінг ніші, динаміка товарів і Opportunity Score 0–100 з розкладкою по компонентах. King Market Intelligence, ТЗ v1.0.',
 
+    tabScreen: 'Скринінг ніші',
+    tabFees: 'Калькулятор комісій',
+    tabSeo: 'SEO-переклади',
+
     needRegHeading: 'Потрібен обліковий запис',
     needRegDesc: 'Аналітика ринку доступна лише зареєстрованим користувачам з тарифом Pro або Ultra.',
     checkingPlan: 'Перевіряю тарифний план…',
@@ -131,6 +135,10 @@ export const marketIntel = {
   en: {
     heading: 'Etsy Market Intelligence',
     intro: 'Niche screening, product dynamics and a 0–100 Opportunity Score broken down by component. King Market Intelligence, spec v1.0.',
+
+    tabScreen: 'Niche screening',
+    tabFees: 'Fee calculator',
+    tabSeo: 'SEO translations',
 
     needRegHeading: 'Account required',
     needRegDesc: 'Market intelligence is available to registered users on the Pro or Ultra plan only.',

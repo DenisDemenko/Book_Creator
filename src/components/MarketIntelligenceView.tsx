@@ -41,9 +41,12 @@ import {
   Lock,
   Minus,
   RefreshCw,
+  Languages,
   Search,
   ShieldAlert,
 } from 'lucide-react';
+import { FeeCalculatorView } from './etsy/FeeCalculatorView';
+import { SeoTranslationsTab } from './etsy/SeoTranslationsTab';
 import type { AuthUser } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
 import { usePlanAccess } from '../hooks/usePlanAccess';
@@ -459,6 +462,15 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({ 
   const { t, lang: uiLang } = useLanguage();
   const access = usePlanAccess(authUser, ['pro', 'ultra']);
 
+  /**
+   * Вкладки сторінки. Скринінг лишається першим і за замовчуванням: це
+   * єдина вкладка, яка витрачає гроші на модель, і саме заради неї автор
+   * сюди заходить. Дві інші рахують за формулами й працюють без мережі —
+   * калькулятор комісій Etsy та SEO-переклади, — тож вони не мають
+   * потребувати ані звіту, ані попереднього скринінгу.
+   */
+  const [tab, setTab] = useState<'screen' | 'fees' | 'seo'>('screen');
+
   const [topic, setTopic] = useState('');
   const [count, setCount] = useState(10);
   const [modelId, setModelId] = useState('');
@@ -635,6 +647,60 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({ 
           <p className="text-slate-400 text-sm mt-1">{t('marketIntel.intro')}</p>
         </header>
 
+        {/*
+          Панель вкладок у мові студії (slate + бірюза), а не в склі набору:
+          вона належить сторінці, а не перенесеному набору. Скляні поверхні
+          починаються всередині вкладок, під обгорткою `.etsy-kit`.
+        */}
+        <nav className="flex flex-wrap gap-1 rounded-xl border border-slate-700/50 bg-slate-900/50 p-1">
+          {(
+            [
+              { id: 'screen' as const, label: t('marketIntel.tabScreen'), icon: LineChart },
+              { id: 'fees' as const, label: t('marketIntel.tabFees'), icon: Calculator },
+              { id: 'seo' as const, label: t('marketIntel.tabSeo'), icon: Languages },
+            ]
+          ).map((item) => {
+            const Icon = item.icon;
+            const isActive = tab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setTab(item.id)}
+                aria-current={isActive ? 'page' : undefined}
+                className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${
+                  isActive
+                    ? 'bg-cyan-500/15 text-cyan-200 border border-cyan-500/40'
+                    : 'border border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                }`}
+              >
+                <Icon className="w-4 h-4" />
+                {item.label}
+              </button>
+            );
+          })}
+        </nav>
+
+        {tab === 'fees' && (
+          <div className="etsy-kit">
+            <FeeCalculatorView />
+          </div>
+        )}
+
+        {/*
+          SEO-вкладка отримує не порожній список, а ключові слова останнього
+          скринінгу: словник перекладає саме те, що модуль щойно знайшов у
+          ніші. Без звіту список порожній — і вкладка чесно показує це,
+          замість підставляти демонстраційні теги, як робив вихідний набір.
+        */}
+        {tab === 'seo' && (
+          <div className="etsy-kit">
+            <SeoTranslationsTab currentTags={report?.keywordCandidates.map((c) => c.phrase) ?? []} />
+          </div>
+        )}
+
+        {tab === 'screen' && (
+          <>
         {/*
           Постійний банер походження. Стоїть НАД усім, а не під таблицею, і не
           згортається: його завдання — бути прочитаним ДО того, як автор
@@ -987,6 +1053,8 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({ 
               </div>
             )}
           </section>
+        )}
+          </>
         )}
       </div>
     </div>

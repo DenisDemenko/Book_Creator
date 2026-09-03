@@ -99,6 +99,11 @@ import {
   factoryBookPdfDesignUserTemplate,
   renderBookPdfDesignTemplate,
 } from './pdf/pdfDesignPrompt';
+import {
+  factoryEtsyAdvisorSystemTemplate,
+  factoryEtsyAdvisorUserTemplate,
+  renderEtsyAdvisorTemplate,
+} from './etsyAdvisorPrompt';
 
 /** Ключ у таблиці `meta`, під яким лежить ЄДИНИЙ адмінський шар усіх модулів ядра. */
 export const CORE_PROMPT_TEMPLATES_META_KEY = 'prompt_templates_core_admin';
@@ -125,6 +130,7 @@ export const CORE_MODULE_KEYS = [
   'characterCodex',
   'etsyMarketScreen',
   'bookPdfDesign',
+  'etsyAdvisor',
 ] as const;
 
 export type CoreModuleKey = (typeof CORE_MODULE_KEYS)[number];
@@ -193,6 +199,7 @@ export const CORE_MODULE_PLACEHOLDERS: Record<CoreModuleKey, string[]> = {
   // Токени навмисно НЕ перейменовані під решту реєстру — інакше шаблон у
   // конструкторі розходився б із документом, за яким його перевірятимуть.
   etsyMarketScreen: ['{{topic}}', '{{count}}', '{{language}}'],
+  etsyAdvisor: ['{{task}}', '{{question}}', '{{language}}'],
   bookPdfDesign: [
     '{{title}}',
     '{{subtitle}}',
@@ -224,6 +231,9 @@ export const CORE_MODULE_HAS_JSON_SCHEMA: Record<CoreModuleKey, boolean> = {
   characterCodex: true,
   etsyMarketScreen: true,
   bookPdfDesign: true,
+  // Порада практика — суцільний текст, а не структура: жорсткої схеми тут
+  // немає й бути не повинно.
+  etsyAdvisor: false,
 };
 
 /**
@@ -314,6 +324,11 @@ export function factoryCoreTemplate(module: CoreModuleKey): CorePromptTemplate {
       return {
         system: factoryBookPdfDesignSystemTemplate(),
         user: factoryBookPdfDesignUserTemplate(),
+      };
+    case 'etsyAdvisor':
+      return {
+        system: factoryEtsyAdvisorSystemTemplate(),
+        user: factoryEtsyAdvisorUserTemplate(),
       };
   }
 }
@@ -583,6 +598,12 @@ export function renderCoreTemplate(
       return renderMarketScreenTemplate(template, {
         topic: fields.topic || '',
         count: fields.count || '',
+        language: fields.language || '',
+      });
+    case 'etsyAdvisor':
+      return renderEtsyAdvisorTemplate(template, {
+        task: fields.task || '',
+        question: fields.question || '',
         language: fields.language || '',
       });
     case 'bookPdfDesign':

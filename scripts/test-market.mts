@@ -256,6 +256,8 @@ console.log('\nДоступ до маршрутів (роль + тариф):');
 
   let principal: any = { id: 'u-1', email: 'a@test.ua', name: 'Автор', role: 'writer', isGuest: false };
   let modelText = JSON.stringify([{ title: 'Літак', priceUsd: 30, reviewCount: 10, confidence: 0.5 }]);
+  /** Останній виклик моделі — щоб перевірити, ЩО саме пішло в ядро. */
+  let lastGenerate: any = null;
 
   const app = express();
   app.use(express.json({ limit: '5mb' }));
@@ -264,7 +266,10 @@ console.log('\nДоступ до маршрутів (роль + тариф):');
     resolveEngine: () => 'gemini',
     defaultModelId: 'stub-model',
     loadAdminLayer: async () => ({}),
-    generateText: async () => ({ text: modelText, inputTokens: 1, outputTokens: 1 }),
+    generateText: async (args: any) => {
+      lastGenerate = args;
+      return { text: modelText, inputTokens: 1, outputTokens: 1 };
+    },
   } as any);
 
   const server = app.listen(0);
@@ -307,6 +312,48 @@ console.log('\nДоступ до маршрутів (роль + тариф):');
   t('не-JSON від моделі → 502 bad_model_output',
     r.status === 502 && r.data?.kind === 'bad_model_output', `${r.status} ${r.data?.kind}`);
   modelText = JSON.stringify([{ title: 'Літак', priceUsd: 30, reviewCount: 10, confidence: 0.5 }]);
+
+  // --- Консультант (`etsyAdvisor`) ---
+  //
+  // Перевіряємо не «відповідь прийшла», а те, що вона прийшла ТИМ САМИМ
+  // шляхом, що й скринінг: через deps.generateText із label — інакше
+  // витрата не потрапить до usage_log, і платні виклики стануть невидимі.
+  principal = { ...principal, role: 'writer' };
+  modelText = 'Головне: підняти ціну на $4 — маржа зараз 6%.';
+
+  r = await call('POST', '/api/market/advisor', { task: 'pricing', question: 'Ціна $38, маржа 6%.' });
+  t('advisor: writer на pro → 200', r.status === 200, `${r.status} ${JSON.stringify(r.data)?.slice(0, 120)}`);
+  t('advisor: повернув текст поради', r.data?.answer === modelText, String(r.data?.answer).slice(0, 60));
+  t('advisor: виклик пішов через generateText з label',
+    typeof lastGenerate?.label === 'string' && lastGenerate.label.includes('консультант'),
+    String(lastGenerate?.label));
+  t('advisor: тип задачі підставлено в промпт',
+    typeof lastGenerate?.systemInstruction === 'string' && lastGenerate.systemInstruction.includes('маржа'),
+    String(lastGenerate?.systemInstruction).slice(0, 80));
+  t('advisor: питання підставлено в промпт',
+    typeof lastGenerate?.prompt === 'string' && lastGenerate.prompt.includes('Ціна $38'),
+    String(lastGenerate?.prompt).slice(0, 80));
+  t('advisor: без json-схеми', !lastGenerate?.json, String(lastGenerate?.json));
+
+  r = await call('POST', '/api/market/advisor', { task: 'вигаданий', question: 'щось' });
+  t('advisor: невідома задача → 400', r.status === 400 && r.data?.kind === 'bad_input', `${r.status} ${r.data?.kind}`);
+
+  r = await call('POST', '/api/market/advisor', { task: 'pricing', question: '   ' });
+  t('advisor: порожнє питання → 400', r.status === 400, String(r.status));
+
+  r = await call('POST', '/api/market/advisor', { task: 'shop', question: 'x'.repeat(7000) });
+  t('advisor: питання >6000 символів → 400', r.status === 400, String(r.status));
+
+  modelText = '   ';
+  r = await call('POST', '/api/market/advisor', { task: 'trend', question: 'Чи росте попит на паракорд?' });
+  t('advisor: порожня відповідь моделі → 502',
+    r.status === 502 && r.data?.kind === 'bad_model_output', `${r.status} ${r.data?.kind}`);
+  modelText = JSON.stringify([{ title: 'Літак', priceUsd: 30, reviewCount: 10, confidence: 0.5 }]);
+
+  principal = { ...principal, role: 'reader' };
+  r = await call('POST', '/api/market/advisor', { task: 'pricing', question: 'Ціна $38.' });
+  t('advisor: роль reader → 403', r.status === 403, String(r.status));
+  principal = { ...principal, role: 'writer' };
 
   r = await call('PUT', '/api/market/settings', { weights: { demand: 50 } });
   t('PUT settings не для writer', r.status === 403, String(r.status));

@@ -1121,3 +1121,596 @@
   background-color: rgba(245, 158, 11, 0.18);
   border-radius: 2px;
 }
+
+
+/* ==========================================================================
+   Скляні поверхні набору Etsy-аналітики (src/components/etsy/*).
+   ==========================================================================
+   Перенесено з набору «Etsy Analytics & Trend Tracker» разом з екранами
+   калькулятора комісій і SEO-перекладів. Це друга візуальна мова: біле
+   напівпрозоре скло, розраховане на кольоровий градієнт під ним, тоді як
+   решта студії — щільні slate-панелі з бірюзовим акцентом.
+
+   ТОМУ ВСЕ ЗАСКОУПЛЕНО ПІД `.etsy-kit`. Класи набору (.glass-card,
+   .glass-btn, .glass-input, .glass-badge, .glass-tab-btn) — надто загальні
+   імена, щоб жити в глобальному просторі поруч із .glass-panel студії:
+   перше ж співпадіння імен перефарбувало б чужий екран, і причину шукали б
+   довго. Обгортка `.etsy-kit` стоїть лише навколо вкладок цього набору,
+   тож жоден інший компонент студії цих правил не бачить.
+
+   Під склом потрібен градієнт — на голому slate-950 воно читається як
+   брудна пляма, а не як скло. Градієнт задає сама обгортка нижче.
+   Анімації набору вимкнені для prefers-reduced-motion разом з рештою
+   студії (правило в кінці блоку).
+   ========================================================================== */
+
+.etsy-kit {
+  position: relative;
+  border-radius: 20px;
+  padding: 1.25rem;
+  background:
+    radial-gradient(120% 80% at 12% 0%, rgba(56, 189, 248, 0.18) 0%, transparent 55%),
+    radial-gradient(100% 90% at 92% 8%, rgba(168, 85, 247, 0.16) 0%, transparent 60%),
+    linear-gradient(160deg, rgba(15, 23, 42, 0.95) 0%, rgba(2, 6, 23, 0.98) 100%);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+/* Набір писався під світлий текст на склі — фіксуємо це всередині обгортки,
+   інакше успадкований колір студії давав би сірий текст на світлому склі. */
+.etsy-kit {
+  color: #f8fafc;
+}
+
+/* `animate-fadeIn` набір використовував, але ніде не визначав — у ньому це
+   був мовчазний no-op. Визначаємо тут, коротко: поява картки з порадою не
+   має затримувати читання. */
+@keyframes etsy-kit-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+.etsy-kit .animate-fadeIn {
+  animation: etsy-kit-fade-in 0.22s ease-out both;
+}
+
+.etsy-kit .no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.etsy-kit .no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Base Glass Button from User Specification with 20s Moving Light Source */
+.etsy-kit .glass-btn {
+  position: relative;
+  padding: 12px 32px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #ffffff;
+  cursor: pointer;
+  border: none;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  user-select: none;
+  
+  /* 1. Напівпрозоре матове скло */
+  background: linear-gradient(
+    135deg, 
+    rgba(255, 255, 255, 0.28), 
+    rgba(255, 255, 255, 0.08)
+  );
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+
+  /* 2. Тонкий скляний кант */
+  border: 1px solid rgba(255, 255, 255, 0.35);
+
+  /* 3. Глибока м'яка тінь від кнопки */
+  box-shadow: 
+    0 20px 30px -10px rgba(0, 0, 0, 0.35),
+    inset 0 1px 1px rgba(255, 255, 255, 0.6);
+
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: visible;
+}
+
+.etsy-kit .glass-btn > * {
+  position: relative;
+  z-index: 2;
+}
+
+/* Верхній рухомий блік на поверхні скла (20-секундний цикл світла) */
+.etsy-kit .glass-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    105deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.05) 32%,
+    rgba(255, 255, 255, 0.42) 50%,
+    rgba(255, 255, 255, 0.05) 68%,
+    transparent 100%
+  );
+  background-size: 280% 100%;
+  animation: glass-light-drift-sheen 20s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* 4. Характерне яскраве світіння знизу кнопки з плавним переміщенням джерела світла за 20 секунд */
+.etsy-kit .glass-btn::after {
+  content: "";
+  position: absolute;
+  bottom: -2px;
+  left: 10%;
+  width: 46%;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  filter: blur(2px);
+  box-shadow: 0 0 14px 2px rgba(255, 255, 255, 0.75);
+  pointer-events: none;
+  animation: glass-light-drift-bottom 20s ease-in-out infinite;
+  transition: box-shadow 0.25s ease;
+  z-index: 0;
+}
+
+/* Анімація при наведенні */
+.etsy-kit .glass-btn:hover {
+  background: linear-gradient(
+    135deg, 
+    rgba(255, 255, 255, 0.36), 
+    rgba(255, 255, 255, 0.14)
+  );
+  transform: translateY(-2px);
+  box-shadow: 
+    0 24px 34px -8px rgba(0, 0, 0, 0.4),
+    inset 0 1px 1px rgba(255, 255, 255, 0.8);
+}
+
+.etsy-kit .glass-btn:hover::before {
+  background: linear-gradient(
+    105deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.1) 30%,
+    rgba(255, 255, 255, 0.6) 50%,
+    rgba(255, 255, 255, 0.1) 70%,
+    transparent 100%
+  );
+  background-size: 280% 100%;
+}
+
+.etsy-kit .glass-btn:hover::after {
+  box-shadow: 0 0 18px 4px rgba(255, 255, 255, 0.95);
+}
+
+/* Анімація при кліку */
+.etsy-kit .glass-btn:active {
+  transform: translateY(1px);
+  box-shadow: 
+    0 10px 18px -4px rgba(0, 0, 0, 0.35),
+    inset 0 1px 1px rgba(255, 255, 255, 0.4);
+}
+
+/* Secondary variant with subtle light sheen */
+.etsy-kit .glass-btn-secondary {
+  position: relative;
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  user-select: none;
+  
+  background: linear-gradient(
+    135deg, 
+    rgba(255, 255, 255, 0.16), 
+    rgba(255, 255, 255, 0.05)
+  );
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 
+    0 12px 20px -8px rgba(0, 0, 0, 0.25),
+    inset 0 1px 1px rgba(255, 255, 255, 0.4);
+  transition: all 0.2s ease;
+  overflow: visible;
+}
+
+.etsy-kit .glass-btn-secondary > * {
+  position: relative;
+  z-index: 2;
+}
+
+.etsy-kit .glass-btn-secondary::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    105deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.03) 32%,
+    rgba(255, 255, 255, 0.22) 50%,
+    rgba(255, 255, 255, 0.03) 68%,
+    transparent 100%
+  );
+  background-size: 280% 100%;
+  animation: glass-light-drift-sheen 20s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.etsy-kit .glass-btn-secondary:hover {
+  background: linear-gradient(
+    135deg, 
+    rgba(255, 255, 255, 0.24), 
+    rgba(255, 255, 255, 0.09)
+  );
+  transform: translateY(-1px);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.35);
+  box-shadow: 
+    0 16px 24px -6px rgba(0, 0, 0, 0.3),
+    inset 0 1px 1px rgba(255, 255, 255, 0.6);
+}
+
+.etsy-kit .glass-btn-secondary:active {
+  transform: translateY(1px);
+}
+
+/* Liquid Glass Cards / Panels */
+.etsy-kit .glass-card {
+  position: relative;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.22) 0%,
+    rgba(255, 255, 255, 0.07) 100%
+  );
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 20px;
+  box-shadow: 
+    0 30px 45px -15px rgba(0, 0, 0, 0.35),
+    inset 0 1px 1px rgba(255, 255, 255, 0.5),
+    inset 0 -1px 1px rgba(0, 0, 0, 0.1);
+  transition: all 0.25s ease;
+}
+
+.etsy-kit .glass-card-hover:hover {
+  border-color: rgba(255, 255, 255, 0.4);
+  box-shadow: 
+    0 36px 55px -15px rgba(0, 0, 0, 0.4),
+    inset 0 1px 1px rgba(255, 255, 255, 0.7);
+  transform: translateY(-2px);
+}
+
+/* Glass Inputs */
+.etsy-kit .glass-input {
+  width: 100%;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.15) 0%,
+    rgba(255, 255, 255, 0.05) 100%
+  );
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 14px;
+  color: #ffffff;
+  outline: none;
+  box-shadow: 
+    inset 0 2px 4px rgba(0, 0, 0, 0.15),
+    0 8px 16px -6px rgba(0, 0, 0, 0.2),
+    inset 0 1px 1px rgba(255, 255, 255, 0.3);
+  transition: all 0.2s ease;
+}
+
+.etsy-kit .glass-input::placeholder {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.etsy-kit .glass-input:focus {
+  border-color: rgba(255, 255, 255, 0.6);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.22) 0%,
+    rgba(255, 255, 255, 0.08) 100%
+  );
+  box-shadow: 
+    0 0 0 3px rgba(255, 255, 255, 0.15),
+    inset 0 1px 2px rgba(0, 0, 0, 0.15),
+    inset 0 1px 1px rgba(255, 255, 255, 0.5);
+}
+
+/* Glass Pill / Badge */
+.etsy-kit .glass-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.4);
+}
+
+/* Glass Tabs Container */
+.etsy-kit .glass-tabs-container {
+  display: inline-flex;
+  padding: 4px;
+  background: rgba(0, 0, 0, 0.15);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+.etsy-kit .glass-tab-btn {
+  position: relative;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  background: transparent;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.etsy-kit .glass-tab-btn:hover {
+  color: #ffffff;
+}
+
+.etsy-kit .glass-tab-btn.active {
+  color: #ffffff;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.32) 0%,
+    rgba(255, 255, 255, 0.12) 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  box-shadow: 
+    0 6px 14px -3px rgba(0, 0, 0, 0.25),
+    inset 0 1px 1px rgba(255, 255, 255, 0.6);
+}
+
+.etsy-kit .glass-tab-btn.active::after {
+  content: "";
+  position: absolute;
+  bottom: -1px;
+  left: 15%;
+  width: 45%;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  filter: blur(1px);
+  box-shadow: 0 0 8px 1px rgba(255, 255, 255, 0.85);
+  animation: glass-tab-light-drift 20s ease-in-out infinite;
+}
+
+/* 20-Second Ambient Light Source Transit Keyframes along 12-Hour Clock Cycle */
+@keyframes glass-light-drift-bottom {
+  0% {
+    left: 6%;
+    width: 42%;
+    transform: scaleX(0.92);
+    opacity: 0.75;
+    box-shadow: 0 0 14px 2px rgba(255, 255, 255, 0.75);
+  }
+  25% {
+    left: 28%;
+    width: 48%;
+    transform: scaleX(1.05);
+    opacity: 0.95;
+    box-shadow: 0 0 16px 3px rgba(255, 255, 255, 0.85);
+  }
+  50% {
+    left: 52%;
+    width: 42%;
+    transform: scaleX(1.08);
+    opacity: 1;
+    box-shadow: 0 0 18px 3px rgba(255, 255, 255, 0.9);
+  }
+  75% {
+    left: 28%;
+    width: 48%;
+    transform: scaleX(1.05);
+    opacity: 0.95;
+    box-shadow: 0 0 16px 3px rgba(255, 255, 255, 0.85);
+  }
+  100% {
+    left: 6%;
+    width: 42%;
+    transform: scaleX(0.92);
+    opacity: 0.75;
+    box-shadow: 0 0 14px 2px rgba(255, 255, 255, 0.75);
+  }
+}
+
+@keyframes glass-light-drift-sheen {
+  0% {
+    background-position: 0% 50%;
+    opacity: 0.65;
+    filter: hue-rotate(0deg);
+  }
+  25% {
+    background-position: 50% 100%;
+    opacity: 0.85;
+  }
+  50% {
+    background-position: 100% 50%;
+    opacity: 1;
+  }
+  75% {
+    background-position: 50% 0%;
+    opacity: 0.85;
+  }
+  100% {
+    background-position: 0% 50%;
+    opacity: 0.65;
+    filter: hue-rotate(0deg);
+  }
+}
+
+@keyframes glass-tab-light-drift {
+  0% {
+    left: 8%;
+    opacity: 0.75;
+  }
+  50% {
+    left: 47%;
+    opacity: 1;
+  }
+  100% {
+    left: 8%;
+    opacity: 0.75;
+  }
+}
+
+/* Diagonal White Light Wave Flare: Alternating 12-Hour Clock Direction on Each Pass */
+.etsy-kit .glass-btn-flare {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.etsy-kit .glass-btn-flare::before {
+  content: "";
+  position: absolute;
+  top: -70%;
+  left: -130%;
+  width: 55%;
+  height: 240%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.05) 15%,
+    rgba(255, 255, 255, 0.65) 45%,
+    rgba(255, 255, 255, 1) 50%,
+    rgba(255, 255, 255, 0.65) 55%,
+    rgba(255, 255, 255, 0.05) 85%,
+    transparent 100%
+  );
+  transform: rotate(32deg);
+  filter: blur(2.5px);
+  box-shadow: 0 0 15px rgba(255, 255, 255, 0.85);
+  animation: glass-diagonal-wave-clock-alternate 20s cubic-bezier(0.25, 1, 0.5, 1) infinite;
+}
+
+/* 
+  12-Hour Clock Alternating Flare Animation:
+  Pass 1 (0% -> 22%): Glare moves clockwise along 11:00 -> 5:00 trajectory (top-left to bottom-right at 32deg).
+  Pause (22% -> 50%): Resting period.
+  Pass 2 (50% -> 72%): Glare moves in the OPPOSITE direction (5:00 -> 11:00 / bottom-right to top-left at 212deg).
+  Pause (72% -> 100%): Resting period before the next 12-hour cycle begins.
+*/
+@keyframes glass-diagonal-wave-clock-alternate {
+  /* --- Pass 1: Forward Direction (Top-Left -> Bottom-Right along 12h clock angle 32deg) --- */
+  0% {
+    top: -70%;
+    left: -130%;
+    transform: rotate(32deg);
+    opacity: 0;
+  }
+  1.5% {
+    opacity: 1;
+  }
+  20% {
+    top: 70%;
+    left: 220%;
+    transform: rotate(32deg);
+    opacity: 1;
+  }
+  22% {
+    top: 70%;
+    left: 220%;
+    transform: rotate(32deg);
+    opacity: 0;
+  }
+  
+  /* Instant reposition & 180° rotation to opposite 12-hour clock angle (212deg) while invisible */
+  23% {
+    top: 70%;
+    left: 220%;
+    transform: rotate(212deg);
+    opacity: 0;
+  }
+  49% {
+    top: 70%;
+    left: 220%;
+    transform: rotate(212deg);
+    opacity: 0;
+  }
+
+  /* --- Pass 2: Opposite Reverse Direction (Bottom-Right -> Top-Left along 12h clock angle 212deg) --- */
+  50% {
+    top: 70%;
+    left: 220%;
+    transform: rotate(212deg);
+    opacity: 0;
+  }
+  51.5% {
+    opacity: 1;
+  }
+  70% {
+    top: -70%;
+    left: -130%;
+    transform: rotate(212deg);
+    opacity: 1;
+  }
+  72% {
+    top: -70%;
+    left: -130%;
+    transform: rotate(212deg);
+    opacity: 0;
+  }
+
+  /* Instant reset to forward 32deg angle while invisible */
+  73% {
+    top: -70%;
+    left: -130%;
+    transform: rotate(32deg);
+    opacity: 0;
+  }
+  100% {
+    top: -70%;
+    left: -130%;
+    transform: rotate(32deg);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .etsy-kit .animate-fadeIn,
+  .etsy-kit .glass-btn::before,
+  .etsy-kit .glass-btn::after,
+  .etsy-kit .glass-btn-flare::before,
+  .etsy-kit .glass-tab-btn.active::after {
+    animation: none;
+  }
+}
