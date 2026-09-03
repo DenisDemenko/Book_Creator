@@ -336,6 +336,15 @@ const NEUTRAL_RAW = 50;
 
 /** Вибірка, за якої ніша вважається щільно зайнятою (компонент competition). */
 const COMPETITION_FULL_SAMPLE = 60;
+/**
+ * Скільки активних лістингів за запитом означає повністю зайняту нішу.
+ *
+ * Використовується ЛИШЕ коли джерело дало справжній обсяг пропозиції (Etsy
+ * повертає його полем `count`). Шкала логарифмічна: між нішею на 200 і на
+ * 2000 лістингів різниця величезна, між 80 000 і 100 000 — майже ніякої, і
+ * лінійна шкала злиплася б у нуль для всього, що більше кількох тисяч.
+ */
+const COMPETITION_FULL_TOTAL = 50_000;
 /** Скільки відгуків у лідера ніші означає, що ніша вже насичена (saturation). */
 const SATURATION_FULL_REVIEWS = 2000;
 /** Приріст відгуків на день, який дає компоненту growth повні 100. */
@@ -367,7 +376,14 @@ export function computeOpportunityScore(
     listing: MarketListing;
     dynamics: ProductDynamics;
     popularity: number;
-    context: { medianPriceUsd: number; maxReviewCount: number; maxFavorers: number; sampleSize: number };
+    context: {
+      medianPriceUsd: number;
+      maxReviewCount: number;
+      maxFavorers: number;
+      sampleSize: number;
+      /** Реальний обсяг пропозиції за запитом. null — джерело його не знає. */
+      totalActive?: number | null;
+    };
   },
   weights: ScoreWeights,
 ): OpportunityScore {
@@ -424,15 +440,30 @@ export function computeOpportunityScore(
 
   // 3. Competition — чим більше товарів вибірка знайшла за темою, тим
   //    щільніше зайнята ніша, тим менше балів. Показник ніші.
+  //
+  // ДВІ ШКАЛИ, І ВОНИ НЕ РІВНОЦІННІ. Якщо джерело дало справжню кількість
+  // активних лістингів за запитом (Etsy — полем `count`), рахуємо з неї:
+  // це і є конкуренція. Якщо не дало — лишається сурогат із розміру власної
+  // вибірки, і `basisUk` прямо каже, що це сурогат. Вибірка ніколи не буває
+  // більшою за 25, тож без цієї заміни будь-яка ніша — і на 300 лістингів, і
+  // на 300 000 — отримувала б однаковий бал конкуренції.
+  const total = num(context.totalActive ?? null);
   const sample = num(context.sampleSize);
-  if (sample === null || sample <= 0) {
+  if (total !== null && total >= 0) {
+    const raw = 100 - logNorm(total, COMPETITION_FULL_TOTAL);
+    put(
+      'competition',
+      raw,
+      `100 − log-нормалізовані ${total} активних лістингів за запитом (${COMPETITION_FULL_TOTAL} = повністю зайнята ніша). Справжній обсяг пропозиції з джерела. Показник ніші, однаковий для всіх позицій звіту.`,
+    );
+  } else if (sample === null || sample <= 0) {
     put('competition', null, 'Конкуренція оцінюється за обсягом вибірки за темою.');
   } else {
     const raw = (1 - Math.min(1, sample / COMPETITION_FULL_SAMPLE)) * 100;
     put(
       'competition',
       raw,
-      `(1 − ${sample}/${COMPETITION_FULL_SAMPLE}) × 100: що більше товарів у вибірці за темою, то щільніша ніша. Показник ніші, однаковий для всіх позицій звіту.`,
+      `(1 − ${sample}/${COMPETITION_FULL_SAMPLE}) × 100. Джерело не дало справжньої кількості лістингів за запитом, тож замість неї взято розмір власної вибірки — це сурогат, а не обсяг ринку. Показник ніші, однаковий для всіх позицій звіту.`,
     );
   }
 
@@ -593,6 +624,8 @@ export function buildMarketReport(params: {
   requestedCount: number;
   modelId?: string;
   engine?: string;
+  /** Реальний обсяг пропозиції за запитом, якщо джерело його дало. */
+  totalActive?: number | null;
 }): MarketReport {
   const listings = Array.isArray(params.listings) ? params.listings : [];
   const weights = normalizeWeights(params.weights);
@@ -605,6 +638,9 @@ export function buildMarketReport(params: {
     maxReviewCount: listings.reduce((max, l) => Math.max(max, num(l.reviewCount) ?? 0), 0),
     maxFavorers: listings.reduce((max, l) => Math.max(max, num(l.favorers) ?? 0), 0),
     sampleSize: listings.length,
+    totalActive: typeof params.totalActive === 'number' && Number.isFinite(params.totalActive)
+      ? params.totalActive
+      : null,
   };
 
   const items: MarketReportItem[] = listings.map((listing, index) => {

@@ -146,6 +146,7 @@ export async function runMarketScreen(
     requestedCount: params.count,
     modelId: screened.modelId,
     engine: screened.engine,
+    totalActive: screened.totalActive ?? null,
   });
 
   await saveReport(report, params.userId);

@@ -422,6 +422,34 @@ console.log('\nДоступ до маршрутів (роль + тариф):');
   t('advisor: роль reader → 403', r.status === 403, String(r.status));
   principal = { ...principal, role: 'writer' };
 
+  // Прапорець джерела. Найкоштовніша перевірка в цьому файлі: помилку, яку
+  // вона ловить, вмикало НАЛАШТУВАННЯ, а не код — банер починав писати
+  // «Джерело: Etsy Open API v3» рівно в день, коли з'являвся ETSY_API_KEY,
+  // хоча скринінг і далі йшов у модель.
+  process.env.ETSY_API_KEY = 'fake-key-for-test';
+  process.env.ETSY_SHARED_SECRET = 'fake-secret';
+  process.env.APP_URL = 'https://example.test';
+  r = await call('GET', '/api/market/settings');
+  t('з ключем Etsy: налаштованість позначена', r.data?.etsyApiConfigured === true,
+    String(r.data?.etsyApiConfigured));
+  t('з ключем Etsy: наступний скринінг усе одно моделлю',
+    r.data?.nextScreenSource === 'ai_screen', String(r.data?.nextScreenSource));
+  t('поле source більше не віддається (щоб ніхто не читав старий сенс)',
+    r.data?.source === undefined, String(r.data?.source));
+
+  r = await call('POST', '/api/market/screen', { topic: 'ключ є, а дані з моделі', force: true });
+  t('звіт із ключем Etsy усе одно позначений ai_screen',
+    r.data?.report?.provenance?.source === 'ai_screen', String(r.data?.report?.provenance?.source));
+  t('дисклеймер звіту — той, що для моделі',
+    typeof r.data?.report?.disclaimerUk === 'string' && r.data.report.disclaimerUk.includes('модел'),
+    String(r.data?.report?.disclaimerUk).slice(0, 60));
+
+  delete process.env.ETSY_API_KEY;
+  delete process.env.ETSY_SHARED_SECRET;
+  r = await call('GET', '/api/market/settings');
+  t('без ключа: налаштованість знята', r.data?.etsyApiConfigured === false,
+    String(r.data?.etsyApiConfigured));
+
   r = await call('PUT', '/api/market/settings', { weights: { demand: 50 } });
   t('PUT settings не для writer', r.status === 403, String(r.status));
 

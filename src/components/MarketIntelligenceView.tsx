@@ -79,7 +79,10 @@ interface MarketSettings {
   weights: ScoreWeights;
   modelId: string | null;
   availableModels: MarketModelOption[];
-  source: 'ai_screen' | 'etsy_api';
+  /** Чи налаштований офіційний Etsy API. НЕ означає, що звіт зібраний ним. */
+  etsyApiConfigured: boolean;
+  /** Чим буде зібраний НАСТУПНИЙ скринінг. */
+  nextScreenSource: 'ai_screen' | 'etsy_api';
 }
 
 interface TopicRow {
@@ -639,6 +642,13 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({ 
 
   const aggregate = report?.aggregate;
 
+  /*
+    Джерело для банера береться з ПОКАЗАНОГО звіту, а не з налаштувань:
+    налаштування кажуть, що доступно, звіт — чим зібрані саме ці числа. Поки
+    звіту немає, показуємо те, чим буде зібраний наступний.
+  */
+  const shownSource = report?.provenance.source ?? settings?.nextScreenSource ?? 'ai_screen';
+
   return (
     <div className="flex-1 overflow-y-auto bg-slate-950 text-slate-100 p-6 lg:p-8">
       <div className="max-w-6xl mx-auto space-y-6">
@@ -735,7 +745,7 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({ 
           </p>
           <div className="flex flex-wrap items-center gap-2 mt-3">
             <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-0.5 text-[11px] text-amber-200">
-              {settings?.source === 'etsy_api' ? t('marketIntel.sourceEtsy') : t('marketIntel.sourceAi')}
+              {shownSource === 'etsy_api' ? t('marketIntel.sourceEtsy') : t('marketIntel.sourceAi')}
             </span>
             {report?.modelId && (
               <span className="rounded-full border border-slate-700 bg-slate-900/60 px-2.5 py-0.5 text-[11px] text-slate-300">

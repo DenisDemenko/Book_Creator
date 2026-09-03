@@ -403,9 +403,22 @@ export function registerMarketRoutes(app: Express, deps: MarketRoutesDeps): void
           // спрацює — хай інтерфейс покаже це до вибору, а не після 503.
           engineConfigured: engineConfigured(m.engine),
         })),
-        // Джерело даних модуля: офіційний API, якщо він налаштований, інакше
-        // чесно — скринінг моделлю.
-        source: etsy.configured ? ('etsy_api' as FieldSource) : ('ai_screen' as FieldSource),
+        // ДВА РІЗНІ ФАКТИ, І ЇХ НЕ МОЖНА ЗЛИВАТИ В ОДИН.
+        //
+        // Раніше тут стояло `source: etsy.configured ? 'etsy_api' : 'ai_screen'`,
+        // тобто джерело виводилось із НАЯВНОСТІ КЛЮЧА. Але скринінг нижче за
+        // будь-яких умов іде в мовну модель — отже в день, коли в .env
+        // з'явився б ETSY_API_KEY, банер почав би писати «Джерело: Etsy Open
+        // API v3» над числами, які лишились оцінкою моделі. Помилка не
+        // проявлялась лише тому, що ключа не було: її вмикало налаштування,
+        // а не код.
+        //
+        // Тому окремо «що налаштовано» і окремо «чим буде зібрано наступний
+        // звіт». Джерело ПОКАЗАНОГО звіту інтерфейс бере не звідси, а з
+        // `report.provenance.source` — з того самого запису, який пройшов
+        // увесь шлях разом із даними.
+        etsyApiConfigured: etsy.configured,
+        nextScreenSource: 'ai_screen' as FieldSource,
         defaultWeights: DEFAULT_SCORE_WEIGHTS,
         disclaimerUk: MARKET_DISCLAIMER_AI_UK,
       });
