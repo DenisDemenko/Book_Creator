@@ -1420,58 +1420,73 @@ export const EditorView: React.FC<EditorViewProps> = ({
   const [narrationPlayer, setNarrationPlayer] = useState<{ audioUrl: string; label: string } | null>(null);
 
   /**
-   * Повноекранний («фокус») режим редагування тексту — F12 або значок у
-   * шапці панелі тексту. У Chrome/Firefox F12 системно зарезервований під
+   * Окреме вікно набору й редагування тексту — F12 або значок у шапці
+   * панелі тексту.
+   *
+   * БУЛО ПОВНОЕКРАННИМ РЕЖИМОМ, СТАЛО ВІКНОМ. Оверлей на весь viewport
+   * розкривався криво: та сама поверхня редактора отримувала
+   * `fixed inset-0 w-screen h-screen`, маючи всередині власну висоту
+   * `calc(100vh - 105px)`, розраховану на місце у вкладці. Замість
+   * підпирання цих двох правил одне одним поверхня тепер просто заповнює
+   * плаваючу панель (`DraggablePanel`), яку автор пересуває й розтягує сам.
+   *
+   * Вміст вікна — ВСЯ поверхня редактора, а не її частина: текст, права
+   * панель «Персонажі і сцена» з додаванням і правкою персонажів, вставка
+   * зображень із бібліотеки книги. Другий екран набору не заводиться
+   * навмисно — копія розійшлася б з оригіналом на першій же правці.
+   *
+   * Про саму клавішу: у Chrome/Firefox F12 системно зарезервований під
    * DevTools, і сторінка НЕ може заблокувати це на рівні браузера —
    * preventDefault() нижче лише ловить випадки, коли браузер таки віддає
-   * подію сторінці (звичний десктопний Chrome з відкритим фокусом на
-   * сторінці зазвичай віддає). Кнопка — надійний шлях у будь-якому разі.
+   * подію сторінці. Кнопка в шапці — надійний шлях у будь-якому разі.
    *
-   * Технічно це НЕ Fullscreen API (document.requestFullscreen): той вимагає
-   * жесту користувача під кожен виклик і виходить по Escape, що суперечило
-   * б «вихід теж за F12». Натомість — CSS-оверлей на весь viewport
-   * (position: fixed, inset: 0), той самий підхід, що «режим без
-   * відволікань» у Notion/Google Docs.
+   * Це й далі НЕ Fullscreen API (`document.requestFullscreen`): той вимагає
+   * жесту користувача під кожен виклик і виходить по Escape, що суперечило б
+   * «вихід теж за F12».
    */
   // usePersistentState, а не useState: письменник, який щоразу відкриває
-  // книгу у фулскріні, не повинен щоразу тиснути F12 наново — той самий
+  // книгу у вікні набору, не повинен щоразу тиснути F12 наново — той самий
   // принцип, що вже діє для showLeftTree/showRightPanel вище.
-  const [isFullscreenMode, setIsFullscreenMode] = usePersistentState<boolean>('nova_editor_fullscreenMode', false);
-  const fullscreenRootRef = useRef<HTMLDivElement>(null);
+  //
+  // Ключі сховища лишились зі старою назвою (`…fullscreenMode`,
+  // `…focusZoom`) свідомо: їх уже містять браузери авторів, і
+  // перейменування мовчки скинуло б збережений стан у всіх.
+  const [isFocusWindow, setIsFocusWindow] = usePersistentState<boolean>('nova_editor_fullscreenMode', false);
+  const focusRootRef = useRef<HTMLDivElement>(null);
 
   /**
    * Масштаб сторінки у фулскріні (1.0–1.6, крок 0.1). Це НЕ зміна фізичної
    * ширини сторінки (`widthMm`, від якої залежить друкарськи точна
    * пагінація/експорт) — суто верхня межа CSS-масштабу в usePageScale.ts,
    * який і так уже стискає сторінку на вузьких екранах; тут лише
-   * дозволено те саме масштабування піти вище 1.0, коли фулскрін на
-   * широкому моніторі лишає порожнє тло навколо друкарськи вузької
-   * сторінки. Поза фулскріном PageColumn/PageRuler завжди отримують 1 —
-   * значення з нею не впливає на звичайний режим редагування.
+   * дозволено те саме масштабування піти вище 1.0, коли розтягнуте вікно
+   * набору на широкому моніторі лишає порожнє тло навколо друкарськи
+   * вузької сторінки. Поза вікном PageColumn/PageRuler завжди отримують 1 —
+   * значення звідси не впливає на звичайний режим редагування.
    */
-  const [fullscreenZoom, setFullscreenZoom] = usePersistentState<number>('nova_editor_fullscreenZoom', 1);
-  const adjustFullscreenZoom = (delta: number) => {
-    setFullscreenZoom((v) => Math.round(Math.min(1.6, Math.max(1, v + delta)) * 10) / 10);
+  const [focusZoom, setFocusZoom] = usePersistentState<number>('nova_editor_fullscreenZoom', 1);
+  const adjustFocusZoom = (delta: number) => {
+    setFocusZoom((v) => Math.round(Math.min(1.6, Math.max(1, v + delta)) * 10) / 10);
   };
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'F12') {
         e.preventDefault();
-        setIsFullscreenMode((v) => !v);
+        setIsFocusWindow((v) => !v);
         return;
       }
       // Escape — ДОДАТКОВИЙ вихід, лише вихід (не тогл і не вхід). F12 у
       // Chrome/Firefox зарезервований під DevTools і не завжди доходить до
       // сторінки (застереження із запису #39) — Escape лишається робочим
       // запасним шляхом навіть тоді, коли браузер забрав F12 собі.
-      if (e.key === 'Escape' && isFullscreenMode) {
-        setIsFullscreenMode(false);
+      if (e.key === 'Escape' && isFocusWindow) {
+        setIsFocusWindow(false);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isFullscreenMode]);
+  }, [isFocusWindow]);
 
   /**
    * Перехід між «розривами сторінок» (PaginationPlugin.ts малює їх як
@@ -1482,7 +1497,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
    * вкладений, тож не треба здогадуватись, який саме елемент прокручується.
    */
   const jumpToPageBreak = (direction: 1 | -1) => {
-    const root = fullscreenRootRef.current;
+    const root = focusRootRef.current;
     if (!root) return;
     const breaks = Array.from(root.querySelectorAll<HTMLElement>('[data-nova-pagebreak]'));
     if (breaks.length === 0) return;
@@ -1504,8 +1519,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
   const [pageProgress, setPageProgress] = useState<{ current: number; total: number }>({ current: 1, total: 1 });
 
   useEffect(() => {
-    if (!isFullscreenMode) return;
-    const root = fullscreenRootRef.current;
+    if (!isFocusWindow) return;
+    const root = focusRootRef.current;
     if (!root) return;
 
     const recomputePageProgress = () => {
@@ -1522,7 +1537,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
       window.removeEventListener('scroll', recomputePageProgress, true);
       window.removeEventListener('resize', recomputePageProgress);
     };
-  }, [isFullscreenMode]);
+  }, [isFocusWindow]);
 
   /**
    * Таймер спринту письма — не блокує редагування, лише рахує час і
@@ -1595,7 +1610,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
   const toolbarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!isFullscreenMode) {
+    if (!isFocusWindow) {
       setToolbarHidden(false);
       return;
     }
@@ -1632,7 +1647,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
       window.removeEventListener('mousemove', showAndReschedule);
       window.removeEventListener('keydown', showAndReschedule);
     };
-  }, [isFullscreenMode, showSprintMenu, showNarrationToolbarMenu]);
+  }, [isFocusWindow, showSprintMenu, showNarrationToolbarMenu]);
 
   /**
    * Озвучує виділений фрагмент (абзац або навіть одне слово — та сама межа
@@ -1906,7 +1921,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
   const renderFormatToolbar = (isEn: boolean) => (
     <div
       className={`flex items-center gap-1.5 shrink-0 flex-wrap transition-opacity duration-300 ${
-        isFullscreenMode && toolbarHidden ? 'opacity-0 pointer-events-none' : 'opacity-100'
+        isFocusWindow && toolbarHidden ? 'opacity-0 pointer-events-none' : 'opacity-100'
       }`}
     >
       <select
@@ -2008,7 +2023,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
           панелі, решта (рушій AI, обтікання картинки, сам перемикач
           фулскріну) переходить нижче. У звичайному режимі елемент не
           рендериться — панель лишається як була, одним рядком. */}
-      {isFullscreenMode && <div className="basis-full h-0" aria-hidden="true" />}
+      {isFocusWindow && <div className="basis-full h-0" aria-hidden="true" />}
 
       {/* Вибір LLM для генерації тексту книги (завдання 3). Значення живе в
           самій книзі (`preferredAiModelId`) — те саме поле, яким уже
@@ -2200,14 +2215,14 @@ export const EditorView: React.FC<EditorViewProps> = ({
           рендериться в усіх розкладках (одна мова / розворот укр|англ). */}
       <button
         onMouseDown={(e) => e.preventDefault()}
-        onClick={() => setIsFullscreenMode((v) => !v)}
+        onClick={() => setIsFocusWindow((v) => !v)}
         className={`p-1 rounded-md ml-1 transition-colors ${
-          isFullscreenMode ? 'bg-amber-500 text-slate-950' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+          isFocusWindow ? 'bg-amber-500 text-slate-950' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
         }`}
-        title={isFullscreenMode ? t('editor.fullscreenExitTitle') : t('editor.fullscreenEnterTitle')}
-        aria-label={isFullscreenMode ? t('editor.fullscreenExitTitle') : t('editor.fullscreenEnterTitle')}
+        title={isFocusWindow ? t('editor.fullscreenExitTitle') : t('editor.fullscreenEnterTitle')}
+        aria-label={isFocusWindow ? t('editor.fullscreenExitTitle') : t('editor.fullscreenEnterTitle')}
       >
-        {isFullscreenMode ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+        {isFocusWindow ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
       </button>
     </div>
   );
@@ -3433,22 +3448,31 @@ export const EditorView: React.FC<EditorViewProps> = ({
     </div>
   );
 
-  return (
+  /*
+    Поверхня редактора — та сама і у вбудованому режимі, і у вікні. Другого
+    екрана набору не заводимо навмисно: усе, заради чого відкривають вікно
+    (текст, «Персонажі і сцена», вставка з медіабібліотеки), уже живе тут, і
+    копія розійшлася б з оригіналом на першій же правці.
+
+    У режимі вікна поверхня просто заповнює панель (`w-full h-full`) замість
+    того, щоб самій ставати оверлеєм на весь viewport. Саме та підміна —
+    `fixed inset-0 w-screen h-screen` на елементі, який усередині ще й має
+    власний `height: calc(100vh - 105px)`, — і давала криве розкриття.
+  */
+  const editorSurface = (
     <div
-      ref={fullscreenRootRef}
+      ref={focusRootRef}
       className={`flex flex-col lg:flex-row overflow-hidden bg-slate-900 text-slate-100 relative ${
-        isFullscreenMode
-          ? 'nova-fullscreen-editor fixed inset-0 z-[200] w-screen h-screen'
-          : 'flex-1 min-h-0'
+        isFocusWindow ? 'nova-fullscreen-editor w-full h-full min-h-0' : 'flex-1 min-h-0'
       }`}
-      style={isFullscreenMode ? undefined : { height: 'calc(100vh - 105px)', maxHeight: 'calc(100vh - 105px)' }}
+      style={isFocusWindow ? undefined : { height: 'calc(100vh - 105px)', maxHeight: 'calc(100vh - 105px)' }}
     >
       {/* Повноекранний режим: маленькі стрілочки збоку для переходу між
           розривами сторінок (не системний Fullscreen API — просто
           оверлей на весь viewport, тож ці кнопки лишаються звичайним
           fixed-елементом усередині нього). */}
-      {isFullscreenMode && (
-        <div className="fixed right-3 top-1/2 -translate-y-1/2 z-[210] flex flex-col gap-1.5">
+      {isFocusWindow && (
+        <div className="absolute right-3 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-1.5">
           <button
             onClick={() => jumpToPageBreak(-1)}
             className="p-1 rounded-full bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700 shadow-lg"
@@ -3478,23 +3502,23 @@ export const EditorView: React.FC<EditorViewProps> = ({
               друкарськи вузька сторінка не губилась у порожньому тлі. */}
           <div className="mt-1.5 flex flex-col items-center gap-0.5 bg-slate-800/90 border border-slate-700 rounded-xl p-1 shadow-lg">
             <button
-              onClick={() => adjustFullscreenZoom(0.1)}
-              disabled={fullscreenZoom >= 1.6}
+              onClick={() => adjustFocusZoom(0.1)}
+              disabled={focusZoom >= 1.6}
               className="p-1 rounded-full text-slate-300 hover:bg-slate-700 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent"
-              title={t('editor.fullscreenZoomIn')}
-              aria-label={t('editor.fullscreenZoomIn')}
+              title={t('editor.focusZoomIn')}
+              aria-label={t('editor.focusZoomIn')}
             >
               <ZoomIn className="w-3 h-3" />
             </button>
             <span className="text-[9px] font-mono text-slate-400 select-none tabular-nums">
-              {Math.round(fullscreenZoom * 100)}%
+              {Math.round(focusZoom * 100)}%
             </span>
             <button
-              onClick={() => adjustFullscreenZoom(-0.1)}
-              disabled={fullscreenZoom <= 1}
+              onClick={() => adjustFocusZoom(-0.1)}
+              disabled={focusZoom <= 1}
               className="p-1 rounded-full text-slate-300 hover:bg-slate-700 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent"
-              title={t('editor.fullscreenZoomOut')}
-              aria-label={t('editor.fullscreenZoomOut')}
+              title={t('editor.focusZoomOut')}
+              aria-label={t('editor.focusZoomOut')}
             >
               <ZoomOut className="w-3 h-3" />
             </button>
@@ -4080,12 +4104,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
               <PageRuler
                 widthMm={getPageContentWidthMm()}
-                zoomFactor={isFullscreenMode ? fullscreenZoom : 1}
+                zoomFactor={isFocusWindow ? focusZoom : 1}
                 insideMm={book.layoutConfig.margins?.insideMm || 0}
                 outsideMm={book.layoutConfig.margins?.outsideMm || 0}
                 onChangeMargins={handleChangeMargins}
               />
-              <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFullscreenMode ? fullscreenZoom : 1} className="flex-1 min-h-0">
+              <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : 1} className="flex-1 min-h-0">
                 {/* Колонтитул першого аркуша. Плагін пагінації малює його на
                     кожному РОЗРИВІ, тобто зверху сторінок 2, 3, … — у першої
                     розриву перед нею немає, тож він рендериться тут. */}
@@ -4207,12 +4231,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     />
                     <PageRuler
                       widthMm={getPageContentWidthMm()}
-                      zoomFactor={isFullscreenMode ? fullscreenZoom : 1}
+                      zoomFactor={isFocusWindow ? focusZoom : 1}
                       insideMm={book.layoutConfig.margins?.insideMm || 0}
                       outsideMm={book.layoutConfig.margins?.outsideMm || 0}
                       onChangeMargins={handleChangeMargins}
                     />
-                    <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFullscreenMode ? fullscreenZoom : 1} className="flex-1 min-h-0 rounded-xl border border-slate-800/80">
+                    <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : 1} className="flex-1 min-h-0 rounded-xl border border-slate-800/80">
                       <EditorContent
                         editor={uaEditor}
                         style={{ fontFamily: manuscriptFontStack }}
@@ -4260,12 +4284,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     />
                     <PageRuler
                       widthMm={getPageContentWidthMm()}
-                      zoomFactor={isFullscreenMode ? fullscreenZoom : 1}
+                      zoomFactor={isFocusWindow ? focusZoom : 1}
                       insideMm={book.layoutConfig.margins?.insideMm || 0}
                       outsideMm={book.layoutConfig.margins?.outsideMm || 0}
                       onChangeMargins={handleChangeMargins}
                     />
-                    <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFullscreenMode ? fullscreenZoom : 1} className="flex-1 min-h-0 rounded-xl border border-slate-800/80">
+                    <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : 1} className="flex-1 min-h-0 rounded-xl border border-slate-800/80">
                       <EditorContent
                         editor={enEditor}
                         style={{ fontFamily: manuscriptFontStack }}
@@ -4323,12 +4347,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 />
                 <PageRuler
                   widthMm={getPageContentWidthMm()}
-                  zoomFactor={isFullscreenMode ? fullscreenZoom : 1}
+                  zoomFactor={isFocusWindow ? focusZoom : 1}
                   insideMm={book.layoutConfig.margins?.insideMm || 0}
                   outsideMm={book.layoutConfig.margins?.outsideMm || 0}
                   onChangeMargins={handleChangeMargins}
                 />
-                <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFullscreenMode ? fullscreenZoom : 1} className="flex-1 min-h-0 rounded-xl border border-slate-800">
+                <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : 1} className="flex-1 min-h-0 rounded-xl border border-slate-800">
                   <EditorContent
                     editor={enEditor}
                     style={{ fontFamily: manuscriptFontStack }}
@@ -5710,12 +5734,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
             />
             <PageRuler
               widthMm={getPageContentWidthMm()}
-              zoomFactor={isFullscreenMode ? fullscreenZoom : 1}
+              zoomFactor={isFocusWindow ? focusZoom : 1}
               insideMm={book.layoutConfig.margins?.insideMm || 0}
               outsideMm={book.layoutConfig.margins?.outsideMm || 0}
               onChangeMargins={handleChangeMargins}
             />
-            <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFullscreenMode ? fullscreenZoom : 1} className="flex-1 min-h-0 rounded-xl border border-slate-800">
+            <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : 1} className="flex-1 min-h-0 rounded-xl border border-slate-800">
               <EditorContent
                 editor={enEditor}
                 style={{ fontFamily: manuscriptFontStack }}
@@ -6131,5 +6155,62 @@ export const EditorView: React.FC<EditorViewProps> = ({
       )}
 
     </div>
+  );
+
+  // Вбудований режим — поверхня і є вкладка студії.
+  if (!isFocusWindow) return editorSurface;
+
+  return (
+    <>
+      {/*
+        Місце редактора у вкладці не лишається порожнім: за розмиттям видно,
+        куди подівся текст і як його повернути. Порожня сіра пляма позаду
+        читалась би як поламаний екран, а не як «вікно відкрите».
+      */}
+      <div className="flex-1 min-h-0 flex items-center justify-center bg-slate-900 text-center p-8">
+        <div className="max-w-sm space-y-3">
+          <Maximize2 className="w-8 h-8 text-amber-400 mx-auto" />
+          <p className="text-sm text-slate-300">{t('editor.focusWindowPlaceholder')}</p>
+          <button
+            onClick={() => setIsFocusWindow(false)}
+            className="px-4 py-2 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-200 text-xs font-bold hover:bg-amber-500/30"
+          >
+            {t('editor.focusWindowReturn')}
+          </button>
+        </div>
+      </div>
+
+      {/*
+        Розмиття студії позаду — те саме, що у вікні аналітики. Клік по фону
+        не закриває: у вікні набирають текст, і закриття по промаху коштувало
+        б абзацу. Вихід — F12, Escape або хрестик.
+
+        backdrop-filter НЕ можна ставити на саму панель: він створює
+        containing block для `position: fixed`, і всі модалки редактора
+        (вставка зображення, шрифти, контекстні меню) поїхали б відносно
+        панелі замість вікна браузера.
+      */}
+      <div className="fixed inset-0 z-[190] bg-black/70 backdrop-blur-md" aria-hidden="true" />
+
+      <DraggablePanel
+        title={
+          <span className="flex items-center gap-2">
+            <Maximize2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            {activeSection?.title || activeChapter?.title || t('editor.focusWindowTitle')}
+          </span>
+        }
+        onClose={() => setIsFocusWindow(false)}
+        storageKey="nova.editor.window"
+        initialWidth={1280}
+        initialHeight={860}
+        minWidth={520}
+        minHeight={380}
+        zIndex={200}
+        headerClassName="bg-slate-950/90"
+        bodyClassName="flex min-h-0"
+      >
+        {editorSurface}
+      </DraggablePanel>
+    </>
   );
 };
