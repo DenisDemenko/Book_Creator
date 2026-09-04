@@ -154,6 +154,43 @@ export function registerBookRoutes(app: Express, deps: BookRoutesDeps): void {
     }
   });
 
+  /**
+   * ОБКЛАДИНКА ПУБЛІЧНО, БЕЗ ВХОДУ.
+   *
+   * Єдиний маршрут книги без `requireAuth` — і це свідомо, з однієї
+   * причини: картку у вітрині маркетплейсу відкриває СТОРОННІЙ покупець,
+   * і зображення тягне його браузер, а не наш сервер. Посилання, яке
+   * вимагає сесії Студії, у нього не завантажиться взагалі — саме тому
+   * картки стояли порожні.
+   *
+   * Межа рівно одна й проходить тут: назовні віддається ЛИШЕ `cover`.
+   * `pdf` і `sample` лишаються за входом, бо це сам товар; обкладинка ж —
+   * вітрина товару, її призначення в тому й полягає, щоб її бачили всі.
+   *
+   * Прихованого переліку книг це не створює: адресу треба знати, а знає
+   * її той, кому ми самі її дали, публікуючи картку. Обкладинки не існує
+   * доти, доки автор не поклав її у сховище книги свідомою дією.
+   */
+  app.get('/api/public/books/:id/cover', async (req: Request, res: Response) => {
+    try {
+      const format: ArtifactFormat = req.query.format === 'print' ? 'print' : 'digital';
+      const found =
+        (await readArtifact(req.params.id, 'cover', format)) ||
+        (await readArtifact(req.params.id, 'cover', 'digital'));
+      if (!found) {
+        return res.status(404).json({ error: 'Обкладинки для цієї книги немає.', kind: 'not_built' });
+      }
+      res.setHeader('Content-Type', found.record.mimeType);
+      res.setHeader('Content-Length', String(found.bytes.length));
+      // Довгий кеш безпечний, бо адреса, яку отримує маркетплейс, несе
+      // мітку версії (`?v=`): нова обкладинка приїжджає новим посиланням.
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.send(Buffer.from(found.bytes));
+    } catch (err) {
+      fail(res, err, 'Не вдалося віддати обкладинку.');
+    }
+  });
+
   /** Завантажити зверстаний файл із сервера. */
   app.get('/api/books/:id/artifact/:kind', requireAuth, async (req: Request, res: Response) => {
     try {

@@ -655,6 +655,28 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           ? `Увага: PDF зібраний з ревізії ${pdf.record.bookRevision}, а книга вже ${stored.revision}. Складіть файли заново, якщо правки мають потрапити покупцеві.`
           : undefined;
 
+      /*
+        ОБКЛАДИНКА ЇДЕ ПОСИЛАННЯМ У САМОМУ СТВОРЕННІ КАРТКИ, а не тільки
+        окремим файлом після нього.
+
+        Причина знайдена живим прогоном: у задеплоєного приймача просто
+        НЕМАЄ маршруту `/bridge/books/:id/file` — він зʼявився в мості
+        пізніше, ніж востаннє деплоївся маркетплейс. Тобто поки той не
+        оновлять, жоден файл туди не потрапить у принципі. А `coverUrl`
+        приймач розуміє з самого початку й кладе просто в картку — отже
+        зображення можна дати вітрині вже зараз, не чекаючи ні на що.
+
+        `?v=` — не забаганка: маркетплейс зберігає САМЕ РЯДОК посилання, і
+        без мітки версії нова обкладинка тієї самої книги приїхала б за
+        тією ж адресою, а браузер покупця показував би стару з кешу.
+      */
+      const publicBase = (process.env.APP_URL?.replace(/\/$/, '') ||
+        `${params.req.protocol}://${params.req.get('host')}`);
+      const coverStamp = Date.parse(cover.record.builtAt || '') || 0;
+      const coverUrl =
+        `${publicBase}/api/public/books/${encodeURIComponent(stored.id)}/cover` +
+        `?format=${cover.record.format}&v=${coverStamp}`;
+
       const published = await publishBookToMarketplace(
         {
           bookId: stored.id,
@@ -664,23 +686,53 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           summary: book.logline ? String(book.logline) : undefined,
           description: book.synopsis ? String(book.synopsis) : undefined,
           priceMinor: Math.round(priceMinor),
+          coverUrl,
           sellerSlug: params.sellerSlug,
         },
         { settings }
       );
 
-      const attached = await attachBookFileToMarketplace(
-        {
-          bookId: stored.id,
-          format,
-          filename: pdf.record.filename,
-          mimeType: pdf.record.mimeType,
-          bytes: pdf.bytes,
-        },
-        { settings }
-      );
+      /*
+        ФАЙЛ КНИГИ БІЛЬШЕ НЕ ЗРИВАЄ ПУБЛІКАЦІЮ.
 
-      let coverAttached;
+        Було: виняток на цьому кроці валив усю публікацію, і автор бачив
+        помилку там, де насправді картка вже стояла у вітрині — а заразом
+        не виконувались наступні кроки, зокрема обкладинка. Тепер невдача
+        файла лишається невдачею файла: картка з обкладинкою й ціною
+        живе, а причина сказана окремим полем.
+
+        Це НЕ тихий відкіт: ми нічого не підміняємо іншим і не вдаємо
+        успіх — `attached: false` і текст причини йдуть у відповідь, і
+        панель має їх показати.
+      */
+      let attached: Awaited<ReturnType<typeof attachBookFileToMarketplace>> | null = null;
+      let fileErrorUk: string | undefined;
+      try {
+        attached = await attachBookFileToMarketplace(
+          {
+            bookId: stored.id,
+            format,
+            filename: pdf.record.filename,
+            mimeType: pdf.record.mimeType,
+            bytes: pdf.bytes,
+          },
+          { settings }
+        );
+      } catch (fileErr) {
+        fileErrorUk =
+          `Картка опублікована, але сам файл книги до неї не прикріплено: ` +
+          `${(fileErr as Error)?.message || 'невідома причина'}`;
+      }
+
+      /*
+        Обкладинку окремим файлом однаково пробуємо: коли приймач оновлять,
+        зображення в його власному сховищі краще за посилання на нас —
+        воно переживе і зміну домену Студії, і її недоступність. Але тепер
+        це не привід знімати картку з вітрини: `coverUrl` вище вже дав їй
+        зображення.
+      */
+      let coverAttached: Awaited<ReturnType<typeof attachBookFileToMarketplace>> | null = null;
+      let coverErrorUk: string | undefined;
       try {
         coverAttached = await attachBookFileToMarketplace(
           {
@@ -694,13 +746,10 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           { settings }
         );
       } catch (coverErr) {
-        await unpublishBookFromMarketplace({ bookId: stored.id, format }, { settings }).catch(() => {});
-        throw new MarketplaceBridgeError(
-          `Обкладинку не вдалося прикріпити (${(coverErr as Error)?.message || 'невідома причина'}). ` +
-            `Редакцію «${format}» знято з вітрини, щоб там не лишилась картка без зображення.`,
-          'rejected',
-          502
-        );
+        coverErrorUk =
+          `Обкладинку не вдалося покласти у сховище маркетплейсу ` +
+          `(${(coverErr as Error)?.message || 'невідома причина'}). ` +
+          `У картці вона показується посиланням на Студію.`;
       }
 
       const sample = await readArtifact(stored.id, 'sample', format);
@@ -729,6 +778,9 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
         format,
         published,
         attached,
+        fileErrorUk,
+        coverUrl,
+        coverErrorUk,
         cover: coverAttached,
         sample: sample
           ? { pages: sample.record.pageCount, attached: sampleAttached, errorUk: sampleErrorUk }

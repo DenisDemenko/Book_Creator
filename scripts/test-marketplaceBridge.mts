@@ -138,10 +138,30 @@ console.log('\nНадсилання файла книги:');
   try {
     await bridge.attachBookFileToMarketplace(
       { bookId: 'x', format: 'digital', filename: 'a.pdf', mimeType: 'application/pdf', bytes },
-      { fetch: mk(404), settings });
+      { fetch: mk(404, JSON.stringify({ message: 'Книгу не знайдено в каталозі — спершу опублікуйте її' })), settings });
   } catch (e) { notFound = e; }
-  t('404 → зрозуміла порада опублікувати спершу',
+  t('404 із тілом приймача → порада опублікувати спершу',
     /спершу опублікуйте/.test(String(notFound?.message)), String(notFound?.message));
+
+  /*
+    Два різні 404. Коли задеплоєний маркетплейс СТАРІШИЙ за міст, маршруту
+    `/file` у нього немає взагалі, і Nest віддає власне «Cannot POST …».
+    Порада «спершу опублікуйте книгу» в цьому випадку відправляє шукати
+    проблему не туди: картка у вітрині вже стоїть. Саме так і сталося на
+    живому прогоні 03.09.2026 — звідси ця перевірка.
+  */
+  let routeGone: any = null;
+  try {
+    await bridge.attachBookFileToMarketplace(
+      { bookId: 'x', format: 'digital', filename: 'a.pdf', mimeType: 'application/pdf', bytes },
+      { fetch: mk(404, JSON.stringify({ message: 'Cannot POST /bridge/books/x%3Adigital/file', statusCode: 404 })), settings });
+  } catch (e) { routeGone = e; }
+  t('404 «Cannot POST» → сказано, що приймач старіший за міст',
+    /старіший за міст/.test(String(routeGone?.message)), String(routeGone?.message));
+  t('і названо, що робити — деплой приймача',
+    /деплой приймача/.test(String(routeGone?.message)));
+  t('порада «опублікуйте спершу» тут НЕ звучить',
+    !/спершу опублікуйте/.test(String(routeGone?.message)));
 
   let badType: any = null;
   try {
