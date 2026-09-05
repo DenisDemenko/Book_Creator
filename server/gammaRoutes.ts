@@ -122,13 +122,31 @@ export function registerGammaRoutes(app: Express, deps: GammaRoutesDeps): void {
         role: (req.principal?.role as string) ?? null,
       });
       let themes: unknown = null;
+      /*
+        ЧОМУ ПРИЧИНА ПОВЕРТАЄТЬСЯ, А НЕ ЛИШЕ ГЛУШИТЬСЯ.
+
+        Теми — справді прикраса, і їхня відсутність не має ламати екран; це
+        лишається. Але мовчазний `catch` робив цей маршрут єдиним місцем, де
+        живий виклик до Gamma або вдається, або ні — і зовні ці два випадки
+        виглядали однаково: `themes: null`. Через це «ключ робочий», «ключ
+        недійсний», «тариф без доступу до API» і «Gamma не відповіла» не
+        відрізнялись НІЯК, а саме цим маршрутом ключ і перевіряють перед
+        першою генерацією (05.09.2026 на цьому загубився цілий прогін).
+
+        Тому помилка тепер їде поруч із порожніми темами: екран цілий,
+        причина названа.
+      */
+      let themesErrorUk: string | undefined;
       const client = resolved.apiKey ? deps.makeClient(resolved.apiKey) : null;
       if (client) {
         try {
           themes = await listThemes(client);
-        } catch {
-          // Теми — прикраса вибору; їхня відсутність не має ламати екран.
+        } catch (themesErr) {
           themes = null;
+          themesErrorUk =
+            themesErr instanceof GammaApiError
+              ? themesErr.message
+              : `Gamma не відповіла: ${(themesErr as Error).message}`;
         }
       }
       res.json({
@@ -140,6 +158,8 @@ export function registerGammaRoutes(app: Express, deps: GammaRoutesDeps): void {
         reasonUk: resolved.reasonUk ?? cfg.reasonUk,
         kinds: Object.entries(KINDS).map(([id, v]) => ({ id, ...v })),
         themes,
+        /* Порожньо, коли теми прийшли. Заповнено — отже, ключ до Gamma не дійшов. */
+        themesErrorUk,
         limits: LIMITS,
         // Залишок денної квоти з заголовків останньої відповіді Gamma.
         // Єдине джерело правди про те, скільки ще можна зробити сьогодні.
