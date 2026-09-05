@@ -232,7 +232,9 @@ export const PublishingHubView: React.FC<PublishingHubViewProps> = ({
       {tab === 'etsy' && <EtsyPanel book={book} isGuest={isGuest} />}
       {tab === 'bundle' && <BundlePanel isGuest={isGuest} />}
       {tab === 'research' && <ResearchPanel copy={copy} copiedKey={copiedKey} isGuest={isGuest} />}
-      {tab === 'vitryna' && <VitrynaPanel book={book} isGuest={isGuest} />}
+      {tab === 'vitryna' && (
+        <VitrynaPanel book={book} isGuest={isGuest} onNavigateToTab={onNavigateToTab} />
+      )}
       {tab === 'gamma' && <GammaPanel book={book} isGuest={isGuest} />}
     </div>
   );
@@ -277,7 +279,11 @@ interface EditionResult {
   warningsUk?: string[];
 }
 
-const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGuest }) => {
+const VitrynaPanel: React.FC<{
+  book: Book;
+  isGuest: boolean;
+  onNavigateToTab: (tab: NavigationTab) => void;
+}> = ({ book, isGuest, onNavigateToTab }) => {
   const [variant, setVariant] = useState<'code' | 'design'>('code');
   const [withPrint, setWithPrint] = useState(true);
   const [trimId, setTrimId] = useState('6x9');
@@ -886,6 +892,10 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
           reasonUk={[connecting.reasonUk, connecting.fixUk].filter(Boolean).join(' ')}
           onClose={() => setConnecting(null)}
           onConnected={() => void loadEngines(connecting.id)}
+          onOpenSubscription={() => {
+            setConnecting(null);
+            onNavigateToTab('subscription');
+          }}
         />
       )}
     </div>

@@ -7,6 +7,8 @@ interface GammaKeyModalProps {
   onClose: () => void;
   /** Викликається після успішного підключення: перелік рушіїв треба перепитати. */
   onConnected: () => void;
+  /** Перехід на екран підписки. Без нього лишається лише текст вимоги. */
+  onOpenSubscription?: () => void;
 }
 
 /**
@@ -34,10 +36,17 @@ export const GammaKeyModal: React.FC<GammaKeyModalProps> = ({
   reasonUk,
   onClose,
   onConnected,
+  onOpenSubscription,
 }) => {
   const [apiKey, setApiKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /*
+    Відмова через тариф СТУДІЇ — окремо від решти помилок, бо це єдина з них,
+    яку не виправити іншим ключем. Автор має піти на підписку, і кнопка туди
+    з'являється просто в тексті помилки.
+  */
+  const [planRequired, setPlanRequired] = useState(false);
 
   const connect = async () => {
     const key = apiKey.trim();
@@ -62,6 +71,7 @@ export const GammaKeyModal: React.FC<GammaKeyModalProps> = ({
         // Сервер уже сходив у Gamma й знає, ЩО саме не так: не той ключ,
         // тариф без доступу до API, немає чим шифрувати. Його текст
         // конкретніший за будь-який наш загальний, тож показуємо його.
+        if (data?.kind === 'plan_required') setPlanRequired(true);
         throw new Error(data?.error || `Помилка ${res.status}`);
       }
       // Поле не лишаємо заповненим ні на мить: ключ уже на сервері, а тут
@@ -154,6 +164,30 @@ export const GammaKeyModal: React.FC<GammaKeyModalProps> = ({
               Генерація коштує кредитів: дек на 9 карток зі звичайними ілюстраціями — приблизно
               27–162 кредити, без ілюстрацій 9–27. Верстка книги — теж генерація.
             </p>
+            {/*
+              Тарифів тут ДВА, і плутати їх — найшвидший спосіб зайти в глухий
+              кут: підписка Gamma відкриває їхній API, підписка Студії відкриває
+              сам рушій. Робочий ключ Gamma на безкоштовному тарифі Студії
+              все одно отримає відмову, тож сказати про це треба ДО того, як
+              автор піде по ключ, а не після.
+            */}
+            <p className="text-[11px] leading-relaxed text-slate-300">
+              І окремо про наш бік: рушій Gamma доступний на тарифах Студії{' '}
+              <span className="text-slate-100">Pro</span> та{' '}
+              <span className="text-slate-100">Ultra</span>. На безкоштовному навіть дійсний ключ
+              отримає відмову.
+              {onOpenSubscription && (
+                <>
+                  {' '}
+                  <button
+                    onClick={onOpenSubscription}
+                    className="text-cyan-300/80 hover:text-cyan-200 underline underline-offset-2"
+                  >
+                    Переглянути тарифи
+                  </button>
+                </>
+              )}
+            </p>
           </div>
 
           <div className="space-y-2">
@@ -188,9 +222,17 @@ export const GammaKeyModal: React.FC<GammaKeyModalProps> = ({
           </div>
 
           {error && (
-            <p className="text-[11px] leading-relaxed text-rose-300 border border-rose-500/25 bg-rose-500/[0.06] rounded-xl p-3">
-              {error}
-            </p>
+            <div className="text-[11px] leading-relaxed text-rose-300 border border-rose-500/25 bg-rose-500/[0.06] rounded-xl p-3 space-y-2">
+              <p>{error}</p>
+              {planRequired && onOpenSubscription && (
+                <button
+                  onClick={onOpenSubscription}
+                  className="px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-cyan-500/15 border border-cyan-500/50 text-cyan-200 hover:bg-cyan-500/25 transition"
+                >
+                  Перейти до підписки
+                </button>
+              )}
+            </div>
           )}
         </div>
 
