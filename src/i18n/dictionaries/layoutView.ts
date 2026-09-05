@@ -84,6 +84,9 @@ export const layoutView = {
     kdpStatusOk: '✓ Поля валідні',
     kdpStatusWarn: '⚠️ Мін. корінець {n} мм',
     checkInKdpInspectorBtn: 'Перевірити книгу в KDP Інспекторі',
+    sheetZoomLabel: 'Масштаб аркуша',
+    sheetZoomCustomOpt: 'Свій %',
+    sheetZoomCustomHint: 'Введіть свій відсоток (10–200) і натисніть Enter',
   },
   en: {
     mmUnit: 'mm',
@@ -170,5 +173,8 @@ export const layoutView = {
     kdpStatusOk: '✓ Margins valid',
     kdpStatusWarn: '⚠️ Min. gutter {n} mm',
     checkInKdpInspectorBtn: 'Check the book in the KDP Inspector',
+    sheetZoomLabel: 'Sheet zoom',
+    sheetZoomCustomOpt: 'Custom %',
+    sheetZoomCustomHint: 'Type your percent (10–200) and press Enter',
   },
 };

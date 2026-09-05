@@ -7,6 +7,7 @@ import {
   FileSpreadsheet, 
   Check, 
   Maximize2, 
+  ZoomIn,
   Layers, 
   Sparkles,
   Info,
@@ -36,10 +37,17 @@ interface LayoutViewProps {
   totalWords: number;
 }
 
+// Розмір превʼю-аркуша (колишні Tailwind-класи w-64 h-96) та дозволені масштаби.
+const SHEET_W = 256;
+const SHEET_H = 384;
+const ZOOM_PRESETS = [20, 50, 70, 80, 90, 100, 110, 120, 150];
+
 export const LayoutView: React.FC<LayoutViewProps> = ({ book, onUpdateBook, totalWords }) => {
   const { t } = useLanguage();
   const layout = book.layoutConfig;
   const [showKdpModal, setShowKdpModal] = useState<boolean>(false);
+  const [sheetZoom, setSheetZoom] = useState<number>(100);
+  const [customZoom, setCustomZoom] = useState<string>('');
 
   // Calculate estimated total pages dynamically
   const estimatedPages = estimatePageCount(
@@ -115,7 +123,7 @@ export const LayoutView: React.FC<LayoutViewProps> = ({ book, onUpdateBook, tota
             <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
               {t('layoutView.headerBadge')}
             </span>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
               <BookOpen className="w-3 h-3" />
               <span>{t('layoutView.kdpReadyBadge', { n: String(kdpReport.overallScore) })}</span>
             </span>
@@ -223,7 +231,7 @@ export const LayoutView: React.FC<LayoutViewProps> = ({ book, onUpdateBook, tota
                 <LayoutTemplate className="w-3.5 h-3.5" />
                 {t('layoutView.section1Heading')}
               </h3>
-              <span className="text-[11px] text-amber-300/80 font-mono">
+              <span className="text-[11px] text-emerald-300/80 font-mono">
                 {t('layoutView.recommendedNote')}
               </span>
             </div>
@@ -245,7 +253,7 @@ export const LayoutView: React.FC<LayoutViewProps> = ({ book, onUpdateBook, tota
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-bold">{preset.label}</span>
                         {preset.kdpTag && (
-                          <span className="px-1.5 py-0.2 rounded text-[9px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                          <span className="px-1.5 py-0.2 rounded text-[9px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
                             {preset.kdpTag}
                           </span>
                         )}
@@ -363,7 +371,7 @@ export const LayoutView: React.FC<LayoutViewProps> = ({ book, onUpdateBook, tota
                       margins: { ...layout.margins, bleedMm: Number(e.target.value) },
                     })
                   }
-                  className="w-20 p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-amber-300 font-mono text-center"
+                  className="w-20 p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-emerald-300 font-mono text-center"
                 />
               </div>
 
@@ -625,8 +633,77 @@ export const LayoutView: React.FC<LayoutViewProps> = ({ book, onUpdateBook, tota
               </span>
             </div>
 
-            {/* Simulated Paper Sheet */}
-            <div className="relative w-64 h-96 bg-white text-slate-900 rounded shadow-2xl p-4 flex flex-col justify-between overflow-hidden border border-slate-300">
+            {/* Масштаб аркуша: вибір зі списку або власний відсоток */}
+            <div className="flex items-center justify-center gap-2 w-full text-xs">
+              <ZoomIn className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <span className="text-slate-400">{t('layoutView.sheetZoomLabel')}</span>
+              <select
+                value={ZOOM_PRESETS.includes(sheetZoom) ? String(sheetZoom) : 'custom'}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value === 'custom') {
+                    setCustomZoom(String(sheetZoom));
+                  } else {
+                    setSheetZoom(Number(value));
+                  }
+                }}
+                className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-200"
+              >
+                {ZOOM_PRESETS.map((zoom) => (
+                  <option key={zoom} value={zoom}>
+                    {zoom}%
+                  </option>
+                ))}
+                <option value="custom">{t('layoutView.sheetZoomCustomOpt')}</option>
+              </select>
+              {!ZOOM_PRESETS.includes(sheetZoom) && (
+                <input
+                  type="number"
+                  min={10}
+                  max={200}
+                  value={customZoom}
+                  placeholder="%"
+                  onChange={(e) => setCustomZoom(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      const parsed = Number(customZoom);
+                      if (Number.isFinite(parsed) && parsed >= 10 && parsed <= 200) {
+                        setSheetZoom(Math.round(parsed));
+                      }
+                    }
+                  }}
+                  onBlur={() => {
+                    const parsed = Number(customZoom);
+                    if (Number.isFinite(parsed) && parsed >= 10 && parsed <= 200) {
+                      setSheetZoom(Math.round(parsed));
+                    }
+                  }}
+                  className="w-20 p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-cyan-300 font-mono text-center"
+                  title={t('layoutView.sheetZoomCustomHint')}
+                />
+              )}
+            </div>
+
+            {/* Simulated Paper Sheet — масштабується transform-ом разом із
+                вмістом; обгортка резервує розмір, щоб кнопка нижче не
+                наїжджала на аркуш. */}
+            <div className="w-full overflow-x-auto">
+              <div
+                className="mx-auto"
+                style={{
+                  width: Math.round((SHEET_W * sheetZoom) / 100),
+                  height: Math.round((SHEET_H * sheetZoom) / 100),
+                }}
+              >
+                <div
+                  className="relative bg-white text-slate-900 rounded shadow-2xl p-4 flex flex-col justify-between overflow-hidden border border-slate-300"
+                  style={{
+                    width: SHEET_W,
+                    height: SHEET_H,
+                    transform: `scale(${sheetZoom / 100})`,
+                    transformOrigin: 'top left',
+                  }}
+                >
               
               {/* Margins box guide overlay */}
               <div
@@ -671,20 +748,22 @@ export const LayoutView: React.FC<LayoutViewProps> = ({ book, onUpdateBook, tota
               <div className="text-center border-t border-slate-200 pt-1 text-[8px] text-slate-500 font-mono">
                 — 15 —
               </div>
+                </div>
+              </div>
             </div>
 
             <div className="space-y-1 text-center">
               <p className="text-[11px] text-slate-400">
                 {t('layoutView.captionText', { n: String(layout.margins.insideMm) })}
               </p>
-              <div className="text-[10px] text-amber-300 font-mono">
+              <div className="text-[10px] text-emerald-300 font-mono">
                 {t('layoutView.kdpStatusLabel')}{isGutterCompliant ? t('layoutView.kdpStatusOk') : t('layoutView.kdpStatusWarn', { n: String(gutterSpec.minMm) })}
               </div>
             </div>
 
             <button
               onClick={() => setShowKdpModal(true)}
-              className="w-full py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-amber-500/40 text-amber-300 font-bold text-xs transition-colors flex items-center justify-center gap-2"
+              className="w-full py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-emerald-500/40 text-emerald-300 font-bold text-xs transition-colors flex items-center justify-center gap-2"
             >
               <ShieldCheck className="w-4 h-4" />
               <span>{t('layoutView.checkInKdpInspectorBtn')}</span>
