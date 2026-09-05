@@ -3980,6 +3980,44 @@ ${JSON.stringify(bookContext || {}, null, 2)}
     });
   });
 
+  // Лендінг Студії — статична сторінка `public/about/index.html`
+  // (у проді vite копіює її в `dist/about/`). Два маршрути, а не один,
+  // через префікс: за маркетплейсом сторінка живе під /studio/about, і
+  // Nova про цей префікс не знає. Тому:
+  //
+  //  * `/about/` віддаємо файлом напряму — усі посилання всередині
+  //    сторінки відносні («./about.css», «../» на сам застосунок), тож із
+  //    завершальною скісною вони однаково правильні і під /studio/about/,
+  //    і на власному домені Nova;
+  //  * `/about` без скісної НЕ редиректимо кодом 301, як зробив би
+  //    express.static: його Location був би абсолютним «/about/», і
+  //    браузер із fusionlab.in.ua/studio/about пішов би на
+  //    fusionlab.in.ua/about/ — на маркетплейсі це 404. Замість цього
+  //    віддаємо крихітну сторінку з відносним переходом на «about/»,
+  //    який правильний під будь-яким префіксом.
+  //
+  // Маршрут один, а не два: Express за замовчуванням не розрізняє «/about»
+  // і «/about/» (strict routing вимкнено), тож два окремі `app.get` дали б
+  // перехідну сторінку на обидві адреси — і браузер зациклився б на
+  // «about/» → «about/about/». Тому розрізняємо самі, за req.path, який
+  // завершальну скісну зберігає.
+  //
+  // Маршрут стоїть перед express.static і catch-all SPA — інакше його
+  // перехопили б вони.
+  app.get(['/about', '/about/'], (req, res) => {
+    if (req.path.endsWith('/')) {
+      const root = process.env.NODE_ENV === 'production' ? 'dist' : 'public';
+      res.sendFile(path.join(process.cwd(), root, 'about', 'index.html'));
+      return;
+    }
+    res
+      .type('html')
+      .send(
+        '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=about/">' +
+          '<title>Fusion Lab Studio</title><a href="about/">Fusion Lab Studio</a>'
+      );
+  });
+
   // Vite middleware setup
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

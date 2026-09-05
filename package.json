@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=esm --packages=external --sourcemap --outfile=dist/server.mjs",
+    "build:landing": "npx -y tailwindcss@3.4.17 -c scripts/landing/tailwind.config.cjs -i scripts/landing/input.css -o public/about/about.css --minify",
     "start": "node dist/server.mjs",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",

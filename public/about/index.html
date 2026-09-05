@@ -1,0 +1,1172 @@
+<!DOCTYPE html>
+
+<html class="light scroll-smooth" lang="uk"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Fusion Lab Studio — Платформа для письменників: ШІ-коуч, критик та публікація</title>
+<meta content="Fusion Lab Studio — середовище створення книги від ідеї до публікації: ШІ-коуч, літературний критик, ілюстрації, верстка та експорт у PDF, DOCX і EPUB." name="description"/>
+<meta content="Fusion Lab Studio — платформа для письменників" property="og:title"/>
+<meta content="ШІ-коуч, літературний критик і публікація — від першого розділу до готового видання." property="og:description"/>
+<meta content="./logo.png" property="og:image"/>
+<meta content="website" property="og:type"/>
+<link href="./logo.png" rel="icon" type="image/png"/>
+<!-- Google Fonts & Material Symbols -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,500;0,8..60,600;0,8..60,700;1,8..60,400&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind: скомпільований статичний CSS замість cdn.tailwindcss.com.
+     CDN-скрипт — це JIT-компілятор у браузері (сотні КБ + спалах нестилізованої
+     сторінки), він не для проду. Конфіг макета лежить у scripts/landing/,
+     файл нижче перезбирається командою `npm run build:landing`. -->
+<link href="./about.css" rel="stylesheet"/>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      display: inline-block;
+      vertical-align: middle;
+      line-height: 1;
+    }
+    
+    /* Liquid Glass Custom Refractions & Caustics */
+    .glass-pill-amber {
+      background: linear-gradient(135deg, #eb6834 0%, #d97757 45%, #c6613f 100%);
+      box-shadow: 
+        inset 0 1.5px 1px 0 rgba(255, 255, 255, 0.85),
+        inset 0 -1.5px 2px 0 rgba(0, 0, 0, 0.25),
+        0 8px 24px -3px rgba(217, 119, 87, 0.5),
+        0 2px 6px rgba(0, 0, 0, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.6);
+    }
+    .glass-pill-amber::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background: linear-gradient(180deg, rgba(255,255,255,0.45) 0%, rgba(255,255,255,0.08) 48%, rgba(0,0,0,0.12) 100%);
+      pointer-events: none;
+    }
+
+    .glass-pill-cyan {
+      background: linear-gradient(135deg, rgba(255,255,255,0.85) 0%, rgba(220,238,255,0.7) 100%);
+      box-shadow: 
+        inset 0 1.5px 1px 0 rgba(255, 255, 255, 0.95),
+        inset 0 -1.5px 2px 0 rgba(57, 135, 229, 0.25),
+        0 8px 22px -3px rgba(57, 135, 229, 0.35),
+        0 2px 6px rgba(0, 0, 0, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.85);
+    }
+
+    .glass-pill-blue-deep {
+      background: linear-gradient(180deg, #388bfd 0%, #1754c0 100%);
+      box-shadow: 
+        inset 0 1.5px 1px 0 rgba(255, 255, 255, 0.75),
+        inset 0 -1px 2px 0 rgba(0, 0, 0, 0.35),
+        0 8px 20px -3px rgba(57, 135, 229, 0.45);
+      border: 1px solid rgba(255, 255, 255, 0.5);
+    }
+
+    .glass-trough {
+      background: rgba(255, 255, 255, 0.65);
+      backdrop-filter: blur(16px) saturate(180%);
+      -webkit-backdrop-filter: blur(16px) saturate(180%);
+      box-shadow: 
+        inset 0 1.5px 2px rgba(255, 255, 255, 0.95),
+        inset 0 -1.5px 2px rgba(11, 11, 11, 0.05),
+        0 10px 25px -5px rgba(11, 11, 11, 0.06),
+        0 4px 10px -2px rgba(11, 11, 11, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.85);
+    }
+
+    .glass-specular-lens {
+      position: relative;
+      background: rgba(255, 255, 255, 0.72);
+      backdrop-filter: blur(16px) saturate(160%);
+      border: 1px solid rgba(255, 255, 255, 0.88);
+      box-shadow: 
+        inset 0 1.5px 1.5px 0 rgba(255, 255, 255, 0.98),
+        inset 0 -1.5px 1.5px 0 rgba(11, 11, 11, 0.04),
+        0 16px 36px -8px rgba(11, 11, 11, 0.07),
+        0 0 0 1px rgba(255, 255, 255, 0.4);
+    }
+
+    .prismatic-caustic-halo {
+      position: absolute;
+      inset: -4px;
+      border-radius: inherit;
+      background: radial-gradient(ellipse at 80% 90%, rgba(57,135,229,0.3) 0%, transparent 60%),
+                  radial-gradient(ellipse at 15% 90%, rgba(217,119,87,0.35) 0%, transparent 60%),
+                  radial-gradient(ellipse at 50% 110%, rgba(27,175,122,0.25) 0%, transparent 70%);
+      z-index: -1;
+      filter: blur(8px);
+      pointer-events: none;
+    }
+
+    .squish-click {
+      transition: transform 0.15s cubic-bezier(0.34, 1.3, 0.64, 1), box-shadow 0.15s ease;
+    }
+    .squish-click:active {
+      transform: scale(0.965);
+    }
+</style>
+</head>
+<body class="bg-background text-on-surface antialiased selection:bg-primary-fixed selection:text-on-primary-fixed min-h-screen relative overflow-x-hidden">
+<!-- Ambient Light Stage / Warm-Cool Atmosphere Mesh -->
+<div class="fixed inset-0 pointer-events-none z-0 overflow-hidden">
+<div class="absolute -top-[20%] left-1/4 w-[750px] h-[750px] rounded-full bg-gradient-to-br from-flame-amber/15 via-coral-radiance/10 to-transparent blur-3xl"></div>
+<div class="absolute top-[35%] -right-[15%] w-[650px] h-[650px] rounded-full bg-gradient-to-bl from-electric-cyan/15 via-secondary-fixed/20 to-transparent blur-3xl"></div>
+<div class="absolute top-[65%] left-[10%] w-[600px] h-[600px] rounded-full bg-gradient-to-tr from-flame-amber/10 via-primary-fixed/20 to-transparent blur-3xl"></div>
+<div class="absolute bottom-[5%] left-[5%] w-[500px] h-[500px] rounded-full bg-gradient-to-tr from-tertiary-fixed-dim/20 via-surface-container/40 to-transparent blur-3xl"></div>
+</div>
+<!-- 1. Navigation Bar (TopNavBar) -->
+<header class="docked full-width top-0 sticky z-50 bg-glass-surface backdrop-blur-md shadow-[0_10px_25px_-5px_rgba(11,11,11,0.08)] transition-all border-b border-glass-border">
+<div class="flex justify-between items-center w-full px-col-gutter md:px-pad-xl max-w-container-max mx-auto h-16">
+<!-- Brand & Left Cluster -->
+<div class="flex items-center gap-gap-spacious">
+<a class="flex items-center gap-pad-sm group active:scale-[0.975] transition-transform duration-150 ease-out" href="#hero">
+<img alt="Fusion Lab Studio Logo" class="w-10 h-10 object-contain drop-shadow-sm group-hover:rotate-3 transition-transform duration-300 rounded-lg" src="./logo.png"/>
+<span class="text-headline-sm font-headline-sm font-semibold tracking-tight text-on-surface">Fusion Lab Studio</span>
+</a>
+<!-- Search Bar with glass style -->
+<div class="hidden xl:flex items-center relative pl-pad-md">
+<div class="glass-trough h-10 rounded-full flex items-center pl-pad-md pr-pad-xs gap-pad-xs border border-glass-border">
+<span class="material-symbols-outlined text-text-muted text-base" data-icon="search">search</span>
+<input aria-label="Перейти до розділу сторінки" autocomplete="off" class="bg-transparent border-none focus:outline-none focus:ring-0 text-body-md font-body-md text-text-ink placeholder:text-text-muted w-40" id="section-jump" list="section-list" placeholder="Пошук..." type="text"/>
+<datalist id="section-list">
+<option value="Проблема"></option>
+<option value="Рішення"></option>
+<option value="Можливості"></option>
+<option value="Для досвідчених"></option>
+<option value="Архітектура ШІ"></option>
+<option value="Переваги"></option>
+<option value="Тарифи"></option>
+<option value="Дорожня карта"></option>
+<option value="Метрики"></option>
+<option value="Ринок і публікація"></option>
+<option value="Висновок"></option>
+</datalist>
+<div class="h-4 w-px bg-outline-variant/60"></div>
+<button aria-label="Перейти до розділу" class="w-7 h-7 rounded-full bg-surface-container-lowest/80 hover:bg-surface-container-lowest flex items-center justify-center text-text-ink squish-click shadow-sm" id="section-jump-go" type="button">
+<span class="material-symbols-outlined text-sm font-semibold" data-icon="arrow_forward">arrow_forward</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Menu Items -->
+<nav class="hidden lg:flex items-center gap-4 xl:gap-5 text-[13px] font-medium font-label-pill">
+<a class="text-on-surface-variant hover:text-primary transition-colors" href="#problem">Проблема</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors" href="#solution">Рішення</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors" href="#features-beginners">Можливості</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors" href="#architecture">Архітектура ШІ</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors" href="#advantages">Переваги</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors" href="#pricing">Тарифи</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors" href="#roadmap">Дорожня карта</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors" href="#metrics">Метрики</a>
+</nav>
+<!-- Trailing Action Buttons -->
+<div class="flex items-center gap-pad-sm">
+<a class="hidden sm:inline-flex items-center justify-center h-10 px-pad-lg rounded-full text-label-pill font-label-pill font-medium text-text-ink glass-pill-cyan squish-click" href="#pricing">
+        Pro план
+      </a>
+<a class="relative inline-flex items-center justify-center h-10 px-pad-lg md:px-pad-xl rounded-full text-label-pill font-label-pill font-medium text-on-primary glass-pill-amber squish-click overflow-hidden" href="../">
+<span class="relative z-10 flex items-center gap-1.5">
+          Увійти в Студію
+        </span>
+</a>
+</div>
+</div>
+</header>
+<main class="relative z-10">
+<!-- 2. Hero Section (Slide 1 - IMAGE_13) -->
+<section class="max-w-container-max mx-auto px-col-gutter md:px-pad-xl pt-pad-3xl pb-pad-2xl text-center relative" id="hero">
+<!-- Badge -->
+<div class="inline-flex items-center gap-pad-sm px-pad-lg py-pad-xs rounded-full glass-trough mb-pad-xl border border-glass-border shadow-sm">
+<span class="w-2.5 h-2.5 rounded-full bg-flame-amber animate-pulse"></span>
+<span class="text-label-code font-label-code text-on-surface-variant uppercase tracking-wider font-semibold">FUSION LAB STUDIO • ПЛАТФОРМА ДЛЯ ПИСЬМЕННИКІВ</span>
+</div>
+<!-- Title -->
+<h1 class="font-display-hero text-display-hero-mobile md:text-display-hero text-on-surface max-w-4xl mx-auto tracking-tight mb-pad-lg">
+      Платформа для <span class="text-primary italic font-headline-lg">письменників</span>
+</h1>
+<!-- Subtitle -->
+<p class="font-body-prose-lg text-body-prose-lg text-text-muted max-w-3xl mx-auto mb-pad-2xl leading-relaxed">
+      Опис продукту — ШІ-коуч, літературний критик та публікація на глобальних маркетплейсах.
+    </p>
+<!-- Glassmorphism CTAs -->
+<div class="flex flex-wrap items-center justify-center gap-pad-lg mb-pad-2xl">
+<a class="relative h-13 px-9 py-3.5 rounded-full text-headline-sm font-headline-sm font-medium text-on-primary glass-pill-amber squish-click flex items-center gap-2" href="../">
+<span>Почати писати</span>
+<span class="material-symbols-outlined text-sm font-semibold" data-icon="arrow_forward">arrow_forward</span>
+</a>
+<a class="relative h-13 px-8 py-3.5 rounded-full text-headline-sm font-headline-sm font-medium text-text-ink glass-pill-cyan squish-click flex items-center gap-2" href="#features-beginners">
+<span>Дізнатися більше</span>
+<span class="material-symbols-outlined text-sm" data-icon="expand_more">expand_more</span>
+</a>
+</div>
+<!-- Liquid Specimen Preview Instrument -->
+<div class="relative max-w-3xl mx-auto p-pad-lg rounded-xl glass-specular-lens border border-white/80 shadow-[0_20px_50px_-15px_rgba(0,0,0,0.08)]">
+<div class="prismatic-caustic-halo"></div>
+<div class="flex items-center justify-between border-b border-glass-border-dark pb-3 mb-4 text-left">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-flame-amber" data-icon="auto_stories">auto_stories</span>
+<span class="font-title-card text-title-card font-semibold text-on-surface">Інтелектуальна лабораторія письма</span>
+</div>
+<span class="text-label-code font-label-code text-flame-amber bg-flame-amber/10 px-3 py-1 rounded-full">ШІ-Коуч &amp; Критик Онлайн</span>
+</div>
+<div class="flex flex-col sm:flex-row items-center justify-between gap-4 text-left bg-surface-container-lowest/70 p-4 rounded-lg border border-glass-border">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-full glass-pill-amber flex items-center justify-center text-white font-bold text-sm">ШІ</div>
+<div>
+<p class="text-title-card font-medium text-on-surface">Персональний наставник</p>
+<p class="text-body-sm text-text-muted">Адаптується під авторський стиль у реальному часі</p>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<span class="text-label-code font-semibold text-tertiary bg-tertiary-fixed-dim/30 px-3 py-1.5 rounded-full flex items-center gap-1">
+<span class="material-symbols-outlined text-sm" data-icon="check_circle">check_circle</span> Толерантна критика
+          </span>
+</div>
+</div>
+</div>
+</section>
+<!-- 3. The Problem Section (Slide 2 - IMAGE_12) -->
+<section class="max-w-container-max mx-auto px-col-gutter md:px-pad-xl py-pad-3xl" id="problem">
+<div class="text-center max-w-3xl mx-auto mb-pad-2xl">
+<span class="text-label-code font-label-code uppercase tracking-widest text-primary font-semibold">Виклики творчого шляху</span>
+<h2 class="font-headline-lg text-headline-lg-mobile md:text-headline-lg text-on-surface mt-pad-xs mb-pad-sm">
+        Проблема: Бар'єри на шляху до письменництва
+      </h2>
+<p class="font-body-prose-lg text-body-prose-lg text-text-muted leading-relaxed">
+        Письменництво залишається однією з найбільш недоступних творчих дисциплін. Початківці стикаються з паралічем чистого аркуша, невпевненістю в якості свого письма та відсутністю конструктивного зворотного зв'язку. Досвідчені письменники, навпаки, потребують глибокого аналізу своєї роботи та можливості постійного розвитку навичок.
+      </p>
+</div>
+<!-- 3 Glass Cards -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-gap-spacious">
+<div class="rounded-xl glass-specular-lens p-pad-xl flex flex-col justify-between hover:shadow-xl transition-all border border-glass-border">
+<div>
+<div class="w-12 h-12 rounded-2xl glass-pill-amber flex items-center justify-center text-white mb-pad-lg">
+<span class="material-symbols-outlined text-2xl" data-icon="edit_off">edit_off</span>
+</div>
+<span class="text-label-code font-label-code text-flame-amber font-semibold uppercase">Бар'єр початку</span>
+<h3 class="font-headline-md text-headline-md text-on-surface mt-1 mb-pad-xs">Для початківців</h3>
+<p class="font-body-md text-body-md text-text-muted leading-relaxed">
+<strong class="text-primary font-semibold">73% потенційних авторів</strong> ніколи не розпочинають писати через страх перед критикою та невпевненість у своїх здібностях.
+          </p>
+</div>
+<div class="mt-pad-lg pt-pad-md border-t border-glass-border-dark flex items-center gap-2 text-label-pill text-text-muted">
+<span class="material-symbols-outlined text-flame-amber text-base" data-icon="priority_high">priority_high</span>
+<span>Параліч чистого аркуша</span>
+</div>
+</div>
+<div class="rounded-xl glass-specular-lens p-pad-xl flex flex-col justify-between hover:shadow-xl transition-all border border-glass-border">
+<div>
+<div class="w-12 h-12 rounded-2xl glass-pill-cyan flex items-center justify-center text-secondary mb-pad-lg">
+<span class="material-symbols-outlined text-2xl" data-icon="psychology">psychology</span>
+</div>
+<span class="text-label-code font-label-code text-secondary font-semibold uppercase">Бар'єр майстерності</span>
+<h3 class="font-headline-md text-headline-md text-on-surface mt-1 mb-pad-xs">Для досвідчених</h3>
+<p class="font-body-md text-body-md text-text-muted leading-relaxed">
+            Відсутність кваліфікованого редакторського зворотного зв'язку та персоналізованого коучингу гальмує професійний розвиток і вихід на новий літературний рівень.
+          </p>
+</div>
+<div class="mt-pad-lg pt-pad-md border-t border-glass-border-dark flex items-center gap-2 text-label-pill text-text-muted">
+<span class="material-symbols-outlined text-secondary text-base" data-icon="trending_down">trending_down</span>
+<span>Дефіцит глибинної критики</span>
+</div>
+</div>
+<div class="rounded-xl glass-specular-lens p-pad-xl flex flex-col justify-between hover:shadow-xl transition-all border border-glass-border">
+<div>
+<div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-error/80 to-coral-radiance flex items-center justify-center text-white mb-pad-lg shadow-[0_8px_20px_-4px_rgba(186,26,26,0.3)]">
+<span class="material-symbols-outlined text-2xl" data-icon="money_off">money_off</span>
+</div>
+<span class="text-label-code font-label-code text-error font-semibold uppercase">Бар'єр індустрії</span>
+<h3 class="font-headline-md text-headline-md text-on-surface mt-1 mb-pad-xs">Спільна проблема</h3>
+<p class="font-body-md text-body-md text-text-muted leading-relaxed">
+            Традиційні редактори дорогі, недоступні та часто не розуміють індивідуальний стиль автора, нав'язуючи шаблонні кліше замість збереження голосу.
+          </p>
+</div>
+<div class="mt-pad-lg pt-pad-md border-t border-glass-border-dark flex items-center gap-2 text-label-pill text-text-muted">
+<span class="material-symbols-outlined text-error text-base" data-icon="block">block</span>
+<span>Висока вартість та суб'єктивність</span>
+</div>
+</div>
+</div>
+</section>
+<!-- 4. The Solution Section (Slide 3 - IMAGE_11) -->
+<section class="max-w-container-max mx-auto px-col-gutter md:px-pad-xl py-pad-3xl bg-surface-container-low/60 rounded-3xl my-pad-xl" id="solution">
+<div class="text-center max-w-3xl mx-auto mb-pad-2xl">
+<span class="text-label-code font-label-code uppercase tracking-widest text-tertiary font-semibold">Новаторський підхід</span>
+<h2 class="font-headline-lg text-headline-lg-mobile md:text-headline-lg text-on-surface mt-pad-xs mb-pad-sm">
+        Рішення: Платформа з ШІ-коучем та критиком
+      </h2>
+<p class="font-body-prose-lg text-body-prose-lg text-text-muted leading-relaxed">
+        Ми пропонуємо інтегровану платформу, яка поєднує інтелектуальний ШІ-коуч для навчання та толерантного літературного критика для розвитку. Платформа адаптується до рівня користувача — від першого слова до публікації.
+      </p>
+</div>
+<!-- 3 Glass Cards -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-gap-spacious">
+<div class="rounded-xl glass-trough p-pad-xl flex flex-col justify-between border border-glass-border hover:border-flame-amber/40 transition-colors">
+<div>
+<div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-flame-amber/15 text-primary text-label-code font-semibold mb-pad-md">
+<span class="material-symbols-outlined text-sm" data-icon="school">school</span>
+<span>Старт без страху</span>
+</div>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-pad-sm">Для початківців</h3>
+<p class="font-body-md text-body-md text-text-muted leading-relaxed">
+            Покроковий коучинг, підказки для подолання творчого блоку, структурування історії та базові техніки письма у доступному форматі діалогу.
+          </p>
+</div>
+<ul class="mt-pad-lg space-y-2 border-t border-glass-border-dark pt-pad-md text-body-sm text-on-surface-variant">
+<li class="flex items-center gap-2">
+<span class="material-symbols-outlined text-tertiary text-base" data-icon="check">check</span> Подолання творчого блоку
+          </li>
+<li class="flex items-center gap-2">
+<span class="material-symbols-outlined text-tertiary text-base" data-icon="check">check</span> Побудова перших сюжетних арок
+          </li>
+</ul>
+</div>
+<div class="rounded-xl glass-trough p-pad-xl flex flex-col justify-between border border-glass-border hover:border-secondary/40 transition-colors">
+<div>
+<div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-secondary-fixed/50 text-secondary text-label-code font-semibold mb-pad-md">
+<span class="material-symbols-outlined text-sm" data-icon="auto_awesome">auto_awesome</span>
+<span>Майстерність стилю</span>
+</div>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-pad-sm">Для досвідчених</h3>
+<p class="font-body-md text-body-md text-text-muted leading-relaxed">
+            Глибокий аналіз стилю, рекомендації щодо розвитку унікального голосу автора, конструктивна критика, яка мотивує та підсилює глибину тексту.
+          </p>
+</div>
+<ul class="mt-pad-lg space-y-2 border-t border-glass-border-dark pt-pad-md text-body-sm text-on-surface-variant">
+<li class="flex items-center gap-2">
+<span class="material-symbols-outlined text-tertiary text-base" data-icon="check">check</span> Оцінка темпоритму та персонажів
+          </li>
+<li class="flex items-center gap-2">
+<span class="material-symbols-outlined text-tertiary text-base" data-icon="check">check</span> Толерантний зворотний зв'язок
+          </li>
+</ul>
+</div>
+<div class="rounded-xl glass-trough p-pad-xl flex flex-col justify-between border border-glass-border hover:border-tertiary/40 transition-colors">
+<div>
+<div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-tertiary-fixed-dim/40 text-tertiary text-label-code font-semibold mb-pad-md">
+<span class="material-symbols-outlined text-sm" data-icon="all_inclusive">all_inclusive</span>
+<span>Універсальна екосистема</span>
+</div>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-pad-sm">Для всіх</h3>
+<p class="font-body-md text-body-md text-text-muted leading-relaxed">
+            Персоналізований навчальний шлях, який еволюціонує разом з користувачем — від першого написаного слова до видання книги на міжнародних маркетплейсах.
+          </p>
+</div>
+<ul class="mt-pad-lg space-y-2 border-t border-glass-border-dark pt-pad-md text-body-sm text-on-surface-variant">
+<li class="flex items-center gap-2">
+<span class="material-symbols-outlined text-tertiary text-base" data-icon="check">check</span> Повна еволюція навичок
+          </li>
+<li class="flex items-center gap-2">
+<span class="material-symbols-outlined text-tertiary text-base" data-icon="check">check</span> Безшовний вихід на публікацію
+          </li>
+</ul>
+</div>
+</div>
+</section>
+<!-- 5. Features for Beginners (Slide 4 - IMAGE_10) -->
+<section class="max-w-container-max mx-auto px-col-gutter md:px-pad-xl py-pad-3xl" id="features-beginners">
+<div class="text-center max-w-3xl mx-auto mb-pad-2xl">
+<span class="text-label-code font-label-code uppercase tracking-widest text-flame-amber font-semibold">Легкий вхід у творчість</span>
+<h2 class="font-headline-lg text-headline-lg-mobile md:text-headline-lg text-on-surface mt-pad-xs mb-pad-sm">
+        Функції для початківців
+      </h2>
+<p class="font-body-md text-body-md text-text-muted">
+        Дві ключові опори підтримки перших літературних кроків
+      </p>
+</div>
+<!-- 2 main columns / glass panels -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-gap-spacious">
+<!-- Column A: Навчання та натхнення -->
+<div class="rounded-xl glass-specular-lens p-pad-xl border border-glass-border flex flex-col justify-between">
+<div>
+<div class="flex items-center gap-3 mb-pad-lg">
+<div class="w-10 h-10 rounded-xl glass-pill-amber flex items-center justify-center text-white">
+<span class="material-symbols-outlined text-xl" data-icon="lightbulb">lightbulb</span>
+</div>
+<h3 class="font-headline-md text-headline-md text-on-surface">Навчання та натхнення</h3>
+</div>
+<div class="space-y-pad-lg">
+<div class="p-pad-md rounded-lg bg-surface-container-lowest/80 border border-glass-border">
+<div class="flex items-center gap-2 text-primary font-semibold text-title-card mb-1">
+<span class="material-symbols-outlined text-lg" data-icon="smart_toy">smart_toy</span>
+<h4>Творчий коуч</h4>
+</div>
+<p class="text-body-md text-text-muted">
+                ШІ-помічник, який допомагає розпочати писання через наведення питань, генерацію ідей та структурування сюжету.
+              </p>
+</div>
+<div class="p-pad-md rounded-lg bg-surface-container-lowest/80 border border-glass-border">
+<div class="flex items-center gap-2 text-primary font-semibold text-title-card mb-1">
+<span class="material-symbols-outlined text-lg" data-icon="psychology_alt">psychology_alt</span>
+<h4>Генератор ідей</h4>
+</div>
+<p class="text-body-md text-text-muted">
+                Підказки для подолання творчого блоку, випадкові промпти для вправ, вибір жанру та тематики.
+              </p>
+</div>
+<div class="p-pad-md rounded-lg bg-surface-container-lowest/80 border border-glass-border">
+<div class="flex items-center gap-2 text-primary font-semibold text-title-card mb-1">
+<span class="material-symbols-outlined text-lg" data-icon="format_list_numbered">format_list_numbered</span>
+<h4>Покроковий модуль</h4>
+</div>
+<p class="text-body-md text-text-muted">
+                Інтерактивні уроки з основ письма — діалог, опис, розвиток персонажів, темп оповідання.
+              </p>
+</div>
+</div>
+</div>
+</div>
+<!-- Column B: Аналіз та підтримка -->
+<div class="rounded-xl glass-specular-lens p-pad-xl border border-glass-border flex flex-col justify-between">
+<div>
+<div class="flex items-center gap-3 mb-pad-lg">
+<div class="w-10 h-10 rounded-xl glass-pill-cyan flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined text-xl" data-icon="support_agent">support_agent</span>
+</div>
+<h3 class="font-headline-md text-headline-md text-on-surface">Аналіз та підтримка</h3>
+</div>
+<div class="space-y-pad-md">
+<div class="p-pad-md rounded-lg bg-surface-container-lowest/80 border border-glass-border">
+<div class="flex items-center gap-2 text-secondary font-semibold text-title-card mb-1">
+<span class="material-symbols-outlined text-lg" data-icon="account_tree">account_tree</span>
+<h4>Структурний помічник</h4>
+</div>
+<p class="text-body-md text-text-muted">
+                Автоматичне розпізнавання структури тексту, пропозиції щодо організації розділів та сцен.
+              </p>
+</div>
+<div class="p-pad-md rounded-lg bg-surface-container-lowest/80 border border-glass-border">
+<div class="flex items-center gap-2 text-secondary font-semibold text-title-card mb-1">
+<span class="material-symbols-outlined text-lg" data-icon="menu_book">menu_book</span>
+<h4>Словник письменника</h4>
+</div>
+<p class="text-body-md text-text-muted">
+                Рекомендації щодо розширення словникового запасу, уникнення повторень, вибір точних слів.
+              </p>
+</div>
+<div class="p-pad-md rounded-lg bg-surface-container-lowest/80 border border-glass-border">
+<div class="flex items-center gap-2 text-secondary font-semibold text-title-card mb-1">
+<span class="material-symbols-outlined text-lg" data-icon="analytics">analytics</span>
+<h4>Аналіз ринку</h4>
+</div>
+<p class="text-body-md text-text-muted">
+                Дослідження популярних жанрів, трендів та потенціалу продажів — ще до початку написання.
+              </p>
+</div>
+<div class="p-pad-md rounded-lg bg-surface-container-lowest/80 border border-glass-border">
+<div class="flex items-center gap-2 text-secondary font-semibold text-title-card mb-1">
+<span class="material-symbols-outlined text-lg" data-icon="sentiment_satisfied">sentiment_satisfied</span>
+<h4>Перша критика</h4>
+</div>
+<p class="text-body-md text-text-muted">
+                М'яка, мотивуюча критика, яка виділяє сильні сторони та пропонує напрями для поліпшення.
+              </p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- 6. Features for Advanced Writers (Slide 5 - IMAGE_9) -->
+<section class="max-w-container-max mx-auto px-col-gutter md:px-pad-xl py-pad-3xl" id="features-advanced">
+<div class="text-center max-w-3xl mx-auto mb-pad-2xl">
+<span class="text-label-code font-label-code uppercase tracking-widest text-secondary font-semibold">Професійний інструментарій</span>
+<h2 class="font-headline-lg text-headline-lg-mobile md:text-headline-lg text-on-surface mt-pad-xs mb-pad-sm">
+        Функції для досвідчених письменників
+      </h2>
+<p class="font-body-md text-body-md text-text-muted">
+        Глибинна аналітика, шліфування голосу та глобальна дистрибуція
+      </p>
+</div>
+<!-- Grid of 6 glass cards with icons -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-gap-spacious">
+<!-- 1 -->
+<div class="rounded-xl glass-specular-lens p-pad-xl border border-glass-border flex flex-col justify-between hover:shadow-lg transition-all">
+<div>
+<div class="w-12 h-12 rounded-2xl glass-pill-amber flex items-center justify-center text-white mb-pad-md">
+<span class="material-symbols-outlined text-2xl" data-icon="psychology">psychology</span>
+</div>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-2">1. Літературний коуч</h3>
+<p class="font-body-md text-body-md text-text-muted leading-relaxed">
+            Глибокий аналіз авторського голосу, стилю та унікальних характеристик письма.
+          </p>
+</div>
+</div>
+<!-- 2 -->
+<div class="rounded-xl glass-specular-lens p-pad-xl border border-glass-border flex flex-col justify-between hover:shadow-lg transition-all">
+<div>
+<div class="w-12 h-12 rounded-2xl glass-pill-cyan flex items-center justify-center text-secondary mb-pad-md">
+<span class="material-symbols-outlined text-2xl" data-icon="rate_review">rate_review</span>
+</div>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-2">2. Розширена критика</h3>
+<p class="font-body-md text-body-md text-text-muted leading-relaxed">
+            Детальна оцінка структури, темпу, психологічної глибини персонажів, тематичної когерентності.
+          </p>
+</div>
+</div>
+<!-- 3 -->
+<div class="rounded-xl glass-specular-lens p-pad-xl border border-glass-border flex flex-col justify-between hover:shadow-lg transition-all">
+<div>
+<div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-secondary to-electric-cyan flex items-center justify-center text-white mb-pad-md shadow-md">
+<span class="material-symbols-outlined text-2xl" data-icon="query_stats">query_stats</span>
+</div>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-2">3. Аналіз ніші</h3>
+<p class="font-body-md text-body-md text-text-muted leading-relaxed">
+            Дослідження конкурентного середовища — аналіз популярних книг, цінових стратегій, трендів жанру та ключових слів.
+          </p>
+</div>
+</div>
+<!-- 4 -->
+<div class="rounded-xl glass-specular-lens p-pad-xl border border-glass-border flex flex-col justify-between hover:shadow-lg transition-all">
+<div>
+<div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-tertiary to-tertiary-fixed-dim flex items-center justify-center text-white mb-pad-md shadow-md">
+<span class="material-symbols-outlined text-2xl" data-icon="model_training">model_training</span>
+</div>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-2">4. Персоналізований розвиток</h3>
+<p class="font-body-md text-body-md text-text-muted leading-relaxed">
+            Визначення слабких місць у письмі та створення цільованих вправ для їх подолання.
+          </p>
+</div>
+</div>
+<!-- 5 -->
+<div class="rounded-xl glass-specular-lens p-pad-xl border border-glass-border flex flex-col justify-between hover:shadow-lg transition-all">
+<div>
+<div class="w-12 h-12 rounded-2xl glass-pill-amber flex items-center justify-center text-white mb-pad-md">
+<span class="material-symbols-outlined text-2xl" data-icon="volunteer_activism">volunteer_activism</span>
+</div>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-2">5. Толерантна критика</h3>
+<p class="font-body-md text-body-md text-text-muted leading-relaxed">
+            Конструктивний зворотний зв'язок, який поважає авторський задум і пропонує альтернативи замість наказів.
+          </p>
+</div>
+</div>
+<!-- 6 -->
+<div class="rounded-xl glass-specular-lens p-pad-xl border border-glass-border flex flex-col justify-between hover:shadow-lg transition-all">
+<div>
+<div class="w-12 h-12 rounded-2xl glass-pill-blue-deep flex items-center justify-center text-white mb-pad-md">
+<span class="material-symbols-outlined text-2xl" data-icon="publish">publish</span>
+</div>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-2">6. Публікація KDP та Etsy</h3>
+<p class="font-body-md text-body-md text-text-muted leading-relaxed">
+            Автоматичне форматування, експорт у EPUB/MOBI/PDF, оптимізація обкладинки та метаданих для максимальної видимості.
+          </p>
+</div>
+</div>
+</div>
+</section>
+<!-- 7. Technical Architecture of AI (Slide 6 - IMAGE_8) -->
+<section class="max-w-container-max mx-auto px-col-gutter md:px-pad-xl py-pad-3xl" id="architecture">
+<div class="text-center max-w-3xl mx-auto mb-pad-2xl">
+<span class="text-label-code font-label-code uppercase tracking-widest text-primary font-semibold">Інженерія та алгоритми</span>
+<h2 class="font-headline-lg text-headline-lg-mobile md:text-headline-lg text-on-surface mt-pad-xs mb-pad-sm">
+        Технічна архітектура ШІ
+      </h2>
+<p class="font-body-md text-body-md text-text-muted">
+        Багаторівнева система інтелектуального аналізу з безумовною повагою до приватності
+      </p>
+</div>
+<!-- Visual Concentric Architecture Hub -->
+<div class="rounded-xl glass-trough p-pad-xl md:p-pad-2xl border border-glass-border mb-pad-xl relative overflow-hidden">
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6 text-center">
+<!-- Layer 1 -->
+<div class="p-pad-lg rounded-xl glass-specular-lens border border-white/80 flex flex-col items-center">
+<div class="w-14 h-14 rounded-full glass-pill-amber flex items-center justify-center text-white mb-3 shadow-md">
+<span class="material-symbols-outlined text-2xl" data-icon="travel_explore">travel_explore</span>
+</div>
+<h3 class="font-title-card text-title-card font-semibold text-on-surface mb-1">Контекстне розуміння</h3>
+<p class="text-body-sm text-text-muted">Жанр, авторський задум, цільова аудиторія та емоційний тон</p>
+</div>
+<!-- Layer 2 -->
+<div class="p-pad-lg rounded-xl glass-specular-lens border border-white/80 flex flex-col items-center">
+<div class="w-14 h-14 rounded-full glass-pill-cyan flex items-center justify-center text-secondary mb-3 shadow-md">
+<span class="material-symbols-outlined text-2xl" data-icon="neurology">neurology</span>
+</div>
+<h3 class="font-title-card text-title-card font-semibold text-on-surface mb-1">Адаптивне навчання</h3>
+<p class="text-body-sm text-text-muted">Персоналізація, відстеження прогресу та еволюція словника</p>
+</div>
+<!-- Layer 3 -->
+<div class="p-pad-lg rounded-xl glass-specular-lens border border-white/80 flex flex-col items-center">
+<div class="w-14 h-14 rounded-full glass-pill-blue-deep flex items-center justify-center text-white mb-3 shadow-md">
+<span class="material-symbols-outlined text-2xl" data-icon="hub">hub</span>
+</div>
+<h3 class="font-title-card text-title-card font-semibold text-on-surface mb-1">Багатомодельна система</h3>
+<p class="text-body-sm text-text-muted">Спеціалізовані ШІ для генерації й аналізу та семантичної верифікації</p>
+</div>
+</div>
+</div>
+<!-- 2 Pillar Cards Below -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-gap-spacious">
+<div class="rounded-xl glass-specular-lens p-pad-xl border border-glass-border flex gap-4 items-start">
+<div class="w-12 h-12 rounded-xl bg-tertiary/10 text-tertiary flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-2xl" data-icon="balance">balance</span>
+</div>
+<div>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-2">Толерантність як алгоритм</h3>
+<p class="font-body-md text-body-md text-text-muted leading-relaxed">
+            Алгоритми критики розроблені так, щоб бути конструктивними, а не деструктивними — з постійним акцентом на розвиток і повагу до авторського задуму.
+          </p>
+</div>
+</div>
+<div class="rounded-xl glass-specular-lens p-pad-xl border border-glass-border flex gap-4 items-start">
+<div class="w-12 h-12 rounded-xl bg-secondary/10 text-secondary flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-2xl" data-icon="shield">shield</span>
+</div>
+<div>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-2">Приватність гарантована</h3>
+<p class="font-body-md text-body-md text-text-muted leading-relaxed">
+            Всі тексти користувачів зберігаються приватно і не використовуються для навчання публічних моделей ШІ без явного дозволу автора.
+          </p>
+</div>
+</div>
+</div>
+</section>
+<!-- 8. Competitive Advantage (Slide 7 - IMAGE_7) -->
+<section class="max-w-container-max mx-auto px-col-gutter md:px-pad-xl py-pad-3xl bg-surface-container-low/50 rounded-3xl" id="advantages">
+<div class="text-center max-w-3xl mx-auto mb-pad-2xl">
+<span class="text-label-code font-label-code uppercase tracking-widest text-primary font-semibold">Унікальність екосистеми</span>
+<h2 class="font-headline-lg text-headline-lg-mobile md:text-headline-lg text-on-surface mt-pad-xs mb-pad-sm">
+        Конкурентна перевага
+      </h2>
+<p class="font-body-md text-body-md text-text-muted">
+        Чому письменники обирають Fusion Lab Studio серед звичайних текстових редакторів та чат-ботів
+      </p>
+</div>
+<!-- 5 Connected Advantage Badges / Cards -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-gap-spacious">
+<div class="p-pad-lg rounded-xl glass-trough border border-glass-border flex items-start gap-3">
+<div class="w-10 h-10 rounded-full glass-pill-amber flex items-center justify-center text-white shrink-0 font-bold">1</div>
+<div>
+<h3 class="font-title-card text-title-card font-semibold text-on-surface mb-1">Дуальна архітектура</h3>
+<p class="text-body-sm text-text-muted">Коучинг і критика в одній платформі для безперервного творчого циклу.</p>
+</div>
+</div>
+<div class="p-pad-lg rounded-xl glass-trough border border-glass-border flex items-start gap-3">
+<div class="w-10 h-10 rounded-full glass-pill-cyan flex items-center justify-center text-secondary shrink-0 font-bold">2</div>
+<div>
+<h3 class="font-title-card text-title-card font-semibold text-on-surface mb-1">Толерантність як ядро</h3>
+<p class="text-body-sm text-text-muted">Критика, що надихає та мотивує, замість деструктивних оцінок.</p>
+</div>
+</div>
+<div class="p-pad-lg rounded-xl glass-trough border border-glass-border flex items-start gap-3">
+<div class="w-10 h-10 rounded-full bg-tertiary-fixed-dim text-on-tertiary-fixed flex items-center justify-center shrink-0 font-bold">3</div>
+<div>
+<h3 class="font-title-card text-title-card font-semibold text-on-surface mb-1">Адаптація до рівня</h3>
+<p class="text-body-sm text-text-muted">Гнучке середовище від першого написаного слова до професійного бестселера.</p>
+</div>
+</div>
+<div class="p-pad-lg rounded-xl glass-trough border border-glass-border flex items-start gap-3">
+<div class="w-10 h-10 rounded-full glass-pill-blue-deep flex items-center justify-center text-white shrink-0 font-bold">4</div>
+<div>
+<h3 class="font-title-card text-title-card font-semibold text-on-surface mb-1">Персоналізація</h3>
+<p class="text-body-sm text-text-muted">Унікальний шлях розвитку та калібрування під індивідуальний стиль кожного автора.</p>
+</div>
+</div>
+<div class="p-pad-lg rounded-xl glass-trough border border-glass-border flex items-start gap-3 md:col-span-2 lg:col-span-2">
+<div class="w-10 h-10 rounded-full bg-flame-amber text-white flex items-center justify-center shrink-0 font-bold">5</div>
+<div>
+<h3 class="font-title-card text-title-card font-semibold text-on-surface mb-1">Спільнота письменників</h3>
+<p class="text-body-sm text-text-muted">Обмін роботами, безпечний пір-рев’ю, спільні проекти та взаємна підтримка авторів однодумців.</p>
+</div>
+</div>
+</div>
+</section>
+<!-- 9. Business Model & Pricing (Slide 8 - IMAGE_6) -->
+<!-- Тарифи. Ціни — реальні плани Студії з server/subscriptions.ts
+     (гривні, місячний рахунок); річна оплата = 10 місячних, тобто два
+     місяці в подарунок. У макеті тут стояли вигадані доларові суми
+     ($0 / $9.99–14.99 / індивідуально) і внутрішні бізнес-прогнози
+     (конверсія 15–20%, ARPU $12) — на публічній сторінці їм не місце. -->
+<section class="max-w-container-max mx-auto px-col-gutter md:px-pad-xl py-pad-3xl" id="pricing">
+<div class="text-center max-w-3xl mx-auto mb-pad-2xl">
+<span class="text-label-code font-label-code uppercase tracking-widest text-secondary font-semibold">Тарифні плани</span>
+<h2 class="font-headline-lg text-headline-lg-mobile md:text-headline-lg text-on-surface mt-pad-xs mb-pad-sm">
+        Тарифи Студії
+      </h2>
+<p class="font-body-md text-body-md text-text-muted">
+        Ціни в гривнях. Річна оплата — десять місячних цін, тобто два місяці в подарунок
+      </p>
+</div>
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-gap-spacious items-stretch">
+<!-- Ліва колонка: чотири реальні плани -->
+<div class="lg:col-span-8 space-y-pad-md">
+<!-- Безкоштовний -->
+<div class="rounded-xl glass-specular-lens p-pad-lg border border-glass-border flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+<div>
+<div class="flex items-center gap-2 mb-1">
+<span class="font-headline-md text-headline-md text-on-surface font-semibold">Безкоштовний</span>
+<span class="text-label-code font-semibold bg-surface-container-high px-2.5 py-0.5 rounded-full text-text-muted">Без картки</span>
+</div>
+<p class="text-body-md text-text-muted">
+              10 генерацій ілюстрацій за весь час, необмежене редагування тексту й AI-редактор, персонажі та сценарій, спільна робота, 100 МБ фотоальбому.
+            </p>
+</div>
+<div class="text-right shrink-0">
+<span class="text-headline-lg font-bold text-on-surface">0 ₴</span>
+<span class="text-body-sm text-text-muted block">завжди безплатно</span>
+</div>
+</div>
+<!-- Start -->
+<div class="rounded-xl glass-specular-lens p-pad-lg border border-glass-border flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+<div>
+<div class="flex items-center gap-2 mb-1">
+<span class="font-headline-md text-headline-md text-on-surface font-semibold">Start</span>
+<span class="text-label-code font-semibold bg-surface-container-high px-2.5 py-0.5 rounded-full text-text-muted">Одному авторові</span>
+</div>
+<p class="text-body-md text-text-muted">
+              100 генерацій зображень на місяць, усі рушії Nano Banana, повний експорт PDF/DOCX/EPUB, історія версій книги, 200 МБ фотоальбому.
+            </p>
+</div>
+<div class="text-right shrink-0">
+<span class="text-headline-lg font-bold text-on-surface">260 ₴</span>
+<span class="text-body-sm text-text-muted block">/місяць · 2600 ₴ на рік</span>
+</div>
+</div>
+<!-- Pro — highlighted:true у server/subscriptions.ts, бейдж «Популярний вибір» -->
+<div class="rounded-xl glass-specular-lens p-pad-lg border-2 border-electric-cyan/70 shadow-lg relative flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+<div class="absolute -top-3 right-6 bg-electric-cyan text-white text-label-code font-semibold px-3 py-0.5 rounded-full uppercase">
+            Популярний вибір
+          </div>
+<div>
+<div class="flex items-center gap-2 mb-1">
+<span class="font-headline-md text-headline-md text-on-surface font-semibold">Pro</span>
+<span class="text-label-code font-semibold bg-secondary-fixed text-secondary px-2.5 py-0.5 rounded-full">Ілюстровані видання</span>
+</div>
+<p class="text-body-md text-text-muted">
+              400 генерацій на місяць з пріоритетом якості Nano Banana Pro (4K), ШІ-текст за мотивами зображення, пріоритетна черга, 500 МБ фотоальбому.
+            </p>
+</div>
+<div class="text-right shrink-0">
+<span class="text-headline-lg font-bold text-electric-cyan">800 ₴</span>
+<span class="text-body-sm text-text-muted block">/місяць · 8000 ₴ на рік</span>
+</div>
+</div>
+<!-- Ultra -->
+<div class="rounded-xl glass-specular-lens p-pad-lg border border-glass-border flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+<div>
+<div class="flex items-center gap-2 mb-1">
+<span class="font-headline-md text-headline-md text-on-surface font-semibold">Ultra</span>
+<span class="text-label-code font-semibold bg-tertiary-fixed-dim text-on-tertiary-fixed px-2.5 py-0.5 rounded-full">Видавництвам і командам</span>
+</div>
+<p class="text-body-md text-text-muted">
+              2000 генерацій на місяць, найвищий пріоритет у черзі обробки, пріоритетна підтримка команди, 2 ГБ фотоальбому.
+            </p>
+</div>
+<div class="text-right shrink-0">
+<span class="text-headline-lg font-bold text-on-surface">2600 ₴</span>
+<span class="text-body-sm text-text-muted block">/місяць · 26 000 ₴ на рік</span>
+</div>
+</div>
+</div>
+<!-- Права колонка: як саме оплачується підписка -->
+<div class="lg:col-span-4 rounded-xl glass-trough p-pad-xl border border-glass-border flex flex-col justify-between">
+<div>
+<span class="text-label-code uppercase tracking-wider text-flame-amber font-semibold">Оплата</span>
+<h3 class="font-headline-md text-headline-md text-on-surface mt-1 mb-pad-lg">Як це працює</h3>
+<div class="space-y-pad-lg">
+<div class="p-pad-md rounded-lg bg-surface-container-lowest/90 border border-glass-border">
+<span class="text-headline-lg font-bold text-primary block">2 місяці</span>
+<span class="text-title-card font-medium text-on-surface block">У подарунок за рік</span>
+<span class="text-body-sm text-text-muted">Річна оплата дорівнює десяти місячним — знижка близько 17%</span>
+</div>
+<div class="p-pad-md rounded-lg bg-surface-container-lowest/90 border border-glass-border">
+<span class="text-title-card font-medium text-on-surface block mb-1">Спосіб оплати</span>
+<span class="text-body-sm text-text-muted">Картка через PrivatBank (LiqPay) у гривнях або PayPal за орієнтовним курсом. Тариф змінюється всередині Студії й діє одразу.</span>
+</div>
+<div class="p-pad-md rounded-lg bg-surface-container-lowest/90 border border-glass-border">
+<span class="text-title-card font-medium text-on-surface block mb-1">Початок без картки</span>
+<span class="text-body-sm text-text-muted">Безкоштовний план не потребує платіжних даних — перші розділи можна написати одразу.</span>
+</div>
+</div>
+</div>
+<div class="mt-pad-lg">
+<a class="w-full h-11 rounded-full text-label-pill font-medium text-white glass-pill-blue-deep squish-click shadow-md flex items-center justify-center gap-2" href="../">
+<span>Обрати план у Студії</span>
+<span class="material-symbols-outlined text-sm" data-icon="arrow_forward">arrow_forward</span>
+</a>
+</div>
+</div>
+</div>
+</section>
+<!-- 10. Development Roadmap (Slide 9 - IMAGE_5) -->
+<section class="max-w-container-max mx-auto px-col-gutter md:px-pad-xl py-pad-3xl" id="roadmap">
+<div class="text-center max-w-3xl mx-auto mb-pad-2xl">
+<span class="text-label-code font-label-code uppercase tracking-widest text-primary font-semibold">Етапи впровадження</span>
+<h2 class="font-headline-lg text-headline-lg-mobile md:text-headline-lg text-on-surface mt-pad-xs mb-pad-sm">
+        Дорожня карта розвитку
+      </h2>
+<p class="font-body-md text-body-md text-text-muted">
+        Чіткий план розширення можливостей від бета-тесту до світової експансії
+      </p>
+</div>
+<!-- 4 Milestones Timeline -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-gap-spacious relative">
+<!-- Phase 1 -->
+<div class="rounded-xl glass-specular-lens p-pad-lg border border-glass-border flex flex-col justify-between relative overflow-hidden">
+<div class="absolute top-0 left-0 right-0 h-1 bg-flame-amber"></div>
+<div>
+<span class="text-label-code font-bold text-flame-amber uppercase tracking-wider block mb-1">Місяці 1–3</span>
+<h3 class="font-title-card text-title-card font-bold text-on-surface mb-2">1. Фаза 1</h3>
+<p class="text-body-md text-text-muted leading-relaxed">
+            Запуск MVP з базовим коучем для початківців та простою критикою. Перші когорти бета-тестерів.
+          </p>
+</div>
+<div class="mt-pad-md pt-pad-sm border-t border-glass-border-dark flex items-center gap-1.5 text-xs text-flame-amber font-medium">
+<span class="material-symbols-outlined text-sm" data-icon="check_circle">check_circle</span> Активна фаза
+        </div>
+</div>
+<!-- Phase 2 -->
+<div class="rounded-xl glass-specular-lens p-pad-lg border border-glass-border flex flex-col justify-between relative overflow-hidden">
+<div class="absolute top-0 left-0 right-0 h-1 bg-electric-cyan"></div>
+<div>
+<span class="text-label-code font-bold text-electric-cyan uppercase tracking-wider block mb-1">Місяці 4–6</span>
+<h3 class="font-title-card text-title-card font-bold text-on-surface mb-2">2. Фаза 2</h3>
+<p class="text-body-md text-text-muted leading-relaxed">
+            Розширення функцій для досвідчених письменників, інтеграція з вбудованим редактором тексту.
+          </p>
+</div>
+<div class="mt-pad-md pt-pad-sm border-t border-glass-border-dark flex items-center gap-1.5 text-xs text-electric-cyan font-medium">
+<span class="material-symbols-outlined text-sm" data-icon="schedule">schedule</span> Заплановано
+        </div>
+</div>
+<!-- Phase 3 -->
+<div class="rounded-xl glass-specular-lens p-pad-lg border border-glass-border flex flex-col justify-between relative overflow-hidden">
+<div class="absolute top-0 left-0 right-0 h-1 bg-tertiary"></div>
+<div>
+<span class="text-label-code font-bold text-tertiary uppercase tracking-wider block mb-1">Місяці 7–9</span>
+<h3 class="font-title-card text-title-card font-bold text-on-surface mb-2">3. Фаза 3</h3>
+<p class="text-body-md text-text-muted leading-relaxed">
+            Спільнота письменників, аналітика прогресу, персоналізовані тренувальні вправи.
+          </p>
+</div>
+<div class="mt-pad-md pt-pad-sm border-t border-glass-border-dark flex items-center gap-1.5 text-xs text-tertiary font-medium">
+<span class="material-symbols-outlined text-sm" data-icon="schedule">schedule</span> Заплановано
+        </div>
+</div>
+<!-- Phase 4 -->
+<div class="rounded-xl glass-specular-lens p-pad-lg border border-glass-border flex flex-col justify-between relative overflow-hidden">
+<div class="absolute top-0 left-0 right-0 h-1 bg-secondary"></div>
+<div>
+<span class="text-label-code font-bold text-secondary uppercase tracking-wider block mb-1">Місяці 10–12</span>
+<h3 class="font-title-card text-title-card font-bold text-on-surface mb-2">4. Фаза 4</h3>
+<p class="text-body-md text-text-muted leading-relaxed">
+            Мобільний додаток, інтеграція з видавництвами, розширення на інші мови та ринки.
+          </p>
+</div>
+<div class="mt-pad-md pt-pad-sm border-t border-glass-border-dark flex items-center gap-1.5 text-xs text-secondary font-medium">
+<span class="material-symbols-outlined text-sm" data-icon="schedule">schedule</span> Заплановано
+        </div>
+</div>
+</div>
+</section>
+<!-- 11. Success Metrics & KPIs (Slide 10 - IMAGE_4) -->
+<section class="max-w-container-max mx-auto px-col-gutter md:px-pad-xl py-pad-3xl" id="metrics">
+<div class="text-center max-w-3xl mx-auto mb-pad-2xl">
+<span class="text-label-code font-label-code uppercase tracking-widest text-tertiary font-semibold">Показники ефективності</span>
+<h2 class="font-headline-lg text-headline-lg-mobile md:text-headline-lg text-on-surface mt-pad-xs mb-pad-sm">
+        Метрики успіху та KPI
+      </h2>
+<p class="font-body-md text-body-md text-text-muted">
+        Критерії оцінки впливу та життєздатності продукту
+      </p>
+</div>
+<!-- 5 Structured KPI Blocks -->
+<div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-gap-spacious">
+<!-- KPI 1 -->
+<div class="p-pad-lg rounded-xl glass-specular-lens border border-glass-border text-center flex flex-col justify-between">
+<div>
+<div class="w-12 h-12 rounded-full glass-pill-amber mx-auto flex items-center justify-center text-white mb-3 shadow-sm">
+<span class="material-symbols-outlined text-2xl" data-icon="group_add">group_add</span>
+</div>
+<span class="text-label-code font-bold text-flame-amber uppercase block">1. ЗАЛУЧЕННЯ</span>
+<p class="text-body-sm text-text-muted mt-2">
+            Реєстрації, активні користувачі (MAU/DAU), час роботи на платформі.
+          </p>
+</div>
+</div>
+<!-- KPI 2 -->
+<div class="p-pad-lg rounded-xl glass-specular-lens border border-glass-border text-center flex flex-col justify-between">
+<div>
+<div class="w-12 h-12 rounded-full glass-pill-cyan mx-auto flex items-center justify-center text-secondary mb-3 shadow-sm">
+<span class="material-symbols-outlined text-2xl" data-icon="verified_user">verified_user</span>
+</div>
+<span class="text-label-code font-bold text-secondary uppercase block">2. ЯКІСТЬ КОНТЕНТУ</span>
+<p class="text-body-sm text-text-muted mt-2">
+            Задоволення критикою, виправлення та реальне покращення структури тексту.
+          </p>
+</div>
+</div>
+<!-- KPI 3 -->
+<div class="p-pad-lg rounded-xl glass-specular-lens border border-glass-border text-center flex flex-col justify-between">
+<div>
+<div class="w-12 h-12 rounded-full bg-tertiary-fixed-dim mx-auto flex items-center justify-center text-on-tertiary-fixed mb-3 shadow-sm">
+<span class="material-symbols-outlined text-2xl" data-icon="sync_alt">sync_alt</span>
+</div>
+<span class="text-label-code font-bold text-tertiary uppercase block">3. КОНВЕРСІЯ</span>
+<p class="text-body-sm text-text-muted mt-2">
+            % переходу з безкоштовного ознайомлення на платний преміум план.
+          </p>
+</div>
+</div>
+<!-- KPI 4 -->
+<div class="p-pad-lg rounded-xl glass-specular-lens border border-glass-border text-center flex flex-col justify-between">
+<div>
+<div class="w-12 h-12 rounded-full glass-pill-blue-deep mx-auto flex items-center justify-center text-white mb-3 shadow-sm">
+<span class="material-symbols-outlined text-2xl" data-icon="replay">replay</span>
+</div>
+<span class="text-label-code font-bold text-secondary uppercase block">4. УТРИМАННЯ</span>
+<p class="text-body-sm text-text-muted mt-2">
+            Місячне та річне утримання (retention rate), регулярність повернення до рукописів.
+          </p>
+</div>
+</div>
+<!-- KPI 5 -->
+<div class="p-pad-lg rounded-xl glass-specular-lens border border-glass-border text-center flex flex-col justify-between md:col-span-3 lg:col-span-1">
+<div>
+<div class="w-12 h-12 rounded-full bg-gradient-to-tr from-flame-amber to-coral-radiance mx-auto flex items-center justify-center text-white mb-3 shadow-sm">
+<span class="material-symbols-outlined text-2xl" data-icon="workspace_premium">workspace_premium</span>
+</div>
+<span class="text-label-code font-bold text-primary uppercase block">5. ВПЛИВ</span>
+<p class="text-body-sm text-text-muted mt-2">
+            Опубліковані роботи авторів, прямі контракти з видавництвами та комерційний успіх.
+          </p>
+</div>
+</div>
+</div>
+</section>
+<!-- 12. Market Analysis & Publishing (Slide 11 - IMAGE_3) -->
+<section class="max-w-container-max mx-auto px-col-gutter md:px-pad-xl py-pad-3xl bg-surface-container-low/60 rounded-3xl" id="market-publishing">
+<div class="text-center max-w-3xl mx-auto mb-pad-2xl">
+<span class="text-label-code font-label-code uppercase tracking-widest text-primary font-semibold">Глобальна комерціалізація</span>
+<h2 class="font-headline-lg text-headline-lg-mobile md:text-headline-lg text-on-surface mt-pad-xs mb-pad-sm">
+        Аналіз ринку та публікація
+      </h2>
+<p class="font-body-prose-lg text-body-prose-lg text-text-muted leading-relaxed">
+        Платформа інтегрує потужні інструменти для дослідження ринку та прямої публікації на глобальних маркетплейсах, дозволяючи письменникам приймати дані-обґрунтовані рішення та швидко виводити свої роботи на ринок.
+      </p>
+</div>
+<!-- 2 Glass Columns -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-gap-spacious">
+<!-- Column 1: Аналіз ринку ніші -->
+<div class="rounded-xl glass-specular-lens p-pad-xl border border-glass-border">
+<div class="flex items-center gap-3 mb-pad-lg">
+<div class="w-12 h-12 rounded-2xl glass-pill-cyan flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined text-2xl" data-icon="insights">insights</span>
+</div>
+<div>
+<h3 class="font-headline-md text-headline-md text-on-surface font-semibold">Аналіз ринку ніші</h3>
+<span class="text-body-sm text-text-muted">Дані для впевненого старту книги</span>
+</div>
+</div>
+<div class="space-y-pad-md">
+<div class="p-pad-md rounded-lg bg-surface-container-lowest/80 border border-glass-border">
+<h4 class="font-title-card font-semibold text-on-surface mb-1 flex items-center gap-1.5">
+<span class="material-symbols-outlined text-electric-cyan text-base" data-icon="leaderboard">leaderboard</span>
+              Дослідження конкурентів
+            </h4>
+<p class="text-body-sm text-text-muted">
+              Автоматичний аналіз топ-20 книг у вибраній ніші — рейтинги, ціни, кількість відгуків, динаміка продажів.
+            </p>
+</div>
+<div class="p-pad-md rounded-lg bg-surface-container-lowest/80 border border-glass-border">
+<h4 class="font-title-card font-semibold text-on-surface mb-1 flex items-center gap-1.5">
+<span class="material-symbols-outlined text-electric-cyan text-base" data-icon="tag">tag</span>
+              Аналіз ключових слів
+            </h4>
+<p class="text-body-sm text-text-muted">
+              Визначення найпопулярніших ключових слів у жанрі, їх пошукового обсягу та рівня конкуренції.
+            </p>
+</div>
+<div class="p-pad-md rounded-lg bg-surface-container-lowest/80 border border-glass-border">
+<h4 class="font-title-card font-semibold text-on-surface mb-1 flex items-center gap-1.5">
+<span class="material-symbols-outlined text-electric-cyan text-base" data-icon="trending_up">trending_up</span>
+              Оцінка потенціалу
+            </h4>
+<p class="text-body-sm text-text-muted">
+              Прогноз потенціалу продажів на основі розміру ніші, конкуренції та актуальних трендів читацького попиту.
+            </p>
+</div>
+</div>
+</div>
+<!-- Column 2: Публікація на маркетплейсах -->
+<div class="rounded-xl glass-specular-lens p-pad-xl border border-glass-border">
+<div class="flex items-center gap-3 mb-pad-lg">
+<div class="w-12 h-12 rounded-2xl glass-pill-amber flex items-center justify-center text-white">
+<span class="material-symbols-outlined text-2xl" data-icon="storefront">storefront</span>
+</div>
+<div>
+<h3 class="font-headline-md text-headline-md text-on-surface font-semibold">Публікація на маркетплейсах</h3>
+<span class="text-body-sm text-text-muted">Дистрибуція в один клік</span>
+</div>
+</div>
+<div class="space-y-pad-md">
+<div class="p-pad-md rounded-lg bg-surface-container-lowest/80 border border-glass-border">
+<h4 class="font-title-card font-semibold text-on-surface mb-1 flex items-center gap-1.5">
+<span class="material-symbols-outlined text-flame-amber text-base" data-icon="menu_book">menu_book</span>
+              Amazon KDP
+            </h4>
+<p class="text-body-sm text-text-muted">
+              Автоматичне форматування під стандарти KDP, експорт у MOBI та EPUB, оптимізація метаданих — назва, опис, ключові слова, категорія.
+            </p>
+</div>
+<div class="p-pad-md rounded-lg bg-surface-container-lowest/80 border border-glass-border">
+<h4 class="font-title-card font-semibold text-on-surface mb-1 flex items-center gap-1.5">
+<span class="material-symbols-outlined text-flame-amber text-base" data-icon="shopping_bag">shopping_bag</span>
+              Etsy інтеграція
+            </h4>
+<p class="text-body-sm text-text-muted">
+              Підготовка файлів для цифрових продуктів на Etsy, оптимізація описів та тегів для високої пошукової видимості.
+            </p>
+</div>
+<div class="p-pad-md rounded-lg bg-surface-container-lowest/80 border border-glass-border">
+<h4 class="font-title-card font-semibold text-on-surface mb-1 flex items-center gap-1.5">
+<span class="material-symbols-outlined text-flame-amber text-base" data-icon="dashboard_customize">dashboard_customize</span>
+              Управління публікаціями
+            </h4>
+<p class="text-body-sm text-text-muted">
+              Відстеження статусу модерації, аналітика глобальних продажів та управління кількома виданнями з єдиного кабінету.
+            </p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- 13. Conclusion: Democratization of Writing (Slide 12 - IMAGE_2) -->
+<section class="max-w-container-max mx-auto px-col-gutter md:px-pad-xl py-pad-3xl" id="conclusion">
+<div class="rounded-2xl glass-trough p-pad-xl md:p-pad-3xl border border-glass-border relative overflow-hidden">
+<div class="prismatic-caustic-halo"></div>
+<div class="max-w-3xl mx-auto text-center space-y-pad-lg">
+<span class="text-label-code font-label-code uppercase tracking-widest text-primary font-semibold">Місія та візія</span>
+<h2 class="font-headline-lg text-headline-lg-mobile md:text-headline-lg text-on-surface">
+          Висновок: Демократизація письменництва
+        </h2>
+<!-- Quote Block -->
+<blockquote class="p-pad-lg rounded-xl bg-surface-container-lowest/90 border border-glass-border shadow-sm font-headline-md text-headline-md text-primary italic">
+          «Це не просто інструмент — це партнер у творчій подорожі.»
+        </blockquote>
+<!-- Paragraph -->
+<p class="font-body-prose-lg text-body-prose-lg text-text-muted leading-relaxed">
+          Наша платформа вирішує критичну проблему: письменництво залишається недоступним для більшості людей. Ми пропонуємо персоналізований, толерантний та адаптивний підхід до навчання та розвитку письменників будь-якого рівня. Комбінація ШІ-коучу та толерантного критика створює унікальне середовище, де кожен може розпочати писати без страху, а досвідчені автори можуть постійно розвиватися.
+        </p>
+<!-- 3 Summary Pill Cards -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-gap-default pt-pad-md text-left">
+<div class="p-pad-md rounded-xl glass-specular-lens border border-glass-border">
+<div class="flex items-center gap-2 mb-1 text-primary font-semibold">
+<span class="material-symbols-outlined text-base" data-icon="flight_takeoff">flight_takeoff</span>
+<h3 class="text-title-card">Починайте без страху</h3>
+</div>
+<p class="text-body-sm text-text-muted">Для тих, хто робить перший крок у світ великої літератури.</p>
+</div>
+<div class="p-pad-md rounded-xl glass-specular-lens border border-glass-border">
+<div class="flex items-center gap-2 mb-1 text-secondary font-semibold">
+<span class="material-symbols-outlined text-base" data-icon="all_inclusive">all_inclusive</span>
+<h3 class="text-title-card">Розвивайтесь без меж</h3>
+</div>
+<p class="text-body-sm text-text-muted">Для досвідчених авторів, які невпинно прагнуть до досконалості.</p>
+</div>
+<div class="p-pad-md rounded-xl glass-specular-lens border border-glass-border">
+<div class="flex items-center gap-2 mb-1 text-tertiary font-semibold">
+<span class="material-symbols-outlined text-base" data-icon="public">public</span>
+<h3 class="text-title-card">Публікуйтесь глобально</h3>
+</div>
+<p class="text-body-sm text-text-muted">Виводьте свої книги на Amazon KDP та Etsy — легко, надійно та швидко.</p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- 14. Final Call to Action Banner -->
+<section class="max-w-container-max mx-auto px-col-gutter md:px-pad-xl pb-pad-3xl">
+<div class="rounded-xl glass-pill-amber p-pad-2xl md:p-pad-3xl text-center text-white relative overflow-hidden shadow-2xl">
+<div class="relative z-10 max-w-2xl mx-auto space-y-pad-md">
+<h2 class="font-headline-lg text-headline-lg-mobile md:text-headline-lg text-white font-semibold">
+          Розпочніть свій літературний шедевр уже сьогодні
+        </h2>
+<p class="font-body-md text-body-md text-white/90 leading-relaxed">
+          Відкрийте робочий простір у браузері або додатку. Безкоштовний старт без кредитної картки для перших розділів вашої книги.
+        </p>
+<div class="pt-pad-md flex flex-wrap justify-center gap-pad-md">
+<a class="h-12 px-8 rounded-full bg-white text-primary font-headline-sm font-semibold hover:bg-white/95 squish-click shadow-lg inline-flex items-center gap-2" href="../">
+<span>Почати проєкт</span>
+<span class="material-symbols-outlined text-sm font-semibold" data-icon="arrow_forward">arrow_forward</span>
+</a>
+<a class="h-12 px-8 rounded-full bg-white/20 hover:bg-white/30 text-white font-headline-sm font-medium border border-white/40 squish-click inline-flex items-center gap-2" href="#pricing">
+<span>Переглянути тарифи</span>
+<span class="material-symbols-outlined text-sm" data-icon="sell">sell</span>
+</a>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- Shared Component: Footer -->
+<footer class="w-full bg-surface-container-low dark:bg-inverse-surface border-t border-glass-border">
+<div class="w-full max-w-container-max mx-auto px-col-gutter md:px-pad-xl py-pad-2xl flex flex-col md:flex-row justify-between items-center gap-gap-spacious">
+<!-- Brand & Copyright -->
+<div class="flex flex-col md:flex-row items-center gap-pad-md text-center md:text-left">
+<div class="flex items-center gap-2">
+<img alt="Fusion Lab Studio Mark" class="w-8 h-8 object-contain rounded-md" src="./logo.png"/>
+<span class="text-headline-sm font-headline-sm font-semibold text-on-surface dark:text-inverse-on-surface">Fusion Lab Studio</span>
+</div>
+<span class="text-body-sm font-body-sm text-text-muted dark:text-outline md:border-l md:border-outline-variant/40 md:pl-pad-md">
+        © 2026 Fusion Lab Studio. Платформа для письменників. Всі права захищено.
+      </span>
+</div>
+<!-- Links -->
+<div class="flex flex-wrap items-center justify-center gap-gap-spacious text-label-code font-label-code">
+<a class="text-on-surface dark:text-inverse-on-surface font-medium hover:text-primary transition-colors" href="#conclusion">Маніфест</a>
+<a class="text-text-muted dark:text-outline hover:text-primary transition-colors" href="#architecture">Архітектура ШІ</a>
+<a class="text-text-muted dark:text-outline hover:text-primary transition-colors" href="#pricing">Тарифи</a>
+<a class="text-text-muted dark:text-outline hover:text-primary transition-colors" href="#roadmap">Дорожня карта</a>
+<a class="text-text-muted dark:text-outline hover:text-primary transition-colors" href="../">Увійти в Студію</a>
+</div>
+</div>
+</footer>
+<script>
+  // Поле пошуку в шапці — це перехід по розділах цієї сторінки
+  // (у макеті воно було неробочим). Назви збігаються з <datalist>,
+  // порівняння без урахування регістру й за входженням, щоб «тариф»
+  // теж спрацював.
+  (function () {
+    var targets = [
+      ['проблем', 'problem'],
+      ['рішенн', 'solution'],
+      ['можлив', 'features-beginners'],
+      ['досвідчен', 'features-advanced'],
+      ['архітектур', 'architecture'],
+      ['переваг', 'advantages'],
+      ['тариф', 'pricing'],
+      ['ціни', 'pricing'],
+      ['дорожн', 'roadmap'],
+      ['метрик', 'metrics'],
+      ['ринок', 'market-publishing'],
+      ['публікац', 'market-publishing'],
+      ['висновок', 'conclusion'],
+    ];
+    var input = document.getElementById('section-jump');
+    var go = document.getElementById('section-jump-go');
+    if (!input || !go) return;
+    function jump() {
+      var q = (input.value || '').trim().toLowerCase();
+      if (!q) return;
+      for (var i = 0; i < targets.length; i++) {
+        if (q.indexOf(targets[i][0]) !== -1 || targets[i][0].indexOf(q) === 0) {
+          var el = document.getElementById(targets[i][1]);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            input.blur();
+          }
+          return;
+        }
+      }
+    }
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); jump(); }
+    });
+    go.addEventListener('click', jump);
+  })();
+</script>
+</body></html>
