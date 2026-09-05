@@ -41,6 +41,7 @@ import { registerAdminRoutes } from './server/adminRoutes';
 import { registerUsageRoutes } from './server/usageRoutes';
 import { registerSubscriptionRoutes } from './server/subscriptionRoutes';
 import { registerMediaRoutes } from './server/mediaRoutes';
+import { registerKnowledgeRoutes } from './server/knowledgeRoutes';
 import { registerCollaborationRoutes } from './server/collaborationRoutes';
 import { registerChatRoutes, CHAT_USAGE_CONTEXT } from './server/chatRoutes';
 import { registerApiKeysRoutes } from './server/apiKeysRoutes';
@@ -296,6 +297,7 @@ async function startServer() {
   registerUsageRoutes(app);
   registerSubscriptionRoutes(app);
   registerMediaRoutes(app);
+  registerKnowledgeRoutes(app);
   registerCollaborationRoutes(app);
 
   /**

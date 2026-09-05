@@ -1812,6 +1812,12 @@ export default function App() {
             book={book}
             onUpdateBook={handleUpdateBook}
             authUser={auth.user}
+            activeChapterId={activeChapterId}
+            activeSectionId={activeSectionId}
+            onSendToChat={(text, where) => {
+              setChatDiscussFragment({ text, where });
+              setIsQuickAiOpen(true);
+            }}
           />
         )}
 

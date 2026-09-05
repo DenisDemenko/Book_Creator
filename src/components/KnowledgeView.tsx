@@ -7,6 +7,8 @@ import {
   Trash2,
   Loader2,
   Quote,
+  ScanText,
+  MessageSquare,
   X,
   BookmarkPlus,
   AlertTriangle,
@@ -20,6 +22,11 @@ interface KnowledgeViewProps {
   book: Book;
   onUpdateBook: (updatedBook: Book, logAction?: string, logDetails?: string) => void;
   authUser?: AuthUser | null;
+  /** Поточний розділ книги — куди «Зберегти текст в книгу» дописує текст. */
+  activeChapterId?: string;
+  activeSectionId?: string;
+  /** «Передати в чат АІ» — текст лягає першим повідомленням обговорення (власник відкриває чат). */
+  onSendToChat?: (text: string, where: string) => void;
 }
 
 interface StorageInfo {
@@ -48,16 +55,27 @@ async function extractTextFromFile(file: File): Promise<string> {
   throw new Error('unsupported');
 }
 
+/** Растрові формати, які розуміє Tesseract (tesseract.js → leptonica). PDF свідомо немає — tesseract.js його не підтримує. */
+const OCR_IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'bmp', 'webp', 'gif', 'tif', 'tiff', 'pbm', 'pgm', 'ppm'];
+
 function detectFileType(file: File): KnowledgeFile['fileType'] | null {
   const name = file.name.toLowerCase();
   if (file.type.startsWith('image/')) return 'image';
   if (name.endsWith('.docx')) return 'docx';
   if (name.endsWith('.md')) return 'md';
   if (name.endsWith('.txt') || file.type === 'text/plain') return 'txt';
+  if (OCR_IMAGE_EXTENSIONS.some((ext) => name.endsWith(`.${ext}`))) return 'image';
   return null;
 }
 
-export const KnowledgeView: React.FC<KnowledgeViewProps> = ({ book, onUpdateBook, authUser }) => {
+export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
+  book,
+  onUpdateBook,
+  authUser,
+  activeChapterId,
+  activeSectionId,
+  onSendToChat,
+}) => {
   const { t } = useLanguage();
   const files = book.knowledgeFiles || [];
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -77,6 +95,7 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({ book, onUpdateBook
   const [insertChapterId, setInsertChapterId] = useState<string>(book.chapters[0]?.id || '');
   const [insertSectionId, setInsertSectionId] = useState<string>(book.chapters[0]?.sections[0]?.id || '');
   const [insertToast, setInsertToast] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const selectedFile = files.find((f) => f.id === selectedFileId) || null;
   const insertChapter = book.chapters.find((c) => c.id === insertChapterId) || book.chapters[0];
@@ -242,6 +261,83 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({ book, onUpdateBook
     setTimeout(() => setInsertToast(null), 3000);
   };
 
+  /** «Проаналізувати текст»: OCR зображення через Tesseract (server/knowledgeRoutes.ts). */
+  const handleAnalyzeText = async () => {
+    if (!selectedFile || isAnalyzing) return;
+    if (selectedFile.fileType !== 'image') {
+      setUploadError(t('knowledgeView.ocrImageOnly'));
+      return;
+    }
+    if (!selectedFile.previewImageUrl) {
+      setUploadError(t('knowledgeView.processError'));
+      return;
+    }
+    setIsAnalyzing(true);
+    setUploadError(null);
+    try {
+      const res = await fetch('/api/knowledge/ocr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ image: selectedFile.previewImageUrl }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'ocr failed');
+      const text = (data?.text || '').trim();
+      if (!text) throw new Error(t('knowledgeView.ocrEmpty'));
+      const updatedFiles = files.map((f) =>
+        f.id === selectedFile.id ? { ...f, contentText: text } : f
+      );
+      onUpdateBook(
+        { ...book, knowledgeFiles: updatedFiles },
+        'Розпізнано текст у Базі знань (OCR)',
+        `«${selectedFile.fileName}» → ${text.length} символів`
+      );
+    } catch (err) {
+      setUploadError((err as Error)?.message || t('knowledgeView.ocrError'));
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  /** «Зберегти текст в книгу»: дописує розпізнаний текст у поточний розділ книги. */
+  const handleSaveTextToBook = () => {
+    const text = selectedFile?.contentText?.trim();
+    const chapterId = activeChapterId || book.chapters[0]?.id;
+    const sectionId = activeSectionId || book.chapters[0]?.sections[0]?.id || '';
+    if (!text || !chapterId) return;
+    const updatedChapters = book.chapters.map((chap) => {
+      if (chap.id !== chapterId) return chap;
+      return {
+        ...chap,
+        sections: chap.sections.map((sec) => {
+          if (sec.id !== sectionId) return sec;
+          const nextContent = sec.content ? `${sec.content}\n\n${text}` : text;
+          return {
+            ...sec,
+            content: nextContent,
+            wordCount: calculateWordCount(nextContent),
+            lastModified: new Date().toISOString(),
+          };
+        }),
+      };
+    });
+    onUpdateBook(
+      { ...book, chapters: updatedChapters },
+      'Текст із Бази знань збережено в поточний розділ',
+      `Джерело: «${selectedFile?.fileName || ''}»`
+    );
+    setInsertToast(t('knowledgeView.savedToBookToast'));
+    setTimeout(() => setInsertToast(null), 3000);
+  };
+
+  /** «Передати в чат АІ»: розпізнаний текст іде першим повідомленням обговорення в чаті. */
+  const handleSendToChat = () => {
+    const text = selectedFile?.contentText?.trim();
+    if (!text || !onSendToChat) return;
+    onSendToChat(text, `${t('knowledgeView.chatSourceLabel')}: ${selectedFile?.fileName || ''}`);
+  };
+
   const iconFor = (type: KnowledgeFile['fileType']) => (type === 'image' ? FileImage : FileText);
 
   return (
@@ -271,7 +367,7 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({ book, onUpdateBook
               </div>
             </div>
           )}
-          <input ref={fileInputRef} type="file" accept=".txt,.md,.docx,image/*" onChange={handleUpload} className="hidden" />
+          <input ref={fileInputRef} type="file" accept=".txt,.md,.docx,image/*,.png,.jpg,.jpeg,.bmp,.webp,.gif,.tif,.tiff,.pbm,.pgm,.ppm" onChange={handleUpload} className="hidden" />
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={isUploading}
@@ -346,18 +442,50 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({ book, onUpdateBook
                   </button>
                 )}
               </div>
-              {selectedFile.fileType === 'image' ? (
-                <img src={selectedFile.previewImageUrl} alt={selectedFile.fileName} className="max-h-[500px] object-contain rounded-xl mx-auto" />
-              ) : (
+              <div className="flex items-center gap-2 mb-3 flex-wrap">
+                {selectedFile.fileType === 'image' && !selectedFile.contentText && (
+                  <button
+                    onClick={handleAnalyzeText}
+                    disabled={isAnalyzing}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition-colors disabled:opacity-50"
+                  >
+                    {isAnalyzing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ScanText className="w-3.5 h-3.5" />}
+                    <span>{isAnalyzing ? t('knowledgeView.analyzingBtn') : t('knowledgeView.analyzeBtn')}</span>
+                  </button>
+                )}
+                {selectedFile.contentText && (
+                  <>
+                    <button
+                      onClick={handleSaveTextToBook}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 text-xs font-bold transition-colors"
+                    >
+                      <BookmarkPlus className="w-3.5 h-3.5" />
+                      <span>{t('knowledgeView.saveToBookBtn')}</span>
+                    </button>
+                    <button
+                      onClick={handleSendToChat}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 text-xs font-bold transition-colors"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      <span>{t('knowledgeView.sendToChatBtn')}</span>
+                    </button>
+                  </>
+                )}
+              </div>
+              {selectedFile.contentText ? (
                 <div
                   ref={previewRef}
                   onMouseUp={handlePreviewMouseUp}
                   className="whitespace-pre-wrap text-sm text-slate-300 leading-relaxed select-text max-h-[600px] overflow-y-auto"
                 >
-                  {selectedFile.contentText || t('knowledgeView.emptyContent')}
+                  {selectedFile.contentText}
                 </div>
+              ) : selectedFile.fileType === 'image' ? (
+                <img src={selectedFile.previewImageUrl} alt={selectedFile.fileName} className="max-h-[500px] object-contain rounded-xl mx-auto" />
+              ) : (
+                <div className="text-sm text-slate-500">{t('knowledgeView.emptyContent')}</div>
               )}
-              {selectedFile.fileType !== 'image' && (
+              {selectedFile.contentText && (
                 <p className="text-[10px] text-slate-600 mt-3 pt-3 border-t border-slate-800">{t('knowledgeView.selectHint')}</p>
               )}
             </>
