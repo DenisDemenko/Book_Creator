@@ -17,6 +17,7 @@ import {
 import type { Book, AuthUser, KnowledgeFile } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
 import { calculateWordCount } from '../utils/helpers';
+import { collectBookTags, insertTextAfterTag } from '../utils/bookTags';
 
 interface KnowledgeViewProps {
   book: Book;
@@ -96,9 +97,14 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
   const [insertSectionId, setInsertSectionId] = useState<string>(book.chapters[0]?.sections[0]?.id || '');
   const [insertToast, setInsertToast] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [saveChapterId, setSaveChapterId] = useState<string>(book.chapters[0]?.id || '');
+  const [saveMode, setSaveMode] = useState<'end' | 'tag'>('end');
+  const [saveTagName, setSaveTagName] = useState<string>('');
 
   const selectedFile = files.find((f) => f.id === selectedFileId) || null;
   const insertChapter = book.chapters.find((c) => c.id === insertChapterId) || book.chapters[0];
+  const bookTags = collectBookTags(book);
 
   const loadStorageInfo = useCallback(async () => {
     if (!isRegistered) {
@@ -300,33 +306,72 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
     }
   };
 
-  /** «Зберегти текст в книгу»: дописує розпізнаний текст у поточний розділ книги. */
-  const handleSaveTextToBook = () => {
+  /** «Зберегти текст в книгу»: вибір глави (у кінець) або тегу в тексті. */
+  const openSaveModal = () => {
+    setSaveChapterId(activeChapterId || book.chapters[0]?.id || '');
+    setSaveMode('end');
+    setSaveTagName(bookTags[0]?.name || '');
+    setSaveModalOpen(true);
+  };
+
+  const confirmSaveToBook = () => {
     const text = selectedFile?.contentText?.trim();
-    const chapterId = activeChapterId || book.chapters[0]?.id;
-    const sectionId = activeSectionId || book.chapters[0]?.sections[0]?.id || '';
-    if (!text || !chapterId) return;
-    const updatedChapters = book.chapters.map((chap) => {
-      if (chap.id !== chapterId) return chap;
-      return {
-        ...chap,
-        sections: chap.sections.map((sec) => {
-          if (sec.id !== sectionId) return sec;
-          const nextContent = sec.content ? `${sec.content}\n\n${text}` : text;
-          return {
-            ...sec,
-            content: nextContent,
-            wordCount: calculateWordCount(nextContent),
-            lastModified: new Date().toISOString(),
-          };
-        }),
-      };
-    });
-    onUpdateBook(
-      { ...book, chapters: updatedChapters },
-      'Текст із Бази знань збережено в поточний розділ',
-      `Джерело: «${selectedFile?.fileName || ''}»`
-    );
+    if (!text) return;
+    if (saveMode === 'tag') {
+      const tag = bookTags.find((tg) => tg.name === saveTagName);
+      if (!tag) {
+        setUploadError(t('knowledgeView.tagNotFound'));
+        return;
+      }
+      const updatedChapters = book.chapters.map((chap) => {
+        if (chap.id !== tag.chapterId) return chap;
+        return {
+          ...chap,
+          sections: chap.sections.map((sec) => {
+            if (sec.id !== tag.sectionId) return sec;
+            const nextContent = insertTextAfterTag(sec.content || '', tag.name, text);
+            if (nextContent === null) return sec;
+            return {
+              ...sec,
+              content: nextContent,
+              wordCount: calculateWordCount(nextContent),
+              lastModified: new Date().toISOString(),
+            };
+          }),
+        };
+      });
+      onUpdateBook(
+        { ...book, chapters: updatedChapters },
+        'Текст із Бази знань вставлено в тег',
+        `Тег «${tag.name}» → «${selectedFile?.fileName || ''}»`
+      );
+    } else {
+      const chapter = book.chapters.find((c) => c.id === saveChapterId) || book.chapters[0];
+      const lastSection = chapter?.sections[chapter.sections.length - 1];
+      if (!chapter || !lastSection) return;
+      const updatedChapters = book.chapters.map((chap) => {
+        if (chap.id !== chapter.id) return chap;
+        return {
+          ...chap,
+          sections: chap.sections.map((sec) => {
+            if (sec.id !== lastSection.id) return sec;
+            const nextContent = sec.content ? `${sec.content}\n\n${text}` : text;
+            return {
+              ...sec,
+              content: nextContent,
+              wordCount: calculateWordCount(nextContent),
+              lastModified: new Date().toISOString(),
+            };
+          }),
+        };
+      });
+      onUpdateBook(
+        { ...book, chapters: updatedChapters },
+        'Текст із Бази знань збережено в кінець глави',
+        `Глава «${chapter.title}» → «${selectedFile?.fileName || ''}»`
+      );
+    }
+    setSaveModalOpen(false);
     setInsertToast(t('knowledgeView.savedToBookToast'));
     setTimeout(() => setInsertToast(null), 3000);
   };
@@ -456,7 +501,7 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
                 {selectedFile.contentText && (
                   <>
                     <button
-                      onClick={handleSaveTextToBook}
+                      onClick={openSaveModal}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 text-xs font-bold transition-colors"
                     >
                       <BookmarkPlus className="w-3.5 h-3.5" />
@@ -582,6 +627,83 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
                 {t('knowledgeView.chooseModeHint')}
               </p>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Модалка «Зберегти текст у книгу»: глава (у кінець) або тег у тексті */}
+      {saveModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+                <BookmarkPlus className="w-4 h-4 text-emerald-400" />
+                {t('knowledgeView.saveModalTitle')}
+              </h3>
+              <button onClick={() => setSaveModalOpen(false)} className="text-slate-500 hover:text-slate-300">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setSaveMode('end')}
+                className={`px-3 py-2 rounded-lg text-xs font-bold border transition-colors ${saveMode === 'end' ? 'bg-emerald-600 text-white border-emerald-500' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'}`}
+              >
+                {t('knowledgeView.saveModeEnd')}
+              </button>
+              <button
+                onClick={() => setSaveMode('tag')}
+                className={`px-3 py-2 rounded-lg text-xs font-bold border transition-colors ${saveMode === 'tag' ? 'bg-emerald-600 text-white border-emerald-500' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'}`}
+              >
+                {t('knowledgeView.saveModeTag')}
+              </button>
+            </div>
+
+            {saveMode === 'end' ? (
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">{t('knowledgeView.saveChapterLabel')}</label>
+                <select
+                  value={saveChapterId}
+                  onChange={(e) => setSaveChapterId(e.target.value)}
+                  className="w-full p-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200"
+                >
+                  {book.chapters.map((chap) => (
+                    <option key={chap.id} value={chap.id}>
+                      {chap.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : bookTags.length === 0 ? (
+              <p className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+                {t('knowledgeView.saveNoTagsHint')}
+              </p>
+            ) : (
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">{t('knowledgeView.saveTagLabel')}</label>
+                <select
+                  value={saveTagName}
+                  onChange={(e) => setSaveTagName(e.target.value)}
+                  className="w-full p-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-emerald-300"
+                >
+                  {bookTags.map((tg) => (
+                    <option key={`${tg.chapterId}-${tg.sectionId}-${tg.name}`} value={tg.name}>
+                      {`тега: ${tg.name} — ${tg.chapterTitle} → ${tg.sectionTitle}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <button
+              onClick={confirmSaveToBook}
+              disabled={saveMode === 'tag' && bookTags.length === 0}
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all active:scale-95 disabled:opacity-40"
+            >
+              <BookmarkPlus className="w-4 h-4" />
+              <span>{t('knowledgeView.saveConfirmBtn')}</span>
+            </button>
           </div>
         </div>
       )}

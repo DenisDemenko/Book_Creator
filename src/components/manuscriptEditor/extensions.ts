@@ -7,6 +7,7 @@ import { AiDraftBlockNode } from './AiDraftBlockNode';
 import { FocusParagraphPlugin } from './FocusParagraphPlugin';
 import { CharacterMentionPlugin, type CharacterMentionEntry } from './CharacterMentionPlugin';
 import { ReadabilityHighlightPlugin } from './ReadabilityHighlightPlugin';
+import { TagPlugin } from './TagPlugin';
 
 export interface ManuscriptAiTextOptions {
   onRequestAiText?: WrappedImageOptions['onRequestAiText'];
@@ -82,5 +83,6 @@ export function buildManuscriptExtensions(
       longSentenceClass: 'nova-readability-long-sentence',
       longSentenceThreshold: 30,
     }),
+    TagPlugin,
   ];
 }

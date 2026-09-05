@@ -8,6 +8,7 @@ import { PaginationPlugin } from './manuscriptEditor/PaginationPlugin';
 import { characterMentionKey } from './manuscriptEditor/CharacterMentionPlugin';
 import { readabilityKey } from './manuscriptEditor/ReadabilityHighlightPlugin';
 import { PAGE_FORMAT_QUICK_OPTIONS } from '../utils/pageFormats';
+import { collectBookTags, type BookTag } from '../utils/bookTags';
 import { PageColumn } from './manuscriptEditor/PageColumn';
 import { PageRuler } from './manuscriptEditor/PageRuler';
 import { useRealBookPages } from '../utils/useRealBookPages';
@@ -75,6 +76,8 @@ import {
   SplitSquareVertical,
   Columns,
   Eye,
+  EyeOff,
+  CornerDownRight,
   CheckCircle2,
   GraduationCap,
   Tag,
@@ -1473,6 +1476,74 @@ export const EditorView: React.FC<EditorViewProps> = ({
   // «Свій %» — довільне число 20–200.
   const [editorZoom, setEditorZoom] = usePersistentState<number>('nova_editor_pageZoom', 100);
   const [customEditorZoom, setCustomEditorZoom] = useState<string>('');
+
+  // --- Теги-вставки (з Бази знань): вставити / сховати / перейти ---
+  const [tagsHidden, setTagsHidden] = usePersistentState<boolean>('nova_editor_hideTags', false);
+  const [tagMenuOpen, setTagMenuOpen] = useState(false);
+  const [tagMenuAnchor, setTagMenuAnchor] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [pendingTagFocus, setPendingTagFocus] = useState<string | null>(null);
+  const tagMenuBtnRef = useRef<HTMLButtonElement>(null);
+
+  const bookTags: BookTag[] = collectBookTags(book);
+
+  /** «+ Тега»: вставляє власний абзац «тега: назва» і виділяє «назва» для набору. */
+  const handleInsertTag = () => {
+    const editor = editorLanguageMode === 'en' ? enEditor : uaEditor;
+    if (!editor) return;
+    editor
+      .chain()
+      .focus()
+      .insertContent([{ type: 'paragraph', content: [{ type: 'text', text: 'тега: назва' }] }])
+      .run();
+    const to = editor.state.selection.to;
+    const from = to - 'назва'.length;
+    if (from >= 0) editor.commands.setTextSelection({ from, to });
+  };
+
+  /** Скролує до тегу в поточному документі й підсвічує його на півтори секунди. */
+  const focusTagInEditor = (name: string) => {
+    const root = focusRootRef.current;
+    if (!root) return;
+    const wanted = `тега: ${name}`;
+    const el = Array.from(root.querySelectorAll<HTMLElement>('.nova-chapter-tag')).find(
+      (node) => (node.textContent || '').trim() === wanted
+    );
+    if (!el) return;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el.style.outline = '2px solid #34d399';
+    el.style.borderRadius = '2px';
+    window.setTimeout(() => {
+      el.style.outline = '';
+      el.style.borderRadius = '';
+    }, 1800);
+  };
+
+  const openTagMenu = () => {
+    const rect = tagMenuBtnRef.current?.getBoundingClientRect();
+    setTagMenuAnchor({ x: Math.min(rect?.left ?? 80, window.innerWidth - 340), y: (rect?.bottom ?? 120) + 6 });
+    setTagMenuOpen(true);
+  };
+
+  const handleGoToTag = (tag: BookTag) => {
+    setTagMenuOpen(false);
+    if (tag.sectionId === activeSection?.id) {
+      window.setTimeout(() => focusTagInEditor(tag.name), 30);
+    } else {
+      setPendingTagFocus(tag.name);
+      onSelectSection(tag.chapterId, tag.sectionId);
+    }
+  };
+
+  useEffect(() => {
+    if (!pendingTagFocus) return;
+    const name = pendingTagFocus;
+    const timer = window.setTimeout(() => {
+      focusTagInEditor(name);
+      setPendingTagFocus(null);
+    }, 180);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingTagFocus, activeSection?.id]);
   const adjustFocusZoom = (delta: number) => {
     setFocusZoom((v) => Math.round(Math.min(1.6, Math.max(1, v + delta)) * 10) / 10);
   };
@@ -3471,8 +3542,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
     <div
       ref={focusRootRef}
       className={`flex flex-col lg:flex-row overflow-hidden bg-slate-900 text-slate-100 relative ${
-        isFocusWindow ? 'nova-fullscreen-editor w-full h-full min-h-0' : 'flex-1 min-h-0'
-      }`}
+        tagsHidden ? 'nova-hide-tags ' : ''
+      }${isFocusWindow ? 'nova-fullscreen-editor w-full h-full min-h-0' : 'flex-1 min-h-0'}`}
       style={isFocusWindow ? undefined : { height: 'calc(100vh - 105px)', maxHeight: 'calc(100vh - 105px)' }}
     >
       {/* Повноекранний режим: маленькі стрілочки збоку для переходу між
@@ -3948,6 +4019,40 @@ export const EditorView: React.FC<EditorViewProps> = ({
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-400" />
               <span>{t('editor.insertIllustrationBtn')}</span>
+            </button>
+
+            <div className="h-4 w-px bg-slate-800 mx-1" />
+
+            <button
+              onClick={handleInsertTag}
+              className="flex items-center gap-1 px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-md font-semibold"
+              title={t('editor.insertTagTitle')}
+            >
+              <Tag className="w-3.5 h-3.5" />
+              <span>{t('editor.insertBookTagBtn')}</span>
+            </button>
+
+            <button
+              onClick={() => setTagsHidden((v) => !v)}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md font-medium border ${
+                tagsHidden
+                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+                  : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+              }`}
+              title={tagsHidden ? t('editor.showTagsTitle') : t('editor.hideTagsTitle')}
+            >
+              {tagsHidden ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+              <span>{tagsHidden ? t('editor.showTagsBtn') : t('editor.hideTagsBtn')}</span>
+            </button>
+
+            <button
+              ref={tagMenuBtnRef}
+              onClick={openTagMenu}
+              className="flex items-center gap-1 px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-md font-medium"
+              title={t('editor.gotoTagTitle')}
+            >
+              <CornerDownRight className="w-3.5 h-3.5" />
+              <span>{t('editor.gotoTagBtn')}</span>
             </button>
 
             <div className="h-4 w-px bg-slate-800 mx-1" />
@@ -6212,6 +6317,39 @@ export const EditorView: React.FC<EditorViewProps> = ({
         </div>
       )}
 
+      {/* Меню «Перейти до тегу» — фіксований поповер біля кнопки в тулбарі. */}
+      {tagMenuOpen && (
+        <>
+          <div className="fixed inset-0 z-[75]" onClick={() => setTagMenuOpen(false)} />
+          <div
+            className="fixed z-[80] w-80 max-h-[60vh] overflow-y-auto rounded-2xl bg-slate-950 border border-emerald-500/40 shadow-2xl shadow-black/60 p-1.5 text-xs"
+            style={{ left: tagMenuAnchor.x, top: tagMenuAnchor.y }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            <div className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-400 flex items-center justify-between">
+              <span>{t('editor.gotoTagTitle')}</span>
+              <button onClick={() => setTagMenuOpen(false)} className="text-slate-500 hover:text-white">
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+            {bookTags.length === 0 ? (
+              <div className="px-2.5 py-2 text-[11px] text-slate-500 italic">{t('editor.noTagsHint')}</div>
+            ) : (
+              bookTags.map((tg) => (
+                <button
+                  key={`${tg.chapterId}-${tg.sectionId}-${tg.name}`}
+                  onClick={() => handleGoToTag(tg)}
+                  className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-white/[0.06] transition-colors"
+                >
+                  <span className="block text-emerald-300 font-semibold truncate">тега: {tg.name}</span>
+                  <span className="block text-[10px] text-slate-500 truncate">{tg.chapterTitle} → {tg.sectionTitle}</span>
+                </button>
+              ))
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 
