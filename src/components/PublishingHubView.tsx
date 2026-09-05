@@ -33,7 +33,6 @@ import {
   RefreshCw,
   Search,
   ShoppingBag,
-  Sparkles,
   Store,
   Trash2,
   Upload,
@@ -41,8 +40,6 @@ import {
 import type { AuthUser, Book, NavigationTab } from '../types';
 import { calculateWordCount, estimatePageCount } from '../utils/helpers';
 import { renderPdfFirstPageToPng } from '../utils/pdfCover';
-import { GammaPanel } from './publishing/GammaPanel';
-import { GammaKeyModal } from './publishing/GammaKeyModal';
 import { useLanguage } from '../i18n/LanguageContext';
 
 interface PublishingHubViewProps {
@@ -52,7 +49,7 @@ interface PublishingHubViewProps {
   onNavigateToTab: (tab: NavigationTab) => void;
 }
 
-type SubTab = 'kdp' | 'etsy' | 'bundle' | 'research' | 'vitryna' | 'gamma';
+type SubTab = 'kdp' | 'etsy' | 'bundle' | 'research' | 'vitryna';
 
 interface Issue {
   severity: 'blocker' | 'warning';
@@ -204,7 +201,6 @@ export const PublishingHubView: React.FC<PublishingHubViewProps> = ({
             кшталт «Gamma» поруч із ними обіцяла б третє джерело доходу,
             якого немає.
           */
-          ['gamma', 'Матеріали (Gamma)', Sparkles],
         ] as [SubTab, string, React.ComponentType<{ className?: string }>][]).map(([id, label, Icon]) => (
           <button
             key={id}
@@ -232,10 +228,7 @@ export const PublishingHubView: React.FC<PublishingHubViewProps> = ({
       {tab === 'etsy' && <EtsyPanel book={book} isGuest={isGuest} />}
       {tab === 'bundle' && <BundlePanel isGuest={isGuest} />}
       {tab === 'research' && <ResearchPanel copy={copy} copiedKey={copiedKey} isGuest={isGuest} />}
-      {tab === 'vitryna' && (
-        <VitrynaPanel book={book} isGuest={isGuest} onNavigateToTab={onNavigateToTab} />
-      )}
-      {tab === 'gamma' && <GammaPanel book={book} isGuest={isGuest} />}
+      {tab === 'vitryna' && <VitrynaPanel book={book} isGuest={isGuest} />}
     </div>
   );
 };
@@ -258,12 +251,6 @@ interface PdfEngineOption {
   available: boolean;
   reasonUk?: string;
   fixUk?: string;
-  /**
-   * Заповнено — отже, рушій недоступний, але зарадити може сам автор, і
-   * кнопка веде у вікно, а не лишається вимкненою. Порожньо — авторові тут
-   * робити нічого (немає бінарника в образі, не налаштований сервер).
-   */
-  fixAction?: 'connect_gamma_key';
   isDefault: boolean;
 }
 
@@ -279,11 +266,7 @@ interface EditionResult {
   warningsUk?: string[];
 }
 
-const VitrynaPanel: React.FC<{
-  book: Book;
-  isGuest: boolean;
-  onNavigateToTab: (tab: NavigationTab) => void;
-}> = ({ book, isGuest, onNavigateToTab }) => {
+const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGuest }) => {
   const [variant, setVariant] = useState<'code' | 'design'>('code');
   const [withPrint, setWithPrint] = useState(true);
   const [trimId, setTrimId] = useState('6x9');
@@ -322,14 +305,6 @@ const VitrynaPanel: React.FC<{
     без натяку, що сталось.
   */
   const [enginesState, setEnginesState] = useState<'loading' | 'ready' | 'failed'>('loading');
-  /*
-    Рушій, який автор обрав, але який поки не працює через ВІДСУТНІЙ КЛЮЧ.
-    Тримаємо саме рушій, а не булеве «вікно відкрите»: коли ключ підключено,
-    цей же рушій треба одразу зробити обраним — інакше автор натиснув Gamma,
-    підключив підписку й лишився з Nova, не розуміючи, що пішло не так.
-  */
-  const [connecting, setConnecting] = useState<PdfEngineOption | null>(null);
-
   /*
     Перелік перепитується не лише на вході: після підключення ключа
     доступність Gamma міняється на сервері, і зберігати стару відповідь
@@ -577,43 +552,29 @@ const VitrynaPanel: React.FC<{
           )}
 
           <div className="flex flex-wrap gap-2">
-            {engines.map((engine) => {
-              /*
-                Три стани кнопки, а не два. Недоступний рушій, який автор може
-                підключити САМ, лишається живим і веде у вікно підключення:
-                вимкнена кнопка — це глухий кут, за яким автор має сам
-                здогадатись піти на інший екран по ключ.
-              */
-              const fixable = !engine.available && !!engine.fixAction;
-              return (
-                <button
-                  key={engine.id}
-                  onClick={() => (fixable ? setConnecting(engine) : setEngineId(engine.id))}
-                  disabled={!engine.available && !fixable}
-                  title={
-                    engine.available
-                      ? `${engine.strengthUk} Не вміє: ${engine.limitUk}`
-                      : [engine.reasonUk, engine.fixUk].filter(Boolean).join(' ')
-                  }
-                  className={`px-3 py-2 rounded-xl text-xs border transition text-left ${
-                    fixable
-                      ? 'bg-slate-950 border-amber-500/40 text-amber-200/90 hover:border-amber-400/70'
-                      : !engine.available
-                        ? 'bg-slate-950/60 border-slate-800 text-slate-600 cursor-not-allowed'
-                        : engineId === engine.id
-                          ? 'bg-cyan-500/15 border-cyan-500/50 text-cyan-200'
-                          : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-600'
-                  }`}
-                >
-                  {engine.label}
-                  {engine.isDefault && <span className="ml-1 text-[10px] opacity-60">типово</span>}
-                  {fixable && <span className="ml-1 text-[10px]">потрібен ваш ключ</span>}
-                  {!engine.available && !fixable && (
-                    <span className="ml-1 text-[10px]">недоступний</span>
-                  )}
-                </button>
-              );
-            })}
+            {engines.map((engine) => (
+              <button
+                key={engine.id}
+                onClick={() => setEngineId(engine.id)}
+                disabled={!engine.available}
+                title={
+                  engine.available
+                    ? `${engine.strengthUk} Не вміє: ${engine.limitUk}`
+                    : [engine.reasonUk, engine.fixUk].filter(Boolean).join(' ')
+                }
+                className={`px-3 py-2 rounded-xl text-xs border transition text-left ${
+                  !engine.available
+                    ? 'bg-slate-950/60 border-slate-800 text-slate-600 cursor-not-allowed'
+                    : engineId === engine.id
+                      ? 'bg-cyan-500/15 border-cyan-500/50 text-cyan-200'
+                      : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-600'
+                }`}
+              >
+                {engine.label}
+                {engine.isDefault && <span className="ml-1 text-[10px] opacity-60">типово</span>}
+                {!engine.available && <span className="ml-1 text-[10px]">недоступний</span>}
+              </button>
+            ))}
           </div>
 
           {/* Причина недоступності — текстом під переліком, а не лише в
@@ -626,14 +587,6 @@ const VitrynaPanel: React.FC<{
                   <li key={e.id} className="text-[11px] text-slate-500">
                     <span className="text-slate-400">{e.label}:</span>{' '}
                     {[e.reasonUk, e.fixUk].filter(Boolean).join(' ')}
-                    {e.fixAction && (
-                      <button
-                        onClick={() => setConnecting(e)}
-                        className="ml-1 text-cyan-300/80 hover:text-cyan-200 underline underline-offset-2"
-                      >
-                        Підключити
-                      </button>
-                    )}
                   </li>
                 ))}
             </ul>
@@ -881,23 +834,6 @@ const VitrynaPanel: React.FC<{
         </div>
       )}
 
-      {/*
-        Вікно підключення власного ключа. Стоїть тут, а не в панелі Gamma:
-        автор упирається у брак ключа саме тут, у виборі рушія, і саме тут
-        має його підключити. Після успіху перепитуємо перелік і одразу
-        обираємо той рушій, заради якого все й затівалось.
-      */}
-      {connecting && (
-        <GammaKeyModal
-          reasonUk={[connecting.reasonUk, connecting.fixUk].filter(Boolean).join(' ')}
-          onClose={() => setConnecting(null)}
-          onConnected={() => void loadEngines(connecting.id)}
-          onOpenSubscription={() => {
-            setConnecting(null);
-            onNavigateToTab('subscription');
-          }}
-        />
-      )}
     </div>
   );
 };

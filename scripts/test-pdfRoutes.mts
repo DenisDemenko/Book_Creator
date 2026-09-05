@@ -244,7 +244,14 @@ console.log('\nПерелік рушіїв (GET /api/pdf/engines):');
   const ids = engines.map((e) => e.id);
 
   t('віддає перелік', r.status === 200 && Array.isArray(r.data?.engines), String(r.status));
-  t('усі чотири рушії присутні', ['nova', 'chromium', 'pandoc', 'gamma'].every((id) => ids.includes(id)), ids.join(','));
+  t('три рушії присутні', ['nova', 'chromium', 'pandoc'].every((id) => ids.includes(id)), ids.join(','));
+  /*
+    Gamma знята з реєстрації (рішення власника 05.09.2026): вона переписувала
+    рукопис замість верстати його, коштом кредитів чужої підписки. Перевірка
+    саме тут, на маршруті: тихе повернення рушія в перелік означало б, що
+    автор знову бачить цю кнопку.
+  */
+  t('gamma в переліку відсутня — рушій вимкнено', !ids.includes('gamma'), ids.join(','));
   t('рушій за замовчуванням названий окремим полем', r.data?.defaultEngineId === 'nova', String(r.data?.defaultEngineId));
   t('nova позначена типовою', engines.find((e) => e.id === 'nova')?.isDefault === true);
   t('nova доступна завжди — вона ні від чого зовнішнього не залежить',
@@ -258,8 +265,8 @@ console.log('\nПерелік рушіїв (GET /api/pdf/engines):');
   t('недоступні рушії не зникають із переліку, а називають причину',
     unavailable.every((e) => typeof e.reasonUk === 'string' && e.reasonUk.length > 0),
     unavailable.map((e) => `${e.id}: ${e.reasonUk || '—'}`).join(' | '));
-  t('gamma без налаштованого клієнта — недоступна, і це сказано',
-    engines.find((e) => e.id === 'gamma')?.available === false);
+  t('chromium без бінарника — недоступний, і це сказано',
+    engines.find((e) => e.id === 'chromium')?.available === false);
 
   t('кожен рушій називає сильний бік і обмеження',
     engines.every((e) => e.strengthUk?.length > 0 && e.limitUk?.length > 0));
@@ -282,11 +289,18 @@ console.log('\nВибір рушія в перегляді:');
 
   // Відмова рушія — стан, у якому автор може щось зробити (обрати інший,
   // підключити підписку), а не збій сервера. 500 сказало б «зламалось у нас».
-  const gamma = await call('/api/admin/pdf/preview', { book, variant: 'code', engineId: 'gamma' });
+  const broken = await call('/api/admin/pdf/preview', { book, variant: 'code', engineId: 'chromium' });
   t('недоступний рушій → відмова з причиною, а не порожній PDF',
-    gamma.status === 400 && gamma.buffer === null, `${gamma.status}`);
-  t('вид відмови переданий машинно (kind)', gamma.data?.kind === 'unavailable', String(gamma.data?.kind));
-  t('у відмові вказано, ЯКИЙ саме рушій відмовив', gamma.data?.engineId === 'gamma', String(gamma.data?.engineId));
+    broken.status === 400 && broken.buffer === null, `${broken.status}`);
+  t('вид відмови переданий машинно (kind)', broken.data?.kind === 'unavailable', String(broken.data?.kind));
+  t('у відмові вказано, ЯКИЙ саме рушій відмовив', broken.data?.engineId === 'chromium', String(broken.data?.engineId));
+
+  // Знятий з реєстрації рушій не мовчить і не падає 500: автор, у якого
+  // лишилось старе посилання чи збережений вибір, має прочитати, чим
+  // верстати натомість.
+  const retired = await call('/api/admin/pdf/preview', { book, variant: 'code', engineId: 'gamma' });
+  t('запит вимкненого рушія → 400, а не 500', retired.status === 400, String(retired.status));
+  t('відмова називає рушії, які лишились', /nova/.test(String(retired.data?.error)), String(retired.data?.error));
 
   // Друкована редакція — виняткова здатність nova (дзеркальні поля, корінець
   // за обсягом). Інший рушій має відмовити ДО рендера, а не видати файл,

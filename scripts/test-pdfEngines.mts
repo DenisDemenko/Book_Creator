@@ -176,6 +176,12 @@ console.log('\nРеєстр рушіїв');
 {
   const list = await registry.listPdfEngines();
   t('nova в переліку', list.some((e) => e.id === 'nova'));
+  /*
+    Gamma знята з реєстрації рішенням власника (05.09.2026). Перевірка тут, а
+    не в коментарі: мовчазне повернення рушія в перелік означало б, що автори
+    знову бачать кнопку, яка переписує рукопис коштом чужої підписки.
+  */
+  t('gamma НЕ в переліку — рушій вимкнено', !list.some((e) => e.id === 'gamma'));
   t('nova — рушій за замовчуванням', list.find((e) => e.id === 'nova')?.isDefault === true);
   t('у кожного названо і сильний бік, і обмеження', list.every((e) => e.strengthUk && e.limitUk));
 
@@ -343,28 +349,6 @@ console.log('\nGamma: доступність без підписки');
   t('Gamma не робить друк під KDP', gammaEngine.supportsPrint === false);
   t('обмеження називає витрату кредитів автора', gammaEngine.limitUk.includes('кредити'));
 
-  /*
-    ХТО МОЖЕ ЗАРАДИТИ — МАШИНОЧИТАНО.
-
-    Інтерфейс мусить відрізнити «натисніть і підключіть» від «тут авторові
-    робити нічого», не розбираючи текст причини й не питаючи назву рушія.
-    Помилка в цьому полі не видна на вигляд: кнопка або мовчки не працює,
-    або веде у вікно, яке нічого не полагодить. Тому перевіряємо ОБИДВА
-    боки — і що дія є, і що її немає там, де її бути не повинно.
-  */
-  t('без ключа автора — сказано, що зарадити може він сам',
-    noKey.fixAction === 'connect_gamma_key', String(noKey.fixAction));
-  t('без ключа — є й людський текст дії', String(noKey.fixUk).length > 0, String(noKey.fixUk));
-  t('несправність на нашому боці НЕ пропонує авторові дію',
-    noClient.fixAction === undefined, String(noClient.fixAction));
-
-  // Перелік для інтерфейсу мусить донести дію, інакше поле є, а кнопка ні.
-  const { listPdfEngines } = await import('../server/pdf/engines/registry');
-  const listed = await listPdfEngines({ ownerId: 'user-without-key', ownerRole: 'writer' });
-  const gammaRow = listed.find((e) => e.id === 'gamma');
-  t('перелік доносить дію до інтерфейсу',
-    gammaRow?.fixAction === 'connect_gamma_key', String(gammaRow?.fixAction));
-  t('доступний рушій дії не має', listed.find((e) => e.id === 'nova')?.fixAction === undefined);
 }
 
 // ---------------------------------------------------------------------------

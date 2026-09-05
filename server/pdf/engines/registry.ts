@@ -15,14 +15,12 @@
 import { novaEngine } from './novaEngine';
 import { chromiumEngine } from './chromiumEngine';
 import { pandocEngine } from './pandocEngine';
-import { gammaEngine } from './gammaEngine';
 import {
   DEFAULT_PDF_ENGINE,
   PDF_ENGINE_IDS,
   PdfEngineError,
   type PdfEngine,
   type PdfEngineContext,
-  type PdfEngineFixAction,
   type PdfEngineId,
   type PdfRenderRequest,
   type PdfRenderResult,
@@ -38,7 +36,10 @@ const ENGINES: Partial<Record<PdfEngineId, PdfEngine>> = {
   nova: novaEngine,
   chromium: chromiumEngine,
   pandoc: pandocEngine,
-  gamma: gammaEngine,
+  // gamma: свідомо НЕ зареєстрована (рішення власника 05.09.2026). Рушій
+  // переписував рукопис замість верстати його й списував кредити чужої
+  // підписки за результат, який книгою не є. Код підсистеми лишається на
+  // місці; щоб повернути — розкоментувати рядок і імпорт вище.
 };
 
 /** Дозволяє під'єднати рушій із його файлу, не редагуючи цей словник вручну. */
@@ -59,8 +60,6 @@ export interface PdfEngineDescription {
   available: boolean;
   reasonUk?: string;
   fixUk?: string;
-  /** Заповнено — отже, автор може підключити рушій сам, просто звідси. */
-  fixAction?: PdfEngineFixAction;
   isDefault: boolean;
 }
 
@@ -98,7 +97,6 @@ export async function listPdfEngines(
     available: state.ok,
     reasonUk: state.ok ? undefined : state.reasonUk,
     fixUk: state.ok ? undefined : state.fixUk,
-    fixAction: state.ok ? undefined : state.fixAction,
     isDefault: engine.id === DEFAULT_PDF_ENGINE,
   }));
 }
