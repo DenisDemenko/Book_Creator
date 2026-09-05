@@ -109,6 +109,16 @@
   color: transparent;
 }
 
+/* Бренд-градієнт Fusion Lab: той самий перехід «оранж → синій», що й у
+   монограмі FL (src/assets/fusion-lab-studio-logo.png) — щоб текст поруч
+   із лого не сперечався з ним кольором. */
+.text-aurora-brand {
+  background: linear-gradient(90deg, #fb923c 0%, #f97316 40%, #38bdf8 65%, #3b82f6 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
 /* Ambient glow orbs, used behind hero / feature sections */
 .orb-field {
   position: absolute;

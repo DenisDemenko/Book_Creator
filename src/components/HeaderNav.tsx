@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   Eye,
   Save,
-  Feather,
   ShieldCheck,
   ChevronDown,
   Lock,
@@ -27,6 +26,7 @@ import {
 import { NavigationTab, Book, UserRole, CollaboratorPresence, RealtimeSyncStatus, AuthUser } from '../types';
 import { ALL_ROLES, getRoleInfo } from '../utils/rbac';
 import { useLanguage } from '../i18n/LanguageContext';
+import fusionLabLogo from '../assets/fusion-lab-studio-logo.png';
 
 interface HeaderNavProps {
   currentTab: NavigationTab;
@@ -176,16 +176,18 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
         <div className="flex items-center gap-3">
           <button
             onClick={() => onSelectTab('start')}
-            className="aurora-glow-amber flex items-center justify-center w-9 h-9 rounded-lg bg-gradient-to-br from-amber-400 to-amber-500 text-slate-950 hover:from-amber-300 hover:to-amber-400 transition-all focus:outline-hidden"
+            className="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-white/[0.06] transition-all focus:outline-hidden"
             title={t('header.goToStart')}
           >
-            <Feather className="w-5 h-5 stroke-[2.2]" />
+            {/* Монограма FL Fusion Lab Studio (src/assets/fusion-lab-studio-logo.png) —
+                замінює колишню амброву плашку з іконкою пера. */}
+            <img src={fusionLabLogo} alt="" className="w-8 h-8 object-contain" />
           </button>
 
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold tracking-widest text-aurora uppercase font-mono">
-                NOVA STUDIO
+              <span className="text-[10px] font-bold tracking-widest text-aurora-brand uppercase font-mono">
+                FUSION LAB STUDIO
               </span>
               <span className="hidden sm:inline-block w-1 h-1 rounded-full bg-slate-700" />
               <span className="hidden sm:inline text-[11px] font-medium text-slate-400">
