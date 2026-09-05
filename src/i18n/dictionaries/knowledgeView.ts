@@ -40,6 +40,7 @@ export const knowledgeView = {
     saveNoTagsHint: 'У книзі ще немає тегів. Додайте тег у редакторі («+ Тега») і повторіть.',
     saveConfirmBtn: 'Зберегти',
     tagNotFound: 'Тег не знайдено в тексті книги.',
+    selectFirstHint: 'Спочатку виділіть мишкою фрагмент тексту у превʼю — у книгу піде лише виділене.',
   },
   en: {
     title: 'Knowledge Base',
@@ -82,5 +83,6 @@ export const knowledgeView = {
     saveNoTagsHint: 'The book has no tags yet. Add a tag in the editor ("+ Tag") and try again.',
     saveConfirmBtn: 'Save',
     tagNotFound: 'Tag not found in the book text.',
+    selectFirstHint: 'First select a text fragment in the preview with the mouse — only the selection goes into the book.',
   },
 };

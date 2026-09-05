@@ -101,6 +101,7 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
   const [saveChapterId, setSaveChapterId] = useState<string>(book.chapters[0]?.id || '');
   const [saveMode, setSaveMode] = useState<'end' | 'tag'>('end');
   const [saveTagName, setSaveTagName] = useState<string>('');
+  const [saveText, setSaveText] = useState<string>('');
 
   const selectedFile = files.find((f) => f.id === selectedFileId) || null;
   const insertChapter = book.chapters.find((c) => c.id === insertChapterId) || book.chapters[0];
@@ -308,6 +309,17 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
 
   /** «Зберегти текст в книгу»: вибір глави (у кінець) або тегу в тексті. */
   const openSaveModal = () => {
+    // Поправка власника: у книгу йде лише виділений мишкою фрагмент
+    // розшифровки, а не весь розпізнаний текст файлу.
+    const selection = window.getSelection();
+    const selected = selection?.toString().trim() || '';
+    const insidePreview = !!(selection && selection.anchorNode && previewRef.current?.contains(selection.anchorNode));
+    const text = insidePreview && selected ? selected : selectedQuoteText.trim();
+    if (!text) {
+      setUploadError(t('knowledgeView.selectFirstHint'));
+      return;
+    }
+    setSaveText(text);
     setSaveChapterId(activeChapterId || book.chapters[0]?.id || '');
     setSaveMode('end');
     setSaveTagName(bookTags[0]?.name || '');
@@ -315,7 +327,7 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
   };
 
   const confirmSaveToBook = () => {
-    const text = selectedFile?.contentText?.trim();
+    const text = saveText.trim();
     if (!text) return;
     if (saveMode === 'tag') {
       const tag = bookTags.find((tg) => tg.name === saveTagName);
@@ -644,6 +656,8 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
                 <X className="w-4 h-4" />
               </button>
             </div>
+
+            <p className="text-xs text-slate-500 italic line-clamp-3">«{saveText}»</p>
 
             <div className="grid grid-cols-2 gap-2">
               <button
