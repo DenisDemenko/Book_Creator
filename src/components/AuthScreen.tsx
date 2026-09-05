@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Feather, Mail, Lock, User as UserIcon, ArrowRight, Eye, Sparkles, AlertTriangle, Sun, Moon } from 'lucide-react';
+import { Mail, Lock, User as UserIcon, ArrowRight, Eye, Sparkles, AlertTriangle, Sun, Moon } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext';
+import fusionLabStudioBrand from '../assets/fusion-lab-studio-brand.png';
 
 interface AuthScreenProps {
   onLogin: (email: string, password: string) => Promise<boolean>;
@@ -82,12 +83,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       <div className="relative z-10 w-full max-w-md">
         {/* Шапка */}
         <div className="text-center mb-7">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-500 text-slate-950 shadow-[0_0_28px_-6px_rgba(245,158,11,0.7)] mb-4">
-            <Feather className="w-7 h-7 stroke-[2.2]" />
-          </div>
-          <div className="text-[11px] font-bold tracking-widest text-aurora uppercase font-mono">
-            NOVA STUDIO
-          </div>
+          {/* Символ + напис Fusion Lab Studio одним зображенням
+              (src/assets/fusion-lab-studio-brand.png) — замінює колишню
+              амброву плашку з іконкою пера й окремий текстовий рядок
+              «FUSION LAB STUDIO» під нею. */}
+          <img
+            src={fusionLabStudioBrand}
+            alt="Fusion Lab Studio"
+            className="h-16 w-auto mx-auto mb-4"
+          />
           <h1 className="text-2xl font-bold font-heading mt-1">{t('auth.brandTitle')}</h1>
           <p className="text-sm text-slate-400 mt-2">
             {mode === 'login' ? t('auth.subtitleLogin') : t('auth.subtitleRegister')}
