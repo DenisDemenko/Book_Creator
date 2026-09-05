@@ -342,6 +342,29 @@ console.log('\nGamma: доступність без підписки');
   t('Gamma не може бути рушієм за замовчуванням', gammaEngine.id !== 'nova');
   t('Gamma не робить друк під KDP', gammaEngine.supportsPrint === false);
   t('обмеження називає витрату кредитів автора', gammaEngine.limitUk.includes('кредити'));
+
+  /*
+    ХТО МОЖЕ ЗАРАДИТИ — МАШИНОЧИТАНО.
+
+    Інтерфейс мусить відрізнити «натисніть і підключіть» від «тут авторові
+    робити нічого», не розбираючи текст причини й не питаючи назву рушія.
+    Помилка в цьому полі не видна на вигляд: кнопка або мовчки не працює,
+    або веде у вікно, яке нічого не полагодить. Тому перевіряємо ОБИДВА
+    боки — і що дія є, і що її немає там, де її бути не повинно.
+  */
+  t('без ключа автора — сказано, що зарадити може він сам',
+    noKey.fixAction === 'connect_gamma_key', String(noKey.fixAction));
+  t('без ключа — є й людський текст дії', String(noKey.fixUk).length > 0, String(noKey.fixUk));
+  t('несправність на нашому боці НЕ пропонує авторові дію',
+    noClient.fixAction === undefined, String(noClient.fixAction));
+
+  // Перелік для інтерфейсу мусить донести дію, інакше поле є, а кнопка ні.
+  const { listPdfEngines } = await import('../server/pdf/engines/registry');
+  const listed = await listPdfEngines({ ownerId: 'user-without-key', ownerRole: 'writer' });
+  const gammaRow = listed.find((e) => e.id === 'gamma');
+  t('перелік доносить дію до інтерфейсу',
+    gammaRow?.fixAction === 'connect_gamma_key', String(gammaRow?.fixAction));
+  t('доступний рушій дії не має', listed.find((e) => e.id === 'nova')?.fixAction === undefined);
 }
 
 // ---------------------------------------------------------------------------

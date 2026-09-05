@@ -42,6 +42,7 @@ import type { AuthUser, Book, NavigationTab } from '../types';
 import { calculateWordCount, estimatePageCount } from '../utils/helpers';
 import { renderPdfFirstPageToPng } from '../utils/pdfCover';
 import { GammaPanel } from './publishing/GammaPanel';
+import { GammaKeyModal } from './publishing/GammaKeyModal';
 import { useLanguage } from '../i18n/LanguageContext';
 
 interface PublishingHubViewProps {
@@ -255,6 +256,12 @@ interface PdfEngineOption {
   available: boolean;
   reasonUk?: string;
   fixUk?: string;
+  /**
+   * Заповнено — отже, рушій недоступний, але зарадити може сам автор, і
+   * кнопка веде у вікно, а не лишається вимкненою. Порожньо — авторові тут
+   * робити нічого (немає бінарника в образі, не налаштований сервер).
+   */
+  fixAction?: 'connect_gamma_key';
   isDefault: boolean;
 }
 
@@ -309,32 +316,50 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
     без натяку, що сталось.
   */
   const [enginesState, setEnginesState] = useState<'loading' | 'ready' | 'failed'>('loading');
+  /*
+    Рушій, який автор обрав, але який поки не працює через ВІДСУТНІЙ КЛЮЧ.
+    Тримаємо саме рушій, а не булеве «вікно відкрите»: коли ключ підключено,
+    цей же рушій треба одразу зробити обраним — інакше автор натиснув Gamma,
+    підключив підписку й лишився з Nova, не розуміючи, що пішло не так.
+  */
+  const [connecting, setConnecting] = useState<PdfEngineOption | null>(null);
+
+  /*
+    Перелік перепитується не лише на вході: після підключення ключа
+    доступність Gamma міняється на сервері, і зберігати стару відповідь
+    означало б показувати автору вимкнену кнопку рушія, який щойно запрацював.
+    `select` — рушій, який треба обрати, якщо він уже доступний.
+  */
+  const loadEngines = useCallback(async (select?: string) => {
+    try {
+      const res = await fetch('/api/pdf/engines', { credentials: 'same-origin' });
+      const data = res.ok ? await res.json() : null;
+      if (!data?.engines?.length) {
+        setEnginesState('failed');
+        return;
+      }
+      const list: PdfEngineOption[] = data.engines;
+      setEngines(list);
+      setEnginesState('ready');
+      if (select) {
+        // Обираємо лише те, що справді запрацювало. Інакше автор отримав би
+        // обраним рушій, яким верстка одразу впаде.
+        if (list.some((e) => e.id === select && e.available)) setEngineId(select);
+      } else {
+        setEngineId(data.defaultEngineId || 'nova');
+      }
+    } catch {
+      // Перелік не прийшов — лишається рушій за замовчуванням, той
+      // єдиний, який не залежить ні від чого зовнішнього. Мовчати про це
+      // не можна: автор має знати, що вибору зараз немає не тому, що його
+      // не буває, а тому, що перелік не дійшов.
+      setEnginesState('failed');
+    }
+  }, []);
 
   useEffect(() => {
-    let alive = true;
-    fetch('/api/pdf/engines', { credentials: 'same-origin' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!alive) return;
-        if (!data?.engines?.length) {
-          setEnginesState('failed');
-          return;
-        }
-        setEngines(data.engines);
-        setEngineId(data.defaultEngineId || 'nova');
-        setEnginesState('ready');
-      })
-      .catch(() => {
-        // Перелік не прийшов — лишається рушій за замовчуванням, той
-        // єдиний, який не залежить ні від чого зовнішнього. Мовчати про це
-        // не можна: автор має знати, що вибору зараз немає не тому, що його
-        // не буває, а тому, що перелік не дійшов.
-        if (alive) setEnginesState('failed');
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
+    void loadEngines();
+  }, [loadEngines]);
 
   const chosenEngine = engines.find((e) => e.id === engineId) || null;
 
@@ -546,29 +571,43 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
           )}
 
           <div className="flex flex-wrap gap-2">
-            {engines.map((engine) => (
-              <button
-                key={engine.id}
-                onClick={() => setEngineId(engine.id)}
-                disabled={!engine.available}
-                title={
-                  engine.available
-                    ? `${engine.strengthUk} Не вміє: ${engine.limitUk}`
-                    : [engine.reasonUk, engine.fixUk].filter(Boolean).join(' ')
-                }
-                className={`px-3 py-2 rounded-xl text-xs border transition text-left ${
-                  !engine.available
-                    ? 'bg-slate-950/60 border-slate-800 text-slate-600 cursor-not-allowed'
-                    : engineId === engine.id
-                      ? 'bg-cyan-500/15 border-cyan-500/50 text-cyan-200'
-                      : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-600'
-                }`}
-              >
-                {engine.label}
-                {engine.isDefault && <span className="ml-1 text-[10px] opacity-60">типово</span>}
-                {!engine.available && <span className="ml-1 text-[10px]">недоступний</span>}
-              </button>
-            ))}
+            {engines.map((engine) => {
+              /*
+                Три стани кнопки, а не два. Недоступний рушій, який автор може
+                підключити САМ, лишається живим і веде у вікно підключення:
+                вимкнена кнопка — це глухий кут, за яким автор має сам
+                здогадатись піти на інший екран по ключ.
+              */
+              const fixable = !engine.available && !!engine.fixAction;
+              return (
+                <button
+                  key={engine.id}
+                  onClick={() => (fixable ? setConnecting(engine) : setEngineId(engine.id))}
+                  disabled={!engine.available && !fixable}
+                  title={
+                    engine.available
+                      ? `${engine.strengthUk} Не вміє: ${engine.limitUk}`
+                      : [engine.reasonUk, engine.fixUk].filter(Boolean).join(' ')
+                  }
+                  className={`px-3 py-2 rounded-xl text-xs border transition text-left ${
+                    fixable
+                      ? 'bg-slate-950 border-amber-500/40 text-amber-200/90 hover:border-amber-400/70'
+                      : !engine.available
+                        ? 'bg-slate-950/60 border-slate-800 text-slate-600 cursor-not-allowed'
+                        : engineId === engine.id
+                          ? 'bg-cyan-500/15 border-cyan-500/50 text-cyan-200'
+                          : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-600'
+                  }`}
+                >
+                  {engine.label}
+                  {engine.isDefault && <span className="ml-1 text-[10px] opacity-60">типово</span>}
+                  {fixable && <span className="ml-1 text-[10px]">потрібен ваш ключ</span>}
+                  {!engine.available && !fixable && (
+                    <span className="ml-1 text-[10px]">недоступний</span>
+                  )}
+                </button>
+              );
+            })}
           </div>
 
           {/* Причина недоступності — текстом під переліком, а не лише в
@@ -581,6 +620,14 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
                   <li key={e.id} className="text-[11px] text-slate-500">
                     <span className="text-slate-400">{e.label}:</span>{' '}
                     {[e.reasonUk, e.fixUk].filter(Boolean).join(' ')}
+                    {e.fixAction && (
+                      <button
+                        onClick={() => setConnecting(e)}
+                        className="ml-1 text-cyan-300/80 hover:text-cyan-200 underline underline-offset-2"
+                      >
+                        Підключити
+                      </button>
+                    )}
                   </li>
                 ))}
             </ul>
@@ -826,6 +873,20 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
             </div>
           ))}
         </div>
+      )}
+
+      {/*
+        Вікно підключення власного ключа. Стоїть тут, а не в панелі Gamma:
+        автор упирається у брак ключа саме тут, у виборі рушія, і саме тут
+        має його підключити. Після успіху перепитуємо перелік і одразу
+        обираємо той рушій, заради якого все й затівалось.
+      */}
+      {connecting && (
+        <GammaKeyModal
+          reasonUk={[connecting.reasonUk, connecting.fixUk].filter(Boolean).join(' ')}
+          onClose={() => setConnecting(null)}
+          onConnected={() => void loadEngines(connecting.id)}
+        />
       )}
     </div>
   );

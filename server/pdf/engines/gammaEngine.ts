@@ -77,7 +77,14 @@ export const gammaEngine: PdfEngine = {
     }
     const key = await resolveGammaKey({ userId: context.ownerId, role: context.ownerRole });
     if (!key.apiKey) {
-      return { ok: false, reasonUk: key.reasonUk || 'Підписку Gamma не підключено.' };
+      // Єдиний випадок, коли авторові є що натиснути: ключ його власний, і
+      // підключається він звідси ж. Тому — `fixAction`, а не лише текст.
+      return {
+        ok: false,
+        reasonUk: key.reasonUk || 'Підписку Gamma не підключено.',
+        fixUk: 'Підключіть власний ключ Gamma — це робиться просто тут.',
+        fixAction: 'connect_gamma_key',
+      };
     }
     return { ok: true };
   },

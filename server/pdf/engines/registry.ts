@@ -22,6 +22,7 @@ import {
   PdfEngineError,
   type PdfEngine,
   type PdfEngineContext,
+  type PdfEngineFixAction,
   type PdfEngineId,
   type PdfRenderRequest,
   type PdfRenderResult,
@@ -58,6 +59,8 @@ export interface PdfEngineDescription {
   available: boolean;
   reasonUk?: string;
   fixUk?: string;
+  /** Заповнено — отже, автор може підключити рушій сам, просто звідси. */
+  fixAction?: PdfEngineFixAction;
   isDefault: boolean;
 }
 
@@ -95,6 +98,7 @@ export async function listPdfEngines(
     available: state.ok,
     reasonUk: state.ok ? undefined : state.reasonUk,
     fixUk: state.ok ? undefined : state.fixUk,
+    fixAction: state.ok ? undefined : state.fixAction,
     isDefault: engine.id === DEFAULT_PDF_ENGINE,
   }));
 }
