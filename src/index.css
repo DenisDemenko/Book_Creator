@@ -1085,15 +1085,13 @@
 }
 
 /* Повноекранний режим редагування (F12): розрив між сторінками —
-   візуальний проміжок, що імітує поля паперового аркуша (верх+низ),
-   — у звичайному режимі корисний як орієнтир, скільки книжкових
-   сторінок попереду. У фулскріні мета інша: максимум тексту на екрані
-   без гортання, тож проміжок стискається до тонкої риски-роздільника.
-   `!important` перебиває inline `style.height`, який ставить сам
-   PaginationPlugin.ts на кожен маркер `[data-nova-pagebreak]`. */
+   тонка смуга 15px, та сама, що й у вкладці (див. buildGapWidget у
+   PaginationPlugin.ts). `!important` перебиває inline `style.height`,
+   який ставить сам PaginationPlugin.ts на кожен маркер
+   `[data-nova-pagebreak]`. */
 .nova-fullscreen-editor [data-nova-pagebreak] {
-  height: 10px !important;
-  min-height: 10px !important;
+  height: 15px !important;
+  min-height: 15px !important;
   overflow: hidden;
 }
 

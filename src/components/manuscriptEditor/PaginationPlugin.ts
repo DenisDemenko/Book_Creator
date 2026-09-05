@@ -29,9 +29,8 @@ export interface PaginationOptions {
 
 const paginationKey = new PluginKey('novaPagination');
 
-/** Малює "розрив між аркушами" — суцільна смуга кольору полотна на всю ширину вікна (не лише колонки сторінки), заввишки в суму верхнього й нижнього полів. */
-function buildGapWidget(topMm: number, bottomMm: number, pageNumber: number, runningHeaderText: string): HTMLElement {
-  const gapMm = topMm + bottomMm;
+/** Малює "розрив між аркушами" — суцільна смуга кольору полотна на всю ширину вікна (не лише колонки сторінки), фіксованої висоти 15px. */
+function buildGapWidget(pageNumber: number): HTMLElement {
   const el = document.createElement('div');
   el.setAttribute('contenteditable', 'false');
   // Мітка для measure(): перед вимірюванням розриви ховаються, щоб
@@ -40,7 +39,7 @@ function buildGapWidget(topMm: number, bottomMm: number, pageNumber: number, run
   el.style.cssText = `
     width: 100vw;
     margin-left: calc(-50vw + 50%);
-    height: ${gapMm}mm;
+    height: 15px;
     background: #0f172a;
     flex-direction: column;
     gap: 2px;
@@ -51,24 +50,14 @@ function buildGapWidget(topMm: number, bottomMm: number, pageNumber: number, run
     display: flex;
     align-items: center;
     justify-content: center;
+    overflow: hidden;
     pointer-events: none;
     user-select: none;
   `;
-  // Колонтитул зверху НАСТУПНОГО аркуша — рендериться тут-таки, у розриві,
-  // бо саме розрив і є межею між сторінками; технічно це «верх сторінки
-  // N+1», а не «низ сторінки N».
-  //
-  // Бордовий, а не бурштиновий — навмисно інший колір, ніж решта
-  // AI-акцентів редактора: це елемент верстки самої книги, присутній
-  // незалежно від того, як саме з'явився текст під ним.
-  if (runningHeaderText) {
-    const header = document.createElement('div');
-    header.textContent = runningHeaderText;
-    header.style.cssText =
-      'font-size: 11px; letter-spacing: 0.04em; color: #7a1f2b; font-weight: 600; font-family: Georgia, serif;';
-    el.appendChild(header);
-  }
-
+  // Лише номер сторінки. Бордовий колонтитул глави з розриву прибрано:
+  // у смузі заввишки 15px він не вміщається, а обрізаний наполовину рядок
+  // читався б як дефект верстки. Колонтитул першого аркуша лишається
+  // статичним блоком у EditorView.tsx.
   const label = document.createElement('span');
   label.textContent = `— ${pageNumber} —`;
   label.style.cssText = 'font-size: 10px; color: #64748b; font-family: monospace;';
@@ -173,15 +162,11 @@ export const PaginationPlugin = Extension.create<PaginationOptions>({
             });
 
             const breakIndices = computeBreaksFromBounds(bounds, pageContentHeightPx, keepWithNext);
-            const { topMm, bottomMm } = options.getVerticalMarginsMm();
             const startPage = options.getStartPageNumber ? options.getStartPageNumber() : 1;
-            const runningHeaderText = options.getRunningHeaderText
-              ? options.getRunningHeaderText()
-              : '';
             const decorations = breakIndices.map((i, n) =>
               Decoration.widget(
                 positions[i],
-                () => buildGapWidget(topMm, bottomMm, startPage + n + 1, runningHeaderText),
+                () => buildGapWidget(startPage + n + 1),
                 { side: -1, key: `nova-pagebreak-${i}` }
               )
             );

@@ -3608,7 +3608,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
       {/* LEFT DRAWER: Book Structure Tree (Can be collapsed or opened) */}
       {showLeftTree && (
-        <aside className="w-full lg:w-72 bg-slate-950/95 backdrop-blur-xl border-r border-slate-800 shadow-2xl shadow-black/60 flex flex-col shrink-0 absolute z-40 h-full max-h-full">
+        <aside className="w-full lg:w-72 bg-slate-950/95 backdrop-blur-xl border-r border-slate-800 shadow-2xl shadow-black/60 flex flex-col shrink-0 absolute z-40 h-full max-h-full lg:relative lg:z-auto">
           <div className="p-3.5 border-b border-slate-800 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <BookMarked className="w-4 h-4 text-amber-400" />
@@ -3977,7 +3977,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
         </div>
 
         {/* Text Area Canvas Body */}
-        <div className="flex-1 min-h-0 p-4 lg:p-6 bg-slate-950 flex flex-col overflow-hidden">
+        <div className="flex-1 min-h-0 bg-slate-950 flex flex-col overflow-hidden">
           
           {/* Role Status Banners */}
           {isReader && (
@@ -4032,7 +4032,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 </select>
                 </>
               }
-              bodyClassName="p-6 flex flex-col overflow-hidden"
+              bodyClassName="flex flex-col overflow-hidden"
             >
               <div className="relative flex flex-col h-full min-h-0">
               {/* Форматування тексту + швидкий доступ до англійської версії */}
@@ -4206,7 +4206,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
               <DockedEditorPanel
                   title={<span className="flex items-center gap-2">🇺🇦 <span className="text-slate-100">{t('editor.ukOriginal')} — {activeSection?.title || ''}</span></span>}
                   className="min-w-0"
-                  bodyClassName="p-4 flex flex-col overflow-hidden"
+                  bodyClassName="flex flex-col overflow-hidden"
                 >
                   <div className="flex flex-col h-full min-h-0 gap-2">
                     <div className="flex items-center justify-between gap-2 shrink-0 flex-wrap">
@@ -4249,7 +4249,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
               <DockedEditorPanel
                   title={<span className="flex items-center gap-2">🇬🇧 <span className="text-slate-100">English Edition — {activeSection?.titleEn || activeSection?.title || ''}</span></span>}
                   className="min-w-0"
-                  bodyClassName="p-4 flex flex-col overflow-hidden"
+                  bodyClassName="flex flex-col overflow-hidden"
                 >
                   <div className="flex flex-col h-full min-h-0 gap-2">
                     <div className="flex items-center justify-between gap-2 shrink-0 flex-wrap">
@@ -4314,7 +4314,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   🇺🇦 UA
                 </button>
               }
-              bodyClassName="p-4 flex flex-col overflow-hidden"
+              bodyClassName="flex flex-col overflow-hidden"
             >
               <div className="flex flex-col h-full min-h-0 gap-2">
                 <div className="flex items-center justify-between gap-2 shrink-0 flex-wrap">
