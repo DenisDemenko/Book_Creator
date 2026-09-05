@@ -228,6 +228,9 @@ export interface PromptConstructorRequest {
   contextAfter?: string;
 }
 
+/** Масштаби аркуша у вкладці — ті самі значення, що й у панелі «Верстка» (LayoutView). */
+const PAGE_ZOOM_PRESETS = [20, 50, 70, 80, 90, 100, 110, 120, 150];
+
 export const EditorView: React.FC<EditorViewProps> = ({
   book,
   onUpdateBook,
@@ -1465,6 +1468,11 @@ export const EditorView: React.FC<EditorViewProps> = ({
    * значення звідси не впливає на звичайний режим редагування.
    */
   const [focusZoom, setFocusZoom] = usePersistentState<number>('nova_editor_fullscreenZoom', 1);
+  // Масштаб аркуша у вкладці: той самий механізм, що й focusZoom у вікні F12 —
+  // піднімає/опускає стелю scale() у usePageScale. Значення — PAGE_ZOOM_PRESETS,
+  // «Свій %» — довільне число 20–200.
+  const [editorZoom, setEditorZoom] = usePersistentState<number>('nova_editor_pageZoom', 100);
+  const [customEditorZoom, setCustomEditorZoom] = useState<string>('');
   const adjustFocusZoom = (delta: number) => {
     setFocusZoom((v) => Math.round(Math.min(1.6, Math.max(1, v + delta)) * 10) / 10);
   };
@@ -3973,6 +3981,56 @@ export const EditorView: React.FC<EditorViewProps> = ({
               <span>• EN: <b className="text-amber-400">{calculateWordCount(activeSection.contentEn)}</b></span>
             )}
             <span>{t('editor.readingTime', { n: estimateReadingTimeMinutes(activeSection?.wordCount || 0) })}</span>
+            {!isFocusWindow && (
+              <div className="flex items-center gap-1.5 pl-3 border-l border-slate-800" title={t('editor.pageZoomTitle')}>
+                <ZoomIn className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                <select
+                  value={PAGE_ZOOM_PRESETS.includes(editorZoom) ? String(editorZoom) : 'custom'}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value === 'custom') {
+                      setCustomEditorZoom(String(editorZoom));
+                    } else {
+                      setEditorZoom(Number(value));
+                    }
+                  }}
+                  className="bg-slate-900 border border-slate-800 rounded-md px-1 py-0.5 text-slate-200 cursor-pointer"
+                >
+                  {PAGE_ZOOM_PRESETS.map((zoom) => (
+                    <option key={zoom} value={zoom}>
+                      {zoom}%
+                    </option>
+                  ))}
+                  <option value="custom">{t('editor.pageZoomCustom')}</option>
+                </select>
+                {!PAGE_ZOOM_PRESETS.includes(editorZoom) && (
+                  <input
+                    type="number"
+                    min={20}
+                    max={200}
+                    value={customEditorZoom}
+                    placeholder="%"
+                    onChange={(e) => setCustomEditorZoom(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const parsed = Number(customEditorZoom);
+                        if (Number.isFinite(parsed) && parsed >= 20 && parsed <= 200) {
+                          setEditorZoom(Math.round(parsed));
+                        }
+                      }
+                    }}
+                    onBlur={() => {
+                      const parsed = Number(customEditorZoom);
+                      if (Number.isFinite(parsed) && parsed >= 20 && parsed <= 200) {
+                        setEditorZoom(Math.round(parsed));
+                      }
+                    }}
+                    className="w-16 bg-slate-900 border border-slate-800 rounded-md px-1 py-0.5 text-cyan-300 text-center"
+                    title={t('editor.pageZoomHint')}
+                  />
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -4104,12 +4162,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
               <PageRuler
                 widthMm={getPageContentWidthMm()}
-                zoomFactor={isFocusWindow ? focusZoom : 1}
+                zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
                 insideMm={book.layoutConfig.margins?.insideMm || 0}
                 outsideMm={book.layoutConfig.margins?.outsideMm || 0}
                 onChangeMargins={handleChangeMargins}
               />
-              <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : 1} className="flex-1 min-h-0">
+              <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0">
                 {/* Колонтитул першого аркуша. Плагін пагінації малює його на
                     кожному РОЗРИВІ, тобто зверху сторінок 2, 3, … — у першої
                     розриву перед нею немає, тож він рендериться тут. */}
@@ -4231,12 +4289,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     />
                     <PageRuler
                       widthMm={getPageContentWidthMm()}
-                      zoomFactor={isFocusWindow ? focusZoom : 1}
+                      zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
                       insideMm={book.layoutConfig.margins?.insideMm || 0}
                       outsideMm={book.layoutConfig.margins?.outsideMm || 0}
                       onChangeMargins={handleChangeMargins}
                     />
-                    <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : 1} className="flex-1 min-h-0 rounded-xl border border-slate-800/80">
+                    <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800/80">
                       <EditorContent
                         editor={uaEditor}
                         style={{ fontFamily: manuscriptFontStack }}
@@ -4284,12 +4342,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     />
                     <PageRuler
                       widthMm={getPageContentWidthMm()}
-                      zoomFactor={isFocusWindow ? focusZoom : 1}
+                      zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
                       insideMm={book.layoutConfig.margins?.insideMm || 0}
                       outsideMm={book.layoutConfig.margins?.outsideMm || 0}
                       onChangeMargins={handleChangeMargins}
                     />
-                    <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : 1} className="flex-1 min-h-0 rounded-xl border border-slate-800/80">
+                    <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800/80">
                       <EditorContent
                         editor={enEditor}
                         style={{ fontFamily: manuscriptFontStack }}
@@ -4347,12 +4405,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 />
                 <PageRuler
                   widthMm={getPageContentWidthMm()}
-                  zoomFactor={isFocusWindow ? focusZoom : 1}
+                  zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
                   insideMm={book.layoutConfig.margins?.insideMm || 0}
                   outsideMm={book.layoutConfig.margins?.outsideMm || 0}
                   onChangeMargins={handleChangeMargins}
                 />
-                <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : 1} className="flex-1 min-h-0 rounded-xl border border-slate-800">
+                <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800">
                   <EditorContent
                     editor={enEditor}
                     style={{ fontFamily: manuscriptFontStack }}
@@ -5734,12 +5792,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
             />
             <PageRuler
               widthMm={getPageContentWidthMm()}
-              zoomFactor={isFocusWindow ? focusZoom : 1}
+              zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
               insideMm={book.layoutConfig.margins?.insideMm || 0}
               outsideMm={book.layoutConfig.margins?.outsideMm || 0}
               onChangeMargins={handleChangeMargins}
             />
-            <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : 1} className="flex-1 min-h-0 rounded-xl border border-slate-800">
+            <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800">
               <EditorContent
                 editor={enEditor}
                 style={{ fontFamily: manuscriptFontStack }}
