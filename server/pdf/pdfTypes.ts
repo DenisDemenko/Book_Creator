@@ -166,7 +166,16 @@ export interface PdfBookInput {
   subtitle?: string;
   author?: string;
   chapters: Array<{
+    /** Потрібен лише для прив'язки ілюстрацій (`BookIllustration.chapterId`). */
+    id?: string;
     title: string;
     sections: Array<{ title?: string; content: string }>;
   }>;
+  /**
+   * Ілюстрації. Книга не зберігає точного місця вставки — лише главу
+   * (`BookIllustration.chapterId`, src/types.ts) — тому рендерер, як і
+   * `bookToMarkdown.ts` для зовнішніх рушіїв, кладе їх однаково: у кінці
+   * глави, а не всередині абзацу.
+   */
+  illustrations?: Array<{ chapterId?: string; url: string; caption?: string }>;
 }

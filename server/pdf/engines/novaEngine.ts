@@ -10,6 +10,14 @@
  *
  * Він же єдиний, який нічого не потребує: ані бінарника в образі, ані ключа,
  * ані мережі. Тому `available()` тут перевіряє рівно одне — шрифти.
+ *
+ * ІЛЮСТРАЦІЇ (запис #109, довершено). Раніше `renderBookPdf` не бачив
+ * зображень книги взагалі — рушій лише чесно повідомляв про їх кількість.
+ * Тепер `pdfRenderer.ts` вставляє їх сам: PNG і JPEG вбудовуються, підпис
+ * лягає під картинкою. Формат, якого `pdf-lib` не вміє (webp, gif, svg), і
+ * файл, якого не прочитати, — не привід тихо пропустити ілюстрацію: рушій
+ * лишає підпис текстом і повертає причину в `notesUk`, той самий принцип
+ * чесності, що діяв і раніше.
  */
 
 import { renderBookPdf, fontsAvailable, FONT_DIR } from '../pdfRenderer';
@@ -21,28 +29,6 @@ import {
   type PdfRenderRequest,
   type PdfRenderResult,
 } from './types';
-
-/**
- * Власна верстка НЕ малює ілюстрацій — і мусить про це сказати.
- *
- * `renderBookPdf` (pdf-lib) будує сторінку з тексту; зображень книги він
- * не бачить узагалі. Доки в книзі картинок немає, це нікого не обходить.
- * Але щойно автор їх додав, мовчазний PDF без жодної ілюстрації — це вже
- * тихий відкіт: автор замовив книгу з малюнками, а отримав без них і
- * дізнався б про це вже з готового файлу.
- *
- * Тому кількість названо прямо. Це не вибачення, а факт, з якого автор
- * робить висновок сам: лишитися на власній верстці заради полів KDP чи
- * перейти на Chromium або pandoc заради ілюстрацій.
- */
-function notesForDroppedIllustrations(book: PdfRenderRequest['book']): string[] {
-  const count = (book as { illustrations?: unknown[] })?.illustrations?.length || 0;
-  if (!count) return [];
-  return [
-    `Ілюстрацій у книзі: ${count}. Власна верстка їх НЕ вставляє — вона будує сторінку з тексту. ` +
-      'Щоб ілюстрації потрапили у файл, зверстайте книгу рушієм «Chromium» або «pandoc + Eisvogel».',
-  ];
-}
 
 export const novaEngine: PdfEngine = {
   id: 'nova',
@@ -74,25 +60,29 @@ export const novaEngine: PdfEngine = {
 
     try {
       if (request.print) {
-        const kdp = await renderKdpInterior(request.book, { base: request.spec as never });
+        const kdp = await renderKdpInterior(request.book, {
+          base: request.spec as never,
+          ownerId: request.ownerId,
+        });
         return {
           bytes: kdp.bytes,
           pageCount: kdp.pageCount,
           engineId: 'nova',
           honoredSpec: true,
-          // Попередження KDP — не «нотатки рушія», а те, що автор мусить
-          // побачити до завантаження файлу; сюди вони й переходять.
-          notesUk: [...kdp.warningsUk, ...notesForDroppedIllustrations(request.book)],
+          // Попередження KDP і причини пропущених ілюстрацій — не «нотатки
+          // рушія», а те, що автор мусить побачити до завантаження файлу;
+          // сюди вони й переходять.
+          notesUk: [...kdp.warningsUk, ...kdp.notesUk],
         };
       }
 
-      const result = await renderBookPdf(request.book, request.spec);
+      const result = await renderBookPdf(request.book, request.spec, { ownerId: request.ownerId });
       return {
         bytes: result.bytes,
         pageCount: result.pageCount,
         engineId: 'nova',
         honoredSpec: true,
-        notesUk: notesForDroppedIllustrations(request.book),
+        notesUk: result.notesUk,
       };
     } catch (err) {
       throw new PdfEngineError('nova', 'engine', (err as Error).message);

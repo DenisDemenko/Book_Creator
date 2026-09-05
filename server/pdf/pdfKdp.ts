@@ -25,6 +25,8 @@ import { getKdpMinimumGutterMm, getKdpMinimumOutsideMarginsMm } from '../../src/
 import { renderBookPdf, type RenderResult } from './pdfRenderer';
 import { DEFAULT_LAYOUT_SPEC, mm, type PdfBookInput, type PdfLayoutSpec } from './pdfTypes';
 
+type ImageCache = Map<string, { mimeType: string; bytes: Buffer }>;
+
 const PT_PER_INCH = 72;
 
 export interface KdpLayoutOptions {
@@ -35,6 +37,8 @@ export interface KdpLayoutOptions {
   hasBleed?: boolean;
   /** Базовий макет, з якого беруться типографські рішення (кегль, шрифт). */
   base?: PdfLayoutSpec;
+  /** Власник книги — для ілюстрацій із медіатеки (#100). */
+  ownerId?: string | null;
 }
 
 export interface KdpRenderResult extends RenderResult {
@@ -113,10 +117,14 @@ export async function renderKdpInterior(
   let result: RenderResult | null = null;
   let built = kdpSpec({ ...options, pageCountEstimate: estimate });
   let passes = 0;
+  // Три проходи верстають ту саму книгу поспіль (комент. вище) — байти
+  // ілюстрації читаються (а посилання http — запитуються мережею) один раз,
+  // а не по разу на прохід.
+  const imageCache: ImageCache = new Map();
 
   for (let i = 0; i < 3; i += 1) {
     passes += 1;
-    result = await renderBookPdf(book, built.spec);
+    result = await renderBookPdf(book, built.spec, { ownerId: options.ownerId, imageCache });
     const needed = getKdpMinimumGutterMm(result.pageCount).minMm;
     if (needed === built.gutterMm) break;
     // Корінець тільки росте: якщо наступний прохід дав менший обсяг і

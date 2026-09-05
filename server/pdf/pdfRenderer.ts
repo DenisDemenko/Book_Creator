@@ -26,6 +26,7 @@ import {
   type PdfBookInput,
   type PdfLayoutSpec,
 } from './pdfTypes';
+import { loadImageBytes } from '../media/imageBytes';
 
 export const FONT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fonts');
 
@@ -120,11 +121,43 @@ export interface RenderResult {
   pageCount: number;
   /** Скільки сторінок пронумеровано — для звіту в інтерфейсі. */
   numberedPages: number;
+  /**
+   * Що рушій зробив інакше, ніж просив автор — конкретно ілюстрація, яку не
+   * вдалося вставити (формат, який `pdf-lib` не вміє, або файл, якого не
+   * знайшлося). Порожньо — значить, усе вставлено як є. Той самий принцип
+   * чесності, що й у `notesUk` зовнішніх рушіїв (#101, #109): мовчазний
+   * відкіт заборонений, автор бачить причину до того, як відкриє готовий PDF.
+   */
+  notesUk: string[];
+}
+
+export interface RenderContext {
+  /** Власник книги — потрібен лише для посилань на медіатеку (#100). */
+  ownerId?: string | null;
+  /**
+   * Кеш байтів зображення за посиланням. Друкована редакція (`pdfKdp.ts`)
+   * верстає книгу до трьох разів поспіль, шукаючи корінець під фактичний
+   * обсяг, — без кешу той самий файл читався б (а посилання `http(s)` —
+   * запитувалося мережею) стільки ж разів.
+   */
+  imageCache?: Map<string, { mimeType: string; bytes: Buffer }>;
+}
+
+async function loadImageCached(
+  url: string,
+  ownerId: string | null | undefined,
+  cache?: Map<string, { mimeType: string; bytes: Buffer }>
+): Promise<{ mimeType: string; bytes: Buffer }> {
+  if (cache?.has(url)) return cache.get(url)!;
+  const result = await loadImageBytes(url, ownerId);
+  cache?.set(url, result);
+  return result;
 }
 
 export async function renderBookPdf(
   book: PdfBookInput,
-  specInput?: Partial<PdfLayoutSpec>
+  specInput?: Partial<PdfLayoutSpec>,
+  context?: RenderContext
 ): Promise<RenderResult> {
   if (!fontsAvailable()) {
     throw new Error(
@@ -161,8 +194,11 @@ export async function renderBookPdf(
       ? { width: spec.pageWidthPt, height: spec.pageHeightPt }
       : PAGE_SIZES[spec.pageSize] || PAGE_SIZES.A5;
   const contentWidth = size.width - spec.margins.left - spec.margins.right;
+  const contentHeight = size.height - spec.margins.top - spec.margins.bottom;
   const black = rgb(0.1, 0.09, 0.08);
   const grey = rgb(0.45, 0.43, 0.4);
+  const ownerId = context?.ownerId ?? null;
+  const notesUk: string[] = [];
 
   /**
    * Ліве поле поточної сторінки. При дзеркальних полях перша сторінка —
@@ -263,6 +299,79 @@ export async function renderBookPdf(
   };
 
   /**
+   * Ілюстрація книги: зображення, вписане в смугу набору за шириною й у
+   * висоту сторінки — не розтягнуте понад оригінал (та сама межа, що й
+   * `img { max-width: 100% }` у `bookHtml.ts`), — і підпис під ним.
+   *
+   * `pdf-lib` уміє вбудувати лише PNG і JPEG: інший формат чи файл, якого
+   * не прочитати (медіатека іншого власника, видалений запис, недоступна
+   * мережа), — не привід тихо пропустити ілюстрацію. Причина йде одразу в
+   * двох місцях: підписом просто в тексті книги (автор бачить її й без
+   * інтерфейсу) і рядком у `notesUk` (автор бачить її ДО завантаження файлу).
+   */
+  const drawIllustration = async (ill: { url: string; caption?: string }) => {
+    const captionText = String(ill.caption || '').trim();
+    const label = captionText || ill.url;
+    let embedded: Awaited<ReturnType<typeof doc.embedPng>> | null = null;
+    let failureUk = '';
+
+    try {
+      const { mimeType, bytes } = await loadImageCached(ill.url, ownerId, context?.imageCache);
+      if (/png/i.test(mimeType)) {
+        embedded = await doc.embedPng(bytes);
+      } else if (/jpe?g/i.test(mimeType)) {
+        embedded = await doc.embedJpg(bytes);
+      } else {
+        failureUk =
+          `формат ${mimeType} не підтримується власною версткою (лише PNG і JPEG) — ` +
+          'зверстайте книгу рушієм «Chromium» або «pandoc + Eisvogel»';
+      }
+    } catch (err) {
+      // `pdf-lib` кидає на биті PNG-байти не `Error`, а РЯДОК (перевірено
+      // живим прогоном) — `(err as Error).message` на ньому мовчки дало б
+      // `undefined`, і автор побачив би причину без причини.
+      failureUk = err instanceof Error ? err.message : String(err);
+    }
+
+    if (!embedded) {
+      notesUk.push(`Ілюстрація «${label}» не вставлена: ${failureUk}.`);
+      // Підпис лишається текстом — читач бачить, що тут малась бути
+      // ілюстрація, а не порожнє місце без пояснення.
+      if (captionText) {
+        ensure(spec.baseFontSize * spec.lineHeight + spec.paragraphSpacing);
+        drawLine(`Ілюстрація: ${captionText}`, serif, spec.baseFontSize, 'center', grey);
+        y -= spec.baseFontSize * spec.lineHeight + spec.paragraphSpacing;
+      }
+      return;
+    }
+
+    const dims = embedded.size();
+    // Висота обмежена часткою смуги набору (як `0.8\textheight` у
+    // pandocEngine.ts) — на всю висоту сторінки ілюстрація налізла б на
+    // колонтитул і номер; маленька картинка не розтягується понад оригінал.
+    const maxHeight = contentHeight * 0.6;
+    const scale = Math.min(contentWidth / dims.width, maxHeight / dims.height, 1);
+    const w = dims.width * scale;
+    const h = dims.height * scale;
+
+    const captionSize = Math.max(7, Math.round(spec.baseFontSize * 0.85));
+    const captionLines = captionText ? wrapText(captionText, serif, captionSize, contentWidth) : [];
+    const captionStep = captionSize * 1.3;
+    const gap = 8;
+    const needed = h + gap + captionLines.length * captionStep + spec.paragraphSpacing;
+    ensure(needed);
+
+    const x = curLeft + (contentWidth - w) / 2;
+    page.drawImage(embedded, { x, y: y - h, width: w, height: h });
+    y -= h + gap;
+    for (const line of captionLines) {
+      drawLine(line, serif, captionSize, 'center', grey);
+      y -= captionStep;
+    }
+    y -= spec.paragraphSpacing;
+  };
+
+  /**
    * Скільки рядків тексту мусить лишитись під заголовком на тій самій
    * сторінці. Два — мінімум, за яким заголовок перестає бути «висячим»:
    * заголовок в останньому рядку сторінки, а текст під ним — на наступній,
@@ -336,6 +445,16 @@ export async function renderBookPdf(
         drawParagraph(paragraph, spec.paragraphIndent > 0 && index > 0);
       });
     }
+
+    // Ілюстрації глави — у кінці, після всіх розділів. Книга не зберігає
+    // точнішого місця вставки (пояснено в `bookToMarkdown.ts` і в
+    // `PdfBookInput.illustrations`); той самий порядок, що й у Chromium і
+    // pandoc, тож три рушії дають ту саму книгу з тими самими картинками на
+    // тому самому місці, а не три різні.
+    for (const ill of book.illustrations || []) {
+      if (!chapter.id || ill.chapterId !== chapter.id) continue;
+      await drawIllustration(ill);
+    }
   }
 
   // --- колонтитули й нумерація -------------------------------------------
@@ -379,5 +498,5 @@ export async function renderBookPdf(
     p.drawText(label, { x, y: yy, size: spec.pageNumber.fontSize, font: serif, color: grey });
   });
 
-  return { bytes: await doc.save(), pageCount: pages.length, numberedPages: numbered };
+  return { bytes: await doc.save(), pageCount: pages.length, numberedPages: numbered, notesUk };
 }

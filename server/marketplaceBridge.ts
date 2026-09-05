@@ -173,6 +173,8 @@ export interface PublishBookInput {
   coverUrl?: string;
   highlights?: string[];
   sellerSlug?: string;
+  /** Непорожнє — лише для тестового видання нестандартним рушієм PDF. */
+  engineId?: string;
 }
 
 export interface PublishBookResult {
@@ -190,9 +192,16 @@ export interface PublishBookResult {
  * `externalId` містить формат: інакше другий виклик (друкована версія)
  * оновив би той самий лістинг, що й перший, замість створити сусідній —
  * приймач у маркетплейсі ідемпотентний саме за цим полем.
+ *
+ * `engineId` — той самий принцип для тестових видань одної книги різними
+ * рушіями PDF (порівняння nova/chromium/pandoc, log.md #109): без нього
+ * другий рушій оновив би лістинг першого замість створити сусідній. Порожньо
+ * для звичайної публікації — і тоді `externalId` не відрізняється від
+ * попереднього формату, тож наявні лістинги оновлюються так само, як і
+ * раніше.
  */
-export function bridgeExternalId(bookId: string, format: MarketplaceFormat): string {
-  return `${bookId}:${format}`;
+export function bridgeExternalId(bookId: string, format: MarketplaceFormat, engineId?: string): string {
+  return engineId ? `${bookId}:${format}:${engineId}` : `${bookId}:${format}`;
 }
 
 const TIMEOUT_MS = 20000;
@@ -495,6 +504,8 @@ export async function attachBookFileToMarketplace(
      *   'attachment' — сам файл книги, лише тому, хто має право на товар.
      */
     kind?: BridgeFileKind;
+    /** Непорожнє — лише для тестового видання нестандартним рушієм PDF. */
+    engineId?: string;
   },
   deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
 ): Promise<{
@@ -506,7 +517,7 @@ export async function attachBookFileToMarketplace(
 }> {
   const settings = deps.settings ?? (await readBridgeSettings());
   const doFetch = deps.fetch ?? fetch;
-  const externalId = bridgeExternalId(input.bookId, input.format);
+  const externalId = bridgeExternalId(input.bookId, input.format, input.engineId);
 
   const form = new FormData();
   form.append(
@@ -599,12 +610,12 @@ export async function attachBookFileToMarketplace(
  * повторне натискання кнопки лякало б користувача червоним.
  */
 export async function unpublishBookFromMarketplace(
-  input: { bookId: string; format: MarketplaceFormat },
+  input: { bookId: string; format: MarketplaceFormat; engineId?: string },
   deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
 ): Promise<{ removed: boolean; externalId: string; format: MarketplaceFormat }> {
   const settings = deps.settings ?? (await readBridgeSettings());
   const doFetch = deps.fetch ?? fetch;
-  const externalId = bridgeExternalId(input.bookId, input.format);
+  const externalId = bridgeExternalId(input.bookId, input.format, input.engineId);
 
   let response: Response;
   try {
@@ -784,7 +795,7 @@ export async function publishBookToMarketplace(
 ): Promise<PublishBookResult> {
   const settings = deps.settings ?? (await readBridgeSettings());
   const doFetch = deps.fetch ?? fetch;
-  const externalId = bridgeExternalId(input.bookId, input.format);
+  const externalId = bridgeExternalId(input.bookId, input.format, input.engineId);
 
   const body = {
     externalId,

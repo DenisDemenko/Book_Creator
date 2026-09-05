@@ -375,16 +375,44 @@ console.log('\nІлюстрації: розмір, підпис і чесніс�
   t('у стилях є межа ширини для БУДЬ-ЯКОЇ картинки',
     /img\s*\{[^}]*max-width:\s*100%/.test(page));
 
-  // 3. Власна верстка ілюстрацій не малює — і мусить про це сказати.
+  // 3. Власна верстка тепер малює ілюстрації сама (#109, довершено): PNG і
+  //    JPEG вбудовуються; те, чого `pdf-lib` не вміє, або биті байти файлу —
+  //    чесна причина в notesUk, а не тихий пропуск.
   registry.registerPdfEngine(novaEngine as never);
-  const withImages = await registry.renderWithEngine('nova', {
-    book: { ...(book as never as object), illustrations: [{ id: 'i1', url: 'u', caption: 'c' }] } as never,
+
+  const tinyPng =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+
+  const embedded = await registry.renderWithEngine('nova', {
+    book: {
+      ...(book as never as object),
+      illustrations: [{ id: 'i1', chapterId: 'c1', url: tinyPng, caption: 'Нічний Київ' }],
+    } as never,
     kind: 'book',
   });
-  t('nova називає кількість пропущених ілюстрацій',
-    withImages.notesUk.some((n) => /Ілюстрацій у книзі: 1/.test(n)), JSON.stringify(withImages.notesUk));
-  t('nova підказує, який рушій їх зверстає',
-    withImages.notesUk.some((n) => /Chromium|pandoc/.test(n)));
+  t('дійсний PNG вставляється без приміток', embedded.notesUk.length === 0, JSON.stringify(embedded.notesUk));
+
+  const badBytes = await registry.renderWithEngine('nova', {
+    book: {
+      ...(book as never as object),
+      illustrations: [{ id: 'i1', chapterId: 'c1', url: 'data:image/png;base64,AAA', caption: 'Биті байти' }],
+    } as never,
+    kind: 'book',
+  });
+  t('биті байти PNG не вставлено мовчки',
+    badBytes.notesUk.some((n) => n.includes('Биті байти') && n.includes('не вставлена')),
+    JSON.stringify(badBytes.notesUk));
+
+  const unsupported = await registry.renderWithEngine('nova', {
+    book: {
+      ...(book as never as object),
+      illustrations: [{ id: 'i1', chapterId: 'c1', url: 'data:image/webp;base64,AAAA', caption: 'Вебп' }],
+    } as never,
+    kind: 'book',
+  });
+  t('непідтримуваний формат називає рушій, що впорається',
+    unsupported.notesUk.some((n) => n.includes('Вебп') && /Chromium|pandoc/.test(n)),
+    JSON.stringify(unsupported.notesUk));
 
   // Фікстура `book` вище САМА має одну ілюстрацію, тож для протилежного
   // випадку її треба прибрати явно — інакше перевірка порівнює не те.
@@ -392,8 +420,7 @@ console.log('\nІлюстрації: розмір, підпис і чесніс�
     book: { ...(book as never as object), illustrations: [] } as never,
     kind: 'book',
   });
-  t('без ілюстрацій зайвої примітки немає',
-    !noImages.notesUk.some((n) => /Ілюстрацій у книзі/.test(n)), JSON.stringify(noImages.notesUk));
+  t('без ілюстрацій приміток немає', noImages.notesUk.length === 0, JSON.stringify(noImages.notesUk));
 }
 
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);
