@@ -27,6 +27,7 @@ const t = (n: string, c: boolean, e = '') => {
 const { htmlToMarkdown, bookToMarkdown, courseToMarkdown } = await import('../server/pdf/bookToMarkdown');
 const { buildBookHtml, markdownToHtmlBody, escapeHtml } = await import('../server/pdf/html/bookHtml');
 const registry = await import('../server/pdf/engines/registry');
+const { novaEngine } = await import('../server/pdf/engines/novaEngine');
 const { PdfEngineError } = await import('../server/pdf/engines/types');
 const { chromiumAvailableAt, chromiumEngine, __setBrowserLauncherForTests } = await import(
   '../server/pdf/engines/chromiumEngine'
@@ -341,6 +342,58 @@ console.log('\nGamma: доступність без підписки');
   t('Gamma не може бути рушієм за замовчуванням', gammaEngine.id !== 'nova');
   t('Gamma не робить друк під KDP', gammaEngine.supportsPrint === false);
   t('обмеження називає витрату кредитів автора', gammaEngine.limitUk.includes('кредити'));
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nІлюстрації: розмір, підпис і чесність про пропущене');
+{
+  const { markdownToHtmlBody } = await import('../server/pdf/html/bookHtml.ts');
+
+  /*
+    Живий прогін книги з картинками з медіатеки показав три різні вади за
+    один раз, і кожна перевіряється тут окремо.
+  */
+
+  // 1. markdown-it робить `<p><img></p>`, тож правило `figure img` у стилях
+  //    не діяло взагалі — широка ілюстрація вилазила за сторінку.
+  const html = markdownToHtmlBody('![Широка ілюстрація](nova-image-1)\n');
+  t('абзац із самої картинки стає <figure>', /<figure><img/.test(html), html.slice(0, 90));
+  t('підпис із alt виводиться видимим текстом',
+    /<figcaption>Широка ілюстрація<\/figcaption>/.test(html), html.slice(0, 140));
+  t('порожній підпис не породжує порожній <figcaption>',
+    !/<figcaption><\/figcaption>/.test(markdownToHtmlBody('![](nova-image-2)\n')));
+
+  // Картинка ВСЕРЕДИНІ абзацу — не ілюстрація, і в <figure> її загортати
+  // не можна: це розірвало б речення.
+  const inline = markdownToHtmlBody('Текст ![і картинка](nova-image-3) далі\n');
+  t('картинка всередині тексту лишається в абзаці',
+    /<p>Текст <img/.test(inline) && !/<figure>/.test(inline), inline.slice(0, 100));
+
+  // 2. Загальне правило для img — щоб і така картинка не вилізла за смугу.
+  const { buildBookHtml } = await import('../server/pdf/html/bookHtml.ts');
+  const page = buildBookHtml('![п](nova-image-1)\n', { title: 'К', theme: 'book' } as never);
+  t('у стилях є межа ширини для БУДЬ-ЯКОЇ картинки',
+    /img\s*\{[^}]*max-width:\s*100%/.test(page));
+
+  // 3. Власна верстка ілюстрацій не малює — і мусить про це сказати.
+  registry.registerPdfEngine(novaEngine as never);
+  const withImages = await registry.renderWithEngine('nova', {
+    book: { ...(book as never as object), illustrations: [{ id: 'i1', url: 'u', caption: 'c' }] } as never,
+    kind: 'book',
+  });
+  t('nova називає кількість пропущених ілюстрацій',
+    withImages.notesUk.some((n) => /Ілюстрацій у книзі: 1/.test(n)), JSON.stringify(withImages.notesUk));
+  t('nova підказує, який рушій їх зверстає',
+    withImages.notesUk.some((n) => /Chromium|pandoc/.test(n)));
+
+  // Фікстура `book` вище САМА має одну ілюстрацію, тож для протилежного
+  // випадку її треба прибрати явно — інакше перевірка порівнює не те.
+  const noImages = await registry.renderWithEngine('nova', {
+    book: { ...(book as never as object), illustrations: [] } as never,
+    kind: 'book',
+  });
+  t('без ілюстрацій зайвої примітки немає',
+    !noImages.notesUk.some((n) => /Ілюстрацій у книзі/.test(n)), JSON.stringify(noImages.notesUk));
 }
 
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);

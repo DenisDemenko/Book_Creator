@@ -22,6 +22,28 @@ import {
   type PdfRenderResult,
 } from './types';
 
+/**
+ * Власна верстка НЕ малює ілюстрацій — і мусить про це сказати.
+ *
+ * `renderBookPdf` (pdf-lib) будує сторінку з тексту; зображень книги він
+ * не бачить узагалі. Доки в книзі картинок немає, це нікого не обходить.
+ * Але щойно автор їх додав, мовчазний PDF без жодної ілюстрації — це вже
+ * тихий відкіт: автор замовив книгу з малюнками, а отримав без них і
+ * дізнався б про це вже з готового файлу.
+ *
+ * Тому кількість названо прямо. Це не вибачення, а факт, з якого автор
+ * робить висновок сам: лишитися на власній верстці заради полів KDP чи
+ * перейти на Chromium або pandoc заради ілюстрацій.
+ */
+function notesForDroppedIllustrations(book: PdfRenderRequest['book']): string[] {
+  const count = (book as { illustrations?: unknown[] })?.illustrations?.length || 0;
+  if (!count) return [];
+  return [
+    `Ілюстрацій у книзі: ${count}. Власна верстка їх НЕ вставляє — вона будує сторінку з тексту. ` +
+      'Щоб ілюстрації потрапили у файл, зверстайте книгу рушієм «Chromium» або «pandoc + Eisvogel».',
+  ];
+}
+
 export const novaEngine: PdfEngine = {
   id: 'nova',
   label: 'Nova (власна верстка)',
@@ -60,7 +82,7 @@ export const novaEngine: PdfEngine = {
           honoredSpec: true,
           // Попередження KDP — не «нотатки рушія», а те, що автор мусить
           // побачити до завантаження файлу; сюди вони й переходять.
-          notesUk: kdp.warningsUk,
+          notesUk: [...kdp.warningsUk, ...notesForDroppedIllustrations(request.book)],
         };
       }
 
@@ -70,7 +92,7 @@ export const novaEngine: PdfEngine = {
         pageCount: result.pageCount,
         engineId: 'nova',
         honoredSpec: true,
-        notesUk: [],
+        notesUk: notesForDroppedIllustrations(request.book),
       };
     } catch (err) {
       throw new PdfEngineError('nova', 'engine', (err as Error).message);

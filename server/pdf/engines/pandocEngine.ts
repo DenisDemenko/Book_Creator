@@ -271,6 +271,16 @@ export const pandocEngine: PdfEngine = {
         'titlepage=true',
         '-V',
         'toc-own-page=true',
+        /*
+          Кожна ілюстрація вписується у смугу набору й висоту сторінки.
+          Без цього LaTeX ставить `\\includegraphics` у НАТУРАЛЬНОМУ розмірі
+          зображення: широка картинка на 1600 px вилазила за правий край і
+          налізала на колонтитул — перевірено живим прогоном.
+          `keepaspectratio` лишає пропорції, тож картинка не спотворюється,
+          а мала й не збільшується — `width` тут стеля, а не вимога.
+        */
+        '-V',
+        'header-includes=\\setkeys{Gin}{width=\\linewidth,height=0.8\\textheight,keepaspectratio}',
       ];
 
       const result = await run(PANDOC_PATH, args, { cwd: workDir, timeoutMs: PANDOC_TIMEOUT_MS });

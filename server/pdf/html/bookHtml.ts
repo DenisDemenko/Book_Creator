@@ -127,6 +127,10 @@ function styles(theme: ThemeVars, fontSizePt: number, lineHeight: number): strin
       white-space: pre-wrap;
       break-inside: avoid-page;
     }
+    /* Запобіжник для БУДЬ-ЯКОЇ картинки, не лише тієї, що в <figure>:
+       натуральний розмір зображення не має жодного стосунку до ширини
+       сторінки книги, і без цього рядка широка ілюстрація зрізається. */
+    img { max-width: 100%; height: auto; }
     figure { margin: 1.4em 0; text-align: center; break-inside: avoid-page; }
     figure img { max-width: 100%; max-height: 60vh; }
     figcaption {
@@ -168,8 +172,33 @@ function markdownRenderer(): MarkdownIt {
   });
 }
 
+/*
+  Ілюстрація в markdown — це `![підпис](адреса)`, і markdown-it робить із
+  неї `<p><img alt="підпис"></p>`. Наслідків два, і обидва знайшов живий
+  прогін книги з картинками:
+
+  1. Правило `figure img { max-width: 100% }` у таблиці стилів не діяло
+     ЖОДНОГО разу, бо `<figure>` тут ніколи не зʼявлявся. Широка
+     ілюстрація (1600 px) лягала в натуральний розмір і вилазила за
+     сторінку A5 — праву третину просто зрізало.
+  2. Підпис жив лише в атрибуті `alt`, тобто був невидимий: читач бачив
+     картинку без жодного пояснення, хоча автор підпис писав.
+
+  Тому абзац, який складається РІВНО з однієї картинки, перетворюємо на
+  `<figure>` з `<figcaption>`. Картинка всередині тексту (рідкість, але
+  можлива) лишається як є — загальне правило для `img` нижче все одно не
+  дасть їй вилізти.
+*/
 export function markdownToHtmlBody(markdown: string): string {
-  return markdownRenderer().render(String(markdown ?? ''));
+  const html = markdownRenderer().render(String(markdown ?? ''));
+  return html.replace(
+    /<p>\s*(<img\b[^>]*>)\s*<\/p>/g,
+    (_full, img: string) => {
+      const alt = /alt="([^"]*)"/.exec(img)?.[1] || '';
+      const caption = alt.trim() ? `<figcaption>${alt}</figcaption>` : '';
+      return `<figure>${img}${caption}</figure>`;
+    }
+  );
 }
 
 export function buildBookHtml(markdown: string, options: BookHtmlOptions): string {
