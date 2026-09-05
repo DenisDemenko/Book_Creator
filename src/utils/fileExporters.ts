@@ -406,7 +406,7 @@ nav#toc a {
     ${subtitle ? `<h2 class="subtitle">${escapeXml(subtitle)}</h2>` : ''}
     <p class="author">${escapeXml(isEn ? 'Author' : 'Автор')}: ${escapeXml(author)}</p>
     <div style="margin-top: 4em; font-size: 0.9em; color: #6b7280;">
-      <p style="text-align: center; text-indent: 0;">NOVA STUDIO Publishing Edition</p>
+      <p style="text-align: center; text-indent: 0;">Fusion Lab Studio Publishing Edition</p>
       <p style="text-align: center; text-indent: 0;">${dateStr}</p>
     </div>
   </div>
@@ -530,7 +530,7 @@ nav#toc a {
     <dc:title>${escapeXml(title)}</dc:title>
     <dc:language>${lang}</dc:language>
     <dc:creator>${escapeXml(author)}</dc:creator>
-    <dc:publisher>NOVA STUDIO</dc:publisher>
+    <dc:publisher>Fusion Lab Studio</dc:publisher>
     <dc:date>${dateStr}</dc:date>
     <meta property="dcterms:modified">${new Date().toISOString().replace(/\.\d+Z$/, 'Z')}</meta>
   </metadata>

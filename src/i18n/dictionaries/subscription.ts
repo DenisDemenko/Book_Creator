@@ -1,6 +1,6 @@
 export const subscription = {
   uk: {
-    badge: 'Тарифи NOVA STUDIO',
+    badge: 'Тарифи Fusion Lab Studio',
     heading: 'Оберіть план для вашої видавничої майстерні',
     priceIntro: 'Ціни в гривнях, оплата через',
     or: 'або',
@@ -40,7 +40,7 @@ export const subscription = {
     cancel: 'Скасувати',
   },
   en: {
-    badge: 'NOVA STUDIO Plans',
+    badge: 'Fusion Lab Studio Plans',
     heading: 'Choose a plan for your publishing studio',
     priceIntro: 'Prices in hryvnia, paid via',
     or: 'or',

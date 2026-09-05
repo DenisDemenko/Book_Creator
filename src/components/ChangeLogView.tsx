@@ -80,7 +80,7 @@ export const ChangeLogView: React.FC<ChangeLogViewProps> = ({
   const handleDownloadTxt = () => {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const header = `=======================================================\n` +
-      `  NOVA STUDIO - ЖУРНАЛ АУДИТУ ТА ЗМІН КНИГИ\n` +
+      `  FUSION LAB STUDIO - ЖУРНАЛ АУДИТУ ТА ЗМІН КНИГИ\n` +
       `  Твір: ${bookTitle} (ID: ${bookId})\n` +
       `  Поточна версія: ${currentVersion}\n` +
       `  Згенеровано: ${new Date().toLocaleString('uk-UA')}\n` +

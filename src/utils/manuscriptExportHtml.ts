@@ -3,7 +3,7 @@
  * Amazon KDP» (src/components/ManuscriptFormatterView.tsx).
  *
  * Навмисно НЕ використовує серверні PDF-бібліотеки — той самий підхід,
- * що й генерація PDF для книг NOVA STUDIO (utils/helpers.ts →
+ * що й генерація PDF для книг Fusion Lab Studio (utils/helpers.ts →
  * generateBookExportHtml): HTML зі сторінковою розміткою `@page` за
  * офіційними полями/обрізним форматом Amazon KDP, а сам PDF-файл створює
  * діалог друку браузера («Зберегти як PDF»). Це узгоджено з рештою
@@ -158,7 +158,7 @@ export function generateFormattedManuscriptExportHtml(
   <div class="title-page">
     <h1 style="font-size: 32pt; margin-bottom: 8px;">${escapeHtml(meta.title)}</h1>
     <h3 style="font-size: 18pt; font-weight: 600; margin-top: 40px;">${escapeHtml(meta.author)}</h3>
-    <p style="margin-top: 120px; color: #64748b; font-size: 11pt;">Відформатовано за допомогою ШІ (Claude) — Цифрова Майстерня Письменника NOVA STUDIO</p>
+    <p style="margin-top: 120px; color: #64748b; font-size: 11pt;">Відформатовано за допомогою ШІ (Claude) — Цифрова Майстерня Письменника Fusion Lab Studio</p>
   </div>
 
   <div class="copyright-page">

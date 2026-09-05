@@ -60,7 +60,7 @@ export async function exportBookToBackupZip(book: Book): Promise<void> {
 
   const manifest: BookBackupManifest = {
     schemaVersion: BOOK_BACKUP_SCHEMA_VERSION,
-    appVersion: 'NOVA STUDIO',
+    appVersion: 'Fusion Lab Studio',
     exportedAt: new Date().toISOString(),
     bookId: book.id,
     title: book.title,
@@ -73,10 +73,10 @@ export async function exportBookToBackupZip(book: Book): Promise<void> {
   zip.file('book.json', JSON.stringify(book, null, 2));
   zip.file(
     'README.txt',
-    'Це повна резервна копія проєкту книги NOVA STUDIO.\n' +
+    'Це повна резервна копія проєкту книги Fusion Lab Studio.\n' +
       'Файл book.json містить усі дані рукопису: глави, розділи, персонажів,\n' +
       'ілюстрації, курс, верстку PDF та налаштування видання.\n\n' +
-      'Щоб продовжити роботу над книгою — на стартовій сторінці NOVA STUDIO\n' +
+      'Щоб продовжити роботу над книгою — на стартовій сторінці Fusion Lab Studio\n' +
       'натисніть «Відкрити з ZIP» і виберіть цей файл.\n\n' +
       'Не редагуйте book.json вручну без потреби: пошкоджений JSON унеможливить імпорт.\n'
   );
@@ -132,7 +132,7 @@ export interface ReadBookBackupResult {
  *   2. це наш власний course.zip (є course-info.json, немає book.json) —
  *      коректний архів, але не той формат: у ньому немає повного тексту
  *      книги, потрібного для продовження редагування;
- *   3. book.json відсутній, або є, але це не JSON книги NOVA STUDIO.
+ *   3. book.json відсутній, або є, але це не JSON книги Fusion Lab Studio.
  */
 export async function readBookBackupZip(file: File): Promise<ReadBookBackupResult> {
   let zip: JSZip;
@@ -158,7 +158,7 @@ export async function readBookBackupZip(file: File): Promise<ReadBookBackupResul
     }
     throw new BookBackupError(
       'missing_book_json',
-      'У цьому ZIP-архіві не знайдено файл book.json — це не резервна копія книги NOVA STUDIO.'
+      'У цьому ZIP-архіві не знайдено файл book.json — це не резервна копія книги Fusion Lab Studio.'
     );
   }
 
@@ -187,7 +187,7 @@ export async function readBookBackupZip(file: File): Promise<ReadBookBackupResul
   if (!isPlausibleBook(parsed)) {
     throw new BookBackupError(
       'invalid_schema',
-      'Вміст book.json не відповідає структурі книги NOVA STUDIO (відсутні обов’язкові поля).'
+      'Вміст book.json не відповідає структурі книги Fusion Lab Studio (відсутні обов’язкові поля).'
     );
   }
 

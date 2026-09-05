@@ -1,7 +1,7 @@
 export const inviteAccept = {
   uk: {
     heading: 'Запрошення до співпраці',
-    subheading: 'NOVA STUDIO · Cowork',
+    subheading: 'Fusion Lab Studio · Cowork',
     loadingLabel: 'Завантаження запрошення…',
     bookLabel: 'Книга',
     roleLabel: 'Роль',
@@ -20,7 +20,7 @@ export const inviteAccept = {
   },
   en: {
     heading: 'Collaboration invitation',
-    subheading: 'NOVA STUDIO · Cowork',
+    subheading: 'Fusion Lab Studio · Cowork',
     loadingLabel: 'Loading invitation…',
     bookLabel: 'Book',
     roleLabel: 'Role',

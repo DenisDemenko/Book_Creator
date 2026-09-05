@@ -984,7 +984,7 @@ function renderEditorialParagraphs(
  * (claude.ai/design), нумеровані розділи, буквиці, виділені інформаційні
  * блоки та стилізовані виноски. Вмикається за explicit вибором письменика
  * (book.layoutConfig.designTheme === 'editorial') і повністю зберігає всі
- * властиві NOVA STUDIO особливості тексту — виноски, QR-теги сцен та
+ * властиві Fusion Lab Studio особливості тексту — виноски, QR-теги сцен та
  * обтікання ілюстрацій із «Верстки PDF», яких немає у типовому
  * згенерованому Claude Design документі.
  */
@@ -1030,7 +1030,7 @@ function generateEditorialBookExportHtml(book: Book, tocItems: ComputedTOCItem[]
       </div>
       <div class="ed-cover-footer">
         <span>${book.author}</span>
-        <span>NOVA STUDIO</span>
+        <span>Fusion Lab Studio</span>
       </div>
     </div>
   `;

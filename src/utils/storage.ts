@@ -1,5 +1,5 @@
 /**
- * NOVA STUDIO — шар персистентності.
+ * FUSION LAB STUDIO — шар персистентності.
  *
  * Чому IndexedDB, а не localStorage:
  *   localStorage має квоту ~5 МБ на походження і синхронний API, який блокує

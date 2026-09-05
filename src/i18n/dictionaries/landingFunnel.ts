@@ -1,6 +1,6 @@
 export const landingFunnel = {
   uk: {
-    heroBadge: 'NOVA STUDIO · Цифрова майстерня письменника',
+    heroBadge: 'Fusion Lab Studio · Цифрова майстерня письменника',
     heroTitle: 'Від чернетки до надрукованої книги — в одній студії',
     heroSubtitle: 'Пишіть, ілюструйте, верстайте й перетворюйте книгу на курс. Один інструмент для письменника, дизайнера, перекладача та видавця — з готовим експортом у PDF, DOCX, EPUB та курс-архів.',
     heroCtaPrimary: 'Почати писати',
@@ -51,7 +51,7 @@ export const landingFunnel = {
     wizardTeaserCta: 'Почати перенесення',
   },
   en: {
-    heroBadge: 'NOVA STUDIO · Digital Writer\'s Workshop',
+    heroBadge: 'Fusion Lab Studio · Digital Writer\'s Workshop',
     heroTitle: 'From draft to printed book — in one studio',
     heroSubtitle: 'Write, illustrate, lay out, and turn your book into a course. One tool for writers, designers, translators, and publishers — with ready-made PDF, DOCX, EPUB, and course-archive exports.',
     heroCtaPrimary: 'Start writing',

@@ -1267,7 +1267,7 @@ export default function App() {
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center gap-4">
         <Loader2 className="w-8 h-8 text-amber-400 animate-spin" />
         <div className="text-center">
-          <div className="text-sm font-bold font-heading">NOVA STUDIO</div>
+          <div className="text-sm font-bold font-heading">FUSION LAB STUDIO</div>
           <div className="text-xs text-slate-400 mt-1">Завантаження проекту…</div>
         </div>
       </div>
