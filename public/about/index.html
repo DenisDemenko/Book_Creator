@@ -2,6 +2,23 @@
 
 <html class="light scroll-smooth" lang="uk"><head>
 <meta charset="utf-8"/>
+<!-- Кінцева скісна: усі посилання на цій сторінці відносні («./about.css»,
+     «./logo.png», «../» на сам застосунок), і правильні вони лише тоді, коли
+     адреса закінчується скісною. Сервер сам цього забезпечити не може: під
+     маркетплейсом сторінка живе за /studio/about/, але rewrite Next.js
+     («/studio/:path*») кінцеву скісну З'ЇДАЄ, тож Express бачить рівно
+     «/about» в обох випадках і відрізнити їх не здатний. Тому вирішує
+     браузер — єдиний, хто бачить справжню адресу. Скрипт стоїть перед усіма
+     <link>, тож нічого зайвого завантажитись не встигає, і зациклитись не
+     може: умова — на самій адресі, а не на відповіді сервера. -->
+<script>
+  (function () {
+    var p = location.pathname;
+    if (p.charAt(p.length - 1) !== '/') {
+      location.replace(p + '/' + location.search + location.hash);
+    }
+  })();
+</script>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>Fusion Lab Studio — Платформа для письменників: ШІ-коуч, критик та публікація</title>
 <meta content="Fusion Lab Studio — середовище створення книги від ідеї до публікації: ШІ-коуч, літературний критик, ілюстрації, верстка та експорт у PDF, DOCX і EPUB." name="description"/>
