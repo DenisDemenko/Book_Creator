@@ -28,6 +28,7 @@ import { bookToPdfInput, specFromBook } from './pdf/pdfFromBook';
 import { normalizeDesignResult, parseBookPdfDesignResponse } from './pdf/pdfDesignPrompt';
 import { renderKdpInterior, type KdpRenderResult } from './pdf/pdfKdp';
 import { clampSamplePages, extractSamplePages } from './pdf/pdfSample';
+import { publicOriginFrom } from './publicOrigin';
 import {
   getBook as getStoredBook,
   readArtifact,
@@ -670,8 +671,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
         без мітки версії нова обкладинка тієї самої книги приїхала б за
         тією ж адресою, а браузер покупця показував би стару з кешу.
       */
-      const publicBase = (process.env.APP_URL?.replace(/\/$/, '') ||
-        `${params.req.protocol}://${params.req.get('host')}`);
+      const publicBase = publicOriginFrom(params.req);
       const coverStamp = Date.parse(cover.record.builtAt || '') || 0;
       const coverUrl =
         `${publicBase}/api/public/books/${encodeURIComponent(stored.id)}/cover` +

@@ -333,5 +333,47 @@ console.log('\nПовідомлення «не налаштовано» нази
 
 }
 
+// ---------------------------------------------------------------------------
+console.log('\nПублічна адреса для посилання на обкладинку:');
+{
+  const { publicOriginFrom } = await import('../server/publicOrigin.ts');
+  const reqWith = (headers: Record<string, string>, protocol = 'http') => ({
+    protocol,
+    get: (name: string) => headers[name.toLowerCase()],
+  });
+
+  /*
+    Головне, заради чого функція існує: посилання йде у ЧУЖИЙ браузер на
+    https-сторінці маркетплейсу. http там або мовчки підвищується, або
+    блокується як змішаний вміст — залежно від браузера, тобто помітили б
+    це не ми, а покупець.
+  */
+  t('за проксі береться зовнішній домен, а не внутрішній',
+    publicOriginFrom(reqWith({ 'x-forwarded-host': 'app.fusionlab.in.ua', host: 'localhost:3000' }))
+      === 'https://app.fusionlab.in.ua');
+  t('схема примусово https, навіть коли проксі сказав http',
+    publicOriginFrom(reqWith({ 'x-forwarded-host': 'app.fusionlab.in.ua', 'x-forwarded-proto': 'http' }))
+      === 'https://app.fusionlab.in.ua');
+  t('ланцюг проксі — беремо перший вузол, не весь рядок',
+    publicOriginFrom(reqWith({ 'x-forwarded-host': 'app.fusionlab.in.ua, internal.railway' }))
+      === 'https://app.fusionlab.in.ua');
+  t('без x-forwarded-* працює звичайний Host',
+    publicOriginFrom(reqWith({ host: 'app.fusionlab.in.ua' })) === 'https://app.fusionlab.in.ua');
+
+  // Локальна розробка — єдиний виняток: https там зламав би роботу.
+  t('localhost лишається на http', publicOriginFrom(reqWith({ host: 'localhost:3000' })) === 'http://localhost:3000');
+  t('127.0.0.1 так само', publicOriginFrom(reqWith({ host: '127.0.0.1:3000' })) === 'http://127.0.0.1:3000');
+
+  // Відкіт на налаштування — і його теж доводимо до https: саме APP_URL у
+  // проді заданий як http://…up.railway.app, з чого все й почалось.
+  t('без Host — відкіт на APP_URL, піднятий до https',
+    publicOriginFrom(reqWith({}), 'http://bookcreator-production-7304.up.railway.app')
+      === 'https://bookcreator-production-7304.up.railway.app');
+  t('кінцевий слеш у APP_URL не подвоюється',
+    publicOriginFrom(reqWith({}), 'https://app.fusionlab.in.ua/') === 'https://app.fusionlab.in.ua');
+  t('немає ні Host, ні APP_URL — порожньо, а не «undefined» у посиланні',
+    publicOriginFrom(reqWith({}), '') === '');
+}
+
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);
 if (fail > 0) process.exit(1);
