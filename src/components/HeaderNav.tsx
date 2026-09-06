@@ -28,6 +28,7 @@ import {
 import { NavigationTab, Book, UserRole, CollaboratorPresence, RealtimeSyncStatus, AuthUser } from '../types';
 import { ALL_ROLES, getRoleInfo } from '../utils/rbac';
 import { useLanguage } from '../i18n/LanguageContext';
+import { useSunLighting } from '../context/SunLightingContext';
 import fusionLabLogo from '../assets/fusion-lab-studio-logo.png';
 
 interface HeaderNavProps {
@@ -91,6 +92,21 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   roleLocked = false,
 }) => {
   const { lang, toggleLang, t } = useLanguage();
+  const { selectedColor } = useSunLighting();
+  // Акцент тулбара = колір «Сонечка», обраний у палітрі на канві (12 кольорів).
+  // CSS-змінні використовуються для кнопок і надписів; працює і в темній, і в світлій темі.
+  const sunVars = {
+    '--sun-acc': selectedColor.secondary,
+    '--sun-soft': selectedColor.highlight,
+    '--sun-acc-10': `${selectedColor.secondary}1A`,
+    '--sun-acc-15': `${selectedColor.secondary}26`,
+    '--sun-acc-20': `${selectedColor.secondary}33`,
+    '--sun-acc-25': `${selectedColor.secondary}40`,
+    '--sun-acc-30': `${selectedColor.secondary}4D`,
+    '--sun-acc-40': `${selectedColor.secondary}66`,
+    '--sun-acc-70': `${selectedColor.secondary}B3`,
+    '--sun-acc-80': `${selectedColor.secondary}CC`,
+  } as React.CSSProperties;
   const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState<boolean>(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState<boolean>(false);
   const [isPluginsOpen, setIsPluginsOpen] = useState<boolean>(false);
@@ -152,7 +168,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
       return {
         icon: <Loader2 className="w-3 h-3 animate-spin" />,
         text: t('header.indicatorSaving'),
-        cls: 'text-emerald-300',
+        cls: '[color:var(--sun-acc)]',
         title: t('header.indicatorSavingTitle'),
       };
     }
@@ -166,9 +182,9 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
     }
     if (hasUnsavedChanges) {
       return {
-        icon: <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />,
+        icon: <span className="w-1.5 h-1.5 rounded-full [background-color:var(--sun-acc)]" />,
         text: t('header.indicatorUnsaved'),
-        cls: 'text-emerald-300',
+        cls: '[color:var(--sun-acc)]',
         title: t('header.indicatorUnsavedTitle'),
       };
     }
@@ -176,7 +192,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
       return {
         icon: <Cloud className="w-3 h-3" />,
         text: t('header.indicatorSaved', { time: savedTimeLabel }),
-        cls: 'text-emerald-300',
+        cls: '[color:var(--sun-acc)]',
         title: t('header.indicatorSavedTitle'),
       };
     }
@@ -184,7 +200,10 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   })();
 
   return (
-    <header className="sticky top-0 z-40 w-full min-h-[var(--app-header-h)] bg-slate-950/75 border-b border-white/[0.06] backdrop-blur-2xl">
+    <header
+      className="sticky top-0 z-40 w-full min-h-[var(--app-header-h)] bg-slate-950/75 border-b border-white/[0.06] backdrop-blur-2xl"
+      style={sunVars}
+    >
       <div className="max-w-[1780px] mx-auto px-4 sm:px-6 py-2 flex flex-col gap-2">
         {/* Ряд 1 — інформаційні блоки (неклікабельні) */}
         <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -200,20 +219,20 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
 
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold tracking-widest text-emerald-400 uppercase font-mono">
+                <span className="text-[10px] font-bold tracking-widest [color:var(--sun-acc)] uppercase font-mono">
                   FUSION LAB STUDIO
                 </span>
                 <span className="hidden sm:inline-block w-1 h-1 rounded-full bg-slate-700" />
-                <span className="hidden sm:inline text-[11px] font-medium text-emerald-300/70">
+                <span className="hidden sm:inline text-[11px] font-medium [color:var(--sun-acc-70)]">
                   {t('header.brandSubtitle')}
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <h1 className="text-sm font-bold text-emerald-100 truncate max-w-[180px] sm:max-w-[260px]">
+                <h1 className="text-sm font-bold [color:var(--sun-soft)] truncate max-w-[180px] sm:max-w-[260px]">
                   {book.title || t('header.untitledBook')}
                 </h1>
                 <span className="text-xs text-slate-600">/</span>
-                <span className="text-xs text-emerald-300/80 truncate max-w-[120px]">
+                <span className="text-xs [color:var(--sun-acc-80)] truncate max-w-[120px]">
                   {book.author}
                 </span>
               </div>
@@ -236,26 +255,26 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
 
             {/* Book ID Pill */}
             <div className="px-2 py-1 rounded-lg badge-glass text-xs flex items-center gap-1.5 font-mono">
-              <Fingerprint className="w-3 h-3 text-emerald-400" />
-              <span className="text-emerald-300 font-bold">{book.id || 'BK-2084-CYBER'}</span>
+              <Fingerprint className="w-3 h-3 [color:var(--sun-acc)]" />
+              <span className="[color:var(--sun-acc)] font-bold">{book.id || 'BK-2084-CYBER'}</span>
               <button
                 onClick={handleCopyId}
-                className="p-0.5 rounded hover:bg-white/10 text-emerald-400/70 hover:text-emerald-200 transition-colors"
+                className="p-0.5 rounded hover:bg-white/10 [color:var(--sun-acc-70)] hover:[color:var(--sun-soft)] transition-colors"
                 title={t('header.copyBookId')}
               >
-                {copiedId ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                {copiedId ? <Check className="w-3 h-3 [color:var(--sun-acc)]" /> : <Copy className="w-3 h-3" />}
               </button>
             </div>
 
             <div className="px-2.5 py-1 rounded-lg badge-glass text-xs flex items-center gap-1.5">
-              <span className="text-emerald-400/80">{t('header.wordsLabel')}</span>
-              <span className="font-semibold text-emerald-200 font-mono">{totalWords.toLocaleString(locale)}</span>
+              <span className="[color:var(--sun-acc-80)]">{t('header.wordsLabel')}</span>
+              <span className="font-semibold [color:var(--sun-soft)] font-mono">{totalWords.toLocaleString(locale)}</span>
             </div>
 
             <div className="px-2.5 py-1 rounded-lg badge-glass text-xs flex items-center gap-1.5">
-              <span className="text-emerald-400/80">{t('header.formatLabel')}</span>
-              <span className="font-semibold text-emerald-300">{book.layoutConfig.formatPreset}</span>
-              <span className="text-emerald-400/70">{t('header.pagesShort', { n: totalPages })}</span>
+              <span className="[color:var(--sun-acc-80)]">{t('header.formatLabel')}</span>
+              <span className="font-semibold [color:var(--sun-acc)]">{book.layoutConfig.formatPreset}</span>
+              <span className="[color:var(--sun-acc-70)]">{t('header.pagesShort', { n: totalPages })}</span>
             </div>
           </div>
         </div>
@@ -271,16 +290,16 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                 disabled={isSaving}
                 className={`flex items-center justify-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all whitespace-nowrap ${
                   hasUnsavedChanges
-                    ? 'bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300'
-                    : 'badge-glass text-emerald-200'
+                    ? '[background-color:var(--sun-acc-15)] hover:[background-color:var(--sun-acc-25)] border [border-color:var(--sun-acc-40)] [color:var(--sun-acc)]'
+                    : 'badge-glass [color:var(--sun-soft)]'
                 }`}
                 title={t('header.saveTitle')}
               >
-                <Save className={`w-3.5 h-3.5 ${hasUnsavedChanges ? 'text-emerald-400' : 'text-emerald-400/70'}`} />
+                <Save className={`w-3.5 h-3.5 ${hasUnsavedChanges ? '[color:var(--sun-acc)]' : '[color:var(--sun-acc-70)]'}`} />
                 <span>{isSaving ? t('header.saving') : hasUnsavedChanges ? t('header.saveWithChanges') : t('header.save')}</span>
               </button>
             ) : (
-              <div className="px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center justify-center gap-1.5 font-medium">
+              <div className="px-2.5 py-1 rounded-lg [background-color:var(--sun-acc-10)] border [border-color:var(--sun-acc-30)] [color:var(--sun-acc)] text-xs flex items-center justify-center gap-1.5 font-medium">
                 <Eye className="w-3.5 h-3.5" />
                 <span>{t('header.readOnly')}</span>
               </div>
@@ -291,10 +310,10 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
               <button
                 id="plugins-btn"
                 onClick={() => setIsPluginsOpen(!isPluginsOpen)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl badge-glass hover:border-emerald-400/40 text-emerald-300 text-xs font-bold transition-all"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl badge-glass hover:[border-color:var(--sun-acc-40)] [color:var(--sun-acc)] text-xs font-bold transition-all"
                 title={t('header.pluginsTitle')}
               >
-                <Blocks className="w-3.5 h-3.5 text-emerald-400" />
+                <Blocks className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
                 <span>{t('header.pluginsBtn')}</span>
                 <ChevronDown className={`w-3 h-3 transition-transform ${isPluginsOpen ? 'rotate-180' : ''}`} />
               </button>
@@ -302,7 +321,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
               {isPluginsOpen && (
                 <div className="absolute left-0 mt-2 w-80 rounded-2xl glass-panel-elevated shadow-2xl z-50 p-2 text-xs animate-in fade-in zoom-in-95">
                   <div className="px-3 py-2 border-b border-white/[0.06] mb-1.5">
-                    <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">
+                    <span className="text-[10px] font-bold [color:var(--sun-acc)] uppercase tracking-wider">
                       {t('header.pluginsTitle')}
                     </span>
                   </div>
@@ -311,12 +330,12 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                       onClick={() => { setIsPluginsOpen(false); onOpenVersionModal?.(); }}
                       className="w-full p-2 rounded-xl text-left transition-all flex items-center gap-2.5 hover:bg-white/[0.06]"
                     >
-                      <GitCommit className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <GitCommit className="w-4 h-4 [color:var(--sun-acc)] shrink-0" />
                       <span className="min-w-0 flex-1">
-                        <span className="block font-semibold text-emerald-200 leading-tight">
+                        <span className="block font-semibold [color:var(--sun-soft)] leading-tight">
                           {t('header.pluginVersionCtrl')}
                         </span>
-                        <span className="block text-[10px] text-emerald-400/70 font-mono">
+                        <span className="block text-[10px] [color:var(--sun-acc-70)] font-mono">
                           {book.version || 'v1.0.0'} · rev #{book.revisionNumber || 1}
                         </span>
                       </span>
@@ -327,12 +346,12 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                         onClick={() => { setIsPluginsOpen(false); onOpenCollab(); }}
                         className="w-full p-2 rounded-xl text-left transition-all flex items-center gap-2.5 hover:bg-white/[0.06]"
                       >
-                        <Radio className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <Radio className="w-4 h-4 [color:var(--sun-acc)] shrink-0" />
                         <span className="min-w-0 flex-1">
-                          <span className="block font-semibold text-emerald-200 leading-tight">
+                          <span className="block font-semibold [color:var(--sun-soft)] leading-tight">
                             {t('header.pluginCollab')}
                           </span>
-                          <span className="block text-[10px] text-emerald-400/70 font-mono">
+                          <span className="block text-[10px] [color:var(--sun-acc-70)] font-mono">
                             {t('header.online', { n: collaborators.length })}
                           </span>
                         </span>
@@ -343,8 +362,8 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                       onClick={() => { setIsPluginsOpen(false); onSelectTab('changelog'); }}
                       className="w-full p-2 rounded-xl text-left transition-all flex items-center gap-2.5 hover:bg-white/[0.06]"
                     >
-                      <History className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <span className="block font-semibold text-emerald-200 leading-tight">
+                      <History className="w-4 h-4 [color:var(--sun-acc)] shrink-0" />
+                      <span className="block font-semibold [color:var(--sun-soft)] leading-tight">
                         {t('header.pluginChangelog')}
                       </span>
                     </button>
@@ -360,15 +379,15 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                 onClick={onOpenCollab}
                 className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition-all active:scale-95 ${
                   syncStatus === 'connected'
-                    ? 'badge-glass hover:border-emerald-400/40 text-emerald-200'
-                    : 'bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-300'
+                    ? 'badge-glass hover:[border-color:var(--sun-acc-40)] [color:var(--sun-soft)]'
+                    : '[background-color:var(--sun-acc-10)] hover:[background-color:var(--sun-acc-20)] [border-color:var(--sun-acc-30)] [color:var(--sun-acc)]'
                 }`}
                 title={t('header.collabTitle')}
               >
                 <div className="relative flex items-center">
-                  <Radio className={`w-3.5 h-3.5 ${syncStatus === 'connected' ? 'text-emerald-400 animate-pulse' : 'text-emerald-400'}`} />
+                  <Radio className={`w-3.5 h-3.5 ${syncStatus === 'connected' ? '[color:var(--sun-acc)] animate-pulse' : '[color:var(--sun-acc)]'}`} />
                   <span className={`absolute -top-1 -right-1 w-2 h-2 rounded-full ${
-                    syncStatus === 'connected' ? 'bg-emerald-500 animate-ping' : 'bg-emerald-500'
+                    syncStatus === 'connected' ? '[background-color:var(--sun-acc)] animate-ping' : '[background-color:var(--sun-acc)]'
                   }`} />
                 </div>
 
@@ -391,14 +410,14 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                     )}
                   </div>
                 ) : (
-                  <span className="hidden xl:inline text-[11px] text-emerald-400/80">{t('header.live')}</span>
+                  <span className="hidden xl:inline text-[11px] [color:var(--sun-acc-80)]">{t('header.live')}</span>
                 )}
 
-                <span className="hidden md:inline text-[11px] font-bold text-emerald-400 font-mono">
+                <span className="hidden md:inline text-[11px] font-bold [color:var(--sun-acc)] font-mono">
                   {collaborators.length > 0 ? t('header.online', { n: collaborators.length }) : t('header.live')}
                 </span>
 
-                <MessageSquare className="w-3.5 h-3.5 text-emerald-400/70" />
+                <MessageSquare className="w-3.5 h-3.5 [color:var(--sun-acc-70)]" />
               </button>
             )}
           </div>
@@ -408,7 +427,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
             <button
               id="language-toggle-btn"
               onClick={toggleLang}
-              className="flex items-center justify-center gap-1 px-2 h-8 rounded-xl badge-glass hover:border-emerald-400/40 text-emerald-300 hover:text-emerald-200 transition-all shrink-0 text-[11px] font-bold font-mono"
+              className="flex items-center justify-center gap-1 px-2 h-8 rounded-xl badge-glass hover:[border-color:var(--sun-acc-40)] [color:var(--sun-acc)] hover:[color:var(--sun-soft)] transition-all shrink-0 text-[11px] font-bold font-mono"
               title={t('header.languageSwitchTitle')}
               aria-label={t('header.languageSwitchTitle')}
             >
@@ -421,7 +440,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
               <button
                 id="theme-toggle-btn"
                 onClick={onToggleTheme}
-                className="flex items-center justify-center w-8 h-8 rounded-xl badge-glass hover:border-emerald-400/40 text-emerald-300 hover:text-emerald-200 transition-all shrink-0"
+                className="flex items-center justify-center w-8 h-8 rounded-xl badge-glass hover:[border-color:var(--sun-acc-40)] [color:var(--sun-acc)] hover:[color:var(--sun-soft)] transition-all shrink-0"
                 title={theme === 'light' ? t('header.themeToDark') : t('header.themeToLight')}
                 aria-label={t('header.toggleTheme')}
               >
@@ -434,13 +453,13 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
               <button
                 id="user-menu-btn"
                 onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-                className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl badge-glass hover:border-emerald-400/40 text-xs font-semibold text-emerald-200 transition-all"
+                className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl badge-glass hover:[border-color:var(--sun-acc-40)] text-xs font-semibold [color:var(--sun-soft)] transition-all"
                 title={authUser?.isGuest ? t('header.guestModeTitle') : authUser?.email || ''}
               >
                 {authUser?.avatarUrl ? (
                   <img src={authUser.avatarUrl} alt="" className="w-5 h-5 rounded-full" />
                 ) : (
-                  <UserCircle2 className={`w-4 h-4 ${authUser?.isGuest ? 'text-slate-400' : 'text-emerald-400'}`} />
+                  <UserCircle2 className={`w-4 h-4 ${authUser?.isGuest ? 'text-slate-400' : '[color:var(--sun-acc)]'}`} />
                 )}
                 <span className="hidden lg:inline max-w-[110px] truncate">
                   {authUser?.name || t('header.guest')}
@@ -542,7 +561,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                           }}
                           className={`w-full p-2 rounded-xl text-left transition-all flex items-center justify-between ${
                             isCurrent
-                              ? 'bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/40'
+                              ? '[background-color:var(--sun-acc-20)] [color:var(--sun-acc)] font-bold border [border-color:var(--sun-acc-40)]'
                               : 'text-slate-300 hover:bg-white/[0.06] hover:text-white'
                           }`}
                         >
@@ -553,7 +572,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                               <div className="text-[10px] text-slate-400 font-mono truncate">{lang === 'en' ? role.nameUk : role.nameEn}</div>
                             </div>
                           </div>
-                          {isCurrent && <Check className="w-4 h-4 text-emerald-400 shrink-0" />}
+                          {isCurrent && <Check className="w-4 h-4 [color:var(--sun-acc)] shrink-0" />}
                         </button>
                       );
                     })}
@@ -565,9 +584,9 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                         setIsRoleDropdownOpen(false);
                         onOpenRoleModal();
                       }}
-                      className="w-full py-2 px-3 rounded-xl badge-glass hover:border-emerald-400/40 text-emerald-200 font-bold text-[11px] flex items-center justify-center gap-1.5 transition-all"
+                      className="w-full py-2 px-3 rounded-xl badge-glass hover:[border-color:var(--sun-acc-40)] [color:var(--sun-soft)] font-bold text-[11px] flex items-center justify-center gap-1.5 transition-all"
                     >
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                      <ShieldCheck className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
                       <span>{t('header.rolesMatrixBtn')}</span>
                     </button>
                   </div>
@@ -579,10 +598,10 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
             <button
               id="book-settings-btn"
               onClick={onOpenSettings}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-emerald-300 badge-glass hover:border-emerald-400/40 rounded-lg transition-all"
+              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium [color:var(--sun-acc)] badge-glass hover:[border-color:var(--sun-acc-40)] rounded-lg transition-all"
               title={t('header.settingsTitle')}
             >
-              <Sliders className="w-3.5 h-3.5 text-emerald-400" />
+              <Sliders className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
             </button>
           </div>
         </div>
