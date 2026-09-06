@@ -39,7 +39,7 @@ import {
 import { getRoleInfo } from '../utils/rbac';
 import { useLanguage } from '../i18n/LanguageContext';
 
-type CoworkInviteRole = 'designer' | 'publisher' | 'translator';
+type CoworkInviteRole = 'designer' | 'publisher' | 'translator' | 'reader';
 
 interface CoworkInvite {
   id: string;
@@ -110,6 +110,7 @@ export const CollaborationDrawer: React.FC<CollaborationDrawerProps> = ({
     designer: t('collaborationDrawer.coworkRoleDesigner'),
     publisher: t('collaborationDrawer.coworkRolePublisher'),
     translator: t('collaborationDrawer.coworkRoleTranslator'),
+    reader: t('collaborationDrawer.coworkRoleReader'),
   };
 
   const loadInvites = useCallback(async () => {
@@ -444,7 +445,7 @@ export const CollaborationDrawer: React.FC<CollaborationDrawerProps> = ({
                   className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-amber-400 focus:ring-1 focus:ring-amber-400"
                 />
                 <div className="flex items-center gap-1.5">
-                  {(['designer', 'publisher', 'translator'] as const).map((r) => (
+                  {(['designer', 'publisher', 'translator', 'reader'] as const).map((r) => (
                     <button
                       key={r}
                       type="button"

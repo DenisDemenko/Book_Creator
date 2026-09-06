@@ -77,7 +77,7 @@ export interface StoredCollabInvite {
   bookTitle: string;
   inviterUserId: string;
   inviteeEmail: string;
-  role: 'designer' | 'publisher' | 'translator';
+  role: 'designer' | 'publisher' | 'translator' | 'reader';
   token: string;
   status: 'pending' | 'accepted' | 'revoked';
   emailSent: boolean;

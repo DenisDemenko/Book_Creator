@@ -19,7 +19,7 @@
  */
 
 import type { Express, Request, Response } from 'express';
-import { requireAuth } from './auth';
+import { requireAuth, requirePermission } from './auth';
 import { requirePlanAtLeast } from './subscriptions';
 import {
   GammaApiError,
@@ -93,7 +93,7 @@ function fail(res: Response, err: unknown, fallback: string): void {
 
 export function registerGammaRoutes(app: Express, deps: GammaRoutesDeps): void {
   const now = deps.now || (() => new Date());
-  const gate = [requireAuth, requirePlanAtLeast(['pro', 'ultra'])] as const;
+  const gate = [requireAuth, requirePermission('canGenerateImages'), requirePlanAtLeast(['pro', 'ultra'])] as const;
 
   /**
    * Клієнт автора або чесна відмова.

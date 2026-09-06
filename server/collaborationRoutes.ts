@@ -29,12 +29,13 @@ import {
 } from './store';
 import { sendMail } from './mail';
 
-const INVITE_ROLES: StoredCollabInvite['role'][] = ['designer', 'publisher', 'translator'];
+const INVITE_ROLES: StoredCollabInvite['role'][] = ['designer', 'publisher', 'translator', 'reader'];
 
 const ROLE_NAMES_UK: Record<StoredCollabInvite['role'], string> = {
   designer: 'Дизайнер',
   publisher: 'Видавець',
   translator: 'Перекладач',
+  reader: 'Читач (бета-рідер)',
 };
 
 function isValidRole(role: unknown): role is StoredCollabInvite['role'] {
@@ -95,7 +96,7 @@ export function registerCollaborationRoutes(app: Express): void {
         return res.status(400).json({ error: 'Вкажіть коректну електронну пошту запрошуваного.' });
       }
       if (!isValidRole(role)) {
-        return res.status(400).json({ error: 'Роль запрошення має бути designer, publisher або translator.' });
+        return res.status(400).json({ error: 'Роль запрошення має бути designer, publisher, translator або reader.' });
       }
 
       const principal = req.principal!;

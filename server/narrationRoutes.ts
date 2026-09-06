@@ -10,7 +10,7 @@
  */
 
 import type { Express } from 'express';
-import { requireAuth } from './auth';
+import { requireAuth, requirePermission } from './auth';
 import { requirePlanAtLeast } from './subscriptions';
 import { platformKeyFor } from './platformKeys';
 import { recordUsage } from './store';
@@ -38,6 +38,7 @@ export function registerNarrationRoutes(app: Express): void {
   app.post(
     '/api/narration/synthesize',
     requireAuth,
+    requirePermission('canUseAi'),
     requirePlanAtLeast(['pro', 'ultra']),
     async (req, res) => {
       try {

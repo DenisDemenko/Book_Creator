@@ -26,7 +26,7 @@
  */
 
 import type { Express } from 'express';
-import { requireAuth } from './auth';
+import { requireAuth, requirePermission } from './auth';
 import {
   createChatSession,
   getChatSession,
@@ -197,7 +197,7 @@ export function registerChatRoutes(app: Express, deps: ChatRoutesDeps): void {
   }
 
   /** Список сесій користувача — для бічної панелі вибору розмови. */
-  app.get('/api/chat/sessions', requireAuth, async (req, res) => {
+  app.get('/api/chat/sessions', requireAuth, requirePermission('canUseAi'), async (req, res) => {
     try {
       const sessions = await listChatSessions(req.principal!.id as string);
       res.json({ sessions });
@@ -211,7 +211,7 @@ export function registerChatRoutes(app: Express, deps: ChatRoutesDeps): void {
    * Доступні моделі чату — щоб клієнт не хардкодив список і бачив, які
    * провайдери реально налаштовані на сервері (available = env-ключ є).
    */
-  app.get('/api/chat/models', requireAuth, async (req, res) => {
+  app.get('/api/chat/models', requireAuth, requirePermission('canUseAi'), async (req, res) => {
     try {
       const userId = req.principal!.id as string;
       const ownEngines = new Set(
@@ -241,7 +241,7 @@ export function registerChatRoutes(app: Express, deps: ChatRoutesDeps): void {
   });
 
   /** Створює порожню сесію. Заголовок уточниться після першої репліки. */
-  app.post('/api/chat/sessions', requireAuth, async (req, res) => {
+  app.post('/api/chat/sessions', requireAuth, requirePermission('canUseAi'), async (req, res) => {
     try {
       const principal = req.principal!;
       const now = new Date().toISOString();
@@ -268,7 +268,7 @@ export function registerChatRoutes(app: Express, deps: ChatRoutesDeps): void {
   });
 
   /** Історія однієї сесії + її накопичені лічильники. */
-  app.get('/api/chat/sessions/:id', requireAuth, async (req, res) => {
+  app.get('/api/chat/sessions/:id', requireAuth, requirePermission('canUseAi'), async (req, res) => {
     try {
       const session = await loadOwnSession(req, res, req.params.id);
       if (!session) return;
@@ -281,7 +281,7 @@ export function registerChatRoutes(app: Express, deps: ChatRoutesDeps): void {
   });
 
   /** Видаляє сесію разом з її репліками (каскадом). */
-  app.delete('/api/chat/sessions/:id', requireAuth, async (req, res) => {
+  app.delete('/api/chat/sessions/:id', requireAuth, requirePermission('canUseAi'), async (req, res) => {
     try {
       const session = await loadOwnSession(req, res, req.params.id);
       if (!session) return;
@@ -297,7 +297,7 @@ export function registerChatRoutes(app: Express, deps: ChatRoutesDeps): void {
    * Головний роут: додає репліку автора, викликає модель з контекстом
    * попередньої історії, зберігає відповідь і оновлює лічильники сесії.
    */
-  app.post('/api/chat/sessions/:id/messages', requireAuth, async (req, res) => {
+  app.post('/api/chat/sessions/:id/messages', requireAuth, requirePermission('canUseAi'), async (req, res) => {
     try {
       const session = await loadOwnSession(req, res, req.params.id);
       if (!session) return;
