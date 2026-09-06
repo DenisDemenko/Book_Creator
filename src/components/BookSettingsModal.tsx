@@ -1,7 +1,8 @@
 import React from 'react';
-import { Layers, X, Save, Check } from 'lucide-react';
+import { Layers, X, Save, Check, Timer } from 'lucide-react';
 import { Book } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
+import { useSunLighting } from '../context/SunLightingContext';
 
 interface BookSettingsModalProps {
   isOpen: boolean;
@@ -17,6 +18,12 @@ export const BookSettingsModal: React.FC<BookSettingsModalProps> = ({
   onUpdateBook,
 }) => {
   const { t } = useLanguage();
+  const {
+    restIntervalMinutes,
+    setRestIntervalMinutes,
+    restRemindersEnabled,
+    setRestRemindersEnabled,
+  } = useSunLighting();
   if (!isOpen) return null;
 
   return (
@@ -107,6 +114,45 @@ export const BookSettingsModal: React.FC<BookSettingsModalProps> = ({
               <option value="pl">Polski</option>
               <option value="de">Deutsch</option>
             </select>
+          </div>
+
+          {/* Таймінг відпочинку — та сама функція, що й «сонечко» на канві
+              (SunLightingContext): інтервал між паузами та вимкнення пауз. */}
+          <div className="pt-4 border-t border-slate-800 space-y-3">
+            <div className="flex items-center gap-2">
+              <Timer className="w-4 h-4 text-emerald-400" />
+              <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                {t('bookModals.restTimingHeading')}
+              </h4>
+            </div>
+
+            <label className="flex items-center justify-between p-3 rounded-xl bg-slate-900 border border-slate-800 cursor-pointer">
+              <span className="text-slate-200">{t('bookModals.restEnabledLabel')}</span>
+              <input
+                type="checkbox"
+                checked={restRemindersEnabled}
+                onChange={(e) => setRestRemindersEnabled(e.target.checked)}
+                className="w-4 h-4 rounded text-emerald-500 focus:ring-0"
+              />
+            </label>
+
+            <div className={restRemindersEnabled ? '' : 'opacity-50 pointer-events-none'}>
+              <label className="text-slate-400 block mb-1">{t('bookModals.restIntervalLabel')}</label>
+              <select
+                value={restIntervalMinutes}
+                onChange={(e) => setRestIntervalMinutes(Number(e.target.value))}
+                className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-emerald-300"
+              >
+                {[5, 10, 15, 20, 30, 45, 60].map((m) => (
+                  <option key={m} value={m}>
+                    {m} {t('bookModals.restIntervalUnit')}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">
+                {t('bookModals.restIntervalHint')}
+              </p>
+            </div>
           </div>
         </div>
 

@@ -147,7 +147,8 @@ export const SUN_12_COLORS: SunColorTheme[] = [
   },
 ];
 
-const TOTAL_SESSION_SECONDS = 600; // 10 minutes
+const DEFAULT_SESSION_MINUTES = 10;
+const REST_INTERVAL_OPTIONS = [5, 10, 15, 20, 30, 45, 60];
 const PAUSE_DURATION_SECONDS = 60; // 1 minute relax break
 
 // Gentle Web Audio Chime Generator
@@ -234,6 +235,12 @@ interface SunLightingContextType {
   // 10-Minute Writer Focus & Illumination Engine
   sessionSeconds: number;
   totalSessionSeconds: number;
+  /** Інтервал між паузами відпочинку (хвилини) — налаштовується в Налаштуваннях книги. */
+  restIntervalMinutes: number;
+  setRestIntervalMinutes: (minutes: number) => void;
+  /** Нагадування про відпочинок увімкнені (false = паузи вимкнені). */
+  restRemindersEnabled: boolean;
+  setRestRemindersEnabled: (enabled: boolean) => void;
   isSessionRunning: boolean;
   intensityFactor: number; // 0.0 to 1.0 — max(прогрес сесії, ручна сила sunStrength)
   isPauseActive: boolean;
@@ -403,31 +410,83 @@ export const SunLightingProvider: React.FC<{
   const [isPauseActive, setIsPauseActive] = useState<boolean>(false);
   const [pauseSecondsRemaining, setPauseSecondsRemaining] = useState<number>(PAUSE_DURATION_SECONDS);
 
+  // Налаштування відпочинку (з «Налаштувань книги та проєкту»): інтервал
+  // між паузами та можливість їх вимкнути. Зберігається в localStorage.
+  const [restIntervalMinutes, setRestIntervalMinutesState] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = window.localStorage.getItem('nova_rest_interval_minutes');
+        const n = saved ? Number(saved) : NaN;
+        if (REST_INTERVAL_OPTIONS.includes(n)) return n;
+      } catch {
+        /* ignore */
+      }
+    }
+    return DEFAULT_SESSION_MINUTES;
+  });
+  const [restRemindersEnabled, setRestRemindersEnabledState] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = window.localStorage.getItem('nova_rest_reminders_enabled');
+        if (saved !== null) return saved === '1';
+      } catch {
+        /* ignore */
+      }
+    }
+    return true;
+  });
+
+  const setRestIntervalMinutes = (minutes: number) => {
+    setRestIntervalMinutesState(minutes);
+    setSessionSeconds(0);
+    try {
+      window.localStorage.setItem('nova_rest_interval_minutes', String(minutes));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const setRestRemindersEnabled = (enabled: boolean) => {
+    setRestRemindersEnabledState(enabled);
+    if (!enabled) {
+      setIsPauseActive(false);
+      setSessionSeconds(0);
+      setPauseSecondsRemaining(PAUSE_DURATION_SECONDS);
+    }
+    try {
+      window.localStorage.setItem('nova_rest_reminders_enabled', enabled ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const totalSessionSeconds = restIntervalMinutes * 60;
+
   // Intensity factor from 0.0 to 1.0 — або природний прогрес 10-хв сесії
   // письма, або ручна сила з кільцевого повзунка (DraggableSun.tsx),
   // залежно від того, що зараз більше. Так ручне підкручування завжди
   // одразу видно, а автоматичне зростання за сесію нікуди не зникає.
-  const intensityFactor = Math.max(Math.min(1.0, sessionSeconds / TOTAL_SESSION_SECONDS), sunStrength);
+  const intensityFactor = Math.max(Math.min(1.0, sessionSeconds / totalSessionSeconds), sunStrength);
 
   // 10-minute Timer Interval Loop
   useEffect(() => {
-    if (!isSessionRunning || isPauseActive) return;
+    if (!isSessionRunning || isPauseActive || !restRemindersEnabled) return;
 
     const interval = setInterval(() => {
       setSessionSeconds((prev) => {
-        if (prev + 1 >= TOTAL_SESSION_SECONDS) {
-          // 10 Minutes Reached -> Trigger Pause Mode!
+        if (prev + 1 >= totalSessionSeconds) {
+          // Досягнуто інтервалу відпочинку -> пауза.
           setIsPauseActive(true);
           setPauseSecondsRemaining(PAUSE_DURATION_SECONDS);
           playGentleChime("pause-start");
-          return TOTAL_SESSION_SECONDS;
+          return totalSessionSeconds;
         }
         return prev + 1;
       });
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isSessionRunning, isPauseActive]);
+  }, [isSessionRunning, isPauseActive, restRemindersEnabled, totalSessionSeconds]);
 
   // Pause Mode Countdown Interval
   useEffect(() => {
@@ -697,7 +756,11 @@ export const SunLightingProvider: React.FC<{
         selectedColor,
         setSelectedColor,
         sessionSeconds,
-        totalSessionSeconds: TOTAL_SESSION_SECONDS,
+        totalSessionSeconds,
+        restIntervalMinutes,
+        setRestIntervalMinutes,
+        restRemindersEnabled,
+        setRestRemindersEnabled,
         isSessionRunning,
         intensityFactor,
         isPauseActive,

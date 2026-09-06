@@ -24,6 +24,11 @@ export const bookModals = {
     audienceLabel: 'Цільова аудиторія',
     bookLanguageLabel: 'Мова книги',
     saveChanges: 'Зберегти зміни',
+    restTimingHeading: 'Таймінг відпочинку',
+    restEnabledLabel: 'Нагадування про відпочинок',
+    restIntervalLabel: 'Перерва кожні',
+    restIntervalUnit: 'хв',
+    restIntervalHint: 'Коли минає цей час роботи — зʼявляється повідомлення про відпочинок. Вимкніть перемикач вище, щоб прибрати паузи зовсім.',
   },
   en: {
     createHeading: 'Create a New Book Project',
@@ -50,5 +55,10 @@ export const bookModals = {
     audienceLabel: 'Target audience',
     bookLanguageLabel: 'Book language',
     saveChanges: 'Save changes',
+    restTimingHeading: 'Rest timing',
+    restEnabledLabel: 'Rest reminders',
+    restIntervalLabel: 'Break every',
+    restIntervalUnit: 'min',
+    restIntervalHint: 'When this much work time passes, a rest message appears. Turn the toggle off to disable breaks entirely.',
   },
 };
