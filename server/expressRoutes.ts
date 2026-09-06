@@ -4,14 +4,16 @@
  * Окремий файл, а не додаток до server.ts: той уже перевалив за 1700 рядків,
  * і саме тому решта модулів давно живе тут поруч.
  *
- * Маршрути свідомо НЕ під `requireAuth`: майстер проходять анонімно, і
- * реєстрацію просять аж на переході в панель створення книг. Захист від
- * чужої чернетки — не сесія, а сам `draftId`: випадковий UUID, який знає
- * лише той, кому його віддали. Виняток — `claim`, де акаунт уже потрібен.
+ * Чернетка, її перегляд і список рушіїв свідомо без `requireAuth`:
+ * майстер починають анонімно, і захист чужої чернетки — не сесія, а сам
+ * `draftId`: випадковий UUID, який знає лише той, кому його віддали.
+ * Кроки, що витрачають виклики моделі (seed / suggest / generate), стоять
+ * за requireAuth + requirePermission('canUseAi'): анонім може пройти
+ * майстер до цих кроків, а генерація вимагає входу й ролі з правом на ШІ.
  */
 
 import type { Express } from 'express';
-import { requireAuth } from './auth';
+import { requireAuth, requirePermission } from './auth';
 import { generateText } from './aiCore';
 import {
   availableEngines,
@@ -164,7 +166,7 @@ export function registerExpressRoutes(app: Express): void {
   });
 
   /** Крок Е1 «Кинути кубик» — задум для того, хто прийшов без ідеї. */
-  app.post('/api/express/seed', async (req, res) => {
+  app.post('/api/express/seed', requireAuth, requirePermission('canUseAi'), async (req, res) => {
     try {
       const { system, prompt } = seedPrompt();
       const { text: raw } = await ask(req, 'Експрес-майстер: випадковий задум', system, prompt);
@@ -185,7 +187,7 @@ export function registerExpressRoutes(app: Express): void {
    * тримати їх трьома майже однаковими маршрутами означало б правити
    * кожну помилку тричі.
    */
-  app.post('/api/express/suggest', async (req, res) => {
+  app.post('/api/express/suggest', requireAuth, requirePermission('canUseAi'), async (req, res) => {
     const stage = String(req.body?.stage ?? '');
     const draftId = String(req.body?.draftId ?? '');
 
@@ -258,7 +260,7 @@ export function registerExpressRoutes(app: Express): void {
    * Крок Е5 — одна частина на виклик. Клієнт викликає тричі поспіль і
    * домальовує структуру, що й дає ефект «народжується на очах» без SSE.
    */
-  app.post('/api/express/generate', async (req, res) => {
+  app.post('/api/express/generate', requireAuth, requirePermission('canUseAi'), async (req, res) => {
     const draftId = String(req.body?.draftId ?? '');
     const partNumber = Number(req.body?.partNumber ?? 1);
 

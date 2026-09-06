@@ -41,6 +41,7 @@ import { CreateBookModal } from './components/CreateBookModal';
 import { ImportBookModal } from './components/ImportBookModal';
 import { ImportMaterialsWizardModal } from './components/ImportMaterialsWizardModal';
 import { CollaborationDrawer } from './components/CollaborationDrawer';
+import { InviteRoleChoiceModal } from './components/InviteRoleChoiceModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { AuthScreen } from './components/AuthScreen';
 import { AdminOsView } from './components/adminOs/AdminOsView';
@@ -177,6 +178,8 @@ export default function App() {
   } | null>(null);
   const [inviteScreenStatus, setInviteScreenStatus] = useState<'idle' | 'loading' | 'ready' | 'error' | 'accepting' | 'done'>('idle');
   const [inviteScreenError, setInviteScreenError] = useState<string | null>(null);
+  // Після прийняття запрошення — вікно вибору ролі входу перед студією.
+  const [roleChoice, setRoleChoice] = useState<{ bookId: string; bookTitle: string; invitedRole: UserRole } | null>(null);
 
   const [currentTab, setCurrentTab] = useState<NavigationTab>('dashboard');
   const [activeChapterId, setActiveChapterId] = useState<string>(book.chapters[0]?.id || '');
@@ -423,33 +426,59 @@ export default function App() {
         return;
       }
 
-      const lock = { bookId: data.bookId as string, role: data.role as UserRole };
-      setCoworkLock(lock);
-      saveMeta(META_COWORK_LOCK, lock).catch((e) => console.warn('[storage]', e));
-
-      // Якщо ця книга ще не відкрита локально — створюємо мінімальну
-      // заглушку з тим самим ID: реальний вміст прийде через WS-кімнату
-      // спільної роботи (server.ts, room:sync), щойно письменник буде онлайн.
-      if (book.id !== lock.bookId) {
-        const stubBook: Book = {
-          ...initialBookData,
-          id: lock.bookId,
-          title: data.bookTitle || inviteInfo.bookTitle,
-          chapters: [],
-        };
-        setBook(stubBook);
-        setActiveChapterId('');
-        setActiveSectionId('');
-        persistBook(stubBook);
-      }
-
-      handleSelectRole(lock.role);
+      // Запрошення прийнято. Роль поки НЕ фіксуємо: спершу користувач має
+      // обрати роль входу у вікні InviteRoleChoiceModal, і вона повинна
+      // збігтися з роллю із листа-запрошення.
       setInviteScreenStatus('done');
-      setCurrentTab(getDefaultTabForRole(lock.role));
+      setRoleChoice({
+        bookId: data.bookId as string,
+        bookTitle: data.bookTitle || inviteInfo.bookTitle,
+        invitedRole: data.role as UserRole,
+      });
     } catch {
       setInviteScreenStatus('ready');
       setInviteScreenError('Сервер недоступний. Спробуйте ще раз.');
     }
+  };
+
+  /** Перейти до вікна вибору ролі входу (для вже прийнятих запрошень теж). */
+  const startRoleChoice = (info: { bookId: string; bookTitle: string; invitedRole: UserRole }) => {
+    setInviteScreenStatus('done');
+    setRoleChoice(info);
+  };
+
+  /**
+   * Підтвердження ролі входу. Роль фіксується як cowork-лок для цієї книги,
+   * перемикач ролей блокується, і користувач потрапляє в студію в обраній
+   * ролі (відповідність листу-запрошенню вже перевірено в модалці).
+   */
+  const confirmInviteRole = (role: UserRole) => {
+    if (!roleChoice) return;
+    const lock = { bookId: roleChoice.bookId, role };
+    setCoworkLock(lock);
+    saveMeta(META_COWORK_LOCK, lock).catch((e) => console.warn('[storage]', e));
+
+    // Якщо ця книга ще не відкрита локально — створюємо мінімальну
+    // заглушку з тим самим ID: реальний вміст прийде через WS-кімнату
+    // спільної роботи (server.ts, room:sync), щойно письменник буде онлайн.
+    if (book.id !== lock.bookId) {
+      const stubBook: Book = {
+        ...initialBookData,
+        id: lock.bookId,
+        title: roleChoice.bookTitle,
+        chapters: [],
+      };
+      setBook(stubBook);
+      setActiveChapterId('');
+      setActiveSectionId('');
+      persistBook(stubBook);
+    }
+
+    handleSelectRole(role);
+    setInviteToken(null);
+    setInviteScreenStatus('idle');
+    setRoleChoice(null);
+    setCurrentTab(getDefaultTabForRole(role));
   };
 
   // Жодна невдала відповідь /api/ai/* не має зникнути мовчки.
@@ -1283,6 +1312,7 @@ export default function App() {
       designer: t('inviteAccept.roleDesigner'),
       publisher: t('inviteAccept.rolePublisher'),
       translator: t('inviteAccept.roleTranslator'),
+      reader: t('inviteAccept.roleReader'),
     };
 
     return (
@@ -1319,9 +1349,22 @@ export default function App() {
                 <div className="text-sm font-bold text-amber-300">{roleLabels[inviteInfo.role] || inviteInfo.role}</div>
               </div>
 
-              {inviteInfo.status !== 'pending' ? (
+              {inviteInfo.status === 'revoked' ? (
                 <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700 text-slate-300 text-xs">
-                  {inviteInfo.status === 'accepted' ? t('inviteAccept.alreadyAccepted') : t('inviteAccept.revoked')}
+                  {t('inviteAccept.revoked')}
+                </div>
+              ) : inviteInfo.status === 'accepted' ? (
+                <div className="space-y-2.5">
+                  <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700 text-slate-300 text-xs">
+                    {t('inviteAccept.alreadyAccepted')}
+                  </div>
+                  <button
+                    onClick={() => startRoleChoice({ bookId: inviteInfo.bookId, bookTitle: inviteInfo.bookTitle, invitedRole: inviteInfo.role })}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition-all"
+                  >
+                    <UserCheck className="w-4 h-4" />
+                    <span>{t('inviteAccept.roleChoiceConfirm')}</span>
+                  </button>
                 </div>
               ) : isGuestSession ? (
                 <div className="space-y-2.5">
@@ -1885,6 +1928,20 @@ export default function App() {
         onJumpToTab={(tab) => { handleSelectTab(tab); setIsCollabDrawerOpen(false); }}
         authUser={auth.user}
       />
+
+      {/* Вибір ролі входу після cowork-запрошення — перед входом у студію */}
+      {roleChoice && (
+        <InviteRoleChoiceModal
+          bookTitle={roleChoice.bookTitle}
+          invitedRole={roleChoice.invitedRole}
+          onConfirm={confirmInviteRole}
+          onCancel={() => {
+            setInviteToken(null);
+            setInviteScreenStatus('idle');
+            setRoleChoice(null);
+          }}
+        />
+      )}
 
       {/* Version Control Snapshot & History Modal */}
       <VersionSnapshotModal
