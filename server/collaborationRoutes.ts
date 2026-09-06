@@ -38,6 +38,14 @@ const ROLE_NAMES_UK: Record<StoredCollabInvite['role'], string> = {
   reader: 'Читач (бета-рідер)',
 };
 
+/** Короткий опис того, чим займатиметься запрошений у своїй ролі (лист-запрошення). */
+const ROLE_BLURBS_UK: Record<StoredCollabInvite['role'], string> = {
+  designer: 'Обкладинка книги, ілюстрації, Visual Bible та медіатека видання.',
+  publisher: 'Верстка, поліграфічні стандарти, аудит Amazon KDP і експорт тиражу.',
+  translator: 'Переклад книги англійською (English Edition) у двомовному режимі.',
+  reader: 'Читання рукопису та відгуки для автора (бета-рідинг), без права редагування.',
+};
+
 function isValidRole(role: unknown): role is StoredCollabInvite['role'] {
   return typeof role === 'string' && (INVITE_ROLES as string[]).includes(role);
 }
@@ -68,24 +76,92 @@ async function assertCanManageInvites(bookId: string, principal: { id: string | 
   return { ok: true, status: 200, error: '' };
 }
 
-function inviteEmailHtml(bookTitle: string, roleUk: string, inviterName: string, link: string): string {
+function inviteEmailHtml(
+  bookTitle: string,
+  roleUk: string,
+  roleBlurb: string,
+  inviterName: string,
+  inviteeEmail: string,
+  link: string
+): string {
   return `
-    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#1e293b">
-      <h2 style="margin:0 0 12px">Запрошення до спільної роботи над книгою</h2>
-      <p>${inviterName} запрошує вас приєднатися до книги «<b>${bookTitle}</b>» на платформі NOVA STUDIO у ролі <b>${roleUk}</b>.</p>
-      <p style="margin:20px 0">
-        <a href="${link}" style="background:#f59e0b;color:#0f172a;padding:12px 20px;border-radius:10px;text-decoration:none;font-weight:bold">Прийняти запрошення</a>
-      </p>
-      <p style="font-size:12px;color:#64748b">Якщо кнопка не працює, скопіюйте це посилання у браузер:<br>${link}</p>
+    <div style="font-family:Arial,Helvetica,sans-serif;background:#f1f5f9;padding:32px 16px;color:#1e293b">
+      <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0">
+        <div style="background:#0f172a;padding:20px 28px">
+          <div style="color:#f59e0b;font-size:13px;font-weight:bold;letter-spacing:2px">FUSION LAB STUDIO</div>
+          <div style="color:#94a3b8;font-size:12px;margin-top:2px">Видавнича майстерня</div>
+        </div>
+        <div style="padding:28px;font-size:14px;line-height:1.6">
+          <p style="margin:0 0 12px">Вітаємо!</p>
+          <p style="margin:0 0 16px">
+            <b>${inviterName}</b> запрошує вас до спільної роботи над книгою
+            «<b>${bookTitle}</b>» на платформі NOVA STUDIO.
+          </p>
+
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin:0 0 20px">
+            <div style="font-size:12px;color:#64748b;margin-bottom:4px">Ваша роль у цій книзі</div>
+            <div style="font-size:16px;font-weight:bold;color:#0f172a">${roleUk}</div>
+            <div style="font-size:13px;color:#475569;margin-top:6px">${roleBlurb}</div>
+          </div>
+
+          <p style="margin:0 0 12px"><b>Щоб приєднатися:</b></p>
+          <ol style="margin:0 0 20px;padding-left:20px;font-size:13px;color:#334155">
+            <li style="margin-bottom:6px">Натисніть кнопку нижче.</li>
+            <li style="margin-bottom:6px">Увійдіть або зареєструйтесь під поштою <b>${inviteeEmail}</b>.</li>
+            <li style="margin-bottom:0">У вікні «Вибір ролі входу» оберіть роль <b>${roleUk}</b> — саме її вказано в цьому листі.</li>
+          </ol>
+
+          <p style="margin:0 0 16px">
+            <a href="${link}" style="display:inline-block;background:#f59e0b;color:#0f172a;padding:12px 24px;border-radius:10px;text-decoration:none;font-weight:bold">Прийняти запрошення</a>
+          </p>
+
+          <p style="font-size:12px;color:#64748b;margin:0">
+            Якщо кнопка не працює, скопіюйте це посилання у браузер:<br>${link}
+          </p>
+        </div>
+        <div style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:16px 28px;font-size:11px;color:#94a3b8">
+          Цей лист адресований ${inviteeEmail} і дійсний лише для ролі «${roleUk}».<br>
+          FUSION LAB STUDIO · NOVA STUDIO
+        </div>
+      </div>
     </div>`;
 }
 
-function inviteEmailText(bookTitle: string, roleUk: string, inviterName: string, link: string): string {
-  return `${inviterName} запрошує вас приєднатися до книги «${bookTitle}» на платформі NOVA STUDIO у ролі ${roleUk}.\n\nПосилання для приєднання: ${link}`;
+function inviteEmailText(
+  bookTitle: string,
+  roleUk: string,
+  roleBlurb: string,
+  inviterName: string,
+  inviteeEmail: string,
+  link: string
+): string {
+  return [
+    'FUSION LAB STUDIO · Видавнича майстерня',
+    '',
+    'Вітаємо!',
+    '',
+    `${inviterName} запрошує вас до спільної роботи над книгою`,
+    `«${bookTitle}» на платформі NOVA STUDIO.`,
+    '',
+    `Ваша роль: ${roleUk}`,
+    roleBlurb,
+    '',
+    'Щоб приєднатися:',
+    '1. Відкрийте посилання нижче.',
+    `2. Увійдіть або зареєструйтесь під поштою ${inviteeEmail}.`,
+    `3. У вікні «Вибір ролі входу» оберіть роль «${roleUk}» — саме її вказано в цьому листі.`,
+    '',
+    `Посилання: ${link}`,
+    '',
+    `Цей лист адресований ${inviteeEmail} і дійсний лише для ролі «${roleUk}».`,
+    '',
+    'З повагою,',
+    'команда FUSION LAB STUDIO',
+  ].join('\n');
 }
 
 export function registerCollaborationRoutes(app: Express): void {
-  /** Письменник (або адмін) надсилає запрошення дизайнеру/видавцю/перекладачу. */
+  /** Письменник (або адмін) надсилає запрошення дизайнеру/видавцю/перекладачу/бета-читачу. */
   app.post('/api/collaboration/invite', requireAuth, async (req, res) => {
     try {
       const { bookId, bookTitle, email, role } = req.body || {};
@@ -120,9 +196,9 @@ export function registerCollaborationRoutes(app: Express): void {
       const inviteLink = `${appBaseUrl(req)}/?invite=${token}`;
       const emailSent = await sendMail({
         to: invite.inviteeEmail,
-        subject: `Запрошення до книги «${invite.bookTitle}» — NOVA STUDIO`,
-        html: inviteEmailHtml(invite.bookTitle, ROLE_NAMES_UK[role], principal.name || 'Автор', inviteLink),
-        text: inviteEmailText(invite.bookTitle, ROLE_NAMES_UK[role], principal.name || 'Автор', inviteLink),
+        subject: `Запрошення до книги «${invite.bookTitle}» — роль: ${ROLE_NAMES_UK[role]}`,
+        html: inviteEmailHtml(invite.bookTitle, ROLE_NAMES_UK[role], ROLE_BLURBS_UK[role], principal.name || 'Автор', invite.inviteeEmail, inviteLink),
+        text: inviteEmailText(invite.bookTitle, ROLE_NAMES_UK[role], ROLE_BLURBS_UK[role], principal.name || 'Автор', invite.inviteeEmail, inviteLink),
       });
       invite.emailSent = emailSent;
 
