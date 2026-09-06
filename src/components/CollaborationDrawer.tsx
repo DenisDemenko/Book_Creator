@@ -258,10 +258,13 @@ export const CollaborationDrawer: React.FC<CollaborationDrawerProps> = ({
   ];
 
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden bg-slate-950/70 backdrop-blur-xs flex justify-end animate-in fade-in duration-200">
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200"
+    >
       <div 
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md bg-slate-900 border-l border-slate-700 shadow-2xl flex flex-col h-full text-slate-100 animate-in slide-in-from-right duration-300"
+        className="w-full max-w-lg bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl flex flex-col max-h-[86vh] text-slate-100 animate-in zoom-in-95 duration-200"
       >
         {/* Header */}
         <div className="p-4 border-b border-slate-800 bg-slate-950/80 flex items-center justify-between">
