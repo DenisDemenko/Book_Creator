@@ -9,7 +9,9 @@ import {
   Sparkles,
   Search,
   Bookmark,
-  QrCode
+  QrCode,
+  ZoomIn,
+  ZoomOut
 } from 'lucide-react';
 import { Book } from '../types';
 import { computeTableOfContents, getLeaderSymbol, getDisplayPageNumber } from '../utils/helpers';
@@ -25,6 +27,11 @@ export const BookPreviewView: React.FC<BookPreviewViewProps> = ({ book, totalWor
   const { t } = useLanguage();
   const [currentPageIndex, setCurrentPageIndex] = useState<number>(0);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  /** Масштаб розвороту для зручності читання (0.5–2.0). */
+  const [zoom, setZoom] = useState<number>(1);
+
+  const zoomBy = (delta: number) =>
+    setZoom((z) => Math.min(2, Math.max(0.5, Math.round((z + delta) * 10) / 10)));
 
   const layout = book.layoutConfig;
   const tocConfig = layout.tocConfig || {
@@ -308,13 +315,41 @@ export const BookPreviewView: React.FC<BookPreviewViewProps> = ({ book, totalWor
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>
+
+        {/* Zoom controls */}
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => zoomBy(-0.1)}
+            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-all"
+            title={t('bookPreviewView.zoomOut')}
+          >
+            <ZoomOut className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setZoom(1)}
+            className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-cyan-300 text-xs font-mono hover:border-cyan-400/40 transition-all"
+            title={t('bookPreviewView.zoomReset')}
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+          <button
+            onClick={() => zoomBy(0.1)}
+            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-all"
+            title={t('bookPreviewView.zoomIn')}
+          >
+            <ZoomIn className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* Book Spread Realistic Canvas */}
-      <div className="flex-1 flex items-center justify-center p-2 sm:p-6 bg-slate-950 rounded-3xl border border-slate-800 shadow-2xl min-h-[560px]">
-        
+      <div className="flex-1 overflow-auto p-2 sm:p-6 bg-slate-950 rounded-3xl border border-slate-800 shadow-2xl min-h-[560px]">
+
+        {/* Масштабований розворот (zoom 50–200%) */}
+        <div style={{ zoom }} className="mx-auto w-full max-w-5xl">
+
         {/* Book Container with 3D spine shadow */}
-        <div className="w-full max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-0 bg-[#e2ded6] rounded-2xl p-2 sm:p-3 shadow-2xl border-4 border-slate-800 relative" data-tour="preview__1">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-0 bg-[#e2ded6] rounded-2xl p-2 sm:p-3 shadow-2xl border-4 border-slate-800 relative" data-tour="preview__1">
           
           {/* Central Gutter / Spine Shadow */}
           <div className="hidden md:block absolute left-1/2 top-0 bottom-0 w-8 -translate-x-1/2 z-10 bg-gradient-to-r from-black/20 via-black/40 to-black/20 pointer-events-none" />
@@ -334,6 +369,8 @@ export const BookPreviewView: React.FC<BookPreviewViewProps> = ({ book, totalWor
               </div>
             )}
           </div>
+
+        </div>
 
         </div>
 

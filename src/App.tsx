@@ -42,6 +42,7 @@ import { ImportBookModal } from './components/ImportBookModal';
 import { ImportMaterialsWizardModal } from './components/ImportMaterialsWizardModal';
 import { CollaborationDrawer } from './components/CollaborationDrawer';
 import { InviteRoleChoiceModal } from './components/InviteRoleChoiceModal';
+import { InviteLoginForm } from './components/InviteLoginForm';
 import { CourseStudioView } from './components/CourseStudioView';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { AuthScreen } from './components/AuthScreen';
@@ -1372,17 +1373,14 @@ export default function App() {
                   <p className="text-xs text-slate-300">
                     {t('inviteAccept.guestPrompt', { email: inviteInfo.inviteeEmail })}
                   </p>
-                  <button
-                    onClick={() => {
-                      auth.clearError();
-                      localStorage.removeItem('nova_guest_dismissed_login');
-                      window.location.reload();
-                    }}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition-all"
-                  >
-                    <UserCheck className="w-4 h-4" />
-                    <span>{t('inviteAccept.loginBtn')}</span>
-                  </button>
+                  <InviteLoginForm
+                    firebaseEnabled={auth.firebaseEnabled}
+                    error={auth.error}
+                    onClearError={auth.clearError}
+                    onLogin={auth.login}
+                    onRegister={auth.register}
+                    onLoginWithGoogle={auth.loginWithGoogle}
+                  />
                 </div>
               ) : emailMismatch ? (
                 <div className="space-y-2.5">

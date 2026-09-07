@@ -55,7 +55,17 @@ function isValidEmail(email: unknown): email is string {
 }
 
 function appBaseUrl(req: { protocol: string; get(name: string): string | undefined }): string {
-  return process.env.APP_URL?.replace(/\/$/, '') || `${req.protocol}://${req.get('host')}`;
+  // Публічна адреса студії (напр. https://www.fusionlab.in.ua/studio) —
+  // саме сюди має вести лист-запрошення, а не на localhost сервера.
+  const studioUrl = process.env.STUDIO_PUBLIC_URL?.replace(/\/$/, '');
+  if (studioUrl) return studioUrl;
+  const appUrl = process.env.APP_URL?.replace(/\/$/, '');
+  if (appUrl) {
+    // НЕлокальна APP_URL — продакшн за маркетплейсом, студія живе під /studio.
+    if (!/(localhost|127\.0\.0\.1)/.test(appUrl)) return `${appUrl}/studio`;
+    return appUrl;
+  }
+  return `${req.protocol}://${req.get('host')}`;
 }
 
 interface ManageGuardResult {

@@ -252,9 +252,11 @@ export const EditorView: React.FC<EditorViewProps> = ({
   promptGenerateTick = 0,
 }) => {
   const { t, lang: uiLang } = useLanguage();
-  const isReader = currentRole === 'reader';
-  const isTranslator = currentRole === 'translator';
   const roleInfo = getRoleInfo(currentRole);
+  // Режим лише читання: бета-рідер, гість, а також ролі без canEditContent
+  // (дизайнер, перекладач, видавець) — текст видно, редагування вимкнено.
+  const isReader = currentRole === 'reader' || !roleInfo.permissions.canEditContent;
+  const isTranslator = currentRole === 'translator';
 
   const activeChapter = book.chapters.find((c) => c.id === activeChapterId) || book.chapters[0];
   const activeSection = activeChapter?.sections.find((s) => s.id === activeSectionId) || activeChapter?.sections[0];

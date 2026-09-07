@@ -213,7 +213,9 @@ export const ALL_ROLES: RoleInfo[] = [
         'preview',
         'start',
         'characters',
-        'layout'
+        'layout',
+        'editor',
+        'toc'
       ]
     },
     defaultPersona: {

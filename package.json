@@ -57,6 +57,7 @@
     "test:gamma": "tsx scripts/test-gamma.mts",
     "test:book-store": "tsx scripts/test-bookStore.mts",
     "test:media-library": "tsx scripts/test-mediaLibrary.mts",
+    "test:invite-mail": "tsx scripts/test-invite-mail.mts",
     "test:pdf-engines": "tsx scripts/test-pdfEngines.mts",
     "test:pdf-sample": "tsx scripts/test-pdfSample.mts",
     "test:pdf-cover": "tsx scripts/test-pdfCover.mts",
