@@ -38,22 +38,22 @@ interface SmtpTarget {
 const transporterCache = new Map<string, ReturnType<typeof nodemailer.createTransport>>();
 
 /**
- * Резолвить SMTP-хост лише в IPv4.
+ * Резолвить SMTP-хост лише в IPv4 і повертає ВСІ A-адреси.
  *
  * Чому це критично: контейнер Railway не має IPv6-маршруту, і DNS для
  * smtp.gmail.com повертає AAAA першим. nodemailer пробує IPv6 і падає з
- * «connect ENETUNREACH 2a00:...:465», не повертаючись до IPv4. Тому адресу
+ * «connect ENETUNREACH 2a00:...:465», не повертаючись до IPv4. Тому адреси
  * A-запису отримуємо самі й передаємо як host, а hostname лишаємо в
  * servername для TLS/SNI (Gmail віддає сертифікат саме на smtp.gmail.com).
  */
-async function resolveSmtpHost(host: string): Promise<string> {
+async function resolveSmtpHosts(host: string): Promise<string[]> {
   try {
     const addresses = await dnsPromises.resolve4(host);
-    if (addresses.length > 0) return addresses[0];
+    if (addresses.length > 0) return addresses;
   } catch {
     // DNS не відповів — пробуємо з оригінальним hostname.
   }
-  return host;
+  return [host];
 }
 
 function getTransporter(target: SmtpTarget) {
@@ -86,18 +86,25 @@ function getTransporter(target: SmtpTarget) {
 }
 
 /**
- * Список цілей для спроби підключення. Для Gmail додаємо альтернативний порт:
- * 465 (SSL) ⇄ 587 (STARTTLS). Railway часто відкидає вихідний 465, але 587
- * проходить — тому фолбек рятує ситуацію без зміни змінних на сервері.
+ * Список цілей для спроби підключення: кожна IPv4-адреса × порти. Для Gmail
+ * додаємо альтернативний порт: 465 (SSL) ⇄ 587 (STARTTLS). Railway часто
+ * відкидає вихідний 465, але 587 проходить — тому фолбек рятує ситуацію без
+ * зміни змінних на сервері.
  */
-function smtpTargets(host: string): SmtpTarget[] {
-  const primary: SmtpTarget = { host, port: mailConfig.port, secure: mailConfig.secure };
-  if (!/g(oogle)?mail\.com$/i.test(mailConfig.host)) return [primary];
-
-  const alternate: SmtpTarget = primary.secure
-    ? { host, port: 587, secure: false }
-    : { host, port: 465, secure: true };
-  return alternate.port === primary.port ? [primary] : [primary, alternate];
+function smtpTargets(hosts: string[]): SmtpTarget[] {
+  const targets: SmtpTarget[] = [];
+  for (const host of hosts) {
+    targets.push({ host, port: mailConfig.port, secure: mailConfig.secure });
+    if (/g(oogle)?mail\.com$/i.test(mailConfig.host)) {
+      const alternate = mailConfig.secure
+        ? { port: 587, secure: false }
+        : { port: 465, secure: true };
+      if (alternate.port !== mailConfig.port) {
+        targets.push({ host, ...alternate });
+      }
+    }
+  }
+  return targets;
 }
 
 export interface SendMailInput {
@@ -121,10 +128,13 @@ export async function sendMail(input: SendMailInput): Promise<{ ok: boolean; err
     return { ok: false, error: 'SMTP не налаштовано' };
   }
 
-  const host = await resolveSmtpHost(mailConfig.host);
+  const hosts = await resolveSmtpHosts(mailConfig.host);
+  const attempted: string[] = [];
   let lastError: string | undefined;
 
-  for (const target of smtpTargets(host)) {
+  for (const target of smtpTargets(hosts)) {
+    const label = `${target.host}:${target.port} ${target.secure ? 'SSL' : 'STARTTLS'}`;
+    attempted.push(label);
     try {
       await getTransporter(target).sendMail({
         from: mailConfig.from,
@@ -136,12 +146,11 @@ export async function sendMail(input: SendMailInput): Promise<{ ok: boolean; err
       return { ok: true };
     } catch (err) {
       lastError = String((err as Error).message || err);
-      console.error(
-        `[mail] Не вдалося надіслати через ${target.host}:${target.port} (${target.secure ? 'SSL' : 'STARTTLS'}):`,
-        lastError
-      );
+      console.error(`[mail] Не вдалося надіслати через ${label}:`, lastError);
     }
   }
 
-  return { ok: false, error: lastError };
+  // Користувач бачить не лише причину, а й що саме пробували — це одразу
+  // показує, чи спрацював фолбек 465→587, чи відпав уже на першому порту.
+  return { ok: false, error: `${lastError} — ${attempted.join(', ')}` };
 }
