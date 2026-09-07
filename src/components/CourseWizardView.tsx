@@ -72,6 +72,7 @@ export const CourseWizardView: React.FC<{
   const [stageIndex, setStageIndex] = useState(0);
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [generated, setGenerated] = useState<Record<StageId, boolean>>({
     theme: false, outcomes: false, skills: false, modules: false, lessons: false, practice: false,
@@ -95,73 +96,84 @@ export const CourseWizardView: React.FC<{
 
   const patch = (p: Partial<WizardCourse>) => setCourse((prev) => ({ ...prev, ...p }));
 
-  const generate = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const data = await api<{ stage: StageId; data: Record<string, unknown> }>('/api/courses/wizard/stage', {
+  /** Один запит до сервера з одним автоматичним повтором на порожні 502 (таймаут проксі). */
+  const requestStage = async (body: Record<string, unknown>) => {
+    const doCall = () =>
+      api<{ stage: StageId; data: Record<string, unknown> }>('/api/courses/wizard/stage', {
         method: 'POST',
-        body: JSON.stringify({
-          stage,
-          course: {
-            title: course.title || undefined,
-            subtitle: course.subtitle || undefined,
-            skills: course.skills.map((s) => ({ name: s.name })),
-            modules: course.modules.map((m) => ({
-              title: m.title,
-              summary: m.summary,
-              lessons: m.lessons.map((l) => ({ title: l.title })),
-            })),
-          },
-          context,
-        }),
+        body: JSON.stringify(body),
       });
+    try {
+      return await doCall();
+    } catch (e) {
+      if (String((e as Error).message).includes('502')) {
+        await new Promise((r) => setTimeout(r, 1500));
+        return await doCall();
+      }
+      throw e;
+    }
+  };
 
-      const d = data.data as Record<string, any>;
-      setCourse((prev) => {
-        const next: WizardCourse = { ...prev };
-        if (stage === 'theme') {
-          if (typeof d.title === 'string' && d.title) next.title = d.title;
-          if (typeof d.subtitle === 'string') next.subtitle = d.subtitle;
-          if (Array.isArray(d.audience)) next.audience = d.audience.map(String);
-        } else if (stage === 'outcomes') {
-          if (Array.isArray(d.outcomes)) next.outcomes = d.outcomes.map(String);
-          if (Array.isArray(d.highlights)) {
-            next.highlights = [...d.highlights.map(String), '', '', ''].slice(0, 3);
-          }
-        } else if (stage === 'skills') {
-          if (Array.isArray(d.skills)) {
-            next.skills = d.skills.map((s: any): CourseSkillV2 => ({
-              id: uid('sk'),
-              name: String(s?.name ?? ''),
-              level: s?.level === 'pro' || s?.level === 'confident' ? s.level : 'base',
-              whyItMatters: String(s?.whyItMatters ?? ''),
-              howToDevelop: Array.isArray(s?.howToDevelop) ? s.howToDevelop.map(String) : [],
-              practiceIdeas: Array.isArray(s?.practiceIdeas) ? s.practiceIdeas.map(String) : [],
-            }));
-          }
-        } else if (stage === 'modules') {
-          if (Array.isArray(d.modules)) {
-            next.modules = d.modules.map((m: any, mi: number): CourseModuleV2 => {
-              const skillIds = (Array.isArray(m?.skillIndexes) ? m.skillIndexes : []).map((idx: number) => next.skills[idx]?.id).filter(Boolean) as string[];
-              return {
-                id: uid('mo'),
-                title: String(m?.title ?? `Модуль ${mi + 1}`),
-                summary: typeof m?.summary === 'string' ? m.summary : '',
-                skillIds,
-                lessons: prev.modules[mi]?.lessons ?? [],
-                finalAssignment: prev.modules[mi]?.finalAssignment,
-              };
-            });
-          }
-        } else if (stage === 'lessons') {
-          if (Array.isArray(d.modules)) {
-            next.modules = next.modules.map((m, mi) => {
-              const proposed = (d.modules as any[])[mi];
-              if (!proposed || !Array.isArray(proposed.lessons)) return m;
-              return {
+  const courseForServer = () => ({
+    title: course.title || undefined,
+    subtitle: course.subtitle || undefined,
+    skills: course.skills.map((s) => ({ name: s.name })),
+    modules: course.modules.map((m) => ({
+      title: m.title,
+      summary: m.summary,
+      lessons: m.lessons.map((l) => ({ title: l.title })),
+    })),
+  });
+
+  const applyStageData = (
+    prev: WizardCourse,
+    stageId: StageId,
+    d: Record<string, any>,
+    moduleIndex?: number
+  ): WizardCourse => {
+    const next: WizardCourse = { ...prev };
+    if (stageId === 'theme') {
+      if (typeof d.title === 'string' && d.title) next.title = d.title;
+      if (typeof d.subtitle === 'string') next.subtitle = d.subtitle;
+      if (Array.isArray(d.audience)) next.audience = d.audience.map(String);
+    } else if (stageId === 'outcomes') {
+      if (Array.isArray(d.outcomes)) next.outcomes = d.outcomes.map(String);
+      if (Array.isArray(d.highlights)) {
+        next.highlights = [...d.highlights.map(String), '', '', ''].slice(0, 3);
+      }
+    } else if (stageId === 'skills') {
+      if (Array.isArray(d.skills)) {
+        next.skills = d.skills.map((s: any): CourseSkillV2 => ({
+          id: uid('sk'),
+          name: String(s?.name ?? ''),
+          level: s?.level === 'pro' || s?.level === 'confident' ? s.level : 'base',
+          whyItMatters: String(s?.whyItMatters ?? ''),
+          howToDevelop: Array.isArray(s?.howToDevelop) ? s.howToDevelop.map(String) : [],
+          practiceIdeas: Array.isArray(s?.practiceIdeas) ? s.practiceIdeas.map(String) : [],
+        }));
+      }
+    } else if (stageId === 'modules') {
+      if (Array.isArray(d.modules)) {
+        next.modules = d.modules.map((m: any, mi: number): CourseModuleV2 => {
+          const skillIds = (Array.isArray(m?.skillIndexes) ? m.skillIndexes : []).map((idx: number) => next.skills[idx]?.id).filter(Boolean) as string[];
+          return {
+            id: uid('mo'),
+            title: String(m?.title ?? `Модуль ${mi + 1}`),
+            summary: typeof m?.summary === 'string' ? m.summary : '',
+            skillIds,
+            lessons: prev.modules[mi]?.lessons ?? [],
+            finalAssignment: prev.modules[mi]?.finalAssignment,
+          };
+        });
+      }
+    } else if (stageId === 'lessons' && moduleIndex !== undefined) {
+      if (Array.isArray(d.lessons)) {
+        next.modules = next.modules.map((m, mi) =>
+          mi !== moduleIndex
+            ? m
+            : {
                 ...m,
-                lessons: proposed.lessons.map((l: any): CourseLessonV2 => ({
+                lessons: d.lessons.map((l: any): CourseLessonV2 => ({
                   id: uid('le'),
                   title: String(l?.title ?? ''),
                   goal: typeof l?.goal === 'string' ? l.goal : '',
@@ -169,41 +181,72 @@ export const CourseWizardView: React.FC<{
                   topics: Array.isArray(l?.topics) ? l.topics.map(String) : [],
                   photoUrls: [],
                 })),
-              };
-            });
-          }
-        } else if (stage === 'practice') {
-          const mapAssignment = (a: any): CourseAssignment => ({
-            id: uid('as'),
-            title: String(a?.title ?? ''),
-            brief: String(a?.brief ?? ''),
-            steps: Array.isArray(a?.steps) ? a.steps.map(String) : [],
-            deliverable: String(a?.deliverable ?? ''),
-            acceptanceCriteria: Array.isArray(a?.acceptanceCriteria) ? a.acceptanceCriteria.map(String) : [],
-          });
-          if (Array.isArray(d.assignments)) {
-            next.modules = next.modules.map((m, mi) => ({
-              ...m,
-              lessons: m.lessons.map((l, li) => {
-                const entry = (d.assignments as any[]).find((x: any) => x?.moduleIndex === mi && x?.lessonIndex === li);
-                return entry ? { ...l, assignment: mapAssignment(entry.assignment) } : l;
-              }),
-            }));
-          }
-          if (Array.isArray(d.finalAssignments)) {
-            next.modules = next.modules.map((m, mi) => {
-              const entry = (d.finalAssignments as any[]).find((x: any) => x?.moduleIndex === mi);
-              return entry ? { ...m, finalAssignment: mapAssignment(entry.assignment) } : m;
-            });
-          }
-        }
-        return next;
+              }
+        );
+      }
+    } else if (stageId === 'practice' && moduleIndex !== undefined) {
+      const mapAssignment = (a: any): CourseAssignment => ({
+        id: uid('as'),
+        title: String(a?.title ?? ''),
+        brief: String(a?.brief ?? ''),
+        steps: Array.isArray(a?.steps) ? a.steps.map(String) : [],
+        deliverable: String(a?.deliverable ?? ''),
+        acceptanceCriteria: Array.isArray(a?.acceptanceCriteria) ? a.acceptanceCriteria.map(String) : [],
       });
+      next.modules = next.modules.map((m, mi) => {
+        if (mi !== moduleIndex) return m;
+        let lessons = m.lessons;
+        if (Array.isArray(d.assignments)) {
+          lessons = lessons.map((l, li) => {
+            const entry = (d.assignments as any[]).find((x: any) => Number(x?.lessonIndex) === li);
+            return entry ? { ...l, assignment: mapAssignment(entry.assignment) } : l;
+          });
+        }
+        return {
+          ...m,
+          lessons,
+          finalAssignment: d.finalAssignment ? mapAssignment(d.finalAssignment) : m.finalAssignment,
+        };
+      });
+    }
+    return next;
+  };
+
+  const generate = async () => {
+    setBusy(true);
+    setError(null);
+    setProgress(null);
+    try {
+      if (stage === 'lessons' || stage === 'practice') {
+        if (course.modules.length === 0) {
+          setError(stage === 'lessons' ? 'Спершу згенеруйте модулі (крок 4).' : 'Спершу створіть модулі та уроки (кроки 4-5).');
+          return;
+        }
+        // Генерація ПО ОДНОМУ МОДУЛЮ за виклик: один великий JSON на всі модулі
+        // впирався в таймаут проксі й повертав порожній 502.
+        const label = stage === 'lessons' ? 'Уроки' : 'Практика';
+        for (let mi = 0; mi < course.modules.length; mi++) {
+          setProgress(`${label}: модуль ${mi + 1}/${course.modules.length} — «${course.modules[mi].title || 'без назви'}»`);
+          const res = await requestStage({
+            stage,
+            moduleIndex: mi,
+            course: courseForServer(),
+            context,
+          });
+          const d = res.data as Record<string, any>;
+          setCourse((prev) => applyStageData(prev, stage, d, mi));
+        }
+      } else {
+        const res = await requestStage({ stage, course: courseForServer(), context });
+        const d = res.data as Record<string, any>;
+        setCourse((prev) => applyStageData(prev, stage, d));
+      }
       setGenerated((g) => ({ ...g, [stage]: true }));
     } catch (e) {
-      setError((e as Error).message);
+      setError((e as Error).message || 'Не вдалося згенерувати. Спробуйте ще раз.');
     } finally {
       setBusy(false);
+      setProgress(null);
     }
   };
 
@@ -299,7 +342,7 @@ export const CourseWizardView: React.FC<{
             className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-slate-950 text-xs font-bold transition-all"
           >
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : generated[stage] ? <RefreshCw className="w-4 h-4" /> : <Wand2 className="w-4 h-4" />}
-            {busy ? 'Модель думає…' : generated[stage] ? 'Запропонувати ще раз' : 'Запропонувати'}
+            {busy ? (progress ?? 'Модель думає…') : generated[stage] ? 'Запропонувати ще раз' : 'Запропонувати'}
           </button>
         </div>
 

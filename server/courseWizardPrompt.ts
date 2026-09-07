@@ -28,7 +28,8 @@ interface CourseLite {
 export function courseStagePrompt(
   stage: CourseWizardStage,
   course: CourseLite,
-  context: Record<string, string>
+  context: Record<string, string>,
+  moduleIndex?: number
 ): { system: string; prompt: string } {
   const title = course.title || 'новий курс';
   const subtitle = course.subtitle || '';
@@ -85,6 +86,18 @@ export function courseStagePrompt(
       };
     }
     case 'lessons': {
+      if (moduleIndex !== undefined) {
+        const m = (course.modules ?? [])[moduleIndex];
+        return {
+          system: SYSTEM,
+          prompt: [
+            `Курс «${title}». Модуль ${moduleIndex + 1}${m ? ` «${m.title}»${m.summary ? ` — ${m.summary}` : ''}` : ''}.`,
+            `Запропонуй для ЦЬОГО модуля 3-6 уроків: title, goal (мета одним реченням),`,
+            `description (2-3 речення), topics (3-5 пунктів змісту).`,
+            `Дай JSON: {"lessons":[{"title":"...","goal":"...","description":"...","topics":["..."]}]}.`,
+          ].join('\n'),
+        };
+      }
       const modules = (course.modules ?? [])
         .map((m, i) => `${i}. ${m.title}${m.summary ? ` — ${m.summary}` : ''}`)
         .join('\n');
@@ -99,6 +112,22 @@ export function courseStagePrompt(
       };
     }
     case 'practice': {
+      if (moduleIndex !== undefined) {
+        const m = (course.modules ?? [])[moduleIndex];
+        const lessons = (m?.lessons ?? []).map((l, i) => `${i}. ${l.title}`).join('\n');
+        return {
+          system: SYSTEM,
+          prompt: [
+            `Курс «${title}». Модуль ${moduleIndex + 1}${m ? ` «${m.title}»` : ''}.`,
+            `Уроки модуля:\n${lessons || '—'}.`,
+            `Для КОЖНОГО уроку запропонуй практичне завдання:`,
+            `title, brief (що зробити), steps (3-5 покрокових пунктів), deliverable (що студент здає: файл/фото/текст),`,
+            `acceptanceCriteria (3-4 критерії «зроблено правильно»).`,
+            `І для МОДУЛЯ загалом — підсумкове завдання того самого формату.`,
+            `Дай JSON: {"assignments":[{"lessonIndex":0,"assignment":{"title":"...","brief":"...","steps":["..."],"deliverable":"...","acceptanceCriteria":["..."]}}],"finalAssignment":{...}}.`,
+          ].join('\n'),
+        };
+      }
       const lessons = (course.modules ?? [])
         .map((m, mi) => (m.lessons ?? []).map((l, li) => `${mi}.${li} — ${l.title}`).join('\n'))
         .join('\n');

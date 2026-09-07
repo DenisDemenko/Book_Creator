@@ -39,9 +39,16 @@ export function registerCourseWizardRoutes(app: Express): void {
           return res.status(400).json({ error: `Невідомий крок майстра: ${stage}.` });
         }
 
+        // Кроки «Уроки» та «Практика» генеруються ПО ОДНОМУ МОДУЛЮ за виклик:
+        // один великий JSON на всі модулі впирався в таймаут проксі (502 без тіла).
+        const moduleIndex = Number(req.body?.moduleIndex);
+        if ((stage === 'lessons' || stage === 'practice') && !Number.isInteger(moduleIndex)) {
+          return res.status(400).json({ error: `Для кроку «${stage}» потрібен moduleIndex (номер модуля).` });
+        }
+
         const course = req.body?.course || {};
         const context = req.body?.context || {};
-        const { system, prompt } = courseStagePrompt(stage, course, context);
+        const { system, prompt } = courseStagePrompt(stage, course, context, moduleIndex);
 
         const choice = await resolveEngineForWizard(req.principal?.id ?? null, req.body?.engine);
         if (!choice) {
