@@ -43,6 +43,7 @@ import { registerSubscriptionRoutes } from './server/subscriptionRoutes';
 import { registerMediaRoutes } from './server/mediaRoutes';
 import { registerKnowledgeRoutes } from './server/knowledgeRoutes';
 import { registerCollaborationRoutes } from './server/collaborationRoutes';
+import { mailConfig } from './server/mail';
 import { registerCourseRoutes } from './server/courseRoutes';
 import { registerCourseWizardRoutes } from './server/courseWizardRoutes';
 import { registerChatRoutes, CHAT_USAGE_CONTEXT } from './server/chatRoutes';
@@ -292,6 +293,9 @@ async function startServer() {
   if (purged) console.log(`[auth] Прибрано протухлих сесій: ${purged}`);
   console.log(
     `[auth] Адміністратор: ${ADMIN_EMAIL} | Firebase-вхід: ${firebaseAuthStatus.enabled ? 'налаштовано' : 'НЕ налаштовано — задайте FIREBASE_* у .env'}`
+  );
+  console.log(
+    `[mail] SMTP: ${mailConfig.enabled ? `увімкнено (${mailConfig.from})` : 'вимкнено — задайте SMTP_HOST/SMTP_USER/SMTP_PASS у .env і перезапустіть сервер'}`
   );
 
   registerAuthRoutes(app);
