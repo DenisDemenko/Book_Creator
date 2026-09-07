@@ -5,7 +5,6 @@ import {
   Wifi,
   WifiOff,
   Send,
-  Copy,
   Check,
   Radio,
   ShieldCheck,
@@ -20,7 +19,6 @@ import {
   BookOpen,
   Eye,
   Hash,
-  Share2,
   Mail,
   UserPlus,
   Loader2,
@@ -86,7 +84,6 @@ export const CollaborationDrawer: React.FC<CollaborationDrawerProps> = ({
 }) => {
   const [activeView, setActiveView] = useState<'chat' | 'collaborators' | 'invite'>('chat');
   const [inputMessage, setInputMessage] = useState('');
-  const [copiedLink, setCopiedLink] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { t, lang } = useLanguage();
   const locale = lang === 'en' ? 'en-US' : 'uk-UA';
@@ -210,13 +207,6 @@ export const CollaborationDrawer: React.FC<CollaborationDrawerProps> = ({
     setInputMessage('');
   };
 
-  const handleCopyInviteLink = () => {
-    const url = window.location.href;
-    navigator.clipboard.writeText(url);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2500);
-  };
-
   const getRoleIcon = (role: UserRole) => {
     switch (role) {
       case 'admin': return Crown;
@@ -310,26 +300,15 @@ export const CollaborationDrawer: React.FC<CollaborationDrawerProps> = ({
             <span className="truncate">{t('collaborationDrawer.collabRolesLabel')}</span>
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
+          {syncStatus !== 'connected' && (
             <button
-              onClick={handleCopyInviteLink}
-              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1 border border-slate-700 transition-all"
-              title={t('collaborationDrawer.copyInviteTooltip')}
+              onClick={onReconnect}
+              className="p-1.5 rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 text-xs transition-colors"
+              title={t('collaborationDrawer.reconnectTooltip')}
             >
-              {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Share2 className="w-3.5 h-3.5 text-amber-400" />}
-              <span>{copiedLink ? t('collaborationDrawer.copiedLabel') : t('collaborationDrawer.inviteBtn')}</span>
+              <RefreshCw className="w-3.5 h-3.5" />
             </button>
-
-            {syncStatus !== 'connected' && (
-              <button
-                onClick={onReconnect}
-                className="p-1.5 rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 text-xs transition-colors"
-                title={t('collaborationDrawer.reconnectTooltip')}
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
+          )}
         </div>
 
         {/* Navigation Sub-Tabs */}

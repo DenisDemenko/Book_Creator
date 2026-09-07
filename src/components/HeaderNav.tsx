@@ -31,6 +31,15 @@ import { useLanguage } from '../i18n/LanguageContext';
 import { useSunLighting } from '../context/SunLightingContext';
 import fusionLabLogo from '../assets/fusion-lab-studio-logo.png';
 
+/** Затемнює hex-колір: factor 0..1 (0 = без змін, 1 = чорний). */
+function darkenHex(hex: string, factor: number): string {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (!m) return hex;
+  const scale = (v: number) => Math.max(0, Math.round(v * (1 - factor)));
+  const [r, g, b] = [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
+  return `#${[r, g, b].map((v) => scale(v).toString(16).padStart(2, '0')).join('')}`;
+}
+
 interface HeaderNavProps {
   currentTab: NavigationTab;
   onSelectTab: (tab: NavigationTab) => void;
@@ -94,18 +103,22 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   const { lang, toggleLang, t } = useLanguage();
   const { selectedColor } = useSunLighting();
   // Акцент тулбара = колір «Сонечка», обраний у палітрі на канві (12 кольорів).
-  // CSS-змінні використовуються для кнопок і надписів; працює і в темній, і в світлій темі.
+  // У світлій темі світлі відтінки палітри погано читаються на білому, тому
+  // там уживаються ТЕМНІ тони: primary та ще темніший для м'яких надписів.
+  const isLightTheme = theme === 'light';
+  const sunBase = isLightTheme ? selectedColor.primary : selectedColor.secondary;
+  const sunSoft = isLightTheme ? darkenHex(selectedColor.primary, 0.35) : selectedColor.highlight;
   const sunVars = {
-    '--sun-acc': selectedColor.secondary,
-    '--sun-soft': selectedColor.highlight,
-    '--sun-acc-10': `${selectedColor.secondary}1A`,
-    '--sun-acc-15': `${selectedColor.secondary}26`,
-    '--sun-acc-20': `${selectedColor.secondary}33`,
-    '--sun-acc-25': `${selectedColor.secondary}40`,
-    '--sun-acc-30': `${selectedColor.secondary}4D`,
-    '--sun-acc-40': `${selectedColor.secondary}66`,
-    '--sun-acc-70': `${selectedColor.secondary}B3`,
-    '--sun-acc-80': `${selectedColor.secondary}CC`,
+    '--sun-acc': sunBase,
+    '--sun-soft': sunSoft,
+    '--sun-acc-10': `${sunBase}1A`,
+    '--sun-acc-15': `${sunBase}26`,
+    '--sun-acc-20': `${sunBase}33`,
+    '--sun-acc-25': `${sunBase}40`,
+    '--sun-acc-30': `${sunBase}4D`,
+    '--sun-acc-40': `${sunBase}66`,
+    '--sun-acc-70': `${sunBase}B3`,
+    '--sun-acc-80': `${sunBase}CC`,
   } as React.CSSProperties;
   const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState<boolean>(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState<boolean>(false);
