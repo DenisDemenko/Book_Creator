@@ -85,54 +85,62 @@ export function inviteEmailHtml(
   link: string
 ): string {
   return `
-    <div style="font-family:Arial,Helvetica,sans-serif;background:#0b1120;padding:36px 16px;color:#e2e8f0">
-      <div style="max-width:560px;margin:0 auto;background:#0f172a;border-radius:20px;overflow:hidden;border:1px solid #1e293b">
-        <!-- Шапка-герой -->
-        <div style="padding:36px 32px 28px;background:radial-gradient(130% 150% at 15% 0%, #1e293b 0%, #0f172a 65%)">
-          <div style="color:#f59e0b;font-size:11px;font-weight:bold;letter-spacing:3px">FUSION LAB STUDIO · ВИДАВНИЧА МАЙСТЕРНЯ</div>
-          <h1 style="margin:18px 0 10px;font-size:22px;line-height:1.4;color:#f8fafc">
-            Запрошення до співпраці з письменником «${inviterName}» в маркетплейсі Fusion Lab Studio
-          </h1>
-          <p style="margin:0;font-size:14px;color:#94a3b8;line-height:1.7">
-            Вас обрано до роботи над книгою «<b style="color:#f8fafc">${bookTitle}</b>».
+    <div style="font-family:Arial,Helvetica,sans-serif;background:#f8fafc;padding:32px 16px;color:#0f172a">
+      <div style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0">
+        <!-- Шапка -->
+        <div style="padding:30px 32px 0;text-align:center">
+          <span style="display:inline-block;border:1px solid #93c5fd;color:#2563eb;border-radius:999px;padding:6px 16px;font-size:10px;font-weight:bold;letter-spacing:2px">FUSION LAB STUDIO · PUBLISHING MARKETPLACE</span>
+          <h1 style="margin:18px 0 8px;font-size:26px;line-height:1.3;color:#0f172a">Запрошення до співпраці</h1>
+          <p style="margin:0 0 22px;font-size:14px;color:#475569">
+            Письменник «<b>${inviterName}</b>» · Книга «<b>${bookTitle}</b>»
           </p>
+          <hr style="border:none;border-top:1px solid #e2e8f0;margin:0">
         </div>
 
-        <div style="padding:26px 32px 30px">
-          <p style="margin:0 0 18px;font-size:14px;line-height:1.7;color:#cbd5e1">
-            Це не розсилка. Автор шукає людину саме з вашими навичками, щоб довести
-            книгу до читача — і ваша роль тут не випадкова.
+        <div style="padding:22px 32px 30px">
+          <p style="margin:0 0 18px;font-size:14px;line-height:1.7;color:#334155">
+            Це не масова розсилка. Автор особисто обрав вас — людину з потрібними
+            навичками — щоб разом довести цю книгу до читача.
           </p>
 
-          <!-- Картка ролі -->
-          <div style="background:#1e293b;border:1px solid #334155;border-left:3px solid #f59e0b;border-radius:12px;padding:16px 18px;margin:0 0 22px">
-            <div style="font-size:11px;letter-spacing:1px;color:#94a3b8;text-transform:uppercase">Ваша роль у книзі</div>
-            <div style="font-size:17px;font-weight:bold;color:#f8fafc;margin-top:5px">${roleUk}</div>
-            <div style="font-size:13px;color:#cbd5e1;margin-top:6px;line-height:1.6">${roleBlurb}</div>
+          <!-- Роль -->
+          <div style="background:#eef2ff;border:1px solid #e0e7ff;border-radius:12px;padding:16px 18px;margin:0 0 20px">
+            <div style="font-size:10px;font-weight:bold;letter-spacing:2px;color:#6366f1;margin-bottom:6px">🔒 ВАША РОЛЬ У ПРОЄКТІ</div>
+            <div style="font-size:14px;line-height:1.6;color:#1e293b">
+              <b>${roleUk}</b> — ${roleBlurb}
+            </div>
           </div>
 
-          <p style="margin:0 0 10px;font-size:14px;font-weight:bold;color:#f8fafc">Щоб приєднатися:</p>
-          <ol style="margin:0 0 22px;padding-left:20px;font-size:13px;line-height:1.7;color:#cbd5e1">
-            <li style="margin-bottom:6px">Натисніть кнопку нижче й увійдіть (або зареєструйтесь) під поштою <b>${inviteeEmail}</b>.</li>
-            <li style="margin-bottom:0">У вікні «Вибір ролі входу» оберіть роль <b>${roleUk}</b> — її зафіксовано в цьому листі.</li>
-          </ol>
+          <p style="margin:0 0 12px;font-size:15px;font-weight:bold;color:#0f172a">Як приєднатися:</p>
 
-          <p style="margin:0 0 18px;text-align:center">
-            <a href="${link}" style="display:inline-block;background:#f59e0b;color:#0f172a;padding:14px 30px;border-radius:12px;text-decoration:none;font-weight:bold;font-size:14px">Приєднатися до команди книги</a>
+          <!-- Кроки -->
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 22px">
+            <tr>
+              <td width="33%" valign="top" style="padding:0 8px 0 0">
+                <div style="font-size:11px;font-weight:bold;color:#2563eb;margin-bottom:4px">01</div>
+                <div style="font-size:13px;font-weight:bold;color:#0f172a;margin-bottom:4px">Натисніть кнопку нижче</div>
+                <div style="font-size:12px;line-height:1.6;color:#64748b">Перейдіть до сторінки приєднання до команди книги.</div>
+              </td>
+              <td width="34%" valign="top" style="padding:0 8px">
+                <div style="font-size:11px;font-weight:bold;color:#2563eb;margin-bottom:4px">02</div>
+                <div style="font-size:13px;font-weight:bold;color:#0f172a;margin-bottom:4px">Увійдіть або зареєструйтесь</div>
+                <div style="font-size:12px;line-height:1.6;color:#64748b">Використайте пошту <b>${inviteeEmail}</b>, на яку надійшло це запрошення.</div>
+              </td>
+              <td width="33%" valign="top" style="padding:0 0 0 8px">
+                <div style="font-size:11px;font-weight:bold;color:#2563eb;margin-bottom:4px">03</div>
+                <div style="font-size:13px;font-weight:bold;color:#0f172a;margin-bottom:4px">Оберіть роль у вікні «Вибір ролі»</div>
+                <div style="font-size:12px;line-height:1.6;color:#64748b">Оберіть роль <b>${roleUk}</b> — її зафіксовано в цьому листі.</div>
+              </td>
+            </tr>
+          </table>
+
+          <p style="margin:0 0 22px;text-align:center">
+            <a href="${link}" style="display:inline-block;background:#2563eb;color:#ffffff;padding:14px 32px;border-radius:12px;text-decoration:none;font-weight:bold;font-size:14px">Приєднатися до команди книги</a>
           </p>
 
-          <p style="font-size:12px;color:#64748b;margin:0 0 22px;text-align:center">
-            Якщо кнопка не працює, скопіюйте це посилання у браузер:<br>${link}
-          </p>
-
-          <p style="margin:0;font-size:12px;line-height:1.6;color:#94a3b8">
-            З повагою,<br>
-            <b style="color:#e2e8f0">команда FUSION LAB STUDIO</b>
-          </p>
-        </div>
-
-        <div style="background:#0b1120;border-top:1px solid #1e293b;padding:14px 32px;font-size:11px;color:#64748b;line-height:1.6">
-          Лист адресований ${inviteeEmail} і дійсний лише для ролі «${roleUk}». Пересилати його іншим не можна — посилання прив'язане до адреси.
+          <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:14px 16px;font-size:12px;line-height:1.6;color:#1e40af">
+            🔒 Цей лист адресований <b>${inviteeEmail}</b> і дійсний лише для ролі «<b>${roleUk}</b>». Пересилати його іншим не можна — посилання прив'язане до адреси.
+          </div>
         </div>
       </div>
     </div>`;
@@ -147,25 +155,33 @@ export function inviteEmailText(
   link: string
 ): string {
   return [
-    'FUSION LAB STUDIO · Видавнича майстерня',
+    'FUSION LAB STUDIO · PUBLISHING MARKETPLACE',
     '',
-    `Запрошення до співпраці з письменником «${inviterName}» в маркетплейсі Fusion Lab Studio.`,
+    'Запрошення до співпраці',
     '',
-    `Вас обрано до роботи над книгою «${bookTitle}».`,
+    `Письменник «${inviterName}» · Книга «${bookTitle}»`,
     '',
-    `Ваша роль: ${roleUk}`,
-    roleBlurb,
+    '----------------------------------------',
     '',
-    'Щоб приєднатися:',
-    `1. Відкрийте посилання нижче й увійдіть (або зареєструйтесь) під поштою ${inviteeEmail}.`,
-    `2. У вікні «Вибір ролі входу» оберіть роль «${roleUk}» — її зафіксовано в цьому листі.`,
+    'Це не масова розсилка. Автор особисто обрав вас — людину з потрібними навичками — щоб разом довести цю книгу до читача.',
+    '',
+    'ВАША РОЛЬ У ПРОЄКТІ',
+    `${roleUk} — ${roleBlurb}`,
+    '',
+    'Як приєднатися:',
+    '',
+    '01 Натисніть кнопку нижче',
+    '   Перейдіть до сторінки приєднання до команди книги.',
+    '',
+    '02 Увійдіть або зареєструйтесь',
+    `   Використайте пошту ${inviteeEmail}, на яку надійшло це запрошення.`,
+    '',
+    '03 Оберіть роль у вікні «Вибір ролі»',
+    `   Оберіть роль ${roleUk} — її зафіксовано в цьому листі.`,
     '',
     `Посилання: ${link}`,
     '',
-    `Лист адресований ${inviteeEmail} і дійсний лише для ролі «${roleUk}».`,
-    '',
-    'З повагою,',
-    'команда FUSION LAB STUDIO',
+    `🔒 Цей лист адресований ${inviteeEmail} і дійсний лише для ролі «${roleUk}». Пересилати його іншим не можна — посилання прив'язане до адреси.`,
   ].join('\n');
 }
 
