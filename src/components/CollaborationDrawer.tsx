@@ -142,11 +142,14 @@ export const CollaborationDrawer: React.FC<CollaborationDrawerProps> = ({
     }
     setInviteSending(true);
     setInviteNotice(null);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 40_000);
     try {
       const res = await fetch('/api/collaboration/invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
+        signal: controller.signal,
         body: JSON.stringify({ bookId: book.id, bookTitle: book.title, email: inviteEmail.trim(), role: inviteRole }),
       });
       let data: any;
@@ -172,9 +175,16 @@ export const CollaborationDrawer: React.FC<CollaborationDrawerProps> = ({
       });
       setInviteEmail('');
       loadInvites();
-    } catch {
-      setInviteNotice({ kind: 'error', text: t('collaborationDrawer.coworkSendError') });
+    } catch (err) {
+      const isAbort = (err as Error)?.name === 'AbortError';
+      setInviteNotice({
+        kind: 'error',
+        text: isAbort
+          ? `${t('collaborationDrawer.coworkSendError')} (${t('collaborationDrawer.coworkSendTimeout')})`
+          : t('collaborationDrawer.coworkSendError'),
+      });
     } finally {
+      clearTimeout(timeoutId);
       setInviteSending(false);
     }
   };

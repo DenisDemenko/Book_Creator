@@ -45,15 +45,31 @@ const transporterCache = new Map<string, ReturnType<typeof nodemailer.createTran
  * «connect ENETUNREACH 2a00:...:465», не повертаючись до IPv4. Тому адреси
  * A-запису отримуємо самі й передаємо як host, а hostname лишаємо в
  * servername для TLS/SNI (Gmail віддає сертифікат саме на smtp.gmail.com).
+ *
+ * DNS без таймауту може зависнути назавжди (hosting-хости часом не
+ * відповідають на A-запит із датацентру) — тоді запит до /invite висне, а
+ * проксі вбиває його раніше, ніж ми встигли відповісти. Тому резолвінг
+ * обмежено 5 секундами.
  */
+const DNS_TIMEOUT_MS = 5_000;
+
 async function resolveSmtpHosts(host: string): Promise<string[]> {
+  let timer: NodeJS.Timeout | undefined;
   try {
-    const addresses = await dnsPromises.resolve4(host);
-    if (addresses.length > 0) return addresses;
-  } catch {
-    // DNS не відповів — пробуємо з оригінальним hostname.
+    const addresses = await Promise.race([
+      dnsPromises.resolve4(host),
+      new Promise<string[]>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`DNS не відповів за ${DNS_TIMEOUT_MS / 1000} с (${host})`)), DNS_TIMEOUT_MS);
+      }),
+    ]);
+    return addresses.length > 0 ? addresses : [host];
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOTFOUND' || code === 'ENODATA') return [host]; // пробуємо за hostname
+    throw err; // DNS-таймаут або інша помилка — піднімається до sendMail
+  } finally {
+    if (timer) clearTimeout(timer);
   }
-  return [host];
 }
 
 function getTransporter(target: SmtpTarget) {
@@ -126,10 +142,17 @@ export async function sendMail(input: SendMailInput): Promise<{ ok: boolean; err
     return { ok: false, error: 'SMTP не налаштовано' };
   }
 
-  const hosts = await resolveSmtpHosts(mailConfig.host);
+  let hosts: string[];
+  try {
+    hosts = await resolveSmtpHosts(mailConfig.host);
+  } catch (err) {
+    const message = String((err as Error).message || err);
+    console.error('[mail] Помилка резолвінгу SMTP-хосту:', message);
+    return { ok: false, error: message };
+  }
+
   const attempted: string[] = [];
   let lastError: string | undefined;
-
   for (const target of smtpTargets(hosts)) {
     const label = `${target.host}:${target.port} ${target.secure ? 'SSL' : 'STARTTLS'}`;
     attempted.push(label);
