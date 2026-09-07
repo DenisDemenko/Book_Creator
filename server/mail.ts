@@ -86,22 +86,20 @@ function getTransporter(target: SmtpTarget) {
 }
 
 /**
- * Список цілей для спроби підключення: кожна IPv4-адреса × порти. Для Gmail
- * додаємо альтернативний порт: 465 (SSL) ⇄ 587 (STARTTLS). Railway часто
- * відкидає вихідний 465, але 587 проходить — тому фолбек рятує ситуацію без
- * зміни змінних на сервері.
+ * Список цілей для спроби підключення: кожна IPv4-адреса × порти. До кожного
+ * хосту додаємо альтернативний порт: 465 (SSL) ⇄ 587 (STARTTLS). Це рятує і
+ * від блокування одного з портів на платформі (Railway часто відкидає 465), і
+ * від хостингів, які підтримують лише один із них — без зміни змінних.
  */
 function smtpTargets(hosts: string[]): SmtpTarget[] {
   const targets: SmtpTarget[] = [];
   for (const host of hosts) {
     targets.push({ host, port: mailConfig.port, secure: mailConfig.secure });
-    if (/g(oogle)?mail\.com$/i.test(mailConfig.host)) {
-      const alternate = mailConfig.secure
-        ? { port: 587, secure: false }
-        : { port: 465, secure: true };
-      if (alternate.port !== mailConfig.port) {
-        targets.push({ host, ...alternate });
-      }
+    const alternate = mailConfig.secure
+      ? { port: 587, secure: false }
+      : { port: 465, secure: true };
+    if (alternate.port !== mailConfig.port) {
+      targets.push({ host, ...alternate });
     }
   }
   return targets;
