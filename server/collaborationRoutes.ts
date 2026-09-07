@@ -229,16 +229,22 @@ export function registerCollaborationRoutes(app: Express): void {
       };
 
       const inviteLink = `${appBaseUrl(req)}/?invite=${token}`;
-      const emailSent = await sendMail({
+      const mailResult = await sendMail({
         to: invite.inviteeEmail,
         subject: `Запрошення до книги «${invite.bookTitle}» — роль: ${ROLE_NAMES_UK[role]}`,
         html: inviteEmailHtml(invite.bookTitle, ROLE_NAMES_UK[role], ROLE_BLURBS_UK[role], principal.name || 'Автор', invite.inviteeEmail, inviteLink),
         text: inviteEmailText(invite.bookTitle, ROLE_NAMES_UK[role], ROLE_BLURBS_UK[role], principal.name || 'Автор', invite.inviteeEmail, inviteLink),
       });
-      invite.emailSent = emailSent;
+      invite.emailSent = mailResult.ok;
 
       await createCollabInvite(invite);
-      res.json({ ok: true, invite, inviteLink, emailSent });
+      res.json({
+        ok: true,
+        invite,
+        inviteLink,
+        emailSent: mailResult.ok,
+        mailError: mailResult.error ?? null,
+      });
     } catch (err) {
       console.error('[collaboration] invite:', err);
       res.status(500).json({ error: 'Не вдалося створити запрошення.' });

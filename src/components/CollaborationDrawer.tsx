@@ -154,9 +154,12 @@ export const CollaborationDrawer: React.FC<CollaborationDrawerProps> = ({
         setInviteNotice({ kind: 'error', text: data?.error || t('collaborationDrawer.coworkSendError') });
         return;
       }
+      const mailError = typeof data.mailError === 'string' && data.mailError ? ` (${data.mailError})` : '';
       setInviteNotice({
-        kind: 'success',
-        text: data.emailSent ? t('collaborationDrawer.coworkEmailSentNotice') : t('collaborationDrawer.coworkEmailNotSentNotice'),
+        kind: data.emailSent ? 'success' : 'error',
+        text: data.emailSent
+          ? t('collaborationDrawer.coworkEmailSentNotice')
+          : `${t('collaborationDrawer.coworkEmailNotSentNotice')}${mailError}`,
         link: data.inviteLink,
       });
       setInviteEmail('');

@@ -21,12 +21,13 @@ const base = process.env.STUDIO_PUBLIC_URL || process.env.APP_URL || 'http://loc
 const link = `${base.replace(/\/$/, '')}/?invite=demo-token`;
 
 (async () => {
-  const ok = await sendMail({
+  const result = await sendMail({
     to: TO,
     subject: `Запрошення до книги «${bookTitle}» — роль: ${roleUk}`,
     html: inviteEmailHtml(bookTitle, roleUk, roleBlurb, inviterName, TO, link),
     text: inviteEmailText(bookTitle, roleUk, roleBlurb, inviterName, TO, link),
   });
-  console.log(ok ? 'TEST_MAIL_OK' : 'TEST_MAIL_FAILED');
-  process.exit(ok ? 0 : 1);
+  if (!result.ok) console.log('TEST_MAIL_ERROR:', result.error ?? 'unknown');
+  console.log(result.ok ? 'TEST_MAIL_OK' : 'TEST_MAIL_FAILED');
+  process.exit(result.ok ? 0 : 1);
 })();

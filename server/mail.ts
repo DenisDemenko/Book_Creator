@@ -37,6 +37,10 @@ function getTransporter() {
       host: mailConfig.host,
       port: mailConfig.port,
       secure: mailConfig.secure,
+      // Без таймаутів з'єднання, яке «не відповідає», крутить спінер назавжди.
+      connectionTimeout: 15_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 25_000,
       auth: {
         user: mailConfig.user.trim(),
         // Пароль додатка Gmail часто копіюють у вигляді «aaaa bbbb cccc dddd» —
@@ -56,19 +60,18 @@ export interface SendMailInput {
 }
 
 /**
- * Повертає true лише якщо лист реально пішов через SMTP. false — і коли
- * SMTP не налаштований (mailConfig.enabled === false), і коли відправка
- * провалилась (мережа, невірні креденшли тощо) — в обох випадках виклик
- * не повинен падати, а мусить запропонувати запасний варіант (посилання).
+ * Надсилає лист і повертає результат з причиною помилки (без винятків).
+ * ok === false і коли SMTP не налаштований, і коли відправка провалилась —
+ * виклик не падає, а мусить запропонувати запасний варіант (посилання).
  */
-export async function sendMail(input: SendMailInput): Promise<boolean> {
+export async function sendMail(input: SendMailInput): Promise<{ ok: boolean; error?: string }> {
   const tx = getTransporter();
   if (!tx) {
     console.warn(
       `[mail] SMTP не налаштовано (SMTP_HOST/SMTP_USER/SMTP_PASS) — лист до ${input.to} не надіслано. ` +
         'Посилання потрібно передати отримувачу вручну.'
     );
-    return false;
+    return { ok: false, error: 'SMTP не налаштовано' };
   }
   try {
     await tx.sendMail({
@@ -78,9 +81,10 @@ export async function sendMail(input: SendMailInput): Promise<boolean> {
       html: input.html,
       text: input.text,
     });
-    return true;
+    return { ok: true };
   } catch (err) {
-    console.error('[mail] Не вдалося надіслати лист:', err);
-    return false;
+    const message = String((err as Error).message || err);
+    console.error('[mail] Не вдалося надіслати лист:', message);
+    return { ok: false, error: message };
   }
 }
