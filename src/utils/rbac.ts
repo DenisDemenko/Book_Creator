@@ -37,6 +37,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canManageSettings: true,
       canViewAuditLog: true,
       canManageRoles: true,
+      canAuthorCourses: true,
       canGenerateImages: true,
       canPublish: true,
       canPublishExternal: true,
@@ -121,6 +122,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canManageSettings: false,
       canViewAuditLog: true,
       canManageRoles: false,
+      canAuthorCourses: false,
       canGenerateImages: true,
       canPublish: true,
       canPublishExternal: true,
@@ -196,6 +198,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canManageSettings: false,
       canViewAuditLog: false,
       canManageRoles: false,
+      canAuthorCourses: false,
       canGenerateImages: true,
       canPublish: false,
       canPublishExternal: false,
@@ -255,6 +258,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canManageSettings: false,
       canViewAuditLog: false,
       canManageRoles: false,
+      canAuthorCourses: false,
       canGenerateImages: true,
       canPublish: false,
       canPublishExternal: false,
@@ -313,6 +317,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canManageSettings: true,
       canViewAuditLog: true,
       canManageRoles: false,
+      canAuthorCourses: false,
       canGenerateImages: true,
       canPublish: true,
       canPublishExternal: true,
@@ -339,6 +344,120 @@ export const ALL_ROLES: RoleInfo[] = [
       name: 'Вікторія Гнатюк (Головний Редактор)',
       email: 'publisher@novastudio.ua',
       avatar: '🏛️'
+    }
+  },
+  {
+    id: 'expert',
+    nameUk: 'Експерт',
+    nameEn: 'Craft Expert',
+    badgeEmoji: '🛠️',
+    badgeColor: 'bg-orange-500/20 text-orange-300 border-orange-500/40',
+    bgGradient: 'from-orange-500/20 to-amber-500/10 border-orange-500/50',
+    descriptionUk: 'Носій ремесла, автор змісту навчальних курсів: програма, уроки, практика, завдання.',
+    descriptionEn: 'Craft expert and course content author: program, lessons, practice, assignments.',
+    responsibilitiesUk: [
+      'Створення та редагування самостійних курсів',
+      'Наповнення модулів і уроків змістом, метою і практикою',
+      'Робота з медіа курсу (фото, відео-посилання)',
+      'Готовність курсу до публікації в каталозі'
+    ],
+    responsibilitiesEn: [
+      'Creating and editing standalone courses',
+      'Filling modules and lessons with content, goals, and practice',
+      'Working with course media (photos, video links)',
+      'Preparing the course for catalog publishing'
+    ],
+    permissions: {
+      canEditContent: false,
+      canEditTranslation: false,
+      canEditVisuals: true,
+      canEditLayout: false,
+      canExport: false,
+      canImportBook: false,
+      canManageCharacters: false,
+      canManagePlot: false,
+      canUseAi: true,
+      canManageSettings: false,
+      canViewAuditLog: false,
+      canManageRoles: false,
+      canAuthorCourses: true,
+      canGenerateImages: true,
+      canPublish: false,
+      canPublishExternal: false,
+      canManageApiKeys: false,
+      canMarketIntel: false,
+      isReadOnly: false,
+      allowedTabs: [
+        'start',
+        'dashboard',
+        'course-studio',
+        'media',
+        'illustrations',
+        'preview',
+        'subscription'
+      ]
+    },
+    defaultPersona: {
+      name: 'Олена Ткачук (Експерт)',
+      email: 'expert@novastudio.ua',
+      avatar: '🛠️'
+    }
+  },
+  {
+    id: 'teacher',
+    nameUk: 'Викладач',
+    nameEn: 'Teacher',
+    badgeEmoji: '🎓',
+    badgeColor: 'bg-teal-500/20 text-teal-300 border-teal-500/40',
+    bgGradient: 'from-teal-500/20 to-emerald-500/10 border-teal-500/50',
+    descriptionUk: 'Веде курс, править методику, перевіряє завдання студентів та слідкує за готовністю програми.',
+    descriptionEn: 'Runs the course, refines methodology, reviews student assignments, and keeps the program ready.',
+    responsibilitiesUk: [
+      'Ведення та редагування навчальних курсів',
+      'Методика: мета уроків, критерії приймання завдань',
+      'Перевірка завдань і супровід студентів',
+      'Готовність курсу до публікації'
+    ],
+    responsibilitiesEn: [
+      'Running and editing courses',
+      'Methodology: lesson goals, assignment acceptance criteria',
+      'Reviewing assignments and supporting students',
+      'Keeping the course ready for publishing'
+    ],
+    permissions: {
+      canEditContent: false,
+      canEditTranslation: false,
+      canEditVisuals: true,
+      canEditLayout: false,
+      canExport: false,
+      canImportBook: false,
+      canManageCharacters: false,
+      canManagePlot: false,
+      canUseAi: true,
+      canManageSettings: false,
+      canViewAuditLog: false,
+      canManageRoles: false,
+      canAuthorCourses: true,
+      canGenerateImages: true,
+      canPublish: false,
+      canPublishExternal: false,
+      canManageApiKeys: false,
+      canMarketIntel: false,
+      isReadOnly: false,
+      allowedTabs: [
+        'start',
+        'dashboard',
+        'course-studio',
+        'media',
+        'illustrations',
+        'preview',
+        'subscription'
+      ]
+    },
+    defaultPersona: {
+      name: 'Ігор Симоненко (Викладач)',
+      email: 'teacher@novastudio.ua',
+      avatar: '🎓'
     }
   },
   {
@@ -382,6 +501,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canPublishExternal: false,
       canManageApiKeys: false,
       canMarketIntel: false,
+      canAuthorCourses: false,
       isReadOnly: true,
       allowedTabs: [
         'subscription',
@@ -436,6 +556,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canPublishExternal: false,
       canManageApiKeys: false,
       canMarketIntel: false,
+      canAuthorCourses: false,
       isReadOnly: true,
       allowedTabs: [
 'express',
@@ -497,6 +618,10 @@ export function getDefaultTabForRole(role?: UserRole | string | null): Navigatio
       return 'editor';
     case 'publisher':
       return 'layout';
+    case 'expert':
+      return 'course-studio';
+    case 'teacher':
+      return 'course-studio';
     case 'reader':
       return 'preview';
     default:

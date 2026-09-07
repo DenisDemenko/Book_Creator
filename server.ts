@@ -43,6 +43,8 @@ import { registerSubscriptionRoutes } from './server/subscriptionRoutes';
 import { registerMediaRoutes } from './server/mediaRoutes';
 import { registerKnowledgeRoutes } from './server/knowledgeRoutes';
 import { registerCollaborationRoutes } from './server/collaborationRoutes';
+import { registerCourseRoutes } from './server/courseRoutes';
+import { registerCourseWizardRoutes } from './server/courseWizardRoutes';
 import { registerChatRoutes, CHAT_USAGE_CONTEXT } from './server/chatRoutes';
 import { registerApiKeysRoutes } from './server/apiKeysRoutes';
 import { registerExpressRoutes } from './server/expressRoutes';
@@ -299,6 +301,8 @@ async function startServer() {
   registerMediaRoutes(app);
   registerKnowledgeRoutes(app);
   registerCollaborationRoutes(app);
+registerCourseRoutes(app);
+registerCourseWizardRoutes(app);
 
   /**
    * Модуль публікації та експорту (Amazon KDP + Etsy). Реєструється тут,

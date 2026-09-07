@@ -22,6 +22,7 @@ export type NavigationTab =
   | 'api-keys'     // Ключі API провайдерів ШІ для всієї платформи (вводить лише адміністратор)
   | 'kdp-format'   // Форматування готового файлу під Amazon KDP (Claude, Pro/Ultra)
   | 'courses'      // Перетворення книги на курс/мінікурс: теги, матеріали, експорт
+  | 'course-studio' // Створити курс: самостійні навчальні курси (експерт/викладач/адмін)
   | 'narration'    // Озвучення книги й курсу (ElevenLabs): розділи та виділені фрагменти, Pro/Ultra
   | 'pdf-editor'   // WYSIWYG-верстка PDF перед публікацією: рамки тексту, обтікання графіки
   | 'knowledge'    // Фаза 2: База знань — референси, цитати, перетягування в текст
@@ -437,6 +438,78 @@ export interface CourseConfig {
   modules?: CourseModule[];
 }
 
+// ---------------------------------------------------------------------------
+// Самостійні навчальні курси (docs/tech-spec-course-wizard-2026.md).
+// На відміну від CourseConfig вище («курс із книги»), ця сутність живе без
+// рукопису: ремісничий курс має власні модулі, уроки, завдання й навички.
+// ---------------------------------------------------------------------------
+
+export type CourseStatusV2 = 'draft' | 'ready' | 'published';
+
+export interface CourseSkillV2 {
+  id: string;
+  name: string;
+  level: 'base' | 'confident' | 'pro';
+  whyItMatters: string;
+  howToDevelop: string[];
+  practiceIdeas: string[];
+}
+
+export interface CourseAssignment {
+  id: string;
+  title: string;
+  brief: string;
+  steps: string[];
+  deliverable: string;
+  acceptanceCriteria: string[];
+  estimateMin?: number;
+}
+
+export interface CourseLessonV2 {
+  id: string;
+  title: string;
+  goal?: string;
+  description?: string;
+  topics: string[];
+  videoUrl?: string;
+  photoUrls: string[];
+  assignment?: CourseAssignment;
+  durationMin?: number;
+}
+
+export interface CourseModuleV2 {
+  id: string;
+  title: string;
+  summary?: string;
+  coverPhotoUrl?: string;
+  introVideoUrl?: string;
+  lessons: CourseLessonV2[];
+  finalAssignment?: CourseAssignment;
+  skillIds: string[];
+}
+
+export interface CourseV2 {
+  id: string;
+  ownerId: string;
+  status: CourseStatusV2;
+  title: string;
+  subtitle?: string;
+  summary?: string;
+  description?: string;
+  audience: string[];
+  outcomes: string[];
+  highlights: string[];
+  coverUrl?: string;
+  category?: string;
+  priceMinor?: number;
+  currency?: string;
+  skills: CourseSkillV2[];
+  modules: CourseModuleV2[];
+  createdAt: string;
+  updatedAt: string;
+  publishedAt?: string;
+}
+
 /**
  * WYSIWYG-верстка PDF («Верстка PDF») — позиціонування графічних об'єктів
  * на сторінці глави з режимом обтікання текстом, і перевизначення полів
@@ -730,6 +803,8 @@ export type UserRole =
   | 'designer'    // Дизайнер / Ілюстратор: обкладинка, Visual Bible, ілюстрації, медіатека
   | 'translator'  // Перекладач: двомовна локалізація, EN поля, експорт English Edition
   | 'publisher'   // Видавець / Редактор: верстка, Amazon KDP аудит, корінець, поліграфія, експорт
+  | 'expert'      // Експерт: носій ремесла, автор змісту навчальних курсів
+  | 'teacher'     // Викладач: веде курс, править методику, перевіряє завдання
   | 'reader'      // Читач / Бета-рідер: режим читання, перегляд книги та лору персонажів
   | 'guest';      // Гість: відкритий вхід без реєстрації, лише перегляд і заглушки замість AI
 
@@ -752,6 +827,8 @@ export interface RolePermission {
   canManageSettings: boolean;
   canViewAuditLog: boolean;
   canManageRoles: boolean;
+  /** Створення та редагування самостійних навчальних курсів (експерт/викладач/адмін). */
+  canAuthorCourses: boolean;
   /** Чи дозволено витрачати платні генерації зображень. Гість — ні. */
   canGenerateImages: boolean;
   /**

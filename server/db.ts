@@ -573,6 +573,21 @@ CREATE TABLE IF NOT EXISTS media_assets (
 );
 CREATE INDEX IF NOT EXISTS idx_media_assets_owner ON media_assets(owner_id, created_at DESC);
 
+-- РЎР°РјРѕСЃС‚С–Р№РЅС– РЅР°РІС‡Р°Р»СЊРЅС– РєСѓСЂСЃРё (docs/tech-spec-course-wizard-2026.md).
+-- РљСѓСЂСЃ РЅРµ РїСЂРёРІРјСЏР·Р°РЅРёР№ РґРѕ РєРЅРёРіРё: СЂРµРјС–СЃРЅРёС‡С– РєСѓСЂСЃРё Р±СѓРІР°СЋС‚СЊ Р±РµР· СЂСѓРєРѕРїРёСЃСѓ.
+-- Р’РµСЃСЊ РІРјС–СЃС‚ (РјРѕРґСѓР»С–, СѓСЂРѕРєРё, Р·Р°РІРґР°РЅРЅСЏ, РЅР°РІРёС‡РєРё) — JSON Сѓ payload.
+CREATE TABLE IF NOT EXISTS courses (
+  id           TEXT PRIMARY KEY,
+  owner_id     TEXT NOT NULL,                    -- Р°РІС‚РѕСЂ (user id)
+  status       TEXT NOT NULL DEFAULT 'draft',    -- draft | ready | published
+  title        TEXT NOT NULL DEFAULT '',         -- РґСѓР±Р»СЊ С–Р· payload РґР»СЏ СЃРїРёСЃРєС–РІ
+  payload      TEXT NOT NULL,                    -- JSON РєСѓСЂСЃСѓ
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL,
+  published_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_courses_owner ON courses(owner_id, updated_at DESC);
+
 `;
 
 /**

@@ -42,6 +42,7 @@ import { ImportBookModal } from './components/ImportBookModal';
 import { ImportMaterialsWizardModal } from './components/ImportMaterialsWizardModal';
 import { CollaborationDrawer } from './components/CollaborationDrawer';
 import { InviteRoleChoiceModal } from './components/InviteRoleChoiceModal';
+import { CourseStudioView } from './components/CourseStudioView';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { AuthScreen } from './components/AuthScreen';
 import { AdminOsView } from './components/adminOs/AdminOsView';
@@ -1635,7 +1636,15 @@ export default function App() {
                 applyExpressPlan(payload);
                 handleSelectTab('editor');
               }}
+              onCourseCreated={() => handleSelectTab('course-studio')}
             />
+          </div>
+        )}
+
+        {/* Створити курс: самостійні навчальні курси (експерт/викладач/адмін) */}
+        {currentTab === 'course-studio' && (
+          <div className="flex-1 overflow-y-auto">
+            <CourseStudioView onOpenWizard={() => handleSelectTab('express')} />
           </div>
         )}
 

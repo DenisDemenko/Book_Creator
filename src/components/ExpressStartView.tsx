@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, ArrowRight, BookOpen, Gamepad2, GraduationCap, ListChecks, Lock, Wand2 } from 'lucide-react';
 import { EXPRESS_TRACKS, findExpressTrack, isTrackRunnable, type ExpressTrack, type ExpressTrackId } from '../data/expressTracks';
 import { ExpressWizardView, type ExpressWizardPayload } from './ExpressWizardView';
+import { CourseWizardView } from './CourseWizardView';
+import type { CourseV2 } from '../types';
 
 /**
  * Розвилка перед експрес-майстром (Завдання 4).
@@ -141,7 +143,11 @@ const PlannedTrackNotice: React.FC<{ track: ExpressTrack; onBack: () => void }> 
   );
 };
 
-export const ExpressStartView: React.FC<{ onFinish?: (payload: ExpressWizardPayload) => void }> = ({ onFinish }) => {
+export const ExpressStartView: React.FC<{
+  onFinish?: (payload: ExpressWizardPayload) => void;
+  /** Майстер курсів створив курс — батько переходить на екран «Створити курс». */
+  onCourseCreated?: (course: CourseV2) => void;
+}> = ({ onFinish, onCourseCreated }) => {
   // Напрям із минулого візиту підхоплюємо одразу при першому рендері,
   // щоб не блимнути екраном вибору перед тим, як показати майстер.
   const [track, setTrack] = useState<ExpressTrackId | null>(() => readSavedTrack());
@@ -181,6 +187,10 @@ export const ExpressStartView: React.FC<{ onFinish?: (payload: ExpressWizardPayl
         onChangeTrack={backToChoice}
       />
     );
+  }
+
+  if (track === 'course') {
+    return <CourseWizardView onChangeTrack={backToChoice} onCourseCreated={onCourseCreated} />;
   }
 
   return (

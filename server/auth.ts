@@ -154,6 +154,7 @@ type ServerPermissions = {
   canPublishExternal: boolean;
   canManageApiKeys: boolean;
   canMarketIntel: boolean;
+  canAuthorCourses: boolean;
 };
 
 /**
@@ -177,26 +178,17 @@ type ServerPermissions = {
  * ще й за requirePlanAtLeast(['pro','ultra']) у маршрутах.
  */
 export const BASE_SERVER_PERMISSIONS: Record<StoredRole, ServerPermissions> = {
-  admin:      { canGenerateImages: true,  canUseAi: true,  canEditContent: true,  canPublish: true,  canPublishExternal: true,  canManageApiKeys: true,  canMarketIntel: true },
-  // Письменник НЕ вводить ключів провайдерів: коди вставляє лише
-  // адміністратор, а Nova обслуговує авторів своїми ключами в межах
-  // підписки. Раніше право стояло true, і панель ключів була доступна
-  // кожному письменнику.
-  // Автор досліджує ринок сам — саме він вирішує, що писати наступним.
-  writer:     { canGenerateImages: true,  canUseAi: true,  canEditContent: true,  canPublish: true,  canPublishExternal: true,  canManageApiKeys: false, canMarketIntel: true },
-  // Дизайнер і перекладач працюють над готовим товаром — ринок не їхня
-  // зона рішень, а кожен скринінг коштує викликів моделі.
-  designer:   { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false },
-  translator: { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false },
-  // Видавець = менеджер продажів маркетплейсу (H5): публікує і всередині, і
-  // назовні — аудит KDP це його робота, — але власних ключів провайдерів не
-  // вводить, бо послуги йому надає Nova.
-  // Видавцю аналітика потрібна за посадою: асортимент і ціна — його рішення.
-  publisher:  { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: true,  canPublishExternal: true,  canManageApiKeys: false, canMarketIntel: true },
-  // Бета-рідер лише читає — хай не витрачає платні генерації.
-  reader:     { canGenerateImages: false, canUseAi: false, canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false },
-  // Гість бачить демонстраційні заглушки замість згенерованих зображень.
-  guest:      { canGenerateImages: false, canUseAi: false, canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false },
+  admin:      { canGenerateImages: true,  canUseAi: true,  canEditContent: true,  canPublish: true,  canPublishExternal: true,  canManageApiKeys: true,  canMarketIntel: true,  canAuthorCourses: true },
+  writer:     { canGenerateImages: true,  canUseAi: true,  canEditContent: true,  canPublish: true,  canPublishExternal: true,  canManageApiKeys: false, canMarketIntel: true,  canAuthorCourses: false },
+  designer:   { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false },
+  translator: { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false },
+  publisher:  { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: true,  canPublishExternal: true,  canManageApiKeys: false, canMarketIntel: true,  canAuthorCourses: false },
+  // Експерт і викладач: автори самостійних курсів (docs/tech-spec-course-wizard-2026.md §6.1).
+  // Генерації зображень і ШІ дозволені (медіа курсу), решта письменницько-видавничого — ні.
+  expert:     { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: true },
+  teacher:    { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: true },
+  reader:     { canGenerateImages: false, canUseAi: false, canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false },
+  guest:      { canGenerateImages: false, canUseAi: false, canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false },
 };
 
 export async function effectivePermissions(role: StoredRole) {

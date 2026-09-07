@@ -28,6 +28,8 @@ export type StoredRole =
   | 'designer'
   | 'translator'
   | 'publisher'
+  | 'expert'
+  | 'teacher'
   | 'reader'
   | 'guest';
 
