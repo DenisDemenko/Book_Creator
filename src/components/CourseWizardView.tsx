@@ -6,6 +6,7 @@ import {
   ArrowRight,
   Check,
   RefreshCw,
+  Trash2,
   Users,
   Target,
   GraduationCap,
@@ -133,56 +134,79 @@ export const CourseWizardView: React.FC<{
   ): WizardCourse => {
     const next: WizardCourse = { ...prev };
     if (stageId === 'theme') {
-      if (typeof d.title === 'string' && d.title) next.title = d.title;
-      if (typeof d.subtitle === 'string') next.subtitle = d.subtitle;
-      if (Array.isArray(d.audience)) next.audience = d.audience.map(String);
+      // Скалярні поля заповнюються лише якщо користувач ще нічого не ввів:
+      // його власний текст — за основу, модель лише доповнює порожнє.
+      if (typeof d.title === 'string' && d.title && !next.title.trim()) next.title = d.title;
+      if (typeof d.subtitle === 'string' && !(next.subtitle ?? '').trim()) next.subtitle = d.subtitle;
+      if (Array.isArray(d.audience)) {
+        const existing = new Set(next.audience.map((a) => a.trim().toLowerCase()).filter(Boolean));
+        const added = d.audience.map(String).filter((a) => a.trim() && !existing.has(a.trim().toLowerCase()));
+        next.audience = [...next.audience, ...added];
+      }
     } else if (stageId === 'outcomes') {
-      if (Array.isArray(d.outcomes)) next.outcomes = d.outcomes.map(String);
+      if (Array.isArray(d.outcomes)) {
+        const existing = new Set(next.outcomes.map((o) => o.trim().toLowerCase()).filter(Boolean));
+        const added = d.outcomes.map(String).filter((o) => o.trim() && !existing.has(o.trim().toLowerCase()));
+        next.outcomes = [...next.outcomes, ...added];
+      }
       if (Array.isArray(d.highlights)) {
-        next.highlights = [...d.highlights.map(String), '', '', ''].slice(0, 3);
+        next.highlights = next.highlights.map((h, i) => (h.trim() ? h : String(d.highlights[i] ?? '')));
       }
     } else if (stageId === 'skills') {
       if (Array.isArray(d.skills)) {
-        next.skills = d.skills.map((s: any): CourseSkillV2 => ({
-          id: uid('sk'),
-          name: String(s?.name ?? ''),
-          level: s?.level === 'pro' || s?.level === 'confident' ? s.level : 'base',
-          whyItMatters: String(s?.whyItMatters ?? ''),
-          howToDevelop: Array.isArray(s?.howToDevelop) ? s.howToDevelop.map(String) : [],
-          practiceIdeas: Array.isArray(s?.practiceIdeas) ? s.practiceIdeas.map(String) : [],
-        }));
+        const existing = new Set(next.skills.map((s) => s.name.trim().toLowerCase()).filter(Boolean));
+        const added: CourseSkillV2[] = [];
+        for (const s of d.skills as any[]) {
+          const name = String(s?.name ?? '').trim();
+          if (!name || existing.has(name.toLowerCase())) continue;
+          existing.add(name.toLowerCase());
+          added.push({
+            id: uid('sk'),
+            name,
+            level: s?.level === 'pro' || s?.level === 'confident' ? s.level : 'base',
+            whyItMatters: String(s?.whyItMatters ?? ''),
+            howToDevelop: Array.isArray(s?.howToDevelop) ? s.howToDevelop.map(String) : [],
+            practiceIdeas: Array.isArray(s?.practiceIdeas) ? s.practiceIdeas.map(String) : [],
+          });
+        }
+        next.skills = [...next.skills, ...added];
       }
     } else if (stageId === 'modules') {
       if (Array.isArray(d.modules)) {
-        next.modules = d.modules.map((m: any, mi: number): CourseModuleV2 => {
-          const skillIds = (Array.isArray(m?.skillIndexes) ? m.skillIndexes : []).map((idx: number) => next.skills[idx]?.id).filter(Boolean) as string[];
-          return {
-            id: uid('mo'),
-            title: String(m?.title ?? `Модуль ${mi + 1}`),
-            summary: typeof m?.summary === 'string' ? m.summary : '',
-            skillIds,
-            lessons: prev.modules[mi]?.lessons ?? [],
-            finalAssignment: prev.modules[mi]?.finalAssignment,
-          };
-        });
+        const existing = new Set(next.modules.map((m) => m.title.trim().toLowerCase()).filter(Boolean));
+        const added: CourseModuleV2[] = [];
+        for (const m of d.modules as any[]) {
+          const title = String(m?.title ?? '').trim();
+          if (!title || existing.has(title.toLowerCase())) continue;
+          existing.add(title.toLowerCase());
+          const skillIds = (Array.isArray(m?.skillIndexes) ? m.skillIndexes : [])
+            .map((idx: number) => next.skills[idx]?.id)
+            .filter(Boolean) as string[];
+          added.push({ id: uid('mo'), title, summary: typeof m?.summary === 'string' ? m.summary : '', skillIds, lessons: [], finalAssignment: undefined });
+        }
+        next.modules = [...next.modules, ...added];
       }
     } else if (stageId === 'lessons' && moduleIndex !== undefined) {
       if (Array.isArray(d.lessons)) {
-        next.modules = next.modules.map((m, mi) =>
-          mi !== moduleIndex
-            ? m
-            : {
-                ...m,
-                lessons: d.lessons.map((l: any): CourseLessonV2 => ({
-                  id: uid('le'),
-                  title: String(l?.title ?? ''),
-                  goal: typeof l?.goal === 'string' ? l.goal : '',
-                  description: typeof l?.description === 'string' ? l.description : '',
-                  topics: Array.isArray(l?.topics) ? l.topics.map(String) : [],
-                  photoUrls: [],
-                })),
-              }
-        );
+        next.modules = next.modules.map((m, mi) => {
+          if (mi !== moduleIndex) return m;
+          const existing = new Set(m.lessons.map((l) => l.title.trim().toLowerCase()).filter(Boolean));
+          const added: CourseLessonV2[] = [];
+          for (const l of d.lessons as any[]) {
+            const title = String(l?.title ?? '').trim();
+            if (!title || existing.has(title.toLowerCase())) continue;
+            existing.add(title.toLowerCase());
+            added.push({
+              id: uid('le'),
+              title,
+              goal: typeof l?.goal === 'string' ? l.goal : '',
+              description: typeof l?.description === 'string' ? l.description : '',
+              topics: Array.isArray(l?.topics) ? l.topics.map(String) : [],
+              photoUrls: [],
+            });
+          }
+          return { ...m, lessons: [...m.lessons, ...added] };
+        });
       }
     } else if (stageId === 'practice' && moduleIndex !== undefined) {
       const mapAssignment = (a: any): CourseAssignment => ({
@@ -198,6 +222,7 @@ export const CourseWizardView: React.FC<{
         let lessons = m.lessons;
         if (Array.isArray(d.assignments)) {
           lessons = lessons.map((l, li) => {
+            if (l.assignment) return l;
             const entry = (d.assignments as any[]).find((x: any) => Number(x?.lessonIndex) === li);
             return entry ? { ...l, assignment: mapAssignment(entry.assignment) } : l;
           });
@@ -205,7 +230,7 @@ export const CourseWizardView: React.FC<{
         return {
           ...m,
           lessons,
-          finalAssignment: d.finalAssignment ? mapAssignment(d.finalAssignment) : m.finalAssignment,
+          finalAssignment: m.finalAssignment ?? (d.finalAssignment ? mapAssignment(d.finalAssignment) : undefined),
         };
       });
     }
@@ -358,121 +383,134 @@ export const CourseWizardView: React.FC<{
               <input value={context.audience} onChange={(e) => setContext((c) => ({ ...c, audience: e.target.value }))} placeholder="Для кого (напр. майстри-початківці)" className={inputCls} />
             </div>
             <input value={context.level} onChange={(e) => setContext((c) => ({ ...c, level: e.target.value }))} placeholder="Рівень входу" className={inputCls} />
-            {generated.theme && (
-              <div className="space-y-2 p-3 rounded-xl bg-slate-950/60 border border-slate-800">
-                <input value={course.title} onChange={(e) => patch({ title: e.target.value })} placeholder="Назва курсу" className={inputCls + ' font-bold'} />
-                <input value={course.subtitle ?? ''} onChange={(e) => patch({ subtitle: e.target.value })} placeholder="Підзаголовок" className={inputCls} />
-                <div>
-                  <span className="text-[11px] text-slate-400 font-semibold">Аудиторія (по одному на рядок)</span>
-                  <textarea value={course.audience.join('\n')} onChange={(e) => patch({ audience: e.target.value.split('\n') })} rows={4} className={areaCls + ' mt-1'} />
-                </div>
+            <div className="space-y-2 p-3 rounded-xl bg-slate-950/60 border border-slate-800">
+              <input value={course.title} onChange={(e) => patch({ title: e.target.value })} placeholder="Назва курсу (свій текст — за основу)" className={inputCls + ' font-bold'} />
+              <input value={course.subtitle ?? ''} onChange={(e) => patch({ subtitle: e.target.value })} placeholder="Підзаголовок" className={inputCls} />
+              <div>
+                <span className="text-[11px] text-slate-400 font-semibold">Аудиторія (по одному на рядок)</span>
+                <textarea value={course.audience.join('\n')} onChange={(e) => patch({ audience: e.target.value.split('\n') })} rows={4} className={areaCls + ' mt-1'} />
               </div>
-            )}
+            </div>
           </div>
         )}
 
         {/* ---------- Крок 2: результати ---------- */}
         {stage === 'outcomes' && (
           <div className="space-y-3">
-            {generated.outcomes ? (
-              <>
-                <div>
-                  <span className="text-[11px] text-slate-400 font-semibold">Результати навчання</span>
-                  <textarea value={course.outcomes.join('\n')} onChange={(e) => patch({ outcomes: e.target.value.split('\n') })} rows={5} className={areaCls + ' mt-1'} />
-                </div>
-                <div>
-                  <span className="text-[11px] text-slate-400 font-semibold">Три вигоди на картку</span>
-                  {course.highlights.map((h, i) => (
-                    <input
-                      key={i}
-                      value={h}
-                      onChange={(e) => {
-                        const highlights = [...course.highlights];
-                        highlights[i] = e.target.value;
-                        patch({ highlights });
-                      }}
-                      placeholder={`Вигода ${i + 1}`}
-                      className={inputCls + ' mt-1'}
-                    />
-                  ))}
-                </div>
-              </>
-            ) : (
-              <p className="text-xs text-slate-500">Натисніть «Запропонувати», щоб отримати результати навчання та вигоди.</p>
-            )}
+            <div>
+              <span className="text-[11px] text-slate-400 font-semibold">Результати навчання (свій текст — за основу)</span>
+              <textarea value={course.outcomes.join('\n')} onChange={(e) => patch({ outcomes: e.target.value.split('\n') })} rows={5} className={areaCls + ' mt-1'} />
+            </div>
+            <div>
+              <span className="text-[11px] text-slate-400 font-semibold">Три вигоди на картку</span>
+              {course.highlights.map((h, i) => (
+                <input
+                  key={i}
+                  value={h}
+                  onChange={(e) => {
+                    const highlights = [...course.highlights];
+                    highlights[i] = e.target.value;
+                    patch({ highlights });
+                  }}
+                  placeholder={`Вигода ${i + 1}`}
+                  className={inputCls + ' mt-1'}
+                />
+              ))}
+            </div>
           </div>
         )}
 
         {/* ---------- Крок 3: навички ---------- */}
         {stage === 'skills' && (
           <div className="space-y-3">
-            {course.skills.length === 0 ? (
-              <p className="text-xs text-slate-500">Натисніть «Запропонувати», щоб отримати предметні навички курсу.</p>
-            ) : (
-              course.skills.map((s, i) => (
-                <div key={s.id} className="space-y-2 p-3 rounded-xl bg-slate-950/60 border border-slate-800">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono text-slate-500">{i + 1}.</span>
-                    <input
-                      value={s.name}
-                      onChange={(e) => patch({ skills: course.skills.map((x) => (x.id === s.id ? { ...x, name: e.target.value } : x)) })}
-                      className={inputCls + ' flex-1 font-bold'}
-                    />
-                    <select
-                      value={s.level}
-                      onChange={(e) => patch({ skills: course.skills.map((x) => (x.id === s.id ? { ...x, level: e.target.value as CourseSkillV2['level'] } : x)) })}
-                      className={inputCls + ' w-28'}
-                    >
-                      <option value="base">Базова</option>
-                      <option value="confident">Впевнена</option>
-                      <option value="pro">Pro</option>
-                    </select>
-                  </div>
-                  <input value={s.whyItMatters} onChange={(e) => patch({ skills: course.skills.map((x) => (x.id === s.id ? { ...x, whyItMatters: e.target.value } : x)) })} placeholder="Навіщо в ремеслі" className={inputCls} />
+            {course.skills.map((s, i) => (
+              <div key={s.id} className="space-y-2 p-3 rounded-xl bg-slate-950/60 border border-slate-800">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono text-slate-500">{i + 1}.</span>
+                  <input
+                    value={s.name}
+                    onChange={(e) => patch({ skills: course.skills.map((x) => (x.id === s.id ? { ...x, name: e.target.value } : x)) })}
+                    placeholder="Назва навички"
+                    className={inputCls + ' flex-1 font-bold'}
+                  />
+                  <select
+                    value={s.level}
+                    onChange={(e) => patch({ skills: course.skills.map((x) => (x.id === s.id ? { ...x, level: e.target.value as CourseSkillV2['level'] } : x)) })}
+                    className={inputCls + ' w-28'}
+                  >
+                    <option value="base">Базова</option>
+                    <option value="confident">Впевнена</option>
+                    <option value="pro">Pro</option>
+                  </select>
+                  <button
+                    onClick={() => patch({ skills: course.skills.filter((x) => x.id !== s.id) })}
+                    className="p-1.5 text-slate-500 hover:text-rose-300 transition-colors"
+                    title="Видалити"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
-              ))
-            )}
+                <input value={s.whyItMatters} onChange={(e) => patch({ skills: course.skills.map((x) => (x.id === s.id ? { ...x, whyItMatters: e.target.value } : x)) })} placeholder="Навіщо в ремеслі" className={inputCls} />
+              </div>
+            ))}
+            <button
+              onClick={() => patch({ skills: [...course.skills, { id: uid('sk'), name: '', level: 'base', whyItMatters: '', howToDevelop: [], practiceIdeas: [] }] })}
+              className="w-full py-2 rounded-xl border border-dashed border-slate-700 text-slate-400 hover:text-amber-300 hover:border-amber-400/40 text-xs font-semibold transition-colors"
+            >
+              + Додати навичку вручну
+            </button>
           </div>
         )}
 
         {/* ---------- Крок 4: модулі ---------- */}
         {stage === 'modules' && (
           <div className="space-y-2">
-            {course.modules.length === 0 ? (
-              <p className="text-xs text-slate-500">Натисніть «Запропонувати», щоб отримати модулі навчального шляху.</p>
-            ) : (
-              course.modules.map((m, i) => (
-                <div key={m.id} className="space-y-1.5 p-3 rounded-xl bg-slate-950/60 border border-slate-800">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono text-slate-500">{i + 1}.</span>
-                    <input
-                      value={m.title}
-                      onChange={(e) => patch({ modules: course.modules.map((x) => (x.id === m.id ? { ...x, title: e.target.value } : x)) })}
-                      className={inputCls + ' flex-1 font-bold'}
-                    />
-                  </div>
-                  <textarea
-                    value={m.summary ?? ''}
-                    onChange={(e) => patch({ modules: course.modules.map((x) => (x.id === m.id ? { ...x, summary: e.target.value } : x)) })}
-                    rows={2}
-                    placeholder="Опис модуля"
-                    className={areaCls}
+            {course.modules.map((m, i) => (
+              <div key={m.id} className="space-y-1.5 p-3 rounded-xl bg-slate-950/60 border border-slate-800">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono text-slate-500">{i + 1}.</span>
+                  <input
+                    value={m.title}
+                    onChange={(e) => patch({ modules: course.modules.map((x) => (x.id === m.id ? { ...x, title: e.target.value } : x)) })}
+                    placeholder="Назва модуля"
+                    className={inputCls + ' flex-1 font-bold'}
                   />
+                  <button
+                    onClick={() => patch({ modules: course.modules.filter((x) => x.id !== m.id) })}
+                    className="p-1.5 text-slate-500 hover:text-rose-300 transition-colors"
+                    title="Видалити"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
-              ))
-            )}
+                <textarea
+                  value={m.summary ?? ''}
+                  onChange={(e) => patch({ modules: course.modules.map((x) => (x.id === m.id ? { ...x, summary: e.target.value } : x)) })}
+                  rows={2}
+                  placeholder="Опис модуля"
+                  className={areaCls}
+                />
+              </div>
+            ))}
+            <button
+              onClick={() => patch({ modules: [...course.modules, { id: uid('mo'), title: '', summary: '', skillIds: [], lessons: [] }] })}
+              className="w-full py-2 rounded-xl border border-dashed border-slate-700 text-slate-400 hover:text-amber-300 hover:border-amber-400/40 text-xs font-semibold transition-colors"
+            >
+              + Додати модуль вручну
+            </button>
           </div>
         )}
 
         {/* ---------- Крок 5: уроки ---------- */}
         {stage === 'lessons' && (
           <div className="space-y-3">
-            {course.modules.length === 0 || course.modules.every((m) => m.lessons.length === 0) ? (
-              <p className="text-xs text-slate-500">Спершу згенеруйте модулі (крок 4). Натисніть «Запропонувати» для уроків.</p>
+            {course.modules.length === 0 ? (
+              <p className="text-xs text-slate-500">Спершу створіть модулі (крок 4, вручну або через «Запропонувати»).</p>
             ) : (
               course.modules.map((m, mi) => (
                 <div key={m.id} className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
-                  <div className="text-xs font-bold text-slate-200 mb-2">{mi + 1}. {m.title}</div>
+                  <div className="text-xs font-bold text-slate-200 mb-2">{mi + 1}. {m.title || 'Без назви'}</div>
+                  {m.lessons.length === 0 && <div className="text-[11px] text-slate-500 mb-1.5">Уроків поки немає — натисніть «Запропонувати».</div>}
                   <div className="space-y-2">
                     {m.lessons.map((l, li) => (
                       <div key={l.id} className="space-y-1.5 p-2.5 rounded-lg bg-slate-900/70 border border-slate-800">

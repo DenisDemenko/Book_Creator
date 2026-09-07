@@ -31,8 +31,15 @@ export function courseStagePrompt(
   context: Record<string, string>,
   moduleIndex?: number
 ): { system: string; prompt: string } {
-  const title = course.title || 'новий курс';
+  const craft = context.craft?.trim() || '';
+  const titleBase = course.title?.trim() || craft || 'новий курс';
+  const title = titleBase;
   const subtitle = course.subtitle || '';
+  const contextLine = [
+    craft ? `Ремесло: ${craft}.` : '',
+    context.audience?.trim() ? `Для кого: ${context.audience.trim()}.` : '',
+    context.level?.trim() ? `Рівень входу: ${context.level.trim()}.` : '',
+  ].filter(Boolean).join(' ');
 
   switch (stage) {
     case 'theme': {
@@ -53,6 +60,7 @@ export function courseStagePrompt(
         system: SYSTEM,
         prompt: [
           `Курс «${title}»${subtitle ? ` — ${subtitle}` : ''}.`,
+          contextLine,
           `Сформулюй 4-6 результатів навчання (що людина ВМІТИМЕ наприкінці, дієслова дії)`,
           `і рівно три короткі вигоди для картки курсу.`,
           `Дай JSON: {"outcomes":["..."],"highlights":["...","...","..."]}.`,
