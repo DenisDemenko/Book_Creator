@@ -37,7 +37,12 @@ function getTransporter() {
       host: mailConfig.host,
       port: mailConfig.port,
       secure: mailConfig.secure,
-      auth: { user: mailConfig.user, pass: mailConfig.pass },
+      auth: {
+        user: mailConfig.user.trim(),
+        // Пароль додатка Gmail часто копіюють у вигляді «aaaa bbbb cccc dddd» —
+        // пробіли тут зайві, Gmail очікує 16 символів підряд.
+        pass: mailConfig.pass.replace(/\s+/g, ''),
+      },
     });
   }
   return transporter;
