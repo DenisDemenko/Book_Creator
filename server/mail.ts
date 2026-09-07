@@ -15,6 +15,7 @@
  */
 
 import nodemailer from 'nodemailer';
+import { promises as dnsPromises } from 'node:dns';
 
 export const mailConfig = {
   host: process.env.SMTP_HOST || '',
@@ -29,13 +30,34 @@ export const mailConfig = {
 };
 
 let transporter: ReturnType<typeof nodemailer.createTransport> | null = null;
+let transporterHost = '';
 
-function getTransporter() {
+/**
+ * Резолвить SMTP-хост лише в IPv4.
+ *
+ * Чому це критично: контейнер Railway не має IPv6-маршруту, і DNS для
+ * smtp.gmail.com повертає AAAA першим. nodemailer пробує IPv6 і падає з
+ * «connect ENETUNREACH 2a00:...:465», не повертаючись до IPv4. Тому адресу
+ * A-запису отримуємо самі й передаємо як host, а hostname лишаємо в
+ * servername для TLS/SNI (Gmail віддає сертифікат саме на smtp.gmail.com).
+ */
+async function resolveSmtpHost(host: string): Promise<string> {
+  try {
+    const addresses = await dnsPromises.resolve4(host);
+    if (addresses.length > 0) return addresses[0];
+  } catch {
+    // DNS не відповів — пробуємо з оригінальним hostname.
+  }
+  return host;
+}
+
+function getTransporter(host: string) {
   if (!mailConfig.enabled) return null;
-  if (!transporter) {
+  if (!transporter || transporterHost !== host) {
     transporter = nodemailer.createTransport({
-      host: mailConfig.host,
+      host,
       port: mailConfig.port,
+      tls: { servername: mailConfig.host },
       secure: mailConfig.secure,
       // Без таймаутів з'єднання, яке «не відповідає», крутить спінер назавжди.
       // Ліміти свідомо малі: проксі перед студією (Vercel/Cloudflare) може
@@ -50,6 +72,7 @@ function getTransporter() {
         pass: mailConfig.pass.replace(/\s+/g, ''),
       },
     });
+    transporterHost = host;
   }
   return transporter;
 }
@@ -67,7 +90,8 @@ export interface SendMailInput {
  * виклик не падає, а мусить запропонувати запасний варіант (посилання).
  */
 export async function sendMail(input: SendMailInput): Promise<{ ok: boolean; error?: string }> {
-  const tx = getTransporter();
+  const host = await resolveSmtpHost(mailConfig.host);
+  const tx = getTransporter(host);
   if (!tx) {
     console.warn(
       `[mail] SMTP не налаштовано (SMTP_HOST/SMTP_USER/SMTP_PASS) — лист до ${input.to} не надіслано. ` +
