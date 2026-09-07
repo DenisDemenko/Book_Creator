@@ -5,6 +5,7 @@ import {
   ArrowUp,
   ArrowDown,
   Save,
+  Store,
   Check,
   Loader2,
   Wand2,
@@ -224,6 +225,8 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void }> = ({ onOp
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selection, setSelection] = useState<{ type: 'course' | 'skill' | 'module' | 'lesson'; skillId?: string; moduleId?: string; lessonId?: string }>({ type: 'course' });
 
@@ -300,6 +303,50 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void }> = ({ onOp
       setError((e as Error).message);
     } finally {
       setSaving(false);
+    }
+  }, [course]);
+
+  const publishCourse = useCallback(async () => {
+    if (!course) return;
+    setPublishing(true);
+    setError(null);
+    setSubmitted(false);
+    try {
+      // Спершу зберігаємо, щоб на модерацію поїхав останній стан курсу.
+      const saved = await api<{ course: CourseV2 }>(`/api/courses/${course.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(course),
+      });
+      setCourse(saved.course);
+      setDirty(false);
+      setSavedAt(new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }));
+
+      const res = await fetch(`/api/courses/${course.id}/publish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({}),
+      });
+      const text = await res.text();
+      let body: { submitted?: boolean; error?: string; problems?: string[] } = {};
+      try {
+        body = JSON.parse(text) as typeof body;
+      } catch {
+        body = {};
+      }
+      if (!res.ok) {
+        const problems = Array.isArray(body.problems) ? body.problems : [];
+        throw new Error(
+          problems.length
+            ? `${body.error || 'Курс не готовий до публікації'}: ${problems.join('; ')}`
+            : body.error || `Помилка ${res.status}`
+        );
+      }
+      setSubmitted(true);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setPublishing(false);
     }
   }, [course]);
 
@@ -518,6 +565,19 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void }> = ({ onOp
           {saving ? 'Збереження…' : dirty ? 'Зберегти' : savedAt ? `Збережено ${savedAt}` : 'Збережено'}
         </button>
         <button
+          onClick={() => void publishCourse()}
+          disabled={publishing || saving}
+          className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+            publishing || saving
+              ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+              : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+          }`}
+          title="Надіслати курс на модерацію — адміністратор погодить публікацію у вітрину"
+        >
+          {publishing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Store className="w-3.5 h-3.5" />}
+          {publishing ? 'Публікація…' : 'Опублікувати'}
+        </button>
+        <button
           onClick={() => void deleteCourse()}
           className="p-2 rounded-xl bg-slate-800 hover:bg-rose-500/20 border border-slate-700 hover:border-rose-500/40 text-slate-400 hover:text-rose-300 transition-all"
           title="Видалити курс"
@@ -528,6 +588,16 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void }> = ({ onOp
 
       {error && (
         <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/40 text-rose-200 text-xs">{error}</div>
+      )}
+
+      {submitted && (
+        <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/40 text-amber-200 text-xs">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>
+            Курс надіслано на модерацію. Адміністратор має погодити публікацію у вітрину —
+            після цього курс зʼявиться в каталозі.
+          </span>
+        </div>
       )}
 
       <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[280px_1fr_260px] gap-3">

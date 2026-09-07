@@ -588,6 +588,22 @@ CREATE TABLE IF NOT EXISTS courses (
 );
 CREATE INDEX IF NOT EXISTS idx_courses_owner ON courses(owner_id, updated_at DESC);
 
+-- Черга модерації публікацій у вітрину. Автор подає готовий твір
+-- (книгу/курс/інструкцію/гру), адміністратор погоджує або відхиляє —
+-- і лише після погодження твір стає товаром у маркетплейсі.
+CREATE TABLE IF NOT EXISTS moderation (
+  id           TEXT PRIMARY KEY,
+  item_type    TEXT NOT NULL,                   -- book | course | instruction | game
+  item_id      TEXT NOT NULL,                   -- id у Студії (book.id / course.id)
+  title        TEXT NOT NULL,
+  author_id    TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'pending', -- pending | approved | rejected
+  reason       TEXT,
+  created_at   TEXT NOT NULL,
+  decided_at   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_moderation_status ON moderation(status, created_at);
+
 `;
 
 /**

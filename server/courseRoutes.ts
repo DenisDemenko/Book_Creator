@@ -10,6 +10,7 @@
 
 import type { Express } from 'express';
 import { requireAuth, requirePermission } from './auth';
+import { submitForModeration } from './moderationStore';
 import {
   createCourse,
   deleteCourse,
@@ -24,6 +25,26 @@ const OWNER_ERROR = 'Курс не знайдено.';
 
 function canManage(principal: { id: string | null; role: string }, course: Course): boolean {
   return principal.role === 'admin' || course.ownerId === principal.id;
+}
+
+// Server-side gate before a course reaches the storefront. A subset of the
+// editor's readiness checklist: the essentials a catalog card needs, without
+// the per-lesson polish checks the UI still guides the author on.
+function publishProblems(course: Course): string[] {
+  const problems: string[] = [];
+  if (!course.title.trim() || course.title === 'Новий курс') problems.push('Курс без назви.');
+  if (!course.subtitle?.trim()) problems.push('Немає підзаголовка.');
+  if (course.audience.filter(Boolean).length === 0) problems.push('Не описана аудиторія.');
+  if (course.outcomes.filter(Boolean).length === 0) problems.push('Немає результатів навчання.');
+  if (course.highlights.filter(Boolean).length < 3) problems.push('Менше трьох вигод на картку.');
+  if (course.skills.length === 0) problems.push('Немає навичок курсу.');
+  if (course.modules.length === 0) problems.push('Немає жодного модуля.');
+  course.modules.forEach((m, i) => {
+    const n = i + 1;
+    if (!m.title.trim()) problems.push(`Модуль ${n}: без назви.`);
+    if (m.lessons.length === 0) problems.push(`Модуль ${n}: жодного уроку.`);
+  });
+  return problems;
 }
 
 export function registerCourseRoutes(app: Express): void {
@@ -71,6 +92,36 @@ export function registerCourseRoutes(app: Express): void {
       const course = updateCourse(req.params.id, req.body || {});
       if (!course) return res.status(404).json({ error: OWNER_ERROR });
       res.json({ course });
+    } catch (err) {
+      res.status(503).json({ error: String((err as Error).message) });
+    }
+  });
+
+  /**
+   * Подання курсу на модерацію. Курс у вітрину НЕ публікується одразу —
+   * він потрапляє в чергу, і адміністратор погоджує або відхиляє його
+   * в розділі «Міст до вітрини → Модерація».
+   */
+  app.post('/api/courses/:id/publish', requireAuth, requirePermission('canAuthorCourses'), async (req, res) => {
+    try {
+      const course = getCourse(req.params.id);
+      if (!course || !canManage(req.principal!, course)) {
+        return res.status(404).json({ error: OWNER_ERROR });
+      }
+
+      const problems = publishProblems(course);
+      if (problems.length > 0) {
+        return res.status(400).json({ error: 'Курс не готовий до публікації', problems });
+      }
+
+      const moderation = submitForModeration({
+        itemType: 'course',
+        itemId: course.id,
+        title: course.title,
+        authorId: course.ownerId,
+      });
+
+      res.json({ submitted: true, moderation });
     } catch (err) {
       res.status(503).json({ error: String((err as Error).message) });
     }
