@@ -136,7 +136,10 @@ export const CollaborationDrawer: React.FC<CollaborationDrawerProps> = ({
 
   const handleSendInvite = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inviteEmail.trim()) return;
+    if (!inviteEmail.trim()) {
+      setInviteNotice({ kind: 'error', text: t('collaborationDrawer.coworkEmailRequired') });
+      return;
+    }
     setInviteSending(true);
     setInviteNotice(null);
     try {
@@ -417,7 +420,7 @@ export const CollaborationDrawer: React.FC<CollaborationDrawerProps> = ({
                 </div>
                 <input
                   type="email"
-                  required
+                  autoFocus
                   value={inviteEmail}
                   onChange={(e) => setInviteEmail(e.target.value)}
                   placeholder={t('collaborationDrawer.coworkEmailPlaceholder')}
@@ -441,7 +444,7 @@ export const CollaborationDrawer: React.FC<CollaborationDrawerProps> = ({
                 </div>
                 <button
                   type="submit"
-                  disabled={inviteSending || !inviteEmail.trim()}
+                  disabled={inviteSending}
                   className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs transition-all"
                 >
                   {inviteSending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
