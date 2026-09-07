@@ -76,7 +76,7 @@ async function assertCanManageInvites(bookId: string, principal: { id: string | 
   return { ok: true, status: 200, error: '' };
 }
 
-function inviteEmailHtml(
+export function inviteEmailHtml(
   bookTitle: string,
   roleUk: string,
   roleBlurb: string,
@@ -85,49 +85,60 @@ function inviteEmailHtml(
   link: string
 ): string {
   return `
-    <div style="font-family:Arial,Helvetica,sans-serif;background:#f1f5f9;padding:32px 16px;color:#1e293b">
-      <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0">
-        <div style="background:#0f172a;padding:20px 28px">
-          <div style="color:#f59e0b;font-size:13px;font-weight:bold;letter-spacing:2px">FUSION LAB STUDIO</div>
-          <div style="color:#94a3b8;font-size:12px;margin-top:2px">Видавнича майстерня</div>
+    <div style="font-family:Arial,Helvetica,sans-serif;background:#0b1120;padding:36px 16px;color:#e2e8f0">
+      <div style="max-width:560px;margin:0 auto;background:#0f172a;border-radius:20px;overflow:hidden;border:1px solid #1e293b">
+        <!-- Шапка-герой -->
+        <div style="padding:36px 32px 28px;background:radial-gradient(130% 150% at 15% 0%, #1e293b 0%, #0f172a 65%)">
+          <div style="color:#f59e0b;font-size:11px;font-weight:bold;letter-spacing:3px">FUSION LAB STUDIO · ВИДАВНИЧА МАЙСТЕРНЯ</div>
+          <h1 style="margin:18px 0 10px;font-size:22px;line-height:1.4;color:#f8fafc">
+            Запрошення до співпраці з письменником «${inviterName}» в маркетплейсі Fusion Lab Studio
+          </h1>
+          <p style="margin:0;font-size:14px;color:#94a3b8;line-height:1.7">
+            Вас обрано до роботи над книгою «<b style="color:#f8fafc">${bookTitle}</b>».
+          </p>
         </div>
-        <div style="padding:28px;font-size:14px;line-height:1.6">
-          <p style="margin:0 0 12px">Вітаємо!</p>
-          <p style="margin:0 0 16px">
-            <b>${inviterName}</b> запрошує вас до спільної роботи над книгою
-            «<b>${bookTitle}</b>» на платформі NOVA STUDIO.
+
+        <div style="padding:26px 32px 30px">
+          <p style="margin:0 0 18px;font-size:14px;line-height:1.7;color:#cbd5e1">
+            Це не розсилка. Автор шукає людину саме з вашими навичками, щоб довести
+            книгу до читача — і ваша роль тут не випадкова.
           </p>
 
-          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin:0 0 20px">
-            <div style="font-size:12px;color:#64748b;margin-bottom:4px">Ваша роль у цій книзі</div>
-            <div style="font-size:16px;font-weight:bold;color:#0f172a">${roleUk}</div>
-            <div style="font-size:13px;color:#475569;margin-top:6px">${roleBlurb}</div>
+          <!-- Картка ролі -->
+          <div style="background:#1e293b;border:1px solid #334155;border-left:3px solid #f59e0b;border-radius:12px;padding:16px 18px;margin:0 0 22px">
+            <div style="font-size:11px;letter-spacing:1px;color:#94a3b8;text-transform:uppercase">Ваша роль у книзі</div>
+            <div style="font-size:17px;font-weight:bold;color:#f8fafc;margin-top:5px">${roleUk}</div>
+            <div style="font-size:13px;color:#cbd5e1;margin-top:6px;line-height:1.6">${roleBlurb}</div>
           </div>
 
-          <p style="margin:0 0 12px"><b>Щоб приєднатися:</b></p>
-          <ol style="margin:0 0 20px;padding-left:20px;font-size:13px;color:#334155">
-            <li style="margin-bottom:6px">Натисніть кнопку нижче.</li>
-            <li style="margin-bottom:6px">Увійдіть або зареєструйтесь під поштою <b>${inviteeEmail}</b>.</li>
-            <li style="margin-bottom:0">У вікні «Вибір ролі входу» оберіть роль <b>${roleUk}</b> — саме її вказано в цьому листі.</li>
+          <p style="margin:0 0 10px;font-size:14px;font-weight:bold;color:#f8fafc">Щоб приєднатися:</p>
+          <ol style="margin:0 0 22px;padding-left:20px;font-size:13px;line-height:1.7;color:#cbd5e1">
+            <li style="margin-bottom:6px">Натисніть кнопку нижче й увійдіть (або зареєструйтесь) під поштою <b>${inviteeEmail}</b>.</li>
+            <li style="margin-bottom:0">У вікні «Вибір ролі входу» оберіть роль <b>${roleUk}</b> — її зафіксовано в цьому листі.</li>
           </ol>
 
-          <p style="margin:0 0 16px">
-            <a href="${link}" style="display:inline-block;background:#f59e0b;color:#0f172a;padding:12px 24px;border-radius:10px;text-decoration:none;font-weight:bold">Прийняти запрошення</a>
+          <p style="margin:0 0 18px;text-align:center">
+            <a href="${link}" style="display:inline-block;background:#f59e0b;color:#0f172a;padding:14px 30px;border-radius:12px;text-decoration:none;font-weight:bold;font-size:14px">Приєднатися до команди книги</a>
           </p>
 
-          <p style="font-size:12px;color:#64748b;margin:0">
+          <p style="font-size:12px;color:#64748b;margin:0 0 22px;text-align:center">
             Якщо кнопка не працює, скопіюйте це посилання у браузер:<br>${link}
           </p>
+
+          <p style="margin:0;font-size:12px;line-height:1.6;color:#94a3b8">
+            З повагою,<br>
+            <b style="color:#e2e8f0">команда FUSION LAB STUDIO</b>
+          </p>
         </div>
-        <div style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:16px 28px;font-size:11px;color:#94a3b8">
-          Цей лист адресований ${inviteeEmail} і дійсний лише для ролі «${roleUk}».<br>
-          FUSION LAB STUDIO · NOVA STUDIO
+
+        <div style="background:#0b1120;border-top:1px solid #1e293b;padding:14px 32px;font-size:11px;color:#64748b;line-height:1.6">
+          Лист адресований ${inviteeEmail} і дійсний лише для ролі «${roleUk}». Пересилати його іншим не можна — посилання прив'язане до адреси.
         </div>
       </div>
     </div>`;
 }
 
-function inviteEmailText(
+export function inviteEmailText(
   bookTitle: string,
   roleUk: string,
   roleBlurb: string,
@@ -138,22 +149,20 @@ function inviteEmailText(
   return [
     'FUSION LAB STUDIO · Видавнича майстерня',
     '',
-    'Вітаємо!',
+    `Запрошення до співпраці з письменником «${inviterName}» в маркетплейсі Fusion Lab Studio.`,
     '',
-    `${inviterName} запрошує вас до спільної роботи над книгою`,
-    `«${bookTitle}» на платформі NOVA STUDIO.`,
+    `Вас обрано до роботи над книгою «${bookTitle}».`,
     '',
     `Ваша роль: ${roleUk}`,
     roleBlurb,
     '',
     'Щоб приєднатися:',
-    '1. Відкрийте посилання нижче.',
-    `2. Увійдіть або зареєструйтесь під поштою ${inviteeEmail}.`,
-    `3. У вікні «Вибір ролі входу» оберіть роль «${roleUk}» — саме її вказано в цьому листі.`,
+    `1. Відкрийте посилання нижче й увійдіть (або зареєструйтесь) під поштою ${inviteeEmail}.`,
+    `2. У вікні «Вибір ролі входу» оберіть роль «${roleUk}» — її зафіксовано в цьому листі.`,
     '',
     `Посилання: ${link}`,
     '',
-    `Цей лист адресований ${inviteeEmail} і дійсний лише для ролі «${roleUk}».`,
+    `Лист адресований ${inviteeEmail} і дійсний лише для ролі «${roleUk}».`,
     '',
     'З повагою,',
     'команда FUSION LAB STUDIO',
