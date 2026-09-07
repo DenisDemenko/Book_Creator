@@ -86,8 +86,9 @@ function getTransporter(target: SmtpTarget) {
     tls: { servername: mailConfig.host },
     // Без таймаутів з'єднання, яке «не відповідає», крутить спінер назавжди.
     // Ліміти свідомо малі: проксі перед студією (Vercel/Cloudflare) може
-    // обірвати повільний запит раніше, ніж сервер встигне відповісти.
-    connectionTimeout: 8_000,
+    // обірвати повільний запит раніше, ніж сервер встигне відповісти, а
+    // фолбек-ланцюжок може містити до 3 портів на адресу.
+    connectionTimeout: 6_000,
     greetingTimeout: 6_000,
     socketTimeout: 12_000,
     auth: {
@@ -102,20 +103,26 @@ function getTransporter(target: SmtpTarget) {
 }
 
 /**
- * Список цілей для спроби підключення: кожна IPv4-адреса × порти. До кожного
- * хосту додаємо альтернативний порт: 465 (SSL) ⇄ 587 (STARTTLS). Це рятує і
- * від блокування одного з портів на платформі (Railway часто відкидає 465), і
- * від хостингів, які підтримують лише один із них — без зміни змінних.
+ * Список цілей для спроби підключення: кожна IPv4-адреса × порти. Порядок:
+ * налаштований порт → альтернативний (465 SSL ⇄ 587 STARTTLS) → 2525.
+ * Порт 2525 — штатний запасний для середовищ, де 25/465/587 закриті
+ * вихідним фаєрволом (як на Railway). Його підтримують Brevo, SendGrid та
+ * частина хостингів — тому пробуємо його останнім без зміни змінних.
  */
 function smtpTargets(hosts: string[]): SmtpTarget[] {
   const targets: SmtpTarget[] = [];
+  const seen = new Set<string>();
   for (const host of hosts) {
-    targets.push({ host, port: mailConfig.port, secure: mailConfig.secure });
-    const alternate = mailConfig.secure
-      ? { port: 587, secure: false }
-      : { port: 465, secure: true };
-    if (alternate.port !== mailConfig.port) {
-      targets.push({ host, ...alternate });
+    const candidates: Array<{ port: number; secure: boolean }> = [
+      { port: mailConfig.port, secure: mailConfig.secure },
+      mailConfig.secure ? { port: 587, secure: false } : { port: 465, secure: true },
+      { port: 2525, secure: false },
+    ];
+    for (const c of candidates) {
+      const key = `${host}:${c.port}:${c.secure}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      targets.push({ host, port: c.port, secure: c.secure });
     }
   }
   return targets;
