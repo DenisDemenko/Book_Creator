@@ -42,6 +42,7 @@ import { pricingSnapshot } from './pricing';
 import { IMAGE_ENGINES, seedreamConfig } from './imageGeneration';
 import { SEEDREAM_FAL_MODEL } from './pricing';
 import { geminiClient } from './aiCore';
+import { mailConfig } from './mail';
 import { PLANS, PLAN_ORDER, priceFor, type PlanId } from './subscriptions';
 import { platformKeyFor } from './platformKeys';
 import { paypalConfig } from './payments/paypal';
@@ -117,6 +118,17 @@ export function registerAdminRoutes(app: Express): void {
   // ---------------------------------------------------------------------
   // Користувачі
   // ---------------------------------------------------------------------
+
+  /** Стан поштового сервісу — діагностика без доступу до логів. */
+  app.get('/api/admin/mail/status', requireAdmin, (_req, res) => {
+    res.json({
+      enabled: mailConfig.enabled,
+      host: mailConfig.host || null,
+      port: mailConfig.port,
+      secure: mailConfig.secure,
+      from: mailConfig.from || null,
+    });
+  });
 
   app.get('/api/admin/users', requireAdmin, async (_req, res) => {
     const users = await listUsers();
