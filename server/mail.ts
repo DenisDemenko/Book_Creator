@@ -38,9 +38,11 @@ function getTransporter() {
       port: mailConfig.port,
       secure: mailConfig.secure,
       // Без таймаутів з'єднання, яке «не відповідає», крутить спінер назавжди.
-      connectionTimeout: 15_000,
-      greetingTimeout: 10_000,
-      socketTimeout: 25_000,
+      // Ліміти свідомо малі: проксі перед студією (Vercel/Cloudflare) може
+      // обірвати повільний запит раніше, ніж сервер встигне відповісти.
+      connectionTimeout: 8_000,
+      greetingTimeout: 6_000,
+      socketTimeout: 12_000,
       auth: {
         user: mailConfig.user.trim(),
         // Пароль додатка Gmail часто копіюють у вигляді «aaaa bbbb cccc dddd» —

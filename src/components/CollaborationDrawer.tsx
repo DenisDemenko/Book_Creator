@@ -149,7 +149,15 @@ export const CollaborationDrawer: React.FC<CollaborationDrawerProps> = ({
         credentials: 'same-origin',
         body: JSON.stringify({ bookId: book.id, bookTitle: book.title, email: inviteEmail.trim(), role: inviteRole }),
       });
-      const data = await res.json();
+      let data: any;
+      try {
+        data = await res.json();
+      } catch {
+        // Проксі обірвав запит і віддав не-JSON (502/504) — показуємо статус,
+        // а не безлику «спробуйте ще раз».
+        setInviteNotice({ kind: 'error', text: `${t('collaborationDrawer.coworkSendError')} (HTTP ${res.status})` });
+        return;
+      }
       if (!res.ok) {
         setInviteNotice({ kind: 'error', text: data?.error || t('collaborationDrawer.coworkSendError') });
         return;
