@@ -29,8 +29,13 @@ export const mailConfig = {
   },
 };
 
-let transporter: ReturnType<typeof nodemailer.createTransport> | null = null;
-let transporterHost = '';
+interface SmtpTarget {
+  host: string;
+  port: number;
+  secure: boolean;
+}
+
+const transporterCache = new Map<string, ReturnType<typeof nodemailer.createTransport>>();
 
 /**
  * Резолвить SMTP-хост лише в IPv4.
@@ -51,30 +56,48 @@ async function resolveSmtpHost(host: string): Promise<string> {
   return host;
 }
 
-function getTransporter(host: string) {
-  if (!mailConfig.enabled) return null;
-  if (!transporter || transporterHost !== host) {
-    transporter = nodemailer.createTransport({
-      host,
-      port: mailConfig.port,
-      tls: { servername: mailConfig.host },
-      secure: mailConfig.secure,
-      // Без таймаутів з'єднання, яке «не відповідає», крутить спінер назавжди.
-      // Ліміти свідомо малі: проксі перед студією (Vercel/Cloudflare) може
-      // обірвати повільний запит раніше, ніж сервер встигне відповісти.
-      connectionTimeout: 8_000,
-      greetingTimeout: 6_000,
-      socketTimeout: 12_000,
-      auth: {
-        user: mailConfig.user.trim(),
-        // Пароль додатка Gmail часто копіюють у вигляді «aaaa bbbb cccc dddd» —
-        // пробіли тут зайві, Gmail очікує 16 символів підряд.
-        pass: mailConfig.pass.replace(/\s+/g, ''),
-      },
-    });
-    transporterHost = host;
-  }
+function getTransporter(target: SmtpTarget) {
+  const key = `${target.host}:${target.port}:${target.secure ? 'ssl' : 'starttls'}`;
+  const cached = transporterCache.get(key);
+  if (cached) return cached;
+
+  const transporter = nodemailer.createTransport({
+    host: target.host,
+    port: target.port,
+    secure: target.secure,
+    // host — це вже IPv4-адреса, тож SNI/перевірка сертифіката йдуть за
+    // оригінальним hostname (smtp.gmail.com), а не за IP.
+    tls: { servername: mailConfig.host },
+    // Без таймаутів з'єднання, яке «не відповідає», крутить спінер назавжди.
+    // Ліміти свідомо малі: проксі перед студією (Vercel/Cloudflare) може
+    // обірвати повільний запит раніше, ніж сервер встигне відповісти.
+    connectionTimeout: 8_000,
+    greetingTimeout: 6_000,
+    socketTimeout: 12_000,
+    auth: {
+      user: mailConfig.user.trim(),
+      // Пароль додатка Gmail часто копіюють у вигляді «aaaa bbbb cccc dddd» —
+      // пробіли тут зайві, Gmail очікує 16 символів підряд.
+      pass: mailConfig.pass.replace(/\s+/g, ''),
+    },
+  });
+  transporterCache.set(key, transporter);
   return transporter;
+}
+
+/**
+ * Список цілей для спроби підключення. Для Gmail додаємо альтернативний порт:
+ * 465 (SSL) ⇄ 587 (STARTTLS). Railway часто відкидає вихідний 465, але 587
+ * проходить — тому фолбек рятує ситуацію без зміни змінних на сервері.
+ */
+function smtpTargets(host: string): SmtpTarget[] {
+  const primary: SmtpTarget = { host, port: mailConfig.port, secure: mailConfig.secure };
+  if (!/g(oogle)?mail\.com$/i.test(mailConfig.host)) return [primary];
+
+  const alternate: SmtpTarget = primary.secure
+    ? { host, port: 587, secure: false }
+    : { host, port: 465, secure: true };
+  return alternate.port === primary.port ? [primary] : [primary, alternate];
 }
 
 export interface SendMailInput {
@@ -90,27 +113,35 @@ export interface SendMailInput {
  * виклик не падає, а мусить запропонувати запасний варіант (посилання).
  */
 export async function sendMail(input: SendMailInput): Promise<{ ok: boolean; error?: string }> {
-  const host = await resolveSmtpHost(mailConfig.host);
-  const tx = getTransporter(host);
-  if (!tx) {
+  if (!mailConfig.enabled) {
     console.warn(
       `[mail] SMTP не налаштовано (SMTP_HOST/SMTP_USER/SMTP_PASS) — лист до ${input.to} не надіслано. ` +
         'Посилання потрібно передати отримувачу вручну.'
     );
     return { ok: false, error: 'SMTP не налаштовано' };
   }
-  try {
-    await tx.sendMail({
-      from: mailConfig.from,
-      to: input.to,
-      subject: input.subject,
-      html: input.html,
-      text: input.text,
-    });
-    return { ok: true };
-  } catch (err) {
-    const message = String((err as Error).message || err);
-    console.error('[mail] Не вдалося надіслати лист:', message);
-    return { ok: false, error: message };
+
+  const host = await resolveSmtpHost(mailConfig.host);
+  let lastError: string | undefined;
+
+  for (const target of smtpTargets(host)) {
+    try {
+      await getTransporter(target).sendMail({
+        from: mailConfig.from,
+        to: input.to,
+        subject: input.subject,
+        html: input.html,
+        text: input.text,
+      });
+      return { ok: true };
+    } catch (err) {
+      lastError = String((err as Error).message || err);
+      console.error(
+        `[mail] Не вдалося надіслати через ${target.host}:${target.port} (${target.secure ? 'SSL' : 'STARTTLS'}):`,
+        lastError
+      );
+    }
   }
+
+  return { ok: false, error: lastError };
 }
