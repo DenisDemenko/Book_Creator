@@ -4,6 +4,8 @@
  */
 
 import type { Express } from 'express';
+import net from 'node:net';
+import { promises as dnsPromises } from 'node:dns';
 import {
   StoredRole,
   listUsers,
@@ -114,6 +116,35 @@ function monthlyEquivalentUah(plan: PlanId, cycle: 'monthly' | 'annual'): number
   return cycle === 'annual' ? def.priceAnnualUah / 12 : def.priceMonthlyUah;
 }
 
+/**
+ * Проста TCP-проба з цього контейнера: резолвить хост в IPv4 і пробує
+ * з'єднатися. Показує, чи пускає платформа вихідний трафік на порт.
+ */
+function tcpProbe(host: string, port: number, timeoutMs = 5_000): Promise<{ ok: boolean; error?: string }> {
+  return (async () => {
+    let address = host;
+    try {
+      const addrs = await dnsPromises.resolve4(host);
+      if (addrs.length > 0) address = addrs[0];
+    } catch {
+      // резолвінг не вдався — пробуємо за hostname напряму
+    }
+    return new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      const socket = net.connect({ host: address, port, timeout: timeoutMs });
+      let settled = false;
+      const done = (ok: boolean, error?: string) => {
+        if (settled) return;
+        settled = true;
+        socket.destroy();
+        resolve({ ok, error });
+      };
+      socket.once('connect', () => done(true));
+      socket.once('timeout', () => done(false, 'timeout'));
+      socket.once('error', (err) => done(false, (err as Error).message || String(err)));
+    });
+  })();
+}
+
 export function registerAdminRoutes(app: Express): void {
   // ---------------------------------------------------------------------
   // Користувачі
@@ -128,6 +159,28 @@ export function registerAdminRoutes(app: Express): void {
       secure: mailConfig.secure,
       from: mailConfig.from || null,
     });
+  });
+
+  /**
+   * Жива перевірка вихідних з'єднань прямо з цього контейнера: чи може
+   * сервер достукатися до SMTP-портів. Показує істину про те, що блокує
+   * Railway (якщо блокує), без доступу до логів платформи.
+   */
+  app.get('/api/admin/mail/test', requireAdmin, async (_req, res) => {
+    const host = mailConfig.host || 'smtp.gmail.com';
+    const targets = [
+      { label: `${host}:465`, host, port: 465 },
+      { label: `${host}:587`, host, port: 587 },
+      { label: `${host}:2525`, host, port: 2525 },
+      { label: 'smtp-relay.brevo.com:2525', host: 'smtp-relay.brevo.com', port: 2525 },
+      { label: 'www.google.com:443 (еталон egress)', host: 'www.google.com', port: 443 },
+    ];
+    const results = [];
+    for (const t of targets) {
+      const started = Date.now();
+      results.push({ label: t.label, ...(await tcpProbe(t.host, t.port)), ms: Date.now() - started });
+    }
+    res.json({ results });
   });
 
   app.get('/api/admin/users', requireAdmin, async (_req, res) => {
