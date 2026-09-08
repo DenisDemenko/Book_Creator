@@ -39,6 +39,7 @@ import {
 import { NavigationTab, Book, UserRole } from '../types';
 import { canAccessTab } from '../utils/rbac';
 import { useLanguage } from '../i18n/LanguageContext';
+import { useSunAccentVars } from '../utils/sunAccent';
 import { GlowIntensityControl } from './GlowIntensityControl';
 
 interface SidebarNavProps {
@@ -206,6 +207,9 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
   onQuickAi,
 }) => {
   const { t } = useLanguage();
+  // Акцент «Сонечка»: кольоровий текст навігації слідує за вибраним
+  // кольором сонця (той самий механізм, що й у HeaderNav).
+  const sunVars = useSunAccentVars();
   const [collapsed, setCollapsed] = useState<boolean>(readInitialCollapsed);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(readInitialGroups);
 
@@ -277,16 +281,16 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
         title={t(`header.nav.${tab}`)}
         className={`w-full flex items-center gap-2.5 py-2 text-xs font-medium rounded-lg whitespace-nowrap transition-all px-3 ${
           isActive
-            ? 'badge-glass text-amber-400 font-bold shadow-[0_0_14px_-6px_rgba(245,158,11,0.5)]'
+            ? 'badge-glass [color:var(--sun-acc)] font-bold shadow-[0_0_14px_-6px_rgba(245,158,11,0.5)]'
             : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
         }`}
       >
-        <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-amber-400' : 'text-slate-400'}`} />
+        <Icon className={`w-4 h-4 shrink-0 ${isActive ? '[color:var(--sun-acc)]' : 'text-slate-400'}`} />
         <span className="flex-1 min-w-0 text-left truncate">{t(`header.nav.${tab}`)}</span>
         {item.badge !== undefined && item.badge !== null && (
           <span
             className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono leading-none shrink-0 ${
-              isActive ? 'bg-amber-400/20 text-amber-300' : 'bg-slate-800 text-slate-400'
+              isActive ? '[background-color:var(--sun-acc-20)] [color:var(--sun-soft)]' : 'bg-slate-800 text-slate-400'
             }`}
           >
             {item.badge}
@@ -307,11 +311,11 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
         title={t(`header.nav.${tab}`)}
         className={`w-full flex items-center justify-center py-2 rounded-lg transition-all ${
           isActive
-            ? 'badge-glass text-amber-400 shadow-[0_0_14px_-6px_rgba(245,158,11,0.5)]'
+            ? 'badge-glass [color:var(--sun-acc)] shadow-[0_0_14px_-6px_rgba(245,158,11,0.5)]'
             : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
         }`}
       >
-        <Icon className={`w-4 h-4 ${isActive ? 'text-amber-400' : 'text-slate-400'}`} />
+        <Icon className={`w-4 h-4 ${isActive ? '[color:var(--sun-acc)]' : 'text-slate-400'}`} />
       </button>
     );
   };
@@ -326,9 +330,9 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
       id="quick-ai-btn"
       onClick={onQuickAi}
       title={t('header.quickAiTitle')}
-      className="w-full flex items-center gap-2.5 py-2 text-xs font-medium rounded-lg whitespace-nowrap transition-all px-3 text-slate-400 hover:text-amber-300 hover:bg-white/[0.04]"
+      className="w-full flex items-center gap-2.5 py-2 text-xs font-medium rounded-lg whitespace-nowrap transition-all px-3 text-slate-400 hover:[color:var(--sun-soft)] hover:bg-white/[0.04]"
     >
-      <Sparkles className="w-4 h-4 shrink-0 text-amber-400" />
+      <Sparkles className="w-4 h-4 shrink-0 [color:var(--sun-acc)]" />
       <span className="flex-1 min-w-0 text-left truncate">{t('header.quickAi')}</span>
     </button>
   );
@@ -339,14 +343,15 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
       id="quick-ai-btn"
       onClick={onQuickAi}
       title={t('header.quickAiTitle')}
-      className="w-full flex items-center justify-center py-2 rounded-lg transition-all text-slate-400 hover:text-amber-300 hover:bg-white/[0.04]"
+      className="w-full flex items-center justify-center py-2 rounded-lg transition-all text-slate-400 hover:[color:var(--sun-soft)] hover:bg-white/[0.04]"
     >
-      <Sparkles className="w-4 h-4 text-amber-400" />
+      <Sparkles className="w-4 h-4 [color:var(--sun-acc)]" />
     </button>
   );
 
   return (
     <aside
+      style={sunVars}
       className={`sticky top-[var(--app-header-h)] shrink-0 flex flex-col h-[var(--app-sidebar-h)] bg-slate-950/75 border-r border-white/[0.06] backdrop-blur-2xl transition-[width] duration-200 ease-out ${
         collapsed ? 'w-16' : 'w-64'
       }`}
@@ -381,9 +386,9 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
                   й теж крупніша, з тим самим бурштиновим кольором, що й
                   номер, щоб пара читалась одним написом, а не двома.
                 */}
-                <span className="text-[11px] font-extrabold font-mono text-amber-400 leading-none">{group.numeral}</span>
+                <span className="text-[11px] font-extrabold font-mono [color:var(--sun-acc)] leading-none">{group.numeral}</span>
                 {!collapsed && (
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-amber-200 truncate">
+                  <span className="text-[11px] font-bold uppercase tracking-wider [color:var(--sun-soft)] truncate">
                     {t(`header.group.${group.id}`)}
                   </span>
                 )}

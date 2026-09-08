@@ -16,6 +16,11 @@ import {
   Loader2,
   Library,
   Coins,
+  Plus,
+  Trash2,
+  BookPlus,
+  X,
+  FileText,
 } from 'lucide-react';
 import type { AuthUser, Book, NavigationTab, WriterMasteryState, SkillCategory } from '../types';
 import { SKILL_CATEGORIES, SKILL_TASKS, INITIAL_MASTERY_STATE } from '../data/skillsData';
@@ -27,6 +32,12 @@ interface DashboardViewProps {
   authUser: AuthUser | null;
   totalWords: number;
   onNavigateToTab: (tab: NavigationTab) => void;
+  /** Відкрити майстер створення книги (CreateBookModal у власника, App.tsx). */
+  onOpenCreateWizard: () => void;
+  /** Створити порожню книгу «з нульової планки» й одразу відкрити редактор. */
+  onCreateBlankBook: () => void;
+  /** Видалити книгу за id (власник обробляє перемикання активної книги). */
+  onDeleteBook: (id: string) => void;
 }
 
 interface StyleStatus {
@@ -48,7 +59,15 @@ const BOOK_WORDS_MILESTONE = 100_000;
 /** Той самий localStorage-місток, яким AIStudioView повідомляє MasteryView про використання AI-редактора (Фаза 0, 0.5). */
 const LAST_AI_ANALYSIS_KEY = 'nova_last_ai_analysis';
 
-export const DashboardView: React.FC<DashboardViewProps> = ({ book, authUser, totalWords, onNavigateToTab }) => {
+export const DashboardView: React.FC<DashboardViewProps> = ({
+  book,
+  authUser,
+  totalWords,
+  onNavigateToTab,
+  onOpenCreateWizard,
+  onCreateBlankBook,
+  onDeleteBook,
+}) => {
   const { t } = useLanguage();
 
   // Стан майстерності живе лише в MasteryView (localStorage) — тут лише
@@ -124,6 +143,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ book, authUser, to
     await saveMeta(META_ACTIVE_BOOK, id);
     window.location.reload();
   };
+
+  // Модалка вибору способу створення (візард / з нульової планки) і
+  // підтвердження видалення книги.
+  const [createChooserOpen, setCreateChooserOpen] = useState(false);
+  const [bookToDelete, setBookToDelete] = useState<BookSummary | null>(null);
 
   // Персональний облік витрат токенів (Завдання 2 grill-me сесії) — та сама
   // усage_log-агрегація, що й адмінська панель, але відфільтрована сервером
@@ -367,33 +391,55 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ book, authUser, to
             <Library className="w-4 h-4 text-amber-400" />
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">{t('dashboard.myBooksHeading')}</h3>
           </div>
+
+          {/* Велика кнопка створення нової книги */}
+          <button
+            onClick={() => setCreateChooserOpen(true)}
+            className="w-full mb-3 flex items-center justify-center gap-2 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm shadow-md shadow-amber-500/20 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            <span>{t('dashboard.createBook')}</span>
+          </button>
+
           {myBooks.length === 0 ? (
             <p className="text-sm text-slate-500">{t('dashboard.myBooksEmpty')}</p>
           ) : (
             <div className="space-y-1.5 max-h-64 overflow-y-auto">
               {myBooks.map((b) => (
-                <button
+                <div
                   key={b.id}
-                  onClick={() => handleSwitchBook(b.id)}
-                  disabled={b.id === book.id}
-                  className={`w-full flex items-center justify-between gap-2 p-2.5 rounded-lg text-left transition-colors ${
+                  className={`flex items-center gap-1.5 p-2.5 rounded-lg border ${
                     b.id === book.id
-                      ? 'bg-amber-500/10 border border-amber-500/30 cursor-default'
-                      : 'bg-slate-900/60 border border-slate-800 hover:bg-slate-800'
+                      ? 'bg-amber-500/10 border-amber-500/30'
+                      : 'bg-slate-900/60 border-slate-800'
                   }`}
                 >
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-slate-100 truncate">{b.title}</div>
-                    <div className="text-[10px] text-slate-500">
-                      {b.status} · {b.updatedAt ? new Date(b.updatedAt).toLocaleDateString() : ''}
+                  <button
+                    onClick={() => handleSwitchBook(b.id)}
+                    disabled={b.id === book.id}
+                    className="flex-1 flex items-center justify-between gap-2 text-left min-w-0 disabled:cursor-default"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-slate-100 truncate">{b.title}</div>
+                      <div className="text-[10px] text-slate-500">
+                        {b.status} · {b.updatedAt ? new Date(b.updatedAt).toLocaleDateString() : ''}
+                      </div>
                     </div>
-                  </div>
-                  {b.id === book.id ? (
-                    <span className="text-[10px] font-bold text-amber-400 shrink-0">{t('dashboard.myBooksActive')}</span>
-                  ) : (
-                    <ArrowRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                  )}
-                </button>
+                    {b.id === book.id ? (
+                      <span className="text-[10px] font-bold text-amber-400 shrink-0">{t('dashboard.myBooksActive')}</span>
+                    ) : (
+                      <ArrowRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setBookToDelete(b)}
+                    className="p-1.5 rounded-md text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors shrink-0"
+                    title={t('dashboard.deleteBook')}
+                    aria-label={`${t('dashboard.deleteBook')}: ${b.title}`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               ))}
             </div>
           )}
@@ -457,6 +503,106 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ book, authUser, to
           })}
         </div>
       </div>
+
+      {/* Модалка вибору способу створення нової книги */}
+      {createChooserOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm"
+          onClick={() => setCreateChooserOpen(false)}
+        >
+          <div
+            className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-lg bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-300">
+                  <BookPlus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">{t('dashboard.createBookChooserTitle')}</h3>
+                  <p className="text-xs text-slate-400">{t('dashboard.createBookChooserDesc')}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setCreateChooserOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-5 space-y-3">
+              <button
+                onClick={() => {
+                  setCreateChooserOpen(false);
+                  onOpenCreateWizard();
+                }}
+                className="w-full text-left p-4 rounded-xl bg-slate-800/60 border border-slate-700 hover:border-amber-500/40 transition-colors"
+              >
+                <div className="flex items-center gap-2 text-amber-300 font-bold text-sm">
+                  <Wand2 className="w-4 h-4" />
+                  <span>{t('dashboard.createBookWizard')}</span>
+                </div>
+                <p className="text-xs text-slate-400 mt-1">{t('dashboard.createBookWizardDesc')}</p>
+              </button>
+              <button
+                onClick={() => {
+                  setCreateChooserOpen(false);
+                  onCreateBlankBook();
+                }}
+                className="w-full text-left p-4 rounded-xl bg-slate-800/60 border border-slate-700 hover:border-cyan-500/40 transition-colors"
+              >
+                <div className="flex items-center gap-2 text-cyan-300 font-bold text-sm">
+                  <FileText className="w-4 h-4" />
+                  <span>{t('dashboard.createBookBlank')}</span>
+                </div>
+                <p className="text-xs text-slate-400 mt-1">{t('dashboard.createBookBlankDesc')}</p>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Модалка підтвердження видалення книги */}
+      {bookToDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm"
+          onClick={() => setBookToDelete(null)}
+        >
+          <div
+            className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-5">
+              <div className="flex items-center gap-2.5 mb-3">
+                <div className="w-9 h-9 rounded-lg bg-rose-500/20 border border-rose-500/30 flex items-center justify-center text-rose-300">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <h3 className="text-base font-bold text-white">{t('dashboard.deleteBookConfirmTitle')}</h3>
+              </div>
+              <p className="text-sm text-slate-300">{t('dashboard.deleteBookConfirm')}</p>
+              <p className="text-xs text-slate-500 mt-1">{t('dashboard.deleteBookConfirmHint')}</p>
+              <div className="flex gap-2 mt-5">
+                <button
+                  onClick={() => setBookToDelete(null)}
+                  className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-colors"
+                >
+                  {t('dashboard.cancel')}
+                </button>
+                <button
+                  onClick={() => {
+                    onDeleteBook(bookToDelete.id);
+                    setBookToDelete(null);
+                  }}
+                  className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-colors"
+                >
+                  {t('dashboard.confirmDelete')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

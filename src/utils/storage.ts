@@ -394,6 +394,25 @@ export async function listBooks(): Promise<BookSummary[]> {
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
+/**
+ * Видаляє книгу разом із її знімками версій (snapshots).
+ * Активну книгу викликач перемикає сам — тут лише чисте прибирання сховища.
+ */
+export async function deleteBook(id: string): Promise<void> {
+  await ensureBackend();
+  if (usingFallback) {
+    try {
+      localStorage.removeItem(`nova_book_${id}`);
+    } catch {
+      /* ігноруємо */
+    }
+    return;
+  }
+  const snapshotIds = await listSnapshotIds(id);
+  await Promise.all(snapshotIds.map((snapshotId) => deleteSnapshotData(snapshotId)));
+  await idbDelete(STORE_BOOKS, id);
+}
+
 /** Зберігає повний зліпок стану книги окремо від самої книги. */
 export async function saveSnapshotData(
   snapshotId: string,

@@ -77,10 +77,13 @@ import {
   saveSnapshotData,
   loadSnapshotData,
   migrateFromLocalStorage,
+  deleteBook,
+  listBooks,
   StorageError,
   META_CHANGELOG,
   META_ROLE,
   META_COWORK_LOCK,
+  type BookSummary,
 } from './utils/storage';
 import { stampBookRevision, isNewerBook, describeRevisionGap } from './utils/bookVersion';
 import { otherSessionsOfSameUser } from './utils/deviceSession';
@@ -1098,6 +1101,138 @@ export default function App() {
     setCurrentTab(importedBook.chapters.length > 0 ? 'editor' : 'start');
   };
 
+  /**
+   * Нова книга «з нульової планки» — порожній аркуш без героїв і сюжету.
+   * На відміну від handleCreateNewBook (візард), тут НЕ наслідуються
+   * персонажі, сценарій, синопсис та історія демо-книги: лише одна порожня
+   * глава з одним порожнім розділом, і одразу відкривається «Книга & Текст».
+   *
+   * Рівень письменника (майстерність, XP у тренажерах і тестах) НЕ чіпаємо —
+   * це навмисно: створення книги не має обнуляти прогрес письменника.
+   */
+  const handleCreateBlankBook = () => {
+    const now = Date.now();
+    const bookId = `BK-${now.toString(36).toUpperCase()}`;
+    const title = 'Нова книга';
+    const author = 'Олександр Радченко';
+    const initialSnapshot: BookVersionSnapshot = {
+      id: `snap-init-${now}`,
+      bookId,
+      versionNumber: 'v1.0.0',
+      revisionNumber: 1,
+      timestamp: new Date().toISOString(),
+      author,
+      authorName: author,
+      authorRole: currentRole,
+      label: 'Ініціалізація та старт проекту',
+      comment: 'Порожній аркуш — книгу створено з нульової планки.',
+      note: 'Порожній аркуш — книгу створено з нульової планки.',
+      tags: ['Створення', 'З нульової планки'],
+      wordCount: 0,
+      chapterCount: 1,
+      pageCount: 1,
+    };
+    const chapterId = `chap-${now}-1`;
+    const newBook: Book = {
+      ...initialBookData,
+      id: bookId,
+      title,
+      author,
+      genre: '',
+      version: 'v1.0.0',
+      revisionNumber: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      versionHistory: [initialSnapshot],
+      synopsis: '',
+      logline: '',
+      theme: '',
+      status: 'draft',
+      characters: [],
+      heroArc: undefined,
+      mindBoard: undefined,
+      qrTags: [],
+      illustrations: [],
+      footnotes: [],
+      visualBible: { ...initialBookData.visualBible, id: `vb-${now}`, bookId },
+      chapters: [
+        {
+          id: chapterId,
+          bookId,
+          title: 'Глава 1: Новий початок',
+          order: 1,
+          sections: [
+            {
+              id: `sec-${now}-1`,
+              chapterId,
+              title: 'Пролог',
+              order: 1,
+              content: '',
+              wordCount: 0,
+              lastModified: new Date().toISOString(),
+            }
+          ]
+        }
+      ]
+    };
+
+    setBook(newBook);
+    setActiveChapterId(newBook.chapters[0]?.id || '');
+    setActiveSectionId(newBook.chapters[0]?.sections[0]?.id || '');
+    setHasUnsavedChanges(false);
+    void persistBook(newBook);
+
+    addLogEntry(
+      'Створення нової книги (з нульової планки)',
+      `Створено порожню книгу «${title}» [ID: ${bookId}]. Герої та сценарій обнулені.`,
+      'system',
+      bookId,
+      'v1.0.0',
+      currentRole
+    );
+
+    setSaveToast(`Порожню книгу [ID: ${bookId}] створено — відкрито в «Книга & Текст».`);
+    setTimeout(() => setSaveToast(null), 4000);
+    setCurrentTab('editor');
+  };
+
+  /**
+   * Видалення книги зі сховища. Якщо видалено активну книгу — перемикаємось
+   * на першу з решти; якщо книг не лишилось — створюємо порожню.
+   */
+  const handleDeleteBook = async (id: string) => {
+    try {
+      await deleteBook(id);
+    } catch (err) {
+      console.error('[storage] Помилка видалення книги', err);
+      setSaveToast('Не вдалося видалити книгу. Спробуйте ще раз.');
+      setTimeout(() => setSaveToast(null), 3500);
+      return;
+    }
+
+    if (id !== book.id) {
+      setSaveToast('Книгу видалено.');
+      setTimeout(() => setSaveToast(null), 3500);
+      return;
+    }
+
+    const remaining = await listBooks().catch(() => [] as BookSummary[]);
+    if (remaining.length > 0) {
+      const next = await loadBook(remaining[0].id);
+      if (next) {
+        setBook(next);
+        setActiveChapterId(next.chapters[0]?.id || '');
+        setActiveSectionId(next.chapters[0]?.sections[0]?.id || '');
+        setHasUnsavedChanges(false);
+        setSaveToast(`Активну книгу перемкнено на «${next.title}».`);
+        setTimeout(() => setSaveToast(null), 3500);
+        return;
+      }
+    }
+
+    handleCreateBlankBook();
+  };
+
   // Зберегти повну резервну копію поточної книги (ZIP) — пара до
   // handleImportBook, та сама роль-перевірка canImportBook.
   const handleExportBackup = async () => {
@@ -1701,6 +1836,9 @@ export default function App() {
             authUser={auth.user}
             totalWords={totalWords}
             onNavigateToTab={handleSelectTab}
+            onOpenCreateWizard={() => setIsCreateBookModalOpen(true)}
+            onCreateBlankBook={handleCreateBlankBook}
+            onDeleteBook={handleDeleteBook}
           />
         )}
 

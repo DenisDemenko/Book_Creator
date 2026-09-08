@@ -69,7 +69,44 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
   
   // Model engine
   const [selectedModel, setSelectedModel] = useState<GenerationModel>('nano-banana-2');
-  
+
+  // Доступні image-рушії (ключі вставлені адміністратором і активні).
+  // null = список ще не завантажено (показуємо всі, щоб не блимати);
+  // Set = лише ті двигуни, у яких сервер бачить ключ.
+  const [availableImageEngines, setAvailableImageEngines] = useState<Set<string> | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/ai/image-engines', { credentials: 'same-origin' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || !data?.engines) return;
+        const ids = new Set<string>(
+          (data.engines as { id: string; available: boolean }[])
+            .filter((e) => e.available)
+            .map((e) => e.id)
+        );
+        setAvailableImageEngines(ids);
+      })
+      .catch(() => {
+        /* немає мережі/ендпоінта — лишаємо null (показ усіх), не ховаємо вибір */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Якщо обрана модель стала недоступною — падаємо на першу доступну.
+  useEffect(() => {
+    if (!availableImageEngines) return;
+    if (!availableImageEngines.has(selectedModel)) {
+      const firstAvailable = modelOptions.find((m) => availableImageEngines.has(m.id));
+      if (firstAvailable) setSelectedModel(firstAvailable.id);
+    }
+    // modelOptions/selectedModel — стабільні в межах сеансу, не додаємо в deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [availableImageEngines]);
+
   // Style preset
   const [stylePreset, setStylePreset] = useState<StylePreset>('cyberpunk-photoreal');
   
@@ -295,6 +332,11 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
     },
   ];
 
+  // Лише ті моделі, для яких адміністратор вставив ключ і він активний.
+  const visibleModelOptions = availableImageEngines
+    ? modelOptions.filter((m) => availableImageEngines.has(m.id))
+    : modelOptions;
+
   const styleOptions: { id: StylePreset; label: string; icon: string }[] = [
     { id: 'cyberpunk-photoreal', label: t('generateCharacterModal.styleCyberpunk'), icon: '🏙️' },
     { id: 'cinematic', label: t('generateCharacterModal.styleCinematic'), icon: '🎬' },
@@ -494,7 +536,7 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
             </label>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {modelOptions.map((model) => {
+              {visibleModelOptions.map((model) => {
                 const isSelected = model.id === selectedModel;
                 return (
                   <div

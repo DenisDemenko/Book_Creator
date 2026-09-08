@@ -9,6 +9,7 @@ import { characterMentionKey } from './manuscriptEditor/CharacterMentionPlugin';
 import { readabilityKey } from './manuscriptEditor/ReadabilityHighlightPlugin';
 import { PAGE_FORMAT_QUICK_OPTIONS } from '../utils/pageFormats';
 import { collectBookTags, type BookTag } from '../utils/bookTags';
+import { useSunAccentVars } from '../utils/sunAccent';
 import { PageColumn } from './manuscriptEditor/PageColumn';
 import { PageRuler } from './manuscriptEditor/PageRuler';
 import { useRealBookPages } from '../utils/useRealBookPages';
@@ -130,6 +131,7 @@ import { SKILL_MARKER_BY_ID } from '../data/skillMarkers';
 import { CharacterEditModal } from './CharacterEditModal';
 import { AddParticipantsModal } from './AddParticipantsModal';
 import { GenerateCharacterModal } from './GenerateCharacterModal';
+import { HeroJourneyModal } from './HeroJourneyModal';
 import { GenerateIllustrationModal } from './GenerateIllustrationModal';
 import { DraggablePanel } from './DraggablePanel';
 import { DockedEditorPanel } from './DockedEditorPanel';
@@ -252,6 +254,9 @@ export const EditorView: React.FC<EditorViewProps> = ({
   promptGenerateTick = 0,
 }) => {
   const { t, lang: uiLang } = useLanguage();
+  // Акцент «Сонечка»: кольоровий текст тулбарів і панелей слідує за
+  // вибраним кольором сонця (той самий механізм, що й у HeaderNav).
+  const sunVars = useSunAccentVars();
   const roleInfo = getRoleInfo(currentRole);
   // Режим лише читання: бета-рідер, гість, а також ролі без canEditContent
   // (дизайнер, перекладач, видавець) — текст видно, редагування вимкнено.
@@ -366,6 +371,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
   const [showAddParticipantsModal, setShowAddParticipantsModal] = useState<boolean>(false);
   const [showGenerateHeroModal, setShowGenerateHeroModal] = useState<boolean>(false);
   const [heroToEnhance, setHeroToEnhance] = useState<Character | null>(null);
+  const [showHeroJourney, setShowHeroJourney] = useState<boolean>(false);
 
   // Quick Footnote / QR dialog state
   const [showFootnoteModal, setShowFootnoteModal] = useState<boolean>(false);
@@ -2001,6 +2007,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
    */
   const renderFormatToolbar = (isEn: boolean) => (
     <div
+      style={sunVars}
       className={`flex items-center gap-1.5 shrink-0 flex-wrap transition-opacity duration-300 ${
         isFocusWindow && toolbarHidden ? 'opacity-0 pointer-events-none' : 'opacity-100'
       }`}
@@ -2050,7 +2057,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
             ))}
           </optgroup>
         )}
-        <option value={ADD_FONT_OPTION} className="bg-slate-900 text-amber-300 text-base">
+        <option value={ADD_FONT_OPTION} className="bg-slate-900 [color:var(--sun-soft)] text-base">
           ⬇ {t('editor.fontAddOption')}
         </option>
       </select>
@@ -2112,36 +2119,46 @@ export const EditorView: React.FC<EditorViewProps> = ({
           розділу «Книга і текст», а не лише на одну кнопку. Моделі без
           ключа показані, але недоступні: письменник має бачити, ЩО саме
           можна підключити, а не порожній список. */}
-      <select
-        value={effectiveAiModelId}
-        onChange={(e) => {
-          const value = e.target.value;
-          const label = aiCoreModels.find((m) => m.id === value)?.label || value;
-          onUpdateBook(
-            { ...book, preferredAiModelId: value },
-            'Рушій AI книги',
-            `Рушій AI для книги змінено на «${label}».`
-          );
-        }}
-        disabled={isReader || aiCoreModels.length === 0}
-        className="px-2.5 py-1.5 rounded-md bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed min-w-[150px]"
-        title={t('editor.aiModelSelectTitle')}
-        aria-label={t('editor.aiModelSelectTitle')}
-      >
-        <option value="" className="bg-slate-900 text-slate-100">
-          {aiCoreModels.length === 0 ? t('editor.aiModelSelectEmpty') : t('editor.aiModelSelectAuto')}
-        </option>
-        {aiCoreModels.map((m) => (
-          <option
-            key={m.id}
-            value={m.id}
-            disabled={!m.available}
-            className="bg-slate-900 text-slate-100"
-          >
-            {m.available ? m.label : `${m.label} — ${t('editor.aiModelNoKey')}`}
+      <div className="flex flex-col gap-1">
+        <span className="text-[10px] text-slate-400 font-medium leading-tight">
+          {t('editor.aiModelSelectedLabel')}:{' '}
+          <span className="text-slate-200 font-semibold">
+            {effectiveAiModelId
+              ? aiCoreModels.find((m) => m.id === effectiveAiModelId)?.label || effectiveAiModelId
+              : t('editor.aiModelSelectAuto')}
+          </span>
+        </span>
+        <select
+          value={effectiveAiModelId}
+          onChange={(e) => {
+            const value = e.target.value;
+            const label = aiCoreModels.find((m) => m.id === value)?.label || value;
+            onUpdateBook(
+              { ...book, preferredAiModelId: value },
+              'Рушій AI книги',
+              `Рушій AI для книги змінено на «${label}».`
+            );
+          }}
+          disabled={isReader || aiCoreModels.length === 0}
+          className="px-2.5 py-1.5 rounded-md bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed min-w-[150px]"
+          title={t('editor.aiModelSelectTitle')}
+          aria-label={t('editor.aiModelSelectTitle')}
+        >
+          <option value="" className="bg-slate-900 text-slate-100">
+            {aiCoreModels.length === 0 ? t('editor.aiModelSelectEmpty') : t('editor.aiModelSelectAuto')}
           </option>
-        ))}
-      </select>
+          {aiCoreModels.map((m) => (
+            <option
+              key={m.id}
+              value={m.id}
+              disabled={!m.available}
+              className="bg-slate-900 text-slate-100"
+            >
+              {m.available ? m.label : `${m.label} — ${t('editor.aiModelNoKey')}`}
+            </option>
+          ))}
+        </select>
+      </div>
 
       {(() => {
         const selectedWrap = isEn ? enSelectedImageWrap : uaSelectedImageWrap;
@@ -2159,7 +2176,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
         const wrapBtnClass = (mode: string) =>
           `p-1 rounded-md transition-colors ${
             selectedWrap === mode
-              ? 'bg-amber-500 text-slate-950'
+              ? '[background-color:var(--sun-acc)] text-slate-950'
               : 'text-slate-300 hover:bg-slate-800 hover:text-white'
           }`;
         return (
@@ -2188,7 +2205,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => setFocusParagraphMode((v) => !v)}
         className={`p-1 rounded-md ml-1 transition-colors ${
-          focusParagraphMode ? 'bg-amber-500 text-slate-950' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+          focusParagraphMode ? '[background-color:var(--sun-acc)] text-slate-950' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
         }`}
         title={t('editor.focusParagraphTitle')}
         aria-label={t('editor.focusParagraphTitle')}
@@ -2203,7 +2220,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => setReadabilityHighlightMode((v) => !v)}
         className={`p-1 rounded-md ml-1 transition-colors ${
-          readabilityHighlightMode ? 'bg-amber-500 text-slate-950' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+          readabilityHighlightMode ? '[background-color:var(--sun-acc)] text-slate-950' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
         }`}
         title={t('editor.readabilityHighlightTitle')}
         aria-label={t('editor.readabilityHighlightTitle')}
@@ -2238,7 +2255,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 disabled={narrationBusy !== null}
                 className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-50"
               >
-                <Volume2 className="w-3 h-3 text-sky-400/70" />
+                <Volume2 className="w-3 h-3 [color:var(--sun-acc-70)]" />
                 {lang === 'uk' ? t('editor.narrationLangUk') : t('editor.narrationLangEn')}
               </button>
             ))}
@@ -2298,7 +2315,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => setIsFocusWindow((v) => !v)}
         className={`p-1 rounded-md ml-1 transition-colors ${
-          isFocusWindow ? 'bg-amber-500 text-slate-950' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+          isFocusWindow ? '[background-color:var(--sun-acc)] text-slate-950' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
         }`}
         title={isFocusWindow ? t('editor.fullscreenExitTitle') : t('editor.fullscreenEnterTitle')}
         aria-label={isFocusWindow ? t('editor.fullscreenExitTitle') : t('editor.fullscreenEnterTitle')}
@@ -3060,7 +3077,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
   // Role badges helper
   const roleBadges: Record<Character['role'], { label: string; color: string }> = {
-    protagonist: { label: t('editor.roleProtagonist'), color: 'bg-amber-500/20 text-amber-300 border-amber-500/40' },
+    protagonist: { label: t('editor.roleProtagonist'), color: '[background-color:var(--sun-acc-20)] [color:var(--sun-soft)] [border-color:var(--sun-acc-40)]' },
     antagonist: { label: t('editor.roleAntagonist'), color: 'bg-rose-500/20 text-rose-300 border-rose-500/40' },
     deuteragonist: { label: t('editor.roleDeuteragonist'), color: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' },
     mentor: { label: t('editor.roleMentor'), color: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40' },
@@ -3154,7 +3171,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
         {castMismatch.length > 0 && !isReader && (
           <button
             onClick={syncCastFromScenes}
-            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] font-bold hover:bg-amber-500/30 transition-all"
+            className="flex items-center gap-1 px-2 py-1 rounded-lg [background-color:var(--sun-acc-20)] border [border-color:var(--sun-acc-40)] [color:var(--sun-soft)] text-[10px] font-bold hover:[background-color:var(--sun-acc-30)] transition-all"
             title={t('editor.chapterCastSyncTitle')}
           >
             <AlertCircle className="w-3 h-3" />
@@ -3180,7 +3197,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 {char.avatarUrl ? (
                   <img src={char.avatarUrl} alt="" className="w-5 h-5 rounded-lg object-cover" />
                 ) : (
-                  <span className="w-5 h-5 rounded-lg bg-slate-800 flex items-center justify-center text-[9px] font-bold text-amber-400">
+                  <span className="w-5 h-5 rounded-lg bg-slate-800 flex items-center justify-center text-[9px] font-bold [color:var(--sun-acc)]">
                     {char.name?.charAt(0)}
                   </span>
                 )}
@@ -3223,7 +3240,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
     <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-3 shadow-md">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
         <div className="flex items-center gap-2">
-          <Users className="w-4 h-4 text-amber-400" />
+          <Users className="w-4 h-4 [color:var(--sun-acc)]" />
           <span className="font-bold text-slate-100 text-sm">
             {t('editor.sceneParticipants', { n: sceneCharacters.length })}
           </span>
@@ -3259,7 +3276,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
             onClick={() => setParticipantsUnpinned(!participantsUnpinned)}
             className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl border font-bold text-[11px] transition-all shadow-sm active:scale-95 ${
               participantsUnpinned
-                ? 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border-amber-500/40'
+                ? '[background-color:var(--sun-acc-20)] hover:[background-color:var(--sun-acc-30)] [color:var(--sun-soft)] [border-color:var(--sun-acc-40)]'
                 : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
             }`}
             title={participantsUnpinned ? t('editor.pinTitle') : t('editor.unpinTitle')}
@@ -3273,7 +3290,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
               setHeroToEnhance(null);
               setShowGenerateHeroModal(true);
             }}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-[11px] transition-all shadow-sm active:scale-95"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-[var(--sun-acc)] to-[var(--sun-acc-70)] hover:from-[var(--sun-acc-80)] hover:to-[var(--sun-acc)] text-slate-950 font-bold text-[11px] transition-all shadow-sm active:scale-95"
             title={t('editor.generateHeroTitle')}
           >
             <Sparkles className="w-3 h-3 text-slate-950" />
@@ -3281,8 +3298,17 @@ export const EditorView: React.FC<EditorViewProps> = ({
           </button>
 
           <button
+            onClick={() => setShowHeroJourney(true)}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 [color:var(--sun-soft)] border border-slate-700 font-bold text-[11px] transition-all shadow-sm active:scale-95"
+            title={t('editor.heroJourneyTitle')}
+          >
+            <Wand2 className="w-3 h-3" />
+            <span>{t('editor.heroJourneyBtn')}</span>
+          </button>
+
+          <button
             onClick={() => setShowAddParticipantsModal(true)}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 font-bold text-[11px] transition-all shadow-sm active:scale-95"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 [color:var(--sun-soft)] border border-slate-700 font-bold text-[11px] transition-all shadow-sm active:scale-95"
           >
             <UserPlus className="w-3 h-3" />
             <span>{t('editor.addParticipant')}</span>
@@ -3300,7 +3326,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 setHeroToEnhance(null);
                 setShowGenerateHeroModal(true);
               }}
-              className="px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs font-bold hover:bg-amber-500/30 transition-all flex items-center gap-1"
+              className="px-3 py-1.5 rounded-lg [background-color:var(--sun-acc-20)] [color:var(--sun-soft)] border [border-color:var(--sun-acc-40)] text-xs font-bold hover:[background-color:var(--sun-acc-30)] transition-all flex items-center gap-1"
             >
               <Sparkles className="w-3 h-3" />
               <span>{t('editor.generateHeroAi')}</span>
@@ -3324,7 +3350,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
             const isHighlighted = highlightedCharacterId === charInScene.characterId;
             const isDimmed = highlightedCharacterId !== null && !isHighlighted;
             const highlightCls = isHighlighted
-              ? 'border-amber-400/70 ring-1 ring-amber-400/40 aurora-glow-amber'
+              ? '[border-color:var(--sun-acc-70)] ring-1 ring-[color:var(--sun-acc-40)] aurora-glow-amber'
               : 'border-slate-800 hover:border-slate-700/80';
             const dimCls = isDimmed ? 'opacity-50 saturate-50' : '';
 
@@ -3359,7 +3385,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   {char?.avatarUrl ? (
                     <img src={char.avatarUrl} alt="" className="w-7 h-7 rounded-lg object-cover shrink-0" />
                   ) : (
-                    <div className="w-7 h-7 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-[11px] font-bold text-amber-400 shrink-0">
+                    <div className="w-7 h-7 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-[11px] font-bold [color:var(--sun-acc)] shrink-0">
                       {char?.name?.charAt(0) || '?'}
                     </div>
                   )}
@@ -3396,15 +3422,15 @@ export const EditorView: React.FC<EditorViewProps> = ({
                         <img
                           src={char.avatarUrl}
                           alt={char.name}
-                          className="w-11 h-11 rounded-xl object-cover border border-amber-500/40 shrink-0 shadow-sm group-hover/avatar:border-amber-400 transition-all"
+                          className="w-11 h-11 rounded-xl object-cover border [border-color:var(--sun-acc-40)] shrink-0 shadow-sm group-hover/avatar:[border-color:var(--sun-acc)] transition-all"
                         />
                       ) : (
-                        <div className="w-11 h-11 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-amber-400 font-bold shrink-0">
+                        <div className="w-11 h-11 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center [color:var(--sun-acc)] font-bold shrink-0">
                           {char?.name?.charAt(0) || t('editor.heroFallback').charAt(0)}
                         </div>
                       )}
                       <div className="absolute inset-0 bg-black/60 rounded-xl opacity-0 group-hover/avatar:opacity-100 flex items-center justify-center transition-all">
-                        <Sparkles className="w-4 h-4 text-amber-400" />
+                        <Sparkles className="w-4 h-4 [color:var(--sun-acc)]" />
                       </div>
                     </div>
 
@@ -3440,10 +3466,10 @@ export const EditorView: React.FC<EditorViewProps> = ({
                             setHeroToEnhance(char);
                             setShowGenerateHeroModal(true);
                           }}
-                          className="flex items-center gap-1 px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 hover:text-amber-200 border border-amber-500/30 rounded-lg text-[11px] font-semibold transition-colors"
+                          className="flex items-center gap-1 px-2 py-1 [background-color:var(--sun-acc-10)] hover:[background-color:var(--sun-acc-20)] [color:var(--sun-soft)] hover:[color:var(--sun-soft)] border [border-color:var(--sun-acc-30)] rounded-lg text-[11px] font-semibold transition-colors"
                           title={t('editor.artBtnTitle')}
                         >
-                          <Sparkles className="w-3 h-3 text-amber-400" />
+                          <Sparkles className="w-3 h-3 [color:var(--sun-acc)]" />
                           <span>{t('editor.artBtn')}</span>
                         </button>
 
@@ -3491,7 +3517,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                         });
                         onUpdateBook({ ...book, chapters: updatedChapters });
                       }}
-                      className="w-full p-2 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-200 focus:border-amber-400 focus:outline-hidden"
+                      className="w-full p-2 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-200 focus:[border-color:var(--sun-acc)] focus:outline-hidden"
                     />
                   </div>
 
@@ -3517,7 +3543,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                         });
                         onUpdateBook({ ...book, chapters: updatedChapters });
                       }}
-                      className="w-full p-2 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-200 focus:border-amber-400 focus:outline-hidden"
+                      className="w-full p-2 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-200 focus:[border-color:var(--sun-acc)] focus:outline-hidden"
                     />
                   </div>
                 </div>
@@ -3546,7 +3572,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
       className={`flex flex-col lg:flex-row overflow-hidden bg-slate-900 text-slate-100 relative ${
         tagsHidden ? 'nova-hide-tags ' : ''
       }${isFocusWindow ? 'nova-fullscreen-editor w-full h-full min-h-0' : 'flex-1 min-h-0'}`}
-      style={isFocusWindow ? undefined : { height: 'calc(100vh - 105px)', maxHeight: 'calc(100vh - 105px)' }}
+      style={isFocusWindow ? { ...sunVars } : { ...sunVars, height: 'calc(100vh - 105px)', maxHeight: 'calc(100vh - 105px)' }}
     >
       {/* Повноекранний режим: маленькі стрілочки збоку для переходу між
           розривами сторінок (не системний Fullscreen API — просто
@@ -3616,21 +3642,21 @@ export const EditorView: React.FC<EditorViewProps> = ({
       )}
 
       {fontSelectHintText && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-amber-500/90 text-slate-950 font-bold px-4 py-2 rounded-xl shadow-2xl flex items-center gap-2 border border-amber-400 text-xs">
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 [background-color:var(--sun-acc-90)] text-slate-950 font-bold px-4 py-2 rounded-xl shadow-2xl flex items-center gap-2 border [border-color:var(--sun-acc-40)] text-xs">
           <AlertCircle className="w-4 h-4" />
           <span>{fontSelectHintText}</span>
         </div>
       )}
 
       {aiEngineToast && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-amber-500/90 text-slate-950 font-bold px-4 py-2 rounded-xl shadow-2xl flex items-center gap-2 border border-amber-400 text-xs">
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 [background-color:var(--sun-acc-90)] text-slate-950 font-bold px-4 py-2 rounded-xl shadow-2xl flex items-center gap-2 border [border-color:var(--sun-acc-40)] text-xs">
           <Sparkles className="w-4 h-4" />
           <span>{aiEngineToast}</span>
         </div>
       )}
 
       {wrapToast && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 text-amber-200 font-semibold px-4 py-2 rounded-xl shadow-2xl flex items-center gap-2 border border-amber-500/40 text-xs">
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 [color:var(--sun-soft)] font-semibold px-4 py-2 rounded-xl shadow-2xl flex items-center gap-2 border [border-color:var(--sun-acc-40)] text-xs">
           <Spline className="w-4 h-4" />
           <span>{wrapToast}</span>
         </div>
@@ -3665,7 +3691,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
         <button
           onClick={() => setShowLeftTree(!showLeftTree)}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border font-bold transition-all ${
-            showLeftTree ? 'bg-amber-500/20 border-amber-500 text-amber-300' : 'bg-slate-900 border-slate-800 text-slate-300'
+            showLeftTree ? '[background-color:var(--sun-acc-20)] [border-color:var(--sun-acc)] [color:var(--sun-soft)]' : 'bg-slate-900 border-slate-800 text-slate-300'
           }`}
         >
           <PanelLeft className="w-3.5 h-3.5" />
@@ -3679,7 +3705,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
         <button
           onClick={() => setShowRightPanel(!showRightPanel)}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border font-bold transition-all ${
-            showRightPanel ? 'bg-amber-500/20 border-amber-500 text-amber-300' : 'bg-slate-900 border-slate-800 text-slate-300'
+            showRightPanel ? '[background-color:var(--sun-acc-20)] [border-color:var(--sun-acc)] [color:var(--sun-soft)]' : 'bg-slate-900 border-slate-800 text-slate-300'
           }`}
         >
           <Users className="w-3.5 h-3.5" />
@@ -3689,10 +3715,10 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
       {/* LEFT DRAWER: Book Structure Tree (Can be collapsed or opened) */}
       {showLeftTree && (
-        <aside className="w-full lg:w-72 bg-slate-950/95 backdrop-blur-xl border-r border-slate-800 shadow-2xl shadow-black/60 flex flex-col shrink-0 absolute z-40 h-full max-h-full lg:relative lg:z-auto">
+        <aside style={sunVars} className="w-full lg:w-72 bg-slate-950/95 backdrop-blur-xl border-r border-slate-800 shadow-2xl shadow-black/60 flex flex-col shrink-0 absolute z-40 h-full max-h-full lg:relative lg:z-auto">
           <div className="p-3.5 border-b border-slate-800 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <BookMarked className="w-4 h-4 text-amber-400" />
+              <BookMarked className="w-4 h-4 [color:var(--sun-acc)]" />
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-300">
                 {t('editor.tocHeading')}
               </h2>
@@ -3701,7 +3727,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
             <div className="flex items-center gap-1">
               <button
                 onClick={handleAddChapter}
-                className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 border border-amber-500/30 transition-all"
+                className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg [background-color:var(--sun-acc-10)] [color:var(--sun-soft)] hover:[background-color:var(--sun-acc-20)] border [border-color:var(--sun-acc-30)] transition-all"
                 title={t('editor.addChapterTitle')}
               >
                 <Plus className="w-3.5 h-3.5" />
@@ -3728,14 +3754,14 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   key={chapter.id}
                   className={`rounded-xl border transition-all ${
                     isChapActive
-                      ? 'bg-slate-900/90 border-amber-500/40 shadow-sm'
+                      ? 'bg-slate-900/90 [border-color:var(--sun-acc-40)] shadow-sm'
                       : 'bg-slate-900/40 border-slate-800/70 hover:border-slate-700'
                   }`}
                 >
                   {/* Chapter Header */}
                   <div className="p-2.5 flex items-center justify-between group">
                     <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+                      <span className="w-2 h-2 rounded-full [background-color:var(--sun-acc)] shrink-0" />
                       <input
                         type="text"
                         value={chapter.title}
@@ -3745,7 +3771,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                           );
                           onUpdateBook({ ...book, chapters: updated });
                         }}
-                        className="text-xs font-bold text-slate-200 bg-transparent border-b border-transparent focus:border-amber-400 focus:outline-hidden truncate w-full"
+                        className="text-xs font-bold text-slate-200 bg-transparent border-b border-transparent focus:[border-color:var(--sun-acc)] focus:outline-hidden truncate w-full"
                         placeholder={t('editor.chapterTitlePlaceholder')}
                       />
                     </div>
@@ -3756,7 +3782,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                       </span>
                       <button
                         onClick={() => handleAddSection(chapter.id)}
-                        className="p-1 text-slate-400 hover:text-amber-300 hover:bg-slate-800 rounded-md"
+                        className="p-1 text-slate-400 hover:[color:var(--sun-soft)] hover:bg-slate-800 rounded-md"
                         title={t('editor.addSectionTitle')}
                       >
                         <Plus className="w-3.5 h-3.5" />
@@ -3777,7 +3803,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                           }}
                           className={`group/sec flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs cursor-pointer transition-all ${
                             isSecActive
-                              ? 'bg-amber-500/10 text-amber-300 border border-amber-500/40 font-medium'
+                              ? '[background-color:var(--sun-acc-10)] [color:var(--sun-soft)] border [border-color:var(--sun-acc-40)] font-medium'
                               : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
                           }`}
                         >
@@ -3815,7 +3841,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 className="hidden lg:flex items-center gap-1 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 rounded-lg text-xs transition-colors shrink-0"
                 title={t('editor.openTocTitle')}
               >
-                <PanelLeft className="w-3.5 h-3.5 text-amber-400" />
+                <PanelLeft className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
                 <span>{t('editor.tocBtn')}</span>
               </button>
             )}
@@ -3837,7 +3863,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   });
                   onUpdateBook({ ...book, chapters: updated });
                 }}
-                className="text-sm sm:text-base font-bold text-white bg-transparent border-b border-slate-700/60 focus:border-amber-400 focus:outline-hidden px-1 w-full max-w-sm truncate"
+                className="text-sm sm:text-base font-bold text-white bg-transparent border-b border-slate-700/60 focus:[border-color:var(--sun-acc)] focus:outline-hidden px-1 w-full max-w-sm truncate"
                 placeholder={t('editor.sectionTitlePlaceholder')}
               />
               <span className="text-[11px] text-slate-400 block truncate">
@@ -3855,7 +3881,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 onClick={() => setEditorLanguageMode('ua')}
                 className={`px-2.5 py-1 rounded-lg font-bold text-xs transition-all ${
                   editorLanguageMode === 'ua'
-                    ? 'bg-amber-500 text-slate-950 shadow-sm'
+                    ? '[background-color:var(--sun-acc)] text-slate-950 shadow-sm'
                     : 'text-slate-400 hover:text-white'
                 }`}
                 title={t('editor.modeUaTitle')}
@@ -3867,7 +3893,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 onClick={() => setEditorLanguageMode('parallel')}
                 className={`px-2.5 py-1 rounded-lg font-bold text-xs transition-all flex items-center gap-1 ${
                   editorLanguageMode === 'parallel'
-                    ? 'bg-amber-500 text-slate-950 shadow-sm'
+                    ? '[background-color:var(--sun-acc)] text-slate-950 shadow-sm'
                     : 'text-slate-400 hover:text-white'
                 }`}
                 title={t('editor.modeParallelTitle')}
@@ -3880,7 +3906,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 onClick={() => setEditorLanguageMode('en')}
                 className={`px-2.5 py-1 rounded-lg font-bold text-xs transition-all ${
                   editorLanguageMode === 'en'
-                    ? 'bg-amber-500 text-slate-950 shadow-sm'
+                    ? '[background-color:var(--sun-acc)] text-slate-950 shadow-sm'
                     : 'text-slate-400 hover:text-white'
                 }`}
                 title={t('editor.modeEnTitle')}
@@ -3928,7 +3954,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
               onClick={handleTranslateToEnglish}
               disabled={isTranslating || !activeSection?.content}
               data-tour="editor__4"
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-lg transition-all shadow-sm active:scale-95 disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-[var(--sun-acc)] to-[var(--sun-acc-70)] hover:from-[var(--sun-acc-80)] hover:to-[var(--sun-acc)] text-slate-950 font-bold rounded-lg transition-all shadow-sm active:scale-95 disabled:opacity-50"
               title={t('editor.translateTitle')}
             >
               <Languages className="w-3.5 h-3.5" />
@@ -3938,7 +3964,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
             {onSaveBook && (
               <button
                 onClick={onSaveBook}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-amber-300 font-bold border border-amber-500/30 rounded-lg transition-colors whitespace-nowrap"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 [color:var(--sun-soft)] font-bold border [border-color:var(--sun-acc-30)] rounded-lg transition-colors whitespace-nowrap"
                 title={t('editor.saveTitle')}
               >
                 <Save className="w-3.5 h-3.5" />
@@ -3949,7 +3975,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
             {!showRightPanel && (
               <button
                 onClick={() => setShowRightPanel(true)}
-                className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-amber-400 border border-slate-800 rounded-lg transition-colors"
+                className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 [color:var(--sun-acc)] border border-slate-800 rounded-lg transition-colors"
                 title={t('editor.openCharPanelTitle')}
               >
                 <Users className="w-3.5 h-3.5" />
@@ -3960,7 +3986,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
         </div>
 
         {/* Formatting & Insert Toolbar */}
-        <div className="px-4 py-2 border-b border-slate-800 bg-slate-950 flex items-center justify-between gap-2 text-slate-300 text-xs overflow-x-auto no-scrollbar shrink-0">
+        <div style={sunVars} className="px-4 py-2 border-b border-slate-800 bg-slate-950 flex items-center justify-between gap-2 text-slate-300 text-xs overflow-x-auto no-scrollbar shrink-0">
           <div className="flex items-center gap-2">
             {/* Quick Typography Insets */}
             <button
@@ -3992,7 +4018,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
               className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-md font-medium"
               title={t('editor.insertFootnoteTitle')}
             >
-              <BookMarked className="w-3.5 h-3.5 text-amber-400" />
+              <BookMarked className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
               <span>{t('editor.insertFootnoteBtn')}</span>
             </button>
 
@@ -4001,7 +4027,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
               className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-md font-medium"
               title={t('editor.insertQrTitle')}
             >
-              <QrCode className="w-3.5 h-3.5 text-amber-400" />
+              <QrCode className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
               <span>{t('editor.insertQrBtn')}</span>
             </button>
 
@@ -4010,16 +4036,16 @@ export const EditorView: React.FC<EditorViewProps> = ({
               className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-md font-medium"
               title={t('editor.imgFromGalleryTitle')}
             >
-              <ImagePlus className="w-3.5 h-3.5 text-cyan-400" />
+              <ImagePlus className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
               <span>{t('editor.imgFromGalleryBtn')}</span>
             </button>
 
             <button
               onClick={() => setShowIllustrationModal(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-md font-bold shadow-xs transition-all"
+              className="flex items-center gap-1.5 px-2.5 py-1 [background-color:var(--sun-acc-20)] hover:[background-color:var(--sun-acc-30)] [color:var(--sun-soft)] border [border-color:var(--sun-acc-40)] rounded-md font-bold shadow-xs transition-all"
               title={t('editor.insertIllustrationTitle')}
             >
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <Sparkles className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
               <span>{t('editor.insertIllustrationBtn')}</span>
             </button>
 
@@ -4027,7 +4053,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
             <button
               onClick={handleInsertTag}
-              className="flex items-center gap-1 px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-md font-semibold"
+              className="flex items-center gap-1 px-2.5 py-1 [background-color:var(--sun-acc-10)] hover:[background-color:var(--sun-acc-20)] [color:var(--sun-soft)] border [border-color:var(--sun-acc-30)] rounded-md font-semibold"
               title={t('editor.insertTagTitle')}
             >
               <Tag className="w-3.5 h-3.5" />
@@ -4039,7 +4065,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
               className={`flex items-center gap-1 px-2.5 py-1 rounded-md font-medium border ${
                 tagsHidden
                   ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
-                  : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                  : '[background-color:var(--sun-acc-10)] hover:[background-color:var(--sun-acc-20)] [color:var(--sun-soft)] [border-color:var(--sun-acc-30)]'
               }`}
               title={tagsHidden ? t('editor.showTagsTitle') : t('editor.hideTagsTitle')}
             >
@@ -4085,12 +4111,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
           <div className="flex items-center gap-3 text-slate-400 font-mono text-[11px]">
             <span>{t('editor.wordsUaLabel')} <b className="text-slate-100">{activeSection?.wordCount || 0}</b></span>
             {activeSection?.contentEn && (
-              <span>• EN: <b className="text-amber-400">{calculateWordCount(activeSection.contentEn)}</b></span>
+              <span>• EN: <b className="[color:var(--sun-acc)]">{calculateWordCount(activeSection.contentEn)}</b></span>
             )}
             <span>{t('editor.readingTime', { n: estimateReadingTimeMinutes(activeSection?.wordCount || 0) })}</span>
             {!isFocusWindow && (
               <div className="flex items-center gap-1.5 pl-3 border-l border-slate-800" title={t('editor.pageZoomTitle')}>
-                <ZoomIn className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                <ZoomIn className="w-3.5 h-3.5 [color:var(--sun-acc)] shrink-0" />
                 <select
                   value={PAGE_ZOOM_PRESETS.includes(editorZoom) ? String(editorZoom) : 'custom'}
                   onChange={(e) => {
@@ -4182,7 +4208,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     const [cId, sId] = e.target.value.split('::');
                     if (cId && sId) onSelectSection(cId, sId);
                   }}
-                  className="bg-slate-800 border border-slate-700 text-slate-200 text-[11px] font-semibold rounded-lg px-2 py-1 max-w-[190px] cursor-pointer focus:outline-none focus:border-amber-400"
+                  className="bg-slate-800 border border-slate-700 text-slate-200 text-[11px] font-semibold rounded-lg px-2 py-1 max-w-[190px] cursor-pointer focus:outline-none focus:[border-color:var(--sun-acc)]"
                   title={t('editor.sectionSwitcherTitle')}
                 >
                   {book.chapters.map((c) => (
@@ -4208,7 +4234,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-[11px] font-semibold transition-colors"
                   title={t('editor.openEnWindowTitle')}
                 >
-                  <Languages className="w-3.5 h-3.5 text-amber-400" />
+                  <Languages className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
                   <span>{t('editor.openEnWindowBtn')}</span>
                 </button>
               </div>
@@ -4220,14 +4246,14 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   а не перекриваючи. */}
               {selectedText.length > 0 && !isReader && (
                 <div className="flex items-center flex-wrap gap-2 mb-3 shrink-0 bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 shadow-lg text-xs">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <Sparkles className="w-3.5 h-3.5 [color:var(--sun-acc)] shrink-0" />
                   <span className="text-slate-300 font-medium">
                     {t('editor.selectedWords', { n: selectedText.split(/\s+/).filter(Boolean).length })}
                   </span>
                   <div className="flex-1" />
                   <button
                     onClick={() => handleTriggerAiEdit('improve')}
-                    className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg transition-colors"
+                    className="px-2.5 py-1 [background-color:var(--sun-acc)] hover:[background-color:var(--sun-acc-80)] text-slate-950 font-bold rounded-lg transition-colors"
                   >
                     {t('editor.improveAi')}
                   </button>
@@ -4328,7 +4354,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 <div className="mt-6 pt-4 border-t border-slate-800/80 space-y-3">
                   {sectionQrTags.length > 0 && (
                     <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-800 space-y-2">
-                      <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1">
+                      <span className="text-[10px] font-bold [color:var(--sun-acc)] uppercase tracking-wider flex items-center gap-1">
                         <QrCode className="w-3.5 h-3.5" /> {t('editor.qrTagsInScene')}
                       </span>
                       <div className="flex flex-wrap gap-2">
@@ -4347,12 +4373,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
                   {sectionFootnotes.length > 0 && (
                     <div className="space-y-1 text-xs text-slate-400">
-                      <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block mb-1">
+                      <span className="text-[10px] font-bold [color:var(--sun-acc)] uppercase tracking-wider block mb-1">
                         {t('editor.sectionNotes')}
                       </span>
                       {sectionFootnotes.map((fn) => (
                         <div key={fn.id} className="flex items-baseline gap-2">
-                          <span className="font-bold text-amber-400 font-mono">[{fn.marker}]</span>
+                          <span className="font-bold [color:var(--sun-acc)] font-mono">[{fn.marker}]</span>
                           {fn.term && <span className="text-white font-medium">{fn.term}:</span>}
                           <span>{fn.text}</span>
                         </div>
@@ -4418,7 +4444,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 >
                   <div className="flex flex-col h-full min-h-0 gap-2">
                     <div className="flex items-center justify-between gap-2 shrink-0 flex-wrap">
-                      <span className="text-[11px] font-mono text-amber-400/90">
+                      <span className="text-[11px] font-mono [color:var(--sun-acc)]/90">
                         {calculateWordCount(activeSection?.contentEn || '')} words
                       </span>
                       <div className="flex items-center gap-1.5 flex-wrap">
@@ -4426,7 +4452,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                         <button
                           onClick={handleTranslateToEnglish}
                           disabled={isTranslating}
-                          className="px-2 py-0.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-bold rounded-md transition-colors"
+                          className="px-2 py-0.5 [background-color:var(--sun-acc)] hover:[background-color:var(--sun-acc-80)] text-slate-950 text-[10px] font-bold rounded-md transition-colors"
                           title={t('editor.updateTranslationTitle')}
                         >
                           {isTranslating ? '...' : t('editor.update')}
@@ -4489,7 +4515,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     <button
                       onClick={handleTranslateToEnglish}
                       disabled={isTranslating}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-lg transition-colors"
+                      className="flex items-center gap-1.5 px-3 py-1.5 [background-color:var(--sun-acc)] hover:[background-color:var(--sun-acc-80)] text-slate-950 text-xs font-bold rounded-lg transition-colors"
                     >
                       <Languages className="w-3.5 h-3.5" />
                       <span>{isTranslating ? t('editor.translating') : t('editor.translateFromUa')}</span>
@@ -4534,7 +4560,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
       {/* RIGHT PANEL: CHARACTERS & SCENE WORKSPACE ("персонажі з права альбомного перегляду сайту") */}
       {showRightPanel && (
         <aside
-          style={{ '--panel-w': `${rightPanelWidth}px` } as React.CSSProperties}
+          style={{ '--panel-w': `${rightPanelWidth}px`, ...sunVars } as React.CSSProperties}
           className="nova-char-panel w-full bg-slate-950/95 backdrop-blur-xl border-l border-slate-800 flex flex-col shrink-0 absolute lg:relative right-0 z-30 lg:z-auto h-full max-h-full"
         >
           {/* Ручка зміни ширини панелі (тягнути вправо-вліво) */}
@@ -4554,7 +4580,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
               window.addEventListener('pointermove', onMove);
               window.addEventListener('pointerup', onUp);
             }}
-            className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize hover:bg-amber-500/50 z-20 hidden lg:block"
+            className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize hover:[background-color:var(--sun-acc-40)] z-20 hidden lg:block"
             title="Змінити ширину панелі"
           />
           
@@ -4564,11 +4590,11 @@ export const EditorView: React.FC<EditorViewProps> = ({
               onClick={() => setRightPanelTab('scene')}
               className={`flex-1 py-3 px-2 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-all whitespace-nowrap ${
                 rightPanelTab === 'scene'
-                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                  ? '[background-color:var(--sun-acc-20)] [color:var(--sun-soft)] border [border-color:var(--sun-acc-40)]'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Users className="w-3.5 h-3.5 text-amber-400" />
+              <Users className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
               <span>{t('editor.rootTabScene')}</span>
             </button>
 
@@ -4579,12 +4605,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
               }}
               className={`flex-1 py-3 px-2 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-all whitespace-nowrap ${
                 rightPanelTab === 'workText'
-                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                  ? '[background-color:var(--sun-acc-20)] [color:var(--sun-soft)] border [border-color:var(--sun-acc-40)]'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
               title={t('editor.rootTabWorkTextTitle')}
             >
-              <FileText className="w-3.5 h-3.5 text-amber-400" />
+              <FileText className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
               <span>{t('editor.rootTabWorkText')}</span>
             </button>
 
@@ -4595,12 +4621,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
               }}
               className={`flex-1 py-3 px-2 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-all whitespace-nowrap ${
                 rightPanelTab === 'workAi'
-                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                  ? '[background-color:var(--sun-acc-20)] [color:var(--sun-soft)] border [border-color:var(--sun-acc-40)]'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
               title={t('editor.rootTabWorkAiTitle')}
             >
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <Sparkles className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
               <span>{t('editor.rootTabWorkAi')}</span>
             </button>
 
@@ -4622,7 +4648,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   onClick={() => setRightPanelSubTab('translation')}
                   className={`flex-1 py-2 px-1 text-[11px] font-semibold rounded-lg flex items-center justify-center gap-1 transition-all whitespace-nowrap ${
                     rightPanelSubTab === 'translation'
-                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      ? '[background-color:var(--sun-acc-20)] [color:var(--sun-soft)] border [border-color:var(--sun-acc-40)]'
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
@@ -4633,7 +4659,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   onClick={() => setRightPanelSubTab('footnotes_qr')}
                   className={`flex-1 py-2 px-1 text-[11px] font-semibold rounded-lg flex items-center justify-center gap-1 transition-all whitespace-nowrap ${
                     rightPanelSubTab === 'footnotes_qr'
-                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      ? '[background-color:var(--sun-acc-20)] [color:var(--sun-soft)] border [border-color:var(--sun-acc-40)]'
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
@@ -4644,7 +4670,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   onClick={() => setRightPanelSubTab('course_tags')}
                   className={`flex-1 py-2 px-1 text-[11px] font-semibold rounded-lg flex items-center justify-center gap-1 transition-all whitespace-nowrap ${
                     rightPanelSubTab === 'course_tags'
-                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      ? '[background-color:var(--sun-acc-20)] [color:var(--sun-soft)] border [border-color:var(--sun-acc-40)]'
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
@@ -4661,7 +4687,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   onClick={() => setRightPanelSubTab('ai')}
                   className={`flex-1 py-2 px-1 text-[11px] font-semibold rounded-lg flex items-center justify-center gap-1 transition-all whitespace-nowrap ${
                     rightPanelSubTab === 'ai'
-                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      ? '[background-color:var(--sun-acc-20)] [color:var(--sun-soft)] border [border-color:var(--sun-acc-40)]'
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
@@ -4672,7 +4698,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   onClick={() => setRightPanelSubTab('spellcheck')}
                   className={`flex-1 py-2 px-1 text-[11px] font-semibold rounded-lg flex items-center justify-center gap-1 transition-all whitespace-nowrap ${
                     rightPanelSubTab === 'spellcheck'
-                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      ? '[background-color:var(--sun-acc-20)] [color:var(--sun-soft)] border [border-color:var(--sun-acc-40)]'
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
@@ -4683,7 +4709,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   onClick={() => setRightPanelSubTab('diff')}
                   className={`flex-1 py-2 px-1 text-[11px] font-semibold rounded-lg flex items-center justify-center gap-1 transition-all whitespace-nowrap ${
                     rightPanelSubTab === 'diff'
-                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      ? '[background-color:var(--sun-acc-20)] [color:var(--sun-soft)] border [border-color:var(--sun-acc-40)]'
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
@@ -4694,7 +4720,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   onClick={() => setRightPanelSubTab('reader')}
                   className={`flex-1 py-2 px-1 text-[11px] font-semibold rounded-lg flex items-center justify-center gap-1 transition-all whitespace-nowrap ${
                     rightPanelSubTab === 'reader'
-                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      ? '[background-color:var(--sun-acc-20)] [color:var(--sun-soft)] border [border-color:var(--sun-acc-40)]'
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
@@ -4705,7 +4731,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   onClick={() => setRightPanelSubTab('metrics')}
                   className={`flex-1 py-2 px-1 text-[11px] font-semibold rounded-lg flex items-center justify-center gap-1 transition-all whitespace-nowrap ${
                     rightPanelSubTab === 'metrics'
-                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      ? '[background-color:var(--sun-acc-20)] [color:var(--sun-soft)] border [border-color:var(--sun-acc-40)]'
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
@@ -4766,7 +4792,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                           });
                           onUpdateBook({ ...book, chapters: updatedChapters });
                         }}
-                        className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:border-amber-400 focus:outline-hidden"
+                        className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:[border-color:var(--sun-acc)] focus:outline-hidden"
                       />
                     </div>
 
@@ -4792,7 +4818,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                             onUpdateBook({ ...book, chapters: updatedChapters });
                           }}
                           placeholder="Лабораторія, Поділ..."
-                          className="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:border-amber-400 focus:outline-hidden"
+                          className="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:[border-color:var(--sun-acc)] focus:outline-hidden"
                         />
                       </div>
 
@@ -4816,7 +4842,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                             onUpdateBook({ ...book, chapters: updatedChapters });
                           }}
                           placeholder="Світанок, 05:45..."
-                          className="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:border-amber-400 focus:outline-hidden"
+                          className="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:[border-color:var(--sun-acc)] focus:outline-hidden"
                         />
                       </div>
                     </div>
@@ -4841,7 +4867,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                           });
                           onUpdateBook({ ...book, chapters: updatedChapters });
                         }}
-                        className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:border-amber-400 focus:outline-hidden"
+                        className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:[border-color:var(--sun-acc)] focus:outline-hidden"
                       />
                     </div>
 
@@ -4864,14 +4890,14 @@ export const EditorView: React.FC<EditorViewProps> = ({
                           });
                           onUpdateBook({ ...book, chapters: updatedChapters });
                         }}
-                        className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:border-amber-400 focus:outline-hidden"
+                        className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:[border-color:var(--sun-acc)] focus:outline-hidden"
                       />
                     </div>
 
                     {/* AI Dramaturgy Notes */}
                     {activeSection.scene.aiDramaturgyNotes && (
-                      <div className="p-3 rounded-xl bg-slate-950 border border-amber-500/30 space-y-1">
-                        <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1">
+                      <div className="p-3 rounded-xl bg-slate-950 border [border-color:var(--sun-acc-30)] space-y-1">
+                        <span className="text-[10px] font-bold [color:var(--sun-acc)] uppercase tracking-wider flex items-center gap-1">
                           <Sparkles className="w-3.5 h-3.5" /> {t('editor.sceneAiAnalysis')}
                         </span>
                         <p className="text-[11px] text-slate-300 leading-relaxed">
@@ -4895,7 +4921,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
               <div className="space-y-4">
                 <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="text-xs font-bold [color:var(--sun-acc)] uppercase tracking-wider flex items-center gap-1.5">
                       <Globe className="w-4 h-4" /> {t('editor.englishEditionHeading')}
                     </span>
                   </div>
@@ -4907,7 +4933,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   <button
                     onClick={handleTranslateToEnglish}
                     disabled={isTranslating || !activeSection?.content}
-                    className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-md active:scale-95 disabled:opacity-50"
+                    className="w-full py-2.5 rounded-xl [background-color:var(--sun-acc)] hover:[background-color:var(--sun-acc-80)] text-slate-950 font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-md active:scale-95 disabled:opacity-50"
                   >
                     <Languages className="w-4 h-4" />
                     <span>{isTranslating ? t('editor.translatingInProgress') : t('editor.translateSectionBtn')}</span>
@@ -4918,15 +4944,15 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 {translationPanelCollapsed ? (
                   <button
                     onClick={() => setTranslationPanelCollapsed(false)}
-                    className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-amber-500/30 text-amber-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                    className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border [border-color:var(--sun-acc-30)] [color:var(--sun-soft)] font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
                   >
                     <Languages className="w-3.5 h-3.5" />
                     <span>{t('editor.showEnglishEditionBtn')}</span>
                   </button>
                 ) : (
-                  <div className="p-4 rounded-2xl bg-slate-900 border border-amber-500/30 space-y-3">
+                  <div className="p-4 rounded-2xl bg-slate-900 border [border-color:var(--sun-acc-30)] space-y-3">
                     <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
-                      <span className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="text-xs font-bold [color:var(--sun-acc)] uppercase tracking-wider flex items-center gap-1.5">
                         <Languages className="w-4 h-4" /> {t('editor.enInlineEditorHeading')}
                       </span>
                       <button
@@ -4954,13 +4980,13 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     />
 
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-mono text-amber-400/80">
+                      <span className="text-[10px] font-mono [color:var(--sun-acc-80)]">
                         {calculateWordCount(activeSection?.contentEn || '')} words
                       </span>
                       <button
                         onClick={handleTranslateToEnglish}
                         disabled={isTranslating}
-                        className="px-2 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-bold rounded-md transition-colors"
+                        className="px-2 py-1 [background-color:var(--sun-acc)] hover:[background-color:var(--sun-acc-80)] text-slate-950 text-[10px] font-bold rounded-md transition-colors"
                         title={t('editor.updateTranslationTitle')}
                       >
                         {isTranslating ? '...' : t('editor.update')}
@@ -5034,7 +5060,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                       setTranslationDetached(false);
                       setEditorLanguageMode('parallel');
                     }}
-                    className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-amber-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                    className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 [color:var(--sun-soft)] font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
                     title={t('editor.freezeTranslationTitle')}
                   >
                     <Columns className="w-3.5 h-3.5" />
@@ -5048,7 +5074,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     }}
                     className={`w-full py-2.5 rounded-xl border font-bold text-xs flex items-center justify-center gap-1.5 transition-colors ${
                       translationDetached
-                        ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                        ? '[background-color:var(--sun-acc-20)] [border-color:var(--sun-acc-40)] [color:var(--sun-soft)]'
                         : 'bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-300'
                     }`}
                     title={t('editor.detachTranslationTitle')}
@@ -5064,19 +5090,19 @@ export const EditorView: React.FC<EditorViewProps> = ({
             {rightPanelTab === 'workText' && rightPanelSubTab === 'footnotes_qr' && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase tracking-wider text-amber-400">
+                  <span className="text-xs font-bold uppercase tracking-wider [color:var(--sun-acc)]">
                     {t('editor.footnotesAndQrHeading')}
                   </span>
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => setShowFootnoteModal(true)}
-                      className="px-2 py-1 rounded-md bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/40"
+                      className="px-2 py-1 rounded-md [background-color:var(--sun-acc-20)] [color:var(--sun-soft)] text-[10px] font-bold border [border-color:var(--sun-acc-40)]"
                     >
                       {t('editor.addFootnoteBtn')}
                     </button>
                     <button
                       onClick={() => setShowQrModal(true)}
-                      className="px-2 py-1 rounded-md bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/40"
+                      className="px-2 py-1 rounded-md [background-color:var(--sun-acc-20)] [color:var(--sun-soft)] text-[10px] font-bold border [border-color:var(--sun-acc-40)]"
                     >
                       {t('editor.addQrBtn')}
                     </button>
@@ -5092,10 +5118,10 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     sectionQrTags.map((q) => (
                       <div key={q.id} className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs space-y-1">
                         <div className="flex items-center justify-between">
-                          <span className="font-mono text-amber-300 font-bold">{q.code}</span>
+                          <span className="font-mono [color:var(--sun-soft)] font-bold">{q.code}</span>
                           <button
                             onClick={() => insertTextAtCursor(`[QR: ${q.code} - "${q.title}"]`)}
-                            className="text-[10px] text-amber-400 hover:underline"
+                            className="text-[10px] [color:var(--sun-acc)] hover:underline"
                           >
                             {t('editor.insertTagBtn')}
                           </button>
@@ -5116,10 +5142,10 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     sectionFootnotes.map((fn) => (
                       <div key={fn.id} className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs space-y-1">
                         <div className="flex items-center justify-between">
-                          <span className="font-mono text-amber-400 font-bold">[^${fn.marker}]</span>
+                          <span className="font-mono [color:var(--sun-acc)] font-bold">[^${fn.marker}]</span>
                           <button
                             onClick={() => insertTextAtCursor(`[^${fn.marker}]`)}
-                            className="text-[10px] text-amber-400 hover:underline"
+                            className="text-[10px] [color:var(--sun-acc)] hover:underline"
                           >
                             {t('editor.insertMarkerBtn')}
                           </button>
@@ -5137,14 +5163,14 @@ export const EditorView: React.FC<EditorViewProps> = ({
             {rightPanelTab === 'workText' && rightPanelSubTab === 'course_tags' && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase tracking-wider text-amber-400">
+                  <span className="text-xs font-bold uppercase tracking-wider [color:var(--sun-acc)]">
                     {t('editor.courseTagsHeading')}
                   </span>
                   <button
                     onClick={() => setShowCourseTagModal(true)}
                     disabled={!selectedText.trim()}
                     title={!selectedText.trim() ? t('editor.needSelectionForTag') : undefined}
-                    className="px-2 py-1 rounded-md bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/40 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="px-2 py-1 rounded-md [background-color:var(--sun-acc-20)] [color:var(--sun-soft)] text-[10px] font-bold border [border-color:var(--sun-acc-40)] disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {t('editor.addCourseTagBtn')}
                   </button>
@@ -5163,7 +5189,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                       <div key={tag.id} className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs space-y-1">
                         <div className="flex items-center justify-between">
                           <span className="flex items-center gap-1 font-bold text-white">
-                            <Tag className="w-3 h-3 text-amber-400 shrink-0" />
+                            <Tag className="w-3 h-3 [color:var(--sun-acc)] shrink-0" />
                             {tag.label}
                           </span>
                           <button
@@ -5193,19 +5219,19 @@ export const EditorView: React.FC<EditorViewProps> = ({
             {rightPanelTab === 'workAi' && rightPanelSubTab === 'ai' && (
               <div className="space-y-4">
                 <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
-                  <span className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1">
+                  <span className="text-xs font-bold [color:var(--sun-acc)] uppercase tracking-wider flex items-center gap-1">
                     <Sparkles className="w-3.5 h-3.5" /> {t('editor.customAiRequest')}
                   </span>
                   <textarea
                     value={customAiPrompt}
                     onChange={(e) => setCustomAiPrompt(e.target.value)}
                     placeholder={t('editor.customAiPlaceholder')}
-                    className="w-full h-16 p-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-hidden focus:border-amber-400 resize-none"
+                    className="w-full h-16 p-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-hidden focus:[border-color:var(--sun-acc)] resize-none"
                   />
                   <button
                     onClick={() => handleTriggerAiEdit('custom')}
                     disabled={isGeneratingAi || !customAiPrompt.trim()}
-                    className="w-full py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition-all disabled:opacity-50"
+                    className="w-full py-2 rounded-xl [background-color:var(--sun-acc)] hover:[background-color:var(--sun-acc-80)] text-slate-950 text-xs font-bold transition-all disabled:opacity-50"
                   >
                     {isGeneratingAi ? t('editor.generatingProposal') : t('editor.applyAiRequest')}
                   </button>
@@ -5223,9 +5249,9 @@ export const EditorView: React.FC<EditorViewProps> = ({
                           key={preset.id}
                           onClick={() => handleTriggerAiEdit(preset.id)}
                           disabled={isGeneratingAi}
-                          className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/40 text-left text-xs text-slate-300 hover:text-white transition-all active:scale-95 disabled:opacity-40"
+                          className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:[border-color:var(--sun-acc-40)] text-left text-xs text-slate-300 hover:text-white transition-all active:scale-95 disabled:opacity-40"
                         >
-                          <Icon className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                          <Icon className="w-3.5 h-3.5 [color:var(--sun-acc)] shrink-0" />
                           <span className="truncate">{preset.label}</span>
                         </button>
                       );
@@ -5245,7 +5271,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   <button
                     onClick={handleRunSpellcheck}
                     disabled={isCheckingGrammar}
-                    className="text-xs text-amber-400 hover:text-amber-300 underline"
+                    className="text-xs [color:var(--sun-acc)] hover:[color:var(--sun-soft)] underline"
                   >
                     {t('editor.retryBtn')}
                   </button>
@@ -5266,7 +5292,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                       <div className="flex items-center justify-between">
                         <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
                           issue.type === 'spelling' ? 'bg-rose-500/20 text-rose-300' :
-                          issue.type === 'grammar' ? 'bg-amber-500/20 text-amber-300' :
+                          issue.type === 'grammar' ? '[background-color:var(--sun-acc-20)] [color:var(--sun-soft)]' :
                           issue.type === 'style' ? 'bg-purple-500/20 text-purple-300' :
                           'bg-cyan-500/20 text-cyan-300'
                         }`}>
@@ -5312,9 +5338,9 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 </div>
 
                 {currentProposal ? (
-                  <div className="p-4 rounded-xl bg-slate-900/90 border-2 border-amber-500/50 space-y-3 shadow-xl">
+                  <div className="p-4 rounded-xl bg-slate-900/90 border-2 [border-color:var(--sun-acc-40)] space-y-3 shadow-xl">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                      <span className="text-xs font-bold [color:var(--sun-soft)] flex items-center gap-1.5">
                         <Sparkles className="w-3.5 h-3.5" />
                         {currentProposal.instruction}
                       </span>
@@ -5392,7 +5418,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     </div>
 
                     {readerResponseResult.dropOffRisk && (
-                      <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs">
+                      <div className="p-3 rounded-xl [background-color:var(--sun-acc-10)] border [border-color:var(--sun-acc-30)] [color:var(--sun-soft)] text-xs">
                         <span className="font-semibold">{t('editor.readerResponseDropOffTitle')}:</span> {readerResponseResult.dropOffRisk}
                       </div>
                     )}
@@ -5405,7 +5431,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                             b.intensity === 'high'
                               ? 'border-rose-500/40 bg-rose-500/10 text-rose-100'
                               : b.intensity === 'medium'
-                                ? 'border-amber-500/40 bg-amber-500/10 text-amber-100'
+                                ? '[border-color:var(--sun-acc-40)] [background-color:var(--sun-acc-10)] [color:var(--sun-soft)]'
                                 : 'border-slate-600 bg-slate-800/40 text-slate-300'
                           }`}
                         >
@@ -5439,13 +5465,13 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
                       <div className="flex items-center justify-between gap-2">
                         <h4 className="text-slate-300 font-semibold text-xs flex items-center gap-1.5">
-                          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                          <Sparkles className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
                           {t('editor.openingStrengthTitle')}
                         </h4>
                         <button
                           onClick={handleAnalyzeOpeningStrength}
                           disabled={isAnalyzingOpeningStrength || !hasText}
-                          className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-semibold transition-colors disabled:opacity-40"
+                          className="px-2.5 py-1 rounded-lg [background-color:var(--sun-acc-20)] hover:[background-color:var(--sun-acc-30)] [color:var(--sun-soft)] border [border-color:var(--sun-acc-40)] text-[11px] font-semibold transition-colors disabled:opacity-40"
                         >
                           {isAnalyzingOpeningStrength ? t('editor.openingStrengthRunning') : t('editor.openingStrengthBtn')}
                         </button>
@@ -5461,7 +5487,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                       {openingStrengthResult && (
                         <div className="space-y-2">
                           <div className="flex items-baseline gap-2">
-                            <span className="text-lg font-bold text-amber-300">{openingStrengthResult.score}%</span>
+                            <span className="text-lg font-bold [color:var(--sun-soft)]">{openingStrengthResult.score}%</span>
                             <p className="text-[11px] text-slate-400">{openingStrengthResult.summary}</p>
                           </div>
                           <div className="space-y-1.5">
@@ -5471,7 +5497,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                                 className={`flex items-start gap-2 p-2 rounded-lg text-[11px] ${
                                   item.present
                                     ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-100'
-                                    : 'bg-amber-500/10 border border-amber-500/30 text-amber-100'
+                                    : '[background-color:var(--sun-acc-10)] border [border-color:var(--sun-acc-30)] [color:var(--sun-soft)]'
                                 }`}
                               >
                                 {item.present ? (
@@ -5617,6 +5643,22 @@ export const EditorView: React.FC<EditorViewProps> = ({
           visualBible={book.visualBible}
           onApplyAvatarToCharacter={handleApplyAvatarToCharacter}
           onAddNewCharacterWithArt={handleAddNewCharacterWithArt}
+          preferredAiModelId={book.preferredAiModelId || undefined}
+        />
+      )}
+
+      {/* ШЛЯХ ГЕРОЯ — конструктор сюжетної дуги за мономіфом */}
+      {showHeroJourney && (
+        <HeroJourneyModal
+          isOpen={showHeroJourney}
+          onClose={() => setShowHeroJourney(false)}
+          book={book}
+          preferredAiModelId={book.preferredAiModelId || undefined}
+          currentModelLabel={
+            effectiveAiModelId
+              ? aiCoreModels.find((m) => m.id === effectiveAiModelId)?.label || effectiveAiModelId
+              : t('editor.aiModelSelectAuto')
+          }
         />
       )}
 
@@ -5674,7 +5716,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
           >
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
-                <BookMarked className="w-5 h-5 text-amber-400" />
+                <BookMarked className="w-5 h-5 [color:var(--sun-acc)]" />
                 <h3 className="text-sm font-bold">{t('editor.insertFootnoteHeading')}</h3>
               </div>
               <button onClick={() => setShowFootnoteModal(false)} className="text-slate-400 hover:text-white font-bold">✕</button>
@@ -5712,7 +5754,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
               <button
                 onClick={handleInsertFootnote}
                 disabled={!modalFnText.trim()}
-                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-bold text-xs"
+                className="px-4 py-2 rounded-xl [background-color:var(--sun-acc)] hover:[background-color:var(--sun-acc-80)] disabled:opacity-40 text-slate-950 font-bold text-xs"
               >
                 {t('editor.insertFootnoteBtnWithNum', { n: String((book.footnotes || []).length + 1) })}
               </button>
@@ -5733,7 +5775,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
           >
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
-                <QrCode className="w-5 h-5 text-amber-400" />
+                <QrCode className="w-5 h-5 [color:var(--sun-acc)]" />
                 <h3 className="text-sm font-bold">{t('editor.insertQrHeading')}</h3>
               </div>
               <button onClick={() => setShowQrModal(false)} className="text-slate-400 hover:text-white font-bold">✕</button>
@@ -5787,7 +5829,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
               <button
                 onClick={handleInsertQR}
                 disabled={!modalQrTitle.trim() || !modalQrPayload.trim()}
-                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-bold text-xs"
+                className="px-4 py-2 rounded-xl [background-color:var(--sun-acc)] hover:[background-color:var(--sun-acc-80)] disabled:opacity-40 text-slate-950 font-bold text-xs"
               >
                 {t('editor.generateAndInsertQr')}
               </button>
@@ -5808,7 +5850,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
           >
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
-                <GraduationCap className="w-5 h-5 text-amber-400" />
+                <GraduationCap className="w-5 h-5 [color:var(--sun-acc)]" />
                 <h3 className="text-sm font-bold">{t('editor.insertCourseTagHeading')}</h3>
               </div>
               <button onClick={() => setShowCourseTagModal(false)} className="text-slate-400 hover:text-white font-bold">✕</button>
@@ -5842,7 +5884,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
               <button
                 onClick={handleAddCourseTag}
                 disabled={!modalCourseTagLabel.trim() || !selectedText.trim()}
-                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-bold text-xs"
+                className="px-4 py-2 rounded-xl [background-color:var(--sun-acc)] hover:[background-color:var(--sun-acc-80)] disabled:opacity-40 text-slate-950 font-bold text-xs"
               >
                 {t('editor.createCourseTagBtn')}
               </button>
@@ -5854,7 +5896,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
       {/* Вільне вікно учасників сцени (після «Відкріпити») */}
       {participantsUnpinned && (
         <DraggablePanel
-          title={<span className="flex items-center gap-2"><Users className="w-3.5 h-3.5 text-amber-400" /> {t('editor.sceneParticipants', { n: sceneCharacters.length })}</span>}
+          title={<span className="flex items-center gap-2"><Users className="w-3.5 h-3.5 [color:var(--sun-acc)]" /> {t('editor.sceneParticipants', { n: sceneCharacters.length })}</span>}
           initialWidth={420}
           initialHeight={620}
           minWidth={320}
@@ -5973,7 +6015,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 {char.avatarUrl ? (
                   <img src={char.avatarUrl} alt="" className="w-7 h-7 rounded-lg object-cover shrink-0 border border-violet-500/30" />
                 ) : (
-                  <div className="w-7 h-7 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-amber-400 shrink-0">
+                  <div className="w-7 h-7 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold [color:var(--sun-acc)] shrink-0">
                     {char.name?.charAt(0) || '?'}
                   </div>
                 )}
@@ -6061,7 +6103,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
             }}
             className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-white/[0.06] text-left transition-colors"
           >
-            <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <AlertCircle className="w-3.5 h-3.5 [color:var(--sun-acc)] shrink-0" />
             <span className="flex-1 text-slate-200">{t('editor.contextMenuIssues')}</span>
             {showAiIssuesWidget && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
           </button>
@@ -6109,7 +6151,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
               <Volume2 className="w-3.5 h-3.5 text-sky-400 shrink-0" />
               <span className="flex-1 text-slate-200">{t('editor.contextMenuNarrate')}</span>
               {!narrationAccess.hasAccess && !narrationAccess.loading && (
-                <span className="text-[9px] font-mono font-bold text-amber-400 uppercase">Pro</span>
+                <span className="text-[9px] font-mono font-bold [color:var(--sun-acc)] uppercase">Pro</span>
               )}
               <ChevronDown
                 className={`w-3.5 h-3.5 text-slate-500 shrink-0 transition-transform ${showNarrationSubmenu ? 'rotate-180' : ''}`}
@@ -6226,7 +6268,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                         {c.avatarUrl ? (
                           <img src={c.avatarUrl} alt="" className="w-6 h-6 rounded-md object-cover shrink-0" />
                         ) : (
-                          <div className="w-6 h-6 rounded-md bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-amber-400 shrink-0">
+                          <div className="w-6 h-6 rounded-md bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold [color:var(--sun-acc)] shrink-0">
                             {c.name?.charAt(0) || '?'}
                           </div>
                         )}
@@ -6250,12 +6292,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
       {/* Меню правого кліку по фото: «Проаналізувати фото і згенерувати AI текст книги» → 1/2/3 абзаци. */}
       {aiImageMenu && (
         <div
-          className="fixed z-[80] w-60 rounded-2xl bg-slate-950 border border-amber-500/40 shadow-2xl shadow-black/60 p-1.5 text-xs"
+          className="fixed z-[80] w-60 rounded-2xl bg-slate-950 border [border-color:var(--sun-acc-40)] shadow-2xl shadow-black/60 p-1.5 text-xs"
           style={{ left: aiImageMenu.x, top: aiImageMenu.y }}
           onMouseDown={(e) => e.stopPropagation()}
           onContextMenu={(e) => e.preventDefault()}
         >
-          <div className="px-2.5 py-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-400">
+          <div className="px-2.5 py-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider [color:var(--sun-acc)]">
             <Sparkles className="w-3 h-3 shrink-0" />
             {t('editor.aiImageMenuHeading')}
           </div>
@@ -6293,12 +6335,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
       {/* Пікер робочого модуля — рушій книги не аналізує фото (Q8/Q14 grilling-сесії). */}
       {aiEnginePicker && (
         <div
-          className="fixed z-[80] w-72 rounded-2xl bg-slate-950 border border-amber-500/40 shadow-2xl shadow-black/60 p-1.5 text-xs"
+          className="fixed z-[80] w-72 rounded-2xl bg-slate-950 border [border-color:var(--sun-acc-40)] shadow-2xl shadow-black/60 p-1.5 text-xs"
           style={{ left: aiEnginePicker.x, top: aiEnginePicker.y }}
           onMouseDown={(e) => e.stopPropagation()}
           onContextMenu={(e) => e.preventDefault()}
         >
-          <div className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-400">
+          <div className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider [color:var(--sun-acc)]">
             {t('editor.aiEnginePickerHeading')}
           </div>
           {(() => {
@@ -6365,13 +6407,13 @@ export const EditorView: React.FC<EditorViewProps> = ({
         куди подівся текст і як його повернути. Порожня сіра пляма позаду
         читалась би як поламаний екран, а не як «вікно відкрите».
       */}
-      <div className="flex-1 min-h-0 flex items-center justify-center bg-slate-900 text-center p-8">
+      <div style={sunVars} className="flex-1 min-h-0 flex items-center justify-center bg-slate-900 text-center p-8">
         <div className="max-w-sm space-y-3">
-          <Maximize2 className="w-8 h-8 text-amber-400 mx-auto" />
+          <Maximize2 className="w-8 h-8 [color:var(--sun-acc)] mx-auto" />
           <p className="text-sm text-slate-300">{t('editor.focusWindowPlaceholder')}</p>
           <button
             onClick={() => setIsFocusWindow(false)}
-            className="px-4 py-2 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-200 text-xs font-bold hover:bg-amber-500/30"
+            className="px-4 py-2 rounded-xl [background-color:var(--sun-acc-20)] border [border-color:var(--sun-acc-40)] [color:var(--sun-soft)] text-xs font-bold hover:[background-color:var(--sun-acc-30)]"
           >
             {t('editor.focusWindowReturn')}
           </button>
@@ -6393,7 +6435,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
       <DraggablePanel
         title={
           <span className="flex items-center gap-2">
-            <Maximize2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <Maximize2 className="w-3.5 h-3.5 [color:var(--sun-acc)] shrink-0" />
             {activeSection?.title || activeChapter?.title || t('editor.focusWindowTitle')}
           </span>
         }

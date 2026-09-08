@@ -3623,7 +3623,7 @@ ${criteriaList}
   // 8d. Аналіз емоційної дуги книги з опису сюжету.
   app.post('/api/ai/analyze-emotional-arc', async (req, res) => {
     try {
-      const { storyOutline, chaptersCount } = req.body || {};
+      const { storyOutline, chaptersCount, modelId } = req.body || {};
       if (!storyOutline || !String(storyOutline).trim()) {
         return res.status(400).json({ error: 'Опишіть сюжет для аналізу.' });
       }
@@ -3652,15 +3652,24 @@ ${criteriaList}
   ]
 }`;
 
+      // «Шлях героя» надсилає modelId = поточний рушій книги (вибраний у
+      // панелі інструментів). Якщо рушій налаштований — ідемо в ядро сайту
+      // з цією моделлю; інакше (немає ключа) — демо-відповідь, як і раніше.
+      const requestedModel = (modelId || '').trim();
+      const engine = requestedModel ? resolveChatEngine(requestedModel) : 'gemini';
+
       let result: any;
-      if (ai) {
-        const raw = await generateWithGemini(
-          `Опис сюжету:\n"""${String(storyOutline).slice(0, 4000)}"""\n\nКількість розділів: ${count}`,
-          systemPrompt,
-          true,
-          { req, label: 'Аналіз емоційної дуги' }
-        );
-        result = JSON.parse(raw);
+      if (engineConfigured(engine)) {
+        const raw = await generateAiText({
+          engine,
+          modelId: requestedModel || GEMINI_MODEL,
+          prompt: `Опис сюжету:\n"""${String(storyOutline).slice(0, 4000)}"""\n\nКількість розділів: ${count}`,
+          systemInstruction: systemPrompt,
+          json: true,
+          req,
+          label: 'Аналіз емоційної дуги',
+        });
+        result = JSON.parse(raw.text);
       } else {
         const chapters = Array.from({ length: count }, (_, i) => {
           const mid = Math.floor(count / 2);
