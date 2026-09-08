@@ -32,6 +32,7 @@
 
 import { GoogleGenAI } from '@google/genai';
 import {
+  ChatProviderError,
   PROVIDERS,
   resolveEngine as resolveChatEngine,
   type EngineId as ChatEngineId,
@@ -243,6 +244,67 @@ function isTransientAiError(err: unknown): boolean {
   );
 }
 
+/**
+ * Перетворює сиру помилку провайдера на зрозумілий український текст.
+ *
+ * SDK Gemini (@google/genai) кидає ApiError, у якого `message` — це СИРИЙ
+ * JSON тіла відповіді (напр. `{"error":{"code":429,"message":"You exceeded
+ * your current quota...","status":"RESOURCE_EXHAUSTED"}}`). Показувати його
+ * автору в модалці не можна, тож тут він стає людським повідомленням.
+ *
+ * Повертає ChatProviderError, щоб наявні маршрути server.ts, які вже
+ * роблять `err instanceof ChatProviderError ? err.status : 500`, автоматично
+ * віддавали і правильний статус, і людський текст без правок на місцях.
+ */
+export function humanizeAiError(err: unknown, engine?: AiTextEngine): ChatProviderError {
+  if (err instanceof ChatProviderError) return err;
+
+  const anyErr = err as { message?: unknown; status?: unknown };
+  const raw = String(anyErr?.message ?? err ?? '').trim();
+  const status = Number(anyErr?.status ?? 0);
+
+  // Вичерпано квоту/ліміт запитів (429) або ресурс провайдера вичерпано.
+  if (status === 429 || /\b429\b/.test(raw) || /RESOURCE_EXHAUSTED|quota/i.test(raw)) {
+    return new ChatProviderError(
+      429,
+      'Вичерпано ліміт запитів до моделі ШІ. Зачекайте кілька хвилин і спробуйте ще раз або оберіть іншу модель у панелі інструментів.'
+    );
+  }
+
+  // Недійсний, відсутній або прострочений ключ.
+  if (
+    status === 401 ||
+    status === 403 ||
+    /API_KEY_INVALID|invalid api key|api key not valid|api key expired|not configured/i.test(raw)
+  ) {
+    return new ChatProviderError(
+      401,
+      'Ключ доступу до моделі ШІ недійсний або не налаштований. Перевірте ключ у налаштуваннях і спробуйте знову.'
+    );
+  }
+
+  // Якщо в message прийшов JSON із вкладеним повідомленням — дістанемо його.
+  try {
+    const parsed = JSON.parse(raw);
+    const inner = parsed?.error?.message || parsed?.message;
+    if (typeof inner === 'string' && inner.trim()) {
+      return new ChatProviderError(status || 500, `Помилка моделі ШІ: ${inner.trim().slice(0, 240)}`);
+    }
+  } catch {
+    /* не JSON — обробляємо нижче */
+  }
+
+  // Якщо повідомлення вже людське (короткий не-JSON текст) — показуємо як є.
+  if (raw && raw.length <= 240 && !raw.startsWith('{')) {
+    return new ChatProviderError(status || 500, raw);
+  }
+
+  return new ChatProviderError(
+    500,
+    `Модель ШІ${engine ? ` (${engine})` : ''} не відповіла. Спробуйте ще раз.`
+  );
+}
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -275,7 +337,7 @@ export async function generateText(
         // спробу: інакше один клік автора давав би три записи «провал»
         // у бізнес-аналітиці й спотворював би статистику надійності.
         await logTextUsage(ctx, modelId, p.engine, 0, 0, false);
-        throw err;
+        throw humanizeAiError(err, p.engine);
       }
       console.warn(
         `[aiCore] ${p.label}: тимчасова відмова ${p.engine} (спроба ${attempt + 1}/${TRANSIENT_RETRIES + 1}), ` +
