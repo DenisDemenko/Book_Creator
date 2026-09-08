@@ -1,4 +1,5 @@
 import type { Book } from '../types';
+import { calculateWordCount } from './helpers';
 
 /**
  * Теги-вставки в тексті книги: власний абзац, що починається з «тега: ».
@@ -52,4 +53,45 @@ export function insertTextAfterTag(content: string, tagName: string, text: strin
   const next = [...paragraphs];
   next.splice(index + 1, 0, text);
   return next.join('\n\n');
+}
+
+/**
+ * Вставляє `text` після тегу `tag` у відповідний розділ книги.
+ *
+ * На відміну від `insertTextAfterTag` (працює з сирим `content`), ця
+ * функція приймає цілу книгу й повертає її оновлену копію з перерахованим
+ * `wordCount` і `lastModified` у секції-приймачі. Використовується
+ * тренажером «Стиль письменника»: відповідь автора додається в рукопис за
+ * тегом, який письменник заздалегідь залишив у тексті (`тега: #...`).
+ *
+ * Повертає null, якщо тегу або секції вже немає (тег видалили після того,
+ * як список був зібраний) — викликач показує помилку й не чіпає книгу.
+ */
+export function insertTextAfterTagInBook(book: Book, tag: BookTag, text: string): Book | null {
+  if (!text.trim()) return null;
+  const chapter = book.chapters.find((c) => c.id === tag.chapterId);
+  const section = chapter?.sections.find((s) => s.id === tag.sectionId);
+  if (!chapter || !section) return null;
+
+  const newContent = insertTextAfterTag(section.content, tag.name, text);
+  if (newContent === null) return null;
+
+  const updatedChapters = book.chapters.map((c) => {
+    if (c.id !== chapter.id) return c;
+    return {
+      ...c,
+      sections: c.sections.map((s) =>
+        s.id !== section.id
+          ? s
+          : {
+              ...s,
+              content: newContent,
+              wordCount: calculateWordCount(newContent),
+              lastModified: new Date().toISOString(),
+            }
+      ),
+    };
+  });
+
+  return { ...book, chapters: updatedChapters, updatedAt: new Date().toISOString() };
 }

@@ -1871,7 +1871,13 @@ export default function App() {
           />
         )}
 
-        {currentTab === 'trainers' && <TrainersView />}
+        {currentTab === 'trainers' && (
+          <TrainersView
+            book={book}
+            onSendTextToChapter={handleSendChatTextToChapter}
+            onUpdateBook={handleUpdateBook}
+          />
+        )}
 
         {currentTab === 'structure' && (
           <BookStructureBuilder

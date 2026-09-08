@@ -3752,21 +3752,76 @@ ${criteriaList}
       { key: 'subtext', labelUk: 'Підтекст' },
       { key: 'characterReveal', labelUk: 'Розкриття характеру' },
     ],
+    // 8 компонентів авторського стилю — тренажер «Стиль письменника».
+    'style-thought': [
+      { key: 'depth', labelUk: 'Глибина думки' },
+      { key: 'subtext', labelUk: 'Прихований підтекст' },
+      { key: 'position', labelUk: 'Авторська позиція' },
+    ],
+    'style-will': [
+      { key: 'courage', labelUk: 'Сміливість вислову' },
+      { key: 'honesty', labelUk: 'Чесність позиції' },
+      { key: 'energy', labelUk: 'Енергія переконання' },
+    ],
+    'style-imagery': [
+      { key: 'vividness', labelUk: 'Яскравість образу' },
+      { key: 'freshness', labelUk: 'Свіжість метафори' },
+      { key: 'cinematic', labelUk: 'Кінематографічність' },
+    ],
+    'style-rhythm': [
+      { key: 'tempo', labelUk: 'Темп і динаміка' },
+      { key: 'musicality', labelUk: 'Музичність речень' },
+      { key: 'montage', labelUk: 'Монтаж напруги' },
+    ],
+    'style-dialogue': [
+      { key: 'naturalness', labelUk: 'Природність мовлення' },
+      { key: 'subtext', labelUk: 'Підтекст реплік' },
+      { key: 'voice', labelUk: 'Характерність голосу' },
+    ],
+    'style-lexis': [
+      { key: 'precision', labelUk: 'Точність слів' },
+      { key: 'markers', labelUk: 'Унікальні маркери' },
+      { key: 'tone', labelUk: 'Тон і рівень мови' },
+    ],
+    'style-emotion': [
+      { key: 'authenticity', labelUk: 'Достовірність емоції' },
+      { key: 'impact', labelUk: 'Глибина впливу' },
+      { key: 'somatics', labelUk: 'Тілесність передачі' },
+    ],
+    'style-detail': [
+      { key: 'accuracy', labelUk: 'Точність деталі' },
+      { key: 'balance', labelUk: 'Баланс деталей' },
+      { key: 'presence', labelUk: 'Ефект присутності' },
+    ],
+  };
+
+  const TRAINER_LABELS: Record<string, string> = {
+    character: 'Персонаж',
+    dialogue: 'Діалог',
+    'style-thought': 'Стиль письменника — Думка',
+    'style-will': 'Стиль письменника — Воля',
+    'style-imagery': 'Стиль письменника — Образність',
+    'style-rhythm': 'Стиль письменника — Ритм',
+    'style-dialogue': 'Стиль письменника — Діалоги',
+    'style-lexis': 'Стиль письменника — Лексика',
+    'style-emotion': 'Стиль письменника — Емоційність',
+    'style-detail': 'Стиль письменника — Деталізація',
   };
 
   app.post('/api/ai/evaluate-trainer', async (req, res) => {
     try {
-      const { trainerType, taskPrompt, userAnswer } = req.body || {};
+      const { trainerType, taskPrompt, userAnswer, trainerLabel, bookContext } = req.body || {};
       const criteria = TRAINER_CRITERIA[trainerType];
       if (!criteria) {
-        return res.status(400).json({ error: 'Підтримувані тренажери: character, dialogue.' });
+        return res.status(400).json({ error: 'Невідомий trainerType: підтримуються character, dialogue та style-thought/will/imagery/rhythm/dialogue/lexis/emotion/detail.' });
       }
       if (!userAnswer || !String(userAnswer).trim()) {
         return res.status(400).json({ error: 'Потрібна відповідь для оцінки.' });
       }
 
+      const label = trainerLabel || TRAINER_LABELS[trainerType] || trainerType;
       const criteriaList = criteria.map((c) => `- ${c.key} (${c.labelUk})`).join('\n');
-      const systemPrompt = `Ти — прискіпливий, але доброзичливий AI-тренер письменницької майстерності. Оцінюєш вправу тренажера «${trainerType === 'character' ? 'Персонаж' : 'Діалог'}» СТРОГО за трьома критеріями (кожен від 0 до 100):
+      const systemPrompt = `Ти — прискіпливий, але доброзичливий AI-тренер письменницької майстерності. Оцінюєш вправу тренажера «${label}» СТРОГО за трьома критеріями (кожен від 0 до 100):
 ${criteriaList}
 Також дай 2-3 короткі практичні поради українською та загальний бал (середнє по критеріях, округлене).
 Поверни ЛИШЕ JSON:
@@ -3776,7 +3831,10 @@ ${criteriaList}
   "tips": ["...", "..."]
 }`;
 
-      const userPrompt = `Завдання тренажера: ${taskPrompt || ''}\n\nВідповідь автора:\n"""${String(userAnswer).slice(0, 4000)}"""`;
+      const bookContextBlock = bookContext && String(bookContext).trim()
+        ? `\n\nУривок з книги автора (контекст для оцінки):\n"""${String(bookContext).slice(0, 2500)}"""`
+        : '';
+      const userPrompt = `Завдання тренажера (питання ШІ до автора): ${taskPrompt || ''}${bookContextBlock}\n\nВідповідь автора:\n"""${String(userAnswer).slice(0, 4000)}"""`;
 
       let parsed: any;
       if (ai) {
@@ -3796,9 +3854,23 @@ ${criteriaList}
         };
       }
 
-      const overallScore = typeof parsed.overallScore === 'number' ? parsed.overallScore : 70;
+      // Нормалізація балів. Модель час від часу повертає overallScore за
+      // шкалою 0–10 (напр. «9.2») або окремий критерій поза 0–100 — тоді
+      // загальний бал і XP в UI поїдуть. Тому: кожен критерій затискаємо в
+      // 0–100, а загальний бал завжди РАХУЄМО як середнє по критеріях
+      // (саме це й обіцяє системний промт), а не беремо з відповіді моделі.
+      const rawCriteria: any[] = Array.isArray(parsed.criteria) ? parsed.criteria : [];
+      const criteriaOut = rawCriteria.map((c) => ({
+        key: typeof c?.key === 'string' ? c.key : '',
+        label: typeof c?.label === 'string' ? c.label : '',
+        score: Math.max(0, Math.min(100, Math.round(Number(c?.score) || 0))),
+      }));
+      const overallScore = criteriaOut.length
+        ? Math.round(criteriaOut.reduce((acc, c) => acc + c.score, 0) / criteriaOut.length)
+        : (typeof parsed.overallScore === 'number' ? Math.max(0, Math.min(100, parsed.overallScore)) : 70);
+
       res.json({
-        criteria: Array.isArray(parsed.criteria) ? parsed.criteria : [],
+        criteria: criteriaOut,
         overallScore,
         tips: Array.isArray(parsed.tips) ? parsed.tips : [],
         xpEarned: Math.round(30 + (overallScore / 100) * 40),

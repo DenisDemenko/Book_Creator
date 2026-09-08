@@ -1,19 +1,32 @@
 import React, { useState } from 'react';
-import { Dumbbell, Users, MessageCircle } from 'lucide-react';
+import { Dumbbell, Users, MessageCircle, Feather } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext';
+import type { Book } from '../types';
 import { CharacterTrainer } from './CharacterTrainer';
 import { DialogueTrainer } from './DialogueTrainer';
+import { StyleTrainer } from './StyleTrainer';
 
-type TrainerKind = 'character' | 'dialogue';
+type TrainerKind = 'style' | 'character' | 'dialogue';
+
+interface TrainersViewProps {
+  book: Book;
+  /** Додає текст у кінець обраного розділу книги (той самий місток, що й у чаті). */
+  onSendTextToChapter: (chapterId: string, text: string, sectionId?: string) => void;
+  /** Записує зміну книги (для вставки за тегом у тренажері «Стиль письменника»). */
+  onUpdateBook?: (book: Book, logAction?: string, logDetails?: string) => void;
+}
 
 /**
  * Фаза 2, 2.2: «Пілотні тренажери». Один top-level розділ навігації з
- * перемикачем між двома пілотними тренажерами — так само, як MasteryView
- * перемикає підвкладки, щоб не плодити ще два окремих пункти в шапці.
+ * перемикачем між трьома тренажерами — так само, як MasteryView перемикає
+ * підвкладки, щоб не плодити ще окремих пунктів у шапці.
+ *
+ * Порядок вкладок: «Стиль письменника» стоїть ПЕРШИМ, перед «Персонаж» і
+ * «Діалог» — за постановкою власника.
  */
-export const TrainersView: React.FC = () => {
+export const TrainersView: React.FC<TrainersViewProps> = ({ book, onSendTextToChapter, onUpdateBook }) => {
   const { t } = useLanguage();
-  const [active, setActive] = useState<TrainerKind>('character');
+  const [active, setActive] = useState<TrainerKind>('style');
 
   return (
     <div className="flex-1 p-4 lg:p-6 overflow-y-auto bg-slate-900 text-slate-100 space-y-5">
@@ -28,6 +41,15 @@ export const TrainersView: React.FC = () => {
       </div>
 
       <div className="max-w-3xl mx-auto flex items-center gap-2">
+        <button
+          onClick={() => setActive('style')}
+          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
+            active === 'style' ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20' : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+          }`}
+        >
+          <Feather className="w-4 h-4" />
+          <span>{t('trainersView.styleTitle')}</span>
+        </button>
         <button
           onClick={() => setActive('character')}
           className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
@@ -48,7 +70,9 @@ export const TrainersView: React.FC = () => {
         </button>
       </div>
 
-      {active === 'character' ? <CharacterTrainer /> : <DialogueTrainer />}
+      {active === 'style' && <StyleTrainer book={book} onSendTextToChapter={onSendTextToChapter} onUpdateBook={onUpdateBook} />}
+      {active === 'character' && <CharacterTrainer />}
+      {active === 'dialogue' && <DialogueTrainer />}
     </div>
   );
 };
