@@ -507,7 +507,7 @@ registerModerationRoutes(app);
   // 1. AI Text Editing with Diff Proposal
   app.post('/api/ai/edit-text', async (req, res) => {
     try {
-      const { text, instruction, category, bookContext, sceneContext, styleGuide } = req.body;
+      const { text, instruction, category, bookContext, sceneContext, styleGuide, modelId, bookId } = req.body;
       if (!text || text.trim().length === 0) {
         return res.status(400).json({ error: 'Потрібен текст для редагування.' });
       }
@@ -563,27 +563,50 @@ registerModerationRoutes(app);
 
 Поверни JSON з відредагованим текстом.`;
 
+      // Раніше цей маршрут жорстко викликав Gemini напряму
+      // (generateWithGemini), ігноруючи вибір моделі автора в AI
+      // Асистенті («GPT-4o» тощо лишалось без ефекту — кнопка «Покращити
+      // AI» завжди йшла в Gemini). Тепер — та сама мультипровайдерна
+      // система (resolveCoachEngine/generateAiText), що й AI-коуч:
+      // автор може обрати Claude/GPT/іншу модель, і саме вона піде в
+      // запит. Локальна симуляція-фолбек лишається ТІЛЬКИ на випадок,
+      // коли жодного рушія взагалі не налаштовано (ні власний ключ
+      // автора, ні серверний .env) — той самий офлайн-режим, що був і
+      // раніше для розробки без жодного ключа.
       let resultJson: any;
-      if (ai) {
-        const rawResponse = await generateWithGemini(userPrompt, systemPrompt, true, {
+      try {
+        const userId = req.principal?.id as string | undefined;
+        const { resolvedModelId, engine, userKey } = await resolveCoachEngine(userId, modelId);
+        const result = await generateAiText({
+          engine,
+          modelId: resolvedModelId,
+          prompt: userPrompt,
+          systemInstruction: systemPrompt,
+          json: true,
+          apiKeyOverride: userKey,
           req,
           label: 'Редагування тексту',
-          bookId: req.body?.bookId,
+          bookId,
         });
-        resultJson = JSON.parse(rawResponse);
-      } else {
-        // High quality fallback simulation for instant offline experience
-        resultJson = {
-          proposedText: text.replace(/був/g, 'став').replace(/дуже/g, 'надзвичайно') + '\n\n(AI-редакція: мовні звороти гармонізовано, темпоритм підвищено)',
-          explanation: 'Покращено синаптичний темпоритм оповіді, усунено тавтологічні повтори та підкреслено художню атмосферу.',
-          changesCount: 4,
-          diffSummary: ['Очищено від надлишкових займенників', 'Посилено образність дієслів', 'Гармонізовано ритміку фрази']
-        };
+        resultJson = JSON.parse(result.text);
+      } catch (engineErr: any) {
+        if (engineErr instanceof ChatProviderError && engineErr.status === 503) {
+          // Жодного рушія не налаштовано взагалі — офлайн-симуляція.
+          resultJson = {
+            proposedText: text.replace(/був/g, 'став').replace(/дуже/g, 'надзвичайно') + '\n\n(AI-редакція: мовні звороти гармонізовано, темпоритм підвищено)',
+            explanation: 'Покращено синаптичний темпоритм оповіді, усунено тавтологічні повтори та підкреслено художню атмосферу.',
+            changesCount: 4,
+            diffSummary: ['Очищено від надлишкових займенників', 'Посилено образність дієслів', 'Гармонізовано ритміку фрази']
+          };
+        } else {
+          throw engineErr;
+        }
       }
 
       res.json(resultJson);
     } catch (err: any) {
       console.error('Error in /api/ai/edit-text:', err);
+      if (err instanceof ChatProviderError) return res.status(err.status).json({ error: err.message });
       res.status(500).json({ error: err.message || 'Помилка генерації AI пропозиції' });
     }
   });

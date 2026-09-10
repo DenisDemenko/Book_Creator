@@ -3291,6 +3291,11 @@ export const EditorView: React.FC<EditorViewProps> = ({
       const response = await fetch('/api/ai/edit-text', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        // modelId/bookId — раніше цей запит завжди йшов у Gemini напряму,
+        // ігноруючи модель, обрану автором в AI Асистенті (effectiveAiModelId,
+        // те саме поле book.preferredAiModelId, яким уже користується
+        // AI-коуч). Тепер сервер резолвить обраний рушій замість того, щоб
+        // мовчки підміняти його на Gemini.
         body: JSON.stringify({
           text: textToProcess,
           instruction: customAiPrompt || `Застосуй художній режим: ${actionCategory}`,
@@ -3298,6 +3303,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
           bookContext: `${book.title}, жанр: ${book.genre}`,
           sceneContext: activeSection.scene ? `${activeSection.scene.title}: ${activeSection.scene.conflict}` : '',
           styleGuide: activeStyleGuide || undefined,
+          modelId: effectiveAiModelId || undefined,
+          bookId: book.id,
         }),
       });
 
