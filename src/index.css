@@ -309,6 +309,168 @@
   color: #1e293b;
 }
 
+/* --- LIQUID GLASS (вода) — редизайн світлої теми за мокапом
+   "FusionWrite - Liquid Glass Document Editor" (задача: зберегти сонечко,
+   додати ефект світлових хвиль як від води на фоні застосунку).
+   Токени нижче — з мокапу 1:1 (--glass-*), значення .glass-panel і
+   похідних класів вище (рядки ~400+) лишаються — тут лише нові змінні й
+   нові утилітарні класи для скляних елементів, яких раніше не було
+   (пігулки, активна вкладка, кнопка з підсвіткою, водяний повзунок). */
+[data-theme="light"] {
+  --glass-border-light: rgba(255, 255, 255, 0.7);
+  --glass-border-dark: rgba(186, 230, 253, 0.4);
+  --glass-bg-subtle: rgba(255, 255, 255, 0.32);
+  --glass-bg-hover: rgba(255, 255, 255, 0.5);
+  --glass-glow: 0 8px 32px 0 rgba(31, 78, 121, 0.12);
+  --liquid-bevel: inset 0 1px 1px 0 rgba(255, 255, 255, 0.8), inset 0 -1px 2px 0 rgba(56, 189, 248, 0.25);
+  --water-tint-50: #f0f9ff;
+  --water-tint-100: #e0f2fe;
+  --water-tint-200: #bae6fd;
+  --water-tint-300: #7dd3fc;
+  --water-tint-400: #38bdf8;
+  --water-tint-500: #0ea5e9;
+  --water-tint-600: #0284c7;
+}
+
+/* Фон усього застосунку (лише кореневий контейнер App.tsx, не всі
+   елементи з bg-slate-950 — інакше карти/модалки теж стали б «водяними»).
+   Статичні радіальні плями як у мокапі + повільний дрейф (@keyframes
+   waterDrift нижче) — це і є «ефект світлових хвиль як від води». */
+[data-theme="light"] .app-shell-root {
+  background-color: #eaf6fd;
+  background-image:
+    radial-gradient(at 18% 12%, rgba(255, 255, 255, 0.9) 0px, transparent 38%),
+    radial-gradient(at 80% 18%, rgba(224, 242, 254, 0.85) 0px, transparent 42%),
+    radial-gradient(at 30% 60%, rgba(186, 230, 253, 0.5) 0px, transparent 48%),
+    radial-gradient(at 88% 78%, rgba(125, 211, 252, 0.4) 0px, transparent 50%),
+    radial-gradient(at 50% 95%, rgba(14, 165, 233, 0.12) 0px, transparent 60%);
+  background-attachment: fixed;
+  background-size: 140% 140%;
+  animation: waterDrift 42s ease-in-out infinite alternate;
+}
+@keyframes waterDrift {
+  0%   { background-position: 0% 0%; }
+  50%  { background-position: 30% 20%; }
+  100% { background-position: 10% 35%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-theme="light"] .app-shell-root { animation: none; }
+}
+
+/* Скляна пігулка (кнопка/чип) — для нових панелей (тулбар «Текст/AI
+   Асистент», вставка, вода й каустика). Не чіпає наявні кнопки, доки їх
+   явно не позначено класом glass-pill. */
+[data-theme="light"] .glass-pill {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72) 0%, rgba(240, 249, 255, 0.4) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow:
+    0 4px 12px -2px rgba(14, 165, 233, 0.15),
+    inset 0 1.5px 1.5px 0 rgba(255, 255, 255, 0.95),
+    inset 0 -1px 2px 0 rgba(56, 189, 248, 0.2);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+[data-theme="light"] .glass-pill:hover {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.88) 0%, rgba(224, 242, 254, 0.6) 100%);
+  box-shadow:
+    0 6px 18px -2px rgba(14, 165, 233, 0.25),
+    inset 0 2px 2px 0 rgba(255, 255, 255, 1),
+    inset 0 -1px 2px 0 rgba(56, 189, 248, 0.3);
+  transform: translateY(-0.5px);
+}
+[data-theme="light"] .glass-pill:active {
+  transform: translateY(1px);
+  box-shadow: 0 2px 6px -1px rgba(14, 165, 233, 0.2), inset 0 1px 1px 0 rgba(0, 0, 0, 0.05);
+}
+[data-theme="light"] .glass-pill-active {
+  background: linear-gradient(180deg, rgba(14, 165, 233, 0.22) 0%, rgba(56, 189, 248, 0.38) 100%) !important;
+  border-color: rgba(14, 165, 233, 0.6) !important;
+  color: #0369a1 !important;
+  font-weight: 700 !important;
+  box-shadow: inset 0 1px 3px rgba(14, 165, 233, 0.35), 0 2px 6px rgba(14, 165, 233, 0.2) !important;
+}
+[data-theme="light"] .glass-active-blue {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.88) 0%, rgba(186, 230, 253, 0.72) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.95);
+  box-shadow:
+    0 8px 24px -4px rgba(14, 165, 233, 0.35),
+    inset 0 2px 3px 0 rgba(255, 255, 255, 1),
+    inset 0 -2px 4px 0 rgba(2, 132, 199, 0.3);
+}
+[data-theme="light"] .btn-action-glow {
+  background: linear-gradient(180deg, #ff8a4c 0%, #f95f24 100%);
+  border: 1px solid rgba(255, 220, 190, 0.8);
+  color: #fff7ed;
+  box-shadow:
+    0 0 20px 2px rgba(249, 95, 36, 0.4),
+    0 4px 14px 0 rgba(234, 88, 12, 0.35),
+    inset 0 1.5px 2px 0 rgba(255, 255, 255, 0.7),
+    inset 0 -2px 3px 0 rgba(154, 52, 18, 0.4);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+[data-theme="light"] .btn-action-glow:hover {
+  background: linear-gradient(180deg, #ffa069 0%, #fb6a33 100%);
+  box-shadow:
+    0 0 26px 4px rgba(249, 95, 36, 0.55),
+    0 6px 20px 0 rgba(234, 88, 12, 0.4),
+    inset 0 2px 3px 0 rgba(255, 255, 255, 0.85);
+}
+[data-theme="light"] .caustic-ripple {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  border: 1px solid rgba(14, 165, 233, 0.5);
+  box-shadow: 0 0 18px 2px rgba(255, 255, 255, 0.5), inset 0 0 14px 2px rgba(255, 255, 255, 0.35);
+  animation: rippleAnim 4s ease-out infinite;
+  transition: opacity 0.5s ease;
+}
+@keyframes rippleAnim {
+  0% { transform: scale(0.6); opacity: 0.8; }
+  50% { opacity: 0.4; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+[data-theme="light"] .water-range-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 5px;
+  border-radius: 9999px;
+  background: rgba(14, 165, 233, 0.25);
+  outline: none;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+[data-theme="light"] .water-range-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid #0284c7;
+  box-shadow: 0 2px 6px rgba(14, 165, 233, 0.5);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+[data-theme="light"] .water-range-slider::-webkit-slider-thumb:hover { transform: scale(1.25); }
+
+/* Головна «шкаралупа» редактора (EditorView.tsx) раніше мала суцільний
+   bg-slate-900 → біле тло, яке повністю перекривало водяний фон
+   .app-shell-root (0 видимих пікселів). Робимо її склом — так само, як
+   уже скляні header/sidebar (bg-slate-950/75 + blur), — щоб хвилі було
+   видно крізь усю робочу область, а не лише у щілинах між панелями. */
+[data-theme="light"] .editor-shell-glass {
+  background-color: rgba(240, 249, 255, 0.55) !important;
+  backdrop-filter: blur(28px) saturate(140%);
+  -webkit-backdrop-filter: blur(28px) saturate(140%);
+}
+/* Права панель «Персонажі і сцена» — трохи прозоріша, ніж було (.95),
+   щоб теж пропускала воду, але лишалась легко читабельною (щільний текст). */
+[data-theme="light"] .nova-char-panel {
+  background-color: rgba(255, 255, 255, 0.72) !important;
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+}
+
 /* --- Суцільні фони --- */
 [data-theme="light"] [class~="bg-slate-950"] { background-color: #f7f8fb; }
 [data-theme="light"] [class~="bg-slate-900"] { background-color: #ffffff; }
@@ -395,24 +557,26 @@
 
 /* --- Скляні поверхні дизайн-системи (світла тема: тінь сонця) --- */
 [data-theme="light"] .glass-panel {
-  background: linear-gradient(180deg, rgba(255,255,255,0.78) 0%, rgba(246,248,251,0.82) 100%);
-  border-color: rgba(15, 23, 42, 0.08);
+  background: linear-gradient(135deg, rgba(255,255,255,0.82) 0%, rgba(224,242,254,0.55) 100%);
+  border-color: var(--glass-border-dark, rgba(186, 230, 253, 0.4));
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.9),
+    inset 0 -2px 6px 0 rgba(56, 189, 248, 0.12),
     var(--sun-shadow-x) var(--sun-shadow-y) 18px var(--shadow-color),
     var(--sun-light-x) var(--sun-light-y) 18px var(--highlight-color);
 }
 [data-theme="light"] .glass-panel-elevated {
-  background: linear-gradient(180deg, rgba(255,255,255,0.9) 0%, rgba(248,250,252,0.92) 100%);
-  border-color: rgba(15, 23, 42, 0.1);
+  background: linear-gradient(135deg, rgba(255,255,255,0.92) 0%, rgba(224,242,254,0.65) 100%);
+  border-color: var(--glass-border-dark, rgba(186, 230, 253, 0.4));
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.95),
+    inset 0 -2px 6px 0 rgba(56, 189, 248, 0.16),
     var(--sun-shadow-lg-x) var(--sun-shadow-lg-y) 26px var(--shadow-color-lg),
     var(--sun-light-lg-x) var(--sun-light-lg-y) 26px var(--highlight-color);
 }
 [data-theme="light"] .badge-glass {
-  background: rgba(255, 255, 255, 0.72);
-  border-color: rgba(15, 23, 42, 0.1);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.82) 0%, rgba(240, 249, 255, 0.6) 100%);
+  border-color: rgba(56, 189, 248, 0.3);
   box-shadow:
     var(--sun-shadow-soft-x) var(--sun-shadow-soft-y) 8px var(--shadow-color-soft),
     var(--sun-light-soft-x) var(--sun-light-soft-y) 8px var(--highlight-color);

@@ -551,6 +551,58 @@ function renderFontSizeMarkers(text: string): string {
 }
 
 /**
+ * Розгортає маркер кольору тексту `[COLOR="#rrggbb"]текст[/COLOR]` — точна
+ * копія renderFontMarkers, лише замість гарнітури керує кольором символів
+ * (панель «Colors» у форматуванні, TextColorMark.ts).
+ */
+function renderColorMarkers(text: string): string {
+  if (!text || !text.includes('[COLOR=')) return text;
+  return text.replace(/\[COLOR="([^"]+)"\]([\s\S]*?)\[\/COLOR\]/g, (full, color: string, inner: string) => {
+    if (!color.trim()) return full;
+    return `<span style="color:${color};">${inner}</span>`;
+  });
+}
+
+/**
+ * Розгортає маркер виділення тексту кольором `[HL="#rrggbb"]текст[/HL]` —
+ * та сама схема, що й renderColorMarkers, лише малює фон замість кольору
+ * символів (панель «Highlight», HighlightMark.ts).
+ */
+function renderHighlightMarkers(text: string): string {
+  if (!text || !text.includes('[HL=')) return text;
+  return text.replace(/\[HL="([^"]+)"\]([\s\S]*?)\[\/HL\]/g, (full, color: string, inner: string) => {
+    if (!color.trim()) return full;
+    return `<span style="background-color:${color}; border-radius:2px;">${inner}</span>`;
+  });
+}
+
+/**
+ * Розгортає маркер посилання `[LINK="https://…"]текст[/LINK]` — та сама
+ * схема, що й renderColorMarkers/renderHighlightMarkers, лише малює `<a>`
+ * замість `<span>` (панель форматування, LinkMark.ts).
+ */
+function renderLinkMarkers(text: string): string {
+  if (!text || !text.includes('[LINK=')) return text;
+  return text.replace(/\[LINK="([^"]*)"\]([\s\S]*?)\[\/LINK\]/g, (full, href: string, inner: string) => {
+    if (!href.trim()) return inner;
+    return `<a href="${href}" target="_blank" rel="noopener noreferrer" style="color:#0284c7; text-decoration:underline; text-underline-offset:2px;">${inner}</a>`;
+  });
+}
+
+/**
+ * Розгортає маркер розділювача сцени `[DIVIDER]` (окремий абзац сам по
+ * собі, той самий підхід, що й [IMG:…] — див. utils/manuscriptDoc.ts,
+ * DividerNode.ts) у горизонтальну лінію.
+ */
+function renderDividerMarkers(text: string): string {
+  if (!text || !text.includes('[DIVIDER]')) return text;
+  return text.replace(
+    /^[ \t]*\[DIVIDER\][ \t]*$/gm,
+    '<hr style="border:none;border-top:1px solid currentColor;opacity:0.3;width:40%;margin:2em auto;" />'
+  );
+}
+
+/**
  * Повний ланцюжок розгортання маркерів тексту розділу (виноски, зображення,
  * шрифт, кегль, жирність/курсив) у справжній HTML — той самий, що вже
  * використовує HTML/PDF-експорт (generateBookExportHtml). Винесено окремою
@@ -572,8 +624,16 @@ export function renderSectionContentHtml(
     .replace(/\n*\[AI-DRAFT\]\n*/g, '\n\n')
     .replace(/\n*\[\/AI-DRAFT\]\n*/g, '\n\n');
   return renderBoldItalicMarkers(
-    renderFontSizeMarkers(
-      renderFontMarkers(renderImageMarkers(linkifyFootnoteMarkers(withoutAiDraftMarkers, sectionFootnotes, allFootnotes), book))
+    renderLinkMarkers(
+      renderHighlightMarkers(
+        renderColorMarkers(
+          renderFontSizeMarkers(
+            renderFontMarkers(
+              renderDividerMarkers(renderImageMarkers(linkifyFootnoteMarkers(withoutAiDraftMarkers, sectionFootnotes, allFootnotes), book))
+            )
+          )
+        )
+      )
     )
   );
 }

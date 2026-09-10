@@ -1568,7 +1568,7 @@ export default function App() {
   return (
     <SunLightingProvider theme={theme}>
       <WriterBookProvider book={book}>
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-400/20 selection:text-amber-200 relative">
+    <div className="app-shell-root min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-400/20 selection:text-amber-200 relative">
 
       {/* Сонечко на сторінках студії: динамічне освітлення + перетягуване
           3D-сонце. У світлій темі дає тіні, у темній — сяйво

@@ -2,6 +2,10 @@ import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import { FontSpanMark } from './FontSpanMark';
 import { FontSizeMark } from './FontSizeMark';
+import { TextColorMark } from './TextColorMark';
+import { HighlightMark } from './HighlightMark';
+import { LinkMark } from './LinkMark';
+import { DividerNode } from './DividerNode';
 import { WrappedImageNode, type WrappedImageOptions } from './WrappedImageNode';
 import { AiDraftBlockNode } from './AiDraftBlockNode';
 import { FocusParagraphPlugin } from './FocusParagraphPlugin';
@@ -57,6 +61,10 @@ export function buildManuscriptExtensions(
     }),
     FontSpanMark,
     FontSizeMark,
+    TextColorMark,
+    HighlightMark,
+    LinkMark,
+    DividerNode,
     WrappedImageNode.configure({
       resolveImageUrl,
       getPageContentWidthMm,

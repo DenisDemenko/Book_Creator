@@ -19,15 +19,24 @@ export interface JSONContent {
   text?: string;
 }
 
-type ActiveMarks = { bold: boolean; italic: boolean; fontStack: string[]; sizeStack: string[] };
+type ActiveMarks = {
+  bold: boolean;
+  italic: boolean;
+  fontStack: string[];
+  sizeStack: string[];
+  colorStack: string[];
+  hlStack: string[];
+  linkStack: string[];
+};
 
-const INLINE_TOKEN = /(\*\*|\*|\[FONT="[^"]*"\]|\[\/FONT\]|\[SIZE=[\d.]+\]|\[\/SIZE\]|\n)/;
+const INLINE_TOKEN =
+  /(\*\*|\*|\[FONT="[^"]*"\]|\[\/FONT\]|\[SIZE=[\d.]+\]|\[\/SIZE\]|\[COLOR="[^"]*"\]|\[\/COLOR\]|\[HL="[^"]*"\]|\[\/HL\]|\[LINK="[^"]*"\]|\[\/LINK\]|\n)/;
 
 /** Розбирає рядок одного абзацу на інлайн-вузли TipTap (текст + жирність/курсив/шрифт/переніс рядка). */
 function parseInline(text: string): JSONContent[] {
   const tokens = text.split(INLINE_TOKEN);
   const nodes: JSONContent[] = [];
-  const state: ActiveMarks = { bold: false, italic: false, fontStack: [], sizeStack: [] };
+  const state: ActiveMarks = { bold: false, italic: false, fontStack: [], sizeStack: [], colorStack: [], hlStack: [], linkStack: [] };
   let buffer = '';
 
   const flush = () => {
@@ -40,6 +49,15 @@ function parseInline(text: string): JSONContent[] {
     }
     if (state.sizeStack.length) {
       marks.push({ type: 'fontSize', attrs: { size: Number(state.sizeStack[state.sizeStack.length - 1]) } });
+    }
+    if (state.colorStack.length) {
+      marks.push({ type: 'textColor', attrs: { color: state.colorStack[state.colorStack.length - 1] } });
+    }
+    if (state.hlStack.length) {
+      marks.push({ type: 'highlight', attrs: { color: state.hlStack[state.hlStack.length - 1] } });
+    }
+    if (state.linkStack.length) {
+      marks.push({ type: 'nlink', attrs: { href: state.linkStack[state.linkStack.length - 1] } });
     }
     nodes.push(marks.length ? { type: 'text', text: buffer, marks } : { type: 'text', text: buffer });
     buffer = '';
@@ -59,6 +77,9 @@ function parseInline(text: string): JSONContent[] {
     } else {
       const openFont = token.match(/^\[FONT="([^"]*)"\]$/);
       const openSize = token.match(/^\[SIZE=([\d.]+)\]$/);
+      const openColor = token.match(/^\[COLOR="([^"]*)"\]$/);
+      const openHl = token.match(/^\[HL="([^"]*)"\]$/);
+      const openLink = token.match(/^\[LINK="([^"]*)"\]$/);
       if (openFont) {
         flush();
         state.fontStack.push(openFont[1]);
@@ -71,6 +92,24 @@ function parseInline(text: string): JSONContent[] {
       } else if (token === '[/SIZE]') {
         flush();
         state.sizeStack.pop();
+      } else if (openColor) {
+        flush();
+        state.colorStack.push(openColor[1]);
+      } else if (token === '[/COLOR]') {
+        flush();
+        state.colorStack.pop();
+      } else if (openHl) {
+        flush();
+        state.hlStack.push(openHl[1]);
+      } else if (token === '[/HL]') {
+        flush();
+        state.hlStack.pop();
+      } else if (openLink) {
+        flush();
+        state.linkStack.push(openLink[1]);
+      } else if (token === '[/LINK]') {
+        flush();
+        state.linkStack.pop();
       } else {
         buffer += token;
       }
@@ -95,6 +134,9 @@ const VALID_WRAP = new Set(['left', 'right', 'none', 'contour']);
  */
 const AI_DRAFT_OPEN = '[AI-DRAFT]';
 const AI_DRAFT_CLOSE = '[/AI-DRAFT]';
+
+/** Маркер розділювача сцени — окремий абзац, що складається лише з цього літерала (аналог [IMG:…]). */
+const DIVIDER_MARKER = '[DIVIDER]';
 
 /** Будує канонічний рядок-маркер `[IMG: id "підпис" wrap=режим width=Nmm height=Nmm shape="…"]` з атрибутів вузла wrappedImage. */
 function imgMarkerString(attrs: Record<string, any>): string {
@@ -133,6 +175,11 @@ export function markerStringToTiptapDoc(text: string): JSONContent {
         content.push({ type: 'aiDraft', content: draftBuffer.length ? draftBuffer : [{ type: 'paragraph', content: [] }] });
       }
       draftBuffer = null;
+      return;
+    }
+
+    if (trimmed === DIVIDER_MARKER) {
+      pushBlock({ type: 'sceneDivider' });
       return;
     }
 
@@ -177,10 +224,13 @@ export function markerStringToTiptapDoc(text: string): JSONContent {
 /** Серіалізує масив інлайн-вузлів (текст+marks/hardBreak) назад у рядок з маркерами. */
 function serializeInline(nodes: JSONContent[]): string {
   let out = '';
-  let prev: ActiveMarks = { bold: false, italic: false, fontStack: [], sizeStack: [] };
+  let prev: ActiveMarks = { bold: false, italic: false, fontStack: [], sizeStack: [], colorStack: [], hlStack: [], linkStack: [] };
 
   const familyOf = (n: JSONContent) => n.marks?.find((m) => m.type === 'fontSpan')?.attrs?.family as string | undefined;
   const sizeOf = (n: JSONContent) => n.marks?.find((m) => m.type === 'fontSize')?.attrs?.size as number | undefined;
+  const colorOf = (n: JSONContent) => n.marks?.find((m) => m.type === 'textColor')?.attrs?.color as string | undefined;
+  const hlOf = (n: JSONContent) => n.marks?.find((m) => m.type === 'highlight')?.attrs?.color as string | undefined;
+  const linkOf = (n: JSONContent) => n.marks?.find((m) => m.type === 'nlink')?.attrs?.href as string | undefined;
 
   nodes.forEach((n) => {
     if (n.type === 'hardBreak') {
@@ -194,8 +244,23 @@ function serializeInline(nodes: JSONContent[]): string {
     const family = familyOf(n);
     const size = sizeOf(n);
     const sizeStr = size != null ? String(size) : undefined;
+    const color = colorOf(n);
+    const hl = hlOf(n);
+    const link = linkOf(n);
 
     // Закриваємо маркери, яких більше немає (у зворотному до відкриття порядку).
+    if (prev.linkStack.length && prev.linkStack[prev.linkStack.length - 1] !== link) {
+      out += '[/LINK]';
+      prev.linkStack = [];
+    }
+    if (prev.hlStack.length && prev.hlStack[prev.hlStack.length - 1] !== hl) {
+      out += '[/HL]';
+      prev.hlStack = [];
+    }
+    if (prev.colorStack.length && prev.colorStack[prev.colorStack.length - 1] !== color) {
+      out += '[/COLOR]';
+      prev.colorStack = [];
+    }
     if (prev.sizeStack.length && prev.sizeStack[prev.sizeStack.length - 1] !== sizeStr) {
       out += '[/SIZE]';
       prev.sizeStack = [];
@@ -212,12 +277,26 @@ function serializeInline(nodes: JSONContent[]): string {
     if (italic && !prev.italic) out += '*';
     if (family && prev.fontStack[prev.fontStack.length - 1] !== family) out += `[FONT="${family}"]`;
     if (sizeStr && prev.sizeStack[prev.sizeStack.length - 1] !== sizeStr) out += `[SIZE=${sizeStr}]`;
+    if (color && prev.colorStack[prev.colorStack.length - 1] !== color) out += `[COLOR="${color}"]`;
+    if (hl && prev.hlStack[prev.hlStack.length - 1] !== hl) out += `[HL="${hl}"]`;
+    if (link && prev.linkStack[prev.linkStack.length - 1] !== link) out += `[LINK="${link}"]`;
 
     out += n.text || '';
-    prev = { bold, italic, fontStack: family ? [family] : [], sizeStack: sizeStr ? [sizeStr] : [] };
+    prev = {
+      bold,
+      italic,
+      fontStack: family ? [family] : [],
+      sizeStack: sizeStr ? [sizeStr] : [],
+      colorStack: color ? [color] : [],
+      hlStack: hl ? [hl] : [],
+      linkStack: link ? [link] : [],
+    };
   });
 
   // Закриваємо все, що лишилось відкритим у кінці абзацу.
+  if (prev.linkStack.length) out += '[/LINK]';
+  if (prev.hlStack.length) out += '[/HL]';
+  if (prev.colorStack.length) out += '[/COLOR]';
   if (prev.sizeStack.length) out += '[/SIZE]';
   if (prev.fontStack.length) out += '[/FONT]';
   if (prev.italic) out += '*';
@@ -231,6 +310,9 @@ export function tiptapDocToMarkerString(doc: JSONContent): string {
   const blocks = (doc.content || []).map((node) => {
     if (node.type === 'wrappedImage') {
       return imgMarkerString(node.attrs || {});
+    }
+    if (node.type === 'sceneDivider') {
+      return DIVIDER_MARKER;
     }
     if (node.type === 'blockquote') {
       const inner = (node.content || [])
@@ -275,7 +357,7 @@ export function markerSnippetToNodes(snippet: string): JSONContent[] {
 export function markerOffsetToDocPos(doc: PMNode, targetOffset: number): number | null {
   let acc = 0;
   let found: number | null = null;
-  let prev: ActiveMarks = { bold: false, italic: false, fontStack: [], sizeStack: [] };
+  let prev: ActiveMarks = { bold: false, italic: false, fontStack: [], sizeStack: [], colorStack: [], hlStack: [], linkStack: [] };
 
   /** Проходить інлайн-вміст одного абзаца (текст/hardBreak), рахуючи acc/found у лок-кроці з doc-позицією. */
   const walkInline = (para: PMNode, paraStart: number): boolean => {
@@ -297,8 +379,17 @@ export function markerOffsetToDocPos(doc: PMNode, targetOffset: number): number 
       const family = fontMark?.attrs?.family as string | undefined;
       const sizeMark = node.marks.find((m) => m.type.name === 'fontSize');
       const sizeStr = sizeMark?.attrs?.size != null ? String(sizeMark.attrs.size) : undefined;
+      const colorMark = node.marks.find((m) => m.type.name === 'textColor');
+      const color = colorMark?.attrs?.color as string | undefined;
+      const hlMark = node.marks.find((m) => m.type.name === 'highlight');
+      const hl = hlMark?.attrs?.color as string | undefined;
+      const linkMark = node.marks.find((m) => m.type.name === 'nlink');
+      const link = linkMark?.attrs?.href as string | undefined;
 
       let prefix = '';
+      if (prev.linkStack.length && prev.linkStack[prev.linkStack.length - 1] !== link) prefix += '[/LINK]';
+      if (prev.hlStack.length && prev.hlStack[prev.hlStack.length - 1] !== hl) prefix += '[/HL]';
+      if (prev.colorStack.length && prev.colorStack[prev.colorStack.length - 1] !== color) prefix += '[/COLOR]';
       if (prev.sizeStack.length && prev.sizeStack[prev.sizeStack.length - 1] !== sizeStr) prefix += '[/SIZE]';
       if (prev.fontStack.length && prev.fontStack[prev.fontStack.length - 1] !== family) prefix += '[/FONT]';
       if (prev.italic && !italic) prefix += '*';
@@ -307,7 +398,18 @@ export function markerOffsetToDocPos(doc: PMNode, targetOffset: number): number 
       if (italic && !prev.italic) prefix += '*';
       if (family && prev.fontStack[prev.fontStack.length - 1] !== family) prefix += `[FONT="${family}"]`;
       if (sizeStr && prev.sizeStack[prev.sizeStack.length - 1] !== sizeStr) prefix += `[SIZE=${sizeStr}]`;
-      prev = { bold, italic, fontStack: family ? [family] : [], sizeStack: sizeStr ? [sizeStr] : [] };
+      if (color && prev.colorStack[prev.colorStack.length - 1] !== color) prefix += `[COLOR="${color}"]`;
+      if (hl && prev.hlStack[prev.hlStack.length - 1] !== hl) prefix += `[HL="${hl}"]`;
+      if (link && prev.linkStack[prev.linkStack.length - 1] !== link) prefix += `[LINK="${link}"]`;
+      prev = {
+        bold,
+        italic,
+        fontStack: family ? [family] : [],
+        sizeStack: sizeStr ? [sizeStr] : [],
+        colorStack: color ? [color] : [],
+        hlStack: hl ? [hl] : [],
+        linkStack: link ? [link] : [],
+      };
 
       acc += prefix.length;
       if (targetOffset <= acc + text.length) {
@@ -326,7 +428,7 @@ export function markerOffsetToDocPos(doc: PMNode, targetOffset: number): number 
     if (found !== null) return;
     if (!isFirstBlock) acc += 2; // "\n\n" між абзацами
     isFirstBlock = false;
-    prev = { bold: false, italic: false, fontStack: [], sizeStack: [] };
+    prev = { bold: false, italic: false, fontStack: [], sizeStack: [], colorStack: [], hlStack: [], linkStack: [] };
 
     if (block.type.name === 'wrappedImage') {
       acc += imgMarkerString(block.attrs || {}).length;
@@ -347,7 +449,7 @@ export function markerOffsetToDocPos(doc: PMNode, targetOffset: number): number 
         if (found !== null) return;
         if (!isFirstInner) acc += 2; // "\n\n" між абзацами всередині блоку
         isFirstInner = false;
-        prev = { bold: false, italic: false, fontStack: [], sizeStack: [] };
+        prev = { bold: false, italic: false, fontStack: [], sizeStack: [], colorStack: [], hlStack: [], linkStack: [] };
         walkInline(child, blockOffset + 2 + childOffset);
       });
       acc += 2 + AI_DRAFT_CLOSE.length; // "\n\n" + "[/AI-DRAFT]"
