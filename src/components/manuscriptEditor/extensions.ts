@@ -24,8 +24,12 @@ export interface ManuscriptAiTextOptions {
 /**
  * Набір розширень для UA/EN редакторів тексту розділу (EditorView.tsx).
  * StarterKit звужений до того, що реально розуміє utils/manuscriptDoc.ts —
- * inline-теги на кшталт списків/заголовків/посилань навмисно вимкнені,
- * бо серіалізатор не вміє записати їх назад у формат маркерів книги.
+ * списки навмисно лишаються вимкненими (серіалізатор ще не вміє записати
+ * їх назад у формат маркерів книги). Заголовки (рівні 1-3) і посилання —
+ * УВІМКНЕНІ: manuscriptDoc.ts вміє їх серіалізувати (heading → `# Текст`,
+ * посилання — власний LinkMark нижче, а не вбудований StarterKit `link`,
+ * бо той пише markdown-синтаксис `[text](url)`, не сумісний з дужковим
+ * форматом книги).
  */
 export function buildManuscriptExtensions(
   resolveImageUrl: (id: string) => string | undefined,
@@ -45,7 +49,7 @@ export function buildManuscriptExtensions(
 ) {
   return [
     StarterKit.configure({
-      heading: false,
+      heading: { levels: [1, 2, 3] },
       bulletList: false,
       orderedList: false,
       listItem: false,

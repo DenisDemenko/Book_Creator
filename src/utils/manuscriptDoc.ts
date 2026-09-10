@@ -138,6 +138,14 @@ const AI_DRAFT_CLOSE = '[/AI-DRAFT]';
 /** Маркер розділювача сцени — окремий абзац, що складається лише з цього літерала (аналог [IMG:…]). */
 const DIVIDER_MARKER = '[DIVIDER]';
 
+/**
+ * Заголовок `# Текст` / `## Текст` / `### Текст` — markdown-стиль, лише
+ * рівні 1-3 (H4+ не потрібні для книги). Як і [IMG:…]/[DIVIDER], абзац
+ * складається з цього маркера цілком — але, на відміну від них, зберігає
+ * інлайн-вміст (можна виділити жирним/курсивом/кольором текст заголовка).
+ */
+const HEADING_RE = /^(#{1,3})\s+([\s\S]*)$/;
+
 /** Будує канонічний рядок-маркер `[IMG: id "підпис" wrap=режим width=Nmm height=Nmm shape="…"]` з атрибутів вузла wrappedImage. */
 function imgMarkerString(attrs: Record<string, any>): string {
   const { imageId, caption, wrap, widthMm, heightMm, shape } = attrs;
@@ -180,6 +188,13 @@ export function markerStringToTiptapDoc(text: string): JSONContent {
 
     if (trimmed === DIVIDER_MARKER) {
       pushBlock({ type: 'sceneDivider' });
+      return;
+    }
+
+    const headingMatch = trimmed.match(HEADING_RE);
+    if (headingMatch) {
+      const level = headingMatch[1].length;
+      pushBlock({ type: 'heading', attrs: { level }, content: parseInline(headingMatch[2]) });
       return;
     }
 
@@ -314,6 +329,10 @@ export function tiptapDocToMarkerString(doc: JSONContent): string {
     if (node.type === 'sceneDivider') {
       return DIVIDER_MARKER;
     }
+    if (node.type === 'heading') {
+      const level = Math.min(3, Math.max(1, Number(node.attrs?.level) || 1));
+      return '#'.repeat(level) + ' ' + serializeInline(node.content || []);
+    }
     if (node.type === 'blockquote') {
       const inner = (node.content || [])
         .map((p) => serializeInline(p.content || []))
@@ -432,6 +451,18 @@ export function markerOffsetToDocPos(doc: PMNode, targetOffset: number): number 
 
     if (block.type.name === 'wrappedImage') {
       acc += imgMarkerString(block.attrs || {}).length;
+      return;
+    }
+
+    if (block.type.name === 'sceneDivider') {
+      acc += DIVIDER_MARKER.length;
+      return;
+    }
+
+    if (block.type.name === 'heading') {
+      const level = Math.min(3, Math.max(1, block.attrs?.level || 1));
+      acc += level + 1; // "#".repeat(level) + " "
+      walkInline(block, blockOffset + level + 1);
       return;
     }
 

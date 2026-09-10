@@ -603,6 +603,21 @@ function renderDividerMarkers(text: string): string {
 }
 
 /**
+ * Розгортає заголовок `# Текст` / `## Текст` / `### Текст` (лише рівні 1-3,
+ * абзац цілком — див. HEADING_RE у utils/manuscriptDoc.ts) у `<h1>`-`<h3>`.
+ * На відміну від [IMG:…]/[DIVIDER], текст усередині НЕ літерал — інлайн-
+ * маркери (жирний/курсив/колір тощо) далі в ланцюжку `renderSectionContentHtml`
+ * розгорнуться так само всередині заголовка, як і в звичайному абзаці.
+ */
+function renderHeadingMarkers(text: string): string {
+  if (!text || !/^#{1,3}\s/m.test(text)) return text;
+  return text.replace(/^(#{1,3})[ \t]+(.*)$/gm, (full, hashes: string, inner: string) => {
+    const level = hashes.length;
+    return `<h${level} style="margin:1.1em 0 0.5em;line-height:1.25;">${inner}</h${level}>`;
+  });
+}
+
+/**
  * Повний ланцюжок розгортання маркерів тексту розділу (виноски, зображення,
  * шрифт, кегль, жирність/курсив) у справжній HTML — той самий, що вже
  * використовує HTML/PDF-експорт (generateBookExportHtml). Винесено окремою
@@ -629,7 +644,7 @@ export function renderSectionContentHtml(
         renderColorMarkers(
           renderFontSizeMarkers(
             renderFontMarkers(
-              renderDividerMarkers(renderImageMarkers(linkifyFootnoteMarkers(withoutAiDraftMarkers, sectionFootnotes, allFootnotes), book))
+              renderHeadingMarkers(renderDividerMarkers(renderImageMarkers(linkifyFootnoteMarkers(withoutAiDraftMarkers, sectionFootnotes, allFootnotes), book)))
             )
           )
         )

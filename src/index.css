@@ -1129,6 +1129,25 @@
   color: #475569;
   font-style: italic;
 }
+/* Заголовки H1-H3 (# Текст) — успадковують гарнітуру рукопису, а не
+   системний sans-serif браузера за замовчуванням; масштаб і відступи
+   узгоджені між собою, а не взяті з дефолтів <h1>-<h3>. */
+.nova-manuscript-editor h1,
+.nova-manuscript-editor h2,
+.nova-manuscript-editor h3 {
+  font-family: inherit;
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 1.1em 0 0.5em;
+}
+.nova-manuscript-editor h1:first-child,
+.nova-manuscript-editor h2:first-child,
+.nova-manuscript-editor h3:first-child {
+  margin-top: 0;
+}
+.nova-manuscript-editor h1 { font-size: 1.7em; }
+.nova-manuscript-editor h2 { font-size: 1.4em; }
+.nova-manuscript-editor h3 { font-size: 1.18em; }
 .nova-manuscript-editor p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   float: left;

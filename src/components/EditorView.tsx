@@ -109,7 +109,8 @@ import {
   Highlighter,
   Ban,
   Link2,
-  SeparatorHorizontal
+  SeparatorHorizontal,
+  Heading3
 } from 'lucide-react';
 import { 
   Book, 
@@ -1182,6 +1183,20 @@ export const EditorView: React.FC<EditorViewProps> = ({
     const editor = isEn ? enEditor : uaEditor;
     if (!editor) return false;
     editor.chain().focus().insertContent({ type: 'sceneDivider' }).run();
+    return true;
+  };
+
+  /**
+   * Заголовок H1-H3 (`# Текст`, HEADING_RE в manuscriptDoc.ts) на поточному
+   * абзаці — вмикається/вимикається курсором усередині блока, без
+   * обов'язкового виділення (на відміну від Colors/Highlight/Link, і так
+   * само, як toggleBold/toggleItalic вище). Повторний клік на тому самому
+   * рівні знімає заголовок назад у звичайний абзац.
+   */
+  const toggleHeadingLevel = (level: 1 | 2 | 3, isEn = false): boolean => {
+    const editor = isEn ? enEditor : uaEditor;
+    if (!editor) return false;
+    editor.chain().focus().toggleHeading({ level }).run();
     return true;
   };
 
@@ -2479,6 +2494,51 @@ export const EditorView: React.FC<EditorViewProps> = ({
       >
         <SeparatorHorizontal className="w-3.5 h-3.5" />
       </button>
+
+      {/* Заголовки H1-H3 — тогл на поточному абзаці, `# Текст`/`## Текст`/`### Текст`. */}
+      {(() => {
+        const editor = isEn ? enEditor : uaEditor;
+        const headingBtnClass = (level: 1 | 2 | 3) =>
+          `p-1 rounded-md transition-colors ${
+            editor?.isActive('heading', { level })
+              ? '[background-color:var(--sun-acc)] text-slate-950'
+              : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+          }`;
+        return (
+          <div className="flex items-center gap-0.5 pl-1.5 ml-0.5 border-l border-slate-800">
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => toggleHeadingLevel(1, isEn)}
+              disabled={isReader}
+              className={`${headingBtnClass(1)} disabled:opacity-50 disabled:cursor-not-allowed`}
+              title={t('editor.heading1Title')}
+              aria-label={t('editor.heading1Title')}
+            >
+              <Heading1 className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => toggleHeadingLevel(2, isEn)}
+              disabled={isReader}
+              className={`${headingBtnClass(2)} disabled:opacity-50 disabled:cursor-not-allowed`}
+              title={t('editor.heading2Title')}
+              aria-label={t('editor.heading2Title')}
+            >
+              <Heading2 className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => toggleHeadingLevel(3, isEn)}
+              disabled={isReader}
+              className={`${headingBtnClass(3)} disabled:opacity-50 disabled:cursor-not-allowed`}
+              title={t('editor.heading3Title')}
+              aria-label={t('editor.heading3Title')}
+            >
+              <Heading3 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        );
+      })()}
       </div>
 
       {/* Повноекранний режим: примусовий перенос рядка в flex-wrap

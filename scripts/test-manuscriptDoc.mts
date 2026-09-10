@@ -119,6 +119,40 @@ function main() {
     t('фрагмент розпізнав блок sceneDivider', nodes[0]?.type === 'sceneDivider');
   }
 
+  console.log('\nHEADING — рівні 1-3, round-trip:');
+  {
+    for (const level of [1, 2, 3] as const) {
+      const src = 'Перший абзац.\n\n' + '#'.repeat(level) + ' Заголовок ' + level + ' рівня\n\nДругий абзац.';
+      const out = roundTrip(src);
+      t(`H${level}: текст не змінюється після round-trip`, out === src, out);
+      const doc = markerStringToTiptapDoc(src);
+      const heading = doc.content?.[1];
+      t(`H${level}: блок має type heading і attrs.level=${level}`, heading?.type === 'heading' && heading?.attrs?.level === level);
+    }
+  }
+
+  console.log('\nHEADING разом з інлайн-маркерами (жирний/колір усередині заголовка):');
+  {
+    const src = '## Заголовок із **жирним** і [COLOR="#ff0000"]кольором[/COLOR]';
+    t('текст не змінюється після round-trip', roundTrip(src) === src, roundTrip(src));
+    const doc = markerStringToTiptapDoc(src);
+    const heading = doc.content?.[0];
+    t('усередині заголовка розпізналось форматування', !!heading?.content?.some((n) => n.marks?.some((m) => m.type === 'bold')));
+  }
+
+  console.log('\nHEADING — 4+ решітки НЕ є заголовком (лишається звичайним текстом):');
+  {
+    const src = '#### Це не заголовок, а звичайний текст';
+    const doc = markerStringToTiptapDoc(src);
+    t('блок лишився paragraph, а не heading', doc.content?.[0]?.type === 'paragraph');
+  }
+
+  console.log('\nmarkerSnippetToNodes — вставка HEADING:');
+  {
+    const nodes = markerSnippetToNodes('# Швидкий заголовок');
+    t('фрагмент розпізнав блок heading рівня 1', nodes[0]?.type === 'heading' && nodes[0]?.attrs?.level === 1);
+  }
+
   console.log(`\nРезультат: ${passed} пройдено, ${failed} провалено`);
   if (failed > 0) process.exit(1);
 }
