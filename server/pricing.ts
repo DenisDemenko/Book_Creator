@@ -173,6 +173,73 @@ export function priceForClaudeModel(modelId: string, inputTokens: number, output
 }
 
 /**
+ * Тарифи ВСІХ моделей OpenAI, доступних у селекторі чату (server/chatProviders.ts
+ * CHAT_MODELS) — той самий принцип, що й CLAUDE_MODEL_PRICING вище: ціна за
+ * КОНКРЕТНУ модель, а не за рушій 'gpt' загалом (GPT-5.4 Mini у 40+ разів
+ * дешевший за GPT-6 Astra — усереднена ціна на рушій тут була б безглуздою).
+ *
+ * Лінійку gpt-5.5…gpt-5.6-luna додано за переліком із вкладки «Rate limits»
+ * акаунту власника (platform.openai.com/settings/organization/limits) —
+ * ціни звірено на офіційних сторінках моделей
+ * developers.openai.com/api/docs/models/<id> (вересень 2026), долари за
+ * мільйон токенів, стандартний (не Batch/Fast) тариф Chat/Responses API.
+ * `gpt-4o` лишає власний запис у GPT_TEXT_PRICING нижче — priceForGptModel
+ * падає на нього, якщо модель не знайдена в цій таблиці.
+ *
+ * Кешований вхід (cached input) тут НЕ трекається окремим полем: жоден
+ * виклик у цьому коді (aiCore.ts/chatRoutes.ts) поки не рахує кешовані
+ * токени окремо від звичайних вхідних — додавати поле, яким нема кому
+ * скористатись, означало б лише роздути таблицю. Для довідки в note
+ * лишено офіційну ціну кешованого входу, якщо вона є.
+ */
+export const GPT_MODEL_PRICING: Record<
+  string,
+  { inputPerMillionUsd: number; outputPerMillionUsd: number; note: string }
+> = {
+  'gpt-5.5': {
+    inputPerMillionUsd: 5,
+    outputPerMillionUsd: 30,
+    note: 'GPT-5.5 — флагман для найскладніших професійних задач (глибоке міркування, код). Кешований вхід: $0.50/млн.',
+  },
+  'gpt-5.5-pro': {
+    inputPerMillionUsd: 30,
+    outputPerMillionUsd: 180,
+    note: 'GPT-5.5 Pro — версія з підвищеними обчисленнями для точніших відповідей. Кешованого входу не пропонує (немає знижки).',
+  },
+  'gpt-5.4-mini': {
+    inputPerMillionUsd: 0.75,
+    outputPerMillionUsd: 4.5,
+    note: 'GPT-5.4 Mini — компактна модель під код/агентні задачі. Кешований вхід: $0.075/млн.',
+  },
+  'gpt-6-astra': {
+    inputPerMillionUsd: 10,
+    outputPerMillionUsd: 50,
+    note: 'GPT-6 Astra — поточний флагман OpenAI (найпотужніша модель лінійки). Кешований вхід: $1/млн.',
+  },
+  'gpt-5.6-sol': {
+    inputPerMillionUsd: 4,
+    outputPerMillionUsd: 20,
+    note: 'GPT-5.6 Sol — флагман лінійки 5.6. Офіційна сторінка позначає це промо-тарифом щонайменше до 21.11.2026 — після цієї дати звірте ціну вручну.',
+  },
+  'gpt-5.6-terra': {
+    inputPerMillionUsd: 2,
+    outputPerMillionUsd: 12,
+    note: 'GPT-5.6 Terra — середній рівень лінійки 5.6 (баланс ціни й якості). Кешований вхід: $0.20/млн.',
+  },
+  'gpt-5.6-luna': {
+    inputPerMillionUsd: 0.2,
+    outputPerMillionUsd: 1.2,
+    note: 'GPT-5.6 Luna — найдешевший рівень лінійки 5.6, для масових задач. Кешований вхід: $0.02/млн.',
+  },
+};
+
+/** Вартість текстової генерації OpenAI з урахуванням КОНКРЕТНОЇ моделі (5.5/5.5 Pro/5.4 Mini/6 Astra/5.6 Sol/Terra/Luna). */
+export function priceForGptModel(modelId: string, inputTokens: number, outputTokens: number): number {
+  const rate = GPT_MODEL_PRICING[modelId] || GPT_TEXT_PRICING;
+  return (inputTokens / 1_000_000) * rate.inputPerMillionUsd + (outputTokens / 1_000_000) * rate.outputPerMillionUsd;
+}
+
+/**
  * Тариф DeepSeek, долари за мільйон токенів. Для чат-сесій (новий
  * провайдер мультимодельного чату). Орієнтир звірено на офіційній
  * документації api-docs.deepseek.com у серпні 2026: DeepSeek-V4-Flash
@@ -293,7 +360,11 @@ export function priceForTextEngine(
   outputTokens: number,
   modelId?: string
 ): number {
-  if (engine === 'gpt') return priceForGptText(inputTokens, outputTokens);
+  if (engine === 'gpt') {
+    return modelId
+      ? priceForGptModel(modelId, inputTokens, outputTokens)
+      : priceForGptText(inputTokens, outputTokens);
+  }
   if (engine === 'claude') {
     return modelId
       ? priceForClaudeModel(modelId, inputTokens, outputTokens)
@@ -305,12 +376,20 @@ export function priceForTextEngine(
   return priceForText(inputTokens, outputTokens);
 }
 
-/** Тариф (вхід/вихід за млн) для конкретної моделі — для відображення в селекторі чату. */
+/**
+ * Тариф (вхід/вихід за млн) для конкретної моделі — для відображення в
+ * селекторі чату (`/api/chat/models`) і в таблиці «Тарифи та аналітика
+ * ШІ» (`/api/admin/ai/pricing`). `note` необов'язковий у типі лише тому,
+ * що снепшот gemini/deepseek/groq/mistral (`pricingSnapshot().textEngines`)
+ * теоретично міг би колись повернути запис без нього — на практиці він
+ * завжди є в усіх джерел цієї функції.
+ */
 export function priceRateForModel(
   engine: TextEngine,
   modelId: string
-): { inputPerMillionUsd: number; outputPerMillionUsd: number } {
+): { inputPerMillionUsd: number; outputPerMillionUsd: number; note?: string } {
   if (engine === 'claude') return CLAUDE_MODEL_PRICING[modelId] || CLAUDE_TEXT_PRICING;
+  if (engine === 'gpt') return GPT_MODEL_PRICING[modelId] || GPT_TEXT_PRICING;
   const snap = pricingSnapshot().textEngines;
   return snap[engine as keyof typeof snap] || TEXT_PRICING;
 }

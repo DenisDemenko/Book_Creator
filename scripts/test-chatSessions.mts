@@ -202,7 +202,7 @@ console.log('\nHTTP-роути (підставний генератор, без 
   // GET /api/chat/models — список доступних моделей
   const models = await call('GET', '/api/chat/models');
   t('GET /models → 200 зі списком', models.status === 200 && Array.isArray(models.data?.models), String(models.status));
-  t('список містить 8 моделей (6 провайдерів, 3 моделі Claude)', models.data?.models?.length === 8, String(models.data?.models?.length));
+  t('список містить 15 моделей (6 провайдерів: 1 Gemini, 8 OpenAI, 3 Claude, 1 DeepSeek, 1 Groq, 1 Mistral)', models.data?.models?.length === 15, String(models.data?.models?.length));
   t('defaultModelId повертається клієнту', models.data?.defaultModelId === 'gemini-3.7-flash');
   const geminiModel = models.data?.models?.find((m: any) => m.engine === 'gemini');
   t('модель містить ціну за мільйон токенів (для селектора)',
@@ -420,7 +420,7 @@ console.log('\nПровайдери (server/chatProviders.ts) — визначе
   t('resolveEngine: groq (llama)', providers.resolveEngine('llama-3.3-70b-versatile') === 'groq');
   t('resolveEngine: mistral', providers.resolveEngine('mistral-large-latest') === 'mistral');
   t('resolveEngine: невідома модель → gemini', providers.resolveEngine('custom-xyz') === 'gemini');
-  t('CHAT_MODELS містить рівно 8 варіантів (3 Claude: Haiku/Sonnet/Opus)', providers.CHAT_MODELS.length === 8, String(providers.CHAT_MODELS.length));
+  t('CHAT_MODELS містить рівно 15 варіантів (8 OpenAI, 3 Claude: Haiku/Sonnet/Opus)', providers.CHAT_MODELS.length === 15, String(providers.CHAT_MODELS.length));
   t('isKnownModel: відома модель', providers.isKnownModel('deepseek-chat') === true);
   t('isKnownModel: невідома модель', providers.isKnownModel('zzz-not-a-model') === false);
   t('усі 6 рушіїв мають генератор у PROVIDERS',

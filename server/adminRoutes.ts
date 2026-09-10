@@ -40,7 +40,7 @@ import {
   BASE_SERVER_PERMISSIONS,
   effectivePermissions,
 } from './auth';
-import { pricingSnapshot } from './pricing';
+import { pricingSnapshot, priceRateForModel, type TextEngine } from './pricing';
 import { IMAGE_ENGINES, seedreamConfig } from './imageGeneration';
 import { SEEDREAM_FAL_MODEL } from './pricing';
 import { geminiClient } from './aiCore';
@@ -403,28 +403,37 @@ export function registerAdminRoutes(app: Express): void {
    * Прайс текстових двигунів у форматі, зручному для вкладки «Тарифи та
    * аналітика ШІ» (та сама форма, що й у Modul_token ModelPricing): ціни
    * за 1k токенів, прапорець is_active = чи налаштований відповідний ключ.
+   *
+   * Один рядок — ОДНА модель із CHAT_MODELS (server/chatProviders.ts), а
+   * не один рядок на провайдера. Раніше тут було рівно 6 рядків (по
+   * одному на gemini/gpt/claude/deepseek/groq/mistral), і різні моделі
+   * ОДНОГО провайдера з різними цінами (напр. 7 моделей OpenAI — GPT-5.4
+   * Mini у 40+ разів дешевший за GPT-6 Astra, або 3 моделі Claude) мовчки
+   * усереднювались в один рядок під ціною типової/дефолтної моделі —
+   * адміністратор не міг побачити справжню вартість конкретної моделі,
+   * яку автор реально обрав для книги. `priceRateForModel()` (те саме
+   * джерело, що вже живить підказку ціни в самому селекторі моделі,
+   * `/api/chat/models`) тут лише перевикористано, щоб два екрани не
+   * розходились у відповіді на «скільки коштує ця модель».
    */
   app.get('/api/admin/ai/pricing', requireAdmin, async (_req, res) => {
     const snapshot = pricingSnapshot();
-    const providerByEngine: Record<string, string> = {
-      gemini: 'Google',
-      gpt: 'OpenAI',
-      claude: 'Anthropic',
-      deepseek: 'DeepSeek',
-      groq: 'Meta',
-      mistral: 'Mistral',
-    };
-    const pricings = Object.entries(snapshot.textEngines).map(([engine, p]) => ({
-      id: `pricing-${engine}`,
-      provider: providerByEngine[engine] || engine,
-      model: p.modelId,
-      display_name: `${p.modelId} (${ENGINE_LABELS[engine as keyof typeof ENGINE_LABELS] || engine})`,
-      input_price_per_1k: p.inputPerMillionUsd / 1000,
-      output_price_per_1k: p.outputPerMillionUsd / 1000,
-      is_active: engineConfigured(engine as keyof typeof ENGINE_LABELS),
-      updated_at: snapshot.updatedAt,
-      note: p.note,
-    }));
+    const pricings = CHAT_MODELS.map((m) => {
+      const rate = priceRateForModel(m.engine as TextEngine, m.id);
+      const contextNote = m.contextWindow ? `Контекстне вікно: ${m.contextWindow}.` : '';
+      const note = [rate.note, contextNote].filter(Boolean).join(' ') || undefined;
+      return {
+        id: `pricing-model-${m.id}`,
+        provider: m.provider,
+        model: m.id,
+        display_name: `${m.id} (${m.label})`,
+        input_price_per_1k: rate.inputPerMillionUsd / 1000,
+        output_price_per_1k: rate.outputPerMillionUsd / 1000,
+        is_active: engineConfigured(m.engine),
+        updated_at: snapshot.updatedAt,
+        note,
+      };
+    });
     // Двигуни ЗОБРАЖЕНЬ у тій самій таблиці тарифів.
     //
     // Досі сюди потрапляли лише текстові. Витрати на картинки чесно

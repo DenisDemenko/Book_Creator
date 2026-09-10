@@ -77,10 +77,27 @@ export interface ChatModelInfo {
   contextWindow?: string;
 }
 
-/** Моделі, які пропонуються користувачеві в селекторі чату. */
+/**
+ * Моделі, які пропонуються користувачеві в селекторі чату.
+ *
+ * Лінійка OpenAI (gpt-5.5 … gpt-5.6-luna) додана за переліком із
+ * вкладки «Rate limits» власного акаунту власника (platform.openai.com/
+ * settings/organization/limits, звірено вересень 2026) — саме ці 7
+ * моделей там перелічені як «Models in use» / «Latest models», тобто
+ * реально доступні цьому ключу OpenAI. `gpt-4o` лишається першим/типовим
+ * пунктом для сумісності: книги, у яких вже збережено `preferredAiModelId:
+ * 'gpt-4o'`, не повинні мовчки «осиротіти» через оновлення списку.
+ */
 export const CHAT_MODELS: ChatModelInfo[] = [
   { id: 'gemini-3.7-flash', engine: 'gemini', label: 'Gemini 3.7 Flash', provider: 'Google', contextWindow: '1M' },
   { id: 'gpt-4o', engine: 'gpt', label: 'GPT-4o', provider: 'OpenAI', contextWindow: '128k' },
+  { id: 'gpt-5.5', engine: 'gpt', label: 'GPT-5.5', provider: 'OpenAI', contextWindow: '1M' },
+  { id: 'gpt-5.5-pro', engine: 'gpt', label: 'GPT-5.5 Pro', provider: 'OpenAI', contextWindow: '1M' },
+  { id: 'gpt-5.4-mini', engine: 'gpt', label: 'GPT-5.4 Mini', provider: 'OpenAI', contextWindow: '400k' },
+  { id: 'gpt-6-astra', engine: 'gpt', label: 'GPT-6 Astra', provider: 'OpenAI', contextWindow: '1M' },
+  { id: 'gpt-5.6-sol', engine: 'gpt', label: 'GPT-5.6 Sol', provider: 'OpenAI', contextWindow: '1M' },
+  { id: 'gpt-5.6-terra', engine: 'gpt', label: 'GPT-5.6 Terra', provider: 'OpenAI', contextWindow: '1M' },
+  { id: 'gpt-5.6-luna', engine: 'gpt', label: 'GPT-5.6 Luna', provider: 'OpenAI', contextWindow: '1M' },
   { id: 'claude-haiku-4-5-20251001', engine: 'claude', label: 'Claude Haiku 4.5', provider: 'Anthropic', contextWindow: '200k' },
   { id: 'claude-sonnet-5', engine: 'claude', label: 'Claude Sonnet 5', provider: 'Anthropic', contextWindow: '200k' },
   { id: 'claude-opus-5', engine: 'claude', label: 'Claude Opus 5', provider: 'Anthropic', contextWindow: '200k' },
