@@ -78,11 +78,14 @@ const HEALTH_KEYS: { key: string; labelKey: string }[] = [
   { key: 'sensory', labelKey: 'coachHealthSensory' },
 ];
 
+// nm-inset задає власний фон/тінь (неоморфна тема) — тут лишається тільки
+// колірний акцент статусу (текст + ліва межа), без bg-*/border-* класів,
+// що конфліктували б із фоном nm-inset.
 const STATUS_STYLE: Record<HealthStatus, string> = {
-  clear: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
-  weak: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-  missing: 'bg-red-500/15 text-red-300 border-red-500/30',
-  uncertain: 'bg-slate-500/15 text-slate-300 border-slate-500/30',
+  clear: 'text-emerald-300 border-l-2 border-emerald-400/60',
+  weak: 'text-amber-300 border-l-2 border-amber-400/60',
+  missing: 'text-rose-300 border-l-2 border-rose-400/60',
+  uncertain: 'text-[var(--outline)] border-l-2 border-[var(--outline-variant)]',
 };
 
 // Клієнтська межа для книжкового аудиту — серверний захисний ліміт (90k)
@@ -268,32 +271,37 @@ export const CoachModal: React.FC<CoachModalProps> = ({
     setTimeout(() => setInsertedFlash(false), 2500);
   };
 
+  // Стиль попапу переюзаний з QuickAiModal.tsx («AI Літературний
+  // Консультант») — та сама неоморфна тема Modul_token
+  // (src/styles/tokenModuleTheme.css, клас .token-module-scope + nm-*),
+  // щоб коуч виглядав як частина того самого продукту, а не окремий,
+  // різкіший за кольором попап поверх нього. Логіка/хендлери не змінені.
   return (
     <div className="fixed inset-0 z-[85] flex items-center justify-center p-3 sm:p-6 bg-black/70 backdrop-blur-sm" onClick={onClose}>
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-[#0b101c] border border-white/[0.08] rounded-2xl w-full max-w-4xl h-[90vh] flex flex-col overflow-hidden shadow-2xl text-slate-200"
+        className="token-module-scope rounded-2xl w-full max-w-4xl h-[90vh] flex flex-col overflow-hidden shadow-2xl"
       >
         {/* Header */}
-        <div className="shrink-0 px-5 py-4 border-b border-white/[0.08] flex items-center justify-between gap-3">
+        <div className="shrink-0 p-4 nm-outset-sm flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-300 shrink-0">
-              <GraduationCap className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-lg nm-outset flex items-center justify-center text-[var(--primary)] shrink-0">
+              <GraduationCap className="w-4.5 h-4.5" />
             </div>
             <div className="min-w-0">
-              <h2 className="text-lg font-bold text-white leading-tight truncate">{t('editor.coachTitle')}</h2>
-              <p className="text-xs text-slate-400 truncate">
+              <h2 className="text-[14px] font-bold text-[var(--on-surface)] leading-tight truncate">{t('editor.coachTitle')}</h2>
+              <p className="text-[11px] text-[var(--outline)] truncate">
                 {seed?.sceneTitle || book.title} · {currentModelLabel}
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors shrink-0">
-            <X className="w-5 h-5" />
+          <button onClick={onClose} className="nm-btn p-2 rounded-lg text-[var(--on-surface-variant)] shrink-0">
+            <X className="w-3.5 h-3.5" />
           </button>
         </div>
 
         {/* Tabs */}
-        <div className="shrink-0 px-5 pt-3 flex items-center gap-2 text-sm font-medium">
+        <div className="shrink-0 px-4 pt-3 pb-0 flex items-center gap-1">
           {([
             { id: 'analysis' as Tab, icon: ScanSearch, key: 'coachTabAnalysis' },
             { id: 'chat' as Tab, icon: Sparkles, key: 'coachTabChat' },
@@ -302,10 +310,10 @@ export const CoachModal: React.FC<CoachModalProps> = ({
             <button
               key={id}
               onClick={() => setTab(id)}
-              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-t-lg transition-colors ${
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[11px] font-bold transition-all ${
                 tab === id
-                  ? 'bg-[#131b2e] border-t-2 border-x border-cyan-400 border-b-transparent text-white font-semibold'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'nm-inset text-[var(--primary)] border-b-2 border-[var(--primary)]'
+                  : 'nm-btn text-[var(--outline)] hover:text-[var(--on-surface)]'
               }`}
             >
               <Icon className="w-3.5 h-3.5" />
@@ -315,34 +323,34 @@ export const CoachModal: React.FC<CoachModalProps> = ({
         </div>
 
         {/* Body */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-4 nm-flat">
           {tab === 'analysis' && (
             <div className="space-y-4">
-              <div className="rounded-xl bg-slate-900/60 border border-white/10 p-3">
-                <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">{t('editor.coachFragmentLabel')}</div>
-                <p className="text-sm text-slate-300 whitespace-pre-wrap max-h-32 overflow-y-auto">{seed?.text}</p>
+              <div className="rounded-xl nm-inset p-3">
+                <div className="text-[11px] uppercase tracking-wide text-[var(--outline)] mb-1">{t('editor.coachFragmentLabel')}</div>
+                <p className="text-sm text-[var(--on-surface-variant)] whitespace-pre-wrap max-h-32 overflow-y-auto">{seed?.text}</p>
               </div>
 
               <div>
-                <label className="text-xs text-slate-400 block mb-1">{t('editor.coachIntentLabel')}</label>
+                <label className="text-xs text-[var(--outline)] block mb-1">{t('editor.coachIntentLabel')}</label>
                 <input
                   value={intent}
                   onChange={(e) => setIntent(e.target.value)}
                   placeholder={t('editor.coachIntentPlaceholder')}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none focus:border-cyan-500/50"
+                  className="w-full px-3 py-2 rounded-lg nm-inset text-sm text-[var(--on-surface)] outline-none bg-transparent placeholder:text-[var(--outline)]"
                 />
               </div>
 
               <button
                 onClick={runAnalysis}
                 disabled={analyzing || !seed?.text}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-500/90 hover:bg-cyan-400 text-slate-950 font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="nm-btn-primary flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-sm disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanSearch className="w-4 h-4" />}
                 {t('editor.coachRunAnalysis')}
               </button>
 
-              {analyzeError && <p className="text-sm text-red-400">{analyzeError}</p>}
+              {analyzeError && <p className="text-sm text-rose-400">{analyzeError}</p>}
 
               {analysis && (
                 <div className="space-y-3">
@@ -352,7 +360,7 @@ export const CoachModal: React.FC<CoachModalProps> = ({
                       return (
                         <div
                           key={key}
-                          className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-medium ${STATUS_STYLE[status]}`}
+                          className={`nm-inset px-2.5 py-1.5 rounded-lg text-[11px] font-medium ${STATUS_STYLE[status]}`}
                           title={t(`editor.${labelKey}`)}
                         >
                           <div className="truncate">{t(`editor.${labelKey}`)}</div>
@@ -363,16 +371,16 @@ export const CoachModal: React.FC<CoachModalProps> = ({
                   </div>
 
                   {analysis.mainProblem && (
-                    <div className="rounded-xl bg-amber-500/10 border border-amber-500/25 p-3 space-y-1.5">
+                    <div className="rounded-xl nm-inset p-3 space-y-1.5 border-l-2 border-amber-400/60">
                       <div className="text-sm font-semibold text-amber-300">{analysis.mainProblem.label}</div>
-                      <div className="text-xs text-slate-300">{analysis.mainProblem.evidence}</div>
-                      <div className="text-sm text-slate-100 italic">« {analysis.mainProblem.question} »</div>
+                      <div className="text-xs text-[var(--on-surface-variant)]">{analysis.mainProblem.evidence}</div>
+                      <div className="text-sm text-[var(--on-surface)] italic">« {analysis.mainProblem.question} »</div>
                       <button
                         onClick={() => {
                           setTab('chat');
                           void sendChat(analysis.mainProblem!.question);
                         }}
-                        className="text-xs text-cyan-300 hover:text-cyan-200 mt-1"
+                        className="text-xs text-[var(--primary)] hover:opacity-80 mt-1"
                       >
                         {t('editor.coachDiscussInChat')} →
                       </button>
@@ -380,18 +388,18 @@ export const CoachModal: React.FC<CoachModalProps> = ({
                   )}
 
                   {analysis.intentGap?.message && (
-                    <div className="text-xs text-slate-400 border-l-2 border-slate-700 pl-2">{analysis.intentGap.message}</div>
+                    <div className="text-xs text-[var(--outline)] border-l-2 border-[var(--outline-variant)] pl-2">{analysis.intentGap.message}</div>
                   )}
 
                   {analysis.exercise && (
-                    <div className="rounded-xl bg-slate-900/60 border border-white/10 p-3 flex items-start justify-between gap-3">
+                    <div className="rounded-xl nm-inset p-3 flex items-start justify-between gap-3">
                       <div>
-                        <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">{t('editor.coachExerciseLabel')}</div>
-                        <p className="text-sm text-slate-200">{analysis.exercise}</p>
+                        <div className="text-[11px] uppercase tracking-wide text-[var(--outline)] mb-1">{t('editor.coachExerciseLabel')}</div>
+                        <p className="text-sm text-[var(--on-surface)]">{analysis.exercise}</p>
                       </div>
                       <button
                         onClick={() => setDraftText(analysis.exercise)}
-                        className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-xs text-slate-200"
+                        className="nm-btn shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs text-[var(--on-surface)]"
                       >
                         <PenLine className="w-3.5 h-3.5" />
                         {t('editor.coachToDraft')}
@@ -405,15 +413,16 @@ export const CoachModal: React.FC<CoachModalProps> = ({
 
           {tab === 'chat' && (
             <div className="flex flex-col h-full min-h-[360px]">
-              <div ref={feedRef} className="flex-1 overflow-y-auto space-y-2 pr-1">
-                {messages.length === 0 && <p className="text-sm text-slate-500">{t('editor.coachChatEmpty')}</p>}
+              {/* msg-user/msg-assistant — ті самі класи-градієнти, що й у
+                  QuickAiModal.tsx (чат «AI Літературний Консультант»),
+                  щоб бульбашки коуча виглядали ідентично. */}
+              <div ref={feedRef} className="flex-1 overflow-y-auto space-y-3 pr-1">
+                {messages.length === 0 && <p className="text-sm text-[var(--outline)]">{t('editor.coachChatEmpty')}</p>}
                 {messages.map((m, i) => (
                   <div
                     key={i}
-                    className={`max-w-[85%] px-3 py-2 rounded-xl text-sm whitespace-pre-wrap ${
-                      m.role === 'author'
-                        ? 'ml-auto bg-cyan-500/15 border border-cyan-500/25 text-slate-100'
-                        : 'bg-slate-900/70 border border-white/10 text-slate-200'
+                    className={`max-w-[85%] p-3.5 text-sm text-[var(--on-surface)] whitespace-pre-wrap ${
+                      m.role === 'author' ? 'ml-auto msg-user' : 'msg-assistant'
                     }`}
                   >
                     {m.text}
@@ -421,7 +430,7 @@ export const CoachModal: React.FC<CoachModalProps> = ({
                       <div className="mt-1.5">
                         <button
                           onClick={() => setDraftText(m.text)}
-                          className="text-[11px] text-cyan-300 hover:text-cyan-200"
+                          className="text-[11px] text-[var(--primary)] hover:opacity-80"
                         >
                           {t('editor.coachToDraft')} →
                         </button>
@@ -429,10 +438,10 @@ export const CoachModal: React.FC<CoachModalProps> = ({
                     )}
                   </div>
                 ))}
-                {chatBusy && <Loader2 className="w-4 h-4 animate-spin text-slate-500" />}
+                {chatBusy && <Loader2 className="w-4 h-4 animate-spin text-[var(--outline)]" />}
               </div>
-              {chatError && <p className="text-sm text-red-400 mt-2">{chatError}</p>}
-              <div className="shrink-0 flex items-center gap-2 mt-3 pt-3 border-t border-white/10">
+              {chatError && <p className="text-sm text-rose-400 mt-2">{chatError}</p>}
+              <div className="shrink-0 flex items-center gap-2 mt-3 pt-3 border-t border-[var(--border-subtle)]">
                 <input
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
@@ -443,12 +452,12 @@ export const CoachModal: React.FC<CoachModalProps> = ({
                     }
                   }}
                   placeholder={t('editor.coachChatPlaceholder')}
-                  className="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none focus:border-cyan-500/50"
+                  className="flex-1 px-3 py-2 rounded-lg nm-inset text-sm text-[var(--on-surface)] outline-none bg-transparent placeholder:text-[var(--outline)]"
                 />
                 <button
                   onClick={() => void sendChat()}
                   disabled={chatBusy || !chatInput.trim()}
-                  className="p-2 rounded-lg bg-cyan-500/90 hover:bg-cyan-400 text-slate-950 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="nm-btn-primary p-2.5 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <Send className="w-4 h-4" />
                 </button>
@@ -458,16 +467,16 @@ export const CoachModal: React.FC<CoachModalProps> = ({
 
           {tab === 'audit' && (
             <div className="space-y-4">
-              <p className="text-xs text-slate-400">{t('editor.coachAuditHint')}</p>
+              <p className="text-xs text-[var(--outline)]">{t('editor.coachAuditHint')}</p>
               <button
                 onClick={runAudit}
                 disabled={auditing}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-500/90 hover:bg-cyan-400 text-slate-950 font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="nm-btn-primary flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-sm disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {auditing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ListChecks className="w-4 h-4" />}
                 {t('editor.coachRunAudit')}
               </button>
-              {auditError && <p className="text-sm text-red-400">{auditError}</p>}
+              {auditError && <p className="text-sm text-rose-400">{auditError}</p>}
               {audit && (
                 <div className="space-y-4">
                   {audit.truncated && <p className="text-xs text-amber-400">{t('editor.coachAuditTruncated')}</p>}
@@ -482,17 +491,17 @@ export const CoachModal: React.FC<CoachModalProps> = ({
                     const items = (audit as any)[key] as any[];
                     return (
                       <div key={key}>
-                        <h4 className="text-xs uppercase tracking-wide text-slate-500 mb-1.5">{t(`editor.${titleKey}`)}</h4>
+                        <h4 className="text-xs uppercase tracking-wide text-[var(--outline)] mb-1.5">{t(`editor.${titleKey}`)}</h4>
                         {!items || items.length === 0 ? (
-                          <p className="text-sm text-slate-500">{t('editor.coachAuditNone')}</p>
+                          <p className="text-sm text-[var(--outline)]">{t('editor.coachAuditNone')}</p>
                         ) : (
                           <div className="space-y-1.5">
                             {items.map((it, i) => (
-                              <div key={i} className="rounded-lg bg-slate-900/60 border border-white/10 p-2.5 text-sm text-slate-200">
+                              <div key={i} className="rounded-lg nm-inset p-2.5 text-sm text-[var(--on-surface)]">
                                 {key === 'continuityIssues' && (
                                   <>
                                     <div>{it.description}</div>
-                                    {it.locations && <div className="text-xs text-slate-500 mt-0.5">{it.locations}</div>}
+                                    {it.locations && <div className="text-xs text-[var(--outline)] mt-0.5">{it.locations}</div>}
                                   </>
                                 )}
                                 {key === 'openThreads' && (
@@ -500,7 +509,7 @@ export const CoachModal: React.FC<CoachModalProps> = ({
                                     <div>
                                       <b>{it.name}</b> · <span className="text-amber-400">{it.status}</span>
                                     </div>
-                                    {it.note && <div className="text-xs text-slate-400 mt-0.5">{it.note}</div>}
+                                    {it.note && <div className="text-xs text-[var(--outline)] mt-0.5">{it.note}</div>}
                                   </>
                                 )}
                                 {key === 'arcNotes' && (
@@ -508,7 +517,7 @@ export const CoachModal: React.FC<CoachModalProps> = ({
                                     <div>
                                       <b>{it.character}</b>
                                     </div>
-                                    <div className="text-xs text-slate-400 mt-0.5">{it.note}</div>
+                                    <div className="text-xs text-[var(--outline)] mt-0.5">{it.note}</div>
                                   </>
                                 )}
                                 {key === 'setupPayoff' && (
@@ -516,7 +525,7 @@ export const CoachModal: React.FC<CoachModalProps> = ({
                                     <div>
                                       {it.setup} · <span className="text-amber-400">{it.payoffStatus}</span>
                                     </div>
-                                    {it.note && <div className="text-xs text-slate-400 mt-0.5">{it.note}</div>}
+                                    {it.note && <div className="text-xs text-[var(--outline)] mt-0.5">{it.note}</div>}
                                   </>
                                 )}
                               </div>
@@ -532,13 +541,18 @@ export const CoachModal: React.FC<CoachModalProps> = ({
           )}
         </div>
 
-        {/* Постійна панель вставки — доступна на будь-якій вкладці */}
-        <div className="shrink-0 border-t border-white/10 bg-[#0d1322] px-5 py-3 space-y-2">
+        {/* Постійна панель вставки — доступна на будь-якій вкладці.
+            Кнопка вставки лишається смарагдовою (не var(--primary)) —
+            єдиний свідомий відступ від чат-дровера: це дія іншого типу
+            (закомітити текст у рукопис, а не надіслати повідомлення), тож
+            зберігає власний колірний акцент, але в тій самій неоморфній
+            мові тіней (nm-btn/nm-outset), що й решта попапу. */}
+        <div className="shrink-0 border-t border-[var(--border-subtle)] nm-outset-sm px-5 py-3 space-y-2">
           <div className="flex items-center justify-between">
-            <label className="text-[11px] uppercase tracking-wide text-slate-500">{t('editor.coachDraftLabel')}</label>
+            <label className="text-[11px] uppercase tracking-wide text-[var(--outline)]">{t('editor.coachDraftLabel')}</label>
             <button
               onClick={() => setDraftText(seed?.text || '')}
-              className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-200"
+              className="flex items-center gap-1 text-[11px] text-[var(--outline)] hover:text-[var(--on-surface)]"
             >
               <RotateCcw className="w-3 h-3" />
               {t('editor.coachDraftReset')}
@@ -548,7 +562,7 @@ export const CoachModal: React.FC<CoachModalProps> = ({
             value={draftText}
             onChange={(e) => setDraftText(e.target.value)}
             rows={3}
-            className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none focus:border-cyan-500/50 resize-none"
+            className="w-full px-3 py-2 rounded-lg nm-inset text-sm text-[var(--on-surface)] outline-none bg-transparent resize-none"
           />
           <div className="flex items-center justify-between">
             <span className="text-xs text-emerald-400" style={{ opacity: insertedFlash ? 1 : 0, transition: 'opacity .3s' }}>
@@ -557,7 +571,7 @@ export const CoachModal: React.FC<CoachModalProps> = ({
             <button
               onClick={doInsert}
               disabled={!draftText.trim()}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500/90 hover:bg-emerald-400 text-slate-950 font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="nm-btn flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-sm text-emerald-300 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <PenLine className="w-4 h-4" />
               {t('editor.coachInsertToBook')}

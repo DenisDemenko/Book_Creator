@@ -4650,13 +4650,22 @@ export const EditorView: React.FC<EditorViewProps> = ({
           </div>
 
           <div className="flex items-center gap-3 text-slate-400 font-mono text-[11px]">
-            <span>{t('editor.wordsUaLabel')} <b className="text-slate-100">{activeSection?.wordCount || 0}</b></span>
-            {activeSection?.contentEn && (
-              <span>• EN: <b className="[color:var(--sun-acc)]">{calculateWordCount(activeSection.contentEn)}</b></span>
+            {/* Кількість слів/час читання переїхали компактним чіпом у
+                рядок форматування режиму «UA» — лівіше кнопки «Англійська
+                версія» (openEnglishWindow) — див. коментар «Компактний чіп
+                кількості слів» там. Тут лишається резервний варіант для
+                режимів EN/Паралельно (у них немає власного toolbar-рядка,
+                що межує з тою кнопкою) — без дублювання в режимі UA. */}
+            {editorLanguageMode !== 'ua' && (
+              <span>
+                {t('editor.wordsShort', { n: activeSection?.wordCount || 0 })}
+                {activeSection?.contentEn && (
+                  <> · EN {calculateWordCount(activeSection.contentEn)}</>
+                )}
+              </span>
             )}
-            <span>{t('editor.readingTime', { n: estimateReadingTimeMinutes(activeSection?.wordCount || 0) })}</span>
             {!isFocusWindow && (
-              <div className="flex items-center gap-1.5 pl-3 border-l border-slate-800" title={t('editor.pageZoomTitle')}>
+              <div className="flex items-center gap-1.5" title={t('editor.pageZoomTitle')}>
                 <ZoomIn className="w-3.5 h-3.5 [color:var(--sun-acc)] shrink-0" />
                 <select
                   value={PAGE_ZOOM_PRESETS.includes(editorZoom) ? String(editorZoom) : 'custom'}
@@ -4770,14 +4779,32 @@ export const EditorView: React.FC<EditorViewProps> = ({
               {/* Форматування тексту + швидкий доступ до англійської версії */}
               <div className="flex items-center justify-between gap-2 mb-3 shrink-0 flex-wrap">
                 {renderFormatToolbar(false)}
-                <button
-                  onClick={openEnglishWindow}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-[11px] font-semibold transition-colors"
-                  title={t('editor.openEnWindowTitle')}
-                >
-                  <Languages className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
-                  <span>{t('editor.openEnWindowBtn')}</span>
-                </button>
+                <div className="flex items-center gap-1.5 ml-auto">
+                  {/* Компактний чіп кількості слів виділення/розділу —
+                      раніше окремим рядком нижче тулбару (три довгі <span>,
+                      «Слів (UA): N • EN: N • ~N хв читання»), губився в
+                      переповненому горизонтальним скролом рядку. Стиснуто в
+                      один моноширинний чіп і піднято сюди, лівіше кнопки
+                      «Англійська версія», як просив власник. */}
+                  <div
+                    className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-md bg-slate-950 border border-slate-800 text-slate-400 font-mono text-[10px] shrink-0"
+                    title={`${t('editor.wordsUaLabel')} ${activeSection?.wordCount || 0} · ${t('editor.readingTime', { n: estimateReadingTimeMinutes(activeSection?.wordCount || 0) })}`}
+                  >
+                    <span className="text-slate-100 font-bold">{t('editor.wordsShort', { n: activeSection?.wordCount || 0 })}</span>
+                    {activeSection?.contentEn && (
+                      <span className="[color:var(--sun-acc)]">· EN {calculateWordCount(activeSection.contentEn)}</span>
+                    )}
+                    <span className="text-slate-500">· {t('editor.readingTimeShort', { n: estimateReadingTimeMinutes(activeSection?.wordCount || 0) })}</span>
+                  </div>
+                  <button
+                    onClick={openEnglishWindow}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-[11px] font-semibold transition-colors"
+                    title={t('editor.openEnWindowTitle')}
+                  >
+                    <Languages className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
+                    <span>{t('editor.openEnWindowBtn')}</span>
+                  </button>
+                </div>
               </div>
 
               {/* Панель дій над виділенням.

@@ -297,6 +297,7 @@ export const editor = {
     quoteTitle: 'Цитата',
     wordsUaLabel: 'Слів (UA):',
     readingTime: '• ~{n} хв читання',
+    readingTimeShort: '~{n} хв',
     readerBannerTitle: 'Режим Читача (Read-Only):',
     readerBannerText: 'Редагування рукопису заблоковано. Відкрийте вкладку «Розворот книги» для повноформатного читання з анімацією сторінок.',
     translatorBannerTitle: 'Режим Перекладача:',
