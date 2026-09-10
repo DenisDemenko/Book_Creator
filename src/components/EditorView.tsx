@@ -146,6 +146,7 @@ import { CharacterEditModal } from './CharacterEditModal';
 import { AddParticipantsModal } from './AddParticipantsModal';
 import { GenerateCharacterModal } from './GenerateCharacterModal';
 import { HeroJourneyModal } from './HeroJourneyModal';
+import { CoachModal, type CoachSeed } from './CoachModal';
 import { GenerateIllustrationModal } from './GenerateIllustrationModal';
 import { DraggablePanel } from './DraggablePanel';
 import { DockedEditorPanel } from './DockedEditorPanel';
@@ -437,6 +438,15 @@ export const EditorView: React.FC<EditorViewProps> = ({
   const [showGenerateHeroModal, setShowGenerateHeroModal] = useState<boolean>(false);
   const [heroToEnhance, setHeroToEnhance] = useState<Character | null>(null);
   const [showHeroJourney, setShowHeroJourney] = useState<boolean>(false);
+
+  // AI-коуч: попап-тренажер, що з'являється після виділення тексту
+  // (кнопка в тулбарі «AI Асистент» + значок ✦ біля виділення нижче).
+  // coachSourceRef НЕ реактивний навмисно — потрібен лише в момент
+  // «Вставити в книгу», перерендер компонента через нього не потрібен.
+  const [coachOpen, setCoachOpen] = useState(false);
+  const [coachSeed, setCoachSeed] = useState<CoachSeed | null>(null);
+  const [coachPill, setCoachPill] = useState<{ x: number; y: number; kind: 'ua' | 'en' } | null>(null);
+  const coachSourceRef = useRef<{ editor: Editor; to: number } | null>(null);
 
   // Quick Footnote / QR dialog state
   const [showFootnoteModal, setShowFootnoteModal] = useState<boolean>(false);
@@ -807,6 +817,26 @@ export const EditorView: React.FC<EditorViewProps> = ({
     return true;
   };
 
+  /**
+   * Обчислює позицію значка ✦ AI-коуч біля кінця виділення (той самий
+   * `coordsAtPos`, що й наведення на згадку персонажа нижче) — окремо для
+   * UA/EN колонки, бо виділення в них незалежні. Порожнє виділення ховає
+   * значок ЛИШЕ якщо він належав цій самій колонці — інакше клік по
+   * значку EN міг би зникнути через порожнє selection-подія в UA.
+   */
+  const updateCoachPill = (editor: Editor, from: number, to: number, empty: boolean, kind: 'ua' | 'en') => {
+    if (empty || to <= from) {
+      setCoachPill((prev) => (prev?.kind === kind ? null : prev));
+      return;
+    }
+    try {
+      const coords = editor.view.coordsAtPos(to);
+      setCoachPill({ x: coords.right, y: coords.bottom, kind });
+    } catch {
+      /* coordsAtPos може кинути виняток, якщо позиція поза відрендереним в'юпортом — просто не показуємо значок */
+    }
+  };
+
   const uaEditor = useEditor(
     {
       extensions: uaManuscriptExtensions,
@@ -821,6 +851,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
       onSelectionUpdate: ({ editor }) => {
         const { from, to, empty } = editor.state.selection;
         setSelectedText(empty ? '' : editor.state.doc.textBetween(from, to, '\n'));
+        updateCoachPill(editor, from, to, empty, 'ua');
       },
     },
     []
@@ -835,6 +866,10 @@ export const EditorView: React.FC<EditorViewProps> = ({
       },
       onUpdate: ({ editor }) => {
         handleContentEnChangeRef.current(tiptapDocToMarkerString(editor.getJSON() as JSONContent));
+      },
+      onSelectionUpdate: ({ editor }) => {
+        const { from, to, empty } = editor.state.selection;
+        updateCoachPill(editor, from, to, empty, 'en');
       },
     },
     []
@@ -2053,6 +2088,50 @@ export const EditorView: React.FC<EditorViewProps> = ({
     }
   };
 
+  /**
+   * Відкриває AI-коуча (CoachModal.tsx) — з кнопки тулбару «AI Асистент»
+   * АБО зі значка ✦, що з'являється біля виділення (coachPill вище).
+   * Якщо нічого не виділено, кнопка тулбару працює на всю поточну сцену
+   * (activeSection.content) — так само, як «Аналізувати сцену» в панелі
+   * «Персонажі і сцена», а не блокується мовчки.
+   */
+  const openCoachWithSelection = (isEn = false) => {
+    const source = getSelectionSource();
+    const editor = source?.editor || (isEn ? enEditor : uaEditor);
+    if (!editor) return;
+    const fallbackText = isEn ? activeSection?.contentEn || '' : activeSection?.content || '';
+    const text = source?.text || fallbackText.replace(/\[[^\]]*\]/g, ' ').trim();
+    if (!text) return;
+    coachSourceRef.current = { editor, to: source ? source.to : editor.state.doc.content.size };
+    setCoachSeed({
+      text,
+      kind: source ? source.kind : isEn ? 'en' : 'ua',
+      sceneText: fallbackText.replace(/\[[^\]]*\]/g, ' '),
+      sceneTitle: activeSection?.title,
+      chapterTitle: activeChapter?.title,
+    });
+    setCoachPill(null);
+    setCoachOpen(true);
+  };
+
+  /**
+   * Вставляє (можливо, відредагований автором) текст із CoachModal назад у
+   * розділ — дослівно той самий шлях, що й runSelectionParagraphs вище:
+   * маркер [AI-DRAFT]…[/AI-DRAFT] одразу після блоку, де було виділення чи
+   * курсор у момент відкриття коуча. Блок інтерактивний (прийняти/
+   * відхилити) — nova-ai-draft, AiDraftBlockNode.tsx.
+   */
+  const insertCoachTextToBook = (text: string) => {
+    const src = coachSourceRef.current;
+    const editor = src?.editor || uaEditor;
+    if (!editor) return;
+    const pos = Math.min(src?.to ?? editor.state.doc.content.size, editor.state.doc.content.size);
+    const $to = editor.state.doc.resolve(pos);
+    const insertAt = $to.depth > 0 ? $to.after(1) : pos;
+    const snippet = `[AI-DRAFT]\n\n${text}\n\n[/AI-DRAFT]`;
+    editor.chain().focus().insertContentAt(insertAt, markerSnippetToNodes(snippet)).run();
+  };
+
   // Закриває меню/пікер AI-тексту за фото при кліку/Esc поза ним.
   useEffect(() => {
     if (!aiImageMenu && !aiEnginePicker) return;
@@ -2598,6 +2677,22 @@ export const EditorView: React.FC<EditorViewProps> = ({
             </option>
           ))}
         </select>
+
+        {/* AI-коуч — попап-тренажер за виділеним фрагментом (або всією
+            сценою, якщо нічого не виділено). Видиме місце у вкладці «AI
+            Асистент», окремо від значка ✦, що з'являється біля самого
+            виділення (coachPill, рендериться поза тулбаром). */}
+        <button
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => openCoachWithSelection(isEn)}
+          disabled={isReader}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/30 text-cyan-300 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          title={t('editor.coachButtonTitle')}
+          aria-label={t('editor.coachButtonTitle')}
+        >
+          <GraduationCap className="w-3.5 h-3.5" />
+          {t('editor.coachButton')}
+        </button>
       </div>
 
       {(() => {
@@ -6150,6 +6245,33 @@ export const EditorView: React.FC<EditorViewProps> = ({
           }
         />
       )}
+
+      {/* AI-КОУЧ — значок ✦ біля виділення тексту (coachPill) і сама модалка. */}
+      {coachPill && (
+        <button
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => openCoachWithSelection(coachPill.kind === 'en')}
+          className="fixed z-[60] flex items-center gap-1 px-2 py-1 rounded-full bg-cyan-500 text-slate-950 text-[11px] font-semibold shadow-lg shadow-cyan-500/30 hover:bg-cyan-400 transition-colors"
+          style={{ left: coachPill.x + 6, top: coachPill.y + 4 }}
+          title={t('editor.coachButtonTitle')}
+        >
+          <Sparkles className="w-3 h-3" />
+          {t('editor.coachPillLabel')}
+        </button>
+      )}
+      <CoachModal
+        isOpen={coachOpen}
+        onClose={() => setCoachOpen(false)}
+        book={book}
+        seed={coachSeed}
+        preferredAiModelId={book.preferredAiModelId || undefined}
+        currentModelLabel={
+          effectiveAiModelId
+            ? aiCoreModels.find((m) => m.id === effectiveAiModelId)?.label || effectiveAiModelId
+            : t('editor.aiModelSelectAuto')
+        }
+        onInsertToBook={insertCoachTextToBook}
+      />
 
       {/* ВСТАВКА ЗОБРАЖЕННЯ З ГАЛЕРЕЇ */}
       {showInsertImageModal && (

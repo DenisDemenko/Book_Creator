@@ -2788,6 +2788,269 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
     }
   });
 
+  // === AI-КОУЧ «Книга і текст» ===============================================
+  //
+  // Спливаюче вікно-тренажер, що з'являється після виділення тексту в
+  // рукописі (кнопка в тулбарі «AI Асистент» + значок біля виділення,
+  // src/components/EditorView.tsx `openCoach`/`coachPill`). На відміну від
+  // макета-основи (fusion_lab_ai_mentor_v4.html, локальні regex-детектори),
+  // тут аналіз, чат і книжковий аудит виконує РЕАЛЬНА модель ШІ через те
+  // саме ядро (generateAiText), що й решта AI-інструментів продукту —
+  // власник підтвердив це прямо (AskUserQuestion), а не локальну симуляцію.
+  //
+  // Три ендпоінти:
+  //   • coach-analyze — «здоров'я» виділеного фрагмента сцени (мета/
+  //     конфлікт/ставки/POV/ритм/сенсорика/розрив наміру) — MESO+MICRO.
+  //   • coach-chat — багатоходовий чат з ментором про фрагмент.
+  //   • coach-book-audit — Phase 2, MACRO: наскрізна перевірка книги
+  //     (суперечності, незакриті сюжетні лінії, дрейф арки персонажа,
+  //     setup/payoff) — читає РЕАЛЬНИЙ стан книги (characters/heroArc),
+  //     а не окрему ручну форму пам'яті, як у макеті.
+  //
+  // Вставка результату назад у книгу НЕ ендпоінт — клієнт використовує вже
+  // наявний, перевірений маркер `[AI-DRAFT]…[/AI-DRAFT]` (той самий, що й
+  // «Вставити абзац за виділенням» вище) через markerSnippetToNodes.
+
+  /**
+   * Спільний резолвер рушія й ключа для трьох ендпоінтів коуча нижче —
+   * той самий блок, що дослівно повторюється в generate-paragraphs-from-
+   * selection вище, винесений сюди окремо, щоб не тричі копіювати його в
+   * нових маршрутах. Кидає ChatProviderError(503), якщо рушій не
+   * налаштований — обробляється тим самим catch, що й у сусідніх маршрутах.
+   */
+  async function resolveCoachEngine(userId: string | undefined, modelId?: string) {
+    const resolvedModelId = modelId || GEMINI_MODEL;
+    const engine = resolveChatEngine(resolvedModelId);
+    let userKey: string | undefined;
+    if (userId) {
+      const stored = await getUserApiKey(userId, engine).catch(() => undefined);
+      if (stored) {
+        try {
+          userKey = decryptApiKey(stored.encryptedKey);
+        } catch (err) {
+          console.warn('[ai-coach] не вдалося розшифрувати ключ користувача, пробуємо серверний:', err);
+        }
+      }
+    }
+    if (!userKey && !engineConfigured(engine)) {
+      throw new ChatProviderError(
+        503,
+        `Рушій «${ENGINE_LABELS[engine]}» не налаштований: додайте ${ENGINE_ENV_KEY[engine]} у .env сервера або власний ключ у розділі «Ключі API».`
+      );
+    }
+    return { resolvedModelId, engine, userKey };
+  }
+
+  /** Стислий опис персонажів книги для контексту промпту коуча (обидва coach-* ендпоінти, що читають книгу). */
+  function summarizeCharactersForCoach(characters: unknown): string {
+    if (!Array.isArray(characters) || characters.length === 0) return '(персонажі книги не передані)';
+    return characters
+      .slice(0, 12)
+      .map((c: any) => {
+        const name = String(c?.name || '—');
+        const goals = Array.isArray(c?.personality?.goals) ? c.personality.goals.join('; ') : '';
+        const fears = Array.isArray(c?.personality?.fears) ? c.personality.fears.join('; ') : '';
+        const rel = Array.isArray(c?.relationships)
+          ? c.relationships.map((r: any) => `${r.type || '?'}→${r.targetCharacterId || '?'}`).join(', ')
+          : '';
+        return `- ${name}: мета(-и): ${goals || '—'}; страх(и): ${fears || '—'}; стосунки: ${rel || '—'}`;
+      })
+      .join('\n');
+  }
+
+  app.post('/api/ai/coach-analyze', requirePermission('canUseAi'), async (req, res) => {
+    const {
+      modelId, fragment, sceneText, intent, bookTitle, genre, chapterTitle, sceneTitle, characters, bookId,
+    } = req.body || {};
+    try {
+      const text = typeof fragment === 'string' ? fragment.trim() : '';
+      if (!text || text.length < 20) {
+        return res
+          .status(400)
+          .json({ error: 'Виділіть фрагмент тексту (щонайменше кілька слів) перед аналізом.', kind: 'selection_too_short' });
+      }
+      const userId = req.principal?.id as string | undefined;
+      const { resolvedModelId, engine, userKey } = await resolveCoachEngine(userId, modelId);
+
+      const system =
+        'Ти — досвідчений літературний ментор-редактор художньої прози, у стилі сократівського коучингу ' +
+        '(питаннями, а не готовими рішеннями). Аналізуєш ОДИН фрагмент сцени в контексті всієї сцени. ' +
+        'Відповідай ЛИШЕ JSON-об\'єктом без жодного тексту навколо, українською мовою.';
+      const charBlock = summarizeCharactersForCoach(characters);
+      const user = [
+        `Книга: «${bookTitle || 'без назви'}», жанр: ${genre || 'не вказано'}.`,
+        chapterTitle ? `Глава: ${chapterTitle}.` : '',
+        sceneTitle ? `Сцена: ${sceneTitle}.` : '',
+        intent ? `Заявлений намір автора для цієї сцени: «${intent}».` : 'Намір автора не заявлено.',
+        `Персонажі книги (контекст, не переказувати):\n${charBlock}`,
+        sceneText ? `Повний текст сцени (контекст):\n"""${String(sceneText).slice(0, 6000)}"""` : '',
+        `Фрагмент, що аналізується (виділений автором):\n"""${text.slice(0, 4000)}"""`,
+        'Оціни ЛИШЕ виділений фрагмент (текст сцени — контекст для точності), і поверни JSON рівно такої форми:',
+        '{"health":{"goal":"clear|weak|missing|uncertain","conflict":"...","stakes":"...","choice":"...","emotionalChange":"...","pov":"...","rhythm":"...","sensory":"..."},' +
+          '"mainProblem":{"label":"коротка назва проблеми","evidence":"1-2 речення чому","question":"одне сократівське питання авторові"}|null,' +
+          '"intentGap":{"status":"aligned|gap|uncertain|unset","message":"1 речення"},' +
+          '"exercise":"одна конкретна мікровправа (1-2 речення) під головну проблему"}',
+        'Якщо критичних проблем немає — mainProblem має бути null. Не вигадуй персонажів чи подій поза наданим контекстом.',
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+
+      const result = await generateAiText({
+        engine,
+        modelId: resolvedModelId,
+        prompt: user,
+        systemInstruction: system,
+        json: true,
+        apiKeyOverride: userKey,
+        req,
+        label: `AI-коуч: аналіз фрагмента${sceneTitle ? ` (${sceneTitle})` : ''}`,
+        bookId,
+      });
+
+      let parsed: any = null;
+      try {
+        parsed = JSON.parse(result.text);
+      } catch {
+        return res.status(502).json({ error: 'Модель повернула не-JSON відповідь. Спробуйте ще раз.', kind: 'bad_json' });
+      }
+      res.json({ ...parsed, engine, modelId: resolvedModelId, timestamp: new Date().toISOString() });
+    } catch (err: any) {
+      console.error('Error in /api/ai/coach-analyze:', err?.message || err);
+      if (err instanceof ChatProviderError) return res.status(err.status).json({ error: err.message });
+      res.status(500).json({ error: err?.message || 'Не вдалося виконати аналіз фрагмента.', kind: 'unknown' });
+    }
+  });
+
+  app.post('/api/ai/coach-chat', requirePermission('canUseAi'), async (req, res) => {
+    const { modelId, messages, fragment, sceneTitle, bookTitle, genre, bookId } = req.body || {};
+    try {
+      if (!Array.isArray(messages) || messages.length === 0) {
+        return res.status(400).json({ error: 'Порожня історія розмови.', kind: 'empty_messages' });
+      }
+      const userId = req.principal?.id as string | undefined;
+      const { resolvedModelId, engine, userKey } = await resolveCoachEngine(userId, modelId);
+
+      const system =
+        'Ти — теплий, конкретний ментор-коуч для письменника, що працює над романом. Відповідай українською, ' +
+        'стисло (2-5 речень), по суті наданого фрагмента й репліки автора. Не вигадуй сюжет за автора — став ' +
+        'уточнювальні запитання й давай точкові поради, спираючись на сократівський метод.';
+      const history = (messages as Array<{ role?: string; text?: string }>)
+        .slice(-20)
+        .map((m) => `${m.role === 'coach' ? 'Коуч' : 'Автор'}: ${String(m.text || '').slice(0, 1500)}`)
+        .join('\n');
+      const user = [
+        `Книга: «${bookTitle || 'без назви'}», жанр: ${genre || 'не вказано'}.${sceneTitle ? ` Сцена: ${sceneTitle}.` : ''}`,
+        fragment ? `Фрагмент, що обговорюється:\n"""${String(fragment).slice(0, 3000)}"""` : '',
+        `Діалог дотепер:\n${history}`,
+        'Дай наступну репліку коуча (лише текст репліки, без префікса "Коуч:").',
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+
+      const result = await generateAiText({
+        engine,
+        modelId: resolvedModelId,
+        prompt: user,
+        systemInstruction: system,
+        apiKeyOverride: userKey,
+        req,
+        label: `AI-коуч: чат${sceneTitle ? ` (${sceneTitle})` : ''}`,
+        bookId,
+      });
+
+      res.json({ reply: result.text.trim(), engine, modelId: resolvedModelId, timestamp: new Date().toISOString() });
+    } catch (err: any) {
+      console.error('Error in /api/ai/coach-chat:', err?.message || err);
+      if (err instanceof ChatProviderError) return res.status(err.status).json({ error: err.message });
+      res.status(500).json({ error: err?.message || 'Не вдалося отримати відповідь коуча.', kind: 'unknown' });
+    }
+  });
+
+  /**
+   * Книжковий аудит (Phase 2 з наданого технічного аналізу) — MACRO-рівень:
+   * суперечності між главами, незакриті сюжетні лінії, дрейф арки
+   * персонажа, setup без payoff. На відміну від coach-analyze (одна сцена),
+   * тут навмисно НЕМАЄ жорсткого нижнього ліміту довжини — аудит короткого
+   * чорновика (1 глава) так само має сенс, як і повної книги.
+   */
+  app.post('/api/ai/coach-book-audit', requirePermission('canUseAi'), async (req, res) => {
+    const { modelId, bookTitle, genre, synopsis, characters, heroArcSummary, chaptersText, bookId } = req.body || {};
+    try {
+      if (!Array.isArray(chaptersText) || chaptersText.length === 0) {
+        return res.status(400).json({ error: 'У книзі немає розділів з текстом для аудиту.', kind: 'empty_book' });
+      }
+      const userId = req.principal?.id as string | undefined;
+      const { resolvedModelId, engine, userKey } = await resolveCoachEngine(userId, modelId);
+
+      // Клієнт вже скорочує до розумної межі (CoachModal.tsx COACH_AUDIT_CHAR_CAP),
+      // але серверний захисний ліміт лишається окремо — про всяк випадок.
+      const SERVER_HARD_CAP = 90000;
+      let used = 0;
+      const bookText = (chaptersText as Array<{ chapterTitle?: string; sections?: Array<{ title?: string; text?: string }> }>)
+        .map((ch) => {
+          const secs = (ch.sections || [])
+            .map((s) => {
+              const t = String(s.text || '');
+              return `  · ${s.title || 'без назви'}:\n${t}`;
+            })
+            .join('\n');
+          return `## ${ch.chapterTitle || 'Глава без назви'}\n${secs}`;
+        })
+        .join('\n\n');
+      const cappedBookText =
+        bookText.length > SERVER_HARD_CAP
+          ? bookText.slice(0, SERVER_HARD_CAP) + '\n\n[…текст скорочено для аудиту, перевірено лише початок книги…]'
+          : bookText;
+      used = cappedBookText.length;
+
+      const system =
+        'Ти — редактор-розвитку (developmental editor), що перевіряє ЦІЛУ книгу на наскрізні проблеми: ' +
+        'суперечності фактів між главами, сюжетні лінії, які відкрились і не закрились, дрейф характеру ' +
+        'персонажа від його заявленого профілю, і закладки (setup) без розкриття (payoff). Це MACRO-рівень — ' +
+        'НЕ коментуй стиль речень чи ритм, лише наскрізну структуру. Відповідай ЛИШЕ JSON, українською.';
+      const charBlock = summarizeCharactersForCoach(characters);
+      const user = [
+        `Книга: «${bookTitle || 'без назви'}», жанр: ${genre || 'не вказано'}.`,
+        synopsis ? `Синопсис: ${String(synopsis).slice(0, 1500)}` : '',
+        heroArcSummary ? `Арка головного героя (заявлена автором): ${String(heroArcSummary).slice(0, 1500)}` : '',
+        `Персонажі:\n${charBlock}`,
+        `Повний текст книги за главами (може бути скорочено в кінці, якщо позначено):\n${cappedBookText}`,
+        'Поверни JSON рівно такої форми:',
+        '{"continuityIssues":[{"description":"...","locations":"напр. Глава 2 vs Глава 5"}],' +
+          '"openThreads":[{"name":"...","status":"open|unclear","note":"..."}],' +
+          '"arcNotes":[{"character":"ім\'я","note":"..."}],' +
+          '"setupPayoff":[{"setup":"...","payoffStatus":"resolved|unresolved|unclear","note":"..."}]}',
+        'Кожен масив може бути порожнім, якщо проблем не знайдено. Не вигадуй фактів, яких немає в наданому тексті.',
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+
+      const result = await generateAiText({
+        engine,
+        modelId: resolvedModelId,
+        prompt: user,
+        systemInstruction: system,
+        json: true,
+        apiKeyOverride: userKey,
+        req,
+        label: `AI-коуч: аудит книги «${bookTitle || ''}» (${Math.round(used / 1000)}k симв.)`,
+        bookId,
+      });
+
+      let parsed: any = null;
+      try {
+        parsed = JSON.parse(result.text);
+      } catch {
+        return res.status(502).json({ error: 'Модель повернула не-JSON відповідь. Спробуйте ще раз.', kind: 'bad_json' });
+      }
+      res.json({ ...parsed, engine, modelId: resolvedModelId, truncated: bookText.length > SERVER_HARD_CAP, timestamp: new Date().toISOString() });
+    } catch (err: any) {
+      console.error('Error in /api/ai/coach-book-audit:', err?.message || err);
+      if (err instanceof ChatProviderError) return res.status(err.status).json({ error: err.message });
+      res.status(500).json({ error: err?.message || 'Не вдалося виконати аудит книги.', kind: 'unknown' });
+    }
+  });
+
   // --- Форматування готового файлу під Amazon KDP (Claude API, Pro/Ultra) ---
 
   /** Чи налаштовано Anthropic-ключ — щоб клієнт показав чесний стан кнопки, а не 503 після завантаження файлу. */
