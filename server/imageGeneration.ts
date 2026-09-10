@@ -18,10 +18,24 @@
  *     Gemini-шлях, тож решта пайплайну (збереження файлу, книга, витрати)
  *     лишається спільною для обох провайдерів.
  *
+ * П'ятий двигун — GPT Image (OpenAI), задача «фото персонажа тим самим
+ * провайдером, що й обраний текст»:
+ *   • GPT Image — POST https://api.openai.com/v1/images/generations,
+ *     той самий OPENAI_API_KEY (панель «Ключі API», рушій 'gpt'), що вже
+ *     обслуговує GPT-4o в чаті/тексті ядра — окремого ключа для картинок
+ *     не заводимо. За замовчуванням модель gpt-image-1.5 (звірено вересень
+ *     2026: gpt-image-1 позначено deprecated на сторінці моделі,
+ *     gpt-image-2 вже тарифікується інакше — за токенами, а не фіксованою
+ *     ціною за зображення, що не лягає в ImagePriceTable нижче без
+ *     окремого лічильника токенів). OPENAI_IMAGE_MODEL перемикає модель
+ *     без правок коду, коли лінійка піде далі. GPT-моделі завжди
+ *     повертають b64_json (response_format — параметр лише DALL·E,
+ *     якої тут немає) — той самий формат, що й у Gemini/Seedream.
+ *
  * Чого тут свідомо немає і чому:
  *   • Midjourney — не має офіційного публічного API; існують лише сторонні
  *     мости через Discord, які порушують його ToS і ризикують акаунтом.
- *   • DALL·E 3   — видалена з OpenAI API.
+ *   • DALL·E 3   — видалена з OpenAI API (замінена лінійкою GPT Image).
  *   • Imagen 4   — моделі imagen-4.0-* вимкнено Google 17 серпня 2026,
  *     а метод models.generateImages оголошено застарілим.
  *   • Seedance   — це модель ByteDance для ВІДЕО (text/image-to-video), не
@@ -48,7 +62,7 @@ import { SEEDREAM_FAL_MODEL, SEEDREAM_FAL_EDIT_MODEL } from './pricing';
  */
 export const MAX_REFERENCE_IMAGES = 10;
 
-export type ImageEngineId = 'nano-banana-2-lite' | 'nano-banana-2' | 'nano-banana-pro' | 'seedream';
+export type ImageEngineId = 'nano-banana-2-lite' | 'nano-banana-2' | 'nano-banana-pro' | 'seedream' | 'gpt-image';
 
 export interface ImageEngineInfo {
   id: ImageEngineId;
@@ -56,7 +70,7 @@ export interface ImageEngineInfo {
   label: string;
   /** Ідентифікатор моделі у провайдера. */
   modelId: string;
-  provider: 'google' | 'bytedance';
+  provider: 'google' | 'bytedance' | 'openai';
   /** Найбільший розмір, який приймає модель. */
   maxSize: '1K' | '2K' | '4K';
   /**
@@ -118,6 +132,27 @@ export const IMAGE_ENGINES: Record<ImageEngineId, ImageEngineInfo> = {
     supportsQualityControl: false,
     supportsFormatChoice: false,
   },
+  'gpt-image': {
+    id: 'gpt-image',
+    label: 'GPT Image (OpenAI)',
+    modelId: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1.5',
+    provider: 'openai',
+    // Реальний розмір рахується з aspectRatio окремою функцією
+    // (openaiSizeFor) — цей маркер тут лише обирає ЦІНОВИЙ рядок у
+    // IMAGE_PRICING (server/pricing.ts), як і для Lite/Seedream: OpenAI
+    // тарифікує здебільшого за ЯКІСТЮ (low/medium/high), а не за
+    // роздільністю, тож єдина фіксована '1K'-ціна — за замовчуванням
+    // «medium»-якість — чесніша, ніж вигадувати три ціни під токен,
+    // якого запит навіть не просить.
+    maxSize: '1K',
+    // 'minimal'/'high' мапляться на 'low'/'high' якості OpenAI; типовий
+    // запит без явного quality йде як 'medium' (сама ціна в pricing.ts —
+    // саме під це значення).
+    supportsQualityControl: true,
+    // output_format (png/jpeg/webp) — документований для GPT-моделей
+    // (developers.openai.com/api/reference, звірено вересень 2026).
+    supportsFormatChoice: true,
+  },
 };
 
 export const DEFAULT_ENGINE: ImageEngineId = 'nano-banana-2';
@@ -162,6 +197,22 @@ export function seedreamTransportFor(apiKey: string): SeedreamTransport {
 export const seedreamConfig = {
   apiKey: process.env.ARK_API_KEY || process.env.SEEDREAM_API_KEY || process.env.FAL_KEY || '',
   baseUrl: (process.env.ARK_BASE_URL || process.env.SEEDREAM_BASE_URL || 'https://ark.ap-southeast.bytepluses.com/api/v3').replace(/\/+$/, ''),
+  get enabled(): boolean {
+    return !!this.apiKey;
+  },
+};
+
+/**
+ * Конфігурація GPT Image (OpenAI) — навмисно ТОЙ САМИЙ OPENAI_API_KEY, що
+ * server/chatProviders.ts вже використовує для рушія 'gpt' (текст/чат):
+ * один ключ OpenAI покриває і GPT-4o, і зображення, тож окремого секрету
+ * автор чи адміністратор не вставляє. Ключ, вставлений адміністратором у
+ * розділі «Ключі API» під рушієм 'gpt' (platformKeyFor('gpt')), має
+ * пріоритет і приходить сюди через apiKeyOverride (server/aiCore.ts) —
+ * так само, як Seedream отримує свій override.
+ */
+export const openaiImageConfig = {
+  apiKey: process.env.OPENAI_API_KEY || '',
   get enabled(): boolean {
     return !!this.apiKey;
   },
@@ -309,7 +360,11 @@ function classifyProviderError(err: unknown): ImageErrorKind {
   return 'unknown';
 }
 
-function humanMessage(kind: ImageErrorKind, engineLabel: string, provider: 'google' | 'bytedance' = 'google'): string {
+function humanMessage(
+  kind: ImageErrorKind,
+  engineLabel: string,
+  provider: 'google' | 'bytedance' | 'openai' = 'google'
+): string {
   switch (kind) {
     case 'no_key':
       // Раніше повідомлення завжди називало провайдера «Gemini», навіть
@@ -319,15 +374,23 @@ function humanMessage(kind: ImageErrorKind, engineLabel: string, provider: 'goog
       // як «викликали не той рушій». Тепер назва обраного двигуна лишається
       // на першому місці, а Gemini згадується лише як ключ, який для нього
       // потрібен.
-      return provider === 'bytedance'
-        ? `Двигун ${engineLabel} не налаштований: додайте ARK_API_KEY (ByteDance Seedream) у змінні оточення, або перевірте власний ключ у розділі «Ключі API».`
-        : `Двигун ${engineLabel} не налаштований: додайте GEMINI_API_KEY (усі моделі Nano Banana працюють через Gemini API) у змінні оточення, або перевірте власний ключ у розділі «Ключі API».`;
+      if (provider === 'bytedance') {
+        return `Двигун ${engineLabel} не налаштований: додайте ARK_API_KEY (ByteDance Seedream) у змінні оточення, або перевірте власний ключ у розділі «Ключі API».`;
+      }
+      if (provider === 'openai') {
+        return `Двигун ${engineLabel} не налаштований: додайте OPENAI_API_KEY (той самий ключ, що й для GPT у чаті) у змінні оточення, або перевірте власний ключ у розділі «Ключі API».`;
+      }
+      return `Двигун ${engineLabel} не налаштований: додайте GEMINI_API_KEY (усі моделі Nano Banana працюють через Gemini API) у змінні оточення, або перевірте власний ключ у розділі «Ключі API».`;
     case 'safety':
       return 'Модель відхилила запит через фільтри безпеки. Спробуйте пом’якшити опис сцени або персонажа.';
     case 'quota':
-      return provider === 'bytedance'
-        ? 'Вичерпано ліміт запитів до Seedream. Спробуйте за кілька хвилин або перевірте квоти у консолі BytePlus ModelArk.'
-        : 'Вичерпано ліміт запитів до моделі. Спробуйте за кілька хвилин або перевірте квоти у Google AI Studio.';
+      if (provider === 'bytedance') {
+        return 'Вичерпано ліміт запитів до Seedream. Спробуйте за кілька хвилин або перевірте квоти у консолі BytePlus ModelArk.';
+      }
+      if (provider === 'openai') {
+        return 'Вичерпано ліміт запитів до OpenAI. Спробуйте за кілька хвилин або перевірте квоти й ліміти витрат у платформі OpenAI.';
+      }
+      return 'Вичерпано ліміт запитів до моделі. Спробуйте за кілька хвилин або перевірте квоти у Google AI Studio.';
     case 'empty':
       return `Двигун ${engineLabel} не повернув зображення. Спробуйте ще раз або оберіть інший двигун.`;
     default:
@@ -513,6 +576,91 @@ async function generateWithSeedream(
   };
 }
 
+/**
+ * Найближчий розмір із фіксованого набору gpt-image (1024x1024 /
+ * 1536x1024 / 1024x1536) для заданого співвідношення сторін. GPT-моделі
+ * приймають і 'auto', але тоді ціна й фактичний розмір лишаються
+ * непередбачувані для тарифу нижче, тож тут завжди обираємо конкретне
+ * значення — квадрат/альбом/портрет за тим самим принципом, що вже
+ * використовує normalizeAspectRatio() для решти двигунів.
+ */
+function openaiSizeFor(aspectRatio: SupportedRatio): '1024x1024' | '1536x1024' | '1024x1536' {
+  const [rw, rh] = aspectRatio.split(':').map(Number);
+  if (rw === rh) return '1024x1024';
+  return rw > rh ? '1536x1024' : '1024x1536';
+}
+
+/**
+ * Виклик GPT Image (OpenAI) через /v1/images/generations. На відміну від
+ * Seedream/Ark, тут немає окремого `negative_prompt` — виклик generateImage()
+ * нижче вже дописує його текстом у сам prompt (та сама гілка, що й для
+ * Google). Референсні зображення (мультиреференсна генерація, задача #52)
+ * для GPT Image йдуть окремим ендпоінтом /images/edits із multipart-файлами,
+ * а не JSON-полем у /generations — підключення цього шляху лишається поза
+ * межами поточної задачі, тож із референсами двигун чесно відмовляє, а не
+ * мовчки їх ігнорує.
+ */
+async function generateWithOpenAI(
+  engine: ImageEngineInfo,
+  apiKey: string,
+  prompt: string,
+  aspectRatio: SupportedRatio,
+  quality?: 'minimal' | 'high',
+  outputFormat?: 'png' | 'jpeg',
+  referenceImageUrls?: string[]
+): Promise<{ buffer: Buffer; mimeType: string }> {
+  if (referenceImageUrls?.length) {
+    throw new ImageGenerationError(
+      'unknown',
+      `Двигун ${engine.label} поки не підтримує референсні зображення — оберіть інший двигун або приберіть референси.`,
+      engine.id
+    );
+  }
+
+  const size = openaiSizeFor(aspectRatio);
+  const mappedQuality = quality === 'high' ? 'high' : quality === 'minimal' ? 'low' : 'medium';
+
+  let res: Response;
+  try {
+    res = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: engine.modelId,
+        prompt,
+        size,
+        quality: mappedQuality,
+        n: 1,
+        ...(outputFormat && engine.supportsFormatChoice ? { output_format: outputFormat } : {}),
+      }),
+    });
+  } catch (err) {
+    throw new ImageGenerationError('unknown', `OpenAI API недоступний: ${(err as Error).message}`, engine.id, err);
+  }
+
+  const json = (await res.json().catch(() => null)) as
+    | { data?: { b64_json?: string }[]; error?: { message?: string; code?: string; type?: string } }
+    | null;
+
+  if (!res.ok) {
+    const message = json?.error?.message || `HTTP ${res.status}`;
+    const kind = classifySeedreamError(res.status, message);
+    throw new ImageGenerationError(kind, `OpenAI: ${message}`, engine.id);
+  }
+
+  const first = json?.data?.[0];
+  if (!first?.b64_json) {
+    throw new ImageGenerationError('empty', humanMessage('empty', engine.label), engine.id);
+  }
+  return {
+    buffer: Buffer.from(first.b64_json, 'base64'),
+    mimeType: outputFormat === 'jpeg' ? 'image/jpeg' : 'image/png',
+  };
+}
+
 /** Виклик моделі сімейства Nano Banana через Interactions API. */
 async function generateWithNanoBanana(
   ai: GoogleGenAI,
@@ -578,14 +726,22 @@ export async function generateImage(
   const engine = resolveEngine(options.engine);
 
   // Власний ключ автора («Ключі API») має пріоритет над серверним, як і в
-  // текстових рушіях: платить той, чий ключ підставлено.
-  const seedreamKey = options.apiKeyOverride?.trim() || seedreamConfig.apiKey;
+  // текстових рушіях: платить той, чий ключ підставлено. Той самий override
+  // стосується рівно ОДНОГО провайдера за виклик — той, що відповідає
+  // обраному двигуну (server/aiCore.ts підставляє платформний ключ саме
+  // під нього), тож тут просто розкладаємо його по двох гілках.
+  const overrideKey = options.apiKeyOverride?.trim();
+  const seedreamKey = overrideKey || seedreamConfig.apiKey;
+  const openaiKey = overrideKey || openaiImageConfig.apiKey;
 
   if (engine.provider === 'google' && !ai) {
     throw new ImageGenerationError('no_key', humanMessage('no_key', engine.label, 'google'), engine.id);
   }
   if (engine.provider === 'bytedance' && !seedreamKey) {
     throw new ImageGenerationError('no_key', humanMessage('no_key', engine.label, 'bytedance'), engine.id);
+  }
+  if (engine.provider === 'openai' && !openaiKey) {
+    throw new ImageGenerationError('no_key', humanMessage('no_key', engine.label, 'openai'), engine.id);
   }
   if (!options.prompt || !options.prompt.trim()) {
     throw new ImageGenerationError('unknown', 'Порожній промпт для генерації зображення.', engine.id);
@@ -632,16 +788,26 @@ export async function generateImage(
               options.negativePrompt,
               options.referenceImageUrls
             )
-        : await generateWithNanoBanana(
-            ai as GoogleGenAI,
-            engine,
-            prompt,
-            aspectRatio,
-            imageSize,
-            options.quality,
-            options.outputFormat,
-            options.referenceImageUrls
-          );
+        : engine.provider === 'openai'
+          ? await generateWithOpenAI(
+              engine,
+              openaiKey,
+              prompt,
+              aspectRatio,
+              options.quality,
+              options.outputFormat,
+              options.referenceImageUrls
+            )
+          : await generateWithNanoBanana(
+              ai as GoogleGenAI,
+              engine,
+              prompt,
+              aspectRatio,
+              imageSize,
+              options.quality,
+              options.outputFormat,
+              options.referenceImageUrls
+            );
     return {
       ...generated,
       engine,
@@ -705,7 +871,7 @@ export async function saveGeneratedImage(
 }
 
 /** Перелік двигунів для інтерфейсу — щоб клієнт не хардкодив назви моделей. */
-export function listEngines(availability: { google: boolean; bytedance: boolean }) {
+export function listEngines(availability: { google: boolean; bytedance: boolean; openai: boolean }) {
   return Object.values(IMAGE_ENGINES).map((engine) => ({
     id: engine.id,
     label: engine.label,
@@ -714,6 +880,11 @@ export function listEngines(availability: { google: boolean; bytedance: boolean 
     maxSize: engine.maxSize,
     supportsQualityControl: engine.supportsQualityControl,
     supportsFormatChoice: engine.supportsFormatChoice,
-    available: engine.provider === 'bytedance' ? availability.bytedance : availability.google,
+    available:
+      engine.provider === 'bytedance'
+        ? availability.bytedance
+        : engine.provider === 'openai'
+          ? availability.openai
+          : availability.google,
   }));
 }

@@ -1,6 +1,7 @@
 import {
   normalizeAspectRatio, resolveEngine, generateImage, saveGeneratedImage,
-  IMAGE_ENGINES, listEngines, ImageGenerationError, GENERATED_DIR, seedreamConfig, seedreamTransportFor
+  IMAGE_ENGINES, listEngines, ImageGenerationError, GENERATED_DIR, seedreamConfig, seedreamTransportFor,
+  openaiImageConfig
 } from '../server/imageGeneration';
 import fs from 'node:fs/promises';
 import { priceForImage } from '../server/pricing';
@@ -37,6 +38,9 @@ t('модель Nano Banana Pro правильна', IMAGE_ENGINES['nano-banana-
 t('модель Lite правильна', IMAGE_ENGINES['nano-banana-2-lite'].modelId==='gemini-3.1-flash-lite-image');
 t('seedream резолвиться', resolveEngine('seedream').id==='seedream');
 t('seedream — провайдер bytedance', IMAGE_ENGINES['seedream'].provider==='bytedance');
+t('gpt-image резолвиться', resolveEngine('gpt-image').id==='gpt-image');
+t('gpt-image — провайдер openai', IMAGE_ENGINES['gpt-image'].provider==='openai');
+t('модель GPT Image правильна', IMAGE_ENGINES['gpt-image'].modelId==='gpt-image-1.5');
 
 console.log('\nбез ключа:');
 try { await generateImage(null, {prompt:'кіт'}); t('кидає помилку', false); }
@@ -340,20 +344,104 @@ console.log('\nзбереження файлу:');
   await fs.unlink(`${GENERATED_DIR}/${saved.filename}`);
 }
 
+console.log('\nбез ключа — GPT Image:');
+try { await generateImage(null, {prompt:'кіт', engine:'gpt-image'}); t('кидає помилку', false); }
+catch(e:any){
+  t('kind = no_key', e.kind==='no_key', e.kind);
+  t('повідомлення згадує OPENAI_API_KEY', /OPENAI_API_KEY/.test(e.message), e.message);
+}
+
+console.log('\nGPT Image (підставний fetch):');
+{
+  const realFetch = global.fetch;
+  const prevKey = openaiImageConfig.apiKey;
+  openaiImageConfig.apiKey = 'sk-test-fake-key';
+  let capturedUrl:any=null, capturedBody:any=null, capturedAuth:any=null;
+  // @ts-expect-error підміна глобального fetch лише на час цього блоку тесту
+  global.fetch = async (url:string, init:any) => {
+    capturedUrl = url;
+    capturedBody = JSON.parse(init.body);
+    capturedAuth = init.headers.Authorization;
+    return { ok:true, status:200, json: async()=>({ data:[{ b64_json: PNG_B64 }] }) };
+  };
+  try {
+    const r = await generateImage(null, {
+      prompt:'портрет кіберпанк-детектива', engine:'gpt-image', aspectRatio:'16:9', negativePrompt:'blurry',
+    });
+    t('URL — офіційний ендпоінт OpenAI', capturedUrl==='https://api.openai.com/v1/images/generations', capturedUrl);
+    t('Authorization: Bearer <ключ>', capturedAuth==='Bearer sk-test-fake-key', capturedAuth);
+    t('викликано правильну модель', capturedBody.model==='gpt-image-1.5', capturedBody.model);
+    t('16:9 → альбомний розмір 1536x1024', capturedBody.size==='1536x1024', capturedBody.size);
+    t('якість за замовчуванням — medium', capturedBody.quality==='medium', capturedBody.quality);
+    t('негативний промпт дописано текстом (нема структурного поля)', /Avoid: blurry/.test(capturedBody.prompt), capturedBody.prompt);
+    t('повернуто буфер PNG', Buffer.isBuffer(r.buffer) && r.buffer.subarray(1,4).toString()==='PNG');
+    t('engineId у відповіді — gpt-image', r.engine.id==='gpt-image');
+
+    await generateImage(null, { prompt:'квадратний портрет', engine:'gpt-image', aspectRatio:'1:1' });
+    t('1:1 → квадратний розмір 1024x1024', capturedBody.size==='1024x1024', capturedBody.size);
+
+    await generateImage(null, { prompt:'портретна орієнтація', engine:'gpt-image', aspectRatio:'3:4' });
+    t('3:4 → портретний розмір 1024x1536', capturedBody.size==='1024x1536', capturedBody.size);
+
+    await generateImage(null, { prompt:'чернетка', engine:'gpt-image', quality:'minimal' });
+    t("'minimal' мапиться на 'low'", capturedBody.quality==='low', capturedBody.quality);
+    await generateImage(null, { prompt:'фінал', engine:'gpt-image', quality:'high' });
+    t("'high' мапиться на 'high'", capturedBody.quality==='high', capturedBody.quality);
+
+    t('тариф gpt-image — $0.034 (medium, 1024x1024)', priceForImage('gpt-image','1K')===0.034, String(priceForImage('gpt-image','1K')));
+  } finally {
+    global.fetch = realFetch;
+    openaiImageConfig.apiKey = prevKey;
+  }
+}
+
+console.log('\nGPT Image — референсні зображення чесно відхиляються (немає /images/edits):');
+{
+  const prevKey = openaiImageConfig.apiKey;
+  openaiImageConfig.apiKey = 'sk-test-fake-key';
+  try {
+    await generateImage(null, { prompt:'x', engine:'gpt-image', referenceImageUrls:['https://example.com/ref.png'] });
+    t('з референсами кидає помилку', false);
+  } catch (e:any) {
+    t('повідомлення пояснює відсутність підтримки референсів', /референс/i.test(e.message), e.message);
+  } finally {
+    openaiImageConfig.apiKey = prevKey;
+  }
+}
+
+console.log('\nGPT Image — класифікація HTTP-помилок:');
+{
+  const realFetch = global.fetch;
+  const prevKey = openaiImageConfig.apiKey;
+  openaiImageConfig.apiKey = 'sk-test-fake-key';
+  for (const [status, message, kind] of [[401,'Incorrect API key provided','no_key'],[403,'Forbidden','no_key'],[429,'Rate limit reached','quota'],[400,'Your request was rejected by our safety system','safety'],[500,'Internal error','unknown']] as const) {
+    // @ts-expect-error підміна глобального fetch лише на час цього блоку тесту
+    global.fetch = async () => ({ ok:false, status, json: async()=>({ error:{ message } }) });
+    try { await generateImage(null,{prompt:'x', engine:'gpt-image'}); t(`HTTP ${status}`, false); }
+    catch(e:any){ t(`HTTP ${status} "${message}" → ${kind}`, e.kind===kind, e.kind); }
+  }
+  global.fetch = realFetch;
+  openaiImageConfig.apiKey = prevKey;
+}
+
 console.log('\nсписок двигунів для UI:');
 {
-  const list = listEngines({ google:false, bytedance:false });
-  t('рівно 4 двигуни', list.length===4, list.map(e=>e.id).join(', '));
+  const list = listEngines({ google:false, bytedance:false, openai:false });
+  t('рівно 5 двигунів', list.length===5, list.map(e=>e.id).join(', '));
   t('без жодного ключа available=false для всіх', list.every(e=>!e.available));
   t('лише Google-ключ → доступні тільки 3 Nano Banana', (()=>{
-    const l = listEngines({ google:true, bytedance:false });
-    return l.filter(e=>e.provider==='google').every(e=>e.available) && !l.find(e=>e.id==='seedream')!.available;
+    const l = listEngines({ google:true, bytedance:false, openai:false });
+    return l.filter(e=>e.provider==='google').every(e=>e.available) && !l.find(e=>e.id==='seedream')!.available && !l.find(e=>e.id==='gpt-image')!.available;
   })());
   t('лише ByteDance-ключ → доступний тільки seedream', (()=>{
-    const l = listEngines({ google:false, bytedance:true });
-    return l.find(e=>e.id==='seedream')!.available && l.filter(e=>e.provider==='google').every(e=>!e.available);
+    const l = listEngines({ google:false, bytedance:true, openai:false });
+    return l.find(e=>e.id==='seedream')!.available && l.filter(e=>e.provider==='google').every(e=>!e.available) && !l.find(e=>e.id==='gpt-image')!.available;
   })());
-  t('обидва ключі → усі доступні', listEngines({ google:true, bytedance:true }).every(e=>e.available));
+  t('лише OpenAI-ключ → доступний тільки gpt-image', (()=>{
+    const l = listEngines({ google:false, bytedance:false, openai:true });
+    return l.find(e=>e.id==='gpt-image')!.available && l.filter(e=>e.provider==='google').every(e=>!e.available) && !l.find(e=>e.id==='seedream')!.available;
+  })());
+  t('усі три ключі → усі доступні', listEngines({ google:true, bytedance:true, openai:true }).every(e=>e.available));
   t('Midjourney відсутній', !JSON.stringify(list).toLowerCase().includes('midjourney'));
   t('DALL·E відсутній', !JSON.stringify(list).toLowerCase().includes('dall'));
   t('Imagen відсутній', !JSON.stringify(list).toLowerCase().includes('imagen'));

@@ -472,11 +472,24 @@ export async function generateImage(p: GenerateImageParams): Promise<{
 }> {
   const ctx: UsageLogCtx = { req: p.req, label: p.label, bookId: p.bookId };
   try {
-    // Власний ключ автора для Seedream, якщо він його зберіг. Помилка
-    // читання не має валити генерацію — тоді просто працює серверний ключ.
     // Ключ платформи, а не того, хто викликає: коди провайдерів вводить
-    // лише адміністратор, і Nova обслуговує ним усіх авторів.
-    const apiKeyOverride = await platformKeyFor('seedream');
+    // лише адміністратор, і Nova обслуговує ним усіх авторів. Помилка
+    // читання не має валити генерацію — тоді просто працює серверний
+    // env-ключ (imageGeneration.ts сам на нього відкотиться).
+    //
+    // Який саме platformKeyFor(...) читати, залежить від ОБРАНОГО
+    // двигуна: Seedream і GPT Image — різні провайдери з різними рядками
+    // ключа в розділі «Ключі API». GPT Image навмисно ділить ключ із
+    // рушієм 'gpt' (той самий OPENAI_API_KEY, що обслуговує GPT-4o в
+    // чаті/тексті) — окремого запису для зображень адміністратор не
+    // заводить.
+    const targetEngine = resolveImageEngine(p.engine);
+    const apiKeyOverride =
+      targetEngine.provider === 'bytedance'
+        ? await platformKeyFor('seedream')
+        : targetEngine.provider === 'openai'
+          ? await platformKeyFor('gpt')
+          : undefined;
 
 
     const generated = await generateImageRaw(geminiClient, {

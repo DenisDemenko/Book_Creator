@@ -11,6 +11,7 @@ import {
   ensureGeneratedDir,
   listEngines,
   seedreamConfig,
+  openaiImageConfig,
   GENERATED_DIR,
   GENERATED_URL_PREFIX,
   SUPPORTED_RATIOS,
@@ -489,11 +490,27 @@ registerModerationRoutes(app);
   // вставлений адміністратором у розділі «Ключі API», теж робить рушій
   // робочим — і робить його таким для ВСІХ авторів, бо обслуговує їх
   // Nova своїми ключами.
-  app.get('/api/ai/image-engines', async (_req, res) => {
+  app.get('/api/ai/image-engines', async (req, res) => {
     const adminKey = !!(await platformKeyFor('seedream'));
     const hasSeedreamKey = seedreamConfig.enabled || adminKey;
+    // GPT Image ділить ключ із текстовим рушієм 'gpt' (той самий
+    // OPENAI_API_KEY / адмінський запис, що й GPT-4o в чаті) —
+    // окремого ключа для зображень немає.
+    const adminOpenAiKey = !!(await platformKeyFor('gpt'));
+    const hasOpenAiImageKey = openaiImageConfig.enabled || adminOpenAiKey;
+    // Якщо клієнт передав ?modelId=<обраний рушій ТЕКСТУ книги>, і той
+    // рушій — OpenAI, і GPT Image доступний, підказуємо його як двигун
+    // картинки за замовчуванням: саме цього просив автор («якщо обрано
+    // модель від OpenAI, то повинна нею створюватися і фотографія»),
+    // а не лише пропонувати його як один з пунктів списку, котрий
+    // довелось би вручну шукати серед Nano Banana/Seedream.
+    const requestedModelId = typeof req.query.modelId === 'string' ? req.query.modelId : undefined;
+    const suggestedEngineId =
+      requestedModelId && hasOpenAiImageKey && resolveChatEngine(requestedModelId) === 'gpt'
+        ? ('gpt-image' as const)
+        : undefined;
     res.json({
-      engines: listEngines({ google: !!ai, bytedance: hasSeedreamKey }),
+      engines: listEngines({ google: !!ai, bytedance: hasSeedreamKey, openai: hasOpenAiImageKey }),
       // Той самий перелік співвідношень сторін, що й нормалізує сервер
       // (imageGeneration.ts) — панель генерації в медіатеці малює кнопки
       // з нього, а не з власного захардкодженого списку.
@@ -501,6 +518,9 @@ registerModerationRoutes(app);
       hasGeminiKey: !!ai,
       hasSeedreamKey,
       seedreamKeySource: adminKey ? ('panel' as const) : seedreamConfig.enabled ? ('env' as const) : null,
+      hasOpenAiImageKey,
+      openAiImageKeySource: adminOpenAiKey ? ('panel' as const) : openaiImageConfig.enabled ? ('env' as const) : null,
+      suggestedEngineId,
     });
   });
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   X, 
   Sparkles, 
@@ -45,7 +45,7 @@ interface GenerateCharacterModalProps {
   preferredAiModelId?: string;
 }
 
-export type GenerationModel = 'nano-banana-2-lite' | 'nano-banana-2' | 'nano-banana-pro' | 'seedream';
+export type GenerationModel = 'nano-banana-2-lite' | 'nano-banana-2' | 'nano-banana-pro' | 'seedream' | 'gpt-image';
 export type StylePreset = 'cyberpunk-photoreal' | 'cinematic' | 'graphic-novel' | 'anime' | 'oil-portrait' | 'dark-noir';
 
 export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
@@ -75,9 +75,14 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
   // Set = лише ті двигуни, у яких сервер бачить ключ.
   const [availableImageEngines, setAvailableImageEngines] = useState<Set<string> | null>(null);
 
+  // Чи вже застосовано серверну підказку рушія картинки (нижче) — лише
+  // РАЗ на відкриття модалки, щоб не перебивати ручний вибір автора.
+  const hasAutoSelectedEngineRef = useRef(false);
+
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/ai/image-engines', { credentials: 'same-origin' })
+    const query = preferredAiModelId ? `?modelId=${encodeURIComponent(preferredAiModelId)}` : '';
+    fetch(`/api/ai/image-engines${query}`, { credentials: 'same-origin' })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (cancelled || !data?.engines) return;
@@ -87,6 +92,19 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
             .map((e) => e.id)
         );
         setAvailableImageEngines(ids);
+        // Сервер підказує 'gpt-image', якщо обраний у книзі текстовий
+        // рушій — OpenAI, і GPT Image доступний (server.ts::/api/ai/image-engines).
+        // Раніше двигун картинки завжди лишався на дефолтному Nano Banana
+        // незалежно від того, яку модель автор обрав для тексту — саме
+        // на це й скаржились («модель також звертається лише до Gemini»).
+        if (
+          !hasAutoSelectedEngineRef.current &&
+          data.suggestedEngineId &&
+          ids.has(data.suggestedEngineId)
+        ) {
+          hasAutoSelectedEngineRef.current = true;
+          setSelectedModel(data.suggestedEngineId as GenerationModel);
+        }
       })
       .catch(() => {
         /* немає мережі/ендпоінта — лишаємо null (показ усіх), не ховаємо вибір */
@@ -94,7 +112,7 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [preferredAiModelId]);
 
   // Якщо обрана модель стала недоступною — падаємо на першу доступну.
   useEffect(() => {
@@ -329,6 +347,13 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
       tag: t('generateCharacterModal.modelSeedreamTag'),
       icon: '🌱',
       desc: t('generateCharacterModal.modelSeedreamDesc'),
+    },
+    {
+      id: 'gpt-image',
+      name: t('generateCharacterModal.modelGptImageName'),
+      tag: t('generateCharacterModal.modelGptImageTag'),
+      icon: '🧠',
+      desc: t('generateCharacterModal.modelGptImageDesc'),
     },
   ];
 

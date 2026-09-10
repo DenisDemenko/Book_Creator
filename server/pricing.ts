@@ -85,6 +85,19 @@ export const IMAGE_PRICING: Record<string, ImagePriceTable> = {
     label: 'Seedream 4.5 Edit (ByteDance, fal.ai)',
     perImageUsd: { '1K': 0.04 },
   },
+  // GPT Image (OpenAI) — на відміну від решти таблиці, офіційна ціна
+  // залежить головно від ЯКОСТІ (low/medium/high), а не роздільності:
+  // gpt-image-1.5, medium, 1024x1024 = $0.034 (developers.openai.com/api/docs/models/gpt-image-1.5,
+  // звірено вересень 2026). Двигун завжди запитує 'medium', якщо автор не
+  // обрав інше через supportsQualityControl (server/imageGeneration.ts),
+  // тож цей запис — реальна ціна ТИПОВОГО запиту, а не оцінка навмання;
+  // за явного 'low'/'high' фактична ціна відхиляється від цієї цифри —
+  // окремого лічильника токенів під усі три рівні поки не підключено.
+  'gpt-image': {
+    modelId: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1.5',
+    label: 'GPT Image (OpenAI)',
+    perImageUsd: { '1K': 0.034 },
+  },
 };
 
 /** Тариф текстової моделі, долари за мільйон токенів. */
