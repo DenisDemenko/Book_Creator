@@ -61,11 +61,15 @@ export function registerModerationRoutes(app: Express): void {
           outcomes: course.outcomes.filter(Boolean),
           // Картка-вітрина: лише назва/рівень/«навіщо» — без «як розвивати» й вправ (платний контент).
           skills: course.skills.map((s) => ({ name: s.name, level: s.level, whyItMatters: s.whyItMatters })),
-          // Скелет програми: назви модулів і уроків із тривалістю — без опису/відео/фото/завдань.
+          // Скелет програми (назви модулів і уроків із тривалістю) плюс
+          // посилання на відео (YouTube/Vimeo — на вибір автора, тут не
+          // розрізняється) — решта платного матеріалу (опис/фото/завдання)
+          // досі не передається, лишається за карткою (log.md #138).
           modules: course.modules.map((m) => ({
             title: m.title,
             summary: m.summary,
-            lessons: m.lessons.map((l) => ({ title: l.title, durationMin: l.durationMin })),
+            introVideoUrl: m.introVideoUrl,
+            lessons: m.lessons.map((l) => ({ title: l.title, durationMin: l.durationMin, videoUrl: l.videoUrl })),
           })),
         });
         updateCourse(course.id, { status: 'published' });

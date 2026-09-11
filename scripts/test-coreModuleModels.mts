@@ -193,7 +193,10 @@ console.log('\nПублікація курсу у вітрину:');
         {
           title: 'Модуль 1: Старт',
           summary: 'З чого почати',
-          lessons: [{ title: 'Урок 1', durationMin: 15 }],
+          introVideoUrl: 'https://vimeo.com/1234567890',
+          lessons: [
+            { title: 'Урок 1', durationMin: 15, videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' },
+          ],
         },
       ],
     },
@@ -224,6 +227,11 @@ console.log('\nПублікація курсу у вітрину:');
       sent.modules?.[0]?.lessons?.[0]?.durationMin === 15 &&
       sent.modules?.[0]?.lessons?.[0]?.description === undefined &&
       sent.modules?.[0]?.lessons?.[0]?.assignment === undefined
+  );
+  t(
+    'відео уроку й модуля передані як є, незалежно від провайдера (YouTube чи Vimeo — вибір автора, Nova не розрізняє)',
+    sent.modules?.[0]?.introVideoUrl === 'https://vimeo.com/1234567890' &&
+      sent.modules?.[0]?.lessons?.[0]?.videoUrl === 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
   );
   t('відповідь маркетплейсу повернена', (result.listing as any)?.slug === 'testovyi-kurs');
 

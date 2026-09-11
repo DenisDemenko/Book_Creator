@@ -1024,11 +1024,12 @@ export function registerAdminRoutes(app: Express): void {
   });
 
   /**
-   * Публікація КУРСУ у вітрину. На відміну від книги — приймач
-   * `/bridge/courses` на боці Fusion Lab не підтверджений цим
-   * репозиторієм (немає коду вітрини тут), тож запит може повертати
-   * `unreachable`/`rejected`, поки маркетплейс не додасть відповідний
-   * ендпоінт — це очікувана поведінка, а не ознака поломки на боці Nova.
+   * Публікація КУРСУ у вітрину — ручний адмінський дублікат реального
+   * шляху модерації (moderationRoutes.ts), для паритету з книжковим
+   * `/publish` вище. Приймач `/bridge/courses` на боці Fusion Lab
+   * підтверджений і реалізований (log.md #137–#138); поля `skills`/
+   * `modules` тут приходять сирими з тіла запиту й ідуть далі без
+   * перетворень, включно з `videoUrl`/`introVideoUrl`, якщо їх передали.
    */
   app.post('/api/admin/marketplace-bridge/publish-course', requireAdmin, async (req, res) => {
     const {
