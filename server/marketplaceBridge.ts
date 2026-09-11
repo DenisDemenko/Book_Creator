@@ -874,7 +874,35 @@ export async function publishBookToMarketplace(
  * `x-bridge-key`, той самий формат помилок), готову до підключення, коли
  * на боці маркетплейсу з'явиться відповідний ендпоінт. До того моменту
  * виклик повертатиме `unreachable`/`rejected` — це очікувано, не баг.
+ *
+ * Обсяг полів (аудит log.md #137): передається лише КАРТКА-ВІТРИНА —
+ * все, що покупець читає ДО оплати, щоб вирішити, чи купувати курс:
+ * валюта, категорія, аудиторія, результати навчання, навички (назва,
+ * рівень, навіщо) і скелет програми (назви модулів/уроків, тривалість).
+ * Свідомо НЕ передається сам платний матеріал — опис/мета уроку,
+ * посилання на відео/фото, тексти завдань і критерії прийняття: це
+ * контент, який покупець отримує лише ПІСЛЯ оплати, і його місце — у
+ * файлі/додатку товару (за взірцем `attachBookFileToMarketplace` для
+ * книг), а не в публічних полях лістингу картки.
  */
+export interface PublishCourseSkill {
+  name: string;
+  level: 'base' | 'confident' | 'pro';
+  /** Навіщо ця навичка в ремеслі — рядок пояснення, без «як розвивати»/вправ (те вже платний контент). */
+  whyItMatters?: string;
+}
+
+export interface PublishCourseModuleLesson {
+  title: string;
+  durationMin?: number;
+}
+
+export interface PublishCourseModule {
+  title: string;
+  summary?: string;
+  lessons: PublishCourseModuleLesson[];
+}
+
 export interface PublishCourseInput {
   /** Ідентифікатор книги-джерела — курс завжди прив'язаний до конкретної книги. */
   bookId: string;
@@ -884,12 +912,24 @@ export interface PublishCourseInput {
   description?: string;
   /** Ціна в копійках — та сама мінорна одиниця, що й у книг. */
   priceMinor: number;
+  /** ISO-код валюти (наприклад «UAH») — без неї ціна в мінорних одиницях неоднозначна. */
+  currency?: string;
   coverUrl?: string;
   /** Наприклад, назви модулів або «12 уроків» — вітрина показує їх як переваги товару. */
   highlights?: string[];
   sellerSlug?: string;
   moduleCount?: number;
   lessonCount?: number;
+  /** Категорія курсу для фільтрів/навігації вітрини. */
+  category?: string;
+  /** Кому підходить курс — рядки «Аудиторія» зі студії. */
+  audience?: string[];
+  /** Що покупець уміє після курсу — рядки «Результати навчання». */
+  outcomes?: string[];
+  /** Навички курсу — лише назва/рівень/«навіщо», без «як розвивати» й вправ. */
+  skills?: PublishCourseSkill[];
+  /** Скелет програми: назви модулів і уроків із тривалістю — без опису/відео/завдань уроку. */
+  modules?: PublishCourseModule[];
 }
 
 export interface PublishCourseResult {
@@ -919,11 +959,17 @@ export async function publishCourseToMarketplace(
     summary: input.summary,
     description: input.description,
     priceMinor: Math.round(input.priceMinor),
+    currency: input.currency,
     coverUrl: input.coverUrl,
     highlights: input.highlights,
     sellerSlug: input.sellerSlug,
     moduleCount: input.moduleCount,
     lessonCount: input.lessonCount,
+    category: input.category,
+    audience: input.audience,
+    outcomes: input.outcomes,
+    skills: input.skills,
+    modules: input.modules,
   };
 
   const controller = new AbortController();

@@ -50,11 +50,23 @@ export function registerModerationRoutes(app: Express): void {
           summary: course.summary,
           description: course.description,
           priceMinor: course.priceMinor ?? 0,
+          currency: course.currency,
           coverUrl: course.coverUrl,
           highlights: course.highlights.filter(Boolean),
           sellerSlug,
           moduleCount: course.modules.length,
           lessonCount: course.modules.reduce((n, m) => n + m.lessons.length, 0),
+          category: course.category,
+          audience: course.audience.filter(Boolean),
+          outcomes: course.outcomes.filter(Boolean),
+          // Картка-вітрина: лише назва/рівень/«навіщо» — без «як розвивати» й вправ (платний контент).
+          skills: course.skills.map((s) => ({ name: s.name, level: s.level, whyItMatters: s.whyItMatters })),
+          // Скелет програми: назви модулів і уроків із тривалістю — без опису/відео/фото/завдань.
+          modules: course.modules.map((m) => ({
+            title: m.title,
+            summary: m.summary,
+            lessons: m.lessons.map((l) => ({ title: l.title, durationMin: l.durationMin })),
+          })),
         });
         updateCourse(course.id, { status: 'published' });
         published = result;

@@ -178,10 +178,24 @@ console.log('\nПублікація курсу у вітрину:');
       bookId: 'book-1',
       title: 'Тестовий курс',
       priceMinor: 45000,
+      currency: 'UAH',
       coverUrl: 'https://example.com/cover.png',
       highlights: ['Модуль 1', 'Модуль 2'],
       moduleCount: 2,
       lessonCount: 7,
+      category: 'Письменництво',
+      audience: ['Початківці', 'Автори без досвіду'],
+      outcomes: ['Напишете перший розділ', 'Складете план книги'],
+      skills: [
+        { name: 'Структура сюжету', level: 'base', whyItMatters: 'Тримає читача до кінця' },
+      ],
+      modules: [
+        {
+          title: 'Модуль 1: Старт',
+          summary: 'З чого почати',
+          lessons: [{ title: 'Урок 1', durationMin: 15 }],
+        },
+      ],
     },
     { fetch: fakeFetch, settings: { url: 'https://api.example.com', key: 'k' } }
   );
@@ -191,6 +205,26 @@ console.log('\nПублікація курсу у вітрину:');
   const sent = JSON.parse(calls[0].init.body);
   t('externalId курсу в тілі запиту', sent.externalId === 'book-1:course');
   t('кількість модулів і уроків передана', sent.moduleCount === 2 && sent.lessonCount === 7);
+  t('валюта передана', sent.currency === 'UAH');
+  t('категорія передана', sent.category === 'Письменництво');
+  t('аудиторія передана', Array.isArray(sent.audience) && sent.audience.length === 2);
+  t('результати навчання передані', Array.isArray(sent.outcomes) && sent.outcomes[0] === 'Напишете перший розділ');
+  t(
+    'навички передані лише карткою (назва/рівень/навіщо), без «як розвивати» й вправ',
+    sent.skills?.[0]?.name === 'Структура сюжету' &&
+      sent.skills?.[0]?.level === 'base' &&
+      sent.skills?.[0]?.whyItMatters === 'Тримає читача до кінця' &&
+      sent.skills?.[0]?.howToDevelop === undefined &&
+      sent.skills?.[0]?.practiceIdeas === undefined
+  );
+  t(
+    'скелет програми переданий (назви модулів/уроків, тривалість), без опису уроку й завдань',
+    sent.modules?.[0]?.title === 'Модуль 1: Старт' &&
+      sent.modules?.[0]?.lessons?.[0]?.title === 'Урок 1' &&
+      sent.modules?.[0]?.lessons?.[0]?.durationMin === 15 &&
+      sent.modules?.[0]?.lessons?.[0]?.description === undefined &&
+      sent.modules?.[0]?.lessons?.[0]?.assignment === undefined
+  );
   t('відповідь маркетплейсу повернена', (result.listing as any)?.slug === 'testovyi-kurs');
 
   // Приймач /bridge/courses на боці Fusion Lab не підтверджений — тест

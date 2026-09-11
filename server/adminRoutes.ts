@@ -1037,12 +1037,18 @@ export function registerAdminRoutes(app: Express): void {
       subtitle,
       summary,
       description,
+      currency,
       coverUrl,
       highlights,
       sellerSlug,
       priceMinor,
       moduleCount,
       lessonCount,
+      category,
+      audience,
+      outcomes,
+      skills,
+      modules,
     } = req.body || {};
     if (!bookId || !title) {
       return res.status(400).json({ error: 'Потрібні bookId і title.', kind: 'bad_input' });
@@ -1062,11 +1068,17 @@ export function registerAdminRoutes(app: Express): void {
           summary,
           description,
           priceMinor: price,
+          currency,
           coverUrl,
           highlights,
           sellerSlug,
           moduleCount,
           lessonCount,
+          category,
+          audience,
+          outcomes,
+          skills,
+          modules,
         },
         { settings }
       );
