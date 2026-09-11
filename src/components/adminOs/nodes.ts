@@ -96,6 +96,15 @@ export const ADMIN_NODES: AdminNode[] = [
     group: 'core',
   },
   {
+    id: 'crm',
+    title: 'CRM',
+    hint: 'сегменти · чат підтримки',
+    description:
+      'Хто створив книгу чи курс, почав і не опублікував, опублікував, лише зареєструвався, писав у чат підтримки — одна таблиця з фільтрами-сегментами і переписка прямо звідси.',
+    action: { kind: 'panel', tab: 'crm' },
+    group: 'core',
+  },
+  {
     id: 'bridge',
     title: 'Міст до вітрини',
     hint: 'Nova → Fusion Lab',

@@ -49,6 +49,7 @@ import { apiKeysView } from './apiKeysView';
 import { narration } from './narration';
 import { mediaGenerationPanel } from './mediaGenerationPanel';
 import { marketIntel } from './marketIntel';
+import { supportChat } from './supportChat';
 
 /**
  * Об'єднані дерева перекладів. Кожен новий словник (наступний екран) —
@@ -107,6 +108,7 @@ export const dictionaries = {
     narration: narration.uk,
     mediaGenerationPanel: mediaGenerationPanel.uk,
     marketIntel: marketIntel.uk,
+    supportChat: supportChat.uk,
   },
   en: {
     common: common.en,
@@ -160,5 +162,6 @@ export const dictionaries = {
     narration: narration.en,
     mediaGenerationPanel: mediaGenerationPanel.en,
     marketIntel: marketIntel.en,
+    supportChat: supportChat.en,
   },
 };

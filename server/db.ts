@@ -604,6 +604,38 @@ CREATE TABLE IF NOT EXISTS moderation (
 );
 CREATE INDEX IF NOT EXISTS idx_moderation_status ON moderation(status, created_at);
 
+-- Чат підтримки сайту (адмін-CRM, log.md — розділ «CRM/чат підтримки»).
+-- Один тред на користувача (лише зареєстровані — анонімним гостям чат
+-- недоступний, тож user_id NOT NULL UNIQUE достатньо, окремий thread_id
+-- у клієнта не потрібен). Двостороннє листування: sender_role розрізняє
+-- репліку користувача від відповіді адміністратора, а unread_by_admin /
+-- unread_by_user — прості лічильники непрочитаного з обох боків, щоб не
+-- рахувати їх агрегатом по support_messages на кожен показ списку в CRM.
+CREATE TABLE IF NOT EXISTS support_threads (
+  id                    TEXT PRIMARY KEY,
+  user_id               TEXT NOT NULL UNIQUE,
+  status                TEXT NOT NULL DEFAULT 'open',  -- open | closed
+  last_message_at       TEXT NOT NULL,
+  last_message_preview  TEXT NOT NULL DEFAULT '',
+  message_count         INTEGER NOT NULL DEFAULT 0,
+  unread_by_admin       INTEGER NOT NULL DEFAULT 0,
+  unread_by_user        INTEGER NOT NULL DEFAULT 0,
+  created_at            TEXT NOT NULL,
+  updated_at            TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_support_threads_updated ON support_threads(updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS support_messages (
+  id            TEXT PRIMARY KEY,
+  thread_id     TEXT NOT NULL,
+  sender_role   TEXT NOT NULL,             -- user | admin
+  sender_id     TEXT NOT NULL,
+  content       TEXT NOT NULL,
+  created_at    TEXT NOT NULL,
+  FOREIGN KEY (thread_id) REFERENCES support_threads(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_support_messages_thread ON support_messages(thread_id, created_at);
+
 `;
 
 /**

@@ -140,6 +140,30 @@ export interface StoredChatMessage {
   createdAt: string;
 }
 
+/** Тред чату підтримки — один на зареєстрованого користувача (адмін-CRM). */
+export interface StoredSupportThread {
+  id: string;
+  userId: string;
+  status: 'open' | 'closed';
+  lastMessageAt: string;
+  lastMessagePreview: string;
+  messageCount: number;
+  unreadByAdmin: number;
+  unreadByUser: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Одна репліка треду підтримки — від користувача або адміністратора. */
+export interface StoredSupportMessage {
+  id: string;
+  threadId: string;
+  senderRole: 'user' | 'admin';
+  senderId: string;
+  content: string;
+  createdAt: string;
+}
+
 /** Власний ключ API користувача для одного провайдера (override серверного). */
 export interface StoredUserApiKey {
   userId: string;
@@ -194,6 +218,8 @@ interface StoreShape {
   userStyles: Record<string, StoredUserStyle>;
   chatSessions: Record<string, StoredChatSession>;
   chatMessages: StoredChatMessage[];
+  supportThreads: Record<string, StoredSupportThread>;
+  supportMessages: StoredSupportMessage[];
   /** Ключ запису — `${userId}:${engine}`. */
   userApiKeys: Record<string, StoredUserApiKey>;
   /** Шаблони промтів автора — JSON-рядок на користувача ("Конструктор промтів"). */
@@ -214,6 +240,8 @@ const EMPTY: StoreShape = {
   userStyles: {},
   chatSessions: {},
   chatMessages: [],
+  supportThreads: {},
+  supportMessages: [],
   userApiKeys: {},
   userPromptTemplates: {},
   appSettings: {},
@@ -234,6 +262,8 @@ const FILES: Record<keyof StoreShape, string> = {
   userStyles: 'user-styles.json',
   chatSessions: 'chat-sessions.json',
   chatMessages: 'chat-messages.json',
+  supportThreads: 'support-threads.json',
+  supportMessages: 'support-messages.json',
   userApiKeys: 'user-api-keys.json',
   userPromptTemplates: 'user-prompt-templates.json',
   appSettings: 'app-settings.json',
@@ -262,7 +292,7 @@ async function writeAtomic(name: string, value: unknown): Promise<void> {
 
 export async function loadStore(): Promise<StoreShape> {
   if (cache) return cache;
-  const [users, sessions, usage, roleOverrides, subscriptions, payments, collabInvites, bookOwners, userStyles, chatSessions, chatMessages, userApiKeys, userPromptTemplates, appSettings] = await Promise.all([
+  const [users, sessions, usage, roleOverrides, subscriptions, payments, collabInvites, bookOwners, userStyles, chatSessions, chatMessages, supportThreads, supportMessages, userApiKeys, userPromptTemplates, appSettings] = await Promise.all([
     readFileSafe<StoredUser[]>(FILES.users, []),
     readFileSafe<StoredSession[]>(FILES.sessions, []),
     readFileSafe<UsageRecord[]>(FILES.usage, []),
@@ -274,11 +304,13 @@ export async function loadStore(): Promise<StoreShape> {
     readFileSafe<Record<string, StoredUserStyle>>(FILES.userStyles, {}),
     readFileSafe<Record<string, StoredChatSession>>(FILES.chatSessions, {}),
     readFileSafe<StoredChatMessage[]>(FILES.chatMessages, []),
+    readFileSafe<Record<string, StoredSupportThread>>(FILES.supportThreads, {}),
+    readFileSafe<StoredSupportMessage[]>(FILES.supportMessages, []),
     readFileSafe<Record<string, StoredUserApiKey>>(FILES.userApiKeys, {}),
     readFileSafe<Record<string, string>>(FILES.userPromptTemplates, {}),
     readFileSafe<Record<string, string>>(FILES.appSettings, {}),
   ]);
-  cache = { users, sessions, usage, roleOverrides, subscriptions, payments, collabInvites, bookOwners, userStyles, chatSessions, chatMessages, userApiKeys, userPromptTemplates, appSettings };
+  cache = { users, sessions, usage, roleOverrides, subscriptions, payments, collabInvites, bookOwners, userStyles, chatSessions, chatMessages, supportThreads, supportMessages, userApiKeys, userPromptTemplates, appSettings };
   return cache;
 }
 
@@ -621,6 +653,54 @@ export async function listChatMessages(sessionId: string): Promise<StoredChatMes
 export async function listAllChatMessages(): Promise<StoredChatMessage[]> {
   const store = await loadStore();
   return [...store.chatMessages].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+// ---------------------------------------------------------------------------
+// Чат підтримки сайту (адмін-CRM)
+// ---------------------------------------------------------------------------
+
+export async function createSupportThread(thread: StoredSupportThread): Promise<StoredSupportThread> {
+  const store = await loadStore();
+  store.supportThreads[thread.id] = thread;
+  await persist('supportThreads');
+  return thread;
+}
+
+export async function getSupportThread(id: string): Promise<StoredSupportThread | undefined> {
+  const store = await loadStore();
+  return store.supportThreads[id];
+}
+
+export async function getSupportThreadByUser(userId: string): Promise<StoredSupportThread | undefined> {
+  const store = await loadStore();
+  return Object.values(store.supportThreads).find((t) => t.userId === userId);
+}
+
+/** Усі треди підтримки — для адмінської CRM (список користувачів, які писали в чат). */
+export async function listAllSupportThreads(): Promise<StoredSupportThread[]> {
+  const store = await loadStore();
+  return Object.values(store.supportThreads).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+export async function updateSupportThread(thread: StoredSupportThread): Promise<StoredSupportThread> {
+  const store = await loadStore();
+  store.supportThreads[thread.id] = thread;
+  await persist('supportThreads');
+  return thread;
+}
+
+export async function addSupportMessage(message: StoredSupportMessage): Promise<StoredSupportMessage> {
+  const store = await loadStore();
+  store.supportMessages.push(message);
+  await persist('supportMessages');
+  return message;
+}
+
+export async function listSupportMessages(threadId: string): Promise<StoredSupportMessage[]> {
+  const store = await loadStore();
+  return store.supportMessages
+    .filter((m) => m.threadId === threadId)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
 // ---------------------------------------------------------------------------

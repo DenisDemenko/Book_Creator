@@ -21,8 +21,10 @@ import {
   CreditCard,
   Coins,
   Link2,
+  Contact,
 } from 'lucide-react';
 import { AiPricingAnalyticsView } from './AiPricingAnalyticsView';
+import { AdminCrmView } from './AdminCrmView';
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -43,7 +45,7 @@ import type { AdminUserRow, UserRole } from '../types';
 import { getRoleInfo } from '../utils/rbac';
 import { renderPdfFirstPageToPng } from '../utils/pdfCover';
 
-export type AdminTab = 'users' | 'roles' | 'costs' | 'business' | 'ai' | 'bridge';
+export type AdminTab = 'users' | 'roles' | 'costs' | 'business' | 'ai' | 'bridge' | 'crm';
 
 interface RoleRow {
   role: UserRole;
@@ -1041,6 +1043,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ tab: controlledT
             ['costs', 'Витрати на API', Calculator],
             ['ai', 'Тарифи та аналітика ШІ', Coins],
             ['users', 'Користувачі', Users],
+            ['crm', 'CRM', Contact],
             ['roles', 'Права доступу', ShieldCheck],
             ['bridge', 'Міст до вітрини', Link2],
           ] as const).map(([id, label, Icon]) => (
@@ -1084,6 +1087,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ tab: controlledT
           <ModerationPanel />
         </>
       )}
+
+      {tab === 'crm' && <AdminCrmView />}
 
       {tab === 'business' && revenue && (
         <div className="space-y-6">

@@ -48,6 +48,7 @@ import { mailConfig } from './server/mail';
 import { registerCourseRoutes } from './server/courseRoutes';
 import { registerCourseWizardRoutes } from './server/courseWizardRoutes';
 import { registerModerationRoutes } from './server/moderationRoutes';
+import { registerSupportChatRoutes } from './server/supportChatRoutes';
 import { registerChatRoutes, CHAT_USAGE_CONTEXT } from './server/chatRoutes';
 import { registerApiKeysRoutes } from './server/apiKeysRoutes';
 import { registerExpressRoutes } from './server/expressRoutes';
@@ -310,6 +311,7 @@ async function startServer() {
 registerCourseRoutes(app);
 registerCourseWizardRoutes(app);
 registerModerationRoutes(app);
+registerSupportChatRoutes(app);
 
   /**
    * Модуль публікації та експорту (Amazon KDP + Etsy). Реєструється тут,

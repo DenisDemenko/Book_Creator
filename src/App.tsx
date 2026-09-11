@@ -38,6 +38,7 @@ import { QuickAiModal } from './components/QuickAiModal';
 import { RoleManagementModal } from './components/RoleManagementModal';
 import { VersionSnapshotModal } from './components/VersionSnapshotModal';
 import { CreateBookModal } from './components/CreateBookModal';
+import { SupportChatWidget } from './components/SupportChatWidget';
 import { ImportBookModal } from './components/ImportBookModal';
 import { ImportMaterialsWizardModal } from './components/ImportMaterialsWizardModal';
 import { CollaborationDrawer } from './components/CollaborationDrawer';
@@ -1735,6 +1736,13 @@ export default function App() {
           <span>{syncToast}</span>
         </div>
       )}
+
+      {/* Чат підтримки сайту — глобальний віджет, монтується ОДИН РАЗ тут
+          (не всередині EditorView/DashboardView, щоб не дублювати стан).
+          Показується лише зареєстрованим користувачам і лише в кабінеті/
+          редакторі книги (уточнення користувача під час постановки задачі) —
+          не на публічній сторінці, не на кожній вкладці сайту. */}
+      {!auth.isGuest && (currentTab === 'dashboard' || currentTab === 'editor') && <SupportChatWidget />}
 
       {/* Робоча область: бічна вертикальна навігація зліва (SidebarNav,
           зі згортанням) + контент вкладки справа. */}

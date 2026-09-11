@@ -28,9 +28,12 @@ import {
   listAllChatMessages,
   createChatSession,
   deleteChatSession,
+  listAllSupportThreads,
   UsageRecord,
   StoredPayment,
 } from './store';
+import { listBooks } from './bookStore';
+import { listAllCourses } from './courseStore';
 import { CHAT_USAGE_CONTEXT } from './chatRoutes';
 import { CHAT_MODELS, ENGINE_LABELS, engineConfigured } from './chatProviders';
 import {
@@ -287,6 +290,101 @@ export function registerAdminRoutes(app: Express): void {
     } catch (err) {
       console.error('[admin] create user:', err);
       res.status(500).json({ error: 'Не вдалося створити користувача.' });
+    }
+  });
+
+  // ---------------------------------------------------------------------
+  // CRM: сегменти користувачів + чат підтримки
+  // ---------------------------------------------------------------------
+
+  /**
+   * Один рядок на користувача з обчисленими сегментами для CRM-таблиці
+   * адмінки: створив книгу/курс, почав і не опублікував, опублікував,
+   * лише зареєструвався, писав у чат підтримки — плюс контакти й стан
+   * власного треду підтримки (щоб відкрити переписку прямо з рядка).
+   *
+   * Важливе обмеження моделі даних (свідоме рішення, не недогляд): у книг
+   * НЕМАЄ локального поля статусу — публікація книги йде напряму через
+   * адмінський міст до вітрини (marketplaceBridge.ts), минаючи чергу
+   * модерації, тож «книгу опубліковано» тут відстежити неможливо. Сегмент
+   * «опубліковано» тому враховує лише курси (у яких status дійсно є —
+   * server/courseStore.ts, CourseStatus). Наявність книги без відомого
+   * статусу зараховується в «почав і не опублікував» — це найчастіший
+   * реальний стан автора книги в Студії.
+   */
+  app.get('/api/admin/crm/users', requireAdmin, async (_req, res) => {
+    try {
+      const [users, books, courses, threads] = await Promise.all([
+        listUsers(),
+        listBooks(),
+        Promise.resolve(listAllCourses()),
+        listAllSupportThreads(),
+      ]);
+
+      const booksByOwner = new Map<string, number>();
+      for (const b of books) {
+        if (!b.ownerId) continue;
+        booksByOwner.set(b.ownerId, (booksByOwner.get(b.ownerId) || 0) + 1);
+      }
+
+      const coursesByOwner = new Map<string, { total: number; published: number }>();
+      for (const c of courses) {
+        const row = coursesByOwner.get(c.ownerId) || { total: 0, published: 0 };
+        row.total += 1;
+        if (c.status === 'published') row.published += 1;
+        coursesByOwner.set(c.ownerId, row);
+      }
+
+      const threadByUser = new Map(threads.map((t) => [t.userId, t]));
+
+      const rows = users.map((u) => {
+        const booksCount = booksByOwner.get(u.id) || 0;
+        const courseStats = coursesByOwner.get(u.id) || { total: 0, published: 0 };
+        const thread = threadByUser.get(u.id);
+        const usedSupportChat = !!thread && thread.messageCount > 0;
+
+        const createdBook = booksCount > 0;
+        const createdCourse = courseStats.total > 0;
+        const published = courseStats.published > 0;
+        // «Почав, не опублікував» — будь-яка книга (статус невідомий, див.
+        // коментар вище) або курс, що ще не дійшов до published.
+        const inProgressNotPublished =
+          createdBook || (createdCourse && courseStats.total > courseStats.published);
+        const registeredOnly = !createdBook && !createdCourse && !usedSupportChat;
+
+        return {
+          ...publicUser(u),
+          isProtectedAdmin: u.email.toLowerCase() === ADMIN_EMAIL,
+          segments: {
+            createdBook,
+            createdCourse,
+            inProgressNotPublished,
+            published,
+            registeredOnly,
+            usedSupportChat,
+          },
+          stats: {
+            booksCount,
+            coursesCount: courseStats.total,
+            coursesPublished: courseStats.published,
+          },
+          support: thread
+            ? {
+                threadId: thread.id,
+                status: thread.status,
+                messageCount: thread.messageCount,
+                unreadByAdmin: thread.unreadByAdmin,
+                lastMessageAt: thread.lastMessageAt,
+                lastMessagePreview: thread.lastMessagePreview,
+              }
+            : null,
+        };
+      });
+
+      res.json({ users: rows.sort((a, b) => a.createdAt.localeCompare(b.createdAt)) });
+    } catch (err) {
+      console.error('[admin] crm users:', err);
+      res.status(500).json({ error: 'Не вдалося завантажити CRM.' });
     }
   });
 

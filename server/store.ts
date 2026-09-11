@@ -1217,6 +1217,169 @@ export async function deleteUserApiKey(userId: string, engine: string): Promise<
   return (result?.changes || 0) > 0;
 }
 
+// ---------------------------------------------------------------------------
+// Чат підтримки сайту (адмін-CRM)
+// ---------------------------------------------------------------------------
+
+export interface StoredSupportThread {
+  id: string;
+  userId: string;
+  status: 'open' | 'closed';
+  lastMessageAt: string;
+  lastMessagePreview: string;
+  messageCount: number;
+  /** Непрочитаних адміністратором реплік користувача. */
+  unreadByAdmin: number;
+  /** Непрочитаних користувачем відповідей адміністратора. */
+  unreadByUser: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StoredSupportMessage {
+  id: string;
+  threadId: string;
+  senderRole: 'user' | 'admin';
+  senderId: string;
+  content: string;
+  createdAt: string;
+}
+
+interface SupportThreadRow {
+  id: string;
+  user_id: string;
+  status: string;
+  last_message_at: string;
+  last_message_preview: string;
+  message_count: number;
+  unread_by_admin: number;
+  unread_by_user: number;
+  created_at: string;
+  updated_at: string;
+}
+
+interface SupportMessageRow {
+  id: string;
+  thread_id: string;
+  sender_role: string;
+  sender_id: string;
+  content: string;
+  created_at: string;
+}
+
+function rowToSupportThread(row: SupportThreadRow): StoredSupportThread {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    status: row.status === 'closed' ? 'closed' : 'open',
+    lastMessageAt: row.last_message_at,
+    lastMessagePreview: row.last_message_preview,
+    messageCount: row.message_count,
+    unreadByAdmin: row.unread_by_admin,
+    unreadByUser: row.unread_by_user,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function rowToSupportMessage(row: SupportMessageRow): StoredSupportMessage {
+  return {
+    id: row.id,
+    threadId: row.thread_id,
+    senderRole: row.sender_role === 'admin' ? 'admin' : 'user',
+    senderId: row.sender_id,
+    content: row.content,
+    createdAt: row.created_at,
+  };
+}
+
+export async function createSupportThread(thread: StoredSupportThread): Promise<StoredSupportThread> {
+  if (useJson()) return jsonStore.createSupportThread(thread as jsonStore.StoredSupportThread);
+  getDb()!
+    .prepare(
+      `INSERT INTO support_threads (id, user_id, status, last_message_at, last_message_preview,
+         message_count, unread_by_admin, unread_by_user, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      thread.id,
+      thread.userId,
+      thread.status,
+      thread.lastMessageAt,
+      thread.lastMessagePreview,
+      thread.messageCount,
+      thread.unreadByAdmin,
+      thread.unreadByUser,
+      thread.createdAt,
+      thread.updatedAt
+    );
+  return thread;
+}
+
+export async function getSupportThread(id: string): Promise<StoredSupportThread | undefined> {
+  if (useJson()) return jsonStore.getSupportThread(id);
+  const row = getDb()!.prepare('SELECT * FROM support_threads WHERE id = ?').get(id) as
+    | SupportThreadRow
+    | undefined;
+  return row ? rowToSupportThread(row) : undefined;
+}
+
+export async function getSupportThreadByUser(userId: string): Promise<StoredSupportThread | undefined> {
+  if (useJson()) return jsonStore.getSupportThreadByUser(userId);
+  const row = getDb()!.prepare('SELECT * FROM support_threads WHERE user_id = ?').get(userId) as
+    | SupportThreadRow
+    | undefined;
+  return row ? rowToSupportThread(row) : undefined;
+}
+
+/** Усі треди підтримки — для адмінської CRM (список користувачів, які писали в чат). */
+export async function listAllSupportThreads(): Promise<StoredSupportThread[]> {
+  if (useJson()) return jsonStore.listAllSupportThreads();
+  const rows = getDb()!
+    .prepare('SELECT * FROM support_threads ORDER BY updated_at DESC')
+    .all() as SupportThreadRow[];
+  return rows.map(rowToSupportThread);
+}
+
+export async function updateSupportThread(thread: StoredSupportThread): Promise<StoredSupportThread> {
+  if (useJson()) return jsonStore.updateSupportThread(thread as jsonStore.StoredSupportThread);
+  getDb()!
+    .prepare(
+      `UPDATE support_threads SET status = ?, last_message_at = ?, last_message_preview = ?,
+         message_count = ?, unread_by_admin = ?, unread_by_user = ?, updated_at = ? WHERE id = ?`
+    )
+    .run(
+      thread.status,
+      thread.lastMessageAt,
+      thread.lastMessagePreview,
+      thread.messageCount,
+      thread.unreadByAdmin,
+      thread.unreadByUser,
+      thread.updatedAt,
+      thread.id
+    );
+  return thread;
+}
+
+export async function addSupportMessage(message: StoredSupportMessage): Promise<StoredSupportMessage> {
+  if (useJson()) return jsonStore.addSupportMessage(message as jsonStore.StoredSupportMessage);
+  getDb()!
+    .prepare(
+      `INSERT INTO support_messages (id, thread_id, sender_role, sender_id, content, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .run(message.id, message.threadId, message.senderRole, message.senderId, message.content, message.createdAt);
+  return message;
+}
+
+export async function listSupportMessages(threadId: string): Promise<StoredSupportMessage[]> {
+  if (useJson()) return jsonStore.listSupportMessages(threadId);
+  const rows = getDb()!
+    .prepare('SELECT * FROM support_messages WHERE thread_id = ? ORDER BY created_at ASC')
+    .all(threadId) as SupportMessageRow[];
+  return rows.map(rowToSupportMessage);
+}
+
 /** Лише для тестів. */
 export function __resetCacheForTests(): void {
   jsonStore.__resetCacheForTests();
