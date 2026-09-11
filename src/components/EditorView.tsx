@@ -10,16 +10,8 @@ import { readabilityKey } from './manuscriptEditor/ReadabilityHighlightPlugin';
 import { PAGE_FORMAT_QUICK_OPTIONS } from '../utils/pageFormats';
 import { collectBookTags, type BookTag } from '../utils/bookTags';
 import { useSunAccentVars } from '../utils/sunAccent';
-import { useTheme } from '../hooks/useTheme';
 import { PageColumn } from './manuscriptEditor/PageColumn';
 import { PageRuler } from './manuscriptEditor/PageRuler';
-import {
-  WaterCausticsCanvas,
-  DEFAULT_WATER_SETTINGS,
-  type WaterCausticsSettings,
-  type WaterCausticsHandle,
-} from './manuscriptEditor/WaterCausticsCanvas';
-import { WaterCausticsPanel } from './manuscriptEditor/WaterCausticsPanel';
 import { useRealBookPages } from '../utils/useRealBookPages';
 import { computeContourPolygon } from '../utils/imageContour';
 import {
@@ -420,18 +412,6 @@ export const EditorView: React.FC<EditorViewProps> = ({
       Тут — той самий виклик, лише доступний прямо з «Книга & Текст», без
       переходу на вкладку «Сценарій & Сюжет». */
   const [isAnalyzingScene, setIsAnalyzingScene] = useState(false);
-
-  /** «Вода і відблиски» — фоновий canvas-ефект світлової води (лише світла
-      тема) + повний пульт керування (WaterCausticsPanel). Налаштування —
-      суто візуальна преференція перегляду цього браузера, тому в
-      localStorage (usePersistentState), а не в книзі (onUpdateBook). */
-  const { theme: currentUiTheme } = useTheme();
-  const isLightTheme = currentUiTheme === 'light';
-  const [waterSettings, setWaterSettings] = usePersistentState<WaterCausticsSettings>(
-    'nova_water_caustics_settings',
-    DEFAULT_WATER_SETTINGS
-  );
-  const waterSplashRef = useRef<WaterCausticsHandle | null>(null);
 
   // Character editing, generation & participant adding modals
   const [editingCharacter, setEditingCharacter] = useState<Character | null>(null);
@@ -4143,18 +4123,11 @@ export const EditorView: React.FC<EditorViewProps> = ({
       }${isFocusWindow ? 'nova-fullscreen-editor w-full h-full min-h-0' : 'flex-1 min-h-0'}`}
       style={isFocusWindow ? { ...sunVars } : { ...sunVars, height: 'calc(100vh - 105px)', maxHeight: 'calc(100vh - 105px)' }}
     >
-      {/* Фонова анімація «світлові хвилі як від води» — раніше рендерилась
-          лише у світлій темі (isLightTheme), а застосунок за замовчуванням
-          відкривається в ТЕМНІЙ — тобто цей уже готовий ефект не бачив
-          практично ніхто. Власна палітра канвасу (бляклі небесно-блакитні
-          відтінки на малій прозорості) не залежить від теми напряму — це
-          звичайні напівпрозорі плями, що однаково добре читаються і на
-          темному тлі (як світіння), і на світлому (як вода) — тому рушій
-          мальовки лишається той самий, просто вже без прив'язки до теми.
-          Позаду всього вмісту (z-0, pointer-events:none), керується
-          панеллю «Вода і відблиски» (WaterCausticsPanel, вкладка
-          «Персонажі і сцена»). */}
-      <WaterCausticsCanvas settings={waterSettings} splashRef={waterSplashRef} />
+      {/* Тут раніше лежав фоновий canvas «світлові хвилі як від води»
+          (WaterCausticsCanvas) із пультом керування «Вода і відблиски».
+          Ефект прибрано цілком за прямим проханням власника (запис #142):
+          фон світлої теми тепер — простий спокійний голубий градієнт у
+          `.app-shell-root` (src/index.css), без canvas і без анімації. */}
 
       {/* Повноекранний режим: маленькі стрілочки збоку для переходу між
           розривами сторінок (не системний Fullscreen API — просто
@@ -5591,34 +5564,10 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   </div>
                 )}
 
-                {/* «Вода і відблиски» — повний пульт керування фоновим
-                    canvas-ефектом світлових хвиль (мокап «FusionWrite —
-                    Water & Caustics»). Раніше — лише світла тема; ефект
-                    тепер рендериться в обох темах, тож і пульт керування
-                    (вимкнути/швидкість/рівень) має бути доступний завжди,
-                    а не ховатись саме тоді, коли ефект активний. */}
-                {(
-                  <WaterCausticsPanel
-                    settings={waterSettings}
-                    onChange={setWaterSettings}
-                    onSplash={() => waterSplashRef.current?.splash()}
-                    labels={{
-                      title: t('editor.waterPanelTitle'),
-                      enabled: waterSettings.enabled ? t('editor.waterEnabledOn') : t('editor.waterEnabledOff'),
-                      speed: t('editor.waterSpeed'),
-                      level: t('editor.waterLevel'),
-                      levelLabels: {
-                        low: t('editor.waterLevelLow'),
-                        medium: t('editor.waterLevelMedium'),
-                        high: t('editor.waterLevelHigh'),
-                        ultra: t('editor.waterLevelUltra'),
-                      },
-                      frequency: t('editor.waterFrequency'),
-                      shimmer: t('editor.waterShimmer'),
-                      splash: t('editor.waterSplash'),
-                    }}
-                  />
-                )}
+                {/* Тут був пульт «Вода і відблиски» (WaterCausticsPanel) —
+                    керування фоновим canvas-ефектом світлових хвиль.
+                    Прибрано разом із самим ефектом за прямим проханням
+                    власника (запис #142): керувати більше нічим. */}
               </div>
             )}
 

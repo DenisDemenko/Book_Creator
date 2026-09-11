@@ -309,57 +309,45 @@
   color: #1e293b;
 }
 
-/* --- LIQUID GLASS (вода) — редизайн світлої теми за мокапом
-   "FusionWrite - Liquid Glass Document Editor" (задача: зберегти сонечко,
-   додати ефект світлових хвиль як від води на фоні застосунку).
-   Токени нижче — з мокапу 1:1 (--glass-*), значення .glass-panel і
-   похідних класів вище (рядки ~400+) лишаються — тут лише нові змінні й
-   нові утилітарні класи для скляних елементів, яких раніше не було
-   (пігулки, активна вкладка, кнопка з підсвіткою, водяний повзунок). */
+/* --- LIQUID GLASS — редизайн світлої теми за мокапом
+   "FusionWrite - Liquid Glass Document Editor". Токени нижче — з мокапу
+   1:1 (--glass-*); значення .glass-panel і похідних класів лишаються —
+   тут лише змінні для скляних елементів (пігулки, активна вкладка,
+   кнопка з підсвіткою).
+
+   Змінні `--water-tint-50…600` і `--liquid-bevel` прибрано разом із
+   водяним ефектом (запис #142): жоден `var(--water-tint-…)` у проєкті
+   не викликався — перевірено grep-ом по всьому src/, вони були мертві
+   ще до видалення ефекту. */
 [data-theme="light"] {
   --glass-border-light: rgba(255, 255, 255, 0.7);
   --glass-border-dark: rgba(186, 230, 253, 0.4);
   --glass-bg-subtle: rgba(255, 255, 255, 0.32);
   --glass-bg-hover: rgba(255, 255, 255, 0.5);
   --glass-glow: 0 8px 32px 0 rgba(31, 78, 121, 0.12);
-  --liquid-bevel: inset 0 1px 1px 0 rgba(255, 255, 255, 0.8), inset 0 -1px 2px 0 rgba(56, 189, 248, 0.25);
-  --water-tint-50: #f0f9ff;
-  --water-tint-100: #e0f2fe;
-  --water-tint-200: #bae6fd;
-  --water-tint-300: #7dd3fc;
-  --water-tint-400: #38bdf8;
-  --water-tint-500: #0ea5e9;
-  --water-tint-600: #0284c7;
 }
 
 /* Фон усього застосунку (лише кореневий контейнер App.tsx, не всі
    елементи з bg-slate-950 — інакше карти/модалки теж стали б «водяними»).
-   Статичні радіальні плями як у мокапі + повільний дрейф (@keyframes
-   waterDrift нижче) — це і є «ефект світлових хвиль як від води». */
+
+   Раніше тут жив «ефект світлових хвиль як від води»: п'ять радіальних
+   плям + нескінченна анімація `waterDrift` (повільний дрейф
+   background-position). Прибрано ЦІЛКОМ за прямим проханням власника
+   (запис #142) — разом із canvas-шаром WaterCausticsCanvas у редакторі.
+   Замість нього — простий спокійний голубий градієнт: один
+   linear-gradient згори вниз, без анімації, без плям, без canvas.
+   `background-attachment: fixed` лишено, щоб градієнт не «їхав» під час
+   прокрутки довгих сторінок. */
 [data-theme="light"] .app-shell-root {
   background-color: #eaf6fd;
-  background-image:
-    radial-gradient(at 18% 12%, rgba(255, 255, 255, 0.9) 0px, transparent 38%),
-    radial-gradient(at 80% 18%, rgba(224, 242, 254, 0.85) 0px, transparent 42%),
-    radial-gradient(at 30% 60%, rgba(186, 230, 253, 0.5) 0px, transparent 48%),
-    radial-gradient(at 88% 78%, rgba(125, 211, 252, 0.4) 0px, transparent 50%),
-    radial-gradient(at 50% 95%, rgba(14, 165, 233, 0.12) 0px, transparent 60%);
+  background-image: linear-gradient(180deg, #f4fbff 0%, #dff1fc 45%, #c3e4f7 100%);
   background-attachment: fixed;
-  background-size: 140% 140%;
-  animation: waterDrift 42s ease-in-out infinite alternate;
-}
-@keyframes waterDrift {
-  0%   { background-position: 0% 0%; }
-  50%  { background-position: 30% 20%; }
-  100% { background-position: 10% 35%; }
-}
-@media (prefers-reduced-motion: reduce) {
-  [data-theme="light"] .app-shell-root { animation: none; }
+  background-size: cover;
 }
 
-/* Скляна пігулка (кнопка/чип) — для нових панелей (тулбар «Текст/AI
-   Асистент», вставка, вода й каустика). Не чіпає наявні кнопки, доки їх
-   явно не позначено класом glass-pill. */
+/* Скляна пігулка (кнопка/чип) — для панелей тулбара («Текст/AI
+   Асистент», вставка). Не чіпає наявні кнопки, доки їх явно не
+   позначено класом glass-pill. */
 [data-theme="light"] .glass-pill {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.72) 0%, rgba(240, 249, 255, 0.4) 100%);
   border: 1px solid rgba(255, 255, 255, 0.85);
@@ -416,55 +404,23 @@
     0 6px 20px 0 rgba(234, 88, 12, 0.4),
     inset 0 2px 3px 0 rgba(255, 255, 255, 0.85);
 }
-[data-theme="light"] .caustic-ripple {
-  position: absolute;
-  border-radius: 50%;
-  pointer-events: none;
-  border: 1px solid rgba(14, 165, 233, 0.5);
-  box-shadow: 0 0 18px 2px rgba(255, 255, 255, 0.5), inset 0 0 14px 2px rgba(255, 255, 255, 0.35);
-  animation: rippleAnim 4s ease-out infinite;
-  transition: opacity 0.5s ease;
-}
-@keyframes rippleAnim {
-  0% { transform: scale(0.6); opacity: 0.8; }
-  50% { opacity: 0.4; }
-  100% { transform: scale(1.6); opacity: 0; }
-}
-[data-theme="light"] .water-range-slider {
-  -webkit-appearance: none;
-  appearance: none;
-  height: 5px;
-  border-radius: 9999px;
-  background: rgba(14, 165, 233, 0.25);
-  outline: none;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
-}
-[data-theme="light"] .water-range-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: #ffffff;
-  border: 2px solid #0284c7;
-  box-shadow: 0 2px 6px rgba(14, 165, 233, 0.5);
-  cursor: pointer;
-  transition: transform 0.15s ease;
-}
-[data-theme="light"] .water-range-slider::-webkit-slider-thumb:hover { transform: scale(1.25); }
+/* Тут були `.caustic-ripple`/`@keyframes rippleAnim` (кільця-брижі) і
+   `.water-range-slider` (повзунки пульта «Вода і відблиски») — обидва
+   обслуговували водяний ефект і після його видалення (запис #142) не
+   мали жодного користувача в коді. Прибрано. */
 
 /* Головна «шкаралупа» редактора (EditorView.tsx) раніше мала суцільний
-   bg-slate-900 → біле тло, яке повністю перекривало водяний фон
-   .app-shell-root (0 видимих пікселів). Робимо її склом — так само, як
-   уже скляні header/sidebar (bg-slate-950/75 + blur), — щоб хвилі було
-   видно крізь усю робочу область, а не лише у щілинах між панелями. */
+   bg-slate-900 → біле тло. Лишаємо її склом — тепер крізь неї видно вже
+   не воду, а спокійний голубий градієнт `.app-shell-root`, і робоча
+   область не перетворюється на суцільний білий прямокутник. */
 [data-theme="light"] .editor-shell-glass {
   background-color: rgba(240, 249, 255, 0.55) !important;
   backdrop-filter: blur(28px) saturate(140%);
   -webkit-backdrop-filter: blur(28px) saturate(140%);
 }
 /* Права панель «Персонажі і сцена» — трохи прозоріша, ніж було (.95),
-   щоб теж пропускала воду, але лишалась легко читабельною (щільний текст). */
+   щоб крізь неї читався голубий градієнт фону, але сама лишалась легко
+   читабельною (щільний текст). */
 [data-theme="light"] .nova-char-panel {
   background-color: rgba(255, 255, 255, 0.72) !important;
   backdrop-filter: blur(22px) saturate(150%);
