@@ -135,9 +135,16 @@ export const SupportChatWidget: React.FC = () => {
 
   return (
     <>
+      {/* Позиція: верх-право, під шапкою — НЕ bottom-right. Той куток
+          постійно займає плаваючий віджет сонця (DraggableSun.tsx —
+          згорнута пігулка "Сонце (...)" на fixed bottom-4 right-4 z-50,
+          а розгорнута панель керування там же росте ще вище й ширше).
+          Кнопка підтримки на bottom-6 right-6 z-40 опинялась візуально
+          ПІД пігулкою сонця (нижчий z-index, та сама ділянка екрана) —
+          клік по видимому куту ловила пігулка сонця, а не ця кнопка. */}
       <button
         onClick={() => setOpen((v) => !v)}
-        className="fixed bottom-6 right-6 z-40 w-12 h-12 rounded-full bg-amber-500 text-slate-950 shadow-xl flex items-center justify-center hover:scale-105 transition-transform"
+        className="fixed top-20 right-6 z-40 w-12 h-12 rounded-full bg-amber-500 text-slate-950 shadow-xl flex items-center justify-center hover:scale-105 transition-transform"
         title={t('supportChat.openButtonTitle')}
       >
         {open ? <X className="w-5 h-5" /> : <MessageCircle className="w-5 h-5" />}
@@ -149,7 +156,7 @@ export const SupportChatWidget: React.FC = () => {
       </button>
 
       {open && (
-        <div className="fixed bottom-24 right-6 z-40 w-[340px] max-w-[calc(100vw-2rem)] h-[440px] max-h-[70vh] bg-slate-950 border border-white/[0.1] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+        <div className="fixed top-36 right-6 z-40 w-[340px] max-w-[calc(100vw-2rem)] h-[440px] max-h-[70vh] bg-slate-950 border border-white/[0.1] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
           <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2 text-slate-100 font-bold text-xs">
               <MessageCircle className="w-4 h-4 text-amber-400" />
