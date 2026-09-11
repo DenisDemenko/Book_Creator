@@ -39,7 +39,7 @@ const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const UPLOAD_KINDS: readonly MediaKind[] = ['upload', 'illustration', 'character_art', 'cover_art'];
 
 /** Розбирає `data:`-URL або голий base64. Повертає null, якщо це не зображення. */
-function decodeImagePayload(raw: unknown): { mimeType: string; bytes: Buffer } | null {
+export function decodeImagePayload(raw: unknown): { mimeType: string; bytes: Buffer } | null {
   if (typeof raw !== 'string' || !raw) return null;
   const match = raw.match(/^data:([^;,]+);base64,(.*)$/s);
   if (!match) return null;

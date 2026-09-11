@@ -217,17 +217,31 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
       className="sticky top-0 z-40 w-full min-h-[var(--app-header-h)] bg-slate-950/75 border-b border-white/[0.06] backdrop-blur-2xl"
       style={sunVars}
     >
-      <div className="max-w-[1780px] mx-auto px-4 sm:px-6 py-2 flex flex-col gap-2">
+      {/* pr-20 праворуч: у тому кутку висить плаваюча кнопка чату підтримки
+          з підписом (SupportChatWidget.tsx, fixed top-1.5 right-4). Без
+          цього відступу вона лягала б поверх чипа «Формат: A4 …» на
+          екранах, де шапка заповнена. */}
+      <div className="max-w-[1780px] mx-auto px-4 sm:px-6 pr-20 sm:pr-24 py-2 flex flex-col gap-2">
         {/* Ряд 1 — інформаційні блоки (неклікабельні) */}
         <div className="flex items-center justify-between gap-3 flex-wrap">
           {/* Brand & Book Title */}
           <div className="flex items-center gap-3">
+            {/* Емблема — 80% висоти шапки (--app-header-h, 86px → ~69px),
+                за прямим проханням власника. Розмір рахується від тієї
+                самої змінної, що задає висоту шапки, тому лишиться
+                пропорційним, якщо висоту колись змінять. Кнопка на
+                shrink-0: інакше у вузькому вікні flex-рядок стиснув би
+                саме її, а не довгий заголовок книги поруч. */}
             <button
               onClick={() => onSelectTab('start')}
-              className="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-white/[0.06] transition-all focus:outline-hidden"
+              className="flex items-center justify-center shrink-0 rounded-xl hover:bg-white/[0.06] transition-all focus:outline-hidden"
+              style={{
+                width: 'calc(var(--app-header-h) * 0.8)',
+                height: 'calc(var(--app-header-h) * 0.8)',
+              }}
               title={t('header.goToStart')}
             >
-              <img src={fusionLabLogo} alt="" className="w-8 h-8 object-contain" />
+              <img src={fusionLabLogo} alt="" className="w-full h-full object-contain p-0.5" />
             </button>
 
             <div className="min-w-0">

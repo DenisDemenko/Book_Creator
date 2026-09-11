@@ -1242,6 +1242,8 @@ export interface StoredSupportMessage {
   senderRole: 'user' | 'admin';
   senderId: string;
   content: string;
+  /** id файлів медіатеки, доданих до повідомлення (фото/знімок екрана). */
+  attachments?: string[];
   createdAt: string;
 }
 
@@ -1264,6 +1266,8 @@ interface SupportMessageRow {
   sender_role: string;
   sender_id: string;
   content: string;
+  /** Може бути відсутнім у базах, створених до появи вкладень. */
+  attachments?: string;
   created_at: string;
 }
 
@@ -1289,8 +1293,22 @@ function rowToSupportMessage(row: SupportMessageRow): StoredSupportMessage {
     senderRole: row.sender_role === 'admin' ? 'admin' : 'user',
     senderId: row.sender_id,
     content: row.content,
+    // Колонка з'явилась пізніше за таблицю: у старих рядках її може не
+    // бути зовсім, а вміст — будь-чим, тож розбір не має права впасти.
+    attachments: parseAttachments(row.attachments),
     createdAt: row.created_at,
   };
+}
+
+/** JSON-масив рядків із колонки attachments → масив id, без винятків. */
+function parseAttachments(raw: unknown): string[] {
+  if (typeof raw !== 'string' || !raw.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function createSupportThread(thread: StoredSupportThread): Promise<StoredSupportThread> {
@@ -1365,10 +1383,18 @@ export async function addSupportMessage(message: StoredSupportMessage): Promise<
   if (useJson()) return jsonStore.addSupportMessage(message as jsonStore.StoredSupportMessage);
   getDb()!
     .prepare(
-      `INSERT INTO support_messages (id, thread_id, sender_role, sender_id, content, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO support_messages (id, thread_id, sender_role, sender_id, content, attachments, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(message.id, message.threadId, message.senderRole, message.senderId, message.content, message.createdAt);
+    .run(
+      message.id,
+      message.threadId,
+      message.senderRole,
+      message.senderId,
+      message.content,
+      JSON.stringify(message.attachments || []),
+      message.createdAt
+    );
   return message;
 }
 

@@ -50,6 +50,7 @@ import { narration } from './narration';
 import { mediaGenerationPanel } from './mediaGenerationPanel';
 import { marketIntel } from './marketIntel';
 import { supportChat } from './supportChat';
+import { mediaPicker } from './mediaPicker';
 
 /**
  * Об'єднані дерева перекладів. Кожен новий словник (наступний екран) —
@@ -109,6 +110,7 @@ export const dictionaries = {
     mediaGenerationPanel: mediaGenerationPanel.uk,
     marketIntel: marketIntel.uk,
     supportChat: supportChat.uk,
+    mediaPicker: mediaPicker.uk,
   },
   en: {
     common: common.en,
@@ -163,5 +165,6 @@ export const dictionaries = {
     mediaGenerationPanel: mediaGenerationPanel.en,
     marketIntel: marketIntel.en,
     supportChat: supportChat.en,
+    mediaPicker: mediaPicker.en,
   },
 };

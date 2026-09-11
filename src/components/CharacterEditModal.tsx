@@ -19,6 +19,7 @@ import {
   Library,
 } from 'lucide-react';
 import { Character, Book } from '../types';
+import { PickFromMediaLibraryModal } from './PickFromMediaLibraryModal';
 import { normalizeCharacter } from '../utils/characterNormalize';
 import { useLanguage } from '../i18n/LanguageContext';
 import { collectCharacterMentions, formatMentionsForPrompt } from '../utils/characterMentions';
@@ -105,6 +106,8 @@ export const CharacterEditModal: React.FC<CharacterEditModalProps> = ({
   // джерела) — без нормалізації p.strengths.filter(...) і подібні виклики
   // нижче кидають TypeError, крах підхоплює ErrorBoundary.
   const [charData, setCharData] = useState<Character>(normalizeCharacter({ ...character }));
+  /** Відкрите вікно вибору картинки персонажа з медіатеки студії. */
+  const [showMediaPicker, setShowMediaPicker] = useState(false);
   const [activeTab, setActiveTab] = useState<'general' | 'appearance' | 'psychology' | 'biography' | 'consistency' | 'drift' | 'codex'>('general');
   const [newTag, setNewTag] = useState<string>('');
   const [newStrength, setNewStrength] = useState<string>('');
@@ -594,6 +597,19 @@ export const CharacterEditModal: React.FC<CharacterEditModalProps> = ({
                     />
                   )}
                 </div>
+
+                {/* Друге місце з тим самим полем аватара, що й у
+                    CharactersView.tsx — тож і кнопка вибору з медіатеки
+                    має бути тут, інакше вона знаходилась би лише в одній
+                    із двох форм редагування портрета. */}
+                <button
+                  type="button"
+                  onClick={() => setShowMediaPicker(true)}
+                  className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-amber-400/60 text-slate-300 hover:text-white text-[11px] font-semibold transition-colors"
+                >
+                  <ImageIcon className="w-3.5 h-3.5 text-amber-400" />
+                  <span>{t('mediaPicker.pickForCharacter')}</span>
+                </button>
 
                 {/* AI Portrait Generator Bar */}
                 <div className="mt-2.5 p-3 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
@@ -1099,6 +1115,14 @@ export const CharacterEditModal: React.FC<CharacterEditModalProps> = ({
           </button>
         </div>
       </div>
+
+      {showMediaPicker && (
+        <PickFromMediaLibraryModal
+          title={t('mediaPicker.pickForCharacter')}
+          onClose={() => setShowMediaPicker(false)}
+          onPick={(url) => setCharData({ ...charData, avatarUrl: url })}
+        />
+      )}
     </div>
   );
 };

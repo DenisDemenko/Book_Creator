@@ -161,6 +161,8 @@ export interface StoredSupportMessage {
   senderRole: 'user' | 'admin';
   senderId: string;
   content: string;
+  /** id файлів медіатеки, доданих до повідомлення (фото/знімок екрана). */
+  attachments?: string[];
   createdAt: string;
 }
 

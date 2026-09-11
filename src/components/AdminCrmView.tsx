@@ -14,7 +14,15 @@
  * вітрини, минаючи чергу модерації). Це свідоме обмеження v1, не помилка;
  * див. коментар до GET /api/admin/crm/users у server/adminRoutes.ts.
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  MAX_SUPPORT_ATTACHMENTS,
+  captureScreenshot,
+  checkAttachment,
+  fileToDataUrl,
+  imagesFromPaste,
+  supportAttachmentUrl,
+} from '../utils/supportAttachments';
 import {
   Users,
   RefreshCw,
@@ -30,6 +38,8 @@ import {
   Send,
   Loader2,
   Crown,
+  Paperclip,
+  Camera,
 } from 'lucide-react';
 import { getRoleInfo } from '../utils/rbac';
 import type { UserRole } from '../types';
@@ -81,6 +91,7 @@ interface SupportMessage {
   senderRole: 'user' | 'admin';
   senderId: string;
   content: string;
+  attachments?: string[];
   createdAt: string;
 }
 
@@ -133,6 +144,9 @@ const SupportThreadPanel: React.FC<{
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  /** Картинки, вже підготовлені до надсилання (data:URL). */
+  const [drafts, setDrafts] = useState<string[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [sending, setSending] = useState(false);
 
   const threadId = userRow.support?.threadId;
@@ -160,21 +174,44 @@ const SupportThreadPanel: React.FC<{
     load();
   }, [load]);
 
+  /** Спільний шлях для всіх трьох джерел картинки: файл, буфер, знімок екрана. */
+  const addImage = async (file: File | Blob) => {
+    const problem = checkAttachment(file);
+    if (problem) return setError(problem);
+    if (drafts.length >= MAX_SUPPORT_ATTACHMENTS) {
+      return setError(`Максимум ${MAX_SUPPORT_ATTACHMENTS} зображення за одну репліку.`);
+    }
+    setError(null);
+    const dataUrl = await fileToDataUrl(file);
+    setDrafts((prev) => [...prev, dataUrl]);
+  };
+
+  const takeScreenshot = async () => {
+    try {
+      const shot = await captureScreenshot();
+      if (shot) await addImage(shot);
+    } catch (err: any) {
+      setError(err?.message || 'Не вдалося зробити знімок екрана.');
+    }
+  };
+
   const send = async () => {
     const content = draft.trim();
-    if (!content || !threadId || sending) return;
+    // Відповідь із самим лише знімком екрана — цілком осмислена.
+    if ((!content && drafts.length === 0) || !threadId || sending) return;
     setSending(true);
     setError(null);
     try {
       const data = await request(`/api/admin/support/threads/${threadId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, attachments: drafts }),
       });
       setMessages((prev) => [...prev, data.message]);
       setThread(data.thread);
       onThreadUpdated(userRow.id, data.thread);
       setDraft('');
+      setDrafts([]);
     } catch (err: any) {
       setError(err?.message || 'Не вдалося надіслати відповідь.');
     } finally {
@@ -222,18 +259,83 @@ const SupportThreadPanel: React.FC<{
                     : 'bg-slate-900/80 border border-white/[0.08] text-slate-200'
                 }`}
               >
-                <div>{m.content}</div>
+                {m.content && <div>{m.content}</div>}
+                {(m.attachments || []).length > 0 && (
+                  <div className={`grid gap-1.5 ${(m.attachments || []).length > 1 ? 'grid-cols-2' : 'grid-cols-1'} ${m.content ? 'mt-1.5' : ''}`}>
+                    {(m.attachments || []).map((id) => (
+                      <a key={id} href={supportAttachmentUrl(id)} target="_blank" rel="noreferrer">
+                        <img
+                          src={supportAttachmentUrl(id)}
+                          alt="Зображення у повідомленні"
+                          loading="lazy"
+                          className="w-full rounded-lg border border-white/[0.12] object-cover max-h-52"
+                        />
+                      </a>
+                    ))}
+                  </div>
+                )}
                 <div className="mt-1 text-[10px] text-slate-500">{fmtDate(m.createdAt)}</div>
               </div>
             </div>
           ))}
         </div>
 
+        {threadId && drafts.length > 0 && (
+          <div className="px-3 pt-2 flex gap-1.5 flex-wrap">
+            {drafts.map((d, i) => (
+              <div key={i} className="relative">
+                <img src={d} alt="" className="w-14 h-14 rounded-lg object-cover border border-white/[0.12]" />
+                <button
+                  onClick={() => setDrafts((prev) => prev.filter((_, j) => j !== i))}
+                  className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-rose-500 text-white flex items-center justify-center"
+                  title="Прибрати"
+                >
+                  <X className="w-2.5 h-2.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         {threadId && (
-          <div className="p-3 border-t border-white/[0.06] flex items-end gap-2">
+          <div className="p-3 border-t border-white/[0.06] flex items-end gap-1.5">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) addImage(f);
+                e.target.value = '';
+              }}
+            />
+            <button
+              onClick={() => fileRef.current?.click()}
+              className="p-2.5 rounded-xl bg-slate-900 border border-white/[0.08] text-slate-300 hover:text-white shrink-0"
+              title="Прикріпити фото до чату"
+            >
+              <Paperclip className="w-4 h-4" />
+            </button>
+            <button
+              onClick={takeScreenshot}
+              className="p-2.5 rounded-xl bg-slate-900 border border-white/[0.08] text-slate-300 hover:text-white shrink-0"
+              title="Зробити знімок екрана і додати до чату"
+            >
+              <Camera className="w-4 h-4" />
+            </button>
             <textarea
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
+              // Знімок, зроблений системними засобами (Win+Shift+S), лежить
+              // у буфері як зображення — так він і потрапляє в чат.
+              onPaste={(e) => {
+                const imgs = imagesFromPaste(e.nativeEvent as ClipboardEvent);
+                if (imgs.length) {
+                  e.preventDefault();
+                  imgs.forEach((f) => addImage(f));
+                }
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
@@ -242,11 +344,11 @@ const SupportThreadPanel: React.FC<{
               }}
               placeholder="Відповідь користувачу…"
               rows={2}
-              className="field-glow flex-1 p-2.5 rounded-xl bg-slate-950/60 border border-white/[0.08] text-slate-100 text-xs resize-none"
+              className="field-glow flex-1 min-w-0 p-2.5 rounded-xl bg-slate-950/60 border border-white/[0.08] text-slate-100 text-xs resize-none"
             />
             <button
               onClick={send}
-              disabled={sending || !draft.trim()}
+              disabled={sending || (!draft.trim() && drafts.length === 0)}
               className="p-2.5 rounded-xl bg-amber-500 text-slate-950 disabled:opacity-40 transition-all shrink-0"
               title="Надіслати"
             >

@@ -625,12 +625,18 @@ CREATE TABLE IF NOT EXISTS support_threads (
 );
 CREATE INDEX IF NOT EXISTS idx_support_threads_updated ON support_threads(updated_at DESC);
 
+-- attachments: JSON-масив id файлів медіатеки, доданих до повідомлення
+-- (фото або знімок екрана). Самі байти лежать у медіасховищі
+-- (server/media/mediaLibraryStore.ts), а не в базі — тут лише посилання.
+-- Для баз, створених до появи вкладень, колонку додає
+-- migrateSupportMessageColumns() нижче.
 CREATE TABLE IF NOT EXISTS support_messages (
   id            TEXT PRIMARY KEY,
   thread_id     TEXT NOT NULL,
   sender_role   TEXT NOT NULL,             -- user | admin
   sender_id     TEXT NOT NULL,
   content       TEXT NOT NULL,
+  attachments   TEXT NOT NULL DEFAULT '[]',
   created_at    TEXT NOT NULL,
   FOREIGN KEY (thread_id) REFERENCES support_threads(id) ON DELETE CASCADE
 );
@@ -674,6 +680,23 @@ function migrateUsersColumns(instance: Database): void {
 }
 
 /**
+ * Вкладення в чаті підтримки з'явилися пізніше за саму таблицю, тож у
+ * базах, створених до них, колонки ще немає — `CREATE TABLE IF NOT
+ * EXISTS` її не дописує. Значення за замовчуванням «[]» робить старі
+ * рядки коректними без окремого переливання даних.
+ */
+function migrateSupportMessageColumns(instance: Database): void {
+  try {
+    const cols = instance.prepare('PRAGMA table_info(support_messages)').all() as { name: string }[];
+    if (!cols.some((c) => c.name === 'attachments')) {
+      instance.exec("ALTER TABLE support_messages ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'");
+    }
+  } catch (err) {
+    console.warn('[db] Не вдалося перевірити/додати колонку support_messages.attachments:', err);
+  }
+}
+
+/**
  * Відкриває базу. Виклик асинхронний, бо `node:sqlite` підвантажується
  * динамічним import: у ESM немає require, а статичний import завалив би
  * збірку на середовищах, де модуля ще немає.
@@ -692,6 +715,7 @@ export async function initDb(): Promise<boolean> {
     instance.exec(SCHEMA);
     migrateUsageLogColumns(instance);
     migrateUsersColumns(instance);
+    migrateSupportMessageColumns(instance);
     db = instance;
     available = true;
   } catch (err) {

@@ -34,6 +34,7 @@ import {
 import { Book, Character, CharacterRelationship } from '../types';
 import { normalizeCharacter, normalizeCharacterOrUndefined } from '../utils/characterNormalize';
 import { GenerateCharacterModal } from './GenerateCharacterModal';
+import { PickFromMediaLibraryModal } from './PickFromMediaLibraryModal';
 import { useLanguage } from '../i18n/LanguageContext';
 import { computeAllCharacterDensities, type DensityLabel } from '../utils/characterDensity';
 
@@ -64,6 +65,8 @@ export const CharactersView: React.FC<CharactersViewProps> = ({
 }) => {
   const { t } = useLanguage();
   const [selectedCharacterId, setSelectedCharacterId] = useState<string>(book.characters[0]?.id || '');
+  /** id персонажа, для якого зараз відкрито вибір картинки з медіатеки. */
+  const [pickAvatarFor, setPickAvatarFor] = useState<string | null>(null);
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
   const [aiPromptRole, setAiPromptRole] = useState<'protagonist' | 'antagonist' | 'mentor' | 'ally' | 'rival'>('antagonist');
   const [aiPromptDesc, setAiPromptDesc] = useState('');
@@ -972,6 +975,17 @@ export const CharactersView: React.FC<CharactersViewProps> = ({
                     placeholder="https://images.unsplash.com/..."
                     className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-800 focus:border-cyan-400 text-slate-300 font-mono text-[11px] focus:outline-hidden"
                   />
+                  {/* Поле вище лишається: посилання можна вставити й руками.
+                      Кнопка — другий шлях, коли картинка вже лежить у
+                      медіатеці студії й згадувати її URL не хочеться. */}
+                  <button
+                    type="button"
+                    onClick={() => setPickAvatarFor(selectedChar.id)}
+                    className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-cyan-400/60 text-slate-300 hover:text-white text-[11px] font-semibold transition-colors"
+                  >
+                    <ImageIcon className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>{t('mediaPicker.pickForCharacter')}</span>
+                  </button>
                 </div>
 
                 {/* Biography Textarea */}
@@ -1893,6 +1907,20 @@ export const CharactersView: React.FC<CharactersViewProps> = ({
 
         </div>
       </div>
+
+      {/* Вибір готової картинки з медіатеки студії під поле «Посилання на
+          портрет / аватар». Пише той самий avatarUrl, що й поле вводу —
+          жодного окремого сховища для портретів не заводимо. */}
+      {pickAvatarFor && (
+        <PickFromMediaLibraryModal
+          title={t('mediaPicker.pickForCharacter')}
+          onClose={() => setPickAvatarFor(null)}
+          onPick={(url) => {
+            const target = book.characters.find((c) => c.id === pickAvatarFor);
+            if (target) handleUpdateCharacter({ ...normalizeCharacter(target), avatarUrl: url });
+          }}
+        />
+      )}
 
       {/* AI CHARACTER & ART GENERATION MODAL (Nano Banana, Leonardo.ai) */}
       {showGenerateModal && (

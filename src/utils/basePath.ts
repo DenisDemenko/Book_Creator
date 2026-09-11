@@ -55,6 +55,42 @@ export function realtimeSocketUrl(): string {
   return `${protocol}//${window.location.host}${API_BASE}/ws`;
 }
 
+/**
+ * Той самий префікс — але для АТРИБУТІВ, а не для fetch.
+ *
+ * Перехоплення `fetch` вище не рятує зображення: `<img src="/api/media/
+ * file/md-…">` браузер вантажить сам, повз будь-який JS-перехоплювач.
+ * Під `/studio` такий шлях розкривається в `app.fusionlab.in.ua/api/…`,
+ * а rewrite маркетплейсу проксує лише `/studio/:path*` — тобто картинка
+ * приходить 404 і показується биткою. Саме це власник і бачив у
+ * «Медіатеці»: завантаження (fetch) працювало, показ (img) — ні.
+ *
+ * Патчимо `setAttribute`, а не властивість `HTMLImageElement.src`, бо
+ * React виставляє `src` у зображень саме атрибутом — через властивість
+ * воно не проходить, і патч властивості нічого б не зловив.
+ *
+ * Чому знову одне місце, а не 48 правок `src={...}` по 15 файлах:
+ * причина та сама, що описана вгорі файлу для fetch — префікс є
+ * властивістю транспорту, а не кожного окремого місця, де малюється
+ * картинка. Умова максимально вузька (рядок, що починається з «/api/»),
+ * тож усі інші адреси — http, data:, blob: — проходять недоторканими, а
+ * без префікса (локальний запуск) цей патч навіть не ставиться.
+ */
+function installAssetAttributePrefix(): void {
+  const nativeSetAttribute = Element.prototype.setAttribute;
+
+  Element.prototype.setAttribute = function (name: string, value: string) {
+    if (
+      (name === 'src' || name === 'href') &&
+      typeof value === 'string' &&
+      value.startsWith('/api/')
+    ) {
+      return nativeSetAttribute.call(this, name, `${API_BASE}${value}`);
+    }
+    return nativeSetAttribute.call(this, name, value);
+  };
+}
+
 let installed = false;
 
 /**
@@ -64,6 +100,8 @@ let installed = false;
 export function installApiBasePath(): void {
   if (installed || !hasBasePath || typeof window === 'undefined') return;
   installed = true;
+
+  installAssetAttributePrefix();
 
   const nativeFetch = window.fetch.bind(window);
 
