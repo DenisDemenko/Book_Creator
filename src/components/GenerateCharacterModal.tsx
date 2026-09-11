@@ -374,26 +374,36 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
   return (
     <div
       onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-slate-950 border border-slate-800 rounded-3xl max-w-3xl w-full flex flex-col max-h-[92vh] shadow-2xl overflow-hidden"
+        className="token-module-scope rounded-2xl max-w-3xl w-full flex flex-col max-h-[92vh] shadow-2xl overflow-hidden"
       >
-        {/* Header */}
-        <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
-              <Sparkles className="w-5 h-5" />
+        {/* Header — та сама неоморфна тема Modul_token (token-module-scope,
+            nm- класи, src/styles/tokenModuleTheme.css), що й AI-коуч
+            (CoachModal.tsx) і чат «AI Літературний Консультант»
+            (QuickAiModal.tsx). Раніше (запис #133) цю тему мала лише смуга
+            вкладок нижче; тепер — усе вікно цілком, за прямим проханням
+            власника («переробити всю модалку цілком»), тому що ця тема
+            фіксовано темна (не залежить від data-theme застосунку), а решта
+            вікна на звичайних класах типу bg-slate-900, border-slate-800 у
+            світлій темі перефарбовувалась глобальними правилами в index.css
+            й виглядала світлою — не так, як чат. Логіка/хендлери нижче не
+            змінені, лише класи. */}
+        <div className="shrink-0 p-4 nm-outset-sm flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-lg nm-outset flex items-center justify-center text-[var(--primary)] shrink-0">
+              <Sparkles className="w-4.5 h-4.5" />
             </div>
-            <div>
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <span>{t('generateCharacterModal.heading')}</span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+            <div className="min-w-0">
+              <h3 className="text-[14px] font-bold text-[var(--on-surface)] flex items-center gap-2 truncate">
+                <span className="truncate">{t('generateCharacterModal.heading')}</span>
+                <span className="nm-inset px-2 py-0.5 rounded-full text-[10px] font-bold text-cyan-300 shrink-0">
                   AI Multi-Model
                 </span>
               </h3>
-              <p className="text-xs text-slate-400">
+              <p className="text-[11px] text-[var(--outline)] truncate">
                 {t('generateCharacterModal.subheading')}
               </p>
             </div>
@@ -401,19 +411,15 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
 
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+            className="nm-btn p-2 rounded-lg text-[var(--on-surface-variant)] shrink-0"
           >
-            <X className="w-5 h-5" />
+            <X className="w-3.5 h-3.5" />
           </button>
         </div>
 
         {/* Mode Switcher — той самий стиль вкладок, що й AI-коуч (CoachModal.tsx,
-            запис #127): неоморфна тема Modul_token (token-module-scope + nm-*,
-            src/styles/tokenModuleTheme.css), а не власна темна/бурштинова
-            палітра. Клас-скоуп навішений лише на цю смугу вкладок — решта
-            модалки (картки моделей, промпт тощо) лишається без змін, це
-            свідомо звужена задача («дизайн вкладенки», не всього вікна). */}
-        <div className="token-module-scope flex items-center gap-1 px-6 pt-3 pb-3">
+            запис #127/#133). */}
+        <div className="shrink-0 flex items-center gap-1 px-4 sm:px-6 pt-3 pb-0">
           <button
             onClick={() => {
               setMode('existing');
@@ -446,12 +452,12 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
         </div>
 
         {/* Body Content */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6 text-xs text-slate-200">
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 pt-4 space-y-5 text-xs text-[var(--on-surface-variant)] nm-flat">
           
           {/* 1. TARGET CHARACTER SELECTION (If mode === 'existing') */}
           {mode === 'existing' && (
-            <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 space-y-3">
-              <label className="text-xs font-bold text-slate-300 block">
+            <div className="nm-outset-sm p-4 rounded-2xl space-y-3">
+              <label className="text-xs font-bold text-[var(--on-surface)] block">
                 {t('generateCharacterModal.chooseCharacterLabel')}
               </label>
 
@@ -465,27 +471,27 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
                         setSelectedCharId(char.id);
                         handleCraftPrompt(char);
                       }}
-                      className={`p-2.5 rounded-xl border flex items-center gap-3 cursor-pointer transition-all ${
+                      className={`p-2.5 rounded-xl flex items-center gap-3 cursor-pointer transition-all ${
                         isSelected
-                          ? 'bg-amber-500/10 border-amber-500/50 text-white shadow-sm'
-                          : 'bg-slate-950 border-slate-800/80 hover:border-slate-700 text-slate-400'
+                          ? 'nm-inset text-[var(--on-surface)] border-l-2 border-[var(--primary)]'
+                          : 'nm-btn text-[var(--outline)]'
                       }`}
                     >
                       {char.avatarUrl ? (
                         <img
                           src={char.avatarUrl}
                           alt={char.name}
-                          className="w-9 h-9 rounded-xl object-cover border border-slate-700 shrink-0"
+                          className="w-9 h-9 rounded-xl object-cover shrink-0"
                         />
                       ) : (
-                        <div className="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-amber-400 font-bold shrink-0">
+                        <div className="w-9 h-9 rounded-xl nm-outset-xs flex items-center justify-center text-[var(--primary)] font-bold shrink-0">
                           {char.name.charAt(0)}
                         </div>
                       )}
 
                       <div className="min-w-0 flex-1">
-                        <div className="font-bold text-slate-200 truncate">{char.name} {char.surname || ''}</div>
-                        <div className="text-[10px] text-amber-400/90 truncate">{char.profession || char.role}</div>
+                        <div className="font-bold text-[var(--on-surface)] truncate">{char.name} {char.surname || ''}</div>
+                        <div className="text-[10px] text-[var(--primary)] truncate">{char.profession || char.role}</div>
                       </div>
                     </div>
                   );
@@ -493,8 +499,8 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
               </div>
 
               {activeChar && (
-                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1 text-[11px] text-slate-300">
-                  <span className="font-bold text-amber-400">{t('generateCharacterModal.descriptionInBookLabel')}</span>
+                <div className="nm-inset-deep p-3 rounded-xl space-y-1 text-[11px] text-[var(--on-surface-variant)]">
+                  <span className="font-bold text-[var(--primary)]">{t('generateCharacterModal.descriptionInBookLabel')}</span>
                   <span>
                     {activeChar.appearance?.hair ? t('generateCharacterModal.hairPrefix', { v: activeChar.appearance.hair }) : ''}
                     {activeChar.appearance?.eyes ? t('generateCharacterModal.eyesPrefix', { v: activeChar.appearance.eyes }) : ''}
@@ -508,18 +514,18 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
 
           {/* 1b. NEW HERO CONFIG (If mode === 'new') */}
           {mode === 'new' && (
-            <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 space-y-3">
-              <label className="text-xs font-bold text-slate-300 block">
+            <div className="nm-outset-sm p-4 rounded-2xl space-y-3">
+              <label className="text-xs font-bold text-[var(--on-surface)] block">
                 {t('generateCharacterModal.newCharParamsLabel')}
               </label>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[11px] text-slate-400 block mb-1">{t('generateCharacterModal.dramaturgyRoleLabel')}</label>
+                  <label className="text-[11px] text-[var(--outline)] block mb-1">{t('generateCharacterModal.dramaturgyRoleLabel')}</label>
                   <select
                     value={newCharRole}
                     onChange={(e) => setNewCharRole(e.target.value as any)}
-                    className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white font-medium focus:border-amber-400 focus:outline-hidden"
+                    className="w-full p-2.5 rounded-lg nm-inset text-xs text-[var(--on-surface)] font-medium bg-transparent outline-none"
                   >
                     <option value="protagonist">{t('generateCharacterModal.roleProtagonist')}</option>
                     <option value="antagonist">{t('generateCharacterModal.roleAntagonist')}</option>
@@ -532,13 +538,13 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="text-[11px] text-slate-400 block mb-1">{t('generateCharacterModal.ideaConceptLabel')}</label>
+                  <label className="text-[11px] text-[var(--outline)] block mb-1">{t('generateCharacterModal.ideaConceptLabel')}</label>
                   <input
                     type="text"
                     value={newCharIdea}
                     onChange={(e) => setNewCharIdea(e.target.value)}
                     placeholder={t('generateCharacterModal.ideaPlaceholder')}
-                    className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-amber-400 focus:outline-hidden"
+                    className="w-full p-2.5 rounded-lg nm-inset text-xs text-[var(--on-surface)] bg-transparent outline-none placeholder:text-[var(--outline)]"
                   />
                 </div>
               </div>
@@ -549,9 +555,9 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
                   id="add-to-scene-chk"
                   checked={addToSceneAfterCreate}
                   onChange={(e) => setAddToSceneAfterCreate(e.target.checked)}
-                  className="rounded border-slate-700 text-amber-500 focus:ring-amber-400"
+                  className="rounded border-[var(--outline-variant)] text-[var(--primary)] focus:ring-[var(--primary)] bg-transparent"
                 />
-                <label htmlFor="add-to-scene-chk" className="text-[11px] text-slate-300 cursor-pointer">
+                <label htmlFor="add-to-scene-chk" className="text-[11px] text-[var(--on-surface-variant)] cursor-pointer">
                   {t('generateCharacterModal.addToSceneLabel')}
                 </label>
               </div>
@@ -560,8 +566,8 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
 
           {/* 2. Вибір двигуна генерації */}
           <div className="space-y-3">
-            <label className="text-xs font-bold text-slate-300 block flex items-center gap-1.5">
-              <Cpu className="w-3.5 h-3.5 text-amber-400" />
+            <label className="text-xs font-bold text-[var(--on-surface)] block flex items-center gap-1.5">
+              <Cpu className="w-3.5 h-3.5 text-[var(--primary)]" />
               <span>{t('generateCharacterModal.chooseModelLabel')}</span>
             </label>
 
@@ -572,10 +578,10 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
                   <div
                     key={model.id}
                     onClick={() => setSelectedModel(model.id)}
-                    className={`p-3.5 rounded-2xl border cursor-pointer transition-all flex flex-col justify-between ${
+                    className={`p-3.5 rounded-2xl cursor-pointer transition-all flex flex-col justify-between ${
                       isSelected
-                        ? 'bg-amber-500/10 border-amber-500 text-white shadow-md'
-                        : 'bg-slate-900/80 border-slate-800/80 hover:border-slate-700 text-slate-300'
+                        ? 'nm-inset text-[var(--on-surface)] border-l-2 border-[var(--primary)]'
+                        : 'nm-btn text-[var(--on-surface-variant)]'
                     }`}
                   >
                     <div className="space-y-1">
@@ -585,12 +591,12 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
                           <span>{model.name}</span>
                         </span>
                         <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
-                          isSelected ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400'
+                          isSelected ? 'nm-outset-xs text-[var(--primary)]' : 'nm-inset text-[var(--outline)]'
                         }`}>
                           {model.tag}
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                      <p className="text-[11px] text-[var(--outline)] leading-relaxed">
                         {model.desc}
                       </p>
                     </div>
@@ -602,8 +608,8 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
 
           {/* 3. STYLE PRESET SELECTION */}
           <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-300 block flex items-center gap-1.5">
-              <Palette className="w-3.5 h-3.5 text-amber-400" />
+            <label className="text-xs font-bold text-[var(--on-surface)] block flex items-center gap-1.5">
+              <Palette className="w-3.5 h-3.5 text-[var(--primary)]" />
               <span>{t('generateCharacterModal.artStyleLabel')}</span>
             </label>
 
@@ -612,10 +618,10 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
                 <button
                   key={st.id}
                   onClick={() => setStylePreset(st.id)}
-                  className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center gap-2 transition-all ${
+                  className={`p-2.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
                     stylePreset === st.id
-                      ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200'
-                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                      ? 'nm-inset text-cyan-300 border-l-2 border-cyan-400/70'
+                      : 'nm-btn text-[var(--outline)] hover:text-[var(--on-surface)]'
                   }`}
                 >
                   <span>{st.icon}</span>
@@ -626,11 +632,11 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
           </div>
 
           {/* 4. PROMPT CRAFTING SECTION */}
-          <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 space-y-3">
+          <div className="nm-outset-sm p-4 rounded-2xl space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Terminal className="w-4 h-4 text-amber-400" />
-                <span className="font-bold text-xs text-white">
+                <Terminal className="w-4 h-4 text-[var(--primary)]" />
+                <span className="font-bold text-xs text-[var(--on-surface)]">
                   {t('generateCharacterModal.promptEngineeringLabel')}
                 </span>
               </div>
@@ -639,7 +645,7 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
                 <button
                   onClick={() => handleCraftPrompt(activeChar)}
                   disabled={isCraftingPrompt}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-bold transition-all disabled:opacity-50"
+                  className="nm-btn flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-amber-300 text-[11px] font-bold transition-all disabled:opacity-50"
                   title={t('generateCharacterModal.craftPromptTooltip')}
                 >
                   <Wand2 className="w-3.5 h-3.5" />
@@ -649,7 +655,7 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
             </div>
 
             <div>
-              <label className="text-[10px] font-bold text-slate-400 block mb-1">
+              <label className="text-[10px] font-bold text-[var(--outline)] block mb-1">
                 {t('generateCharacterModal.promptFieldLabel')}
               </label>
               <textarea
@@ -657,49 +663,49 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
                 value={customPrompt}
                 onChange={(e) => setCustomPrompt(e.target.value)}
                 placeholder="Detailed portrait prompt with lighting, atmosphere, clothing, camera angle, 8k render..."
-                className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 font-mono focus:border-amber-400 focus:outline-hidden"
+                className="w-full p-2.5 rounded-lg nm-inset text-xs text-[var(--on-surface)] font-mono bg-transparent outline-none placeholder:text-[var(--outline)]"
               />
             </div>
 
             <div>
-              <label className="text-[10px] font-bold text-slate-400 block mb-1">
+              <label className="text-[10px] font-bold text-[var(--outline)] block mb-1">
                 {t('generateCharacterModal.negativePromptLabel')}
               </label>
               <input
                 type="text"
                 value={negativePrompt}
                 onChange={(e) => setNegativePrompt(e.target.value)}
-                className="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400 font-mono focus:border-amber-400 focus:outline-hidden"
+                className="w-full p-2 rounded-lg nm-inset text-[11px] text-[var(--outline)] font-mono bg-transparent outline-none"
               />
             </div>
           </div>
 
           {/* Помилка ДО отримання будь-якого результату — немає навіть дозьє. */}
           {generationError && (
-            <div className="p-4 rounded-2xl bg-rose-950/40 border-2 border-rose-500/50 space-y-1.5 shadow-xl animate-fade-in">
-              <span className="text-xs font-bold text-rose-400 flex items-center gap-1.5">
+            <div className="nm-inset p-4 rounded-2xl border-l-2 border-rose-400/60 space-y-1.5 animate-fade-in">
+              <span className="text-xs font-bold text-rose-300 flex items-center gap-1.5">
                 <AlertCircle className="w-4 h-4" />
                 <span>Генерація не вдалася</span>
               </span>
-              <p className="text-rose-200 text-[11px] leading-relaxed">{generationError}</p>
+              <p className="text-rose-200/90 text-[11px] leading-relaxed">{generationError}</p>
             </div>
           )}
 
           {/* 5. GENERATED RESULT PREVIEW */}
           {generatedResult && (
             <div
-              className={`p-4 rounded-2xl bg-slate-900 border-2 space-y-4 shadow-xl animate-fade-in ${
-                generatedResult.artError ? 'border-amber-500/50' : 'border-emerald-500/50'
+              className={`nm-outset-sm p-4 rounded-2xl border-l-2 space-y-4 animate-fade-in ${
+                generatedResult.artError ? 'border-amber-400/60' : 'border-emerald-400/60'
               }`}
             >
               <div className="flex items-center justify-between">
                 {generatedResult.artError ? (
-                  <span className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
                     <AlertCircle className="w-4 h-4" />
                     <span>Дозьє готове, портрет — ні</span>
                   </span>
                 ) : (
-                  <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
                     <CheckCircle2 className="w-4 h-4" />
                     <span>{t('generateCharacterModal.generatedWithModel', { model: generatedResult.modelUsed })}</span>
                   </span>
@@ -711,10 +717,10 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
                   <img
                     src={generatedResult.imageUrl}
                     alt="Generated Hero Art"
-                    className="w-32 h-32 rounded-2xl object-cover border-2 border-amber-400 shadow-2xl shrink-0"
+                    className="w-32 h-32 rounded-2xl object-cover nm-outset-xs shrink-0"
                   />
                 ) : (
-                  <div className="w-32 h-32 rounded-2xl border-2 border-dashed border-slate-700 shadow-2xl shrink-0 flex items-center justify-center text-slate-600">
+                  <div className="w-32 h-32 rounded-2xl nm-inset-deep shrink-0 flex items-center justify-center text-[var(--outline)]">
                     <ImageIcon className="w-8 h-8" />
                   </div>
                 )}
@@ -723,31 +729,31 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
                 <div className="space-y-1.5 text-xs flex-1 min-w-0">
                   {generatedResult.characterDossier ? (
                     <div>
-                      <div className="font-bold text-white text-sm">
+                      <div className="font-bold text-[var(--on-surface)] text-sm">
                         {generatedResult.characterDossier.name} {generatedResult.characterDossier.surname || ''}
                       </div>
-                      <div className="text-amber-400 text-xs">
+                      <div className="text-[var(--primary)] text-xs">
                         {generatedResult.characterDossier.profession} • {generatedResult.characterDossier.role}
                       </div>
-                      <p className="text-slate-300 text-[11px] line-clamp-2 mt-1">
+                      <p className="text-[var(--on-surface-variant)] text-[11px] line-clamp-2 mt-1">
                         {generatedResult.characterDossier.biography}
                       </p>
                     </div>
                   ) : (
                     <div>
-                      <div className="font-bold text-white text-sm">
+                      <div className="font-bold text-[var(--on-surface)] text-sm">
                         {activeChar?.name} {activeChar?.surname || ''}
                       </div>
-                      <p className="text-slate-400 text-[11px]">
+                      <p className="text-[var(--outline)] text-[11px]">
                         {t('generateCharacterModal.newArtReadyNote')}
                       </p>
                     </div>
                   )}
 
                   {generatedResult.artError ? (
-                    <p className="text-amber-300 text-[11px] leading-relaxed">{generatedResult.artError}</p>
+                    <p className="text-amber-300/90 text-[11px] leading-relaxed">{generatedResult.artError}</p>
                   ) : (
-                    <div className="text-[10px] text-slate-500 font-mono truncate">
+                    <div className="text-[10px] text-[var(--outline)] font-mono truncate">
                       {t('generateCharacterModal.promptUsedLabel', { prompt: generatedResult.promptUsed })}
                     </div>
                   )}
@@ -759,9 +765,9 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="p-5 border-t border-slate-800 bg-slate-900/90 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="text-[11px] text-slate-400 flex items-center gap-2">
-            <Bot className="w-4 h-4 text-amber-400" />
+        <div className="shrink-0 border-t border-[var(--border-subtle)] nm-outset-sm p-5 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="text-[11px] text-[var(--outline)] flex items-center gap-2">
+            <Bot className="w-4 h-4 text-[var(--primary)]" />
             <span>
               {t('generateCharacterModal.selectedModelLabel', { model: selectedModel, style: stylePreset })}
             </span>
@@ -770,7 +776,7 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
           <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
             <button
               onClick={onClose}
-              className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs transition-colors"
+              className="nm-btn px-4 py-2.5 rounded-xl text-[var(--on-surface-variant)] font-semibold text-xs"
             >
               {t('generateCharacterModal.closeBtn')}
             </button>
@@ -779,7 +785,7 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
               <button
                 onClick={handleExecuteGeneration}
                 disabled={isGenerating}
-                className="flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs transition-all shadow-lg active:scale-95 disabled:opacity-50"
+                className="nm-btn-primary flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl font-bold text-xs disabled:opacity-50"
               >
                 {isGenerating ? (
                   <>
@@ -796,7 +802,7 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
             ) : (
               <button
                 onClick={handleApplyResult}
-                className="flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition-all shadow-lg active:scale-95"
+                className="nm-btn flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-emerald-300 font-bold text-xs"
               >
                 <Check className="w-4 h-4 stroke-[3]" />
                 <span>{t('generateCharacterModal.applyAndSaveBtn')}</span>
