@@ -27,7 +27,7 @@ import {
   recordTextUsageByModel,
   GEMINI_MODEL,
 } from './server/aiCore';
-import { platformKeyFor } from './server/platformKeys';
+import { platformKeyFor, resolveEngineKey } from './server/platformKeys';
 import {
   attachPrincipal,
   registerAuthRoutes,
@@ -140,8 +140,7 @@ import {
   resolveModuleModelId,
 } from './server/coreModuleModels';
 import { formatManuscriptWithClaude, anthropicConfig, ClaudeManuscriptError, MAX_MANUSCRIPT_CHARS } from './server/claudeManuscript';
-import { purgeExpiredSessions, initStore, getUserStyle, upsertUserStyle, deleteUserStyle, getUserApiKey, listUserApiKeys, getUserPromptTemplates, upsertUserPromptTemplates, deleteUserPromptTemplates, getAppSetting, setAppSetting } from './server/store';
-import { decryptApiKey } from './server/userApiKeyCrypto';
+import { purgeExpiredSessions, initStore, getUserStyle, upsertUserStyle, deleteUserStyle, listUserApiKeys, getUserPromptTemplates, upsertUserPromptTemplates, deleteUserPromptTemplates, getAppSetting, setAppSetting } from './server/store';
 
 // Логування витрат (logImageUsage/logTextUsage) переїхало в server/aiCore.ts —
 // єдине місце, звідки тепер проходять усі AI-виклики продукту.
@@ -348,17 +347,9 @@ registerSupportChatRoutes(app);
     const resolvedModel = modelId || GEMINI_MODEL;
     const engine = resolveChatEngine(resolvedModel);
 
-    let userKey: string | undefined;
-    if (userId) {
-      const stored = await getUserApiKey(userId, engine).catch(() => undefined);
-      if (stored) {
-        try {
-          userKey = decryptApiKey(stored.encryptedKey);
-        } catch (err) {
-          console.warn('[chat] не вдалося розшифрувати ключ користувача, пробуємо серверний:', err);
-        }
-      }
-    }
+    // Платформний ключ → власний ключ того, хто викликає → змінна
+    // оточення (її підхоплює сам виклик рушія). Див. #146.
+    const userKey = await resolveEngineKey(userId, engine, 'chat');
 
     if (!userKey && !engineConfigured(engine)) {
       return {
@@ -758,17 +749,7 @@ registerSupportChatRoutes(app);
     const engine = resolveChatEngine(resolvedModelId);
 
     const userId = req.principal?.id as string | undefined;
-    let userKey: string | undefined;
-    if (userId) {
-      const stored = await getUserApiKey(userId, engine).catch(() => undefined);
-      if (stored) {
-        try {
-          userKey = decryptApiKey(stored.encryptedKey);
-        } catch (err) {
-          console.warn(`[${label}] не вдалося розшифрувати ключ користувача, пробуємо серверний:`, err);
-        }
-      }
-    }
+    const userKey = await resolveEngineKey(userId, engine, label);
 
     if (!userKey && !engineConfigured(engine)) {
       res.status(503).json({
@@ -1168,17 +1149,7 @@ Translate into refined English JSON.`;
         const textResolvedModelId = textModelId || GEMINI_MODEL;
         const textEngine = resolveChatEngine(textResolvedModelId);
         const textUserId = req.principal?.id as string | undefined;
-        let textUserKey: string | undefined;
-        if (textUserId) {
-          const stored = await getUserApiKey(textUserId, textEngine).catch(() => undefined);
-          if (stored) {
-            try {
-              textUserKey = decryptApiKey(stored.encryptedKey);
-            } catch {
-              /* пробуємо серверний ключ нижче */
-            }
-          }
-        }
+        const textUserKey = await resolveEngineKey(textUserId, textEngine, 'image-text');
         if (textUserKey || engineConfigured(textEngine)) {
           try {
             const enhanced = await generateAiText({
@@ -1707,17 +1678,7 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
         const textResolvedModelId = textModelId || GEMINI_MODEL;
         const textEngine = resolveChatEngine(textResolvedModelId);
         const textUserId = req.principal?.id as string | undefined;
-        let textUserKey: string | undefined;
-        if (textUserId) {
-          const stored = await getUserApiKey(textUserId, textEngine).catch(() => undefined);
-          if (stored) {
-            try {
-              textUserKey = decryptApiKey(stored.encryptedKey);
-            } catch {
-              /* пробуємо серверний ключ нижче */
-            }
-          }
-        }
+        const textUserKey = await resolveEngineKey(textUserId, textEngine, 'image-text');
         if (textUserKey || engineConfigured(textEngine)) {
           try {
             const crafted = await generateAiText({
@@ -2108,17 +2069,7 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
       }
 
       const userId = req.principal?.id as string | undefined;
-      let userKey: string | undefined;
-      if (userId) {
-        const stored = await getUserApiKey(userId, engine).catch(() => undefined);
-        if (stored) {
-          try {
-            userKey = decryptApiKey(stored.encryptedKey);
-          } catch (err) {
-            console.warn('[design-layout] ключ користувача не розшифрувався, пробуємо серверний:', err);
-          }
-        }
-      }
+      const userKey = await resolveEngineKey(userId, engine, 'design-layout');
       if (!userKey && !engineConfigured(engine)) {
         return res.status(503).json({
           error: `Рушій «${ENGINE_LABELS[engine]}» не налаштований: додайте ${ENGINE_ENV_KEY[engine]} у .env сервера або власний ключ у розділі «Ключі API».`,
@@ -2643,17 +2594,7 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
       }
 
       const userId = req.principal?.id as string | undefined;
-      let userKey: string | undefined;
-      if (userId) {
-        const stored = await getUserApiKey(userId, engine).catch(() => undefined);
-        if (stored) {
-          try {
-            userKey = decryptApiKey(stored.encryptedKey);
-          } catch (err) {
-            console.warn('[manuscript-image-text] не вдалося розшифрувати ключ користувача, пробуємо серверний:', err);
-          }
-        }
-      }
+      const userKey = await resolveEngineKey(userId, engine, 'manuscript-image-text');
       if (!userKey && !engineConfigured(engine)) {
         return res.status(503).json({
           error: `Рушій «${ENGINE_LABELS[engine]}» не налаштований: додайте ${ENGINE_ENV_KEY[engine]} у .env сервера або власний ключ у розділі «Ключі API».`,
@@ -2773,17 +2714,7 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
       const lang = language === 'en' ? 'en' : 'uk';
 
       const userId = req.principal?.id as string | undefined;
-      let userKey: string | undefined;
-      if (userId) {
-        const stored = await getUserApiKey(userId, engine).catch(() => undefined);
-        if (stored) {
-          try {
-            userKey = decryptApiKey(stored.encryptedKey);
-          } catch (err) {
-            console.warn('[selection-paragraphs] не вдалося розшифрувати ключ користувача, пробуємо серверний:', err);
-          }
-        }
-      }
+      const userKey = await resolveEngineKey(userId, engine, 'selection-paragraphs');
       if (!userKey && !engineConfigured(engine)) {
         return res.status(503).json({
           error: `Рушій «${ENGINE_LABELS[engine]}» не налаштований: додайте ${ENGINE_ENV_KEY[engine]} у .env сервера або власний ключ у розділі «Ключі API».`,
@@ -2866,17 +2797,7 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
   async function resolveCoachEngine(userId: string | undefined, modelId?: string) {
     const resolvedModelId = modelId || GEMINI_MODEL;
     const engine = resolveChatEngine(resolvedModelId);
-    let userKey: string | undefined;
-    if (userId) {
-      const stored = await getUserApiKey(userId, engine).catch(() => undefined);
-      if (stored) {
-        try {
-          userKey = decryptApiKey(stored.encryptedKey);
-        } catch (err) {
-          console.warn('[ai-coach] не вдалося розшифрувати ключ користувача, пробуємо серверний:', err);
-        }
-      }
-    }
+    const userKey = await resolveEngineKey(userId, engine, 'ai-coach');
     if (!userKey && !engineConfigured(engine)) {
       throw new ChatProviderError(
         503,
