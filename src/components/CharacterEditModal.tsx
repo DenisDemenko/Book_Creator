@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   X, 
   Save, 
@@ -22,6 +22,10 @@ import { Character, Book } from '../types';
 import { normalizeCharacter } from '../utils/characterNormalize';
 import { useLanguage } from '../i18n/LanguageContext';
 import { collectCharacterMentions, formatMentionsForPrompt } from '../utils/characterMentions';
+/** Той самий тип двигуна картинки, що й у GenerateCharacterModal.tsx — тут
+ * повторно використаний, щоб обидва селектори рушія (там і тут) не могли
+ * розійтись у переліку можливих значень. */
+import type { GenerationModel } from './GenerateCharacterModal';
 
 /** Одна знахідка «Хранителя цілісності» — форма відповіді сервера (server/characterConsistencyPrompt.ts), продубльована тут: клієнт не імпортує типи з server/. */
 interface ConsistencyFinding {
@@ -110,7 +114,49 @@ export const CharacterEditModal: React.FC<CharacterEditModalProps> = ({
 
   // AI Art generation in modal
   const [isGeneratingArt, setIsGeneratingArt] = useState<boolean>(false);
-  const [selectedArtModel, setSelectedArtModel] = useState<'nano-banana-2-lite' | 'nano-banana-2' | 'nano-banana-pro'>('nano-banana-2');
+  const [selectedArtModel, setSelectedArtModel] = useState<GenerationModel>('nano-banana-2');
+
+  // Доступні image-рушії й автопідказка обраного в книзі текстового рушія —
+  // той самий фікс, що вже застосований у GenerateCharacterModal.tsx (лог
+  // #129), сюди досі не доїхав: ця модалка («Редагувати персонажа» →
+  // регенерація портрета ІСНУЮЧОГО героя) мала власний, вужчий і НЕЗАЛЕЖНИЙ
+  // список лише з трьох варіантів Nano Banana — і саме тому портрет міг
+  // піти в Gemini навіть коли для книги обрано OpenAI: користувач просто
+  // потрапляв сюди, а не в «Створити нового героя». null = список ще не
+  // завантажено (показуємо всі варіанти, щоб не блимати).
+  const [availableImageEngines, setAvailableImageEngines] = useState<Set<string> | null>(null);
+  const hasAutoSelectedEngineRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const preferredAiModelId = book.preferredAiModelId;
+    const query = preferredAiModelId ? `?modelId=${encodeURIComponent(preferredAiModelId)}` : '';
+    fetch(`/api/ai/image-engines${query}`, { credentials: 'same-origin' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || !data?.engines) return;
+        const ids = new Set<string>(
+          (data.engines as { id: string; available: boolean }[])
+            .filter((e) => e.available)
+            .map((e) => e.id)
+        );
+        setAvailableImageEngines(ids);
+        if (
+          !hasAutoSelectedEngineRef.current &&
+          data.suggestedEngineId &&
+          ids.has(data.suggestedEngineId)
+        ) {
+          hasAutoSelectedEngineRef.current = true;
+          setSelectedArtModel(data.suggestedEngineId as GenerationModel);
+        }
+      })
+      .catch(() => {
+        /* немає мережі/ендпоінта — лишаємо null (показ усіх), не ховаємо вибір */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [book.preferredAiModelId]);
 
   // «Хранитель цілісності персонажа» — крос-книжкова перевірка суперечностей
   const [isCheckingConsistency, setIsCheckingConsistency] = useState<boolean>(false);
@@ -269,6 +315,13 @@ export const CharacterEditModal: React.FC<CharacterEditModalProps> = ({
           character: charData,
           model: selectedArtModel,
           stylePreset: 'cyberpunk-photoreal',
+          // Рушій ТЕКСТУ для шліфування промпту (окремо від model — рушія
+          // КАРТИНКИ вище) — раніше тут узагалі не передавався, тож сервер
+          // мовчки підставляв GEMINI_MODEL (server.ts) незалежно від
+          // обраної в книзі моделі, навіть коли саму картинку вже коректно
+          // генерував правильний рушій.
+          textModelId: book.preferredAiModelId,
+          bookId: book.id,
         }),
       });
       const data = await res.json();
@@ -549,12 +602,15 @@ export const CharacterEditModal: React.FC<CharacterEditModalProps> = ({
                     <span className="text-[11px] text-slate-300">{t('characterEditModal.modelLabel')}</span>
                     <select
                       value={selectedArtModel}
-                      onChange={(e) => setSelectedArtModel(e.target.value as any)}
+                      onChange={(e) => setSelectedArtModel(e.target.value as GenerationModel)}
                       className="p-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[11px] text-amber-300 font-semibold focus:outline-hidden"
                     >
                       <option value="nano-banana-2-lite">{t('characterEditModal.modelLiteOption')}</option>
                       <option value="nano-banana-2">{t('characterEditModal.modelStandardOption')}</option>
                       <option value="nano-banana-pro">{t('characterEditModal.modelProOption')}</option>
+                      {(!availableImageEngines || availableImageEngines.has('gpt-image')) && (
+                        <option value="gpt-image">{t('characterEditModal.modelGptImageOption')}</option>
+                      )}
                     </select>
                   </div>
 

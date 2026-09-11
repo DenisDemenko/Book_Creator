@@ -407,20 +407,25 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
           </button>
         </div>
 
-        {/* Mode Switcher */}
-        <div className="flex border-b border-slate-800 bg-slate-950/80 px-6 pt-3 gap-3">
+        {/* Mode Switcher — той самий стиль вкладок, що й AI-коуч (CoachModal.tsx,
+            запис #127): неоморфна тема Modul_token (token-module-scope + nm-*,
+            src/styles/tokenModuleTheme.css), а не власна темна/бурштинова
+            палітра. Клас-скоуп навішений лише на цю смугу вкладок — решта
+            модалки (картки моделей, промпт тощо) лишається без змін, це
+            свідомо звужена задача («дизайн вкладенки», не всього вікна). */}
+        <div className="token-module-scope flex items-center gap-1 px-6 pt-3 pb-3">
           <button
             onClick={() => {
               setMode('existing');
               setGeneratedResult(null);
             }}
-            className={`pb-3 text-xs font-bold border-b-2 flex items-center gap-2 transition-all ${
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[11px] font-bold transition-all ${
               mode === 'existing'
-                ? 'border-amber-400 text-amber-300'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
+                ? 'nm-inset text-[var(--primary)] border-b-2 border-[var(--primary)]'
+                : 'nm-btn text-[var(--outline)] hover:text-[var(--on-surface)]'
             }`}
           >
-            <User className="w-4 h-4" />
+            <User className="w-3.5 h-3.5" />
             <span>{t('generateCharacterModal.tabExisting')}</span>
           </button>
 
@@ -429,13 +434,13 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
               setMode('new');
               setGeneratedResult(null);
             }}
-            className={`pb-3 text-xs font-bold border-b-2 flex items-center gap-2 transition-all ${
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[11px] font-bold transition-all ${
               mode === 'new'
-                ? 'border-amber-400 text-amber-300'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
+                ? 'nm-inset text-[var(--primary)] border-b-2 border-[var(--primary)]'
+                : 'nm-btn text-[var(--outline)] hover:text-[var(--on-surface)]'
             }`}
           >
-            <UserPlus className="w-4 h-4" />
+            <UserPlus className="w-3.5 h-3.5" />
             <span>{t('generateCharacterModal.tabNew')}</span>
           </button>
         </div>
