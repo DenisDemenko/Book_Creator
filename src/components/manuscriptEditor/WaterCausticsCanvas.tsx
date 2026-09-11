@@ -107,19 +107,30 @@ export function WaterCausticsCanvas({
       if (s.enabled) {
         const layers = LEVEL_LAYERS[s.level];
         const time = (t / 1000) * s.speed;
+        // 'lighter' (адитивне змішування) замість звичайного alpha-blend —
+        // плями СВІТЯТЬСЯ, накладаючись одна на одну, а не просто злегка
+        // тонують тло. На темному тлі (за замовчуванням у застосунку)
+        // звичайний alpha-blend на суцільному #0f172a був майже непомітний
+        // — саме тому власник і повідомив, що ефект «ніде не відображається»,
+        // хоча технічно вже рендерився. Підвищено й саму прозорість плям
+        // (55 → 99 у hex-alpha), щоб «світіння хвиль» читалось як таке, а
+        // не як ледь помітний градієнт.
+        ctx.globalCompositeOperation = 'lighter';
         for (let i = 0; i < layers; i++) {
           const freq = 0.4 + i * 0.17 * s.frequency;
           const phase = i * 1.7;
           const cx = width * (0.5 + 0.38 * Math.sin(time * freq + phase));
           const cy = height * (0.5 + 0.38 * Math.cos(time * freq * 0.8 + phase * 1.3));
-          const r = Math.max(width, height) * (0.28 + 0.05 * i);
+          const r = Math.max(width, height) * (0.4 + 0.06 * i);
           const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
           const color = palette[i % palette.length];
-          grad.addColorStop(0, `${color}55`);
+          grad.addColorStop(0, `${color}99`);
+          grad.addColorStop(0.45, `${color}55`);
           grad.addColorStop(1, `${color}00`);
           ctx.fillStyle = grad;
           ctx.fillRect(0, 0, width, height);
         }
+        ctx.globalCompositeOperation = 'source-over';
 
         if (s.shimmer) {
           const shimmerCount = 14;

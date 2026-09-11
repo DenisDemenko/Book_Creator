@@ -20,7 +20,15 @@ import { PX_PER_MM } from '../../utils/mmUnits';
  * лишається `outer.clientWidth / widthPx`: збільшена сторінка ніколи не
  * вилізе за межі контейнера й не потребує горизонтального скролу.
  */
-export function usePageScale(widthMm: number, zoomFactor: number = 1) {
+/**
+ * `reservedPx` (за замовчуванням 0 — поведінка не змінюється для жодного
+ * наявного виклику) віднімається від виміряної ширини контейнера ДО
+ * розрахунку fitRatio — потрібно, коли всередині того самого `outerRef`
+ * зі сторінкою тепер ще й вертикальна лінійка (PageColumn.tsx): без цього
+ * сторінка масштабувалась би так, ніби вся ширина контейнера належить ЇЙ,
+ * і вилізала б під смугу лінійки замість того, щоб стиснутись під неї.
+ */
+export function usePageScale(widthMm: number, zoomFactor: number = 1, reservedPx: number = 0) {
   const outerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const widthPx = widthMm * PX_PER_MM;
@@ -29,14 +37,15 @@ export function usePageScale(widthMm: number, zoomFactor: number = 1) {
     const outer = outerRef.current;
     if (!outer) return;
     const update = () => {
-      const fitRatio = outer.clientWidth > 0 ? outer.clientWidth / widthPx : 1;
+      const availablePx = Math.max(0, outer.clientWidth - reservedPx);
+      const fitRatio = availablePx > 0 ? availablePx / widthPx : 1;
       setScale(Math.min(zoomFactor, fitRatio));
     };
     update();
     const ro = new ResizeObserver(update);
     ro.observe(outer);
     return () => ro.disconnect();
-  }, [widthPx, zoomFactor]);
+  }, [widthPx, zoomFactor, reservedPx]);
 
   return { outerRef, scale, widthPx };
 }

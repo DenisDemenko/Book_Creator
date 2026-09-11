@@ -110,7 +110,8 @@ import {
   Ban,
   Link2,
   SeparatorHorizontal,
-  Heading3
+  Heading3,
+  Ruler
 } from 'lucide-react';
 import { 
   Book, 
@@ -1703,6 +1704,10 @@ export const EditorView: React.FC<EditorViewProps> = ({
   // «Свій %» — довільне число 20–200.
   const [editorZoom, setEditorZoom] = usePersistentState<number>('nova_editor_pageZoom', 100);
   const [customEditorZoom, setCustomEditorZoom] = useState<string>('');
+  // Показ лінійки (горизонтальної й вертикальної) над/збоку від аркуша —
+  // перемикач на панелі поруч, як просив власник; за замовчуванням увімкнено,
+  // бо лінійка й раніше завжди була видима без окремого перемикача.
+  const [rulerVisible, setRulerVisible] = usePersistentState<boolean>('nova_editor_rulerVisible', true);
 
   // --- Теги-вставки (з Бази знань): вставити / сховати / перейти ---
   const [tagsHidden, setTagsHidden] = usePersistentState<boolean>('nova_editor_hideTags', false);
@@ -2268,6 +2273,28 @@ export const EditorView: React.FC<EditorViewProps> = ({
    * Жирність і нахил діють на виділений фрагмент і кладуть у текст
    * markdown-маркери, бо контент розділу зберігається як простий рядок.
    */
+  /**
+   * Перемикач лінійки (мм) — одна й та сама кнопка в кожному режимі
+   * перегляду (UA-соло, Паралельно UA/EN, EN-соло, відкріплений переклад):
+   * `rulerVisible` — один спільний стан, тож перемикання з будь-якого
+   * місця вмикає/вимикає обидві лінійки (горизонтальну й вертикальну)
+   * скрізь одразу.
+   */
+  const renderRulerToggle = () => (
+    <button
+      type="button"
+      onClick={() => setRulerVisible((v) => !v)}
+      className={`p-1.5 rounded-lg border transition-colors shrink-0 ${
+        rulerVisible
+          ? 'bg-slate-900 border-slate-700 [color:var(--sun-acc)]'
+          : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'
+      }`}
+      title={rulerVisible ? t('editor.rulerToggleHide') : t('editor.rulerToggleShow')}
+    >
+      <Ruler className="w-3.5 h-3.5" />
+    </button>
+  );
+
   const renderFormatToolbar = (isEn: boolean) => (
     <div
       style={sunVars}
@@ -4116,11 +4143,18 @@ export const EditorView: React.FC<EditorViewProps> = ({
       }${isFocusWindow ? 'nova-fullscreen-editor w-full h-full min-h-0' : 'flex-1 min-h-0'}`}
       style={isFocusWindow ? { ...sunVars } : { ...sunVars, height: 'calc(100vh - 105px)', maxHeight: 'calc(100vh - 105px)' }}
     >
-      {/* Фонова анімація «світлові хвилі як від води» — лише світла тема,
-          позаду всього вмісту (z-0, pointer-events:none), керується
+      {/* Фонова анімація «світлові хвилі як від води» — раніше рендерилась
+          лише у світлій темі (isLightTheme), а застосунок за замовчуванням
+          відкривається в ТЕМНІЙ — тобто цей уже готовий ефект не бачив
+          практично ніхто. Власна палітра канвасу (бляклі небесно-блакитні
+          відтінки на малій прозорості) не залежить від теми напряму — це
+          звичайні напівпрозорі плями, що однаково добре читаються і на
+          темному тлі (як світіння), і на світлому (як вода) — тому рушій
+          мальовки лишається той самий, просто вже без прив'язки до теми.
+          Позаду всього вмісту (z-0, pointer-events:none), керується
           панеллю «Вода і відблиски» (WaterCausticsPanel, вкладка
           «Персонажі і сцена»). */}
-      {isLightTheme && <WaterCausticsCanvas settings={waterSettings} splashRef={waterSplashRef} />}
+      <WaterCausticsCanvas settings={waterSettings} splashRef={waterSplashRef} />
 
       {/* Повноекранний режим: маленькі стрілочки збоку для переходу між
           розривами сторінок (не системний Fullscreen API — просто
@@ -4815,28 +4849,42 @@ export const EditorView: React.FC<EditorViewProps> = ({
               </div>
 
               {/* Панель дій над виділенням.
-                  Раніше була absolute поверх тексту й закривала саме той
-                  фрагмент, який редагують. Тепер це звичайний рядок у потоці
-                  під шапкою вікна: з'являється над текстом, зсуваючи його,
-                  а не перекриваючи. */}
-              {selectedText.length > 0 && !isReader && (
-                <div className="flex items-center flex-wrap gap-2 mb-3 shrink-0 bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 shadow-lg text-xs">
-                  <Sparkles className="w-3.5 h-3.5 [color:var(--sun-acc)] shrink-0" />
-                  <span className="text-slate-300 font-medium">
-                    {t('editor.selectedWords', { n: selectedText.split(/\s+/).filter(Boolean).length })}
+                  Раніше монтувалась/розмонтовувалась залежно від
+                  selectedText.length > 0 — і саме це власник сприймав як
+                  "згортання-розгортання": ProseMirror скидає selection у
+                  empty при втраті фокусу редактора (наприклад, коли курсор
+                  миші лише йде до самої кнопки всередині цієї ж панелі,
+                  ще до кліку), тож рядок міг зникнути просто в момент
+                  спроби ним скористатись. Тепер рядок змонтований ЗАВЖДИ
+                  (доки не читацький режим) — не блимає й не ховається;
+                  обидві дії коректно працюють і без виділення:
+                  handleTriggerAiEdit('improve') сам підставляє
+                  activeSection.content, коли selectedText порожній, а
+                  GenerateIllustrationModal дозволяє ввести чи змінити
+                  джерельний текст просто в модалці. Стиснуто (менший
+                  падінг/шрифт), як і обіцяно раніше для чіпа кількості
+                  слів (запис #127) — там йшлося про інший рядок, тут
+                  той самий принцип застосовано і до цього. */}
+              {!isReader && (
+                <div className="flex items-center flex-wrap gap-1.5 mb-2 shrink-0 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 shadow-xs text-[11px]">
+                  <Sparkles className="w-3 h-3 [color:var(--sun-acc)] shrink-0" />
+                  <span className="text-slate-400 font-medium">
+                    {selectedText.length > 0
+                      ? t('editor.selectedWords', { n: selectedText.split(/\s+/).filter(Boolean).length })
+                      : t('editor.selectedWordsNone')}
                   </span>
                   <div className="flex-1" />
                   <button
                     onClick={() => handleTriggerAiEdit('improve')}
-                    className="px-2.5 py-1 [background-color:var(--sun-acc)] hover:[background-color:var(--sun-acc-80)] text-slate-950 font-bold rounded-lg transition-colors"
+                    className="px-2 py-0.5 [background-color:var(--sun-acc)] hover:[background-color:var(--sun-acc-80)] text-slate-950 font-bold rounded-md transition-colors"
                   >
                     {t('editor.improveAi')}
                   </button>
                   <button
                     onClick={() => setShowIllustrationModal(true)}
-                    className="px-2.5 py-1 bg-gradient-to-r from-purple-600 to-cyan-600 hover:from-purple-500 hover:to-cyan-500 text-white font-bold rounded-lg shadow-xs flex items-center gap-1 transition-all"
+                    className="px-2 py-0.5 bg-gradient-to-r from-purple-600 to-cyan-600 hover:from-purple-500 hover:to-cyan-500 text-white font-bold rounded-md shadow-xs flex items-center gap-1 transition-all"
                   >
-                    <ImageIcon className="w-3 h-3" />
+                    <ImageIcon className="w-2.5 h-2.5" />
                     <span>{t('editor.illustrationFromText')}</span>
                   </button>
                 </div>
@@ -4866,16 +4914,32 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     ))}
                   </select>
                 </label>
+                {/* Перемикач лінійки (мм) — вмикає/вимикає і горизонтальну
+                    PageRuler нижче, і вертикальну (всередині PageColumn). */}
+                <button
+                  type="button"
+                  onClick={() => setRulerVisible((v) => !v)}
+                  className={`p-1.5 rounded-lg border transition-colors shrink-0 ${
+                    rulerVisible
+                      ? 'bg-slate-900 border-slate-700 [color:var(--sun-acc)]'
+                      : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'
+                  }`}
+                  title={rulerVisible ? t('editor.rulerToggleHide') : t('editor.rulerToggleShow')}
+                >
+                  <Ruler className="w-3.5 h-3.5" />
+                </button>
               </div>
 
-              <PageRuler
-                widthMm={getPageContentWidthMm()}
-                zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
-                insideMm={book.layoutConfig.margins?.insideMm || 0}
-                outsideMm={book.layoutConfig.margins?.outsideMm || 0}
-                onChangeMargins={handleChangeMargins}
-              />
-              <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0">
+              {rulerVisible && (
+                <PageRuler
+                  widthMm={getPageContentWidthMm()}
+                  zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
+                  insideMm={book.layoutConfig.margins?.insideMm || 0}
+                  outsideMm={book.layoutConfig.margins?.outsideMm || 0}
+                  onChangeMargins={handleChangeMargins}
+                />
+              )}
+              <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0" showVerticalRuler={rulerVisible}>
                 {/* Колонтитул першого аркуша. Плагін пагінації малює його на
                     кожному РОЗРИВІ, тобто зверху сторінок 2, 3, … — у першої
                     розриву перед нею немає, тож він рендериться тут. */}
@@ -4979,7 +5043,21 @@ export const EditorView: React.FC<EditorViewProps> = ({
                       <span className="text-[11px] font-mono text-slate-400">
                         {t('editor.wordsCount', { n: activeSection?.wordCount || 0 })}
                       </span>
-                      {renderFormatToolbar(false)}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {renderFormatToolbar(false)}
+                        <button
+                          type="button"
+                          onClick={() => setRulerVisible((v) => !v)}
+                          className={`p-1.5 rounded-lg border transition-colors shrink-0 ${
+                            rulerVisible
+                              ? 'bg-slate-900 border-slate-700 [color:var(--sun-acc)]'
+                              : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'
+                          }`}
+                          title={rulerVisible ? t('editor.rulerToggleHide') : t('editor.rulerToggleShow')}
+                        >
+                          <Ruler className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                     <input
                       type="text"
@@ -4995,14 +5073,16 @@ export const EditorView: React.FC<EditorViewProps> = ({
                       placeholder={t('editor.sectionTitleUaLabel')}
                       className="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white font-bold shrink-0"
                     />
-                    <PageRuler
-                      widthMm={getPageContentWidthMm()}
-                      zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
-                      insideMm={book.layoutConfig.margins?.insideMm || 0}
-                      outsideMm={book.layoutConfig.margins?.outsideMm || 0}
-                      onChangeMargins={handleChangeMargins}
-                    />
-                    <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800/80">
+                    {rulerVisible && (
+                      <PageRuler
+                        widthMm={getPageContentWidthMm()}
+                        zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
+                        insideMm={book.layoutConfig.margins?.insideMm || 0}
+                        outsideMm={book.layoutConfig.margins?.outsideMm || 0}
+                        onChangeMargins={handleChangeMargins}
+                      />
+                    )}
+                    <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800/80" showVerticalRuler={rulerVisible}>
                       <EditorContent
                         editor={uaEditor}
                         style={{ fontFamily: manuscriptFontStack }}
@@ -5024,6 +5104,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                       </span>
                       <div className="flex items-center gap-1.5 flex-wrap">
                         {renderFormatToolbar(true)}
+                        {renderRulerToggle()}
                         <button
                           onClick={handleTranslateToEnglish}
                           disabled={isTranslating}
@@ -5048,14 +5129,16 @@ export const EditorView: React.FC<EditorViewProps> = ({
                       placeholder="Section Title (EN)"
                       className="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white font-bold shrink-0"
                     />
-                    <PageRuler
-                      widthMm={getPageContentWidthMm()}
-                      zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
-                      insideMm={book.layoutConfig.margins?.insideMm || 0}
-                      outsideMm={book.layoutConfig.margins?.outsideMm || 0}
-                      onChangeMargins={handleChangeMargins}
-                    />
-                    <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800/80">
+                    {rulerVisible && (
+                      <PageRuler
+                        widthMm={getPageContentWidthMm()}
+                        zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
+                        insideMm={book.layoutConfig.margins?.insideMm || 0}
+                        outsideMm={book.layoutConfig.margins?.outsideMm || 0}
+                        onChangeMargins={handleChangeMargins}
+                      />
+                    )}
+                    <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800/80" showVerticalRuler={rulerVisible}>
                       <EditorContent
                         editor={enEditor}
                         style={{ fontFamily: manuscriptFontStack }}
@@ -5087,6 +5170,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   <span className="text-xs font-bold text-slate-300">English Publication Edition</span>
                   <div className="flex items-center gap-1.5 flex-wrap">
                     {renderFormatToolbar(true)}
+                    {renderRulerToggle()}
                     <button
                       onClick={handleTranslateToEnglish}
                       disabled={isTranslating}
@@ -5111,14 +5195,16 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   placeholder="Section Title (EN)"
                   className="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white font-bold shrink-0"
                 />
-                <PageRuler
-                  widthMm={getPageContentWidthMm()}
-                  zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
-                  insideMm={book.layoutConfig.margins?.insideMm || 0}
-                  outsideMm={book.layoutConfig.margins?.outsideMm || 0}
-                  onChangeMargins={handleChangeMargins}
-                />
-                <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800">
+                {rulerVisible && (
+                  <PageRuler
+                    widthMm={getPageContentWidthMm()}
+                    zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
+                    insideMm={book.layoutConfig.margins?.insideMm || 0}
+                    outsideMm={book.layoutConfig.margins?.outsideMm || 0}
+                    onChangeMargins={handleChangeMargins}
+                  />
+                )}
+                <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800" showVerticalRuler={rulerVisible}>
                   <EditorContent
                     editor={enEditor}
                     style={{ fontFamily: manuscriptFontStack }}
@@ -5507,9 +5593,11 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
                 {/* «Вода і відблиски» — повний пульт керування фоновим
                     canvas-ефектом світлових хвиль (мокап «FusionWrite —
-                    Water & Caustics»). Лише світла тема: у темній сторінка
-                    й так «скляна з авророю», а не водяна. */}
-                {isLightTheme && (
+                    Water & Caustics»). Раніше — лише світла тема; ефект
+                    тепер рендериться в обох темах, тож і пульт керування
+                    (вимкнути/швидкість/рівень) має бути доступний завжди,
+                    а не ховатись саме тоді, коли ефект активний. */}
+                {(
                   <WaterCausticsPanel
                     settings={waterSettings}
                     onChange={setWaterSettings}
@@ -6567,8 +6655,9 @@ export const EditorView: React.FC<EditorViewProps> = ({
           onClose={() => setTranslationDetached(false)}
         >
           <div className="flex flex-col h-full gap-2">
-            <div className="flex items-center justify-end shrink-0">
+            <div className="flex items-center justify-end gap-1.5 shrink-0">
               {renderFormatToolbar(true)}
+              {renderRulerToggle()}
             </div>
             <input
               type="text"
@@ -6584,14 +6673,16 @@ export const EditorView: React.FC<EditorViewProps> = ({
               }}
               className="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white font-bold shrink-0"
             />
-            <PageRuler
-              widthMm={getPageContentWidthMm()}
-              zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
-              insideMm={book.layoutConfig.margins?.insideMm || 0}
-              outsideMm={book.layoutConfig.margins?.outsideMm || 0}
-              onChangeMargins={handleChangeMargins}
-            />
-            <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800">
+            {rulerVisible && (
+              <PageRuler
+                widthMm={getPageContentWidthMm()}
+                zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
+                insideMm={book.layoutConfig.margins?.insideMm || 0}
+                outsideMm={book.layoutConfig.margins?.outsideMm || 0}
+                onChangeMargins={handleChangeMargins}
+              />
+            )}
+            <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800" showVerticalRuler={rulerVisible}>
               <EditorContent
                 editor={enEditor}
                 style={{ fontFamily: manuscriptFontStack }}

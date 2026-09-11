@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { usePageScale } from './usePageScale';
-import { PX_PER_MM } from '../../utils/mmUnits';
+import { PX_PER_MM, buildRulerMarks } from '../../utils/mmUnits';
 
 interface PageRulerProps {
   /** Ширина текстового блоку сторінки (мм) — та сама, що й у PageColumn під лінійкою, щоб обидва лишались вирівняними. */
@@ -53,8 +53,7 @@ export const PageRuler: React.FC<PageRulerProps> = ({ widthMm, insideMm, outside
     window.addEventListener('pointerup', handleUp);
   };
 
-  const totalCm = Math.floor(widthMm / 10);
-  const marks = Array.from({ length: totalCm + 1 }, (_, cm) => cm);
+  const marks = buildRulerMarks(widthMm);
 
   return (
     <div ref={outerRef} className="w-full h-6 relative select-none shrink-0" style={{ background: '#1e293b' }}>
@@ -70,11 +69,11 @@ export const PageRuler: React.FC<PageRulerProps> = ({ widthMm, insideMm, outside
           background: '#fffefc',
         }}
       >
-        {marks.map((cm) => (
-          <div key={cm} className="absolute top-0 bottom-0" style={{ left: cm * 10 * PX_PER_MM }}>
-            <div style={{ width: 1, height: cm % 5 === 0 ? '100%' : '50%', background: '#94a3b8' }} />
-            {cm % 5 === 0 && (
-              <span className="text-[8px] text-slate-500 absolute top-0.5 left-0.5 font-mono">{cm / 10}</span>
+        {marks.map((m) => (
+          <div key={m.mm} className="absolute top-0 bottom-0" style={{ left: m.mm * PX_PER_MM }}>
+            <div style={{ width: 1, height: m.major ? '100%' : '50%', background: '#94a3b8' }} />
+            {m.major && (
+              <span className="text-[8px] text-slate-500 absolute top-0.5 left-0.5 font-mono">{m.mm}</span>
             )}
           </div>
         ))}
