@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { KeyRound, Check, Trash2, Loader2, ShieldAlert, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { KeyRound, Check, Trash2, Loader2, ShieldAlert, ShieldCheck, AlertTriangle, Stethoscope } from 'lucide-react';
 import type { AuthUser } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
 
@@ -62,6 +62,36 @@ export const ApiKeysView: React.FC<ApiKeysViewProps> = ({ authUser }) => {
   useEffect(() => {
     load();
   }, [load]);
+
+  /**
+   * Перевірка ключа справжнім викликом провайдера. Відповідь показує не
+   * лише «працює / не працює», а й ДЖЕРЕЛО ключа та його останні 4
+   * символи — щоб на скаргу «провайдер каже, ключ невалідний» можна було
+   * одразу побачити, чи пішов у запит саме той ключ, що в цій панелі, чи
+   * зовсім інший зі змінної оточення сервера.
+   */
+  const handleTest = async (engine: string) => {
+    setBusyEngine(engine);
+    setNotice(null);
+    try {
+      const res = await fetch(`/api/account/api-keys/${engine}/test`, {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+      const data = await res.json().catch(() => ({}));
+      const where = data?.source ? ` (${data.source}${data.last4 ? `, ключ …${data.last4}` : ''})` : '';
+      setNotice({
+        engine,
+        text: data?.ok
+          ? `${t('apiKeysView.testOk')}${where}`
+          : `${t('apiKeysView.testFailed')}${where}: ${data?.error || `HTTP ${res.status}`}`,
+      });
+    } catch (err: any) {
+      setNotice({ engine, text: `${t('apiKeysView.testFailed')}: ${err?.message || err}` });
+    } finally {
+      setBusyEngine(null);
+    }
+  };
 
   const handleSave = async (engine: string) => {
     const apiKey = (drafts[engine] || '').trim();
@@ -156,6 +186,19 @@ export const ApiKeysView: React.FC<ApiKeysViewProps> = ({ authUser }) => {
             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
             {t('apiKeysView.save')}
           </button>
+          {/* Перевірка доступна лише текстовим рушіям: у зображень і
+              озвучення інший транспорт, і «найдешевший запит» там коштує
+              грошей, а не часток копійки. */}
+          {row.kind !== 'image' && row.kind !== 'audio' && (
+            <button
+              onClick={() => handleTest(row.engine)}
+              disabled={busy}
+              title={t('apiKeysView.testTitle')}
+              className="nm-btn p-2 rounded-xl text-cyan-300 disabled:opacity-50 shrink-0"
+            >
+              <Stethoscope className="w-3.5 h-3.5" />
+            </button>
+          )}
           {row.configured && (
             <button
               onClick={() => handleRemove(row.engine)}

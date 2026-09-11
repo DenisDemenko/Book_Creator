@@ -16,6 +16,14 @@
  * ANTHROPIC_API_KEY, DEEPSEEK_API_KEY, GROQ_API_KEY, MISTRAL_API_KEY).
  */
 
+import {
+  adaptQuirks,
+  buildOpenAiBody,
+  quirksFor,
+  rememberQuirks,
+  type ModelQuirks,
+} from './modelQuirks';
+
 export type EngineId = 'gemini' | 'gpt' | 'claude' | 'deepseek' | 'groq' | 'mistral';
 
 export interface GenerateResult {
@@ -198,29 +206,42 @@ async function openAiCompatible(
         ]
       : prompt;
 
-  const upstream = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-    body: JSON.stringify({
-      model: modelId,
-      messages: [
-        { role: 'system', content: systemInstruction },
-        { role: 'user', content: userContent },
-      ],
-      temperature: 0.7,
-      max_tokens: 4096,
-      stream: false,
-      // OpenAI-сумісний параметр (GPT/DeepSeek/Groq/Mistral усі дзеркалять
-      // цей контракт) — гарантує СИНТАКСИЧНО валідний JSON, а не лише
-      // «модель попросили ввічливо». Без нього JSON-модулі ядра (Q18
-      // grilling-сесії) інколи ламались на моделях без апаратної опори:
-      // літеральний перенос рядка в багатоабзацній біографії персонажа
-      // ламає JSON.parse так само надійно, як і зайвий текст навколо.
-      ...(json ? { response_format: { type: 'json_object' } } : {}),
-    }),
-  });
+  const messages = [
+    { role: 'system', content: systemInstruction },
+    { role: 'user', content: userContent },
+  ];
 
-  const data = await upstream.json().catch(() => ({}));
+  // Набір параметрів більше не зашитий: він залежить від моделі й
+  // ДОВЧУЄТЬСЯ з відповіді провайдера (server/modelQuirks.ts). Раніше тут
+  // жорстко стояли max_tokens/temperature/response_format, і кожна модель,
+  // яка їх не приймає, вилазила власнику сирою помилкою провайдера.
+  // Режим гарантованого JSON (`response_format`) лишається тим самим
+  // важливим параметром, що й був: без нього JSON-модулі ядра ламались на
+  // літеральному переносі рядка в довгій біографії персонажа — тому він
+  // вимикається лише тоді, коли модель прямо каже, що не вміє його.
+  const attempt = async (quirks: ModelQuirks) => {
+    const upstream = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify(buildOpenAiBody({ modelId, messages, json, quirks })),
+    });
+    const payload = await upstream.json().catch(() => ({}));
+    return { upstream, payload };
+  };
+
+  let { upstream, payload: data } = await attempt(quirksFor(modelId));
+
+  if (!upstream.ok) {
+    // Провайдер сам називає, що саме не так із параметром — звужуємо набір
+    // для цієї моделі й пробуємо ще РАЗ (саме один: якщо не допомогло,
+    // причина не в параметрах, і цикл лише палив би квоту).
+    const adapted = adaptQuirks(modelId, data?.error?.message || '');
+    if (adapted) {
+      rememberQuirks(modelId, adapted);
+      ({ upstream, payload: data } = await attempt(adapted));
+    }
+  }
+
   if (!upstream.ok) {
     const message = data?.error?.message || `${envKey} провайдер повернув статус ${upstream.status}.`;
     throw new ChatProviderError(upstream.status, message);

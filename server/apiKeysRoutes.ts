@@ -15,7 +15,9 @@ import type { Express } from 'express';
 import { requireAuth, requirePermission } from './auth';
 import { getUserApiKey, listUserApiKeys, upsertUserApiKey, deleteUserApiKey } from './store';
 import { encryptApiKey, apiKeyFingerprint, isApiKeyCryptoConfigured } from './userApiKeyCrypto';
-import { CHAT_MODELS, ENGINE_LABELS, engineConfigured, type EngineId } from './chatProviders';
+import { CHAT_MODELS, ENGINE_LABELS, ENGINE_ENV_KEY, engineConfigured, type EngineId } from './chatProviders';
+import { dispatch } from './aiCore';
+import { platformKeyFor, resolveEngineKey } from './platformKeys';
 
 const KNOWN_ENGINES = new Set<string>(Object.keys(ENGINE_LABELS));
 
@@ -228,6 +230,74 @@ export function registerApiKeysRoutes(app: Express): void {
     } catch (err) {
       console.error('[api-keys] delete:', err);
       res.status(500).json({ error: 'Не вдалося видалити ключ API.' });
+    }
+  });
+
+  /**
+   * «Перевірити ключ» — справжній, найдешевший можливий виклик провайдера
+   * тим самим ключем і тим самим шляхом, яким ходить продукт
+   * (`resolveEngineKey`: платформний → власний → змінна оточення).
+   *
+   * Навіщо окремий маршрут. Досі на скаргу «провайдер каже, що ключ
+   * невалідний» не було чим відповісти, крім здогадок: панель показує
+   * ЗБЕРЕЖЕНИЙ ключ, а в запит могла піти змінна оточення з зовсім іншим
+   * ключем, і зовні ці два випадки не розрізнити. Тут повертається
+   * ДЖЕРЕЛО ключа і його відбиток — той самий sha256-префікс, що показує
+   * панель, тож збіг або розбіжність видно очима.
+   *
+   * `last4` — останні 4 символи ключа. Це не витік: провайдери самі
+   * друкують їх у тексті помилки («Your api key: ****3986 is invalid»),
+   * а саме за ними власник і звіряє, чи пішов у запит той ключ, що він
+   * вставив. Маршрут доступний лише тому, хто й так має право керувати
+   * ключами.
+   */
+  app.post('/api/account/api-keys/:engine/test', requireAuth, requirePermission('canManageApiKeys'), async (req, res) => {
+    const engine = req.params.engine;
+    if (!isEngineId(engine)) {
+      return res.status(400).json({ error: `Перевірка доступна лише для текстових рушіїв, а не для «${engine}».` });
+    }
+    try {
+      const userId = req.principal!.id as string;
+      const key = await resolveEngineKey(userId, engine, 'key-test');
+      const source = key
+        ? (await platformKeyFor(engine)) === key
+          ? 'платформний ключ із цієї панелі'
+          : 'власний ключ цього користувача'
+        : 'змінна оточення сервера';
+
+      if (!key && !engineConfigured(engine)) {
+        return res.json({
+          ok: false,
+          engine,
+          source,
+          error: `Ключа немає ніде: ні в цій панелі, ні у змінній оточення ${ENGINE_ENV_KEY[engine]}.`,
+        });
+      }
+
+      const modelId = CHAT_MODELS.find((m) => m.engine === engine)?.id || '';
+      // Найдешевший осмислений запит: одне слово на вхід, одне на вихід.
+      await dispatch(engine, modelId, 'ping', 'Reply with the single word: pong.', key);
+
+      res.json({
+        ok: true,
+        engine,
+        source,
+        fingerprint: key ? apiKeyFingerprint(key) : undefined,
+        last4: key ? key.slice(-4) : undefined,
+        modelId,
+      });
+    } catch (err: any) {
+      // Помилку провайдера віддаємо як є: саме в ній він називає, який
+      // ключ відхилив — і це головна цінність перевірки.
+      const key = await resolveEngineKey(req.principal!.id as string, engine, 'key-test').catch(() => undefined);
+      res.json({
+        ok: false,
+        engine,
+        source: key ? 'ключ знайдено' : 'ключа немає',
+        fingerprint: key ? apiKeyFingerprint(key) : undefined,
+        last4: key ? key.slice(-4) : undefined,
+        error: String(err?.message || err),
+      });
     }
   });
 }
