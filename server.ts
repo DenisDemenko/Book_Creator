@@ -4407,6 +4407,16 @@ ${JSON.stringify(bookContext || {}, null, 2)}
     res.sendFile(path.join(process.cwd(), root, 'about', 'index.html'));
   });
 
+  // Другий лендінг — «FusionWrite» (`public/write/index.html`, запис #144).
+  // Окрема адреса поруч із /about/, а не заміна: власник просив лишити
+  // чинну сторінку на місці. Влаштований точно так само, як /about вище,
+  // і скісну так само доводить до ладу скрипт у <head> самої сторінки —
+  // причини ті самі (rewrite Next.js з'їдає завершальну скісну).
+  app.get(['/write', '/write/'], (_req, res) => {
+    const root = process.env.NODE_ENV === 'production' ? 'dist' : 'public';
+    res.sendFile(path.join(process.cwd(), root, 'write', 'index.html'));
+  });
+
   // Vite middleware setup
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
