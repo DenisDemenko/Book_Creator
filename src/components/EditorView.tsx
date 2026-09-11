@@ -922,6 +922,27 @@ export const EditorView: React.FC<EditorViewProps> = ({
     },
   });
 
+  /** Гарнітура ВИДІЛЕНОГО фрагмента — позначка fontSpan під курсором
+   *  (null, якщо фрагмент без власного шрифту й малюється шрифтом книги).
+   *
+   *  Потрібна саме як стан редактора, а не як `typography.bodyFont`:
+   *  список шрифтів у панелі керує лише виділеним фрагментом
+   *  (applyFontToSelection → setMark('fontSpan')), а `bodyFont` — шрифт
+   *  усієї книги, який цей список ніколи не змінює. Поки `value` списку
+   *  було прив'язане до `bodyFont`, вибір шрифту нікуди не записувався:
+   *  React після onChange перемальовував <select> назад на стару назву,
+   *  а вибрати ту гарнітуру, що вже показана в полі, було неможливо в
+   *  принципі — DOM-значення не мінялось, тож onChange навіть не
+   *  спрацьовував. Саме це власник і бачив як «шрифт не перемикається». */
+  const uaSelectedFontFamily = useEditorState({
+    editor: uaEditor,
+    selector: ({ editor }) => (editor?.getAttributes('fontSpan')?.family as string | undefined) ?? null,
+  });
+  const enSelectedFontFamily = useEditorState({
+    editor: enEditor,
+    selector: ({ editor }) => (editor?.getAttributes('fontSpan')?.family as string | undefined) ?? null,
+  });
+
   // Синхронізуємо редактор із activeSection ЛИШЕ коли контент змінився ЗЗОВНІ
   // (перемкнули розділ, AI переписав текст, відновили версію) — а не як
   // відлуння власного onUpdate редактора (порівнюємо серіалізовану строку,
@@ -2305,10 +2326,17 @@ export const EditorView: React.FC<EditorViewProps> = ({
       </div>
 
       <div className={formatTabFor[isEn ? 'en' : 'ua'] === 'text' ? 'contents' : 'hidden'}>
+      {/* `value` — гарнітура ВИДІЛЕНОГО фрагмента, а не шрифт книги: цей
+          список керує саме фрагментом (див. коментар до
+          uaSelectedFontFamily вище). Коли у фрагмента власного шрифту
+          немає, показуємо порожню службову позицію, а не назву шрифту
+          книги — інакше та гарнітура ставала невибірною (DOM-значення не
+          мінялось → onChange не спрацьовував). */}
       <select
-        value={book.layoutConfig.typography.bodyFont}
+        value={(isEn ? enSelectedFontFamily : uaSelectedFontFamily) ?? ''}
         onChange={(e) => {
           const value = e.target.value;
+          if (!value) return;
           // Остання позиція списку — не шрифт, а команда «додати шрифт».
           if (value === ADD_FONT_OPTION) {
             setShowFontModal(true);
@@ -2322,10 +2350,17 @@ export const EditorView: React.FC<EditorViewProps> = ({
         }}
         disabled={isReader}
         className="px-2.5 py-1.5 rounded-md bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed min-w-[160px]"
-        style={{ fontFamily: manuscriptFontStack }}
+        style={{
+          fontFamily: (isEn ? enSelectedFontFamily : uaSelectedFontFamily)
+            ? `"${isEn ? enSelectedFontFamily : uaSelectedFontFamily}", Georgia, serif`
+            : manuscriptFontStack,
+        }}
         title={t('editor.bodyFontTitle')}
         aria-label={t('editor.bodyFontTitle')}
       >
+        <option value="" disabled className="bg-slate-900 text-slate-400 text-base">
+          {t('editor.bodyFontPlaceholder')}
+        </option>
         {BODY_FONT_OPTIONS.map((f) => (
           <option
             key={f.value}
