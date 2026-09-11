@@ -61,8 +61,35 @@
 }
 
 /* --- Glass surfaces --- */
-.glass-panel {
+
+/* `position` винесено з .glass-panel/.glass-panel-elevated в окреме
+   правило з винятками — і ось чому.
+
+   Ці класи задають ВИГЛЯД (скло, рамка, тінь), але заразом ставили
+   `position: relative` прямо в собі. Tailwind 4 (`@import "tailwindcss"`)
+   кладе свої утиліти в шар `utilities`, а власні правила цього файлу —
+   поза шарами; за каскадом НЕшарове правило б'є шарове незалежно від
+   специфічності й порядку. Тому `.absolute`, `.sticky` і `.fixed`
+   програвали цьому `position: relative` — елемент із класом
+   «absolute … glass-panel-elevated» лишався в потоці.
+
+   Саме це й був баг, на який поскаржився власник: випадне меню «Плагіни»
+   не лягало поверх шапки, а розсовувало її (шапка росла з 97 до 286 px,
+   решта кнопок їхала вниз). Тим самим були зламані ще вісім місць —
+   див. запис #145 у log.md.
+
+   Виняток `:not(.absolute):not(.fixed):not(.sticky)` лишає неявний
+   `relative` усім, хто на нього спирається (а таких у проєкті немає —
+   перевірено, кожен споживач, якому потрібна система координат, пише
+   `relative` у власному списку класів), і водночас не заважає явно
+   заданій позиційній утиліті. Видаляти `position` зовсім не стали саме
+   на випадок майбутнього споживача, який покладеться на стару поведінку. */
+.glass-panel:not(.absolute):not(.fixed):not(.sticky),
+.glass-panel-elevated:not(.absolute):not(.fixed):not(.sticky) {
   position: relative;
+}
+
+.glass-panel {
   background: linear-gradient(180deg, rgba(19, 29, 53, 0.55) 0%, rgba(9, 13, 22, 0.6) 100%);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
@@ -74,7 +101,6 @@
 }
 
 .glass-panel-elevated {
-  position: relative;
   background: linear-gradient(180deg, rgba(24, 36, 61, 0.68) 0%, rgba(10, 15, 26, 0.72) 100%);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
