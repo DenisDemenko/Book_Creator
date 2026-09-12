@@ -1,0 +1,969 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Fusion Lab Studio — AI Mentor v7 · Adaptive Mastery Engine</title>
+<style>
+:root{
+  --bg:#eefdff;--panel:rgba(255,255,255,.76);--stroke:rgba(118,189,222,.28);
+  --text:#0f3564;--muted:#6f98bb;--blue:#2f7df4;--cyan:#44d6e8;--mint:#38d1ac;
+  --amber:#ffb64d;--red:#ff6e7a;--violet:#7568ff;
+  --shadow:0 18px 60px rgba(55,151,191,.14), inset 0 1px 0 rgba(255,255,255,.8);
+  --r:22px;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:var(--text);
+background:radial-gradient(circle at 20% 0%,rgba(123,225,255,.28),transparent 30%),radial-gradient(circle at 80% 10%,rgba(116,249,225,.20),transparent 28%),linear-gradient(180deg,#f7fdff,#eafaff 42%,#ddf8ff);min-height:100vh}
+button,input,textarea,select{font:inherit}.app{display:grid;grid-template-rows:64px 1fr;min-height:100vh}
+.topbar{display:flex;align-items:center;gap:14px;padding:10px 18px;backdrop-filter:blur(18px);background:rgba(255,255,255,.62);border-bottom:1px solid var(--stroke);position:sticky;top:0;z-index:20}
+.brand{display:flex;align-items:center;gap:10px;min-width:215px}.logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#ff9d57,#7ac8ff);display:grid;place-items:center;color:#fff;font-weight:800}
+.brand b{display:block}.brand small{color:var(--muted)}.search{flex:1;max-width:340px}.search input{width:100%;border:0;outline:0;border-radius:16px;padding:11px 16px;background:rgba(255,255,255,.7);box-shadow:inset 0 0 0 1px var(--stroke)}
+.nav{display:flex;gap:8px}.pill{border:0;background:rgba(255,255,255,.66);padding:9px 12px;border-radius:14px;color:var(--text);cursor:pointer;box-shadow:inset 0 0 0 1px var(--stroke);font-size:13px}.pill.active{background:linear-gradient(135deg,#dff5ff,#cffcf5)}
+.avatar{margin-left:auto;display:flex;align-items:center;gap:8px}.workspace{display:grid;grid-template-columns:220px 240px minmax(0,1fr) 420px;gap:12px;padding:12px;min-height:calc(100vh - 64px)}
+.panel{background:linear-gradient(180deg,rgba(255,255,255,.76),rgba(239,251,255,.72));border:1px solid rgba(255,255,255,.88);border-radius:var(--r);box-shadow:var(--shadow);backdrop-filter:blur(18px);overflow:hidden}
+.side,.chapters,.mentor{padding:14px}.side{display:flex;flex-direction:column}.bookcard,.card,.qcard{background:rgba(255,255,255,.72);box-shadow:inset 0 0 0 1px var(--stroke);border-radius:16px}
+.bookcard{padding:12px;margin-bottom:12px}.menu{display:grid;gap:5px}.menu button,.chapter-btn{width:100%;text-align:left;border:0;background:transparent;padding:10px 11px;border-radius:12px;color:var(--text);cursor:pointer}.menu button.active,.menu button:hover,.chapter-btn:hover,.chapter-btn.active{background:linear-gradient(90deg,rgba(204,239,255,.9),rgba(208,255,246,.65))}
+.progress{margin-top:auto;padding:14px;border-radius:18px;background:rgba(255,255,255,.58);box-shadow:inset 0 0 0 1px var(--stroke)}.bar{height:8px;border-radius:999px;background:#d9f0f8;overflow:hidden}.bar span{display:block;width:42%;height:100%;background:linear-gradient(90deg,var(--mint),var(--cyan))}
+.chapter-group{margin-bottom:16px}.chapter-title{font-weight:700;font-size:13px;margin:6px 0 8px}.chapter-btn{font-size:13px;padding:9px 10px}
+.editor{padding:14px;display:grid;grid-template-rows:auto auto auto auto minmax(320px,1fr) auto auto auto;gap:12px}.breadcrumb{font-size:13px;color:var(--muted)}.title-row{display:flex;gap:16px;justify-content:space-between}.title-row h1{font:30px Georgia,serif;margin:0 0 5px}.title-row input{border:0;background:transparent;outline:0;width:100%;color:var(--muted)}
+.toolbar,.focusbar,.modebar,.tabs{display:flex;gap:6px;flex-wrap:wrap}.tool,.focusbar button,.modebar button,.tabs button{border:0;background:rgba(255,255,255,.72);color:var(--text);border-radius:10px;cursor:pointer;box-shadow:inset 0 0 0 1px var(--stroke)}
+.tool{min-width:36px;height:36px}.focusbar button,.modebar button,.tabs button{padding:7px 10px;font-size:12px}.active{background:linear-gradient(135deg,#dff2ff,#dcfff5)!important;color:#0e4f8e!important}
+.paper{position:relative;background:rgba(255,255,255,.88);border-radius:18px;overflow:hidden;box-shadow:inset 0 0 0 1px rgba(145,205,228,.25),0 18px 50px rgba(84,164,194,.11)}
+#editor{width:100%;height:100%;min-height:390px;padding:24px 34px 24px 28px;border:0;outline:0;resize:none;background:transparent;color:#15395f;line-height:1.7;font-size:16px}
+.marker{position:absolute;right:14px;width:11px;height:11px;border-radius:50%;box-shadow:0 0 0 6px rgba(255,255,255,.82);display:none;cursor:pointer}.marker.show{display:block}.m1{top:86px}.m2{top:152px}.m3{top:220px}.m4{top:288px}
+.quick{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.qcard{padding:12px;cursor:pointer}.qcard b{display:block;font-size:13px}.qcard span{font-size:12px;color:var(--muted)}
+.awaiting{display:none;padding:12px 14px;border-radius:15px;background:linear-gradient(135deg,#fff8e9,#efffff);box-shadow:inset 0 0 0 1px rgba(255,182,77,.3)}.awaiting.show{display:flex;justify-content:space-between;gap:12px;align-items:center}
+.bottom{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}.mentor{display:flex;flex-direction:column;gap:12px;overflow:auto}.mentor-head{display:flex;justify-content:space-between;align-items:center}
+.card{padding:14px}.card h4{margin:0 0 10px;font-size:15px}.metric{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(120,190,220,.16);font-size:13px}.metric:last-child{border-bottom:0}
+.tag{padding:3px 8px;border-radius:999px;font-size:11px}.good{background:#d9fbf1;color:#15886f}.warn{background:#fff0d8;color:#a96b10}.bad{background:#ffe4e7;color:#b33f51}.mute{background:#e8f2f8;color:#587b96}
+.btn{border:0;border-radius:12px;padding:10px 14px;background:linear-gradient(135deg,#4c95ff,#2f73e9);color:#fff;cursor:pointer;box-shadow:0 10px 22px rgba(47,125,244,.22)}.btn.ghost{background:rgba(255,255,255,.8);color:var(--text);box-shadow:inset 0 0 0 1px var(--stroke)}.btn.small{padding:7px 10px;font-size:12px}
+.problem-box{border-left:3px solid var(--amber);padding:9px 10px;background:rgba(255,246,230,.65);border-radius:8px;font-size:13px}.confidence{font-size:11px;color:var(--muted);margin-top:5px}.feed{display:grid;gap:8px;max-height:300px;overflow:auto}.feed-item{padding:10px;border-radius:13px;background:rgba(247,252,255,.84);font-size:12px;box-shadow:inset 0 0 0 1px rgba(140,200,225,.18)}.feed-item strong{display:block;margin-bottom:4px}
+.skill{margin:7px 0;font-size:12px}.skill-row{display:flex;justify-content:space-between;margin-bottom:3px}.skill-bar{height:6px;border-radius:999px;background:#dff1f8;overflow:hidden}.skill-bar span{display:block;height:100%;background:linear-gradient(90deg,#4c95ff,#38d1ac)}
+.modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(19,66,94,.18);backdrop-filter:blur(10px);z-index:50}.modal.show{display:flex}.dialog{width:min(620px,92vw);padding:20px;border-radius:24px;background:rgba(255,255,255,.95);box-shadow:0 30px 90px rgba(18,103,144,.25)}.dialog textarea{width:100%;min-height:120px;border:1px solid var(--stroke);border-radius:14px;padding:12px;outline:0;margin:12px 0;background:#faffff}
+.context-menu{position:fixed;display:none;z-index:70;background:rgba(255,255,255,.96);border:1px solid var(--stroke);border-radius:14px;padding:7px;box-shadow:0 16px 44px rgba(29,96,128,.22)}.context-menu.show{display:grid;gap:4px}.context-menu button{border:0;background:transparent;padding:8px 10px;border-radius:9px;text-align:left;color:var(--text);cursor:pointer}.context-menu button:hover{background:#edfaff}
+.problem-list{display:grid;gap:8px}.problem-row{padding:10px;border-radius:12px;background:#f7fcff;box-shadow:inset 0 0 0 1px rgba(118,189,222,.2)}
+pre{margin:0}
+
+.wdi-hero{display:grid;grid-template-columns:1.15fr .85fr;gap:10px}
+.wdi-score{padding:16px;border-radius:18px;background:linear-gradient(135deg,rgba(223,242,255,.92),rgba(220,255,245,.88));box-shadow:inset 0 0 0 1px var(--stroke)}
+.wdi-number{font-size:42px;font-weight:800;letter-spacing:-2px;line-height:1}.wdi-number small{font-size:15px;font-weight:600;color:var(--muted);letter-spacing:0}
+.wdi-level{margin-top:7px;font-weight:700}.wdi-sub{font-size:12px;color:var(--muted);margin-top:4px}
+.wdi-mini-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.wdi-mini{padding:11px;border-radius:14px;background:rgba(255,255,255,.72);box-shadow:inset 0 0 0 1px var(--stroke)}
+.wdi-mini strong{font-size:19px;display:block}.wdi-mini span{font-size:11px;color:var(--muted)}
+.wdi-skill-list{display:grid;gap:8px}.wdi-skill{padding:10px;border-radius:13px;background:rgba(248,253,255,.9);box-shadow:inset 0 0 0 1px rgba(118,189,222,.18)}
+.wdi-skill-top{display:flex;justify-content:space-between;gap:10px;font-size:12px;margin-bottom:6px}.wdi-track{height:7px;border-radius:999px;background:#dff1f8;overflow:hidden}.wdi-track span{display:block;height:100%;background:linear-gradient(90deg,#4c95ff,#38d1ac)}
+.wdi-meta{display:flex;justify-content:space-between;gap:8px;margin-top:5px;font-size:10px;color:var(--muted)}
+.wdi-evidence{display:grid;gap:7px;max-height:230px;overflow:auto}.wdi-event{padding:9px 10px;border-radius:11px;background:#f7fcff;box-shadow:inset 0 0 0 1px rgba(118,189,222,.18);font-size:11px}
+.wdi-event strong{display:block;font-size:12px;margin-bottom:3px}.wdi-pill{display:inline-block;padding:3px 7px;border-radius:999px;font-size:10px;background:#e8f5ff;color:#39709e;margin-right:5px}
+.wdi-actions{display:flex;gap:7px;flex-wrap:wrap}.wdi-note{font-size:11px;color:var(--muted);line-height:1.45}
+.wdi-high{padding:12px;border-radius:14px;background:linear-gradient(135deg,#fff7e7,#efffff);box-shadow:inset 0 0 0 1px rgba(255,182,77,.26)}
+.wdi-high b{display:block;margin-bottom:4px}.wdi-status{padding:8px 10px;border-radius:11px;background:#eef8ff;font-size:11px}.wdi-history{height:90px;width:100%}.wdi-axis{font-size:9px;fill:#7b9bb5}
+
+
+.assessment-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.assessment-card{padding:12px;border-radius:15px;background:rgba(255,255,255,.76);box-shadow:inset 0 0 0 1px var(--stroke)}
+.assessment-card h5{margin:0 0 6px;font-size:13px}
+.assessment-card p{margin:0;font-size:11px;color:var(--muted);line-height:1.4}
+.quiz-q{padding:12px;border-radius:14px;background:#f8fdff;box-shadow:inset 0 0 0 1px rgba(118,189,222,.18);margin-bottom:10px}
+.quiz-q strong{display:block;margin-bottom:8px;font-size:13px}
+.quiz-option{display:flex;align-items:flex-start;gap:8px;padding:7px 8px;border-radius:10px;margin:4px 0;cursor:pointer}
+.quiz-option:hover{background:#edf9ff}.quiz-option input{margin-top:2px}
+.practice-editor{width:100%;min-height:130px;border:1px solid var(--stroke);border-radius:12px;padding:10px;resize:vertical;outline:0;background:#fbfeff;color:var(--text)}
+.skill-detail-head{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center}
+.skill-badge{padding:5px 9px;border-radius:999px;background:#e8f6ff;color:#3172a2;font-size:11px}
+.detail-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+.detail-metric{padding:10px;border-radius:12px;background:#f7fcff;box-shadow:inset 0 0 0 1px rgba(118,189,222,.18)}
+.detail-metric b{display:block;font-size:18px}.detail-metric span{font-size:10px;color:var(--muted)}
+.plan-day{padding:10px;border-radius:12px;background:#f8fdff;box-shadow:inset 0 0 0 1px rgba(118,189,222,.18);margin:6px 0}
+.plan-day b{display:block;font-size:12px;margin-bottom:4px}.plan-day span{font-size:11px;color:var(--muted)}
+.radar-wrap{display:grid;place-items:center}.radar{width:100%;height:300px;max-width:330px}
+.radar-label{font-size:8.5px;fill:#577793}.radar-grid{fill:none;stroke:rgba(76,149,255,.18);stroke-width:1}.radar-shape{fill:rgba(76,149,255,.18);stroke:#2f7df4;stroke-width:2}
+.assessment-progress{height:8px;border-radius:999px;background:#dff1f8;overflow:hidden}.assessment-progress span{display:block;height:100%;background:linear-gradient(90deg,#4c95ff,#38d1ac)}
+.result-good{color:#16866d}.result-warn{color:#a96b10}
+
+
+.mastery-board{display:grid;gap:8px}
+.mastery-row{padding:10px;border-radius:13px;background:rgba(248,253,255,.92);box-shadow:inset 0 0 0 1px rgba(118,189,222,.18)}
+.mastery-row-top{display:flex;justify-content:space-between;gap:10px;align-items:center}
+.mastery-state{font-size:10px;padding:4px 8px;border-radius:999px;background:#edf7ff;color:#316c99;white-space:nowrap}
+.mastery-state.mastered{background:#e7fbf4;color:#187a62}.mastery-state.transferred{background:#eef7e8;color:#477526}.mastery-state.reliable{background:#fff8e6;color:#94671c}
+.mastery-state.introduced{background:#eef1ff;color:#4a5ba6}.mastery-state.practicing{background:#f0edff;color:#5a4aa6}.mastery-state.developing{background:#e9f6ff;color:#285e8c}
+.adaptive-q{padding:12px;border-radius:14px;background:#f9fdff;box-shadow:inset 0 0 0 1px rgba(118,189,222,.2)}
+.adaptive-q h5{margin:0 0 8px;font-size:13px}.diff-pill{display:inline-block;font-size:10px;padding:3px 7px;border-radius:999px;background:#eef4ff;color:#4a67a6;margin-left:6px}
+.assess-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.assess-mini{padding:10px;border-radius:12px;background:#f8fcff;box-shadow:inset 0 0 0 1px rgba(118,189,222,.18)}
+.assess-mini b{display:block;font-size:18px}.assess-mini span{font-size:10px;color:var(--muted)}
+.question-feedback{font-size:11px;line-height:1.45;margin-top:8px;padding:8px;border-radius:10px;background:#f4fbff}
+.adaptive-next{padding:11px;border-radius:13px;background:#fff9eb;box-shadow:inset 0 0 0 1px rgba(255,190,80,.28)}
+.skill-gate{font-size:10px;color:var(--muted);margin-top:5px}.timeline{display:grid;gap:7px}.timeline-item{display:grid;grid-template-columns:70px 1fr;gap:8px;align-items:start}.timeline-date{font-size:10px;color:var(--muted)}.timeline-body{padding:8px 10px;border-radius:10px;background:#f8fcff}
+
+/* Memory panel — styles previously missing */
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
+.form-grid input,.form-grid select{width:100%;border:1px solid var(--stroke);border-radius:10px;padding:8px 10px;outline:0;background:#fbfeff;color:var(--text);font-size:12px}
+.form-grid .full{grid-column:1 / -1}
+.row-actions{display:flex;justify-content:flex-end;gap:8px;margin:6px 0 10px}
+.memory-list{display:grid;gap:7px;max-height:180px;overflow:auto}
+.memory-item{padding:9px 10px;border-radius:11px;background:#f7fcff;box-shadow:inset 0 0 0 1px rgba(118,189,222,.18);font-size:11px;line-height:1.45}
+.memory-item b{font-size:12px}
+.checkline{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-bottom:10px}
+
+@media(max-width:1250px){.workspace{grid-template-columns:190px minmax(0,1fr) 380px}.chapters{display:none}}@media(max-width:900px){.workspace{grid-template-columns:1fr}.side,.mentor{display:none}.nav{display:none}.quick{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+<header class="topbar">
+  <div class="brand"><div class="logo">FL</div><div><b>Fusion Lab Studio</b><small>Ideas into Books</small></div></div>
+  <div class="search"><input placeholder="Пошук у проєкті..." /></div>
+  <nav class="nav"><button class="pill">Книга</button><button class="pill">Дослідження</button><button class="pill active">AI Ментор</button><button class="pill" id="downloadBtn">⬇ HTML</button></nav>
+  <div class="avatar">👤 <b>Автор</b></div>
+</header>
+
+<main class="workspace">
+<aside class="panel side">
+  <h3>Мої книги</h3>
+  <div class="bookcard"><b>Тіні Нового Світу</b><small style="display:block;color:var(--muted)">Роман · Чернетка</small></div>
+  <div class="menu">
+    <button>⌂ Огляд</button><button>▦ План книги</button><button class="active">▤ Глави</button><button>♙ Персонажі</button><button>⌖ Локації</button><button>◎ Світ і правила</button><button>✎ Нотатки</button><button>⌕ Дослідження</button><button>↺ Версії</button><button>◎ WDI 1000</button><button>◫ Assessment Center</button><button>✓ План розвитку</button><button>◆ Mastery Engine</button><button>✦ AI Ментор</button>
+  </div>
+  <div class="progress"><div style="display:flex;justify-content:space-between"><b>Прогрес</b><b>42%</b></div><div class="bar" style="margin:10px 0"><span></span></div><small>24 530 / 60 000 слів</small></div>
+</aside>
+
+<section class="panel chapters">
+  <h3>Глави</h3>
+  <div class="chapter-group"><div class="chapter-title">Частина I. Пробудження</div><button class="chapter-btn">1. Початок</button><button class="chapter-btn">2. Місто тіней</button><button class="chapter-btn active">↳ Сцена 1. Ранок у місті</button><button class="chapter-btn">↳ Сцена 2. Незнайомець</button></div>
+  <div class="chapter-group"><div class="chapter-title">Частина II. Конфлікт</div><button class="chapter-btn">4. Нові союзники</button><button class="chapter-btn">5. Межа</button><button class="chapter-btn">6. Втрата</button></div>
+</section>
+
+<section class="panel editor">
+  <div class="breadcrumb">Тіні Нового Світу / Глава 2 / Сцена 1</div>
+  <div class="title-row"><div style="flex:1"><h1>Сцена 1. Ранок у місті</h1><input id="intentInput" placeholder="Намір автора: співчуття / напруга / радість / страх / відраза + коротке пояснення" /></div><span class="tag good" id="saveBadge">● Збережено</span></div>
+  <div class="toolbar"><button class="tool">¶</button><button class="tool"><b>B</b></button><button class="tool"><i>I</i></button><button class="tool"><u>U</u></button><button class="tool">☷</button><button class="tool">≡</button><button class="tool" id="analyzeBtn" title="Запустити цикл">✦</button></div>
+  <div class="focusbar" id="focusBar"><button data-focus="everything" class="active">Everything</button><button data-focus="story">Story</button><button data-focus="character">Character</button><button data-focus="scene">Scene</button><button data-focus="dialogue">Dialogue</button><button data-focus="style">Style</button><button data-focus="sensory">Sensory</button></div>
+  <div class="paper">
+    <textarea id="editor">Дощ почався ще до світанку. Анна стояла біля вікна і дивилася на порожню вулицю. Їй було страшно, але вона не могла пояснити чому.
+
+Телефон завібрував на столі.
+
+Вона не взяла слухавку.</textarea>
+    <span class="marker m1" id="marker1"></span><span class="marker m2" id="marker2"></span><span class="marker m3" id="marker3"></span><span class="marker m4" id="marker4"></span>
+  </div>
+  <div class="awaiting" id="awaitingEdit"><div><b>Рішення збережено.</b><div style="font-size:12px;color:var(--muted)">Відредагуйте сцену, а потім запустіть перевірку результату.</div></div><button class="btn" id="verifyEditBtn">Я відредагував — перевір результат</button></div>
+  <div class="quick">
+    <div class="qcard" data-action="mentor"><b>✦ Запустити цикл</b><span>Аналіз → питання → рішення</span></div>
+    <div class="qcard" data-action="exercise"><b>◈ Вправа зараз</b><span>Точкова мікровправа</span></div>
+    <div class="qcard" data-action="more"><b>▣ Показати більше</b><span>Усі знайдені проблеми</span></div>
+    <div class="qcard" data-action="context"><b>⌁ Аналіз виділення</b><span>Контекст вибраного фрагмента</span></div>
+  </div>
+  <div class="bottom"><div><span id="wordCount">0</span> слів · <span id="charCount">0</span> символів · читання: <span id="readTime">&lt;1 хв</span></div><div id="versionLabel">v1</div></div>
+</section>
+
+<aside class="panel mentor">
+  <div class="mentor-head"><h3>✦ AI Ментор</h3><span class="tag good" id="mentorStatus">● Готовий</span></div>
+  <div class="modebar" id="modeBar"><button data-mode="mentor" class="active">Mentor</button><button data-mode="editor">Editor</button><button data-mode="exercise">Exercise</button><button data-mode="architect">Story</button><button data-mode="character">Character</button><button data-mode="dialogue">Dialogue</button></div>
+  <div class="tabs"><button class="active" data-tab="analysis">Аналіз</button><button data-tab="chat">Чат</button><button data-tab="exercises">Вправи</button><button data-tab="decisions">Рішення</button><button data-tab="memory">Memory</button><button data-tab="wdi">WDI 1000</button><button data-tab="assessment">Assessment</button><button data-tab="plan">План 14 днів</button><button data-tab="mastery">Mastery</button></div>
+
+  <div class="tab-pane" data-pane="analysis">
+    <div class="card"><h4>Стан сцени</h4><div id="healthList"></div></div>
+    <div class="card"><h4>Головна проблема</h4><div id="mainProblem">Запусти цикл.</div><div style="display:flex;gap:8px;margin-top:10px"><button class="btn" id="answerBtn">Відповісти</button><button class="btn ghost" id="moreProblemsBtn">Усі проблеми</button></div></div>
+    <div class="card"><h4>Питання ментора</h4><div id="mainQuestion">—</div><div class="confidence" id="questionMeta"></div></div>
+    <div class="card"><h4>Intent Gap</h4><div id="intentGapBox" style="font-size:13px;color:var(--muted)">Намір не задано.</div></div>
+  </div>
+
+  <div class="tab-pane" data-pane="chat" hidden>
+    <div class="card"><h4>Контекстний чат</h4><div class="feed" id="feed"></div><div style="display:flex;gap:6px;margin-top:10px"><input id="chatInput" placeholder="Запитати ментора..." style="flex:1;border:1px solid var(--stroke);border-radius:10px;padding:8px;outline:0"><button class="btn small" id="chatSend">→</button></div></div>
+  </div>
+
+  <div class="tab-pane" data-pane="exercises" hidden>
+    <div class="card"><h4>Творча вправа</h4><div id="exerciseText">—</div><div class="confidence" id="exerciseMeta"></div><div style="display:flex;gap:8px;margin-top:10px"><button class="btn ghost" id="newExercise">Інша</button><button class="btn" id="startExercise">Почати</button></div></div>
+    <div class="card"><h4>Профіль письменника</h4><div id="skillsList"></div><div id="profileSummary" style="font-size:12px;color:var(--muted);margin-top:8px"></div></div>
+  </div>
+
+  <div class="tab-pane" data-pane="decisions" hidden>
+    <div class="card"><h4>Авторські рішення</h4><div class="feed" id="decisionsList"></div></div>
+    <div class="card"><h4>Серія питань</h4><div class="feed" id="questionChain"></div></div>
+  </div>
+
+  <div class="tab-pane" data-pane="memory" hidden>
+    <div class="card"><h4>Character State</h4><div class="form-grid"><input id="charName" placeholder="Ім'я персонажа"><select id="charEmotion"></select><input id="charGoal" class="full" placeholder="Поточна мета"><input id="charFear" placeholder="Страх"><input id="charNeed" placeholder="Потреба"></div><div class="row-actions"><button class="btn small" id="addCharacterBtn">Додати / оновити</button></div><div class="memory-list" id="characterState"></div></div>
+    <div class="card"><h4>Relationship State</h4><div class="form-grid"><input id="relA" placeholder="Персонаж A"><input id="relB" placeholder="Персонаж B"><input id="relTrust" type="number" min="0" max="1" step=".1" placeholder="Trust 0–1"><input id="relConflict" type="number" min="0" max="1" step=".1" placeholder="Conflict 0–1"></div><div class="row-actions"><button class="btn small" id="addRelationshipBtn">Зберегти зв'язок</button></div><div class="memory-list" id="relationshipState"></div></div>
+    <div class="card"><h4>Knowledge State</h4><div class="form-grid"><input id="factText" class="full" placeholder="Факт"><input id="factKnows" placeholder="Хто знає (через кому)"><input id="factScene" placeholder="Сцена / глава"></div><div class="row-actions"><button class="btn small" id="addFactBtn">Додати факт</button></div><div class="memory-list" id="knowledgeState"></div></div>
+    <div class="card"><h4>Plot State</h4><div class="form-grid"><input id="threadName" placeholder="Назва сюжетної лінії"><select id="threadStatus"><option value="open">open</option><option value="resolved">resolved</option><option value="paused">paused</option></select></div><div class="row-actions"><button class="btn small" id="addThreadBtn">Додати / оновити thread</button></div><div class="memory-list" id="plotState"></div></div>
+    <div class="card"><h4>Style State</h4><div class="memory-list" id="styleState"></div></div>
+  </div>
+
+  <div class="tab-pane" data-pane="wdi" hidden>
+    <div class="card">
+      <div class="wdi-hero">
+        <div class="wdi-score">
+          <div class="wdi-number"><span id="wdiScore">—</span> <small>/ 1000</small></div>
+          <div class="wdi-level" id="wdiLevel">Недостатньо даних</div>
+          <div class="wdi-sub"><span id="wdiConfidence">Confidence —</span> · <span id="wdiGrowth">Growth 90 —</span></div>
+        </div>
+        <div class="wdi-mini-grid">
+          <div class="wdi-mini"><strong id="wdiCraft">—</strong><span>CRAFT</span></div>
+          <div class="wdi-mini"><strong id="wdiVoice">—</strong><span>VOICE</span></div>
+          <div class="wdi-mini"><strong id="wdiIndependence">—</strong><span>INDEPENDENCE</span></div>
+          <div class="wdi-mini"><strong id="wdiEvidenceCount">0</strong><span>EVIDENCE</span></div>
+        </div>
+      </div>
+      <div class="wdi-status" id="wdiStatus" style="margin-top:10px">Оцінка ще не стабілізована.</div>
+    </div>
+    <div class="card"><h4>10 компетенцій</h4><div class="wdi-skill-list" id="wdiSkills"></div></div>
+    <div class="card"><h4>Найвищий потенціал росту</h4><div class="wdi-high" id="wdiLeverage">—</div></div>
+    <div class="card"><h4>Динаміка WDI</h4><svg id="wdiHistory" class="wdi-history" viewBox="0 0 340 90" preserveAspectRatio="none"></svg><div class="wdi-note">Локальна історія прототипу. У production сюди надходять SkillSnapshot та WDIHistory.</div></div>
+    <div class="card"><h4>Evidence Events</h4><div class="wdi-actions" style="margin-bottom:10px"><button class="btn small" id="wdiKnowledgeTestBtn">+ Knowledge test</button><button class="btn ghost small" id="wdiPracticalBtn">+ Practical task</button></div><div class="wdi-evidence" id="wdiEvidence"></div></div>
+    <div class="card"><h4>Принцип оцінки</h4><div class="wdi-note">AI-порада сама по собі не підвищує рейтинг. Найсильніші докази: самостійне рішення автора, успішний revision loop і перенесення навички в новий контекст.</div></div>
+  </div>
+
+  <div class="tab-pane" data-pane="assessment" hidden>
+    <div class="card">
+      <h4>Assessment Center</h4>
+      <div class="assessment-grid">
+        <div class="assessment-card">
+          <h5>Knowledge Test</h5>
+          <p>Об'єктивні питання з Story, Scene, POV, Dialogue, Continuity та Revision.</p>
+          <button class="btn small" id="startKnowledgeAssessment" style="margin-top:9px">Почати тест</button>
+        </div>
+        <div class="assessment-card">
+          <h5>Practical Task</h5>
+          <p>Редагування проблемного фрагмента з оцінкою Diagnosis, Decision, Execution та Independence.</p>
+          <button class="btn ghost small" id="startPracticalAssessment" style="margin-top:9px">Почати завдання</button>
+        </div>
+      </div>
+      <div style="margin-top:12px">
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:5px"><span>Assessment progress</span><span id="assessmentProgressLabel">0%</span></div>
+        <div class="assessment-progress"><span id="assessmentProgressBar" style="width:0%"></span></div>
+      </div>
+    </div>
+
+    <div class="card" id="knowledgeAssessmentCard" hidden>
+      <h4>Knowledge Test</h4>
+      <div id="knowledgeQuestions"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn ghost small" id="cancelKnowledgeTest">Скасувати</button><button class="btn small" id="submitKnowledgeTest">Завершити тест</button></div>
+      <div id="knowledgeResult" class="wdi-note" style="margin-top:10px"></div>
+    </div>
+
+    <div class="card" id="practicalAssessmentCard" hidden>
+      <h4>Практичне завдання</h4>
+      <div class="problem-box" id="practicalPrompt"></div>
+      <textarea class="practice-editor" id="practicalAnswer" placeholder="Опиши проблему, рішення і внеси правку..."></textarea>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px"><button class="btn ghost small" id="cancelPracticalTask">Скасувати</button><button class="btn small" id="submitPracticalTask">Оцінити</button></div>
+      <div id="practicalResult" class="wdi-note" style="margin-top:10px"></div>
+    </div>
+
+    <div class="card">
+      <h4>Skill Detail</h4>
+      <select id="skillDetailSelect" style="width:100%;border:1px solid var(--stroke);border-radius:10px;padding:8px;background:#fbfeff;color:var(--text)"></select>
+      <div id="skillDetailPanel" style="margin-top:10px"></div>
+    </div>
+
+    <div class="card">
+      <h4>Radar — 10 компетенцій</h4>
+      <div class="radar-wrap"><svg id="wdiRadar" class="radar" viewBox="0 0 340 300"></svg></div>
+    </div>
+  </div>
+
+  <div class="tab-pane" data-pane="plan" hidden>
+    <div class="card">
+      <h4>Персональний план розвитку — 14 днів</h4>
+      <div class="wdi-note">План автоматично будується з найслабших компетенцій, recurring issues та Independence Score.</div>
+      <div class="wdi-actions" style="margin-top:10px"><button class="btn small" id="regeneratePlanBtn">Оновити план</button></div>
+    </div>
+    <div class="card">
+      <div id="developmentPlan"></div>
+    </div>
+  </div>
+
+
+  <div class="tab-pane" data-pane="mastery" hidden>
+    <div class="card">
+      <h4>Adaptive Mastery Engine</h4>
+      <div class="assess-summary">
+        <div class="assess-mini"><b id="adaptiveLevel">1</b><span>Adaptive level</span></div>
+        <div class="assess-mini"><b id="masteredCount">0</b><span>Mastered skills</span></div>
+        <div class="assess-mini"><b id="transferCount">0</b><span>Transfers</span></div>
+        <div class="assess-mini"><b id="avgMasteryConfidence">0%</b><span>Mastery confidence</span></div>
+      </div>
+      <div class="adaptive-next" id="adaptiveNextAction" style="margin-top:10px">Система збирає evidence.</div>
+    </div>
+    <div class="card"><h4>Mastery Map</h4><div class="mastery-board" id="masteryBoard"></div></div>
+    <div class="card">
+      <h4>Adaptive Assessment</h4>
+      <div class="wdi-note">Питання підбираються за слабкою компетенцією, confidence, попередніми помилками та поточним mastery state.</div>
+      <div class="wdi-actions" style="margin-top:10px"><button class="btn small" id="startAdaptiveAssessment">Почати адаптивний тест</button><button class="btn ghost small" id="startTransferTest">Transfer Test</button></div>
+      <div id="adaptiveAssessmentArea" style="margin-top:12px"></div>
+    </div>
+    <div class="card"><h4>Mastery Timeline</h4><div class="timeline" id="masteryTimeline"></div></div>
+  </div>
+
+</aside>
+</main>
+</div>
+
+<div class="modal" id="modal"><div class="dialog"><h3 id="dialogTitle">Відповідь ментору</h3><div id="dialogPrompt" style="color:var(--muted);font-size:13px"></div><textarea id="dialogInput"></textarea><label class="checkline" id="intentionalLabel"><input type="checkbox" id="intentionalCheck"> Це навмисне авторське рішення</label><div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn ghost" id="cancelDialog">Скасувати</button><button class="btn" id="saveDialog">Зберегти</button></div></div></div>
+<div class="modal" id="blockModal"><div class="dialog"><h3>Можливий творчий блок</h3><p style="color:var(--muted)">Ви кілька разів запускаєте аналіз без суттєвої зміни тексту. Що робимо?</p><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn ghost" id="continueAnalysisBtn">Аналізувати далі</button><button class="btn" id="blockExerciseBtn">Давай вправу</button></div></div></div>
+<div class="modal" id="problemsModal"><div class="dialog"><h3>Усі знайдені проблеми</h3><div class="problem-list" id="allProblemsList"></div><div style="text-align:right;margin-top:12px"><button class="btn ghost" id="closeProblems">Закрити</button></div></div></div>
+
+<div class="context-menu" id="contextMenu">
+  <button data-ctx="why">Чому це не працює?</button><button data-ctx="character">Перевірити персонажа</button><button data-ctx="dialogue">Перевірити діалог</button><button data-ctx="rhythm">Перевірити ритм</button><button data-ctx="pov">Перевірити POV</button><button data-ctx="sensory">Перевірити сенсорику</button><button data-ctx="exercise">Дати вправу</button>
+</div>
+
+<script>
+let PRISTINE_HTML='';
+document.addEventListener('DOMContentLoaded',()=>{PRISTINE_HTML='<!doctype html>\n'+document.documentElement.outerHTML;});
+const DAY=86400000, DECISION_TTL=7*DAY;
+const $=id=>document.getElementById(id);
+const STATUS={clear:{cls:'good',txt:'✓'},weak:{cls:'warn',txt:'⚠'},uncertain:{cls:'mute',txt:'?'},missing:{cls:'bad',txt:'✕'},intentional:{cls:'good',txt:'◆'}};
+const SCOPE_RANK={macro:0,meso:1,micro:2};
+
+const State={
+ version:1,focus:'everything',mode:'mentor',
+ scene:{id:'scene_1',chapter:2,hero:'Анна',intent:''},
+ characterState:{Анна:{goal:'',longTermGoal:'',fear:'невідоме',need:'контроль',belief:'',falseBelief:'',secret:'',knowledge:['дзвінок важливий'],emotionalState:'anxiety',arcStage:'початок'}},
+ relationships:{'Анна—Незнайомець':{trust:0.1,conflict:0.3,power:'unknown',secret:false}},
+ knowledge:[{fact:'Дзвінок може змінити напрям подій',knows:['Анна'],revealedIn:'scene_1'}],
+ plot:{threads:[{id:'call',name:'Дзвінок',status:'open'},{id:'stranger',name:'Незнайомець',status:'open'}],foreshadowing:[],payoffs:[]},
+ style:{avgSentence:0,dialogueDensity:0,pov:'',sensoryDominant:'',metaphorFields:[]},
+ health:{},rawProblems:[],allProblems:[],visibleProblems:[],currentProblem:null,currentQuestion:null,questionChain:[],decisions:[],observations:[],awaitingEdit:null,
+ lastTextHash:'',sameAnalysisCount:0,skills:{'Діалог':.55,'Структура сцени':.45,'POV':.70,'Підтекст':.35,'Сенсорика':.50,'Ритм':.65,'Мета сцени':.40,'Show / Tell':.55},profile:{strengths:[],developing:[],recurring:{}},
+ wdi:{
+   skillScores:{story_architecture:58,character_craft:62,scene_craft:55,language_style:66,dialogue_subtext:61,pov_narration:68,emotion_reader_impact:57,world_continuity:52,revision_mastery:48,writer_development:46},
+   confidenceBySkill:{},independenceBySkill:{},evidence:[],history:[],seenTextHashes:[],
+   testsCompleted:0,practicalCompleted:0,revisionLoops:0,transferEvents:0,analyzedWords:0,analyzedScenes:0,currentScore:null,confidence:0,growth90:0,
+   assessment:{knowledgeAttempts:[],practicalAttempts:[],currentKnowledge:null,currentPractical:null,adaptiveAttempts:[],currentAdaptive:null,transferAttempts:[]},
+   developmentPlan:[],
+   mastery:{},masteryTimeline:[],adaptiveLevel:1,recentQuestionIds:[],recurringWrong:{}
+ }
+};
+
+const LEX={
+ visual:/(бач|дивл|світл|тінь|колір|яскрав|темн|блиск|око|погляд|видно|мерехт|силует|вікн|вулиц)/gi,
+ sound:/(чут|звук|шум|шепіт|крик|тиш|гурк|скрип|дзвін|голос|стук|шелест|вібру)/gi,
+ touch:/(дотик|шкір|холод|тепл|гаряч|гладк|шорст|вітер|волог|біль|торк|мороз)/gi,
+ smell:/(запах|пахн|аромат|смерд|нюх)/gi,taste:/(смак|солод|гірк|кисл|солон|присмак)/gi,
+ internal:/(серц|дихан|горл|напруг|тремт|піт|кров|пульс|нудот)/gi
+};
+const GOAL=/(хоті|прагн|виріши|намір|план|потреб|шука|бажа|мрі|намага|мета|ціль)/i;
+const CONFLICT=/(але|проте|однак|заваж|перешкод|не мог|відмов|супереч|проти|натомість)/i;
+const STAKES=/(якщо|інакше|втрат|загроз|небезпек|ризик|ціна|наслідок|смерт|зникн)/i;
+const CHOICE=/(вибр|виріш|наваж|погод|відмов|піш|залиш|зупин|зробив|зробила|вчин)/i;
+const Emotion={sympathy:'співчуття',tension:'напруга',joy:'радість',fear:'страх',disgust:'відраза',anxiety:'тривога',sadness:'сум',anger:'гнів',calm:'спокій'};
+const EMOTION_PATTERNS={sympathy:/(біль|самотн|втра|сльоз|безпорад|ніжн|уразлив)/i,tension:/(страх|тривог|небезпек|раптом|різко|мовчан|темн|дзвін|вібру)/i,joy:/(раді|усміх|сміх|тепл|світл|полегш)/i,fear:/(страх|жах|тремт|небезпек|темн|серц|холод)/i,disgust:/(огид|смерд|бруд|липк|нудот|відраз)/i,anxiety:/(тривог|неспок|напруг|очікуван|серц|пульс)/i,sadness:/(сум|туг|сльоз|втра|самотн)/i,anger:/(гнів|зліст|лют|стисн|різк)/i,calm:/(спок|тих|рівн|м'як|повільн)/i};
+const EMOTION_LABEL_TO_KEY=Object.fromEntries(Object.entries(Emotion).map(([k,v])=>[v,k]));
+
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function sents(t){return t.split(/(?<=[.!?…])\s+/).map(x=>x.trim()).filter(Boolean)}
+function paragraphs(t){return t.split(/\n{2,}/).map(x=>x.trim()).filter(Boolean)}
+function hash(t){let h=0;for(let i=0;i<t.length;i++)h=((h<<5)-h+t.charCodeAt(i))|0;return String(h)}
+
+function isIntentional(key){
+ const now=Date.now();
+ return State.decisions.some(d=>d.key===key && now-d.ts<DECISION_TTL && d.intentional===true);
+}
+function recentDecision(key){return State.decisions.slice().reverse().find(d=>d.key===key && Date.now()-d.ts<DECISION_TTL)}
+
+function analyzeMicro(text){
+ const ss=sents(text), lens=ss.map(s=>(s.match(/\S+/g)||[]).length),avg=lens.length?lens.reduce((a,b)=>a+b,0)/lens.length:0,varr=lens.length?lens.reduce((a,b)=>a+(b-avg)**2,0)/lens.length:0;
+ const first=(text.match(/\b(я|мене|мені|мій|моя|моє|мною)\b/gi)||[]).length, third=(text.match(/\b(він|вона|його|її|йому|їй|ним|нею)\b/gi)||[]).length,total=first+third||1;
+ const sensory={};Object.entries(LEX).forEach(([k,re])=>sensory[k]=(text.match(re)||[]).length);
+ const dom=Object.entries(sensory).sort((a,b)=>b[1]-a[1])[0];
+ const p=paragraphs(text), emoHits=(x)=>(x.match(/страх|тривог|раді|сум|гнів|зліст|відраз|ніжн|жах|сором|наді/i)||[]).length;
+ return {sentenceCount:ss.length,avg,varr,pov:first/total>.5?'first':'third',povRatio:Math.max(first,third)/total,sensory,sensoryCount:Object.values(sensory).filter(v=>v>0).length,sensoryDominant:dom&&dom[1]>0?dom[0]:null,hasGoal:GOAL.test(text),hasConflict:CONFLICT.test(text),hasStakes:STAKES.test(text),hasChoice:CHOICE.test(text),emotionShift:p.length>1&&Math.abs(emoHits(p[0])-emoHits(p[p.length-1]))>=1,dialogue:(text.match(/^\s*[—–-]/gm)||[]).length/Math.max(1,text.split('\n').length)};
+}
+function parseIntentEmotion(raw){const s=raw.trim().toLowerCase();for(const [label,key] of Object.entries(EMOTION_LABEL_TO_KEY))if(s.includes(label))return key;return null;}
+function intentGap(text){
+ const raw=State.scene.intent.trim(); if(!raw)return {status:'unset',message:'Намір не задано.'};
+ const key=parseIntentEmotion(raw); State.scene.intentEmotion=key;
+ if(!key)return {status:'uncertain',message:'Вкажіть одну з базових цілей: співчуття, напруга, радість, страх або відраза.'};
+ const hits=(text.match(EMOTION_PATTERNS[key])||[]).length,label=Emotion[key];
+ return hits>1?{status:'aligned',emotion:key,confidence:.72,message:`Текст має сигнали, що підтримують намір «${label}».`}:{status:'gap',emotion:key,confidence:.70,message:`Намір «${label}» заявлений, але в тексті слабко проявлені відповідні сигнали.`};
+}
+function analyzeMacro(text,micro){ const ig=intentGap(text); return {intentGap:ig,theme:State.scene.intent||'не задано',openThreads:State.plot.threads.some(t=>t.status==='open')}; }
+function fullAnalyze(text){const micro=analyzeMicro(text);return {micro,macro:analyzeMacro(text,micro)}}
+
+function computeHealth(a){
+ const h={
+ goal:a.micro.hasGoal?'clear':'weak',conflict:a.micro.hasConflict?'clear':'weak',stakes:a.micro.hasStakes?'clear':'weak',choice:a.micro.hasChoice?'clear':'missing',
+ emotional_change:a.micro.emotionShift?'clear':'weak',pov:a.micro.povRatio>.7?'clear':'uncertain',rhythm:a.micro.varr>12?'clear':'weak',sensory:a.micro.sensoryCount>=2?'clear':'weak',
+ intent:a.macro.intentGap.status==='aligned'?'clear':a.macro.intentGap.status==='gap'?'weak':'uncertain'
+ };
+ if(isIntentional('no_emotional_change'))h.emotional_change='intentional';
+ if(isIntentional('weak_sensory'))h.sensory='intentional';
+ if(isIntentional('weak_pov'))h.pov='intentional';
+ if(isIntentional('intent_gap'))h.intent='intentional';
+ return h;
+}
+
+const PROBLEMS={
+ intent_gap:{scope:'macro',priority:1,label:'Розрив між наміром і ефектом',detect:a=>(isIntentional('intent_gap')||a.macro.intentGap.status!=='gap')?null:{severity:'high',confidence:a.macro.intentGap.confidence,evidence:[a.macro.intentGap.message],question:`Ти хочеш, щоб читач відчув ${Emotion[a.macro.intentGap.emotion]} уже в цій сцені, чи це має з'явитися пізніше?`,exercise:'intent'}},
+ unclear_goal:{scope:'meso',priority:2,label:'Мета героя нечітка',detect:a=>a.micro.hasGoal?null:{severity:'high',confidence:.82,evidence:['Герой реагує, але не формулює або не проявляє конкретне бажання.'],question:'Що Анна хоче отримати до кінця цієї сцени?',exercise:'scene_goal'}},
+ weak_stakes:{scope:'meso',priority:3,label:'Ставки слабкі',detect:a=>a.micro.hasStakes?null:{severity:'high',confidence:.74,evidence:['Не видно ціни невдачі.'],question:'Що Анна втратить, якщо не відповість або зробить неправильний вибір?',exercise:'stakes'}},
+ missing_choice:{scope:'meso',priority:4,label:'Вибір героя не показаний',detect:a=>a.micro.hasChoice?null:{severity:'medium',confidence:.70,evidence:['Немає дії-вибору, яка змінює стан сцени.'],question:'Який конкретний вибір робить Анна?',exercise:'scene_goal'}},
+ no_emotional_change:{scope:'meso',priority:5,label:'Емоційна зміна слабка',detect:a=>isIntentional('no_emotional_change')?null:(a.micro.emotionShift?null:{severity:'medium',confidence:.66,evidence:['Початок і кінець сцени емоційно схожі.'],question:'Який емоційний стан Анни на вході та на виході?',exercise:'emotion'})},
+ weak_pov:{scope:'micro',priority:6,label:'POV нестабільний',detect:a=>isIntentional('weak_pov')?null:(a.micro.povRatio>.7?null:{severity:'medium',confidence:.68,evidence:[`Домінантний POV: ${a.micro.pov}, впевненість ${Math.round(a.micro.povRatio*100)}%.`],question:'Ця зміна POV свідома?',exercise:'pov'})},
+ weak_sensory:{scope:'micro',priority:7,label:'Сенсорика слабка',detect:a=>isIntentional('weak_sensory')?null:(a.micro.sensoryCount>=2?null:{severity:'low',confidence:.62,evidence:[`Активних сенсорних каналів: ${a.micro.sensoryCount}.`],question:'Який один сенсорний канал тут найважливіший?',exercise:'sensory'})}
+};
+
+function modeAllows(p){
+ if(State.mode==='architect')return p.scope!=='micro';
+ if(State.mode==='character')return ['unclear_goal','weak_stakes','missing_choice','no_emotional_change','intent_gap'].includes(p.key);
+ if(State.mode==='dialogue')return ['weak_pov','no_emotional_change'].includes(p.key);
+ if(State.focus==='story')return p.scope==='macro';
+ if(State.focus==='scene')return p.scope==='meso';
+ if(State.focus==='character')return ['unclear_goal','weak_stakes','missing_choice','no_emotional_change'].includes(p.key);
+ if(State.focus==='sensory')return p.key==='weak_sensory';
+ return true;
+}
+function detectRawProblems(a){
+ let list=[];
+ for(const [key,def] of Object.entries(PROBLEMS)){const r=def.detect(a);if(r)list.push({key,...def,...r})}
+ return list.sort((x,y)=>SCOPE_RANK[x.scope]-SCOPE_RANK[y.scope]||x.priority-y.priority);
+}
+function detectProblems(a){
+ let list=detectRawProblems(a).filter(modeAllows);
+ if(list.some(p=>p.scope==='macro'&&p.severity==='high'))return list.filter(p=>p.scope==='macro');
+ if(list.some(p=>p.scope==='meso'&&p.severity==='high'))return list.filter(p=>p.scope!=='micro');
+ return list;
+}
+function visibleProblems(list){const crit=list.filter(p=>p.severity==='high').slice(0,1);const sec=list.filter(p=>p.severity!=='high').slice(0,2);return [...crit,...sec]}
+
+const EX={
+ intent:['Сформулюй одним реченням: що читач має відчути → через яку конкретну дію або образ це стане відчутним.'],
+ scene_goal:['Сформулюй бажання Анни одним дієсловом. Потім додай одну дію, яка його проявляє.'],
+ stakes:['Напиши одне речення: «Якщо Анна не ___, вона втратить ___».'],
+ emotion:['Опиши стан Анни на вході та виході без назв емоцій — лише тілом і поведінкою.'],
+ pov:['Перепиши один абзац суворо з POV Анни.'],
+ sensory:['Опиши цей момент лише через звук і відчуття тіла — 4 речення.']
+};
+function pickExercise(p){const type=p?.exercise||'sensory',pool=EX[type]||EX.sensory;State.pendingExercise={type,text:pool[0]};$('exerciseText').textContent=pool[0];$('exerciseMeta').textContent='категорія: '+type}
+
+function addObs(title,body,meta=''){State.observations.unshift({title,body,meta,ts:Date.now()});State.observations=State.observations.slice(0,50)}
+function renderFeed(){$('feed').innerHTML=State.observations.map(o=>`<div class="feed-item"><strong>${esc(o.title)}</strong>${esc(o.body)}<div style="color:var(--muted);font-size:11px">${esc(o.meta)}</div></div>`).join('')}
+function renderHealth(){const names={goal:'Мета героя',conflict:'Конфлікт',stakes:'Ставки',choice:'Вибір',emotional_change:'Емоційна зміна',pov:'POV',rhythm:'Ритм',sensory:'Сенсорика',intent:'Intent Gap'};$('healthList').innerHTML=Object.entries(names).map(([k,n])=>{const st=State.health[k]||'uncertain',s=STATUS[st]||STATUS.uncertain;return `<div class="metric"><span>${n}</span><span class="tag ${s.cls}">${s.txt} ${st}</span></div>`}).join('')}
+function renderProblem(){
+ const p=State.currentProblem,box=$('mainProblem');
+ if(p){box.innerHTML=`<div class="problem-box"><b>${esc(p.label)}</b><div style="margin-top:4px">${p.evidence.map(esc).join('<br>')}</div></div><div class="confidence">${esc(p.scope)} · ${esc(p.severity)} · ${Math.round(p.confidence*100)}%</div>`;return;}
+ if(State.rawProblems.length>0&&State.allProblems.length===0){box.textContent=`У фокусі ${State.mode}/${State.focus} проблем не знайдено, але поза фокусом є ${State.rawProblems.length}.`;return;}
+ box.textContent='Критичних проблем не знайдено.';
+}
+function recalcProfile(){
+ const entries=Object.entries(State.skills).sort((a,b)=>b[1]-a[1]);
+ State.profile.strengths=entries.filter(([,v])=>v>=.65).map(([k])=>k);
+ State.profile.developing=entries.filter(([,v])=>v<.55).map(([k])=>k);
+ $('profileSummary').textContent=`Сильні: ${State.profile.strengths.join(', ')||'—'} · Розвивати: ${State.profile.developing.join(', ')||'—'}`;
+}
+function renderSkills(){$('skillsList').innerHTML=Object.entries(State.skills).map(([n,v])=>`<div class="skill"><div class="skill-row"><span>${esc(n)}</span><span>${Math.round(v*100)}%</span></div><div class="skill-bar"><span style="width:${Math.round(v*100)}%"></span></div></div>`).join('');recalcProfile()}
+function renderDecisions(){$('decisionsList').innerHTML=State.decisions.slice().reverse().map(d=>`<div class="feed-item"><strong>${esc(d.key)}${d.intentional?' · intentional':''}</strong>${esc(d.value)}<div style="color:var(--muted);font-size:11px">${new Date(d.ts).toLocaleString()}</div></div>`).join('')||'<div class="feed-item">Поки немає рішень.</div>';$('questionChain').innerHTML=State.questionChain.slice(-12).reverse().map(x=>`<div class="feed-item">${esc(x)}</div>`).join('')||'<div class="feed-item">—</div>'}
+function renderMemory(){
+ $('characterState').innerHTML=Object.entries(State.characterState).map(([name,c])=>`<div class="memory-item"><b>${esc(name)}</b> · ${esc(Emotion[c.emotionalState]||c.emotionalState||'—')}<br>Мета: ${esc(c.goal||'—')} · Страх: ${esc(c.fear||'—')} · Потреба: ${esc(c.need||'—')}</div>`).join('');
+ $('relationshipState').innerHTML=Object.entries(State.relationships).map(([key,r])=>`<div class="memory-item"><b>${esc(r.a||key.split('—')[0])} ↔ ${esc(r.b||key.split('—')[1]||'')}</b><br>trust ${Number(r.trust||0).toFixed(1)} · conflict ${Number(r.conflict||0).toFixed(1)}</div>`).join('');
+ $('knowledgeState').innerHTML=State.knowledge.map(f=>`<div class="memory-item"><b>${esc(f.fact)}</b><br>Знають: ${esc((f.knows||[]).join(', '))} · ${esc(f.revealedIn||'—')}</div>`).join('');
+ $('plotState').innerHTML=State.plot.threads.map(t=>`<div class="memory-item"><b>${esc(t.name)}</b> · ${esc(t.status)}</div>`).join('');
+ $('styleState').innerHTML=`<div class="memory-item">Середня довжина речення: <b>${esc(State.style.avgSentence)}</b><br>POV: <b>${esc(State.style.pov||'—')}</b><br>Сенсорний домінант: <b>${esc(State.style.sensoryDominant||'—')}</b><br>Dialogue density: <b>${esc(State.style.dialogueDensity)}</b></div>`;
+}
+
+const WDI_SKILLS={
+ story_architecture:{label:'Story Architecture'},character_craft:{label:'Character Craft'},scene_craft:{label:'Scene Craft'},
+ language_style:{label:'Language & Style'},dialogue_subtext:{label:'Dialogue & Subtext'},pov_narration:{label:'POV & Narration'},
+ emotion_reader_impact:{label:'Emotion & Reader Impact'},world_continuity:{label:'World & Continuity'},
+ revision_mastery:{label:'Revision Mastery'},writer_development:{label:'Writer Development'}
+};
+const PROBLEM_TO_WDI={intent_gap:'emotion_reader_impact',unclear_goal:'scene_craft',weak_stakes:'story_architecture',missing_choice:'scene_craft',no_emotional_change:'emotion_reader_impact',weak_pov:'pov_narration',weak_sensory:'language_style'};
+
+function wdiLevel(s){if(s<200)return'Foundation';if(s<350)return'Developing Writer';if(s<500)return'Emerging Writer';if(s<650)return'Competent Writer';if(s<750)return'Advanced Writer';if(s<850)return'Accomplished Writer';if(s<930)return'Expert Craft';return'Mastery'}
+function wdiStatus(){const w=State.wdi;if(w.analyzedScenes<3||w.analyzedWords<3000||w.testsCompleted<1)return'INSUFFICIENT_DATA';if(w.analyzedScenes<10||w.analyzedWords<20000||w.testsCompleted<2||w.practicalCompleted<2||w.revisionLoops<3)return'PROVISIONAL';if(w.analyzedScenes<30||w.analyzedWords<50000||w.testsCompleted<5||w.practicalCompleted<10||w.revisionLoops<10)return'STABLE';return'HIGH_CONFIDENCE'}
+function wdiConfidence(){const w=State.wdi,tc=Math.min(1,w.analyzedWords/50000),sc=Math.min(1,w.analyzedScenes/30),kc=Math.min(1,w.testsCompleted/5),pc=Math.min(1,w.practicalCompleted/10),rc=Math.min(1,w.revisionLoops/10),st=Math.min(1,w.evidence.length/30);return Math.round(100*(tc*.30+sc*.20+kc*.15+pc*.15+rc*.15+st*.05))}
+function wdiScore(){
+ const keys=Object.keys(WDI_SKILLS);
+ return Math.round(keys.reduce((a,k)=>a+(typeof State.wdi.skillScores[k]==='number'?State.wdi.skillScores[k]:50),0));
+}
+function wdiCraft(){const k=['story_architecture','character_craft','scene_craft','dialogue_subtext','pov_narration','world_continuity'];return Math.round(k.reduce((s,x)=>s+State.wdi.skillScores[x],0)/k.length*10)}
+function wdiVoice(){const k=['language_style','dialogue_subtext','pov_narration','emotion_reader_impact'];return Math.round(k.reduce((s,x)=>s+State.wdi.skillScores[x],0)/k.length*10)}
+function wdiIndependence(){const v=Object.values(State.wdi.independenceBySkill);return v.length?Math.round(v.reduce((a,b)=>a+b,0)/v.length):42}
+function pushWdiHistory(){const score=wdiScore(),last=State.wdi.history.at(-1);if(!last||last.score!==score){State.wdi.history.push({ts:Date.now(),score});State.wdi.history=State.wdi.history.slice(-24)}const first=State.wdi.history[0]?.score??score;State.wdi.growth90=score-first;State.wdi.currentScore=score;State.wdi.confidence=wdiConfidence()}
+function addWdiEvidence({type,skill,delta=0,confidence=.6,independence=50,summary,sourceId}){const w=State.wdi;if(sourceId&&w.evidence.some(e=>e.sourceId===sourceId))return false;const before=w.skillScores[skill]??50,b=Math.max(-2,Math.min(2,delta)),after=Math.max(0,Math.min(100,before+b));w.skillScores[skill]=after;w.confidenceBySkill[skill]=Math.max(w.confidenceBySkill[skill]||0,Math.round(confidence*100));w.independenceBySkill[skill]=Math.round(((w.independenceBySkill[skill]??45)*.75)+(independence*.25));w.evidence.unshift({id:'ev_'+Date.now(),type,skill,before,after,delta:b,confidence,independence,summary,sourceId,ts:Date.now()});w.evidence=w.evidence.slice(0,80);pushWdiHistory();return true}
+
+
+function addTextAnalysisEvidence(text,a){
+ const h=hash(text);if(State.wdi.seenTextHashes.includes(h))return;
+ State.wdi.seenTextHashes.push(h);State.wdi.seenTextHashes=State.wdi.seenTextHashes.slice(-80);
+ State.wdi.analyzedWords+=(text.trim().match(/\S+/g)||[]).length;State.wdi.analyzedScenes++;
+ const d=c=>c?.6:-.35;
+ addWdiEvidence({type:'TEXT_ANALYSIS',skill:'scene_craft',delta:d(a.micro.hasGoal&&a.micro.hasChoice),confidence:.62,independence:55,summary:'Мета, вибір і зміна стану сцени.',sourceId:'text:'+h+':scene'});
+ addWdiEvidence({type:'TEXT_ANALYSIS',skill:'story_architecture',delta:d(a.micro.hasStakes&&a.micro.hasConflict),confidence:.58,independence:55,summary:'Конфлікт та ставки.',sourceId:'text:'+h+':story'});
+ addWdiEvidence({type:'TEXT_ANALYSIS',skill:'pov_narration',delta:a.micro.povRatio>.7?.45:-.3,confidence:.60,independence:55,summary:'Стабільність POV.',sourceId:'text:'+h+':pov'});
+ addWdiEvidence({type:'TEXT_ANALYSIS',skill:'emotion_reader_impact',delta:a.macro.intentGap.status==='aligned'?.55:a.macro.intentGap.status==='gap'?-0.35:0,confidence:.57,independence:55,summary:'Intent → text → probable reader effect.',sourceId:'text:'+h+':emotion'});
+ addWdiEvidence({type:'TEXT_ANALYSIS',skill:'language_style',delta:a.micro.varr>12?.35:0,confidence:.52,independence:55,summary:'Ритм і сенсорний профіль.',sourceId:'text:'+h+':style'});
+}
+function evidenceForRevision(target,improved){
+ const skill=PROBLEM_TO_WDI[target]||'revision_mastery';
+ State.wdi.revisionLoops++;
+ // FIX: revision loop тепер оновлює mastery counters, а не лише додає evidence
+ registerMasteryOutcome(skill, improved, false);
+ addWdiEvidence({type:'REVISION_LOOP',skill,delta:improved?1.4:-.3,confidence:.84,independence:State.decisions.at(-1)?.intentional?82:68,summary:improved?'Цільову проблему усунено після авторської правки.':'Проблема ще присутня після правки.',sourceId:'revision:'+State.version+':'+target});
+ addWdiEvidence({type:'REVISION_LOOP',skill:'revision_mastery',delta:improved?1.2:.1,confidence:.88,independence:State.decisions.at(-1)?.intentional?86:72,summary:'Замкнений цикл рішення та перевірки.',sourceId:'revisionmastery:'+State.version+':'+target});
+ registerMasteryOutcome('revision_mastery', improved, false);
+ if(improved){
+   addWdiEvidence({type:'VERIFIED_GROWTH',skill:'writer_development',delta:.7,confidence:.75,independence:74,summary:'Покращення підтверджене повторним аналізом.',sourceId:'growth:'+State.version+':'+target});
+   registerMasteryOutcome('writer_development', true, false);
+ }
+}
+function evidenceForExercise(){State.wdi.practicalCompleted++;addWdiEvidence({type:'PRACTICAL_TASK',skill:'writer_development',delta:.6,confidence:.66,independence:60,summary:'Виконано мікровправу AI Mentor.',sourceId:'exercise:'+Date.now()});registerMasteryOutcome('writer_development',true,false)}
+
+function renderWdi(){
+ if(!$('wdiScore'))return;pushWdiHistory();
+ const score=wdiScore(),conf=wdiConfidence(),status=wdiStatus();
+ $('wdiScore').textContent=score;$('wdiLevel').textContent=wdiLevel(score);$('wdiConfidence').textContent='Confidence '+conf+'%';$('wdiGrowth').textContent='Growth 90 '+(State.wdi.growth90>=0?'+':'')+State.wdi.growth90;$('wdiCraft').textContent=wdiCraft();$('wdiVoice').textContent=wdiVoice();$('wdiIndependence').textContent=wdiIndependence()+'%';$('wdiEvidenceCount').textContent=State.wdi.evidence.length;
+ $('wdiStatus').textContent=`${status} · ${State.wdi.analyzedWords.toLocaleString()} слів · ${State.wdi.analyzedScenes} сцен · ${State.wdi.testsCompleted} тестів · ${State.wdi.revisionLoops} revision loops`;
+ $('wdiSkills').innerHTML=Object.entries(WDI_SKILLS).map(([k,m])=>{const s=Math.round(State.wdi.skillScores[k]??0),c=State.wdi.confidenceBySkill[k]??Math.min(95,25+State.wdi.evidence.filter(e=>e.skill===k).length*9),i=State.wdi.independenceBySkill[k]??45;return `<div class="wdi-skill"><div class="wdi-skill-top"><b>${esc(m.label)}</b><strong>${s}/100</strong></div><div class="wdi-track"><span style="width:${s}%"></span></div><div class="wdi-meta"><span>Confidence ${Math.round(c)}%</span><span>Independence ${Math.round(i)}%</span></div></div>`}).join('');
+ const low=Object.entries(WDI_SKILLS).map(([k,m])=>({k,label:m.label,score:State.wdi.skillScores[k]??0,confidence:State.wdi.confidenceBySkill[k]??40})).sort((a,b)=>a.score-b.score)[0];
+ $('wdiLeverage').innerHTML=`<b>${esc(low.label)}</b><div>Поточний рівень: ${Math.round(low.score)}/100 · Confidence ${Math.round(low.confidence)}%</div><div class="wdi-note" style="margin-top:5px">AI Mentor має пріоритезувати вправи й питання, які підсилюють цю компетенцію.</div>`;
+ $('wdiEvidence').innerHTML=State.wdi.evidence.slice(0,14).map(e=>`<div class="wdi-event"><strong>${esc(WDI_SKILLS[e.skill]?.label||e.skill)}</strong><span class="wdi-pill">${esc(e.type)}</span>${e.delta>=0?'+':''}${Number(e.delta).toFixed(1)} · Confidence ${Math.round(e.confidence*100)}%<div style="margin-top:4px">${esc(e.summary)}</div></div>`).join('')||'<div class="wdi-event">Evidence ще не накопичено.</div>';
+ renderWdiHistory();renderSkillDetail();renderRadar();updateAssessmentProgress();renderMastery();
+}
+function renderWdiHistory(){const svg=$('wdiHistory');if(!svg)return;const h=State.wdi.history;if(h.length<2){svg.innerHTML='<text x="8" y="45" class="wdi-axis">Потрібно більше evidence для графіка</text>';return}const min=Math.min(...h.map(x=>x.score))-8,max=Math.max(...h.map(x=>x.score))+8,span=Math.max(1,max-min),pts=h.map((x,i)=>`${8+i*(324/Math.max(1,h.length-1))},${78-(x.score-min)/span*62}`).join(' ');svg.innerHTML=`<line x1="8" y1="78" x2="332" y2="78" stroke="rgba(111,152,187,.35)"/><polyline fill="none" stroke="#2f7df4" stroke-width="2.5" points="${pts}"/><text x="8" y="12" class="wdi-axis">${max}</text><text x="8" y="88" class="wdi-axis">${min}</text>`}
+function simulateKnowledgeTest(){
+ State.wdi.testsCompleted++;
+ const c=Object.keys(WDI_SKILLS).filter(k=>!['writer_development','revision_mastery'].includes(k)),skill=c[State.wdi.testsCompleted%c.length];
+ // FIX: демо-кнопка тепер справді просуває mastery
+ registerMasteryOutcome(skill,true,false);
+ addWdiEvidence({type:'KNOWLEDGE_TEST',skill,delta:.8,confidence:.78,independence:70,summary:'Демо: стандартизований knowledge test.',sourceId:'test:'+State.wdi.testsCompleted});
+ renderWdi();saveState();
+}
+function simulatePracticalTask(){
+ State.wdi.practicalCompleted++;
+ const skill=Object.keys(WDI_SKILLS).sort((a,b)=>State.wdi.skillScores[a]-State.wdi.skillScores[b])[0];
+ // FIX: демо-кнопка тепер справді просуває mastery
+ registerMasteryOutcome(skill,true,false);
+ registerMasteryOutcome('revision_mastery',true,false);
+ addWdiEvidence({type:'PRACTICAL_TASK',skill,delta:1,confidence:.80,independence:72,summary:'Демо: практичне завдання з підтвердженим результатом.',sourceId:'practical:'+State.wdi.practicalCompleted});
+ renderWdi();saveState();
+}
+
+
+const KNOWLEDGE_BANK=[
+ {id:'k1',skill:'story_architecture',q:'Який елемент найкраще описує ставки сцени?',opts:['Те, чого персонаж може втратити або отримати','Кількість персонажів у сцені','Довжина діалогів','Опис локації'],correct:0},
+ {id:'k2',skill:'scene_craft',q:'Що робить сцену драматично завершеною?',opts:['Лише красивий опис','Зміна стану через вибір і наслідок','Максимальна кількість конфліктів','Обов’язково кліфгенгер'],correct:1},
+ {id:'k3',skill:'pov_narration',q:'Що найкраще описує head-hopping?',opts:['Зміна локації','Безконтрольний перехід між внутрішніми перспективами кількох персонажів','Флешбек','Авторський відступ'],correct:1},
+ {id:'k4',skill:'dialogue_subtext',q:'Що таке підтекст у діалозі?',opts:['Пряме пояснення почуттів','Інформація в авторській примітці','Сенс, який не проговорюється прямо, але читається через поведінку і контекст','Довга репліка'],correct:2},
+ {id:'k5',skill:'world_continuity',q:'Який приклад є continuity error?',opts:['Герой змінює думку після нової події','Предмет знищений у главі 3 без пояснення з’являється у главі 6','Зміна темпу','Новий другорядний персонаж'],correct:1},
+ {id:'k6',skill:'revision_mastery',q:'Яка дія найкраще свідчить про сформовану навичку?',opts:['Автор приймає будь-яку AI-пораду','Автор сам розпізнає проблему і виправляє її в новій сцені без підказки','Автор переписує текст за готовим шаблоном','Автор збільшує кількість слів'],correct:1}
+];
+
+const PRACTICAL_BANK=[
+ {id:'p1',skill:'scene_craft',title:'Scene Goal & Consequence',prompt:'Фрагмент: «Олена прийшла до редактора. Вони поговорили про рукопис. Потім вона пішла додому.» Визнач головну проблему сцени та запропонуй зміну, яка дасть Олені конкретну мету, вибір і наслідок.'},
+ {id:'p2',skill:'dialogue_subtext',title:'Dialogue & Subtext',prompt:'Фрагмент: «— Я злюся на тебе, — сказав Петро. — Я теж злюся, — відповіла Марія.» Перепиши 4–6 реплік так, щоб конфлікт читався без прямого називання емоцій.'},
+ {id:'p3',skill:'pov_narration',title:'POV Control',prompt:'Фрагмент починається з внутрішніх думок Анни, а потім без переходу повідомляє, що Петро таємно ненавидить її. Запропонуй виправлення з одного стабільного POV.'}
+];
+
+function skillEvidenceList(skill){return State.wdi.evidence.filter(e=>e.skill===skill)}
+
+function renderSkillDetail(){
+ const sel=$('skillDetailSelect');if(!sel)return;
+ if(!sel.options.length){sel.innerHTML=Object.entries(WDI_SKILLS).map(([k,v])=>`<option value="${k}">${esc(v.label)}</option>`).join('')}
+ const skill=sel.value||Object.keys(WDI_SKILLS)[0],score=Math.round(State.wdi.skillScores[skill]||0),conf=Math.round(State.wdi.confidenceBySkill[skill]||40),ind=Math.round(State.wdi.independenceBySkill[skill]||45),ev=skillEvidenceList(skill);
+ const pos=ev.filter(x=>x.delta>0).length,neg=ev.filter(x=>x.delta<0).length;
+ $('skillDetailPanel').innerHTML=`<div class="skill-detail-head"><div><b>${esc(WDI_SKILLS[skill].label)}</b><div class="wdi-note">Evidence events: ${ev.length}</div></div><span class="skill-badge">${score}/100</span></div>
+ <div class="detail-metrics"><div class="detail-metric"><b>${score}</b><span>Score</span></div><div class="detail-metric"><b>${conf}%</b><span>Confidence</span></div><div class="detail-metric"><b>${ind}%</b><span>Independence</span></div></div>
+ <div class="wdi-note" style="margin-top:10px">Позитивних evidence: ${pos} · Негативних: ${neg}. Наступний крок: ${score<60?'цільова вправа + revision loop':'transfer test у новому контексті'}.</div>`;
+}
+
+function renderRadar(){
+ const svg=$('wdiRadar');if(!svg)return;
+ const entries=Object.entries(WDI_SKILLS),cx=170,cy=145,R=105,n=entries.length;
+ let grids='';
+ for(let g=1;g<=5;g++){
+   const r=R*g/5,pts=entries.map((_,i)=>{const a=-Math.PI/2+i*2*Math.PI/n;return `${cx+Math.cos(a)*r},${cy+Math.sin(a)*r}`}).join(' ');
+   grids+=`<polygon class="radar-grid" points="${pts}"/>`;
+ }
+ const shape=entries.map(([k],i)=>{const a=-Math.PI/2+i*2*Math.PI/n,r=R*(State.wdi.skillScores[k]||0)/100;return `${cx+Math.cos(a)*r},${cy+Math.sin(a)*r}`}).join(' ');
+ const labels=entries.map(([k,v],i)=>{const a=-Math.PI/2+i*2*Math.PI/n,r=R+24,x=cx+Math.cos(a)*r,y=cy+Math.sin(a)*r;const short=v.label.replace(' Architecture','').replace(' & Reader Impact','').replace(' & Narration','').replace(' & Continuity','').replace(' & Subtext','');return `<text class="radar-label" text-anchor="middle" x="${x}" y="${y}">${esc(short)}</text>`}).join('');
+ svg.innerHTML=grids+`<polygon class="radar-shape" points="${shape}"/>`+labels;
+}
+
+function generateDevelopmentPlan(){
+ const ordered=Object.keys(WDI_SKILLS).sort((a,b)=>(State.wdi.skillScores[a]||0)-(State.wdi.skillScores[b]||0));
+ const focus=ordered.slice(0,3);
+ const tasks=[
+  ['Діагностика',`Проаналізуй одну нову сцену з фокусом на ${WDI_SKILLS[focus[0]].label}.`],
+  ['Мікровправа',`Виконай 10-хвилинну вправу на ${WDI_SKILLS[focus[0]].label}.`],
+  ['Revision Loop',`Відредагуй одну сцену і зроби targeted re-check.`],
+  ['Transfer',`Застосуй принцип ${WDI_SKILLS[focus[0]].label} у новій сцені без підказки.`],
+  ['Діагностика',`Проаналізуй приклад з фокусом на ${WDI_SKILLS[focus[1]].label}.`],
+  ['Практика',`Виконай практичне завдання на ${WDI_SKILLS[focus[1]].label}.`],
+  ['Рефлексія',`Запиши 3 рішення, які ти прийняв самостійно цього тижня.`],
+  ['Revision Loop',`Повернись до сцени з повторюваною проблемою та перевір її ще раз.`],
+  ['Мікровправа',`Зроби вправу на ${WDI_SKILLS[focus[2]].label}.`],
+  ['Нова сцена',`Напиши коротку сцену, де ${WDI_SKILLS[focus[2]].label} є головною ціллю.`],
+  ['Transfer',`Застосуй найслабшу навичку в іншому жанровому або емоційному контексті.`],
+  ['Self-check',`Самостійно знайди одну проблему до запуску AI Mentor.`],
+  ['Assessment',`Пройди короткий knowledge test і practical task.`],
+  ['Підсумок',`Порівняй WDI, Independence і recurring issues з Днем 1.`]
+ ];
+ State.wdi.developmentPlan=tasks.map((x,i)=>({day:i+1,title:x[0],task:x[1],done:false}));
+ renderDevelopmentPlan();saveState();
+}
+
+function renderDevelopmentPlan(){
+ if(!$('developmentPlan'))return;
+ if(!State.wdi.developmentPlan?.length)generateDevelopmentPlan();
+ $('developmentPlan').innerHTML=State.wdi.developmentPlan.map((d,i)=>`<div class="plan-day"><b>День ${d.day} · ${esc(d.title)}</b><span>${esc(d.task)}</span></div>`).join('');
+}
+
+function startKnowledgeAssessment(){
+ State.wdi.assessment.currentKnowledge={startedAt:Date.now(),answers:{}};
+ $('knowledgeAssessmentCard').hidden=false;
+ $('knowledgeResult').textContent='';
+ $('knowledgeQuestions').innerHTML=KNOWLEDGE_BANK.map((q,idx)=>`<div class="quiz-q"><strong>${idx+1}. ${esc(q.q)}</strong>${q.opts.map((o,i)=>`<label class="quiz-option"><input type="radio" name="q_${q.id}" value="${i}"><span>${esc(o)}</span></label>`).join('')}</div>`).join('');
+ updateAssessmentProgress();
+}
+function submitKnowledgeAssessment(){
+ let correct=0,answered=0;
+ KNOWLEDGE_BANK.forEach(q=>{
+   const el=document.querySelector(`input[name="q_${q.id}"]:checked`);
+   if(!el)return;
+   answered++;
+   const ok=Number(el.value)===q.correct;if(ok)correct++;
+   addWdiEvidence({type:'KNOWLEDGE_TEST',skill:q.skill,delta:ok?.7:-.25,confidence:.82,independence:75,summary:ok?'Правильна відповідь у стандартизованому тесті.':'Помилка у стандартизованому тесті.',sourceId:'kt:'+Date.now()+':'+q.id});
+   registerMasteryOutcome(q.skill,ok,false);
+ });
+ if(answered<KNOWLEDGE_BANK.length){$('knowledgeResult').textContent='Дай відповідь на всі питання.';return}
+ State.wdi.testsCompleted++;
+ const pct=Math.round(correct/KNOWLEDGE_BANK.length*100);
+ State.wdi.assessment.knowledgeAttempts.push({ts:Date.now(),correct,total:KNOWLEDGE_BANK.length,pct});
+ $('knowledgeResult').innerHTML=`Результат: <b class="${pct>=70?'result-good':'result-warn'}">${correct}/${KNOWLEDGE_BANK.length} · ${pct}%</b>`;
+ renderWdi();renderSkillDetail();renderRadar();updateAssessmentProgress();saveState();
+}
+function startPracticalAssessment(){
+ const weakest=Object.keys(WDI_SKILLS).sort((a,b)=>(State.wdi.skillScores[a]||0)-(State.wdi.skillScores[b]||0));
+ const task=PRACTICAL_BANK.find(p=>weakest.includes(p.skill))||PRACTICAL_BANK[0];
+ State.wdi.assessment.currentPractical={...task,startedAt:Date.now()};
+ $('practicalAssessmentCard').hidden=false;$('practicalPrompt').innerHTML=`<b>${esc(task.title)}</b><div style="margin-top:6px">${esc(task.prompt)}</div>`;$('practicalAnswer').value='';$('practicalResult').textContent='';
+}
+function scorePracticalAnswer(answer,task){
+ const words=(answer.trim().match(/\S+/g)||[]).length;
+ const diagnosis=/(проблем|мета|конфлікт|наслід|pov|підтекст|ставк)/i.test(answer)?22:12;
+ const decision=/(пропон|змін|виріш|замість|додам|перепиш)/i.test(answer)?22:12;
+ const execution=Math.min(30,Math.max(10,Math.round(words/3)));
+ const explanation=/(тому|щоб|оскільки|це дає|читач)/i.test(answer)?9:5;
+ const independence=words>40?9:6;
+ return {diagnosis,decision,execution,explanation,independence,total:diagnosis+decision+execution+explanation+independence};
+}
+function submitPracticalAssessment(){
+ const task=State.wdi.assessment.currentPractical,answer=$('practicalAnswer').value.trim();if(!task||!answer)return;
+ const r=scorePracticalAnswer(answer,task);State.wdi.practicalCompleted++;
+ State.wdi.assessment.practicalAttempts.push({ts:Date.now(),taskId:task.id,skill:task.skill,score:r.total});
+ const delta=r.total>=80?1.3:r.total>=65?.8:r.total>=50?.3:-.2;
+ addWdiEvidence({type:'PRACTICAL_TASK',skill:task.skill,delta,confidence:.78,independence:r.independence*10,summary:`Practical score ${r.total}/100. Diagnosis ${r.diagnosis}, Decision ${r.decision}, Execution ${r.execution}.`,sourceId:'pt:'+Date.now()+':'+task.id});
+ registerMasteryOutcome(task.skill,r.total>=65,false);
+ addWdiEvidence({type:'PRACTICAL_TASK',skill:'revision_mastery',delta:r.total>=65?.6:.1,confidence:.72,independence:r.independence*10,summary:'Практичне редакторське рішення.',sourceId:'ptrev:'+Date.now()+':'+task.id});
+ registerMasteryOutcome('revision_mastery',r.total>=65,false);
+ $('practicalResult').innerHTML=`Score <b>${r.total}/100</b> · Diagnosis ${r.diagnosis}/25 · Decision ${r.decision}/25 · Execution ${r.execution}/30 · Explanation ${r.explanation}/10 · Independence ${r.independence}/10`;
+ renderWdi();renderSkillDetail();renderRadar();updateAssessmentProgress();saveState();
+}
+function updateAssessmentProgress(){
+ const total=State.wdi.testsCompleted+State.wdi.practicalCompleted+State.wdi.revisionLoops;
+ const pct=Math.min(100,Math.round(total/12*100));
+ if($('assessmentProgressBar'))$('assessmentProgressBar').style.width=pct+'%';
+ if($('assessmentProgressLabel'))$('assessmentProgressLabel').textContent=pct+'%';
+}
+
+
+const ADAPTIVE_BANK=[
+ {id:'a_story_1',skill:'story_architecture',difficulty:1,q:'Що найточніше описує причинність у сюжеті?',opts:['Хронологічний порядок','Одна подія створює причину або умову для наступної','Наявність конфлікту всюди','Таємниця кожного героя'],correct:1},
+ {id:'a_story_2',skill:'story_architecture',difficulty:4,q:'Як підсилити stakes без штучного підвищення небезпеки?',opts:['Додати випадкову катастрофу','Пов’язати невдачу з важливою для героя втратою, цінністю або метою','Подовжити описи','Додати випадкового героя'],correct:1},
+ {id:'a_story_3',skill:'story_architecture',difficulty:7,q:'Герой досяг проміжної мети, і напруга впала. Яке рішення структурно сильніше?',opts:['Повторити стару перешкоду','Показати нову ціну або наслідок досягнення, що змінює напрямок історії','Додати флешбек','Змінити POV'],correct:1},
+
+ {id:'a_char_1',skill:'character_craft',difficulty:2,q:'Що відрізняє зовнішню ціль персонажа від внутрішньої потреби?',opts:['Ціль завжди прихована','Ціль — те, чого герой прагне; потреба — глибша зміна або усвідомлення','Потреба завжди матеріальна','Різниці немає'],correct:1},
+ {id:'a_char_2',skill:'character_craft',difficulty:5,q:'Герой здебільшого реагує, але не приймає рішень. Яка проблема найімовірніша?',opts:['Надмірна агентність','Слабка агентність','Слабкий POV','Надмірний підтекст'],correct:1},
+ {id:'a_char_3',skill:'character_craft',difficulty:8,q:'Який доказ найкраще підтверджує арку трансформації?',opts:['Автор каже, що герой змінився','У схожій фінальній ситуації герой робить інший вибір, ніж на початку','Герой змінює одяг','Зростає кількість монологів'],correct:1},
+
+ {id:'a_scene_1',skill:'scene_craft',difficulty:1,q:'Який ланцюг найкраще перевіряє драматичну сцену?',opts:['Опис → діалог → опис','Мета → перешкода → вибір → наслідок','Локація → погода → спогад','Експозиція → пояснення'],correct:1},
+ {id:'a_scene_2',skill:'scene_craft',difficulty:5,q:'Сцена має конфлікт, але після неї нічого не змінюється. Що перевірити?',opts:['Кількість прикметників','Чи вибір героя створив наслідок або зміну стану','Опис погоди','Довжину реплік'],correct:1},
+ {id:'a_scene_3',skill:'scene_craft',difficulty:8,q:'Що найкраще відрізняє функціональну сцену від інформаційного епізоду?',opts:['Довжина','Вона змінює стан історії через рішення, відкриття або наслідок','Кількість героїв','Метафора'],correct:1},
+
+ {id:'a_style_1',skill:'language_style',difficulty:2,q:'Контроль ритму прози — це…',opts:['Завжди короткі речення','Свідоме керування довжиною, синтаксисом і паузами відповідно до ефекту','Відсутність діалогів','Максимум метафор'],correct:1},
+ {id:'a_style_2',skill:'language_style',difficulty:6,q:'Коли повтор може бути виправданим?',opts:['Ніколи','Коли створює ритм, мотив або смислове підсилення','Коли його не помітили','Тільки в діалогах'],correct:1},
+
+ {id:'a_dialogue_1',skill:'dialogue_subtext',difficulty:2,q:'Підтекст у діалозі — це…',opts:['Пунктуація','Непрямий сенс через контекст, поведінку й невисловлене','Авторська примітка','Внутрішній монолог'],correct:1},
+ {id:'a_dialogue_2',skill:'dialogue_subtext',difficulty:6,q:'Що створює сильний підтекст між ввічливими, але вороже налаштованими героями?',opts:['Пряме пояснення ненависті','Суперечність між словами, діями, паузами та прихованими цілями','Більше привітань','Більше реплік'],correct:1},
+ {id:'a_dialogue_3',skill:'dialogue_subtext',difficulty:9,q:'Як розрізнити голоси персонажів без карикатури?',opts:['Один говорить лише коротко','Врахувати різні цілі, словник, ритм, досвід і способи уникати прямої відповіді','Діалект у кожній репліці','Імена перед репліками'],correct:1},
+
+ {id:'a_pov_1',skill:'pov_narration',difficulty:2,q:'Head-hopping — це…',opts:['Зміна глави','Немотивований стрибок між внутрішніми перспективами','Флешбек','Іронія'],correct:1},
+ {id:'a_pov_2',skill:'pov_narration',difficulty:6,q:'Як зберегти limited POV, коли інший герой приховує інформацію?',opts:['Дати його думки','Показати лише спостережувані сигнали та інтерпретацію POV-персонажа','На речення перейти в omniscient','Пояснити в дужках'],correct:1},
+
+ {id:'a_emotion_1',skill:'emotion_reader_impact',difficulty:3,q:'Intent Gap виникає, коли…',opts:['Є короткі речення','Бажаний автором ефект і ймовірна реакція читача розходяться','Є діалог','Є дві локації'],correct:1},
+ {id:'a_emotion_2',skill:'emotion_reader_impact',difficulty:7,q:'Автор хоче співчуття до героя, але той поводиться жорстоко без контексту. Що перевірити першим?',opts:['Додати слово «добрий»','Чи текст дає причини зрозуміти мотивацію або внутрішню ціну поведінки','Прибрати конфлікт','Додати опис кімнати'],correct:1},
+
+ {id:'a_world_1',skill:'world_continuity',difficulty:2,q:'Continuity error — це…',opts:['Будь-яка зміна світу','Суперечність встановленим фактам, хронології, знанням або стану без пояснення','Нова локація','Нове ім’я'],correct:1},
+ {id:'a_world_2',skill:'world_continuity',difficulty:6,q:'Герой використовує факт, про який дізнався лише в наступній главі. Що порушено?',opts:['Rhythm State','Knowledge State','Style State','Metaphor State'],correct:1},
+
+ {id:'a_revision_1',skill:'revision_mastery',difficulty:3,q:'Який evidence найсильніше підтверджує редакторську навичку?',opts:['Автор прочитав пораду','Автор сам виправив проблему, а re-check підтвердив результат','AI переписав абзац','Автор погодився'],correct:1},
+ {id:'a_revision_2',skill:'revision_mastery',difficulty:7,q:'Що сильніше за успішну правку за підказкою?',opts:['Ще одна підказка','Самостійне перенесення принципу на нову сцену','Довша відповідь','Більше коментарів'],correct:1},
+
+ {id:'a_growth_1',skill:'writer_development',difficulty:3,q:'Що найкраще свідчить про розвиток автора?',opts:['Більше слів','Менше повторюваних проблем і більша самостійність','Більше вкладок','Частіше використання AI'],correct:1},
+ {id:'a_growth_2',skill:'writer_development',difficulty:7,q:'Як відрізнити разове покращення від сформованої навички?',opts:['За довжиною тексту','Перевірити стабільність у кількох нових контекстах без прямої підказки','Запитати, чи сподобалось','Оцінити одну сцену'],correct:1}
+];
+
+function ensureMasteryState(){
+ Object.keys(WDI_SKILLS).forEach(k=>{
+   if(!State.wdi.mastery[k])State.wdi.mastery[k]={state:'UNOBSERVED',confidence:0,successes:0,failures:0,transfers:0,lastChanged:null};
+ });
+}
+function masteryStateFor(skill){
+ ensureMasteryState();
+ const m=State.wdi.mastery[skill],score=State.wdi.skillScores[skill]||0,conf=State.wdi.confidenceBySkill[skill]||0,ind=State.wdi.independenceBySkill[skill]||0;
+ let next='UNOBSERVED';
+ if(m.successes+m.failures>0||skillEvidenceList(skill).length>0)next='INTRODUCED';
+ if(score>=45&&m.successes>=2)next='PRACTICING';
+ if(score>=60&&conf>=55&&m.successes>=4)next='DEVELOPING';
+ if(score>=70&&conf>=65&&ind>=60&&m.successes>=6)next='RELIABLE';
+ if(m.transfers>=1&&score>=72&&conf>=70)next='TRANSFERRED';
+ if(m.transfers>=2&&score>=82&&conf>=80&&ind>=75&&m.successes>=10)next='MASTERED';
+ if(m.state!==next){
+   m.state=next;m.lastChanged=Date.now();
+   State.wdi.masteryTimeline.unshift({ts:Date.now(),skill,state:next});
+   State.wdi.masteryTimeline=State.wdi.masteryTimeline.slice(0,50);
+ }
+ return next;
+}
+function masteryRank(s){return ['UNOBSERVED','INTRODUCED','PRACTICING','DEVELOPING','RELIABLE','TRANSFERRED','MASTERED'].indexOf(s)}
+function registerMasteryOutcome(skill,ok,isTransfer=false){
+ ensureMasteryState();const m=State.wdi.mastery[skill];
+ ok?m.successes++:m.failures++;
+ if(isTransfer&&ok){m.transfers++;State.wdi.transferEvents++}
+ m.confidence=Math.min(100,Math.round((m.confidence||20)+(ok?7:2)));
+ masteryStateFor(skill);
+}
+function adaptiveDifficultyFor(skill){
+ const score=State.wdi.skillScores[skill]||50,st=masteryStateFor(skill);
+ let d=Math.round(score/12);
+ if(st==='UNOBSERVED'||st==='INTRODUCED')d=Math.min(d,3);
+ if(st==='RELIABLE'||st==='TRANSFERRED')d=Math.max(d,6);
+ if(st==='MASTERED')d=9;
+ return Math.max(1,Math.min(9,d));
+}
+function chooseAdaptiveSkill(){
+ ensureMasteryState();
+ const c=Object.keys(WDI_SKILLS).map(k=>({k,score:State.wdi.skillScores[k]||0,conf:State.wdi.confidenceBySkill[k]||20,st:masteryStateFor(k),wrong:State.wdi.recurringWrong[k]||0}));
+ c.sort((a,b)=>((100-b.score)+(100-b.conf)*.35+b.wrong*8-masteryRank(b.st)*2)-((100-a.score)+(100-a.conf)*.35+a.wrong*8-masteryRank(a.st)*2));
+ return c[0].k;
+}
+function chooseAdaptiveQuestion(skill){
+ const target=adaptiveDifficultyFor(skill),recent=new Set(State.wdi.recentQuestionIds||[]);
+ let pool=ADAPTIVE_BANK.filter(q=>q.skill===skill&&!recent.has(q.id));
+ if(!pool.length)pool=ADAPTIVE_BANK.filter(q=>q.skill===skill);
+ pool.sort((a,b)=>Math.abs(a.difficulty-target)-Math.abs(b.difficulty-target));
+ return pool[0]||ADAPTIVE_BANK[0];
+}
+function renderAdaptiveQuestion(q,isTransfer=false){
+ const area=$('adaptiveAssessmentArea');if(!area)return;
+ area.innerHTML=`<div class="adaptive-q"><h5>${isTransfer?'Transfer Test':'Adaptive Question'} <span class="diff-pill">Difficulty ${q.difficulty}/10</span></h5><div style="font-size:12px;margin-bottom:9px">${esc(q.q)}</div>${q.opts.map((o,i)=>`<label class="quiz-option"><input type="radio" name="adaptive_q" value="${i}"><span>${esc(o)}</span></label>`).join('')}<div class="wdi-actions" style="margin-top:9px"><button class="btn small" id="submitAdaptiveAnswer">${isTransfer?'Перевірити transfer':'Відповісти'}</button></div><div id="adaptiveFeedback"></div></div>`;
+ $('submitAdaptiveAnswer').onclick=()=>submitAdaptiveAnswer(q,isTransfer);
+}
+function startAdaptiveAssessment(){const skill=chooseAdaptiveSkill(),q=chooseAdaptiveQuestion(skill);State.wdi.assessment.currentAdaptive={skill,qid:q.id,startedAt:Date.now(),isTransfer:false};renderAdaptiveQuestion(q,false)}
+function submitAdaptiveAnswer(q,isTransfer){
+ const checked=document.querySelector('input[name="adaptive_q"]:checked');if(!checked)return;
+ const ok=Number(checked.value)===q.correct,skill=q.skill;
+ State.wdi.recentQuestionIds=(State.wdi.recentQuestionIds||[]).concat(q.id).slice(-12);
+ if(!ok)State.wdi.recurringWrong[skill]=(State.wdi.recurringWrong[skill]||0)+1;else State.wdi.recurringWrong[skill]=Math.max(0,(State.wdi.recurringWrong[skill]||0)-1);
+ registerMasteryOutcome(skill,ok,isTransfer);
+ const weight=.35+q.difficulty*.08;
+ addWdiEvidence({type:isTransfer?'TRANSFER_TEST':'KNOWLEDGE_TEST',skill,delta:ok?Math.min(1.2,weight):-Math.min(.45,weight/3),confidence:.84,independence:isTransfer?85:76,summary:ok?(isTransfer?'Успішне перенесення навички в новий контекст.':'Правильна відповідь в адаптивному тесті.'):'Помилка в адаптивному тесті.',sourceId:(isTransfer?'transfer:':'adaptive:')+Date.now()+':'+q.id});
+ (isTransfer?State.wdi.assessment.transferAttempts:State.wdi.assessment.adaptiveAttempts).push({ts:Date.now(),skill,qid:q.id,ok,difficulty:q.difficulty});
+ $('adaptiveFeedback').innerHTML=`<div class="question-feedback ${ok?'result-good':'result-warn'}">${ok?'Правильно. Evidence зараховано.':'Відповідь не зарахована. Система скоригує складність.'}</div>`;
+ renderWdi();renderMastery();saveState();
+}
+function startTransferTest(){
+ ensureMasteryState();
+ const eligible=Object.keys(WDI_SKILLS).filter(k=>['RELIABLE','TRANSFERRED'].includes(masteryStateFor(k)));
+ const skill=eligible[0]||chooseAdaptiveSkill();
+ let q=chooseAdaptiveQuestion(skill);
+ const harder=ADAPTIVE_BANK.filter(x=>x.skill===skill&&x.difficulty>=Math.max(5,q.difficulty)).sort((a,b)=>b.difficulty-a.difficulty);
+ if(harder.length)q=harder[0];
+ State.wdi.assessment.currentAdaptive={skill,qid:q.id,startedAt:Date.now(),isTransfer:true};renderAdaptiveQuestion(q,true);
+}
+function masteryClass(s){return s==='MASTERED'?'mastered':s==='TRANSFERRED'?'transferred':s==='RELIABLE'?'reliable':s==='INTRODUCED'?'introduced':s==='PRACTICING'?'practicing':s==='DEVELOPING'?'developing':''}
+function renderMastery(){
+ ensureMasteryState();if(!$('masteryBoard'))return;
+ let mastered=0,transferred=0,confSum=0;
+ $('masteryBoard').innerHTML=Object.entries(WDI_SKILLS).map(([k,v])=>{
+   const m=State.wdi.mastery[k],st=masteryStateFor(k);if(st==='MASTERED')mastered++;if(['TRANSFERRED','MASTERED'].includes(st))transferred++;confSum+=m.confidence||0;
+   const gate=st==='MASTERED'?'Стабільна навичка з повторними transfer evidence.':st==='TRANSFERRED'?'Потрібен ще один незалежний transfer + вищий confidence.':st==='RELIABLE'?'Потрібен успішний Transfer Test.':'Потрібно більше успішних evidence та незалежності.';
+   return `<div class="mastery-row"><div class="mastery-row-top"><div><b>${esc(v.label)}</b><div class="wdi-meta"><span>Score ${Math.round(State.wdi.skillScores[k]||0)}</span><span>Success ${m.successes} / Fail ${m.failures}</span><span>Transfers ${m.transfers}</span></div></div><span class="mastery-state ${masteryClass(st)}">${st}</span></div><div class="skill-gate">${esc(gate)}</div></div>`;
+ }).join('');
+ $('masteredCount').textContent=mastered;$('transferCount').textContent=transferred;$('avgMasteryConfidence').textContent=Math.round(confSum/Object.keys(WDI_SKILLS).length)+'%';
+ State.wdi.adaptiveLevel=Math.max(1,Math.round(Object.values(State.wdi.skillScores).reduce((a,b)=>a+b,0)/Object.keys(WDI_SKILLS).length/12));
+ $('adaptiveLevel').textContent=State.wdi.adaptiveLevel;
+ const next=chooseAdaptiveSkill();
+ $('adaptiveNextAction').innerHTML=`Наступний пріоритет: <b>${esc(WDI_SKILLS[next].label)}</b> · складність ${adaptiveDifficultyFor(next)}/10 · mastery ${masteryStateFor(next)}.`;
+ $('masteryTimeline').innerHTML=(State.wdi.masteryTimeline||[]).slice(0,12).map(x=>`<div class="timeline-item"><div class="timeline-date">${new Date(x.ts).toLocaleDateString()}</div><div class="timeline-body"><b>${esc(WDI_SKILLS[x.skill]?.label||x.skill)}</b><div class="wdi-note">Перехід у ${esc(x.state)}</div></div></div>`).join('')||'<div class="wdi-note">Переходи mastery ще не зафіксовані.</div>';
+}
+
+function saveState(){localStorage.setItem('fusion_mentor_v7_adaptive_mastery',JSON.stringify(State))}
+function loadState(){try{
+ const raw=localStorage.getItem('fusion_mentor_v7_adaptive_mastery')||localStorage.getItem('fusion_mentor_v6_assessment')||localStorage.getItem('fusion_mentor_v5_wdi')||localStorage.getItem('fusion_mentor_v4')||localStorage.getItem('fusion_mentor_v3');
+ const d=JSON.parse(raw||'null');
+ if(d){
+   // FIX: робимо незалежну копію дефолтів, щоб наступні мерджі не мутували "базу"
+   const baseWdi=JSON.parse(JSON.stringify(State.wdi));
+   const incomingWdi=(d.wdi&&typeof d.wdi==='object')?d.wdi:{};
+
+   Object.assign(State,d);
+   if(!State.wdi||typeof State.wdi!=='object')State.wdi={};
+
+   State.wdi=Object.assign({},baseWdi,incomingWdi);
+   State.wdi.skillScores=Object.assign({},baseWdi.skillScores,incomingWdi.skillScores||{});
+   State.wdi.confidenceBySkill=Object.assign({},baseWdi.confidenceBySkill,incomingWdi.confidenceBySkill||{});
+   State.wdi.independenceBySkill=Object.assign({},baseWdi.independenceBySkill,incomingWdi.independenceBySkill||{});
+   State.wdi.assessment=Object.assign({},baseWdi.assessment,incomingWdi.assessment||{});
+   State.wdi.mastery=Object.assign({},incomingWdi.mastery||{});
+   State.wdi.masteryTimeline=Array.isArray(incomingWdi.masteryTimeline)?incomingWdi.masteryTimeline:[];
+   State.wdi.recentQuestionIds=Array.isArray(incomingWdi.recentQuestionIds)?incomingWdi.recentQuestionIds:[];
+   State.wdi.recurringWrong=Object.assign({},incomingWdi.recurringWrong||{});
+
+   // FIX: гарантуємо всі 10 ключів у skillScores
+   Object.keys(WDI_SKILLS).forEach(k=>{if(typeof State.wdi.skillScores[k]!=='number')State.wdi.skillScores[k]=50});
+
+   // FIX: гарантуємо масиви всередині assessment
+   ['knowledgeAttempts','practicalAttempts','adaptiveAttempts','transferAttempts'].forEach(k=>{
+     if(!Array.isArray(State.wdi.assessment[k]))State.wdi.assessment[k]=[];
+   });
+
+   // FIX: гарантуємо масиви evidence/history/seenTextHashes/developmentPlan
+   if(!Array.isArray(State.wdi.evidence))State.wdi.evidence=[];
+   if(!Array.isArray(State.wdi.history))State.wdi.history=[];
+   if(!Array.isArray(State.wdi.seenTextHashes))State.wdi.seenTextHashes=[];
+   if(!Array.isArray(State.wdi.developmentPlan))State.wdi.developmentPlan=[];
+ }
+}catch(e){console.warn('State migration failed',e)}}
+function updateStyle(a){State.style.avgSentence=+a.micro.avg.toFixed(1);State.style.dialogueDensity=+a.micro.dialogue.toFixed(2);State.style.pov=a.micro.pov;State.style.sensoryDominant=a.micro.sensoryDominant||'none'}
+
+function runAnalysis(force=false){
+ const text=$('editor').value, h=hash(text);
+ if(!force && State.lastTextHash===h)State.sameAnalysisCount++; else State.sameAnalysisCount=0;
+ State.lastTextHash=h;
+ if(!force && State.sameAnalysisCount>=2){$('blockModal').classList.add('show');return}
+ State.scene.intent=$('intentInput').value.trim();
+ const a=fullAnalyze(text);State.health=computeHealth(a);updateStyle(a);addTextAnalysisEvidence(text,a);
+ State.rawProblems=detectRawProblems(a);State.allProblems=detectProblems(a);State.visibleProblems=visibleProblems(State.allProblems);
+ State.currentProblem=State.visibleProblems[0]||null;State.currentQuestion=State.currentProblem?{text:State.currentProblem.question,problem:State.currentProblem.key}:null;
+ if(State.currentQuestion)State.questionChain.push(State.currentQuestion.text);
+ State.rawProblems.forEach(p=>State.profile.recurring[p.key]=(State.profile.recurring[p.key]||0)+1);
+ if(State.currentProblem)pickExercise(State.currentProblem);
+ if(State.visibleProblems.length===0&&State.rawProblems.length>0)addObs('Фокус порожній',`У режимі ${State.mode}/${State.focus} нічого не знайдено, але є ${State.rawProblems.length} проблем поза фокусом.`,'info');
+ renderHealth();renderProblem();renderQuestion();renderIntentGap();renderMarkers();renderSkills();renderDecisions();renderMemory();renderWdi();
+ addObs('Аналіз завершено',State.currentProblem?`Головна проблема: ${State.currentProblem.label}`:'У поточному фокусі активної проблеми немає.',State.mode+' / '+State.focus);renderFeed();saveState()
+}
+
+function renderQuestion(){const q=State.currentQuestion;$('mainQuestion').textContent=q?q.text:'—';$('questionMeta').textContent=q?`${q.problem} · priority ${State.currentProblem?.priority??'—'}`:''}
+function renderIntentGap(){const ig=State.currentProblem?null:null;const box=$('intentGapBox');const raw=$('intentInput').value.trim();if(!raw){box.textContent='Намір не задано.';return}const g=intentGap($('editor').value);box.textContent=g.message;box.style.color=g.status==='aligned'?'#15886f':g.status==='gap'?'#a96b10':'#6f98bb'}
+function renderMarkers(){['marker1','marker2','marker3','marker4'].forEach((id,i)=>{const el=$(id);if(!el)return;const p=State.allProblems[i];el.classList.toggle('show',!!p);el.style.background=p?(p.severity==='high'?'#ff6e7a':p.severity==='medium'?'#ffb64d':'#44d6e8'):'transparent'})}
+
+function beginAwaitingEdit(decisionText,intentional){
+ State.awaitingEdit={health:{...State.health},textHash:hash($('editor').value),problemKey:State.currentProblem?.key||null,version:State.version};
+ if(State.currentProblem)State.decisions.push({key:State.currentProblem.key,value:decisionText,intentional,ts:Date.now(),scope:State.scene.id});
+ State.version++;$('versionLabel').textContent='v'+State.version;$('awaitingEdit').classList.add('show');renderDecisions();saveState();
+}
+function verifyEdit(){
+ if(!State.awaitingEdit)return;
+ const nowHash=hash($('editor').value);
+ if(nowHash===State.awaitingEdit.textHash){addObs('Перевірка не запущена','Текст не змінено після авторського рішення.','feedback');renderFeed();return}
+ const target=State.awaitingEdit.problemKey;
+ const a=fullAnalyze($('editor').value),after=computeHealth(a);State.health=after;
+ const still=detectRawProblems(a).find(p=>p.key===target),improved=!still;
+ if(improved)addObs('Результат редагування',`Цільова проблема «${target}» більше не визначається.`,'improved');
+ else addObs('Результат редагування',`Цільова проблема «${target}» ще присутня (${Math.round(still.confidence*100)}%).`,'needs_more_work');
+ evidenceForRevision(target,improved);
+ State.awaitingEdit=null;$('awaitingEdit').classList.remove('show');renderWdi();runAnalysis(true)
+}
+
+const modal=$('modal'),dialogInput=$('dialogInput');let dialogContext='question';
+$('answerBtn').onclick=()=>{if(!State.currentQuestion)return;$('dialogTitle').textContent='Відповідь ментору';$('dialogPrompt').textContent=State.currentQuestion.text;$('dialogInput').value='';$('intentionalCheck').checked=false;$('intentionalLabel').style.display='flex';dialogContext='question';modal.classList.add('show')}
+$('cancelDialog').onclick=()=>modal.classList.remove('show');
+$('saveDialog').onclick=()=>{
+ const t=dialogInput.value.trim();if(!t)return;
+ if(dialogContext==='exercise'){addObs('Вправу виконано',t,'exercise');State.skills['Структура сцени']=Math.min(1,State.skills['Структура сцени']+.02);evidenceForExercise();modal.classList.remove('show');renderSkills();renderFeed();renderWdi();saveState();return}
+ const intentional=$('intentionalCheck').checked;
+ State.questionChain.push('A: '+t);
+ beginAwaitingEdit(t,intentional);addObs('Авторське рішення',t,intentional?'intentional':'decision');modal.classList.remove('show');renderFeed()
+};
+
+$('verifyEditBtn').onclick=verifyEdit;
+$('analyzeBtn').onclick=()=>runAnalysis();
+document.querySelectorAll('.qcard').forEach(c=>c.onclick=()=>{const a=c.dataset.action;if(a==='mentor')runAnalysis();if(a==='exercise'){pickExercise(State.currentProblem||{exercise:'sensory'});document.querySelector('[data-tab="exercises"]').click()}if(a==='more')openProblems();if(a==='context'){showSelectionMenu()}});
+$('moreProblemsBtn').onclick=openProblems;
+function openProblems(){$('allProblemsList').innerHTML=State.rawProblems.map(p=>`<div class="problem-row"><b>${esc(p.label)}</b><div>${esc(p.evidence[0])}</div><div class="confidence">${esc(p.scope)} · ${esc(p.severity)} · ${Math.round(p.confidence*100)}%</div></div>`).join('')||'<div class="problem-row">Проблем немає.</div>';$('problemsModal').classList.add('show')}
+$('closeProblems').onclick=()=>$('problemsModal').classList.remove('show');
+
+function closeBlockModal(){ $('blockModal').classList.remove('show');State.sameAnalysisCount=0;saveState(); }
+$('continueAnalysisBtn').onclick=()=>{closeBlockModal();runAnalysis(true)}
+$('blockExerciseBtn').onclick=()=>{closeBlockModal();pickExercise(State.currentProblem||{exercise:'sensory'});document.querySelector('[data-tab="exercises"]').click()}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){if($('blockModal').classList.contains('show'))closeBlockModal();$('modal').classList.remove('show');$('problemsModal').classList.remove('show')}});
+$('blockModal').addEventListener('click',e=>{if(e.target===$('blockModal'))closeBlockModal()});
+
+$('newExercise').onclick=()=>pickExercise(State.currentProblem||{exercise:'sensory'});
+$('startExercise').onclick=()=>{if(!State.pendingExercise)return;$('dialogTitle').textContent='Творча вправа';$('dialogPrompt').textContent=State.pendingExercise.text;$('dialogInput').value='';$('intentionalLabel').style.display='none';dialogContext='exercise';modal.classList.add('show')}
+
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.querySelectorAll('.tab-pane').forEach(p=>p.hidden=p.dataset.pane!==b.dataset.tab)});
+document.querySelectorAll('#modeBar button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#modeBar button').forEach(x=>x.classList.remove('active'));b.classList.add('active');State.mode=b.dataset.mode;saveState()});
+document.querySelectorAll('#focusBar button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#focusBar button').forEach(x=>x.classList.remove('active'));b.classList.add('active');State.focus=b.dataset.focus;saveState()});
+
+function chatReply(){
+ const p=State.currentProblem,d=recentDecision(p?.key||'');
+ const ctx=`Сцена: ${State.scene.hero}; проблема: ${p?.label||'немає'}; мета=${State.health.goal||'?'}; intent=${State.scene.intent||'не задано'}.`;
+ if(d)return `Я пам'ятаю твоє рішення: «${d.value}». ${ctx} Яке наступне авторське рішення хочеш перевірити?`;
+ if(p)return `${ctx} Найкорисніше зараз: ${p.question}`;
+ return `${ctx} Можемо перейти до структури, персонажа або стилю.`;
+}
+$('chatSend').onclick=()=>{const t=$('chatInput').value.trim();if(!t)return;addObs('Автор',t,'chat');$('chatInput').value='';setTimeout(()=>{addObs('Ментор',chatReply(),'context-aware');renderFeed();saveState()},150)}
+
+const cm=$('contextMenu');
+function showSelectionMenu(){const ta=$('editor'),sel=ta.value.slice(ta.selectionStart,ta.selectionEnd);if(!sel){addObs('Виділення','Спочатку виділіть фрагмент у редакторі.','context');renderFeed();return}const r=ta.getBoundingClientRect();cm.dataset.selection=sel;cm.style.left=(r.left+40)+'px';cm.style.top=(r.top+70)+'px';cm.classList.add('show')}
+$('editor').addEventListener('contextmenu',e=>{e.preventDefault();showSelectionMenu()});
+document.addEventListener('click',e=>{if(!cm.contains(e.target)&&e.target!==$('editor'))cm.classList.remove('show')});
+cm.querySelectorAll('button').forEach(b=>b.onclick=()=>{const sel=cm.dataset.selection||'',a=fullAnalyze(sel);let msg='';switch(b.dataset.ctx){case'why':msg='У виділенні головна сліпа зона: '+(detectRawProblems(a)[0]?.label||'критичних проблем не знайдено');break;case'pov':msg=`POV: ${a.micro.pov}, стабільність ${Math.round(a.micro.povRatio*100)}%`;break;case'rhythm':msg=`Середня довжина речення: ${a.micro.avg.toFixed(1)} слова`;break;case'sensory':msg=`Домінантний канал: ${a.micro.sensoryDominant||'не визначено'}`;break;case'character':msg=`Мета у фрагменті: ${a.micro.hasGoal?'проявлена':'нечітка'}`;break;case'dialogue':msg=`Щільність діалогу: ${Math.round(a.micro.dialogue*100)}%`;break;case'exercise':pickExercise(detectRawProblems(a)[0]||{exercise:'sensory'});document.querySelector('[data-tab="exercises"]').click();msg='Вправу створено.'}addObs('Аналіз виділення',msg,'selection');renderFeed();cm.classList.remove('show')});
+
+function updateStats(){
+ const t=$('editor').value.trim(),w=t?t.split(/\s+/).length:0;
+ $('wordCount').textContent=w;$('charCount').textContent=$('editor').value.length;$('readTime').textContent=w<220?'<1 хв':Math.ceil(w/220)+' хв';
+}
+$('editor').addEventListener('input',()=>{updateStats();$('saveBadge').textContent='● Є зміни';$('saveBadge').className='tag warn'});
+$('intentInput').addEventListener('input',()=>{$('saveBadge').textContent='● Є зміни';$('saveBadge').className='tag warn'});
+
+
+function populateEmotionSelect(){ $('charEmotion').innerHTML=Object.entries(Emotion).map(([k,v])=>`<option value="${esc(k)}">${esc(v)}</option>`).join(''); }
+function clamp01(v){return Math.max(0,Math.min(1,Number(v)||0))}
+$('addCharacterBtn').onclick=()=>{const name=$('charName').value.trim();if(!name)return;State.characterState[name]={...(State.characterState[name]||{}),goal:$('charGoal').value.trim(),fear:$('charFear').value.trim(),need:$('charNeed').value.trim(),emotionalState:$('charEmotion').value,knowledge:State.characterState[name]?.knowledge||[],arcStage:State.characterState[name]?.arcStage||'unknown'};renderMemory();saveState()};
+$('addRelationshipBtn').onclick=()=>{const a=$('relA').value.trim(),b=$('relB').value.trim();if(!a||!b)return;State.relationships[`${a}—${b}`]={a,b,trust:clamp01($('relTrust').value),conflict:clamp01($('relConflict').value)};renderMemory();saveState()};
+$('addFactBtn').onclick=()=>{const fact=$('factText').value.trim();if(!fact)return;State.knowledge.push({fact,knows:$('factKnows').value.split(',').map(x=>x.trim()).filter(Boolean),revealedIn:$('factScene').value.trim()||State.scene.id});renderMemory();saveState()};
+$('addThreadBtn').onclick=()=>{const name=$('threadName').value.trim();if(!name)return;const existing=State.plot.threads.find(t=>t.name.toLowerCase()===name.toLowerCase());if(existing)existing.status=$('threadStatus').value;else State.plot.threads.push({id:'thread_'+Date.now(),name,status:$('threadStatus').value});renderMemory();saveState()};
+
+
+if($('startAdaptiveAssessment'))$('startAdaptiveAssessment').onclick=startAdaptiveAssessment;
+if($('startTransferTest'))$('startTransferTest').onclick=startTransferTest;
+if($('startKnowledgeAssessment'))$('startKnowledgeAssessment').onclick=startKnowledgeAssessment;
+if($('submitKnowledgeTest'))$('submitKnowledgeTest').onclick=submitKnowledgeAssessment;
+if($('cancelKnowledgeTest'))$('cancelKnowledgeTest').onclick=()=>{$('knowledgeAssessmentCard').hidden=true};
+if($('startPracticalAssessment'))$('startPracticalAssessment').onclick=startPracticalAssessment;
+if($('submitPracticalTask'))$('submitPracticalTask').onclick=submitPracticalAssessment;
+if($('cancelPracticalTask'))$('cancelPracticalTask').onclick=()=>{$('practicalAssessmentCard').hidden=true};
+if($('skillDetailSelect'))$('skillDetailSelect').onchange=renderSkillDetail;
+if($('regeneratePlanBtn'))$('regeneratePlanBtn').onclick=generateDevelopmentPlan;
+
+if($('wdiKnowledgeTestBtn'))$('wdiKnowledgeTestBtn').onclick=simulateKnowledgeTest;
+if($('wdiPracticalBtn'))$('wdiPracticalBtn').onclick=simulatePracticalTask;
+
+$('downloadBtn').onclick=()=>{const blob=new Blob([PRISTINE_HTML||('<!doctype html>\n'+document.documentElement.outerHTML)],{type:'text/html;charset=utf-8'}),u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download='fusion_lab_ai_mentor_v7_adaptive_mastery.html';a.click();setTimeout(()=>URL.revokeObjectURL(u),800)};
+
+loadState();
+populateEmotionSelect();
+Object.entries(State.relationships).forEach(([k,r])=>{if(!r.a){const parts=k.split('—');r.a=parts[0]||'';r.b=parts[1]||'';}});
+$('intentInput').value=State.scene.intent||'';
+$('versionLabel').textContent='v'+(State.version||1);
+if(State.awaitingEdit)$('awaitingEdit').classList.add('show');
+renderHealth();renderProblem();renderQuestion();renderIntentGap();renderMarkers();renderFeed();renderSkills();renderDecisions();renderMemory();renderWdi();renderDevelopmentPlan();updateAssessmentProgress();renderMastery();updateStats();
+</script>
+</body>
+</html>

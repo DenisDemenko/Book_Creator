@@ -4342,6 +4342,23 @@ ${JSON.stringify(bookContext || {}, null, 2)}
     res.sendFile(path.join(process.cwd(), root, 'write', 'index.html'));
   });
 
+  // Макет AI Mentor v7 «Adaptive Mastery Engine» (`public/mentor/index.html`).
+  //
+  // ЦЕ ПРОТОТИП, А НЕ ПРОДУКТ. Робочий AI-наставник живе в застосунку —
+  // `CoachModal.tsx` плюс маршрути `/api/ai/coach-*`, і він працює на
+  // СПРАВЖНЬОМУ AI та читає СПРАВЖНЮ книгу (запис #125). Цей файл —
+  // самодостатній макет власника: детерміновані regex-детектори і
+  // localStorage, без жодного запиту до моделі.
+  //
+  // Навіщо він у репозиторії. Попередні макети (v4) жили лише в чаті й у
+  // git не потрапляли — тож наступна сесія не могла ні звіритися з ними,
+  // ні побачити, що змінилось між версіями. Тепер макет під версійним
+  // контролем, і його можна відкрити поруч із продуктом і порівняти.
+  app.get(['/mentor', '/mentor/'], (_req, res) => {
+    const root = process.env.NODE_ENV === 'production' ? 'dist' : 'public';
+    res.sendFile(path.join(process.cwd(), root, 'mentor', 'index.html'));
+  });
+
   // Vite middleware setup
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
