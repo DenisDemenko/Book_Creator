@@ -21,6 +21,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Express } from 'express';
 import { requireAdmin } from './auth';
+import {
+  parseJournal,
+  extractEntryText,
+  parseJournalEntry,
+  readJournalSource,
+  type JournalEntry,
+} from './journal';
+
+export { parseJournal, extractEntryText, parseJournalEntry };
+export type { JournalEntry };
 
 /**
  * Розділювачі у виводі `git log`: 0x1e між комітами, 0x1f між полями.
@@ -79,16 +89,6 @@ export interface GitCommit {
   pushedTo: string[];
 }
 
-/** Запис журналу log.md — те, ЧОМУ коміт існує. */
-export interface JournalEntry {
-  n: number;
-  title: string;
-  /** «✅ Зроблено», «⚠️ Частково» тощо — те, що в заголовку після «→». */
-  status: string;
-  /** Короткий уривок: постановка задачі, якщо її видно, інакше перший абзац. */
-  excerpt: string;
-}
-
 function gitDir(): string | null {
   const candidate = path.join(process.cwd(), '.git');
   try {
@@ -113,20 +113,6 @@ function runGit(args: string[], extraEnv?: Record<string, string>): Promise<stri
       (err, stdout) => (err ? reject(err) : resolve(stdout))
     );
   });
-}
-
-/**
- * Витягує номер запису журналу з теми коміта.
- *
- * Обережно з `#`: у темах трапляються й посилання іншого роду («rev #1»),
- * тож беремо лише число з 1-3 цифр і відкидаємо явно не-журнальні
- * випадки. Помилитись тут не страшно — це підказка, а не дані.
- */
-export function parseJournalEntry(subject: string): number | null {
-  const match = subject.match(/#(\d{1,3})\b/);
-  if (!match) return null;
-  const n = Number(match[1]);
-  return n >= 1 && n <= 999 ? n : null;
 }
 
 /** Розбір виводу `git log --numstat` у масив комітів. */
@@ -179,113 +165,6 @@ export function parseGitLog(raw: string): GitCommit[] {
   return out;
 }
 
-
-/** Текст `log.md` із теки запуску, або null, якщо файлу немає. */
-function readJournal(): string | null {
-  try {
-    const file = path.join(process.cwd(), 'log.md');
-    return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Записи журналу `log.md` — заголовок, статус і короткий уривок.
- *
- * Навіщо в схемі комітів: тема коміта каже, ЩО змінилось, а запис
- * журналу — ЧОМУ це робилось і чим перевірено. На записи посилаються
- * дві третини комітів, тож без цього зв'язку схема лишалась би
- * причесаним `git log`.
- *
- * Повний текст запису тут НЕ віддається: `log.md` уже понад дев'ять тисяч
- * рядків, і слати його цілком на кожне відкриття вкладки — марно
- * витрачений трафік. Уривок для списку, повний текст — окремим запитом
- * за номером, коли власник розкриє коміт.
- */
-export function parseJournal(md: string): Map<number, JournalEntry> {
-  const entries = new Map<number, JournalEntry>();
-  const lines = md.split('\n');
-  let current: { n: number; title: string; status: string; body: string[] } | null = null;
-
-  const flush = () => {
-    if (!current) return;
-    entries.set(current.n, {
-      n: current.n,
-      title: current.title,
-      status: current.status,
-      excerpt: extractExcerpt(current.body),
-    });
-    current = null;
-  };
-
-  for (const line of lines) {
-    // Заголовок запису: «## 150. Назва → ✅ Статус». Номер обов'язковий —
-    // у файлі є й інші «##»-заголовки (стан гілок, вітрина, журнал сесій),
-    // і вони записами не є.
-    const head = line.match(/^##\s+(\d{1,3})\.\s+(.+)$/);
-    if (head) {
-      flush();
-      const rest = head[2];
-      // Статус у цьому журналі завжди починається з емодзі-позначки
-      // («→ ✅ Зроблено», «→ 📋 Черга», «→ 🔧 Ядро зроблено»). Саме її й
-      // вимагаємо, бо стрілка трапляється і В САМІЙ назві: запис
-      // «Конвеєр публікації замкнено: макет → PDF → лістинг → файл»
-      // статусу не має, і розбір «усе після останньої стрілки» відкусив
-      // би від назви слово «файл». Ще у 42 із 98 записів статусу немає
-      // зовсім — це старіші записи, і це нормально.
-      const arrow = rest.lastIndexOf('→');
-      const tail = arrow === -1 ? '' : rest.slice(arrow + 1).trim();
-      const looksLikeStatus = /^[\u2700-\u27bf\u2b00-\u2bff\u2600-\u26ff\ufe0f\u{1f300}-\u{1faff}]/u.test(tail);
-      current = {
-        n: Number(head[1]),
-        title: (looksLikeStatus ? rest.slice(0, arrow) : rest).trim(),
-        status: looksLikeStatus ? tail : '',
-        body: [],
-      };
-      continue;
-    }
-    // Будь-який інший заголовок рівня ## закриває поточний запис.
-    if (line.startsWith('## ') || line.startsWith('# ')) {
-      flush();
-      continue;
-    }
-    if (current) current.body.push(line);
-  }
-  flush();
-  return entries;
-}
-
-/** Постановка задачі, якщо вона є в записі; інакше перший змістовний абзац. */
-function extractExcerpt(body: string[]): string {
-  const text = body.join('\n');
-  const paragraphs = text
-    .split(/\n\s*\n/)
-    .map((p) => p.replace(/\s+/g, ' ').trim())
-    .filter((p) => p && !/^\*\*Сесія Claude/.test(p));
-
-  const stated = paragraphs.find((p) => /^\*\*Постановка/.test(p));
-  const chosen = stated || paragraphs[0] || '';
-  // Розмітку прибираємо: у картці коміта вона тільки шумить.
-  const plain = chosen.replace(/\*\*/g, '').replace(/`/g, '').trim();
-  return plain.length > 400 ? `${plain.slice(0, 399)}…` : plain;
-}
-
-/** Повний текст одного запису — для розкритої картки коміта. */
-export function extractEntryText(md: string, n: number): string | null {
-  const lines = md.split('\n');
-  const startPattern = new RegExp(`^##\\s+${n}\\.\\s`);
-  let start = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (startPattern.test(lines[i])) { start = i; break; }
-  }
-  if (start === -1) return null;
-  let end = lines.length;
-  for (let i = start + 1; i < lines.length; i++) {
-    if (lines[i].startsWith('## ') || lines[i].startsWith('# ')) { end = i; break; }
-  }
-  return lines.slice(start, end).join('\n').trim();
-}
 
 /**
  * Які коміти вже є на кожному remote — за локальними remote-tracking ref.
@@ -361,7 +240,7 @@ export function registerGitHistoryRoutes(app: Express): void {
 
       // Записи журналу — лише ті, на які справді хтось посилається.
       const journal: Record<number, JournalEntry> = {};
-      const md = readJournal();
+      const md = readJournalSource();
       if (md) {
         const parsed = parseJournal(md);
         const needed = new Set(commits.map((c) => c.journalEntry).filter((n): n is number => n !== null));
@@ -398,10 +277,10 @@ export function registerGitHistoryRoutes(app: Express): void {
     if (!Number.isFinite(n) || n < 1 || n > 999) {
       return res.status(400).json({ error: 'Некоректний номер запису.' });
     }
-    const md = readJournal();
-    if (!md) return res.status(404).json({ error: 'Файл log.md недоступний у цьому запуску.' });
+    const md = readJournalSource();
+    if (!md) return res.status(404).json({ error: 'Журнал недоступний у цьому запуску.' });
     const text = extractEntryText(md, Math.trunc(n));
-    if (!text) return res.status(404).json({ error: `Запису #${Math.trunc(n)} у log.md немає.` });
+    if (!text) return res.status(404).json({ error: `Запису #${Math.trunc(n)} у журналі немає.` });
     res.json({ n: Math.trunc(n), text });
   });
 

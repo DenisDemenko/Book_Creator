@@ -83,6 +83,26 @@ function pluralCommits(n: number): string {
   return `${n} комітів`;
 }
 
+/**
+ * Готує текст запису до показу в картці.
+ *
+ * Запис приходить сирим markdown, а показується в `<pre>` — тож зірочки й
+ * решітки лишались на екрані як сміття, а перший рядок дублював назву,
+ * яка стоїть просто над ним. Повноцінний markdown-рендер тут не потрібен:
+ * достатньо зняти розмітку, яку нічим не замінюють.
+ */
+function readableEntry(raw: string): string {
+  const lines = raw.split('\n');
+  // Перший рядок — заголовок запису; назва вже показана кнопкою вище.
+  if (lines[0]?.startsWith('#')) lines.shift();
+  return lines
+    .join('\n')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^\s*\n/, '')
+    .trimEnd();
+}
+
 export const AdminGitHistoryView: React.FC = () => {
   const [commits, setCommits] = useState<Commit[]>([]);
   const [total, setTotal] = useState(0);
@@ -464,7 +484,9 @@ export const AdminGitHistoryView: React.FC = () => {
                             </button>
                             {expanded === c.hash ? (
                               <pre className="mt-1.5 max-h-80 overflow-y-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-slate-300 font-sans">
-                                {entryText[c.journalEntry] || 'Читаємо запис…'}
+                                {entryText[c.journalEntry]
+                                  ? readableEntry(entryText[c.journalEntry])
+                                  : 'Читаємо запис…'}
                               </pre>
                             ) : (
                               <p className="mt-0.5 text-[10.5px] leading-snug text-slate-400 line-clamp-2">

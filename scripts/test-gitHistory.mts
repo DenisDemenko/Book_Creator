@@ -17,7 +17,13 @@ if (!fs.existsSync(`${REPO}/.git`)) {
   process.exit(0);
 }
 
-const { parseGitLog, parseJournalEntry, parseJournal, extractEntryText } = await import('../server/gitHistoryRoutes');
+const { parseGitLog } = await import('../server/gitHistoryRoutes');
+// Журнал читаємо тим самим модулем, що й сервер: з 12.09.2026 він
+// розділений на покажчик log.md + частини в log/, і читач, який
+// відкриває лише log.md, побачив би нуль записів. Саме так цей тест і
+// впав після розділення — тому тут readJournalSource(), а не readFileSync.
+const { parseJournalEntry, parseJournal, extractEntryText, readJournalSource } =
+  await import('../server/journal');
 
 const REC = '\u001e';
 const FLD = '\u001f';
@@ -80,7 +86,7 @@ t('додано/вилучено — невід\'ємні числа',
   commits.every((c) => c.insertions >= 0 && c.deletions >= 0 &&
     Number.isFinite(c.insertions) && Number.isFinite(c.deletions)));
 
-console.log('\nЗв\'язок із журналом log.md:');
+console.log('\nЗв\'язок із журналом:');
 t('посилання на записи знайдені', commits.filter((c) => c.journalEntry !== null).length > 50,
   `${commits.filter((c) => c.journalEntry !== null).length} комітів`);
 t('«записати #140» → 140', parseJournalEntry('docs: записати #140 — живе QA') === 140);
@@ -101,11 +107,17 @@ t('сміття без розділювачів нічого не ламає', p
 t('коміт без numstat (мердж) розбирається',
   parseGitLog(`${REC}${'a'.repeat(40)}${FLD}2026-09-01T10:00:00+03:00${FLD}2026-09-01T10:00:00+03:00${FLD}Хтось${FLD}p1 p2${FLD}Merge branch`).length === 1);
 
-console.log('\nРозбір журналу log.md:');
+console.log('\nРозбір журналу (покажчик + частини):');
 {
-  const md = fs.existsSync(`${REPO}/log.md`) ? fs.readFileSync(`${REPO}/log.md`, 'utf8') : '';
+  const md = readJournalSource() ?? '';
   const entries = parseJournal(md);
-  const headingCount = (md.match(/^##\s+\d{1,3}\./gm) || []).length;
+  // Заголовків рахуємо всі три форми: `## N.`, `## #N —` і сесійну мітку.
+  // Перша версія рахувала лише першу — і саме тому не бачила 52 записи.
+  const uniq = new Set<number>();
+  for (const m of md.matchAll(/^##\s+(\d{1,3})\.\s/gm)) uniq.add(Number(m[1]));
+  for (const m of md.matchAll(/^##\s+#(\d{1,3})\s*[\u2014\u2013-]\s/gm)) uniq.add(Number(m[1]));
+  for (const m of md.matchAll(/^##\s+.*?\u2014\s*запис(?!и)\s+#(\d{1,3})\s*$/gm)) uniq.add(Number(m[1]));
+  const headingCount = uniq.size;
   t('розібрано всі нумеровані записи', entries.size === headingCount, `${entries.size} проти ${headingCount}`);
   t('у кожного запису є назва', [...entries.values()].every((e) => e.title.length > 0));
   // Статус є не в кожного запису: у 42 із 98 його немає зовсім (старіші
