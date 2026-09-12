@@ -19,6 +19,7 @@ import {
   parseJournalEntry,
   readJournalSource,
   splitTitleStatus,
+  referencedEntries,
 } from '../server/journal.ts';
 
 let pass = 0;
@@ -160,6 +161,70 @@ if (!source) {
   }
 
   console.log(`\nЖурнал: ${entries.size} записів (#${nums[0]}–#${nums[nums.length - 1]}), форми: ${JSON.stringify(byForm)}`);
+}
+
+
+console.log('\n── CRLF: журнал із машини власника ──');
+{
+  // Справжній баг 12.09.2026: у власника core.autocrlf=true, тож журнал у
+  // робочій теці з CRLF. Розбиття по «\n» лишало «\r», і зі 156 записів
+  // знаходилось 10 — усі формою C. Причина точна: у JS «.» не відповідає
+  // «\r» (це термінатор рядка), тож форми A і B з «(.+)$» збігу не давали,
+  // а форма C із «\s*$» вціліла, бо «\s» його поглинає.
+  const lf = readJournalSource();
+  if (!lf) {
+    console.log('  (журналу немає — пропускаємо)');
+  } else {
+    const crlf = lf.replace(/\n/g, '\r\n');
+    const a = parseJournal(lf);
+    const b = parseJournal(crlf);
+    eq('CRLF дає стільки ж записів, скільки LF', b.size, a.size);
+    ok('у CRLF присутні всі три форми',
+      new Set([...b.values()].map((e) => e.form)).size === 3,
+      [...new Set([...b.values()].map((e) => e.form))].join(','));
+    ok('назви в CRLF без хвостового \\r',
+      [...b.values()].every((e) => !/[\r]/.test(e.title)));
+    ok('статуси в CRLF без хвостового \\r',
+      [...b.values()].every((e) => !/[\r]/.test(e.status)));
+    ok('повний текст у CRLF знаходиться',
+      !!extractEntryText(crlf, [...b.keys()][0]));
+
+    // Окремо — самотній CR (старий Mac). Дешево, і теж не має валити.
+    const cr = lf.replace(/\n/g, '\r');
+    eq('самотній CR теж розбирається', parseJournal(cr).size, a.size);
+  }
+
+  // Рядок із «\r» напряму — саме так він приходив із чужого розбиття.
+  eq('форма A з \\r', parseHeading('## 150. Назва → ✅ Зроблено\r')?.n, 150);
+  eq('форма B з \\r', parseHeading('## #12 — Назва → ✅ Виконано\r')?.n, 12);
+  eq('форма C з \\r', parseHeading('## Сесія 05.09.2026 #06 — запис #118\r')?.n, 118);
+  eq('назва не тягне за собою \\r',
+    parseHeading('## 150. Назва → ✅ Зроблено\r')?.status, '✅ Зроблено');
+}
+
+
+console.log('\n── Посилання на записи: проза записом не є ──');
+{
+  // Саме тут хук помилково скасував пуші власника: у тілі коміта я писав
+  // «правки власника №2 і №3», і `#2`/`#3` було прочитано як записи.
+  const body = "the owner's fixes #2 and #3 wired mastery; my own #6 was different";
+  eq('гола решітка в ПРОЗІ не вважається посиланням',
+    referencedEntries('feat(wdi): foundation', body).length, 0);
+
+  // А справжні форми — вважаються.
+  ok('«log.md #151» — посилання', referencedEntries('', 'див. log.md #151').includes(151));
+  ok('«запис #150» — посилання', referencedEntries('', 'прохання власника, запис #150').includes(150));
+  ok('«записи #48–#124» ловить перший номер', referencedEntries('', 'записи #48 і далі').includes(48));
+  ok('«(#114)» у дужках — посилання', referencedEntries('log: лендінг (#114)').includes(114));
+  ok('гола решітка в ТЕМІ — посилання', referencedEntries('fix: щось (#151)').includes(151));
+  ok('гола решітка в темі без дужок теж', referencedEntries('fix: щось #151').includes(151));
+
+  // Хвіст коміта не має давати посилань навіть якщо там є числа.
+  eq('чотиризначне число не посилання', referencedEntries('', 'ключ ****3986').length, 0);
+  eq('нуль не посилання', referencedEntries('', 'запис #0').length, 0);
+  // Тема з номером + проза з іншими: беремо лише тему.
+  const mixed = referencedEntries('feat: зроблено (#156)', 'правки #2, #3 і #6 власника');
+  eq('із суміші беремо лише справжнє', mixed.join(','), '156');
 }
 
 console.log('\n── Уривок і посилання з теми коміта ──');

@@ -63,7 +63,9 @@ export function readJournalSource(cwd = process.cwd()): string | null {
   } catch {
     /* частини недоступні — віддамо хоч індекс */
   }
-  return parts.length ? parts.join('\n\n') : null;
+  // Нормалізуємо тут, щоб CRLF не доходив до розбору взагалі: це
+  // другий шар захисту поверх splitLines().
+  return parts.length ? parts.join('\n\n').replace(/\r\n?/g, '\n') : null;
 }
 
 /** Один запис журналу — те, ЧОМУ коміт існує. */
@@ -76,6 +78,24 @@ export interface JournalEntry {
   excerpt: string;
   /** Якою формою заголовка знайдено — A, B чи C. Для діагностики. */
   form: 'A' | 'B' | 'C';
+}
+
+/**
+ * Розбиття на рядки, стійке до CRLF.
+ *
+ * НЕ дрібниця, а справжній баг, який поклав хук на пуші власника
+ * 12.09.2026. У нього `core.autocrlf = true`, тож у робочій теці журнал
+ * лежить із CRLF, а розбиття по `\n` лишало `\r` у кінці кожного рядка.
+ *
+ * Механізм точний: у JavaScript `.` НЕ відповідає `\r` — це термінатор
+ * рядка. Форми A і B закінчуються на `(.+)$`, тож зайвий `\r` робив збіг
+ * неможливим. А форма C закінчується на `\s*$`, і `\s` символ `\r`
+ * поглинає — тому вона єдина вціліла. Наслідок: зі 156 записів
+ * знаходилось 10, усі формою C, і схема комітів в адмінці на машині
+ * власника показувала те саме.
+ */
+function splitLines(md: string): string[] {
+  return md.split(/\r\n|\n|\r/);
 }
 
 /** Заголовок форми A: `## 150. Назва → статус`. */
@@ -125,7 +145,9 @@ interface Heading {
  * Експортовано, бо тим самим розбором користуються і тест, і хук: якщо
  * форма заголовка колись зміниться вчетверте, місце для правки одне.
  */
-export function parseHeading(line: string): Heading | null {
+export function parseHeading(raw: string): Heading | null {
+  // Захист на випадок, коли рядок прийшов із чужого розбиття по '\n'.
+  const line = raw.replace(/[\r\u2028\u2029]+$/, '');
   const a = line.match(HEAD_A);
   if (a) return { n: Number(a[1]), ...splitTitleStatus(a[2]), form: 'A' };
 
@@ -164,7 +186,7 @@ export function parseJournal(md: string): Map<number, JournalEntry> {
   // затирала б запис із назвою.
   const fallback = new Map<number, JournalEntry>();
 
-  const lines = md.split('\n');
+  const lines = splitLines(md);
   let head: Heading | null = null;
   let body: string[] = [];
 
@@ -246,7 +268,7 @@ export function extractExcerpt(body: string[]): string {
 
 /** Повний текст одного запису — для розкритої картки коміта. */
 export function extractEntryText(md: string, n: number): string | null {
-  const lines = md.split('\n');
+  const lines = splitLines(md);
   let start = -1;
   let fallbackStart = -1;
   for (let i = 0; i < lines.length; i++) {
@@ -268,6 +290,37 @@ export function extractEntryText(md: string, n: number): string | null {
     if (isSectionBreak(lines[i])) { end = i; break; }
   }
   return lines.slice(start, end).join('\n').trim();
+}
+
+/**
+ * Номери, на які коміт СПРАВДІ посилається як на записи журналу.
+ *
+ * Гола решітка з числом у прозі записом не є — і це не теорія: на пушах
+ * власника 12.09.2026 хук `pre-push` зачепився за «правки власника №2 і
+ * №3» у тілі коміта, де `#2` і `#3` означали пункти ЙОГО списку восьми
+ * виправлень, а не записи журналу. Перевірка формально спрацювала, але не
+ * на те, і пуш було скасовано без причини.
+ *
+ * Тому посиланням вважаємо лише усталені в цьому проєкті форми:
+ *  - `log.md #151` — саме так це показує схема комітів в адмінці;
+ *  - `запис #151` / `записи #151` — як у самому журналі;
+ *  - `(#151)` у дужках — конвенція тем комітів (`log: … (#114)`);
+ *  - `#151` у ТЕМІ коміта — там решітка іншого значення не має.
+ *
+ * Усе інше — проза, і судити коміт за неї безглуздо.
+ */
+export function referencedEntries(subject: string, body = ''): number[] {
+  const out = new Set<number>();
+  const add = (raw: string) => {
+    const n = Number(raw);
+    if (n >= 1 && n <= 999) out.add(n);
+  };
+  const both = `${subject}\n${body}`;
+  for (const m of both.matchAll(/log\.md\s*#(\d{1,3})\b/gi)) add(m[1]);
+  for (const m of both.matchAll(/запис(?:и|у|ів)?\s+#(\d{1,3})\b/gi)) add(m[1]);
+  for (const m of both.matchAll(/\(#(\d{1,3})\)/g)) add(m[1]);
+  for (const m of subject.matchAll(/#(\d{1,3})\b/g)) add(m[1]);
+  return [...out];
 }
 
 /**

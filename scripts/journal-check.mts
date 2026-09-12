@@ -25,7 +25,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { parseJournal, extractEntryText, readJournalSource } from '../server/journal.ts';
+import { parseJournal, extractEntryText, readJournalSource, referencedEntries } from '../server/journal.ts';
 
 const range = process.argv[2] || '';
 
@@ -51,6 +51,18 @@ if (!entries.size) {
 }
 
 const spec = range ? [range] : [];
+// Якщо діапазон не розв'язується (чужий хеш, зіпсований аргумент), git
+// віддає порожньо — і перевірка тихо «проходила», перевіривши нуль
+// комітів. Хук, який на помилці каже «все добре», гірший за відсутній,
+// тож розв'язність діапазону перевіряємо ОКРЕМО й падаємо явно.
+if (range) {
+  const probe = git(['rev-list', '--count', range]);
+  if (!probe.trim()) {
+    console.error(`✗ journal-check: діапазон «${range}» не розв'язується в цьому репозиторії.`);
+    console.error('  Перевірку не виконано — і це помилка, а не дозвіл.');
+    process.exit(1);
+  }
+}
 const raw = git(['log', '--format=%H%x1f%s%x1f%B%x1e', ...spec]);
 const commits = raw
   .split('\x1e')
@@ -61,29 +73,14 @@ const commits = raw
   })
   .filter((c) => c.hash);
 
-/**
- * Номери, на які посилається коміт. Беремо і тему, і тіло, але лише в
- * контексті, що справді означає запис: «#151», «log.md #151», «запис #151».
- * Гола решітка з числом трапляється і в іншому значенні (ключі, quota,
- * номери портів), тож 4+ цифр відкидаємо — записів стільки не буде.
- */
-function referenced(text: string): number[] {
-  const out = new Set<number>();
-  for (const m of text.matchAll(/#(\d{1,3})\b/g)) {
-    const n = Number(m[1]);
-    if (n >= 1 && n <= 999) out.add(n);
-  }
-  return [...out];
-}
-
 const dangling: { hash: string; subject: string; n: number }[] = [];
 let checked = 0;
 
 for (const c of commits) {
   // Хвіст коміта службовий: у ньому «Co-Authored-By» і посилання на
   // сесію, і жодних згадок журналу там бути не може.
-  const text = `${c.subject}\n${c.body.split(/^(?:Co-Authored-By|Claude-Session):/m)[0]}`;
-  for (const n of referenced(text)) {
+  const body = c.body.split(/^(?:Co-Authored-By|Claude-Session):/m)[0];
+  for (const n of referencedEntries(c.subject, body)) {
     checked += 1;
     if (!entries.has(n) || !extractEntryText(source, n)) {
       dangling.push({ hash: c.hash.slice(0, 9), subject: c.subject.slice(0, 62), n });
