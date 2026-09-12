@@ -52,6 +52,7 @@ import { registerSupportChatRoutes } from './server/supportChatRoutes';
 import { registerChatRoutes, CHAT_USAGE_CONTEXT } from './server/chatRoutes';
 import { registerApiKeysRoutes } from './server/apiKeysRoutes';
 import { registerGitHistoryRoutes } from './server/gitHistoryRoutes';
+import { registerGitCommandRoutes } from './server/gitCommandRoutes';
 import { registerExpressRoutes } from './server/expressRoutes';
 import { registerDiagnRoutes } from './server/diagnRoutes';
 import { registerMarketRoutes } from './server/marketRoutes';
@@ -313,6 +314,7 @@ registerCourseWizardRoutes(app);
 registerModerationRoutes(app);
 registerSupportChatRoutes(app);
 registerGitHistoryRoutes(app);
+registerGitCommandRoutes(app);
 
   /**
    * Модуль публікації та експорту (Amazon KDP + Etsy). Реєструється тут,

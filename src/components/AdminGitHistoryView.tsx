@@ -13,6 +13,7 @@
  * причину, а не зникає без слова.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { GitCommandPanel } from './GitCommandPanel';
 import {
   GitCommit, RefreshCw, Loader2, AlertTriangle, FileDiff, BookOpen,
   CloudUpload, CloudOff, ChevronDown, Radio,
@@ -118,6 +119,14 @@ export const AdminGitHistoryView: React.FC = () => {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [entryText, setEntryText] = useState<Record<number, string>>({});
   const [verify, setVerify] = useState<{ busy: boolean; head?: string; results?: RemoteCheck[]; error?: string }>({ busy: false });
+  /**
+   * Коміт, вибраний для панелі команд. Клік по хешу в стрічці підставляє
+   * його — інакше 40 символів довелось би переписувати руками, а помилка
+   * в одному символі дала б «коміта немає» без зрозумілої причини.
+   */
+  const [pickedHash, setPickedHash] = useState<string | null>(null);
+  /** Лічильник кліків — щоб повторний клік по тому самому хешу теж діяв. */
+  const [pickNonce, setPickNonce] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -359,6 +368,17 @@ export const AdminGitHistoryView: React.FC = () => {
         ))}
       </div>
 
+      {/* Команди над комітом — на прохання власника: кнопками, з вибором
+          коміта зі списку або вручну, і поясненням при наведенні. */}
+      <div className="mb-4">
+        <GitCommandPanel
+          commits={commits}
+          presetHash={pickedHash}
+          presetNonce={pickNonce}
+          onChanged={load}
+        />
+      </div>
+
       {/* Стрічка часу */}
       <div className="relative pl-5">
         {/* Вертикаль стрічки */}
@@ -399,7 +419,22 @@ export const AdminGitHistoryView: React.FC = () => {
                       <div className="min-w-0 flex-1">
                         <p className="text-xs text-slate-200 leading-snug break-words">{c.subject}</p>
                         <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[10px]">
-                          <span className="font-mono text-slate-500">{c.shortHash}</span>
+                          {/* Клік підставляє хеш у панель команд: 40 символів
+                              руками — це помилка в одному символі й потім
+                              «коміта немає» без зрозумілої причини. */}
+                          <button
+                            type="button"
+                            data-pick-hash={c.hash}
+                            title="Підставити цей коміт у панель команд"
+                            onClick={() => { setPickedHash(c.hash); setPickNonce((n) => n + 1); }}
+                            className={`font-mono rounded px-1 -mx-1 transition-colors ${
+                              pickedHash === c.hash
+                                ? 'bg-cyan-500/20 text-cyan-200'
+                                : 'text-slate-500 hover:bg-white/10 hover:text-slate-300'
+                            }`}
+                          >
+                            {c.shortHash}
+                          </button>
                           <span className="text-slate-600">{fmtTime(c.date)}</span>
                           <span
                             className={`px-1.5 py-px rounded border font-semibold ${
