@@ -32,6 +32,69 @@
 
 ---
 
+# Репозиторії, з якими працюємо (звірено 12.09.2026)
+
+> Записано на пряме прохання власника. Читати ПЕРЕД першим пушем у сесії:
+> саме плутанина в цьому переліку 11.09.2026 призвела до того, що робота
+> кількох сесій пішла в репозиторій, з якого ніщо не деплоїться (запис
+> #140). Дані звірені `git remote -v` на машині власника й скріншотами
+> Railway/Vercel від нього ж, а не з пам'яті.
+
+## Студія (цей проєкт)
+
+| Що | Де |
+|---|---|
+| Робоча копія власника | `D:\Rama\Book_Creality`, гілка `master` |
+| Клон у хмарній сесії Claude | `/root/work/bookcreality` (пуш звідси неможливий — мережеву політику див. нижче) |
+| Remote `production` | **`https://github.com/DenisDemenko/Book_Creator.git`** |
+| Remote `origin` | `https://github.com/DenisDemenko/FusionLabPush.git` |
+
+**`Book_Creator` — єдиний репозиторій, з якого йде прод.** Railway проєкт
+`comfortable-caring`, сервіс `Book_Creator`, гілка `master`, автодеплой
+при пуші увімкнений → `bookcreator-production-7304.up.railway.app` →
+за реверс-проксі маркетплейсу відкривається як
+**`app.fusionlab.in.ua/studio/`**. Том даних монтується в сервісі
+(Settings → Volumes) у точку `/data` — у Dockerfile задано `DATA_DIR=/data`,
+самої інструкції `VOLUME` там немає, бо Railway такий образ відхиляє.
+
+**`FusionLabPush` — НІ ДО ЧОГО не підключений.** Створений 11.09.2026 і
+тоді ж помилково прописаний як `origin` замість наявного `Book_Creator`.
+Жодного деплою з нього немає. Лишається як другий remote суто щоб історія
+не розійшлась; **пуш лише туди = робота нікуди не потрапила.**
+
+**Тому пуш завжди в ДВА remote:**
+
+```powershell
+cd D:\Rama\Book_Creality
+git push origin master
+git push production master
+```
+
+## Маркетплейс (окремий проєкт)
+
+| Що | Де |
+|---|---|
+| Репозиторій | `https://github.com/DenisDemenko/Fusion-Lab-Marketplaes.git`, гілка `master` |
+| Vercel | проєкт `fusion-lab-marketplaes-web`, команда `denisdemenkos-projects` → сам сайт і rewrite `/studio/:path*` на Студію |
+| Railway | проєкт `adventurous-tranquility`, сервіс `@fusion-lab/web` + Postgres → **`api.fusionlab.in.ua`** |
+
+Саме rewrite `/studio/:path*` у цьому проєкті зрізає префікс, через що в
+Студії існує `src/utils/basePath.ts`, і саме він з'їдає завершальну скісну
+— причина двох окремих історій із лендінгом (записи #113/#114).
+
+## Чому пуш робить власник, а не Claude
+
+З хмарної пісочниці `git push` на GitHub не проходить: організаційна
+політика мережі. З `device_bash` на машині власника — теж, але з іншої
+причини: там немає доступу до його GitHub-облікових даних (вони у
+Windows Credential Manager). `git ls-remote` звідти працює, тож **стан
+remote перевірити можна, запушити — ні**. Робочий порядок: Claude комітить
+у хмарному клоні → `git format-patch` → патч кладеться в теку репозиторію
+власника → `git am --3way` через `device_bash` → **пуш власник запускає
+сам** двома командами вище.
+
+---
+
 # Що не запушено (для наступної сесії)
 
 > Оновлюється щоразу, коли зʼявляється коміт. Пуш робиться **лише на пряме
