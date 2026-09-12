@@ -24,11 +24,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  ARG_PLACEHOLDER,
+  GIT_PREFIX_ARGS,
   GIT_COMMANDS,
   buildArgs,
   commandById,
   isPlausibleHash,
+  isSafeMessage,
+  isSafePath,
   isSafeRefName,
+  needsCommit,
   renderDisplay,
 } from '../server/gitCommands.ts';
 
@@ -41,7 +46,11 @@ function t(name: string, cond: boolean, extra = '') {
 
 console.log('\n── Каталог ──');
 {
-  t('команд принаймні десять', GIT_COMMANDS.length >= 10, `${GIT_COMMANDS.length}`);
+  t('команд принаймні тридцять', GIT_COMMANDS.length >= 30, `${GIT_COMMANDS.length}`);
+  t('у кожної команди є група', GIT_COMMANDS.every((c) => !!c.group));
+  t('усі шість груп заповнені',
+    new Set(GIT_COMMANDS.map((c) => c.group)).size === 6,
+    [...new Set(GIT_COMMANDS.map((c) => c.group))].join(','));
   t('id унікальні', new Set(GIT_COMMANDS.map((c) => c.id)).size === GIT_COMMANDS.length);
   t('у кожної є підпис, команда і підказка',
     GIT_COMMANDS.every((c) => c.label && c.display && c.tooltip));
@@ -72,9 +81,12 @@ console.log('\n── Каталог ──');
   t('reset згадує незворотність',
     /НЕЗВОРОТНО|не можна/.test(commandById('reset-hard')?.tooltip || ''));
 
+  // Чистого дерева вимагають рівно ті, що при конфлікті лишають півстан:
+  // revert, cherry-pick і merge. Список перелічений повністю, а не «хоч
+  // щось», щоб нова така команда без цієї вимоги впала тут, а не в роботі.
   const needsClean = GIT_COMMANDS.filter((c) => c.needsCleanTree);
-  t('revert і cherry-pick вимагають чистого дерева',
-    needsClean.map((c) => c.id).sort().join(',') === 'cherry-pick,revert',
+  t('чистого дерева вимагають рівно revert, cherry-pick і merge',
+    needsClean.map((c) => c.id).sort().join(',') === 'cherry-pick,merge,revert',
     needsClean.map((c) => c.id).join(','));
   t('у них є команда виходу з півстану', needsClean.every((c) => !!c.abortHint));
 
@@ -145,11 +157,102 @@ console.log('\n── Підстановка лишає аргументи сп�
     renderDisplay(tag, 'abc1234').includes('<ім’я>'));
 }
 
+
+console.log('\n── Шляхи: нова поверхня для помилок ──');
+{
+  for (const good of ['server/db.ts', 'log/001-047.md', 'a.txt', 'src/components/Panel.tsx']) {
+    t(`дозволено «${good}»`, isSafePath(good));
+  }
+  const badPaths: [string, string][] = [
+    ['-f', 'git прийняв би за прапорець'],
+    ['--force', 'те саме, довго'],
+    ['../../etc/passwd', 'вихід за межі репозиторію'],
+    ['a/../../b', '«..» у середині шляху'],
+    ['..\\..\\x', 'зворотні слеші теж треба нормалізувати'],
+    ['/etc/passwd', 'абсолютний шлях'],
+    ['C:\\Windows\\x', 'абсолютний шлях Windows'],
+    ['', 'порожній'],
+    ['x'.repeat(401), 'надто довгий'],
+  ];
+  for (const [bad, why] of badPaths) t(`відхилено «${bad.slice(0, 16)}»`, !isSafePath(bad), why);
+
+  // Усі шляхові команди мусять передавати шлях ПІСЛЯ `--`, інакше навіть
+  // дозволений рядок git міг би прочитати як ревізію.
+  const pathCmds = GIT_COMMANDS.filter((c) => c.needs === 'path' && c.args.length);
+  t('шляхові команди використовують розділювач --',
+    pathCmds.every((c) => c.args.includes('--')),
+    pathCmds.map((c) => c.id).join(','));
+  t('шлях іде ПІСЛЯ --',
+    pathCmds.every((c) => c.args.indexOf('%ARG') > c.args.indexOf('--')));
+}
+
+console.log('\n── Опис коміта ──');
+{
+  t('нормальний опис', isSafeMessage('fix: полагодив лінійку'));
+  t('лапки й символи оболонки дозволені (оболонки немає)',
+    isSafeMessage('fix: "лапки", $VAR, `бектіки`, ; && rm -rf /'));
+  t('порожній відхилено', !isSafeMessage('   '));
+  t('керуючі символи відхилено', !isSafeMessage('опис\u0007дзвінок'));
+  t('надто довгий відхилено', !isSafeMessage('я'.repeat(2001)));
+  t('переніс рядка дозволено', isSafeMessage('перший рядок\nдругий'));
+}
+
+console.log('\n── Потреба в коміті виводиться з даних ──');
+{
+  t('show потребує коміт', needsCommit(commandById('show')!));
+  t('tag потребує коміт І назву',
+    needsCommit(commandById('tag')!) && commandById('tag')!.needs === 'ref');
+  t('status коміт НЕ потребує', !needsCommit(commandById('status')!));
+  t('add-path коміт НЕ потребує', !needsCommit(commandById('add-path')!));
+  t('merge коміт НЕ потребує', !needsCommit(commandById('merge')!));
+  // Якби потребу оголошували полем, а не виводили, tag втратив би одне з двох.
+  const both = GIT_COMMANDS.filter((c) => needsCommit(c) && c.needs && c.needs !== 'none');
+  t('є команди з ДВОМА аргументами', both.length >= 2, both.map((c) => c.id).join(','));
+}
+
+console.log('\n── Мережа: жодної виконуваної команди ──');
+{
+  const sync = GIT_COMMANDS.filter((c) => c.group === 'sync');
+  t('група синхронізації непорожня', sync.length >= 4, `${sync.length}`);
+  t('ЖОДНА команда синхронізації не виконується',
+    sync.every((c) => c.tier === 'manual' && c.args.length === 0),
+    sync.map((c) => c.id).join(','));
+  // Тут перша версія тесту була надто широкою і справедливо впала:
+  // `git remote add` мережі НЕ потребує, тож причина «немає доступу» до
+  // нього не стосується — у нього причина інша. Тому дві окремі перевірки.
+  t('кожна підказка синхронізації каже, що панель цього не виконує',
+    sync.every((c) => /не виконує|довідкова|не варто/.test(c.tooltip)),
+    sync.filter((c) => !/не виконує|довідкова|не варто/.test(c.tooltip)).map((c) => c.id).join(',') || 'усі кажуть');
+  const networked = ['pull', 'push', 'push-first'];
+  t('мережеві називають саме брак доступу до GitHub',
+    networked.every((id) => /доступ|логін/.test(commandById(id)!.tooltip)),
+    networked.filter((id) => !/доступ|логін/.test(commandById(id)!.tooltip)).join(',') || 'усі називають');
+  const setup = GIT_COMMANDS.filter((c) => c.group === 'setup');
+  t('створення/клонування теж не виконується',
+    setup.every((c) => c.tier === 'manual' && c.args.length === 0));
+  // І взагалі ніде в аргументах не має бути мережевих слів.
+  t('у жодних аргументах немає push/pull/clone/fetch',
+    GIT_COMMANDS.every((c) => !/\b(push|pull|clone|fetch)\b/.test(c.args.join(' '))));
+}
+
+console.log('\n── Заповнювачі в показі команди ──');
+{
+  for (const c of GIT_COMMANDS) {
+    const token = ARG_PLACEHOLDER[c.needs || 'none'];
+    if (!token) continue;
+    t(`«${c.id}»: показ містить свій заповнювач ${token}`, c.display.includes(token));
+  }
+  t('шлях підставляється в показ',
+    renderDisplay(commandById('add-path')!, '', 'server/db.ts') === 'git add server/db.ts');
+  t('опис підставляється в показ',
+    renderDisplay(commandById('commit')!, '', 'моя правка').includes('моя правка'));
+}
+
 // ── Виконання на одноразовому репозиторії ────────────────────────────────
 console.log('\n── Виконання на справжньому одноразовому репозиторії ──');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gitcmd-'));
 function g(args: string[], cwd = tmp): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' });
+  return execFileSync('git', [...GIT_PREFIX_ARGS, ...args], { cwd, encoding: 'utf8' });
 }
 try {
   g(['init', '-q', '-b', 'main']);
@@ -165,7 +268,9 @@ try {
   const run = (id: string, hash: string, name?: string) => {
     const spec = commandById(id)!;
     try {
-      return { ok: true, out: execFileSync('git', buildArgs(spec, hash, name), { cwd: tmp, encoding: 'utf8' }) };
+      // Той самий префікс, що й на сервері, — інакше тест перевіряв би не
+      // те, що насправді виконується.
+      return { ok: true, out: execFileSync('git', [...GIT_PREFIX_ARGS, ...buildArgs(spec, hash, name)], { cwd: tmp, encoding: 'utf8' }) };
     } catch (e: any) {
       return { ok: false, out: String(e?.stdout || '') + String(e?.stderr || e?.message || '') };
     }
@@ -206,9 +311,88 @@ try {
   t('stat не збігається зі show (це різні команди, а не однакові)',
     run('stat', second).out !== run('show', second).out);
 
+
+  // ── Друга порція команд: щоденне, гілки, історія ──────────────────────
+  console.log('');
+  const status = run('status', '');
+  t('status показує стан', status.ok && /branch|On branch|main/i.test(status.out));
+
+  const logOne = run('log-oneline', '');
+  t('log --oneline дає рядки комітів', logOne.ok && logOne.out.trim().split('\n').length >= 3);
+
+  const brList = run('branch-list', '');
+  t('список гілок містить активну із зірочкою', brList.ok && /\*\s/.test(brList.out));
+
+  // add <file> + commit: працюємо на новому файлі, щоб не чіпати наявні.
+  fs.writeFileSync(path.join(tmp, 'нове.txt'), 'вміст\n');
+  const addOne = run('add-path', '', 'нове.txt');
+  t('add <файл> додає саме його',
+    addOne.ok && g(['diff', '--cached', '--name-only']).includes('нове.txt'));
+
+  const unstage = run('restore-staged', '', 'нове.txt');
+  t('restore --staged знімає з індексу, але файл лишається',
+    unstage.ok &&
+    !g(['diff', '--cached', '--name-only']).includes('нове.txt') &&
+    fs.existsSync(path.join(tmp, 'нове.txt')));
+
+  const addAll = run('add-all', '');
+  t('add . додає все', addAll.ok && g(['diff', '--cached', '--name-only']).includes('нове.txt'));
+
+  const before = Number(g(['rev-list', '--count', 'HEAD']).trim());
+  const commitRes = run('commit', '', 'test: коміт із панелі');
+  const after = Number(g(['rev-list', '--count', 'HEAD']).trim());
+  t('commit -m створює коміт', commitRes.ok && after === before + 1, `${before} → ${after}`);
+  t('опис коміта збережено дослівно',
+    g(['log', '-1', '--format=%s']).trim() === 'test: коміт із панелі');
+
+  // Гілки: створити, перейти, злити, видалити.
+  // Назва латиницею — саме такі й пропускає isSafeRefName; кириличну він
+  // відхиляє ще до виконання, тож перевіряти нею створення безглуздо.
+  const bh = run('branch-here', '', 'proba/gilka');
+  t('нова гілка від поточного стану створюється',
+    bh.ok && g(['rev-parse', 'proba/gilka']).trim() === g(['rev-parse', 'HEAD']).trim());
+  t('поточна гілка при цьому НЕ перемкнулась',
+    g(['rev-parse', '--abbrev-ref', 'HEAD']).trim() === 'main');
+
+  const sc = run('switch-create', '', 'feature-x');
+  t('switch -c створює і переходить',
+    sc.ok && g(['rev-parse', '--abbrev-ref', 'HEAD']).trim() === 'feature-x');
+
+  fs.writeFileSync(path.join(tmp, 'фіча.txt'), 'фіча\n');
+  g(['add', '.']); g(['commit', '-q', '-m', 'фіча']);
+  const sw = run('switch', '', 'main');
+  t('switch повертає на main',
+    sw.ok && g(['rev-parse', '--abbrev-ref', 'HEAD']).trim() === 'main');
+
+  const mergeRes = run('merge', '', 'feature-x');
+  t('merge приводить зміни гілки',
+    mergeRes.ok && fs.existsSync(path.join(tmp, 'фіча.txt')));
+
+  const del = run('branch-delete', '', 'feature-x');
+  t('branch -d видаляє злиту гілку', del.ok && !g(['branch']).includes('feature-x'));
+
+  // -d мусить ВІДМОВИТИСЬ на незлитій гілці — це і є його безпечність.
+  g(['branch', 'незлита', 'main']);
+  g(['checkout', '-q', 'незлита']);
+  fs.writeFileSync(path.join(tmp, 'незлите.txt'), 'x\n');
+  g(['add', '.']); g(['commit', '-q', '-m', 'незлитий коміт']);
+  g(['checkout', '-q', 'main']);
+  const delUnmerged = run('branch-delete', '', 'незлита');
+  t('branch -d ВІДМОВЛЯЄТЬСЯ видаляти незлиту гілку',
+    !delUnmerged.ok && g(['branch']).includes('незлита'));
+
+  // Команди, які панель не виконує — нічим виконувати.
+  for (const id of ['restore-file', 'init', 'clone', 'remote-add', 'pull', 'push', 'push-first']) {
+    t(`«${commandById(id)!.label}» нічим виконувати`,
+      buildArgs(commandById(id)!, 'deadbee', 'x').length === 0);
+  }
+
   // Стан репозиторію після тестів — щоб було видно, що revert справді
   // додав коміт, а не переписав історію.
-  t('історія зросла, а не переписалась', g(['rev-list', '--count', 'HEAD']).trim() === '3');
+  // Суть не в конкретному числі (нижні тести додають свої коміти), а в
+  // тому, що revert НЕ прибрав початковий коміт.
+  t('початковий коміт уцілів після revert', g(['cat-file', '-t', second]).trim() === 'commit');
+  t('історія лише зростала', Number(g(['rev-list', '--count', 'HEAD']).trim()) >= 3);
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

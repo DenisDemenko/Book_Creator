@@ -1,9 +1,18 @@
 /**
- * Панель git-операцій над вибраним комітом.
+ * Панель git-команд: 32 кнопки в шести групах.
  *
- * Постановка власника: «десять найуживаніших функцій кнопочками, з
- * вибором номера коміта або введенням вручну, і до кожної кнопочки
- * пояснення — що саме робить команда — при піднесенні мишкою».
+ * Постановка власника, у два заходи. Спершу — «десять найуживаніших
+ * функцій кнопочками, з вибором номера коміта або введенням вручну, і до
+ * кожної кнопочки пояснення при піднесенні мишкою». Потім — другий,
+ * довший список (створення проєкту, щоденне, гілки, синхронізація,
+ * історія) з проханням «опрацюй так само».
+ *
+ * ЧОМУ ДРУГА ПОРЦІЯ ЗЛАМАЛА РАМКУ. Перша була вся про ВИБРАНИЙ КОМІТ, і
+ * одного поля з хешем вистачало. Але `git status` не діє ні на який
+ * коміт, `git add <file>` хоче шлях, `git merge` — гілку, `git commit -m`
+ * — текст. Якби всі вони й далі вимагали хеш, половина кнопок стояла б
+ * заблокованою без причини. Тому аргумент типізовано (`needs`), а
+ * потреба в коміті ВИВОДИТЬСЯ з того, чи команда справді згадує хеш.
  *
  * ЧОМУ ПІДКАЗКА СВОЯ, А НЕ `title`. Штатний `title` браузера з'являється
  * за секунду-дві, обрізається і не переносить рядки — а тут пояснення на
@@ -32,7 +41,12 @@ export interface GitCommandInfo {
   display: string;
   tooltip: string;
   tier: 'read' | 'add' | 'manual';
-  needsName: boolean;
+  group: 'commit-ops' | 'daily' | 'branches' | 'sync' | 'history' | 'setup';
+  needs: 'none' | 'commit' | 'path' | 'ref' | 'message' | 'url';
+  /** Заповнювач у тексті команди — приходить із сервера, не дублюється тут. */
+  argToken: string;
+  /** Чи потрібен цій команді вибраний коміт (виводиться на сервері). */
+  needsCommit: boolean;
   namePlaceholder: string;
   needsCleanTree: boolean;
   abortHint: string;
@@ -69,20 +83,59 @@ interface Props {
   onChanged?: () => void;
 }
 
+/**
+ * Заголовки груп — словами власника з його ж списку. Групування за рівнем
+ * небезпеки було б технічно чесним і практично незручним: людина шукає
+ * «щоденне» й «гілки», а не «read» і «add». Небезпека лишається кольором.
+ */
+const GROUP_ORDER: GitCommandInfo['group'][] = [
+  'commit-ops', 'daily', 'branches', 'history', 'sync', 'setup',
+];
+
+const GROUP_TITLE: Record<GitCommandInfo['group'], string> = {
+  'commit-ops': 'Операції над вибраним комітом',
+  daily: 'Перевірка та збереження змін (щоденна база)',
+  branches: 'Робота з гілками',
+  history: 'Перегляд історії та скасування дій',
+  sync: 'Синхронізація з GitHub',
+  setup: 'Створення або копіювання проєкту',
+};
+
+const GROUP_NOTE: Partial<Record<GitCommandInfo['group'], string>> = {
+  sync:
+    'Жодну з цих команд панель не виконує, і це не обережність, а факт: у сервера ' +
+    'немає доступу до GitHub — приватний репозиторій попросив би логін, і запит ' +
+    'повис би. Пуш у цьому проєкті завжди робиш ти сам.',
+  setup:
+    'Довідкові: цей репозиторій створено давно, а клонувати треба туди, куди ' +
+    'вирішиш ти, а не в теку застосунку.',
+};
+
+/** Чим саме заповнюється поле — щоб повідомлення казало це словами. */
+const ARG_WORD: Record<GitCommandInfo['needs'], string> = {
+  none: '—',
+  commit: 'вибрати коміт',
+  path: 'шлях до файлу від кореня проєкту',
+  ref: 'назву гілки',
+  message: 'опис коміта',
+  url: 'адресу репозиторію',
+};
+
+const ARG_LABEL: Record<GitCommandInfo['needs'], string> = {
+  none: '',
+  commit: 'Коміт',
+  path: 'Шлях до файлу',
+  ref: 'Назва гілки',
+  message: 'Опис коміта',
+  url: 'Адреса репозиторію',
+};
+
 const TIER_TITLE: Record<GitCommandInfo['tier'], string> = {
   read: 'Перегляд — нічого не змінює',
   add: 'Додає новий об’єкт — історію не переписує',
   manual: 'Панель не виконує — готує команду для термінала',
 };
 
-const TIER_NOTE: Record<GitCommandInfo['tier'], string> = {
-  read: 'Ці команди лише читають історію. Натискати можна без побоювань.',
-  add: 'Створюють новий коміт, теґ або гілку. Нічого не зникає, будь-що можна відкотити.',
-  manual:
-    'Ці команди панель не виконує принципово: конфлікти з веб-панелі не розв’язати, ' +
-    'а помилковий клік по «скинути» знищив би роботу назавжди. Кнопка готує точну ' +
-    'команду з підставленим хешем — запускай у терміналі.',
-};
 
 export const GitCommandPanel: React.FC<Props> = ({ commits, presetHash, presetNonce, onChanged }) => {
   const [catalog, setCatalog] = useState<GitCommandInfo[]>([]);
@@ -114,14 +167,20 @@ export const GitCommandPanel: React.FC<Props> = ({ commits, presetHash, presetNo
     if (presetHash) setHash(presetHash);
   }, [presetHash, presetNonce]);
 
-  const groups = useMemo(
-    () => ({
-      read: catalog.filter((c) => c.tier === 'read'),
-      add: catalog.filter((c) => c.tier === 'add'),
-      manual: catalog.filter((c) => c.tier === 'manual'),
-    }),
-    [catalog]
-  );
+  const groups = useMemo(() => {
+    const by = new Map<GitCommandInfo['group'], GitCommandInfo[]>();
+    for (const c of catalog) {
+      const list = by.get(c.group);
+      if (list) list.push(c);
+      else by.set(c.group, [c]);
+    }
+    // Усередині групи: спершу те, що панель виконує, потім те, що лише
+    // готує — інакше червона кнопка стояла б першою і тягнула око.
+    for (const list of by.values()) {
+      list.sort((a, b) => Number(a.tier === 'manual') - Number(b.tier === 'manual'));
+    }
+    return by;
+  }, [catalog]);
 
   const hashValid = /^[0-9a-fA-F]{7,40}$/.test(hash.trim());
   const active = activeId ? catalog.find((c) => c.id === activeId) : null;
@@ -139,9 +198,9 @@ export const GitCommandPanel: React.FC<Props> = ({ commits, presetHash, presetNo
   const prepare = useCallback(
     (cmd: GitCommandInfo) => {
       const h = hash.trim() || '<хеш>';
-      const text = cmd.display
-        .replace('<хеш>', h)
-        .replace('<ім’я>', name.trim() || '<ім’я>');
+      const token = cmd.argToken;
+      let text = cmd.display.replace('<хеш>', h);
+      if (token && name.trim()) text = text.replace(token, name.trim());
       setResult(null);
       setActiveId(cmd.id);
       setPrepared({ cmd: text, label: cmd.label, danger: cmd.danger });
@@ -152,10 +211,10 @@ export const GitCommandPanel: React.FC<Props> = ({ commits, presetHash, presetNo
 
   const run = useCallback(
     async (cmd: GitCommandInfo) => {
-      if (!hashValid) return;
-      if (cmd.needsName && !name.trim()) {
+      if (cmd.needsCommit && !hashValid) return;
+      if (cmd.needs !== 'none' && !name.trim()) {
         setActiveId(cmd.id);
-        setResult({ ok: false, error: `Для «${cmd.label}» потрібне ім’я — введи його в полі нижче.` });
+        setResult({ ok: false, error: `Для «${cmd.label}» потрібно ${ARG_WORD[cmd.needs]} — введи це в полі нижче й натисни кнопку ще раз.` });
         return;
       }
       setActiveId(cmd.id);
@@ -249,7 +308,7 @@ export const GitCommandPanel: React.FC<Props> = ({ commits, presetHash, presetNo
         type="button"
         data-cmd={cmd.id}
         data-tier={cmd.tier}
-        disabled={cmd.executable && !hashValid}
+        disabled={cmd.executable && cmd.needsCommit && !hashValid}
         onClick={() => (cmd.executable ? run(cmd) : prepare(cmd))}
         onMouseEnter={(e) => showTip(cmd.id, e.currentTarget)}
         onMouseLeave={() => setHover((h) => (h?.id === cmd.id ? null : h))}
@@ -317,44 +376,75 @@ export const GitCommandPanel: React.FC<Props> = ({ commits, presetHash, presetNo
         </p>
       )}
 
-      {active?.needsName && (
+      {active && active.needs !== 'none' && (
         <div className="mb-2">
+          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+            {ARG_LABEL[active.needs]} — для «{active.label}»
+          </label>
           <input
-            aria-label={`Ім’я для ${active.label}`}
+            aria-label={`${ARG_LABEL[active.needs]} для ${active.label}`}
+            data-arg-kind={active.needs}
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={active.namePlaceholder}
-            spellCheck={false}
+            spellCheck={active.needs === 'message'}
             className="w-full rounded-lg border border-[var(--border-subtle)] bg-black/25 px-2 py-1.5 text-[11.5px] text-slate-200"
           />
           <p className="mt-1 text-[10px] text-slate-500">
-            Латиниця, цифри, точка, дефіс, підкреслення і слеш. Після введення натисни кнопку ще раз.
+            {active.needs === 'path'
+              ? 'Від кореня проєкту, напр. server/db.ts. Без «..» і без початкового дефіса.'
+              : active.needs === 'ref'
+                ? 'Латиниця, цифри, точка, дефіс, підкреслення і слеш.'
+                : active.needs === 'message'
+                  ? 'Один рядок про те, що саме змінилось. Лапки й символи можна — оболонки тут немає.'
+                  : 'Адреса репозиторію.'}
+            {' '}Після введення натисни кнопку ще раз.
           </p>
         </div>
       )}
 
-      {/* ── Кнопки за трьома групами ── */}
-      <div className="space-y-2.5">
-      {(['read', 'add', 'manual'] as const).map((tier) => (
-        groups[tier].length > 0 && (
-          <div key={tier}>
-            <div className="flex items-center gap-2 mb-1.5">
-              <span
-                className={`text-[10px] font-semibold uppercase tracking-wide ${
-                  tier === 'manual' ? 'text-rose-300/80' : tier === 'add' ? 'text-emerald-300/80' : 'text-cyan-300/80'
-                }`}
-              >
-                {TIER_TITLE[tier]}
-              </span>
-              <span className="h-px flex-1 bg-white/[0.06]" />
+      {/* ── Кнопки за групами: категорії з постановки власника ── */}
+      <div className="space-y-3">
+        {GROUP_ORDER.map((group) => {
+          const list = groups.get(group);
+          if (!list || list.length === 0) return null;
+          // Група вся з невиконуваних команд (синхронізація, створення) —
+          // позначаємо це заголовком, щоб не здавалось, що кнопки зламані.
+          const allManual = list.every((c) => c.tier === 'manual');
+          return (
+            <div key={group} data-group={group}>
+              <div className="flex items-center gap-2 mb-1.5">
+                <span
+                  className={`text-[10px] font-semibold uppercase tracking-wide ${
+                    allManual ? 'text-slate-400' : 'text-cyan-300/80'
+                  }`}
+                >
+                  {GROUP_TITLE[group]}
+                </span>
+                {allManual && (
+                  <span className="rounded border border-slate-500/30 px-1 text-[9px] text-slate-400">
+                    лише текст команди
+                  </span>
+                )}
+                <span className="h-px flex-1 bg-white/[0.06]" />
+              </div>
+              {GROUP_NOTE[group] && (
+                <p className="mb-1.5 text-[10px] leading-snug text-slate-500">{GROUP_NOTE[group]}</p>
+              )}
+              <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+                {list.map(renderButton)}
+              </div>
             </div>
-            <p className="mb-1.5 text-[10px] leading-snug text-slate-500">{TIER_NOTE[tier]}</p>
-            <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
-              {groups[tier].map(renderButton)}
-            </div>
-          </div>
-        )
-      ))}
+          );
+        })}
+      </div>
+
+      {/* Що означає колір — один раз унизу, а не в кожній групі. */}
+      <div className="mt-2.5 flex flex-wrap gap-x-3 gap-y-1 border-t border-white/[0.06] pt-2 text-[9.5px] text-slate-500">
+        <span><span className="text-cyan-300">■</span> {TIER_TITLE.read}</span>
+        <span><span className="text-emerald-300">■</span> {TIER_TITLE.add}</span>
+        <span><span className="text-slate-300">■</span> {TIER_TITLE.manual}</span>
+        <span><span className="text-rose-300">■</span> незворотно знищує роботу</span>
       </div>
 
       {/* ── Підказка при наведенні ── */}

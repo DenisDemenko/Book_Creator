@@ -27,11 +27,16 @@ import path from 'node:path';
 import type { Express } from 'express';
 import { requireAdmin } from './auth';
 import {
+  ARG_PLACEHOLDER,
+  GIT_PREFIX_ARGS,
   GIT_COMMANDS,
   buildArgs,
   commandById,
   isPlausibleHash,
+  isSafeMessage,
+  isSafePath,
   isSafeRefName,
+  needsCommit,
   renderDisplay,
 } from './gitCommands';
 
@@ -56,7 +61,7 @@ function runGit(args: string[]): Promise<GitResult> {
   return new Promise((resolve) => {
     execFile(
       'git',
-      args,
+      [...GIT_PREFIX_ARGS, ...args],
       {
         cwd: process.cwd(),
         maxBuffer: 24 * 1024 * 1024,
@@ -116,7 +121,13 @@ export function registerGitCommandRoutes(app: Express): void {
         display: c.display,
         tooltip: c.tooltip,
         tier: c.tier,
-        needsName: !!c.needsName,
+        group: c.group,
+        needs: c.needs || 'none',
+        // Заповнювач віддаємо з сервера, щоб клієнт не тримав другу копію
+        // цих токенів: розійшовшись, вони показували б одну команду, а
+        // виконували іншу.
+        argToken: ARG_PLACEHOLDER[c.needs || 'none'],
+        needsCommit: needsCommit(c),
         namePlaceholder: c.namePlaceholder || '',
         needsCleanTree: !!c.needsCleanTree,
         abortHint: c.abortHint || '',
@@ -156,33 +167,81 @@ export function registerGitCommandRoutes(app: Express): void {
       });
     }
 
-    if (!isPlausibleHash(hashRaw)) {
-      return res.status(400).json({ error: 'Хеш коміта має бути 7–40 шістнадцяткових символів.' });
+    // Коміт потрібен лише тим командам, які його справді згадують:
+    // `git status` чи `git add` вимагати хеш не мають жодної причини.
+    let hash = '';
+    if (needsCommit(spec)) {
+      if (!isPlausibleHash(hashRaw)) {
+        return res.status(400).json({ error: 'Хеш коміта має бути 7–40 шістнадцяткових символів.' });
+      }
+      // Хеш перевіряє сам git: він і скаже, чи це справді коміт цього
+      // репозиторію. Власна перевірка вище — лише щоб не передавати git
+      // відкровене сміття.
+      const verified = await runGit(['rev-parse', '--verify', '--end-of-options', `${hashRaw}^{commit}`]);
+      if (!verified.ok) {
+        return res.status(400).json({ error: `Коміта ${hashRaw} у цьому репозиторії немає.` });
+      }
+      hash = verified.stdout.trim();
     }
-
-    // Хеш перевіряє сам git: він і скаже, чи це справді коміт цього
-    // репозиторію. Власна перевірка вище — лише щоб не передавати git
-    // відкровене сміття.
-    const verified = await runGit(['rev-parse', '--verify', '--end-of-options', `${hashRaw}^{commit}`]);
-    if (!verified.ok) {
-      return res.status(400).json({ error: `Коміта ${hashRaw} у цьому репозиторії немає.` });
-    }
-    const hash = verified.stdout.trim();
 
     let name = '';
-    if (spec.needsName) {
-      if (!isSafeRefName(nameRaw)) {
-        return res.status(400).json({
-          error:
-            'Ім’я може містити латинські літери, цифри, точку, підкреслення, дефіс і слеш; ' +
-            'не може починатися з дефіса чи слеша й не може містити «..».',
-        });
+    switch (spec.needs) {
+      case 'ref': {
+        if (!isSafeRefName(nameRaw)) {
+          return res.status(400).json({
+            error:
+              'Назва може містити латинські літери, цифри, точку, підкреслення, дефіс і слеш; ' +
+              'не може починатися з дефіса чи слеша й не може містити «..».',
+          });
+        }
+        const fmt = await runGit(['check-ref-format', '--allow-onelevel', nameRaw]);
+        if (!fmt.ok) {
+          return res.status(400).json({ error: `Git вважає назву «${nameRaw}» некоректною.` });
+        }
+        name = nameRaw;
+        break;
       }
-      const fmt = await runGit(['check-ref-format', '--allow-onelevel', nameRaw]);
-      if (!fmt.ok) {
-        return res.status(400).json({ error: `Git вважає ім’я «${nameRaw}» некоректним.` });
+      case 'path': {
+        if (!isSafePath(nameRaw)) {
+          return res.status(400).json({
+            error:
+              'Шлях вказується від кореня проєкту (напр. server/db.ts): без «..», ' +
+              'без початкового дефіса й не абсолютний.',
+          });
+        }
+        // Остаточна перевірка «всередині репозиторію» — тут, бо лише тут є
+        // файлова система. `isSafePath` відсіює `..` за текстом, але
+        // символічне посилання могло б вивести за межі й без «..», тож
+        // порівнюємо РОЗІБРАНІ шляхи, а не рядки.
+        const root = fs.realpathSync(process.cwd());
+        let target: string;
+        try {
+          target = fs.realpathSync(path.resolve(root, nameRaw));
+        } catch {
+          // Файлу може не бути (напр. його видалили — `git add` на таке
+          // теж має право), тож беремо шлях без розіменування.
+          target = path.resolve(root, nameRaw);
+        }
+        if (target !== root && !target.startsWith(root + path.sep)) {
+          return res.status(400).json({ error: 'Шлях виходить за межі проєкту.' });
+        }
+        name = nameRaw;
+        break;
       }
-      name = nameRaw;
+      case 'message': {
+        if (!isSafeMessage(nameRaw)) {
+          return res.status(400).json({
+            error: 'Опис коміта не може бути порожнім, довшим за 2000 символів або містити керуючі символи.',
+          });
+        }
+        name = nameRaw;
+        break;
+      }
+      case 'url':
+        // URL є лише в командах, які панель не виконує — сюди не дійде.
+        return res.status(400).json({ error: 'Ця команда з панелі не виконується.' });
+      default:
+        break;
     }
 
     // Півстан від попередньої операції — окремо від «брудного дерева»,
