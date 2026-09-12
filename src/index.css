@@ -1900,3 +1900,34 @@
     animation: none;
   }
 }
+
+/* --- Діф пропозиції ШІ («АІ ПРОПОНУЄ — АВТОР ВИРІШУЄ») ---
+   Раніше сегменти малювались інлайновими `text-emerald-200` /
+   `text-rose-300` на заливці `bg-*-500/30`. У ТЕМНІЙ темі це читалось, а
+   в денній глобальний шар перефарбування фону робив заливку світлою,
+   текст же лишався світло-зеленим і світло-рожевим — слова зникали, і
+   власник бачив лише кольорові плями. Тому контраст задається явно й
+   окремо для кожної теми, а не виводиться з Tailwind-відтінків. */
+.nova-diff-ins {
+  background-color: rgba(16, 185, 129, 0.22);
+  color: #d1fae5;
+  border-bottom: 1px solid rgba(52, 211, 153, 0.75);
+}
+.nova-diff-del {
+  background-color: rgba(244, 63, 94, 0.22);
+  color: #ffe4e6;
+}
+.nova-diff-same { color: #cbd5e1; }
+
+[data-theme="light"] .nova-diff-ins {
+  /* Темно-зелений текст на блідо-зеленому — співвідношення контрасту
+     приблизно 7:1, читабельно й для слабкого зору. */
+  background-color: rgba(16, 185, 129, 0.18);
+  color: #064e3b;
+  border-bottom: 1px solid rgba(5, 150, 105, 0.55);
+}
+[data-theme="light"] .nova-diff-del {
+  background-color: rgba(244, 63, 94, 0.14);
+  color: #7f1d3a;
+}
+[data-theme="light"] .nova-diff-same { color: #1e293b; }

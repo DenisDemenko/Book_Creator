@@ -65,9 +65,12 @@ export function realtimeSocketUrl(): string {
  * приходить 404 і показується биткою. Саме це власник і бачив у
  * «Медіатеці»: завантаження (fetch) працювало, показ (img) — ні.
  *
- * Патчимо `setAttribute`, а не властивість `HTMLImageElement.src`, бо
- * React виставляє `src` у зображень саме атрибутом — через властивість
- * воно не проходить, і патч властивості нічого б не зловив.
+ * Підпираються ОБА шляхи, якими адреса потрапляє в елемент: атрибут
+ * (`setAttribute('src', …)`) і властивість (`img.src = …`). Спершу тут
+ * був лише атрибут — на думці, що React виставляє `src` саме атрибутом.
+ * Але це припущення про внутрішнє влаштування React, а не факт нашого
+ * коду: воно може змінитись із будь-яким оновленням, та й сторонні
+ * бібліотеки користуються властивістю. Тому патчаться обидві двері.
  *
  * Чому знову одне місце, а не 48 правок `src={...}` по 15 файлах:
  * причина та сама, що описана вгорі файлу для fetch — префікс є
@@ -89,6 +92,25 @@ function installAssetAttributePrefix(): void {
     }
     return nativeSetAttribute.call(this, name, value);
   };
+
+  // Другий шлях, яким адреса потрапляє в елемент: присвоєння ВЛАСТИВОСТІ
+  // (`img.src = …`). Атрибут і властивість — різні двері до одного й того
+  // самого, і який саме використає React чи стороння бібліотека, залежить
+  // від їхньої реалізації, а не від нас. Тому підпираємо обидві: інакше
+  // фікс тримався б на внутрішньому влаштуванні React, яке може змінитись
+  // із будь-яким оновленням.
+  [HTMLImageElement, HTMLSourceElement, HTMLAudioElement, HTMLVideoElement].forEach((Ctor) => {
+    const desc = Object.getOwnPropertyDescriptor(Ctor.prototype, 'src');
+    if (!desc?.get || !desc?.set) return;
+    Object.defineProperty(Ctor.prototype, 'src', {
+      ...desc,
+      set(value: unknown) {
+        const next =
+          typeof value === 'string' && value.startsWith('/api/') ? `${API_BASE}${value}` : value;
+        desc.set!.call(this, next);
+      },
+    });
+  });
 }
 
 let installed = false;

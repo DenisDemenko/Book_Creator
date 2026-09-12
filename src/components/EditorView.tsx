@@ -6037,22 +6037,29 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     </div>
 
                     <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 text-xs font-serif-book leading-relaxed max-h-60 overflow-y-auto">
+                      {/* Кольори діфа — семантичними класами (nova-diff-*,
+                          src/index.css), а не інлайновими text-emerald-200 /
+                          text-rose-300. Ті класи задавали СВІТЛИЙ текст на
+                          світлій же заливці, і в денній темі пропозиція ШІ
+                          ставала нечитабельною: власник бачив порожні
+                          зелені й рожеві плями замість слів. Тепер контраст
+                          заданий явно для обох тем. */}
                       {currentProposal.diffSegments.map((segment, idx) => {
                         if (segment.type === 'added') {
                           return (
-                            <span key={idx} className="bg-emerald-500/30 text-emerald-200 px-0.5 rounded border-b border-emerald-400">
+                            <span key={idx} className="nova-diff-ins px-0.5 rounded">
                               {segment.text}
                             </span>
                           );
                         }
                         if (segment.type === 'removed') {
                           return (
-                            <span key={idx} className="bg-rose-500/30 text-rose-300 line-through px-0.5 rounded opacity-75">
+                            <span key={idx} className="nova-diff-del line-through px-0.5 rounded">
                               {segment.text}
                             </span>
                           );
                         }
-                        return <span key={idx} className="text-slate-300">{segment.text}</span>;
+                        return <span key={idx} className="nova-diff-same">{segment.text}</span>;
                       })}
                     </div>
 
