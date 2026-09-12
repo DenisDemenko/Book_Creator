@@ -122,6 +122,37 @@ CREATE TABLE IF NOT EXISTS role_overrides (
   permissions TEXT NOT NULL
 );
 
+-- ЖУРНАЛ ДОКАЗІВ РОЗВИТКУ ПИСЬМЕННИКА (WDI, запис #156).
+--
+-- Тільки дописується й ніколи не переписується: бали навичок ЩОРАЗУ
+-- згортаються з цього журналу ("server/wdi.ts"), а не зберігаються
+-- окремим змінним полем. Тому будь-яке число WDI можна показати разом
+-- із подіями, які його дали, — автор бачить підставу, а не вердикт.
+--
+-- UNIQUE(user_id, source_id) — це ідемпотентність на рівні БАЗИ, а не
+-- коду. Без неї повторний аналіз того самого тексту накручував би бал;
+-- у макеті це намагався стримати масив "seenTextHashes" у localStorage,
+-- але він губився разом із браузером.
+CREATE TABLE IF NOT EXISTS writer_evidence (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL,
+  book_id       TEXT,
+  skill         TEXT NOT NULL,
+  type          TEXT NOT NULL,
+  outcome       REAL NOT NULL,
+  confidence    REAL NOT NULL,
+  independence  INTEGER NOT NULL,
+  summary       TEXT NOT NULL DEFAULT '',
+  source_id     TEXT NOT NULL,
+  created_at    TEXT NOT NULL,
+  UNIQUE(user_id, source_id)
+);
+
+-- Читаємо майже завжди "усі докази одного автора", інколи з відбором за
+-- навичкою — саме під це індекс.
+CREATE INDEX IF NOT EXISTS idx_writer_evidence_user
+  ON writer_evidence(user_id, skill);
+
 CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
