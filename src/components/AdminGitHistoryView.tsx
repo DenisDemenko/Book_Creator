@@ -13,7 +13,10 @@
  * причину, а не зникає без слова.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { GitCommit, RefreshCw, Loader2, AlertTriangle, FileDiff, BookOpen } from 'lucide-react';
+import {
+  GitCommit, RefreshCw, Loader2, AlertTriangle, FileDiff, BookOpen,
+  CloudUpload, CloudOff, ChevronDown, Radio,
+} from 'lucide-react';
 
 interface Commit {
   hash: string;
@@ -27,6 +30,22 @@ interface Commit {
   deletions: number;
   journalEntry: number | null;
   isMerge: boolean;
+  pushedTo: string[];
+}
+
+interface JournalEntry {
+  n: number;
+  title: string;
+  status: string;
+  excerpt: string;
+}
+
+interface RemoteCheck {
+  remote: string;
+  ok: boolean;
+  shortHash?: string;
+  upToDate?: boolean;
+  error?: string;
 }
 
 /** Автор у git може бути записаний по-різному — зводимо до однієї особи. */
@@ -72,6 +91,13 @@ export const AdminGitHistoryView: React.FC = () => {
   const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(true);
   const [authorFilter, setAuthorFilter] = useState<string | null>(null);
+  const [journal, setJournal] = useState<Record<number, JournalEntry>>({});
+  const [remotes, setRemotes] = useState<string[]>([]);
+  const [onlyUnpushed, setOnlyUnpushed] = useState(false);
+  /** Розкритий коміт → повний текст запису журналу (вантажиться на вимогу). */
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [entryText, setEntryText] = useState<Record<number, string>>({});
+  const [verify, setVerify] = useState<{ busy: boolean; head?: string; results?: RemoteCheck[]; error?: string }>({ busy: false });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -83,6 +109,8 @@ export const AdminGitHistoryView: React.FC = () => {
       setCommits(Array.isArray(data.commits) ? data.commits : []);
       setTotal(Number(data.total) || 0);
       setBranch(data.branch || '');
+      setJournal(data.journal || {});
+      setRemotes(Array.isArray(data.remotes) ? data.remotes : []);
     } catch (err: any) {
       setAvailable(false);
       setReason(err?.message || 'Не вдалося прочитати історію комітів.');
@@ -104,10 +132,43 @@ export const AdminGitHistoryView: React.FC = () => {
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
   }, [commits]);
 
-  const visible = useMemo(
-    () => (authorFilter ? commits.filter((c) => normalizeAuthor(c.author) === authorFilter) : commits),
-    [commits, authorFilter]
-  );
+  const visible = useMemo(() => {
+    let list = commits;
+    if (authorFilter) list = list.filter((c) => normalizeAuthor(c.author) === authorFilter);
+    // «Не запушені» — ті, яких немає ні на ОДНОМУ remote. Саме цей
+    // фільтр і відповідає на питання «що ще не на GitHub».
+    if (onlyUnpushed) list = list.filter((c) => c.pushedTo.length === 0);
+    return list;
+  }, [commits, authorFilter, onlyUnpushed]);
+
+  const unpushedCount = useMemo(() => commits.filter((c) => c.pushedTo.length === 0).length, [commits]);
+
+  /** Повний текст запису журналу — тягнемо лише коли коміт розкрили. */
+  const toggleExpand = async (c: Commit) => {
+    const next = expanded === c.hash ? null : c.hash;
+    setExpanded(next);
+    if (next && c.journalEntry !== null && !entryText[c.journalEntry]) {
+      try {
+        const res = await fetch(`/api/admin/git/journal/${c.journalEntry}`, { credentials: 'same-origin' });
+        const data = await res.json().catch(() => ({}));
+        if (data?.text) setEntryText((prev) => ({ ...prev, [c.journalEntry as number]: data.text }));
+      } catch {
+        /* не критично: уривок у картці однаково лишається */
+      }
+    }
+  };
+
+  const runVerify = async () => {
+    setVerify({ busy: true });
+    try {
+      const res = await fetch('/api/admin/git/verify-remotes', { method: 'POST', credentials: 'same-origin' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) setVerify({ busy: false, error: data?.error || `HTTP ${res.status}` });
+      else setVerify({ busy: false, head: data.shortHead, results: data.results });
+    } catch (err: any) {
+      setVerify({ busy: false, error: err?.message || String(err) });
+    }
+  };
 
   /** Групування по днях — кістяк стрічки. */
   const days = useMemo(() => {
@@ -187,6 +248,30 @@ export const AdminGitHistoryView: React.FC = () => {
             {branch}
           </div>
         )}
+        {/* Головне питання власника: що ще не на GitHub. */}
+        <button
+          onClick={() => setOnlyUnpushed((v) => !v)}
+          className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 ${
+            onlyUnpushed
+              ? 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+              : unpushedCount > 0
+                ? 'bg-slate-900 text-amber-300/90 border-amber-500/25 hover:border-amber-500/50'
+                : 'bg-slate-900 text-slate-500 border-white/[0.06]'
+          }`}
+          title="Показати лише коміти, яких немає ні на одному remote"
+        >
+          {unpushedCount > 0 ? <CloudOff className="w-3.5 h-3.5" /> : <CloudUpload className="w-3.5 h-3.5" />}
+          {unpushedCount > 0 ? `Не запушено: ${unpushedCount}` : 'Усе запушено'}
+        </button>
+        <button
+          onClick={runVerify}
+          disabled={verify.busy}
+          className="px-3 py-2 rounded-xl bg-slate-900 border border-white/[0.06] text-xs text-slate-300 hover:text-white flex items-center gap-1.5 disabled:opacity-50"
+          title="Запитати GitHub напряму, на якому коміті кожен remote"
+        >
+          {verify.busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Radio className="w-3.5 h-3.5" />}
+          Звірити з GitHub
+        </button>
         <button
           onClick={load}
           className="ml-auto px-3 py-2 rounded-xl bg-slate-900 border border-white/[0.06] text-xs text-slate-300 hover:text-white flex items-center gap-1.5"
@@ -194,6 +279,38 @@ export const AdminGitHistoryView: React.FC = () => {
           <RefreshCw className="w-3.5 h-3.5" /> Оновити
         </button>
       </div>
+
+      {/* Результат звірки з GitHub */}
+      {(verify.results || verify.error) && (
+        <div className="p-3 rounded-xl bg-slate-900 border border-white/[0.06] space-y-1.5">
+          {verify.error && <p className="text-[11px] text-rose-300">{verify.error}</p>}
+          {verify.results?.map((r) => (
+            <div key={r.remote} className="flex flex-wrap items-center gap-2 text-[11px]">
+              <span className="font-mono font-bold text-slate-200 min-w-[80px]">{r.remote}</span>
+              {r.ok ? (
+                <>
+                  <span className="font-mono text-slate-400">{r.shortHash}</span>
+                  {r.upToDate ? (
+                    <span className="px-1.5 py-px rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold">
+                      співпадає з HEAD
+                    </span>
+                  ) : (
+                    <span className="px-1.5 py-px rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-semibold">
+                      відстає від HEAD ({verify.head})
+                    </span>
+                  )}
+                </>
+              ) : (
+                /* Для приватного репозиторію без збережених облікових даних
+                   це очікувано, а не поломка — так і пишемо. */
+                <span className="text-slate-500">
+                  не вдалося запитати: {r.error}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Автори — заразом і фільтр стрічки */}
       <div className="flex flex-wrap gap-1.5">
@@ -286,6 +403,25 @@ export const AdminGitHistoryView: React.FC = () => {
                               log.md #{c.journalEntry}
                             </span>
                           )}
+                          {/* Де коміт уже є. Порожньо = ще нікуди не
+                              запушений, і це головне, що видно з картки. */}
+                          {c.pushedTo.length > 0 ? (
+                            <span
+                              className="px-1.5 py-px rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold flex items-center gap-1"
+                              title={`Коміт уже є на: ${c.pushedTo.join(', ')}`}
+                            >
+                              <CloudUpload className="w-2.5 h-2.5" />
+                              {c.pushedTo.join(' · ')}
+                            </span>
+                          ) : (
+                            <span
+                              className="px-1.5 py-px rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-semibold flex items-center gap-1"
+                              title="Цього коміта ще немає ні на одному remote"
+                            >
+                              <CloudOff className="w-2.5 h-2.5" />
+                              не запушено
+                            </span>
+                          )}
                           {!c.isMerge && (
                             <span className="flex items-center gap-1 font-mono text-slate-500">
                               <FileDiff className="w-2.5 h-2.5" />
@@ -300,6 +436,44 @@ export const AdminGitHistoryView: React.FC = () => {
                             </span>
                           )}
                         </div>
+                        {/* Що саме зроблено — із журналу log.md. Тема
+                            коміта каже, ЩО змінилось, запис — ЧОМУ це
+                            робилось; без нього схема була б причесаним
+                            `git log`. */}
+                        {c.journalEntry !== null && journal[c.journalEntry] && (
+                          <div className="mt-1.5 pl-2 border-l-2 border-cyan-500/25">
+                            <button
+                              onClick={() => toggleExpand(c)}
+                              className="w-full text-left group/j"
+                            >
+                              <span className="flex items-start gap-1 text-[11px] font-semibold text-cyan-200/90">
+                                <ChevronDown
+                                  className={`w-3 h-3 mt-0.5 shrink-0 transition-transform ${
+                                    expanded === c.hash ? 'rotate-0' : '-rotate-90'
+                                  }`}
+                                />
+                                <span className="min-w-0">
+                                  {journal[c.journalEntry].title}
+                                  {journal[c.journalEntry].status && (
+                                    <span className="ml-1.5 font-normal text-slate-400">
+                                      {journal[c.journalEntry].status}
+                                    </span>
+                                  )}
+                                </span>
+                              </span>
+                            </button>
+                            {expanded === c.hash ? (
+                              <pre className="mt-1.5 max-h-80 overflow-y-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-slate-300 font-sans">
+                                {entryText[c.journalEntry] || 'Читаємо запис…'}
+                              </pre>
+                            ) : (
+                              <p className="mt-0.5 text-[10.5px] leading-snug text-slate-400 line-clamp-2">
+                                {journal[c.journalEntry].excerpt}
+                              </p>
+                            )}
+                          </div>
+                        )}
+
                         {/* Смужка обсягу: відносно найбільшого коміта у
                             вибірці, тож масштаб завжди осмислений. */}
                         {volume > 0 && (
