@@ -105,6 +105,15 @@ export const ADMIN_NODES: AdminNode[] = [
     group: 'core',
   },
   {
+    id: 'git',
+    title: 'Історія комітів',
+    hint: 'схема розробки · лише локально',
+    description:
+      'Стрічка часу всіх комітів від найпершого: день, автор, обсяг зміни і запис журналу log.md, на який коміт посилається. Дані читаються з живого git log, тому розділ працює лише при локальному запуску — у продакшн-образі теки .git немає.',
+    action: { kind: 'panel', tab: 'git' },
+    group: 'operations',
+  },
+  {
     id: 'bridge',
     title: 'Міст до вітрини',
     hint: 'Nova → Fusion Lab',

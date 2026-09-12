@@ -22,9 +22,11 @@ import {
   Coins,
   Link2,
   Contact,
+  GitCommit,
 } from 'lucide-react';
 import { AiPricingAnalyticsView } from './AiPricingAnalyticsView';
 import { AdminCrmView } from './AdminCrmView';
+import { AdminGitHistoryView } from './AdminGitHistoryView';
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -45,7 +47,7 @@ import type { AdminUserRow, UserRole } from '../types';
 import { getRoleInfo } from '../utils/rbac';
 import { renderPdfFirstPageToPng } from '../utils/pdfCover';
 
-export type AdminTab = 'users' | 'roles' | 'costs' | 'business' | 'ai' | 'bridge' | 'crm';
+export type AdminTab = 'users' | 'roles' | 'costs' | 'business' | 'ai' | 'bridge' | 'crm' | 'git';
 
 interface RoleRow {
   role: UserRole;
@@ -1046,6 +1048,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ tab: controlledT
             ['crm', 'CRM', Contact],
             ['roles', 'Права доступу', ShieldCheck],
             ['bridge', 'Міст до вітрини', Link2],
+            ['git', 'Історія комітів', GitCommit],
           ] as const).map(([id, label, Icon]) => (
             <button
               key={id}
@@ -1089,6 +1092,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ tab: controlledT
       )}
 
       {tab === 'crm' && <AdminCrmView />}
+
+      {tab === 'git' && <AdminGitHistoryView />}
 
       {tab === 'business' && revenue && (
         <div className="space-y-6">
