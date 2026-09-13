@@ -385,8 +385,8 @@ export const ManuscriptFormatterView: React.FC<ManuscriptFormatterViewProps> = (
               </div>
 
               {notes.length > 0 && (
-                <div className="p-3 rounded-xl bg-cyan-500/10 border border-cyan-500/30 space-y-1.5">
-                  <div className="flex items-center gap-1.5 text-[11px] font-bold text-cyan-300">
+                <div className="p-3 rounded-xl [background-color:var(--sun-acc-10)] [border-color:var(--sun-acc-30)] border space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-[11px] font-bold [color:var(--sun-soft)]">
                     <Info className="w-3.5 h-3.5" /> {t('manuscriptFormatter.claudeNotes')}
                   </div>
                   <ul className="text-[11px] text-slate-300 space-y-1 list-disc pl-4">

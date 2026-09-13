@@ -719,6 +719,16 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void }> = ({ onOp
               <LinesEditor label="Результати навчання" lines={course.outcomes} onChange={(outcomes) => patch((c) => ({ ...c, outcomes }))} min={1} />
               <LinesEditor label="Три вигоди на картку" lines={course.highlights} onChange={(highlights) => patch((c) => ({ ...c, highlights }))} min={3} />
               <input value={course.coverUrl ?? ''} onChange={(e) => patch((c) => ({ ...c, coverUrl: e.target.value }))} placeholder="Обкладинка (URL)" className={inputCls} />
+              {/*
+                Картка без обкладинки у каталозі — порожній прямокутник, і
+                саме це власник назвав «книга на вітрині без фотографій»
+                (запис #168). Публікація тепер таку картку не створює, і
+                краще сказати про це ТУТ, ніж відмовити на кнопці.
+              */}
+              <p className="text-[11px] text-slate-500 -mt-1">
+                Без обкладинки публікація не піде: у каталозі картка буде порожнім прямокутником.
+                Дайте посилання на зображення (напр. ту саму картинку, що й для KDP).
+              </p>
               <div className="grid grid-cols-2 gap-2">
                 <input value={course.category ?? ''} onChange={(e) => patch((c) => ({ ...c, category: e.target.value }))} placeholder="Категорія" className={inputCls} />
                 <input

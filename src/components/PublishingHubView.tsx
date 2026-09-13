@@ -155,7 +155,7 @@ const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, 
 );
 
 const inputClass =
-  'w-full rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-500';
+  'w-full rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 sun-accent-focus';
 
 export const PublishingHubView: React.FC<PublishingHubViewProps> = ({
   book,
@@ -183,7 +183,7 @@ export const PublishingHubView: React.FC<PublishingHubViewProps> = ({
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       <header>
         <h1 className="text-2xl font-semibold text-slate-100 flex items-center gap-2">
-          <ShoppingBag className="w-6 h-6 text-cyan-400" /> {t('publishingHub.title')}
+          <ShoppingBag className="w-6 h-6 [color:var(--sun-acc)]" /> {t('publishingHub.title')}
         </h1>
         <p className="text-slate-400 text-sm mt-1">{t('publishingHub.subtitle')}</p>
       </header>
@@ -207,7 +207,7 @@ export const PublishingHubView: React.FC<PublishingHubViewProps> = ({
             onClick={() => setTab(id)}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm border transition ${
               tab === id
-                ? 'bg-cyan-500/15 border-cyan-500/50 text-cyan-200'
+                ? 'sun-accent-pill-active'
                 : 'bg-slate-900/50 border-slate-700 text-slate-300 hover:border-slate-500'
             }`}
           >
@@ -259,6 +259,15 @@ interface EditionResult {
   published?: { slug?: string; created?: boolean };
   attached?: { attached?: boolean };
   cover?: { attached?: boolean };
+  /**
+   * Причини, які сервер віддає ПОРЯД із результатом (маршрут
+   * `/api/admin/pdf/publish`): невдача файла й обкладинки більше не зриває
+   * публікацію, тому кожна з них приходить окремим полем і має бути видимою.
+   * `staleUk` — попередження, що PDF зібрано зі старої ревізії книги.
+   */
+  fileErrorUk?: string;
+  coverErrorUk?: string;
+  staleUk?: string;
   /** null — уривок вимкнули; attached:false — не вдався, причина в errorUk. */
   sample?: { pages: number; totalPages: number; attached: boolean; errorUk?: string } | null;
   pdf?: { pageCount?: number; sizeBytes?: number };
@@ -266,7 +275,54 @@ interface EditionResult {
   warningsUk?: string[];
 }
 
+/**
+ * Крок публікації у вітрину: те, що автор бачить, поки триває запит.
+ *
+ * `state` — це не прикраса: саме він перетворює «кнопка щось робить» на
+ * зрозумілий перебіг. `note` заповнюється причинами від сервера, коли крок
+ * не вдався, — щоб автор бачив, на чому саме спинилось, а не «помилка».
+ */
+interface PublishStep {
+  id: string;
+  label: string;
+  state: 'wait' | 'run' | 'done' | 'fail';
+  note?: string;
+}
+
+/** Ключ, під яким лежить звіт про останню публікацію (щоб пережити перезавантаження). */
+const LAST_PUBLISH_KEY = 'nova_vitryna_last_publish';
+
+/** Звіт про останню публікацію: редакції + час. */
+interface LastPublish {
+  at: string;
+  editions: EditionResult[];
+}
+
+function readLastPublish(): LastPublish | null {
+  try {
+    const raw = localStorage.getItem(LAST_PUBLISH_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as LastPublish;
+    return Array.isArray(parsed?.editions) ? parsed : null;
+  } catch {
+    // Приватний режим або зіпсований запис — краще без історії, ніж падіння.
+    return null;
+  }
+}
+
+function writeLastPublish(value: LastPublish): void {
+  try {
+    localStorage.setItem(LAST_PUBLISH_KEY, JSON.stringify(value));
+  } catch {
+    // Не запамʼяталось — не привід валити публікацію, яка вже відбулась.
+  }
+}
+
 const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGuest }) => {
+  // Панель пише підписи українською прямо в розмітці (так історично склалось),
+  // але ЧАС публікації має показуватись у локалі автора — тому locale тут.
+  const { lang } = useLanguage();
+  const locale = lang === 'en' ? 'en-US' : 'uk-UA';
   const [variant, setVariant] = useState<'code' | 'design'>('code');
   const [withPrint, setWithPrint] = useState(true);
   const [trimId, setTrimId] = useState('6x9');
@@ -284,6 +340,24 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
   const [busy, setBusy] = useState<'' | 'preview' | 'publish' | 'cover'>('');
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<EditionResult[] | null>(null);
+  /*
+    СТАН ПУБЛІКАЦІЇ, А НЕ ЛИШЕ ЇЇ РЕЗУЛЬТАТ.
+
+    Скарга власника (запис #168): натиснув «Опублікувати у вітрину» — і ні
+    статусу, ні перебігу. Причина була не в тому, що повідомлення не
+    формувалось: результат малювався блоком у САМОМУ НИЗУ довгої форми, до
+    якого ніхто не доскролював, а сама публікація тим часом тривала хвилини
+    (збірка друкованої редакції на 40 МБ + обкладинка + завантаження у
+    вітрину) з єдиною ознакою життя — підписом на кнопці.
+
+    Тому тепер є кроки (`publishSteps`) з часом на кожен, і вони живуть, поки
+    йде запит. Сам запит один і довгий, і чесно сказати «45 %» нічим: частки
+    приходять від сервера лише разом із відповіддю. Тож кроки показують
+    ФАЗИ, а не відсотки.
+  */
+  const [publishSteps, setPublishSteps] = useState<PublishStep[]>([]);
+  const [publishAt, setPublishAt] = useState<string | null>(null);
+  const statusRef = useRef<HTMLDivElement | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [coverNote, setCoverNote] = useState<string | null>(null);
   const [withSample, setWithSample] = useState(true);
@@ -342,6 +416,21 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
     void loadEngines();
   }, [loadEngines]);
 
+  /*
+    Звіт останньої публікації — з памʼяті браузера.
+
+    Публікація триває хвилинами, і автор цілком може оновити вкладку (або
+    вона впаде) саме посеред неї. Тоді результат попередньої спроби лишається
+    видимим, а не зникає разом зі станом React.
+  */
+  useEffect(() => {
+    const last = readLastPublish();
+    if (last) {
+      setResult(last.editions);
+      setPublishAt(last.at);
+    }
+  }, []);
+
   const chosenEngine = engines.find((e) => e.id === engineId) || null;
 
   const preview = async (format: 'digital' | 'print') => {
@@ -375,11 +464,51 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
     }
   };
 
+  /**
+   * Кроки публікації — оголошуються заздалегідь, а не з'являються по ходу.
+   *
+   * Так автор бачить не лише те, що вже сталося, а й те, що ще попереду:
+   * «завантаження файлу у вітрину» на 40 МБ триває найдовше, і знати про
+   * нього ДО того, як воно почнеться, важливіше, ніж спостерігати його потім.
+   */
+  const stepTemplate: PublishStep[] = useMemo(
+    () => [
+      { id: 'pdf', label: 'Складаю PDF книги для обкладинки', state: 'wait' },
+      { id: 'cover', label: 'Малюю обкладинку з першої сторінки', state: 'wait' },
+      { id: 'publish', label: 'Створюю картку й завантажую файли у вітрину', state: 'wait' },
+    ],
+    []
+  );
+
+  /** Позначити крок: `state` плюс, за потреби, причина від сервера. */
+  const setStep = useCallback((id: string, state: PublishStep['state'], note?: string) => {
+    setPublishSteps((prev) =>
+      prev.map((step) => (step.id === id ? { ...step, state, note: note ?? step.note } : step))
+    );
+  }, []);
+
+  /**
+   * Показати блок стану й довести його до очей.
+   *
+   * Без `scrollIntoView` результат публікації малювався в самому низу форми
+   * (під кнопками обкладинки), і саме тому власник його не побачив — хоча
+   * код його малював. Прокрутка тут не «приємність», а виправлення тієї
+   * скарги.
+   */
+  const revealStatus = useCallback(() => {
+    requestAnimationFrame(() => {
+      statusRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  }, []);
+
   const publish = async () => {
     setBusy('publish');
     setError(null);
     setResult(null);
     setCoverNote(null);
+    setPublishSteps(stepTemplate);
+    setPublishAt(new Date().toISOString());
+    revealStatus();
     try {
       /*
         Обкладинку малюємо ПЕРЕД публікацією, а не після.
@@ -392,6 +521,7 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
         а зайвий рендер KDP коштував би ще одного проходу зі збіжністю
         корінця заради тієї ж картинки.
       */
+      setStep('pdf', 'run');
       const previewRes = await fetch('/api/admin/pdf/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -402,7 +532,11 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
         const data = await previewRes.json().catch(() => ({}));
         throw new Error(data?.error || `Не вдалося зібрати PDF для обкладинки (HTTP ${previewRes.status}).`);
       }
+      setStep('pdf', 'done');
+
+      setStep('cover', 'run');
       const coverBase64 = await renderPdfFirstPageToPng(await previewRes.blob());
+      setStep('cover', 'done');
 
       const editions: Record<string, unknown>[] = [
         { format: 'digital', priceMinor: Math.round(Number(priceDigital) * 100), variant },
@@ -415,6 +549,13 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
           trimId,
         });
       }
+      /*
+        Один довгий запит на всю публікацію. Частки звідси не приходять:
+        сервер віддає звіт лише разом із відповіддю. Тому крок нижче
+        лишається «в роботі» до кінця — і це чесніше за відсоток, який
+        довелося б вигадувати.
+      */
+      setStep('publish', 'run');
       const res = await fetch('/api/admin/pdf/publish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -435,11 +576,26 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
       }
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Публікація не вдалася.');
-      setResult(data.editions || []);
+      const editionsResult: EditionResult[] = data.editions || [];
+      setResult(editionsResult);
+      setStep('publish', 'done');
+      // Звіт переживає перезавантаження сторінки: публікація — дія назавжди,
+      // а вкладка може закритись раніше за автора.
+      writeLastPublish({ at: new Date().toISOString(), editions: editionsResult });
     } catch (err: any) {
-      setError(err?.message || 'Помилка публікації.');
+      /*
+        Причину показуємо і в загальному повідомленні, і в тому кроці, на
+        якому спинилось: «помилка публікації» без кроку змушує шукати її
+        по всій формі, хоч вона майже завжди в одному місці.
+      */
+      const message = err?.message || 'Помилка публікації.';
+      setPublishSteps((prev) =>
+        prev.map((step) => (step.state === 'run' ? { ...step, state: 'fail', note: message } : step))
+      );
+      setError(message);
     } finally {
       setBusy('');
+      revealStatus();
     }
   };
 
@@ -526,7 +682,7 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
                 title={hint}
                 className={`px-3 py-2 rounded-xl text-xs border transition ${
                   variant === id
-                    ? 'bg-cyan-500/15 border-cyan-500/50 text-cyan-200'
+                    ? 'sun-accent-pill-active'
                     : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-600'
                 }`}
               >
@@ -566,7 +722,7 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
                   !engine.available
                     ? 'bg-slate-950/60 border-slate-800 text-slate-600 cursor-not-allowed'
                     : engineId === engine.id
-                      ? 'bg-cyan-500/15 border-cyan-500/50 text-cyan-200'
+                      ? 'sun-accent-pill-active'
                       : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-600'
                 }`}
               >
@@ -613,7 +769,7 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
                   onClick={() => setTheme(id)}
                   className={`px-2.5 py-1.5 rounded-lg text-[11px] border transition ${
                     theme === id
-                      ? 'bg-cyan-500/15 border-cyan-500/50 text-cyan-200'
+                      ? 'sun-accent-pill-active'
                       : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-600'
                   }`}
                 >
@@ -640,7 +796,7 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
             <input
               value={priceDigital}
               onChange={(e) => setPriceDigital(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none focus:border-cyan-500/60 font-mono"
+              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none sun-accent-focus font-mono"
             />
           </label>
           <label className="block">
@@ -649,7 +805,7 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
               value={sellerSlug}
               onChange={(e) => setSellerSlug(e.target.value)}
               placeholder="fusion-lab"
-              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none focus:border-cyan-500/60 font-mono"
+              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none sun-accent-focus font-mono"
             />
           </label>
         </div>
@@ -666,7 +822,7 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
                 <input
                   value={pricePrint}
                   onChange={(e) => setPricePrint(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none focus:border-cyan-500/60 font-mono"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none sun-accent-focus font-mono"
                 />
               </label>
               <label className="block">
@@ -674,7 +830,7 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
                 <select
                   value={trimId}
                   onChange={(e) => setTrimId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none focus:border-cyan-500/60"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none sun-accent-focus"
                 >
                   {['5x8', '5.5x8.5', '6x9', '7x10', '8.5x11'].map((id) => (
                     <option key={id} value={id}>{id.replace('x', ' × ')}″</option>
@@ -705,7 +861,7 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
           <button
             onClick={() => void publish()}
             disabled={busy !== ''}
-            className="px-4 py-2 rounded-xl bg-cyan-500 text-slate-950 text-xs font-bold disabled:opacity-50"
+            className="px-4 py-2 rounded-xl sun-accent-solid text-xs font-bold disabled:opacity-50"
           >
             {busy === 'publish' ? 'Малюю обкладинку й публікую…' : 'Опублікувати у вітрину'}
           </button>
@@ -721,7 +877,7 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
               type="checkbox"
               checked={withSample}
               onChange={(e) => setWithSample(e.target.checked)}
-              className="accent-cyan-500"
+              className="sun-accent-check"
             />
             Відкрити безкоштовний уривок
           </label>
@@ -789,50 +945,142 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
         )}
       </div>
 
-      {result && (
-        <div className="space-y-3">
-          {result.map((edition) => (
-            <div key={edition.format} className="p-4 rounded-2xl bg-slate-900/60 border border-emerald-500/30 space-y-2">
-              <p className="text-sm font-bold text-emerald-200">
-                {edition.format === 'print' ? 'Друкована редакція (KDP)' : 'Електронна редакція'} —{' '}
-                {edition.published?.created === false ? 'оновлено' : 'опубліковано'}
-              </p>
-              <p className="text-[11px] text-slate-300">
-                Сторінок: {edition.pdf?.pageCount} · Розмір: {Math.round((edition.pdf?.sizeBytes || 0) / 1024)} КБ
-                {edition.layout?.trimId ? ` · Обріз ${edition.layout.trimId}` : ''}
-                {edition.layout?.gutterMm ? ` · Норма корінця ${edition.layout.gutterMm} мм` : ''}
-                {edition.attached?.attached ? ' · Файл у лістингу' : ' · Файл НЕ прикріплено'}
-                {edition.cover?.attached ? ' · Обкладинка' : ''}
-              </p>
-              {edition.sample && (
-                <p className="text-[11px] text-slate-300">
-                  {edition.sample.attached
-                    ? `Уривок: ${edition.sample.pages} сторінок із ${edition.sample.totalPages} — відкритий усім.`
-                    : edition.sample.errorUk}
-                </p>
+      {/*
+        СТАТУС ПУБЛІКАЦІЇ — там, де на нього дивляться, і словами, а не
+        кольором кнопки.
+
+        Блок стоїть ПІСЛЯ кнопок (щоб не розривати форму), але з прокруткою
+        до себе: саме відсутність цієї прокрутки й була причиною скарги —
+        звіт малювався нижче його екрана. `role="status"` + `aria-live`
+        озвучують перебіг тим, хто читає екран.
+      */}
+      <div
+        ref={statusRef}
+        role="status"
+        aria-live="polite"
+        className={(busy === 'publish' || publishSteps.length > 0 || result) ? 'space-y-3 scroll-mt-6' : 'hidden'}
+      >
+        {(busy === 'publish' || publishSteps.length > 0) && (
+          <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-700 space-y-2">
+            <p className="text-xs font-bold [color:var(--sun-soft)] flex items-center gap-2">
+              {busy === 'publish' ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <CheckCircle2 className="w-3.5 h-3.5" />
               )}
-              {edition.published?.slug && (
-                <a
-                  href={`https://app.fusionlab.in.ua/uk/catalog/${edition.published.slug}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-[11px] text-cyan-300 underline"
-                >
-                  /uk/catalog/{edition.published.slug}
-                </a>
+              {busy === 'publish' ? 'Публікація у вітрину триває…' : 'Публікацію завершено'}
+              {publishAt && (
+                <span className="text-slate-500 font-normal">
+                  · {new Date(publishAt).toLocaleString(locale)}
+                </span>
               )}
-              {edition.layout?.noteUk && (
-                <p className="text-[11px] text-slate-400 border-l-2 border-slate-700 pl-3">{edition.layout.noteUk}</p>
-              )}
-              {(edition.warningsUk || []).map((w) => (
-                <p key={w} className="text-[11px] text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
-                  {w}
-                </p>
+            </p>
+            <ol className="space-y-1">
+              {publishSteps.map((step, index) => (
+                <li key={step.id} className="flex items-start gap-2 text-[11px]">
+                  <span className="mt-0.5 shrink-0">
+                    {step.state === 'done' ? (
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    ) : step.state === 'fail' ? (
+                      <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                    ) : step.state === 'run' ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin [color:var(--sun-acc)]" />
+                    ) : (
+                      <span className="inline-block w-3.5 h-3.5 rounded-full border border-slate-600" />
+                    )}
+                  </span>
+                  <span className={step.state === 'wait' ? 'text-slate-500' : 'text-slate-300'}>
+                    {index + 1}. {step.label}
+                    {step.note && <span className="block text-rose-300 mt-0.5">{step.note}</span>}
+                  </span>
+                </li>
               ))}
-            </div>
-          ))}
-        </div>
-      )}
+            </ol>
+            {busy === 'publish' && (
+              <p className="text-[11px] text-slate-500">
+                Друкована редакція верстається під KDP, а файл книги завантажується у сховище
+                маркетплейсу — на великій книзі це триває хвилинами. Титульну сторінку PDF
+                можна не закривати: публікація не залежить від вкладки.
+              </p>
+            )}
+          </div>
+        )}
+
+        {result && (
+          <div className="space-y-3">
+            {result.map((edition) => (
+              <div
+                key={edition.format}
+                className={`p-4 rounded-2xl bg-slate-900/60 border space-y-2 ${
+                  edition.cover?.attached === false ? 'border-amber-500/40' : 'border-emerald-500/30'
+                }`}
+              >
+                <p className="text-sm font-bold text-emerald-200">
+                  {edition.format === 'print' ? 'Друкована редакція (KDP)' : 'Електронна редакція'} —{' '}
+                  {edition.published?.created === false ? 'оновлено' : 'опубліковано'}
+                </p>
+                <ul className="text-[11px] text-slate-300 space-y-0.5">
+                  <li>
+                    {edition.attached?.attached === false ? '✗' : '✓'} Файл книги:{' '}
+                    {edition.attached?.attached === false ? 'НЕ прикріплено' : 'у сховищі маркетплейсу'}
+                  </li>
+                  <li>
+                    {edition.cover?.attached === false ? '✗' : '✓'} Обкладинка:
+                    {edition.cover?.attached === false
+                      ? ' НЕ прикріплена — у картці вона лишилась посиланням на Студію'
+                      : ' у картці вітрини'}
+                  </li>
+                  <li>
+                    Сторінок: {edition.pdf?.pageCount} · Розмір: {Math.round((edition.pdf?.sizeBytes || 0) / 1024)} КБ
+                    {edition.layout?.trimId ? ` · Обріз ${edition.layout.trimId}` : ''}
+                    {edition.layout?.gutterMm ? ` · Норма корінця ${edition.layout.gutterMm} мм` : ''}
+                  </li>
+                  {edition.sample && (
+                    <li>
+                      {edition.sample.attached
+                        ? `Уривок: ${edition.sample.pages} сторінок із ${edition.sample.totalPages} — відкритий усім.`
+                        : edition.sample.errorUk}
+                    </li>
+                  )}
+                </ul>
+                {edition.fileErrorUk && (
+                  <p className="text-[11px] text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+                    {edition.fileErrorUk}
+                  </p>
+                )}
+                {edition.coverErrorUk && (
+                  <p className="text-[11px] text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+                    {edition.coverErrorUk}
+                  </p>
+                )}
+                {edition.staleUk && (
+                  <p className="text-[11px] text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+                    {edition.staleUk}
+                  </p>
+                )}
+                {edition.published?.slug && (
+                  <a
+                    href={`https://app.fusionlab.in.ua/uk/catalog/${edition.published.slug}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] [color:var(--sun-soft)] underline"
+                  >
+                    Відкрити картку у вітрині <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+                {edition.layout?.noteUk && (
+                  <p className="text-[11px] text-slate-400 border-l-2 border-slate-700 pl-3">{edition.layout.noteUk}</p>
+                )}
+                {(edition.warningsUk || []).map((w) => (
+                  <p key={w} className="text-[11px] text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+                    {w}
+                  </p>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
     </div>
   );
@@ -992,11 +1240,11 @@ const KdpPanel: React.FC<{
     <div className="space-y-6">
       <section className="rounded-xl border border-slate-700 bg-slate-900/40 p-4">
         <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
-          <Info className="w-4 h-4 text-cyan-400" /> {t('publishingHub.kdpIntroTitle')}
+          <Info className="w-4 h-4 [color:var(--sun-acc)]" /> {t('publishingHub.kdpIntroTitle')}
         </h2>
         <p className="text-sm text-slate-400 mt-2">{t('publishingHub.kdpIntroText')}</p>
         <p className="text-xs text-slate-500 mt-2">{t('publishingHub.kdpExportHint')}</p>
-        <button onClick={() => onNavigateToTab('export')} className="text-cyan-400 text-sm mt-2 hover:underline">
+        <button onClick={() => onNavigateToTab('export')} className="[color:var(--sun-acc)] text-sm mt-2 hover:underline">
           {t('publishingHub.kdpGoToExport')}
         </button>
       </section>
@@ -1058,7 +1306,7 @@ const KdpPanel: React.FC<{
         <button
           onClick={runValidation}
           disabled={busy}
-          className="inline-flex items-center gap-2 rounded-lg bg-cyan-500/15 border border-cyan-500/40 px-4 py-2 text-sm text-cyan-200 hover:bg-cyan-500/25 disabled:opacity-50"
+          className="inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm sun-accent-outline disabled:opacity-50"
         >
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
           {t('publishingHub.kdpValidateBtn')}
@@ -1100,7 +1348,7 @@ const KdpPanel: React.FC<{
         <button
           onClick={buildSheet}
           disabled={busy}
-          className="inline-flex items-center gap-2 rounded-lg bg-cyan-500/15 border border-cyan-500/40 px-4 py-2 text-sm text-cyan-200 hover:bg-cyan-500/25 disabled:opacity-50"
+          className="inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm sun-accent-outline disabled:opacity-50"
         >
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <BookMarked className="w-4 h-4" />}
           {t('publishingHub.kdpBuildSheet')}
@@ -1210,7 +1458,7 @@ const FileRow: React.FC<{
   onDelete?: () => void;
 }> = ({ file, checked, onToggle, onDelete }) => (
   <li className="flex items-center gap-3 rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2 text-sm">
-    <input type="checkbox" checked={checked} onChange={onToggle} className="accent-cyan-500" />
+    <input type="checkbox" checked={checked} onChange={onToggle} className="sun-accent-check" />
     <span className="flex-1 text-slate-200 truncate">{file.name}</span>
     <span className="text-slate-500 text-xs">{formatBytes(file.bytes)}</span>
     {onDelete && (
@@ -1416,7 +1664,7 @@ const EtsyPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGuest }
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="text-sm text-slate-300 flex items-center gap-2">
-                <Store className="w-4 h-4 text-cyan-400" />
+                <Store className="w-4 h-4 [color:var(--sun-acc)]" />
                 {status?.connected
                   ? `${t('publishingHub.etsyShop')}: ${status.shopName || status.shopId || '—'}`
                   : t('publishingHub.etsyConnect')}
@@ -1442,7 +1690,7 @@ const EtsyPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGuest }
               <button
                 onClick={connect}
                 disabled={busy || isGuest}
-                className="inline-flex items-center gap-2 rounded-lg bg-cyan-500/15 border border-cyan-500/40 px-4 py-2 text-sm text-cyan-200 hover:bg-cyan-500/25 disabled:opacity-50"
+                className="inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm sun-accent-outline disabled:opacity-50"
               >
                 <Link2 className="w-4 h-4" /> {t('publishingHub.etsyConnect')}
               </button>
@@ -1455,7 +1703,7 @@ const EtsyPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGuest }
       {!isGuest && !product && (
         <button
           onClick={() => create().catch((err) => setError(err.message))}
-          className="rounded-lg bg-cyan-500/15 border border-cyan-500/40 px-4 py-2 text-sm text-cyan-200"
+          className="rounded-lg border px-4 py-2 text-sm sun-accent-outline"
         >
           {t('publishingHub.etsyCreateProduct')}
         </button>
@@ -1491,7 +1739,7 @@ const EtsyPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGuest }
                 <input ref={fileInput} type="file" multiple onChange={onUpload} className="hidden" id="etsy-upload" />
                 <label
                   htmlFor="etsy-upload"
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-300 cursor-pointer hover:border-cyan-500"
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-300 cursor-pointer hover:[border-color:var(--sun-acc)]"
                 >
                   <Upload className="w-4 h-4" /> {t('publishingHub.etsyUpload')}
                 </label>
@@ -1543,7 +1791,7 @@ const EtsyPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGuest }
             )}
 
             <label className="flex items-center gap-2 text-sm text-slate-300">
-              <input type="checkbox" checked={activate} onChange={(e) => setActivate(e.target.checked)} className="accent-cyan-500" />
+              <input type="checkbox" checked={activate} onChange={(e) => setActivate(e.target.checked)} className="sun-accent-check" />
               {t('publishingHub.etsyActivate')}
             </label>
 
@@ -1551,14 +1799,14 @@ const EtsyPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGuest }
               <button
                 onClick={validate}
                 disabled={busy}
-                className="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-200 hover:border-cyan-500 disabled:opacity-50"
+                className="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-200 hover:[border-color:var(--sun-acc)] disabled:opacity-50"
               >
                 {t('publishingHub.etsyValidate')}
               </button>
               <button
                 onClick={publish}
                 disabled={busy || !status?.connected}
-                className="inline-flex items-center gap-2 rounded-lg bg-cyan-500/20 border border-cyan-500/50 px-4 py-2 text-sm text-cyan-100 hover:bg-cyan-500/30 disabled:opacity-50"
+                className="inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm sun-accent-outline disabled:opacity-50"
               >
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShoppingBag className="w-4 h-4" />}
                 {t('publishingHub.etsyPublish')}
@@ -1583,7 +1831,7 @@ const EtsyPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGuest }
                   href={etsyPublication.externalUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-cyan-400 hover:underline"
+                  className="inline-flex items-center gap-1 [color:var(--sun-acc)] hover:underline"
                 >
                   {t('publishingHub.etsyOpenListing')} <ExternalLink className="w-3 h-3" />
                 </a>
@@ -1684,7 +1932,7 @@ const BundlePanel: React.FC<{ isGuest: boolean }> = ({ isGuest }) => {
     <div className="space-y-6">
       <section className="rounded-xl border border-slate-700 bg-slate-900/40 p-4 space-y-3">
         <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
-          <FileArchive className="w-4 h-4 text-cyan-400" /> {t('publishingHub.bundleTitle')}
+          <FileArchive className="w-4 h-4 [color:var(--sun-acc)]" /> {t('publishingHub.bundleTitle')}
         </h2>
         <p className="text-sm text-slate-400">{t('publishingHub.bundleIntro')}</p>
 
@@ -1734,14 +1982,14 @@ const BundlePanel: React.FC<{ isGuest: boolean }> = ({ isGuest }) => {
           <button
             onClick={analyze}
             disabled={busy || !productId || !selected.length}
-            className="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-200 hover:border-cyan-500 disabled:opacity-50"
+            className="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-200 hover:[border-color:var(--sun-acc)] disabled:opacity-50"
           >
             {t('publishingHub.bundleAnalyze')}
           </button>
           <button
             onClick={build}
             disabled={busy || !productId || !selected.length}
-            className="inline-flex items-center gap-2 rounded-lg bg-cyan-500/20 border border-cyan-500/50 px-4 py-2 text-sm text-cyan-100 disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm sun-accent-outline disabled:opacity-50"
           >
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Package className="w-4 h-4" />}
             {t('publishingHub.bundlePackage')}
@@ -1840,7 +2088,7 @@ const ResearchPanel: React.FC<{
     <div className="space-y-6">
       <section className="rounded-xl border border-slate-700 bg-slate-900/40 p-4 space-y-3">
         <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
-          <Search className="w-4 h-4 text-cyan-400" /> {t('publishingHub.researchTitle')}
+          <Search className="w-4 h-4 [color:var(--sun-acc)]" /> {t('publishingHub.researchTitle')}
         </h2>
         <div className="flex gap-2 items-end">
           <div className="flex-1">
@@ -1857,7 +2105,7 @@ const ResearchPanel: React.FC<{
           <button
             onClick={search}
             disabled={busy || isGuest}
-            className="inline-flex items-center gap-2 rounded-lg bg-cyan-500/20 border border-cyan-500/50 px-4 py-2 text-sm text-cyan-100 disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm sun-accent-outline disabled:opacity-50"
           >
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
             {t('publishingHub.researchSearch')}
@@ -1900,7 +2148,7 @@ const ResearchPanel: React.FC<{
               <h3 className="text-sm font-semibold text-slate-200">{t('publishingHub.researchTags')}</h3>
               <button
                 onClick={() => copy(report.suggestedTags.join(', '), 'tags')}
-                className="inline-flex items-center gap-1 text-xs text-slate-300 hover:text-cyan-300"
+                className="inline-flex items-center gap-1 text-xs text-slate-300 hover:[color:var(--sun-soft)]"
               >
                 <Copy className="w-3 h-3" />
                 {copiedKey === 'tags' ? t('publishingHub.copied') : t('publishingHub.researchCopyTags')}
@@ -1946,7 +2194,7 @@ const ResearchPanel: React.FC<{
                       <td className="py-2 text-slate-200">{listing.title}</td>
                       <td className="py-2 text-right text-slate-400">{listing.numFavorers}</td>
                       <td className="py-2 text-right text-slate-400">${listing.priceUsd}</td>
-                      <td className="py-2 text-right text-cyan-300">{listing.popularity}</td>
+                      <td className="py-2 text-right [color:var(--sun-soft)]">{listing.popularity}</td>
                     </tr>
                   ))}
                 </tbody>

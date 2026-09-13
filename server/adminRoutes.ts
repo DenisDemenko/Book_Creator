@@ -64,6 +64,7 @@ import {
   unpublishBookFromMarketplace,
   publishBookToMarketplace,
   publishCourseToMarketplace,
+  assertStorefrontCover,
   MarketplaceBridgeError,
 } from './marketplaceBridge';
 
@@ -1096,6 +1097,12 @@ export function registerAdminRoutes(app: Express): void {
 
     try {
       const settings = await readBridgeSettings();
+      /*
+        Без обкладинки картка у каталозі — порожній прямокутник (запис #168).
+        Перевіряємо ДО першого виклику мосту, щоб не створити лістинг, який
+        потім доведеться знімати вручну.
+      */
+      assertStorefrontCover(coverUrl, `Видання «${title}»`);
       const results = [];
       for (const entry of list) {
         const format = entry?.format === 'print' ? 'print' : 'digital';
@@ -1159,6 +1166,7 @@ export function registerAdminRoutes(app: Express): void {
 
     try {
       const settings = await readBridgeSettings();
+      assertStorefrontCover(coverUrl, `Курс «${title}»`);
       const result = await publishCourseToMarketplace(
         {
           bookId,

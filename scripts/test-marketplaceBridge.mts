@@ -375,5 +375,38 @@ console.log('\nПублічна адреса для посилання на об
     publicOriginFrom(reqWith({}), '') === '');
 }
 
+// ---------------------------------------------------------------------------
+console.log('\nКартка без обкладинки у вітрину не йде:');
+{
+  /*
+    Живий прогін вітрини (запис #168) знайшов у каталозі картки Студії з
+    порожнім `coverUrl` — курс і тестову книгу. У каталозі вони показуються
+    порожнім прямокутником; саме це власник назвав «книга без фотографій».
+
+    Правило «без обкладинки не публікуємо» існувало лише на шляху книги з
+    браузера. Тепер воно одне на всі шляхи — і перевіряється тут, щоб не
+    зникнути мовчки під час наступного рефакторингу.
+  */
+  const refused = (value: unknown) => {
+    try {
+      bridge.assertStorefrontCover(value, 'Курс «Тест»');
+      return null;
+    } catch (err: any) {
+      return err as { kind?: string; status?: number; message?: string };
+    }
+  };
+
+  const empty = refused('');
+  t('порожнє посилання — відмова', empty !== null);
+  t('відмова має вид cover_required, а не «щось зламалось»', empty?.kind === 'cover_required', String(empty?.kind));
+  t('відмова має статус 400 (це помилка даних, не сервісу)', empty?.status === 400, String(empty?.status));
+  t('у відмові є назва того, чого не хватає', String(empty?.message).includes('Курс «Тест»'), empty?.message);
+  t('у відмові сказано, ЩО робити далі', String(empty?.message).includes('Додайте обкладинку'));
+  t('пробіли замість посилання теж відмова', refused('   ') !== null);
+  t('undefined теж відмова', refused(undefined) !== null);
+  t('справжнє посилання проходить без винятку',
+    refused('https://app.fusionlab.in.ua/api/public/books/BK-1/cover?v=1') === null);
+}
+
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);
 if (fail > 0) process.exit(1);

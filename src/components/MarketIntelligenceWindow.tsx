@@ -74,7 +74,7 @@ export const MarketIntelligenceWindow: React.FC<MarketIntelligenceWindowProps> =
       <DraggablePanel
         title={
           <span className="flex items-center gap-2">
-            <LineChart className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+            <LineChart className="w-3.5 h-3.5 [color:var(--sun-acc)] shrink-0" />
             {t('marketIntel.heading')}
           </span>
         }

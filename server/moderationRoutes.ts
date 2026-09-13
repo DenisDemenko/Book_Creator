@@ -8,7 +8,7 @@
 
 import type { Express } from 'express';
 import { requireAdmin } from './auth';
-import { publishCourseToMarketplace, MarketplaceBridgeError } from './marketplaceBridge';
+import { publishCourseToMarketplace, assertStorefrontCover, MarketplaceBridgeError } from './marketplaceBridge';
 import { getCourse, updateCourse } from './courseStore';
 import {
   decideModeration,
@@ -43,6 +43,9 @@ export function registerModerationRoutes(app: Express): void {
           return res.status(404).json({ error: 'Курс не знайдено — можливо, його видалили.' });
         }
         const sellerSlug = process.env.BRIDGE_SELLER_SLUG || 'fusion-lab';
+        // Курс без обкладинки дав би в каталозі порожню картку — відмовляємо
+        // з причиною замість того, щоб публікувати непоказний товар.
+        assertStorefrontCover(course.coverUrl, `Курс «${course.title}»`);
         const result = await publishCourseToMarketplace({
           bookId: course.id,
           title: course.title,

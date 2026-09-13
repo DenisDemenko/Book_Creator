@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
+import { sunAccentVars } from "../utils/sunAccentVars";
 
 export interface SunColorTheme {
   id: string;
@@ -653,6 +654,21 @@ export const SunLightingProvider: React.FC<{
       root.style.setProperty("--sun-ambient-rgb", color.ambientRgb);
       root.style.setProperty("--sun-intensity-progress", intensityProgress.toString());
       root.style.setProperty("--sun-pause-active", pauseMode ? "1" : "0");
+
+      /*
+        АКЦЕНТ «СОНЕЧКА» — НА КОРЕНІ, А НЕ В ОБГОРТЦІ РОЗДІЛУ.
+
+        `useSunAccentVars()` віддає ті самі змінні, але лише тому піддереву,
+        куди його поклали. Через це колір тексту кнопок залежав від того, чи
+        про це подбав конкретний розділ: там, де обгортки не було, кнопки
+        лишались блакитними (скарга власника: «Публікація та експорт»,
+        «Формування файлу», «Аналітика ринку Etsy»). Тепер джерело правди
+        одне — корінь документа, і `[color:var(--sun-acc)]` працює скрізь.
+      */
+      const accents = sunAccentVars(color, theme === "light" ? "light" : "dark");
+      for (const [name, value] of Object.entries(accents)) {
+        root.style.setProperty(name, value);
+      }
 
       // Angle in degrees
       const angleDeg = Math.round((Math.atan2(dy, dx) * 180) / Math.PI);

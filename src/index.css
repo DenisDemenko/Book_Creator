@@ -771,6 +771,58 @@
 }
 
 @layer utilities {
+  /*
+    АКЦЕНТ «СОНЕЧКА» ДЛЯ СУЦІЛЬНИХ КНОПОК.
+
+    Змінні --sun-acc* тепер стоять на корені документа (SunLightingContext),
+    тож будь-який розділ може фарбувати текст кнопок акцентом сонця. Але з
+    суцільною заливкою є тонкість: у СВІТЛІЙ темі акцент темний
+    (--sun-acc = primary), а в ТЕМНІЙ — яскравий (secondary). Один колір
+    тексту для обох випадків дасть або темне на темному, або біле на
+    салатовому. Тому колір тексту міняється разом із темою — і міняється
+    рівно тут, а не в кожному розділі окремо.
+  */
+  .sun-accent-solid {
+    background-color: var(--sun-acc);
+    color: #ffffff;
+  }
+  [data-theme='dark'] .sun-accent-solid {
+    color: #0b1220;
+  }
+  .sun-accent-solid:disabled {
+    opacity: 0.5;
+  }
+
+  /* Активна пігулка (вибрана вкладка, обраний рушій, обраний макет):
+     напівпрозора заливка акценту + акцентна рамка + м'який тон тексту. */
+  .sun-accent-pill-active {
+    background-color: var(--sun-acc-15);
+    border-color: var(--sun-acc-40);
+    color: var(--sun-soft);
+  }
+
+  /* Другорядна дія в акценті: рамка й заливка акценту, текст — м'який тон. */
+  .sun-accent-outline {
+    background-color: var(--sun-acc-15);
+    border-color: var(--sun-acc-40);
+    color: var(--sun-soft);
+  }
+  .sun-accent-outline:hover {
+    background-color: var(--sun-acc-25);
+    border-color: var(--sun-acc-70);
+  }
+
+  /* Фокус поля — акцентом сонця, як у решті студії. */
+  .sun-accent-focus:focus {
+    border-color: var(--sun-acc);
+    outline: none;
+  }
+
+  /* Прапорець/перемикач — той самий акцент. */
+  .sun-accent-check {
+    accent-color: var(--sun-acc);
+  }
+
   /* Dynamic Neomorphic Utility Classes Driven by Draggable Sun.
      СВІТЛА ТЕМА (за замовчуванням): класична СІРА тінь + білий хайлайт,
      напрямок — від сонця (тінь) і до сонця (хайлайт), як у архіві.

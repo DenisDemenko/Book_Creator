@@ -116,7 +116,7 @@ interface ApiError extends Error {
 const COUNT_OPTIONS = [5, 10, 15, 20, 30];
 
 const inputClass =
-  'w-full rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-500';
+  'w-full rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 sun-accent-focus';
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { credentials: 'same-origin', ...init });
@@ -268,7 +268,7 @@ const ScoreBreakdown: React.FC<{ item: MarketReportItem }> = ({ item }) => {
     <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 p-4 space-y-4">
       <div>
         <h4 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
-          <Calculator className="w-4 h-4 text-cyan-400" /> {t('marketIntel.breakdownTitle')}
+          <Calculator className="w-4 h-4 [color:var(--sun-acc)]" /> {t('marketIntel.breakdownTitle')}
         </h4>
         <p className="text-xs text-slate-500 mt-1">{t('marketIntel.breakdownHint')}</p>
       </div>
@@ -294,7 +294,7 @@ const ScoreBreakdown: React.FC<{ item: MarketReportItem }> = ({ item }) => {
                   </td>
                   <td className="py-1.5 px-3 text-right font-mono text-slate-300">{part.raw.toFixed(1)}</td>
                   <td className="py-1.5 px-3 text-right font-mono text-slate-500">{part.weight}%</td>
-                  <td className="py-1.5 px-3 text-right font-mono text-cyan-300">{part.contribution.toFixed(2)}</td>
+                  <td className="py-1.5 px-3 text-right font-mono [color:var(--sun-soft)]">{part.contribution.toFixed(2)}</td>
                   <td className="py-1.5 pl-3 text-slate-400">{part.basisUk}</td>
                 </tr>
               );
@@ -303,7 +303,7 @@ const ScoreBreakdown: React.FC<{ item: MarketReportItem }> = ({ item }) => {
               <td className="py-1.5 pr-3 font-semibold text-slate-200">{t('marketIntel.bdTotal')}</td>
               <td />
               <td />
-              <td className="py-1.5 px-3 text-right font-mono font-bold text-cyan-200">
+              <td className="py-1.5 px-3 text-right font-mono font-bold [color:var(--sun-acc)]">
                 {totalContribution.toFixed(2)} → {score}
               </td>
               <td />
@@ -700,7 +700,7 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({
       <div className="max-w-6xl mx-auto space-y-6">
         <header>
           <h1 className="text-2xl font-semibold text-slate-100 flex items-center gap-2">
-            <LineChart className="w-6 h-6 text-cyan-400" /> {t('marketIntel.heading')}
+            <LineChart className="w-6 h-6 [color:var(--sun-acc)]" /> {t('marketIntel.heading')}
           </h1>
           <p className="text-slate-400 text-sm mt-1">{t('marketIntel.intro')}</p>
         </header>
@@ -730,7 +730,7 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({
                 aria-current={isActive ? 'page' : undefined}
                 className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${
                   isActive
-                    ? 'bg-cyan-500/15 text-cyan-200 border border-cyan-500/40'
+                    ? 'sun-accent-pill-active'
                     : 'border border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
                 }`}
               >
@@ -805,7 +805,7 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({
         {/* --- Пошук (ТЗ 6) --- */}
         <section className="rounded-xl border border-slate-700/50 bg-slate-900/50 p-4 space-y-4">
           <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
-            <Search className="w-4 h-4 text-cyan-400" /> {t('marketIntel.searchTitle')}
+            <Search className="w-4 h-4 [color:var(--sun-acc)]" /> {t('marketIntel.searchTitle')}
           </h2>
 
           <div className="grid gap-4 lg:grid-cols-[2fr_auto_2fr]">
@@ -887,7 +887,7 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({
             селектор змусив би автора думати, що він щось налаштовує.
           */}
           {shownNextSource === 'etsy_api' && (
-            <p className="text-xs text-cyan-300/80">{t('marketIntel.modelUnusedOnEtsy')}</p>
+            <p className="text-xs [color:var(--sun-soft)] opacity-80">{t('marketIntel.modelUnusedOnEtsy')}</p>
           )}
 
           <div className="flex flex-wrap items-center gap-3">
@@ -896,7 +896,7 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({
                 type="checkbox"
                 checked={force}
                 onChange={(event) => setForce(event.target.checked)}
-                className="accent-cyan-500"
+                className="sun-accent-check"
               />
               <RefreshCw className="w-3.5 h-3.5 text-slate-500" />
               {t('marketIntel.forceLabel')}
@@ -905,7 +905,7 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({
             <button
               onClick={runScreen}
               disabled={busy}
-              className="inline-flex items-center gap-2 rounded-lg bg-cyan-500/20 border border-cyan-500/50 px-4 py-2 text-sm text-cyan-100 hover:bg-cyan-500/30 disabled:opacity-50"
+              className="inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm sun-accent-outline disabled:opacity-50"
             >
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
               {busy ? t('marketIntel.searching') : t('marketIntel.searchBtn')}
@@ -915,7 +915,7 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({
               <button
                 onClick={() => downloadReportCsv(report)}
                 title={t('marketIntel.exportHint')}
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-200 hover:border-cyan-500"
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-200 hover:[border-color:var(--sun-acc)]"
               >
                 <Download className="w-4 h-4" /> {t('marketIntel.exportCsv')}
               </button>
@@ -942,7 +942,7 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({
                       count: row.itemCount,
                       date: new Date(row.collectedAt).toLocaleString(locale),
                     })}
-                    className="rounded-full border border-slate-700 bg-slate-900/60 px-3 py-1 text-xs text-slate-300 hover:border-cyan-500 hover:text-cyan-200"
+                    className="rounded-full border border-slate-700 bg-slate-900/60 px-3 py-1 text-xs text-slate-300 hover:[border-color:var(--sun-acc)] hover:[color:var(--sun-soft)]"
                   >
                     {row.topic}
                     <span className="text-slate-600"> · {row.itemCount}</span>
@@ -1011,7 +1011,7 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({
                   [
                     t('marketIntel.aggAvgOpportunity'),
                     aggregate.avgOpportunity === null ? null : String(Math.round(aggregate.avgOpportunity)),
-                    'text-cyan-300',
+                    '[color:var(--sun-acc)]',
                   ],
                   [t('marketIntel.aggRising'), String(aggregate.risingCount), 'text-emerald-300'],
                   [t('marketIntel.aggDeclining'), String(aggregate.decliningCount), 'text-rose-300'],
@@ -1068,7 +1068,7 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({
                                     target="_blank"
                                     rel="noreferrer"
                                     title={t('marketIntel.openUrl')}
-                                    className="text-slate-500 hover:text-cyan-300 shrink-0 mt-0.5"
+                                    className="text-slate-500 hover:[color:var(--sun-soft)] shrink-0 mt-0.5"
                                   >
                                     <ExternalLink className="w-3 h-3" />
                                   </a>
@@ -1154,7 +1154,7 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({
                   >
                     {candidate.phrase}
                     <span className="text-slate-500"> · {candidate.listings}</span>
-                    <span className="text-cyan-400/80"> · {Math.round(candidate.score)}</span>
+                    <span className="[color:var(--sun-acc)] opacity-80"> · {Math.round(candidate.score)}</span>
                   </span>
                 ))}
               </div>
