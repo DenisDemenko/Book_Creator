@@ -71,6 +71,7 @@
     "test:typography": "tsx scripts/test-typography.mts",
     "live:layout-probe": "tsx scripts/live-layoutProbe.mts",
     "live:ruler-shot": "tsx scripts/live-rulerShot.mts",
+    "live:storefront-export": "tsx scripts/live-storefrontExport.mts",
     "live:agni-import": "tsx scripts/live-agniImport.mts",
     "test:style-trainer": "tsx scripts/test-styleTrainer.mts",
     "test:invite-mail": "tsx scripts/test-invite-mail.mts",
