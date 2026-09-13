@@ -1265,6 +1265,7 @@ export default function App() {
     illustrations: Book['illustrations'];
     courseMaterials: NonNullable<Book['course']>['materials'];
     hasCourse: boolean;
+    docxImagesFailed?: number;
   }) => {
     const bookId = result.chapters[0]?.bookId || `BK-${Date.now().toString(36).toUpperCase()}`;
     const now = new Date().toISOString();
@@ -1296,18 +1297,24 @@ export default function App() {
     setActiveSectionId(newBook.chapters[0]?.sections[0]?.id || '');
     persistBook(newBook);
 
+    const failed = result.docxImagesFailed || 0;
     addLogEntry(
       'Перенесення матеріалів з іншого сервісу',
       `Створено новий проект «${result.title}» з майстра перенесення: ` +
         `глав — ${newBook.chapters.length}, зображень в альбомі — ${(result.illustrations || []).length}, ` +
-        `3D-моделей курсу — ${result.hasCourse ? (result.courseMaterials || []).length : 0}.`,
+        `3D-моделей курсу — ${result.hasCourse ? (result.courseMaterials || []).length : 0}.` +
+        (failed > 0 ? ` Зображень із .docx не вдалося покласти в медіатеку: ${failed} (ліміт сховища).` : ''),
       'system',
       bookId,
       'v1.0.0'
     );
 
-    setSaveToast(`Книгу «${result.title}» успішно перенесено!`);
-    setTimeout(() => setSaveToast(null), 4000);
+    setSaveToast(
+      failed > 0
+        ? `Книгу «${result.title}» перенесено, але ${failed} зображень із .docx не вмістилося в ліміт сховища.`
+        : `Книгу «${result.title}» успішно перенесено!`
+    );
+    setTimeout(() => setSaveToast(null), failed > 0 ? 7000 : 4000);
     setCurrentTab('editor');
   };
 

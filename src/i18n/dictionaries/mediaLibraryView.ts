@@ -21,6 +21,11 @@ export const mediaLibraryView = {
     saveToComputerLabel: 'Зберегти файл на компʼютер у вибраному форматі:',
     downloadedToast: 'Файл завантажено у форматі .{format}!',
     uploadedToast: 'Файл успішно додано до медіатеки!',
+    sectionLabel: 'Розділ медіатеки (книга)',
+    sectionAll: 'Усі книги',
+    sectionNoBook: 'Без книги',
+    sectionItems: 'Файлів: {n}',
+    uploadedToSection: 'Файл додано в розділ «{title}».',
   },
   en: {
     headerBadge: 'Media Library & Visual Assets',
@@ -44,5 +49,10 @@ export const mediaLibraryView = {
     saveToComputerLabel: 'Save the file to your computer in the chosen format:',
     downloadedToast: 'File downloaded as .{format}!',
     uploadedToast: 'File successfully added to the media library!',
+    sectionLabel: 'Media library section (book)',
+    sectionAll: 'All books',
+    sectionNoBook: 'No book',
+    sectionItems: 'Files: {n}',
+    uploadedToSection: 'File added to the “{title}” section.',
   },
 };

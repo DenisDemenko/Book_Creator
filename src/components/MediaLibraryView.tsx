@@ -32,7 +32,47 @@ interface StorageInfo {
   remainingBytes: number | null;
 }
 
+/** Розділ медіатеки — група файлів однієї книги (`GET /api/media/sections`). */
+interface LibrarySection {
+  bookId: string | null;
+  title: string | null;
+  count: number;
+  sizeBytes: number;
+}
+
+/** Файл із серверної медіатеки автора — те, що справді лежить у сховищі. */
+interface ServerAsset {
+  id: string;
+  url: string;
+  bookId: string | null;
+  kind: string;
+  filename: string;
+  sizeBytes: number;
+  prompt?: string | null;
+}
+
+/**
+ * Картка галереї. Джерела два, і вони не еквівалентні: посилання з книги
+ * (обкладинка, портрети, ілюстрації) і файл серверної медіатеки. Показуємо
+ * обидва, бо книга може містити старі `data:`-URL, яких на сервері немає.
+ */
+type MediaCard = {
+  id: string;
+  url: string;
+  title: string;
+  type: 'portraits' | 'illustrations' | 'covers';
+  prompt?: string;
+  source?: string;
+  /** Книга-розділ цього файлу; `''` — файли без книги. */
+  sectionId: string;
+  sectionTitle: string;
+};
+
 const MB = 1024 * 1024;
+
+/** Службовий id для файлів без книги (`book_id = null`). */
+const NO_BOOK_SECTION = '';
+const ALL_SECTIONS = '__all__';
 
 export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpdateBook, authUser }) => {
   const [filter, setFilter] = useState<'all' | 'portraits' | 'illustrations' | 'covers'>('all');
@@ -41,10 +81,53 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
   const [isDownloading, setIsDownloading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null);
+  const [sections, setSections] = useState<LibrarySection[]>([]);
+  const [serverAssets, setServerAssets] = useState<ServerAsset[]>([]);
+  /** Обраний розділ: id книги, `ALL_SECTIONS` — усі одразу. */
+  const [selectedSectionId, setSelectedSectionId] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { t } = useLanguage();
 
   const isRegistered = !!authUser && !authUser.isGuest;
+
+  /**
+   * Серверна медіатека автора: розділи по книгах і самі файли.
+   * Два запити замість одного — бо розділ без назви книги неможливо
+   * підписати: title лежить у книгосховищі, а не в записі файлу.
+   */
+  const loadLibrary = useCallback(async () => {
+    if (!isRegistered) {
+      setSections([]);
+      setServerAssets([]);
+      return;
+    }
+    try {
+      const [sectionsRes, listRes] = await Promise.all([
+        fetch('/api/media/sections', { credentials: 'same-origin' }),
+        fetch('/api/media/list', { credentials: 'same-origin' }),
+      ]);
+      if (sectionsRes.ok) {
+        const data = await sectionsRes.json();
+        setSections(Array.isArray(data?.sections) ? data.sections : []);
+      }
+      if (listRes.ok) {
+        const data = await listRes.json();
+        setServerAssets(Array.isArray(data?.assets) ? data.assets : []);
+      }
+    } catch {
+      /* тихо — галерея просто лишиться книжковою, як була до розділів */
+    }
+  }, [isRegistered]);
+
+  useEffect(() => {
+    loadLibrary();
+  }, [loadLibrary]);
+
+  // Перемикання активної книги в студії повертає галерею в її ж розділ —
+  // інакше автор бачив би чужі файли під заголовком своєї книги.
+  useEffect(() => {
+    setSelectedSectionId(book.id);
+  }, [book.id]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -77,49 +160,117 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
     loadStorageInfo();
   }, [loadStorageInfo]);
 
-  // Collect all media items from book
-  const allMedia: { id: string; url: string; title: string; type: 'portraits' | 'illustrations' | 'covers'; prompt?: string; source?: string }[] = [];
+  // ── Галерея: два джерела ────────────────────────────────────────────────
+  // 1) Посилання з самої книги (обкладинка, портрети, ілюстрації) — у тому
+  //    вигляді, у якому автор бачив їх досі. Старі книги можуть тримати тут
+  //    `data:`-URL, яких на сервері немає, тож не показувати їх означало б
+  //    «зникли картинки».
+  // 2) Файли серверної медіатеки — усе, що завантажено для будь-якої книги;
+  //    саме вони й розкладаються по розділах через `book_id`.
+  const objectMedia: MediaCard[] = [];
 
-  // 1. Cover
   if (book.coverConfig.frontArtUrl) {
-    allMedia.push({
+    objectMedia.push({
       id: 'media-cover',
       url: book.coverConfig.frontArtUrl,
       title: t('mediaLibraryView.coverArtTitle'),
       type: 'covers',
+      sectionId: book.id,
+      sectionTitle: book.title,
     });
   }
 
-  // 2. Character portraits
   book.characters.forEach((char) => {
     if (char.avatarUrl) {
-      allMedia.push({
+      objectMedia.push({
         id: `char-media-${char.id}`,
         url: char.avatarUrl,
         title: t('mediaLibraryView.portraitTitle', { name: `${char.name} ${char.surname || ''}` }),
         type: 'portraits',
+        sectionId: book.id,
+        sectionTitle: book.title,
       });
     }
   });
 
-  // 3. Chapter illustrations
   (book.illustrations || []).forEach((ill) => {
-    allMedia.push({
+    objectMedia.push({
       id: ill.id,
       url: ill.url,
       title: ill.caption,
       type: 'illustrations',
       prompt: ill.promptUsed,
       source: ill.source,
+      sectionId: book.id,
+      sectionTitle: book.title,
     });
   });
+
+  // Той самий файл, описаний і в книзі, і на сервері, показуємо один раз.
+  const objectUrls = new Set(objectMedia.map((m) => m.url));
+  const sectionTitleById = new Map(sections.map((s) => [s.bookId ?? NO_BOOK_SECTION, s.title || '']));
+
+  const serverCards: MediaCard[] = serverAssets
+    .filter((a) => !(a.bookId === book.id && objectUrls.has(a.url)))
+    .map((asset) => {
+      const sectionId = asset.bookId ?? NO_BOOK_SECTION;
+      return {
+        id: asset.id,
+        url: asset.url,
+        title: asset.filename || asset.id,
+        type: asset.kind === 'cover_art' ? 'covers' : asset.kind === 'character_art' ? 'portraits' : 'illustrations',
+        prompt: asset.prompt || undefined,
+        source: 'upload',
+        sectionId,
+        sectionTitle: sectionTitleById.get(sectionId) || t('mediaLibraryView.sectionNoBook'),
+      } satisfies MediaCard;
+    });
+
+  const allMedia: MediaCard[] = [...objectMedia, ...serverCards];
 
   // Сортуємо за форматом файлу (JPG → PNG → WEBP → …), як просив автор.
   // Той самий компаратор використовує вікно вставки зображення в текст,
   // тож порядок у галереї та у вставці однаковий.
-  const filteredMedia = allMedia
+  const visibleMedia = allMedia
+    .filter((m) => selectedSectionId === ALL_SECTIONS || m.sectionId === selectedSectionId)
     .filter((m) => filter === 'all' || m.type === filter)
     .sort(compareByImageFormat);
+
+  // У режимі «Усі книги» картки групуються під заголовком свого розділу —
+  // саме те, що дає змогу бачити файли різних книг окремо в одному списку.
+  const showSectionHeaders = selectedSectionId === ALL_SECTIONS;
+  const groups: { sectionId: string; title: string; items: MediaCard[] }[] = [];
+  if (showSectionHeaders) {
+    const bySection = new Map<string, MediaCard[]>();
+    for (const card of visibleMedia) {
+      const bucket = bySection.get(card.sectionId) || [];
+      bucket.push(card);
+      bySection.set(card.sectionId, bucket);
+    }
+    for (const [sectionId, items] of bySection) {
+      groups.push({ sectionId, title: items[0]?.sectionTitle || t('mediaLibraryView.sectionNoBook'), items });
+    }
+    // Активна книга — завжди першою: це те, з чим автор працює зараз.
+    groups.sort((a, b) =>
+      a.sectionId === book.id ? -1 : b.sectionId === book.id ? 1 : a.title.localeCompare(b.title)
+    );
+  } else {
+    groups.push({ sectionId: selectedSectionId, title: '', items: visibleMedia });
+  }
+
+  const sectionOptions = [
+    { value: book.id, label: book.title },
+    ...sections
+      .filter((s) => s.bookId && s.bookId !== book.id)
+      .map((s) => ({ value: s.bookId as string, label: `${s.title || t('mediaLibraryView.sectionNoBook')} (${s.count})` })),
+  ];
+  if (sections.some((s) => !s.bookId)) {
+    const noBook = sections.find((s) => !s.bookId)!;
+    sectionOptions.push({ value: NO_BOOK_SECTION, label: `${t('mediaLibraryView.sectionNoBook')} (${noBook.count})` });
+  }
+
+  /** Куди кладеться новий файл: обраний розділ, а в режимі «усі» — активна книга. */
+  const uploadTargetBookId = selectedSectionId === ALL_SECTIONS || !selectedSectionId ? book.id : selectedSectionId;
 
   // Download handler
   const handleDownload = async (url: string, title: string, format: 'png' | 'jpg') => {
@@ -171,7 +322,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
         body: JSON.stringify({
           dataUrl,
           filename: file.name,
-          bookId: book.id,
+          bookId: uploadTargetBookId,
           kind: 'upload',
         }),
       });
@@ -191,11 +342,24 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
       }
 
       const asset = data.asset;
+      const caption = file.name.replace(/\.[^/.]+$/, '');
+      await loadLibrary();
+
+      // Файл, завантажений у ЧУЖИЙ розділ, не має потрапляти в ілюстрації
+      // активної книги — інакше він з'явився б у тексті не тієї книги.
+      if (uploadTargetBookId !== book.id) {
+        const target = sections.find((s) => (s.bookId ?? NO_BOOK_SECTION) === uploadTargetBookId);
+        showToast(
+          t('mediaLibraryView.uploadedToSection', { title: target?.title || t('mediaLibraryView.sectionNoBook') })
+        );
+        return;
+      }
+
       const newIll: BookIllustration = {
         id: `ill-upload-${Date.now()}`,
         chapterId: book.chapters[0]?.id,
         url: asset.url,
-        caption: file.name.replace(/\.[^/.]+$/, ''),
+        caption,
         aspectRatio: '16:9',
         style: 'Медіатека',
         source: 'upload',
@@ -271,7 +435,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
               {t('mediaLibraryView.headerBadge')}
             </span>
             <span className="text-xs text-slate-400">
-              {t('mediaLibraryView.subBadge', { n: String(allMedia.length) })}
+              {t('mediaLibraryView.subBadge', { n: String(visibleMedia.length) })}
             </span>
           </div>
           <h1 className="text-xl font-bold text-white font-heading">
@@ -303,6 +467,21 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {isRegistered && sectionOptions.length > 1 && (
+            <select
+              value={selectedSectionId}
+              onChange={(e) => setSelectedSectionId(e.target.value)}
+              data-tour="media__0"
+              title={t('mediaLibraryView.sectionLabel')}
+              className="px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:border-cyan-500 focus:outline-hidden max-w-[220px]"
+            >
+              <option value={ALL_SECTIONS}>{t('mediaLibraryView.sectionAll')}</option>
+              {sectionOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          )}
+
           {/* Upload Button */}
           <button
             onClick={() => fileInputRef.current?.click()}
@@ -335,7 +514,17 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
 
       {/* Media Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" data-tour="media__3">
-        {filteredMedia.map((item) => (
+        {groups.map((group) => (
+          <React.Fragment key={group.sectionId || 'no-book'}>
+            {showSectionHeaders && (
+              <div className="col-span-full flex items-center justify-between border-b border-slate-800 pb-2 mt-1">
+                <h2 className="text-sm font-bold text-white font-heading">{group.title}</h2>
+                <span className="text-[11px] text-slate-400">
+                  {t('mediaLibraryView.sectionItems', { n: String(group.items.length) })}
+                </span>
+              </div>
+            )}
+            {group.items.map((item) => (
           <div
             key={item.id}
             className="group rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 hover:border-cyan-500/50 shadow-lg transition-all flex flex-col justify-between"
@@ -391,6 +580,8 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
 
             </div>
           </div>
+            ))}
+          </React.Fragment>
         ))}
       </div>
 

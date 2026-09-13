@@ -18,6 +18,7 @@
 import type { Express } from 'express';
 import { requireAuth } from './auth';
 import { checkAndRecordStorageUpload, getStorageUsage } from './mediaStorage';
+import { listBooks } from './bookStore';
 import {
   MEDIA_MIME_EXTENSIONS,
   deleteAsset,
@@ -175,6 +176,47 @@ export function registerMediaRoutes(app: Express): void {
     } catch (err) {
       console.error('[media] list:', err);
       res.status(500).json({ error: 'Не вдалося прочитати медіатеку.' });
+    }
+  });
+
+  /**
+   * Розділи медіатеки — по одному на книгу.
+   *
+   * Розділ — це НЕ окремий запис у базі, а група файлів за `book_id`, який
+   * проставляє кожне завантаження. Тому він з'являється сам, щойно в книгу
+   * покладено перший файл (зокрема й майстром перенесення), і не потребує
+   * ні міграції, ні окремого «створити розділ». Файли без книги
+   * (`book_id = null`) віддаються окремою групою з `bookId: null`.
+   */
+  app.get('/api/media/sections', requireAuth, async (req, res) => {
+    try {
+      const principal = req.principal!;
+      const ownerId = principal.id as string;
+      const [assets, books] = await Promise.all([listAssets(ownerId), listBooks(ownerId)]);
+
+      const titles = new Map<string, string>();
+      for (const b of books) titles.set(b.id, b.title);
+
+      const groups = new Map<string, { bookId: string | null; title: string | null; count: number; sizeBytes: number }>();
+      let totalBytes = 0;
+      for (const asset of assets) {
+        totalBytes += asset.sizeBytes;
+        const key = asset.bookId ?? '';
+        const row = groups.get(key) ?? {
+          bookId: asset.bookId ?? null,
+          title: asset.bookId ? titles.get(asset.bookId) ?? null : null,
+          count: 0,
+          sizeBytes: 0,
+        };
+        row.count += 1;
+        row.sizeBytes += asset.sizeBytes;
+        groups.set(key, row);
+      }
+
+      res.json({ sections: [...groups.values()].sort((a, b) => b.sizeBytes - a.sizeBytes), totalBytes });
+    } catch (err) {
+      console.error('[media] sections:', err);
+      res.status(500).json({ error: 'Не вдалося прочитати розділи медіатеки.' });
     }
   });
 

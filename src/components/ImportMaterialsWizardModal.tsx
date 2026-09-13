@@ -17,6 +17,7 @@ import { Book, BookIllustration, Chapter, CourseMaterial, Model3DFormat, UserRol
 import { hasPermission } from '../utils/rbac';
 import { parseManuscriptText } from '../utils/manuscriptImport';
 import { decodeTextBuffer } from '../utils/textEncoding';
+import { DOCX_IMAGE_SRC_PREFIX, htmlToManuscript } from '../utils/docxManuscript';
 import { useLanguage } from '../i18n/LanguageContext';
 
 interface ImportMaterialsWizardModalProps {
@@ -32,32 +33,73 @@ interface ImportMaterialsWizardModalProps {
     illustrations: BookIllustration[];
     courseMaterials: CourseMaterial[];
     hasCourse: boolean;
+    /** Скільки зображень із .docx не вдалося покласти в медіатеку (ліміт тарифу). */
+    docxImagesFailed?: number;
   }) => void;
 }
 
 type PendingImage = { id: string; fileName: string; dataUrl: string; sizeLabel: string };
+/** Зображення, витягнуте з .docx: `id` мусить збігатися з id у маркері тексту. */
+type PendingDocxImage = { id: string; caption: string; fileName: string; dataUrl: string; sizeLabel: string };
 type PendingModel = { id: string; fileName: string; dataUrl: string; format: Model3DFormat; sizeLabel: string };
 
 const STEPS = ['text', 'images', 'models', 'review'] as const;
 type StepKey = typeof STEPS[number];
 
 /**
- * Читає текст рукопису з файлу. .txt/.md — з визначенням кодування
- * (UTF-8, Windows-1251, KOI8-U/R, Windows-1252 тощо), .docx — через mammoth
- * (динамічний імпорт, лише в браузері).
+ * Читає рукопис із файлу.
+ *   • .txt/.md — визначає кодування (UTF-8, Windows-1251, KOI8-U/R, …);
+ *   • .docx — через mammoth, і РАЗОМ із текстом витягує вбудовані
+ *     зображення. Раніше тут стояв `extractRawText`, який мовчки викидає
+ *     всі картинки — саме тому .docx переносився як голий текст.
  */
-async function readManuscriptFile(file: File): Promise<{ text: string; encoding: string }> {
+async function readManuscriptFile(
+  file: File
+): Promise<{ text: string; encoding: string; docxImages: PendingDocxImage[] }> {
   const name = file.name.toLowerCase();
   if (name.endsWith('.docx')) {
     const mod: any = await import('mammoth');
     const mammoth = mod.default || mod;
     const arrayBuffer = await file.arrayBuffer();
-    const result = await mammoth.extractRawText({ arrayBuffer });
-    return { text: result.value as string, encoding: 'DOCX' };
+
+    // Картинки збираємо в масив, а в HTML ставимо короткий плейсхолдер: на
+    // реальній книзі base64-у-HTML дає 52 МБ рядка (див. utils/docxManuscript.ts).
+    const collected: { contentType: string; base64: string }[] = [];
+    const result = await mammoth.convertToHtml(
+      { arrayBuffer },
+      {
+        convertImage: mammoth.images.imgElement((image: any) => {
+          const index = collected.length;
+          return image.read('base64').then((data: string) => {
+            collected.push({ contentType: image.contentType, base64: data });
+            return { src: `${DOCX_IMAGE_SRC_PREFIX}${index}` };
+          });
+        }),
+      }
+    );
+
+    const parsed = htmlToManuscript(result.value as string);
+    const docxImages: PendingDocxImage[] = parsed.images
+      .map((img) => {
+        const index = Number(img.id.slice('docx-img-'.length));
+        const found = collected[index];
+        if (!found) return null;
+        const bytes = Math.round((found.base64.length * 3) / 4);
+        return {
+          id: img.id,
+          caption: img.caption,
+          fileName: img.caption || 'Зображення з .docx',
+          dataUrl: `data:${found.contentType};base64,${found.base64}`,
+          sizeLabel: formatSize(bytes),
+        };
+      })
+      .filter((i): i is PendingDocxImage => i !== null);
+
+    return { text: parsed.text, encoding: 'DOCX', docxImages };
   }
   const buffer = await file.arrayBuffer();
   const decoded = decodeTextBuffer(buffer);
-  return { text: decoded.text, encoding: decoded.encoding };
+  return { text: decoded.text, encoding: decoded.encoding, docxImages: [] };
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -98,6 +140,7 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
   const [author, setAuthor] = useState('');
   const [manuscriptText, setManuscriptText] = useState('');
   const [images, setImages] = useState<PendingImage[]>([]);
+  const [docxImages, setDocxImages] = useState<PendingDocxImage[]>([]);
   const [hasCourse, setHasCourse] = useState(false);
   const [models, setModels] = useState<PendingModel[]>([]);
   const [isBusy, setIsBusy] = useState(false);
@@ -113,6 +156,7 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
     setAuthor('');
     setManuscriptText('');
     setImages([]);
+    setDocxImages([]);
     setHasCourse(false);
     setModels([]);
     setIsBusy(false);
@@ -130,6 +174,7 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
     try {
       const decoded = await readManuscriptFile(file);
       setManuscriptText(decoded.text);
+      setDocxImages(decoded.docxImages);
       if (!title.trim()) {
         setTitle(file.name.replace(/\.(txt|md|docx)$/i, ''));
       }
@@ -192,13 +237,16 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
 
   /**
    * Кладе зображення в медіатеку користувача на сервері (`POST
-   * /api/media/upload`, та сама медіатека, що й розділ «Медіатека»), а в
-   * книгу — коротке посилання на файл. Якщо користувач гість або сервер
-   * відхилив файл (ліміт, збій), лишаємо data-URL — перенесення не має
-   * падати через одну картинку.
+   * /api/media/upload`), а в книгу — коротке посилання на файл. Повертає
+   * і URL, і те, чи завантаження справді відбулося: викликачі розпоряджаються
+   * цим по-різному (зображення з .docx без завантаження втратили б сенс, а
+   * гостю сховища просто не існує).
    */
-  const uploadImageToMediaLibrary = async (img: PendingImage, bookId: string): Promise<string> => {
-    if (!authUser || authUser.isGuest) return img.dataUrl;
+  const uploadImageToMediaLibrary = async (
+    img: { fileName: string; dataUrl: string },
+    bookId: string
+  ): Promise<{ url: string; uploaded: boolean }> => {
+    if (!authUser || authUser.isGuest) return { url: img.dataUrl, uploaded: false };
     try {
       const res = await fetch('/api/media/upload', {
         method: 'POST',
@@ -212,36 +260,70 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
         }),
       });
       const data = await res.json();
-      if (res.ok && data?.asset?.url) return data.asset.url as string;
+      if (res.ok && data?.asset?.url) return { url: data.asset.url as string, uploaded: true };
     } catch {
-      /* сервер недоступний — лишаємо data-URL */
+      /* сервер недоступний — повертаємо data-URL нижче */
     }
-    return img.dataUrl;
+    return { url: img.dataUrl, uploaded: false };
   };
 
   const handleFinish = async () => {
     setIsBusy(true);
     try {
       const bookId = `BK-${Date.now().toString(36).toUpperCase()}`;
-      const parsed = parseManuscriptText(manuscriptText, bookId);
       const now = new Date().toISOString();
+      const isGuest = !authUser || authUser.isGuest;
 
-      const illustrations: BookIllustration[] = [];
+      // 1. Зображення, додані вручну на кроці «Зображення».
+      const uploaded: { id: string; url: string; caption: string; fileSize: string; aspectRatio: string }[] = [];
       for (let idx = 0; idx < images.length; idx++) {
         const img = images[idx];
-        const url = await uploadImageToMediaLibrary(img, bookId);
-        illustrations.push({
+        const { url } = await uploadImageToMediaLibrary(img, bookId);
+        uploaded.push({
           id: `il-import-${Date.now()}-${idx}`,
-          chapterId: parsed.chapters[0]?.id,
           url,
           caption: img.fileName.replace(/\.[^/.]+$/, ''),
           aspectRatio: '1:1',
-          style: 'Медіатека',
-          source: 'upload',
-          createdAt: now,
           fileSize: img.sizeLabel,
         });
       }
+
+      // 2. Зображення з .docx — під ТИМИ САМИМИ id, які стоять у маркерах
+      //    тексту, інакше маркер не знайде картинку й не намалюється.
+      let text = manuscriptText;
+      let docxImagesFailed = 0;
+      for (const img of docxImages) {
+        const { url, uploaded: didUpload } = await uploadImageToMediaLibrary(img, bookId);
+        if (!didUpload && !isGuest) {
+          // Зареєстрований користувач отримав відмову — це ліміт тарифу.
+          // Вкласти десятки мегабайт base64 у книгу не можна (JSON книги
+          // роздувся б у рази), тому маркер прибираємо й рахуємо втрату.
+          text = text.split(`[IMG: ${img.id} "${img.caption}"]`).join('');
+          docxImagesFailed += 1;
+          continue;
+        }
+        uploaded.push({
+          id: img.id,
+          url,
+          caption: img.caption,
+          aspectRatio: '16:9',
+          fileSize: img.sizeLabel,
+        });
+      }
+
+      const parsed = parseManuscriptText(text, bookId);
+      const chapterId = parsed.chapters[0]?.id;
+      const illustrations: BookIllustration[] = uploaded.map((u) => ({
+        id: u.id,
+        chapterId,
+        url: u.url,
+        caption: u.caption,
+        aspectRatio: u.aspectRatio,
+        style: 'Медіатека',
+        source: 'upload',
+        createdAt: now,
+        fileSize: u.fileSize,
+      }));
 
       const courseMaterials: CourseMaterial[] = hasCourse
         ? models.map((m, idx) => ({
@@ -264,6 +346,7 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
         illustrations,
         courseMaterials,
         hasCourse,
+        docxImagesFailed,
       });
       reset();
       onClose();
@@ -449,6 +532,11 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
                     </div>
                   )}
                   <p className="text-slate-500">{t('importWizard.imagesCount', { n: images.length })}</p>
+                  {docxImages.length > 0 && (
+                    <p className="text-emerald-300/90">
+                      {t('importWizard.docxImagesFound', { n: docxImages.length })}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -521,7 +609,7 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
                       </div>
                       <div>
                         <div className="text-slate-500">{t('importWizard.reviewImages')}</div>
-                        <div className="text-slate-100 font-bold">{images.length}</div>
+                        <div className="text-slate-100 font-bold">{images.length + docxImages.length}</div>
                       </div>
                       <div>
                         <div className="text-slate-500">{t('importWizard.reviewModels')}</div>
