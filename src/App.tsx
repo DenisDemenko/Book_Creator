@@ -2136,6 +2136,7 @@ export default function App() {
         isOpen={isImportWizardModalOpen}
         onClose={() => setIsImportWizardModalOpen(false)}
         currentRole={currentRole}
+        authUser={auth.user}
         onComplete={handleImportMaterials}
       />
 

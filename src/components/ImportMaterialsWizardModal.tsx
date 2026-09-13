@@ -13,15 +13,18 @@ import {
   Sparkles,
   ClipboardList,
 } from 'lucide-react';
-import { Book, BookIllustration, Chapter, CourseMaterial, Model3DFormat, UserRole } from '../types';
+import { Book, BookIllustration, Chapter, CourseMaterial, Model3DFormat, UserRole, AuthUser } from '../types';
 import { hasPermission } from '../utils/rbac';
 import { parseManuscriptText } from '../utils/manuscriptImport';
+import { decodeTextBuffer } from '../utils/textEncoding';
 import { useLanguage } from '../i18n/LanguageContext';
 
 interface ImportMaterialsWizardModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentRole: UserRole;
+  /** Поточний користувач — щоб завантажити зображення в медіатеку на сервері. */
+  authUser?: AuthUser | null;
   onComplete: (result: {
     title: string;
     author: string;
@@ -38,13 +41,23 @@ type PendingModel = { id: string; fileName: string; dataUrl: string; format: Mod
 const STEPS = ['text', 'images', 'models', 'review'] as const;
 type StepKey = typeof STEPS[number];
 
-function readFileAsText(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsText(file);
-  });
+/**
+ * Читає текст рукопису з файлу. .txt/.md — з визначенням кодування
+ * (UTF-8, Windows-1251, KOI8-U/R, Windows-1252 тощо), .docx — через mammoth
+ * (динамічний імпорт, лише в браузері).
+ */
+async function readManuscriptFile(file: File): Promise<{ text: string; encoding: string }> {
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.docx')) {
+    const mod: any = await import('mammoth');
+    const mammoth = mod.default || mod;
+    const arrayBuffer = await file.arrayBuffer();
+    const result = await mammoth.extractRawText({ arrayBuffer });
+    return { text: result.value as string, encoding: 'DOCX' };
+  }
+  const buffer = await file.arrayBuffer();
+  const decoded = decodeTextBuffer(buffer);
+  return { text: decoded.text, encoding: decoded.encoding };
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -72,6 +85,7 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
   isOpen,
   onClose,
   currentRole,
+  authUser,
   onComplete,
 }) => {
   const { t } = useLanguage();
@@ -114,10 +128,10 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
     if (!file) return;
     setIsBusy(true);
     try {
-      const text = await readFileAsText(file);
-      setManuscriptText(text);
+      const decoded = await readManuscriptFile(file);
+      setManuscriptText(decoded.text);
       if (!title.trim()) {
-        setTitle(file.name.replace(/\.(txt|md)$/i, ''));
+        setTitle(file.name.replace(/\.(txt|md|docx)$/i, ''));
       }
     } finally {
       setIsBusy(false);
@@ -176,46 +190,86 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
   const goNext = () => setStepIdx((i) => Math.min(i + 1, STEPS.length - 1));
   const goBack = () => setStepIdx((i) => Math.max(i - 1, 0));
 
-  const handleFinish = () => {
-    const bookId = `BK-${Date.now().toString(36).toUpperCase()}`;
-    const parsed = parseManuscriptText(manuscriptText, bookId);
-    const now = new Date().toISOString();
-
-    const illustrations: BookIllustration[] = images.map((img, idx) => ({
-      id: `il-import-${Date.now()}-${idx}`,
-      url: img.dataUrl,
-      caption: img.fileName,
-      aspectRatio: '1:1',
-      style: 'imported',
-      source: 'upload',
-      createdAt: now,
-      fileSize: img.sizeLabel,
-    }));
-
-    const courseMaterials: CourseMaterial[] = hasCourse
-      ? models.map((m, idx) => ({
-          id: `cm-import-${Date.now()}-${idx}`,
+  /**
+   * Кладе зображення в медіатеку користувача на сервері (`POST
+   * /api/media/upload`, та сама медіатека, що й розділ «Медіатека»), а в
+   * книгу — коротке посилання на файл. Якщо користувач гість або сервер
+   * відхилив файл (ліміт, збій), лишаємо data-URL — перенесення не має
+   * падати через одну картинку.
+   */
+  const uploadImageToMediaLibrary = async (img: PendingImage, bookId: string): Promise<string> => {
+    if (!authUser || authUser.isGuest) return img.dataUrl;
+    try {
+      const res = await fetch('/api/media/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          dataUrl: img.dataUrl,
+          filename: img.fileName,
           bookId,
-          kind: 'model_3d' as const,
-          title: m.fileName,
-          fileName: m.fileName,
-          fileUrl: m.dataUrl,
-          fileSize: m.sizeLabel,
-          model3DFormat: m.format,
-          createdAt: now,
-        }))
-      : [];
+          kind: 'upload',
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data?.asset?.url) return data.asset.url as string;
+    } catch {
+      /* сервер недоступний — лишаємо data-URL */
+    }
+    return img.dataUrl;
+  };
 
-    onComplete({
-      title: title.trim(),
-      author: author.trim() || 'Невідомий автор',
-      chapters: parsed.chapters,
-      illustrations,
-      courseMaterials,
-      hasCourse,
-    });
-    reset();
-    onClose();
+  const handleFinish = async () => {
+    setIsBusy(true);
+    try {
+      const bookId = `BK-${Date.now().toString(36).toUpperCase()}`;
+      const parsed = parseManuscriptText(manuscriptText, bookId);
+      const now = new Date().toISOString();
+
+      const illustrations: BookIllustration[] = [];
+      for (let idx = 0; idx < images.length; idx++) {
+        const img = images[idx];
+        const url = await uploadImageToMediaLibrary(img, bookId);
+        illustrations.push({
+          id: `il-import-${Date.now()}-${idx}`,
+          chapterId: parsed.chapters[0]?.id,
+          url,
+          caption: img.fileName.replace(/\.[^/.]+$/, ''),
+          aspectRatio: '1:1',
+          style: 'Медіатека',
+          source: 'upload',
+          createdAt: now,
+          fileSize: img.sizeLabel,
+        });
+      }
+
+      const courseMaterials: CourseMaterial[] = hasCourse
+        ? models.map((m, idx) => ({
+            id: `cm-import-${Date.now()}-${idx}`,
+            bookId,
+            kind: 'model_3d' as const,
+            title: m.fileName,
+            fileName: m.fileName,
+            fileUrl: m.dataUrl,
+            fileSize: m.sizeLabel,
+            model3DFormat: m.format,
+            createdAt: now,
+          }))
+        : [];
+
+      onComplete({
+        title: title.trim(),
+        author: author.trim() || 'Невідомий автор',
+        chapters: parsed.chapters,
+        illustrations,
+        courseMaterials,
+        hasCourse,
+      });
+      reset();
+      onClose();
+    } finally {
+      setIsBusy(false);
+    }
   };
 
   const stepMeta: Record<StepKey, { icon: React.ElementType; label: string }> = {
@@ -336,7 +390,7 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
                       <input
                         ref={textFileInputRef}
                         type="file"
-                        accept=".txt,.md,text/plain,text/markdown"
+                        accept=".txt,.md,.docx,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                         className="hidden"
                         onChange={handleTextFileChange}
                       />
@@ -503,8 +557,9 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
               ) : (
                 <button
                   type="button"
+                  disabled={isBusy}
                   onClick={handleFinish}
-                  className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition-colors flex items-center gap-2 shadow-md"
+                  className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition-colors flex items-center gap-2 shadow-md disabled:opacity-40"
                 >
                   <Check className="w-4 h-4 stroke-[2.5]" />
                   <span>{t('importWizard.finish')}</span>
