@@ -94,6 +94,8 @@ export function computeBreaks(blockHeightsPx: number[], pageContentHeightPx: num
     if (currentHeight + h > pageContentHeightPx) {
       breaks.push(i);
       currentHeight = h;
+    } else {
+      currentHeight += h;
     }
   });
 

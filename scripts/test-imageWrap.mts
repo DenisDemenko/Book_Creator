@@ -3,15 +3,25 @@
  *   • computeBreaksFromBounds (src/utils/pageBreaker.ts) — розбиття на
  *     сторінки за реальними межами блоків, з «не відривати обтічне фото
  *     від тексту, що його обтікає»;
+ *   • computeBreaks (той самий файл) — те саме розбиття, але за сумою
+ *     власних висот блоків; ним користується «Розворот книги»;
  *   • migrateImageWrapDefaults (src/utils/wrapMigration.ts) — одноразовий
  *     прохід, що дописує `wrap=left` у маркери старих книг.
  * Запуск: npm run test:image-wrap
  *
  * Обидві функції чисті, без React/DOM — той самий підхід, що й у
  * scripts/test-bookText.mts: тестуємо шов напряму, без браузера.
+ *
+ * ЧОМУ ТУТ З'ЯВИВСЯ computeBreaks. Ця функція роками жила без єдиного
+ * тесту — і саме в ній запис #163 випадково з'їв гілку `else
+ * { currentHeight += h; }`. Без неї висота сторінки ніколи не
+ * накопичувалась, розривів не було зовсім, і «Розворот книги» показував
+ * по одній сторінці на розділ. Жоден тест цього не помітив, бо жоден
+ * тест її не викликав; побачив живий замір розкладки в справжньому
+ * Chrome (scripts/live-layoutProbe.mts).
  */
 import type { Book } from '../src/types.ts';
-import { computeBreaksFromBounds, type BlockBounds } from '../src/utils/pageBreaker.ts';
+import { computeBreaks, computeBreaksFromBounds, type BlockBounds } from '../src/utils/pageBreaker.ts';
 import { migrateImageWrapDefaults } from '../src/utils/wrapMigration.ts';
 
 let pass = 0, fail = 0;
@@ -25,6 +35,34 @@ function stack(heights: number[]): BlockBounds[] {
     top += h;
     return b;
   });
+}
+
+console.log('\ncomputeBreaks — розбиття за сумою ВИСОТ (ним рахує «Розворот книги»):');
+{
+  const heights = [100, 100, 100, 100, 100, 100, 100];
+  // 100+100+100 = 300 ≤ 350, а четвертий блок дає 400 > 350 → розрив ПЕРЕД ним
+  // (індекс 3). Далі те саме: 3 блоки влазять, четвертий не влазить.
+  t('висоти НАКОПИЧУЮТЬСЯ: 7×100 при бюджеті 350 → два розриви',
+    JSON.stringify(computeBreaks(heights, 350)) === '[3,6]',
+    JSON.stringify(computeBreaks(heights, 350)));
+  t('без накопичення розривів не було б зовсім (саме це й зламалось у #163)',
+    computeBreaks(heights, 350).length > 0);
+  t('усе влазить — розривів немає',
+    JSON.stringify(computeBreaks(heights, 1000)) === '[]');
+  t('рівно в бюджет — ще влазить, розриву немає',
+    JSON.stringify(computeBreaks([200, 200, 200], 400)) === '[2]',
+    JSON.stringify(computeBreaks([200, 200, 200], 400)));
+  // Блок вищий за сторінку стоїть сам: розрив ПЕРЕД ним не потрібен (він і
+  // так починає сторінку), а два наступні по 100 уже влазять у 350 разом.
+  t('блок, вищий за сторінку, лишається сам на своїй сторінці',
+    JSON.stringify(computeBreaks([900, 100, 100], 350)) === '[1]',
+    JSON.stringify(computeBreaks([900, 100, 100], 350)));
+  t('нульовий бюджет — без розривів (а не поділ на нуль)',
+    JSON.stringify(computeBreaks(heights, 0)) === '[]');
+  t('порожній список блоків — без розривів',
+    JSON.stringify(computeBreaks([], 350)) === '[]');
+  t('один блок — без розривів',
+    JSON.stringify(computeBreaks([100], 350)) === '[]');
 }
 
 console.log('\ncomputeBreaksFromBounds — розбиття за реальними межами:');
