@@ -13,6 +13,7 @@ import { collectBookTags, type BookTag } from '../utils/bookTags';
 import { useSunAccentVars } from '../utils/sunAccent';
 import { PageColumn, VERTICAL_RULER_WIDTH_PX } from './manuscriptEditor/PageColumn';
 import { PageRuler } from './manuscriptEditor/PageRuler';
+import type { PageScaleMode } from './manuscriptEditor/usePageScale';
 import { useRealBookPages } from '../utils/useRealBookPages';
 import { resolvePageGeometry, type PageGeometry } from '../utils/pageGeometry';
 import { bodyFontStack, paragraphCssVars, resolveParagraphGeometry } from '../utils/typography';
@@ -1765,6 +1766,16 @@ export const EditorView: React.FC<EditorViewProps> = ({
   // піднімає/опускає стелю scale() у usePageScale. Значення — PAGE_ZOOM_PRESETS,
   // «Свій %» — довільне число 20–200.
   const [editorZoom, setEditorZoom] = usePersistentState<number>('nova_editor_pageZoom', 100);
+  /**
+   * «Авто» — вміщати аркуш у панель (стара поведінка, де показаний відсоток
+   * був лише стелею). Вимкнено = чесний зум: `100 %` це рівно 100 %, а якщо
+   * аркуш ширший за панель — панель прокручується, а не стискає аркуш.
+   * Докладніше — usePageScale.ts.
+   */
+  const [zoomToFit, setZoomToFit] = usePersistentState<boolean>('nova_editor_pageZoomFit', false);
+  /** Той самий режим для обох компонентів аркуша (колонка й лінійка) — вони МУСЯТЬ мати однаковий масштаб. */
+  const pageScaleMode: PageScaleMode = zoomToFit && !isFocusWindow ? 'fit' : 'zoom';
+  const pageZoomFactor = isFocusWindow ? focusZoom : editorZoom / 100;
   const [customEditorZoom, setCustomEditorZoom] = useState<string>('');
   // Показ лінійки (горизонтальної й вертикальної) над/збоку від аркуша —
   // перемикач на панелі поруч, як просив власник; за замовчуванням увімкнено,
@@ -4802,17 +4813,22 @@ export const EditorView: React.FC<EditorViewProps> = ({
               <div className="flex items-center gap-1.5" title={t('editor.pageZoomTitle')}>
                 <ZoomIn className="w-3.5 h-3.5 [color:var(--sun-acc)] shrink-0" />
                 <select
-                  value={PAGE_ZOOM_PRESETS.includes(editorZoom) ? String(editorZoom) : 'custom'}
+                  value={zoomToFit ? 'fit' : PAGE_ZOOM_PRESETS.includes(editorZoom) ? String(editorZoom) : 'custom'}
                   onChange={(e) => {
                     const value = e.target.value;
-                    if (value === 'custom') {
+                    if (value === 'fit') {
+                      setZoomToFit(true);
+                    } else if (value === 'custom') {
+                      setZoomToFit(false);
                       setCustomEditorZoom(String(editorZoom));
                     } else {
+                      setZoomToFit(false);
                       setEditorZoom(Number(value));
                     }
                   }}
                   className="bg-slate-900 border border-slate-800 rounded-md px-1 py-0.5 text-slate-200 cursor-pointer"
                 >
+                  <option value="fit">{t('editor.pageZoomFit')}</option>
                   {PAGE_ZOOM_PRESETS.map((zoom) => (
                     <option key={zoom} value={zoom}>
                       {zoom}%
@@ -4820,7 +4836,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   ))}
                   <option value="custom">{t('editor.pageZoomCustom')}</option>
                 </select>
-                {!PAGE_ZOOM_PRESETS.includes(editorZoom) && (
+                {!zoomToFit && !PAGE_ZOOM_PRESETS.includes(editorZoom) && (
                   <input
                     type="number"
                     min={20}
@@ -5023,18 +5039,29 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 </button>
               </div>
 
-              {rulerVisible && (
-                <PageRuler
-                  sheetWidthMm={pageGeometry.pageWidthMm}
-                  textWidthMm={pageGeometry.contentWidthMm}
-                  zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
-                  insideMm={pageGeometry.margins.insideMm}
-                  outsideMm={pageGeometry.margins.outsideMm}
-                  verticalRulerWidthPx={VERTICAL_RULER_WIDTH_PX}
-                  onChangeMargins={handleChangeMargins}
-                />
-              )}
-              <PageColumn widthMm={pageGeometry.contentWidthMm} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0" showVerticalRuler={rulerVisible} pagination={uaPagination} pageGeometry={pageGeometry}>
+              <PageColumn
+                widthMm={pageGeometry.contentWidthMm}
+                zoomFactor={pageZoomFactor}
+                scaleMode={pageScaleMode}
+                className="flex-1 min-h-0"
+                showVerticalRuler={rulerVisible}
+                pagination={uaPagination}
+                pageGeometry={pageGeometry}
+                ruler={
+                  rulerVisible ? (
+                    <PageRuler
+                      sheetWidthMm={pageGeometry.pageWidthMm}
+                      textWidthMm={pageGeometry.contentWidthMm}
+                      zoomFactor={pageZoomFactor}
+                      scaleMode={pageScaleMode}
+                      insideMm={pageGeometry.margins.insideMm}
+                      outsideMm={pageGeometry.margins.outsideMm}
+                      verticalRulerWidthPx={VERTICAL_RULER_WIDTH_PX}
+                      onChangeMargins={handleChangeMargins}
+                    />
+                  ) : null
+                }
+              >
                 {/* Колонтитул першого аркуша. Плагін пагінації малює його на
                     кожному РОЗРИВІ, тобто зверху сторінок 2, 3, … — у першої
                     розриву перед нею немає, тож він рендериться тут. */}
@@ -5164,18 +5191,29 @@ export const EditorView: React.FC<EditorViewProps> = ({
                       placeholder={t('editor.sectionTitleUaLabel')}
                       className="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white font-bold shrink-0"
                     />
-                    {rulerVisible && (
-                      <PageRuler
-                        sheetWidthMm={pageGeometry.pageWidthMm}
-                        textWidthMm={pageGeometry.contentWidthMm}
-                        zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
-                        insideMm={pageGeometry.margins.insideMm}
-                        outsideMm={pageGeometry.margins.outsideMm}
-                        verticalRulerWidthPx={VERTICAL_RULER_WIDTH_PX}
-                        onChangeMargins={handleChangeMargins}
-                      />
-                    )}
-                    <PageColumn widthMm={pageGeometry.contentWidthMm} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800/80" showVerticalRuler={rulerVisible} pagination={uaPagination} pageGeometry={pageGeometry}>
+                    <PageColumn
+                      widthMm={pageGeometry.contentWidthMm}
+                      zoomFactor={pageZoomFactor}
+                      scaleMode={pageScaleMode}
+                      className="flex-1 min-h-0 rounded-xl border border-slate-800/80"
+                      showVerticalRuler={rulerVisible}
+                      pagination={uaPagination}
+                      pageGeometry={pageGeometry}
+                      ruler={
+                        rulerVisible ? (
+                          <PageRuler
+                            sheetWidthMm={pageGeometry.pageWidthMm}
+                            textWidthMm={pageGeometry.contentWidthMm}
+                            zoomFactor={pageZoomFactor}
+                            scaleMode={pageScaleMode}
+                            insideMm={pageGeometry.margins.insideMm}
+                            outsideMm={pageGeometry.margins.outsideMm}
+                            verticalRulerWidthPx={VERTICAL_RULER_WIDTH_PX}
+                            onChangeMargins={handleChangeMargins}
+                          />
+                        ) : null
+                      }
+                    >
                       <EditorContent
                         editor={uaEditor}
                         style={manuscriptTextStyle}
@@ -5222,18 +5260,29 @@ export const EditorView: React.FC<EditorViewProps> = ({
                       placeholder="Section Title (EN)"
                       className="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white font-bold shrink-0"
                     />
-                    {rulerVisible && (
-                      <PageRuler
-                        sheetWidthMm={pageGeometry.pageWidthMm}
-                        textWidthMm={pageGeometry.contentWidthMm}
-                        zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
-                        insideMm={pageGeometry.margins.insideMm}
-                        outsideMm={pageGeometry.margins.outsideMm}
-                        verticalRulerWidthPx={VERTICAL_RULER_WIDTH_PX}
-                        onChangeMargins={handleChangeMargins}
-                      />
-                    )}
-                    <PageColumn widthMm={pageGeometry.contentWidthMm} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800/80" showVerticalRuler={rulerVisible} pagination={enPagination} pageGeometry={pageGeometry}>
+                    <PageColumn
+                      widthMm={pageGeometry.contentWidthMm}
+                      zoomFactor={pageZoomFactor}
+                      scaleMode={pageScaleMode}
+                      className="flex-1 min-h-0 rounded-xl border border-slate-800/80"
+                      showVerticalRuler={rulerVisible}
+                      pagination={enPagination}
+                      pageGeometry={pageGeometry}
+                      ruler={
+                        rulerVisible ? (
+                          <PageRuler
+                            sheetWidthMm={pageGeometry.pageWidthMm}
+                            textWidthMm={pageGeometry.contentWidthMm}
+                            zoomFactor={pageZoomFactor}
+                            scaleMode={pageScaleMode}
+                            insideMm={pageGeometry.margins.insideMm}
+                            outsideMm={pageGeometry.margins.outsideMm}
+                            verticalRulerWidthPx={VERTICAL_RULER_WIDTH_PX}
+                            onChangeMargins={handleChangeMargins}
+                          />
+                        ) : null
+                      }
+                    >
                       <EditorContent
                         editor={enEditor}
                         style={manuscriptTextStyle}
@@ -5290,18 +5339,29 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   placeholder="Section Title (EN)"
                   className="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white font-bold shrink-0"
                 />
-                {rulerVisible && (
-                  <PageRuler
-                    sheetWidthMm={pageGeometry.pageWidthMm}
-                    textWidthMm={pageGeometry.contentWidthMm}
-                    zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
-                    insideMm={pageGeometry.margins.insideMm}
-                    outsideMm={pageGeometry.margins.outsideMm}
-                    verticalRulerWidthPx={VERTICAL_RULER_WIDTH_PX}
-                    onChangeMargins={handleChangeMargins}
-                  />
-                )}
-                <PageColumn widthMm={pageGeometry.contentWidthMm} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800" showVerticalRuler={rulerVisible} pagination={enPagination} pageGeometry={pageGeometry}>
+                <PageColumn
+                  widthMm={pageGeometry.contentWidthMm}
+                  zoomFactor={pageZoomFactor}
+                  scaleMode={pageScaleMode}
+                  className="flex-1 min-h-0 rounded-xl border border-slate-800"
+                  showVerticalRuler={rulerVisible}
+                  pagination={enPagination}
+                  pageGeometry={pageGeometry}
+                  ruler={
+                    rulerVisible ? (
+                      <PageRuler
+                        sheetWidthMm={pageGeometry.pageWidthMm}
+                        textWidthMm={pageGeometry.contentWidthMm}
+                        zoomFactor={pageZoomFactor}
+                        scaleMode={pageScaleMode}
+                        insideMm={pageGeometry.margins.insideMm}
+                        outsideMm={pageGeometry.margins.outsideMm}
+                        verticalRulerWidthPx={VERTICAL_RULER_WIDTH_PX}
+                        onChangeMargins={handleChangeMargins}
+                      />
+                    ) : null
+                  }
+                >
                   <EditorContent
                     editor={enEditor}
                     style={manuscriptTextStyle}
@@ -6753,18 +6813,29 @@ export const EditorView: React.FC<EditorViewProps> = ({
               }}
               className="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white font-bold shrink-0"
             />
-            {rulerVisible && (
-              <PageRuler
-                sheetWidthMm={pageGeometry.pageWidthMm}
-                textWidthMm={pageGeometry.contentWidthMm}
-                zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
-                insideMm={pageGeometry.margins.insideMm}
-                outsideMm={pageGeometry.margins.outsideMm}
-                verticalRulerWidthPx={VERTICAL_RULER_WIDTH_PX}
-                onChangeMargins={handleChangeMargins}
-              />
-            )}
-            <PageColumn widthMm={pageGeometry.contentWidthMm} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800" showVerticalRuler={rulerVisible} pagination={enPagination} pageGeometry={pageGeometry}>
+            <PageColumn
+              widthMm={pageGeometry.contentWidthMm}
+              zoomFactor={pageZoomFactor}
+              scaleMode={pageScaleMode}
+              className="flex-1 min-h-0 rounded-xl border border-slate-800"
+              showVerticalRuler={rulerVisible}
+              pagination={enPagination}
+              pageGeometry={pageGeometry}
+              ruler={
+                rulerVisible ? (
+                  <PageRuler
+                    sheetWidthMm={pageGeometry.pageWidthMm}
+                    textWidthMm={pageGeometry.contentWidthMm}
+                    zoomFactor={pageZoomFactor}
+                    scaleMode={pageScaleMode}
+                    insideMm={pageGeometry.margins.insideMm}
+                    outsideMm={pageGeometry.margins.outsideMm}
+                    verticalRulerWidthPx={VERTICAL_RULER_WIDTH_PX}
+                    onChangeMargins={handleChangeMargins}
+                  />
+                ) : null
+              }
+            >
               <EditorContent
                 editor={enEditor}
                 style={manuscriptTextStyle}

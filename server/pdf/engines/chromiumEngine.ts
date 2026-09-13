@@ -203,6 +203,11 @@ export const chromiumEngine: PdfEngine = {
 
     const spec = request.spec || {};
     const size = pageFormatFor((spec as { pageSize?: string }).pageSize);
+    // Абзацні відступ і відбивка — з того самого макета, що й кегль з
+    // інтерліньяжем (`PdfLayoutSpec.paragraphIndent/paragraphSpacing`, у
+    // пунктах). Якщо макета немає, `undefined` лишає в таблиці стилів
+    // класичний «червоний рядок» 1.2em, тобто поведінка старих викликів
+    // не змінюється.
     const html = buildBookHtml(markdown, {
       title: doc.meta.title,
       subtitle: doc.meta.subtitle,
@@ -211,6 +216,8 @@ export const chromiumEngine: PdfEngine = {
       theme: (request.theme as BookHtmlTheme) || 'book',
       fontSizePt: (spec as { fontSizePt?: number }).fontSizePt,
       lineHeight: (spec as { lineHeight?: number }).lineHeight,
+      firstLineIndentPt: (spec as { paragraphIndent?: number }).paragraphIndent,
+      paragraphSpacingPt: (spec as { paragraphSpacing?: number }).paragraphSpacing,
     });
 
     let browser: Awaited<ReturnType<BrowserLauncher>> | null = null;

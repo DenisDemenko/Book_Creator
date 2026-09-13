@@ -21,6 +21,7 @@
  */
 import { PX_PER_MM, buildRulerMarks, buildRulerSheetLayout, formatMm } from '../src/utils/mmUnits.ts';
 import { buildPaginationSnapshot, paginationSnapshotsEqual } from '../src/utils/pageBreaker.ts';
+import { resolveSheetScale } from '../src/components/manuscriptEditor/usePageScale.ts';
 
 let passed = 0;
 let failed = 0;
@@ -175,6 +176,34 @@ function main() {
     t('без бюджету нічого не позначається переповненим',
       buildPaginationSnapshot([{ top: 0, bottom: 9999 }], [], 0).pageOverflows[0] === false);
     t('знімки з різними прапорцями — різні', !paginationSnapshotsEqual(over, fits));
+  }
+
+  console.log('\nЧесний зум проти «вмістити» (фаза 4):');
+  {
+    const widthPx = 642; // A4-колонка, 170 мм
+    const availablePx = 500; // панель вужча за аркуш
+    t('чесний зум 100 % = рівно 1, контейнер не враховується',
+      resolveSheetScale('zoom', 1, widthPx, availablePx) === 1);
+    t('чесний зум 150 % = рівно 1.5, навіть коли не влазить',
+      resolveSheetScale('zoom', 1.5, widthPx, availablePx) === 1.5, String(resolveSheetScale('zoom', 1.5, widthPx, availablePx)));
+    t('чесний зум 20 % = рівно 0.2', resolveSheetScale('zoom', 0.2, widthPx, availablePx) === 0.2);
+    t('«вмістити» при вузькій панелі стискає аркуш',
+      Math.abs(resolveSheetScale('fit', 1, widthPx, availablePx) - 500 / 642) < 0.0001,
+      String(resolveSheetScale('fit', 1, widthPx, availablePx)));
+    t('«вмістити» не збільшує понад заданий відсоток',
+      resolveSheetScale('fit', 0.5, widthPx, 5000) === 0.5);
+    t('«вмістити» на широкій панелі = заданий відсоток',
+      resolveSheetScale('fit', 1.2, widthPx, 5000) === 1.2);
+    t('нульова ширина аркуша не дає ділення на нуль',
+      resolveSheetScale('fit', 1, 0, 500) === 1);
+    t('невідомий (NaN) масштаб → 1, а не NaN у transform',
+      resolveSheetScale('zoom', NaN, widthPx, availablePx) === 1 &&
+        Number.isFinite(resolveSheetScale('fit', NaN, widthPx, availablePx)));
+    t('у «вмістити» NaN-відсоток не ламає стискання',
+      Math.abs(resolveSheetScale('fit', NaN, widthPx, availablePx) - 500 / 642) < 0.0001,
+      String(resolveSheetScale('fit', NaN, widthPx, availablePx)));
+    t('від\u02bcємний масштаб → 1 (аркуш не вивертається)',
+      resolveSheetScale('zoom', -2, widthPx, availablePx) === 1);
   }
 
   console.log('\nПідпис міліметрів:');

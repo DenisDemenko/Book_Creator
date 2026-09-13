@@ -291,6 +291,57 @@ function main() {
     t('сам аркуш із текстом усе одно відрендерено', html.includes('текст'));
   }
 
+  console.log('\nЛінійка живе ВСЕРЕДИНІ колонки — один контейнер, один масштаб (фаза 4):');
+  {
+    const budget = 257 * PX_PER_MM;
+    const snapshot = buildPaginationSnapshot([{ top: 46, bottom: 46 + budget }], [], budget);
+    const html = renderToStaticMarkup(
+      React.createElement(
+        LanguageProvider,
+        null,
+        React.createElement(PageColumn, {
+          widthMm: 170,
+          zoomFactor: 1,
+          showVerticalRuler: true,
+          pagination: snapshot,
+          pageGeometry: A4_GEOMETRY,
+          ruler: React.createElement(PageRuler, {
+            sheetWidthMm: 210,
+            textWidthMm: 170,
+            insideMm: 20,
+            outsideMm: 20,
+            verticalRulerWidthPx: 24,
+            onChangeMargins: () => {},
+          }),
+          children: React.createElement('div', null, 'текст'),
+        })
+      )
+    );
+
+    // Порядок у розмітці = структура: контейнер → рядок лінійки → рядок
+    // [смуга | текст]. Саме ця вкладеність дає лінійці той самий масштаб і
+    // ту саму ширину, що й колонці (і прокручування разом із нею).
+    const container = html.indexOf('overflow-y-auto');
+    const rulerRow = html.indexOf('sticky top-0');
+    const strip = html.indexOf('sticky left-0');
+    // Саме колонковий `transform-origin:top center` — у лінійки власний
+    // аркуш має `top left`, тож пошук по `transform:scale(1)` знайшов би
+    // лінійку замість тексту (перевірено: перша спроба тесту саме так і
+    // помилилась).
+    const text = html.indexOf('transform-origin:top center');
+    t('лінійка вкладена в прокручуваний контейнер колонки', container >= 0 && container < rulerRow, `${container} < ${rulerRow}`);
+    t('рядок лінійки — перед рядом зі смугою й текстом', rulerRow < strip && strip < text, `${rulerRow} < ${strip} < ${text}`);
+    t('лінійка приклеєна зверху (не тікає при вертикальному скролі)', html.includes('sticky top-0 z-20'));
+    t('смуга вертикальної лінійки приклеєна зліва (не тікає при горизонтальному)', html.includes('sticky left-0'));
+    // Цифри лінійки — лише ті, що ДО смуги: далі йдуть підписи вертикальної
+    // лінійки, і без цього поділу рахунок дав би 22 + 26.
+    const rulerLabels = labels(html.slice(0, strip));
+    t('шкала лінійки намальована: 22 цифри по аркушу', rulerLabels.length === 22, String(rulerLabels.length));
+    t('остання цифра — 210 (повний формат, а не ширина тексту)', rulerLabels.at(-1) === 210, String(rulerLabels.at(-1)));
+    t('вертикальна зона тексту теж на місці', zones(html).length === 1, String(zones(html).length));
+    t('без лінійки рядок не рендериться зовсім', !renderColumn(null).includes('sticky top-0'));
+  }
+
   console.log(`\nРезультат: ${passed} пройшло, ${failed} впало.`);
   if (failed > 0) process.exit(1);
 }

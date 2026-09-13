@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { usePageScale } from './usePageScale';
+import { usePageScale, type PageScaleMode } from './usePageScale';
 import { PX_PER_MM, buildRulerMarks, buildRulerSheetLayout, formatMm } from '../../utils/mmUnits';
 import { clampMarginMm, type MarginSide } from '../../utils/pageGeometry';
 import { useLanguage } from '../../i18n/LanguageContext';
@@ -18,6 +18,8 @@ interface PageRulerProps {
   onChangeMargins: (patch: { insideMm?: number; outsideMm?: number }) => void;
   /** Той самий zoomFactor, що передається сусідньому PageColumn — інакше лінійка розійдеться з колонкою тексту під нею. */
   zoomFactor?: number;
+  /** Той самий режим масштабу, що й у PageColumn (див. usePageScale.ts): у `fit` лінійка теж вписується в панель. */
+  scaleMode?: PageScaleMode;
   /**
    * Ширина смуги вертикальної лінійки, яка стоїть ЗЛІВА в PageColumn під цією
    * лінійкою (0 — коли вертикальної лінійки нема). Лінійка відступає на цю
@@ -69,10 +71,11 @@ export const PageRuler: React.FC<PageRulerProps> = ({
   outsideMm,
   onChangeMargins,
   zoomFactor = 1,
+  scaleMode = 'zoom',
   verticalRulerWidthPx = 0,
 }) => {
   const { t } = useLanguage();
-  const { outerRef: marksRef, scale } = usePageScale(textWidthMm, zoomFactor);
+  const { outerRef: marksRef, scale } = usePageScale(textWidthMm, zoomFactor, 0, scaleMode);
   const dragRef = useRef<{ side: MarginSide; startClientX: number; startMm: number } | null>(null);
 
   const beginDrag = (side: MarginSide) => (e: React.PointerEvent) => {

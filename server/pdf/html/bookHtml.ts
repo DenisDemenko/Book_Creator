@@ -29,6 +29,15 @@ export interface BookHtmlOptions {
   fontSizePt?: number;
   /** Інтерліньяж як множник кегля. */
   lineHeight?: number;
+  /**
+   * Абзацний відступ і відбивка між абзацами, У ПУНКТАХ — як і кегль
+   * (`PdfLayoutSpec.paragraphIndent/paragraphSpacing`). Раніше тут стояло
+   * жорстке `text-indent: 1.2em`, тобто вибір автора цей рушій ігнорував
+   * (власний рушій nova читає ті самі поля правильно). Без заданих значень —
+   * ті самі 1.2em, щоб для старих викликів нічого не змінилось.
+   */
+  firstLineIndentPt?: number;
+  paragraphSpacingPt?: number;
   /** Титульна сторінка. Для уривка й чернетки вимикається. */
   titlePage?: boolean;
 }
@@ -71,7 +80,17 @@ export function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function styles(theme: ThemeVars, fontSizePt: number, lineHeight: number): string {
+function styles(
+  theme: ThemeVars,
+  fontSizePt: number,
+  lineHeight: number,
+  firstLineIndentPt?: number,
+  paragraphSpacingPt?: number
+): string {
+  // Відступ автора — у пунктах, як і кегль; якщо налаштувань немає,
+  // лишається класичний «червоний рядок» 1.2em.
+  const indent = Number(firstLineIndentPt) > 0 ? `${Number(firstLineIndentPt)}pt` : '1.2em';
+  const gap = Number(paragraphSpacingPt) > 0 ? `${Number(paragraphSpacingPt)}pt` : '0';
   return `
     :root {
       --body-font: ${theme.body};
@@ -108,7 +127,7 @@ function styles(theme: ThemeVars, fontSizePt: number, lineHeight: number): strin
     h1:first-of-type { break-before: auto; page-break-before: auto; }
     h2 { font-size: ${(fontSizePt * 1.4).toFixed(1)}pt; margin: 1.6em 0 0.6em; }
     h3 { font-size: ${(fontSizePt * 1.15).toFixed(1)}pt; margin: 1.3em 0 0.5em; }
-    p { margin: 0; text-indent: 1.2em; orphans: 2; widows: 2; }
+    p { margin: 0 0 ${gap}; text-indent: ${indent}; orphans: 2; widows: 2; }
     /* Перший абзац під заголовком — без червоного рядка, як у книжці. */
     h1 + p, h2 + p, h3 + p, blockquote + p { text-indent: 0; }
     blockquote {
@@ -222,7 +241,13 @@ export function buildBookHtml(markdown: string, options: BookHtmlOptions): strin
     '<head>',
     '<meta charset="utf-8">',
     `<title>${escapeHtml(options.title)}</title>`,
-    `<style>${styles(theme, fontSizePt, lineHeight)}</style>`,
+    `<style>${styles(
+      theme,
+      fontSizePt,
+      lineHeight,
+      options.firstLineIndentPt,
+      options.paragraphSpacingPt
+    )}</style>`,
     '</head>',
     '<body>',
     titlePage,

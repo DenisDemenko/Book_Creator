@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { usePageScale } from './usePageScale';
+import { usePageScale, type PageScaleMode } from './usePageScale';
 import { PX_PER_MM, buildRulerMarks, formatMm } from '../../utils/mmUnits';
 import type { PaginationSnapshot } from '../../utils/pageBreaker';
 import type { PageGeometry } from '../../utils/pageGeometry';
@@ -11,6 +11,20 @@ interface PageColumnProps {
   className?: string;
   /** Стеля масштабу понад фізичний розмір сторінки — див. usePageScale.ts. За замовчуванням 1 (поведінка не змінюється). */
   zoomFactor?: number;
+  /**
+   * `zoom` (за замовчуванням) — чесний масштаб: показаний відсоток і є
+   * справжнім. `fit` — вміщати аркуш у панель. Докладніше — usePageScale.ts.
+   */
+  scaleMode?: PageScaleMode;
+  /**
+   * Горизонтальна лінійка — рендериться ВСЕРЕДИНІ цього ж контейнера, а не
+   * поруч із ним у батьківській розмітці. Це не косметика: лінійка має
+   * прокручуватись разом із текстом (інакше при чесному зумі, коли аркуш
+   * ширший за панель, міліметри поїхали б відносно тексту) і міряти РІВНО ту
+   * саму ширину, що й колонка (інакше її масштаб відрізняється на ширину
+   * смуги прокрутки — ті самі ~3 px, які лишались у фазі 1).
+   */
+  ruler?: React.ReactNode;
   /** Показати вертикальну лінійку (мм) зліва від тексту — керується тим самим перемикачем «показати лінійку», що й горизонтальна PageRuler.tsx. За замовчуванням false (поведінка не змінюється). */
   showVerticalRuler?: boolean;
   /**
@@ -53,12 +67,14 @@ export const PageColumn: React.FC<PageColumnProps> = ({
   widthMm,
   className,
   zoomFactor = 1,
+  scaleMode = 'zoom',
+  ruler = null,
   showVerticalRuler = false,
   pagination = null,
   pageGeometry,
 }) => {
   const { t } = useLanguage();
-  const { outerRef, scale, widthPx } = usePageScale(widthMm, zoomFactor, showVerticalRuler ? VERTICAL_RULER_WIDTH_PX : 0);
+  const { outerRef, scale, widthPx } = usePageScale(widthMm, zoomFactor, showVerticalRuler ? VERTICAL_RULER_WIDTH_PX : 0, scaleMode);
   const innerRef = useRef<HTMLDivElement>(null);
   const [naturalHeightPx, setNaturalHeightPx] = useState(0);
 
@@ -104,10 +120,17 @@ export const PageColumn: React.FC<PageColumnProps> = ({
     // лежав під ним раніше, прибрано цілком (запис #142). Сама сторінка
     // (`#fffefc` нижче) лишається непрозорою — прозорий лише простір
     // навколо неї.
-    <div ref={outerRef} className={`overflow-y-auto flex ${className || ''}`}>
+    <div ref={outerRef} className={`overflow-y-auto flex flex-col ${className || ''}`}>
+      {/* Горизонтальна лінійка — першим РЯДКОМ цього ж прокручуваного
+          контейнера, а не окремим блоком над ним. `sticky top-0` тримає її
+          на виду при вертикальному прокручуванні, а горизонтально вона
+          сунеться разом із текстом — саме тому при чесному зумі (коли аркуш
+          ширший за панель) міліметри не поїдуть відносно рядка. */}
+      {ruler && <div className="sticky top-0 z-20 shrink-0">{ruler}</div>}
+      <div className="flex flex-1 min-h-0">
       {showVerticalRuler && (
         <div
-          className="shrink-0 relative select-none overflow-hidden"
+          className="shrink-0 relative select-none overflow-hidden sticky left-0 z-10"
           style={{
             width: VERTICAL_RULER_WIDTH_PX,
             height: naturalHeightPx * scale,
@@ -180,6 +203,7 @@ export const PageColumn: React.FC<PageColumnProps> = ({
         >
           {children}
         </div>
+      </div>
       </div>
     </div>
   );

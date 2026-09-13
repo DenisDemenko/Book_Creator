@@ -430,5 +430,49 @@ console.log('\nІлюстрації: розмір, підпис і чесніс�
   t('без ілюстрацій приміток немає', noImages.notesUk.length === 0, JSON.stringify(noImages.notesUk));
 }
 
+// ---------------------------------------------------------------------------
+console.log('\nДрук: абзацний відступ і відбивка з макета книги, а не жорстке 1.2em');
+{
+  const { buildBookHtml } = await import('../server/pdf/html/bookHtml.ts');
+
+  /*
+    Фаза 4 (#166): `chromiumEngine` передає в таблицю стилів
+    `PdfLayoutSpec.paragraphIndent` і `paragraphSpacing` (у пунктах). До того
+    тут стояло жорстке `text-indent: 1.2em` і нульова відбивка — тобто автор
+    міняв абзацний відступ у «Верстка & Поля», а PDF це ігнорував.
+
+    Перевіряється САМЕ та таблиця стилів: живого друку тут немає (він вимагає
+    Chromium і сторінки застосунку), але числа, які в неї потрапили, видно
+    текстом.
+  */
+  const custom = buildBookHtml('Текст.\n', {
+    title: 'К',
+    theme: 'book',
+    firstLineIndentPt: 24,
+    paragraphSpacingPt: 6,
+  } as never);
+  t('відступ автора потрапляє в стилі абзацу',
+    /p\s*\{[^}]*text-indent:\s*24pt/.test(custom));
+  t('відбивка автора потрапляє в стилі абзацу',
+    /p\s*\{[^}]*margin:\s*0 0 6pt/.test(custom));
+  t('перший абзац під заголовком лишається без відступу',
+    /h1 \+ p[^{]*\{[^}]*text-indent:\s*0/.test(custom));
+
+  const fallback = buildBookHtml('Текст.\n', { title: 'К', theme: 'book' } as never);
+  t('без макета лишається класичний «червоний рядок»',
+    /p\s*\{[^}]*text-indent:\s*1\.2em/.test(fallback));
+  t('без макета відбивки немає',
+    /p\s*\{[^}]*margin:\s*0 0 0;/.test(fallback));
+
+  const broken = buildBookHtml('Текст.\n', {
+    title: 'К',
+    theme: 'book',
+    firstLineIndentPt: 0,
+    paragraphSpacingPt: -3,
+  } as never);
+  t('нульовий і відʼємний відступ не ламають таблицю стилів',
+    /p\s*\{[^}]*text-indent:\s*1\.2em/.test(broken) && /margin:\s*0 0 0;/.test(broken));
+}
+
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);
 if (fail > 0) process.exit(1);

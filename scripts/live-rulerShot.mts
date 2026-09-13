@@ -77,14 +77,6 @@ const markup = renderToStaticMarkup(
     React.createElement(
       'div',
       { style: { width: `${geometry.contentWidthMm * PX_PER_MM}px` } as React.CSSProperties },
-      React.createElement(PageRuler, {
-        sheetWidthMm: geometry.pageWidthMm,
-        textWidthMm: geometry.contentWidthMm,
-        insideMm: geometry.margins.insideMm,
-        outsideMm: geometry.margins.outsideMm,
-        verticalRulerWidthPx: 24,
-        onChangeMargins: () => {},
-      }),
       React.createElement(
         PageColumn,
         {
@@ -92,6 +84,16 @@ const markup = renderToStaticMarkup(
           showVerticalRuler: true,
           pagination: snapshot,
           pageGeometry: geometry,
+          // Лінійка тепер ВЛАСТИВІСТЬ колонки, а не сусідній блок: тільки так
+          // вони ділять один прокручуваний контейнер і один масштаб.
+          ruler: React.createElement(PageRuler, {
+            sheetWidthMm: geometry.pageWidthMm,
+            textWidthMm: geometry.contentWidthMm,
+            insideMm: geometry.margins.insideMm,
+            outsideMm: geometry.margins.outsideMm,
+            verticalRulerWidthPx: 24,
+            onChangeMargins: () => {},
+          }),
           children: React.createElement(
             'div',
             { className: 'nova-manuscript-blocks', style: typographyVars },
@@ -133,10 +135,11 @@ async function main() {
       const scroll = document.querySelector('div.overflow-y-auto') as HTMLElement | null;
       if (!scroll) return { zones: [] as { top: string; height: string; background: string }[], ticks: 0 };
       scroll.style.height = '920px';
-      // Смуга вертикальної лінійки — ПЕРША дитина прокручуваного контейнера
-      // (PageColumn.tsx), а не будь-який div із класами лінійки: горизонтальна
-      // лінійка теж має `shrink-0 relative select-none` і збиває з пантелику.
-      const strip = scroll.firstElementChild as HTMLElement | null;
+      // Структура PageColumn — ДВА ряди: [лінійка][рядок зі смугою й текстом].
+      // Смуга вертикальної лінійки — це `sticky left-0` у другому ряді
+      // (перший ряд — сама горизонтальна лінійка, теж `shrink-0 select-none`,
+      // тож селектор по класах лінійки брав би не те).
+      const strip = scroll.querySelector('div.sticky.left-0') as HTMLElement | null;
       if (strip) strip.style.height = '920px';
       const zones = strip
         ? Array.from(strip.children).map((el) => {
@@ -149,6 +152,61 @@ async function main() {
     console.log('Зони вертикальної лінійки (живий DOM):');
     for (const z of info.zones) console.log(`  top ${z.top}, висота ${z.height}, тло ${z.background}`);
     console.log(`  цифр у зонах: ${info.ticks}`);
+
+    // ГОЛОВНА ПЕРЕВІРКА ФАЗИ 1: світла зона тексту на лінійці має стояти РІВНО
+    // над колонкою тексту. Раніше це було неможливо перевірити (лінійка й
+    // колонка міряли різні контейнери) — тепер вони в одному, і це видно
+    // числами просто у браузері.
+    const align = await page.evaluate(() => {
+      // Шукаємо за ВЛАСТИВІСТЮ `transformOrigin`, а не атрибутним селектором
+      // `[style*="transform-origin: top left"]`: серіалізація інлайн-стилю
+      // різна залежно від того, хто її писав (SSR React ставить
+      // `transform-origin:top left` без пробілу, CSSOM — `: `). Селектор з
+      // пробілом тихо не знаходив нічого, і звірка падала замість того, щоб
+      // міряти.
+      // CSSOM віддає нормалізований порядок (`left top`, `center top`), а не
+      // той, що писали в коді (`top left`) — тому ключ зрівнюємо через
+      // сортування слів. Навмисно БЕЗ окремої функції-помічника: esbuild для
+      // іменованих функцій у `page.evaluate` дописує хелпер `__name`, якого
+      // в пісочниці браузера немає («__name is not defined»).
+      const entries = Array.from(document.querySelectorAll('div')).map((el) => ({
+        el: el as HTMLElement,
+        key: (el as HTMLElement).style.transformOrigin.split(' ').sort().join(' '),
+      }));
+      const sheet = entries.find((e) => e.key === 'left top')?.el ?? null;
+      const column = entries.find((e) => e.key === 'center top')?.el ?? null;
+      // Діагностика: якщо звірка не склалась, треба бачити, що саме не
+      // знайшлось, а не лише «не вдалося».
+      const diag = {
+        divs: entries.length,
+        origins: entries.map((e) => e.key).filter(Boolean),
+        sheets: entries.filter((e) => e.key === 'left top').length,
+        columns: entries.filter((e) => e.key === 'center top').length,
+        backgrounds: sheet ? Array.from(sheet.children).map((el) => (el as HTMLElement).style.background) : [],
+      };
+      if (!sheet || !column) return { fail: 'немає аркуша або колонки', diag };
+      const band = Array.from(sheet.children).find(
+        (el) => (el as HTMLElement).style.background.includes('255, 254, 252')
+      ) as HTMLElement | undefined;
+      if (!band) return { fail: 'в аркуші немає текстової смуги', diag };
+      const b = band.getBoundingClientRect();
+      const c = column.getBoundingClientRect();
+      return { bandLeft: b.left, bandRight: b.right, colLeft: c.left, colRight: c.right, diag };
+    });
+    if (align && 'fail' in align) {
+      console.log(`Не вдалося знайти смугу/колонку для звірки: ${align.fail}`);
+      console.log(`  ${JSON.stringify(align.diag)}`);
+      process.exitCode = 1;
+    } else if (align) {
+      const dLeft = Math.abs(align.bandLeft - align.colLeft);
+      const dRight = Math.abs(align.bandRight - align.colRight);
+      console.log(`Зона тексту на лінійці проти колонки: ліва межа ±${dLeft.toFixed(2)} px, права ±${dRight.toFixed(2)} px`);
+      console.log(dLeft < 1 && dRight < 1 ? '  ЗБІГАЄТЬСЯ' : '  РОЗІЙШЛАСЬ — це помилка');
+      if (dLeft >= 1 || dRight >= 1) process.exitCode = 1;
+    } else {
+      console.log('Не вдалося знайти смугу/колонку для звірки');
+      process.exitCode = 1;
+    }
 
     const out = path.resolve('tmp/ruler-shot.png');
     const columnEl = await page.$('div.overflow-y-auto');
