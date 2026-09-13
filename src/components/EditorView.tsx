@@ -10,7 +10,7 @@ import { readabilityKey } from './manuscriptEditor/ReadabilityHighlightPlugin';
 import { PAGE_FORMAT_QUICK_OPTIONS } from '../utils/pageFormats';
 import { collectBookTags, type BookTag } from '../utils/bookTags';
 import { useSunAccentVars } from '../utils/sunAccent';
-import { PageColumn } from './manuscriptEditor/PageColumn';
+import { PageColumn, VERTICAL_RULER_WIDTH_PX } from './manuscriptEditor/PageColumn';
 import { PageRuler } from './manuscriptEditor/PageRuler';
 import { useRealBookPages } from '../utils/useRealBookPages';
 import { resolvePageGeometry, type PageGeometry } from '../utils/pageGeometry';
@@ -611,6 +611,15 @@ export const EditorView: React.FC<EditorViewProps> = ({
   const getPageGeometry = useCallback((): PageGeometry => {
     return resolvePageGeometry(bookRef.current.layoutConfig);
   }, []);
+
+  /**
+   * Та сама геометрія, але для РЕНДЕРА (лінійка, колонка тексту): тут `book`
+   * — це вже той проп, з яким компонент рендериться, тож ref читати не
+   * треба. Раніше в цих пʼяти місцях поля брались інлайном
+   * (`book.layoutConfig.margins?.insideMm || 0`) — тобто четверта копія того
+   * самого, зі своїм `|| 0` замість `marginOr` з pageGeometry.
+   */
+  const pageGeometry = resolvePageGeometry(book.layoutConfig);
 
   /** Ширина текстового блоку сторінки (мм) — формат мінус внутрішнє/зовнішнє поле. Основа для дефолтної половини ширини картинки та межі її масштабування. */
   const getPageContentWidthMm = useCallback((): number => {
@@ -4946,14 +4955,16 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
               {rulerVisible && (
                 <PageRuler
-                  widthMm={getPageContentWidthMm()}
+                  sheetWidthMm={pageGeometry.pageWidthMm}
+                  textWidthMm={pageGeometry.contentWidthMm}
                   zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
-                  insideMm={book.layoutConfig.margins?.insideMm || 0}
-                  outsideMm={book.layoutConfig.margins?.outsideMm || 0}
+                  insideMm={pageGeometry.margins.insideMm}
+                  outsideMm={pageGeometry.margins.outsideMm}
+                  verticalRulerWidthPx={VERTICAL_RULER_WIDTH_PX}
                   onChangeMargins={handleChangeMargins}
                 />
               )}
-              <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0" showVerticalRuler={rulerVisible}>
+              <PageColumn widthMm={pageGeometry.contentWidthMm} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0" showVerticalRuler={rulerVisible}>
                 {/* Колонтитул першого аркуша. Плагін пагінації малює його на
                     кожному РОЗРИВІ, тобто зверху сторінок 2, 3, … — у першої
                     розриву перед нею немає, тож він рендериться тут. */}
@@ -5089,14 +5100,16 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     />
                     {rulerVisible && (
                       <PageRuler
-                        widthMm={getPageContentWidthMm()}
+                        sheetWidthMm={pageGeometry.pageWidthMm}
+                        textWidthMm={pageGeometry.contentWidthMm}
                         zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
-                        insideMm={book.layoutConfig.margins?.insideMm || 0}
-                        outsideMm={book.layoutConfig.margins?.outsideMm || 0}
+                        insideMm={pageGeometry.margins.insideMm}
+                        outsideMm={pageGeometry.margins.outsideMm}
+                        verticalRulerWidthPx={VERTICAL_RULER_WIDTH_PX}
                         onChangeMargins={handleChangeMargins}
                       />
                     )}
-                    <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800/80" showVerticalRuler={rulerVisible}>
+                    <PageColumn widthMm={pageGeometry.contentWidthMm} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800/80" showVerticalRuler={rulerVisible}>
                       <EditorContent
                         editor={uaEditor}
                         style={{ fontFamily: manuscriptFontStack }}
@@ -5145,14 +5158,16 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     />
                     {rulerVisible && (
                       <PageRuler
-                        widthMm={getPageContentWidthMm()}
+                        sheetWidthMm={pageGeometry.pageWidthMm}
+                        textWidthMm={pageGeometry.contentWidthMm}
                         zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
-                        insideMm={book.layoutConfig.margins?.insideMm || 0}
-                        outsideMm={book.layoutConfig.margins?.outsideMm || 0}
+                        insideMm={pageGeometry.margins.insideMm}
+                        outsideMm={pageGeometry.margins.outsideMm}
+                        verticalRulerWidthPx={VERTICAL_RULER_WIDTH_PX}
                         onChangeMargins={handleChangeMargins}
                       />
                     )}
-                    <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800/80" showVerticalRuler={rulerVisible}>
+                    <PageColumn widthMm={pageGeometry.contentWidthMm} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800/80" showVerticalRuler={rulerVisible}>
                       <EditorContent
                         editor={enEditor}
                         style={{ fontFamily: manuscriptFontStack }}
@@ -5211,14 +5226,16 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 />
                 {rulerVisible && (
                   <PageRuler
-                    widthMm={getPageContentWidthMm()}
+                    sheetWidthMm={pageGeometry.pageWidthMm}
+                    textWidthMm={pageGeometry.contentWidthMm}
                     zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
-                    insideMm={book.layoutConfig.margins?.insideMm || 0}
-                    outsideMm={book.layoutConfig.margins?.outsideMm || 0}
+                    insideMm={pageGeometry.margins.insideMm}
+                    outsideMm={pageGeometry.margins.outsideMm}
+                    verticalRulerWidthPx={VERTICAL_RULER_WIDTH_PX}
                     onChangeMargins={handleChangeMargins}
                   />
                 )}
-                <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800" showVerticalRuler={rulerVisible}>
+                <PageColumn widthMm={pageGeometry.contentWidthMm} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800" showVerticalRuler={rulerVisible}>
                   <EditorContent
                     editor={enEditor}
                     style={{ fontFamily: manuscriptFontStack }}
@@ -6672,14 +6689,16 @@ export const EditorView: React.FC<EditorViewProps> = ({
             />
             {rulerVisible && (
               <PageRuler
-                widthMm={getPageContentWidthMm()}
+                sheetWidthMm={pageGeometry.pageWidthMm}
+                textWidthMm={pageGeometry.contentWidthMm}
                 zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100}
-                insideMm={book.layoutConfig.margins?.insideMm || 0}
-                outsideMm={book.layoutConfig.margins?.outsideMm || 0}
+                insideMm={pageGeometry.margins.insideMm}
+                outsideMm={pageGeometry.margins.outsideMm}
+                verticalRulerWidthPx={VERTICAL_RULER_WIDTH_PX}
                 onChangeMargins={handleChangeMargins}
               />
             )}
-            <PageColumn widthMm={getPageContentWidthMm()} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800" showVerticalRuler={rulerVisible}>
+            <PageColumn widthMm={pageGeometry.contentWidthMm} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800" showVerticalRuler={rulerVisible}>
               <EditorContent
                 editor={enEditor}
                 style={{ fontFamily: manuscriptFontStack }}

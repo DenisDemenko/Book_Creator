@@ -28,3 +28,51 @@ export function buildRulerMarks(lengthMm: number): RulerMark[] {
   }
   return marks;
 }
+
+export interface RulerSheetLayout {
+  /** Повна ширина аркуша в px, БЕЗ масштабу — аркуш у лінійці сам несе `transform: scale()`. */
+  sheetWidthPx: number;
+  insidePx: number;
+  outsidePx: number;
+  textWidthPx: number;
+  /**
+   * Зсув ЛІВОГО КРАЮ аркуша від центру доступної ширини, УЖЕ з масштабом
+   * (бо це позиція самого аркуша в контейнері, а не дитина всередині нього).
+   */
+  sheetLeftScaledPx: number;
+}
+
+/**
+ * Розкладка аркуша на горизонтальній лінійці редактора (PageRuler.tsx):
+ * лінійка міряє АРКУШ, а текстова колонка під нею — лише його середину,
+ * тож аркуш доводиться малювати навколо колонки. Функція відповідає на
+ * єдине питання, яке тут можна переплутати: на скільки px ліва межа аркуша
+ * лівіше за центр доступної ширини.
+ *
+ * Виведення (і чому саме так):
+ *   • колонка тексту в PageColumn центрується як `left: 50%` мінус пів
+ *     ширини і масштабується тим самим `scale`, тож її лівий край лежить
+ *     на `-textWidthPx * scale / 2` від центру;
+ *   • ліва межа аркуша відходить від краю колонки ще на внутрішнє поле
+ *     (`insideMm`), тому зсув аркуша = `(textWidthPx / 2 + insidePx) * scale`.
+ * Обидва числа рахуються від того самого центру — саме тому світла зона
+ * тексту на лінійці стоїть точно над текстом під нею. Тримається це лише
+ * на цій рівності, тож вона зафіксована тестом (`npm run test:ruler-layout`).
+ */
+export function buildRulerSheetLayout(params: {
+  sheetWidthMm: number;
+  textWidthMm: number;
+  insideMm: number;
+  outsideMm: number;
+  scale: number;
+}): RulerSheetLayout {
+  const textWidthPx = params.textWidthMm * PX_PER_MM;
+  const insidePx = params.insideMm * PX_PER_MM;
+  return {
+    sheetWidthPx: params.sheetWidthMm * PX_PER_MM,
+    insidePx,
+    outsidePx: params.outsideMm * PX_PER_MM,
+    textWidthPx,
+    sheetLeftScaledPx: (textWidthPx / 2 + insidePx) * params.scale,
+  };
+}

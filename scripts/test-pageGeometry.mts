@@ -11,7 +11,7 @@
  * поля не перетворюються на `NaN` і що текстова зона ніколи не стає
  * від'ємною (від'ємна ширина ламала б масштабування колонки).
  */
-import { resolvePageGeometry, DEFAULT_PAGE_WIDTH_MM, DEFAULT_PAGE_HEIGHT_MM } from '../src/utils/pageGeometry.ts';
+import { resolvePageGeometry, clampMarginMm, MIN_MARGIN_MM, MIN_TEXT_WIDTH_MM, DEFAULT_PAGE_WIDTH_MM, DEFAULT_PAGE_HEIGHT_MM } from '../src/utils/pageGeometry.ts';
 
 let passed = 0;
 let failed = 0;
@@ -113,6 +113,44 @@ function main() {
     const withoutExtras = resolvePageGeometry(base as any);
     t('bleed і mirrored не змінюють зону', mm(withExtras.contentWidthMm, withoutExtras.contentWidthMm) && mm(withExtras.contentHeightMm, withoutExtras.contentHeightMm));
     t('вхідний обʼєкт не змінено', JSON.stringify(base) === before, JSON.stringify(base));
+  }
+
+  console.log('\nМежі перетягування полів (ручки лінійки):');
+  {
+    const a4 = { pageWidthMm: 210, insideMm: 20, outsideMm: 20 };
+    t('звичайне значення проходить як є', mm(clampMarginMm('insideMm', 25, a4), 25));
+    t('менше за мінімум → мінімум', clampMarginMm('insideMm', 1.5, a4) === MIN_MARGIN_MM, String(clampMarginMm('insideMm', 1.5, a4)));
+    t('від\u02bcємне → мінімум', clampMarginMm('outsideMm', -40, a4) === MIN_MARGIN_MM);
+    t('завелике — обрізає по текстова зона 20 мм', mm(clampMarginMm('insideMm', 500, a4), 170), String(clampMarginMm('insideMm', 500, a4)));
+    t('межа враховує ПРОТИЛЕЖНЕ поле', mm(clampMarginMm('insideMm', 500, { pageWidthMm: 210, insideMm: 20, outsideMm: 60 }), 130));
+    t('обидві сторони мають ту саму межу', mm(clampMarginMm('insideMm', 500, a4), clampMarginMm('outsideMm', 500, a4)));
+    t('NaN → мінімум, а не NaN у книзі', clampMarginMm('insideMm', NaN, a4) === MIN_MARGIN_MM);
+    t('мінімум — ті самі 5 мм, що в PdfEditorView', MIN_MARGIN_MM === 5);
+  }
+
+  console.log('\nКламп ніколи не дає неверстабельної зони:');
+  {
+    const pages = [210, 148, 30];
+    const others = [0, 5, 20, 60, 200];
+    let ok = true;
+    let where = '';
+    for (const pageWidthMm of pages) {
+      for (const otherMm of others) {
+        for (const request of [-100, 0, 4.9, 5, 20, 25.4, 1000, NaN]) {
+          const got = clampMarginMm('insideMm', request, { pageWidthMm, insideMm: request, outsideMm: otherMm });
+          const maxMm = Math.max(MIN_MARGIN_MM, pageWidthMm - otherMm - MIN_TEXT_WIDTH_MM);
+          if (!(Number.isFinite(got) && got >= MIN_MARGIN_MM && got <= maxMm)) {
+            ok = false;
+            where = `аркуш ${pageWidthMm}, протилежне ${otherMm}, просили ${request} → ${got}`;
+          }
+        }
+      }
+    }
+    t('результат завжди в [5, максимум]', ok, where);
+
+    // Здоровий аркуш: після клампу текстовій зоні лишається щонайменше 20 мм.
+    const clamped = clampMarginMm('insideMm', 500, { pageWidthMm: 210, insideMm: 20, outsideMm: 20 });
+    t('після клампу зона ≥ 20 мм', 210 - clamped - 20 >= MIN_TEXT_WIDTH_MM, String(210 - clamped - 20));
   }
 
   console.log(`\nРезультат: ${passed} пройшло, ${failed} впало.`);
