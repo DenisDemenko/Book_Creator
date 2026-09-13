@@ -3,6 +3,7 @@ import { Book, Chapter, Section } from '../types';
 import { BookPage, buildBookPages, renderSectionBlocksHtml } from './helpers';
 import { computeBreaks } from './pageBreaker';
 import { PX_PER_MM } from './mmUnits';
+import { resolvePageGeometry } from './pageGeometry';
 
 /**
  * Реальна (не евристична) пагінація книги для «Розворот книги» — вимірює
@@ -43,12 +44,14 @@ export function useRealBookPages(book: Book): BookPage[] {
       if (!container) return;
 
       const layout = book.layoutConfig;
-      const margins = layout.margins;
-      const contentWidthMm = layout.pageWidthMm - (margins?.insideMm || 0) - (margins?.outsideMm || 0);
-      const contentHeightMm = layout.pageHeightMm - (margins?.topMm || 0) - (margins?.bottomMm || 0);
-      const contentHeightPx = contentHeightMm * PX_PER_MM;
+      // Геометрія аркуша — з єдиного джерела (utils/pageGeometry.ts). Раніше
+      // тут стояли ті самі два віднімання, але БЕЗ запасного розміру взагалі:
+      // книга без `pageWidthMm` давала `NaN` у ширині прихованого контейнера,
+      // і пагінація «Розвороту книги» ламалась мовчки.
+      const geometry = resolvePageGeometry(layout);
+      const contentHeightPx = geometry.contentHeightMm * PX_PER_MM;
 
-      container.style.width = `${contentWidthMm}mm`;
+      container.style.width = `${geometry.contentWidthMm}mm`;
       container.style.fontFamily = layout.typography.bodyFont === 'Literata' ? 'Literata, Georgia, serif' : 'sans-serif';
       container.style.fontSize = `${layout.typography.fontSizePt}pt`;
       container.style.lineHeight = String(layout.typography.lineHeight);

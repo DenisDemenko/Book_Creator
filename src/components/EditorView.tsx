@@ -13,6 +13,7 @@ import { useSunAccentVars } from '../utils/sunAccent';
 import { PageColumn } from './manuscriptEditor/PageColumn';
 import { PageRuler } from './manuscriptEditor/PageRuler';
 import { useRealBookPages } from '../utils/useRealBookPages';
+import { resolvePageGeometry, type PageGeometry } from '../utils/pageGeometry';
 import { computeContourPolygon } from '../utils/imageContour';
 import {
   markerStringToTiptapDoc,
@@ -600,21 +601,26 @@ export const EditorView: React.FC<EditorViewProps> = ({
     return (b.illustrations || []).find((i) => i.id === id)?.url;
   }, []);
 
+  /**
+   * Геометрія аркуша — з єдиного джерела (`utils/pageGeometry.ts`).
+   * Викликається через `bookRef`, як і решта опцій ProseMirror: сам
+   * компонент не має перемонтовувати розширення на кожну правку книги, тож
+   * замикання мусить читати АКТУАЛЬНУ книгу на момент виклику, а не ту, що
+   * була при створенні колбека.
+   */
+  const getPageGeometry = useCallback((): PageGeometry => {
+    return resolvePageGeometry(bookRef.current.layoutConfig);
+  }, []);
+
   /** Ширина текстового блоку сторінки (мм) — формат мінус внутрішнє/зовнішнє поле. Основа для дефолтної половини ширини картинки та межі її масштабування. */
   const getPageContentWidthMm = useCallback((): number => {
-    const layout = bookRef.current.layoutConfig;
-    const margins = layout?.margins;
-    const pageWidthMm = layout?.pageWidthMm || 152;
-    return pageWidthMm - (margins?.insideMm || 0) - (margins?.outsideMm || 0);
-  }, []);
+    return getPageGeometry().contentWidthMm;
+  }, [getPageGeometry]);
 
   /** Висота текстового блоку сторінки (мм) — формат мінус верхнє/нижнє поле. Бюджет висоти для живих розривів сторінок (PaginationPlugin). */
   const getPageContentHeightMm = useCallback((): number => {
-    const layout = bookRef.current.layoutConfig;
-    const margins = layout?.margins;
-    const pageHeightMm = layout?.pageHeightMm || 229;
-    return pageHeightMm - (margins?.topMm || 0) - (margins?.bottomMm || 0);
-  }, []);
+    return getPageGeometry().contentHeightMm;
+  }, [getPageGeometry]);
 
   /**
    * Підпис, що повторюється зверху кожного аркуша: номер глави та її назва.
@@ -631,9 +637,9 @@ export const EditorView: React.FC<EditorViewProps> = ({
   }, []);
 
   const getVerticalMarginsMm = useCallback(() => {
-    const margins = bookRef.current.layoutConfig?.margins;
-    return { topMm: margins?.topMm || 0, bottomMm: margins?.bottomMm || 0 };
-  }, []);
+    const { topMm, bottomMm } = getPageGeometry().margins;
+    return { topMm, bottomMm };
+  }, [getPageGeometry]);
 
   // --- «Проаналізувати фото і згенерувати AI текст книги» (правий клік на зображенні) ---
   /** Меню вибору кількості абзаців (1/2/3), відкрите правим кліком по фото. `getPos` — жива функція позиції вузла зображення (WrappedImageNode.tsx). */
