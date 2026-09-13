@@ -1,6 +1,7 @@
 // Text diff calculation, QR code generation, and document layout utilities
 import QRCode from 'qrcode';
 import { Book, Chapter, Section, Footnote, QRTag, TOCLeaderStyle, TOCNumberingStyle, PdfChapterLayout, PdfFrameObject, TOCConfig } from '../types';
+import { imageMarkerRegexp, resolveImageMarker } from './imageMarkers';
 
 export function calculateWordCount(text: string): number {
   if (!text) return 0;
@@ -459,17 +460,12 @@ function renderImageMarkers(text: string, book: Book): string {
   if (!text || !text.includes('[IMG:')) return text;
 
   return text.replace(
-    /\[IMG:\s*([^\s\]"]+)\s*(?:"([^"]*)")?(?:\s+wrap=(\w+))?(?:\s+width=([\d.]+)mm)?(?:\s+height=([\d.]+)mm)?(?:\s+shape="([^"]*)")?\]/g,
+    imageMarkerRegexp(),
     (full, id: string, caption?: string, wrap?: string, widthMm?: string, heightMm?: string, shape?: string) => {
-      let url: string | undefined;
-
-      if (id === 'cover-front') {
-        url = book.coverConfig?.frontArtUrl;
-      } else if (id.startsWith('char-')) {
-        url = book.characters.find((c) => c.id === id.slice('char-'.length))?.avatarUrl;
-      } else {
-        url = (book.illustrations || []).find((i) => i.id === id)?.url;
-      }
+      // Розбір і розвʼязання id — спільні з серверною версткою
+      // (`utils/imageMarkers.ts`, запис #169): доки правил було два набори,
+      // PDF друкував маркер голим текстом, а браузер малював картинку.
+      const url = resolveImageMarker(id, book)?.url;
 
       if (!url) return full;
       const cap = (caption || '').trim();

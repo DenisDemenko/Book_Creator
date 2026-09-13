@@ -18,7 +18,7 @@ import { Book, BookIllustration, Chapter, CourseMaterial, Model3DFormat, UserRol
 import { hasPermission } from '../utils/rbac';
 import { parseManuscriptText } from '../utils/manuscriptImport';
 import { decodeTextBuffer } from '../utils/textEncoding';
-import { DOCX_IMAGE_SRC_PREFIX, htmlToManuscript } from '../utils/docxManuscript';
+import { DOCX_IMAGE_SRC_PREFIX, createDocxImageSlots, htmlToManuscript } from '../utils/docxManuscript';
 import { useLanguage } from '../i18n/LanguageContext';
 
 interface ImportMaterialsWizardModalProps {
@@ -71,15 +71,20 @@ async function readManuscriptFile(
 
     // Картинки збираємо в масив, а в HTML ставимо короткий плейсхолдер: на
     // реальній книзі base64-у-HTML дає 52 МБ рядка (див. utils/docxManuscript.ts).
-    const collected: { contentType: string; base64: string }[] = [];
+    //
+    // Місце резервується ДО `image.read`: відповіді на 42 картинки приходять
+    // не в тому порядку, у якому їх запитали, і старий `collected.push` із
+    // індексом від `collected.length` переплутував картинки між маркерами (а
+    // подекуди й зовсім валив вбудову в PDF). Причина — у шапці
+    // `createDocxImageSlots`.
+    const slots = createDocxImageSlots(onImagesRead);
     const result = await mammoth.convertToHtml(
       { arrayBuffer },
       {
         convertImage: mammoth.images.imgElement((image: any) => {
-          const index = collected.length;
+          const index = slots.reserve();
           return image.read('base64').then((data: string) => {
-            collected.push({ contentType: image.contentType, base64: data });
-            onImagesRead?.(collected.length);
+            slots.put(index, { contentType: image.contentType, base64: data });
             return { src: `${DOCX_IMAGE_SRC_PREFIX}${index}` };
           });
         }),
@@ -90,7 +95,7 @@ async function readManuscriptFile(
     const docxImages: PendingDocxImage[] = parsed.images
       .map((img) => {
         const index = Number(img.id.slice('docx-img-'.length));
-        const found = collected[index];
+        const found = slots.get(index);
         if (!found) return null;
         const bytes = Math.round((found.base64.length * 3) / 4);
         return {

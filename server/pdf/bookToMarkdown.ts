@@ -24,6 +24,7 @@
  */
 
 import type { Book, CourseConfig } from '../../src/types';
+import { collectImageMarkerIds, resolveImageMarker, imageMarkerRegexp } from '../../src/utils/imageMarkers';
 
 export interface MarkdownImage {
   /** Рядок, який рушій замінить на шлях до файлу. Унікальний у межах документа. */
@@ -43,6 +44,13 @@ export interface MarkdownDocument {
     author?: string;
     lang: string;
   };
+  /**
+   * id маркерів `[IMG: …]`, для яких у книзі немає картинки (її прибрали з
+   * галереї, а посилання в тексті лишилось). Маркер у PDF не друкується —
+   * це наша службова конвенція, — але й мовчати про втрату не можна: рушії
+   * докладають це до `notesUk`, який автор бачить у звіті публікації.
+   */
+  unresolvedMarkers: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -166,6 +174,56 @@ export function bookToMarkdown(book: Book, options: BookToMarkdownOptions = {}):
 
   const illustrations = withImages ? book.illustrations || [] : [];
 
+  /*
+    МІСЦЕ КАРТИНКИ ЗБЕРІГАЄ РУКОПИС — маркером `[IMG: id "підпис" wrap=…]`
+    (`utils/imageMarkers.ts`). Доти тут стояло «точного місця вставки книга
+    не зберігає», і картинки всіх глав ізїжджались у кінець глави, а самі
+    маркери друкувались як текст (запис #169: 39 сторінок із 373).
+
+    Сумісність: книги, написані до появи маркерів, мають порожній
+    `referenced` — для них працює старий шлях, ілюстрації глави в її кінці.
+  */
+  const referenced = new Set<string>();
+  if (withImages) {
+    for (const chapter of chapters) {
+      for (const section of chapter.sections || []) {
+        for (const id of collectImageMarkerIds(String(section.content || ''))) referenced.add(id);
+      }
+    }
+  }
+
+  const unresolvedMarkers: string[] = [];
+
+  /**
+   * Маркери в тексті → справжні картинки на своєму місці.
+   *
+   * Маркер ніколи не лишається текстом: це наша службова конвенція, а не
+   * слово автора. Невідомий id прибирається з тексту й називається окремо
+   * (`unresolvedMarkers`) — друкувати замість картинки `[IMG: …]` означало б
+   * покласти у книгу, яку вже купили, рядок нашого службового синтаксису.
+   */
+  const markersToMarkdown = (content: string): string => {
+    const source = String(content || '');
+    if (!source.includes('[IMG:')) return source;
+    // Книга верстається без ілюстрацій (уривок, чернетка): маркер усе одно
+    // не має права лишитись у тексті — він наш службовий, не авторський.
+    if (!withImages) return source.replace(imageMarkerRegexp(), ' ');
+
+    return source.replace(imageMarkerRegexp(), (_full, id: string, caption?: string) => {
+      const target = resolveImageMarker(id, book);
+      if (!target) {
+        unresolvedMarkers.push(id);
+        return ' ';
+      }
+      const placeholder = `nova-image-${images.length + 1}`;
+      const captionUk = String(caption || '').trim() || String(target.caption || '').trim();
+      images.push({ placeholder, url: target.url, captionUk });
+      // Підпис в alt не має містити `]` чи `[` — інакше markdown-розмітка
+      // зламається і картинка стане звичайним текстом.
+      return `\n\n![${headingText(captionUk)}](${placeholder})\n\n`;
+    });
+  };
+
   for (const chapter of chapters) {
     out.push(`# ${headingText(chapter.title) || 'Розділ'}`);
 
@@ -176,15 +234,16 @@ export function bookToMarkdown(book: Book, options: BookToMarkdownOptions = {}):
     for (const section of sections) {
       const title = headingText(section.title);
       if (title) out.push(`## ${title}`);
-      const body = htmlToMarkdown(section.content || '');
+      const body = htmlToMarkdown(markersToMarkdown(section.content || ''));
       if (body) out.push(body);
     }
 
     // Ілюстрації розділу — в кінці розділу, а не всередині тексту.
-    // Точного місця вставки книга не зберігає (у `BookIllustration` є лише
-    // `chapterId`), і вигадувати його означало б розривати абзац навмання.
+    // Це сумісний шлях для книг без маркерів: ті, у яких місце картинки
+    // записане в рукописі, уже надруковані на своєму місці вище.
     for (const ill of illustrations) {
       if (ill.chapterId !== chapter.id) continue;
+      if (ill.id && referenced.has(ill.id)) continue;
       const placeholder = `nova-image-${images.length + 1}`;
       images.push({
         placeholder,
@@ -196,7 +255,25 @@ export function bookToMarkdown(book: Book, options: BookToMarkdownOptions = {}):
     }
   }
 
-  return { markdown: out.join('\n\n').replace(/\n{3,}/g, '\n\n').trim() + '\n', images, meta };
+  return {
+    markdown: out.join('\n\n').replace(/\n{3,}/g, '\n\n').trim() + '\n',
+    images,
+    meta,
+    unresolvedMarkers,
+  };
+}
+
+/**
+ * Примітка про маркери, за якими не знайшлось картинки. Спільна для рушіїв
+ * Chromium і pandoc — щоб два рушії не розповідали про ту саму втрату
+ * різними словами (власна верстка говорить про це сама, у `pdfRenderer.ts`).
+ */
+export function unresolvedMarkersNoteUk(ids: string[]): string | null {
+  if (!ids || ids.length === 0) return null;
+  return (
+    `Картинок за маркером не знайдено: ${ids.join(', ')}. ` +
+    'У тексті стояло посилання на ілюстрацію, якої немає в галереї книги, — місце лишилось без малюнка.'
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -300,5 +377,13 @@ export function courseToMarkdown(
     }
   }
 
-  return { markdown: out.join('\n\n').replace(/\n{3,}/g, '\n\n').trim() + '\n', images, meta };
+  return {
+    markdown: out.join('\n\n').replace(/\n{3,}/g, '\n\n').trim() + '\n',
+    images,
+    meta,
+    // У курсі маркерів `[IMG: …]` не буває: вміст уроку — це фрагмент
+    // рукопису, а не його сторінка. Порожній список тут — правда, а не
+    // заглушка.
+    unresolvedMarkers: [],
+  };
 }

@@ -270,5 +270,163 @@ console.log('\nПорожні випадки:');
   t('книга без глав не падає', empty.pageCount >= 1, String(empty.pageCount));
 }
 
+console.log('\nМаркери зображень: картинка стає на своє місце в рукописі (#169)');
+{
+  /*
+    Живий прогін книги, зібраної з .docx (#159), показав на проді ось що: у
+    надрукованому PDF маркер стояв голим текстом на 39 сторінках із 373 —
+    `[IMG: docx-img-3 "Санскрит7" wrap=left]`, — а всі 42 ілюстрації лежали
+    купою в кінці першого розділу. Автор поставив картинки у текст, і саме
+    там вони мусять бути надруковані.
+
+    Перевіряється не «вийшов PDF», а МІСЦЕ: на якій сторінці лежить
+    зображення і чи не лишився в тексті сам маркер.
+  */
+  const { PDFDocument: PdfLib, PDFName, PDFDict } = await import('pdf-lib');
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const path = await import('node:path');
+  const { pathToFileURL } = await import('node:url');
+  pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
+    path.resolve('node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs')
+  ).href;
+
+  const tinyPng =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+
+  /** Номери сторінок (1-based), на яких лежить хоч одне зображення. */
+  const pagesWithImages = async (bytes: Uint8Array): Promise<number[]> => {
+    const doc = await PdfLib.load(bytes);
+    const out: number[] = [];
+    doc.getPages().forEach((page, i) => {
+      const res = (page as unknown as { node: { Resources(): unknown } }).node.Resources() as
+        | { lookup(name: unknown, type: unknown): unknown }
+        | undefined;
+      if (!res) return;
+      const xo = res.lookup(PDFName.of('XObject'), PDFDict) as
+        | { entries?: () => Array<[unknown, unknown]> }
+        | undefined;
+      if (!xo?.entries) return;
+      for (const [key, ref] of xo.entries()) {
+        const obj = (res as unknown as { context: { lookup(r: unknown): { dict?: { get(n: unknown): unknown } } | undefined } })
+          .context.lookup(ref);
+        const subtype = String(obj?.dict?.get(PDFName.of('Subtype')) ?? '');
+        if (subtype === '/Image') {
+          out.push(i + 1);
+          return;
+        }
+        void key;
+      }
+    });
+    return out;
+  };
+
+  /** Весь текст документа одним рядком — маркер у ньому видно як є. */
+  const textOf = async (bytes: Uint8Array): Promise<string> => {
+    const task = pdfjs.getDocument({
+      data: bytes.slice(),
+      useWorkerFetch: false,
+      standardFontDataUrl: `${pathToFileURL(path.resolve('node_modules/pdfjs-dist/standard_fonts')).href}/`,
+    } as never);
+    const doc = (await task.promise) as { numPages: number; getPage(n: number): Promise<any> };
+    let all = '';
+    for (let p = 1; p <= doc.numPages; p += 1) {
+      const page = await doc.getPage(p);
+      const content = await page.getTextContent();
+      all += content.items.map((i: { str: string }) => i.str).join('') + '\n';
+    }
+    return all;
+  };
+
+  const src = await import('../server/pdf/pdfFromBook');
+  const makeBook = (illustrations: any[]) =>
+    ({
+      id: 'bk-1',
+      title: 'Книга з маркерами',
+      author: 'Автор',
+      chapters: [
+        {
+          id: 'c1',
+          title: 'Розділ перший',
+          order: 1,
+          sections: [
+            {
+              id: 's1',
+              order: 1,
+              // Маркер стоїть у тексті, а не окремим абзацом у кінці: саме так
+              // його пише і конвертер .docx, і кнопка «вставити з галереї».
+              content: 'Перед картинкою.\n\n[IMG: ill-1 "Підпис з рукопису" wrap=left]\n\n' + 'Довгий текст після. '.repeat(400),
+            },
+          ],
+        },
+      ],
+      illustrations,
+      characters: [],
+      coverConfig: {},
+      layoutConfig: undefined,
+    }) as never;
+
+  const withMarker = await renderer.renderBookPdf(
+    src.bookToPdfInput(makeBook([{ id: 'ill-1', chapterId: 'c1', url: tinyPng, caption: 'Підпис з книги' }]))
+  );
+  const markerPages = await pagesWithImages(withMarker.bytes);
+  t('картинка з маркера є в PDF', markerPages.length > 0, JSON.stringify(markerPages));
+  t('вона стоїть на початку тексту, а не купою в кінці',
+    markerPages[0] === 2 && markerPages[markerPages.length - 1] === 2,
+    `сторінки: ${JSON.stringify(markerPages)}, у книзі ${withMarker.pageCount} стор.`);
+
+  const markerText = await textOf(withMarker.bytes);
+  t('маркер не надруковано як текст', !markerText.includes('[IMG:'), markerText.slice(0, 120));
+  t('текст до й після маркера не загублено',
+    markerText.includes('Перед картинкою') && markerText.includes('Довгий текст після'),
+    markerText.slice(0, 160));
+  t('підпис із маркера надруковано під картинкою', markerText.includes('Підпис з рукопису'));
+  t('приміток про втрату немає', withMarker.notesUk.length === 0, JSON.stringify(withMarker.notesUk));
+
+  /*
+    Сумісний шлях: книга, написана до появи маркерів, місця картинки не має
+    взагалі — для неї ілюстрація й далі йде в кінець глави, і саме тому
+    правило «маркер є — у кінець не дублюємо» перевіряється окремо.
+  */
+  const withoutMarkers = await renderer.renderBookPdf(
+    src.bookToPdfInput(
+      makeBook([{ id: 'ill-bez', chapterId: 'c1', url: tinyPng, caption: 'Без маркера' }])
+    )
+  );
+  const legacyPages = await pagesWithImages(withoutMarkers.bytes);
+  t('ілюстрація без маркера йде сумісним шляхом — у кінець глави',
+    legacyPages.length > 0 && legacyPages[legacyPages.length - 1] > 2,
+    JSON.stringify(legacyPages));
+
+  const both = await renderer.renderBookPdf(
+    src.bookToPdfInput(
+      makeBook([
+        { id: 'ill-1', chapterId: 'c1', url: tinyPng, caption: 'Підпис з книги' },
+        { id: 'ill-bez', chapterId: 'c1', url: tinyPng, caption: 'Без маркера' },
+      ])
+    )
+  );
+  const bothPages = await pagesWithImages(both.bytes);
+  t('картинка з маркером не друкується двічі',
+    bothPages.filter((p) => p === 2).length === 1 && bothPages[bothPages.length - 1] > 2,
+    JSON.stringify(bothPages));
+
+  /*
+    Маркер, за яким картинки вже немає (ілюстрацію прибрали з галереї).
+    Друкувати `[IMG: …]` замість малюнка не можна — це наш службовий
+    синтаксис, а не текст автора. Але й мовчати про втрату не можна.
+  */
+  const lostBook = makeBook([]) as {
+    chapters: Array<{ sections: Array<{ content: string }> }>;
+  };
+  lostBook.chapters[0].sections[0].content = 'Текст.\n\n[IMG: znykla-illyustratsiya ""]\n\nЩе текст.';
+  const lostOut = await renderer.renderBookPdf(src.bookToPdfInput(lostBook as never));
+  const lostText = await textOf(lostOut.bytes);
+  t('зниклий id не друкується як маркер', !lostText.includes('[IMG:'), lostText.slice(0, 120));
+  t('про зниклу картинку сказано в примітках',
+    lostOut.notesUk.some((n) => n.includes('znykla-illyustratsiya')),
+    JSON.stringify(lostOut.notesUk));
+  t('решта тексту на місці', lostText.includes('Ще текст'), lostText.slice(0, 120));
+}
+
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);
 if (fail > 0) process.exit(1);

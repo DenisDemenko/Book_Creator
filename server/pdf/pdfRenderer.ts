@@ -27,6 +27,7 @@ import {
   type PdfLayoutSpec,
 } from './pdfTypes';
 import { loadImageBytes } from '../media/imageBytes';
+import { collectImageMarkerIds, splitImageMarkers } from '../../src/utils/imageMarkers';
 
 export const FONT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fonts');
 
@@ -314,9 +315,18 @@ export async function renderBookPdf(
     const label = captionText || ill.url;
     let embedded: Awaited<ReturnType<typeof doc.embedPng>> | null = null;
     let failureUk = '';
+    /**
+     * Перші байти файлу — короткий підпис, за яким видно, ЩО саме не
+     * вбудувалось. Додано після живого прогону #169: причина «SOI not found
+     * in JPEG» на книзі, де всі 42 картинки — справжні JPEG і PNG, залишала
+     * відкритим питання, який саме файл дійшов до верстальника. Без підпису
+     * це неможливо з'ясувати ні з PDF, ні зі звіту.
+     */
+    let headBytes = '';
 
     try {
       const { mimeType, bytes } = await loadImageCached(ill.url, ownerId, context?.imageCache);
+      headBytes = [...bytes.subarray(0, 4)].map((b) => b.toString(16).padStart(2, '0')).join(' ');
       if (/png/i.test(mimeType)) {
         embedded = await doc.embedPng(bytes);
       } else if (/jpe?g/i.test(mimeType)) {
@@ -334,7 +344,10 @@ export async function renderBookPdf(
     }
 
     if (!embedded) {
-      notesUk.push(`Ілюстрація «${label}» не вставлена: ${failureUk}.`);
+      notesUk.push(
+        `Ілюстрація «${label}» не вставлена: ${failureUk}.` +
+          (headBytes ? ` Початок файлу: ${headBytes}.` : '')
+      );
       // Підпис лишається текстом — читач бачить, що тут малась бути
       // ілюстрація, а не порожнє місце без пояснення.
       if (captionText) {
@@ -372,13 +385,59 @@ export async function renderBookPdf(
   };
 
   /**
+   * Картинка, на яку вказав маркер `[IMG: id …]` у тексті.
+   *
+   * ДО #169 ТУТ КАРТИНОК НЕ БУЛО ВЗАГАЛІ. Маркер лишався звичайним текстом
+   * і друкувався як `[IMG: docx-img-3 "Санскрит7" wrap=left]`, а всі
+   * зображення глави скидались у її кінці — на книзі з .docx це дало 39
+   * сторінок із голим маркером замість малюнка і 42 картинки купою після
+   * вступу. Тепер картинка стоїть там, де її поставив автор.
+   *
+   * Невідомий id (ілюстрацію прибрали з галереї, а маркер лишився) — не
+   * привід мовчати: причина йде в `notesUk`, який автор бачить у звіті
+   * публікації ДО того, як відкриє файл. Сам маркер у книзі не друкується:
+   * `[IMG: …]` — наша службова конвенція, а не текст автора.
+   */
+  const drawMarkerImage = async (marker: { id: string; caption: string }): Promise<void> => {
+    const target = book.markerImages?.[marker.id];
+    if (!target) {
+      notesUk.push(
+        `Картинка «${marker.id}» з маркера не вставлена: у книзі немає ілюстрації з таким id — ` +
+          'схоже, її прибрали з галереї, а посилання в тексті лишилось.'
+      );
+      return;
+    }
+    await drawIllustration({ url: target.url, caption: marker.caption || target.caption || '' });
+  };
+
+  /**
+   * Абзац, у якому може стояти маркер. Маркер зазвичай займає абзац цілком
+   * (так його пише і редактор, і конвертер .docx), але буває й усередині
+   * рядка — тому текст до і після нього малюється як окремі абзаци, а не
+   * викидається.
+   */
+  const drawParagraphWithImages = async (paragraph: string, indentFirst: boolean): Promise<void> => {
+    const segments = splitImageMarkers(paragraph);
+    let first = indentFirst;
+    for (const segment of segments) {
+      if (segment.kind === 'text') {
+        drawParagraph(segment.text.replace(/\s+/g, ' ').trim(), first);
+      } else {
+        await drawMarkerImage(segment.marker);
+      }
+      // Червоний рядок належить початку абзацу, а після картинки це вже не
+      // початок — навіть якщо текст перед нею був порожній.
+      first = false;
+    }
+  };
+
+  /**
    * Скільки рядків тексту мусить лишитись під заголовком на тій самій
    * сторінці. Два — мінімум, за яким заголовок перестає бути «висячим»:
    * заголовок в останньому рядку сторінки, а текст під ним — на наступній,
    * це класичний дефект набору, і жодне число сторінок його не викриє.
    */
   const WIDOW_LINES = 2;
-
   const drawHeading = (text: string, style: HeadingStyle) => {
     const font = pick(style.font, true);
     const label = style.uppercase ? text.toUpperCase() : text;
@@ -427,6 +486,18 @@ export async function renderBookPdf(
   }
 
   // --- тіло --------------------------------------------------------------
+  /*
+    Картинки, на які в тексті книги Є маркер. Вони вже стоять на своєму
+    місці — другим разом малювати їх не можна, інакше та сама ілюстрація
+    зʼявилась би в книзі двічі: у тексті й у кінці глави.
+  */
+  const markerIds = new Set<string>();
+  for (const chapter of book.chapters) {
+    for (const section of chapter.sections) {
+      for (const id of collectImageMarkerIds(section.content)) markerIds.add(id);
+    }
+  }
+
   for (const chapter of book.chapters) {
     if (spec.chapterStartsNewPage && (bodyStarted || !spec.titlePage.show)) {
       if (bodyStarted) newPage();
@@ -441,18 +512,18 @@ export async function renderBookPdf(
     for (const section of chapter.sections) {
       if (section.title) drawHeading(section.title, spec.sectionTitle);
       const paragraphs = toParagraphs(section.content);
-      paragraphs.forEach((paragraph, index) => {
-        drawParagraph(paragraph, spec.paragraphIndent > 0 && index > 0);
-      });
+      for (let index = 0; index < paragraphs.length; index += 1) {
+        await drawParagraphWithImages(paragraphs[index], spec.paragraphIndent > 0 && index > 0);
+      }
     }
 
-    // Ілюстрації глави — у кінці, після всіх розділів. Книга не зберігає
-    // точнішого місця вставки (пояснено в `bookToMarkdown.ts` і в
-    // `PdfBookInput.illustrations`); той самий порядок, що й у Chromium і
-    // pandoc, тож три рушії дають ту саму книгу з тими самими картинками на
-    // тому самому місці, а не три різні.
+    // Ілюстрації глави — у кінці, після всіх розділів. Це СУМІСНИЙ шлях:
+    // так поводяться книги, написані до появи маркерів `[IMG: …]`, де
+    // точного місця картинки в рукописі справді немає. Ті, у яких місце є,
+    // уже надруковані в тексті (`drawMarkerImage`) і сюди не потрапляють.
     for (const ill of book.illustrations || []) {
       if (!chapter.id || ill.chapterId !== chapter.id) continue;
+      if (ill.id && markerIds.has(ill.id)) continue;
       await drawIllustration(ill);
     }
   }

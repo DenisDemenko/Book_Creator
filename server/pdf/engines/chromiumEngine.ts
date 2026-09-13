@@ -17,7 +17,7 @@
 import { PDFDocument } from 'pdf-lib';
 import fs from 'node:fs';
 import { buildBookHtml, type BookHtmlTheme } from '../html/bookHtml';
-import { bookToMarkdown } from '../bookToMarkdown';
+import { bookToMarkdown, unresolvedMarkersNoteUk } from '../bookToMarkdown';
 import { loadImageBytes } from '../../media/imageBytes';
 import { PAGE_SIZES } from '../pdfTypes';
 import {
@@ -199,6 +199,8 @@ export const chromiumEngine: PdfEngine = {
 
     const notesUk: string[] = [];
     const doc = bookToMarkdown(request.book as never, { frontmatter: false });
+    const markerNote = unresolvedMarkersNoteUk(doc.unresolvedMarkers);
+    if (markerNote) notesUk.push(markerNote);
     const markdown = await embedImages(doc.markdown, doc.images, request.ownerId, notesUk);
 
     const spec = request.spec || {};

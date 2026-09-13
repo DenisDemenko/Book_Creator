@@ -34,6 +34,55 @@ export interface DocxManuscript {
 /** Префікс плейсхолдера, який `convertImage` ставить замість справжнього src. */
 export const DOCX_IMAGE_SRC_PREFIX = 'docx-image://';
 
+/** Байти однієї картинки з .docx — те, що `image.read('base64')` віддає разом із типом. */
+export interface DocxImageBytes {
+  contentType: string;
+  base64: string;
+}
+
+/**
+ * Сховище картинок .docx ЗА ІНДЕКСОМ ПЛЕЙСХОЛДЕРА — стійке до порядку відповідей.
+ *
+ * НАВІЩО ОКРЕМА РІЧ, А НЕ `collected.push`. `convertImage` викликається
+ * синхронно, а `image.read('base64')` повертає проміс: на книзі з 42
+ * картинками відповіді приходять НЕ в тому порядку, у якому їх запитали
+ * (40 з них — по кілька мегабайтів). Доти індекс брався як
+ * `collected.length` ДО `push`, тож дві картинки могли отримати один індекс,
+ * а масив зсувався: плейсхолдер `docx-img-27` показував на чужі байти.
+ * Наслідок у PDF — не та картинка на місці, а подекуди й зовсім без
+ * картинки: верстальник дістає PNG там, де оголошено JPEG, і відмовляється
+ * його вбудовувати («SOI not found in JPEG», живий прогін 13.09.2026).
+ *
+ * Тому місце РЕЗЕРВУЄТЬСЯ синхронно (`reserve`), а байти кладуться за цим
+ * самим номером, коли прийдуть (`put`) — порядок відповідей більше нічого
+ * не значить. Функція чиста, тож перевіряється тестом
+ * (`scripts/test-docxManuscript.mts`) без браузера й без .docx.
+ */
+export function createDocxImageSlots(onFilled?: (count: number) => void) {
+  const slots = new Map<number, DocxImageBytes>();
+  let nextIndex = 0;
+
+  return {
+    /** Місце під наступний плейсхолдер. Викликається ДО `image.read`. */
+    reserve(): number {
+      const index = nextIndex;
+      nextIndex += 1;
+      return index;
+    },
+    /** Байти, коли вони прийшли. Той самий номер, що від `reserve`. */
+    put(index: number, value: DocxImageBytes): void {
+      slots.set(index, value);
+      onFilled?.(slots.size);
+    },
+    get(index: number): DocxImageBytes | undefined {
+      return slots.get(index);
+    },
+    get size(): number {
+      return slots.size;
+    },
+  };
+}
+
 /**
  * Підпис для маркера не має містити лапок і `]` — інакше зламався б розбір
  * маркера в `utils/manuscriptDoc.ts`.

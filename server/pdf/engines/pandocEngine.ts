@@ -26,7 +26,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PDFDocument } from 'pdf-lib';
-import { bookToMarkdown } from '../bookToMarkdown';
+import { bookToMarkdown, unresolvedMarkersNoteUk } from '../bookToMarkdown';
 import { extensionForMime, loadImageBytes } from '../../media/imageBytes';
 import { PAGE_SIZES } from '../pdfTypes';
 import {
@@ -214,6 +214,8 @@ export const pandocEngine: PdfEngine = {
 
     try {
       const doc = bookToMarkdown(request.book as never, { frontmatter: true });
+      const markerNote = unresolvedMarkersNoteUk(doc.unresolvedMarkers);
+      if (markerNote) notesUk.push(markerNote);
 
       // Ілюстрації — файлами поруч із рукописом: pandoc читає їх з диска,
       // а `data:`-URL у Markdown він не розуміє взагалі.

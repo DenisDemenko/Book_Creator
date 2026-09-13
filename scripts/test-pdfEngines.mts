@@ -24,7 +24,9 @@ const t = (n: string, c: boolean, e = '') => {
   console.log(`${c ? '  ✓' : '  ✗'} ${n}${e ? ' — ' + e : ''}`);
 };
 
-const { htmlToMarkdown, bookToMarkdown, courseToMarkdown } = await import('../server/pdf/bookToMarkdown');
+const { htmlToMarkdown, bookToMarkdown, courseToMarkdown, unresolvedMarkersNoteUk } = await import(
+  '../server/pdf/bookToMarkdown'
+);
 const { buildBookHtml, markdownToHtmlBody, escapeHtml } = await import('../server/pdf/html/bookHtml');
 const registry = await import('../server/pdf/engines/registry');
 const { novaEngine } = await import('../server/pdf/engines/novaEngine');
@@ -103,6 +105,79 @@ const book: any = {
   // Лапки в назві не мають зламати YAML.
   const quoted = bookToMarkdown({ ...book, title: 'Книга "у лапках": том 2' } as any, { frontmatter: true });
   t('лапки в назві екрановані для YAML', quoted.markdown.includes('title: "Книга \\"у лапках\\": том 2"'));
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nМаркери зображень у Markdown: картинка на своєму місці (#169)');
+{
+  /*
+    Доти `bookToMarkdown` додавав ілюстрації ЛИШЕ в кінець глави, а маркер
+    `[IMG: …]` у тексті лишався текстом — і зовнішні рушії друкували його
+    голим рядком (на проді: 39 сторінок із 373). Місце картинки зберігає
+    рукопис, і саме його має поважати перетворення.
+  */
+  const markerBook: any = {
+    id: 'b2',
+    title: 'Книга з маркером',
+    author: 'Автор',
+    chapters: [
+      {
+        id: 'c1',
+        title: 'Розділ перший',
+        order: 1,
+        sections: [
+          {
+            id: 's1',
+            order: 1,
+            content:
+              '<p>Перед картинкою.</p>\n\n[IMG: ill-1 "Підпис із рукопису" wrap=left]\n\n<p>Після картинки.</p>',
+          },
+        ],
+      },
+    ],
+    illustrations: [
+      { id: 'ill-1', chapterId: 'c1', url: 'data:image/png;base64,AAA', caption: 'Підпис із книги' },
+      { id: 'ill-2', chapterId: 'c1', url: 'data:image/png;base64,BBB', caption: 'Без маркера' },
+    ],
+  };
+
+  const doc = bookToMarkdown(markerBook, {});
+  t('маркер став картинкою, а не текстом', doc.markdown.includes('![Підпис із рукопису](nova-image-1)'), doc.markdown.slice(0, 200));
+  t('у Markdown не лишилось самого маркера', !doc.markdown.includes('[IMG:'));
+  t('підпис узято з маркера, а не з книги', !doc.markdown.includes('![Підпис із книги]'));
+  t('картинка стоїть між текстом до і після',
+    doc.markdown.indexOf('Перед картинкою') < doc.markdown.indexOf('nova-image-1') &&
+      doc.markdown.indexOf('nova-image-1') < doc.markdown.indexOf('Після картинки'),
+    doc.markdown.replace(/\s+/g, ' ').slice(0, 180));
+  t('у переліку лише дві картинки: за маркером і сумісна',
+    doc.images.length === 2, String(doc.images.length));
+  t('перша картинка — з маркера', doc.images[0].url.endsWith('AAA'), doc.images[0].url);
+  t('ілюстрація без маркера йде в кінець глави',
+    doc.markdown.indexOf('nova-image-2') > doc.markdown.indexOf('Після картинки'), doc.markdown.slice(-80));
+  t('про невставлені маркери нічого не сказано', doc.unresolvedMarkers.length === 0);
+
+  const withoutImages = bookToMarkdown(markerBook, { withImages: false });
+  t('без ілюстрацій маркер не друкується текстом', !withoutImages.markdown.includes('[IMG:'));
+  t('без ілюстрацій плейсхолдерів немає', !withoutImages.markdown.includes('nova-image'));
+
+  // Маркер, за яким картинки вже немає: у текст він не потрапляє, але й не
+  // зникає безслідно — рушій скаже про це в notesUk.
+  const lostBook: any = {
+    ...markerBook,
+    chapters: [
+      {
+        ...markerBook.chapters[0],
+        sections: [{ ...markerBook.chapters[0].sections[0], content: '<p>Текст.</p>\n\n[IMG: znykla ""]\n\n<p>Ще.</p>' }],
+      },
+    ],
+  };
+  const lost = bookToMarkdown(lostBook, {});
+  t('зниклий id названо окремо', lost.unresolvedMarkers.join(',') === 'znykla', lost.unresolvedMarkers.join(','));
+  t('зниклий маркер у Markdown не надруковано', !lost.markdown.includes('[IMG:'), lost.markdown);
+  t('текст навколо зниклого маркера на місці',
+    lost.markdown.includes('Текст.') && lost.markdown.includes('Ще.'), lost.markdown);
+  t('примітка про зниклий маркер існує', !!unresolvedMarkersNoteUk(lost.unresolvedMarkers));
+  t('без зниклих маркерів примітки немає', unresolvedMarkersNoteUk([]) === null);
 }
 
 // ---------------------------------------------------------------------------
@@ -398,6 +473,77 @@ console.log('\nІлюстрації: розмір, підпис і чесніс�
     kind: 'book',
   });
   t('дійсний PNG вставляється без приміток', embedded.notesUk.length === 0, JSON.stringify(embedded.notesUk));
+
+  /*
+    ЗАЯВЛЕНИЙ ТИП МОЖЕ БРЕХАТИ, І ЦЕ НЕ РІДКІСТЬ. Тип приходить із чужого
+    коду: із `data:`-URL його взяв mammoth (тип у документі Word), із
+    медіатеки — те, що надіслав браузер, з `http` — заголовок сервера. У
+    живому прогоні книги з .docx (13.09.2026) дві з 42 картинок не
+    вбудовувались зовсім: верстальник діставав PNG під іменем JPEG і падав з
+    «SOI not found in JPEG». Тепер формат визначають БАЙТИ.
+  */
+  const { imageMimeFromBytes, tightImageBytes, loadImageBytes } = await import('../server/media/imageBytes');
+  const pngBytes = Buffer.from(tinyPng.split(',')[1], 'base64');
+  t('підпис PNG визначено за байтами', imageMimeFromBytes(pngBytes) === 'image/png', String(imageMimeFromBytes(pngBytes)));
+  t('підпис JPEG визначено за байтами',
+    imageMimeFromBytes(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10])) === 'image/jpeg');
+  t('невідомий підпис не вигадується', imageMimeFromBytes(Buffer.from('не картинка')) === null, String(imageMimeFromBytes(Buffer.from('не картинка'))));
+
+  /*
+    ПАСТКА pdf-lib: `JpegEmbedder.for` робить `new DataView(imageData.buffer)` —
+    БЕЗ `byteOffset`. А `Buffer.from(base64)` для картинки, меншої за половину
+    пулу Node (64 КБ у Node 24), віддає вікно в СПІЛЬНОМУ пулі, і pdf-lib читає
+    початок пулу — тобто чужу память. Живий прогін #169: з 42 картинок
+    рукопису не вбудовувались рівно дві найменші (18 і 20 КБ), і НЕ ЩОРАЗУ —
+    залежно від того, куди лягла память. Перевіряємо обидва боки: зі зсувом
+    ламається, після `tightImageBytes` — ні.
+  */
+  const { PDFDocument: PdfLibForOffset } = await import('pdf-lib');
+  const pool = new Uint8Array(pngBytes.length + 64);
+  pool.set(pngBytes, 40);
+  const shifted = Buffer.from(pool.buffer, 40, pngBytes.length);
+  t('вікно зі зсувом справді має ненульовий byteOffset', shifted.byteOffset === 40, String(shifted.byteOffset));
+
+  let rawError = '';
+  try {
+    const doc = await PdfLibForOffset.create();
+    // `imageData.buffer` починається з нулів пулу, а не з байтів картинки —
+    // саме тому pdf-lib бачить не той файл.
+    await doc.embedJpg(shifted);
+  } catch (err) {
+    rawError = (err as Error).message;
+  }
+  t('pdf-lib ламається на вікні зі зсувом — це і є причина дефекту',
+    rawError.includes('SOI not found'), rawError);
+
+  const tight = tightImageBytes(shifted);
+  t('tightImageBytes дає нульовий зсув', tight.byteOffset === 0 && tight.buffer.byteLength === tight.byteLength,
+    `${tight.byteOffset} / ${tight.buffer.byteLength} проти ${tight.byteLength}`);
+  t('байти після нормалізації ті самі', Buffer.compare(tight, Buffer.from(pngBytes)) === 0);
+  {
+    const doc = await PdfLibForOffset.create();
+    await doc.embedPng(tight);
+    t('нормалізовані байти вбудовуються', true);
+  }
+
+  // Читання з data:-URL мусить віддавати байти з нульовим зсувом — незалежно
+  // від того, у пул вони лягли чи ні.
+  const fromUrl = await loadImageBytes(tinyPng, 'u1');
+  t('loadImageBytes віддає буфер із нульовим зсувом',
+    fromUrl.bytes.byteOffset === 0 && fromUrl.bytes.buffer.byteLength === fromUrl.bytes.byteLength,
+    `${fromUrl.bytes.byteOffset} / ${fromUrl.bytes.buffer.byteLength} проти ${fromUrl.bytes.byteLength}`);
+
+  const mislabelled = await registry.renderWithEngine('nova', {
+    book: {
+      ...(book as never as object),
+      illustrations: [
+        { id: 'i1', chapterId: 'c1', url: tinyPng.replace('image/png', 'image/jpeg'), caption: 'Брехливий тип' },
+      ],
+    } as never,
+    kind: 'book',
+  });
+  t('картинка з неправильним заявленим типом усе одно вбудовується',
+    mislabelled.notesUk.length === 0, JSON.stringify(mislabelled.notesUk));
 
   const badBytes = await registry.renderWithEngine('nova', {
     book: {

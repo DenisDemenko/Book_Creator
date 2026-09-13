@@ -10,6 +10,7 @@
  */
 
 import type { Book } from '../../src/types';
+import { buildMarkerImageMap } from '../../src/utils/imageMarkers';
 import {
   DEFAULT_LAYOUT_SPEC,
   mm,
@@ -74,10 +75,15 @@ export function bookToPdfInput(book: Book): PdfBookInput {
           .map((section) => ({ title: section.title, content: section.content || '' })),
       })),
     illustrations: (book.illustrations || []).map((ill) => ({
+      id: ill.id,
       chapterId: ill.chapterId,
       url: ill.url,
       caption: ill.caption,
     })),
+    // Місце картинки в книзі зберігає сам рукопис — маркером `[IMG: id …]`
+    // (`utils/imageMarkers.ts`). Рендерер отримує карту «id → картинка», бо
+    // сам він бачить лише плоский зріз книги, без героїв і обкладинки.
+    markerImages: buildMarkerImageMap(book),
   };
 }
 

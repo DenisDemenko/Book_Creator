@@ -12,7 +12,7 @@
  *   3. сумісність: рядок, який будує конвертер, справді розбирається тим
  *      самим парсером, що й у редакторі (`markerStringToTiptapDoc`).
  */
-import { htmlToManuscript, DOCX_IMAGE_SRC_PREFIX } from '../src/utils/docxManuscript.ts';
+import { htmlToManuscript, DOCX_IMAGE_SRC_PREFIX, createDocxImageSlots } from '../src/utils/docxManuscript.ts';
 import { markerStringToTiptapDoc } from '../src/utils/manuscriptDoc.ts';
 
 let passed = 0;
@@ -54,8 +54,47 @@ function main() {
     t('маркер стоїть окремим абзацом', /\n\n\[IMG: docx-img-0 "[^"]*"\]\n\n/.test(text));
   }
 
-  console.log('\nМаркер, який будує конвертер, розбирається редактором:');
+  console.log('\nМісця картинок .docx не залежать від порядку відповідей:');
   {
+    /*
+      Гонка, знайдена живим прогоном 13.09.2026 (#169). `convertImage`
+      викликається синхронно, а `image.read('base64')` відповідає промісом:
+      на книзі з 42 картинками (40 з них — по кілька мегабайтів) відповіді
+      приходять НЕ в тому порядку. Доти індекс брався як `collected.length`
+      ДО `push`, тож дві картинки могли дістати один індекс, масив зсувався —
+      і маркер `docx-img-27` показував на чужі байти. У PDF це виглядало як
+      «SOI not found in JPEG»: верстальник діставав PNG там, де оголошено JPEG.
+    */
+    const slots = createDocxImageSlots();
+    const seen: number[] = [];
+    const store = createDocxImageSlots((n) => seen.push(n));
+
+    const first = store.reserve();
+    const second = store.reserve();
+    const third = store.reserve();
+    t('місця видаються по порядку', [first, second, third].join(',') === '0,1,2', [first, second, third].join(','));
+
+    // Відповіді приходять у зворотному порядку — саме так і буває на практиці.
+    store.put(third, { contentType: 'image/png', base64: 'C' });
+    store.put(second, { contentType: 'image/jpeg', base64: 'B' });
+    store.put(first, { contentType: 'image/jpeg', base64: 'A' });
+
+    t('байти лежать за своїм номером, а не за порядком відповіді',
+      store.get(0)?.base64 === 'A' && store.get(1)?.base64 === 'B' && store.get(2)?.base64 === 'C',
+      [store.get(0)?.base64, store.get(1)?.base64, store.get(2)?.base64].join(','));
+    t('тип їде разом зі своїми байтами', store.get(2)?.contentType === 'image/png', String(store.get(2)?.contentType));
+    t('розмір — це кількість заповнених місць', store.size === 3, String(store.size));
+    t('лічильник прогресу росте на кожну картинку', seen.join(',') === '1,2,3', seen.join(','));
+    t('невідомий номер дає undefined, а не чужі байти', store.get(99) === undefined);
+
+    // Два плейсхолдери не мають права отримати один номер — саме це й
+    // зсувало масив у старій реалізації.
+    const a = slots.reserve();
+    const b = slots.reserve();
+    t('сусідні місця різні', a !== b, `${a},${b}`);
+  }
+
+  console.log('\nМаркер, який будує конвертер, розбирається редактором:');  {
     const html = `<p>Абзац.</p><p><img alt="Ілюстрація 1" src="${DOCX_IMAGE_SRC_PREFIX}0" /></p>`;
     const { images } = htmlToManuscript(html);
     const doc = markerStringToTiptapDoc(`[IMG: ${images[0].id} "${images[0].caption}"]`);
