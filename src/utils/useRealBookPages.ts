@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { Book, Chapter, Section } from '../types';
 import { BookPage, buildBookPages, renderSectionBlocksHtml } from './helpers';
-import { computeBreaks } from './pageBreaker';
+import { computeBreaksFromBounds } from './pageBreaker';
 import { PX_PER_MM } from './mmUnits';
 import { resolvePageGeometry } from './pageGeometry';
+import { bodyFontStack, paragraphCssVars, resolveParagraphGeometry } from './typography';
 
 /**
  * Реальна (не евристична) пагінація книги для «Розворот книги» — вимірює
@@ -51,10 +52,22 @@ export function useRealBookPages(book: Book): BookPage[] {
       const geometry = resolvePageGeometry(layout);
       const contentHeightPx = geometry.contentHeightMm * PX_PER_MM;
 
+      // Типографіка й абзацна геометрія — ті самі, що в живому редакторі:
+      // той самий клас `.nova-manuscript-blocks` і ті самі CSS-змінні
+      // (utils/typography.ts). До цього цей контейнер був голий, а Tailwind-ів
+      // preflight знімає поля абзаців до нуля — тому сторінок виходило менше,
+      // ніж показував редактор, і ті самі абзаци лягали інакше.
+      const typography = resolveParagraphGeometry(layout);
+      container.className = 'nova-manuscript-blocks';
+      Object.entries(paragraphCssVars(typography)).forEach(([name, value]) =>
+        container.style.setProperty(name, value)
+      );
+      // Ширина — точно текстова зона аркуша (без жодних внутрішніх відступів):
+      // саме ця ширина визначає, де переносяться рядки, а отже й розбиття.
       container.style.width = `${geometry.contentWidthMm}mm`;
-      container.style.fontFamily = layout.typography.bodyFont === 'Literata' ? 'Literata, Georgia, serif' : 'sans-serif';
-      container.style.fontSize = `${layout.typography.fontSizePt}pt`;
-      container.style.lineHeight = String(layout.typography.lineHeight);
+      container.style.fontFamily = bodyFontStack(layout.typography.bodyFont);
+      container.style.fontSize = `${typography.fontSizePx}px`;
+      container.style.lineHeight = String(typography.lineHeight);
 
       const allFootnotes = book.footnotes || [];
 
@@ -68,8 +81,20 @@ export function useRealBookPages(book: Book): BookPage[] {
         // buildBookPages (яка теж нічого не додає, якщо currentChunk.trim() порожній).
         if (children.length === 0) return [];
 
-        const heights = children.map((c) => c.getBoundingClientRect().height);
-        const breaks = computeBreaks(heights, contentHeightPx);
+        // Вимірюємо МЕЖІ блоків (як живий редактор), а не їхні власні висоти:
+        // сума висот не враховує відступів між абзацами й обтікання, тому
+        // сторінок виходило більше, ніж уміщається в аркуш. `top` рахуємо від
+        // верху контейнера — він у нас прихований і зсунутий за екран, але
+        // різниця координат від цього не залежить.
+        const containerTop = container.getBoundingClientRect().top;
+        const bounds = children.map((child) => {
+          const r = child.getBoundingClientRect();
+          return { top: r.top - containerTop, bottom: r.bottom - containerTop };
+        });
+        // Обтічне фото не має лишатися останнім на сторінці — те саме правило
+        // й той самий алгоритм, що в живому редакторі (PaginationPlugin.ts).
+        const keepWithNext = children.map((child) => getComputedStyle(child).float !== 'none');
+        const breaks = computeBreaksFromBounds(bounds, contentHeightPx, keepWithNext);
         const chunkBounds = [0, ...breaks, children.length];
 
         const result: BookPage[] = [];

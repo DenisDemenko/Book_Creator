@@ -15,6 +15,7 @@ import { PageColumn, VERTICAL_RULER_WIDTH_PX } from './manuscriptEditor/PageColu
 import { PageRuler } from './manuscriptEditor/PageRuler';
 import { useRealBookPages } from '../utils/useRealBookPages';
 import { resolvePageGeometry, type PageGeometry } from '../utils/pageGeometry';
+import { bodyFontStack, paragraphCssVars, resolveParagraphGeometry } from '../utils/typography';
 import { computeContourPolygon } from '../utils/imageContour';
 import {
   markerStringToTiptapDoc,
@@ -186,21 +187,6 @@ const HIGHLIGHT_SWATCHES = [
   '#fbcfe8', '#e9d5ff', '#c7d2fe', '#bae6fd',
   '#99f6e4', '#bbf7d0', '#d9f99d', '#e5e7eb',
 ];
-
-/** Назва шрифту з налаштувань книги → повний CSS-стек із запасними. */
-function bodyFontStack(bodyFont: string): string {
-  switch (bodyFont) {
-    case 'Cormorant Garamond':
-      return "'Cormorant Garamond', Georgia, serif";
-    case 'Outfit':
-      return "Outfit, 'Plus Jakarta Sans', sans-serif";
-    case 'Plus Jakarta Sans':
-      return "'Plus Jakarta Sans', -apple-system, sans-serif";
-    case 'Literata':
-    default:
-      return "Literata, 'Cormorant Garamond', Georgia, serif";
-  }
-}
 
 interface EditorViewProps {
   book: Book;
@@ -861,7 +847,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
       extensions: uaManuscriptExtensions,
       content: markerStringToTiptapDoc(activeSection?.content || ''),
       editorProps: {
-        attributes: { class: 'nova-manuscript-editor', spellcheck: String(spellcheckEnabled), lang: proofingLanguage },
+        attributes: { class: 'nova-manuscript-editor nova-manuscript-blocks', spellcheck: String(spellcheckEnabled), lang: proofingLanguage },
         handleKeyDown: createSlashTriggerHandler('ua'),
       },
       onUpdate: ({ editor }) => {
@@ -880,7 +866,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
       extensions: enManuscriptExtensions,
       content: markerStringToTiptapDoc(activeSection?.contentEn || ''),
       editorProps: {
-        attributes: { class: 'nova-manuscript-editor', spellcheck: String(spellcheckEnabled), lang: 'en' },
+        attributes: { class: 'nova-manuscript-editor nova-manuscript-blocks', spellcheck: String(spellcheckEnabled), lang: 'en' },
         handleKeyDown: createSlashTriggerHandler('en'),
       },
       onUpdate: ({ editor }) => {
@@ -1040,7 +1026,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
   useEffect(() => {
     uaEditor?.setOptions({
       editorProps: {
-        attributes: { class: 'nova-manuscript-editor', spellcheck: String(spellcheckEnabled), lang: proofingLanguage },
+        // Класів ДВА, і обидва тут обовʼязкові: `nova-manuscript-editor` —
+        // стиль самого редактора, `nova-manuscript-blocks` — абзацна
+        // геометрія з layoutConfig (`index.css` + utils/typography.ts). Без
+        // другого перемикання орфографії чи мови тихо повертало б абзаци до
+        // дефолтів браузера, бо setOptions ПЕРЕЗАПИСУЄ attributes цілком.
+        attributes: { class: 'nova-manuscript-editor nova-manuscript-blocks', spellcheck: String(spellcheckEnabled), lang: proofingLanguage },
       },
     });
   }, [uaEditor, spellcheckEnabled, proofingLanguage]);
@@ -1048,7 +1039,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
   useEffect(() => {
     enEditor?.setOptions({
       editorProps: {
-        attributes: { class: 'nova-manuscript-editor', spellcheck: String(spellcheckEnabled), lang: 'en' },
+        attributes: { class: 'nova-manuscript-editor nova-manuscript-blocks', spellcheck: String(spellcheckEnabled), lang: 'en' },
       },
     });
   }, [enEditor, spellcheckEnabled]);
@@ -2291,11 +2282,35 @@ export const EditorView: React.FC<EditorViewProps> = ({
     });
   }, [customFonts]);
 
+  /**
+   * Геометрія абзацу для ЕКРАНА — з тих самих полів `layoutConfig.typography`,
+   * які читають друкарські рушії (utils/typography.ts). Доти кегль тут був
+   * `fontSizePt * 1.3` px замість `* 96/72`, а абзацний відступ і відбивка
+   * брались із `index.css` жорстко — тобто налаштування «Верстка & Поля» в
+   * канві не діяли взагалі, і рядки лягали не так, як у книзі.
+   */
+  const paragraphGeometry = resolveParagraphGeometry(book.layoutConfig);
+
   /** Поточний CSS-стек шрифту основного тексту — спільний для UA та EN,
    *  тому англійське вікно завжди повторює вибір, зроблений в українському. */
-  const manuscriptFontStack = customFonts.some((f) => f.family === book.layoutConfig.typography.bodyFont)
-    ? `"${book.layoutConfig.typography.bodyFont}", Georgia, serif`
-    : bodyFontStack(book.layoutConfig.typography.bodyFont);
+  const manuscriptFontStack = bodyFontStack(
+    book.layoutConfig.typography.bodyFont,
+    customFonts.some((f) => f.family === book.layoutConfig.typography.bodyFont)
+  );
+
+  /**
+   * Спільний стиль тексту рукопису для всіх п'яти місць, де він рендериться
+   * (UA/EN, одне вікно й паралельний режим): кегль, інтерліньяж і абзацна
+   * геометрія. `as React.CSSProperties` — бо CSS-змінні (`--para-indent`
+   * тощо) у типах React не описані, хоч браузер їх приймає й успадковує
+   * всередину `.ProseMirror`.
+   */
+  const manuscriptTextStyle = {
+    fontFamily: manuscriptFontStack,
+    fontSize: `${paragraphGeometry.fontSizePx}px`,
+    lineHeight: paragraphGeometry.lineHeight,
+    ...paragraphCssVars(paragraphGeometry),
+  } as React.CSSProperties;
 
   const handleInstallFont = (font: CustomFont) => {
     onUpdateBook(
@@ -5040,14 +5055,10 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   editor={uaEditor}
                   id="book-content-editor-ua"
                   data-tour="editor__2"
-                  className={`text-slate-900 text-base sm:text-lg leading-relaxed p-4 ${
+                  className={`text-slate-900 py-4 ${
                     isReader ? 'cursor-default select-text' : ''
                   }`}
-                  style={{
-                    fontFamily: manuscriptFontStack,
-                    fontSize: `${book.layoutConfig.typography.fontSizePt * 1.3}px`,
-                    lineHeight: book.layoutConfig.typography.lineHeight,
-                  }}
+                  style={manuscriptTextStyle}
                 />
               </PageColumn>
 
@@ -5167,8 +5178,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     <PageColumn widthMm={pageGeometry.contentWidthMm} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800/80" showVerticalRuler={rulerVisible} pagination={uaPagination} pageGeometry={pageGeometry}>
                       <EditorContent
                         editor={uaEditor}
-                        style={{ fontFamily: manuscriptFontStack }}
-                        className="text-slate-900 text-sm leading-relaxed p-3"
+                        style={manuscriptTextStyle}
+                        className="text-slate-900 py-3"
                       />
                     </PageColumn>
                   </div>
@@ -5225,8 +5236,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     <PageColumn widthMm={pageGeometry.contentWidthMm} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800/80" showVerticalRuler={rulerVisible} pagination={enPagination} pageGeometry={pageGeometry}>
                       <EditorContent
                         editor={enEditor}
-                        style={{ fontFamily: manuscriptFontStack }}
-                        className="text-slate-900 text-sm leading-relaxed p-3"
+                        style={manuscriptTextStyle}
+                        className="text-slate-900 py-3"
                       />
                     </PageColumn>
                   </div>
@@ -5293,8 +5304,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 <PageColumn widthMm={pageGeometry.contentWidthMm} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800" showVerticalRuler={rulerVisible} pagination={enPagination} pageGeometry={pageGeometry}>
                   <EditorContent
                     editor={enEditor}
-                    style={{ fontFamily: manuscriptFontStack }}
-                    className="text-slate-900 text-sm leading-relaxed p-3"
+                    style={manuscriptTextStyle}
+                    className="text-slate-900 py-3"
                   />
                 </PageColumn>
               </div>
@@ -6756,8 +6767,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
             <PageColumn widthMm={pageGeometry.contentWidthMm} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800" showVerticalRuler={rulerVisible} pagination={enPagination} pageGeometry={pageGeometry}>
               <EditorContent
                 editor={enEditor}
-                style={{ fontFamily: manuscriptFontStack }}
-                className="text-slate-900 text-sm leading-relaxed p-3"
+                style={manuscriptTextStyle}
+                className="text-slate-900 py-3"
               />
             </PageColumn>
           </div>

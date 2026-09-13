@@ -86,7 +86,11 @@ export const PageColumn: React.FC<PageColumnProps> = ({
   const pageZones =
     showVerticalRuler && pagination
       ? pagination.pageTopsPx
-          .map((topPx, i) => ({ topPx, heightPx: Math.max(0, (pagination.pageBottomsPx[i] ?? topPx) - topPx) }))
+          .map((topPx, i) => ({
+            topPx,
+            heightPx: Math.max(0, (pagination.pageBottomsPx[i] ?? topPx) - topPx),
+            overflows: pagination.pageOverflows[i] === true,
+          }))
           .filter((z) => z.heightPx > 0)
       : [];
   const budgetMmLabel = pagination ? formatMm(pagination.contentHeightPx / PX_PER_MM) : '';
@@ -119,13 +123,29 @@ export const PageColumn: React.FC<PageColumnProps> = ({
             <div
               key={z.topPx}
               className="absolute left-0 right-0 overflow-hidden"
-              style={{ top: z.topPx * scale, height: z.heightPx * scale, background: '#fffefc' }}
-              title={t('editor.verticalRulerPageTip', {
-                page: i + 1,
-                filled: formatMm(z.heightPx / PX_PER_MM),
-                budget: budgetMmLabel,
-                sheet: sheetMmLabel,
-              })}
+              style={{
+                top: z.topPx * scale,
+                height: z.heightPx * scale,
+                // Бурштиновий = сторінка переповнена (блок, вищий за аркуш).
+                // Це ЄДИНЕ місце, де канва свідомо розходиться з PDF: друк
+                // розриває такий блок усередині, редактор — поки що ні.
+                // Краще показати це кольором, ніж мовчати.
+                background: z.overflows ? '#fde68a' : '#fffefc',
+              }}
+              title={
+                z.overflows
+                  ? t('editor.verticalRulerOverflowTip', {
+                      page: i + 1,
+                      filled: formatMm(z.heightPx / PX_PER_MM),
+                      budget: budgetMmLabel,
+                    })
+                  : t('editor.verticalRulerPageTip', {
+                      page: i + 1,
+                      filled: formatMm(z.heightPx / PX_PER_MM),
+                      budget: budgetMmLabel,
+                      sheet: sheetMmLabel,
+                    })
+              }
             >
               {verticalMarks.map((m) => (
                 <div key={m.mm} className="absolute left-0 right-0" style={{ top: m.mm * PX_PER_MM * scale }}>

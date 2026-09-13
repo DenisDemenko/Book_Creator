@@ -156,6 +156,27 @@ function main() {
     t('два null — однакові', paginationSnapshotsEqual(null, null));
   }
 
+  console.log('\nПереповнена сторінка (блок, вищий за аркуш):');
+  {
+    const budget = 971;
+    const fits = buildPaginationSnapshot([{ top: 46, bottom: 46 + budget }], [], budget);
+    t('сторінка рівно в бюджет — не переповнена', fits.pageOverflows[0] === false);
+
+    const over = buildPaginationSnapshot([{ top: 46, bottom: 46 + budget * 2 }], [], budget);
+    t('блок, удвічі вищий за бюджет → переповнена', over.pageOverflows[0] === true);
+    t('прапорець є на КОЖНУ сторінку', over.pageOverflows.length === over.pageTopsPx.length);
+
+    // Допуск на субпіксельне округлення: сторінка, що влізла рівно, не має
+    // світитись попередженням через 0.4 px.
+    const tiny = buildPaginationSnapshot([{ top: 0, bottom: budget + 0.4 }], [], budget);
+    t('+0.4 px — ще не переповнення', tiny.pageOverflows[0] === false);
+    const real = buildPaginationSnapshot([{ top: 0, bottom: budget + 1 }], [], budget);
+    t('+1 px — уже переповнення', real.pageOverflows[0] === true);
+    t('без бюджету нічого не позначається переповненим',
+      buildPaginationSnapshot([{ top: 0, bottom: 9999 }], [], 0).pageOverflows[0] === false);
+    t('знімки з різними прапорцями — різні', !paginationSnapshotsEqual(over, fits));
+  }
+
   console.log('\nПідпис міліметрів:');
   {
     t('ціле — без дробу', formatMm(170) === '170', formatMm(170));

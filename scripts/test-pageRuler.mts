@@ -182,7 +182,7 @@ function main() {
     t('українською — «Текст: 170 мм»', html.includes('Текст: 170 мм'), html.match(/Текст[^<]*/)?.[0]);
     t('дробові мм показуються одним знаком', renderRuler({ sheetWidthMm: 152.4, textWidthMm: 120.7, insideMm: 19, outsideMm: 12.7 }).includes('Текст: 120.7 мм'));
 
-    const keys = ['rulerTextWidth', 'rulerInsideHandleTip', 'rulerOutsideHandleTip', 'rulerSheetTip'] as const;
+    const keys = ['rulerTextWidth', 'rulerInsideHandleTip', 'rulerOutsideHandleTip', 'rulerSheetTip', 'verticalRulerPageTip', 'verticalRulerOverflowTip'] as const;
     const missing = keys.filter((k) => {
       const uk = (dictionaries.uk as any).editor?.[k];
       const en = (dictionaries.en as any).editor?.[k];
@@ -265,6 +265,22 @@ function main() {
       renderColumn(early).includes('текст 132.3 мм із 257 мм'),
       renderColumn(early).match(/Сторінка 1[^"]*/)?.[0]
     );
+  }
+
+  console.log('\nВертикальна лінійка — переповнена сторінка (блок, вищий за аркуш):');
+  {
+    const budget = 257 * PX_PER_MM;
+    // Один абзац, вищий за сторінку вдвічі: алгоритм лишає його на своїй
+    // сторінці, і вона виходить переповненою.
+    const over = buildPaginationSnapshot([{ top: 46, bottom: 46 + budget * 2 }], [], budget);
+    const html = renderColumn(over);
+    t('зона пофарбована бурштиновим, а не як звичайна сторінка',
+      html.includes('background:#fde68a'), html.match(/background:#[0-9a-f]{6}/g)?.join(' '));
+    t('світлої зони «все гаразд» немає', zones(html).length === 0);
+    t('підказка пояснює: друк розірве абзац, канва поки що ні',
+      html.includes('розірветься всередині'), html.match(/Сторінка 1[^"]*/)?.[0]);
+    t('підказка називає обидва числа — факт і бюджет',
+      html.includes('514 мм') && html.includes('257 мм'), html.match(/текст займає[^"]*/)?.[0]);
   }
 
   console.log('\nВертикальна лінійка без знімка пагінації:');

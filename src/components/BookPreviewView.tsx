@@ -16,6 +16,8 @@ import {
 import { Book } from '../types';
 import { computeTableOfContents, getLeaderSymbol, getDisplayPageNumber } from '../utils/helpers';
 import { useRealBookPages } from '../utils/useRealBookPages';
+import { PX_PER_MM } from '../utils/mmUnits';
+import { bodyFontStack, resolveParagraphGeometry } from '../utils/typography';
 import { useLanguage } from '../i18n/LanguageContext';
 
 interface BookPreviewViewProps {
@@ -34,6 +36,29 @@ export const BookPreviewView: React.FC<BookPreviewViewProps> = ({ book, totalWor
     setZoom((z) => Math.min(2, Math.max(0.5, Math.round((z + delta) * 10) / 10)));
 
   const layout = book.layoutConfig;
+
+  /**
+   * Превʼю аркуша — ЗМЕНШЕНА копія справжньої сторінки: кегль у
+   * `previewScale` разів менший, ніж той, яким сторінку ВИМІРЯЛИ
+   * (utils/useRealBookPages.ts), тож і абзацний відступ масштабується тим
+   * самим множником, а не окремим числом. Раніше тут стояло
+   * `firstLineIndentMm * 2` px: 6 мм ставали 12 px замість 22.7, і абзаци
+   * виглядали інакше, ніж на щойно виміряній сторінці; а рубрика
+   * `[&_p]:m-0` з `space-y-2` зводила відбивку між абзацами до нуля й
+   * додавала власний відступ, якого при вимірі не було. Тепер той самий
+   * клас `.nova-manuscript-blocks`, що й у живому редакторі.
+   */
+  const typography = resolveParagraphGeometry(layout);
+  const previewFontPx = layout.typography.fontSizePt * 0.9;
+  const previewScale = typography.fontSizePx > 0 ? previewFontPx / typography.fontSizePx : 1;
+  const pageTextStyle = {
+    fontFamily: bodyFontStack(layout.typography.bodyFont),
+    fontSize: `${previewFontPx}px`,
+    lineHeight: typography.lineHeight,
+    '--para-indent': `${typography.firstLineIndentMm * PX_PER_MM * previewScale}px`,
+    '--para-gap': `${typography.paragraphSpacingMm * PX_PER_MM * previewScale}px`,
+    '--para-align': typography.textAlign,
+  } as React.CSSProperties;
   const tocConfig = layout.tocConfig || {
     leaderStyle: 'dots',
     numberingStyle: 'arabic',
@@ -221,13 +246,8 @@ export const BookPreviewView: React.FC<BookPreviewViewProps> = ({ book, totalWor
         {/* Text Body with indent & justify — насичений HTML (жирний/курсив/шрифт/кегль/картинки),
             реально відрендерений і розбитий по сторінках у utils/useRealBookPages.ts. */}
         <div
-          className="flex-1 overflow-hidden py-3 text-justify text-xs leading-relaxed space-y-2 text-slate-800 [&_p]:m-0"
-          style={{
-            fontFamily: layout.typography.bodyFont === 'Literata' ? 'Literata, Georgia, serif' : 'sans-serif',
-            fontSize: `${layout.typography.fontSizePt * 0.9}px`,
-            lineHeight: layout.typography.lineHeight,
-            textIndent: `${layout.typography.firstLineIndentMm * 2}px`,
-          }}
+          className="nova-manuscript-blocks flex-1 overflow-hidden py-3 text-slate-800"
+          style={pageTextStyle}
           dangerouslySetInnerHTML={{ __html: page.content || '' }}
         />
 

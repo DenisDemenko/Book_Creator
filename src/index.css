@@ -1098,12 +1098,58 @@
   outline: none;
   min-height: 100%;
 }
-.nova-manuscript-editor p {
-  margin: 0 0 0.9em 0;
+/* ============================================================
+   ГЕОМЕТРІЯ АБЗАЦІВ — ОДНА НА ЕКРАНІ Й У ДРУЦІ
+   ============================================================
+   Клас ставиться І на .ProseMirror живого редактора, І на контейнер, у
+   якому «Розворот книги» міряє висоту того самого тексту
+   (utils/useRealBookPages.ts). Значення приходять CSS-змінними з
+   resolveParagraphGeometry (utils/typography.ts) — з тих самих полів
+   layoutConfig, які читають друкарські рушії.
+
+   Чому саме так, а не «як було». Раніше тут стояло жорстке
+   `margin: 0 0 0.9em 0`, а `firstLineIndentMm`, `paragraphSpacingMm` і
+   `textAlign` із «Верстка & Поля» редактор не читав узагалі: автор міняв
+   абзацний відступ у панелі, а канва цього не показувала. Паралельно той
+   самий текст мірявся в голому контейнері без полів — і сторінок виходило
+   менше, ніж показував редактор. Один клас на обидва місця робить таку
+   розбіжність неможливою: розійтись можуть хіба що змінні, а їх ставить
+   один і той самий resolveParagraphGeometry. */
+.nova-manuscript-blocks {
+  text-align: var(--para-align, left);
 }
-.nova-manuscript-editor p:last-child {
-  margin-bottom: 0;
+.nova-manuscript-blocks p {
+  margin: 0 0 var(--para-gap, 0) 0;
+  text-indent: var(--para-indent, 0);
 }
+/* Перший абзац під заголовком — без абзацного відступу, як у книжці;
+   те саме правило є в обох друкарських рушіях. */
+.nova-manuscript-blocks p:first-child,
+.nova-manuscript-blocks h1 + p,
+.nova-manuscript-blocks h2 + p,
+.nova-manuscript-blocks h3 + p {
+  text-indent: 0;
+}
+/* Заголовки H1-H3 (# Текст) — успадковують гарнітуру рукопису, а не
+   системний sans-serif браузера за замовчуванням; масштаб і відступи
+   узгоджені між собою, а не взяті з дефолтів <h1>-<h3>. Поля тут ті самі,
+   що й у рядкових стилях експорту (renderHeadingMarkers у helpers.ts). */
+.nova-manuscript-blocks h1,
+.nova-manuscript-blocks h2,
+.nova-manuscript-blocks h3 {
+  font-family: inherit;
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 1.1em 0 0.5em;
+}
+.nova-manuscript-blocks h1:first-child,
+.nova-manuscript-blocks h2:first-child,
+.nova-manuscript-blocks h3:first-child {
+  margin-top: 0;
+}
+.nova-manuscript-blocks h1 { font-size: 1.7em; }
+.nova-manuscript-blocks h2 { font-size: 1.4em; }
+.nova-manuscript-blocks h3 { font-size: 1.18em; }
 .nova-manuscript-editor blockquote {
   margin: 0.9em 0;
   padding: 0.4em 1em;
@@ -1111,25 +1157,6 @@
   color: #475569;
   font-style: italic;
 }
-/* Заголовки H1-H3 (# Текст) — успадковують гарнітуру рукопису, а не
-   системний sans-serif браузера за замовчуванням; масштаб і відступи
-   узгоджені між собою, а не взяті з дефолтів <h1>-<h3>. */
-.nova-manuscript-editor h1,
-.nova-manuscript-editor h2,
-.nova-manuscript-editor h3 {
-  font-family: inherit;
-  font-weight: 700;
-  line-height: 1.25;
-  margin: 1.1em 0 0.5em;
-}
-.nova-manuscript-editor h1:first-child,
-.nova-manuscript-editor h2:first-child,
-.nova-manuscript-editor h3:first-child {
-  margin-top: 0;
-}
-.nova-manuscript-editor h1 { font-size: 1.7em; }
-.nova-manuscript-editor h2 { font-size: 1.4em; }
-.nova-manuscript-editor h3 { font-size: 1.18em; }
 .nova-manuscript-editor p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   float: left;

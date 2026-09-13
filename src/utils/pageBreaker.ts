@@ -134,6 +134,18 @@ export interface PaginationSnapshot {
   pageBottomsPx: number[];
   /** Бюджет висоти тексту на сторінку, px — той самий, за яким робились розриви. */
   contentHeightPx: number;
+  /**
+   * Чи сторінка ПЕРЕПОВНЕНА — тобто чи її вміст вищий за бюджет.
+   *
+   * Так буває з блоком, вищим за сторінку (величезне фото або абзац на
+   * кілька тисяч символів): алгоритм лишає такий блок на своїй сторінці, і
+   * вона виходить вищою за формат. Друк розриває такий блок УСЕРЕДИНІ
+   * (обидва рушії це вміють), а живий редактор — поки що ні, і саме тут
+   * канва свідомо розходиться з PDF. Цей прапорець існує, щоб розходження
+   * було ВИДНО (вертикальна лінійка малює таку зону бурштиновою), а не щоб
+   * удавати, ніби його немає.
+   */
+  pageOverflows: boolean[];
 }
 
 /**
@@ -153,6 +165,7 @@ export function buildPaginationSnapshot(
   const starts = [0, ...breakIndices.filter((i) => i > 0 && i < blocks.length)];
   const pageTopsPx: number[] = [];
   const pageBottomsPx: number[] = [];
+  const pageOverflows: boolean[] = [];
 
   for (let k = 0; k < starts.length; k += 1) {
     const from = starts[k];
@@ -173,9 +186,12 @@ export function buildPaginationSnapshot(
     // висота смуги на лінійці — це вже не «порожня сторінка», а зламана
     // розмітка.
     pageBottomsPx.push(Math.max(bottom, top));
+    // Допуск 0.5 px — на округлення субпіксельної розкладки: сторінка, що
+    // влізла рівно в бюджет, не має світитись як переповнена.
+    pageOverflows.push(contentHeightPx > 0 && bottom - top > contentHeightPx + 0.5);
   }
 
-  return { pageTopsPx, pageBottomsPx, contentHeightPx };
+  return { pageTopsPx, pageBottomsPx, contentHeightPx, pageOverflows };
 }
 
 /**
@@ -192,5 +208,9 @@ export function paginationSnapshotsEqual(
   if (a.contentHeightPx !== b.contentHeightPx) return false;
   if (a.pageTopsPx.length !== b.pageTopsPx.length) return false;
   if (a.pageBottomsPx.length !== b.pageBottomsPx.length) return false;
-  return a.pageTopsPx.every((t, i) => t === b.pageTopsPx[i] && a.pageBottomsPx[i] === b.pageBottomsPx[i]);
+  if (a.pageOverflows.length !== b.pageOverflows.length) return false;
+  return (
+    a.pageTopsPx.every((t, i) => t === b.pageTopsPx[i] && a.pageBottomsPx[i] === b.pageBottomsPx[i]) &&
+    a.pageOverflows.every((f, i) => f === b.pageOverflows[i])
+  );
 }
