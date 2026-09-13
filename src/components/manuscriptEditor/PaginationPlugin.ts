@@ -2,7 +2,12 @@ import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { PX_PER_MM } from '../../utils/mmUnits';
-import { computeBreaksFromBounds, type BlockBounds } from '../../utils/pageBreaker';
+import {
+  buildPaginationSnapshot,
+  computeBreaksFromBounds,
+  type BlockBounds,
+  type PaginationSnapshot,
+} from '../../utils/pageBreaker';
 
 export interface PaginationOptions {
   /** Висота текстового блоку сторінки (мм) — формат мінус верхнє/нижнє поле. */
@@ -25,9 +30,35 @@ export interface PaginationOptions {
    * просто не малюється (сумісність зі старими викликами плагіна).
    */
   getRunningHeaderText?: () => string;
+  /**
+   * Куди віддати ВІДРЕНДЕРНІ межі сторінок (вертикальна лінійка в
+   * PageColumn.tsx). Викликається після кожного виміру, разом із уже
+   * застосованими декораціями — тобто координати вже враховують смуги
+   * розривів, і саме тому лінійка стоїть там, де сторінка на екрані, а не
+   * там, де вона була б без смуг (див. PaginationSnapshot у pageBreaker.ts).
+   * Необов'язковий: без нього плагін працює точно як раніше.
+   */
+  onMeasured?: (snapshot: PaginationSnapshot) => void;
 }
 
 const paginationKey = new PluginKey('novaPagination');
+
+/**
+ * Ключ транзакції «переміряти пагінацію ЗАРАЗ» — EditorView.tsx надсилає
+ * його, коли змінився формат аркуша, поля чи типографіка.
+ *
+ * НАВІЩО ОКРЕМЕ СИГНАЛІЗУВАННЯ. Розриви залежать не лише від тексту, а й
+ * від бюджету висоти сторінки — а бюджет міняється БЕЗ жодної правки
+ * документа (автор обрав інший формат у спадному списку). Оскільки плагін
+ * досі перераховував розриви тільки при `docChanged`, після зміни формату
+ * старі розриви лишались на місці (а з ними й нова вертикальна лінійка
+ * показувала б стару висоту сторінки) аж до першої натиснутої клавіші.
+ *
+ * Окремий ключ, а не мета на `paginationKey`, — стан декорацій
+ * (`DecorationSet`) лишається недоторканим, а лічильник перерахунків має
+ * власний, тривіальний стан поруч.
+ */
+export const paginationRescanKey = new PluginKey<number>('novaPaginationRescan');
 
 /** Малює "розрив між аркушами" — суцільна смуга кольору полотна на всю ширину вікна (не лише колонки сторінки), фіксованої висоти 15px. */
 function buildGapWidget(pageNumber: number): HTMLElement {
@@ -174,6 +205,23 @@ export const PaginationPlugin = Extension.create<PaginationOptions>({
             const next = DecorationSet.create(editorView.state.doc, decorations);
             const tr = editorView.state.tr.setMeta(paginationKey, next);
             editorView.dispatch(tr);
+
+            // Знімок для вертикальної лінійки — ПІСЛЯ dispatch, і це
+            // принципово: саме dispatch вставляє смуги розривів у потік, і
+            // лише тепер offsetTop показує те місце, де сторінка справді
+            // стоїть на екрані. Виміри «чистого» потоку вище для цього не
+            // годяться — кожна наступна сторінка там вища рівно на суму
+            // висот смуг, і лінійка повзла б униз із кожною сторінкою.
+            // Читання самих лише offsetTop/offsetHeight нової розкладки не
+            // потребує: dispatch застосовує зміни до DOM синхронно.
+            if (options.onMeasured) {
+              const rendered = positions.map((offset) => {
+                const dom = editorView.nodeDOM(offset) as HTMLElement | null;
+                const top = dom ? dom.offsetTop : 0;
+                return { top, bottom: top + (dom ? dom.offsetHeight : 0) };
+              });
+              options.onMeasured(buildPaginationSnapshot(rendered, breakIndices, pageContentHeightPx));
+            }
           };
 
           const schedule = () => {
@@ -184,9 +232,10 @@ export const PaginationPlugin = Extension.create<PaginationOptions>({
           schedule();
 
           return {
-            // Лише коли ЗМІНИВСЯ САМ ДОКУМЕНТ (реальне редагування), а НЕ
-            // на кожен update() узагалі — bez цієї перевірки власна
-            // транзакція measure() (editorView.dispatch(tr) нижче, лише
+            // Лише коли ЗМІНИВСЯ САМ ДОКУМЕНТ (реальне редагування) або
+            // прийшов явний сигнал «переміряти» (зміна формату аркуша), а
+            // НЕ на кожен update() узагалі — без цієї перевірки власна
+            // транзакція measure() (editorView.dispatch(tr) вище, лише
             // setMeta декорацій, doc той самий) теж викликає update(),
             // schedule() планує НАСТУПНИЙ вимір, той знову дописує
             // транзакцію — і так нескінченно, кожні 200мс, назавжди, навіть
@@ -198,13 +247,26 @@ export const PaginationPlugin = Extension.create<PaginationOptions>({
             // «блимання» тексту поруч із обтічним (float) зображенням —
             // де перестворення DOM найпомітніше зачіпає розкладку.
             update: (view, prevState) => {
-              if (view.state.doc !== prevState.doc) schedule();
+              const rescanTick = paginationRescanKey.getState(view.state) ?? 0;
+              const prevRescanTick = paginationRescanKey.getState(prevState) ?? 0;
+              if (view.state.doc !== prevState.doc || rescanTick !== prevRescanTick) schedule();
             },
             destroy: () => {
               destroyed = true;
               if (timer) clearTimeout(timer);
             },
           };
+        },
+      }),
+      // Сам лише лічильник перерахунків: жодних декорацій, жодного DOM.
+      // Потрібен, щоб `update` вище міг відрізнити «нічого не змінилось» від
+      // «формат змінився, переміряй» — у мета-даних транзакції для
+      // декорацій місця під цей сигнал немає (див. paginationRescanKey).
+      new Plugin({
+        key: paginationRescanKey,
+        state: {
+          init: () => 0,
+          apply: (tr, prev) => (tr.getMeta(paginationRescanKey) ? prev + 1 : prev),
         },
       }),
     ];

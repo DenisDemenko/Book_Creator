@@ -22,7 +22,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { LanguageProvider } from '../src/i18n/LanguageContext.tsx';
 import { dictionaries } from '../src/i18n/dictionaries/index.ts';
 import { PageRuler } from '../src/components/manuscriptEditor/PageRuler.tsx';
+import { PageColumn } from '../src/components/manuscriptEditor/PageColumn.tsx';
 import { PX_PER_MM } from '../src/utils/mmUnits.ts';
+import { buildPaginationSnapshot, type PaginationSnapshot } from '../src/utils/pageBreaker.ts';
+import { resolvePageGeometry } from '../src/utils/pageGeometry.ts';
 
 let passed = 0;
 let failed = 0;
@@ -80,9 +83,53 @@ function nums(html: string, re: RegExp): number[] {
   return [...html.matchAll(re)].map((m) => Number(m[1]));
 }
 
-/** Підписи поділок — усі числа, які лінійка надрукувала цифрами. */
+/**
+ * Підписи поділок — усі числа, які лінійка надрукувала цифрами. Мітка
+ * шукається за класом `font-mono` у будь-якому місці тега: у горизонтальної
+ * лінійки підпис — голий span, у вертикальної в нього ще й `style`
+ * (writing-mode), тож жорсткий шаблон «font-mono">» другу лінійку не бачив.
+ */
 function labels(html: string): number[] {
-  return nums(html, /font-mono">(\d+)<\/span>/g);
+  return nums(html, /<span[^>]*font-mono[^>]*>(\d+)<\/span>/g);
+}
+
+/** Зони тексту вертикальної лінійки (світлі смуги): [верх, висота] у px. */
+function zones(html: string): { top: number; height: number }[] {
+  return [...html.matchAll(/style="top:([\d.]+)(?:px)?;height:([\d.]+)(?:px)?;background:#fffefc"/g)].map((m) => ({
+    top: Number(m[1]),
+    height: Number(m[2]),
+  }));
+}
+
+/** Позначки всередині зон — їхні позиції від верху власної зони. */
+function tickTops(html: string): number[] {
+  return nums(html, /class="absolute left-0 right-0" style="top:([\d.]+)(?:px)?"/g);
+}
+
+const A4_GEOMETRY = resolvePageGeometry({
+  pageWidthMm: 210,
+  pageHeightMm: 297,
+  margins: { topMm: 20, bottomMm: 20, insideMm: 20, outsideMm: 20 },
+} as any);
+
+function renderColumn(pagination: PaginationSnapshot | null): string {
+  return renderToStaticMarkup(
+    React.createElement(
+      LanguageProvider,
+      null,
+      React.createElement(PageColumn, {
+        widthMm: 170,
+        zoomFactor: 1,
+        showVerticalRuler: true,
+        pagination,
+        pageGeometry: A4_GEOMETRY,
+        // `children` — обов'язковий проп PageColumn, тож передаємо його в
+        // обʼєкті властивостей: третім аргументом createElement типи React
+        // його не порахували б (у компонента діти — частина пропсів).
+        children: React.createElement('div', null, 'текст'),
+      })
+    )
+  );
 }
 
 function main() {
@@ -165,6 +212,67 @@ function main() {
     const weird = renderRuler({ sheetWidthMm: 148, textWidthMm: 0, insideMm: 200, outsideMm: 200 });
     t('рендер не порожній', weird.length > 0);
     t('жодного NaN у розмітці', !weird.includes('NaN'));
+  }
+
+  console.log('\nВертикальна лінійка — шкала НА КОЖНУ СТОРІНКУ:');
+  {
+    const budget = 257 * PX_PER_MM; // текстова зона A4 з полями 20 + 20
+    const snapshot = buildPaginationSnapshot(
+      [
+        { top: 46, bottom: 46 + budget },
+        { top: 46 + budget + 15, bottom: 46 + 2 * budget + 15 },
+      ],
+      [1],
+      budget
+    );
+    const html = renderColumn(snapshot);
+    const z = zones(html);
+
+    t('дві сторінки — дві світлі зони тексту', z.length === 2, JSON.stringify(z));
+    t('перша зона починається там, де починається текст', eq(z[0]?.top ?? -1, 46), String(z[0]?.top));
+    t('друга зона — на смузі розриву нижче (15 px)', eq(z[1]?.top ?? -1, 46 + budget + 15), String(z[1]?.top));
+    t('висота зони = бюджету сторінки (257 мм)', eq(z[0]?.height ?? -1, budget), String(z[0]?.height));
+    t('зони не налазять одна на одну', (z[0]?.top ?? 0) + (z[0]?.height ?? 0) <= (z[1]?.top ?? 0));
+
+    // Головна відмінність від старої лінійки: шкала повторюється, а не тягнеться
+    // одна на всю висоту рукопису.
+    const marks = tickTops(html);
+    const perPage = marks.length / 2;
+    t('позначки є в кожній зоні', marks.length === 104 && perPage === 52, `усього ${marks.length}, на сторінку ${perPage}`);
+    t('кожна сторінка починає з 0', eq(marks[0], 0) && eq(marks[perPage], 0));
+    t('остання позначка — 255 мм (257 не ділиться на 5)', eq(marks[perPage - 1], 255 * PX_PER_MM), String(marks[perPage - 1]));
+    t('шкала другого аркуша така сама, як першого', marks.slice(0, perPage).every((v, i) => eq(v, marks[perPage + i])));
+    const numsAll = labels(html);
+    t('цифри повторюються на кожній сторінці', numsAll.length === 52 && numsAll[26] === 0 && numsAll[27] === 10, numsAll.slice(24, 30).join(','));
+    t('цифри — у реальних мм', numsAll[1] === 10 && numsAll[2] === 20, numsAll.slice(1, 3).join(','));
+
+    t(
+      'підказка називає сторінку, заповнення, бюджет і аркуш',
+      html.includes('Сторінка 1: текст 257 мм із 257 мм') && html.includes('Аркуш 297 мм'),
+      html.match(/Сторінка 1[^"]*/)?.[0]
+    );
+  }
+
+  console.log('\nВертикальна лінійка — недозаповнена сторінка:');
+  {
+    const budget = 257 * PX_PER_MM;
+    const early = buildPaginationSnapshot([{ top: 46, bottom: 546 }, { top: 561, bottom: 1500 }], [1], budget);
+    const z = zones(renderColumn(early));
+    t('зона коротша за бюджет — сторінка скінчилась раніше', eq(z[0]?.height ?? -1, 500), String(z[0]?.height));
+    t('межа сторінки на лінійці там, де розрив у тексті', eq(z[1]?.top ?? -1, 561), String(z[1]?.top));
+    t(
+      'підказка розділяє заповнене й бюджет',
+      renderColumn(early).includes('текст 132.3 мм із 257 мм'),
+      renderColumn(early).match(/Сторінка 1[^"]*/)?.[0]
+    );
+  }
+
+  console.log('\nВертикальна лінійка без знімка пагінації:');
+  {
+    const html = renderColumn(null);
+    t('жодної зони', zones(html).length === 0);
+    t('жодної позначки — краще порожня смуга, ніж вигадані числа', tickTops(html).length === 0);
+    t('сам аркуш із текстом усе одно відрендерено', html.includes('текст'));
   }
 
   console.log(`\nРезультат: ${passed} пройшло, ${failed} впало.`);

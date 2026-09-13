@@ -1,10 +1,11 @@
-import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { useEditor, useEditorState, EditorContent, type Editor } from '@tiptap/react';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import type { EditorView as PMView } from '@tiptap/pm/view';
 import { findSlashCandidate, matchCharacterBySlashCandidate, collectInsertablePatterns } from '../utils/slashTrigger';
 import { buildManuscriptExtensions } from './manuscriptEditor/extensions';
-import { PaginationPlugin } from './manuscriptEditor/PaginationPlugin';
+import { PaginationPlugin, paginationRescanKey } from './manuscriptEditor/PaginationPlugin';
+import { paginationSnapshotsEqual, type PaginationSnapshot } from '../utils/pageBreaker';
 import { characterMentionKey } from './manuscriptEditor/CharacterMentionPlugin';
 import { readabilityKey } from './manuscriptEditor/ReadabilityHighlightPlugin';
 import { PAGE_FORMAT_QUICK_OPTIONS } from '../utils/pageFormats';
@@ -621,6 +622,27 @@ export const EditorView: React.FC<EditorViewProps> = ({
    */
   const pageGeometry = resolvePageGeometry(book.layoutConfig);
 
+  /**
+   * Відрендерні межі сторінок — від PaginationPlugin (по одному знімку на
+   * кожен редактор). Потрібні вертикальній лінійці: без них вона не знає,
+   * де починається й закінчується сторінка, і показати їй нічого.
+   *
+   * Порівняння в setState — не мікрооптимізація: вимір пагінації біжить
+   * раз на 200 мс після кожної правки, а редактор тут величезний. Поки
+   * автор пише всередині абзацу, межі сторінок не рухаються, і без цієї
+   * перевірки кожна правка давала б зайвий повний перерендер.
+   */
+  const [uaPagination, setUaPagination] = useState<PaginationSnapshot | null>(null);
+  const [enPagination, setEnPagination] = useState<PaginationSnapshot | null>(null);
+  const applyPaginationSnapshot = useCallback(
+    (setter: React.Dispatch<React.SetStateAction<PaginationSnapshot | null>>) =>
+      (next: PaginationSnapshot) =>
+        setter((prev) => (paginationSnapshotsEqual(prev, next) ? prev : next)),
+    []
+  );
+  const onUaMeasured = useMemo(() => applyPaginationSnapshot(setUaPagination), [applyPaginationSnapshot]);
+  const onEnMeasured = useMemo(() => applyPaginationSnapshot(setEnPagination), [applyPaginationSnapshot]);
+
   /** Ширина текстового блоку сторінки (мм) — формат мінус внутрішнє/зовнішнє поле. Основа для дефолтної половини ширини картинки та межі її масштабування. */
   const getPageContentWidthMm = useCallback((): number => {
     return getPageGeometry().contentWidthMm;
@@ -757,6 +779,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
       getVerticalMarginsMm,
       getStartPageNumber,
       getRunningHeaderText,
+      onMeasured: onUaMeasured,
     }),
   ]).current;
   const enManuscriptExtensions = useRef([
@@ -775,7 +798,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
       () => bookRef.current.characters,
       () => readabilityHighlightModeRef.current
     ),
-    PaginationPlugin.configure({ getPageContentHeightMm, getVerticalMarginsMm }),
+    PaginationPlugin.configure({ getPageContentHeightMm, getVerticalMarginsMm, onMeasured: onEnMeasured }),
   ]).current;
 
   /**
@@ -870,6 +893,38 @@ export const EditorView: React.FC<EditorViewProps> = ({
     },
     []
   );
+
+  /**
+   * Зміна формату аркуша, полів чи типографіки міняє бюджет висоти
+   * сторінки — а пагінація досі перераховувалась лише на правку ТЕКСТУ.
+   * Через це після вибору іншого формату розриви (а з ними й шкала
+   * вертикальної лінійки) лишались старими аж до першої натиснутої клавіші.
+   * Тепер обидва редактори дістають явний сигнал «переміряй» — той самий
+   * прийом, що й в ефекті згадувань персонажів нижче, лише з метою, яку
+   * плагін справді розуміє (paginationRescanKey).
+   *
+   * Підпис навмисно містить і ШИРИНУ тексту (поля inside/outside входять у
+   * неї): від ширини залежить перенос рядків, а отже й висота кожного блоку.
+   */
+  const paginationMeasureKey = [
+    pageGeometry.pageWidthMm,
+    pageGeometry.pageHeightMm,
+    pageGeometry.margins.insideMm,
+    pageGeometry.margins.outsideMm,
+    pageGeometry.margins.topMm,
+    pageGeometry.margins.bottomMm,
+    book.layoutConfig.typography.fontSizePt,
+    book.layoutConfig.typography.lineHeight,
+  ].join('|');
+  useEffect(() => {
+    const rescan = (editor: Editor | null) => {
+      if (!editor) return;
+      editor.view.dispatch(editor.state.tr.setMeta(paginationRescanKey, true));
+    };
+    rescan(uaEditor);
+    rescan(enEditor);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paginationMeasureKey]);
 
   // Освіжаємо декорації згадувань персонажів, коли ЗМІНИВСЯ САМ СПИСОК
   // персонажів (перейменування у вкладці «Персонажі» тощо) — плагін сам
@@ -4964,7 +5019,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   onChangeMargins={handleChangeMargins}
                 />
               )}
-              <PageColumn widthMm={pageGeometry.contentWidthMm} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0" showVerticalRuler={rulerVisible}>
+              <PageColumn widthMm={pageGeometry.contentWidthMm} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0" showVerticalRuler={rulerVisible} pagination={uaPagination} pageGeometry={pageGeometry}>
                 {/* Колонтитул першого аркуша. Плагін пагінації малює його на
                     кожному РОЗРИВІ, тобто зверху сторінок 2, 3, … — у першої
                     розриву перед нею немає, тож він рендериться тут. */}
@@ -5109,7 +5164,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                         onChangeMargins={handleChangeMargins}
                       />
                     )}
-                    <PageColumn widthMm={pageGeometry.contentWidthMm} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800/80" showVerticalRuler={rulerVisible}>
+                    <PageColumn widthMm={pageGeometry.contentWidthMm} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800/80" showVerticalRuler={rulerVisible} pagination={uaPagination} pageGeometry={pageGeometry}>
                       <EditorContent
                         editor={uaEditor}
                         style={{ fontFamily: manuscriptFontStack }}
@@ -5167,7 +5222,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                         onChangeMargins={handleChangeMargins}
                       />
                     )}
-                    <PageColumn widthMm={pageGeometry.contentWidthMm} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800/80" showVerticalRuler={rulerVisible}>
+                    <PageColumn widthMm={pageGeometry.contentWidthMm} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800/80" showVerticalRuler={rulerVisible} pagination={enPagination} pageGeometry={pageGeometry}>
                       <EditorContent
                         editor={enEditor}
                         style={{ fontFamily: manuscriptFontStack }}
@@ -5235,7 +5290,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     onChangeMargins={handleChangeMargins}
                   />
                 )}
-                <PageColumn widthMm={pageGeometry.contentWidthMm} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800" showVerticalRuler={rulerVisible}>
+                <PageColumn widthMm={pageGeometry.contentWidthMm} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800" showVerticalRuler={rulerVisible} pagination={enPagination} pageGeometry={pageGeometry}>
                   <EditorContent
                     editor={enEditor}
                     style={{ fontFamily: manuscriptFontStack }}
@@ -6698,7 +6753,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 onChangeMargins={handleChangeMargins}
               />
             )}
-            <PageColumn widthMm={pageGeometry.contentWidthMm} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800" showVerticalRuler={rulerVisible}>
+            <PageColumn widthMm={pageGeometry.contentWidthMm} zoomFactor={isFocusWindow ? focusZoom : editorZoom / 100} className="flex-1 min-h-0 rounded-xl border border-slate-800" showVerticalRuler={rulerVisible} pagination={enPagination} pageGeometry={pageGeometry}>
               <EditorContent
                 editor={enEditor}
                 style={{ fontFamily: manuscriptFontStack }}

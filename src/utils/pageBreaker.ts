@@ -94,10 +94,101 @@ export function computeBreaks(blockHeightsPx: number[], pageContentHeightPx: num
     if (currentHeight + h > pageContentHeightPx) {
       breaks.push(i);
       currentHeight = h;
-    } else {
-      currentHeight += h;
     }
   });
 
   return breaks;
+}
+
+/** Блок у вже ВІДРЕНДЕРНІЙ системі координат колонки (px, без масштабу). */
+export interface RenderedBlock {
+  top: number;
+  bottom: number;
+}
+
+/**
+ * Знімок живої пагінації — те, що потрібне вертикальній лінійці, щоб
+ * показати сторінки такими, якими вони Є на екрані.
+ *
+ * ЧОМУ ЦЕ ОКРЕМИЙ ТИП, А НЕ ПРОСТО ТРИ ЧИСЛА В КОМПОНЕНТІ. Раніше
+ * вертикальна лінійка малювала одну суцільну шкалу від 0 до загальної
+ * висоти ВМІСТУ (для глави це могло бути 1300 мм). Числа на ній не мали
+ * жодного відношення до формату аркуша — саме на це й скаржився власник
+ * («не відповідає аркушам розмітки сторінки ні по висоті»). Щоб шкала
+ * відповідала сторінкам, лінійка мусить знати, де кожна сторінка
+ * починається й де закінчується ЇЇ заповнений текст.
+ *
+ * ВАЖЛИВО: координати — вже ВІДРЕНДЕРНІ, тобто разом зі смугами розривів
+ * (PaginationPlugin вставляє між сторінками віджет). «Чисті» виміри, за
+ * якими рахуються розриви, і видимі позиції відрізняються на суму висот
+ * цих смуг: друга сторінка на екрані стоїть нижче, ніж у чистому вимірі,
+ * тож лінійка, намальована за чистими числами, «пливла» б униз із кожною
+ * сторінкою.
+ */
+export interface PaginationSnapshot {
+  /** Верх кожної сторінки, px. */
+  pageTopsPx: number[];
+  /** Низ ЗАПОВНЕНОГО тексту кожної сторінки, px (для останньої — там, де текст закінчується). */
+  pageBottomsPx: number[];
+  /** Бюджет висоти тексту на сторінку, px — той самий, за яким робились розриви. */
+  contentHeightPx: number;
+}
+
+/**
+ * Складає знімок пагінації з відрендерених меж блоків і списку розривів.
+ *
+ * Чиста функція (без DOM і ProseMirror) — самі виміри робить плагін, а вся
+ * арифметика «котрий блок на якій сторінці й доки вона заповнена» живе тут
+ * і перевіряється тестом. Розрив на початку списку (індекс 0) і поза межами
+ * відкидаються: першу сторінку відкриває сам початок документа, а не
+ * розрив, і «сторінка» з нуля блоків не має сенсу.
+ */
+export function buildPaginationSnapshot(
+  blocks: RenderedBlock[],
+  breakIndices: number[],
+  contentHeightPx: number
+): PaginationSnapshot {
+  const starts = [0, ...breakIndices.filter((i) => i > 0 && i < blocks.length)];
+  const pageTopsPx: number[] = [];
+  const pageBottomsPx: number[] = [];
+
+  for (let k = 0; k < starts.length; k += 1) {
+    const from = starts[k];
+    const to = k + 1 < starts.length ? starts[k + 1] : blocks.length;
+    if (from >= blocks.length || to <= from) continue;
+
+    let top = Infinity;
+    let bottom = -Infinity;
+    for (let i = from; i < to; i += 1) {
+      top = Math.min(top, blocks[i].top);
+      bottom = Math.max(bottom, blocks[i].bottom);
+    }
+    if (!Number.isFinite(top) || !Number.isFinite(bottom)) continue;
+
+    pageTopsPx.push(top);
+    // Низ не може бути вищим за верх: блоки з нульовою висотою (обтічне
+    // фото повертає offsetHeight 0) дали б від'ємну зону, а від'ємна
+    // висота смуги на лінійці — це вже не «порожня сторінка», а зламана
+    // розмітка.
+    pageBottomsPx.push(Math.max(bottom, top));
+  }
+
+  return { pageTopsPx, pageBottomsPx, contentHeightPx };
+}
+
+/**
+ * Чи знімки однакові. Потрібно, щоб кожен вимір пагінації (раз на 200 мс
+ * після правки) не перемальовував увесь редактор: поки автор пише всередині
+ * абзацу, межі сторінок не рухаються, і знімок той самий.
+ */
+export function paginationSnapshotsEqual(
+  a: PaginationSnapshot | null,
+  b: PaginationSnapshot | null
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.contentHeightPx !== b.contentHeightPx) return false;
+  if (a.pageTopsPx.length !== b.pageTopsPx.length) return false;
+  if (a.pageBottomsPx.length !== b.pageBottomsPx.length) return false;
+  return a.pageTopsPx.every((t, i) => t === b.pageTopsPx[i] && a.pageBottomsPx[i] === b.pageBottomsPx[i]);
 }

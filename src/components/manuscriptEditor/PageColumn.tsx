@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { usePageScale } from './usePageScale';
-import { PX_PER_MM, buildRulerMarks } from '../../utils/mmUnits';
+import { PX_PER_MM, buildRulerMarks, formatMm } from '../../utils/mmUnits';
+import type { PaginationSnapshot } from '../../utils/pageBreaker';
+import type { PageGeometry } from '../../utils/pageGeometry';
+import { useLanguage } from '../../i18n/LanguageContext';
 
 interface PageColumnProps {
   children: React.ReactNode;
@@ -10,6 +13,16 @@ interface PageColumnProps {
   zoomFactor?: number;
   /** Показати вертикальну лінійку (мм) зліва від тексту — керується тим самим перемикачем «показати лінійку», що й горизонтальна PageRuler.tsx. За замовчуванням false (поведінка не змінюється). */
   showVerticalRuler?: boolean;
+  /**
+   * Відрендерні межі сторінок — від PaginationPlugin.ts. Без них вертикальна
+   * лінійка лишається порожньою смугою: міряти їй нічого, а вигадувати
+   * числа замість виміряних ми не будемо (див. PaginationSnapshot у
+   * pageBreaker.ts — до цього тут малювалась одна шкала на всю ВИСОТУ
+   * ВМІСТУ, і числа на ній не мали відношення до жодного аркуша).
+   */
+  pagination?: PaginationSnapshot | null;
+  /** Геометрія аркуша — для підказки вертикальної лінійки («аркуш 297 мм, текст 257 мм»). */
+  pageGeometry?: PageGeometry;
 }
 
 /**
@@ -35,7 +48,16 @@ export const VERTICAL_RULER_WIDTH_PX = 24;
  * масштабований розмір і призводив до розривів сторінок у неправильних
  * місцях.
  */
-export const PageColumn: React.FC<PageColumnProps> = ({ children, widthMm, className, zoomFactor = 1, showVerticalRuler = false }) => {
+export const PageColumn: React.FC<PageColumnProps> = ({
+  children,
+  widthMm,
+  className,
+  zoomFactor = 1,
+  showVerticalRuler = false,
+  pagination = null,
+  pageGeometry,
+}) => {
+  const { t } = useLanguage();
   const { outerRef, scale, widthPx } = usePageScale(widthMm, zoomFactor, showVerticalRuler ? VERTICAL_RULER_WIDTH_PX : 0);
   const innerRef = useRef<HTMLDivElement>(null);
   const [naturalHeightPx, setNaturalHeightPx] = useState(0);
@@ -50,15 +72,25 @@ export const PageColumn: React.FC<PageColumnProps> = ({ children, widthMm, class
     return () => ro.disconnect();
   }, []);
 
-  // Вертикальна лінійка (мм) — та сама логіка позначок (buildRulerMarks),
-  // що й у горизонтальної PageRuler.tsx, лише вздовж висоти. `naturalHeightPx`
-  // — це РЕАЛЬНА (немасштабована) висота вмісту в px (той самий scrollHeight,
-  // яким вимірює пагінація) — переведена в мм тим самим PX_PER_MM, яким уже
-  // рахує ширину лінійка зверху, тож обидві лінійки лишаються в одних
-  // одиницях. Рендериться СЕРЕДИНИ того самого прокручуваного контейнера
-  // (outerRef), не окремим елементом — тому прокручується разом із текстом
-  // без додаткової синхронізації скролу.
-  const verticalMarks = showVerticalRuler ? buildRulerMarks(naturalHeightPx / PX_PER_MM) : [];
+  // Вертикальна лінійка — та сама логіка позначок (buildRulerMarks), що й у
+  // горизонтальної PageRuler.tsx, але своя шкала НА КОЖНУ СТОРІНКУ: 0 на
+  // верху текстової зони, далі кожні 5 мм, цифра — кожні 10. Бюджет висоти
+  // береться зі знімка пагінації (`contentHeightPx`), а не з геометрії:
+  // це саме те число, за яким плагін робив розриви, тож п'ятдесяті міліметри
+  // лінійки і розрив у тексті не можуть розійтись.
+  const verticalMarks = showVerticalRuler && pagination ? buildRulerMarks(pagination.contentHeightPx / PX_PER_MM) : [];
+
+  // Світлі зони = заповнений текст кожної сторінки. Між ними лишається тло
+  // смуги — і воно ж стоїть під смугою розриву в тексті, тому межа сторінки
+  // на лінійці видно рівно там, де вона в рукописі.
+  const pageZones =
+    showVerticalRuler && pagination
+      ? pagination.pageTopsPx
+          .map((topPx, i) => ({ topPx, heightPx: Math.max(0, (pagination.pageBottomsPx[i] ?? topPx) - topPx) }))
+          .filter((z) => z.heightPx > 0)
+      : [];
+  const budgetMmLabel = pagination ? formatMm(pagination.contentHeightPx / PX_PER_MM) : '';
+  const sheetMmLabel = pageGeometry ? formatMm(pageGeometry.pageHeightMm) : '';
 
   return (
     // Раніше тут був суцільний непрозорий `background: '#0f172a'` — саме те
@@ -71,20 +103,43 @@ export const PageColumn: React.FC<PageColumnProps> = ({ children, widthMm, class
     <div ref={outerRef} className={`overflow-y-auto flex ${className || ''}`}>
       {showVerticalRuler && (
         <div
-          className="shrink-0 relative select-none"
-          style={{ width: VERTICAL_RULER_WIDTH_PX, height: naturalHeightPx * scale, background: 'rgba(30, 41, 59, 0.55)' }}
+          className="shrink-0 relative select-none overflow-hidden"
+          style={{
+            width: VERTICAL_RULER_WIDTH_PX,
+            height: naturalHeightPx * scale,
+            background: '#1e293b',
+            // Внутрішня лінія по правому краю: світлі зони тексту тієї ж
+            // барви, що й аркуш (`#fffefc`), тож без цієї межі смуга
+            // зливалась би зі сторінкою в одну білу пляму. Inset-тінь, а не
+            // border — щоб не зсунути розкладку на 1 px.
+            boxShadow: 'inset -1px 0 0 rgba(100, 116, 139, 0.45)',
+          }}
         >
-          {verticalMarks.map((m) => (
-            <div key={m.mm} className="absolute left-0 right-0" style={{ top: m.mm * PX_PER_MM * scale }}>
-              <div style={{ height: 1, width: m.major ? '100%' : '50%', background: '#94a3b8' }} />
-              {m.major && (
-                <span
-                  className="text-[8px] text-slate-500 absolute left-0.5 top-0.5 font-mono"
-                  style={{ writingMode: 'vertical-rl' }}
-                >
-                  {m.mm}
-                </span>
-              )}
+          {pageZones.map((z, i) => (
+            <div
+              key={z.topPx}
+              className="absolute left-0 right-0 overflow-hidden"
+              style={{ top: z.topPx * scale, height: z.heightPx * scale, background: '#fffefc' }}
+              title={t('editor.verticalRulerPageTip', {
+                page: i + 1,
+                filled: formatMm(z.heightPx / PX_PER_MM),
+                budget: budgetMmLabel,
+                sheet: sheetMmLabel,
+              })}
+            >
+              {verticalMarks.map((m) => (
+                <div key={m.mm} className="absolute left-0 right-0" style={{ top: m.mm * PX_PER_MM * scale }}>
+                  <div style={{ height: 1, width: m.major ? '100%' : '50%', background: '#94a3b8' }} />
+                  {m.major && (
+                    <span
+                      className="text-[8px] text-slate-500 absolute left-0.5 top-0.5 font-mono"
+                      style={{ writingMode: 'vertical-rl' }}
+                    >
+                      {m.mm}
+                    </span>
+                  )}
+                </div>
+              ))}
             </div>
           ))}
         </div>

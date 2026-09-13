@@ -1,6 +1,17 @@
 /** CSS-специфікація визначає 1mm = 96/25.4 px незалежно від реального DPI екрана — фіксована, передбачувана величина. */
 export const PX_PER_MM = 96 / 25.4;
 
+/**
+ * Міліметри для підпису: ціле число — без дробу, дробове — з одним знаком
+ * (12.7 мм — реальне поле KDP для 6×9″, і «13» тут було б неправдою).
+ * Спільна для обох лінійок (PageRuler.tsx і PageColumn.tsx), щоб «170 » та
+ * «170.0» не з'являлись в одному інтерфейсі поруч.
+ */
+export function formatMm(v: number): string {
+  if (!Number.isFinite(v)) return '0';
+  return Math.abs(v - Math.round(v)) < 0.05 ? String(Math.round(v)) : v.toFixed(1);
+}
+
 export interface RulerMark {
   /** Відстань позначки від початку лінійки, у мм. */
   mm: number;

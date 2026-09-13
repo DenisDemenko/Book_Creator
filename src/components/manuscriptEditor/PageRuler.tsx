@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { usePageScale } from './usePageScale';
-import { PX_PER_MM, buildRulerMarks, buildRulerSheetLayout } from '../../utils/mmUnits';
+import { PX_PER_MM, buildRulerMarks, buildRulerSheetLayout, formatMm } from '../../utils/mmUnits';
 import { clampMarginMm, type MarginSide } from '../../utils/pageGeometry';
 import { useLanguage } from '../../i18n/LanguageContext';
 
@@ -62,10 +62,6 @@ interface PageRulerProps {
  * `clampMarginMm` з pageGeometry.ts (спільні з PdfEditorView найменші 5 мм).
  */
 
-/** Один десятковий знак лише там, де він є (12.7 мм KDP), інакше ціле. */
-const fmtMm = (v: number): string =>
-  Math.abs(v - Math.round(v)) < 0.05 ? String(Math.round(v)) : v.toFixed(1);
-
 export const PageRuler: React.FC<PageRulerProps> = ({
   sheetWidthMm,
   textWidthMm,
@@ -117,12 +113,12 @@ export const PageRuler: React.FC<PageRulerProps> = ({
   const sheet = buildRulerSheetLayout({ sheetWidthMm, textWidthMm, insideMm, outsideMm, scale });
   const { sheetWidthPx, insidePx, textWidthPx, outsidePx, sheetLeftScaledPx } = sheet;
 
-  const widthLabel = fmtMm(textWidthMm);
+  const widthLabel = formatMm(textWidthMm);
   const sheetTip = t('editor.rulerSheetTip', {
-    sheet: fmtMm(sheetWidthMm),
+    sheet: formatMm(sheetWidthMm),
     text: widthLabel,
-    inside: fmtMm(insideMm),
-    outside: fmtMm(outsideMm),
+    inside: formatMm(insideMm),
+    outside: formatMm(outsideMm),
   });
 
   return (

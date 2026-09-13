@@ -1,6 +1,8 @@
 /**
- * Тести математики лінійки редактора (src/utils/mmUnits.ts).
- * Запуск: npm run test:ruler-layout
+ * Тести математики лінійок редактора — усього, що стоїть між «мм у книзі» і
+ * «px на екрані»: `src/utils/mmUnits.ts` (аркуш і позначки) і знімок
+ * пагінації з `src/utils/pageBreaker.ts` (де починається й закінчується
+ * кожна сторінка). Запуск: npm run test:ruler-layout
  *
  * ЧОМУ ЦЕ ВАРТО ПЕРЕВІРЯТИ. Дві помилки в цьому місці вже були живі:
  *
@@ -17,7 +19,8 @@
  *     легко — зміною `transformOrigin` чи забутим множником `scale`. Тому
  *     рівність перевіряється числом, а не поглядом.
  */
-import { PX_PER_MM, buildRulerMarks, buildRulerSheetLayout } from '../src/utils/mmUnits.ts';
+import { PX_PER_MM, buildRulerMarks, buildRulerSheetLayout, formatMm } from '../src/utils/mmUnits.ts';
+import { buildPaginationSnapshot, paginationSnapshotsEqual } from '../src/utils/pageBreaker.ts';
 
 let passed = 0;
 let failed = 0;
@@ -103,6 +106,62 @@ function main() {
     t('A4: права межа зони збігається з правою межею колонки', eq(a4.sheetLeftScaledPx - (a4.insidePx + a4.textWidthPx) * 1, -(a4.textWidthPx / 2) * 1));
     t('масштаб 0 не дає NaN', eq(buildRulerSheetLayout({ sheetWidthMm: 210, textWidthMm: 170, insideMm: 20, outsideMm: 20, scale: 0 }).sheetLeftScaledPx, 0));
     t('нульові поля: аркуш і колонка збігаються', eq(buildRulerSheetLayout({ sheetWidthMm: 148, textWidthMm: 148, insideMm: 0, outsideMm: 0, scale: 1 }).sheetLeftScaledPx, 74 * PX_PER_MM));
+  }
+
+  console.log('\nЗнімок пагінації — межі сторінок для вертикальної лінійки:');
+  {
+    const budget = 971.34; // 257 мм (A4 з полями 20+20) у px
+    const one = buildPaginationSnapshot([{ top: 46, bottom: 46 + budget }], [], budget);
+    t('одна сторінка — одна зона', one.pageTopsPx.length === 1 && one.pageBottomsPx.length === 1);
+    t('верх узято з блоку, а не з нуля', eq(one.pageTopsPx[0], 46), String(one.pageTopsPx[0]));
+    t('бюджет перенесено як є', eq(one.contentHeightPx, budget));
+
+    // Друга сторінка стоїть нижче на висоту смуги розриву — саме тому
+    // лінійка бере ВІДРЕНДЕРНІ межі, а не «чисті». Тут смуга 15 px.
+    const two = buildPaginationSnapshot(
+      [
+        { top: 46, bottom: 46 + budget },
+        { top: 46 + budget + 15, bottom: 46 + 2 * budget + 15 },
+      ],
+      [1],
+      budget
+    );
+    t('розрив ділить на дві сторінки', two.pageTopsPx.length === 2, JSON.stringify(two.pageTopsPx));
+    t('друга сторінка — на 15 px нижче чистої межі', eq(two.pageTopsPx[1], 46 + budget + 15), String(two.pageTopsPx[1]));
+    t('зони сусідніх сторінок не перекриваються', two.pageBottomsPx[0] <= two.pageTopsPx[1]);
+
+    // Сторінка, що закінчилась раніше бюджету (розрив перенесено через
+    // обтічне фото) — саме це лінійка й мусить показати авторові.
+    const early = buildPaginationSnapshot([{ top: 100, bottom: 600 }, { top: 615, bottom: 1200 }], [1], budget);
+    t('недозаповнена сторінка має коротшу зону', eq(early.pageBottomsPx[0] - early.pageTopsPx[0], 500), String(early.pageBottomsPx[0] - early.pageTopsPx[0]));
+    t('але бюджет лишається тим самим — шкала не бреше', eq(early.contentHeightPx, budget));
+
+    t('порожній документ — жодної зони', buildPaginationSnapshot([], [], budget).pageTopsPx.length === 0);
+    t('розрив на початку ігнорується', buildPaginationSnapshot([{ top: 10, bottom: 20 }], [0], budget).pageTopsPx.length === 1);
+    t('розрив поза межами ігнорується', buildPaginationSnapshot([{ top: 10, bottom: 20 }], [5], budget).pageTopsPx.length === 1);
+    t('нульова висота блоку не дає від’ємної зони', buildPaginationSnapshot([{ top: 10, bottom: 10 }], [], budget).pageBottomsPx[0] === 10);
+    t('знімок не залежить від бюджету 0 — але й не вигадує зон', buildPaginationSnapshot([{ top: 10, bottom: 10 }], [], 0).pageTopsPx.length === 1);
+  }
+
+  console.log('\nПорівняння знімків (щоб не перерендерювати редактор дарма):');
+  {
+    const a = buildPaginationSnapshot([{ top: 46, bottom: 1017 }], [], 971);
+    const b = buildPaginationSnapshot([{ top: 46, bottom: 1017 }], [], 971);
+    const c = buildPaginationSnapshot([{ top: 46, bottom: 1017 }], [], 900);
+    const d = buildPaginationSnapshot([{ top: 46, bottom: 1017 }, { top: 1032, bottom: 2000 }], [1], 971);
+    t('однакові виміри — той самий знімок', paginationSnapshotsEqual(a, b));
+    t('інший бюджет — різні', !paginationSnapshotsEqual(a, c));
+    t('інша кількість сторінок — різні', !paginationSnapshotsEqual(a, d));
+    t('null і знімок — різні', !paginationSnapshotsEqual(null, a) && !paginationSnapshotsEqual(a, null));
+    t('два null — однакові', paginationSnapshotsEqual(null, null));
+  }
+
+  console.log('\nПідпис міліметрів:');
+  {
+    t('ціле — без дробу', formatMm(170) === '170', formatMm(170));
+    t('дробове KDP — з одним знаком', formatMm(12.7) === '12.7', formatMm(12.7));
+    t('близьке до цілого округлюється', formatMm(119.98) === '120', formatMm(119.98));
+    t('NaN не потрапляє в підпис', formatMm(NaN) === '0', formatMm(NaN));
   }
 
   console.log(`\nРезультат: ${passed} пройшло, ${failed} впало.`);
