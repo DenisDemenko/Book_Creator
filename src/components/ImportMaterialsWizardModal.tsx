@@ -12,6 +12,7 @@ import {
   ShieldAlert,
   Sparkles,
   ClipboardList,
+  Loader2,
 } from 'lucide-react';
 import { Book, BookIllustration, Chapter, CourseMaterial, Model3DFormat, UserRole, AuthUser } from '../types';
 import { hasPermission } from '../utils/rbac';
@@ -52,9 +53,15 @@ type StepKey = typeof STEPS[number];
  *   • .docx — через mammoth, і РАЗОМ із текстом витягує вбудовані
  *     зображення. Раніше тут стояв `extractRawText`, який мовчки викидає
  *     всі картинки — саме тому .docx переносився як голий текст.
+ *
+ * `onImagesRead` потрібен лише для смужки стану: на рукописі з 42 картинками
+ * розбір триває секунди, і без лічильника автор не бачить, що робота йде.
+ * Колбек кличеться всередині `convertImage` після кожного `image.read`, тож
+ * число справжнє, а не намальоване смужкою навмання.
  */
 async function readManuscriptFile(
-  file: File
+  file: File,
+  onImagesRead?: (count: number) => void
 ): Promise<{ text: string; encoding: string; docxImages: PendingDocxImage[] }> {
   const name = file.name.toLowerCase();
   if (name.endsWith('.docx')) {
@@ -72,6 +79,7 @@ async function readManuscriptFile(
           const index = collected.length;
           return image.read('base64').then((data: string) => {
             collected.push({ contentType: image.contentType, base64: data });
+            onImagesRead?.(collected.length);
             return { src: `${DOCX_IMAGE_SRC_PREFIX}${index}` };
           });
         }),
@@ -144,6 +152,10 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
   const [hasCourse, setHasCourse] = useState(false);
   const [models, setModels] = useState<PendingModel[]>([]);
   const [isBusy, setIsBusy] = useState(false);
+  /** Рядок стану під час тривалої дії (читання .docx, збереження картинок). */
+  const [busyLabel, setBusyLabel] = useState<string | null>(null);
+  /** Лічильник прогресу; `total === 0` — кількість невідома (показуємо лише «скільки зроблено»). */
+  const [busyProgress, setBusyProgress] = useState<{ done: number; total: number } | null>(null);
 
   const allowed = hasPermission(currentRole, 'canImportBook');
   const step: StepKey = STEPS[stepIdx];
@@ -160,6 +172,8 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
     setHasCourse(false);
     setModels([]);
     setIsBusy(false);
+    setBusyLabel(null);
+    setBusyProgress(null);
   };
 
   const handleClose = () => {
@@ -171,8 +185,15 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
     const file = e.target.files?.[0];
     if (!file) return;
     setIsBusy(true);
+    setBusyLabel(t('importWizard.readingFile'));
+    setBusyProgress(null);
     try {
-      const decoded = await readManuscriptFile(file);
+      const decoded = await readManuscriptFile(file, (n) => {
+        // Перша ж прочитана картинка означає, що .docx уже розібрано до тіла
+        // документа — саме тоді напис і має змінитись.
+        if (n === 1) setBusyLabel(t('importWizard.parsingDocx'));
+        setBusyProgress({ done: n, total: 0 });
+      });
       setManuscriptText(decoded.text);
       setDocxImages(decoded.docxImages);
       if (!title.trim()) {
@@ -180,6 +201,8 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
       }
     } finally {
       setIsBusy(false);
+      setBusyLabel(null);
+      setBusyProgress(null);
       if (textFileInputRef.current) textFileInputRef.current.value = '';
     }
   };
@@ -269,6 +292,9 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
 
   const handleFinish = async () => {
     setIsBusy(true);
+    setBusyLabel(t('importWizard.savingImages'));
+    const totalImages = images.length + docxImages.length;
+    setBusyProgress(totalImages > 0 ? { done: 0, total: totalImages } : null);
     try {
       const bookId = `BK-${Date.now().toString(36).toUpperCase()}`;
       const now = new Date().toISOString();
@@ -279,6 +305,7 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
       for (let idx = 0; idx < images.length; idx++) {
         const img = images[idx];
         const { url } = await uploadImageToMediaLibrary(img, bookId);
+        setBusyProgress((p) => (p ? { ...p, done: p.done + 1 } : p));
         uploaded.push({
           id: `il-import-${Date.now()}-${idx}`,
           url,
@@ -294,6 +321,7 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
       let docxImagesFailed = 0;
       for (const img of docxImages) {
         const { url, uploaded: didUpload } = await uploadImageToMediaLibrary(img, bookId);
+        setBusyProgress((p) => (p ? { ...p, done: p.done + 1 } : p));
         if (!didUpload && !isGuest) {
           // Зареєстрований користувач отримав відмову — це ліміт тарифу.
           // Вкласти десятки мегабайт base64 у книгу не можна (JSON книги
@@ -352,6 +380,8 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
       onClose();
     } finally {
       setIsBusy(false);
+      setBusyLabel(null);
+      setBusyProgress(null);
     }
   };
 
@@ -429,6 +459,29 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
 
             {/* Body */}
             <div className="p-6 space-y-4 text-xs overflow-y-auto max-h-[62vh]">
+              {/*
+                Смужка стану. Живе тут, а не в конкретному кроці, бо тривалі
+                дії трапляються на різних кроках: читання .docx — на першому,
+                збереження картинок у медіатеку — на останньому.
+              */}
+              {busyLabel && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="flex items-center gap-2 px-3 py-2 rounded-xl bg-violet-500/10 border border-violet-500/30 text-violet-200"
+                >
+                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                  <span>{busyLabel}</span>
+                  {busyProgress && (busyProgress.total > 0 || busyProgress.done > 0) && (
+                    <span className="ml-auto font-mono text-violet-300 shrink-0">
+                      {busyProgress.total > 0
+                        ? `${busyProgress.done} / ${busyProgress.total}`
+                        : String(busyProgress.done)}
+                    </span>
+                  )}
+                </div>
+              )}
+
               {step === 'text' && (
                 <div className="space-y-4">
                   <p className="text-slate-400">{t('importWizard.textStepIntro')}</p>
