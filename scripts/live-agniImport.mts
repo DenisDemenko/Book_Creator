@@ -1,6 +1,6 @@
 /**
  * Живий прогін майстра перенесення на СПРАВЖНІЙ книзі автора.
- * Запуск: npx tsx scripts/live-agniImport.mts
+ * Запуск: npx tsx scripts/live-agniImport.mts [--engine=nova|chromium|pandoc] [--chromium=<шлях>]
  *
  * Це не юніт-тест із синтетичним рядком, а перевірка на реальному рукописі
  * («Самоучитель для Архата», тека `D:\Книга первая\Книга Агни Йог _Архат_`),
@@ -9,9 +9,16 @@
  *   • .docx містить вбудовані зображення — `extractRawText` їх викидав;
  *   • картинки мусять дійти і в медіатеку, і в текст (маркери на своїх місцях).
  *
+ * РУШІЙ ОБИРАЄТЬСЯ ПРАПОРЦЕМ (запис #170). Власник підтвердив виправлення
+ * #169 на проді для власної верстки Nova, і решту рушіїв треба перевірити
+ * тим самим мірилом: картинка мусить стояти там, де її поставив автор, а
+ * маркер не має бути надрукований.
+ *
  * Скрипт нічого не змінює: він лише читає файли й перевіряє інваріанти. Якщо
  * файлів немає (інша машина), він чесно про це каже й виходить з кодом 0 —
- * щоб його можна було запускати де завгодно.
+ * щоб його можна було запускати де завгодно. Так само він поводиться, коли
+ * обраного рушія немає в системі (напр. pandoc без TeX Live): це «прогін
+ * неможливий тут», а не «рушій зламаний».
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,6 +30,21 @@ import { collectImageMarkerIds } from '../src/utils/imageMarkers.ts';
 const DIR = 'D:/Книга первая/Книга Агни Йог _Архат_';
 const TXT = path.join(DIR, 'Самоучитель для Архата или Путь Архата для чайников.txt');
 const DOCX = path.join(DIR, 'Самоучитель для Архата или Путь Архата для чайников.docx');
+
+const argValue = (name: string): string | undefined =>
+  process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
+
+const ENGINE = argValue('engine') || 'nova';
+/** Скіль-ко глав узяти у верстку (0 — усі): потрібно рушіям на справжньому браузері. */
+const chapterLimit = Number(argValue('chapters') || 0);
+/*
+  Шлях до браузера і запас часу задаємо ДО першого імпорту рушія: обидві
+  величини читаються на завантаженні модуля (`chromiumEngine.ts`), тож пізніше
+  `process.env` на них уже не впливає.
+*/
+const chromiumPath = argValue('chromium');
+if (chromiumPath) process.env.CHROMIUM_PATH = chromiumPath;
+process.env.CHROMIUM_TIMEOUT_MS = process.env.CHROMIUM_TIMEOUT_MS || '600000';
 
 let pass = 0;
 let fail = 0;
@@ -127,15 +149,18 @@ if (fs.existsSync(DOCX)) {
 
   // ── 4. Верстка PDF із цих самих маркерів ──────────────────────────────
   /*
-    ГОЛОВНА ПЕРЕВІРКА ЗАПИСУ #169. Доти серверна верстка не бачила маркерів:
-    друкувала їх голим текстом, а 42 картинки скидала купою в кінець першого
-    розділу. На проді це виглядало як «книга опублікувалась без картинок».
-    Тут той самий рукопис проходить справжній шлях рушія Nova з тими самими
-    байтами зображень — і перевіряється МІСЦЕ картинки, а не факт «PDF є».
+    ГОЛОВНА ПЕРЕВІРКА ЗАПИСУ #169 (і #170 — для решти рушіїв). Доти серверна
+    верстка не бачила маркерів: друкувала їх голим текстом, а 42 картинки
+    скидала купою в кінець першого розділу. На проді це виглядало як «книга
+    опублікувалась без картинок». Тут той самий рукопис проходить справжній
+    шлях рушія з тими самими байтами зображень — і перевіряється МІСЦЕ
+    картинки, а не факт «PDF є».
   */
-  console.log('\n4. Верстка PDF: картинки на своїх місцях, а не купою:');
+  console.log(`\\n4. Верстка PDF рушієм «${ENGINE}»: картинки на своїх місцях, а не купою:`);
   const { bookToPdfInput } = await import('../server/pdf/pdfFromBook.ts');
   const { renderBookPdf } = await import('../server/pdf/pdfRenderer.ts');
+  const registry = await import('../server/pdf/engines/registry.ts');
+  const { PdfEngineError } = await import('../server/pdf/engines/types.ts');
 
   const dataUrl = (i: number) => `data:${slots.get(i)!.contentType};base64,${slots.get(i)!.base64}`;
   const chapters = parsed.chapters.map((ch, index) => ({
@@ -161,16 +186,39 @@ if (fs.existsSync(DOCX)) {
     }
   }
 
+  /*
+    ОБМЕЖЕННЯ ОБСЯГУ ПОТРІБНЕ РУШІЯМ, ЩО МАЛЮЮТЬ СПРАВЖНІМ БРАУЗЕРОМ.
+    Власна верстка на 489 сторінках із 42 картинками — це пів хвилини, а той
+    самий рукопис через Chromium означає один HTML на ~50 МБ і друк 489
+    сторінок. На ноутбуці це хвилини й гігабайти памʼяті, а перевіряємо ми
+    МІСЦЕ картинки, а не витривалість машини. Тому `--chapters=N` бере перші
+    N глав З ТИМИ САМИМИ справжніми маркерами й картинками, а скільком
+    ілюстраціям це дало пройти — сказано прямо, а не замовчано.
+  */
+  const keptChapters = chapterLimit > 0 ? chapters.slice(0, chapterLimit) : chapters;
+  const keptMarkerIds = new Set<string>();
+  for (const ch of keptChapters) {
+    for (const sec of ch.sections) {
+      for (const id of collectImageMarkerIds(sec.content)) keptMarkerIds.add(id);
+    }
+  }
+  const usedImages = images.filter((img) => keptMarkerIds.has(img.id));
+  if (chapterLimit > 0) {
+    console.log(
+      `     (обмежено першими ${keptChapters.length} главами: ${usedImages.length} картинок із ${images.length})`
+    );
+  }
+
   const bookLike = {
     id: 'live-agni',
     title: 'Самоучитель для Архата',
     author: 'Деменко Денис',
-    chapters,
-    illustrations: images.map((img) => {
+    chapters: keptChapters,
+    illustrations: usedImages.map((img) => {
       const order = Number(img.id.slice('docx-img-'.length));
       return {
         id: img.id,
-        chapterId: chapterOfMarker.get(img.id) || chapters[0]?.id,
+        chapterId: chapterOfMarker.get(img.id) || keptChapters[0]?.id,
         url: dataUrl(order),
         caption: img.caption || '',
       };
@@ -182,21 +230,67 @@ if (fs.existsSync(DOCX)) {
 
   const layout = { pageSize: 'A5' as const };
   const startedRender = Date.now();
-  const rendered = await renderBookPdf(bookToPdfInput(bookLike as never), layout as never);
+
+  let rendered: { bytes: Uint8Array; pageCount: number; notesUk: string[] };
+  try {
+    rendered =
+      ENGINE === 'nova'
+        ? await renderBookPdf(bookToPdfInput(bookLike as never), layout as never)
+        : await registry.renderWithEngine(ENGINE, {
+            book: bookLike as never,
+            kind: 'book',
+            spec: layout as never,
+            ownerId: null,
+            ownerRole: null,
+          });
+  } catch (err) {
+    /*
+      Немає рушія в системі — це «прогін неможливий тут», а не «рушій
+      зламався». Тому кажемо прямо, що саме треба поставити, і виходимо з
+      кодом 0: вдавати провал там, де перевірка навіть не почалась, було б
+      брехнею в інший бік.
+    */
+    if (err instanceof PdfEngineError && err.kind === 'unavailable') {
+      console.log(`  ⚠ рушій «${ENGINE}» недоступний на цій машині — прогін пропущено.`);
+      console.log(`     ${err.message}`);
+      console.log(`\\nРезультат: ${pass} пройшло, ${fail} впало (розділ 4 пропущено).`);
+      process.exit(0);
+    }
+    throw err;
+  }
+
   console.log(`     (${rendered.pageCount} стор., ${mb(rendered.bytes.length)}, ${Date.now() - startedRender} мс)`);
 
-  t('усі картинки вставлено — жодної примітки про втрату',
-    rendered.notesUk.length === 0,
-    JSON.stringify(rendered.notesUk).slice(0, 200));
+  /*
+    Примітки бувають двох родів, і плутати їх не можна: «рушій зробив інакше,
+    ніж просив автор» (у Chromium це нормальна фраза про те, що макет виконано
+    браузером) і справжня ВТРАТА — картинку не вставлено. Падає прогін лише на
+    другій.
+  */
+  const lossNotes = rendered.notesUk.filter((n) => /не вставлен|пропущен|не знайдено/i.test(n));
+  t('жодної картинки не втрачено',
+    lossNotes.length === 0,
+    lossNotes.length ? JSON.stringify(lossNotes).slice(0, 300) : `${rendered.notesUk.length} приміток рушія, втрат немає`);
+  for (const note of rendered.notesUk) console.log(`     · ${note}`);
 
   const { PDFDocument, PDFName, PDFDict } = await import('pdf-lib');
   const parsedBytes = await PDFDocument.load(rendered.bytes);
   const pagesWithImages: number[] = [];
   parsedBytes.getPages().forEach((page, i) => {
     const res = (page as unknown as { node: { Resources(): unknown } }).node.Resources() as
-      | { lookup(name: unknown, type: unknown): unknown }
+      | { has(name: unknown): boolean; lookup(name: unknown, type: unknown): unknown }
       | undefined;
-    const xo = res?.lookup(PDFName.of('XObject'), PDFDict) as
+    if (!res) return;
+    /*
+      `has` тут не зайвий: `lookup(key, PDFDict)` КИДАЄ, коли ключа немає —
+      pdf-lib перевіряє тип на `undefined` і падає «Expected instance of
+      PDFDict». А сторінка без жодного XObject — звичайна річ: Chromium так
+      робить для чистих текстових сторінок. Знайдено першим живим прогоном
+      рушія «chromium» (запис #170): прогін падав уже ПІСЛЯ того, як PDF
+      зібрався, тобто ламалась перевірка, а не верстка.
+    */
+    if (!res.has(PDFName.of('XObject'))) return;
+    const xo = res.lookup(PDFName.of('XObject'), PDFDict) as
       | { entries?: () => Array<[unknown, unknown]> }
       | undefined;
     if (!xo?.entries) return;
@@ -212,8 +306,8 @@ if (fs.existsSync(DOCX)) {
   });
   pagesWithImages.sort((a, b) => a - b);
   t('картинок у PDF не менше, ніж у книзі',
-    pagesWithImages.length >= images.length,
-    `${pagesWithImages.length} сторінок із картинками проти ${images.length} ілюстрацій`);
+    pagesWithImages.length >= usedImages.length,
+    `${pagesWithImages.length} сторінок із картинками проти ${usedImages.length} ілюстрацій`);
 
   /* Купа в кінці першого розділу виглядала б так: усі картинки на кількох
      перших сторінках. Тепер місце задає рукопис, тож картинки мусять бути
@@ -245,8 +339,8 @@ if (fs.existsSync(DOCX)) {
   /* Останній маркер рукопису (`docx-img-41`, «Слушайте музыку») — найкраща
      перевірка місця: якщо картинки й далі йдуть купою після вступу, його
      сторінка виявиться близько до початку. */
-  const lastMarkerId = images[images.length - 1].id;
-  const lastCaption = images[images.length - 1].caption;
+  const lastMarkerId = usedImages[usedImages.length - 1].id;
+  const lastCaption = usedImages[usedImages.length - 1].caption;
   if (lastCaption) {
     for (let p = 1; p <= doc.numPages; p += 1) {
       const page = await doc.getPage(p);
@@ -260,8 +354,8 @@ if (fs.existsSync(DOCX)) {
     }
   }
 
-  fs.writeFileSync('/tmp/nova-live-agni.pdf', rendered.bytes);
-  console.log(`  -> /tmp/nova-live-agni.pdf (${rendered.pageCount} стор., ${mb(rendered.bytes.length)})`);
+  fs.writeFileSync(`/tmp/nova-live-agni-${ENGINE}.pdf`, rendered.bytes);
+  console.log(`  -> /tmp/nova-live-agni-${ENGINE}.pdf (${rendered.pageCount} стор., ${mb(rendered.bytes.length)})`);
 }
 
 console.log(`\nРезультат: ${pass} пройшло, ${fail} впало.`);
