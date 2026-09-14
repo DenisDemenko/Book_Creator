@@ -99,7 +99,8 @@ interface ChatSessionSummary {
   updatedAt: string;
 }
 
-interface ChatModelOption {
+/** Опис моделі чату — спільний для «Швидкого AI» і сторінки «Промти ядра» в адмінпанелі. */
+export interface ChatModelOption {
   id: string;
   label: string;
   provider: string;
@@ -824,6 +825,12 @@ const CORE_FIELD_DEFS: Record<string, { key: string; label: string; textarea?: b
  * `{system, user}` (не варіанти '1'/'2'/'3', як у фото-конструктора).
  * Правки одразу впливають на реальні виклики решти сайту (Q6) — тому тут
  * є РЕАЛЬНИЙ тестовий виклик (Q11/Q14), не лише текстовий прев'ю.
+ *
+ * ЖИВЕ В ЦЬОМУ ФАЙЛІ, АЛЕ ВИКОРИСТОВУЄТЬСЯ У ДВОХ МІСЦЯХ: тут — як
+ * вкладенка «Швидкого AI», і на сторінці адмінпанелі — як вузол «Промти
+ * ядра». Друге місце додане тому, що донедавна вузол показував не редактор,
+ * а заглушку «відкривається в іншому місці». Виносити 700 рядків в окремий
+ * файл заради цього не стали — друга копія розійшлася б із першою.
  */
 /** Одне зображення медіатеки книги — ті самі три джерела, що й InsertImageModal.tsx / MediaLibraryView.tsx. */
 interface CoreMediaItem {
@@ -847,9 +854,16 @@ function collectBookMedia(book: Book): CoreMediaItem[] {
   return items;
 }
 
-const CoreAiPanel: React.FC<{
-  book: Book;
-  onClose: () => void;
+export const CoreAiPanel: React.FC<{
+  /**
+   * Книга потрібна ДВОМ речам: пікеру медіатеки для «Текст за фото» і
+   * `bookId` у тестовій генерації портрета. На сторінці адмінпанелі книги
+   * немає (там не працюють з конкретною книгою) — пікер тоді порожній, а
+   * `bookId` просто не надсилається.
+   */
+  book?: Book | null;
+  /** Кнопка закриття. Не задана — панель відкрита як сторінка, а не як вкладенка вікна. */
+  onClose?: () => void;
   models: ChatModelOption[];
   selectedModel: string;
   onSelectModel: (modelId: string) => void;
@@ -914,7 +928,7 @@ const CoreAiPanel: React.FC<{
   const [testing, setTesting] = useState(false);
   /** Пікер медіатеки для «Текст за фото» — відкритий/закритий стан окремо від самих тестових полів. */
   const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
-  const bookMedia = useMemo(() => collectBookMedia(book), [book]);
+  const bookMedia = useMemo(() => (book ? collectBookMedia(book) : []), [book]);
 
   /** «Згенерувати персонажа» після тестового виклику «Промпт персонажа» — окремий, реальний виклик генерації арту. */
   const [charGenLoading, setCharGenLoading] = useState(false);
@@ -1101,7 +1115,7 @@ const CoreAiPanel: React.FC<{
           prompt: craftedCharacterPrompt.prompt,
           aspectRatio: craftedCharacterPrompt.recommendedAspect || '1:1',
           engine: selectedImageEngine || undefined,
-          bookId: book.id,
+          bookId: book?.id,
         }),
       });
       const data = await res.json();
@@ -1143,9 +1157,11 @@ const CoreAiPanel: React.FC<{
             </option>
           ))}
         </select>
-        <button onClick={onClose} className="nm-btn p-2 rounded-lg text-[var(--on-surface-variant)]">
-          <X className="w-3.5 h-3.5" />
-        </button>
+        {onClose && (
+          <button onClick={onClose} className="nm-btn p-2 rounded-lg text-[var(--on-surface-variant)]">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
       </div>
     </div>
   );

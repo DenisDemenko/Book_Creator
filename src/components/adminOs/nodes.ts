@@ -14,7 +14,21 @@
 
 import type { AdminTab } from '../AdminPanelView';
 
-export type NodeAction = { kind: 'panel'; tab: AdminTab } | { kind: 'modal'; modal: 'api-keys' | 'prompts' };
+/**
+ * Чим вузол відкривається.
+ *
+ * `panel` — вкладка наявного `AdminPanelView` (він і далі малює свій вміст).
+ * `view` — самостійна сторінка адмінки: `api-keys` (`ApiKeysView`),
+ * `core-ai` (конструктор промтів ядра), `moderation` (черга погоджень).
+ *
+ * Модальних вузлів більше немає: `kind: 'modal'` тримав «Ключі API» й
+ * «Промти ядра» у віконці поверх карти, і саме там жила заглушка — вузол
+ * «Промти ядра» замість редактора показував текст «відкривається в іншому
+ * місці». Тепер у кожного вузла є справжня сторінка.
+ */
+export type NodeAction = { kind: 'panel'; tab: AdminTab } | { kind: 'view'; view: AdminView };
+
+export type AdminView = 'api-keys' | 'core-ai' | 'moderation';
 
 export interface AdminNode {
   id: string;
@@ -27,10 +41,21 @@ export interface AdminNode {
   action: NodeAction;
   /** Група в лівій колонці консолі. */
   group: 'core' | 'operations';
+  /**
+   * Де пігулка стоїть на карті. Розкладка задана макетом власника (3 зверху,
+   * по 4 у бічних колонках), і тепер вона тут, а не «перші три в масиві» —
+   * інакше доданий вузол зсував усі наступні в чужу колонку.
+   */
+  slot: 'top' | 'left' | 'right';
+  /**
+   * Червона рамка замість ціанової. Потрібна «Історії комітів»: у макеті
+   * вона єдина виділена іншим кольором, бо працює лише при локальному запуску.
+   */
+  tone?: 'neon' | 'danger';
 }
 
 /**
- * Сім вузлів ядра — рівно ті області, якими адміністратор Nova реально
+ * Одинадцять вузлів — рівно ті області, якими адміністратор Nova реально
  * керує. Порядок не випадковий: спершу те, без чого платформа не працює
  * (провайдери й промти), далі гроші, далі люди, далі зовнішні звʼязки.
  */
@@ -41,8 +66,9 @@ export const ADMIN_NODES: AdminNode[] = [
     hint: 'ключі · доступність',
     description:
       'Ключі провайдерів, якими працює вся платформа. Ключі платформні: їх вводить адміністратор, і саме вони живлять генерацію для всіх авторів.',
-    action: { kind: 'modal', modal: 'api-keys' },
+    action: { kind: 'view', view: 'api-keys' },
     group: 'core',
+    slot: 'top',
   },
   {
     id: 'prompts',
@@ -50,8 +76,9 @@ export const ADMIN_NODES: AdminNode[] = [
     hint: 'інструкції моделей',
     description:
       'Тексти інструкцій, за якими працюють модулі: чат, текст за фото, абзац за виділенням, оформлення /design, верстка KDP. Правка діє на весь сайт одразу.',
-    action: { kind: 'modal', modal: 'prompts' },
+    action: { kind: 'view', view: 'core-ai' },
     group: 'core',
+    slot: 'top',
   },
   {
     id: 'pricing',
@@ -61,6 +88,7 @@ export const ADMIN_NODES: AdminNode[] = [
       'Тарифи моделей і аналітика споживання. Саме звідси беруться суми у витратах — якщо тариф не той, уся економіка рахується неправильно.',
     action: { kind: 'panel', tab: 'ai' },
     group: 'core',
+    slot: 'top',
   },
   {
     id: 'costs',
@@ -69,6 +97,7 @@ export const ADMIN_NODES: AdminNode[] = [
     description: 'Фактичні витрати на генерації за період: за днями, за рушіями, за користувачами.',
     action: { kind: 'panel', tab: 'costs' },
     group: 'core',
+    slot: 'left',
   },
   {
     id: 'business',
@@ -78,6 +107,7 @@ export const ADMIN_NODES: AdminNode[] = [
       'Дохід проти витрат на ШІ, валова маржа, активні підписки. Дохід у гривні, витрати в доларах — курс перерахунку орієнтовний і підписаний прямо на екрані.',
     action: { kind: 'panel', tab: 'business' },
     group: 'core',
+    slot: 'left',
   },
   {
     id: 'users',
@@ -86,6 +116,7 @@ export const ADMIN_NODES: AdminNode[] = [
     description: 'Облікові записи, ролі, кількість генерацій і витрати кожного автора.',
     action: { kind: 'panel', tab: 'users' },
     group: 'core',
+    slot: 'right',
   },
   {
     id: 'roles',
@@ -94,6 +125,7 @@ export const ADMIN_NODES: AdminNode[] = [
     description: 'Що дозволено кожній ролі: генерація, редагування, публікація, зовнішні майданчики, ключі.',
     action: { kind: 'panel', tab: 'roles' },
     group: 'core',
+    slot: 'right',
   },
   {
     id: 'crm',
@@ -103,6 +135,7 @@ export const ADMIN_NODES: AdminNode[] = [
       'Хто створив книгу чи курс, почав і не опублікував, опублікував, лише зареєструвався, писав у чат підтримки — одна таблиця з фільтрами-сегментами і переписка прямо звідси.',
     action: { kind: 'panel', tab: 'crm' },
     group: 'core',
+    slot: 'right',
   },
   {
     id: 'git',
@@ -112,6 +145,8 @@ export const ADMIN_NODES: AdminNode[] = [
       'Стрічка часу всіх комітів від найпершого: день, автор, обсяг зміни і запис журналу log.md, на який коміт посилається. Дані читаються з живого git log, тому розділ працює лише при локальному запуску — у продакшн-образі теки .git немає.',
     action: { kind: 'panel', tab: 'git' },
     group: 'operations',
+    slot: 'right',
+    tone: 'danger',
   },
   {
     id: 'bridge',
@@ -121,6 +156,17 @@ export const ADMIN_NODES: AdminNode[] = [
       'Адреса API маркетплейсу і спільний ключ мосту. Через нього готова книга стає товаром у вітрині — у двох форматах, друкованому й електронному.',
     action: { kind: 'panel', tab: 'bridge' },
     group: 'operations',
+    slot: 'left',
+  },
+  {
+    id: 'moderation',
+    title: 'Модерація',
+    hint: 'черга погоджень',
+    description:
+      'Курси, що чекають рішення адміністратора: ухвалити чи відхилити з причиною. Доти ця черга жила всередині «Моста до вітрини», хоч рішення про публікацію ухвалює саме адміністратор — і саме тут.',
+    action: { kind: 'view', view: 'moderation' },
+    group: 'operations',
+    slot: 'left',
   },
 ];
 

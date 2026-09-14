@@ -52,6 +52,9 @@ import {
   Italic,
   SpellCheck2,
   ImagePlus,
+  Minus,
+  TextQuote,
+  MoreHorizontal,
   Minimize2,
   Maximize2,
   GripVertical,
@@ -249,6 +252,51 @@ export interface PromptConstructorRequest {
 
 /** Масштаби аркуша у вкладці — ті самі значення, що й у панелі «Верстка» (LayoutView). */
 const PAGE_ZOOM_PRESETS = [20, 50, 70, 80, 90, 100, 110, 120, 150];
+
+/**
+ * Кнопка тулбара, у якій видно ЛИШЕ іконку, а зміст підписано в підказці.
+ *
+ * Навіщо. У блоці швидкої типографіки підписи займали більше місця, ніж самі
+ * дії, і рядок зʼїдав ширину, потрібну для правки книги (скарга власника).
+ * Тому видимий текст знято, іконку збільшено, а підпис лишився у ДВОХ місцях:
+ * `title` (нативна підказка при наведенні) і `aria-label` — щоб кнопка не
+ * стала беззмістовною для скрін-рідера й щоб ключі словника не стали мертвими.
+ */
+const ACCENT_CLASS: Record<'plain' | 'soft' | 'solid', string> = {
+  plain: 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800',
+  soft: '[background-color:var(--sun-acc-10)] hover:[background-color:var(--sun-acc-20)] [color:var(--sun-soft)] [border-color:var(--sun-acc-30)]',
+  solid:
+    '[background-color:var(--sun-acc-20)] hover:[background-color:var(--sun-acc-30)] [color:var(--sun-soft)] [border-color:var(--sun-acc-40)] font-bold shadow-xs',
+};
+
+const IconToolBtn: React.FC<{
+  /** Готова іконка: колір і розмір задає виклик, бо вони різні за змістом. */
+  icon: React.ReactNode;
+  /** Підказка при наведенні — локалізований ключ `editor.*Title`. */
+  title: string;
+  /** Той самий підпис для скрін-рідера: ключ `editor.*Btn`. */
+  label: string;
+  onClick: () => void;
+  accent?: 'plain' | 'soft' | 'solid';
+  /** Активний стан (наприклад, «теги сховані») — підсвічує кнопку. */
+  active?: boolean;
+  /** Потрібен кнопці «Перейти до тегу»: за нею позиціонується поповер. */
+  btnRef?: React.Ref<HTMLButtonElement>;
+}> = ({ icon, title, label, onClick, accent = 'plain', active, btnRef }) => (
+  <button
+    ref={btnRef}
+    type="button"
+    onClick={onClick}
+    title={title}
+    aria-label={label}
+    aria-pressed={active}
+    className={`flex items-center justify-center p-2 rounded-md border transition-colors ${ACCENT_CLASS[accent]} ${
+      active ? '[border-color:var(--sun-acc)] [background-color:var(--sun-acc-20)]' : ''
+    }`}
+  >
+    {icon}
+  </button>
+);
 
 export const EditorView: React.FC<EditorViewProps> = ({
   book,
@@ -4674,100 +4722,93 @@ export const EditorView: React.FC<EditorViewProps> = ({
         {/* Formatting & Insert Toolbar */}
         <div style={sunVars} className="px-4 py-2 border-b border-slate-800 bg-slate-950 flex items-center justify-between gap-2 text-slate-300 text-xs overflow-x-auto no-scrollbar shrink-0">
           <div className="flex items-center gap-2">
-            {/* Quick Typography Insets */}
-            <button
+            {/* Quick Typography Insets — лише іконки, підписи в підказках.
+                Раніше тут був видимий текст, і рядок зʼїдав місце для правки
+                книги; текст переїхав у title + aria-label (див. IconToolBtn). */}
+            <IconToolBtn
               onClick={() => insertTextAtCursor('— ')}
-              className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 rounded-md font-semibold text-xs font-mono"
               title={t('editor.dashTitle')}
-            >
-              {t('editor.dashBtn')}
-            </button>
-            <button
+              label={t('editor.dashBtn')}
+              icon={<Minus className="w-[18px] h-[18px]" />}
+            />
+            <IconToolBtn
               onClick={() => insertTextAtCursor('«»')}
-              className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 rounded-md font-semibold text-xs"
               title={t('editor.quotesTitle')}
-            >
-              {t('editor.quotesBtn')}
-            </button>
-            <button
+              label={t('editor.quotesBtn')}
+              icon={<TextQuote className="w-[18px] h-[18px]" />}
+            />
+            <IconToolBtn
               onClick={() => insertTextAtCursor('…')}
-              className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 rounded-md font-semibold text-xs"
               title={t('editor.ellipsisTitle')}
-            >
-              …
-            </button>
+              label={t('editor.ellipsisTitle')}
+              icon={<MoreHorizontal className="w-[18px] h-[18px]" />}
+            />
 
             <div className="h-4 w-px bg-slate-800 mx-1" />
 
-            <button
+            <IconToolBtn
               onClick={() => setShowFootnoteModal(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-md font-medium"
               title={t('editor.insertFootnoteTitle')}
-            >
-              <BookMarked className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
-              <span>{t('editor.insertFootnoteBtn')}</span>
-            </button>
+              label={t('editor.insertFootnoteBtn')}
+              icon={<BookMarked className="w-[18px] h-[18px] [color:var(--sun-acc)]" />}
+            />
 
-            <button
+            <IconToolBtn
               onClick={() => setShowQrModal(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-md font-medium"
               title={t('editor.insertQrTitle')}
-            >
-              <QrCode className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
-              <span>{t('editor.insertQrBtn')}</span>
-            </button>
+              label={t('editor.insertQrBtn')}
+              icon={<QrCode className="w-[18px] h-[18px] [color:var(--sun-acc)]" />}
+            />
 
-            <button
+            <IconToolBtn
               onClick={() => setShowInsertImageModal(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-md font-medium"
               title={t('editor.imgFromGalleryTitle')}
-            >
-              <ImagePlus className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
-              <span>{t('editor.imgFromGalleryBtn')}</span>
-            </button>
+              label={t('editor.imgFromGalleryBtn')}
+              icon={<ImagePlus className="w-[18px] h-[18px] [color:var(--sun-acc)]" />}
+            />
 
-            <button
+            {/* Акцентна кнопка: іконка більша (20px), щоб її було видно першою
+                навіть у ряду самих іконок. */}
+            <IconToolBtn
               onClick={() => setShowIllustrationModal(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1 [background-color:var(--sun-acc-20)] hover:[background-color:var(--sun-acc-30)] [color:var(--sun-soft)] border [border-color:var(--sun-acc-40)] rounded-md font-bold shadow-xs transition-all"
               title={t('editor.insertIllustrationTitle')}
-            >
-              <Sparkles className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
-              <span>{t('editor.insertIllustrationBtn')}</span>
-            </button>
+              label={t('editor.insertIllustrationBtn')}
+              accent="solid"
+              icon={<Sparkles className="w-5 h-5 [color:var(--sun-acc)]" />}
+            />
 
             <div className="h-4 w-px bg-slate-800 mx-1" />
 
-            <button
+            <IconToolBtn
               onClick={handleInsertTag}
-              className="flex items-center gap-1 px-2.5 py-1 [background-color:var(--sun-acc-10)] hover:[background-color:var(--sun-acc-20)] [color:var(--sun-soft)] border [border-color:var(--sun-acc-30)] rounded-md font-semibold"
               title={t('editor.insertTagTitle')}
-            >
-              <Tag className="w-3.5 h-3.5" />
-              <span>{t('editor.insertBookTagBtn')}</span>
-            </button>
+              label={t('editor.insertBookTagBtn')}
+              accent="soft"
+              icon={<Tag className="w-[18px] h-[18px]" />}
+            />
 
-            <button
+            <IconToolBtn
               onClick={() => setTagsHidden((v) => !v)}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-md font-medium border ${
-                tagsHidden
-                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
-                  : '[background-color:var(--sun-acc-10)] hover:[background-color:var(--sun-acc-20)] [color:var(--sun-soft)] [border-color:var(--sun-acc-30)]'
-              }`}
               title={tagsHidden ? t('editor.showTagsTitle') : t('editor.hideTagsTitle')}
-            >
-              {tagsHidden ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-              <span>{tagsHidden ? t('editor.showTagsBtn') : t('editor.hideTagsBtn')}</span>
-            </button>
+              label={tagsHidden ? t('editor.showTagsBtn') : t('editor.hideTagsBtn')}
+              accent={tagsHidden ? 'plain' : 'soft'}
+              active={!tagsHidden}
+              icon={
+                tagsHidden ? (
+                  <Eye className="w-[18px] h-[18px]" />
+                ) : (
+                  <EyeOff className="w-[18px] h-[18px]" />
+                )
+              }
+            />
 
-            <button
-              ref={tagMenuBtnRef}
+            <IconToolBtn
+              btnRef={tagMenuBtnRef}
               onClick={openTagMenu}
-              className="flex items-center gap-1 px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-md font-medium"
               title={t('editor.gotoTagTitle')}
-            >
-              <CornerDownRight className="w-3.5 h-3.5" />
-              <span>{t('editor.gotoTagBtn')}</span>
-            </button>
+              label={t('editor.gotoTagBtn')}
+              icon={<CornerDownRight className="w-[18px] h-[18px]" />}
+            />
 
             <div className="h-4 w-px bg-slate-800 mx-1" />
 
