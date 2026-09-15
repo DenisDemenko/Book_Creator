@@ -31,7 +31,7 @@ const ADMIN_PANEL = read('src/components/AdminPanelView.tsx');
 // ---------------------------------------------------------------------------
 console.log('Реєстр вузлів:');
 {
-  t('вузлів одинадцять — як у макеті', ADMIN_NODES.length === 11, String(ADMIN_NODES.length));
+  t('вузлів дванадцять — з «Управлінням товарами»', ADMIN_NODES.length === 12, String(ADMIN_NODES.length));
 
   const ids = ADMIN_NODES.map((n) => n.id);
   t('усі id унікальні', new Set(ids).size === ids.length, ids.join(', '));
@@ -42,7 +42,7 @@ console.log('Реєстр вузлів:');
   const top = ADMIN_NODES.filter((n) => n.slot === 'top');
   const left = ADMIN_NODES.filter((n) => n.slot === 'left');
   const right = ADMIN_NODES.filter((n) => n.slot === 'right');
-  t('карта розкладена 3 / 4 / 4', top.length === 3 && left.length === 4 && right.length === 4,
+  t('карта розкладена 3 / 5 / 4', top.length === 3 && left.length === 5 && right.length === 4,
     `${top.length} / ${left.length} / ${right.length}`);
 
   const danger = ADMIN_NODES.filter((n) => n.tone === 'danger');
@@ -51,6 +51,9 @@ console.log('Реєстр вузлів:');
 
   t('«Модерація» є окремим вузлом', ids.includes('moderation'));
   t('«Модерація» стоїть у бічній колонці', findNode('moderation')?.slot === 'left');
+  t('«Управління товарами» є окремим вузлом', ids.includes('products'));
+  t('«Управління товарами» веде на власну сторінку',
+    (findNode('products')?.action as { kind: string; view?: string })?.view === 'products');
   t('findNode знаходить вузол за id', findNode('crm')?.title === 'CRM');
   t('findNode на невідомий id віддає undefined', findNode('нема-такого') === undefined);
 }
@@ -75,9 +78,9 @@ console.log('\nДії вузлів відповідають тому, що ст�
   }
 
   const viewNodes = ADMIN_NODES.filter((n) => n.action.kind === 'view');
-  const handled = new Set(['api-keys', 'core-ai', 'moderation']);
+  const handled = new Set(['api-keys', 'core-ai', 'moderation', 'products']);
   const unknownViews = viewNodes.filter((n) => !handled.has((n.action as { view: string }).view));
-  t('усі самостійні сторінки — з відомих трьох', unknownViews.length === 0, unknownViews.map((n) => n.id).join(', '));
+  t('усі самостійні сторінки — з відомих чотирьох', unknownViews.length === 0, unknownViews.map((n) => n.id).join(', '));
 
   for (const view of handled) {
     t(`сторінка «${view}» має обробник на екрані`, ADMIN_OS.includes(`'${view}'`));
@@ -92,7 +95,12 @@ console.log('\nСторінка показує справжні екрани, а
   t('вбудовує робочі вкладки (AdminPanelView, chromeless)', ADMIN_OS.includes('<AdminPanelView tab={active.action.tab} chromeless />'));
   t('імпортує «Ключі API»', ADMIN_OS.includes("from '../ApiKeysView'"));
   t('імпортує «Модерацію»', ADMIN_OS.includes("from '../AdminModerationView'"));
+  t('імпортує «Управління товарами»', ADMIN_OS.includes("from '../AdminProductsView'"));
   t('імпортує конструктор промтів ядра', ADMIN_OS.includes("from '../QuickAiModal'"));
+  // Повернення до мапінгу мусить бути в КОЖНОМУ розділі — і з шапки
+  // сторінки, і над вмістом самого розділу.
+  t('кнопка повернення до мапінгу є над вмістом розділу',
+    ADMIN_OS.includes('Повернутися до мапінгу адмін панелі'));
 
   // Заглушка, знайдена в коді 14.09.2026: текст «відкривається в іншому місці»
   // замість редактора. Якщо він повернеться — цей тест має впасти.

@@ -19,7 +19,8 @@ import type { AdminTab } from '../AdminPanelView';
  *
  * `panel` — вкладка наявного `AdminPanelView` (він і далі малює свій вміст).
  * `view` — самостійна сторінка адмінки: `api-keys` (`ApiKeysView`),
- * `core-ai` (конструктор промтів ядра), `moderation` (черга погоджень).
+ * `core-ai` (конструктор промтів ядра), `moderation` (черга погоджень),
+ * `products` (що стоїть у вітрині).
  *
  * Модальних вузлів більше немає: `kind: 'modal'` тримав «Ключі API» й
  * «Промти ядра» у віконці поверх карти, і саме там жила заглушка — вузол
@@ -28,7 +29,7 @@ import type { AdminTab } from '../AdminPanelView';
  */
 export type NodeAction = { kind: 'panel'; tab: AdminTab } | { kind: 'view'; view: AdminView };
 
-export type AdminView = 'api-keys' | 'core-ai' | 'moderation';
+export type AdminView = 'api-keys' | 'core-ai' | 'moderation' | 'products';
 
 export interface AdminNode {
   id: string;
@@ -155,6 +156,16 @@ export const ADMIN_NODES: AdminNode[] = [
     description:
       'Адреса API маркетплейсу і спільний ключ мосту. Через нього готова книга стає товаром у вітрині — у двох форматах, друкованому й електронному.',
     action: { kind: 'panel', tab: 'bridge' },
+    group: 'operations',
+    slot: 'left',
+  },
+  {
+    id: 'products',
+    title: 'Управління товарами',
+    hint: 'додати · зняти',
+    description:
+      'Що зараз стоїть у вітрині: книги й курси з їхніми форматами та цінами. Звідси товар знімають — лістинг іде в архів, а не видаляється, тож покупець доступу не втрачає. А додають товар зі Студії: вкладка «Публікація та експорт», бо PDF, обкладинка й ціна збираються там.',
+    action: { kind: 'view', view: 'products' },
     group: 'operations',
     slot: 'left',
   },

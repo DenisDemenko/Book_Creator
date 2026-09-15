@@ -21,6 +21,11 @@ interface CreateBookModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentRole: UserRole;
+  /**
+   * Імʼя автора за замовчуванням — те, під яким користувач зайшов.
+   * Не задане — лишається демонстраційне значення (лише для превʼю без входу).
+   */
+  authorName?: string;
   onCreateBook: (
     title: string,
     author: string,
@@ -36,6 +41,7 @@ export const CreateBookModal: React.FC<CreateBookModalProps> = ({
   isOpen,
   onClose,
   currentRole,
+  authorName,
   onCreateBook,
 }) => {
   const { lang, t } = useLanguage();
@@ -48,7 +54,9 @@ export const CreateBookModal: React.FC<CreateBookModalProps> = ({
   };
 
   const [title, setTitle] = useState<string>('');
-  const [author, setAuthor] = useState<string>('Олександр Радченко');
+  // Автор за замовчуванням — імʼя залогіненого користувача: книгу створює
+  // саме він, і саме його імʼя має поїхати на обкладинку й у колонтитули.
+  const [author, setAuthor] = useState<string>(authorName?.trim() || 'Олександр Радченко');
   const [genre, setGenre] = useState<string>('Кіберпанк / Наукова фантастика');
   const [bookId, setBookId] = useState<string>(generateRandomBookId());
   const [initialVersion, setInitialVersion] = useState<string>('v1.0.0');

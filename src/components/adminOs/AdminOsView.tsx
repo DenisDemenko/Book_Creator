@@ -29,6 +29,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshCw, ArrowLeft } from 'lucide-react';
 import { AdminPanelView } from '../AdminPanelView';
 import { AdminModerationView } from '../AdminModerationView';
+import { AdminProductsView } from '../AdminProductsView';
 import { ApiKeysView } from '../ApiKeysView';
 import { CoreAiPanel } from '../QuickAiModal';
 import type { ChatModelOption } from '../QuickAiModal';
@@ -286,6 +287,7 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser }) => {
   const renderView = (view: AdminView) => {
     if (view === 'api-keys') return <ApiKeysView authUser={authUser} />;
     if (view === 'moderation') return <AdminModerationView />;
+    if (view === 'products') return <AdminProductsView />;
     if (view === 'core-ai') {
       return (
         <CoreAiPanel
@@ -346,9 +348,10 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser }) => {
             <button
               onClick={() => setActiveId(null)}
               className={`${H} flex items-center gap-1.5 rounded-full border border-cyan-400/35 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-[#d6ebff] transition-colors hover:bg-cyan-400/10`}
+              title="Повернутися до мапінгу адмін панелі"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
-              До карти
+              До мапінгу
             </button>
           )}
           <button
@@ -389,19 +392,20 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser }) => {
               <circle className="os-circuit os-circuit-pulse" cx="600" cy="300" fill="none" r="130" strokeDasharray="4 4" strokeOpacity="0.35" />
               <circle className="os-circuit" cx="600" cy="300" fill="none" r="185" strokeOpacity="0.25" />
               {/* Ліва колонка */}
-              <path className="os-circuit" d="M 500 240 C 430 240, 390 90, 300 90" />
-              <path className="os-circuit" d="M 495 285 C 410 285, 370 230, 300 230" />
-              <path className="os-circuit" d="M 495 320 C 420 320, 370 370, 300 370" />
-              <path className="os-circuit" d="M 505 365 C 440 365, 380 510, 300 510" />
+              <path className="os-circuit" d="M 500 210 C 430 210, 390 70, 300 70" />
+              <path className="os-circuit" d="M 495 265 C 410 265, 370 185, 300 185" />
+              <path className="os-circuit" d="M 492 310 C 420 310, 370 300, 300 300" />
+              <path className="os-circuit" d="M 495 355 C 410 355, 370 415, 300 415" />
+              <path className="os-circuit" d="M 505 400 C 440 400, 380 530, 300 530" />
               {/* Правий бік */}
-              <path className="os-circuit" d="M 700 240 C 770 240, 810 90, 900 90" />
-              <path className="os-circuit" d="M 705 285 C 790 285, 830 230, 900 230" />
-              <path className="os-circuit" d="M 705 320 C 780 320, 830 370, 900 370" />
-              <path className="os-circuit" d="M 695 365 C 760 365, 820 510, 900 510" />
+              <path className="os-circuit" d="M 700 210 C 770 210, 810 70, 900 70" />
+              <path className="os-circuit" d="M 705 265 C 790 265, 830 185, 900 185" />
+              <path className="os-circuit" d="M 708 310 C 780 310, 830 300, 900 300" />
+              <path className="os-circuit" d="M 705 355 C 790 355, 830 415, 900 415" />
               {/* Верхній ряд */}
-              <path className="os-circuit" d="M 570 210 C 540 150, 480 60, 380 45" />
-              <path className="os-circuit" d="M 600 200 L 600 40" />
-              <path className="os-circuit" d="M 630 210 C 660 150, 720 60, 820 45" />
+              <path className="os-circuit" d="M 570 200 C 540 140, 480 50, 380 35" />
+              <path className="os-circuit" d="M 600 190 L 600 30" />
+              <path className="os-circuit" d="M 630 200 C 660 140, 720 50, 820 35" />
             </svg>
 
             <div className="relative z-10">
@@ -494,6 +498,17 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser }) => {
             перевірити, ЩО показав розділ, а не «на сторінці щось є».
           */}
           <div className="min-w-0 p-4 lg:p-5" data-admin-work="1">
+            {/* Повернення до мапінгу — у КОЖНОМУ розділі, над його вмістом:
+                з розділу людина дивиться саме сюди, а не в шапку сторінки. */}
+            <button
+              onClick={() => setActiveId(null)}
+              className={`${H} mb-4 flex w-full items-center justify-center gap-2 rounded-full border border-cyan-400/40 bg-[rgba(0,180,255,.08)] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-[#d6ebff] transition-colors hover:border-cyan-300/70 hover:bg-[rgba(0,180,255,.16)]`}
+              title="Повернутися до мапінгу адмін панелі"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              Повернутися до мапінгу адмін панелі
+            </button>
+
             {active.action.kind === 'panel' ? (
               <AdminPanelView tab={active.action.tab} chromeless />
             ) : (

@@ -150,7 +150,9 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
 
   const [stepIdx, setStepIdx] = useState(0);
   const [title, setTitle] = useState('');
-  const [author, setAuthor] = useState('');
+  // Поле автора стартує з імені того, хто переносить книгу: у більшості
+  // випадків автор книги й автор перенесення — одна людина.
+  const [author, setAuthor] = useState(authUser?.name || '');
   const [manuscriptText, setManuscriptText] = useState('');
   const [images, setImages] = useState<PendingImage[]>([]);
   const [docxImages, setDocxImages] = useState<PendingDocxImage[]>([]);
@@ -170,7 +172,7 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
   const reset = () => {
     setStepIdx(0);
     setTitle('');
-    setAuthor('');
+    setAuthor(authUser?.name || '');
     setManuscriptText('');
     setImages([]);
     setDocxImages([]);
@@ -374,7 +376,11 @@ export const ImportMaterialsWizardModal: React.FC<ImportMaterialsWizardModalProp
 
       onComplete({
         title: title.trim(),
-        author: author.trim() || 'Невідомий автор',
+        // Автор — не порожній рядок і не «Невідомий автор»: у книзі, яку автор
+        // щойно переніс, на місці автора мусить стояти той, хто її приніс.
+        // Службове значення звідси прибиралося б уже в App, але краще не
+        // створювати його зовсім.
+        author: author.trim() || authUser?.name || 'Невідомий автор',
         chapters: parsed.chapters,
         illustrations,
         courseMaterials,

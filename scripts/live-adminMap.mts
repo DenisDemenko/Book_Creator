@@ -175,11 +175,11 @@ try {
     };
   });
 
-  t('на карті 11 пігулок', map.pills === 11, String(map.pills));
+  t('на карті 12 пігулок', map.pills === 12, String(map.pills));
   t('кожна пігулка підписана (доступна з клавіатури/скрін-рідера)', map.labels.every((l: string) => l.length > 3));
   t('червона пігулка рівно одна', map.danger.length === 1, map.danger.join(', '));
   t('червона — саме «Історія комітів»', (map.danger[0] || '').startsWith('Історія комітів'), map.danger[0] || '');
-  t('провідники від ядра намальовані', map.circuits >= 11, String(map.circuits));
+  t('провідники від ядра намальовані', map.circuits >= 12, String(map.circuits));
   t('ядро підписане', map.hasCore);
   t('шапка називає сторінку', map.headerOk);
   t('плиток смуги сутностей вісім', map.tiles === 8, String(map.tiles));
@@ -205,6 +205,7 @@ try {
     'Витрати на API': 'за період',
     'Бізнес-аналітика': 'дохід',
     'Міст до вітрини': 'міст',
+    'Управління товарами': 'товар',
     'Модерація': 'модерація',
     'Користувачі': 'облікові записи',
     'Доступ і ролі': 'дозвол',
@@ -220,17 +221,41 @@ try {
     }, label);
 
     /*
-     * Розділи вантажаться асинхронно, і по-різному довго: «Історія комітів»
-     * читає живий git log і парсить журнал, тож за фіксовану паузу вона не
-     * встигає й виглядала б як порожня. Чекаємо, доки в робочій області
-     * зʼявиться справжній вміст (або доки не мине стеля — тоді чесно падаємо).
+     * Чекаємо не фіксовану паузу, а СПОКІЙ: розділи вантажаться асинхронно й
+     * по-різному довго («Історія комітів» читає живий git log — це десятки
+     * тисяч знаків). Тому чекаємо, доки очікуваний маркер уже є І текст
+     * перестав змінюватись — інакше заголовок «Читаємо історію комітів…»
+     * виглядав би як готовий екран.
      */
+    const marker = MARKERS[title] || '';
+    const startedAt = Date.now();
+    await page.evaluate(() => {
+      (window as unknown as { __osStable?: string }).__osStable = '';
+    });
     await page
       .waitForFunction(
-        () => ((document.querySelector('[data-admin-work]') as HTMLElement | null)?.innerText || '').trim().length > 60,
-        { timeout: 15000, polling: 250 }
+        (m: string) => {
+          const el = document.querySelector('[data-admin-work]') as HTMLElement | null;
+          const text = (el?.innerText || '').toLowerCase();
+          const w = window as unknown as { __osStable?: string; __osStableHits?: number };
+          if (w.__osStable === text) w.__osStableHits = (w.__osStableHits || 0) + 1;
+          else {
+            w.__osStable = text;
+            w.__osStableHits = 0;
+          }
+          // Поріг 100 символів — не «на око»: напис «Читаємо історію комітів…»
+          // разом із кнопкою повернення дає рівно 60, і без порогу він
+          // проходив як готовий екран. Найменший СПРАВЖНІЙ екран (порожня
+          // черга модерації) — близько 170.
+          return (m ? text.includes(m) : true) && text.trim().length > 100 && (w.__osStableHits || 0) >= 3;
+        },
+        // «Історія комітів» читає живий git log і розбирає журнал — у холодному
+        // середовищі це десятки секунд, тож стеля тут свідомо велика.
+        { timeout: 90000, polling: 400 },
+        marker
       )
       .catch(() => undefined);
+    const tookMs = Date.now() - startedAt;
 
     const state = await page.evaluate(() => {
       // Робоча область розділу — за стабільним атрибутом, а не за класами:
@@ -241,17 +266,20 @@ try {
         (d) => d.className.includes('rounded-full') && d.className.includes('border-cyan-400/25')
       );
       return {
-        back: body.includes('до карти'),
+        // Сигнал «я в розділі» — кнопка повернення до мапінгу (вона є в
+        // кожному розділі), а «я на карті» — смуга сутностей, якої поза нею
+        // не буває. Рахувати пігулки для цього не можна: у консолі вони
+        // живуть у колонці шарів, і їх там теж дванадцять.
+        back: body.includes('до мапінгу'),
         bandTiles: band.length,
         workChars: (work?.innerText || '').trim().length,
         workText: (work?.innerText || '').replace(/\s+/g, ' ').trim().toLowerCase(),
       };
     });
 
-    const marker = MARKERS[title] || '';
     t(`«${title}»: відкрився саме цей розділ`,
-      state.back && state.bandTiles === 0 && state.workChars > 60 && (!marker || state.workText.includes(marker)),
-      `маркер «${marker}»: ${state.workText.includes(marker) ? 'є' : 'немає'}, символів: ${state.workChars}`);
+      state.back && state.bandTiles === 0 && state.workChars > 100 && (!marker || state.workText.includes(marker)),
+      `маркер «${marker}»: ${state.workText.includes(marker) ? 'є' : 'немає'}, символів: ${state.workChars}, ${(tookMs / 1000).toFixed(1)} с`);
   }
 
   // -------------------------------------------------------------------------
@@ -265,7 +293,7 @@ try {
   // що показано САМЕ той екран, а не будь-яка сторінка з текстом.
   const openByTitle = async (fragment: string) => {
     await page.evaluate(() => {
-      const back = Array.from(document.querySelectorAll('button')).find((b) => (b.textContent || '').includes('До карти'));
+      const back = Array.from(document.querySelectorAll('button')).find((b) => (b.textContent || '').includes('До мапінгу'));
       (back as HTMLElement | undefined)?.click();
     });
     await page.waitForSelector('.os-pill', { timeout: 10000 });
@@ -281,12 +309,15 @@ try {
   };
 
   const backToMap = await page.evaluate(() => {
-    const back = Array.from(document.querySelectorAll('button')).find((b) => (b.textContent || '').includes('До карти'));
-    (back as HTMLElement | undefined)?.click();
+    const back = Array.from(document.querySelectorAll('button')).find((b) => (b.textContent || '').includes('До мапінгу'));
+    if (!back) return false;
+    (back as HTMLElement).click();
     return true;
   });
-  await page.waitForSelector('.os-pill--danger', { timeout: 10000 });
-  t('кнопка «До карти» повертає на карту', backToMap);
+  t('кнопка повернення до мапінгу знайдена в шапці розділу', backToMap);
+  await page.waitForFunction(() => !document.querySelector('[data-admin-work]'), { timeout: 10000 });
+  t('кнопка «До мапінгу» справді повертає на карту',
+    (await page.evaluate(() => document.body.innerText.toLowerCase().includes('памʼять і сутності'))) === true);
 
   const keysText = await openByTitle('Провайдери ШІ');
   t('«Провайдери ШІ» показує саме ключі', /ключ/i.test(keysText), keysText.slice(0, 80));
@@ -299,6 +330,10 @@ try {
   const modText = await openByTitle('Модерація');
   t('«Модерація» показує чергу погоджень', /модерац|черг/i.test(modText), modText.slice(0, 80));
   await shot('moderation');
+
+  const productsText = await openByTitle('Управління товарами');
+  t('«Управління товарами» показує перелік товарів', /товар/i.test(productsText), productsText.slice(0, 80));
+  await shot('products');
 
   // -------------------------------------------------------------------------
   // Тулбар «Книга та текст» — та сама перевірка, але на СПРАВЖНЬОМУ екрані:
@@ -344,6 +379,33 @@ try {
     });
     t('перемикач тегів підписаний і має іконку',
       tagToggle.label.length > 0 && tagToggle.icons > 0 && tagToggle.text === '', JSON.stringify(tagToggle));
+
+    /*
+     * Висота шапки й канви — щоб «канва стала вищою» було числом, а не
+     * відчуттям. Саме ці два числа показують, чи справді згортання рядка
+     * шапки віддало місце тексту.
+     */
+    const metrics = await page.evaluate(() => {
+      // Без іменованих функцій усередині: tsx обгортає їх у `__name`, а в
+      // браузері такого хелпера немає (перевірено — падало саме тут).
+      const header = document.querySelector('header');
+      const surface = document.querySelector('.editor-shell-glass');
+      const canvas = document.querySelector('.nova-manuscript-editor');
+      return {
+        headerH: header ? Math.round(header.getBoundingClientRect().height) : 0,
+        surfaceH: surface ? Math.round(surface.getBoundingClientRect().height) : 0,
+        canvasH: canvas ? Math.round(canvas.getBoundingClientRect().height) : 0,
+        viewportH: window.innerHeight,
+      };
+    });
+    console.log(
+      `      міра: шапка ${metrics.headerH}px · поверхня редактора ${metrics.surfaceH}px · канва ${metrics.canvasH}px · вікно ${metrics.viewportH}px`
+    );
+    t('шапка займає менше десятої частини екрана', metrics.headerH > 0 && metrics.headerH < metrics.viewportH / 10,
+      `${metrics.headerH}px із ${metrics.viewportH}px`);
+    t('поверхня редактора вміщається в екран без прокрутки',
+      metrics.surfaceH > 0 && metrics.headerH + metrics.surfaceH <= metrics.viewportH,
+      `${metrics.headerH} + ${metrics.surfaceH} проти ${metrics.viewportH}`);
     await shot('editor-toolbar');
   }
 } finally {

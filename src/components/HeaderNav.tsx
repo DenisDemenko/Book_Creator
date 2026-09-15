@@ -221,9 +221,14 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
           з підписом (SupportChatWidget.tsx, fixed top-1.5 right-4). Без
           цього відступу вона лягала б поверх чипа «Формат: A4 …» на
           екранах, де шапка заповнена. */}
-      <div className="max-w-[1780px] mx-auto px-4 sm:px-6 pr-20 sm:pr-24 py-2 flex flex-col gap-2">
-        {/* Ряд 1 — інформаційні блоки (неклікабельні) */}
-        <div className="flex items-center justify-between gap-3 flex-wrap">
+      <div className="max-w-[1780px] mx-auto px-4 sm:px-6 pr-20 sm:pr-24 py-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+        {/* Ряд 1 — інформаційні блоки (неклікабельні).
+            `contents` на обгортці рядка: рядок більше НЕ окремий рядок, його
+            вміст стає безпосередніми елементами шапки. Так шапка з двох
+            рядків (інформація + кнопки) стала одним, і канва введення тексту
+            виграла понад 40 пікселів висоти — за прямим проханням власника:
+            «канва має бути максимально високою». */}
+        <div className="contents">
           {/* Brand & Book Title */}
           <div className="flex items-center gap-3">
             {/* Емблема — 80% висоти шапки (--app-header-h, 86px → ~69px),
@@ -255,7 +260,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <h1 className="text-sm font-bold [color:var(--sun-soft)] truncate max-w-[180px] sm:max-w-[260px]">
+                <h1 className="text-sm font-bold [color:var(--sun-soft)] truncate max-w-[140px] sm:max-w-[200px] xl:max-w-[240px]">
                   {book.title || t('header.untitledBook')}
                 </h1>
                 <span className="text-xs text-slate-600">/</span>
@@ -266,8 +271,12 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
             </div>
           </div>
 
-          {/* Info chips: збереження, ID, слова, формат/сторінки */}
-          <div className="hidden md:flex items-center gap-2 flex-wrap">
+          {/* Info chips: збереження, ID, слова, формат/сторінки.
+              `2xl` — не випадково: чіпи показуються лише тоді, коли шапка
+              справді влазить в ОДИН рядок. На 1280–1536 вони переносили
+              другий рядок, і канва втрачала 40 пікселів висоти тексту —
+              саме те, чого власник просив не робити. */}
+          <div className="hidden 2xl:flex items-center gap-2">
             {saveIndicator && (
               <div
                 id="save-state-indicator"
@@ -306,8 +315,9 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
           </div>
         </div>
 
-        {/* Ряд 2 — клікабельні кнопки */}
-        <div className="flex items-center justify-between gap-2 flex-wrap">
+        {/* Ряд 2 — клікабельні кнопки. Той самий прийом: `contents` вкладає
+            їх у спільний рядок шапки, а не в окремий. */}
+        <div className="contents">
           <div className="flex items-center gap-2 flex-wrap">
             {/* Primary Save Button */}
             {currentRole !== 'reader' ? (

@@ -87,6 +87,7 @@ import {
   type BookSummary,
 } from './utils/storage';
 import { stampBookRevision, isNewerBook, describeRevisionGap } from './utils/bookVersion';
+import { resolveBookAuthor } from './utils/bookAuthor';
 import { otherSessionsOfSameUser } from './utils/deviceSession';
 import { AlertTriangle, CheckCircle2, Radio, Loader2, HardDriveDownload, Mail, LogOut, UserCheck, XCircle } from 'lucide-react';
 import { useLanguage } from './i18n/LanguageContext';
@@ -645,6 +646,34 @@ export default function App() {
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     };
   }, [book, hasUnsavedChanges, persistBook]);
+
+  // --- Авторство книги: службове «Невідомий автор» не має лишатись у тексті ---
+  //
+  // Майстер перенесення .docx писав цей рядок у поле автора, коли в файлі
+  // автора не було. Далі він потрапляв УСЮДИ одразу: у шапку студії, у
+  // колонтитули PDF, на обкладинку, у картку товару в вітрині — тобто в усі
+  // місця, де автор мусить бути справжнім.
+  //
+  // Тому таке значення замінюється, і рівно один раз на кожну його появу:
+  // спершу беремо те, що вже стоїть на обкладинці книги (його автор вписував
+  // сам), інакше — імʼя залогіненого користувача. Правка зберігається одразу,
+  // бо інакше наступне завантаження повернуло б службовий рядок, а публікація
+  // у вітрину пішла б із ним.
+  //
+  // Після заміни умова хибна, тож ефект на кожній наступній правці книги
+  // виходить одразу — циклу немає.
+  useEffect(() => {
+    if (isHydrating || auth.loading) return;
+    const user = auth.user;
+    if (!user || user.isGuest) return;
+
+    const fixed = resolveBookAuthor(book, user.name);
+    if (!fixed) return;
+
+    const repaired: Book = { ...book, ...fixed };
+    setBook(repaired);
+    void persistBook(repaired);
+  }, [book, isHydrating, auth.loading, auth.user, persistBook]);
 
   // --- Одноразова міграція режиму обтікання зображень ---
   //
@@ -2127,6 +2156,7 @@ export default function App() {
         isOpen={isCreateBookModalOpen}
         onClose={() => setIsCreateBookModalOpen(false)}
         currentRole={currentRole}
+        authorName={auth.user?.name}
         onCreateBook={handleCreateNewBook}
       />
 

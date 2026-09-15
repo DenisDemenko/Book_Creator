@@ -254,6 +254,17 @@ export interface PromptConstructorRequest {
 const PAGE_ZOOM_PRESETS = [20, 50, 70, 80, 90, 100, 110, 120, 150];
 
 /**
+ * Висота поверхні редактора.
+ *
+ * Було магічне `calc(100vh - 105px)`: 86px шапки плюс 19px зазору сторінки.
+ * Число працювало лише поки висота шапки справді дорівнювала 86px — а коли
+ * шапка розрослася до двох рядків (128px), поверхня перестала вміщатися в
+ * екран, і сторінка починала прокручуватись на зайві 23px. Тепер висота
+ * виводиться з тієї самої змінної, що й шапка, тож розходження неможливе.
+ */
+const EDITOR_SURFACE_HEIGHT = 'calc(100vh - var(--app-header-h) - 19px)';
+
+/**
  * Кнопка тулбара, у якій видно ЛИШЕ іконку, а зміст підписано в підказці.
  *
  * Навіщо. У блоці швидкої типографіки підписи займали більше місця, ніж самі
@@ -4300,7 +4311,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
       className={`editor-shell-glass flex flex-col lg:flex-row overflow-hidden bg-slate-900 text-slate-100 relative ${
         tagsHidden ? 'nova-hide-tags ' : ''
       }${isFocusWindow ? 'nova-fullscreen-editor w-full h-full min-h-0' : 'flex-1 min-h-0'}`}
-      style={isFocusWindow ? { ...sunVars } : { ...sunVars, height: 'calc(100vh - 105px)', maxHeight: 'calc(100vh - 105px)' }}
+      style={isFocusWindow ? { ...sunVars } : { ...sunVars, height: EDITOR_SURFACE_HEIGHT, maxHeight: EDITOR_SURFACE_HEIGHT }}
     >
       {/* Тут раніше лежав фоновий canvas «світлові хвилі як від води»
           (WaterCausticsCanvas) із пультом керування «Вода і відблиски».
