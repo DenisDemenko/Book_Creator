@@ -441,5 +441,20 @@ console.log('\nФізичний виріб — третя гілка мосту 
   t('created читається з конверта', result.created === true, String(result.created));
 }
 
+console.log('\nФото виробу: чистимо набір перед повторним завантаженням:');
+{
+  const seen: { url: string; method?: string }[] = [];
+  const fetch = (async (url: string, init: any = {}) => {
+    seen.push({ url: String(url), method: init.method });
+    return { status: 200, ok: true, text: async () => JSON.stringify({ cleared: 3 }) };
+  }) as never;
+
+  const res = await bridge.clearProductMedia('product:BK-ORG-001', { fetch, settings });
+  t('DELETE на /bridge/products/:id/media',
+    seen[0]?.url === 'https://api.fusionlab.in.ua/bridge/products/product%3ABK-ORG-001/media', String(seen[0]?.url));
+  t('метод DELETE', seen[0]?.method === 'DELETE');
+  t('кількість прибраних фото прочитано', res.cleared === 3, String(res.cleared));
+}
+
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);
 if (fail > 0) process.exit(1);

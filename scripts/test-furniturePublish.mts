@@ -230,6 +230,60 @@ console.log('\nЩо побачить вітрина (симуляція ренд
   t('усього зображень на сторінці — 10', 1 + shop.gallery.length === 10, String(1 + shop.gallery.length));
 }
 
+console.log('\nПублікація везе й ФОТО (ланка, якої бракувало 16.09.2026):');
+{
+  const { uploadProductMedia } = await import('../server/furnitureProductRoutes');
+
+  const calls: { method: string; url: string; kind?: string; name?: string; size?: number; mime?: string }[] = [];
+  const mediaFetch = (async (url: string, init: any = {}) => {
+    const u = String(url);
+    const method = String(init.method || 'GET');
+    if (u.endsWith('/media') && method === 'DELETE') {
+      calls.push({ method, url: u });
+      return { status: 200, ok: true, text: async () => JSON.stringify({ cleared: 0 }) };
+    }
+    const form = init.body as FormData;
+    const file = form.get('file') as unknown as { name?: string; type?: string; arrayBuffer: () => Promise<ArrayBuffer> };
+    const buf = Buffer.from(await file.arrayBuffer());
+    calls.push({
+      method,
+      url: u,
+      kind: String(form.get('kind')),
+      name: file.name,
+      size: buf.byteLength,
+      mime: String(file.type),
+    });
+    return { status: 200, ok: true, text: async () => JSON.stringify({ attached: true, kind: form.get('kind'), replaced: 0 }) };
+  }) as never;
+
+  const draft = {
+    sku: 'BK-ORG-LED-2084',
+    media: images.map((img) => ({
+      src: `data:${mimeFor(img.name)};base64,${fs.readFileSync(img.full).toString('base64')}`,
+    })),
+  };
+
+  const res = await uploadProductMedia(draft, 'product:BK-ORG-LED-2084', { fetch: mediaFetch, settings });
+
+  t('спершу чиститься старий набір (DELETE), і лише потім фото',
+    calls[0]?.method === 'DELETE' && calls[0]?.url.endsWith('/media'), `${calls[0]?.method} ${calls[0]?.url}`);
+  t('усі 10 фото поїхали (1 DELETE + 10 завантажень)',
+    res.uploaded === 10 && calls.length === 11, `uploaded=${res.uploaded}, дзвінків=${calls.length}`);
+  t('жодної невдачі', res.failed.length === 0, res.failed.join('; '));
+  t('перший файл — головний банер (cover)', calls[1]?.kind === 'cover', String(calls[1]?.kind));
+  t('решта девʼять — галерея', calls.slice(2).every((c) => c.kind === 'gallery'));
+  t('байти декодовані з data URL цілими (розмір як на диску)',
+    calls.slice(1).every((c, i) => c.size === images[i].size),
+    calls.slice(1).map((c, i) => `${c.size}/${images[i].size}`).join(' '));
+  t('імена файлів детерміновані й без кирилиці',
+    calls.slice(1).every((c) => /^BK-ORG-LED-2084-\d{2}\.(jpg|png|webp)$/.test(String(c.name))), String(calls[1]?.name));
+  t('типи зображень збережені', calls.slice(1).every((c) => String(c.mime).startsWith('image/')));
+
+  // Порожня галерея не має смикати міст взагалі.
+  const empty = await uploadProductMedia({ sku: 'X', media: [] }, 'product:X', { fetch: mediaFetch, settings });
+  t('без фото міст не турбують', empty.uploaded === 0 && calls.length === 11, String(calls.length));
+}
+
 // ---------------------------------------------------------------------------
 // Як зробити СПРАВЖНІЙ прогін (коли приймач задеплоють):
 //   1. задеплоїти маркетплейс (міграція product_attributes + /bridge/products);

@@ -32,6 +32,9 @@ import {
 import {
   blankFurnitureProduct,
   furniturePublishIssues,
+  DESCRIPTION_MAX,
+  TEASER_MAX,
+  TITLE_MAX,
   type FurnitureColor,
   type FurnitureProduct,
   type FurnitureWoodTone,
@@ -170,8 +173,26 @@ const ToggleChip: React.FC<{
   </button>
 );
 
+/**
+ * Лічильник символів під полем.
+ *
+ * Межі ставить приймач мосту, і перевищення — це не косметика, а відмова
+ * публікації (HTTP 400). Тому межу видно ПРИ ВВЕДЕННІ: перевищення підсвічене
+ * червоним із числом зайвих символів.
+ */
+const CharCount: React.FC<{ value: string; max: number; t: ThemeTokens }> = ({ value, max, t }) => {
+  const len = value.trim().length;
+  const over = len - max;
+  return (
+    <span className={`text-[10px] tabular-nums ${over > 0 ? 'font-semibold text-rose-400' : t.sub}`}>
+      {len}/{max}
+      {over > 0 ? ` (+${over})` : ''}
+    </span>
+  );
+};
+
 /** Читає локальний файл і стискає до превʼю (data URL) — щоб чорнетка не важила десятки МБ. */
-function fileToPreview(file: File, maxDim = 1200): Promise<{ src: string; width: number; height: number }> {
+function fileToPreview(file: File, maxDim = 1600): Promise<{ src: string; width: number; height: number }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error('Не вдалося прочитати файл.'));
@@ -197,7 +218,10 @@ function fileToPreview(file: File, maxDim = 1200): Promise<{ src: string; width:
           return;
         }
         ctx.drawImage(img, 0, 0, w, h);
-        resolve({ src: canvas.toDataURL('image/jpeg', 0.85), width: w, height: h });
+        // 0.88/1600px — це те, що піде у вітрину: чорнетка зберігає САМЕ превʼю,
+        // і саме його публікація віддає мостом. Дрібніше (0.85/1200) виглядало
+        // б на картці товару мʼяко.
+        resolve({ src: canvas.toDataURL('image/jpeg', 0.88), width: w, height: h });
       };
       img.src = raw;
     };
@@ -426,7 +450,10 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
               <div className="space-y-4">
                 <div>
                   <Label>Назва виробу для вітрини</Label>
-                  <input data-field="name" className={`w-full rounded-xl px-4 py-3 text-sm outline-none ${t.input}`} type="text" value={product.name} onChange={(e) => patch({ name: e.target.value })} placeholder="Преміальний органайзер для робочого столу з LED-підсвічуванням" />
+                  <input data-field="name" maxLength={TITLE_MAX} className={`w-full rounded-xl px-4 py-3 text-sm outline-none ${t.input}`} type="text" value={product.name} onChange={(e) => patch({ name: e.target.value })} placeholder="Преміальний органайзер для робочого столу з LED-підсвічуванням" />
+                  <div className="mt-1 flex justify-end">
+                    <CharCount value={product.name} max={TITLE_MAX} t={t} />
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
@@ -460,8 +487,11 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
                     <input className={`w-full rounded-xl px-3 py-2.5 text-sm outline-none ${t.input}`} type="number" min={0} value={product.basePriceUah || ''} onChange={(e) => patch({ basePriceUah: Number(e.target.value) || 0 })} />
                   </div>
                   <div>
-                    <Label>Залишок на складі</Label>
-                    <input className={`w-24 rounded-xl px-3 py-2.5 text-sm text-center outline-none ${t.input}`} type="number" min={0} value={product.stock || ''} onChange={(e) => patch({ stock: Number(e.target.value) || 0 })} />
+                    <Label muted>Залишок на складі</Label>
+                    <div className="flex items-center gap-2">
+                      <input className={`w-24 rounded-xl px-3 py-2.5 text-sm text-center outline-none ${t.input}`} type="number" min={0} step={1} value={product.stock ?? ''} placeholder="—" onChange={(e) => patch({ stock: e.target.value === '' ? null : Math.max(0, Math.round(Number(e.target.value))) })} />
+                      <span className={`text-[11px] ${t.sub}`}>порожньо — на замовлення</span>
+                    </div>
                   </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -484,11 +514,22 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
               <div className="space-y-4">
                 <div>
                   <Label>Короткий тизер (для превʼю у списку)</Label>
-                  <input className={`w-full rounded-xl px-4 py-2.5 text-xs outline-none ${t.input}`} type="text" value={product.teaser} onChange={(e) => patch({ teaser: e.target.value })} />
+                  <input data-field="teaser" maxLength={TEASER_MAX} className={`w-full rounded-xl px-4 py-2.5 text-xs outline-none ${t.input}`} type="text" value={product.teaser} onChange={(e) => patch({ teaser: e.target.value })} />
+                  <div className="mt-1 flex items-center justify-between gap-2">
+                    <span className={`text-[10px] ${t.sub}`}>Це підзаголовок картки у вітрині, тому він короткий.</span>
+                    <CharCount value={product.teaser} max={TEASER_MAX} t={t} />
+                  </div>
+                  {product.teaser.trim().length > TEASER_MAX ? (
+                    <p className="mt-1 text-[11px] text-rose-400">
+                      Тизер довший за межу вітрини на {product.teaser.trim().length - TEASER_MAX} символів —
+                      публікацію буде відхилено. Скоротіть його, а довший текст перенесіть у «Повний
+                      деталізований опис».
+                    </p>
+                  ) : null}
                 </div>
                 <div>
                   <Label>Повний деталізований опис</Label>
-                  <textarea className={`w-full rounded-xl p-4 text-xs leading-relaxed outline-none resize-y ${t.input}`} rows={6} value={product.description} onChange={(e) => patch({ description: e.target.value })} />
+                  <textarea maxLength={DESCRIPTION_MAX} className={`w-full rounded-xl p-4 text-xs leading-relaxed outline-none resize-y ${t.input}`} rows={6} value={product.description} onChange={(e) => patch({ description: e.target.value })} />
                 </div>
                 <div>
                   <Label>Функціональні зони та слоти (позначки характеристик)</Label>

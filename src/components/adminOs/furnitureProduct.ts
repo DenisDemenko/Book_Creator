@@ -52,7 +52,13 @@ export interface FurnitureProduct {
   priceUah: number;
   /** Базова ціна / до знижки. */
   basePriceUah: number;
-  stock: number;
+  /**
+   * Залишок. **`null` — «не обліковується»**: виріб роблять на замовлення,
+   * тож 0 було б брехнею («продано») і вітрина показувала б «немає в
+   * наявності» з вимкненою кнопкою покупки. Явний 0 лишається для випадку
+   * «справді розпродано».
+   */
+  stock: number | null;
   leadTime: string;
   /** «Активний у Nexus» — чи показується в каталозі. */
   activeInNexus: boolean;
@@ -142,7 +148,7 @@ export function blankFurnitureProduct(): FurnitureProduct {
     subcategory: FURNITURE_SUBCATEGORIES[0],
     priceUah: 0,
     basePriceUah: 0,
-    stock: 0,
+    stock: null,
     leadTime: '2–4 дні (або індивідуальне виготовлення 5-7 днів)',
     activeInNexus: true,
     physical: true,
@@ -170,10 +176,27 @@ export function blankFurnitureProduct(): FurnitureProduct {
 }
 
 /**
+ * Межі полів, які перевіряє приймач мосту (`apps/api/src/bridge/bridge.dto.ts`
+ * маркетплейсу). Тримаємо ТІ САМІ числа тут, щоб автор бачив межу в редакторі,
+ * а не дізнавався про неї із сирої відмови HTTP 400 аж після публікації.
+ *
+ * Саме так і сталося 16.09.2026: тизер довший за 300 символів приймач відкинув
+ * (`subtitle must be shorter than or equal to 300 characters`), а Студія цю
+ * межу взагалі не показувала. Тизер іде у вітрину підзаголовком картки — він
+ * за визначенням короткий (у макеті — ~125 символів).
+ */
+export const TITLE_MAX = 160;
+export const TEASER_MAX = 300;
+export const DESCRIPTION_MAX = 40000;
+
+/**
  * Чи картка заповнена настільки, щоб її можна було опублікувати.
  * Мінімум для вітрини: назва, артикул, ціна і хоча б одне фото.
  * Без обкладинки товар у каталозі показується порожнім прямокутником — те
  * саме правило, що й для книг (assertStorefrontCover у мості).
+ *
+ * Плюс межі довжини (див. константи вище): краще відмовити тут із причиною
+ * українською, ніж віддати авторові англійський текст валідації приймача.
  */
 export function furniturePublishIssues(p: FurnitureProduct): string[] {
   const issues: string[] = [];
@@ -181,5 +204,17 @@ export function furniturePublishIssues(p: FurnitureProduct): string[] {
   if (!p.sku.trim()) issues.push('Немає артикула / SKU.');
   if (!(p.priceUah > 0)) issues.push('Ціна має бути більшою за нуль.');
   if (p.media.length === 0) issues.push('Немає жодного фото — додайте головний банер.');
+  if (p.name.trim().length > TITLE_MAX) {
+    issues.push(`Назва задовга: ${p.name.trim().length} із ${TITLE_MAX} символів.`);
+  }
+  if (p.teaser.trim().length > TEASER_MAX) {
+    issues.push(
+      `Тизер задовгий: ${p.teaser.trim().length} із ${TEASER_MAX} символів — це підзаголовок картки. ` +
+        'Довший текст перенесіть у «Повний деталізований опис».'
+    );
+  }
+  if (p.description.trim().length > DESCRIPTION_MAX) {
+    issues.push(`Опис задовгий: ${p.description.trim().length} із ${DESCRIPTION_MAX} символів.`);
+  }
   return issues;
 }

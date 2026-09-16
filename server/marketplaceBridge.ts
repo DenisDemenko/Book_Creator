@@ -1311,3 +1311,61 @@ export async function attachProductMediaToMarketplace(
     externalId,
   };
 }
+
+/**
+ * Прибрати ВСІ зображення виробу перед повторним завантаженням.
+ *
+ * Приймач додає фото галереї, а не замінює їх (у товару фотографій багато)
+ * — тож без цього кроку кожна повторна публікація подвоювала б галерею.
+ */
+export async function clearProductMedia(
+  externalId: string,
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<{ cleared: number }> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+
+  let response: Response;
+  try {
+    response = await doFetch(
+      `${settings.url}/bridge/products/${encodeURIComponent(externalId)}/media`,
+      {
+        method: 'DELETE',
+        headers: { 'x-bridge-key': settings.key },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      }
+    );
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  }
+
+  const text = await response.text().catch(() => '');
+  if (response.status === 401 || response.status === 403) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401
+    );
+  }
+  if (!response.ok) {
+    throw new MarketplaceBridgeError(
+      `Маркетплейс не прибрав фото виробу: ${describeRejection(response.status, text)}`,
+      'rejected',
+      502,
+      text.slice(0, 400)
+    );
+  }
+
+  let body: any = undefined;
+  try {
+    body = text ? JSON.parse(text) : undefined;
+  } catch {
+    body = undefined;
+  }
+  return { cleared: Number(body?.cleared ?? 0) };
+}

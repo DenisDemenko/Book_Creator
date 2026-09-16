@@ -26,6 +26,8 @@ console.log('Порожня картка:');
   t('три тони дерева', p.woodTones.length === 3, String(p.woodTones.length));
   t('шість доступних кольорів', p.availableColors.length === 6, String(p.availableColors.length));
   t('медіа порожнє', p.media.length === 0);
+  t('порожній залишок — це null (на замовлення), а не 0',
+    p.stock === null, String(p.stock));
   t('категорія — перша з переліку', p.category === 'Органайзери та підставки', p.category);
   t('оновлено — свіжа дата', !Number.isNaN(Date.parse(p.updatedAt)));
 }
@@ -58,6 +60,48 @@ console.log('\nВалідація перед публікацією:');
   filled.priceUah = 8900;
   filled.media = [{ id: 'm1', label: 'Банер', src: 'data:image/jpeg;base64,xx' }];
   t('заповнена картка проходить без зауважень', fp.furniturePublishIssues(filled).length === 0, fp.furniturePublishIssues(filled).join('; '));
+}
+
+console.log('\nМежі полів приймача (саме вони дали HTTP 400 16.09.2026):');
+{
+  t('межа тизера — 300', fp.TEASER_MAX === 300, String(fp.TEASER_MAX));
+  t('межа назви — 160', fp.TITLE_MAX === 160, String(fp.TITLE_MAX));
+  t('межа опису — 40000', fp.DESCRIPTION_MAX === 40000, String(fp.DESCRIPTION_MAX));
+
+  const mk = () => {
+    const p = fp.blankFurnitureProduct();
+    p.name = 'Органайзер';
+    p.sku = 'X-1';
+    p.priceUah = 100;
+    p.media = [{ id: 'm', label: 'b', src: 'data:,' }];
+    return p;
+  };
+
+  const longName = mk();
+  longName.name = 'О'.repeat(161);
+  t('назва 161 символ → зауваження', fp.furniturePublishIssues(longName).some((i) => i.includes('Назва задовга')));
+
+  const longTeaser = mk();
+  longTeaser.teaser = 'т'.repeat(301);
+  const teaserIssues = fp.furniturePublishIssues(longTeaser);
+  t('тизер 301 символ → зауваження', teaserIssues.some((i) => i.includes('Тизер задовгий')), teaserIssues.join('; '));
+  t('у зауваженні видно, скільки зайвого', teaserIssues.some((i) => i.includes('301 із 300')));
+  t('у зауваженні сказано, куди подіти довгий текст', teaserIssues.some((i) => i.includes('Повний деталізований опис')));
+
+  longTeaser.teaser = 'т'.repeat(300);
+  t('тизер рівно 300 → проходить', !fp.furniturePublishIssues(longTeaser).some((i) => i.includes('Тизер')));
+
+  const longDesc = mk();
+  longDesc.description = 'д'.repeat(40001);
+  t('опис 40001 символ → зауваження', fp.furniturePublishIssues(longDesc).some((i) => i.includes('Опис задовгий')));
+
+  // Залишок не входить у перевірку перед публікацією: null (на замовлення) і
+  // явний 0 обидва дозволені — це різні речі, але обидві законні.
+  const madeToOrder = mk();
+  madeToOrder.stock = null;
+  t('виріб на замовлення (stock=null) проходить', fp.furniturePublishIssues(madeToOrder).length === 0);
+  madeToOrder.stock = 0;
+  t('явний нуль (розпродано) теж проходить валідацію', fp.furniturePublishIssues(madeToOrder).length === 0);
 }
 
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);

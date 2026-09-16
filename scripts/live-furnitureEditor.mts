@@ -41,6 +41,7 @@ const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'tropazemli@gmail.com';
 
 const { initStore, saveUser, createSession } = await import('../server/store');
+const { blankFurnitureProduct } = await import('../src/components/adminOs/furnitureProduct');
 await initStore();
 await saveUser({
   id: 'u-live-admin',
@@ -86,6 +87,56 @@ if (!(await waitForServer())) {
   process.exit(1);
 }
 t('сервер піднявся', true);
+
+// ---------------------------------------------------------------------------
+// СЕРВЕРНА половина тієї самої перевірки.
+//
+// Браузер показує, що РЕДАКТОР відмовляє; тут перевіряємо, що й МАРШРУТ
+// відмовляє — до моста. Саме це 16.09.2026 дало власнику сирий HTTP 400 з
+// англійським текстом замість причини українською.
+// ---------------------------------------------------------------------------
+console.log('\nМежі полів на сервері (без моста):');
+{
+  const cookie = `nova_session=${TOKEN}`;
+  const probe = (id: string, sku: string, over: Record<string, unknown>) => ({
+    ...blankFurnitureProduct(),
+    id,
+    sku,
+    name: 'Перевірка межі',
+    priceUah: 100,
+    media: [{ id: 'm', label: 'банер', src: 'data:,' }],
+    ...over,
+  });
+
+  const saveProbe = async (p: unknown) =>
+    fetch(`${BASE}/api/admin/furniture-products`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', cookie },
+      body: JSON.stringify({ product: p }),
+    });
+  const publishProbe = async (id: string) => {
+    const r = await fetch(`${BASE}/api/admin/furniture-products/${id}/publish`, { method: 'POST', headers: { cookie } });
+    const body = await r.json().catch(() => ({}));
+    return { status: r.status, error: String(body?.error || '') };
+  };
+  const dropProbe = (id: string) =>
+    fetch(`${BASE}/api/admin/furniture-products/${id}`, { method: 'DELETE', headers: { cookie } });
+
+  const longTeaser = await saveProbe(probe('live-limit', 'LIVE-LIMIT', { teaser: 'т'.repeat(301) }));
+  t('чорнетка з довгим тизером збереглася', longTeaser.ok, String(longTeaser.status));
+  const longRefused = await publishProbe('live-limit');
+  t('маршрут відмовив до моста (400, а не 409 «міст не налаштований»)', longRefused.status === 400, String(longRefused.status));
+  t('причина — про тизер, українською', longRefused.error.includes('Тизер задовгий'), longRefused.error.slice(0, 110));
+  await dropProbe('live-limit');
+
+  // Дробовий залишок: приймач перевіряє stock як ціле (@IsInt()), тож міст
+  // має отримати округлене. Доказ — відмова приходить про МІСТ, а не про stock.
+  const frac = await saveProbe(probe('live-frac', 'LIVE-FRAC', { stock: 4.7 }));
+  t('чорнетка з дробовим залишком збереглася', frac.ok, String(frac.status));
+  const fracRefused = await publishProbe('live-frac');
+  t('дробовий залишок не спіткнувся об валідацію stock', !fracRefused.error.includes('stock'), fracRefused.error.slice(0, 110));
+  await dropProbe('live-frac');
+}
 
 const puppeteer = (await import('puppeteer-core')).default;
 const CHROME = [
@@ -176,6 +227,34 @@ try {
   await setValue('name', 'Тестовий органайзер (live)');
   await setValue('sku', 'LIVE-ORG-001');
   await setValue('price', '8900');
+
+  // Межа тизера: 301 символ має відмовити ЛОКАЛЬНО (до моста), а не сирою
+  // відмовою приймача. `maxLength` блокує набір, тому ставимо значення
+  // програмно — саме так воно приходить із чорнетки, збереженої до правки.
+  await page.evaluate(() => {
+    const input = document.querySelector('[data-field="teaser"]') as HTMLInputElement | null;
+    if (!input) return;
+    const proto = Object.getPrototypeOf(input) as typeof HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    setter?.call(input, 'т'.repeat(301));
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await new Promise((r) => setTimeout(r, 300));
+  const counterShown = await page.evaluate(() => (document.querySelector('[data-furniture-theme]') as HTMLElement | null)?.innerText.includes('301/300') ?? false);
+  t('редактор показує перевищення межі тизера (301/300)', counterShown);
+
+  await page.evaluate(() => {
+    const btns = Array.from(document.querySelectorAll('[data-furniture-theme] header button'));
+    const btn = btns.find((b) => (b.textContent || '').includes('Опублікувати на вітрині'));
+    (btn as HTMLElement | undefined)?.click();
+  });
+  await new Promise((r) => setTimeout(r, 800));
+  const refused = await page.evaluate(() => (document.querySelector('[data-furniture-theme]') as HTMLElement | null)?.innerText.includes('Тизер задовгий') ?? false);
+  t('задовгий тизер відмовив локально, з причиною українською', refused);
+
+  // Повертаємо робочий тизер, щоб збереження чорнетки було чистим.
+  await setValue('teaser', 'Короткий тизер для перевірки.');
+  await new Promise((r) => setTimeout(r, 300));
 
   // Зберегти чорнетку кнопкою нижньої панелі.
   await page.evaluate(() => {
