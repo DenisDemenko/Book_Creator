@@ -101,31 +101,22 @@ remote перевірити можна, запушити — ні**. Робоч�
 > прохання власника** (AGENTS.md), тому між сесіями тут завжди щось лежить —
 > і наступна сесія має знати, що саме, бо `git log` вона не памʼятає.
 
-## Стан гілок на 15.09.2026 (запис #173) — ⚠️ НЕ закомічено, НЕ запушено
+## Стан гілок на 16.09.2026 (після пушу #173) — ✅ нічого не лишилось
 
-**Book_Creality (Студія).** Незакомічені зміни (частини А і Г):
-- `src/components/adminOs/FurnitureProductEditor.tsx` (новий) — редактор карти
-  виробу, нічна + денна теми.
-- `src/components/adminOs/furnitureProduct.ts` (новий) — модель/валідація.
-- `src/components/AdminProductsView.tsx` — кнопка «Додати виріб», перелік
-  чорнеток, незалежне завантаження обох джерел.
-- `server/furnitureProductRoutes.ts` (новий), `server/marketplaceBridge.ts`
-  (+ `publishProductToMarketplace`, `attachProductMediaToMarketplace`,
-  `productExternalId`, `PRODUCT_SOURCE`), `server.ts` (реєстрація маршрутів).
-- Скрипти: `scripts/live-furnitureEditor.mts`, `scripts/test-furnitureProduct.mts`,
-  `scripts/test-furniturePublish.mts`; `scripts/test-marketplaceBridge.mts`
-  (+10 перевірок); `package.json` (нові скрипти + у ланцюгу `npm test`).
-- `log.md`, `task.md`, `log/119-151.md` — документація #173.
+**Book_Creality (Студія).** Два коміти в `master`, обидва запушено в `origin`
+(`FusionLabPush`) і `production` (`Book_Creator`); хук `pre-push` пропустив
+обидва пуші (`journal-check` — 173 записи):
+- `d4e3b66` — `feat(admin,bridge)`: редактор картки виробу, маршрути
+  `/api/admin/furniture-products`, гілка мосту `/bridge/products`, скрипти
+  (живий прогін редактора, юніт-набір моделі, прогін публікації).
+- `da082f6` — `docs(log)`: запис #173, журнал сесій, `task.md`.
 
-**Fusion-Lab-Marketplaes (маркетплейс, окремий репозиторій).** Теж
-незакомічені (частина Б):
-- `apps/api/prisma/schema.prisma` (+`attributes Json?`), `apps/api/prisma/
-  migrations/20260915000000_product_attributes/migration.sql` (нова),
-  `apps/api/src/bridge/bridge.{dto,service,controller}.ts`,
-  `apps/api/src/catalog/listing.mapper.ts`.
-- `packages/shared-types/src/index.ts` (+`ProductAttributes`).
-- `apps/web/src/app/[locale]/catalog/[slug]/page.tsx` (секції виробу),
-  `apps/web/messages/{uk,en}.json`.
+**Fusion-Lab-Marketplaes (маркетплейс, окремий репозиторій).** Коміт `c3ad022`
+запушено в `origin`:
+- `attributes Json?` + міграція `20260915000000_product_attributes`;
+- приймач `/bridge/products` (+ `/media`, GET, DELETE);
+- `attributes` у мапі каталогу й `shared-types`; секції товару на сторінці
+  `catalog/[slug]` + ключі uk/en.
 
 **Порядок деплою (обидва репозиторії разом):** спершу маркетплейс (міграція
 `product_attributes` + маршрути `/bridge/products`), потім Студія. Якщо
@@ -139,6 +130,11 @@ remote перевірити можна, запушити — ні**. Робоч�
   кольори, тони дерева.
 - Реальний прогін усіх 10 фото: `npm run test:furniture-publish` (зараз
   працює проти мока; після деплою — спрямувати на справжній API).
+
+**Борг #173 (перевіркою НЕ покрито):** реальний прогін публікації (приймач не
+задеплоєний, ключа мосту немає, Docker вимкнений), застосування міграції на
+живій базі, сторінка товару в браузері, реальний multipart (busboy/multer),
+вигляд денної теми.
 
 ## Стан гілок на 14.09.2026 (після запису #172) — ✅ нічого не лишилось
 
