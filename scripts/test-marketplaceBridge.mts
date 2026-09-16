@@ -408,5 +408,38 @@ console.log('\nКартка без обкладинки у вітрину не �
     refused('https://app.fusionlab.in.ua/api/public/books/BK-1/cover?v=1') === null);
 }
 
+console.log('\nФізичний виріб — третя гілка мосту (частина А плану #173):');
+{
+  t('externalId виробу = product:<SKU>', bridge.productExternalId('BK-ORG-001') === 'product:BK-ORG-001');
+  t('пробіли в артикулі обрізаються', bridge.productExternalId('  X  ') === 'product:X');
+
+  const seen: { url: string; method?: string; body?: unknown }[] = [];
+  const fetch = (async (url: string, init: any = {}) => {
+    seen.push({ url: String(url), method: init.method, body: init.body ? JSON.parse(init.body) : undefined });
+    return { status: 200, ok: true, text: async () => JSON.stringify({ created: true, listing: { slug: 'organaizer' } }) };
+  }) as never;
+
+  const result = await bridge.publishProductToMarketplace(
+    {
+      sku: 'BK-ORG-001',
+      title: 'Органайзер',
+      priceMinor: 890000,
+      stock: 4,
+      attributes: { material: 'Дуб', functionalZones: ['Смартфон'] },
+    },
+    { fetch, settings }
+  );
+
+  t('POST йде на /bridge/products', seen[0]?.url === 'https://api.fusionlab.in.ua/bridge/products', String(seen[0]?.url));
+  t('метод POST', seen[0]?.method === 'POST');
+  const body = seen[0]?.body as any;
+  t('у тілі є externalId', body?.externalId === 'product:BK-ORG-001', String(body?.externalId));
+  t('ціна в копійках (мінорні одиниці)', body?.priceMinor === 890000, String(body?.priceMinor));
+  t('залишок передається', body?.stock === 4, String(body?.stock));
+  t('меблеві атрибути в attributes', body?.attributes?.material === 'Дуб' && Array.isArray(body?.attributes?.functionalZones), JSON.stringify(body?.attributes));
+  t('slug розпаковується з відповіді', result.slug === 'organaizer', String(result.slug));
+  t('created читається з конверта', result.created === true, String(result.created));
+}
+
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);
 if (fail > 0) process.exit(1);

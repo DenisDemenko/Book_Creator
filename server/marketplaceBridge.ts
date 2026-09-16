@@ -1062,3 +1062,252 @@ export async function publishCourseToMarketplace(
 
   return { externalId, listing, slug: listingSlug(listing), created: unwrapListing(listing).created };
 }
+
+// ---------------------------------------------------------------------------
+// Фізичні вироби (меблі / дерево) — третя гілка мосту.
+// ---------------------------------------------------------------------------
+
+/**
+ * Джерело виробів у маркетплейсі. Окреме від `BOOK_SOURCE` і
+ * `COURSE_SOURCE` з тієї ж причини, що й курс від книги: виріб — інший
+ * тип товару, і його ідемпотентна пара (source, externalId) не має
+ * перетинатися з книжковою.
+ */
+export const PRODUCT_SOURCE = 'book_creality_product';
+
+/**
+ * Меблеві атрибути, яких немає в картці книги/курсу. Маркетплейс кладе їх
+ * у JSON-колонку лістинга (див. план #173, частина Б) і показує на сторінці
+ * виробу: матеріал, оздоблення, габарити, LED, тони, персоналізація.
+ */
+export interface PublishProductAttributes {
+  category?: string;
+  subcategory?: string;
+  material?: string;
+  finish?: string;
+  dimensions?: string;
+  warranty?: string;
+  leadTime?: string;
+  physical?: boolean;
+  ledStrip?: string;
+  ledPower?: string;
+  ledControl?: string;
+  /** Функціональні зони та слоти — показуються як перелік переваг. */
+  functionalZones?: string[];
+  /** Палітра тонів дерева: { label, color }. */
+  woodTones?: Array<{ label: string; color: string }>;
+  /** Доступні кольори для персоналізації. */
+  colors?: Array<{ label: string; enabled: boolean }>;
+  engraving?: boolean;
+  /** Ціна гравіювання в копійках. */
+  engravingPriceMinor?: number;
+  resinColor?: boolean;
+  phoneFit?: boolean;
+}
+
+export interface PublishProductInput {
+  /** Артикул виробу — основа externalId (ідемпотентність). */
+  sku: string;
+  title: string;
+  subtitle?: string;
+  summary?: string;
+  description?: string;
+  /** Ціна в копійках. */
+  priceMinor: number;
+  /** Базова ціна «до знижки» в копійках — показується закресленою. */
+  basePriceMinor?: number;
+  stock?: number;
+  coverUrl?: string;
+  /** Короткі переваги — поверх атрибутів, якщо треба. */
+  highlights?: string[];
+  attributes?: PublishProductAttributes;
+  sellerSlug?: string;
+}
+
+export interface PublishProductResult {
+  externalId: string;
+  listing: unknown;
+  slug?: string;
+  created?: boolean;
+}
+
+/** `externalId` виробу — артикул із префіксом, щоб не плутати з книгами. */
+export function productExternalId(sku: string): string {
+  return `product:${sku.trim()}`;
+}
+
+/**
+ * Публікація фізичного виробу — дзеркало `publishBookToMarketplace`, але на
+ * `/bridge/products`. Приймач на боці Fusion Lab — частина Б плану #173:
+ * поки його немає, цей виклик чесно віддає `rejected` з кодом відповіді.
+ */
+export async function publishProductToMarketplace(
+  input: PublishProductInput,
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<PublishProductResult> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+  const externalId = productExternalId(input.sku);
+
+  const body = {
+    externalId,
+    title: input.title,
+    subtitle: input.subtitle,
+    summary: input.summary,
+    description: input.description,
+    priceMinor: Math.round(input.priceMinor),
+    basePriceMinor: input.basePriceMinor === undefined ? undefined : Math.round(input.basePriceMinor),
+    stock: input.stock,
+    coverUrl: input.coverUrl,
+    highlights: input.highlights,
+    attributes: input.attributes,
+    sellerSlug: input.sellerSlug,
+  };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await doFetch(`${settings.url}/bridge/products`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-bridge-key': settings.key },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const text = await response.text().catch(() => '');
+  if (response.status === 401) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401,
+      text.slice(0, 400)
+    );
+  }
+  if (!response.ok) {
+    throw new MarketplaceBridgeError(
+      `Маркетплейс відхилив публікацію виробу: ${describeRejection(response.status, text)}`,
+      'rejected',
+      502,
+      text.slice(0, 400)
+    );
+  }
+
+  let listing: unknown = undefined;
+  try {
+    listing = text ? JSON.parse(text) : undefined;
+  } catch {
+    listing = { raw: text.slice(0, 400) };
+  }
+
+  return { externalId, listing, slug: listingSlug(listing), created: unwrapListing(listing).created };
+}
+
+/** Види зображень виробу: головний банер і решта галереї. */
+export type ProductMediaKind = 'cover' | 'gallery';
+
+/**
+ * Надіслати зображення виробу — друга половина товару.
+ *
+ * Локальні фото з диска власника не мають публічного URL, тож міст возить їх
+ * файлами (multipart) — так само, як обкладинку й файл книги. Перший файл
+ * завжди `cover` (головний банер картки), решта — `gallery`.
+ */
+export async function attachProductMediaToMarketplace(
+  input: {
+    sku: string;
+    kind: ProductMediaKind;
+    filename: string;
+    mimeType: string;
+    bytes: Uint8Array;
+  },
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<{ attached: boolean; kind: ProductMediaKind; replaced: number; media?: unknown; externalId: string }> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+  const externalId = productExternalId(input.sku);
+
+  // Заголовок Content-Type навмисно НЕ ставимо: його разом із межею секцій
+  // має поставити fetch, і ручний заголовок зламав би розбір на приймачі.
+  const form = new FormData();
+  form.append(
+    'file',
+    new Blob([input.bytes as unknown as BlobPart], { type: input.mimeType }),
+    input.filename
+  );
+  form.append('kind', input.kind);
+
+  let response: Response;
+  try {
+    response = await doFetch(
+      `${settings.url}/bridge/products/${encodeURIComponent(externalId)}/media`,
+      {
+        method: 'POST',
+        headers: { 'x-bridge-key': settings.key },
+        body: form,
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      }
+    );
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  }
+
+  const text = await response.text().catch(() => '');
+  if (response.status === 401 || response.status === 403) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401
+    );
+  }
+  if (response.status === 404) {
+    const routeMissing = /Cannot\s+(POST|PUT|PATCH|GET)/i.test(text);
+    throw new MarketplaceBridgeError(
+      routeMissing
+        ? 'Маркетплейс не має маршруту для фото виробу: його API старіший за міст. ' +
+            'Потрібен деплой приймача — до того картка публікується, а фото не прикріплюється.'
+        : 'Виробу немає в каталозі — спершу опублікуйте його, потім надсилайте фото.',
+      'rejected',
+      404,
+      text.slice(0, 400)
+    );
+  }
+  if (!response.ok) {
+    throw new MarketplaceBridgeError(
+      `Маркетплейс відхилив фото: ${describeRejection(response.status, text)}`,
+      'rejected',
+      502,
+      text.slice(0, 400)
+    );
+  }
+
+  let body: any = undefined;
+  try {
+    body = text ? JSON.parse(text) : undefined;
+  } catch {
+    body = undefined;
+  }
+  return {
+    attached: Boolean(body?.attached ?? true),
+    kind: (body?.kind as ProductMediaKind) || input.kind,
+    replaced: Number(body?.replaced ?? 0),
+    media: body?.media,
+    externalId,
+  };
+}

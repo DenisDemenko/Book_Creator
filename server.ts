@@ -48,7 +48,7 @@ import { mailConfig } from './server/mail';
 import { registerCourseRoutes } from './server/courseRoutes';
 import { registerCourseWizardRoutes } from './server/courseWizardRoutes';
 import { registerModerationRoutes } from './server/moderationRoutes';
-import { registerSupportChatRoutes } from './server/supportChatRoutes';
+import { registerFurnitureProductRoutes } from './server/furnitureProductRoutes';import { registerSupportChatRoutes } from './server/supportChatRoutes';
 import { registerChatRoutes, CHAT_USAGE_CONTEXT } from './server/chatRoutes';
 import { registerApiKeysRoutes } from './server/apiKeysRoutes';
 import { registerGitHistoryRoutes } from './server/gitHistoryRoutes';
@@ -312,6 +312,7 @@ async function startServer() {
 registerCourseRoutes(app);
 registerCourseWizardRoutes(app);
 registerModerationRoutes(app);
+registerFurnitureProductRoutes(app);
 registerSupportChatRoutes(app);
 registerGitHistoryRoutes(app);
 registerGitCommandRoutes(app);
