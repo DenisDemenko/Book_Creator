@@ -29,7 +29,7 @@ import type { AdminTab } from '../AdminPanelView';
  */
 export type NodeAction = { kind: 'panel'; tab: AdminTab } | { kind: 'view'; view: AdminView };
 
-export type AdminView = 'api-keys' | 'core-ai' | 'moderation' | 'products';
+export type AdminView = 'api-keys' | 'core-ai' | 'moderation' | 'products' | 'price-management';
 
 export interface AdminNode {
   id: string;
@@ -56,7 +56,7 @@ export interface AdminNode {
 }
 
 /**
- * Одинадцять вузлів — рівно ті області, якими адміністратор Nova реально
+ * Тринадцять вузлів — рівно ті області, якими адміністратор Nova реально
  * керує. Порядок не випадковий: спершу те, без чого платформа не працює
  * (провайдери й промти), далі гроші, далі люди, далі зовнішні звʼязки.
  */
@@ -176,6 +176,16 @@ export const ADMIN_NODES: AdminNode[] = [
     description:
       'Курси, що чекають рішення адміністратора: ухвалити чи відхилити з причиною. Доти ця черга жила всередині «Моста до вітрини», хоч рішення про публікацію ухвалює саме адміністратор — і саме тут.',
     action: { kind: 'view', view: 'moderation' },
+    group: 'operations',
+    slot: 'left',
+  },
+  {
+    id: 'price-management',
+    title: 'Управління цінами',
+    hint: 'калькулятор собівартості',
+    description:
+      'Калькулятор собівартості меблів з дерева та епоксидної смоли: деревина, смола, ЧПУ, електроніка/LED, оплата праці, накладні, податки та маржа — до рекомендованої ціни для клієнта. Курс валют і власні шаблони виробів зберігаються на сервері й спільні для всіх адміністраторів.',
+    action: { kind: 'view', view: 'price-management' },
     group: 'operations',
     slot: 'left',
   },

@@ -30,6 +30,7 @@ import { RefreshCw, ArrowLeft } from 'lucide-react';
 import { AdminPanelView } from '../AdminPanelView';
 import { AdminModerationView } from '../AdminModerationView';
 import { AdminProductsView } from '../AdminProductsView';
+import { FurnitureCalculatorPanel } from './furnitureCalculator/FurnitureCalculatorPanel';
 import { ApiKeysView } from '../ApiKeysView';
 import { CoreAiPanel } from '../QuickAiModal';
 import type { ChatModelOption } from '../QuickAiModal';
@@ -305,6 +306,7 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser }) => {
     if (view === 'api-keys') return <ApiKeysView authUser={authUser} />;
     if (view === 'moderation') return <AdminModerationView />;
     if (view === 'products') return <AdminProductsView />;
+    if (view === 'price-management') return <FurnitureCalculatorPanel />;
     if (view === 'core-ai') {
       return (
         <CoreAiPanel

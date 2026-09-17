@@ -1,0 +1,214 @@
+/*
+ * Scoped port of the Neo-Tactile Wood & Epoxy calculator's original src/index.css.
+ * Everything is nested under .furniture-calc-scope (applied to the panel's root <div>
+ * in FurnitureCalculatorPanel.tsx) so these rules never leak into the rest of the Nova
+ * admin panel. The original app was dark-only; [data-theme="light"] overrides below
+ * follow Nova's existing convention ([data-theme="light"] .selector, see src/index.css)
+ * rather than the calculator's own (:root-based) approach.
+ *
+ * The original file's global `::-webkit-scrollbar` rules are intentionally NOT ported:
+ * Nova already styles scrollbars globally, and a second unscoped `::-webkit-scrollbar`
+ * rule here would fight with it outside this panel too (scrollbar pseudo-elements can't
+ * be meaningfully scoped to a class).
+ */
+
+/* Neo-Tactile Custom Shadow and Bevel Utilities */
+.furniture-calc-scope .neo-card {
+  background: rgba(17, 24, 39, 0.72);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow:
+    0 20px 40px -15px rgba(0, 0, 0, 0.7),
+    0 1px 0 0 rgba(255, 255, 255, 0.12) inset,
+    0 -1px 0 0 rgba(0, 0, 0, 0.4) inset;
+}
+
+.furniture-calc-scope .neo-card-subtle {
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 10px 25px -10px rgba(0, 0, 0, 0.5);
+}
+
+.furniture-calc-scope .neo-inset {
+  background: rgba(8, 13, 24, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow:
+    inset 0 2px 5px rgba(0, 0, 0, 0.6),
+    inset 0 1px 2px rgba(0, 0, 0, 0.8),
+    0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.furniture-calc-scope .neo-pill-default {
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 4px 10px rgba(0, 0, 0, 0.4),
+    0 1px 0 rgba(255, 255, 255, 0.12) inset;
+  color: #94a3b8;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.furniture-calc-scope .neo-pill-default:hover {
+  color: #f1f5f9;
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: translateY(-1px);
+}
+
+.furniture-calc-scope .neo-pill-active {
+  background: linear-gradient(180deg, #3b82f6 0%, #1d4ed8 100%);
+  border: 1px solid rgba(147, 197, 253, 0.5);
+  box-shadow:
+    0 0 24px rgba(59, 130, 246, 0.55),
+    0 4px 12px rgba(29, 78, 216, 0.6),
+    0 1px 0 rgba(255, 255, 255, 0.3) inset;
+  color: #ffffff;
+}
+
+.furniture-calc-scope .neo-icon-btn {
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.85) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 3px 8px rgba(0, 0, 0, 0.4),
+    0 1px 0 rgba(255, 255, 255, 0.1) inset;
+  transition: all 0.15s ease;
+}
+
+.furniture-calc-scope .neo-icon-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.18);
+  box-shadow:
+    0 6px 14px rgba(0, 0, 0, 0.5),
+    0 1px 0 rgba(255, 255, 255, 0.15) inset;
+}
+
+.furniture-calc-scope .neo-icon-btn:active {
+  transform: translateY(1px);
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.6),
+    0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* Custom Tactical Range Input */
+.furniture-calc-scope input[type="range"].neo-range {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  height: 24px;
+}
+
+.furniture-calc-scope input[type="range"].neo-range:focus {
+  outline: none;
+}
+
+.furniture-calc-scope input[type="range"].neo-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: rgba(15, 23, 42, 0.9);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.8), 0 1px 0 rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.furniture-calc-scope input[type="range"].neo-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 20px;
+  width: 20px;
+  border-radius: 50%;
+  background: #ffffff;
+  margin-top: -7px;
+  box-shadow:
+    0 0 10px rgba(56, 189, 248, 0.7),
+    0 2px 6px rgba(0, 0, 0, 0.6);
+  border: 2px solid #38bdf8;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+.furniture-calc-scope input[type="range"].neo-range:hover::-webkit-slider-thumb {
+  transform: scale(1.15);
+  box-shadow:
+    0 0 15px rgba(56, 189, 248, 0.9),
+    0 3px 8px rgba(0, 0, 0, 0.8);
+}
+
+/* Custom glowing ambient orb */
+.furniture-calc-scope .neo-glow-cyan {
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.14) 0%, rgba(56, 189, 248, 0) 70%);
+}
+
+.furniture-calc-scope .neo-glow-blue {
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.16) 0%, rgba(59, 130, 246, 0) 70%);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Light theme overrides — the original calculator was dark-only; Nova can be */
+/* switched to a light theme via useTheme()/data-theme="light" on <html>, so  */
+/* the panel's surfaces get a light equivalent instead of staying dark-only.  */
+/* ------------------------------------------------------------------------- */
+
+[data-theme="light"] .furniture-calc-scope {
+  background-color: #f1f5f9;
+  color: #1e293b;
+}
+
+[data-theme="light"] .furniture-calc-scope .neo-card {
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow:
+    0 20px 40px -15px rgba(15, 23, 42, 0.12),
+    0 1px 0 0 rgba(255, 255, 255, 0.6) inset,
+    0 -1px 0 0 rgba(15, 23, 42, 0.04) inset;
+}
+
+[data-theme="light"] .furniture-calc-scope .neo-card-subtle {
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  box-shadow: 0 10px 25px -10px rgba(15, 23, 42, 0.1);
+}
+
+[data-theme="light"] .furniture-calc-scope .neo-inset {
+  background: rgba(226, 232, 240, 0.8);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow:
+    inset 0 2px 5px rgba(15, 23, 42, 0.12),
+    inset 0 1px 2px rgba(15, 23, 42, 0.08),
+    0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+[data-theme="light"] .furniture-calc-scope .neo-pill-default {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(226, 232, 240, 0.9) 100%);
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  box-shadow:
+    0 4px 10px rgba(15, 23, 42, 0.08),
+    0 1px 0 rgba(255, 255, 255, 0.6) inset;
+  color: #475569;
+}
+
+[data-theme="light"] .furniture-calc-scope .neo-pill-default:hover {
+  color: #0f172a;
+  border-color: rgba(15, 23, 42, 0.2);
+}
+
+[data-theme="light"] .furniture-calc-scope .neo-icon-btn {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(226, 232, 240, 0.85) 100%);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow:
+    0 3px 8px rgba(15, 23, 42, 0.08),
+    0 1px 0 rgba(255, 255, 255, 0.6) inset;
+}
+
+[data-theme="light"] .furniture-calc-scope .neo-glow-cyan {
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.1) 0%, rgba(56, 189, 248, 0) 70%);
+}
+
+[data-theme="light"] .furniture-calc-scope .neo-glow-blue {
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.1) 0%, rgba(59, 130, 246, 0) 70%);
+}
+
+[data-theme="light"] .furniture-calc-scope input[type="range"].neo-range::-webkit-slider-runnable-track {
+  background: rgba(226, 232, 240, 0.9);
+  box-shadow: inset 0 1px 3px rgba(15, 23, 42, 0.15), 0 1px 0 rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
