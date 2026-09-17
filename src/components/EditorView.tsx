@@ -2328,11 +2328,6 @@ export const EditorView: React.FC<EditorViewProps> = ({
     onUpdateBook({ ...book, heroArc: next });
   };
 
-  /** Відкриває вікно англійського тексту поруч з українським. */
-  const openEnglishWindow = () => {
-    setEditorLanguageMode('parallel');
-  };
-
   /** Шрифти, які користувач довантажив з Google Fonts (живуть у книзі). */
   const customFonts = book.layoutConfig.customFonts ?? [];
 
@@ -4848,11 +4843,11 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
           <div className="flex items-center gap-3 text-slate-400 font-mono text-[11px]">
             {/* Кількість слів/час читання переїхали компактним чіпом у
-                рядок форматування режиму «UA» — лівіше кнопки «Англійська
-                версія» (openEnglishWindow) — див. коментар «Компактний чіп
-                кількості слів» там. Тут лишається резервний варіант для
-                режимів EN/Паралельно (у них немає власного toolbar-рядка,
-                що межує з тою кнопкою) — без дублювання в режимі UA. */}
+                шапку панелі режиму «UA» (запис #185, разом із прибиранням
+                кнопки «Англійська версія» — режим «Паралельно» так само
+                доступний через «UA | EN» вище). Тут лишається резервний
+                варіант для режимів EN/Паралельно (у них немає такої шапки)
+                — без дублювання в режимі UA. */}
             {editorLanguageMode !== 'ua' && (
               <span>
                 {t('editor.wordsShort', { n: activeSection?.wordCount || 0 })}
@@ -4947,6 +4942,21 @@ export const EditorView: React.FC<EditorViewProps> = ({
               title={null}
               headerExtra={
                 <>
+                {/* Компактний чіп кількості слів/часу читання — раніше в
+                    рядку тулбару форматування, поряд із кнопкою «Англійська
+                    версія» (запис #185 прибрав кнопку зовсім — режим
+                    «Паралельно», який вона відкривала, доступний через
+                    «UA | EN» вище; чіп переїхав сюди, в шапку панелі). */}
+                <div
+                  className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-400 font-mono text-[10px] shrink-0"
+                  title={`${t('editor.wordsUaLabel')} ${activeSection?.wordCount || 0} · ${t('editor.readingTime', { n: estimateReadingTimeMinutes(activeSection?.wordCount || 0) })}`}
+                >
+                  <span className="text-slate-100 font-bold">{t('editor.wordsShort', { n: activeSection?.wordCount || 0 })}</span>
+                  {activeSection?.contentEn && (
+                    <span className="[color:var(--sun-acc)]">· EN {calculateWordCount(activeSection.contentEn)}</span>
+                  )}
+                  <span className="text-slate-500">· {t('editor.readingTimeShort', { n: estimateReadingTimeMinutes(activeSection?.wordCount || 0) })}</span>
+                </div>
                 {/* «Покращити AI» / «Ілюстрація з тексту» — раніше окремим
                     рядком під тулбаром (запис #184 прибрав із нього тільки
                     підпис, кнопки лишались; тепер рядок прибрано повністю,
@@ -5039,32 +5049,6 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 >
                   <Ruler className="w-3.5 h-3.5" />
                 </button>
-                <div className="flex items-center gap-1.5 ml-auto">
-                  {/* Компактний чіп кількості слів виділення/розділу —
-                      раніше окремим рядком нижче тулбару (три довгі <span>,
-                      «Слів (UA): N • EN: N • ~N хв читання»), губився в
-                      переповненому горизонтальним скролом рядку. Стиснуто в
-                      один моноширинний чіп і піднято сюди, лівіше кнопки
-                      «Англійська версія», як просив власник. */}
-                  <div
-                    className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-md bg-slate-950 border border-slate-800 text-slate-400 font-mono text-[10px] shrink-0"
-                    title={`${t('editor.wordsUaLabel')} ${activeSection?.wordCount || 0} · ${t('editor.readingTime', { n: estimateReadingTimeMinutes(activeSection?.wordCount || 0) })}`}
-                  >
-                    <span className="text-slate-100 font-bold">{t('editor.wordsShort', { n: activeSection?.wordCount || 0 })}</span>
-                    {activeSection?.contentEn && (
-                      <span className="[color:var(--sun-acc)]">· EN {calculateWordCount(activeSection.contentEn)}</span>
-                    )}
-                    <span className="text-slate-500">· {t('editor.readingTimeShort', { n: estimateReadingTimeMinutes(activeSection?.wordCount || 0) })}</span>
-                  </div>
-                  <button
-                    onClick={openEnglishWindow}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-[11px] font-semibold transition-colors"
-                    title={t('editor.openEnWindowTitle')}
-                  >
-                    <Languages className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
-                    <span>{t('editor.openEnWindowBtn')}</span>
-                  </button>
-                </div>
               </div>
 
               <PageColumn
