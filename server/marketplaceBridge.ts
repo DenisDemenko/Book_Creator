@@ -1092,6 +1092,11 @@ export interface PublishProductAttributes {
   ledStrip?: string;
   ledPower?: string;
   ledControl?: string;
+  /** Вбудована програмована електроніка (ESP32/Arduino) — понад LED. */
+  electronicsEnabled?: boolean;
+  electronicsController?: 'esp32' | 'arduino';
+  electronicsUserProgrammable?: boolean;
+  electronicsFunctions?: string[];
   /** Функціональні зони та слоти — показуються як перелік переваг. */
   functionalZones?: string[];
   /** Палітра тонів дерева: { label, color }. */

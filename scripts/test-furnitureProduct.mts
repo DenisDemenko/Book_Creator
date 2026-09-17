@@ -104,5 +104,47 @@ console.log('\nМежі полів приймача (саме вони дали 
   t('явний нуль (розпродано) теж проходить валідацію', fp.furniturePublishIssues(madeToOrder).length === 0);
 }
 
+console.log('\nЕлектроніка (ESP32/Arduino, опційний модуль понад LED):');
+{
+  const p = fp.blankFurnitureProduct();
+  t('вимкнена за замовчуванням', p.electronicsEnabled === false);
+  t('типовий контролер — esp32', p.electronicsController === 'esp32', p.electronicsController);
+  t('самопрограмування дозволене за замовчуванням', p.electronicsUserProgrammable === true);
+  t('функції порожні за замовчуванням', p.electronicsFunctions.length === 0);
+
+  t('10 прикладів функцій', fp.DEFAULT_ELECTRONICS_FUNCTIONS.length === 10, String(fp.DEFAULT_ELECTRONICS_FUNCTIONS.length));
+  t('усі приклади — непорожні рядки', fp.DEFAULT_ELECTRONICS_FUNCTIONS.every((f: string) => f.trim().length > 0));
+  t('приклади без повторів', new Set(fp.DEFAULT_ELECTRONICS_FUNCTIONS).size === fp.DEFAULT_ELECTRONICS_FUNCTIONS.length);
+
+  const controllerIds = fp.ELECTRONICS_CONTROLLERS.map((c: { id: string }) => c.id);
+  t('обидва контролери в переліку', controllerIds.includes('esp32') && controllerIds.includes('arduino'), controllerIds.join(','));
+
+  const enabledNoFns = fp.blankFurnitureProduct();
+  enabledNoFns.name = 'Органайзер';
+  enabledNoFns.sku = 'X-2';
+  enabledNoFns.priceUah = 100;
+  enabledNoFns.media = [{ id: 'm', label: 'b', src: 'data:,' }];
+  enabledNoFns.electronicsEnabled = true;
+  const enabledIssues = fp.furniturePublishIssues(enabledNoFns);
+  t('електроніка увімкнена без функцій → зауваження', enabledIssues.some((i: string) => i.includes('жодної функції не обрано')), enabledIssues.join('; '));
+
+  const enabledWithFns = fp.blankFurnitureProduct();
+  enabledWithFns.name = 'Органайзер';
+  enabledWithFns.sku = 'X-3';
+  enabledWithFns.priceUah = 100;
+  enabledWithFns.media = [{ id: 'm', label: 'b', src: 'data:,' }];
+  enabledWithFns.electronicsEnabled = true;
+  enabledWithFns.electronicsFunctions = [fp.DEFAULT_ELECTRONICS_FUNCTIONS[0]];
+  const okIssues = fp.furniturePublishIssues(enabledWithFns);
+  t('електроніка увімкнена з функцією → без зауваження про електроніку', !okIssues.some((i: string) => i.includes('Електроніка')), okIssues.join('; '));
+
+  const disabledNoFns = fp.blankFurnitureProduct();
+  disabledNoFns.name = 'Органайзер';
+  disabledNoFns.sku = 'X-4';
+  disabledNoFns.priceUah = 100;
+  disabledNoFns.media = [{ id: 'm', label: 'b', src: 'data:,' }];
+  t('електроніка вимкнена — відсутність функцій не заважає публікації', fp.furniturePublishIssues(disabledNoFns).length === 0);
+}
+
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);
 if (fail > 0) process.exit(1);

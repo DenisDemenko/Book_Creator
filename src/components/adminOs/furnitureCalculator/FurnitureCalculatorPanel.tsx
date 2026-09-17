@@ -12,6 +12,7 @@ import { LaborAndOperationsSection } from './components/LaborAndOperationsSectio
 import { AiMediaCostSection } from './components/AiMediaCostSection';
 import { ProductionTimelineSection } from './components/ProductionTimelineSection';
 import { ElectronicsSection } from './components/ElectronicsSection';
+import { ApplyToProductModal } from './components/ApplyToProductModal';
 import { CommercialOfferModal } from './components/CommercialOfferModal';
 import { TemplatesModal } from './components/TemplatesModal';
 import { CurrencySettingsModal } from './components/CurrencySettingsModal';
@@ -94,6 +95,7 @@ export const FurnitureCalculatorPanel: React.FC = () => {
   const [isCommercialOfferOpen, setIsCommercialOfferOpen] = useState(false);
   const [isTemplatesModalOpen, setIsTemplatesModalOpen] = useState(false);
   const [isCurrencyModalOpen, setIsCurrencyModalOpen] = useState(false);
+  const [isApplyToProductModalOpen, setIsApplyToProductModalOpen] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
 
   // Load currency rates & custom templates from the Nova server on mount
@@ -281,6 +283,7 @@ export const FurnitureCalculatorPanel: React.FC = () => {
           onOpenTemplates={() => setIsTemplatesModalOpen(true)}
           rates={rates}
           onOpenCurrencySettings={() => setIsCurrencyModalOpen(true)}
+          onOpenApplyToProduct={() => setIsApplyToProductModalOpen(true)}
         />
 
         {/* Core Calculation Sections */}
@@ -385,6 +388,15 @@ export const FurnitureCalculatorPanel: React.FC = () => {
         rates={rates}
         onUpdateRates={handleSaveRates}
         currentInput={input}
+      />
+
+      {/* Apply calculation total to a product's price ('published or planned to be published') */}
+      <ApplyToProductModal
+        isOpen={isApplyToProductModalOpen}
+        onClose={() => setIsApplyToProductModalOpen(false)}
+        totalSellingPriceUah={result.totalSellingPrice}
+        currency={currency}
+        onApplied={(msg) => showNotification(msg)}
       />
     </div>
   );

@@ -14,6 +14,7 @@ import {
   FolderOpen,
   Coins,
   Calendar,
+  Banknote,
 } from 'lucide-react';
 import { CalculationInput, CalculationResult, Currency, CurrencyRates } from '../types';
 import { formatMoney } from '../utils/calculator';
@@ -29,6 +30,7 @@ interface CostBreakdownDashboardProps {
   onOpenTemplates: () => void;
   rates?: CurrencyRates;
   onOpenCurrencySettings?: () => void;
+  onOpenApplyToProduct?: () => void;
 }
 
 export const CostBreakdownDashboard: React.FC<CostBreakdownDashboardProps> = ({
@@ -41,6 +43,7 @@ export const CostBreakdownDashboard: React.FC<CostBreakdownDashboardProps> = ({
   onOpenTemplates,
   rates = { USD: 41.5, EUR: 45.2 },
   onOpenCurrencySettings,
+  onOpenApplyToProduct,
 }) => {
   const [copied, setCopied] = useState(false);
   const schedule = calculateProductionSchedule(input);
@@ -148,6 +151,18 @@ ${input.includeElectronics ? `- Електроніка та LED (БЖ, стрі�
             >
               <Coins className="w-3.5 h-3.5 text-amber-400" />
               <span>Курс: ${(rates?.USD ?? 41.5).toFixed(1)}</span>
+            </button>
+          )}
+
+          {onOpenApplyToProduct && (
+            <button
+              type="button"
+              onClick={onOpenApplyToProduct}
+              className="px-3.5 py-2 rounded-xl neo-pill-default text-xs font-semibold flex items-center gap-1.5 cursor-pointer active:scale-95 text-emerald-300 hover:text-emerald-200 border border-emerald-500/30 shadow-[0_0_12px_rgba(16,185,129,0.15)]"
+              title="Додати підсумок цього розрахунку до ціни опублікованого товару або чорнетки"
+            >
+              <Banknote className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Додати до ціни товару</span>
             </button>
           )}
 

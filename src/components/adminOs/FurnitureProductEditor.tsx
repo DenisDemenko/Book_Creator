@@ -15,11 +15,13 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
   Check,
+  Cpu,
   Image as ImageIcon,
   Info,
   Moon,
   Package,
   Play,
+  Plus,
   RefreshCw,
   Ruler,
   Save,
@@ -35,12 +37,15 @@ import {
   blankFurnitureProduct,
   furniturePublishIssues,
   isVideoMedia,
+  DEFAULT_ELECTRONICS_FUNCTIONS,
   DESCRIPTION_MAX,
+  ELECTRONICS_CONTROLLERS,
   MAX_GALLERY_PHOTOS,
   MAX_GALLERY_VIDEOS,
   TEASER_MAX,
   TITLE_MAX,
   type FurnitureColor,
+  type FurnitureElectronicsController,
   type FurnitureMediaItem,
   type FurnitureProduct,
   type FurnitureWoodTone,
@@ -280,9 +285,16 @@ export interface FurnitureProductEditorProps {
 
 export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ initial, onBack, onSaved }) => {
   const [theme, setTheme] = useState<'night' | 'day'>('night');
-  const [product, setProduct] = useState<FurnitureProduct>(() => initial ?? blankFurnitureProduct());
+  // Чорнетки, збережені до появи блоку електроніки, не мають нових полів
+  // (electronicsEnabled/…) — злиття з blankFurnitureProduct() підставляє їх
+  // за замовчуванням, той самий принцип, що й isVideoMedia() для media.kind.
+  const [product, setProduct] = useState<FurnitureProduct>(() => ({
+    ...blankFurnitureProduct(),
+    ...(initial ?? {}),
+  }));
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: 'ok' | 'err' | 'info'; text: string } | null>(null);
+  const [newElectronicsFunction, setNewElectronicsFunction] = useState('');
 
   const t = THEMES[theme];
 
@@ -295,9 +307,12 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
   const videos = useMemo(() => product.media.filter((m) => isVideoMedia(m)), [product.media]);
 
   // Ефект: якщо батьківський компонент передав інший початковий виріб —
-  // перечитати (наприклад, «новий» після «редагувати»).
+  // перечитати (наприклад, «новий» після «редагувати»). Злиття з
+  // blankFurnitureProduct() тут так само важливе, як і в ініціалізаторі
+  // useState вище — цей ефект стартує вже ПІСЛЯ першого рендеру й без
+  // нього одразу перезаписав би злиті дефолти сирим initial.
   useEffect(() => {
-    setProduct(initial ?? blankFurnitureProduct());
+    setProduct(initial ? { ...blankFurnitureProduct(), ...initial } : blankFurnitureProduct());
   }, [initial]);
 
   const saveDraft = useCallback(async () => {
@@ -452,6 +467,27 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
     },
     [patch, product.availableColors]
   );
+
+  /** Увімкнути/вимкнути функцію електроніки — чи з дефолтного списку, чи власну. */
+  const toggleElectronicsFunction = useCallback(
+    (fn: string) => {
+      const has = product.electronicsFunctions.includes(fn);
+      patch({
+        electronicsFunctions: has
+          ? product.electronicsFunctions.filter((f) => f !== fn)
+          : [...product.electronicsFunctions, fn],
+      });
+    },
+    [patch, product.electronicsFunctions]
+  );
+
+  /** Додати власну функцію електроніки з текстового поля (не з дефолтного списку). */
+  const addCustomElectronicsFunction = useCallback(() => {
+    const label = newElectronicsFunction.trim();
+    if (!label || product.electronicsFunctions.includes(label)) return;
+    patch({ electronicsFunctions: [...product.electronicsFunctions, label] });
+    setNewElectronicsFunction('');
+  }, [newElectronicsFunction, patch, product.electronicsFunctions]);
 
   const colorOf = (c: FurnitureColor) =>
     ({ oak: '#d9b380', walnut: '#6b4a2b', teak: '#9a6b3f', black: '#232323', ebony: '#2e2a26', mahogany: '#7c2f24' })[c.id] ?? '#888';
@@ -669,6 +705,145 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
                 </div>
               </div>
             </Section>
+
+            {/*
+              Окремий блок, а не ще один підрозділ LED-секції — власник:
+              «необхідно відзначити окремим кольором фон блоку про
+              електроніку». Violet навмисно відрізняється від ціан/скай
+              LED-палітри всього редактора, і в night, і в day темі.
+            */}
+            <div
+              className={`rounded-2xl p-5 border shadow-[0_4px_20px_rgba(0,0,0,0.25)] ${
+                theme === 'night' ? 'bg-[#150b1f]/90 border-violet-500/25' : 'bg-violet-50 border-violet-200'
+              }`}
+            >
+              <div
+                className={`flex items-center gap-3 pb-4 mb-5 border-b ${
+                  theme === 'night' ? 'border-violet-900/40' : 'border-violet-200'
+                }`}
+              >
+                <div
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                    theme === 'night'
+                      ? 'bg-violet-950/60 border border-violet-700/50 text-violet-300'
+                      : 'bg-violet-100 border border-violet-300 text-violet-700'
+                  }`}
+                >
+                  <Cpu className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h2 className={`text-base font-bold tracking-wide ${theme === 'night' ? 'text-white' : 'text-slate-900'}`}>
+                    Вбудована електроніка (ESP32 / Arduino)
+                  </h2>
+                  <p className={`text-[11px] ${theme === 'night' ? 'text-violet-300/70' : 'text-violet-700/70'}`}>
+                    Опційний модуль понад просту LED-підсвітку — програмована плата в деревʼяній основі
+                  </p>
+                </div>
+                <ToggleChip
+                  on={product.electronicsEnabled}
+                  label={product.electronicsEnabled ? 'Увімкнено' : 'Вимкнути'}
+                  onClick={() => patch({ electronicsEnabled: !product.electronicsEnabled })}
+                  t={t}
+                />
+              </div>
+
+              {product.electronicsEnabled ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <Label>Контролер</Label>
+                      <select
+                        className={`w-full rounded-xl px-3 py-2.5 text-xs outline-none ${t.select}`}
+                        value={product.electronicsController}
+                        onChange={(e) =>
+                          patch({ electronicsController: e.target.value as FurnitureElectronicsController })
+                        }
+                      >
+                        {ELECTRONICS_CONTROLLERS.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex items-end">
+                      <ToggleChip
+                        on={product.electronicsUserProgrammable}
+                        label="Покупець може перепрограмувати"
+                        onClick={() => patch({ electronicsUserProgrammable: !product.electronicsUserProgrammable })}
+                        t={t}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <Label>Функції електроніки (показуються на вітрині)</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {product.electronicsFunctions.map((fn) => (
+                        <button
+                          key={fn}
+                          type="button"
+                          onClick={() => toggleElectronicsFunction(fn)}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] transition-colors ${
+                            theme === 'night'
+                              ? 'bg-violet-950/50 border border-violet-500/40 text-violet-300'
+                              : 'bg-violet-100 border border-violet-300 text-violet-800'
+                          }`}
+                        >
+                          <Check className="w-3.5 h-3.5" /> {fn}
+                        </button>
+                      ))}
+                      {DEFAULT_ELECTRONICS_FUNCTIONS.filter((fn) => !product.electronicsFunctions.includes(fn)).map(
+                        (fn) => (
+                          <button
+                            key={fn}
+                            type="button"
+                            onClick={() => toggleElectronicsFunction(fn)}
+                            className={`px-3 py-1.5 rounded-lg border border-dashed text-[11px] transition-colors ${
+                              theme === 'night'
+                                ? 'border-violet-700/50 text-violet-400/80 hover:text-violet-200'
+                                : 'border-violet-300 text-violet-500 hover:text-violet-800'
+                            }`}
+                          >
+                            + {fn}
+                          </button>
+                        )
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 mt-2.5">
+                      <input
+                        type="text"
+                        value={newElectronicsFunction}
+                        onChange={(e) => setNewElectronicsFunction(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            addCustomElectronicsFunction();
+                          }
+                        }}
+                        placeholder="Власна функція…"
+                        className={`flex-1 rounded-xl px-3 py-2 text-xs outline-none ${t.input}`}
+                      />
+                      <button
+                        type="button"
+                        onClick={addCustomElectronicsFunction}
+                        className={`px-3 py-2 rounded-xl border border-dashed text-[11px] inline-flex items-center gap-1.5 transition-colors shrink-0 ${
+                          theme === 'night'
+                            ? 'border-violet-700/50 text-violet-300 hover:text-violet-100'
+                            : 'border-violet-300 text-violet-600 hover:text-violet-900'
+                        }`}
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Додати
+                      </button>
+                    </div>
+                  </div>
+
+                  <p className={`text-[11px] ${theme === 'night' ? 'text-violet-300/60' : 'text-violet-700/60'}`}>
+                    Дисплея поки немає — керування кнопками, датчиками або застосунком.
+                  </p>
+                </div>
+              ) : null}
+            </div>
           </div>
 
           {/* Права колонка — медіа та персоналізація */}

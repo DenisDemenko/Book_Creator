@@ -103,6 +103,9 @@ function serverPublishIssues(p: FurnitureProduct): string[] {
   if (videoCount > MAX_GALLERY_VIDEOS) {
     issues.push(`Забагато відео: ${videoCount} із дозволених ${MAX_GALLERY_VIDEOS}.`);
   }
+  if (p.electronicsEnabled && (!Array.isArray(p.electronicsFunctions) || p.electronicsFunctions.length === 0)) {
+    issues.push('Електроніка увімкнена, але жодної функції не обрано.');
+  }
   if ((p.name?.trim().length ?? 0) > TITLE_MAX) {
     issues.push(`Назва задовга: ${p.name.trim().length} із ${TITLE_MAX} символів.`);
   }
@@ -132,6 +135,10 @@ function toBridgeAttributes(p: FurnitureProduct): PublishProductAttributes {
     ledStrip: p.ledStrip,
     ledPower: p.ledPower,
     ledControl: p.ledControl,
+    electronicsEnabled: p.electronicsEnabled,
+    electronicsController: p.electronicsController,
+    electronicsUserProgrammable: p.electronicsUserProgrammable,
+    electronicsFunctions: p.electronicsFunctions,
     functionalZones: p.functionalZones,
     woodTones: p.woodTones.map((w) => ({ label: w.label, color: w.color })),
     colors: p.availableColors.map((c) => ({ label: c.label, enabled: c.enabled })),

@@ -54,6 +54,14 @@ export interface FurnitureColor {
   enabled: boolean;
 }
 
+/**
+ * Вбудована програмована електроніка — понад просту LED-підсвітку.
+ * Плата монтується в деревʼяну основу, дисплея поки немає (керування
+ * кнопками/датчиками/застосунком). Власник: «Клектроника додається
+ * опційно» — самі поля вмикаються лише коли `electronicsEnabled`.
+ */
+export type FurnitureElectronicsController = 'esp32' | 'arduino';
+
 /** Повна картка виробу. */
 export interface FurnitureProduct {
   id: string;
@@ -89,6 +97,14 @@ export interface FurnitureProduct {
   ledStrip: string;
   ledPower: string;
   ledControl: string;
+  /** Чи вбудована в виріб програмована плата (ESP32/Arduino), понад LED. */
+  electronicsEnabled: boolean;
+  /** Яка плата — впливає на текст «самостійне програмування» на вітрині. */
+  electronicsController: FurnitureElectronicsController;
+  /** «Є можливість покупцю програмувати самостійно» — власник ТЗ. */
+  electronicsUserProgrammable: boolean;
+  /** Обрані функції (з DEFAULT_ELECTRONICS_FUNCTIONS або власні). */
+  electronicsFunctions: string[];
   media: FurnitureMediaItem[];
   /** Палітра тонів дерева (з вітрини). */
   woodTones: FurnitureWoodTone[];
@@ -131,6 +147,39 @@ export const DEFAULT_FUNCTIONAL_ZONES = [
   'Слот під кабелі / тримач',
   'Додатковий слот',
 ] as const;
+
+/**
+ * Контролери, з яких обирає автор картки. Одна плата на виріб — не
+ * мультивибір, бо це визначає й текст «самостійне програмування», і
+ * приблизну вартість монтажу в калькуляторі собівартості.
+ */
+export const ELECTRONICS_CONTROLLERS: ReadonlyArray<{
+  id: FurnitureElectronicsController;
+  label: string;
+}> = [
+  { id: 'esp32', label: 'ESP32 (Wi-Fi + Bluetooth)' },
+  { id: 'arduino', label: 'Arduino' },
+];
+
+/**
+ * 10 прикладів функцій вбудованої електроніки — власник попросив
+ * «придумай 10 функцій для органайзера для прикладу». Це не жорсткий
+ * перелік: автор картки може прибрати будь-яку й дописати власну (див.
+ * `toggleElectronicsFunction` у редакторі) — початковий список лише
+ * пришвидшує заповнення.
+ */
+export const DEFAULT_ELECTRONICS_FUNCTIONS: readonly string[] = [
+  'Розклад підсвітки за часом (таймер увімкнення/вимкнення)',
+  'Звуковий будильник / нагадування за розкладом',
+  'Плавне згасання та наростання яскравості',
+  'Датчик руху — автоувімкнення при наближенні, автовимкнення в простої',
+  'Датчик освітленості — підсвітка лише в темний час доби',
+  'Індикатор заряду бездротової зарядки телефону',
+  'Збережені сцени/кольори підсвітки з перемиканням кнопкою',
+  'Керування зі смартфона по Wi-Fi (веб-сторінка або застосунок)',
+  'Нагадування «зробити перерву» — періодичний сигнал',
+  'Таймер фокусу (Pomodoro) зі звуковим сигналом завершення',
+];
 
 export const DEFAULT_WOOD_TONES: FurnitureWoodTone[] = [
   { id: 'light-oak', label: 'Світлий дуб', color: '#e8c99b' },
@@ -176,6 +225,10 @@ export function blankFurnitureProduct(): FurnitureProduct {
     ledStrip: '3000K (Теплий вінтажний тон)',
     ledPower: '12V блок живлення (імпульсний)',
     ledControl: 'Сенсорний модуль / перемикач',
+    electronicsEnabled: false,
+    electronicsController: 'esp32',
+    electronicsUserProgrammable: true,
+    electronicsFunctions: [],
     media: [],
     woodTones: DEFAULT_WOOD_TONES.map((t) => ({ ...t })),
     availableColors: DEFAULT_COLORS.map((c) => ({ ...c })),
@@ -235,6 +288,9 @@ export function furniturePublishIssues(p: FurnitureProduct): string[] {
   }
   if (videoCount > MAX_GALLERY_VIDEOS) {
     issues.push(`Забагато відео: ${videoCount} із дозволених ${MAX_GALLERY_VIDEOS}.`);
+  }
+  if (p.electronicsEnabled && p.electronicsFunctions.length === 0) {
+    issues.push('Електроніка увімкнена, але жодної функції не обрано.');
   }
   if (p.name.trim().length > TITLE_MAX) {
     issues.push(`Назва задовга: ${p.name.trim().length} із ${TITLE_MAX} символів.`);
