@@ -122,6 +122,14 @@ export interface FurnitureProduct {
   phoneFit: boolean;
   status: FurnitureProductStatus;
   publishedAt?: string | null;
+  /**
+   * Слаг картки на вітрині (`/uk/catalog/:slug`) — приходить у відповіді
+   * публікації (`publishProductToMarketplace`) і зберігається тут, щоб
+   * кнопка «Переглянути товар на вітрині» працювала і після перезавантаження
+   * сторінки, без повторного запиту до мосту. `null` — товар ще не публікувався
+   * або слаг не повернувся (старий запис до цього поля).
+   */
+  slug?: string | null;
   updatedAt: string;
 }
 
@@ -245,6 +253,7 @@ export function blankFurnitureProduct(): FurnitureProduct {
     phoneFit: true,
     status: 'draft',
     publishedAt: null,
+    slug: null,
     updatedAt: new Date().toISOString(),
   };
 }

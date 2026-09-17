@@ -16,7 +16,9 @@ import {
   ArrowLeft,
   Check,
   Cpu,
+  ExternalLink,
   Image as ImageIcon,
+  ImagePlus,
   Info,
   Moon,
   Package,
@@ -504,6 +506,23 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
           >
             <ArrowLeft className="w-4 h-4" /> Повернутися до мапінгу адмін панелі
           </button>
+          {product.status === 'published' && product.slug ? (
+            <a
+              href={`https://app.fusionlab.in.ua/uk/catalog/${product.slug}`}
+              target="_blank"
+              rel="noreferrer"
+              className={`px-4 py-2.5 rounded-full flex items-center justify-center gap-2 text-xs font-semibold uppercase tracking-wider transition-colors ${t.ghostBtn}`}
+            >
+              Переглянути товар на вітрині <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          ) : (
+            <span
+              title="Стане доступним після публікації виробу на вітрині."
+              className={`hidden sm:inline-flex px-4 py-2.5 rounded-full items-center justify-center gap-2 text-xs font-semibold uppercase tracking-wider opacity-40 cursor-not-allowed ${t.ghostBtn}`}
+            >
+              Переглянути товар на вітрині <ExternalLink className="w-3.5 h-3.5" />
+            </span>
+          )}
           <button
             type="button"
             onClick={() => setTheme((th) => (th === 'night' ? 'day' : 'night'))}
@@ -880,6 +899,25 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
                         </button>
                       </div>
                     ))}
+                    {/* Порожня плитка в кінці рядка мініатюр — той самий upload,
+                        що й у зоні перетягування нижче, але тут можна додати фото,
+                        не гортаючи до низу картки (власник попросив саме так). */}
+                    {photos.length < MAX_GALLERY_PHOTOS && (
+                      <label
+                        title="Додати нові фотографії"
+                        className={`relative aspect-square rounded-lg border-2 border-dashed flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-colors ${t.dropZone}`}
+                      >
+                        <ImagePlus className="w-4 h-4 opacity-80" />
+                        <span className="text-[8.5px] leading-tight text-center px-1 font-medium">Додати нові фотографії</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          className="hidden"
+                          onChange={(e) => void onFiles(e.target.files)}
+                        />
+                      </label>
+                    )}
                   </div>
                 )}
                 {photos.length > 1 && (

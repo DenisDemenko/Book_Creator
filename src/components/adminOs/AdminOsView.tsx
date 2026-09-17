@@ -340,7 +340,13 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser }) => {
   const systemOk = Boolean(stats.bridgeConfigured && stats.engines?.withKey);
 
   return (
-    <div className={`os-map-bg flex-1 overflow-y-auto ${B} text-[#eef6ff]`}>
+    // Без власного overflow-y-auto: інакше в цьому блоці й у зовнішнього
+    // документа виникають ДВІ незалежні смуги прокрутки поруч (сторінка
+    // «Управління карткою вітрини» довша за один екран — власник помітив дві
+    // смуги праворуч). Прокрутка сторінки — одна, на весь документ, як і в
+    // решті вкладок Студії (SidebarNav лишається «липким» саме завдяки цьому —
+    // див. коментар в App.tsx над `<div className="flex-1 flex">`).
+    <div className={`os-map-bg flex-1 ${B} text-[#eef6ff]`}>
       {/* Шапка сторінки */}
       <div className="flex flex-wrap items-center gap-4 border-b border-cyan-400/20 px-6 py-3">
         <span className={`${H} text-[15px] font-black uppercase tracking-[0.16em] text-white`}>

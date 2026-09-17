@@ -298,6 +298,10 @@ export function registerFurnitureProductRoutes(app: Express): void {
 
       product.status = 'published';
       product.publishedAt = new Date().toISOString();
+      // Слаг зберігаємо тут-таки, не лише у відповіді: без цього кнопка
+      // «Переглянути товар на вітрині» в редакторі не пережила б перезавантаження
+      // сторінки (слаг був би відомий лише секунду, у пам'яті клієнта).
+      if (result.slug) product.slug = result.slug;
       product.updatedAt = new Date().toISOString();
       await writeDrafts(drafts);
 
