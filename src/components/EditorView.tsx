@@ -4944,9 +4944,29 @@ export const EditorView: React.FC<EditorViewProps> = ({
           {/* 1. SINGLE UA MODE — заякорена панель тексту на всю доступну висоту/ширину */}
           {editorLanguageMode === 'ua' && (
             <DockedEditorPanel
-              title={<span className="flex items-center gap-2">✍️ <span className="text-slate-100">{activeSection?.title || t('editor.defaultSectionFallback')}</span></span>}
+              title={null}
               headerExtra={
                 <>
+                {/* Формат аркуша — раніше окремим рядком нижче (разом із
+                    підписом розділу), тепер тут: ліворуч від кнопки
+                    швидкого перемикання на англійську, у звільненому
+                    після прибирання назви розділу з шапки місці
+                    (назва й так вже показана вище, дублювання не потрібне). */}
+                <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                  <span className="hidden sm:inline">{t('editor.pageFormatLabel')}</span>
+                  <select
+                    value={book.layoutConfig.formatPreset}
+                    onChange={(e) => handleChangePageFormat(e.target.value)}
+                    className="bg-slate-800 border border-slate-700 text-slate-200 text-[11px] font-semibold rounded-lg px-2 py-1 outline-none hover:border-slate-500 focus:[border-color:var(--sun-acc)] cursor-pointer"
+                    title={t('editor.pageFormatTitle')}
+                  >
+                    {PAGE_FORMAT_QUICK_OPTIONS.map((p) => (
+                      <option key={p.id} value={p.id} className="bg-slate-900">
+                        {t(p.labelKey)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <button
                   onClick={() => setEditorLanguageMode('en')}
                   className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-semibold border border-slate-700 transition-colors"
@@ -5027,14 +5047,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   слів (запис #127) — там йшлося про інший рядок, тут
                   той самий принцип застосовано і до цього. */}
               {!isReader && (
-                <div className="flex items-center flex-wrap gap-1.5 mb-2 shrink-0 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 shadow-xs text-[11px]">
-                  <Sparkles className="w-3 h-3 [color:var(--sun-acc)] shrink-0" />
-                  <span className="text-slate-400 font-medium">
-                    {selectedText.length > 0
-                      ? t('editor.selectedWords', { n: selectedText.split(/\s+/).filter(Boolean).length })
-                      : t('editor.selectedWordsNone')}
-                  </span>
-                  <div className="flex-1" />
+                <div className="flex items-center justify-end flex-wrap gap-1.5 mb-2 shrink-0 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 shadow-xs text-[11px]">
                   <button
                     onClick={() => handleTriggerAiEdit('improve')}
                     className="px-2 py-0.5 [background-color:var(--sun-acc)] hover:[background-color:var(--sun-acc-80)] text-slate-950 font-bold rounded-md transition-colors"
@@ -5051,30 +5064,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 </div>
               )}
 
-              {/* Підпис аркуша: у якій главі зараз автор, і якого розміру
-                  сторінка. Обидва — те, що постійно потрібно бачити під час
-                  письма, але чого раніше не було видно, щойно текст
-                  прогортали нижче шапки модуля. */}
-              <div className="flex items-center gap-2 mb-1.5 shrink-0 px-0.5">
-                <span className="text-[11px] font-semibold tracking-wide text-[#c07784] truncate">
-                  {getRunningHeaderText()}
-                </span>
-                <div className="flex-1" />
-                <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
-                  <span className="hidden sm:inline">{t('editor.pageFormatLabel')}</span>
-                  <select
-                    value={book.layoutConfig.formatPreset}
-                    onChange={(e) => handleChangePageFormat(e.target.value)}
-                    className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[11px] text-slate-200 outline-none hover:border-slate-500 focus:border-emerald-500/60 cursor-pointer"
-                    title={t('editor.pageFormatTitle')}
-                  >
-                    {PAGE_FORMAT_QUICK_OPTIONS.map((p) => (
-                      <option key={p.id} value={p.id} className="bg-slate-900">
-                        {t(p.labelKey)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+              {/* Було: підпис розділу + формат аркуша в цьому рядку.
+                  Формат перенесено в шапку панелі (ліворуч від EN), підпис
+                  прибрано як зайвий — та ж інформація вже видна вище
+                  (назва розділу) й у колонтитулі першої сторінки нижче.
+                  Лишився тільки перемикач лінійки. */}
+              <div className="flex items-center justify-end gap-2 mb-1.5 shrink-0 px-0.5">
                 {/* Перемикач лінійки (мм) — вмикає/вимикає і горизонтальну
                     PageRuler нижче, і вертикальну (всередині PageColumn). */}
                 <button
