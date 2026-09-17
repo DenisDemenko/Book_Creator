@@ -101,7 +101,8 @@
     "test:emotion-mastery-prompt": "tsx scripts/test-emotionMasteryPrompt.mts",
     "test:threshold-scoring": "tsx scripts/test-thresholdScoring.mts",
     "test:threshold-prompt": "tsx scripts/test-thresholdPrompt.mts",
-    "test:furniture-media": "tsx scripts/test-furnitureMedia.mts"
+    "test:furniture-media": "tsx scripts/test-furnitureMedia.mts",
+    "test:procurement": "tsx scripts/test-procurement.mts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

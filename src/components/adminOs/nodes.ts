@@ -29,7 +29,7 @@ import type { AdminTab } from '../AdminPanelView';
  */
 export type NodeAction = { kind: 'panel'; tab: AdminTab } | { kind: 'view'; view: AdminView };
 
-export type AdminView = 'api-keys' | 'core-ai' | 'moderation' | 'products' | 'price-management';
+export type AdminView = 'api-keys' | 'core-ai' | 'moderation' | 'products' | 'price-management' | 'procurement';
 
 export interface AdminNode {
   id: string;
@@ -186,6 +186,16 @@ export const ADMIN_NODES: AdminNode[] = [
     description:
       'Калькулятор собівартості меблів з дерева та епоксидної смоли: деревина, смола, ЧПУ, електроніка/LED, оплата праці, накладні, податки та маржа — до рекомендованої ціни для клієнта. Курс валют і власні шаблони виробів зберігаються на сервері й спільні для всіх адміністраторів.',
     action: { kind: 'view', view: 'price-management' },
+    group: 'operations',
+    slot: 'left',
+  },
+  {
+    id: 'procurement',
+    title: 'Закупівлі',
+    hint: 'реальні знижки з економії',
+    description:
+      'Записи закупівель дешевшого матеріалу (деревина, епоксидка, фурнітура) — стара й нова ціна за одиницю, постачальник, звідки взялась дешевша ціна. Звідси власник вручну застосовує знижку від конкретної закупівлі до обраних товарів: без вигаданих відсотків, лише реальна економія з простежуваністю до запису.',
+    action: { kind: 'view', view: 'procurement' },
     group: 'operations',
     slot: 'left',
   },

@@ -75,6 +75,12 @@ export interface FurnitureProduct {
   /** Базова ціна / до знижки. */
   basePriceUah: number;
   /**
+   * Запис закупівлі (`ProcurementRecord.id`), звідки взялась поточна знижка —
+   * `null`, якщо ціну ніколи не знижували через закупівлю. Дає простежуваність
+   * «чому саме така ціна» назад до реальної економії на матеріалі.
+   */
+  discountSourceProcurementId: string | null;
+  /**
    * Залишок. **`null` — «не обліковується»**: виріб роблять на замовлення,
    * тож 0 було б брехнею («продано») і вітрина показувала б «немає в
    * наявності» з вимкненою кнопкою покупки. Явний 0 лишається для випадку
@@ -211,6 +217,7 @@ export function blankFurnitureProduct(): FurnitureProduct {
     subcategory: FURNITURE_SUBCATEGORIES[0],
     priceUah: 0,
     basePriceUah: 0,
+    discountSourceProcurementId: null,
     stock: null,
     leadTime: '2–4 дні (або індивідуальне виготовлення 5-7 днів)',
     activeInNexus: true,
