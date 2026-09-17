@@ -38,6 +38,7 @@ import { CHAT_USAGE_CONTEXT } from './chatRoutes';
 import { CHAT_MODELS, ENGINE_LABELS, engineConfigured } from './chatProviders';
 import {
   requireAdmin,
+  requireSupportAgent,
   publicUser,
   ADMIN_EMAIL,
   BASE_SERVER_PERMISSIONS,
@@ -70,6 +71,7 @@ import {
 
 const ALL_ROLES: StoredRole[] = [
   'admin',
+  'site_manager',
   'writer',
   'designer',
   'translator',
@@ -313,7 +315,10 @@ export function registerAdminRoutes(app: Express): void {
    * статусу зараховується в «почав і не опублікував» — це найчастіший
    * реальний стан автора книги в Студії.
    */
-  app.get('/api/admin/crm/users', requireAdmin, async (_req, res) => {
+  // CRM бачить і менеджер сайту (requireSupportAgent) — щоб відповідати в чаті
+  // підтримки треба знати, з ким розмовляєш; фінансові/рольові маршрути нижче
+  // лишаються requireAdmin.
+  app.get('/api/admin/crm/users', requireSupportAgent, async (_req, res) => {
     try {
       const [users, books, courses, threads] = await Promise.all([
         listUsers(),

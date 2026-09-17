@@ -119,7 +119,16 @@ export interface AdminOsViewProps {
 export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser }) => {
   useAdminOsFonts();
 
-  const [activeId, setActiveId] = useState<string | null>(null);
+  /**
+   * Менеджер сайту бачить лише CRM — і бачить його одразу, без мапи: мапа
+   * малює всі дванадцять вузлів жорстко прив'язаними координатами проводів,
+   * і "мапа з одним вузлом" виглядала б поламаною, а не спрощеною. Сервер
+   * усе одно перевіряє роль на кожному маршруті (requireSupportAgent) —
+   * це лише інтерфейс, не межа безпеки.
+   */
+  const restrictedToNodeId = authUser?.role === 'site_manager' ? 'crm' : null;
+
+  const [activeId, setActiveId] = useState<string | null>(restrictedToNodeId);
   const [stats, setStats] = useState<OsStats>({});
   const [loading, setLoading] = useState(false);
   /**
@@ -188,8 +197,11 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser }) => {
   }, []);
 
   useEffect(() => {
-    void loadStats();
-  }, [loadStats]);
+    // Жоден з дев'яти маршрутів статистики не належить requireSupportAgent —
+    // для менеджера сайту всі дев'ять відповіли б 403. Інспектор CRM їх і
+    // так не читає (case 'crm' немає в inspectorRows), тож просто не питаємо.
+    if (!restrictedToNodeId) void loadStats();
+  }, [loadStats, restrictedToNodeId]);
 
   /** Рядки інспектора для конкретного вузла — лише реальні числа, без вигаданих. */
   const inspectorRows = useMemo((): { label: string; value: string }[] => {
@@ -270,14 +282,19 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser }) => {
    * Вибір вузла. Модальних вузлів більше немає: кожен відкриває свою сторінку
    * (див. `NodeAction` у `nodes.ts`).
    */
-  const openNode = (node: AdminNode) => setActiveId(node.id);
+  const openNode = (node: AdminNode) => {
+    if (restrictedToNodeId && node.id !== restrictedToNodeId) return;
+    setActiveId(node.id);
+  };
 
   /** Пігулки за місцем на карті — розкладка задана в реєстрі, а не порядком масиву. */
   const bySlot = (slot: AdminNode['slot']) => ADMIN_NODES.filter((n) => n.slot === slot);
 
   /** Шари консолі — те саме, але за призначенням розділу. */
-  const coreNodes = ADMIN_NODES.filter((n) => n.group === 'core');
-  const opsNodes = ADMIN_NODES.filter((n) => n.group === 'operations');
+  const coreNodes = restrictedToNodeId
+    ? ADMIN_NODES.filter((n) => n.id === restrictedToNodeId)
+    : ADMIN_NODES.filter((n) => n.group === 'core');
+  const opsNodes = restrictedToNodeId ? [] : ADMIN_NODES.filter((n) => n.group === 'operations');
 
   /**
    * Який екран малює обраний вузол. Три вузли — самостійні сторінки: ключі API,
@@ -334,17 +351,19 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser }) => {
             налаштований і хоч один двигун має ключ. Обидві умови беруться з
             живих маршрутів, тому бейдж не може збрехати.
           */}
-          <span
-            className={`hidden items-center gap-2 rounded-full border px-3.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] sm:inline-flex ${
-              systemOk
-                ? 'border-cyan-400/50 bg-[#0d1b2d] text-cyan-300 shadow-[0_0_15px_rgba(0,210,255,0.25)]'
-                : 'border-rose-500/50 bg-[#22121a] text-rose-300 shadow-[0_0_15px_rgba(244,63,94,0.25)]'
-            }`}
-          >
-            <span className={`h-2 w-2 rounded-full ${systemOk ? 'animate-ping bg-emerald-400' : 'bg-rose-400'}`} />
-            {systemOk ? 'Система активна' : 'Потребує уваги'}
-          </span>
-          {active && (
+          {!restrictedToNodeId && (
+            <span
+              className={`hidden items-center gap-2 rounded-full border px-3.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] sm:inline-flex ${
+                systemOk
+                  ? 'border-cyan-400/50 bg-[#0d1b2d] text-cyan-300 shadow-[0_0_15px_rgba(0,210,255,0.25)]'
+                  : 'border-rose-500/50 bg-[#22121a] text-rose-300 shadow-[0_0_15px_rgba(244,63,94,0.25)]'
+              }`}
+            >
+              <span className={`h-2 w-2 rounded-full ${systemOk ? 'animate-ping bg-emerald-400' : 'bg-rose-400'}`} />
+              {systemOk ? 'Система активна' : 'Потребує уваги'}
+            </span>
+          )}
+          {active && !restrictedToNodeId && (
             <button
               onClick={() => setActiveId(null)}
               className={`${H} flex items-center gap-1.5 rounded-full border border-cyan-400/35 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-[#d6ebff] transition-colors hover:bg-cyan-400/10`}
@@ -354,14 +373,16 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser }) => {
               До мапінгу
             </button>
           )}
-          <button
-            onClick={() => void loadStats()}
-            disabled={loading}
-            className={`${H} flex items-center gap-1.5 rounded-full border border-cyan-400/35 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-[#d6ebff] transition-colors hover:bg-cyan-400/10 disabled:opacity-50`}
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-            Оновити
-          </button>
+          {!restrictedToNodeId && (
+            <button
+              onClick={() => void loadStats()}
+              disabled={loading}
+              className={`${H} flex items-center gap-1.5 rounded-full border border-cyan-400/35 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-[#d6ebff] transition-colors hover:bg-cyan-400/10 disabled:opacity-50`}
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+              Оновити
+            </button>
+          )}
         </div>
       </div>
 
@@ -500,14 +521,16 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser }) => {
           <div className="min-w-0 p-4 lg:p-5" data-admin-work="1">
             {/* Повернення до мапінгу — у КОЖНОМУ розділі, над його вмістом:
                 з розділу людина дивиться саме сюди, а не в шапку сторінки. */}
-            <button
-              onClick={() => setActiveId(null)}
-              className={`${H} mb-4 flex w-full items-center justify-center gap-2 rounded-full border border-cyan-400/40 bg-[rgba(0,180,255,.08)] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-[#d6ebff] transition-colors hover:border-cyan-300/70 hover:bg-[rgba(0,180,255,.16)]`}
-              title="Повернутися до мапінгу адмін панелі"
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              Повернутися до мапінгу адмін панелі
-            </button>
+            {!restrictedToNodeId && (
+              <button
+                onClick={() => setActiveId(null)}
+                className={`${H} mb-4 flex w-full items-center justify-center gap-2 rounded-full border border-cyan-400/40 bg-[rgba(0,180,255,.08)] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-[#d6ebff] transition-colors hover:border-cyan-300/70 hover:bg-[rgba(0,180,255,.16)]`}
+                title="Повернутися до мапінгу адмін панелі"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Повернутися до мапінгу адмін панелі
+              </button>
+            )}
 
             {active.action.kind === 'panel' ? (
               <AdminPanelView tab={active.action.tab} chromeless />

@@ -15,7 +15,7 @@
  */
 
 import type { Express } from 'express';
-import { requireAuth, requireAdmin, publicUser } from './auth';
+import { requireAuth, requireSupportAgent, isSupportAgent, publicUser } from './auth';
 import { decodeImagePayload } from './mediaRoutes';
 import { readAsset, saveAsset } from './media/mediaLibraryStore';
 import {
@@ -207,7 +207,7 @@ export function registerSupportChatRoutes(app: Express): void {
       const assetId = String(req.params.id || '');
       const principal = req.principal!;
 
-      if (principal.role !== 'admin') {
+      if (!isSupportAgent(principal)) {
         const thread = await getSupportThreadByUser(principal.id as string);
         if (!thread) return res.status(404).json({ error: 'Файл не знайдено.' });
         const messages = await listSupportMessages(thread.id);
@@ -239,7 +239,7 @@ export function registerSupportChatRoutes(app: Express): void {
   // ---------------------------------------------------------------------
 
   /** Список усіх тредів підтримки з контактами користувача — для таблиці CRM. */
-  app.get('/api/admin/support/threads', requireAdmin, async (_req, res) => {
+  app.get('/api/admin/support/threads', requireSupportAgent, async (_req, res) => {
     try {
       const [threads, users] = await Promise.all([listAllSupportThreads(), listUsers()]);
       const byId = new Map(users.map((u) => [u.id, u]));
@@ -256,7 +256,7 @@ export function registerSupportChatRoutes(app: Express): void {
   });
 
   /** Один тред (за id) + повна історія; позначає непрочитане адміністратором як прочитане. */
-  app.get('/api/admin/support/threads/:id', requireAdmin, async (req, res) => {
+  app.get('/api/admin/support/threads/:id', requireSupportAgent, async (req, res) => {
     try {
       const thread = await getSupportThread(req.params.id);
       if (!thread) return res.status(404).json({ error: 'Звернення не знайдено.' });
@@ -273,7 +273,7 @@ export function registerSupportChatRoutes(app: Express): void {
   });
 
   /** Відповідь адміністратора в тред. */
-  app.post('/api/admin/support/threads/:id/messages', requireAdmin, async (req, res) => {
+  app.post('/api/admin/support/threads/:id/messages', requireSupportAgent, async (req, res) => {
     try {
       const incoming = Array.isArray(req.body?.attachments) ? req.body.attachments : [];
       const validationError = validateSupportMessage(req.body?.content, incoming.length);

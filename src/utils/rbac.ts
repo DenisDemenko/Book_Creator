@@ -85,6 +85,55 @@ export const ALL_ROLES: RoleInfo[] = [
     }
   },
   {
+    id: 'site_manager',
+    nameUk: 'Менеджер сайту',
+    nameEn: 'Site Manager',
+    badgeEmoji: '🎧',
+    badgeColor: 'bg-sky-500/20 text-sky-300 border-sky-500/40',
+    bgGradient: 'from-sky-500/20 to-cyan-500/10 border-sky-500/50',
+    descriptionUk: 'Веде чат підтримки сайту в адмінпанелі: бачить звернення користувачів і відповідає. Без доступу до грошей, тарифів, ключів провайдерів, матриці ролей, моста до вітрини й історії комітів.',
+    descriptionEn: 'Runs the site support chat in the admin panel: sees and answers user threads. No access to money, pricing, provider keys, the role matrix, the marketplace bridge, or commit history.',
+    responsibilitiesUk: [
+      'Відповіді користувачам у чаті підтримки',
+      'Перегляд звернень і вкладень у своїй розмові з кожним користувачем',
+      'Нічого поза підтримкою — решта адмінпанелі закрита'
+    ],
+    responsibilitiesEn: [
+      'Replying to users in the support chat',
+      'Viewing threads and attachments within each conversation',
+      'Nothing beyond support — the rest of the admin panel stays closed'
+    ],
+    permissions: {
+      canEditContent: false,
+      canEditTranslation: false,
+      canEditVisuals: false,
+      canEditLayout: false,
+      canExport: false,
+      canImportBook: false,
+      canManageCharacters: false,
+      canManagePlot: false,
+      canUseAi: false,
+      canManageSettings: false,
+      canViewAuditLog: false,
+      canManageRoles: false,
+      canAuthorCourses: false,
+      canGenerateImages: false,
+      canPublish: false,
+      canPublishExternal: false,
+      canManageApiKeys: false,
+      canMarketIntel: false,
+      isReadOnly: true,
+      allowedTabs: [
+        'admin'
+      ]
+    },
+    defaultPersona: {
+      name: 'Марина (Менеджер сайту)',
+      email: 'support-manager@novastudio.ua',
+      avatar: '🎧'
+    }
+  },
+  {
     id: 'writer',
     nameUk: 'Письменник',
     nameEn: 'Writer / Author',
@@ -608,10 +657,21 @@ export function canAccessTab(role: UserRole | string | undefined | null, tab: Na
   return perms.allowedTabs.includes(tab);
 }
 
+/**
+ * Чи взагалі можна відкрити адмінпанель («Nova OS»). Ширше за `role ===
+ * 'admin'` — менеджер сайту теж заходить туди, але бачить у ній лише вузол
+ * CRM (фільтрація — у AdminOsView, за тим самим principal.role із сервера).
+ */
+export function canOpenAdminPanel(role: UserRole | string | undefined | null): boolean {
+  return role === 'admin' || role === 'site_manager';
+}
+
 export function getDefaultTabForRole(role?: UserRole | string | null): NavigationTab {
   switch (role) {
     case 'admin':
       return 'dashboard';
+    case 'site_manager':
+      return 'admin';
     case 'writer':
       return 'editor';
     case 'designer':

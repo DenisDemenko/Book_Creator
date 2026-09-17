@@ -60,7 +60,7 @@ import { useTheme } from './hooks/useTheme';
 import { useRealtimeSync } from './hooks/useRealtimeSync';
 import { estimatePageCount, calculateWordCount } from './utils/helpers';
 import { appendTextToChapterEnd } from './utils/bookText';
-import { canAccessTab, getDefaultTabForRole, getRoleInfo } from './utils/rbac';
+import { canAccessTab, canOpenAdminPanel, getDefaultTabForRole, getRoleInfo } from './utils/rbac';
 import { diffSectionChange, applySectionPatch, type SectionPatch } from './utils/bookDiff';
 import { exportBookToBackupZip, BookBackupManifest } from './utils/bookBackup';
 import {
@@ -2003,7 +2003,7 @@ export default function App() {
           />
         )}
 
-        {currentTab === 'admin' && auth.isAdmin && <AdminOsView authUser={auth.user} />}
+        {currentTab === 'admin' && canOpenAdminPanel(auth.user?.role) && <AdminOsView authUser={auth.user} />}
 
         {currentTab === 'subscription' && <SubscriptionView authUser={auth.user} />}
 

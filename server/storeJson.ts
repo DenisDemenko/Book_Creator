@@ -24,6 +24,7 @@ export const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), 'data')
 
 export type StoredRole =
   | 'admin'
+  | 'site_manager'
   | 'writer'
   | 'designer'
   | 'translator'

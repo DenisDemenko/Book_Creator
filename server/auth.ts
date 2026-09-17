@@ -142,6 +142,34 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
   next();
 }
 
+/**
+ * Хто має право відповідати в чаті підтримки: адміністратор і менеджер
+ * сайту. Перелік один, і саме він перевіряється тестом — інакше наступна
+ * правка зачепить три маршрути з чотирьох, а четвертий тихо лишиться
+ * адмінським.
+ *
+ * Межа навмисно вузька: менеджер сайту НЕ отримує нічого, крім підтримки.
+ * Гроші, тарифи, ключі, матриця ролей, міст і git лишаються за
+ * `requireAdmin` — додавання ролі не розширює жодного наявного доступу.
+ */
+export const SUPPORT_AGENT_ROLES: StoredRole[] = ['admin', 'site_manager'];
+
+export function isSupportAgent(principal?: Principal): boolean {
+  if (!principal || principal.isGuest) return false;
+  return SUPPORT_AGENT_ROLES.includes(principal.role as StoredRole);
+}
+
+export function requireSupportAgent(req: Request, res: Response, next: NextFunction): void {
+  if (!isSupportAgent(req.principal)) {
+    res.status(403).json({
+      error: 'Доступно адміністратору та менеджеру сайту.',
+      kind: 'forbidden',
+    });
+    return;
+  }
+  next();
+}
+
 // ---------------------------------------------------------------------------
 // Дозволи з урахуванням перевизначень адміністратора
 // ---------------------------------------------------------------------------
@@ -179,6 +207,8 @@ type ServerPermissions = {
  */
 export const BASE_SERVER_PERMISSIONS: Record<StoredRole, ServerPermissions> = {
   admin:      { canGenerateImages: true,  canUseAi: true,  canEditContent: true,  canPublish: true,  canPublishExternal: true,  canManageApiKeys: true,  canMarketIntel: true,  canAuthorCourses: true },
+  // Лише чат підтримки (requireSupportAgent нижче) — жодних платних чи контентних прав.
+  site_manager: { canGenerateImages: false, canUseAi: false, canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false },
   writer:     { canGenerateImages: true,  canUseAi: true,  canEditContent: true,  canPublish: true,  canPublishExternal: true,  canManageApiKeys: false, canMarketIntel: true,  canAuthorCourses: false },
   designer:   { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false },
   translator: { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false },

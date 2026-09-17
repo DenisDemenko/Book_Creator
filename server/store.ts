@@ -22,6 +22,7 @@ export { DATA_DIR, DB_PATH };
 
 export type StoredRole =
   | 'admin'
+  | 'site_manager'
   | 'writer'
   | 'designer'
   | 'translator'
