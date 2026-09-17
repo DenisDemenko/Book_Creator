@@ -4947,6 +4947,29 @@ export const EditorView: React.FC<EditorViewProps> = ({
               title={null}
               headerExtra={
                 <>
+                {/* «Покращити AI» / «Ілюстрація з тексту» — раніше окремим
+                    рядком під тулбаром (запис #184 прибрав із нього тільки
+                    підпис, кнопки лишались; тепер рядок прибрано повністю,
+                    кнопки переїхали сюди, в шапку панелі — завжди на очах,
+                    а не тільки коли долистав до тулбару). Як і раніше,
+                    ховаються в читацькому режимі. */}
+                {!isReader && (
+                  <>
+                    <button
+                      onClick={() => handleTriggerAiEdit('improve')}
+                      className="px-2 py-1 rounded-lg [background-color:var(--sun-acc)] hover:[background-color:var(--sun-acc-80)] text-slate-950 text-[11px] font-bold transition-colors"
+                    >
+                      {t('editor.improveAi')}
+                    </button>
+                    <button
+                      onClick={() => setShowIllustrationModal(true)}
+                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-gradient-to-r from-purple-600 to-cyan-600 hover:from-purple-500 hover:to-cyan-500 text-white text-[11px] font-bold shadow-xs transition-all"
+                    >
+                      <ImageIcon className="w-3 h-3" />
+                      <span>{t('editor.illustrationFromText')}</span>
+                    </button>
+                  </>
+                )}
                 {/* Формат аркуша — раніше окремим рядком нижче (разом із
                     підписом розділу), тепер тут: ліворуч від кнопки
                     швидкого перемикання на англійську, у звільненому
@@ -4998,9 +5021,24 @@ export const EditorView: React.FC<EditorViewProps> = ({
               bodyClassName="flex flex-col overflow-hidden"
             >
               <div className="relative flex flex-col h-full min-h-0">
-              {/* Форматування тексту + швидкий доступ до англійської версії */}
+              {/* Форматування тексту, перемикач лінійки і швидкий доступ до англійської версії */}
               <div className="flex items-center justify-between gap-2 mb-3 shrink-0 flex-wrap">
                 {renderFormatToolbar(false)}
+                {/* Перемикач лінійки (мм) — раніше окремим рядком нижче
+                    тулбару (запис #184 лишив там тільки цю кнопку); тепер
+                    сюди, одразу після панелі форматування. */}
+                <button
+                  type="button"
+                  onClick={() => setRulerVisible((v) => !v)}
+                  className={`p-1.5 rounded-lg border transition-colors shrink-0 ${
+                    rulerVisible
+                      ? 'bg-slate-900 border-slate-700 [color:var(--sun-acc)]'
+                      : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'
+                  }`}
+                  title={rulerVisible ? t('editor.rulerToggleHide') : t('editor.rulerToggleShow')}
+                >
+                  <Ruler className="w-3.5 h-3.5" />
+                </button>
                 <div className="flex items-center gap-1.5 ml-auto">
                   {/* Компактний чіп кількості слів виділення/розділу —
                       раніше окремим рядком нижче тулбару (три довгі <span>,
@@ -5027,63 +5065,6 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     <span>{t('editor.openEnWindowBtn')}</span>
                   </button>
                 </div>
-              </div>
-
-              {/* Панель дій над виділенням.
-                  Раніше монтувалась/розмонтовувалась залежно від
-                  selectedText.length > 0 — і саме це власник сприймав як
-                  "згортання-розгортання": ProseMirror скидає selection у
-                  empty при втраті фокусу редактора (наприклад, коли курсор
-                  миші лише йде до самої кнопки всередині цієї ж панелі,
-                  ще до кліку), тож рядок міг зникнути просто в момент
-                  спроби ним скористатись. Тепер рядок змонтований ЗАВЖДИ
-                  (доки не читацький режим) — не блимає й не ховається;
-                  обидві дії коректно працюють і без виділення:
-                  handleTriggerAiEdit('improve') сам підставляє
-                  activeSection.content, коли selectedText порожній, а
-                  GenerateIllustrationModal дозволяє ввести чи змінити
-                  джерельний текст просто в модалці. Стиснуто (менший
-                  падінг/шрифт), як і обіцяно раніше для чіпа кількості
-                  слів (запис #127) — там йшлося про інший рядок, тут
-                  той самий принцип застосовано і до цього. */}
-              {!isReader && (
-                <div className="flex items-center justify-end flex-wrap gap-1.5 mb-2 shrink-0 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 shadow-xs text-[11px]">
-                  <button
-                    onClick={() => handleTriggerAiEdit('improve')}
-                    className="px-2 py-0.5 [background-color:var(--sun-acc)] hover:[background-color:var(--sun-acc-80)] text-slate-950 font-bold rounded-md transition-colors"
-                  >
-                    {t('editor.improveAi')}
-                  </button>
-                  <button
-                    onClick={() => setShowIllustrationModal(true)}
-                    className="px-2 py-0.5 bg-gradient-to-r from-purple-600 to-cyan-600 hover:from-purple-500 hover:to-cyan-500 text-white font-bold rounded-md shadow-xs flex items-center gap-1 transition-all"
-                  >
-                    <ImageIcon className="w-2.5 h-2.5" />
-                    <span>{t('editor.illustrationFromText')}</span>
-                  </button>
-                </div>
-              )}
-
-              {/* Було: підпис розділу + формат аркуша в цьому рядку.
-                  Формат перенесено в шапку панелі (ліворуч від EN), підпис
-                  прибрано як зайвий — та ж інформація вже видна вище
-                  (назва розділу) й у колонтитулі першої сторінки нижче.
-                  Лишився тільки перемикач лінійки. */}
-              <div className="flex items-center justify-end gap-2 mb-1.5 shrink-0 px-0.5">
-                {/* Перемикач лінійки (мм) — вмикає/вимикає і горизонтальну
-                    PageRuler нижче, і вертикальну (всередині PageColumn). */}
-                <button
-                  type="button"
-                  onClick={() => setRulerVisible((v) => !v)}
-                  className={`p-1.5 rounded-lg border transition-colors shrink-0 ${
-                    rulerVisible
-                      ? 'bg-slate-900 border-slate-700 [color:var(--sun-acc)]'
-                      : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'
-                  }`}
-                  title={rulerVisible ? t('editor.rulerToggleHide') : t('editor.rulerToggleShow')}
-                >
-                  <Ruler className="w-3.5 h-3.5" />
-                </button>
               </div>
 
               <PageColumn
