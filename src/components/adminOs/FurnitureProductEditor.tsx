@@ -80,6 +80,8 @@ interface ThemeTokens {
   footer: string;
   divider: string;
   swatchRing: string;
+  progressTrack: string;
+  progressFill: string;
 }
 
 const THEMES: Record<'night' | 'day', ThemeTokens> = {
@@ -106,6 +108,8 @@ const THEMES: Record<'night' | 'day', ThemeTokens> = {
     footer: 'bg-[#070e17]/95 border-t border-cyan-800/40',
     divider: 'border-slate-800',
     swatchRing: 'ring-cyan-400/60',
+    progressTrack: 'bg-slate-800/80',
+    progressFill: 'bg-gradient-to-r from-cyan-400 to-sky-500',
   },
   day: {
     page: 'bg-[#f4f7fb] text-slate-700',
@@ -130,6 +134,8 @@ const THEMES: Record<'night' | 'day', ThemeTokens> = {
     footer: 'bg-white border-t border-slate-200',
     divider: 'border-slate-200',
     swatchRing: 'ring-sky-500/60',
+    progressTrack: 'bg-slate-200',
+    progressFill: 'bg-gradient-to-r from-sky-500 to-sky-600',
   },
 };
 
@@ -296,6 +302,14 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
   }));
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: 'ok' | 'err' | 'info'; text: string } | null>(null);
+  /**
+   * Прогрес публікації у відсотках — власник попросив: із відео в галереї
+   * `/publish` триває довго (послідовне завантаження кожного фото й відео на
+   * міст), і без індикації адмін не відрізнить «ще працює» від «зависло».
+   * `done`/`total` — реальні кроки з сервера (опитування `/publish-status`
+   * поки триває POST), а не вигаданий таймер.
+   */
+  const [publishProgress, setPublishProgress] = useState<{ done: number; total: number; label: string } | null>(null);
   const [newElectronicsFunction, setNewElectronicsFunction] = useState('');
 
   const t = THEMES[theme];
@@ -346,6 +360,12 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
     }
     setBusy(true);
     setMessage(null);
+    setPublishProgress(null);
+    // Опитування `/publish-status` йде ПАРАЛЕЛЬНО з POST `/publish`, доки той
+    // виконується на сервері (там і рахуються кроки) — окремий інтервал,
+    // не таймер-вигадка, зупиняється в finally незалежно від того, чим
+    // закінчився запит.
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
     try {
       // Спершу зберегти чорнетку, щоб публікувати останню версію.
       const saveRes = await fetch('/api/admin/furniture-products', {
@@ -356,7 +376,25 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
       });
       const saved = await saveRes.json().catch(() => ({}));
       if (!saveRes.ok) throw new Error(saved?.error || 'Не вдалося зберегти перед публікацією.');
-      const res = await fetch(`/api/admin/furniture-products/${encodeURIComponent(saved.product.id)}/publish`, {
+
+      const productId = saved.product.id as string;
+      setPublishProgress({ done: 0, total: 1, label: 'Публікація картки товару…' });
+      pollTimer = setInterval(() => {
+        void fetch(`/api/admin/furniture-products/${encodeURIComponent(productId)}/publish-status`, {
+          credentials: 'same-origin',
+        })
+          .then((r) => r.json())
+          .then((s) => {
+            if (s && s.status === 'running') {
+              setPublishProgress({ done: s.done ?? 0, total: s.total ?? 1, label: s.label ?? '' });
+            }
+          })
+          .catch(() => {
+            /* один пропущений тік опитування не критичний — наступний спробує знову */
+          });
+      }, 600);
+
+      const res = await fetch(`/api/admin/furniture-products/${encodeURIComponent(productId)}/publish`, {
         method: 'POST',
         credentials: 'same-origin',
       });
@@ -368,6 +406,8 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
     } catch (err: any) {
       setMessage({ tone: 'err', text: err?.message || 'Помилка публікації.' });
     } finally {
+      if (pollTimer) clearInterval(pollTimer);
+      setPublishProgress(null);
       setBusy(false);
     }
   }, [product, issues, onSaved]);
@@ -559,13 +599,37 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2.5 self-end md:self-center">
-            <button type="button" onClick={() => void saveDraft()} disabled={busy} className={`px-4 py-2 rounded-xl text-xs font-medium flex items-center gap-2 transition-colors disabled:opacity-50 ${t.ghostBtn}`}>
-              <RefreshCw className="w-3.5 h-3.5" /> Зберегти
-            </button>
-            <button type="button" onClick={() => void publish()} disabled={busy} className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all disabled:opacity-50 ${t.primaryBtn}`}>
-              Опублікувати на вітрині
-            </button>
+          <div className="flex flex-col items-end gap-2 self-end md:self-center">
+            <div className="flex items-center gap-2.5">
+              <button type="button" onClick={() => void saveDraft()} disabled={busy} className={`px-4 py-2 rounded-xl text-xs font-medium flex items-center gap-2 transition-colors disabled:opacity-50 ${t.ghostBtn}`}>
+                <RefreshCw className="w-3.5 h-3.5" /> Зберегти
+              </button>
+              <button type="button" onClick={() => void publish()} disabled={busy} className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all disabled:opacity-50 ${t.primaryBtn}`}>
+                Опублікувати на вітрині
+              </button>
+            </div>
+            {/* Прогрес публікації — з реальних кроків сервера (картка +
+                кожне фото/відео на міст), не з вигаданого таймера. Головна
+                причина: відео в галереї вантажиться довго, і без цього
+                адмін не відрізнить «ще працює» від «зависло» (власник). */}
+            {publishProgress && (
+              <div className="w-full sm:w-64">
+                <div className="flex items-center justify-between gap-2 text-[10px] font-mono mb-1 opacity-80">
+                  <span className="truncate">{publishProgress.label}</span>
+                  <span className="shrink-0">
+                    {Math.min(100, Math.round((publishProgress.done / Math.max(1, publishProgress.total)) * 100))}%
+                  </span>
+                </div>
+                <div className={`h-1.5 rounded-full overflow-hidden ${t.progressTrack}`}>
+                  <div
+                    className={`h-full rounded-full transition-all duration-300 ${t.progressFill}`}
+                    style={{
+                      width: `${Math.min(100, Math.round((publishProgress.done / Math.max(1, publishProgress.total)) * 100))}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </header>

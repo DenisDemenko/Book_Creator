@@ -39,6 +39,51 @@ import {
 const DRAFTS_KEY = 'furniture_product_drafts';
 
 /**
+ * Прогрес публікації — в памʼяті процесу, за id чорнетки.
+ *
+ * ЧОМУ В ПАМʼЯТІ, НЕ В `meta`. Це не дані виробу — це стан ОДНОГО POST
+ * `/publish`, що саме зараз виконується; переживати рестарт сервера йому
+ * не треба, а писати на диск на кожен крок (кожне фото/відео) — зайве
+ * навантаження заради інформації, яка й так зникне за секунди.
+ *
+ * ЧОМУ ЦЕ ПОТРІБНО. З відео в галереї `/publish` вантажить кожен файл на
+ * міст послідовно й довго; без індикації прогресу адмін не відрізнить
+ * «ще працює» від «зависло» (власник, 17.09.2026). Клієнт опитує
+ * `/publish-status` окремими GET, поки триває POST `/publish`.
+ */
+interface PublishProgress {
+  status: 'running' | 'done' | 'error';
+  done: number;
+  total: number;
+  label: string;
+  updatedAt: number;
+  error?: string;
+}
+
+const publishProgressById = new Map<string, PublishProgress>();
+
+/** Записи старші за це чистяться при кожному новому старті публікації — щоб мапа не росла вічно. */
+const PUBLISH_PROGRESS_TTL_MS = 10 * 60 * 1000;
+
+function setPublishProgress(id: string, patch: Partial<Omit<PublishProgress, 'updatedAt'>>): void {
+  const prev = publishProgressById.get(id);
+  publishProgressById.set(id, {
+    status: 'running',
+    done: 0,
+    total: 1,
+    label: '',
+    ...prev,
+    ...patch,
+    updatedAt: Date.now(),
+  });
+  // Прибирання старих записів — під час запису нового, без окремого таймера.
+  const cutoff = Date.now() - PUBLISH_PROGRESS_TTL_MS;
+  for (const [key, value] of publishProgressById) {
+    if (value.status !== 'running' && value.updatedAt < cutoff) publishProgressById.delete(key);
+  }
+}
+
+/**
  * Data-URL превʼю → байти.
  *
  * Чорнетка зберігає і зображення, і відео саме як data URL (щоб пережити
@@ -170,13 +215,21 @@ function toBridgeAttributes(p: FurnitureProduct): PublishProductAttributes {
 export async function uploadProductMedia(
   product: { sku: string; media?: Array<Pick<FurnitureMediaItem, 'src' | 'kind'>> | null },
   externalId: string,
-  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+  deps: {
+    fetch?: typeof fetch;
+    settings?: BridgeSettings;
+    /** Викликається після КОЖНОГО фото/відео (успіху чи невдачі) — прогрес-бар публікації в редакторі. */
+    onProgress?: (done: number, total: number, label: string) => void;
+  } = {}
 ): Promise<{ uploaded: number; failed: string[] }> {
   const allMedia = Array.isArray(product.media) ? product.media : [];
   const photos = allMedia.filter((m) => !isVideoMedia(m)).slice(0, MAX_GALLERY_PHOTOS);
   const videos = allMedia.filter((m) => isVideoMedia(m)).slice(0, MAX_GALLERY_VIDEOS);
   const failed: string[] = [];
   let uploaded = 0;
+  const total = photos.length + videos.length;
+  let done = 0;
+  const report = (label: string) => deps.onProgress?.(done, total, label);
   if (photos.length === 0 && videos.length === 0) return { uploaded, failed };
 
   await clearProductMedia(externalId, deps);
@@ -185,6 +238,8 @@ export async function uploadProductMedia(
     const decoded = decodeImageDataUrl(photos[i]?.src);
     if (!decoded) {
       failed.push(`${i + 1}-е фото: у чорнетці немає зображення`);
+      done++;
+      report(`Фото ${i + 1}/${photos.length}`);
       continue;
     }
     try {
@@ -202,12 +257,16 @@ export async function uploadProductMedia(
     } catch (err: any) {
       failed.push(`${i + 1}-е фото: ${err?.message || 'помилка завантаження'}`);
     }
+    done++;
+    report(`Фото ${i + 1}/${photos.length}`);
   }
 
   for (let i = 0; i < videos.length; i++) {
     const decoded = decodeImageDataUrl(videos[i]?.src);
     if (!decoded) {
       failed.push(`${i + 1}-е відео: у чорнетці немає файлу`);
+      done++;
+      report(`Відео ${i + 1}/${videos.length}`);
       continue;
     }
     try {
@@ -225,6 +284,8 @@ export async function uploadProductMedia(
     } catch (err: any) {
       failed.push(`${i + 1}-е відео: ${err?.message || 'помилка завантаження'}`);
     }
+    done++;
+    report(`Відео ${i + 1}/${videos.length}`);
   }
 
   return { uploaded, failed };
@@ -261,13 +322,22 @@ export function registerFurnitureProductRoutes(app: Express): void {
   });
 
   app.post('/api/admin/furniture-products/:id/publish', requireAdmin, async (req, res) => {
+    const id = req.params.id;
     try {
       const drafts = await readDrafts();
-      const product = drafts.find((d) => d.id === req.params.id);
+      const product = drafts.find((d) => d.id === id);
       if (!product) return res.status(404).json({ error: 'Чорнетку виробу не знайдено.' });
 
       const issues = serverPublishIssues(product);
       if (issues.length) return res.status(400).json({ error: `Не можна публікувати: ${issues.join(' ')}` });
+
+      const allMedia = Array.isArray(product.media) ? product.media : [];
+      const photosCount = allMedia.filter((m) => !isVideoMedia(m)).slice(0, MAX_GALLERY_PHOTOS).length;
+      const videosCount = allMedia.filter((m) => isVideoMedia(m)).slice(0, MAX_GALLERY_VIDEOS).length;
+      // 1 крок — публікація самої картки (текст/ціна/атрибути), решта — по
+      // одному кроку на кожне фото й відео нижче (`uploadProductMedia`).
+      const total = 1 + photosCount + videosCount;
+      setPublishProgress(id, { status: 'running', done: 0, total, label: 'Публікація картки товару…' });
 
       const sellerSlug = process.env.BRIDGE_SELLER_SLUG || 'fusion-lab';
       const result = await publishProductToMarketplace({
@@ -289,11 +359,17 @@ export function registerFurnitureProductRoutes(app: Express): void {
         attributes: toBridgeAttributes(product),
         sellerSlug,
       });
+      setPublishProgress(id, {
+        done: 1,
+        label: photosCount + videosCount > 0 ? 'Завантаження медіа…' : 'Медіа немає',
+      });
 
       // ФОТО. Без них картка в каталозі показується порожнім прямокутником —
       // саме так і сталося 16.09.2026: публікація несла лише текст, бо цю ланку
       // не було підʼєднано.
-      const mediaResult = await uploadProductMedia(product, result.externalId);
+      const mediaResult = await uploadProductMedia(product, result.externalId, {
+        onProgress: (done, _total, label) => setPublishProgress(id, { done: 1 + done, label }),
+      });
       const mediaCount = Array.isArray(product.media) ? product.media.length : 0;
 
       product.status = 'published';
@@ -308,6 +384,7 @@ export function registerFurnitureProductRoutes(app: Express): void {
       // Картка вже є — про часткову невдачу кажемо прямо, а не мовчимо:
       // інакше автор побачив би «готово» й порожню картку в каталозі.
       if (mediaResult.failed.length > 0) {
+        setPublishProgress(id, { status: 'error', done: total, error: mediaResult.failed.join('; ') });
         return res.status(502).json({
           error:
             `Картку опубліковано, але фото доїхали не всі (${mediaResult.uploaded} із ${mediaCount}): ` +
@@ -318,6 +395,7 @@ export function registerFurnitureProductRoutes(app: Express): void {
         });
       }
 
+      setPublishProgress(id, { status: 'done', done: total, label: 'Готово' });
       res.json({
         product,
         slug: result.slug,
@@ -325,10 +403,21 @@ export function registerFurnitureProductRoutes(app: Express): void {
         mediaUploaded: mediaResult.uploaded,
       });
     } catch (err: any) {
+      setPublishProgress(id, { status: 'error', error: err?.message || 'Не вдалося опублікувати виріб.' });
       if (err instanceof MarketplaceBridgeError) {
         return res.status(err.status).json({ error: err.message, kind: err.kind });
       }
       res.status(500).json({ error: err?.message || 'Не вдалося опублікувати виріб.' });
     }
+  });
+
+  // Опитування прогресу публікації, що йде в іншому запиті (див.
+  // `publishProgressById` вище) — окремий GET, бо POST `/publish` сам
+  // повертає відповідь лише по завершенню, а на завантаження відео може
+  // піти хвилина й більше.
+  app.get('/api/admin/furniture-products/:id/publish-status', requireAdmin, (req, res) => {
+    const progress = publishProgressById.get(req.params.id);
+    if (!progress) return res.json({ status: 'idle' });
+    res.json(progress);
   });
 }
