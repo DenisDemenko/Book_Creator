@@ -115,7 +115,7 @@ remote перевірити можна, запушити — ні**. Робоч�
 **Fusion-Lab-Marketplaes (маркетплейс, окремий репозиторій).** Один новий
 коміт, ще не запушено (за тим самим правилом AGENTS.md — пуш лише на пряме
 прохання власника):
-- `feat(catalog,bridge): product gallery slideshow + video` — приймає
+- `36722a2 feat(catalog,bridge): product gallery slideshow with video, one shared media door` — приймає
   `kind: 'video'` у `/bridge/products/:externalId/media` (своя межа розміру
   150 МБ, mime mp4/webm/mov, ліміти 20 фото / 2 відео перевіряються на
   сервері незалежно від Студії); `media.controller.ts` — `Content-
