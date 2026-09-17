@@ -1214,15 +1214,18 @@ export async function publishProductToMarketplace(
   return { externalId, listing, slug: listingSlug(listing), created: unwrapListing(listing).created };
 }
 
-/** Види зображень виробу: головний банер і решта галереї. */
-export type ProductMediaKind = 'cover' | 'gallery';
+/** Види медіа виробу: головний банер, решта галереї фото, і відео. */
+export type ProductMediaKind = 'cover' | 'gallery' | 'video';
 
 /**
- * Надіслати зображення виробу — друга половина товару.
+ * Надіслати фото чи відео виробу — друга половина товару.
  *
- * Локальні фото з диска власника не мають публічного URL, тож міст возить їх
+ * Локальні файли з диска власника не мають публічного URL, тож міст возить їх
  * файлами (multipart) — так само, як обкладинку й файл книги. Перший файл
- * завжди `cover` (головний банер картки), решта — `gallery`.
+ * завжди `cover` (головний банер картки), решта фото — `gallery`, відео —
+ * `video`. Ліміти кількості (`MAX_GALLERY_PHOTOS`/`MAX_GALLERY_VIDEOS` у
+ * `furnitureProduct.ts`) перевіряє викликач (`uploadProductMedia`); тут —
+ * сам транспорт одного файла, без бізнес-меж.
  */
 export async function attachProductMediaToMarketplace(
   input: {

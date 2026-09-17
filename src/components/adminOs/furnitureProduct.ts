@@ -12,18 +12,32 @@
 
 export type FurnitureProductStatus = 'draft' | 'published' | 'archived';
 
+/** Вид медіа-файла картки: фото (типово) чи коротке відео виробу. */
+export type FurnitureMediaKind = 'image' | 'video';
+
 /** Один завантажений файл-ілюстрація картки (превʼю як data URL). */
 export interface FurnitureMediaItem {
   id: string;
-  /** Підпис: «Головний банер CAD / CNC», «Інтерʼєр 2» тощо. */
+  /** Підпис: «Головний банер CAD / CNC», «Інтерʼєр 2», «Відео 1» тощо. */
   label: string;
   /** Data URL превʼю — для чорнетки; повний файл береться при публікації. */
   src: string;
   /** Імʼя файла — для підпису й перевірки формату. */
   filename?: string;
-  /** Ширина/висота в px, якщо відомі (для підпису, як у макеті). */
+  /** Ширина/висота в px, якщо відомі (для підпису, як у макеті). Для відео не рахується. */
   width?: number;
   height?: number;
+  /**
+   * `'image'` за замовчуванням — поле додане пізніше, тож чорнетки без
+   * нього лишаються фото. `'video'` — ролик виробу, що йде в слайд-шоу
+   * вітрини разом із фото, але рахується в окремій межі (`MAX_GALLERY_VIDEOS`).
+   */
+  kind?: FurnitureMediaKind;
+}
+
+/** true, якщо елемент медіа — відео (з урахуванням відсутнього поля `kind`). */
+export function isVideoMedia(item: Pick<FurnitureMediaItem, 'kind'>): boolean {
+  return item.kind === 'video';
 }
 
 /** Тон дерева з палітри (3 варіанти, як у макеті). */
@@ -190,6 +204,16 @@ export const TEASER_MAX = 300;
 export const DESCRIPTION_MAX = 40000;
 
 /**
+ * Межі галереї картки — ті самі числа, що й на боці мосту й приймача
+ * (`server/marketplaceBridge.ts`, marketplace `bridge.service.ts`), щоб
+ * автор бачив ліміт у редакторі, а не дізнавався про відмову вже після
+ * публікації. Власник ТЗ: «Дозволити завантажувати до 20 фотографій і
+ * до 2 відео».
+ */
+export const MAX_GALLERY_PHOTOS = 20;
+export const MAX_GALLERY_VIDEOS = 2;
+
+/**
  * Чи картка заповнена настільки, щоб її можна було опублікувати.
  * Мінімум для вітрини: назва, артикул, ціна і хоча б одне фото.
  * Без обкладинки товар у каталозі показується порожнім прямокутником — те
@@ -200,10 +224,18 @@ export const DESCRIPTION_MAX = 40000;
  */
 export function furniturePublishIssues(p: FurnitureProduct): string[] {
   const issues: string[] = [];
+  const photoCount = p.media.filter((m) => !isVideoMedia(m)).length;
+  const videoCount = p.media.filter((m) => isVideoMedia(m)).length;
   if (!p.name.trim()) issues.push('Немає назви виробу.');
   if (!p.sku.trim()) issues.push('Немає артикула / SKU.');
   if (!(p.priceUah > 0)) issues.push('Ціна має бути більшою за нуль.');
-  if (p.media.length === 0) issues.push('Немає жодного фото — додайте головний банер.');
+  if (photoCount === 0) issues.push('Немає жодного фото — додайте головний банер.');
+  if (photoCount > MAX_GALLERY_PHOTOS) {
+    issues.push(`Забагато фото: ${photoCount} із дозволених ${MAX_GALLERY_PHOTOS}.`);
+  }
+  if (videoCount > MAX_GALLERY_VIDEOS) {
+    issues.push(`Забагато відео: ${videoCount} із дозволених ${MAX_GALLERY_VIDEOS}.`);
+  }
   if (p.name.trim().length > TITLE_MAX) {
     issues.push(`Назва задовга: ${p.name.trim().length} із ${TITLE_MAX} символів.`);
   }

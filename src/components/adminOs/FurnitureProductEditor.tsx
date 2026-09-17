@@ -19,6 +19,7 @@ import {
   Info,
   Moon,
   Package,
+  Play,
   RefreshCw,
   Ruler,
   Save,
@@ -26,16 +27,21 @@ import {
   Sun,
   Trash2,
   Upload,
+  Video,
   X,
   Zap,
 } from 'lucide-react';
 import {
   blankFurnitureProduct,
   furniturePublishIssues,
+  isVideoMedia,
   DESCRIPTION_MAX,
+  MAX_GALLERY_PHOTOS,
+  MAX_GALLERY_VIDEOS,
   TEASER_MAX,
   TITLE_MAX,
   type FurnitureColor,
+  type FurnitureMediaItem,
   type FurnitureProduct,
   type FurnitureWoodTone,
 } from './furnitureProduct';
@@ -229,6 +235,36 @@ function fileToPreview(file: File, maxDim = 1600): Promise<{ src: string; width:
   });
 }
 
+/**
+ * Межа розміру відео в чорнетці. На відміну від фото (`fileToPreview` завжди
+ * перекодовує в JPEG ≤1600px), відео зберігається як data URL БЕЗ
+ * перестиснення — перекодування відео на клієнті надто дороге. Тому межа тут
+ * значно нижча за серверну (`BRIDGE_MAX_PRODUCT_MEDIA_BYTES` = 150 МБ):
+ * inline-base64 відео в JSON-чорнетці (`meta` у SQLite) не повинно роздувати
+ * рядок на сотні мегабайт.
+ */
+const MAX_DRAFT_VIDEO_BYTES = 40 * 1024 * 1024;
+
+/** Читає локальний відеофайл як data URL для чорнетки — без перекодування. */
+function fileToVideoPreview(file: File): Promise<{ src: string }> {
+  return new Promise((resolve, reject) => {
+    if (file.size > MAX_DRAFT_VIDEO_BYTES) {
+      reject(
+        new Error(
+          `${file.name}: відео завелике (${(file.size / 1024 / 1024).toFixed(1)} МБ) — максимум ${Math.round(
+            MAX_DRAFT_VIDEO_BYTES / 1024 / 1024
+          )} МБ у чорнетці.`
+        )
+      );
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`${file.name}: не вдалося прочитати файл.`));
+    reader.onload = () => resolve({ src: String(reader.result || '') });
+    reader.readAsDataURL(file);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Редактор
 // ---------------------------------------------------------------------------
@@ -255,6 +291,8 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
   }, []);
 
   const issues = useMemo(() => furniturePublishIssues(product), [product]);
+  const photos = useMemo(() => product.media.filter((m) => !isVideoMedia(m)), [product.media]);
+  const videos = useMemo(() => product.media.filter((m) => isVideoMedia(m)), [product.media]);
 
   // Ефект: якщо батьківський компонент передав інший початковий виріб —
   // перечитати (наприклад, «новий» після «редагувати»).
@@ -320,25 +358,71 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
   const onFiles = useCallback(
     async (files: FileList | null) => {
       if (!files || files.length === 0) return;
-      const accepted: Awaited<ReturnType<typeof fileToPreview>>[] = [];
+
+      const photosSoFar = product.media.filter((m) => !isVideoMedia(m)).length;
+      const videosSoFar = product.media.filter((m) => isVideoMedia(m)).length;
+      let photoSlots = MAX_GALLERY_PHOTOS - photosSoFar;
+      let videoSlots = MAX_GALLERY_VIDEOS - videosSoFar;
+
+      const items: FurnitureMediaItem[] = [];
+      const skipped: string[] = [];
+      let newPhotoIndex = photosSoFar;
+      let newVideoIndex = videosSoFar;
+
       for (const file of Array.from(files)) {
-        if (!file.type.startsWith('image/')) continue;
+        const isVideo = file.type.startsWith('video/');
+        const isImage = file.type.startsWith('image/');
+        if (isVideo) {
+          if (videoSlots <= 0) {
+            skipped.push(`${file.name} — відео: ліміт ${MAX_GALLERY_VIDEOS} вже вичерпано`);
+            continue;
+          }
+          try {
+            const preview = await fileToVideoPreview(file);
+            newVideoIndex += 1;
+            items.push({
+              id: `${Date.now().toString(36)}-${items.length}`,
+              label: `Відео ${newVideoIndex}`,
+              src: preview.src,
+              filename: file.name,
+              kind: 'video',
+            });
+            videoSlots -= 1;
+          } catch (err: any) {
+            skipped.push(err?.message || `${file.name}: помилка читання відео.`);
+          }
+          continue;
+        }
+        if (!isImage) {
+          skipped.push(`${file.name} — не фото і не відео, пропущено.`);
+          continue;
+        }
+        if (photoSlots <= 0) {
+          skipped.push(`${file.name} — фото: ліміт ${MAX_GALLERY_PHOTOS} вже вичерпано`);
+          continue;
+        }
         try {
-          accepted.push(await fileToPreview(file));
+          const preview = await fileToPreview(file);
+          newPhotoIndex += 1;
+          items.push({
+            id: `${Date.now().toString(36)}-${items.length}`,
+            label: newPhotoIndex === 1 ? 'Головний банер CAD / CNC' : `Фото ${newPhotoIndex}`,
+            src: preview.src,
+            filename: file.name,
+            width: preview.width,
+            height: preview.height,
+            kind: 'image',
+          });
+          photoSlots -= 1;
         } catch {
-          // пропускаємо незображення
+          skipped.push(`${file.name} — не вдалося прочитати як зображення.`);
         }
       }
-      if (accepted.length === 0) return;
-      const items = accepted.map((a, i) => ({
-        id: `${Date.now().toString(36)}-${i}`,
-        label: product.media.length + i === 0 ? 'Головний банер CAD / CNC' : `Фото ${product.media.length + i + 1}`,
-        src: a.src,
-        filename: files[i]?.name,
-        width: a.width,
-        height: a.height,
-      }));
-      patch({ media: [...product.media, ...items] });
+
+      if (items.length > 0) patch({ media: [...product.media, ...items] });
+      if (skipped.length > 0) {
+        setMessage({ tone: 'err', text: `Додано не все: ${skipped.join('; ')}` });
+      }
     },
     [patch, product.media]
   );
@@ -589,21 +673,31 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
 
           {/* Права колонка — медіа та персоналізація */}
           <div className="lg:col-span-4 space-y-5">
-            <Section t={t} icon={<ImageIcon className="w-4 h-4" />} title="Медіа картки товару" sub="Головний банер і галерея" right={<span className={`text-[10px] font-mono ${theme === 'night' ? 'text-cyan-400' : 'text-sky-600'}`}>{product.media.length} файлів</span>}>
+            <Section
+              t={t}
+              icon={<ImageIcon className="w-4 h-4" />}
+              title="Медіа картки товару"
+              sub={`Головний банер, галерея (до ${MAX_GALLERY_PHOTOS} фото) і відео (до ${MAX_GALLERY_VIDEOS})`}
+              right={
+                <span className={`text-[10px] font-mono ${theme === 'night' ? 'text-cyan-400' : 'text-sky-600'}`}>
+                  {photos.length} фото · {videos.length} відео
+                </span>
+              }
+            >
               <div className="space-y-3">
-                {product.media.length > 0 && (
+                {photos.length > 0 && (
                   <div className="relative rounded-xl overflow-hidden border group">
-                    <img src={product.media[0].src} alt={product.media[0].label} className="w-full h-48 object-cover" />
+                    <img src={photos[0].src} alt={photos[0].label} className="w-full h-48 object-cover" />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
                     <div className="absolute bottom-2 left-2.5 right-2.5 flex items-center justify-between">
                       <span className="text-[10px] bg-black/80 text-white px-2 py-0.5 rounded">Головний банер</span>
-                      {product.media[0].width ? <span className="text-[10px] text-slate-200 font-mono">{product.media[0].width} × {product.media[0].height}</span> : null}
+                      {photos[0].width ? <span className="text-[10px] text-slate-200 font-mono">{photos[0].width} × {photos[0].height}</span> : null}
                     </div>
                   </div>
                 )}
-                {product.media.length > 1 && (
+                {photos.length > 1 && (
                   <div className="grid grid-cols-4 gap-2">
-                    {product.media.slice(1).map((m) => (
+                    {photos.slice(1).map((m) => (
                       <div key={m.id} className="relative group rounded-lg overflow-hidden border border-slate-700">
                         <img src={m.src} alt={m.label} className="w-full aspect-square object-cover" />
                         <button type="button" onClick={() => removeMedia(m.id)} className="absolute top-0.5 right-0.5 p-0.5 rounded bg-black/70 text-white opacity-0 group-hover:opacity-100 transition-opacity" aria-label="Видалити">
@@ -613,10 +707,37 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
                     ))}
                   </div>
                 )}
-                {product.media.length > 0 && (
-                  <button type="button" onClick={() => patch({ media: product.media.slice(1) })} className="inline-flex items-center gap-1 text-[11px] text-rose-400 hover:text-rose-300">
-                    <Trash2 className="w-3.5 h-3.5" /> Очистити
+                {photos.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => patch({ media: product.media.filter((m) => isVideoMedia(m) || m.id === photos[0]?.id) })}
+                    className="inline-flex items-center gap-1 text-[11px] text-rose-400 hover:text-rose-300"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Очистити галерею фото
                   </button>
+                )}
+
+                {videos.length > 0 && (
+                  <div>
+                    <Label>Відео виробу ({videos.length}/{MAX_GALLERY_VIDEOS})</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {videos.map((m) => (
+                        <div key={m.id} className="relative group rounded-lg overflow-hidden border border-slate-700 bg-black/60">
+                          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                          <video src={m.src} muted playsInline preload="metadata" className="w-full aspect-video object-cover opacity-90" />
+                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                            <span className="p-1.5 rounded-full bg-black/60 text-white">
+                              <Play className="w-4 h-4" />
+                            </span>
+                          </div>
+                          <span className="absolute bottom-1 left-1.5 text-[10px] bg-black/80 text-white px-1.5 py-0.5 rounded">{m.label}</span>
+                          <button type="button" onClick={() => removeMedia(m.id)} className="absolute top-0.5 right-0.5 p-0.5 rounded bg-black/70 text-white opacity-0 group-hover:opacity-100 transition-opacity" aria-label="Видалити">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
 
                 <div>
@@ -634,8 +755,10 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
                 <label className={`mt-3 border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-colors block ${t.dropZone}`}>
                   <Upload className="w-6 h-6 mx-auto mb-1 opacity-80" />
                   <p className="text-[11px] font-medium">Перетягніть нові фото або відеоогляд</p>
-                  <p className="text-[10px] opacity-70 mt-0.5">PNG, JPG до 10 МБ</p>
-                  <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => void onFiles(e.target.files)} />
+                  <p className="text-[10px] opacity-70 mt-0.5">
+                    PNG / JPG / WEBP — фото (до {MAX_GALLERY_PHOTOS}); MP4 / WEBM / MOV — відео (до {MAX_GALLERY_VIDEOS})
+                  </p>
+                  <input type="file" accept="image/*,video/*" multiple className="hidden" onChange={(e) => void onFiles(e.target.files)} />
                 </label>
               </div>
             </Section>

@@ -29,6 +29,10 @@ import {
   TITLE_MAX,
   TEASER_MAX,
   DESCRIPTION_MAX,
+  MAX_GALLERY_PHOTOS,
+  MAX_GALLERY_VIDEOS,
+  isVideoMedia,
+  type FurnitureMediaItem,
   type FurnitureProduct,
 } from '../src/components/adminOs/furnitureProduct';
 
@@ -37,9 +41,11 @@ const DRAFTS_KEY = 'furniture_product_drafts';
 /**
  * Data-URL превʼю → байти.
  *
- * Чорнетка зберігає зображення саме як data URL (щоб пережити перезавантаження
- * сторінки), тож публікація декодує його назад і віддає файлом — у маркетплейсу
- * немає звідки взяти ці байти інакше.
+ * Чорнетка зберігає і зображення, і відео саме як data URL (щоб пережити
+ * перезавантаження сторінки), тож публікація декодує його назад і віддає
+ * файлом — у маркетплейсу немає звідки взяти ці байти інакше. Назва
+ * лишилась «Image» з часів, коли відео не було — перейменовувати рефакторили
+ * б заради самого рефакторингу; поведінка вже загальна (будь-який data URL).
  */
 function decodeImageDataUrl(src: unknown): { mimeType: string; bytes: Uint8Array } | null {
   const m = /^data:([^;,]+);base64,([\s\S]+)$/.exec(String(src ?? ''));
@@ -52,6 +58,13 @@ function imageFilename(sku: string, index: number, mimeType: string): string {
   const ext = mimeType === 'image/png' ? 'png' : mimeType === 'image/webp' ? 'webp' : 'jpg';
   const base = (sku || 'product').replace(/[^\w.-]+/g, '_').slice(0, 40);
   return `${base}-${String(index + 1).padStart(2, '0')}.${ext}`;
+}
+
+/** Імʼя відеофайла в сховищі — той самий принцип, розширення з mime-типу. */
+function videoFilename(sku: string, index: number, mimeType: string): string {
+  const ext = mimeType === 'video/webm' ? 'webm' : mimeType === 'video/quicktime' ? 'mov' : 'mp4';
+  const base = (sku || 'product').replace(/[^\w.-]+/g, '_').slice(0, 40);
+  return `${base}-video-${String(index + 1).padStart(2, '0')}.${ext}`;
 }
 
 async function readDrafts(): Promise<FurnitureProduct[]> {
@@ -77,10 +90,19 @@ async function writeDrafts(list: FurnitureProduct[]): Promise<void> {
  * англійський рядок валідації. */
 function serverPublishIssues(p: FurnitureProduct): string[] {
   const issues: string[] = [];
+  const media = Array.isArray(p.media) ? p.media : [];
+  const photoCount = media.filter((m) => !isVideoMedia(m)).length;
+  const videoCount = media.filter((m) => isVideoMedia(m)).length;
   if (!p.name?.trim()) issues.push('Немає назви виробу.');
   if (!p.sku?.trim()) issues.push('Немає артикула / SKU.');
   if (!(p.priceUah > 0)) issues.push('Ціна має бути більшою за нуль.');
-  if (!p.media?.length) issues.push('Немає жодного фото — додайте головний банер.');
+  if (photoCount === 0) issues.push('Немає жодного фото — додайте головний банер.');
+  if (photoCount > MAX_GALLERY_PHOTOS) {
+    issues.push(`Забагато фото: ${photoCount} із дозволених ${MAX_GALLERY_PHOTOS}.`);
+  }
+  if (videoCount > MAX_GALLERY_VIDEOS) {
+    issues.push(`Забагато відео: ${videoCount} із дозволених ${MAX_GALLERY_VIDEOS}.`);
+  }
   if ((p.name?.trim().length ?? 0) > TITLE_MAX) {
     issues.push(`Назва задовга: ${p.name.trim().length} із ${TITLE_MAX} символів.`);
   }
@@ -121,31 +143,39 @@ function toBridgeAttributes(p: FurnitureProduct): PublishProductAttributes {
 }
 
 /**
- * Надіслати зображення виробу у сховище вітрини.
+ * Надіслати фото й відео виробу у сховище вітрини.
  *
- * Перший файл — головний банер (`cover`), решта — галерея (`gallery`).
- * Порядок послідовний і навмисний: галерея на сторінці товару показується в
- * тому порядку, у якому лягла в сховище. Перед завантаженням набір чиститься —
- * приймач ДОДАЄ фото галереї, а не замінює їх.
+ * Перше ФОТО (не відео) — головний банер (`cover`), решта фото — галерея
+ * (`gallery`), усі відео — окремий вид (`video`). Порядок у межах кожної
+ * групи послідовний і навмисний: галерея на сторінці товару показується в
+ * тому порядку, у якому лягла в сховище. Перед завантаженням набір
+ * чиститься — приймач ДОДАЄ медіа, а не замінює їх.
+ *
+ * Межі (`MAX_GALLERY_PHOTOS`/`MAX_GALLERY_VIDEOS`) уже перевірені в
+ * редакторі й у `serverPublishIssues` перед публікацією; тут — оборонне
+ * обрізання про всяк випадок (чорнетка могла бути записана старішою
+ * версією клієнта), а не основний механізм захисту.
  *
  * Виділено з маршруту, щоб цю ланку можна було перевірити без HTTP і без
  * справжнього моста: саме її бракувало 16.09.2026, коли публікація поїхала
  * текстом без фотографій.
  */
 export async function uploadProductMedia(
-  product: { sku: string; media?: Array<{ src?: string }> | null },
+  product: { sku: string; media?: Array<Pick<FurnitureMediaItem, 'src' | 'kind'>> | null },
   externalId: string,
   deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
 ): Promise<{ uploaded: number; failed: string[] }> {
-  const media = Array.isArray(product.media) ? product.media : [];
+  const allMedia = Array.isArray(product.media) ? product.media : [];
+  const photos = allMedia.filter((m) => !isVideoMedia(m)).slice(0, MAX_GALLERY_PHOTOS);
+  const videos = allMedia.filter((m) => isVideoMedia(m)).slice(0, MAX_GALLERY_VIDEOS);
   const failed: string[] = [];
   let uploaded = 0;
-  if (media.length === 0) return { uploaded, failed };
+  if (photos.length === 0 && videos.length === 0) return { uploaded, failed };
 
   await clearProductMedia(externalId, deps);
 
-  for (let i = 0; i < media.length; i++) {
-    const decoded = decodeImageDataUrl(media[i]?.src);
+  for (let i = 0; i < photos.length; i++) {
+    const decoded = decodeImageDataUrl(photos[i]?.src);
     if (!decoded) {
       failed.push(`${i + 1}-е фото: у чорнетці немає зображення`);
       continue;
@@ -164,6 +194,29 @@ export async function uploadProductMedia(
       uploaded++;
     } catch (err: any) {
       failed.push(`${i + 1}-е фото: ${err?.message || 'помилка завантаження'}`);
+    }
+  }
+
+  for (let i = 0; i < videos.length; i++) {
+    const decoded = decodeImageDataUrl(videos[i]?.src);
+    if (!decoded) {
+      failed.push(`${i + 1}-е відео: у чорнетці немає файлу`);
+      continue;
+    }
+    try {
+      await attachProductMediaToMarketplace(
+        {
+          sku: product.sku,
+          kind: 'video',
+          filename: videoFilename(product.sku, i, decoded.mimeType),
+          mimeType: decoded.mimeType,
+          bytes: decoded.bytes,
+        },
+        deps
+      );
+      uploaded++;
+    } catch (err: any) {
+      failed.push(`${i + 1}-е відео: ${err?.message || 'помилка завантаження'}`);
     }
   }
 
