@@ -104,6 +104,18 @@ import {
   factoryEtsyAdvisorUserTemplate,
   renderEtsyAdvisorTemplate,
 } from './etsyAdvisorPrompt';
+import {
+  emotionMasterySystemInstruction,
+  factoryEmotionMasteryTemplate,
+  renderEmotionMasterySystemTemplate,
+  renderEmotionMasteryUserTemplate,
+} from './emotionMasteryPrompt';
+import {
+  thresholdSystemInstruction,
+  factoryThresholdTemplate,
+  renderThresholdSystemTemplate,
+  renderThresholdUserTemplate,
+} from './thresholdPrompt';
 
 /** Ключ у таблиці `meta`, під яким лежить ЄДИНИЙ адмінський шар усіх модулів ядра. */
 export const CORE_PROMPT_TEMPLATES_META_KEY = 'prompt_templates_core_admin';
@@ -131,6 +143,8 @@ export const CORE_MODULE_KEYS = [
   'etsyMarketScreen',
   'bookPdfDesign',
   'etsyAdvisor',
+  'emotionMastery',
+  'threshold',
 ] as const;
 
 export type CoreModuleKey = (typeof CORE_MODULE_KEYS)[number];
@@ -209,6 +223,11 @@ export const CORE_MODULE_PLACEHOLDERS: Record<CoreModuleKey, string[]> = {
     '{{wordCount}}',
     '{{sample}}',
   ],
+  emotionMastery: [
+    '{НАЗВА_КНИГИ}', '{ЖАНР}', '{ПЕРСОНАЖ}', '{ПРОФІЛЬ_ПЕРСОНАЖА}', '{СТОСУНКИ}',
+    '{ОПИС_СЦЕНИ}', '{ПОТОЧНИЙ_ПОРІГ}', '{КОНТЕКСТ_ДО}', '{ФРАГМЕНТ}', '{КОНТЕКСТ_ПІСЛЯ}', '{МОВА}',
+  ],
+  threshold: ['{НАЗВА_КНИГИ}', '{ЖАНР}', '{ПЕРСОНАЖ}', '{ПРОФІЛЬ_ПЕРСОНАЖА}', '{ОПИС_СЦЕНИ}', '{ФРАГМЕНТ}', '{МОВА}'],
 };
 
 /** Чи модуль повертає JSON за жорсткою схемою (схема — readonly-текст у конструкторі, не редагується). */
@@ -234,6 +253,8 @@ export const CORE_MODULE_HAS_JSON_SCHEMA: Record<CoreModuleKey, boolean> = {
   // Порада практика — суцільний текст, а не структура: жорсткої схеми тут
   // немає й бути не повинно.
   etsyAdvisor: false,
+  emotionMastery: true,
+  threshold: true,
 };
 
 /**
@@ -330,6 +351,10 @@ export function factoryCoreTemplate(module: CoreModuleKey): CorePromptTemplate {
         system: factoryEtsyAdvisorSystemTemplate(),
         user: factoryEtsyAdvisorUserTemplate(),
       };
+    case 'emotionMastery':
+      return { system: emotionMasterySystemInstruction(), user: factoryEmotionMasteryTemplate() };
+    case 'threshold':
+      return { system: thresholdSystemInstruction(), user: factoryThresholdTemplate() };
   }
 }
 
@@ -616,5 +641,40 @@ export function renderCoreTemplate(
         wordCount: fields.wordCount || '',
         sample: fields.sample || '',
       });
+    case 'emotionMastery': {
+      const values = {
+        bookTitle: fields.bookTitle,
+        genre: fields.genre,
+        characterName: fields.characterName || '',
+        characterProfile: fields.characterProfile,
+        relationshipContext: fields.relationshipContext,
+        sceneSummary: fields.sceneSummary,
+        currentThreshold: fields.currentThreshold,
+        previousParagraph: fields.previousParagraph,
+        nextParagraph: fields.nextParagraph,
+        // {ФРАГМЕНТ} спільний з іншими модулями виділення — той самий подвійний фолбек.
+        fragment: fields.selection || fields.sampleText || '',
+        locale: fields.language,
+      };
+      return {
+        system: renderEmotionMasterySystemTemplate(template.system, values),
+        user: renderEmotionMasteryUserTemplate(template.user, values),
+      };
+    }
+    case 'threshold': {
+      const values = {
+        bookTitle: fields.bookTitle,
+        genre: fields.genre,
+        characterName: fields.characterName || '',
+        characterProfile: fields.characterProfile,
+        sceneSummary: fields.sceneSummary,
+        fragment: fields.selection || fields.sampleText || '',
+        locale: fields.language,
+      };
+      return {
+        system: renderThresholdSystemTemplate(template.system, values),
+        user: renderThresholdUserTemplate(template.user, values),
+      };
+    }
   }
 }

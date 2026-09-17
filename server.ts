@@ -137,6 +137,35 @@ import {
   parseCodexResponse,
   normalizeCodexResult,
 } from './server/characterCodexPrompt';
+import {
+  parseEmotionMasteryResponse,
+  normalizeEmotionAnalysis,
+  MAX_EMOTION_FRAGMENT_CHARS,
+} from './server/emotionMasteryPrompt';
+import {
+  parseThresholdResponse,
+  normalizeThresholdCandidate,
+  MAX_THRESHOLD_FRAGMENT_CHARS,
+} from './server/thresholdPrompt';
+import {
+  computeMasteryScore,
+  masteryLevelUk,
+} from './server/emotionMasteryScoring';
+import {
+  isRealThreshold,
+  thresholdEvidenceOutcome,
+  thresholdScore,
+  thresholdStrength,
+} from './server/thresholdScoring';
+import {
+  persistEmotionAnalysis,
+  emotionEvidenceSourceId,
+  projectAuthorEmotionProfile,
+  listEmotionAnalyses,
+  listEmotionDictionary,
+} from './server/emotionMasteryStore';
+import { registerThresholdRoutes } from './server/thresholdRoutes';
+import { recordEvidence } from './server/wdiStore';
 import { buildJyotishChart, JyotishError } from './server/jyotishChart';
 import {
   readCoreModuleModels,
@@ -316,6 +345,7 @@ registerCourseWizardRoutes(app);
 registerModerationRoutes(app);
 registerFurnitureProductRoutes(app);
 registerFurnitureCalculatorRoutes(app);
+registerThresholdRoutes(app);
 registerSupportChatRoutes(app);
 registerGitHistoryRoutes(app);
 registerGitCommandRoutes(app);
@@ -2452,6 +2482,308 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
         return res.status(err.status).json({ error: err.message });
       }
       res.status(500).json({ error: err?.message || 'Не вдалося скласти кодекс персонажа.', kind: 'unknown' });
+    }
+  });
+
+  /**
+   * «Емоційна майстерність письменника» (ARCHITECTURE_EMOTION_THRESHOLD_
+   * MODULES.md, розділи 3-6, і «Модуль емоцій та поріг повинні бути
+   * частиною ядра навичків письменника» — власник). На відміну від
+   * «Порогу» нижче, тут немає окремого кроку підтвердження: AI аналізує
+   * вже НАПИСАНИЙ фрагмент, а не пропонує структуру на звірку із задумом
+   * автора, тож результат одразу зберігається (ідемпотентно на хеш
+   * тексту, server/emotionMasteryStore.ts) і одразу дописує доказ WDI
+   * компетенції `emotion_reader_impact`. mastery_score AI ніколи не
+   * повертає — його завжди рахує server/emotionMasteryScoring.ts із
+   * сирих балів критеріїв.
+   */
+  app.post('/api/ai/emotion-analyze', requirePermission('canUseAi'), async (req, res) => {
+    const {
+      bookId,
+      sceneId,
+      characterId,
+      characterName,
+      characterProfile,
+      relationshipContext,
+      sceneSummary,
+      currentThreshold,
+      previousParagraph,
+      nextParagraph,
+      bookTitle,
+      genre,
+      fragment,
+      locale,
+      modelId,
+    } = req.body || {};
+
+    const text = typeof fragment === 'string' ? fragment.trim() : '';
+    if (text.length < 100) {
+      return res.status(400).json({
+        error: 'Замало тексту для аналізу емоції — виділіть хоча б абзац.',
+        kind: 'not_enough_text',
+      });
+    }
+    if (text.length > MAX_EMOTION_FRAGMENT_CHARS) {
+      return res.status(413).json({
+        error: `Забагато тексту (${text.length} символів, максимум ${MAX_EMOTION_FRAGMENT_CHARS}) — оберіть менший фрагмент.`,
+        kind: 'too_much_text',
+      });
+    }
+    const character = typeof characterName === 'string' ? characterName.trim() : '';
+    if (!character) {
+      return res.status(400).json({ error: 'Оберіть персонажа, чию емоцію аналізуємо.', kind: 'bad_input' });
+    }
+
+    const preferredModelId = (await resolveModuleModelId('emotionMastery', modelId)) || undefined;
+    const resolved = await resolveTextEngineOrFail(req, res, preferredModelId, 'емоційна майстерність письменника');
+    if (!resolved) return;
+    const { engine, resolvedModelId, userKey } = resolved;
+    const userId = req.principal?.id as string | undefined;
+
+    try {
+      const adminLayer = await loadCoreAdminLayer();
+      const template = resolveCoreTemplate('emotionMastery', adminLayer);
+      const rendered = renderCoreTemplate('emotionMastery', template, {
+        bookTitle,
+        genre,
+        characterName: character,
+        characterProfile,
+        relationshipContext,
+        sceneSummary,
+        currentThreshold,
+        previousParagraph,
+        nextParagraph,
+        selection: text,
+        language: locale,
+      });
+
+      const result = await generateAiText({
+        engine,
+        modelId: resolvedModelId,
+        prompt: rendered.user,
+        systemInstruction: rendered.system,
+        apiKeyOverride: userKey,
+        json: true,
+        req,
+        label: 'Емоційна майстерність письменника',
+        bookId,
+      });
+
+      let parsed: any;
+      try {
+        parsed = parseEmotionMasteryResponse(result.text);
+      } catch {
+        return res.status(502).json({
+          error: 'Модель повернула не JSON — спробуйте ще раз або оберіть іншу модель у налаштуваннях модуля.',
+          kind: 'bad_model_output',
+        });
+      }
+
+      const analysis = normalizeEmotionAnalysis(parsed);
+      const masteryScore = computeMasteryScore(analysis.mastery);
+
+      let persisted: { id: string; alreadyExisted: boolean } | null = null;
+      let evidenceRecorded = false;
+      if (userId) {
+        try {
+          persisted = persistEmotionAnalysis({
+            userId,
+            bookId: bookId ?? null,
+            sceneId: sceneId ?? null,
+            characterId: characterId ?? null,
+            selectedText: text,
+            analysis,
+            modelVersion: resolvedModelId,
+            promptVersion: 'emotionMastery-v1',
+            rubricVersion: 'emotionMastery-v1',
+            taxonomyVersion: 'emotionMastery-v1',
+          });
+          if (!persisted.alreadyExisted) {
+            // 50 = BASE_SCORE у server/wdi.ts — той самий нуль відліку:
+            // середня майстерність не зсуває бал, вище/нижче — плюс/мінус.
+            const outcome = Math.max(-1, Math.min(1, (masteryScore - 50) / 50));
+            evidenceRecorded = recordEvidence({
+              userId,
+              bookId: bookId ?? null,
+              skill: 'emotion_reader_impact',
+              type: 'TEXT_ANALYSIS',
+              outcome,
+              confidence: analysis.confidence,
+              // TEXT_ANALYSIS — найслабший тип доказу (wdi.ts): це спостереження
+              // за вже написаним текстом, а не самостійна дія автора.
+              independence: 20,
+              summary: `Аналіз емоції «${analysis.character}»: ${masteryScore}/100 (${masteryLevelUk(masteryScore)}).`,
+              sourceId: emotionEvidenceSourceId(userId, text),
+            });
+          }
+        } catch (err) {
+          // Аналіз модель уже порахувала — не топити відповідь автору через
+          // збій сховища, лише не зберегти. Той самий підхід, що й
+          // server/wdiStore.ts::recordMany до окремих доказів.
+          console.warn('[emotion-analyze] не вдалося зберегти аналіз:', (err as Error)?.message);
+        }
+      }
+
+      res.json({
+        result: { ...analysis, masteryScore, masteryLevel: masteryLevelUk(masteryScore) },
+        analysisId: persisted?.id ?? null,
+        alreadyAnalyzed: persisted?.alreadyExisted ?? false,
+        evidenceRecorded,
+        engine,
+        modelId: resolvedModelId,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      console.error('Error in /api/ai/emotion-analyze:', err?.message || err);
+      if (err instanceof ChatProviderError) {
+        return res.status(err.status).json({ error: err.message });
+      }
+      res.status(500).json({ error: err?.message || 'Не вдалося проаналізувати емоцію.', kind: 'unknown' });
+    }
+  });
+
+  /** Історія аналізів емоції — щоб показати минулі розбори в тренажері. */
+  app.get('/api/ai/emotion-analyze/history', requireAuth, (req: any, res) => {
+    try {
+      const bookId = typeof req.query.bookId === 'string' ? req.query.bookId : null;
+      res.json({ items: listEmotionAnalyses(req.principal.id, bookId) });
+    } catch (err: any) {
+      res.status(503).json({ error: String(err?.message || err), kind: 'storage_unavailable' });
+    }
+  });
+
+  /**
+   * Профіль емоцій автора (п. 18 ТЗ) — завжди похідний, рахується тут із
+   * emotion_analysis/emotion_mastery_scores, ніколи не зберігається
+   * окремо (коментар біля CREATE TABLE emotion_analysis у server/db.ts).
+   */
+  app.get('/api/ai/emotion-analyze/profile', requireAuth, (req: any, res) => {
+    try {
+      res.json({ profile: projectAuthorEmotionProfile(req.principal.id) });
+    } catch (err: any) {
+      res.status(503).json({ error: String(err?.message || err), kind: 'storage_unavailable' });
+    }
+  });
+
+  app.get('/api/emotion-dictionary', requireAuth, (_req, res) => {
+    try {
+      res.json({ items: listEmotionDictionary() });
+    } catch (err: any) {
+      res.status(503).json({ error: String(err?.message || err), kind: 'storage_unavailable' });
+    }
+  });
+
+  /**
+   * «Поріг» — AI лише ПРОПОНУЄ кандидата (ARCHITECTURE_EMOTION_THRESHOLD_
+   * MODULES.md, розділ 6.3). Нічого не пишеться в БД тут: автор
+   * підтверджує чи редагує запропоноване й зберігає через
+   * POST/PUT /api/thresholds (server/thresholdRoutes.ts), де score()
+   * рахується заново й незалежно, а не приймається з тіла цього роуту.
+   */
+  app.post('/api/ai/threshold-analyze', requirePermission('canUseAi'), async (req, res) => {
+    const { bookId, characterId, characterName, characterProfile, sceneSummary, bookTitle, genre, fragment, locale, modelId } =
+      req.body || {};
+
+    const text = typeof fragment === 'string' ? fragment.trim() : '';
+    if (text.length < 100) {
+      return res.status(400).json({
+        error: 'Замало тексту для пошуку порогу — виділіть хоча б абзац.',
+        kind: 'not_enough_text',
+      });
+    }
+    if (text.length > MAX_THRESHOLD_FRAGMENT_CHARS) {
+      return res.status(413).json({
+        error: `Забагато тексту (${text.length} символів, максимум ${MAX_THRESHOLD_FRAGMENT_CHARS}) — оберіть менший фрагмент.`,
+        kind: 'too_much_text',
+      });
+    }
+    const character = typeof characterName === 'string' ? characterName.trim() : '';
+    if (!character) {
+      return res.status(400).json({ error: 'Оберіть персонажа, для якого шукаємо поріг.', kind: 'bad_input' });
+    }
+
+    const preferredModelId = (await resolveModuleModelId('threshold', modelId)) || undefined;
+    const resolved = await resolveTextEngineOrFail(req, res, preferredModelId, 'поріг');
+    if (!resolved) return;
+    const { engine, resolvedModelId, userKey } = resolved;
+
+    try {
+      const adminLayer = await loadCoreAdminLayer();
+      const template = resolveCoreTemplate('threshold', adminLayer);
+      const rendered = renderCoreTemplate('threshold', template, {
+        bookTitle,
+        genre,
+        characterName: character,
+        characterProfile,
+        sceneSummary,
+        selection: text,
+        language: locale,
+      });
+
+      const result = await generateAiText({
+        engine,
+        modelId: resolvedModelId,
+        prompt: rendered.user,
+        systemInstruction: rendered.system,
+        apiKeyOverride: userKey,
+        json: true,
+        req,
+        label: 'Поріг',
+        bookId,
+      });
+
+      let parsed: any;
+      try {
+        parsed = parseThresholdResponse(result.text);
+      } catch {
+        return res.status(502).json({
+          error: 'Модель повернула не JSON — спробуйте ще раз або оберіть іншу модель у налаштуваннях модуля.',
+          kind: 'bad_model_output',
+        });
+      }
+
+      const candidate = normalizeThresholdCandidate(parsed);
+      // Попередній розрахунок ЛИШЕ для показу в інтерфейсі перед збереженням:
+      // server/thresholdStore.ts::createThreshold рахує score() заново й
+      // незалежно на save, це число сюди ніколи не повертається як команда.
+      const preview = candidate.isThresholdCandidate
+        ? (() => {
+            const scoring = {
+              title: candidate.title,
+              description: candidate.description,
+              types: candidate.types as any,
+              beforeState: candidate.beforeState,
+              choice: candidate.choice,
+              crossingAction: candidate.crossingAction,
+              afterState: candidate.afterState,
+              risks: candidate.risks,
+              cost: candidate.cost,
+              irreversibility: candidate.irreversibility,
+              transformation: candidate.transformation,
+              awareness: candidate.awareness,
+              agency: candidate.agency,
+            };
+            return {
+              score: thresholdScore(scoring),
+              strength: thresholdStrength(scoring),
+              isRealThreshold: isRealThreshold(scoring),
+            };
+          })()
+        : null;
+
+      res.json({
+        result: candidate,
+        preview,
+        engine,
+        modelId: resolvedModelId,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      console.error('Error in /api/ai/threshold-analyze:', err?.message || err);
+      if (err instanceof ChatProviderError) {
+        return res.status(err.status).json({ error: err.message });
+      }
+      res.status(500).json({ error: err?.message || 'Не вдалося знайти поріг.', kind: 'unknown' });
     }
   });
 

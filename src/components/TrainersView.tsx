@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
-import { Dumbbell, Users, MessageCircle, Feather } from 'lucide-react';
+import { Dumbbell, Users, MessageCircle, Feather, Heart, DoorOpen } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext';
 import type { Book } from '../types';
 import { CharacterTrainer } from './CharacterTrainer';
 import { DialogueTrainer } from './DialogueTrainer';
 import { StyleTrainer } from './StyleTrainer';
+import { EmotionMasteryTrainer } from './EmotionMasteryTrainer';
+import { ThresholdTrainer } from './ThresholdTrainer';
 
-type TrainerKind = 'style' | 'character' | 'dialogue';
+type TrainerKind = 'style' | 'character' | 'dialogue' | 'emotion' | 'threshold';
 
 interface TrainersViewProps {
   book: Book;
@@ -40,10 +42,10 @@ export const TrainersView: React.FC<TrainersViewProps> = ({ book, onSendTextToCh
         </div>
       </div>
 
-      <div className="max-w-3xl mx-auto flex items-center gap-2">
+      <div className="max-w-3xl mx-auto flex flex-wrap items-center gap-2">
         <button
           onClick={() => setActive('style')}
-          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
+          className={`flex-1 min-w-[130px] flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
             active === 'style' ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20' : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
           }`}
         >
@@ -52,7 +54,7 @@ export const TrainersView: React.FC<TrainersViewProps> = ({ book, onSendTextToCh
         </button>
         <button
           onClick={() => setActive('character')}
-          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
+          className={`flex-1 min-w-[130px] flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
             active === 'character' ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20' : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
           }`}
         >
@@ -61,18 +63,38 @@ export const TrainersView: React.FC<TrainersViewProps> = ({ book, onSendTextToCh
         </button>
         <button
           onClick={() => setActive('dialogue')}
-          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
+          className={`flex-1 min-w-[130px] flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
             active === 'dialogue' ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20' : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
           }`}
         >
           <MessageCircle className="w-4 h-4" />
           <span>{t('trainersView.dialogueTitle')}</span>
         </button>
+        <button
+          onClick={() => setActive('emotion')}
+          className={`flex-1 min-w-[130px] flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
+            active === 'emotion' ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20' : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+          }`}
+        >
+          <Heart className="w-4 h-4" />
+          <span>{t('emotionMasteryTrainer.title')}</span>
+        </button>
+        <button
+          onClick={() => setActive('threshold')}
+          className={`flex-1 min-w-[130px] flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
+            active === 'threshold' ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20' : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+          }`}
+        >
+          <DoorOpen className="w-4 h-4" />
+          <span>{t('thresholdTrainer.title')}</span>
+        </button>
       </div>
 
       {active === 'style' && <StyleTrainer book={book} onSendTextToChapter={onSendTextToChapter} onUpdateBook={onUpdateBook} />}
       {active === 'character' && <CharacterTrainer />}
       {active === 'dialogue' && <DialogueTrainer />}
+      {active === 'emotion' && <EmotionMasteryTrainer book={book} />}
+      {active === 'threshold' && <ThresholdTrainer book={book} />}
     </div>
   );
 };

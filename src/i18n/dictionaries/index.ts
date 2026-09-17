@@ -41,6 +41,8 @@ import { dashboard } from './dashboard';
 import { styleView } from './styleView';
 import { knowledgeView } from './knowledgeView';
 import { trainersView } from './trainersView';
+import { emotionMasteryTrainer } from './emotionMasteryTrainer';
+import { thresholdTrainer } from './thresholdTrainer';
 import { mindBoard } from './mindBoard';
 import { structureBuilder } from './structureBuilder';
 import { portfolioView } from './portfolioView';
@@ -101,6 +103,8 @@ export const dictionaries = {
     styleView: styleView.uk,
     knowledgeView: knowledgeView.uk,
     trainersView: trainersView.uk,
+    emotionMasteryTrainer: emotionMasteryTrainer.uk,
+    thresholdTrainer: thresholdTrainer.uk,
     mindBoard: mindBoard.uk,
     structureBuilder: structureBuilder.uk,
     portfolioView: portfolioView.uk,
@@ -156,6 +160,8 @@ export const dictionaries = {
     styleView: styleView.en,
     knowledgeView: knowledgeView.en,
     trainersView: trainersView.en,
+    emotionMasteryTrainer: emotionMasteryTrainer.en,
+    thresholdTrainer: thresholdTrainer.en,
     mindBoard: mindBoard.en,
     structureBuilder: structureBuilder.en,
     portfolioView: portfolioView.en,

@@ -673,6 +673,190 @@ CREATE TABLE IF NOT EXISTS support_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_support_messages_thread ON support_messages(thread_id, created_at);
 
+-- ===========================================================================
+-- «Емоційна майстерність письменника» + «Поріг» — два AI-модулі тренажерів
+-- (ARCHITECTURE_EMOTION_THRESHOLD_MODULES.md). Обидва дописують у вже наявну
+-- writer_evidence вище (skill: emotion_reader_impact | character_craft) —
+-- це не паралельна система прогресу, а нові постачальники доказів у ту саму
+-- WDI. Поле «project_id» з ТЗ тут немає (Nova не має сутності «проєкт»): скопована
+-- та сама пара user_id + опційний book_id, що й у решти аналітичних таблиць.
+-- Scene не є SQL-рядком (живе всередині JSON книги), тому scene_id усюди
+-- нижче — м'яке посилання, БЕЗ FOREIGN KEY, той самий тип звʼязку, що й
+-- book_id у chat_sessions.
+-- ===========================================================================
+
+-- Розширюваний словник емоцій (п. 3 ТЗ «Емоційна майстерність»). Насіння —
+-- 9 категорій таксономії власника, завантажене одноразово seedEmotionDictionary()
+-- нижче; is_custom дозволяє додавати нові пізніше (адмінський екран — поза
+-- межами цього етапу).
+CREATE TABLE IF NOT EXISTS emotion_dictionary (
+  id          TEXT PRIMARY KEY,
+  category    TEXT NOT NULL,
+  label_uk    TEXT NOT NULL,
+  is_custom   INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL
+);
+
+-- Один аналізований фрагмент. UNIQUE(user_id, selected_text_hash) — той
+-- самий принцип ідемпотентності, що й у writer_evidence: повторний аналіз
+-- НЕЗМІНЕНОГО фрагмента не плодить нові рядки й не накручує WDI-докази.
+-- mastery_score/mastery_level НЕ приходять від AI — їх рахує
+-- server/emotionMasteryScoring.ts із сирих балів mastery_scores нижче.
+CREATE TABLE IF NOT EXISTS emotion_analysis (
+  id                  TEXT PRIMARY KEY,
+  user_id             TEXT NOT NULL,
+  book_id             TEXT,
+  scene_id            TEXT,
+  character_id        TEXT,
+  character_name      TEXT NOT NULL,
+  selected_text       TEXT NOT NULL,
+  selected_text_hash  TEXT NOT NULL,
+  primary_emotion_id  TEXT NOT NULL,
+  primary_probability REAL NOT NULL,
+  primary_intensity   REAL NOT NULL,
+  mastery_score       REAL NOT NULL,
+  threshold_impact    REAL NOT NULL,
+  confidence          REAL NOT NULL,
+  model_version       TEXT NOT NULL,
+  prompt_version      TEXT NOT NULL,
+  rubric_version      TEXT NOT NULL,
+  taxonomy_version    TEXT NOT NULL,
+  created_at          TEXT NOT NULL,
+  UNIQUE(user_id, selected_text_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_emotion_analysis_user ON emotion_analysis(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_emotion_analysis_book ON emotion_analysis(book_id);
+
+-- Вторинні й приховані емоції одного аналізу.
+CREATE TABLE IF NOT EXISTS emotion_candidates (
+  id           TEXT PRIMARY KEY,
+  analysis_id  TEXT NOT NULL,
+  kind         TEXT NOT NULL,   -- secondary | hidden
+  emotion_id   TEXT NOT NULL,
+  probability  REAL NOT NULL,
+  intensity    REAL NOT NULL,
+  FOREIGN KEY (analysis_id) REFERENCES emotion_analysis(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_emotion_candidates_analysis ON emotion_candidates(analysis_id);
+
+-- 10 критеріїв майстерності (п. 6 ТЗ), по одному рядку кожен — сирі бали
+-- 0..10 від AI, затиснуті server/emotionMasteryScoring.ts::validateMasteryScores.
+CREATE TABLE IF NOT EXISTS emotion_mastery_scores (
+  id           TEXT PRIMARY KEY,
+  analysis_id  TEXT NOT NULL,
+  criterion    TEXT NOT NULL,
+  score        REAL NOT NULL,
+  FOREIGN KEY (analysis_id) REFERENCES emotion_analysis(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_emotion_mastery_scores_analysis ON emotion_mastery_scores(analysis_id);
+
+-- Докази під кожен критерій (п. 10 ТЗ: жоден бал без цитати й пояснення).
+CREATE TABLE IF NOT EXISTS emotion_evidence (
+  id           TEXT PRIMARY KEY,
+  analysis_id  TEXT NOT NULL,
+  criterion    TEXT NOT NULL,
+  quote        TEXT NOT NULL,
+  explanation  TEXT NOT NULL,
+  FOREIGN KEY (analysis_id) REFERENCES emotion_analysis(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_emotion_evidence_analysis ON emotion_evidence(analysis_id);
+
+-- Емоційна крива для довгих виділень (п. 13 ТЗ). Порожня для коротких
+-- фрагментів без розвитку емоції — це нормально, не помилка.
+CREATE TABLE IF NOT EXISTS emotion_timeline (
+  id           TEXT PRIMARY KEY,
+  analysis_id  TEXT NOT NULL,
+  order_index  INTEGER NOT NULL,
+  emotion_id   TEXT NOT NULL,
+  intensity    REAL NOT NULL,
+  FOREIGN KEY (analysis_id) REFERENCES emotion_analysis(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_emotion_timeline_analysis ON emotion_timeline(analysis_id, order_index);
+
+-- «Профіль емоцій автора» (п. 18 ТЗ) свідомо НЕ окрема таблиця — рахується
+-- на льоту з emotion_analysis/emotion_mastery_scores
+-- (server/emotionMasteryStore.ts::projectAuthorEmotionProfile), той самий
+-- принцип, що й проєкції WDI-балів у server/wdi.ts: журнал — джерело
+-- правди, підсумок — завжди похідний.
+
+-- Кандидат у поріг, підтверджений автором (ARCHITECTURE_EMOTION_THRESHOLD_
+-- MODULES.md, розділ 6.3: AI лише ПРОПОНУЄ, сюди пишеться тільки те, що
+-- автор зберіг/відредагував). risk_* — профіль ризику інлайн-колонками, не
+-- окремою таблицею (див. розділ 8, відкрите питання плану): фіксований
+-- 5-осьовий профіль завжди читається разом із рештою порогу, окрема таблиця
+-- дала б лише зайвий JOIN на кожен показ. score рахує сервер при кожному
+-- save (server/thresholdScoring.ts::thresholdScore) і зберігає для
+-- сортування/фільтра — на відміну від WDI-балів це НЕ агрегована проєкція
+-- журналу, а детермінована функція власних полів одного рядка, тож
+-- зберігати її тут безпечно.
+CREATE TABLE IF NOT EXISTS thresholds (
+  id                TEXT PRIMARY KEY,
+  user_id           TEXT NOT NULL,
+  book_id           TEXT,
+  character_id      TEXT,
+  title             TEXT NOT NULL,
+  description       TEXT NOT NULL,
+  types             TEXT NOT NULL DEFAULT '[]',
+  before_state      TEXT NOT NULL,
+  choice            TEXT NOT NULL,
+  crossing_action   TEXT NOT NULL,
+  after_state       TEXT NOT NULL,
+  risk_physical     INTEGER NOT NULL DEFAULT 1,
+  risk_emotional    INTEGER NOT NULL DEFAULT 1,
+  risk_social       INTEGER NOT NULL DEFAULT 1,
+  risk_material     INTEGER NOT NULL DEFAULT 1,
+  risk_existential  INTEGER NOT NULL DEFAULT 1,
+  cost              INTEGER NOT NULL DEFAULT 1,
+  irreversibility   INTEGER NOT NULL DEFAULT 1,
+  transformation    INTEGER NOT NULL DEFAULT 1,
+  awareness         INTEGER NOT NULL DEFAULT 5,
+  agency            INTEGER NOT NULL DEFAULT 5,
+  score             REAL NOT NULL DEFAULT 0,
+  status            TEXT NOT NULL DEFAULT 'planned',
+  consequences      TEXT NOT NULL DEFAULT '[]',
+  confidence        REAL,
+  created_at        TEXT NOT NULL,
+  updated_at        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_thresholds_user ON thresholds(user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_thresholds_book ON thresholds(book_id);
+
+-- Звʼязок порогу зі сценами (preparation/crossing/consequence, п. 9 ТЗ) —
+-- на відміну від risk_*, це СПРАВЖНЯ many-to-many колекція змінного
+-- розміру, тож окрема таблиця тут виправдана без застережень.
+CREATE TABLE IF NOT EXISTS threshold_scene_links (
+  id            TEXT PRIMARY KEY,
+  threshold_id  TEXT NOT NULL,
+  scene_id      TEXT NOT NULL,
+  role          TEXT NOT NULL,   -- preparation | crossing | consequence
+  order_index   INTEGER NOT NULL,
+  FOREIGN KEY (threshold_id) REFERENCES thresholds(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_threshold_scene_links_threshold ON threshold_scene_links(threshold_id);
+
+-- Уникнений поріг (п. 2.2 ТЗ «Поріг») — окрема сутність від thresholds:
+-- описує НЕ перехід, а відмову/відкладення його, тож поля зовсім інші
+-- (страх, поведінка уникнення, короткострокова винагорода і довгострокова
+-- ціна), не варіант того самого запису з іншим статусом.
+CREATE TABLE IF NOT EXISTS avoided_thresholds (
+  id                     TEXT PRIMARY KEY,
+  user_id                TEXT NOT NULL,
+  book_id                TEXT,
+  character_id           TEXT,
+  development_area       TEXT NOT NULL,
+  threshold_description  TEXT NOT NULL,
+  fear                   TEXT NOT NULL,
+  avoidance_behavior     TEXT NOT NULL,
+  short_term_reward      TEXT NOT NULL,
+  long_term_cost         TEXT NOT NULL,
+  repetitions            INTEGER NOT NULL DEFAULT 1,
+  severity               INTEGER NOT NULL DEFAULT 5,
+  next_opportunity       TEXT,
+  created_at             TEXT NOT NULL,
+  updated_at             TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_avoided_thresholds_user ON avoided_thresholds(user_id, updated_at DESC);
+
 `;
 
 /**
@@ -728,6 +912,94 @@ function migrateSupportMessageColumns(instance: Database): void {
 }
 
 /**
+ * Насіння словника емоцій (п. 3 ТЗ «Емоційна майстерність») — 9 категорій
+ * таксономії власника, ~48 записів. Вставляється лише якщо таблиця
+ * порожня (не INSERT OR IGNORE по одному: так один запуск точно знає, чи
+ * це перший старт, а не тихо змагається з паралельною міграцією).
+ *
+ * «Цікавість» у ТЗ власника згадана у ДВОХ категорій (future і
+ * orientation) — оскільки `id` тут PRIMARY KEY, дублікат неможливий:
+ * лишаємо її під `future` (де вона зустрічається першою), `orientation`
+ * без неї має 3 записи замість 4. Емоції з однаковим українським словом,
+ * але різним змістом (напр. «захоплення» — і в joy як delight, і в social
+ * як admiration) — це НЕ колізія: англомовні машинні коди різні.
+ */
+const EMOTION_DICTIONARY_SEED: { id: string; category: string; labelUk: string }[] = [
+  { id: 'fear', category: 'fear', labelUk: 'страх' },
+  { id: 'anxiety', category: 'fear', labelUk: 'тривога' },
+  { id: 'terror', category: 'fear', labelUk: 'жах' },
+  { id: 'worry', category: 'fear', labelUk: 'занепокоєння' },
+  { id: 'insecurity', category: 'fear', labelUk: 'невпевненість' },
+  { id: 'helplessness', category: 'fear', labelUk: 'безпорадність' },
+
+  { id: 'anger', category: 'anger', labelUk: 'гнів' },
+  { id: 'irritation', category: 'anger', labelUk: 'роздратування' },
+  { id: 'rage', category: 'anger', labelUk: 'лють' },
+  { id: 'indignation', category: 'anger', labelUk: 'обурення' },
+  { id: 'hostility', category: 'anger', labelUk: 'ворожість' },
+  { id: 'resentment', category: 'anger', labelUk: 'образа' },
+
+  { id: 'sadness', category: 'loss', labelUk: 'сум' },
+  { id: 'grief', category: 'loss', labelUk: 'горе' },
+  { id: 'longing', category: 'loss', labelUk: 'туга' },
+  { id: 'loneliness', category: 'loss', labelUk: 'самотність' },
+  { id: 'disappointment', category: 'loss', labelUk: 'розчарування' },
+  { id: 'despair', category: 'loss', labelUk: 'відчай' },
+
+  { id: 'joy', category: 'joy', labelUk: 'радість' },
+  { id: 'satisfaction', category: 'joy', labelUk: 'задоволення' },
+  { id: 'delight', category: 'joy', labelUk: 'захоплення' },
+  { id: 'relief', category: 'joy', labelUk: 'полегшення' },
+  { id: 'gratitude', category: 'joy', labelUk: 'вдячність' },
+  { id: 'inspiration', category: 'joy', labelUk: 'натхнення' },
+
+  { id: 'love', category: 'attachment', labelUk: 'любов' },
+  { id: 'tenderness', category: 'attachment', labelUk: 'ніжність' },
+  { id: 'affection', category: 'attachment', labelUk: 'прихильність' },
+  { id: 'trust', category: 'attachment', labelUk: 'довіра' },
+  { id: 'compassion', category: 'attachment', labelUk: 'співчуття' },
+  { id: 'care', category: 'attachment', labelUk: 'турбота' },
+
+  { id: 'shame', category: 'self_evaluative', labelUk: 'сором' },
+  { id: 'guilt', category: 'self_evaluative', labelUk: 'провина' },
+  { id: 'pride', category: 'self_evaluative', labelUk: 'гордість' },
+  { id: 'embarrassment', category: 'self_evaluative', labelUk: 'збентеження' },
+  { id: 'humiliation', category: 'self_evaluative', labelUk: 'приниження' },
+
+  { id: 'hope', category: 'future', labelUk: 'надія' },
+  { id: 'anticipation', category: 'future', labelUk: 'передчуття' },
+  { id: 'curiosity', category: 'future', labelUk: 'цікавість' },
+  { id: 'impatience', category: 'future', labelUk: 'нетерпіння' },
+  { id: 'hopelessness', category: 'future', labelUk: 'безнадія' },
+
+  { id: 'envy', category: 'social', labelUk: 'заздрість' },
+  { id: 'jealousy', category: 'social', labelUk: 'ревнощі' },
+  { id: 'admiration', category: 'social', labelUk: 'захоплення' },
+  { id: 'contempt', category: 'social', labelUk: 'презирство' },
+  { id: 'disgust', category: 'social', labelUk: 'відраза' },
+
+  { id: 'surprise', category: 'orientation', labelUk: 'здивування' },
+  { id: 'confusion', category: 'orientation', labelUk: 'розгубленість' },
+  { id: 'astonishment', category: 'orientation', labelUk: 'подив' },
+];
+
+function seedEmotionDictionary(instance: Database): void {
+  try {
+    const row = instance.prepare('SELECT COUNT(*) AS n FROM emotion_dictionary').get() as { n: number } | undefined;
+    if ((row?.n ?? 0) > 0) return;
+    const insert = instance.prepare(
+      'INSERT INTO emotion_dictionary (id, category, label_uk, is_custom, created_at) VALUES (?, ?, ?, 0, ?)'
+    );
+    const now = new Date().toISOString();
+    for (const e of EMOTION_DICTIONARY_SEED) {
+      insert.run(e.id, e.category, e.labelUk, now);
+    }
+  } catch (err) {
+    console.warn('[db] Не вдалося засіяти emotion_dictionary:', err);
+  }
+}
+
+/**
  * Відкриває базу. Виклик асинхронний, бо `node:sqlite` підвантажується
  * динамічним import: у ESM немає require, а статичний import завалив би
  * збірку на середовищах, де модуля ще немає.
@@ -747,6 +1019,7 @@ export async function initDb(): Promise<boolean> {
     migrateUsageLogColumns(instance);
     migrateUsersColumns(instance);
     migrateSupportMessageColumns(instance);
+    seedEmotionDictionary(instance);
     db = instance;
     available = true;
   } catch (err) {
