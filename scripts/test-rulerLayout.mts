@@ -22,6 +22,7 @@
 import { PX_PER_MM, buildRulerMarks, buildRulerSheetLayout, formatMm } from '../src/utils/mmUnits.ts';
 import { buildPaginationSnapshot, paginationSnapshotsEqual } from '../src/utils/pageBreaker.ts';
 import { resolveSheetScale } from '../src/components/manuscriptEditor/usePageScale.ts';
+import { resolveSheetDisplayHeightPx } from '../src/components/manuscriptEditor/PageColumn.tsx';
 
 let passed = 0;
 let failed = 0;
@@ -204,6 +205,33 @@ function main() {
       String(resolveSheetScale('fit', NaN, widthPx, availablePx)));
     t('від\u02bcємний масштаб → 1 (аркуш не вивертається)',
       resolveSheetScale('zoom', -2, widthPx, availablePx) === 1);
+  }
+
+  console.log('\nВисота «листа»: округлення до повних сторінок (запис #193):');
+  {
+    // Без бюджету сторінки (пагінація ще не порахована) — стара поведінка:
+    // висота точно за вмістом.
+    t('без бюджету — натуральна висота як є', resolveSheetDisplayHeightPx(123, null) === 123);
+    t('без бюджету, вміст 0 — 0 (не малюємо зайвого до першого виміру)', resolveSheetDisplayHeightPx(0, null) === 0);
+
+    // Головний випадок власника: короткий розділ усе одно показує один
+    // повний аркуш, а не лише кілька рядків.
+    t('порожній розділ — один повний аркуш, а не 0', resolveSheetDisplayHeightPx(0, 1000) === 1000);
+    t('кілька рядків — усе одно повний аркуш', resolveSheetDisplayHeightPx(50, 1000) === 1000);
+
+    // Рівно на межі сторінки — без зайвої (N+1)-ї порожньої.
+    t('рівно один бюджет — рівно одна сторінка', resolveSheetDisplayHeightPx(1000, 1000) === 1000);
+    t('рівно два бюджети — рівно дві сторінки', resolveSheetDisplayHeightPx(2000, 1000) === 2000);
+
+    // Трохи більше за N сторінок — округлення вгору до N+1, з видимим
+    // порожнім хвостом останньої.
+    t('1.3 сторінки → дві повні сторінки', resolveSheetDisplayHeightPx(1300, 1000) === 2000);
+    t('2.01 сторінки → три повні сторінки', resolveSheetDisplayHeightPx(2010, 1000) === 3000);
+
+    // Захист від сміттєвих значень бюджету.
+    t('нульовий бюджет — натуральна висота як є', resolveSheetDisplayHeightPx(456, 0) === 456);
+    t('відʼємний бюджет — натуральна висота як є', resolveSheetDisplayHeightPx(456, -10) === 456);
+    t('NaN висота з бюджетом — 0, а не NaN у стилі', resolveSheetDisplayHeightPx(NaN, 1000) === 0);
   }
 
   console.log('\nПідпис міліметрів:');

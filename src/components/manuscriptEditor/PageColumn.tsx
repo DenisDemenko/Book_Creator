@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { usePageScale, type PageScaleMode } from './usePageScale';
 import { PX_PER_MM, buildRulerMarks, formatMm } from '../../utils/mmUnits';
+import { PAGE_FORMAT_QUICK_OPTIONS } from '../../utils/pageFormats';
 import type { PaginationSnapshot } from '../../utils/pageBreaker';
 import type { PageGeometry } from '../../utils/pageGeometry';
 import { useLanguage } from '../../i18n/LanguageContext';
@@ -49,6 +50,30 @@ interface PageColumnProps {
 export const VERTICAL_RULER_WIDTH_PX = 24;
 
 /**
+ * Висота «листа» (px, немасштабовано) — натуральна висота вмісту,
+ * округлена ВГОРУ до цілого числа бюджетів однієї сторінки. Чиста функція
+ * (винесена з компонента навмисно, як `resolveSheetScale` в
+ * usePageScale.ts) — щоб і формулу округлення, і її межові випадки можна
+ * було перевірити тестом у Node, а не лише оком у браузері.
+ *
+ *  • Без бюджету сторінки (`pageContentBudgetPx === null` — пагінація ще
+ *    не порахована на першому рендері) — стара поведінка: висота точно за
+ *    вмістом, щоб нічого не зламати до першого виміру.
+ *  • Порожній чи від'ємний вміст (`naturalHeightPx <= 0`) із бюджетом —
+ *    все одно ОДНА повна сторінка (`Math.max(1, …)`), а не 0: щойно
+ *    створений розділ теж має показувати порожній аркуш, а не порожнечу.
+ *  • Вміст рівно на N сторінок (без переповнення) — рівно N сторінок, без
+ *    зайвої (N+1)-ї порожньої.
+ */
+export function resolveSheetDisplayHeightPx(naturalHeightPx: number, pageContentBudgetPx: number | null): number {
+  if (!pageContentBudgetPx || pageContentBudgetPx <= 0 || !Number.isFinite(naturalHeightPx)) {
+    return Math.max(0, naturalHeightPx || 0);
+  }
+  const pages = Math.max(1, Math.ceil(naturalHeightPx / pageContentBudgetPx));
+  return pages * pageContentBudgetPx;
+}
+
+/**
  * Показує вміст редактора як реальну сторінку книги: внутрішня колонка
  * рендериться на справжню ширину `${widthMm}mm` (той самий трюк з
  * CSS-одиницею mm, що й WrappedImageNode.tsx), а зовнішній контейнер
@@ -77,6 +102,49 @@ export const PageColumn: React.FC<PageColumnProps> = ({
   const { outerRef, scale, widthPx } = usePageScale(widthMm, zoomFactor, showVerticalRuler ? VERTICAL_RULER_WIDTH_PX : 0, scaleMode);
   const innerRef = useRef<HTMLDivElement>(null);
   const [naturalHeightPx, setNaturalHeightPx] = useState(0);
+
+  /**
+   * Висота «листа» (білого тла) — раніше рівно натуральна висота вмісту
+   * (`naturalHeightPx`), тож короткий розділ малював лист лише на кілька
+   * рядків, а решта формату лишалась просто фоном застосунку. Власник:
+   * «розгорнути блок листа канви на всю висоту обраного формату листа, щоб
+   * письменик міг бачити пусте пространство, яке ще залишається не
+   * заповненим на поточному аркуші». Тепер висота округлюється ВГОРУ до
+   * цілого числа «бюджетів сторінки» (`pagination.contentHeightPx` — той
+   * самий бюджет, за яким плагін пагінації ставить розриви, див. коментар
+   * нижче біля verticalMarks) — короткий розділ усе одно показує один
+   * повний аркуш, а розділ довжиною в 1.3 сторінки — два повні аркуші з
+   * видимим порожнім хвостом другого. Без знімка пагінації (перший рендер,
+   * поки плагін ще не порахував розриви) — стара поведінка: висота точно
+   * за вмістом, щоб нічого не зламати до першого виміру.
+   */
+  const pageContentBudgetPx = pagination && pagination.contentHeightPx > 0 ? pagination.contentHeightPx : null;
+  const displayHeightPx = resolveSheetDisplayHeightPx(naturalHeightPx, pageContentBudgetPx);
+
+  /**
+   * Підпис формату в правому верхньому кутку панелі — «А4 (210×297 мм) ·
+   * поля …» — чиста довідка (не редагується звідси), світлим кольором, за
+   * межами самого листа. Формат підбирається за розміром із того самого
+   * переліку, що й селектор формату в тулбарі (`pageFormats.ts`); нема
+   * точного збігу (автор вручну ввів нестандартний розмір у «Верстка &
+   * Поля») — показуємо голі міліметри без назви пресету.
+   */
+  const formatPreset = pageGeometry
+    ? PAGE_FORMAT_QUICK_OPTIONS.find(
+        (p) => Math.round(p.widthMm) === Math.round(pageGeometry.pageWidthMm) && Math.round(p.heightMm) === Math.round(pageGeometry.pageHeightMm)
+      )
+    : undefined;
+  const formatBadgeText = pageGeometry
+    ? t('editor.pageFormatBadge', {
+        format: formatPreset ? t(formatPreset.labelKey) : t('editor.pageFormatBadgeCustom'),
+        w: formatMm(pageGeometry.pageWidthMm),
+        h: formatMm(pageGeometry.pageHeightMm),
+        top: formatMm(pageGeometry.margins.topMm),
+        bottom: formatMm(pageGeometry.margins.bottomMm),
+        inside: formatMm(pageGeometry.margins.insideMm),
+        outside: formatMm(pageGeometry.margins.outsideMm),
+      })
+    : '';
 
   useEffect(() => {
     const inner = innerRef.current;
@@ -127,13 +195,29 @@ export const PageColumn: React.FC<PageColumnProps> = ({
           сунеться разом із текстом — саме тому при чесному зумі (коли аркуш
           ширший за панель) міліметри не поїдуть відносно рядка. */}
       {ruler && <div className="sticky top-0 z-20 shrink-0">{ruler}</div>}
+      {/* Підпис формату аркуша — у правому верхньому кутку ПАНЕЛІ (не
+          листа), світлим кольором, суто довідково. `sticky` без власної
+          висоти (h-0): не рухається разом із текстом при скролі (лишається
+          у видимій верхній частині панелі), і не штовхає розкладку вниз.
+          Поза transform:scale листа — тому масштабування самого аркуша
+          його не зменшує й не збільшує, як і просив власник. */}
+      {formatBadgeText && (
+        <div className="sticky top-0 z-30 h-0 pointer-events-none" aria-hidden={false}>
+          <div
+            className="absolute top-1 right-2 text-[10px] font-mono text-slate-400/80 whitespace-nowrap select-none bg-slate-950/40 backdrop-blur-[1px] px-1.5 py-0.5 rounded"
+            title={t('editor.pageFormatBadgeTitle')}
+          >
+            {formatBadgeText}
+          </div>
+        </div>
+      )}
       <div className="flex flex-1 min-h-0">
       {showVerticalRuler && (
         <div
           className="shrink-0 relative select-none overflow-hidden sticky left-0 z-10"
           style={{
             width: VERTICAL_RULER_WIDTH_PX,
-            height: naturalHeightPx * scale,
+            height: displayHeightPx * scale,
             background: '#1e293b',
             // Внутрішня лінія по правому краю: світлі зони тексту тієї ж
             // барви, що й аркуш (`#fffefc`), тож без цієї межі смуга
@@ -187,11 +271,18 @@ export const PageColumn: React.FC<PageColumnProps> = ({
           ))}
         </div>
       )}
-      <div style={{ height: naturalHeightPx * scale, position: 'relative', flex: 1, minWidth: 0 }}>
+      <div style={{ height: displayHeightPx * scale, position: 'relative', flex: 1, minWidth: 0 }}>
         <div
-          ref={innerRef}
           style={{
             width: widthPx,
+            // Явна висота — округлена вгору до цілих «сторінок» вище — а не
+            // просто природна висота вмісту: саме це малює порожній
+            // папір під коротким текстом, а не обрізає лист по останньому
+            // рядку. Природну висоту й далі міряємо ОКРЕМИМ вкладеним
+            // вузлом (innerRef, нижче) — інакше ResizeObserver міряв би
+            // висоту, яку сам щойно зафіксував, і лист ніколи не міг би
+            // зменшитись назад, коли автор видаляє текст.
+            height: displayHeightPx,
             transform: `scale(${scale})`,
             transformOrigin: 'top center',
             position: 'absolute',
@@ -201,7 +292,7 @@ export const PageColumn: React.FC<PageColumnProps> = ({
             boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
           }}
         >
-          {children}
+          <div ref={innerRef}>{children}</div>
         </div>
       </div>
       </div>
