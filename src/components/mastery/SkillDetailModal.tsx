@@ -136,6 +136,9 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
           userDraft: trimmedDraft,
           exercisePrompt: selectedExercise?.task || "Вільне тренування",
           bookContext,
+          // Запис #188: без цього AI-коуч завжди йшов у Gemini напряму, ігноруючи обрану автором модель.
+          modelId: book?.preferredAiModelId || undefined,
+          bookId: book?.id,
         }),
       });
 
@@ -285,6 +288,8 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
           subSkills: skill.subSkills,
           difficulty: customExerciseDifficulty,
           bookContext,
+          modelId: book?.preferredAiModelId || undefined,
+          bookId: book?.id,
         }),
       });
 

@@ -212,6 +212,8 @@ export const WriterBookProvider: React.FC<WriterBookProviderProps> = ({ children
         isEditorOpen,
         setIsEditorOpen,
         isLinkedToRealBook,
+        bookId: book?.id ?? null,
+        preferredAiModelId: book?.preferredAiModelId ?? null,
         bookExcerpts,
         activeExcerptId,
         setActiveExcerpt: (id) => setActiveExcerptId(id),

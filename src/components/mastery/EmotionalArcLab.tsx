@@ -15,7 +15,7 @@ const DEFAULT_POINTS: EmotionalArcPoint[] = [
 ];
 
 export const EmotionalArcLab: React.FC = () => {
-  const { bookContext } = useWriterBook();
+  const { bookContext, bookId, preferredAiModelId } = useWriterBook();
   const [points, setPoints] = useState<EmotionalArcPoint[]>(DEFAULT_POINTS);
   const [selectedPointIndex, setSelectedPointIndex] = useState<number>(4);
   const [userOutline, setUserOutline] = useState<string>("");
@@ -72,7 +72,13 @@ export const EmotionalArcLab: React.FC = () => {
       const res = await fetch("/api/ai/analyze-emotional-arc", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ storyOutline: userOutline, chaptersCount: 8 }),
+        body: JSON.stringify({
+          storyOutline: userOutline,
+          chaptersCount: 8,
+          // Запис #188: раніше клієнт не надсилав modelId, тож аналіз завжди йшов у Gemini.
+          modelId: preferredAiModelId || undefined,
+          bookId: bookId || undefined,
+        }),
       });
       const data = await res.json();
       if (data.chapters && data.chapters.length > 0) {

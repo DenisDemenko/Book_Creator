@@ -3949,12 +3949,16 @@ ${JSON.stringify(bookContext || {}, null, 2)}
   // Mastery Framework (нова вкладка «Майстерність & Навички»).
   // Чотири ендпойнти живлять AI-тренера 18 навичок, генератор вправ,
   // генератор Blueprint книги/курсу та аналіз емоційної дуги.
+  // 18.09.2026 (запис #188): усі чотири переведено на мультипровайдерне
+  // ядро (resolveCoachEngine/generateAiText) — раніше три з них були жорстко
+  // прив'язані до Gemini напряму і ігнорували модель, обрану автором
+  // у панелі AI Асистента.
   // -----------------------------------------------------------------------
 
   // 8a. AI Coach: глибокий розбір відповіді автора для конкретної навички.
   app.post('/api/ai/coach-feedback', async (req, res) => {
     try {
-      const { skillId, skillTitle, subSkills, userDraft, exercisePrompt, bookContext } = req.body || {};
+      const { skillId, skillTitle, subSkills, userDraft, exercisePrompt, bookContext, modelId, bookId } = req.body || {};
       if (!userDraft || !String(userDraft).trim()) {
         return res.status(400).json({ error: 'Немає тексту для аналізу.' });
       }
@@ -4000,34 +4004,53 @@ ${criteriaList}
 ТЕКСТ АВТОРА:
 """${String(userDraft).slice(0, 6000)}"""`;
 
+      // Раніше цей ендпойнт жорстко викликав Gemini (generateWithGemini),
+      // ігноруючи обрану автором модель в AI Асистенті. Тепер — той
+      // самий resolveCoachEngine/generateAiText, що й у /api/ai/edit-text та
+      // /api/ai/translate. Локальна демо-відповідь лишається ТІЛЬКИ на
+      // випадок, коли жодного рушія взагалі не налаштовано (авторський
+      // ключ, або серверний .env).
       let result: any;
-      if (ai) {
-        const raw = await generateWithGemini(userPrompt, systemPrompt, true, {
+      try {
+        const userId = req.principal?.id as string | undefined;
+        const { resolvedModelId, engine, userKey } = await resolveCoachEngine(userId, modelId);
+        const generated = await generateAiText({
+          engine,
+          modelId: resolvedModelId,
+          prompt: userPrompt,
+          systemInstruction: systemPrompt,
+          json: true,
+          apiKeyOverride: userKey,
           req,
           label: 'AI Coach: розбір навички',
+          bookId,
         });
-        result = JSON.parse(raw);
-      } else {
-        const isSciFi = /аур|енерг|фантаст|роман|світ|геро|психіч/i.test(String(userDraft));
-        result = {
-          score: isSciFi ? 86 : 84,
-          summary: `Ваш уривок демонструє добре володіння навичкою «${skillTitle}». Текст динамічний та утримує фокус уваги читача. (Демо-режим без AI-ключа)`,
-          strengths: [
-            'Чітке та впевнене формулювання авторської думки',
-            'Природна динаміка викладу без штучних ускладнень',
-          ],
-          improvements: [
-            'Додайте контраст або внутрішній сумнів героя для підсилення напруги',
-            'Посильте сенсорні деталі у кульмінаційній фразі',
-          ],
-          criteriaFeedback: (Array.isArray(subSkills) ? subSkills : [skillTitle]).map((s: string, idx: number) => ({
-            criterion: s,
-            score: 82 + (idx % 2) * 4,
-            comment: 'Критерій розкрито впевнено, є хороша основа для розвитку сцени.',
-          })),
-          rewrittenExample: `«${String(userDraft).slice(0, 160)}…» — посилено через дію та сенсорні образи.`,
-          tip: 'Порада майстра: читайте текст уголос, щоб відчути природний ритм читацького дихання.',
-        };
+        result = JSON.parse(generated.text);
+      } catch (engineErr: any) {
+        if (engineErr instanceof ChatProviderError && engineErr.status === 503) {
+          const isSciFi = /аур|енерг|фантаст|роман|світ|геро|психіч/i.test(String(userDraft));
+          result = {
+            score: isSciFi ? 86 : 84,
+            summary: `Ваш уривок демонструє добре володіння навичкою «${skillTitle}». Текст динамічний та утримує фокус уваги читача. (Демо-режим без AI-ключа)`,
+            strengths: [
+              'Чітке та впевнене формулювання авторської думки',
+              'Природна динаміка викладу без штучних ускладнень',
+            ],
+            improvements: [
+              'Додайте контраст або внутрішній сумнів героя для підсилення напруги',
+              'Посильте сенсорні деталі у кульмінаційній фразі',
+            ],
+            criteriaFeedback: (Array.isArray(subSkills) ? subSkills : [skillTitle]).map((s: string, idx: number) => ({
+              criterion: s,
+              score: 82 + (idx % 2) * 4,
+              comment: 'Критерій розкрито впевнено, є хороша основа для розвитку сцени.',
+            })),
+            rewrittenExample: `«${String(userDraft).slice(0, 160)}…» — посилено через дію та сенсорні образи.`,
+            tip: 'Порада майстра: читайте текст уголос, щоб відчути природний ритм читацького дихання.',
+          };
+        } else {
+          throw engineErr;
+        }
       }
 
       const numericScore = Number(result.score);
@@ -4049,7 +4072,7 @@ ${criteriaList}
   // 8b. Генерація персональної вправи для навички під книгу автора.
   app.post('/api/ai/generate-exercise', async (req, res) => {
     try {
-      const { skillTitle, subSkills, difficulty, bookContext } = req.body || {};
+      const { skillTitle, subSkills, difficulty, bookContext, modelId, bookId } = req.body || {};
       if (!skillTitle) {
         return res.status(400).json({ error: 'Не вказано навичку для вправи.' });
       }
@@ -4081,21 +4104,36 @@ ${criteriaList}
       const ctx = bookContext || {};
       const userPrompt = `Книга автора: «${ctx.bookTitle || 'не вказано'}» (жанр: ${ctx.genre || 'не вказано'}). Головний герой: ${ctx.protagonist || 'не вказано'}. Ідея: ${String(ctx.bookIdea || '').slice(0, 500)}.`;
 
+      // Той самий перехід на resolveCoachEngine/generateAiText, що й у
+      // /api/ai/coach-feedback вище (запис #188).
       let result: any;
-      if (ai) {
-        const raw = await generateWithGemini(userPrompt, systemPrompt, true, {
+      try {
+        const userId = req.principal?.id as string | undefined;
+        const { resolvedModelId, engine, userKey } = await resolveCoachEngine(userId, modelId);
+        const generated = await generateAiText({
+          engine,
+          modelId: resolvedModelId,
+          prompt: userPrompt,
+          systemInstruction: systemPrompt,
+          json: true,
+          apiKeyOverride: userKey,
           req,
           label: 'Генерація вправи майстерності',
+          bookId,
         });
-        result = JSON.parse(raw);
-      } else {
-        result = {
-          title: `${skillTitle}: практичний виклик для вашої книги`,
-          scenario: `Попрацюйте з фрагментом вашої книги «${ctx.bookTitle || 'без назви'}»: перечитайте останній уривок і застосуйте навичку «${skillTitle}», щоб посилити його.`,
-          instructions: '1. Вставте уривок з вашої книги в робоче поле. 2. Застосуйте навичку до цього тексту. 3. Поясніть, що саме ви змінили і чому.',
-          exampleSnippet: 'Спробуйте переписати перші 2-3 речення уривка...',
-          constraint: 'Не змінюйте суть подій — лише форму, деталі та напругу.',
-        };
+        result = JSON.parse(generated.text);
+      } catch (engineErr: any) {
+        if (engineErr instanceof ChatProviderError && engineErr.status === 503) {
+          result = {
+            title: `${skillTitle}: практичний виклик для вашої книги`,
+            scenario: `Попрачюйте з фрагментом вашої книги «${ctx.bookTitle || 'без назви'}»: перечитайте останній уривок і застосуйте навичку «${skillTitle}», щоб посилити його.`,
+            instructions: '1. Вставте уривок з вашої книги в робоче поле. 2. Застосуйте навичку до цього тексту. 3. Поясніть, що саме ви змінили і чому.',
+            exampleSnippet: 'Спробуйте переписати перші 2-3 речення уривка...',
+            constraint: 'Не змінюйте суть подій — лише форму, деталі та напругу.',
+          };
+        } else {
+          throw engineErr;
+        }
       }
 
       res.json({
@@ -4114,7 +4152,7 @@ ${criteriaList}
   // 8c. Генератор Blueprint книги/курсу на основі 18 навичок.
   app.post('/api/ai/generate-blueprint', async (req, res) => {
     try {
-      const { projectType, topic, targetAudience, format } = req.body || {};
+      const { projectType, topic, targetAudience, format, modelId, bookId } = req.body || {};
       if (!topic || !String(topic).trim()) {
         return res.status(400).json({ error: 'Вкажіть тему твору або курсу.' });
       }
@@ -4146,30 +4184,44 @@ ${criteriaList}
   "pedagogicalArtifacts": ["...", "..."]
 }`;
 
+      const userPrompt = `Тема: ${String(topic).slice(0, 300)}\nФормат: ${format || ''}\nАудиторія: ${targetAudience || ''}\nТип: ${typeLabel}`;
+
+      // Той самий перехід на resolveCoachEngine/generateAiText (запис #188).
       let result: any;
-      if (ai) {
-        const raw = await generateWithGemini(
-          `Тема: ${String(topic).slice(0, 300)}\nФормат: ${format || ''}\nАудиторія: ${targetAudience || ''}\nТип: ${typeLabel}`,
-          systemPrompt,
-          true,
-          { req, label: 'Генератор Blueprint' }
-        );
-        result = JSON.parse(raw);
-      } else {
-        result = {
-          projectTitle: `${String(topic).slice(0, 60)} — план`,
-          synopsis: `Практичний ${typeLabel}, який веде читача від розуміння проблеми до системного результату. (Демо-режим без AI-ключа)`,
-          targetAudience: targetAudience || 'Широка аудиторія',
-          structure: [
-            { chapter: 'Розділ 1', title: 'Вступ та проблема', skillFocus: 'Ідея та зміст', summary: 'Формулюємо головну тезу та цінність твору.', exercise: 'Сформулюйте контролюючу ідею одним реченням.' },
-            { chapter: 'Розділ 2', title: 'Фундамент концепції', skillFocus: 'Структура та композиція', summary: 'Будуємо архітектуру розділів та логіку подачі.', exercise: 'Складіть план з 5 ключових розділів.' },
-            { chapter: 'Розділ 3', title: 'Головний герой / Оповідач', skillFocus: 'Персонажі та взаємодія', summary: 'Створюємо живого героя з мотивацією та ранами.', exercise: 'Опишіть героя через вчинок під тиском.' },
-            { chapter: 'Розділ 4', title: 'Конфлікт та ставки', skillFocus: 'Конфлікт та напруга', summary: 'Піднімаємо ставки та створюємо перешкоди.', exercise: 'Підвищіть ставки за 3 кроки.' },
-            { chapter: 'Розділ 5', title: 'Практичні інструменти', skillFocus: 'Практична цінність та педагогіка', summary: 'Даємо читачеві алгоритми та шаблони.', exercise: 'Поясніть поняття через аналогію.' },
-            { chapter: 'Розділ 6', title: 'Впровадження та результати', skillFocus: 'Системна інтеграція та практика', summary: 'План впровадження та вимірювання прогресу.', exercise: 'Складіть чекліст перших 30 днів.' },
-          ],
-          pedagogicalArtifacts: ['Чекліст перших кроків', 'Шаблон плану розділу', 'Карта прогресу на 30 днів', 'Список типових помилок'],
-        };
+      try {
+        const userId = req.principal?.id as string | undefined;
+        const { resolvedModelId, engine, userKey } = await resolveCoachEngine(userId, modelId);
+        const generated = await generateAiText({
+          engine,
+          modelId: resolvedModelId,
+          prompt: userPrompt,
+          systemInstruction: systemPrompt,
+          json: true,
+          apiKeyOverride: userKey,
+          req,
+          label: 'Генератор Blueprint',
+          bookId,
+        });
+        result = JSON.parse(generated.text);
+      } catch (engineErr: any) {
+        if (engineErr instanceof ChatProviderError && engineErr.status === 503) {
+          result = {
+            projectTitle: `${String(topic).slice(0, 60)} — план`,
+            synopsis: `Практичний ${typeLabel}, який веде читача від розуміння проблеми до системного результату. (Демо-режим без AI-ключа)`,
+            targetAudience: targetAudience || 'Широка аудиторія',
+            structure: [
+              { chapter: 'Розділ 1', title: 'Вступ та проблема', skillFocus: 'Ідея та зміст', summary: 'Формулюємо головну тезу та цінність твору.', exercise: 'Сформулюйте контролюючу ідею одним реченням.' },
+              { chapter: 'Розділ 2', title: 'Фундамент концепції', skillFocus: 'Структура та композиція', summary: 'Будуємо архітектуру розділів та логіку подачі.', exercise: 'Складіть план з 5 ключових розділів.' },
+              { chapter: 'Розділ 3', title: 'Головний герой / Оповідач', skillFocus: 'Персонажі та взаємодія', summary: 'Створюємо живого героя з мотивацією та ранами.', exercise: 'Опишіть героя через вчинок під тиском.' },
+              { chapter: 'Розділ 4', title: 'Конфлікт та ставки', skillFocus: 'Конфлікт та напруга', summary: 'Піднімаємо ставки та створюємо перешкоди.', exercise: 'Підвищіть ставки за 3 кроки.' },
+              { chapter: 'Розділ 5', title: 'Практичні інструменти', skillFocus: 'Практична цінність та педагогіка', summary: 'Даємо читачеві алгоритми та шаблони.', exercise: 'Поясніть поняття через аналогію.' },
+              { chapter: 'Розділ 6', title: 'Впровадження та результати', skillFocus: 'Системна інтеграція та практика', summary: 'План впровадження та вимірювання прогресу.', exercise: 'Складіть чекліст перших 30 днів.' },
+            ],
+            pedagogicalArtifacts: ['Чекліст перших кроків', 'Шаблон плану розділу', 'Карта прогресу на 30 днів', 'Список типових помилок'],
+          };
+        } else {
+          throw engineErr;
+        }
       }
 
       res.json({
@@ -4188,7 +4240,7 @@ ${criteriaList}
   // 8d. Аналіз емоційної дуги книги з опису сюжету.
   app.post('/api/ai/analyze-emotional-arc', async (req, res) => {
     try {
-      const { storyOutline, chaptersCount, modelId } = req.body || {};
+      const { storyOutline, chaptersCount, modelId, bookId } = req.body || {};
       if (!storyOutline || !String(storyOutline).trim()) {
         return res.status(400).json({ error: 'Опишіть сюжет для аналізу.' });
       }
@@ -4217,42 +4269,51 @@ ${criteriaList}
   ]
 }`;
 
-      // «Шлях героя» надсилає modelId = поточний рушій книги (вибраний у
-      // панелі інструментів). Якщо рушій налаштований — ідемо в ядро сайту
-      // з цією моделлю; інакше (немає ключа) — демо-відповідь, як і раніше.
-      const requestedModel = (modelId || '').trim();
-      const engine = requestedModel ? resolveChatEngine(requestedModel) : 'gemini';
+      // Раніше тут перевірявся лише серверний .env (engineConfigured) —
+      // якщо на сервері не було глобального ключа для обраного рушія, фічу
+      // вважали «не налаштованою» навіть тоді, коли в автора був власний
+      // ключ. Тепер — resolveCoachEngine, як і решта AI-тренажерів (запис #188):
+      // спершу власний ключ автора, потім серверний.
+      const userPrompt = `Опис сюжету:\n"""${String(storyOutline).slice(0, 4000)}"""\n\nКількість розділів: ${count}`;
 
       let result: any;
-      if (engineConfigured(engine)) {
-        const raw = await generateAiText({
+      try {
+        const userId = req.principal?.id as string | undefined;
+        const { resolvedModelId, engine, userKey } = await resolveCoachEngine(userId, modelId);
+        const generated = await generateAiText({
           engine,
-          modelId: requestedModel || GEMINI_MODEL,
-          prompt: `Опис сюжету:\n"""${String(storyOutline).slice(0, 4000)}"""\n\nКількість розділів: ${count}`,
+          modelId: resolvedModelId,
+          prompt: userPrompt,
           systemInstruction: systemPrompt,
           json: true,
+          apiKeyOverride: userKey,
           req,
           label: 'Аналіз емоційної дуги',
+          bookId,
         });
-        result = JSON.parse(raw.text);
-      } else {
-        const chapters = Array.from({ length: count }, (_, i) => {
-          const mid = Math.floor(count / 2);
-          const score = i === 0 ? 4 : i === mid ? -8 : i === count - 1 ? 8 : Math.round(4 - (Math.abs(i - mid) / mid) * 8);
-          return {
-            chapter: i + 1,
-            title: i === 0 ? 'Знайомство та завязка' : i === mid ? 'Темна ніч душі' : i === count - 1 ? 'Катарсис та розвязка' : `Розвиток (крок ${i + 1})`,
-            score: Math.max(-10, Math.min(10, score)),
-            tension: Math.min(100, Math.round(30 + (Math.abs(i - mid) / mid) * 55)),
-            note: i === 0 ? 'Знайомство з героєм, цікавість' : i === mid ? 'Найглибша криза' : i === count - 1 ? 'Тріумф та трансформація' : 'Зростання ставок',
+        result = JSON.parse(generated.text);
+      } catch (engineErr: any) {
+        if (engineErr instanceof ChatProviderError && engineErr.status === 503) {
+          const chapters = Array.from({ length: count }, (_, i) => {
+            const mid = Math.floor(count / 2);
+            const score = i === 0 ? 4 : i === mid ? -8 : i === count - 1 ? 8 : Math.round(4 - (Math.abs(i - mid) / mid) * 8);
+            return {
+              chapter: i + 1,
+              title: i === 0 ? 'Знайомство та завязка' : i === mid ? 'Темна ніч душі' : i === count - 1 ? 'Катарсис та розвязка' : `Розвиток (крок ${i + 1})`,
+              score: Math.max(-10, Math.min(10, score)),
+              tension: Math.min(100, Math.round(30 + (Math.abs(i - mid) / mid) * 55)),
+              note: i === 0 ? 'Знайомство з героєм, цікавість' : i === mid ? 'Найглибша криза' : i === count - 1 ? 'Тріумф та трансформація' : 'Зростання ставок',
+            };
+          });
+          result = {
+            arcName: 'Людина в ямі',
+            description: 'Класична U-подібна дуга: герой падає на дно кризи, а потім тріумфально піднімається. (Демо-режим без AI-ключа)',
+            pacingAssessment: 'Розумне чергування підйомів і спадів утримує увагу читача.',
+            chapters,
           };
-        });
-        result = {
-          arcName: 'Людина в ямі',
-          description: 'Класична U-подібна дуга: герой падає на дно кризи, а потім тріумфально піднімається. (Демо-режим без AI-ключа)',
-          pacingAssessment: 'Розумне чергування підйомів і спадів утримує увагу читача.',
-          chapters,
-        };
+        } else {
+          throw engineErr;
+        }
       }
 
       res.json({

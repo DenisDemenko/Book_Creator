@@ -19,7 +19,7 @@ interface BlueprintBuilderProps {
 }
 
 export const BlueprintBuilder: React.FC<BlueprintBuilderProps> = ({ onClose }) => {
-  const { bookContext } = useWriterBook();
+  const { bookContext, bookId, preferredAiModelId } = useWriterBook();
   const [projectType, setProjectType] = useState<"book" | "course">("book");
   const [topic, setTopic] = useState<string>("");
   const [targetAudience, setTargetAudience] = useState<string>("");
@@ -49,6 +49,9 @@ export const BlueprintBuilder: React.FC<BlueprintBuilderProps> = ({ onClose }) =
           topic,
           targetAudience: targetAudience || "Широка аудиторія фахівців та читачів",
           format,
+          // Запис #188: раніше Blueprint завжди генерувався Gemini, ігноруючи обрану автором модель.
+          modelId: preferredAiModelId || undefined,
+          bookId: bookId || undefined,
         }),
       });
 
