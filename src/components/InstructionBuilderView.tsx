@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
+  BookOpen,
   Cloud,
   Download,
   ExternalLink,
@@ -34,6 +35,18 @@ import {
   loadInstructionDraft,
   saveInstructionDraft,
 } from '../utils/instructionDraft';
+import {
+  buildInstructionBookSections,
+  buildInstructionBookTitle,
+  meaningfulInstructionSteps,
+  type InstructionBookSectionDraft,
+} from '../utils/instructionBookDraft';
+
+/** Результат «Створити книгу» — саме це чекає App.tsx для складання нового Book. */
+export interface InstructionBookCreationPayload {
+  title: string;
+  sections: InstructionBookSectionDraft[];
+}
 
 /**
  * Конструктор інструкцій — реалізація напряму «Інструкція» експрес-майстра
@@ -48,11 +61,16 @@ import {
  *
  * Свідома відмінність від зразка: там немає окремого кроку «створити» —
  * інструмент сам по собі є редактором ОДНОГО документа, без багатьох
- * інструкцій і без серверного сховища. Тут — так само: на відміну від
- * «Книги» й «Курсу» (що стають повноцінними сутностями застосунку), цей
- * розділ — самостійний локальний інструмент, і саме так має лишатися,
- * доки власник не попросить іншого (багато інструкцій, сервер, прив'язку
- * до книги тощо).
+ * інструкцій і без серверного сховища. Це рішення лишалося в силі до
+ * журналу #198 — «доки власник не попросить іншого». Власник попросив
+ * (журнал #199): кнопка «Створити книгу» переносить готовий документ у
+ * «Книга & Текст» як ЗАВЖДИ нову книгу (onInstructionBookCreated →
+ * App.tsx), а кожен крок перед тим поглиблюється ШІ через
+ * /api/ai/elaborate-instruction-steps і лягає в текст як [AI-DRAFT]
+ * (src/utils/manuscriptDoc.ts) — автор бачить, що це доповнення ШІ, і сам
+ * вирішує прийняти чи відхилити. Сам документ інструкції як і раніше
+ * лишається локальним (localStorage, без серверного сховища «багатьох
+ * інструкцій») — серверною стороною стала лише разова дія завершення.
  */
 
 const inputCls =
@@ -292,13 +310,25 @@ const StringListEditor: React.FC<{
 // Головний компонент.
 // ---------------------------------------------------------------------------
 
-export const InstructionBuilderView: React.FC<{ onChangeTrack?: () => void }> = ({ onChangeTrack }) => {
+export const InstructionBuilderView: React.FC<{
+  onChangeTrack?: () => void;
+  /**
+   * Завжди створює НОВУ книгу (пряма відповідь власника на уточнення,
+   * журнал #199) — ніколи не дописує в уже відкриту. Компонент лише формує
+   * вміст (розділи книги, з поглибленнями ШІ по кроках); саму сутність Book
+   * і навігацію в «Книга & Текст» будує App.tsx (onInstructionBookCreated),
+   * за тим самим шаблоном, що й onCourseCreated.
+   */
+  onInstructionBookCreated?: (payload: InstructionBookCreationPayload) => void;
+}> = ({ onChangeTrack, onInstructionBookCreated }) => {
   const [doc, setDoc] = useState<Instruction>(() => loadInstructionDraft() ?? createEmptyInstruction('assembly'));
   const [section, setSection] = useState<InstructionSectionKey>('overview');
   const [showTypeDialog, setShowTypeDialog] = useState<boolean>(() => !loadInstructionDraft());
   const [showPreview, setShowPreview] = useState(true);
   const [kbQuery, setKbQuery] = useState('');
   const [kbDraft, setKbDraft] = useState({ title: '', link: '', excerpt: '' });
+  const [isCreatingBook, setIsCreatingBook] = useState(false);
+  const [createBookError, setCreateBookError] = useState<string | null>(null);
   const firstRender = useRef(true);
 
   // Автозбереження — щоразу, коли документ змінюється. Той самий підхід, що
@@ -376,6 +406,52 @@ export const InstructionBuilderView: React.FC<{ onChangeTrack?: () => void }> = 
     window.open(`https://www.google.com/search?q=${encodeURIComponent(q)}`, '_blank', 'noopener,noreferrer');
   };
 
+  /**
+   * «Створити книгу» — завершення напряму «Інструкція»: ШІ поглиблює кожен
+   * крок (один запит, /api/ai/elaborate-instruction-steps), результат лягає
+   * в майбутню книгу як [AI-DRAFT]. Якщо ШІ недоступний (немає ключа рушія,
+   * мережева помилка) — книга однаково створюється, лише без поглиблень:
+   * автор не має втратити вже написаний документ через збій ШІ-кроку.
+   */
+  const createBook = async () => {
+    setCreateBookError(null);
+    setIsCreatingBook(true);
+    const steps = meaningfulInstructionSteps(doc);
+    let elaborations: string[] | undefined;
+    if (steps.length > 0) {
+      try {
+        const res = await fetch('/api/ai/elaborate-instruction-steps', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            docTypeLabel: type.docBadge,
+            title: doc.title,
+            description: doc.description,
+            materials: doc.materials.filter((m) => m.name.trim()).map((m) => m.name.trim()).join(', '),
+            tools: doc.tools.filter((t) => t.trim()).join(', '),
+            steps: steps.map((s) => ({ title: s.title, description: s.description })),
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.elaborations)) elaborations = data.elaborations;
+        } else {
+          const errBody = await res.json().catch(() => null);
+          setCreateBookError(
+            (errBody?.error as string) || 'ШІ не зміг поглибити кроки — книгу створено без цих доповнень.'
+          );
+        }
+      } catch {
+        setCreateBookError('Не вдалося з’єднатися з ШІ — книгу створено без поглиблень кроків.');
+      }
+    }
+    const sections = buildInstructionBookSections(doc, type, elaborations);
+    const title = buildInstructionBookTitle(doc, type);
+    setIsCreatingBook(false);
+    onInstructionBookCreated?.({ title, sections });
+  };
+
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-6 print:max-w-none print:p-0">
       <header className="mb-4 flex items-start justify-between gap-3 flex-wrap print:hidden">
@@ -403,6 +479,18 @@ export const InstructionBuilderView: React.FC<{ onChangeTrack?: () => void }> = 
         <button type="button" onClick={printDoc} className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 px-3 py-2 text-xs font-bold text-slate-950 transition-colors">
           <Printer className="h-3.5 w-3.5" /> Друкувати / PDF
         </button>
+        {onInstructionBookCreated && (
+          <button
+            type="button"
+            onClick={createBook}
+            disabled={isCreatingBook}
+            title="Перенести документ у нову книгу «Книга & Текст»; ШІ поглибить кожен крок (позначиться як AI-чернетка)."
+            className="inline-flex items-center gap-1.5 rounded-xl bg-violet-500 hover:bg-violet-400 disabled:opacity-60 disabled:cursor-wait px-3 py-2 text-xs font-bold text-white transition-colors"
+          >
+            {isCreatingBook ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <BookOpen className="h-3.5 w-3.5" />}
+            {isCreatingBook ? 'Створюємо книгу…' : 'Створити книгу'}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setShowPreview((v) => !v)}
@@ -413,6 +501,9 @@ export const InstructionBuilderView: React.FC<{ onChangeTrack?: () => void }> = 
         <span className="ml-auto inline-flex items-center gap-1.5 text-[11px] text-slate-500">
           <Cloud className="h-3.5 w-3.5" /> Збережено локально
         </span>
+        {createBookError && (
+          <span className="w-full text-[11px] font-semibold text-amber-400">{createBookError}</span>
+        )}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[220px_1fr] xl:grid-cols-[220px_1fr_380px] print:hidden">

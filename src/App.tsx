@@ -5,6 +5,7 @@ import { HeaderNav } from './components/HeaderNav';
 import { SidebarNav } from './components/SidebarNav';
 import { StartPageView } from './components/StartPageView';
 import { ExpressStartView } from './components/ExpressStartView';
+import type { InstructionBookCreationPayload } from './components/InstructionBuilderView';
 import { DiagnosticsView } from './components/DiagnosticsView';
 import { EditorView, type PromptConstructorRequest } from './components/EditorView';
 import { MasteryFrameworkView } from './components/MasteryFrameworkView';
@@ -1236,6 +1237,104 @@ export default function App() {
   };
 
   /**
+   * Завершення напряму «Інструкція» експрес-майстра (InstructionBuilderView,
+   * журнал #199): результат — ЗАВЖДИ нова книга (пряма відповідь власника
+   * на уточнення при постановці задачі, ніколи не дописується в уже
+   * відкриту), з однією главою і стільки Section, скільки змістовних
+   * розділів у документі. Той самий каркас створення, що й
+   * handleCreateBlankBook вище — те саме джерело автора (auth.user?.name)
+   * і той самий перехід у «Книга & Текст». Текст поглиблень кроків від ШІ
+   * (якщо вони були отримані — payload будує їх компонент) уже прийшов
+   * обгорнутим у [AI-DRAFT], тому тут з ним нічого додатково робити не
+   * треба — TipTap-редактор сам покаже їх як AI-чернетку.
+   */
+  const handleInstructionBookCreated = (payload: InstructionBookCreationPayload) => {
+    const now = Date.now();
+    const bookId = `BK-${now.toString(36).toUpperCase()}`;
+    const title = payload.title.trim() || 'Нова інструкція';
+    const author = auth.user?.name?.trim() || 'Олександр Радченко';
+    const initialSnapshot: BookVersionSnapshot = {
+      id: `snap-init-${now}`,
+      bookId,
+      versionNumber: 'v1.0.0',
+      revisionNumber: 1,
+      timestamp: new Date().toISOString(),
+      author,
+      authorName: author,
+      authorRole: currentRole,
+      label: 'Ініціалізація та старт проекту',
+      comment: 'Книга створена з майстра «Інструкція» — з поглибленнями кроків від ШІ.',
+      note: 'Книга створена з майстра «Інструкція» — з поглибленнями кроків від ШІ.',
+      tags: ['Створення', 'Інструкція', 'Express Wizard'],
+      wordCount: 0,
+      chapterCount: 1,
+      pageCount: 1,
+    };
+    const chapterId = `chap-${now}-1`;
+    const sectionDrafts = payload.sections.length ? payload.sections : [{ title: 'Розділ', content: '' }];
+    const sections = sectionDrafts.map((s, i) => ({
+      id: `sec-${now}-${i + 1}`,
+      chapterId,
+      title: s.title,
+      order: i + 1,
+      content: s.content,
+      wordCount: calculateWordCount(s.content),
+      lastModified: new Date().toISOString(),
+    }));
+    const newBook: Book = {
+      ...initialBookData,
+      id: bookId,
+      title,
+      author,
+      genre: '',
+      version: 'v1.0.0',
+      revisionNumber: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      versionHistory: [initialSnapshot],
+      synopsis: '',
+      logline: '',
+      theme: '',
+      status: 'draft',
+      characters: [],
+      heroArc: undefined,
+      mindBoard: undefined,
+      qrTags: [],
+      illustrations: [],
+      footnotes: [],
+      visualBible: { ...initialBookData.visualBible, id: `vb-${now}`, bookId },
+      chapters: [
+        {
+          id: chapterId,
+          bookId,
+          title,
+          order: 1,
+          sections,
+        },
+      ],
+    };
+
+    setBook(newBook);
+    setActiveChapterId(chapterId);
+    setActiveSectionId(sections[0]?.id || '');
+    setHasUnsavedChanges(false);
+    void persistBook(newBook);
+
+    addLogEntry(
+      'Створення нової книги (майстер «Інструкція»)',
+      `Створено книгу «${title}» [ID: ${bookId}] з документа інструкції, з поглибленнями кроків від ШІ.`,
+      'system',
+      bookId,
+      'v1.0.0',
+      currentRole
+    );
+
+    setSaveToast(`Книгу «${title}» [ID: ${bookId}] створено — відкрито в «Книга & Текст».`);
+    setTimeout(() => setSaveToast(null), 4000);
+    setCurrentTab('editor');
+  };
+
+  /**
    * Видалення книги зі сховища. Якщо видалено активну книгу — перемикаємось
    * на першу з решти; якщо книг не лишилось — створюємо порожню.
    */
@@ -1824,6 +1923,7 @@ export default function App() {
                 handleSelectTab('editor');
               }}
               onCourseCreated={() => handleSelectTab('course-studio')}
+              onInstructionBookCreated={handleInstructionBookCreated}
             />
           </div>
         )}

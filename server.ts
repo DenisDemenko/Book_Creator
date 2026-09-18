@@ -1493,6 +1493,60 @@ Translate into refined English JSON.`;
     }
   });
 
+  /**
+   * Поглиблення кроків інструкції — напрям «Інструкція» експрес-майстра
+   * (журнал #199). Один запит — усі кроки одразу; повертає рівно стільки
+   * елементів "elaborations", скільки кроків надіслано, у тому самому
+   * порядку. Результат лягає в текст нової книги як [AI-DRAFT]
+   * (src/utils/manuscriptDoc.ts) — автор бачить, що це доповнення ШІ.
+   */
+  app.post('/api/ai/elaborate-instruction-steps', async (req, res) => {
+    const { docTypeLabel, title, description, materials, tools, steps, modelId, bookId } = req.body;
+
+    if (!Array.isArray(steps) || steps.length === 0) {
+      res.status(400).json({ error: 'Немає кроків для поглиблення.' });
+      return;
+    }
+
+    const resolved = await resolveTextEngineOrFail(req, res, modelId, 'поглиблення кроків інструкції');
+    if (!resolved) return;
+    const { engine, resolvedModelId, userKey } = resolved;
+
+    const adminLayer = await loadCoreAdminLayer();
+    const template = resolveCoreTemplate('instructionElaboration', adminLayer);
+    const rendered = renderCoreTemplate('instructionElaboration', template, {
+      docTypeLabel,
+      title,
+      description,
+      materials,
+      tools,
+      stepsJson: JSON.stringify(
+        steps.map((s: any) => ({ title: String(s?.title ?? ''), description: String(s?.description ?? '') }))
+      ),
+    });
+
+    try {
+      const result = await generateAiText({
+        engine,
+        modelId: resolvedModelId,
+        prompt: rendered.user,
+        systemInstruction: rendered.system,
+        json: true,
+        apiKeyOverride: userKey,
+        req,
+        label: 'Поглиблення кроків інструкції',
+        bookId,
+      });
+      const parsed = parseModelJson(result.text);
+      const elaborations = Array.isArray(parsed?.elaborations) ? parsed.elaborations.map((x: any) => String(x ?? '')) : [];
+      res.json({ elaborations });
+    } catch (err: any) {
+      console.error('Error in /api/ai/elaborate-instruction-steps:', err?.message || err);
+      const status = err instanceof ChatProviderError ? err.status : 500;
+      res.status(status).json({ error: err?.message || 'Помилка поглиблення кроків інструкції' });
+    }
+  });
+
   // 4.05 Ведична натальна карта персонажа («задіак джйотіш») — реальний
   // астрономічний розрахунок (server/jyotishChart.ts), не текст моделі.
   // Письменник викликає це з картки персонажа при зміні дати/часу/місця

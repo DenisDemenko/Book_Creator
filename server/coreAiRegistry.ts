@@ -116,6 +116,12 @@ import {
   renderThresholdSystemTemplate,
   renderThresholdUserTemplate,
 } from './thresholdPrompt';
+import {
+  factoryInstructionElaborationSystemTemplate,
+  factoryInstructionElaborationUserTemplate,
+  renderInstructionElaborationSystemTemplate,
+  renderInstructionElaborationUserTemplate,
+} from './instructionElaborationPrompt';
 
 /** Ключ у таблиці `meta`, під яким лежить ЄДИНИЙ адмінський шар усіх модулів ядра. */
 export const CORE_PROMPT_TEMPLATES_META_KEY = 'prompt_templates_core_admin';
@@ -145,6 +151,7 @@ export const CORE_MODULE_KEYS = [
   'etsyAdvisor',
   'emotionMastery',
   'threshold',
+  'instructionElaboration',
 ] as const;
 
 export type CoreModuleKey = (typeof CORE_MODULE_KEYS)[number];
@@ -228,6 +235,7 @@ export const CORE_MODULE_PLACEHOLDERS: Record<CoreModuleKey, string[]> = {
     '{ОПИС_СЦЕНИ}', '{ПОТОЧНИЙ_ПОРІГ}', '{КОНТЕКСТ_ДО}', '{ФРАГМЕНТ}', '{КОНТЕКСТ_ПІСЛЯ}', '{МОВА}',
   ],
   threshold: ['{НАЗВА_КНИГИ}', '{ЖАНР}', '{ПЕРСОНАЖ}', '{ПРОФІЛЬ_ПЕРСОНАЖА}', '{ОПИС_СЦЕНИ}', '{ФРАГМЕНТ}', '{МОВА}'],
+  instructionElaboration: ['{ТИП_ІНСТРУКЦІЇ}', '{НАЗВА}', '{ОПИС}', '{МАТЕРІАЛИ}', '{ІНСТРУМЕНТИ}', '{КРОКИ}'],
 };
 
 /** Чи модуль повертає JSON за жорсткою схемою (схема — readonly-текст у конструкторі, не редагується). */
@@ -255,6 +263,7 @@ export const CORE_MODULE_HAS_JSON_SCHEMA: Record<CoreModuleKey, boolean> = {
   etsyAdvisor: false,
   emotionMastery: true,
   threshold: true,
+  instructionElaboration: true,
 };
 
 /**
@@ -355,6 +364,11 @@ export function factoryCoreTemplate(module: CoreModuleKey): CorePromptTemplate {
       return { system: emotionMasterySystemInstruction(), user: factoryEmotionMasteryTemplate() };
     case 'threshold':
       return { system: thresholdSystemInstruction(), user: factoryThresholdTemplate() };
+    case 'instructionElaboration':
+      return {
+        system: factoryInstructionElaborationSystemTemplate(),
+        user: factoryInstructionElaborationUserTemplate(),
+      };
   }
 }
 
@@ -674,6 +688,32 @@ export function renderCoreTemplate(
       return {
         system: renderThresholdSystemTemplate(template.system, values),
         user: renderThresholdUserTemplate(template.user, values),
+      };
+    }
+    case 'instructionElaboration': {
+      // Кроки приходять одним JSON-рядком (fields — плаский «мішок» рядків,
+      // той самий підхід, що й у решти модулів) — тут єдине місце, де його
+      // розбирають назад у масив {title, description}.
+      let steps: { title: string; description: string }[] = [];
+      try {
+        const parsed = JSON.parse(fields.stepsJson || '[]');
+        if (Array.isArray(parsed)) {
+          steps = parsed.map((s) => ({ title: String(s?.title ?? ''), description: String(s?.description ?? '') }));
+        }
+      } catch {
+        steps = [];
+      }
+      const values = {
+        docTypeLabel: fields.docTypeLabel || '',
+        title: fields.title || '',
+        description: fields.description || '',
+        materials: fields.materials || '',
+        tools: fields.tools || '',
+        steps,
+      };
+      return {
+        system: renderInstructionElaborationSystemTemplate(template.system, values),
+        user: renderInstructionElaborationUserTemplate(template.user, values),
       };
     }
   }

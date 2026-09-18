@@ -3,7 +3,7 @@ import { ArrowLeft, ArrowRight, BookOpen, Gamepad2, GraduationCap, ListChecks, L
 import { EXPRESS_TRACKS, findExpressTrack, isTrackRunnable, type ExpressTrack, type ExpressTrackId } from '../data/expressTracks';
 import { ExpressWizardView, type ExpressWizardPayload } from './ExpressWizardView';
 import { CourseWizardView } from './CourseWizardView';
-import { InstructionBuilderView } from './InstructionBuilderView';
+import { InstructionBuilderView, type InstructionBookCreationPayload } from './InstructionBuilderView';
 import type { CourseV2 } from '../types';
 
 /**
@@ -148,7 +148,9 @@ export const ExpressStartView: React.FC<{
   onFinish?: (payload: ExpressWizardPayload) => void;
   /** Майстер курсів створив курс — батько переходить на екран «Створити курс». */
   onCourseCreated?: (course: CourseV2) => void;
-}> = ({ onFinish, onCourseCreated }) => {
+  /** Конструктор інструкцій зібрав документ у книгу — батько створює нову книгу й веде в «Книга & Текст» (журнал #199). */
+  onInstructionBookCreated?: (payload: InstructionBookCreationPayload) => void;
+}> = ({ onFinish, onCourseCreated, onInstructionBookCreated }) => {
   // Напрям із минулого візиту підхоплюємо одразу при першому рендері,
   // щоб не блимнути екраном вибору перед тим, як показати майстер.
   const [track, setTrack] = useState<ExpressTrackId | null>(() => readSavedTrack());
@@ -195,7 +197,7 @@ export const ExpressStartView: React.FC<{
   }
 
   if (track === 'instruction') {
-    return <InstructionBuilderView onChangeTrack={backToChoice} />;
+    return <InstructionBuilderView onChangeTrack={backToChoice} onInstructionBookCreated={onInstructionBookCreated} />;
   }
 
   return (
