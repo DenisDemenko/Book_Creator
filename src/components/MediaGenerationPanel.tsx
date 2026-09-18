@@ -133,7 +133,13 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
         return t('mediaGenerationPanel.engineTagLeonardoV1');
       default:
         // 6 нових двигунів (задача #203) мають спільний префікс id.
-        return id.startsWith('leonardo-') ? t('mediaGenerationPanel.engineTagLeonardoV2') : '';
+        if (id.startsWith('leonardo-')) return t('mediaGenerationPanel.engineTagLeonardoV2');
+        // Автор поскаржився, що незрозуміло, фото чи відео генерує обраний
+        // двигун (особливо для брендів на кшталт Leonardo.Ai, який уміє
+        // й те, й те) — GPT Image (OpenAI) раніше не мав жодного підпису
+        // тут (порожній рядок), тож у панелі не було НІЧОГО, що назвало б
+        // результат фото. Тепер запасний варіант завжди явно каже «Фото».
+        return t('mediaGenerationPanel.engineTagGeneric');
     }
   };
 
@@ -425,6 +431,17 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
             <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
               <Cpu className="w-3 h-3 text-amber-400" /> {t('mediaGenerationPanel.engineLabel')}
             </label>
+            {/*
+              Автор поскаржився: у списку не видно, генерує обраний двигун
+              фото чи відео — особливо гостро для рушіїв «через Leonardo.Ai»,
+              бо Leonardo.Ai реально вміє й те, й те, а ця панель — лише
+              фото-частину. Явний напис тут не залежить від того, чи
+              прочитає автор підзаголовок панелі вгорі.
+            */}
+            <p className="text-[10px] text-amber-400/80 leading-snug flex items-start gap-1">
+              <ImageIcon className="w-3 h-3 shrink-0 mt-0.5" />
+              <span>{t('mediaGenerationPanel.engineSectionPhotoNote')}</span>
+            </p>
             <div className="space-y-1.5">
               {engines.map((e) => (
                 <button
@@ -439,7 +456,10 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
                   } ${!e.available ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-bold text-white truncate">{e.label}</span>
+                    <span className="text-[11px] font-bold text-white truncate flex items-center gap-1">
+                      <ImageIcon className="w-3 h-3 text-amber-400/70 shrink-0" />
+                      {e.label}
+                    </span>
                     {!e.available && <AlertCircle className="w-3 h-3 text-slate-500 shrink-0" />}
                   </div>
                   <div className="text-[9px] text-slate-500 mt-0.5">{engineTagFor(e.id)}</div>

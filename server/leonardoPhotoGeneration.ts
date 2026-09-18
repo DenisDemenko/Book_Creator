@@ -448,7 +448,28 @@ export async function generateLeonardoV2Photo(
   const generationId = extractSubmittedGenerationId(submitJson);
 
   if (!submitRes.ok || !generationId) {
-    const message = (submitJson as { error?: string } | null)?.error || `HTTP ${submitRes.status}`;
+    // 18.09.2026, продакшн: перший реальний виклик Seedream 5.0 Pro впав
+    // тут із голим «Leonardo.Ai: HTTP 200» — відповідь БУЛА успішною
+    // (submitRes.ok), але жодне з очікуваних полів (generations_by_pk.id,
+    // .generationId, кореневий id/generationId, sdGenerationJob.generationId)
+    // не знайшлось. Форма відповіді submit для v2 API НЕ задокументована
+    // (див. коментар модуля вище) — тож замість мовчазної «HTTP 200»
+    // повідомлення тепер несе СИРУ відповідь Leonardo (обрізану), а сервер
+    // логує її повністю. Це дає змогу побачити РЕАЛЬНУ форму й виправити
+    // extractSubmittedGenerationId() точково, а не вгадувати наосліп.
+    let rawSnippet = '';
+    try {
+      rawSnippet = JSON.stringify(submitJson).slice(0, 500);
+    } catch {
+      rawSnippet = String(submitJson);
+    }
+    console.error(
+      `Leonardo.Ai v2 (${options.engineId}): відповідь на відправлення генерації без розпізнаного id. HTTP ${submitRes.status}. Повна відповідь:`,
+      submitJson
+    );
+    const message =
+      (submitJson as { error?: string } | null)?.error ||
+      `HTTP ${submitRes.status}, відповідь без розпізнаного id генерації: ${rawSnippet}`;
     throw new LeonardoV2PhotoError(classifyLeonardoV2Error(submitRes.status, message), `Leonardo.Ai: ${message}`);
   }
 
