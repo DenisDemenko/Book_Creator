@@ -56,7 +56,35 @@ interface MediaGenerationPanelProps {
   book: Book;
   isRegistered: boolean;
   onGenerated: (illustration: BookIllustration) => void;
+  /**
+   * Задача #205. Відео зберігається СЕРВЕРНОЮ медіатекою (`saveAsset`,
+   * server/media/mediaLibraryStore.ts), а не в `book.illustrations[]`, як
+   * фото — тому воно не може пройти через onGenerated(BookIllustration).
+   * Панель лише повідомляє «щось нове зʼявилось на сервері», а батьківський
+   * компонент сам перечитує медіатеку (той самий loadLibrary, що й для
+   * серверних файлів завантаження).
+   */
+  onVideoGenerated: () => void;
   onToast: (msg: string) => void;
+}
+
+/** Задача #205. Форма відповіді `GET /api/ai/video-engines` (server/videoGeneration.ts::listVideoEngines). */
+interface VideoEngineInfo {
+  id: string;
+  label: string;
+  provider: 'leonardo';
+  apiVersion: 'v1' | 'v2';
+  /** v1 з фіксованим переліком тривалостей (напр. [4, 6, 8]); null — тривалість не налаштовується. */
+  durationsSec: number[] | null;
+  defaultDurationSec: number | null;
+  /** v2 — тривалість діапазоном, а не переліком; null для v1. */
+  durationMinSec: number | null;
+  durationMaxSec: number | null;
+  resolutions: string[];
+  defaultResolution: string;
+  aspectRatios: string[];
+  defaultAspectRatio: string;
+  available: boolean;
 }
 
 const ALL_SIZES: ('1K' | '2K' | '4K')[] = ['1K', '2K', '4K'];
@@ -81,7 +109,7 @@ interface ReferenceImage {
   url?: string;
 }
 
-export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book, isRegistered, onGenerated, onToast }) => {
+export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book, isRegistered, onGenerated, onVideoGenerated, onToast }) => {
   const { t } = useLanguage();
 
   const [engines, setEngines] = useState<EngineInfo[]>([]);
@@ -95,10 +123,21 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
   const [outputFormat, setOutputFormat] = useState<'' | 'png' | 'jpeg'>('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [lastResult, setLastResult] = useState<{ imageUrl: string; modelUsed: string } | null>(null);
+  const [lastResult, setLastResult] = useState<{ url: string; modelUsed: string; kind: 'photo' | 'video' } | null>(null);
   const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>([]);
   const [referenceUrlInput, setReferenceUrlInput] = useState('');
   const referenceFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Задача #205: перемикач фото/відео. Обидва режими живуть в одній панелі
+  // (спільний промпт, спільна кнопка «Згенерувати»), але кожен зі своїм
+  // списком двигунів і параметрами — Leonardo.Ai відео не має aspectRatio/
+  // imageSize/quality/format фото-моделей, натомість має resolution/duration.
+  const [mode, setMode] = useState<'photo' | 'video'>('photo');
+  const [videoEngines, setVideoEngines] = useState<VideoEngineInfo[]>([]);
+  const [videoEngineId, setVideoEngineId] = useState<string>('');
+  const [videoResolution, setVideoResolution] = useState<string>('');
+  const [videoAspectRatio, setVideoAspectRatio] = useState<string>('');
+  const [videoDurationSec, setVideoDurationSec] = useState<number | undefined>(undefined);
 
   useEffect(() => {
     fetch('/api/ai/image-engines', { credentials: 'same-origin' })
@@ -113,6 +152,22 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
       })
       .catch(() => {
         /* панель лишається із дефолтним (вузьким) списком співвідношень */
+      });
+  }, []);
+
+  // Задача #205: той самий принцип, що й для фото-двигунів вище — окремий
+  // ендпоінт (/api/ai/video-engines), бо параметри геть інші (тривалість/
+  // роздільність замість aspectRatio/imageSize).
+  useEffect(() => {
+    fetch('/api/ai/video-engines', { credentials: 'same-origin' })
+      .then((r) => r.json())
+      .then((data) => {
+        const list: VideoEngineInfo[] = data?.engines || [];
+        setVideoEngines(list);
+        setVideoEngineId((prev) => prev || list.find((e) => e.available)?.id || list[0]?.id || '');
+      })
+      .catch(() => {
+        /* панель лишається з порожнім списком відеодвигунів */
       });
   }, []);
 
@@ -142,6 +197,20 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
         return t('mediaGenerationPanel.engineTagGeneric');
     }
   };
+
+  /** Задача #205: «4/6/8 с» для v1 (фіксований перелік) або «4–30 с» для v2 (діапазон). */
+  const videoDurationLabel = (e: VideoEngineInfo): string => {
+    if (e.durationsSec && e.durationsSec.length > 0) {
+      return `${e.durationsSec.join('/')}${t('mediaGenerationPanel.videoUnitSeconds')}`;
+    }
+    if (e.durationMinSec != null && e.durationMaxSec != null) {
+      return `${e.durationMinSec}–${e.durationMaxSec}${t('mediaGenerationPanel.videoUnitSeconds')}`;
+    }
+    return t('mediaGenerationPanel.videoDurationFixed');
+  };
+
+  const videoEngineTagFor = (e: VideoEngineInfo): string =>
+    `${t('mediaGenerationPanel.videoTagPrefix')} • ${videoDurationLabel(e)} • ${e.resolutions.join('/')}p`;
 
   const selectedEngine = engines.find((e) => e.id === engineId);
 
@@ -178,6 +247,18 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedEngine, referencesSupported, effectiveMaxReferences]);
+
+  const selectedVideoEngine = videoEngines.find((e) => e.id === videoEngineId);
+
+  // Задача #205: при виборі/зміні відеодвигуна підставляємо саме ЙОГО
+  // дефолтні resolution/aspectRatio/duration — інакше, наприклад, обраний
+  // раніше 1080p лишився б для двигуна, що приймає лише 480p.
+  useEffect(() => {
+    if (!selectedVideoEngine) return;
+    setVideoResolution(selectedVideoEngine.defaultResolution);
+    setVideoAspectRatio(selectedVideoEngine.defaultAspectRatio);
+    setVideoDurationSec(selectedVideoEngine.defaultDurationSec ?? undefined);
+  }, [selectedVideoEngine]);
 
   /** Додає завантажені файли як референси — до вільного місця (MAX_REFERENCE_IMAGES). */
   const handleReferenceFiles = async (files: FileList | null) => {
@@ -280,7 +361,7 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
         return;
       }
 
-      setLastResult({ imageUrl: data.imageUrl, modelUsed: data.modelUsed || '' });
+      setLastResult({ url: data.imageUrl, modelUsed: data.modelUsed || '', kind: 'photo' });
 
       const newIll: BookIllustration = {
         id: `ill-media-${Date.now()}`,
@@ -308,6 +389,70 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
     }
   };
 
+  /**
+   * Задача #205. Свідомо ОКРЕМА від handleGenerate (фото): відео йде на
+   * інший ендпоінт (/api/ai/generate-video), з іншим тілом запиту
+   * (resolution/aspectRatio/durationSec замість imageSize/quality/format) і
+   * головне — результат НЕ можна покласти в onGenerated(BookIllustration),
+   * бо сервер зберігає відео в окремій медіатеці (saveAsset), а не в
+   * book.illustrations[]. Тому успіх повідомляється через onVideoGenerated()
+   * — батько сам перечитає список файлів.
+   */
+  const handleGenerateVideo = async () => {
+    if (!prompt.trim()) {
+      onToast(t('mediaGenerationPanel.toastEmptyPrompt'));
+      return;
+    }
+    setIsGenerating(true);
+    setErrorMsg(null);
+    try {
+      const res = await fetch('/api/ai/generate-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          prompt,
+          engine: videoEngineId || undefined,
+          resolution: videoResolution || undefined,
+          aspectRatio: videoAspectRatio || undefined,
+          durationSec: typeof videoDurationSec === 'number' ? videoDurationSec : undefined,
+          bookId: book.id,
+          context: 'Медіатека',
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (isGuestRestriction(res.status, data)) {
+        setErrorMsg(t('mediaGenerationPanel.toastGuestRestricted'));
+        onToast(t('mediaGenerationPanel.toastGuestRestricted'));
+        return;
+      }
+      if (res.status === 402 || data?.kind === 'quota_exceeded') {
+        setErrorMsg(t('mediaGenerationPanel.toastQuotaExceeded'));
+        onToast(t('mediaGenerationPanel.toastQuotaExceeded'));
+        return;
+      }
+      if (!res.ok || !data?.videoUrl) {
+        const msg = data?.error || t('mediaGenerationPanel.toastGenFailed');
+        setErrorMsg(msg);
+        onToast(msg);
+        return;
+      }
+
+      setLastResult({ url: data.videoUrl, modelUsed: data.modelUsed || '', kind: 'video' });
+      // Відео вже збережено на сервері (saveAsset) — просимо галерею
+      // перечитати медіатеку, а не тягнемо файл у book.illustrations[].
+      onVideoGenerated();
+      onToast(t('mediaGenerationPanel.toastVideoGenerated', { model: data.modelUsed || '' }));
+    } catch (err) {
+      console.error('Error generating video:', err);
+      setErrorMsg(t('mediaGenerationPanel.toastGenError'));
+      onToast(t('mediaGenerationPanel.toastGenError'));
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   return (
     <aside className="w-full lg:w-80 xl:w-96 shrink-0 h-full bg-slate-950/95 border-r border-slate-800 flex flex-col overflow-hidden">
       <div className="p-4 border-b border-slate-800 shrink-0">
@@ -326,6 +471,33 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* Задача #205: перемикач фото/відео — раніше цієї панелі відео
+              взагалі не було видно, і автор не міг зрозуміти, що генерація
+              відео Leonardo.Ai досі не підключена. Тепер це явний вибір
+              нагорі форми, а не підпис під одним із двигунів. */}
+          <div className="grid grid-cols-2 gap-1.5">
+            <button
+              onClick={() => setMode('photo')}
+              className={`py-2 rounded-xl border text-center text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all ${
+                mode === 'photo'
+                  ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+              }`}
+            >
+              <ImageIcon className="w-3.5 h-3.5" /> {t('mediaGenerationPanel.modePhotoLabel')}
+            </button>
+            <button
+              onClick={() => setMode('video')}
+              className={`py-2 rounded-xl border text-center text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all ${
+                mode === 'video'
+                  ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+              }`}
+            >
+              <Film className="w-3.5 h-3.5" /> {t('mediaGenerationPanel.modeVideoLabel')}
+            </button>
+          </div>
+
           {/* Prompt */}
           <div className="space-y-1.5">
             <label className="text-[11px] font-bold text-amber-400 uppercase tracking-wider">
@@ -354,8 +526,8 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
             />
           </div>
 
-          {/* Reference images — image-to-image / мультиреференсна генерація (#52, #203) */}
-          {referencesSupported ? (
+          {/* Reference images — image-to-image / мультиреференсна генерація (#52, #203). Відео (задача #205) референсів не приймає — guidances.start_frame/video_reference лишаються свідомо непідключеними (див. videoGeneration.ts). */}
+          {mode === 'photo' && referencesSupported ? (
           <div className="space-y-1.5">
             <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
               <span>{t('mediaGenerationPanel.referenceImagesLabel')}</span>
@@ -438,37 +610,167 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
               фото-частину. Явний напис тут не залежить від того, чи
               прочитає автор підзаголовок панелі вгорі.
             */}
-            <p className="text-[10px] text-amber-400/80 leading-snug flex items-start gap-1">
-              <ImageIcon className="w-3 h-3 shrink-0 mt-0.5" />
-              <span>{t('mediaGenerationPanel.engineSectionPhotoNote')}</span>
-            </p>
-            <div className="space-y-1.5">
-              {engines.map((e) => (
-                <button
-                  key={e.id}
-                  onClick={() => setEngineId(e.id)}
-                  disabled={!e.available}
-                  title={!e.available ? t('mediaGenerationPanel.engineUnavailableHint') : undefined}
-                  className={`w-full p-2 rounded-xl border text-left transition-all ${
-                    engineId === e.id
-                      ? 'bg-slate-900 border-amber-500 ring-1 ring-amber-500/50'
-                      : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
-                  } ${!e.available ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-bold text-white truncate flex items-center gap-1">
-                      <ImageIcon className="w-3 h-3 text-amber-400/70 shrink-0" />
-                      {e.label}
-                    </span>
-                    {!e.available && <AlertCircle className="w-3 h-3 text-slate-500 shrink-0" />}
-                  </div>
-                  <div className="text-[9px] text-slate-500 mt-0.5">{engineTagFor(e.id)}</div>
-                </button>
-              ))}
-            </div>
+            {mode === 'photo' ? (
+              <>
+                <p className="text-[10px] text-amber-400/80 leading-snug flex items-start gap-1">
+                  <ImageIcon className="w-3 h-3 shrink-0 mt-0.5" />
+                  <span>{t('mediaGenerationPanel.engineSectionPhotoNote')}</span>
+                </p>
+                <div className="space-y-1.5">
+                  {engines.map((e) => (
+                    <button
+                      key={e.id}
+                      onClick={() => setEngineId(e.id)}
+                      disabled={!e.available}
+                      title={!e.available ? t('mediaGenerationPanel.engineUnavailableHint') : undefined}
+                      className={`w-full p-2 rounded-xl border text-left transition-all ${
+                        engineId === e.id
+                          ? 'bg-slate-900 border-amber-500 ring-1 ring-amber-500/50'
+                          : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+                      } ${!e.available ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-bold text-white truncate flex items-center gap-1">
+                          <ImageIcon className="w-3 h-3 text-amber-400/70 shrink-0" />
+                          {e.label}
+                        </span>
+                        {!e.available && <AlertCircle className="w-3 h-3 text-slate-500 shrink-0" />}
+                      </div>
+                      <div className="text-[9px] text-slate-500 mt-0.5">{engineTagFor(e.id)}</div>
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Задача #205: ті самі десять відеодвигунів Leonardo.Ai
+                    (Motion 2.0, Veo 3, Kling, Seedance 2.5, Wan 3.0,
+                    FLUX 3 Video), що вже роками віддає сервер
+                    (/api/ai/video-engines, задачі #201/#202) — раніше без
+                    жодного інтерфейсу. */}
+                <p className="text-[10px] text-cyan-400/80 leading-snug flex items-start gap-1">
+                  <Film className="w-3 h-3 shrink-0 mt-0.5" />
+                  <span>{t('mediaGenerationPanel.videoEngineSectionNote')}</span>
+                </p>
+                <div className="space-y-1.5">
+                  {videoEngines.map((e) => (
+                    <button
+                      key={e.id}
+                      onClick={() => setVideoEngineId(e.id)}
+                      disabled={!e.available}
+                      title={!e.available ? t('mediaGenerationPanel.engineUnavailableHint') : undefined}
+                      className={`w-full p-2 rounded-xl border text-left transition-all ${
+                        videoEngineId === e.id
+                          ? 'bg-slate-900 border-cyan-500 ring-1 ring-cyan-500/50'
+                          : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+                      } ${!e.available ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-bold text-white truncate flex items-center gap-1">
+                          <Film className="w-3 h-3 text-cyan-400/70 shrink-0" />
+                          {e.label}
+                        </span>
+                        {!e.available && <AlertCircle className="w-3 h-3 text-slate-500 shrink-0" />}
+                      </div>
+                      <div className="text-[9px] text-slate-500 mt-0.5">{videoEngineTagFor(e)}</div>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
 
+          {/* Задача #205: параметри ВІДЕО — своя роздільність/пропорції/
+              тривалість замість фото-полів нижче. */}
+          {mode === 'video' && selectedVideoEngine && (
+            <>
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <Maximize2 className="w-3 h-3 text-amber-400" /> {t('mediaGenerationPanel.videoResolutionLabel')}
+                </label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {selectedVideoEngine.resolutions.map((res) => (
+                    <button
+                      key={res}
+                      onClick={() => setVideoResolution(res)}
+                      className={`py-1.5 rounded-lg border text-center font-mono text-[11px] transition-all ${
+                        videoResolution === res
+                          ? 'bg-amber-500/20 border-amber-500 text-amber-300 font-bold'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {res}p
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <Film className="w-3 h-3 text-amber-400" /> {t('mediaGenerationPanel.aspectRatioLabel')}
+                </label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {selectedVideoEngine.aspectRatios.map((ar) => (
+                    <button
+                      key={ar}
+                      onClick={() => setVideoAspectRatio(ar)}
+                      className={`py-1.5 rounded-lg border text-center font-mono text-[11px] transition-all ${
+                        videoAspectRatio === ar
+                          ? 'bg-amber-500/20 border-amber-500 text-amber-300 font-bold'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {ar}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <Gauge className="w-3 h-3 text-amber-400" /> {t('mediaGenerationPanel.videoDurationLabel')}
+                </label>
+                {selectedVideoEngine.durationsSec && selectedVideoEngine.durationsSec.length > 0 ? (
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {selectedVideoEngine.durationsSec.map((sec) => (
+                      <button
+                        key={sec}
+                        onClick={() => setVideoDurationSec(sec)}
+                        className={`py-1.5 rounded-lg border text-center font-mono text-[11px] transition-all ${
+                          videoDurationSec === sec
+                            ? 'bg-amber-500/20 border-amber-500 text-amber-300 font-bold'
+                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {sec}{t('mediaGenerationPanel.videoUnitSeconds')}
+                      </button>
+                    ))}
+                  </div>
+                ) : selectedVideoEngine.durationMinSec != null && selectedVideoEngine.durationMaxSec != null ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={selectedVideoEngine.durationMinSec}
+                      max={selectedVideoEngine.durationMaxSec}
+                      step={1}
+                      value={videoDurationSec ?? selectedVideoEngine.defaultDurationSec ?? selectedVideoEngine.durationMinSec}
+                      onChange={(e) => setVideoDurationSec(Number(e.target.value))}
+                      className="flex-1 accent-amber-500"
+                    />
+                    <span className="text-[11px] font-mono text-amber-300 font-bold w-12 text-right">
+                      {videoDurationSec ?? selectedVideoEngine.defaultDurationSec}{t('mediaGenerationPanel.videoUnitSeconds')}
+                    </span>
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-slate-600 leading-snug">{t('mediaGenerationPanel.videoDurationFixedHint')}</p>
+                )}
+              </div>
+            </>
+          )}
+
           {/* Aspect ratio */}
+          {mode === 'photo' && (
+          <>
           <div className="space-y-1.5">
             <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
               <Film className="w-3 h-3 text-amber-400" /> {t('mediaGenerationPanel.aspectRatioLabel')}
@@ -518,9 +820,11 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
               })}
             </div>
           </div>
+          </>
+          )}
 
           {/* Quality / thinking level — only for engines that document it */}
-          {selectedEngine?.supportsQualityControl && (
+          {mode === 'photo' && selectedEngine?.supportsQualityControl && (
             <div className="space-y-1.5">
               <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
                 <Gauge className="w-3 h-3 text-amber-400" /> {t('mediaGenerationPanel.qualityLabel')}
@@ -549,7 +853,7 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
           )}
 
           {/* Output format — only for engines that document it */}
-          {selectedEngine?.supportsFormatChoice && (
+          {mode === 'photo' && selectedEngine?.supportsFormatChoice && (
             <div className="space-y-1.5">
               <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
                 <FileImage className="w-3 h-3 text-amber-400" /> {t('mediaGenerationPanel.formatLabel')}
@@ -578,8 +882,8 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
 
           {/* Generate button */}
           <button
-            onClick={handleGenerate}
-            disabled={isGenerating || !prompt.trim()}
+            onClick={() => (mode === 'photo' ? handleGenerate() : handleGenerateVideo())}
+            disabled={isGenerating || !prompt.trim() || (mode === 'video' && !videoEngineId)}
             className="w-full py-3 rounded-2xl bg-gradient-to-r from-amber-500 via-purple-600 to-cyan-500 hover:from-amber-400 hover:to-cyan-400 text-slate-950 font-bold text-xs shadow-xl transition-all flex items-center justify-center gap-2 active:scale-98 disabled:opacity-50"
           >
             {isGenerating ? (
@@ -607,16 +911,28 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
             {lastResult ? (
               <div className="space-y-1.5">
                 <div className="rounded-xl overflow-hidden border border-slate-700 bg-black">
-                  <img src={lastResult.imageUrl} alt="" referrerPolicy="no-referrer" className="w-full h-auto max-h-48 object-cover" />
+                  {lastResult.kind === 'video' ? (
+                    <video
+                      src={lastResult.url}
+                      controls
+                      muted
+                      loop
+                      className="w-full h-auto max-h-48 object-cover"
+                    />
+                  ) : (
+                    <img src={lastResult.url} alt="" referrerPolicy="no-referrer" className="w-full h-auto max-h-48 object-cover" />
+                  )}
                 </div>
                 <p className="text-[10px] text-emerald-400 font-bold">{t('mediaGenerationPanel.resultAddedLabel')}</p>
               </div>
             ) : (
               <div className="text-center py-6 space-y-2 text-slate-600">
-                <ImageIcon className="w-8 h-8 mx-auto" />
+                {mode === 'video' ? <Film className="w-8 h-8 mx-auto" /> : <ImageIcon className="w-8 h-8 mx-auto" />}
                 <div className="space-y-0.5">
                   <p className="text-[11px] font-bold text-slate-500">{t('mediaGenerationPanel.resultReadyHeading')}</p>
-                  <p className="text-[10px] text-slate-600 leading-snug px-2">{t('mediaGenerationPanel.resultReadyDesc')}</p>
+                  <p className="text-[10px] text-slate-600 leading-snug px-2">
+                    {mode === 'video' ? t('mediaGenerationPanel.resultReadyDescVideo') : t('mediaGenerationPanel.resultReadyDesc')}
+                  </p>
                 </div>
               </div>
             )}

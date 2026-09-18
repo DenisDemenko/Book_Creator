@@ -12,7 +12,8 @@ import {
   CheckCircle2,
   ExternalLink,
   Layers,
-  HardDrive
+  HardDrive,
+  Film
 } from 'lucide-react';
 import { Book, BookIllustration, AuthUser } from '../types';
 import { downloadImageAs } from '../utils/helpers';
@@ -60,7 +61,7 @@ type MediaCard = {
   id: string;
   url: string;
   title: string;
-  type: 'portraits' | 'illustrations' | 'covers';
+  type: 'portraits' | 'illustrations' | 'covers' | 'videos';
   prompt?: string;
   source?: string;
   /** Книга-розділ цього файлу; `''` — файли без книги. */
@@ -75,7 +76,7 @@ const NO_BOOK_SECTION = '';
 const ALL_SECTIONS = '__all__';
 
 export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpdateBook, authUser }) => {
-  const [filter, setFilter] = useState<'all' | 'portraits' | 'illustrations' | 'covers'>('all');
+  const [filter, setFilter] = useState<'all' | 'portraits' | 'illustrations' | 'covers' | 'videos'>('all');
   const [selectedMedia, setSelectedMedia] = useState<{ id: string; url: string; title: string; type: string; prompt?: string; source?: string } | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -218,7 +219,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
         id: asset.id,
         url: asset.url,
         title: asset.filename || asset.id,
-        type: asset.kind === 'cover_art' ? 'covers' : asset.kind === 'character_art' ? 'portraits' : 'illustrations',
+        type: asset.kind === 'cover_art' ? 'covers' : asset.kind === 'character_art' ? 'portraits' : asset.kind === 'video' ? 'videos' : 'illustrations',
         prompt: asset.prompt || undefined,
         source: 'upload',
         sectionId,
@@ -280,6 +281,35 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
       showToast(t('mediaLibraryView.downloadedToast', { format: format.toUpperCase() }));
     } catch (err) {
       console.error('Download error:', err);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  /**
+   * Задача #205. Відео НЕ можна прогнати через downloadImageAs() — та функція
+   * малює `new Image()` на `<canvas>` і перекодовує в PNG/JPG, а <canvas>
+   * не вміє декодувати відеобайти взагалі (просто ніколи не викличе onload).
+   * Тому окремий, набагато простіший шлях: забрати байти як blob і віддати
+   * через тимчасове посилання — без рекодування, MP4 лишається MP4.
+   */
+  const handleDownloadVideo = async (url: string, title: string) => {
+    setIsDownloading(true);
+    try {
+      const res = await fetch(url, { credentials: 'same-origin' });
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const cleanBaseName = (title || 'video').replace(/[^a-zA-Z0-9А-Яа-яЇїІіЄєҐґ_\-\s]/g, '_');
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `${cleanBaseName || 'video'}.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+      showToast(t('mediaLibraryView.downloadedVideoToast'));
+    } catch (err) {
+      console.error('Video download error:', err);
     } finally {
       setIsDownloading(false);
     }
@@ -405,6 +435,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
         book={book}
         isRegistered={isRegistered}
         onGenerated={handleGeneratedImage}
+        onVideoGenerated={loadLibrary}
         onToast={showToast}
       />
 
@@ -495,7 +526,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
 
           {/* Filter buttons */}
           <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800" data-tour="media__2">
-            {(['all', 'illustrations', 'portraits', 'covers'] as const).map((f) => (
+            {(['all', 'illustrations', 'portraits', 'covers', 'videos'] as const).map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
@@ -505,7 +536,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                {f === 'all' ? t('mediaLibraryView.filterAll') : f === 'illustrations' ? t('mediaLibraryView.filterIllustrations') : f === 'portraits' ? t('mediaLibraryView.filterPortraits') : t('mediaLibraryView.filterCovers')}
+                {f === 'all' ? t('mediaLibraryView.filterAll') : f === 'illustrations' ? t('mediaLibraryView.filterIllustrations') : f === 'portraits' ? t('mediaLibraryView.filterPortraits') : f === 'covers' ? t('mediaLibraryView.filterCovers') : t('mediaLibraryView.filterVideos')}
               </button>
             ))}
           </div>
@@ -533,17 +564,30 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
               onClick={() => setSelectedMedia(item)}
               className="h-48 overflow-hidden bg-black flex items-center justify-center relative cursor-pointer"
             >
-              <img
-                src={item.url}
-                alt={item.title}
-                referrerPolicy="no-referrer"
-                className="w-full h-full object-cover group-hover:scale-105 transition-all duration-300"
-              />
-              {/* Формат файлу — за ним і відсортовано перелік */}
+              {item.type === 'videos' ? (
+                <video
+                  src={item.url}
+                  muted
+                  loop
+                  playsInline
+                  onMouseEnter={(e) => e.currentTarget.play().catch(() => {})}
+                  onMouseLeave={(e) => e.currentTarget.pause()}
+                  className="w-full h-full object-cover group-hover:scale-105 transition-all duration-300"
+                />
+              ) : (
+                <img
+                  src={item.url}
+                  alt={item.title}
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover group-hover:scale-105 transition-all duration-300"
+                />
+              )}
+              {/* Формат файлу — за ним і відсортовано перелік (для відео — завжди MP4, Leonardo.Ai інших контейнерів не віддає) */}
               <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-black/60 backdrop-blur-md text-amber-300">
-                {IMAGE_FORMAT_LABEL[detectImageFormat(item.url)]}
+                {item.type === 'videos' ? 'MP4' : IMAGE_FORMAT_LABEL[detectImageFormat(item.url)]}
               </div>
-              <div className="absolute top-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-black/60 backdrop-blur-md text-cyan-300">
+              <div className="absolute top-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-black/60 backdrop-blur-md text-cyan-300 flex items-center gap-1">
+                {item.type === 'videos' && <Film className="w-2.5 h-2.5" />}
                 {item.type}
               </div>
             </div>
@@ -556,6 +600,17 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
                 <span className="text-[10px] text-slate-500 uppercase font-mono">
                   {t('mediaLibraryView.exportLabel')}
                 </span>
+                {item.type === 'videos' ? (
+                  <button
+                    onClick={() => handleDownloadVideo(item.url, item.title)}
+                    disabled={isDownloading}
+                    className="px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-cyan-300 text-[10px] font-bold border border-slate-700 flex items-center gap-1 transition-all"
+                    title={t('mediaLibraryView.downloadVideoLabel')}
+                  >
+                    <Download className="w-2.5 h-2.5" />
+                    <span>MP4</span>
+                  </button>
+                ) : (
                 <div className="flex items-center gap-1.5">
                   <button
                     onClick={() => handleDownload(item.url, item.title, 'png')}
@@ -576,6 +631,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
                     <span>JPG</span>
                   </button>
                 </div>
+                )}
               </div>
 
             </div>
@@ -606,12 +662,21 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
             </div>
 
             <div className="max-h-[55vh] overflow-hidden rounded-2xl bg-black flex items-center justify-center border border-slate-800">
-              <img
-                src={selectedMedia.url}
-                alt={selectedMedia.title}
-                referrerPolicy="no-referrer"
-                className="max-h-[55vh] w-auto object-contain"
-              />
+              {selectedMedia.type === 'videos' ? (
+                <video
+                  src={selectedMedia.url}
+                  controls
+                  autoPlay
+                  className="max-h-[55vh] w-auto object-contain"
+                />
+              ) : (
+                <img
+                  src={selectedMedia.url}
+                  alt={selectedMedia.title}
+                  referrerPolicy="no-referrer"
+                  className="max-h-[55vh] w-auto object-contain"
+                />
+              )}
             </div>
 
             {selectedMedia.prompt && (
@@ -629,20 +694,32 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
                 {t('mediaLibraryView.saveToComputerLabel')}
               </span>
               <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleDownload(selectedMedia.url, selectedMedia.title, 'png')}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-md transition-all"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>{t('mediaLibraryView.downloadPngLabel')}</span>
-                </button>
-                <button
-                  onClick={() => handleDownload(selectedMedia.url, selectedMedia.title, 'jpg')}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-md transition-all"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>{t('mediaLibraryView.downloadJpgLabel')}</span>
-                </button>
+                {selectedMedia.type === 'videos' ? (
+                  <button
+                    onClick={() => handleDownloadVideo(selectedMedia.url, selectedMedia.title)}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-md transition-all"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>{t('mediaLibraryView.downloadVideoLabel')}</span>
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => handleDownload(selectedMedia.url, selectedMedia.title, 'png')}
+                      className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-md transition-all"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>{t('mediaLibraryView.downloadPngLabel')}</span>
+                    </button>
+                    <button
+                      onClick={() => handleDownload(selectedMedia.url, selectedMedia.title, 'jpg')}
+                      className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-md transition-all"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>{t('mediaLibraryView.downloadJpgLabel')}</span>
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
