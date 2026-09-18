@@ -67,7 +67,8 @@
  *    що вже є для перших шести двигунів.
  */
 
-import { leonardoConfig } from './imageGeneration';
+import { leonardoConfig, extractLeonardoV2ValidationMessage } from './imageGeneration';
+import { uploadReferenceImage } from './leonardoPhotoGeneration';
 
 // ---------------------------------------------------------------------------
 // Реєстр двигунів
@@ -490,6 +491,18 @@ export interface GenerateVideoOptions {
   resolution?: string;
   aspectRatio?: string;
   durationSec?: number;
+  /**
+   * Задача #206. Референс ПЕРШОГО кадру — підтверджено для всіх 10
+   * двигунів: v1 (Motion 2.0, Veo3, Kling 2.1/2.5 — за прямим прикладом
+   * запиту з docs.leonardo.ai; Motion 2.0 Fast/Veo3 Fast — інференція за
+   * аналогією з базовою версією, ті самі моделі відрізняються лише
+   * швидкістю) і v2 (усі чотири — guidances.start_frame задокументовано
+   * прямо для кожної). Референс ОСТАННЬОГО кадру підтверджено ЛИШЕ для
+   * v2 — жодна з трьох перевірених v1-сторінок (Motion 2.0, Veo3, Kling
+   * 2.5) end frame не згадує.
+   */
+  startFrameImageUrl?: string;
+  endFrameImageUrl?: string;
 }
 
 export interface GeneratedVideoResult {
@@ -528,21 +541,52 @@ async function submitPollAndDownload(
     throw new VideoGenerationError('unknown', `Leonardo.Ai недоступний: ${(err as Error).message}`, engine.id, err);
   }
 
-  const submitJson = (await submitRes.json().catch(() => null)) as
+  const submitJson = (await submitRes.json().catch(() => null)) as unknown;
+
+  // Задача #206: та сама перевірка, що й у leonardoPhotoGeneration.ts —
+  // Leonardo v2 інколи повертає HTTP 200 з тілом у формі GraphQL-помилки
+  // (масив `{message, extensions:{details:{errors:[...]}}}`) замість
+  // очікуваної відповіді. Жоден з 10 відеодвигунів ще не отримав
+  // реального виклику через цю панель (задача #205) — тож ця перевірка
+  // тут ПРЕВЕНТИВНА, за фактом того самого збою у фото-двигуні.
+  const validationMessage = extractLeonardoV2ValidationMessage(submitJson);
+  if (validationMessage) {
+    console.error(`Leonardo.Ai v2 відео (${engine.id}): помилка валідації параметрів:`, validationMessage, submitJson);
+    throw new VideoGenerationError(
+      classifyLeonardoVideoError(submitRes.status, validationMessage),
+      `Leonardo.Ai: ${validationMessage}`,
+      engine.id
+    );
+  }
+
+  const json = submitJson as
     | { sdGenerationJob?: { generationId?: string }; generationId?: string; id?: string; error?: string }
     | null;
 
   if (!submitRes.ok) {
-    const message = submitJson?.error || `HTTP ${submitRes.status}`;
+    const message = json?.error || `HTTP ${submitRes.status}`;
     throw new VideoGenerationError(classifyLeonardoVideoError(submitRes.status, message), `Leonardo.Ai: ${message}`, engine.id);
   }
 
   // v1 повертає generationId у sdGenerationJob; форма v2-відповіді не
   // підтверджена документацією — пробуємо ті самі шляхи й додатково
-  // голий `id` (типовий для REST-створення ресурсу).
-  const generationId = submitJson?.sdGenerationJob?.generationId || submitJson?.generationId || submitJson?.id;
+  // голий `id` (типовий для REST-створення ресурсу). Якщо жоден не
+  // спрацює — лог сирої відповіді (задача #206, за прикладом #204), а не
+  // мовчазне «empty»: наступний реальний збій сам покаже точну форму.
+  const generationId = json?.sdGenerationJob?.generationId || json?.generationId || json?.id;
   if (!generationId) {
-    throw new VideoGenerationError('empty', humanVideoMessage('empty', engine.label), engine.id);
+    let rawSnippet = '';
+    try {
+      rawSnippet = JSON.stringify(submitJson).slice(0, 500);
+    } catch {
+      rawSnippet = String(submitJson);
+    }
+    console.error(`Leonardo.Ai v2 відео (${engine.id}): відповідь без розпізнаного id. HTTP ${submitRes.status}. Повна відповідь:`, submitJson);
+    throw new VideoGenerationError(
+      'empty',
+      `${humanVideoMessage('empty', engine.label)} (HTTP ${submitRes.status}, відповідь: ${rawSnippet})`,
+      engine.id
+    );
   }
 
   let videoUrl: string | undefined;
@@ -628,6 +672,40 @@ export async function generateVideo(options: GenerateVideoOptions): Promise<Gene
   const { width, height } = pixelDims(resolution, aspectRatio);
   const prompt = options.prompt.trim().slice(0, 1500); // та сама межа промпту, що й у фото-двигуні Leonardo.
 
+  // Задача #206: референс останнього кадру без першого не має сенсу для
+  // жодного з 10 двигунів (v2-документація прямо каже це для Kling O3;
+  // для решти — узгоджуємо з тим самим правилом, а не вигадуємо виняток).
+  if (options.endFrameImageUrl && !options.startFrameImageUrl) {
+    throw new VideoGenerationError(
+      'unknown',
+      'Референс останнього кадру потребує також референсу першого кадру.',
+      engine.id
+    );
+  }
+  if (options.endFrameImageUrl && engine.apiVersion === 'v1') {
+    throw new VideoGenerationError(
+      'unknown',
+      `${engine.label} підтримує лише референс ПЕРШОГО кадру. Для останнього оберіть один із двигунів Seedance 2.5 / Wan 3.0 / Kling O3 / FLUX 3 Video.`,
+      engine.id
+    );
+  }
+
+  // Той самий цикл завантаження, що й для фото-референсів (init-image →
+  // presigned S3 → id) — платформний механізм Leonardo, не фото-специфічний.
+  // Помилки уже мають kind/message (LeonardoV2PhotoError) — переносимо їх
+  // у VideoGenerationError, щоб видова помилка не витікала з чужого класу.
+  const uploadFrame = async (url: string): Promise<string> => {
+    try {
+      return await uploadReferenceImage(apiKey, url);
+    } catch (err) {
+      const kind = (err as { kind?: VideoErrorKind })?.kind || 'unknown';
+      const message = err instanceof Error ? err.message : String(err);
+      throw new VideoGenerationError(kind, message, engine.id, err);
+    }
+  };
+  const startFrameId = options.startFrameImageUrl ? await uploadFrame(options.startFrameImageUrl) : undefined;
+  const endFrameId = options.endFrameImageUrl ? await uploadFrame(options.endFrameImageUrl) : undefined;
+
   let durationSec: number | null;
   let downloaded: { buffer: Buffer; mimeType: string };
 
@@ -642,7 +720,18 @@ export async function generateVideo(options: GenerateVideoOptions): Promise<Gene
       isPublic: false,
     };
     if (durationSec !== null) body.duration = durationSec;
-    downloaded = await submitPollAndDownload(engine, apiKey, `${leonardoConfig.baseUrl}/generations-text-to-video`, leonardoConfig.baseUrl, body);
+    // Задача #206: підтверджено (docs.leonardo.ai, приклади для Motion 2.0/
+    // Veo3/Kling 2.5) — image-to-video для v1 йде на ІНШИЙ шлях
+    // (`/generations-image-to-video`, не `/generations-text-to-video`) з
+    // плоскими полями imageId/imageType:"UPLOADED", а не guidances.
+    // Motion 2.0 Fast/Veo3 Fast/Kling 2.1 не перевірені напряму — та сама
+    // модель, лише інша швидкість/тарифна вага, тож інференція за аналогією.
+    const submitPath = startFrameId ? 'generations-image-to-video' : 'generations-text-to-video';
+    if (startFrameId) {
+      body.imageId = startFrameId;
+      body.imageType = 'UPLOADED';
+    }
+    downloaded = await submitPollAndDownload(engine, apiKey, `${leonardoConfig.baseUrl}/${submitPath}`, leonardoConfig.baseUrl, body);
   } else {
     durationSec = normalizeV2Duration(engine, options.durationSec);
     const parameters: Record<string, unknown> = {
@@ -654,6 +743,16 @@ export async function generateVideo(options: GenerateVideoOptions): Promise<Gene
     };
     if (engine.resolutionField) parameters[engine.resolutionField.key] = engine.resolutionField.format(resolution);
     if (engine.supportsQuantity) parameters.quantity = 1;
+    // Задача #206: guidances.start_frame/end_frame — підтверджено прямо
+    // для всіх чотирьох v2-двигунів (Seedance 2.5, Wan 3.0, Kling O3,
+    // FLUX 3 Video), максимум 1 елемент кожне, type:"UPLOADED" для своїх
+    // завантажених зображень.
+    if (startFrameId || endFrameId) {
+      const guidances: Record<string, unknown> = {};
+      if (startFrameId) guidances.start_frame = [{ image: { id: startFrameId, type: 'UPLOADED' } }];
+      if (endFrameId) guidances.end_frame = [{ image: { id: endFrameId, type: 'UPLOADED' } }];
+      parameters.guidances = guidances;
+    }
     const body: Record<string, unknown> = { model: engine.modelSlug, public: false, parameters };
     downloaded = await submitPollAndDownload(engine, apiKey, `${LEONARDO_V2_BASE_URL}/generations`, LEONARDO_V2_BASE_URL, body);
   }
@@ -684,6 +783,12 @@ export function listVideoEngines(availability: { leonardo: boolean }) {
     defaultResolution: engine.defaultResolution,
     aspectRatios: engine.aspectRatios,
     defaultAspectRatio: engine.defaultAspectRatio,
+    // Задача #206: перший кадр підтверджено для ВСІХ 10 двигунів (v1 —
+    // окремий ендпоінт generations-image-to-video; v2 — guidances.start_frame).
+    // Останній кадр — лише для v2 (жодна з перевірених v1-сторінок його не
+    // документує).
+    supportsStartFrame: true,
+    supportsEndFrame: engine.apiVersion === 'v2',
     available: availability.leonardo,
   }));
 }

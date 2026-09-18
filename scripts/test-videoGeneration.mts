@@ -512,5 +512,169 @@ console.log('\nLeonardo відео — FLUX 3 Video (v2): опитування �
   }
 }
 
+console.log('\nЗадача #206 — референс ПЕРШОГО кадру (v1, Veo3): submit іде на /generations-image-to-video (НЕ /generations-text-to-video), з imageId/imageType:"UPLOADED":');
+{
+  const realFetch = global.fetch;
+  const prevKey = leonardoConfig.apiKey;
+  leonardoConfig.apiKey = 'test-leonardo-key';
+  let call = 0;
+  const seenUrls: string[] = [];
+  const seenBodies: any[] = [];
+  // @ts-expect-error підміна глобального fetch лише на час цього блоку тесту
+  global.fetch = async (url: string, opts?: any) => {
+    call++;
+    seenUrls.push(String(url));
+    if (call === 1) {
+      // джерело референсу першого кадру
+      return { ok: true, status: 200, headers: { get: (k: string) => (k.toLowerCase() === 'content-type' ? 'image/png' : null) }, arrayBuffer: async () => new ArrayBuffer(8) };
+    }
+    if (call === 2) {
+      return { ok: true, status: 200, json: async () => ({ uploadInitImage: { id: 'frame-id-1', url: 'https://s3.example.com/upload', fields: JSON.stringify({ key: 'k1' }) } }) };
+    }
+    if (call === 3) {
+      return { ok: true, status: 204 }; // S3 upload
+    }
+    if (call === 4) {
+      seenBodies.push(JSON.parse(opts.body));
+      return { ok: true, status: 200, json: async () => ({ sdGenerationJob: { generationId: 'i2v-job-1' } }) };
+    }
+    if (call === 5) {
+      return { ok: true, status: 200, json: async () => ({ generations_by_pk: { status: 'COMPLETE', generated_videos: [{ url: 'https://example.com/i2v.mp4' }] } }) };
+    }
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: (k: string) => (k.toLowerCase() === 'content-type' ? 'video/mp4' : null) },
+      arrayBuffer: async () => MP4_BYTES.buffer,
+    };
+  };
+  try {
+    const result = await generateVideo({ prompt: 'жінка йде пляжем', engine: 'leonardo-veo3', startFrameImageUrl: 'https://app.example.com/generated/frame.png' });
+    t('повернув буфер', result.buffer.length > 0);
+    t('submit пішов на /generations-image-to-video', seenUrls[3].endsWith('/generations-image-to-video'), seenUrls[3]);
+    t('НЕ на /generations-text-to-video', !seenUrls[3].endsWith('/generations-text-to-video'), seenUrls[3]);
+    t('тіло: imageId = id завантаженого кадру', seenBodies[0]?.imageId === 'frame-id-1', JSON.stringify(seenBodies[0]));
+    t('тіло: imageType = "UPLOADED"', seenBodies[0]?.imageType === 'UPLOADED');
+  } catch (e: any) {
+    t('цикл із першим кадром (v1) не мав кинути помилку', false, e.message);
+  } finally {
+    global.fetch = realFetch;
+    leonardoConfig.apiKey = prevKey;
+  }
+}
+
+console.log('\nЗадача #206 — референс ПЕРШОГО і ОСТАННЬОГО кадру (v2, Seedance 2.5): guidances.start_frame + guidances.end_frame, обидва type:"UPLOADED":');
+{
+  const realFetch = global.fetch;
+  const prevKey = leonardoConfig.apiKey;
+  leonardoConfig.apiKey = 'test-leonardo-key';
+  let call = 0;
+  const seenBodies: any[] = [];
+  // @ts-expect-error підміна глобального fetch лише на час цього блоку тесту
+  global.fetch = async (url: string, opts?: any) => {
+    call++;
+    // 1-3: завантаження першого кадру (джерело → init-image → S3)
+    // 4-6: завантаження останнього кадру (джерело → init-image → S3)
+    // 7: submit, 8: опитування, 9: завантаження результату
+    if (call === 1 || call === 4) {
+      return { ok: true, status: 200, headers: { get: (k: string) => (k.toLowerCase() === 'content-type' ? 'image/png' : null) }, arrayBuffer: async () => new ArrayBuffer(8) };
+    }
+    if (call === 2) {
+      return { ok: true, status: 200, json: async () => ({ uploadInitImage: { id: 'start-id', url: 'https://s3.example.com/upload', fields: JSON.stringify({ key: 'k1' }) } }) };
+    }
+    if (call === 5) {
+      return { ok: true, status: 200, json: async () => ({ uploadInitImage: { id: 'end-id', url: 'https://s3.example.com/upload', fields: JSON.stringify({ key: 'k2' }) } }) };
+    }
+    if (call === 3 || call === 6) {
+      return { ok: true, status: 204 }; // S3 upload
+    }
+    if (call === 7) {
+      seenBodies.push(JSON.parse(opts.body));
+      return { ok: true, status: 200, json: async () => ({ id: 'i2v-v2-job' }) };
+    }
+    if (call === 8) {
+      return { ok: true, status: 200, json: async () => ({ status: 'COMPLETE', generated_videos: [{ url: 'https://example.com/seedance-i2v.mp4' }] } ) };
+    }
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: (k: string) => (k.toLowerCase() === 'content-type' ? 'video/mp4' : null) },
+      arrayBuffer: async () => MP4_BYTES.buffer,
+    };
+  };
+  try {
+    const result = await generateVideo({
+      prompt: 'квітка розпускається',
+      engine: 'leonardo-seedance-2-5',
+      startFrameImageUrl: 'https://app.example.com/generated/start.png',
+      endFrameImageUrl: 'https://app.example.com/generated/end.png',
+    });
+    t('повернув буфер', result.buffer.length > 0);
+    const guidances = seenBodies[0]?.parameters?.guidances;
+    t('guidances.start_frame — 1 елемент, id першого кадру', guidances?.start_frame?.[0]?.image?.id === 'start-id', JSON.stringify(guidances));
+    t('guidances.start_frame — type UPLOADED', guidances?.start_frame?.[0]?.image?.type === 'UPLOADED');
+    t('guidances.end_frame — 1 елемент, id останнього кадру', guidances?.end_frame?.[0]?.image?.id === 'end-id');
+    t('guidances.end_frame — type UPLOADED', guidances?.end_frame?.[0]?.image?.type === 'UPLOADED');
+  } catch (e: any) {
+    t('цикл із двома кадрами (v2) не мав кинути помилку', false, e.message);
+  } finally {
+    global.fetch = realFetch;
+    leonardoConfig.apiKey = prevKey;
+  }
+}
+
+console.log('\nЗадача #206 — референс останнього кадру БЕЗ першого кидає зрозумілу помилку, без жодного мережевого виклику:');
+{
+  const realFetch = global.fetch;
+  const prevKey = leonardoConfig.apiKey;
+  leonardoConfig.apiKey = 'test-leonardo-key';
+  let call = 0;
+  global.fetch = async () => { call++; throw new Error('не мав викликати fetch'); };
+  try {
+    await generateVideo({ prompt: 'x', engine: 'leonardo-seedance-2-5', endFrameImageUrl: 'https://app.example.com/generated/end.png' });
+    t('мав кинути помилку', false);
+  } catch (e: any) {
+    t('повідомлення пояснює причину', /останнього кадру.*першого кадру/.test(e.message), e.message);
+    t('жодного мережевого виклику', call === 0, String(call));
+  } finally {
+    global.fetch = realFetch;
+    leonardoConfig.apiKey = prevKey;
+  }
+}
+
+console.log('\nЗадача #206 — референс останнього кадру на v1-двигуні (Motion 2.0) не підтримується, без жодного мережевого виклику:');
+{
+  const realFetch = global.fetch;
+  const prevKey = leonardoConfig.apiKey;
+  leonardoConfig.apiKey = 'test-leonardo-key';
+  let call = 0;
+  global.fetch = async () => { call++; throw new Error('не мав викликати fetch'); };
+  try {
+    await generateVideo({
+      prompt: 'x',
+      engine: 'leonardo-motion2',
+      startFrameImageUrl: 'https://app.example.com/generated/start.png',
+      endFrameImageUrl: 'https://app.example.com/generated/end.png',
+    });
+    t('мав кинути помилку', false);
+  } catch (e: any) {
+    t('повідомлення називає v2-альтернативи', /Seedance 2\.5.*Wan 3\.0.*Kling O3.*FLUX 3 Video/.test(e.message), e.message);
+    t('жодного мережевого виклику', call === 0, String(call));
+  } finally {
+    global.fetch = realFetch;
+    leonardoConfig.apiKey = prevKey;
+  }
+}
+
+console.log('\nЗадача #206 — listVideoEngines(): supportsStartFrame=true для всіх, supportsEndFrame лише для v2:');
+{
+  const list = listVideoEngines({ leonardo: true });
+  t('усі 10 мають supportsStartFrame=true', list.every((e) => e.supportsStartFrame === true));
+  const v1Ids = ['leonardo-motion2', 'leonardo-motion2-fast', 'leonardo-veo3', 'leonardo-veo3-fast', 'leonardo-kling2-1', 'leonardo-kling2-5'];
+  const v2Ids = ['leonardo-seedance-2-5', 'leonardo-wan-3', 'leonardo-kling-o3', 'leonardo-flux-3-video'];
+  t('v1-двигуни: supportsEndFrame=false', v1Ids.every((id) => list.find((e) => e.id === id)?.supportsEndFrame === false));
+  t('v2-двигуни: supportsEndFrame=true', v2Ids.every((id) => list.find((e) => e.id === id)?.supportsEndFrame === true));
+}
+
 console.log(`\nРезультат: ${pass} пройдено, ${fail} провалено`);
 process.exit(fail ? 1 : 0);

@@ -3937,7 +3937,7 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
    */
   app.post('/api/ai/generate-video', requirePermission('canGenerateImages'), async (req, res) => {
     try {
-      const { prompt, engine, resolution, aspectRatio, durationSec, bookId, context } = req.body || {};
+      const { prompt, engine, resolution, aspectRatio, durationSec, bookId, context, startFrameImage, endFrameImage } = req.body || {};
 
       const finalPrompt = String(prompt || '').trim();
       if (!finalPrompt) {
@@ -3946,12 +3946,52 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
 
       const contextLabel = typeof context === 'string' && context.trim() ? context.trim().slice(0, 60) : 'Відео';
 
+      // Задача #206: референс першого/останнього кадру — той самий
+      // {kind:'upload'|'url', ...} формат, що й референси фото
+      // (generate-media-art вище), лише ОДНЕ зображення на поле замість
+      // масиву (Leonardo документує максимум 1 елемент на start_frame/
+      // end_frame для кожної моделі).
+      const resolveFrameUrl = async (item: unknown, label: string): Promise<string | undefined> => {
+        if (!item || typeof item !== 'object') return undefined;
+        const frame = item as { kind?: string; url?: string; dataBase64?: string; mimeType?: string };
+        if (frame.kind === 'url' && typeof frame.url === 'string') {
+          if (!/^https?:\/\//i.test(frame.url)) {
+            throw Object.assign(new Error(`Посилання на референс ${label} має починатися з http:// або https://.`), { kind: 'empty' });
+          }
+          return frame.url;
+        }
+        if (frame.kind === 'upload' && typeof frame.dataBase64 === 'string') {
+          const mimeType = typeof frame.mimeType === 'string' && frame.mimeType.startsWith('image/') ? frame.mimeType : 'image/png';
+          let buffer: Buffer;
+          try {
+            buffer = Buffer.from(frame.dataBase64, 'base64');
+          } catch {
+            throw Object.assign(new Error(`Не вдалося прочитати завантажений референс ${label}.`), { kind: 'empty' });
+          }
+          const baseUrl = process.env.APP_URL?.replace(/\/$/, '') || `${req.protocol}://${req.get('host')}`;
+          const saved = await saveGeneratedImage(buffer, mimeType, 'ref');
+          return `${baseUrl}${saved.url}`;
+        }
+        throw Object.assign(new Error(`Некоректний формат референсу ${label}.`), { kind: 'empty' });
+      };
+
+      let startFrameImageUrl: string | undefined;
+      let endFrameImageUrl: string | undefined;
+      try {
+        startFrameImageUrl = await resolveFrameUrl(startFrameImage, 'першого кадру');
+        endFrameImageUrl = await resolveFrameUrl(endFrameImage, 'останнього кадру');
+      } catch (err: any) {
+        return res.status(400).json({ error: err?.message || 'Некоректний референс кадру.', kind: 'empty' });
+      }
+
       const generated = await generateVideoAndLog({
         prompt: finalPrompt,
         engine,
         resolution,
         aspectRatio,
         durationSec: typeof durationSec === 'number' ? durationSec : undefined,
+        startFrameImageUrl,
+        endFrameImageUrl,
         filenameHint: 'video',
         req,
         label: `${contextLabel}: ${finalPrompt.slice(0, 60)}`,

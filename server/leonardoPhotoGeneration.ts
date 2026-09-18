@@ -62,6 +62,7 @@
  */
 
 import type { SupportedRatio } from './imageGeneration';
+import { extractLeonardoV2ValidationMessage } from './imageGeneration';
 
 export type LeonardoV2ImageErrorKind = 'no_key' | 'safety' | 'quota' | 'empty' | 'unknown';
 
@@ -258,7 +259,7 @@ function extFromContentType(ct: string | null): 'png' | 'jpg' | 'jpeg' | 'webp' 
  * Кроки — підтверджені офіційним гайдом і Python SDK (див. коментар
  * модуля): POST /init-image → presigned S3 POST → id.
  */
-async function uploadReferenceImage(apiKey: string, imageUrl: string): Promise<string> {
+export async function uploadReferenceImage(apiKey: string, imageUrl: string): Promise<string> {
   let sourceRes: Response;
   try {
     sourceRes = await fetch(imageUrl);
@@ -435,7 +436,15 @@ export async function generateLeonardoV2Photo(
           quantity: 1,
           width,
           height,
-          prompt_enhance: 'AUTO',
+          // Задача #206: НЕ надсилаємо prompt_enhance взагалі. Раніше тут
+          // було жорстко закодовано 'AUTO' — реальний виклик Seedream 5.0
+          // Pro впав з "parameters.prompt_enhance must be one of: OFF".
+          // Документація (перевірена для всіх 6 моделей) стверджує
+          // AUTO/ON/OFF — тобто СУПЕРЕЧИТЬ живій відповіді API для цієї
+          // моделі. Поле скрізь позначене необов'язковим — пропускаємо
+          // його, і Leonardo застосовує власний дефолт для кожної моделі
+          // сам, замість здогаду з нашого боку, який уже підтверджено
+          // хибний щонайменше для одного з 6 двигунів.
           ...(guidances ? { guidances } : {}),
         },
       }),
@@ -445,6 +454,21 @@ export async function generateLeonardoV2Photo(
   }
 
   const submitJson = (await submitRes.json().catch(() => null)) as unknown;
+
+  // Задача #206: перевіряємо ПЕРШИМ — реальний продакшн-збій (Seedream 5.0
+  // Pro, prompt_enhance) показав, що Leonardo повертає HTTP 200 з тілом у
+  // формі GraphQL-помилки замість очікуваної відповіді. Без цієї перевірки
+  // валідна причина збою ("prompt_enhance must be one of: OFF") тонула б у
+  // загальному "відповідь без розпізнаного id" з #204.
+  const validationMessage = extractLeonardoV2ValidationMessage(submitJson);
+  if (validationMessage) {
+    console.error(`Leonardo.Ai v2 (${options.engineId}): помилка валідації параметрів:`, validationMessage, submitJson);
+    throw new LeonardoV2PhotoError(
+      classifyLeonardoV2Error(submitRes.status, validationMessage),
+      `Leonardo.Ai: ${validationMessage}`
+    );
+  }
+
   const generationId = extractSubmittedGenerationId(submitJson);
 
   if (!submitRes.ok || !generationId) {

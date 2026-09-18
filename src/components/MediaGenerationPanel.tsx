@@ -84,6 +84,14 @@ interface VideoEngineInfo {
   defaultResolution: string;
   aspectRatios: string[];
   defaultAspectRatio: string;
+  /**
+   * Задача #206. Перший кадр підтверджено для ВСІХ 10 двигунів (v1 —
+   * окремий ендпоінт `/generations-image-to-video`; v2 — guidances.start_frame)
+   * — тому завжди true, поле лишене для симетрії й на випадок майбутнього
+   * двигуна без цієї підтримки. Останній кадр — лише для v2.
+   */
+  supportsStartFrame: boolean;
+  supportsEndFrame: boolean;
   available: boolean;
 }
 
@@ -138,6 +146,17 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
   const [videoResolution, setVideoResolution] = useState<string>('');
   const [videoAspectRatio, setVideoAspectRatio] = useState<string>('');
   const [videoDurationSec, setVideoDurationSec] = useState<number | undefined>(undefined);
+
+  // Задача #206: референс першого/останнього кадру для відео — ОДНЕ
+  // зображення на поле (Leonardo документує максимум 1 елемент для
+  // guidances.start_frame/end_frame і для imageId у v1), тому окремий,
+  // простіший стан від масиву referenceImages вище (фото-референси).
+  const [startFrameImage, setStartFrameImage] = useState<ReferenceImage | null>(null);
+  const [endFrameImage, setEndFrameImage] = useState<ReferenceImage | null>(null);
+  const [startFrameUrlInput, setStartFrameUrlInput] = useState('');
+  const [endFrameUrlInput, setEndFrameUrlInput] = useState('');
+  const startFrameFileInputRef = useRef<HTMLInputElement>(null);
+  const endFrameFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetch('/api/ai/image-engines', { credentials: 'same-origin' })
@@ -260,6 +279,24 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
     setVideoDurationSec(selectedVideoEngine.defaultDurationSec ?? undefined);
   }, [selectedVideoEngine]);
 
+  // Задача #206: останній кадр без першого не має сенсу (сервер це й так
+  // перевіряє, але прибираємо ЗАЗДАЛЕГІДЬ у панелі — той самий принцип,
+  // що й «прибрати референси при зміні двигуна» вище, задача #203) —
+  // і якщо обраний двигун взагалі не підтримує останній кадр (усі v1).
+  useEffect(() => {
+    if (!startFrameImage && endFrameImage) {
+      setEndFrameImage(null);
+    }
+  }, [startFrameImage, endFrameImage]);
+
+  useEffect(() => {
+    if (selectedVideoEngine && !selectedVideoEngine.supportsEndFrame && endFrameImage) {
+      setEndFrameImage(null);
+      onToast(t('mediaGenerationPanel.endFrameUnsupportedHint'));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedVideoEngine]);
+
   /** Додає завантажені файли як референси — до вільного місця (MAX_REFERENCE_IMAGES). */
   const handleReferenceFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -309,6 +346,35 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
 
   const removeReferenceImage = (id: string) => {
     setReferenceImages((prev) => prev.filter((r) => r.id !== id));
+  };
+
+  /** Задача #206: те саме завантаження, що й handleReferenceFiles, лише ОДНЕ зображення в одне поле стану (setImage), не масив. */
+  const handleSingleFrameFile = async (files: FileList | null, setImage: (r: ReferenceImage | null) => void) => {
+    const file = files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      onToast(t('mediaGenerationPanel.referenceImagesBadFile'));
+      return;
+    }
+    const dataBase64 = await fileToBase64(file);
+    setImage({
+      id: `frame-${Date.now()}`,
+      kind: 'upload',
+      dataBase64,
+      mimeType: file.type,
+      previewUrl: `data:${file.type};base64,${dataBase64}`,
+    });
+  };
+
+  const handleAddFrameUrl = (urlInput: string, setImage: (r: ReferenceImage | null) => void, clearInput: () => void) => {
+    const url = urlInput.trim();
+    if (!url) return;
+    if (!/^https?:\/\//i.test(url)) {
+      onToast(t('mediaGenerationPanel.referenceImagesBadUrl'));
+      return;
+    }
+    setImage({ id: `frame-${Date.now()}`, kind: 'url', url, previewUrl: url });
+    clearInput();
   };
 
   const handleGenerate = async () => {
@@ -398,6 +464,14 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
    * book.illustrations[]. Тому успіх повідомляється через onVideoGenerated()
    * — батько сам перечитає список файлів.
    */
+  /** Задача #206: та сама форма, якою вже кодуються referenceImages масиву вище — сервер очікує ідентичний {kind,...} для start/endFrameImage. */
+  const frameToPayload = (r: ReferenceImage | null) => {
+    if (!r) return undefined;
+    return r.kind === 'upload'
+      ? { kind: 'upload', dataBase64: r.dataBase64, mimeType: r.mimeType }
+      : { kind: 'url', url: r.url };
+  };
+
   const handleGenerateVideo = async () => {
     if (!prompt.trim()) {
       onToast(t('mediaGenerationPanel.toastEmptyPrompt'));
@@ -416,6 +490,8 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
           resolution: videoResolution || undefined,
           aspectRatio: videoAspectRatio || undefined,
           durationSec: typeof videoDurationSec === 'number' ? videoDurationSec : undefined,
+          startFrameImage: frameToPayload(startFrameImage),
+          endFrameImage: frameToPayload(endFrameImage),
           bookId: book.id,
           context: 'Медіатека',
         }),
@@ -765,6 +841,129 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
                   <p className="text-[10px] text-slate-600 leading-snug">{t('mediaGenerationPanel.videoDurationFixedHint')}</p>
                 )}
               </div>
+
+              {/* Задача #206: референс першого кадру — підтверджено для
+                  усіх 10 відеодвигунів (image-to-video). */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                  <span>{t('mediaGenerationPanel.startFrameLabel')}</span>
+                </label>
+                <p className="text-[10px] text-slate-600 leading-snug">{t('mediaGenerationPanel.startFrameHint')}</p>
+                {startFrameImage ? (
+                  <div className="relative group w-16 h-16 rounded-lg overflow-hidden border border-slate-800 bg-slate-900">
+                    <img src={startFrameImage.previewUrl} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                    <button
+                      onClick={() => setStartFrameImage(null)}
+                      title={t('mediaGenerationPanel.referenceImagesRemoveTitle')}
+                      className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <input
+                      ref={startFrameFileInputRef}
+                      type="file"
+                      accept="image/*"
+                      hidden
+                      onChange={(e) => {
+                        handleSingleFrameFile(e.target.files, setStartFrameImage);
+                        e.target.value = '';
+                      }}
+                    />
+                    <button
+                      onClick={() => startFrameFileInputRef.current?.click()}
+                      className="w-full py-1.5 rounded-lg border border-slate-800 bg-slate-900 text-[10px] text-slate-400 hover:text-white hover:border-slate-700 flex items-center justify-center gap-1.5"
+                    >
+                      <Upload className="w-3 h-3" /> {t('mediaGenerationPanel.referenceImagesUploadBtn')}
+                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        value={startFrameUrlInput}
+                        onChange={(e) => setStartFrameUrlInput(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleAddFrameUrl(startFrameUrlInput, setStartFrameImage, () => setStartFrameUrlInput(''))}
+                        placeholder={t('mediaGenerationPanel.referenceImagesUrlPlaceholder')}
+                        className="flex-1 p-2 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-300 focus:border-amber-400 focus:outline-hidden"
+                      />
+                      <button
+                        onClick={() => handleAddFrameUrl(startFrameUrlInput, setStartFrameImage, () => setStartFrameUrlInput(''))}
+                        disabled={!startFrameUrlInput.trim()}
+                        className="px-2.5 py-2 rounded-lg border border-slate-800 bg-slate-900 text-[10px] text-slate-400 hover:text-white disabled:opacity-40 shrink-0"
+                      >
+                        {t('mediaGenerationPanel.referenceImagesUrlAddBtn')}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Задача #206: референс останнього кадру — лише v2 (Seedance
+                  2.5 / Wan 3.0 / Kling O3 / FLUX 3 Video), і лише коли вже
+                  обрано перший кадр (жоден із двигунів не приймає останній
+                  без першого). */}
+              {selectedVideoEngine.supportsEndFrame && (
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                    <span>{t('mediaGenerationPanel.endFrameLabel')}</span>
+                  </label>
+                  <p className="text-[10px] text-slate-600 leading-snug">
+                    {startFrameImage ? t('mediaGenerationPanel.endFrameHint') : t('mediaGenerationPanel.endFrameNeedsStartHint')}
+                  </p>
+                  {endFrameImage ? (
+                    <div className="relative group w-16 h-16 rounded-lg overflow-hidden border border-slate-800 bg-slate-900">
+                      <img src={endFrameImage.previewUrl} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                      <button
+                        onClick={() => setEndFrameImage(null)}
+                        title={t('mediaGenerationPanel.referenceImagesRemoveTitle')}
+                        className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <input
+                        ref={endFrameFileInputRef}
+                        type="file"
+                        accept="image/*"
+                        hidden
+                        disabled={!startFrameImage}
+                        onChange={(e) => {
+                          handleSingleFrameFile(e.target.files, setEndFrameImage);
+                          e.target.value = '';
+                        }}
+                      />
+                      <button
+                        onClick={() => endFrameFileInputRef.current?.click()}
+                        disabled={!startFrameImage}
+                        className="w-full py-1.5 rounded-lg border border-slate-800 bg-slate-900 text-[10px] text-slate-400 hover:text-white hover:border-slate-700 disabled:opacity-40 flex items-center justify-center gap-1.5"
+                      >
+                        <Upload className="w-3 h-3" /> {t('mediaGenerationPanel.referenceImagesUploadBtn')}
+                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          value={endFrameUrlInput}
+                          onChange={(e) => setEndFrameUrlInput(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleAddFrameUrl(endFrameUrlInput, setEndFrameImage, () => setEndFrameUrlInput(''))}
+                          placeholder={t('mediaGenerationPanel.referenceImagesUrlPlaceholder')}
+                          disabled={!startFrameImage}
+                          className="flex-1 p-2 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-300 focus:border-amber-400 focus:outline-hidden disabled:opacity-40"
+                        />
+                        <button
+                          onClick={() => handleAddFrameUrl(endFrameUrlInput, setEndFrameImage, () => setEndFrameUrlInput(''))}
+                          disabled={!startFrameImage || !endFrameUrlInput.trim()}
+                          className="px-2.5 py-2 rounded-lg border border-slate-800 bg-slate-900 text-[10px] text-slate-400 hover:text-white disabled:opacity-40 shrink-0"
+                        >
+                          {t('mediaGenerationPanel.referenceImagesUrlAddBtn')}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </>
           )}
 

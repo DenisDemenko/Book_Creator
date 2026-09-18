@@ -322,5 +322,59 @@ console.log('\ngenerateLeonardoV2Photo — відповідь опитуванн
   }
 }
 
+console.log('\nЗадача #206 — submit НЕ надсилає prompt_enhance (реальний продакшн-збій: Leonardo відхилив жорстко закодоване \'AUTO\' для Seedream 5.0 Pro):');
+{
+  const realFetch = global.fetch;
+  const handlers = [
+    () => ({ ok: true, status: 200, json: async () => ({ id: 'gen-g7', status: 'PENDING' }) }),
+    () => ({ ok: true, status: 200, json: async () => ({ generations_by_pk: { status: 'COMPLETE', generated_images: [{ url: 'https://example.com/g7.png' }] } }) }),
+    () => ({ ok: true, status: 200, headers: { get: () => 'image/png' }, arrayBuffer: async () => Buffer.from(PNG_B64, 'base64').buffer }),
+  ];
+  const { fn, seen } = mockSequence(handlers);
+  global.fetch = fn;
+  try {
+    await generateLeonardoV2Photo({ engineId: 'leonardo-seedream-5-pro', apiKey: 'test-key', prompt: 'x', aspectRatio: '1:1' });
+    const submitBody = JSON.parse(seen[0].init.body);
+    t('parameters БЕЗ prompt_enhance (раніше жорстко \'AUTO\')', !('prompt_enhance' in submitBody.parameters), JSON.stringify(submitBody.parameters));
+  } catch (e: any) {
+    t('не мав кинути помилку', false, e.message);
+  } finally {
+    global.fetch = realFetch;
+  }
+}
+
+console.log('\nЗадача #206 — HTTP 200 із GraphQL-конвертом помилки (реальна відповідь Leonardo, Seedream 5.0 Pro, 18.09.2026) розпізнається й показує СПРАВЖНЮ причину, а не "без розпізнаного id":');
+{
+  const realFetch = global.fetch;
+  const REAL_ERROR_BODY = [
+    {
+      extensions: {
+        code: 'BadRequestException',
+        details: {
+          code: 'VALIDATION_ERROR',
+          errors: [{ code: 'VALIDATION_ERROR', message: 'parameters.prompt_enhance must be one of: OFF' }],
+          message: 'parameters.prompt_enhance must be one of: OFF',
+        },
+        statusCode: 400,
+      },
+      locations: [],
+      message: 'An error occurred.',
+      path: [],
+    },
+  ];
+  const handlers = [() => ({ ok: true, status: 200, json: async () => REAL_ERROR_BODY })];
+  const { fn } = mockSequence(handlers);
+  global.fetch = fn;
+  try {
+    await generateLeonardoV2Photo({ engineId: 'leonardo-seedream-5-pro', apiKey: 'test-key', prompt: 'x', aspectRatio: '1:1' });
+    t('мав кинути помилку', false);
+  } catch (e: any) {
+    t('повідомлення несе СПРАВЖНЮ причину validation-помилки', e.message.includes('prompt_enhance must be one of: OFF'), e.message);
+    t('НЕ загальне "відповідь без розпізнаного id"', !e.message.includes('без розпізнаного id'), e.message);
+  } finally {
+    global.fetch = realFetch;
+  }
+}
+
 console.log(`\nРезультат: ${pass} пройдено, ${fail} провалено`);
 process.exit(fail ? 1 : 0);

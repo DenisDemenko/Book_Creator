@@ -593,6 +593,9 @@ interface GenerateVideoParams {
   resolution?: string;
   aspectRatio?: string;
   durationSec?: number;
+  /** Задача #206 — референс першого/останнього кадру, уже перетворений на URL. */
+  startFrameImageUrl?: string;
+  endFrameImageUrl?: string;
   /** Короткий хінт для імені файлу (напр. "product-Комод", "char-Юля"). */
   filenameHint: string;
   req: any;
@@ -658,6 +661,8 @@ export async function generateVideo(p: GenerateVideoParams): Promise<{
       resolution: p.resolution,
       aspectRatio: p.aspectRatio,
       durationSec: p.durationSec,
+      startFrameImageUrl: p.startFrameImageUrl,
+      endFrameImageUrl: p.endFrameImageUrl,
       apiKeyOverride,
     });
     const saved = await saveVideoForOwner(p, generated.buffer, generated.mimeType);

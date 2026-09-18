@@ -342,6 +342,45 @@ export const leonardoConfig = {
 };
 
 /**
+ * Задача #206. Leonardo v2 (`POST /v2/generations`) інколи повертає
+ * HTTP 200 з ТІЛОМ у формі GraphQL-помилки — масив об'єктів
+ * `{message, extensions:{code, statusCode, details:{errors:[{message}]}}}`
+ * — замість очікуваного `{sdGenerationJob:...}`/`{id:...}`. Підтверджено
+ * РЕАЛЬНИМ продакшн-збоєм 18.09.2026 (Seedream 5.0 Pro, задача #204→#206):
+ * `submitRes.ok` було true (HTTP 200), а тіло — саме такий масив із
+ * validation-помилкою `parameters.prompt_enhance must be one of: OFF`.
+ * Без цієї перевірки помилка виглядала б як «HTTP 200, відповідь без
+ * розпізнаного id» — технічно правда, але марна для діагностики.
+ *
+ * Спільна для фото (leonardoPhotoGeneration.ts) і відео (videoGeneration.ts)
+ * v2-логіки — обидва модулі б'ють у той самий `/v2/generations` шлюз, тож
+ * форма помилки та сама для обох. Повертає null, якщо відповідь НЕ схожа
+ * на цей конверт (звичайна успішна відповідь чи інша форма помилки).
+ */
+export function extractLeonardoV2ValidationMessage(json: unknown): string | null {
+  if (!Array.isArray(json) || json.length === 0) return null;
+  const messages: string[] = [];
+  for (const entry of json) {
+    if (!entry || typeof entry !== 'object') continue;
+    const e = entry as {
+      message?: string;
+      extensions?: { details?: { errors?: { message?: string }[]; message?: string } };
+    };
+    const nested = e.extensions?.details?.errors;
+    if (Array.isArray(nested) && nested.length > 0) {
+      for (const item of nested) {
+        if (item?.message) messages.push(item.message);
+      }
+    } else if (e.extensions?.details?.message) {
+      messages.push(e.extensions.details.message);
+    } else if (e.message) {
+      messages.push(e.message);
+    }
+  }
+  return messages.length > 0 ? messages.join('; ') : null;
+}
+
+/**
  * Співвідношення сторін. Раніше тут було лише 5 значень (здогад із того,
  * що реально використовувалось у промптах книги) — звірка з офіційною
  * документацією Interactions API (ai.google.dev/gemini-api/docs/image-generation,
