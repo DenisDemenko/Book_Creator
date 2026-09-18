@@ -3406,6 +3406,11 @@ export const EditorView: React.FC<EditorViewProps> = ({
       const res = await fetch('/api/ai/translate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        // modelId/bookId — раніше переклад завжди йшов у Gemini напряму,
+        // ігноруючи модель, обрану автором в AI Асистенті (той самий
+        // effectiveAiModelId, яким уже користується «Покращити AI»,
+        // запис #187). Тепер сервер резолвить обраний рушій так само, як
+        // для /api/ai/edit-text.
         body: JSON.stringify({
           text: activeSection.content,
           title: activeSection.title,
@@ -3418,6 +3423,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
           } : undefined,
           genre: book.genre,
           bookTitle: book.title,
+          modelId: effectiveAiModelId || undefined,
+          bookId: book.id,
         }),
       });
 

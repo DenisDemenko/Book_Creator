@@ -1051,8 +1051,11 @@ registerGitCommandRoutes(app);
   // 3b. Literary Translation (Ukrainian -> English for bilingual publication)
   app.post('/api/ai/translate', async (req, res) => {
     try {
-      const { text, title, chapterTitle, scene, sourceLang = 'uk', targetLang = 'en', genre, bookTitle } = req.body;
-      
+      const { text, title, chapterTitle, scene, genre, bookTitle, modelId, bookId } = req.body;
+      if (!text || String(text).trim().length === 0) {
+        return res.status(400).json({ error: 'Потрібен текст розділу для перекладу.' });
+      }
+
       const systemPrompt = `You are an elite literary translator specializing in translating Ukrainian fiction and world-class literature into English for high-end international book publication.
 Your translations must:
 1. Preserve deep literary voice, atmosphere, nuances, imagery, metaphors, rhythm, and tone.
@@ -1086,47 +1089,38 @@ Manuscript Text (UA):
 
 Translate into refined English JSON.`;
 
-      let resultJson: any;
-      if (ai) {
-        const raw = await generateWithGemini(userPrompt, systemPrompt, true, {
-          req,
-          label: 'Переклад',
-          bookId: req.body?.bookId,
-        });
-        resultJson = JSON.parse(raw);
-      } else {
-        // High quality offline fallback translation
-        const fallbackText = text
-          ? text
-              .replace(/Скляні куполи Верхнього Печерська відбивали перші промені холодного серпневого сонця/g, 'The glass domes of Upper Pechersk reflected the first rays of the cold August sun')
-              .replace(/перетворюючи неоновий горизонт Нео-Києва на мерехтливу призму/g, 'turning the neon horizon of Neo-Kyiv into a shimmering prism')
-              .replace(/Олена стояла біля панорамного вікна лабораторії на 84-му поверсі/g, 'Olena stood by the panoramic window of the 84th-floor laboratory')
-              .replace(/Готовність до синхронізації 98 відсотків, пані архітекторко/g, 'Sync readiness is at 98 percent, architect')
-              .replace(/спокійний, позбавлений обертонів голос Сварога пролунав прямо в її слуховому імпланті/g, 'Svarog’s calm, overtone-free voice resonated directly inside her auditory implant')
-              .replace(/Підключи фільтри пам'яті четвертого рівня, Свароже/g, 'Connect the fourth-level memory filters, Svarog')
-              .replace(/У кав'ярні «Чорний Кварк» на Нижньому Подолі пахло вологою штучною кавою/g, 'The "Black Quark" cafe in Lower Podil smelled of damp synthetic coffee')
-              .replace(/Тарас Вальц повільно перегорнув сторінку паперового блокнота/g, 'Taras Valts slowly turned the page of his paper notebook')
-              .replace(/Ви запізнилися на сім хвилин, пане Вальц/g, 'You are seven minutes late, Mr. Valts')
-              .replace(/У нашому місті пунктуальність — це найпростіший спосіб опинитися в прицілі снайпера/g, 'In this city, punctuality is the easiest way to end up in a sniper’s crosshairs')
-          : '';
-
-        resultJson = {
-          translatedText: fallbackText || (text ? `[English Edition] ${text}` : ''),
-          translatedTitle: title ? title.replace(/Розділ/g, 'Section').replace(/Квантова голка/g, 'The Quantum Needle').replace(/Детектив з Нижнього Подолу/g, 'The Detective of Lower Podil') : undefined,
-          translatedChapterTitle: chapterTitle ? chapterTitle.replace(/Глава/g, 'Chapter').replace(/Скляний Світанок над Дніпром/g, 'Glass Dawn Over the Dnipro') : undefined,
-          translatedScene: scene ? {
-            title: scene.title ? scene.title.replace(/Нейроекстракція/g, 'Neuroextraction in Prometiy Lab').replace(/Зустріч у кавʼярні/g, 'Meeting at Black Quark Cafe') : '',
-            conflict: scene.conflict ? 'Risk of synaptic brain overload and sudden security raid.' : '',
-            resolution: scene.resolution ? 'Olena breaches the cipher and transfers encrypted data onto an autonomous crystal.' : '',
-            summary: scene.summary || ''
-          } : undefined,
-          notes: 'Literary English translation preserved cyberpunk terminology and dialogue cadences.'
-        };
-      }
+      // Раніше цей маршрут жорстко викликав Gemini напряму (generateWithGemini),
+      // ігноруючи модель, обрану автором в AI Асистенті, а за відсутності
+      // GEMINI_API_KEY мовчки повертав захардкожений «переклад» — кілька
+      // .replace() під конкретні речення ЦІЄЇ демо-книги, які на будь-якому
+      // іншому тексті просто нічого не міняли: автор отримував НЕперекладений
+      // український текст, підписаний як готовий англійський (запис #187).
+      // Тепер — та сама мультипровайдерна система (resolveCoachEngine/
+      // generateAiText), що й «Покращити AI» (/api/ai/edit-text) та AI-коуч:
+      // автор обирає рушій у AI Асистенті (book.preferredAiModelId), і саме
+      // він іде в запит перекладу. Локального фолбеку без жодного рушія
+      // свідомо немає — на відміну від редагування тексту, «перекладену
+      // мовчки без ШІ» версію чесно підробити нічим, тож 503 від
+      // resolveCoachEngine («рушій не налаштований») просто йде автору як є.
+      const userId = req.principal?.id as string | undefined;
+      const { resolvedModelId, engine, userKey } = await resolveCoachEngine(userId, modelId);
+      const result = await generateAiText({
+        engine,
+        modelId: resolvedModelId,
+        prompt: userPrompt,
+        systemInstruction: systemPrompt,
+        json: true,
+        apiKeyOverride: userKey,
+        req,
+        label: 'Переклад',
+        bookId,
+      });
+      const resultJson = JSON.parse(result.text);
 
       res.json(resultJson);
     } catch (err: any) {
       console.error('Error in /api/ai/translate:', err);
+      if (err instanceof ChatProviderError) return res.status(err.status).json({ error: err.message });
       res.status(500).json({ error: err.message || 'Помилка літературного перекладу' });
     }
   });
