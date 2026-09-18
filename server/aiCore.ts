@@ -46,6 +46,7 @@ import {
 import {
   generateVideo as generateVideoRaw,
   resolveVideoEngine,
+  engineModelId as videoEngineModelId,
 } from './videoGeneration';
 import {
   MEDIA_MIME_EXTENSIONS,
@@ -677,7 +678,7 @@ export async function generateVideo(p: GenerateVideoParams): Promise<{
     await logVideoUsage(
       { req: p.req, label: `Невдала спроба (${err?.kind || 'unknown'})`, bookId: p.bookId },
       failedEngine.id,
-      failedEngine.leonardoModel,
+      videoEngineModelId(failedEngine),
       p.resolution || failedEngine.defaultResolution,
       false
     );
