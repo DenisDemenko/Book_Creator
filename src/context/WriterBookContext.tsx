@@ -203,6 +203,14 @@ export const WriterBookProvider: React.FC<WriterBookProviderProps> = ({ children
     }));
   };
 
+  /** Сирий (необрізаний, без stripMarkup) текст секції — для вставки й точної заміни при прийнятті правок AI-коуча. */
+  const getSectionRawContent = (chapterId: string, sectionId: string): string => {
+    const chapter = (book?.chapters || []).find((ch: any) => ch.id === chapterId);
+    if (!chapter || !Array.isArray(chapter.sections)) return "";
+    const section = (chapter.sections as any[]).find((s: any) => s.id === sectionId);
+    return section?.content || section?.text || "";
+  };
+
   return (
     <WriterBookReactContext.Provider
       value={{
@@ -220,6 +228,7 @@ export const WriterBookProvider: React.FC<WriterBookProviderProps> = ({ children
         syncFromBook,
         chapters,
         getSectionsForChapter,
+        getSectionRawContent,
       }}
     >
       {children}

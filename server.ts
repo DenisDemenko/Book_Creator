@@ -4117,7 +4117,7 @@ ${JSON.stringify(bookContext || {}, null, 2)}
   // 8a. AI Coach: глибокий розбір відповіді автора для конкретної навички.
   app.post('/api/ai/coach-feedback', async (req, res) => {
     try {
-      const { skillId, skillTitle, subSkills, userDraft, exercisePrompt, bookContext, modelId, bookId } = req.body || {};
+      const { skillId, skillTitle, subSkills, userDraft, exercisePrompt, bookContext, modelId, bookId, requestFullCorrection, bookExcerptRef } = req.body || {};
       if (!userDraft || !String(userDraft).trim()) {
         return res.status(400).json({ error: 'Немає тексту для аналізу.' });
       }
@@ -4128,6 +4128,20 @@ ${JSON.stringify(bookContext || {}, null, 2)}
       const criteriaList = Array.isArray(subSkills) && subSkills.length > 0
         ? subSkills.map((s: string, i: number) => `${i + 1}. ${s}`).join('\n')
         : skillTitle;
+
+      // requestFullCorrection: автор тренувався не на вигаданій вправі, а на
+      // РЕАЛЬНОМУ уривку зі свого розділу (запис #190, пікер глава→розділ
+      // у BookContextBanner). Тоді, крім звичайного короткого
+      // rewrittenExample, просимо ще ПОВНУ виправлену версію ТОГО САМОГО
+      // уривка — того ж обсягу й того ж поділу на абзаци, — щоб клієнт міг
+      // показати кольоровий діф і одним кліком підставити її замість
+      // оригіналу в розділі книги. Без цієї явної вимоги модель або
+      // ігнорує задачу, або довільно скорочує/подовжує текст, і пряма
+      // заміна в книзі стає небезпечною.
+      const fullCorrectionInstruction = requestFullCorrection
+        ? `
+7. ОКРЕМО поверни поле "correctedFullText" — ПОВНУ виправлену версію тексту автора (усього, що в "ТЕКСТ АВТОРА" нижче), ТОГО Ж обсягу й з ТИМ САМИМ поділом на абзаци (розділяй порожнім рядком так само, як в оригіналі). Це не короткий зразок, а вся виправлена версія, придатна для прямої заміни оригіналу${bookExcerptRef?.sectionTitle ? ` у розділі «${bookExcerptRef.sectionTitle}»` : ''} без ручного редагування. Не скорочуй, не пропускай речення, не додавай нових сцен — лише виправляй стиль, ритм і точність формулювань у межах того самого змісту.`
+        : '';
 
       const systemPrompt = `Ти — провідний літературний AI-Коуч та редактор українських видавництв.
 Проаналізуй виконання практичної вправи автора для конкретної навички майстерності.
@@ -4142,7 +4156,7 @@ ${criteriaList}
 3. Дай 2-3 сильні сторони та 2-3 точки росту (конкретні, не абстрактні).
 4. Оціни кожен суб-критерій від 0 до 100 з коротким коментарем.
 5. Запропонуй покращений приклад (rewrittenExample) — короткий зразок, як підсилити текст.
-6. Дай одну коротку пораду майстра (tip).
+6. Дай одну коротку пораду майстра (tip).${fullCorrectionInstruction}
 
 Поверни СУВОРО такий JSON:
 {
@@ -4152,7 +4166,7 @@ ${criteriaList}
   "improvements": ["...", "..."],
   "criteriaFeedback": [{ "criterion": "назва", "score": 80, "comment": "коментар" }],
   "rewrittenExample": "покращений зразок",
-  "tip": "порада"
+  "tip": "порада"${requestFullCorrection ? ',\n  "correctedFullText": "повна виправлена версія всього тексту автора"' : ''}
 }`;
 
       const ctx = bookContext || {};
@@ -4206,6 +4220,11 @@ ${criteriaList}
             })),
             rewrittenExample: `«${String(userDraft).slice(0, 160)}…» — посилено через дію та сенсорні образи.`,
             tip: 'Порада майстра: читайте текст уголос, щоб відчути природний ритм читацького дихання.',
+            // Демо-режим без реального ШІ-ключа — чесно не повертаємо
+            // "виправлену" версію, якої насправді ніхто не аналізував:
+            // клієнт не показує кнопку "прийняти зміни в книзі", якщо це
+            // поле порожнє (SkillDetailModal.tsx).
+            correctedFullText: '',
           };
         } else {
           throw engineErr;
@@ -4221,6 +4240,7 @@ ${criteriaList}
         criteriaFeedback: Array.isArray(result.criteriaFeedback) ? result.criteriaFeedback : [],
         rewrittenExample: result.rewrittenExample || '',
         tip: result.tip || '',
+        correctedFullText: requestFullCorrection && typeof result.correctedFullText === 'string' ? result.correctedFullText : '',
       });
     } catch (err: any) {
       console.error('Error in /api/ai/coach-feedback:', err);

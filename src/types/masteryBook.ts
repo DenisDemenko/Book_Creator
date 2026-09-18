@@ -20,6 +20,23 @@ export interface BookExcerpt {
   wordCount: number;
 }
 
+/**
+ * Метадані вставки тексту з реальної книги в тренажер (запис #190):
+ * звідки саме взято текст і як саме він обраний, щоб потім — після
+ * правки AI-коуча — можна було точно повернути виправлений варіант у
+ * ТЕ САМЕ місце книги, а не десь навмання.
+ */
+export interface BookExcerptInsertMeta {
+  chapterId: string;
+  chapterTitle: string;
+  sectionId: string;
+  sectionTitle: string;
+  /** «whole» — весь розділ; «paragraphs» — лише обрані абзаци. */
+  mode: "whole" | "paragraphs";
+  /** Індекси обраних абзаців (0-based, за розбиттям content на \n\n), лише для mode === "paragraphs". */
+  paragraphIndices?: number[];
+}
+
 export interface WriterBookContextType {
   bookTitle: string;
   genre: string;
@@ -55,4 +72,12 @@ export interface WriterBookContextState {
   chapters: { id: string; title: string; order: number }[];
   /** Список розділів обраної глави (для селекторів). */
   getSectionsForChapter: (chapterId: string) => { id: string; title: string; wordCount: number }[];
+  /**
+   * Повний, «сирий» текст секції (без обрізання до 6000 символів і без
+   * stripMarkup, на відміну від bookExcerpts[].text, який лише для
+   * прев'ю). Потрібен, коли автор обирає текст глави для тренування
+   * (запис #190): вставляємо і потім звіряємо/заміняємо ТОЧНО той самий
+   * текст, що лежить у книзі, а не його очищену копію.
+   */
+  getSectionRawContent: (chapterId: string, sectionId: string) => string;
 }

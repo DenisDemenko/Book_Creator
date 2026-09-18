@@ -2,8 +2,10 @@
 import { SkillItem, UserSkillProgress, MicroExercise } from "../../types/mastery";
 import { useWriterBook } from "../../context/WriterBookContext";
 import { BookContextBanner } from "./BookContextBanner";
-import { appendTextToChapterEnd } from "../../utils/bookText";
+import { appendTextToChapterEnd, replaceTextInSection, replaceSectionContent } from "../../utils/bookText";
+import { computeWordDiff } from "../../utils/helpers";
 import type { Book } from "../../types";
+import type { BookExcerptInsertMeta } from "../../types/masteryBook";
 import {
   X,
   Sparkles,
@@ -26,6 +28,7 @@ import {
   Feather,
   Coffee,
   BookPlus,
+  RefreshCw,
 } from "lucide-react";
 import confetti from "canvas-confetti";
 
@@ -53,6 +56,20 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
   const { bookContext, chapters } = useWriterBook();
   const [insertChapterId, setInsertChapterId] = useState<string>("");
   const [chapterInsertNotice, setChapterInsertNotice] = useState<string | null>(null);
+
+  /**
+   * Джерело тексту для тренування, якщо він узятий з конкретного розділу
+   * книги через пікер у BookContextBanner (запис #190) — на відміну від
+   * «останній абзац» / «ідея книги» (вільні цитати без точної адреси) чи
+   * тексту, написаного автором з нуля. Поки воно є — після відповіді
+   * ШІ-коуча можна чесно запропонувати повернути виправлений варіант у
+   * ТЕ САМЕ місце книги, з кольоровим діфом і «прийняти / відхилити».
+   */
+  const [draftSource, setDraftSource] = useState<BookExcerptInsertMeta | null>(null);
+  // Точний текст, надісланий на аналіз — саме його звіряємо з актуальним
+  // вмістом розділу при прийнятті правки (розділ міг змінитися між тим).
+  const [lastAnalyzedText, setLastAnalyzedText] = useState<string>("");
+  const [bookCorrectionNotice, setBookCorrectionNotice] = useState<string | null>(null);
 
   /** Вставляє відповідь AI-коуча (рекомендований приклад або підсумок) у кінець обраного розділу. */
   const handleInsertFeedbackToChapter = () => {
@@ -104,11 +121,25 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
     setSliderProgress(userProgress[skill.id]?.progress ?? skill.defaultProgress);
     setNotes(userProgress[skill.id]?.customNotes ?? "");
     setInsertNotice(null);
+    setDraftSource(null);
+    setLastAnalyzedText("");
+    setBookCorrectionNotice(null);
   }, [skill]);
 
-  const handleInsertBookText = (text: string, source: "lastParagraph" | "bookIdea" | "chapterExcerpt") => {
+  const handleInsertBookText = (
+    text: string,
+    source: "lastParagraph" | "bookIdea" | "chapterExcerpt",
+    meta?: BookExcerptInsertMeta
+  ) => {
     setUserDraft(text);
     setAiFeedback(null);
+    // Джерело для заміни в книзі стежимо лише за явним вибором через пікер
+    // глава→розділ (chapterExcerpt + meta від BookContextBanner). «Останній
+    // абзац» і «ідея книги» — вільні цитати без точної адреси в розділі,
+    // для них пропозицію повернути правку в книгу не показуємо: нема куди
+    // точно писати.
+    setDraftSource(source === "chapterExcerpt" && meta ? meta : null);
+    setBookCorrectionNotice(null);
     setInsertNotice(
       source === "lastParagraph"
         ? "Вставлено останній абзац вашої глави для опрацювання!"
@@ -124,6 +155,9 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
     const trimmedDraft = userDraft.trim();
     if (!trimmedDraft) return;
 
+    // Звіряємо з АКТУАЛЬНИМ розділом книги саме цей текст при прийнятті
+    // правки нижче — не той, що лежав у полі вводу секунду тому.
+    setLastAnalyzedText(trimmedDraft);
     setIsAnalyzing(true);
     setAnalysisError(null);
     try {
@@ -140,6 +174,13 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
           // Запис #188: без цього AI-коуч завжди йшов у Gemini напряму, ігноруючи обрану автором модель.
           modelId: book?.preferredAiModelId || undefined,
           bookId: book?.id,
+          // Запис #190: текст узято з розділу книги (не написано з нуля) —
+          // просимо ШІ-коуча додатково повернути повну виправлену версію
+          // цього ж уривка, придатну для прямої заміни в розділі.
+          requestFullCorrection: !!draftSource,
+          bookExcerptRef: draftSource
+            ? { chapterTitle: draftSource.chapterTitle, sectionTitle: draftSource.sectionTitle }
+            : undefined,
         }),
       });
 
@@ -205,6 +246,10 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
         criteriaFeedback: Array.isArray(data.criteriaFeedback) ? data.criteriaFeedback : [],
         rewrittenExample: data.rewrittenExample || "",
         tip: data.tip || "Продовжуйте практикуватися для досягнення найвищого рівня майстерності.",
+        // Довіряємо полю лише тоді, коли самі його запитували (draftSource
+        // є) — інакше воно могло лишитись від локального демо-фолбеку,
+        // який структурно збігається з реальною відповіддю ядра.
+        correctedFullText: draftSource && typeof data.correctedFullText === "string" ? data.correctedFullText : "",
       };
 
       setAiFeedback(sanitizedData);
@@ -266,7 +311,10 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
           : `«${trimmedDraft.slice(0, 160)}...» — посилено через дію та сенсорні образи.`,
         tip: isSciFi
           ? "Золоте правило фантастики: чим могутніша сила героя, тим суворішими мають бути моральні дилеми та правила її використання."
-          : "Порада майстра: читайте текст уголос, щоб відчути природний ритм читацького дихання."
+          : "Порада майстра: читайте текст уголос, щоб відчути природний ритм читацького дихання.",
+        // Мережева помилка — локальний фолбек без реального аналізу ШІ, тож
+        // чесно не пропонуємо «прийняти» те, чого насправді ніхто не писав.
+        correctedFullText: "",
       };
       setAiFeedback(fallback);
       setSliderProgress(Math.max(sliderProgress || 50, fallback.score));
@@ -274,6 +322,48 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
     } finally {
       setIsAnalyzing(false);
     }
+  };
+
+  /**
+   * Прийняти правку ШІ-коуча в книгу (запис #190): підставляємо
+   * correctedFullText туди, звідки взято lastAnalyzedText. Спершу шукаємо
+   * точний збіг фрагмента (replaceTextInSection) — секція могла не
+   * змінитися відтоді, як текст пішов на аналіз. Нема збігу, але режим —
+   * «весь розділ»: пропонуємо повну заміну секції як явний, усвідомлений
+   * фолбек (replaceSectionContent), а не мовчки нічого не робимо і не
+   * пишемо кудись навмання (той самий принцип, що в appendTextToChapterEnd).
+   */
+  const handleAcceptBookCorrection = () => {
+    if (!book || !onUpdateBook || !draftSource || !aiFeedback?.correctedFullText) return;
+    const correctedText: string = aiFeedback.correctedFullText;
+
+    let result = replaceTextInSection(book.chapters, draftSource.chapterId, draftSource.sectionId, lastAnalyzedText, correctedText);
+    if (!result && draftSource.mode === "whole") {
+      result = replaceSectionContent(book.chapters, draftSource.chapterId, draftSource.sectionId, correctedText);
+    }
+
+    if (!result) {
+      setBookCorrectionNotice(
+        "Не вдалося точно знайти цей текст у розділі (можливо, його вже змінили) — вставте виправлений варіант вручну."
+      );
+      return;
+    }
+
+    onUpdateBook(
+      { ...book, chapters: result.chapters, updatedAt: new Date().toISOString() },
+      "AI-коуч оновив текст розділу",
+      `${draftSource.chapterTitle} \u2192 ${draftSource.sectionTitle}`
+    );
+    setBookCorrectionNotice(`Текст розділу «${draftSource.sectionTitle}» оновлено виправленою версією.`);
+    // Пропозицію "спожито" — ховаємо блок діфа, решта звіту лишається.
+    setAiFeedback((prev: any) => (prev ? { ...prev, correctedFullText: "" } : prev));
+    setUserDraft(correctedText);
+    setTimeout(() => setBookCorrectionNotice(null), 5000);
+  };
+
+  /** Відхилити правку — залишаємо текст у книзі як був, ховаємо лише блок пропозиції. */
+  const handleRejectBookCorrection = () => {
+    setAiFeedback((prev: any) => (prev ? { ...prev, correctedFullText: "" } : prev));
   };
 
   // Generate dynamic custom exercise via AI
@@ -306,6 +396,10 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
         setSelectedExercise(newEx);
         setUserDraft("");
         setAiFeedback(null);
+        // Нове AI-завдання — поле вводу знову порожнє, попередній текст із
+        // книги (якщо був) до нього вже не стосується.
+        setDraftSource(null);
+        setBookCorrectionNotice(null);
       }
     } catch (e) {
       console.error(e);
@@ -613,6 +707,16 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
                   <span className="font-bold text-[#445545] flex items-center gap-1.5">
                     <Feather className="w-3.5 h-3.5 text-emerald-700" />
                     <span>Робоче поле тексту:</span>
+                    {/* Джерело тексту (запис #190) — видно, звідки він, ДО того, як ШІ-коуч його розбере. */}
+                    {draftSource ? (
+                      <span className="text-[10px] font-bold text-[#006397] bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-full whitespace-nowrap">
+                        З вашої книги: «{draftSource.sectionTitle}»{draftSource.mode === "paragraphs" ? " (обрані абзаци)" : ""}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full whitespace-nowrap">
+                        Власний текст / вправа
+                      </span>
+                    )}
                   </span>
 
                   {/* Quick-insert pills */}
@@ -663,6 +767,8 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
                         setAiFeedback(null);
                         setAnalysisError(null);
                         setInsertNotice(null);
+                        setDraftSource(null);
+                        setBookCorrectionNotice(null);
                       }}
                       className="font-bold text-[#6c7b6d] hover:text-[#1a1c1c] flex items-center gap-1 cursor-pointer"
                     >
@@ -779,6 +885,80 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
                           </div>
                         ))}
                       </div>
+                    </div>
+                  )}
+
+                  {/* Пропозиція повернути виправлений текст у розділ книги
+                      (запис #190): показується лише коли (а) текст узято з
+                      конкретного розділу через пікер (draftSource) і (б)
+                      ШІ-коуч повернув повну виправлену версію того самого
+                      уривка (correctedFullText, запитано лише в цьому
+                      випадку — див. requestFullCorrection вище). */}
+                  {draftSource && aiFeedback.correctedFullText && (
+                    <div className="neo-extruded bg-white p-4 rounded-2xl border-2 border-sky-300/70 flex flex-col gap-3">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-2 text-xs font-extrabold text-[#006397] uppercase tracking-wider">
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          <span>Розділ «{draftSource.sectionTitle}» (глава «{draftSource.chapterTitle}»)</span>
+                        </div>
+                        <span className="text-[10px] font-bold text-white bg-[#006397] px-2.5 py-1 rounded-full whitespace-nowrap">
+                          Згенеровано ШІ — прийняти зміни?
+                        </span>
+                      </div>
+
+                      {/* Кольори діфа — явними Tailwind-класами світлого
+                          тексту-на-темному/темного-на-світлому, А НЕ
+                          спільними nova-diff-* з index.css: ті класи
+                          розраховані на панель, що сама перефарбовується
+                          разом із global data-theme (як у EditorView), а
+                          картка тренажера тут ЗАВЖДИ світла незалежно від
+                          теми застосунку. Взявши nova-diff-* напряму,
+                          дефолтна (темна) гілка раз у раз лягала б світлим
+                          текстом на світлий фон — той самий баг, що вже
+                          виправляли в EditorView, тільки навпаки. */}
+                      <div className="p-3 rounded-xl neo-pressed-soft bg-[#f4f3f3] text-xs leading-relaxed max-h-64 overflow-y-auto font-['Plus_Jakarta_Sans',sans-serif]">
+                        {computeWordDiff(lastAnalyzedText, aiFeedback.correctedFullText).map((segment, idx) => {
+                          if (segment.type === "added") {
+                            return (
+                              <span key={idx} className="bg-emerald-100 text-emerald-950 border-b border-emerald-500/70 px-0.5 rounded">
+                                {segment.text}
+                              </span>
+                            );
+                          }
+                          if (segment.type === "removed") {
+                            return (
+                              <span key={idx} className="bg-rose-100 text-rose-950 line-through px-0.5 rounded">
+                                {segment.text}
+                              </span>
+                            );
+                          }
+                          return <span key={idx} className="text-[#1a1c1c]">{segment.text}</span>;
+                        })}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          onClick={handleAcceptBookCorrection}
+                          className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs cursor-pointer"
+                        >
+                          <Check className="w-4 h-4" />
+                          <span>Прийняти зміни в книзі</span>
+                        </button>
+                        <button
+                          onClick={handleRejectBookCorrection}
+                          className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-gray-200 hover:bg-gray-300 text-[#3d4a3e] font-bold text-xs cursor-pointer"
+                        >
+                          <X className="w-4 h-4" />
+                          <span>Залишити як є</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {bookCorrectionNotice && (
+                    <div className="text-xs text-sky-800 bg-sky-50 p-2.5 rounded-xl flex items-center gap-2">
+                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                      <span>{bookCorrectionNotice}</span>
                     </div>
                   )}
 

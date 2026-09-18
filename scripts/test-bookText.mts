@@ -7,7 +7,7 @@
  * (scripts/test-chatSessions.mts): тестуємо шов напряму, без браузера.
  */
 import type { Chapter } from '../src/types.ts';
-import { appendTextToChapterEnd } from '../src/utils/bookText.ts';
+import { appendTextToChapterEnd, replaceTextInSection, replaceSectionContent } from '../src/utils/bookText.ts';
 
 let pass = 0, fail = 0;
 const t = (n: string, c: boolean, e = '') => { c ? pass++ : fail++; console.log(`${c ? '  ✓' : '  ✗'} ${n}${e ? ' — ' + e : ''}`); };
@@ -98,6 +98,67 @@ console.log('\nappendTextToChapterEnd — не чіпає інші розділ�
 
   const result = appendTextToChapterEnd(chapters, 'chap-1', 'Y');
   t('інший розділ повертається тим самим об’єктом (без зайвого клонування)', result?.chapters[1] === otherChapter);
+}
+
+console.log('\nreplaceTextInSection — точна заміна фрагмента в секції (запис #190, «Прийняти зміни» в тренажерах майстерності):');
+{
+  const chapters: Chapter[] = [
+    {
+      id: 'chap-1', bookId: 'book-1', title: 'Глава 1', order: 1,
+      sections: [makeSection('sec-1', 1, 'Спочатку йде вступ.\n\nПотім середина тексту.\n\nІ кінець.')],
+    },
+  ];
+
+  const result = replaceTextInSection(chapters, 'chap-1', 'sec-1', 'Потім середина тексту.', 'Тепер тут інша середина.');
+  t('повертає результат (не null), коли фрагмент знайдено', result !== null);
+  t('замінює лише знайдений фрагмент, решта секції незмінна',
+    result?.chapters[0].sections[0].content === 'Спочатку йде вступ.\n\nТепер тут інша середина.\n\nІ кінець.',
+    result?.chapters[0].sections[0].content);
+  t('sectionId вказує на секцію, де відбулась заміна', result?.sectionId === 'sec-1');
+}
+
+console.log('\nreplaceTextInSection — точного збігу немає → null (не переписує щось навмання):');
+{
+  const chapters: Chapter[] = [
+    { id: 'chap-1', bookId: 'book-1', title: 'Глава 1', order: 1, sections: [makeSection('sec-1', 1, 'Оригінальний текст.')] },
+  ];
+
+  t('фрагмент не знайдено в content → null',
+    replaceTextInSection(chapters, 'chap-1', 'sec-1', 'Текст, якого тут нема', 'Заміна') === null);
+  t('невідомий chapterId → null',
+    replaceTextInSection(chapters, 'no-such-chapter', 'sec-1', 'Оригінальний текст.', 'X') === null);
+  t('невідомий sectionId → null',
+    replaceTextInSection(chapters, 'chap-1', 'no-such-section', 'Оригінальний текст.', 'X') === null);
+  t('порожній replacementText → null',
+    replaceTextInSection(chapters, 'chap-1', 'sec-1', 'Оригінальний текст.', '   ') === null);
+}
+
+console.log('\nreplaceTextInSection — не чіпає інші секції й розділи (імутабельність):');
+{
+  const otherSection = makeSection('sec-other', 2, 'Не чіпати.');
+  const chapters: Chapter[] = [
+    { id: 'chap-1', bookId: 'book-1', title: 'Глава 1', order: 1, sections: [makeSection('sec-1', 1, 'A. B.'), otherSection] },
+  ];
+
+  const result = replaceTextInSection(chapters, 'chap-1', 'sec-1', 'A.', 'C.');
+  t('інша секція того ж розділу повертається тим самим об’єктом', result?.chapters[0].sections[1] === otherSection);
+}
+
+console.log('\nreplaceSectionContent — повна заміна вмісту секції (фолбек режиму «цілий розділ», коли точного збігу вже нема):');
+{
+  const chapters: Chapter[] = [
+    { id: 'chap-1', bookId: 'book-1', title: 'Глава 1', order: 1, sections: [makeSection('sec-1', 1, 'Старий вміст розділу.')] },
+  ];
+
+  const result = replaceSectionContent(chapters, 'chap-1', 'sec-1', 'Повністю новий, виправлений вміст розділу.');
+  t('повертає результат (не null)', result !== null);
+  t('вміст секції замінено повністю',
+    result?.chapters[0].sections[0].content === 'Повністю новий, виправлений вміст розділу.',
+    result?.chapters[0].sections[0].content);
+
+  t('невідомий chapterId → null', replaceSectionContent(chapters, 'no-such-chapter', 'sec-1', 'X') === null);
+  t('невідомий sectionId → null', replaceSectionContent(chapters, 'chap-1', 'no-such-section', 'X') === null);
+  t('порожній/пробільний newText → null', replaceSectionContent(chapters, 'chap-1', 'sec-1', '   ') === null);
 }
 
 console.log(`\nРезультат: ${pass} пройдено, ${fail} провалено`);

@@ -16,10 +16,23 @@ import {
   ListTree,
   FileText,
   MousePointerClick,
+  CheckSquare,
+  Square,
 } from "lucide-react";
+import type { BookExcerptInsertMeta } from "../../types/masteryBook";
 
 interface BookContextBannerProps {
-  onInsertText?: (text: string, source: "lastParagraph" | "bookIdea" | "chapterExcerpt") => void;
+  /**
+   * meta (4-й аргумент) — заповнюється лише для source === "chapterExcerpt":
+   * звідки саме взято текст і як (весь розділ чи обрані абзаци), щоб
+   * SkillDetailModal міг потім точно повернути виправлення ШІ-коуча в те
+   * саме місце книги (запис #190).
+   */
+  onInsertText?: (
+    text: string,
+    source: "lastParagraph" | "bookIdea" | "chapterExcerpt",
+    meta?: BookExcerptInsertMeta
+  ) => void;
   compact?: boolean;
 }
 
@@ -27,7 +40,7 @@ export const BookContextBanner: React.FC<BookContextBannerProps> = ({
   onInsertText,
   compact = false,
 }) => {
-  const { bookContext, updateBookContext, resetToDefaultBookContext, bookExcerpts, chapters, getSectionsForChapter, activeExcerptId, setActiveExcerpt } = useWriterBook();
+  const { bookContext, updateBookContext, resetToDefaultBookContext, bookExcerpts, chapters, getSectionsForChapter, getSectionRawContent, activeExcerptId, setActiveExcerpt } = useWriterBook();
   const [isEditing, setIsEditing] = useState(false);
   const [isExpanded, setIsExpanded] = useState(!compact);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -36,10 +49,59 @@ export const BookContextBanner: React.FC<BookContextBannerProps> = ({
   const [pickerChapterId, setPickerChapterId] = useState<string>("");
   const [pickerSectionId, setPickerSectionId] = useState<string>("");
 
+  // Спосіб вставки обраного розділу (запис #190): весь розділ цілком, чи
+  // лише кілька абзаців з нього — власник просив саме такий вибір.
+  const [insertMode, setInsertMode] = useState<"whole" | "paragraphs">("whole");
+  const [selectedParagraphIdxs, setSelectedParagraphIdxs] = useState<Set<number>>(new Set());
+
   // Derive current chapter & section options
   const activeExcerpt = bookExcerpts.find((e) => e.id === activeExcerptId) || null;
   const pickerSections = pickerChapterId ? getSectionsForChapter(pickerChapterId) : [];
   const pickerSection = pickerSections.find((s) => s.id === pickerSectionId) || null;
+
+  // Повний («сирий») текст обраного розділу — саме він вставляється й саме
+  // з ним звіряється точка заміни, коли автор пізніше приймає правку ШІ.
+  const rawSectionContent = pickerSectionId ? getSectionRawContent(pickerChapterId, pickerSectionId) : "";
+  const rawParagraphs = rawSectionContent
+    ? rawSectionContent.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)
+    : [];
+
+  const toggleParagraph = (idx: number) => {
+    setSelectedParagraphIdxs((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
+
+  const handleInsertChapterExcerpt = () => {
+    if (!onInsertText || !pickerChapterId || !pickerSectionId || !pickerSection) return;
+    const chapterTitle = chapters.find((c) => c.id === pickerChapterId)?.title || "";
+    if (insertMode === "whole") {
+      const text = rawSectionContent || activeExcerpt?.text || "";
+      if (!text.trim()) return;
+      onInsertText(text, "chapterExcerpt", {
+        chapterId: pickerChapterId,
+        chapterTitle,
+        sectionId: pickerSectionId,
+        sectionTitle: pickerSection.title,
+        mode: "whole",
+      });
+    } else {
+      const indices = Array.from(selectedParagraphIdxs).sort((a, b) => a - b);
+      if (indices.length === 0) return;
+      const text = indices.map((i) => rawParagraphs[i]).join("\n\n");
+      onInsertText(text, "chapterExcerpt", {
+        chapterId: pickerChapterId,
+        chapterTitle,
+        sectionId: pickerSectionId,
+        sectionTitle: pickerSection.title,
+        mode: "paragraphs",
+        paragraphIndices: indices,
+      });
+    }
+  };
 
   // Sync picker state with the active excerpt from context
   useEffect(() => {
@@ -51,6 +113,12 @@ export const BookContextBanner: React.FC<BookContextBannerProps> = ({
       setPickerSectionId("");
     }
   }, [activeExcerptId, bookExcerpts.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Новий розділ обрано — попередній вибір «весь / абзаци» вже не про нього.
+  useEffect(() => {
+    setInsertMode("whole");
+    setSelectedParagraphIdxs(new Set());
+  }, [pickerSectionId]);
 
   // Form state for inline editing
   const [tempTitle, setTempTitle] = useState(bookContext.bookTitle);
@@ -329,21 +397,76 @@ export const BookContextBanner: React.FC<BookContextBannerProps> = ({
                       </div>
                     </div>
 
-                    {/* Preview + insert button */}
+                    {/* Спосіб вставки + прев'ю + кнопка вставки */}
                     {activeExcerpt && (
-                      <div className="flex items-center justify-between gap-3 pt-1">
-                        <p className="text-[11px] text-[#2c382d] italic line-clamp-2 leading-relaxed flex-1 min-w-0">
-                          «{activeExcerpt.text.slice(0, 180)}{activeExcerpt.text.length > 180 ? "…" : ""}»
-                        </p>
-                        {onInsertText && (
+                      <div className="flex flex-col gap-2 pt-1">
+                        {/* Весь розділ, чи лише обрані абзаци з нього (запис #190) */}
+                        <div className="flex items-center gap-1.5">
                           <button
-                            onClick={() => onInsertText(activeExcerpt.text, "chapterExcerpt")}
-                            className="shrink-0 px-3 py-1.5 rounded-xl bg-[#006397] hover:bg-[#004e77] text-white text-[11px] font-extrabold flex items-center gap-1.5 shadow-sm cursor-pointer"
-                            title="Вставити обраний текст книги в робоче поле вправи"
+                            type="button"
+                            onClick={() => setInsertMode("whole")}
+                            className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition-all cursor-pointer ${
+                              insertMode === "whole" ? "bg-[#006397] text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                            }`}
                           >
-                            <MousePointerClick className="w-3 h-3" />
-                            <span>Вставити в тренажер</span>
+                            Весь розділ
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => setInsertMode("paragraphs")}
+                            className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition-all cursor-pointer ${
+                              insertMode === "paragraphs" ? "bg-[#006397] text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                            }`}
+                          >
+                            Обрати абзаци ({rawParagraphs.length})
+                          </button>
+                        </div>
+
+                        {insertMode === "whole" ? (
+                          <p className="text-[11px] text-[#2c382d] italic line-clamp-2 leading-relaxed">
+                            «{activeExcerpt.text.slice(0, 180)}{activeExcerpt.text.length > 180 ? "…" : ""}»
+                          </p>
+                        ) : (
+                          <div className="flex flex-col gap-1 max-h-40 overflow-y-auto pr-1">
+                            {rawParagraphs.map((para, idx) => {
+                              const isSelected = selectedParagraphIdxs.has(idx);
+                              return (
+                                <div
+                                  key={idx}
+                                  onClick={() => toggleParagraph(idx)}
+                                  className={`flex items-start gap-1.5 p-1.5 rounded-lg cursor-pointer text-[11px] leading-snug transition-colors ${
+                                    isSelected ? "bg-sky-50 border border-sky-200" : "hover:bg-gray-50 border border-transparent"
+                                  }`}
+                                >
+                                  {isSelected ? (
+                                    <CheckSquare className="w-3.5 h-3.5 text-sky-600 shrink-0 mt-0.5" />
+                                  ) : (
+                                    <Square className="w-3.5 h-3.5 text-gray-300 shrink-0 mt-0.5" />
+                                  )}
+                                  <span className="text-[#2c382d] line-clamp-2">
+                                    {para.slice(0, 160)}{para.length > 160 ? "…" : ""}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                            {rawParagraphs.length === 0 && (
+                              <p className="text-[11px] text-gray-400">У цьому розділі не знайдено окремих абзаців.</p>
+                            )}
+                          </div>
+                        )}
+
+                        {onInsertText && (
+                          <div className="flex justify-end">
+                            <button
+                              onClick={handleInsertChapterExcerpt}
+                              disabled={insertMode === "paragraphs" && selectedParagraphIdxs.size === 0}
+                              className="shrink-0 px-3 py-1.5 rounded-xl bg-[#006397] hover:bg-[#004e77] disabled:opacity-40 disabled:cursor-not-allowed text-white text-[11px] font-extrabold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                              title="Вставити обраний текст книги в робоче поле вправи"
+                            >
+                              <MousePointerClick className="w-3 h-3" />
+                              <span>Вставити в тренажер</span>
+                            </button>
+                          </div>
                         )}
                       </div>
                     )}

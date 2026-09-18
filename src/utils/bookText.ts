@@ -76,6 +76,87 @@ export function appendTextToChapterEnd(
  * Обрізаємо на межі слова: чат — не місце для повного розділу, а модель
  * усе одно отримує книжковий контекст окремо (bookContext у запиті).
  */
+/**
+ * Замінює ТОЧНИЙ фрагмент `originalText` на `replacementText` всередині
+ * вмісту секції `sectionId` розділу `chapterId`.
+ *
+ * Навіщо саме так, а не просто перезаписати секцію. AI-коуч у трекажерах
+ * «18 навичок» (SkillDetailModal.tsx) вміє повернути виправлену версію
+ * уривка книги, який автор обрав для тренування — і питає, чи підставити
+ * її замість оригіналу в самому розділі (запис #190). Між тим, як автор
+ * надіслав уривок на аналіз, і тим, як натиснув «Прийняти зміни», секція
+ * могла змінитися (дописав щось в іншій вкладці) — тому шукаємо ТОЧНИЙ
+ * збіг `originalText` в актуальному content, а не сліпо переписуємо все.
+ *
+ * Немає точного збігу — це не привід тихо замінити чужий текст (той
+ * самий принцип, що й у appendTextToChapterEnd вище): повертаємо null,
+ * виклик сам вирішує, чи пропонувати автору повну заміну розділу
+ * (replaceSectionContent нижче) як явний фолбек.
+ */
+export function replaceTextInSection(
+  chapters: Chapter[],
+  chapterId: string,
+  sectionId: string,
+  originalText: string,
+  replacementText: string
+): AppendTextResult | null {
+  if (!originalText || !replacementText.trim()) return null;
+  const chapter = chapters.find((c) => c.id === chapterId);
+  if (!chapter) return null;
+  const section = chapter.sections.find((s) => s.id === sectionId);
+  if (!section || !section.content.includes(originalText)) return null;
+
+  const start = section.content.indexOf(originalText);
+  const newContent = section.content.replace(originalText, replacementText);
+
+  const updatedChapters = chapters.map((chap) => {
+    if (chap.id !== chapterId) return chap;
+    return {
+      ...chap,
+      sections: chap.sections.map((sec) =>
+        sec.id !== sectionId
+          ? sec
+          : { ...sec, content: newContent, wordCount: calculateWordCount(newContent), lastModified: new Date().toISOString() }
+      ),
+    };
+  });
+
+  return { chapters: updatedChapters, sectionId, start, end: start + replacementText.length };
+}
+
+/**
+ * Повна заміна вмісту секції — фолбек для replaceTextInSection, коли
+ * точного збігу фрагмента вже нема (наприклад, режим «цілий розділ», і
+ * секція змінилась), але автор все одно свідомо хоче прийняти виправлення.
+ * SkillDetailModal.tsx пропонує це явним другим кроком, а не робить сама.
+ */
+export function replaceSectionContent(
+  chapters: Chapter[],
+  chapterId: string,
+  sectionId: string,
+  newText: string
+): AppendTextResult | null {
+  if (!newText.trim()) return null;
+  const chapter = chapters.find((c) => c.id === chapterId);
+  if (!chapter) return null;
+  const section = chapter.sections.find((s) => s.id === sectionId);
+  if (!section) return null;
+
+  const updatedChapters = chapters.map((chap) => {
+    if (chap.id !== chapterId) return chap;
+    return {
+      ...chap,
+      sections: chap.sections.map((sec) =>
+        sec.id !== sectionId
+          ? sec
+          : { ...sec, content: newText, wordCount: calculateWordCount(newText), lastModified: new Date().toISOString() }
+      ),
+    };
+  });
+
+  return { chapters: updatedChapters, sectionId, start: 0, end: newText.length };
+}
+
 export const CHAT_FRAGMENT_LIMIT = 3000;
 
 export function formatFragmentForChat(text: string, where?: string, limit = CHAT_FRAGMENT_LIMIT): string {
