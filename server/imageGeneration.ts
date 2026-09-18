@@ -52,6 +52,14 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import type { GoogleGenAI } from '@google/genai';
 import { SEEDREAM_FAL_MODEL, SEEDREAM_FAL_EDIT_MODEL } from './pricing';
+import {
+  LEONARDO_V2_PHOTO_SPECS,
+  leonardoV2PhotoMaxReferences,
+  generateLeonardoV2Photo,
+  LeonardoV2PhotoError,
+  type LeonardoPhotoEngineId,
+  type LeonardoV2PhotoSpec,
+} from './leonardoPhotoGeneration';
 
 /**
  * Максимум референсних зображень для мультиреференсної генерації
@@ -62,7 +70,16 @@ import { SEEDREAM_FAL_MODEL, SEEDREAM_FAL_EDIT_MODEL } from './pricing';
  */
 export const MAX_REFERENCE_IMAGES = 10;
 
-export type ImageEngineId = 'nano-banana-2-lite' | 'nano-banana-2' | 'nano-banana-pro' | 'seedream' | 'gpt-image' | 'leonardo';
+export type ImageEngineId =
+  | 'nano-banana-2-lite'
+  | 'nano-banana-2'
+  | 'nano-banana-pro'
+  | 'seedream'
+  | 'gpt-image'
+  | 'leonardo'
+  // Задача #203 — 6 фото-двигунів Leonardo v2 API з нативною підтримкою
+  // референсних зображень (див. server/leonardoPhotoGeneration.ts).
+  | LeonardoPhotoEngineId;
 
 export interface ImageEngineInfo {
   id: ImageEngineId;
@@ -174,9 +191,77 @@ export const IMAGE_ENGINES: Record<ImageEngineId, ImageEngineInfo> = {
     supportsQualityControl: false,
     supportsFormatChoice: false,
   },
+
+  // --- Задача #203: 6 фото-двигунів Leonardo v2 API з нативною підтримкою ---
+  // --- референсних зображень. Специфіка кожної моделі (розміри, межа  ---
+  // --- референсів) — у server/leonardoPhotoGeneration.ts.             ---
+  'leonardo-gpt-image-25-flare': {
+    id: 'leonardo-gpt-image-25-flare',
+    label: 'GPT Image 2.5 Flare (через Leonardo.Ai)',
+    modelId: 'openai/gpt-image-2.5-flare',
+    provider: 'leonardo',
+    maxSize: '1K',
+    supportsQualityControl: false,
+    supportsFormatChoice: false,
+  },
+  'leonardo-gpt-image-25-sunburst': {
+    id: 'leonardo-gpt-image-25-sunburst',
+    label: 'GPT Image 2.5 Sunburst (через Leonardo.Ai)',
+    modelId: 'openai/gpt-image-2.5-sunburst',
+    provider: 'leonardo',
+    maxSize: '1K',
+    supportsQualityControl: false,
+    supportsFormatChoice: false,
+  },
+  'leonardo-nano-banana-2-lite': {
+    id: 'leonardo-nano-banana-2-lite',
+    // НЕ плутати з ГУГЛІВСЬКИМ 'nano-banana-2-lite' вище (gemini-3.1-flash-
+    // lite-image) — та сама назва моделі, інший провайдер/ключ/API, тому
+    // підпис явно каже «через Leonardo.Ai».
+    label: 'Nano Banana 2 Lite (через Leonardo.Ai)',
+    modelId: 'nano-banana-2-lite',
+    provider: 'leonardo',
+    maxSize: '1K',
+    supportsQualityControl: false,
+    supportsFormatChoice: false,
+  },
+  'leonardo-seedream-4-5': {
+    id: 'leonardo-seedream-4-5',
+    label: 'Seedream 4.5 (через Leonardo.Ai)',
+    modelId: 'seedream-4.5',
+    provider: 'leonardo',
+    maxSize: '1K',
+    supportsQualityControl: false,
+    supportsFormatChoice: false,
+  },
+  'leonardo-seedream-5-pro': {
+    id: 'leonardo-seedream-5-pro',
+    label: 'Seedream 5.0 Pro (через Leonardo.Ai)',
+    modelId: 'seedream-5.0-pro',
+    provider: 'leonardo',
+    // Документований дефолт моделі — 2048x2048, реально вище за решту
+    // цієї шістки, тож '2K' тут чесний маркер, а не занижений.
+    maxSize: '2K',
+    supportsQualityControl: false,
+    supportsFormatChoice: false,
+  },
+  'leonardo-flux-dev': {
+    id: 'leonardo-flux-dev',
+    label: 'FLUX Dev (через Leonardo.Ai)',
+    modelId: 'flux-dev',
+    provider: 'leonardo',
+    maxSize: '2K',
+    supportsQualityControl: false,
+    supportsFormatChoice: false,
+  },
 };
 
 export const DEFAULT_ENGINE: ImageEngineId = 'nano-banana-2';
+
+/** Спека v2-двигуна Leonardo для цього ImageEngineId, якщо він — один із 6 нових (задача #203). */
+function leonardoV2SpecFor(engineId: ImageEngineId): LeonardoV2PhotoSpec | undefined {
+  return (LEONARDO_V2_PHOTO_SPECS as Record<string, LeonardoV2PhotoSpec>)[engineId];
+}
 
 /**
  * Конфігурація ByteDance Seedream — окремий провайдер поза Gemini.
@@ -748,6 +833,40 @@ function sleep(ms: number): Promise<void> {
  * документацією Leonardo) це прийнятно; для набагато довшого відео той
  * самий прийом уже ризикованіший — див. server/videoGeneration.ts.
  */
+/**
+ * Розподіляє виклик між класичним v1-двигуном 'leonardo' і 6 новими
+ * v2-двигунами (задача #203) — залежно від того, який саме ImageEngineId
+ * обрано. Решта generateImage() про цю різницю не знає: обидві гілки
+ * повертають однакову форму { buffer, mimeType }.
+ */
+async function generateWithLeonardoDispatch(
+  engine: ImageEngineInfo,
+  apiKey: string,
+  prompt: string,
+  aspectRatio: SupportedRatio,
+  negativePrompt?: string,
+  referenceImageUrls?: string[]
+): Promise<{ buffer: Buffer; mimeType: string }> {
+  const v2Spec = leonardoV2SpecFor(engine.id);
+  if (!v2Spec) {
+    return generateWithLeonardo(engine, apiKey, prompt, aspectRatio, negativePrompt, referenceImageUrls);
+  }
+  try {
+    return await generateLeonardoV2Photo({
+      engineId: engine.id as LeonardoPhotoEngineId,
+      apiKey,
+      prompt,
+      aspectRatio,
+      referenceImageUrls,
+    });
+  } catch (err) {
+    if (err instanceof LeonardoV2PhotoError) {
+      throw new ImageGenerationError(err.kind, `Leonardo.Ai (${engine.label}): ${err.message}`, engine.id, err);
+    }
+    throw err;
+  }
+}
+
 async function generateWithLeonardo(
   engine: ImageEngineInfo,
   apiKey: string,
@@ -757,9 +876,13 @@ async function generateWithLeonardo(
   referenceImageUrls?: string[]
 ): Promise<{ buffer: Buffer; mimeType: string }> {
   if (referenceImageUrls?.length) {
+    // Задача #203: раніше це повідомлення звучало так, ніби Leonardo.Ai
+    // взагалі не вміє референсів — автор вказав, що це вводить в оману:
+    // не вміє САМЕ ЦЕЙ (класичний v1) двигун; 6 новіших моделей нижче
+    // (v2 API) підтримують референси нативно.
     throw new ImageGenerationError(
       'unknown',
-      `Двигун ${engine.label} поки не підтримує референсні зображення — оберіть інший двигун або приберіть референси.`,
+      `Двигун ${engine.label} (класичний v1 API) не підтримує референсні зображення. Оберіть один із рушіїв «GPT Image 2.5 Flare/Sunburst», «Nano Banana 2 Lite», «Seedream 4.5/5.0 Pro» чи «FLUX Dev» (через Leonardo.Ai) — вони приймають референси нативно, або приберіть референси.`,
       engine.id
     );
   }
@@ -944,12 +1067,21 @@ export async function generateImage(
   if (!options.prompt || !options.prompt.trim()) {
     throw new ImageGenerationError('unknown', 'Порожній промпт для генерації зображення.', engine.id);
   }
-  if ((options.referenceImageUrls?.length || 0) > MAX_REFERENCE_IMAGES) {
-    throw new ImageGenerationError(
-      'unknown',
-      `Занадто багато референсних зображень: максимум ${MAX_REFERENCE_IMAGES}.`,
-      engine.id
-    );
+  const refCount = options.referenceImageUrls?.length || 0;
+  if (refCount > 0) {
+    // Задача #203: у 6 нових Leonardo v2 двигунів своя, задокументована
+    // межа референсів (2-16, залежно від моделі) — НЕ той самий
+    // MAX_REFERENCE_IMAGES=10, що для решти (Google/ByteDance/OpenAI).
+    // Перевіряємо саме межу ОБРАНОГО двигуна, а не універсальну.
+    const v2Spec = leonardoV2SpecFor(engine.id);
+    const perEngineMax = v2Spec ? leonardoV2PhotoMaxReferences(v2Spec) : MAX_REFERENCE_IMAGES;
+    if (refCount > perEngineMax) {
+      throw new ImageGenerationError(
+        'unknown',
+        `Занадто багато референсних зображень для двигуна «${engine.label}»: максимум ${perEngineMax}.`,
+        engine.id
+      );
+    }
   }
 
   const aspectRatio = normalizeAspectRatio(options.aspectRatio);
@@ -997,7 +1129,7 @@ export async function generateImage(
               options.referenceImageUrls
             )
           : engine.provider === 'leonardo'
-            ? await generateWithLeonardo(engine, leonardoKey, prompt, aspectRatio, options.negativePrompt, options.referenceImageUrls)
+            ? await generateWithLeonardoDispatch(engine, leonardoKey, prompt, aspectRatio, options.negativePrompt, options.referenceImageUrls)
             : await generateWithNanoBanana(
               ai as GoogleGenAI,
               engine,
@@ -1072,21 +1204,39 @@ export async function saveGeneratedImage(
 
 /** Перелік двигунів для інтерфейсу — щоб клієнт не хардкодив назви моделей. */
 export function listEngines(availability: { google: boolean; bytedance: boolean; openai: boolean; leonardo: boolean }) {
-  return Object.values(IMAGE_ENGINES).map((engine) => ({
-    id: engine.id,
-    label: engine.label,
-    modelId: engine.modelId,
-    provider: engine.provider,
-    maxSize: engine.maxSize,
-    supportsQualityControl: engine.supportsQualityControl,
-    supportsFormatChoice: engine.supportsFormatChoice,
-    available:
-      engine.provider === 'bytedance'
-        ? availability.bytedance
-        : engine.provider === 'openai'
-          ? availability.openai
-          : engine.provider === 'leonardo'
-            ? availability.leonardo
-            : availability.google,
-  }));
+  return Object.values(IMAGE_ENGINES).map((engine) => {
+    const v2Spec = leonardoV2SpecFor(engine.id);
+    return {
+      id: engine.id,
+      label: engine.label,
+      modelId: engine.modelId,
+      provider: engine.provider,
+      maxSize: engine.maxSize,
+      supportsQualityControl: engine.supportsQualityControl,
+      supportsFormatChoice: engine.supportsFormatChoice,
+      /**
+       * Задача #203. Раніше панель медіатеки показувала завантаження
+       * референсів ОДНАКОВО для всіх двигунів (клієнтський хардкод
+       * MAX_REFERENCE_IMAGES=10) і дізнавалась, що конкретний двигун їх
+       * не приймає, лише з помилки сервера ПІСЛЯ спроби генерації — саме
+       * це й спричинило хибне враження «Leonardo.Ai взагалі не вміє
+       * референсів». Тепер клієнт бачить підтримку і реальну межу
+       * ЗАЗДАЛЕГІДЬ, для кожного двигуна окремо.
+       */
+      supportsReferenceImages: engine.provider === 'leonardo' ? !!v2Spec : true,
+      maxReferenceImages: v2Spec
+        ? leonardoV2PhotoMaxReferences(v2Spec)
+        : engine.provider === 'leonardo'
+          ? 0
+          : MAX_REFERENCE_IMAGES,
+      available:
+        engine.provider === 'bytedance'
+          ? availability.bytedance
+          : engine.provider === 'openai'
+            ? availability.openai
+            : engine.provider === 'leonardo'
+              ? availability.leonardo
+              : availability.google,
+    };
+  });
 }

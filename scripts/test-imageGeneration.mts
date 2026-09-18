@@ -430,7 +430,7 @@ console.log('\nGPT Image — класифікація HTTP-помилок:');
 console.log('\nсписок двигунів для UI:');
 {
   const list = listEngines({ google:false, bytedance:false, openai:false, leonardo:false });
-  t('рівно 6 двигунів', list.length===6, list.map(e=>e.id).join(', '));
+  t('рівно 12 двигунів (задача #203 додала 6 нових)', list.length===12, list.map(e=>e.id).join(', '));
   t('без жодного ключа available=false для всіх', list.every(e=>!e.available));
   t('лише Google-ключ → доступні тільки 3 Nano Banana', (()=>{
     const l = listEngines({ google:true, bytedance:false, openai:false, leonardo:false });
@@ -554,6 +554,78 @@ console.log('\nLeonardo — статус FAILED зупиняє опитуван�
   } catch (e:any) {
     t('повідомлення згадує FAILED', /FAILED/.test(e.message), e.message);
     t('лише 2 виклики fetch (submit + одне опитування)', call===2, String(call));
+  } finally {
+    global.fetch = realFetch;
+    leonardoConfig.apiKey = prevKey;
+  }
+}
+
+console.log('\nЗадача #203 — 6 нових Leonardo v2 фото-двигунів у спільному реєстрі:');
+{
+  const l = listEngines({ google:false, bytedance:false, openai:false, leonardo:true });
+  const v1 = l.find(e=>e.id==='leonardo')!;
+  const flare = l.find(e=>e.id==='leonardo-gpt-image-25-flare')!;
+  const fluxDev = l.find(e=>e.id==='leonardo-flux-dev')!;
+  t('v1 leonardo — supportsReferenceImages=false', v1.supportsReferenceImages===false);
+  t('v1 leonardo — maxReferenceImages=0', v1.maxReferenceImages===0, String(v1.maxReferenceImages));
+  t('GPT Image 2.5 Flare — supportsReferenceImages=true', flare.supportsReferenceImages===true);
+  t('GPT Image 2.5 Flare — maxReferenceImages=16', flare.maxReferenceImages===16, String(flare.maxReferenceImages));
+  t('FLUX Dev — maxReferenceImages=2 (content+style)', fluxDev.maxReferenceImages===2, String(fluxDev.maxReferenceImages));
+  t('non-Leonardo двигун — supportsReferenceImages=true (незмінна поведінка)', l.find(e=>e.id==='leonardo')===v1); // sanity, list still has v1
+  const nano = listEngines({ google:true, bytedance:false, openai:false, leonardo:false }).find(e=>e.id==='nano-banana-2')!;
+  t('Google-двигун — maxReferenceImages=10 (як і раніше, задача #52)', nano.maxReferenceImages===10, String(nano.maxReferenceImages));
+}
+
+console.log('\nЗадача #203 — generateImage() з новим двигуном: понад межу референсів для ЦЬОГО двигуна (не глобальні 10):');
+{
+  const realFetch = global.fetch;
+  const prevKey = leonardoConfig.apiKey;
+  leonardoConfig.apiKey = 'test-leonardo-key';
+  let calls = 0;
+  global.fetch = async () => { calls++; throw new Error('не мало викликатись'); };
+  try {
+    await generateImage(null, {
+      prompt: 'x',
+      engine: 'leonardo-flux-dev',
+      referenceImageUrls: ['https://a', 'https://b', 'https://c'],
+    });
+    t('3 референси для FLUX Dev (межа 2) мали кинути помилку', false);
+  } catch (e:any) {
+    t('повідомлення називає межу (2) і двигун', /2/.test(e.message) && /FLUX Dev/.test(e.message), e.message);
+    t('жодного мережевого виклику (перевірка ДО запиту)', calls===0, String(calls));
+  } finally {
+    global.fetch = realFetch;
+    leonardoConfig.apiKey = prevKey;
+  }
+}
+
+console.log('\nЗадача #203 — generateImage() повний цикл через новий v2-двигун (генерація + 1 референс, наскрізна перевірка диспетчера):');
+{
+  const realFetch = global.fetch;
+  const prevKey = leonardoConfig.apiKey;
+  leonardoConfig.apiKey = 'test-leonardo-key';
+  const handlers = [
+    () => ({ ok:true, status:200, headers:{ get:()=> 'image/png' }, arrayBuffer: async()=> Buffer.from(PNG_B64,'base64').buffer }), // джерело референсу
+    () => ({ ok:true, status:200, json: async()=>({ uploadInitImage:{ id:'ref-e2e', url:'https://s3.example.com/upload', fields: JSON.stringify({key:'k'}) } }) }), // init-image
+    () => ({ ok:true, status:204 }), // S3 upload
+    () => ({ ok:true, status:200, json: async()=>({ id:'gen-e2e' }) }), // submit
+    () => ({ ok:true, status:200, json: async()=>({ generations_by_pk:{ status:'COMPLETE', generated_images:[{ url:'https://example.com/e2e.png' }] } }) }), // poll
+    () => ({ ok:true, status:200, headers:{ get:()=> 'image/png' }, arrayBuffer: async()=> Buffer.from(PNG_B64,'base64').buffer }), // завантаження результату
+  ];
+  let call = 0;
+  // @ts-expect-error підміна глобального fetch лише на час цього блоку тесту
+  global.fetch = async (url:string, init?:any) => handlers[Math.min(call++, handlers.length-1)]();
+  try {
+    const result = await generateImage(null, {
+      prompt: 'персонаж за референсом',
+      engine: 'leonardo-nano-banana-2-lite',
+      referenceImageUrls: ['https://app.example.com/generated/ref.png'],
+    });
+    t('generateImage() повернув буфер через v2-диспетчер', result.buffer.length>0);
+    t('engine у відповіді — leonardo-nano-banana-2-lite', result.engine.id==='leonardo-nano-banana-2-lite', result.engine.id);
+    t('рівно 6 викликів fetch (джерело+init-image+S3+submit+poll+завантаження)', call===6, String(call));
+  } catch (e:any) {
+    t('наскрізний цикл не мав кинути помилку', false, e.message);
   } finally {
     global.fetch = realFetch;
     leonardoConfig.apiKey = prevKey;

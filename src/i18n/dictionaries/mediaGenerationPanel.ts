@@ -13,6 +13,8 @@ export const mediaGenerationPanel = {
     engineTagStandard: 'Робочий стандарт • до 4K',
     engineTagPro: 'Фінал під друк • до 4K',
     engineTagSeedream: 'Альтернативний двигун • до 4K',
+    engineTagLeonardoV1: 'Класичний API • без референсів',
+    engineTagLeonardoV2: 'Приймає референсні зображення',
     engineUnavailableHint: 'Ключ не налаштований — зверніться до адміністратора («Ключі API»).',
     aspectRatioLabel: 'Співвідношення сторін',
     imageSizeLabel: 'Розмір',
@@ -47,6 +49,7 @@ export const mediaGenerationPanel = {
     referenceImagesTooMany: 'Максимум {max} референсних зображень.',
     referenceImagesBadUrl: 'Посилання має починатися з http:// або https://.',
     referenceImagesBadFile: 'Це не файл зображення.',
+    referenceImagesUnsupportedHint: 'Обраний двигун не приймає референсні зображення — вони прибрані. Оберіть один із двигунів Leonardo.Ai з поміткою «Приймає референсні зображення».',
   },
   en: {
     heading: 'Image Generation',
@@ -62,6 +65,8 @@ export const mediaGenerationPanel = {
     engineTagStandard: 'Working standard • up to 4K',
     engineTagPro: 'Print-final • up to 4K',
     engineTagSeedream: 'Alternative engine • up to 4K',
+    engineTagLeonardoV1: 'Classic API • no references',
+    engineTagLeonardoV2: 'Accepts reference images',
     engineUnavailableHint: 'No key configured — ask the administrator ("API Keys").',
     aspectRatioLabel: 'Aspect ratio',
     imageSizeLabel: 'Size',
@@ -96,5 +101,6 @@ export const mediaGenerationPanel = {
     referenceImagesTooMany: 'Maximum {max} reference images.',
     referenceImagesBadUrl: 'The link must start with http:// or https://.',
     referenceImagesBadFile: 'This is not an image file.',
+    referenceImagesUnsupportedHint: 'The selected engine does not accept reference images — they were removed. Choose one of the Leonardo.Ai engines marked "Accepts reference images".',
   },
 };

@@ -32,10 +32,23 @@ interface EngineInfo {
   id: string;
   label: string;
   modelId: string;
-  provider: 'google' | 'bytedance';
+  // Раніше тут бракувало 'openai' і 'leonardo' — сервер уже роками віддає
+  // обидва (server/imageGeneration.ts), просто жодне поле компонента не
+  // звужувало вибір по цьому союзу настільки, щоб помилка стала видимою.
+  provider: 'google' | 'bytedance' | 'openai' | 'leonardo';
   maxSize: '1K' | '2K' | '4K';
   supportsQualityControl: boolean;
   supportsFormatChoice: boolean;
+  /**
+   * Задача #203. Раніше цього поля не було, і панель малювала завантаження
+   * референсів однаково для КОЖНОГО двигуна — з єдиним хардкодженим
+   * лімітом 10, той самий, що й на сервері (MAX_REFERENCE_IMAGES). Це і
+   * спричинило баг: автор додавав референси до класичного 'leonardo' —
+   * панель мовчки дозволяла, а сервер відмовляв лише в момент генерації.
+   * Тепер сервер сам каже, чи приймає обраний двигун референси і скільки.
+   */
+  supportsReferenceImages: boolean;
+  maxReferenceImages: number;
   available: boolean;
 }
 
@@ -49,11 +62,12 @@ interface MediaGenerationPanelProps {
 const ALL_SIZES: ('1K' | '2K' | '4K')[] = ['1K', '2K', '4K'];
 
 /**
- * Максимум референсних зображень для мультиреференсної генерації
- * (задача #52). Значення МАЄ збігатися з `MAX_REFERENCE_IMAGES` у
- * `server/imageGeneration.ts` — той модуль не можна імпортувати в клієнт
- * (node:fs/node:path/node:crypto на верхньому рівні), тож межа
- * продубльована тут навмисно, а не випадково.
+ * Резервний максимум референсів — лише поки список двигунів ще не
+ * завантажився з сервера (`selectedEngine` тоді `undefined`). Щойно
+ * рушій обрано, реальна межа приходить із `selectedEngine.maxReferenceImages`
+ * (задача #203) — вона РІЗНА для кожного двигуна (2-16 у нових Leonardo
+ * v2, 0 у класичного 'leonardo', 10 у решти) — і більше не хардкодиться
+ * тут як єдине число.
  */
 const MAX_REFERENCE_IMAGES = 10;
 
@@ -112,12 +126,24 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
         return t('mediaGenerationPanel.engineTagPro');
       case 'seedream':
         return t('mediaGenerationPanel.engineTagSeedream');
+      case 'leonardo':
+        // Задача #203: класичний v1-двигун — без референсів, на відміну
+        // від 6 нових нижче. Ярлик тут, а не лише помилка після спроби
+        // генерації, щоб автор бачив різницю ЗАЗДАЛЕГІДЬ.
+        return t('mediaGenerationPanel.engineTagLeonardoV1');
       default:
-        return '';
+        // 6 нових двигунів (задача #203) мають спільний префікс id.
+        return id.startsWith('leonardo-') ? t('mediaGenerationPanel.engineTagLeonardoV2') : '';
     }
   };
 
   const selectedEngine = engines.find((e) => e.id === engineId);
+
+  // Задача #203: реальна межа й підтримка референсів — з обраного
+  // двигуна, а не єдиний хардкод. До завантаження списку (engines
+  // порожній) лишаємо старий запасний ліміт, щоб панель не блимала.
+  const referencesSupported = selectedEngine ? selectedEngine.supportsReferenceImages : true;
+  const effectiveMaxReferences = selectedEngine ? selectedEngine.maxReferenceImages : MAX_REFERENCE_IMAGES;
 
   // Розмір, недоступний обраному двигуну, скидаємо на найбільший дозволений
   // — інакше кнопка «Згенерувати» мовчки надіслала б розмір, який сервер
@@ -129,12 +155,30 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
     }
   }, [selectedEngine, imageSize]);
 
+  // Задача #203: раніше перемикання на двигун без підтримки референсів
+  // (класичний 'leonardo') чи з нижчою межею (наприклад, FLUX Dev — лише
+  // 2) лишало вже додані референси в панелі — генерація однаково
+  // провалювалась би на сервері. Тепер панель прибирає зайве одразу при
+  // виборі двигуна, а не після невдалої спроби.
+  useEffect(() => {
+    if (!selectedEngine) return;
+    if (!referencesSupported && referenceImages.length > 0) {
+      setReferenceImages([]);
+      onToast(t('mediaGenerationPanel.referenceImagesUnsupportedHint'));
+      return;
+    }
+    if (referenceImages.length > effectiveMaxReferences) {
+      setReferenceImages((prev) => prev.slice(0, effectiveMaxReferences));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedEngine, referencesSupported, effectiveMaxReferences]);
+
   /** Додає завантажені файли як референси — до вільного місця (MAX_REFERENCE_IMAGES). */
   const handleReferenceFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    const room = MAX_REFERENCE_IMAGES - referenceImages.length;
+    const room = effectiveMaxReferences - referenceImages.length;
     if (room <= 0) {
-      onToast(t('mediaGenerationPanel.referenceImagesTooMany', { max: MAX_REFERENCE_IMAGES }));
+      onToast(t('mediaGenerationPanel.referenceImagesTooMany', { max: effectiveMaxReferences }));
       return;
     }
     const picked = Array.from(files).slice(0, room);
@@ -165,8 +209,8 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
       onToast(t('mediaGenerationPanel.referenceImagesBadUrl'));
       return;
     }
-    if (referenceImages.length >= MAX_REFERENCE_IMAGES) {
-      onToast(t('mediaGenerationPanel.referenceImagesTooMany', { max: MAX_REFERENCE_IMAGES }));
+    if (referenceImages.length >= effectiveMaxReferences) {
+      onToast(t('mediaGenerationPanel.referenceImagesTooMany', { max: effectiveMaxReferences }));
       return;
     }
     setReferenceImages((prev) => [
@@ -304,16 +348,17 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
             />
           </div>
 
-          {/* Reference images — image-to-image / мультиреференсна генерація (#52) */}
+          {/* Reference images — image-to-image / мультиреференсна генерація (#52, #203) */}
+          {referencesSupported ? (
           <div className="space-y-1.5">
             <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
               <span>{t('mediaGenerationPanel.referenceImagesLabel')}</span>
               <span className="text-slate-600 font-mono normal-case">
-                {t('mediaGenerationPanel.referenceImagesCount', { count: referenceImages.length, max: MAX_REFERENCE_IMAGES })}
+                {t('mediaGenerationPanel.referenceImagesCount', { count: referenceImages.length, max: effectiveMaxReferences })}
               </span>
             </label>
             <p className="text-[10px] text-slate-600 leading-snug">
-              {t('mediaGenerationPanel.referenceImagesHint', { max: MAX_REFERENCE_IMAGES })}
+              {t('mediaGenerationPanel.referenceImagesHint', { max: effectiveMaxReferences })}
             </p>
 
             {referenceImages.length > 0 && (
@@ -349,7 +394,7 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
             />
             <button
               onClick={() => referenceFileInputRef.current?.click()}
-              disabled={referenceImages.length >= MAX_REFERENCE_IMAGES}
+              disabled={referenceImages.length >= effectiveMaxReferences}
               className="w-full py-1.5 rounded-lg border border-slate-800 bg-slate-900 text-[10px] text-slate-400 hover:text-white hover:border-slate-700 disabled:opacity-40 flex items-center justify-center gap-1.5"
             >
               <Upload className="w-3 h-3" /> {t('mediaGenerationPanel.referenceImagesUploadBtn')}
@@ -361,18 +406,19 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
                 onChange={(e) => setReferenceUrlInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleAddReferenceUrl()}
                 placeholder={t('mediaGenerationPanel.referenceImagesUrlPlaceholder')}
-                disabled={referenceImages.length >= MAX_REFERENCE_IMAGES}
+                disabled={referenceImages.length >= effectiveMaxReferences}
                 className="flex-1 p-2 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-300 focus:border-amber-400 focus:outline-hidden disabled:opacity-40"
               />
               <button
                 onClick={handleAddReferenceUrl}
-                disabled={!referenceUrlInput.trim() || referenceImages.length >= MAX_REFERENCE_IMAGES}
+                disabled={!referenceUrlInput.trim() || referenceImages.length >= effectiveMaxReferences}
                 className="px-2.5 py-2 rounded-lg border border-slate-800 bg-slate-900 text-[10px] text-slate-400 hover:text-white disabled:opacity-40 shrink-0"
               >
                 {t('mediaGenerationPanel.referenceImagesUrlAddBtn')}
               </button>
             </div>
           </div>
+          ) : null}
 
           {/* Engine */}
           <div className="space-y-1.5">
