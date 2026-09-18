@@ -41,7 +41,14 @@ function renderStyleMarkdown(md: string): React.ReactNode {
       flushList(`list-${idx}`);
       return;
     }
-    if (trimmed.startsWith('## ')) {
+    if (trimmed.startsWith('### ')) {
+      flushList(`list-${idx}`);
+      blocks.push(
+        <h5 key={idx} className="text-xs font-bold text-emerald-300 uppercase tracking-wide mt-3 mb-1.5 first:mt-0">
+          {trimmed.replace(/^###\s+/, '').replace(/_/g, ' ')}
+        </h5>
+      );
+    } else if (trimmed.startsWith('## ')) {
       flushList(`list-${idx}`);
       blocks.push(
         <h4 key={idx} className="text-sm font-bold text-cyan-300 uppercase tracking-wide mt-4 mb-2 first:mt-0">
@@ -135,7 +142,11 @@ export const StyleView: React.FC<StyleViewProps> = ({ book, authUser, completedT
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ sourceText }),
+        body: JSON.stringify({
+          sourceText,
+          modelId: book.preferredAiModelId || undefined,
+          bookId: book.id,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'failed');

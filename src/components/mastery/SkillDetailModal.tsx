@@ -33,7 +33,8 @@ interface SkillDetailModalProps {
   skill: SkillItem | null;
   onClose: () => void;
   userProgress: UserSkillProgress;
-  onUpdateProgress: (skillId: number, newProgress: number, isMastered?: boolean, notes?: string) => void;
+  /** feedbackSummary (5-й аргумент) — короткий підсумок AI-коуча з цієї спроби, якщо є; MasteryFrameworkView використовує його для синхронізації профілю майстерності (запис #189), коли навичка щойно опанована. */
+  onUpdateProgress: (skillId: number, newProgress: number, isMastered?: boolean, notes?: string, feedbackSummary?: string) => void;
   /** Реальна книга письменника — потрібна, щоб дозволити вставити відповідь AI-коуча в обраний розділ. */
   book?: Book;
   onUpdateBook?: (updatedBook: Book, auditAction?: string, auditDetails?: string) => void;
@@ -221,7 +222,7 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
       const currentVal = typeof sliderProgress === "number" && !isNaN(sliderProgress) ? sliderProgress : 50;
       const newScore = Math.max(currentVal, Math.min(100, numericScore));
       setSliderProgress(newScore);
-      onUpdateProgress(skill.id, newScore, newScore >= 90, notes);
+      onUpdateProgress(skill.id, newScore, newScore >= 90, notes, sanitizedData.summary);
     } catch (err: any) {
       console.error("Analysis fallback triggered:", err);
       // Even if network exception occurs, provide real analysis
@@ -269,7 +270,7 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
       };
       setAiFeedback(fallback);
       setSliderProgress(Math.max(sliderProgress || 50, fallback.score));
-      onUpdateProgress(skill.id, Math.max(sliderProgress || 50, fallback.score), fallback.score >= 90, notes);
+      onUpdateProgress(skill.id, Math.max(sliderProgress || 50, fallback.score), fallback.score >= 90, notes, fallback.summary);
     } finally {
       setIsAnalyzing(false);
     }
@@ -321,7 +322,7 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
       confetti({ particleCount: 40, spread: 50, origin: { y: 0.6 } });
       const newScore = Math.min(100, sliderProgress + 15);
       setSliderProgress(newScore);
-      onUpdateProgress(skill.id, newScore, newScore >= 90, notes);
+      onUpdateProgress(skill.id, newScore, newScore >= 90, notes, `Правильна відповідь у тесті з навички «${skill.title}».`);
     }
   };
 

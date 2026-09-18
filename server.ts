@@ -904,6 +904,31 @@ registerGitCommandRoutes(app);
 Не виявлено — увімкніть AI-аналіз (GEMINI_API_KEY), щоб отримати справжні рекомендації.`;
   }
 
+  const MASTERY_SECTION_MARKER = "## Профіль_майстерності";
+
+  /**
+   * Файл стилю (user_styles.contentMd, той самий "ім'я_автора.md",
+   * який ядро підтягує через {СТИЛЬ} у купі промптів) тепер має
+   * ДВІ незалежні частини: авторський стиль (генерує /api/style/generate) і
+   * профіль майстерності з 18 тренажерів (оновлює /api/style/sync-mastery
+   * після кожного опанованої навички). Стабільний маркер
+   * (MASTERY_SECTION_MARKER) відділяє їх, щоб кожен ендпойнт міг перегенерувати
+   * тільки "свою" частину, не затираючи іншу. Ручне редагування
+   * (PUT /api/style/:userId) працює з цілим текстом — автор бачить і править обидві частини
+   * одразу як один файл, розбиття потрібне лише автоматичній генераціям.
+   */
+  function splitStyleAndMastery(contentMd: string | undefined | null): { stylePart: string; masteryPart: string } {
+    const text = (contentMd || '').trim();
+    if (!text) return { stylePart: '', masteryPart: '' };
+    const idx = text.indexOf(MASTERY_SECTION_MARKER);
+    if (idx === -1) return { stylePart: text, masteryPart: '' };
+    return { stylePart: text.slice(0, idx).trim(), masteryPart: text.slice(idx).trim() };
+  }
+
+  function joinStyleAndMastery(stylePart: string, masteryPart: string): string {
+    return [stylePart.trim(), masteryPart.trim()].filter(Boolean).join('\n\n');
+  }
+
   /** Формує вміст файлу стилю (AI, або чесна демо-заглушка, якщо ключа нема). */
   app.post('/api/style/generate', requireAuth, async (req, res) => {
     try {
@@ -913,24 +938,42 @@ registerGitCommandRoutes(app);
         return res.status(400).json({ error: 'Немає текстів для аналізу — напишіть хоча б трохи в книзі або виконайте вправу з майстерності.' });
       }
       const trimmedSource = sourceText.slice(0, MAX_STYLE_SOURCE_CHARS);
+      const { modelId, bookId } = req.body || {};
 
-      let contentMd: string;
-      if (ai) {
-        contentMd = await generateWithGemini(
-          `Ось фрагменти текстів автора для аналізу стилю:\n\n"""${trimmedSource}"""`,
-          styleSystemPrompt(),
-          false,
-          { req, label: 'Аналіз авторського стилю' }
-        );
-      } else {
-        contentMd = styleFallbackMarkdown(trimmedSource);
+      // Запис #189: раніше йшло напряму в Gemini (generateWithGemini),
+      // ігноруючи обрану автором модель — той самий клас багу, що й у
+      // навичкових тренажерів (записи #187/#188). Тепер — resolveCoachEngine.
+      let stylePart: string;
+      try {
+        const userId = principal.id as string | undefined;
+        const { resolvedModelId, engine, userKey } = await resolveCoachEngine(userId, modelId);
+        const generated = await generateAiText({
+          engine,
+          modelId: resolvedModelId,
+          prompt: `Ось фрагменти текстів автора для аналізу стилю:\n\n"""${trimmedSource}"""`,
+          systemInstruction: styleSystemPrompt(),
+          json: false,
+          apiKeyOverride: userKey,
+          req,
+          label: 'Аналіз авторського стилю',
+          bookId,
+        });
+        stylePart = generated.text.trim();
+      } catch (engineErr: any) {
+        if (engineErr instanceof ChatProviderError && engineErr.status === 503) {
+          stylePart = styleFallbackMarkdown(trimmedSource);
+        } else {
+          throw engineErr;
+        }
       }
 
       const existing = await getUserStyle(principal.id!);
+      const { masteryPart } = splitStyleAndMastery(existing?.contentMd);
+      const contentMd = joinStyleAndMastery(stylePart, masteryPart);
       const now = new Date().toISOString();
       const saved = await upsertUserStyle({
         userId: principal.id!,
-        contentMd: contentMd.trim(),
+        contentMd,
         autoUseStyle: existing?.autoUseStyle ?? false,
         sourceChars: trimmedSource.length,
         createdAt: existing?.createdAt || now,
@@ -941,6 +984,122 @@ registerGitCommandRoutes(app);
     } catch (err: any) {
       console.error('Error in /api/style/generate:', err);
       res.status(500).json({ error: err.message || 'Не вдалося сформувати файл стилю.' });
+    }
+  });
+
+  function masterySyncSystemPrompt(): string {
+    return `Ти ведеш стислий практичний профіль письменницької майстерності автора — файл-інструкцію для ІНШОГО ШІ, який писатиме або редагуватиме текст цього автора в будь-якому місці студії.
+Тобі дають (1) поточний текст розділу профілю (може бути порожнім, якщо це перший запис) і (2) результат щойно пройденого тренажера однієї з 18 навичок письменницької майстерності.
+Онови розділ: врахуй нову навичку, не загубивши те, що вже напрацьовано раніше. Формат — СУВОРО:
+${MASTERY_SECTION_MARKER}
+### Опановані_навички
+(перелік навичок з коротким рівнем — 1 рядок на навичку)
+### Сильні_сторони
+(3-6 стислих пунктів — конкретні патерни, які варто зберігати)
+### Зони_росту
+(2-5 стислих пунктів — на що іншому ШІ звертати увагу й делікатно підстраховувати автора)
+### Інструкція_для_ШІ
+(3-5 прямих імперативних порад «пиши так» / «уникай так», сформульованих як інструкції для моделі, що генеруватиме текст цього автора)
+
+Пиши українською, без води, без вступів і загальних фраз, без вигаданих фактів поза наданими даними. Поверни ЛИШЕ текст цього розділу (починаючи з «${MASTERY_SECTION_MARKER}»), без пояснень і без JSON навколо.`;
+  }
+
+  function masteryFallbackSection(existingMasteryPart: string, skillTitle: string, category: string, score: number): string {
+    const prevSkills = existingMasteryPart.match(/^- .+$/gm) || [];
+    const line = `- ${skillTitle} (${category}) — ${score}/100`;
+    const skillsList = [...prevSkills.filter((l) => !l.startsWith(`- ${skillTitle} `)), line].join('\n');
+    return `${MASTERY_SECTION_MARKER}
+### Опановані_навички
+${skillsList}
+
+### Сильні_сторони
+(AI-ключ не налаштований — реальний синтез недоступний, це технічна заглушка)
+
+### Зони_росту
+(AI-ключ не налаштований — реальний синтез недоступний, це технічна заглушка)
+
+### Інструкція_для_ШІ
+(AI-ключ не налаштований — заповниться після першої вдалої синхронізації)`;
+  }
+
+  /**
+   * Після проходження тренажера однієї з 18 навичок — оновлює розділ
+   * «Профіль майстерності» у тому ж файлі стилю (user_styles), який ядро
+   * підтягує через {СТИЛЬ} у купі промптів по всій студії (edit-text,
+   * чат-асистент, генерація зображень, синопсис→розділ тощо — запис #189).
+   * Стильову частину файлу НЕ чіпає (splitStyleAndMastery). Викликається з
+   * клієнта у фоні, без блокування UI тренажера — тому некритично, якщо
+   * іноді впаде (клієнт це просто ігнорує).
+   */
+  app.post('/api/style/sync-mastery', requireAuth, async (req, res) => {
+    try {
+      const principal = req.principal!;
+      const { skillTitle, category, subSkills, score, isMastered, summary, strengths, improvements, notes, modelId, bookId } = req.body || {};
+      if (!skillTitle || typeof score !== 'number') {
+        return res.status(400).json({ error: 'Не вказано навичку або бал для синхронізації профілю.' });
+      }
+
+      const existing = await getUserStyle(principal.id!);
+      const { stylePart, masteryPart } = splitStyleAndMastery(existing?.contentMd);
+
+      const resultDescription = `НОВИЙ РЕЗУЛЬТАТ ТРЕНАЖЕРА:
+Навичка: ${skillTitle} (категорія: ${category || 'н/д'})
+Критерії: ${Array.isArray(subSkills) && subSkills.length ? subSkills.join(', ') : 'н/д'}
+Бал: ${score}/100${isMastered ? ' — навичку опановано' : ''}
+${summary ? `Підсумок AI-коуча: ${summary}` : ''}
+${Array.isArray(strengths) && strengths.length ? `Сильні сторони з цієї спроби: ${strengths.join('; ')}` : ''}
+${Array.isArray(improvements) && improvements.length ? `Зони росту з цієї спроби: ${improvements.join('; ')}` : ''}
+${notes ? `Нотатки автора: ${notes}` : ''}`;
+
+      const userPrompt = `ПОТОЧНИЙ РОЗДІЛ ПРОФІЛЮ (може бути порожнім):
+"""${masteryPart || '(ще не сформовано)'}"""
+
+${resultDescription}
+
+Онови розділ профілю з урахуванням цього результату.`;
+
+      let newMasteryPart: string;
+      try {
+        const userId = principal.id as string | undefined;
+        const { resolvedModelId, engine, userKey } = await resolveCoachEngine(userId, modelId);
+        const generated = await generateAiText({
+          engine,
+          modelId: resolvedModelId,
+          prompt: userPrompt,
+          systemInstruction: masterySyncSystemPrompt(),
+          json: false,
+          apiKeyOverride: userKey,
+          req,
+          label: 'Синхронізація профілю майстерності',
+          bookId,
+        });
+        newMasteryPart = generated.text.trim();
+        if (!newMasteryPart.startsWith(MASTERY_SECTION_MARKER)) {
+          newMasteryPart = `${MASTERY_SECTION_MARKER}\n${newMasteryPart}`;
+        }
+      } catch (engineErr: any) {
+        if (engineErr instanceof ChatProviderError && engineErr.status === 503) {
+          newMasteryPart = masteryFallbackSection(masteryPart, skillTitle, category || 'н/д', score);
+        } else {
+          throw engineErr;
+        }
+      }
+
+      const contentMd = joinStyleAndMastery(stylePart, newMasteryPart);
+      const now = new Date().toISOString();
+      const saved = await upsertUserStyle({
+        userId: principal.id!,
+        contentMd,
+        autoUseStyle: existing ? existing.autoUseStyle : true,
+        sourceChars: existing?.sourceChars || 0,
+        createdAt: existing?.createdAt || now,
+        updatedAt: now,
+      });
+
+      res.json({ contentMd: saved.contentMd, autoUseStyle: saved.autoUseStyle, updatedAt: saved.updatedAt, sourceChars: saved.sourceChars });
+    } catch (err: any) {
+      console.error('Error in /api/style/sync-mastery:', err);
+      res.status(500).json({ error: err.message || 'Не вдалося синхронізувати профіль майстерності.' });
     }
   });
 

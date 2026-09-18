@@ -99,23 +99,68 @@ export const MasteryFrameworkView: React.FC<MasteryFrameworkViewProps> = ({
     return Math.round(total / SKILLS_DATA.length);
   }, [userProgress]);
 
+  /**
+   * Фоновий, best-effort виклик: після того як навичка ЩОЙНО опанована
+   * (перехід false → true), оновлює розділ «Профіль майстерності» у файлі
+   * стилю автора (той самий user_styles, який ядро підтягує через {СТИЛЬ}
+   * у купі промптів по всій студії) — запис #189. Не блокує UI тренажера:
+   * помилку лише логуємо, нічого не показуємо письменнику.
+   */
+  const syncMasteryProfile = (
+    skillId: number,
+    score: number,
+    isMastered: boolean,
+    notes: string,
+    feedbackSummary?: string
+  ) => {
+    if (!authUser?.id) return;
+    const skill = SKILLS_DATA.find((s) => s.id === skillId);
+    if (!skill) return;
+    fetch('/api/style/sync-mastery', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        skillId,
+        skillTitle: skill.title,
+        category: skill.categoryName,
+        subSkills: skill.subSkills,
+        score,
+        isMastered,
+        summary: feedbackSummary || undefined,
+        notes: notes || undefined,
+        modelId: book.preferredAiModelId || undefined,
+        bookId: book.id,
+      }),
+    }).catch((e) => console.warn('[mastery] Не вдалося синхронізувати профіль майстерності', e));
+  };
+
   // Update progress for an individual skill
   const handleUpdateSkillProgress = (
     skillId: number,
     newProgress: number,
     isMastered: boolean = false,
-    customNotes: string = ''
+    customNotes: string = '',
+    feedbackSummary?: string
   ) => {
+    const wasMastered = !!userProgress[skillId]?.isMastered;
+    const nowMastered = isMastered || newProgress >= 90;
     setUserProgress((prev) => ({
       ...prev,
       [skillId]: {
         skillId,
         progress: newProgress,
-        isMastered: isMastered || newProgress >= 90,
+        isMastered: nowMastered,
         customNotes,
         lastTrained: new Date().toISOString(),
       },
     }));
+    // Синхронізуємо лише на переході «ще не опанована» → «опанована», а не
+    // на кожній мікро-дії — так профіль оновлюється один раз на пройдений
+    // тренажер, а не на кожен клік слайдера чи невдалу спробу.
+    if (nowMastered && !wasMastered) {
+      syncMasteryProfile(skillId, newProgress, nowMastered, customNotes, feedbackSummary);
+    }
   };
 
   // Batch update from diagnostic audit
@@ -236,8 +281,8 @@ export const MasteryFrameworkView: React.FC<MasteryFrameworkViewProps> = ({
                   <User className="w-4 h-4" />
                 </div>
                 <div>
-                  <div className="text-sm font-bold text-slate-100">Мій стиль автора</div>
-                  <div className="text-[11px] text-slate-400">Файл ім'я_автора.md — аналіз стилю та підказки для AI</div>
+                  <div className="text-sm font-bold text-slate-100">Мій профіль автора</div>
+                  <div className="text-[11px] text-slate-400">Файл ім'я_автора.md — стиль + профіль майстерності з 18 навичок, підказки для AI по всій студії</div>
                 </div>
               </div>
               <button

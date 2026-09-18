@@ -8,7 +8,7 @@ interface HeaderProps {
   masteryPercent: number;
   onOpenDiagnostic: () => void;
   onOpenBlueprint: () => void;
-  /** Відкрити модуль «Мій стиль автора» (збережено з попередньої версії). */
+  /** Відкрити модуль «Мій профіль автора» — стиль + профіль майстерності з 18 навичок (запис #189). */
   onOpenStyle?: () => void;
 }
 
@@ -130,10 +130,10 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={onOpenStyle}
               className="neo-extruded-soft neo-button-interactive bg-[#f9f9f9] px-3.5 py-2 rounded-full text-xs font-bold text-[#7c2d12] flex items-center gap-1.5"
-              title="Файл ім'я_автора.md: сформувати та використовувати ваш стиль"
+              title="Файл ім'я_автора.md: стиль + профіль майстерності — підказки для AI по всій студії"
             >
               <User className="w-3.5 h-3.5" />
-              Мій стиль
+              Мій профіль
             </button>
           )}
 
@@ -267,7 +267,7 @@ export const Header: React.FC<HeaderProps> = ({
                   className="w-full neo-extruded-soft neo-button-interactive bg-[#f9f9f9] py-3 rounded-xl text-sm font-bold text-[#7c2d12] flex items-center justify-center gap-2"
                 >
                   <User className="w-4 h-4" />
-                  Мій стиль автора (ім'я_автора.md)
+                  Мій профіль автора (ім'я_автора.md)
                 </button>
               )}
               <button

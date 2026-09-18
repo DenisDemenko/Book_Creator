@@ -1,7 +1,7 @@
 export const styleView = {
   uk: {
-    heading: "Мій стиль (ім'я_автора.md)",
-    hint: 'AI аналізує ваші тексти й формує файл-нотатку про ваш авторський стиль: словник, ритм, типові звороти та слова, яких варто уникати.',
+    heading: "Мій профіль (ім'я_автора.md)",
+    hint: 'AI аналізує ваші тексти й формує файл-нотатку про ваш авторський стиль (словник, ритм, типові звороти), а після кожної опанованої навички з розділу «Майстерність» — сам дописує туди розділ профілю майстерності. Цей файл ядро підтягує при кожній генерації тексту по всій студії.',
     needsLogin: 'Увійдіть у систему, щоб сформувати та зберегти файл вашого авторського стилю.',
     loading: 'Завантажуємо…',
     loadError: 'Не вдалося завантажити файл стилю.',
@@ -25,8 +25,8 @@ export const styleView = {
     deleteConfirmBtn: 'Так, видалити',
   },
   en: {
-    heading: 'My style (author_name.md)',
-    hint: 'AI analyzes your texts and builds a note about your authorial style: vocabulary, rhythm, typical phrasing, and words to avoid.',
+    heading: 'My profile (author_name.md)',
+    hint: "AI analyzes your texts and builds a note about your authorial style (vocabulary, rhythm, typical phrasing), and after each mastered skill from the \"Mastery\" section it appends a mastery-profile section on its own. The core pulls this same file into every text generation across the studio.",
     needsLogin: 'Log in to generate and save your authorial style file.',
     loading: 'Loading…',
     loadError: 'Could not load the style file.',
