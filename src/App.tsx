@@ -37,6 +37,7 @@ import { BookSettingsModal } from './components/BookSettingsModal';
 import { QuickAiModal } from './components/QuickAiModal';
 import { RoleManagementModal } from './components/RoleManagementModal';
 import { VersionSnapshotModal } from './components/VersionSnapshotModal';
+import { NotesImportModal } from './components/plugins/NotesImportModal';
 import { CreateBookModal } from './components/CreateBookModal';
 import { SupportChatWidget } from './components/SupportChatWidget';
 import { ImportBookModal } from './components/ImportBookModal';
@@ -164,6 +165,7 @@ export default function App() {
   const [currentRole, setCurrentRole] = useState<UserRole>('guest');
   const [isRoleModalOpen, setIsRoleModalOpen] = useState<boolean>(false);
   const [isVersionModalOpen, setIsVersionModalOpen] = useState<boolean>(false);
+  const [isNotesImportOpen, setIsNotesImportOpen] = useState<boolean>(false);
   const [isCreateBookModalOpen, setIsCreateBookModalOpen] = useState<boolean>(false);
   const [isImportBookModalOpen, setIsImportBookModalOpen] = useState<boolean>(false);
   const [isImportWizardModalOpen, setIsImportWizardModalOpen] = useState<boolean>(false);
@@ -1654,6 +1656,7 @@ export default function App() {
         onOpenRoleModal={() => setIsRoleModalOpen(true)}
         roleLocked={isRoleLocked}
         onOpenVersionModal={() => setIsVersionModalOpen(true)}
+        onOpenNotesImport={() => setIsNotesImportOpen(true)}
         onSave={handleManualSave}
         onOpenSettings={() => setIsSettingsOpen(true)}
         collaborators={collaborators}
@@ -2149,6 +2152,15 @@ export default function App() {
         onCommitVersion={handleCommitVersion}
         onRestoreVersion={handleRestoreSnapshot}
         onUpdateBookId={(newId) => handleUpdateBook({ ...book, id: newId }, 'Зміна ID книги', `Оновлено ідентифікатор книги на «${newId}».`)}
+      />
+
+      {/* Плагін «Імпорт нотаток iPhone» (запис #191) — розкривне меню «Плагіни» в шапці */}
+      <NotesImportModal
+        isOpen={isNotesImportOpen}
+        onClose={() => setIsNotesImportOpen(false)}
+        book={book}
+        currentRole={currentRole}
+        onUpdateBook={handleUpdateBook}
       />
 
       {/* Create New Book Project Modal */}

@@ -24,6 +24,7 @@ import {
   Languages,
   Blocks,
   History,
+  Mic,
 } from 'lucide-react';
 import { NavigationTab, Book, UserRole, CollaboratorPresence, RealtimeSyncStatus, AuthUser } from '../types';
 import { ALL_ROLES, getRoleInfo } from '../utils/rbac';
@@ -52,6 +53,8 @@ interface HeaderNavProps {
   onSelectRole: (role: UserRole) => void;
   onOpenRoleModal: () => void;
   onOpenVersionModal?: () => void;
+  /** Плагін «Імпорт нотаток iPhone» (запис #191) — новий пункт розкривного меню «Плагіни». */
+  onOpenNotesImport?: () => void;
   onSave: () => void;
   onOpenSettings: () => void;
   collaborators?: CollaboratorPresence[];
@@ -85,6 +88,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   onSelectRole,
   onOpenRoleModal,
   onOpenVersionModal,
+  onOpenNotesImport,
   onSave,
   onOpenSettings,
   collaborators = [],
@@ -404,6 +408,23 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                         {t('header.pluginChangelog')}
                       </span>
                     </button>
+
+                    {onOpenNotesImport && (
+                      <button
+                        onClick={() => { setIsPluginsOpen(false); onOpenNotesImport(); }}
+                        className="w-full p-2 rounded-xl text-left transition-all flex items-center gap-2.5 hover:bg-white/[0.06]"
+                      >
+                        <Mic className="w-4 h-4 [color:var(--sun-acc)] shrink-0" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block font-semibold [color:var(--sun-soft)] leading-tight">
+                            {t('header.pluginNotesImport')}
+                          </span>
+                          <span className="block text-[10px] [color:var(--sun-acc-70)]">
+                            {t('header.pluginNotesImportHint')}
+                          </span>
+                        </span>
+                      </button>
+                    )}
                   </div>
                 </div>
               )}

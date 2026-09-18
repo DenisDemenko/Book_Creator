@@ -77,6 +77,7 @@ import {
   ENGINE_ENV_KEY,
   ENGINE_LABELS,
   VISION_ENGINES,
+  AUDIO_ENGINES,
   ChatProviderError,
   type ImageAttachment,
   type EngineId,
@@ -4504,6 +4505,137 @@ ${criteriaList}
     } catch (err: any) {
       console.error('Error in /api/ai/analyze-emotional-arc:', err);
       res.status(500).json({ error: err.message || 'Помилка аналізу дуги' });
+    }
+  });
+
+  // -----------------------------------------------------------------------
+  // Плагіни (нова вкладка «Плагіни», запис #191). Перший і поки єдиний
+  // плагін — «Імпорт нотаток iPhone»: автор диктує чи нашвидкуруч записує
+  // уривок книги в застосунок Нотатки (голосовий запис і/або текст),
+  // експортує нотатки (кожна — .md-файл, що посилається на власний .m4a у
+  // спільній папці Attachments/), і плагін розшифровує аудіо, пропонує
+  // главу книги для вставки — АВТОР ЗАВЖДИ підтверджує чи змінює вибір
+  // перед вставкою, ніхто нічого не пише в книгу мовчки.
+  // -----------------------------------------------------------------------
+
+  /**
+   * 9a. Обробка однієї нотатки: розшифровка аудіо (якщо є) + підбір глави.
+   *
+   * Розшифровка аудіо підтримує лише AUDIO_ENGINES (наразі — тільки
+   * Gemini, chatProviders.ts): якщо обраний автором рушій не вміє аудіо,
+   * тихо переходимо на Gemini ЛИШЕ для цього кроку (якщо він хоч якось
+   * налаштований — власним ключем чи серверним), і повідомляємо про це у
+   * відповіді (`usedFallbackEngineForAudio`), а не мовчки видаємо гіршу
+   * розшифровку чи змушуємо автора вручну перемикати модель. Підбір
+   * глави — звичайний текстовий крок, іде через resolveCoachEngine з
+   * моделлю, яку обрав автор, як і решта AI-інструментів студії.
+   */
+  app.post('/api/ai/notes-import/process', requirePermission('canUseAi'), async (req, res) => {
+    try {
+      const { noteText, audioBase64, audioMimeType, chapters, bookId, modelId } = req.body || {};
+      const trimmedNoteText = typeof noteText === 'string' ? noteText.trim() : '';
+      const hasAudio = typeof audioBase64 === 'string' && audioBase64.length > 0 && typeof audioMimeType === 'string';
+
+      if (!hasAudio && !trimmedNoteText) {
+        return res.status(400).json({ error: 'Немає ні аудіозапису, ні тексту нотатки для обробки.' });
+      }
+      const chapterList: { id: string; title: string }[] = Array.isArray(chapters) ? chapters : [];
+      if (chapterList.length === 0) {
+        return res.status(400).json({ error: 'У книзі ще немає жодного розділу — спершу створіть хоча б один у вкладці «Книга & Текст».' });
+      }
+
+      const userId = req.principal?.id as string | undefined;
+
+      // Крок 1: розшифровка аудіо, якщо воно є.
+      let transcript = '';
+      let usedFallbackEngineForAudio = false;
+      if (hasAudio) {
+        let audioEngine = resolveChatEngine(modelId || GEMINI_MODEL);
+        let audioUserKey = await resolveEngineKey(userId, audioEngine, 'notes-import-audio');
+        if (!AUDIO_ENGINES.has(audioEngine)) {
+          const geminiKey = await resolveEngineKey(userId, 'gemini', 'notes-import-audio');
+          if (!geminiKey && !engineConfigured('gemini')) {
+            return res.status(400).json({
+              error: 'Розшифровка аудіо наразі підтримує лише Gemini. Додайте ключ Gemini в розділі «Ключі API» на сервері, або оберіть Gemini як модель ШІ.',
+              kind: 'audio_unsupported',
+            });
+          }
+          audioEngine = 'gemini';
+          audioUserKey = geminiKey;
+          usedFallbackEngineForAudio = true;
+        }
+
+        const transcribed = await generateAiText({
+          engine: audioEngine,
+          modelId: GEMINI_MODEL,
+          prompt:
+            'Розшифруй цей аудіозапис дослівно, мовою запису (найімовірніше — українською). ' +
+            'Це чернетка уривка книги, яку автор надиктував на телефон — збережи авторські слова, ' +
+            'без переказу й без власних доповнень. Поверни ЛИШЕ розшифрований текст, без заголовків, ' +
+            'лапок і коментарів від себе.',
+          systemInstruction: 'Ти — точний транскрибувальник аудіо для письменника, який диктує текст своєї книги.',
+          images: [{ mimeType: audioMimeType, dataBase64: audioBase64 }],
+          apiKeyOverride: audioUserKey,
+          req,
+          label: 'Плагін «Імпорт нотаток»: розшифровка аудіо',
+          bookId,
+        });
+        transcript = transcribed.text.trim();
+      }
+
+      const combinedText = [transcript, trimmedNoteText && trimmedNoteText !== transcript ? trimmedNoteText : '']
+        .filter(Boolean)
+        .join('\n\n');
+      if (!combinedText.trim()) {
+        return res.status(422).json({ error: 'Розшифровка аудіо порожня, і тексту нотатки теж немає — нема що вставляти.' });
+      }
+
+      // Крок 2: яку главу запропонувати.
+      const chapterListText = chapterList.map((c, i) => `${i + 1}. [${c.id}] ${c.title}`).join('\n');
+      const systemPrompt = `Ти — редактор-асистент письменника. Автор імпортує уривок, надиктований чи нашвидкуруч записаний на телефон, і хоче знати, в яку ІСНУЮЧУ главу книги він найкраще підходить за змістом.
+
+СПИСОК ГЛАВ КНИГИ (обери ОДНУ, лише з цього списку):
+${chapterListText}
+
+Поверни СУВОРО такий JSON:
+{"chapterId": "id обраної глави зі списку вище", "confidence": 72, "reasoning": "1-2 речення, чому саме ця глава"}`;
+
+      const { resolvedModelId, engine, userKey } = await resolveCoachEngine(userId, modelId);
+      const suggestion = await generateAiText({
+        engine,
+        modelId: resolvedModelId,
+        prompt: `Текст, який треба розподілити по главах:\n"""${combinedText.slice(0, 4000)}"""`,
+        systemInstruction: systemPrompt,
+        json: true,
+        apiKeyOverride: userKey,
+        req,
+        label: 'Плагін «Імпорт нотаток»: підбір глави',
+        bookId,
+      });
+
+      let parsed: any = {};
+      try {
+        parsed = JSON.parse(suggestion.text);
+      } catch {
+        /* нижче — чесний фолбек на першу главу з низькою впевненістю */
+      }
+      const suggestedChapterId = chapterList.some((c) => c.id === parsed.chapterId) ? parsed.chapterId : chapterList[0].id;
+      const confidenceNum = Number(parsed.confidence);
+
+      res.json({
+        transcript,
+        combinedText,
+        suggestedChapterId,
+        confidence: Number.isFinite(confidenceNum) ? Math.max(0, Math.min(100, Math.round(confidenceNum))) : 40,
+        reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning : '',
+        usedFallbackEngineForAudio,
+      });
+    } catch (err: any) {
+      if (err instanceof ChatProviderError) {
+        return res.status(err.status).json({ error: err.message });
+      }
+      console.error('Error in /api/ai/notes-import/process:', err);
+      res.status(500).json({ error: err.message || 'Помилка обробки нотатки.' });
     }
   });
 
