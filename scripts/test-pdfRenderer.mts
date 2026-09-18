@@ -31,6 +31,23 @@ console.log('\nОчищення тексту:');
   t('порожні абзаци відкинуто', renderer.toParagraphs('\n\n\n').length === 0);
 }
 
+console.log('\nМаркер таблиці [TABLE] — сплощення в читабельний текст (нема верстки сітки в цьому рушії):');
+{
+  const p = renderer.toParagraphs(
+    'Перед.\n\n[TABLE]\n[ROW][CELL align=left]Назва[/CELL][CELL align=right]Ціна[/CELL][/ROW]\n[ROW][CELL]Перо[/CELL][CELL align=center]10[/CELL][/ROW]\n[/TABLE]\n\nПісля.'
+  );
+  t('маркер не лишився голим текстом', !p.some((line) => line.includes('[TABLE]') || line.includes('[ROW]') || line.includes('[CELL')), p.join(' | '));
+  t('текст до і після на місці', p[0] === 'Перед.' && p[p.length - 1] === 'Після.', p.join(' | '));
+  t('перший рядок таблиці — читабельний, клітинки через «|»', p.some((line) => line.includes('Назва') && line.includes('|') && line.includes('Ціна')), p.join(' | '));
+  t('другий рядок таблиці окремим абзацом', p.some((line) => line.includes('Перо') && line.includes('|') && line.includes('10')), p.join(' | '));
+
+  // Перенос рядка всередині клітинки (Shift+Enter у редакторі) не має
+  // губити рядок таблиці й тут — той самий дефект, що виправлено в
+  // tableMarkers.ts (parseTableMarkerBlock), лише вже на рівні цього рушія.
+  const withHardBreak = renderer.toParagraphs('[TABLE]\n[ROW][CELL]перший\nдругий[/CELL][CELL]сусідня[/CELL][/ROW]\n[/TABLE]');
+  t('перенос у клітинці не губить рядок таблиці', withHardBreak.some((line) => line.includes('сусідня')), withHardBreak.join(' | '));
+}
+
 console.log('\nПеренос по словах:');
 {
   const font = { widthOfTextAtSize: (s: string, size: number) => s.length * size * 0.5 };

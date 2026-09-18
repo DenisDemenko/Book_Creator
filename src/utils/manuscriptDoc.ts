@@ -10,6 +10,7 @@
  * той самий формат.
  */
 import type { Node as PMNode } from '@tiptap/pm/model';
+import { parseTableMarkerBlock, tableMarkerString, type TableMarkerBlock, type TableCellAlign } from './tableMarkers';
 
 export interface JSONContent {
   type: string;
@@ -160,6 +161,38 @@ function imgMarkerString(attrs: Record<string, any>): string {
   return `[IMG: ${imageId} "${caption || ''}"${wrapPart}${widthPart}${heightPart}${shapePart}]`;
 }
 
+/**
+ * `[TABLE]…[/TABLE]` (tableMarkers.ts) → вузол TipTap `table`. Кожна
+ * клітинка — рівно один абзац (наша схема: insertTable без заголовка,
+ * UI не дає розбити клітинку на кілька абзаців), тож досить
+ * parseInline на її тексті.
+ */
+function tableMarkerBlockToNode(table: TableMarkerBlock): JSONContent {
+  return {
+    type: 'table',
+    content: table.rows.map((row) => ({
+      type: 'tableRow',
+      content: row.cells.map((cell) => ({
+        type: 'tableCell',
+        attrs: { align: cell.align },
+        content: [{ type: 'paragraph', content: parseInline(cell.text) }],
+      })),
+    })),
+  };
+}
+
+/** Зворотний бік tableMarkerBlockToNode — вузол `table` → структура для tableMarkerString. tableHeader (якщо колись зʼявиться в документі) трактується так само, як tableCell. */
+function tableNodeToMarkerBlock(node: JSONContent): TableMarkerBlock {
+  return {
+    rows: (node.content || []).map((row) => ({
+      cells: (row.content || []).map((cell) => ({
+        align: (cell.attrs?.align as TableCellAlign) || null,
+        text: serializeInline((cell.content && cell.content[0]?.content) || []),
+      })),
+    })),
+  };
+}
+
 /** Перетворює текст розділу (рядок з маркерами) у документ TipTap (JSON). */
 export function markerStringToTiptapDoc(text: string): JSONContent {
   const paragraphs = (text || '').replace(/\r\n/g, '\n').split(/\n{2,}/);
@@ -216,6 +249,14 @@ export function markerStringToTiptapDoc(text: string): JSONContent {
         },
       });
       return;
+    }
+
+    if (trimmed.startsWith('[TABLE]')) {
+      const table = parseTableMarkerBlock(trimmed);
+      if (table) {
+        pushBlock(tableMarkerBlockToNode(table));
+        return;
+      }
     }
 
     const isCallout = /^>\s?/.test(para);
@@ -328,6 +369,9 @@ export function tiptapDocToMarkerString(doc: JSONContent): string {
     }
     if (node.type === 'sceneDivider') {
       return DIVIDER_MARKER;
+    }
+    if (node.type === 'table') {
+      return tableMarkerString(tableNodeToMarkerBlock(node));
     }
     if (node.type === 'heading') {
       const level = Math.min(3, Math.max(1, Number(node.attrs?.level) || 1));
@@ -456,6 +500,16 @@ export function markerOffsetToDocPos(doc: PMNode, targetOffset: number): number 
 
     if (block.type.name === 'sceneDivider') {
       acc += DIVIDER_MARKER.length;
+      return;
+    }
+
+    if (block.type.name === 'table') {
+      // Атомарний блок для офсетів — так само, як wrappedImage/sceneDivider
+      // вище: підсвітка вставленого ШІ-тексту НІКОЛИ не націлюється на текст
+      // усередині клітинки таблиці (ШІ-чат вставляє звичайний текст, не
+      // таблиці), тож заглиблюватись усередину немає потреби — важлива лише
+      // довжина, яку блок додає до рядка-маркерів.
+      acc += tableMarkerString(tableNodeToMarkerBlock(block.toJSON() as JSONContent)).length;
       return;
     }
 

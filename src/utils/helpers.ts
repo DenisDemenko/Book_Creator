@@ -2,6 +2,7 @@
 import QRCode from 'qrcode';
 import { Book, Chapter, Section, Footnote, QRTag, TOCLeaderStyle, TOCNumberingStyle, PdfChapterLayout, PdfFrameObject, TOCConfig } from '../types';
 import { imageMarkerRegexp, resolveImageMarker } from './imageMarkers';
+import { replaceTableBlocks } from './tableMarkers';
 
 export function calculateWordCount(text: string): number {
   if (!text) return 0;
@@ -621,6 +622,37 @@ function renderHeadingMarkers(text: string): string {
  * текст, а не сирі маркери, — і рахувати реальну висоту відрендереного
  * HTML для точної пагінації (utils/useRealBookPages.ts).
  */
+/**
+ * Розгортає `[TABLE]…[/TABLE]` (utils/tableMarkers.ts, запис #193) у
+ * справжній `<table>`. МУСИТЬ бути найпершим кроком ланцюжка (застосованим
+ * до СИРОГО тексту, ще до bold/color/link/footnote) — інакше глобальні
+ * регекси на кшталт `**…**` чи `[COLOR="…"]…[/COLOR]` бачать текст УСІХ
+ * клітинок як один суцільний рядок і можуть спарувати відкриваючий маркер
+ * з ОДНІЄЇ клітинки із закриваючим із ІНШОЇ (напр. незакритий `**` в одній
+ * клітинці й випадковий `**` кількома клітинками далі). Кожна клітинка
+ * натомість рекурсивно проганяється через ЦЮ Ж САМУ функцію
+ * (renderSectionContentHtml) — інлайн-маркери всередині клітинки
+ * розгортаються коректно і завжди в межах своєї клітинки.
+ */
+function renderTableMarkers(text: string, book: Book, sectionFootnotes: Footnote[], allFootnotes: Footnote[]): string {
+  if (!text || !text.includes('[TABLE]')) return text;
+  return replaceTableBlocks(text, (table) => {
+    const rowsHtml = table.rows
+      .map((row) => {
+        const cellsHtml = row.cells
+          .map((cell) => {
+            const alignStyle = cell.align && cell.align !== 'left' ? `text-align:${cell.align};` : '';
+            const inner = renderSectionContentHtml(cell.text, book, sectionFootnotes, allFootnotes);
+            return `<td style="border:1px solid rgba(100,116,139,0.4);padding:6px 10px;vertical-align:top;${alignStyle}">${inner}</td>`;
+          })
+          .join('');
+        return `<tr>${cellsHtml}</tr>`;
+      })
+      .join('');
+    return `<table style="border-collapse:collapse;width:100%;margin:1em 0;page-break-inside:avoid;">${rowsHtml}</table>`;
+  });
+}
+
 export function renderSectionContentHtml(
   content: string,
   book: Book,
@@ -634,13 +666,16 @@ export function renderSectionContentHtml(
   const withoutAiDraftMarkers = (content || '')
     .replace(/\n*\[AI-DRAFT\]\n*/g, '\n\n')
     .replace(/\n*\[\/AI-DRAFT\]\n*/g, '\n\n');
+  // renderTableMarkers — НАЙПЕРШИЙ крок ланцюжка, до linkifyFootnoteMarkers,
+  // з тієї самої причини, що й у doc-коментарі функції вище.
+  const withTablesExpanded = renderTableMarkers(withoutAiDraftMarkers, book, sectionFootnotes, allFootnotes);
   return renderBoldItalicMarkers(
     renderLinkMarkers(
       renderHighlightMarkers(
         renderColorMarkers(
           renderFontSizeMarkers(
             renderFontMarkers(
-              renderHeadingMarkers(renderDividerMarkers(renderImageMarkers(linkifyFootnoteMarkers(withoutAiDraftMarkers, sectionFootnotes, allFootnotes), book)))
+              renderHeadingMarkers(renderDividerMarkers(renderImageMarkers(linkifyFootnoteMarkers(withTablesExpanded, sectionFootnotes, allFootnotes), book)))
             )
           )
         )
@@ -682,6 +717,15 @@ export function renderSectionBlocksHtml(
 
   return paragraphs
     .map((para) => {
+      // Ціла таблиця — один «абзац» у цьому спліті (усередині [TABLE]…
+      // [/TABLE] навмисно лише одинарні переноси рядка, tableMarkers.ts),
+      // але НЕ параграф: renderTableMarkers сам малює <table>, тож ні
+      // \n→' ' згортання (розчавило б рядки [ROW]…[/ROW] в один), ні <p>
+      // навколо (валідний HTML не дозволяє <table> усередині <p>).
+      const isTable = para.startsWith('[TABLE]') && para.endsWith('[/TABLE]');
+      if (isTable) {
+        return renderSectionContentHtml(para, book, sectionFootnotes, allFootnotes);
+      }
       const isCallout = /^>\s?/.test(para);
       const rawText = (isCallout ? para.replace(/^>\s?/gm, '') : para).replace(/\n+/g, ' ').trim();
       const html = renderSectionContentHtml(rawText, book, sectionFootnotes, allFootnotes);

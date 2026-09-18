@@ -8,6 +8,9 @@ import { LinkMark } from './LinkMark';
 import { DividerNode } from './DividerNode';
 import { WrappedImageNode, type WrappedImageOptions } from './WrappedImageNode';
 import { AiDraftBlockNode } from './AiDraftBlockNode';
+import { Table } from '@tiptap/extension-table';
+import { TableRow } from '@tiptap/extension-table-row';
+import { TableCellAlign, TableHeaderAlign } from './TableAlignCell';
 import { FocusParagraphPlugin } from './FocusParagraphPlugin';
 import { CharacterMentionPlugin, type CharacterMentionEntry } from './CharacterMentionPlugin';
 import { ReadabilityHighlightPlugin } from './ReadabilityHighlightPlugin';
@@ -80,6 +83,16 @@ export function buildManuscriptExtensions(
       reviewLabel: aiText.aiDraftReviewLabel,
       rejectLabel: aiText.aiDraftRejectLabel,
     }),
+    // Таблиці (запис #193) — utils/tableMarkers.ts/manuscriptDoc.ts вміють
+    // серіалізувати назад у маркери лише РІВНО цей набір: table/tableRow/
+    // tableCell(+tableHeader, той самий align — insertTable завжди кличеться
+    // без заголовка, див. EditorView.tsx#insertBlankTable). Без
+    // columnResizing/tableResizing: автор просив вставляти й редагувати
+    // рядки/стовпці та вирівнювання, не ширину колонок.
+    Table.configure({ resizable: false }),
+    TableRow,
+    TableHeaderAlign,
+    TableCellAlign,
     Placeholder.configure({ placeholder }),
     FocusParagraphPlugin.configure({
       enabled: isFocusParagraphModeEnabled || (() => false),

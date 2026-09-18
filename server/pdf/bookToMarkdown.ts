@@ -25,6 +25,50 @@
 
 import type { Book, CourseConfig } from '../../src/types';
 import { collectImageMarkerIds, resolveImageMarker, imageMarkerRegexp } from '../../src/utils/imageMarkers';
+import { replaceTableBlocks, type TableMarkerBlock, type TableCellAlign } from '../../src/utils/tableMarkers';
+
+/**
+ * `[TABLE]…[/TABLE]` (запис #193) → справжня GFM-таблиця Markdown — pandoc
+ * і Chromium (через markdown-рендер) обидва малюють `| a | b |` як реальну
+ * таблицю з коробки, тож для ЦЬОГО рушія найдешевший правильний шлях —
+ * конвертація формату, а не власна верстка клітинок (та є лише у
+ * pdfRenderer.ts, і то фолбеком-сплощенням, див. коментар там).
+ *
+ * ОБМЕЖЕННЯ, свідоме. GFM вирівнює весь СТОВПЕЦЬ, а не окрему клітинку —
+ * наш `[CELL align=…]` per-клітинковий. Беремо вирівнювання ПЕРШОГО рядка
+ * як вирівнювання стовпця; рядки з іншим вирівнюванням у тому самому
+ * стовпці друкуються з вирівнюванням першого рядка. GFM також ЗАВЖДИ
+ * трактує перший рядок таблиці як заголовок (інший шрифт/фон у
+ * pandoc/Chromium) — а наш формат такого поняття не має. Щоб не
+ * перетворити перший рядок РЕАЛЬНИХ даних на візуальний заголовок,
+ * заголовком іде порожній рядок-«шапка», і всі рядки даних — тілом
+ * таблиці. Бракетні маркери всередині клітинки (COLOR/LINK/HL/FONT/SIZE)
+ * тут НЕ розгортаються — той самий пре-існуючий пробіл, що й у звичайному
+ * тексті цього рушія (лише bold/italic, які й так валідний markdown, і
+ * IMG, який розгортає markersToMarkdown нижче, отримують реальну розмітку
+ * тут; решта бракетних маркерів у pandoc/Chromium і поза таблицею
+ * лишається як є).
+ */
+function tablesToGfmMarkdown(content: string): string {
+  return replaceTableBlocks(content, (table: TableMarkerBlock) => {
+    const colCount = table.rows.reduce((max, row) => Math.max(max, row.cells.length), 1);
+    const firstRowAligns: TableCellAlign[] = table.rows[0]?.cells.map((c) => c.align) || [];
+    const sepFor = (align: TableCellAlign) => (align === 'right' ? '---:' : align === 'center' ? ':---:' : '---');
+    const escapeCell = (s: string) =>
+      String(s || '')
+        .replace(/\|/g, '\\|')
+        .replace(/\n+/g, ' ')
+        .trim();
+
+    const blankHeader = `| ${Array(colCount).fill(' ').join(' | ')} |`;
+    const sepRow = `| ${Array.from({ length: colCount }, (_, i) => sepFor(firstRowAligns[i] || null)).join(' | ')} |`;
+    const bodyRows = table.rows.map((row) => {
+      const cells = Array.from({ length: colCount }, (_, i) => escapeCell(row.cells[i]?.text || ''));
+      return `| ${cells.join(' | ')} |`;
+    });
+    return ['', blankHeader, sepRow, ...bodyRows, ''].join('\n');
+  });
+}
 
 export interface MarkdownImage {
   /** Рядок, який рушій замінить на шлях до файлу. Унікальний у межах документа. */
@@ -234,7 +278,7 @@ export function bookToMarkdown(book: Book, options: BookToMarkdownOptions = {}):
     for (const section of sections) {
       const title = headingText(section.title);
       if (title) out.push(`## ${title}`);
-      const body = htmlToMarkdown(markersToMarkdown(section.content || ''));
+      const body = htmlToMarkdown(markersToMarkdown(tablesToGfmMarkdown(section.content || '')));
       if (body) out.push(body);
     }
 

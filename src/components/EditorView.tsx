@@ -110,7 +110,12 @@ import {
   Link2,
   SeparatorHorizontal,
   Heading3,
-  Ruler
+  Ruler,
+  Table2,
+  ArrowLeftToLine,
+  ArrowRightToLine,
+  Rows3,
+  Columns2
 } from 'lucide-react';
 import { 
   Book, 
@@ -1355,6 +1360,43 @@ export const EditorView: React.FC<EditorViewProps> = ({
     const editor = isEn ? enEditor : uaEditor;
     if (!editor) return false;
     editor.chain().focus().toggleHeading({ level }).run();
+    return true;
+  };
+
+  /**
+   * Вставляє порожню таблицю 2x2 в позицію курсора (запис #193) —
+   * `[TABLE]…[/TABLE]` (utils/tableMarkers.ts). Без рядка-заголовка:
+   * серіалізатор (utils/manuscriptDoc.ts) трактує tableHeader так само, як
+   * tableCell, тож звичайні клітинки скрізь простіші й достатні для того,
+   * про що просив автор — вставляти й редагувати рядки/стовпці й
+   * вирівнювання тексту в них.
+   */
+  const insertBlankTable = (isEn = false): boolean => {
+    const editor = isEn ? enEditor : uaEditor;
+    if (!editor) return false;
+    editor.chain().focus().insertTable({ rows: 2, cols: 2, withHeaderRow: false }).run();
+    return true;
+  };
+
+  /** Додати/прибрати рядок чи стовпець, прибрати всю таблицю — курсор має стояти всередині таблиці (контекстна панель renderFormatToolbar рендериться лише тоді). */
+  const runTableCommand = (
+    action: 'addRowBefore' | 'addRowAfter' | 'deleteRow' | 'addColumnBefore' | 'addColumnAfter' | 'deleteColumn' | 'deleteTable',
+    isEn = false
+  ): boolean => {
+    const editor = isEn ? enEditor : uaEditor;
+    if (!editor) return false;
+    const chain = editor.chain().focus() as unknown as Record<string, () => typeof chain>;
+    if (typeof chain[action] !== 'function') return false;
+    (chain[action]() as any).run();
+    return true;
+  };
+
+  /** Вирівнювання тексту в поточній клітинці (курсор чи виділення всередині неї) — `align=null` записується для 'left' (дефолт, у маркері не пишеться взагалі, див. tableMarkers.ts). */
+  const setTableCellAlign = (align: 'left' | 'right' | 'center', isEn = false): boolean => {
+    const editor = isEn ? enEditor : uaEditor;
+    if (!editor) return false;
+    const value = align === 'left' ? null : align;
+    editor.chain().focus().updateAttributes('tableCell', { align: value }).updateAttributes('tableHeader', { align: value }).run();
     return true;
   };
 
@@ -2807,6 +2849,76 @@ export const EditorView: React.FC<EditorViewProps> = ({
             >
               <Heading3 className="w-3.5 h-3.5" />
             </button>
+          </div>
+        );
+      })()}
+
+      {/* Таблиці (запис #193): кнопка вставки завжди видима, контекстна
+          панель рядків/стовпців/вирівнювання зʼявляється лише коли курсор
+          стоїть усередині таблиці (editor.isActive('table')) — той самий
+          принцип, що й кнопки обтікання картинки нижче (зʼявляються лише
+          при виділеній картинці). */}
+      {(() => {
+        const editor = isEn ? enEditor : uaEditor;
+        const inTable = !!editor?.isActive('table');
+        const activeAlign = (editor?.getAttributes('tableCell').align || editor?.getAttributes('tableHeader').align || 'left') as
+          | 'left'
+          | 'right'
+          | 'center';
+        const alignBtnClass = (mode: 'left' | 'right' | 'center') =>
+          `p-1 rounded-md transition-colors ${
+            inTable && activeAlign === mode
+              ? '[background-color:var(--sun-acc)] text-slate-950'
+              : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+          }`;
+        return (
+          <div className="flex items-center gap-0.5 pl-1.5 ml-0.5 border-l border-slate-800">
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => insertBlankTable(isEn)}
+              disabled={isReader}
+              className="p-1 rounded-md text-slate-300 hover:bg-slate-800 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title={t('editor.tableInsertTitle')}
+              aria-label={t('editor.tableInsertTitle')}
+            >
+              <Table2 className="w-3.5 h-3.5" />
+            </button>
+            {inTable && (
+              <>
+                <button onMouseDown={(e) => e.preventDefault()} onClick={() => runTableCommand('addRowBefore', isEn)} disabled={isReader} className="p-1 rounded-md text-slate-300 hover:bg-slate-800 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed" title={t('editor.tableAddRowBefore')} aria-label={t('editor.tableAddRowBefore')}>
+                  <ArrowUp className="w-3.5 h-3.5" />
+                </button>
+                <button onMouseDown={(e) => e.preventDefault()} onClick={() => runTableCommand('addRowAfter', isEn)} disabled={isReader} className="p-1 rounded-md text-slate-300 hover:bg-slate-800 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed" title={t('editor.tableAddRowAfter')} aria-label={t('editor.tableAddRowAfter')}>
+                  <ArrowDown className="w-3.5 h-3.5" />
+                </button>
+                <button onMouseDown={(e) => e.preventDefault()} onClick={() => runTableCommand('deleteRow', isEn)} disabled={isReader} className="p-1 rounded-md text-slate-300 hover:bg-rose-500/20 hover:text-rose-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" title={t('editor.tableDeleteRow')} aria-label={t('editor.tableDeleteRow')}>
+                  <Rows3 className="w-3.5 h-3.5" />
+                </button>
+                <button onMouseDown={(e) => e.preventDefault()} onClick={() => runTableCommand('addColumnBefore', isEn)} disabled={isReader} className="p-1 rounded-md text-slate-300 hover:bg-slate-800 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed" title={t('editor.tableAddColumnBefore')} aria-label={t('editor.tableAddColumnBefore')}>
+                  <ArrowLeftToLine className="w-3.5 h-3.5" />
+                </button>
+                <button onMouseDown={(e) => e.preventDefault()} onClick={() => runTableCommand('addColumnAfter', isEn)} disabled={isReader} className="p-1 rounded-md text-slate-300 hover:bg-slate-800 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed" title={t('editor.tableAddColumnAfter')} aria-label={t('editor.tableAddColumnAfter')}>
+                  <ArrowRightToLine className="w-3.5 h-3.5" />
+                </button>
+                <button onMouseDown={(e) => e.preventDefault()} onClick={() => runTableCommand('deleteColumn', isEn)} disabled={isReader} className="p-1 rounded-md text-slate-300 hover:bg-rose-500/20 hover:text-rose-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" title={t('editor.tableDeleteColumn')} aria-label={t('editor.tableDeleteColumn')}>
+                  <Columns2 className="w-3.5 h-3.5" />
+                </button>
+                <span className="w-px h-4 bg-slate-800 mx-0.5" aria-hidden="true" />
+                <button onMouseDown={(e) => e.preventDefault()} onClick={() => setTableCellAlign('left', isEn)} disabled={isReader} className={`${alignBtnClass('left')} disabled:opacity-50 disabled:cursor-not-allowed`} title={t('editor.tableAlignLeft')} aria-label={t('editor.tableAlignLeft')}>
+                  <AlignLeft className="w-3.5 h-3.5" />
+                </button>
+                <button onMouseDown={(e) => e.preventDefault()} onClick={() => setTableCellAlign('center', isEn)} disabled={isReader} className={`${alignBtnClass('center')} disabled:opacity-50 disabled:cursor-not-allowed`} title={t('editor.tableAlignCenter')} aria-label={t('editor.tableAlignCenter')}>
+                  <AlignCenter className="w-3.5 h-3.5" />
+                </button>
+                <button onMouseDown={(e) => e.preventDefault()} onClick={() => setTableCellAlign('right', isEn)} disabled={isReader} className={`${alignBtnClass('right')} disabled:opacity-50 disabled:cursor-not-allowed`} title={t('editor.tableAlignRight')} aria-label={t('editor.tableAlignRight')}>
+                  <AlignRight className="w-3.5 h-3.5" />
+                </button>
+                <span className="w-px h-4 bg-slate-800 mx-0.5" aria-hidden="true" />
+                <button onMouseDown={(e) => e.preventDefault()} onClick={() => runTableCommand('deleteTable', isEn)} disabled={isReader} className="p-1 rounded-md text-slate-300 hover:bg-rose-500/20 hover:text-rose-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" title={t('editor.tableDeleteTable')} aria-label={t('editor.tableDeleteTable')}>
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </>
+            )}
           </div>
         );
       })()}

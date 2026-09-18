@@ -153,6 +153,80 @@ function main() {
     t('фрагмент розпізнав блок heading рівня 1', nodes[0]?.type === 'heading' && nodes[0]?.attrs?.level === 1);
   }
 
+  console.log('\nTABLE — базовий round-trip (2x2, без вирівнювання):');
+  {
+    const src = 'Перед.\n\n[TABLE]\n[ROW][CELL]a1[/CELL][CELL]a2[/CELL][/ROW]\n[ROW][CELL]b1[/CELL][CELL]b2[/CELL][/ROW]\n[/TABLE]\n\nПісля.';
+    t('текст не змінюється після round-trip', roundTrip(src) === src, roundTrip(src));
+    const doc = markerStringToTiptapDoc(src);
+    const table = doc.content?.[1];
+    t('блок має type table', table?.type === 'table');
+    t('2 рядки', table?.content?.length === 2, JSON.stringify(table?.content?.length));
+    t('перший рядок — 2 клітинки', table?.content?.[0]?.content?.length === 2);
+    t('перша клітинка — параграф з текстом a1', table?.content?.[0]?.content?.[0]?.content?.[0]?.content?.[0]?.text === 'a1', JSON.stringify(table?.content?.[0]));
+    t('align клітинки за замовчуванням — null', table?.content?.[0]?.content?.[0]?.attrs?.align == null);
+  }
+
+  console.log('\nTABLE — вирівнювання клітинок (align=right/center), round-trip:');
+  {
+    const src = '[TABLE]\n[ROW][CELL align=right]праворуч[/CELL][CELL align=center]по центру[/CELL][CELL]ліворуч[/CELL][/ROW]\n[/TABLE]';
+    t('текст не змінюється після round-trip', roundTrip(src) === src, roundTrip(src));
+    const doc = markerStringToTiptapDoc(src);
+    const cells = doc.content?.[0]?.content?.[0]?.content;
+    t('перша клітинка align=right', cells?.[0]?.attrs?.align === 'right');
+    t('друга клітинка align=center', cells?.[1]?.attrs?.align === 'center');
+    t('третя клітинка align=null (не пишеться в маркері)', cells?.[2]?.attrs?.align == null);
+  }
+
+  console.log('\nTABLE — інлайн-маркери всередині клітинки (жирний/колір), round-trip:');
+  {
+    const src = '[TABLE]\n[ROW][CELL]**жирний** і [COLOR="#ff0000"]червоний[/COLOR][/CELL][CELL]звичайний[/CELL][/ROW]\n[/TABLE]';
+    t('текст не змінюється після round-trip', roundTrip(src) === src, roundTrip(src));
+    const doc = markerStringToTiptapDoc(src);
+    const firstCellPara = doc.content?.[0]?.content?.[0]?.content?.[0]?.content?.[0];
+    t('усередині клітинки розпізналось форматування (bold)', firstCellPara?.content?.some((n: any) => n.marks?.some((m: any) => m.type === 'bold')));
+  }
+
+  console.log('\nTABLE — кілька рядків різної довжини (нерівна кількість клітинок), round-trip:');
+  {
+    const src = '[TABLE]\n[ROW][CELL]a[/CELL][CELL]b[/CELL][CELL]c[/CELL][/ROW]\n[ROW][CELL]тільки одна[/CELL][/ROW]\n[/TABLE]';
+    t('текст не змінюється після round-trip', roundTrip(src) === src, roundTrip(src));
+    const doc = markerStringToTiptapDoc(src);
+    t('перший рядок — 3 клітинки', doc.content?.[0]?.content?.[0]?.content?.length === 3);
+    t('другий рядок — 1 клітинка', doc.content?.[0]?.content?.[1]?.content?.length === 1);
+  }
+
+  console.log('\nTABLE — жорсткий перенос (Shift+Enter) усередині клітинки не губить рядок:');
+  {
+    // Раніше parseTableMarkerBlock ділив блок на рядки через один '\n' —
+    // hardBreak (Shift+Enter) усередині клітинки серіалізується саме як
+    // літеральний '\n' (serializeInline), тож [ROW]…[/ROW] розривався на
+    // два «рядки», жоден з яких не збігався з ROW_RE, і рядок таблиці
+    // мовчки зникав. Тепер [ROW]…[/ROW] шукається нежадібним глобальним
+    // виразом по всьому блоку — байдуже, скільки в клітинці своїх переносів.
+    const src = '[TABLE]\n[ROW][CELL]перший\nдругий рядок клітинки[/CELL][CELL]сусідня[/CELL][/ROW]\n[/TABLE]';
+    t('текст не змінюється після round-trip', roundTrip(src) === src, roundTrip(src));
+    const doc = markerStringToTiptapDoc(src);
+    t('рядок таблиці не зник — один [ROW]', doc.content?.[0]?.content?.length === 1, JSON.stringify(doc.content?.[0]));
+    t('у рядку лишились обидві клітинки', doc.content?.[0]?.content?.[0]?.content?.length === 2);
+    const firstCellPara = doc.content?.[0]?.content?.[0]?.content?.[0]?.content?.[0];
+    t('перенос усередині клітинки розпізнано як hardBreak', firstCellPara?.content?.some((n: any) => n.type === 'hardBreak'));
+  }
+
+  console.log('\nmarkerSnippetToNodes — вставка порожньої 2x2 таблиці (кнопка «Вставити таблицю»):');
+  {
+    const nodes = markerSnippetToNodes('[TABLE]\n[ROW][CELL][/CELL][CELL][/CELL][/ROW]\n[ROW][CELL][/CELL][CELL][/CELL][/ROW]\n[/TABLE]');
+    t('фрагмент розпізнав блок table', nodes[0]?.type === 'table');
+    t('2 рядки по 2 клітинки', nodes[0]?.content?.length === 2 && nodes[0]?.content?.every((r: any) => r.content?.length === 2));
+  }
+
+  console.log('\nTABLE поряд із іншими блоками (заголовок/DIVIDER навколо) — увесь документ round-trip:');
+  {
+    const src = '# Глава\n\nВступний абзац.\n\n[TABLE]\n[ROW][CELL align=center]Зведення[/CELL][/ROW]\n[/TABLE]\n\n[DIVIDER]\n\nЗавершальний абзац.';
+    t('текст не змінюється після round-trip', roundTrip(src) === src, roundTrip(src));
+    const doc = markerStringToTiptapDoc(src);
+    t('порядок блоків: heading, paragraph, table, sceneDivider, paragraph', doc.content?.map((b) => b.type).join(',') === 'heading,paragraph,table,sceneDivider,paragraph', doc.content?.map((b) => b.type).join(','));
+  }
+
   console.log(`\nРезультат: ${passed} пройдено, ${failed} провалено`);
   if (failed > 0) process.exit(1);
 }

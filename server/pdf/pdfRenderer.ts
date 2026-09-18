@@ -28,6 +28,7 @@ import {
 } from './pdfTypes';
 import { loadImageBytes } from '../media/imageBytes';
 import { collectImageMarkerIds, splitImageMarkers } from '../../src/utils/imageMarkers';
+import { hasTableMarkers, replaceTableBlocks } from '../../src/utils/tableMarkers';
 
 export const FONT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fonts');
 
@@ -48,8 +49,27 @@ export function fontsAvailable(): boolean {
  * напівпідтримка markdown гірша за її відсутність, бо виглядає як помилка
  * верстки, а не як межа можливостей.
  */
+/**
+ * `[TABLE]…[/TABLE]` (tableMarkers.ts) → читабельний текст, рядок таблиці —
+ * рядок тексту, клітинки розділені « | ». Цей рушій (jsdoc над
+ * `toParagraphs`) не малює справжню сітку — лише абзаци одне під одним —
+ * тож питання не «як зверстати таблицю», а «що надрукувати замість неї».
+ * Голий маркер `[TABLE]\n[ROW]…` текстом — той самий клас дефекту, що й
+ * незгорнутий `[IMG: …]` у записі #169: мовчазна відмова гірша за
+ * спрощений, але читабельний результат.
+ */
+function flattenTableMarkersToPlainText(content: string): string {
+  if (!hasTableMarkers(content)) return content;
+  return replaceTableBlocks(content, (table) => {
+    const rows = table.rows
+      .map((row) => row.cells.map((c) => c.text.trim()).join('  |  ').trim())
+      .filter((line) => line.length > 0);
+    return rows.length ? `\n\n${rows.join('\n\n')}\n\n` : '';
+  });
+}
+
 export function toParagraphs(content: string): string[] {
-  const plain = String(content ?? '')
+  const plain = flattenTableMarkersToPlainText(String(content ?? ''))
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/p>/gi, '\n\n')
     .replace(/<[^>]+>/g, '')

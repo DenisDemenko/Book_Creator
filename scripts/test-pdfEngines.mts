@@ -181,6 +181,104 @@ console.log('\nМаркери зображень у Markdown: картинка �
 }
 
 // ---------------------------------------------------------------------------
+console.log('\nМаркери таблиць у Markdown: GFM-таблиця для pandoc/Chromium (таблиці в редакторі)');
+{
+  const tableBook: any = {
+    id: 'b3',
+    title: 'Книга з таблицею',
+    author: 'Автор',
+    chapters: [
+      {
+        id: 'c1',
+        title: 'Розділ перший',
+        order: 1,
+        sections: [
+          {
+            id: 's1',
+            order: 1,
+            content:
+              '<p>Перед таблицею.</p>\n\n[TABLE]\n[ROW][CELL align=left]Назва[/CELL][CELL align=right]Ціна[/CELL][/ROW]\n[ROW][CELL]Перо[/CELL][CELL align=center]10[/CELL][/ROW]\n[/TABLE]\n\n<p>Після таблиці.</p>',
+          },
+        ],
+      },
+    ],
+  };
+
+  const doc = bookToMarkdown(tableBook, {});
+  t('маркер таблиці не лишився текстом', !doc.markdown.includes('[TABLE]'), doc.markdown);
+  t('текст до таблиці на місці', doc.markdown.includes('Перед таблицею.'));
+  t('текст після таблиці на місці', doc.markdown.includes('Після таблиці.'));
+  t('таблиця стоїть між текстом до і після',
+    doc.markdown.indexOf('Перед таблицею') < doc.markdown.indexOf('Назва') &&
+      doc.markdown.indexOf('Ціна') < doc.markdown.indexOf('Після таблиці'),
+    doc.markdown.replace(/\s+/g, ' ').slice(0, 200));
+  t('клітинки першого рядка надруковані', doc.markdown.includes('Назва') && doc.markdown.includes('Ціна'));
+  t('клітинки другого рядка надруковані', doc.markdown.includes('Перо') && doc.markdown.includes('10'));
+  t('порожній рядок-шапка є (жоден реальний рядок не стає заголовком)',
+    /\|\s+\|\s+\|\n\|[-:\s|]+\|/.test(doc.markdown), doc.markdown);
+  t('роздільник вирівнювання праворуч для другого стовпця (з першого рядка)',
+    /\|\s*---:?\s*\|/.test(doc.markdown) || doc.markdown.includes('---:'), doc.markdown);
+  t('роздільник вирівнювання ліворуч для першого стовпця',
+    doc.markdown.includes('| --- |') || / --- /.test(doc.markdown), doc.markdown);
+
+  const pipeBook: any = {
+    ...tableBook,
+    chapters: [
+      {
+        ...tableBook.chapters[0],
+        sections: [
+          {
+            id: 's1',
+            order: 1,
+            content: '[TABLE]\n[ROW][CELL]а|б[/CELL][CELL]в[/CELL][/ROW]\n[/TABLE]',
+          },
+        ],
+      },
+    ],
+  };
+  const pipeDoc = bookToMarkdown(pipeBook, {});
+  t('вертикальна риска в клітинці екранована', pipeDoc.markdown.includes('а\\|б'), pipeDoc.markdown);
+
+  const unevenBook: any = {
+    ...tableBook,
+    chapters: [
+      {
+        ...tableBook.chapters[0],
+        sections: [
+          {
+            id: 's1',
+            order: 1,
+            content:
+              '[TABLE]\n[ROW][CELL]один[/CELL][CELL]два[/CELL][CELL]три[/CELL][/ROW]\n[ROW][CELL]лише[/CELL][/ROW]\n[/TABLE]',
+          },
+        ],
+      },
+    ],
+  };
+  const unevenDoc = bookToMarkdown(unevenBook, {});
+  t('нерівні рядки не валять конвертацію', unevenDoc.markdown.includes('один') && unevenDoc.markdown.includes('лише'), unevenDoc.markdown);
+  const bodyLines = unevenDoc.markdown.split('\n').filter((l: string) => l.trim().startsWith('|'));
+  const colCounts = new Set(bodyLines.map((l: string) => l.split('|').length));
+  t('усі рядки таблиці мають однакову кількість стовпців (коротший рядок дозаповнено)', colCounts.size === 1, [...colCounts].join(','));
+
+  const multilineBook: any = {
+    ...tableBook,
+    chapters: [
+      {
+        ...tableBook.chapters[0],
+        sections: [
+          { id: 's1', order: 1, content: '[TABLE]\n[ROW][CELL]рядок\nдругий[/CELL][/ROW]\n[/TABLE]' },
+        ],
+      },
+    ],
+  };
+  const multilineDoc = bookToMarkdown(multilineBook, {});
+  t('перенос рядка в клітинці не розриває рядок таблиці',
+    multilineDoc.markdown.includes('рядок другий') || multilineDoc.markdown.includes('рядок  другий'),
+    multilineDoc.markdown);
+}
+
+// ---------------------------------------------------------------------------
 console.log('\nКурс → Markdown');
 {
   const course: any = {
