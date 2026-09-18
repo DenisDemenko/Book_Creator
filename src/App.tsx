@@ -2154,12 +2154,13 @@ export default function App() {
         onUpdateBookId={(newId) => handleUpdateBook({ ...book, id: newId }, 'Зміна ID книги', `Оновлено ідентифікатор книги на «${newId}».`)}
       />
 
-      {/* Плагін «Імпорт нотаток iPhone» (запис #191) — розкривне меню «Плагіни» в шапці */}
+      {/* Плагін «Імпорт нотаток iPhone» (запис #191, розширено запис #192) — розкривне меню «Плагіни» в шапці */}
       <NotesImportModal
         isOpen={isNotesImportOpen}
         onClose={() => setIsNotesImportOpen(false)}
         book={book}
         currentRole={currentRole}
+        authUser={auth.user}
         onUpdateBook={handleUpdateBook}
       />
 

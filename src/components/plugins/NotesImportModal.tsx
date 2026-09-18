@@ -11,16 +11,18 @@ import {
   Trash2,
   RefreshCw,
   Music,
+  Image as ImageIcon,
   Info,
   ShieldAlert,
 } from 'lucide-react';
-import { Book, UserRole } from '../../types';
+import { AuthUser, Book, BookIllustration, UserRole } from '../../types';
 import { hasPermission } from '../../utils/rbac';
 import { appendTextToChapterEnd } from '../../utils/bookText';
 import { fileToBase64 } from '../../utils/extractChatFileText';
 import {
   parseNotesZip,
   matchLooseNotes,
+  imagePlaceholderToken,
   type ParsedNoteEntry,
   type LooseFileInput,
 } from '../../utils/notesImport';
@@ -30,10 +32,11 @@ interface NotesImportModalProps {
   onClose: () => void;
   book: Book;
   currentRole: UserRole;
+  authUser?: AuthUser | null;
   onUpdateBook: (updatedBook: Book, auditAction?: string, auditDetails?: string) => void;
 }
 
-type NoteStatus = 'pending' | 'processing' | 'ready' | 'inserted' | 'skipped' | 'error';
+type NoteStatus = 'pending' | 'processing' | 'ready' | 'inserting' | 'inserted' | 'skipped' | 'error';
 
 interface ReviewNote extends ParsedNoteEntry {
   status: NoteStatus;
@@ -50,19 +53,30 @@ interface ReviewNote extends ParsedNoteEntry {
 const ZIP_EXT = /\.zip$/i;
 const MD_EXT = /\.md$/i;
 const AUDIO_EXT = /\.(m4a|mp3|mpeg|wav|aac|ogg|flac|webm|aiff)$/i;
+const IMAGE_EXT = /\.(png|jpe?g|webp|gif|heic|heif|bmp|tiff?)$/i;
 
 /**
- * Плагін «Імпорт нотаток iPhone» (запис #191, розділ «Плагіни» в шапці
- * студії). Власник диктує чи нашвидкуруч записує уривки книги в застосунок
- * Нотатки на телефоні (голосом і/або текстом), експортує нотатки — кожна
- * лягає власним .md-файлом, що посилається на свій .m4a в теці
- * Attachments/ — і цей плагін розшифровує аудіо, пропонує главу книги для
- * вставки. АВТОР ЗАВЖДИ бачить розшифровку й пропозицію ПЕРЕД вставкою і
- * може змінити главу чи сам текст, або пропустити нотатку — жодна нотатка
- * не потрапляє в книгу без явного підтвердження (власник підтвердив цей
- * вибір явно, а не «вставляти автоматично, коли ШІ впевнений»).
+ * Плагін «Імпорт нотаток iPhone» (запис #191, розширено запис #192,
+ * розділ «Плагіни» в шапці студії). Власник диктує чи нашвидкуруч записує
+ * уривки книги в застосунок Нотатки на телефоні — голосом, текстом,
+ * чеклістом, таблицею, фото чи посиланням упереміш — експортує нотатки —
+ * кожна лягає власним .md-файлом, що посилається на вкладення в теці
+ * Attachments/ — і цей плагін розшифровує аудіо, переносить решту вмісту
+ * (текст/чекліст/таблиця/картинки/посилання) в формат книги й пропонує
+ * главу для вставки. АВТОР ЗАВЖДИ бачить розшифровку й пропозицію ПЕРЕД
+ * вставкою і може змінити главу чи сам текст, або пропустити нотатку —
+ * жодна нотатка не потрапляє в книгу без явного підтвердження (власник
+ * підтвердив цей вибір явно, а не «вставляти автоматично, коли ШІ
+ * впевнений»).
  */
-export const NotesImportModal: React.FC<NotesImportModalProps> = ({ isOpen, onClose, book, currentRole, onUpdateBook }) => {
+export const NotesImportModal: React.FC<NotesImportModalProps> = ({
+  isOpen,
+  onClose,
+  book,
+  currentRole,
+  authUser,
+  onUpdateBook,
+}) => {
   const [notes, setNotes] = useState<ReviewNote[]>([]);
   const [isParsingFiles, setIsParsingFiles] = useState(false);
   const [isProcessingAll, setIsProcessingAll] = useState(false);
@@ -97,7 +111,10 @@ export const NotesImportModal: React.FC<NotesImportModalProps> = ({ isOpen, onCl
       const zipFiles = files.filter((f) => ZIP_EXT.test(f.name));
       const mdFiles = files.filter((f) => MD_EXT.test(f.name));
       const audioFiles = files.filter((f) => AUDIO_EXT.test(f.name));
-      const unknown = files.filter((f) => !ZIP_EXT.test(f.name) && !MD_EXT.test(f.name) && !AUDIO_EXT.test(f.name));
+      const imageFiles = files.filter((f) => IMAGE_EXT.test(f.name));
+      const unknown = files.filter(
+        (f) => !ZIP_EXT.test(f.name) && !MD_EXT.test(f.name) && !AUDIO_EXT.test(f.name) && !IMAGE_EXT.test(f.name)
+      );
 
       const collected: ParsedNoteEntry[] = [];
 
@@ -106,7 +123,7 @@ export const NotesImportModal: React.FC<NotesImportModalProps> = ({ isOpen, onCl
         collected.push(...entries);
       }
 
-      if (mdFiles.length > 0 || audioFiles.length > 0) {
+      if (mdFiles.length > 0 || audioFiles.length > 0 || imageFiles.length > 0) {
         const looseInputs: LooseFileInput[] = [];
         for (const md of mdFiles) {
           looseInputs.push({ name: md.name, kind: 'md', text: await md.text() });
@@ -114,13 +131,16 @@ export const NotesImportModal: React.FC<NotesImportModalProps> = ({ isOpen, onCl
         for (const audio of audioFiles) {
           looseInputs.push({ name: audio.name, kind: 'audio', base64: await fileToBase64(audio), mimeType: null });
         }
+        for (const image of imageFiles) {
+          looseInputs.push({ name: image.name, kind: 'image', base64: await fileToBase64(image), mimeType: image.type || null });
+        }
         collected.push(...matchLooseNotes(looseInputs));
       }
 
       if (collected.length === 0) {
         setFileError(
           unknown.length > 0
-            ? 'Серед вибраних файлів немає жодного .md, аудіо чи .zip з експортом нотаток.'
+            ? 'Серед вибраних файлів немає жодного .md, аудіо, картинки чи .zip з експортом нотаток.'
             : 'Не вдалося розпізнати жодної нотатки у вибраних файлах.'
         );
       } else {
@@ -154,7 +174,12 @@ export const NotesImportModal: React.FC<NotesImportModalProps> = ({ isOpen, onCl
       if (!response.ok) {
         throw new Error(data?.error || `Сервер повернув статус ${response.status}.`);
       }
-      const insertText = (data.transcript && String(data.transcript).trim()) || note.bodyText.trim();
+      // ВАЖЛИВО: раніше тут бралося лише data.transcript, і якщо в нотатці
+      // була ОДНОЧАСНО й аудіо-розшифровка, й написаний текст (чекліст,
+      // таблиця, картинки, посилання) — усе, крім самої розшифровки,
+      // мовчки губилося. combinedText — це і є розшифровка + текст нотатки
+      // разом, саме так, як повертає сервер.
+      const insertText = (data.combinedText && String(data.combinedText).trim()) || note.bodyText.trim();
       updateNote(note.id, {
         status: 'ready',
         transcript: data.transcript || '',
@@ -185,18 +210,103 @@ export const NotesImportModal: React.FC<NotesImportModalProps> = ({ isOpen, onCl
     }
   };
 
-  const handleInsert = (note: ReviewNote) => {
-    const text = (note.insertText || '').trim();
-    if (!note.chosenChapterId || !text) return;
+  /**
+   * Кладе зображення в медіатеку користувача на сервері (`POST
+   * /api/media/upload`), а в книгу — коротке посилання на файл, замість
+   * десятків мегабайт base64 у JSON книги (той самий прийом і той самий
+   * компроміс, що й в ImportMaterialsWizardModal). Гостю сховища немає —
+   * і для нього, і при будь-якій помилці сервера падає назад на прямий
+   * data:URL: картинка все одно з'явиться в книзі, просто важча.
+   */
+  const uploadImageToMediaLibrary = async (
+    img: { fileName: string; dataUrl: string }
+  ): Promise<{ url: string }> => {
+    if (!authUser || authUser.isGuest) return { url: img.dataUrl };
+    try {
+      const res = await fetch('/api/media/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ dataUrl: img.dataUrl, filename: img.fileName, bookId: book.id, kind: 'upload' }),
+      });
+      const data = await res.json();
+      if (res.ok && data?.asset?.url) return { url: data.asset.url as string };
+    } catch {
+      /* сервер недоступний — повертаємо data-URL нижче */
+    }
+    return { url: img.dataUrl };
+  };
+
+  const handleInsert = async (note: ReviewNote) => {
+    if (!note.chosenChapterId) return;
     const chapter = book.chapters.find((c) => c.id === note.chosenChapterId);
+    if (!chapter) return;
+
+    updateNote(note.id, { status: 'inserting' });
+
+    let text = (note.insertText || '').trim();
+    const now = new Date().toISOString();
+    const newIllustrations: BookIllustration[] = [];
+
+    // Картинки нотатки — лише ті, чий токен-заглушка ще реально стоїть у
+    // (можливо відредагованому автором) тексті: якщо автор рядок з
+    // конкретною картинкою просто видалив з textarea, це й є спосіб
+    // «не вставляти цю картинку» — жодного окремого перемикача для цього
+    // не потрібно, і зайве завантаження в медіатеку не робиться.
+    for (const image of note.images) {
+      const token = imagePlaceholderToken(image.placeholderIndex, image.caption);
+      if (!text.includes(token)) continue;
+
+      if (image.missing) {
+        text = text.split(token).join(`«Зображення "${image.caption}" не додано: файл не знайдено серед вибраного.»`);
+        continue;
+      }
+      if (image.unsupported || !image.mimeType || !image.base64) {
+        text = text.split(token).join(
+          `«Зображення "${image.caption}" не додано: формат не підтримується — перезбережіть як JPEG або PNG.»`
+        );
+        continue;
+      }
+
+      const dataUrl = `data:${image.mimeType};base64,${image.base64}`;
+      const { url } = await uploadImageToMediaLibrary({ fileName: image.fileName || image.caption, dataUrl });
+      const illustrationId = `ill-notes-${Date.now()}-${image.placeholderIndex}`;
+      newIllustrations.push({
+        id: illustrationId,
+        chapterId: note.chosenChapterId,
+        url,
+        caption: image.caption,
+        aspectRatio: '1:1',
+        style: 'Імпорт нотаток',
+        source: 'upload',
+        createdAt: now,
+      });
+      text = text.split(token).join(`[IMG: ${illustrationId} "${image.caption}" wrap=none]`);
+    }
+
+    text = text.trim();
+    if (!text) {
+      updateNote(note.id, { status: 'ready', errorMessage: undefined });
+      return;
+    }
+
     const result = appendTextToChapterEnd(book.chapters, note.chosenChapterId, text);
-    if (!chapter || !result) return;
+    if (!result) {
+      updateNote(note.id, { status: 'ready' });
+      return;
+    }
+
     onUpdateBook(
-      { ...book, chapters: result.chapters, updatedAt: new Date().toISOString() },
+      {
+        ...book,
+        chapters: result.chapters,
+        illustrations: newIllustrations.length ? [...(book.illustrations || []), ...newIllustrations] : book.illustrations,
+        updatedAt: now,
+      },
       'Текст із плагіна «Імпорт нотаток» додано до книги',
       chapter.title
     );
-    updateNote(note.id, { status: 'inserted', insertedChapterTitle: chapter.title });
+    updateNote(note.id, { status: 'inserted', insertedChapterTitle: chapter.title, insertText: text });
   };
 
   const handleSkip = (note: ReviewNote) => updateNote(note.id, { status: 'skipped' });
@@ -221,7 +331,7 @@ export const NotesImportModal: React.FC<NotesImportModalProps> = ({ isOpen, onCl
             <div>
               <h2 className="text-lg font-bold text-white">Імпорт нотаток iPhone</h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                Голосові записи й текстові нотатки з експорту «Нотаток» — розшифровка та підбір глави книги.
+                Голос, текст, чеклісти, таблиці, фото й посилання з експорту «Нотаток» — розшифровка та підбір глави книги.
               </p>
             </div>
           </div>
@@ -255,7 +365,7 @@ export const NotesImportModal: React.FC<NotesImportModalProps> = ({ isOpen, onCl
           <div className="p-4 rounded-xl border-2 border-dashed border-slate-700 hover:border-slate-600 transition-colors flex flex-col items-center gap-2 text-center">
             <Upload className="w-6 h-6 text-slate-500" />
             <p className="text-xs text-slate-400 max-w-md">
-              Оберіть ZIP-експорт нотаток, або окремі .md і аудіофайли (.m4a, .mp3, .wav, .aac, .ogg, .flac) — можна кілька за раз.
+              Оберіть ZIP-експорт нотаток, або окремі .md, аудіо- (.m4a, .mp3, .wav, .aac, .ogg, .flac) і файли-картинки (.png, .jpg, .webp, .gif) — можна кілька за раз.
             </p>
             <button
               onClick={() => fileInputRef.current?.click()}
@@ -269,7 +379,7 @@ export const NotesImportModal: React.FC<NotesImportModalProps> = ({ isOpen, onCl
               ref={fileInputRef}
               type="file"
               multiple
-              accept=".zip,.md,.m4a,.mp3,.mpeg,.wav,.aac,.ogg,.flac,.webm,.aiff"
+              accept=".zip,.md,.m4a,.mp3,.mpeg,.wav,.aac,.ogg,.flac,.webm,.aiff,.png,.jpg,.jpeg,.webp,.gif,.heic,.heif"
               className="hidden"
               onChange={(e) => handleFilesSelected(e.target.files)}
             />
@@ -322,6 +432,12 @@ export const NotesImportModal: React.FC<NotesImportModalProps> = ({ isOpen, onCl
                     {note.audioFileName && (
                       <span className="text-[10px] text-slate-500 font-mono truncate">({note.audioFileName})</span>
                     )}
+                    {note.images.length > 0 && (
+                      <span className="text-[10px] text-slate-500 flex items-center gap-0.5 shrink-0">
+                        <ImageIcon className="w-3 h-3" />
+                        {note.images.length}
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     {note.status === 'pending' && <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-700 text-slate-300">Очікує</span>}
@@ -331,6 +447,11 @@ export const NotesImportModal: React.FC<NotesImportModalProps> = ({ isOpen, onCl
                       </span>
                     )}
                     {note.status === 'ready' && <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300">Готово до перевірки</span>}
+                    {note.status === 'inserting' && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 flex items-center gap-1">
+                        <Loader2 className="w-3 h-3 animate-spin" /> Вставка…
+                      </span>
+                    )}
                     {note.status === 'inserted' && <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300">Вставлено</span>}
                     {note.status === 'skipped' && <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-700 text-slate-400">Пропущено</span>}
                     {note.status === 'error' && <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300">Помилка</span>}
@@ -344,6 +465,37 @@ export const NotesImportModal: React.FC<NotesImportModalProps> = ({ isOpen, onCl
                   <div className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg p-2 flex items-center gap-1.5">
                     <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                     <span>У нотатці є посилання на аудіо, але сам файл не знайдено серед вибраного — оброблено лише текст нотатки.</span>
+                  </div>
+                )}
+
+                {note.images.some((i) => i.missing || i.unsupported) && (
+                  <div className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg p-2 flex items-start gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    <span>
+                      {note.images.filter((i) => i.missing).length > 0 &&
+                        `Не знайдено серед вибраного: ${note.images.filter((i) => i.missing).length} картинки. `}
+                      {note.images.filter((i) => i.unsupported).length > 0 &&
+                        `Формат не підтримується (потрібен JPEG/PNG/WEBP/GIF): ${note.images
+                          .filter((i) => i.unsupported)
+                          .map((i) => i.fileName)
+                          .join(', ')}.`}
+                    </span>
+                  </div>
+                )}
+
+                {note.images.some((i) => !i.missing && !i.unsupported && i.base64) && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {note.images
+                      .filter((i) => !i.missing && !i.unsupported && i.base64)
+                      .map((i) => (
+                        <img
+                          key={i.placeholderIndex}
+                          src={`data:${i.mimeType};base64,${i.base64}`}
+                          alt={i.caption}
+                          title={i.caption}
+                          className="w-12 h-12 object-cover rounded-lg border border-slate-700"
+                        />
+                      ))}
                   </div>
                 )}
 
@@ -371,7 +523,7 @@ export const NotesImportModal: React.FC<NotesImportModalProps> = ({ isOpen, onCl
                   </div>
                 )}
 
-                {(note.status === 'ready' || note.status === 'inserted') && (
+                {(note.status === 'ready' || note.status === 'inserting' || note.status === 'inserted') && (
                   <div className="flex flex-col gap-2.5">
                     {note.usedFallbackEngineForAudio && (
                       <div className="text-[11px] text-sky-300 bg-sky-500/10 border border-sky-500/20 rounded-lg p-2 flex items-center gap-1.5">
@@ -382,20 +534,20 @@ export const NotesImportModal: React.FC<NotesImportModalProps> = ({ isOpen, onCl
 
                     <div>
                       <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                        Текст для вставки (можна відредагувати)
+                        Текст для вставки (можна відредагувати; рядок <code>[[ЗОБРАЖЕННЯ #…]]</code> — місце картинки, видаліть рядок, щоб не вставляти саме її)
                       </label>
                       <textarea
                         value={note.insertText || ''}
                         onChange={(e) => updateNote(note.id, { insertText: e.target.value })}
-                        disabled={note.status === 'inserted'}
-                        rows={4}
+                        disabled={note.status !== 'ready'}
+                        rows={6}
                         className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-slate-100 leading-relaxed disabled:opacity-60 focus:outline-none focus:ring-1 focus:ring-sky-500"
                       />
                     </div>
 
                     {note.transcript && note.bodyText && note.transcript.trim() !== note.bodyText.trim() && (
                       <div className="text-[11px] text-slate-400 bg-slate-950/60 rounded-lg p-2">
-                        <span className="font-bold text-slate-500">Текст самої нотатки (не вставлено): </span>
+                        <span className="font-bold text-slate-500">Текст самої нотатки (не вставлено окремо — вже входить у поле вище): </span>
                         <span className="italic">«{note.bodyText}»</span>
                       </div>
                     )}
