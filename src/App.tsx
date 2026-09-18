@@ -1146,7 +1146,14 @@ export default function App() {
     const now = Date.now();
     const bookId = `BK-${now.toString(36).toUpperCase()}`;
     const title = 'Нова книга';
-    const author = 'Олександр Радченко';
+    // Раніше тут стояло жорстко вписане "Олександр Радченко" — ім'я
+    // демо-автора з initialBook.ts — БЕЗ жодного звернення до auth.user:
+    // книга «з нульової планки» ставала авторства демо-персонажа для
+    // БУДЬ-ЯКОГО реального автора, хоч би хто був залогінений. Візард
+    // (handleCreateNewBook, CreateBookModal.tsx) уже отримує ім'я з
+    // auth.user?.name — тут те саме джерело правди й той самий, уже
+    // усталений у проєкті, резервний варіант на випадок порожнього імені.
+    const author = auth.user?.name?.trim() || 'Олександр Радченко';
     const initialSnapshot: BookVersionSnapshot = {
       id: `snap-init-${now}`,
       bookId,
