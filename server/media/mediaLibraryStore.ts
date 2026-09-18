@@ -32,17 +32,33 @@ export const MEDIA_ROOT = path.join(DATA_DIR, 'media');
 /** Публічний префікс, під яким віддаються файли медіатеки. */
 export const MEDIA_URL_PREFIX = '/api/media/file';
 
-export type MediaKind = 'upload' | 'illustration' | 'character_art' | 'cover_art';
+/**
+ * 'video' — задача Leonardo.Ai (журнал #201): один вид на БУДЬ-яке
+ * згенероване відео незалежно від того, де саме його створено (медіатека,
+ * картка товару, персонаж) — так само, як 'illustration' один на всі
+ * ілюстрації книги. Окремого 'product_video'/'character_video' немає:
+ * власника видно з `bookId`/контексту виклику, а не з виду файлу.
+ */
+export type MediaKind = 'upload' | 'illustration' | 'character_art' | 'cover_art' | 'video';
 
-const KINDS: readonly MediaKind[] = ['upload', 'illustration', 'character_art', 'cover_art'];
+const KINDS: readonly MediaKind[] = ['upload', 'illustration', 'character_art', 'cover_art', 'video'];
 
-/** Що приймаємо. Розширення на диску визначається ТИПОМ, а не імʼям файлу. */
+/**
+ * Що приймаємо. Розширення на диску визначається ТИПОМ, а не імʼям файлу.
+ *
+ * 'video/mp4' — єдиний контейнер, який Leonardo.Ai віддає для всіх шести
+ * відеодвигунів (server/videoGeneration.ts). Довільне завантажене відео
+ * з компʼютера автора цей запис так само прийме (UPLOAD_KINDS у
+ * mediaRoutes.ts цього не забороняє) — окремого обмеження «лише
+ * згенероване» тут немає, як і для зображень.
+ */
 export const MEDIA_MIME_EXTENSIONS: Record<string, string> = {
   'image/png': 'png',
   'image/jpeg': 'jpg',
   'image/webp': 'webp',
   'image/gif': 'gif',
   'image/svg+xml': 'svg',
+  'video/mp4': 'mp4',
 };
 
 export interface MediaAsset {

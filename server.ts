@@ -19,11 +19,13 @@ import {
   saveGeneratedImage,
   MAX_REFERENCE_IMAGES,
 } from './server/imageGeneration';
+import { listVideoEngines } from './server/videoGeneration';
 import {
   geminiClient as ai,
   generateWithGemini,
   generateText as generateAiText,
   generateImage as generateImageAndLog,
+  generateVideo as generateVideoAndLog,
   dispatch as dispatchAiText,
   recordTextUsageByModel,
   GEMINI_MODEL,
@@ -562,6 +564,22 @@ registerGitCommandRoutes(app);
       hasLeonardoKey,
       leonardoKeySource: adminLeonardoKey ? ('panel' as const) : leonardoConfig.enabled ? ('env' as const) : null,
       suggestedEngineId,
+    });
+  });
+
+  /**
+   * Перелік двигунів ВІДЕО — той самий принцип, що й /api/ai/image-engines,
+   * але свідомо окремий маршрут, а не спільний список: у відео інший набір
+   * параметрів (тривалість/роздільність замість aspectRatio/imageSize) і
+   * лише один провайдер (задача #201, server/videoGeneration.ts).
+   */
+  app.get('/api/ai/video-engines', async (req, res) => {
+    const adminLeonardoKey = !!(await platformKeyFor('leonardo'));
+    const hasLeonardoKey = leonardoConfig.enabled || adminLeonardoKey;
+    res.json({
+      engines: listVideoEngines({ leonardo: hasLeonardoKey }),
+      hasLeonardoKey,
+      leonardoKeySource: adminLeonardoKey ? ('panel' as const) : leonardoConfig.enabled ? ('env' as const) : null,
     });
   });
 
@@ -3895,6 +3913,68 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
       console.error('Error in /api/ai/generate-media-art:', err?.message || err);
       res.status(status).json({
         error: err?.message || 'Помилка генерації зображення',
+        kind: err?.kind || 'unknown',
+      });
+    }
+  });
+
+  /**
+   * Генерація відео Leonardo.Ai (задача #201) — ОДИН спільний маршрут для
+   * всіх трьох поверхонь UI (медіатека, картка товару, персонаж), на
+   * відміну від зображень, де кожна поверхня має свій маршрут
+   * (generate-character-art/-illustration-art/-cover-art/-media-art).
+   * Відео поки не потребує окремих правил на поверхню — лише текст промпту,
+   * рушій і параметри (тривалість/роздільність/пропорції), тож розділяти
+   * зарано: `context` у тілі запиту лише підписує рядок usage_log.
+   *
+   * Роль — та сама, що й для фото (`canGenerateImages`): один перемикач
+   * доступу на «генерація медіа», а не два паралельних. Квоту ТАРИФУ
+   * (requireImageQuota()) свідомо НЕ підключено — вона рахує лише
+   * kind='image' (server/subscriptions.ts checkImageQuota), тож для
+   * kind='video' це був би лічильник, який ніколи не спрацьовує:
+   * приставити його тут означало б удавати обмеження, якого нема.
+   * Повноцінна відеоквота тарифу — поза межами цієї задачі.
+   */
+  app.post('/api/ai/generate-video', requirePermission('canGenerateImages'), async (req, res) => {
+    try {
+      const { prompt, engine, resolution, aspectRatio, durationSec, bookId, context } = req.body || {};
+
+      const finalPrompt = String(prompt || '').trim();
+      if (!finalPrompt) {
+        return res.status(400).json({ error: 'Введіть опис відео для генерації.', kind: 'empty' });
+      }
+
+      const contextLabel = typeof context === 'string' && context.trim() ? context.trim().slice(0, 60) : 'Відео';
+
+      const generated = await generateVideoAndLog({
+        prompt: finalPrompt,
+        engine,
+        resolution,
+        aspectRatio,
+        durationSec: typeof durationSec === 'number' ? durationSec : undefined,
+        filenameHint: 'video',
+        req,
+        label: `${contextLabel}: ${finalPrompt.slice(0, 60)}`,
+        bookId: typeof bookId === 'string' ? bookId : undefined,
+      });
+
+      res.json({
+        videoUrl: generated.url,
+        promptUsed: finalPrompt,
+        modelUsed: generated.engineLabel,
+        modelKey: generated.engineId,
+        resolution: generated.resolution,
+        aspectRatio: generated.aspectRatio,
+        durationSec: generated.durationSec,
+        fileSize: `${Math.round(generated.bytes / 1024)} КБ`,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      const status = err?.kind === 'no_key' ? 503 : err?.kind === 'quota' ? 429 : 500;
+      if (err?.cause) console.error('  причина:', (err.cause as Error)?.message || err.cause);
+      console.error('Error in /api/ai/generate-video:', err?.message || err);
+      res.status(status).json({
+        error: err?.message || 'Помилка генерації відео',
         kind: err?.kind || 'unknown',
       });
     }

@@ -62,9 +62,10 @@ export interface UsageRecord {
   userId: string | null;
   userEmail: string;
   role: StoredRole;
-  kind: 'image' | 'text' | 'storage' | 'audio';
+  kind: 'image' | 'text' | 'storage' | 'audio' | 'video';
   engineId: string;
   modelId: string;
+  /** Для kind='video' сюди пишеться роздільність ('480'|'720'|'1080') — те саме поле, той самий сенс «розмір виходу». */
   imageSize?: string;
   costUsd: number;
   context?: string;

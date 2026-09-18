@@ -20,7 +20,6 @@ import { requireAuth } from './auth';
 import { checkAndRecordStorageUpload, getStorageUsage } from './mediaStorage';
 import { listBooks } from './bookStore';
 import {
-  MEDIA_MIME_EXTENSIONS,
   deleteAsset,
   listAssets,
   readAsset,
@@ -39,13 +38,28 @@ const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 const UPLOAD_KINDS: readonly MediaKind[] = ['upload', 'illustration', 'character_art', 'cover_art'];
 
+/**
+ * Типи, які приймає ЦЕЙ маршрут (і чат підтримки — `supportChatRoutes.ts`
+ * теж кличе `decodeImagePayload`). Свідомо ВУЖЧий підмножина за
+ * `MEDIA_MIME_EXTENSIONS`: та таблиця з задачі #201 додала 'video/mp4' —
+ * потрібне для того, щоб `saveAsset()` приймав байти згенерованого
+ * Leonardo.Ai відео (server/aiCore.ts кладе їх напряму, минаючи цей
+ * маршрут). Але «завантажити картинку» тут і «вкладення у підтримку» —
+ * обидва звані «зображення» в помилках і коді нижче (`supportMessagePreview`
+ * малює 📎 як «Зображення»), і жоден не готовий показати відео. Якби
+ * decodeImagePayload читав MEDIA_MIME_EXTENSIONS напряму, відео
+ * прослизнуло б крізь ОБИДВА маршрути мовчки, щойно з'явився запис
+ * 'video/mp4' у спільній таблиці.
+ */
+const IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/svg+xml']);
+
 /** Розбирає `data:`-URL або голий base64. Повертає null, якщо це не зображення. */
 export function decodeImagePayload(raw: unknown): { mimeType: string; bytes: Buffer } | null {
   if (typeof raw !== 'string' || !raw) return null;
   const match = raw.match(/^data:([^;,]+);base64,(.*)$/s);
   if (!match) return null;
   const mimeType = match[1].toLowerCase();
-  if (!MEDIA_MIME_EXTENSIONS[mimeType]) return null;
+  if (!IMAGE_MIME_TYPES.has(mimeType)) return null;
   try {
     const bytes = Buffer.from(match[2], 'base64');
     return bytes.length > 0 ? { mimeType, bytes } : null;

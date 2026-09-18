@@ -44,6 +44,10 @@ import {
   resolveEngine as resolveImageEngine,
 } from './imageGeneration';
 import {
+  generateVideo as generateVideoRaw,
+  resolveVideoEngine,
+} from './videoGeneration';
+import {
   MEDIA_MIME_EXTENSIONS,
   saveAsset,
   type MediaKind,
@@ -131,6 +135,46 @@ async function logImageUsage(
     });
   } catch (err) {
     console.warn('[aiCore] Не вдалося записати витрату:', err);
+  }
+}
+
+/**
+ * Той самий usage_log, що й для фото, — окремий kind='video' (задача #201).
+ * `imageSize` тут навмисно несе роздільність відео ('480'|'720'|'1080'):
+ * той самий стовпець бази, той самий сенс «розмір виходу», нова колонка
+ * не заводилась заради одного нового kind. Ціна — 0, доки в pricing.ts
+ * немає запису для 'leonardo' (нема офіційної фіксованої таблиці цін
+ * Leonardo.Ai — той самий принцип, що й priceForImage() уже застосовує:
+ * краще чесний нуль, ніж вигадана цифра; орієнтовну вартість адміністратор
+ * рахує окремо, калькулятором у панелі — розділ 6, «AI-контент для
+ * продажу», FurnitureCalculatorPanel.tsx).
+ */
+async function logVideoUsage(
+  ctx: UsageLogCtx,
+  engineId: string,
+  modelId: string,
+  resolution: string,
+  success: boolean
+): Promise<void> {
+  const principal = ctx.req?.principal;
+  try {
+    await recordUsage({
+      id: `use-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      timestamp: new Date().toISOString(),
+      userId: principal?.isGuest ? null : principal?.id || null,
+      userEmail: principal?.email || 'guest@local',
+      role: principal?.role || 'guest',
+      kind: 'video',
+      engineId,
+      modelId,
+      imageSize: resolution,
+      costUsd: 0,
+      context: ctx.label,
+      bookId: ctx.bookId,
+      success,
+    });
+  } catch (err) {
+    console.warn('[aiCore] Не вдалося записати витрату відео:', err);
   }
 }
 
@@ -532,6 +576,109 @@ export async function generateImage(p: GenerateImageParams): Promise<{
       failedEngine.id,
       failedEngine.modelId,
       sizeLabel,
+      false
+    );
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Відео (задача #201)
+// ---------------------------------------------------------------------------
+
+interface GenerateVideoParams {
+  prompt: string;
+  engine?: string;
+  resolution?: string;
+  aspectRatio?: string;
+  durationSec?: number;
+  /** Короткий хінт для імені файлу (напр. "product-Комод", "char-Юля"). */
+  filenameHint: string;
+  req: any;
+  /** Людський контекст для usage_log при успіху. */
+  label: string;
+  bookId?: string;
+}
+
+/**
+ * Кладе згенероване відео в медіатеку автора. На відміну від
+ * `saveImageForOwner()` — БЕЗ гостьового запасного шляху: відео завжди
+ * потребує ключа Leonardo.Ai в «Ключах API» (доступно лише зареєстрованим
+ * ролям), і статика `assets/generated` заточена під зображення (три
+ * MIME-типи, жодного відео) — вигадувати для гостя друге сховище заради
+ * фічі, якою гість і так не може скористатись, нема сенсу.
+ */
+async function saveVideoForOwner(
+  p: GenerateVideoParams,
+  buffer: Buffer,
+  mimeType: string
+): Promise<{ url: string; filename: string; bytes: number }> {
+  const ownerId = p.req?.principal?.id ? String(p.req.principal.id) : '';
+  if (!ownerId) {
+    throw new Error('Генерація відео доступна лише зареєстрованим авторам.');
+  }
+  const asset = await saveAsset({
+    ownerId,
+    bookId: p.bookId ?? null,
+    kind: 'video',
+    filename: `${p.filenameHint || 'video'}.${MEDIA_MIME_EXTENSIONS[mimeType] || 'mp4'}`,
+    mimeType,
+    bytes: new Uint8Array(buffer),
+    prompt: p.prompt,
+    model: p.engine,
+  });
+  return { url: asset.url, filename: asset.filename, bytes: asset.sizeBytes };
+}
+
+/**
+ * Генерація відео + збереження файлу + ОБОВ'ЯЗКОВЕ логування — той самий
+ * контракт, що й generateImage() вище, свій, а не спільний з фото: відео
+ * має інший набір параметрів (тривалість, роздільність замість розміру) і
+ * лише одного провайдера (Leonardo.Ai) — див. server/videoGeneration.ts.
+ */
+export async function generateVideo(p: GenerateVideoParams): Promise<{
+  url: string;
+  filename: string;
+  bytes: number;
+  engineId: string;
+  engineLabel: string;
+  modelId: string;
+  resolution: string;
+  aspectRatio: string;
+  durationSec: number | null;
+}> {
+  const ctx: UsageLogCtx = { req: p.req, label: p.label, bookId: p.bookId };
+  try {
+    const apiKeyOverride = await platformKeyFor('leonardo');
+
+    const generated = await generateVideoRaw({
+      prompt: p.prompt,
+      engine: p.engine,
+      resolution: p.resolution,
+      aspectRatio: p.aspectRatio,
+      durationSec: p.durationSec,
+      apiKeyOverride,
+    });
+    const saved = await saveVideoForOwner(p, generated.buffer, generated.mimeType);
+    await logVideoUsage(ctx, generated.engine.id, generated.modelId, generated.resolution, true);
+    return {
+      url: saved.url,
+      filename: saved.filename,
+      bytes: saved.bytes,
+      engineId: generated.engine.id,
+      engineLabel: generated.engine.label,
+      modelId: generated.modelId,
+      resolution: generated.resolution,
+      aspectRatio: generated.aspectRatio,
+      durationSec: generated.durationSec,
+    };
+  } catch (err: any) {
+    const failedEngine = resolveVideoEngine(p.engine);
+    await logVideoUsage(
+      { req: p.req, label: `Невдала спроба (${err?.kind || 'unknown'})`, bookId: p.bookId },
+      failedEngine.id,
+      failedEngine.leonardoModel,
+      p.resolution || failedEngine.defaultResolution,
       false
     );
     throw err;
