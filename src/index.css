@@ -625,20 +625,26 @@
 
 /* ============================================================
    ONBOARDING TOUR — спливаючі довідкові вікна для нових авторів.
-   Синьо-блакитна картка з високим контрастом (білий текст) у
-   веселковій переливчастій рамці 2px, довкола якої пульсує
-   розмите "аврора"-світіння шириною до 50px. Прожектор навколо
-   цільової кнопки затемнює решту екрана величезним box-shadow.
+   Аура тепер ТА САМА, що в «електричних пігулок» адмінпанелі ядра
+   сайту (`.os-pill`/`.os-pill--active`, adminOs.css): один ціановий
+   акцент (#00d2ff/#00f0ff), а не веселкова рамка з переливом усіх
+   кольорів через hue-rotate — власник: «зроби дизайн цих вікон такий
+   самий, як кнопки в адмін панелі ядра управління сайтом». Той самий
+   прийом, три складові:
+     • кільце — конічний градієнт, що обертається (як `.os-pill::before`,
+       `os-spin`), а не веселка, що змінює відтінок;
+     • світіння — статичний box-shadow, як у `.os-pill--active` (картка
+       підказки завжди «активна», а не лише при наведенні, тож без
+       дихання-jitter, розрахованого на hover);
+     • жодного окремого розмитого ореолу (`::after` з `filter: blur`) —
+       в адмінці аура це кільце + box-shadow, без третього шару.
+   Прожектор навколо цільової кнопки й далі затемнює решту екрана
+   величезним box-shadow, лише в тому самому ціановому тоні.
    ============================================================ */
 
-@keyframes nova-tour-hue-rotate {
-  0% { filter: hue-rotate(0deg); }
-  100% { filter: hue-rotate(360deg); }
-}
-
-@keyframes nova-tour-aurora-pulse {
-  0%, 100% { opacity: 0.55; transform: scale(0.94); }
-  50% { opacity: 1; transform: scale(1.06); }
+@keyframes nova-tour-ring-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 @keyframes nova-tour-card-in {
@@ -647,8 +653,8 @@
 }
 
 @keyframes nova-tour-ring-pulse {
-  0%, 100% { box-shadow: 0 0 0 3px rgba(125, 211, 252, 0.65), 0 0 0 9999px rgba(2, 6, 23, 0.62); }
-  50% { box-shadow: 0 0 0 6px rgba(125, 211, 252, 0.9), 0 0 0 9999px rgba(2, 6, 23, 0.62); }
+  0%, 100% { box-shadow: 0 0 0 3px rgba(0, 210, 255, 0.65), 0 0 0 9999px rgba(2, 6, 23, 0.62); }
+  50% { box-shadow: 0 0 0 6px rgba(0, 240, 255, 0.9), 0 0 0 9999px rgba(2, 6, 23, 0.62); }
 }
 
 .nova-tour-spotlight {
@@ -664,14 +670,17 @@
   position: fixed;
   isolation: isolate;
   border-radius: 1.1rem;
-  background: linear-gradient(135deg, #1d4ed8 0%, #0e7490 55%, #0891b2 100%);
-  box-shadow: 0 25px 60px -20px rgba(2, 8, 23, 0.75);
+  /* Темно-синій фон адмінпанелі (`.os-pill-inner`), а не сіро-блакитний
+     градієнт попередньої версії — картка й кільце тепер одна система. */
+  background: linear-gradient(180deg, #0d1a2c 0%, #070e1a 100%);
+  box-shadow: 0 25px 60px -20px rgba(2, 8, 23, 0.75), 0 0 22px rgba(0, 240, 255, 0.55);
   animation: nova-tour-card-in 0.28s ease-out;
 }
 
-/* Веселкова переливчаста рамка шириною 2px — кільце створюється маскою
-   XOR: повний прямокутник мінус той самий прямокутник, звужений на
-   товщину рамки (content-box), лишає тільки 2px кайму. */
+/* Ціанове електричне кільце 2px — та сама маска XOR, що й раніше (повний
+   прямокутник мінус звужений на товщину рамки), лише градієнт тепер
+   одного кольору, як у `.os-pill::before`: не веселка, а дуга ціану, що
+   пробігає по колу з "іскрою" (білий спалах на піку). */
 .nova-tour-card::before {
   content: '';
   position: absolute;
@@ -680,40 +689,31 @@
   border-radius: inherit;
   background: conic-gradient(
     from 0deg,
-    #ff5f6d, #ff9a5f, #ffe45f, #7dff5f, #5fffd0, #5fc3ff, #7a6dff, #e05fff, #ff5f6d
+    transparent 0deg,
+    rgba(0, 210, 255, 0.05) 50deg,
+    rgba(0, 240, 255, 0.3) 100deg,
+    rgba(0, 255, 255, 0.95) 130deg,
+    rgba(255, 255, 255, 1) 140deg,
+    rgba(0, 240, 255, 0.95) 150deg,
+    rgba(14, 165, 233, 0.3) 180deg,
+    transparent 210deg,
+    rgba(0, 210, 255, 0.2) 280deg,
+    rgba(56, 189, 248, 0.85) 320deg,
+    rgba(255, 255, 255, 0.95) 330deg,
+    rgba(0, 210, 255, 0.6) 340deg,
+    transparent 360deg
   );
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   mask-composite: exclude;
-  animation: nova-tour-hue-rotate 5s linear infinite;
+  animation: nova-tour-ring-spin 12s linear infinite;
   pointer-events: none;
   z-index: 2;
 }
 
-/* Аврора: розмите веселкове світіння навколо рамки, що "дихає" й
-   розширюється на 50px за межі картки. */
-.nova-tour-card::after {
-  content: '';
-  position: absolute;
-  inset: -50px;
-  border-radius: calc(1.1rem + 50px);
-  background: conic-gradient(
-    from 0deg,
-    rgba(255, 95, 109, 0.55), rgba(255, 154, 95, 0.5), rgba(255, 228, 95, 0.45),
-    rgba(125, 255, 95, 0.5), rgba(95, 255, 208, 0.55), rgba(95, 195, 255, 0.6),
-    rgba(122, 109, 255, 0.55), rgba(224, 95, 255, 0.55), rgba(255, 95, 109, 0.55)
-  );
-  filter: blur(30px);
-  opacity: 0.7;
-  z-index: -1;
-  pointer-events: none;
-  animation: nova-tour-hue-rotate 6.5s linear infinite, nova-tour-aurora-pulse 3.4s ease-in-out infinite;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .nova-tour-card::before,
-  .nova-tour-card::after,
   .nova-tour-spotlight {
     animation: none !important;
   }
