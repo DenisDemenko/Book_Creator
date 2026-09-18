@@ -10,6 +10,7 @@
 import {
   bookRevisionMs,
   isNewerBook,
+  classifyIncomingBook,
   stampBookRevision,
   describeRevisionGap,
 } from '../src/utils/bookVersion.ts';
@@ -37,6 +38,22 @@ console.log('\nЧия копія новіша:');
   t('однакові — не новіша (без пінг-понгу між клієнтами)', isNewerBook(older, { ...older }) === false);
   t('книга без дати не перемагає книгу з датою', isNewerBook(at(''), older) === false);
   t('книга з датою перемагає книгу без дати', isNewerBook(older, at('')) === true);
+}
+
+console.log('\nКласифікація вхідної копії (запис #197, проти пінг-понгу):');
+{
+  const older = at('2026-08-31T18:00:00.000Z');
+  const newer = at('2026-08-31T18:05:00.000Z');
+  t('новіша — apply', classifyIncomingBook(newer, older) === 'apply');
+  t('старіша — reject-stale', classifyIncomingBook(older, newer) === 'reject-stale');
+  // Це і є регресія: РІВНІ позначки мають давати 'noop', а не
+  // 'reject-stale'. Стара логіка (isNewerBook(...) ? apply : reject) не
+  // розрізняла "рівна" від "старіша", тому двоє клієнтів з однаковим станом
+  // без кінця відсилали копії одне одному й показували тост — саме
+  // "мерехтить, загорається та тухне" зі скарги користувача.
+  t('однакові позначки — noop, НЕ reject-stale', classifyIncomingBook(older, { ...older }) === 'noop');
+  t('noop симетричний для обох сторін', classifyIncomingBook({ ...older }, older) === 'noop');
+  t('книги без дати обидві — теж noop (0 === 0)', classifyIncomingBook(at(''), at('')) === 'noop');
 }
 
 console.log('\nШтамп версії:');

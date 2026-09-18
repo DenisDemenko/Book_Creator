@@ -12,7 +12,7 @@ import {
 import { getRoleInfo } from '../utils/rbac';
 import { realtimeSocketUrl } from '../utils/basePath';
 import type { SectionPatch } from '../utils/bookDiff';
-import { isNewerBook, describeRevisionGap } from '../utils/bookVersion';
+import { classifyIncomingBook, describeRevisionGap } from '../utils/bookVersion';
 import { stableClientId, deviceLabel } from '../utils/deviceSession';
 
 /** Мінімальний проміжок між відправками одного каналу, мс. */
@@ -282,9 +282,10 @@ export function useRealtimeSync({
                 // і сесія зі старим станом (та сама книга, відкрита в іншому
                 // браузері чи на іншому пристрої) мовчки затирала свіжий
                 // текст — саме так втрачалась робота.
-                if (isNewerBook(payload.book, bookRef.current)) {
+                const action = classifyIncomingBook(payload.book, bookRef.current);
+                if (action === 'apply') {
                   onRemoteBookUpdate(payload.book, payload.logEntry);
-                } else {
+                } else if (action === 'reject-stale') {
                   // Наша копія свіжіша: не мовчимо, а віддаємо її назад, щоб
                   // відсталий клієнт наздогнав. Інакше два пристрої лишились
                   // би розбіжними до наступної правки.
@@ -302,6 +303,11 @@ export function useRealtimeSync({
                     );
                   }
                 }
+                // action === 'noop' (позначки РІВНІ): копії вже збіглися,
+                // нічого не робимо. Див. classifyIncomingBook у bookVersion.ts —
+                // саме об'єднання цього випадку зі "справді старіша" й
+                // спричиняло вічний пінг-понг між двома клієнтами з
+                // однаковим станом (запис #197).
               }
               break;
             }
