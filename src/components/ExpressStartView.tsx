@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight, BookOpen, Gamepad2, GraduationCap, ListChecks, L
 import { EXPRESS_TRACKS, findExpressTrack, isTrackRunnable, type ExpressTrack, type ExpressTrackId } from '../data/expressTracks';
 import { ExpressWizardView, type ExpressWizardPayload } from './ExpressWizardView';
 import { CourseWizardView } from './CourseWizardView';
+import { InstructionBuilderView } from './InstructionBuilderView';
 import type { CourseV2 } from '../types';
 
 /**
@@ -191,6 +192,10 @@ export const ExpressStartView: React.FC<{
 
   if (track === 'course') {
     return <CourseWizardView onChangeTrack={backToChoice} onCourseCreated={onCourseCreated} />;
+  }
+
+  if (track === 'instruction') {
+    return <InstructionBuilderView onChangeTrack={backToChoice} />;
   }
 
   return (

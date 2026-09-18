@@ -510,6 +510,83 @@ export interface CourseV2 {
   publishedAt?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Інструкції (експрес-майстер, напрям «Інструкція» — src/data/expressTracks.ts).
+//
+// На відміну від CourseV2/Book вище, це НЕ багатосутнісна модель із власником
+// і статусом публікації: як і в довідковому інструменті-конструкторі, за
+// зразком якого зроблено цю гілку, тут один активний документ, що живе в
+// localStorage браузера (src/utils/instructionDraft.ts) — без сервера.
+//
+// Чотири типи документа (`InstructionDocType`) — це НЕ чотири різні форми
+// з різними полями. Під капотом одна й та сама структура нижче; типи різняться
+// лише підписами розділів і підказками (src/data/instructionTypes.ts), так
+// само як улаштований і сам довідковий інструмент: перемикання типу
+// перейменовує розділи, а вже введені дані лишаються на місці.
+// ---------------------------------------------------------------------------
+
+export type InstructionDocType = 'assembly' | 'usage' | 'safety' | 'sequence';
+
+/** Рядок «Комплектації» / «Що знадобиться» / «Небезпечних факторів» тощо. */
+export interface InstructionMaterialRow {
+  id: string;
+  code: string;
+  name: string;
+  qty: string;
+}
+
+/** Один крок послідовності дій — розділ «Кроки складання» та еквіваленти. */
+export interface InstructionStep {
+  id: string;
+  title: string;
+  description: string;
+  components: string;
+  toolsResources: string;
+  warning: string;
+  successCriterion: string;
+}
+
+/** Рядок «Типових помилок» / «Аварійних ситуацій» тощо. */
+export interface InstructionIssueRow {
+  id: string;
+  issue: string;
+  cause: string;
+  action: string;
+}
+
+/** Матеріал в окремій «Базі знань» документа. */
+export interface InstructionKnowledgeItem {
+  id: string;
+  title: string;
+  link: string;
+  excerpt: string;
+}
+
+export interface InstructionWarranty {
+  period: string;
+  responsible: string;
+  notes: string;
+}
+
+export interface Instruction {
+  docType: InstructionDocType;
+  title: string;
+  modelCode: string;
+  estimatedTime: string;
+  skillLevel: string;
+  executorsCount: string;
+  description: string;
+  materials: InstructionMaterialRow[];
+  tools: string[];
+  warnings: string[];
+  steps: InstructionStep[];
+  finalChecks: string[];
+  troubleshooting: InstructionIssueRow[];
+  warranty: InstructionWarranty;
+  knowledgeBase: InstructionKnowledgeItem[];
+  updatedAt: string;
+}
+
 /**
  * WYSIWYG-верстка PDF («Верстка PDF») — позиціонування графічних об'єктів
  * на сторінці глави з режимом обтікання текстом, і перевизначення полів

@@ -7,8 +7,16 @@
  *   1) перелік напрямів продубльовано на сервері (server/expressRoutes.ts
  *      не імпортує з src/), і розходження двох списків не викличе жодної
  *      помилки — просто вибраний напрям мовчки не збережеться;
- *   2) гілку 2-4 колись позначать `ready`, не дописавши кроків, і людина
+ *   2) якийсь напрям позначать `ready`, не дописавши кроків, і людина
  *      піде в майстер, який обірветься.
+ *
+ * Запис #198: «книга — можна» / «курс — ні» / «інструкція — ні» нижче були
+ * застарілі ще ДО цього запису — «курс» став `ready` в попередній сесії, а
+ * тест не оновили (npm run test:express-tracks уже падав на 3 з 23 перевірок
+ * до будь-якої правки в цьому файлі, `git blame` тому не допоможе). Цей
+ * запис додає «інструкцію» до готових і заразом виправляє застарілі
+ * очікування: тепер `ready` — «книга», «курс» і «інструкція», `planned` —
+ * лише «гра».
  */
 import { readFileSync } from 'node:fs';
 import {
@@ -34,10 +42,11 @@ console.log('\nСклад реєстру:');
 console.log('\nСтатуси:');
 {
   const ready = EXPRESS_TRACKS.filter((x) => x.status === 'ready');
-  t('готова рівно одна гілка', ready.length === 1);
-  t('готова саме «Книга» — наявний майстер', ready[0]?.id === 'book');
-  t('гілки 2-4 позначені як planned',
-    EXPRESS_TRACKS.slice(1).every((x) => x.status === 'planned'));
+  t('готові три гілки з чотирьох', ready.length === 3);
+  t('готові саме книга, курс та інструкція',
+    ready.map((x) => x.id).sort().join() === 'book,course,instruction');
+  t('лишається planned лише «гра»',
+    EXPRESS_TRACKS.filter((x) => x.status === 'planned').map((x) => x.id).join() === 'game');
   t('кожна гілка має описані кроки', EXPRESS_TRACKS.every((x) => x.steps.length >= 3));
   t('кроки книги збігаються з майстром',
     findExpressTrack('book')!.steps.join() === 'Зерно,Модель,Герої,Синопсис,Структура');
@@ -46,9 +55,9 @@ console.log('\nСтатуси:');
 console.log('\nЧи можна вести людину в майстер:');
 {
   t('книга — можна', isTrackRunnable('book') === true);
-  t('курс — ні (немає опису)', isTrackRunnable('course') === false);
-  t('інструкція — ні', isTrackRunnable('instruction') === false);
-  t('гра — ні', isTrackRunnable('game') === false);
+  t('курс — можна', isTrackRunnable('course') === true);
+  t('інструкція — можна (запис #198)', isTrackRunnable('instruction') === true);
+  t('гра — ні (ще planned)', isTrackRunnable('game') === false);
   t('невідомий рядок — ні', isTrackRunnable('книжка') === false);
   t('null не кидає', isTrackRunnable(null) === false);
   t('порожній рядок — ні', isTrackRunnable('') === false);
