@@ -489,7 +489,9 @@ export async function generateImage(p: GenerateImageParams): Promise<{
         ? await platformKeyFor('seedream')
         : targetEngine.provider === 'openai'
           ? await platformKeyFor('gpt')
-          : undefined;
+          : targetEngine.provider === 'leonardo'
+            ? await platformKeyFor('leonardo')
+            : undefined;
 
 
     const generated = await generateImageRaw(geminiClient, {

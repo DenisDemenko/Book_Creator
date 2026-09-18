@@ -34,6 +34,15 @@ const IMAGE_KEY_PROVIDERS = [
     label: 'Seedream (ByteDance)',
     envKeys: ['ARK_API_KEY', 'SEEDREAM_API_KEY', 'FAL_KEY'],
   },
+  {
+    // Один ключ Leonardo обслуговує і фото (server/imageGeneration.ts,
+    // ImageEngineId 'leonardo'), і відео (server/videoGeneration.ts,
+    // VideoEngineId 'leonardo-motion2' тощо) — тому запис у панелі один,
+    // а не два: ключ той самий, різняться лише ендпоінти Leonardo API.
+    engine: 'leonardo',
+    label: 'Leonardo.Ai (фото + відео)',
+    envKeys: ['LEONARDO_API_KEY'],
+  },
 ] as const;
 
 const IMAGE_KEY_ENGINES = new Set<string>(IMAGE_KEY_PROVIDERS.map((p) => p.engine));

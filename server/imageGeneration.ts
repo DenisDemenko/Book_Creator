@@ -62,7 +62,7 @@ import { SEEDREAM_FAL_MODEL, SEEDREAM_FAL_EDIT_MODEL } from './pricing';
  */
 export const MAX_REFERENCE_IMAGES = 10;
 
-export type ImageEngineId = 'nano-banana-2-lite' | 'nano-banana-2' | 'nano-banana-pro' | 'seedream' | 'gpt-image';
+export type ImageEngineId = 'nano-banana-2-lite' | 'nano-banana-2' | 'nano-banana-pro' | 'seedream' | 'gpt-image' | 'leonardo';
 
 export interface ImageEngineInfo {
   id: ImageEngineId;
@@ -70,7 +70,7 @@ export interface ImageEngineInfo {
   label: string;
   /** Ідентифікатор моделі у провайдера. */
   modelId: string;
-  provider: 'google' | 'bytedance' | 'openai';
+  provider: 'google' | 'bytedance' | 'openai' | 'leonardo';
   /** Найбільший розмір, який приймає модель. */
   maxSize: '1K' | '2K' | '4K';
   /**
@@ -153,6 +153,27 @@ export const IMAGE_ENGINES: Record<ImageEngineId, ImageEngineInfo> = {
     // (developers.openai.com/api/reference, звірено вересень 2026).
     supportsFormatChoice: true,
   },
+  leonardo: {
+    id: 'leonardo',
+    label: 'Leonardo.Ai',
+    // Leonardo модель — не назва рядком, а UUID конкретної платформної
+    // моделі (Production API); LEONARDO_MODEL_ID лишено порожнім за
+    // замовчуванням, і якщо адміністратор його не задав, запит іде БЕЗ
+    // modelId — Leonardo сама застосовує свою платформну модель за
+    // замовчуванням, а не помилку. Це свідомо, бо жодного UUID моделі
+    // не підтверджено документацією без реального ключа (журнал #199/#200).
+    modelId: process.env.LEONARDO_MODEL_ID || '',
+    provider: 'leonardo',
+    // Leonardo Production API документує ширину/висоту 32-1024px, кратні
+    // 8 (generations, text-to-image) — це нижче за 4K/2K решти двигунів,
+    // тож '1K' тут чесний, а не занижений маркер.
+    maxSize: '1K',
+    // alchemy/photoReal — інша вісь якості Leonardo, не той самий
+    // 'minimal'/'high' перемикач, що в Nano Banana/GPT Image — не мапимо,
+    // щоб не обіцяти невідповідність.
+    supportsQualityControl: false,
+    supportsFormatChoice: false,
+  },
 };
 
 export const DEFAULT_ENGINE: ImageEngineId = 'nano-banana-2';
@@ -213,6 +234,23 @@ export const seedreamConfig = {
  */
 export const openaiImageConfig = {
   apiKey: process.env.OPENAI_API_KEY || '',
+  get enabled(): boolean {
+    return !!this.apiKey;
+  },
+};
+
+/**
+ * Конфігурація Leonardo.Ai Production API — один ключ обслуговує і фото
+ * (тут), і відео (server/videoGeneration.ts). LEONARDO_API_KEY — офіційна
+ * назва змінної оточення провайдера; той самий ключ, вставлений
+ * адміністратором у «Ключах API» під рушієм 'leonardo', приходить сюди
+ * через apiKeyOverride (server/aiCore.ts), за тим самим шляхом, що й
+ * Seedream/GPT Image.
+ */
+export const leonardoConfig = {
+  apiKey: process.env.LEONARDO_API_KEY || '',
+  baseUrl: (process.env.LEONARDO_BASE_URL || 'https://cloud.leonardo.ai/api/rest/v1').replace(/\/+$/, ''),
+  modelId: process.env.LEONARDO_MODEL_ID || '',
   get enabled(): boolean {
     return !!this.apiKey;
   },
@@ -363,7 +401,7 @@ function classifyProviderError(err: unknown): ImageErrorKind {
 function humanMessage(
   kind: ImageErrorKind,
   engineLabel: string,
-  provider: 'google' | 'bytedance' | 'openai' = 'google'
+  provider: 'google' | 'bytedance' | 'openai' | 'leonardo' = 'google'
 ): string {
   switch (kind) {
     case 'no_key':
@@ -380,6 +418,9 @@ function humanMessage(
       if (provider === 'openai') {
         return `Двигун ${engineLabel} не налаштований: додайте OPENAI_API_KEY (той самий ключ, що й для GPT у чаті) у змінні оточення, або перевірте власний ключ у розділі «Ключі API».`;
       }
+      if (provider === 'leonardo') {
+        return `Двигун ${engineLabel} не налаштований: додайте LEONARDO_API_KEY у змінні оточення, або перевірте власний ключ у розділі «Ключі API».`;
+      }
       return `Двигун ${engineLabel} не налаштований: додайте GEMINI_API_KEY (усі моделі Nano Banana працюють через Gemini API) у змінні оточення, або перевірте власний ключ у розділі «Ключі API».`;
     case 'safety':
       return 'Модель відхилила запит через фільтри безпеки. Спробуйте пом’якшити опис сцени або персонажа.';
@@ -389,6 +430,9 @@ function humanMessage(
       }
       if (provider === 'openai') {
         return 'Вичерпано ліміт запитів до OpenAI. Спробуйте за кілька хвилин або перевірте квоти й ліміти витрат у платформі OpenAI.';
+      }
+      if (provider === 'leonardo') {
+        return 'Вичерпано ліміт запитів або кредитів Leonardo.Ai (Pay-As-You-Go). Поповніть баланс або спробуйте за кілька хвилин.';
       }
       return 'Вичерпано ліміт запитів до моделі. Спробуйте за кілька хвилин або перевірте квоти у Google AI Studio.';
     case 'empty':
@@ -661,6 +705,156 @@ async function generateWithOpenAI(
   };
 }
 
+/** Ширина/висота під Leonardo (32-1024px, кратні 8) з обраного співвідношення сторін. */
+function leonardoPixelDims(aspectRatio: SupportedRatio): { width: number; height: number } {
+  const base = 1024;
+  const [rw, rh] = aspectRatio.split(':').map(Number);
+  const longSide = base;
+  const shortSide = Math.max(32, Math.round((base * Math.min(rw, rh)) / Math.max(rw, rh) / 8) * 8);
+  return rw >= rh ? { width: longSide, height: shortSide } : { width: shortSide, height: longSide };
+}
+
+function classifyLeonardoError(status: number, message: string): ImageErrorKind {
+  if (status === 401 || status === 403) return 'no_key';
+  if (status === 429) return 'quota';
+  const m = message.toLowerCase();
+  if (m.includes('safety') || m.includes('moderation') || m.includes('nsfw') || m.includes('blocked')) return 'safety';
+  if (m.includes('quota') || m.includes('rate limit') || m.includes('credit')) return 'quota';
+  return 'unknown';
+}
+
+/** Скільки разів опитати статус генерації Leonardo, перш ніж здатися (кожні LEONARDO_POLL_INTERVAL_MS). */
+const LEONARDO_POLL_INTERVAL_MS = 2500;
+const LEONARDO_POLL_MAX_ATTEMPTS = 48; // ~2 хвилини — Leonardo документує фото як секунди, а не хвилини, тож запас із надлишком.
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Виклик Leonardo.Ai Production API — ЄДИНИЙ асинхронний двигун у цьому
+ * реєстрі (решта повертають байти в тій самій відповіді). Leonardo API
+ * повертає лише `generationId` одразу, а сам результат зʼявляється тільки
+ * після опитування `GET /generations/{id}` (`status: PENDING → COMPLETE`
+ * чи `FAILED`) — тому виклик приховує це очікування всередині функції й
+ * повертає готові байти, як і решта двигунів: решта пайплайну
+ * (server/aiCore.ts generateImage(), збереження файлу, лог витрат,
+ * усі три UI-поверхні через /api/ai/image-engines) лишається незмінною,
+ * не знає й не має знати, що цей конкретний двигун — асинхронний.
+ *
+ * Свідомо поза межами: справжнього фонового job-черги тут немає — HTTP-
+ * запит просто «висить», доки опитування не завершиться чи не вичерпає
+ * LEONARDO_POLL_MAX_ATTEMPTS. Для одного зображення (секунди, за
+ * документацією Leonardo) це прийнятно; для набагато довшого відео той
+ * самий прийом уже ризикованіший — див. server/videoGeneration.ts.
+ */
+async function generateWithLeonardo(
+  engine: ImageEngineInfo,
+  apiKey: string,
+  prompt: string,
+  aspectRatio: SupportedRatio,
+  negativePrompt?: string,
+  referenceImageUrls?: string[]
+): Promise<{ buffer: Buffer; mimeType: string }> {
+  if (referenceImageUrls?.length) {
+    throw new ImageGenerationError(
+      'unknown',
+      `Двигун ${engine.label} поки не підтримує референсні зображення — оберіть інший двигун або приберіть референси.`,
+      engine.id
+    );
+  }
+
+  const { width, height } = leonardoPixelDims(aspectRatio);
+  const headers = {
+    Authorization: `Bearer ${apiKey}`,
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
+
+  let submitRes: Response;
+  try {
+    submitRes = await fetch(`${leonardoConfig.baseUrl}/generations`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        prompt: prompt.slice(0, 1500), // жорсткий ліміт промпту в Leonardo Production API
+        ...(engine.modelId ? { modelId: engine.modelId } : {}),
+        width,
+        height,
+        num_images: 1,
+        ...(negativePrompt?.trim() ? { negative_prompt: negativePrompt.trim() } : {}),
+      }),
+    });
+  } catch (err) {
+    throw new ImageGenerationError('unknown', `Leonardo.Ai недоступний: ${(err as Error).message}`, engine.id, err);
+  }
+
+  const submitJson = (await submitRes.json().catch(() => null)) as
+    | { sdGenerationJob?: { generationId?: string }; generationId?: string; error?: string }
+    | null;
+
+  if (!submitRes.ok) {
+    const message = submitJson?.error || `HTTP ${submitRes.status}`;
+    const kind = classifyLeonardoError(submitRes.status, message);
+    throw new ImageGenerationError(kind, `Leonardo.Ai: ${message}`, engine.id);
+  }
+
+  const generationId = submitJson?.sdGenerationJob?.generationId || submitJson?.generationId;
+  if (!generationId) {
+    throw new ImageGenerationError('empty', humanMessage('empty', engine.label), engine.id);
+  }
+
+  let imageUrl: string | undefined;
+  for (let attempt = 0; attempt < LEONARDO_POLL_MAX_ATTEMPTS; attempt++) {
+    await sleep(LEONARDO_POLL_INTERVAL_MS);
+    let pollRes: Response;
+    try {
+      pollRes = await fetch(`${leonardoConfig.baseUrl}/generations/${generationId}`, {
+        headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+      });
+    } catch (err) {
+      throw new ImageGenerationError('unknown', `Leonardo.Ai недоступний під час очікування: ${(err as Error).message}`, engine.id, err);
+    }
+    const pollJson = (await pollRes.json().catch(() => null)) as
+      | { generations_by_pk?: { status?: string; generated_images?: { url?: string }[] } }
+      | null;
+    if (!pollRes.ok) {
+      const message = `HTTP ${pollRes.status}`;
+      throw new ImageGenerationError(classifyLeonardoError(pollRes.status, message), `Leonardo.Ai: ${message}`, engine.id);
+    }
+    const gen = pollJson?.generations_by_pk;
+    if (gen?.status === 'COMPLETE') {
+      imageUrl = gen.generated_images?.[0]?.url;
+      break;
+    }
+    if (gen?.status === 'FAILED') {
+      throw new ImageGenerationError('unknown', `Leonardo.Ai: генерацію відхилено (status FAILED).`, engine.id);
+    }
+    // PENDING — пробуємо далі.
+  }
+
+  if (!imageUrl) {
+    throw new ImageGenerationError(
+      'unknown',
+      `Leonardo.Ai не встиг завершити генерацію за відведений час. Спробуйте ще раз.`,
+      engine.id
+    );
+  }
+
+  let downloadRes: Response;
+  try {
+    downloadRes = await fetch(imageUrl);
+  } catch (err) {
+    throw new ImageGenerationError('unknown', `Не вдалося завантажити результат Leonardo.Ai: ${(err as Error).message}`, engine.id, err);
+  }
+  if (!downloadRes.ok) {
+    throw new ImageGenerationError('unknown', `Не вдалося завантажити результат Leonardo.Ai (HTTP ${downloadRes.status}).`, engine.id);
+  }
+  const arrayBuffer = await downloadRes.arrayBuffer();
+  const mimeType = downloadRes.headers.get('content-type')?.split(';')[0]?.trim() || 'image/png';
+  return { buffer: Buffer.from(arrayBuffer), mimeType };
+}
+
 /** Виклик моделі сімейства Nano Banana через Interactions API. */
 async function generateWithNanoBanana(
   ai: GoogleGenAI,
@@ -733,6 +927,7 @@ export async function generateImage(
   const overrideKey = options.apiKeyOverride?.trim();
   const seedreamKey = overrideKey || seedreamConfig.apiKey;
   const openaiKey = overrideKey || openaiImageConfig.apiKey;
+  const leonardoKey = overrideKey || leonardoConfig.apiKey;
 
   if (engine.provider === 'google' && !ai) {
     throw new ImageGenerationError('no_key', humanMessage('no_key', engine.label, 'google'), engine.id);
@@ -742,6 +937,9 @@ export async function generateImage(
   }
   if (engine.provider === 'openai' && !openaiKey) {
     throw new ImageGenerationError('no_key', humanMessage('no_key', engine.label, 'openai'), engine.id);
+  }
+  if (engine.provider === 'leonardo' && !leonardoKey) {
+    throw new ImageGenerationError('no_key', humanMessage('no_key', engine.label, 'leonardo'), engine.id);
   }
   if (!options.prompt || !options.prompt.trim()) {
     throw new ImageGenerationError('unknown', 'Порожній промпт для генерації зображення.', engine.id);
@@ -798,7 +996,9 @@ export async function generateImage(
               options.outputFormat,
               options.referenceImageUrls
             )
-          : await generateWithNanoBanana(
+          : engine.provider === 'leonardo'
+            ? await generateWithLeonardo(engine, leonardoKey, prompt, aspectRatio, options.negativePrompt, options.referenceImageUrls)
+            : await generateWithNanoBanana(
               ai as GoogleGenAI,
               engine,
               prompt,
@@ -871,7 +1071,7 @@ export async function saveGeneratedImage(
 }
 
 /** Перелік двигунів для інтерфейсу — щоб клієнт не хардкодив назви моделей. */
-export function listEngines(availability: { google: boolean; bytedance: boolean; openai: boolean }) {
+export function listEngines(availability: { google: boolean; bytedance: boolean; openai: boolean; leonardo: boolean }) {
   return Object.values(IMAGE_ENGINES).map((engine) => ({
     id: engine.id,
     label: engine.label,
@@ -885,6 +1085,8 @@ export function listEngines(availability: { google: boolean; bytedance: boolean;
         ? availability.bytedance
         : engine.provider === 'openai'
           ? availability.openai
-          : availability.google,
+          : engine.provider === 'leonardo'
+            ? availability.leonardo
+            : availability.google,
   }));
 }

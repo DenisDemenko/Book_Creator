@@ -1,7 +1,7 @@
 import {
   normalizeAspectRatio, resolveEngine, generateImage, saveGeneratedImage,
   IMAGE_ENGINES, listEngines, ImageGenerationError, GENERATED_DIR, seedreamConfig, seedreamTransportFor,
-  openaiImageConfig
+  openaiImageConfig, leonardoConfig
 } from '../server/imageGeneration';
 import fs from 'node:fs/promises';
 import { priceForImage } from '../server/pricing';
@@ -38,6 +38,9 @@ t('модель Nano Banana Pro правильна', IMAGE_ENGINES['nano-banana-
 t('модель Lite правильна', IMAGE_ENGINES['nano-banana-2-lite'].modelId==='gemini-3.1-flash-lite-image');
 t('seedream резолвиться', resolveEngine('seedream').id==='seedream');
 t('seedream — провайдер bytedance', IMAGE_ENGINES['seedream'].provider==='bytedance');
+t('leonardo резолвиться', resolveEngine('leonardo').id==='leonardo');
+t('leonardo — провайдер leonardo', IMAGE_ENGINES['leonardo'].provider==='leonardo');
+t('leonardo — maxSize 1K', IMAGE_ENGINES['leonardo'].maxSize==='1K');
 t('gpt-image резолвиться', resolveEngine('gpt-image').id==='gpt-image');
 t('gpt-image — провайдер openai', IMAGE_ENGINES['gpt-image'].provider==='openai');
 t('модель GPT Image правильна', IMAGE_ENGINES['gpt-image'].modelId==='gpt-image-1.5');
@@ -426,26 +429,135 @@ console.log('\nGPT Image — класифікація HTTP-помилок:');
 
 console.log('\nсписок двигунів для UI:');
 {
-  const list = listEngines({ google:false, bytedance:false, openai:false });
-  t('рівно 5 двигунів', list.length===5, list.map(e=>e.id).join(', '));
+  const list = listEngines({ google:false, bytedance:false, openai:false, leonardo:false });
+  t('рівно 6 двигунів', list.length===6, list.map(e=>e.id).join(', '));
   t('без жодного ключа available=false для всіх', list.every(e=>!e.available));
   t('лише Google-ключ → доступні тільки 3 Nano Banana', (()=>{
-    const l = listEngines({ google:true, bytedance:false, openai:false });
-    return l.filter(e=>e.provider==='google').every(e=>e.available) && !l.find(e=>e.id==='seedream')!.available && !l.find(e=>e.id==='gpt-image')!.available;
+    const l = listEngines({ google:true, bytedance:false, openai:false, leonardo:false });
+    return l.filter(e=>e.provider==='google').every(e=>e.available) && !l.find(e=>e.id==='seedream')!.available && !l.find(e=>e.id==='gpt-image')!.available && !l.find(e=>e.id==='leonardo')!.available;
   })());
   t('лише ByteDance-ключ → доступний тільки seedream', (()=>{
-    const l = listEngines({ google:false, bytedance:true, openai:false });
-    return l.find(e=>e.id==='seedream')!.available && l.filter(e=>e.provider==='google').every(e=>!e.available) && !l.find(e=>e.id==='gpt-image')!.available;
+    const l = listEngines({ google:false, bytedance:true, openai:false, leonardo:false });
+    return l.find(e=>e.id==='seedream')!.available && l.filter(e=>e.provider==='google').every(e=>!e.available) && !l.find(e=>e.id==='gpt-image')!.available && !l.find(e=>e.id==='leonardo')!.available;
   })());
   t('лише OpenAI-ключ → доступний тільки gpt-image', (()=>{
-    const l = listEngines({ google:false, bytedance:false, openai:true });
-    return l.find(e=>e.id==='gpt-image')!.available && l.filter(e=>e.provider==='google').every(e=>!e.available) && !l.find(e=>e.id==='seedream')!.available;
+    const l = listEngines({ google:false, bytedance:false, openai:true, leonardo:false });
+    return l.find(e=>e.id==='gpt-image')!.available && l.filter(e=>e.provider==='google').every(e=>!e.available) && !l.find(e=>e.id==='seedream')!.available && !l.find(e=>e.id==='leonardo')!.available;
   })());
-  t('усі три ключі → усі доступні', listEngines({ google:true, bytedance:true, openai:true }).every(e=>e.available));
+  t('лише Leonardo-ключ → доступний тільки leonardo', (()=>{
+    const l = listEngines({ google:false, bytedance:false, openai:false, leonardo:true });
+    return l.find(e=>e.id==='leonardo')!.available && l.filter(e=>e.provider==='google').every(e=>!e.available) && !l.find(e=>e.id==='seedream')!.available && !l.find(e=>e.id==='gpt-image')!.available;
+  })());
+  t('усі чотири ключі → усі доступні', listEngines({ google:true, bytedance:true, openai:true, leonardo:true }).every(e=>e.available));
   t('Midjourney відсутній', !JSON.stringify(list).toLowerCase().includes('midjourney'));
   t('DALL·E відсутній', !JSON.stringify(list).toLowerCase().includes('dall'));
   t('Imagen відсутній', !JSON.stringify(list).toLowerCase().includes('imagen'));
   t('Seedance (відео) відсутній серед двигунів зображень', !list.some(e=>e.id.toLowerCase()==='seedance'));
+}
+
+console.log('\nLeonardo — без ключа:');
+{
+  const prevKey = leonardoConfig.apiKey;
+  leonardoConfig.apiKey = '';
+  try {
+    await generateImage(null, { prompt:'x', engine:'leonardo' });
+    t('без ключа кидає помилку', false);
+  } catch (e:any) {
+    t('kind=no_key', e.kind==='no_key', e.kind);
+    t('повідомлення називає LEONARDO_API_KEY', /LEONARDO_API_KEY/.test(e.message), e.message);
+  } finally {
+    leonardoConfig.apiKey = prevKey;
+  }
+}
+
+console.log('\nLeonardo — референси ще не підтримуються:');
+{
+  const prevKey = leonardoConfig.apiKey;
+  leonardoConfig.apiKey = 'test-leonardo-key';
+  try {
+    await generateImage(null, { prompt:'x', engine:'leonardo', referenceImageUrls:['https://example.com/ref.png'] });
+    t('з референсами кидає помилку', false);
+  } catch (e:any) {
+    t('повідомлення пояснює відсутність підтримки референсів', /референс/i.test(e.message), e.message);
+  } finally {
+    leonardoConfig.apiKey = prevKey;
+  }
+}
+
+console.log('\nLeonardo — класифікація HTTP-помилок відправлення генерації:');
+{
+  const realFetch = global.fetch;
+  const prevKey = leonardoConfig.apiKey;
+  leonardoConfig.apiKey = 'test-leonardo-key';
+  for (const [status, message, kind] of [[401,'Unauthorized','no_key'],[403,'Forbidden','no_key'],[429,'Too many requests','quota'],[400,'Bad request','unknown']] as const) {
+    // @ts-expect-error підміна глобального fetch лише на час цього блоку тесту
+    global.fetch = async () => ({ ok:false, status, json: async()=>({ error: message }) });
+    try { await generateImage(null,{prompt:'x', engine:'leonardo'}); t(`HTTP ${status}`, false); }
+    catch(e:any){ t(`HTTP ${status} "${message}" → ${kind}`, e.kind===kind, e.kind); }
+  }
+  global.fetch = realFetch;
+  leonardoConfig.apiKey = prevKey;
+}
+
+console.log('\nLeonardo — повний цикл (submit → poll PENDING → poll COMPLETE → завантаження):');
+{
+  const realFetch = global.fetch;
+  const prevKey = leonardoConfig.apiKey;
+  leonardoConfig.apiKey = 'test-leonardo-key';
+  let call = 0;
+  // @ts-expect-error підміна глобального fetch лише на час цього блоку тесту
+  global.fetch = async (url: string) => {
+    call++;
+    if (String(url).endsWith('/generations') && call === 1) {
+      // Відправлення генерації.
+      return { ok:true, status:200, json: async()=>({ sdGenerationJob:{ generationId:'gen-123' } }) };
+    }
+    if (String(url).includes('/generations/gen-123') && call === 2) {
+      // Перше опитування — ще не готово.
+      return { ok:true, status:200, json: async()=>({ generations_by_pk:{ status:'PENDING' } }) };
+    }
+    if (String(url).includes('/generations/gen-123') && call === 3) {
+      // Друге опитування — готово.
+      return { ok:true, status:200, json: async()=>({ generations_by_pk:{ status:'COMPLETE', generated_images:[{ url:'https://example.com/result.png' }] } }) };
+    }
+    // Завантаження готового зображення.
+    return { ok:true, status:200, headers:{ get:(k:string)=> k.toLowerCase()==='content-type' ? 'image/png' : null }, arrayBuffer: async()=> Buffer.from(PNG_B64,'base64').buffer };
+  };
+  try {
+    const result = await generateImage(null, { prompt:'x', engine:'leonardo' });
+    t('повернув буфер із даними', result.buffer.length>0);
+    t('mimeType image/png', result.mimeType==='image/png', result.mimeType);
+    t('рівно 4 виклики fetch (submit + 2 опитування + завантаження)', call===4, String(call));
+  } catch (e:any) {
+    t('успішний цикл не мав кинути помилку', false, e.message);
+  } finally {
+    global.fetch = realFetch;
+    leonardoConfig.apiKey = prevKey;
+  }
+}
+
+console.log('\nLeonardo — статус FAILED зупиняє опитування одразу:');
+{
+  const realFetch = global.fetch;
+  const prevKey = leonardoConfig.apiKey;
+  leonardoConfig.apiKey = 'test-leonardo-key';
+  let call = 0;
+  // @ts-expect-error підміна глобального fetch лише на час цього блоку тесту
+  global.fetch = async () => {
+    call++;
+    if (call === 1) return { ok:true, status:200, json: async()=>({ sdGenerationJob:{ generationId:'gen-999' } }) };
+    return { ok:true, status:200, json: async()=>({ generations_by_pk:{ status:'FAILED' } }) };
+  };
+  try {
+    await generateImage(null, { prompt:'x', engine:'leonardo' });
+    t('FAILED мав кинути помилку', false);
+  } catch (e:any) {
+    t('повідомлення згадує FAILED', /FAILED/.test(e.message), e.message);
+    t('лише 2 виклики fetch (submit + одне опитування)', call===2, String(call));
+  } finally {
+    global.fetch = realFetch;
+    leonardoConfig.apiKey = prevKey;
+  }
 }
 
 console.log(`\nРезультат: ${pass} пройдено, ${fail} провалено`);

@@ -12,6 +12,7 @@ import {
   listEngines,
   seedreamConfig,
   openaiImageConfig,
+  leonardoConfig,
   GENERATED_DIR,
   GENERATED_URL_PREFIX,
   SUPPORTED_RATIOS,
@@ -532,6 +533,10 @@ registerGitCommandRoutes(app);
     // окремого ключа для зображень немає.
     const adminOpenAiKey = !!(await platformKeyFor('gpt'));
     const hasOpenAiImageKey = openaiImageConfig.enabled || adminOpenAiKey;
+    // Leonardo.Ai — окремий провайдер, окремий рядок ключа в «Ключах API»
+    // (той самий ключ, яким server/videoGeneration.ts генерує й відео).
+    const adminLeonardoKey = !!(await platformKeyFor('leonardo'));
+    const hasLeonardoKey = leonardoConfig.enabled || adminLeonardoKey;
     // Якщо клієнт передав ?modelId=<обраний рушій ТЕКСТУ книги>, і той
     // рушій — OpenAI, і GPT Image доступний, підказуємо його як двигун
     // картинки за замовчуванням: саме цього просив автор («якщо обрано
@@ -544,7 +549,7 @@ registerGitCommandRoutes(app);
         ? ('gpt-image' as const)
         : undefined;
     res.json({
-      engines: listEngines({ google: !!ai, bytedance: hasSeedreamKey, openai: hasOpenAiImageKey }),
+      engines: listEngines({ google: !!ai, bytedance: hasSeedreamKey, openai: hasOpenAiImageKey, leonardo: hasLeonardoKey }),
       // Той самий перелік співвідношень сторін, що й нормалізує сервер
       // (imageGeneration.ts) — панель генерації в медіатеці малює кнопки
       // з нього, а не з власного захардкодженого списку.
@@ -554,6 +559,8 @@ registerGitCommandRoutes(app);
       seedreamKeySource: adminKey ? ('panel' as const) : seedreamConfig.enabled ? ('env' as const) : null,
       hasOpenAiImageKey,
       openAiImageKeySource: adminOpenAiKey ? ('panel' as const) : openaiImageConfig.enabled ? ('env' as const) : null,
+      hasLeonardoKey,
+      leonardoKeySource: adminLeonardoKey ? ('panel' as const) : leonardoConfig.enabled ? ('env' as const) : null,
       suggestedEngineId,
     });
   });
