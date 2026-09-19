@@ -709,5 +709,47 @@ console.log('\nЗадача #207 — превентивно: якщо відео
   }
 }
 
+console.log('\nЗадача #208 — v2-двигун (Seedance 2.5) опитує статус на v1-хості (НЕ /v2/generations/{id}) — реальний збій продакшну: HTTP 404 на v2-шляху опитування, підтверджено й для фото- (Seedream 5.0 Pro), і для відео-двигунів через той самий /v2/generations шлюз:');
+{
+  const realFetch = global.fetch;
+  const prevKey = leonardoConfig.apiKey;
+  leonardoConfig.apiKey = 'test-leonardo-key';
+  let call = 0;
+  const seenUrls: string[] = [];
+  // @ts-expect-error підміна глобального fetch лише на час цього блоку тесту
+  global.fetch = async (url: string) => {
+    call++;
+    seenUrls.push(String(url));
+    if (call === 1) {
+      return { ok: true, status: 200, json: async () => ({ generate: { generationId: 'seedance-208' } }) };
+    }
+    if (call === 2) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ generations_by_pk: { status: 'COMPLETE', generated_videos: [{ url: 'https://example.com/s208.mp4' }] } }),
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: (k: string) => (k.toLowerCase() === 'content-type' ? 'video/mp4' : null) },
+      arrayBuffer: async () => MP4_BYTES.buffer,
+    };
+  };
+  try {
+    await generateVideo({ prompt: 'коала на дошці для серфінгу', engine: 'leonardo-seedance-2-5' });
+    t('відправлення (submit) — на /v2/generations', seenUrls[0]?.includes('/v2/generations'), seenUrls[0]);
+    const pollUrl = seenUrls.find((u) => u.includes('seedance-208'));
+    t('опитування знайдено', !!pollUrl, JSON.stringify(seenUrls));
+    t('опитування — на /v1/generations/, НЕ на /v2/generations/', !!pollUrl && pollUrl.includes('/v1/generations/seedance-208') && !pollUrl.includes('/v2/generations/'), pollUrl);
+  } catch (e: any) {
+    t('не мав кинути помилку', false, e.message);
+  } finally {
+    global.fetch = realFetch;
+    leonardoConfig.apiKey = prevKey;
+  }
+}
+
 console.log(`\nРезультат: ${pass} пройдено, ${fail} провалено`);
 process.exit(fail ? 1 : 0);

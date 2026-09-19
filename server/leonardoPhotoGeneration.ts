@@ -49,9 +49,19 @@
  *     вгадувати формат наосліп. Натомість використано задокументований і
  *     показаний прикладами шлях: POST /v1/init-image → presigned S3 →
  *     id, з type:"UPLOADED" — той самий, що й офіційний Python SDK.
- *   • Точна форма відповіді статусу для v2-опитування (generations_by_pk
- *     чи без обгортки) — як і в server/videoGeneration.ts (#202),
- *     перевіряються обидва варіанти (extractGenerationRecord нижче).
+ *   • [Задача #208] Ендпойнт опитування статусу — перший реальний виклик,
+ *     що дійшов до цього кроку (Seedream 5.0 Pro, після #206/#207), впав
+ *     із «HTTP 404» на `${LEONARDO_V2_BASE_URL}/generations/{id}`. Жодна
+ *     сторінка docs.leonardo.ai не показує GET-ендпойнт під `/v2/` — лише
+ *     POST на створення. Натомість незалежний (не Leonardo-хостинговий,
+ *     але зібраний із публічної документації Leonardo) OpenAPI-опис
+ *     `GET /v1/generations/{id}` документує саме те, чого й так очікував
+ *     код (`generations_by_pk`, extractGenerationRecord нижче) — тож
+ *     опитування тепер іде на v1-хост (LEONARDO_V1_BASE_URL) незалежно
+ *     від того, якою версією було відправлено саму генерацію. Це фікс за
+ *     непрямим доказом (документація), не живим підтвердженням «200 OK» —
+ *     якщо неточний, поточна діагностика (сира відповідь у повідомленні
+ *     помилки) дасть наступний реальний доказ.
  *   • quantity > 1 за один виклик — Leonardo дозволяє (1-8 залежно від
  *     моделі), але generateImage() у imageGeneration.ts повертає РІВНО
  *     одне зображення на виклик для всіх двигунів; лишено так само й
@@ -521,7 +531,18 @@ export async function generateLeonardoV2Photo(
     await sleep(POLL_INTERVAL_MS);
     let pollRes: Response;
     try {
-      pollRes = await fetch(`${LEONARDO_V2_BASE_URL}/generations/${generationId}`, {
+      // Задача #208, продакшн: перший реальний виклик, що дійшов до опитування
+      // (Seedream 5.0 Pro, після фіксів #206/#207), впав тут із голим
+      // «HTTP 404» на `${LEONARDO_V2_BASE_URL}/generations/${id}`. Жодна
+      // сторінка docs.leonardo.ai не показує GET-ендпойнт під `/v2/` — а
+      // офіційно опублікований (хоч і не Leonardo-хостинговий) OpenAPI-опис
+      // /v1/generations/{id} документує саме той шлях і ту саму форму
+      // відповіді (`generations_by_pk`), яку extractGenerationRecord() нижче
+      // вже й так очікує першою — тобто це не нова здогадка, а узгодження
+      // коду з тим, що завжди й так було закладено. Опитування статусу
+      // йде на v1-хост незалежно від того, якою версією (`v1`/`v2`) було
+      // відправлено саму генерацію.
+      pollRes = await fetch(`${LEONARDO_V1_BASE_URL}/generations/${generationId}`, {
         headers: { Authorization: `Bearer ${options.apiKey}`, Accept: 'application/json' },
       });
     } catch (err) {
@@ -529,7 +550,18 @@ export async function generateLeonardoV2Photo(
     }
     const pollJson = await pollRes.json().catch(() => null);
     if (!pollRes.ok) {
-      throw new LeonardoV2PhotoError(classifyLeonardoV2Error(pollRes.status, `HTTP ${pollRes.status}`), `Leonardo.Ai: HTTP ${pollRes.status}`);
+      // Якщо це виправлення все ж неточне (наприклад, лише для частини
+      // двигунів) — сира відповідь тут дасть наступний реальний доказ
+      // замість повторного «голого HTTP {status}» без жодної деталі.
+      let rawSnippet = '';
+      try {
+        rawSnippet = JSON.stringify(pollJson).slice(0, 500);
+      } catch {
+        rawSnippet = String(pollJson);
+      }
+      const message = rawSnippet && rawSnippet !== 'null' ? `HTTP ${pollRes.status}: ${rawSnippet}` : `HTTP ${pollRes.status}`;
+      console.error(`Leonardo.Ai v2 (${options.engineId}): помилка опитування статусу. ${message}`);
+      throw new LeonardoV2PhotoError(classifyLeonardoV2Error(pollRes.status, message), `Leonardo.Ai: ${message}`);
     }
     const gen = extractGenerationRecord(pollJson);
     if (gen?.status === 'COMPLETE') {

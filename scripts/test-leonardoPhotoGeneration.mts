@@ -402,5 +402,48 @@ console.log('\nЗадача #207 — РЕАЛЬНА форма v2 submit-від�
   }
 }
 
+console.log('\nЗадача #208 — опитування статусу йде на v1-хост (НЕ /v2/generations/{id}), незалежно від того, що submit — v2 (реальний збій: HTTP 404 на v2-шляху опитування, Seedream 5.0 Pro, 19.09.2026):');
+{
+  const realFetch = global.fetch;
+  const handlers = [
+    () => ({ ok: true, status: 200, json: async () => ({ generate: { generationId: 'gen-208' } }) }),
+    () => ({ ok: true, status: 200, json: async () => ({ generations_by_pk: { status: 'COMPLETE', generated_images: [{ url: 'https://example.com/v1poll.png' }] } }) }),
+    () => ({ ok: true, status: 200, headers: { get: () => 'image/png' }, arrayBuffer: async () => Buffer.from(PNG_B64, 'base64').buffer }),
+  ];
+  const { fn, seen } = mockSequence(handlers);
+  global.fetch = fn;
+  try {
+    await generateLeonardoV2Photo({ engineId: 'leonardo-seedream-5-pro', apiKey: 'test-key', prompt: 'x', aspectRatio: '1:1' });
+    const pollCall = seen.find((c) => c.url.includes('gen-208'));
+    t('запит опитування знайдено', !!pollCall, JSON.stringify(seen.map((c) => c.url)));
+    t('опитування — на /v1/generations/, НЕ на /v2/generations/', !!pollCall && pollCall.url.includes('/v1/generations/gen-208') && !pollCall.url.includes('/v2/generations/'), pollCall?.url);
+  } catch (e: any) {
+    t('не мав кинути помилку', false, e.message);
+  } finally {
+    global.fetch = realFetch;
+  }
+}
+
+console.log('\nЗадача #208 — помилка опитування (напр. HTTP 404) несе СИРУ відповідь у повідомленні, а не голий "HTTP {status}" (та сама діагностика, що й для submit у #204):');
+{
+  const realFetch = global.fetch;
+  const handlers = [
+    () => ({ ok: true, status: 200, json: async () => ({ generate: { generationId: 'gen-404' } }) }),
+    () => ({ ok: false, status: 404, json: async () => ({ message: 'Not Found' }) }),
+  ];
+  const { fn } = mockSequence(handlers);
+  global.fetch = fn;
+  try {
+    await generateLeonardoV2Photo({ engineId: 'leonardo-seedream-5-pro', apiKey: 'test-key', prompt: 'x', aspectRatio: '1:1' });
+    t('404 на опитуванні мав кинути помилку', false);
+  } catch (e: any) {
+    t('це LeonardoV2PhotoError', e instanceof LeonardoV2PhotoError);
+    t('повідомлення містить HTTP 404', e.message.includes('404'), e.message);
+    t('повідомлення несе сиру відповідь, а не тільки голий статус', e.message.includes('Not Found'), e.message);
+  } finally {
+    global.fetch = realFetch;
+  }
+}
+
 console.log(`\nРезультат: ${pass} пройдено, ${fail} провалено`);
 process.exit(fail ? 1 : 0);

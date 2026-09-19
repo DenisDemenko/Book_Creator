@@ -41,17 +41,23 @@
  *  - Форма ВІДПОВІДІ на опитування статусу для ОБОХ поколінь API.
  *    Документація не показує приклад відповіді ні для v1-, ні для
  *    v2-відеозавдань (лише для v1-фото: `generations_by_pk.generated_images`).
- *    Опитування v1-двигунів іде на `GET /generations/{id}`; для
- *    v2-двигунів — на `GET /v2/generations/{id}` (та сама логіка версій, що
- *    й у POST) — жодна з двох гілок офіційно не задокументована для відео.
+ *    [Задача #208] Опитування ОБОХ поколінь тепер іде на ОДИН і той самий
+ *    `GET /v1/generations/{id}` (v1-хост) — не на `/v2/generations/{id}`,
+ *    як спочатку припускалося за аналогією з POST. Реальний виклик фото-
+ *    пайплайну (Seedream 5.0 Pro, той самий `/v2/generations` шлюз, що й
+ *    відео) упав із «HTTP 404» саме на v2-шляху опитування; жодна сторінка
+ *    docs.leonardo.ai не показує GET під `/v2/`, а незалежний OpenAPI-опис,
+ *    зібраний із публічної документації Leonardo, документує лише
+ *    `GET /v1/generations/{id}` для всього циклу генерації (створення,
+ *    отримання, видалення) — тепер для ВІДЕО обох поколінь так само.
  *    Результат читається з кількох правдоподібних шляхів і форм обгортки
  *    (`generations_by_pk.generated_videos[0].url` насамперед, потім кілька
  *    запасних) — якщо жоден не знайдено, кидається чітка помилка замість
- *    мовчазного падіння. Перше ж реальне звернення з ключем адміністратора
- *    або підтвердить це, або покаже точну назву поля — тоді значення поля
- *    стане одним рядком-правкою, а не переписуванням. Для v2 це РИЗИКОВАНІШЕ
- *    за v1, бо взагалі ЖОДНОГО підтвердження форми відповіді (навіть для
- *    фото) в документації не знайдено — лише форма ЗАПИТУ.
+ *    мовчазного падіння. Це фікс за непрямим доказом (документація +
+ *    аналогія з реальним фото-збоєм), не живим підтвердженням для відео —
+ *    жоден із 10 відеодвигунів ще не отримав живого виклику через цю
+ *    панель; якщо неточно, поточна діагностика (сира відповідь у
+ *    повідомленні помилки, задача #208) дасть наступний реальний доказ.
  *  - Офіційний FAQ Leonardo (`docs.leonardo.ai/docs/api-faq`) прямо радить
  *    НЕ опитувати статус, а підписатись на webhook. Тут лишено опитування —
  *    той самий свідомий компроміс, що й для фото (generateWithLeonardo() у
@@ -59,12 +65,14 @@
  *    фото, а HTTP-запит просто «висить» ці хвилини. Повноцінна відповідь —
  *    фонова черга завдань і webhook-колбек — свідомо поза межами цієї
  *    задачі.
- *  - Референсні зображення/відео (`guidances.start_frame`/`end_frame`/
- *    `image_reference`/`video_reference_base` — усі чотири нові моделі їх
- *    документують) НЕ підключені: потребують Leonardo-нативного `imageId`,
- *    а крок «завантажити своє зображення в Leonardo» (`imageType:
- *    'UPLOADED'`) лишається непідтвердженим — той самий свідомий виняток,
- *    що вже є для перших шести двигунів.
+ *  - [Задача #206] `guidances.start_frame`/`end_frame` (референс першого/
+ *    останнього кадру) ПІДКЛЮЧЕНО для всіх 10 двигунів (v1 через окремий
+ *    ендпойнт `/generations-image-to-video`, лише перший кадр; v2 через
+ *    `guidances.start_frame`/`end_frame`, обидва кадри) — див.
+ *    generateVideo() нижче. `guidances.image_reference`/
+ *    `video_reference_base` (загальні стильові референси, не кадри) для
+ *    чотирьох v2-моделей лишаються НЕ підключені — свідоме звуження обсягу
+ *    задачі #206 (просили саме перший/останній кадр), а не забутий пункт.
  */
 
 import { leonardoConfig, extractLeonardoV2ValidationMessage } from './imageGeneration';
@@ -618,11 +626,22 @@ async function submitPollAndDownload(
         err
       );
     }
+    const pollJson = await pollRes.json().catch(() => null);
     if (!pollRes.ok) {
-      const message = `HTTP ${pollRes.status}`;
+      // Задача #208: та сама діагностика, що й у leonardoPhotoGeneration.ts —
+      // якщо v1-опитування (щойно виправлене тут) все ж не спрацює для
+      // якогось відеодвигуна, сира відповідь дасть точну причину замість
+      // голого «HTTP {status}».
+      let rawSnippet = '';
+      try {
+        rawSnippet = JSON.stringify(pollJson).slice(0, 500);
+      } catch {
+        rawSnippet = String(pollJson);
+      }
+      const message = rawSnippet && rawSnippet !== 'null' ? `HTTP ${pollRes.status}: ${rawSnippet}` : `HTTP ${pollRes.status}`;
+      console.error(`Leonardo.Ai відео (${engine.id}): помилка опитування статусу. ${message}`);
       throw new VideoGenerationError(classifyLeonardoVideoError(pollRes.status, message), `Leonardo.Ai: ${message}`, engine.id);
     }
-    const pollJson = await pollRes.json().catch(() => null);
     const gen = extractGenerationStatus(pollJson);
     if (gen?.status === 'COMPLETE') {
       videoUrl = extractVideoUrl(gen);
@@ -767,7 +786,11 @@ export async function generateVideo(options: GenerateVideoOptions): Promise<Gene
       parameters.guidances = guidances;
     }
     const body: Record<string, unknown> = { model: engine.modelSlug, public: false, parameters };
-    downloaded = await submitPollAndDownload(engine, apiKey, `${LEONARDO_V2_BASE_URL}/generations`, LEONARDO_V2_BASE_URL, body);
+    // Задача #208: опитування статусу йде на v1-хост навіть для
+    // v2-відправлених генерацій (те саме підтвердження, що й у
+    // leonardoPhotoGeneration.ts, — див. коментар там) — лише URL
+    // відправлення (submit) лишається v2.
+    downloaded = await submitPollAndDownload(engine, apiKey, `${LEONARDO_V2_BASE_URL}/generations`, leonardoConfig.baseUrl, body);
   }
 
   return {
