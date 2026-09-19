@@ -349,9 +349,16 @@ export function calculateWoodAndEpoxyCost(rawInput: CalculationInput, customRate
   const includeAiCost = input.includeAiMediaCost !== false;
   const effectiveAiCostUah = includeAiCost ? totalAiMediaCostUah : 0;
 
+  // 10б. Накладні витрати з «Борду витрат» адмінки (ШІ+Railway+інше на
+  // одиницю, #211) — та сама логіка перемикача include/effective, що й в AI-медіа вище.
+  const expenseBoardOverheadCostUsd = Math.max(0, input.expenseBoardOverheadCostUsd || 0);
+  const expenseBoardOverheadCostUah = expenseBoardOverheadCostUsd * usdRate;
+  const includeExpenseBoardOverhead = input.includeExpenseBoardOverhead !== false;
+  const effectiveExpenseBoardOverheadUah = includeExpenseBoardOverhead ? expenseBoardOverheadCostUah : 0;
+
   // 11. Собівартість
   const productionCost = materialsCostTotal + laborCostTotal + totalOverheadCost;
-  const fullCostPrice = productionCost + finalDeliveryCost + effectiveAiCostUah;
+  const fullCostPrice = productionCost + finalDeliveryCost + effectiveAiCostUah + effectiveExpenseBoardOverheadUah;
 
   // 12. Маржа та Податки
   const profitMarginPercent = input.profitMarginPercent || 0;
@@ -386,7 +393,7 @@ export function calculateWoodAndEpoxyCost(rawInput: CalculationInput, customRate
   const safeTotal = totalSellingPrice > 0 ? totalSellingPrice : 1;
   const materialsSharePercent = Math.round((materialsCostTotal / safeTotal) * 100);
   const laborSharePercent = Math.round((laborCostTotal / safeTotal) * 100);
-  const overheadSharePercent = Math.round(((totalOverheadCost + finalDeliveryCost + effectiveAiCostUah) / safeTotal) * 100);
+  const overheadSharePercent = Math.round(((totalOverheadCost + finalDeliveryCost + effectiveAiCostUah + effectiveExpenseBoardOverheadUah) / safeTotal) * 100);
   const profitSharePercent = Math.round((netProfit / safeTotal) * 100);
   const taxSharePercent = Math.max(0, 100 - (materialsSharePercent + laborSharePercent + overheadSharePercent + profitSharePercent));
 
@@ -439,6 +446,9 @@ export function calculateWoodAndEpoxyCost(rawInput: CalculationInput, customRate
     costPerAiVideoUsd,
     totalAiMediaCostUsd,
     totalAiMediaCostUah,
+
+    expenseBoardOverheadCostUsd,
+    expenseBoardOverheadCostUah,
 
     // Electronics & LED Metrics
     powerSupplyTotalCost,

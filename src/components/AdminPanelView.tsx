@@ -26,6 +26,7 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import { AiPricingAnalyticsView } from './AiPricingAnalyticsView';
+import { AdminExpenseBoardView } from './AdminExpenseBoardView';
 import { AdminCrmView } from './AdminCrmView';
 import { AdminGitHistoryView } from './AdminGitHistoryView';
 import { AdminModerationView } from './AdminModerationView';
@@ -49,7 +50,7 @@ import type { AdminUserRow, UserRole } from '../types';
 import { getRoleInfo } from '../utils/rbac';
 import { renderPdfFirstPageToPng } from '../utils/pdfCover';
 
-export type AdminTab = 'users' | 'roles' | 'costs' | 'business' | 'ai' | 'bridge' | 'crm' | 'git' | 'moderation';
+export type AdminTab = 'users' | 'roles' | 'costs' | 'business' | 'ai' | 'expenses' | 'bridge' | 'crm' | 'git' | 'moderation';
 
 interface RoleRow {
   role: UserRole;
@@ -894,6 +895,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ tab: controlledT
             ['business', 'Бізнес-аналітика', BarChart3],
             ['costs', 'Витрати на API', Calculator],
             ['ai', 'Тарифи та аналітика ШІ', Coins],
+            ['expenses', 'Борд витрат', Wallet],
             ['users', 'Користувачі', Users],
             ['crm', 'CRM', Contact],
             ['moderation', 'Модерація', ShieldAlert],
@@ -934,6 +936,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ tab: controlledT
       {/* --------------------------- БІЗНЕС-АНАЛІТИКА --------------------------- */}
       {/* ------------------- ТАРИФИ ТА АНАЛІТИКА ШІ ------------------- */}
       {tab === 'ai' && <AiPricingAnalyticsView />}
+
+      {tab === 'expenses' && <AdminExpenseBoardView />}
 
       {tab === 'bridge' && <MarketplaceBridgePanel />}
 

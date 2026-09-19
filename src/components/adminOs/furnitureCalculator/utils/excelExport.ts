@@ -105,7 +105,8 @@ export function exportCalculationToExcel(
     ['9', 'AI-КОНТЕНТ ТА МАРКЕТИНГ ТОВАРУ (GPT & RUNWAY)', null, null, null],
     ['9.1', `Генерація фото товару (GPT: $${input.gptPhotoMonthlyCostUsd ?? 25}/міс, ${input.gptPhotosPerProduct ?? 20} фото/товар)`, '1 пакет (20 фото)', null, Math.round(result.gptPhotoCostUah)],
     ['9.2', `Генерація промо-відео (Runway: $${input.runwayVideoMonthlyCostUsd ?? 76}/міс, ліміт ${input.runwayVideoMonthlyVideosCount ?? 25} відео/міс)`, `${input.runwayVideosPerProduct ?? 1} відео`, null, Math.round(result.runwayVideoCostUah)],
-    ['', 'РАЗОМ ПО AI-КОНТЕНТУ:', null, null, Math.round(result.totalAiMediaCostUah)],
+    ['9.3', 'Накладні з борду витрат адмінки (ШІ+Railway+інше, на одиницю за мікс продажів місяця)', '1 виріб', null, Math.round(result.expenseBoardOverheadCostUah)],
+    ['', 'РАЗОМ ПО AI-КОНТЕНТУ ТА НАКЛАДНИХ БОРДУ:', null, null, Math.round(result.totalAiMediaCostUah + result.expenseBoardOverheadCostUah)],
 
     ...(input.includeElectronics ? [
       // 10. Електроніка та LED підсвітка

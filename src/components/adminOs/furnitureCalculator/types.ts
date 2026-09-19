@@ -115,6 +115,14 @@ export interface CalculationInput {
   runwayVideoMonthlyVideosCount?: number; // загальна к-ть відео з підписки на місяць (ручне введення, за замовчуванням 25)
   runwayVideosPerProduct?: number; // к-ть згенерованих відео на цей товар (за замовчуванням 1)
 
+  // 11б. Накладні витрати з «Борду витрат» адмінки (ШІ + Railway + інше,
+  // розподілені на одиницю пропорційно міксу продажів за місяць, #211).
+  // Значення підтягується автоматично з сервера при відкритті калькулятора
+  // (FurnitureCalculatorPanel), але лишається звичайним полем input, щоб
+  // адмін міг перевизначити його вручну, якщо борд ще порожній чи недоступний.
+  includeExpenseBoardOverhead?: boolean; // чи враховувати накладні з борду (default true)
+  expenseBoardOverheadCostUsd?: number; // ставка «на одиницю» з борду витрат поточного місяця
+
   // 12. Електроніка, LED підсвітка та мікропроцесорне керування
   includeElectronics?: boolean; // чи встановлюється LED підсвітка та електроніка
   // Блок живлення
@@ -217,6 +225,10 @@ export interface CalculationResult {
   costPerAiVideoUsd: number;
   totalAiMediaCostUsd: number;
   totalAiMediaCostUah: number;
+
+  // Накладні витрати з «Борду витрат» (ШІ+Railway+інше на одиницю, #211)
+  expenseBoardOverheadCostUsd: number;
+  expenseBoardOverheadCostUah: number;
 
   // Витрати на електроніку та LED підсвітку
   powerSupplyTotalCost: number;

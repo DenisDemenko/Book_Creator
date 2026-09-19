@@ -55,6 +55,7 @@ ${input.includeElectronics ? `- Електроніка та LED (БЖ, стрі�
 - ЧПУ фрезерування: ${formatMoney(result.totalCncCost, currency)}${input.includeRouterBitCost !== false ? ` (верстат: ${formatMoney(result.cncMachineCost, currency)}, оператор: ${formatMoney(result.cncOperatorCost, currency)}, амортизація фрези: ${formatMoney(result.routerBitDepreciationPerProduct, currency)})` : ''}
 - Амортизація та комунальні платежі: ${formatMoney(result.totalOverheadCost, currency)}
 - AI-контент для продажу (GPT фото 20 шт + Runway промо-відео): ${formatMoney(result.totalAiMediaCostUah, currency)} ($${result.totalAiMediaCostUsd.toFixed(2)})
+- Накладні з борду витрат (ШІ+Railway+інше на одиницю): ${formatMoney(result.expenseBoardOverheadCostUah, currency)} ($${result.expenseBoardOverheadCostUsd.toFixed(2)})
 - Доставка клієнту: ${formatMoney(result.finalDeliveryCost, currency)}
 ---------------------------------------------
 🏷️ Повна собівартість: ${formatMoney(result.fullCostPrice, currency)}
@@ -188,7 +189,7 @@ ${input.includeElectronics ? `- Електроніка та LED (БЖ, стрі�
             </div>
             <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
               <Layers className="w-3 h-3 text-cyan-400" />
-              <span>Матеріали + Робота + ЧПУ + AI-медіа + Логістика</span>
+              <span>Матеріали + Робота + ЧПУ + AI-медіа + Борд витрат + Логістика</span>
             </div>
           </div>
         </div>

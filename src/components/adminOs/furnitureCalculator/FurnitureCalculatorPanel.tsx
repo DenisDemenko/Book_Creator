@@ -10,6 +10,7 @@ import { EpoxySection } from './components/EpoxySection';
 import { FinishAndCncSection } from './components/FinishAndCncSection';
 import { LaborAndOperationsSection } from './components/LaborAndOperationsSection';
 import { AiMediaCostSection } from './components/AiMediaCostSection';
+import { ExpenseBoardOverheadSection } from './components/ExpenseBoardOverheadSection';
 import { ProductionTimelineSection } from './components/ProductionTimelineSection';
 import { ElectronicsSection } from './components/ElectronicsSection';
 import { ApplyToProductModal } from './components/ApplyToProductModal';
@@ -27,6 +28,36 @@ import './furnitureCalculator.css';
 // feature (SavedCalculation) has been removed entirely: it loaded from localStorage but
 // was never written to and never rendered anywhere in the original app — the "custom
 // templates" feature already fully covers "save your work for later".
+
+function currentPeriodYm(): string {
+  return new Date().toISOString().slice(0, 7);
+}
+
+/**
+ * Ставка «накладні на одиницю» з вкладки адмінки «Борд витрат» (#211) —
+ * автопідключення калькулятора меблів до загального борду витрат бізнесу
+ * (ШІ + Railway + інше, розподілені на мікс продажів поточного місяця).
+ */
+async function fetchExpenseBoardOverhead(): Promise<{ overheadPerUnitUsd: number; periodLabel: string } | null> {
+  try {
+    const period = currentPeriodYm();
+    const res = await fetch(`/api/admin/expense-board/${period}`, { credentials: 'same-origin' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data?.error || 'Не вдалося завантажити борд витрат');
+    }
+    const [y, m] = period.split('-').map(Number);
+    const periodLabel = new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('uk-UA', {
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
+    return { overheadPerUnitUsd: Number(data?.overheadPerUnitUsd) || 0, periodLabel };
+  } catch (e) {
+    console.error('Failed to load expense board overhead rate', e);
+    return null;
+  }
+}
 
 async function fetchFurnitureCalcRates(): Promise<CurrencyRates | null> {
   try {
@@ -97,6 +128,9 @@ export const FurnitureCalculatorPanel: React.FC = () => {
   const [isCurrencyModalOpen, setIsCurrencyModalOpen] = useState(false);
   const [isApplyToProductModalOpen, setIsApplyToProductModalOpen] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
+  const [expenseBoardLoaded, setExpenseBoardLoaded] = useState(false);
+  const [expenseBoardError, setExpenseBoardError] = useState<string | null>(null);
+  const [expenseBoardPeriodLabel, setExpenseBoardPeriodLabel] = useState<string | undefined>(undefined);
 
   // Load currency rates & custom templates from the Nova server on mount
   useEffect(() => {
@@ -114,6 +148,19 @@ export const FurnitureCalculatorPanel: React.FC = () => {
         setRates(mergedRates);
         updateGlobalCurrencyRates(mergedRates);
       }
+    })();
+
+    (async () => {
+      const board = await fetchExpenseBoardOverhead();
+      if (cancelled) return;
+      if (board) {
+        setExpenseBoardPeriodLabel(board.periodLabel);
+        setExpenseBoardError(null);
+        setInput((prev) => ({ ...prev, expenseBoardOverheadCostUsd: board.overheadPerUnitUsd }));
+      } else {
+        setExpenseBoardError('Не вдалося завантажити ставку з борду витрат — введіть її вручну або спробуйте оновити сторінку.');
+      }
+      setExpenseBoardLoaded(true);
     })();
 
     (async () => {
@@ -343,6 +390,18 @@ export const FurnitureCalculatorPanel: React.FC = () => {
             currency={currency}
             rates={rates}
             onOpenCurrencySettings={() => setIsCurrencyModalOpen(true)}
+          />
+
+          {/* Section 6б: Overhead from the expense board (AI + Railway + other, #211) */}
+          <ExpenseBoardOverheadSection
+            input={input}
+            onChange={handleUpdateInput}
+            result={result}
+            currency={currency}
+            rates={rates}
+            boardLoaded={expenseBoardLoaded}
+            boardError={expenseBoardError}
+            boardPeriodLabel={expenseBoardPeriodLabel}
           />
 
           {/* Section 7: Production Timeline & Gantt Schedule */}
