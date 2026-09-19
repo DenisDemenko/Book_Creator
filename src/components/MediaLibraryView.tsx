@@ -13,7 +13,8 @@ import {
   ExternalLink,
   Layers,
   HardDrive,
-  Film
+  Film,
+  RefreshCw
 } from 'lucide-react';
 import { Book, BookIllustration, AuthUser } from '../types';
 import { downloadImageAs } from '../utils/helpers';
@@ -80,6 +81,10 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
   const [selectedMedia, setSelectedMedia] = useState<{ id: string; url: string; title: string; type: string; prompt?: string; source?: string } | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+  // Задача #217. Йде видалення саме ЦІЄЇ картки — окремий від isDownloading
+  // стан, бо видалення й завантаження можуть відбуватись одночасно на РІЗНИХ
+  // картках, а не заважати одне одному через спільний прапорець.
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null);
   const [sections, setSections] = useState<LibrarySection[]>([]);
@@ -312,6 +317,64 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
       console.error('Video download error:', err);
     } finally {
       setIsDownloading(false);
+    }
+  };
+
+  /**
+   * Задача #217. Галерея — ДВА джерела картки (див. коментар над MediaCard
+   * вище), і вони видаляються по-різному:
+   *  - `source === 'upload'` — файл СЕРВЕРНОЇ медіатеки (реальний id у
+   *    mediaLibraryStore) → DELETE /api/media/:id знімає і байти, і лічильник
+   *    сховища.
+   *  - інакше — посилання, вбудоване прямо в книгу (обкладинка/портрет/
+   *    ілюстрація) — на сервері може взагалі не існувати як окремий файл
+   *    (старі книги тримають тут `data:`-URL), тому видалення — це мутація
+   *    самої книги через onUpdateBook(), а не мережевий запит.
+   */
+  const handleDeleteMedia = async (item: MediaCard) => {
+    setDeletingId(item.id);
+    try {
+      if (item.source === 'upload') {
+        const res = await fetch(`/api/media/${item.id}`, { method: 'DELETE', credentials: 'same-origin' });
+        if (!res.ok) {
+          showToast(t('mediaLibraryView.toastDeleteFailed'));
+          return;
+        }
+        setServerAssets((prev) => prev.filter((a) => a.id !== item.id));
+        loadStorageInfo();
+        showToast(t('mediaLibraryView.toastDeleted'));
+        return;
+      }
+
+      if (item.type === 'covers') {
+        onUpdateBook(
+          { ...book, coverConfig: { ...book.coverConfig, frontArtUrl: '' } },
+          'Видалення медіа',
+          `Вилучено обкладинку «${item.title}»`
+        );
+      } else if (item.type === 'portraits') {
+        const charId = item.id.replace('char-media-', '');
+        onUpdateBook(
+          {
+            ...book,
+            characters: book.characters.map((c) => (c.id === charId ? { ...c, avatarUrl: '' } : c)),
+          },
+          'Видалення медіа',
+          `Вилучено портрет «${item.title}»`
+        );
+      } else {
+        onUpdateBook(
+          { ...book, illustrations: (book.illustrations || []).filter((i) => i.id !== item.id) },
+          'Видалення медіа',
+          `Вилучено ілюстрацію «${item.title}»`
+        );
+      }
+      showToast(t('mediaLibraryView.toastDeleted'));
+    } catch (err) {
+      console.error('Media delete error:', err);
+      showToast(t('mediaLibraryView.toastDeleteFailed'));
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -590,6 +653,24 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
                 {item.type === 'videos' && <Film className="w-2.5 h-2.5" />}
                 {item.type}
               </div>
+              {/* Задача #217. Кошик — на самій мініатюрі, а не в рядку
+                  завантаження нижче (там уже тісно від PNG/JPG/MP4-кнопок).
+                  Клік по ньому не має відкривати лайтбокс — stopPropagation. */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDeleteMedia(item);
+                }}
+                disabled={deletingId === item.id}
+                className="absolute bottom-2 right-2 p-1.5 rounded-full bg-black/60 backdrop-blur-md text-rose-400 hover:bg-rose-500/30 hover:text-rose-300 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all disabled:opacity-70 disabled:cursor-wait"
+                title={t('mediaLibraryView.deleteTooltip')}
+              >
+                {deletingId === item.id ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="w-3.5 h-3.5" />
+                )}
+              </button>
             </div>
 
             <div className="p-3.5 space-y-2">

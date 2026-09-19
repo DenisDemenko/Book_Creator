@@ -29,6 +29,10 @@ export const mediaLibraryView = {
     sectionNoBook: 'Без книги',
     sectionItems: 'Файлів: {n}',
     uploadedToSection: 'Файл додано в розділ «{title}».',
+    deleteTooltip: 'Видалити з медіатеки',
+    deletingLabel: 'Видалення…',
+    toastDeleted: 'Файл видалено з медіатеки.',
+    toastDeleteFailed: 'Не вдалося видалити файл. Спробуйте ще раз.',
   },
   en: {
     headerBadge: 'Media Library & Visual Assets',
@@ -60,5 +64,9 @@ export const mediaLibraryView = {
     sectionNoBook: 'No book',
     sectionItems: 'Files: {n}',
     uploadedToSection: 'File added to the “{title}” section.',
+    deleteTooltip: 'Delete from the media library',
+    deletingLabel: 'Deleting…',
+    toastDeleted: 'File deleted from the media library.',
+    toastDeleteFailed: 'Could not delete the file. Please try again.',
   },
 };

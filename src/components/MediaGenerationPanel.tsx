@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Sparkles, RefreshCw, ImageIcon, Cpu, Film, Maximize2, Gauge, FileImage, AlertCircle, Upload, X } from 'lucide-react';
+import { Sparkles, RefreshCw, ImageIcon, Cpu, Film, Maximize2, Gauge, FileImage, AlertCircle, Upload, X, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Book, BookIllustration } from '../types';
 import { isGuestRestriction } from '../utils/placeholders';
 import { useLanguage } from '../i18n/LanguageContext';
@@ -162,6 +162,22 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
   const [endFrameUrlInput, setEndFrameUrlInput] = useState('');
   const startFrameFileInputRef = useRef<HTMLInputElement>(null);
   const endFrameFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Задача #216. Панель постійно займає w-80/w-96 зліва від галереї —
+  // на вузьких екранах чи просто щоб побачити більше карток медіатеки,
+  // автору нема куди її прибрати. Згорнута форма лишає лише вузьку смугу
+  // з іконками-«ярликами» (режим фото/відео, двигун) — клік по будь-якій
+  // розгортає панель назад, а не лише загальна кнопка вгорі.
+  const [isPanelCollapsed, setIsPanelCollapsed] = useState(false);
+
+  // Задача #216. Список двигунів (5-10 карток) займав половину висоти
+  // панелі одразу під заголовком, хоча двигун і так уже вибраний
+  // автоматично (перший доступний, див. useEffect нижче) — розгорнутий
+  // список був завжди видимим, навіть коли автор про нього не думав.
+  // Тепер це розкривний блок: згорнутий показує лише обраний двигун
+  // одним рядком, розгортається кліком і сам згортається назад одразу
+  // після вибору іншого двигуна.
+  const [isEnginePickerOpen, setIsEnginePickerOpen] = useState(false);
 
   useEffect(() => {
     fetch('/api/ai/image-engines', { credentials: 'same-origin' })
@@ -662,13 +678,80 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
   };
 
   return (
-    <aside className="w-full lg:w-80 xl:w-96 shrink-0 h-full bg-slate-950/95 border-r border-slate-800 flex flex-col overflow-hidden">
+    <aside
+      className={`shrink-0 h-full bg-slate-950/95 border-r border-slate-800 flex flex-col overflow-hidden transition-[width] ${
+        isPanelCollapsed ? 'w-12' : 'w-full lg:w-80 xl:w-96'
+      }`}
+    >
+      {isPanelCollapsed ? (
+        /* Задача #216: згорнута панель — вузька смуга з іконками-ярликами
+           замість повної форми. Клік по будь-якій іконці розгортає панель
+           назад (а не лише загальна кнопка), бо саме так автор описав
+           бажану поведінку — «розгортання з іконок функцій». */
+        <div className="flex-1 flex flex-col items-center py-3 gap-1.5 overflow-y-auto">
+          <button
+            type="button"
+            onClick={() => setIsPanelCollapsed(false)}
+            className="p-2 rounded-lg text-amber-400 hover:bg-slate-800 transition-colors"
+            title={t('mediaGenerationPanel.expandPanelTooltip')}
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+          <div className="w-6 h-px bg-slate-800 my-1 shrink-0" />
+          <button
+            type="button"
+            onClick={() => {
+              setMode('photo');
+              setIsPanelCollapsed(false);
+            }}
+            className={`p-2 rounded-lg transition-colors ${
+              mode === 'photo' ? 'bg-amber-500/20 text-amber-300' : 'text-slate-500 hover:text-white hover:bg-slate-800'
+            }`}
+            title={t('mediaGenerationPanel.modePhotoLabel')}
+          >
+            <ImageIcon className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMode('video');
+              setIsPanelCollapsed(false);
+            }}
+            className={`p-2 rounded-lg transition-colors ${
+              mode === 'video' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-500 hover:text-white hover:bg-slate-800'
+            }`}
+            title={t('mediaGenerationPanel.modeVideoLabel')}
+          >
+            <Film className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setIsPanelCollapsed(false);
+              setIsEnginePickerOpen(true);
+            }}
+            className="p-2 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition-colors"
+            title={t('mediaGenerationPanel.engineLabel')}
+          >
+            <Cpu className="w-4 h-4" />
+          </button>
+        </div>
+      ) : (
+      <>
       <div className="p-4 border-b border-slate-800 shrink-0">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-amber-500/20 via-purple-500/20 to-cyan-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
             <Sparkles className="w-4 h-4" />
           </div>
           <h2 className="text-sm font-bold text-white font-heading">{t('mediaGenerationPanel.heading')}</h2>
+          <button
+            type="button"
+            onClick={() => setIsPanelCollapsed(true)}
+            className="ml-auto p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition-colors shrink-0"
+            title={t('mediaGenerationPanel.collapsePanelTooltip')}
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
         </div>
         <p className="text-[11px] text-slate-500 mt-1.5 leading-snug">{t('mediaGenerationPanel.subheading')}</p>
       </div>
@@ -806,11 +889,51 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
           </div>
           ) : null}
 
-          {/* Engine */}
+          {/* Engine — задача #216: розкривний блок. Двигун і так уже
+              вибирається автоматично (перший доступний, useEffect вище),
+              тож повний список карток не має стирчати розгорнутим завжди —
+              згорнутий стан показує обраний двигун одним рядком, клік
+              розгортає повний перелік, вибір іншого двигуна згортає назад. */}
           <div className="space-y-1.5">
-            <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-              <Cpu className="w-3 h-3 text-amber-400" /> {t('mediaGenerationPanel.engineLabel')}
-            </label>
+            <button
+              type="button"
+              onClick={() => setIsEnginePickerOpen((v) => !v)}
+              className="w-full flex items-center justify-between gap-2"
+            >
+              <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                <Cpu className="w-3 h-3 text-amber-400" /> {t('mediaGenerationPanel.engineLabel')}
+              </span>
+              <ChevronDown
+                className={`w-3.5 h-3.5 text-slate-500 shrink-0 transition-transform ${isEnginePickerOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
+
+            {!isEnginePickerOpen && (
+              <button
+                type="button"
+                onClick={() => setIsEnginePickerOpen(true)}
+                className={`w-full p-2 rounded-xl border text-left transition-all ${
+                  mode === 'photo' ? 'bg-slate-900 border-amber-500/60' : 'bg-slate-900 border-cyan-500/60'
+                }`}
+              >
+                <span className="text-[11px] font-bold text-white truncate flex items-center gap-1">
+                  {mode === 'photo' ? (
+                    <ImageIcon className="w-3 h-3 text-amber-400/70 shrink-0" />
+                  ) : (
+                    <Film className="w-3 h-3 text-cyan-400/70 shrink-0" />
+                  )}
+                  {(mode === 'photo' ? selectedEngine?.label : selectedVideoEngine?.label) || t('mediaGenerationPanel.engineLabel')}
+                </span>
+                <div className="text-[9px] text-slate-500 mt-0.5">
+                  {mode === 'photo'
+                    ? (selectedEngine ? engineTagFor(selectedEngine.id) : '')
+                    : (selectedVideoEngine ? videoEngineTagFor(selectedVideoEngine) : '')}
+                </div>
+              </button>
+            )}
+
+            {isEnginePickerOpen && (
+            <>
             {/*
               Автор поскаржився: у списку не видно, генерує обраний двигун
               фото чи відео — особливо гостро для рушіїв «через Leonardo.Ai»,
@@ -828,7 +951,10 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
                   {engines.map((e) => (
                     <button
                       key={e.id}
-                      onClick={() => setEngineId(e.id)}
+                      onClick={() => {
+                        setEngineId(e.id);
+                        setIsEnginePickerOpen(false);
+                      }}
                       disabled={!e.available}
                       title={!e.available ? t('mediaGenerationPanel.engineUnavailableHint') : undefined}
                       className={`w-full p-2 rounded-xl border text-left transition-all ${
@@ -864,7 +990,10 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
                   {videoEngines.map((e) => (
                     <button
                       key={e.id}
-                      onClick={() => setVideoEngineId(e.id)}
+                      onClick={() => {
+                        setVideoEngineId(e.id);
+                        setIsEnginePickerOpen(false);
+                      }}
                       disabled={!e.available}
                       title={!e.available ? t('mediaGenerationPanel.engineUnavailableHint') : undefined}
                       className={`w-full p-2 rounded-xl border text-left transition-all ${
@@ -885,6 +1014,8 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
                   ))}
                 </div>
               </>
+            )}
+            </>
             )}
           </div>
 
@@ -1278,6 +1409,8 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
             )}
           </div>
         </div>
+      )}
+      </>
       )}
     </aside>
   );
