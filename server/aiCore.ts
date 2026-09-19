@@ -55,7 +55,7 @@ import {
 } from './media/mediaLibraryStore';
 import { recordUsage } from './store';
 import { platformKeyFor } from './platformKeys';
-import { priceForImage, priceForTextEngine } from './pricing';
+import { priceForImage, priceForTextEngine, priceForVideo } from './pricing';
 
 export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.7-flash';
 
@@ -143,18 +143,21 @@ async function logImageUsage(
  * Той самий usage_log, що й для фото, — окремий kind='video' (задача #201).
  * `imageSize` тут навмисно несе роздільність відео ('480'|'720'|'1080'):
  * той самий стовпець бази, той самий сенс «розмір виходу», нова колонка
- * не заводилась заради одного нового kind. Ціна — 0, доки в pricing.ts
- * немає запису для 'leonardo' (нема офіційної фіксованої таблиці цін
- * Leonardo.Ai — той самий принцип, що й priceForImage() уже застосовує:
- * краще чесний нуль, ніж вигадана цифра; орієнтовну вартість адміністратор
- * рахує окремо, калькулятором у панелі — розділ 6, «AI-контент для
- * продажу», FurnitureCalculatorPanel.tsx).
+ * не заводилась заради одного нового kind.
+ *
+ * Ціна (задача #214): ПРИБЛИЗНА, бо Leonardo.Ai не публікує офіційну
+ * доларову ціну за генерацію (лише токенна система без розкритої
+ * прив'язки $ → 1 токен для кожної моделі) — priceForVideo() (server/
+ * pricing.ts) рахує її з офіційної/ринкової ціни ТІЄЇ Ж моделі в її
+ * першоджерела (Google, Kling, ByteDance, Alibaba, Black Forest Labs).
+ * Це орієнтир для звірки з реальним рахунком Leonardo, не точна цифра.
  */
 async function logVideoUsage(
   ctx: UsageLogCtx,
   engineId: string,
   modelId: string,
   resolution: string,
+  durationSec: number | null,
   success: boolean
 ): Promise<void> {
   const principal = ctx.req?.principal;
@@ -169,7 +172,7 @@ async function logVideoUsage(
       engineId,
       modelId,
       imageSize: resolution,
-      costUsd: 0,
+      costUsd: success ? priceForVideo(engineId, modelId, resolution, durationSec) : 0,
       context: ctx.label,
       bookId: ctx.bookId,
       success,
@@ -666,7 +669,7 @@ export async function generateVideo(p: GenerateVideoParams): Promise<{
       apiKeyOverride,
     });
     const saved = await saveVideoForOwner(p, generated.buffer, generated.mimeType);
-    await logVideoUsage(ctx, generated.engine.id, generated.modelId, generated.resolution, true);
+    await logVideoUsage(ctx, generated.engine.id, generated.modelId, generated.resolution, generated.durationSec, true);
     return {
       url: saved.url,
       filename: saved.filename,
@@ -685,6 +688,7 @@ export async function generateVideo(p: GenerateVideoParams): Promise<{
       failedEngine.id,
       videoEngineModelId(failedEngine),
       p.resolution || failedEngine.defaultResolution,
+      p.durationSec,
       false
     );
     throw err;

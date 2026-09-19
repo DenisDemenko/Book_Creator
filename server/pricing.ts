@@ -98,6 +98,85 @@ export const IMAGE_PRICING: Record<string, ImagePriceTable> = {
     label: 'GPT Image (OpenAI)',
     perImageUsd: { '1K': 0.034 },
   },
+
+  // --- Задача #214: ПРИБЛИЗНІ тарифи 6 фото-двигунів Leonardo.Ai v2 -------
+  // --- (та типової моделі платформи 'leonardo') -----------------------
+  //
+  // Leonardo.Ai НЕ публікує офіційну доларову ціну за генерацію (лише
+  // токенну систему без розкритої прив'язки $ → 1 токен для кожної
+  // конкретної моделі) — той самий факт, що вже задокументований у
+  // server/aiCore.ts для відео (задача #201). Записи нижче — оцінка за
+  // ринковою/офіційною ціною ТІЄЇ Ж моделі в її першоджерела (OpenAI,
+  // BytePlus/fal.ai, або типовий хостинг FLUX), а не вигадане число.
+  // Адміністратор звіряє це з реальною витратою Leonardo (рахунок/
+  // дашборд) і за потреби переозначає перелоаднувши тариф — джерела й
+  // дата звірки вказані під кожним записом.
+  //
+  // Ключ у таблиці — САМЕ modelId, який реально йде в usage_log для цього
+  // двигуна (engine.modelId з ImageEngineInfo у server/imageGeneration.ts),
+  // а не назва двигуна — так само, як уже влаштовано для Seedream/fal вище.
+  'openai/gpt-image-2.5-flare': {
+    modelId: 'openai/gpt-image-2.5-flare',
+    label: 'GPT Image 2.5 Flare (через Leonardo.Ai)',
+    // Офіційна ціна OpenAI — токенна: $30/1M вихідних токенів зображення
+    // (developers.openai.com/api/docs/models/gpt-image-2.5-flare, звірено
+    // вересень 2026). Типове зображення середньої якості ~1000-1100
+    // вихідних токенів (той самий порядок, що й у GPT Image 1/1.5) →
+    // ≈$0.03-0.035/зображення. Flare — швидший/дешевший варіант пари
+    // Flare/Sunburst, але окремого тарифу за швидкість OpenAI не публікує,
+    // тому обидва записи нижче поки що рівні.
+    perImageUsd: { '1K': 0.03 },
+  },
+  'openai/gpt-image-2.5-sunburst': {
+    modelId: 'openai/gpt-image-2.5-sunburst',
+    label: 'GPT Image 2.5 Sunburst (через Leonardo.Ai)',
+    // developers.openai.com/api/docs/models/gpt-image-2.5-sunburst,
+    // звірено вересень 2026: «Token rates match GPT Image 2» — та сама
+    // ставка $30/1M вихідних токенів, що й у Flare вище.
+    perImageUsd: { '1K': 0.03 },
+  },
+  'seedream-4.5': {
+    modelId: 'seedream-4.5',
+    label: 'Seedream 4.5 (через Leonardo.Ai)',
+    // Та сама модель ByteDance, що вже тарифікована вище під fal.ai
+    // ($0.04/зображення) — переносимо те саме число, а не вигадуємо нове,
+    // бо це буквально той самий генератор під іншим провайдером доступу.
+    perImageUsd: { '1K': 0.04 },
+  },
+  'seedream-5.0-pro': {
+    modelId: 'seedream-5.0-pro',
+    label: 'Seedream 5.0 Pro (через Leonardo.Ai)',
+    // atlascloud.ai/blog/ai-updates/seedream-5-0-pro-price (звірено
+    // вересень 2026): $0.045/зображення до 2.36МП (умовно '1K'-клас),
+    // $0.09/зображення вище цієї межі. У ImageEngineInfo ця модель має
+    // maxSize '2K' (реальний дефолт 2048×2048 ≈ 4.19МП, тобто саме
+    // дорожчий тариф) — тому основне значення нижче 0.09, а '1K' лишено
+    // як довідкове на випадок ручного зменшення розміру.
+    perImageUsd: { '1K': 0.045, '2K': 0.09 },
+  },
+  'flux-dev': {
+    modelId: 'flux-dev',
+    label: 'FLUX Dev (через Leonardo.Ai)',
+    // FLUX.1 Dev — відкрита модель, доступна через кількох хостерів з
+    // різною ціною (pricepertoken.com/flux-pricing називає $0.009 як
+    // найдешевшого хостера, звірено вересень 2026); Leonardo — не
+    // бюджетний хостинг, тож беремо типовіший середній рівень ринку,
+    // а не мінімальну ціну.
+    perImageUsd: { '1K': 0.025, '2K': 0.025 },
+  },
+  // Типова модель платформи Leonardo (двигун 'leonardo' вище, коли
+  // LEONARDO_MODEL_ID не задано — modelId '' і пошук іде за engineId).
+  // Джерело — власний Help Center Leonardo (intercom.help/leonardo-ai/
+  // en/articles/8044033-token-usage, звірено вересень 2026): «Default
+  // Image (768×768) — 1 токен», а $/токен ≈ $0.0010-0.0014 виходить із
+  // цін підписок ($12/8500, $30/25000, $60/60000 — leonardo.ai/pricing).
+  // Тут дефолтний розмір трохи більший (1024px), тому оцінка округлена
+  // вгору, а не взята буквально $0.0014.
+  leonardo: {
+    modelId: '',
+    label: 'Leonardo.Ai (типова модель платформи)',
+    perImageUsd: { '1K': 0.01 },
+  },
 };
 
 /** Тариф текстової моделі, долари за мільйон токенів. */
@@ -324,6 +403,156 @@ export function priceForImage(engineId: string, imageSize = '2K', modelId?: stri
   return Math.min(...known.map((k) => table.perImageUsd[k]));
 }
 
+/**
+ * Тариф ОДНІЄЇ секунди відео в доларах — задача #214. На відміну від фото
+ * (ціна за зображення), відео Leonardo.Ai рахує за тривалість (і подекуди
+ * роздільність), тому базова одиниця тут — секунда, а не генерація.
+ *
+ * `flatUsd` — для моделей БЕЗ контролю тривалості (Motion 2.0/2.0 Fast,
+ * durationsSec: null у VIDEO_ENGINES): фіксована ціна за один кліп.
+ * `perSecondUsdByResolution` — коли знайдено офіційну ціну саме по
+ * роздільності (FLUX 3 Video). `perSecondUsd` — єдина ставка на всі
+ * роздільності, коли джерело не розрізняло тариф по роздільності
+ * (Wan 3.0) або коли в нас лише одна роздільність цього двигуна
+ * (Seedance 2.5, Kling — усі '1080' чи '720' окремо).
+ *
+ * ВАЖЛИВО: Leonardo.Ai не публікує власну доларову ціну за генерацію
+ * (той самий факт, що й для фото-таблиці вище й задокументований у
+ * server/aiCore.ts, задача #201) — усі числа нижче виведені з
+ * ОФІЦІЙНОЇ або ринкової ціни ТІЄЇ Ж моделі в її першоджерела (Google
+ * Veo3, Kling, ByteDance Seedance, Alibaba Wan, Black Forest Labs FLUX)
+ * станом на вересень 2026, а не вигадані. Це приблизний орієнтир для
+ * звірки з реальною витратою по рахунку Leonardo — не офіційний прайс.
+ */
+export interface VideoPriceTable {
+  label: string;
+  perSecondUsd?: number;
+  perSecondUsdByResolution?: Record<string, number>;
+  flatUsd?: number;
+  note: string;
+}
+
+export const VIDEO_PRICING: Record<string, VideoPriceTable> = {
+  MOTION2: {
+    label: 'Leonardo Motion 2.0',
+    // Власна модель Leonardo, без контролю тривалості й без стороннього
+    // першоджерела для звірки. Leonardo сама позиціонує Motion як дешеву/
+    // «relaxed»-модель (навіть безлімітну на тарифі Ultimate) — тому це
+    // свідомо низька орієнтовна оцінка, а не розрахунок від чужої ціни.
+    flatUsd: 0.03,
+    note: 'Орієнтовно, без першоджерела — власна дешева модель Leonardo.',
+  },
+  MOTION2FAST: {
+    label: 'Leonardo Motion 2.0 Fast',
+    flatUsd: 0.02,
+    note: 'Орієнтовно, без першоджерела — швидший/дешевший варіант Motion 2.0.',
+  },
+  VEO3: {
+    label: 'Google Veo 3 (через Leonardo.Ai)',
+    // quickref.me (аналіз тарифів Leonardo, звірено вересень 2026):
+    // ~2500 токенів Leonardo за 8-секундний кліп; $/токен ≈$0.0012
+    // (виведено з підписки Artisan $30/25000) → ≈$3.00/8с → $0.375/с.
+    // Це СТОРОННІЙ аналіз тарифів Leonardo, не офіційне число самої
+    // Leonardo.Ai чи Google — найменш певна оцінка в цій таблиці.
+    perSecondUsd: 0.375,
+    note: 'Сторонній аналіз тарифів Leonardo (quickref.me), не офіційний прайс.',
+  },
+  VEO3FAST: {
+    label: 'Google Veo 3 Fast (через Leonardo.Ai)',
+    // Той самий аналіз: ~2000 токенів/8с → ≈$2.40/8с → $0.30/с.
+    perSecondUsd: 0.30,
+    note: 'Сторонній аналіз тарифів Leonardo (quickref.me), не офіційний прайс.',
+  },
+  KLING2_1: {
+    label: 'Kling 2.1 Pro (через Leonardo.Ai)',
+    // akool.com/blog-posts/kling-2-5-cost-guide (звірено вересень 2026):
+    // Kling 2.1 Pro витрачає на ~30% більше кредитів за 5с, ніж 2.5 Turbo
+    // (35 проти 25) на ВЛАСНІЙ платформі Kling; той самий множник
+    // застосовано до ринкової ціни 2.5 Turbo нижче.
+    perSecondUsd: 0.08,
+    note: 'Виведено з offіційної ціни Kling API того самого класу моделі (akool.com), не з Leonardo.',
+  },
+  KLING2_5: {
+    label: 'Kling 2.5 Turbo (через Leonardo.Ai)',
+    // akool.com/blog-posts/kling-2-5-cost-guide: офіційна ціна Kling API
+    // «~$0.21-$0.35 за 5-секундне відео» → середина ≈$0.28/5с → $0.056/с,
+    // округлено до $0.06/с.
+    perSecondUsd: 0.06,
+    note: 'Офіційна ціна Kling API за той самий клас моделі (akool.com), не з Leonardo.',
+  },
+  'bytedance/seedance-2.5': {
+    label: 'Seedance 2.5 (ByteDance, через Leonardo.Ai)',
+    // aimlapi.com/models/bytedance-seedance-2-5 (звірено вересень 2026):
+    // $0.065/с при 480p. Наш двигун генерує лише 720p (854×480 → 1280×720
+    // ≈ ×2.25 пікселів) → $0.065×2.25 ≈ $0.146/с, округлено до $0.15/с.
+    perSecondUsdByResolution: { '720': 0.15 },
+    note: 'Перераховано з офіційної ціни AIMLAPI за 480p (aimlapi.com), не з Leonardo.',
+  },
+  'alibaba/wan-3.0': {
+    label: 'Wan 3.0 (Alibaba, через Leonardo.Ai)',
+    // openrouter.ai/alibaba/wan-3.0 (звірено вересень 2026): «from
+    // $0.0425/с» до «$0.085/с» залежно від провайдера; джерело НЕ
+    // розрізняє ціну по роздільності — тому одна ставка на всі три
+    // тарифи (480/720/1080), а не вигадана різниця.
+    perSecondUsd: 0.06,
+    note: 'Середина діапазону OpenRouter для Wan 3.0 (openrouter.ai), не з Leonardo; без розбивки по роздільності.',
+  },
+  'kling-video-o-3': {
+    label: 'Kling O3 (через Leonardo.Ai)',
+    // Наймолодша модель у списку — окремого прайсу (ні в Leonardo, ні на
+    // біржах на кшталт OpenRouter/fal) не знайдено. Використано ту саму
+    // ставку, що й Kling 2.5 Turbo (найближчий за поколінням і класом) —
+    // явно позначено як грубе наближення, а не звірену ціну.
+    perSecondUsd: 0.06,
+    note: 'ГРУБЕ наближення — прирівняно до Kling 2.5 Turbo, окремого прайсу не знайдено.',
+  },
+  'bfl/flux-3-video': {
+    label: 'FLUX 3 Video (Black Forest Labs, через Leonardo.Ai)',
+    // docs.bfl.ml/quick_start/pricing (офіційний прайс Black Forest Labs,
+    // звірено вересень 2026), text-to-video/image-to-video, звичайний
+    // (не draft) режим: HD $0.17/с, FHD $0.29/с. Найнадійніша оцінка в
+    // цій таблиці — першоджерело самого розробника моделі.
+    perSecondUsdByResolution: { '720': 0.17, '1080': 0.29 },
+    note: 'Офіційний прайс Black Forest Labs (docs.bfl.ml) — найнадійніша оцінка в цій таблиці.',
+  },
+};
+
+/** Якщо тривалість невідома (напр. запис про невдалу спробу до визначення durationSec) — розумний дефолт для приблизної оцінки. */
+const FALLBACK_VIDEO_DURATION_SEC = 5;
+
+/**
+ * Вартість одного відео в доларах. `modelId` — реальний рядок моделі
+ * (leonardoModel для v1-двигунів на кшталт 'VEO3', modelSlug для
+ * v2-двигунів на кшталт 'bytedance/seedance-2.5' — engineModelId() у
+ * server/videoGeneration.ts), має пріоритет над `engineId`, той самий
+ * принцип, що й priceForImage() вище.
+ */
+export function priceForVideo(
+  engineId: string,
+  modelId: string,
+  resolution: string,
+  durationSec: number | null
+): number {
+  const table = (modelId && VIDEO_PRICING[modelId]) || VIDEO_PRICING[engineId];
+  if (!table) return 0;
+
+  if (typeof table.flatUsd === 'number') return table.flatUsd;
+
+  let perSecond: number | undefined;
+  if (table.perSecondUsdByResolution) {
+    perSecond = table.perSecondUsdByResolution[resolution];
+    if (typeof perSecond !== 'number') {
+      const known = Object.values(table.perSecondUsdByResolution);
+      perSecond = known.length ? Math.min(...known) : undefined;
+    }
+  }
+  if (typeof perSecond !== 'number') perSecond = table.perSecondUsd;
+  if (typeof perSecond !== 'number') return 0;
+
+  const sec = durationSec && durationSec > 0 ? durationSec : FALLBACK_VIDEO_DURATION_SEC;
+  return perSecond * sec;
+}
+
 export function priceForText(inputTokens: number, outputTokens: number): number {
   return (
     (inputTokens / 1_000_000) * TEXT_PRICING.inputPerMillionUsd +
@@ -435,6 +664,16 @@ export function pricingSnapshot() {
       modelId: table.modelId,
       label: table.label,
       perImageUsd: table.perImageUsd,
+    })),
+    // Задача #214: те саме для відео — ключ тут це modelId (leonardoModel/
+    // modelSlug), а не engineId, бо саме за modelId шукає priceForVideo().
+    videos: Object.entries(VIDEO_PRICING).map(([modelId, table]) => ({
+      modelId,
+      label: table.label,
+      perSecondUsd: table.perSecondUsd,
+      perSecondUsdByResolution: table.perSecondUsdByResolution,
+      flatUsd: table.flatUsd,
+      note: table.note,
     })),
     narration: NARRATION_PRICING,
     text: TEXT_PRICING,
