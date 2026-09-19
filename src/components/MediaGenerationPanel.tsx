@@ -472,6 +472,61 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
       : { kind: 'url', url: r.url };
   };
 
+  // Задача #210, реальний продакшн-збій: живий виклик Seedance 2.5 (5с,
+  // 720p) підтвердив, що один довгий HTTP-запит (весь час опитування
+  // Leonardo — до кількох хвилин) не доживає до кінця: проксі хостингу
+  // обриває з'єднання (502 ROUTER_EXTERNAL_TARGET_ERROR) приблизно на
+  // ~90-й секунді, тоді як Leonardo, найімовірніше, продовжує генерацію.
+  // Сервер тепер повертає jobId одразу (POST .../generate-video), а цей
+  // хелпер опитує статус короткими запитами (кожен — миттєвий) замість
+  // одного довгого fetch. Інтервал/кількість спроб — той самий запас, що
+  // й у сервера (server/videoGeneration.ts: LEONARDO_VIDEO_POLL_MAX_ATTEMPTS
+  // × LEONARDO_VIDEO_POLL_INTERVAL_MS ≈ 6 хв), з запасом на округлення.
+  const VIDEO_STATUS_POLL_INTERVAL_MS = 4000;
+  const VIDEO_STATUS_POLL_MAX_ATTEMPTS = 110; // ~7.3 хв
+
+  const pollVideoJob = async (
+    jobId: string
+  ): Promise<{ videoUrl: string; modelUsed?: string } | null> => {
+    for (let attempt = 0; attempt < VIDEO_STATUS_POLL_MAX_ATTEMPTS; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, VIDEO_STATUS_POLL_INTERVAL_MS));
+      let res: Response;
+      try {
+        res = await fetch(`/api/ai/generate-video/status/${jobId}`, { credentials: 'same-origin' });
+      } catch {
+        // Один пропущений опит через тимчасову мережеву проблему не має
+        // провалювати всю генерацію — пробуємо ще раз на наступному тіку.
+        continue;
+      }
+      const data = await res.json().catch(() => ({}));
+
+      if (isGuestRestriction(res.status, data)) {
+        setErrorMsg(t('mediaGenerationPanel.toastGuestRestricted'));
+        onToast(t('mediaGenerationPanel.toastGuestRestricted'));
+        return null;
+      }
+      if (res.status === 402 || data?.kind === 'quota_exceeded') {
+        setErrorMsg(t('mediaGenerationPanel.toastQuotaExceeded'));
+        onToast(t('mediaGenerationPanel.toastQuotaExceeded'));
+        return null;
+      }
+      if (data?.status === 'complete' && data?.videoUrl) {
+        return data;
+      }
+      if (!res.ok || data?.status === 'error') {
+        const msg = data?.error || t('mediaGenerationPanel.toastGenFailed');
+        setErrorMsg(msg);
+        onToast(msg);
+        return null;
+      }
+      // status === 'pending' — опитуємо далі.
+    }
+    const msg = t('mediaGenerationPanel.toastGenFailed');
+    setErrorMsg(msg);
+    onToast(msg);
+    return null;
+  };
+
   const handleGenerateVideo = async () => {
     if (!prompt.trim()) {
       onToast(t('mediaGenerationPanel.toastEmptyPrompt'));
@@ -508,18 +563,21 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
         onToast(t('mediaGenerationPanel.toastQuotaExceeded'));
         return;
       }
-      if (!res.ok || !data?.videoUrl) {
+      if (!res.ok || !data?.jobId) {
         const msg = data?.error || t('mediaGenerationPanel.toastGenFailed');
         setErrorMsg(msg);
         onToast(msg);
         return;
       }
 
-      setLastResult({ url: data.videoUrl, modelUsed: data.modelUsed || '', kind: 'video' });
+      const videoData = await pollVideoJob(data.jobId);
+      if (!videoData) return; // помилку вже показано всередині pollVideoJob
+
+      setLastResult({ url: videoData.videoUrl, modelUsed: videoData.modelUsed || '', kind: 'video' });
       // Відео вже збережено на сервері (saveAsset) — просимо галерею
       // перечитати медіатеку, а не тягнемо файл у book.illustrations[].
       onVideoGenerated();
-      onToast(t('mediaGenerationPanel.toastVideoGenerated', { model: data.modelUsed || '' }));
+      onToast(t('mediaGenerationPanel.toastVideoGenerated', { model: videoData.modelUsed || '' }));
     } catch (err) {
       console.error('Error generating video:', err);
       setErrorMsg(t('mediaGenerationPanel.toastGenError'));

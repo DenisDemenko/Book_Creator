@@ -4,6 +4,7 @@ import express from 'express';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { randomUUID } from 'node:crypto';
 import { Type } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -3935,7 +3936,54 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
    * приставити його тут означало б удавати обмеження, якого нема.
    * Повноцінна відеоквота тарифу — поза межами цієї задачі.
    */
+  // Задача #210. Реальний продакшн-збій: цей ендпойнт раніше тримав ОДИН
+  // HTTP-запит відкритим на весь час генерації відео (до кількох хвилин —
+  // POLL_MAX_ATTEMPTS × інтервал у server/videoGeneration.ts). Живий виклик
+  // Seedance 2.5 (5с, 720p) підтвердив: проксі хостингу (Railway) обриває
+  // такий довгий запит РАНІШЕ, ніж Leonardo встигає завершити генерацію —
+  // 502 ROUTER_EXTERNAL_TARGET_ERROR приблизно на ~90-й секунді, тоді як
+  // сама генерація, найімовірніше, продовжувала виконуватись на сервері.
+  // Це не баг логіки генерації, а структурна нестиковка: один довгий запит
+  // проти проксі з власним, непідконтрольним нам тайм-аутом.
+  //
+  // Фікс — фонова задача замість однієї довгої відповіді: POST одразу
+  // повертає jobId (звичайна швидка відповідь, validation — синхронно, як
+  // і раніше), а сама генерація (generateVideoAndLog, з опитуванням
+  // Leonardo) виконується у фоні; фронтенд опитує GET .../status/:jobId
+  // короткими запитами (кожен — миттєвий, нічого не тримає відкритим).
+  // Зберігання — проста Map у пам'яті процесу: для одного інстансу сервера
+  // (як і зараз на Railway) цього досить; переживає лише поки живий процес
+  // — перезапуск/деплой під час активної генерації "губить" задачу, це
+  // прийнятний компроміс для першої ітерації, а не омана (TTL нижче explicit).
+  interface VideoJobRecord {
+    status: 'pending' | 'complete' | 'error';
+    result?: {
+      videoUrl: string;
+      promptUsed: string;
+      modelUsed: string;
+      modelKey: string;
+      resolution: string;
+      aspectRatio: string;
+      durationSec: number | null;
+      fileSize: string;
+      timestamp: string;
+    };
+    error?: { message: string; kind: string; status: number };
+    createdAt: number;
+  }
+  const videoJobs = new Map<string, VideoJobRecord>();
+  // ~2х запас над найдовшим реальним опитуванням (server/videoGeneration.ts:
+  // LEONARDO_VIDEO_POLL_MAX_ATTEMPTS × LEONARDO_VIDEO_POLL_INTERVAL_MS ≈ 6 хв).
+  const VIDEO_JOB_TTL_MS = 20 * 60 * 1000;
+  const pruneVideoJobs = () => {
+    const now = Date.now();
+    for (const [id, job] of videoJobs) {
+      if (now - job.createdAt > VIDEO_JOB_TTL_MS) videoJobs.delete(id);
+    }
+  };
+
   app.post('/api/ai/generate-video', requirePermission('canGenerateImages'), async (req, res) => {
+    pruneVideoJobs();
     try {
       const { prompt, engine, resolution, aspectRatio, durationSec, bookId, context, startFrameImage, endFrameImage } = req.body || {};
 
@@ -3984,7 +4032,13 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
         return res.status(400).json({ error: err?.message || 'Некоректний референс кадру.', kind: 'empty' });
       }
 
-      const generated = await generateVideoAndLog({
+      const jobId = `vidjob_${randomUUID()}`;
+      videoJobs.set(jobId, { status: 'pending', createdAt: Date.now() });
+
+      // СВІДОМО без await: саме це і є фікс — запит повертається негайно,
+      // а Leonardo-опитування (могло тривати довше за тайм-аут проксі)
+      // триває у фоні процесу.
+      generateVideoAndLog({
         prompt: finalPrompt,
         engine,
         resolution,
@@ -3996,28 +4050,65 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
         req,
         label: `${contextLabel}: ${finalPrompt.slice(0, 60)}`,
         bookId: typeof bookId === 'string' ? bookId : undefined,
-      });
+      })
+        .then((generated) => {
+          videoJobs.set(jobId, {
+            status: 'complete',
+            createdAt: videoJobs.get(jobId)?.createdAt ?? Date.now(),
+            result: {
+              videoUrl: generated.url,
+              promptUsed: finalPrompt,
+              modelUsed: generated.engineLabel,
+              modelKey: generated.engineId,
+              resolution: generated.resolution,
+              aspectRatio: generated.aspectRatio,
+              durationSec: generated.durationSec,
+              fileSize: `${Math.round(generated.bytes / 1024)} КБ`,
+              timestamp: new Date().toISOString(),
+            },
+          });
+        })
+        .catch((err: any) => {
+          const status = err?.kind === 'no_key' ? 503 : err?.kind === 'quota' ? 429 : 500;
+          if (err?.cause) console.error('  причина:', (err.cause as Error)?.message || err.cause);
+          console.error('Error in /api/ai/generate-video (фонова задача):', err?.message || err);
+          videoJobs.set(jobId, {
+            status: 'error',
+            createdAt: videoJobs.get(jobId)?.createdAt ?? Date.now(),
+            error: { message: err?.message || 'Помилка генерації відео', kind: err?.kind || 'unknown', status },
+          });
+        });
 
-      res.json({
-        videoUrl: generated.url,
-        promptUsed: finalPrompt,
-        modelUsed: generated.engineLabel,
-        modelKey: generated.engineId,
-        resolution: generated.resolution,
-        aspectRatio: generated.aspectRatio,
-        durationSec: generated.durationSec,
-        fileSize: `${Math.round(generated.bytes / 1024)} КБ`,
-        timestamp: new Date().toISOString(),
-      });
+      res.status(202).json({ jobId });
     } catch (err: any) {
+      // Синхронна частина (валідація тіла запиту, референси кадрів) — сюди
+      // потрапляють лише збої ДО створення задачі, як і раніше.
       const status = err?.kind === 'no_key' ? 503 : err?.kind === 'quota' ? 429 : 500;
-      if (err?.cause) console.error('  причина:', (err.cause as Error)?.message || err.cause);
-      console.error('Error in /api/ai/generate-video:', err?.message || err);
+      console.error('Error in /api/ai/generate-video (синхронна частина):', err?.message || err);
       res.status(status).json({
         error: err?.message || 'Помилка генерації відео',
         kind: err?.kind || 'unknown',
       });
     }
+  });
+
+  // Задача #210: статус фонової задачі генерації відео — короткий,
+  // миттєвий запит; фронтенд викликає його періодично замість очікування
+  // однієї довгої відповіді (див. коментар вище POST-ендпойнта).
+  app.get('/api/ai/generate-video/status/:jobId', requirePermission('canGenerateImages'), (req, res) => {
+    pruneVideoJobs();
+    const job = videoJobs.get(req.params.jobId);
+    if (!job) {
+      return res.status(404).json({ error: 'Завдання генерації відео не знайдено або застаріло.', kind: 'unknown' });
+    }
+    if (job.status === 'pending') {
+      return res.json({ status: 'pending' });
+    }
+    if (job.status === 'error') {
+      const { message, kind, status } = job.error!;
+      return res.status(status).json({ status: 'error', error: message, kind });
+    }
+    res.json({ status: 'complete', ...job.result });
   });
 
   // -----------------------------------------------------------------------
