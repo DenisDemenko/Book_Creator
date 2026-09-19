@@ -15,7 +15,8 @@ import {
   HardDrive,
   Film,
   RefreshCw,
-  ArrowUpDown
+  ArrowUpDown,
+  AlertTriangle
 } from 'lucide-react';
 import { Book, BookIllustration, AuthUser } from '../types';
 import { downloadImageAs } from '../utils/helpers';
@@ -91,6 +92,21 @@ type MediaCard = {
 
 const MB = 1024 * 1024;
 
+/**
+ * Мінімум, потрібний видаленню. Саме стільки є і в картки галереї, і в
+ * лайтбокса — тому той самий діалог підтвердження обслуговує обидва місця,
+ * а не дублюється.
+ */
+interface DeletableMedia {
+  id: string;
+  url: string;
+  title: string;
+  /** `'covers'` / `'portraits'` — усе решта вважається ілюстрацією. */
+  type: string;
+  /** `'upload'` — файл серверної медіатеки; інакше — посилання з книги. */
+  source?: string;
+}
+
 /** Службовий id для файлів без книги (`book_id = null`). */
 const NO_BOOK_SECTION = '';
 const ALL_SECTIONS = '__all__';
@@ -119,6 +135,10 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
   // стан, бо видалення й завантаження можуть відбуватись одночасно на РІЗНИХ
   // картках, а не заважати одне одному через спільний прапорець.
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Задача #218-Б. Файл, який автор попросив видалити, але ще не
+  // підтвердив. Видалення незворотне (див. діалог нижче), тому сама кнопка
+  // кошика нічого не стирає — вона лише відкриває попередження.
+  const [pendingDelete, setPendingDelete] = useState<DeletableMedia | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null);
   const [sections, setSections] = useState<LibrarySection[]>([]);
@@ -377,14 +397,19 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
    * Задача #217. Галерея — ДВА джерела картки (див. коментар над MediaCard
    * вище), і вони видаляються по-різному:
    *  - `source === 'upload'` — файл СЕРВЕРНОЇ медіатеки (реальний id у
-   *    mediaLibraryStore) → DELETE /api/media/:id знімає і байти, і лічильник
-   *    сховища.
+   *    mediaLibraryStore) → DELETE /api/media/:id стирає байти з диска.
+   *    Лічильник тарифу при цьому НЕ звільняється — це свідома політика
+   *    (`mediaStorage.ts`: той самий підхід, що й у лічильника генерацій),
+   *    тому в попередженні про це сказано прямо, а не обіцяно «місце
+   *    звільниться».
    *  - інакше — посилання, вбудоване прямо в книгу (обкладинка/портрет/
    *    ілюстрація) — на сервері може взагалі не існувати як окремий файл
    *    (старі книги тримають тут `data:`-URL), тому видалення — це мутація
    *    самої книги через onUpdateBook(), а не мережевий запит.
+   *
+   * Викликається ЛИШЕ після підтвердження в діалозі (`confirmDelete`).
    */
-  const handleDeleteMedia = async (item: MediaCard) => {
+  const handleDeleteMedia = async (item: DeletableMedia) => {
     setDeletingId(item.id);
     try {
       if (item.source === 'upload') {
@@ -429,6 +454,25 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
     } finally {
       setDeletingId(null);
     }
+  };
+
+  /**
+   * Задача #218-Б. Видалення з підтвердженням.
+   *
+   * Відновити видалене нічим: у медіатеки немає кошика й немає архіву —
+   * байти з диска стерто, а резервної копії проєкт не тримає. Тому кнопка
+   * кошика більше нічого не робить сама: вона лише ставить картку в
+   * `pendingDelete`, а діалог просить сказати це явно. Автор бачить і
+   * мініатюру того самого файлу (щоб не видалити сусідній кадр), і чесний
+   * текст про те, що наслідки незворотні.
+   */
+  const confirmDelete = async () => {
+    const item = pendingDelete;
+    if (!item) return;
+    await handleDeleteMedia(item);
+    // Діалог закриваємо в будь-якому разі: якщо запит упав, картка
+    // лишиться на місці, а про помилку скаже тост (toastDeleteFailed).
+    setPendingDelete(null);
   };
 
   /**
@@ -737,15 +781,18 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
               )}
               {/* Задача #217. Кошик — на самій мініатюрі, а не в рядку
                   завантаження нижче (там уже тісно від PNG/JPG/MP4-кнопок).
-                  Клік по ньому не має відкривати лайтбокс — stopPropagation. */}
+                  Клік по ньому не має відкривати лайтбокс — stopPropagation.
+                  Задача #218-Б: клік не видаляє, а питає підтвердження. */}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  handleDeleteMedia(item);
+                  setPendingDelete(item);
                 }}
                 disabled={deletingId === item.id}
-                className="absolute bottom-2 right-2 p-1.5 rounded-full bg-black/60 backdrop-blur-md text-rose-400 hover:bg-rose-500/30 hover:text-rose-300 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all disabled:opacity-70 disabled:cursor-wait"
+                className="absolute bottom-2 right-2 p-1.5 rounded-full bg-black/60 backdrop-blur-md text-rose-400 hover:bg-rose-500/30 hover:text-rose-300 transition-all disabled:opacity-70 disabled:cursor-wait"
                 title={t('mediaLibraryView.deleteTooltip')}
+                aria-label={t('mediaLibraryView.deleteTooltip')}
+                data-delete-media={item.id}
               >
                 {deletingId === item.id ? (
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -804,24 +851,122 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
         ))}
       </div>
 
+      {/* Задача #218-Б. Підтвердження видалення. Стоїть НАД лайтбоксом
+          (z-[60] проти z-50), бо видаляти можна і з нього: автор має бачити
+          саме попередження, а не два вікна одночасно. */}
+      {pendingDelete && (
+        <div
+          onClick={() => {
+            if (deletingId !== pendingDelete.id) setPendingDelete(null);
+          }}
+          className="fixed inset-0 z-[60] bg-black/85 backdrop-blur-md flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-slate-950 border border-rose-500/40 rounded-3xl max-w-md w-full shadow-2xl space-y-4 p-6 text-white"
+            data-delete-dialog
+          >
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-full bg-rose-500/15 border border-rose-500/30 shrink-0">
+                <AlertTriangle className="w-5 h-5 text-rose-400" />
+              </div>
+              <div className="min-w-0 space-y-1">
+                <h3 className="text-base font-bold text-white">{t('mediaLibraryView.deleteConfirmTitle')}</h3>
+                <p className="text-xs text-slate-400 break-words">{pendingDelete.title}</p>
+              </div>
+            </div>
+
+            {/* Мініатюра саме того файлу: у галереї поруч стоять десятки
+                схожих кадрів, і «той чи сусідній» — головний ризик. */}
+            <div className="h-32 overflow-hidden rounded-2xl bg-black border border-slate-800 flex items-center justify-center">
+              {pendingDelete.type === 'videos' ? (
+                <video
+                  src={pendingDelete.url}
+                  muted
+                  loop
+                  playsInline
+                  onMouseEnter={(e) => e.currentTarget.play().catch(() => {})}
+                  onMouseLeave={(e) => e.currentTarget.pause()}
+                  className="max-h-full w-auto object-contain"
+                />
+              ) : (
+                <img
+                  src={pendingDelete.url}
+                  alt={pendingDelete.title}
+                  referrerPolicy="no-referrer"
+                  className="max-h-full w-auto object-contain"
+                />
+              )}
+            </div>
+
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/25 space-y-1.5">
+              <p className="text-xs font-bold text-rose-300">{t('mediaLibraryView.deleteConfirmWarning')}</p>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                {pendingDelete.source === 'upload'
+                  ? t('mediaLibraryView.deleteConfirmNoteStored')
+                  : t('mediaLibraryView.deleteConfirmNoteLinked')}
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={() => setPendingDelete(null)}
+                disabled={deletingId === pendingDelete.id}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition-all disabled:opacity-60"
+                data-delete-cancel
+              >
+                {t('mediaLibraryView.deleteConfirmCancel')}
+              </button>
+              <button
+                onClick={confirmDelete}
+                disabled={deletingId === pendingDelete.id}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-md transition-all disabled:opacity-70 disabled:cursor-wait"
+                data-delete-confirm
+              >
+                {deletingId === pendingDelete.id ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="w-3.5 h-3.5" />
+                )}
+                <span>{t('mediaLibraryView.deleteConfirmConfirm')}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* High-res Modal */}
       {selectedMedia && (
         <div
           onClick={() => setSelectedMedia(null)}
           className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4"
+          data-media-lightbox
         >
           <div
             onClick={(e) => e.stopPropagation()}
             className="bg-slate-950 border border-slate-800 rounded-3xl max-w-3xl w-full overflow-hidden shadow-2xl space-y-4 p-6 text-white"
           >
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-3">
               <h3 className="text-base font-bold text-cyan-300">{selectedMedia.title}</h3>
-              <button
-                onClick={() => setSelectedMedia(null)}
-                className="text-slate-400 hover:text-white font-bold text-lg"
-              >
-                ✕
-              </button>
+              <div className="flex items-center gap-1">
+                {/* Задача #218-Б. Кошик і в лайтбоксі: кадр роздивляються на
+                    весь екран саме тоді, коли вирішують, що він зайвий. */}
+                <button
+                  onClick={() => setPendingDelete(selectedMedia)}
+                  className="p-1.5 rounded-full text-rose-400 hover:bg-rose-500/20 hover:text-rose-300 transition-all"
+                  title={t('mediaLibraryView.deleteTooltip')}
+                  aria-label={t('mediaLibraryView.deleteTooltip')}
+                  data-delete-media-lightbox={selectedMedia.id}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setSelectedMedia(null)}
+                  className="text-slate-400 hover:text-white font-bold text-lg px-1"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
 
             <div className="max-h-[55vh] overflow-hidden rounded-2xl bg-black flex items-center justify-center border border-slate-800">
