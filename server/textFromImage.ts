@@ -17,6 +17,11 @@
 import type { GoogleGenAI } from '@google/genai';
 import { loadImageBytes } from './media/imageBytes';
 import { buildTextFromImagePrompt, textFromImageSystemInstruction } from './textFromImagePrompt';
+import {
+  buildCharacterFromImagePrompt,
+  characterFromImageSystemInstruction,
+  type CharacterFromImageOptions,
+} from './characterFromImagePrompt';
 
 export type TextEngine = 'gemini' | 'gpt';
 
@@ -64,6 +69,18 @@ export interface GenerateTextFromImageOptions {
   genre?: string;
   chapterTitle?: string;
   captionHint?: string;
+  /**
+   * Що саме просимо в моделі (задача #220):
+   *  - `scene` (типово) — художній текст сцени «за мотивами» зображення;
+   *  - `character` — робочий опис персонажа, якого модель СПРАВДІ бачить
+   *    на фото (кнопка «Описати ШІ» в медіатеці). Промпт і системна
+   *    інструкція для цього випадку живуть у `characterFromImagePrompt.ts`,
+   *    бо вимоги до них протилежні: сцена — це література, опис — чесна
+   *    перевірка кадру.
+   */
+  kind?: 'scene' | 'character';
+  /** Додатковий контекст для `kind: 'character'` — «ядро письменника». */
+  character?: CharacterFromImageOptions;
   /** Хто питає — для перевірки права на файл медіатеки (див. resolveImageBytes). */
   ownerId?: string | null;
 }
@@ -74,7 +91,15 @@ export interface GenerateTextFromImageOptions {
  * могло показувати й редагувати той самий текст, що реально йде в модель.
  */
 function buildPrompt(opts: GenerateTextFromImageOptions): string {
+  if (opts.kind === 'character') {
+    return buildCharacterFromImagePrompt({ bookTitle: opts.bookTitle, genre: opts.genre, ...(opts.character || {}) });
+  }
   return buildTextFromImagePrompt(opts);
+}
+
+/** Системна інструкція — своя для кожного виду роботи (див. `kind` вище). */
+function systemInstructionFor(opts: GenerateTextFromImageOptions): string {
+  return opts.kind === 'character' ? characterFromImageSystemInstruction() : textFromImageSystemInstruction();
 }
 
 function classifyGenericError(kind: 'gemini' | 'gpt', message: string): TextFromImageErrorKind {
@@ -120,7 +145,7 @@ async function generateWithGemini(
         },
       ],
       config: {
-        systemInstruction: textFromImageSystemInstruction(),
+        systemInstruction: systemInstructionFor(opts),
         temperature: 0.85,
       },
     });
@@ -174,7 +199,7 @@ async function generateWithGpt(opts: GenerateTextFromImageOptions): Promise<{ te
         messages: [
           {
             role: 'system',
-            content: textFromImageSystemInstruction(),
+            content: systemInstructionFor(opts),
           },
           {
             role: 'user',

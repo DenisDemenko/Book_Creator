@@ -66,6 +66,14 @@ interface MediaGenerationPanelProps {
    */
   onVideoGenerated: () => void;
   onToast: (msg: string) => void;
+  /**
+   * Задача #220. Фото з галереї, яке треба взяти стартовим кадром відео
+   * (кнопка «Генерувати відео» на картці). Панель сама перемикає режим на
+   * «відео» і кладе зображення в `startFrameImage` — батько лише передає
+   * запит і очищає його через `onVideoStartFrameApplied`.
+   */
+  videoStartFrameRequest?: { id: string; url: string; title: string } | null;
+  onVideoStartFrameApplied?: () => void;
 }
 
 /** Задача #205. Форма відповіді `GET /api/ai/video-engines` (server/videoGeneration.ts::listVideoEngines). */
@@ -117,7 +125,15 @@ interface ReferenceImage {
   url?: string;
 }
 
-export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book, isRegistered, onGenerated, onVideoGenerated, onToast }) => {
+export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({
+  book,
+  isRegistered,
+  onGenerated,
+  onVideoGenerated,
+  onToast,
+  videoStartFrameRequest,
+  onVideoStartFrameApplied,
+}) => {
   const { t } = useLanguage();
 
   const [engines, setEngines] = useState<EngineInfo[]>([]);
@@ -169,6 +185,44 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
   // з іконками-«ярликами» (режим фото/відео, двигун) — клік по будь-якій
   // розгортає панель назад, а не лише загальна кнопка вгорі.
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false);
+
+  /**
+   * Задача #220. Фото з галереї → стартовий кадр відео (кнопка
+   * «Генерувати відео» на картці). Панель сама: перемикає режим на «відео»,
+   * розгортає себе, якщо була згорнута, і кладе зображення у `startFrameImage`.
+   *
+   * Про підтримку кадру двигуном тут НЕ мовчимо: якщо обраний відеодвигун
+   * не приймає `startFrame` (`supportsStartFrame` із сервера), автор бачить
+   * це підказкою в панелі, а не мовчазно проігнорований кадр.
+   */
+  useEffect(() => {
+    if (!videoStartFrameRequest) return;
+    setIsPanelCollapsed(false);
+    setMode('video');
+    setStartFrameImage({
+      id: videoStartFrameRequest.id,
+      kind: 'url',
+      previewUrl: videoStartFrameRequest.url,
+      url: videoStartFrameRequest.url,
+    });
+    onToast(t('describeCharacter.videoPanelHint'));
+    onVideoStartFrameApplied?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoStartFrameRequest?.id]);
+
+  /**
+   * Попередження про двигун, який НЕ приймає стартовий кадр.
+   *
+   * Окремим ефектом, бо список відеодвигунів підвантажується асинхронно і в
+   * мить кліку по картці може бути ще порожнім: перевіряти «а чи візьме це
+   * двигун» треба тоді, коли двигун справді відомий, а не колись потім.
+   */
+  useEffect(() => {
+    if (!startFrameImage || mode !== 'video' || !videoEngines.length) return;
+    const engine = videoEngines.find((e) => e.id === videoEngineId) || videoEngines[0];
+    if (engine && !engine.supportsStartFrame) onToast(t('describeCharacter.videoUnsupportedEngine'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startFrameImage?.id, videoEngineId, videoEngines.length, mode]);
 
   // Задача #216. Список двигунів (5-10 карток) займав половину висоти
   // панелі одразу під заголовком, хоча двигун і так уже вибраний
@@ -679,6 +733,7 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
 
   return (
     <aside
+      data-media-mode={mode}
       className={`shrink-0 h-full bg-slate-950/95 border-r border-slate-800 flex flex-col overflow-hidden transition-[width] ${
         isPanelCollapsed ? 'w-12' : 'w-full lg:w-80 xl:w-96'
       }`}

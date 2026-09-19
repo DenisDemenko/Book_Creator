@@ -1,0 +1,96 @@
+/**
+ * Словник кнопки «Описати ШІ» в медіатеці (задача #220).
+ *
+ * Живе окремим файлом, як `generateTextFromImage.ts` і `mediaLibraryView.ts`:
+ * одне завдання — один словник, щоб правка одного екрана не тягла чужий
+ * файл. Ключі вживаються як `describeCharacter.*`.
+ */
+export const describeCharacter = {
+  uk: {
+    // Кнопки на картці фото
+    generateVideoBtn: 'Генерувати відео',
+    generateVideoTooltip: 'Взяти це фото стартовим кадром для генерації відео',
+    describeBtn: 'Описати ШІ',
+    describeTooltip: 'Хай ШІ опише персонажа, якого справді бачить на цьому фото',
+    videoPanelHint: 'Фото стало стартовим кадром відео',
+    videoUnsupportedEngine: 'Обраний відеодвигун не приймає стартовий кадр — фото лежить у панелі, оберіть інший двигун.',
+
+    // Вікно опису
+    heading: 'Опис персонажа за фото',
+    subheading: 'ШІ опише того, кого справді бачить на зображенні, у ключі вашої книги.',
+    photoLabel: 'Фото:',
+    engineLabel: 'Рушій:',
+    geminiHint: 'Gemini бачить зображення нативно (ключ GEMINI_API_KEY).',
+    gptHint: 'GPT-4o приймає зображення через image_url (ключ OPENAI_API_KEY).',
+    notConfiguredSuffix: 'Ключ не налаштований: {hint}',
+    writing: 'Дивлюсь на фото…',
+    writeBtn: 'Описати',
+    rewriteBtn: 'Описати знову',
+    textLabel: 'Опис (редагований — у книгу піде саме цей текст)',
+    textareaPlaceholder: 'Натисніть «Описати» — або впишіть/вставте текст руками: передати можна будь-який.',
+    wordsSuffix: 'слів',
+    emptyTextError: 'Спочатку потрібен текст: натисніть «Описати» або вставте свій.',
+    genericFailError: 'Не вдалося отримати опис.',
+    serverUnavailableError: 'Сервер не відповів. Спробуйте ще раз.',
+    guestStub: 'Опис недоступний у гостьовому режимі.',
+
+    // Передача
+    titleLabel: 'Заголовок у книзі',
+    transferLabel: 'Куди передати:',
+    targetBook: 'Книга',
+    targetInstruction: 'Інструкція',
+    targetCourse: 'Курс',
+    transferTextBtn: 'Передати текст',
+    transferBothBtn: 'Передати текст разом з фото',
+    transferBookTitle: 'Опис персонажа (ШІ)',
+    bookDone: 'Текст додано новим розділом у книгу: «{title}».',
+    instructionDone: 'Текст додано в «Базу знань» чернетки інструкції.',
+    instructionMissing: 'Чернетки інструкції ще немає — відкрийте «Інструкцію» в експрес-старті й повторіть передачу.',
+    courseDone: 'Створено чернетку курсу: «{title}».',
+    courseFailed: 'Не вдалося створити курс: {reason}',
+    transferFailed: 'Передача не вдалася. Спробуйте ще раз.',
+    closeBtn: 'Закрити',
+  },
+  en: {
+    generateVideoBtn: 'Generate video',
+    generateVideoTooltip: 'Use this photo as the start frame for video generation',
+    describeBtn: 'Describe with AI',
+    describeTooltip: 'Let the AI describe the character it actually sees in this photo',
+    videoPanelHint: 'The photo is now the video start frame',
+    videoUnsupportedEngine: 'The selected video engine does not accept a start frame — the photo is in the panel, pick another engine.',
+
+    heading: 'Character description from a photo',
+    subheading: 'The AI will describe who it really sees, in the key of your book.',
+    photoLabel: 'Photo:',
+    engineLabel: 'Engine:',
+    geminiHint: 'Gemini sees images natively (GEMINI_API_KEY).',
+    gptHint: 'GPT-4o takes images via image_url (OPENAI_API_KEY).',
+    notConfiguredSuffix: 'Key not configured: {hint}',
+    writing: 'Looking at the photo…',
+    writeBtn: 'Describe',
+    rewriteBtn: 'Describe again',
+    textLabel: 'Description (editable — exactly this text will be transferred)',
+    textareaPlaceholder: 'Press “Describe” — or type/paste your own text: any text can be transferred.',
+    wordsSuffix: 'words',
+    emptyTextError: 'Text is needed first: press “Describe” or paste your own.',
+    genericFailError: 'Could not get a description.',
+    serverUnavailableError: 'The server did not respond. Please try again.',
+    guestStub: 'Description is not available in guest mode.',
+
+    transferLabel: 'Transfer to:',
+    titleLabel: 'Title in the book',
+    targetBook: 'Book',
+    targetInstruction: 'Instruction',
+    targetCourse: 'Course',
+    transferTextBtn: 'Transfer text',
+    transferBothBtn: 'Transfer text with the photo',
+    transferBookTitle: 'Character description (AI)',
+    bookDone: 'The text was added as a new section to the book: “{title}”.',
+    instructionDone: 'The text was added to the “Knowledge base” of the instruction draft.',
+    instructionMissing: 'There is no instruction draft yet — open “Instruction” in the express start and try again.',
+    courseDone: 'A course draft was created: “{title}”.',
+    courseFailed: 'Could not create the course: {reason}',
+    transferFailed: 'The transfer failed. Please try again.',
+    closeBtn: 'Close',
+  },
+};

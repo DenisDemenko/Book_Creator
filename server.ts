@@ -2077,6 +2077,85 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
   });
 
   /**
+   * Задача #220. «Описати ШІ» — кнопка на фото в медіатеці.
+   *
+   * Окремий маршрут від `/api/ai/generate-book-text-from-image` (вище), бо
+   * там ідеться про ХУДОЖНІЙ ТЕКСТ СЦЕНИ, а тут — про робочий опис
+   * персонажа, якого модель СПРАВДІ бачить на зображенні. Промпт і системна
+   * інструкція для цього випадку — `server/characterFromImagePrompt.ts`;
+   * рушій, форма відповіді й логування ті самі, щоб клієнт мав один спосіб
+   * читати відповідь і одну таблицю витрат.
+   *
+   * «Ядро письменника» приходить РАЗОМ ІЗ ЗАПИТОМ (назва книги, жанр,
+   * аудиторія, синопсис, склад персонажів): сервер не має права сам читати
+   * книгу автора, а клієнт надсилає саме ту, яку автор бачить на екрані.
+   */
+  app.post('/api/ai/describe-character-from-image', requirePermission('canUseAi'), async (req, res) => {
+    try {
+      const {
+        imageUrl,
+        engine,
+        bookTitle,
+        genre,
+        audience,
+        synopsis,
+        characters,
+        photoLabel,
+        generationPrompt,
+        characterHint,
+      } = req.body || {};
+      if (!imageUrl || typeof imageUrl !== 'string') {
+        return res.status(400).json({ error: 'Потрібне зображення для аналізу.' });
+      }
+      const chosenEngine = engine === 'gpt' ? 'gpt' : 'gemini';
+
+      const result = await generateTextFromImage(ai, GEMINI_MODEL, {
+        engine: chosenEngine,
+        imageUrl,
+        kind: 'character',
+        bookTitle,
+        genre,
+        ownerId: req.principal?.id as string | undefined,
+        character: {
+          photoLabel,
+          generationPrompt,
+          characterHint,
+          audience,
+          synopsis,
+          characters: Array.isArray(characters) ? characters : undefined,
+        },
+      });
+
+      await recordTextUsageByModel(
+        req,
+        `Опис персонажа за фото${photoLabel ? `: ${photoLabel}` : ''}`,
+        result.model,
+        result.usage.inputTokens,
+        result.usage.outputTokens,
+        true,
+        req.body?.bookId
+      ).catch((e) => console.warn('[usage] describeCharacter:', e));
+
+      res.json({ text: result.text, engine: result.engine, model: result.model, timestamp: new Date().toISOString() });
+    } catch (err: any) {
+      const kind = err instanceof TextFromImageError ? err.kind : 'unknown';
+      const status = kind === 'no_key' ? 503 : kind === 'quota' ? 429 : kind === 'bad_image' ? 400 : 500;
+      const failedEngine = err instanceof TextFromImageError ? err.engine : (req.body?.engine === 'gpt' ? 'gpt' : 'gemini');
+      await recordTextUsageByModel(
+        req,
+        `Невдала спроба опису персонажа (${kind})`,
+        failedEngine === 'gpt' ? (process.env.OPENAI_MODEL || 'gpt-4o') : GEMINI_MODEL,
+        0,
+        0,
+        false,
+        req.body?.bookId
+      ).catch((e) => console.warn('[usage] describeCharacter (fail):', e));
+      console.error('Error in /api/ai/describe-character-from-image:', err?.message || err);
+      res.status(status).json({ error: err?.message || 'Не вдалося описати персонажа за зображенням.', kind });
+    }
+  });
+
+  /**
    * «Проаналізувати фото і згенерувати AI текст книги» — правий клік на
    * зображенні прямо в редакторі розділу (WrappedImageNode.tsx). На відміну
    * від /api/ai/generate-book-text-from-image (вище — окреме вікно на

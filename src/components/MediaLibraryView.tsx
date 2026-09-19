@@ -16,7 +16,8 @@ import {
   Film,
   RefreshCw,
   ArrowUpDown,
-  AlertTriangle
+  AlertTriangle,
+  Video
 } from 'lucide-react';
 import { Book, BookIllustration, AuthUser } from '../types';
 import { downloadImageAs } from '../utils/helpers';
@@ -30,6 +31,16 @@ import {
   type MediaSortMethod,
 } from '../utils/mediaSort';
 import { MediaGenerationPanel } from './MediaGenerationPanel';
+import { DescribeCharacterModal } from './DescribeCharacterModal';
+import { loadInstructionDraft, saveInstructionDraft } from '../utils/instructionDraft';
+import {
+  appendDescriptionToBook,
+  appendDescriptionToInstruction,
+  buildCourseFromDescription,
+  writerCoreFromBook,
+  type DescriptionPayload,
+  type DescriptionTarget,
+} from '../utils/describeCharacterTransfer';
 
 interface MediaLibraryViewProps {
   book: Book;
@@ -139,6 +150,11 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
   // підтвердив. Видалення незворотне (див. діалог нижче), тому сама кнопка
   // кошика нічого не стирає — вона лише відкриває попередження.
   const [pendingDelete, setPendingDelete] = useState<DeletableMedia | null>(null);
+  // Задача #220. Фото, для якого відкрито вікно «Описати ШІ».
+  const [describePhoto, setDescribePhoto] = useState<{ url: string; title: string; prompt?: string } | null>(null);
+  // Задача #220. Фото-запит «зробити стартовим кадром відео»: летить у
+  // панель генерації, а вона, застосувавши його, очищає цей стан.
+  const [videoStartFrameRequest, setVideoStartFrameRequest] = useState<{ id: string; url: string; title: string } | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null);
   const [sections, setSections] = useState<LibrarySection[]>([]);
@@ -476,6 +492,74 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
   };
 
   /**
+   * Задача #220, кнопка 1. Фото — стартовий кадр для генерації відео.
+   *
+   * Сам перехід робить панель генерації (`MediaGenerationPanel`), бо режим,
+   * двигун і кадри живуть там; галерея лише передає їй запит і показує
+   * підказку автору.
+   */
+  const handleUseAsVideoStartFrame = (item: MediaCard) => {
+    setVideoStartFrameRequest({ id: item.id, url: item.url, title: item.title });
+  };
+
+  /**
+   * Задача #220, кнопка 2. Передача опису в обрану ціль.
+   *
+   * Три цілі — три різні сховища, і кожна має свою чесну відмову:
+   *  • книга — нова секція через `onUpdateBook` (та сама дорога, якою книга
+   *    редагується всюди; нічого не пише на сервер напряму);
+   *  • інструкція — чернетка в `localStorage` (конструктор інструкцій не має
+   *    серверного сховища — це задокументовано в `InstructionBuilderView`),
+   *    тому без чернетки ми кажемо прямо, що її треба спершу створити;
+   *  • курс — `POST /api/courses`: окрема сутність із власним сховищем.
+   *
+   * Повертає `true` лише тоді, коли передача справді відбулася: вікно
+   * опису закривається тільки після успіху, щоб автор не втратив текст.
+   */
+  const handleDescribeTransfer = async (target: DescriptionTarget, payload: DescriptionPayload): Promise<boolean> => {
+    try {
+      if (target === 'book') {
+        onUpdateBook(
+          appendDescriptionToBook(book, payload),
+          'Опис персонажа (ШІ)',
+          `Розділ «${payload.title}»${payload.photo ? ' разом з фото' : ''}`
+        );
+        showToast(t('describeCharacter.bookDone', { title: payload.title }));
+        return true;
+      }
+
+      if (target === 'instruction') {
+        const draft = loadInstructionDraft();
+        if (!draft) {
+          showToast(t('describeCharacter.instructionMissing'));
+          return false;
+        }
+        saveInstructionDraft(appendDescriptionToInstruction(draft, payload));
+        showToast(t('describeCharacter.instructionDone'));
+        return true;
+      }
+
+      const res = await fetch('/api/courses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(buildCourseFromDescription(payload)),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast(t('describeCharacter.courseFailed', { reason: String(data?.error || res.status) }));
+        return false;
+      }
+      showToast(t('describeCharacter.courseDone', { title: payload.title }));
+      return true;
+    } catch (err) {
+      console.error('Describe transfer error:', err);
+      showToast(t('describeCharacter.transferFailed'));
+      return false;
+    }
+  };
+
+  /**
    * Завантаження файлу з компʼютера (задача #100).
    *
    * Раніше файл ставав `data:`-URL ВСЕРЕДИНІ книги: альбом жив в IndexedDB
@@ -597,6 +681,8 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
         onGenerated={handleGeneratedImage}
         onVideoGenerated={loadLibrary}
         onToast={showToast}
+        videoStartFrameRequest={videoStartFrameRequest}
+        onVideoStartFrameApplied={() => setVideoStartFrameRequest(null)}
       />
 
       <div className="flex-1 p-4 lg:p-6 overflow-y-auto space-y-6">
@@ -806,7 +892,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
               <h3 className="text-xs font-bold text-white truncate">{item.title}</h3>
               
               {/* Quick Download Buttons */}
-              <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
+              <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/80 flex-wrap">
                 <span className="text-[10px] text-slate-500 uppercase font-mono">
                   {t('mediaLibraryView.exportLabel')}
                 </span>
@@ -821,7 +907,30 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
                     <span>MP4</span>
                   </button>
                 ) : (
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                  {/* Задача #220. Дві дії саме для ФОТО (у відео немає ні
+                      стартового кадру, ні сенсу «описати персонажа»):
+                      взяти кадр для відео та попросити ШІ описати персонажа
+                      так, як він його СПРАВДІ бачить на цьому знімку. */}
+                  <button
+                    onClick={() => handleUseAsVideoStartFrame(item)}
+                    data-use-start-frame={item.id}
+                    className="px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-fuchsia-300 text-[10px] font-bold border border-slate-700 flex items-center gap-1 transition-all"
+                    title={t('describeCharacter.generateVideoTooltip')}
+                  >
+                    <Video className="w-2.5 h-2.5" />
+                    <span>{t('describeCharacter.generateVideoBtn')}</span>
+                  </button>
+                  <button
+                    onClick={() => setDescribePhoto({ url: item.url, title: item.title, prompt: item.prompt })}
+                    data-describe-ai={item.id}
+                    className="px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-cyan-300 text-[10px] font-bold border border-slate-700 flex items-center gap-1 transition-all"
+                    title={t('describeCharacter.describeTooltip')}
+                  >
+                    <Sparkles className="w-2.5 h-2.5" />
+                    <span>{t('describeCharacter.describeBtn')}</span>
+                  </button>
+                  <span className="w-px h-4 bg-slate-800" aria-hidden="true" />
                   <button
                     onClick={() => handleDownload(item.url, item.title, 'png')}
                     disabled={isDownloading}
@@ -933,6 +1042,19 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
             </div>
           </div>
         </div>
+      )}
+
+      {/* Задача #220. «Описати ШІ» — окреме вікно поверх галереї: опис
+          персонажа, якого модель справді бачить на фото, і передача тексту
+          (за бажанням — разом із фото) у книгу, інструкцію або курс. */}
+      {describePhoto && (
+        <DescribeCharacterModal
+          photo={describePhoto}
+          core={writerCoreFromBook(book)}
+          isRegistered={isRegistered}
+          onClose={() => setDescribePhoto(null)}
+          onTransfer={handleDescribeTransfer}
+        />
       )}
 
       {/* High-res Modal */}
