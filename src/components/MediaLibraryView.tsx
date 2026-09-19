@@ -14,12 +14,20 @@ import {
   Layers,
   HardDrive,
   Film,
-  RefreshCw
+  RefreshCw,
+  ArrowUpDown
 } from 'lucide-react';
 import { Book, BookIllustration, AuthUser } from '../types';
 import { downloadImageAs } from '../utils/helpers';
 import { useLanguage } from '../i18n/LanguageContext';
-import { compareByImageFormat, detectImageFormat, IMAGE_FORMAT_LABEL } from '../utils/imageFormat';
+import { detectImageFormat, IMAGE_FORMAT_LABEL } from '../utils/imageFormat';
+import {
+  DEFAULT_MEDIA_SORT,
+  MEDIA_SORT_METHODS,
+  formatMediaDate,
+  mediaComparator,
+  type MediaSortMethod,
+} from '../utils/mediaSort';
 import { MediaGenerationPanel } from './MediaGenerationPanel';
 
 interface MediaLibraryViewProps {
@@ -51,6 +59,8 @@ interface ServerAsset {
   filename: string;
   sizeBytes: number;
   prompt?: string | null;
+  /** ISO-дата завантаження — саме за нею працює порядок «від першої генерації». */
+  createdAt?: string;
 }
 
 /**
@@ -68,6 +78,15 @@ type MediaCard = {
   /** Книга-розділ цього файлу; `''` — файли без книги. */
   sectionId: string;
   sectionTitle: string;
+  /**
+   * Коли файл зʼявився. Серверна медіатека знає це точно; посилання,
+   * вбудоване просто в книгу, — лише тоді, коли поруч лежить такий самий
+   * файл серверної медіатеки (шукаємо за URL) або коли дата є в самій
+   * ілюстрації. Інакше — `undefined`, і картка піде в кінець переліку.
+   */
+  createdAt?: string;
+  /** Вага файлу в байтах; у посилань із книги її немає. */
+  sizeBytes?: number;
 };
 
 const MB = 1024 * 1024;
@@ -76,8 +95,23 @@ const MB = 1024 * 1024;
 const NO_BOOK_SECTION = '';
 const ALL_SECTIONS = '__all__';
 
+/**
+ * Ключі підписів для списку сортування. Окремою таблицею, а не зібраним
+ * на ходу рядком: так `t()` дістає справжні ключі, а не «схожі» на них.
+ */
+const SORT_LABEL_KEY: Record<MediaSortMethod, string> = {
+  generationAsc: 'mediaLibraryView.sortGenerationAsc',
+  generationDesc: 'mediaLibraryView.sortGenerationDesc',
+  format: 'mediaLibraryView.sortFormat',
+  title: 'mediaLibraryView.sortTitle',
+  size: 'mediaLibraryView.sortSize',
+};
+
 export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpdateBook, authUser }) => {
   const [filter, setFilter] = useState<'all' | 'portraits' | 'illustrations' | 'covers' | 'videos'>('all');
+  // Спосіб сортування галереї — спільний для фото й відео (задача про відео:
+  // усі вони MP4, тож за форматом їх не розрізнити, а порядок появи — можна).
+  const [sort, setSort] = useState<MediaSortMethod>(DEFAULT_MEDIA_SORT);
   const [selectedMedia, setSelectedMedia] = useState<{ id: string; url: string; title: string; type: string; prompt?: string; source?: string } | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -93,7 +127,6 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
   const [selectedSectionId, setSelectedSectionId] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { t } = useLanguage();
-
   const isRegistered = !!authUser && !authUser.isGuest;
 
   /**
@@ -173,6 +206,18 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
   //    «зникли картинки».
   // 2) Файли серверної медіатеки — усе, що завантажено для будь-якої книги;
   //    саме вони й розкладаються по розділах через `book_id`.
+  //
+  // Дати створення книга не зберігає — але для ЗАВАНТАЖЕНИХ файлів вона є
+  // на сервері (`MediaAsset.createdAt`), і той самий файл у книзі тримає
+  // рівно той самий URL (`/api/media/file?id=…`). Тому картку з книги можна
+  // датувати, нічого не вигадуючи: шукаємо її URL серед серверних файлів.
+  const assetCreatedAtByUrl = new Map<string, string>();
+  for (const asset of serverAssets) {
+    if (asset.createdAt && !assetCreatedAtByUrl.has(asset.url)) {
+      assetCreatedAtByUrl.set(asset.url, asset.createdAt);
+    }
+  }
+
   const objectMedia: MediaCard[] = [];
 
   if (book.coverConfig.frontArtUrl) {
@@ -183,6 +228,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
       type: 'covers',
       sectionId: book.id,
       sectionTitle: book.title,
+      createdAt: assetCreatedAtByUrl.get(book.coverConfig.frontArtUrl),
     });
   }
 
@@ -195,6 +241,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
         type: 'portraits',
         sectionId: book.id,
         sectionTitle: book.title,
+        createdAt: assetCreatedAtByUrl.get(char.avatarUrl),
       });
     }
   });
@@ -209,6 +256,9 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
       source: ill.source,
       sectionId: book.id,
       sectionTitle: book.title,
+      // Власна дата ілюстрації точніша за пошук за URL — вона про генерацію,
+      // а не про завантаження файлу в сховище.
+      createdAt: ill.createdAt || assetCreatedAtByUrl.get(ill.url),
     });
   });
 
@@ -229,18 +279,21 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
         source: 'upload',
         sectionId,
         sectionTitle: sectionTitleById.get(sectionId) || t('mediaLibraryView.sectionNoBook'),
+        createdAt: asset.createdAt,
+        sizeBytes: asset.sizeBytes,
       } satisfies MediaCard;
     });
 
   const allMedia: MediaCard[] = [...objectMedia, ...serverCards];
 
-  // Сортуємо за форматом файлу (JPG → PNG → WEBP → …), як просив автор.
-  // Той самий компаратор використовує вікно вставки зображення в текст,
-  // тож порядок у галереї та у вставці однаковий.
+  // Порядок обирає автор (`mediaSort.ts`): типово — «від першої генерації
+  // до останньої», бо саме хронологія пояснює, який кадр за яким ішов.
+  // Файли без дати компаратор ставить у кінець переліку — і це єдина
+  // чесна відповідь, коли дати немає зовсім.
   const visibleMedia = allMedia
     .filter((m) => selectedSectionId === ALL_SECTIONS || m.sectionId === selectedSectionId)
     .filter((m) => filter === 'all' || m.type === filter)
-    .sort(compareByImageFormat);
+    .sort(mediaComparator(sort));
 
   // У режимі «Усі книги» картки групуються під заголовком свого розділу —
   // саме те, що дає змогу бачити файли різних книг окремо в одному списку.
@@ -603,6 +656,28 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
               </button>
             ))}
           </div>
+
+          {/* Сортування — одне на фото й відео: і ті, і ті лежать в одному
+              переліку, а «Відео» окремою вкладкою лишається фільтром. */}
+          <div
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-800"
+            data-tour="media__4"
+            title={t('mediaLibraryView.sortLabel')}
+          >
+            <ArrowUpDown className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value as MediaSortMethod)}
+              aria-label={t('mediaLibraryView.sortLabel')}
+              className="bg-transparent text-xs text-slate-200 focus:outline-hidden cursor-pointer max-w-[190px]"
+            >
+              {MEDIA_SORT_METHODS.map((method) => (
+                <option key={method} value={method} className="bg-slate-950">
+                  {t(SORT_LABEL_KEY[method])}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -653,6 +728,13 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
                 {item.type === 'videos' && <Film className="w-2.5 h-2.5" />}
                 {item.type}
               </div>
+              {/* Дата появи файлу — вона ж і ключ сортування. Немає дати —
+                  немає підпису: прочерк на кожній старій ілюстрації був би шумом. */}
+              {formatMediaDate(item.createdAt) && (
+                <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded-full text-[10px] font-mono bg-black/60 backdrop-blur-md text-slate-300">
+                  {formatMediaDate(item.createdAt)}
+                </div>
+              )}
               {/* Задача #217. Кошик — на самій мініатюрі, а не в рядку
                   завантаження нижче (там уже тісно від PNG/JPG/MP4-кнопок).
                   Клік по ньому не має відкривати лайтбокс — stopPropagation. */}
