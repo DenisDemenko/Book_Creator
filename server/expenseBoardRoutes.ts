@@ -282,6 +282,63 @@ function newExpenseId(): string {
 }
 
 export function registerExpenseBoardRoutes(app: Express): void {
+  // Статичні маршрути /railway-settings реєструються ДО параметричного
+  // GET /:period — інакше Express зіставляє 'railway-settings' як
+  // значення :period (перший зареєстрований шаблон, що збігається,
+  // перемагає), і запит падає з «Некоректний період» (виявлено живою
+  // перевіркою в проді одразу після деплою #211).
+  app.get('/api/admin/expense-board/railway-settings', requireAdmin, async (_req, res) => {
+    const s = await readRailwaySettings();
+    res.json({
+      configured: !!s.encryptedToken,
+      tokenFingerprint: s.tokenFingerprint || null,
+      volumeId: s.volumeId || null,
+      lastCurrentMb: s.lastCurrentMb ?? null,
+      lastSizeMb: s.lastSizeMb ?? null,
+      lastSyncedAt: s.lastSyncedAt || null,
+    });
+  });
+
+  app.put('/api/admin/expense-board/railway-settings', requireAdmin, async (req, res) => {
+    const { token, volumeId } = req.body || {};
+    const s = await readRailwaySettings();
+    if (typeof token === 'string' && token.trim()) {
+      if (!isApiKeyCryptoConfigured()) {
+        return res.status(500).json({ error: 'Шифрування ключів не налаштоване на сервері (USER_API_KEY_SECRET).' });
+      }
+      s.encryptedToken = encryptApiKey(token);
+      s.tokenFingerprint = apiKeyFingerprint(token);
+    }
+    if (typeof volumeId === 'string') {
+      s.volumeId = volumeId.trim().slice(0, 200);
+    }
+    await writeRailwaySettings(s);
+    res.json({ ok: true });
+  });
+
+  app.post('/api/admin/expense-board/railway-settings/sync', requireAdmin, async (_req, res) => {
+    const s = await readRailwaySettings();
+    if (!s.encryptedToken || !s.volumeId) {
+      return res.status(400).json({ error: 'Спершу вкажіть токен доступу Railway та id тому в налаштуваннях.' });
+    }
+    let token: string;
+    try {
+      token = decryptApiKey(s.encryptedToken);
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Не вдалося розшифрувати збережений токен.' });
+    }
+    try {
+      const { currentMb, sizeMb } = await fetchRailwayVolumeSize(token, s.volumeId);
+      s.lastCurrentMb = currentMb;
+      s.lastSizeMb = sizeMb;
+      s.lastSyncedAt = new Date().toISOString();
+      await writeRailwaySettings(s);
+      res.json({ ok: true, lastCurrentMb: currentMb, lastSizeMb: sizeMb, lastSyncedAt: s.lastSyncedAt });
+    } catch (err: any) {
+      res.status(502).json({ error: err?.message || 'Не вдалося отримати дані з Railway API.' });
+    }
+  });
+
   app.get('/api/admin/expense-board/:period', requireAdmin, async (req, res) => {
     const period = String(req.params.period || '');
     if (!isValidPeriod(period)) {
@@ -403,57 +460,5 @@ export function registerExpenseBoardRoutes(app: Express): void {
     entry.updatedAt = new Date().toISOString();
     await writeBoard(period, board);
     res.json(await computeSummary(period, board));
-  });
-
-  app.get('/api/admin/expense-board/railway-settings', requireAdmin, async (_req, res) => {
-    const s = await readRailwaySettings();
-    res.json({
-      configured: !!s.encryptedToken,
-      tokenFingerprint: s.tokenFingerprint || null,
-      volumeId: s.volumeId || null,
-      lastCurrentMb: s.lastCurrentMb ?? null,
-      lastSizeMb: s.lastSizeMb ?? null,
-      lastSyncedAt: s.lastSyncedAt || null,
-    });
-  });
-
-  app.put('/api/admin/expense-board/railway-settings', requireAdmin, async (req, res) => {
-    const { token, volumeId } = req.body || {};
-    const s = await readRailwaySettings();
-    if (typeof token === 'string' && token.trim()) {
-      if (!isApiKeyCryptoConfigured()) {
-        return res.status(500).json({ error: 'Шифрування ключів не налаштоване на сервері (USER_API_KEY_SECRET).' });
-      }
-      s.encryptedToken = encryptApiKey(token);
-      s.tokenFingerprint = apiKeyFingerprint(token);
-    }
-    if (typeof volumeId === 'string') {
-      s.volumeId = volumeId.trim().slice(0, 200);
-    }
-    await writeRailwaySettings(s);
-    res.json({ ok: true });
-  });
-
-  app.post('/api/admin/expense-board/railway-settings/sync', requireAdmin, async (_req, res) => {
-    const s = await readRailwaySettings();
-    if (!s.encryptedToken || !s.volumeId) {
-      return res.status(400).json({ error: 'Спершу вкажіть токен доступу Railway та id тому в налаштуваннях.' });
-    }
-    let token: string;
-    try {
-      token = decryptApiKey(s.encryptedToken);
-    } catch (err: any) {
-      return res.status(500).json({ error: err?.message || 'Не вдалося розшифрувати збережений токен.' });
-    }
-    try {
-      const { currentMb, sizeMb } = await fetchRailwayVolumeSize(token, s.volumeId);
-      s.lastCurrentMb = currentMb;
-      s.lastSizeMb = sizeMb;
-      s.lastSyncedAt = new Date().toISOString();
-      await writeRailwaySettings(s);
-      res.json({ ok: true, lastCurrentMb: currentMb, lastSizeMb: sizeMb, lastSyncedAt: s.lastSyncedAt });
-    } catch (err: any) {
-      res.status(502).json({ error: err?.message || 'Не вдалося отримати дані з Railway API.' });
-    }
   });
 }
