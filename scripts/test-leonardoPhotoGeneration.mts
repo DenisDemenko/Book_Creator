@@ -376,5 +376,31 @@ console.log('\nЗадача #206 — HTTP 200 із GraphQL-конвертом п
   }
 }
 
+console.log('\nЗадача #207 — РЕАЛЬНА форма v2 submit-відповіді ({generate:{generationId,...}}, Seedream 5.0 Pro, 19.09.2026 — після виправлення prompt_enhance у #206) розпізнається:');
+{
+  const realFetch = global.fetch;
+  const handlers = [
+    () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ generate: { apiCreditCost: null, generationId: '1f1b3eff-9205-6f40-82e8-76bc971e48db', cost: { amount: '0.1121', unit: 'DOLLARS' } } }),
+    }),
+    () => ({ ok: true, status: 200, json: async () => ({ generations_by_pk: { status: 'COMPLETE', generated_images: [{ url: 'https://example.com/real.png' }] } }) }),
+    () => ({ ok: true, status: 200, headers: { get: () => 'image/png' }, arrayBuffer: async () => Buffer.from(PNG_B64, 'base64').buffer }),
+  ];
+  const { fn, seen } = mockSequence(handlers);
+  global.fetch = fn;
+  try {
+    const result = await generateLeonardoV2Photo({ engineId: 'leonardo-seedream-5-pro', apiKey: 'test-key', prompt: 'x', aspectRatio: '1:1' });
+    t('повернув буфер (розпізнав generate.generationId)', result.buffer.length > 0);
+    const pollCall = seen.find((c) => c.url.includes('/1f1b3eff-9205-6f40-82e8-76bc971e48db'));
+    t('опитування пішло за id саме з generate.generationId', !!pollCall, JSON.stringify(seen.map((c) => c.url)));
+  } catch (e: any) {
+    t('НЕ мав кинути помилку на реальній відповіді', false, e.message);
+  } finally {
+    global.fetch = realFetch;
+  }
+}
+
 console.log(`\nРезультат: ${pass} пройдено, ${fail} провалено`);
 process.exit(fail ? 1 : 0);

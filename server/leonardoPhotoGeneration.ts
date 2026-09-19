@@ -365,14 +365,33 @@ function extractGenerationRecord(json: unknown): (Record<string, unknown> & { st
  */
 function extractSubmittedGenerationId(json: unknown): string | undefined {
   const root = json as
-    | { generations_by_pk?: { id?: string; generationId?: string }; id?: string; generationId?: string; sdGenerationJob?: { generationId?: string } }
+    | {
+        generations_by_pk?: { id?: string; generationId?: string };
+        id?: string;
+        generationId?: string;
+        sdGenerationJob?: { generationId?: string };
+        /**
+         * Задача #207. РЕАЛЬНА відповідь Leonardo v2 submit (Seedream 5.0
+         * Pro, після виправлення prompt_enhance у #206):
+         * `{generate:{apiCreditCost, generationId, cost:{amount, unit}}}`
+         * — жоден із 5 попередньо вгаданих шляхів (усі впроваджені ще до
+         * першого живого виклику, #203/#204) цього не передбачав. `cost`
+         * тут — те, чого бракувало для калькулятора вартості (#203,
+         * свідомо не реалізований через відсутність живих даних) —
+         * лишаємо нечіпаним зараз, лише фіксуємо форму в коментарі на
+         * майбутнє.
+         */
+        generate?: { generationId?: string; id?: string; cost?: { amount?: string; unit?: string } };
+      }
     | null;
   return (
     root?.generations_by_pk?.id ||
     root?.generations_by_pk?.generationId ||
     root?.id ||
     root?.generationId ||
-    root?.sdGenerationJob?.generationId
+    root?.sdGenerationJob?.generationId ||
+    root?.generate?.generationId ||
+    root?.generate?.id
   );
 }
 

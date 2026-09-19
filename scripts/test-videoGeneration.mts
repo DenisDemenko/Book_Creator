@@ -676,5 +676,38 @@ console.log('\nЗадача #206 — listVideoEngines(): supportsStartFrame=true
   t('v2-двигуни: supportsEndFrame=true', v2Ids.every((id) => list.find((e) => e.id === id)?.supportsEndFrame === true));
 }
 
+console.log('\nЗадача #207 — превентивно: якщо відео-submit поверне ту саму {generate:{generationId}} форму, що й реальна фото-відповідь (той самий /v2/generations шлюз), генерація не впаде:');
+{
+  const realFetch = global.fetch;
+  const prevKey = leonardoConfig.apiKey;
+  leonardoConfig.apiKey = 'test-leonardo-key';
+  let call = 0;
+  // @ts-expect-error підміна глобального fetch лише на час цього блоку тесту
+  global.fetch = async (url: string) => {
+    call++;
+    if (call === 1) {
+      return { ok: true, status: 200, json: async () => ({ generate: { generationId: 'v2-real-shape-id' } }) };
+    }
+    if (call === 2) {
+      return { ok: true, status: 200, json: async () => ({ status: 'COMPLETE', generated_videos: [{ url: 'https://example.com/generate-wrapper.mp4' }] }) };
+    }
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: (k: string) => (k.toLowerCase() === 'content-type' ? 'video/mp4' : null) },
+      arrayBuffer: async () => MP4_BYTES.buffer,
+    };
+  };
+  try {
+    const result = await generateVideo({ prompt: 'x', engine: 'leonardo-seedance-2-5' });
+    t('повернув буфер (розпізнав generate.generationId)', result.buffer.length > 0);
+  } catch (e: any) {
+    t('НЕ мав кинути помилку на {generate:{generationId}}', false, e.message);
+  } finally {
+    global.fetch = realFetch;
+    leonardoConfig.apiKey = prevKey;
+  }
+}
+
 console.log(`\nРезультат: ${pass} пройдено, ${fail} провалено`);
 process.exit(fail ? 1 : 0);

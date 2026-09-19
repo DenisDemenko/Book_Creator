@@ -560,7 +560,20 @@ async function submitPollAndDownload(
   }
 
   const json = submitJson as
-    | { sdGenerationJob?: { generationId?: string }; generationId?: string; id?: string; error?: string }
+    | {
+        sdGenerationJob?: { generationId?: string };
+        generationId?: string;
+        id?: string;
+        error?: string;
+        /**
+         * Задача #207. РЕАЛЬНА форма v2 submit-відповіді (фото, Seedream
+         * 5.0 Pro): `{generate:{generationId, ...}}` — жоден із раніше
+         * вгаданих шляхів цього не передбачав. Відео йде на той самий
+         * `/v2/generations` шлюз, тож додано превентивно, за фактом
+         * фото-збою, а не за власним підтвердженим викликом відео.
+         */
+        generate?: { generationId?: string; id?: string };
+      }
     | null;
 
   if (!submitRes.ok) {
@@ -573,7 +586,7 @@ async function submitPollAndDownload(
   // голий `id` (типовий для REST-створення ресурсу). Якщо жоден не
   // спрацює — лог сирої відповіді (задача #206, за прикладом #204), а не
   // мовчазне «empty»: наступний реальний збій сам покаже точну форму.
-  const generationId = json?.sdGenerationJob?.generationId || json?.generationId || json?.id;
+  const generationId = json?.sdGenerationJob?.generationId || json?.generationId || json?.id || json?.generate?.generationId || json?.generate?.id;
   if (!generationId) {
     let rawSnippet = '';
     try {
