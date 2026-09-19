@@ -1803,11 +1803,28 @@ export default function App() {
         </div>
       )}
 
-      {/* Помилка AI-запиту — видима, а не в консолі */}
+      {/* Помилка AI-запиту — видима, а не в консолі.
+          Задача #208 (реальний баг, підтверджений живою сесією): раніше
+          банер був fixed bottom-6 по центру ВСЬОГО viewport
+          (left-1/2 -translate-x-1/2, w-[calc(100%-3rem)]) — на відміну від
+          УСІХ інших fixed-тостів у цьому файлі (saveToast, syncToast,
+          "відкрито в іншій сесії" — усі bottom-6 right-6/left-6,
+          обмеженої ширини). Широкий центрований банер геометрично
+          перекривав бічну панель «Генерація медіа» (список двигунів,
+          overflow-y-auto, z-index:auto) і не мав pointer-events:none —
+          клік по двигуну під банером «губився» в самому банері. Це і є
+          причина скарги власника «важко переключатися між двигунами, не
+          завжди спрацьовує клік мишкою» (#206) — знайдено й підтверджено
+          тепер, живою сесією, а не здогадкою з коду.
+          Bottom-right теж не підходить: там ПОСТІЙНО живе DraggableSun
+          (fixed bottom-4 right-4 z-50), що вміє розгортатись у високу
+          панель — новий банер там колізував би з НИМ. top-24 right-6 —
+          вільний кут: нижче шапки (--app-header-h: 86px) і без інших
+          fixed-елементів. */}
       {aiError && (
         <div
           id="ai-error-banner"
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 max-w-xl w-[calc(100%-3rem)] p-3.5 rounded-xl bg-rose-950/95 border border-rose-500/50 backdrop-blur-xl shadow-2xl flex items-start gap-3 animate-in fade-in slide-in-from-bottom-2"
+          className="fixed top-24 right-6 z-50 max-w-sm p-3.5 rounded-xl bg-rose-950/95 border border-rose-500/50 backdrop-blur-xl shadow-2xl flex items-start gap-3 animate-in fade-in slide-in-from-top-2"
           role="alert"
         >
           <AlertTriangle className="w-4 h-4 text-rose-300 shrink-0 mt-0.5" />
