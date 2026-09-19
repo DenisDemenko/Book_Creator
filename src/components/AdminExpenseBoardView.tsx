@@ -159,21 +159,33 @@ export const AdminExpenseBoardView: React.FC = () => {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    try {
-      const [b, r] = await Promise.all([fetchBoard(period), fetchRailwaySettings()]);
+    // Дві незалежні спроби, а не Promise.all: борд і налаштування Railway —
+    // окремі секції екрана, і збій в одній (наприклад, тимчасова проблема з
+    // /railway-settings) не має гасити відображення іншої, робочої секції.
+    const results = await Promise.allSettled([fetchBoard(period), fetchRailwaySettings()]);
+    const [boardResult, railwayResult] = results;
+
+    if (boardResult.status === 'fulfilled') {
+      const b = boardResult.value;
       setBoard(b);
-      setRailway(r);
-      setRailwayVolumeId(r.volumeId || '');
       setMixDrafts({
         goods: { planned: String(b.salesMix.goods.plannedUnits), actual: b.salesMix.goods.actualUnits === null ? '' : String(b.salesMix.goods.actualUnits) },
         books: { planned: String(b.salesMix.books.plannedUnits), actual: b.salesMix.books.actualUnits === null ? '' : String(b.salesMix.books.actualUnits) },
         trainings: { planned: String(b.salesMix.trainings.plannedUnits), actual: b.salesMix.trainings.actualUnits === null ? '' : String(b.salesMix.trainings.actualUnits) },
       });
-    } catch (e: any) {
-      setError(e?.message || 'Помилка завантаження.');
-    } finally {
-      setLoading(false);
+    } else {
+      setError((boardResult.reason as any)?.message || 'Помилка завантаження борду витрат.');
     }
+
+    if (railwayResult.status === 'fulfilled') {
+      const r = railwayResult.value;
+      setRailway(r);
+      setRailwayVolumeId(r.volumeId || '');
+    } else {
+      console.error('Failed to load Railway settings', railwayResult.reason);
+    }
+
+    setLoading(false);
   }, [period]);
 
   useEffect(() => {
