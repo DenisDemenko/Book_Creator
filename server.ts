@@ -3804,15 +3804,61 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
     }
   });
 
+  // Задача #215, продакшн: живий збій показав, що ЦЕЙ маршрут мав той
+  // самий клас проблеми, що й відео до фіксу #210 — один довгий
+  // синхронний HTTP-запит на весь час очікування Leonardo (тепер до
+  // ~5.8 хв для найважчих моделей, POLL_MAX_ATTEMPTS у
+  // server/leonardoPhotoGeneration.ts). Seedream 5.0 Pro (найважча з 6
+  // v2-моделей: дефолт 2K замість 1K + додаткова обробка референсного
+  // зображення) — 6 із 7 реальних спроб впадали саме тут: або наш
+  // власний 2-хвилинний бюджет опитування вичерпувався, або проксі
+  // хостингу обривав з'єднання ще раніше (та сама причина, що й
+  // «ROUTER_EXTERNAL_TARGET_ERROR» у #210), і до браузера долітала
+  // гола «Помилка на сервері» без жодної деталі. Той самий фікс, що й
+  // для відео: POST повертає jobId одразу, а фонова задача (без await
+  // у відповіді) робить власне очікування; фронтенд опитує статус
+  // короткими запитами (MediaGenerationPanel.tsx, pollMediaArtJob) —
+  // жоден HTTP-запит більше не тримається відкритим довше миті.
+  interface MediaArtJobRecord {
+    status: 'pending' | 'complete' | 'error';
+    result?: {
+      imageUrl: string;
+      promptUsed: string;
+      negativePrompt?: string;
+      modelUsed: string;
+      modelKey: string;
+      aspectRatio: string;
+      fileSize: string;
+      timestamp: string;
+    };
+    error?: { message: string; kind: string; status: number };
+    createdAt: number;
+  }
+  const mediaArtJobs = new Map<string, MediaArtJobRecord>();
+  // Той самий запас, що й у відео (VIDEO_JOB_TTL_MS) — ~2х над найдовшим
+  // реальним опитуванням (POLL_MAX_ATTEMPTS × POLL_INTERVAL_MS ≈ 5.8 хв).
+  const MEDIA_ART_JOB_TTL_MS = 20 * 60 * 1000;
+  const pruneMediaArtJobs = () => {
+    const now = Date.now();
+    for (const [id, job] of mediaArtJobs) {
+      if (now - job.createdAt > MEDIA_ART_JOB_TTL_MS) mediaArtJobs.delete(id);
+    }
+  };
+
   /**
    * Пряма генерація для медіатеки: жодного авто-складання промпту зі
    * сцени чи книги (як у /generate-illustration-art чи /generate-cover-art) —
    * автор сам пише промпт і сам обирає всі параметри в панелі зліва від
-   * галереї. Тому й ендпоінт «тонкий»: валідація непорожнього промпту +
-   * прямий виклик generateImageAndLog(), без жодного текстового ШІ-кроку
-   * перед картинкою.
+   * галереї.
+   *
+   * Синхронна частина тут — лише швидкі кроки (валідація промпту,
+   * збереження завантажених референсів на диск локально) — сама
+   * генерація (generateImageAndLog, потенційно кілька хвилин для
+   * важких Leonardo v2-моделей) іде у фоні, БЕЗ await у відповіді —
+   * див. коментар над MediaArtJobRecord вище (задача #215).
    */
   app.post('/api/ai/generate-media-art', requirePermission('canGenerateImages'), requireImageQuota(), async (req, res) => {
+    pruneMediaArtJobs();
     try {
       const {
         prompt,
@@ -3885,7 +3931,13 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
         referenceImageUrls = urls;
       }
 
-      const generated = await generateImageAndLog({
+      const jobId = `imgjob_${randomUUID()}`;
+      mediaArtJobs.set(jobId, { status: 'pending', createdAt: Date.now() });
+
+      // СВІДОМО без await — той самий фікс, що й у /api/ai/generate-video
+      // (задача #210): запит повертається негайно, очікування Leonardo
+      // (могло тривати довше за тайм-аут проксі) триває у фоні процесу.
+      generateImageAndLog({
         prompt: finalPrompt,
         engine,
         aspectRatio,
@@ -3898,27 +3950,65 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
         req,
         label: `Медіатека: ${finalPrompt.slice(0, 60)}`,
         bookId,
-      });
+      })
+        .then((generated) => {
+          mediaArtJobs.set(jobId, {
+            status: 'complete',
+            createdAt: mediaArtJobs.get(jobId)?.createdAt ?? Date.now(),
+            result: {
+              imageUrl: generated.url,
+              promptUsed: finalPrompt,
+              negativePrompt: negativePrompt || undefined,
+              modelUsed: generated.engineLabel,
+              modelKey: generated.engineId,
+              aspectRatio: generated.aspectRatio,
+              fileSize: `${Math.round(generated.bytes / 1024)} КБ`,
+              timestamp: new Date().toISOString(),
+            },
+          });
+        })
+        .catch((err: any) => {
+          const status = err?.kind === 'no_key' ? 503 : err?.kind === 'quota' ? 429 : 500;
+          if (err?.cause) console.error('  причина:', (err.cause as Error)?.message || err.cause);
+          console.error('Error in /api/ai/generate-media-art (фонова задача):', err?.message || err);
+          mediaArtJobs.set(jobId, {
+            status: 'error',
+            createdAt: mediaArtJobs.get(jobId)?.createdAt ?? Date.now(),
+            error: { message: err?.message || 'Помилка генерації зображення', kind: err?.kind || 'unknown', status },
+          });
+        });
 
-      res.json({
-        imageUrl: generated.url,
-        promptUsed: finalPrompt,
-        negativePrompt: negativePrompt || undefined,
-        modelUsed: generated.engineLabel,
-        modelKey: generated.engineId,
-        aspectRatio: generated.aspectRatio,
-        fileSize: `${Math.round(generated.bytes / 1024)} КБ`,
-        timestamp: new Date().toISOString(),
-      });
+      res.status(202).json({ jobId });
     } catch (err: any) {
+      // Синхронна частина (валідація тіла запиту, референси) — сюди
+      // потрапляють лише збої ДО створення задачі, як і в /generate-video.
       const status = err?.kind === 'no_key' ? 503 : err?.kind === 'quota' ? 429 : 500;
-      if (err?.cause) console.error('  причина:', (err.cause as Error)?.message || err.cause);
-      console.error('Error in /api/ai/generate-media-art:', err?.message || err);
+      console.error('Error in /api/ai/generate-media-art (синхронна частина):', err?.message || err);
       res.status(status).json({
         error: err?.message || 'Помилка генерації зображення',
         kind: err?.kind || 'unknown',
       });
     }
+  });
+
+  // Задача #215: статус фонової задачі генерації фото медіатеки —
+  // короткий, миттєвий запит; той самий контракт, що й
+  // /api/ai/generate-video/status/:jobId вище.
+  app.get('/api/ai/generate-media-art/status/:jobId', requirePermission('canGenerateImages'), (req, res) => {
+    pruneMediaArtJobs();
+    const job = mediaArtJobs.get(req.params.jobId);
+    if (!job) {
+      return res.status(404).json({ error: 'Завдання генерації зображення не знайдено або застаріло.', kind: 'unknown' });
+    }
+    const elapsedSec = Math.round((Date.now() - job.createdAt) / 1000);
+    if (job.status === 'pending') {
+      return res.json({ status: 'pending', elapsedSec });
+    }
+    if (job.status === 'error') {
+      const { message, kind, status } = job.error!;
+      return res.status(status).json({ status: 'error', error: message, kind, elapsedSec });
+    }
+    res.json({ status: 'complete', elapsedSec, ...job.result });
   });
 
   /**
@@ -4103,14 +4193,20 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
     if (!job) {
       return res.status(404).json({ error: 'Завдання генерації відео не знайдено або застаріло.', kind: 'unknown' });
     }
+    // Задача #215: скільки секунд триває задача — Leonardo.Ai не віддає
+    // жодного проміжного прогресу (лише PENDING/COMPLETE/FAILED, без
+    // відсотків чи кроків — перевірено документацією й живими відповідями
+    // під час #206-#210), тож це єдиний чесний індикатор «щось відбувається»,
+    // який фронтенд може показати замість голого нескінченного спінера.
+    const elapsedSec = Math.round((Date.now() - job.createdAt) / 1000);
     if (job.status === 'pending') {
-      return res.json({ status: 'pending' });
+      return res.json({ status: 'pending', elapsedSec });
     }
     if (job.status === 'error') {
       const { message, kind, status } = job.error!;
-      return res.status(status).json({ status: 'error', error: message, kind });
+      return res.status(status).json({ status: 'error', error: message, kind, elapsedSec });
     }
-    res.json({ status: 'complete', ...job.result });
+    res.json({ status: 'complete', elapsedSec, ...job.result });
   });
 
   // -----------------------------------------------------------------------

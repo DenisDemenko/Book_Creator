@@ -254,7 +254,16 @@ function sleep(ms: number): Promise<void> {
 }
 
 const POLL_INTERVAL_MS = 2500;
-const POLL_MAX_ATTEMPTS = 48; // ~2 хвилини, той самий запас, що й у v1-фото та v2-відео.
+// Задача #215, продакшн: живі збої показали, що 2 хвилини (48×2.5с) НЕ
+// вистачає для найважчої моделі цієї шістки — Seedream 5.0 Pro (2K-дефолт
+// + референсне зображення додає своєї обробки на боці Leonardo) — 6 із 7
+// реальних спроб впали саме тут, з «не встиг завершити генерацію за
+// відведений час». Решта п'ять моделей (легші/1K) укладались у 2 хв.
+// Піднято до того самого запасу, що вже підтверджений для відео
+// (server/videoGeneration.ts: LEONARDO_VIDEO_POLL_MAX_ATTEMPTS ×
+// LEONARDO_VIDEO_POLL_INTERVAL_MS ≈ 6 хв) — той самий клас моделей
+// (Leonardo v2), той самий порядок часу очікування.
+const POLL_MAX_ATTEMPTS = 140; // ~5.8 хв
 
 function extFromContentType(ct: string | null): 'png' | 'jpg' | 'jpeg' | 'webp' {
   const t = (ct || '').toLowerCase();

@@ -47,6 +47,10 @@ export const mediaGenerationPanel = {
     formatJpeg: 'JPEG',
     generateBtn: 'Згенерувати',
     generatingBtn: 'Генерую…',
+    // Задача #215: Leonardo.Ai не віддає відсоток чи крок прогресу (лише
+    // pending/complete/failed) — єдине чесне, що можна показати замість
+    // голого спінера, це скільки часу вже минуло.
+    generatingElapsed: 'Минуло {seconds}с. Leonardo.Ai не показує точний прогрес — лише «в процесі». Важкі моделі (Seedream 5.0 Pro, відео) можуть тривати кілька хвилин.',
     resultAddedLabel: 'Додано в медіатеку',
     resultReadyHeading: 'Готово до генерації',
     resultReadyDesc: 'Напишіть промпт зліва — зображення зʼявиться тут і одразу потрапить у галерею праворуч.',
@@ -118,6 +122,7 @@ export const mediaGenerationPanel = {
     formatJpeg: 'JPEG',
     generateBtn: 'Generate',
     generatingBtn: 'Generating…',
+    generatingElapsed: '{seconds}s elapsed. Leonardo.Ai does not report exact progress — only "in progress". Heavier models (Seedream 5.0 Pro, video) can take a few minutes.',
     resultAddedLabel: 'Added to the media library',
     resultReadyHeading: 'Ready to generate',
     resultReadyDesc: 'Write a prompt on the left — the image will appear here and land in the gallery on the right.',

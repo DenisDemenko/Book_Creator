@@ -130,6 +130,11 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
   const [quality, setQuality] = useState<'' | 'minimal' | 'high'>('');
   const [outputFormat, setOutputFormat] = useState<'' | 'png' | 'jpeg'>('');
   const [isGenerating, setIsGenerating] = useState(false);
+  // Задача #215: скільки секунд триває поточна генерація — єдиний чесний
+  // індикатор прогресу, бо ні Leonardo.Ai (фото v2, відео), ні решта
+  // провайдерів не віддають проміжний відсоток/крок. null, поки нічого
+  // не генерується.
+  const [genElapsedSec, setGenElapsedSec] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<{ url: string; modelUsed: string; kind: 'photo' | 'video' } | null>(null);
   const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>([]);
@@ -377,6 +382,64 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
     clearInput();
   };
 
+  // Задача #215: та сама причина, що й у pollVideoJob нижче (POLL_INTERVAL_MS/
+  // MAX_ATTEMPTS дзеркалять server.ts MEDIA_ART_JOB_TTL_MS + серверний
+  // POLL_MAX_ATTEMPTS у server/leonardoPhotoGeneration.ts, ~5.8 хв) — з
+  // запасом на округлення, той самий інтервал (4с), що й для відео.
+  const MEDIA_ART_STATUS_POLL_INTERVAL_MS = 4000;
+  const MEDIA_ART_STATUS_POLL_MAX_ATTEMPTS = 100; // ~6.7 хв
+
+  const pollMediaArtJob = async (
+    jobId: string
+  ): Promise<{
+    imageUrl: string;
+    promptUsed?: string;
+    negativePrompt?: string;
+    modelUsed?: string;
+    modelKey?: string;
+    aspectRatio?: string;
+    fileSize?: string;
+  } | null> => {
+    for (let attempt = 0; attempt < MEDIA_ART_STATUS_POLL_MAX_ATTEMPTS; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, MEDIA_ART_STATUS_POLL_INTERVAL_MS));
+      let res: Response;
+      try {
+        res = await fetch(`/api/ai/generate-media-art/status/${jobId}`, { credentials: 'same-origin' });
+      } catch {
+        // Один пропущений опит через тимчасову мережеву проблему не має
+        // провалювати всю генерацію — пробуємо ще раз на наступному тіку.
+        continue;
+      }
+      const data = await res.json().catch(() => ({}));
+      if (typeof data?.elapsedSec === 'number') setGenElapsedSec(data.elapsedSec);
+
+      if (isGuestRestriction(res.status, data)) {
+        setErrorMsg(t('mediaGenerationPanel.toastGuestRestricted'));
+        onToast(t('mediaGenerationPanel.toastGuestRestricted'));
+        return null;
+      }
+      if (res.status === 402 || data?.kind === 'quota_exceeded') {
+        setErrorMsg(t('mediaGenerationPanel.toastQuotaExceeded'));
+        onToast(t('mediaGenerationPanel.toastQuotaExceeded'));
+        return null;
+      }
+      if (data?.status === 'complete' && data?.imageUrl) {
+        return data;
+      }
+      if (!res.ok || data?.status === 'error') {
+        const msg = data?.error || t('mediaGenerationPanel.toastGenFailed');
+        setErrorMsg(msg);
+        onToast(msg);
+        return null;
+      }
+      // status === 'pending' — опитуємо далі.
+    }
+    const msg = t('mediaGenerationPanel.toastGenFailed');
+    setErrorMsg(msg);
+    onToast(msg);
+    return null;
+  };
+
   const handleGenerate = async () => {
     if (!prompt.trim()) {
       onToast(t('mediaGenerationPanel.toastEmptyPrompt'));
@@ -384,6 +447,7 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
     }
     setIsGenerating(true);
     setErrorMsg(null);
+    setGenElapsedSec(0);
     try {
       const res = await fetch('/api/ai/generate-media-art', {
         method: 'POST',
@@ -408,24 +472,30 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
               : undefined,
         }),
       });
-      const data = await res.json().catch(() => ({}));
+      const submitData = await res.json().catch(() => ({}));
 
-      if (isGuestRestriction(res.status, data)) {
+      if (isGuestRestriction(res.status, submitData)) {
         setErrorMsg(t('mediaGenerationPanel.toastGuestRestricted'));
         onToast(t('mediaGenerationPanel.toastGuestRestricted'));
         return;
       }
-      if (res.status === 402 || data?.kind === 'quota_exceeded') {
+      if (res.status === 402 || submitData?.kind === 'quota_exceeded') {
         setErrorMsg(t('mediaGenerationPanel.toastQuotaExceeded'));
         onToast(t('mediaGenerationPanel.toastQuotaExceeded'));
         return;
       }
-      if (!res.ok || !data?.imageUrl) {
-        const msg = data?.error || t('mediaGenerationPanel.toastGenFailed');
+      // Задача #215: сервер тепер відповідає 202 + jobId одразу (той самий
+      // фікс, що й /api/ai/generate-video у #210) — жодна відповідь більше
+      // не несе готове зображення напряму, лише через опитування статусу.
+      if (!res.ok || res.status !== 202 || !submitData?.jobId) {
+        const msg = submitData?.error || t('mediaGenerationPanel.toastGenFailed');
         setErrorMsg(msg);
         onToast(msg);
         return;
       }
+
+      const data = await pollMediaArtJob(submitData.jobId);
+      if (!data) return;
 
       setLastResult({ url: data.imageUrl, modelUsed: data.modelUsed || '', kind: 'photo' });
 
@@ -452,6 +522,7 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
       onToast(t('mediaGenerationPanel.toastGenError'));
     } finally {
       setIsGenerating(false);
+      setGenElapsedSec(null);
     }
   };
 
@@ -499,6 +570,7 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
         continue;
       }
       const data = await res.json().catch(() => ({}));
+      if (typeof data?.elapsedSec === 'number') setGenElapsedSec(data.elapsedSec);
 
       if (isGuestRestriction(res.status, data)) {
         setErrorMsg(t('mediaGenerationPanel.toastGuestRestricted'));
@@ -534,6 +606,7 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
     }
     setIsGenerating(true);
     setErrorMsg(null);
+    setGenElapsedSec(0);
     try {
       const res = await fetch('/api/ai/generate-video', {
         method: 'POST',
@@ -584,6 +657,7 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
       onToast(t('mediaGenerationPanel.toastGenError'));
     } finally {
       setIsGenerating(false);
+      setGenElapsedSec(null);
     }
   };
 
@@ -1155,6 +1229,15 @@ export const MediaGenerationPanel: React.FC<MediaGenerationPanelProps> = ({ book
               </>
             )}
           </button>
+
+          {/* Задача #215: жоден провайдер (Leonardo.Ai найперше) не віддає
+              відсоток/крок генерації — минулий час це єдине чесне, що
+              можна показати замість голого нескінченного спінера. */}
+          {isGenerating && genElapsedSec !== null && (
+            <div className="text-[10px] text-slate-500 text-center -mt-1">
+              {t('mediaGenerationPanel.generatingElapsed', { seconds: String(genElapsedSec) })}
+            </div>
+          )}
 
           {errorMsg && (
             <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-[11px] text-rose-300 flex items-start gap-1.5">
