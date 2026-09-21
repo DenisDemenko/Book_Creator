@@ -193,21 +193,44 @@ console.log('\nHTTP-роути (підставний генератор, без 
   t('нова сесія отримала модель за замовчуванням', created.data?.session?.modelId === 'gemini-3.7-flash');
 
   // POST /sessions — вибір моделі (мультимодельність)
-  const deep = await call('POST', '/api/chat/sessions', { title: '', modelId: 'deepseek-chat' });
+  const deep = await call('POST', '/api/chat/sessions', { title: '', modelId: 'deepseek-flash' });
   t('POST /sessions з бажаною моделлю → 201', deep.status === 201, String(deep.status));
-  t('обрана модель збережена в сесії', deep.data?.session?.modelId === 'deepseek-chat');
+  t('обрана модель збережена в сесії', deep.data?.session?.modelId === 'deepseek-flash');
+  // Старе ім'я моделі (книги, збережені до #223): приймаємо, але зберігаємо ЖИВЕ
+  // ім'я, бо `deepseek-chat` провайдер більше не приймає — інакше сесія тягла б
+  // мертвий id у кожен наступний запит.
+  const legacy = await call('POST', '/api/chat/sessions', { title: '', modelId: 'deepseek-chat' });
+  t('старий id deepseek-chat прийнято та перекладено на flash',
+    legacy.status === 201 && legacy.data?.session?.modelId === 'deepseek-flash',
+    String(legacy.data?.session?.modelId));
   const fallback = await call('POST', '/api/chat/sessions', { title: '', modelId: 'no-such-model' });
   t('невідома модель → модель за замовчуванням', fallback.data?.session?.modelId === 'gemini-3.7-flash');
 
   // GET /api/chat/models — список доступних моделей
   const models = await call('GET', '/api/chat/models');
   t('GET /models → 200 зі списком', models.status === 200 && Array.isArray(models.data?.models), String(models.status));
-  t('список містить 15 моделей (6 провайдерів: 1 Gemini, 8 OpenAI, 3 Claude, 1 DeepSeek, 1 Groq, 1 Mistral)', models.data?.models?.length === 15, String(models.data?.models?.length));
+  t('список містить 17 моделей (6 провайдерів: 1 Gemini, 8 OpenAI, 3 Claude, 2 DeepSeek, 2 Groq, 1 Mistral)', models.data?.models?.length === 17, String(models.data?.models?.length));
   t('defaultModelId повертається клієнту', models.data?.defaultModelId === 'gemini-3.7-flash');
   const geminiModel = models.data?.models?.find((m: any) => m.engine === 'gemini');
   t('модель містить ціну за мільйон токенів (для селектора)',
     typeof geminiModel?.inputPerMillionUsd === 'number' && typeof geminiModel?.outputPerMillionUsd === 'number',
     JSON.stringify(geminiModel));
+
+  // Прапорець зору (задача #223): селектор опису фото фільтрує список САМЕ по
+  // ньому, тож контракт мусить бути в кожній моделі — інакше клієнт мовчки
+  // відкине всі моделі й покаже порожній список.
+  t('кожна модель віддає булевий прапорець vision',
+    models.data?.models?.every((m: any) => typeof m.vision === 'boolean'));
+  const visionIds = (models.data?.models || []).filter((m: any) => m.vision).map((m: any) => m.id);
+  t('прапорець стоїть у зрячих моделей усіх шести рушіїв',
+    ['gemini-3.7-flash', 'gpt-5.5', 'claude-sonnet-5', 'deepseek-flash',
+     'meta-llama/llama-4-scout-17b-16e-instruct', 'mistral-large-latest']
+      .every((id) => visionIds.includes(id)),
+    visionIds.join(', '));
+  t('текстові моделі прапорця не мають',
+    !visionIds.includes('deepseek-v4-pro') && !visionIds.includes('llama-3.3-70b-versatile'));
+  t('тариф незвіреної моделі — null, а не вигадане число',
+    models.data?.models?.find((m: any) => m.id === 'meta-llama/llama-4-scout-17b-16e-instruct')?.inputPerMillionUsd === null);
 
   // GET /api/chat/sessions
   const listed = await call('GET', '/api/chat/sessions');
@@ -372,16 +395,32 @@ console.log('\nHTTP-роути (підставний генератор, без 
   t('генератор отримав зображення', lastImages?.length === 1 && lastImages[0].mimeType === 'image/png');
   t('репліка автора в історії позначена прикріпленим зображенням', withImage.data?.userMessage?.content?.includes('photo.png'));
 
-  // Негативний: DeepSeek (текстова модель) отримує зображення → 400, запит навіть не пішов до генератора
+  // Негативний: модель БЕЗ зору отримує зображення → 400, запит навіть не пішов
+  // до генератора. Модель узято реальну текстову (`deepseek-v4-pro` — Vision ✗
+  // за таблицею DeepSeek), а не старий id `deepseek-chat`: той тепер перекладається
+  // на `deepseek-flash`, який зір МАЄ (#223).
   lastImages = undefined;
   const withImageOnTextModel = await call('POST', `/api/chat/sessions/${sessionId}/messages`, {
     content: 'Що на цій картинці?',
-    modelId: 'deepseek-chat',
+    modelId: 'deepseek-v4-pro',
     attachments: { images: [{ name: 'photo.png', mimeType: 'image/png', dataBase64: tinyPngBase64 }] },
   });
-  t('зображення на текстову модель (DeepSeek) → 400', withImageOnTextModel.status === 400, String(withImageOnTextModel.status));
+  t('зображення на текстову модель (DeepSeek V4 Pro) → 400', withImageOnTextModel.status === 400, String(withImageOnTextModel.status));
   t('400 містить kind vision_unsupported', withImageOnTextModel.data?.kind === 'vision_unsupported');
+  t('400 називає САМЕ обрану модель, а не рушій',
+    String(withImageOnTextModel.data?.error || '').includes('DeepSeek V4 Pro'), String(withImageOnTextModel.data?.error || ''));
   t('генератор НЕ викликався для відхиленого запиту', lastImages === undefined);
+
+  // Позитивний: та сама рушієва родина, але зряча модель DeepSeek тепер працює
+  // з фото — до #223 рушій був відсічений цілком.
+  lastImages = undefined;
+  const deepVision = await call('POST', `/api/chat/sessions/${sessionId}/messages`, {
+    content: 'Що на цій картинці?',
+    modelId: 'deepseek-flash',
+    attachments: { images: [{ name: 'photo.png', mimeType: 'image/png', dataBase64: tinyPngBase64 }] },
+  });
+  t('зображення на DeepSeek flash (зір ✓) → 200', deepVision.status === 200, String(deepVision.status));
+  t('генератор отримав зображення для deepseek-flash', lastImages?.length === 1);
 
   // Ліміт кількості зображень — понад MAX_ATTACHED_IMAGES обрізається
   const manyImages = Array.from({ length: chat.MAX_ATTACHED_IMAGES + 3 }, (_, i) => ({
@@ -416,12 +455,14 @@ console.log('\nПровайдери (server/chatProviders.ts) — визначе
   t('resolveEngine: gemini', providers.resolveEngine('gemini-3.7-flash') === 'gemini');
   t('resolveEngine: gpt', providers.resolveEngine('gpt-4o') === 'gpt');
   t('resolveEngine: claude', providers.resolveEngine('claude-sonnet-5') === 'claude');
-  t('resolveEngine: deepseek', providers.resolveEngine('deepseek-chat') === 'deepseek');
+  // Старий id: рушій визначається й далі — через LEGACY_MODEL_ALIASES (#223).
+  t('resolveEngine: deepseek (старий id перекладено)', providers.resolveEngine('deepseek-chat') === 'deepseek');
   t('resolveEngine: groq (llama)', providers.resolveEngine('llama-3.3-70b-versatile') === 'groq');
   t('resolveEngine: mistral', providers.resolveEngine('mistral-large-latest') === 'mistral');
   t('resolveEngine: невідома модель → gemini', providers.resolveEngine('custom-xyz') === 'gemini');
-  t('CHAT_MODELS містить рівно 15 варіантів (8 OpenAI, 3 Claude: Haiku/Sonnet/Opus)', providers.CHAT_MODELS.length === 15, String(providers.CHAT_MODELS.length));
-  t('isKnownModel: відома модель', providers.isKnownModel('deepseek-chat') === true);
+  t('CHAT_MODELS містить рівно 17 варіантів (8 OpenAI, 3 Claude: Haiku/Sonnet/Opus)', providers.CHAT_MODELS.length === 17, String(providers.CHAT_MODELS.length));
+  t('isKnownModel: відома модель', providers.isKnownModel('deepseek-flash') === true);
+  t('isKnownModel: старий id теж відомий (перекладається)', providers.isKnownModel('deepseek-chat') === true);
   t('isKnownModel: невідома модель', providers.isKnownModel('zzz-not-a-model') === false);
   t('усі 6 рушіїв мають генератор у PROVIDERS',
     ['gemini', 'gpt', 'claude', 'deepseek', 'groq', 'mistral'].every((e) => typeof providers.PROVIDERS[e as keyof typeof providers.PROVIDERS] === 'function'));
@@ -437,8 +478,17 @@ console.log('\nТарифи нових провайдерів (server/pricing.ts
   t('priceForTextEngine(mistral) сумує вхід+вихід',
     pricing.priceForTextEngine('mistral', 1_000_000, 1_000_000) ===
       pricing.MISTRAL_TEXT_PRICING.inputPerMillionUsd + pricing.MISTRAL_TEXT_PRICING.outputPerMillionUsd);
-  t('deepseek flash: $0.22 вхід / $0.66 вихід за млн',
-    pricing.DEEPSEEK_TEXT_PRICING.inputPerMillionUsd === 0.22 && pricing.DEEPSEEK_TEXT_PRICING.outputPerMillionUsd === 0.66);
+  t('deepseek flash: $0.15 вхід / $0.60 вихід за млн (21.09.2026, api-docs.deepseek.com)',
+    pricing.DEEPSEEK_TEXT_PRICING.inputPerMillionUsd === 0.15 && pricing.DEEPSEEK_TEXT_PRICING.outputPerMillionUsd === 0.6);
+  t('типова модель DeepSeek — ЖИВЕ ім’я flash, не мертвий deepseek-chat',
+    pricing.DEEPSEEK_TEXT_PRICING.modelId === 'deepseek-flash', pricing.DEEPSEEK_TEXT_PRICING.modelId);
+  // Ціна — властивість моделі: flash і pro різняться вчетверо, тож селектор
+  // моделей не має показувати обом ціну рушія-за-замовчуванням (#223).
+  t('flash і pro мають різні тарифи в /api/chat/models',
+    pricing.priceRateForModel('deepseek', 'deepseek-flash').inputPerMillionUsd !==
+    pricing.priceRateForModel('deepseek', 'deepseek-v4-pro').inputPerMillionUsd);
+  t('незвірений тариф Groq для Llama 4 Scout віддається як null, а не як ціна Llama 3.3',
+    pricing.priceRateForModel('groq', 'meta-llama/llama-4-scout-17b-16e-instruct').inputPerMillionUsd === null);
   t('тарифи нових двигунів є в pricingSnapshot().textEngines',
     Object.keys(pricing.pricingSnapshot().textEngines).length === 6);
 
@@ -534,7 +584,8 @@ console.log('\nАдмінські роути сесій чату (сайдбар
   t('сесія має модель за замовчуванням (перша з CHAT_MODELS)', createdAdminSession.data?.session?.modelId === providers.CHAT_MODELS[0].id);
 
   const createdWithModel = await callAdmin('POST', '/api/admin/chat/sessions', { modelId: 'deepseek-chat' });
-  t('POST з бажаною моделлю використовує її', createdWithModel.data?.session?.modelId === 'deepseek-chat');
+  t('POST з бажаною моделлю використовує її (старий id перекладено на живе ім’я)',
+    createdWithModel.data?.session?.modelId === 'deepseek-flash', String(createdWithModel.data?.session?.modelId));
 
   t('нова сесія реально з’являється в БД', (await store.getChatSession(adminSessionId))?.userId === 'u-admin');
 

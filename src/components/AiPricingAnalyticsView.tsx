@@ -48,8 +48,9 @@ interface AiPricingRow {
   provider: string;
   model: string;
   display_name: string;
-  input_price_per_1k: number;
-  output_price_per_1k: number;
+  /** `null` — тариф цієї моделі ще не звірено (напр. Llama 4 Scout у Groq). Це не нуль і не «безкоштовно». */
+  input_price_per_1k: number | null;
+  output_price_per_1k: number | null;
   is_active: boolean;
   updated_at: string;
   note?: string;
@@ -343,8 +344,11 @@ export const AiPricingAnalyticsView: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {pricings.map((p) => {
             const Icon = PROVIDER_ICONS[p.provider] || Sparkles;
-            const inPrice = p.input_price_per_1k * multiplier;
-            const outPrice = p.output_price_per_1k * multiplier;
+            // Тариф не звірено — чесно показуємо прочерк замість числа:
+            // вигадана ціна змусила б адміністратора рахувати на неї.
+            const rateKnown = p.input_price_per_1k !== null && p.output_price_per_1k !== null;
+            const inPrice = rateKnown ? p.input_price_per_1k! * multiplier : null;
+            const outPrice = rateKnown ? p.output_price_per_1k! * multiplier : null;
             return (
               <div
                 key={p.id}
@@ -374,13 +378,13 @@ export const AiPricingAnalyticsView: React.FC = () => {
                   <div className="rounded-xl nm-inset p-2.5">
                     <div className="text-[10px] uppercase tracking-wider text-[var(--outline)]">вхід</div>
                     <div className="text-[15px] font-mono font-bold text-[var(--on-surface)] mt-0.5">
-                      ${inPrice.toFixed(inPrice < 0.01 && unitMode === '1k' ? 4 : unitMode === '1m' ? 2 : 3)}
+                      {inPrice === null ? '—' : `$${inPrice.toFixed(inPrice < 0.01 && unitMode === '1k' ? 4 : unitMode === '1m' ? 2 : 3)}`}
                     </div>
                   </div>
                   <div className="rounded-xl nm-inset p-2.5">
                     <div className="text-[10px] uppercase tracking-wider text-[var(--outline)]">вихід</div>
                     <div className="text-[15px] font-mono font-bold text-[var(--on-surface)] mt-0.5">
-                      ${outPrice.toFixed(outPrice < 0.01 && unitMode === '1k' ? 4 : unitMode === '1m' ? 2 : 3)}
+                      {outPrice === null ? '—' : `$${outPrice.toFixed(outPrice < 0.01 && unitMode === '1k' ? 4 : unitMode === '1m' ? 2 : 3)}`}
                     </div>
                   </div>
                 </div>
@@ -413,8 +417,8 @@ export const AiPricingAnalyticsView: React.FC = () => {
             </div>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mt-3">
-            {pricings.filter((p) => p.is_active).map((p) => {
-              const cost = (estInput * p.input_price_per_1k + estOutput * p.output_price_per_1k) / 1000;
+            {pricings.filter((p) => p.is_active && p.input_price_per_1k !== null && p.output_price_per_1k !== null).map((p) => {
+              const cost = (estInput * (p.input_price_per_1k as number) + estOutput * (p.output_price_per_1k as number)) / 1000;
               return (
                 <div key={p.id} className="rounded-xl nm-outset-xs p-2 text-center">
                   <div className="text-[10px] text-[var(--outline)] truncate">{p.provider}</div>

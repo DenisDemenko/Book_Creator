@@ -35,7 +35,7 @@ import {
 import { listBooks } from './bookStore';
 import { listAllCourses } from './courseStore';
 import { CHAT_USAGE_CONTEXT } from './chatRoutes';
-import { CHAT_MODELS, ENGINE_LABELS, engineConfigured } from './chatProviders';
+import { CHAT_MODELS, ENGINE_LABELS, engineConfigured, normalizeModelId } from './chatProviders';
 import {
   requireAdmin,
   requireSupportAgent,
@@ -525,15 +525,21 @@ export function registerAdminRoutes(app: Express): void {
     const pricings = CHAT_MODELS.map((m) => {
       const rate = priceRateForModel(m.engine as TextEngine, m.id);
       const contextNote = m.contextWindow ? `Контекстне вікно: ${m.contextWindow}.` : '';
+      // `null` — тариф цієї моделі ще не звірено (напр. Llama 4 Scout у Groq).
+      // Це саме «невідомо», а не «безкоштовно»: показуємо «—» в інтерфейсі,
+      // а калькулятор таку модель пропускає, бо вигадане число гірше за його
+      // відсутність — адміністратор спирався б на нього в рішеннях.
+      const per1k = (v: number | null) => (v === null ? null : v / 1000);
       const note = [rate.note, contextNote].filter(Boolean).join(' ') || undefined;
       return {
         id: `pricing-model-${m.id}`,
         provider: m.provider,
         model: m.id,
         display_name: `${m.id} (${m.label})`,
-        input_price_per_1k: rate.inputPerMillionUsd / 1000,
-        output_price_per_1k: rate.outputPerMillionUsd / 1000,
+        input_price_per_1k: per1k(rate.inputPerMillionUsd),
+        output_price_per_1k: per1k(rate.outputPerMillionUsd),
         is_active: engineConfigured(m.engine),
+        vision: m.vision,
         updated_at: snapshot.updatedAt,
         note,
       };
@@ -737,7 +743,12 @@ export function registerAdminRoutes(app: Express): void {
       const principal = req.principal!;
       const now = new Date().toISOString();
       const requestedModel = typeof req.body?.modelId === 'string' ? req.body.modelId.trim() : '';
-      const modelId = CHAT_MODELS.some((m) => m.id === requestedModel) ? requestedModel : CHAT_MODELS[0].id;
+      // `normalizeModelId` — те саме перекладання старого імені, що в
+      // POST /api/chat/sessions: `deepseek-chat` більше не приймається
+      // провайдером, тож у сесії має лягти ЖИВЕ ім'я (LEGACY_MODEL_ALIASES),
+      // а невідома модель — як і раніше — падає на першу зі списку.
+      const wanted = normalizeModelId(requestedModel);
+      const modelId = CHAT_MODELS.some((m) => m.id === wanted) ? wanted : CHAT_MODELS[0].id;
       const session = {
         id: `chat-admin-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         userId: principal.id as string,

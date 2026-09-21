@@ -262,8 +262,10 @@ console.log('\nchatProviders.PROVIDERS бере apiKeyOverride замість en
     catch (err: any) { threwMissing = /не налаштований/.test(err?.message || ''); }
     t('без override і без env-ключа → помилка «не налаштований»', threwMissing);
 
-    // Прикріплені зображення — VISION_ENGINES (gemini/gpt/claude) конвертують
-    // їх у свій нативний формат (кнопка-скріпка в чаті, server/chatRoutes.ts).
+    // Прикріплені зображення — кожен рушій конвертує їх у свій нативний
+    // формат (кнопка-скріпка в чаті, server/chatRoutes.ts). Чи дійшло
+    // зображення до провайдера, вирішує КОНКРЕТНА модель із зором
+    // (`modelSupportsVision`), а не рушій (#223).
     const testImage = { mimeType: 'image/png', dataBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' };
 
     process.env.OPENAI_API_KEY = 'sk-test';

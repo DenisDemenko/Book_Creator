@@ -243,7 +243,21 @@ try {
   t('є три цілі передачі', modalShape.targets.join(',') === 'book,instruction,course', modalShape.targets.join(','));
   t('є обидві кнопки передачі', modalShape.hasTransferText && modalShape.hasTransferBoth);
 
-  // ── 2а. Вибір моделі ядра AI (задача #222) ─────────────────────────────
+  // ── 2а. Вибір моделі ядра AI (задача #222, переписано під #223) ────────
+  /**
+   * Перелік моделей, які сервер САМ позначив як зрячі (`vision: true`).
+   * Порівнювати список у вікні з цим переліком — і є перевірка «правдивої
+   * роботи»: раніше клієнт мав власний список рушіїв і брехав у обидва боки.
+   */
+  const visionModelIds = await page.evaluate(async () => {
+    const res = await fetch('/api/chat/models', { credentials: 'same-origin' });
+    const data = await res.json().catch(() => ({}));
+    return ((data.models || []) as { id: string; vision?: boolean }[])
+      .filter((m) => m.vision)
+      .map((m) => m.id);
+  });
+  t('сервер віддає прапорець vision і має хоч одну зрячу модель', visionModelIds.length > 0, visionModelIds.join(','));
+
   const modelShape = await page.evaluate(() => {
     const modal = document.querySelector('[data-describe-modal]') as HTMLElement | null;
     const select = modal?.querySelector('[data-describe-model]') as HTMLSelectElement | null;
@@ -267,8 +281,18 @@ try {
     'у списку лише моделі, що СПРАВДІ бачать зображення',
     !!modelShape &&
       modelShape.options.slice(1).length > 0 &&
-      modelShape.options.slice(1).every((o) => /^(gemini|gpt|claude)/.test(o.value)),
-    modelShape?.options.map((o) => o.value).join(',')
+      // Список порівнюється з прапорцями `vision` із САМОГО сервера, а не з
+      // зашитим переліком рушіїв (#223): зір — властивість моделі, тож DeepSeek
+      // V4.1 Flash, Llama 4 Scout і Mistral Large теж мають бути тут, а
+      // deepseek-v4-pro і Llama 3.3 70B — ні.
+      modelShape.options.slice(1).every((o) => visionModelIds.includes(o.value)) &&
+      visionModelIds.every((id) => modelShape.options.slice(1).some((o) => o.value === id)),
+    `у списку: ${modelShape?.options.map((o) => o.value).join(',')} | із зором: ${visionModelIds.join(',')}`
+  );
+  t(
+    'текстові моделі у списку відсутні',
+    !!modelShape &&
+      !modelShape.options.some((o) => o.value === 'deepseek-v4-pro' || o.value === 'llama-3.3-70b-versatile')
   );
   t(
     'моделі без ключа позначені й недоступні (і навпаки)',
@@ -320,13 +344,17 @@ try {
   );
 
   // ── 2б. Правила сервера щодо моделі ────────────────────────────────────
+  // Модель без зору взято РЕАЛЬНУ текстову (`deepseek-v4-pro` за таблицею
+  // DeepSeek), а не старий id `deepseek-chat`: той тепер перекладається на
+  // `deepseek-flash`, який зір МАЄ (#223), тож перевірка перестала б бути
+  // перевіркою відмови.
   const noVision = await page.evaluate(
     async (url: string) => {
       const res = await fetch('/api/ai/describe-character-from-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ imageUrl: url, modelId: 'deepseek-chat' }),
+        body: JSON.stringify({ imageUrl: url, modelId: 'deepseek-v4-pro' }),
       });
       return { status: res.status, body: await res.json().catch(() => ({})) };
     },
@@ -337,6 +365,60 @@ try {
     noVision.status === 400 && /не аналізує зображення/.test(String(noVision.body?.error)),
     `${noVision.status} ${noVision.body?.error || ''}`
   );
+  t(
+    'відмова називає САМЕ обрану модель, а не рушій',
+    /DeepSeek V4 Pro/.test(String(noVision.body?.error || '')),
+    String(noVision.body?.error || '')
+  );
+
+  // Те саме правило діє і на адмінській прив'язці «модуль → модель»: інакше
+  // адміністратор віддав би модуль «Текст за фото» текстовій моделі, і відмову
+  // бачив би автор — посеред роботи з фото, не знаючи причини.
+  const bindBlind = await page.evaluate(
+    async (modelId: string) => {
+      const res = await fetch('/api/ai/core-module-models', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ module: 'textFromImage', modelId }),
+      });
+      return { status: res.status, body: await res.json().catch(() => ({})) };
+    },
+    'deepseek-v4-pro'
+  );
+  t(
+    'прив’язка текстової моделі до модуля «Текст за фото» → 400',
+    bindBlind.status === 400 && bindBlind.body?.kind === 'vision_unsupported',
+    `${bindBlind.status} ${JSON.stringify(bindBlind.body)}`
+  );
+
+  const bindVision = await page.evaluate(
+    async (modelId: string) => {
+      const res = await fetch('/api/ai/core-module-models', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ module: 'textFromImage', modelId }),
+      });
+      return { status: res.status, body: await res.json().catch(() => ({})) };
+    },
+    'deepseek-flash'
+  );
+  t(
+    'прив’язка зрячої моделі того ж рушія — приймається',
+    bindVision.status === 200 && bindVision.body?.models?.textFromImage === 'deepseek-flash',
+    `${bindVision.status} ${JSON.stringify(bindVision.body?.models || {})}`
+  );
+  // Прибираємо прив'язку (тимчасова тека даних, але лишати слід не варто):
+  // далі в прогоні опис іде «за рішенням адміністратора».
+  await page.evaluate(async () => {
+    await fetch('/api/ai/core-module-models', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ module: 'textFromImage', modelId: null }),
+    });
+  });
 
   const autoNoKey = await page.evaluate(
     async (url: string) => {

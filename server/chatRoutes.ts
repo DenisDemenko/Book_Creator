@@ -39,7 +39,7 @@ import {
   type StoredChatMessage,
 } from './store';
 import { priceForTextEngine, priceRateForModel } from './pricing';
-import { CHAT_MODELS, engineConfigured, isKnownModel, resolveEngine, VISION_ENGINES, type ImageAttachment } from './chatProviders';
+import { CHAT_MODELS, chatModelLabel, engineConfigured, isKnownModel, modelSupportsVision, normalizeModelId, resolveEngine, visionEngineHint, type ImageAttachment } from './chatProviders';
 import { CONTEXT_WINDOW_MESSAGES, buildPromptContext, buildSystemPrompt } from './chatPrompt';
 
 /** Один прикріплений файл-текст (txt/md/pdf) — вміст уже витягнутий на клієнті. */
@@ -251,7 +251,7 @@ export function registerChatRoutes(app: Express, deps: ChatRoutesDeps): void {
         userId: principal.id as string,
         title: typeof req.body?.title === 'string' && req.body.title.trim() ? req.body.title.trim() : 'Нова розмова',
         bookId: typeof req.body?.bookId === 'string' ? req.body.bookId : undefined,
-        modelId: isKnownModel(requestedModel) ? requestedModel : deps.defaultModelId,
+        modelId: isKnownModel(requestedModel) ? normalizeModelId(requestedModel) : deps.defaultModelId,
         totalInputTokens: 0,
         totalOutputTokens: 0,
         totalCostUsd: 0,
@@ -315,7 +315,10 @@ export function registerChatRoutes(app: Express, deps: ChatRoutesDeps): void {
       let modelId = session.modelId || deps.defaultModelId;
       const requestedModel = typeof req.body?.modelId === 'string' ? req.body.modelId.trim() : '';
       if (requestedModel && isKnownModel(requestedModel)) {
-        modelId = requestedModel;
+        // `normalizeModelId` — щоб сесія з книги старої редакції (id
+        // `deepseek-chat`) перейшла на живе ім'я вже тут, а не тягла мертве
+        // далі в кожен наступний запит (див. LEGACY_MODEL_ALIASES).
+        modelId = normalizeModelId(requestedModel);
       }
       const engine = resolveEngine(modelId);
 
@@ -335,9 +338,9 @@ export function registerChatRoutes(app: Express, deps: ChatRoutesDeps): void {
         .map((img: any) => ({ mimeType: img.mimeType, dataBase64: img.dataBase64 }));
       const imageNames: string[] = rawImages.slice(0, MAX_ATTACHED_IMAGES).map((img: any, i: number) => img?.name || `зображення-${i + 1}`);
 
-      if (images.length > 0 && !VISION_ENGINES.has(engine)) {
+      if (images.length > 0 && !modelSupportsVision(modelId)) {
         return res.status(400).json({
-          error: `Модель «${CHAT_MODELS.find((m) => m.id === modelId)?.label || modelId}» не аналізує зображення. Оберіть Gemini, GPT-4o або модель Claude.`,
+          error: `Модель «${chatModelLabel(modelId)}» не аналізує зображення. Оберіть модель із зором (${visionEngineHint()}).`,
           kind: 'vision_unsupported',
         });
       }

@@ -35,16 +35,9 @@ interface CoreModel {
   label: string;
   engine: string;
   available: boolean;
+  /** Чи модель справді приймає зображення — прапорець із сервера, не здогад. */
+  vision: boolean;
 }
-
-/**
- * Рушії, чиї моделі СПРАВДІ бачать зображення — дзеркало `VISION_ENGINES`
- * із `server/chatProviders.ts`. DeepSeek, Groq і Mistral підключені тут
- * текстовими моделями: показати їх у списку означало б запропонувати авторові
- * варіант, який гарантовано відмовиться.
- */
-const VISION_ENGINES_FRONT = new Set(['gemini', 'gpt', 'claude']);
-
 interface DescribeCharacterModalProps {
   /** Фото, яке описуємо. */
   photo: { url: string; title: string; prompt?: string };
@@ -87,8 +80,12 @@ export const DescribeCharacterModal: React.FC<DescribeCharacterModalProps> = ({
 
   /**
    * Список моделей — той самий, що й у редакторі (`/api/chat/models`), і
-   * той самий, що в «Ядрі AI». Типове значення — модель книги; якщо книга
-   * живе на моделі, яка не бачить зображень (напр. DeepSeek), у списку
+   * той самий, що в «Ядрі AI». Показуємо ЛИШЕ ті, що справді бачать
+   * зображення: сервер віддає це прапорцем `vision` по кожній моделі
+   * (`server/chatProviders.ts::CHAT_MODELS`), бо зір — властивість моделі, а
+   * не рушія. DeepSeek V4 Pro, Llama 3.3 70B і будь-яка нова текстова
+   * модель того ж провайдера відсіються самі, без правки клієнта.
+   * Типове значення — модель книги; якщо вона зору не має, у списку
    * лишається «Автоматично», а причину автор бачить підписом.
    */
   useEffect(() => {
@@ -97,7 +94,7 @@ export const DescribeCharacterModal: React.FC<DescribeCharacterModalProps> = ({
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (!alive) return;
-        const list = ((d?.models || []) as CoreModel[]).filter((m) => VISION_ENGINES_FRONT.has(m.engine));
+        const list = ((d?.models || []) as CoreModel[]).filter((m) => m.vision);
         setModels(list);
         if (preferredModelId && list.some((m) => m.id === preferredModelId)) setModelId(preferredModelId);
         setModelsLoaded(true);

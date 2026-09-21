@@ -107,6 +107,13 @@ export interface ChatModelOption {
   available: boolean;
   /** Рушій моделі (gemini/gpt/claude/deepseek/groq/mistral) — сервер завжди його віддає (server/chatProviders.ts::CHAT_MODELS), тут лише типізовано. */
   engine?: string;
+  /**
+   * Чи модель приймає зображення (`CHAT_MODELS[].vision`). Потрібен там, де
+   * вибір моделі означає саме роботу з фото — вузол «Промти ядра» в адмінці
+   * (модуль «Текст за фото»): адміністратор має бачити, які зі списку
+   * справді бачать зображення, а не дізнаватись про це з відмови.
+   */
+  vision?: boolean;
   /** Ціна за мільйон токенів (server/pricing.ts) — щоб автор бачив різницю вартості ПЕРЕД вибором моделі. */
   inputPerMillionUsd?: number | null;
   outputPerMillionUsd?: number | null;
@@ -1005,6 +1012,8 @@ export const CoreAiPanel: React.FC<{
     setTestFields((prev) => ({ ...prev, [activeModule]: { ...prev[activeModule], [key]: value } }));
 
   const isChat = activeModule === 'chat';
+  /** Модуль читає зображення (на сьогодні лише «Текст за фото») — модель без зору йому не можна. */
+  const moduleNeedsVision = activeModule === 'textFromImage';
   const hasSchema = meta?.hasJsonSchema[activeModule] ?? false;
   const schemaSuffix = meta?.schemaSuffix[activeModule] || '';
   const placeholders = meta?.placeholders[activeModule] || [];
@@ -1266,6 +1275,18 @@ export const CoreAiPanel: React.FC<{
             <div className="text-[10px] text-[var(--outline)] leading-snug">
               Діє для всіх користувачів. Вибір автора в панелі редактора має вищий пріоритет.
             </div>
+            {/*
+              Модуль «Текст за фото» читає ЗОБРАЖЕННЯ — модель без зору тут
+              не помилка автора, а помилка налаштування: він побачив би відмову
+              посеред роботи. Тому моделі без прапорця `vision`
+              (server/chatProviders.ts::CHAT_MODELS) у цьому списку неактивні,
+              а підпис пояснює чому. Сервер перевіряє це ж саме на PUT.
+            */}
+            {moduleNeedsVision && (
+              <div className="text-[10px] text-amber-500 leading-snug mt-0.5">
+                Цей модуль працює з фото: доступні лише моделі із зором.
+              </div>
+            )}
           </div>
           <select
             value={moduleModels[activeModule] || ''}
@@ -1274,12 +1295,16 @@ export const CoreAiPanel: React.FC<{
             className="ml-auto min-w-[220px] nm-inset rounded-lg px-2.5 py-1.5 text-[11px] font-bold text-[var(--on-surface)] bg-transparent outline-none cursor-pointer disabled:opacity-50"
           >
             <option value="">За замовчуванням (рішення сервера)</option>
-            {models.map((m) => (
-              <option key={m.id} value={m.id} disabled={!m.available}>
-                {m.label}
-                {m.available ? '' : ' (без ключа)'}
-              </option>
-            ))}
+            {models.map((m) => {
+              const blindForThisModule = moduleNeedsVision && !m.vision;
+              return (
+                <option key={m.id} value={m.id} disabled={!m.available || blindForThisModule}>
+                  {m.label}
+                  {blindForThisModule ? ' (не бачить фото)' : ''}
+                  {m.available ? '' : ' (без ключа)'}
+                </option>
+              );
+            })}
           </select>
           {moduleModelError && (
             <div className="w-full text-[10px] text-rose-400">{moduleModelError}</div>

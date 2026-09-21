@@ -81,7 +81,9 @@ import {
   engineConfigured,
   ENGINE_ENV_KEY,
   ENGINE_LABELS,
-  VISION_ENGINES,
+  chatModelLabel,
+  modelSupportsVision,
+  visionEngineHint,
   AUDIO_ENGINES,
   ChatProviderError,
   type ImageAttachment,
@@ -183,6 +185,7 @@ import {
   setCoreModuleModel,
   resolveModuleModelId,
 } from './server/coreModuleModels';
+import { CORE_VISION_MODULES } from './server/coreAiRegistry';
 import { formatManuscriptWithClaude, anthropicConfig, ClaudeManuscriptError, MAX_MANUSCRIPT_CHARS } from './server/claudeManuscript';
 import { purgeExpiredSessions, initStore, getUserStyle, upsertUserStyle, deleteUserStyle, listUserApiKeys, getUserPromptTemplates, upsertUserPromptTemplates, deleteUserPromptTemplates, getAppSetting, setAppSetting } from './server/store';
 
@@ -2133,9 +2136,11 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
         обирає автор у списку ядра AI, порожнє значення — «хай вирішує
         адміністратор» (прив'язка модуля «Текст за фото», той самий модуль,
         що й у редакторі, бо це та сама робота — читати зображення). Тут
-        працюють УСІ vision-рушії ядра (Gemini, GPT, Claude), власний ключ
-        автора й спільне логування витрат — рівно те, що вже робить
-        `/api/ai/generate-manuscript-paragraphs-from-image`.
+        працює БУДЬ-ЯКА модель ядра, яка справді бачить зображення —
+        перевірка йде по моделі (`modelSupportsVision`), а не по рушію:
+        у Groq текстова Llama й мультимодальна Scout живуть поряд. Свій
+        ключ автора й спільне логування витрат працюють для всіх — рівно те,
+        що вже робить `/api/ai/generate-manuscript-paragraphs-from-image`.
 
         Запит БЕЗ `modelId` — це старий клієнт (лише `engine: gemini|gpt`).
         Його лишаємо на `generateTextFromImage` з повтором при
@@ -2144,9 +2149,9 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
       if (typeof modelId === 'string') {
         const resolvedModelId = (await resolveModuleModelId('textFromImage', modelId)) || GEMINI_MODEL;
         const modelEngine = resolveChatEngine(resolvedModelId);
-        if (!VISION_ENGINES.has(modelEngine)) {
+        if (!modelSupportsVision(resolvedModelId)) {
           return res.status(400).json({
-            error: `Модель «${ENGINE_LABELS[modelEngine]}» не аналізує зображення. Оберіть Gemini, GPT або Claude.`,
+            error: `Модель «${chatModelLabel(resolvedModelId)}» не аналізує зображення. Оберіть модель із зором (${visionEngineHint()}).`,
             kind: 'vision_unsupported',
           });
         }
@@ -3192,6 +3197,19 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
     if (modelId !== null && modelId !== undefined && typeof modelId !== 'string') {
       return res.status(400).json({ error: 'modelId має бути рядком або null.', kind: 'bad_input' });
     }
+    /*
+      Модуль, який читає зображення, не можна віддати моделі без зору.
+      Перевірка саме ТУТ, а не лише в момент виклику: прив'язка діє для всіх
+      авторів і надовго, тож помилку має побачити адміністратор — того ж
+      моменту, коли її робить, а не автор посеред роботи з фото.
+    */
+    const trimmedModel = typeof modelId === 'string' ? modelId.trim() : '';
+    if (trimmedModel && CORE_VISION_MODULES.has(module) && !modelSupportsVision(trimmedModel)) {
+      return res.status(400).json({
+        error: `Модель «${chatModelLabel(trimmedModel)}» не аналізує зображення, а модуль «${module}» працює саме з фото. Оберіть модель із зором (${visionEngineHint()}).`,
+        kind: 'vision_unsupported',
+      });
+    }
     // Порожній рядок = «хай працює серверний дефолт», а не збережена порожнеча.
     const models = await setCoreModuleModel(module, typeof modelId === 'string' ? modelId : null);
     res.json({ models });
@@ -3235,11 +3253,15 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
     // «Текст за фото» — vision-модуль: без самого зображення тестовий
     // виклик перевіряє лише половину промту. Адмін обирає фото з
     // медіатеки книги на клієнті, сюди приходить готовий URL.
+    //
+    // Перевірка по КОНКРЕТНІЙ моделі, а не по рушію: у DeepSeek, Groq і
+    // Mistral у списку є і текстові моделі, і моделі із зором
+    // (напр. `deepseek-v4-pro` проти `deepseek-flash`).
     let testImages: ImageAttachment[] | undefined;
     if (module === 'textFromImage' && fieldsObj.imageUrl) {
-      if (!VISION_ENGINES.has(engine)) {
+      if (!modelSupportsVision(resolvedModelId)) {
         return res.status(400).json({
-          error: `Рушій «${ENGINE_LABELS[engine]}» не аналізує зображення. Оберіть Gemini, GPT-4o або модель Claude.`,
+          error: `Модель «${chatModelLabel(resolvedModelId)}» не аналізує зображення. Оберіть модель із зором (${visionEngineHint()}).`,
           kind: 'vision_unsupported',
         });
       }
@@ -3314,9 +3336,9 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
       const count = [1, 2, 3].includes(paragraphCount) ? paragraphCount : 1;
       const lang = language === 'en' ? 'en' : 'uk';
 
-      if (!VISION_ENGINES.has(engine)) {
+      if (!modelSupportsVision(resolvedModelId)) {
         return res.status(400).json({
-          error: `Рушій книги «${ENGINE_LABELS[engine]}» не аналізує зображення. Оберіть Gemini, GPT-4o або модель Claude.`,
+          error: `Модель «${chatModelLabel(resolvedModelId)}» не аналізує зображення. Оберіть модель із зором (${visionEngineHint()}).`,
           kind: 'vision_unsupported',
         });
       }

@@ -349,18 +349,89 @@ export function priceForGptModel(modelId: string, inputTokens: number, outputTok
 }
 
 /**
- * Тариф DeepSeek, долари за мільйон токенів. Для чат-сесій (новий
- * провайдер мультимодельного чату). Орієнтир звірено на офіційній
- * документації api-docs.deepseek.com у серпні 2026: DeepSeek-V4-Flash
- * коштує $0.22 / $0.66 за млн вхідних/вихідних токенів у «позапіковий»
- * час; у пік — удвічі дорожче ($0.44 / $1.32). Беремо позапікову ціну
- * (консервативно: краще недооцінити, ніж завищити рахунок).
+ * Тариф DeepSeek, долари за мільйон токенів. Для чат-сесій. Це тариф
+ * РУШІЯ-за-замовчуванням — конкретні моделі див. `DEEPSEEK_MODEL_PRICING`,
+ * бо вони різняться вчетверо.
+ *
+ * Звірено 21.09.2026 на api-docs.deepseek.com/quick_start/pricing:
+ * `deepseek-flash` (DeepSeek-V4.1-Flash) — $0.15 / $0.60 за млн вхідних/
+ * вихідних у позапіковий час; у пік — удвічі дорожче ($0.30 / $1.20). Беремо
+ * позапікову ціну (консервативно: краще недооцінити, ніж завищити рахунок).
+ *
+ * Ім'я моделі змінилось зі `deepseek-chat` на `deepseek-flash`: моделей у
+ * документації лишилось дві (flash і pro), а стара назва — мертвий id, який
+ * провайдер більше не приймає (див. LEGACY_MODEL_ALIASES у chatProviders.ts).
  */
 export const DEEPSEEK_TEXT_PRICING = {
-  modelId: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
-  inputPerMillionUsd: Number(process.env.DEEPSEEK_INPUT_PRICE) || 0.22,
-  outputPerMillionUsd: Number(process.env.DEEPSEEK_OUTPUT_PRICE) || 0.66,
-  note: 'DeepSeek V4 Flash, позапіковий тариф (серпень 2026, api-docs.deepseek.com). У пік — вдвічі дорожче. Якщо DEEPSEEK_MODEL інша — перевірте ціну вручну.',
+  modelId: process.env.DEEPSEEK_MODEL || 'deepseek-flash',
+  inputPerMillionUsd: Number(process.env.DEEPSEEK_INPUT_PRICE) || 0.15,
+  outputPerMillionUsd: Number(process.env.DEEPSEEK_OUTPUT_PRICE) || 0.6,
+  note: 'DeepSeek V4.1 Flash, позапіковий тариф (21.09.2026, api-docs.deepseek.com). У пік — удвічі дорожче. Якщо DEEPSEEK_MODEL інша — перевірте ціну вручну.',
+};
+
+/**
+ * Ціни моделей DeepSeek — окремо на кожну, бо вони різні за порядком:
+ * flash $0.15 / $0.60, pro $0.66 / $1.98 за млн (та сама сторінка,
+ * 21.09.2026). Один рядок у селекторі — одна модель, і показана ціна
+ * має бути ціною САМЕ цієї моделі.
+ */
+export const DEEPSEEK_MODEL_PRICING: Record<
+  string,
+  { inputPerMillionUsd: number; outputPerMillionUsd: number; note?: string }
+> = {
+  'deepseek-flash': {
+    inputPerMillionUsd: 0.15,
+    outputPerMillionUsd: 0.6,
+    note: 'DeepSeek V4.1 Flash, позапіковий тариф (21.09.2026, api-docs.deepseek.com).',
+  },
+  'deepseek-v4-pro': {
+    inputPerMillionUsd: 0.66,
+    outputPerMillionUsd: 1.98,
+    note: 'DeepSeek V4 Pro (21.09.2026, api-docs.deepseek.com). Зору не має — для аналізу фото обирайте flash.',
+  },
+};
+
+/**
+ * Ціни моделей Groq. `llama-3.3-70b-versatile` — $0.59 / $0.79 за млн
+ * (звірено з groq.com у серпні 2026).
+ *
+ * Для `meta-llama/llama-4-scout-17b-16e-instruct` тариф НЕ звірено:
+ * консоль документації Groq недоступна для читання ззовні, а підставити
+ * ціну іншого вендора (OpenRouter) означало б показати автору число, за
+ * яким його не виставлять. Тому — `null`: картка тарифу показує «—», а
+ * калькулятор таку модель пропускає. Ціну треба вписати після звірки
+ * руками на groq.com/pricing.
+ */
+export const GROQ_MODEL_PRICING: Record<
+  string,
+  { inputPerMillionUsd: number | null; outputPerMillionUsd: number | null; note?: string }
+> = {
+  'llama-3.3-70b-versatile': {
+    inputPerMillionUsd: 0.59,
+    outputPerMillionUsd: 0.79,
+    note: 'Llama 3.3 70B через Groq (серпень 2026, groq.com).',
+  },
+  'meta-llama/llama-4-scout-17b-16e-instruct': {
+    inputPerMillionUsd: null,
+    outputPerMillionUsd: null,
+    note: 'Тариф Groq для Llama 4 Scout не звірено — впишіть після перевірки на groq.com/pricing. Модель бачить зображення.',
+  },
+};
+
+/**
+ * Ціни моделей Mistral. `mistral-large-latest` (Mistral Large 3) —
+ * $0.5 / $1.5 за млн (mistral.ai/pricing, серпень 2026). Інші моделі
+ * Mistral у списку не з'являлись, тож таблиця наразі з одного запису.
+ */
+export const MISTRAL_MODEL_PRICING: Record<
+  string,
+  { inputPerMillionUsd: number; outputPerMillionUsd: number; note?: string }
+> = {
+  'mistral-large-latest': {
+    inputPerMillionUsd: 0.5,
+    outputPerMillionUsd: 1.5,
+    note: 'Mistral Large 3 (серпень 2026, mistral.ai/pricing). Бачить зображення.',
+  },
 };
 
 /**
@@ -674,9 +745,15 @@ export function priceForTextEngine(
 export function priceRateForModel(
   engine: TextEngine,
   modelId: string
-): { inputPerMillionUsd: number; outputPerMillionUsd: number; note?: string } {
+): { inputPerMillionUsd: number | null; outputPerMillionUsd: number | null; note?: string } {
   if (engine === 'claude') return CLAUDE_MODEL_PRICING[modelId] || CLAUDE_TEXT_PRICING;
   if (engine === 'gpt') return GPT_MODEL_PRICING[modelId] || GPT_TEXT_PRICING;
+  // DeepSeek/Groq/Mistral теж мають таблиці ПО МОДЕЛЯХ: у DeepSeek різниця
+  // між flash і pro вчетверо, а в Groq мультимодальна Scout коштує інакше
+  // за текстову 3.3. `null` у таблиці — чесне «не звірено», не нуль.
+  if (engine === 'deepseek') return DEEPSEEK_MODEL_PRICING[modelId] || DEEPSEEK_TEXT_PRICING;
+  if (engine === 'groq') return GROQ_MODEL_PRICING[modelId] || GROQ_TEXT_PRICING;
+  if (engine === 'mistral') return MISTRAL_MODEL_PRICING[modelId] || MISTRAL_TEXT_PRICING;
   const snap = pricingSnapshot().textEngines;
   return snap[engine as keyof typeof snap] || TEXT_PRICING;
 }

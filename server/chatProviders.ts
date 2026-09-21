@@ -45,6 +45,16 @@ export interface ImageAttachment {
  * свій нативний формат; DeepSeek/Groq/Mistral цього не роблять узагалі,
  * бо підключені тут моделі текстові).
  */
+/**
+ * Рушії, чиї моделі в ЗАГАЛЬНОМУ випадку вміють приймати зображення.
+ *
+ * ЦЕ ЛИШЕ ЗАПАСНИЙ ПРАВИЛО ДЛЯ НЕВІДОМИХ id (див. `modelSupportsVision`):
+ * насправді зір — властивість КОНКРЕТНОЇ моделі, а не рушія. У Groq поряд
+ * лежать Llama 3.3 70B (текст) і Llama 4 Scout (text+image), у DeepSeek —
+ * `deepseek-flash` (Vision ✓) і `deepseek-v4-pro` (Vision ✗ за офіційною
+ * таблицею api-docs.deepseek.com/quick_start/pricing). Тому всі перевірки
+ * «чи побачить модель фото» йдуть через `modelSupportsVision(modelId)`.
+ */
 export const VISION_ENGINES: ReadonlySet<EngineId> = new Set(['gemini', 'gpt', 'claude']);
 
 /**
@@ -71,9 +81,9 @@ export const AUDIO_ENGINES: ReadonlySet<EngineId> = new Set(['gemini']);
  * Четвертий (необов'язковий) — власний ключ користувача (розділ «Ключі API»
  * в налаштуваннях), який іде в запит замість серверного env-ключа.
  * П'ятий (необов'язковий) — прикріплені зображення (jpg/png); мають сенс
- * лише для рушіїв із VISION_ENGINES, виклик відсікається раніше на рівні
- * роута (server/chatRoutes.ts), тож провайдери без vision цей аргумент
- * просто ніколи не отримують.
+ * лише для моделей із зором (`modelSupportsVision`), виклик відсікається
+ * раніше на рівні роута, тож моделі без зору цей аргумент не отримують,
+ * а ті, що отримують, конвертують його у свій нативний формат.
  */
 export type Generate = (
   prompt: string,
@@ -101,6 +111,33 @@ export interface ChatModelInfo {
   provider: string;
   /** Звірено/орієнтовно; показується в селекторі моделей. */
   contextWindow?: string;
+  /**
+   * Чи модель СПРАВДІ приймає зображення на вході (документація провайдера,
+   * не здогад). Показується клієнту в `/api/chat/models`, щоб у списку опису
+   * фото не було моделей, які гарантовано відмовляться, і щоб не було
+   * навпаки — текстової моделі, яку автор обере дарма.
+   */
+  vision: boolean;
+}
+
+/**
+ * Імена моделей, які провайдер більше не приймає, АЛЕ вони лежать у
+ * збережених книгах (`book.preferredAiModelId`).
+ *
+ * `deepseek-chat` — стара назва; у поточній документації DeepSeek моделей
+ * лише дві: `deepseek-flash` і `deepseek-v4-pro`, і перша з них уміє Vision.
+ * Мовчки надіслати провайдеру відправлене ім'я означало б повернути автору
+ * 400 замість тексту, тому перекладаємо на найближчу живу модель — явно,
+ * в одному місці й з поясненням.
+ */
+export const LEGACY_MODEL_ALIASES: Record<string, string> = {
+  'deepseek-chat': 'deepseek-flash',
+};
+
+/** Приводить збережене ім'я моделі до того, яке провайдер приймає сьогодні. */
+export function normalizeModelId(modelId: string): string {
+  const id = (modelId || '').trim();
+  return LEGACY_MODEL_ALIASES[id] ?? id;
 }
 
 /**
@@ -115,21 +152,47 @@ export interface ChatModelInfo {
  * 'gpt-4o'`, не повинні мовчки «осиротіти» через оновлення списку.
  */
 export const CHAT_MODELS: ChatModelInfo[] = [
-  { id: 'gemini-3.7-flash', engine: 'gemini', label: 'Gemini 3.7 Flash', provider: 'Google', contextWindow: '1M' },
-  { id: 'gpt-4o', engine: 'gpt', label: 'GPT-4o', provider: 'OpenAI', contextWindow: '128k' },
-  { id: 'gpt-5.5', engine: 'gpt', label: 'GPT-5.5', provider: 'OpenAI', contextWindow: '1M' },
-  { id: 'gpt-5.5-pro', engine: 'gpt', label: 'GPT-5.5 Pro', provider: 'OpenAI', contextWindow: '1M' },
-  { id: 'gpt-5.4-mini', engine: 'gpt', label: 'GPT-5.4 Mini', provider: 'OpenAI', contextWindow: '400k' },
-  { id: 'gpt-6-astra', engine: 'gpt', label: 'GPT-6 Astra', provider: 'OpenAI', contextWindow: '1M' },
-  { id: 'gpt-5.6-sol', engine: 'gpt', label: 'GPT-5.6 Sol', provider: 'OpenAI', contextWindow: '1M' },
-  { id: 'gpt-5.6-terra', engine: 'gpt', label: 'GPT-5.6 Terra', provider: 'OpenAI', contextWindow: '1M' },
-  { id: 'gpt-5.6-luna', engine: 'gpt', label: 'GPT-5.6 Luna', provider: 'OpenAI', contextWindow: '1M' },
-  { id: 'claude-haiku-4-5-20251001', engine: 'claude', label: 'Claude Haiku 4.5', provider: 'Anthropic', contextWindow: '200k' },
-  { id: 'claude-sonnet-5', engine: 'claude', label: 'Claude Sonnet 5', provider: 'Anthropic', contextWindow: '200k' },
-  { id: 'claude-opus-5', engine: 'claude', label: 'Claude Opus 5', provider: 'Anthropic', contextWindow: '200k' },
-  { id: 'deepseek-chat', engine: 'deepseek', label: 'DeepSeek V4', provider: 'DeepSeek', contextWindow: '64k' },
-  { id: 'llama-3.3-70b-versatile', engine: 'groq', label: 'Llama 3.3 70B (Groq)', provider: 'Groq', contextWindow: '128k' },
-  { id: 'mistral-large-latest', engine: 'mistral', label: 'Mistral Large', provider: 'Mistral', contextWindow: '128k' },
+  // Gemini: мультимодальний (text+image+file+audio+video у кожній моделі лінійки).
+  { id: 'gemini-3.7-flash', engine: 'gemini', label: 'Gemini 3.7 Flash', provider: 'Google', contextWindow: '1M', vision: true },
+  // OpenAI: уся лінійка GPT-5.x і gpt-4o приймає зображення (text+image+file).
+  { id: 'gpt-4o', engine: 'gpt', label: 'GPT-4o', provider: 'OpenAI', contextWindow: '128k', vision: true },
+  { id: 'gpt-5.5', engine: 'gpt', label: 'GPT-5.5', provider: 'OpenAI', contextWindow: '1M', vision: true },
+  { id: 'gpt-5.5-pro', engine: 'gpt', label: 'GPT-5.5 Pro', provider: 'OpenAI', contextWindow: '1M', vision: true },
+  { id: 'gpt-5.4-mini', engine: 'gpt', label: 'GPT-5.4 Mini', provider: 'OpenAI', contextWindow: '400k', vision: true },
+  { id: 'gpt-6-astra', engine: 'gpt', label: 'GPT-6 Astra', provider: 'OpenAI', contextWindow: '1M', vision: true },
+  { id: 'gpt-5.6-sol', engine: 'gpt', label: 'GPT-5.6 Sol', provider: 'OpenAI', contextWindow: '1M', vision: true },
+  { id: 'gpt-5.6-terra', engine: 'gpt', label: 'GPT-5.6 Terra', provider: 'OpenAI', contextWindow: '1M', vision: true },
+  { id: 'gpt-5.6-luna', engine: 'gpt', label: 'GPT-5.6 Luna', provider: 'OpenAI', contextWindow: '1M', vision: true },
+  // Claude: text+image+file у Haiku 4.5, Sonnet 5 і Opus 5.
+  { id: 'claude-haiku-4-5-20251001', engine: 'claude', label: 'Claude Haiku 4.5', provider: 'Anthropic', contextWindow: '200k', vision: true },
+  { id: 'claude-sonnet-5', engine: 'claude', label: 'Claude Sonnet 5', provider: 'Anthropic', contextWindow: '200k', vision: true },
+  { id: 'claude-opus-5', engine: 'claude', label: 'Claude Opus 5', provider: 'Anthropic', contextWindow: '200k', vision: true },
+  /*
+    DeepSeek — єдиний рушій у списку, де зір залежить від моделі:
+    `deepseek-flash` (DeepSeek-V4.1-Flash) має Vision ✓, `deepseek-v4-pro` —
+    «Not supported» (таблиця «Model Details» на
+    api-docs.deepseek.com/quick_start/pricing, звірено 21.09.2026).
+  */
+  { id: 'deepseek-flash', engine: 'deepseek', label: 'DeepSeek V4.1 Flash', provider: 'DeepSeek', contextWindow: '1M', vision: true },
+  { id: 'deepseek-v4-pro', engine: 'deepseek', label: 'DeepSeek V4 Pro', provider: 'DeepSeek', contextWindow: '1M', vision: false },
+  /*
+    Groq — та сама історія: Llama 3.3 70B текстова, а Llama 4 Scout за
+    карткою моделі Meta приймає до 5 зображень на запит
+    (llama.com → Model Cards → Llama 4: «Multimodal — Input: Text + up to
+    5 images»). Тому в списку обидві: текстова дешевша й швидша, а для
+    опису фото автор має обрати Scout.
+
+    ⚠ Ідентифікатор Scout узято з переліку Groq (`meta-llama/<модель>`), але
+    САМЕ цим рядком він живим викликом ще не підтверджений: консоль Groq
+    не читається зовні (CSP), а власного ключа Groq у розробці немає.
+    Перевірити першим реальним запитом: якщо Groq знає модель під іншим
+    ім'ям, він відповість 404 на неї — автор побачить це в повідомленні
+    помилки (не мовчазну підміну), і рядок треба буде поправити тут.
+  */
+  { id: 'llama-3.3-70b-versatile', engine: 'groq', label: 'Llama 3.3 70B (Groq)', provider: 'Groq', contextWindow: '128k', vision: false },
+  { id: 'meta-llama/llama-4-scout-17b-16e-instruct', engine: 'groq', label: 'Llama 4 Scout (Groq)', provider: 'Groq', contextWindow: '1M', vision: true },
+  // Mistral Large 3 (alias `-latest`) — text+image+file за docs.mistral.ai/capabilities/vision.
+  { id: 'mistral-large-latest', engine: 'mistral', label: 'Mistral Large', provider: 'Mistral', contextWindow: '128k', vision: true },
 ];
 
 export const ENGINE_LABELS: Record<EngineId, string> = {
@@ -160,9 +223,13 @@ export function engineConfigured(engine: EngineId): boolean {
  * рушій; невідомі — за префіксом (щоб зміна моделі на нову версію того ж
  * провайдера не потребувала правок коду). Невпізнане падає на gemini — це
  * поведінка до цієї зміни, тож старі сесії лишаються робочими.
+ *
+ * Старе ім'я моделі (`deepseek-chat`) спершу перекладається на живе
+ * (`normalizeModelId`) — інакше рушій усе одно вгадався б за префіксом, але
+ * в запит пішло б ім'я, якого провайдер більше не приймає.
  */
 export function resolveEngine(modelId: string): EngineId {
-  const id = (modelId || '').toLowerCase();
+  const id = normalizeModelId(modelId).toLowerCase();
   if (!id) return 'gemini';
   if (id.startsWith('gemini')) return 'gemini';
   if (id.startsWith('gpt') || id.startsWith('o1') || id.startsWith('o3') || id.startsWith('chatgpt')) return 'gpt';
@@ -176,7 +243,52 @@ export function resolveEngine(modelId: string): EngineId {
 /** Чи відома модель (чи впізнається рушій) — для валідації на POST /sessions. */
 export function isKnownModel(modelId: string): boolean {
   if (!modelId) return false;
-  return CHAT_MODELS.some((m) => m.id === modelId) || resolveEngine(modelId) !== 'gemini';
+  const id = normalizeModelId(modelId);
+  return CHAT_MODELS.some((m) => m.id === id) || resolveEngine(id) !== 'gemini';
+}
+
+/**
+ * Чи ЦЯ модель прийме зображення.
+ *
+ * Два ступені точності, саме в цьому порядку:
+ *   1. модель є в реєстрі — відповідь беремо звідти (єдине місце правди);
+ *   2. моделі немає (нова версія того ж провайдера) — питаємо РУШІЙ. Тут
+ *      відповідь неминуче нерівна, і саме тому вона лишається так:
+ *      у Gemini/GPT/Claude (`VISION_ENGINES`) усі актуальні моделі
+ *      мультимодальні, тож невідомий `gpt-9-…` отримує `true` — інакше нова
+ *      зряча модель була б заблокована до правки коду;
+ *      у DeepSeek/Groq/Mistral моделі обох видів стоять поряд, тож невідомий
+ *      `deepseek-…` отримує `false` — обіцяти зір навмання означало б
+ *      віддати авторові помилку провайдера посеред роботи з фото замість
+ *      чесної відмови з порадою обрати зрячу модель.
+ *      (Цілком невідомий id `resolveEngine` трактує як gemini — так було й до
+ *      цієї правки; такий виклик однаково впаде на самому імені моделі.)
+ */
+export function modelSupportsVision(modelId: string): boolean {
+  const id = normalizeModelId(modelId);
+  const known = CHAT_MODELS.find((m) => m.id === id);
+  if (known) return known.vision;
+  const engine = resolveEngine(id);
+  return VISION_ENGINES.has(engine);
+}
+
+/** Людська назва моделі за id — щоб відмова в роуті називала САМЕ ту модель, яку обрав автор. */
+export function chatModelLabel(modelId: string): string {
+  const id = normalizeModelId(modelId);
+  return CHAT_MODELS.find((m) => m.id === id)?.label || id || 'невідома модель';
+}
+
+/**
+ * Перелік рушіїв, у яких є хоч одна модель із зором — для підказки в
+ * повідомленні-відмові. Обчислюється з `CHAT_MODELS`, а не пишеться руками:
+ * додали мультимодальну модель новому провайдеру — підказка оновилась сама.
+ */
+export function visionEngineHint(): string {
+  const withVision = new Set(CHAT_MODELS.filter((m) => m.vision).map((m) => m.engine));
+  return (Object.keys(ENGINE_LABELS) as EngineId[])
+    .filter((e) => withVision.has(e))
+    .map((e) => ENGINE_LABELS[e])
+    .join(', ');
 }
 
 export class ChatProviderError extends Error {
@@ -210,9 +322,27 @@ async function openAiCompatible(
   const key = apiKeyOverride?.trim() || process.env[envKey]?.trim();
   if (!key) throw missingKeyError(envKey);
 
-  // Content-частини (image_url) розуміє лише OpenAI (GPT-4o) — сюди доходить
-  // лише коли VISION_ENGINES дозволив це на рівні роута, тож для DeepSeek/
-  // Groq/Mistral `images` завжди порожній.
+  /*
+    Старе ім'я моделі (`deepseek-chat`) провайдер більше не приймає —
+    перекладаємо його на живе ДО запиту. Книги, збережені до цієї правки,
+    тримають саме старий id у `preferredAiModelId`, і без перекладу автор
+    отримував би 400 замість тексту.
+  */
+  const model = normalizeModelId(modelId);
+
+  /*
+    Зображення йдуть у тіло запиту для ВСІХ OpenAI-сумісних рушіїв (OpenAI,
+    DeepSeek, Groq, Mistral): усі четверо приймають `image_url` у вмісті
+    повідомлення. Чи дійде до цього коду картинка — вирішує не рушій, а
+    КОНКРЕТНА модель (`modelSupportsVision`): у Groq поряд лежать текстова
+    Llama 3.3 70B і мультимодальна Llama 4 Scout, у DeepSeek —
+    `deepseek-flash` (Vision ✓) і `deepseek-v4-pro` (Vision ✗).
+
+    Форма частини — об'єкт `{ url: 'data:...' }`, як описано в документації
+    OpenAI Chat Completions; тієї самої форми вживає сумісний шар DeepSeek і
+    Groq. Mistral у прикладах показує і рядок, і об'єкт (їхній SDK приймає
+    обидві форми), тож об'єкт лишається спільним для всіх чотирьох.
+  */
   const userContent =
     images && images.length > 0
       ? [
@@ -241,21 +371,21 @@ async function openAiCompatible(
     const upstream = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: JSON.stringify(buildOpenAiBody({ modelId, messages, json, quirks })),
+      body: JSON.stringify(buildOpenAiBody({ modelId: model, messages, json, quirks })),
     });
     const payload = await upstream.json().catch(() => ({}));
     return { upstream, payload };
   };
 
-  let { upstream, payload: data } = await attempt(quirksFor(modelId));
+  let { upstream, payload: data } = await attempt(quirksFor(model));
 
   if (!upstream.ok) {
     // Провайдер сам називає, що саме не так із параметром — звужуємо набір
     // для цієї моделі й пробуємо ще РАЗ (саме один: якщо не допомогло,
     // причина не в параметрах, і цикл лише палив би квоту).
-    const adapted = adaptQuirks(modelId, data?.error?.message || '');
+    const adapted = adaptQuirks(model, data?.error?.message || '');
     if (adapted) {
-      rememberQuirks(modelId, adapted);
+      rememberQuirks(model, adapted);
       ({ upstream, payload: data } = await attempt(adapted));
     }
   }
@@ -286,7 +416,10 @@ async function generateGemini(
   if (!key) throw missingKeyError('GEMINI_API_KEY');
 
   const imageParts = (images || []).map((img) => ({ inlineData: { mimeType: img.mimeType, data: img.dataBase64 } }));
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(key)}`;
+  // Старе ім'я моделі не приймається провайдером — те саме перекладання, що
+  // в openAiCompatible.
+  const model = normalizeModelId(modelId);
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
   const upstream = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'User-Agent': 'aistudio-build' },
@@ -325,6 +458,9 @@ async function generateClaude(
 ): Promise<GenerateResult> {
   const key = apiKeyOverride?.trim() || process.env.ANTHROPIC_API_KEY?.trim();
   if (!key) throw missingKeyError('ANTHROPIC_API_KEY');
+
+  /** Старе ім'я моделі не приймається провайдером — див. `LEGACY_MODEL_ALIASES`. */
+  const model = normalizeModelId(modelId);
 
   const userContent =
     images && images.length > 0
@@ -375,7 +511,7 @@ async function generateClaude(
       // this model», якщо параметр взагалі присутній у тілі запиту — навіть
       // зі значенням за замовчуванням.
       body: JSON.stringify({
-        model: modelId,
+        model,
         system: systemInstruction,
         messages,
         max_tokens: 4096,

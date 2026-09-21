@@ -728,9 +728,9 @@ export const EditorView: React.FC<EditorViewProps> = ({
   const [aiImageMenu, setAiImageMenu] = useState<{
     imageId: string; x: number; y: number; editorKind: 'ua' | 'en'; getPos: () => number;
   } | null>(null);
-  /** Список рушіїв AI-ядра книги (для вибору робочого модуля, якщо рушій книги не аналізує фото) — вантажиться лениво, лише коли справді знадобиться. */
+  /** Список моделей AI-ядра книги (для вибору робочого модуля, якщо модель книги не аналізує фото) — вантажиться лениво, лише коли справді знадобиться. `vision` приходить із сервера: зір — властивість моделі, не рушія. */
   const [aiCoreModels, setAiCoreModels] = useState<
-    { id: string; label: string; engine: string; available: boolean }[]
+    { id: string; label: string; engine: string; available: boolean; vision: boolean }[]
   >([]);
   /** Запит на вибір робочого модуля (рушій книги не вміє аналізувати фото) — той самий контекст, що й aiImageMenu, лишається до завершення вибору. */
   const [aiEnginePicker, setAiEnginePicker] = useState<{
@@ -1535,17 +1535,25 @@ export const EditorView: React.FC<EditorViewProps> = ({
     }
   };
 
-  /** Рушії AI-ядра, що вміють аналізувати фото (server/chatProviders.ts::VISION_ENGINES) — дзеркало на фронтенді, лише для фільтрації списку в пікері робочого модуля. */
-  const VISION_ENGINES_FRONT = new Set(['gemini', 'gpt', 'claude']);
-
-  /** Ліниво вантажить список моделей AI-ядра (раз на відкритий редактор) — потрібен лише для перевірки, чи рушій книги вміє аналізувати фото, і для списку в пікері робочого модуля. */
-  const ensureAiCoreModels = async (): Promise<{ id: string; label: string; engine: string; available: boolean }[]> => {
+  /**
+   * Ліниво вантажить список моделей AI-ядра (раз на відкритий редактор) —
+   * потрібен для перевірки, чи модель книги вміє аналізувати фото, і для
+   * списку в пікері робочого модуля.
+   *
+   * `vision` — з сервера (`server/chatProviders.ts::CHAT_MODELS`), бо зір є
+   * властивістю МОДЕЛІ: у Groq текстова Llama 3.3 70B і мультимодальна
+   * Llama 4 Scout стоять поряд, і перевірка по рушію помилялась би в обидва
+   * боки — і забороняла б Scout, і пропускала текстовий `deepseek-v4-pro`.
+   */
+  const ensureAiCoreModels = async (): Promise<
+    { id: string; label: string; engine: string; available: boolean; vision: boolean }[]
+  > => {
     if (aiCoreModels.length) return aiCoreModels;
     try {
       const res = await fetch('/api/chat/models', { credentials: 'same-origin' });
       if (!res.ok) return [];
       const data = await res.json();
-      const list = (data.models || []) as { id: string; label: string; engine: string; available: boolean }[];
+      const list = (data.models || []) as { id: string; label: string; engine: string; available: boolean; vision: boolean }[];
       setAiCoreModels(list);
       return list;
     } catch {
@@ -1706,13 +1714,16 @@ export const EditorView: React.FC<EditorViewProps> = ({
   ) => {
     const models = await ensureAiCoreModels();
     let modelId = book.preferredAiModelId || '';
-    let engine = modelId ? models.find((m) => m.id === modelId)?.engine : 'gemini';
     if (!modelId) {
       modelId = models.find((m) => m.engine === 'gemini')?.id || 'gemini-3.7-flash';
-      engine = 'gemini';
     }
 
-    if (engine && !VISION_ENGINES_FRONT.has(engine)) {
+    // Не бачить фото — одразу пікер, без марного запиту до моделі. Модель,
+    // якої немає в списку (нова версія того ж провайдера), пропускаємо: хай
+    // вирішує сервер, а він на відмову відповість `vision_unsupported` — і
+    // пікер відкриється другим шляхом, після відповіді.
+    const chosen = models.find((m) => m.id === modelId);
+    if (chosen && !chosen.vision) {
       setAiEnginePicker({ imageId, x, y, editorKind, getPos, paragraphCount });
       return;
     }
@@ -7364,7 +7375,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
             {t('editor.aiEnginePickerHeading')}
           </div>
           {(() => {
-            const options = aiCoreModels.filter((m) => VISION_ENGINES_FRONT.has(m.engine) && m.available);
+            const options = aiCoreModels.filter((m) => m.vision && m.available);
             if (options.length === 0) {
               return <div className="px-2.5 py-2 text-[11px] text-slate-500 italic">{t('editor.aiEnginePickerEmpty')}</div>;
             }

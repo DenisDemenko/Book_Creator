@@ -156,6 +156,17 @@ export const CORE_MODULE_KEYS = [
 
 export type CoreModuleKey = (typeof CORE_MODULE_KEYS)[number];
 
+/**
+ * Модулі, яким на вхід іде ЗОБРАЖЕННЯ.
+ *
+ * Єдиний такий модуль на сьогодні — `textFromImage` («Текст за фото»):
+ * у решті плейсхолдери текстові. Потрібен, щоб адмінська прив'язка
+ * «модуль → модель» не могла віддати текстовій моделі (напр.
+ * `deepseek-v4-pro`) модуль, який без зору не працює: інакше помилку бачив
+ * би автор, а причина лежала б у налаштуваннях адміністратора.
+ */
+export const CORE_VISION_MODULES: ReadonlySet<CoreModuleKey> = new Set<CoreModuleKey>(['textFromImage']);
+
 export interface CorePromptTemplate {
   system: string;
   user: string;
