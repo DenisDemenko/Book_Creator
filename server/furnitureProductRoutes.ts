@@ -31,9 +31,14 @@ import {
   DESCRIPTION_MAX,
   MAX_GALLERY_PHOTOS,
   MAX_GALLERY_VIDEOS,
+  effectivePriceUah,
+  hasVariantPriceRange,
   isVideoMedia,
+  variantIssues,
+  visibleVariants,
   type FurnitureMediaItem,
   type FurnitureProduct,
+  type FurnitureVariant,
 } from '../src/components/adminOs/furnitureProduct';
 
 const DRAFTS_KEY = 'furniture_product_drafts';
@@ -140,7 +145,11 @@ function serverPublishIssues(p: FurnitureProduct): string[] {
   const videoCount = media.filter((m) => isVideoMedia(m)).length;
   if (!p.name?.trim()) issues.push('Немає назви виробу.');
   if (!p.sku?.trim()) issues.push('Немає артикула / SKU.');
-  if (!(p.priceUah > 0)) issues.push('Ціна має бути більшою за нуль.');
+  // Ціна з урахуванням варіантів (#225) — те саме правило, що й на клієнті:
+  // товар із порожньою базовою ціною, але з цінами у варіантах, — валідний.
+  if (!(effectivePriceUah(p) > 0)) {
+    issues.push('Ціна має бути більшою за нуль.');
+  }
   if (photoCount === 0) issues.push('Немає жодного фото — додайте головний банер.');
   if (photoCount > MAX_GALLERY_PHOTOS) {
     issues.push(`Забагато фото: ${photoCount} із дозволених ${MAX_GALLERY_PHOTOS}.`);
@@ -163,6 +172,10 @@ function serverPublishIssues(p: FurnitureProduct): string[] {
   if ((p.description?.trim().length ?? 0) > DESCRIPTION_MAX) {
     issues.push(`Опис задовгий: ${p.description.trim().length} із ${DESCRIPTION_MAX} символів.`);
   }
+  // Варіанти (#225): унікальність артикулів і межі рядка — ті самі
+  // перевірки, що й у редакторі. Дубль SKU, який пройшов би тут, означав
+  // би дві позиції замовлення з однаковим артикулом і різними цінами.
+  issues.push(...variantIssues(p));
   return issues;
 }
 
@@ -191,7 +204,34 @@ function toBridgeAttributes(p: FurnitureProduct): PublishProductAttributes {
     engravingPriceMinor: Math.round(p.engravingPriceUah * 100),
     resinColor: p.resinColor,
     phoneFit: p.phoneFit,
+    // Вітрина пише «від N» лише тоді, коли ціни видимих варіантів різні.
+    variantPriceRange: hasVariantPriceRange(p) || undefined,
   };
+}
+
+/**
+ * Варіанти виробу → контракт мосту (задача #225).
+ *
+ * Видимі варіанти їдуть першими за ціною: у випадному списку покупця
+ * найдешевший варіант читається як «той, з якого починається товар», і саме
+ * він стоїть типово вибраним на вітрині. Приховані не відкидаються зовсім —
+ * вони лишаються в даних з `visible: false`, бо автор може приховати варіант
+ * на час, а не видалити його назовсім.
+ */
+export function toBridgeVariants(variants: FurnitureVariant[] | undefined) {
+  return (variants || [])
+    .filter((v) => v.name.trim() && v.sku.trim() && v.priceUah > 0)
+    .sort((a, b) => Number(b.visible) - Number(a.visible) || a.priceUah - b.priceUah)
+    .map((v) => ({
+      name: v.name.trim(),
+      sku: v.sku.trim(),
+      priceMinor: Math.round(v.priceUah * 100),
+      stock: v.stock === null || v.stock === undefined ? undefined : Math.max(0, Math.round(v.stock)),
+      visible: v.visible,
+      options: (v.options || [])
+        .filter((o) => o.name.trim() && o.value.trim())
+        .map((o) => ({ name: o.name.trim(), value: o.value.trim() })),
+    }));
 }
 
 /**
@@ -346,7 +386,11 @@ export function registerFurnitureProductRoutes(app: Express): void {
         subtitle: product.teaser,
         summary: product.teaser,
         description: product.description,
-        priceMinor: Math.round(product.priceUah * 100),
+        // Ціна картки в каталозі — найдешевший ВИДИМИЙ варіант, якщо вони є:
+        // покупець бачить на картці «від 95 $», а на сторінці — точну ціну
+        // свого варіанта (#225). Без варіантів це та сама ціна товару, що й
+        // була раніше.
+        priceMinor: Math.round(effectivePriceUah(product) * 100),
         basePriceMinor: product.basePriceUah > 0 ? Math.round(product.basePriceUah * 100) : undefined,
         // `null` — «не обліковується» (виріб на замовлення): тоді поле взагалі
         // не їде, і вітрина не показує «немає в наявності» замість покупки.
@@ -357,6 +401,7 @@ export function registerFurnitureProductRoutes(app: Express): void {
           : Math.max(0, Math.round(product.stock)),
         highlights: product.functionalZones,
         attributes: toBridgeAttributes(product),
+        variants: toBridgeVariants(product.variants),
         sellerSlug,
       });
       setPublishProgress(id, {

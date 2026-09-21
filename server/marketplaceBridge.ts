@@ -1108,6 +1108,35 @@ export interface PublishProductAttributes {
   engravingPriceMinor?: number;
   resinColor?: boolean;
   phoneFit?: boolean;
+  /**
+   * Чи ціни видимих варіантів різні — тоді вітрина має писати «від», а не
+   * просто ціну. Обчислюється в Студії (`hasVariantPriceRange`) і їде як
+   * факт, а не як припущення приймача: саме Студія знає, скільки у товару
+   * варіантів і які з них видимі.
+   */
+  variantPriceRange?: boolean;
+}
+
+/**
+ * Варіант виробу на боці мосту — те, що їде в `variants` тіла запиту.
+ *
+ * Окрема структура, а не частина `attributes`: варіант — це не
+ * характеристика товару, а САМОСТІЙНИЙ АРТИКУЛ із ціною й залишком, який
+ * вітрина продає окремим рядком кошика (задача #225).
+ */
+export interface PublishProductVariant {
+  /** Людська назва у виборі покупця: «3pc + Open Notes». */
+  name: string;
+  /** Власний артикул варіанта. */
+  sku: string;
+  /** Ціна варіанта в копійках. */
+  priceMinor: number;
+  /** Залишок; відсутній — «на замовлення». */
+  stock?: number;
+  /** Чи показувати покупцеві. */
+  visible: boolean;
+  /** Опції: «Комплектація» → «3pc + Open Notes». */
+  options?: Array<{ name: string; value: string }>;
 }
 
 export interface PublishProductInput {
@@ -1126,6 +1155,11 @@ export interface PublishProductInput {
   /** Короткі переваги — поверх атрибутів, якщо треба. */
   highlights?: string[];
   attributes?: PublishProductAttributes;
+  /**
+   * Додаткові артикули тієї самої назви (#225). Порожній/відсутній масив —
+   * товар продається одним артикулом, як і до цієї задачі.
+   */
+  variants?: PublishProductVariant[];
   sellerSlug?: string;
 }
 
@@ -1166,6 +1200,11 @@ export async function publishProductToMarketplace(
     coverUrl: input.coverUrl,
     highlights: input.highlights,
     attributes: input.attributes,
+    // Варіанти їдуть ОКРЕМИМ полем, а не в attributes: приймач зберігає їх
+    // у `attributes.variants` лістингу, але продаються вони як самостійні
+    // артикули (кошик, замовлення) — і на боці мосту це видно вже з форми
+    // запиту (задача #225).
+    variants: input.variants?.length ? input.variants : undefined,
     sellerSlug: input.sellerSlug,
   };
 

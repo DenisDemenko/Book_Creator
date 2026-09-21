@@ -55,6 +55,47 @@ export interface FurnitureColor {
 }
 
 /**
+ * Одна опція варіанта: «Комплектація» → «3pc + Open Notes», «Колір» → «Oak».
+ *
+ * ЧОМУ ПАРИ «назва → значення», а не фіксовані поля. Власник назвав три
+ * різні вісі (комплектація, покраска, розміри) — і саме тому жорсткі колонки
+ * під кожну з них застаріли б на першій же новій вісі. Пари дають і одну
+ * вісь (як у прикладі на скріншоті: «Organizer Set» з трьома значеннями),
+ * і кілька одразу, без зміни схеми.
+ */
+export interface FurnitureVariantOption {
+  /** Назва опції: «Комплектація», «Колір», «Розмір». */
+  name: string;
+  /** Значення цієї опції у варіанті: «3pc + Open Notes», «Oak», «30 × 40 см». */
+  value: string;
+}
+
+/**
+ * Варіант виробу — ДОДАТКОВИЙ АРТИКУЛ тієї самої назви (задача #225).
+ *
+ * Навіщо окремий артикул, а не просто поле «колір»: у власника комплектації
+ * відрізняються і складом, і ціною (2pc — 95$, 3pc — 110$, 4pc — 120$), тож
+ * покупець має бачити вибір із власною ціною, а склад — знати, ЩО саме
+ * поїхало. Наскрізний шлях одного варіанта: картка в Студії → міст →
+ * `attributes.variants` лістингу → вибір на вітрині → рядок кошика →
+ * позиція замовлення (там уже знімок назви й ціни).
+ */
+export interface FurnitureVariant {
+  id: string;
+  /** Назва у виборі покупця: «3pc + Open Notes». */
+  name: string;
+  /** Власний артикул варіанта — саме те, що просив власник. */
+  sku: string;
+  /** Ціна варіанта в гривнях цілими (так само, як у базової картки — `priceUah`). */
+  priceUah: number;
+  /** `null` — «не обліковується / на замовлення», як і в базової картки. */
+  stock: number | null;
+  /** Показувати цей варіант покупцеві на вітрині. */
+  visible: boolean;
+  options: FurnitureVariantOption[];
+}
+
+/**
  * Вбудована програмована електроніка — понад просту LED-підсвітку.
  * Плата монтується в деревʼяну основу, дисплея поки немає (керування
  * кнопками/датчиками/застосунком). Власник: «Клектроника додається
@@ -116,6 +157,13 @@ export interface FurnitureProduct {
   woodTones: FurnitureWoodTone[];
   /** Доступні тони та персоналізація. */
   availableColors: FurnitureColor[];
+  /**
+   * Додаткові артикули тієї самої назви (комплектація / колір / розмір).
+   * Порожній масив — товар продається одним артикулом, як і до #225:
+   * саме тому поле необов'язкове за змістом, а вітрина показує базову ціну
+   * `priceUah` без вибору.
+   */
+  variants: FurnitureVariant[];
   engraving: boolean;
   engravingPriceUah: number;
   resinColor: boolean;
@@ -215,6 +263,149 @@ export function furnitureUid(): string {
   return `fp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+/**
+ * Межі варіантів. Числа тут — не естетика, а межа розуму: список варіантів
+ * показується покупцеві в одному випадному списку, а приймач мосту валідує
+ * кожен рядок. Ті самі межі перевіряються і в Студії, і в DTO маркетплейсу.
+ */
+export const MAX_VARIANTS = 30;
+export const VARIANT_NAME_MAX = 120;
+export const VARIANT_OPTION_NAME_MAX = 40;
+export const VARIANT_OPTION_VALUE_MAX = 80;
+export const MAX_VARIANT_OPTIONS = 6;
+
+/** Порожній варіант — з підготовленими полями, щоб не вводити назви колонок двічі. */
+export function blankFurnitureVariant(index = 1): FurnitureVariant {
+  return {
+    id: furnitureUid(),
+    name: '',
+    sku: '',
+    priceUah: 0,
+    stock: null,
+    visible: true,
+    options: [{ name: 'Комплектація', value: '' }],
+  };
+}
+
+/** Варіанти, які покупець справді побачить на вітрині. */
+export function visibleVariants(p: Pick<FurnitureProduct, 'variants'>): FurnitureVariant[] {
+  return (p.variants || []).filter((v) => v.visible);
+}
+
+/**
+ * Ціна, за якою товар показується в каталозі й сортується.
+ *
+ * З варіантами це НАЙДЕШЕВШИЙ видимий — те саме «від 95$», яке покупець
+ * бачить на картці перед тим, як відкрити сторінку (на скріншоті власника
+ * ціна картки — саме ціна вибраного варіанта). Якщо видимих варіантів немає
+ * (їх не завели або всі приховані) — базова ціна товару, тобто поведінка до
+ * #225 не ламається.
+ */
+export function effectivePriceUah(p: FurnitureProduct): number {
+  const visible = visibleVariants(p).filter((v) => v.priceUah > 0);
+  if (!visible.length) return p.priceUah;
+  return Math.min(...visible.map((v) => v.priceUah));
+}
+
+/** Чи ціни видимих варіантів різні — тоді вітрина має казати «від», а не «ціна». */
+export function hasVariantPriceRange(p: FurnitureProduct): boolean {
+  const prices = visibleVariants(p)
+    .filter((v) => v.priceUah > 0)
+    .map((v) => v.priceUah);
+  return new Set(prices).size > 1;
+}
+
+/** Унікальні назви опцій у товарі — підказка для колонки «Опції» в редакторі. */
+export function variantOptionNames(p: Pick<FurnitureProduct, 'variants'>): string[] {
+  const names: string[] = [];
+  for (const variant of p.variants || []) {
+    for (const option of variant.options || []) {
+      const name = option.name.trim();
+      if (name && !names.includes(name)) names.push(name);
+    }
+  }
+  return names;
+}
+
+/**
+ * Перевірки варіантів — окремо від загальних, щоб і тест, і редактор
+ * показували ТУ САМУ причину відмови, а не два схожі формулювання.
+ *
+ * Найважливіше тут — унікальність артикула: два варіанти з тим самим SKU на
+ * вітрині означали б, що склад не знає, що саме пакувати, а покупець бачить
+ * два однакові рядки з різними цінами.
+ */
+export function variantIssues(p: FurnitureProduct): string[] {
+  const issues: string[] = [];
+  const variants = p.variants || [];
+  if (!variants.length) return issues;
+
+  if (variants.length > MAX_VARIANTS) {
+    issues.push(`Забагато варіантів: ${variants.length} із дозволених ${MAX_VARIANTS}.`);
+  }
+
+  const seenSku = new Map<string, number>();
+  const baseSku = p.sku.trim().toLowerCase();
+
+  variants.forEach((variant, index) => {
+    const where = `Варіант ${index + 1}`;
+    const name = variant.name.trim();
+    const sku = variant.sku.trim();
+
+    if (!name) issues.push(`${where}: немає назви варіанта.`);
+    else if (name.length > VARIANT_NAME_MAX) {
+      issues.push(`${where}: назва задовга (${name.length} із ${VARIANT_NAME_MAX}).`);
+    }
+
+    if (!sku) issues.push(`${where}: немає артикула / SKU.`);
+    else if (baseSku && sku.toLowerCase() === baseSku) {
+      issues.push(`${where}: артикул «${sku}» збігається з артикулом товару — потрібен власний.`);
+    } else {
+      const key = sku.toLowerCase();
+      const first = seenSku.get(key);
+      if (first !== undefined) issues.push(`${where}: артикул «${sku}» уже зайнятий варіантом ${first}.`);
+      else seenSku.set(key, index + 1);
+    }
+
+    if (!(variant.priceUah > 0)) issues.push(`${where}: ціна має бути більшою за нуль.`);
+    if (variant.stock !== null && (!Number.isFinite(variant.stock) || variant.stock < 0)) {
+      issues.push(`${where}: залишок не може бути від’ємним.`);
+    }
+
+    const options = (variant.options || []).filter(
+      (o) => o.name.trim() || o.value.trim()
+    );
+    if (options.length > MAX_VARIANT_OPTIONS) {
+      issues.push(`${where}: забагато опцій (${options.length} із ${MAX_VARIANT_OPTIONS}).`);
+    }
+    const optionNames = new Set<string>();
+    options.forEach((option) => {
+      const optionName = option.name.trim();
+      const value = option.value.trim();
+      if (!optionName || !value) {
+        issues.push(`${where}: опція має мати і назву, і значення.`);
+        return;
+      }
+      if (optionName.length > VARIANT_OPTION_NAME_MAX) {
+        issues.push(`${where}: назва опції задовга (${optionName.length} із ${VARIANT_OPTION_NAME_MAX}).`);
+      }
+      if (value.length > VARIANT_OPTION_VALUE_MAX) {
+        issues.push(`${where}: значення опції задовге (${value.length} із ${VARIANT_OPTION_VALUE_MAX}).`);
+      }
+      if (optionNames.has(optionName.toLowerCase())) {
+        issues.push(`${where}: опція «${optionName}» указана двічі.`);
+      }
+      optionNames.add(optionName.toLowerCase());
+    });
+  });
+
+  if (!variants.some((v) => v.visible)) {
+    issues.push('Усі варіанти приховані — покупець не побачить жодного.');
+  }
+
+  return issues;
+}
+
 /** Порожня картка — зі значеннями з макета, щоб не вводити з нуля. */
 export function blankFurnitureProduct(): FurnitureProduct {
   return {
@@ -247,6 +438,7 @@ export function blankFurnitureProduct(): FurnitureProduct {
     media: [],
     woodTones: DEFAULT_WOOD_TONES.map((t) => ({ ...t })),
     availableColors: DEFAULT_COLORS.map((c) => ({ ...c })),
+    variants: [],
     engraving: true,
     engravingPriceUah: 350,
     resinColor: true,
@@ -297,7 +489,17 @@ export function furniturePublishIssues(p: FurnitureProduct): string[] {
   const videoCount = p.media.filter((m) => isVideoMedia(m)).length;
   if (!p.name.trim()) issues.push('Немає назви виробу.');
   if (!p.sku.trim()) issues.push('Немає артикула / SKU.');
-  if (!(p.priceUah > 0)) issues.push('Ціна має бути більшою за нуль.');
+  // Ціну перевіряємо З УРАХУВАННЯМ варіантів (#225): товар, у якого базова
+  // ціна порожня, а всі ціни лежать у варіантах, — це нормальний випадок, і
+  // відмовляти йому через порожнє `priceUah` було б несправделиво.
+  const effectivePrice = effectivePriceUah(p);
+  if (!(effectivePrice > 0)) {
+    issues.push(
+      (p.variants || []).length
+        ? 'Немає жодної ціни: задайте ціну хоча б одному видимому варіанту.'
+        : 'Ціна має бути більшою за нуль.'
+    );
+  }
   if (photoCount === 0) issues.push('Немає жодного фото — додайте головний банер.');
   if (photoCount > MAX_GALLERY_PHOTOS) {
     issues.push(`Забагато фото: ${photoCount} із дозволених ${MAX_GALLERY_PHOTOS}.`);
@@ -320,5 +522,8 @@ export function furniturePublishIssues(p: FurnitureProduct): string[] {
   if (p.description.trim().length > DESCRIPTION_MAX) {
     issues.push(`Опис задовгий: ${p.description.trim().length} із ${DESCRIPTION_MAX} символів.`);
   }
+  // Варіанти (#225): кожен — окремий артикул, і відмова тут означає, що
+  // вітрина не знає, що саме продає.
+  issues.push(...variantIssues(p));
   return issues;
 }

@@ -53,7 +53,14 @@ const images = fs
     const full = path.join(IMAGES_DIR, f);
     return { name: f, full, size: fs.statSync(full).size };
   });
-t('знайдено зображень (очікую 10)', images.length === 10, String(images.length));
+/**
+ * Кількість знімків береться з теки, а не з константи: це матеріали ВЛАСНИКА
+ * (`D:\Rama\…\Органайзер`), і він докладає туди файли. Раніше тут стояло
+ * тверде «10», і 21.09.2026 прогін упав шість разів підряд лише тому, що в
+ * теці стало 14 зображень — тест міряв теку, а не код.
+ */
+const PHOTO_COUNT = images.length;
+t('знайдено зображень (мінімум одне)', PHOTO_COUNT >= 1, String(PHOTO_COUNT));
 t('усі файли непорожні', images.every((i) => i.size > 0));
 console.log(`     ${images.map((i) => i.name).join('\n     ')}`);
 
@@ -177,7 +184,7 @@ console.log('\nПублікація картки:');
   t('created прочитано', result.created === true);
 }
 
-console.log('\nЗавантаження всіх 10 фото:');
+console.log(`\nЗавантаження всіх ${PHOTO_COUNT} фото:`);
 {
   for (let i = 0; i < images.length; i++) {
     const img = images[i];
@@ -193,9 +200,9 @@ console.log('\nЗавантаження всіх 10 фото:');
     );
   }
 
-  t('приймач отримав рівно 10 фото', received.media.length === 10, String(received.media.length));
+  t(`приймач отримав рівно ${PHOTO_COUNT} фото`, received.media.length === PHOTO_COUNT, String(received.media.length));
   t('перший файл — головний банер (cover)', received.media[0]?.kind === 'cover', received.media[0]?.kind);
-  t('решта девʼять — галерея', received.media.slice(1).every((m) => m.kind === 'gallery'));
+  t('решта — галерея', received.media.slice(1).every((m) => m.kind === 'gallery'));
   t('кожен файл має тип зображення', received.media.every((m) => m.mimeType.startsWith('image/')), received.media.map((m) => m.mimeType).join(','));
   t('усі байти дійшли цілими (розмір збігається з диском)',
     received.media.every((m, i) => m.sizeBytes === images[i].size),
@@ -221,13 +228,13 @@ console.log('\nЩо побачить вітрина (симуляція ренд
     tones: a.woodTones.map((w: any) => w.label),
   };
   t('обкладинка картки є', Boolean(shop.cover), String(shop.cover));
-  t('у галереї 9 фото', shop.gallery.length === 9, String(shop.gallery.length));
+  t('у галереї всі фото, крім обкладинки', shop.gallery.length === PHOTO_COUNT - 1, String(shop.gallery.length));
   t('таблиця характеристик непорожня', shop.specs.length >= 4, String(shop.specs.length));
   t('функціональні зони показані', shop.zones.length === 6);
   t('LED-блок показаний', shop.led.length === 3, String(shop.led.length));
   t('кольори показані', shop.colors.length === 6, String(shop.colors.length));
   t('тони дерева показані', shop.tones.length === 3, String(shop.tones.join(', ')));
-  t('усього зображень на сторінці — 10', 1 + shop.gallery.length === 10, String(1 + shop.gallery.length));
+  t(`усього зображень на сторінці — ${PHOTO_COUNT}`, 1 + shop.gallery.length === PHOTO_COUNT, String(1 + shop.gallery.length));
 }
 
 console.log('\nПублікація везе й ФОТО (ланка, якої бракувало 16.09.2026):');
@@ -267,11 +274,11 @@ console.log('\nПублікація везе й ФОТО (ланка, якої �
 
   t('спершу чиститься старий набір (DELETE), і лише потім фото',
     calls[0]?.method === 'DELETE' && calls[0]?.url.endsWith('/media'), `${calls[0]?.method} ${calls[0]?.url}`);
-  t('усі 10 фото поїхали (1 DELETE + 10 завантажень)',
-    res.uploaded === 10 && calls.length === 11, `uploaded=${res.uploaded}, дзвінків=${calls.length}`);
+  t(`усі ${PHOTO_COUNT} фото поїхали (1 DELETE + ${PHOTO_COUNT} завантажень)`,
+    res.uploaded === PHOTO_COUNT && calls.length === PHOTO_COUNT + 1, `uploaded=${res.uploaded}, дзвінків=${calls.length}`);
   t('жодної невдачі', res.failed.length === 0, res.failed.join('; '));
   t('перший файл — головний банер (cover)', calls[1]?.kind === 'cover', String(calls[1]?.kind));
-  t('решта девʼять — галерея', calls.slice(2).every((c) => c.kind === 'gallery'));
+  t('решта — галерея', calls.slice(2).every((c) => c.kind === 'gallery'));
   t('байти декодовані з data URL цілими (розмір як на диску)',
     calls.slice(1).every((c, i) => c.size === images[i].size),
     calls.slice(1).map((c, i) => `${c.size}/${images[i].size}`).join(' '));
@@ -281,7 +288,56 @@ console.log('\nПублікація везе й ФОТО (ланка, якої �
 
   // Порожня галерея не має смикати міст взагалі.
   const empty = await uploadProductMedia({ sku: 'X', media: [] }, 'product:X', { fetch: mediaFetch, settings });
-  t('без фото міст не турбують', empty.uploaded === 0 && calls.length === 11, String(calls.length));
+  t('без фото міст не турбують', empty.uploaded === 0 && calls.length === PHOTO_COUNT + 1, String(calls.length));
+}
+
+console.log('\nВаріанти їдуть на вітрину окремим полем (задача #225):');
+{
+  const { toBridgeVariants } = await import('../server/furnitureProductRoutes');
+
+  const withVariants = blankFurnitureProduct();
+  withVariants.sku = 'BK-LED-YSEN';
+  withVariants.name = 'Модульний органайзер';
+  withVariants.priceUah = 4400;
+  withVariants.variants = [
+    { id: 'v1', name: '4pc + 3 Lids', sku: 'BK-LED_YSEN_0004', priceUah: 4800, stock: 2, visible: true, options: [{ name: 'Комплектація', value: '4pc' }] },
+    { id: 'v2', name: '2pc Phone/Pens Lid', sku: 'BK-LED_YSEN_0002', priceUah: 3800, stock: null, visible: true, options: [{ name: 'Комплектація', value: '2pc' }] },
+    { id: 'v3', name: 'Прихований', sku: 'BK-LED_YSEN_0009', priceUah: 100, stock: null, visible: false, options: [] },
+  ];
+
+  const mapped = toBridgeVariants(withVariants.variants);
+  t('видимі варіанти їдуть першими', mapped[0]?.visible === true && mapped[1]?.visible === true, mapped.map((v: any) => v.visible).join(','));
+  t('прихований не викинуто, але він останній', mapped[2]?.visible === false && mapped.length === 3, String(mapped.length));
+  t('серед видимих дешевший попереду', mapped[0]?.priceMinor === 380000, String(mapped[0]?.priceMinor));
+  t('ціна варіанта — в копійках', mapped.every((v: any) => Number.isInteger(v.priceMinor)));
+  t('залишок «на замовлення» не їде як null', mapped.find((v: any) => v.sku === 'BK-LED_YSEN_0002')?.stock === undefined);
+  t('опції збережено парами', mapped[0]?.options?.[0]?.name === 'Комплектація', JSON.stringify(mapped[0]?.options));
+
+  // Ламані варіанти (порожній артикул / нульова ціна) не мають доїхати:
+  // інакше вітрина отримала б рядок без артикула.
+  const broken = toBridgeVariants([
+    { id: 'x', name: '', sku: '', priceUah: 100, stock: null, visible: true, options: [] },
+    { id: 'y', name: 'Добрий', sku: 'OK-1', priceUah: 0, stock: null, visible: true, options: [] },
+    { id: 'z', name: 'Робочий', sku: 'OK-2', priceUah: 100, stock: null, visible: true, options: [] },
+  ] as never);
+  t('варіант без артикула/назви не їде', broken.length === 1 && broken[0]?.sku === 'OK-2', JSON.stringify(broken));
+
+  const sent = await bridge.publishProductToMarketplace(
+    {
+      sku: withVariants.sku,
+      title: withVariants.name,
+      priceMinor: 380000,
+      variants: mapped as never,
+      attributes: { variantPriceRange: true },
+      sellerSlug: 'fusion-lab',
+    },
+    { fetch: mockFetch, settings }
+  );
+  t('міст надіслав варіанти в тілі запиту', Array.isArray(received.product?.variants) && received.product.variants.length === 3, JSON.stringify(received.product?.variants?.length));
+  t('кожен варіант має власний артикул', received.product?.variants?.every((v: any) => typeof v.sku === 'string' && v.sku.length > 0));
+  t('ціна картки передана окремо від цін варіантів', received.product?.priceMinor === 380000, String(received.product?.priceMinor));
+  t('ознака «від» доїхала в attributes', received.product?.attributes?.variantPriceRange === true);
+  t('публікація з варіантами не впала', sent.created === true);
 }
 
 // ---------------------------------------------------------------------------

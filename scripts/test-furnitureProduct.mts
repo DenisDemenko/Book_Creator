@@ -146,5 +146,128 @@ console.log('\nЕлектроніка (ESP32/Arduino, опційний моду�
   t('електроніка вимкнена — відсутність функцій не заважає публікації', fp.furniturePublishIssues(disabledNoFns).length === 0);
 }
 
+/**
+ * Варіанти — додаткові артикули тієї самої назви (задача #225).
+ *
+ * Тут найдорожча властивість — УНІКАЛЬНІСТЬ АРТИКУЛА: два варіанти з тим самим
+ * SKU на вітрині дали б дві позиції замовлення з різними цінами й однаковим
+ * артикулом, а склад не знав би, що пакувати. Саме тому ці перевірки живуть
+ * у моделі, а не лише в редакторі.
+ */
+console.log('\nВаріанти (додаткові артикули):');
+{
+  const p = fp.blankFurnitureProduct();
+  t('у нової картки варіантів немає', Array.isArray(p.variants) && p.variants.length === 0);
+
+  const v = fp.blankFurnitureVariant(1);
+  t('порожній варіант видимий', v.visible === true);
+  t('порожній варіант має порожній залишок (на замовлення)', v.stock === null);
+  t('порожній варіант має заготовку опції', v.options.length === 1 && v.options[0].name === 'Комплектація', JSON.stringify(v.options));
+  t('два порожні варіанти мають різні id', fp.blankFurnitureVariant(1).id !== fp.blankFurnitureVariant(2).id);
+
+  // Базова картка для перевірок — та сама, що й у блоці вище.
+  const base = () => {
+    const product = fp.blankFurnitureProduct();
+    product.name = 'Органайзер';
+    product.sku = 'BK-ORG-001';
+    product.priceUah = 8900;
+    product.media = [{ id: 'm', label: 'b', src: 'data:,' }];
+    return product;
+  };
+
+  const withVariants = base();
+  withVariants.variants = [
+    { id: 'v1', name: '2pc Phone/Pens Lid', sku: 'BK-LED_YSEN_0002', priceUah: 3800, stock: 5, visible: true, options: [{ name: 'Комплектація', value: '2pc' }] },
+    { id: 'v2', name: '3pc + Open Notes', sku: 'BK-LED_YSEN_0003', priceUah: 4400, stock: null, visible: true, options: [{ name: 'Комплектація', value: '3pc + нотатки' }] },
+    { id: 'v3', name: '4pc + 3 Lids', sku: 'BK-LED_YSEN_0004', priceUah: 4800, stock: 2, visible: false, options: [{ name: 'Комплектація', value: '4pc' }] },
+  ];
+  t('картка з варіантами проходить валідацію', fp.furniturePublishIssues(withVariants).length === 0, fp.furniturePublishIssues(withVariants).join('; '));
+  t('видимих варіантів — два', fp.visibleVariants(withVariants).length === 2, String(fp.visibleVariants(withVariants).length));
+  t('ціна каталогу — найдешевший ВИДИМИЙ', fp.effectivePriceUah(withVariants) === 3800, String(fp.effectivePriceUah(withVariants)));
+  t('діапазон цін видно (каталог скаже «від»)', fp.hasVariantPriceRange(withVariants) === true);
+  t('назви опцій унікальні', fp.variantOptionNames(withVariants).join(',') === 'Комплектація', fp.variantOptionNames(withVariants).join(','));
+
+  // Прихований найдешевший не має опускати ціну каталогу: покупець його не бачить.
+  const hidden = base();
+  hidden.variants = [
+    { id: 'v1', name: 'Дешевий (прихований)', sku: 'S-1', priceUah: 100, stock: null, visible: false, options: [] },
+    { id: 'v2', name: 'Дорогий видимий', sku: 'S-2', priceUah: 5000, stock: null, visible: true, options: [] },
+  ];
+  t('ціна каталогу ігнорує приховані варіанти', fp.effectivePriceUah(hidden) === 5000, String(fp.effectivePriceUah(hidden)));
+  t('одна ціна — без «від»', fp.hasVariantPriceRange(hidden) === false);
+
+  // Дубль артикула — головна причина існування перевірок.
+  const dup = base();
+  dup.variants = [
+    { id: 'v1', name: 'Перший', sku: 'SAME-1', priceUah: 100, stock: null, visible: true, options: [] },
+    { id: 'v2', name: 'Другий', sku: 'same-1', priceUah: 200, stock: null, visible: true, options: [] },
+  ];
+  const dupIssues = fp.furniturePublishIssues(dup);
+  t('дубль артикула (навіть у різному регістрі) → зауваження',
+    dupIssues.some((i: string) => i.includes('уже зайнятий')), dupIssues.join('; '));
+  t('у зауваженні видно, який саме варіант зайняв артикул',
+    dupIssues.some((i: string) => i.includes('варіантом 1')), dupIssues.join('; '));
+
+  const sameAsProduct = base();
+  sameAsProduct.variants = [
+    { id: 'v1', name: 'Той самий', sku: 'BK-ORG-001', priceUah: 100, stock: null, visible: true, options: [] },
+  ];
+  t('артикул варіанта не може дорівнювати артикулу товару',
+    fp.furniturePublishIssues(sameAsProduct).some((i: string) => i.includes('збігається з артикулом товару')));
+
+  const broken = base();
+  broken.variants = [
+    { id: 'v1', name: '', sku: '', priceUah: 0, stock: -5, visible: true, options: [{ name: 'Комплектація', value: '' }] },
+  ];
+  const brokenIssues = fp.furniturePublishIssues(broken);
+  t('порожня назва варіанта → зауваження', brokenIssues.some((i: string) => i.includes('немає назви варіанта')));
+  t('порожній артикул варіанта → зауваження', brokenIssues.some((i: string) => i.includes('немає артикула')));
+  t('нульова ціна варіанта → зауваження', brokenIssues.some((i: string) => i.includes('ціна має бути більшою за нуль')));
+  t('від’ємний залишок → зауваження', brokenIssues.some((i: string) => i.includes('не може бути від’ємним')));
+  t('опція без значення → зауваження', brokenIssues.some((i: string) => i.includes('і назву, і значення')));
+
+  const allHidden = base();
+  allHidden.variants = [
+    { id: 'v1', name: 'Прихований', sku: 'H-1', priceUah: 100, stock: null, visible: false, options: [] },
+  ];
+  t('усі варіанти приховані → зауваження',
+    fp.furniturePublishIssues(allHidden).some((i: string) => i.includes('Усі варіанти приховані')));
+
+  const duplicateOption = base();
+  duplicateOption.variants = [
+    {
+      id: 'v1', name: 'Варіант', sku: 'O-1', priceUah: 100, stock: null, visible: true,
+      options: [{ name: 'Колір', value: 'Oak' }, { name: 'колір', value: 'Walnut' }],
+    },
+  ];
+  t('однакова опція двічі → зауваження',
+    fp.furniturePublishIssues(duplicateOption).some((i: string) => i.includes('указана двічі')));
+
+  // Товар без базової ціни, але з цінами у варіантах — валідний: саме так
+  // виглядає картка, де вся ціна живе у варіантах.
+  const variantOnlyPrice = base();
+  variantOnlyPrice.priceUah = 0;
+  variantOnlyPrice.variants = [
+    { id: 'v1', name: 'Варіант', sku: 'P-1', priceUah: 2500, stock: null, visible: true, options: [] },
+  ];
+  t('ціна лише у варіантах — публікація дозволена', fp.furniturePublishIssues(variantOnlyPrice).length === 0, fp.furniturePublishIssues(variantOnlyPrice).join('; '));
+  t('ціна каталогу береться з варіанта', fp.effectivePriceUah(variantOnlyPrice) === 2500);
+
+  const nothingPriced = base();
+  nothingPriced.priceUah = 0;
+  nothingPriced.variants = [
+    { id: 'v1', name: 'Варіант', sku: 'P-2', priceUah: 0, stock: null, visible: true, options: [] },
+  ];
+  t('ні базової ціни, ні цін варіантів → зауваження',
+    fp.furniturePublishIssues(nothingPriced).some((i: string) => i.includes('Немає жодної ціни')));
+
+  const tooMany = base();
+  tooMany.variants = Array.from({ length: fp.MAX_VARIANTS + 1 }, (_, i) => ({
+    id: `v${i}`, name: `Варіант ${i}`, sku: `SKU-${i}`, priceUah: 100, stock: null, visible: true, options: [],
+  }));
+  t('понад межу варіантів → зауваження',
+    fp.furniturePublishIssues(tooMany).some((i: string) => i.includes('Забагато варіантів')));
+}
+
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);
 if (fail > 0) process.exit(1);

@@ -256,6 +256,105 @@ try {
   await setValue('teaser', 'Короткий тизер для перевірки.');
   await new Promise((r) => setTimeout(r, 300));
 
+  // -------------------------------------------------------------------------
+  // ВАРІАНТИ — додаткові артикули (#225).
+  //
+  // Юніт-тести вже перевіряють модель; тут перевіряється те, чого вони не
+  // бачать: що рядок варіанта справді з'являється у формі, тримає власні
+  // значення і що дубль артикула зупиняє публікацію ЛОКАЛЬНО, з причиною
+  // українською — а не сирою відмовою приймача або, гірше, публікацією двох
+  // однакових артикулів.
+  // -------------------------------------------------------------------------
+  const setVariant = async (field: string, index: number, value: string) => {
+    await page.evaluate(([f, i, v]) => {
+      const el = document.querySelector(`[data-variant-${f}="${i}"]`) as HTMLInputElement | null;
+      if (!el) return;
+      const proto = Object.getPrototypeOf(el) as typeof HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+      setter?.call(el, v);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    }, [field, index, value] as const);
+  };
+
+  const clickAddVariant = async () => {
+    await page.evaluate(() => {
+      (document.querySelector('[data-field="add-variant"]') as HTMLElement | null)?.click();
+    });
+    await new Promise((r) => setTimeout(r, 200));
+  };
+
+  await clickAddVariant();
+  const rowsAfterFirst = await page.evaluate(() => document.querySelectorAll('[data-variant-row]').length);
+  t('кнопка «Додати варіант» створює рядок', rowsAfterFirst === 1, String(rowsAfterFirst));
+
+  await setVariant('name', 1, '2pc Phone/Pens Lid');
+  await setVariant('sku', 1, 'LIVE-V-2PC');
+  await setVariant('price', 1, '3800');
+  await setVariant('stock', 1, '3');
+  await new Promise((r) => setTimeout(r, 200));
+
+  // Значення читаємо з .value, а не з innerText: у полів введення текст у
+  // розмітці не живе, і перевірка «на око» тут нічого не доводила б.
+  // Усередині evaluate — ЖОДНИХ оголошених функцій (пастка `__name`): тому
+  // чотири окремі запити замість хелпера.
+  const firstRow = await page.evaluate(() => {
+    const name = document.querySelector('[data-variant-name="1"]') as HTMLInputElement | null;
+    const sku = document.querySelector('[data-variant-sku="1"]') as HTMLInputElement | null;
+    const price = document.querySelector('[data-variant-price="1"]') as HTMLInputElement | null;
+    const stock = document.querySelector('[data-variant-stock="1"]') as HTMLInputElement | null;
+
+    return {
+      name: name?.value ?? '',
+      sku: sku?.value ?? '',
+      price: price?.value ?? '',
+      stock: stock?.value ?? '',
+    };
+  });
+  t(
+    'рядок варіанта тримає назву, артикул, ціну й залишок',
+    firstRow.name === '2pc Phone/Pens Lid' &&
+      firstRow.sku === 'LIVE-V-2PC' &&
+      firstRow.price === '3800' &&
+      firstRow.stock === '3',
+    JSON.stringify(firstRow),
+  );
+
+  const priceHint = await page.evaluate(() =>
+    (document.querySelector('[data-furniture-theme]') as HTMLElement | null)?.innerText.includes('від') ?? false
+  );
+  t('редактор каже, що ціна каталогу — «від» найдешевшого варіанта', priceHint);
+
+  // Другий варіант з ТИМ САМИМ артикулом — різний лише регістр, бо покупець
+  // однаково не має бачити два артикули з однаковою ідентичністю.
+  await clickAddVariant();
+  await setVariant('name', 2, '4pc + 3 Lids');
+  await setVariant('sku', 2, 'live-v-2pc');
+  await setVariant('price', 2, '4800');
+  await new Promise((r) => setTimeout(r, 300));
+
+  await page.evaluate(() => {
+    const btns = Array.from(document.querySelectorAll('[data-furniture-theme] header button'));
+    const btn = btns.find((b) => (b.textContent || '').includes('Опублікувати на вітрині'));
+    (btn as HTMLElement | undefined)?.click();
+  });
+  await new Promise((r) => setTimeout(r, 800));
+  const dupRefused = await page.evaluate(() =>
+    (document.querySelector('[data-furniture-theme]') as HTMLElement | null)?.innerText.includes('уже зайнятий') ?? false
+  );
+  t('дубль артикула зупиняє публікацію, причина українською', dupRefused);
+
+  await page.screenshot({ path: path.join(shotDir, 'furniture-editor-variants.png'), fullPage: true });
+  console.log('     (знімок: tmp/furniture-editor-variants.png)');
+
+  // Прибираємо дубль і лишаємо один робочий варіант: далі чорнетка має
+  // зберегтися чисто, разом із цим артикулом.
+  await page.evaluate(() => {
+    (document.querySelector('[data-variant-remove="2"]') as HTMLElement | null)?.click();
+  });
+  await new Promise((r) => setTimeout(r, 200));
+  const rowsAfterRemove = await page.evaluate(() => document.querySelectorAll('[data-variant-row]').length);
+  t('рядок варіанта прибирається', rowsAfterRemove === 1, String(rowsAfterRemove));
+
   // Зберегти чорнетку кнопкою нижньої панелі.
   await page.evaluate(() => {
     const btns = Array.from(document.querySelectorAll('[data-furniture-theme] aside button'));

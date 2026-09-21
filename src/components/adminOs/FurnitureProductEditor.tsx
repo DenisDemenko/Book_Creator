@@ -20,6 +20,7 @@ import {
   Image as ImageIcon,
   ImagePlus,
   Info,
+  Layers,
   Moon,
   Package,
   Play,
@@ -37,19 +38,28 @@ import {
 } from 'lucide-react';
 import {
   blankFurnitureProduct,
+  blankFurnitureVariant,
   furniturePublishIssues,
+  hasVariantPriceRange,
   isVideoMedia,
+  visibleVariants,
   DEFAULT_ELECTRONICS_FUNCTIONS,
   DESCRIPTION_MAX,
   ELECTRONICS_CONTROLLERS,
   MAX_GALLERY_PHOTOS,
   MAX_GALLERY_VIDEOS,
+  MAX_VARIANTS,
+  MAX_VARIANT_OPTIONS,
   TEASER_MAX,
   TITLE_MAX,
+  VARIANT_NAME_MAX,
+  VARIANT_OPTION_NAME_MAX,
+  VARIANT_OPTION_VALUE_MAX,
   type FurnitureColor,
   type FurnitureElectronicsController,
   type FurnitureMediaItem,
   type FurnitureProduct,
+  type FurnitureVariant,
   type FurnitureWoodTone,
 } from './furnitureProduct';
 
@@ -531,6 +541,58 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
     setNewElectronicsFunction('');
   }, [newElectronicsFunction, patch, product.electronicsFunctions]);
 
+  /**
+   * Варіанти (#225). Кожна правка йде через `patch`, тобто через той самий
+   * стан, що й решта полів: чорнетка зберігається тим самим шляхом, і
+   * публікація віддає мосту вже готовий масив.
+   */
+  const addVariant = useCallback(() => {
+    if ((product.variants || []).length >= MAX_VARIANTS) return;
+    patch({ variants: [...(product.variants || []), blankFurnitureVariant((product.variants || []).length + 1)] });
+  }, [patch, product.variants]);
+
+  const patchVariant = useCallback(
+    (id: string, partial: Partial<FurnitureVariant>) => {
+      patch({ variants: (product.variants || []).map((v) => (v.id === id ? { ...v, ...partial } : v)) });
+    },
+    [patch, product.variants]
+  );
+
+  const removeVariant = useCallback(
+    (id: string) => patch({ variants: (product.variants || []).filter((v) => v.id !== id) }),
+    [patch, product.variants]
+  );
+
+  /** Додати опцію варіанта (комплектація / колір / розмір). */
+  const addVariantOption = useCallback(
+    (id: string) => {
+      const variant = (product.variants || []).find((v) => v.id === id);
+      if (!variant || variant.options.length >= MAX_VARIANT_OPTIONS) return;
+      patchVariant(id, { options: [...variant.options, { name: '', value: '' }] });
+    },
+    [patchVariant, product.variants]
+  );
+
+  const patchVariantOption = useCallback(
+    (id: string, index: number, partial: { name?: string; value?: string }) => {
+      const variant = (product.variants || []).find((v) => v.id === id);
+      if (!variant) return;
+      patchVariant(id, {
+        options: variant.options.map((o, i) => (i === index ? { ...o, ...partial } : o)),
+      });
+    },
+    [patchVariant, product.variants]
+  );
+
+  const removeVariantOption = useCallback(
+    (id: string, index: number) => {
+      const variant = (product.variants || []).find((v) => v.id === id);
+      if (!variant) return;
+      patchVariant(id, { options: variant.options.filter((_, i) => i !== index) });
+    },
+    [patchVariant, product.variants]
+  );
+
   const colorOf = (c: FurnitureColor) =>
     ({ oak: '#d9b380', walnut: '#6b4a2b', teak: '#9a6b3f', black: '#232323', ebony: '#2e2a26', mahogany: '#7c2f24' })[c.id] ?? '#888';
 
@@ -710,6 +772,194 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
                     </div>
                   </div>
                 </div>
+              </div>
+            </Section>
+
+            {/*
+              ВАРІАНТИ — додаткові артикули тієї самої назви (задача #225).
+              Власник: «можливість створення додаткових артикулів для
+              поточного нового товару та вибирати додаткові опції для цього
+              артикулу при одній самій назві». Тому рядок варіанта — це
+              НАЗВА + ВЛАСНИЙ АРТИКУЛ + ціна + видимість, а опції
+              (комплектація/колір/розмір) лежать усередині рядка.
+
+              Чому окрема секція, а не поля в «Основній інформації»:
+              варіантів може бути десятки, і колонки таблиці мають бути
+              поруч, інакше автор губить рядок, який редагує.
+            */}
+            <Section
+              t={t}
+              icon={<Layers className="w-4 h-4" />}
+              title="Варіанти та додаткові артикули"
+              sub="Комплектація, колір, розмір — кожен варіант зі своїм артикулом і ціною"
+              right={
+                <span className={`text-[10px] font-mono px-2.5 py-1 rounded border ${t.badge}`}>
+                  {(product.variants || []).length} / {MAX_VARIANTS}
+                </span>
+              }
+            >
+              <div className="space-y-4">
+                <p className={`text-[11px] leading-relaxed ${t.sub}`}>
+                  Один товар — кілька артикулів. Покупець на вітрині вибере варіант і побачить його ціну;
+                  у замовленні збережеться саме вибраний артикул. Ціна картки в каталозі —{' '}
+                  {hasVariantPriceRange(product)
+                    ? `найдешевший видимий варіант, тобто «від ${visibleVariants(product).reduce((min, v) => Math.min(min, v.priceUah), Infinity).toLocaleString('uk-UA')} ₴».`
+                    : 'ціна видимого варіанта.'}{' '}
+                  Без варіантів товар продається одним артикулом, як і раніше.
+                </p>
+
+                {(product.variants || []).length === 0 ? (
+                  <div className={`rounded-xl border border-dashed px-4 py-6 text-center ${t.badge}`}>
+                    <p className="text-xs">Варіантів немає — товар продається одним артикулом.</p>
+                    <button
+                      type="button"
+                      data-field="add-variant"
+                      onClick={addVariant}
+                      className={`mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-full text-[11px] font-bold uppercase tracking-wider ${t.backPill}`}
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Додати варіант
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {(product.variants || []).map((variant, index) => (
+                      <div
+                        key={variant.id}
+                        data-variant-row={index + 1}
+                        className={`rounded-xl border p-3 space-y-3 ${variant.visible ? t.badge : `${t.badge} opacity-70`}`}
+                      >
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`text-[10px] font-mono px-2 py-0.5 rounded ${t.badge}`}>
+                            #{index + 1}
+                          </span>
+                          <input
+                            data-variant-name={index + 1}
+                            maxLength={VARIANT_NAME_MAX}
+                            className={`flex-1 min-w-[160px] rounded-lg px-3 py-2 text-xs outline-none ${t.input}`}
+                            type="text"
+                            placeholder="3pc + Open Notes"
+                            value={variant.name}
+                            onChange={(e) => patchVariant(variant.id, { name: e.target.value })}
+                          />
+                          <input
+                            data-variant-sku={index + 1}
+                            className={`w-44 rounded-lg px-3 py-2 text-xs font-mono outline-none ${t.input}`}
+                            type="text"
+                            placeholder="BK-LED_YSEN_0003"
+                            value={variant.sku}
+                            onChange={(e) => patchVariant(variant.id, { sku: e.target.value })}
+                          />
+                          <input
+                            data-variant-price={index + 1}
+                            className={`w-28 rounded-lg px-3 py-2 text-xs font-bold outline-none ${t.input}`}
+                            type="number"
+                            min={0}
+                            placeholder="₴"
+                            value={variant.priceUah || ''}
+                            onChange={(e) => patchVariant(variant.id, { priceUah: Number(e.target.value) || 0 })}
+                          />
+                          <input
+                            data-variant-stock={index + 1}
+                            className={`w-20 rounded-lg px-3 py-2 text-xs text-center outline-none ${t.input}`}
+                            type="number"
+                            min={0}
+                            step={1}
+                            placeholder="—"
+                            value={variant.stock ?? ''}
+                            onChange={(e) =>
+                              patchVariant(variant.id, {
+                                stock: e.target.value === '' ? null : Math.max(0, Math.round(Number(e.target.value))),
+                              })
+                            }
+                          />
+                          <ToggleChip
+                            t={t}
+                            on={variant.visible}
+                            label="Видно"
+                            onClick={() => patchVariant(variant.id, { visible: !variant.visible })}
+                          />
+                          <button
+                            type="button"
+                            data-variant-remove={index + 1}
+                            onClick={() => removeVariant(variant.id)}
+                            className={`p-2 rounded-lg ${t.backPill}`}
+                            aria-label={`Видалити варіант ${index + 1}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        {/* Опції варіанта: «Комплектація» → «3pc + Open Notes». */}
+                        <div className="space-y-2">
+                          {variant.options.map((option, optionIndex) => (
+                            <div key={optionIndex} className="flex items-center gap-2 flex-wrap">
+                              <input
+                                list="variant-option-names"
+                                className={`w-40 rounded-lg px-3 py-1.5 text-[11px] outline-none ${t.input}`}
+                                type="text"
+                                placeholder="Комплектація"
+                                maxLength={VARIANT_OPTION_NAME_MAX}
+                                value={option.name}
+                                onChange={(e) => patchVariantOption(variant.id, optionIndex, { name: e.target.value })}
+                              />
+                              <span className={t.sub}>→</span>
+                              <input
+                                className={`flex-1 min-w-[140px] rounded-lg px-3 py-1.5 text-[11px] outline-none ${t.input}`}
+                                type="text"
+                                placeholder="3pc + Open Notes"
+                                maxLength={VARIANT_OPTION_VALUE_MAX}
+                                value={option.value}
+                                onChange={(e) => patchVariantOption(variant.id, optionIndex, { value: e.target.value })}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => removeVariantOption(variant.id, optionIndex)}
+                                className={`p-1.5 rounded-lg ${t.backPill}`}
+                                aria-label="Прибрати опцію"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                          {variant.options.length < MAX_VARIANT_OPTIONS ? (
+                            <button
+                              type="button"
+                              onClick={() => addVariantOption(variant.id)}
+                              className={`inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider ${t.sub}`}
+                            >
+                              <Plus className="w-3 h-3" />
+                              Опція (колір, розмір…)
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+
+                    {(product.variants || []).length < MAX_VARIANTS ? (
+                      <button
+                        type="button"
+                        data-field="add-variant"
+                        onClick={addVariant}
+                        className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-[11px] font-bold uppercase tracking-wider ${t.backPill}`}
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Ще артикул
+                      </button>
+                    ) : (
+                      <p className={`text-[11px] ${t.sub}`}>
+                        Межа — {MAX_VARIANTS} варіантів на товар.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Підказка назв опцій — щоб однакові вісі не писались по-різному. */}
+                <datalist id="variant-option-names">
+                  {['Комплектація', 'Колір', 'Розмір', 'Матеріал', 'Підсвітка'].map((name) => (
+                    <option key={name} value={name} />
+                  ))}
+                </datalist>
               </div>
             </Section>
 
