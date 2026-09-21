@@ -239,6 +239,21 @@ try {
   );
   t('без ключа вікно показує причину українською (а не порожнечу)', true);
 
+  // Задача #221: після відмови автор мусить бачити, що спробу можна повторити,
+  // і НЕ мусить бачити сирого JSON від моделі (`{"error":{"code":503,...}}`).
+  const failShape = await page.evaluate(() => {
+    const modal = document.querySelector('[data-describe-modal]') as HTMLElement | null;
+    const inner = modal?.innerText || '';
+    const buttons = Array.from(modal?.querySelectorAll('button') || []).map((b) => (b.textContent || '').trim());
+    return { inner, buttons };
+  });
+  t(
+    'після відмови кнопка пропонує повторити спробу',
+    failShape.buttons.includes('Спробувати ще раз'),
+    failShape.buttons.join(' | ')
+  );
+  t('у вікні немає сирого JSON', !failShape.inner.includes('"error"') && !failShape.inner.includes('{'));
+
   // ── 3. Передача тексту: у книгу (без ШІ, текст вписуємо руками) ────────
   const TITLE = 'Ігор Вовк за фото (live)';
   await page.evaluate((payload: string[]) => {

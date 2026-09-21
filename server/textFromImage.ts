@@ -25,7 +25,12 @@ import {
 
 export type TextEngine = 'gemini' | 'gpt';
 
-export type TextFromImageErrorKind = 'no_key' | 'safety' | 'quota' | 'bad_image' | 'unknown';
+/**
+ * Види відмов. `busy` (задача #221) — окремо від `unknown`, бо це єдина
+ * відмова, яку має сенс ПОВТОРИТИ: 503/UNAVAILABLE у Gemini означає «зараз
+ * пік навантаження», а не «щось зламалося назавжди».
+ */
+export type TextFromImageErrorKind = 'no_key' | 'safety' | 'quota' | 'bad_image' | 'busy' | 'unknown';
 
 export class TextFromImageError extends Error {
   kind: TextFromImageErrorKind;
@@ -85,6 +90,66 @@ export interface GenerateTextFromImageOptions {
   ownerId?: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// Перевантаження моделі (задача #221)
+// ---------------------------------------------------------------------------
+
+/**
+ * Паузи між повторними спробами, коли модель тимчасово перевантажена.
+ *
+ * Два повтори — це вже три запити загалом: пік навантаження в Gemini триває
+ * секунди-десятки секунд, і в більшості випадків друга спроба проходить.
+ * Більше — означало б тримати автора перед спінером без причини.
+ */
+export const BUSY_RETRY_DELAYS_MS = [700, 1800];
+
+/** Чи має цей вид відмови сенс повторювати (див. `BUSY_RETRY_DELAYS_MS`). */
+export function isRetryableFailure(err: unknown): boolean {
+  return err instanceof TextFromImageError && err.kind === 'busy';
+}
+
+/**
+ * Повтор запиту до моделі, коли відповідь — «перевантажено».
+ *
+ * Виокремлено як чисту функцію саме тому, що це логіка, яку треба перевірити
+ * без мережі: `scripts/test-describeCharacter.mts` підсовує їй власний
+ * виконавець і перевіряє, що третя спроба проходить, а четвертої не буває.
+ */
+export async function withBusyRetry<T>(run: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await run();
+    } catch (err) {
+      if (!isRetryableFailure(err) || attempt >= BUSY_RETRY_DELAYS_MS.length) throw err;
+      await new Promise((resolve) => setTimeout(resolve, BUSY_RETRY_DELAYS_MS[attempt]));
+    }
+  }
+}
+
+/** Відмова з позначкою «модель зараз перевантажена». */
+export function busyMessage(engine: TextEngine): string {
+  return engine === 'gpt'
+    ? 'GPT зараз перевантажений — це тимчасово. Спробуйте ще раз за хвилину або перемкніться на Gemini.'
+    : 'Gemini зараз перевантажений — це тимчасово. Спробуйте ще раз за хвилину або перемкніться на GPT.';
+}
+
+/**
+ * Повідомлення, яке не соромно показати автору.
+ *
+ * Модель віддає помилки у вигляді сирого JSON (`{"error":{"code":503,...}}`),
+ * і показувати його в українському вікні — те саме, що показати стек викликів:
+ * автор не може нічого з ним зробити. Тому будь-який схожий на JSON рядок
+ * замінюється на людське пояснення (задача #221).
+ */
+export function humanizeEngineMessage(message: string, engine: TextEngine): string {
+  const raw = String(message || '').trim();
+  if (!raw) return `Модель ${engine === 'gpt' ? 'GPT' : 'Gemini'} не змогла обробити зображення. Спробуйте ще раз.`;
+  if (/^\s*[{\[]/.test(raw) || raw.includes('"error"')) {
+    return `Модель ${engine === 'gpt' ? 'GPT' : 'Gemini'} не змогла обробити зображення (тимчасова помилка сервісу). Спробуйте ще раз.`;
+  }
+  return raw;
+}
+
 /**
  * Побудова промту винесена в server/textFromImagePrompt.ts — чистий файл
  * без роутів/стану (за принципом manuscriptImagePrompt.ts), щоб «Ядро AI»
@@ -102,8 +167,21 @@ function systemInstructionFor(opts: GenerateTextFromImageOptions): string {
   return opts.kind === 'character' ? characterFromImageSystemInstruction() : textFromImageSystemInstruction();
 }
 
-function classifyGenericError(kind: 'gemini' | 'gpt', message: string): TextFromImageErrorKind {
+export function classifyGenericError(kind: 'gemini' | 'gpt', message: string): TextFromImageErrorKind {
   const m = message.toLowerCase();
+  // Перевантаження перевіряємо ПЕРШИМ: у відповіді Gemini може одночасно
+  // трапитись і «503», і слово про ліміти, а від цього залежить, чи має
+  // сенс повторювати запит (див. `withBusyRetry`) — задача #221.
+  if (
+    m.includes('503') ||
+    m.includes('unavailable') ||
+    m.includes('high demand') ||
+    m.includes('overloaded') ||
+    m.includes('temporarily') ||
+    m.includes('deadline exceeded')
+  ) {
+    return 'busy';
+  }
   if (m.includes('api key') || m.includes('unauthenticated') || m.includes('401') || m.includes('403') || m.includes('permission')) {
     return 'no_key';
   }
@@ -160,7 +238,8 @@ async function generateWithGemini(
     };
   } catch (err) {
     if (err instanceof TextFromImageError) throw err;
-    const kind = classifyGenericError('gemini', String((err as Error)?.message || err));
+    const raw = String((err as Error)?.message || err);
+    const kind = classifyGenericError('gemini', raw);
     const message =
       kind === 'no_key'
         ? 'Ключ Gemini не має доступу до цієї моделі.'
@@ -168,7 +247,9 @@ async function generateWithGemini(
         ? 'Gemini відхилив зображення через фільтри безпеки.'
         : kind === 'quota'
         ? 'Вичерпано ліміт запитів до Gemini. Спробуйте пізніше.'
-        : `Gemini не зміг обробити зображення: ${(err as Error)?.message || err}`;
+        : kind === 'busy'
+        ? busyMessage('gemini')
+        : `Gemini не зміг обробити зображення: ${humanizeEngineMessage(raw, 'gemini')}`;
     throw new TextFromImageError(kind, message, 'gemini');
   }
 }
@@ -230,8 +311,10 @@ async function generateWithGpt(opts: GenerateTextFromImageOptions): Promise<{ te
         ? 'no_key'
         : res.status === 429
         ? 'quota'
+        : res.status === 503
+        ? 'busy'
         : classifyGenericError('gpt', message);
-    throw new TextFromImageError(kind, `GPT: ${message}`, 'gpt');
+    throw new TextFromImageError(kind, kind === 'busy' ? busyMessage('gpt') : `GPT: ${humanizeEngineMessage(message, 'gpt')}`, 'gpt');
   }
 
   const text = (json?.choices?.[0]?.message?.content || '').trim();
@@ -254,11 +337,14 @@ export async function generateTextFromImage(
   geminiModel: string,
   opts: GenerateTextFromImageOptions
 ): Promise<{ text: string; engine: TextEngine; model: string; usage: TokenUsage }> {
+  // Обидва рушії — через `withBusyRetry`: «перевантажено» — єдина відмова,
+  // яку має сенс повторити (задача #221). Пауза й кількість спроб — у
+  // BUSY_RETRY_DELAYS_MS, тобто в одному місці на весь продукт.
   if (opts.engine === 'gpt') {
-    const { text, usage } = await generateWithGpt(opts);
+    const { text, usage } = await withBusyRetry(() => generateWithGpt(opts));
     return { text, engine: 'gpt', model: process.env.OPENAI_MODEL || 'gpt-4o', usage };
   }
-  const { text, usage } = await generateWithGemini(ai, geminiModel, opts);
+  const { text, usage } = await withBusyRetry(() => generateWithGemini(ai, geminiModel, opts));
   return { text, engine: 'gemini', model: geminiModel, usage };
 }
 

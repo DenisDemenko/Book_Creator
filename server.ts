@@ -2060,7 +2060,9 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
       res.json({ text: result.text, engine: result.engine, model: result.model, timestamp: new Date().toISOString() });
     } catch (err: any) {
       const kind = err instanceof TextFromImageError ? err.kind : 'unknown';
-      const status = kind === 'no_key' ? 503 : kind === 'quota' ? 429 : kind === 'bad_image' ? 400 : 500;
+      // `busy` («модель перевантажена») — теж 503: це тимчасово, і клієнт має
+      // показати «спробуйте ще раз», а не загальне «щось пішло не так» (#221).
+      const status = kind === 'no_key' || kind === 'busy' ? 503 : kind === 'quota' ? 429 : kind === 'bad_image' ? 400 : 500;
       const failedEngine = err instanceof TextFromImageError ? err.engine : (req.body?.engine === 'gpt' ? 'gpt' : 'gemini');
       await recordTextUsageByModel(
         req,
@@ -2139,7 +2141,7 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
       res.json({ text: result.text, engine: result.engine, model: result.model, timestamp: new Date().toISOString() });
     } catch (err: any) {
       const kind = err instanceof TextFromImageError ? err.kind : 'unknown';
-      const status = kind === 'no_key' ? 503 : kind === 'quota' ? 429 : kind === 'bad_image' ? 400 : 500;
+      const status = kind === 'no_key' || kind === 'busy' ? 503 : kind === 'quota' ? 429 : kind === 'bad_image' ? 400 : 500;
       const failedEngine = err instanceof TextFromImageError ? err.engine : (req.body?.engine === 'gpt' ? 'gpt' : 'gemini');
       await recordTextUsageByModel(
         req,
@@ -3329,7 +3331,7 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
         return res.status(err.status).json({ error: err.message });
       }
       const kind = err instanceof TextFromImageError ? err.kind : 'unknown';
-      const status = kind === 'no_key' ? 503 : kind === 'quota' ? 429 : kind === 'bad_image' ? 400 : 500;
+      const status = kind === 'no_key' || kind === 'busy' ? 503 : kind === 'quota' ? 429 : kind === 'bad_image' ? 400 : 500;
       res.status(status).json({ error: err?.message || 'Не вдалося згенерувати текст за зображенням.', kind });
     }
   });

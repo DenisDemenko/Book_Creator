@@ -194,7 +194,18 @@ export const DescribeCharacterModal: React.FC<DescribeCharacterModalProps> = ({
             className="ml-auto flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-60 disabled:cursor-wait text-white text-xs font-bold shadow-md transition-all"
           >
             {busy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-            <span>{busy ? t('describeCharacter.writing') : text ? t('describeCharacter.rewriteBtn') : t('describeCharacter.writeBtn')}</span>
+            {/* Задача #221. Після відмови (наприклад, «модель перевантажена»)
+                кнопка змінює підпис на «Спробувати ще раз» — автор має бачити,
+                що саме ця кнопка і є повторною спробою. */}
+            <span>
+              {busy
+                ? t('describeCharacter.writing')
+                : error && !text.trim()
+                ? t('describeCharacter.retryBtn')
+                : text
+                ? t('describeCharacter.rewriteBtn')
+                : t('describeCharacter.writeBtn')}
+            </span>
           </button>
         </div>
 

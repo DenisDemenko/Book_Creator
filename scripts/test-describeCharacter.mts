@@ -20,6 +20,16 @@ import {
 } from '../server/characterFromImagePrompt.ts';
 import { buildTextFromImagePrompt, textFromImageSystemInstruction } from '../server/textFromImagePrompt.ts';
 import {
+  BUSY_RETRY_DELAYS_MS,
+  TextFromImageError,
+  busyMessage,
+  classifyGenericError,
+  generateTextFromImage,
+  humanizeEngineMessage,
+  isRetryableFailure,
+  withBusyRetry,
+} from '../server/textFromImage.ts';
+import {
   appendDescriptionToBook,
   appendDescriptionToInstruction,
   buildCourseFromDescription,
@@ -193,6 +203,108 @@ console.log('\nЛічба слів:');
   t('порожній текст — 0', descriptionWordCount('   ') === 0);
   t('рахує слова, а не символи', descriptionWordCount('раз два три') === 3);
   t('кілька пробілів і переносів не додають слів', descriptionWordCount(' раз\n\n  два ') === 2);
+}
+
+console.log('\nПеревантаження моделі (задача #221):');
+{
+  const overload = '{"error":{"code":503,"message":"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.","status":"UNAVAILABLE"}}';
+  t('503 із тіла відповіді — це «перевантажено», а не «невідомо»', classifyGenericError('gemini', overload) === 'busy');
+  t('слово UNAVAILABLE теж', classifyGenericError('gemini', 'UNAVAILABLE: model overloaded') === 'busy');
+  t('«high demand» теж', classifyGenericError('gpt', 'We are experiencing high demand') === 'busy');
+  t('429 і далі — це ліміт, не перевантаження', classifyGenericError('gemini', '429 resource_exhausted') === 'quota');
+  t('401 — це ключ', classifyGenericError('gemini', 'API key not valid (401)') === 'no_key');
+  t('фільтри безпеки лишаються безпекою', classifyGenericError('gemini', 'blocked by safety filters') === 'safety');
+  t('сирий JSON більше не показують авторові', !humanizeEngineMessage(overload, 'gemini').includes('{'));
+  t('замість JSON — людське пояснення', humanizeEngineMessage(overload, 'gemini').includes('тимчасова помилка сервісу'));
+  t('порожнє повідомлення теж не лякає', humanizeEngineMessage('', 'gemini').startsWith('Модель Gemini'));
+  t('нормальне повідомлення не переписується', humanizeEngineMessage('Модель відмовилась', 'gemini') === 'Модель відмовилась');
+  t('підказка про перевантаження радить перемкнути рушій', busyMessage('gemini').includes('GPT') && busyMessage('gpt').includes('Gemini'));
+  t('перевантаження позначене як те, що можна повторити', isRetryableFailure(new TextFromImageError('busy', 'x', 'gemini')));
+  t('а «немає ключа» — ні', !isRetryableFailure(new TextFromImageError('no_key', 'x', 'gemini')));
+  t('і звичайна помилка — ні', !isRetryableFailure(new Error('щось')));
+}
+
+console.log('\nПовтор при перевантаженні:');
+{
+  let calls = 0;
+  const result = await withBusyRetry(async () => {
+    calls += 1;
+    if (calls < 3) throw new TextFromImageError('busy', 'перевантажено', 'gemini');
+    return 'готово';
+  });
+  t('третя спроба проходить', result === 'готово' && calls === 3, String(calls));
+
+  let hardCalls = 0;
+  let thrown = '';
+  try {
+    await withBusyRetry(async () => {
+      hardCalls += 1;
+      throw new TextFromImageError('busy', 'перевантажено назовсім', 'gemini');
+    });
+  } catch (err) {
+    thrown = (err as Error).message;
+  }
+  t('після вичерпання спроб помилка виходить нагору', thrown === 'перевантажено назовсім', thrown);
+  t('і спроб рівно три, а не більше', hardCalls === 1 + BUSY_RETRY_DELAYS_MS.length, String(hardCalls));
+
+  let keyCalls = 0;
+  try {
+    await withBusyRetry(async () => {
+      keyCalls += 1;
+      throw new TextFromImageError('no_key', 'немає ключа', 'gemini');
+    });
+  } catch { /* очікувано */ }
+  t('невідворотну відмову не повторюємо жодного разу', keyCalls === 1, String(keyCalls));
+}
+
+console.log('\nСправжній шлях «зображення → текст» із підставним рушієм:');
+{
+  // 8 байтів підпису PNG — більшого не треба: `resolveImageBytes` читає
+  // `data:`-URL локально, мережі тут немає.
+  const dataUrl =
+    'data:image/png;base64,' + Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64');
+  const overload =
+    '{"error":{"code":503,"message":"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.","status":"UNAVAILABLE"}}';
+
+  const stub = (failTimes: number) => {
+    let calls = 0;
+    const ai = {
+      models: {
+        generateContent: async () => {
+          calls += 1;
+          if (calls <= failTimes) throw new Error(overload);
+          return { text: 'Опис персонажа.', usageMetadata: { promptTokenCount: 12, candidatesTokenCount: 7 } };
+        },
+      },
+    };
+    return { ai, calls: () => calls };
+  };
+
+  const ok = stub(2);
+  const result = await generateTextFromImage(ok.ai as never, 'gemini-2.5-flash', {
+    engine: 'gemini',
+    imageUrl: dataUrl,
+  });
+  t('перевантажений Gemini повторюється й таки віддає текст', result.text === 'Опис персонажа.', result.text);
+  t('і це рівно три запити', ok.calls() === 3, String(ok.calls()));
+  t(
+    'токени беруться зі спроби, яка пройшла',
+    result.usage.inputTokens === 12 && result.usage.outputTokens === 7,
+    JSON.stringify(result.usage)
+  );
+
+  const broken = stub(99);
+  let kind = '';
+  let message = '';
+  try {
+    await generateTextFromImage(broken.ai as never, 'gemini-2.5-flash', { engine: 'gemini', imageUrl: dataUrl });
+  } catch (err) {
+    kind = err instanceof TextFromImageError ? err.kind : 'not-TextFromImageError';
+    message = (err as Error).message;
+  }
+  t('постійне перевантаження виходить нагору як `busy`', kind === 'busy', kind);
+  t('повідомлення — українською й без JSON', message.includes('перевантажений') && !message.includes('{'), message);
+  t('і після трьох спроб воно зупиняється', broken.calls() === 3, String(broken.calls()));
 }
 
 console.log(`\nРезультат: ${pass} пройшло, ${fail} впало.`);
