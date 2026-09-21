@@ -102,9 +102,12 @@ const child = spawn(process.execPath, [path.join(ROOT, 'dist/server.mjs')], {
     PORT: String(PORT),
     NODE_ENV: 'production',
     // Порожні ключі — див. заголовок файлу: прогін не має коштувати грошей,
-    // а чесна відмова без ключа теж потребує перевірки.
+    // а чесна відмова без ключа теж потребує перевірки. ANTHROPIC — теж
+    // порожній: без цього на машині з ключем у середовищі прогін #222
+    // зробив би СПРАВЖНІЙ виклик Claude (і коштував би грошей).
     GEMINI_API_KEY: '',
     OPENAI_API_KEY: '',
+    ANTHROPIC_API_KEY: '',
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -153,6 +156,17 @@ try {
   const page = await browser.newPage();
   await page.setViewport({ width: 1680, height: 1000 });
   await browser.setCookie({ name: 'nova_session', value: TOKEN, domain: 'localhost', path: '/' });
+  /** Тіла запитів на опис — щоб бачити, ЯКУ модель клієнт справді просить (задача #222). */
+  const describeBodies: any[] = [];
+  page.on('request', (r) => {
+    if (r.url().includes('/api/ai/describe-character-from-image')) {
+      try {
+        describeBodies.push(JSON.parse(r.postData() || '{}'));
+      } catch {
+        describeBodies.push({ parseFailed: true });
+      }
+    }
+  });
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
 
   await page.waitForSelector('#nav-tab-media', { timeout: 30000 });
@@ -228,6 +242,137 @@ try {
   t('видно фото, поле тексту й заголовок', modalShape.hasTextarea && modalShape.hasTitle);
   t('є три цілі передачі', modalShape.targets.join(',') === 'book,instruction,course', modalShape.targets.join(','));
   t('є обидві кнопки передачі', modalShape.hasTransferText && modalShape.hasTransferBoth);
+
+  // ── 2а. Вибір моделі ядра AI (задача #222) ─────────────────────────────
+  const modelShape = await page.evaluate(() => {
+    const modal = document.querySelector('[data-describe-modal]') as HTMLElement | null;
+    const select = modal?.querySelector('[data-describe-model]') as HTMLSelectElement | null;
+    if (!select) return null;
+    return {
+      value: select.value,
+      options: Array.from(select.options).map((o) => ({
+        value: o.value,
+        text: (o.textContent || '').trim(),
+        disabled: o.disabled,
+      })),
+    };
+  });
+  t('у вікні є список моделей ядра AI', !!modelShape);
+  t(
+    'перший пункт — «Автоматично (налаштування адміністратора)»',
+    modelShape?.options[0]?.value === '' && (modelShape?.options[0]?.text || '').includes('Автоматично'),
+    modelShape?.options[0]?.text
+  );
+  t(
+    'у списку лише моделі, що СПРАВДІ бачать зображення',
+    !!modelShape &&
+      modelShape.options.slice(1).length > 0 &&
+      modelShape.options.slice(1).every((o) => /^(gemini|gpt|claude)/.test(o.value)),
+    modelShape?.options.map((o) => o.value).join(',')
+  );
+  t(
+    'моделі без ключа позначені й недоступні (і навпаки)',
+    !!modelShape && modelShape.options.slice(1).every((o) => o.disabled === o.text.includes('немає ключа'))
+  );
+  t('без моделі книги типово «Автоматично»', modelShape?.value === '', String(modelShape?.value));
+  // Знімок для власника: як виглядає список моделей у вікні опису (#222).
+  await page.screenshot({ path: path.join(ROOT, 'tmp', 'media-describe-model.png') });
+
+  // Автоматичний опис на відкритті мусить нести НОВИЙ контракт: поле
+  // `modelId` (порожнє = «хай вирішує адміністратор»), а не старий `engine`.
+  const firstBody = describeBodies[0];
+  t('запит на опис несе поле modelId', !!firstBody && firstBody.modelId === '', JSON.stringify(firstBody?.modelId));
+
+  // Дозволяємо собі обрати модель без ключа (у прогоні ключів немає, тож усі
+  // пункти disabled) — перевіряємо саме ПРОВОДКУ: що вибране їде в запит.
+  const pickedModel = await page.evaluate(() => {
+    const modal = document.querySelector('[data-describe-modal]') as HTMLElement | null;
+    const select = modal?.querySelector('[data-describe-model]') as HTMLSelectElement | null;
+    if (!select) return null;
+    const claude = Array.from(select.options).find((o) => o.value.startsWith('claude'));
+    if (!claude) return null;
+    claude.disabled = false;
+    select.value = claude.value;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    return claude.value;
+  });
+  await page.waitForFunction(
+    (expected: string) => {
+      const modal = document.querySelector('[data-describe-modal]') as HTMLElement | null;
+      const select = modal?.querySelector('[data-describe-model]') as HTMLSelectElement | null;
+      return select?.value === expected;
+    },
+    { timeout: 5000 },
+    pickedModel || ''
+  );
+  await page.evaluate(() => {
+    const modal = document.querySelector('[data-describe-modal]') as HTMLElement | null;
+    (modal?.querySelector('[data-describe-generate]') as HTMLElement | null)?.click();
+  });
+  for (let i = 0; describeBodies.length < 2 && i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  const secondBody = describeBodies[describeBodies.length - 1];
+  t(
+    'обрана у списку модель їде в запит',
+    !!pickedModel && secondBody?.modelId === pickedModel,
+    `${pickedModel} → ${JSON.stringify(secondBody?.modelId)}`
+  );
+
+  // ── 2б. Правила сервера щодо моделі ────────────────────────────────────
+  const noVision = await page.evaluate(
+    async (url: string) => {
+      const res = await fetch('/api/ai/describe-character-from-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ imageUrl: url, modelId: 'deepseek-chat' }),
+      });
+      return { status: res.status, body: await res.json().catch(() => ({})) };
+    },
+    photoAsset.url
+  );
+  t(
+    'модель без зору відхиляється з поясненням, а не мовчки',
+    noVision.status === 400 && /не аналізує зображення/.test(String(noVision.body?.error)),
+    `${noVision.status} ${noVision.body?.error || ''}`
+  );
+
+  const autoNoKey = await page.evaluate(
+    async (url: string) => {
+      const res = await fetch('/api/ai/describe-character-from-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ imageUrl: url, modelId: '' }),
+      });
+      return { status: res.status, body: await res.json().catch(() => ({})) };
+    },
+    photoAsset.url
+  );
+  t(
+    '«Автоматично» без ключів — чесна відмова 503 з підказкою',
+    autoNoKey.status === 503 && /Ключі API|\.env/.test(String(autoNoKey.body?.error)),
+    `${autoNoKey.status} ${autoNoKey.body?.error || ''}`
+  );
+
+  const legacy = await page.evaluate(
+    async (url: string) => {
+      const res = await fetch('/api/ai/describe-character-from-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ imageUrl: url, engine: 'gemini' }),
+      });
+      return { status: res.status, body: await res.json().catch(() => ({})) };
+    },
+    photoAsset.url
+  );
+  t(
+    'старий контракт (лише engine) досі працює',
+    legacy.status === 503 && /Gemini/.test(String(legacy.body?.error)),
+    `${legacy.status} ${legacy.body?.error || ''}`
+  );
 
   // Ключів немає — вікно мусить сказати причину, а не мовчати.
   await page.waitForFunction(

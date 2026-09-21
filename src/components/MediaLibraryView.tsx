@@ -1051,6 +1051,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
         <DescribeCharacterModal
           photo={describePhoto}
           core={writerCoreFromBook(book)}
+          preferredModelId={book?.preferredAiModelId}
           isRegistered={isRegistered}
           onClose={() => setDescribePhoto(null)}
           onTransfer={handleDescribeTransfer}

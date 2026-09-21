@@ -90,6 +90,10 @@ import {
 import { priceForTextEngine } from './server/pricing';
 import { buildPromptContext } from './server/chatPrompt';
 import { generateTextFromImage, engineAvailability, TextFromImageError, resolveImageBytes } from './server/textFromImage';
+import {
+  buildCharacterFromImagePrompt,
+  characterFromImageSystemInstruction,
+} from './server/characterFromImagePrompt';
 import { buildManuscriptImagePrompt, manuscriptImageSystemInstruction } from './server/manuscriptImagePrompt';
 import {
   PROMPT_TEMPLATES_META_KEY,
@@ -2097,6 +2101,7 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
       const {
         imageUrl,
         engine,
+        modelId,
         bookTitle,
         genre,
         audience,
@@ -2105,10 +2110,76 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
         photoLabel,
         generationPrompt,
         characterHint,
+        bookId,
       } = req.body || {};
       if (!imageUrl || typeof imageUrl !== 'string') {
         return res.status(400).json({ error: 'Потрібне зображення для аналізу.' });
       }
+
+      const characterOptions = {
+        photoLabel,
+        generationPrompt,
+        characterHint,
+        audience,
+        synopsis,
+        characters: Array.isArray(characters) ? characters : undefined,
+      };
+      const userId = req.principal?.id as string | undefined;
+
+      /*
+        Задача #222. Два шляхи в одному маршруті — і це свідомо.
+
+        `modelId` (навіть порожній) означає «клієнт нового зразка»: модель
+        обирає автор у списку ядра AI, порожнє значення — «хай вирішує
+        адміністратор» (прив'язка модуля «Текст за фото», той самий модуль,
+        що й у редакторі, бо це та сама робота — читати зображення). Тут
+        працюють УСІ vision-рушії ядра (Gemini, GPT, Claude), власний ключ
+        автора й спільне логування витрат — рівно те, що вже робить
+        `/api/ai/generate-manuscript-paragraphs-from-image`.
+
+        Запит БЕЗ `modelId` — це старий клієнт (лише `engine: gemini|gpt`).
+        Його лишаємо на `generateTextFromImage` з повтором при
+        перевантаженні: ламати робочий шлях заради чистоти не варто.
+      */
+      if (typeof modelId === 'string') {
+        const resolvedModelId = (await resolveModuleModelId('textFromImage', modelId)) || GEMINI_MODEL;
+        const modelEngine = resolveChatEngine(resolvedModelId);
+        if (!VISION_ENGINES.has(modelEngine)) {
+          return res.status(400).json({
+            error: `Модель «${ENGINE_LABELS[modelEngine]}» не аналізує зображення. Оберіть Gemini, GPT або Claude.`,
+            kind: 'vision_unsupported',
+          });
+        }
+        const userKey = await resolveEngineKey(userId, modelEngine, 'describe-character');
+        if (!userKey && !engineConfigured(modelEngine)) {
+          return res.status(503).json({
+            error: `Модель не налаштована: додайте ${ENGINE_ENV_KEY[modelEngine]} у .env сервера або власний ключ у розділі «Ключі API».`,
+            kind: 'no_key',
+          });
+        }
+
+        const { mimeType, base64 } = await resolveImageBytes(imageUrl, userId);
+        const result = await generateAiText({
+          engine: modelEngine,
+          modelId: resolvedModelId,
+          prompt: buildCharacterFromImagePrompt(characterOptions),
+          systemInstruction: characterFromImageSystemInstruction(),
+          apiKeyOverride: userKey,
+          images: [{ mimeType, dataBase64: base64 }],
+          req,
+          label: `Опис персонажа за фото${photoLabel ? `: ${photoLabel}` : ''}`,
+          bookId,
+        });
+
+        return res.json({
+          text: result.text,
+          engine: modelEngine,
+          model: resolvedModelId,
+          modelId: resolvedModelId,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
       const chosenEngine = engine === 'gpt' ? 'gpt' : 'gemini';
 
       const result = await generateTextFromImage(ai, GEMINI_MODEL, {
@@ -2117,15 +2188,8 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
         kind: 'character',
         bookTitle,
         genre,
-        ownerId: req.principal?.id as string | undefined,
-        character: {
-          photoLabel,
-          generationPrompt,
-          characterHint,
-          audience,
-          synopsis,
-          characters: Array.isArray(characters) ? characters : undefined,
-        },
+        ownerId: userId,
+        character: characterOptions,
       });
 
       await recordTextUsageByModel(
@@ -2135,11 +2199,17 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
         result.usage.inputTokens,
         result.usage.outputTokens,
         true,
-        req.body?.bookId
+        bookId
       ).catch((e) => console.warn('[usage] describeCharacter:', e));
 
       res.json({ text: result.text, engine: result.engine, model: result.model, timestamp: new Date().toISOString() });
     } catch (err: any) {
+      console.error('Error in /api/ai/describe-character-from-image:', err?.message || err);
+      // Відмова провайдера вже перекладена людською (`humanizeAiError`
+      // усередині generateText) — лишається віддати її з тим самим статусом.
+      if (err instanceof ChatProviderError) {
+        return res.status(err.status).json({ error: err.message, kind: 'provider' });
+      }
       const kind = err instanceof TextFromImageError ? err.kind : 'unknown';
       const status = kind === 'no_key' || kind === 'busy' ? 503 : kind === 'quota' ? 429 : kind === 'bad_image' ? 400 : 500;
       const failedEngine = err instanceof TextFromImageError ? err.engine : (req.body?.engine === 'gpt' ? 'gpt' : 'gemini');
@@ -2152,7 +2222,6 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
         false,
         req.body?.bookId
       ).catch((e) => console.warn('[usage] describeCharacter (fail):', e));
-      console.error('Error in /api/ai/describe-character-from-image:', err?.message || err);
       res.status(status).json({ error: err?.message || 'Не вдалося описати персонажа за зображенням.', kind });
     }
   });

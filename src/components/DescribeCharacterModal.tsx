@@ -29,13 +29,34 @@ import {
   type WriterCorePayload,
 } from '../utils/describeCharacterTransfer';
 
-type Engine = 'gemini' | 'gpt';
+/** Модель ядра AI, яку можна обрати для опису (дзеркало /api/chat/models). */
+interface CoreModel {
+  id: string;
+  label: string;
+  engine: string;
+  available: boolean;
+}
+
+/**
+ * Рушії, чиї моделі СПРАВДІ бачать зображення — дзеркало `VISION_ENGINES`
+ * із `server/chatProviders.ts`. DeepSeek, Groq і Mistral підключені тут
+ * текстовими моделями: показати їх у списку означало б запропонувати авторові
+ * варіант, який гарантовано відмовиться.
+ */
+const VISION_ENGINES_FRONT = new Set(['gemini', 'gpt', 'claude']);
 
 interface DescribeCharacterModalProps {
   /** Фото, яке описуємо. */
   photo: { url: string; title: string; prompt?: string };
   /** «Ядро письменника» — дані книги, з якими опис має бути в одному ключі. */
   core: WriterCorePayload;
+  /**
+   * Модель, обрана в розділі «Книга та текст» (`book.preferredAiModelId`).
+   * Вона ж — типове значення в списку: автор має бачити ту саму модель, якою
+   * вже живе його книга, а не абстрактний «рушій за замовчуванням».
+   * Порожнє значення — «хай вирішує адміністратор».
+   */
+  preferredModelId?: string;
   isRegistered: boolean;
   onClose: () => void;
   /** Виконати передачу. `true` — вдалося (вікно закриється). */
@@ -47,13 +68,15 @@ const TARGETS: DescriptionTarget[] = ['book', 'instruction', 'course'];
 export const DescribeCharacterModal: React.FC<DescribeCharacterModalProps> = ({
   photo,
   core,
+  preferredModelId,
   isRegistered,
   onClose,
   onTransfer,
 }) => {
   const { t } = useLanguage();
-  const [engines, setEngines] = useState<{ gemini: boolean; gpt: boolean }>({ gemini: false, gpt: false });
-  const [engine, setEngine] = useState<Engine>('gemini');
+  const [models, setModels] = useState<CoreModel[]>([]);
+  const [modelId, setModelId] = useState('');
+  const [modelsLoaded, setModelsLoaded] = useState(false);
   const [title, setTitle] = useState(photo.title || '');
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -62,21 +85,28 @@ export const DescribeCharacterModal: React.FC<DescribeCharacterModalProps> = ({
   const [transferring, setTransferring] = useState(false);
   const autoStarted = useRef(false);
 
-  /** Чи налаштовані ключі рушіїв — щоб не пропонувати те, чого немає. */
+  /**
+   * Список моделей — той самий, що й у редакторі (`/api/chat/models`), і
+   * той самий, що в «Ядрі AI». Типове значення — модель книги; якщо книга
+   * живе на моделі, яка не бачить зображень (напр. DeepSeek), у списку
+   * лишається «Автоматично», а причину автор бачить підписом.
+   */
   useEffect(() => {
     let alive = true;
-    fetch('/api/ai/text-engines', { credentials: 'same-origin' })
+    fetch('/api/chat/models', { credentials: 'same-origin' })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (!alive || !d) return;
-        setEngines({ gemini: !!d.gemini, gpt: !!d.gpt });
-        if (!d.gemini && d.gpt) setEngine('gpt');
+        if (!alive) return;
+        const list = ((d?.models || []) as CoreModel[]).filter((m) => VISION_ENGINES_FRONT.has(m.engine));
+        setModels(list);
+        if (preferredModelId && list.some((m) => m.id === preferredModelId)) setModelId(preferredModelId);
+        setModelsLoaded(true);
       })
-      .catch(() => undefined);
+      .catch(() => setModelsLoaded(true));
     return () => {
       alive = false;
     };
-  }, []);
+  }, [preferredModelId]);
 
   const describe = useCallback(async () => {
     if (!isRegistered) {
@@ -92,7 +122,11 @@ export const DescribeCharacterModal: React.FC<DescribeCharacterModalProps> = ({
         credentials: 'same-origin',
         body: JSON.stringify({
           imageUrl: photo.url,
-          engine,
+          // `modelId` (навіть порожній) — ознака клієнта нового зразка:
+          // порожнє значення означає «модель із прив'язки адміністратора»
+          // (server/coreModuleModels.ts, модуль «Текст за фото»).
+          modelId,
+          engine: models.find((m) => m.id === modelId)?.engine || 'gemini',
           photoLabel: photo.title,
           generationPrompt: photo.prompt,
           ...core,
@@ -111,15 +145,19 @@ export const DescribeCharacterModal: React.FC<DescribeCharacterModalProps> = ({
     } finally {
       setBusy(false);
     }
-  }, [core, engine, isRegistered, photo.prompt, photo.title, photo.url, t, title]);
+  }, [core, modelId, models, isRegistered, photo.prompt, photo.title, photo.url, t, title]);
 
-  /** Перший опис починається сам: автор уже натиснув «Описати ШІ», чекати ще одного кліку зайве. */
+  /**
+   * Перший опис починається сам — але ЛИШЕ після того, як приїхав список
+   * моделей: інакше дефолтний запит пішов би з порожнім `modelId`, тобто
+   * не тією моделлю, яку автор обрав у «Книга та текст».
+   */
   useEffect(() => {
-    if (autoStarted.current) return;
+    if (!modelsLoaded || autoStarted.current) return;
     autoStarted.current = true;
     describe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [modelsLoaded]);
 
   const transfer = async (withPhoto: boolean) => {
     const clean = text.trim();
@@ -173,20 +211,24 @@ export const DescribeCharacterModal: React.FC<DescribeCharacterModalProps> = ({
         <p className="text-xs text-slate-400">{t('describeCharacter.subheading')}</p>
 
         <div className="flex items-center flex-wrap gap-2">
-          <span className="text-[11px] text-slate-400">{t('describeCharacter.engineLabel')}</span>
-          {(['gemini', 'gpt'] as const).map((e) => (
-            <button
-              key={e}
-              onClick={() => setEngine(e)}
-              disabled={busy}
-              title={!engines[e] ? t('describeCharacter.notConfiguredSuffix', { hint: e === 'gemini' ? t('describeCharacter.geminiHint') : t('describeCharacter.gptHint') }) : (e === 'gemini' ? t('describeCharacter.geminiHint') : t('describeCharacter.gptHint'))}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all ${
-                engine === e ? 'bg-slate-800 text-cyan-300 border-cyan-500/40' : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
-              } ${!engines[e] ? 'opacity-60' : ''}`}
-            >
-              {e === 'gemini' ? 'Gemini' : 'GPT'}
-            </button>
-          ))}
+          <span className="text-[11px] text-slate-400">{t('describeCharacter.modelLabel')}</span>
+          <select
+            value={modelId}
+            onChange={(e) => setModelId(e.target.value)}
+            disabled={busy || models.length === 0}
+            data-describe-model
+            title={t('describeCharacter.modelHint')}
+            className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-100 focus:border-cyan-500 focus:outline-hidden max-w-[280px] disabled:opacity-60"
+          >
+            <option value="">{t('describeCharacter.modelAuto')}</option>
+            {models.map((m) => (
+              <option key={m.id} value={m.id} disabled={!m.available}>
+                {m.label}
+                {!m.available ? ` ${t('describeCharacter.modelNoKeySuffix')}` : ''}
+                {m.id === preferredModelId ? ` ${t('describeCharacter.modelBookSuffix')}` : ''}
+              </option>
+            ))}
+          </select>
           <button
             onClick={describe}
             disabled={busy}
@@ -208,6 +250,9 @@ export const DescribeCharacterModal: React.FC<DescribeCharacterModalProps> = ({
             </span>
           </button>
         </div>
+
+        {/* Чому саме ця модель стоїть типово — автор має бачити без здогадів. */}
+        <p className="text-[10px] text-slate-500 leading-relaxed">{t('describeCharacter.modelHint')}</p>
 
         <div className="space-y-1.5">
           <label className="flex items-center justify-between text-[11px] text-slate-400">
