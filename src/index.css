@@ -1284,6 +1284,37 @@
 @media (prefers-reduced-motion: reduce) {
   .nova-manuscript-editor .nova-ai-draft-reject { transition: none; }
 }
+/* Значок ✓ — прийняття чернетки (AiDraftBlockNode.tsx, задача #224).
+   Той самий розмір і та сама логіка «приглушений у спокої», що й у ⊘ поруч:
+   обидва значки живуть на мітці, яку письменник бачить під час читання прози.
+   Зелений лише під курсором — колір тут означає намір, а не стан тексту. */
+.nova-manuscript-editor .nova-ai-draft-accept {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35em;
+  height: 1.35em;
+  margin: -0.2em 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(251, 191, 36, 0.55);
+  cursor: pointer;
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+.nova-manuscript-editor .nova-ai-draft-accept:hover {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.16);
+}
+.nova-manuscript-editor .nova-ai-draft-accept:focus-visible {
+  outline: 2px solid #34d399;
+  outline-offset: 1px;
+  color: #34d399;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nova-manuscript-editor .nova-ai-draft-accept { transition: none; }
+}
 .nova-manuscript-editor .nova-ai-draft p:last-child {
   margin-bottom: 0;
 }

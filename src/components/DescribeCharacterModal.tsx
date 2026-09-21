@@ -50,6 +50,12 @@ interface DescribeCharacterModalProps {
    * Порожнє значення — «хай вирішує адміністратор».
    */
   preferredModelId?: string;
+  /**
+   * Глави книги (порядок — як у книзі) для вибору місця передачі (#224).
+   * Порожній перелік — це не помилка: у новій книзі глав може не бути, і
+   * тоді текст створить главу «Опис персонажів» (так було й до #224).
+   */
+  chapters?: { id: string; title: string }[];
   isRegistered: boolean;
   onClose: () => void;
   /** Виконати передачу. `true` — вдалося (вікно закриється). */
@@ -62,6 +68,7 @@ export const DescribeCharacterModal: React.FC<DescribeCharacterModalProps> = ({
   photo,
   core,
   preferredModelId,
+  chapters,
   isRegistered,
   onClose,
   onTransfer,
@@ -75,8 +82,26 @@ export const DescribeCharacterModal: React.FC<DescribeCharacterModalProps> = ({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [target, setTarget] = useState<DescriptionTarget>('book');
+  /**
+   * Глава, куди автор передає текст (#224). Типове значення — ОСТАННЯ глава:
+   * саме туди текст лягав до #224, і це найближче місце до того, над чим
+   * автор працює. Вибір зберігається, поки вікно відкрите: автор бачить, куди
+   * саме поїде текст, ще ДО натискання кнопки передачі.
+   */
+  const [chapterId, setChapterId] = useState('');
+  /** Підтвердження передачі: крок між «натиснув» і «поїхало» (просив власник). */
+  const [confirming, setConfirming] = useState<null | { withPhoto: boolean }>(null);
   const [transferring, setTransferring] = useState(false);
   const autoStarted = useRef(false);
+
+  const chapterList = chapters || [];
+  const chosenChapter = chapterList.find((c) => c.id === chapterId) || null;
+
+  // Типова глава — остання, і лише якщо автор ще нічого не вибрав сам.
+  useEffect(() => {
+    if (chapterId || !chapterList.length) return;
+    setChapterId(chapterList[chapterList.length - 1].id);
+  }, [chapterId, chapterList]);
 
   /**
    * Список моделей — той самий, що й у редакторі (`/api/chat/models`), і
@@ -156,7 +181,27 @@ export const DescribeCharacterModal: React.FC<DescribeCharacterModalProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelsLoaded]);
 
-  const transfer = async (withPhoto: boolean) => {
+  /**
+   * Передача. Для книги спершу питаємо ПІДТВЕРДЖЕННЯ глави (задача #224):
+   * автор має бачити назву глави й розуміти, що текст приїде AI-чернеткою,
+   * а не шукати потім, «куди воно поділося». Для інструкції та курсу
+   * підтвердження не потрібне: там місце одне й фіксоване.
+   */
+  const requestTransfer = (withPhoto: boolean) => {
+    const clean = text.trim();
+    if (!clean) {
+      setError(t('describeCharacter.emptyTextError'));
+      return;
+    }
+    setError(null);
+    if (target === 'book' && !confirming) {
+      setConfirming({ withPhoto });
+      return;
+    }
+    void runTransfer(withPhoto);
+  };
+
+  const runTransfer = async (withPhoto: boolean) => {
     const clean = text.trim();
     if (!clean) {
       setError(t('describeCharacter.emptyTextError'));
@@ -169,10 +214,14 @@ export const DescribeCharacterModal: React.FC<DescribeCharacterModalProps> = ({
         title: title.trim() || t('describeCharacter.transferBookTitle'),
         text: clean,
         photo: withPhoto ? { url: photo.url, title: photo.title } : null,
+        // Порожній id — «хай вирішує книга»: у новій книзі глав може ще не
+        // бути, і тоді вставка створить першу сама.
+        chapterId: target === 'book' ? chapterId : undefined,
       });
       if (ok) onClose();
     } finally {
       setTransferring(false);
+      setConfirming(null);
     }
   };
 
@@ -288,7 +337,10 @@ export const DescribeCharacterModal: React.FC<DescribeCharacterModalProps> = ({
             <span className="text-[11px] text-slate-400">{t('describeCharacter.transferLabel')}</span>
             <select
               value={target}
-              onChange={(e) => setTarget(e.target.value as DescriptionTarget)}
+              onChange={(e) => {
+                setTarget(e.target.value as DescriptionTarget);
+                setConfirming(null);
+              }}
               data-describe-target
               className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-100 focus:border-cyan-500 focus:outline-hidden"
             >
@@ -303,9 +355,37 @@ export const DescribeCharacterModal: React.FC<DescribeCharacterModalProps> = ({
               ))}
             </select>
 
+            {/*
+              Вибір глави (задача #224). Раніше текст ішов в останню главу
+              БЕЗ відома автора: він бачив тост «додано новим розділом» і не
+              знав ні глави, ні того, що вставлений текст — сирий HTML.
+            */}
+            {target === 'book' && (
+              <select
+                value={chapterId}
+                onChange={(e) => {
+                  setChapterId(e.target.value);
+                  setConfirming(null);
+                }}
+                data-describe-chapter
+                disabled={!chapterList.length}
+                className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-100 focus:border-cyan-500 focus:outline-hidden disabled:opacity-60 min-w-[160px]"
+              >
+                {chapterList.length ? (
+                  chapterList.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.title}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">{t('describeCharacter.chapterWillCreate')}</option>
+                )}
+              </select>
+            )}
+
             <div className="ml-auto flex items-center gap-2">
               <button
-                onClick={() => transfer(false)}
+                onClick={() => requestTransfer(false)}
                 disabled={transferring}
                 data-describe-transfer-text
                 className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-bold border border-slate-700 transition-all disabled:opacity-60"
@@ -314,7 +394,7 @@ export const DescribeCharacterModal: React.FC<DescribeCharacterModalProps> = ({
                 <span>{t('describeCharacter.transferTextBtn')}</span>
               </button>
               <button
-                onClick={() => transfer(true)}
+                onClick={() => requestTransfer(true)}
                 disabled={transferring}
                 data-describe-transfer-both
                 className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold shadow-md transition-all disabled:opacity-60"
@@ -324,6 +404,53 @@ export const DescribeCharacterModal: React.FC<DescribeCharacterModalProps> = ({
               </button>
             </div>
           </div>
+
+          {target === 'book' && (
+            <p className="text-[10px] text-slate-500 leading-snug">
+              {chapterList.length
+                ? t('describeCharacter.chapterHint', { chapter: chosenChapter?.title || '' })
+                : t('describeCharacter.chapterWillCreateHint')}
+            </p>
+          )}
+
+          {/*
+            Підтвердження глави — окремий крок, як просив власник: спершу
+            вибір, потім явне «так, саме сюди», і аж тоді передача. Друга
+            кнопка передачі перезаписує вибір (текст / текст із фото), тож
+            автор не може «підтвердити» одне, а передати інше.
+          */}
+          {confirming && target === 'book' && (
+            <div
+              data-describe-confirm-panel
+              className="rounded-xl border border-cyan-500/40 bg-cyan-500/5 p-3 space-y-2"
+            >
+              <p className="text-[11px] font-bold text-cyan-200">
+                {t('describeCharacter.confirmHeading', {
+                  chapter: chosenChapter?.title || t('describeCharacter.chapterNewTitle'),
+                })}
+              </p>
+              <p className="text-[10px] text-slate-400 leading-snug">{t('describeCharacter.confirmHint')}</p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => void runTransfer(confirming.withPhoto)}
+                  disabled={transferring}
+                  data-describe-confirm
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-bold transition-all disabled:opacity-60"
+                >
+                  {transferring ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                  <span>{t('describeCharacter.confirmBtn')}</span>
+                </button>
+                <button
+                  onClick={() => setConfirming(null)}
+                  disabled={transferring}
+                  data-describe-confirm-cancel
+                  className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 text-[11px] font-bold border border-slate-800 transition-all disabled:opacity-60"
+                >
+                  {t('describeCharacter.confirmCancel')}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex justify-end">

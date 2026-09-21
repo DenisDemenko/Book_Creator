@@ -86,17 +86,35 @@ const AiDraftBlockView: React.FC<ReactNodeViewProps> = ({ node, getPos, editor, 
       <div className="nova-ai-draft-label" contentEditable={false} suppressContentEditableWarning>
         <span>✨ {label}</span>
         {/*
-          Значок ⊘ на самій мітці, а не пункт меню. Прийняти доповнення
-          можна було й з контекстного меню, а відхилити — ніяк: автор
-          бачив жовтий блок і не мав видимого способу сказати «ні».
-          Значок навмисно малий і без підпису — він не має конкурувати
-          з текстом, лише бути на видноті, коли погляд уже на мітці.
+          Два значки на мітці — «прийняти» й «відхилити». Раніше був лише ⊘:
+          прийняти можна було тільки з контекстного меню, тобто автор мав
+          здогадатись, що правий клік узагалі щось дає. Власник попросив це
+          прямо (задача #224 — передача опису з медіатеки): «прийняти або
+          відхилити вставлений текст — виділяється окремим кольором». Обидва
+          значки малі й без підписів — вони не мають конкурувати з прозою,
+          лише бути на видноті, коли погляд уже на мітці.
         */}
+        <button
+          type="button"
+          className="nova-ai-draft-accept"
+          title={reviewLabel}
+          aria-label={reviewLabel}
+          data-ai-draft-accept
+          onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+          onClick={(e: React.MouseEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            markReviewed();
+          }}
+        >
+          <CheckCircle2 size={13} aria-hidden="true" />
+        </button>
         <button
           type="button"
           className="nova-ai-draft-reject"
           title={`${rejectLabel} · Ctrl+Z поверне`}
           aria-label={rejectLabel}
+          data-ai-draft-reject
           onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
           onClick={(e: React.MouseEvent) => {
             e.preventDefault();

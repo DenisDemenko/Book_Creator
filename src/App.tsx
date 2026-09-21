@@ -195,7 +195,13 @@ export default function App() {
   const [activeChapterId, setActiveChapterId] = useState<string>(book.chapters[0]?.id || '');
   const [activeSectionId, setActiveSectionId] = useState<string>(book.chapters[0]?.sections[0]?.id || '');
   /** Діапазон символів для виділення в EditorView одразу після «Передати текст у книгу» з AI-чату. */
-  const [pendingChatHighlight, setPendingChatHighlight] = useState<{ sectionId: string; start: number; end: number } | null>(null);
+  const [pendingChatHighlight, setPendingChatHighlight] = useState<{
+    sectionId: string;
+    start: number;
+    end: number;
+    /** Сам вставлений текст: EditorView шукає його в документі — надійніше за арифметику маркерів (#224). */
+    text?: string;
+  } | null>(null);
   /**
    * Фрагмент книги, надісланий з редактора в чат на обговорення
    * (EditorView → «Обговорити фрагмент у чаті»). App — власник і книги, і
@@ -1525,7 +1531,33 @@ export default function App() {
       [chapter.title, section?.title].filter(Boolean).join(' → ')
     );
     handleNavigateToSection(chapter.id, result.sectionId);
-    setPendingChatHighlight({ sectionId: result.sectionId, start: result.start, end: result.end });
+    setPendingChatHighlight({ sectionId: result.sectionId, start: result.start, end: result.end, text });
+  };
+
+  /**
+   * «Передати текст у книгу» з медіатеки (`MediaLibraryView` → вікно опису,
+   * задача #224). Книгу вже оновлено там (вставка описана в
+   * `describeCharacterTransfer.insertDescriptionIntoBook`), тож тут
+   * лишається рівно те, що належить App: перевести автора на потрібну
+   * вкладку, відкрити вибрану главу й показати вставлене.
+   *
+   * Підсвічування — той самий механізм, що й у мості «чат → книга»
+   * (`pendingChatHighlight` → `EditorView` прокручує й виділяє діапазон), і
+   * це навмисно: два різні способи підсвітити «щойно додане» розійшлися б
+   * поведінкою за першої ж правки редактора.
+   */
+  const handleRevealChapterText = (target: {
+    chapterId: string;
+    chapterTitle: string;
+    sectionId: string;
+    start: number;
+    end: number;
+    text: string;
+  }) => {
+    handleNavigateToSection(target.chapterId, target.sectionId);
+    setPendingChatHighlight({ sectionId: target.sectionId, start: target.start, end: target.end, text: target.text });
+    setSyncToast(`Відкрито главу «${target.chapterTitle}»: AI-чернетка в кінці — прийміть або відхиліть її.`);
+    setTimeout(() => setSyncToast(null), 5000);
   };
 
   const handleClearLog = () => {
@@ -2127,6 +2159,7 @@ export default function App() {
             book={book}
             onUpdateBook={handleUpdateBook}
             authUser={auth.user}
+            onRevealChapterText={handleRevealChapterText}
           />
         )}
 

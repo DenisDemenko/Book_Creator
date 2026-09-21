@@ -50,7 +50,20 @@ export const describeCharacter = {
     transferTextBtn: 'Передати текст',
     transferBothBtn: 'Передати текст разом з фото',
     transferBookTitle: 'Опис персонажа (ШІ)',
-    bookDone: 'Текст додано новим розділом у книгу: «{title}».',
+    // Вибір глави і підтвердження (#224)
+    chapterLabel: 'Глава книги:',
+    chapterNewTitle: 'Опис персонажів',
+    chapterWillCreate: 'Нова глава — «Опис персонажів»',
+    chapterWillCreateHint:
+      'У книзі ще немає глав: текст створить першу — «Опис персонажів» — і відкриється в «Книга та текст».',
+    chapterHint:
+      'Текст ляже в КІНЕЦЬ глави «{chapter}» як AI-чернетка: її можна прийняти (стане звичайним текстом) або відхилити.',
+    confirmHeading: 'Передати в главу «{chapter}»?',
+    confirmHint:
+      'Після підтвердження відкриється «Книга та текст» на цьому місці: текст стоятиме в кінці глави, помічений бурштиновою рамкою «AI-чернетка» — з кнопками прийняти або відхилити. Ctrl+Z повертає відхилене.',
+    confirmBtn: 'Підтвердити передачу',
+    confirmCancel: 'Скасувати',
+    bookDone: 'Передано в главу «{chapter}» як AI-чернетка. Відкриваємо «Книга та текст» на цьому місці.',
     instructionDone: 'Текст додано в «Базу знань» чернетки інструкції.',
     instructionMissing: 'Чернетки інструкції ще немає — відкрийте «Інструкцію» в експрес-старті й повторіть передачу.',
     courseDone: 'Створено чернетку курсу: «{title}».',
@@ -99,7 +112,20 @@ export const describeCharacter = {
     transferTextBtn: 'Transfer text',
     transferBothBtn: 'Transfer text with the photo',
     transferBookTitle: 'Character description (AI)',
-    bookDone: 'The text was added as a new section to the book: “{title}”.',
+    // Chapter choice and confirmation (#224)
+    chapterLabel: 'Book chapter:',
+    chapterNewTitle: 'Character descriptions',
+    chapterWillCreate: 'New chapter — “Character descriptions”',
+    chapterWillCreateHint:
+      'The book has no chapters yet: the text will create the first one — “Character descriptions” — and the editor will open on it.',
+    chapterHint:
+      'The text will be appended to the END of chapter “{chapter}” as an AI draft: you can accept it (it becomes ordinary text) or reject it.',
+    confirmHeading: 'Transfer to chapter “{chapter}”?',
+    confirmHint:
+      'After confirmation “Book & Text” opens right there: the text sits at the end of the chapter, marked with an amber “AI draft” frame and buttons to accept or reject it. Ctrl+Z restores a rejected draft.',
+    confirmBtn: 'Confirm transfer',
+    confirmCancel: 'Cancel',
+    bookDone: 'Transferred to chapter “{chapter}” as an AI draft. Opening “Book & Text” right there.',
     instructionDone: 'The text was added to the “Knowledge base” of the instruction draft.',
     instructionMissing: 'There is no instruction draft yet — open “Instruction” in the express start and try again.',
     courseDone: 'A course draft was created: “{title}”.',

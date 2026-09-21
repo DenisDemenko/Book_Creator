@@ -156,6 +156,9 @@ try {
   const page = await browser.newPage();
   await page.setViewport({ width: 1680, height: 1000 });
   await browser.setCookie({ name: 'nova_session', value: TOKEN, domain: 'localhost', path: '/' });
+  /** Повідомлення консолі сторінки — щоб вади, які код лишає в warn, було видно тесту. */
+  const consoleLog: string[] = [];
+  page.on('console', (msg) => consoleLog.push(`${msg.type()}: ${msg.text()}`));
   /** Тіла запитів на опис — щоб бачити, ЯКУ модель клієнт справді просить (задача #222). */
   const describeBodies: any[] = [];
   page.on('request', (r) => {
@@ -481,48 +484,176 @@ try {
   );
   t('у вікні немає сирого JSON', !failShape.inner.includes('"error"') && !failShape.inner.includes('{'));
 
-  // ── 3. Передача тексту: у книгу (без ШІ, текст вписуємо руками) ────────
+  // ── 3. Передача тексту в книгу: глава → підтвердження → редактор (#224) ─
   const TITLE = 'Ігор Вовк за фото (live)';
-  await page.evaluate((payload: string[]) => {
-    const [title, body] = payload;
-    const modal = document.querySelector('[data-describe-modal]') as HTMLElement | null;
-    const titleInput = modal?.querySelector('[data-describe-title]') as HTMLInputElement | null;
-    const textArea = modal?.querySelector('[data-describe-text]') as HTMLTextAreaElement | null;
-    if (titleInput) {
-      const titleSet = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(titleInput), 'value')?.set;
-      titleSet?.call(titleInput, title);
-      titleInput.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-    if (textArea) {
-      const textSet = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(textArea), 'value')?.set;
-      textSet?.call(textArea, body);
-      textArea.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-  }, [TITLE, 'Перший абзац живого опису.\n\nДругий абзац живого опису.']);
+  const BODY = 'Перший абзац живого опису.\n\nДругий абзац живого опису.';
 
+  /**
+   * Заповнює заголовок і текст у відкритому вікні опису (React-контрольовані
+   * поля — значення ставиться через дескриптор прототипу, інакше React не
+   * бачить зміни).
+   *
+   * Навмисно БЕЗ жодної функції всередині `page.evaluate`: tsx обгортає
+   * оголошені функції в `__name(...)`, а цього хелпера в браузері немає —
+   * прогін падає на `ReferenceError: __name is not defined`. Тут цикл, не
+   * колбек.
+   */
+  const fillDescribe = (title: string, body: string) =>
+    page.evaluate(
+      (payload: string[]) => {
+        const modal = document.querySelector('[data-describe-modal]') as HTMLElement | null;
+        const fields: Array<HTMLInputElement | HTMLTextAreaElement | null> = [
+          modal?.querySelector('[data-describe-title]') as HTMLInputElement | null,
+          modal?.querySelector('[data-describe-text]') as HTMLTextAreaElement | null,
+        ];
+        const values = [payload[0], payload[1]];
+        for (let i = 0; i < fields.length; i++) {
+          const el = fields[i];
+          if (!el) continue;
+          const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value');
+          descriptor?.set?.call(el, values[i]);
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      },
+      [title, body]
+    );
+
+  // Список глав має бути в вікні ДО натискання кнопки: саме його власник
+  // просив — «надати можливість вибору глави книги куди передати».
+  const chapterShape = await page.evaluate(() => {
+    const modal = document.querySelector('[data-describe-modal]') as HTMLElement | null;
+    const select = modal?.querySelector('[data-describe-chapter]') as HTMLSelectElement | null;
+    if (!select) return null;
+    return {
+      value: select.value,
+      options: Array.from(select.options).map((o) => ({ value: o.value, text: (o.textContent || '').trim() })),
+    };
+  });
+  t('у вікні є вибір глави книги', !!chapterShape);
+  t('у списку глави книги, а не щось інше', !!chapterShape && chapterShape.options.length > 0, String(chapterShape?.options.length));
+  t(
+    'типово обрана остання глава (як текст лягав до #224)',
+    !!chapterShape && chapterShape.value === chapterShape.options[chapterShape.options.length - 1]?.value,
+    chapterShape?.value
+  );
+  const chapterTitle = chapterShape?.options.find((o) => o.value === chapterShape.value)?.text || '';
+
+  await fillDescribe(TITLE, BODY);
   await page.evaluate(() => {
     (document.querySelector('[data-describe-transfer-text]') as HTMLElement | null)?.click();
   });
+
+  // Підтвердження глави: передача ще НЕ почалася — інакше крок був би фікцією.
+  await page.waitForSelector('[data-describe-confirm-panel]', { timeout: 5000 });
+  const confirmShape = await page.evaluate(() => {
+    const panel = document.querySelector('[data-describe-confirm-panel]') as HTMLElement | null;
+    return {
+      text: panel?.innerText || '',
+      hasConfirm: !!panel?.querySelector('[data-describe-confirm]'),
+      hasCancel: !!panel?.querySelector('[data-describe-confirm-cancel]'),
+    };
+  });
+  t(
+    'спершу показано підтвердження з назвою глави',
+    confirmShape.hasConfirm && confirmShape.hasCancel && confirmShape.text.includes(chapterTitle),
+    `${chapterTitle} | ${confirmShape.text.split('\n')[0]}`
+  );
+  t('тост про передачу ще не зʼявився (передача не почалася)', await page.evaluate(() => !!document.querySelector('[data-describe-modal]')));
+
+  // Скасування: підтвердження зникає, вікно лишається, у книгу нічого не йде.
+  await page.evaluate(() => {
+    (document.querySelector('[data-describe-confirm-cancel]') as HTMLElement | null)?.click();
+  });
+  await page.waitForFunction(() => !document.querySelector('[data-describe-confirm-panel]'), { timeout: 5000 });
+  t('скасування закриває підтвердження, текст не передано', await page.evaluate(() => !!document.querySelector('[data-describe-modal]')));
+
+  // Підтверджуємо передачу.
+  await page.evaluate(() => {
+    (document.querySelector('[data-describe-transfer-text]') as HTMLElement | null)?.click();
+  });
+  await page.waitForSelector('[data-describe-confirm-panel]', { timeout: 5000 });
+  await page.evaluate(() => {
+    (document.querySelector('[data-describe-confirm]') as HTMLElement | null)?.click();
+  });
   await page.waitForFunction(() => !document.querySelector('[data-describe-modal]'), { timeout: 15000 });
-  t('після передачі вікно закрилося', true);
+  t('після підтвердження вікно опису закрилося', true);
 
-  await page.waitForFunction(
-    (title: string) => document.body.innerText.includes(title),
-    { timeout: 10000 },
-    TITLE
+  /*
+    Найважливіше в задачі #224: автор має ПОБАЧИТИ, куди приїхав текст.
+    Тому перевіряємо не тост, а сам редактор: «Книга та текст» відкрилась на
+    потрібній главі, і текст стоїть у ній БЛОКОМ AI-ЧЕРНЕТКИ (бурштинова
+    рамка + дві дії), а не сирим HTML, як було до цієї правки.
+  */
+  await page.waitForSelector('[data-ai-draft]', { timeout: 20000 });
+  const draftShape = await page.evaluate(() => {
+    const block = document.querySelector('[data-ai-draft]') as HTMLElement | null;
+    const editor = document.querySelector('.nova-manuscript-editor') as HTMLElement | null;
+    return {
+      text: block?.innerText || '',
+      label: (block?.querySelector('.nova-ai-draft-label')?.textContent || '').trim(),
+      hasAccept: !!block?.querySelector('[data-ai-draft-accept]'),
+      hasReject: !!block?.querySelector('[data-ai-draft-reject]'),
+      editorText: editor?.innerText || '',
+      bodyText: document.body.innerText,
+      selection: window.getSelection()?.toString() || '',
+    };
+  });
+  t('редактор «Книга та текст» відкрито на вставленому тексті', !!draftShape);
+  t('відкрита САМЕ та глава, яку підтвердили', draftShape.bodyText.includes(chapterTitle), chapterTitle);
+  t('текст опису в книзі', draftShape.text.includes('Перший абзац живого опису.') && draftShape.text.includes('Другий абзац живого опису.'), draftShape.text.slice(0, 80));
+  t('текст помічено як AI-чернетку', draftShape.label.includes('AI-чернетка'), draftShape.label);
+  t('на мітці є обидві дії — прийняти й відхилити', draftShape.hasAccept && draftShape.hasReject);
+  t('сирого HTML у книзі НЕМАЄ (дефект #220)', !draftShape.editorText.includes('<p>'), draftShape.editorText.slice(0, 100));
+
+  /*
+    Виділення зʼявляється НЕ тієї ж миті, що блок: сам блок малює синхронізація
+    контенту редактора, а виділення — окремий ефект EditorView (той, що й у
+    мості «чат → книга»). Тому чекаємо на нього явно, а не ловимо навмання:
+    інакше тест падав би через гонку двох ефектів, а не через справжню ваду.
+  */
+  let highlightOk = false;
+  try {
+    await page.waitForFunction(
+      () => (window.getSelection()?.toString() || '').includes('Перший абзац живого опису'),
+      { timeout: 5000 }
+    );
+    highlightOk = true;
+  } catch {
+    highlightOk = false;
+  }
+  const highlightShape = await page.evaluate(() => ({
+    selection: window.getSelection()?.toString() || '',
+    active: (document.activeElement?.className || '').slice(0, 60),
+    markers: Array.from(document.querySelectorAll('.nova-ai-draft')).map((el) => (el.textContent || '').slice(0, 40)),
+    draftInsideEditor: !!document.querySelector('.nova-manuscript-editor [data-ai-draft]'),
+  }));
+  t(
+    'вставлене виділено (автор бачить, що саме приїхало)',
+    highlightOk,
+    `виділено: «${highlightShape.selection.slice(0, 60)}» | фокус: ${highlightShape.active} | чернетка в редакторі: ${highlightShape.draftInsideEditor}`
   );
-  t('тост підтвердив передачу в книгу', true);
+  if (!highlightOk) console.log('     console:', consoleLog.filter((l) => l.includes('editor')).slice(-4).join(' | '));
 
-  // Найважливіше: розділ справді зʼявився в книзі, а не лише в тості.
-  await page.click('#nav-tab-toc');
-  await page.waitForFunction(
-    (title: string) => document.body.innerText.includes(title),
-    { timeout: 15000 },
-    TITLE
+  await page.screenshot({ path: path.join(ROOT, 'tmp', 'media-describe-draft.png'), fullPage: true });
+  console.log('     (знімок: tmp/media-describe-draft.png)');
+
+  // Прийняття: позначка зникає, текст лишається звичайним.
+  await page.evaluate(() => {
+    (document.querySelector('[data-ai-draft-accept]') as HTMLElement | null)?.click();
+  });
+  await page.waitForFunction(() => !document.querySelector('[data-ai-draft]'), { timeout: 10000 });
+  const afterAccept = await page.evaluate(() => {
+    const editor = document.querySelector('.nova-manuscript-editor') as HTMLElement | null;
+    return { text: editor?.innerText || '', drafts: document.querySelectorAll('[data-ai-draft]').length };
+  });
+  t('після прийняття позначка чернетки зникає', afterAccept.drafts === 0);
+  t(
+    'а сам текст лишається в книзі звичайним',
+    afterAccept.text.includes('Перший абзац живого опису.') && afterAccept.text.includes('Другий абзац живого опису.')
   );
-  t('новий розділ видно у «Змісті» книги', true);
 
-  // ── 4. «Разом з фото» — друга передача ────────────────────────────────
+  // ── 4. «Разом з фото» — фото стає ілюстрацією, текст — чернеткою ───────
+  const TITLE_BOTH = 'Ігор Вовк з фото (live)';
   await page.click('#nav-tab-media');
   await page.waitForSelector('[data-tour="media__3"]', { timeout: 15000 });
   await page.evaluate((name: string) => {
@@ -531,39 +662,45 @@ try {
     (card?.querySelector('[data-describe-ai]') as HTMLElement | null)?.click();
   }, PHOTO);
   await page.waitForSelector('[data-describe-modal]', { timeout: 10000 });
-  const TITLE_BOTH = 'Ігор Вовк з фото (live)';
-  await page.evaluate((payload: string[]) => {
-    const [title, body] = payload;
-    const modal = document.querySelector('[data-describe-modal]') as HTMLElement | null;
-    const titleInput = modal?.querySelector('[data-describe-title]') as HTMLInputElement | null;
-    const textArea = modal?.querySelector('[data-describe-text]') as HTMLTextAreaElement | null;
-    if (titleInput) {
-      const titleSet = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(titleInput), 'value')?.set;
-      titleSet?.call(titleInput, title);
-      titleInput.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-    if (textArea) {
-      const textSet = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(textArea), 'value')?.set;
-      textSet?.call(textArea, body);
-      textArea.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-  }, [TITLE_BOTH, 'Опис разом із фото.']);
+  await fillDescribe(TITLE_BOTH, 'Опис разом із фото.');
   await page.evaluate(() => {
     (document.querySelector('[data-describe-transfer-both]') as HTMLElement | null)?.click();
   });
+  await page.waitForSelector('[data-describe-confirm-panel]', { timeout: 5000 });
+  await page.evaluate(() => {
+    (document.querySelector('[data-describe-confirm]') as HTMLElement | null)?.click();
+  });
   await page.waitForFunction(() => !document.querySelector('[data-describe-modal]'), { timeout: 15000 });
-  await page.click('#nav-tab-toc');
-  await page.waitForFunction(
-    (title: string) => document.body.innerText.includes(title),
-    { timeout: 15000 },
-    TITLE_BOTH
-  );
-  t('друга передача («разом з фото») теж дала розділ у книзі', true);
+  await page.waitForSelector('[data-ai-draft]', { timeout: 20000 });
+  const bothShape = await page.evaluate(() => {
+    const block = document.querySelector('[data-ai-draft]') as HTMLElement | null;
+    const editor = document.querySelector('.nova-manuscript-editor') as HTMLElement | null;
+    return {
+      text: block?.innerText || '',
+      images: document.querySelectorAll('.nova-manuscript-editor figure[data-wrapped-image]').length,
+      editorText: editor?.innerText || '',
+    };
+  });
+  t('друга передача: текст теж чернеткою', bothShape.text.includes('Опис разом із фото.'), bothShape.text.slice(0, 60));
+  t('фото показано як ілюстрацію книги', bothShape.images > 0, String(bothShape.images));
+  t('маркер фото не видно текстом', !bothShape.editorText.includes('[IMG:'), bothShape.editorText.slice(0, 100));
 
-  const shotDir = path.join(ROOT, 'tmp');
-  fs.mkdirSync(shotDir, { recursive: true });
-  await page.screenshot({ path: path.join(shotDir, 'media-describe-transfer.png'), fullPage: true });
-  console.log('     (знімок: tmp/media-describe-transfer.png)');
+  // Відхилення: зникає текст чернетки, а фото лишається — воно не частина
+  // відповіді моделі, а ілюстрація, яку автор сам попросив додати.
+  await page.evaluate(() => {
+    (document.querySelector('[data-ai-draft-reject]') as HTMLElement | null)?.click();
+  });
+  await page.waitForFunction(() => !document.querySelector('[data-ai-draft]'), { timeout: 10000 });
+  const afterReject = await page.evaluate(() => {
+    const editor = document.querySelector('.nova-manuscript-editor') as HTMLElement | null;
+    return {
+      text: editor?.innerText || '',
+      images: document.querySelectorAll('.nova-manuscript-editor figure[data-wrapped-image]').length,
+    };
+  });
+  t('після відхилення тексту чернетки немає', !afterReject.text.includes('Опис разом із фото.'));
+  t('а фото лишилося в книзі', afterReject.images > 0, String(afterReject.images));
+  t('прийнятий раніше текст не зачеплено', afterReject.text.includes('Перший абзац живого опису.'));
 
   // ── 4.5. Ціль «курс» — окрема сутність із власним сховищем ─────────────
   await page.click('#nav-tab-media');
@@ -647,7 +784,7 @@ try {
   t('без чернетки інструкції вікно НЕ закривається (текст не втрачено)', stillOpen);
   const instructionRefused = await page.evaluate(() => document.body.innerText.includes('Чернетки інструкції ще немає'));
   t('і автор бачить, чому саме передача не відбулася', instructionRefused);
-  await page.screenshot({ path: path.join(shotDir, 'media-describe-instruction-refused.png') });
+  await page.screenshot({ path: path.join(ROOT, 'tmp', 'media-describe-instruction-refused.png') });
 } finally {
   await browser.close();
   stopServer();

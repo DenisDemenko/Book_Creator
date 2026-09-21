@@ -23,6 +23,7 @@ import {
   tiptapDocToMarkerString,
   markerSnippetToNodes,
   markerOffsetToDocPos,
+  findBlockRangeWithText,
   JSONContent,
 } from '../utils/manuscriptDoc';
 import { 
@@ -213,7 +214,16 @@ interface EditorViewProps {
    * збігається з pendingHighlight.sectionId, потім знімається через
    * onHighlightApplied.
    */
-  pendingHighlight?: { sectionId: string; start: number; end: number } | null;
+  /**
+   * Діапазон для підсвічування щойно вставленого тексту.
+   *
+   * `text` — сам вставлений фрагмент (перші рядки). Коли він є, шукаємо блок
+   * У ДОКУМЕНТІ (`findBlockRangeWithText`) — це надійно й не залежить від
+   * арифметики маркерів (див. коментар у manuscriptDoc.ts про ваду, знайдену
+   * живим прогоном #224). `start`/`end` лишаються запасним шляхом для старих
+   * викликів і для випадків, коли текст у документі не знайшовся.
+   */
+  pendingHighlight?: { sectionId: string; start: number; end: number; text?: string } | null;
   onHighlightApplied?: () => void;
   /**
    * «Редагувати промт →» з меню правого кліку по фото: відкриває
@@ -1111,30 +1121,73 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
   // Виділяє й прокручує до щойно вставленого з AI-чату тексту (App.tsx →
   // handleSendChatTextToChapter уже перемкнув сюди activeChapterId/activeSectionId
-  // разом із pendingHighlight — застосовуємо один раз і знімаємо прапорець).
+  // разом із pendingHighlight) або до опису, переданого з медіатеки (#224,
+  // App.tsx → handleRevealChapterText). Обидва шляхи ходять саме через цей
+  // ефект — і це навмисно: два способи підсвітити «щойно додане» розійшлися б
+  // поведінкою за першої ж правки редактора.
+  //
   // Навмисно БЕЗ requestAnimationFrame: rAF не спрацьовує (або сильно
-  // затримується) на неактивній/невидимій вкладці, а ефект і так виконується
-  // вже ПІСЛЯ коміту нового value в textarea, тож відкладати нема потреби.
+  // затримується) на неактивній/невидимій вкладці.
+  //
+  // ВАДА, ЗНАЙДЕНА ЖИВИМ ПРОГОНОМ #224 (записано, щоб не повернути). Раніше
+  // тут було так: якщо редактор ще не готовий, ставився setTimeout(50) на
+  // повтор — і ТІЄЇ Ж МИТІ викликався `onHighlightApplied()`. Той знімав
+  // pendingHighlight в App, ефект перезапускався, і cleanup скасовував ще не
+  // виконаний повтор. Тобто підсвічування губилось щоразу, коли редактор не
+  // встигав змонтуватись у першому проході — а саме так і буває при переході
+  // «медіатека → Книга та текст». Тепер прапорець знімається ЛИШЕ після
+  // успішного застосування (або після вичерпання спроб, щоб не крутитись
+  // вічно).
   useEffect(() => {
     if (!pendingHighlight || !activeSection || pendingHighlight.sectionId !== activeSection.id) return;
-    const { start, end } = pendingHighlight;
+    const { start, end, text: needle } = pendingHighlight;
+    const MAX_ATTEMPTS = 20; // ~1 секунда: далі вважаємо, що збіг не знайдеться
+    let attempts = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
     const applyHighlight = () => {
       if (!uaEditor) return false;
       const doc = uaEditor.state.doc;
-      const from = markerOffsetToDocPos(doc, start);
-      const to = markerOffsetToDocPos(doc, end);
+      // Спершу — за самим текстом у документі; арифметика маркерів лише як
+      // запасний шлях (див. опис `findBlockRangeWithText`).
+      const byText = needle ? findBlockRangeWithText(doc, needle) : null;
+      const from = byText ? byText.from : markerOffsetToDocPos(doc, start);
+      const to = byText ? byText.to : markerOffsetToDocPos(doc, end);
       if (from === null || to === null) return false;
       uaEditor.chain().focus().setTextSelection({ from, to }).scrollIntoView().run();
       return true;
     };
-    // Пряма спроба (звичайний випадок — контент уже завантажено в редактор) +
-    // setTimeout-резерв на випадок, якщо редактор для цієї секції ще не встиг змонтуватись.
-    if (!applyHighlight()) {
-      const timeout = setTimeout(applyHighlight, 50);
-      onHighlightApplied?.();
-      return () => clearTimeout(timeout);
-    }
-    onHighlightApplied?.();
+
+    const attempt = () => {
+      attempts += 1;
+      if (applyHighlight()) {
+        onHighlightApplied?.();
+        return;
+      }
+      if (attempts >= MAX_ATTEMPTS) {
+        // Мовчазна відмова тут коштувала б цілої сесії пошуку: автор бачить
+        // текст у книзі, але без підсвічування й прокрутки — і причини ніде
+        // не видно. Тому в консоль, а не «нічого».
+        console.warn(
+          '[editor] не вдалося підсвітити вставлений фрагмент ' +
+            JSON.stringify({
+              sectionId: activeSection?.id,
+              start,
+              end,
+              needle: needle ? needle.slice(0, 40) : null,
+              editorReady: !!uaEditor,
+              docSize: uaEditor ? uaEditor.state.doc.content.size : null,
+            })
+        );
+        onHighlightApplied?.();
+        return;
+      }
+      timer = setTimeout(attempt, 50);
+    };
+    attempt();
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingHighlight, activeSection?.id, uaEditor]);
 

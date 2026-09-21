@@ -34,18 +34,36 @@ import { MediaGenerationPanel } from './MediaGenerationPanel';
 import { DescribeCharacterModal } from './DescribeCharacterModal';
 import { loadInstructionDraft, saveInstructionDraft } from '../utils/instructionDraft';
 import {
-  appendDescriptionToBook,
   appendDescriptionToInstruction,
   buildCourseFromDescription,
+  insertDescriptionIntoBook,
   writerCoreFromBook,
   type DescriptionPayload,
   type DescriptionTarget,
 } from '../utils/describeCharacterTransfer';
 
+/** Куди саме ліг текст — App за цим відкриває «Книга та текст» на потрібному місці (#224). */
+export interface DescribeRevealTarget {
+  chapterId: string;
+  chapterTitle: string;
+  sectionId: string;
+  start: number;
+  end: number;
+  /** Вставлений текст — ним EditorView знаходить блок для підсвічування. */
+  text: string;
+}
+
 interface MediaLibraryViewProps {
   book: Book;
   onUpdateBook: (updatedBook: Book, logAction?: string, logDetails?: string) => void;
   authUser?: AuthUser | null;
+  /**
+   * Відкрити «Книга та текст» на щойно вставленому тексті (задача #224).
+   * Передається з App: перемикання вкладки, активний розділ і підсвічування
+   * вставленого фрагмента — стан App, і тримати його тут означало б дублювати
+   * той самий шлях, яким уже ходить міст «чат → книга».
+   */
+  onRevealChapterText?: (target: DescribeRevealTarget) => void;
 }
 
 interface StorageInfo {
@@ -134,7 +152,7 @@ const SORT_LABEL_KEY: Record<MediaSortMethod, string> = {
   size: 'mediaLibraryView.sortSize',
 };
 
-export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpdateBook, authUser }) => {
+export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpdateBook, authUser, onRevealChapterText }) => {
   const [filter, setFilter] = useState<'all' | 'portraits' | 'illustrations' | 'covers' | 'videos'>('all');
   // Спосіб сортування галереї — спільний для фото й відео (задача про відео:
   // усі вони MP4, тож за форматом їх не розрізнити, а порядок появи — можна).
@@ -519,12 +537,39 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
   const handleDescribeTransfer = async (target: DescriptionTarget, payload: DescriptionPayload): Promise<boolean> => {
     try {
       if (target === 'book') {
+        /*
+          Задача #224. Три речі, яких тут не було раніше:
+            1. главу вибирає автор (payload.chapterId), а не «остання завжди»;
+            2. текст лягає АВТОМАТИЧНОЮ ЧЕРНЕТКОЮ (маркер [AI-DRAFT]), тобто
+               з бурштиновою рамкою і кнопками прийняти/відхилити в редакторі;
+            3. після передачі App відкриває «Книга та текст» на цьому самому
+               місці (onRevealChapterText) — автор бачить, КУДИ приїхало.
+        */
+        const draft = insertDescriptionIntoBook(book, payload, {
+          chapterId: payload.chapterId ?? null,
+          withPhoto: Boolean(payload.photo),
+          illustrationId: `ill-desc-${Date.now()}`,
+        });
+        if (!draft) {
+          showToast(t('describeCharacter.transferFailed'));
+          return false;
+        }
         onUpdateBook(
-          appendDescriptionToBook(book, payload),
-          'Опис персонажа (ШІ)',
-          `Розділ «${payload.title}»${payload.photo ? ' разом з фото' : ''}`
+          draft.book,
+          'Опис персонажа (ШІ) передано в книгу',
+          `Глава «${draft.chapterTitle}» → AI-чернетка${payload.photo ? ' разом із фото' : ''}`
         );
-        showToast(t('describeCharacter.bookDone', { title: payload.title }));
+        showToast(t('describeCharacter.bookDone', { chapter: draft.chapterTitle }));
+        onRevealChapterText?.({
+          chapterId: draft.chapterId,
+          chapterTitle: draft.chapterTitle,
+          sectionId: draft.sectionId,
+          start: draft.start,
+          end: draft.end,
+          // Перший абзац опису — той самий текст, що ліг у книгу: за ним
+          // EditorView знаходить вставлений блок (а не за арифметикою зміщень).
+          text: payload.text.trim().split(/\n{2,}/)[0]?.trim() || '',
+        });
         return true;
       }
 
@@ -1046,12 +1091,15 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
 
       {/* Задача #220. «Описати ШІ» — окреме вікно поверх галереї: опис
           персонажа, якого модель справді бачить на фото, і передача тексту
-          (за бажанням — разом із фото) у книгу, інструкцію або курс. */}
+          (за бажанням — разом із фото) у книгу, інструкцію або курс.
+          Задача #224 додала вибір ГЛАВИ книги й підтвердження: до цього
+          текст ішов в останню главу без відома автора. */}
       {describePhoto && (
         <DescribeCharacterModal
           photo={describePhoto}
           core={writerCoreFromBook(book)}
           preferredModelId={book?.preferredAiModelId}
+          chapters={(book.chapters || []).map((c) => ({ id: c.id, title: c.title }))}
           isRegistered={isRegistered}
           onClose={() => setDescribePhoto(null)}
           onTransfer={handleDescribeTransfer}

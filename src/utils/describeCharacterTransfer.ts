@@ -13,8 +13,9 @@
  * `scripts/test-describeCharacter.mts` — так само, як `instructionDraft.ts`.
  */
 
-import type { Book, Chapter, Instruction, InstructionKnowledgeItem, Section } from '../types';
+import type { Book, BookIllustration, Chapter, Instruction, InstructionKnowledgeItem, Section } from '../types';
 import { instructionUid } from './instructionDraft';
+import { appendTextToChapterEnd } from './bookText';
 
 /** Три цілі, у які автор може передати опис. */
 export type DescriptionTarget = 'book' | 'instruction' | 'course';
@@ -26,6 +27,11 @@ export interface DescriptionPayload {
   text: string;
   /** Фото, з якого зроблено опис; `null` — передаємо лише текст. */
   photo?: { url: string; title: string } | null;
+  /**
+   * Глава книги, яку автор вибрав у вікні опису (задача #224). Має сенс
+   * лише для цілі `book`; порожнє — остання глава книги.
+   */
+  chapterId?: string;
 }
 
 /** Слова рахуються так само, як у решті книги (`Section.wordCount`). */
@@ -33,41 +39,43 @@ export function descriptionWordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
-/** Екранування тексту перед вставкою в HTML розділу. */
-function escapeHtml(value: string): string {
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
+/**
+ * Маркер-обгортка «AI-чернетка» — той самий, який читає редактор книги
+ * (`utils/manuscriptDoc.ts` → вузол `aiDraft` → `AiDraftBlockNode.tsx`).
+ * Літерали навмисно продубльовані, а не імпортовані: `manuscriptDoc.ts`
+ * тримає їх приватними, а тягнути в цей помічник увесь парсер рукопису
+ * означало б прив'язати передачу з медіатеки до редактора ProseMirror.
+ * Збіг літералів перевіряється тестом (`test-describe-character`).
+ */
+export const AI_DRAFT_OPEN = '[AI-DRAFT]';
+export const AI_DRAFT_CLOSE = '[/AI-DRAFT]';
 
 /**
- * Тіло розділу: фото (лише у варіанті «разом з фото») + абзаци тексту.
+ * Текст опису у ФОРМАТІ КНИГИ — абзаци через порожній рядок.
  *
- * Абзаци розділяються порожнім рядком у textarea, а не одним переносом:
- * редагований текст ШІ приходить суцільним потоком, і різати його на
- * `<p>` по кожному переносу означало б породжувати рвані абзаци.
- *
- * Фото вставляється тегом `<img>` з адресою з медіатеки — так само, як
- * це робить редактор розділу; окремого запису в `book.illustrations` не
- * створюємо: там потрібне співвідношення сторін, якого ми про це фото не
- * знаємо, і вигадувати його було б гірше, ніж не мати.
+ * ЧОМУ НЕ HTML (як було в #220). Розділ книги зберігається не як HTML, а як
+ * рядок із маркерами, який редактор розбирає сам (`markerStringToTiptapDoc`).
+ * Зібраний тут `<p>…</p>` редактор показував авторові ЛІТЕРАЛЬНО — тегами в
+ * тексті книги: саме це видно власникові як «передав, а куди — незрозуміло».
+ * Порожній рядок — це межа абзацу; усередині абзацу перенос лишається м'яким.
  */
-export function descriptionSectionContent(payload: DescriptionPayload): string {
-  const parts: string[] = [];
-  if (payload.photo?.url) {
-    parts.push(
-      `<img src="${escapeHtml(payload.photo.url)}" alt="${escapeHtml(payload.photo.title || payload.title)}" />`
-    );
-  }
-  const paragraphs = payload.text
+export function descriptionParagraphs(text: string): string {
+  return text
+    .replace(/\r\n/g, '\n')
     .split(/\n{2,}/)
     .map((p) => p.trim())
     .filter(Boolean)
-    .map((p) => `<p>${escapeHtml(p).replace(/\n/g, '<br />')}</p>`);
-  if (paragraphs.length) parts.push(paragraphs.join('\n'));
-  return parts.join('\n');
+    .join('\n\n');
+}
+
+/**
+ * Опис як блок «AI-чернетка» — те, чого автор і просив: текст приходить
+ * поміченим (бурштинова рамка + мітка «✨ AI-чернетка»), із видимими діями
+ * «прийняти» (позначка знімається, текст лишається звичайним чорним) та
+ * «відхилити» (блок зникає разом із текстом, Ctrl+Z повертає).
+ */
+export function buildDescriptionDraft(text: string): string {
+  return [AI_DRAFT_OPEN, descriptionParagraphs(text), AI_DRAFT_CLOSE].join('\n\n');
 }
 
 /** Заголовок, який дістає порожній ввід (автор нічого не написав — теж робочий випадок). */
@@ -77,40 +85,150 @@ function resolveTitle(payload: DescriptionPayload): string {
 }
 
 /**
- * Новий розділ у книзі з описом.
+ * Вставка опису в КІНЕЦЬ вибраної глави (задача #224).
  *
- * Кладеться в ОСТАННЮ главу — це найближче місце до того, над чим автор
- * працює зараз, і воно не вимагає від нього вибору глави посеред вікна
- * опису. Якщо глав немає зовсім (нова книга), створюється одна — «Опис
- * персонажів»: інакше розділ не мав би куди лягти взагалі.
+ * Чому саме кінець глави. Власник попросив «вибір глави → передати → відкрити
+ * кінець глави з вставленим текстом»: кінець — єдине місце, яке не рве вже
+ * написане, і єдине, яке автор однаково знайде після переходу.
+ *
+ * Куди саме всередині глави: в ОСТАННЮ секцію за `order` (у книзі секції —
+ * це підрозділи всередині глави). Якщо в главі секцій немає зовсім, створюємо
+ * одну з заголовком опису — інакше тексту не було б куди лягти.
+ *
+ * Фото («разом з фото») стає ЗАПИСОМ КНИГИ (`book.illustrations`) і маркером
+ * `[IMG: id]` перед чернеткою — так редактор і верстальник PDF бачать його як
+ * звичайну ілюстрацію глави. Одне й те саме фото, уже додане в книгу, не
+ * дублюється: беремо наявний запис за адресою.
+ *
+ * `start`/`end` — зміщення вставленого тексту в `content` секції: за ними
+ * редактор підсвічує й прокручує до місця передачі (той самий `pendingHighlight`,
+ * яким користується міст «чат → книга»).
+ *
+ * `null` — відмова без здогадок: порожній текст передавати нема сенсу, і
+ * краще, щоб автор побачив причину, ніж порожній блок у книзі.
  */
-export function appendDescriptionToBook(
+export interface DescriptionBookInsert {
+  /** Оновлена книга: і глави, і (у варіанті «разом з фото») перелік ілюстрацій. */
+  book: Book;
+  chapterId: string;
+  chapterTitle: string;
+  sectionId: string;
+  /** Зміщення вставленого блоку в `Section.content` (включно з маркерами). */
+  start: number;
+  end: number;
+}
+
+export interface DescriptionInsertOptions {
+  /** Глава, яку автор вибрав у вікні опису. Порожньо — остання глава книги. */
+  chapterId?: string | null;
+  /** Додати фото в книгу (кнопка «разом з фото»). */
+  withPhoto?: boolean;
+  /**
+   * id нової ілюстрації приходить ззовні: у тестах він фіксований, а в
+   * застосунку — з мітки часу. Так функція лишається чистою й передбачуваною.
+   */
+  illustrationId?: string;
+  now?: string;
+}
+
+/** Запит книги на фото з медіатеки: той самий набір полів, що й у завантаженні файлу. */
+function illustrationFromPhoto(
+  payload: DescriptionPayload,
+  chapterId: string,
+  id: string,
+  now: string
+): BookIllustration {
+  return {
+    id,
+    chapterId,
+    url: payload.photo!.url,
+    caption: payload.photo!.title || resolveTitle(payload),
+    // Співвідношення сторін файлу з медіатеки тут невідоме — ставимо те саме,
+    // що й завантаження файлу в медіатеку (`MediaLibraryView`), і не вдаємо,
+    // ніби знаємо точне. Редактор і PDF беруть геометрію з самої картинки.
+    aspectRatio: '16:9',
+    style: 'Медіатека',
+    createdAt: now,
+  };
+}
+
+export function insertDescriptionIntoBook(
   book: Book,
   payload: DescriptionPayload,
-  now: string = new Date().toISOString()
-): Book {
+  options: DescriptionInsertOptions = {}
+): DescriptionBookInsert | null {
+  const text = payload.text.trim();
+  if (!text) return null;
+
+  const now = options.now || new Date().toISOString();
   const chapters = [...(book.chapters || [])];
-  if (!chapters.length) {
-    chapters.push({
-      id: instructionUid('chap'),
-      bookId: book.id,
-      title: 'Опис персонажів',
-      order: 1,
-      sections: [],
-    } as Chapter);
+
+  // Вибір глави: названа автором → остання в книзі → нова «Опис персонажів».
+  // Невідомий id не привід мовчки кинути текст в інше місце, але й не привід
+  // відмовляти: на момент передачі главу могли перейменувати/видалити в іншій
+  // вкладці. Остання глава — те саме місце, куди текст лягав до #224.
+  const wanted = (options.chapterId || '').trim();
+  let targetIndex = wanted ? chapters.findIndex((c) => c.id === wanted) : -1;
+  if (targetIndex === -1) {
+    if (!chapters.length) {
+      chapters.push({
+        id: instructionUid('chap'),
+        bookId: book.id,
+        title: 'Опис персонажів',
+        order: 1,
+        sections: [],
+      } as Chapter);
+    }
+    targetIndex = chapters.length - 1;
   }
-  const target = chapters[chapters.length - 1];
-  const section: Section = {
-    id: instructionUid('sec'),
+  const target = chapters[targetIndex];
+
+  // Фото — запис книги, і лише один на адресу (повторна передача того самого
+  // фото не має плодити ілюстрації-двійники).
+  const illustrations = [...(book.illustrations || [])];
+  let photoMarker = '';
+  if (options.withPhoto && payload.photo?.url) {
+    const existing = illustrations.find((i) => i.url === payload.photo!.url);
+    const illustration = existing || illustrationFromPhoto(payload, target.id, options.illustrationId || `ill-desc-${Date.parse(now) || Date.now()}`, now);
+    if (!existing) illustrations.push(illustration);
+    photoMarker = `[IMG: ${illustration.id} "${illustration.caption.replace(/"/g, '')}" wrap=none]`;
+  }
+
+  const insertText = [photoMarker, buildDescriptionDraft(text)].filter(Boolean).join('\n\n');
+
+  // Порожня глава: секції немає — створюємо її разом із текстом.
+  const sortedSections = [...(target.sections || [])].sort((a, b) => a.order - b.order);
+  if (!sortedSections.length) {
+    const section: Section = {
+      id: instructionUid('sec'),
+      chapterId: target.id,
+      title: resolveTitle(payload),
+      order: 1,
+      content: insertText,
+      wordCount: descriptionWordCount(text),
+      lastModified: now,
+    };
+    const updated: Chapter = { ...target, sections: [section] };
+    return {
+      book: { ...book, chapters: [...chapters.slice(0, targetIndex), updated, ...chapters.slice(targetIndex + 1)], illustrations },
+      chapterId: target.id,
+      chapterTitle: target.title,
+      sectionId: section.id,
+      start: 0,
+      end: insertText.length,
+    };
+  }
+
+  const appended = appendTextToChapterEnd(chapters, target.id, insertText);
+  if (!appended) return null;
+  return {
+    book: { ...book, chapters: appended.chapters, illustrations },
     chapterId: target.id,
-    title: resolveTitle(payload),
-    order: (target.sections?.length || 0) + 1,
-    content: descriptionSectionContent(payload),
-    wordCount: descriptionWordCount(payload.text),
-    lastModified: now,
+    chapterTitle: target.title,
+    sectionId: appended.sectionId,
+    start: appended.start,
+    end: appended.end,
   };
-  const updated: Chapter = { ...target, sections: [...(target.sections || []), section] };
-  return { ...book, chapters: [...chapters.slice(0, -1), updated] };
 }
 
 /**

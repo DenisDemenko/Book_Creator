@@ -30,14 +30,18 @@ import {
   withBusyRetry,
 } from '../server/textFromImage.ts';
 import {
-  appendDescriptionToBook,
   appendDescriptionToInstruction,
+  AI_DRAFT_CLOSE,
+  AI_DRAFT_OPEN,
+  buildDescriptionDraft,
   buildCourseFromDescription,
-  descriptionSectionContent,
+  descriptionParagraphs,
   descriptionWordCount,
+  insertDescriptionIntoBook,
   writerCoreFromBook,
   type DescriptionPayload,
 } from '../src/utils/describeCharacterTransfer.ts';
+import { calculateWordCount } from '../src/utils/helpers.ts';
 import { createEmptyInstruction } from '../src/utils/instructionDraft.ts';
 import type { Book } from '../src/types.ts';
 
@@ -120,41 +124,94 @@ const payload: DescriptionPayload = {
   photo: { url: '/api/media/file?id=abc&x=1', title: 'media.jpg' },
 };
 
-console.log('\nРозділ у книзі:');
+console.log('\nПередача опису в книгу (задача #224) — глава, формат, чернетка:');
 {
   const before = JSON.parse(JSON.stringify(emptyBook));
   const now = '2026-09-19T20:00:00.000Z';
-  const updated = appendDescriptionToBook(emptyBook, payload, now);
-  const chapters = updated.chapters;
-  t('глав стало стільки ж', chapters.length === 2, String(chapters.length));
-  t('розділ ліг в ОСТАННЮ главу', chapters[1].sections.length === 2);
-  t('title узято з payload', chapters[1].sections[1].title === payload.title);
-  t('order продовжує нумерацію глави', chapters[1].sections[1].order === 2, String(chapters[1].sections[1].order));
-  t('chapterId вказує на свою главу', chapters[1].sections[1].chapterId === 'ch2');
-  t('wordCount пораховано', chapters[1].sections[1].wordCount === descriptionWordCount(payload.text), String(chapters[1].sections[1].wordCount));
-  t('lastModified — переданий час', chapters[1].sections[1].lastModified === now);
-  t('абзаци стали <p>', chapters[1].sections[1].content.includes('<p>Перший абзац опису.</p>'));
-  t('HTML у тексті екрановано', chapters[1].sections[1].content.includes('&lt;b&gt;не HTML&lt;/b&gt;'));
-  t('фото вставлено тегом img', chapters[1].sections[1].content.startsWith('<img src="/api/media/file?id=abc&amp;x=1"'));
+  const draft = insertDescriptionIntoBook(emptyBook, payload, { chapterId: 'ch2', now, illustrationId: 'ill-test' });
+  t('вставка вдалася', !!draft);
+  const chapters = draft!.book.chapters;
+  t('кількість глав не змінилась', chapters.length === 2, String(chapters.length));
+  t('текст ліг у ВИБРАНУ главу', draft!.chapterId === 'ch2' && draft!.chapterTitle === 'Друга');
+  t('назва глави повертається для повідомлення', draft!.chapterTitle === 'Друга');
+  t('дописано в КІНЕЦЬ останньої секції глави', chapters[1].sections.length === 1 && chapters[1].sections[0].content.endsWith(AI_DRAFT_CLOSE));
+  t('секція — та сама, не нова', draft!.sectionId === chapters[1].sections[0].id);
+  t('старий текст секції не затерто', chapters[1].sections[0].content.startsWith('<p>текст</p>'));
+
+  const content = chapters[1].sections[0].content;
+  t('текст загорнуто в маркер AI-чернетки', content.includes(AI_DRAFT_OPEN) && content.includes(AI_DRAFT_CLOSE));
+  t('маркер відкриття — окремим абзацом', content.includes(`\n\n${AI_DRAFT_OPEN}\n\n`), JSON.stringify(content.slice(0, 60)));
+  t('абзаци розділені порожнім рядком, а не тегами', content.includes('Перший абзац опису.\n\nДругий абзац <b>не HTML</b>.'));
+  t('жодного HTML-тега від нас', !content.includes('<p>Перший абзац'), content.slice(-120));
+  t('HTML у тексті лишається текстом (не екранується в маркерах)', content.includes('<b>не HTML</b>'));
+
+  // Діапазон для підсвічування мусить покривати САМЕ вставлене.
+  t('start указує на початок вставки', content.slice(draft!.start, draft!.start + AI_DRAFT_OPEN.length) === AI_DRAFT_OPEN, String(draft!.start));
+  t('end — на кінець', content.slice(draft!.end - AI_DRAFT_CLOSE.length, draft!.end) === AI_DRAFT_CLOSE, String(draft!.end));
+  t('виділений фрагмент дорівнює вставленому тексту', content.slice(draft!.start, draft!.end) === buildDescriptionDraft(payload.text));
+
+  t('wordCount секції рахується тим самим лічильником, що й решта книги',
+    chapters[1].sections[0].wordCount === calculateWordCount(chapters[1].sections[0].content),
+    String(chapters[1].sections[0].wordCount));
+  // Свідомо НЕ рівність до слів опису: лічильник книги грубий (ділить за
+  // пробілами й рахує самі маркери як слова) — так само поводяться й
+  // чернетки з правого кліку по фото та чату. Це давня грубість книги, не
+  // цієї задачі, і саме тому тут перевіряється лише її послідовність.
+  t('опис додав слова, а не забрав', chapters[1].sections[0].wordCount > descriptionWordCount(payload.text), String(chapters[1].sections[0].wordCount));
   t('книга НЕ змінена на місці', JSON.stringify(emptyBook) === JSON.stringify(before));
   t('перша глава недоторкана', chapters[0].sections.length === 0);
+}
+
+console.log('\nФото разом із текстом — ілюстрацією книги, а не тегом у тексті:');
+{
+  const draft = insertDescriptionIntoBook(emptyBook, payload, { chapterId: 'ch2', withPhoto: true, illustrationId: 'ill-test', now: '2026-09-19T20:00:00.000Z' })!;
+  const ill = draft.book.illustrations.find((i) => i.id === 'ill-test');
+  t('фото стало ілюстрацією книги', !!ill, JSON.stringify(draft.book.illustrations));
+  t('ілюстрація прив’язана до вибраної глави', ill?.chapterId === 'ch2');
+  t('підпис — назва фото', ill?.caption === 'media.jpg');
+  t('у тексті стоїть маркер [IMG: id]', draft.book.chapters[1].sections[0].content.includes('[IMG: ill-test "media.jpg"'));
+  t('маркер фото — ПЕРЕД чернеткою', draft.book.chapters[1].sections[0].content.indexOf('[IMG:') < draft.book.chapters[1].sections[0].content.indexOf(AI_DRAFT_OPEN));
+  t('виділення починається з фото', draft.book.chapters[1].sections[0].content.slice(draft.start, draft.start + 4) === '[IMG');
+
+  // Повторна передача того самого фото не має плодити ілюстрації-двійники.
+  const again = insertDescriptionIntoBook(draft.book, { ...payload, text: 'Ще опис' }, { chapterId: 'ch2', withPhoto: true, illustrationId: 'ill-second' })!;
+  t('те саме фото не дублюється', again.book.illustrations.length === draft.book.illustrations.length, String(again.book.illustrations.length));
+  t('другий раз використано наявний id', again.book.chapters[1].sections[0].content.includes('[IMG: ill-test'));
+}
+
+console.log('\nВибір глави:');
+{
+  const first = insertDescriptionIntoBook(emptyBook, payload, { chapterId: 'ch1' })!;
+  t('обрана ПОРОЖНЯ глава отримує власну секцію', first.chapterId === 'ch1' && first.book.chapters[0].sections.length === 1);
+  t('заголовок секції — із payload', first.book.chapters[0].sections[0].title === payload.title);
+  t('у порожній главі виділено весь вміст', first.start === 0 && first.end === first.book.chapters[0].sections[0].content.length);
+  t('другу главу не зачеплено', first.book.chapters[1].sections.length === 1);
+
+  const last = insertDescriptionIntoBook(emptyBook, payload, { chapterId: '' })!;
+  t('порожній id — остання глава (як було до #224)', last.chapterId === 'ch2');
+
+  const unknown = insertDescriptionIntoBook(emptyBook, payload, { chapterId: 'no-such-chapter' })!;
+  t('невідомий id — теж остання глава, а не відмова', unknown.chapterId === 'ch2');
 }
 
 console.log('\nКнига без глав:');
 {
   const bare = { ...emptyBook, chapters: [] } as unknown as Book;
-  const updated = appendDescriptionToBook(bare, { title: '', text: 'Опис', photo: null });
-  t('створено главу, щоб розділу було куди лягти', updated.chapters.length === 1);
-  t('назва глави людська', updated.chapters[0].title === 'Опис персонажів');
-  t('порожній заголовок замінено службовим', updated.chapters[0].sections[0].title === 'Опис персонажа (ШІ)');
+  const draft = insertDescriptionIntoBook(bare, { title: '', text: 'Опис', photo: null })!;
+  t('створено главу, щоб тексту було куди лягти', draft.book.chapters.length === 1);
+  t('назва глави людська', draft.book.chapters[0].title === 'Опис персонажів');
+  t('порожній заголовок замінено службовим', draft.book.chapters[0].sections[0].title === 'Опис персонажа (ШІ)');
+  t('текст усередині маркерів', draft.book.chapters[0].sections[0].content === buildDescriptionDraft('Опис'));
 }
 
-console.log('\nБез фото — без img:');
+console.log('\nПорожній текст і межі формату:');
 {
-  const content = descriptionSectionContent({ title: 'Х', text: 'Опис', photo: null });
-  t('жодного тега img', !content.includes('<img'));
-  t('текст на місці', content.includes('<p>Опис</p>'));
-  t('одинарний перенос стає <br />', descriptionSectionContent({ title: 'Х', text: 'а\nб', photo: null }).includes('а<br />б'));
+  t('порожній текст — відмова, а не порожній блок', insertDescriptionIntoBook(emptyBook, { title: 'Х', text: '   ', photo: null }, { chapterId: 'ch2' }) === null);
+  t('без фото — жодного [IMG]', !insertDescriptionIntoBook(emptyBook, { ...payload, photo: null }, { chapterId: 'ch2' })!.book.chapters[1].sections[0].content.includes('[IMG'));
+  t('одинарний перенос лишається всередині абзацу', descriptionParagraphs('а\nб') === 'а\nб', descriptionParagraphs('а\nб'));
+  t('порожні абзаци не плодять пустих блоків', descriptionParagraphs('а\n\n\n\nб') === 'а\n\nб');
+  t('дві порожні лінії — межа абзацу', descriptionParagraphs('а\n\nб') === 'а\n\nб');
+  t('чернетка складається з трьох частин', buildDescriptionDraft('а\n\nб').split('\n\n').filter(Boolean).length === 4, JSON.stringify(buildDescriptionDraft('а\n\nб')));
 }
 
 console.log('\nЧернетка інструкції:');
