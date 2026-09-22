@@ -101,20 +101,21 @@ remote перевірити можна, запушити — ні**. Робоч�
 > прохання власника** (AGENTS.md), тому між сесіями тут завжди щось лежить —
 > і наступна сесія має знати, що саме, бо `git log` вона не памʼятає.
 
-## Стан на 22.09.2026 (після запису #226) — не запушено
+## Стан на 22.09.2026 (після пушу #226) — ✅ нічого не лишилось
 
 **Book_Creality (Студія).** Гілка `master` = `origin/master` =
-`production/master` = `9a13a41`, зміни в робочій теці **незакомічені**:
+`production/master` = `64c1d5b`. Запушено два коміти:
 
-- **Код і тести** (запис #226): перетягування фото у редакторі виробу, вибір
+- `c5bd58e` — код і тести #226: перетягування фото у редакторі виробу, вибір
   головного банера, передача порядку мостом. Файли:
   `src/components/adminOs/furnitureProduct.ts`,
   `src/components/adminOs/FurnitureProductEditor.tsx`,
   `server/marketplaceBridge.ts`, `server/furnitureProductRoutes.ts`,
   `scripts/test-furnitureMedia.mts`, `scripts/live-furnitureEditor.mts`.
+- `64c1d5b` — журнал: запис #226, покажчик, цей розділ.
 
 **Fusion-Lab-Marketplaes (маркетплейс).** Гілка `master` = `origin/master` =
-`b578ebc`, зміни **незакомічені**:
+`a370b87` — один коміт, усе, що стосується порядку фото:
 
 - міграція `apps/api/prisma/migrations/20260922000001_media_sort_order/`;
 - `apps/api/prisma/schema.prisma` (`MediaAsset.sortOrder`),
