@@ -346,6 +346,91 @@ try {
   await page.screenshot({ path: path.join(shotDir, 'furniture-editor-variants.png'), fullPage: true });
   console.log('     (знімок: tmp/furniture-editor-variants.png)');
 
+  // -------------------------------------------------------------------------
+  // ПОРЯДОК ФОТО — перетягування та «зробити головним» (#226).
+  //
+  // Юніт-тести перевіряють самі функції перестановки; тут перевіряється те,
+  // чого вони не бачать: що жест справді привʼязаний до плиток, що перетягування
+  // змінює СТАН чорнетки (а отже й поїде на вітрину) і що зірка піднімає фото в
+  // головний банер. HTML5 drag-and-drop у headless-Chrome не відтворюється
+  // мишею, тому події надсилаємо синтетично — з тим самим DataTransfer, який
+  // дав би справжній браузер.
+  // -------------------------------------------------------------------------
+  const tmpMediaDir = path.join(DIR, 'media');
+  fs.mkdirSync(tmpMediaDir, { recursive: true });
+  const photoPaths = ['photo-a.png', 'photo-b.png'].map((name, index) => {
+    const filePath = path.join(tmpMediaDir, name);
+    // 2×2 PNG, різні за вмістом, щоб підписи й порядок було видно на знімку.
+    const png = Buffer.from(
+      index === 0
+        ? 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGP8z8Dwn4EIwDiqkL4KAXWpB/1s1k0MAAAAAElFTkSuQmCC'
+        : 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFUlEQVR4nGP8z8DAwMDAwMDEwAAAFBoB/7nO6sUAAAAASUVORK5CYII=',
+      'base64'
+    );
+    fs.writeFileSync(filePath, png);
+    return filePath;
+  });
+
+  const mediaInput = await page.$('input[type="file"][accept="image/*,video/*"]');
+  if (mediaInput) await mediaInput.uploadFile(...photoPaths);
+  await page.waitForFunction(
+    () => Boolean(document.querySelector('[data-media-main]')) && document.querySelectorAll('[data-media-id]').length >= 1,
+    { timeout: 15000 }
+  );
+
+  const mediaState = async () =>
+    page.evaluate(() => {
+      const main = document.querySelector('[data-media-main]') as HTMLElement | null;
+      const tiles = Array.from(document.querySelectorAll('[data-media-id]')) as HTMLElement[];
+      return { main: main?.getAttribute('data-media-main') ?? '', tiles: tiles.map((el) => el.getAttribute('data-media-id') ?? '') };
+    });
+
+  const beforeDrag = await mediaState();
+  t('два фото завантажились, перше — головний банер', Boolean(beforeDrag.main) && beforeDrag.tiles.length === 1, JSON.stringify(beforeDrag));
+
+  // Тягнемо друге фото НА головний банер — воно має стати головним.
+  //
+  // dragstart і drop розділені окремими тактами НАВМИСНО: компонент тримає
+  // id перетягуваного в стані (так це працює в Firefox, де під час dragover
+  // dataTransfer порожній), а React оновлює стан після обробника. У справжньому
+  // перетягуванні між подіями проходять десятки мілісекунд, у синтетичному —
+  // жодної, і drop побачив би `null`. Це властивість прогону, а не продукту:
+  // тому тут пауза, а не зміна компонента.
+  await page.evaluate((fromId) => {
+    const from = document.querySelector(`[data-media-id="${fromId}"]`) as HTMLElement | null;
+    if (!from) return;
+    from.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: new DataTransfer() }));
+  }, beforeDrag.tiles[0] ?? '');
+  await new Promise((r) => setTimeout(r, 150));
+
+  await page.evaluate((toId) => {
+    const to = document.querySelector(`[data-media-main="${toId}"]`) as HTMLElement | null;
+    if (!to) return;
+    const dt = new DataTransfer();
+    to.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    to.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+  }, beforeDrag.main);
+  await new Promise((r) => setTimeout(r, 300));
+
+  const afterDrag = await mediaState();
+  t(
+    'перетягування змінює головне фото (порядок у чорнетці, а не лише на вигляд)',
+    afterDrag.main === beforeDrag.tiles[0] && afterDrag.tiles[0] === beforeDrag.main,
+    JSON.stringify(afterDrag)
+  );
+
+  // Зірка на мініатюрі повертає попереднє фото в головні.
+  await page.evaluate((id) => {
+    (document.querySelector(`[data-media-make-main="${id}"]`) as HTMLElement | null)?.click();
+  }, afterDrag.tiles[0] ?? '');
+  await new Promise((r) => setTimeout(r, 300));
+
+  const afterStar = await mediaState();
+  t('зірка «зробити головним» повертає фото на перше місце', afterStar.main === beforeDrag.main, JSON.stringify(afterStar));
+
+  await page.screenshot({ path: path.join(shotDir, 'furniture-editor-media-order.png'), fullPage: true });
+  console.log('     (знімок: tmp/furniture-editor-media-order.png)');
+
   // Прибираємо дубль і лишаємо один робочий варіант: далі чорнетка має
   // зберегтися чисто, разом із цим артикулом.
   await page.evaluate(() => {

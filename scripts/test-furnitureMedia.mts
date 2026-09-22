@@ -17,7 +17,7 @@
  *   4. Чисті функції моделі: `isVideoMedia`, `furniturePublishIssues` — нові
  *      зауваження «забагато фото» / «забагато відео».
  */
-import { blankFurnitureProduct, furniturePublishIssues, isVideoMedia, MAX_GALLERY_PHOTOS, MAX_GALLERY_VIDEOS } from '../src/components/adminOs/furnitureProduct';
+import { blankFurnitureProduct, furniturePublishIssues, isVideoMedia, makeMainMedia, MAX_GALLERY_PHOTOS, MAX_GALLERY_VIDEOS, moveMediaItem, relabelMedia } from '../src/components/adminOs/furnitureProduct';
 import { uploadProductMedia } from '../server/furnitureProductRoutes';
 
 let pass = 0;
@@ -146,6 +146,91 @@ console.log('\nuploadProductMedia — оборонне обрізання лиш
     res.uploaded === MAX_GALLERY_PHOTOS + MAX_GALLERY_VIDEOS,
     String(res.uploaded)
   );
+}
+
+console.log('\nПорядок медіа: перетягування, головне фото, підписи (#226):');
+{
+  const photo = (id: string): { id: string; label: string; src: string; kind: 'image' } => ({
+    id,
+    label: `Фото ${id}`,
+    src: 'data:image/png;base64,x',
+    kind: 'image',
+  });
+  const video = (id: string): { id: string; label: string; src: string; kind: 'video' } => ({
+    id,
+    label: `Відео ${id}`,
+    src: 'data:video/mp4;base64,x',
+    kind: 'video',
+  });
+
+  const ids = (list: Array<{ id: string }>) => list.map((m) => m.id).join(',');
+
+  // Перетягування ВПЕРЕД (третє фото на місце другого).
+  const forward = moveMediaItem([photo('a'), photo('b'), photo('c')], 'c', 'b');
+  t('перетягування вгору ставить фото ПЕРЕД ціллю', ids(forward) === 'a,c,b', ids(forward));
+
+  // Перетягування НАЗАД (перше фото на місце третього) — окремий випадок,
+  // бо індекси праворуч зсуваються після виймання.
+  const backward = moveMediaItem([photo('a'), photo('b'), photo('c')], 'a', 'c');
+  t('перетягування вниз ставить фото НА місце цілі, а не після', ids(backward) === 'b,c,a', ids(backward));
+
+  const original = [photo('a'), photo('b'), photo('c')];
+  const snapshot = ids(original);
+  moveMediaItem(original, 'a', 'c');
+  t('вхідний масив не змінюється (мутація зламала б чорнетку в стані)', ids(original) === snapshot);
+
+  t('невідомий id — без змін', ids(moveMediaItem(original, 'zzz', 'b')) === snapshot);
+  t('перетягування на себе — без змін', ids(moveMediaItem(original, 'b', 'b')) === snapshot);
+
+  // Головне фото = перший елемент масиву.
+  const main = makeMainMedia([photo('a'), photo('b'), photo('c')], 'c');
+  t('«зробити головним» піднімає фото на перше місце', ids(main) === 'c,a,b', ids(main));
+  t('перше фото вже головне — без змін', ids(makeMainMedia(original, 'a')) === snapshot);
+  t('невідомий id у «зробити головним» — без змін', ids(makeMainMedia(original, 'zzz')) === snapshot);
+
+  // Підписи переписуються за фактичними позиціями.
+  const relabelled = relabelMedia([photo('c'), photo('a'), video('v'), photo('b')]);
+  t(
+    'перше фото знову називається головним банером',
+    relabelled[0]?.label === 'Головний банер CAD / CNC',
+    String(relabelled[0]?.label)
+  );
+  t('друге фото — «Фото 2»', relabelled[1]?.label === 'Фото 2', String(relabelled[1]?.label));
+  t('третє фото після відео — «Фото 3»', relabelled[3]?.label === 'Фото 3', String(relabelled[3]?.label));
+  t('відео нумерується своїм рядом', relabelled[2]?.label === 'Відео 1', String(relabelled[2]?.label));
+
+  // Публікація везе порядок на вітрину — інакше перетягування лишалось би
+  // наміром у чорнетці (жива перевірка 22.09.2026: відправили 01..14, а
+  // вітрина показала 09, 05, 03, 13, …).
+  const sent: { kind?: string; position?: string }[] = [];
+  const orderFetch = (async (url: string, init: any = {}) => {
+    const u = String(url);
+    if (u.endsWith('/media') && String(init.method || 'GET') === 'DELETE') {
+      return { status: 200, ok: true, text: async () => JSON.stringify({ cleared: 0 }) };
+    }
+    const form = init.body as FormData;
+    sent.push({ kind: String(form.get('kind')), position: String(form.get('position')) });
+    return { status: 200, ok: true, text: async () => JSON.stringify({ attached: true, kind: form.get('kind'), replaced: 0 }) };
+  }) as never;
+
+  await uploadProductMedia(
+    {
+      sku: 'BK-ORG-ORDER-TEST',
+      media: [
+        { src: `data:image/png;base64,${TINY_PNG}`, kind: 'image' as const },
+        { src: `data:image/png;base64,${TINY_PNG}`, kind: 'image' as const },
+        { src: `data:image/png;base64,${TINY_PNG}`, kind: 'image' as const },
+        { src: `data:video/mp4;base64,${TINY_VIDEO}`, kind: 'video' as const },
+        { src: `data:video/mp4;base64,${TINY_VIDEO}`, kind: 'video' as const },
+      ],
+    },
+    'product:BK-ORG-ORDER-TEST',
+    { fetch: orderFetch, settings }
+  );
+
+  t('фото їдуть із позиціями 0,1,2', sent.filter((c) => c.kind !== 'video').map((c) => c.position).join(',') === '0,1,2', sent.filter((c) => c.kind !== 'video').map((c) => c.position).join(','));
+  t('відео нумеруються своїм рядом 0,1', sent.filter((c) => c.kind === 'video').map((c) => c.position).join(',') === '0,1', sent.filter((c) => c.kind === 'video').map((c) => c.position).join(','));
+  t('кожне вкладення має поле position', sent.every((c) => c.position !== 'undefined' && c.position !== 'null'), JSON.stringify(sent));
 }
 
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);

@@ -290,6 +290,11 @@ export async function uploadProductMedia(
           filename: imageFilename(product.sku, i, decoded.mimeType),
           mimeType: decoded.mimeType,
           bytes: decoded.bytes,
+          // Порядок автора: 0 — головне фото. Він ДОЇЖДЖАЄ до вітрини, а не
+          // лишається наміром: без нього галерея показувала рядки в тому
+          // порядку, у якому їх випадково віддав Postgres (жива перевірка
+          // 22.09.2026: відправили 01..14 — приїхало 09, 05, 03, 13, …).
+          position: i,
         },
         deps
       );
@@ -317,6 +322,10 @@ export async function uploadProductMedia(
           filename: videoFilename(product.sku, i, decoded.mimeType),
           mimeType: decoded.mimeType,
           bytes: decoded.bytes,
+          // Відео нумеруються своїм рядом: на вітрині вони йдуть після фото,
+          // тож спільна нумерація з фото нічого не додала б, а збила б
+          // порядок усередині групи.
+          position: i,
         },
         deps
       );

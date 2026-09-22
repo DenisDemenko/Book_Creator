@@ -1278,6 +1278,13 @@ export async function attachProductMediaToMarketplace(
     filename: string;
     mimeType: string;
     bytes: Uint8Array;
+    /**
+     * Порядковий номер у наборі автора (0 — головне фото). Вітрина рендерить
+     * галерею за цим номером, а не в тому порядку, у якому база випадково
+     * поверне рядки. Необовʼязковий: старіший клієнт без нього дає 0, і
+     * приймач тоді впорядковує за часом завантаження (див. sortOrder у схемі).
+     */
+    position?: number;
   },
   deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
 ): Promise<{ attached: boolean; kind: ProductMediaKind; replaced: number; media?: unknown; externalId: string }> {
@@ -1294,6 +1301,8 @@ export async function attachProductMediaToMarketplace(
     input.filename
   );
   form.append('kind', input.kind);
+  // multipart возить усе текстом — приймач розбирає це назад у число.
+  form.append('position', String(Math.max(0, Math.trunc(input.position ?? 0))));
 
   let response: Response;
   try {

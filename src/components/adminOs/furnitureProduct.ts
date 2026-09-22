@@ -40,6 +40,83 @@ export function isVideoMedia(item: Pick<FurnitureMediaItem, 'kind'>): boolean {
   return item.kind === 'video';
 }
 
+/**
+ * Порядок вкладень картки — це те, що бачить покупець: ПЕРШЕ фото стає
+ * головним банером (обкладинкою) у каталозі й першим слайдом на сторінці
+ * товару, решта йдуть галереєю саме в цій послідовності. Відео стоять у
+ * масиві після фото і порядкуються між собою.
+ *
+ * Три функції нижче — чисті, кожна повертає НОВИЙ масив: редактор кладе їхній
+ * результат у чорнетку через `patch`, і мутація на місці зламала б ту
+ * незмінність, на якій тримається весь його стан.
+ */
+export function moveMediaItem(
+  media: FurnitureMediaItem[],
+  draggedId: string,
+  targetId: string
+): FurnitureMediaItem[] {
+  const from = media.findIndex((m) => m.id === draggedId);
+  const to = media.findIndex((m) => m.id === targetId);
+  if (from < 0 || to < 0 || from === to) return media;
+
+  const next = media.slice();
+  const [item] = next.splice(from, 1);
+  if (!item) return media;
+
+  // Вставляємо НА місце цілі: перетягнуте займає її позицію, а ціль зсувається
+  // в бік руху. Індекси після виймання елемента не перераховуємо — саме тому
+  // правило однакове для обох напрямків:
+  //   [a,b,c] тягнемо 'a' на 'b' (from < to) → [b,a,c] (обмін сусідів);
+  //   [a,b,c] тягнемо 'a' на 'c' (from < to) → [b,c,a] ('a' зайняв місце 'c');
+  //   [a,b,c] тягнемо 'c' на 'a' (from > to) → [c,a,b] ('c' зайняв місце 'a').
+  // Перша версія мала `to - 1` для руху вниз, і кидання на сусідню плитку не
+  // робило НІЧОГО (елемент повертався на своє місце) — знайдено тестом.
+  next.splice(to, 0, item);
+  return next;
+}
+
+/** Підняти вкладення на перше місце — тобто зробити фото головним. */
+export function makeMainMedia(
+  media: FurnitureMediaItem[],
+  id: string
+): FurnitureMediaItem[] {
+  const from = media.findIndex((m) => m.id === id);
+  if (from <= 0) return media;
+
+  const next = media.slice();
+  const [item] = next.splice(from, 1);
+  if (!item) return media;
+
+  next.unshift(item);
+  return next;
+}
+
+/**
+ * Переписати підписи за фактичними позиціями.
+ *
+ * Підписи генерує завантаження («Головний банер CAD / CNC», «Фото 2»,
+ * «Відео 1»), тобто вони описують ПОЗИЦІЮ — і після перетягування починали б
+ * брехати: фото з підписом «Головний банер» стояло б четвертим. Підписи тут
+ * не редагуються вручну (поля для них немає), тож переписати їх безпечно.
+ */
+export function relabelMedia(media: FurnitureMediaItem[]): FurnitureMediaItem[] {
+  let photoIndex = 0;
+  let videoIndex = 0;
+
+  return media.map((item) => {
+    if (isVideoMedia(item)) {
+      videoIndex += 1;
+      return { ...item, label: `Відео ${videoIndex}` };
+    }
+
+    photoIndex += 1;
+    return {
+      ...item,
+      label: photoIndex === 1 ? 'Головний банер CAD / CNC' : `Фото ${photoIndex}`,
+    };
+  });
+}
+
 /** Тон дерева з палітри (3 варіанти, як у макеті). */
 export interface FurnitureWoodTone {
   id: string;

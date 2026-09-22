@@ -30,6 +30,7 @@ import {
   Save,
   Sparkles,
   Sun,
+  Star,
   Trash2,
   Upload,
   Video,
@@ -42,6 +43,9 @@ import {
   furniturePublishIssues,
   hasVariantPriceRange,
   isVideoMedia,
+  makeMainMedia,
+  moveMediaItem,
+  relabelMedia,
   visibleVariants,
   DEFAULT_ELECTRONICS_FUNCTIONS,
   DESCRIPTION_MAX,
@@ -321,6 +325,14 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
    */
   const [publishProgress, setPublishProgress] = useState<{ done: number; total: number; label: string } | null>(null);
   const [newElectronicsFunction, setNewElectronicsFunction] = useState('');
+  /**
+   * id вкладення, яке зараз тягнуть. HTML5 drag-and-drop не має «поточного»
+   * елемента в події drop — отже, id треба памʼятати між подіями. У стані, а
+   * не в `dataTransfer`, бо так керована підсвітка плитки-цілі працює в
+   * Firefox так само, як у Chrome (там `dataTransfer.getData` під час
+   * `dragover` порожній).
+   */
+  const [draggingMediaId, setDraggingMediaId] = useState<string | null>(null);
 
   const t = THEMES[theme];
 
@@ -496,6 +508,31 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
 
   const removeMedia = useCallback(
     (id: string) => patch({ media: product.media.filter((m) => m.id !== id) }),
+    [patch, product.media]
+  );
+
+  /**
+   * Перетягування вкладень — те, чого бракувало: порядок у масиві СТАЄ
+   * порядком на вітрині (перше фото — головний банер), а доти він був лише
+   * порядком завантаження файлів, і виправити його без перезаливки не можна
+   * було ніяк.
+   */
+  const moveMedia = useCallback(
+    (draggedId: string, targetId: string) => {
+      const next = relabelMedia(moveMediaItem(product.media, draggedId, targetId));
+      // Підписи переписуються разом із порядком: «Фото 2» на четвертому
+      // місці гірше за відсутність підпису.
+      if (next !== product.media) patch({ media: next });
+    },
+    [patch, product.media]
+  );
+
+  /** Підняти фото в головний банер — те саме, що перетягнути його на перше місце. */
+  const makeMainPhoto = useCallback(
+    (id: string) => {
+      const next = relabelMedia(makeMainMedia(product.media, id));
+      if (next !== product.media) patch({ media: next });
+    },
     [patch, product.media]
   );
 
@@ -1194,10 +1231,28 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
             >
               <div className="space-y-3">
                 {photos.length > 0 && (
-                  <div className="relative rounded-xl overflow-hidden border group">
-                    <img src={photos[0].src} alt={photos[0].label} className="w-full h-48 object-cover" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
-                    <div className="absolute bottom-2 left-2.5 right-2.5 flex items-center justify-between">
+                  <div
+                    data-media-main={photos[0].id}
+                    onDragOver={(e) => {
+                      if (draggingMediaId && draggingMediaId !== photos[0].id) e.preventDefault();
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (draggingMediaId) makeMainPhoto(draggingMediaId);
+                      setDraggingMediaId(null);
+                    }}
+                    className={`relative rounded-xl overflow-hidden border group transition-shadow ${
+                      draggingMediaId && draggingMediaId !== photos[0].id ? 'ring-2 ring-cyan-400' : ''
+                    }`}
+                  >
+                    <img
+                      src={photos[0].src}
+                      alt={photos[0].label}
+                      draggable={false}
+                      className="w-full h-48 object-cover"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent pointer-events-none" />
+                    <div className="absolute bottom-2 left-2.5 right-2.5 flex items-center justify-between pointer-events-none">
                       <span className="text-[10px] bg-black/80 text-white px-2 py-0.5 rounded">Головний банер</span>
                       {photos[0].width ? <span className="text-[10px] text-slate-200 font-mono">{photos[0].width} × {photos[0].height}</span> : null}
                     </div>
@@ -1206,8 +1261,38 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
                 {photos.length > 1 && (
                   <div className="grid grid-cols-4 gap-2">
                     {photos.slice(1).map((m) => (
-                      <div key={m.id} className="relative group rounded-lg overflow-hidden border border-slate-700">
-                        <img src={m.src} alt={m.label} className="w-full aspect-square object-cover" />
+                      <div
+                        key={m.id}
+                        data-media-id={m.id}
+                        draggable
+                        onDragStart={() => setDraggingMediaId(m.id)}
+                        onDragEnd={() => setDraggingMediaId(null)}
+                        onDragOver={(e) => {
+                          if (draggingMediaId && draggingMediaId !== m.id) e.preventDefault();
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          if (draggingMediaId && draggingMediaId !== m.id) moveMedia(draggingMediaId, m.id);
+                          setDraggingMediaId(null);
+                        }}
+                        className={`relative group rounded-lg overflow-hidden border cursor-grab active:cursor-grabbing transition-opacity ${
+                          draggingMediaId === m.id ? 'opacity-40 border-cyan-400' : 'border-slate-700'
+                        }`}
+                      >
+                        {/* draggable={false} на самому зображенні — інакше
+                            браузер тягнув би файл картинки, а не плитку, і
+                            подія drop ніколи не дійшла б до батька. */}
+                        <img src={m.src} alt={m.label} draggable={false} className="w-full aspect-square object-cover" />
+                        <button
+                          type="button"
+                          data-media-make-main={m.id}
+                          onClick={() => makeMainPhoto(m.id)}
+                          title="Зробити головним банером"
+                          className="absolute top-0.5 left-0.5 p-0.5 rounded bg-black/70 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                          aria-label="Зробити головним банером"
+                        >
+                          <Star className="w-3 h-3" />
+                        </button>
                         <button type="button" onClick={() => removeMedia(m.id)} className="absolute top-0.5 right-0.5 p-0.5 rounded bg-black/70 text-white opacity-0 group-hover:opacity-100 transition-opacity" aria-label="Видалити">
                           <X className="w-3 h-3" />
                         </button>
@@ -1242,6 +1327,14 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
                   >
                     <Trash2 className="w-3.5 h-3.5" /> Очистити галерею фото
                   </button>
+                )}
+
+                {photos.length > 1 && (
+                  <p className={`text-[10px] leading-relaxed ${t.sub}`}>
+                    Перетягніть фото, щоб змінити порядок на вітрині. Перше — головний банер
+                    (обкладинка в каталозі й перший слайд); зірка на мініатюрі піднімає фото на
+                    перше місце. Порядок їде на вітрину під час публікації.
+                  </p>
                 )}
 
                 {videos.length > 0 && (
