@@ -13,8 +13,10 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   ArrowLeft,
   Check,
+  CheckCircle2,
   Cpu,
   ExternalLink,
   Image as ImageIcon,
@@ -82,7 +84,13 @@ interface ThemeTokens {
   select: string;
   chip: string;
   chipChecked: string;
-  banner: string;
+  // Раніше це був один `banner` на всі випадки, і «Опубліковано на вітрині»
+  // виглядало точнісінько як «Не можна публікувати: …» — тобто відмову можна
+  // було прочитати як успіх. Тепер стан видно з першого погляду: залитий
+  // зелений блок для успіху, червоний для відмови, ціановий для підказки.
+  bannerOk: string;
+  bannerErr: string;
+  bannerInfo: string;
   primaryBtn: string;
   ghostBtn: string;
   dangerBtn: string;
@@ -110,7 +118,10 @@ const THEMES: Record<'night' | 'day', ThemeTokens> = {
     select: 'bg-[#091119] border border-[#1a2a3a] text-slate-200 focus:border-cyan-400',
     chip: 'bg-cyan-950/50 border border-cyan-500/40 text-cyan-300',
     chipChecked: 'bg-cyan-950/70 border-cyan-400 text-cyan-200',
-    banner: 'bg-[#0d1926]/70 border-l-4 border-l-cyan-400 text-slate-300',
+    bannerOk:
+      'bg-emerald-600/85 border-l-4 border-emerald-300 text-white shadow-[0_0_20px_rgba(16,185,129,0.30)]',
+    bannerErr: 'bg-rose-950/85 border-l-4 border-rose-400 text-rose-100',
+    bannerInfo: 'bg-[#0d1926]/70 border-l-4 border-l-cyan-400 text-slate-300',
     primaryBtn: 'bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600 text-white shadow-lg shadow-cyan-500/25 hover:shadow-cyan-500/40',
     ghostBtn: 'bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-white',
     dangerBtn: 'border border-rose-600/40 bg-rose-950/20 hover:bg-rose-900/30 text-rose-300 hover:text-white',
@@ -136,7 +147,9 @@ const THEMES: Record<'night' | 'day', ThemeTokens> = {
     select: 'bg-white border border-slate-300 text-slate-800 focus:border-sky-500',
     chip: 'bg-sky-50 border border-sky-200 text-sky-700',
     chipChecked: 'bg-sky-100 border-sky-400 text-sky-800',
-    banner: 'bg-sky-50 border-l-4 border-l-sky-500 text-slate-700',
+    bannerOk: 'bg-emerald-600 border-l-4 border-emerald-800 text-white shadow-sm',
+    bannerErr: 'bg-rose-50 border-l-4 border-rose-500 text-rose-700',
+    bannerInfo: 'bg-sky-50 border-l-4 border-l-sky-500 text-slate-700',
     primaryBtn: 'bg-sky-600 hover:bg-sky-500 text-white shadow-sm',
     ghostBtn: 'bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900',
     dangerBtn: 'border border-rose-300 bg-rose-50 hover:bg-rose-100 text-rose-600 hover:text-rose-700',
@@ -156,6 +169,17 @@ const THEMES: Record<'night' | 'day', ThemeTokens> = {
 // ---------------------------------------------------------------------------
 // Дрібні підкомпоненти
 // ---------------------------------------------------------------------------
+
+/**
+ * Тон повідомлення — це стан справи, а не окраса: за ним адмін розуміє, чи
+ * публікація вдалася. Тому й колір, і іконка беруться з тону, а не з місця в
+ * коді, де це повідомлення виникло.
+ */
+function messageChrome(t: ThemeTokens, tone: 'ok' | 'err' | 'info') {
+  if (tone === 'ok') return { className: t.bannerOk, Icon: CheckCircle2 };
+  if (tone === 'err') return { className: t.bannerErr, Icon: AlertTriangle };
+  return { className: t.bannerInfo, Icon: Info };
+}
 
 /** Підпис над полем — те саме місце, де в макеті стоять UPPERCASE-лейбли. */
 const Label: React.FC<{ children: React.ReactNode; muted?: boolean }> = ({ children, muted }) => (
@@ -633,6 +657,11 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
   const colorOf = (c: FurnitureColor) =>
     ({ oak: '#d9b380', walnut: '#6b4a2b', teak: '#9a6b3f', black: '#232323', ebony: '#2e2a26', mahogany: '#7c2f24' })[c.id] ?? '#888';
 
+  // Колір та іконка банера залежать лише від тону повідомлення — обчислюємо
+  // їх тут, щоб у розмітці не було двох однакових викликів і вкладеного
+  // тернарника.
+  const banner = message ? messageChrome(t, message.tone) : null;
+
   return (
     <div className={`min-h-full rounded-2xl p-4 sm:p-6 pb-28 ${t.page}`} data-furniture-theme={theme}>
       {/* Шапка */}
@@ -735,9 +764,12 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
 
       {/* Основний вміст */}
       <main className="max-w-6xl mx-auto mt-5 space-y-5">
-        {message && (
-          <div className={`rounded-xl p-3.5 flex items-start gap-2.5 text-xs leading-relaxed ${t.banner}`}>
-            <Info className="w-4 h-4 shrink-0 mt-0.5" />
+        {message && banner && (
+          <div
+            data-message-tone={message.tone}
+            className={`rounded-xl p-3.5 flex items-start gap-2.5 text-xs leading-relaxed ${banner.className}`}
+          >
+            <banner.Icon className="w-4 h-4 shrink-0 mt-0.5" />
             <span>{message.text}</span>
             <button type="button" onClick={() => setMessage(null)} className="ml-auto shrink-0 opacity-70 hover:opacity-100" aria-label="Закрити">
               <X className="w-3.5 h-3.5" />

@@ -159,6 +159,46 @@ const browser = await puppeteer.launch({ executablePath: CHROME, headless: true,
 try {
   const page = await browser.newPage();
   await page.setViewport({ width: 1440, height: 1000 });
+
+  // Банер стану під шапкою редактора. Перевіряємо не класи в коді, а
+  // ПОРАХОВАНИЙ колір: клас міг не потрапити у збірку Tailwind, і тоді
+  // «зелений блок» існує лише в тексті коміта. Тон і колір читаємо з того
+  // самого елемента, який бачить адмін.
+  //
+  // Колір доводиться ДРУКУВАТИ в 1×1 canvas і брати піксель: Tailwind 4
+  // тримає палітру в oklch, і Chrome віддає пораховане значення як
+  // `oklab(0.596 -0.139 0.042 / 0.85)` — ні rgb, ні hex, а `fillStyle`
+  // повертає той самий запис назад, тож нормалізувати рядок не вийде.
+  const banner = () =>
+    page.evaluate(() => {
+      const el = document.querySelector('[data-message-tone]') as HTMLElement | null;
+      if (!el) return null;
+      const cs = getComputedStyle(el);
+      const canvas = document.createElement('canvas');
+      canvas.width = 1;
+      canvas.height = 1;
+      const ctx = canvas.getContext('2d');
+      // Без оголошених функцій усередині: tsx обгортає їх у `__name`, якого
+      // в браузері немає (log.md #172).
+      let background: number[] = [];
+      let borderLeft: number[] = [];
+      if (ctx) {
+        ctx.fillStyle = cs.backgroundColor;
+        ctx.fillRect(0, 0, 1, 1);
+        background = Array.from(ctx.getImageData(0, 0, 1, 1).data);
+        ctx.clearRect(0, 0, 1, 1);
+        ctx.fillStyle = cs.borderLeftColor;
+        ctx.fillRect(0, 0, 1, 1);
+        borderLeft = Array.from(ctx.getImageData(0, 0, 1, 1).data);
+      }
+      return {
+        tone: el.getAttribute('data-message-tone'),
+        background,
+        borderLeft,
+        borderLeftWidth: cs.borderLeftWidth,
+        width: Math.round(el.getBoundingClientRect().width),
+      };
+    });
   await browser.setCookie({ name: 'nova_session', value: TOKEN, domain: 'localhost', path: '/' });
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
 
@@ -251,6 +291,16 @@ try {
   await new Promise((r) => setTimeout(r, 800));
   const refused = await page.evaluate(() => (document.querySelector('[data-furniture-theme]') as HTMLElement | null)?.innerText.includes('Тизер задовгий') ?? false);
   t('задовгий тизер відмовив локально, з причиною українською', refused);
+
+  const errBanner = await banner();
+  {
+    const [r, g, b] = errBanner?.background ?? [-1, -1, -1];
+    t(
+      'банер відмови — червоний і позначений тоном err',
+      errBanner?.tone === 'err' && r > g && r > b,
+      JSON.stringify(errBanner),
+    );
+  }
 
   // Повертаємо робочий тизер, щоб збереження чорнетки було чистим.
   await setValue('teaser', 'Короткий тизер для перевірки.');
@@ -449,6 +499,27 @@ try {
   await new Promise((r) => setTimeout(r, 2500));
   const saved = await page.evaluate(() => (document.querySelector('[data-furniture-theme]') as HTMLElement | null)?.innerText.includes('збережено як чорнетку') ?? false);
   t('чорнетка збереглася (повідомлення про успіх)', saved);
+
+  // Вимога власника: повідомлення про успіх має бути ЗЕЛЕНИМ на всю площу
+  // блока, щоб його було замітно. Перевіряємо саме це — інакше лишається
+  // вірити, що клас із коду справді дійшов до сторінки.
+  const okBanner = await banner();
+  {
+    const [r, g, b] = okBanner?.background ?? [-1, -1, -1];
+    const [er, eg, eb] = errBanner?.background ?? [-1, -1, -1];
+    t(
+      'банер успіху — зелений на всю площу блока',
+      okBanner?.tone === 'ok' && g > r + 40 && g > b + 20 && (okBanner?.background?.[3] ?? 0) > 0,
+      JSON.stringify(okBanner),
+    );
+    t('ліва смуга банера успіху — 4px', okBanner?.borderLeftWidth === '4px', String(okBanner?.borderLeftWidth));
+    t(
+      'успіх і відмова розрізняються кольором',
+      Boolean(okBanner && errBanner && (r !== er || g !== eg || b !== eb)),
+      `ok=${JSON.stringify(okBanner?.background)} err=${JSON.stringify(errBanner?.background)}`,
+    );
+  }
+  await page.screenshot({ path: path.join(shotDir, 'furniture-editor-banner-ok.png') });
 
   // Повернутися в перелік — чорнетка має бути в списку.
   await page.evaluate(() => {
