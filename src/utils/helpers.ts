@@ -3,6 +3,7 @@ import QRCode from 'qrcode';
 import { Book, Chapter, Section, Footnote, QRTag, TOCLeaderStyle, TOCNumberingStyle, PdfChapterLayout, PdfFrameObject, TOCConfig } from '../types';
 import { imageMarkerRegexp, resolveImageMarker } from './imageMarkers';
 import { replaceTableBlocks } from './tableMarkers';
+import { stripEntityTags } from './coreEntities';
 
 export function calculateWordCount(text: string): number {
   if (!text) return 0;
@@ -659,11 +660,17 @@ export function renderSectionContentHtml(
   sectionFootnotes: Footnote[],
   allFootnotes: Footnote[]
 ): string {
+  // Теги сутностей ядра (`[/character:Serhii]`) — службова розмітка роботи з
+  // текстом, а не текст автора, тож у друкованому вигляді їх не має бути
+  // (постановка власника, п. 6). Це спільна точка для будь-якого експорту й
+  // переддрукового перегляду, тому зняття робиться саме тут, а не в кожному
+  // місці окремо: там його рано чи пізно забули б в одному з них.
+  const withoutEntityTags = stripEntityTags(content || '');
   // [AI-DRAFT]/[/AI-DRAFT] (utils/manuscriptDoc.ts) — позначка «AI-чернетка»
   // лише для живого редактора; в будь-якому експорті абзаци всередині
   // виглядають як звичайний текст, тож самі обгортки просто прибираються
   // (лишаючи звичайний абзацний відступ на їхньому місці).
-  const withoutAiDraftMarkers = (content || '')
+  const withoutAiDraftMarkers = withoutEntityTags
     .replace(/\n*\[AI-DRAFT\]\n*/g, '\n\n')
     .replace(/\n*\[\/AI-DRAFT\]\n*/g, '\n\n');
   // renderTableMarkers — НАЙПЕРШИЙ крок ланцюжка, до linkifyFootnoteMarkers,
@@ -713,7 +720,12 @@ export function renderSectionBlocksHtml(
     .split(/\n{2,}/)
     .map((p) => p.trim())
     .filter(Boolean)
-    .filter((p) => p !== AI_DRAFT_OPEN && p !== AI_DRAFT_CLOSE);
+    .filter((p) => p !== AI_DRAFT_OPEN && p !== AI_DRAFT_CLOSE)
+    // Абзац, що складається ЛИШЕ з тегів сутностей, у верстці не існує: після
+    // зняття тегів від нього не лишається жодного символу, а порожній <p> дав
+    // би зайвий вертикальний відступ — тобто слід службової розмітки на
+    // друкованій сторінці, чого пункт 6 постановки прямо не дозволяє.
+    .filter((p) => stripEntityTags(p).trim().length > 0);
 
   return paragraphs
     .map((para) => {

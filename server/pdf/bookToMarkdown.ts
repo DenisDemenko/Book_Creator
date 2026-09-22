@@ -26,6 +26,7 @@
 import type { Book, CourseConfig } from '../../src/types';
 import { collectImageMarkerIds, resolveImageMarker, imageMarkerRegexp } from '../../src/utils/imageMarkers';
 import { replaceTableBlocks, type TableMarkerBlock, type TableCellAlign } from '../../src/utils/tableMarkers';
+import { stripEntityTags } from '../../src/utils/coreEntities';
 
 /**
  * `[TABLE]…[/TABLE]` (запис #193) → справжня GFM-таблиця Markdown — pandoc
@@ -278,7 +279,13 @@ export function bookToMarkdown(book: Book, options: BookToMarkdownOptions = {}):
     for (const section of sections) {
       const title = headingText(section.title);
       if (title) out.push(`## ${title}`);
-      const body = htmlToMarkdown(markersToMarkdown(tablesToGfmMarkdown(section.content || '')));
+      // Теги сутностей знімаються ПЕРШИМИ, до розбору таблиць і картинок:
+      // вони — службова розмітка ядра (постановка власника, п. 6: «теги
+      // сутностей не включаємо в документ PDF-експорту та форматування»),
+      // і в надрукованій книзі не має лишитись ані тега, ані порожнього
+      // місця замість нього. Порядок саме такий, бо `[/character:…]`
+      // усередині клітинки таблиці інакше лишився б у GFM-розмітці.
+      const body = htmlToMarkdown(markersToMarkdown(tablesToGfmMarkdown(stripEntityTags(section.content || ''))));
       if (body) out.push(body);
     }
 

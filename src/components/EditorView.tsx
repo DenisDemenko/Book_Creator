@@ -8,6 +8,17 @@ import { PaginationPlugin, paginationRescanKey } from './manuscriptEditor/Pagina
 import { paginationSnapshotsEqual, type PaginationSnapshot } from '../utils/pageBreaker';
 import { characterMentionKey } from './manuscriptEditor/CharacterMentionPlugin';
 import { readabilityKey } from './manuscriptEditor/ReadabilityHighlightPlugin';
+import { entityTagKey } from './manuscriptEditor/EntityTagPlugin';
+import { CoreEntityPanel } from './CoreEntityPanel';
+import { EntitySlashMenu } from './EntitySlashMenu';
+import {
+  CORE_ENTITIES,
+  MAX_ENTITIES_PER_PARAGRAPH,
+  buildEntityTag,
+  parseAnyEntityTags,
+  wrapPlainEntityTags,
+  type CoreEntity,
+} from '../utils/coreEntities';
 import { PAGE_FORMAT_QUICK_OPTIONS } from '../utils/pageFormats';
 import { collectBookTags, type BookTag } from '../utils/bookTags';
 import { useSunAccentVars } from '../utils/sunAccent';
@@ -116,7 +127,8 @@ import {
   ArrowLeftToLine,
   ArrowRightToLine,
   Rows3,
-  Columns2
+  Columns2,
+  Boxes
 } from 'lucide-react';
 import { 
   Book, 
@@ -424,8 +436,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
     };
   }, [authUserId]);
 
-  // Кореневі вкладки правої панелі: «Персонажі і сцена», «Робота над текстом», «Робота з AI».
-  const [rightPanelTab, setRightPanelTab] = usePersistentState<'scene' | 'workText' | 'workAi'>(
+  // Кореневі вкладки правої панелі: «Персонажі і сцена», «Робота над текстом», «Робота з AI», «Сутності».
+  const [rightPanelTab, setRightPanelTab] = usePersistentState<'scene' | 'workText' | 'workAi' | 'entities'>(
     'nova_editor_rightPanelTab',
     isTranslator ? 'workText' : 'scene'
   );
@@ -819,6 +831,30 @@ export const EditorView: React.FC<EditorViewProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readabilityHighlightMode]);
 
+  /**
+   * Кнопка приховування сутностей (постановка, п. 5). Стан той самий за
+   * формою, що й readabilityHighlightMode вище, і з тієї ж причини: сам тогл
+   * — не транзакція ProseMirror, тож декорації треба попросити перерахувати
+   * явно через setMeta. Без цього кнопка міняла б стан React, а канва
+   * лишалася б пофарбованою до першого натискання клавіші.
+   */
+  const [entityTagsVisible, setEntityTagsVisible] = usePersistentState<boolean>('nova_editor_entityTagsVisible', true);
+  const entityTagsVisibleRef = useRef(entityTagsVisible);
+  useEffect(() => {
+    entityTagsVisibleRef.current = entityTagsVisible;
+    uaEditor?.view.dispatch(uaEditor.state.tr.setMeta(entityTagKey, true));
+    enEditor?.view.dispatch(enEditor.state.tr.setMeta(entityTagKey, true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entityTagsVisible]);
+
+  /**
+   * Текст абзацу під курсором — для лічильника “N із 12” у панелі сутностей.
+   * Тримається в стані, бо панель малюється React'ом і не має доступу до
+   * ProseMirror-документа; оновлюється на кожен рух курсора й на кожну
+   * правку (курсор рухається і під час набору).
+   */
+  const [entityParagraphText, setEntityParagraphText] = useState('');
+
   const uaManuscriptExtensions = useRef([
     ...buildManuscriptExtensions(
       resolveImageUrl,
@@ -833,7 +869,9 @@ export const EditorView: React.FC<EditorViewProps> = ({
       },
       () => focusParagraphModeRef.current,
       () => bookRef.current.characters,
-      () => readabilityHighlightModeRef.current
+      () => readabilityHighlightModeRef.current,
+      () => CORE_ENTITIES,
+      () => entityTagsVisibleRef.current
     ),
     PaginationPlugin.configure({
       getPageContentHeightMm,
@@ -857,7 +895,9 @@ export const EditorView: React.FC<EditorViewProps> = ({
       },
       () => focusParagraphModeRef.current,
       () => bookRef.current.characters,
-      () => readabilityHighlightModeRef.current
+      () => readabilityHighlightModeRef.current,
+      () => CORE_ENTITIES,
+      () => entityTagsVisibleRef.current
     ),
     PaginationPlugin.configure({ getPageContentHeightMm, getVerticalMarginsMm, onMeasured: onEnMeasured }),
   ]).current;
@@ -928,10 +968,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
       onUpdate: ({ editor }) => {
         handleContentChangeRef.current(tiptapDocToMarkerString(editor.getJSON() as JSONContent));
       },
+      onBlur: ({ editor }) => normalizeEntityTagsOnBlur(editor),
       onSelectionUpdate: ({ editor }) => {
         const { from, to, empty } = editor.state.selection;
         setSelectedText(empty ? '' : editor.state.doc.textBetween(from, to, '\n'));
         updateCoachPill(editor, from, to, empty, 'ua');
+        setEntityParagraphText(editor.state.selection.$from.parent.isTextblock ? editor.state.selection.$from.parent.textContent : '');
       },
     },
     []
@@ -947,9 +989,11 @@ export const EditorView: React.FC<EditorViewProps> = ({
       onUpdate: ({ editor }) => {
         handleContentEnChangeRef.current(tiptapDocToMarkerString(editor.getJSON() as JSONContent));
       },
+      onBlur: ({ editor }) => normalizeEntityTagsOnBlur(editor),
       onSelectionUpdate: ({ editor }) => {
         const { from, to, empty } = editor.state.selection;
         updateCoachPill(editor, from, to, empty, 'en');
+        setEntityParagraphText(editor.state.selection.$from.parent.isTextblock ? editor.state.selection.$from.parent.textContent : '');
       },
     },
     []
@@ -1270,6 +1314,93 @@ export const EditorView: React.FC<EditorViewProps> = ({
     });
   };
   handleContentChangeRef.current = handleContentChange;
+
+  /**
+   * «Сирий» тег, набраний руками, стає канонічним при виході з редактора —
+   * і саме ТУТ, а не на кожне натискання клавіші.
+   *
+   * ЧОМУ НЕ НА КОЖНЕ НАТИСКАННЯ (це найдорожчий висновок цієї задачі).
+   * Нормалізація на кожен `onUpdate` робила рядок книги відмінним від рядка
+   * редактора — і ефект синхронізації вище (він навмисно перезавантажує
+   * канву, коли вміст розділу прийшов ЗЗОВНІ) спрацьовував на власній же
+   * правці. Автор бачив, як посеред набору `/character:Сер` текст
+   * перетворюється на канонічний маркер із першим-ліпшим словом поруч, а
+   * слеш-підбір другого кроку закривався: тригер живе в «сирому» тексті, а
+   * він щойно зник. Це знайшов живий прогін, і виглядало це як «меню не
+   * пропонує характеристик».
+   *
+   * На виході з редактора ціна інша: курсора в тексті немає, перестановка
+   * нікого не смикає, а автор навпаки бачить результат — тег стає чипом.
+   * `emitUpdate: true` навмисний: книга мусить отримати ту саму форму, яку
+   * вже показує канва, інакше ефект синхронізації перезавантажить її наново.
+   */
+  const normalizeEntityTagsOnBlur = (editor: Editor) => {
+    const current = tiptapDocToMarkerString(editor.getJSON() as JSONContent);
+    const normalized = wrapPlainEntityTags(current);
+    if (normalized === current) return;
+    editor.commands.setContent(markerStringToTiptapDoc(normalized), { emitUpdate: true });
+  };
+
+  /**
+   * Редактор, у якому зараз працює автор. Панель сутностей ставить тег у
+   * ТЕКСТ, а не в розмітку, тож їй треба саме той редактор, де стоїть курсор:
+   * писати в UA-колонку замість EN, у якій автор набирає, означало б, що
+   * кнопка «додати сутність» мовчки не робить нічого видимого.
+   */
+  const entityTargetEditor = (): Editor | null => {
+    if (enEditor?.isFocused) return enEditor;
+    if (uaEditor?.isFocused) return uaEditor;
+    return uaEditor || enEditor || null;
+  };
+
+  /**
+   * Абзац під курсором: де він починається в документі й що в ньому вже є.
+   * `before(depth) + 1` — перша позиція ВСЕРЕДИНІ блоку: позиція самого блоку
+   * на один крок лівіше за його вміст (той самий принцип, що й у
+   * manuscriptDoc.ts і в плагіні сутностей).
+   */
+  const entityParagraphTarget = (editor: Editor) => {
+    const { $from } = editor.state.selection;
+    let depth = $from.depth;
+    while (depth > 0 && !$from.node(depth).isTextblock) depth -= 1;
+    if (depth === 0) return null;
+    const text = $from.node(depth).textContent;
+    return { start: $from.before(depth) + 1, text, slugs: parseAnyEntityTags(text).map((tag) => tag.slug) };
+  };
+
+  /**
+   * «Додати до поточного абзацу» (постановка, п. 4). Тег лягає на ПОЧАТОК
+   * абзацу — після тих, що вже стоять там: так мітки не розривають речення,
+   * а сам абзац лишається одним блоком, як його й бачить автор.
+   */
+  const handleAddEntityToParagraph = (entity: CoreEntity) => {
+    const editor = entityTargetEditor();
+    if (!editor) return;
+    const target = entityParagraphTarget(editor);
+    if (!target) return;
+    if (target.slugs.length >= MAX_ENTITIES_PER_PARAGRAPH) return;
+    if (target.slugs.includes(entity.slug)) return;
+
+    // Скільки символів на початку абзацу вже займають теги — щоб новий став
+    // у чергу, а не перед ними (порядок і визначає колір: фон береться від
+    // першої сутності, і «перша» мусить лишатися тією, яку автор поставив
+    // першою).
+    const leadingTags = /^(?:\s*\[[^\]]*\])*/.exec(target.text)?.[0].length ?? 0;
+    const insertAt = target.start + leadingTags;
+    const needsSpace = leadingTags > 0 && !/\s$/.test(target.text.slice(0, leadingTags));
+    editor
+      .chain()
+      .focus()
+      .insertContentAt(insertAt, `${needsSpace ? ' ' : ''}${buildEntityTag(entity.slug, '')} `)
+      .run();
+  };
+
+  /** Вставити тег у позицію курсора — для випадку «мітка саме тут, усередині абзацу». */
+  const handleInsertEntityAtCursor = (entity: CoreEntity) => {
+    const editor = entityTargetEditor();
+    if (!editor) return;
+    editor.chain().focus().insertContent(`${buildEntityTag(entity.slug, '')} `).run();
+  };
 
   // English Content change handler
   const handleContentEnChange = (newContentEn: string) => {
@@ -5644,6 +5775,20 @@ export const EditorView: React.FC<EditorViewProps> = ({
             </button>
 
             <button
+              onClick={() => setRightPanelTab('entities')}
+              className={`flex-1 py-3 px-2 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-all whitespace-nowrap ${
+                rightPanelTab === 'entities'
+                  ? '[background-color:var(--sun-acc-20)] [color:var(--sun-soft)] border [border-color:var(--sun-acc-40)]'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title={t('coreEntities.rootTabTitle')}
+              data-tour="editor__entities"
+            >
+              <Boxes className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
+              <span>{t('coreEntities.rootTab')}</span>
+            </button>
+
+            <button
               onClick={() => setShowRightPanel(false)}
               className="lg:hidden p-1 text-slate-400 hover:text-white"
             >
@@ -5653,6 +5798,21 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
           {/* Tab Content Body */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
+
+            {/* Сутності ядра (задача #227) — окрема коренева вкладка: це не
+                підрежим роботи з текстом і не AI-інструмент, а самостійний
+                шар розмітки рукопису. */}
+            {rightPanelTab === 'entities' && (
+              <CoreEntityPanel
+                sectionContent={activeSection?.content || ''}
+                paragraphText={entityParagraphText}
+                visible={entityTagsVisible}
+                onToggleVisible={() => setEntityTagsVisible((prev) => !prev)}
+                onAddToParagraph={handleAddEntityToParagraph}
+                onInsertAtCursor={handleInsertEntityAtCursor}
+                disabled={!uaEditor && !enEditor}
+              />
+            )}
 
             {/* Підвкладки групи «Робота над текстом» */}
             {rightPanelTab === 'workText' && (
@@ -6669,6 +6829,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
           }}
         />
       )}
+
+      {/* Підбір сутності під час набору (постановка, п. 3). Живе на рівні
+          компонента, а не в редакторі: список малюється у `position: fixed`
+          за координатами курсора, і всередині прокручуваної колонки сторінки
+          він обрізався б її межами. */}
+      <EntitySlashMenu editor={enEditor?.isFocused ? enEditor : uaEditor} />
 
       {/* AI CHARACTER & ART GENERATION MODAL (Nano Banana, Leonardo.ai) */}
       {showGenerateHeroModal && (

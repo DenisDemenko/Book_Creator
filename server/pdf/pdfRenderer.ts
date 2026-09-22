@@ -29,6 +29,7 @@ import {
 import { loadImageBytes } from '../media/imageBytes';
 import { collectImageMarkerIds, splitImageMarkers } from '../../src/utils/imageMarkers';
 import { hasTableMarkers, replaceTableBlocks } from '../../src/utils/tableMarkers';
+import { entityTagRegexp } from '../../src/utils/coreEntities';
 
 export const FONT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fonts');
 
@@ -70,6 +71,11 @@ function flattenTableMarkersToPlainText(content: string): string {
 
 export function toParagraphs(content: string): string[] {
   const plain = flattenTableMarkersToPlainText(String(content ?? ''))
+    // Теги сутностей ядра — службова розмітка, а не текст автора: у
+    // надрукованій книзі вони не мають лишитись (постановка власника, п. 6).
+    // Знімаються ДО розбору HTML і таблиць, бо `[/character:…]` міг стояти
+    // всередині клітинки й інакше потрапив би у рядок таблиці як текст.
+    .replace(entityTagRegexp(), '')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/p>/gi, '\n\n')
     .replace(/<[^>]+>/g, '')

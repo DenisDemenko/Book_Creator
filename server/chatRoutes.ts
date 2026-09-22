@@ -41,6 +41,7 @@ import {
 import { priceForTextEngine, priceRateForModel } from './pricing';
 import { CHAT_MODELS, chatModelLabel, engineConfigured, isKnownModel, modelSupportsVision, normalizeModelId, resolveEngine, visionEngineHint, type ImageAttachment } from './chatProviders';
 import { CONTEXT_WINDOW_MESSAGES, buildPromptContext, buildSystemPrompt } from './chatPrompt';
+import { indexChatMessageEntities, listChosenChatEntityGroups, listSessionMessageEntities } from './coreEntityStore';
 
 /** Один прикріплений файл-текст (txt/md/pdf) — вміст уже витягнутий на клієнті. */
 export interface ChatTextAttachment {
@@ -273,7 +274,17 @@ export function registerChatRoutes(app: Express, deps: ChatRoutesDeps): void {
       const session = await loadOwnSession(req, res, req.params.id);
       if (!session) return;
       const messages = await listChatMessages(session.id);
-      res.json({ session, messages });
+      // Сутності, якими автор помітив репліки (п. 7 постановки) — одним
+      // запитом на всю розмову, не по одній репліці. Кожному повідомленню
+      // додаємо його власний список: клієнт малює з нього чипи під реплікою
+      // і групування сутностей розмови.
+      const entityMap = await listSessionMessageEntities(session.id).catch(() => ({}));
+      const entityGroups = await listChosenChatEntityGroups(session.id).catch(() => []);
+      res.json({
+        session,
+        messages: messages.map((m) => ({ ...m, entities: entityMap[m.id] || [] })),
+        entityGroups,
+      });
     } catch (err) {
       console.error('[chat] get session:', err);
       res.status(500).json({ error: 'Не вдалося завантажити розмову.' });
@@ -415,6 +426,15 @@ export function registerChatRoutes(app: Express, deps: ChatRoutesDeps): void {
         createdAt: now,
       };
       await addChatMessage(userMessage);
+      // Репліка вже збережена — індексуємо згадані в ній сутності (п. 7
+      // постановки). Помилка індексації не має кидати користувача з чату:
+      // текст репліки вже в історії, лишиться тільки без групування.
+      await indexChatMessageEntities({
+        messageId: userMessage.id,
+        sessionId: session.id,
+        userId: session.userId,
+        text: userMessage.content,
+      }).catch((err) => console.warn('[chat] не вдалося проіндексувати сутності репліки:', err));
 
       let aiResult: ChatAiResult;
       try {
@@ -445,6 +465,14 @@ export function registerChatRoutes(app: Express, deps: ChatRoutesDeps): void {
         createdAt: new Date().toISOString(),
       };
       await addChatMessage(assistantMessage);
+      // Відповідь моделі теж може містити теги — автор міг попросити її
+      // «позначити сутності», або сам переніс мітки у своєму запиті.
+      await indexChatMessageEntities({
+        messageId: assistantMessage.id,
+        sessionId: session.id,
+        userId: session.userId,
+        text: assistantMessage.content,
+      }).catch((err) => console.warn('[chat] не вдалося проіндексувати сутності відповіді:', err));
 
       const updated: StoredChatSession = {
         ...session,

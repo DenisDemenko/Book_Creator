@@ -178,6 +178,7 @@ import {
   listEmotionDictionary,
 } from './server/emotionMasteryStore';
 import { registerThresholdRoutes } from './server/thresholdRoutes';
+import { registerCoreEntityRoutes } from './server/coreEntityRoutes';
 import { recordEvidence } from './server/wdiStore';
 import { buildJyotishChart, JyotishError } from './server/jyotishChart';
 import {
@@ -362,6 +363,7 @@ registerFurnitureCalculatorRoutes(app);
 registerExpenseBoardRoutes(app);
 registerProcurementRoutes(app);
 registerThresholdRoutes(app);
+registerCoreEntityRoutes(app);
 registerSupportChatRoutes(app);
 registerGitHistoryRoutes(app);
 registerGitCommandRoutes(app);

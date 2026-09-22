@@ -1,9 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Sparkles, Send, Bot, User, Trash2, Plus, Coins, Loader2, Search, X, Paperclip, FileText, Image as ImageIcon, BookPlus, Copy, Check, FileCode2, TerminalSquare, Cpu, Lock as LockIcon, AlertTriangle, Save, RotateCcw, Terminal, Quote, MessagesSquare, Wand2, MousePointerClick } from 'lucide-react';
+import { Sparkles, Send, Bot, User, Trash2, Plus, Coins, Loader2, Search, X, Paperclip, FileText, Image as ImageIcon, BookPlus, Copy, Check, FileCode2, TerminalSquare, Cpu, Lock as LockIcon, AlertTriangle, Save, RotateCcw, Terminal, Quote, MessagesSquare, Wand2, MousePointerClick, Boxes } from 'lucide-react';
 import { Book, Chapter, AuthUser } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
 import { extractChatFileText, fileToBase64 } from '../utils/extractChatFileText';
 import { formatFragmentForChat } from '../utils/bookText';
+import {
+  CORE_ENTITIES,
+  MAX_ENTITIES_PER_PARAGRAPH,
+  buildEntityTag,
+  entityBySlug,
+  parseAnyEntityTags,
+  paragraphBackgroundOnDarkCanvas,
+  readableTextOn,
+  type CoreEntity,
+} from '../utils/coreEntities';
+import { EntityChatPicker } from './EntityChatPicker';
 import { findSlashCandidate, matchCharacterBySlashCandidate, collectInsertablePatterns } from '../utils/slashTrigger';
 import {
   renderTemplate,
@@ -182,6 +193,69 @@ export interface PromptConstructorContext {
 }
 
 const COUNTS: ('1' | '2' | '3')[] = ['1', '2', '3'];
+
+/**
+ * Абзац репліки з сутностями: чипи замість тегів, тло абзацу — колір ПЕРШОЇ
+ * заявленої сутності (постановка, пп. 7–8).
+ *
+ * ЧОМУ АБЗАЦАМИ, А НЕ СУЦІЛЬНИМ ТЕКСТОМ. Тло і лічильник «до 12» — обидва
+ * про абзац, а не про повідомлення: дванадцять сутностей на одне повідомлення
+ * і дванадцять на абзац — різні речі, і автор розмічає саме абзаци. Тому
+ * межа абзацу тут та сама, що й у `paragraphsWithEntities`, у PDF-рушії та в
+ * канві — порожній рядок.
+ */
+const ChatTextWithEntities: React.FC<{ text: string }> = ({ text }) => {
+  const paragraphs = useMemo(() => {
+    return String(text || '')
+      .replace(/\r\n?/g, '\n')
+      .split(/\n\s*\n/)
+      .map((raw, index) => ({ index, raw, tags: parseAnyEntityTags(raw) }))
+      .filter((p) => p.raw.trim().length > 0);
+  }, [text]);
+
+  return (
+    <>
+      {paragraphs.map((paragraph) => {
+        const firstEntity = paragraph.tags.find((tag) => entityBySlug(tag.slug))?.slug;
+        const color = firstEntity ? entityBySlug(firstEntity)?.color : undefined;
+        const background = paragraphBackgroundOnDarkCanvas(color);
+
+        const parts: React.ReactNode[] = [];
+        let cursor = 0;
+        for (const tag of paragraph.tags) {
+          if (tag.start > cursor) parts.push(paragraph.raw.slice(cursor, tag.start));
+          const entity = entityBySlug(tag.slug);
+          const chipColor = entity?.color || '#475569';
+          parts.push(
+            <span
+              key={`${tag.slug}-${tag.start}`}
+              className="inline-block rounded px-1 text-[0.85em] font-semibold mx-0.5"
+              style={{ backgroundColor: chipColor, color: readableTextOn(chipColor) }}
+              data-chat-entity-chip={tag.slug}
+              title={tag.value ? `${tag.tag}:${tag.value}` : tag.tag}
+            >
+              {entity ? entity.nameUk : tag.slug}
+              {tag.value ? `: ${tag.value}` : ''}
+            </span>
+          );
+          cursor = tag.end;
+        }
+        parts.push(paragraph.raw.slice(cursor));
+
+        return (
+          <p
+            key={paragraph.index}
+            className={background ? 'rounded-md px-1.5 my-0.5' : undefined}
+            style={background ? { backgroundColor: background } : undefined}
+            data-chat-entity-paragraph={firstEntity}
+          >
+            {parts}
+          </p>
+        );
+      })}
+    </>
+  );
+};
 
 /**
  * Конструктор промтів: редактор ЖИВОГО тексту промту, який реально піде в
@@ -1714,6 +1788,21 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
    * знімається першим же кліком по списку.
    */
   const [insertTarget, setInsertTarget] = useState<{ text: string; chapterId: string | null } | null>(null);
+
+  /**
+   * Сутності ядра в чаті (постановка, п. 7).
+   *
+   * `sessionEntityGroups` приходить від сервера разом з історією розмови —
+   * це зведення по всій сесії з таблиці `chat_message_entities`. Локальний
+   * `messages` тут не помічник: він знає лише те, що вже завантажено в
+   * поточну вкладку, а групування мусить бути однаковим і після
+   * перезавантаження сторінки.
+   */
+  const [sessionEntityGroups, setSessionEntityGroups] = useState<
+    { slug: string; count: number; values: string[]; color?: string }[]
+  >([]);
+  /** Панель вибору сутності над полем вводу. */
+  const [entityPickerOpen, setEntityPickerOpen] = useState(false);
   /** Фрагмент книги, який чекає на питання автора (з редактора). */
   const [fragmentCard, setFragmentCard] = useState<{ text: string; where: string } | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -1785,6 +1874,10 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
         costUsd: m.costUsd,
       }));
       setMessages(loaded.length > 0 ? loaded : [welcomeMessage]);
+      // Групування сутностей розмови приходить із сервера (таблиця
+      // chat_message_entities) — саме воно показує, навколо чого розмова
+      // точилася насправді, а не лише що написано в останній репліці.
+      setSessionEntityGroups(Array.isArray(data.entityGroups) ? data.entityGroups : []);
     } catch {
       /* лишаємо поточний стан */
     } finally {
@@ -2067,8 +2160,7 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
     handleSendMessage();
   };
 
-  /** Вставляє обраний поведінковий шаблон на місце «/Ім'я» в полі чату. */
-  const handleInsertSlashPattern = (pattern: string) => {
+  /** Вставляє обраний поведінковий шаблон на місце «/Ім'я» в полі чату. */  const handleInsertSlashPattern = (pattern: string) => {
     if (!slashPopover) return;
     const clean = pattern.trim();
     const { deleteFrom, deleteTo } = slashPopover;
@@ -2081,6 +2173,29 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
       if (!el) return;
       el.focus();
       el.setSelectionRange(caret, caret);
+    });
+  };
+
+  /**
+   * Вставка тега сутності в поле чату — у позицію курсора, тим самим
+   * способом, що й поведінковий шаблон вище: у звичайного `<input>` немає
+   * документа, тож «вставити» означає зшити рядок і повернути каретку.
+   * Тег лягає у форматі `/сутність:` — автор одразу дописує характеристику
+   * (або лишає порожню), а канонічні дужки додає нормалізація на сервері й
+   * у канві, коли той самий текст потрапить у книгу.
+   */
+  const insertEntityTagIntoChatInput = (entity: CoreEntity) => {
+    const el = chatInputRef.current;
+    const cursor = el?.selectionStart ?? inputText.length;
+    const tag = `${entity.tag}: `;
+    const next = inputText.slice(0, cursor) + tag + inputText.slice(cursor);
+    setInputText(next);
+    const caret = cursor + tag.length;
+    requestAnimationFrame(() => {
+      const node = chatInputRef.current;
+      if (!node) return;
+      node.focus();
+      node.setSelectionRange(caret, caret);
     });
   };
 
@@ -2377,6 +2492,39 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
             onContextMenu={handleMessagesContextMenu}
             className="flex-1 p-5 overflow-y-auto space-y-4"
           >
+            {/* Групування сутностей розмови (постановка, пп. 7 і 11) — НАД
+                історією, а не під нею: це відповідь на питання «про що ця
+                розмова», і читається вона першою, а не після тридцяти реплік. */}
+            <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-dim)] px-3 py-2">
+              <div className="text-[10.5px] font-semibold text-[var(--on-surface-variant)] mb-1.5">
+                {t('coreEntities.chatGroupingTitle')}
+              </div>
+              {sessionEntityGroups.length === 0 ? (
+                <div className="text-[10.5px] text-[var(--outline)]">
+                  {t('coreEntities.chatGroupingEmpty')}
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-1" data-chat-entity-groups>
+                  {sessionEntityGroups.map((group) => {
+                    const entity = entityBySlug(group.slug) || CORE_ENTITIES.find((e) => e.slug === group.slug);
+                    const color = entity?.color || group.color || '#475569';
+                    return (
+                      <span
+                        key={group.slug}
+                        className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
+                        style={{ backgroundColor: color, color: readableTextOn(color) }}
+                        title={group.values.join(', ')}
+                        data-chat-entity-group-chip={group.slug}
+                      >
+                        {entity ? entity.nameUk : group.slug}
+                        {group.count > 1 ? ` ×${group.count}` : ''}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
             {messages.map((m, idx) => (
               <div
                 key={idx}
@@ -2394,7 +2542,7 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
                     m.sender === 'user' ? 'msg-user' : 'msg-assistant whitespace-pre-wrap'
                   }`}
                 >
-                  {m.text}
+                  <ChatTextWithEntities text={m.text} />
                   {/*
                     Кнопка, а не лише правий клік по виділенню. Перенести
                     відповідь у книгу можна було й раніше — але тільки якщо
@@ -2538,7 +2686,34 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
               </div>
             )}
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 relative">
+              {/* Кнопка вибору сутності (постановка, п. 7). Не слеш-команда в
+                  полі вводу, як у канві: тут той самий `/` уже зайнятий
+                  поведінковими шаблонами героя (`handleChatInputKeyDown`), і
+                  другий перехоплювач слеша зробив би непередбачуваним те, що
+                  вже працює. Кнопка дає те саме — вибір із 118 сутностей із
+                  групуванням — і не забирає чужого жесту. */}
+              {isRegistered && (
+                <button
+                  onClick={() => setEntityPickerOpen((prev) => !prev)}
+                  title={t('coreEntities.chatPickerButton')}
+                  data-chat-entity-picker-button
+                  className={`nm-btn p-2.5 rounded-xl shrink-0 ${
+                    entityPickerOpen ? 'text-[var(--primary)]' : 'text-[var(--on-surface-variant)]'
+                  }`}
+                >
+                  <Boxes className="w-4 h-4" />
+                </button>
+              )}
+              {entityPickerOpen && (
+                <EntityChatPicker
+                  onPick={(entity) => {
+                    insertEntityTagIntoChatInput(entity);
+                    setEntityPickerOpen(false);
+                  }}
+                  onClose={() => setEntityPickerOpen(false)}
+                />
+              )}
               {isRegistered && (
                 <button
                   onClick={() => fileInputRef.current?.click()}

@@ -14,7 +14,9 @@ import { TableCellAlign, TableHeaderAlign } from './TableAlignCell';
 import { FocusParagraphPlugin } from './FocusParagraphPlugin';
 import { CharacterMentionPlugin, type CharacterMentionEntry } from './CharacterMentionPlugin';
 import { ReadabilityHighlightPlugin } from './ReadabilityHighlightPlugin';
+import { EntityTagPlugin } from './EntityTagPlugin';
 import { TagPlugin } from './TagPlugin';
+import type { CoreEntity } from '../../utils/coreEntities';
 
 export interface ManuscriptAiTextOptions {
   onRequestAiText?: WrappedImageOptions['onRequestAiText'];
@@ -48,7 +50,14 @@ export function buildManuscriptExtensions(
   /** Необов'язково: живий список персонажів книги — див. коментар у CharacterMentionPlugin.ts. */
   getCharacters?: () => CharacterMentionEntry[],
   /** Необов'язково: тогл підсвітки задовгих речень — див. коментар у ReadabilityHighlightPlugin.ts. */
-  isReadabilityHighlightEnabled?: () => boolean
+  isReadabilityHighlightEnabled?: () => boolean,
+  /**
+   * Необов'язково: реєстр сутностей ядра (118 типів) — читається заново при
+   * кожній транзакції, той самий підхід, що й `getCharacters` вище.
+   */
+  getCoreEntities?: () => CoreEntity[],
+  /** Необов'язково: чи показувати сутності в канві (кнопка приховування, п. 5). */
+  isEntityTagsVisible?: () => boolean
 ) {
   return [
     StarterKit.configure({
@@ -107,6 +116,15 @@ export function buildManuscriptExtensions(
       enabled: isReadabilityHighlightEnabled || (() => false),
       longSentenceClass: 'nova-readability-long-sentence',
       longSentenceThreshold: 30,
+    }),
+    // Сутності ядра (задача #227): чипи на тегах і тло абзаців. Плагін лише
+    // МАЛЮЄ — текст розділу він не чіпає взагалі, тож теги лишаються в книзі
+    // такими, якими їх записано, і зникають лише на експорті.
+    EntityTagPlugin.configure({
+      getEntities: getCoreEntities || (() => []),
+      isVisible: isEntityTagsVisible || (() => true),
+      chipClass: 'nova-entity-chip',
+      paragraphClass: 'nova-entity-paragraph',
     }),
     TagPlugin,
   ];

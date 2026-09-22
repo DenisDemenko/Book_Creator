@@ -16,6 +16,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { CORE_ENTITIES, CORE_ENTITY_RELATIONS } from '../src/utils/coreEntities';
+
 export const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), 'data');
 export const DB_PATH = process.env.DATABASE_PATH || path.join(DATA_DIR, 'nova-studio.db');
 
@@ -857,6 +859,73 @@ CREATE TABLE IF NOT EXISTS avoided_thresholds (
 );
 CREATE INDEX IF NOT EXISTS idx_avoided_thresholds_user ON avoided_thresholds(user_id, updated_at DESC);
 
+-- ===========================================================================
+-- ЯДРО СУТНОСТЕЙ (реєстр власника, 118 типів + 37 типів зв'язків)
+--
+-- НАВІЩО В БАЗІ, ЯКЩО Є КОД. Сам перелік справді живе в коді
+-- (src/utils/coreEntities.ts) — там він читається клієнтом, панеллю,
+-- чатом і тестами без жодного запиту. Але «сутності ядра» — це ще й
+-- словник, на який посилаються ДАНІ: теги абзаців у книзі, згадки в
+-- чаті (chat_message_entities нижче), майбутні правила сортування.
+-- Посилатися на словник, який існує лише в коді, означає, що зміна
+-- коду тихо міняє зміст уже збережених даних. Таблиця дає точку, від
+-- якої можна перевірити цілісність (скільки рядків, які кольори, чи є
+-- тег у тексті книги сутністю реєстру), і саме це робить насіння нижче.
+--
+-- group_id — «A»…«I» базового реєстру та «J1»…«J3» додатка «Літературна
+-- критика»; registry розрізняє походження запису, бо документ описує
+-- додаток окремо (88 + 30 = 118) і змішувати їх в одному переліку не можна.
+-- ===========================================================================
+
+CREATE TABLE IF NOT EXISTS core_entities (
+  slug            TEXT PRIMARY KEY,       -- ключ без слеша: character
+  tag             TEXT NOT NULL,          -- тег як у документі: /character
+  name_uk         TEXT NOT NULL,
+  name_en         TEXT NOT NULL,
+  group_id        TEXT NOT NULL,
+  color           TEXT NOT NULL,          -- HEX із документа, як є
+  characteristics TEXT NOT NULL,          -- JSON-масив назв характеристик
+  registry        TEXT NOT NULL,          -- base | critic
+  sort_order      INTEGER NOT NULL DEFAULT 0,
+  updated_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_core_entities_group ON core_entities(group_id, sort_order);
+
+CREATE TABLE IF NOT EXISTS core_entity_relations (
+  key         TEXT PRIMARY KEY,           -- participates_in
+  name_uk     TEXT NOT NULL,
+  example     TEXT NOT NULL,
+  registry    TEXT NOT NULL,              -- base | critic
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  updated_at  TEXT NOT NULL
+);
+
+-- Сутності, якими автор помітив повідомлення в чаті ШІ (постановка, п. 7).
+--
+-- НАВІЩО ОКРЕМА ТАБЛИЦЯ, А НЕ ПОЛЕ В chat_messages. Групування в чаті —
+-- це запит «покажи всі розмови, де згадано /threshold», тобто вибірка ПО
+-- СУТНОСТІ, а не читання одного повідомлення. Зберігати це рядком у
+-- content означало б або парсити кожен рядок на кожен запит, або тримати
+-- другу копію того самого тексту. Тут — індекс, і саме тому він будується
+-- НА ЗАПИСІ повідомлення, а не «коли знадобиться».
+--
+-- text_value — те, що автор написав після двокрапки («Serhii», «страх»).
+-- Без нього групування по сутності втратило б конкретику: «у цій розмові
+-- згадано /character» і «згадано Сергія» — різні за цінністю відповіді.
+CREATE TABLE IF NOT EXISTS chat_message_entities (
+  id          TEXT PRIMARY KEY,
+  message_id  TEXT NOT NULL,
+  session_id  TEXT NOT NULL,
+  user_id     TEXT NOT NULL,
+  slug        TEXT NOT NULL,
+  text_value  TEXT NOT NULL DEFAULT '',
+  position    INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_message_entities_message ON chat_message_entities(message_id);
+CREATE INDEX IF NOT EXISTS idx_chat_message_entities_session ON chat_message_entities(session_id);
+CREATE INDEX IF NOT EXISTS idx_chat_message_entities_slug ON chat_message_entities(user_id, slug);
+
 `;
 
 /**
@@ -1000,6 +1069,78 @@ function seedEmotionDictionary(instance: Database): void {
 }
 
 /**
+ * Насіння реєстру сутностей ядра — 118 типів і 37 зв'язків із документа
+ * власника (див. `src/utils/coreEntities.ts`).
+ *
+ * НЕ «ЛИШЕ ЯКЩО ПОРОЖНЬО», на відміну від словника емоцій вище. Словник
+ * емоцій — це дані власника, які він може дописувати (є `is_custom`), тож
+ * повторне насіння затерло б його правки. Реєстр сутностей — навпаки,
+ * похідна від коду: якщо рядок у документі перейменовано (або виправлено
+ * HEX), база мусить це побачити на наступному старті, а не жити зі старою
+ * копією, доки хтось не здогадається видалити файл бази. Тому тут upsert
+ * по кожному рядку плюс прибирання тих, яких у коді вже немає.
+ *
+ * 118 INSERT-ів на старті — це мікросекунди; натомість розходження між
+ * кодом і базою, яке ніхто не помічає, коштує дорого: саме воно робить
+ * «сутність у панелі» й «сутність у книзі» різними речами.
+ */
+function seedCoreEntityRegistry(instance: Database): void {
+  try {
+    const now = new Date().toISOString();
+
+    const upsertEntity = instance.prepare(
+      `INSERT INTO core_entities (slug, tag, name_uk, name_en, group_id, color, characteristics, registry, sort_order, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(slug) DO UPDATE SET
+         tag = excluded.tag, name_uk = excluded.name_uk, name_en = excluded.name_en,
+         group_id = excluded.group_id, color = excluded.color,
+         characteristics = excluded.characteristics, registry = excluded.registry,
+         sort_order = excluded.sort_order, updated_at = excluded.updated_at`
+    );
+    CORE_ENTITIES.forEach((entity, index) => {
+      upsertEntity.run(
+        entity.slug,
+        entity.tag,
+        entity.nameUk,
+        entity.nameEn,
+        entity.groupId,
+        entity.color,
+        JSON.stringify(entity.characteristics),
+        entity.registry,
+        index,
+        now
+      );
+    });
+
+    // Прибираємо те, чого в коді вже немає — інакше видалена з документа
+    // сутність лишалася б у базі назавжди й «оживала» б у запитах.
+    const entitySlugs = CORE_ENTITIES.map((e) => e.slug);
+    instance
+      .prepare(`DELETE FROM core_entities WHERE slug NOT IN (${entitySlugs.map(() => '?').join(',')})`)
+      .run(...entitySlugs);
+
+    const upsertRelation = instance.prepare(
+      `INSERT INTO core_entity_relations (key, name_uk, example, registry, sort_order, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET
+         name_uk = excluded.name_uk, example = excluded.example,
+         registry = excluded.registry, sort_order = excluded.sort_order,
+         updated_at = excluded.updated_at`
+    );
+    CORE_ENTITY_RELATIONS.forEach((relation, index) => {
+      upsertRelation.run(relation.key, relation.nameUk, relation.example, relation.registry, index, now);
+    });
+
+    const relationKeys = CORE_ENTITY_RELATIONS.map((r) => r.key);
+    instance
+      .prepare(`DELETE FROM core_entity_relations WHERE key NOT IN (${relationKeys.map(() => '?').join(',')})`)
+      .run(...relationKeys);
+  } catch (err) {
+    console.warn('[db] Не вдалося засіяти реєстр сутностей ядра:', err);
+  }
+}
+
+/**
  * Відкриває базу. Виклик асинхронний, бо `node:sqlite` підвантажується
  * динамічним import: у ESM немає require, а статичний import завалив би
  * збірку на середовищах, де модуля ще немає.
@@ -1020,6 +1161,7 @@ export async function initDb(): Promise<boolean> {
     migrateUsersColumns(instance);
     migrateSupportMessageColumns(instance);
     seedEmotionDictionary(instance);
+    seedCoreEntityRegistry(instance);
     db = instance;
     available = true;
   } catch (err) {
