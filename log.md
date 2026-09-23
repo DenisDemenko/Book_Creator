@@ -101,44 +101,21 @@ remote перевірити можна, запушити — ні**. Робоч�
 > прохання власника** (AGENTS.md), тому між сесіями тут завжди щось лежить —
 > і наступна сесія має знати, що саме, бо `git log` вона не памʼятає.
 
-## Стан на 23.09.2026 (сесія #01, запис #230) — коміт `6ada3fb`, ⚠️ не запушено
+## Стан на 23.09.2026 (сесія #01, запис #230) — ✅ запушено, деплой за власником
 
-**Book_Creality (Студія), гілка `master`.** Коміт `6ada3fb` (код і тести,
-20 файлів, +1576/−331) плюс цей коміт із журналом. Пуш — відразу після
-запису цього рядка, тож якщо ти читаєш його, а `git log origin/master -1` не
-показує `6ada3fb` — пуш не пройшов і його треба повторити.
+**Book_Creality (Студія), гілка `master` = `origin/master` = `production/master`
+= `edd0ed9`.** Поїхали два коміти:
 
-Що саме в коміті `6ada3fb`:
+- `6ada3fb` — код і тести: дизайн канви (колір тексту замість тла), діалоги
+  героя за тегом `/character:Ім'я:діалог` (третій стан слеш-меню, нове поле
+  `Character.dialogueTemplates`, модал «Налаштувати діалоги героя», блок
+  діалогів у поповері, прибраний старий жест `/Ім'я`+Enter), кириличні ключі
+  (`герой`/`персонаж`/`емоція`), підказки з реєстру, панель сутностей у чаті,
+  знімання тегів у DOCX/EPUB/TXT, чотири оновлені набори перевірок;
+- `edd0ed9` — журнал: запис #230, розділ стану, `task.md`.
 
-- код: `src/utils/coreEntities.ts` (кириличні теги, `ALIASES` + `EXTRA_ALIASES`
-  зі словами `герой`/`героїня`/`емоція`, `entityTooltip`),
-  `src/utils/slashTrigger.ts` (розбір `/character:Ім'я:діалог`, збір діалогів,
-  перші три слова, побудова вставки з двома тегами),
-  `src/utils/fileExporters.ts` (`clean`, `exportParagraphs`, `bookToPlainText`
-  — знімання тегів у DOCX/EPUB/TXT),
-  `src/components/ExportView.tsx` (текстовий фолбек через `bookToPlainText`),
-  `src/components/manuscriptEditor/EntityTagPlugin.ts` (колір тексту замість
-  тла), `src/components/manuscriptEditor/extensions.ts`,
-  `src/components/EditorView.tsx` (мова підказок, кнопка «Налаштувати діалоги
-  героя», блок діалогів у поповері, прибрано старий жест `/Ім'я`+Enter),
-  `src/components/CoreEntityPanel.tsx` (підказка про сутність),
-  `src/components/EntitySlashMenu.tsx` (третій стан — діалоги),
-  `src/components/ChatEntityPanel.tsx` (нове: панель сутностей у чаті),
-  `src/components/CharacterDialogueModal.tsx` (нове: модал діалогів),
-  `src/components/QuickAiModal.tsx` (права колонка + `entityTagging`),
-  `src/types.ts` (`Character.dialogueTemplates`), `src/index.css`,
-  `src/i18n/dictionaries/coreEntities.ts`, `src/i18n/dictionaries/editor.ts`;
-- тести: `scripts/test-slashTrigger.mts` (23 → 56 перевірок),
-  `scripts/test-coreEntities.mts` (71 → 80: кириличні ключі),
-  `scripts/test-coreEntityExport.mts` (14 → 32: справжні .docx і .epub),
-  `scripts/live-coreEntities.mts` (30 → 40: новий дизайн, режим діалогів).
+**Railway перезібере Студію автоматично на пуш.** Що перевірити на проді:
 
-**Перед пушем прогнано:** `test:core-entities` 80/0,
-`test:core-entities-store` 32/0, `test:core-entity-export` 32/0,
-`test:slash-trigger` 56/0, `npm run build` OK,
-`npm run live:core-entities` 40/0.
-
-**Після деплою перевірити:**
 1. У канві книги тег має бути ПОФАРБОВАНИМ ТЕКСТОМ, а тло абзацу — білим.
 2. Експорт DOCX / EPUB / TXT книги з тегами не має містити `[/…:…]`.
 3. У чаті справа має бути панель сутностей; клік по сутності вставляє тег у
@@ -151,9 +128,23 @@ remote перевірити можна, запушити — ні**. Робоч�
    для ШІ» — сервер поки ігнорує прапорець `entityTagging`, який уже надсилає
    клієнт (див. «Не зроблено» в записі #230).
 
+**Перед пушем прогнано:** `test:core-entities` 80/0,
+`test:core-entities-store` 32/0, `test:core-entity-export` 32/0,
+`test:slash-trigger` 56/0, `test:chat` 152/0, `test:pdf` 82/0,
+`test:manuscript-doc` 50/0, `test:editor-toolbar` 59/0, `test:book-text` 26/0,
+`test:character-codex` 28/0, `test:character-mentions` 27/0,
+`test:behavior-drift` 28/0, `npm run build` OK,
+`npm run live:core-entities` 40/0.
+
 ⚠️ **У робочій теці лишається НЕ моє:** `.vscode/settings.json` (+56 рядків) і
 некомічені `tmp/`, `Claude outputs/`, `desktop.ini`. Не чіпав: AGENTS.md
 забороняє змішувати в один коміт свою роботу й чуже.
+
+⚠️ **Окремо для наступної сесії.** Правки журналу з цієї роботи частково
+поїхали чужими комітами (`4e3fe9a`, `e46f21c` — сесія, що дописувала #231,
+узяла з робочої теки і мої рядки в `log/sessions.md` і `log/119-151.md`).
+Історію не переписував: це вже опубліковані коміти, і авторство в них
+правдиве — просто змішане.
 
 ## Стан на 23.09.2026 (після пушу #227) — ✅ нічого не лишилось
 
