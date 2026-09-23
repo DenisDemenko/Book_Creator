@@ -101,39 +101,55 @@ remote перевірити можна, запушити — ні**. Робоч�
 > прохання власника** (AGENTS.md), тому між сесіями тут завжди щось лежить —
 > і наступна сесія має знати, що саме, бо `git log` вона не памʼятає.
 
-## Стан на 23.09.2026 (сесія #01, запис #230) — ⚠️ у робочій теці, НЕ закомічено
+## Стан на 23.09.2026 (сесія #01, запис #230) — коміт `6ada3fb`, ⚠️ не запушено
 
-**Book_Creality (Студія), гілка `master`, `HEAD` = `55a3119`.** Незакомічено
-(13 моїх файлів + журнал):
+**Book_Creality (Студія), гілка `master`.** Коміт `6ada3fb` (код і тести,
+20 файлів, +1576/−331) плюс цей коміт із журналом. Пуш — відразу після
+запису цього рядка, тож якщо ти читаєш його, а `git log origin/master -1` не
+показує `6ada3fb` — пуш не пройшов і його треба повторити.
 
-- код: `src/utils/coreEntities.ts` (кириличні теги, `ALIASES`,
-  `entityTooltip`), `src/utils/fileExporters.ts` (`clean`, `exportParagraphs`,
-  `bookToPlainText` — знімання тегів у DOCX/EPUB/TXT),
+Що саме в коміті `6ada3fb`:
+
+- код: `src/utils/coreEntities.ts` (кириличні теги, `ALIASES` + `EXTRA_ALIASES`
+  зі словами `герой`/`героїня`/`емоція`, `entityTooltip`),
+  `src/utils/slashTrigger.ts` (розбір `/character:Ім'я:діалог`, збір діалогів,
+  перші три слова, побудова вставки з двома тегами),
+  `src/utils/fileExporters.ts` (`clean`, `exportParagraphs`, `bookToPlainText`
+  — знімання тегів у DOCX/EPUB/TXT),
   `src/components/ExportView.tsx` (текстовий фолбек через `bookToPlainText`),
   `src/components/manuscriptEditor/EntityTagPlugin.ts` (колір тексту замість
   тла), `src/components/manuscriptEditor/extensions.ts`,
-  `src/components/EditorView.tsx` (мова підказок за режимом набору),
+  `src/components/EditorView.tsx` (мова підказок, кнопка «Налаштувати діалоги
+  героя», блок діалогів у поповері, прибрано старий жест `/Ім'я`+Enter),
   `src/components/CoreEntityPanel.tsx` (підказка про сутність),
-  `src/components/ChatEntityPanel.tsx` (новий файл: панель сутностей у чаті),
-  `src/components/QuickAiModal.tsx` (права колонка + прапорець
-  `entityTagging`), `src/index.css`, `src/i18n/dictionaries/coreEntities.ts`;
-- тести: `scripts/test-coreEntityExport.mts` (14 → 32 перевірки, з них шість —
-  на справжніх байтах .docx і .epub);
-- журнал: `log.md`, `log/sessions.md`, `log/119-151.md` (запис #230),
-  `task.md`.
+  `src/components/EntitySlashMenu.tsx` (третій стан — діалоги),
+  `src/components/ChatEntityPanel.tsx` (нове: панель сутностей у чаті),
+  `src/components/CharacterDialogueModal.tsx` (нове: модал діалогів),
+  `src/components/QuickAiModal.tsx` (права колонка + `entityTagging`),
+  `src/types.ts` (`Character.dialogueTemplates`), `src/index.css`,
+  `src/i18n/dictionaries/coreEntities.ts`, `src/i18n/dictionaries/editor.ts`;
+- тести: `scripts/test-slashTrigger.mts` (23 → 56 перевірок),
+  `scripts/test-coreEntities.mts` (71 → 80: кириличні ключі),
+  `scripts/test-coreEntityExport.mts` (14 → 32: справжні .docx і .epub),
+  `scripts/live-coreEntities.mts` (30 → 40: новий дизайн, режим діалогів).
 
-**Що перевірити перед пушем:** `npm run test:core-entities`,
-`test:core-entities-store`, `test:core-entity-export`, `test:chat`,
-`test:slash-trigger` — і обовʼязково переписати `scripts/live-coreEntities.mts`:
-він досі чекає тла абзаців (`data-entity-first`), яких у дизайні більше немає.
+**Перед пушем прогнано:** `test:core-entities` 80/0,
+`test:core-entities-store` 32/0, `test:core-entity-export` 32/0,
+`test:slash-trigger` 56/0, `npm run build` OK,
+`npm run live:core-entities` 40/0.
 
 **Після деплою перевірити:**
 1. У канві книги тег має бути ПОФАРБОВАНИМ ТЕКСТОМ, а тло абзацу — білим.
 2. Експорт DOCX / EPUB / TXT книги з тегами не має містити `[/…:…]`.
 3. У чаті справа має бути панель сутностей; клік по сутності вставляє тег у
    поле вводу.
-4. (ще не зроблено) відповідь ШІ з тегами при ввімкненому режимі — серверну
-   половину пакета завершено не було; див. «Не зроблено» в записі #230.
+4. `/character:Ім'я:діалог` (і `/герой:Ім'я:діалог`) має відкривати список
+   готових діалогів героя; Tab вставляє `[/character:Ім'я]` + `[/dialogue:…]`
+   і текст репліки; список налаштовується кнопкою «Налаштувати діалоги героя»
+   у вкладці «Персонажі сцени».
+5. **Ще не зроблено:** скіл тегування відповіді ШІ та його показ у «промтах
+   для ШІ» — сервер поки ігнорує прапорець `entityTagging`, який уже надсилає
+   клієнт (див. «Не зроблено» в записі #230).
 
 ⚠️ **У робочій теці лишається НЕ моє:** `.vscode/settings.json` (+56 рядків) і
 некомічені `tmp/`, `Claude outputs/`, `desktop.ini`. Не чіпав: AGENTS.md
