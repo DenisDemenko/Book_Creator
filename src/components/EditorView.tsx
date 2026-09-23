@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMe
 import { useEditor, useEditorState, EditorContent, type Editor } from '@tiptap/react';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import type { EditorView as PMView } from '@tiptap/pm/view';
-import { findSlashCandidate, matchCharacterBySlashCandidate, collectInsertablePatterns } from '../utils/slashTrigger';
+import { collectInsertablePatterns, collectDialogueTemplates, buildDialogueInsertText, matchCharacterBySlashCandidate } from '../utils/slashTrigger';
 import { buildManuscriptExtensions } from './manuscriptEditor/extensions';
 import { PaginationPlugin, paginationRescanKey } from './manuscriptEditor/PaginationPlugin';
 import { paginationSnapshotsEqual, type PaginationSnapshot } from '../utils/pageBreaker';
@@ -11,6 +11,7 @@ import { readabilityKey } from './manuscriptEditor/ReadabilityHighlightPlugin';
 import { entityTagKey } from './manuscriptEditor/EntityTagPlugin';
 import { CoreEntityPanel } from './CoreEntityPanel';
 import { EntitySlashMenu } from './EntitySlashMenu';
+import { CharacterDialogueModal } from './CharacterDialogueModal';
 import {
   CORE_ENTITIES,
   MAX_ENTITIES_PER_PARAGRAPH,
@@ -128,6 +129,7 @@ import {
   ArrowRightToLine,
   Rows3,
   Columns2,
+  MessageSquareQuote,
   Boxes
 } from 'lucide-react';
 import { 
@@ -506,6 +508,16 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
   // Quick Footnote / QR dialog state
   const [showFootnoteModal, setShowFootnoteModal] = useState<boolean>(false);
+  /**
+   * Модал «Налаштувати діалоги героя» (п. 2 постановки 23.09.2026).
+   * `dialogueModalCharId` — герой, з якого модал відкрився; якщо в сцені
+   * учасників немає, береться перший герой книги, щоб кнопка не відкривала
+   * порожнє вікно.
+   */
+  const [showDialogueModal, setShowDialogueModal] = useState<boolean>(false);
+  const [dialogueModalCharId, setDialogueModalCharId] = useState<string>('');
+  /** Тост після збереження діалогів — автор мусить бачити, що запис стався. */
+  const [dialogueToast, setDialogueToast] = useState<string | null>(null);
   const [showQrModal, setShowQrModal] = useState<boolean>(false);
   const [showFontModal, setShowFontModal] = useState<boolean>(false);
   /** Модальне вікно пошуку й заміни ПО ВСІЙ КНИЗІ (BookSearchModal.tsx) — на відміну від решти модалок тут, шукає в усіх розділах, а не лише в поточному відкритому. */
@@ -533,8 +545,6 @@ export const EditorView: React.FC<EditorViewProps> = ({
     charId: string;
     x: number;
     y: number;
-    source?: 'hover' | 'slash';
-    editorKind?: 'ua' | 'en';
   } | null>(null);
   /** Таймер відкладеного закриття поповера — щоб курсор встиг перейти з картки героя на сам поповер. */
   const behaviorPopoverCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -556,23 +566,9 @@ export const EditorView: React.FC<EditorViewProps> = ({
     }
   };
 
-  // Поповер, відкритий через «/Ім'я»+Enter (behaviorPopover.source === 'slash'),
-  // не має живого курсора над собою (writer не наводив мишку) — на відміну
-  // від hover-варіанта (закривається mouseleave), тут потрібне окреме
-  // закриття по Escape чи кліку повз поповер.
-  useEffect(() => {
-    if (!behaviorPopover || behaviorPopover.source !== 'slash') return;
-    const close = () => setBehaviorPopover(null);
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setBehaviorPopover(null);
-    };
-    document.addEventListener('mousedown', close);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', close);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [behaviorPopover]);
+  // Поповер закривається, коли курсор іде з нього (mouseleave) або з картки
+  // героя; окремого закриття по Escape більше не потрібно — його вимагав
+  // лише варіант, відкритий через «/Ім'я»+Enter, а того жесту вже немає.
 
   // Розташування контекстного меню. За замовчуванням воно відкривається вниз
   // від курсора, але якщо знизу недостатньо місця (курсор біля нижнього краю
@@ -840,6 +836,28 @@ export const EditorView: React.FC<EditorViewProps> = ({
    */
   const [entityTagsVisible, setEntityTagsVisible] = usePersistentState<boolean>('nova_editor_entityTagsVisible', true);
   const entityTagsVisibleRef = useRef(entityTagsVisible);
+  /**
+   * Мова підказок про сутності (п. 4 постановки: «підказка мовою набору»).
+   *
+   * Мова набору — це режим редактора, а не мова інтерфейсу: автор може
+   * тримати інтерфейс українською й набирати англійський рукопис. У режимі
+   * «паралельно» видно обидві канви, тож єдиного правильною вибору там немає і
+   * береться мова інтерфейсу — мовчазний і передбачуваний компроміс.
+   *
+   * Замиканням, а не значенням: розширення збираються один раз на сесію.
+   * Перемалювання після зміни мови вимагає окремого ефекту — підказка живе
+   * в декорації, а декорація не залежить від замикання.
+   */
+  const entityTooltipEnglish =
+    editorLanguageMode === 'en' ? true : editorLanguageMode === 'ua' ? false : uiLang === 'en';
+  const langRef = useRef(entityTooltipEnglish);
+  useEffect(() => {
+    if (langRef.current === entityTooltipEnglish) return;
+    langRef.current = entityTooltipEnglish;
+    uaEditor?.view.dispatch(uaEditor.state.tr.setMeta(entityTagKey, true));
+    enEditor?.view.dispatch(enEditor.state.tr.setMeta(entityTagKey, true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entityTooltipEnglish]);
   useEffect(() => {
     entityTagsVisibleRef.current = entityTagsVisible;
     uaEditor?.view.dispatch(uaEditor.state.tr.setMeta(entityTagKey, true));
@@ -871,7 +889,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
       () => bookRef.current.characters,
       () => readabilityHighlightModeRef.current,
       () => CORE_ENTITIES,
-      () => entityTagsVisibleRef.current
+      () => entityTagsVisibleRef.current,
+      () => langRef.current
     ),
     PaginationPlugin.configure({
       getPageContentHeightMm,
@@ -897,45 +916,22 @@ export const EditorView: React.FC<EditorViewProps> = ({
       () => bookRef.current.characters,
       () => readabilityHighlightModeRef.current,
       () => CORE_ENTITIES,
-      () => entityTagsVisibleRef.current
+      () => entityTagsVisibleRef.current,
+      () => langRef.current
     ),
     PaginationPlugin.configure({ getPageContentHeightMm, getVerticalMarginsMm, onMeasured: onEnMeasured }),
   ]).current;
 
-  /**
-   * «/Ім'я героя» + Enter → замість нового рядка відкриває поповер
-   * поведінкових шаблонів цього героя (behaviorPopover, той самий
-   * компонент, що й при наведенні) точно в позиції курсора. Просте
-   * розпізнавання ЛІТЕРАЛЬНОГО тексту (не жива підказка під час набору,
-   * за рішенням письменника) — зіставляється з ім'ям/«ім'я прізвище»/
-   * псевдонімом існуючого персонажа книги, регістронезалежно. Читає
-   * bookRef.current (не book із замикання) — той самий підхід, що й
-   * плейсхолдери extensions вище, бо ця функція будується ОДИН раз при
-   * ініціалізації editorProps і не оновлюється на кожен рендер.
+  /*
+   * ТУТ БУВ ОБРОБНИК «/Ім'я героя» + ENTER (createSlashTriggerHandler).
+   *
+   * Прибрано на пряме рішення власника (23.09.2026, п. 5 відповідей): жест
+   * замінено на повний тег сутності `/character:Ім'я:діалог`, який відкриває
+   * той самий список діалогів героя, але ще й лишає в тексті теги — тобто
+   * робить репліку видимою для канви, панелі сутностей і майбутніх правил
+   * обробки. Два різні жести для однієї дії збивали б з пантелику, а старий
+   * до того ж вставляв текст БЕЗ розмітки.
    */
-  const createSlashTriggerHandler = (editorKind: 'ua' | 'en') => (view: PMView, event: KeyboardEvent): boolean => {
-    if (event.key !== 'Enter' || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return false;
-    if (!view.state.selection.empty) return false;
-
-    const { $from } = view.state.selection;
-    const textBefore = $from.parent.textBetween(0, $from.parentOffset);
-    const found = findSlashCandidate(textBefore);
-    if (!found) return false;
-
-    const matched = matchCharacterBySlashCandidate(bookRef.current.characters || [], found.candidate);
-    if (!matched) return false;
-
-    const blockStart = $from.start();
-    const deleteFrom = blockStart + found.slashIndex;
-    const deleteTo = $from.pos;
-
-    view.dispatch(view.state.tr.delete(deleteFrom, deleteTo));
-
-    const coords = view.coordsAtPos(deleteFrom);
-    setBehaviorPopover({ charId: matched.id, x: coords.left, y: coords.bottom, source: 'slash', editorKind });
-
-    return true;
-  };
 
   /**
    * Обчислює позицію значка ✦ AI-коуч біля кінця виділення (той самий
@@ -963,7 +959,6 @@ export const EditorView: React.FC<EditorViewProps> = ({
       content: markerStringToTiptapDoc(activeSection?.content || ''),
       editorProps: {
         attributes: { class: 'nova-manuscript-editor nova-manuscript-blocks', spellcheck: String(spellcheckEnabled), lang: proofingLanguage },
-        handleKeyDown: createSlashTriggerHandler('ua'),
       },
       onUpdate: ({ editor }) => {
         handleContentChangeRef.current(tiptapDocToMarkerString(editor.getJSON() as JSONContent));
@@ -984,7 +979,6 @@ export const EditorView: React.FC<EditorViewProps> = ({
       content: markerStringToTiptapDoc(activeSection?.contentEn || ''),
       editorProps: {
         attributes: { class: 'nova-manuscript-editor nova-manuscript-blocks', spellcheck: String(spellcheckEnabled), lang: 'en' },
-        handleKeyDown: createSlashTriggerHandler('en'),
       },
       onUpdate: ({ editor }) => {
         handleContentEnChangeRef.current(tiptapDocToMarkerString(editor.getJSON() as JSONContent));
@@ -3588,6 +3582,29 @@ export const EditorView: React.FC<EditorViewProps> = ({
   };
 
   /**
+   * Збереження діалогів героя з модала: пише в `Character.dialogueTemplates`
+   * тим самим шляхом, що й решта правок персонажа (`onUpdateBook`), — тож
+   * зміна потрапляє в історію версій і в автозбереження книги, а не губиться
+   * в локальному стані модала.
+   */
+  const handleSaveCharacterDialogues = (characterId: string, dialogues: string[]) => {
+    const target = book.characters.find((c) => c.id === characterId);
+    if (!target) return;
+    const updatedCharacters = book.characters.map((c) =>
+      c.id === characterId ? { ...c, dialogueTemplates: dialogues } : c
+    );
+    onUpdateBook(
+      { ...book, characters: updatedCharacters },
+      'Діалоги героя',
+      `Герой: «${target.name}${target.surname ? ' ' + target.surname : ''}», діалогів: ${dialogues.length}`
+    );
+    setDialogueToast(
+      t('editor.dialogueModalSaved', { name: `${target.name}${target.surname ? ' ' + target.surname : ''}`.trim() })
+    );
+    setTimeout(() => setDialogueToast(null), 3500);
+  };
+
+  /**
    * Вставляє в текст сцени вибраний поведінковий шаблон героя (опис дії /
    * поведінки в діалозі) у позицію курсора — для швидкого вводу в сюжет.
    */
@@ -3602,22 +3619,23 @@ export const EditorView: React.FC<EditorViewProps> = ({
   };
 
   /**
-   * Вставка через «/Ім'я героя»+Enter (createSlashTriggerHandler вище) —
-   * на відміну від handleInsertBehaviorPattern: (1) у ТОЙ редактор
-   * (ua/en), де стався тригер, а не завжди uaEditor; (2) курсивом
-   * (`*текст*`, markerSnippetToNodes розбирає цей маркер так само, як і
-   * повний документ) і БЕЗ навколишніх «\n» — фраза лягає ІНЛАЙН у місце
-   * курсора (яке вже стоїть точно там, де стояв «/Ім'я» до видалення в
-   * createSlashTriggerHandler), щоб письменник одразу продовжував той
-   * самий рядок звичайним текстом, як у прикладі завдання.
+   * Вставка готового діалогу героя з поповера (наведення на картку героя).
+   *
+   * Той самий текст, що й зі слеш-меню: два теги плюс сама репліка. Один
+   * спільний будівник (`buildDialogueInsertText`) навмисно — інакше два входи
+   * в ту саму дію розійшлися б у розмітці вже за першої правки.
    */
-  const handleInsertSlashPattern = (pattern: string, editorKind: 'ua' | 'en') => {
-    const editor = editorKind === 'en' ? enEditor : uaEditor;
-    if (!editor || !pattern.trim()) return;
-    editor.chain().focus().insertContent(markerSnippetToNodes(`*${pattern.trim()}*`)).run();
+  const handleInsertDialogue = (speakerName: string, dialogue: string) => {
+    if (!activeSection || !dialogue.trim() || !uaEditor) return;
+    uaEditor
+      .chain()
+      .focus()
+      .insertContent(markerSnippetToNodes(`\n${buildDialogueInsertText(speakerName, dialogue)}\n`))
+      .run();
 
     cancelBehaviorPopoverClose();
     setBehaviorPopover(null);
+    setContextMenu(null);
   };
 
   // Remove individual participant from scene
@@ -6107,6 +6125,38 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     керування фоновим canvas-ефектом світлових хвиль.
                     Прибрано разом із самим ефектом за прямим проханням
                     власника (запис #142): керувати більше нічим. */}
+
+                {/* ДІАЛОГИ ГЕРОЯ (п. 2 постановки 23.09.2026).
+                    Кнопка відкриває модал, у якому автор налаштовує готові
+                    репліки; у канві вони потім підбираються слеш-записом
+                    `/character:Ім'я:діалог`, а самі репліки лягають у текст
+                    з тегами героя та діалогу. */}
+                {!isReader && (
+                  <div
+                    className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-2 shadow-md"
+                    data-scene-dialogues-panel
+                  >
+                    <span className="font-bold text-slate-100 text-sm block border-b border-slate-800 pb-2 flex items-center gap-1.5">
+                      <Quote className="w-3.5 h-3.5 text-cyan-400" />
+                      {t('editor.dialoguesTitle')}
+                    </span>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">{t('editor.dialogueSetupHint')}</p>
+                    <button
+                      onClick={() => {
+                        setDialogueModalCharId(
+                          sceneCharacters[0]?.characterId || book.characters[0]?.id || ''
+                        );
+                        setShowDialogueModal(true);
+                      }}
+                      disabled={book.characters.length === 0}
+                      data-open-dialogue-setup
+                      className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl bg-cyan-500/15 border border-cyan-500/40 text-cyan-200 text-[11px] font-bold hover:bg-cyan-500/25 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <MessageSquareQuote className="w-3.5 h-3.5" />
+                      {t('editor.dialogueSetupBtn')}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -6834,7 +6884,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
           компонента, а не в редакторі: список малюється у `position: fixed`
           за координатами курсора, і всередині прокручуваної колонки сторінки
           він обрізався б її межами. */}
-      <EntitySlashMenu editor={enEditor?.isFocused ? enEditor : uaEditor} />
+      <EntitySlashMenu editor={enEditor?.isFocused ? enEditor : uaEditor} characters={book.characters || []} />
 
       {/* AI CHARACTER & ART GENERATION MODAL (Nano Banana, Leonardo.ai) */}
       {showGenerateHeroModal && (
@@ -6936,6 +6986,22 @@ export const EditorView: React.FC<EditorViewProps> = ({
           onNavigateToMatch={handleNavigateToSearchMatch}
           onClose={() => setShowBookSearch(false)}
         />
+      )}
+
+      {/* МОДАЛ «ДІАЛОГИ ГЕРОЯ» (п. 2 постановки 23.09.2026) */}
+      {showDialogueModal && (
+        <CharacterDialogueModal
+          characters={book.characters || []}
+          initialCharacterId={dialogueModalCharId}
+          onSave={handleSaveCharacterDialogues}
+          onClose={() => setShowDialogueModal(false)}
+        />
+      )}
+
+      {dialogueToast && (
+        <div className="fixed bottom-6 right-6 z-[130] px-4 py-2.5 rounded-xl bg-cyan-500/90 text-slate-950 text-xs font-bold shadow-2xl">
+          {dialogueToast}
+        </div>
       )}
 
       {/* FOOTNOTE CREATION MODAL */}
@@ -7245,8 +7311,19 @@ export const EditorView: React.FC<EditorViewProps> = ({
           // «Персонажі» (див. CharactersView.tsx), лише письменник туди
           // раніше не бачив жодного шляху вставки, крім ручного копіювання.
           const patterns = collectInsertablePatterns(char);
+          /*
+           * Готові діалоги — те, що відкриває слеш-запис
+           * `/character:Ім'я:діалог`. Показуємо їх і ТУТ, при наведенні:
+           * інакше автор бачив би список лише тоді, коли вже знає жест, і не
+           * мав би жодного способу помітити, що діалоги взагалі є.
+           * `collectDialogueTemplates` падає на поведінкові шаблони, якщо
+           * власних діалогів у героя ще немає — тож порожнім цей блок буває
+           * рівно тоді, коли й стара секція порожня.
+           */
+          const dialogues = collectDialogueTemplates(char);
+          const ownDialogues = (char.dialogueTemplates || []).filter((d) => d.trim()).length > 0;
           const popW = 360;
-          const popH = Math.min(320, 96 + patterns.length * 30 + 12);
+          const popH = Math.min(420, 96 + patterns.length * 30 + dialogues.length * 30 + 40);
           const left = Math.max(8, Math.min(behaviorPopover.x + 16, window.innerWidth - popW - 8));
           const top = Math.max(8, Math.min(behaviorPopover.y + 16, window.innerHeight - popH - 8));
           return (
@@ -7291,11 +7368,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   {patterns.map((p, i) => (
                     <li key={i}>
                       <button
-                        onClick={() =>
-                          behaviorPopover.source === 'slash'
-                            ? handleInsertSlashPattern(p, behaviorPopover.editorKind || 'ua')
-                            : handleInsertBehaviorPattern(p)
-                        }
+                        onClick={() => handleInsertBehaviorPattern(p)}
                         className="w-full text-left text-[11px] text-slate-200 leading-snug flex gap-1.5 px-1.5 py-1 rounded-lg hover:bg-violet-500/15 hover:text-white transition-colors"
                         title={t('editor.behaviorPatternInsertTitle')}
                       >
@@ -7312,6 +7385,51 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   {t('editor.behaviorPatternInsertHint')}
                 </p>
               )}
+
+              {/* ГОТОВІ ДІАЛОГИ ГЕРОЯ (п. 2 постановки 23.09.2026). Клік
+                  вставляє репліку РАЗОМ із тегами героя та діалогу — тобто
+                  тим самим шляхом, що й слеш-запис у канві. */}
+              <div className="mt-3 pt-3 border-t border-cyan-500/20">
+                <div className="flex items-center gap-1.5 pb-1.5 min-w-0">
+                  <div className="text-[10px] text-cyan-300/80 flex items-center gap-1 min-w-0 flex-1">
+                    <Quote className="w-2.5 h-2.5" />
+                    <span className="truncate">{t('editor.dialoguesTitle')}</span>
+                  </div>
+                  <span className="px-1.5 py-0.5 rounded-md bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-[10px] font-bold shrink-0">
+                    {dialogues.length}
+                  </span>
+                </div>
+                {!ownDialogues && dialogues.length > 0 && (
+                  <p className="text-[10px] text-slate-500 italic mb-1.5">
+                    {t('editor.dialoguesEmpty')}
+                  </p>
+                )}
+                {dialogues.length === 0 ? (
+                  <p className="text-[11px] text-slate-500 italic leading-relaxed">
+                    {t('editor.dialoguesEmpty')}
+                  </p>
+                ) : (
+                  <ul className="space-y-1 max-h-40 overflow-y-auto pr-1" data-editor-dialogue-list>
+                    {dialogues.map((d, i) => (
+                      <li key={i}>
+                        <button
+                          onClick={() => handleInsertDialogue(`${char.name}${char.surname ? ` ${char.surname}` : ''}`.trim(), d)}
+                          className="w-full text-left text-[11px] text-slate-200 leading-snug flex gap-1.5 px-1.5 py-1 rounded-lg hover:bg-cyan-500/15 hover:text-white transition-colors"
+                          title={t('editor.dialogueInsertTitle')}
+                          data-editor-dialogue-item={i}
+                        >
+                          <span className="text-cyan-400 shrink-0 mt-0.5">❝</span>
+                          <span className="min-w-0">{d}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <p className="mt-2 text-[10px] text-cyan-300/60 flex items-center gap-1 leading-relaxed">
+                  <MousePointerClick className="w-3 h-3 shrink-0" />
+                  {t('editor.dialogueInsertHint')}
+                </p>
+              </div>
             </div>
           );
         })()}

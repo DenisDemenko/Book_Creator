@@ -47,6 +47,17 @@ export const coreEntities = {
     chatGroupingTitle: 'Сутності цієї розмови:',
     chatGroupingEmpty: 'У цій розмові сутностей ще не заявлено.',
     chatMessageEntities: 'Сутності репліки:',
+    // Права панель сутностей у чаті (постановка 23.09.2026, п. 5).
+    chatPanelTitle: 'Сутності ядра',
+    chatPanelToggleOn: 'Теги увімкнено',
+    chatPanelToggleOff: 'Показати теги ядра',
+    chatPanelToggleHint: 'Показати теги в репліках і попросити ШІ тегувати свої відповіді',
+    chatPanelHintOn:
+      'Увімкнено: у репліках видно теги, і ШІ додає теги до своїх відповідей — щоб було ясно, про яку сутність він говорить.',
+    chatPanelHintOff:
+      'Вимкнено: теги в репліках приховані й модель їх не додає. Вибір сутності в запит працює завжди.',
+    chatPanelPickHint: 'Клік по сутності — тег стане в текст запиту в позицію курсора.',
+    entityHintLabel: 'Зміст тега',
   },
   en: {
     rootTab: 'Entities',
@@ -83,5 +94,16 @@ export const coreEntities = {
     chatGroupingTitle: 'Entities in this conversation:',
     chatGroupingEmpty: 'No entities declared in this conversation yet.',
     chatMessageEntities: 'Entities in this reply:',
+    // Right-hand entity panel in the chat (owner's brief 23.09.2026, item 5).
+    chatPanelTitle: 'Core entities',
+    chatPanelToggleOn: 'Tags are on',
+    chatPanelToggleOff: 'Show core tags',
+    chatPanelToggleHint: 'Show tags in replies and ask the AI to tag its answers',
+    chatPanelHintOn:
+      'On: tags are visible in replies and the AI adds tags to its answers, so it is clear which entity it is talking about.',
+    chatPanelHintOff:
+      'Off: tags in replies are hidden and the model does not add them. Picking an entity for your prompt always works.',
+    chatPanelPickHint: 'Click an entity — its tag lands at the cursor in your prompt.',
+    entityHintLabel: 'Tag meaning',
   },
 };

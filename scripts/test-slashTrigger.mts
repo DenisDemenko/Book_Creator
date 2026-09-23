@@ -1,15 +1,22 @@
 /**
- * Тести чистої логіки «/Ім'я героя»+Enter (src/utils/slashTrigger.ts) —
- * задачі #50/#51. Сам перехоплювач Enter (createSlashTriggerHandler у
- * EditorView.tsx) вимагає монтованого TipTap-редактора й тут не
- * тестується — лише винесена логіка пошуку кандидата, зіставлення з
- * персонажем і збору вставних фраз.
+ * Тести чистої логіки слеш-записів (src/utils/slashTrigger.ts) —
+ * задачі #50/#51 і #230 (режим діалогів героя). Сам перехоплювач Enter
+ * (був `createSlashTriggerHandler` у EditorView.tsx) прибраний рішенням
+ * власника 23.09.2026: його замінив тег сутності `/character:Ім'я:діалог`,
+ * розбір якого перевіряється тут. Меню (`EntitySlashMenu.tsx`) вимагає
+ * монтованого TipTap-редактора, тому перевіряємо саме чисту логіку.
  * Запуск: npm run test:slash-trigger
  */
 import {
   findSlashCandidate,
   matchCharacterBySlashCandidate,
   collectInsertablePatterns,
+  collectDialogueTemplates,
+  parseDialogueSlashSyntax,
+  isDialogueModeKeyword,
+  dialogueTagValue,
+  buildDialogueInsertText,
+  DIALOGUE_MODE_KEYWORDS,
   MAX_SLASH_CANDIDATE_LENGTH,
 } from '../src/utils/slashTrigger.ts';
 
@@ -59,6 +66,77 @@ console.log('\ncollectInsertablePatterns:');
   t('дублікати того самого тексту прибираються',
     collectInsertablePatterns({ behaviorPatterns: ['А'], behaviorPatternLibrary: [{ trigger: 'question', patterns: ['А', 'Б'] }] }).length === 2);
   t('порожній персонаж — порожній масив', collectInsertablePatterns({}).length === 0);
+}
+
+console.log('\nparseDialogueSlashSyntax — «/character:Ім\'я:діалог»:');
+{
+  const en = parseDialogueSlashSyntax('/character:Serhii:dialog');
+  t('розбирає три сегменти', en?.key === 'character' && en?.heroName === 'Serhii' && en?.modeQuery === 'dialog');
+  t('повертає позицію слеша', parseDialogueSlashSyntax('Він сказав. /character:Serhii:діа')?.slashIndex === 'Він сказав. '.length);
+  t('український ключ сутності теж працює', parseDialogueSlashSyntax('/персонаж:Сергій:діалог')?.heroName === 'Сергій');
+  t('ім\'я з пробілом (ім\'я + прізвище) не рветься',
+    parseDialogueSlashSyntax('/character:Сергій Коваль:діалог')?.heroName === 'Сергій Коваль');
+  t('незакінчений ключ-режим теж розпізнається (автор ще набирає)',
+    parseDialogueSlashSyntax('/character:Сергій:ді')?.modeQuery === 'ді');
+  t('ДВА сегменти — не цей запис (звичайний підбір сутності)', parseDialogueSlashSyntax('/character:Сергій') === null);
+  t('порожнє ім\'я героя — не запис', parseDialogueSlashSyntax('/character::діалог') === null);
+  /*
+   * РОЗБІР СИНТАКСИЧНИЙ, ВОРОТА — СЕМАНТИЧНІ. `стор./2:3:4` справді лягає під
+   * форму «/ключ:значення:режим» — і це нормально, бо меню відкриває список
+   * лише коли ВСІ три умови виконані: ключ є в реєстрі 118 сутностей
+   * (`entityBySlug`) і є сутністю «персонаж», а третій сегмент — префікс
+   * «діалог». Тут перевіряємо саме другу половину воріт.
+   */
+  const numeric = parseDialogueSlashSyntax('стор./2:3:4');
+  t('«стор./2:3:4» не проходить ворота меню (третій сегмент — не режим діалогу)',
+    !!numeric && !isDialogueModeKeyword(numeric.modeQuery));
+  t('звичайна характеристика замість режиму теж не відкриває діалоги',
+    !isDialogueModeKeyword('характеристика'));
+  t('звичайний текст — null', parseDialogueSlashSyntax('Просто речення без слеша') === null);
+}
+
+console.log('\nisDialogueModeKeyword:');
+{
+  t('повний український ключ', isDialogueModeKeyword('діалог'));
+  t('повний англійський ключ', isDialogueModeKeyword('dialog'));
+  t('префікс під час набору', isDialogueModeKeyword('ді'));
+  t('регістр не важливий', isDialogueModeKeyword('ДІАЛОГ'));
+  t('порожній сегмент — НЕ режим (інакше ламався б другий крок підбору)', !isDialogueModeKeyword(''));
+  t('сегмент із самих пробілів — теж не режим', !isDialogueModeKeyword('   '));
+  t('чуже слово — не режим', !isDialogueModeKeyword('репліка'));
+  t('усі ключі режиму (укр. + англ.) працюють', DIALOGUE_MODE_KEYWORDS.every((w) => isDialogueModeKeyword(w)));
+}
+
+console.log('\ncollectDialogueTemplates — власні діалоги або фолбек:');
+{
+  t('власні діалоги мають пріоритет',
+    JSON.stringify(collectDialogueTemplates({ dialogueTemplates: ['— А', '— Б'], behaviorPatterns: ['дива'] })) === JSON.stringify(['— А', '— Б']));
+  t('порожнє поле — падаємо на поведінкові шаблони',
+    JSON.stringify(collectDialogueTemplates({ behaviorPatterns: ['дивиться в очі'] })) === JSON.stringify(['дивиться в очі']));
+  t('порожні рядки не вважаються діалогами (і не блокують фолбек)',
+    JSON.stringify(collectDialogueTemplates({ dialogueTemplates: ['  ', ''], behaviorPatterns: ['патерн'] })) === JSON.stringify(['патерн']));
+  t('дублікати прибираються', collectDialogueTemplates({ dialogueTemplates: ['— А', '— А'] }).length === 1);
+  t('порожній персонаж — порожній список', collectDialogueTemplates({}).length === 0);
+}
+
+console.log('\ndialogueTagValue — перші три слова репліки (рішення власника):');
+{
+  t('бере три слова', dialogueTagValue('— Ти й досі не віриш мені?') === 'Ти й досі');
+  t('провідне тире репліки у значення не входить', !dialogueTagValue('— Привіт').startsWith('—'));
+  t('коротша репліка віддається цілком', dialogueTagValue('— Так') === 'Так');
+  t('розділові знаки в кінці не лишаються', dialogueTagValue('Привіт, світе!') === 'Привіт, світе');
+  t('порожній текст — порожнє значення', dialogueTagValue('   ') === '');
+}
+
+console.log('\nbuildDialogueInsertText — те, що лягає в текст:');
+{
+  const text = buildDialogueInsertText('Сергій', '— Ти й досі не віриш мені?');
+  t('є тег героя', text.includes('[/character:Сергій]'));
+  t('є тег діалогу з першими трьома словами', text.includes('[/dialogue:Ти й досі]'));
+  t('текст репліки збережено', text.includes('— Ти й досі не віриш мені?'));
+  t('теги стоять ПЕРЕД текстом', text.indexOf('[/dialogue:') < text.indexOf('— Ти й досі'));
+  t('ім\'я з прізвищем лягає в тег героя цілком',
+    buildDialogueInsertText('Сергій Коваль', '— Так.').includes('[/character:Сергій Коваль]'));
 }
 
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);

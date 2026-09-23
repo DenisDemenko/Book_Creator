@@ -7,6 +7,7 @@ import {
   CORE_ENTITY_RELATIONS,
   MAX_ENTITIES_PER_PARAGRAPH,
   duplicateColors,
+  entityTooltip,
   parseAnyEntityTags,
   readableTextOn,
   searchEntities,
@@ -111,7 +112,7 @@ export const CoreEntityPanel: React.FC<CoreEntityPanelProps> = ({
       <button
         onClick={() => add(entity)}
         disabled={disabled || paragraphFull}
-        title={`${t('coreEntities.addToParagraph')} — ${entity.tag}`}
+        title={`${entityTooltip(entity, useEnglishNames ? 'en' : 'uk')}\n${t('coreEntities.addToParagraph')} — ${entity.tag}`}
         className="flex-1 min-w-0 text-left px-2 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
         data-entity-button={entity.slug}
       >

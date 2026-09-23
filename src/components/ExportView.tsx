@@ -25,7 +25,7 @@ import {
   generateKdpMetadataReport, 
   getKdpMinimumGutterMm 
 } from '../utils/kdpHelpers';
-import { exportBookToDocx, exportBookToEpub } from '../utils/fileExporters';
+import { exportBookToDocx, exportBookToEpub, bookToPlainText } from '../utils/fileExporters';
 import { KdpPublishingModal } from './KdpPublishingModal';
 import { useLanguage } from '../i18n/LanguageContext';
 
@@ -89,15 +89,13 @@ export const ExportView: React.FC<ExportViewProps> = ({ book, onUpdateBook, tota
       setExportSuccessMsg(t('exportView.toastDocxGenerated'));
     } catch (err: any) {
       console.error('Error generating DOCX:', err);
-      // Fallback to text
-      let docContent = `${book.title}\n${book.subtitle || ''}\nАвтор: ${book.author}\n\n`;
-      book.chapters.forEach((chap, cIdx) => {
-        docContent += `\n\n========================================\nГЛАВА ${cIdx + 1}: ${chap.title}\n========================================\n\n`;
-        chap.sections.forEach((sec) => {
-          docContent += `\n### ${sec.title}\n\n${sec.content}\n\n`;
-        });
-      });
-      downloadTextFile(`${book.title.replace(/\s+/g, '_')}.docx.txt`, docContent, 'text/plain');
+      // Fallback to text. Текстова версія живе в `bookToPlainText` —
+      // вона ж знімає службові теги ядра (постановка 23.09.2026).
+      downloadTextFile(
+        `${book.title.replace(/\s+/g, '_')}.docx.txt`,
+        bookToPlainText(book, { isEnglish: false }),
+        'text/plain'
+      );
       setExportSuccessMsg(t('exportView.toastDocxFallback'));
     } finally {
       setIsExporting(false);
@@ -114,14 +112,11 @@ export const ExportView: React.FC<ExportViewProps> = ({ book, onUpdateBook, tota
       setExportSuccessMsg(t('exportView.toastEnDocxGenerated'));
     } catch (err: any) {
       console.error('Error generating English DOCX:', err);
-      let docContent = `${book.titleEn || book.title}\n${book.subtitleEn || book.subtitle || ''}\nAuthor: ${book.authorEn || book.author}\n\n`;
-      book.chapters.forEach((chap, cIdx) => {
-        docContent += `\n\n========================================\nCHAPTER ${cIdx + 1}: ${chap.titleEn || chap.title}\n========================================\n\n`;
-        chap.sections.forEach((sec) => {
-          docContent += `\n### ${sec.titleEn || sec.title}\n\n${sec.contentEn || sec.content}\n\n`;
-        });
-      });
-      downloadTextFile(`${(book.titleEn || book.title).replace(/\s+/g, '_')}_English_Edition.docx.txt`, docContent, 'text/plain');
+      downloadTextFile(
+        `${(book.titleEn || book.title).replace(/\s+/g, '_')}_English_Edition.docx.txt`,
+        bookToPlainText(book, { isEnglish: true }),
+        'text/plain'
+      );
       setExportSuccessMsg(t('exportView.toastEnDocxFallback'));
     } finally {
       setIsExporting(false);

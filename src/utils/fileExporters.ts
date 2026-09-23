@@ -14,6 +14,19 @@ import {
   convertInchesToTwip
 } from 'docx';
 import { Book } from '../types';
+import { stripEntityTags } from './coreEntities';
+
+/**
+ * Знімає службові теги ядра (постановка 23.09.2026: «теги не включаємо
+ * в жоден експорт»).
+ *
+ * ЧОМУ ЦЕ ТУТ, А НЕ В КОЖНОМУ ВИКЛИКУ. Доти PDF знімав теги власним
+ * рушієм (`server/pdf/…`), а DOCX/EPUB/TXT брали `sec.content` як є —
+ * і в готовому файлі лишалося `[/character:Сергій]`. Спільна обгортка
+ * робить поведінку однаковою для всіх трьох форматів і не дає забути
+ * про неї в четвертому.
+ */
+const clean = (text: string | undefined): string => stripEntityTags(text || '');
 
 /**
  * Escapes XML special characters for valid XHTML/OPF generation
@@ -26,6 +39,53 @@ function escapeXml(unsafe: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
+}
+
+/**
+ * Абзаци книги, готові лягти в експортований файл: теги ядра знято,
+ * порожні рядки викинуто, зайві пропуски прибрано.
+ *
+ * ЧОМУ ОКРЕМА ФУНКЦІЯ. Три формати (DOCX, EPUB, TXT-фолбек) раніше мали
+ * КОЖЕН СВОЮ копію цієї підготовки — і саме тому теги сутностей довго
+ * лишалися в них: PDF знімав, а тут ніхто не згадав. Тепер знімання й поділ
+ * на абзаци живуть в одному місці, і четвертий формат не зможе знову
+ * «забути» про них.
+ */
+export function exportParagraphs(content: string | undefined): string[] {
+  return stripEntityTags(content || '')
+    .replace(/\r\n?/g, '\n')
+    .split(/\n\s*\n|\n/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+}
+
+/**
+ * Текстова версія книги (.txt) — той самий рукопис, що й у бінарному DOCX,
+ * але голим текстом. Нею користується екран «Експорт», коли браузер не зміг
+ * зібрати .docx: краще дати текст, ніж не дати нічого.
+ *
+ * ЧОМУ НЕ В КОМПОНЕНТІ. Спокуса лишити це в `catch` блоку кнопки велика, але
+ * саме так теги сутностей і вижили в DOCX/TXT: текст збирався в тому місці,
+ * до якого тест не дотягується. Тут він чистий, а `ExportView` лише
+ * викликає його й віддає в завантаження.
+ */
+export function bookToPlainText(book: Book, options?: { isEnglish?: boolean }): string {
+  const isEn = !!options?.isEnglish;
+  const title = (isEn && book.titleEn) ? book.titleEn : book.title;
+  const subtitle = (isEn && book.subtitleEn) ? book.subtitleEn : (book.subtitle || '');
+  const author = (isEn && book.authorEn) ? book.authorEn : book.author;
+
+  let out = `${title}\n${subtitle}\n${isEn ? 'Author' : 'Автор'}: ${author}\n\n`;
+  book.chapters.forEach((chap, cIdx) => {
+    const chapTitle = clean(isEn ? (chap.titleEn || chap.title) : chap.title);
+    out += `\n\n========================================\n${isEn ? 'CHAPTER' : 'ГЛАВА'} ${cIdx + 1}: ${chapTitle}\n========================================\n\n`;
+    chap.sections.forEach((sec) => {
+      const secTitle = clean(isEn ? (sec.titleEn || sec.title) : sec.title);
+      const secContent = isEn ? (sec.contentEn || sec.content) : sec.content;
+      out += `\n### ${secTitle}\n\n${exportParagraphs(secContent).join('\n\n')}\n\n`;
+    });
+  });
+  return out;
 }
 
 /**
@@ -175,8 +235,8 @@ export async function exportBookToDocx(book: Book, options?: { isEnglish?: boole
     );
 
     chapter.sections.forEach((sec) => {
-      const secTitle = (isEn && sec.titleEn) ? sec.titleEn : sec.title;
-      const secContent = (isEn && sec.contentEn) ? sec.contentEn : sec.content;
+      const secTitle = clean((isEn && sec.titleEn) ? sec.titleEn : sec.title);
+      const secContent = clean((isEn && sec.contentEn) ? sec.contentEn : sec.content);
 
       if (secTitle && secTitle !== chapTitle && secTitle !== 'Сцена 1' && secTitle !== 'Scene 1') {
         docChildren.push(
@@ -196,27 +256,24 @@ export async function exportBookToDocx(book: Book, options?: { isEnglish?: boole
         );
       }
 
-      // Split paragraphs by newlines
-      const paragraphs = (secContent || '').split(/\n\s*\n|\n/);
-      paragraphs.forEach((pText) => {
-        const trimmed = pText.trim();
-        if (trimmed) {
-          docChildren.push(
-            new Paragraph({
-              alignment: AlignmentType.JUSTIFIED,
-              spacing: { after: 120, line: 360 }, // 1.5 line spacing
-              indent: { firstLine: convertInchesToTwip(0.3) },
-              children: [
-                new TextRun({
-                  text: trimmed,
-                  size: 24, // 12pt
-                  font: 'Georgia',
-                  color: '000000'
-                })
-              ]
-            })
-          );
-        }
+      // Тегів тут уже немає — їх зняв `exportParagraphs`. Абзац, що складався
+      // лише з тегів, після зняття порожній і в документ не потрапляє взагалі.
+      exportParagraphs(secContent).forEach((trimmed) => {
+        docChildren.push(
+          new Paragraph({
+            alignment: AlignmentType.JUSTIFIED,
+            spacing: { after: 120, line: 360 }, // 1.5 line spacing
+            indent: { firstLine: convertInchesToTwip(0.3) },
+            children: [
+              new TextRun({
+                text: trimmed,
+                size: 24, // 12pt
+                font: 'Georgia',
+                color: '000000'
+              })
+            ]
+          })
+        );
       });
     });
   });
@@ -425,20 +482,16 @@ nav#toc a {
 
     let sectionsHtml = '';
     chap.sections.forEach((sec) => {
-      const secTitle = (isEn && sec.titleEn) ? sec.titleEn : sec.title;
-      const secContent = (isEn && sec.contentEn) ? sec.contentEn : sec.content;
+      const secTitle = clean((isEn && sec.titleEn) ? sec.titleEn : sec.title);
+      const secContent = clean((isEn && sec.contentEn) ? sec.contentEn : sec.content);
 
       if (secTitle && secTitle !== chapTitle && secTitle !== 'Сцена 1' && secTitle !== 'Scene 1') {
         sectionsHtml += `<h3>${escapeXml(secTitle)}</h3>\n`;
       }
 
-      const paragraphs = (secContent || '').split(/\n\s*\n|\n/);
-      paragraphs.forEach((pText, pIdx) => {
-        const trimmed = pText.trim();
-        if (trimmed) {
-          const cls = pIdx === 0 ? ' class="first"' : '';
-          sectionsHtml += `<p${cls}>${escapeXml(trimmed)}</p>\n`;
-        }
+      exportParagraphs(secContent).forEach((trimmed, pIdx) => {
+        const cls = pIdx === 0 ? ' class="first"' : '';
+        sectionsHtml += `<p${cls}>${escapeXml(trimmed)}</p>\n`;
       });
     });
 

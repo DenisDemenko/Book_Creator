@@ -3,9 +3,9 @@ import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import {
+  entityTooltip,
   parseAnyEntityTags,
-  paragraphBackgroundOnDarkCanvas,
-  readableTextOn,
+  textColorOnWhite,
   type CoreEntity,
 } from '../../utils/coreEntities';
 
@@ -26,8 +26,12 @@ export interface EntityTagOptions {
   isVisible: () => boolean;
   /** CSS-клас чипа тега — сама стилістика живе в index.css. */
   chipClass: string;
-  /** CSS-клас абзацу з сутностями. */
-  paragraphClass: string;
+  /**
+   * Мова підказки про сутність (постановка, п. 4: підказка мовою набору).
+   * Замикання, а не значення — мова може перемкнутись у розмові, а масив
+   * розширень збирається один раз на сесію редагування.
+   */
+  isEnglishUi: () => boolean;
 }
 
 export const entityTagKey = new PluginKey('novaEntityTag');
@@ -118,22 +122,21 @@ function buildDecorations(doc: PMNode, entities: CoreEntity[], options: EntityTa
 
     if (!options.isVisible()) return;
 
-    const first = resolved[0].entity;
-    const background = paragraphBackgroundOnDarkCanvas(first.color);
-    if (background) {
-      decorations.push(
-        Decoration.node(pos, pos + node.nodeSize, {
-          class: options.paragraphClass,
-          style: `background-color:${background};`,
-          ['data-entity-first']: first.slug,
-        })
-      );
-    }
-
-    // Чипи — по кожному текстовому вузлу. Тег, розірваний межею вузлів
-    // (усередині нього автор поставив наголос), лишається без чипа: це
-    // видимий, але рідкісний край, і краще пропустити чип, ніж поставити
-    // його на чужий діапазон.
+    /*
+     * ТІЛЬКИ КОЛІР ТЕКСТУ — БЕЗ ЗАЛИВКИ (зміна дизайну, рішення власника
+     * 23.09.2026: «міняєм лише в колір текст, а задній фон завжди залишаємо в
+     * канві білим»).
+     *
+     * ДО ЦЬОГО тут стояла ще й `Decoration.node` із тлом абзацу — тим самим
+     * кольором сутності, лише затемненим. На білій сторінці канви
+     * (`PageColumn` малює аркуш `#fffefc`) це виглядало як темна смуга через
+     * увесь абзац, і власник відхилив саме це. Тепер абзац не чіпається
+     * взагалі: мітку видно кольором самого тега.
+     *
+     * Колір тексту береться не з документа як є, а проходить через
+     * `textColorOnWhite`: палітра реєстру містить і `#FACC15`, який на білому
+     * не читався б узагалі.
+     */
     for (const segment of segments) {
       for (const tag of parseAnyEntityTags(segment.text)) {
         const entity = bySlug.get(tag.slug);
@@ -141,9 +144,9 @@ function buildDecorations(doc: PMNode, entities: CoreEntity[], options: EntityTa
         decorations.push(
           Decoration.inline(segment.start + tag.start, segment.start + tag.end, {
             class: options.chipClass,
-            style: `background-color:${entity.color};color:${readableTextOn(entity.color)};`,
+            style: `color:${textColorOnWhite(entity.color)};`,
             ['data-entity-slug']: entity.slug,
-            title: `${entity.tag}:${tag.value}`,
+            title: entityTooltip(entity, options.isEnglishUi() ? 'en' : 'uk'),
           })
         );
       }
@@ -179,7 +182,7 @@ export const EntityTagPlugin = Extension.create<EntityTagOptions>({
       getEntities: () => [],
       isVisible: () => true,
       chipClass: 'nova-entity-chip',
-      paragraphClass: 'nova-entity-paragraph',
+      isEnglishUi: () => false,
     };
   },
 

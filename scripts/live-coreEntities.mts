@@ -8,9 +8,16 @@
  * ЧОМУ ЦЕ ЖИВИЙ ПРОГІН, А НЕ МОДУЛЬНИЙ ТЕСТ. Модульні тести вже довели, що
  * реєстр містить 118 типів, що тег розбирається, що з експорту він зникає.
  * Нез'ясованим лишається найважливіше для автора: чи ПОБАЧИТЬ він ці 118
- * сутностей у канві — чи пофарбується абзац, чи стане чип, чи зникне все за
- * кнопкою приховування. Це властивість збірки (Tailwind, ProseMirror,
- * декорації), а не функції, і ловиться вона лише в браузері.
+ * сутностей у канві — чи стане тег кольоровим, чи зникне все за кнопкою
+ * приховування, чи відкриє слеш-запис `/character:Ім'я:діалог` список діалогів
+ * героя. Це властивість збірки (Tailwind, ProseMirror, декорації), а не
+ * функції, і ловиться вона лише в браузері.
+ *
+ * ⚠️ ЗМІНА ДИЗАЙНУ (23.09.2026). Раніше тут перевірялося ТЛО абзацу
+ * (`[data-entity-first]`). Власник відхилив тло («міняєм лише в колір текст, а
+ * задній фон завжди залишаємо в канві білим»), тому тепер перевіряються
+ * кольорові мітки `[data-entity-slug]` — і ОКРЕМО те, що тло абзацу лишилося
+ * білим. Без другої перевірки повернення тла пройшло б повз прогін.
  *
  * ЩО ТУТ СПРАВЖНЄ: прод-збірка (`dist/server.mjs`), справжня сесія, реальний
  * Chrome, реальна канва. Що НЕ справжнє: тестова книга кладеться в IndexedDB
@@ -103,7 +110,28 @@ const TEST_BOOK = {
       ],
     },
   ],
-  characters: [],
+  characters: [
+    {
+      id: 'char-serhii',
+      bookId: TEST_BOOK_ID,
+      name: 'Сергій',
+      surname: 'Коваль',
+      role: 'protagonist',
+      /*
+       * Готові діалоги героя — ними перевіряється слеш-запис
+       * `/character:Сергій:діалог` (постановка 23.09.2026, п. 2). Поведінкові
+       * шаблони тут навмисно теж є: вони ловлять регресію «два різні
+       * джерела переплуталися» — список діалогів мусить показати саме
+       * dialogueTemplates, а не фолбек.
+       */
+      dialogueTemplates: [
+        '— Ти й досі не віриш мені?',
+        '— Я не вірю нікому, хто приходить уночі.',
+        '— Тоді я піду сам.',
+      ],
+      behaviorPatterns: ['дивиться прямо в очі'],
+    },
+  ],
   footnotes: [],
   illustrations: [],
   qrTags: [],
@@ -292,79 +320,63 @@ try {
   const countBy = (selector: string) =>
     page.evaluate((sel: string) => document.querySelectorAll(sel).length, selector);
 
-  const paragraphs = await countBy('[data-entity-first]');
-  t('канва пофарбувала абзаци з сутностями', paragraphs >= 118, `${paragraphs} абзаців із тлом`);
+  const paragraphs = await countBy('.ProseMirror p');
+  t('канва показала всі абзаци тестової книги', paragraphs >= 118, `${paragraphs} абзаців`);
+
+  const marks = await countBy('[data-entity-slug]');
+  t('усі 118 тегів стали кольоровими мітками в тексті', marks >= 118, `${marks} міток`);
 
   const chips = await countBy('.nova-entity-chip');
-  t('усі 118 тегів стали чипами в канві', chips >= 118, `${chips} чипів`);
+  t('мітка має клас чипа (стилістика з index.css)', chips >= 118, `${chips} чипів`);
 
-  // ДІАГНОСТИКА (тимчасова): якщо чипів менше, ніж абзаців, треба знати, у
-  // ЯКИХ саме абзацах чипа немає — інакше причина лишається здогадом.
-  if (chips < 118) {
+  /*
+   * ДИЗАЙН: ФАРБУЄМО ТЕКСТ, А НЕ ТЛО (рішення власника 23.09.2026). Ця
+   * перевірка з'явилася саме тому, що попередній варіант фарбував абзац
+   * цілком — і саме це власник відхилив. Без неї повернення тла пройшло б
+   * поза увагою: решта перевірок одинаково зелені в обох варіантах.
+   */
+  const paragraphBackground = await page.evaluate(() => {
+    const mark = document.querySelector('[data-entity-slug]') as HTMLElement | null;
+    const paragraph = mark?.closest('p') as HTMLElement | null;
+    if (!mark || !paragraph) return null;
+    return {
+      paragraph: getComputedStyle(paragraph).backgroundColor,
+      text: getComputedStyle(mark).color,
+      slug: mark.getAttribute('data-entity-slug'),
+    };
+  });
+  t('канва НЕ фарбує тло абзацу',
+    !!paragraphBackground &&
+      (paragraphBackground.paragraph === 'rgba(0, 0, 0, 0)' || paragraphBackground.paragraph === 'transparent'),
+    JSON.stringify(paragraphBackground));
+  t('натомість колір має сам текст мітки',
+    !!paragraphBackground && paragraphBackground.text !== paragraphBackground.paragraph,
+    JSON.stringify(paragraphBackground));
+
+  // ДІАГНОСТИКА: якщо міток менше, ніж абзаців, треба знати, у ЯКИХ саме
+  // абзацах мітки немає — інакше причина лишається здогадом.
+  if (marks < 118) {
     const diagnosis = await page.evaluate(() => {
       const editors = Array.from(document.querySelectorAll('.ProseMirror'));
       const perEditor = editors.map((el, i) => ({
         i,
         cls: el.className,
         paragraphs: el.querySelectorAll('p').length,
-        tints: el.querySelectorAll('[data-entity-first]').length,
-        chips: el.querySelectorAll('.nova-entity-chip').length,
+        marks: el.querySelectorAll('[data-entity-slug]').length,
       }));
-      const firstTinted = document.querySelector('[data-entity-first]') as HTMLElement | null;
-      const parents: string[] = [];
-      let cur: HTMLElement | null = firstTinted;
-      while (cur && parents.length < 6) {
-        parents.push(`${cur.tagName.toLowerCase()}.${(cur.className || '').toString().split(' ').slice(0, 2).join('.')}`);
-        cur = cur.parentElement;
-      }
       return {
         editorCount: editors.length,
         perEditor,
-        firstTintedParents: parents,
-        totalTints: document.querySelectorAll('[data-entity-first]').length,
-        totalChips: document.querySelectorAll('.nova-entity-chip').length,
-        // Які саме абзаци отримали чип: якщо це перші N підряд — причина в
-        // рендері/нарізці на сторінки, якщо врозкид — у розборі тегів.
-        indexed: Array.from(document.querySelectorAll('[data-entity-first]')).map((el, i) => ({
-          i,
-          slug: el.getAttribute('data-entity-first'),
-          chip: !!el.querySelector('.nova-entity-chip'),
-          chips: el.querySelectorAll('.nova-entity-chip').length,
-        })).slice(0, 118).map((r) => `${r.i}${r.chip ? '+' : '-'}`).join(' '),
-        chipPlaces: Array.from(document.querySelectorAll('.nova-entity-chip')).slice(0, 8).map((el) => {
-          const p = el.closest('p, div');
-          return {
-            text: (el.textContent || '').slice(0, 30),
-            parentTag: p?.tagName,
-            parentFirst: p?.getAttribute('data-entity-first'),
-            parentClass: (p?.className || '').toString().slice(0, 60),
-            insideProseMirror: !!el.closest('.ProseMirror'),
-          };
-        }),
-        firstParagraphHtml: (() => {
-          const el = document.querySelector('[data-entity-first]') as HTMLElement | null;
-          return el ? el.innerHTML.slice(0, 600) : null;
-        })(),
-        editorBBox: (() => {
-          const ed = document.querySelector('.ProseMirror');
-          const r = ed?.getBoundingClientRect();
-          return r ? { h: Math.round(r.height), top: Math.round(r.top) } : null;
-        })(),
+        totalMarks: document.querySelectorAll('[data-entity-slug]').length,
+        indexed: Array.from(document.querySelectorAll('.ProseMirror p'))
+          .map((p, i) => `${i}${p.querySelector('[data-entity-slug]') ? '+' : '-'}`)
+          .slice(0, 130)
+          .join(' '),
+        firstParagraphHtml: (document.querySelector('.ProseMirror p') as HTMLElement | null)?.innerHTML.slice(0, 600) || null,
       };
     });
-    console.log('    діагностика:', JSON.stringify(diagnosis, null, 1).slice(0, 1800));
-    console.log('    HTML абзацу 0:\n' + String((diagnosis as any).firstParagraphHtml).slice(0, 700));
+    console.log('    діагностика:', JSON.stringify(diagnosis, null, 1).slice(0, 1500));
   }
-
-  const coloredParagraph = await page.evaluate(() => {
-    const el = document.querySelector('[data-entity-first]') as HTMLElement | null;
-    if (!el) return null;
-    const cs = getComputedStyle(el);
-    return { slug: el.getAttribute('data-entity-first'), background: cs.backgroundColor };
-  });
-  t('тло абзацу справді пофарбоване (не порожній стиль)',
-    !!coloredParagraph && coloredParagraph.background !== 'rgba(0, 0, 0, 0)' && coloredParagraph.background !== 'transparent',
-    JSON.stringify(coloredParagraph));
 
   // Панель сутностей
   await page.click('[data-tour="editor__entities"]');
@@ -395,13 +407,13 @@ try {
   const afterAdd = await countBy('.nova-entity-chip');
   t('натискання сутності додало тег у книгу', afterAdd === beforeAdd + 1, `${beforeAdd} → ${afterAdd}`);
 
-  // Приховування: чипи й тло зникають, текст лишається
+  // Приховування: мітки зникають, текст лишається
   await page.click('[data-entity-toggle]');
   await new Promise((r) => setTimeout(r, 500));
   const hiddenChips = await countBy('.nova-entity-chip');
-  const hiddenTints = await countBy('[data-entity-first]');
-  t('кнопка приховала всі чипи', hiddenChips === 0, `${hiddenChips} чипів`);
-  t('кнопка приховала тло абзаців', hiddenTints === 0, `${hiddenTints} абзаців із тлом`);
+  const hiddenMarks = await countBy('[data-entity-slug]');
+  t('кнопка приховала всі мітки', hiddenChips === 0 && hiddenMarks === 0, `${hiddenChips} чипів`);
+  t('кнопка приховала кольори тексту', hiddenMarks === 0, `${hiddenMarks} міток`);
   const stillHasText = await page.evaluate(() => (document.querySelector('.ProseMirror')?.textContent || '').includes('Абзац 1'));
   t('текст книги при цьому лишився на місці', stillHasText);
   const toggleHiddenState = await page.evaluate(() => (document.querySelector('[data-entity-toggle]') as HTMLElement | null)?.getAttribute('data-entity-toggle'));
@@ -460,7 +472,64 @@ try {
     afterSecondTab.includes('[/character:'), afterSecondTab.slice(-160));
 
   await page.screenshot({ path: path.join(shotDir, 'core-entities-canvas.png'), fullPage: false });
-  console.log('\nСкриншоти: tmp/core-entities-canvas.png, tmp/core-entities-hidden.png');
+
+  // -------------------------------------------------------------------------
+  // РЕЖИМ ДІАЛОГІВ ГЕРОЯ: «/character:Ім'я:діалог» (п. 2 постановки)
+  // -------------------------------------------------------------------------
+  // Новий абзац — щоб слеш стояв на початку рядка (межа тригера вимагає,
+  // щоб перед ним не було літери; це те саме правило, що й для сутностей).
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('/character:Сергій:діалог');
+  await page.waitForSelector('[data-entity-slash-menu="dialogue"]', { timeout: 10000 });
+  const dialogueItems = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('[data-entity-slash-dialogue]')).map((el) => el.getAttribute('data-entity-slash-dialogue'))
+  );
+  t('слеш-запис відкрив список готових діалогів героя',
+    dialogueItems.length === 3, JSON.stringify(dialogueItems.slice(0, 3)));
+  t('перший пункт — саме готовий діалог (не поведінковий шаблон)',
+    dialogueItems[0] === '— Ти й досі не віриш мені?', String(dialogueItems[0]));
+
+  await page.keyboard.press('Tab');
+  await new Promise((r) => setTimeout(r, 500));
+  /*
+   * Дивимося ОСТАННІЙ абзац, а не весь документ. У книзі вже є теги
+   * `character` із попередніх кроків прогону (їх додала панель сутностей), і
+   * пошук першого збігу по всьому тексту знайшов би чужий тег — саме на
+   * цьому перша версія цієї перевірки й заплуталася.
+   */
+  const dialogueText = await page.evaluate(() => {
+    const editor = document.querySelectorAll('.ProseMirror')[0];
+    const paragraphs = Array.from(editor?.querySelectorAll('p') || []);
+    return paragraphs.length ? (paragraphs[paragraphs.length - 1].textContent || '') : '';
+  });
+  const heroTag = dialogueText.match(/\[\/character:[^\]]*\]/)?.[0] || '';
+  t('Tab вставив тег героя з його іменем', heroTag === '[/character:Сергій Коваль]', heroTag || 'тега немає');
+  t('Tab вставив тег діалогу з першими трьома словами', dialogueText.includes('[/dialogue:Ти й досі]'));
+  t('текст репліки лягає в канву', dialogueText.includes('Ти й досі не віриш мені?'));
+  t('набраний слеш-запис не залишився хвостом у тексті',
+    !dialogueText.includes('/character:Сергій:діалог'));
+
+  // Те саме українським ключем — і саме тим словом, яке власник написав у
+  // постановці («тег сутності / герой:Ім'я»), а не лише «персонаж» з реєстру.
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('/герой:Сергій:діалог');
+  await page.waitForSelector('[data-entity-slash-menu="dialogue"]', { timeout: 10000 });
+  t('український ключ «герой» теж відкриває список діалогів', true);
+  await page.keyboard.press('Tab');
+  await new Promise((r) => setTimeout(r, 500));
+  const ukText = await page.evaluate(() => {
+    const editor = document.querySelectorAll('.ProseMirror')[0];
+    const paragraphs = Array.from(editor?.querySelectorAll('p') || []);
+    return paragraphs.length ? (paragraphs[paragraphs.length - 1].textContent || '') : '';
+  });
+  t('у книгу лягає канонічний англійський слаг, а не український',
+    !ukText.includes('персонаж:') && ukText.includes('[/dialogue:') && ukText.includes('[/character:Сергій Коваль]'),
+    ukText.slice(0, 90));
+
+  await page.screenshot({ path: path.join(shotDir, 'core-entities-dialogue.png'), fullPage: false });
+  console.log('\nСкриншоти: tmp/core-entities-canvas.png, tmp/core-entities-hidden.png, tmp/core-entities-dialogue.png');
 } finally {
   await browser.close();
   stopServer();

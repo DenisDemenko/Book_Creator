@@ -9,12 +9,13 @@ import {
   MAX_ENTITIES_PER_PARAGRAPH,
   buildEntityTag,
   entityBySlug,
+  entityTooltip,
   parseAnyEntityTags,
-  paragraphBackgroundOnDarkCanvas,
-  readableTextOn,
+  textColorOnDark,
   type CoreEntity,
 } from '../utils/coreEntities';
-import { EntityChatPicker } from './EntityChatPicker';
+import { ChatEntityPanel } from './ChatEntityPanel';
+import { usePersistentState } from '../hooks/usePersistentState';
 import { findSlashCandidate, matchCharacterBySlashCandidate, collectInsertablePatterns } from '../utils/slashTrigger';
 import {
   renderTemplate,
@@ -204,7 +205,8 @@ const COUNTS: ('1' | '2' | '3')[] = ['1', '2', '3'];
  * межа абзацу тут та сама, що й у `paragraphsWithEntities`, у PDF-рушії та в
  * канві — порожній рядок.
  */
-const ChatTextWithEntities: React.FC<{ text: string }> = ({ text }) => {
+const ChatTextWithEntities: React.FC<{ text: string; showEntities: boolean }> = ({ text, showEntities }) => {
+  const { lang } = useLanguage();
   const paragraphs = useMemo(() => {
     return String(text || '')
       .replace(/\r\n?/g, '\n')
@@ -216,25 +218,25 @@ const ChatTextWithEntities: React.FC<{ text: string }> = ({ text }) => {
   return (
     <>
       {paragraphs.map((paragraph) => {
-        const firstEntity = paragraph.tags.find((tag) => entityBySlug(tag.slug))?.slug;
-        const color = firstEntity ? entityBySlug(firstEntity)?.color : undefined;
-        const background = paragraphBackgroundOnDarkCanvas(color);
-
         const parts: React.ReactNode[] = [];
         let cursor = 0;
         for (const tag of paragraph.tags) {
           if (tag.start > cursor) parts.push(paragraph.raw.slice(cursor, tag.start));
           const entity = entityBySlug(tag.slug);
-          const chipColor = entity?.color || '#475569';
+          // ЗМІНА ДИЗАЙНУ (рішення власника 23.09.2026): заливки немає ні в
+          // канві, ні тут — тег позначається кольором тексту, а абзац не
+          // фарбується взагалі. Колір проходить через `textColorOnDark`, бо
+          // канва чату темна й темні кольори реєстру злилися б із тлом.
+          const color = entity ? textColorOnDark(entity.color) : undefined;
           parts.push(
             <span
               key={`${tag.slug}-${tag.start}`}
-              className="inline-block rounded px-1 text-[0.85em] font-semibold mx-0.5"
-              style={{ backgroundColor: chipColor, color: readableTextOn(chipColor) }}
+              className="font-semibold underline decoration-dotted underline-offset-2"
+              style={color ? { color } : undefined}
               data-chat-entity-chip={tag.slug}
-              title={tag.value ? `${tag.tag}:${tag.value}` : tag.tag}
+              title={entity ? entityTooltip(entity, lang === 'en' ? 'en' : 'uk') : tag.tag}
             >
-              {entity ? entity.nameUk : tag.slug}
+              {entity ? (lang === 'en' ? entity.nameEn : entity.nameUk) : tag.slug}
               {tag.value ? `: ${tag.value}` : ''}
             </span>
           );
@@ -243,12 +245,7 @@ const ChatTextWithEntities: React.FC<{ text: string }> = ({ text }) => {
         parts.push(paragraph.raw.slice(cursor));
 
         return (
-          <p
-            key={paragraph.index}
-            className={background ? 'rounded-md px-1.5 my-0.5' : undefined}
-            style={background ? { backgroundColor: background } : undefined}
-            data-chat-entity-paragraph={firstEntity}
-          >
+          <p key={paragraph.index} className="my-0.5" data-chat-entity-paragraph={paragraph.tags[0]?.slug}>
             {parts}
           </p>
         );
@@ -1801,8 +1798,13 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
   const [sessionEntityGroups, setSessionEntityGroups] = useState<
     { slug: string; count: number; values: string[]; color?: string }[]
   >([]);
-  /** Панель вибору сутності над полем вводу. */
-  const [entityPickerOpen, setEntityPickerOpen] = useState(false);
+  /**
+   * Права колонка сутностей у чаті (п. 5 постановки 23.09.2026) і режим
+   * «показати теги ядра» — той самий тумблер, що й у канві книги, але з
+   * додатковою дією: коли він увімкнений, модель отримує скіл тегування.
+   */
+  const [showEntityPanel, setShowEntityPanel] = usePersistentState<boolean>('nova_chat_entityPanel', true);
+  const [showEntityTags, setShowEntityTags] = usePersistentState<boolean>('nova_chat_entityTags', true);
   /** Фрагмент книги, який чекає на питання автора (з редактора). */
   const [fragmentCard, setFragmentCard] = useState<{ text: string; where: string } | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -2232,6 +2234,7 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
           body: JSON.stringify({
             messages: nextMessages.map((m) => ({ role: m.sender === 'user' ? 'user' : 'assistant', content: m.text })),
             bookContext: { title: book.title, genre: book.genre, synopsis: book.synopsis },
+            entityTagging: showEntityTags,
           }),
         });
         const data = await res.json();
@@ -2269,6 +2272,14 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
           // отримує саме той контекст, який користувач бачить у вікні чату.
           messages: messages.map((m) => ({ role: m.sender === 'user' ? 'user' : 'assistant', content: m.text })),
           bookContext: { title: book.title, genre: book.genre, synopsis: book.synopsis },
+          /**
+           * Режим «показати теги ядра» (постановка 23.09.2026, п. 5): коли
+           * ввімкнено, сервер додає до системної інструкції скіл тегування
+           * відповіді, щоб було видно, про яку сутність модель говорить.
+           * Прапорець іде ЗАПИТОМ, а не зберігається на сервері: автор
+           * може міняти його хоч посеред розмови.
+           */
+          entityTagging: showEntityTags,
           attachments: readyAttachments.length > 0
             ? {
                 images: readyAttachments
@@ -2446,8 +2457,9 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
           </div>
         )}
 
-        {/* Права частина — активний чат */}
-        <div className="flex-1 flex flex-col min-w-0 nm-flat">
+        {/* Права частина — активний чат і права колонка сутностей (п. 5 постановки 23.09.2026) */}
+        <div className="flex-1 flex min-w-0 nm-flat">
+        <div className="flex-1 flex flex-col min-w-0">
           {/* Header */}
           <div className="p-4 nm-outset-sm flex items-center justify-between gap-3 shrink-0">
             <div className="min-w-0">
@@ -2512,11 +2524,17 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
                       <span
                         key={group.slug}
                         className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
-                        style={{ backgroundColor: color, color: readableTextOn(color) }}
-                        title={group.values.join(', ')}
+                        style={{ backgroundColor: color, color: textColorOnDark(color) }}
+                        /*
+                         * Підказка — та сама, що й у канві книги (п. 4
+                         * постановки), плюс перелік значень, які автор уже
+                         * вжив у цій розмові: без нього чип «Персонаж ×7» не
+                         * відповідає на питання, ПРО КОГО саме йшлося.
+                         */
+                        title={`${entity ? entityTooltip(entity, lang === 'en' ? 'en' : 'uk') : group.slug}\n${group.values.join(', ')}`}
                         data-chat-entity-group-chip={group.slug}
                       >
-                        {entity ? entity.nameUk : group.slug}
+                        {entity ? (lang === 'en' ? entity.nameEn : entity.nameUk) : group.slug}
                         {group.count > 1 ? ` ×${group.count}` : ''}
                       </span>
                     );
@@ -2542,7 +2560,7 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
                     m.sender === 'user' ? 'msg-user' : 'msg-assistant whitespace-pre-wrap'
                   }`}
                 >
-                  <ChatTextWithEntities text={m.text} />
+                  <ChatTextWithEntities text={m.text} showEntities={showEntityTags} />
                   {/*
                     Кнопка, а не лише правий клік по виділенню. Перенести
                     відповідь у книгу можна було й раніше — але тільки якщо
@@ -2687,32 +2705,22 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
             )}
 
             <div className="flex items-center gap-2 relative">
-              {/* Кнопка вибору сутності (постановка, п. 7). Не слеш-команда в
-                  полі вводу, як у канві: тут той самий `/` уже зайнятий
-                  поведінковими шаблонами героя (`handleChatInputKeyDown`), і
-                  другий перехоплювач слеша зробив би непередбачуваним те, що
-                  вже працює. Кнопка дає те саме — вибір із 118 сутностей із
-                  групуванням — і не забирає чужого жесту. */}
+              {/* Права панель сутностей — основна точка входу (п. 5 постановки
+                  23.09.2026). Кнопка-пікер, яка була тут доти, ховалася серед
+                  скріпки й вибору моделі, і власник її не знайшов; тому
+                  лишається сама панель, а кнопка тут — тільки щоб її
+                  згорнути/розгорнути. */}
               {isRegistered && (
                 <button
-                  onClick={() => setEntityPickerOpen((prev) => !prev)}
-                  title={t('coreEntities.chatPickerButton')}
-                  data-chat-entity-picker-button
+                  onClick={() => setShowEntityPanel((prev) => !prev)}
+                  title={t('coreEntities.chatPanelTitle')}
+                  data-chat-entity-panel-button
                   className={`nm-btn p-2.5 rounded-xl shrink-0 ${
-                    entityPickerOpen ? 'text-[var(--primary)]' : 'text-[var(--on-surface-variant)]'
+                    showEntityPanel ? 'text-[var(--primary)]' : 'text-[var(--on-surface-variant)]'
                   }`}
                 >
                   <Boxes className="w-4 h-4" />
                 </button>
-              )}
-              {entityPickerOpen && (
-                <EntityChatPicker
-                  onPick={(entity) => {
-                    insertEntityTagIntoChatInput(entity);
-                    setEntityPickerOpen(false);
-                  }}
-                  onClose={() => setEntityPickerOpen(false)}
-                />
               )}
               {isRegistered && (
                 <button
@@ -2742,6 +2750,15 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
               </button>
             </div>
           </div>
+          </div>
+          {isRegistered && showEntityPanel && (
+            <ChatEntityPanel
+              onPick={insertEntityTagIntoChatInput}
+              showTags={showEntityTags}
+              onToggleTags={() => setShowEntityTags((prev) => !prev)}
+              groups={sessionEntityGroups}
+            />
+          )}
         </div>
           </div>
         )}

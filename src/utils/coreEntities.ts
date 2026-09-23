@@ -339,11 +339,89 @@ export const MAX_ENTITIES_PER_PARAGRAPH = 12;
 const BY_SLUG = new Map(CORE_ENTITIES.map((e) => [e.slug, e]));
 const BY_TAG = new Map(CORE_ENTITIES.map((e) => [e.tag, e]));
 
-/** Сутність за ключем без слеша (`character`) або з ним (`/character`). */
+/** Нормалізація псевдоніма: регістр, « / » та подвійні пропуски. */
+function normalizeAlias(value: string): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s*\/\s*/g, ' ')
+    .replace(/\s+/g, ' ');
+}
+
+/**
+ * Українські (і англійські) назви як ключі тега.
+ *
+ * НАВІЩО. Постановка власника (23.09.2026, п. 3): усі 118 тегів мають
+ * вводитись і англійською, і українською. Тобто `/персонаж:Сергій` мусить
+ * працювати так само, як `/character:Serhii`. Документ реєстру сам каже, чому
+ * канонічним лишається англійський ключ: «Українські назви використовуються в
+ * інтерфейсі, англомовні теги — як стабільні системні ключі». Тож у книгу
+ * завжди пишеться англійський slug, а українська назва — це лише спосіб його
+ * набрати.
+ *
+ * Реєструємо декілька форм на одну сутність:
+ *   • англійську назву (`rider`), бо її автор бачить у панелі англійською;
+ *   • повну українську назву;
+ *   • першу частину складеної назви до «/»: «Глава / розділ» → «глава».
+ *     Без цього складене ім'я вимагало б набирати слеш усередині тега, а він
+ *     там службовий — тег `/глава розділ:x` виглядав би як дві сутності.
+ */
+const ALIASES = new Map<string, CoreEntity>();
+for (const entity of CORE_ENTITIES) {
+  const candidates = [
+    entity.nameEn,
+    entity.nameUk,
+    entity.nameUk.split('/')[0],
+    // Українська назва-«рід» без уточнення в дужках: «Емоційний стан (тип)» — немає,
+    // але «Проблема безперервності» лишається як є.
+  ];
+  for (const candidate of candidates) {
+    const alias = normalizeAlias(candidate);
+    // Перша реєстрація виграє: інакше однакові українські назви в різних
+    // сутностей (їх у документі 32 за кольорами, а за назвами теж буває)
+    // перезаписували б одна одну в непередбачуваному порядку.
+    if (alias && !ALIASES.has(alias)) ALIASES.set(alias, entity);
+  }
+  const bySlugAlias = normalizeAlias(entity.slug.replace(/-/g, ' '));
+  if (!ALIASES.has(bySlugAlias)) ALIASES.set(bySlugAlias, entity);
+}
+
+/**
+ * Слова, якими автор реально називає сутність, але яких немає серед назв
+ * документа. Потрібні рівно для двох випадків, і обидва — не здогад:
+ *
+ *   • **«герой»** — так сутність `character` називає САМ ВЛАСНИК у постановці
+ *     («тег сутності `/ герой:Ім'я`»). У документі її українська назва —
+ *     «Персонаж», і без цього рядка жест власника не працював би.
+ *   • **назви-фрази** — «Емоційний стан», «Мовний портрет»: автор набиратиме
+ *     «емоція», а не «емоційний стан». Додаємо лише ті, де слово є очевидним
+ *     і не збігається з іншою сутністю.
+ *
+ * Розширювати цей список «на всяк випадок» не можна: кожен аліас — це ще один
+ * спосіб написати ключ, і зайвий аліас тихо зробить тегом те, що тегом не
+ * задумано (саме тому «сирі» теги перевіряються реєстром, див. `stripEntityTags`).
+ */
+const EXTRA_ALIASES: Record<string, string> = {
+  герой: 'character',
+  героїня: 'character',
+  емоція: 'emotion',
+};
+for (const [alias, slug] of Object.entries(EXTRA_ALIASES)) {
+  const entity = CORE_ENTITIES.find((e) => e.slug === slug);
+  if (entity && !ALIASES.has(normalizeAlias(alias))) ALIASES.set(normalizeAlias(alias), entity);
+}
+
+/** Сутність за ключем без слеша (`character`), зі слешем або за назвою (`Персонаж`, `Character`). */
 export function entityBySlug(slugOrTag: string): CoreEntity | undefined {
   const raw = String(slugOrTag || '').trim().toLowerCase();
   if (!raw) return undefined;
-  return BY_SLUG.get(raw.replace(/^\//, '')) || BY_TAG.get(raw);
+  const withoutSlash = raw.replace(/^\//, '');
+  return BY_SLUG.get(withoutSlash) || BY_TAG.get(raw) || ALIASES.get(normalizeAlias(withoutSlash));
+}
+
+/** Чи це ключ, за яким реєстр справді знає сутність — для розпізнавання тегів у тексті. */
+export function isKnownEntityKey(key: string): boolean {
+  return !!entityBySlug(key);
 }
 
 export function entityGroup(groupId: string): CoreEntityGroup | undefined {
@@ -417,7 +495,12 @@ export const ENTITY_TAG_SEPARATOR = ':';
  * характеристику ще пишуть», і він має лишатися розпізнаваним.
  */
 export function entityTagRegexp(): RegExp {
-  return /\[(\/[a-z0-9-]+):([^\]\n]*)\]/g;
+  // Ключ допускає кирилицю: власник просив вводити теги і українською
+  // (`/персонаж:Сергій`), а не лише англійським slug. Канонічною у книзі все
+  // одно стає англійська форма (див. `buildEntityTag`), але розпізнати й
+  // убрати з експорту треба ОБИДВІ — інакше український тег потрапив би
+  // в надруковану книгу.
+  return /\[(\/[a-z0-9\u0400-\u04FF-]+):([^\]\n]*)\]/g;
 }
 
 /** Один розібраний тег: сутність плюс те, що автор написав після двокрапки. */
@@ -496,7 +579,7 @@ export function stripEntityTags(text: string): string {
    * ключів у реєстрі немає.
    */
   const withoutTags = source.replace(
-    /\[(\/[a-z0-9-]+):([^\]\n]*)\]|(^|[\s({«"',;:—-])(\/[a-z0-9-]+):([^\s\n\]]*)/g,
+    /\[(\/[a-z0-9\u0400-\u04FF-]+):([^\]\n]*)\]|(^|[\s({«"',;:—-])(\/[a-z0-9\u0400-\u04FF-]+):([^\s\n\]]*)/g,
     (full, wrappedTag: string | undefined, _wrappedValue: string, prefix: string | undefined, looseTag: string | undefined) => {
       if (wrappedTag) return '';
       if (looseTag && entityBySlug(looseTag.slice(1))) return prefix || '';
@@ -624,14 +707,53 @@ export function mixWithBlack(hex: string, amount: number): string {
  * синій, і «середнє» давало б неправильний бік для половини палітри.
  */
 export function readableTextOn(hex: string): string {
+  return relativeLuminance(hex) > 0.45 ? '#0f172a' : '#ffffff';
+}
+
+/** Відносна яскравість кольору за WCAG (0 — чорний, 1 — білий). */
+function relativeLuminance(hex: string): number {
   const rgb = hexChannels(hex);
-  if (!rgb) return '#0f172a';
+  if (!rgb) return 0;
   const [r, g, b] = rgb.map((v) => {
     const c = v / 255;
     return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
   });
-  const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  return luminance > 0.45 ? '#0f172a' : '#ffffff';
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/**
+ * Колір ТЕКСТУ тега на білій канві книги (рішення власника 23.09.2026: тег
+ * позначається кольором тексту, а не заливкою абзацу).
+ *
+ * ЧОМУ НЕ КОЛІР ІЗ ДОКУМЕНТА ЯК Є. Палітра реєстру простягається від
+ * `#FACC15` (світлий жовтий) до `#312E81` (майже чорний синій): на білій
+ * сторінці жовтий тег не читався б зовсім, а темні кольори навпаки — цілком
+ * годяться. Тому колір затемнюється рівно настільки, щоб пройти поріг
+ * читабельності, і не більше: зайве затемнення зробило б різні сутності
+ * однаковими на вигляд.
+ */
+export function textColorOnWhite(hex: string, maxLuminance = 0.42): string {
+  if (!hexChannels(hex)) return hex;
+  let out = hex;
+  for (let amount = 0; amount <= 0.8; amount += 0.08) {
+    if (relativeLuminance(out) <= maxLuminance) break;
+    out = mixWithBlack(hex, amount);
+  }
+  return out;
+}
+
+/**
+ * Колір тексту тега на темній канві (чат, нічна тема): колір навпаки
+ * освітлюється, бо інакше `#312E81` злився б із тлом.
+ */
+export function textColorOnDark(hex: string, minLuminance = 0.5): string {
+  if (!hexChannels(hex)) return hex;
+  let out = hex;
+  for (let amount = 0; amount <= 0.8; amount += 0.08) {
+    if (relativeLuminance(out) >= minLuminance) break;
+    out = mixWithWhite(hex, amount);
+  }
+  return out;
 }
 
 /**
@@ -700,7 +822,7 @@ export function parseLooseEntityTags(text: string): ParsedEntityTag[] {
   // малювала два теги на одному місці, а нормалізація перетворювала
   // `[/character:Serhii]` на `[[/character:Serhii]]` — тобто псувала
   // канонічний маркер при кожному збереженні. Знайдено тестом.
-  const re = /(^|[\s({«"',;:—-])(\/[a-z0-9-]+):([^\s\n\]]*)/g;
+  const re = /(^|[\s({«"',;:—-])(\/[a-z0-9\u0400-\u04FF-]+):([^\s\n\]]*)/g;
   const found: ParsedEntityTag[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(source))) {
@@ -763,7 +885,55 @@ export function parseAnyEntityTags(text: string): ParsedEntityTag[] {
   return [...wrapped, ...loose].sort((a, b) => a.start - b.start);
 }
 
-/** Стисла довідка про склад реєстру — для тестів і для заголовка панелі. */export function registryStats(): {
+// ---------------------------------------------------------------------------
+// Підказка про зміст сутності (для наведення в панелі)
+// ---------------------------------------------------------------------------
+
+/**
+ * Текст підказки про сутність — у МОВІ НАБОРУ автора (постановка, п. 4).
+ *
+ * ЩО ТУТ Є І ЧОГО НЕМАЄ. Усе береться з документа власника й нічого не
+ * вигадується: назви (англійська й українська — у документі вони обидві),
+ * група й перелік характеристик («Основні характеристики» — колонка
+ * документа). **Опису-речення** в документі немає для жодної з 118 сутностей,
+ * тому підказка не вдає, ніби він існує: вона показує саме те, що власник у
+ * документі написав.
+ *
+ * Характеристики в документі лише українською — тому в англійському варіанті
+ * вони наведені як є, з явною позначкою мови джерела. Перекладати їх означало
+ * б розійтися з реєстром: ці слова — назви полів, за якими працюють майбутні
+ * правила обробки сутностей.
+ */
+export function entityTooltip(entity: CoreEntity, lang: 'uk' | 'en' = 'uk'): string {
+  const group = CORE_ENTITY_GROUPS.find((g) => g.id === entity.groupId);
+  const lines: string[] = [];
+  lines.push(`${entity.nameUk} · ${entity.nameEn}`);
+  lines.push(`${entity.tag} · ${entity.color}`);
+  if (group) {
+    lines.push(`${group.id}. ${lang === 'en' ? group.nameEn : group.nameUk}`);
+  }
+  lines.push(
+    entity.characteristics.length > 0
+      ? (lang === 'en' ? 'Characteristics (as in the registry): ' : 'Характеристики (з реєстру): ') +
+          entity.characteristics.join(', ')
+      : lang === 'en'
+        ? 'No characteristics listed in the registry'
+        : 'Характеристик у реєстрі не вказано'
+  );
+  lines.push(
+    entity.registry === 'critic'
+      ? lang === 'en'
+        ? 'Appendix: literary critic (J1–J3)'
+        : 'Додаток: літературна критика (J1–J3)'
+      : lang === 'en'
+        ? 'Base registry (A–I)'
+        : 'Базовий реєстр (A–I)'
+  );
+  return lines.join('\n');
+}
+
+/** Стисла довідка про склад реєстру — для тестів і для заголовка панелі. */
+export function registryStats(): {
   entities: number;
   base: number;
   critic: number;

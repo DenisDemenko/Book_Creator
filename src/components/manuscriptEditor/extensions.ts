@@ -57,7 +57,9 @@ export function buildManuscriptExtensions(
    */
   getCoreEntities?: () => CoreEntity[],
   /** Необов'язково: чи показувати сутності в канві (кнопка приховування, п. 5). */
-  isEntityTagsVisible?: () => boolean
+  isEntityTagsVisible?: () => boolean,
+  /** Необов'язково: мова підказок про сутності (п. 4 постановки 23.09.2026). */
+  isEnglishUi?: () => boolean
 ) {
   return [
     StarterKit.configure({
@@ -124,7 +126,7 @@ export function buildManuscriptExtensions(
       getEntities: getCoreEntities || (() => []),
       isVisible: isEntityTagsVisible || (() => true),
       chipClass: 'nova-entity-chip',
-      paragraphClass: 'nova-entity-paragraph',
+      isEnglishUi: isEnglishUi || (() => false),
     }),
     TagPlugin,
   ];

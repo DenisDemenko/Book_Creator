@@ -10,10 +10,26 @@ import {
   searchEntities,
   type CoreEntity,
 } from '../utils/coreEntities';
+import {
+  DIALOGUE_CHARACTER_SLUG,
+  buildDialogueInsertText,
+  collectDialogueTemplates,
+  isDialogueModeKeyword,
+  matchCharacterBySlashCandidate,
+  parseDialogueSlashSyntax,
+} from '../utils/slashTrigger';
+import type { Character } from '../types';
 
 export interface EntitySlashMenuProps {
   /** Редактор книги (UA або EN — той, у якому зараз курсор). */
   editor: Editor | null;
+  /**
+   * Герої книги — третій стан меню (`/character:Ім'я:діалог`) бере їхні
+   * готові діалоги. Передаються як звичайний масив (не замикання, як у
+   * плагінах канви): меню — React-компонент, воно перемальовується на кожну
+   * зміну книги, і застигле значення тут неможливе.
+   */
+  characters: Character[];
 }
 
 /**
@@ -40,14 +56,16 @@ export interface EntitySlashMenuProps {
  * його нормалізує `wrapPlainEntityTags` на шляху до збереження, а другий крок
  * закриває його сам.
  */
-export const EntitySlashMenu: React.FC<EntitySlashMenuProps> = ({ editor }) => {
+export const EntitySlashMenu: React.FC<EntitySlashMenuProps> = ({ editor, characters }) => {
   const { t, lang } = useLanguage();
   const useEnglish = lang === 'en';
 
   const [open, setOpen] = useState(false);
-  const [stage, setStage] = useState<'entity' | 'value'>('entity');
+  const [stage, setStage] = useState<'entity' | 'value' | 'dialogue'>('entity');
   const [slug, setSlug] = useState('');
   const [query, setQuery] = useState('');
+  /** Ім'я героя, набране між першою й другою двокрапкою (третій стан). */
+  const [heroName, setHeroName] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const [position, setPosition] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   /** Діапазон у документі, який замінить підстановка. */
@@ -55,8 +73,17 @@ export const EntitySlashMenu: React.FC<EntitySlashMenuProps> = ({ editor }) => {
 
   const entity = slug ? entityBySlug(slug) : undefined;
 
+  /** Герой третього стану; `undefined`, якщо ім'я не збіглося з жодним. */
+  const hero = stage === 'dialogue' ? matchCharacterBySlashCandidate(characters, heroName) : undefined;
+  const heroDisplayName = hero ? `${hero.name}${hero.surname ? ' ' + hero.surname : ''}`.trim() : heroName;
+
   const items = useMemo(() => {
     if (stage === 'entity') return searchEntities(query, 8);
+    // Третій стан: готові діалоги героя (або його поводження — фолбек, якщо
+    // власники діалогів ще не налаштовані). Фільтру немає, бо третій сегмент
+    // запису — це ключ-режим (`діалог`), а не пошуковий запит: після нього
+    // автор уже нічого не набирає, він обирає зі списку.
+    if (stage === 'dialogue') return hero ? collectDialogueTemplates(hero) : [];
     if (entity) {
       const characteristics = searchCharacteristics(entity, query, 8);
       // Характеристик у сутності може бути менше за вісім — тоді підказуємо
@@ -64,7 +91,7 @@ export const EntitySlashMenu: React.FC<EntitySlashMenuProps> = ({ editor }) => {
       return characteristics.length > 0 ? characteristics : entity.characteristics.slice(0, 8);
     }
     return [] as string[];
-  }, [stage, query, entity]);
+  }, [stage, query, entity, hero]);
 
   /**
    * Що стоїть перед курсором. Повертає `null`, якщо тригера немає — тоді
@@ -84,7 +111,29 @@ export const EntitySlashMenu: React.FC<EntitySlashMenuProps> = ({ editor }) => {
     if (!$from.parent.isTextblock) return null;
     const before = $from.parent.textBetween(0, $from.parentOffset, '\n', '\n');
 
-    const valueMatch = before.match(/(?:^|[^\p{L}\p{N}_])(\/[a-z0-9-]+):([^\s:]*)$/u);
+    /*
+     * ТРЕТІЙ СЕГМЕНТ — ПЕРШИМ, бо він найдовший і найконкретніший:
+     * `/character:Сергій:діалог` містить у собі і дворівневий запис, і якщо
+     * перевіряти його другим, меню встигло б перемкнутися на список
+     * характеристик і автор побачив би не ті підказки.
+     */
+    const dialogue = parseDialogueSlashSyntax(before);
+    if (
+      dialogue &&
+      isDialogueModeKeyword(dialogue.modeQuery) &&
+      entityBySlug(dialogue.key)?.slug === DIALOGUE_CHARACTER_SLUG
+    ) {
+      const typedLength = before.length - dialogue.slashIndex;
+      return {
+        stage: 'dialogue' as const,
+        slug: DIALOGUE_CHARACTER_SLUG,
+        query: dialogue.modeQuery,
+        heroName: dialogue.heroName,
+        range: { from: from - typedLength, to: from },
+      };
+    }
+
+    const valueMatch = before.match(/(?:^|[^\p{L}\p{N}_])(\/[a-z0-9\u0400-\u04FF-]+):([^\s:]*)$/u);
     if (valueMatch && entityBySlug(valueMatch[1].slice(1))) {
       // Довжина замінюваного фрагмента = слеш + ключ + двокрапка + значення.
       // Саме довжина, а не `match[0].trim().length`: у `match[0]` входить ще
@@ -98,12 +147,13 @@ export const EntitySlashMenu: React.FC<EntitySlashMenuProps> = ({ editor }) => {
       };
     }
 
-    const entityMatch = before.match(/(?:^|[^\p{L}\p{N}_])(\/[a-z0-9-]*)$/u);
+    const entityMatch = before.match(/(?:^|[^\p{L}\p{N}_])(\/[a-z0-9\u0400-\u04FF-]*)$/u);
     if (entityMatch) {
       return {
         stage: 'entity' as const,
         slug: '',
         query: entityMatch[1].slice(1),
+        heroName: '',
         range: { from: from - entityMatch[1].length, to: from },
       };
     }
@@ -124,6 +174,7 @@ export const EntitySlashMenu: React.FC<EntitySlashMenuProps> = ({ editor }) => {
     setStage(trigger.stage);
     setSlug(trigger.slug);
     setQuery(trigger.query);
+    setHeroName(trigger.heroName);
     setActiveIndex(0);
     setOpen(true);
 
@@ -148,6 +199,22 @@ export const EntitySlashMenu: React.FC<EntitySlashMenuProps> = ({ editor }) => {
       if (item === undefined) return;
       const { from, to } = rangeRef.current;
 
+      /*
+       * Третій стан — вставка готового діалогу. Замінюємо весь набраний запис
+       * (`/character:Сергій:діалог`) на два теги плюс сам текст репліки —
+       * саме так репліка стає видимою і канві, і майбутнім правилам обробки
+       * сутностей, а на експорті обидва теги знімаються.
+       */
+      if (stage === 'dialogue') {
+        editor
+          .chain()
+          .focus()
+          .insertContentAt({ from, to }, buildDialogueInsertText(heroDisplayName, String(item)))
+          .run();
+        setOpen(false);
+        return;
+      }
+
       if (stage === 'entity') {
         const picked = item as CoreEntity;
         editor.chain().focus().insertContentAt({ from, to }, `${picked.tag}:`).run();
@@ -170,7 +237,7 @@ export const EntitySlashMenu: React.FC<EntitySlashMenuProps> = ({ editor }) => {
         .run();
       setOpen(false);
     },
-    [editor, open, items, stage, slug]
+    [editor, open, items, stage, slug, heroDisplayName]
   );
 
   /** Закриває тег без характеристики — автор тисне Enter, значення не потрібне. */
@@ -249,12 +316,25 @@ export const EntitySlashMenu: React.FC<EntitySlashMenuProps> = ({ editor }) => {
       onMouseDown={(e) => e.preventDefault()}
     >
       <div className="px-2 py-1 text-[10px] text-slate-500 border-b border-slate-800 mb-1">
-        {stage === 'entity' ? t('coreEntities.slashEntityHint') : t('coreEntities.slashValueHint')}
+        {stage === 'entity'
+          ? t('coreEntities.slashEntityHint')
+          : stage === 'dialogue'
+            ? `${heroDisplayName} · ${t('editor.dialoguesTitle')}`
+            : t('coreEntities.slashValueHint')}
+        {/* Підказка про режим діалогів там, де автор цілком може його шукати:
+            на другому кроці сутності «Персонаж». */}
+        {stage === 'value' && slug === DIALOGUE_CHARACTER_SLUG && (
+          <span className="block text-[9px] text-slate-600 mt-0.5">{t('editor.slashDialogueHint')}</span>
+        )}
       </div>
 
       {items.length === 0 && (
         <div className="px-2 py-2 text-[11px] text-slate-500">
-          {t('coreEntities.noResults', { q: query })}
+          {stage === 'dialogue'
+            ? hero
+              ? t('editor.dialoguesEmpty')
+              : t('editor.dialogueHeroNotFound')
+            : t('coreEntities.noResults', { q: query })}
         </div>
       )}
 
@@ -294,26 +374,33 @@ export const EntitySlashMenu: React.FC<EntitySlashMenuProps> = ({ editor }) => {
                 index === activeIndex ? 'bg-slate-800' : 'hover:bg-slate-900'
               }`}
               data-entity-slash-value={item}
+              data-entity-slash-dialogue={stage === 'dialogue' ? item : undefined}
             >
               <span
                 className="w-2.5 h-2.5 rounded-full shrink-0"
                 style={{ backgroundColor: entity?.color || '#475569' }}
               />
               <span className="flex-1 text-[11px] text-slate-200 truncate">{item}</span>
-              <span
-                className="text-[9px] px-1 rounded"
-                style={{
-                  backgroundColor: entity?.color || '#475569',
-                  color: readableTextOn(entity?.color || '#475569'),
-                }}
-              >
-                /{slug}
-              </span>
+              {/* Бейдж каже, ЯКИЙ тег ляже в текст після вибору. У третьому
+                  стані це `/dialogue` — не `/character`, бо саме тег діалогу
+                  автор тут і вибирає, а ім'я героя вже відоме. */}
+              {(() => {
+                const badgeEntity = stage === 'dialogue' ? entityBySlug('dialogue') : entity;
+                const badgeColor = badgeEntity?.color || '#475569';
+                return (
+                  <span
+                    className="text-[9px] px-1 rounded shrink-0"
+                    style={{ backgroundColor: badgeColor, color: readableTextOn(badgeColor) }}
+                  >
+                    /{stage === 'dialogue' ? 'dialogue' : slug}
+                  </span>
+                );
+              })()}
             </button>
           ))}
 
       <div className="px-2 py-1 mt-1 border-t border-slate-800 text-[9px] text-slate-600">
-        {CORE_ENTITIES.length} · ↑↓ · Tab · Esc
+        {stage === 'entity' ? `${CORE_ENTITIES.length} · ` : ''}↑↓ · Tab · Esc
       </div>
     </div>
   );
