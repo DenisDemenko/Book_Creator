@@ -101,47 +101,44 @@ remote перевірити можна, запушити — ні**. Робоч�
 > прохання власника** (AGENTS.md), тому між сесіями тут завжди щось лежить —
 > і наступна сесія має знати, що саме, бо `git log` вона не памʼятає.
 
-## Стан на 23.09.2026 (сесія #01) — ⚠️ НЕ закомічено: довідка (#232) і фікс приховування (#233)
+## Стан на 23.09.2026 (сесія #01) — ✅ запушено: довідка (#232) і фікс приховування (#233)
 
-**Book_Creality (Студія), гілка `master`, `HEAD` = `b798fca`** (коміти #230
-поїхали в `origin/master` і `production/master`). Після пушу в робочій теці
-зробилися ще дві задачі власника — **вони не закомічені** (AGENTS.md: коміт
-робиться лише на пряме прохання):
+**Book_Creality (Студія), гілка `master` = `origin/master` = `production/master`.
+Поїхали коміти #232 і #233:**
 
-- #232 **сторінка довідки**: `src/components/HelpGuideView.tsx` (нове),
-  `src/i18n/dictionaries/helpGuide.ts` (нове, uk+en),
-  `src/i18n/dictionaries/index.ts`, `src/components/SidebarNav.tsx` (кнопка
-  внизу навігації + проп `onOpenHelp`), `src/App.tsx` (футер + монтаж
-  сторінки), `scripts/live-helpScreens.mts` (нове, `npm run live:help-screens`),
-  `package.json` (новий скрипт), `public/help/*.png` (шість кадрів, **нові
-  бінарні файли**);
-- #233 **приховування сутностей**: `src/components/manuscriptEditor/EntityTagPlugin.ts`,
-  `src/utils/entityTagHiding.ts` (нове), `src/index.css`,
-  `src/components/manuscriptEditor/extensions.ts`,
-  `scripts/test-entityTagHiding.mts` (нове, `npm run test:entity-tag-hiding`),
-  `scripts/live-coreEntities.mts`, `package.json` (новий скрипт + запис у
-  ланцюжок `npm test`);
-- журнал: `log.md`, `log/119-151.md` (записи #232 і #233), `task.md`.
+- `f5b722c` — код, тести й кадри: приховування сутностей тепер ховає САМ ТЕГ
+  (`EntityTagPlugin.ts`, `src/utils/entityTagHiding.ts`,
+  `src/index.css`), сторінка довідки (`src/components/HelpGuideView.tsx`,
+  `src/i18n/dictionaries/helpGuide.ts`), точки входу (`src/App.tsx` — футер,
+  `src/components/SidebarNav.tsx` — кнопка внизу навігації), шість скринь у
+  `public/help/` із номерними мітками, прогін `scripts/live-helpScreens.mts` і
+  тест `scripts/test-entityTagHiding.mts`, оновлений `package.json`;
+- `61eb8f2` — журнал: записи #232 і #233, рядки в покажчику, блок сесії
+  23.09.2026 #01 у `log/sessions.md`, `task.md`.
 
-**Перед пушем прогнати:** `npx tsc --noEmit`, `npm run build`,
-`test:entity-tag-hiding` 19/0, `test:core-entities` 80/0,
-`test:slash-trigger` 56/0, `test:editor-toolbar` 59/0, `test:readability` 15/0,
-`test:manuscript-doc` 50/0, `live:core-entities` 42/0,
-`live:help-screens` 37/0.
+**Railway перезібере Студію автоматично на пуш.** Що перевірити на проді
+(окремо від блоку #230 нижче):
+
+1. Унизу кожної сторінки студії — смуга з кнопкою «Довідка», а в самому низу
+   лівої навігації — пункт «Довідка» (він є навіть тоді, коли футер за межами
+   екрана).
+2. Сторінка довідки відкривається, кадри видно (не сірі рамки-заглушки),
+   кнопка «English version» перемикає мову всієї студії.
+3. Кнопка «Сховати сутності» прибирає теги З КАНВИ повністю — лишається тільки
+   текст книги; натискання ще раз повертає теги.
+
+**Перед пушем прогнано:** `npx tsc --noEmit` 0, `npm run build` OK,
+`live:core-entities` 42/0, `live:help-screens` 37/0, `test:entity-tag-hiding`
+19/0, `test:core-entities` 80/0, `test:slash-trigger` 56/0,
+`test:editor-toolbar` 59/0, `test:readability` 15/0, `test:manuscript-doc` 50/0,
+`test:chat` 152/0, `test:pdf` 82/0.
 
 ⚠️ **Важливий порядок для кадрів довідки.** Якщо їх треба перегенерувати:
 спершу `npm run build`, потім `npm run live:help-screens`. Прогін працює проти
 `dist/`, а Vite копіює `public/` у `dist/` лише під час збірки — тому прогін
-наприкінці сам копіює свіжі кадри в `dist/help/`.
-
-**Що перевірити оком на проді (окремо від попереднього блоку):**
-1. Унизу кожної сторінки студії — смуга з кнопкою «Довідка», а в самому низу
-   лівої навігації — пункт «Довідка» (він є навіть тоді, коли футер за
-   межами екрана).
-2. Сторінка довідки відкривається, кадри видно (не сірі рамки-заглушки),
-   кнопка «English version» перемикає мову всієї студії.
-3. Кнопка «Сховати сутності» тепер прибирає теги З КАНВИ повністю —
-   лишається тільки текст книги; натискання ще раз повертає теги.
+наприкінці сам копіює свіжі кадри в `dist/help/`. Кадр самої сторінки
+(`help-page.png`) лягає в `tmp/`, а не в репозиторій: він важить понад 600 КБ і
+застосунку не потрібен.
 
 ⚠️ **У робочій теці лишається НЕ моє:** `.vscode/settings.json` і некомічені
 `tmp/`, `Claude outputs/`, `desktop.ini`. Не чіпав.
