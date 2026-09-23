@@ -1,5 +1,5 @@
 import { Extension } from '@tiptap/core';
-import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Plugin, PluginKey, TextSelection, type EditorState } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import {
@@ -8,6 +8,7 @@ import {
   textColorOnWhite,
   type CoreEntity,
 } from '../../utils/coreEntities';
+import { positionAfterHidden, textInsertionPoint, type HiddenRange } from '../../utils/entityTagHiding';
 
 export interface EntityTagOptions {
   /**
@@ -20,12 +21,19 @@ export interface EntityTagOptions {
   getEntities: () => CoreEntity[];
   /**
    * Чи показувати сутності авторові. Кнопка приховування (постановка, п. 5)
-   * перемикає саме це: коли вимкнено — жодного чипа й жодного тла, текст
-   * розділу виглядає так, як виглядав би без розмітки взагалі.
+   * перемикає саме це: коли вимкнено — жодного чипа й жодного тла, а САМ ТЕГ
+   * зникає з канви, тож лишається тільки текст книги (див. `hiddenClass`).
    */
   isVisible: () => boolean;
   /** CSS-клас чипа тега — сама стилістика живе в index.css. */
   chipClass: string;
+  /**
+   * CSS-клас прихованого тега. Саме `display: none` ховає текст тега, а не
+   * лише його колір: до 23.09.2026 кнопка «Сховати сутності» прибирала тільки
+   * фарбування, і власник побачив у книзі не текст, а `[/character:Олена]`
+   * сірим — це і був баг, через який з'явився цей режим.
+   */
+  hiddenClass: string;
   /**
    * Мова підказки про сутність (постановка, п. 4: підказка мовою набору).
    * Замикання, а не значення — мова може перемкнутись у розмові, а масив
@@ -43,6 +51,13 @@ interface BuiltDecorations {
   set: DecorationSet;
   /** Скільки сутностей на абзац — ключ: індекс абзацу в документі. */
   perParagraph: { index: number; slugs: string[] }[];
+  /**
+   * Діапазони ПРИХОВАНИХ тегів (порожній масив, коли сутності показані). Потрібні
+   * не для малювання, а для поведінки курсора: у ці межі не можна пускати
+   * ні клік, ні стрілки, ні набраний текст — інакше тег зіпсується непомітно
+   * (див. `src/utils/entityTagHiding.ts`).
+   */
+  hiddenRanges: HiddenRange[];
 }
 
 /**
@@ -64,6 +79,8 @@ function buildDecorations(doc: PMNode, entities: CoreEntity[], options: EntityTa
   const bySlug = new Map(entities.map((e) => [e.slug, e]));
   const decorations: Decoration[] = [];
   const perParagraph: { index: number; slugs: string[] }[] = [];
+  const hiddenRanges: HiddenRange[] = [];
+  const visible = options.isVisible();
   let paragraphIndex = 0;
 
   doc.descendants((node, pos) => {
@@ -120,7 +137,36 @@ function buildDecorations(doc: PMNode, entities: CoreEntity[], options: EntityTa
 
     perParagraph.push({ index, slugs: resolved.map((r) => r.entity.slug) });
 
-    if (!options.isVisible()) return;
+    /*
+     * ПРИХОВАНИЙ РЕЖИМ: ТЕГ ЗНИКАЄ З КАНВИ ПОВНІСТЮ.
+     *
+     * Тут була вада, яку власник знайшов 23.09.2026: кнопка «Сховати
+     * сутності» прибирала ЛИШЕ фарбування, а сам текст тега лишався — сірим,
+     * поміж прозою. Виглядало це як «сутності не зникли, а лише змінили
+     * колір», і саме так власник і сказав.
+     *
+     * Тепер на кожен тег ставиться декорація з класом `display: none`: текст
+     * зникає з очей, але в ДОКУМЕНТІ лишається тим самим рядком. Це і є
+     * вимога постановки: «залишитися лише текст книги» — тег не можна
+     * видаляти, бо він серіалізується в книгу (`manuscriptDoc.ts`) і без нього
+     * зникла б уся розмітка.
+     *
+     * Діапазони збираються в `hiddenRanges` — ними потім коригується
+     * поведінка курсора, щоб набраний символ не ліг у середину невидимого
+     * тега.
+     */
+    if (!visible) {
+      for (const segment of segments) {
+        for (const tag of parseAnyEntityTags(segment.text)) {
+          if (!bySlug.get(tag.slug)) continue;
+          const from = segment.start + tag.start;
+          const to = segment.start + tag.end;
+          hiddenRanges.push({ from, to });
+          decorations.push(Decoration.inline(from, to, { class: options.hiddenClass }));
+        }
+      }
+      return;
+    }
 
     /*
      * ТІЛЬКИ КОЛІР ТЕКСТУ — БЕЗ ЗАЛИВКИ (зміна дизайну, рішення власника
@@ -153,11 +199,17 @@ function buildDecorations(doc: PMNode, entities: CoreEntity[], options: EntityTa
     }
   });
 
-  return { set: DecorationSet.create(doc, decorations), perParagraph };
+  return { set: DecorationSet.create(doc, decorations), perParagraph, hiddenRanges };
 }
 
 export interface EntityTagState extends BuiltDecorations {
   visible: boolean;
+}
+
+/** Діапазони прихованих тегів поточного стану — порожні, коли сутності показані. */
+function hiddenRangesOf(state: EditorState): HiddenRange[] {
+  const value = entityTagKey.getState(state) as EntityTagState | undefined;
+  return value?.hiddenRanges ?? [];
 }
 
 /**
@@ -182,6 +234,7 @@ export const EntityTagPlugin = Extension.create<EntityTagOptions>({
       getEntities: () => [],
       isVisible: () => true,
       chipClass: 'nova-entity-chip',
+      hiddenClass: 'nova-entity-tag-hidden',
       isEnglishUi: () => false,
     };
   },
@@ -209,8 +262,64 @@ export const EntityTagPlugin = Extension.create<EntityTagOptions>({
         props: {
           decorations(state) {
             const value = entityTagKey.getState(state) as EntityTagState | undefined;
-            return value?.visible ? value.set : DecorationSet.empty;
+            /*
+             * Повертаємо набір ЗАВЖДИ. Доти тут стояло `value.visible ? … :
+             * DecorationSet.empty`, і саме це робило прихований режим
+             * «перефарбовуванням»: коли декорацій немає зовсім, тег показує
+             * сам ProseMirror — сірим текстом поміж прози. Тепер у
+             * прихованому режимі в наборі лежать декорації `display: none`,
+             * тож канва показує лише текст книги.
+             */
+            return value?.set ?? DecorationSet.empty;
           },
+
+          /**
+           * Клік усередину прихованого тега переносимо за його межі. Без цього
+           * каретка ставала між `[/` і `character:…]`, і подальший набір
+           * псував тег — невидимо для автора.
+           */
+          handleClick(view, pos) {
+            const ranges = hiddenRangesOf(view.state);
+            const fixed = positionAfterHidden(pos, ranges);
+            if (fixed === pos) return false;
+            view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, fixed)));
+            return true;
+          },
+
+          /**
+           * Набраний текст ніколи не замінює прихований тег. Той випадок, який
+           * це рятує: автор виділив фрагмент, у виділення попав невидимий тег,
+           * і почав писати — звичайна вставка знищила б тег мовчки.
+           */
+          handleTextInput(view, from, to, text) {
+            const ranges = hiddenRangesOf(view.state);
+            const point = textInsertionPoint(from, to, ranges);
+            if (point === from && to === from) return false;
+            view.dispatch(view.state.tr.insertText(text, point));
+            return true;
+          },
+        },
+
+        /**
+         * Остання лінія оборони: якщо каретка все ж опинилася в прихованому
+         * тегу (стрілки, Home/End, виділення мишею, програмна установка —
+         * усе, що не проходить через `handleClick`), виносимо її за межі
+         * тега наступною транзакцією.
+         *
+         * Це саме хук ПЛАГІНА, а не `props`: у ProseMirror `props` описує
+         * поведінку редактора, а `appendTransaction` — доопрацювання вже
+         * застосованих транзакцій, і жити в `props` він не може (перевірено
+         * компілятором: `tsc` цю структуру не приймає).
+         */
+        appendTransaction(transactions, _oldState, newState) {
+          if (!transactions.some((tr) => tr.selectionSet || tr.docChanged)) return null;
+          const ranges = hiddenRangesOf(newState);
+          if (ranges.length === 0) return null;
+          const { from, to } = newState.selection;
+          const fixedFrom = positionAfterHidden(from, ranges);
+          const fixedTo = positionAfterHidden(to, ranges);
+          if (fixedFrom === from && fixedTo === to) return null;
+          return newState.tr.setSelection(TextSelection.create(newState.doc, fixedFrom, fixedTo));
         },
       }),
     ];

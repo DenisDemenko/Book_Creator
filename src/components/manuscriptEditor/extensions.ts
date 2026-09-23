@@ -126,6 +126,7 @@ export function buildManuscriptExtensions(
       getEntities: getCoreEntities || (() => []),
       isVisible: isEntityTagsVisible || (() => true),
       chipClass: 'nova-entity-chip',
+      hiddenClass: 'nova-entity-tag-hidden',
       isEnglishUi: isEnglishUi || (() => false),
     }),
     TagPlugin,

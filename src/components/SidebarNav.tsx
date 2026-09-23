@@ -50,6 +50,8 @@ interface SidebarNavProps {
   currentRole: UserRole;
   /** Відкриває модалку AI-асистента (QuickAiModal) — кнопка живе тут, одразу під «Книга & Текст». */
   onQuickAi: () => void;
+  /** Відкрити сторінку довідки (кнопка внизу навігації). */
+  onOpenHelp: () => void;
 }
 
 /** Ключ localStorage для персистентності стану згорнутого/розгорнутого сайдбара. */
@@ -205,6 +207,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
   logCount = 0,
   currentRole,
   onQuickAi,
+  onOpenHelp,
 }) => {
   const { t } = useLanguage();
   // Акцент «Сонечка»: кольоровий текст навігації слідує за вибраним
@@ -429,6 +432,27 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
           <GlowIntensityControl />
         </div>
       )}
+
+      {/* Кнопка довідки. Стоїть у самому низу навігації з ДВОХ причин:
+          (1) власник просив точку входу «в кінці сторінок» — і футер
+          сторінки є, але в застосунку він опиняється під згином на
+          повноекранних екранах; (2) сторінка довідки потрібна новачку саме
+          тоді, коли він не знає, де що шукати, тож вона мусить бути видима
+          без жодної прокрутки. У згорнутому сайдбарі лишається іконка. */}
+      <div className="border-t border-white/[0.06] p-2 pb-0">
+        <button
+          id="sidebar-help-btn"
+          onClick={onOpenHelp}
+          className={`w-full flex items-center gap-2 py-2 rounded-lg text-slate-400 hover:text-cyan-200 hover:bg-white/[0.04] text-xs font-semibold transition-all ${
+            collapsed ? 'justify-center px-0' : 'px-3'
+          }`}
+          title={t('helpGuide.title')}
+          aria-label={t('helpGuide.footerTitle')}
+        >
+          <BookOpen className="w-4 h-4 shrink-0 text-cyan-400" />
+          {!collapsed && <span className="flex-1 min-w-0 text-left truncate">{t('helpGuide.footerTitle')}</span>}
+        </button>
+      </div>
 
       {/* Перемикач згортання/розгортання сайдбара */}
       <div className="border-t border-white/[0.06] p-2">

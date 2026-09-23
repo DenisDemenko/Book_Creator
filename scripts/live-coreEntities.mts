@@ -407,13 +407,39 @@ try {
   const afterAdd = await countBy('.nova-entity-chip');
   t('натискання сутності додало тег у книгу', afterAdd === beforeAdd + 1, `${beforeAdd} → ${afterAdd}`);
 
-  // Приховування: мітки зникають, текст лишається
+  // Приховування: теги зникають З КАНВИ ПОВНІСТЮ, текст лишається
   await page.click('[data-entity-toggle]');
   await new Promise((r) => setTimeout(r, 500));
   const hiddenChips = await countBy('.nova-entity-chip');
   const hiddenMarks = await countBy('[data-entity-slug]');
   t('кнопка приховала всі мітки', hiddenChips === 0 && hiddenMarks === 0, `${hiddenChips} чипів`);
-  t('кнопка приховала кольори тексту', hiddenMarks === 0, `${hiddenMarks} міток`);
+
+  /*
+   * ВАДА ВЛАСНИКА 23.09.2026: кнопка прибирала лише КОЛІР, а тег лишався
+   * сірим текстом посеред прози («сутності не зникли, а лише змінили
+   * колір»). Перевіряємо саме те, чого не бачили модульні тести: прихований
+   * діапазон не має бути ВИДИМИМ у браузері — `display: none` дає нульову
+   * ширину й висоту, тоді як «сірий текст» давав би нормальні розміри.
+   */
+  const hiddenTagsRendered = await page.evaluate(() => {
+    const hidden = Array.from(document.querySelectorAll('.nova-entity-tag-hidden'));
+    return {
+      count: hidden.length,
+      visible: hidden.filter((el) => el.getClientRects().length > 0).length,
+      width: hidden.reduce((sum, el) => sum + el.getBoundingClientRect().width, 0),
+    };
+  });
+  t('приховані теги є в документі (розмітка не видалена)',
+    hiddenTagsRendered.count >= 118, String(hiddenTagsRendered.count));
+  t('жоден прихований тег не малюється в канві',
+    hiddenTagsRendered.visible === 0 && hiddenTagsRendered.width === 0,
+    JSON.stringify(hiddenTagsRendered));
+
+  const tagsStillInDocument = await page.evaluate(() =>
+    (document.querySelector('.ProseMirror')?.textContent || '').includes('[/project:')
+  );
+  t('у документі теги лишилися (підуть у книгу як є)', tagsStillInDocument);
+
   const stillHasText = await page.evaluate(() => (document.querySelector('.ProseMirror')?.textContent || '').includes('Абзац 1'));
   t('текст книги при цьому лишився на місці', stillHasText);
   const toggleHiddenState = await page.evaluate(() => (document.querySelector('[data-entity-toggle]') as HTMLElement | null)?.getAttribute('data-entity-toggle'));

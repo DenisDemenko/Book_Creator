@@ -41,6 +41,7 @@ import { VersionSnapshotModal } from './components/VersionSnapshotModal';
 import { NotesImportModal } from './components/plugins/NotesImportModal';
 import { CreateBookModal } from './components/CreateBookModal';
 import { SupportChatWidget } from './components/SupportChatWidget';
+import { HelpGuideView } from './components/HelpGuideView';
 import { ImportBookModal } from './components/ImportBookModal';
 import { ImportMaterialsWizardModal } from './components/ImportMaterialsWizardModal';
 import { CollaborationDrawer } from './components/CollaborationDrawer';
@@ -91,7 +92,7 @@ import {
 import { stampBookRevision, isNewerBook, describeRevisionGap } from './utils/bookVersion';
 import { resolveBookAuthor } from './utils/bookAuthor';
 import { otherSessionsOfSameUser } from './utils/deviceSession';
-import { AlertTriangle, CheckCircle2, Radio, Loader2, HardDriveDownload, Mail, LogOut, UserCheck, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Radio, Loader2, HardDriveDownload, Mail, LogOut, UserCheck, XCircle, BookOpen } from 'lucide-react';
 import { useLanguage } from './i18n/LanguageContext';
 
 /** Пауза після останнього натискання клавіші перед автозбереженням. */
@@ -167,6 +168,8 @@ export default function App() {
   const [isRoleModalOpen, setIsRoleModalOpen] = useState<boolean>(false);
   const [isVersionModalOpen, setIsVersionModalOpen] = useState<boolean>(false);
   const [isNotesImportOpen, setIsNotesImportOpen] = useState<boolean>(false);
+  /** Сторінка довідки (кнопка у футері). Стан тут, бо футер — частина оболонки. */
+  const [isHelpOpen, setIsHelpOpen] = useState<boolean>(false);
   const [isCreateBookModalOpen, setIsCreateBookModalOpen] = useState<boolean>(false);
   const [isImportBookModalOpen, setIsImportBookModalOpen] = useState<boolean>(false);
   const [isImportWizardModalOpen, setIsImportWizardModalOpen] = useState<boolean>(false);
@@ -1952,14 +1955,14 @@ export default function App() {
         logCount={logEntries.length}
         currentRole={currentRole}
         onQuickAi={() => setIsQuickAiOpen(true)}
+        onOpenHelp={() => setIsHelpOpen(true)}
       />
 
       {/* Внутрішня межа помилок: падіння одного модуля не забирає з собою
           шапку й навігацію. key={currentTab} скидає межу при переході
           на іншу вкладку, тож застосунок відновлюється сам. */}
       <ErrorBoundary key={currentTab}>
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Експрес-майстер (Wisart Book Crealiry.md §3.4). Прокручується
+      <div className="flex-1 flex flex-col overflow-hidden">        {/* Експрес-майстер (Wisart Book Crealiry.md §3.4). Прокручується
             власним контейнером, бо п'ять кроків не влазять у висоту
             вкладки, а зовнішній контейнер тут із overflow-hidden. */}
         {currentTab === 'express' && (
@@ -2247,6 +2250,29 @@ export default function App() {
           />
         )}
 
+        {/* ── ФУТЕР — «в кінці всіх сторінок студії» (постановка власника
+            23.09.2026). Стоїть саме тут, у оболонці, а не в кожній вкладці:
+            тоді він є на кожному екрані за побудовою, і додати нову сторінку
+            забути його неможливо. `shrink-0`, бо контейнер — flex-col: без
+            цього смуга з'їхала б угору на екранах із власною прокруткою. */}
+        <footer
+          className="shrink-0 border-t border-slate-800 bg-slate-950/80 px-5 py-2 flex items-center justify-between gap-3 text-[11px]"
+          data-help-footer
+        >
+          <span className="text-slate-500 min-w-0 truncate">
+            Nova Studio · {book.title || ''}
+          </span>
+          <button
+            onClick={() => setIsHelpOpen(true)}
+            data-help-open
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-300 font-bold hover:border-cyan-500/60 hover:text-cyan-200 transition-colors shrink-0"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="hidden sm:inline">{t('helpGuide.footerTitle')}:</span>
+            {t('helpGuide.footerBtn')}
+            <span className="hidden md:inline text-slate-500 font-normal">— {t('helpGuide.footerHint')}</span>
+          </button>
+        </footer>
 
       </div>
       </ErrorBoundary>
@@ -2266,6 +2292,10 @@ export default function App() {
           вкладки для нових користувачів. Сам відстежує зміну currentTab
           і показує 3-5 підказок при першому відвідуванні вкладки. */}
       <OnboardingTour currentTab={currentTab} authUser={auth.user} />
+
+      {/* Сторінка довідки (кнопка в футері вище). Поверх студії, а не
+          вкладкою: автор читає її, не втрачаючи місця, де працював. */}
+      <HelpGuideView isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
 
       {/* Панель командної співпраці (чат, учасники, cowork-запрошення) */}
       <CollaborationDrawer

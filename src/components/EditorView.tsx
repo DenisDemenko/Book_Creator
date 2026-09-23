@@ -5750,6 +5750,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
           <div data-tour="editor__5" className="flex border-b border-slate-800 bg-slate-950/80 p-2 gap-1 overflow-x-auto no-scrollbar shrink-0">
             <button
               onClick={() => setRightPanelTab('scene')}
+              data-right-tab="scene"
               className={`flex-1 py-3 px-2 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-all whitespace-nowrap ${
                 rightPanelTab === 'scene'
                   ? '[background-color:var(--sun-acc-20)] [color:var(--sun-soft)] border [border-color:var(--sun-acc-40)]'
@@ -5771,6 +5772,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   : 'text-slate-400 hover:text-slate-200'
               }`}
               title={t('editor.rootTabWorkTextTitle')}
+              data-right-tab="workText"
             >
               <FileText className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
               <span>{t('editor.rootTabWorkText')}</span>
@@ -5787,6 +5789,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   : 'text-slate-400 hover:text-slate-200'
               }`}
               title={t('editor.rootTabWorkAiTitle')}
+              data-right-tab="workAi"
             >
               <Sparkles className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
               <span>{t('editor.rootTabWorkAi')}</span>
@@ -5801,6 +5804,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
               }`}
               title={t('coreEntities.rootTabTitle')}
               data-tour="editor__entities"
+              data-right-tab="entities"
             >
               <Boxes className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
               <span>{t('coreEntities.rootTab')}</span>
