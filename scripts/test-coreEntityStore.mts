@@ -2,7 +2,7 @@
  * Тести реєстру сутностей ядра на сервері: насіння таблиць, читання словника
  * й індекс згадок у чаті. Запуск: npm run test:core-entities-store
  *
- * ЩО ТУТ ГОЛОВНЕ. Числа з документа власника (118 / 88 / 30 / 37) уже
+ * ЩО ТУТ ГОЛОВНЕ. Числа з документа власника (118 / 88 / 30 / 37 + 2 зв'язки з ТЗ = 39) уже
  * перевірені в `test-coreEntities.mts` над самим модулем. Тут перевіряється
  * ІНШЕ, і саме воно ламається тихо: чи доїхав той перелік у таблицю, чи
  * переживає перезапуск, чи прибирає рядки, яких у коді вже немає, і чи
@@ -44,7 +44,7 @@ console.log('\nНасіння реєстру при ініціалізації �
   const entities = handle.prepare('SELECT COUNT(*) AS n FROM core_entities').get() as { n: number };
   const relations = handle.prepare('SELECT COUNT(*) AS n FROM core_entity_relations').get() as { n: number };
   t('у core_entities рівно 118 рядків', entities.n === 118, String(entities.n));
-  t('у core_entity_relations рівно 37 рядків', relations.n === 37, String(relations.n));
+  t('у core_entity_relations рівно 39 рядків', relations.n === 39, String(relations.n));
 
   const groupCounts = handle
     .prepare('SELECT group_id, COUNT(*) AS n FROM core_entities GROUP BY group_id')
@@ -95,11 +95,11 @@ console.log('\nЧитання словника:');
     entities.every((e) => e.registry === 'base' || e.registry === 'critic'));
 
   const relations = await store.listCoreRelations();
-  t('listCoreRelations віддає 37', relations.length === 37, String(relations.length));
+  t('listCoreRelations віддає 39', relations.length === 39, String(relations.length));
 
   const stats = await store.coreEntityStats();
-  t('зведення: 118 сутностей, 37 зв’язків, 12 груп',
-    stats.entities === 118 && stats.relations === 37 && stats.groups === CORE_ENTITY_GROUPS.length,
+  t('зведення: 118 сутностей, 39 зв’язків, 12 груп',
+    stats.entities === 118 && stats.relations === 39 && stats.groups === CORE_ENTITY_GROUPS.length,
     JSON.stringify(stats));
   t('зведення розрізняє базовий реєстр і додаток критики',
     stats.base === 88 && stats.critic === 30, `${stats.base}/${stats.critic}`);
@@ -203,7 +203,7 @@ console.log('\nHTTP-шар:');
   const body = await res.json() as any;
   t('GET /api/core/entities відповідає 200', res.status === 200, String(res.status));
   t('відповідь містить 118 сутностей', body.entities?.length === 118, String(body.entities?.length));
-  t('відповідь містить 37 зв’язків', body.relations?.length === 37, String(body.relations?.length));
+  t('відповідь містить 39 зв’язків', body.relations?.length === 39, String(body.relations?.length));
   t('відповідь містить 12 груп', body.groups?.length === 12, String(body.groups?.length));
   t('ліміт сутностей на абзац віддається клієнту', body.maxPerParagraph === 12, String(body.maxPerParagraph));
   t('формат тега віддається клієнту', typeof body.tagFormat === 'string' && body.tagFormat.includes('['),

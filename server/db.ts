@@ -902,7 +902,7 @@ CREATE TABLE IF NOT EXISTS avoided_thresholds (
 CREATE INDEX IF NOT EXISTS idx_avoided_thresholds_user ON avoided_thresholds(user_id, updated_at DESC);
 
 -- ===========================================================================
--- ЯДРО СУТНОСТЕЙ (реєстр власника, 118 типів + 37 типів зв'язків)
+-- ЯДРО СУТНОСТЕЙ (реєстр власника, 118 типів + 39 типів зв'язків: 37 з PDF + 2 з ТЗ)
 --
 -- НАВІЩО В БАЗІ, ЯКЩО Є КОД. Сам перелік справді живе в коді
 -- (src/utils/coreEntities.ts) — там він читається клієнтом, панеллю,
@@ -937,7 +937,7 @@ CREATE TABLE IF NOT EXISTS core_entity_relations (
   key         TEXT PRIMARY KEY,           -- participates_in
   name_uk     TEXT NOT NULL,
   example     TEXT NOT NULL,
-  registry    TEXT NOT NULL,              -- base | critic
+  registry    TEXT NOT NULL,              -- base | critic | spec (зв'язки з ТЗ)
   sort_order  INTEGER NOT NULL DEFAULT 0,
   updated_at  TEXT NOT NULL
 );
@@ -1111,8 +1111,8 @@ function seedEmotionDictionary(instance: Database): void {
 }
 
 /**
- * Насіння реєстру сутностей ядра — 118 типів і 37 зв'язків із документа
- * власника (див. `src/utils/coreEntities.ts`).
+ * Насіння реєстру сутностей ядра — 118 типів і 39 зв'язків (37 із документа
+ * власника + 2 часові з ТЗ «11 сторінок»; див. `src/utils/coreEntities.ts`).
  *
  * НЕ «ЛИШЕ ЯКЩО ПОРОЖНЬО», на відміну від словника емоцій вище. Словник
  * емоцій — це дані власника, які він може дописувати (є `is_custom`), тож

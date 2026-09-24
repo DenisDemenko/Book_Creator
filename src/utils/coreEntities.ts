@@ -1,5 +1,5 @@
 /**
- * ЯДРО СУТНОСТЕЙ СТУДІЇ — 118 типів сутностей і 37 типів зв'язків.
+ * ЯДРО СУТНОСТЕЙ СТУДІЇ — 118 типів сутностей і 39 типів зв'язків.
  *
  * Джерело істини — документ власника
  * `Fusion_Lab_Studio_Entity_Registry_with_Literary_Critic_UA_EN.pdf` (10 стор.,
@@ -10,7 +10,8 @@
  *   A–I   — базовий реєстр: 88 типів у 9 групах;
  *   J1–J3 — додаток «Літературна критика»: 30 типів у 3 підгрупах;
  *   разом  88 + 30 = **118 типів сутностей**;
- *   зв'язки: 21 базовий + 16 критичних = **37 типів зв'язків**.
+ *   зв'язки: 21 базовий + 16 критичних = 37 із документа, плюс 2 часові з ТЗ
+ *   «11 сторінок» (`follows`, `overlaps`, див. `spec` нижче) = **39 типів**.
  * Група «K» документа (id, project_id, type, slug, color, attributes…)
  * переліком типів НЕ є — це спільний службовий набір полів, тож окремою
  * сутністю тут не заводиться: він реалізований самою схемою реєстру
@@ -63,13 +64,20 @@ export interface CoreEntity {
   registry: CoreEntityRegistry;
 }
 
+/**
+ * Походження зв'язку: два документи власника (`base`, `critic`) або ТЗ
+ * «Fusion Lab Studio — 11 окремих сторінок» (`spec`). Сутностей `spec` немає —
+ * це лише для зв'язків.
+ */
+export type CoreRelationRegistry = CoreEntityRegistry | 'spec';
+
 export interface CoreEntityRelation {
   /** `participates_in` — як у документі, без слеша. */
   key: string;
   nameUk: string;
   /** Приклад застосування з документа: «Сергій → подія». */
   example: string;
-  registry: CoreEntityRegistry;
+  registry: CoreRelationRegistry;
 }
 
 /**
@@ -271,7 +279,7 @@ export const CORE_ENTITIES: CoreEntity[] = ENTITY_ROWS.map(expand);
  * `kind='relation'` у тій самій — інакше «118 сутностей» перестало б бути
  * правдою в тому ж запиті.
  */
-const RELATION_ROWS: [key: string, nameUk: string, example: string, registry: CoreEntityRegistry][] = [
+const RELATION_ROWS: [key: string, nameUk: string, example: string, registry: CoreRelationRegistry][] = [
   ['contains', 'Містить', 'Глава → сцена', 'base'],
   ['part_of', 'Є частиною', 'Сцена → сюжетна лінія', 'base'],
   ['participates_in', 'Бере участь', 'Сергій → подія', 'base'],
@@ -309,6 +317,14 @@ const RELATION_ROWS: [key: string, nameUk: string, example: string, registry: Co
   ['flags_issue', 'позначає проблему', '/critical-finding → /coherence-issue', 'critic'],
   ['recommends', 'рекомендує', '/critical-finding → /critical-recommendation', 'critic'],
   ['addresses_issue', 'усуває або розглядає', '/revision-outcome → /critical-finding', 'critic'],
+
+  // Часові зв'язки з ТЗ «11 окремих сторінок», сторінка 6 «Хронологія»:
+  // «Зв'язки precedes, overlaps, follows». У PDF-реєстрі є лише `precedes`;
+  // `follows` і `overlaps` додано за рішенням власника 24.09.2026 (запис #238),
+  // до оновлення PDF. `follows` — обернений до `precedes`; `overlaps` —
+  // події, чиї інтервали часу світу перетинаються.
+  ['follows', 'Слідує за', 'Подія B → подія A', 'spec'],
+  ['overlaps', 'Перекривається в часі', '/event → /event', 'spec'],
 ];
 
 export const CORE_ENTITY_RELATIONS: CoreEntityRelation[] = RELATION_ROWS.map(
@@ -317,8 +333,10 @@ export const CORE_ENTITY_RELATIONS: CoreEntityRelation[] = RELATION_ROWS.map(
 
 /** Скільки саме сутностей мусить бути в реєстрі — охорона від випадкового видалення рядка. */
 export const CORE_ENTITY_COUNT = 118;
-/** Скількох типів зв'язків — те саме. */
-export const CORE_RELATION_COUNT = 37;
+/** Скількох типів зв'язків — те саме: 37 із документів + 2 з ТЗ «11 сторінок». */
+export const CORE_RELATION_COUNT = 39;
+/** Зв'язки, додані з ТЗ «11 сторінок» (`follows`, `overlaps`), — не з PDF-реєстру. */
+export const CORE_RELATION_SPEC_COUNT = 2;
 /** Базовий реєстр без додатка критики — для перевірок походження запису. */
 export const CORE_ENTITY_BASE_COUNT = 88;
 /** Додаток «Літературна критика». */

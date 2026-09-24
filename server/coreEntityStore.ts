@@ -4,7 +4,7 @@
  * ДВІ РІЗНІ РЕЧІ В ОДНОМУ ФАЙЛІ, І ЦЕ НАВМИСНО.
  *
  *   1. СЛОВНИК (core_entities / core_entity_relations) — 118 типів сутностей
- *      і 37 типів зв'язків із документа власника. Він ЗАВЖДИ є: якщо SQLite
+ *      і 39 типів зв'язків (37 із документа власника + 2 часові з ТЗ «11 сторінок»). Він ЗАВЖДИ є: якщо SQLite
  *      недоступний, дані беруться з того самого модуля, яким ця таблиця
  *      засіяна (`src/utils/coreEntities.ts`). Тому тут немає `requireDb()`,
  *      як у решті сховищ: відсутність бази не робить словник недоступним, а
@@ -54,7 +54,8 @@ export interface StoredCoreRelation {
   key: string;
   nameUk: string;
   example: string;
-  registry: 'base' | 'critic';
+  /** `spec` — зв'язки з ТЗ «11 сторінок» (`follows`, `overlaps`), запис #238. */
+  registry: 'base' | 'critic' | 'spec';
 }
 
 export interface StoredChatMessageEntity {
@@ -134,7 +135,7 @@ export async function listCoreRelations(): Promise<StoredCoreRelation[]> {
       key: r.key,
       nameUk: r.name_uk,
       example: r.example,
-      registry: r.registry === 'critic' ? ('critic' as const) : ('base' as const),
+      registry: r.registry === 'critic' ? ('critic' as const) : r.registry === 'spec' ? ('spec' as const) : ('base' as const),
     }));
   } catch (err) {
     console.warn('[coreEntityStore] Читання core_entity_relations не вдалося, віддаю з коду:', err);

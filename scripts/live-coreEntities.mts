@@ -177,7 +177,7 @@ console.log('\nСервер: реєстр і тестова книга');
   const body = (await res.json()) as any;
   t('GET /api/core/entities → 200', res.status === 200, String(res.status));
   t('118 сутностей у відповіді', body.entities?.length === 118, String(body.entities?.length));
-  t('37 зв’язків у відповіді', body.relations?.length === 37, String(body.relations?.length));
+  t('39 зв’язків у відповіді', body.relations?.length === 39, String(body.relations?.length));
   t('12 груп у відповіді', body.groups?.length === 12, String(body.groups?.length));
 
   // Книга з усіма 118 тегами їде на сервер і повертається БЕЗ ВТРАТ.
