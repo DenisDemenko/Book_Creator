@@ -101,9 +101,10 @@ remote перевірити можна, запушити — ні**. Робоч�
 > прохання власника** (AGENTS.md), тому між сесіями тут завжди щось лежить —
 > і наступна сесія має знати, що саме, бо `git log` вона не памʼятає.
 
-## Стан на 24.09.2026 (сесія #01) — ⏳ НЕ запушено: WriterScan (#234), блок інструментів (#235), «Сховати сутності» (#236), сутності в тренажерах (#237), плани й рішення (#238–#241), безпека (#242–#243)
+## Стан на 24.09.2026 (сесія #01, пуш зроблено) — ✅ нічого не лишилось: #234–#245 у `origin` і `production` (`1c5a91d`)
 
-**Book_Creality (Студія), гілка `master` попереду `origin`/`production` на 12 комітів:**
+**Book_Creality (Студія), гілка `master` = `origin/master` = `production/master`
+= `1c5a91d` (14 комітів понад `c0da350`):**
 
 - `541d38c` — #234, код: зовнішній API WriterScan (`server/external/*`,
   таблиці в `server/db.ts`, `server.ts`, `ScanInboxPanel.tsx`, контракт
@@ -130,15 +131,22 @@ remote перевірити можна, запушити — ні**. Робоч�
 - `49080fa` — #242–#243, код: WebSocket за квитком (`server/realtimeAuth.ts`,
   `server.ts`, `useRealtimeSync.ts`), право `canUseAi` на всіх 23 маршрутах ШІ
   (`server.ts`, `server/auth.ts`), `test:realtime-auth`, `live:realtime-auth`;
-- наступний коміт `docs(log)` — записи #242–#243, цей розділ, `task.md`.
+- `855e531` — #242–#243, журнал: записи про безпеку, `task.md` (Т0.1, Т0.2) і
+  цей розділ;
+- `94214a3` — #244–#245, код: «чиє» (`@Ім'я`) і поля значення
+  (`coreEntities.ts`: `parseEntityValue`, `entityValueTooltip`;
+  `EntityTagPlugin.ts`, `EntitySlashMenu.tsx`, `sutnosty.md`,
+  `test:tag-corpus`) і «Знайти й замінити», що розрізняє текст і теги
+  (`searchScope.ts`, `coreEntities.ts`: `entityTagSpans`, `BookSearchModal.tsx`,
+  `test:book-search`), `live:core-entities` +13;
+- `1c5a91d` — #244–#245, журнал: записи й покажчик (245 записів), цей розділ.
+  Обидва коміти — робота сесії Claude 24.09.2026 #01, закомічена окремо від
+  чужого (AGENTS.md) з трейлером `Co-Authored-By: Claude`. Робочого дерева не
+  чіпано: код закомічено як є.
 
-**Пуш (робить власник):**
-
-```powershell
-cd D:\Rama\Book_Creality
-git push origin master
-git push production master
-```
+**Пуш зроблено 24.09.2026** (сесія GitHub Copilot, на пряме прохання власника):
+`origin` → `c0da350..1c5a91d`, `production` → те саме. Хук перед пушем пройшов:
+245 записів, 14 комітів, кожне посилання на журнал розвʼязується.
 
 **Railway перезбере Студію сам.** Таблиці WriterScan створюються при старті —
 окремої міграції не треба. Що перевірити на проді:
@@ -191,6 +199,16 @@ git push production master
 16. Необов'язково: змінна `REALTIME_TICKET_SECRET` на Railway (без неї ключ
     квитків випадковий на кожен запуск — цього достатньо для одного процесу).
 
+*#244–#245 Теги й пошук*
+17. Слеш-меню (`/emotion:` → другий крок) показує «Формат: … · чиє — @Ім'я»;
+    у тексті `[/emotion:страх — 7 · @Анна]` підказка чипа містить «Чиє: Анна» і
+    поля. Живцем це бачила лише сесія-автор (`live:core-entities` 43/0) — інші
+    прогін не повторювали.
+18. «Знайти й замінити» у книзі з тегами: лічильник каже, скільки збігів у
+    тегах; типово замінюється **лише текст**, перемикач «лише теги»
+    перейменовує тільки теги (без нього «Замінити все» псувало
+    `[/character:Олена]`).
+
 **Перед комітами прогнано:** `tsc` 0, `vite build` OK, `esbuild server.ts` OK,
 `test:external-api` 100/0, `test:tool-dock` 59/0, `live:tool-dock` 35/0
 (у хмарній пісочниці, Chromium), `test:editor-toolbar` 59/0,
@@ -200,7 +218,13 @@ git push production master
 `test:entity-tag-decorations` 23/0, `test:mastery-entities` 25/0,
 `live:mastery-entities` 22/0 і `live:core-entities` 42/0 (Chromium, хмара),
 `test:core-entities` 80/0, `test:core-entity-export` 32/0, `test:pdf` 82/0,
-`test:core-ai` 52/0.
+`test:core-ai` 52/0. **Перед пушем 24.09.2026 (сесія GitHub Copilot, для
+#244–#245) прогнано:** `tsc --noEmit` 0, `npm run build` OK,
+`test:tag-corpus` 72/0 (новий), `test:core-entities` 81/0,
+`test:core-entity-export` 32/0, `test:slash-trigger` 56/0,
+`test:entity-tag-hiding` 19/0, `test:entity-tag-decorations` 23/0,
+`test:book-search` 16/0. `test:journal` 75/1 — відомий борг «покажчик
+компактний»: `log.md` ≈ 202 КБ при межі 120 КБ (не від цієї роботи).
 
 ⚠️ **У робочій теці лишається НЕ моє:** `.vscode/settings.json` і некомічені
 `tmp/`, `Claude outputs/`, `desktop.ini`. Не чіпав.
