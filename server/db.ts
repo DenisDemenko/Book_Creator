@@ -606,6 +606,48 @@ CREATE TABLE IF NOT EXISTS media_assets (
 );
 CREATE INDEX IF NOT EXISTS idx_media_assets_owner ON media_assets(owner_id, created_at DESC);
 
+-- Зовнішній API для застосунків автора (WriterScan — фото сторінки з телефону).
+--
+-- Токен — особистий і довгоживучий, як Personal Access Token: автор створює
+-- його в Студії й вставляє в застосунок. У базі лише SHA-256 хеш: сам токен
+-- показується один раз і більше ніде не зберігається, тож витік бази не
+-- видає робочих токенів. prefix — перші символи для впізнавання в списку.
+CREATE TABLE IF NOT EXISTS external_api_tokens (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL,
+  name          TEXT NOT NULL,
+  token_hash    TEXT NOT NULL UNIQUE,
+  prefix        TEXT NOT NULL,
+  created_at    TEXT NOT NULL,
+  last_used_at  TEXT,
+  revoked_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_external_api_tokens_user ON external_api_tokens(user_id, created_at DESC);
+
+-- Скани сторінок із зовнішнього застосунку. Скан НЕ пише в книгу сам: книга
+-- живе в браузері автора (IndexedDB), а серверна копія — лише дзеркало, яке
+-- наступне збереження з браузера перезаписало б. Тому скан лягає у «Вхідні»
+-- медіатеки, і вже автор у Студії вставляє його в главу AI-чернеткою.
+CREATE TABLE IF NOT EXISTS external_scans (
+  id               TEXT PRIMARY KEY,
+  owner_id         TEXT NOT NULL,
+  book_id          TEXT NOT NULL,
+  asset_id         TEXT NOT NULL,
+  image_url        TEXT NOT NULL,
+  status           TEXT NOT NULL,       -- processing | recognized | failed | submitted | inserted | dismissed
+  recognized_text  TEXT NOT NULL DEFAULT '',
+  text             TEXT NOT NULL DEFAULT '',
+  chapter_id       TEXT,
+  chapter_title    TEXT,
+  section_title    TEXT,
+  model_id         TEXT,
+  error            TEXT,
+  token_id         TEXT,
+  created_at       TEXT NOT NULL,
+  updated_at       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_external_scans_owner ON external_scans(owner_id, status, created_at DESC);
+
 -- РЎР°РјРѕСЃС‚С–Р№РЅС– РЅР°РІС‡Р°Р»СЊРЅС– РєСѓСЂСЃРё (docs/tech-spec-course-wizard-2026.md).
 -- РљСѓСЂСЃ РЅРµ РїСЂРёРІРјСЏР·Р°РЅРёР№ РґРѕ РєРЅРёРіРё: СЂРµРјС–СЃРЅРёС‡С– РєСѓСЂСЃРё Р±СѓРІР°СЋС‚СЊ Р±РµР· СЂСѓРєРѕРїРёСЃСѓ.
 -- Р’РµСЃСЊ РІРјС–СЃС‚ (РјРѕРґСѓР»С–, СѓСЂРѕРєРё, Р·Р°РІРґР°РЅРЅСЏ, РЅР°РІРёС‡РєРё) — JSON Сѓ payload.

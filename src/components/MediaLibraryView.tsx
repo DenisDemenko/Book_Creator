@@ -31,6 +31,7 @@ import {
   type MediaSortMethod,
 } from '../utils/mediaSort';
 import { MediaGenerationPanel } from './MediaGenerationPanel';
+import { ScanInboxPanel } from './ScanInboxPanel';
 import { DescribeCharacterModal } from './DescribeCharacterModal';
 import { loadInstructionDraft, saveInstructionDraft } from '../utils/instructionDraft';
 import {
@@ -855,6 +856,11 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
           </div>
         </div>
       </div>
+
+      {/* WriterScan: вхідні скани з телефону й підключення застосунку. */}
+      {isRegistered && (
+        <ScanInboxPanel book={book} onUpdateBook={onUpdateBook} onRevealChapterText={onRevealChapterText} showToast={showToast} />
+      )}
 
       {/* Media Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" data-tour="media__3">

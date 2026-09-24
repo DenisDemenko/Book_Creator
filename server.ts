@@ -59,6 +59,9 @@ import { registerProcurementRoutes } from './server/procurementRoutes';
 import { registerSupportChatRoutes } from './server/supportChatRoutes';
 import { registerChatRoutes, CHAT_USAGE_CONTEXT } from './server/chatRoutes';
 import { registerApiKeysRoutes } from './server/apiKeysRoutes';
+import { registerExternalApiRoutes } from './server/external/externalApiRoutes';
+import { recognizeScanWithCoreVision } from './server/external/scanRecognizer';
+import { checkAndRecordStorageUpload } from './server/mediaStorage';
 import { registerGitHistoryRoutes } from './server/gitHistoryRoutes';
 import { registerGitCommandRoutes } from './server/gitCommandRoutes';
 import { registerExpressRoutes } from './server/expressRoutes';
@@ -353,6 +356,13 @@ async function startServer() {
   registerUsageRoutes(app);
   registerSubscriptionRoutes(app);
   registerMediaRoutes(app);
+  // Зовнішній API (WriterScan — фото сторінки з телефону → «Вхідні» медіатеки).
+  // Токен застосунку, а не cookie; розпізнавання — модель зору ядра AI.
+  registerExternalApiRoutes(app, {
+    recognize: recognizeScanWithCoreVision,
+    checkStorage: ({ userId, email, role, bytes, bookId, filename }) =>
+      checkAndRecordStorageUpload(userId, email, role, bytes, bookId, filename),
+  });
   registerKnowledgeRoutes(app);
   registerCollaborationRoutes(app);
 registerCourseRoutes(app);
