@@ -24,6 +24,8 @@ import {
   runMigrations,
 } from './migrate';
 import { PgCoreRepository } from './pgRepository';
+import { PgJobStore } from './jobs/pgJobStore';
+import { JobQueue } from './jobs/queue';
 import type { CoreRepository } from './types';
 
 export type CoreState = 'disabled' | 'starting' | 'ready' | 'failed';
@@ -41,6 +43,8 @@ let status: CoreStatusInfo = {
   message: 'Ядро не запускалось',
 };
 let repository: CoreRepository | null = null;
+let jobQueue: JobQueue | null = null;
+let stopWorker: (() => void) | null = null;
 let startPromise: Promise<CoreStatusInfo> | null = null;
 /** Пауза перед повторною спробою, якщо база ядра недоступна. */
 const RETRY_MS = 60_000;
@@ -88,6 +92,11 @@ export function initCore(log: (msg: string) => void = (m) => console.log(m)): Pr
       const migrations = loadMigrations(resolveMigrationsDir());
       const res = await runMigrations(pool, migrations, log);
       repository = new PgCoreRepository(pool, true);
+      // Фонова черга ядра (Т0.7). Види задач реєструють модулі, що їх
+      // потребують (`getCoreJobQueue().register(...)`: core_sync — Т0.6,
+      // ролі AI — Т0.9); воркер бере лише зареєстровані види.
+      jobQueue = new JobQueue(new PgJobStore(pool));
+      stopWorker = jobQueue.start().stop;
       status = {
         state: 'ready',
         schemaVersion: res.schemaVersion,
@@ -124,7 +133,15 @@ export function getCoreRepository(): CoreRepository | null {
   return repository;
 }
 
+/** Черга фонових задач ядра або null, якщо ядро вимкнене. */
+export function getCoreJobQueue(): JobQueue | null {
+  return jobQueue;
+}
+
 export async function shutdownCore(): Promise<void> {
+  stopWorker?.();
+  stopWorker = null;
+  jobQueue = null;
   const r = repository;
   repository = null;
   startPromise = null;
