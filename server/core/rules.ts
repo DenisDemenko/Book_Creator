@@ -181,10 +181,10 @@ export function checkNewFinding(input: FindingInput): CoreStatus {
   if (ai && status !== 'suggested') {
     throw new CoreRuleError('ai_suggests_only', 'Висновок AI — лише пропозиція (suggested); затверджує автор');
   }
-  if (ai && !(input.sourceParagraphIds ?? []).length && !input.insufficientData) {
+  if (ai && !(input.sourceParagraphIds ?? []).length && !(input.sourceAssetIds ?? []).length && !input.insufficientData) {
     throw new CoreRuleError(
       'evidence_required',
-      'Висновок AI без доказу не зберігається: вкажіть абзаци-джерела або позначку «недостатньо даних»',
+      'Висновок AI без доказу не зберігається: вкажіть абзаци чи зображення-джерела або позначку «недостатньо даних»',
     );
   }
   return status;

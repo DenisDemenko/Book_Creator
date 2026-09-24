@@ -489,6 +489,7 @@ export class MemoryCoreRepository implements CoreRepository {
       kind: input.kind,
       payload: clone(input.payload ?? {}),
       sourceParagraphIds: [...(input.sourceParagraphIds ?? [])],
+      sourceAssetIds: [...(input.sourceAssetIds ?? [])],
       sourceRevision: input.sourceRevision ?? null,
       validStoryTime: input.validStoryTime ? clone(input.validStoryTime) : null,
       status,

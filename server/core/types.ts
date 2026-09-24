@@ -175,6 +175,8 @@ export interface FindingRow {
   kind: string;
   payload: Record<string, unknown>;
   sourceParagraphIds: string[];
+  /** Ілюстрації-докази (AI-3, Т0.9): id з медіатеки. */
+  sourceAssetIds: string[];
   sourceRevision: number | null;
   validStoryTime: StoryTimeRange | null;
   status: CoreStatus;
@@ -294,6 +296,7 @@ export interface FindingInput {
   kind: string;
   payload?: Record<string, unknown>;
   sourceParagraphIds?: string[];
+  sourceAssetIds?: string[];
   sourceRevision?: number | null;
   validStoryTime?: StoryTimeRange | null;
   status?: CoreStatus;

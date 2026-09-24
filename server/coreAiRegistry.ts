@@ -123,6 +123,12 @@ import {
   renderInstructionElaborationUserTemplate,
 } from './instructionElaborationPrompt';
 
+import {
+  CORE_AI_ROLE_PLACEHOLDERS,
+  factoryCoreAiRoleTemplate,
+  renderCoreAiRoleTemplate,
+} from './core/ai/rolePrompts';
+
 /** Ключ у таблиці `meta`, під яким лежить ЄДИНИЙ адмінський шар усіх модулів ядра. */
 export const CORE_PROMPT_TEMPLATES_META_KEY = 'prompt_templates_core_admin';
 
@@ -152,6 +158,11 @@ export const CORE_MODULE_KEYS = [
   'emotionMastery',
   'threshold',
   'instructionElaboration',
+  // Три ролі AI семантичного ядра (Т0.9, server/core/ai/rolePrompts.ts):
+  // окремий шаблон і окрема модель у кожної — роль замінюється незалежно.
+  'coreAi1Classify',
+  'coreAi2Analysis',
+  'coreAi3Visual',
 ] as const;
 
 export type CoreModuleKey = (typeof CORE_MODULE_KEYS)[number];
@@ -165,7 +176,7 @@ export type CoreModuleKey = (typeof CORE_MODULE_KEYS)[number];
  * `deepseek-v4-pro`) модуль, який без зору не працює: інакше помилку бачив
  * би автор, а причина лежала б у налаштуваннях адміністратора.
  */
-export const CORE_VISION_MODULES: ReadonlySet<CoreModuleKey> = new Set<CoreModuleKey>(['textFromImage']);
+export const CORE_VISION_MODULES: ReadonlySet<CoreModuleKey> = new Set<CoreModuleKey>(['textFromImage', 'coreAi3Visual']);
 
 export interface CorePromptTemplate {
   system: string;
@@ -247,6 +258,9 @@ export const CORE_MODULE_PLACEHOLDERS: Record<CoreModuleKey, string[]> = {
   ],
   threshold: ['{НАЗВА_КНИГИ}', '{ЖАНР}', '{ПЕРСОНАЖ}', '{ПРОФІЛЬ_ПЕРСОНАЖА}', '{ОПИС_СЦЕНИ}', '{ФРАГМЕНТ}', '{МОВА}'],
   instructionElaboration: ['{ТИП_ІНСТРУКЦІЇ}', '{НАЗВА}', '{ОПИС}', '{МАТЕРІАЛИ}', '{ІНСТРУМЕНТИ}', '{КРОКИ}'],
+  coreAi1Classify: CORE_AI_ROLE_PLACEHOLDERS,
+  coreAi2Analysis: CORE_AI_ROLE_PLACEHOLDERS,
+  coreAi3Visual: CORE_AI_ROLE_PLACEHOLDERS,
 };
 
 /** Чи модуль повертає JSON за жорсткою схемою (схема — readonly-текст у конструкторі, не редагується). */
@@ -275,6 +289,9 @@ export const CORE_MODULE_HAS_JSON_SCHEMA: Record<CoreModuleKey, boolean> = {
   emotionMastery: true,
   threshold: true,
   instructionElaboration: true,
+  coreAi1Classify: true,
+  coreAi2Analysis: true,
+  coreAi3Visual: true,
 };
 
 /**
@@ -380,6 +397,10 @@ export function factoryCoreTemplate(module: CoreModuleKey): CorePromptTemplate {
         system: factoryInstructionElaborationSystemTemplate(),
         user: factoryInstructionElaborationUserTemplate(),
       };
+    case 'coreAi1Classify':
+    case 'coreAi2Analysis':
+    case 'coreAi3Visual':
+      return factoryCoreAiRoleTemplate(module);
   }
 }
 
@@ -727,5 +748,14 @@ export function renderCoreTemplate(
         user: renderInstructionElaborationUserTemplate(template.user, values),
       };
     }
+    case 'coreAi1Classify':
+    case 'coreAi2Analysis':
+    case 'coreAi3Visual':
+      return renderCoreAiRoleTemplate(template, {
+        task: fields.coreTask,
+        paragraphs: fields.coreParagraphs,
+        images: fields.coreImages,
+        language: fields.language,
+      });
   }
 }

@@ -191,6 +191,7 @@ function toFinding(r: any): FindingRow {
     kind: r.kind,
     payload: r.payload ?? {},
     sourceParagraphIds: r.source_paragraph_ids ?? [],
+    sourceAssetIds: r.source_asset_ids ?? [],
     sourceRevision: r.source_revision,
     validStoryTime: r.valid_story_time,
     status: r.status,
@@ -775,8 +776,8 @@ export class PgCoreRepository implements CoreRepository {
       const { rows } = await c.query(
         `INSERT INTO analysis_findings
            (project_id, run_id, entity_id, kind, payload, source_paragraph_ids, source_revision,
-            valid_story_time, status, insufficient_data, visibility, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+            valid_story_time, status, insufficient_data, visibility, created_by, source_asset_ids)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
         [
           input.projectId,
           input.runId ?? null,
@@ -790,6 +791,7 @@ export class PgCoreRepository implements CoreRepository {
           !!input.insufficientData,
           input.visibility ?? 'project',
           input.createdBy,
+          input.sourceAssetIds ?? [],
         ],
       );
       const row = toFinding(rows[0]);

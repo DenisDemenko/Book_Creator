@@ -197,6 +197,8 @@ import { normalizePromptEntities, buildCoachEntityInstruction, normalizeEntityFe
 import { formatManuscriptWithClaude, anthropicConfig, ClaudeManuscriptError, MAX_MANUSCRIPT_CHARS } from './server/claudeManuscript';
 import { initCore, getCoreStatus, shutdownCore, registerCoreJobKind, getCoreRepository } from './server/core';
 import { CORE_SYNC_KIND, coreSyncJobKind } from './server/core/sync';
+import { AI_ROLE_JOB_KIND, aiRoleJobKind } from './server/core/ai/job';
+import { aiRoleGenerateViaCore, loadCoreAiRoleTemplate } from './server/core/ai/generate';
 import { purgeExpiredSessions, initStore, getUserStyle, upsertUserStyle, deleteUserStyle, listUserApiKeys, getUserPromptTemplates, upsertUserPromptTemplates, deleteUserPromptTemplates, getAppSetting, setAppSetting } from './server/store';
 
 // Логування витрат (logImageUsage/logTextUsage) переїхало в server/aiCore.ts —
@@ -5982,6 +5984,17 @@ ${JSON.stringify(bookContext || {}, null, 2)}
   // Синхронізація книги з ядром (Т0.6) — фонова задача, яку ставить
   // збереження книги (server/bookRoutes.ts).
   registerCoreJobKind(CORE_SYNC_KIND, coreSyncJobKind({ repo: getCoreRepository, loadBook: getStoredBookForRealtime }));
+  // Три ролі AI ядра (Т0.9): прогін ролі над абзацами — фоновою задачею з
+  // бюджетом проєкту; модель кожної ролі — з прив'язки «модуль → модель» адміна.
+  registerCoreJobKind(
+    AI_ROLE_JOB_KIND,
+    aiRoleJobKind({
+      repo: getCoreRepository,
+      generate: aiRoleGenerateViaCore,
+      resolveModel: (module) => resolveModuleModelId(module),
+      loadTemplate: loadCoreAiRoleTemplate,
+    }),
+  );
   void initCore();
 
   // Зупиняємо фонові процеси модуля публікації по сигналу платформи: задачі,
