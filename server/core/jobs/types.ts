@@ -61,6 +61,12 @@ export interface EnqueueInput {
   estimatedTokens?: number;
   /** Кошик бюджету, крім загального проєктного: 'simulation:<id>'. */
   budgetScope?: string;
+  /**
+   * Не раніше ніж через стільки мс. Для задач, що йдуть за частими подіями
+   * (синхронізація після автозбереження): кілька збережень поспіль
+   * встигають злитися в одну задачу, поки вона чекає.
+   */
+  delayMs?: number;
   createdBy: CoreActor;
 }
 
@@ -186,6 +192,9 @@ export function checkEnqueueInput(input: EnqueueInput): void {
   }
   if (input.maxAttempts !== undefined && (!Number.isInteger(input.maxAttempts) || input.maxAttempts < 1)) {
     throw new JobRejectedError('bad_input', 'Кількість спроб має бути цілим числом від 1');
+  }
+  if (input.delayMs !== undefined && (!Number.isFinite(input.delayMs) || input.delayMs < 0)) {
+    throw new JobRejectedError('bad_input', 'Відкладення задачі не може бути від\'ємним');
   }
   if (input.estimatedTokens !== undefined && (!Number.isFinite(input.estimatedTokens) || input.estimatedTokens < 0)) {
     throw new JobRejectedError('bad_input', 'Оцінка токенів не може бути від\'ємною');

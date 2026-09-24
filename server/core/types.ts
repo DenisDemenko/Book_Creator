@@ -48,6 +48,8 @@ export interface DocumentRow {
   order: number;
   title: string;
   version: number;
+  /** Розділу/глави більше немає в книзі (Т0.6). */
+  deletedAt: string | null;
   updatedAt: string;
 }
 
@@ -61,6 +63,8 @@ export interface ParagraphRow {
   textHash: string;
   version: number;
   deletedAt: string | null;
+  /** Номер у редакторі, якщо відрізняється від id (копія розділу з тими самими номерами, Т0.6). */
+  editorPid: string | null;
   updatedAt: string;
 }
 
@@ -82,6 +86,8 @@ export interface EntityRow {
   canonical: Record<string, unknown>;
   status: CoreStatus;
   version: number;
+  /** Зв'язок з об'єктом Студії: `studio:character:<id>` (Т0.6). */
+  externalRef: string | null;
   createdBy: CoreActor;
   createdAt: string;
   updatedAt: string;
@@ -206,6 +212,7 @@ export interface ParagraphInput {
   order: number;
   kind: ParagraphKind;
   text: string;
+  editorPid?: string | null;
 }
 
 export interface EntityInput {
@@ -214,12 +221,33 @@ export interface EntityInput {
   name: string;
   canonical?: Record<string, unknown>;
   status?: CoreStatus;
+  externalRef?: string | null;
   createdBy: CoreActor;
 }
 
 export interface EntityPatch {
   name?: string;
   canonical?: Record<string, unknown>;
+  externalRef?: string | null;
+}
+
+export interface NotificationRow {
+  id: string;
+  projectId: string;
+  kind: string;
+  message: string;
+  paragraphIds: string[];
+  payload: Record<string, unknown>;
+  createdAt: string;
+  readAt: string | null;
+}
+
+export interface NotificationInput {
+  projectId: string;
+  kind: string;
+  message: string;
+  paragraphIds?: string[];
+  payload?: Record<string, unknown>;
 }
 
 export interface MentionInput {
@@ -294,8 +322,11 @@ export interface CoreRepository {
   removeMember(projectId: string, userId: string): Promise<void>;
   getMemberRole(projectId: string, userId: string): Promise<MemberRole | null>;
 
+  /** Створює або оновлює документ; видалений документ повертається в книгу. */
   upsertDocument(input: DocumentInput): Promise<DocumentRow>;
+  /** Усі документи, зокрема видалені (`deletedAt`). */
   listDocuments(projectId: string): Promise<DocumentRow[]>;
+  markDocumentDeleted(projectId: string, id: string): Promise<boolean>;
 
   /**
    * Новий абзац — версія 1. Той самий текст — нічого не пише (changed=false),
@@ -307,10 +338,13 @@ export interface CoreRepository {
   getParagraph(projectId: string, id: string): Promise<ParagraphRow | null>;
   /** Лише живі абзаци, у порядку документа. */
   listParagraphs(projectId: string, documentId: string): Promise<ParagraphRow[]>;
+  /** Усі абзаци проєкту, зокрема видалені, — для звірки під час синхронізації. */
+  listAllParagraphs(projectId: string): Promise<ParagraphRow[]>;
   listParagraphVersions(projectId: string, id: string): Promise<ParagraphVersionRow[]>;
 
   createEntity(input: EntityInput): Promise<EntityRow>;
   getEntity(projectId: string, id: string): Promise<EntityRow | null>;
+  findEntityByExternalRef(projectId: string, type: string, externalRef: string): Promise<EntityRow | null>;
   listEntities(projectId: string, type?: string): Promise<EntityRow[]>;
   updateEntity(projectId: string, id: string, patch: EntityPatch, actor: CoreActor, reason?: string): Promise<EntityRow>;
   setEntityStatus(projectId: string, id: string, status: CoreStatus, actor: CoreActor, reason?: string): Promise<EntityRow>;
@@ -340,6 +374,9 @@ export interface CoreRepository {
   markFindingsNeedReview(projectId: string, paragraphIds: string[]): Promise<number>;
   listFindings(projectId: string, filter?: { entityId?: string; status?: CoreStatus }): Promise<FindingRow[]>;
   listFindingVersions(projectId: string, id: string): Promise<VersionRow<FindingRow>[]>;
+
+  addNotification(input: NotificationInput): Promise<NotificationRow>;
+  listNotifications(projectId: string, limit?: number): Promise<NotificationRow[]>;
 
   close(): Promise<void>;
 }

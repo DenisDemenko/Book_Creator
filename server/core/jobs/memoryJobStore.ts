@@ -88,6 +88,7 @@ export class MemoryJobStore implements JobStore {
     }
 
     const t = iso(now);
+    const runAt = iso(new Date(now.getTime() + (input.delayMs ?? 0)));
     if (existing) {
       Object.assign(existing, {
         status: 'queued' as JobStatus,
@@ -96,7 +97,7 @@ export class MemoryJobStore implements JobStore {
         result: null,
         attempts: 0,
         maxAttempts: input.maxAttempts ?? existing.maxAttempts,
-        nextAttemptAt: t,
+        nextAttemptAt: runAt,
         cancelRequested: false,
         lockedBy: null,
         heartbeatAt: null,
@@ -118,7 +119,7 @@ export class MemoryJobStore implements JobStore {
       idempotencyKey: key,
       attempts: 0,
       maxAttempts: input.maxAttempts ?? 3,
-      nextAttemptAt: t,
+      nextAttemptAt: runAt,
       cancelRequested: false,
       lockedBy: null,
       heartbeatAt: null,

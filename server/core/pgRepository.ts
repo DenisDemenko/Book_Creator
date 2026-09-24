@@ -39,6 +39,8 @@ import type {
   MemberRole,
   MentionInput,
   MentionRow,
+  NotificationInput,
+  NotificationRow,
   ParagraphInput,
   ParagraphRow,
   ParagraphVersionRow,
@@ -81,6 +83,7 @@ function toDocument(r: any): DocumentRow {
     order: r.ord,
     title: r.title,
     version: r.version,
+    deletedAt: isoOrNull(r.deleted_at),
     updatedAt: iso(r.updated_at),
   };
 }
@@ -96,6 +99,7 @@ function toParagraph(r: any): ParagraphRow {
     textHash: r.text_hash,
     version: r.version,
     deletedAt: isoOrNull(r.deleted_at),
+    editorPid: r.editor_pid ?? null,
     updatedAt: iso(r.updated_at),
   };
 }
@@ -109,6 +113,7 @@ function toEntity(r: any): EntityRow {
     canonical: r.canonical ?? {},
     status: r.status,
     version: r.version,
+    externalRef: r.external_ref ?? null,
     createdBy: r.created_by,
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
@@ -211,12 +216,28 @@ function toVersion<T>(r: any, idColumn: string): VersionRow<T> {
   };
 }
 
+function toNotification(r: any): NotificationRow {
+  return {
+    id: r.id,
+    projectId: r.project_id,
+    kind: r.kind,
+    message: r.message,
+    paragraphIds: r.paragraph_ids ?? [],
+    payload: r.payload ?? {},
+    createdAt: iso(r.created_at),
+    readAt: isoOrNull(r.read_at),
+  };
+}
+
 /** Порушення обмежень бази → ті самі помилки правил, що дає сховище в пам'яті. */
 function mapPgError(err: any): never {
   const code = err?.code;
   const constraint: string = err?.constraint ?? '';
   if (code === '23514' && /ai_evidence/.test(constraint)) {
     throw new CoreRuleError('evidence_required', 'Запис AI без доказу база не приймає');
+  }
+  if (code === '23505' && /external_ref/.test(constraint)) {
+    throw new CoreRuleError('bad_input', 'Сутність із таким зв\'язком зі Студією вже є');
   }
   if (code === '23505' && /entity_aliases/.test(constraint)) {
     throw new CoreRuleError('duplicate_alias', 'Псевдонім уже належить іншій сутності цього типу');
@@ -321,6 +342,7 @@ export class PgCoreRepository implements CoreRepository {
          parent_id = EXCLUDED.parent_id,
          ord = EXCLUDED.ord,
          title = EXCLUDED.title,
+         deleted_at = NULL,
          version = documents.version + CASE WHEN
            documents.title IS DISTINCT FROM EXCLUDED.title OR
            documents.kind IS DISTINCT FROM EXCLUDED.kind OR
@@ -330,6 +352,14 @@ export class PgCoreRepository implements CoreRepository {
       [input.projectId, input.id, input.kind, input.parentId ?? null, input.order, input.title ?? ''],
     );
     return toDocument(rows[0]);
+  }
+
+  async markDocumentDeleted(projectId: string, id: string) {
+    const { rowCount } = await this.q(
+      'UPDATE documents SET deleted_at = now(), updated_at = now() WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL',
+      [projectId, id],
+    );
+    return (rowCount ?? 0) > 0;
   }
 
   async listDocuments(projectId: string) {
@@ -348,10 +378,11 @@ export class PgCoreRepository implements CoreRepository {
         );
         const changed = !prev.rows[0] || prev.rows[0].text_hash !== hash;
         const { rows } = await c.query(
-          `INSERT INTO paragraphs (project_id, id, document_id, ord, kind, text, text_hash)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
+          `INSERT INTO paragraphs (project_id, id, document_id, ord, kind, text, text_hash, editor_pid)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
            ON CONFLICT (project_id, id) DO UPDATE SET
              document_id = EXCLUDED.document_id,
+             editor_pid = EXCLUDED.editor_pid,
              ord = EXCLUDED.ord,
              kind = EXCLUDED.kind,
              text = EXCLUDED.text,
@@ -363,7 +394,7 @@ export class PgCoreRepository implements CoreRepository {
                     AND paragraphs.deleted_at IS NULL
                THEN paragraphs.updated_at ELSE now() END
            RETURNING *`,
-          [input.projectId, input.id, input.documentId, input.order, input.kind, input.text, hash],
+          [input.projectId, input.id, input.documentId, input.order, input.kind, input.text, hash, input.editorPid ?? null],
         );
         const row = toParagraph(rows[0]);
         if (changed) {
@@ -399,6 +430,11 @@ export class PgCoreRepository implements CoreRepository {
       'SELECT * FROM paragraphs WHERE project_id = $1 AND document_id = $2 AND deleted_at IS NULL ORDER BY ord',
       [projectId, documentId],
     );
+    return rows.map(toParagraph);
+  }
+
+  async listAllParagraphs(projectId: string) {
+    const { rows } = await this.q('SELECT * FROM paragraphs WHERE project_id = $1 ORDER BY document_id, ord', [projectId]);
     return rows.map(toParagraph);
   }
 
@@ -449,9 +485,9 @@ export class PgCoreRepository implements CoreRepository {
     const status = checkNewEntity(input);
     return this.mutate(async (c) => {
       const { rows } = await c.query(
-        `INSERT INTO entities (project_id, type, name, canonical, status, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-        [input.projectId, input.type, input.name.trim(), JSON.stringify(input.canonical ?? {}), status, input.createdBy],
+        `INSERT INTO entities (project_id, type, name, canonical, status, created_by, external_ref)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+        [input.projectId, input.type, input.name.trim(), JSON.stringify(input.canonical ?? {}), status, input.createdBy, input.externalRef ?? null],
       );
       const row = toEntity(rows[0]);
       await this.writeVersion(c, 'entity_versions', 'entity_id', row, input.createdBy, 'створено');
@@ -462,6 +498,15 @@ export class PgCoreRepository implements CoreRepository {
   async getEntity(projectId: string, id: string) {
     if (!isUuid(id)) return null;
     const { rows } = await this.q('SELECT * FROM entities WHERE project_id = $1 AND id = $2', [projectId, id]);
+    return rows[0] ? toEntity(rows[0]) : null;
+  }
+
+  async findEntityByExternalRef(projectId: string, type: string, externalRef: string) {
+    const { rows } = await this.q('SELECT * FROM entities WHERE project_id = $1 AND type = $2 AND external_ref = $3', [
+      projectId,
+      type,
+      externalRef,
+    ]);
     return rows[0] ? toEntity(rows[0]) : null;
   }
 
@@ -484,10 +529,18 @@ export class PgCoreRepository implements CoreRepository {
         `UPDATE entities SET
            name = COALESCE($3, name),
            canonical = COALESCE($4::jsonb, canonical),
+           external_ref = CASE WHEN $5 THEN $6 ELSE external_ref END,
            version = version + 1,
            updated_at = now()
          WHERE project_id = $1 AND id = $2 RETURNING *`,
-        [projectId, id, patch.name?.trim() ?? null, patch.canonical ? JSON.stringify(patch.canonical) : null],
+        [
+          projectId,
+          id,
+          patch.name?.trim() ?? null,
+          patch.canonical ? JSON.stringify(patch.canonical) : null,
+          patch.externalRef !== undefined,
+          patch.externalRef ?? null,
+        ],
       );
       const row = toEntity(rows[0]);
       await this.writeVersion(c, 'entity_versions', 'entity_id', row, actor, reason);
@@ -795,6 +848,23 @@ export class PgCoreRepository implements CoreRepository {
       [projectId, id],
     );
     return rows.map((r: any) => toVersion<FindingRow>(r, 'finding_id'));
+  }
+
+  async addNotification(input: NotificationInput): Promise<NotificationRow> {
+    const { rows } = await this.q(
+      `INSERT INTO core_notifications (project_id, kind, message, paragraph_ids, payload)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [input.projectId, input.kind, input.message, input.paragraphIds ?? [], JSON.stringify(input.payload ?? {})],
+    );
+    return toNotification(rows[0]);
+  }
+
+  async listNotifications(projectId: string, limit = 50) {
+    const { rows } = await this.q(
+      'SELECT * FROM core_notifications WHERE project_id = $1 ORDER BY created_at DESC LIMIT $2',
+      [projectId, limit],
+    );
+    return rows.map(toNotification);
   }
 
   async close() {

@@ -19,6 +19,8 @@
 
 import type { Express, Request, Response } from 'express';
 import { requireAdmin, requireAuth } from './auth';
+import { getCoreJobQueue, getCoreRepository } from './core';
+import { scheduleCoreSync } from './core/sync';
 import {
   BookRevisionConflict,
   getBook,
@@ -123,6 +125,13 @@ export function registerBookRoutes(app: Express, deps: BookRoutesDeps): void {
         expectedRevision:
           req.body?.expectedRevision === undefined ? undefined : Number(req.body.expectedRevision),
       });
+      // Семантичне ядро (Т0.6): синхронізація — фоновою задачею, відповідь
+      // її не чекає. Без ядра (немає CORE_DATABASE_URL) — нічого не робить.
+      void scheduleCoreSync(
+        { repo: getCoreRepository(), queue: getCoreJobQueue() },
+        saved,
+        `user:${req.principal?.id ?? 'unknown'}`,
+      );
       // Вміст назад не віддаємо: клієнт щойно його надіслав, і ще одна
       // копія книги в відповіді — це подвоєний трафік на кожне збереження.
       const { book: _sent, ...meta } = saved;

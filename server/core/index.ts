@@ -25,7 +25,7 @@ import {
 } from './migrate';
 import { PgCoreRepository } from './pgRepository';
 import { PgJobStore } from './jobs/pgJobStore';
-import { JobQueue } from './jobs/queue';
+import { JobQueue, type JobKind } from './jobs/queue';
 import type { CoreRepository } from './types';
 
 export type CoreState = 'disabled' | 'starting' | 'ready' | 'failed';
@@ -45,6 +45,17 @@ let status: CoreStatusInfo = {
 let repository: CoreRepository | null = null;
 let jobQueue: JobQueue | null = null;
 let stopWorker: (() => void) | null = null;
+/** Види задач, зареєстровані до старту ядра, — застосовуються, щойно черга з'явиться. */
+const pendingKinds = new Map<string, JobKind>();
+
+/**
+ * Зареєструвати вид фонової задачі ядра (`core_sync` — Т0.6, ролі AI — Т0.9).
+ * Можна викликати до `initCore()`: вид збережеться й підхопиться на старті.
+ */
+export function registerCoreJobKind(kind: string, def: JobKind): void {
+  pendingKinds.set(kind, def);
+  jobQueue?.register(kind, def);
+}
 let startPromise: Promise<CoreStatusInfo> | null = null;
 /** Пауза перед повторною спробою, якщо база ядра недоступна. */
 const RETRY_MS = 60_000;
@@ -96,6 +107,7 @@ export function initCore(log: (msg: string) => void = (m) => console.log(m)): Pr
       // потребують (`getCoreJobQueue().register(...)`: core_sync — Т0.6,
       // ролі AI — Т0.9); воркер бере лише зареєстровані види.
       jobQueue = new JobQueue(new PgJobStore(pool));
+      for (const [kind, def] of pendingKinds) jobQueue.register(kind, def);
       stopWorker = jobQueue.start().stop;
       status = {
         state: 'ready',

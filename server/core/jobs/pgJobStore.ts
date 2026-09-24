@@ -152,6 +152,7 @@ export class PgJobStore implements JobStore {
         }
 
         const estimate = Math.round(input.estimatedTokens ?? 0);
+        const runAt = new Date(now.getTime() + (input.delayMs ?? 0));
         for (const scope of budgetScopes(input.budgetScope)) {
           const b = await this.rolledBudget(c, input.projectId, scope, now);
           if (!b) continue;
@@ -171,10 +172,10 @@ export class PgJobStore implements JobStore {
         if (existing) {
           const { rows } = await c.query(
             `UPDATE core_jobs SET status = 'queued', payload = COALESCE($2::jsonb, payload), error = NULL, result = NULL,
-               attempts = 0, max_attempts = COALESCE($3, max_attempts), next_attempt_at = $4, cancel_requested = false,
+               attempts = 0, max_attempts = COALESCE($3, max_attempts), next_attempt_at = $6, cancel_requested = false,
                locked_by = NULL, heartbeat_at = NULL, estimated_tokens = $5, updated_at = $4, finished_at = NULL
              WHERE id = $1 RETURNING *`,
-            [existing.id, input.payload ? JSON.stringify(input.payload) : null, input.maxAttempts ?? null, now, estimate],
+            [existing.id, input.payload ? JSON.stringify(input.payload) : null, input.maxAttempts ?? null, now, estimate, runAt],
           );
           return { job: toJob(rows[0]), created: true };
         }
@@ -182,7 +183,7 @@ export class PgJobStore implements JobStore {
           `INSERT INTO core_jobs
              (project_id, kind, payload, idempotency_key, max_attempts, next_attempt_at, budget_scope,
               estimated_tokens, created_by, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $6, $6) RETURNING *`,
+           VALUES ($1, $2, $3, $4, $5, $10, $7, $8, $9, $6, $6) RETURNING *`,
           [
             input.projectId,
             input.kind,
@@ -193,6 +194,7 @@ export class PgJobStore implements JobStore {
             input.budgetScope ?? 'project',
             estimate,
             input.createdBy,
+            runAt,
           ],
         );
         return { job: toJob(rows[0]), created: true };

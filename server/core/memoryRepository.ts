@@ -38,6 +38,8 @@ import type {
   MemberRole,
   MentionInput,
   MentionRow,
+  NotificationInput,
+  NotificationRow,
   ParagraphInput,
   ParagraphRow,
   ParagraphVersionRow,
@@ -72,6 +74,7 @@ export class MemoryCoreRepository implements CoreRepository {
   private runs = new Map<string, RunRow>();
   private findings = new Map<string, FindingRow>();
   private findingVersions = new Map<string, VersionRow<FindingRow>[]>();
+  private notifications: NotificationRow[] = [];
 
   private requireProject(projectId: string): ProjectRow {
     const p = this.projects.get(projectId);
@@ -151,6 +154,7 @@ export class MemoryCoreRepository implements CoreRepository {
     const title = input.title ?? '';
     const changed = !prev || prev.title !== title || prev.kind !== input.kind || prev.parentId !== (input.parentId ?? null);
     const row: DocumentRow = {
+      deletedAt: null,
       projectId: input.projectId,
       id: input.id,
       kind: input.kind,
@@ -162,6 +166,14 @@ export class MemoryCoreRepository implements CoreRepository {
     };
     this.documents.set(k, row);
     return clone(row);
+  }
+
+  async markDocumentDeleted(projectId: string, id: string) {
+    const d = this.documents.get(key(projectId, id));
+    if (!d || d.deletedAt) return false;
+    d.deletedAt = now();
+    d.updatedAt = d.deletedAt;
+    return true;
   }
 
   async listDocuments(projectId: string) {
@@ -189,6 +201,7 @@ export class MemoryCoreRepository implements CoreRepository {
       textHash: hash,
       version: prev ? prev.version + (changed ? 1 : 0) : 1,
       deletedAt: null,
+      editorPid: input.editorPid ?? null,
       updatedAt: changed || prev?.deletedAt || prev?.order !== input.order ? t : prev!.updatedAt,
     };
     this.paragraphs.set(k, row);
@@ -227,6 +240,13 @@ export class MemoryCoreRepository implements CoreRepository {
       .map(clone);
   }
 
+  async listAllParagraphs(projectId: string) {
+    return [...this.paragraphs.values()]
+      .filter((p) => p.projectId === projectId)
+      .sort((a, b) => a.documentId.localeCompare(b.documentId) || a.order - b.order)
+      .map(clone);
+  }
+
   async listParagraphVersions(projectId: string, id: string) {
     return clone(this.paragraphVersions.get(key(projectId, id)) ?? []);
   }
@@ -250,10 +270,14 @@ export class MemoryCoreRepository implements CoreRepository {
       canonical: clone(input.canonical ?? {}),
       status,
       version: 1,
+      externalRef: input.externalRef ?? null,
       createdBy: input.createdBy,
       createdAt: t,
       updatedAt: t,
     };
+    if (row.externalRef && (await this.findEntityByExternalRef(row.projectId, row.type, row.externalRef))) {
+      throw new CoreRuleError('bad_input', `Сутність із зв'язком «${row.externalRef}» уже є`);
+    }
     this.entities.set(row.id, row);
     this.pushVersion(this.entityVersions, row, input.createdBy, 'створено');
     return clone(row);
@@ -261,6 +285,11 @@ export class MemoryCoreRepository implements CoreRepository {
 
   async getEntity(projectId: string, id: string) {
     const e = this.entityIn(projectId, id);
+    return e ? clone(e) : null;
+  }
+
+  async findEntityByExternalRef(projectId: string, type: string, externalRef: string) {
+    const e = [...this.entities.values()].find((x) => x.projectId === projectId && x.type === type && x.externalRef === externalRef);
     return e ? clone(e) : null;
   }
 
@@ -277,6 +306,11 @@ export class MemoryCoreRepository implements CoreRepository {
     checkEntityUpdate(e, actor);
     if (patch.name !== undefined) e.name = patch.name.trim();
     if (patch.canonical !== undefined) e.canonical = clone(patch.canonical);
+    if (patch.externalRef !== undefined) {
+      const other = patch.externalRef ? await this.findEntityByExternalRef(projectId, e.type, patch.externalRef) : null;
+      if (other && other.id !== e.id) throw new CoreRuleError('bad_input', `Сутність із зв'язком «${patch.externalRef}» уже є`);
+      e.externalRef = patch.externalRef;
+    }
     e.version += 1;
     e.updatedAt = now();
     this.pushVersion(this.entityVersions, e, actor, reason);
@@ -518,6 +552,31 @@ export class MemoryCoreRepository implements CoreRepository {
 
   async listFindingVersions(projectId: string, id: string) {
     return clone((this.findingVersions.get(id) ?? []).filter((v) => v.projectId === projectId));
+  }
+
+  async addNotification(input: NotificationInput) {
+    this.requireProject(input.projectId);
+    const row: NotificationRow = {
+      id: randomUUID(),
+      projectId: input.projectId,
+      kind: input.kind,
+      message: input.message,
+      paragraphIds: [...(input.paragraphIds ?? [])],
+      payload: clone(input.payload ?? {}),
+      createdAt: now(),
+      readAt: null,
+    };
+    this.notifications.push(row);
+    return clone(row);
+  }
+
+  async listNotifications(projectId: string, limit = 50) {
+    return this.notifications
+      .filter((n) => n.projectId === projectId)
+      .slice()
+      .reverse()
+      .slice(0, limit)
+      .map(clone);
   }
 
   async close() {}

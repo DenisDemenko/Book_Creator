@@ -1119,9 +1119,22 @@ export function entityValueTooltip(entity: CoreEntity, value: string, lang: 'uk'
  * «Олена» → «Олеся» не переписувала `[/character:Олена]` мимохідь.
  */
 export function entityTagSpans(text: string): [number, number][] {
+  return parseEntityTagsInSource(text).map((t) => [t.start, t.end] as [number, number]);
+}
+
+/**
+ * Усі теги рядка рукопису з позиціями у ВИХІДНОМУ рядку: канонічні (зокрема
+ * розрізані маркерами форматування — їхнє значення вже без маркерів) і
+ * «сирі» `/slug:значення`, що не лежать усередині канонічних. У порядку появи.
+ *
+ * Навіщо окремо від `parseAnyEntityTags`: той працює з видимим текстом
+ * канви, а синхронізація ядра (Т0.6, журнал #249) читає рукопис як він є —
+ * з маркерами — і мусить побачити кожен тег, який автор бачить у канві.
+ */
+export function parseEntityTagsInSource(text: string): ParsedEntityTag[] {
   const source = String(text ?? '');
   if (!source.includes('/')) return [];
-  const spans: [number, number][] = [];
+  const found: ParsedEntityTag[] = [];
 
   // Канонічні — через «плаский» вигляд без маркерів, як у removeFormattedEntityTags.
   const markerRe = new RegExp(FORMAT_MARKER_SOURCE, 'g');
@@ -1138,14 +1151,22 @@ export function entityTagSpans(text: string): [number, number][] {
   const tagRe = entityTagRegexp();
   let tm: RegExpExecArray | null;
   while ((tm = tagRe.exec(plain))) {
-    spans.push([plainToSource[tm.index], plainToSource[tm.index + tm[0].length - 1] + 1]);
+    const slug = tm[1].slice(1);
+    found.push({
+      tag: tm[1],
+      slug,
+      value: (tm[2] || '').trim(),
+      entity: entityBySlug(slug),
+      start: plainToSource[tm.index],
+      end: plainToSource[tm.index + tm[0].length - 1] + 1,
+    });
   }
 
   // «Сирі» — лише ті, що не всередині канонічних.
   for (const loose of parseLooseEntityTags(source)) {
-    if (!spans.some(([a, b]) => loose.start < b && a < loose.end)) spans.push([loose.start, loose.end]);
+    if (!found.some((t) => loose.start < t.end && t.start < loose.end)) found.push(loose);
   }
-  return spans.sort((x, y) => x[0] - y[0]);
+  return found.sort((x, y) => x.start - y.start);
 }
 
 /** Стисла довідка про склад реєстру — для тестів і для заголовка панелі. */
