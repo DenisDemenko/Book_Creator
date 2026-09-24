@@ -38,13 +38,13 @@
   на `/api/ai/translate`, `/api/ai/coach-feedback`, `/api/ai/generate-exercise`,
   `/api/ai/analyze-emotional-arc`.
   Готово: гість отримує 403, звичайні сценарії не змінились.
-- ⬜ **Т0.3 · PostgreSQL для ядра (M).** База на Railway з `pgvector`, підключення
+- ✅ **Т0.3 · PostgreSQL для ядра (M).** *(Зроблено 24.09.2026, журнал #247. Лишилось власнику: сервіс PostgreSQL з pgvector на Railway і змінна `CORE_DATABASE_URL` у сервісі Студії.)* База на Railway з `pgvector`, підключення
   (`pg`), міграції SQL-файлами з версією, шар репозиторіїв з реалізацією в
   пам'яті для тестів; SQLite Студії не чіпаємо (К1).
   Готово: міграції накочуються на порожню базу й повторно без помилок; тести
   ядра проходять без PostgreSQL.
   Залежить: рішення К1 (ухвалено).
-- ⬜ **Т0.4 · Схема ядра (M).** `projects`, `documents`, `paragraphs` +
+- ✅ **Т0.4 · Схема ядра (M).** *(Зроблено 24.09.2026, журнал #247.)* `projects`, `documents`, `paragraphs` +
   `paragraph_versions`, `entities` + `entity_aliases`, `entity_mentions`,
   `entity_relations` + версії, `analysis_runs` + `analysis_findings`,
   `project_members`; `project_id` і індекси всюди; статуси
