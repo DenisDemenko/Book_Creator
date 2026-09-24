@@ -75,7 +75,11 @@ interface BuiltDecorations {
  * закінчується текст (короткий абзац виглядав би залитим лише до половини
  * рядка).
  */
-function buildDecorations(doc: PMNode, entities: CoreEntity[], options: EntityTagOptions): BuiltDecorations {
+export function buildDecorations(
+  doc: PMNode,
+  entities: CoreEntity[],
+  options: Pick<EntityTagOptions, 'isVisible' | 'chipClass' | 'hiddenClass' | 'isEnglishUi'>
+): BuiltDecorations {
   const bySlug = new Map(entities.map((e) => [e.slug, e]));
   const decorations: Decoration[] = [];
   const perParagraph: { index: number; slugs: string[] }[] = [];
@@ -88,7 +92,7 @@ function buildDecorations(doc: PMNode, entities: CoreEntity[], options: EntityTa
     const index = paragraphIndex++;
 
     /*
-     * ДВА ПРОХОДИ, І ЦЕ НАВМИСНО — тут була помилка, знайдена живим прогоном.
+     * ІСТОРІЯ ЦЬОГО ОБХОДУ — дві помилки, обидві знайдені живим прогоном.
      *
      * СПЕРШУ версію я написав так: склеював текст абзацу в один рядок, шукав
      * теги в ньому, а потім перераховував зсуви назад у позиції документа.
@@ -97,11 +101,10 @@ function buildDecorations(doc: PMNode, entities: CoreEntity[], options: EntityTa
      * показав це відразу (118 абзаців із тлом, 36 чипів), а модульні тести —
      * ні, бо ті перевіряють розбір рядка, а не позиції в документі.
      *
-     * ТЕПЕР: чипи (те, що має лягти на точний діапазон) ставляться по
-     * КОЖНОМУ текстовому вузлу окремо — зсув усередині вузла плюс позиція
-     * вузла, без жодного перерахунку через межу абзацу. Тло абзацу
-     * (властивість блоку, а не діапазону) рахується зі склеєного тексту, бо
-     * для нього точні позиції не потрібні взагалі.
+     * Далі була версія «по КОЖНОМУ текстовому вузлу окремо» — вона полагодила
+     * позиції, але розбивала теги, розрізані форматуванням; її замінено
+     * розбором по склеєному тексту абзацу з точним переносом назад (див.
+     * коментар «ТЕГ РОЗБИРАЄТЬСЯ ПО ВСЬОМУ АБЗАЦУ…» нижче, запис #236).
      */
     /*
      * ПОЗИЦІЇ — тут була найдорожча помилка цієї задачі, знайдена живим
@@ -117,78 +120,92 @@ function buildDecorations(doc: PMNode, entities: CoreEntity[], options: EntityTa
      * Модульні тести цього не бачили б узагалі: вони перевіряють розбір
      * рядка, а не систему координат ProseMirror.
      */
-    const segments: { text: string; start: number }[] = [];
+    /*
+     * ТЕГ РОЗБИРАЄТЬСЯ ПО ВСЬОМУ АБЗАЦУ, А МАЛЮЄТЬСЯ ПО ШМАТКАХ (запис #236).
+     *
+     * Доти теги шукалися в КОЖНОМУ текстовому вузлі окремо. Але абзац ділиться
+     * на вузли не за змістом, а за форматуванням: досить, щоб `[` і `]`
+     * лишились без кольору, а `/character:Олена` був пофарбований (або щоб
+     * значення тега було жирним), — і тег розпадається на три вузли. Тоді:
+     *   • у середньому вузлі спрацьовував «сирий» розбір без дужок, і режим
+     *     «Сховати сутності» ховав лише `/character:Олена`, а `[` і `]`
+     *     лишались у тексті книги — саме це й побачив власник;
+     *   • тег, у якому жирне лише значення (`[/emotion:**страх**]`), не
+     *     розпізнавався зовсім і не ховався взагалі.
+     *
+     * Тепер розбір іде по склеєному тексту абзацу (як і для лічильника
+     * сутностей), а кожен знайдений тег перекладається назад на ті вузли, які
+     * він покриває: одна декорація на кожен шматок. Нетекстові вузли всередині
+     * абзацу (розрив рядка, зображення) вставляються в склеєний текст як `\n`
+     * — тег не може «перестрибнути» через них, так само як не може через
+     * перенос рядка.
+     */
+    const segments: { text: string; start: number; offset: number; virtual: boolean }[] = [];
+    let joinedLength = 0;
     node.descendants((child, childPos) => {
       if (child.isText && child.text) {
-        segments.push({ text: child.text, start: pos + 1 + childPos });
+        segments.push({ text: child.text, start: pos + 1 + childPos, offset: joinedLength, virtual: false });
+        joinedLength += child.text.length;
+      } else if (child.isInline && child.isLeaf) {
+        segments.push({ text: '\n', start: pos + 1 + childPos, offset: joinedLength, virtual: true });
+        joinedLength += 1;
       }
       return true;
     });
-    if (segments.length === 0) return;
+    if (!segments.some((s) => !s.virtual)) return;
 
     const paragraphText = segments.map((s) => s.text).join('');
     const tags = parseAnyEntityTags(paragraphText);
     if (tags.length === 0) return;
 
+    // Сутність — за реєстром із урахуванням українських ключів
+    // (`/персонаж:` → character): `tag.entity` уже розв'язаний парсером.
     const resolved = tags
-      .map((tag) => ({ tag, entity: bySlug.get(tag.slug) }))
+      .map((tag) => ({ tag, entity: bySlug.get(tag.entity?.slug ?? tag.slug) }))
       .filter((t): t is { tag: (typeof tags)[number]; entity: CoreEntity } => !!t.entity);
     if (resolved.length === 0) return;
 
     perParagraph.push({ index, slugs: resolved.map((r) => r.entity.slug) });
 
-    /*
-     * ПРИХОВАНИЙ РЕЖИМ: ТЕГ ЗНИКАЄ З КАНВИ ПОВНІСТЮ.
-     *
-     * Тут була вада, яку власник знайшов 23.09.2026: кнопка «Сховати
-     * сутності» прибирала ЛИШЕ фарбування, а сам текст тега лишався — сірим,
-     * поміж прозою. Виглядало це як «сутності не зникли, а лише змінили
-     * колір», і саме так власник і сказав.
-     *
-     * Тепер на кожен тег ставиться декорація з класом `display: none`: текст
-     * зникає з очей, але в ДОКУМЕНТІ лишається тим самим рядком. Це і є
-     * вимога постановки: «залишитися лише текст книги» — тег не можна
-     * видаляти, бо він серіалізується в книгу (`manuscriptDoc.ts`) і без нього
-     * зникла б уся розмітка.
-     *
-     * Діапазони збираються в `hiddenRanges` — ними потім коригується
-     * поведінка курсора, щоб набраний символ не ліг у середину невидимого
-     * тега.
-     */
-    if (!visible) {
-      for (const segment of segments) {
-        for (const tag of parseAnyEntityTags(segment.text)) {
-          if (!bySlug.get(tag.slug)) continue;
-          const from = segment.start + tag.start;
-          const to = segment.start + tag.end;
-          hiddenRanges.push({ from, to });
-          decorations.push(Decoration.inline(from, to, { class: options.hiddenClass }));
-        }
+    /** Діапазон тега в склеєному тексті → шматки в координатах документа. */
+    const piecesOf = (from: number, to: number): { from: number; to: number }[] => {
+      const out: { from: number; to: number }[] = [];
+      for (const seg of segments) {
+        if (seg.virtual) continue;
+        const a = Math.max(from, seg.offset);
+        const b = Math.min(to, seg.offset + seg.text.length);
+        if (a < b) out.push({ from: seg.start + (a - seg.offset), to: seg.start + (b - seg.offset) });
       }
-      return;
-    }
+      return out;
+    };
 
-    /*
-     * ТІЛЬКИ КОЛІР ТЕКСТУ — БЕЗ ЗАЛИВКИ (зміна дизайну, рішення власника
-     * 23.09.2026: «міняєм лише в колір текст, а задній фон завжди залишаємо в
-     * канві білим»).
-     *
-     * ДО ЦЬОГО тут стояла ще й `Decoration.node` із тлом абзацу — тим самим
-     * кольором сутності, лише затемненим. На білій сторінці канви
-     * (`PageColumn` малює аркуш `#fffefc`) це виглядало як темна смуга через
-     * увесь абзац, і власник відхилив саме це. Тепер абзац не чіпається
-     * взагалі: мітку видно кольором самого тега.
-     *
-     * Колір тексту береться не з документа як є, а проходить через
-     * `textColorOnWhite`: палітра реєстру містить і `#FACC15`, який на білому
-     * не читався б узагалі.
-     */
-    for (const segment of segments) {
-      for (const tag of parseAnyEntityTags(segment.text)) {
-        const entity = bySlug.get(tag.slug);
-        if (!entity) continue;
+    for (const { tag, entity } of resolved) {
+      const pieces = piecesOf(tag.start, tag.end);
+      if (pieces.length === 0) continue;
+
+      /*
+       * ПРИХОВАНИЙ РЕЖИМ: ТЕГ ЗНИКАЄ З КАНВИ ПОВНІСТЮ — разом із дужками.
+       * `display: none` ховає текст лише з очей: у документі тег лишається
+       * тим самим рядком (він серіалізується в книгу, `manuscriptDoc.ts`).
+       * Діапазон цілого тега йде в `hiddenRanges` — за ним курсор не
+       * пускають усередину невидимого тега.
+       */
+      if (!visible) {
+        for (const piece of pieces) {
+          decorations.push(Decoration.inline(piece.from, piece.to, { class: options.hiddenClass }));
+        }
+        hiddenRanges.push({ from: pieces[0].from, to: pieces[pieces.length - 1].to });
+        continue;
+      }
+
+      /*
+       * ТІЛЬКИ КОЛІР ТЕКСТУ — БЕЗ ЗАЛИВКИ (рішення власника 23.09.2026):
+       * абзац не фарбується, мітку видно кольором самого тега. Колір проходить
+       * через `textColorOnWhite`: `#FACC15` на білому аркуші не читався б.
+       */
+      for (const piece of pieces) {
         decorations.push(
-          Decoration.inline(segment.start + tag.start, segment.start + tag.end, {
+          Decoration.inline(piece.from, piece.to, {
             class: options.chipClass,
             style: `color:${textColorOnWhite(entity.color)};`,
             ['data-entity-slug']: entity.slug,

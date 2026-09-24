@@ -503,6 +503,95 @@ export function entityTagRegexp(): RegExp {
   return /\[(\/[a-z0-9\u0400-\u04FF-]+):([^\]\n]*)\]/g;
 }
 
+/**
+ * Інлайн-маркери форматування рукопису — ті самі, що розбирає
+ * `utils/manuscriptDoc.ts` (INLINE_TOKEN): жирний/курсив, шрифт, розмір,
+ * колір, виділення, посилання. Порядок `\*\*` перед `\*` — як там же.
+ */
+const FORMAT_MARKER_SOURCE =
+  '\\*\\*|\\*|\\[FONT="[^"]*"\\]|\\[\\/FONT\\]|\\[SIZE=[\\d.]+\\]|\\[\\/SIZE\\]|\\[COLOR="[^"]*"\\]|\\[\\/COLOR\\]|\\[HL="[^"]*"\\]|\\[\\/HL\\]|\\[LINK="[^"]*"\\]|\\[\\/LINK\\]';
+
+/** Чи збалансовані маркери всередині тега: кожен відкритий там же й закритий. */
+function markersBalanced(markers: string[]): boolean {
+  let bold = 0;
+  let italic = 0;
+  const depth: Record<string, number> = {};
+  for (const mk of markers) {
+    if (mk === '**') bold ^= 1;
+    else if (mk === '*') italic ^= 1;
+    else {
+      const close = /^\[\/(FONT|SIZE|COLOR|HL|LINK)\]$/.exec(mk);
+      const open = /^\[(FONT|SIZE|COLOR|HL|LINK)[=]/.exec(mk);
+      if (open) depth[open[1]] = (depth[open[1]] || 0) + 1;
+      else if (close) {
+        depth[close[1]] = (depth[close[1]] || 0) - 1;
+        if (depth[close[1]] < 0) return false;
+      }
+    }
+  }
+  return bold === 0 && italic === 0 && Object.values(depth).every((d) => d === 0);
+}
+
+/**
+ * Знімає канонічні теги, які форматування розрізало маркерами.
+ *
+ * ВАДА, ЯКУ ЦЕ ЗАКРИВАЄ (власник, 24.09.2026): досить пофарбувати чи
+ * виділити жирним частину тега — і в рукописі він зберігається як
+ * `[[COLOR="#e11d48"]/character:Олена[/COLOR]]` або `[/emotion:**страх**]`.
+ * Звичайний `entityTagRegexp` такого тега не бачить, тож у редакторі
+ * «Сховати сутності» лишало дужки `[` `]`, а експорт друкував тег повністю.
+ *
+ * Як: маркери стають «нульової ширини» — тег шукається в тексті без них,
+ * потім знімаються саме символи тега. Маркери, що стоять ВСЕРЕДИНІ тега й
+ * там же закриваються, знімаються разом із ним (інакше лишився б `****`);
+ * якщо маркер лише відкрився в тезі, а закривається в тексті книги, — він
+ * лишається, щоб не зламати форматування сусіднього тексту. Порожні пари,
+ * що лишилися навколо знятого тега (`[COLOR="…"][/COLOR]`), прибираються.
+ */
+export function removeFormattedEntityTags(text: string): string {
+  const source = String(text ?? '');
+  if (!source.includes('/') || !/\*|\[(?:FONT|SIZE|COLOR|HL|LINK)=/.test(source)) return source;
+
+  const markerRe = new RegExp(FORMAT_MARKER_SOURCE, 'g');
+  const plainChars: string[] = [];
+  const plainToSource: number[] = [];
+  const markerSpans: { start: number; end: number; text: string }[] = [];
+  let cursor = 0;
+  let mm: RegExpExecArray | null;
+  while ((mm = markerRe.exec(source))) {
+    for (let i = cursor; i < mm.index; i++) { plainChars.push(source[i]); plainToSource.push(i); }
+    markerSpans.push({ start: mm.index, end: mm.index + mm[0].length, text: mm[0] });
+    cursor = mm.index + mm[0].length;
+  }
+  if (!markerSpans.length) return source;
+  for (let i = cursor; i < source.length; i++) { plainChars.push(source[i]); plainToSource.push(i); }
+
+  const plain = plainChars.join('');
+  const drop = new Uint8Array(source.length);
+  let changed = false;
+  const tagRe = entityTagRegexp();
+  let tm: RegExpExecArray | null;
+  while ((tm = tagRe.exec(plain))) {
+    const from = plainToSource[tm.index];
+    const to = plainToSource[tm.index + tm[0].length - 1] + 1;
+    // Тег без маркерів усередині теж знімається тут: тоді порожня пара
+    // навколо нього (`[COLOR="…"][/COLOR]`) прибереться нижче, а не лишиться.
+    for (let k = tm.index; k < tm.index + tm[0].length; k++) drop[plainToSource[k]] = 1;
+    const inside = markerSpans.filter((s) => s.start >= from && s.end <= to);
+    if (markersBalanced(inside.map((s) => s.text))) {
+      inside.forEach((s) => { for (let k = s.start; k < s.end; k++) drop[k] = 1; });
+    }
+    changed = true;
+  }
+  if (!changed) return source;
+
+  let out = '';
+  for (let i = 0; i < source.length; i++) if (!drop[i]) out += source[i];
+  return out
+    .replace(/\[(FONT|COLOR|HL|LINK)="[^"]*"\]\[\/\1\]/g, '')
+    .replace(/\[SIZE=[\d.]+\]\[\/SIZE\]/g, '');
+}
+
 /** Один розібраний тег: сутність плюс те, що автор написав після двокрапки. */
 export interface ParsedEntityTag {
   /** Тег як у документі: `/character`. */
@@ -561,8 +650,12 @@ export function parseEntityTags(text: string): ParsedEntityTag[] {
  *      з самими тегами — єдиний наслідок, якого автор не побачив би заздалегідь.
  */
 export function stripEntityTags(text: string): string {
-  const source = String(text ?? '');
-  if (!source.includes('/')) return source;
+  const original = String(text ?? '');
+  if (!original.includes('/')) return original;
+  // Спершу — теги, розрізані маркерами форматування (див. removeFormattedEntityTags).
+  // Перевірка на `/` — ДО цього кроку: після нього тегів уже може не лишитись,
+  // а прибирання пропусків нижче все одно потрібне.
+  const source = removeFormattedEntityTags(original);
 
   /*
    * Знімаються ОБИДВІ форми — канонічна й «сира», одним проходом.
