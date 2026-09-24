@@ -8,6 +8,9 @@ import { randomUUID } from 'node:crypto';
 import { Type } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { WebSocketServer, WebSocket } from 'ws';
+import { issueRealtimeTicket, resolveRealtimeAccess, ticketFromUrl, verifyRealtimeTicket, isValidBookId, type RealtimeAccess, type RealtimeAccessDeps } from './server/realtimeAuth';
+import { getBook as getStoredBookForRealtime } from './server/bookStore';
+import { getBookOwner as getCollabOwnerForRealtime, listCollabInvitesForBook as listInvitesForRealtime } from './server/store';
 import {
   ensureGeneratedDir,
   listEngines,
@@ -251,11 +254,31 @@ function bookRevisionMs(book: any): number {
   return Number.isFinite(ms) ? ms : 0;
 }
 
+/**
+ * Кімнати спільного редагування. Ключ — НЕ id книги, а ключ кімнати з
+ * `server/realtimeAuth.ts` (`book:<id>` для власника й запрошених,
+ * `private:<user>:<id>` для решти) — Т0.1, журнал #242.
+ */
 const collabRooms = new Map<string, RoomData>();
 
-function getOrCreateRoom(bookId: string): RoomData {
-  if (!collabRooms.has(bookId)) {
-    collabRooms.set(bookId, {
+/** Звідки сокет і REST кімнат дізнаються власника й учасників книги. */
+const realtimeAccessDeps: RealtimeAccessDeps = {
+  async getBookOwnerId(bookId) {
+    return (await getStoredBookForRealtime(bookId))?.ownerId ?? null;
+  },
+  async getCollabOwnerId(bookId) {
+    return (await getCollabOwnerForRealtime(bookId))?.ownerUserId;
+  },
+  async listAcceptedInvites(bookId) {
+    return (await listInvitesForRealtime(bookId))
+      .filter((inv) => inv.status === 'accepted')
+      .map((inv) => ({ acceptedUserId: inv.acceptedUserId, role: inv.role }));
+  },
+};
+
+function getOrCreateRoom(roomKey: string, bookId: string): RoomData {
+  if (!collabRooms.has(roomKey)) {
+    collabRooms.set(roomKey, {
       bookId,
       book: null,
       clients: new Map(),
@@ -274,11 +297,11 @@ function getOrCreateRoom(bookId: string): RoomData {
       changelog: []
     });
   }
-  return collabRooms.get(bookId)!;
+  return collabRooms.get(roomKey)!;
 }
 
-function broadcastToRoom(bookId: string, event: any, senderId?: string) {
-  const room = collabRooms.get(bookId);
+function broadcastToRoom(roomKey: string, event: any, senderId?: string) {
+  const room = collabRooms.get(roomKey);
   if (!room) return;
 
   const payloadStr = JSON.stringify({
@@ -607,7 +630,7 @@ registerGitCommandRoutes(app);
   });
 
   // 1. AI Text Editing with Diff Proposal
-  app.post('/api/ai/edit-text', async (req, res) => {
+  app.post('/api/ai/edit-text', requirePermission('canUseAi'), async (req, res) => {
     try {
       const { text, instruction, category, bookContext, sceneContext, styleGuide, modelId, bookId } = req.body;
       if (!text || text.trim().length === 0) {
@@ -714,7 +737,7 @@ registerGitCommandRoutes(app);
   });
 
   // 2. Grammar, Spelling, Style & Repetition Checker
-  app.post('/api/ai/check-grammar', async (req, res) => {
+  app.post('/api/ai/check-grammar', requirePermission('canUseAi'), async (req, res) => {
     try {
       const { text } = req.body;
       if (!text || text.trim().length === 0) {
@@ -1200,7 +1223,7 @@ ${resultDescription}
   });
 
   // 3. Scene & Dramaturgy Analysis
-  app.post('/api/ai/analyze-scene', async (req, res) => {
+  app.post('/api/ai/analyze-scene', requirePermission('canUseAi'), async (req, res) => {
     try {
       const { sceneTitle, sceneContent, characters, location, conflict } = req.body;
       const prompt = `Проаналізуй драматургію сцени роману:
@@ -1257,7 +1280,7 @@ ${resultDescription}
   });
 
   // 3b. Literary Translation (Ukrainian -> English for bilingual publication)
-  app.post('/api/ai/translate', async (req, res) => {
+  app.post('/api/ai/translate', requirePermission('canUseAi'), async (req, res) => {
     try {
       const { text, title, chapterTitle, scene, genre, bookTitle, modelId, bookId } = req.body;
       if (!text || String(text).trim().length === 0) {
@@ -1454,7 +1477,7 @@ Translate into refined English JSON.`;
    * іде через рушій, обраний у чаті (Q13/Q18 grilling-сесії): немає ключа
    * для нього — чесна 503, без жодної підміни.
    */
-  app.post('/api/ai/craft-character-prompt', async (req, res) => {
+  app.post('/api/ai/craft-character-prompt', requirePermission('canUseAi'), async (req, res) => {
     const { character, model = 'nano-banana', stylePreset = 'cyberpunk-photoreal', genre, modelId, bookId } = req.body;
     if (!character) {
       return res.status(400).json({ error: 'Потрібні дані персонажа.' });
@@ -1506,7 +1529,7 @@ Translate into refined English JSON.`;
    * решта ядра, іде через рушій, обраний у чаті: немає ключа для нього —
    * чесна 503, без жодної підміни (Q13/Q18 grilling-сесії).
    */
-  app.post('/api/ai/generate-character', async (req, res) => {
+  app.post('/api/ai/generate-character', requirePermission('canUseAi'), async (req, res) => {
     const { role, promptDescription, genre, modelId, bookId } = req.body;
 
     const resolved = await resolveTextEngineOrFail(req, res, modelId, 'генерація персонажа');
@@ -1548,7 +1571,7 @@ Translate into refined English JSON.`;
    * порядку. Результат лягає в текст нової книги як [AI-DRAFT]
    * (src/utils/manuscriptDoc.ts) — автор бачить, що це доповнення ШІ.
    */
-  app.post('/api/ai/elaborate-instruction-steps', async (req, res) => {
+  app.post('/api/ai/elaborate-instruction-steps', requirePermission('canUseAi'), async (req, res) => {
     const { docTypeLabel, title, description, materials, tools, steps, modelId, bookId } = req.body;
 
     if (!Array.isArray(steps) || steps.length === 0) {
@@ -1628,7 +1651,7 @@ Translate into refined English JSON.`;
   // ендпоінт із розділу «Персонажі», а результати зберігаються у
   // Character.behaviorPatterns і показуються при наведенні на героя в
   // редакторі («Книга і текст»).
-  app.post('/api/ai/generate-behavior-patterns', async (req, res) => {
+  app.post('/api/ai/generate-behavior-patterns', requirePermission('canUseAi'), async (req, res) => {
     try {
       const {
         name,
@@ -1753,7 +1776,7 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
    * API ядра (aiCore.generateText) — нового коду нема сенсу тягнути крізь
    * legacy-сумісний шлях.
    */
-  app.post('/api/ai/generate-skandhas', async (req, res) => {
+  app.post('/api/ai/generate-skandhas', requirePermission('canUseAi'), async (req, res) => {
     try {
       const {
         name,
@@ -1817,7 +1840,7 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
     }
   });
 
-  app.post('/api/ai/generate-skandha-cycle', async (req, res) => {
+  app.post('/api/ai/generate-skandha-cycle', requirePermission('canUseAi'), async (req, res) => {
     try {
       const { name, skandhas = {}, event } = req.body;
       if (!event || !String(event).trim()) {
@@ -1887,7 +1910,7 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
    * обраний у чаті: немає ключа для нього — чесна 503, без жодної підміни
    * (Q13/Q18 grilling-сесії).
    */
-  app.post('/api/ai/craft-illustration-prompt', async (req, res) => {
+  app.post('/api/ai/craft-illustration-prompt', requirePermission('canUseAi'), async (req, res) => {
     const {
       selectedText,
       model = 'nano-banana',
@@ -3846,7 +3869,7 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
   );
 
   // Legacy prompt generator backward compatibility
-  app.post('/api/ai/generate-prompt', async (req, res) => {
+  app.post('/api/ai/generate-prompt', requirePermission('canUseAi'), async (req, res) => {
     try {
       const { text, sceneContext, visualBible, style } = req.body;
       const prompt = `Ти — провідний AI Prompt Engineer для генерації книжкових ілюстрацій найвищої якості.
@@ -3892,7 +3915,7 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
   });
 
   // 6. Cover Concept Generator
-  app.post('/api/ai/generate-cover', async (req, res) => {
+  app.post('/api/ai/generate-cover', requirePermission('canUseAi'), async (req, res) => {
     try {
       const { title, genre, synopsis, author, visualBible } = req.body;
       const prompt = `Створи концепцію поліграфічної обкладинки для книги:
@@ -4578,7 +4601,7 @@ ${skillLines}
   });
 
   // 7. Writer Mastery: Task Evaluation with AI Mentor
-  app.post('/api/ai/evaluate-skill-task', async (req, res) => {
+  app.post('/api/ai/evaluate-skill-task', requirePermission('canUseAi'), async (req, res) => {
     try {
       const { task, userAnswer, bookContext } = req.body;
       if (!userAnswer || !userAnswer.trim()) {
@@ -4671,7 +4694,7 @@ ${JSON.stringify(bookContext || {}, null, 2)}
   // -----------------------------------------------------------------------
 
   // 8a. AI Coach: глибокий розбір відповіді автора для конкретної навички.
-  app.post('/api/ai/coach-feedback', async (req, res) => {
+  app.post('/api/ai/coach-feedback', requirePermission('canUseAi'), async (req, res) => {
     try {
       const { skillId, skillTitle, subSkills, userDraft, exercisePrompt, bookContext, modelId, bookId, requestFullCorrection, bookExcerptRef, exerciseEntities, entityStep } = req.body || {};
       // Запис #237: сутності вправи — лише ключі з клієнта, решта з реєстру.
@@ -4808,7 +4831,7 @@ ${criteriaList}
   });
 
   // 8b. Генерація персональної вправи для навички під книгу автора.
-  app.post('/api/ai/generate-exercise', async (req, res) => {
+  app.post('/api/ai/generate-exercise', requirePermission('canUseAi'), async (req, res) => {
     try {
       const { skillTitle, subSkills, difficulty, bookContext, modelId, bookId, entities } = req.body || {};
       // Запис #237: сутності тренажера, на які спирається нова вправа.
@@ -4891,7 +4914,7 @@ ${criteriaList}
   });
 
   // 8c. Генератор Blueprint книги/курсу на основі 18 навичок.
-  app.post('/api/ai/generate-blueprint', async (req, res) => {
+  app.post('/api/ai/generate-blueprint', requirePermission('canUseAi'), async (req, res) => {
     try {
       const { projectType, topic, targetAudience, format, modelId, bookId } = req.body || {};
       if (!topic || !String(topic).trim()) {
@@ -4979,7 +5002,7 @@ ${criteriaList}
   });
 
   // 8d. Аналіз емоційної дуги книги з опису сюжету.
-  app.post('/api/ai/analyze-emotional-arc', async (req, res) => {
+  app.post('/api/ai/analyze-emotional-arc', requirePermission('canUseAi'), async (req, res) => {
     try {
       const { storyOutline, chaptersCount, modelId, bookId } = req.body || {};
       if (!storyOutline || !String(storyOutline).trim()) {
@@ -5205,7 +5228,7 @@ ${chapterListText}
   // 'direct' (пряма цитата) обробляється на клієнті без виклику сервера —
   // сюди приходять лише 'paraphrase' і 'analytical', яким справді потрібен AI.
   // -----------------------------------------------------------------------
-  app.post('/api/ai/knowledge-quote', async (req, res) => {
+  app.post('/api/ai/knowledge-quote', requirePermission('canUseAi'), async (req, res) => {
     try {
       const { text, mode, sourceName } = req.body || {};
       if (!text || !String(text).trim()) {
@@ -5315,7 +5338,7 @@ ${chapterListText}
     'style-detail': 'Стиль письменника — Деталізація',
   };
 
-  app.post('/api/ai/evaluate-trainer', async (req, res) => {
+  app.post('/api/ai/evaluate-trainer', requirePermission('canUseAi'), async (req, res) => {
     try {
       const { trainerType, taskPrompt, userAnswer, trainerLabel, bookContext } = req.body || {};
       const criteria = TRAINER_CRITERIA[trainerType];
@@ -5394,7 +5417,7 @@ ${criteriaList}
   // розділу. Авторський текст блоку сам AI ніколи не змінює — лише читає
   // його як контекст для назви.
   // -----------------------------------------------------------------------
-  app.post('/api/ai/structure-suggest-title', async (req, res) => {
+  app.post('/api/ai/structure-suggest-title', requirePermission('canUseAi'), async (req, res) => {
     try {
       const { blockLabel, blockText, genre, bookTitle } = req.body || {};
       if (!blockLabel || !String(blockLabel).trim()) {
@@ -5441,7 +5464,7 @@ ${criteriaList}
   // якщо чекбокс «Автоматично використовувати стиль» увімкнено
   // (та сама модель, що і в EditorView, Фаза 1, 1.3).
   // -----------------------------------------------------------------------
-  app.post('/api/ai/assistant-chat', async (req, res) => {
+  app.post('/api/ai/assistant-chat', requirePermission('canUseAi'), async (req, res) => {
     try {
       const { messages, bookContext, styleGuide } = req.body || {};
       if (!Array.isArray(messages) || messages.length === 0) {
@@ -5491,7 +5514,7 @@ ${criteriaList}
   });
 
   // 8. Writer Mastery: Diagnostic Assessment
-  app.post('/api/ai/diagnostic-assessment', async (req, res) => {
+  app.post('/api/ai/diagnostic-assessment', requirePermission('canUseAi'), async (req, res) => {
     try {
       const { categoryScores, bookContext } = req.body;
 
@@ -5541,9 +5564,27 @@ ${JSON.stringify(bookContext || {}, null, 2)}
 
   // --- Real-time Collaboration REST API Endpoints ---
 
-  app.get('/api/rooms/:bookId/info', (req, res) => {
+  /**
+   * Квиток для WebSocket спільного редагування (Т0.1). Береться звичайним
+   * запитом, де є cookie сесії; сокет пред'являє його в адресі.
+   */
+  app.post('/api/realtime/ticket', requireAuth, async (req, res) => {
+    const bookId = req.body?.bookId;
+    if (!isValidBookId(bookId)) return res.status(400).json({ error: 'Некоректний id книги.' });
+    const access = await resolveRealtimeAccess(req.principal as any, bookId, realtimeAccessDeps);
+    if (!access) return res.status(403).json({ error: 'Немає доступу до спільного редагування цієї книги.' });
+    res.json({ ticket: issueRealtimeTicket(access), role: access.role, canWrite: access.canWrite, shared: access.shared });
+  });
+
+  /** Кімната, до якої має доступ автор запиту, — або null. */
+  const roomForRequest = async (req: express.Request): Promise<RoomData | null> => {
+    const access = await resolveRealtimeAccess(req.principal as any, String(req.params.bookId || ''), realtimeAccessDeps);
+    return access ? collabRooms.get(access.roomKey) ?? null : null;
+  };
+
+  app.get('/api/rooms/:bookId/info', requireAuth, async (req, res) => {
     const { bookId } = req.params;
-    const room = collabRooms.get(bookId);
+    const room = await roomForRequest(req);
     if (!room) {
       return res.json({
         bookId,
@@ -5563,9 +5604,8 @@ ${JSON.stringify(bookContext || {}, null, 2)}
     });
   });
 
-  app.get('/api/rooms/:bookId/chat', (req, res) => {
-    const { bookId } = req.params;
-    const room = collabRooms.get(bookId);
+  app.get('/api/rooms/:bookId/chat', requireAuth, async (req, res) => {
+    const room = await roomForRequest(req);
     res.json({
       messages: room ? room.messages : []
     });
@@ -5644,43 +5684,63 @@ ${JSON.stringify(bookContext || {}, null, 2)}
   const wss = new WebSocketServer({ server, path: '/ws' });
 
   wss.on('connection', (ws, req) => {
-    let currentBookId: string | null = null;
+    // Т0.1 (журнал #242): хто підключився, у яку кімнату й чи може писати —
+    // визначає лише квиток, виданий сервером (`POST /api/realtime/ticket`).
+    // Ні id книги, ні роль, ні id користувача з повідомлень клієнта більше не
+    // довіряються.
+    const access: RealtimeAccess | null = verifyRealtimeTicket(ticketFromUrl(req.url));
+    if (!access) {
+      try {
+        ws.close(4401, 'unauthorized');
+      } catch {
+        // ignore
+      }
+      return;
+    }
+    const roomKey = access.roomKey;
+    const bookId = access.bookId;
     let currentClientId: string | null = null;
+
+    /** Повідомлення лише про «свою» книгу й лише після входу в кімнату. */
+    const isOwnBook = (payloadBookId: unknown) => payloadBookId === bookId;
 
     ws.on('message', (raw) => {
       try {
         const message = JSON.parse(raw.toString());
-        const { type, payload } = message;
+        const { type, payload } = message || {};
 
         switch (type) {
           case 'client:join': {
-            const { bookId, user, initialBook } = payload;
-            if (!bookId) return;
-
-            currentBookId = bookId;
-            const room = getOrCreateRoom(bookId);
-            // Кімната бере НОВІШУ копію, а не першу-ліпшу.
-            //
-            // Було: `if (!room.book && initialBook)` — тобто стан кімнати
-            // назавжди визначав той, хто підключився першим. Якщо він мав
-            // застарілу книгу (та сама книга, відкрита в іншому браузері чи
-            // на іншому пристрої), кожен наступний учасник отримував у
-            // room:sync цей старий текст. Свіжа робота зникала без сліду.
-            const clientIsNewer = initialBook && bookRevisionMs(initialBook) > bookRevisionMs(room.book);
-            if (!room.book && initialBook) {
-              room.book = initialBook;
-            } else if (clientIsNewer) {
-              room.book = initialBook;
+            const { initialBook, user } = payload || {};
+            if (!isOwnBook(payload?.bookId)) {
+              ws.close(4403, 'forbidden');
+              return;
             }
 
-            const clientId = user?.clientId || `client-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+            const room = getOrCreateRoom(roomKey, bookId);
+            // Кімната бере НОВІШУ копію, а не першу-ліпшу (див. історію в
+            // журналі): інакше учасник зі старою книгою затирав свіжу роботу.
+            // Приймається лише від того, хто має право писати, і лише копія
+            // саме цієї книги.
+            const offered = access.canWrite && initialBook && initialBook.id === bookId ? initialBook : null;
+            const clientIsNewer = offered && bookRevisionMs(offered) > bookRevisionMs(room.book);
+            if (!room.book && offered) {
+              room.book = offered;
+            } else if (clientIsNewer) {
+              room.book = offered;
+            }
+
+            const clientId = typeof user?.clientId === 'string' && user.clientId.length <= 100
+              ? user.clientId
+              : `client-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
             currentClientId = clientId;
 
             const userInfo: CollabUser = {
               clientId,
-              userId: user?.userId || clientId,
-              userName: user?.userName || 'Користувач',
-              role: user?.role || 'writer',
+              // Хто це і яка роль — із квитка, а не з повідомлення.
+              userId: access.userId,
+              userName: typeof user?.userName === 'string' ? user.userName.slice(0, 120) : 'Користувач',
+              role: access.role as any,
               currentTab: user?.currentTab || 'editor',
               activeSectionId: user?.activeSectionId,
               activeChapterId: user?.activeChapterId,
@@ -5706,7 +5766,8 @@ ${JSON.stringify(bookContext || {}, null, 2)}
                 presenceList,
                 chatHistory: room.messages,
                 changelog: room.changelog,
-                assignedClientId: clientId
+                assignedClientId: clientId,
+                canWrite: access.canWrite
               },
               timestamp: new Date().toISOString()
             }));
@@ -5714,19 +5775,18 @@ ${JSON.stringify(bookContext || {}, null, 2)}
             // Новоприбулий приніс свіжішу книгу — негайно віддаємо її решті,
             // інакше вони лишились би зі старим станом до наступної правки.
             if (clientIsNewer) {
-              broadcastToRoom(bookId, {
+              broadcastToRoom(roomKey, {
                 type: 'book:remote_update',
                 payload: { book: room.book }
               }, clientId);
             }
 
-            // Notify others
-            broadcastToRoom(bookId, {
+            broadcastToRoom(roomKey, {
               type: 'presence:update',
               payload: { presenceList }
             });
 
-            broadcastToRoom(bookId, {
+            broadcastToRoom(roomKey, {
               type: 'user:joined',
               payload: { user: userInfo }
             }, clientId);
@@ -5734,17 +5794,17 @@ ${JSON.stringify(bookContext || {}, null, 2)}
           }
 
           case 'book:update': {
-            const { bookId, updatedBook, logEntry } = payload;
-            if (!bookId || !updatedBook) return;
+            const { updatedBook, logEntry } = payload || {};
+            if (!currentClientId || !access.canWrite || !isOwnBook(payload?.bookId) || !updatedBook) return;
+            if (updatedBook.id && updatedBook.id !== bookId) return;
 
-            const room = getOrCreateRoom(bookId);
+            const room = getOrCreateRoom(roomKey, bookId);
             // Старіша копія не має відкочувати кімнату. Таке приходить від
             // сесії, що прокинулась із застарілим станом; її власний клієнт
             // уже отримає свіжу версію нижче.
             if (room.book && bookRevisionMs(updatedBook) < bookRevisionMs(room.book)) {
-              const socket = ws;
-              if (socket.readyState === socket.OPEN) {
-                socket.send(
+              if (ws.readyState === ws.OPEN) {
+                ws.send(
                   JSON.stringify({
                     type: 'book:remote_update',
                     payload: { book: room.book },
@@ -5761,14 +5821,13 @@ ${JSON.stringify(bookContext || {}, null, 2)}
               if (room.changelog.length > 200) room.changelog.pop();
             }
 
-            // Broadcast to other clients in room
-            broadcastToRoom(bookId, {
+            broadcastToRoom(roomKey, {
               type: 'book:remote_update',
               payload: {
                 book: updatedBook,
                 logEntry
               }
-            }, currentClientId || undefined);
+            }, currentClientId);
             break;
           }
 
@@ -5777,10 +5836,11 @@ ${JSON.stringify(bookContext || {}, null, 2)}
            * саме її замість усієї книги: кілька сотень байтів проти мегабайта.
            */
           case 'section:patch': {
-            const { bookId, patch } = payload;
-            if (!bookId || !patch?.chapterId || !patch?.sectionId) return;
+            const { patch } = payload || {};
+            if (!currentClientId || !access.canWrite || !isOwnBook(payload?.bookId)) return;
+            if (!patch?.chapterId || !patch?.sectionId) return;
 
-            const room = getOrCreateRoom(bookId);
+            const room = getOrCreateRoom(roomKey, bookId);
 
             // Якщо серверна копія книги є — оновлюємо її, щоб новий учасник
             // отримав актуальний стан у room:sync.
@@ -5795,28 +5855,31 @@ ${JSON.stringify(bookContext || {}, null, 2)}
               }
             }
 
-            broadcastToRoom(bookId, {
+            broadcastToRoom(roomKey, {
               type: 'section:remote_patch',
               payload: { patch }
-            }, currentClientId || undefined);
+            }, currentClientId);
             break;
           }
 
           case 'presence:status': {
-            const { bookId, status } = payload;
-            if (!bookId || !currentClientId) return;
+            const { status } = payload || {};
+            if (!currentClientId || !isOwnBook(payload?.bookId)) return;
 
-            const room = collabRooms.get(bookId);
+            const room = collabRooms.get(roomKey);
             if (room && room.clients.has(currentClientId)) {
               const client = room.clients.get(currentClientId)!;
+              // Роль і особу статус змінити не може — лише вкладку, розділ,
+              // «друкує» тощо.
+              const { role: _ignoredRole, userId: _ignoredUser, clientId: _ignoredClient, ...safeStatus } = status || {};
               client.info = {
                 ...client.info,
-                ...status,
+                ...safeStatus,
                 lastActive: new Date().toISOString()
               };
 
               const presenceList = Array.from(room.clients.values()).map(c => c.info);
-              broadcastToRoom(bookId, {
+              broadcastToRoom(roomKey, {
                 type: 'presence:update',
                 payload: { presenceList }
               });
@@ -5825,19 +5888,20 @@ ${JSON.stringify(bookContext || {}, null, 2)}
           }
 
           case 'chat:send': {
-            const { bookId, text, tabContext, senderName, role, color } = payload;
-            if (!bookId || !text || !text.trim()) return;
+            const { text, tabContext } = payload || {};
+            if (!currentClientId || !isOwnBook(payload?.bookId)) return;
+            if (typeof text !== 'string' || !text.trim()) return;
 
-            const room = getOrCreateRoom(bookId);
-            const client = currentClientId ? room.clients.get(currentClientId) : null;
+            const room = getOrCreateRoom(roomKey, bookId);
+            const client = room.clients.get(currentClientId);
 
             const newMsg = {
               id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-              clientId: currentClientId || 'anon',
-              senderName: client?.info?.userName || senderName || 'Колега',
-              role: client?.info?.role || role || 'writer',
-              color: client?.info?.color || color || '#3b82f6',
-              message: text.trim(),
+              clientId: currentClientId,
+              senderName: client?.info?.userName || 'Колега',
+              role: client?.info?.role || access.role,
+              color: client?.info?.color || '#3b82f6',
+              message: text.trim().slice(0, 4000),
               timestamp: new Date().toISOString(),
               tabContext: tabContext || client?.info?.currentTab || 'editor'
             };
@@ -5845,7 +5909,7 @@ ${JSON.stringify(bookContext || {}, null, 2)}
             room.messages.push(newMsg);
             if (room.messages.length > 200) room.messages.shift();
 
-            broadcastToRoom(bookId, {
+            broadcastToRoom(roomKey, {
               type: 'chat:message',
               payload: { message: newMsg }
             });
@@ -5853,18 +5917,18 @@ ${JSON.stringify(bookContext || {}, null, 2)}
           }
 
           case 'version:snapshot_created': {
-            const { bookId, snapshot, updatedBook } = payload;
-            if (!bookId) return;
+            const { snapshot, updatedBook } = payload || {};
+            if (!currentClientId || !access.canWrite || !isOwnBook(payload?.bookId)) return;
 
-            const room = getOrCreateRoom(bookId);
-            if (updatedBook) {
+            const room = getOrCreateRoom(roomKey, bookId);
+            if (updatedBook && (!updatedBook.id || updatedBook.id === bookId)) {
               room.book = updatedBook;
             }
 
-            broadcastToRoom(bookId, {
+            broadcastToRoom(roomKey, {
               type: 'version:snapshot_created',
               payload: { snapshot, book: room.book }
-            }, currentClientId || undefined);
+            }, currentClientId);
             break;
           }
 
@@ -5879,20 +5943,20 @@ ${JSON.stringify(bookContext || {}, null, 2)}
     });
 
     ws.on('close', () => {
-      if (currentBookId && currentClientId) {
-        const room = collabRooms.get(currentBookId);
+      if (currentClientId) {
+        const room = collabRooms.get(roomKey);
         if (room) {
           const leavingUser = room.clients.get(currentClientId)?.info;
           room.clients.delete(currentClientId);
 
           const presenceList = Array.from(room.clients.values()).map(c => c.info);
-          broadcastToRoom(currentBookId, {
+          broadcastToRoom(roomKey, {
             type: 'presence:update',
             payload: { presenceList }
           });
 
           if (leavingUser) {
-            broadcastToRoom(currentBookId, {
+            broadcastToRoom(roomKey, {
               type: 'user:left',
               payload: { user: leavingUser }
             });

@@ -240,7 +240,9 @@ export function requirePermission(permission: string) {
     const isGuest = !req.principal || req.principal.isGuest;
     res.status(403).json({
       error: isGuest
-        ? 'Генерація зображень доступна зареєстрованим користувачам. Створіть обліковий запис або увійдіть.'
+        ? permission === 'canGenerateImages'
+          ? 'Генерація зображень доступна зареєстрованим користувачам. Створіть обліковий запис або увійдіть.'
+          : 'Функції ШІ доступні зареєстрованим користувачам. Створіть обліковий запис або увійдіть.'
         : 'Ваша роль не має дозволу на цю дію. Зверніться до адміністратора.',
       kind: isGuest ? 'guest_restricted' : 'forbidden',
       permission,

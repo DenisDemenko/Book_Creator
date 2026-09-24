@@ -85,6 +85,8 @@ export function useRealtimeSync({
   });
   const reconnectAttemptsRef = useRef<number>(0);
   const isUnmountedRef = useRef<boolean>(false);
+  /** Номер спроби з'єднання: відповідь на застарілий запит квитка ігнорується. */
+  const connectGenerationRef = useRef<number>(0);
   // Колір обирається один раз на сесію. Раніше тут лежала функція, яку
   // викликали при кожному під'єднанні, тож колір користувача стрибав
   // після кожного реконекту.
@@ -198,9 +200,22 @@ export function useRealtimeSync({
     // Не збираємо URL тут: під префіксом /studio (Фаза G3) WebSocket іде
     // повз проксі, напряму на хост Nova — див. realtimeSocketUrl().
     const wsUrl = realtimeSocketUrl();
+    const generation = ++connectGenerationRef.current;
 
+    /** Наростаюча пауза перед повторною спробою (та сама, що й при обриві). */
+    const scheduleReconnect = () => {
+      const attempt = reconnectAttemptsRef.current;
+      const delay = Math.min(3000 * Math.pow(2, attempt), 30000);
+      reconnectAttemptsRef.current = attempt + 1;
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = setTimeout(() => {
+        connectWebSocket();
+      }, delay);
+    };
+
+    const openSocket = (socketUrl: string) => {
     try {
-      const ws = new WebSocket(wsUrl);
+      const ws = new WebSocket(socketUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -351,13 +366,18 @@ export function useRealtimeSync({
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (ev?: CloseEvent) => {
         // Якщо цей сокет уже не активний — його закрили ми самі, реконект зайвий.
         if (wsRef.current !== ws) return;
         if (isUnmountedRef.current) return;
 
         setSyncStatus('disconnected');
         if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+
+        // 4403 — сервер відмовив у цій книзі (Т0.1): повтор нічого не змінить.
+        // 4401 (квиток прострочений чи вже використаний) лишається звичайним
+        // обривом — нова спроба візьме свіжий квиток.
+        if (ev?.code === 4403) return;
 
         // Наростаюча пауза: 3, 6, 12, 24, далі 30 с — щоб не бомбардувати
         // сервер, який лежить, і не палити батарею на мобільному.
@@ -379,6 +399,43 @@ export function useRealtimeSync({
       console.error('Failed to create WebSocket:', e);
       setSyncStatus('disconnected');
     }
+    };
+
+    // Т0.1 (журнал #242): спершу — квиток. Звичайний запит несе cookie сесії
+    // (навіть коли сам сокет іде на інший хост, де cookie немає), сервер
+    // вирішує, у яку кімнату пустити й чи можна писати, а сокет пред'являє
+    // квиток в адресі. Без сесії (гість) чи без доступу — спільного
+    // редагування немає, і повторних спроб теж: це не обрив мережі.
+    const bookIdForTicket = bookRef.current.id || 'BK-2084-CYBER';
+    void (async () => {
+      let ticket: string | null = null;
+      try {
+        const res = await fetch('/api/realtime/ticket', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ bookId: bookIdForTicket }),
+        });
+        if (res.status === 400 || res.status === 401 || res.status === 403) {
+          if (generation === connectGenerationRef.current && !isUnmountedRef.current) setSyncStatus('disconnected');
+          return;
+        }
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          ticket = typeof data?.ticket === 'string' ? data.ticket : null;
+        }
+      } catch {
+        ticket = null;
+      }
+      if (isUnmountedRef.current || generation !== connectGenerationRef.current) return;
+      if (!ticket) {
+        setSyncStatus('disconnected');
+        scheduleReconnect();
+        return;
+      }
+      const sep = wsUrl.includes('?') ? '&' : '?';
+      openSocket(`${wsUrl}${sep}ticket=${encodeURIComponent(ticket)}`);
+    })();
   }, [clientId, activeChapterId, activeSectionId, onRemoteBookUpdate, onRemoteVersionSnapshot]);
 
   // Initial connection & reconnection on bookId change
