@@ -18,7 +18,7 @@
 import type { Book, Chapter, Section } from '../types';
 
 /** Поля секції, які редактор змінює під час набору тексту. */
-const PATCHABLE_SECTION_FIELDS = ['content', 'contentEn', 'wordCount', 'lastModified'] as const;
+const PATCHABLE_SECTION_FIELDS = ['content', 'contentEn', 'wordCount', 'lastModified', 'paragraphIds', 'paragraphHashes'] as const;
 
 /** Поля книги, яким дозволено змінюватися разом із правкою тексту. */
 const IGNORED_BOOK_FIELDS = new Set(['chapters', 'updatedAt']);
@@ -30,6 +30,9 @@ export interface SectionPatch {
   contentEn?: string;
   wordCount?: number;
   lastModified?: string;
+  /** Постійні номери абзаців (Т0.5) — їдуть разом із текстом, інакше співавтор їх втратив би. */
+  paragraphIds?: string[];
+  paragraphHashes?: string[];
 }
 
 /** Порівнює верхній рівень книги за посиланнями, ігноруючи chapters/updatedAt. */

@@ -12,6 +12,7 @@ import { Table } from '@tiptap/extension-table';
 import { TableRow } from '@tiptap/extension-table-row';
 import { TableCellAlign, TableHeaderAlign } from './TableAlignCell';
 import { FocusParagraphPlugin } from './FocusParagraphPlugin';
+import { ParagraphIdExtension } from './ParagraphIdExtension';
 import { CharacterMentionPlugin, type CharacterMentionEntry } from './CharacterMentionPlugin';
 import { ReadabilityHighlightPlugin } from './ReadabilityHighlightPlugin';
 import { EntityTagPlugin } from './EntityTagPlugin';
@@ -130,5 +131,8 @@ export function buildManuscriptExtensions(
       isEnglishUi: isEnglishUi || (() => false),
     }),
     TagPlugin,
+    // Постійні номери абзаців (Т0.5, журнал #246) — лише атрибут вузла, у текст
+    // розділу не пишеться.
+    ParagraphIdExtension,
   ];
 }

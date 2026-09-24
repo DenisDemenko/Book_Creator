@@ -361,9 +361,13 @@ function serializeInline(nodes: JSONContent[]): string {
   return out;
 }
 
-/** Серіалізує документ TipTap (JSON) назад у текст розділу з маркерами. */
-export function tiptapDocToMarkerString(doc: JSONContent): string {
-  const blocks = (doc.content || []).map((node) => {
+/**
+ * Текст кожного блока верхнього рівня окремо — у тому самому вигляді, що й у
+ * рядку розділу (`tiptapDocToMarkerString` — це ці блоки через порожній рядок).
+ * Потрібно для постійних номерів абзаців (`utils/paragraphIds.ts`, Т0.5).
+ */
+export function tiptapDocToMarkerBlocks(doc: JSONContent): string[] {
+  return (doc.content || []).map((node) => {
     if (node.type === 'wrappedImage') {
       return imgMarkerString(node.attrs || {});
     }
@@ -395,7 +399,11 @@ export function tiptapDocToMarkerString(doc: JSONContent): string {
     }
     return '';
   });
-  return blocks.join('\n\n');
+}
+
+/** Серіалізує документ TipTap (JSON) назад у текст розділу з маркерами. */
+export function tiptapDocToMarkerString(doc: JSONContent): string {
+  return tiptapDocToMarkerBlocks(doc).join('\n\n');
 }
 
 /**

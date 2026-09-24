@@ -213,6 +213,14 @@ export interface Section {
   order: number;
   content: string; // rich text or markdown
   contentEn?: string; // English translation / edition
+  /**
+   * Постійні номери блоків `content` (абзаців, заголовків, таблиць…) у порядку
+   * тексту — Т0.5, журнал #246, `utils/paragraphIds.ts`. Необов'язкові: старі
+   * розділи отримують номери під час першого відкриття чи синхронізації.
+   */
+  paragraphIds?: string[];
+  /** Відбитки тексту тих самих блоків — за ними номери звіряються після правок поза редактором. */
+  paragraphHashes?: string[];
   wordCount: number;
   characterCount?: number;
   footnotes?: Footnote[];

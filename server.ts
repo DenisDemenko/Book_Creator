@@ -5848,7 +5848,7 @@ ${JSON.stringify(bookContext || {}, null, 2)}
               const chapter = room.book.chapters.find((c: any) => c.id === patch.chapterId);
               const section = chapter?.sections?.find((s: any) => s.id === patch.sectionId);
               if (section) {
-                for (const field of ['content', 'contentEn', 'wordCount', 'lastModified']) {
+                for (const field of ['content', 'contentEn', 'wordCount', 'lastModified', 'paragraphIds', 'paragraphHashes']) {
                   if (patch[field] !== undefined) section[field] = patch[field];
                 }
                 room.book.updatedAt = new Date().toISOString();

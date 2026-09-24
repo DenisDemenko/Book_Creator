@@ -38,6 +38,7 @@ import {
   findBlockRangeWithText,
   JSONContent,
 } from '../utils/manuscriptDoc';
+import { reconcileParagraphIds, markerStringToTiptapDocWithIds, paragraphStateFromDoc, sameStrings, type ParagraphIdState } from '../utils/paragraphIds';
 import { 
   Plus, 
   Trash2, 
@@ -662,7 +663,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
   // бачили б значення book/activeSection з першого рендеру назавжди).
   const bookRef = useRef(book);
   bookRef.current = book;
-  const handleContentChangeRef = useRef<(v: string) => void>(() => {});
+  const handleContentChangeRef = useRef<(v: string, pids?: ParagraphIdState) => void>(() => {});
   const handleContentEnChangeRef = useRef<(v: string) => void>(() => {});
 
   const resolveImageUrl = useCallback((id: string): string | undefined => {
@@ -954,15 +955,34 @@ export const EditorView: React.FC<EditorViewProps> = ({
     }
   };
 
+  /**
+   * Документ української колонки з постійними номерами абзаців (Т0.5,
+   * журнал #246): збережені номери звіряються з поточним текстом розділу —
+   * якщо текст змінився поза редактором, номери незмінених і відредагованих
+   * на місці абзаців зберігаються, нові обчислюються.
+   */
+  const uaDocForSection = (section?: { id: string; content?: string; paragraphIds?: string[]; paragraphHashes?: string[] } | null) => {
+    if (!section) return markerStringToTiptapDoc('');
+    const { ids } = reconcileParagraphIds({
+      sectionId: section.id,
+      content: section.content || '',
+      prevIds: section.paragraphIds,
+      prevHashes: section.paragraphHashes,
+    });
+    return markerStringToTiptapDocWithIds(section.content || '', ids);
+  };
+
   const uaEditor = useEditor(
     {
       extensions: uaManuscriptExtensions,
-      content: markerStringToTiptapDoc(activeSection?.content || ''),
+      content: uaDocForSection(activeSection),
       editorProps: {
         attributes: { class: 'nova-manuscript-editor nova-manuscript-blocks', spellcheck: String(spellcheckEnabled), lang: proofingLanguage },
       },
       onUpdate: ({ editor }) => {
-        handleContentChangeRef.current(tiptapDocToMarkerString(editor.getJSON() as JSONContent));
+        // Текст розділу й номери його абзаців — з одного проходу по документу.
+        const state = paragraphStateFromDoc(editor.getJSON() as JSONContent);
+        handleContentChangeRef.current(state.content, state);
       },
       onBlur: ({ editor }) => normalizeEntityTagsOnBlur(editor),
       onSelectionUpdate: ({ editor }) => {
@@ -1121,7 +1141,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
     if (!uaEditor || !activeSection) return;
     const current = tiptapDocToMarkerString(uaEditor.getJSON() as JSONContent);
     if (current === (activeSection.content || '')) return;
-    uaEditor.commands.setContent(markerStringToTiptapDoc(activeSection.content || ''), { emitUpdate: false });
+    uaEditor.commands.setContent(uaDocForSection(activeSection), { emitUpdate: false });
   }, [uaEditor, activeSection?.id, activeSection?.content]);
 
   useEffect(() => {
@@ -1283,7 +1303,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
   }, [pendingSearchHighlight, activeSection?.id, uaEditor, enEditor]);
 
   // Ukrainian Content change handler
-  const handleContentChange = (newContent: string) => {
+  const handleContentChange = (newContent: string, pids?: ParagraphIdState) => {
     if (!activeChapter || !activeSection) return;
     const words = calculateWordCount(newContent);
     const updatedChapters = book.chapters.map((chap) => {
@@ -1292,12 +1312,19 @@ export const EditorView: React.FC<EditorViewProps> = ({
         ...chap,
         sections: chap.sections.map((sec) => {
           if (sec.id !== activeSection.id) return sec;
-          return {
+          const next = {
             ...sec,
             content: newContent,
             wordCount: words,
             lastModified: new Date().toISOString(),
           };
+          // Номери абзаців (Т0.5) — лише коли прийшли з редактора; той самий
+          // вміст лишає старий масив, щоб патч WebSocket не ніс його щоразу.
+          if (pids) {
+            if (!sameStrings(sec.paragraphIds, pids.ids)) next.paragraphIds = pids.ids;
+            if (!sameStrings(sec.paragraphHashes, pids.hashes)) next.paragraphHashes = pids.hashes;
+          }
+          return next;
         }),
       };
     });
@@ -1330,10 +1357,20 @@ export const EditorView: React.FC<EditorViewProps> = ({
    * вже показує канва, інакше ефект синхронізації перезавантажить її наново.
    */
   const normalizeEntityTagsOnBlur = (editor: Editor) => {
-    const current = tiptapDocToMarkerString(editor.getJSON() as JSONContent);
+    const currentDoc = editor.getJSON() as JSONContent;
+    const current = tiptapDocToMarkerString(currentDoc);
     const normalized = wrapPlainEntityTags(current);
     if (normalized === current) return;
-    editor.commands.setContent(markerStringToTiptapDoc(normalized), { emitUpdate: true });
+    // Загортання тегів не змінює кількості абзаців — номери (Т0.5) переносимо
+    // як є, інакше кожен вихід із редактора роздавав би абзацам нові.
+    const ids = (currentDoc.content || []).map((node) => String(node.attrs?.pid || ''));
+    const nextDoc = markerStringToTiptapDoc(normalized);
+    if ((nextDoc.content || []).length === ids.length) {
+      (nextDoc.content || []).forEach((node, i) => {
+        if (ids[i]) node.attrs = { ...(node.attrs || {}), pid: ids[i] };
+      });
+    }
+    editor.commands.setContent(nextDoc, { emitUpdate: true });
   };
 
   /**
