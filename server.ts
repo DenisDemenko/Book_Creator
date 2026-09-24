@@ -190,6 +190,7 @@ import {
   resolveModuleModelId,
 } from './server/coreModuleModels';
 import { CORE_VISION_MODULES } from './server/coreAiRegistry';
+import { normalizePromptEntities, buildCoachEntityInstruction, normalizeEntityFeedback, buildExerciseEntityInstruction, normalizeGeneratedEntities } from './server/masteryEntityPrompt';
 import { formatManuscriptWithClaude, anthropicConfig, ClaudeManuscriptError, MAX_MANUSCRIPT_CHARS } from './server/claudeManuscript';
 import { purgeExpiredSessions, initStore, getUserStyle, upsertUserStyle, deleteUserStyle, listUserApiKeys, getUserPromptTemplates, upsertUserPromptTemplates, deleteUserPromptTemplates, getAppSetting, setAppSetting } from './server/store';
 
@@ -4672,7 +4673,9 @@ ${JSON.stringify(bookContext || {}, null, 2)}
   // 8a. AI Coach: глибокий розбір відповіді автора для конкретної навички.
   app.post('/api/ai/coach-feedback', async (req, res) => {
     try {
-      const { skillId, skillTitle, subSkills, userDraft, exercisePrompt, bookContext, modelId, bookId, requestFullCorrection, bookExcerptRef } = req.body || {};
+      const { skillId, skillTitle, subSkills, userDraft, exercisePrompt, bookContext, modelId, bookId, requestFullCorrection, bookExcerptRef, exerciseEntities, entityStep } = req.body || {};
+      // Запис #237: сутності вправи — лише ключі з клієнта, решта з реєстру.
+      const promptEntities = normalizePromptEntities(exerciseEntities);
       if (!userDraft || !String(userDraft).trim()) {
         return res.status(400).json({ error: 'Немає тексту для аналізу.' });
       }
@@ -4711,7 +4714,7 @@ ${criteriaList}
 3. Дай 2-3 сильні сторони та 2-3 точки росту (конкретні, не абстрактні).
 4. Оціни кожен суб-критерій від 0 до 100 з коротким коментарем.
 5. Запропонуй покращений приклад (rewrittenExample) — короткий зразок, як підсилити текст.
-6. Дай одну коротку пораду майстра (tip).${fullCorrectionInstruction}
+6. Дай одну коротку пораду майстра (tip).${fullCorrectionInstruction}${buildCoachEntityInstruction(promptEntities, typeof entityStep === 'string' ? entityStep : undefined, String(userDraft))}
 
 Поверни СУВОРО такий JSON:
 {
@@ -4721,7 +4724,7 @@ ${criteriaList}
   "improvements": ["...", "..."],
   "criteriaFeedback": [{ "criterion": "назва", "score": 80, "comment": "коментар" }],
   "rewrittenExample": "покращений зразок",
-  "tip": "порада"${requestFullCorrection ? ',\n  "correctedFullText": "повна виправлена версія всього тексту автора"' : ''}
+  "tip": "порада"${requestFullCorrection ? ',\n  "correctedFullText": "повна виправлена версія всього тексту автора"' : ''}${promptEntities.length ? ',\n  "entityFeedback": [{ "slug": "ключ", "used": true, "comment": "коментар" }]' : ''}
 }`;
 
       const ctx = bookContext || {};
@@ -4796,6 +4799,7 @@ ${criteriaList}
         rewrittenExample: result.rewrittenExample || '',
         tip: result.tip || '',
         correctedFullText: requestFullCorrection && typeof result.correctedFullText === 'string' ? result.correctedFullText : '',
+        entityFeedback: normalizeEntityFeedback(result.entityFeedback, promptEntities),
       });
     } catch (err: any) {
       console.error('Error in /api/ai/coach-feedback:', err);
@@ -4806,7 +4810,9 @@ ${criteriaList}
   // 8b. Генерація персональної вправи для навички під книгу автора.
   app.post('/api/ai/generate-exercise', async (req, res) => {
     try {
-      const { skillTitle, subSkills, difficulty, bookContext, modelId, bookId } = req.body || {};
+      const { skillTitle, subSkills, difficulty, bookContext, modelId, bookId, entities } = req.body || {};
+      // Запис #237: сутності тренажера, на які спирається нова вправа.
+      const promptEntities = normalizePromptEntities(entities);
       if (!skillTitle) {
         return res.status(400).json({ error: 'Не вказано навичку для вправи.' });
       }
@@ -4833,7 +4839,7 @@ ${criteriaList}
   "instructions": "покрокова інструкція, 2-4 пункти",
   "exampleSnippet": "приклад-підказка початку тексту",
   "constraint": "творче обмеження"
-}`;
+}${buildExerciseEntityInstruction(promptEntities)}`;
 
       const ctx = bookContext || {};
       const userPrompt = `Книга автора: «${ctx.bookTitle || 'не вказано'}» (жанр: ${ctx.genre || 'не вказано'}). Головний герой: ${ctx.protagonist || 'не вказано'}. Ідея: ${String(ctx.bookIdea || '').slice(0, 500)}.`;
@@ -4876,6 +4882,7 @@ ${criteriaList}
         instructions: result.instructions || '',
         exampleSnippet: result.exampleSnippet || '',
         constraint: result.constraint || '',
+        ...normalizeGeneratedEntities(result, promptEntities),
       });
     } catch (err: any) {
       console.error('Error in /api/ai/generate-exercise:', err);

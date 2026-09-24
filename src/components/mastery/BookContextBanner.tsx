@@ -20,6 +20,7 @@ import {
   Square,
 } from "lucide-react";
 import type { BookExcerptInsertMeta } from "../../types/masteryBook";
+import { entityBySlug, parseAnyEntityTags, textColorOnWhite } from "../../utils/coreEntities";
 
 interface BookContextBannerProps {
   /**
@@ -34,11 +35,18 @@ interface BookContextBannerProps {
     meta?: BookExcerptInsertMeta
   ) => void;
   compact?: boolean;
+  /**
+   * Сутності тренажера (запис #237). Абзаци розділу, де автор уже поставив
+   * теги цих сутностей, підсвічуються і вибираються одним кліком: тренажер
+   * «Діалоги» бере абзаци з `/dialogue`, «Конфлікт» — із `/conflict` тощо.
+   */
+  entitySlugs?: string[];
 }
 
 export const BookContextBanner: React.FC<BookContextBannerProps> = ({
   onInsertText,
   compact = false,
+  entitySlugs,
 }) => {
   const { bookContext, updateBookContext, resetToDefaultBookContext, bookExcerpts, chapters, getSectionsForChapter, getSectionRawContent, activeExcerptId, setActiveExcerpt } = useWriterBook();
   const [isEditing, setIsEditing] = useState(false);
@@ -65,6 +73,22 @@ export const BookContextBanner: React.FC<BookContextBannerProps> = ({
   const rawParagraphs = rawSectionContent
     ? rawSectionContent.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)
     : [];
+
+  // Сутності тренажера, що стоять у кожному абзаці (запис #237).
+  const trainerSlugs = new Set(entitySlugs || []);
+  const paragraphEntities: string[][] = rawParagraphs.map((para) => {
+    const found: string[] = [];
+    for (const tag of parseAnyEntityTags(para)) {
+      const slug = tag.entity?.slug;
+      if (slug && trainerSlugs.has(slug) && !found.includes(slug)) found.push(slug);
+    }
+    return found;
+  });
+  const taggedParagraphIdxs = paragraphEntities.map((found, idx) => (found.length ? idx : -1)).filter((idx) => idx >= 0);
+  const selectTaggedParagraphs = () => {
+    setInsertMode("paragraphs");
+    setSelectedParagraphIdxs(new Set(taggedParagraphIdxs));
+  };
 
   const toggleParagraph = (idx: number) => {
     setSelectedParagraphIdxs((prev) => {
@@ -420,6 +444,17 @@ export const BookContextBanner: React.FC<BookContextBannerProps> = ({
                           >
                             Обрати абзаци ({rawParagraphs.length})
                           </button>
+                          {taggedParagraphIdxs.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={selectTaggedParagraphs}
+                              data-select-entity-paragraphs
+                              className="px-2.5 py-1 rounded-full text-[10px] font-bold transition-all cursor-pointer bg-violet-100 text-violet-800 hover:bg-violet-200"
+                              title="Обрати абзаци, у яких стоять теги сутностей цього тренажера"
+                            >
+                              З сутностями тренажера ({taggedParagraphIdxs.length})
+                            </button>
+                          )}
                         </div>
 
                         {insertMode === "whole" ? (
@@ -443,8 +478,22 @@ export const BookContextBanner: React.FC<BookContextBannerProps> = ({
                                   ) : (
                                     <Square className="w-3.5 h-3.5 text-gray-300 shrink-0 mt-0.5" />
                                   )}
-                                  <span className="text-[#2c382d] line-clamp-2">
-                                    {para.slice(0, 160)}{para.length > 160 ? "…" : ""}
+                                  <span className="flex flex-col gap-0.5 min-w-0">
+                                    <span className="text-[#2c382d] line-clamp-2">
+                                      {para.slice(0, 160)}{para.length > 160 ? "…" : ""}
+                                    </span>
+                                    {paragraphEntities[idx]?.length > 0 && (
+                                      <span className="flex flex-wrap gap-1" data-paragraph-entities={paragraphEntities[idx].join(",")}>
+                                        {paragraphEntities[idx].map((slug) => {
+                                          const entity = entityBySlug(slug);
+                                          return entity ? (
+                                            <span key={slug} className="text-[9px] font-bold px-1.5 rounded-full bg-violet-50" style={{ color: textColorOnWhite(entity.color) }}>
+                                              {entity.nameUk}
+                                            </span>
+                                          ) : null;
+                                        })}
+                                      </span>
+                                    )}
                                   </span>
                                 </div>
                               );

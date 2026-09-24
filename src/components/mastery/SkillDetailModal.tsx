@@ -1,7 +1,9 @@
-﻿import React, { useState, useEffect } from "react";
+﻿import React, { useState, useEffect, useRef } from "react";
 import { SkillItem, UserSkillProgress, MicroExercise } from "../../types/mastery";
 import { useWriterBook } from "../../context/WriterBookContext";
 import { BookContextBanner } from "./BookContextBanner";
+import { ExerciseEntityPanel, EntityFeedbackList } from "./ExerciseEntityPanel";
+import { entityBySlug } from "../../utils/coreEntities";
 import { appendTextToChapterEnd, replaceTextInSection, replaceSectionContent } from "../../utils/bookText";
 import { computeWordDiff } from "../../utils/helpers";
 import type { Book } from "../../types";
@@ -102,6 +104,28 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
   const [customExerciseDifficulty, setCustomExerciseDifficulty] = useState<string>("medium");
   const [isGeneratingExercise, setIsGeneratingExercise] = useState<boolean>(false);
   const [insertNotice, setInsertNotice] = useState<string | null>(null);
+  const draftRef = useRef<HTMLTextAreaElement | null>(null);
+
+  /**
+   * Вставляє тег сутності в робоче поле там, де стоїть курсор (запис #237),
+   * і лишає курсор перед `]` — щоб одразу писати значення тега.
+   */
+  const handleInsertEntityTag = (slug: string) => {
+    const tag = `[/${slug}:]`;
+    const el = draftRef.current;
+    const start = el ? el.selectionStart ?? userDraft.length : userDraft.length;
+    const end = el ? el.selectionEnd ?? start : start;
+    const before = userDraft.slice(0, start);
+    const pad = before && !/\s$/.test(before) ? " " : "";
+    const next = before + pad + tag + userDraft.slice(end);
+    setUserDraft(next);
+    const caret = before.length + pad.length + tag.length - 1;
+    requestAnimationFrame(() => {
+      if (!draftRef.current) return;
+      draftRef.current.focus();
+      draftRef.current.setSelectionRange(caret, caret);
+    });
+  };
 
   // Quiz state
   const [selectedOptionIdx, setSelectedOptionIdx] = useState<number | null>(null);
@@ -170,6 +194,12 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
           subSkills: skill.subSkills,
           userDraft: trimmedDraft,
           exercisePrompt: selectedExercise?.task || "Вільне тренування",
+          // Запис #237: сутності вправи й крок розмітки — коуч оцінює і їх.
+          exerciseEntities: (selectedExercise?.entities || [])
+            .map((slug) => entityBySlug(slug))
+            .filter(Boolean)
+            .map((e) => ({ slug: e!.slug, nameUk: e!.nameUk, characteristics: e!.characteristics })),
+          entityStep: selectedExercise?.entityStep || undefined,
           bookContext,
           // Запис #188: без цього AI-коуч завжди йшов у Gemini напряму, ігноруючи обрану автором модель.
           modelId: book?.preferredAiModelId || undefined,
@@ -245,6 +275,7 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
         improvements: Array.isArray(data.improvements) ? data.improvements : ["Поглибте деталі та конфлікт"],
         criteriaFeedback: Array.isArray(data.criteriaFeedback) ? data.criteriaFeedback : [],
         rewrittenExample: data.rewrittenExample || "",
+        entityFeedback: Array.isArray(data.entityFeedback) ? data.entityFeedback : [],
         tip: data.tip || "Продовжуйте практикуватися для досягнення найвищого рівня майстерності.",
         // Довіряємо полю лише тоді, коли самі його запитували (draftSource
         // є) — інакше воно могло лишитись від локального демо-фолбеку,
@@ -381,6 +412,11 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
           bookContext,
           modelId: book?.preferredAiModelId || undefined,
           bookId: book?.id,
+          // Запис #237: згенерована вправа теж спирається на сутності тренажера.
+          entities: (skill.entities || [])
+            .map((slug) => entityBySlug(slug))
+            .filter(Boolean)
+            .map((e) => ({ slug: e!.slug, nameUk: e!.nameUk, characteristics: e!.characteristics })),
         }),
       });
 
@@ -392,6 +428,8 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
           task: `${data.scenario}\n\n${data.instructions}`,
           promptPlaceholder: data.exampleSnippet || "Почніть писати тут...",
           constraint: data.constraint,
+          entities: Array.isArray(data.entities) ? data.entities.filter((slug: unknown) => typeof slug === "string" && !!entityBySlug(slug)) : undefined,
+          entityStep: typeof data.entityStep === "string" && data.entityStep.trim() ? data.entityStep : undefined,
         };
         setSelectedExercise(newEx);
         setUserDraft("");
@@ -612,7 +650,7 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
           {activeTab === "trainer" && (
             <div className="flex flex-col gap-6 animate-in fade-in duration-150">
               {/* 0. Real Book Context & Excerpt Manager */}
-              <BookContextBanner onInsertText={handleInsertBookText} />
+              <BookContextBanner onInsertText={handleInsertBookText} entitySlugs={skill.entities} />
 
               {/* Notice when user inserts excerpt or premise */}
               {insertNotice && (
@@ -698,6 +736,14 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
                     <span>Творче обмеження: {selectedExercise.constraint}</span>
                   </div>
                 )}
+
+                {/* Сутності реєстру, які використовує вправа (запис #237) */}
+                <ExerciseEntityPanel
+                  slugs={selectedExercise.entities || []}
+                  entityStep={selectedExercise.entityStep}
+                  draft={userDraft}
+                  onInsertTag={handleInsertEntityTag}
+                />
               </div>
 
               {/* Writing Workspace */}
@@ -744,6 +790,8 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
                 </div>
 
                 <textarea
+                  ref={draftRef}
+                  data-trainer-draft
                   value={userDraft}
                   onChange={(e) => setUserDraft(e.target.value)}
                   placeholder={
@@ -886,6 +934,11 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
                         ))}
                       </div>
                     </div>
+                  )}
+
+                  {/* Розбір розмітки сутностями від коуча (запис #237) */}
+                  {Array.isArray(aiFeedback.entityFeedback) && aiFeedback.entityFeedback.length > 0 && (
+                    <EntityFeedbackList items={aiFeedback.entityFeedback} />
                   )}
 
                   {/* Пропозиція повернути виправлений текст у розділ книги

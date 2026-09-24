@@ -12,6 +12,10 @@ export interface MicroExercise {
   promptPlaceholder: string;
   constraint: string;
   sampleAnswer?: string;
+  /** Сутності реєстру ядра (slug без слеша), які вправа використовує (запис #237). */
+  entities?: string[];
+  /** Крок розмітки: які теги `[/slug:…]` автор ставить у своєму тексті. */
+  entityStep?: string;
 }
 
 export interface QuizOption {
@@ -52,6 +56,8 @@ export interface SkillItem {
   microExercises: MicroExercise[];
   quiz: SkillQuiz;
   defaultProgress: number;
+  /** Сутності тренажера — об’єднання сутностей його вправ (`data/masteryEntities.ts`). */
+  entities?: string[];
 }
 
 export interface FlowStep {

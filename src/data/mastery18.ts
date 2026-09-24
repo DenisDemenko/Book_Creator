@@ -1,6 +1,7 @@
 ﻿import { SkillItem, FlowStep } from "../types/mastery";
+import { attachEntities } from "./masteryEntities";
 
-export const SKILLS_DATA: SkillItem[] = [
+const BASE_SKILLS_DATA: SkillItem[] = [
   {
     id: 1,
     numberStr: "01",
@@ -1153,6 +1154,12 @@ export const SKILLS_DATA: SkillItem[] = [
     defaultProgress: 95
   }
 ];
+
+/**
+ * 18 навичок разом із сутностями ядра: крок розмітки в кожній вправі й нові
+ * вправи для сутностей, яких наявні не зачіпали (запис #237, `masteryEntities.ts`).
+ */
+export const SKILLS_DATA: SkillItem[] = attachEntities(BASE_SKILLS_DATA);
 
 export const FLOW_STEPS: FlowStep[] = [
   {
