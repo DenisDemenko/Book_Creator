@@ -4,6 +4,7 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import {
   entityTooltip,
+  entityValueTooltip,
   parseAnyEntityTags,
   textColorOnWhite,
   type CoreEntity,
@@ -209,7 +210,9 @@ export function buildDecorations(
             class: options.chipClass,
             style: `color:${textColorOnWhite(entity.color)};`,
             ['data-entity-slug']: entity.slug,
-            title: entityTooltip(entity, options.isEnglishUi() ? 'en' : 'uk'),
+            title: [entityTooltip(entity, options.isEnglishUi() ? 'en' : 'uk'), entityValueTooltip(entity, tag.value, options.isEnglishUi() ? 'en' : 'uk')]
+              .filter(Boolean)
+              .join('\n'),
           })
         );
       }

@@ -3,6 +3,8 @@ import { Search, X, ArrowRight, Replace, ChevronRight } from 'lucide-react';
 import type { Book } from '../types';
 import { calculateWordCount } from '../utils/helpers';
 import { useLanguage } from '../i18n/LanguageContext';
+import { entityTagSpans } from '../utils/coreEntities';
+import { filterRangesByScope, isInTag, replaceRanges, type SearchScope } from '../utils/searchScope';
 
 interface BookSearchModalProps {
   book: Book;
@@ -23,6 +25,8 @@ interface SearchMatch {
   before: string;
   match: string;
   after: string;
+  /** Збіг усередині тега сутності (Т0.11, журнал #245). */
+  inTag: boolean;
 }
 
 /** Скільки збігів показувати в списку — далі лише лічильник "ще N". Книга
@@ -89,6 +93,12 @@ export function BookSearchModal({ book, onUpdateBook, onNavigateToMatch, onClose
   const [replacement, setReplacement] = useState('');
   const [matchCase, setMatchCase] = useState(false);
   const [confirmingReplaceAll, setConfirmingReplaceAll] = useState(false);
+  /**
+   * Що замінювати (Т0.11, рішення П9): типово — лише текст книги, щоб
+   * заміна «Олена» → «Олеся» не переписала `[/character:Олена]` мимохідь.
+   * Перейменування героя в тегах — свідомий вибір «лише теги» чи «усе».
+   */
+  const [scope, setScope] = useState<SearchScope>('text');
 
   // Дебаунс: рахувати збіги по всій книзі на КОЖНЕ натискання клавіші —
   // марнотратно на великій книзі. 250мс — той самий порядок величини, що
@@ -103,14 +113,16 @@ export function BookSearchModal({ book, onUpdateBook, onNavigateToMatch, onClose
   // втрачає сенс і має зникнути, а не залишитись "озброєним".
   useEffect(() => {
     setConfirmingReplaceAll(false);
-  }, [query, replacement, matchCase]);
+  }, [query, replacement, matchCase, scope]);
 
-  const { results, truncated, totalCount } = useMemo(() => {
+  const { results, truncated, totalCount, tagCount, scopedCount } = useMemo(() => {
     if (query.length < MIN_QUERY_LENGTH) {
-      return { results: [] as SearchMatch[], truncated: false, totalCount: 0 };
+      return { results: [] as SearchMatch[], truncated: false, totalCount: 0, tagCount: 0, scopedCount: 0 };
     }
     const out: SearchMatch[] = [];
     let total = 0;
+    let inTags = 0;
+    let scoped = 0;
     for (const chapter of book.chapters) {
       for (const section of chapter.sections) {
         const fields: Array<['content' | 'contentEn', string]> = [
@@ -120,8 +132,13 @@ export function BookSearchModal({ book, onUpdateBook, onNavigateToMatch, onClose
         for (const [field, text] of fields) {
           if (!text) continue;
           const ranges = findRanges(text, query, matchCase);
+          const spans = ranges.length > 0 ? entityTagSpans(text) : [];
           for (const [start, end] of ranges) {
             total += 1;
+            const inTag = isInTag(start, end, spans);
+            if (inTag) inTags += 1;
+            if (scope !== 'all' && (scope === 'tags') !== inTag) continue;
+            scoped += 1;
             if (out.length < MAX_RESULTS) {
               const beforeStart = Math.max(0, start - SNIPPET_CONTEXT);
               const afterEnd = Math.min(text.length, end + SNIPPET_CONTEXT);
@@ -137,14 +154,15 @@ export function BookSearchModal({ book, onUpdateBook, onNavigateToMatch, onClose
                 before: (beforeStart > 0 ? '…' : '') + text.slice(beforeStart, start),
                 match: text.slice(start, end),
                 after: text.slice(end, afterEnd) + (afterEnd < text.length ? '…' : ''),
+                inTag,
               });
             }
           }
         }
       }
     }
-    return { results: out, truncated: total > out.length, totalCount: total };
-  }, [book, query, matchCase]);
+    return { results: out, truncated: scoped > out.length, totalCount: total, tagCount: inTags, scopedCount: scoped };
+  }, [book, query, matchCase, scope]);
 
   /** Замінює РІВНО ОДНЕ конкретне входження (за вже відомими індексами
    *  цього результату) — проста нарізка рядка, без регулярки. */
@@ -177,27 +195,30 @@ export function BookSearchModal({ book, onUpdateBook, onNavigateToMatch, onClose
   /** Замінює УСІ входження запиту по всій книзі за один прохід — одна
    *  нова книга, один виклик `onUpdateBook`, один запис у журналі дій. */
   const handleReplaceAll = () => {
-    if (!query || totalCount === 0) return;
-    const regex = new RegExp(escapeRegExp(query), matchCase ? 'g' : 'gi');
+    if (!query || scopedCount === 0) return;
     let touchedSections = 0;
     let totalReplacements = 0;
+    // Заміна за вже знайденими діапазонами, відфільтрованими за областю
+    // (Т0.11): текст / теги / усе. Та сама логіка пошуку, що й у списку, —
+    // тож замінюється рівно те, що автор бачив у лічильнику.
+    const replaceField = (text: string): [string, number] => {
+      if (!text) return [text, 0];
+      const ranges = filterRangesByScope(text, findRanges(text, query, matchCase), scope);
+      return ranges.length ? [replaceRanges(text, ranges, replacement), ranges.length] : [text, 0];
+    };
     const updatedChapters = book.chapters.map((chap) => ({
       ...chap,
       sections: chap.sections.map((sec) => {
-        const originalContent = sec.content || '';
-        const originalContentEn = sec.contentEn || '';
-        const contentHits = originalContent ? originalContent.match(regex) : null;
-        const enHits = originalContentEn ? originalContentEn.match(regex) : null;
+        const [newContent, contentHits] = replaceField(sec.content || '');
+        const [newContentEn, enHits] = replaceField(sec.contentEn || '');
         if (!contentHits && !enHits) return sec;
         touchedSections += 1;
-        totalReplacements += (contentHits?.length || 0) + (enHits?.length || 0);
-        const newContent = contentHits ? originalContent.replace(regex, replacement) : sec.content;
-        const newContentEn = enHits ? originalContentEn.replace(regex, replacement) : sec.contentEn;
+        totalReplacements += contentHits + enHits;
         return {
           ...sec,
-          content: newContent,
-          contentEn: newContentEn,
-          wordCount: calculateWordCount(newContent || ''),
+          content: contentHits ? newContent : sec.content,
+          contentEn: enHits ? newContentEn : sec.contentEn,
+          wordCount: calculateWordCount((contentHits ? newContent : sec.content) || ''),
           lastModified: new Date().toISOString(),
         };
       }),
@@ -269,15 +290,34 @@ export function BookSearchModal({ book, onUpdateBook, onNavigateToMatch, onClose
               {query.length < MIN_QUERY_LENGTH
                 ? t('editor.searchMinLengthHint', { n: MIN_QUERY_LENGTH })
                 : `${t('editor.searchMatchesFound', { n: totalCount })}${
-                    truncated ? ` ${t('editor.searchTruncatedHint', { n: MAX_RESULTS })}` : ''
-                  }`}
+                    tagCount > 0 ? ` ${t('editor.searchInTags', { n: tagCount })}` : ''
+                  }${truncated ? ` ${t('editor.searchTruncatedHint', { n: MAX_RESULTS })}` : ''}`}
             </span>
 
-            {totalCount > 0 &&
+            {tagCount > 0 && (
+              <div className="flex items-center gap-1 text-[10px]" data-search-scope={scope}>
+                <span className="text-slate-500">{t('editor.searchScopeLabel')}</span>
+                {(['text', 'tags', 'all'] as SearchScope[]).map((sc) => (
+                  <button
+                    key={sc}
+                    type="button"
+                    onClick={() => setScope(sc)}
+                    data-search-scope-option={sc}
+                    className={`px-2 py-0.5 rounded-md border ${
+                      scope === sc ? 'bg-amber-500 text-slate-950 border-amber-500 font-bold' : 'bg-slate-900 text-slate-300 border-slate-700'
+                    }`}
+                  >
+                    {t(sc === 'text' ? 'editor.searchScopeText' : sc === 'tags' ? 'editor.searchScopeTags' : 'editor.searchScopeAll')}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {scopedCount > 0 &&
               (confirmingReplaceAll ? (
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] text-amber-300 font-bold">
-                    {t('editor.searchReplaceAllConfirm', { n: totalCount })}
+                    {t('editor.searchReplaceAllConfirm', { n: scopedCount })}
                   </span>
                   <button
                     onClick={handleReplaceAll}
@@ -328,6 +368,11 @@ export function BookSearchModal({ book, onUpdateBook, onNavigateToMatch, onClose
                   >
                     {m.field === 'content' ? 'UA' : 'EN'}
                   </span>
+                  {m.inTag && (
+                    <span className="shrink-0 px-1.5 py-0.5 rounded text-[9px] font-bold bg-violet-500/20 text-violet-300" data-search-in-tag>
+                      {t('editor.searchTagBadge')}
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-slate-300 leading-snug">
                   <span className="text-slate-500">{m.before}</span>

@@ -326,6 +326,13 @@ export const EntitySlashMenu: React.FC<EntitySlashMenuProps> = ({ editor, charac
         {stage === 'value' && slug === DIALOGUE_CHARACTER_SLUG && (
           <span className="block text-[9px] text-slate-600 mt-0.5">{t('editor.slashDialogueHint')}</span>
         )}
+        {/* Формат значення (П1, П2 — журнал #244): поля в порядку характеристик
+            реєстру через « — » і, за потреби, чиє це — «@Ім'я» в кінці. */}
+        {stage === 'value' && entity && slug !== DIALOGUE_CHARACTER_SLUG && entity.characteristics.length > 1 && (
+          <span className="block text-[9px] text-slate-600 mt-0.5" data-entity-slash-format>
+            {t('coreEntities.slashFieldsHint', { fields: entity.characteristics.join(' — ') })}
+          </span>
+        )}
       </div>
 
       {items.length === 0 && (

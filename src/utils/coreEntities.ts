@@ -1043,6 +1043,111 @@ export function entityTooltip(entity: CoreEntity, lang: 'uk' | 'en' = 'uk'): str
   return lines.join('\n');
 }
 
+
+// ---------------------------------------------------------------------------
+// Значення тега: чиє воно (`@Ім'я`) і його поля — рішення власника П1, П2
+// (`TAGS_ANALYSIS.md` §7, задача Т0.10, журнал #244)
+// ---------------------------------------------------------------------------
+
+/**
+ * Розібране значення тега.
+ *
+ * ЩО ЦЕ НЕ ЗМІНЮЄ. Сам розбір тегів (`parseEntityTags`, `parseAnyEntityTags`),
+ * показ, приховування й зняття на експорті працюють із `value` як і раніше —
+ * цілим рядком. Тут лише **додатково** читається, що вже й так написано в
+ * значенні: приписка `@Ім'я` в кінці і частини через « — ». Тег, що
+ * розбирався до цієї функції, розбирається так само.
+ */
+export interface EntityValueParts {
+  /** Значення без приписки `@Ім'я`, обрізане з країв. */
+  text: string;
+  /** Ім'я героя з приписки `@Ім'я` в кінці значення (П1), якщо вона є. */
+  subject?: string;
+  /** Частини значення через « — » (або « – »); щонайменше одна. */
+  parts: string[];
+  /**
+   * Частини за порядком характеристик реєстру (П2): перша частина — перша
+   * характеристика тощо. Частин більше, ніж характеристик, — зайві мають
+   * назву «поле N». Вільний текст без роздільника — одне поле.
+   */
+  fields: { name: string; value: string }[];
+}
+
+/**
+ * Приписка суб'єкта: `@` на початку значення або після пробілу, далі ім'я до
+ * кінця значення. `@` усередині слова (пошта `a@b.ua`) чи окремий `@ 10:00` —
+ * не приписка.
+ */
+const SUBJECT_SUFFIX = /(?:^|\s)@([^@\s][^@]*?)\s*$/;
+/** Роздільник полів: тире з пробілами з обох боків (довге чи середнє). */
+const FIELD_SEPARATOR = /\s+[—–]\s+/;
+
+export function parseEntityValue(slugOrEntity: string | CoreEntity | undefined, value: string): EntityValueParts {
+  const entity = typeof slugOrEntity === 'string' ? entityBySlug(slugOrEntity) : slugOrEntity;
+  let text = String(value ?? '').trim();
+  let subject: string | undefined;
+  const m = SUBJECT_SUFFIX.exec(text);
+  if (m) {
+    subject = m[1].trim();
+    text = text.slice(0, m.index).trim();
+  }
+  const parts = text === '' ? [''] : text.split(FIELD_SEPARATOR).map((p) => p.trim());
+  const names = entity?.characteristics ?? [];
+  const fields = parts
+    .map((part, i) => ({ name: names[i] ?? `поле ${i + 1}`, value: part }))
+    .filter((f) => f.value !== '');
+  return subject ? { text, subject, parts, fields } : { text, parts, fields };
+}
+
+/** Рядки підказки про значення тега: чиє і які поля (для чипа в канві). */
+export function entityValueTooltip(entity: CoreEntity, value: string, lang: 'uk' | 'en' = 'uk'): string {
+  const parsed = parseEntityValue(entity, value);
+  const lines: string[] = [];
+  if (parsed.subject) lines.push(`${lang === 'en' ? 'Whose' : 'Чиє'}: ${parsed.subject}`);
+  if (parsed.fields.length > 1) lines.push(parsed.fields.map((f) => `${f.name}: ${f.value}`).join(' · '));
+  return lines.join('\n');
+}
+
+
+/**
+ * Де в рядку рукопису стоять теги — діапазони `[start, end)` у ВИХІДНОМУ
+ * рядку (з маркерами форматування). Бачить і канонічні теги, розрізані
+ * маркерами (`[[COLOR=…]/character:Олена[/COLOR]]`), і «сирі» `/slug:значення`.
+ *
+ * Навіщо (задача Т0.11, журнал #245, рішення П9): «Знайти й замінити» має
+ * розрізняти збіги в тексті книги й у значеннях тегів, щоб заміна
+ * «Олена» → «Олеся» не переписувала `[/character:Олена]` мимохідь.
+ */
+export function entityTagSpans(text: string): [number, number][] {
+  const source = String(text ?? '');
+  if (!source.includes('/')) return [];
+  const spans: [number, number][] = [];
+
+  // Канонічні — через «плаский» вигляд без маркерів, як у removeFormattedEntityTags.
+  const markerRe = new RegExp(FORMAT_MARKER_SOURCE, 'g');
+  const plainChars: string[] = [];
+  const plainToSource: number[] = [];
+  let cursor = 0;
+  let mm: RegExpExecArray | null;
+  while ((mm = markerRe.exec(source))) {
+    for (let i = cursor; i < mm.index; i++) { plainChars.push(source[i]); plainToSource.push(i); }
+    cursor = mm.index + mm[0].length;
+  }
+  for (let i = cursor; i < source.length; i++) { plainChars.push(source[i]); plainToSource.push(i); }
+  const plain = plainChars.join('');
+  const tagRe = entityTagRegexp();
+  let tm: RegExpExecArray | null;
+  while ((tm = tagRe.exec(plain))) {
+    spans.push([plainToSource[tm.index], plainToSource[tm.index + tm[0].length - 1] + 1]);
+  }
+
+  // «Сирі» — лише ті, що не всередині канонічних.
+  for (const loose of parseLooseEntityTags(source)) {
+    if (!spans.some(([a, b]) => loose.start < b && a < loose.end)) spans.push([loose.start, loose.end]);
+  }
+  return spans.sort((x, y) => x[0] - y[0]);
+}
+
 /** Стисла довідка про склад реєстру — для тестів і для заголовка панелі. */
 export function registryStats(): {
   entities: number;

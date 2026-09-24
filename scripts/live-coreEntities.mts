@@ -497,6 +497,19 @@ try {
   t('другий Tab закрив канонічний тег',
     afterSecondTab.includes('[/character:'), afterSecondTab.slice(-160));
 
+  // Т0.10 (журнал #244, П2): на другому кроці сутності з кількома
+  // характеристиками меню підказує формат полів і «@Ім'я».
+  await page.keyboard.press('End');
+  await page.keyboard.type(' /emot');
+  await page.waitForSelector('[data-entity-slash-menu]', { timeout: 10000 });
+  await page.keyboard.press('Tab');
+  await new Promise((r) => setTimeout(r, 400));
+  const formatHint = await page.evaluate(() => document.querySelector('[data-entity-slash-format]')?.textContent || '');
+  t('слеш-меню підказує формат полів і «@Ім’я» (П2, Т0.10)',
+    formatHint.includes('Тип — інтенсивність') && formatHint.includes('@Ім'), formatHint);
+  await page.keyboard.press('Escape');
+  await new Promise((r) => setTimeout(r, 300));
+
   await page.screenshot({ path: path.join(shotDir, 'core-entities-canvas.png'), fullPage: false });
 
   // -------------------------------------------------------------------------
