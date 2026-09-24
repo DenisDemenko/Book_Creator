@@ -98,6 +98,10 @@ COPY --from=build /app/package.json package.json
 # ---------------------------------------------------------------------------
 COPY --from=build /app/server/pdf/fonts dist/fonts
 COPY --from=build /app/server/pdf/latex dist/latex
+# SQL-міграції семантичного ядра (Т0.3): сервер накочує їх на старті, а в
+# образі від вихідної теки лишається лише dist/ — без цього рядка ядро
+# падало б з «Теку міграцій ядра не знайдено» (server/core/migrate.ts).
+COPY --from=build /app/server/core/migrations dist/core-migrations
 
 # Обидві теки мають лежати на постійному томі, інакше при кожному
 # перезапуску зникають і база, і згенеровані зображення.

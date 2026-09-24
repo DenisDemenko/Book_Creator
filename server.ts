@@ -195,6 +195,7 @@ import {
 import { CORE_VISION_MODULES } from './server/coreAiRegistry';
 import { normalizePromptEntities, buildCoachEntityInstruction, normalizeEntityFeedback, buildExerciseEntityInstruction, normalizeGeneratedEntities } from './server/masteryEntityPrompt';
 import { formatManuscriptWithClaude, anthropicConfig, ClaudeManuscriptError, MAX_MANUSCRIPT_CHARS } from './server/claudeManuscript';
+import { initCore, getCoreStatus, shutdownCore } from './server/core';
 import { purgeExpiredSessions, initStore, getUserStyle, upsertUserStyle, deleteUserStyle, listUserApiKeys, getUserPromptTemplates, upsertUserPromptTemplates, deleteUserPromptTemplates, getAppSetting, setAppSetting } from './server/store';
 
 // Логування витрат (logImageUsage/logTextUsage) переїхало в server/aiCore.ts —
@@ -565,7 +566,8 @@ registerGitCommandRoutes(app);
   );
 
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', hasGeminiKey: !!ai, hasSeedreamKey: seedreamConfig.enabled });
+    // `core` — стан семантичного ядра (Т0.3): disabled / starting / ready / failed.
+    res.json({ status: 'ok', hasGeminiKey: !!ai, hasSeedreamKey: seedreamConfig.enabled, core: getCoreStatus().state });
   });
 
   /** Перелік доступних двигунів генерації — щоб клієнт не хардкодив назви моделей. */
@@ -5974,12 +5976,17 @@ ${JSON.stringify(bookContext || {}, null, 2)}
     console.log(`Server running on http://0.0.0.0:${PORT} with WebSockets enabled on /ws`);
   });
 
+  // Семантичне ядро (Т0.3) — ПІСЛЯ старту: міграції не затримують відкриття
+  // Студії, а збій бази ядра не валить решту застосунку (стан — у /api/health).
+  void initCore();
+
   // Зупиняємо фонові процеси модуля публікації по сигналу платформи: задачі,
   // що лишились у стані «виконується», при наступному старті повернуться в
   // чергу автоматично — стан кроку зберігається в базі.
   for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     process.once(signal, () => {
       publishing.stop();
+      void shutdownCore();
       server.close(() => process.exit(0));
     });
   }
