@@ -170,6 +170,7 @@ import { CoachModal, type CoachSeed } from './CoachModal';
 import { GenerateIllustrationModal } from './GenerateIllustrationModal';
 import { DraggablePanel } from './DraggablePanel';
 import { DockedEditorPanel } from './DockedEditorPanel';
+import { FloatingToolDock } from './FloatingToolDock';
 import { AiReadabilityPanel } from './AiReadabilityPanel';
 import { FontInstallModal } from './FontInstallModal';
 import { ProofingLanguageModal } from './ProofingLanguageModal';
@@ -330,7 +331,7 @@ const IconToolBtn: React.FC<{
     title={title}
     aria-label={label}
     aria-pressed={active}
-    className={`flex items-center justify-center p-2 rounded-md border transition-colors ${ACCENT_CLASS[accent]} ${
+    className={`flex items-center justify-center p-1.5 rounded-md border transition-colors ${ACCENT_CLASS[accent]} ${
       active ? '[border-color:var(--sun-acc)] [background-color:var(--sun-acc-20)]' : ''
     }`}
   >
@@ -2115,7 +2116,14 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
   const openTagMenu = () => {
     const rect = tagMenuBtnRef.current?.getBoundingClientRect();
-    setTagMenuAnchor({ x: Math.min(rect?.left ?? 80, window.innerWidth - 340), y: (rect?.bottom ?? 120) + 6 });
+    // Кнопка живе в плаваючому блоці (запис #235), і блок може стояти внизу
+    // екрана: тоді меню відкривається вгору, а не за край вікна.
+    const below = (rect?.bottom ?? 120) + 6;
+    const y =
+      rect && window.innerHeight - below < 260
+        ? Math.max(8, rect.top - Math.min(window.innerHeight * 0.6, 420) - 6)
+        : below;
+    setTagMenuAnchor({ x: Math.max(8, Math.min(rect?.left ?? 80, window.innerWidth - 340)), y });
     setTagMenuOpen(true);
   };
 
@@ -2282,6 +2290,28 @@ export const EditorView: React.FC<EditorViewProps> = ({
    */
   const [toolbarHidden, setToolbarHidden] = useState(false);
   const toolbarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /**
+   * Плаваючий блок інструментів (запис #235). `mainAreaRef` — поле тексту:
+   * до його країв блок прилипає. `toolReserve` — скільки місця поле
+   * звільняє під прилиплим блоком, щоб той не накривав текст.
+   * `formatTarget` — до якої колонки розвороту UA | EN застосовується
+   * форматування з блока; сам стежить за курсором (фокусом редактора).
+   */
+  const mainAreaRef = useRef<HTMLElement>(null);
+  const [toolReserve, setToolReserve] = useState({ top: 0, bottom: 0, left: 0, right: 0 });
+  const [formatTarget, setFormatTarget] = useState<'ua' | 'en'>('ua');
+  useEffect(() => {
+    if (!uaEditor || !enEditor) return;
+    const onUa = () => setFormatTarget('ua');
+    const onEn = () => setFormatTarget('en');
+    uaEditor.on('focus', onUa);
+    enEditor.on('focus', onEn);
+    return () => {
+      uaEditor.off('focus', onUa);
+      enEditor.off('focus', onEn);
+    };
+  }, [uaEditor, enEditor]);
 
   useEffect(() => {
     if (!isFocusWindow) {
@@ -2677,10 +2707,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
     </button>
   );
 
-  const renderFormatToolbar = (isEn: boolean) => (
+  const renderFormatToolbar = (isEn: boolean, inline = false) => (
     <div
       style={sunVars}
-      className={`flex items-center gap-1.5 shrink-0 flex-wrap transition-opacity duration-300 ${
+      // `inline` — у горизонтальному блоці інструментів кнопки течуть одним
+      // потоком із рештою блока (display: contents), а не окремим рядком.
+      className={inline ? 'contents' : `flex items-center gap-1.5 min-w-0 max-w-full flex-wrap transition-opacity duration-300 ${
         isFocusWindow && toolbarHidden ? 'opacity-0 pointer-events-none' : 'opacity-100'
       }`}
     >
@@ -2730,7 +2762,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
           if (!applied) setFontSelectHint(t('editor.bodyFontNoSelection'));
         }}
         disabled={isReader}
-        className="px-2.5 py-1.5 rounded-md bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed min-w-[160px]"
+        className="px-2.5 py-1.5 rounded-md bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed min-w-[160px] max-w-[200px]"
         style={{
           fontFamily: (isEn ? enSelectedFontFamily : uaSelectedFontFamily)
             ? `"${isEn ? enSelectedFontFamily : uaSelectedFontFamily}", Georgia, serif`
@@ -4632,6 +4664,482 @@ export const EditorView: React.FC<EditorViewProps> = ({
     `fixed inset-0 w-screen h-screen` на елементі, який усередині ще й має
     власний `height: calc(100vh - 105px)`, — і давала криве розкриття.
   */
+  // ── Плаваючий блок інструментів (запис #235) ───────────────────────────
+  // Власник: «абсолютно всі кнопки та функції винести в окремий новий блок,
+  // який можна перетягнути в будь-яку позицію поверх канви, змінити розмір
+  // і примагнітити до верху, низу, правої панелі або лівого меню; усі інші
+  // блоки над канвою прибрати». Тут зібрано ВСЕ, що раніше стояло смугами
+  // над текстом: шапку з назвою розділу й діями, рядок швидких вставок,
+  // шапку панелі тексту (слова, «Покращити AI», формат аркуша, перемикач
+  // розділів), рядок форматування з лінійкою, підвал «мова та словник»,
+  // банери ролей і мобільну смугу «Зміст / Персонажі». Функції й обробники
+  // ті самі — змінилось лише місце. Оболонка — FloatingToolDock.
+  const renderToolDockContent = ({ orientation }: { orientation: 'horizontal' | 'vertical'; width: number }) => {
+    const vertical = orientation === 'vertical';
+    // Горизонтально групи «розчиняються» (contents): кнопки течуть одним
+    // потоком і заповнюють рядок до кінця, а межу групи позначає тонка риска.
+    // Вертикально (колонка біля меню чи правої панелі) кожна група — свій
+    // блок із лінією зверху: так її легше знайти оком у вузькій колонці.
+    const groupClass = vertical
+      ? 'flex flex-wrap items-center gap-1 w-full pt-1.5 border-t border-slate-800 first:pt-0 first:border-t-0'
+      : 'contents';
+    const groupSep = vertical ? null : <span aria-hidden="true" className="self-stretch w-px my-1 bg-slate-700/70" />;
+    const dockFormatIsEn = editorLanguageMode === 'en' || (editorLanguageMode === 'parallel' && formatTarget === 'en');
+    const proofingStatus = spellcheckEnabled
+      ? t('editor.proofingStatusOn', { lang: proofingLanguage.toUpperCase() })
+      : t('editor.proofingStatusOff');
+    return (
+      <>
+        {/* Документ: зміст книги, назва розділу, перемикач розділів, роль */}
+        <div className={groupClass}>
+          <button
+            onClick={() => setShowLeftTree(!showLeftTree)}
+            data-tour="editor__1"
+            aria-pressed={showLeftTree}
+            className={`flex items-center gap-1 px-2 py-1.5 rounded-lg border text-xs transition-colors ${
+              showLeftTree
+                ? '[background-color:var(--sun-acc-20)] [border-color:var(--sun-acc)] [color:var(--sun-soft)]'
+                : 'bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-800'
+            }`}
+            title={t('editor.openTocTitle')}
+          >
+            <PanelLeft className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
+            <span className="sr-only">{t('editor.tocBtn')}</span>
+          </button>
+          <input
+            type="text"
+            value={activeSection?.title || ''}
+            onChange={(e) => {
+              if (!activeChapter || !activeSection) return;
+              const updated = book.chapters.map((c) => {
+                if (c.id !== activeChapter.id) return c;
+                return {
+                  ...c,
+                  sections: c.sections.map((s) =>
+                    s.id === activeSection.id ? { ...s, title: e.target.value } : s
+                  ),
+                };
+              });
+              onUpdateBook({ ...book, chapters: updated });
+            }}
+            className={`${vertical ? 'w-full' : 'w-36'} min-w-0 px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 text-xs font-bold text-white focus:[border-color:var(--sun-acc)] focus:outline-hidden`}
+            placeholder={t('editor.sectionTitlePlaceholder')}
+            title={`${activeChapter?.title || ''}${activeSection?.titleEn ? ` • EN: ${activeSection.titleEn}` : ''}`}
+            aria-label={t('editor.sectionTitlePlaceholder')}
+          />
+          {editorLanguageMode !== 'ua' && (
+            <input
+              type="text"
+              value={activeSection?.titleEn || ''}
+              onChange={(e) => {
+                const updated = book.chapters.map((c) =>
+                  c.id === activeChapter?.id
+                    ? { ...c, sections: c.sections.map((s) => (s.id === activeSection?.id ? { ...s, titleEn: e.target.value } : s)) }
+                    : c
+                );
+                onUpdateBook({ ...book, chapters: updated });
+              }}
+              placeholder="Section Title (EN)"
+              aria-label="Section Title (EN)"
+              className={`${vertical ? 'w-full' : 'w-36'} min-w-0 px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 text-xs font-bold text-white focus:[border-color:var(--sun-acc)] focus:outline-hidden`}
+            />
+          )}
+          <select
+            value={`${activeChapter?.id}::${activeSection?.id}`}
+            onChange={(e) => {
+              const [cId, sId] = e.target.value.split('::');
+              if (cId && sId) onSelectSection(cId, sId);
+            }}
+            className={`${vertical ? 'w-full' : 'max-w-[160px]'} bg-slate-800 border border-slate-700 text-slate-200 text-[11px] font-semibold rounded-lg px-2 py-1 cursor-pointer focus:outline-none focus:[border-color:var(--sun-acc)]`}
+            title={t('editor.sectionSwitcherTitle')}
+            aria-label={t('editor.sectionSwitcherTitle')}
+          >
+            {book.chapters.map((c) => (
+              <optgroup key={c.id} label={c.title}>
+                {c.sections.map((s) => (
+                  <option key={s.id} value={`${c.id}::${s.id}`}>
+                    {s.title}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          {/* Банери ролей — раніше окремими смугами над текстом */}
+          {isReader && (
+            <span
+              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-[10px] font-bold"
+              title={t('editor.readerBannerText')}
+            >
+              <Eye className="w-3 h-3 shrink-0" /> {t('editor.readerBannerTitle')}
+            </span>
+          )}
+          {isTranslator && (
+            <span
+              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold"
+              title={t('editor.translatorBannerText')}
+            >
+              <Globe className="w-3 h-3 shrink-0" /> {t('editor.translatorBannerTitle')}
+            </span>
+          )}
+        </div>
+
+        {groupSep}
+        {/* Вигляд: мова, слова, формат аркуша, масштаб, лінійка */}
+        <div className={groupClass}>
+            {/* Language Mode Selector */}
+            <div data-tour="editor__3" className="flex items-center whitespace-nowrap bg-slate-950 p-1 rounded-xl border border-slate-800">
+              <button
+                onClick={() => setEditorLanguageMode('ua')}
+                className={`px-2.5 py-1 rounded-lg font-bold text-xs transition-all ${
+                  editorLanguageMode === 'ua'
+                    ? '[background-color:var(--sun-acc)] text-slate-950 shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title={t('editor.modeUaTitle')}
+              >
+                🇺🇦 UA
+              </button>
+
+              <button
+                onClick={() => setEditorLanguageMode('parallel')}
+                className={`px-2.5 py-1 rounded-lg font-bold text-xs transition-all flex items-center gap-1 ${
+                  editorLanguageMode === 'parallel'
+                    ? '[background-color:var(--sun-acc)] text-slate-950 shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title={t('editor.modeParallelTitle')}
+              >
+                <Columns className="w-3 h-3" />
+                <span>UA | EN</span>
+              </button>
+
+              <button
+                onClick={() => setEditorLanguageMode('en')}
+                className={`px-2.5 py-1 rounded-lg font-bold text-xs transition-all ${
+                  editorLanguageMode === 'en'
+                    ? '[background-color:var(--sun-acc)] text-slate-950 shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title={t('editor.modeEnTitle')}
+              >
+                🇬🇧 EN
+              </button>
+            </div>
+          <div
+            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-400 font-mono text-[10px]"
+            title={`${t('editor.wordsUaLabel')} ${activeSection?.wordCount || 0} · ${t('editor.readingTime', { n: estimateReadingTimeMinutes(activeSection?.wordCount || 0) })}`}
+          >
+            <span className="text-slate-100 font-bold">{t('editor.wordsShort', { n: activeSection?.wordCount || 0 })}</span>
+            {activeSection?.contentEn && (
+              <span className="[color:var(--sun-acc)]">· EN {calculateWordCount(activeSection.contentEn)}</span>
+            )}
+            <span className="text-slate-500">· {t('editor.readingTimeShort', { n: estimateReadingTimeMinutes(activeSection?.wordCount || 0) })}</span>
+          </div>
+          <select
+            value={book.layoutConfig.formatPreset}
+            onChange={(e) => handleChangePageFormat(e.target.value)}
+            className="bg-slate-800 border border-slate-700 text-slate-200 text-[11px] font-semibold rounded-lg px-2 py-1 outline-none hover:border-slate-500 focus:[border-color:var(--sun-acc)] cursor-pointer"
+            title={t('editor.pageFormatTitle')}
+            aria-label={t('editor.pageFormatLabel')}
+          >
+            {PAGE_FORMAT_QUICK_OPTIONS.map((p) => (
+              <option key={p.id} value={p.id} className="bg-slate-900">
+                {t(p.labelKey)}
+              </option>
+            ))}
+          </select>
+            {!isFocusWindow && (
+              <div className="flex items-center gap-1.5" title={t('editor.pageZoomTitle')}>
+                <ZoomIn className="w-3.5 h-3.5 [color:var(--sun-acc)] shrink-0" />
+                <select
+                  value={zoomToFit ? 'fit' : PAGE_ZOOM_PRESETS.includes(editorZoom) ? String(editorZoom) : 'custom'}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value === 'fit') {
+                      setZoomToFit(true);
+                    } else if (value === 'custom') {
+                      setZoomToFit(false);
+                      setCustomEditorZoom(String(editorZoom));
+                    } else {
+                      setZoomToFit(false);
+                      setEditorZoom(Number(value));
+                    }
+                  }}
+                  className="bg-slate-900 border border-slate-800 rounded-md px-1 py-0.5 text-slate-200 cursor-pointer"
+                >
+                  <option value="fit">{t('editor.pageZoomFit')}</option>
+                  {PAGE_ZOOM_PRESETS.map((zoom) => (
+                    <option key={zoom} value={zoom}>
+                      {zoom}%
+                    </option>
+                  ))}
+                  <option value="custom">{t('editor.pageZoomCustom')}</option>
+                </select>
+                {!zoomToFit && !PAGE_ZOOM_PRESETS.includes(editorZoom) && (
+                  <input
+                    type="number"
+                    min={20}
+                    max={200}
+                    value={customEditorZoom}
+                    placeholder="%"
+                    onChange={(e) => setCustomEditorZoom(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const parsed = Number(customEditorZoom);
+                        if (Number.isFinite(parsed) && parsed >= 20 && parsed <= 200) {
+                          setEditorZoom(Math.round(parsed));
+                        }
+                      }
+                    }}
+                    onBlur={() => {
+                      const parsed = Number(customEditorZoom);
+                      if (Number.isFinite(parsed) && parsed >= 20 && parsed <= 200) {
+                        setEditorZoom(Math.round(parsed));
+                      }
+                    }}
+                    className="w-16 bg-slate-900 border border-slate-800 rounded-md px-1 py-0.5 text-cyan-300 text-center"
+                    title={t('editor.pageZoomHint')}
+                  />
+                )}
+              </div>
+            )}
+          {renderRulerToggle()}
+        </div>
+
+        {groupSep}
+        {/* Дії: пошук, читач, показники, переклад, збереження, панелі, перевірка */}
+        <div className={groupClass}>
+            {/* Пошук і заміна по всій книзі (BookSearchModal.tsx) — на
+                відміну від Ctrl+F браузера, бачить усі глави/розділи, а
+                не лише поточний відкритий. */}
+            <button
+              onClick={() => setShowBookSearch(true)}
+              className="flex items-center gap-1.5 px-2 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 rounded-lg transition-colors"
+              title={t('editor.searchBookTitle')}
+            >
+              <Search className="w-3.5 h-3.5" />
+              <span className="sr-only">{t('editor.searchBookBtn')}</span>
+            </button>
+
+            {/* Симуляція емоційної реакції читача на активну сцену */}
+            <button
+              onClick={handleRunReaderResponse}
+              disabled={isSimulatingReader || !(editorLanguageMode === 'en' ? activeSection?.contentEn : activeSection?.content)}
+              className="flex items-center gap-1.5 px-2 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 rounded-lg transition-colors disabled:opacity-50"
+              title={t('editor.readerResponseTitle')}
+            >
+              <Smile className="w-3.5 h-3.5" />
+              <span className="sr-only">{isSimulatingReader ? t('editor.readerResponseRunning') : t('editor.readerResponseBtn')}</span>
+            </button>
+
+            {/* Показники глави (хвиля 2, задача 6) */}
+            <button
+              onClick={handleAnalyzeChapterMetrics}
+              disabled={isAnalyzingChapterMetrics || !activeChapter}
+              className="flex items-center gap-1.5 px-2 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 rounded-lg transition-colors disabled:opacity-50"
+              title={t('editor.chapterMetricsTitle')}
+            >
+              <BarChart3 className="w-3.5 h-3.5" />
+              <span className="sr-only">{isAnalyzingChapterMetrics ? t('editor.chapterMetricsRunning') : t('editor.chapterMetricsBtn')}</span>
+            </button>
+
+            {/* Translate Button */}
+            <button
+              onClick={handleTranslateToEnglish}
+              disabled={isTranslating || !activeSection?.content}
+              data-tour="editor__4"
+              className="flex items-center gap-1.5 px-2 py-1.5 bg-gradient-to-r from-[var(--sun-acc)] to-[var(--sun-acc-70)] hover:from-[var(--sun-acc-80)] hover:to-[var(--sun-acc)] text-slate-950 font-bold rounded-lg transition-all shadow-sm active:scale-95 disabled:opacity-50"
+              title={t('editor.translateTitle')}
+            >
+              <Languages className="w-3.5 h-3.5" />
+              <span>{isTranslating ? t('editor.translating') : t('editor.translate')}</span>
+            </button>
+
+            {onSaveBook && (
+              <button
+                onClick={onSaveBook}
+                className="flex items-center gap-1.5 px-2 py-1.5 bg-slate-900 hover:bg-slate-800 [color:var(--sun-soft)] font-bold border [border-color:var(--sun-acc-30)] rounded-lg transition-colors whitespace-nowrap"
+                title={t('editor.saveTitle')}
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span className="sr-only">{t('editor.save')}</span>
+              </button>
+            )}
+
+            {/* Права панель «Персонажі і сцена» — перемикач (раніше кнопка
+                зʼявлялась лише коли панель закрита, а на телефоні жила в
+                окремій смузі над текстом). */}
+            <button
+              onClick={() => setShowRightPanel(!showRightPanel)}
+              aria-pressed={showRightPanel}
+              className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg border transition-colors ${
+                showRightPanel
+                  ? '[background-color:var(--sun-acc-20)] [border-color:var(--sun-acc)] [color:var(--sun-soft)]'
+                  : 'bg-slate-900 hover:bg-slate-800 [color:var(--sun-acc)] border-slate-800'
+              }`}
+              title={t('editor.openCharPanelTitle')}
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span className="sr-only">{t('editor.charactersBtn')}</span>
+            </button>
+          <button
+            onClick={() => setShowProofingModal(true)}
+            className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-[10px] font-mono transition-colors"
+            title={`${t('editor.proofingBtnTitle')} — ${proofingStatus}`}
+            aria-label={t('editor.proofingBtn')}
+          >
+            <SpellCheck2 className="w-3.5 h-3.5 text-cyan-400" />
+            <span className={spellcheckEnabled ? 'text-slate-400' : 'text-slate-600'}>
+              {spellcheckEnabled ? proofingLanguage.toUpperCase() : '—'}
+            </span>
+          </button>
+          {!isReader && editorLanguageMode !== 'en' && (
+            <button
+              onClick={() => handleTriggerAiEdit('improve')}
+              className="flex items-center gap-1 px-2 py-1 rounded-lg [background-color:var(--sun-acc)] hover:[background-color:var(--sun-acc-80)] text-slate-950 text-[11px] font-bold transition-colors"
+              title={t('editor.improveAi')}
+            >
+              <Sparkles className="w-3 h-3" />
+              <span>{t('editor.improveAi')}</span>
+            </button>
+          )}
+        </div>
+
+        {groupSep}
+        {/* Вставки й теги — той самий набір іконок, що й раніше */}
+        <div className={groupClass}>
+            {/* Quick Typography Insets — лише іконки, підписи в підказках.
+                Раніше тут був видимий текст, і рядок зʼїдав місце для правки
+                книги; текст переїхав у title + aria-label (див. IconToolBtn). */}
+            <IconToolBtn
+              onClick={() => insertTextAtCursor('— ')}
+              title={t('editor.dashTitle')}
+              label={t('editor.dashBtn')}
+              icon={<Minus className="w-4 h-4" />}
+            />
+            <IconToolBtn
+              onClick={() => insertTextAtCursor('«»')}
+              title={t('editor.quotesTitle')}
+              label={t('editor.quotesBtn')}
+              icon={<TextQuote className="w-4 h-4" />}
+            />
+            <IconToolBtn
+              onClick={() => insertTextAtCursor('…')}
+              title={t('editor.ellipsisTitle')}
+              label={t('editor.ellipsisTitle')}
+              icon={<MoreHorizontal className="w-4 h-4" />}
+            />
+
+            <div className="h-4 w-px bg-slate-800 mx-1" />
+
+            <IconToolBtn
+              onClick={() => setShowFootnoteModal(true)}
+              title={t('editor.insertFootnoteTitle')}
+              label={t('editor.insertFootnoteBtn')}
+              icon={<BookMarked className="w-4 h-4 [color:var(--sun-acc)]" />}
+            />
+
+            <IconToolBtn
+              onClick={() => setShowQrModal(true)}
+              title={t('editor.insertQrTitle')}
+              label={t('editor.insertQrBtn')}
+              icon={<QrCode className="w-4 h-4 [color:var(--sun-acc)]" />}
+            />
+
+            <IconToolBtn
+              onClick={() => setShowInsertImageModal(true)}
+              title={t('editor.imgFromGalleryTitle')}
+              label={t('editor.imgFromGalleryBtn')}
+              icon={<ImagePlus className="w-4 h-4 [color:var(--sun-acc)]" />}
+            />
+
+            {/* Акцентна кнопка: іконка більша (20px), щоб її було видно першою
+                навіть у ряду самих іконок. */}
+            <IconToolBtn
+              onClick={() => setShowIllustrationModal(true)}
+              title={t('editor.insertIllustrationTitle')}
+              label={t('editor.insertIllustrationBtn')}
+              accent="solid"
+              icon={<Sparkles className="w-[18px] h-[18px] [color:var(--sun-acc)]" />}
+            />
+
+            <div className="h-4 w-px bg-slate-800 mx-1" />
+
+            <IconToolBtn
+              onClick={handleInsertTag}
+              title={t('editor.insertTagTitle')}
+              label={t('editor.insertBookTagBtn')}
+              accent="soft"
+              icon={<Tag className="w-4 h-4" />}
+            />
+
+            <IconToolBtn
+              onClick={() => setTagsHidden((v) => !v)}
+              title={tagsHidden ? t('editor.showTagsTitle') : t('editor.hideTagsTitle')}
+              label={tagsHidden ? t('editor.showTagsBtn') : t('editor.hideTagsBtn')}
+              accent={tagsHidden ? 'plain' : 'soft'}
+              active={!tagsHidden}
+              icon={
+                tagsHidden ? (
+                  <Eye className="w-4 h-4" />
+                ) : (
+                  <EyeOff className="w-4 h-4" />
+                )
+              }
+            />
+
+            <IconToolBtn
+              btnRef={tagMenuBtnRef}
+              onClick={openTagMenu}
+              title={t('editor.gotoTagTitle')}
+              label={t('editor.gotoTagBtn')}
+              icon={<CornerDownRight className="w-4 h-4" />}
+            />
+
+            <div className="h-4 w-px bg-slate-800 mx-1" />
+
+            {/* Жирний/курсив — у групі «Форматування» нижче (вони там ще й
+                знають, до якої мови застосовуватись); тут лишилась цитата. */}
+            <button
+              onClick={() => insertTextAtCursor('\n\n> Цитата...\n\n')}
+              className="p-1.5 hover:bg-slate-800 hover:text-white rounded-md transition-colors"
+              title={t('editor.quoteTitle')}
+            >
+              <Quote className="w-3.5 h-3.5" />
+            </button>
+        </div>
+
+        {groupSep}
+        {/* Форматування. У розвороті UA | EN — одна панель на обидві
+            колонки: ціль перемикається тут і сама слідує за курсором. */}
+        <div className={groupClass}>
+          {editorLanguageMode === 'parallel' && (
+            <div
+              className="flex items-center gap-0.5 p-0.5 rounded-md bg-slate-950 border border-slate-800"
+              title={t('editor.formatTargetTitle')}
+            >
+              {(['ua', 'en'] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => setFormatTarget(k)}
+                  aria-pressed={formatTarget === k}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors ${
+                    formatTarget === k ? '[background-color:var(--sun-acc)] text-slate-950' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {k === 'ua' ? '🇺🇦 UA' : '🇬🇧 EN'}
+                </button>
+              ))}
+            </div>
+          )}
+          {renderFormatToolbar(dockFormatIsEn, !vertical)}
+        </div>
+      </>
+    );
+  };
+
   const editorSurface = (
     <div
       ref={focusRootRef}
@@ -4758,32 +5266,6 @@ export const EditorView: React.FC<EditorViewProps> = ({
         </div>
       )}
 
-      {/* Mobile Top Navigation Bar */}
-      <div className="lg:hidden flex items-center justify-between p-2.5 bg-slate-950 border-b border-slate-800 text-xs shrink-0">
-        <button
-          onClick={() => setShowLeftTree(!showLeftTree)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border font-bold transition-all ${
-            showLeftTree ? '[background-color:var(--sun-acc-20)] [border-color:var(--sun-acc)] [color:var(--sun-soft)]' : 'bg-slate-900 border-slate-800 text-slate-300'
-          }`}
-        >
-          <PanelLeft className="w-3.5 h-3.5" />
-          <span>{t('editor.tocMobile', { n: book.chapters.length })}</span>
-        </button>
-
-        <div className="font-bold text-slate-200 truncate max-w-[140px] text-[11px]">
-          {activeSection?.title}
-        </div>
-
-        <button
-          onClick={() => setShowRightPanel(!showRightPanel)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border font-bold transition-all ${
-            showRightPanel ? '[background-color:var(--sun-acc-20)] [border-color:var(--sun-acc)] [color:var(--sun-soft)]' : 'bg-slate-900 border-slate-800 text-slate-300'
-          }`}
-        >
-          <Users className="w-3.5 h-3.5" />
-          <span>{t('editor.charactersSceneMobile')}</span>
-        </button>
-      </div>
 
       {/* LEFT DRAWER: Book Structure Tree (Can be collapsed or opened) */}
       {showLeftTree && (
@@ -4896,493 +5378,32 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
       {/* LEFT / CENTER: MAIN WRITING AREA ("велике поле для тексту книги зліва") */}
       <main
+        ref={mainAreaRef}
         className="flex-1 min-h-0 flex flex-col h-full bg-slate-950 overflow-hidden border-r border-slate-800"
+        style={{
+          paddingTop: toolReserve.top,
+          paddingBottom: toolReserve.bottom,
+          paddingLeft: toolReserve.left,
+          paddingRight: toolReserve.right,
+        }}
         onContextMenu={(e) => {
           e.preventDefault();
           setContextMenu({ x: e.clientX, y: e.clientY });
         }}
       >
-        
-        {/* Editor Top Title Bar — окремий блок на всю ширину */}
-        <div className="m-2.5 rounded-xl border border-slate-800 bg-slate-900 shadow-lg shadow-black/30 p-3 flex flex-wrap items-center justify-between gap-3 shrink-0">
-          <div className="flex items-center gap-2 flex-1 min-w-0">
-            {!showLeftTree && (
-              <button
-                onClick={() => setShowLeftTree(true)}
-                data-tour="editor__1"
-                className="hidden lg:flex items-center gap-1 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 rounded-lg text-xs transition-colors shrink-0"
-                title={t('editor.openTocTitle')}
-              >
-                <PanelLeft className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
-                <span>{t('editor.tocBtn')}</span>
-              </button>
-            )}
-
-            <div className="flex-1 min-w-0">
-              <input
-                type="text"
-                value={activeSection?.title || ''}
-                onChange={(e) => {
-                  if (!activeChapter || !activeSection) return;
-                  const updated = book.chapters.map((c) => {
-                    if (c.id !== activeChapter.id) return c;
-                    return {
-                      ...c,
-                      sections: c.sections.map((s) =>
-                        s.id === activeSection.id ? { ...s, title: e.target.value } : s
-                      ),
-                    };
-                  });
-                  onUpdateBook({ ...book, chapters: updated });
-                }}
-                className="text-sm sm:text-base font-bold text-white bg-transparent border-b border-slate-700/60 focus:[border-color:var(--sun-acc)] focus:outline-hidden px-1 w-full max-w-sm truncate"
-                placeholder={t('editor.sectionTitlePlaceholder')}
-              />
-              <span className="text-[11px] text-slate-400 block truncate">
-                {activeChapter?.title} {activeSection?.titleEn ? `• EN: ${activeSection.titleEn}` : ''}
-              </span>
-            </div>
-          </div>
-
-          {/* Bilingual View Mode Switcher + Fast Actions */}
-          <div className="flex items-center gap-2 text-xs flex-wrap">
-            
-            {/* Language Mode Selector */}
-            <div data-tour="editor__3" className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800">
-              <button
-                onClick={() => setEditorLanguageMode('ua')}
-                className={`px-2.5 py-1 rounded-lg font-bold text-xs transition-all ${
-                  editorLanguageMode === 'ua'
-                    ? '[background-color:var(--sun-acc)] text-slate-950 shadow-sm'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-                title={t('editor.modeUaTitle')}
-              >
-                🇺🇦 UA
-              </button>
-
-              <button
-                onClick={() => setEditorLanguageMode('parallel')}
-                className={`px-2.5 py-1 rounded-lg font-bold text-xs transition-all flex items-center gap-1 ${
-                  editorLanguageMode === 'parallel'
-                    ? '[background-color:var(--sun-acc)] text-slate-950 shadow-sm'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-                title={t('editor.modeParallelTitle')}
-              >
-                <Columns className="w-3 h-3" />
-                <span>UA | EN</span>
-              </button>
-
-              <button
-                onClick={() => setEditorLanguageMode('en')}
-                className={`px-2.5 py-1 rounded-lg font-bold text-xs transition-all ${
-                  editorLanguageMode === 'en'
-                    ? '[background-color:var(--sun-acc)] text-slate-950 shadow-sm'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-                title={t('editor.modeEnTitle')}
-              >
-                🇬🇧 EN
-              </button>
-            </div>
-
-            {/* Пошук і заміна по всій книзі (BookSearchModal.tsx) — на
-                відміну від Ctrl+F браузера, бачить усі глави/розділи, а
-                не лише поточний відкритий. */}
-            <button
-              onClick={() => setShowBookSearch(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 rounded-lg transition-colors"
-              title={t('editor.searchBookTitle')}
-            >
-              <Search className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{t('editor.searchBookBtn')}</span>
-            </button>
-
-            {/* Симуляція емоційної реакції читача на активну сцену */}
-            <button
-              onClick={handleRunReaderResponse}
-              disabled={isSimulatingReader || !(editorLanguageMode === 'en' ? activeSection?.contentEn : activeSection?.content)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 rounded-lg transition-colors disabled:opacity-50"
-              title={t('editor.readerResponseTitle')}
-            >
-              <Smile className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{isSimulatingReader ? t('editor.readerResponseRunning') : t('editor.readerResponseBtn')}</span>
-            </button>
-
-            {/* Показники глави (хвиля 2, задача 6) */}
-            <button
-              onClick={handleAnalyzeChapterMetrics}
-              disabled={isAnalyzingChapterMetrics || !activeChapter}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 rounded-lg transition-colors disabled:opacity-50"
-              title={t('editor.chapterMetricsTitle')}
-            >
-              <BarChart3 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{isAnalyzingChapterMetrics ? t('editor.chapterMetricsRunning') : t('editor.chapterMetricsBtn')}</span>
-            </button>
-
-            {/* Translate Button */}
-            <button
-              onClick={handleTranslateToEnglish}
-              disabled={isTranslating || !activeSection?.content}
-              data-tour="editor__4"
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-[var(--sun-acc)] to-[var(--sun-acc-70)] hover:from-[var(--sun-acc-80)] hover:to-[var(--sun-acc)] text-slate-950 font-bold rounded-lg transition-all shadow-sm active:scale-95 disabled:opacity-50"
-              title={t('editor.translateTitle')}
-            >
-              <Languages className="w-3.5 h-3.5" />
-              <span>{isTranslating ? t('editor.translating') : t('editor.translate')}</span>
-            </button>
-
-            {onSaveBook && (
-              <button
-                onClick={onSaveBook}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 [color:var(--sun-soft)] font-bold border [border-color:var(--sun-acc-30)] rounded-lg transition-colors whitespace-nowrap"
-                title={t('editor.saveTitle')}
-              >
-                <Save className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">{t('editor.save')}</span>
-              </button>
-            )}
-
-            {!showRightPanel && (
-              <button
-                onClick={() => setShowRightPanel(true)}
-                className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 [color:var(--sun-acc)] border border-slate-800 rounded-lg transition-colors"
-                title={t('editor.openCharPanelTitle')}
-              >
-                <Users className="w-3.5 h-3.5" />
-                <span>{t('editor.charactersBtn')}</span>
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Formatting & Insert Toolbar */}
-        <div style={sunVars} className="px-4 py-2 border-b border-slate-800 bg-slate-950 flex items-center justify-between gap-2 text-slate-300 text-xs overflow-x-auto no-scrollbar shrink-0">
-          <div className="flex items-center gap-2">
-            {/* Quick Typography Insets — лише іконки, підписи в підказках.
-                Раніше тут був видимий текст, і рядок зʼїдав місце для правки
-                книги; текст переїхав у title + aria-label (див. IconToolBtn). */}
-            <IconToolBtn
-              onClick={() => insertTextAtCursor('— ')}
-              title={t('editor.dashTitle')}
-              label={t('editor.dashBtn')}
-              icon={<Minus className="w-[18px] h-[18px]" />}
-            />
-            <IconToolBtn
-              onClick={() => insertTextAtCursor('«»')}
-              title={t('editor.quotesTitle')}
-              label={t('editor.quotesBtn')}
-              icon={<TextQuote className="w-[18px] h-[18px]" />}
-            />
-            <IconToolBtn
-              onClick={() => insertTextAtCursor('…')}
-              title={t('editor.ellipsisTitle')}
-              label={t('editor.ellipsisTitle')}
-              icon={<MoreHorizontal className="w-[18px] h-[18px]" />}
-            />
-
-            <div className="h-4 w-px bg-slate-800 mx-1" />
-
-            <IconToolBtn
-              onClick={() => setShowFootnoteModal(true)}
-              title={t('editor.insertFootnoteTitle')}
-              label={t('editor.insertFootnoteBtn')}
-              icon={<BookMarked className="w-[18px] h-[18px] [color:var(--sun-acc)]" />}
-            />
-
-            <IconToolBtn
-              onClick={() => setShowQrModal(true)}
-              title={t('editor.insertQrTitle')}
-              label={t('editor.insertQrBtn')}
-              icon={<QrCode className="w-[18px] h-[18px] [color:var(--sun-acc)]" />}
-            />
-
-            <IconToolBtn
-              onClick={() => setShowInsertImageModal(true)}
-              title={t('editor.imgFromGalleryTitle')}
-              label={t('editor.imgFromGalleryBtn')}
-              icon={<ImagePlus className="w-[18px] h-[18px] [color:var(--sun-acc)]" />}
-            />
-
-            {/* Акцентна кнопка: іконка більша (20px), щоб її було видно першою
-                навіть у ряду самих іконок. */}
-            <IconToolBtn
-              onClick={() => setShowIllustrationModal(true)}
-              title={t('editor.insertIllustrationTitle')}
-              label={t('editor.insertIllustrationBtn')}
-              accent="solid"
-              icon={<Sparkles className="w-5 h-5 [color:var(--sun-acc)]" />}
-            />
-
-            <div className="h-4 w-px bg-slate-800 mx-1" />
-
-            <IconToolBtn
-              onClick={handleInsertTag}
-              title={t('editor.insertTagTitle')}
-              label={t('editor.insertBookTagBtn')}
-              accent="soft"
-              icon={<Tag className="w-[18px] h-[18px]" />}
-            />
-
-            <IconToolBtn
-              onClick={() => setTagsHidden((v) => !v)}
-              title={tagsHidden ? t('editor.showTagsTitle') : t('editor.hideTagsTitle')}
-              label={tagsHidden ? t('editor.showTagsBtn') : t('editor.hideTagsBtn')}
-              accent={tagsHidden ? 'plain' : 'soft'}
-              active={!tagsHidden}
-              icon={
-                tagsHidden ? (
-                  <Eye className="w-[18px] h-[18px]" />
-                ) : (
-                  <EyeOff className="w-[18px] h-[18px]" />
-                )
-              }
-            />
-
-            <IconToolBtn
-              btnRef={tagMenuBtnRef}
-              onClick={openTagMenu}
-              title={t('editor.gotoTagTitle')}
-              label={t('editor.gotoTagBtn')}
-              icon={<CornerDownRight className="w-[18px] h-[18px]" />}
-            />
-
-            <div className="h-4 w-px bg-slate-800 mx-1" />
-
-            <button
-              onClick={() => wrapSelection('**', t('editor.boldPlaceholder'))}
-              className="p-1.5 hover:bg-slate-800 hover:text-white rounded-md transition-colors"
-              title={t('editor.boldTitle')}
-            >
-              <Bold className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => wrapSelection('*', t('editor.italicPlaceholder'))}
-              className="p-1.5 hover:bg-slate-800 hover:text-white rounded-md transition-colors"
-              title={t('editor.italicTitle')}
-            >
-              <Italic className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => insertTextAtCursor('\n\n> Цитата...\n\n')}
-              className="p-1.5 hover:bg-slate-800 hover:text-white rounded-md transition-colors"
-              title={t('editor.quoteTitle')}
-            >
-              <Quote className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          <div className="flex items-center gap-3 text-slate-400 font-mono text-[11px]">
-            {/* Кількість слів/час читання переїхали компактним чіпом у
-                шапку панелі режиму «UA» (запис #185, разом із прибиранням
-                кнопки «Англійська версія» — режим «Паралельно» так само
-                доступний через «UA | EN» вище). Тут лишається резервний
-                варіант для режимів EN/Паралельно (у них немає такої шапки)
-                — без дублювання в режимі UA. */}
-            {editorLanguageMode !== 'ua' && (
-              <span>
-                {t('editor.wordsShort', { n: activeSection?.wordCount || 0 })}
-                {activeSection?.contentEn && (
-                  <> · EN {calculateWordCount(activeSection.contentEn)}</>
-                )}
-              </span>
-            )}
-            {!isFocusWindow && (
-              <div className="flex items-center gap-1.5" title={t('editor.pageZoomTitle')}>
-                <ZoomIn className="w-3.5 h-3.5 [color:var(--sun-acc)] shrink-0" />
-                <select
-                  value={zoomToFit ? 'fit' : PAGE_ZOOM_PRESETS.includes(editorZoom) ? String(editorZoom) : 'custom'}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    if (value === 'fit') {
-                      setZoomToFit(true);
-                    } else if (value === 'custom') {
-                      setZoomToFit(false);
-                      setCustomEditorZoom(String(editorZoom));
-                    } else {
-                      setZoomToFit(false);
-                      setEditorZoom(Number(value));
-                    }
-                  }}
-                  className="bg-slate-900 border border-slate-800 rounded-md px-1 py-0.5 text-slate-200 cursor-pointer"
-                >
-                  <option value="fit">{t('editor.pageZoomFit')}</option>
-                  {PAGE_ZOOM_PRESETS.map((zoom) => (
-                    <option key={zoom} value={zoom}>
-                      {zoom}%
-                    </option>
-                  ))}
-                  <option value="custom">{t('editor.pageZoomCustom')}</option>
-                </select>
-                {!zoomToFit && !PAGE_ZOOM_PRESETS.includes(editorZoom) && (
-                  <input
-                    type="number"
-                    min={20}
-                    max={200}
-                    value={customEditorZoom}
-                    placeholder="%"
-                    onChange={(e) => setCustomEditorZoom(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        const parsed = Number(customEditorZoom);
-                        if (Number.isFinite(parsed) && parsed >= 20 && parsed <= 200) {
-                          setEditorZoom(Math.round(parsed));
-                        }
-                      }
-                    }}
-                    onBlur={() => {
-                      const parsed = Number(customEditorZoom);
-                      if (Number.isFinite(parsed) && parsed >= 20 && parsed <= 200) {
-                        setEditorZoom(Math.round(parsed));
-                      }
-                    }}
-                    className="w-16 bg-slate-900 border border-slate-800 rounded-md px-1 py-0.5 text-cyan-300 text-center"
-                    title={t('editor.pageZoomHint')}
-                  />
-                )}
-              </div>
-            )}
-          </div>
-        </div>
+        {/* Над полем тексту більше нічого немає (запис #235): назва розділу,
+            дії, вставки, форматування, лінійка, банери ролей і «мова та
+            словник» — у плаваючому блоці інструментів (кінець <main>). */}
 
         {/* Text Area Canvas Body */}
         <div className="flex-1 min-h-0 bg-slate-950 flex flex-col overflow-hidden">
-          
-          {/* Role Status Banners */}
-          {isReader && (
-            <div className="w-full max-w-3xl mb-4 p-3 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs flex items-center justify-between shadow-sm">
-              <div className="flex items-center gap-2">
-                <Eye className="w-4 h-4 shrink-0" />
-                <span><b>{t('editor.readerBannerTitle')}</b> {t('editor.readerBannerText')}</span>
-              </div>
-            </div>
-          )}
-
-          {isTranslator && (
-            <div className="w-full max-w-5xl mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center justify-between shadow-sm">
-              <div className="flex items-center gap-2">
-                <Globe className="w-4 h-4 shrink-0" />
-                <span><b>{t('editor.translatorBannerTitle')}</b> {t('editor.translatorBannerText')}</span>
-              </div>
-            </div>
-          )}
-
           {/* 1. SINGLE UA MODE — заякорена панель тексту на всю доступну висоту/ширину */}
           {editorLanguageMode === 'ua' && (
             <DockedEditorPanel
               title={null}
-              headerExtra={
-                <>
-                {/* Компактний чіп кількості слів/часу читання — раніше в
-                    рядку тулбару форматування, поряд із кнопкою «Англійська
-                    версія» (запис #185 прибрав кнопку зовсім — режим
-                    «Паралельно», який вона відкривала, доступний через
-                    «UA | EN» вище; чіп переїхав сюди, в шапку панелі). */}
-                <div
-                  className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-400 font-mono text-[10px] shrink-0"
-                  title={`${t('editor.wordsUaLabel')} ${activeSection?.wordCount || 0} · ${t('editor.readingTime', { n: estimateReadingTimeMinutes(activeSection?.wordCount || 0) })}`}
-                >
-                  <span className="text-slate-100 font-bold">{t('editor.wordsShort', { n: activeSection?.wordCount || 0 })}</span>
-                  {activeSection?.contentEn && (
-                    <span className="[color:var(--sun-acc)]">· EN {calculateWordCount(activeSection.contentEn)}</span>
-                  )}
-                  <span className="text-slate-500">· {t('editor.readingTimeShort', { n: estimateReadingTimeMinutes(activeSection?.wordCount || 0) })}</span>
-                </div>
-                {/* «Покращити AI» / «Ілюстрація з тексту» — раніше окремим
-                    рядком під тулбаром (запис #184 прибрав із нього тільки
-                    підпис, кнопки лишались; тепер рядок прибрано повністю,
-                    кнопки переїхали сюди, в шапку панелі — завжди на очах,
-                    а не тільки коли долистав до тулбару). Як і раніше,
-                    ховаються в читацькому режимі. */}
-                {!isReader && (
-                  <>
-                    <button
-                      onClick={() => handleTriggerAiEdit('improve')}
-                      className="px-2 py-1 rounded-lg [background-color:var(--sun-acc)] hover:[background-color:var(--sun-acc-80)] text-slate-950 text-[11px] font-bold transition-colors"
-                    >
-                      {t('editor.improveAi')}
-                    </button>
-                    <button
-                      onClick={() => setShowIllustrationModal(true)}
-                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-gradient-to-r from-purple-600 to-cyan-600 hover:from-purple-500 hover:to-cyan-500 text-white text-[11px] font-bold shadow-xs transition-all"
-                    >
-                      <ImageIcon className="w-3 h-3" />
-                      <span>{t('editor.illustrationFromText')}</span>
-                    </button>
-                  </>
-                )}
-                {/* Формат аркуша — раніше окремим рядком нижче (разом із
-                    підписом розділу), тепер тут: ліворуч від кнопки
-                    швидкого перемикання на англійську, у звільненому
-                    після прибирання назви розділу з шапки місці
-                    (назва й так вже показана вище, дублювання не потрібне). */}
-                <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
-                  <span className="hidden sm:inline">{t('editor.pageFormatLabel')}</span>
-                  <select
-                    value={book.layoutConfig.formatPreset}
-                    onChange={(e) => handleChangePageFormat(e.target.value)}
-                    className="bg-slate-800 border border-slate-700 text-slate-200 text-[11px] font-semibold rounded-lg px-2 py-1 outline-none hover:border-slate-500 focus:[border-color:var(--sun-acc)] cursor-pointer"
-                    title={t('editor.pageFormatTitle')}
-                  >
-                    {PAGE_FORMAT_QUICK_OPTIONS.map((p) => (
-                      <option key={p.id} value={p.id} className="bg-slate-900">
-                        {t(p.labelKey)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button
-                  onClick={() => setEditorLanguageMode('en')}
-                  className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-semibold border border-slate-700 transition-colors"
-                  title={t('editor.quickSwitchToEnTitle')}
-                >
-                  🇬🇧 EN
-                </button>
-                <select
-                  value={`${activeChapter?.id}::${activeSection?.id}`}
-                  onChange={(e) => {
-                    const [cId, sId] = e.target.value.split('::');
-                    if (cId && sId) onSelectSection(cId, sId);
-                  }}
-                  className="bg-slate-800 border border-slate-700 text-slate-200 text-[11px] font-semibold rounded-lg px-2 py-1 max-w-[190px] cursor-pointer focus:outline-none focus:[border-color:var(--sun-acc)]"
-                  title={t('editor.sectionSwitcherTitle')}
-                >
-                  {book.chapters.map((c) => (
-                    <optgroup key={c.id} label={c.title}>
-                      {c.sections.map((s) => (
-                        <option key={s.id} value={`${c.id}::${s.id}`}>
-                          {s.title}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-                </>
-              }
               bodyClassName="flex flex-col overflow-hidden"
             >
               <div className="relative flex flex-col h-full min-h-0">
-              {/* Форматування тексту, перемикач лінійки і швидкий доступ до англійської версії */}
-              <div className="flex items-center justify-between gap-2 mb-3 shrink-0 flex-wrap">
-                {renderFormatToolbar(false)}
-                {/* Перемикач лінійки (мм) — раніше окремим рядком нижче
-                    тулбару (запис #184 лишив там тільки цю кнопку); тепер
-                    сюди, одразу після панелі форматування. */}
-                <button
-                  type="button"
-                  onClick={() => setRulerVisible((v) => !v)}
-                  className={`p-1.5 rounded-lg border transition-colors shrink-0 ${
-                    rulerVisible
-                      ? 'bg-slate-900 border-slate-700 [color:var(--sun-acc)]'
-                      : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'
-                  }`}
-                  title={rulerVisible ? t('editor.rulerToggleHide') : t('editor.rulerToggleShow')}
-                >
-                  <Ruler className="w-3.5 h-3.5" />
-                </button>
-              </div>
-
               <PageColumn
                 widthMm={pageGeometry.contentWidthMm}
                 zoomFactor={pageZoomFactor}
@@ -5433,23 +5454,6 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 />
               </PageColumn>
 
-              {/* Підвал блока тексту: мова та словник перевірки */}
-              <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-slate-800/60 shrink-0 flex-wrap">
-                <button
-                  onClick={() => setShowProofingModal(true)}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-[11px] font-semibold transition-colors"
-                  title={t('editor.proofingBtnTitle')}
-                >
-                  <SpellCheck2 className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>{t('editor.proofingBtn')}</span>
-                </button>
-                <span className="text-[10px] font-mono text-slate-500">
-                  {spellcheckEnabled
-                    ? t('editor.proofingStatusOn', { lang: proofingLanguage.toUpperCase() })
-                    : t('editor.proofingStatusOff')}
-                </span>
-              </div>
-
               {/* In-text Footnotes & QR tags visual footer */}
               {(sectionFootnotes.length > 0 || sectionQrTags.length > 0) && (
                 <div className="mt-6 pt-4 border-t border-slate-800/80 space-y-3">
@@ -5496,45 +5500,13 @@ export const EditorView: React.FC<EditorViewProps> = ({
           {editorLanguageMode === 'parallel' && (
             <div className="flex-1 min-h-0 w-full flex flex-col lg:flex-row gap-4">
               <DockedEditorPanel
-                  title={<span className="flex items-center gap-2">🇺🇦 <span className="text-slate-100">{t('editor.ukOriginal')} — {activeSection?.title || ''}</span></span>}
+                  title={null}
                   className="min-w-0"
                   bodyClassName="flex flex-col overflow-hidden"
                 >
-                  <div className="flex flex-col h-full min-h-0 gap-2">
-                    <div className="flex items-center justify-between gap-2 shrink-0 flex-wrap">
-                      <span className="text-[11px] font-mono text-slate-400">
-                        {t('editor.wordsCount', { n: activeSection?.wordCount || 0 })}
-                      </span>
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {renderFormatToolbar(false)}
-                        <button
-                          type="button"
-                          onClick={() => setRulerVisible((v) => !v)}
-                          className={`p-1.5 rounded-lg border transition-colors shrink-0 ${
-                            rulerVisible
-                              ? 'bg-slate-900 border-slate-700 [color:var(--sun-acc)]'
-                              : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'
-                          }`}
-                          title={rulerVisible ? t('editor.rulerToggleHide') : t('editor.rulerToggleShow')}
-                        >
-                          <Ruler className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                    <input
-                      type="text"
-                      value={activeSection?.title || ''}
-                      onChange={(e) => {
-                        const updated = book.chapters.map((c) =>
-                          c.id === activeChapter?.id
-                            ? { ...c, sections: c.sections.map((s) => (s.id === activeSection?.id ? { ...s, title: e.target.value } : s)) }
-                            : c
-                        );
-                        onUpdateBook({ ...book, chapters: updated });
-                      }}
-                      placeholder={t('editor.sectionTitleUaLabel')}
-                      className="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white font-bold shrink-0"
-                    />
+                  <div className="relative flex flex-col h-full min-h-0 gap-2">
+                    {/* Мітка колонки замість шапки: у розвороті треба бачити, де яка мова. */}
+                    <span className="absolute top-2 left-2 z-10 px-1.5 py-0.5 rounded-md bg-slate-900/80 border border-slate-700 text-[10px] font-bold text-slate-300 pointer-events-none select-none">🇺🇦 UA</span>
                     <PageColumn
                       widthMm={pageGeometry.contentWidthMm}
                       zoomFactor={pageZoomFactor}
@@ -5568,42 +5540,13 @@ export const EditorView: React.FC<EditorViewProps> = ({
               </DockedEditorPanel>
 
               <DockedEditorPanel
-                  title={<span className="flex items-center gap-2">🇬🇧 <span className="text-slate-100">English Edition — {activeSection?.titleEn || activeSection?.title || ''}</span></span>}
+                  title={null}
                   className="min-w-0"
                   bodyClassName="flex flex-col overflow-hidden"
                 >
-                  <div className="flex flex-col h-full min-h-0 gap-2">
-                    <div className="flex items-center justify-between gap-2 shrink-0 flex-wrap">
-                      <span className="text-[11px] font-mono [color:var(--sun-acc)]/90">
-                        {calculateWordCount(activeSection?.contentEn || '')} words
-                      </span>
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {renderFormatToolbar(true)}
-                        {renderRulerToggle()}
-                        <button
-                          onClick={handleTranslateToEnglish}
-                          disabled={isTranslating}
-                          className="px-2 py-0.5 [background-color:var(--sun-acc)] hover:[background-color:var(--sun-acc-80)] text-slate-950 text-[10px] font-bold rounded-md transition-colors"
-                          title={t('editor.updateTranslationTitle')}
-                        >
-                          {isTranslating ? '...' : t('editor.update')}
-                        </button>
-                      </div>
-                    </div>
-                    <input
-                      type="text"
-                      value={activeSection?.titleEn || ''}
-                      onChange={(e) => {
-                        const updated = book.chapters.map((c) =>
-                          c.id === activeChapter?.id
-                            ? { ...c, sections: c.sections.map((s) => (s.id === activeSection?.id ? { ...s, titleEn: e.target.value } : s)) }
-                            : c
-                        );
-                        onUpdateBook({ ...book, chapters: updated });
-                      }}
-                      placeholder="Section Title (EN)"
-                      className="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white font-bold shrink-0"
-                    />
+                  <div className="relative flex flex-col h-full min-h-0 gap-2">
+                    {/* Мітка колонки замість шапки: у розвороті треба бачити, де яка мова. */}
+                    <span className="absolute top-2 left-2 z-10 px-1.5 py-0.5 rounded-md bg-slate-900/80 border border-slate-700 text-[10px] font-bold text-slate-300 pointer-events-none select-none">🇬🇧 EN</span>
                     <PageColumn
                       widthMm={pageGeometry.contentWidthMm}
                       zoomFactor={pageZoomFactor}
@@ -5641,48 +5584,10 @@ export const EditorView: React.FC<EditorViewProps> = ({
           {/* 3. SINGLE EN MODE — заякорена панель англійського тексту на всю доступну висоту/ширину */}
           {editorLanguageMode === 'en' && (
             <DockedEditorPanel
-              title={<span className="flex items-center gap-2">🇬🇧 <span className="text-slate-100">English Edition — {activeSection?.titleEn || activeSection?.title || ''}</span></span>}
-              headerExtra={
-                <button
-                  onClick={() => setEditorLanguageMode('ua')}
-                  className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-semibold border border-slate-700 transition-colors"
-                  title={t('editor.quickSwitchToUaTitle')}
-                >
-                  🇺🇦 UA
-                </button>
-              }
+              title={null}
               bodyClassName="flex flex-col overflow-hidden"
             >
-              <div className="flex flex-col h-full min-h-0 gap-2">
-                <div className="flex items-center justify-between gap-2 shrink-0 flex-wrap">
-                  <span className="text-xs font-bold text-slate-300">English Publication Edition</span>
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {renderFormatToolbar(true)}
-                    {renderRulerToggle()}
-                    <button
-                      onClick={handleTranslateToEnglish}
-                      disabled={isTranslating}
-                      className="flex items-center gap-1.5 px-3 py-1.5 [background-color:var(--sun-acc)] hover:[background-color:var(--sun-acc-80)] text-slate-950 text-xs font-bold rounded-lg transition-colors"
-                    >
-                      <Languages className="w-3.5 h-3.5" />
-                      <span>{isTranslating ? t('editor.translating') : t('editor.translateFromUa')}</span>
-                    </button>
-                  </div>
-                </div>
-                <input
-                  type="text"
-                  value={activeSection?.titleEn || ''}
-                  onChange={(e) => {
-                    const updated = book.chapters.map((c) =>
-                      c.id === activeChapter?.id
-                        ? { ...c, sections: c.sections.map((s) => (s.id === activeSection?.id ? { ...s, titleEn: e.target.value } : s)) }
-                        : c
-                    );
-                    onUpdateBook({ ...book, chapters: updated });
-                  }}
-                  placeholder="Section Title (EN)"
-                  className="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white font-bold shrink-0"
-                />
+              <div className="relative flex flex-col h-full min-h-0 gap-2">
                 <PageColumn
                   widthMm={pageGeometry.contentWidthMm}
                   zoomFactor={pageZoomFactor}
@@ -5717,6 +5622,31 @@ export const EditorView: React.FC<EditorViewProps> = ({
           )}
 
         </div>
+        {/* Усі кнопки й повідомлення, що раніше стояли смугами над текстом
+            (запис #235). Портал у body — див. FloatingToolDock. */}
+        <FloatingToolDock
+          anchorRef={mainAreaRef}
+          storageKey="nova.editor.toolDock.v1"
+          zIndex={isFocusWindow ? 210 : 45}
+          style={sunVars}
+          hidden={isFocusWindow && toolbarHidden}
+          onReserveChange={setToolReserve}
+          labels={{
+            title: t('editor.toolDockTitle'),
+            dragHint: t('editor.toolDockDragHint'),
+            magnet: t('editor.toolDockMagnet'),
+            dockTop: t('editor.toolDockTop'),
+            dockBottom: t('editor.toolDockBottom'),
+            dockLeft: t('editor.toolDockLeft'),
+            dockRight: t('editor.toolDockRight'),
+            undock: t('editor.toolDockUndock'),
+            minimize: t('editor.toolDockMinimize'),
+            expand: t('editor.toolDockExpand'),
+            resize: t('editor.toolDockResize'),
+          }}
+        >
+          {renderToolDockContent}
+        </FloatingToolDock>
       </main>
 
       {/* RIGHT PANEL: CHARACTERS & SCENE WORKSPACE ("персонажі з права альбомного перегляду сайту") */}

@@ -2085,3 +2085,13 @@
   color: #7f1d3a;
 }
 [data-theme="light"] .nova-diff-same { color: #1e293b; }
+
+/* Плаваючий блок інструментів редактора (запис #235). Прилиплий до НИЗУ
+   блок відкриває свої випадні палітри (колір, підсвітка, посилання, спринт)
+   ВГОРУ — інакше вони йшли б за нижній край вікна. */
+[data-editor-tool-dock][data-dock="bottom"] .top-full {
+  top: auto;
+  bottom: 100%;
+  margin-top: 0;
+  margin-bottom: 0.25rem;
+}

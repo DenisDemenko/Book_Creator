@@ -11,6 +11,7 @@ import { X } from 'lucide-react';
  * низ екрана знизу), а не лишався маленьким довільно зміненим вікном.
  */
 interface DockedEditorPanelProps {
+  /** `null` разом із відсутнім headerExtra/onClose — панель без шапки. */
   title: React.ReactNode;
   children: React.ReactNode;
   onClose?: () => void;
@@ -29,6 +30,9 @@ export const DockedEditorPanel: React.FC<DockedEditorPanelProps> = ({
 }) => {
   return (
     <div className={`flex-1 min-h-0 flex flex-col bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl shadow-black/50 ${className}`}>
+      {/* Порожня шапка не малюється (запис #235): над полем тексту не має
+          лишатися жодної смуги — усі кнопки живуть у плаваючому блоці. */}
+      {(title || headerExtra || onClose) && (
       <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-800 shrink-0">
         <span className="flex-1 text-xs font-bold text-slate-200 truncate">{title}</span>
         {headerExtra && <div className="shrink-0 flex items-center gap-1.5">{headerExtra}</div>}
@@ -38,6 +42,7 @@ export const DockedEditorPanel: React.FC<DockedEditorPanelProps> = ({
           </button>
         )}
       </div>
+      )}
       <div className={`flex-1 min-h-0 ${bodyClassName}`}>{children}</div>
     </div>
   );
