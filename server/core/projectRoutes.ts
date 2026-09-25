@@ -24,6 +24,8 @@ import { hybridSearch, type SearchDeps, type SearchRequest } from './search/serv
 import { buildStoryGraph, evidenceRefs } from './storyGraph';
 import { AI_PROFILE_JOB_KIND, PROFILE_FACT, buildCharacterProfile, type StudioCharacterLike } from './characterProfile';
 import type { EntityRow } from './types';
+import { runFlcCycle } from './flc/cycle';
+import { LlmFallbackJevAdapter, type JevAdapter, type LlmJson } from './flc/jev';
 import { interpretSearchQuery, type SearchInterpretDeps, type SearchInterpretation } from './search/interpret';
 
 export interface ProjectAccess {
@@ -80,6 +82,8 @@ export interface ProjectRoutesDeps {
   interpret?: Omit<SearchInterpretDeps, 'repo'>;
   /** Картка героя в Студії (канон автора) для профілю персонажа (Т1.5). */
   studio?: (projectId: string, entity: EntityRow) => Promise<{ character: StudioCharacterLike | null; all: StudioCharacterLike[] }>;
+  /** Прототип FLC етапу 0 (Т1.6): адаптер Jev (null — ключа немає) і LLM. */
+  flc?: { jev: () => Promise<JevAdapter | null>; llm: (projectId: string, actor: string) => LlmJson };
 }
 
 /** Не більше стількох тлумачень запиту ШІ на користувача за хвилину — це платні виклики. */
@@ -656,6 +660,55 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       status === 'confirmed' ? 'підтверджено автором (профіль героя)' : 'відхилено автором (профіль героя)',
     );
     res.json({ finding });
+  }));
+
+  // ── Т1.6: прототип FLC етапу 0 (лише адміністратор) ──────────────────────
+
+  /**
+   * Один повний цикл retrieval → профіль → Jev → LLM → чернетка для героя.
+   * Прототип для звіту (Т1.6): лише адміністратор, нічого не записує в канон;
+   * відповідь — чернетка з рішенням, часом кроків, вартістю й журналом агентів.
+   */
+  app.post('/api/projects/:id/flc/prototype', withRepo(async (repo, req, res) => {
+    if (req.projectAccess!.role !== 'admin') {
+      res.status(403).json({ error: 'Прототип FLC доступний лише адміністратору.', kind: 'forbidden' });
+      return;
+    }
+    if (!deps.flc) {
+      res.status(503).json({ error: 'Прототип FLC тут не підключено.', kind: 'core_unavailable' });
+      return;
+    }
+    const b = req.body ?? {};
+    const entity = await repo.getEntity(req.params.id, String(b.entityId ?? ''));
+    const question = typeof b.question === 'string' ? b.question.trim() : '';
+    if (!entity || entity.status === 'rejected' || !question) {
+      res.status(400).json({ error: 'Потрібні герой книги і запитання.', kind: 'bad_input' });
+      return;
+    }
+    const actor = `user:${req.projectAccess!.userId}`;
+    const llm = deps.flc.llm(req.params.id, actor);
+    try {
+      const result = await runFlcCycle(
+        {
+          repo,
+          jev: await deps.flc.jev(),
+          fallback: new LlmFallbackJevAdapter(llm),
+          llm,
+          studio: deps.studio ? await deps.studio(req.params.id, entity).catch(() => undefined) : undefined,
+        },
+        {
+          projectId: req.params.id,
+          entityId: entity.id,
+          question: question.slice(0, 2000),
+          asOfChapter: Number(b.asOfChapter) || null,
+          allowedActions: Array.isArray(b.allowedActions) ? b.allowedActions.map(String) : undefined,
+          actorId: actor,
+        },
+      );
+      res.json(result);
+    } catch (err) {
+      res.status(502).json({ error: `Цикл не завершився: ${(err as Error).message}`, kind: 'flc_failed' });
+    }
   }));
 
   /** Зв'язки проєкту або однієї сутності (`?entityId=`). */

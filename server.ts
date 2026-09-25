@@ -203,6 +203,7 @@ import { AI_MENTIONS_JOB_KIND, aiMentionsJobKind } from './server/core/ai/mentio
 import { aiRoleGenerateViaCore, loadCoreAiRoleTemplate } from './server/core/ai/generate';
 import { CORE_EMBED_KIND, coreEmbedJobKind, scheduleCoreEmbed } from './server/core/search/embedJob';
 import { AI_PROFILE_JOB_KIND, aiProfileJobKind, studioFromBook } from './server/core/characterProfile';
+import { HttpJevAdapter, JEV_MODEL } from './server/core/flc/jev';
 import { platformEmbedder, recordEmbeddingCost, embeddingKeyFor } from './server/core/search/platform';
 import {
   DEFAULT_EMBEDDING_MODEL,
@@ -562,6 +563,18 @@ registerGitCommandRoutes(app);
       },
       onEmbeddingsStale: (projectId) => void scheduleCoreEmbed(getCoreJobQueue(), projectId, 'system:search'),
       recordQueryCost: (u) => recordEmbeddingCost(u, 'Ядро: ембединг запиту пошуку'),
+    },
+    // Прототип FLC етапу 0 (Т1.6): Jev (TypeSafe) за ключем платформи чи TYPESAFE_API_KEY,
+    // LLM — модель ролі AI-2 з «Ядра AI»; без ключа Jev — запасний шлях через LLM.
+    flc: {
+      jev: async () => {
+        const key = (await platformKeyFor('typesafe').catch(() => undefined)) || process.env.TYPESAFE_API_KEY?.trim();
+        return key ? new HttpJevAdapter(key, { model: process.env.TYPESAFE_JEV_MODEL?.trim() || JEV_MODEL }) : null;
+      },
+      llm: (projectId, actor) => async (system, user) => {
+        const out = await aiRoleGenerateViaCore({ module: 'coreAi2Analysis', modelId: await resolveModuleModelId('coreAi2Analysis'), system, user, projectId, actor });
+        return { text: out.text, modelId: out.modelId, inputTokens: out.inputTokens, outputTokens: out.outputTokens };
+      },
     },
     // Канон автора для профілю героя (Т1.5): картка в «Персонажах».
     studio: async (projectId, entity) => studioFromBook((await getStoredBookForRealtime(projectId))?.book as any, entity),
