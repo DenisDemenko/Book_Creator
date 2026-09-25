@@ -171,13 +171,13 @@ await page.waitForSelector('[data-core-characters] button', { timeout: 15000 }).
 const heroes = await page.evaluate(() => Array.from(document.querySelectorAll('[data-core-characters] button')).map((b) => b.textContent));
 t('список героїв книги з ядра', heroes.length > 0, heroes.slice(0, 3).join(' | '));
 await page.evaluate(() => (document.querySelector('[data-core-characters] button') as HTMLElement)?.click());
-await page.waitForSelector('[data-core-character]', { timeout: 15000 }).catch(() => null);
+await page.waitForSelector('[data-character-profile]', { timeout: 15000 }).catch(() => null);
 const heroPath = await pathNow();
-const heroId = await page.evaluate(() => document.querySelector('[data-core-character]')?.getAttribute('data-core-character'));
+const heroId = await page.evaluate(() => document.querySelector('[data-character-profile]')?.getAttribute('data-character-profile'));
 t('картка героя — адреса /characters/:id (як у ТЗ)', !!heroId && heroPath === `/projects/${BOOK}/characters/${heroId}`, heroPath);
 await page.reload({ waitUntil: 'domcontentloaded' });
-await page.waitForSelector('[data-core-character]', { timeout: 20000 }).catch(() => null);
-t('картка героя переживає перезавантаження', (await page.evaluate(() => document.querySelector('[data-core-character]')?.getAttribute('data-core-character'))) === heroId);
+await page.waitForSelector('[data-character-profile]', { timeout: 20000 }).catch(() => null);
+t('картка героя переживає перезавантаження', (await page.evaluate(() => document.querySelector('[data-character-profile]')?.getAttribute('data-character-profile'))) === heroId);
 await page.goBack();
 await page.waitForSelector('[data-core-characters]', { timeout: 15000 }).catch(() => null);
 t('«назад» — знову список героїв', (await pathNow()) === `/projects/${BOOK}/character-profile` && !!(await page.$('[data-core-characters]')));

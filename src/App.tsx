@@ -2327,6 +2327,7 @@ export default function App() {
             characterId={coreCharacterId}
             onOpenCharacter={setCoreCharacterId}
             onOpenParagraph={handleOpenCoreParagraph}
+            onUpdateBook={handleUpdateBook}
           />
         )}
 

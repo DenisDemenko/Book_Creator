@@ -202,6 +202,7 @@ import { AI_ROLE_JOB_KIND, aiRoleJobKind } from './server/core/ai/job';
 import { AI_MENTIONS_JOB_KIND, aiMentionsJobKind } from './server/core/ai/mentions';
 import { aiRoleGenerateViaCore, loadCoreAiRoleTemplate } from './server/core/ai/generate';
 import { CORE_EMBED_KIND, coreEmbedJobKind, scheduleCoreEmbed } from './server/core/search/embedJob';
+import { AI_PROFILE_JOB_KIND, aiProfileJobKind, studioFromBook } from './server/core/characterProfile';
 import { platformEmbedder, recordEmbeddingCost, embeddingKeyFor } from './server/core/search/platform';
 import {
   DEFAULT_EMBEDDING_MODEL,
@@ -562,6 +563,8 @@ registerGitCommandRoutes(app);
       onEmbeddingsStale: (projectId) => void scheduleCoreEmbed(getCoreJobQueue(), projectId, 'system:search'),
       recordQueryCost: (u) => recordEmbeddingCost(u, 'Ядро: ембединг запиту пошуку'),
     },
+    // Канон автора для профілю героя (Т1.5): картка в «Персонажах».
+    studio: async (projectId, entity) => studioFromBook((await getStoredBookForRealtime(projectId))?.book as any, entity),
     // Тлумачення запиту сторінки «Пошук» (Т1.3): AI-2, модуль coreSearchInterpret —
     // свій шаблон і своя модель у «Ядрі AI».
     interpret: {
@@ -6087,6 +6090,17 @@ ${JSON.stringify(bookContext || {}, null, 2)}
       generate: aiRoleGenerateViaCore,
       resolveModel: (module) => resolveModuleModelId(module),
       loadTemplate: loadCoreAiRoleTemplate,
+    }),
+  );
+  // Profile Builder (Т1.5): AI-2 складає доказовий профіль героя — кнопкою на сторінці героя.
+  registerCoreJobKind(
+    AI_PROFILE_JOB_KIND,
+    aiProfileJobKind({
+      repo: getCoreRepository,
+      generate: aiRoleGenerateViaCore,
+      resolveModel: (module) => resolveModuleModelId(module),
+      loadTemplate: loadCoreAiRoleTemplate,
+      loadStudio: async (projectId, entity) => studioFromBook((await getStoredBookForRealtime(projectId))?.book as any, entity),
     }),
   );
   registerCoreJobKind(

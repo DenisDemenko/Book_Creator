@@ -22,6 +22,8 @@ import type { JobQueue } from './jobs/queue';
 import { AI_MENTIONS_JOB_KIND, MENTION_SUGGESTION, RELATION_SUGGESTION, publicSuggestion } from './ai/mentions';
 import { hybridSearch, type SearchDeps, type SearchRequest } from './search/service';
 import { buildStoryGraph, evidenceRefs } from './storyGraph';
+import { AI_PROFILE_JOB_KIND, PROFILE_FACT, buildCharacterProfile, type StudioCharacterLike } from './characterProfile';
+import type { EntityRow } from './types';
 import { interpretSearchQuery, type SearchInterpretDeps, type SearchInterpretation } from './search/interpret';
 
 export interface ProjectAccess {
@@ -76,6 +78,8 @@ export interface ProjectRoutesDeps {
   search?: Omit<SearchDeps, 'repo'>;
   /** Тлумачення запиту AI-2 (Т1.3, `searchInterpret`); без нього — пошук без тлумачення. */
   interpret?: Omit<SearchInterpretDeps, 'repo'>;
+  /** Картка героя в Студії (канон автора) для профілю персонажа (Т1.5). */
+  studio?: (projectId: string, entity: EntityRow) => Promise<{ character: StudioCharacterLike | null; all: StudioCharacterLike[] }>;
 }
 
 /** Не більше стількох тлумачень запиту ШІ на користувача за хвилину — це платні виклики. */
@@ -579,6 +583,79 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       status === 'confirmed' ? 'підтверджено автором (граф історії)' : 'відхилено автором (граф історії)',
     );
     res.json({ relation });
+  }));
+
+  // ── Т1.5: профіль персонажа і Profile Builder ────────────────────────────
+
+  /** Профіль героя; `?chapter=N` — «стан на главі N» без спойлерів із пізніших. */
+  app.get('/api/projects/:id/characters/:entityId/profile', withRepo(async (repo, req, res) => {
+    const entity = await repo.getEntity(req.params.id, req.params.entityId);
+    if (!entity || entity.status === 'rejected') {
+      res.status(404).json({ error: 'Героя не знайдено в цьому проєкті.', kind: 'not_found' });
+      return;
+    }
+    const upto = Number(req.query.chapter) || null;
+    const studio = deps.studio ? await deps.studio(req.params.id, entity).catch(() => undefined) : undefined;
+    const profile = await buildCharacterProfile(repo, req.params.id, entity.id, { upto, studio });
+    res.json({ ...profile, canEdit: canEditStory(req.projectAccess!) });
+  }));
+
+  /** Запустити Profile Builder (AI-2) для героя — фонова задача. */
+  app.post('/api/projects/:id/characters/:entityId/profile/build', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const queue = deps.queue?.();
+    if (!queue) {
+      res.status(503).json({ error: 'Фонові задачі ядра зараз недоступні.', kind: 'core_unavailable' });
+      return;
+    }
+    const entity = await repo.getEntity(req.params.id, req.params.entityId);
+    if (!entity || entity.status === 'rejected') {
+      res.status(404).json({ error: 'Героя не знайдено в цьому проєкті.', kind: 'not_found' });
+      return;
+    }
+    try {
+      const { job } = await queue.enqueue({
+        projectId: req.params.id,
+        kind: AI_PROFILE_JOB_KIND,
+        payload: { entityId: entity.id },
+        createdBy: `user:${req.projectAccess!.userId}`,
+      });
+      res.status(202).json({ jobId: job.id });
+    } catch (err) {
+      if (err instanceof JobRejectedError) {
+        const status = err.code === 'rate_limited' ? 429 : err.code === 'budget_exhausted' ? 402 : 422;
+        res.status(status).json({ error: err.message, kind: err.code, retryAfterMs: err.retryAfterMs });
+        return;
+      }
+      throw err;
+    }
+  }));
+
+  /** Рішення автора щодо факту Profile Builder: підтвердити (стає каноном профілю) чи відхилити. */
+  app.post('/api/projects/:id/characters/:entityId/facts/:findingId/status', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const status = req.body?.status;
+    if (status !== 'confirmed' && status !== 'rejected') {
+      res.status(400).json({ error: 'Статус — confirmed або rejected.', kind: 'bad_input' });
+      return;
+    }
+    const f = await repo.getFinding(req.params.id, req.params.findingId);
+    if (!f || f.kind !== PROFILE_FACT || f.entityId !== req.params.entityId || !visibleTo(req.projectAccess!)(f)) {
+      res.status(404).json({ error: 'Факт не знайдено.', kind: 'not_found' });
+      return;
+    }
+    if (f.status === status) {
+      res.json({ finding: f });
+      return;
+    }
+    const finding = await repo.setFindingStatus(
+      req.params.id,
+      f.id,
+      status,
+      `user:${req.projectAccess!.userId}`,
+      status === 'confirmed' ? 'підтверджено автором (профіль героя)' : 'відхилено автором (профіль героя)',
+    );
+    res.json({ finding });
   }));
 
   /** Зв'язки проєкту або однієї сутності (`?entityId=`). */

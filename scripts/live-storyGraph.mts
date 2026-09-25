@@ -199,8 +199,11 @@ await page.click('[data-graph-search-go]');
 await page.waitForSelector(`[data-graph-card="${taras}"]`, { timeout: 10000 }).catch(() => null);
 t('пошук вузла — картка знайденого', !!(await page.$(`[data-graph-card="${taras}"]`)));
 await page.click('[data-graph-type="emotion"]');
-await sleep(1500);
-const types = await page.evaluate(() => Array.from(document.querySelectorAll('[data-graph-node-type]')).map((e) => e.getAttribute('data-graph-node-type')));
+const types = await waitFor(
+  () => page.evaluate(() => Array.from(document.querySelectorAll('[data-graph-node-type]')).map((e) => e.getAttribute('data-graph-node-type'))),
+  (v) => v.length > 0 && v.every((x) => x === 'emotion'),
+  8000,
+);
 t('фільтр типу «Емоційний стан» — лише емоції', types.length > 0 && types.every((x) => x === 'emotion'), types.join());
 await page.click('[data-graph-type="emotion"]');
 await sleep(1200);

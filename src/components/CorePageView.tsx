@@ -11,11 +11,12 @@
  */
 
 import React, { Suspense, lazy, useEffect, useState } from 'react';
-import { Database, Loader2, ShieldAlert, UserRound, ArrowLeft } from 'lucide-react';
+import { Database, Loader2, ShieldAlert, UserRound } from 'lucide-react';
 import type { Book, NavigationTab } from '../types';
 import { corePageByTab } from '../utils/appRoutes';
 import { useLanguage } from '../i18n/LanguageContext';
 import { CoreSearchPage } from './CoreSearchPage';
+import { CharacterProfilePage } from './CharacterProfilePage';
 
 // Граф (Т1.4) тягне React Flow — вантажимо його лише на сторінці графа.
 const StoryGraphPage = lazy(() => import('./StoryGraphPage'));
@@ -27,6 +28,8 @@ interface Props {
   onOpenCharacter: (entityId: string | undefined) => void;
   /** Перехід до абзацу в редакторі (сторінка «Пошук», Т1.3). */
   onOpenParagraph?: (target: { chapterId: string; sectionId: string; editorPid: string; text: string }) => void;
+  /** Зміна книги (пакетна заміна старого імені героя, П6). */
+  onUpdateBook?: (book: Book, logAction?: string, logDetails?: string) => void;
 }
 
 type Load<T> = { state: 'loading' } | { state: 'ok'; data: T } | { state: 'error'; status: number; message: string };
@@ -175,46 +178,7 @@ function CharacterList({ bookId, onOpen }: { bookId: string; onOpen: (id: string
   );
 }
 
-function CharacterCard({ bookId, entityId, onBack }: { bookId: string; entityId: string; onBack: () => void }) {
-  const load = useApi<{
-    entity: EntityItem;
-    aliases: { alias: string }[];
-    mentions: unknown[];
-    relations: unknown[];
-    findings: { id: string; kind: string; status: string; payload: { summary?: string } }[];
-  }>(`/api/projects/${encodeURIComponent(bookId)}/entities/${encodeURIComponent(entityId)}`);
-  return (
-    <div className="space-y-3">
-      <button type="button" onClick={onBack} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200">
-        <ArrowLeft className="h-3.5 w-3.5" /> Усі герої
-      </button>
-      {load.state === 'loading' && <Loader2 className="h-5 w-5 animate-spin text-slate-500" />}
-      {load.state === 'error' && <Problem load={load} />}
-      {load.state === 'ok' && (
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5" data-core-character={load.data.entity.id}>
-          <h2 className="text-lg font-bold text-slate-100">{load.data.entity.name}</h2>
-          {load.data.aliases.length > 0 && (
-            <p className="mt-1 text-xs text-slate-400">Також: {load.data.aliases.map((a) => a.alias).join(', ')}</p>
-          )}
-          <p className="mt-3 text-sm text-slate-300">
-            Згадок у тексті: {load.data.mentions.length} · зв'язків: {load.data.relations.length} · висновків AI: {load.data.findings.length}
-          </p>
-          {load.data.findings.length > 0 && (
-            <ul className="mt-3 space-y-1.5">
-              {load.data.findings.slice(0, 20).map((f) => (
-                <li key={f.id} className="text-xs text-slate-300">
-                  <span className="text-slate-500">[{f.status}]</span> {f.payload?.summary ?? f.kind}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-export const CorePageView: React.FC<Props> = ({ tab, book, characterId, onOpenCharacter, onOpenParagraph }) => {
+export const CorePageView: React.FC<Props> = ({ tab, book, characterId, onOpenCharacter, onOpenParagraph, onUpdateBook }) => {
   const { t } = useLanguage();
   const page = corePageByTab(tab);
   const summary = useApi<Summary>(`/api/projects/${encodeURIComponent(book.id)}/summary`);
@@ -230,7 +194,7 @@ export const CorePageView: React.FC<Props> = ({ tab, book, characterId, onOpenCh
         </div>
         <h1 className="text-2xl font-bold text-slate-100">{t(`header.nav.${tab}`)}</h1>
         <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-slate-400">{page.purposeUk}</p>
-        {tab !== 'core-search' && tab !== 'core-story-graph' && (
+        {tab !== 'core-search' && tab !== 'core-story-graph' && tab !== 'core-character' && (
           <p className="mt-2 text-xs text-slate-500">
             Сторінка з'явиться повністю на етапі {page.stage} дорожньої карти. Нижче — дані семантичного ядра цієї книги, на яких вона працюватиме.
           </p>
@@ -254,7 +218,14 @@ export const CorePageView: React.FC<Props> = ({ tab, book, characterId, onOpenCh
       {tab === 'core-character' && summary.state === 'ok' && (
         <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
           {characterId ? (
-            <CharacterCard bookId={book.id} entityId={characterId} onBack={() => onOpenCharacter(undefined)} />
+            <CharacterProfilePage
+              book={book}
+              entityId={characterId}
+              onBack={() => onOpenCharacter(undefined)}
+              onOpenCharacter={(id) => onOpenCharacter(id)}
+              onOpenParagraph={(t) => onOpenParagraph?.(t)}
+              onUpdateBook={onUpdateBook}
+            />
           ) : (
             <CharacterList bookId={book.id} onOpen={(id) => onOpenCharacter(id)} />
           )}
