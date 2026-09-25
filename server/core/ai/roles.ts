@@ -20,12 +20,13 @@ import {
   CORE_AI_ROLE_RESPONSE_SCHEMA,
   factoryCoreAiRoleTemplate,
   renderCoreAiRoleTemplate,
+  type CoreAiModule,
   type CoreAiRoleModule,
 } from './rolePrompts';
 import { parseModelJson, validateAgainstSchema } from './schema';
 
 export interface AiGenerateInput {
-  module: CoreAiRoleModule;
+  module: CoreAiModule;
   modelId: string | undefined;
   system: string;
   user: string;

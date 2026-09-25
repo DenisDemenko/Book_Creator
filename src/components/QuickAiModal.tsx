@@ -817,9 +817,12 @@ const CORE_MODULE_LABELS: Record<CoreModuleKey, string> = {
   coreAi1Classify: 'Ядро · AI-1 класифікація',
   coreAi2Analysis: 'Ядро · AI-2 спеціалізований аналіз',
   coreAi3Visual: 'Ядро · AI-3 візуальний аналіз',
+  coreSearchInterpret: 'Ядро · AI-2 тлумачення пошуку',
 };
 
 const CORE_MODULE_DESCRIPTIONS: Record<CoreModuleKey, string> = {
+  coreSearchInterpret:
+    'Сторінка «Розумний пошук» (Т1.3): AI-2 лише розкладає запит автора на фільтри — сутності книги, глави, статус — і слова для пошуку. На запит не відповідає й нічого про книгу не вигадує: автор бачить лише знайдені абзаци. Схема відповіді не редагується; сутність, якої немає в книзі, фільтром не стає.',
   coreAi1Classify:
     'Роль AI-1 семантичного ядра: згадки сутностей в абзацах книги, зіставлення з відомими сутностями, первинні зв\'язки. Лише пропонує — затверджує автор. Схема відповіді не редагується й перевіряється сервером; висновок без доказу з вхідних абзаців не зберігається.',
   coreAi2Analysis:
@@ -870,6 +873,9 @@ const CORE_FIELD_DEFS: Record<string, { key: string; label: string; textarea?: b
   '{СТИЛЬ}': { key: 'styleGuide', label: 'Файл стилю (зразок)', textarea: true },
   '{ЗАВДАННЯ}': { key: 'coreTask', label: 'Завдання ролі AI', textarea: true, placeholder: 'Знайди згадки персонажів і емоцій' },
   '{АБЗАЦИ}': { key: 'coreParagraphs', label: 'Абзаци ([id] текст, через порожній рядок)', textarea: true, placeholder: '[p-1] Олена мовчала біля мосту.' },
+  '{ЗАПИТ}': { key: 'coreQuery', label: 'Пошуковий запит автора', placeholder: 'Де Сергій приховує страх від дружини?' },
+  '{СУТНОСТІ}': { key: 'coreEntities', label: 'Відомі сутності книги (тип: назва, по рядку)', textarea: true, placeholder: 'character: Сергій\nemotion: страх' },
+  '{ГЛАВИ}': { key: 'coreChapters', label: 'Глави (номер. назва, по рядку)', textarea: true, placeholder: '1. Початок' },
   '{ЗОБРАЖЕННЯ}': { key: 'coreImages', label: 'Зображення ([id] опис, по рядку)', textarea: true },
   '{НАЗВА_КНИГИ}': { key: 'bookTitle', label: 'Назва книги' },
   '{ЖАНР}': { key: 'genre', label: 'Жанр' },

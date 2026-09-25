@@ -82,7 +82,7 @@ for (let i = 0; i < 120 && health?.core !== 'ready'; i++) {
 }
 if (health?.core !== 'ready') { console.error(log.join('').slice(-3000)); child.kill(); process.exit(1); }
 const schema = (log.join('').match(/схема v(\d+)/) ?? [])[1];
-t('ядро піднялось, міграція пошуку накочена (схема v6)', schema === '6', `v${schema}`);
+t('ядро піднялось, міграція пошуку накочена (схема ≥ v6)', Number(schema) >= 6, `v${schema}`);
 
 const api = async (method: string, p: string, body?: unknown, token = TOKEN) => {
   const res = await fetch(`${BASE}${p}`, {

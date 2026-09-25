@@ -31,6 +31,20 @@ export interface SearchRequest {
   entityIds?: string[];
   /** Скільки абзаців повернути (типово 20, не більше 50). */
   limit?: number;
+  /**
+   * Слова для пошуку за текстом, якщо вони відрізняються від запиту (так їх
+   * виділяє тлумачення ШІ, Т1.3: імена пішли у фільтри, лишилось «приховує
+   * від дружини»). Запит цілком усе одно йде в пошук за змістом.
+   */
+  text?: string;
+  /** Сутності, які назвало тлумачення ШІ (м'яко, як упізнані в запиті): група — альтернативи. */
+  hintEntityIds?: string[][];
+  /** Фільтр ТЗ «глава»: лише ці глави. */
+  chapterIds?: string[];
+  /** Фільтр ТЗ «період»: від глави до глави (номери з 1, у порядку книги). */
+  chapterRange?: { from?: number; to?: number };
+  /** Фільтр ТЗ «статус підтвердження»: зважати лише на згадки з цим статусом. */
+  mentionStatus?: 'confirmed' | 'suggested';
 }
 
 export interface SearchDeps {
@@ -53,8 +67,8 @@ export interface RecognizedEntity {
   id: string;
   type: string;
   name: string;
-  /** Звідки: з тексту запиту чи з фільтра. */
-  via: 'query' | 'filter';
+  /** Звідки: з тексту запиту, з фільтра чи з тлумачення ШІ. */
+  via: 'query' | 'filter' | 'ai';
 }
 
 export interface SearchHit {
@@ -65,9 +79,13 @@ export interface SearchHit {
   sectionTitle: string;
   chapterId: string | null;
   chapterTitle: string;
+  /** Номер глави в книзі (з 1), якщо абзац у главі. */
+  chapterNumber: number | null;
   order: number;
   kind: string;
   excerpt: string;
+  /** Контекст: сусідні абзаци того самого розділу (уривки). */
+  context: { before: string | null; after: string | null };
   score: number;
   sources: {
     text?: { rank: number; score: number; terms: string[] };
@@ -89,6 +107,8 @@ export interface SearchResponse {
   query: string;
   stems: string[];
   entities: RecognizedEntity[];
+  /** Застосовані фільтри глав і статусу — як їх зрозумів сервер. */
+  filters: { chapterIds: string[]; mentionStatus: 'confirmed' | 'suggested' | null };
   results: SearchHit[];
   sources: {
     text: { used: boolean; hits: number };
@@ -188,7 +208,12 @@ interface GraphInfo {
   relations: Map<string, RelationRow[]>;
 }
 
-async function graphFor(repo: CoreRepository, projectId: string, entityIds: string[]): Promise<GraphInfo> {
+async function graphFor(
+  repo: CoreRepository,
+  projectId: string,
+  entityIds: string[],
+  mentionStatus?: 'confirmed' | 'suggested',
+): Promise<GraphInfo> {
   const wanted = new Set(entityIds);
   const cover: GraphInfo['cover'] = new Map();
   const touch = (pid: string, entityId: string, how: { subjectOf?: string } = {}) => {
@@ -200,7 +225,7 @@ async function graphFor(repo: CoreRepository, projectId: string, entityIds: stri
   const mentions: MentionRow[] = [];
   for (const id of wanted) mentions.push(...(await repo.listMentionsByEntity(projectId, id)));
   for (const m of mentions) {
-    if (m.status === 'rejected') continue;
+    if (m.status === 'rejected' || (mentionStatus && m.status !== mentionStatus)) continue;
     touch(m.paragraphId, m.entityId);
     // Емоція (стан, дія…) з суб'єктом (П1): абзац стосується і самого героя.
     if (m.subjectEntityId && wanted.has(m.subjectEntityId)) touch(m.paragraphId, m.subjectEntityId, { subjectOf: m.entityId });
@@ -210,7 +235,8 @@ async function graphFor(repo: CoreRepository, projectId: string, entityIds: stri
     const seen = new Set<string>();
     for (const id of wanted) {
       for (const r of await repo.listRelations(projectId, id)) {
-        if (seen.has(r.id) || r.status === 'rejected' || !wanted.has(r.fromId) || !wanted.has(r.toId)) continue;
+        if (seen.has(r.id) || r.status === 'rejected' || (mentionStatus && r.status !== mentionStatus)) continue;
+        if (!wanted.has(r.fromId) || !wanted.has(r.toId)) continue;
         seen.add(r.id);
         for (const pid of r.evidence) {
           const list = relations.get(pid) ?? [];
@@ -235,7 +261,8 @@ export async function hybridSearch(deps: SearchDeps, projectId: string, req: Sea
   const { repo } = deps;
   const query = String(req.query ?? '').trim().slice(0, 500);
   const limit = Math.max(1, Math.min(SEARCH_MAX_LIMIT, Math.floor(Number(req.limit) || SEARCH_DEFAULT_LIMIT)));
-  const stems = searchStems(query);
+  const stems = searchStems(typeof req.text === 'string' ? req.text.slice(0, 500) : query);
+  const mentionStatus = req.mentionStatus === 'confirmed' || req.mentionStatus === 'suggested' ? req.mentionStatus : undefined;
 
   const [paragraphs, documents, entities] = await Promise.all([
     repo.listAllParagraphs(projectId),
@@ -250,6 +277,25 @@ export async function hybridSearch(deps: SearchDeps, projectId: string, req: Sea
   }
   const entityById = new Map(entities.map((e) => [e.id, e]));
 
+  // Глави в порядку книги — для фільтрів «глава» й «період» і номера в результаті.
+  const chapters = documents.filter((d) => d.kind === 'chapter' && !d.deletedAt).sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+  const chapterNo = new Map(chapters.map((c, i) => [c.id, i + 1]));
+  const chapterOf = (p: ParagraphRow): string | null => {
+    const d = docs.get(p.documentId);
+    if (!d) return null;
+    if (d.kind === 'chapter') return d.id;
+    return d.parentId && docs.get(d.parentId)?.kind === 'chapter' ? d.parentId : null;
+  };
+  let chapterFilter: Set<string> | null = null;
+  if (req.chapterIds?.length) chapterFilter = new Set(req.chapterIds.filter((id) => chapterNo.has(id)));
+  const range = req.chapterRange;
+  if (range && (Number.isFinite(Number(range.from)) || Number.isFinite(Number(range.to)))) {
+    const from = Number.isFinite(Number(range.from)) ? Number(range.from) : 1;
+    const to = Number.isFinite(Number(range.to)) ? Number(range.to) : chapters.length;
+    const inRange = new Set(chapters.filter((_, i) => i + 1 >= from && i + 1 <= to).map((c) => c.id));
+    chapterFilter = chapterFilter ? new Set([...chapterFilter].filter((id) => inRange.has(id))) : inRange;
+  }
+
   // Сутності: з фільтра (жорстко) і впізнані в запиті (м'яко — лише підсилюють).
   const filterIds = [...new Set((req.entityIds ?? []).filter((id) => entityById.has(id)))];
   const matches = query ? await recognizeEntities(repo, projectId, query, entities) : [];
@@ -258,10 +304,22 @@ export async function hybridSearch(deps: SearchDeps, projectId: string, req: Sea
     ...filterIds.map((id) => ({ id, type: entityById.get(id)!.type, name: entityById.get(id)!.name, via: 'filter' as const })),
     ...recognized.filter((e) => !filterIds.includes(e.id)).map((e) => ({ id: e.id, type: e.type, name: e.name, via: 'query' as const })),
   ];
+  // Сутності з тлумачення ШІ — ще не названі ні фільтром, ні словами запиту.
+  const known = new Set(recognizedEntities.map((e) => e.id));
+  const hintGroups = (req.hintEntityIds ?? [])
+    .map((g) => [...new Set(g)].filter((id) => entityById.has(id)))
+    .filter((g) => g.length && !g.some((id) => known.has(id)));
+  for (const g of hintGroups) {
+    for (const id of g) {
+      const e = entityById.get(id)!;
+      recognizedEntities.push({ id, type: e.type, name: e.name, via: 'ai' });
+      known.add(id);
+    }
+  }
   const graphIds = recognizedEntities.map((e) => e.id);
-  const graph = graphIds.length ? await graphFor(repo, projectId, graphIds) : { cover: new Map(), relations: new Map() };
+  const graph = graphIds.length ? await graphFor(repo, projectId, graphIds, mentionStatus) : { cover: new Map(), relations: new Map() };
   // Групи названого (фільтр — кожна сутність окремою групою).
-  const groups = [...filterIds.map((id) => [id]), ...entityGroups(matches.filter((m) => !filterIds.includes(m.entity.id)))];
+  const groups = [...filterIds.map((id) => [id]), ...entityGroups(matches.filter((m) => !filterIds.includes(m.entity.id))), ...hintGroups];
   const groupsCovered = (pid: string): number => {
     const c = graph.cover.get(pid);
     return c ? groups.filter((g) => g.some((id) => c.has(id))).length : 0;
@@ -269,7 +327,12 @@ export async function hybridSearch(deps: SearchDeps, projectId: string, req: Sea
 
   // Жорсткий фільтр: абзац зачіпає всі сутності фільтра.
   const allowed = (pid: string): boolean => {
-    if (!live.has(pid)) return false;
+    const p = live.get(pid);
+    if (!p) return false;
+    if (chapterFilter) {
+      const ch = chapterOf(p);
+      if (!ch || !chapterFilter.has(ch)) return false;
+    }
     if (!filterIds.length) return true;
     const c = graph.cover.get(pid);
     return !!c && filterIds.every((id) => c.has(id));
@@ -370,6 +433,15 @@ export async function hybridSearch(deps: SearchDeps, projectId: string, req: Sea
     return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
   };
 
+  const bySection = new Map<string, ParagraphRow[]>();
+  const sectionParagraphs = (sectionId: string): ParagraphRow[] => {
+    let list = bySection.get(sectionId);
+    if (!list) {
+      list = [...live.values()].filter((x) => x.documentId === sectionId).sort((a, b) => a.order - b.order);
+      bySection.set(sectionId, list);
+    }
+    return list;
+  };
   const tier = (pid: string) => (groups.length >= 2 && groupsCovered(pid) === groups.length ? 1 : 0);
 
   const results: SearchHit[] = [...fused.entries()]
@@ -381,7 +453,10 @@ export async function hybridSearch(deps: SearchDeps, projectId: string, req: Sea
     .map(([pid, f]) => {
       const p = live.get(pid)!;
       const section = docs.get(p.documentId);
-      const chapter = section?.parentId ? docs.get(section.parentId) : undefined;
+      const chapterId = chapterOf(p);
+      const chapter = chapterId ? docs.get(chapterId) : undefined;
+      const siblings = sectionParagraphs(p.documentId);
+      const at = siblings.findIndex((x) => x.id === p.id);
       return {
         paragraphId: p.id,
         editorPid: p.editorPid ?? p.id,
@@ -389,9 +464,14 @@ export async function hybridSearch(deps: SearchDeps, projectId: string, req: Sea
         sectionTitle: section?.title ?? '',
         chapterId: chapter?.id ?? null,
         chapterTitle: chapter?.title ?? '',
+        chapterNumber: chapterId ? chapterNo.get(chapterId) ?? null : null,
         order: p.order,
         kind: p.kind,
         excerpt: paragraphExcerpt(p.text),
+        context: {
+          before: at > 0 ? paragraphExcerpt(siblings[at - 1].text, 200) || null : null,
+          after: at >= 0 && at < siblings.length - 1 ? paragraphExcerpt(siblings[at + 1].text, 200) || null : null,
+        },
         score: Math.round(f.score * 10000) / 10000,
         sources: f.hit,
         why: explain(f.hit),
@@ -402,6 +482,7 @@ export async function hybridSearch(deps: SearchDeps, projectId: string, req: Sea
     query,
     stems,
     entities: recognizedEntities,
+    filters: { chapterIds: chapterFilter ? [...chapterFilter] : [], mentionStatus: mentionStatus ?? null },
     results,
     sources: {
       text: { used: stems.length > 0, hits: textRanked.length },

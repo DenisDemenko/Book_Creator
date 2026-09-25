@@ -562,6 +562,13 @@ registerGitCommandRoutes(app);
       onEmbeddingsStale: (projectId) => void scheduleCoreEmbed(getCoreJobQueue(), projectId, 'system:search'),
       recordQueryCost: (u) => recordEmbeddingCost(u, 'Ядро: ембединг запиту пошуку'),
     },
+    // Тлумачення запиту сторінки «Пошук» (Т1.3): AI-2, модуль coreSearchInterpret —
+    // свій шаблон і своя модель у «Ядрі AI».
+    interpret: {
+      generate: aiRoleGenerateViaCore,
+      resolveModel: () => resolveModuleModelId('coreSearchInterpret'),
+      loadTemplate: () => loadCoreAiRoleTemplate('coreSearchInterpret'),
+    },
     lastSync: async (projectId) => {
       const jobs = (await getCoreJobQueue()?.store.list(projectId, { kind: CORE_SYNC_KIND, limit: 10 })) ?? [];
       const last = jobs.find((j) => j.status === 'succeeded' || j.status === 'failed');

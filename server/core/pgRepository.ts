@@ -46,6 +46,7 @@ import type {
   ParagraphInput,
   ParagraphRow,
   ParagraphScore,
+  SavedSearchRow,
   ParagraphVersionRow,
   ProjectInput,
   ProjectRow,
@@ -72,6 +73,17 @@ const isoOrNull = (v: unknown): string | null => (v == null ? null : iso(v));
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Рядок, що не є UUID, у колонці `uuid` дав би помилку бази; для ядра це просто «не знайдено». */
 const isUuid = (v: unknown): v is string => typeof v === 'string' && UUID_RE.test(v);
+
+function toSavedSearch(r: any): SavedSearchRow {
+  return {
+    id: r.id,
+    projectId: r.project_id,
+    userId: r.user_id,
+    name: r.name,
+    params: r.params ?? {},
+    createdAt: iso(r.created_at),
+  };
+}
 
 function toProject(r: any): ProjectRow {
   return {
@@ -961,6 +973,32 @@ export class PgCoreRepository implements CoreRepository {
       [projectId, keepModel],
     );
     return res?.rowCount ?? 0;
+  }
+
+  // ── Збережені запити (Т1.3) ──────────────────────────────────────────────
+
+  async listSavedSearches(projectId: string, userId: string) {
+    const { rows } = await this.q(
+      'SELECT * FROM saved_searches WHERE project_id = $1 AND user_id = $2 ORDER BY created_at DESC, id',
+      [projectId, userId],
+    );
+    return rows.map(toSavedSearch);
+  }
+
+  async addSavedSearch(input: { projectId: string; userId: string; name: string; params: Record<string, unknown> }) {
+    const name = input.name.trim();
+    if (!name || name.length > 200) throw new CoreRuleError('bad_input', 'Назва запиту — від 1 до 200 символів');
+    const { rows } = await this.q(
+      `INSERT INTO saved_searches (project_id, user_id, name, params) VALUES ($1, $2, $3, $4) RETURNING *`,
+      [input.projectId, input.userId, name, JSON.stringify(input.params ?? {})],
+    );
+    return toSavedSearch(rows[0]);
+  }
+
+  async deleteSavedSearch(projectId: string, userId: string, id: string) {
+    if (!isUuid(id)) return false;
+    const res = await this.q('DELETE FROM saved_searches WHERE project_id = $1 AND user_id = $2 AND id = $3', [projectId, userId, id]);
+    return (res?.rowCount ?? 0) > 0;
   }
 
   async addNotification(input: NotificationInput): Promise<NotificationRow> {

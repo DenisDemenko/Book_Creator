@@ -15,14 +15,14 @@ import { findUserById } from '../../store';
 import { getAppSetting } from '../../store';
 import { CORE_PROMPT_TEMPLATES_META_KEY, resolveCoreTemplate, type CorePromptTemplateBundle } from '../../coreAiRegistry';
 import type { AiGenerateInput, AiGenerateOutput } from './roles';
-import type { CoreAiRoleModule } from './rolePrompts';
+import type { CoreAiModule } from './rolePrompts';
 
 /**
  * Шаблон ролі з урахуванням правок адміна (вкладка «Ядро AI»). Схема відповіді
  * завжди заводська — `resolveCoreTemplate` дописує її поверх будь-якого
  * адмінського тексту.
  */
-export async function loadCoreAiRoleTemplate(module: CoreAiRoleModule): Promise<{ system: string; user: string }> {
+export async function loadCoreAiRoleTemplate(module: CoreAiModule): Promise<{ system: string; user: string }> {
   let layer: CorePromptTemplateBundle | undefined;
   try {
     const raw = await getAppSetting(CORE_PROMPT_TEMPLATES_META_KEY);

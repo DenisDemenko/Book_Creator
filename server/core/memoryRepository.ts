@@ -45,6 +45,7 @@ import type {
   ParagraphInput,
   ParagraphRow,
   ParagraphScore,
+  SavedSearchRow,
   ParagraphVersionRow,
   ProjectInput,
   ProjectRow,
@@ -79,6 +80,7 @@ export class MemoryCoreRepository implements CoreRepository {
   private findingVersions = new Map<string, VersionRow<FindingRow>[]>();
   private notifications: NotificationRow[] = [];
   /** Ключ — проєкт, абзац, модель. */
+  private savedSearches: SavedSearchRow[] = [];
   private embeddings = new Map<string, { projectId: string; paragraphId: string; model: string; contentHash: string; vector: number[] }>();
 
   private requireProject(projectId: string): ProjectRow {
@@ -650,6 +652,32 @@ export class MemoryCoreRepository implements CoreRepository {
       }
     }
     return n;
+  }
+
+  // ── Збережені запити (Т1.3) ──────────────────────────────────────────────
+
+  async listSavedSearches(projectId: string, userId: string) {
+    return this.savedSearches
+      .filter((s) => s.projectId === projectId && s.userId === userId)
+      .slice()
+      .reverse()
+      .map(clone);
+  }
+
+  async addSavedSearch(input: { projectId: string; userId: string; name: string; params: Record<string, unknown> }) {
+    this.requireProject(input.projectId);
+    const name = input.name.trim();
+    if (!name || name.length > 200) throw new CoreRuleError('bad_input', 'Назва запиту — від 1 до 200 символів');
+    const row: SavedSearchRow = { id: randomUUID(), projectId: input.projectId, userId: input.userId, name, params: clone(input.params ?? {}), createdAt: now() };
+    this.savedSearches.push(row);
+    return clone(row);
+  }
+
+  async deleteSavedSearch(projectId: string, userId: string, id: string) {
+    const i = this.savedSearches.findIndex((s) => s.projectId === projectId && s.userId === userId && s.id === id);
+    if (i < 0) return false;
+    this.savedSearches.splice(i, 1);
+    return true;
   }
 
   async addNotification(input: NotificationInput) {

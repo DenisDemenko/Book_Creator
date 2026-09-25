@@ -15,12 +15,15 @@ import { Database, Loader2, ShieldAlert, UserRound, ArrowLeft } from 'lucide-rea
 import type { Book, NavigationTab } from '../types';
 import { corePageByTab } from '../utils/appRoutes';
 import { useLanguage } from '../i18n/LanguageContext';
+import { CoreSearchPage } from './CoreSearchPage';
 
 interface Props {
   tab: NavigationTab;
   book: Book;
   characterId?: string;
   onOpenCharacter: (entityId: string | undefined) => void;
+  /** Перехід до абзацу в редакторі (сторінка «Пошук», Т1.3). */
+  onOpenParagraph?: (target: { chapterId: string; sectionId: string; editorPid: string; text: string }) => void;
 }
 
 type Load<T> = { state: 'loading' } | { state: 'ok'; data: T } | { state: 'error'; status: number; message: string };
@@ -208,7 +211,7 @@ function CharacterCard({ bookId, entityId, onBack }: { bookId: string; entityId:
   );
 }
 
-export const CorePageView: React.FC<Props> = ({ tab, book, characterId, onOpenCharacter }) => {
+export const CorePageView: React.FC<Props> = ({ tab, book, characterId, onOpenCharacter, onOpenParagraph }) => {
   const { t } = useLanguage();
   const page = corePageByTab(tab);
   const summary = useApi<Summary>(`/api/projects/${encodeURIComponent(book.id)}/summary`);
@@ -224,10 +227,15 @@ export const CorePageView: React.FC<Props> = ({ tab, book, characterId, onOpenCh
         </div>
         <h1 className="text-2xl font-bold text-slate-100">{t(`header.nav.${tab}`)}</h1>
         <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-slate-400">{page.purposeUk}</p>
-        <p className="mt-2 text-xs text-slate-500">
-          Сторінка з'явиться повністю на етапі {page.stage} дорожньої карти. Нижче — дані семантичного ядра цієї книги, на яких вона працюватиме.
-        </p>
+        {tab !== 'core-search' && (
+          <p className="mt-2 text-xs text-slate-500">
+            Сторінка з'явиться повністю на етапі {page.stage} дорожньої карти. Нижче — дані семантичного ядра цієї книги, на яких вона працюватиме.
+          </p>
+        )}
       </header>
+
+      {/* Сторінка 1 — «Розумний пошук» (Т1.3) — уже робоча. */}
+      {tab === 'core-search' && <CoreSearchPage book={book} onOpenParagraph={(t) => onOpenParagraph?.(t)} />}
 
       {summary.state === 'loading' && <Loader2 className="h-5 w-5 animate-spin text-slate-500" />}
       {summary.state === 'error' && <Problem load={summary} />}

@@ -218,6 +218,8 @@ export default function App() {
     end: number;
     /** Сам вставлений текст: EditorView шукає його в документі — надійніше за арифметику маркерів (#224). */
     text?: string;
+    /** Постійний номер абзацу (Т0.5): перехід зі сторінки «Пошук» (Т1.3) — виділити саме цей абзац. */
+    pid?: string;
   } | null>(null);
   /**
    * Фрагмент книги, надісланий з редактора в чат на обговорення
@@ -1638,6 +1640,17 @@ export default function App() {
     setTimeout(() => setSyncToast(null), 5000);
   };
 
+  /**
+   * «Відкрити в редакторі» зі сторінки «Розумний пошук» (Т1.3): глава й
+   * розділ абзацу, потім виділення абзацу за постійним номером — тим самим
+   * механізмом підсвічування, що й у мостах «чат → книга» і «медіатека →
+   * книга».
+   */
+  const handleOpenCoreParagraph = (target: { chapterId: string; sectionId: string; editorPid: string; text: string }) => {
+    handleNavigateToSection(target.chapterId, target.sectionId);
+    setPendingChatHighlight({ sectionId: target.sectionId, start: 0, end: 0, text: target.text, pid: target.editorPid });
+  };
+
   const handleClearLog = () => {
     setLogEntries([]);
     saveMeta(META_CHANGELOG, []).catch((e) => console.warn('[storage]', e));
@@ -2313,6 +2326,7 @@ export default function App() {
             book={book}
             characterId={coreCharacterId}
             onOpenCharacter={setCoreCharacterId}
+            onOpenParagraph={handleOpenCoreParagraph}
           />
         )}
 

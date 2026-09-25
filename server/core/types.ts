@@ -305,6 +305,16 @@ export interface FindingInput {
   createdBy: CoreActor;
 }
 
+/** Збережений пошуковий запит автора (Т1.3). */
+export interface SavedSearchRow {
+  id: string;
+  projectId: string;
+  userId: string;
+  name: string;
+  params: Record<string, unknown>;
+  createdAt: string;
+}
+
 /** Вектор абзацу для пошуку за змістом (Т1.2). */
 export interface EmbeddingInput {
   paragraphId: string;
@@ -410,6 +420,12 @@ export interface CoreRepository {
   upsertParagraphEmbeddings(projectId: string, model: string, rows: EmbeddingInput[]): Promise<number>;
   /** Прибирає вектори інших моделей і видалених абзаців; повертає кількість. */
   pruneParagraphEmbeddings(projectId: string, keepModel: string): Promise<number>;
+
+  /** Збережені запити автора в книзі (Т1.3), новіші першими. */
+  listSavedSearches(projectId: string, userId: string): Promise<SavedSearchRow[]>;
+  addSavedSearch(input: { projectId: string; userId: string; name: string; params: Record<string, unknown> }): Promise<SavedSearchRow>;
+  /** Видаляє лише свій запит; false — такого немає (або він чужий). */
+  deleteSavedSearch(projectId: string, userId: string, id: string): Promise<boolean>;
 
   addNotification(input: NotificationInput): Promise<NotificationRow>;
   listNotifications(projectId: string, limit?: number): Promise<NotificationRow[]>;

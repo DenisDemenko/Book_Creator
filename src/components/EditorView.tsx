@@ -240,7 +240,7 @@ interface EditorViewProps {
    * живим прогоном #224). `start`/`end` лишаються запасним шляхом для старих
    * викликів і для випадків, коли текст у документі не знайшовся.
    */
-  pendingHighlight?: { sectionId: string; start: number; end: number; text?: string } | null;
+  pendingHighlight?: { sectionId: string; start: number; end: number; text?: string; pid?: string } | null;
   onHighlightApplied?: () => void;
   /**
    * «Редагувати промт →» з меню правого кліку по фото: відкриває
@@ -1200,7 +1200,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
   // вічно).
   useEffect(() => {
     if (!pendingHighlight || !activeSection || pendingHighlight.sectionId !== activeSection.id) return;
-    const { start, end, text: needle } = pendingHighlight;
+    const { start, end, text: needle, pid } = pendingHighlight;
     const MAX_ATTEMPTS = 20; // ~1 секунда: далі вважаємо, що збіг не знайдеться
     let attempts = 0;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -1208,6 +1208,14 @@ export const EditorView: React.FC<EditorViewProps> = ({
     const applyHighlight = () => {
       if (!uaEditor) return false;
       const doc = uaEditor.state.doc;
+      // Перехід зі сторінки «Пошук» (Т1.3): абзац за постійним номером —
+      // увесь абзац, а не уривок з видачі (той без тегів і міг бути обрізаний).
+      if (pid) {
+        const block = findBlockByPid(pid);
+        if (!block) return false;
+        uaEditor.chain().focus().setTextSelection({ from: block.pos, to: block.pos + block.text.length }).scrollIntoView().run();
+        return true;
+      }
       // Спершу — за самим текстом у документі; арифметика маркерів лише як
       // запасний шлях (див. опис `findBlockRangeWithText`).
       const byText = needle ? findBlockRangeWithText(doc, needle) : null;

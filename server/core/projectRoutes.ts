@@ -20,7 +20,8 @@ import type { CoreRepository, FindingRow } from './types';
 import { JobRejectedError } from './jobs/types';
 import type { JobQueue } from './jobs/queue';
 import { AI_MENTIONS_JOB_KIND, MENTION_SUGGESTION, RELATION_SUGGESTION, publicSuggestion } from './ai/mentions';
-import { hybridSearch, type SearchDeps } from './search/service';
+import { hybridSearch, type SearchDeps, type SearchRequest } from './search/service';
+import { interpretSearchQuery, type SearchInterpretDeps, type SearchInterpretation } from './search/interpret';
 
 export interface ProjectAccess {
   projectId: string;
@@ -72,6 +73,37 @@ export interface ProjectRoutesDeps {
   queue?: () => JobQueue | null;
   /** Пошук за змістом (Т1.2): ембедер, модель ембедингів, дозапуск `core_embed`. */
   search?: Omit<SearchDeps, 'repo'>;
+  /** Тлумачення запиту AI-2 (Т1.3, `searchInterpret`); без нього — пошук без тлумачення. */
+  interpret?: Omit<SearchInterpretDeps, 'repo'>;
+}
+
+/** Не більше стількох тлумачень запиту ШІ на користувача за хвилину — це платні виклики. */
+export const INTERPRET_PER_MINUTE = 20;
+/** Скільки збережених запитів може мати автор у книзі. */
+export const MAX_SAVED_SEARCHES = 50;
+
+const list = (v: unknown): string[] =>
+  (Array.isArray(v) ? v : typeof v === 'string' ? v.split(',') : []).map((x) => String(x).trim()).filter(Boolean).slice(0, 50);
+const num = (v: unknown): number | undefined => {
+  const n = Number(v);
+  return v !== undefined && v !== null && v !== '' && Number.isFinite(n) && n >= 1 ? Math.floor(n) : undefined;
+};
+const flag = (v: unknown) => v === true || v === 'true' || v === '1' || v === 1;
+
+/** Параметри пошуку з запиту (GET — рядок запиту, POST — тіло); те саме лягає в збережений запит. */
+export function parseSearchParams(src: Record<string, unknown>) {
+  const q = typeof src.q === 'string' ? src.q : typeof src.query === 'string' ? src.query : '';
+  const status = src.status === 'confirmed' || src.status === 'suggested' ? src.status : undefined;
+  return {
+    q: q.slice(0, 500),
+    entityIds: list(src.entityIds).slice(0, 10),
+    chapterIds: list(src.chapterIds),
+    chapterFrom: num(src.chapterFrom),
+    chapterTo: num(src.chapterTo),
+    status: status as 'confirmed' | 'suggested' | undefined,
+    interpret: flag(src.interpret),
+    limit: num(src.limit),
+  };
 }
 
 export function requireProjectAccess(deps: Pick<ProjectRoutesDeps, 'access'>) {
@@ -343,32 +375,105 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
    * в кожного результату. GET `?q=&entityIds=a,b&limit=` або POST з тим самим
    * тілом. Читати може кожен учасник книги (право перевірено вище).
    */
+  const interpretCalls = new Map<string, number[]>();
+  const interpretAllowed = (userId: string): boolean => {
+    const now = Date.now();
+    const recent = (interpretCalls.get(userId) ?? []).filter((t) => now - t < 60_000);
+    if (recent.length >= INTERPRET_PER_MINUTE) {
+      interpretCalls.set(userId, recent);
+      return false;
+    }
+    recent.push(now);
+    interpretCalls.set(userId, recent);
+    return true;
+  };
+
   const search = withRepo(async (repo, req, res) => {
-    const src = req.method === 'GET' ? req.query : (req.body ?? {});
-    const rawIds = (src as any).entityIds;
-    const entityIds = (Array.isArray(rawIds) ? rawIds : typeof rawIds === 'string' ? rawIds.split(',') : [])
-      .map((x: unknown) => String(x).trim())
-      .filter(Boolean)
-      .slice(0, 10);
-    const query = typeof (src as any).q === 'string' ? (src as any).q : typeof (src as any).query === 'string' ? (src as any).query : '';
-    if (!query.trim() && !entityIds.length) {
+    const params = parseSearchParams((req.method === 'GET' ? req.query : req.body ?? {}) as Record<string, unknown>);
+    if (!params.q.trim() && !params.entityIds.length) {
       res.status(400).json({ error: 'Порожній запит: введіть слова або оберіть сутність.', kind: 'bad_input' });
       return;
     }
     const project = await repo.getProject(req.params.id);
     if (!project) {
-      res.json({ query, synced: false, stems: [], entities: [], results: [], sources: null });
+      res.json({ query: params.q, synced: false, stems: [], entities: [], results: [], sources: null, interpretation: null });
       return;
     }
-    const out = await hybridSearch({ repo, ...(deps.search ?? {}) }, req.params.id, {
-      query,
-      entityIds,
-      limit: Number((src as any).limit) || undefined,
-    });
-    res.json({ synced: true, revision: project.revision, ...out });
+    const request: SearchRequest = {
+      query: params.q,
+      entityIds: params.entityIds,
+      chapterIds: params.chapterIds,
+      chapterRange: params.chapterFrom || params.chapterTo ? { from: params.chapterFrom, to: params.chapterTo } : undefined,
+      mentionStatus: params.status,
+      limit: params.limit,
+    };
+
+    // Тлумачення ШІ — лише розкладає запит на фільтри (AI не відповідає, відповідь — знайдені абзаци).
+    let interpretation: (SearchInterpretation & { ok: true }) | { ok: false; error: string } | null = null;
+    if (params.interpret && params.q.trim()) {
+      if (!deps.interpret) interpretation = { ok: false, error: 'Тлумачення запиту ШІ тут не підключене — пошук без нього.' };
+      else if (!interpretAllowed(req.projectAccess!.userId)) {
+        interpretation = { ok: false, error: `Забагато тлумачень запиту за хвилину (не більше ${INTERPRET_PER_MINUTE}) — цей пошук без ШІ.` };
+      } else {
+        try {
+          const it = await interpretSearchQuery({ repo, ...deps.interpret }, req.params.id, params.q, `user:${req.projectAccess!.userId}`);
+          interpretation = { ok: true, ...it };
+          // Слова — від ШІ (імена пішли у фільтри), запит цілком — у пошук за змістом.
+          request.text = it.text;
+          request.hintEntityIds = it.groups;
+          // Явний вибір автора у фільтрах важливіший за тлумачення.
+          if (!params.chapterIds.length && !request.chapterRange && it.chapterIds.length) request.chapterIds = it.chapterIds;
+          if (!params.status && it.mentionStatus) request.mentionStatus = it.mentionStatus;
+        } catch (err) {
+          interpretation = { ok: false, error: `ШІ не розібрав запит (${(err as Error).message}) — пошук без тлумачення.` };
+        }
+      }
+    }
+    const out = await hybridSearch({ repo, ...(deps.search ?? {}) }, req.params.id, request);
+    res.json({ synced: true, revision: project.revision, ...out, interpretation });
   });
   app.get('/api/projects/:id/search', search);
   app.post('/api/projects/:id/search', search);
+
+  // ── Т1.3: збережені запити (особисті, у межах книги) ─────────────────────
+
+  app.get('/api/projects/:id/saved-searches', withRepo(async (repo, req, res) => {
+    res.json({ items: await repo.listSavedSearches(req.params.id, req.projectAccess!.userId) });
+  }));
+
+  app.post('/api/projects/:id/saved-searches', withRepo(async (repo, req, res) => {
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    if (!name || name.length > 200) {
+      res.status(400).json({ error: 'Назва запиту — від 1 до 200 символів.', kind: 'bad_input' });
+      return;
+    }
+    const params = parseSearchParams((req.body?.params ?? {}) as Record<string, unknown>);
+    if (!params.q.trim() && !params.entityIds.length) {
+      res.status(400).json({ error: 'Нема чого зберігати: запит порожній.', kind: 'bad_input' });
+      return;
+    }
+    if (!(await repo.getProject(req.params.id))) {
+      res.status(409).json({ error: 'Книгу ще не синхронізовано з ядром.', kind: 'not_synced' });
+      return;
+    }
+    const mine = await repo.listSavedSearches(req.params.id, req.projectAccess!.userId);
+    if (mine.length >= MAX_SAVED_SEARCHES) {
+      res.status(409).json({ error: `Збережених запитів уже ${MAX_SAVED_SEARCHES} — видаліть непотрібні.`, kind: 'limit' });
+      return;
+    }
+    const { limit: _limit, ...stored } = params;
+    const item = await repo.addSavedSearch({ projectId: req.params.id, userId: req.projectAccess!.userId, name, params: stored });
+    res.status(201).json({ item });
+  }));
+
+  app.delete('/api/projects/:id/saved-searches/:savedId', withRepo(async (repo, req, res) => {
+    const ok = await repo.deleteSavedSearch(req.params.id, req.projectAccess!.userId, req.params.savedId);
+    if (!ok) {
+      res.status(404).json({ error: 'Збережений запит не знайдено.', kind: 'not_found' });
+      return;
+    }
+    res.json({ ok: true });
+  }));
 
   /** Зв'язки проєкту або однієї сутності (`?entityId=`). */
   app.get('/api/projects/:id/relations', withRepo(async (repo, req, res) => {

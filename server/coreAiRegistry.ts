@@ -128,6 +128,11 @@ import {
   factoryCoreAiRoleTemplate,
   renderCoreAiRoleTemplate,
 } from './core/ai/rolePrompts';
+import {
+  factorySearchInterpretTemplate,
+  renderSearchInterpretTemplate,
+  SEARCH_INTERPRET_PLACEHOLDERS,
+} from './core/search/interpretPrompt';
 
 /** Ключ у таблиці `meta`, під яким лежить ЄДИНИЙ адмінський шар усіх модулів ядра. */
 export const CORE_PROMPT_TEMPLATES_META_KEY = 'prompt_templates_core_admin';
@@ -163,6 +168,8 @@ export const CORE_MODULE_KEYS = [
   'coreAi1Classify',
   'coreAi2Analysis',
   'coreAi3Visual',
+  // Т1.3: AI-2 тлумачить запит сторінки «Пошук» — лише фільтри, без відповіді.
+  'coreSearchInterpret',
 ] as const;
 
 export type CoreModuleKey = (typeof CORE_MODULE_KEYS)[number];
@@ -261,6 +268,7 @@ export const CORE_MODULE_PLACEHOLDERS: Record<CoreModuleKey, string[]> = {
   coreAi1Classify: CORE_AI_ROLE_PLACEHOLDERS,
   coreAi2Analysis: CORE_AI_ROLE_PLACEHOLDERS,
   coreAi3Visual: CORE_AI_ROLE_PLACEHOLDERS,
+  coreSearchInterpret: SEARCH_INTERPRET_PLACEHOLDERS,
 };
 
 /** Чи модуль повертає JSON за жорсткою схемою (схема — readonly-текст у конструкторі, не редагується). */
@@ -292,6 +300,7 @@ export const CORE_MODULE_HAS_JSON_SCHEMA: Record<CoreModuleKey, boolean> = {
   coreAi1Classify: true,
   coreAi2Analysis: true,
   coreAi3Visual: true,
+  coreSearchInterpret: true,
 };
 
 /**
@@ -401,6 +410,8 @@ export function factoryCoreTemplate(module: CoreModuleKey): CorePromptTemplate {
     case 'coreAi2Analysis':
     case 'coreAi3Visual':
       return factoryCoreAiRoleTemplate(module);
+    case 'coreSearchInterpret':
+      return factorySearchInterpretTemplate();
   }
 }
 
@@ -755,6 +766,13 @@ export function renderCoreTemplate(
         task: fields.coreTask,
         paragraphs: fields.coreParagraphs,
         images: fields.coreImages,
+        language: fields.language,
+      });
+    case 'coreSearchInterpret':
+      return renderSearchInterpretTemplate(template, {
+        query: fields.coreQuery,
+        entities: fields.coreEntities,
+        chapters: fields.coreChapters,
         language: fields.language,
       });
   }

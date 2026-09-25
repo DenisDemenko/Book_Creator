@@ -20,6 +20,8 @@
  */
 
 export type CoreAiRoleModule = 'coreAi1Classify' | 'coreAi2Analysis' | 'coreAi3Visual';
+/** Модулі ядра, що йдуть через `aiRoleGenerateViaCore`: три ролі й тлумачення пошуку AI-2 (Т1.3). */
+export type CoreAiModule = CoreAiRoleModule | 'coreSearchInterpret';
 
 export const CORE_AI_ROLE_MODULE = {
   'AI-1': 'coreAi1Classify',
