@@ -13,7 +13,7 @@
 `server/behaviorDriftPrompt.ts`, `server/characterCodexPrompt.ts`, ділянка
 AI-коуча в `server.ts` (`/api/ai/coach-*`), `src/components/TrainersView.tsx`,
 `src/components/StyleTrainer.tsx`, `src/components/TrainerView.tsx`,
-`src/context/WriterBookContext.tsx`, `src/types.ts`, журнал `log/119-151.md`
+`src/context/WriterBookContext.tsx`, `src/types.ts`, журнал `log/119-199.md`
 запис №156.
 
 ---

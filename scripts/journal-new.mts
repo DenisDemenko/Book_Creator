@@ -113,6 +113,16 @@ if (fs.existsSync(OUT_DIR)) {
     if (max > targetMax) { targetMax = max; target = f; }
   }
 }
+// Відкрита нова частина (25.09.2026: `252-300.md`) ще не має жодного запису,
+// тож за вмістом її не видно. Порожня частина з іменем `NNN-MMM.md`, чий
+// початок іде ПІСЛЯ найбільшого наявного номера, — і є місце для нових записів.
+if (fs.existsSync(OUT_DIR)) {
+  for (const f of fs.readdirSync(OUT_DIR).filter((f) => /^\d{3}-\d{3}\.md$/.test(f))) {
+    const start = Number(f.slice(0, 3));
+    const parsed = parseJournal(fs.readFileSync(path.join(OUT_DIR, f), 'utf8'));
+    if (!parsed.size && start > targetMax) { target = f; targetMax = start - 1; }
+  }
+}
 if (!target) {
   console.error('✗ Не знайдено частину журналу, куди дописувати. Чи зроблено розділення (scripts/journal-split.mts)?');
   process.exit(1);
