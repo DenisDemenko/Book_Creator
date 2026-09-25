@@ -331,6 +331,42 @@ export type TimePointInput = Omit<TimePointRow, 'id' | 'updatedAt' | 'status' | 
   evidence?: string[];
 };
 
+/** Емоційна точка героя поза тегами (Т2.2): поставив автор або підтвердив з пропозиції AI-2. */
+export interface EmotionPointRow {
+  id: string;
+  projectId: string;
+  characterId: string;
+  paragraphId: string;
+  /** Назва емоції як у тексті, малими літерами («страх», «сором»). */
+  emotion: string;
+  /** Родина емоції (`src/utils/emotionScale.ts`): fear, joy, guilt… */
+  family: string;
+  /** Основна, другорядна чи прихована емоція. */
+  layer: 'primary' | 'secondary' | 'hidden';
+  /** Сила емоції героя 0…10. */
+  intensity: number;
+  /** Майстерність передачі в тексті 0…10; null — не оцінено. */
+  craft: number | null;
+  /** Вплив на сюжет 0…10; null — не оцінено. */
+  impact: number | null;
+  note: string;
+  source: 'author' | 'ai';
+  status: CoreStatus;
+  findingId: string | null;
+  createdBy: CoreActor;
+  updatedAt: string;
+}
+
+export type EmotionPointInput = Omit<EmotionPointRow, 'id' | 'updatedAt' | 'note' | 'source' | 'findingId' | 'layer' | 'craft' | 'impact' | 'status'> & {
+  layer?: EmotionPointRow['layer'];
+  craft?: number | null;
+  impact?: number | null;
+  note?: string;
+  source?: EmotionPointRow['source'];
+  status?: CoreStatus;
+  findingId?: string | null;
+};
+
 /** Збережений пошуковий запит автора (Т1.3). */
 export interface SavedSearchRow {
   id: string;
@@ -453,6 +489,11 @@ export interface CoreRepository {
   listTimePoints(projectId: string): Promise<TimePointRow[]>;
   upsertTimePoint(input: TimePointInput): Promise<TimePointRow>;
   deleteTimePoint(projectId: string, subjectKind: TimePointRow['subjectKind'], subjectId: string): Promise<boolean>;
+
+  /** Емоційний монітор (Т2.2): точки героїв поза тегами. Той самий герой, абзац і емоція — заміна. */
+  listEmotionPoints(projectId: string, characterId?: string): Promise<EmotionPointRow[]>;
+  upsertEmotionPoint(input: EmotionPointInput): Promise<EmotionPointRow>;
+  deleteEmotionPoint(projectId: string, id: string): Promise<boolean>;
 
   /** Збережені запити автора в книзі (Т1.3), новіші першими. */
   listSavedSearches(projectId: string, userId: string): Promise<SavedSearchRow[]>;

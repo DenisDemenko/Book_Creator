@@ -203,6 +203,7 @@ import { AI_MENTIONS_JOB_KIND, aiMentionsJobKind } from './server/core/ai/mentio
 import { aiRoleGenerateViaCore, loadCoreAiRoleTemplate } from './server/core/ai/generate';
 import { CORE_EMBED_KIND, coreEmbedJobKind, scheduleCoreEmbed } from './server/core/search/embedJob';
 import { AI_PROFILE_JOB_KIND, aiProfileJobKind, studioFromBook } from './server/core/characterProfile';
+import { AI_EMOTIONS_JOB_KIND, aiEmotionsJobKind } from './server/core/emotions';
 import { HttpJevAdapter, JEV_MODEL } from './server/core/flc/jev';
 import { platformEmbedder, recordEmbeddingCost, embeddingKeyFor } from './server/core/search/platform';
 import {
@@ -6124,6 +6125,16 @@ ${JSON.stringify(bookContext || {}, null, 2)}
       resolveModel: (module) => resolveModuleModelId(module),
       loadTemplate: loadCoreAiRoleTemplate,
       loadStudio: async (projectId, entity) => studioFromBook((await getStoredBookForRealtime(projectId))?.book as any, entity),
+    }),
+  );
+  // Емоційний монітор (Т2.2): AI-2 пропонує емоційні точки героя — на розгляд автору.
+  registerCoreJobKind(
+    AI_EMOTIONS_JOB_KIND,
+    aiEmotionsJobKind({
+      repo: getCoreRepository,
+      generate: aiRoleGenerateViaCore,
+      resolveModel: (module) => resolveModuleModelId(module),
+      loadTemplate: loadCoreAiRoleTemplate,
     }),
   );
   registerCoreJobKind(

@@ -23,6 +23,7 @@ import {
   notFound,
   paragraphTextHash,
   checkTimePoint,
+  checkEmotionPoint,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isSearchableKind, isValidEmbedding, memoryTextScore } from './search/text';
 import type {
@@ -49,6 +50,8 @@ import type {
   SavedSearchRow,
   TimePointInput,
   TimePointRow,
+  EmotionPointInput,
+  EmotionPointRow,
   ParagraphVersionRow,
   ProjectInput,
   ProjectRow,
@@ -85,6 +88,7 @@ export class MemoryCoreRepository implements CoreRepository {
   /** Ключ — проєкт, абзац, модель. */
   private savedSearches: SavedSearchRow[] = [];
   private timePoints = new Map<string, TimePointRow>();
+  private emotionPoints = new Map<string, EmotionPointRow>();
   private embeddings = new Map<string, { projectId: string; paragraphId: string; model: string; contentHash: string; vector: number[] }>();
 
   private requireProject(projectId: string): ProjectRow {
@@ -699,6 +703,52 @@ export class MemoryCoreRepository implements CoreRepository {
 
   async deleteTimePoint(projectId: string, subjectKind: TimePointRow['subjectKind'], subjectId: string) {
     return this.timePoints.delete(`${projectId}\u0000${subjectKind}\u0000${subjectId}`);
+  }
+
+  // ── Емоційний монітор (Т2.2) ─────────────────────────────────────────────
+
+  async listEmotionPoints(projectId: string, characterId?: string) {
+    return [...this.emotionPoints.values()]
+      .filter((p) => p.projectId === projectId && (!characterId || p.characterId === characterId))
+      .map(clone);
+  }
+
+  async upsertEmotionPoint(input: EmotionPointInput) {
+    this.requireProject(input.projectId);
+    checkEmotionPoint(input);
+    // Як зовнішні ключі в базі: герой і абзац — з цього ж проєкту.
+    if (!this.entityIn(input.projectId, input.characterId)) throw notFound(`Герой «${input.characterId}»`);
+    if (!this.paragraphs.get(key(input.projectId, input.paragraphId))) throw notFound(`Абзац «${input.paragraphId}»`);
+    const emotion = input.emotion.trim();
+    const prev = [...this.emotionPoints.values()].find(
+      (p) => p.projectId === input.projectId && p.characterId === input.characterId && p.paragraphId === input.paragraphId && p.emotion === emotion,
+    );
+    const row: EmotionPointRow = {
+      id: prev?.id ?? randomUUID(),
+      projectId: input.projectId,
+      characterId: input.characterId,
+      paragraphId: input.paragraphId,
+      emotion,
+      family: input.family,
+      layer: input.layer ?? 'primary',
+      intensity: input.intensity,
+      craft: input.craft ?? null,
+      impact: input.impact ?? null,
+      note: input.note ?? '',
+      source: input.source ?? 'author',
+      status: input.status ?? 'confirmed',
+      findingId: input.findingId ?? null,
+      createdBy: input.createdBy,
+      updatedAt: now(),
+    };
+    this.emotionPoints.set(row.id, row);
+    return clone(row);
+  }
+
+  async deleteEmotionPoint(projectId: string, id: string) {
+    const p = this.emotionPoints.get(id);
+    if (!p || p.projectId !== projectId) return false;
+    return this.emotionPoints.delete(id);
   }
 
   // ── Збережені запити (Т1.3) ──────────────────────────────────────────────

@@ -24,6 +24,7 @@ import {
   notFound,
   paragraphTextHash,
   checkTimePoint,
+  checkEmotionPoint,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isValidEmbedding, SEARCHABLE_KINDS, tsQueryFromStems } from './search/text';
 import type {
@@ -59,6 +60,8 @@ import type {
   RunFinishInput,
   RunRow,
   VersionRow,
+  EmotionPointInput,
+  EmotionPointRow,
 } from './types';
 
 type Q = Pool | PoolClient;
@@ -92,6 +95,27 @@ function toTimePoint(r: any): TimePointRow {
     status: r.status,
     source: r.source,
     evidence: r.evidence ?? [],
+    createdBy: r.created_by,
+    updatedAt: iso(r.updated_at),
+  };
+}
+
+function toEmotionPoint(r: any): EmotionPointRow {
+  return {
+    id: r.id,
+    projectId: r.project_id,
+    characterId: r.character_id,
+    paragraphId: r.paragraph_id,
+    emotion: r.emotion,
+    family: r.family,
+    layer: r.layer,
+    intensity: Number(r.intensity),
+    craft: r.craft == null ? null : Number(r.craft),
+    impact: r.impact == null ? null : Number(r.impact),
+    note: r.note,
+    source: r.source,
+    status: r.status,
+    findingId: r.finding_id ?? null,
     createdBy: r.created_by,
     updatedAt: iso(r.updated_at),
   };
@@ -1039,6 +1063,45 @@ export class PgCoreRepository implements CoreRepository {
 
   async deleteTimePoint(projectId: string, subjectKind: TimePointRow['subjectKind'], subjectId: string) {
     const res = await this.q('DELETE FROM story_time_points WHERE project_id = $1 AND subject_kind = $2 AND subject_id = $3', [projectId, subjectKind, subjectId]);
+    return (res?.rowCount ?? 0) > 0;
+  }
+
+  // ── Емоційний монітор (Т2.2) ─────────────────────────────────────────────
+
+  async listEmotionPoints(projectId: string, characterId?: string) {
+    if (characterId && !isUuid(characterId)) return [];
+    const { rows } = characterId
+      ? await this.q('SELECT * FROM emotion_points WHERE project_id = $1 AND character_id = $2 ORDER BY updated_at, id', [projectId, characterId])
+      : await this.q('SELECT * FROM emotion_points WHERE project_id = $1 ORDER BY updated_at, id', [projectId]);
+    return rows.map(toEmotionPoint);
+  }
+
+  async upsertEmotionPoint(input: EmotionPointInput) {
+    checkEmotionPoint(input);
+    if (!isUuid(input.characterId)) throw notFound(`Герой «${input.characterId}»`);
+    if (input.findingId != null && !isUuid(input.findingId)) throw new CoreRuleError('bad_input', 'Неправильний id висновку');
+    // Зовнішні ключі (герой, абзац цього проєкту) → not_found, як у сховищі в пам'яті.
+    const { rows } = await this.q(
+      `INSERT INTO emotion_points
+         (project_id, character_id, paragraph_id, emotion, family, layer, intensity, craft, impact, note, source, status, finding_id, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       ON CONFLICT (project_id, character_id, paragraph_id, emotion) DO UPDATE SET
+         family = excluded.family, layer = excluded.layer, intensity = excluded.intensity, craft = excluded.craft,
+         impact = excluded.impact, note = excluded.note, source = excluded.source, status = excluded.status,
+         finding_id = excluded.finding_id, created_by = excluded.created_by, updated_at = now()
+       RETURNING *`,
+      [
+        input.projectId, input.characterId, input.paragraphId, input.emotion.trim(), input.family, input.layer ?? 'primary',
+        input.intensity, input.craft ?? null, input.impact ?? null, input.note ?? '', input.source ?? 'author',
+        input.status ?? 'confirmed', input.findingId ?? null, input.createdBy,
+      ],
+    );
+    return toEmotionPoint(rows[0]);
+  }
+
+  async deleteEmotionPoint(projectId: string, id: string) {
+    if (!isUuid(id)) return false;
+    const res = await this.q('DELETE FROM emotion_points WHERE project_id = $1 AND id = $2', [projectId, id]);
     return (res?.rowCount ?? 0) > 0;
   }
 

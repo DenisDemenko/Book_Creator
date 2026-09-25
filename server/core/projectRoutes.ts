@@ -27,6 +27,8 @@ import type { EntityRow } from './types';
 import { runFlcCycle } from './flc/cycle';
 import { buildTimeline, characterKnowledge } from './timeline';
 import { normalizeStoryTime } from '../../src/utils/storyTime';
+import { AI_EMOTIONS_JOB_KIND, EMOTION_POINT, buildEmotionMonitor } from './emotions';
+import { clampIntensity, emotionFamily } from '../../src/utils/emotionScale';
 import { LlmFallbackJevAdapter, type JevAdapter, type LlmJson } from './flc/jev';
 import { interpretSearchQuery, type SearchInterpretDeps, type SearchInterpretation } from './search/interpret';
 
@@ -751,6 +753,186 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       return;
     }
     res.json(k);
+  }));
+
+  // ── Т2.2: емоційний монітор ───────────────────────────────────────────────
+
+  /**
+   * Криві емоцій героїв, настрій сцен, мітки подій, попередження, пропозиції AI:
+   * `?characters=a,b&family=&layer=&axis=chapter|scene|world&metric=intensity|craft|impact&event=&window=`.
+   */
+  app.get('/api/projects/:id/emotions', withRepo(async (repo, req, res) => {
+    const project = await repo.getProject(req.params.id);
+    if (!project) {
+      res.json({ synced: false, axis: 'chapter', metric: 'intensity', buckets: [], chapters: [], families: [], characters: [], selected: [], points: [], series: [], scenes: [], warnings: [], suggestions: [], events: [], impact: null, anchors: [] });
+      return;
+    }
+    const q = req.query as Record<string, unknown>;
+    const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
+    const list = [str(q.characters), str(q.character)].filter(Boolean).join(',').split(',').map((x) => x.trim()).filter(Boolean);
+    const axis = str(q.axis);
+    const monitor = await buildEmotionMonitor(repo, req.params.id, {
+      characters: list,
+      family: str(q.family),
+      layer: str(q.layer),
+      axis,
+      metric: str(q.metric),
+      event: str(q.event),
+      window: Number(q.window) || 2,
+      studioOrder: axis === 'world' ? await sceneOrder(req.params.id) : undefined,
+      visible: visibleTo(req.projectAccess!),
+    });
+    res.json({ synced: true, canEdit: canEditStory(req.projectAccess!), ...monitor });
+  }));
+
+  /**
+   * Точка автора або ручне коригування: герой, абзац-доказ, емоція, сила 0…10,
+   * шар, майстерність передачі й вплив (0…10 або null — не оцінено). Та сама
+   * емоція героя в тому ж абзаці — заміна; точку з тега це коригує без зміни тексту.
+   */
+  app.post('/api/projects/:id/emotions/points', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const b = req.body ?? {};
+    const hero = await repo.getEntity(req.params.id, String(b.characterId ?? ''));
+    if (!hero || hero.type !== 'character' || hero.status === 'rejected') {
+      res.status(404).json({ error: 'Героя не знайдено в цьому проєкті.', kind: 'not_found' });
+      return;
+    }
+    const paragraph = await repo.getParagraph(req.params.id, String(b.paragraphId ?? ''));
+    if (!paragraph || paragraph.deletedAt) {
+      res.status(404).json({ error: 'Абзац-доказ не знайдено в книзі.', kind: 'not_found' });
+      return;
+    }
+    const emotion = typeof b.emotion === 'string' ? b.emotion.trim().toLocaleLowerCase('uk') : '';
+    const intensity = Number(b.intensity);
+    const optScore = (v: unknown) => (v == null || v === '' ? null : Number(v));
+    const craft = optScore(b.craft);
+    const impact = optScore(b.impact);
+    const bad = (v: number | null) => v != null && (!Number.isFinite(v) || v < 0 || v > 10);
+    const layer = b.layer == null || b.layer === '' ? 'primary' : b.layer;
+    if (!emotion || emotion.length > 80 || !Number.isFinite(intensity) || intensity < 0 || intensity > 10 || bad(craft) || bad(impact) || !['primary', 'secondary', 'hidden'].includes(layer)) {
+      res.status(400).json({ error: 'Потрібні назва емоції (до 80 знаків) і оцінки від 0 до 10; шар — основна, другорядна чи прихована.', kind: 'bad_input' });
+      return;
+    }
+    const point = await repo.upsertEmotionPoint({
+      projectId: req.params.id,
+      characterId: hero.id,
+      paragraphId: paragraph.id,
+      emotion,
+      family: emotionFamily(emotion),
+      layer,
+      intensity: clampIntensity(intensity),
+      craft: craft == null ? null : clampIntensity(craft),
+      impact: impact == null ? null : clampIntensity(impact),
+      note: typeof b.note === 'string' ? b.note.slice(0, 500) : '',
+      source: 'author',
+      createdBy: `user:${req.projectAccess!.userId}`,
+    });
+    res.status(201).json({ point });
+  }));
+
+  app.delete('/api/projects/:id/emotions/points/:pointId', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    if (!(await repo.deleteEmotionPoint(req.params.id, req.params.pointId))) {
+      res.status(404).json({ error: 'Такої точки немає.', kind: 'not_found' });
+      return;
+    }
+    res.json({ ok: true });
+  }));
+
+  /** Запустити AI-2 «емоції героя» — фонова задача; результат — пропозиції на розгляд. */
+  app.post('/api/projects/:id/emotions/analyze', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const queue = deps.queue?.();
+    if (!queue) {
+      res.status(503).json({ error: 'Фонові задачі ядра зараз недоступні.', kind: 'core_unavailable' });
+      return;
+    }
+    const hero = await repo.getEntity(req.params.id, String(req.body?.characterId ?? ''));
+    if (!hero || hero.type !== 'character' || hero.status === 'rejected') {
+      res.status(404).json({ error: 'Героя не знайдено в цьому проєкті.', kind: 'not_found' });
+      return;
+    }
+    try {
+      const { job } = await queue.enqueue({
+        projectId: req.params.id,
+        kind: AI_EMOTIONS_JOB_KIND,
+        payload: { characterId: hero.id },
+        createdBy: `user:${req.projectAccess!.userId}`,
+      });
+      res.status(202).json({ jobId: job.id });
+    } catch (err) {
+      if (err instanceof JobRejectedError) {
+        const status = err.code === 'rate_limited' ? 429 : err.code === 'budget_exhausted' ? 402 : 422;
+        res.status(status).json({ error: err.message, kind: err.code, retryAfterMs: err.retryAfterMs });
+        return;
+      }
+      throw err;
+    }
+  }));
+
+  /**
+   * Рішення автора щодо пропозиції AI-2: підтвердити (стає точкою кривої,
+   * можна уточнити силу `intensity`) чи відхилити.
+   */
+  app.post('/api/projects/:id/emotions/suggestions/:findingId/status', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const status = req.body?.status;
+    if (status !== 'confirmed' && status !== 'rejected') {
+      res.status(400).json({ error: 'Статус — confirmed або rejected.', kind: 'bad_input' });
+      return;
+    }
+    const f = await repo.getFinding(req.params.id, req.params.findingId);
+    if (!f || f.kind !== EMOTION_POINT || !f.entityId || !visibleTo(req.projectAccess!)(f)) {
+      res.status(404).json({ error: 'Пропозицію не знайдено.', kind: 'not_found' });
+      return;
+    }
+    if (f.status !== 'suggested') {
+      res.status(409).json({ error: 'Цю пропозицію вже розглянуто.', kind: 'already_decided', finding: f });
+      return;
+    }
+    const actor = `user:${req.projectAccess!.userId}`;
+    let point = null;
+    if (status === 'confirmed' && (f.insufficientData || !f.sourceParagraphIds.length)) {
+      res.status(422).json({ error: 'Це позначка «недостатньо даних» — підтверджувати нема чого, можна лише відхилити.', kind: 'insufficient_data' });
+      return;
+    }
+    if (status === 'confirmed') {
+      const p = f.payload as Record<string, unknown>;
+      const b = req.body ?? {};
+      const emotion = String(p.emotion ?? '').trim().toLocaleLowerCase('uk');
+      // Автор може уточнити оцінки перед підтвердженням; порожнє — як запропонував AI.
+      const pickScore = (over: unknown, orig: unknown) => {
+        const v = over !== undefined ? over : orig;
+        return v == null || v === '' || !Number.isFinite(Number(v)) ? null : clampIntensity(Number(v));
+      };
+      const intensity = pickScore(b.intensity, p.intensity) ?? 5;
+      const layer = ['primary', 'secondary', 'hidden'].includes(String(b.layer ?? p.layer)) ? (String(b.layer ?? p.layer) as 'primary' | 'secondary' | 'hidden') : 'primary';
+      // Спершу точка: якщо абзацу вже немає — висновок лишається на розгляді.
+      point = await repo.upsertEmotionPoint({
+        projectId: req.params.id,
+        characterId: f.entityId,
+        paragraphId: f.sourceParagraphIds[0] ?? '',
+        emotion,
+        family: emotionFamily(emotion),
+        layer,
+        intensity,
+        craft: pickScore(b.craft, p.craft),
+        impact: pickScore(b.impact, p.impact),
+        note: String(p.statement ?? ''),
+        source: 'ai',
+        findingId: f.id,
+        createdBy: actor,
+      });
+    }
+    const finding = await repo.setFindingStatus(
+      req.params.id,
+      f.id,
+      status,
+      actor,
+      status === 'confirmed' ? 'підтверджено автором (емоційний монітор)' : 'відхилено автором (емоційний монітор)',
+    );
+    res.json({ finding, point });
   }));
 
   // ── Т1.6: прототип FLC етапу 0 (лише адміністратор) ──────────────────────

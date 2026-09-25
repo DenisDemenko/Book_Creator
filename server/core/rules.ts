@@ -26,6 +26,7 @@ import {
   type RelationInput,
   type RunCreateInput,
   type TimePointInput,
+  type EmotionPointInput,
 } from './types';
 
 export type CoreRuleCode =
@@ -157,6 +158,23 @@ export function checkTimePoint(p: TimePointInput): void {
   if (!['exact', 'approximate', 'interval', 'unknown'].includes(p.kind)) throw new CoreRuleError('bad_input', 'Невідомий вид часу');
   if (p.kind !== 'unknown' && (p.sortKey == null || !Number.isFinite(p.sortKey))) throw new CoreRuleError('bad_input', 'Точці часу потрібне значення');
   if (p.kind === 'interval' && (p.endKey == null || p.endKey < (p.sortKey ?? 0))) throw new CoreRuleError('bad_input', 'Кінець інтервалу раніше за початок');
+}
+
+/** Емоційна точка (Т2.2): ті самі правила, що й CHECK у базі. */
+export function checkEmotionPoint(p: EmotionPointInput): void {
+  assertActor(p.createdBy);
+  if (!p.characterId) throw new CoreRuleError('bad_input', 'Не вказано героя');
+  if (!p.paragraphId) throw new CoreRuleError('bad_input', 'Емоційній точці потрібен абзац-доказ');
+  const e = String(p.emotion ?? '').trim();
+  if (!e || e.length > 80) throw new CoreRuleError('bad_input', 'Назва емоції — від 1 до 80 знаків');
+  if (!/^[a-z]{2,20}$/.test(p.family)) throw new CoreRuleError('bad_input', `Невідома родина емоції «${p.family}»`);
+  const score = (v: unknown) => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 10;
+  if (!score(p.intensity)) throw new CoreRuleError('bad_input', 'Інтенсивність — ціле число від 0 до 10');
+  if (p.craft != null && !score(p.craft)) throw new CoreRuleError('bad_input', 'Майстерність передачі — ціле число від 0 до 10');
+  if (p.impact != null && !score(p.impact)) throw new CoreRuleError('bad_input', 'Вплив на сюжет — ціле число від 0 до 10');
+  if (p.layer && !['primary', 'secondary', 'hidden'].includes(p.layer)) throw new CoreRuleError('bad_input', `Невідомий шар емоції «${p.layer}»`);
+  if (p.source && p.source !== 'author' && p.source !== 'ai') throw new CoreRuleError('bad_input', `Невідоме джерело точки «${p.source}»`);
+  if (p.status) assertStatus(p.status);
 }
 
 export function checkMention(m: MentionInput): void {
