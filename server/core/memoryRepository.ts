@@ -387,6 +387,14 @@ export class MemoryCoreRepository implements CoreRepository {
     return clone(out);
   }
 
+  async listMentionsByParagraphs(projectId: string, paragraphIds: string[]) {
+    const ids = new Set(paragraphIds);
+    return [...this.mentions.values()]
+      .filter((m) => m.projectId === projectId && ids.has(m.paragraphId))
+      .sort((a, b) => a.paragraphId.localeCompare(b.paragraphId) || a.spanStart - b.spanStart)
+      .map(clone);
+  }
+
   async countMentionsByEntity(projectId: string) {
     const out: Record<string, number> = {};
     for (const m of this.mentions.values()) {

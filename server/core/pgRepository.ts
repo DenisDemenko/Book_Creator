@@ -660,6 +660,15 @@ export class PgCoreRepository implements CoreRepository {
     });
   }
 
+  async listMentionsByParagraphs(projectId: string, paragraphIds: string[]) {
+    if (!paragraphIds.length) return [];
+    const { rows } = await this.q(
+      'SELECT * FROM entity_mentions WHERE project_id = $1 AND paragraph_id = ANY($2::text[]) ORDER BY paragraph_id, span_start',
+      [projectId, paragraphIds],
+    );
+    return rows.map(toMention);
+  }
+
   async countMentionsByEntity(projectId: string) {
     const { rows } = await this.q(
       `SELECT m.entity_id, count(*)::int AS n

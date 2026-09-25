@@ -17,6 +17,9 @@ import type { Express, NextFunction, Request, Response } from 'express';
 import { isValidBookId, type RealtimeAccessDeps } from '../realtimeAuth';
 import { CoreRuleError } from './rules';
 import type { CoreRepository, FindingRow } from './types';
+import { JobRejectedError } from './jobs/types';
+import type { JobQueue } from './jobs/queue';
+import { AI_MENTIONS_JOB_KIND, MENTION_SUGGESTION, RELATION_SUGGESTION, publicSuggestion } from './ai/mentions';
 
 export interface ProjectAccess {
   projectId: string;
@@ -64,6 +67,8 @@ export interface ProjectRoutesDeps {
   coreState: () => string;
   /** Остання синхронізація книги (Т0.6) — для підсумку сторінок. */
   lastSync?: (projectId: string) => Promise<{ status: string; finishedAt: string | null } | null>;
+  /** Черга ядра (Т0.7) — для запуску AI-1 з інтерфейсу (Т1.1). */
+  queue?: () => JobQueue | null;
 }
 
 export function requireProjectAccess(deps: Pick<ProjectRoutesDeps, 'access'>) {
@@ -194,6 +199,138 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       relations,
       findings: findings.filter(visibleTo(req.projectAccess!)),
     });
+  }));
+
+  // ── Т1.1: пропозиції AI-1 (згадки й зв'язки) ──────────────────────────────
+
+  const requireWrite = (req: Request, res: Response): boolean => {
+    if (req.projectAccess?.canWrite) return true;
+    res.status(403).json({ error: 'Ваша роль у проєкті лише для читання.', kind: 'forbidden' });
+    return false;
+  };
+
+  /** Запустити AI-1 над розділом: фонова задача, відповідь — її id. */
+  app.post('/api/projects/:id/ai/mentions', withRepo(async (repo, req, res) => {
+    if (!requireWrite(req, res)) return;
+    const queue = deps.queue?.();
+    if (!queue) {
+      res.status(503).json({ error: 'Фонові задачі ядра зараз недоступні.', kind: 'core_unavailable' });
+      return;
+    }
+    const sectionId = String(req.body?.sectionId ?? '');
+    const paragraphs = sectionId ? await repo.listParagraphs(req.params.id, sectionId) : [];
+    if (!paragraphs.length) {
+      res.status(409).json({
+        error: 'Розділ ще не синхронізовано з ядром — збережіть книгу й спробуйте за кілька секунд.',
+        kind: 'not_synced',
+      });
+      return;
+    }
+    try {
+      const { job } = await queue.enqueue({
+        projectId: req.params.id,
+        kind: AI_MENTIONS_JOB_KIND,
+        payload: { sectionId, paragraphIds: paragraphs.map((p) => p.id) },
+        createdBy: `user:${req.projectAccess!.userId}`,
+      });
+      res.status(202).json({ jobId: job.id, paragraphs: paragraphs.length });
+    } catch (err) {
+      if (err instanceof JobRejectedError) {
+        const status = err.code === 'rate_limited' ? 429 : err.code === 'budget_exhausted' ? 402 : 422;
+        res.status(status).json({ error: err.message, kind: err.code, retryAfterMs: err.retryAfterMs });
+        return;
+      }
+      throw err;
+    }
+  }));
+
+  /** Стан фонової задачі проєкту (прогрес, підсумок, помилка). */
+  app.get('/api/projects/:id/jobs/:jobId', withRepo(async (_repo, req, res) => {
+    const job = await deps.queue?.()?.store.get(req.params.id, req.params.jobId);
+    if (!job) {
+      res.status(404).json({ error: 'Задачу не знайдено в цьому проєкті.', kind: 'not_found' });
+      return;
+    }
+    res.json({ id: job.id, kind: job.kind, status: job.status, progress: job.progress, result: job.result, error: job.error });
+  }));
+
+  /** Нерозглянуті пропозиції AI (згадки й зв'язки), за бажанням — лише розділу. */
+  app.get('/api/projects/:id/suggestions', withRepo(async (repo, req, res) => {
+    const sectionId = typeof req.query.sectionId === 'string' && req.query.sectionId ? req.query.sectionId : undefined;
+    const findings = (await repo.listFindings(req.params.id, { status: 'suggested' }))
+      .filter((f) => f.kind === MENTION_SUGGESTION || f.kind === RELATION_SUGGESTION)
+      .filter(visibleTo(req.projectAccess!));
+    const out = [];
+    for (const f of findings) {
+      const paragraph = f.sourceParagraphIds[0] ? await repo.getParagraph(req.params.id, f.sourceParagraphIds[0]) : null;
+      if (paragraph?.deletedAt) continue;
+      if (sectionId && paragraph?.documentId !== sectionId) continue;
+      out.push(publicSuggestion(f, paragraph ?? undefined));
+    }
+    res.json({ suggestions: out });
+  }));
+
+  const loadSuggestion = async (repo: CoreRepository, req: Request, res: Response): Promise<FindingRow | null> => {
+    const f = await repo.getFinding(req.params.id, req.params.findingId);
+    if (!f || (f.kind !== MENTION_SUGGESTION && f.kind !== RELATION_SUGGESTION) || !visibleTo(req.projectAccess!)(f)) {
+      res.status(404).json({ error: 'Пропозицію не знайдено.', kind: 'not_found' });
+      return null;
+    }
+    if (f.status !== 'suggested') {
+      res.status(409).json({ error: 'Пропозицію вже розглянуто.', kind: 'already_decided', status: f.status });
+      return null;
+    }
+    return f;
+  };
+
+  /**
+   * «Підтвердити» (П3). Згадка: висновок підтверджено, відповідь — тег і абзац,
+   * куди його поставить редактор у браузері (рукопис змінює лише редактор, К2).
+   * Зв'язок: створюється в ядрі як підтверджений автором.
+   */
+  app.post('/api/projects/:id/suggestions/:findingId/confirm', withRepo(async (repo, req, res) => {
+    if (!requireWrite(req, res)) return;
+    const f = await loadSuggestion(repo, req, res);
+    if (!f) return;
+    const actor = `user:${req.projectAccess!.userId}`;
+    const p = f.payload as Record<string, any>;
+    if (f.kind === RELATION_SUGGESTION) {
+      const relation = await repo.createRelation({
+        projectId: req.params.id,
+        type: String(p.relationType),
+        fromId: String(f.entityId),
+        toId: String(p.targetEntityId),
+        evidence: f.sourceParagraphIds,
+        status: 'confirmed',
+        note: typeof p.quote === 'string' ? p.quote : '',
+        createdBy: actor,
+      });
+      await repo.setFindingStatus(req.params.id, f.id, 'confirmed', actor, 'підтверджено автором');
+      res.json({ kind: RELATION_SUGGESTION, relation });
+      return;
+    }
+    const paragraph = await repo.getParagraph(req.params.id, f.sourceParagraphIds[0]);
+    if (!paragraph || paragraph.deletedAt) {
+      res.status(409).json({ error: 'Абзацу вже немає в книзі.', kind: 'paragraph_gone' });
+      return;
+    }
+    await repo.setFindingStatus(req.params.id, f.id, 'confirmed', actor, 'підтверджено автором — тег у рукописі');
+    res.json({
+      kind: MENTION_SUGGESTION,
+      tag: p.tag,
+      paragraphId: paragraph.id,
+      editorPid: paragraph.editorPid ?? paragraph.id,
+      sectionId: paragraph.documentId,
+    });
+  }));
+
+  /** «Відхилити»: більше не пропонується (для згадки — у цьому абзаці). */
+  app.post('/api/projects/:id/suggestions/:findingId/reject', withRepo(async (repo, req, res) => {
+    if (!requireWrite(req, res)) return;
+    const f = await loadSuggestion(repo, req, res);
+    if (!f) return;
+    await repo.setFindingStatus(req.params.id, f.id, 'rejected', `user:${req.projectAccess!.userId}`, 'відхилено автором');
+    res.json({ ok: true });
   }));
 
   /** Зв'язки проєкту або однієї сутності (`?entityId=`). */

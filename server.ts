@@ -199,6 +199,7 @@ import { initCore, getCoreStatus, shutdownCore, registerCoreJobKind, getCoreRepo
 import { registerProjectRoutes } from './server/core/projectRoutes';
 import { CORE_SYNC_KIND, coreSyncJobKind } from './server/core/sync';
 import { AI_ROLE_JOB_KIND, aiRoleJobKind } from './server/core/ai/job';
+import { AI_MENTIONS_JOB_KIND, aiMentionsJobKind } from './server/core/ai/mentions';
 import { aiRoleGenerateViaCore, loadCoreAiRoleTemplate } from './server/core/ai/generate';
 import { purgeExpiredSessions, initStore, getUserStyle, upsertUserStyle, deleteUserStyle, listUserApiKeys, getUserPromptTemplates, upsertUserPromptTemplates, deleteUserPromptTemplates, getAppSetting, setAppSetting } from './server/store';
 
@@ -539,6 +540,7 @@ registerGitCommandRoutes(app);
     access: realtimeAccessDeps,
     repo: getCoreRepository,
     coreState: () => getCoreStatus().state,
+    queue: getCoreJobQueue,
     lastSync: async (projectId) => {
       const jobs = (await getCoreJobQueue()?.store.list(projectId, { kind: CORE_SYNC_KIND, limit: 10 })) ?? [];
       const last = jobs.find((j) => j.status === 'succeeded' || j.status === 'failed');
@@ -5999,6 +6001,16 @@ ${JSON.stringify(bookContext || {}, null, 2)}
   registerCoreJobKind(CORE_SYNC_KIND, coreSyncJobKind({ repo: getCoreRepository, loadBook: getStoredBookForRealtime }));
   // Три ролі AI ядра (Т0.9): прогін ролі над абзацами — фоновою задачею з
   // бюджетом проєкту; модель кожної ролі — з прив'язки «модуль → модель» адміна.
+  // AI-1: пропоновані згадки й зв'язки (Т1.1) — запускає автор кнопкою в панелі сутностей.
+  registerCoreJobKind(
+    AI_MENTIONS_JOB_KIND,
+    aiMentionsJobKind({
+      repo: getCoreRepository,
+      generate: aiRoleGenerateViaCore,
+      resolveModel: (module) => resolveModuleModelId(module),
+      loadTemplate: loadCoreAiRoleTemplate,
+    }),
+  );
   registerCoreJobKind(
     AI_ROLE_JOB_KIND,
     aiRoleJobKind({

@@ -135,6 +135,11 @@ export const CORE_AI_ROLE_RESPONSE_SCHEMA = {
           quote: { type: 'string', maxLength: 1000 },
           confidence: { type: 'number', minimum: 0, maximum: 1 },
           insufficient_data: { type: 'boolean' },
+          // Т1.1: чиє (для емоцій, цілей, рішень…) і зв'язок між двома сутностями.
+          subject_name: { type: 'string', maxLength: 300 },
+          relation_type: { type: 'string', maxLength: 60 },
+          target_entity_type: { type: 'string', maxLength: 60 },
+          target_entity_name: { type: 'string', maxLength: 300 },
         },
       },
     },

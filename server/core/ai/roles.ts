@@ -71,10 +71,17 @@ export interface AiRoleRequest {
   /** Хто запустив прогін: `user:…` або `system:…`. */
   createdBy: CoreActor;
   signal?: AbortSignal;
+  /**
+   * Додаткова обробка кожного висновку (Т1.1): зіставлення з сутностями,
+   * відсів дублів і відхиленого раніше, розбиття по абзацах. Отримує висновок
+   * з уже звіреним доказом; `[]` — не зберігати.
+   */
+  prepare?: (finding: ModelFinding, evidence: { paragraphIds: string[]; imageIds: string[] }) => Promise<PreparedFinding[]>;
 }
 
 export interface RejectedFinding {
-  reason: 'no_evidence';
+  /** no_evidence — немає доказу з вхідних даних; filtered — відкинув `prepare` (дубль, відхилене раніше…). */
+  reason: 'no_evidence' | 'filtered';
   kind: string;
   summary: string;
 }
@@ -87,7 +94,7 @@ export interface AiRoleResult {
   errors: string[];
 }
 
-interface ModelFinding {
+export interface ModelFinding {
   kind: string;
   entity_type?: string;
   entity_name?: string;
@@ -97,6 +104,16 @@ interface ModelFinding {
   quote?: string;
   confidence: number;
   insufficient_data?: boolean;
+  [key: string]: unknown;
+}
+
+/** Висновок після `prepare`: що саме зберегти (можна кілька з одного — по абзацу). */
+export interface PreparedFinding {
+  kind: string;
+  entityId?: string | null;
+  payload: Record<string, unknown>;
+  paragraphIds: string[];
+  imageIds?: string[];
 }
 
 function formatParagraphs(paragraphs: { id: string; text: string }[]): string {
@@ -200,21 +217,30 @@ export async function runAiRole(deps: AiRoleDeps, req: AiRoleRequest): Promise<A
     if (f.quote) payload.quote = f.quote;
     const dropped = (f.paragraph_ids ?? []).length - paragraphIds.length + (f.image_ids ?? []).length - imageIds.length;
     if (dropped > 0) payload.droppedUnknownEvidence = dropped;
-    findings.push(
-      await deps.repo.addFinding({
-        projectId: req.projectId,
-        runId: run.id,
-        entityId: req.entityId ?? null,
-        kind: f.kind,
-        payload,
-        sourceParagraphIds: paragraphIds,
-        sourceAssetIds: imageIds,
-        sourceRevision: req.sourceRevision ?? null,
-        insufficientData: insufficient,
-        visibility: req.visibility ?? 'project',
-        createdBy: `ai:${req.role}`,
-      }),
-    );
+    const prepared: PreparedFinding[] = req.prepare
+      ? await req.prepare(f, { paragraphIds, imageIds })
+      : [{ kind: f.kind, entityId: req.entityId ?? null, payload, paragraphIds, imageIds }];
+    if (!prepared.length) {
+      rejected.push({ reason: 'filtered', kind: f.kind, summary: f.summary });
+      continue;
+    }
+    for (const p of prepared) {
+      findings.push(
+        await deps.repo.addFinding({
+          projectId: req.projectId,
+          runId: run.id,
+          entityId: p.entityId ?? null,
+          kind: p.kind,
+          payload: { ...payload, ...p.payload },
+          sourceParagraphIds: p.paragraphIds,
+          sourceAssetIds: p.imageIds ?? [],
+          sourceRevision: req.sourceRevision ?? null,
+          insufficientData: insufficient && !p.paragraphIds.length && !(p.imageIds ?? []).length,
+          visibility: req.visibility ?? 'project',
+          createdBy: `ai:${req.role}`,
+        }),
+      );
+    }
   }
 
   const done = await deps.repo.finishRun(req.projectId, run.id, {

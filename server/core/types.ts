@@ -361,6 +361,7 @@ export interface CoreRepository {
   /** Замінює всі згадки абзацу одним рухом (так їх перераховує синхронізація). */
   replaceParagraphMentions(projectId: string, paragraphId: string, mentions: MentionInput[]): Promise<MentionRow[]>;
   listMentionsByEntity(projectId: string, entityId: string): Promise<MentionRow[]>;
+  listMentionsByParagraphs(projectId: string, paragraphIds: string[]): Promise<MentionRow[]>;
   /** Скільки згадок у живих абзацах має кожна сутність проєкту (Т0.8, для списків). */
   countMentionsByEntity(projectId: string): Promise<Record<string, number>>;
 

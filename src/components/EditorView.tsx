@@ -10,6 +10,7 @@ import { characterMentionKey } from './manuscriptEditor/CharacterMentionPlugin';
 import { readabilityKey } from './manuscriptEditor/ReadabilityHighlightPlugin';
 import { entityTagKey } from './manuscriptEditor/EntityTagPlugin';
 import { CoreEntityPanel } from './CoreEntityPanel';
+import { AiSuggestionsPanel } from './AiSuggestionsPanel';
 import { EntitySlashMenu } from './EntitySlashMenu';
 import { CharacterDialogueModal } from './CharacterDialogueModal';
 import {
@@ -1425,6 +1426,48 @@ export const EditorView: React.FC<EditorViewProps> = ({
       .focus()
       .insertContentAt(insertAt, `${needsSpace ? ' ' : ''}${buildEntityTag(entity.slug, '')} `)
       .run();
+  };
+
+  /**
+   * Пропозиції AI-1 (Т1.1, рішення П3): підтверджений тег стає на початок
+   * абзацу, на який вказує доказ, — за постійним номером блоку (Т0.5), а не за
+   * курсором. Лише український текст: переклад має власні теги (П5).
+   */
+  const findBlockByPid = (pid: string): { pos: number; text: string } | null => {
+    if (!uaEditor || !pid) return null;
+    let found: { pos: number; text: string } | null = null;
+    uaEditor.state.doc.forEach((node, offset) => {
+      if (found || node.attrs?.pid !== pid) return;
+      // До першого текстового блоку всередині (цитата, чернетка AI).
+      let n = node;
+      let pos = offset;
+      while (!n.isTextblock && n.firstChild) {
+        n = n.firstChild;
+        pos += 1;
+      }
+      if (n.isTextblock) found = { pos: pos + 1, text: n.textContent };
+    });
+    return found;
+  };
+
+  const handleCanInsertSuggestionTag = (pid: string, tag: string): true | string => {
+    if (!uaEditor) return 'Редактор ще не відкрито.';
+    const block = findBlockByPid(pid);
+    if (!block) return 'Абзацу з цієї пропозиції немає в поточному розділі — відкрийте його розділ.';
+    if (parseAnyEntityTags(block.text).length >= MAX_ENTITIES_PER_PARAGRAPH) {
+      return `У цьому абзаці вже ${MAX_ENTITIES_PER_PARAGRAPH} тегів — більше не можна.`;
+    }
+    if (tag && block.text.includes(tag)) return 'Такий тег уже стоїть у цьому абзаці.';
+    return true;
+  };
+
+  const handleInsertSuggestionTag = (pid: string, tag: string): boolean => {
+    const block = findBlockByPid(pid);
+    if (!uaEditor || !block || !tag) return false;
+    const leadingTags = /^(?:\s*\[[^\]]*\])*/.exec(block.text)?.[0].length ?? 0;
+    const needsSpace = leadingTags > 0 && !/\s$/.test(block.text.slice(0, leadingTags));
+    uaEditor.chain().insertContentAt(block.pos + leadingTags, `${needsSpace ? ' ' : ''}${tag} `).run();
+    return true;
   };
 
   /** Вставити тег у позицію курсора — для випадку «мітка саме тут, усередині абзацу». */
@@ -5791,6 +5834,15 @@ export const EditorView: React.FC<EditorViewProps> = ({
             {/* Сутності ядра (задача #227) — окрема коренева вкладка: це не
                 підрежим роботи з текстом і не AI-інструмент, а самостійний
                 шар розмітки рукопису. */}
+            {/* Пропозиції AI-1 (Т1.1) — над реєстром: їх мало, і вони про ЦЕЙ розділ. */}
+            {rightPanelTab === 'entities' && (
+              <AiSuggestionsPanel
+                bookId={book.id}
+                sectionId={activeSection?.id}
+                canInsertTag={handleCanInsertSuggestionTag}
+                onInsertTag={handleInsertSuggestionTag}
+              />
+            )}
             {rightPanelTab === 'entities' && (
               <CoreEntityPanel
                 sectionContent={activeSection?.content || ''}
