@@ -195,7 +195,8 @@ import {
 import { CORE_VISION_MODULES } from './server/coreAiRegistry';
 import { normalizePromptEntities, buildCoachEntityInstruction, normalizeEntityFeedback, buildExerciseEntityInstruction, normalizeGeneratedEntities } from './server/masteryEntityPrompt';
 import { formatManuscriptWithClaude, anthropicConfig, ClaudeManuscriptError, MAX_MANUSCRIPT_CHARS } from './server/claudeManuscript';
-import { initCore, getCoreStatus, shutdownCore, registerCoreJobKind, getCoreRepository } from './server/core';
+import { initCore, getCoreStatus, shutdownCore, registerCoreJobKind, getCoreRepository, getCoreJobQueue } from './server/core';
+import { registerProjectRoutes } from './server/core/projectRoutes';
 import { CORE_SYNC_KIND, coreSyncJobKind } from './server/core/sync';
 import { AI_ROLE_JOB_KIND, aiRoleJobKind } from './server/core/ai/job';
 import { aiRoleGenerateViaCore, loadCoreAiRoleTemplate } from './server/core/ai/generate';
@@ -532,6 +533,18 @@ registerGitCommandRoutes(app);
     generateText: generateAiText as never,
   });
   registerBookRoutes(app, storedBookOps);
+  // API сторінок семантичного ядра (Т0.8): /api/projects/:id/* — лише з правом
+  // на книгу (власник, прийняте запрошення, адміністратор).
+  registerProjectRoutes(app, {
+    access: realtimeAccessDeps,
+    repo: getCoreRepository,
+    coreState: () => getCoreStatus().state,
+    lastSync: async (projectId) => {
+      const jobs = (await getCoreJobQueue()?.store.list(projectId, { kind: CORE_SYNC_KIND, limit: 10 })) ?? [];
+      const last = jobs.find((j) => j.status === 'succeeded' || j.status === 'failed');
+      return last ? { status: last.status, finishedAt: last.finishedAt } : null;
+    },
+  });
 
   /*
     Gamma. Відро власне й скромне: документованих лімітів Gamma не публікує,

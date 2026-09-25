@@ -78,7 +78,7 @@ for (let i = 0; i < 120 && health?.core !== 'ready'; i++) {
 }
 console.log('\nСтарт:');
 t('сервер піднявся, ядро готове', health?.core === 'ready', JSON.stringify(health));
-t('міграції накочено на старті', /схема v4/.test(log.join('')), (log.join('').match(/\[core\][^\n]*/g) || []).join(' | '));
+t('міграції накочено на старті', /схема v\d+/.test(log.join('')) && /0004_core_sync накочено/.test(log.join('')), (log.join('').match(/\[core\][^\n]*/g) || []).join(' | '));
 if (health?.core !== 'ready') { console.error(log.join('').slice(-3000)); child.kill(); process.exit(1); }
 
 const puppeteer = (await import('puppeteer-core')).default;
@@ -137,7 +137,9 @@ await waitFor(
   () => q(`SELECT count(*)::int AS n FROM fusion_core.core_jobs WHERE project_id = $1 AND status IN ('queued', 'running')`, [BOOK]),
   (rows) => rows[0].n === 0,
 );
-const coreSec0 = paragraphs.filter((p: any) => p.document_id === sec0?.id).map((p: any) => p.id);
+// Абзаци — заново, після синхронізації книги з номерами (перший запит міг бути раніше).
+const synced = await q(`SELECT id, document_id FROM fusion_core.paragraphs WHERE project_id = $1 AND deleted_at IS NULL ORDER BY document_id, ord`, [BOOK]);
+const coreSec0 = synced.filter((p: any) => p.document_id === sec0?.id).map((p: any) => p.id);
 t('номери абзаців у ядрі — ті самі, що в канві й у книзі',
   coreSec0.length > 0 && coreSec0.join() === (sec0?.paragraphIds || []).join() && coreSec0.join() === (await topPids()).join(),
   `${coreSec0.length} / ${sec0?.paragraphIds?.length}`);

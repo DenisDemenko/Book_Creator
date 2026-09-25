@@ -356,10 +356,13 @@ export interface CoreRepository {
   addAlias(projectId: string, entityId: string, alias: string, kind?: AliasRow['kind']): Promise<AliasRow>;
   /** Сутність за псевдонімом у межах типу (регістр і зайві пробіли не важать). */
   resolveAlias(projectId: string, type: string, alias: string): Promise<string | null>;
+  listAliases(projectId: string, entityId: string): Promise<AliasRow[]>;
 
   /** Замінює всі згадки абзацу одним рухом (так їх перераховує синхронізація). */
   replaceParagraphMentions(projectId: string, paragraphId: string, mentions: MentionInput[]): Promise<MentionRow[]>;
   listMentionsByEntity(projectId: string, entityId: string): Promise<MentionRow[]>;
+  /** Скільки згадок у живих абзацах має кожна сутність проєкту (Т0.8, для списків). */
+  countMentionsByEntity(projectId: string): Promise<Record<string, number>>;
 
   createRelation(input: RelationInput): Promise<RelationRow>;
   setRelationStatus(projectId: string, id: string, status: CoreStatus, actor: CoreActor, reason?: string): Promise<RelationRow>;

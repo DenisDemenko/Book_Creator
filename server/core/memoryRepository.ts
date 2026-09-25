@@ -348,6 +348,13 @@ export class MemoryCoreRepository implements CoreRepository {
     return clone(row);
   }
 
+  async listAliases(projectId: string, entityId: string) {
+    return [...this.aliases.values()]
+      .filter((a) => a.projectId === projectId && a.entityId === entityId)
+      .sort((x, y) => x.alias.localeCompare(y.alias))
+      .map(clone);
+  }
+
   async resolveAlias(projectId: string, type: string, alias: string) {
     return this.aliases.get(`${projectId}\u0000${type}\u0000${normalizeAlias(alias)}`)?.entityId ?? null;
   }
@@ -378,6 +385,16 @@ export class MemoryCoreRepository implements CoreRepository {
     }));
     for (const m of out) this.mentions.set(m.id, m);
     return clone(out);
+  }
+
+  async countMentionsByEntity(projectId: string) {
+    const out: Record<string, number> = {};
+    for (const m of this.mentions.values()) {
+      if (m.projectId !== projectId) continue;
+      if (this.paragraphs.get(key(projectId, m.paragraphId))?.deletedAt) continue;
+      out[m.entityId] = (out[m.entityId] ?? 0) + 1;
+    }
+    return out;
   }
 
   async listMentionsByEntity(projectId: string, entityId: string) {

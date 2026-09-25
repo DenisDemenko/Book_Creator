@@ -654,6 +654,9 @@ export function hasPermission(role: UserRole | string | undefined | null, permis
 export function canAccessTab(role: UserRole | string | undefined | null, tab: NavigationTab): boolean {
   if (role === 'admin') return true;
   const perms = getRolePermissions(role);
+  // Сторінки семантичного ядра (Т0.8) — для всіх, хто працює з текстом книги:
+  // доступ до самих даних перевіряє сервер (requireProjectAccess), тут лише меню.
+  if (String(tab).startsWith('core-')) return perms.allowedTabs.includes('editor');
   return perms.allowedTabs.includes(tab);
 }
 

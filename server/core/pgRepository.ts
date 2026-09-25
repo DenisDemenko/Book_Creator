@@ -599,6 +599,15 @@ export class PgCoreRepository implements CoreRepository {
     });
   }
 
+  async listAliases(projectId: string, entityId: string) {
+    if (!isUuid(entityId)) return [];
+    const { rows } = await this.q('SELECT * FROM entity_aliases WHERE project_id = $1 AND entity_id = $2 ORDER BY alias', [
+      projectId,
+      entityId,
+    ]);
+    return rows.map(toAlias);
+  }
+
   async resolveAlias(projectId: string, type: string, alias: string) {
     const { rows } = await this.q(
       'SELECT entity_id FROM entity_aliases WHERE project_id = $1 AND entity_type = $2 AND alias_norm = $3',
@@ -649,6 +658,20 @@ export class PgCoreRepository implements CoreRepository {
       }
       return out;
     });
+  }
+
+  async countMentionsByEntity(projectId: string) {
+    const { rows } = await this.q(
+      `SELECT m.entity_id, count(*)::int AS n
+       FROM entity_mentions m
+       JOIN paragraphs p ON p.project_id = m.project_id AND p.id = m.paragraph_id AND p.deleted_at IS NULL
+       WHERE m.project_id = $1
+       GROUP BY m.entity_id`,
+      [projectId],
+    );
+    const out: Record<string, number> = {};
+    for (const r of rows) out[r.entity_id] = r.n;
+    return out;
   }
 
   async listMentionsByEntity(projectId: string, entityId: string) {

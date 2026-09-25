@@ -87,8 +87,12 @@ import {
   META_CHANGELOG,
   META_ROLE,
   META_COWORK_LOCK,
+  META_ACTIVE_BOOK,
   type BookSummary,
 } from './utils/storage';
+import { parseAppPath, buildAppPath, isCorePageTab } from './utils/appRoutes';
+import { API_BASE } from './utils/basePath';
+import { CorePageView } from './components/CorePageView';
 import { stampBookRevision, isNewerBook, describeRevisionGap } from './utils/bookVersion';
 import { resolveBookAuthor } from './utils/bookAuthor';
 import { otherSessionsOfSameUser } from './utils/deviceSession';
@@ -195,6 +199,16 @@ export default function App() {
   const [roleChoice, setRoleChoice] = useState<{ bookId: string; bookTitle: string; invitedRole: UserRole } | null>(null);
 
   const [currentTab, setCurrentTab] = useState<NavigationTab>('dashboard');
+  /**
+   * Адреса, з якою відкрили Студію (Т0.8, К3): /projects/<книга>/<сторінка>.
+   * Читається один раз — далі адресу веде стан (вкладка й книга), а «назад»
+   * повертає стан з адреси (popstate нижче).
+   */
+  const initialRouteRef = useRef(typeof window !== 'undefined' ? parseAppPath(window.location.pathname, API_BASE) : null);
+  /** Герой відкритого профілю (сторінка «Профіль персонажа», /characters/:id). */
+  const [coreCharacterId, setCoreCharacterId] = useState<string | undefined>(initialRouteRef.current?.characterId);
+  /** Адресу вже приведено до стану хоча б раз — далі кожна зміна вкладки йде в історію браузера. */
+  const routeSyncedRef = useRef(false);
   const [activeChapterId, setActiveChapterId] = useState<string>(book.chapters[0]?.id || '');
   const [activeSectionId, setActiveSectionId] = useState<string>(book.chapters[0]?.sections[0]?.id || '');
   /** Діапазон символів для виділення в EditorView одразу після «Передати текст у книгу» з AI-чату. */
@@ -518,7 +532,7 @@ export default function App() {
       try {
         await migrateFromLocalStorage();
 
-        const [storedBook, storedLog, storedRole, storedCoworkLock] = await Promise.all([
+        const [activeBook, storedLog, storedRole, storedCoworkLock] = await Promise.all([
           loadBook(),
           loadMeta<AuditLogEntry[]>(META_CHANGELOG),
           loadMeta<string>(META_ROLE),
@@ -526,6 +540,28 @@ export default function App() {
         ]);
 
         if (cancelled) return;
+
+        // Адреса з іншою книгою (закладка, посилання співавтора): відкриваємо
+        // її, якщо вона є на цьому пристрої, і робимо активною.
+        //
+        // Крім ПЕРЕЗАВАНТАЖЕННЯ сторінки: так Студія перемикає книгу («Мої
+        // книги» → інша книга: активна книга змінюється, сторінка
+        // перезавантажується), і тоді в адресі ще стара книга — перемагати
+        // має саме нова активна, а адреса підлаштується під неї.
+        let storedBook = activeBook;
+        const routeBookId = initialRouteRef.current?.projectId;
+        const navigation = (performance.getEntriesByType?.('navigation')?.[0] as PerformanceNavigationTiming | undefined)?.type;
+        if (routeBookId && activeBook?.id !== routeBookId && navigation !== 'reload') {
+          const routed = await loadBook(routeBookId).catch(() => undefined);
+          if (cancelled) return;
+          if (routed) {
+            storedBook = routed;
+            await saveMeta(META_ACTIVE_BOOK, routeBookId).catch(() => undefined);
+          } else {
+            console.warn(`[routes] книги ${routeBookId} з адреси немає на цьому пристрої — відкрито активну`);
+          }
+        }
+        if (initialRouteRef.current) setCurrentTab(initialRouteRef.current.tab);
 
         if (storedBook) {
           setBook(storedBook);
@@ -590,6 +626,45 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth.loading, auth.user?.role, coworkLock, book.id]);
+
+  // Адреса ↔ вкладка (Т0.8, К3). Кожна вкладка — /projects/<книга>/<сторінка>:
+  // перший раз адреса лише уточнюється (replaceState), далі кожен перехід —
+  // запис в історії, тож «назад» у браузері повертає попередню вкладку.
+  useEffect(() => {
+    if (isHydrating) return;
+    const path = buildAppPath(
+      { projectId: book.id, tab: currentTab, characterId: currentTab === 'core-character' ? coreCharacterId : undefined },
+      API_BASE
+    );
+    if (!path) return;
+    if (window.location.pathname !== path) {
+      const url = `${path}${window.location.search}${window.location.hash}`;
+      if (routeSyncedRef.current) window.history.pushState({ tab: currentTab }, '', url);
+      else window.history.replaceState({ tab: currentTab }, '', url);
+    }
+    routeSyncedRef.current = true;
+  }, [isHydrating, book.id, currentTab, coreCharacterId]);
+
+  const bookIdRef = useRef(book.id);
+  bookIdRef.current = book.id;
+  useEffect(() => {
+    const onPop = () => {
+      const route = parseAppPath(window.location.pathname, API_BASE);
+      if (!route) return;
+      // Інша книга в історії — робимо її активною й перезавантажуємо: гідратація відкриє саме її.
+      if (route.projectId !== bookIdRef.current) {
+        saveMeta(META_ACTIVE_BOOK, route.projectId)
+          .catch(() => undefined)
+          .finally(() => window.location.reload());
+        return;
+      }
+      setMarketOpen(false);
+      setCoreCharacterId(route.characterId);
+      setCurrentTab(route.tab);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
 
   // Журнал змін: обрізаємо до MAX_LOG_ENTRIES, щоб він не ріс безмежно.
   useEffect(() => {
@@ -2229,6 +2304,15 @@ export default function App() {
             book={book}
             onUpdateBook={handleUpdateBook}
             onNavigateToTab={handleSelectTab}
+          />
+        )}
+
+        {isCorePageTab(currentTab) && (
+          <CorePageView
+            tab={currentTab}
+            book={book}
+            characterId={coreCharacterId}
+            onOpenCharacter={setCoreCharacterId}
           />
         )}
 

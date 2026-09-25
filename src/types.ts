@@ -31,7 +31,20 @@ export type NavigationTab =
   | 'structure'    // Фаза 3, 3.1: Конструктор структури книги (шаблони + AI-заголовки)
   | 'portfolio'    // Фаза 3, 3.3: Приватне портфоліо автора (лише для самого автора)
   | 'publishing'   // Модуль публікації та експорту: Amazon KDP (файли + метадані) та Etsy (лістинг через Open API v3)
-  | 'market';      // King Market Intelligence: аналітика ринку Etsy (AI-скринінг, Opportunity Score) — Pro/Ultra
+  | 'market'       // King Market Intelligence: аналітика ринку Etsy (AI-скринінг, Opportunity Score) — Pro/Ultra
+  // Одинадцять сторінок семантичного ядра (ТЗ «11 окремих сторінок», Т0.8;
+  // адреси й назви — src/utils/appRoutes.ts → CORE_PAGES).
+  | 'core-search'
+  | 'core-story-graph'
+  | 'core-character'
+  | 'core-emotions'
+  | 'core-branches'
+  | 'core-timeline'
+  | 'core-visual'
+  | 'core-continuity'
+  | 'core-mastery'
+  | 'core-collaboration'
+  | 'core-translation';
 
 export interface AuditLogEntry {
   id: string;

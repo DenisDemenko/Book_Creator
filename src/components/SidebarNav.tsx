@@ -35,6 +35,15 @@ import {
   ChevronsLeft,
   ChevronsRight,
   ChevronDown,
+  Search,
+  UserRound,
+  HeartPulse,
+  GitBranch,
+  CalendarClock,
+  Images,
+  ShieldAlert,
+  UsersRound,
+  Languages,
 } from 'lucide-react';
 import { NavigationTab, Book, UserRole } from '../types';
 import { canAccessTab } from '../utils/rbac';
@@ -118,6 +127,17 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   subscription: CreditCard,
   'api-keys': KeyRound,
   admin: ShieldCheck,
+  'core-search': Search,
+  'core-story-graph': Network,
+  'core-character': UserRound,
+  'core-emotions': HeartPulse,
+  'core-branches': GitBranch,
+  'core-timeline': CalendarClock,
+  'core-visual': Images,
+  'core-continuity': ShieldAlert,
+  'core-mastery': GraduationCap,
+  'core-collaboration': UsersRound,
+  'core-translation': Languages,
 };
 
 /**
@@ -175,6 +195,26 @@ const NAV_GROUPS: NavGroup[] = [
     numeral: 'V',
     labelKey: 'groupTraining',
     tabs: ['mastery', 'knowledge', 'trainers', 'diagn', 'structure', 'portfolio'],
+  },
+  {
+    // Одинадцять сторінок ТЗ «11 окремих сторінок» (Т0.8): кожна має адресу
+    // /projects/<книга>/<сторінка> і оживає на своєму етапі дорожньої карти.
+    id: 'core',
+    numeral: 'VI',
+    labelKey: 'groupCore',
+    tabs: [
+      'core-search',
+      'core-story-graph',
+      'core-character',
+      'core-emotions',
+      'core-branches',
+      'core-timeline',
+      'core-visual',
+      'core-continuity',
+      'core-mastery',
+      'core-collaboration',
+      'core-translation',
+    ],
   },
 ];
 

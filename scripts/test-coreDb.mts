@@ -177,6 +177,8 @@ async function contract(repo: CoreRepository, label: string) {
   ]);
   t('згадки абзацу записано; AI-згадка — suggested', ms.length === 2 && ms[1].status === 'suggested' && ms[0].status === 'confirmed');
   await repo.replaceParagraphMentions(P, 'p-1', [{ entityId: olena.id, spanStart: 0, spanEnd: 5, source: 'tag' }]);
+  t('псевдоніми сутності списком', (await repo.listAliases(P, olena.id)).map((x) => x.aliasNorm).sort().join() === '/character:olena,олена');
+  t('кількість згадок за сутностями', (await repo.countMentionsByEntity(P))[olena.id] === 1 && (await repo.countMentionsByEntity(P))[marko.id] === undefined, JSON.stringify(await repo.countMentionsByEntity(P)));
   t('повторний розбір абзацу замінює згадки, а не дописує',
     (await repo.listMentionsByEntity(P, olena.id)).length === 1 && (await repo.listMentionsByEntity(P, marko.id)).length === 0);
   await rejects('згадка в неіснуючому абзаці відхиляється',
