@@ -696,6 +696,17 @@ export class PgCoreRepository implements CoreRepository {
     return rows.map(toMention);
   }
 
+  async listSubjectMentions(projectId: string) {
+    const { rows } = await this.q(
+      `SELECT m.* FROM entity_mentions m
+       JOIN paragraphs p ON p.project_id = m.project_id AND p.id = m.paragraph_id AND p.deleted_at IS NULL
+       WHERE m.project_id = $1 AND m.subject_entity_id IS NOT NULL
+       ORDER BY m.paragraph_id, m.span_start`,
+      [projectId],
+    );
+    return rows.map(toMention);
+  }
+
   async countMentionsByEntity(projectId: string) {
     const { rows } = await this.q(
       `SELECT m.entity_id, count(*)::int AS n

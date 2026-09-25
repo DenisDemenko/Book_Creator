@@ -10,12 +10,15 @@
  * висновки) — рівно те, що дають перші маршрути задачі.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { Database, Loader2, ShieldAlert, UserRound, ArrowLeft } from 'lucide-react';
 import type { Book, NavigationTab } from '../types';
 import { corePageByTab } from '../utils/appRoutes';
 import { useLanguage } from '../i18n/LanguageContext';
 import { CoreSearchPage } from './CoreSearchPage';
+
+// Граф (Т1.4) тягне React Flow — вантажимо його лише на сторінці графа.
+const StoryGraphPage = lazy(() => import('./StoryGraphPage'));
 
 interface Props {
   tab: NavigationTab;
@@ -227,7 +230,7 @@ export const CorePageView: React.FC<Props> = ({ tab, book, characterId, onOpenCh
         </div>
         <h1 className="text-2xl font-bold text-slate-100">{t(`header.nav.${tab}`)}</h1>
         <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-slate-400">{page.purposeUk}</p>
-        {tab !== 'core-search' && (
+        {tab !== 'core-search' && tab !== 'core-story-graph' && (
           <p className="mt-2 text-xs text-slate-500">
             Сторінка з'явиться повністю на етапі {page.stage} дорожньої карти. Нижче — дані семантичного ядра цієї книги, на яких вона працюватиме.
           </p>
@@ -236,6 +239,13 @@ export const CorePageView: React.FC<Props> = ({ tab, book, characterId, onOpenCh
 
       {/* Сторінка 1 — «Розумний пошук» (Т1.3) — уже робоча. */}
       {tab === 'core-search' && <CoreSearchPage book={book} onOpenParagraph={(t) => onOpenParagraph?.(t)} />}
+
+      {/* Сторінка 2 — «Граф історії» (Т1.4). */}
+      {tab === 'core-story-graph' && (
+        <Suspense fallback={<Loader2 className="h-5 w-5 animate-spin text-slate-500" />}>
+          <StoryGraphPage book={book} onOpenParagraph={(t) => onOpenParagraph?.(t)} />
+        </Suspense>
+      )}
 
       {summary.state === 'loading' && <Loader2 className="h-5 w-5 animate-spin text-slate-500" />}
       {summary.state === 'error' && <Problem load={summary} />}

@@ -402,6 +402,13 @@ export class MemoryCoreRepository implements CoreRepository {
       .map(clone);
   }
 
+  async listSubjectMentions(projectId: string) {
+    return [...this.mentions.values()]
+      .filter((m) => m.projectId === projectId && m.subjectEntityId && !this.paragraphs.get(key(projectId, m.paragraphId))?.deletedAt)
+      .sort((a, b) => a.paragraphId.localeCompare(b.paragraphId) || a.spanStart - b.spanStart)
+      .map(clone);
+  }
+
   async countMentionsByEntity(projectId: string) {
     const out: Record<string, number> = {};
     for (const m of this.mentions.values()) {

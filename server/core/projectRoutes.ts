@@ -21,6 +21,7 @@ import { JobRejectedError } from './jobs/types';
 import type { JobQueue } from './jobs/queue';
 import { AI_MENTIONS_JOB_KIND, MENTION_SUGGESTION, RELATION_SUGGESTION, publicSuggestion } from './ai/mentions';
 import { hybridSearch, type SearchDeps, type SearchRequest } from './search/service';
+import { buildStoryGraph, evidenceRefs } from './storyGraph';
 import { interpretSearchQuery, type SearchInterpretDeps, type SearchInterpretation } from './search/interpret';
 
 export interface ProjectAccess {
@@ -127,6 +128,15 @@ export function requireProjectAccess(deps: Pick<ProjectRoutesDeps, 'access'>) {
   };
 }
 
+/**
+ * Хто змінює граф історії (створює й підтверджує зв'язки, Т1.4): власник,
+ * адміністратор, співавтор і редактор. Дизайнер, перекладач, видавець і
+ * читач бачать граф, але не змінюють його.
+ */
+export function canEditStory(access: ProjectAccess): boolean {
+  return access.isOwner || access.role === 'admin' || access.role === 'coauthor' || access.role === 'editor';
+}
+
 function visibleTo(access: ProjectAccess) {
   return (f: FindingRow) =>
     f.visibility === 'project' || (f.visibility === 'author' && (access.isOwner || access.role === 'admin'));
@@ -227,12 +237,18 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       repo.listRelations(id, entityId),
       repo.listFindings(id, { entityId }),
     ]);
+    // `?excerpts=1` (картка графа, Т1.4): абзаци згадок з уривком і адресою в редакторі.
+    const mentionParagraphs =
+      req.query.excerpts === '1'
+        ? await evidenceRefs(repo, id, [...new Set(mentions.filter((m) => m.status !== 'rejected').map((m) => m.paragraphId))].slice(0, 30))
+        : undefined;
     res.json({
       entity,
       aliases: aliases.map((a) => ({ alias: a.alias, kind: a.kind })),
       mentions,
       relations,
       findings: findings.filter(visibleTo(req.projectAccess!)),
+      ...(mentionParagraphs ? { mentionParagraphs } : {}),
     });
   }));
 
@@ -473,6 +489,96 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       return;
     }
     res.json({ ok: true });
+  }));
+
+  // ── Т1.4: граф історії ───────────────────────────────────────────────────
+
+  /**
+   * Граф: `?focus=<entityId>&depth=1|2` — сутність і сусіди (поступове
+   * довантаження), без фокуса — огляд; `types=a,b`, `suggested=0` (лише
+   * підтверджені), `tags=0` (без зв'язків із тегів), `limit`.
+   */
+  app.get('/api/projects/:id/story-graph', withRepo(async (repo, req, res) => {
+    const qs = req.query as Record<string, unknown>;
+    const project = await repo.getProject(req.params.id);
+    if (!project) {
+      res.json({ synced: false, focus: null, depth: 1, nodes: [], edges: [], truncated: false, totals: { entities: 0, edges: 0 } });
+      return;
+    }
+    const graph = await buildStoryGraph(repo, req.params.id, {
+      focus: typeof qs.focus === 'string' && qs.focus ? qs.focus : undefined,
+      depth: Number(qs.depth) || 1,
+      types: typeof qs.types === 'string' && qs.types ? qs.types.split(',').map((x) => x.trim()).filter(Boolean) : undefined,
+      includeSuggested: qs.suggested !== '0',
+      includeTagLinks: qs.tags !== '0',
+      limit: Number(qs.limit) || undefined,
+    });
+    res.json({ synced: true, canEdit: canEditStory(req.projectAccess!), ...graph });
+  }));
+
+  const requireStoryEdit = (req: Request, res: Response): boolean => {
+    if (canEditStory(req.projectAccess!)) return true;
+    res.status(403).json({ error: 'Змінювати зв\'язки можуть власник, співавтор, редактор і адміністратор.', kind: 'forbidden' });
+    return false;
+  };
+
+  /** Ручний зв'язок від автора (підтверджений одразу); джерела — абзаци книги, за бажанням. */
+  app.post('/api/projects/:id/relations', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const b = req.body ?? {};
+    const fromId = String(b.fromId ?? '');
+    const toId = String(b.toId ?? '');
+    if (!fromId || !toId || fromId === toId) {
+      res.status(400).json({ error: 'Потрібні дві різні сутності.', kind: 'bad_input' });
+      return;
+    }
+    const [from, to] = await Promise.all([repo.getEntity(req.params.id, fromId), repo.getEntity(req.params.id, toId)]);
+    if (!from || !to || from.status === 'rejected' || to.status === 'rejected') {
+      res.status(404).json({ error: 'Сутність не знайдено в цьому проєкті.', kind: 'not_found' });
+      return;
+    }
+    const evidenceIn = (Array.isArray(b.evidence) ? b.evidence : []).map(String).slice(0, 20);
+    const evidence = (await evidenceRefs(repo, req.params.id, evidenceIn)).map((e) => e.paragraphId);
+    if (evidence.length !== evidenceIn.length) {
+      res.status(400).json({ error: 'Абзаців-джерел немає в книзі.', kind: 'bad_input' });
+      return;
+    }
+    const existing = (await repo.listRelations(req.params.id, fromId)).find(
+      (r) => r.fromId === fromId && r.toId === toId && r.type === String(b.type) && r.status !== 'rejected',
+    );
+    if (existing) {
+      res.status(409).json({ error: 'Такий зв\'язок уже є.', kind: 'duplicate', relation: existing });
+      return;
+    }
+    const relation = await repo.createRelation({
+      projectId: req.params.id,
+      type: String(b.type ?? ''),
+      fromId,
+      toId,
+      evidence,
+      note: typeof b.note === 'string' ? b.note.slice(0, 1000) : '',
+      status: 'confirmed',
+      createdBy: `user:${req.projectAccess!.userId}`,
+    });
+    res.status(201).json({ relation });
+  }));
+
+  /** Підтвердити або відхилити зв'язок (зокрема запропонований ШІ). */
+  app.post('/api/projects/:id/relations/:relationId/status', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const status = req.body?.status;
+    if (status !== 'confirmed' && status !== 'rejected') {
+      res.status(400).json({ error: 'Статус — confirmed або rejected.', kind: 'bad_input' });
+      return;
+    }
+    const relation = await repo.setRelationStatus(
+      req.params.id,
+      req.params.relationId,
+      status,
+      `user:${req.projectAccess!.userId}`,
+      status === 'confirmed' ? 'підтверджено автором (граф історії)' : 'відхилено автором (граф історії)',
+    );
+    res.json({ relation });
   }));
 
   /** Зв'язки проєкту або однієї сутності (`?entityId=`). */
