@@ -25,6 +25,7 @@ import {
   type ParagraphInput,
   type RelationInput,
   type RunCreateInput,
+  type TimePointInput,
 } from './types';
 
 export type CoreRuleCode =
@@ -146,6 +147,16 @@ export function checkNewRelation(input: RelationInput): CoreStatus {
     throw new CoreRuleError('evidence_required', 'Зв\'язок від AI має посилатися хоча б на один абзац');
   }
   return status;
+}
+
+/** Точка часу (Т2.1): ті самі правила, що й CHECK у базі — щоб пам'ять і PostgreSQL не розійшлися. */
+export function checkTimePoint(p: TimePointInput): void {
+  assertActor(p.createdBy);
+  if (p.subjectKind !== 'scene' && p.subjectKind !== 'event') throw new CoreRuleError('bad_input', 'Час задається сцені або події');
+  if (!p.subjectId) throw new CoreRuleError('bad_input', 'Не вказано сцену чи подію');
+  if (!['exact', 'approximate', 'interval', 'unknown'].includes(p.kind)) throw new CoreRuleError('bad_input', 'Невідомий вид часу');
+  if (p.kind !== 'unknown' && (p.sortKey == null || !Number.isFinite(p.sortKey))) throw new CoreRuleError('bad_input', 'Точці часу потрібне значення');
+  if (p.kind === 'interval' && (p.endKey == null || p.endKey < (p.sortKey ?? 0))) throw new CoreRuleError('bad_input', 'Кінець інтервалу раніше за початок');
 }
 
 export function checkMention(m: MentionInput): void {

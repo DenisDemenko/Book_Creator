@@ -564,6 +564,16 @@ registerGitCommandRoutes(app);
       onEmbeddingsStale: (projectId) => void scheduleCoreEmbed(getCoreJobQueue(), projectId, 'system:search'),
       recordQueryCost: (u) => recordEmbeddingCost(u, 'Ядро: ембединг запиту пошуку'),
     },
+    // Порядок сцен у часі світу, якщо автор вів його в Студії (Scene.timelineOrder) — Т2.1.
+    sceneOrder: async (projectId) => {
+      const book = (await getStoredBookForRealtime(projectId))?.book as any;
+      const out = new Map<string, number>();
+      for (const ch of book?.chapters ?? []) for (const sec of ch.sections ?? []) {
+        const n = Number(sec?.scene?.timelineOrder);
+        if (sec?.id && Number.isFinite(n) && n > 0) out.set(sec.id, n);
+      }
+      return out;
+    },
     // Прототип FLC етапу 0 (Т1.6): Jev (TypeSafe) за ключем платформи чи TYPESAFE_API_KEY,
     // LLM — модель ролі AI-2 з «Ядра AI»; без ключа Jev — запасний шлях через LLM.
     flc: {

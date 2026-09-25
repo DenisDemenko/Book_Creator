@@ -22,6 +22,7 @@ import {
   normalizeAlias,
   notFound,
   paragraphTextHash,
+  checkTimePoint,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isSearchableKind, isValidEmbedding, memoryTextScore } from './search/text';
 import type {
@@ -46,6 +47,8 @@ import type {
   ParagraphRow,
   ParagraphScore,
   SavedSearchRow,
+  TimePointInput,
+  TimePointRow,
   ParagraphVersionRow,
   ProjectInput,
   ProjectRow,
@@ -81,6 +84,7 @@ export class MemoryCoreRepository implements CoreRepository {
   private notifications: NotificationRow[] = [];
   /** Ключ — проєкт, абзац, модель. */
   private savedSearches: SavedSearchRow[] = [];
+  private timePoints = new Map<string, TimePointRow>();
   private embeddings = new Map<string, { projectId: string; paragraphId: string; model: string; contentHash: string; vector: number[] }>();
 
   private requireProject(projectId: string): ProjectRow {
@@ -659,6 +663,42 @@ export class MemoryCoreRepository implements CoreRepository {
       }
     }
     return n;
+  }
+
+  // ── Хронологія (Т2.1) ────────────────────────────────────────────────────
+
+  async listTimePoints(projectId: string) {
+    return [...this.timePoints.values()].filter((p) => p.projectId === projectId).map(clone);
+  }
+
+  async upsertTimePoint(input: TimePointInput) {
+    this.requireProject(input.projectId);
+    checkTimePoint(input);
+    const k = `${input.projectId}\u0000${input.subjectKind}\u0000${input.subjectId}`;
+    const prev = this.timePoints.get(k);
+    const row: TimePointRow = {
+      id: prev?.id ?? randomUUID(),
+      projectId: input.projectId,
+      subjectKind: input.subjectKind,
+      subjectId: input.subjectId,
+      kind: input.kind,
+      start: input.start ?? null,
+      end: input.end ?? null,
+      sortKey: input.sortKey ?? null,
+      endKey: input.endKey ?? null,
+      label: input.label ?? '',
+      status: input.status ?? 'confirmed',
+      source: input.source ?? 'author',
+      evidence: [...(input.evidence ?? [])],
+      createdBy: input.createdBy,
+      updatedAt: now(),
+    };
+    this.timePoints.set(k, row);
+    return clone(row);
+  }
+
+  async deleteTimePoint(projectId: string, subjectKind: TimePointRow['subjectKind'], subjectId: string) {
+    return this.timePoints.delete(`${projectId}\u0000${subjectKind}\u0000${subjectId}`);
   }
 
   // ── Збережені запити (Т1.3) ──────────────────────────────────────────────

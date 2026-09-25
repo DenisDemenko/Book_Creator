@@ -25,6 +25,8 @@ import { buildStoryGraph, evidenceRefs } from './storyGraph';
 import { AI_PROFILE_JOB_KIND, PROFILE_FACT, buildCharacterProfile, type StudioCharacterLike } from './characterProfile';
 import type { EntityRow } from './types';
 import { runFlcCycle } from './flc/cycle';
+import { buildTimeline, characterKnowledge } from './timeline';
+import { normalizeStoryTime } from '../../src/utils/storyTime';
 import { LlmFallbackJevAdapter, type JevAdapter, type LlmJson } from './flc/jev';
 import { interpretSearchQuery, type SearchInterpretDeps, type SearchInterpretation } from './search/interpret';
 
@@ -84,6 +86,8 @@ export interface ProjectRoutesDeps {
   studio?: (projectId: string, entity: EntityRow) => Promise<{ character: StudioCharacterLike | null; all: StudioCharacterLike[] }>;
   /** Прототип FLC етапу 0 (Т1.6): адаптер Jev (null — ключа немає) і LLM. */
   flc?: { jev: () => Promise<JevAdapter | null>; llm: (projectId: string, actor: string) => LlmJson };
+  /** Порядок сцен у часі світу зі Студії (`Scene.timelineOrder`), Т2.1. */
+  sceneOrder?: (projectId: string) => Promise<Map<string, number>>;
 }
 
 /** Не більше стількох тлумачень запиту ШІ на користувача за хвилину — це платні виклики. */
@@ -660,6 +664,93 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       status === 'confirmed' ? 'підтверджено автором (профіль героя)' : 'відхилено автором (профіль героя)',
     );
     res.json({ finding });
+  }));
+
+  // ── Т2.1: хронологія ──────────────────────────────────────────────────────
+
+  const sceneOrder = async (projectId: string) => (deps.sceneOrder ? await deps.sceneOrder(projectId).catch(() => undefined) : undefined);
+
+  /** Дві шкали (порядок розкриття й час у світі), флешбеки, лінії, зв'язки часу й суперечності; фільтри `character`, `location`, `storyline`. */
+  app.get('/api/projects/:id/timeline', withRepo(async (repo, req, res) => {
+    const project = await repo.getProject(req.params.id);
+    if (!project) {
+      res.json({ synced: false, scenes: [], events: [], relations: [], warnings: [], lanes: [], filters: {} });
+      return;
+    }
+    const q = req.query as Record<string, unknown>;
+    const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
+    const timeline = await buildTimeline(repo, req.params.id, {
+      character: str(q.character),
+      location: str(q.location),
+      storyline: str(q.storyline),
+      studioOrder: await sceneOrder(req.params.id),
+    });
+    res.json({ synced: true, canEdit: canEditStory(req.projectAccess!), ...timeline });
+  }));
+
+  /** Задати час сцени чи події (автор, з підтвердженням в інтерфейсі). */
+  app.put('/api/projects/:id/timeline/points', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const b = req.body ?? {};
+    const subjectKind = b.subjectKind === 'scene' || b.subjectKind === 'event' ? b.subjectKind : null;
+    const subjectId = typeof b.subjectId === 'string' ? b.subjectId : '';
+    if (!subjectKind || !subjectId) {
+      res.status(400).json({ error: 'Потрібні сцена чи подія.', kind: 'bad_input' });
+      return;
+    }
+    if (subjectKind === 'scene') {
+      const doc = (await repo.listDocuments(req.params.id)).find((d) => d.id === subjectId && d.kind === 'section' && !d.deletedAt);
+      if (!doc) {
+        res.status(404).json({ error: 'Сцену не знайдено в книзі.', kind: 'not_found' });
+        return;
+      }
+    } else {
+      const e = await repo.getEntity(req.params.id, subjectId);
+      if (!e || e.status === 'rejected') {
+        res.status(404).json({ error: 'Подію не знайдено в книзі.', kind: 'not_found' });
+        return;
+      }
+    }
+    const v = normalizeStoryTime({ kind: b.kind, start: b.start, end: b.end, label: b.label });
+    if (typeof v === 'string') {
+      res.status(400).json({ error: v, kind: 'bad_input' });
+      return;
+    }
+    const point = await repo.upsertTimePoint({
+      projectId: req.params.id,
+      subjectKind,
+      subjectId,
+      kind: v.kind,
+      start: v.start,
+      end: v.end,
+      sortKey: v.key,
+      endKey: v.endKey,
+      label: v.label,
+      createdBy: `user:${req.projectAccess!.userId}`,
+    });
+    res.json({ point });
+  }));
+
+  app.delete('/api/projects/:id/timeline/points/:subjectKind/:subjectId', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const kind = req.params.subjectKind === 'scene' || req.params.subjectKind === 'event' ? req.params.subjectKind : null;
+    if (!kind || !(await repo.deleteTimePoint(req.params.id, kind, req.params.subjectId))) {
+      res.status(404).json({ error: 'Точки часу немає.', kind: 'not_found' });
+      return;
+    }
+    res.json({ ok: true });
+  }));
+
+  /** Що герой міг знати до сцени (ТЗ-H knowledge boundary). */
+  app.get('/api/projects/:id/timeline/knowledge', withRepo(async (repo, req, res) => {
+    const character = typeof req.query.character === 'string' ? req.query.character : '';
+    const scene = typeof req.query.scene === 'string' ? req.query.scene : '';
+    const k = character && scene ? await characterKnowledge(repo, req.params.id, character, scene, { studioOrder: await sceneOrder(req.params.id) }) : null;
+    if (!k) {
+      res.status(404).json({ error: 'Героя чи сцену не знайдено.', kind: 'not_found' });
+      return;
+    }
+    res.json(k);
   }));
 
   // ── Т1.6: прототип FLC етапу 0 (лише адміністратор) ──────────────────────

@@ -305,6 +305,32 @@ export interface FindingInput {
   createdBy: CoreActor;
 }
 
+/** Час сцени чи події у світі книги (Т2.1). */
+export interface TimePointRow {
+  id: string;
+  projectId: string;
+  subjectKind: 'scene' | 'event';
+  /** Сцена — id розділу книги; подія — id сутності. */
+  subjectId: string;
+  kind: 'exact' | 'approximate' | 'interval' | 'unknown';
+  start: string | null;
+  end: string | null;
+  sortKey: number | null;
+  endKey: number | null;
+  label: string;
+  status: CoreStatus;
+  source: 'author' | 'ai' | 'tag';
+  evidence: string[];
+  createdBy: CoreActor;
+  updatedAt: string;
+}
+
+export type TimePointInput = Omit<TimePointRow, 'id' | 'updatedAt' | 'status' | 'source' | 'evidence'> & {
+  status?: CoreStatus;
+  source?: TimePointRow['source'];
+  evidence?: string[];
+};
+
 /** Збережений пошуковий запит автора (Т1.3). */
 export interface SavedSearchRow {
   id: string;
@@ -422,6 +448,11 @@ export interface CoreRepository {
   upsertParagraphEmbeddings(projectId: string, model: string, rows: EmbeddingInput[]): Promise<number>;
   /** Прибирає вектори інших моделей і видалених абзаців; повертає кількість. */
   pruneParagraphEmbeddings(projectId: string, keepModel: string): Promise<number>;
+
+  /** Хронологія (Т2.1): точки часу сцен і подій. */
+  listTimePoints(projectId: string): Promise<TimePointRow[]>;
+  upsertTimePoint(input: TimePointInput): Promise<TimePointRow>;
+  deleteTimePoint(projectId: string, subjectKind: TimePointRow['subjectKind'], subjectId: string): Promise<boolean>;
 
   /** Збережені запити автора в книзі (Т1.3), новіші першими. */
   listSavedSearches(projectId: string, userId: string): Promise<SavedSearchRow[]>;

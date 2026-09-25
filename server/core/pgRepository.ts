@@ -23,6 +23,7 @@ import {
   normalizeAlias,
   notFound,
   paragraphTextHash,
+  checkTimePoint,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isValidEmbedding, SEARCHABLE_KINDS, tsQueryFromStems } from './search/text';
 import type {
@@ -47,6 +48,8 @@ import type {
   ParagraphRow,
   ParagraphScore,
   SavedSearchRow,
+  TimePointInput,
+  TimePointRow,
   ParagraphVersionRow,
   ProjectInput,
   ProjectRow,
@@ -73,6 +76,26 @@ const isoOrNull = (v: unknown): string | null => (v == null ? null : iso(v));
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Рядок, що не є UUID, у колонці `uuid` дав би помилку бази; для ядра це просто «не знайдено». */
 const isUuid = (v: unknown): v is string => typeof v === 'string' && UUID_RE.test(v);
+
+function toTimePoint(r: any): TimePointRow {
+  return {
+    id: r.id,
+    projectId: r.project_id,
+    subjectKind: r.subject_kind,
+    subjectId: r.subject_id,
+    kind: r.kind,
+    start: r.start_value,
+    end: r.end_value,
+    sortKey: r.sort_key == null ? null : Number(r.sort_key),
+    endKey: r.end_key == null ? null : Number(r.end_key),
+    label: r.label,
+    status: r.status,
+    source: r.source,
+    evidence: r.evidence ?? [],
+    createdBy: r.created_by,
+    updatedAt: iso(r.updated_at),
+  };
+}
 
 function toSavedSearch(r: any): SavedSearchRow {
   return {
@@ -984,6 +1007,39 @@ export class PgCoreRepository implements CoreRepository {
       [projectId, keepModel],
     );
     return res?.rowCount ?? 0;
+  }
+
+  // ── Хронологія (Т2.1) ────────────────────────────────────────────────────
+
+  async listTimePoints(projectId: string) {
+    const { rows } = await this.q('SELECT * FROM story_time_points WHERE project_id = $1 ORDER BY subject_kind, subject_id', [projectId]);
+    return rows.map(toTimePoint);
+  }
+
+  async upsertTimePoint(input: TimePointInput) {
+    checkTimePoint(input);
+    const { rows } = await this.q(
+      `INSERT INTO story_time_points
+         (project_id, subject_kind, subject_id, kind, start_value, end_value, sort_key, end_key, label, status, source, evidence, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       ON CONFLICT (project_id, subject_kind, subject_id) DO UPDATE SET
+         kind = excluded.kind, start_value = excluded.start_value, end_value = excluded.end_value,
+         sort_key = excluded.sort_key, end_key = excluded.end_key, label = excluded.label,
+         status = excluded.status, source = excluded.source, evidence = excluded.evidence,
+         created_by = excluded.created_by, updated_at = now()
+       RETURNING *`,
+      [
+        input.projectId, input.subjectKind, input.subjectId, input.kind, input.start ?? null, input.end ?? null,
+        input.sortKey ?? null, input.endKey ?? null, input.label ?? '', input.status ?? 'confirmed', input.source ?? 'author',
+        input.evidence ?? [], input.createdBy,
+      ],
+    );
+    return toTimePoint(rows[0]);
+  }
+
+  async deleteTimePoint(projectId: string, subjectKind: TimePointRow['subjectKind'], subjectId: string) {
+    const res = await this.q('DELETE FROM story_time_points WHERE project_id = $1 AND subject_kind = $2 AND subject_id = $3', [projectId, subjectKind, subjectId]);
+    return (res?.rowCount ?? 0) > 0;
   }
 
   // ── Збережені запити (Т1.3) ──────────────────────────────────────────────

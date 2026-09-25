@@ -17,6 +17,7 @@ import { corePageByTab } from '../utils/appRoutes';
 import { useLanguage } from '../i18n/LanguageContext';
 import { CoreSearchPage } from './CoreSearchPage';
 import { CharacterProfilePage } from './CharacterProfilePage';
+import { TimelinePage } from './TimelinePage';
 
 // Граф (Т1.4) тягне React Flow — вантажимо його лише на сторінці графа.
 const StoryGraphPage = lazy(() => import('./StoryGraphPage'));
@@ -194,7 +195,7 @@ export const CorePageView: React.FC<Props> = ({ tab, book, characterId, onOpenCh
         </div>
         <h1 className="text-2xl font-bold text-slate-100">{t(`header.nav.${tab}`)}</h1>
         <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-slate-400">{page.purposeUk}</p>
-        {tab !== 'core-search' && tab !== 'core-story-graph' && tab !== 'core-character' && (
+        {tab !== 'core-search' && tab !== 'core-story-graph' && tab !== 'core-character' && tab !== 'core-timeline' && (
           <p className="mt-2 text-xs text-slate-500">
             Сторінка з'явиться повністю на етапі {page.stage} дорожньої карти. Нижче — дані семантичного ядра цієї книги, на яких вона працюватиме.
           </p>
@@ -203,6 +204,9 @@ export const CorePageView: React.FC<Props> = ({ tab, book, characterId, onOpenCh
 
       {/* Сторінка 1 — «Розумний пошук» (Т1.3) — уже робоча. */}
       {tab === 'core-search' && <CoreSearchPage book={book} onOpenParagraph={(t) => onOpenParagraph?.(t)} />}
+
+      {/* Сторінка 6 — «Хронологія» (Т2.1). */}
+      {tab === 'core-timeline' && <TimelinePage book={book} onOpenParagraph={(t) => onOpenParagraph?.(t)} />}
 
       {/* Сторінка 2 — «Граф історії» (Т1.4). */}
       {tab === 'core-story-graph' && (
