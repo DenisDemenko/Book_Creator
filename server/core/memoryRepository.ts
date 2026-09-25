@@ -23,12 +23,14 @@ import {
   notFound,
   paragraphTextHash,
 } from './rules';
+import { EMBEDDING_DIMENSIONS, isSearchableKind, isValidEmbedding, memoryTextScore } from './search/text';
 import type {
   AliasRow,
   CoreActor,
   CoreRepository,
   CoreStatus,
   DocumentInput,
+  EmbeddingInput,
   DocumentRow,
   EntityInput,
   EntityPatch,
@@ -42,6 +44,7 @@ import type {
   NotificationRow,
   ParagraphInput,
   ParagraphRow,
+  ParagraphScore,
   ParagraphVersionRow,
   ProjectInput,
   ProjectRow,
@@ -75,6 +78,8 @@ export class MemoryCoreRepository implements CoreRepository {
   private findings = new Map<string, FindingRow>();
   private findingVersions = new Map<string, VersionRow<FindingRow>[]>();
   private notifications: NotificationRow[] = [];
+  /** Ключ — проєкт, абзац, модель. */
+  private embeddings = new Map<string, { projectId: string; paragraphId: string; model: string; contentHash: string; vector: number[] }>();
 
   private requireProject(projectId: string): ProjectRow {
     const p = this.projects.get(projectId);
@@ -348,9 +353,9 @@ export class MemoryCoreRepository implements CoreRepository {
     return clone(row);
   }
 
-  async listAliases(projectId: string, entityId: string) {
+  async listAliases(projectId: string, entityId?: string) {
     return [...this.aliases.values()]
-      .filter((a) => a.projectId === projectId && a.entityId === entityId)
+      .filter((a) => a.projectId === projectId && (entityId === undefined || a.entityId === entityId))
       .sort((x, y) => x.alias.localeCompare(y.alias))
       .map(clone);
   }
@@ -580,6 +585,73 @@ export class MemoryCoreRepository implements CoreRepository {
     return clone((this.findingVersions.get(id) ?? []).filter((v) => v.projectId === projectId));
   }
 
+  // ── Пошук (Т1.2) ─────────────────────────────────────────────────────────
+
+  /** Живий абзац живого розділу, у якому є текст. */
+  private searchable(p: ParagraphRow): boolean {
+    if (p.deletedAt || !isSearchableKind(p.kind)) return false;
+    const d = this.documents.get(key(p.projectId, p.documentId));
+    return !!d && !d.deletedAt;
+  }
+
+  async searchParagraphsByText(projectId: string, stems: string[], limit: number): Promise<ParagraphScore[]> {
+    if (!stems.length) return [];
+    const out: ParagraphScore[] = [];
+    for (const p of this.paragraphs.values()) {
+      if (p.projectId !== projectId || !this.searchable(p)) continue;
+      const score = memoryTextScore(p.text, stems);
+      if (score > 0) out.push({ paragraphId: p.id, score });
+    }
+    return out.sort((a, b) => b.score - a.score || a.paragraphId.localeCompare(b.paragraphId)).slice(0, limit);
+  }
+
+  async searchParagraphsByVector(projectId: string, model: string, vector: number[], limit: number): Promise<ParagraphScore[]> {
+    const out: ParagraphScore[] = [];
+    for (const e of this.embeddings.values()) {
+      if (e.projectId !== projectId || e.model !== model) continue;
+      const p = this.paragraphs.get(key(projectId, e.paragraphId));
+      if (!p || !this.searchable(p)) continue;
+      out.push({ paragraphId: e.paragraphId, score: cosine(vector, e.vector) });
+    }
+    return out.sort((a, b) => b.score - a.score || a.paragraphId.localeCompare(b.paragraphId)).slice(0, limit);
+  }
+
+  async listEmbeddingHashes(projectId: string, model: string) {
+    return [...this.embeddings.values()]
+      .filter((e) => e.projectId === projectId && e.model === model)
+      .map((e) => ({ paragraphId: e.paragraphId, contentHash: e.contentHash }));
+  }
+
+  async upsertParagraphEmbeddings(projectId: string, model: string, rows: EmbeddingInput[]) {
+    for (const r of rows) {
+      if (!isValidEmbedding(r.vector)) throw new CoreRuleError('bad_input', `Вектор має складатися з ${EMBEDDING_DIMENSIONS} скінченних чисел`);
+      if (!this.paragraphs.has(key(projectId, r.paragraphId))) throw notFound(`Абзац «${r.paragraphId}»`);
+    }
+    for (const r of rows) {
+      this.embeddings.set(`${key(projectId, r.paragraphId)}\u0000${model}`, {
+        projectId,
+        paragraphId: r.paragraphId,
+        model,
+        contentHash: r.contentHash,
+        vector: [...r.vector],
+      });
+    }
+    return rows.length;
+  }
+
+  async pruneParagraphEmbeddings(projectId: string, keepModel: string) {
+    let n = 0;
+    for (const [k, e] of this.embeddings) {
+      if (e.projectId !== projectId) continue;
+      const p = this.paragraphs.get(key(projectId, e.paragraphId));
+      if (e.model !== keepModel || !p || p.deletedAt) {
+        this.embeddings.delete(k);
+        n++;
+      }
+    }
+    return n;
+  }
+
   async addNotification(input: NotificationInput) {
     this.requireProject(input.projectId);
     const row: NotificationRow = {
@@ -606,4 +678,18 @@ export class MemoryCoreRepository implements CoreRepository {
   }
 
   async close() {}
+}
+
+/** Косинусна близькість; вектори з ембедера вже нормовані, але тест може дати й ненормовані. */
+function cosine(a: number[], b: number[]): number {
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  return na && nb ? dot / Math.sqrt(na * nb) : 0;
 }

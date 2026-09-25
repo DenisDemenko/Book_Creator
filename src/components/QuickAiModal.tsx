@@ -15,6 +15,7 @@ import {
   type CoreEntity,
 } from '../utils/coreEntities';
 import { ChatEntityPanel } from './ChatEntityPanel';
+import { EmbeddingModelSetting } from './EmbeddingModelSetting';
 import { usePersistentState } from '../hooks/usePersistentState';
 import { findSlashCandidate, matchCharacterBySlashCandidate, collectInsertablePatterns } from '../utils/slashTrigger';
 import {
@@ -1324,6 +1325,9 @@ export const CoreAiPanel: React.FC<{
       {header}
 
       <div className="flex-1 min-h-0 overflow-y-auto p-4">
+        {/* Модель ембедингів пошуку (Т1.2) — окреме від модулів налаштування:
+            її дефолт стосується лише семантичного пошуку, не інших функцій ШІ. */}
+        <EmbeddingModelSetting />
         <div className="flex flex-wrap gap-2 mb-4">
           {meta.modules.map((m) => (
             <button

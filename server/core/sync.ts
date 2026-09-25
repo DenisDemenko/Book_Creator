@@ -404,6 +404,12 @@ export async function syncBookToCore(
 export interface CoreSyncDeps {
   repo: () => CoreRepository | null;
   loadBook: (id: string) => Promise<StoredBookForSync | null>;
+  /**
+   * Після синхронізації, у якій з'явились нові чи змінені абзаци: так
+   * server.ts ставить `core_embed` (Т1.2) — вектори лише цих абзаців.
+   * Збій тут не робить синхронізацію невдалою.
+   */
+  afterTextChanged?: (projectId: string, changedParagraphs: number) => Promise<unknown> | void;
 }
 
 /** Опис виду задачі `core_sync` для `JobQueue.register`. */
@@ -419,10 +425,19 @@ export function coreSyncJobKind(deps: CoreSyncDeps) {
       if (!repo) throw new Error('Ядро недоступне');
       const stored = await deps.loadBook(ctx.job.projectId);
       if (!stored) return { projectId: ctx.job.projectId, skipped: 'no_book' };
-      return syncBookToCore(repo, stored, {
+      const result = await syncBookToCore(repo, stored, {
         checkpoint: () => ctx.checkpoint(),
         progress: (done, total) => ctx.setProgress({ done, total, step: 'sections' }),
       });
+      const changed = result.paragraphs.created + result.paragraphs.changed;
+      if (changed > 0 && deps.afterTextChanged) {
+        try {
+          await deps.afterTextChanged(ctx.job.projectId, changed);
+        } catch (err) {
+          console.warn(`[core] після синхронізації ${ctx.job.projectId}: ${(err as Error).message}`);
+        }
+      }
+      return result;
     },
   };
 }

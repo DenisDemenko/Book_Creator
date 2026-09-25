@@ -20,6 +20,7 @@ import type { CoreRepository, FindingRow } from './types';
 import { JobRejectedError } from './jobs/types';
 import type { JobQueue } from './jobs/queue';
 import { AI_MENTIONS_JOB_KIND, MENTION_SUGGESTION, RELATION_SUGGESTION, publicSuggestion } from './ai/mentions';
+import { hybridSearch, type SearchDeps } from './search/service';
 
 export interface ProjectAccess {
   projectId: string;
@@ -69,6 +70,8 @@ export interface ProjectRoutesDeps {
   lastSync?: (projectId: string) => Promise<{ status: string; finishedAt: string | null } | null>;
   /** Черга ядра (Т0.7) — для запуску AI-1 з інтерфейсу (Т1.1). */
   queue?: () => JobQueue | null;
+  /** Пошук за змістом (Т1.2): ембедер, модель ембедингів, дозапуск `core_embed`. */
+  search?: Omit<SearchDeps, 'repo'>;
 }
 
 export function requireProjectAccess(deps: Pick<ProjectRoutesDeps, 'access'>) {
@@ -332,6 +335,40 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
     await repo.setFindingStatus(req.params.id, f.id, 'rejected', `user:${req.projectAccess!.userId}`, 'відхилено автором');
     res.json({ ok: true });
   }));
+
+  // ── Т1.2: гібридний пошук ────────────────────────────────────────────────
+
+  /**
+   * Пошук абзаців книги: слова + зміст + граф сутностей, з поясненням джерела
+   * в кожного результату. GET `?q=&entityIds=a,b&limit=` або POST з тим самим
+   * тілом. Читати може кожен учасник книги (право перевірено вище).
+   */
+  const search = withRepo(async (repo, req, res) => {
+    const src = req.method === 'GET' ? req.query : (req.body ?? {});
+    const rawIds = (src as any).entityIds;
+    const entityIds = (Array.isArray(rawIds) ? rawIds : typeof rawIds === 'string' ? rawIds.split(',') : [])
+      .map((x: unknown) => String(x).trim())
+      .filter(Boolean)
+      .slice(0, 10);
+    const query = typeof (src as any).q === 'string' ? (src as any).q : typeof (src as any).query === 'string' ? (src as any).query : '';
+    if (!query.trim() && !entityIds.length) {
+      res.status(400).json({ error: 'Порожній запит: введіть слова або оберіть сутність.', kind: 'bad_input' });
+      return;
+    }
+    const project = await repo.getProject(req.params.id);
+    if (!project) {
+      res.json({ query, synced: false, stems: [], entities: [], results: [], sources: null });
+      return;
+    }
+    const out = await hybridSearch({ repo, ...(deps.search ?? {}) }, req.params.id, {
+      query,
+      entityIds,
+      limit: Number((src as any).limit) || undefined,
+    });
+    res.json({ synced: true, revision: project.revision, ...out });
+  });
+  app.get('/api/projects/:id/search', search);
+  app.post('/api/projects/:id/search', search);
 
   /** Зв'язки проєкту або однієї сутності (`?entityId=`). */
   app.get('/api/projects/:id/relations', withRepo(async (repo, req, res) => {

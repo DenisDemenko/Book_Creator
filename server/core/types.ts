@@ -305,6 +305,20 @@ export interface FindingInput {
   createdBy: CoreActor;
 }
 
+/** Вектор абзацу для пошуку за змістом (Т1.2). */
+export interface EmbeddingInput {
+  paragraphId: string;
+  /** Відбиток «модель + текст без тегів» (`search/text.ts::embeddingContentHash`). */
+  contentHash: string;
+  vector: number[];
+}
+
+/** Абзац у видачі одного з джерел пошуку: чим більше `score`, тим ближче. */
+export interface ParagraphScore {
+  paragraphId: string;
+  score: number;
+}
+
 export interface UpsertParagraphResult {
   row: ParagraphRow;
   /** true — з'явилась нова версія тексту (або абзац новий). */
@@ -356,7 +370,8 @@ export interface CoreRepository {
   addAlias(projectId: string, entityId: string, alias: string, kind?: AliasRow['kind']): Promise<AliasRow>;
   /** Сутність за псевдонімом у межах типу (регістр і зайві пробіли не важать). */
   resolveAlias(projectId: string, type: string, alias: string): Promise<string | null>;
-  listAliases(projectId: string, entityId: string): Promise<AliasRow[]>;
+  /** Псевдоніми сутності, а без `entityId` — усі псевдоніми проєкту (для розпізнавання імен у запиті, Т1.2). */
+  listAliases(projectId: string, entityId?: string): Promise<AliasRow[]>;
 
   /** Замінює всі згадки абзацу одним рухом (так їх перераховує синхронізація). */
   replaceParagraphMentions(projectId: string, paragraphId: string, mentions: MentionInput[]): Promise<MentionRow[]>;
@@ -381,6 +396,20 @@ export interface CoreRepository {
   markFindingsNeedReview(projectId: string, paragraphIds: string[]): Promise<number>;
   listFindings(projectId: string, filter?: { entityId?: string; status?: CoreStatus }): Promise<FindingRow[]>;
   listFindingVersions(projectId: string, id: string): Promise<VersionRow<FindingRow>[]>;
+
+  // ── Пошук (Т1.2) ── усі методи бачать лише живі абзаци живих розділів,
+  // із текстом (без роздільників і картинок).
+
+  /** Пошук за словами: будь-яка з основ (`search/text.ts::searchStems`) як префікс слова. */
+  searchParagraphsByText(projectId: string, stems: string[], limit: number): Promise<ParagraphScore[]>;
+  /** Пошук за змістом: косинусна близькість до вектора запиту, лише вектори цієї моделі. */
+  searchParagraphsByVector(projectId: string, model: string, vector: number[], limit: number): Promise<ParagraphScore[]>;
+  /** Які абзаци вже мають вектор цієї моделі і від якого тексту він пораховний. */
+  listEmbeddingHashes(projectId: string, model: string): Promise<{ paragraphId: string; contentHash: string }[]>;
+  /** Записує (або замінює) вектори абзаців; повертає кількість. */
+  upsertParagraphEmbeddings(projectId: string, model: string, rows: EmbeddingInput[]): Promise<number>;
+  /** Прибирає вектори інших моделей і видалених абзаців; повертає кількість. */
+  pruneParagraphEmbeddings(projectId: string, keepModel: string): Promise<number>;
 
   addNotification(input: NotificationInput): Promise<NotificationRow>;
   listNotifications(projectId: string, limit?: number): Promise<NotificationRow[]>;

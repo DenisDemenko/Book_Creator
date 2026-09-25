@@ -201,6 +201,15 @@ import { CORE_SYNC_KIND, coreSyncJobKind } from './server/core/sync';
 import { AI_ROLE_JOB_KIND, aiRoleJobKind } from './server/core/ai/job';
 import { AI_MENTIONS_JOB_KIND, aiMentionsJobKind } from './server/core/ai/mentions';
 import { aiRoleGenerateViaCore, loadCoreAiRoleTemplate } from './server/core/ai/generate';
+import { CORE_EMBED_KIND, coreEmbedJobKind, scheduleCoreEmbed } from './server/core/search/embedJob';
+import { platformEmbedder, recordEmbeddingCost, embeddingKeyFor } from './server/core/search/platform';
+import {
+  DEFAULT_EMBEDDING_MODEL,
+  EMBEDDING_MODELS,
+  isEmbeddingModel,
+  readEmbeddingModel,
+  setEmbeddingModel,
+} from './server/core/search/embeddingModels';
 import { purgeExpiredSessions, initStore, getUserStyle, upsertUserStyle, deleteUserStyle, listUserApiKeys, getUserPromptTemplates, upsertUserPromptTemplates, deleteUserPromptTemplates, getAppSetting, setAppSetting } from './server/store';
 
 // Логування витрат (logImageUsage/logTextUsage) переїхало в server/aiCore.ts —
@@ -541,6 +550,18 @@ registerGitCommandRoutes(app);
     repo: getCoreRepository,
     coreState: () => getCoreStatus().state,
     queue: getCoreJobQueue,
+    // Гібридний пошук (Т1.2): смислова частина — модель ембедингів, яку обрав
+    // адмін (типово gemini-embedding-001, див. server/core/search/embeddingModels.ts).
+    search: {
+      embedder: platformEmbedder,
+      model: readEmbeddingModel,
+      available: async (model) => {
+        const info = EMBEDDING_MODELS.find((m) => m.id === model);
+        return !!info && !!(await embeddingKeyFor(info.engine));
+      },
+      onEmbeddingsStale: (projectId) => void scheduleCoreEmbed(getCoreJobQueue(), projectId, 'system:search'),
+      recordQueryCost: (u) => recordEmbeddingCost(u, 'Ядро: ембединг запиту пошуку'),
+    },
     lastSync: async (projectId) => {
       const jobs = (await getCoreJobQueue()?.store.list(projectId, { kind: CORE_SYNC_KIND, limit: 10 })) ?? [];
       const last = jobs.find((j) => j.status === 'succeeded' || j.status === 'failed');
@@ -3243,6 +3264,38 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
    */
   app.get('/api/ai/core-module-models', requireAdmin, async (_req, res) => {
     res.json({ models: await readCoreModuleModels(), modules: CORE_MODULE_KEYS });
+  });
+
+  /**
+   * Модель ембедингів для СЕМАНТИЧНОГО ПОШУКУ (Т1.2). Окреме налаштування:
+   * дефолт тут (gemini-embedding-001) діє лише для ембедингів пошуку, а не для
+   * інших функцій ШІ — у тих свої моделі (див. core-module-models вище).
+   */
+  app.get('/api/ai/core-embedding-model', requireAdmin, async (_req, res) => {
+    const current = await readEmbeddingModel();
+    const models = await Promise.all(
+      EMBEDDING_MODELS.map(async (m) => ({
+        id: m.id,
+        label: m.label,
+        provider: m.provider,
+        usdPerMTokens: m.usdPerMTokens,
+        note: m.note ?? null,
+        available: !!(await embeddingKeyFor(m.engine)),
+      })),
+    );
+    res.json({ modelId: current, defaultModelId: DEFAULT_EMBEDDING_MODEL, models });
+  });
+
+  app.put('/api/ai/core-embedding-model', requireAdmin, async (req, res) => {
+    const { modelId } = req.body || {};
+    if (modelId !== null && modelId !== undefined && modelId !== '' && !isEmbeddingModel(modelId)) {
+      return res.status(400).json({ error: `Невідома модель ембедингів: ${modelId}`, kind: 'bad_input' });
+    }
+    const current = await setEmbeddingModel(typeof modelId === 'string' ? modelId : null);
+    // Вектори старої моделі з новою не порівнюються: книги переобчислюються
+    // фоновою задачею core_embed, коли їх уперше шукатимуть (або після
+    // наступного збереження). Доти пошук іде за словами й сутностями.
+    res.json({ modelId: current, defaultModelId: DEFAULT_EMBEDDING_MODEL });
   });
 
   app.put('/api/ai/core-module-models', requireAdmin, async (req, res) => {
@@ -5998,7 +6051,25 @@ ${JSON.stringify(bookContext || {}, null, 2)}
   // Студії, а збій бази ядра не валить решту застосунку (стан — у /api/health).
   // Синхронізація книги з ядром (Т0.6) — фонова задача, яку ставить
   // збереження книги (server/bookRoutes.ts).
-  registerCoreJobKind(CORE_SYNC_KIND, coreSyncJobKind({ repo: getCoreRepository, loadBook: getStoredBookForRealtime }));
+  registerCoreJobKind(
+    CORE_SYNC_KIND,
+    coreSyncJobKind({
+      repo: getCoreRepository,
+      loadBook: getStoredBookForRealtime,
+      // Нові чи змінені абзаци → вектори для пошуку за змістом (Т1.2), лише для них.
+      afterTextChanged: (projectId) => scheduleCoreEmbed(getCoreJobQueue(), projectId, 'system:core_sync'),
+    }),
+  );
+  // Ембединги абзаців для гібридного пошуку (Т1.2).
+  registerCoreJobKind(
+    CORE_EMBED_KIND,
+    coreEmbedJobKind({
+      repo: getCoreRepository,
+      embedder: platformEmbedder,
+      model: readEmbeddingModel,
+      recordCost: (u) => recordEmbeddingCost(u, 'Ядро: ембединги пошуку'),
+    }),
+  );
   // Три ролі AI ядра (Т0.9): прогін ролі над абзацами — фоновою задачею з
   // бюджетом проєкту; модель кожної ролі — з прив'язки «модуль → модель» адміна.
   // AI-1: пропоновані згадки й зв'язки (Т1.1) — запускає автор кнопкою в панелі сутностей.

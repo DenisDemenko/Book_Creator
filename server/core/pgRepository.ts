@@ -24,12 +24,14 @@ import {
   notFound,
   paragraphTextHash,
 } from './rules';
+import { EMBEDDING_DIMENSIONS, isValidEmbedding, SEARCHABLE_KINDS, tsQueryFromStems } from './search/text';
 import type {
   AliasRow,
   CoreActor,
   CoreRepository,
   CoreStatus,
   DocumentInput,
+  EmbeddingInput,
   DocumentRow,
   EntityInput,
   EntityPatch,
@@ -43,6 +45,7 @@ import type {
   NotificationRow,
   ParagraphInput,
   ParagraphRow,
+  ParagraphScore,
   ParagraphVersionRow,
   ProjectInput,
   ProjectRow,
@@ -55,6 +58,14 @@ import type {
 } from './types';
 
 type Q = Pool | PoolClient;
+
+/** Вектор у текстовому вигляді pgvector: `[0.1,0.2,…]`. Нечислове значення — помилка вхідних даних, не бази. */
+function vectorLiteral(v: number[]): string {
+  if (!isValidEmbedding(v)) {
+    throw new CoreRuleError('bad_input', `Вектор має складатися з ${EMBEDDING_DIMENSIONS} скінченних чисел`);
+  }
+  return `[${v.join(',')}]`;
+}
 
 const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : String(v));
 const isoOrNull = (v: unknown): string | null => (v == null ? null : iso(v));
@@ -599,7 +610,11 @@ export class PgCoreRepository implements CoreRepository {
     });
   }
 
-  async listAliases(projectId: string, entityId: string) {
+  async listAliases(projectId: string, entityId?: string) {
+    if (entityId === undefined) {
+      const { rows } = await this.q('SELECT * FROM entity_aliases WHERE project_id = $1 ORDER BY alias', [projectId]);
+      return rows.map(toAlias);
+    }
     if (!isUuid(entityId)) return [];
     const { rows } = await this.q('SELECT * FROM entity_aliases WHERE project_id = $1 AND entity_id = $2 ORDER BY alias', [
       projectId,
@@ -882,6 +897,70 @@ export class PgCoreRepository implements CoreRepository {
       [projectId, id],
     );
     return rows.map((r: any) => toVersion<FindingRow>(r, 'finding_id'));
+  }
+
+  // ── Пошук (Т1.2) ─────────────────────────────────────────────────────────
+  // Лише живі абзаци живих розділів, із текстом — та сама умова, що в пам'яті.
+
+  async searchParagraphsByText(projectId: string, stems: string[], limit: number): Promise<ParagraphScore[]> {
+    if (!stems.length) return [];
+    const { rows } = await this.q(
+      `SELECT p.id, ts_rank(p.search_tsv, q) AS score
+       FROM paragraphs p
+       JOIN documents d ON d.project_id = p.project_id AND d.id = p.document_id AND d.deleted_at IS NULL,
+            to_tsquery('simple', $2) q
+       WHERE p.project_id = $1 AND p.deleted_at IS NULL AND p.kind = ANY($3::text[]) AND p.search_tsv @@ q
+       ORDER BY score DESC, p.id
+       LIMIT $4`,
+      [projectId, tsQueryFromStems(stems), SEARCHABLE_KINDS, limit],
+    );
+    return rows.map((r: any) => ({ paragraphId: r.id, score: Number(r.score) }));
+  }
+
+  async searchParagraphsByVector(projectId: string, model: string, vector: number[], limit: number): Promise<ParagraphScore[]> {
+    const { rows } = await this.q(
+      `SELECT e.paragraph_id, 1 - (e.embedding <=> $3::vector) AS score
+       FROM paragraph_embeddings e
+       JOIN paragraphs p ON p.project_id = e.project_id AND p.id = e.paragraph_id AND p.deleted_at IS NULL
+       JOIN documents d ON d.project_id = p.project_id AND d.id = p.document_id AND d.deleted_at IS NULL
+       WHERE e.project_id = $1 AND e.model = $2 AND p.kind = ANY($4::text[])
+       ORDER BY e.embedding <=> $3::vector, e.paragraph_id
+       LIMIT $5`,
+      [projectId, model, vectorLiteral(vector), SEARCHABLE_KINDS, limit],
+    );
+    return rows.map((r: any) => ({ paragraphId: r.paragraph_id, score: Number(r.score) }));
+  }
+
+  async listEmbeddingHashes(projectId: string, model: string) {
+    const { rows } = await this.q(
+      'SELECT paragraph_id, content_hash FROM paragraph_embeddings WHERE project_id = $1 AND model = $2',
+      [projectId, model],
+    );
+    return rows.map((r: any) => ({ paragraphId: r.paragraph_id as string, contentHash: r.content_hash as string }));
+  }
+
+  async upsertParagraphEmbeddings(projectId: string, model: string, rows: EmbeddingInput[]) {
+    if (!rows.length) return 0;
+    await this.q(
+      `INSERT INTO paragraph_embeddings (project_id, paragraph_id, model, content_hash, embedding)
+       SELECT $1, u.pid, $2, u.hash, u.vec::vector
+       FROM unnest($3::text[], $4::text[], $5::text[]) AS u(pid, hash, vec)
+       ON CONFLICT (project_id, paragraph_id, model)
+       DO UPDATE SET content_hash = excluded.content_hash, embedding = excluded.embedding, updated_at = now()`,
+      [projectId, model, rows.map((r) => r.paragraphId), rows.map((r) => r.contentHash), rows.map((r) => vectorLiteral(r.vector))],
+    );
+    return rows.length;
+  }
+
+  async pruneParagraphEmbeddings(projectId: string, keepModel: string) {
+    const res = await this.q(
+      `DELETE FROM paragraph_embeddings e
+       USING paragraphs p
+       WHERE e.project_id = $1 AND p.project_id = e.project_id AND p.id = e.paragraph_id
+         AND (e.model <> $2 OR p.deleted_at IS NOT NULL)`,
+      [projectId, keepModel],
+    );
+    return res?.rowCount ?? 0;
   }
 
   async addNotification(input: NotificationInput): Promise<NotificationRow> {
