@@ -585,6 +585,20 @@ registerGitCommandRoutes(app);
     // Порядок сцен у часі світу, якщо автор вів його в Студії (Scene.timelineOrder) — Т2.1.
     // Бібліотека ілюстрацій (Т2.3 В4): що з Медіатеки може бачити AI-3.
     visualImage: loadVisualImage,
+    // Генерація від сутності (Т2.3 В6): ті самі право й квота, що в Медіатеці;
+    // референси — файли Медіатеки (свої чи власника книги), публічною копією для моделі.
+    visualGeneration: {
+      guards: [requirePermission('canGenerateImages'), requireImageQuota()],
+      maxReferences: MAX_REFERENCE_IMAGES,
+      referenceUrl: async (req, projectId, assetUrl, actor) => {
+        const img = await loadVisualImage(projectId, assetUrl, actor);
+        if (!img) return null;
+        const saved = await saveGeneratedImage(Buffer.from(img.data, 'base64'), img.mimeType, 'ref');
+        const baseUrl = process.env.APP_URL?.replace(/\/$/, '') || `${req.protocol}://${req.get('host')}`;
+        return `${baseUrl}${saved.url}`;
+      },
+      start: async (req, { onGenerated, ...p }) => startMediaArtJob(req, p, onGenerated),
+    },
     sceneOrder: async (projectId) => {
       const book = (await getStoredBookForRealtime(projectId))?.book as any;
       const out = new Map<string, number>();
@@ -4164,9 +4178,14 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
       aspectRatio: string;
       fileSize: string;
       timestamp: string;
+      /** Т2.3 В6: зв'язок із сутністю, якщо генерували від сутності. */
+      link?: unknown;
+      linkError?: string;
     };
     error?: { message: string; kind: string; status: number };
     createdAt: number;
+    /** Хто поставив задачу — статус бачить лише він. */
+    ownerId?: string;
   }
   const mediaArtJobs = new Map<string, MediaArtJobRecord>();
   // Той самий запас, що й у відео (VIDEO_JOB_TTL_MS) — ~2х над найдовшим
@@ -4178,6 +4197,81 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
       if (now - job.createdAt > MEDIA_ART_JOB_TTL_MS) mediaArtJobs.delete(id);
     }
   };
+
+  /**
+   * Фонова генерація зображення з записом у `mediaArtJobs` — спільна для
+   * Медіатеки (`/api/ai/generate-media-art`) і генерації від сутності
+   * (Т2.3 В6, `/api/projects/:id/visual/generate`). `onGenerated` — дія після
+   * успіху (прив'язати до сутності); її результат іде в статус задачі як
+   * `link`, а збій — як `linkError`: зображення вже оплачене й лежить у
+   * Медіатеці, тож задача однаково «complete».
+   */
+  function startMediaArtJob(
+    req: any,
+    p: {
+      prompt: string;
+      engine?: string;
+      aspectRatio?: string;
+      imageSize?: string;
+      negativePrompt?: string;
+      quality?: any;
+      outputFormat?: any;
+      referenceImageUrls?: string[];
+      filenameHint: string;
+      label: string;
+      bookId?: string;
+    },
+    onGenerated?: (url: string) => Promise<unknown>,
+  ): string {
+    pruneMediaArtJobs();
+    const jobId = `imgjob_${randomUUID()}`;
+    const ownerId = req?.principal?.id ? String(req.principal.id) : undefined;
+    mediaArtJobs.set(jobId, { status: 'pending', createdAt: Date.now(), ownerId });
+    // СВІДОМО без await — той самий фікс, що й у /api/ai/generate-video
+    // (задача #210): запит повертається негайно, очікування Leonardo
+    // (могло тривати довше за тайм-аут проксі) триває у фоні процесу.
+    generateImageAndLog({ ...p, req, aspectRatio: p.aspectRatio ?? '1:1' })
+      .then(async (generated) => {
+        let link: unknown;
+        let linkError: string | undefined;
+        if (onGenerated) {
+          try {
+            link = await onGenerated(generated.url);
+          } catch (err: any) {
+            console.error('[media-art] зображення готове, але прив\'язати не вдалося:', err?.message || err);
+            linkError = err?.message || 'Не вдалося прив\'язати зображення до сутності.';
+          }
+        }
+        mediaArtJobs.set(jobId, {
+          status: 'complete',
+          createdAt: mediaArtJobs.get(jobId)?.createdAt ?? Date.now(),
+          ownerId,
+          result: {
+            imageUrl: generated.url,
+            promptUsed: p.prompt,
+            negativePrompt: p.negativePrompt || undefined,
+            modelUsed: generated.engineLabel,
+            modelKey: generated.engineId,
+            aspectRatio: generated.aspectRatio,
+            fileSize: `${Math.round(generated.bytes / 1024)} КБ`,
+            timestamp: new Date().toISOString(),
+            ...(onGenerated ? { link: link ?? null, linkError } : {}),
+          },
+        });
+      })
+      .catch((err: any) => {
+        const status = err?.kind === 'no_key' ? 503 : err?.kind === 'quota' ? 429 : 500;
+        if (err?.cause) console.error('  причина:', (err.cause as Error)?.message || err.cause);
+        console.error('Error in media-art job (фонова задача):', err?.message || err);
+        mediaArtJobs.set(jobId, {
+          status: 'error',
+          createdAt: mediaArtJobs.get(jobId)?.createdAt ?? Date.now(),
+          ownerId,
+          error: { message: err?.message || 'Помилка генерації зображення', kind: err?.kind || 'unknown', status },
+        });
+      });
+    return jobId;
+  }
 
   /**
    * Пряма генерація для медіатеки: жодного авто-складання промпту зі
@@ -4265,13 +4359,7 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
         referenceImageUrls = urls;
       }
 
-      const jobId = `imgjob_${randomUUID()}`;
-      mediaArtJobs.set(jobId, { status: 'pending', createdAt: Date.now() });
-
-      // СВІДОМО без await — той самий фікс, що й у /api/ai/generate-video
-      // (задача #210): запит повертається негайно, очікування Leonardo
-      // (могло тривати довше за тайм-аут проксі) триває у фоні процесу.
-      generateImageAndLog({
+      const jobId = startMediaArtJob(req, {
         prompt: finalPrompt,
         engine,
         aspectRatio,
@@ -4281,36 +4369,9 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
         outputFormat,
         referenceImageUrls,
         filenameHint: 'media',
-        req,
         label: `Медіатека: ${finalPrompt.slice(0, 60)}`,
         bookId,
-      })
-        .then((generated) => {
-          mediaArtJobs.set(jobId, {
-            status: 'complete',
-            createdAt: mediaArtJobs.get(jobId)?.createdAt ?? Date.now(),
-            result: {
-              imageUrl: generated.url,
-              promptUsed: finalPrompt,
-              negativePrompt: negativePrompt || undefined,
-              modelUsed: generated.engineLabel,
-              modelKey: generated.engineId,
-              aspectRatio: generated.aspectRatio,
-              fileSize: `${Math.round(generated.bytes / 1024)} КБ`,
-              timestamp: new Date().toISOString(),
-            },
-          });
-        })
-        .catch((err: any) => {
-          const status = err?.kind === 'no_key' ? 503 : err?.kind === 'quota' ? 429 : 500;
-          if (err?.cause) console.error('  причина:', (err.cause as Error)?.message || err.cause);
-          console.error('Error in /api/ai/generate-media-art (фонова задача):', err?.message || err);
-          mediaArtJobs.set(jobId, {
-            status: 'error',
-            createdAt: mediaArtJobs.get(jobId)?.createdAt ?? Date.now(),
-            error: { message: err?.message || 'Помилка генерації зображення', kind: err?.kind || 'unknown', status },
-          });
-        });
+      });
 
       res.status(202).json({ jobId });
     } catch (err: any) {
@@ -4331,7 +4392,8 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
   app.get('/api/ai/generate-media-art/status/:jobId', requirePermission('canGenerateImages'), (req, res) => {
     pruneMediaArtJobs();
     const job = mediaArtJobs.get(req.params.jobId);
-    if (!job) {
+    const me = (req as any).principal?.id ? String((req as any).principal.id) : undefined;
+    if (!job || (job.ownerId && job.ownerId !== me)) {
       return res.status(404).json({ error: 'Завдання генерації зображення не знайдено або застаріло.', kind: 'unknown' });
     }
     const elapsedSec = Math.round((Date.now() - job.createdAt) / 1000);

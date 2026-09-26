@@ -11,9 +11,10 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Check, History, ImagePlus, Loader2, Pencil, Plus, Trash2, UserRound, X } from 'lucide-react';
+import { AlertTriangle, Check, History, ImagePlus, Loader2, Pencil, Plus, Sparkles, Trash2, UserRound, X } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext';
 import { PickFromMediaLibraryModal } from './PickFromMediaLibraryModal';
+import { GenerateFromEntityModal } from './GenerateFromEntityModal';
 
 interface VersionView {
   id: string;
@@ -81,6 +82,8 @@ export const AppearanceVersionsPanel: React.FC<Props> = ({ bookId, entityId, upt
   const [note, setNote] = useState<string | null>(null);
   const [pickFor, setPickFor] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  /** Т2.3 В6: вікно генерації — за карткою героя (versionId null) чи за версією. */
+  const [genFor, setGenFor] = useState<{ versionId: string | null } | null>(null);
   const seq = useRef(0);
 
   const load = useCallback(async () => {
@@ -286,6 +289,11 @@ export const AppearanceVersionsPanel: React.FC<Props> = ({ bookId, entityId, upt
             <p className="text-[12px] font-bold text-slate-100">{t('visualLibrary.avBase')}</p>
             <p className="text-[10px] text-slate-500">{data.upto ? t('visualLibrary.avBaseHidden') : t('visualLibrary.avBaseHint')}</p>
             {data.base.description && <p className="mt-1 break-words text-[11px] text-slate-300">{data.base.description}</p>}
+            {data.canEdit && !data.upto && (
+              <button type="button" disabled={busy} onClick={() => setGenFor({ versionId: null })} data-av-generate="base" title={t('visualLibrary.genButtonHint')} className="mt-1.5 flex items-center gap-1 rounded border border-violet-500/50 px-1.5 py-0.5 text-[10px] text-violet-200 hover:bg-violet-500/10">
+                <Sparkles className="h-3 w-3" /> {t('visualLibrary.genButton')}
+              </button>
+            )}
           </div>
         </div>
 
@@ -324,6 +332,11 @@ export const AppearanceVersionsPanel: React.FC<Props> = ({ bookId, entityId, upt
                         <X className="h-3 w-3" />
                       </button>
                     )}
+                    {v.approved && (
+                      <button type="button" disabled={busy} onClick={() => setGenFor({ versionId: v.id })} data-av-generate={v.id} title={t('visualLibrary.genButtonHint')} className="flex items-center gap-1 rounded border border-violet-500/50 px-1.5 py-0.5 text-[10px] text-violet-200 hover:bg-violet-500/10">
+                        <Sparkles className="h-3 w-3" /> {t('visualLibrary.genButton')}
+                      </button>
+                    )}
                     <button type="button" disabled={busy} onClick={() => startEdit(v)} data-av-edit={v.id} className="flex items-center gap-1 rounded border border-slate-700 px-1.5 py-0.5 text-[10px] text-slate-200 hover:border-sky-500">
                       <Pencil className="h-3 w-3" /> {t('visualLibrary.avEdit')}
                     </button>
@@ -360,6 +373,19 @@ export const AppearanceVersionsPanel: React.FC<Props> = ({ bookId, entityId, upt
             ))}
           </ul>
         </details>
+      )}
+
+      {genFor && (
+        <GenerateFromEntityModal
+          bookId={bookId}
+          entityId={entityId}
+          versionId={genFor.versionId}
+          onClose={() => setGenFor(null)}
+          onDone={() => {
+            void load();
+            onChanged?.();
+          }}
+        />
       )}
 
       {pickFor && (

@@ -13,7 +13,7 @@
  * власнику й адміністратору, `project` — усім учасникам.
  */
 
-import type { Express, NextFunction, Request, Response } from 'express';
+import type { Express, NextFunction, Request, RequestHandler, Response } from 'express';
 import { isValidBookId, type RealtimeAccessDeps } from '../realtimeAuth';
 import { CoreRuleError } from './rules';
 import type { CoreRepository, FindingRow } from './types';
@@ -29,6 +29,16 @@ import { buildTimeline, characterKnowledge } from './timeline';
 import { normalizeStoryTime } from '../../src/utils/storyTime';
 import { AI_EMOTIONS_JOB_KIND, EMOTION_POINT, buildEmotionMonitor } from './emotions';
 import { AI_VISUAL_JOB_KIND, visualAnalysisView } from './visualAi';
+import {
+  GENERATION_MAX_PROMPT,
+  GENERATION_MAX_REFERENCES,
+  generationBrief,
+  generationHash,
+  isMediaFileUrl,
+  linkGeneratedImage,
+  resolveGenerationTarget,
+  type GenerationTarget,
+} from './visualGeneration';
 import { ROLE_ENTITY_TYPES, appearanceOverview, cardAppearanceHash, describeLinks, expectedLinkHash, heroPortrait, refreshVisualReview, sceneVisuals } from './visual';
 import { ASSET_ROLES, type AssetRole } from './types';
 import { VERSIONED_ROLES, isLinkableAssetUrl } from './rules';
@@ -99,6 +109,40 @@ export interface ProjectRoutesDeps {
    * авторові запиту або власникові книги. null — ні (немає, чуже, не зображення).
    */
   visualImage?: (projectId: string, assetUrl: string, actor: string) => Promise<{ mimeType: string; data: string } | null>;
+  /** Т2.3 В6: генерація зображення від сутності (лише за командою автора). */
+  visualGeneration?: VisualGenerationDeps;
+}
+
+/** Генерація від сутності (Т2.3 В6): сам виклик моделі й черга задач — у сервері Студії. */
+export interface VisualGenerationDeps {
+  /** Право генерувати й квота тарифу — ті самі перевірки, що в `/api/ai/generate-media-art`. */
+  guards?: RequestHandler[];
+  /** Скільки референсів приймає генерація (`MAX_REFERENCE_IMAGES` сервера); ядро бере не більше за свою межу. */
+  maxReferences?: number;
+  /**
+   * Файл Медіатеки як референс: лише свій чи власника книги, зображення; повертає
+   * публічну адресу копії для моделі. null — референс недоступний.
+   */
+  referenceUrl: (req: Request, projectId: string, assetUrl: string, actor: string) => Promise<string | null>;
+  /**
+   * Поставити фонову генерацію, повернути id задачі (статус — `GET
+   * /api/ai/generate-media-art/status/:jobId`). `onGenerated` викликається з
+   * адресою готового файлу Медіатеки й повертає зв'язок — він іде в результат задачі.
+   */
+  start: (
+    req: Request,
+    params: {
+      prompt: string;
+      engine?: string;
+      aspectRatio?: string;
+      imageSize?: string;
+      referenceImageUrls: string[];
+      filenameHint: string;
+      label: string;
+      bookId: string;
+      onGenerated: (assetUrl: string) => Promise<unknown>;
+    },
+  ) => Promise<string>;
 }
 
 /** Не більше стількох тлумачень запиту ШІ на користувача за хвилину — це платні виклики. */
@@ -1202,6 +1246,85 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
     }
     const findings = (await repo.listFindings(req.params.id)).filter(visibleTo(req.projectAccess!));
     res.json({ ...visualAnalysisView(findings, assetUrl), available: !!deps.visualImage && !!deps.queue?.() });
+  }));
+
+  // ── Т2.3 В6: генерація від сутності, лише за командою автора ──────────────
+
+  /** Опис зовнішності з картки героя в Студії (канон автора) — для промпту й відбитка. */
+  const cardTextOf = async (projectId: string, e: EntityRow) => {
+    if (e.type !== 'character' || !deps.studio) return '';
+    const st = await deps.studio(projectId, e).catch(() => undefined);
+    return studioAppearanceText(st?.character ?? null);
+  };
+  const genMax = () => Math.max(0, Math.min(GENERATION_MAX_REFERENCES, deps.visualGeneration?.maxReferences ?? GENERATION_MAX_REFERENCES));
+
+  /** Що буде згенеровано: промпт із затвердженого опису, референси — прив'язані зображення. `?entityId=&versionId=&role=` */
+  app.get('/api/projects/:id/visual/generation-brief', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const q = req.query as Record<string, unknown>;
+    const target = await resolveGenerationTarget(repo, req.params.id, { entityId: q.entityId, appearanceVersionId: q.versionId, role: q.role });
+    const brief = await generationBrief(repo, target, await cardTextOf(req.params.id, target.entity), genMax());
+    res.json({ ...brief, available: !!deps.visualGeneration });
+  }));
+
+  /**
+   * Згенерувати зображення сутності: промпт (автор міг правити), референси —
+   * файли Медіатеки. Відповідь 202 з id задачі; готове зображення одразу
+   * прив'язане до сутності (джерело — автор), результат задачі несе зв'язок.
+   */
+  app.post('/api/projects/:id/visual/generate', ...(deps.visualGeneration?.guards ?? []), withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const gen = deps.visualGeneration;
+    if (!gen) {
+      res.status(503).json({ error: 'Генерація зображень на цьому сервері вимкнена.', kind: 'unavailable' });
+      return;
+    }
+    const b = req.body ?? {};
+    const prompt = typeof b.prompt === 'string' ? b.prompt.trim() : '';
+    if (!prompt || prompt.length > GENERATION_MAX_PROMPT) {
+      res.status(400).json({ error: `Потрібен промпт (до ${GENERATION_MAX_PROMPT} символів).`, kind: 'bad_input' });
+      return;
+    }
+    const target: GenerationTarget = await resolveGenerationTarget(repo, req.params.id, b);
+    const actor = `user:${req.projectAccess!.userId}`;
+    const refs: unknown[] = Array.isArray(b.referenceAssets) ? b.referenceAssets : [];
+    if (refs.length > genMax()) {
+      res.status(400).json({ error: `Не більше ${genMax()} референсів.`, kind: 'bad_input' });
+      return;
+    }
+    const referenceImageUrls: string[] = [];
+    for (const r of refs) {
+      const url = isMediaFileUrl(r) ? await gen.referenceUrl(req, req.params.id, r.trim(), actor).catch(() => null) : null;
+      if (!url) {
+        res.status(400).json({ error: 'Референс — лише зображення з Медіатеки (своє чи власника книги).', kind: 'bad_input' });
+        return;
+      }
+      referenceImageUrls.push(url);
+    }
+    // Звірено з тим описом, з якого генеруємо (Т2.3 В5); порівняння з поточним — коли зображення готове.
+    const usedHash = generationHash(target, await cardTextOf(req.params.id, target.entity));
+    const projectId = req.params.id;
+    const jobId = await gen.start(req, {
+      prompt,
+      engine: typeof b.engine === 'string' && b.engine ? b.engine : undefined,
+      aspectRatio: typeof b.aspectRatio === 'string' && b.aspectRatio ? b.aspectRatio : undefined,
+      imageSize: typeof b.imageSize === 'string' && b.imageSize ? b.imageSize : undefined,
+      referenceImageUrls,
+      filenameHint: target.entity.type === 'character' ? `char-${target.entity.name}`.slice(0, 60) : 'entity',
+      label: `Бібліотека ілюстрацій: ${target.entity.name}${target.version ? ` (${target.version.label})` : ''}`,
+      bookId: projectId,
+      onGenerated: async (assetUrl) => {
+        const r = deps.repo();
+        if (!r) throw new Error('Семантичне ядро недоступне — зображення в Медіатеці, прив\'яжіть його вручну.');
+        // Версію за час генерації могли видалити — тоді зображення стає загальним і звіряється з карткою.
+        const version = target.version ? await r.getAppearanceVersion(projectId, target.version.id) : null;
+        const now: GenerationTarget = { ...target, version };
+        const currentHash = generationHash(now, await cardTextOf(projectId, target.entity));
+        const link = await linkGeneratedImage(r, now, assetUrl, actor, { usedHash, currentHash });
+        return { id: link.id, entityId: link.entityId, entityName: target.entity.name, role: link.role, versionLabel: version?.label ?? null, needsReview: link.needsReview };
+      },
+    });
+    res.status(202).json({ jobId, target: { entityId: target.entity.id, role: target.role, versionId: target.version?.id ?? null }, references: referenceImageUrls.length });
   }));
 
   /** «Хто в сцені»: герої розділу з портретами й ілюстрації сцени — для редактора. */

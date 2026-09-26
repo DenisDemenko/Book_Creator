@@ -171,20 +171,27 @@ t('у базі: 2 пропозиції зв\'язків від AI-3 і 4 вис�
 await openCard(kid.url);
 const chips = await waitFor(() => page.evaluate(() => Array.from(document.querySelectorAll('[data-media-link-status="suggested"]')).map((e) => e.getAttribute('data-media-link'))), (v) => v.length === 2, 10000);
 t('КРИТЕРІЙ: у Медіатеці — «ШІ пропонує»: Олена й другий герой, з «Прив\'язати» / «Відхилити»', chips.length === 2 && chips.includes('depicts:Олена Ковальчук') && !!(await page.$('[data-media-link-accept]')), JSON.stringify(chips));
-const aiBox = await page.evaluate(() => ({ traits: document.querySelectorAll('[data-media-ai-trait]').length, mism: document.querySelector('[data-media-ai-mismatch]')?.textContent ?? '' }));
+// Висновки AI-3 приходять окремим запитом (GET analysis) — чекаємо їх, а не лише чипи.
+const aiBox = await waitFor(() => page.evaluate(() => ({ traits: document.querySelectorAll('[data-media-ai-trait]').length, mism: document.querySelector('[data-media-ai-mismatch]')?.textContent ?? '' })), (b) => b.traits > 0 && !!b.mism, 10000);
 t('блок «AI-3 бачить» — ознака й розбіжність з описом', aiBox.traits === 1 && /карі очі/.test(aiBox.mism), JSON.stringify(aiBox));
 await page.screenshot({ path: path.join(DIR, 'visual-ai-suggest.png') });
 const olenaLink = (await q(`SELECT id FROM fusion_core.asset_entity_links WHERE project_id = $1 AND asset_url = $2 AND entity_id = $3`, [BOOK, kid.url, olena.id]))[0];
 const otherLink = (await q(`SELECT id FROM fusion_core.asset_entity_links WHERE project_id = $1 AND asset_url = $2 AND entity_id = $3`, [BOOK, kid.url, other.id]))[0];
 await page.click(`[data-media-link-accept="${olenaLink.id}"]`);
 const acc = await waitFor(() => q(`SELECT status, source, created_by FROM fusion_core.asset_entity_links WHERE id = $1`, [olenaLink.id]), (r) => r[0]?.status === 'confirmed', 10000);
+// Висновок-доказ маршрут переводить слідом за зв'язком — чекаємо, а не читаємо одразу.
+const accF = await waitFor(() => q(`SELECT status FROM fusion_core.analysis_findings WHERE id = $1`, [fOlena]), (r) => r[0]?.status === 'confirmed', 10000);
 t('«Прив\'язати»: підтверджено автором, джерело — ШІ; висновок-доказ підтверджено',
-  acc[0]?.created_by === 'user:u-admin' && acc[0]?.source === 'ai' && (await q(`SELECT status FROM fusion_core.analysis_findings WHERE id = $1`, [fOlena]))[0]?.status === 'confirmed', JSON.stringify(acc));
-await page.waitForSelector(`[data-media-link-reject="${otherLink.id}"]`, { timeout: 10000 });
-await page.click(`[data-media-link-reject="${otherLink.id}"]`);
+  acc[0]?.created_by === 'user:u-admin' && acc[0]?.source === 'ai' && accF[0]?.status === 'confirmed', JSON.stringify(acc));
+// Після «Прив'язати» панель перечитує зв'язки й перемальовує чипи — клікаємо вже в оновлений список.
+await waitFor(() => page.evaluate((id: string) => {
+  const b = document.querySelector(`[data-media-link-reject="${id}"]`) as HTMLButtonElement | null;
+  return !!b && !b.disabled && !document.querySelector(`[data-media-link-status="suggested"][data-media-link="depicts:Олена Ковальчук"]`);
+}, otherLink.id), (v) => v, 10000);
+await page.evaluate((id: string) => (document.querySelector(`[data-media-link-reject="${id}"]`) as HTMLButtonElement | null)?.click(), otherLink.id);
 await waitFor(() => q(`SELECT status FROM fusion_core.asset_entity_links WHERE id = $1`, [otherLink.id]), (r) => r[0]?.status === 'rejected', 10000);
 t('«Відхилити»: зв\'язок відхилено назавжди (лишається в базі), висновок відхилено, чип зник',
-  (await q(`SELECT status FROM fusion_core.analysis_findings WHERE id = $1`, [fOther]))[0]?.status === 'rejected' &&
+  (await waitFor(() => q(`SELECT status FROM fusion_core.analysis_findings WHERE id = $1`, [fOther]), (r) => r[0]?.status === 'rejected', 10000))[0]?.status === 'rejected' &&
   (await waitFor(() => page.evaluate(() => document.querySelectorAll('[data-media-link-status="suggested"]').length), (n) => n === 0, 10000)) === 0);
 
 console.log('\nЗвірка з описом:');
