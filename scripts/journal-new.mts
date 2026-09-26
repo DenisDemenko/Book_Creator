@@ -38,6 +38,24 @@ function git(args: string[]): string {
   }
 }
 
+/**
+ * `--session=02` і `--title="…"` — обидва необов'язкові.
+ *
+ * Номер сесії скрипт угадує («найбільший за сьогодні + 1») і робить це
+ * НЕПРАВИЛЬНО, коли та сама сесія пише другий запис того самого дня: бере
+ * наступний номер і той самий день дістає зайву сесію. 26.09.2026 так і
+ * сталося (запис #265 дістав #03, хоч належав сесії #02), тож номер тепер
+ * можна сказати прямо, а скрипт каже, коли варто.
+ */
+const ARGV = process.argv.slice(2);
+function argValue(name: string): string | null {
+  const withEq = ARGV.find((a) => a.startsWith(`--${name}=`));
+  if (withEq) return withEq.slice(name.length + 3);
+  const at = ARGV.indexOf(`--${name}`);
+  return at >= 0 && ARGV[at + 1] ? ARGV[at + 1] : null;
+}
+const titleArg = argValue('title');
+
 const source = readJournalSource();
 if (!source) {
   console.error('✗ Журнал не знайдено (ні log.md, ні теки log/). Скрипт запускають із кореня проєкту.');
@@ -50,7 +68,26 @@ if (!entries.size) {
   process.exit(1);
 }
 
-const next = Math.max(...entries.keys()) + 1;
+let next = Math.max(...entries.keys()) + 1;
+
+// Номер, який уже є в історії, не можна зайняти вдруге. 26.09.2026 дві сесії
+// в одному дереві обидві взяли #263 («найбільший наявний + 1»), і журнал
+// деякий час мав два різні записи з одним номером. Робоче дерево видно з
+// `entries`, історію — лише з покажчика в HEAD (паралельна сесія могла
+// закомітити свій запис, не чіпаючи наших файлів).
+const committed = new Set<number>(
+  [...git(['show', 'HEAD:log.md']).matchAll(/^\| (\d+) \|/gm)].map((m) => Number(m[1]))
+);
+let bumped = 0;
+while (committed.has(next)) {
+  next += 1;
+  bumped += 1;
+}
+if (bumped) {
+  console.warn(
+    `⚠ #${next - bumped} вже є в історії (паралельна сесія закомітила його першою) — беру #${next}`
+  );
+}
 
 // ── Дата й номер сесії ───────────────────────────────────────────────────
 const now = new Date();
@@ -62,9 +99,12 @@ const today = `${dd}.${mm}.${now.getFullYear()}`;
 // Конвенція з шапки: «Сесія Claude: ДД.ММ.РРРР #NN».
 const sessionMarks = [...source.matchAll(/Сесія Claude:\s*(\d{2}\.\d{2}\.\d{4})(?:\s*#(\d{2}))?/g)];
 const todayMarks = sessionMarks.filter((m) => m[1] === today);
-const sessionNo = String(
-  todayMarks.reduce((max, m) => Math.max(max, Number(m[2] || 1)), 0) + 1
-).padStart(2, '0');
+const sessionArg = argValue('session');
+const sessionNo = sessionArg
+  ? sessionArg.replace(/^#/, '').padStart(2, '0')
+  : String(
+      todayMarks.reduce((max, m) => Math.max(max, Number(m[2] || 1)), 0) + 1
+    ).padStart(2, '0');
 
 // ── Коміти після останнього запису ───────────────────────────────────────
 // Орієнтир — останній коміт, що ТОРКАВСЯ журналу. Це точна відповідь на
@@ -129,7 +169,7 @@ if (!target) {
 }
 
 const skeleton = `
-## ${next}. НАЗВА ЗАВДАННЯ → 🚧 У роботі
+## ${next}. ${titleArg ?? 'НАЗВА ЗАВДАННЯ'} → 🚧 У роботі
 
 **Сесія Claude: ${today} #${sessionNo}**
 
@@ -172,7 +212,7 @@ if (at === -1) {
   console.warn('⚠ У покажчику не знайдено таблицю — рядок доведеться додати руками.');
 } else {
   const insertAt = at + headerRow.length;
-  const row = `\n| ${next} | НАЗВА ЗАВДАННЯ | 🚧 У роботі | [${target}](log/${target}) |`;
+  const row = `\n| ${next} | ${titleArg ?? 'НАЗВА ЗАВДАННЯ'} | 🚧 У роботі | [${target}](log/${target}) |`;
   index = index.slice(0, insertAt) + row + index.slice(insertAt);
 
   // Заголовок покажчика теж рахує записи — без цього він одразу ж
@@ -189,6 +229,14 @@ if (at === -1) {
 console.log(`✓ Запис #${next} — скелет дописано у log/${target}`);
 console.log(`✓ Покажчик log.md оновлено (рядок #${next})`);
 console.log(`  сесія: ${today} #${sessionNo}`);
+if (!sessionArg && todayMarks.length > 0) {
+  console.log(
+    `  (сьогодні в журналі вже є сесії: ${[...new Set(todayMarks.map((m) => '#' + (m[2] || '01')))].join(', ')})`
+  );
+  console.log(
+    '  якщо це ТА САМА сесія — наступного разу вкажи --session=<номер>, інакше день дістане зайву сесію'
+  );
+}
 console.log(
   commits.length
     ? `  комітів після запису #${prev}: ${commits.length} (орієнтир — ${anchorKind}; перелічені в скелеті)`
