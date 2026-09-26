@@ -21,7 +21,7 @@
  */
 
 import type { AppearanceVersionRow, AssetLinkRow, AssetRole, CoreRepository, EntityRow } from './types';
-import { isLinkableAssetUrl } from './rules';
+import { VERSIONED_ROLES, appearanceHash, isLinkableAssetUrl } from './rules';
 import { bookIndex, placeOf } from './characterProfile';
 
 export const LEGACY_ACTOR = 'system:core_sync';
@@ -226,6 +226,8 @@ export interface AppearanceVersionView extends AppearanceVersionRow {
   /** Портрет цієї версії (підтверджений зв'язок «портрет» з її позначкою). */
   portraitUrl: string | null;
   portraitLinkId: string | null;
+  /** Опис версії змінився після звірки портрета (Т2.3 В5). */
+  portraitNeedsReview: boolean;
   /** Інші затверджені версії, чиї глави перетинаються з цією. */
   overlapsWith: string[];
   /** Діє в обраній главі (режим «стан на главі N»). */
@@ -234,8 +236,10 @@ export interface AppearanceVersionView extends AppearanceVersionRow {
 
 export interface AppearanceOverview {
   /** Основа — картка героя в Студії: канон автора, редагується в картці. */
-  base: { description: string; portraitUrl: string | null; portraitSource: 'link' | 'card' | null };
+  base: { description: string; portraitUrl: string | null; portraitSource: 'link' | 'card' | null; portraitLinkId: string | null; portraitNeedsReview: boolean };
   versions: AppearanceVersionView[];
+  /** Зображення героя (будь-якої ролі), що чекають звірки з новим описом. */
+  needsReview: { linkId: string; assetUrl: string; role: string; versionLabel: string | null }[];
   /** Версія, що діє в главі `upto`; null — немає або глава не обрана. */
   activeId: string | null;
   upto: number | null;
@@ -270,6 +274,7 @@ export async function appearanceOverview(
       ...v,
       portraitUrl: p?.assetUrl ?? null,
       portraitLinkId: p?.id ?? null,
+      portraitNeedsReview: !!p?.needsReview,
       overlapsWith: v.approved ? all.filter((o) => o.id !== v.id && o.approved && overlaps(o, v)).map((o) => o.id) : [],
       active: !!active && active.id === v.id,
     };
@@ -281,12 +286,99 @@ export async function appearanceOverview(
       description: upto == null ? card.description : '',
       portraitUrl: basePortrait && !basePortrait.version ? basePortrait.url : null,
       portraitSource: basePortrait && !basePortrait.version ? basePortrait.source : null,
+      portraitLinkId: basePortrait && !basePortrait.version ? basePortrait.linkId : null,
+      portraitNeedsReview: !!(basePortrait?.linkId && !basePortrait.version && portraits.find((l) => l.id === basePortrait.linkId)?.needsReview),
     },
     versions,
+    needsReview: links
+      .filter((l) => l.status === 'confirmed' && l.needsReview && (!l.appearanceVersionId || visibleIds.has(l.appearanceVersionId)))
+      .map((l) => ({ linkId: l.id, assetUrl: l.assetUrl, role: l.role, versionLabel: l.appearanceVersionId ? all.find((v) => v.id === l.appearanceVersionId)?.label ?? null : null })),
     activeId: active?.id ?? null,
     upto,
     history: history
       .filter((h) => upto == null || visibleIds.has(h.versionId))
       .map((h) => ({ versionId: h.versionId, action: h.action, label: String((h.snapshot as any)?.label ?? ''), actor: h.actor, at: h.at })),
   };
+}
+
+// ── «Перевірити» після зміни опису (Т2.3 В5) ─────────────────────────────────
+
+/**
+ * Відбиток опису, з яким має збігатися зображення героя: портрет (повний
+ * зріст, референс) версії зовнішності — опис цієї версії, решта — опис
+ * зовнішності з картки героя. undefined — опису не знаємо (героя немає в
+ * книзі), такий зв'язок не чіпаємо.
+ */
+export function expectedLinkHash(
+  link: Pick<AssetLinkRow, 'entityId' | 'role' | 'appearanceVersionId'>,
+  versions: Map<string, Pick<AppearanceVersionRow, 'descriptionHash'>>,
+  cardHash: (entityId: string) => string | undefined,
+): string | undefined {
+  if (!link.entityId || !VERSIONED_ROLES.includes(link.role)) return undefined;
+  if (link.appearanceVersionId) return versions.get(link.appearanceVersionId)?.descriptionHash;
+  return cardHash(link.entityId);
+}
+
+/** Відбиток опису з картки героя (порожній опис — теж опис: заповнили — перевірити). */
+export const cardAppearanceHash = (text: string | null | undefined) => appearanceHash(text ?? '');
+
+export interface VisualReviewResult {
+  /** Щойно позначені «перевірити». */
+  flagged: number;
+  /** Позначку знято: опис повернувся до того, з яким звіряли. */
+  cleared: number;
+  /** Старі зв'язки без відбитка — звірені з поточним описом (без позначки). */
+  baselined: number;
+  notifications: number;
+}
+
+/**
+ * Звести позначки «перевірити» з поточними описами. Зображення, звірене зі
+ * старим описом (`checked_hash` ≠ поточного), позначається `needs_review`, і
+ * ядро пише сповіщення — одне на героя. Зв'язок без відбитка (з В2 або
+ * щойно перенесений з книги) приймає поточний опис як звірений. Лише
+ * підтверджені зв'язки героїв; `cardHash` — відбитки карток тих героїв, чиї
+ * картки відомі (інших не чіпаємо); `entityIds` — обмежити героями.
+ */
+export async function refreshVisualReview(
+  repo: CoreRepository,
+  projectId: string,
+  cardHash: (entityId: string) => string | undefined,
+  opts: { entityIds?: string[]; reason?: string } = {},
+): Promise<VisualReviewResult> {
+  const out: VisualReviewResult = { flagged: 0, cleared: 0, baselined: 0, notifications: 0 };
+  const scope = opts.entityIds ? new Set(opts.entityIds) : null;
+  const [links, versions] = await Promise.all([repo.listAssetLinks(projectId), repo.listAppearanceVersions(projectId)]);
+  const vById = new Map(versions.map((v) => [v.id, v]));
+  const flaggedBy = new Map<string, AssetLinkRow[]>();
+  for (const l of links) {
+    if (l.status !== 'confirmed' || !l.entityId || (scope && !scope.has(l.entityId))) continue;
+    const want = expectedLinkHash(l, vById, cardHash);
+    if (want === undefined) continue;
+    if (l.checkedHash == null) {
+      await repo.setAssetLinkReview(projectId, l.id, { needsReview: false, checkedHash: want });
+      out.baselined++;
+    } else if (l.checkedHash !== want && !l.needsReview) {
+      await repo.setAssetLinkReview(projectId, l.id, { needsReview: true });
+      out.flagged++;
+      flaggedBy.set(l.entityId, [...(flaggedBy.get(l.entityId) ?? []), l]);
+    } else if (l.checkedHash === want && l.needsReview) {
+      await repo.setAssetLinkReview(projectId, l.id, { needsReview: false });
+      out.cleared++;
+    }
+  }
+  if (flaggedBy.size) {
+    const names = new Map((await repo.listEntities(projectId, 'character')).map((e) => [e.id, e.name]));
+    for (const [entityId, list] of flaggedBy) {
+      const labels = [...new Set(list.map((l) => (l.appearanceVersionId ? vById.get(l.appearanceVersionId)?.label : null)).filter(Boolean))];
+      await repo.addNotification({
+        projectId,
+        kind: 'visual_needs_review',
+        message: `Опис зовнішності «${names.get(entityId) ?? '?'}»${labels.length ? ` (${labels.join(', ')})` : ''} змінився — перевірте зображення: ${list.length}`,
+        payload: { entityId, linkIds: list.map((l) => l.id), assetUrls: list.map((l) => l.assetUrl), reason: opts.reason ?? '' },
+      });
+      out.notifications++;
+    }
+  }
+  return out;
 }

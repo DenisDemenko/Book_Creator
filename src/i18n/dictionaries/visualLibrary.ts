@@ -81,6 +81,14 @@ export const visualLibrary = {
     avHistDeleted: 'видалено',
     avHistPortrait: 'новий портрет',
     avHistPortraitRemoved: 'портрет прибрано',
+    // Т2.3 В5 — «перевірити» після зміни опису
+    reviewBadge: 'перевірити',
+    reviewHint: "Опис зовнішності змінився після того, як зображення звірили, — перегляньте його з новим описом.",
+    reviewDone: 'Звірено',
+    reviewDoneHint: 'Зображення відповідає поточному опису — зняти позначку',
+    reviewDoneToast: 'Звірено з поточним описом.',
+    filterReview: '⚠ Перевірити (опис змінився)',
+    avReviewTitle: 'Перевірити після зміни опису: {n}',
   },
   en: {
     linksTitle: 'Links to the book',
@@ -162,5 +170,12 @@ export const visualLibrary = {
     avHistDeleted: 'deleted',
     avHistPortrait: 'new portrait',
     avHistPortraitRemoved: 'portrait removed',
+    reviewBadge: 'check',
+    reviewHint: 'The appearance description changed after this image was checked — review it against the new description.',
+    reviewDone: 'Checked',
+    reviewDoneHint: 'The image matches the current description — clear the mark',
+    reviewDoneToast: 'Checked against the current description.',
+    filterReview: '⚠ To check (description changed)',
+    avReviewTitle: 'To check after a description change: {n}',
   },
 };

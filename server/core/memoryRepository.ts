@@ -801,7 +801,7 @@ export class MemoryCoreRepository implements CoreRepository {
       role: input.role,
       status: input.status ?? 'confirmed',
       source: input.source ?? 'author',
-      needsReview: prev?.needsReview ?? false,
+      needsReview: input.checkedHash != null ? false : prev?.needsReview ?? false,
       checkedHash: input.checkedHash !== undefined ? input.checkedHash : prev?.checkedHash ?? null,
       evidence: [...(input.evidence ?? prev?.evidence ?? [])],
       note: input.note ?? prev?.note ?? '',
@@ -824,6 +824,14 @@ export class MemoryCoreRepository implements CoreRepository {
     if (!l || l.projectId !== projectId) throw notFound(`Зв'язок зображення «${id}»`);
     if (!['suggested', 'confirmed', 'rejected'].includes(status)) throw new CoreRuleError('bad_input', `Невідомий статус «${status}»`);
     const row = { ...l, status, updatedAt: now() };
+    this.assetLinks.set(id, row);
+    return clone(row);
+  }
+
+  async setAssetLinkReview(projectId: string, id: string, review: { needsReview: boolean; checkedHash?: string | null }) {
+    const l = this.assetLinks.get(id);
+    if (!l || l.projectId !== projectId) throw notFound(`Зв'язок зображення «${id}»`);
+    const row = { ...l, needsReview: !!review.needsReview, checkedHash: review.checkedHash !== undefined ? review.checkedHash : l.checkedHash, updatedAt: now() };
     this.assetLinks.set(id, row);
     return clone(row);
   }

@@ -109,6 +109,18 @@ const PERSONALITY_UK: Record<string, string> = {
   internalConflict: 'Внутрішній конфлікт',
 };
 
+/**
+ * Опис зовнішності з картки героя одним рядком («волосся: руде; очі: сірі») —
+ * канон автора для бібліотеки ілюстрацій: основа версій зовнішності (Т2.3 В3)
+ * і відбиток, з яким звіряються портрети (В5).
+ */
+export function studioAppearanceText(ch: Pick<StudioCharacterLike, 'appearance'> | null | undefined): string {
+  return Object.entries(ch?.appearance ?? {})
+    .filter(([, v]) => v && String(v).trim())
+    .map(([k, v]) => `${APPEARANCE_UK[k] ?? k}: ${String(v).trim()}`)
+    .join('; ');
+}
+
 /** Картка героя → поля канону (лише заповнені). */
 export function studioCanon(ch: StudioCharacterLike | null, others: StudioCharacterLike[] = []): { fields: CanonField[]; portraitUrl: string | null } {
   if (!ch) return { fields: [], portraitUrl: null };
@@ -122,10 +134,7 @@ export function studioCanon(ch: StudioCharacterLike | null, others: StudioCharac
   add('gender', 'Стать', ch.gender);
   add('profession', 'Професія', ch.profession);
   add('alias', 'Прізвисько', ch.alias);
-  const look = Object.entries(ch.appearance ?? {})
-    .filter(([, v]) => v && String(v).trim())
-    .map(([k, v]) => `${APPEARANCE_UK[k] ?? k}: ${String(v).trim()}`);
-  add('appearance', 'Зовнішність', look.join('; '));
+  add('appearance', 'Зовнішність', studioAppearanceText(ch));
   for (const [k, v] of Object.entries(ch.personality ?? {})) add(`personality.${k}`, PERSONALITY_UK[k] ?? k, v);
   add('biography', 'Біографія', ch.biography);
   const rel = (ch.relationships ?? [])

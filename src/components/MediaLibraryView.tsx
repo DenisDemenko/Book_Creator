@@ -390,9 +390,13 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
   const linkTargets = [...new Map(bookLinks.map((l) => [l.entityId ? `e:${l.entityId}` : `s:${l.sectionId}`, l])).entries()]
     .map(([key, l]) => ({ key, label: l.targetName || '—', scene: !l.entityId }))
     .sort((a, b) => Number(a.scene) - Number(b.scene) || a.label.localeCompare(b.label, 'uk'));
-  const entityUrls = entityFilter
-    ? new Set(bookLinks.filter((l) => (l.entityId ? `e:${l.entityId}` : `s:${l.sectionId}`) === entityFilter).map((l) => l.assetUrl))
-    : null;
+  // Т2.3 В5: зображення, які треба звірити з новим описом героя.
+  const reviewUrls = new Set(bookLinks.filter((l) => l.needsReview && l.status === 'confirmed').map((l) => l.assetUrl));
+  const entityUrls = entityFilter === 'review'
+    ? reviewUrls
+    : entityFilter
+      ? new Set(bookLinks.filter((l) => (l.entityId ? `e:${l.entityId}` : `s:${l.sectionId}`) === entityFilter).map((l) => l.assetUrl))
+      : null;
 
   const visibleMedia = allMedia
     .filter((m) => selectedSectionId === ALL_SECTIONS || m.sectionId === selectedSectionId)
@@ -934,6 +938,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
               className="px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:border-cyan-500 focus:outline-hidden max-w-[200px]"
             >
               <option value="">{t('visualLibrary.filterEntityAll')}</option>
+              {reviewUrls.size > 0 && <option value="review">{t('visualLibrary.filterReview')} ({reviewUrls.size})</option>}
               {linkTargets.map((o) => (
                 <option key={o.key} value={o.key}>{o.scene ? `▸ ${o.label}` : o.label}</option>
               ))}
@@ -1001,17 +1006,23 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
                   {formatMediaDate(item.createdAt)}
                 </div>
               )}
-              {/* Паспорт (Т2.3 В1): версія, чернетка, невідома ліцензія. */}
+              {/* Паспорт (Т2.3 В1): версія, чернетка, невідома ліцензія; «перевірити» (В5). */}
               {(() => {
                 const a = passportOf(item);
-                if (!a) return null;
-                const w = passportWarnings(a);
+                const review = reviewUrls.has(item.url);
+                if (!a && !review) return null;
+                const w = a ? passportWarnings(a) : [];
                 return (
                   <div className="absolute top-8 left-2 flex flex-wrap gap-1" data-media-passport-badges={item.id}>
-                    {(a.version ?? 1) > 1 && (
+                    {review && (
+                      <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/40 backdrop-blur-md text-amber-50" title={t('visualLibrary.reviewHint')} data-media-review-badge>
+                        ⚠ {t('visualLibrary.reviewBadge')}
+                      </span>
+                    )}
+                    {a && (a.version ?? 1) > 1 && (
                       <span className="px-1.5 py-0.5 rounded-full text-[10px] font-mono bg-black/60 backdrop-blur-md text-cyan-200">v{a.version}</span>
                     )}
-                    {a.status === 'draft' && (
+                    {a?.status === 'draft' && (
                       <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-black/60 backdrop-blur-md text-slate-200">{t('mediaPassport.badgeDraft')}</span>
                     )}
                     {w.length > 0 && (

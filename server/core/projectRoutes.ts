@@ -22,13 +22,13 @@ import type { JobQueue } from './jobs/queue';
 import { AI_MENTIONS_JOB_KIND, MENTION_SUGGESTION, RELATION_SUGGESTION, publicSuggestion } from './ai/mentions';
 import { hybridSearch, type SearchDeps, type SearchRequest } from './search/service';
 import { buildStoryGraph, evidenceRefs } from './storyGraph';
-import { AI_PROFILE_JOB_KIND, PROFILE_FACT, buildCharacterProfile, studioCanon, type StudioCharacterLike } from './characterProfile';
+import { AI_PROFILE_JOB_KIND, PROFILE_FACT, buildCharacterProfile, studioAppearanceText, studioCanon, type StudioCharacterLike } from './characterProfile';
 import type { EntityRow } from './types';
 import { runFlcCycle } from './flc/cycle';
 import { buildTimeline, characterKnowledge } from './timeline';
 import { normalizeStoryTime } from '../../src/utils/storyTime';
 import { AI_EMOTIONS_JOB_KIND, EMOTION_POINT, buildEmotionMonitor } from './emotions';
-import { ROLE_ENTITY_TYPES, appearanceOverview, describeLinks, heroPortrait, sceneVisuals } from './visual';
+import { ROLE_ENTITY_TYPES, appearanceOverview, cardAppearanceHash, describeLinks, expectedLinkHash, heroPortrait, refreshVisualReview, sceneVisuals } from './visual';
 import { ASSET_ROLES, type AssetRole } from './types';
 import { VERSIONED_ROLES, isLinkableAssetUrl } from './rules';
 import { clampIntensity, emotionFamily } from '../../src/utils/emotionScale';
@@ -947,6 +947,29 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
     return st?.character?.avatarUrl || null;
   };
 
+  /**
+   * Відбиток опису, з яким звіряється зображення героя (Т2.3 В5): версії
+   * зовнішності — її опис, інакше — опис із картки героя. undefined — роль не
+   * про зовнішність (локація, сцена, «зображено»).
+   */
+  const expectedHash = async (repo: CoreRepository, projectId: string, link: { entityId: string | null; role: AssetRole; appearanceVersionId: string | null }) => {
+    if (!link.entityId) return undefined;
+    const version = link.appearanceVersionId ? await repo.getAppearanceVersion(projectId, link.appearanceVersionId) : null;
+    let card: string | undefined;
+    if (!link.appearanceVersionId) {
+      const e = await repo.getEntity(projectId, link.entityId);
+      const st = e && deps.studio ? await deps.studio(projectId, e).catch(() => undefined) : undefined;
+      card = cardAppearanceHash(studioAppearanceText(st?.character ?? null));
+    }
+    return expectedLinkHash(link, new Map(version ? [[version.id, version]] : []), () => card);
+  };
+  /** Звести «перевірити» для героя після зміни опису версії (картку зводить синхронізація книги). */
+  const refreshHero = async (repo: CoreRepository, projectId: string, entity: EntityRow, reason: string) => {
+    const st = deps.studio ? await deps.studio(projectId, entity).catch(() => undefined) : undefined;
+    const card = st?.character ? cardAppearanceHash(studioAppearanceText(st.character)) : undefined;
+    return refreshVisualReview(repo, projectId, (id) => (id === entity.id ? card : undefined), { entityIds: [entity.id], reason });
+  };
+
   /** Зв'язки зображень книги; `?assetUrl=&entityId=&sectionId=` — фільтри. Відхилені — лише з `includeRejected=1`. */
   app.get('/api/projects/:id/visual/links', withRepo(async (repo, req, res) => {
     const q = req.query as Record<string, unknown>;
@@ -1028,6 +1051,8 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       entityId,
       sectionId,
       appearanceVersionId: versionId,
+      // Автор прив'язує зараз — отже, звіряє з поточним описом (Т2.3 В5).
+      checkedHash: (await expectedHash(repo, req.params.id, { entityId, role, appearanceVersionId: versionId })) ?? null,
       status: 'confirmed',
       source: 'author',
       note: typeof b.note === 'string' ? b.note.slice(0, 500) : '',
@@ -1050,6 +1075,23 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       return;
     }
     res.json({ link: await repo.setAssetLinkStatus(req.params.id, l.id, status) });
+  }));
+
+  /** «Звірено» (Т2.3 В5): автор переглянув зображення після зміни опису — звірено з поточним описом. */
+  app.post('/api/projects/:id/visual/links/:linkId/checked', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const l = await repo.getAssetLink(req.params.id, req.params.linkId);
+    if (!l) {
+      res.status(404).json({ error: 'Зв\'язку немає.', kind: 'not_found' });
+      return;
+    }
+    const want = await expectedHash(repo, req.params.id, l);
+    if (want === undefined) {
+      res.status(400).json({ error: 'Звіряти з описом можна лише портрет, повний зріст чи референс героя.', kind: 'bad_input' });
+      return;
+    }
+    const link = await repo.setAssetLinkReview(req.params.id, l.id, { needsReview: false, checkedHash: want });
+    res.json({ link: (await describeLinks(repo, req.params.id, [link]))[0] });
   }));
 
   /**
@@ -1170,7 +1212,10 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       approved: b.approved ?? prev.approved,
       createdBy: `user:${req.projectAccess!.userId}`,
     });
-    res.json({ version });
+    // Опис змінився — портрети цієї версії, звірені зі старим, — «перевірити» (Т2.3 В5).
+    const e = await repo.getEntity(req.params.id, prev.entityId);
+    const review = version.descriptionHash !== prev.descriptionHash && e ? await refreshHero(repo, req.params.id, e, 'version') : null;
+    res.json({ version, review });
   }));
 
   /** Видалити версію; її портрети лишаються загальними портретами героя. */
@@ -1181,7 +1226,11 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       res.status(404).json({ error: 'Версії зовнішності немає.', kind: 'not_found' });
       return;
     }
-    res.json({ ok: await repo.deleteAppearanceVersion(req.params.id, prev.id, `user:${req.projectAccess!.userId}`) });
+    const ok = await repo.deleteAppearanceVersion(req.params.id, prev.id, `user:${req.projectAccess!.userId}`);
+    // Портрети версії стали загальними — тепер їх звіряють з описом картки (Т2.3 В5).
+    const e = await repo.getEntity(req.params.id, prev.entityId);
+    const review = ok && e ? await refreshHero(repo, req.params.id, e, 'version_deleted') : null;
+    res.json({ ok, review });
   }));
 
   /**
@@ -1208,7 +1257,11 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
     for (const l of links) {
       if (l.role !== 'portrait' || l.appearanceVersionId !== v.id || l.assetUrl === assetUrl) continue;
       if (l.source === 'author') await repo.deleteAssetLink(req.params.id, l.id);
-      else await repo.upsertAssetLink({ projectId: l.projectId, assetUrl: l.assetUrl, role: l.role, entityId: l.entityId, status: l.status, source: l.source, appearanceVersionId: null, createdBy: l.createdBy });
+      else {
+        // Перенесений з картки знову загальний — автор щойно бачив його, звірено з описом картки (Т2.3 В5).
+        const card = await expectedHash(repo, req.params.id, { entityId: l.entityId, role: l.role, appearanceVersionId: null });
+        await repo.upsertAssetLink({ projectId: l.projectId, assetUrl: l.assetUrl, role: l.role, entityId: l.entityId, status: l.status, source: l.source, appearanceVersionId: null, checkedHash: card ?? null, createdBy: l.createdBy });
+      }
     }
     let link = null;
     if (assetUrl) {
@@ -1219,6 +1272,7 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
         role: 'portrait',
         entityId: v.entityId,
         appearanceVersionId: v.id,
+        checkedHash: v.descriptionHash,
         status: 'confirmed',
         source: same && same.source !== 'ai' ? same.source : 'author',
         createdBy: same && same.source === 'legacy' ? same.createdBy : actor,

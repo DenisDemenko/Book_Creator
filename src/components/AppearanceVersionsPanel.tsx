@@ -24,13 +24,17 @@ interface VersionView {
   description: string;
   approved: boolean;
   portraitUrl: string | null;
+  portraitLinkId: string | null;
+  portraitNeedsReview?: boolean;
   overlapsWith: string[];
   active: boolean;
 }
 
 interface Overview {
-  base: { description: string; portraitUrl: string | null; portraitSource: 'link' | 'card' | null };
+  base: { description: string; portraitUrl: string | null; portraitSource: 'link' | 'card' | null; portraitLinkId?: string | null; portraitNeedsReview?: boolean };
   versions: VersionView[];
+  /** Т2.3 В5: зображення героя, які треба звірити з новим описом. */
+  needsReview?: { linkId: string; assetUrl: string; role: string; versionLabel: string | null }[];
   activeId: string | null;
   upto: number | null;
   history: { versionId: string; action: string; label: string; actor: string; at: string }[];
@@ -160,6 +164,15 @@ export const AppearanceVersionsPanel: React.FC<Props> = ({ bookId, entityId, upt
     await done(t('visualLibrary.avSaved'));
   };
 
+  const markChecked = async (linkId: string) => {
+    setBusy(true);
+    const res = await api(`/api/projects/${encodeURIComponent(bookId)}/visual/links/${linkId}/checked`, { method: 'POST', body: '{}' }).catch(() => null);
+    setBusy(false);
+    if (!res?.ok) return failed(res);
+    await done(t('visualLibrary.reviewDoneToast'));
+  };
+  const reviewItems = data.needsReview ?? [];
+
   const field = 'w-full min-w-0 rounded-lg border border-slate-700 bg-slate-950/60 px-2 py-1 text-xs text-slate-200 focus:border-sky-500 focus:outline-hidden';
   const chapterOptions = (empty: string) => (
     <>
@@ -217,9 +230,16 @@ export const AppearanceVersionsPanel: React.FC<Props> = ({ bookId, entityId, upt
     </div>
   );
 
-  const Portrait = ({ url }: { url: string | null }) =>
+  const Portrait = ({ url, review }: { url: string | null; review?: boolean }) =>
     url ? (
-      <img src={url} alt="" className="h-16 w-16 shrink-0 rounded-xl object-cover" referrerPolicy="no-referrer" />
+      <div className="relative h-16 w-16 shrink-0">
+        <img src={url} alt="" className={`h-16 w-16 rounded-xl object-cover ${review ? 'ring-2 ring-amber-400' : ''}`} referrerPolicy="no-referrer" />
+        {review && (
+          <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-amber-500 px-1.5 text-[9px] font-bold text-slate-950" title={t('visualLibrary.reviewHint')} data-av-review-badge>
+            ⚠ {t('visualLibrary.reviewBadge')}
+          </span>
+        )}
+      </div>
     ) : (
       <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl border border-dashed border-slate-700 bg-slate-800" title={t('visualLibrary.avNoPortrait')}>
         <UserRound className="h-6 w-6 text-slate-500" />
@@ -238,11 +258,30 @@ export const AppearanceVersionsPanel: React.FC<Props> = ({ bookId, entityId, upt
       </div>
       <p className="text-[11px] text-slate-500">{t('visualLibrary.avHint')}</p>
       {note && <p className="text-[11px] text-amber-300" data-av-note>{note}</p>}
+      {reviewItems.length > 0 && (
+        <div className="space-y-1.5 rounded-xl border border-amber-500/40 bg-amber-500/5 p-2.5" data-av-review={reviewItems.length}>
+          <p className="text-[11px] font-bold text-amber-200">⚠ {t('visualLibrary.avReviewTitle', { n: reviewItems.length })}</p>
+          <p className="text-[10px] text-amber-100/70">{t('visualLibrary.reviewHint')}</p>
+          <div className="flex flex-wrap gap-2">
+            {reviewItems.map((r) => (
+              <div key={r.linkId} className="flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-950/40 p-1 pr-2" data-av-review-item={r.linkId}>
+                <img src={r.assetUrl} alt="" className="h-9 w-9 rounded-md object-cover" referrerPolicy="no-referrer" />
+                <span className="text-[10px] text-slate-300">{r.versionLabel ?? t('visualLibrary.avBase')}</span>
+                {data.canEdit && (
+                  <button type="button" disabled={busy} onClick={() => void markChecked(r.linkId)} title={t('visualLibrary.reviewDoneHint')} data-av-review-done={r.linkId} className="rounded border border-emerald-500/50 px-1.5 py-0.5 text-[10px] text-emerald-200 hover:bg-emerald-500/10">
+                    ✓ {t('visualLibrary.reviewDone')}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {editing === 'new' && form}
 
       <div className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
         <div className="flex min-w-0 gap-2.5 rounded-xl border border-slate-800 bg-slate-950/30 p-2.5" data-av-base>
-          <Portrait url={data.base.portraitUrl} />
+          <Portrait url={data.base.portraitUrl} review={data.base.portraitNeedsReview} />
           <div className="min-w-0 flex-1">
             <p className="text-[12px] font-bold text-slate-100">{t('visualLibrary.avBase')}</p>
             <p className="text-[10px] text-slate-500">{data.upto ? t('visualLibrary.avBaseHidden') : t('visualLibrary.avBaseHint')}</p>
@@ -260,7 +299,7 @@ export const AppearanceVersionsPanel: React.FC<Props> = ({ bookId, entityId, upt
               data-av-version={v.label}
               data-av-version-active={v.active ? '1' : '0'}
             >
-              <Portrait url={v.portraitUrl} />
+              <Portrait url={v.portraitUrl} review={v.portraitNeedsReview} />
               <div className="min-w-0 flex-1 space-y-1">
                 <p className="break-words text-[12px] font-bold text-slate-100">{v.label}</p>
                 <div className="flex flex-wrap gap-1 text-[10px]">

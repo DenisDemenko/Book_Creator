@@ -24,7 +24,8 @@ import {
 import { markerStringToTiptapDoc, tiptapDocToMarkerBlocks } from '../../src/utils/manuscriptDoc';
 import { blockHash, deterministicParagraphId, reconcileParagraphIds } from '../../src/utils/paragraphIds';
 import { CoreRuleError } from './rules';
-import { reconcileLegacyAssetLinks, type LegacyImage } from './visual';
+import { cardAppearanceHash, reconcileLegacyAssetLinks, refreshVisualReview, type LegacyImage } from './visual';
+import { studioAppearanceText } from './characterProfile';
 import type { CoreRepository, DocumentRow, MentionInput, ParagraphKind, ParagraphRow } from './types';
 
 export const CORE_SYNC_ACTOR = 'system:core_sync';
@@ -54,6 +55,8 @@ export interface SyncCharacter {
   alias?: string;
   /** Портрет героя з картки — переноситься в бібліотеку ілюстрацій (Т2.3 В2). */
   avatarUrl?: string;
+  /** Зовнішність з картки — з нею звіряються портрети героя (Т2.3 В5). */
+  appearance?: Record<string, string | undefined>;
 }
 export interface SyncIllustration {
   id?: string;
@@ -87,7 +90,8 @@ export interface CoreSyncResult {
   findingsNeedReview: number;
   notifications: number;
   /** Зображення з книги в бібліотеці ілюстрацій (Т2.3 В2): прив'язано / прибрано. */
-  assets: { linked: number; unlinked: number };
+  /** Бібліотека ілюстрацій: перенесені з книги зв'язки (В2) і позначки «перевірити» після зміни опису (В5). */
+  assets: { linked: number; unlinked: number; review?: { flagged: number; cleared: number; baselined: number } };
   /** false — повторне збереження без змін: у базу не записано нічого. */
   wroteAnything: boolean;
 }
@@ -407,6 +411,20 @@ export async function syncBookToCore(
   }
   result.assets = await reconcileLegacyAssetLinks(repo, projectId, legacy);
   if (result.assets.linked || result.assets.unlinked) wrote();
+
+  // 5б. «Перевірити» після зміни опису (Т2.3 В5) --------------------------------
+  // Опис зовнішності з картки героя змінився — портрети (повний зріст,
+  // референси) без версії, звірені зі старим, позначаються; ядро пише
+  // сповіщення. Зв'язки без відбитка приймають поточний опис як звірений.
+  const cardHashes = new Map<string, string>();
+  for (const ch of book.characters ?? []) {
+    const entityId = ch?.id ? heroByStudioId.get(ch.id) : undefined;
+    if (entityId) cardHashes.set(entityId, cardAppearanceHash(studioAppearanceText(ch)));
+  }
+  const review = await refreshVisualReview(repo, projectId, (id) => cardHashes.get(id), { reason: 'card' });
+  result.assets.review = { flagged: review.flagged, cleared: review.cleared, baselined: review.baselined };
+  result.notifications += review.notifications;
+  if (review.flagged || review.cleared || review.baselined) wrote();
 
   // 6. Ревізія, висновки на перегляд, сповіщення -------------------------------
   const touched = [...textChanged.map((p) => p.id), ...deletedIds];

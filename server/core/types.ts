@@ -402,6 +402,7 @@ export type AssetLinkInput = Pick<AssetLinkRow, 'projectId' | 'assetUrl' | 'role
   source?: AssetLinkRow['source'];
   evidence?: string[];
   note?: string;
+  /** Відбиток опису, з яким автор звірив зображення (Т2.3 В5); задано — позначка «перевірити» знімається. */
   checkedHash?: string | null;
   /** undefined — не змінювати; null — зняти позначку версії. */
   appearanceVersionId?: string | null;
@@ -589,6 +590,11 @@ export interface CoreRepository {
   getAssetLink(projectId: string, id: string): Promise<AssetLinkRow | null>;
   setAssetLinkStatus(projectId: string, id: string, status: CoreStatus): Promise<AssetLinkRow>;
   deleteAssetLink(projectId: string, id: string): Promise<boolean>;
+  /**
+   * «Перевірити» (Т2.3 В5): позначка й відбиток опису, з яким зображення
+   * звірено. Відбиток у `upsertAssetLink` теж означає «звірено» — позначка знімається.
+   */
+  setAssetLinkReview(projectId: string, id: string, review: { needsReview: boolean; checkedHash?: string | null }): Promise<AssetLinkRow>;
 
   /**
    * Версії зовнішності (Т2.3 В3). Кожна зміна пише рядок історії; видалення

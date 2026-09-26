@@ -1203,6 +1203,7 @@ export class PgCoreRepository implements CoreRepository {
        ON CONFLICT (project_id, asset_url, target, role) DO UPDATE SET
          status = excluded.status, source = excluded.source,
          checked_hash = COALESCE(excluded.checked_hash, asset_entity_links.checked_hash),
+         needs_review = CASE WHEN excluded.checked_hash IS NOT NULL THEN false ELSE asset_entity_links.needs_review END,
          evidence = CASE WHEN cardinality(excluded.evidence) > 0 THEN excluded.evidence ELSE asset_entity_links.evidence END,
          note = CASE WHEN excluded.note <> '' THEN excluded.note ELSE asset_entity_links.note END,
          appearance_version_id = CASE WHEN $15::boolean THEN excluded.appearance_version_id ELSE asset_entity_links.appearance_version_id END,
@@ -1228,6 +1229,18 @@ export class PgCoreRepository implements CoreRepository {
     const { rows } = await this.q(
       'UPDATE asset_entity_links SET status = $3, updated_at = now() WHERE project_id = $1 AND id = $2 RETURNING *',
       [projectId, id, status],
+    );
+    if (!rows[0]) throw notFound(`Зв'язок зображення «${id}»`);
+    return toAssetLink(rows[0]);
+  }
+
+  async setAssetLinkReview(projectId: string, id: string, review: { needsReview: boolean; checkedHash?: string | null }) {
+    if (!isUuid(id)) throw notFound(`Зв'язок зображення «${id}»`);
+    const { rows } = await this.q(
+      `UPDATE asset_entity_links SET needs_review = $3,
+         checked_hash = CASE WHEN $5::boolean THEN $4 ELSE checked_hash END, updated_at = now()
+       WHERE project_id = $1 AND id = $2 RETURNING *`,
+      [projectId, id, !!review.needsReview, review.checkedHash ?? null, review.checkedHash !== undefined],
     );
     if (!rows[0]) throw notFound(`Зв'язок зображення «${id}»`);
     return toAssetLink(rows[0]);

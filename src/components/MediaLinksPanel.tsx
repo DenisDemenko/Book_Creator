@@ -38,6 +38,8 @@ export interface VisualLink {
   /** Т2.3 В3: версія зовнішності героя, чий це портрет. */
   appearanceVersionId?: string | null;
   versionLabel?: string | null;
+  /** Т2.3 В5: опис змінився після звірки — «перевірити». */
+  needsReview?: boolean;
 }
 
 const VERSIONED: readonly AssetRoleKey[] = ['portrait', 'full_body', 'reference'];
@@ -157,6 +159,19 @@ export const MediaLinksPanel: React.FC<Props> = ({ bookId, assetUrl, onChanged, 
     onChanged?.();
   };
 
+  const markChecked = async (l: VisualLink) => {
+    setBusy(true);
+    const res = await api(`${base}/links/${l.id}/checked`, { method: 'POST', body: '{}' }).catch(() => null);
+    setBusy(false);
+    if (!res?.ok) {
+      onToast(t('visualLibrary.linkFailed', { reason: res?.status ?? '—' }));
+      return;
+    }
+    onToast(t('visualLibrary.reviewDoneToast'));
+    await load();
+    onChanged?.();
+  };
+
   const sourceLabel = (s: VisualLink['source']) => (s === 'legacy' ? t('visualLibrary.sourceLegacy') : s === 'ai' ? t('visualLibrary.sourceAi') : t('visualLibrary.sourceAuthor'));
   const selectCls = 'min-w-0 rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-200 focus:border-cyan-500 focus:outline-hidden';
 
@@ -184,6 +199,16 @@ export const MediaLinksPanel: React.FC<Props> = ({ bookId, assetUrl, onChanged, 
                   <span className="text-slate-400">{t(ROLE_LABEL_KEY[l.role])}</span>
                   <span className="min-w-0 truncate font-bold">{l.targetName || '—'}</span>
                   {l.versionLabel && <span className="min-w-0 truncate text-sky-300" data-media-link-version={l.versionLabel}>· {l.versionLabel}</span>}
+                  {l.needsReview && (
+                    <span className="rounded-full bg-amber-500/25 px-1.5 text-[10px] font-bold text-amber-200" title={t('visualLibrary.reviewHint')} data-media-link-review={l.id}>
+                      ⚠ {t('visualLibrary.reviewBadge')}
+                    </span>
+                  )}
+                  {l.needsReview && canEdit && (
+                    <button type="button" disabled={busy} onClick={() => void markChecked(l)} title={t('visualLibrary.reviewDoneHint')} className="rounded-full border border-emerald-500/50 px-1.5 text-[10px] text-emerald-200 hover:bg-emerald-500/10" data-media-link-checked={l.id}>
+                      ✓ {t('visualLibrary.reviewDone')}
+                    </button>
+                  )}
                   <span className="text-[10px] text-slate-500">· {sourceLabel(l.source)}</span>
                   {canEdit && (
                     <button type="button" disabled={busy} onClick={() => void remove(l)} title={t('visualLibrary.linkRemove')} aria-label={t('visualLibrary.linkRemove')} className="text-slate-500 hover:text-rose-300" data-media-link-remove={l.id}>
