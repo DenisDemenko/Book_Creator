@@ -4,6 +4,79 @@
         "/^npx vite build 2>&1 \\| Select-Object -Last 20$/": {
             "approve": true,
             "matchCommandLine": true
+        },
+        "/^npx tsx -e \"import \\{ decodeTextBuffer \\} from '\\./src/utils/textEncoding\\.ts'; const enc=\\(e,t\\)=>\\{const m=new Map\\(\\);for\\(let b=0;b<=255;b\\+\\+\\)\\{const ch=new TextDecoder\\(e\\)\\.decode\\(new Uint8Array\\(\\[b\\]\\)\\);if\\(ch\\.length===1\\)m\\.set\\(ch,b\\)\\}const o=\\[\\];for\\(const c of t\\)\\{const b=m\\.get\\(c\\);if\\(b===undefined\\)throw new Error\\('no byte '\\+c\\+' in '\\+e\\);o\\.push\\(b\\)\\}return new Uint8Array\\(o\\)\\}; const RU='Самоучитель для Архата\\. Это первая глава рукописи, проверка кодировки файла\\.'; for\\(const e of \\['windows-1251','koi8-r','koi8-u','iso-8859-5'\\]\\)\\{ const bytes=enc\\(e,RU\\); const r=decodeTextBuffer\\(bytes\\); console\\.log\\(e,'->',r\\.encoding,'\\|',r\\.text\\.slice\\(0,40\\)\\); \\}\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^npx tsx tmp/debug-encoding\\.mts$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^node -e \"JSON\\.parse\\(require\\('fs'\\)\\.readFileSync\\('package\\.json','utf8'\\)\\); console\\.log\\('package\\.json OK'\\)\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^git status --short; echo \"---- BRANCH ----\"; git branch -vv; echo \"---- REMOTES ----\"; git remote -v; echo \"---- LAST COMMITS ----\"; git log --oneline -8$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^git push origin master; git push production master$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^git status --short; echo \"==== SYNC ====\"; git log --oneline -1 --decorate; git rev-parse --short origin/master production/master master$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "npx tsx": true,
+        "/^node -e \"const s=require\\('fs'\\)\\.readFileSync\\('log/sessions\\.md','utf8'\\)\\.split\\(/\\\\r\\?\\\\n/\\);console\\.log\\('lines',s\\.length\\);console\\.log\\(s\\.slice\\(0,20\\)\\.join\\('\\\\n'\\)\\);\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^node -e \"const fs=require\\('fs'\\);const files=fs\\.readdirSync\\('log'\\)\\.filter\\(f=>f\\.endsWith\\('\\.md'\\)\\);const counts=\\{\\};for\\(const f of files\\)\\{const t=fs\\.readFileSync\\('log/'\\+f,'utf8'\\);for\\(const m of t\\.matchAll\\(/Сесія Claude: \\(\\\\d\\\\d\\\\\\.\\\\d\\\\d\\\\\\.\\\\d\\{4\\} #\\\\d\\\\d\\)/g\\)\\)\\{counts\\[m\\[1\\]\\]=\\(counts\\[m\\[1\\]\\]\\|\\|0\\)\\+1;\\}\\}const rows=Object\\.entries\\(counts\\)\\.sort\\(\\);for\\(const \\[k,v\\] of rows\\)\\{if\\(v>1\\)console\\.log\\('ПОВТОР',k,v\\);\\}console\\.log\\('усього позначок:',rows\\.length\\);\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "git add": true,
+        "git commit": true,
+        "git push": true,
+        "/^node -e \"const p=require\\('\\./node_modules/puppeteer-core/package\\.json'\\);console\\.log\\('puppeteer-core', p\\.version\\);\" ; Select-String -Path node_modules\\\\puppeteer-core\\\\lib\\\\types\\.d\\.ts -Pattern \"setCookie\\\\\\(\" \\| Select-Object -First 5 -ExpandProperty Line$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "Out-File": true,
+        "Get-Item": true,
+        "git rev-parse": true,
+        "/^node -e \"const fs=require\\('fs'\\);const b=fs\\.readFileSync\\('task\\.md'\\);const s=b\\.toString\\('utf8'\\);const line=s\\.split\\('\\\\n'\\)\\[1\\];console\\.log\\('line2:',JSON\\.stringify\\(line\\)\\);console\\.log\\('codes:',\\[\\.\\.\\.line\\.slice\\(36,52\\)\\]\\.map\\(c=>c\\.codePointAt\\(0\\)\\.toString\\(16\\)\\)\\.join\\(' '\\)\\);console\\.log\\('hasFFFD:',s\\.includes\\('\\\\uFFFD'\\)\\);\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "ForEach-Object": true,
+        "/^Write-Output '=== utf8 sanity ==='; node -e \"const fs=require\\('fs'\\);const files=\\['src/utils/mediaSort\\.ts','src/components/MediaLibraryView\\.tsx','src/i18n/dictionaries/mediaLibraryView\\.ts','src/onboarding/tourSteps\\.ts','scripts/test-mediaSort\\.mts','scripts/live-mediaSort\\.mts','log/119-151\\.md','log/sessions\\.md','log\\.md'\\];for\\(const f of files\\)\\{const s=fs\\.readFileSync\\(f,'utf8'\\);const bad=s\\.includes\\('\\\\uFFFD'\\);const nl=s\\.includes\\('\\\\r\\\\n'\\);console\\.log\\(\\(bad\\?'BAD ':'ok  '\\)\\+f\\+'  fffd='\\+bad\\+' crlf='\\+nl\\);\\}\"; Write-Output '=== media tests ==='; npm run test:media-library 2>&1 \\| Select-Object -Last 3 \\| Out-String -Width 200; npm run test:media-sections 2>&1 \\| Select-Object -Last 3 \\| Out-String -Width 200$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^git fetch origin 2>&1 \\| Out-String -Width 200; git fetch production 2>&1 \\| Out-String -Width 200; Write-Output '=== branches ==='; git rev-parse --short HEAD; git rev-parse --short origin/master; git rev-parse --short production/master; Write-Output '=== unpushed to production ==='; git log --oneline production/master\\.\\.HEAD \\| Out-String -Width 200$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "git fetch": true,
+        "npx next": true,
+        "Push-Location": true,
+        "&": true,
+        "npm run typecheck": true,
+        "/^Set-Location 'D:\\\\Rama\\\\furnivision-architecture\\\\marketplace'; node -e \"const j=require\\('\\./apps/web/messages/uk\\.json'\\); console\\.log\\(JSON\\.stringify\\(j\\.homePage,null,2\\)\\);\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^Set-Location 'D:\\\\Rama\\\\Book_Creality'; node -e \"const p=require\\('\\./package\\.json'\\); for \\(const \\[k,v\\] of Object\\.entries\\(p\\.scripts\\)\\) \\{ if \\(/test\\|journal/\\.test\\(k\\)\\) console\\.log\\(k \\+ ': ' \\+ String\\(v\\)\\.slice\\(0,400\\)\\); \\}\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^Set-Location 'D:\\\\Rama\\\\Book_Creality'; node -e \"const s=require\\('\\./package\\.json'\\)\\.scripts\\.test; console\\.log\\(s\\.slice\\(-700\\)\\);\"$/": {
+            "approve": true,
+            "matchCommandLine": true
         }
     }
 }
