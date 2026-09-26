@@ -602,9 +602,41 @@ CREATE TABLE IF NOT EXISTS media_assets (
   size_bytes  INTEGER NOT NULL,
   prompt      TEXT,                    -- NULL лише для завантажених з компʼютера
   model       TEXT,                    -- те саме
-  created_at  TEXT NOT NULL
+  created_at  TEXT NOT NULL,
+  -- Паспорт зображення (Т2.3 В1, PLAN_VISUAL_LIBRARY.md). NULL у старих
+  -- рядках — значення виводяться при читанні (mediaLibraryStore.rowToAsset):
+  -- джерело з prompt/model, ліцензія «своя» для згенерованого й «невідома»
+  -- для завантаженого, статус «готове», версія 1. Для вже наявних баз
+  -- колонки додає migrateMediaAssetColumns().
+  title       TEXT,                    -- назва для людей (filename — технічна)
+  alt_text    TEXT,                    -- опис зображення для читача
+  source      TEXT,                    -- upload | ai | stock | commission | scan
+  author      TEXT,                    -- автор зображення (художник, фотограф, «ШІ …»)
+  license     TEXT,                    -- own | cc-by | cc-by-sa | cc0 | licensed | unknown
+  license_url TEXT,
+  status      TEXT,                    -- draft | final
+  parent_id   TEXT,                    -- попередня версія цього ж зображення
+  root_id     TEXT,                    -- перша версія: ключ групи версій
+  version     INTEGER,                 -- 1, 2, 3… у межах групи
+  updated_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_media_assets_owner ON media_assets(owner_id, created_at DESC);
+
+-- Історія зображення (Т2.3 В1): хто, коли й що зробив — створено, нова
+-- версія, змінено паспорт, видалено. Рядки лишаються й після видалення
+-- файлу: історія пояснює, куди він подівся. Ключ групи — root_id (усі
+-- версії одного зображення мають одну історію).
+CREATE TABLE IF NOT EXISTS media_asset_history (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  asset_id    TEXT NOT NULL,
+  root_id     TEXT NOT NULL,
+  owner_id    TEXT NOT NULL,
+  at          TEXT NOT NULL,
+  actor       TEXT NOT NULL,
+  action      TEXT NOT NULL,           -- created | version | passport | deleted
+  details     TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_media_asset_history_root ON media_asset_history(root_id, id);
 
 -- Зовнішній API для застосунків автора (WriterScan — фото сторінки з телефону).
 --
@@ -1006,6 +1038,37 @@ function migrateUsersColumns(instance: Database): void {
 }
 
 /**
+ * Паспорт зображення (Т2.3 В1) з'явився пізніше за саму медіатеку: у старих
+ * базах колонок немає. Додаємо порожніми — значення для старих рядків
+ * виводяться при читанні, тож переливати дані не треба.
+ */
+const MEDIA_ASSET_NEW_COLUMNS: [string, string][] = [
+  ['title', 'TEXT'],
+  ['alt_text', 'TEXT'],
+  ['source', 'TEXT'],
+  ['author', 'TEXT'],
+  ['license', 'TEXT'],
+  ['license_url', 'TEXT'],
+  ['status', 'TEXT'],
+  ['parent_id', 'TEXT'],
+  ['root_id', 'TEXT'],
+  ['version', 'INTEGER'],
+  ['updated_at', 'TEXT'],
+];
+
+function migrateMediaAssetColumns(instance: Database): void {
+  try {
+    const cols = new Set((instance.prepare('PRAGMA table_info(media_assets)').all() as { name: string }[]).map((c) => c.name));
+    for (const [name, type] of MEDIA_ASSET_NEW_COLUMNS) {
+      if (!cols.has(name)) instance.exec(`ALTER TABLE media_assets ADD COLUMN ${name} ${type}`);
+    }
+    instance.exec('CREATE INDEX IF NOT EXISTS idx_media_assets_root ON media_assets(root_id)');
+  } catch (err) {
+    console.warn('[db] Не вдалося перевірити/додати колонки паспорта media_assets:', err);
+  }
+}
+
+/**
  * Вкладення в чаті підтримки з'явилися пізніше за саму таблицю, тож у
  * базах, створених до них, колонки ще немає — `CREATE TABLE IF NOT
  * EXISTS` її не дописує. Значення за замовчуванням «[]» робить старі
@@ -1202,6 +1265,7 @@ export async function initDb(): Promise<boolean> {
     migrateUsageLogColumns(instance);
     migrateUsersColumns(instance);
     migrateSupportMessageColumns(instance);
+    migrateMediaAssetColumns(instance);
     seedEmotionDictionary(instance);
     seedCoreEntityRegistry(instance);
     db = instance;

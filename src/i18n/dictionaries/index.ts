@@ -25,6 +25,7 @@ import { kdpPublishingModal } from './kdpPublishingModal';
 import { qrFootnotesView } from './qrFootnotesView';
 import { changeLogView } from './changeLogView';
 import { mediaLibraryView } from './mediaLibraryView';
+import { mediaPassport } from './mediaPassport';
 import { describeCharacter } from './describeCharacter';
 import { versionSnapshotModal } from './versionSnapshotModal';
 import { collaborationDrawer } from './collaborationDrawer';
@@ -91,6 +92,7 @@ export const dictionaries = {
     qrFootnotesView: qrFootnotesView.uk,
     changeLogView: changeLogView.uk,
     mediaLibraryView: mediaLibraryView.uk,
+    mediaPassport: mediaPassport.uk,
     describeCharacter: describeCharacter.uk,
     versionSnapshotModal: versionSnapshotModal.uk,
     collaborationDrawer: collaborationDrawer.uk,
@@ -152,6 +154,7 @@ export const dictionaries = {
     qrFootnotesView: qrFootnotesView.en,
     changeLogView: changeLogView.en,
     mediaLibraryView: mediaLibraryView.en,
+    mediaPassport: mediaPassport.en,
     describeCharacter: describeCharacter.en,
     versionSnapshotModal: versionSnapshotModal.en,
     collaborationDrawer: collaborationDrawer.en,

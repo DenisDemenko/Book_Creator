@@ -31,6 +31,8 @@ import {
   type MediaSortMethod,
 } from '../utils/mediaSort';
 import { MediaGenerationPanel } from './MediaGenerationPanel';
+import { MediaPassportPanel, type PassportAsset } from './MediaPassportPanel';
+import { mediaIdFromUrl, passportWarnings, replaceMediaUrlInBook } from '../utils/mediaPassport';
 import { ScanInboxPanel } from './ScanInboxPanel';
 import { DescribeCharacterModal } from './DescribeCharacterModal';
 import { loadInstructionDraft, saveInstructionDraft } from '../utils/instructionDraft';
@@ -81,18 +83,14 @@ interface LibrarySection {
   sizeBytes: number;
 }
 
-/** Файл із серверної медіатеки автора — те, що справді лежить у сховищі. */
-interface ServerAsset {
-  id: string;
-  url: string;
-  bookId: string | null;
-  kind: string;
-  filename: string;
-  sizeBytes: number;
-  prompt?: string | null;
-  /** ISO-дата завантаження — саме за нею працює порядок «від першої генерації». */
-  createdAt?: string;
-}
+/**
+ * Файл із серверної медіатеки автора — те, що справді лежить у сховищі.
+ * Разом із паспортом (Т2.3 В1): назва, ліцензія, статус, версія.
+ */
+type ServerAsset = PassportAsset;
+
+/** Фільтр за паспортом (Т2.3 В1). */
+type PassportFilter = 'all' | 'draft' | 'noLicense' | 'noAuthor';
 
 /**
  * Картка галереї. Джерела два, і вони не еквівалентні: посилання з книги
@@ -119,6 +117,9 @@ type MediaCard = {
   /** Вага файлу в байтах; у посилань із книги її немає. */
   sizeBytes?: number;
 };
+
+/** Службове: серверний файл картки (за URL) — для паспорта й позначок. */
+const cardAssetId = (card: { url: string }) => mediaIdFromUrl(card.url);
 
 const MB = 1024 * 1024;
 
@@ -158,6 +159,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
   // Спосіб сортування галереї — спільний для фото й відео (задача про відео:
   // усі вони MP4, тож за форматом їх не розрізнити, а порядок появи — можна).
   const [sort, setSort] = useState<MediaSortMethod>(DEFAULT_MEDIA_SORT);
+  const [passportFilter, setPassportFilter] = useState<PassportFilter>('all');
   const [selectedMedia, setSelectedMedia] = useState<{ id: string; url: string; title: string; type: string; prompt?: string; source?: string } | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -198,7 +200,8 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
     try {
       const [sectionsRes, listRes] = await Promise.all([
         fetch('/api/media/sections', { credentials: 'same-origin' }),
-        fetch('/api/media/list', { credentials: 'same-origin' }),
+        // Лише останні версії: попередні видно в паспорті, а не окремими картками (Т2.3 В1).
+        fetch('/api/media/list?latest=1', { credentials: 'same-origin' }),
       ]);
       if (sectionsRes.ok) {
         const data = await sectionsRes.json();
@@ -328,7 +331,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
       return {
         id: asset.id,
         url: asset.url,
-        title: asset.filename || asset.id,
+        title: asset.title || asset.filename || asset.id,
         type: asset.kind === 'cover_art' ? 'covers' : asset.kind === 'character_art' ? 'portraits' : asset.kind === 'video' ? 'videos' : 'illustrations',
         prompt: asset.prompt || undefined,
         source: 'upload',
@@ -345,9 +348,25 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
   // до останньої», бо саме хронологія пояснює, який кадр за яким ішов.
   // Файли без дати компаратор ставить у кінець переліку — і це єдина
   // чесна відповідь, коли дати немає зовсім.
+  // Паспорт картки — з серверного файлу за її URL (посилання з книги теж ведуть сюди).
+  const assetById = new Map(serverAssets.map((a) => [a.id, a]));
+  const passportOf = (m: { url: string }) => {
+    const id = cardAssetId(m);
+    return id ? assetById.get(id) ?? null : null;
+  };
+  const passportMatches = (m: MediaCard) => {
+    if (passportFilter === 'all') return true;
+    const a = passportOf(m);
+    if (!a) return false;
+    if (passportFilter === 'draft') return a.status === 'draft';
+    const w = passportWarnings(a);
+    return passportFilter === 'noLicense' ? w.includes('license') : w.includes('author');
+  };
+
   const visibleMedia = allMedia
     .filter((m) => selectedSectionId === ALL_SECTIONS || m.sectionId === selectedSectionId)
     .filter((m) => filter === 'all' || m.type === filter)
+    .filter(passportMatches)
     .sort(mediaComparator(sort));
 
   // У режимі «Усі книги» картки групуються під заголовком свого розділу —
@@ -854,6 +873,23 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
               ))}
             </select>
           </div>
+
+          {/* Паспорт (Т2.3 В1): чернетки, невідома ліцензія, ліцензія без автора. */}
+          {isRegistered && (
+            <select
+              value={passportFilter}
+              onChange={(e) => setPassportFilter(e.target.value as PassportFilter)}
+              title={t('mediaPassport.filterPassport')}
+              aria-label={t('mediaPassport.filterPassport')}
+              data-media-passport-filter
+              className="px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:border-cyan-500 focus:outline-hidden max-w-[190px]"
+            >
+              <option value="all">{t('mediaPassport.filterPassportAll')}</option>
+              <option value="draft">{t('mediaPassport.filterPassportDraft')}</option>
+              <option value="noLicense">{t('mediaPassport.filterPassportNoLicense')}</option>
+              <option value="noAuthor">{t('mediaPassport.filterPassportNoAuthor')}</option>
+            </select>
+          )}
         </div>
       </div>
 
@@ -916,6 +952,25 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
                   {formatMediaDate(item.createdAt)}
                 </div>
               )}
+              {/* Паспорт (Т2.3 В1): версія, чернетка, невідома ліцензія. */}
+              {(() => {
+                const a = passportOf(item);
+                if (!a) return null;
+                const w = passportWarnings(a);
+                return (
+                  <div className="absolute top-8 left-2 flex flex-wrap gap-1" data-media-passport-badges={item.id}>
+                    {(a.version ?? 1) > 1 && (
+                      <span className="px-1.5 py-0.5 rounded-full text-[10px] font-mono bg-black/60 backdrop-blur-md text-cyan-200">v{a.version}</span>
+                    )}
+                    {a.status === 'draft' && (
+                      <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-black/60 backdrop-blur-md text-slate-200">{t('mediaPassport.badgeDraft')}</span>
+                    )}
+                    {w.length > 0 && (
+                      <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-amber-500/30 backdrop-blur-md text-amber-100">{t('mediaPassport.badgeLicense')}</span>
+                    )}
+                  </div>
+                );
+              })()}
               {/* Задача #217. Кошик — на самій мініатюрі, а не в рядку
                   завантаження нижче (там уже тісно від PNG/JPG/MP4-кнопок).
                   Клік по ньому не має відкривати лайтбокс — stopPropagation.
@@ -1121,7 +1176,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-slate-950 border border-slate-800 rounded-3xl max-w-3xl w-full overflow-hidden shadow-2xl space-y-4 p-6 text-white"
+            className="bg-slate-950 border border-slate-800 rounded-3xl max-w-3xl w-full max-h-[92vh] overflow-y-auto shadow-2xl space-y-4 p-4 sm:p-6 text-white"
           >
             <div className="flex items-center justify-between gap-3">
               <h3 className="text-base font-bold text-cyan-300">{selectedMedia.title}</h3>
@@ -1163,6 +1218,27 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
                 />
               )}
             </div>
+
+            {/* Паспорт зображення (Т2.3 В1) — лише для файлів сховища. */}
+            {isRegistered && mediaIdFromUrl(selectedMedia.url) && (
+              <MediaPassportPanel
+                key={mediaIdFromUrl(selectedMedia.url)!}
+                assetId={mediaIdFromUrl(selectedMedia.url)!}
+                bookId={book.id}
+                onToast={showToast}
+                onChanged={(asset) => setServerAssets((prev) => prev.map((a) => (a.id === asset.id ? { ...a, ...asset } : a)))}
+                onNewVersion={(previous, next) => {
+                  // Посилання в книзі (портрети, обкладинка, ілюстрації, текст) переходять на нову версію.
+                  const { book: updated, count } = replaceMediaUrlInBook(book, previous.url, next.url);
+                  if (count) {
+                    onUpdateBook(updated, 'Нова версія зображення', `«${previous.title || previous.filename}» → v${next.version} (замін у книзі: ${count})`);
+                  }
+                  setSelectedMedia((cur) => (cur ? { ...cur, url: next.url } : cur));
+                  void loadLibrary();
+                  return count;
+                }}
+              />
+            )}
 
             {selectedMedia.prompt && (
               <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-xs font-mono text-slate-300">

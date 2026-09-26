@@ -20,6 +20,7 @@ process.env.DATA_DIR = DIR;
 process.env.DATABASE_PATH = `${DIR}/nova-studio.db`;
 
 import fs from 'node:fs';
+import path from 'node:path';
 fs.rmSync(DIR, { recursive: true, force: true });
 fs.mkdirSync(DIR, { recursive: true });
 
@@ -165,7 +166,9 @@ console.log('\nЗахист шляху');
   });
   t('id власника з «../» не виводить запис за межі медіатеки',
     !fs.existsSync('/tmp/evil') && !fs.existsSync(`${DIR}/../evil`));
-  t('файл лежить усередині media/', store.assetPath(evil).startsWith(`${DIR}/media/`), store.assetPath(evil));
+  // path.join, а не рядок з «/»: на Windows шлях іде через «\\» (журнал #260 — тест упав лише там).
+  const mediaRoot = path.resolve(DIR, 'media') + path.sep;
+  t('файл лежить усередині media/', path.resolve(store.assetPath(evil)).startsWith(mediaRoot), store.assetPath(evil));
 }
 
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);

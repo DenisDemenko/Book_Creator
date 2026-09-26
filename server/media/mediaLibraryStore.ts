@@ -61,6 +61,21 @@ export const MEDIA_MIME_EXTENSIONS: Record<string, string> = {
   'video/mp4': 'mp4',
 };
 
+// ---------------------------------------------------------------------------
+// Паспорт зображення (Т2.3 В1, PLAN_VISUAL_LIBRARY.md §2)
+// ---------------------------------------------------------------------------
+
+/** Звідки зображення. */
+export type MediaSource = 'upload' | 'ai' | 'stock' | 'commission' | 'scan';
+export const MEDIA_SOURCES: readonly MediaSource[] = ['upload', 'ai', 'stock', 'commission', 'scan'];
+
+/** Ліцензія (перелік погоджено власником 25.09.2026). */
+export type MediaLicense = 'own' | 'cc-by' | 'cc-by-sa' | 'cc0' | 'licensed' | 'unknown';
+export const MEDIA_LICENSES: readonly MediaLicense[] = ['own', 'cc-by', 'cc-by-sa', 'cc0', 'licensed', 'unknown'];
+
+export type MediaStatus = 'draft' | 'final';
+export const MEDIA_STATUSES: readonly MediaStatus[] = ['draft', 'final'];
+
 export interface MediaAsset {
   id: string;
   ownerId: string;
@@ -75,6 +90,87 @@ export interface MediaAsset {
   createdAt: string;
   /** Похідне: те, що йде в книгу замість мегабайтів base64. */
   url: string;
+  /** Паспорт: назва для людей ('' — показується filename). */
+  title: string;
+  /** Опис зображення для читача (alt). */
+  altText: string;
+  source: MediaSource;
+  author: string;
+  license: MediaLicense;
+  licenseUrl: string;
+  status: MediaStatus;
+  /** Версії: попередня версія, перша версія групи (ключ), номер у групі. */
+  parentId: string | null;
+  rootId: string;
+  version: number;
+  updatedAt: string;
+}
+
+/** Що автор може змінити в паспорті. */
+export interface MediaPassportPatch {
+  title?: string;
+  altText?: string;
+  source?: MediaSource;
+  author?: string;
+  license?: MediaLicense;
+  licenseUrl?: string;
+  status?: MediaStatus;
+}
+
+export type MediaHistoryAction = 'created' | 'version' | 'passport' | 'deleted';
+
+export interface MediaHistoryEntry {
+  id: number;
+  assetId: string;
+  rootId: string;
+  ownerId: string;
+  at: string;
+  /** `user:<id>`, `ai:<модель>` чи `system:…`. */
+  actor: string;
+  action: MediaHistoryAction;
+  details: Record<string, unknown>;
+}
+
+/** Помилка перевірки паспорта — маршрут перетворює її на 400. */
+export class MediaPassportError extends Error {}
+
+const PASSPORT_TEXT_LIMITS: Record<'title' | 'altText' | 'author' | 'licenseUrl', number> = {
+  title: 200,
+  altText: 1000,
+  author: 200,
+  licenseUrl: 500,
+};
+
+/**
+ * Перевіряє й нормалізує зміни паспорта. Невідоме поле ігнорується, неправильне
+ * значення — MediaPassportError з поясненням (а не мовчазна заміна).
+ */
+export function normalizePassportPatch(raw: unknown): MediaPassportPatch {
+  const src = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const out: MediaPassportPatch = {};
+  for (const key of ['title', 'altText', 'author', 'licenseUrl'] as const) {
+    if (src[key] === undefined) continue;
+    if (src[key] !== null && typeof src[key] !== 'string') throw new MediaPassportError(`Поле «${key}» має бути текстом.`);
+    const v = String(src[key] ?? '').trim();
+    if (v.length > PASSPORT_TEXT_LIMITS[key]) throw new MediaPassportError(`Поле «${key}» задовге (до ${PASSPORT_TEXT_LIMITS[key]} знаків).`);
+    out[key] = v;
+  }
+  if (out.licenseUrl && !/^https?:\/\/\S+$/i.test(out.licenseUrl)) {
+    throw new MediaPassportError('Посилання на ліцензію має починатися з http:// або https://.');
+  }
+  if (src.source !== undefined) {
+    if (!MEDIA_SOURCES.includes(src.source as MediaSource)) throw new MediaPassportError(`Невідоме джерело «${String(src.source)}».`);
+    out.source = src.source as MediaSource;
+  }
+  if (src.license !== undefined) {
+    if (!MEDIA_LICENSES.includes(src.license as MediaLicense)) throw new MediaPassportError(`Невідома ліцензія «${String(src.license)}».`);
+    out.license = src.license as MediaLicense;
+  }
+  if (src.status !== undefined) {
+    if (!MEDIA_STATUSES.includes(src.status as MediaStatus)) throw new MediaPassportError(`Невідомий статус «${String(src.status)}».`);
+    out.status = src.status as MediaStatus;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +181,8 @@ const JSON_FILE = 'media-assets.json';
 
 interface JsonShape {
   assets: MediaAsset[];
+  /** Історія зображень (Т2.3 В1); у старих файлах поля немає. */
+  history: MediaHistoryEntry[];
 }
 
 let jsonCache: JsonShape | null = null;
@@ -95,9 +193,13 @@ async function loadJson(): Promise<JsonShape> {
   try {
     const raw = await fs.readFile(path.join(DATA_DIR, JSON_FILE), 'utf8');
     const parsed = JSON.parse(raw) as Partial<JsonShape>;
-    jsonCache = { assets: Array.isArray(parsed.assets) ? parsed.assets : [] };
+    jsonCache = {
+      // Старі записи JSON-файлу — без паспорта: доповнюємо тими самими правилами, що й рядки SQLite.
+      assets: Array.isArray(parsed.assets) ? parsed.assets.map((a) => withPassportDefaults(a)) : [],
+      history: Array.isArray(parsed.history) ? parsed.history : [],
+    };
   } catch {
-    jsonCache = { assets: [] };
+    jsonCache = { assets: [], history: [] };
   }
   return jsonCache;
 }
@@ -165,9 +267,35 @@ export function assetIdFromUrl(url: string): string | null {
 // Запис і читання
 // ---------------------------------------------------------------------------
 
+/**
+ * Паспорт для запису, у якого його ще немає (рядок до Т2.3 чи новий файл без
+ * указаних полів). Правила — одні для SQLite і JSON:
+ *   джерело — «ШІ», якщо є промпт чи модель, інакше «завантажено»;
+ *   ліцензія — «своя» для згенерованого, «невідома» для завантаженого
+ *     (про чуже фото ми нічого не знаємо — чесніше так і сказати);
+ *   статус — «готове»; версія — 1, група — сам файл.
+ */
+function withPassportDefaults(a: Partial<MediaAsset> & { id: string; createdAt: string }): MediaAsset {
+  const source: MediaSource = MEDIA_SOURCES.includes(a.source as MediaSource) ? (a.source as MediaSource) : a.prompt || a.model ? 'ai' : 'upload';
+  return {
+    ...(a as MediaAsset),
+    title: a.title ?? '',
+    altText: a.altText ?? '',
+    source,
+    author: a.author ?? '',
+    license: MEDIA_LICENSES.includes(a.license as MediaLicense) ? (a.license as MediaLicense) : source === 'ai' ? 'own' : 'unknown',
+    licenseUrl: a.licenseUrl ?? '',
+    status: MEDIA_STATUSES.includes(a.status as MediaStatus) ? (a.status as MediaStatus) : 'final',
+    parentId: a.parentId ?? null,
+    rootId: a.rootId || a.id,
+    version: Number(a.version) > 0 ? Number(a.version) : 1,
+    updatedAt: a.updatedAt || a.createdAt,
+  };
+}
+
 function rowToAsset(row: any): MediaAsset {
   const id = String(row.id);
-  return {
+  return withPassportDefaults({
     id,
     ownerId: String(row.owner_id),
     bookId: row.book_id ? String(row.book_id) : null,
@@ -179,7 +307,52 @@ function rowToAsset(row: any): MediaAsset {
     model: row.model ? String(row.model) : null,
     createdAt: String(row.created_at),
     url: urlForAsset(id),
+    title: row.title ?? undefined,
+    altText: row.alt_text ?? undefined,
+    source: row.source ?? undefined,
+    author: row.author ?? undefined,
+    license: row.license ?? undefined,
+    licenseUrl: row.license_url ?? undefined,
+    status: row.status ?? undefined,
+    parentId: row.parent_id ?? null,
+    rootId: row.root_id ?? undefined,
+    version: row.version ?? undefined,
+    updatedAt: row.updated_at ?? undefined,
+  });
+}
+
+function rowToHistory(row: any): MediaHistoryEntry {
+  let details: Record<string, unknown> = {};
+  try {
+    details = JSON.parse(String(row.details || '{}'));
+  } catch {
+    /* зіпсований JSON — порожні подробиці, запис лишається */
+  }
+  return {
+    id: Number(row.id),
+    assetId: String(row.asset_id),
+    rootId: String(row.root_id),
+    ownerId: String(row.owner_id),
+    at: String(row.at),
+    actor: String(row.actor),
+    action: String(row.action) as MediaHistoryAction,
+    details,
   };
+}
+
+/** Записати подію в історію зображення (група — `rootId`). */
+export async function recordAssetHistory(entry: Omit<MediaHistoryEntry, 'id' | 'at'> & { at?: string }): Promise<void> {
+  const at = entry.at ?? new Date().toISOString();
+  if (useJson()) {
+    const data = await loadJson();
+    const id = data.history.reduce((m, h) => Math.max(m, h.id), 0) + 1;
+    data.history.push({ ...entry, id, at });
+    await persistJson();
+    return;
+  }
+  getDb()!
+    .prepare('INSERT INTO media_asset_history (asset_id, root_id, owner_id, at, actor, action, details) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(entry.assetId, entry.rootId, entry.ownerId, at, entry.actor, entry.action, JSON.stringify(entry.details ?? {}));
 }
 
 export function newAssetId(): string {
@@ -196,6 +369,12 @@ export async function saveAsset(params: {
   prompt?: string | null;
   model?: string | null;
   now?: () => Date;
+  /** Нова версія наявного зображення (Т2.3 В1): id попередньої версії того ж власника. */
+  parentId?: string | null;
+  /** Паспорт одразу при збереженні; не вказане — як у попередньої версії або за правилами за замовчуванням. */
+  passport?: MediaPassportPatch;
+  /** Хто зберіг — для історії; типово `user:<власник>`. */
+  actor?: string;
 }): Promise<MediaAsset> {
   const ownerId = String(params.ownerId || '').trim();
   if (!ownerId) throw new Error('Медіафайл без власника — зберігати нікуди.');
@@ -206,19 +385,45 @@ export async function saveAsset(params: {
     throw new Error(`Непідтримуваний тип файлу: ${mimeType || 'невідомий'}.`);
   }
 
-  const record: MediaAsset = {
-    id: newAssetId(),
+  // Нова версія: попередня має бути своєю; група, книга, вид і паспорт — від неї.
+  let parent: MediaAsset | null = null;
+  if (params.parentId) {
+    parent = await getAsset(String(params.parentId));
+    if (!parent || parent.ownerId !== ownerId) throw new Error('Попередню версію зображення не знайдено.');
+  }
+  const passport = normalizePassportPatch(params.passport ?? {});
+  const nowIso = (params.now?.() ?? new Date()).toISOString();
+  const id = newAssetId();
+  let version = 1;
+  if (parent) {
+    const group = (await listAssets(ownerId)).filter((a) => a.rootId === parent!.rootId);
+    version = Math.max(parent.version, ...group.map((a) => a.version)) + 1;
+  }
+
+  const record: MediaAsset = withPassportDefaults({
+    id,
     ownerId,
-    bookId: params.bookId ? String(params.bookId) : null,
-    kind: KINDS.includes(params.kind) ? params.kind : 'upload',
+    bookId: params.bookId ? String(params.bookId) : parent?.bookId ?? null,
+    kind: KINDS.includes(params.kind) ? params.kind : parent?.kind ?? 'upload',
     filename: String(params.filename || 'image').slice(0, 200),
     mimeType,
     sizeBytes: params.bytes.length,
     prompt: params.prompt ? String(params.prompt).slice(0, 4000) : null,
     model: params.model ? String(params.model).slice(0, 200) : null,
-    createdAt: (params.now?.() ?? new Date()).toISOString(),
+    createdAt: nowIso,
     url: '',
-  };
+    title: passport.title ?? parent?.title,
+    altText: passport.altText ?? parent?.altText,
+    source: passport.source,
+    author: passport.author ?? parent?.author,
+    license: passport.license ?? (parent && !params.prompt && !params.model ? parent.license : undefined),
+    licenseUrl: passport.licenseUrl ?? parent?.licenseUrl,
+    status: passport.status ?? parent?.status,
+    parentId: parent?.id ?? null,
+    rootId: parent?.rootId ?? id,
+    version,
+    updatedAt: nowIso,
+  });
   record.url = urlForAsset(record.id);
 
   // Спершу файл, потім опис: опис без файлу — це «битий рядок» у переліку,
@@ -230,27 +435,49 @@ export async function saveAsset(params: {
     const data = await loadJson();
     data.assets.push(record);
     await persistJson();
-    return record;
+  } else {
+    getDb()!
+      .prepare(
+        `INSERT INTO media_assets
+           (id, owner_id, book_id, kind, filename, mime_type, size_bytes, prompt, model, created_at,
+            title, alt_text, source, author, license, license_url, status, parent_id, root_id, version, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        record.id,
+        record.ownerId,
+        record.bookId,
+        record.kind,
+        record.filename,
+        record.mimeType,
+        record.sizeBytes,
+        record.prompt,
+        record.model,
+        record.createdAt,
+        record.title,
+        record.altText,
+        record.source,
+        record.author,
+        record.license,
+        record.licenseUrl,
+        record.status,
+        record.parentId,
+        record.rootId,
+        record.version,
+        record.updatedAt
+      );
   }
-
-  getDb()!
-    .prepare(
-      `INSERT INTO media_assets
-         (id, owner_id, book_id, kind, filename, mime_type, size_bytes, prompt, model, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
-      record.id,
-      record.ownerId,
-      record.bookId,
-      record.kind,
-      record.filename,
-      record.mimeType,
-      record.sizeBytes,
-      record.prompt,
-      record.model,
-      record.createdAt
-    );
+  await recordAssetHistory({
+    assetId: record.id,
+    rootId: record.rootId,
+    ownerId,
+    at: nowIso,
+    actor: params.actor || `user:${ownerId}`,
+    action: parent ? 'version' : 'created',
+    details: parent
+      ? { version: record.version, from: parent.id, filename: record.filename }
+      : { source: record.source, kind: record.kind, filename: record.filename, ...(record.model ? { model: record.model } : {}) },
+  });
   return record;
 }
 
@@ -321,6 +548,16 @@ export async function deleteAsset(id: string, ownerId: string): Promise<boolean>
     // Файла вже немає — опис усе одно прибираємо.
   }
 
+  // Історія лишається: вона пояснює, куди подівся файл і яка версія стала останньою.
+  await recordAssetHistory({
+    assetId: record.id,
+    rootId: record.rootId,
+    ownerId: record.ownerId,
+    actor: `user:${record.ownerId}`,
+    action: 'deleted',
+    details: { version: record.version, filename: record.filename },
+  });
+
   if (useJson()) {
     const data = await loadJson();
     data.assets = data.assets.filter((a) => a.id !== record.id);
@@ -330,6 +567,88 @@ export async function deleteAsset(id: string, ownerId: string): Promise<boolean>
 
   getDb()!.prepare('DELETE FROM media_assets WHERE id = ?').run(record.id);
   return true;
+}
+
+/**
+ * Змінити паспорт зображення. `null` — файлу немає або він чужий (як 404).
+ * Нічого не змінилось — запис лишається як був, в історію нічого не йде.
+ */
+export async function updateAssetPassport(
+  id: string,
+  ownerId: string,
+  rawPatch: unknown,
+  actor?: string,
+  now: () => Date = () => new Date()
+): Promise<MediaAsset | null> {
+  const patch = normalizePassportPatch(rawPatch);
+  const current = await getAsset(id);
+  if (!current || current.ownerId !== String(ownerId)) return null;
+  const changes: Record<string, { from: unknown; to: unknown }> = {};
+  for (const [k, v] of Object.entries(patch) as [keyof MediaPassportPatch, unknown][]) {
+    if (v !== undefined && current[k] !== v) changes[k] = { from: current[k], to: v };
+  }
+  if (!Object.keys(changes).length) return current;
+  const updatedAt = now().toISOString();
+  const next: MediaAsset = { ...current, ...patch, updatedAt } as MediaAsset;
+  if (useJson()) {
+    const data = await loadJson();
+    data.assets = data.assets.map((a) => (a.id === current.id ? next : a));
+    await persistJson();
+  } else {
+    getDb()!
+      .prepare(
+        `UPDATE media_assets SET title = ?, alt_text = ?, source = ?, author = ?, license = ?, license_url = ?, status = ?, updated_at = ?
+         WHERE id = ?`
+      )
+      .run(next.title, next.altText, next.source, next.author, next.license, next.licenseUrl, next.status, updatedAt, current.id);
+  }
+  await recordAssetHistory({
+    assetId: current.id,
+    rootId: current.rootId,
+    ownerId: current.ownerId,
+    at: updatedAt,
+    actor: actor || `user:${current.ownerId}`,
+    action: 'passport',
+    details: { changes },
+  });
+  return next;
+}
+
+/**
+ * Паспорт повністю: сам файл, усі його версії (від першої) і історія групи
+ * (новіші події першими). `null` — чужий чи неіснуючий файл.
+ */
+export async function getAssetPassport(
+  id: string,
+  ownerId: string
+): Promise<{ asset: MediaAsset; versions: MediaAsset[]; history: MediaHistoryEntry[] } | null> {
+  const asset = await getAsset(id);
+  if (!asset || asset.ownerId !== String(ownerId)) return null;
+  const versions = (await listAssets(asset.ownerId))
+    .filter((a) => a.rootId === asset.rootId)
+    .sort((a, b) => a.version - b.version);
+  let history: MediaHistoryEntry[];
+  if (useJson()) {
+    history = (await loadJson()).history.filter((h) => h.rootId === asset.rootId && h.ownerId === asset.ownerId);
+  } else {
+    history = (getDb()!
+      .prepare('SELECT * FROM media_asset_history WHERE root_id = ? AND owner_id = ? ORDER BY id')
+      .all(asset.rootId, asset.ownerId) as any[]).map(rowToHistory);
+  }
+  return { asset, versions, history: history.sort((a, b) => b.id - a.id) };
+}
+
+/**
+ * Лише останні версії: кожна група версій — одним записом (найбільший номер).
+ * Для галереї: попередні версії видно в паспорті, а не окремими картками.
+ */
+export function latestVersionsOnly(assets: MediaAsset[]): MediaAsset[] {
+  const best = new Map<string, MediaAsset>();
+  for (const a of assets) {
+    const cur = best.get(a.rootId);
+    if (!cur || a.version > cur.version) best.set(a.rootId, a);
+  }
+  return assets.filter((a) => best.get(a.rootId) === a);
 }
 
 /** Сумарний обсяг медіатеки автора — для звірки з лічильником тарифу. */

@@ -21,9 +21,13 @@ import { checkAndRecordStorageUpload, getStorageUsage } from './mediaStorage';
 import { listBooks } from './bookStore';
 import {
   deleteAsset,
+  getAssetPassport,
+  latestVersionsOnly,
   listAssets,
+  MediaPassportError,
   readAsset,
   saveAsset,
+  updateAssetPassport,
   type MediaKind,
 } from './media/mediaLibraryStore';
 
@@ -132,7 +136,7 @@ export function registerMediaRoutes(app: Express): void {
   app.post('/api/media/upload', requireAuth, async (req, res) => {
     try {
       const principal = req.principal!;
-      const { dataUrl, filename, bookId, kind, prompt, model } = req.body || {};
+      const { dataUrl, filename, bookId, kind, prompt, model, parentId, passport } = req.body || {};
 
       const payload = decodeImagePayload(dataUrl);
       if (!payload) {
@@ -171,10 +175,16 @@ export function registerMediaRoutes(app: Express): void {
         bytes: payload.bytes,
         prompt: typeof prompt === 'string' ? prompt : null,
         model: typeof model === 'string' ? model : null,
+        // Т2.3 В1: «замінити новою версією» і паспорт одразу при завантаженні.
+        parentId: typeof parentId === 'string' && parentId ? parentId : null,
+        passport: passport && typeof passport === 'object' ? passport : undefined,
+        actor: `user:${principal.id}`,
       });
 
       res.json({ asset, storage: quota });
     } catch (err) {
+      if (err instanceof MediaPassportError) return res.status(400).json({ error: err.message, kind: 'bad_passport' });
+      if (err instanceof Error && /Попередню версію/.test(err.message)) return res.status(404).json({ error: err.message });
       console.error('[media] upload:', err);
       res.status(500).json({ error: 'Не вдалося зберегти файл у медіатеці.' });
     }
@@ -185,7 +195,9 @@ export function registerMediaRoutes(app: Express): void {
     try {
       const principal = req.principal!;
       const bookId = typeof req.query.bookId === 'string' ? req.query.bookId : null;
-      const assets = await listAssets(principal.id as string, { bookId });
+      const all = await listAssets(principal.id as string, { bookId });
+      // `?latest=1` — лише останні версії (галерея); без нього — усе, як і раніше.
+      const assets = req.query.latest === '1' ? latestVersionsOnly(all) : all;
       res.json({ assets });
     } catch (err) {
       console.error('[media] list:', err);
@@ -260,6 +272,36 @@ export function registerMediaRoutes(app: Express): void {
     } catch (err) {
       console.error('[media] file:', err);
       res.status(500).json({ error: 'Не вдалося прочитати файл.' });
+    }
+  });
+
+  /**
+   * Паспорт зображення (Т2.3 В1): сам файл, усі версії й історія.
+   * Чужий файл — 404, як і скрізь у медіатеці.
+   */
+  app.get('/api/media/:id/passport', requireAuth, async (req, res) => {
+    try {
+      const principal = req.principal!;
+      const found = await getAssetPassport(String(req.params.id || ''), principal.id as string);
+      if (!found) return res.status(404).json({ error: 'Файл не знайдено.' });
+      res.json(found);
+    } catch (err) {
+      console.error('[media] passport:', err);
+      res.status(500).json({ error: 'Не вдалося прочитати паспорт файлу.' });
+    }
+  });
+
+  /** Змінити паспорт: назва, опис, джерело, автор, ліцензія, посилання, статус. */
+  app.patch('/api/media/:id', requireAuth, async (req, res) => {
+    try {
+      const principal = req.principal!;
+      const asset = await updateAssetPassport(String(req.params.id || ''), principal.id as string, req.body || {}, `user:${principal.id}`);
+      if (!asset) return res.status(404).json({ error: 'Файл не знайдено.' });
+      res.json({ asset });
+    } catch (err) {
+      if (err instanceof MediaPassportError) return res.status(400).json({ error: err.message, kind: 'bad_passport' });
+      console.error('[media] patch:', err);
+      res.status(500).json({ error: 'Не вдалося зберегти паспорт файлу.' });
     }
   });
 
