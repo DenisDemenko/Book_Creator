@@ -150,10 +150,29 @@ export const ExpressStartView: React.FC<{
   onCourseCreated?: (course: CourseV2) => void;
   /** Конструктор інструкцій зібрав документ у книгу — батько створює нову книгу й веде в «Книга & Текст» (журнал #199). */
   onInstructionBookCreated?: (payload: InstructionBookCreationPayload) => void;
-}> = ({ onFinish, onCourseCreated, onInstructionBookCreated }) => {
+  /**
+   * Задум книги, з яким прийшли з маркетплейсу (`?idea=…`). Їде просто в
+   * поле «Зерно» майстра: на головній людина вже виклала ідею реченням, і
+   * набирати її вдруге тут було б найгіршим першим кроком.
+   */
+  initialSeed?: string;
+  /**
+   * Гілка, з якої почати. Потрібна входу з маркетплейсу: там кнопка обіцяє
+   * книгу, тож розвилка «що створюємо?» перед нею — зайве коло. Гілку
+   * поважаємо лише якщо вона справді проходиться (isTrackRunnable): інакше
+   * замість попередження «чекає на опис» людина дістала б порожній майстер.
+   */
+  startTrack?: ExpressTrackId | null;
+}> = ({ onFinish, onCourseCreated, onInstructionBookCreated, initialSeed, startTrack }) => {
   // Напрям із минулого візиту підхоплюємо одразу при першому рендері,
   // щоб не блимнути екраном вибору перед тим, як показати майстер.
-  const [track, setTrack] = useState<ExpressTrackId | null>(() => readSavedTrack());
+  //
+  // Напрям із маркетплейсу — сильніший за збережений: людина щойно натисла
+  // кнопку про книгу, і старий вибір (скажімо, «курс») завів би її не туди,
+  // звідки вона прийшла.
+  const [track, setTrack] = useState<ExpressTrackId | null>(() =>
+    isTrackRunnable(startTrack) ? startTrack! : readSavedTrack()
+  );
   const [preview, setPreview] = useState<ExpressTrack | null>(null);
 
   useEffect(() => {
@@ -188,6 +207,7 @@ export const ExpressStartView: React.FC<{
         track={track}
         trackTitle={active?.title}
         onChangeTrack={backToChoice}
+        initialSeed={initialSeed}
       />
     );
   }

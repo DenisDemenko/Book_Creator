@@ -5,6 +5,7 @@ import { HeaderNav } from './components/HeaderNav';
 import { SidebarNav } from './components/SidebarNav';
 import { StartPageView } from './components/StartPageView';
 import { ExpressStartView } from './components/ExpressStartView';
+import type { ExpressTrackId } from './data/expressTracks';
 import type { InstructionBookCreationPayload } from './components/InstructionBuilderView';
 import { DiagnosticsView } from './components/DiagnosticsView';
 import { EditorView, type PromptConstructorRequest } from './components/EditorView';
@@ -91,6 +92,11 @@ import {
   type BookSummary,
 } from './utils/storage';
 import { parseAppPath, buildAppPath, isCorePageTab } from './utils/appRoutes';
+import {
+  STUDIO_ENTRY_PARAMS,
+  parseStudioEntry,
+  type StudioEntryIntent,
+} from './utils/studioEntry';
 import { API_BASE } from './utils/basePath';
 import { CorePageView } from './components/CorePageView';
 import { stampBookRevision, isNewerBook, describeRevisionGap } from './utils/bookVersion';
@@ -362,39 +368,52 @@ export default function App() {
     }
   }, []);
 
-  // Вхід із кнопки «Створити книгу» на головній маркетплейсу
-  // (?create=book): студія відкривається одразу на створенні книги, а не на
-  // панелі, звідки її ще треба знайти. Саме це відрізняє ту кнопку від
-  // сусідньої «Відкрити студію» — інакше обидві вели б в одне місце.
+  // Вхід із головної маркетплейсу в конкретний розділ Студії: `?open=<слаг>`
+  // та `?idea=<задум>` (розбір — utils/studioEntry.ts), а також давня адреса
+  // `?create=book` від кнопки «Створити книгу за 5 хвилин». Маркетплейс не
+  // знає ні книги, ні вкладки — він передає намір, а рішення ухвалює Студія;
+  // саме тому тут той самий механізм, що вже був для `?create=book`.
   //
   // Намір зберігається окремо від адреси й чекає на автентифікацію. Прямо
-  // на монтуванні відкривати вікно марно: людина, яка прийшла з
-  // маркетплейсу, найчастіше ще не увійшла, і поверх екрана входу воно
-  // просто згоріло б, а параметр із адреси вже зник.
-  //
-  // Коли зʼявиться експрес-майстер (Wisart Book Crealiry.md §3.4), тут
-  // стане перемикач на вкладку `express`; поки що найближче до задуму —
-  // наявне вікно створення книги.
-  const [pendingCreateBook, setPendingCreateBook] = useState<boolean>(false);
+  // на монтуванні відкривати розділ марно: людина, яка прийшла з
+  // маркетплейсу, найчастіше ще не увійшла, і за екраном входу перехід
+  // просто згорів би, а параметр із адреси вже зник.
+  const [pendingEntry, setPendingEntry] = useState<StudioEntryIntent | null>(null);
+  /** Задум книги з маркетплейсу — стане полем «Зерно» в експрес-майстрі. */
+  const [entryIdea, setEntryIdea] = useState<string | null>(null);
+  /** Гілка майстра, обрана за людину на вході з маркетплейсу (див. нижче). */
+  const [entryTrack, setEntryTrack] = useState<ExpressTrackId | null>(null);
 
   useEffect(() => {
+    const intent = parseStudioEntry(window.location.search);
+    if (!intent) return;
+    setPendingEntry(intent);
+    // Прибираємо з адреси одразу, як і `invite` нижче: інакше параметри
+    // лишаться в історії, і кнопка «назад» відкриє те саме вдруге.
     const url = new URL(window.location.href);
-    if (url.searchParams.get('create') !== 'book') return;
-    setPendingCreateBook(true);
-    // Прибираємо з адреси одразу, як і `invite` нижче: інакше параметр
-    // лишиться в історії, і кнопка «назад» відкриє вікно вдруге.
-    url.searchParams.delete('create');
+    for (const key of STUDIO_ENTRY_PARAMS) url.searchParams.delete(key);
     window.history.replaceState({}, '', url.toString());
   }, []);
 
   useEffect(() => {
-    if (!pendingCreateBook) return;
+    if (!pendingEntry) return;
     if (auth.loading) return;
-    // Гостю теж відкриваємо: за ТЗ §3.4.1 майстер проходять до реєстрації —
-    // саме в цьому його сенс як точки входу з маркетплейсу.
-    setCurrentTab('express');
-    setPendingCreateBook(false);
-  }, [pendingCreateBook, auth.loading]);
+    // Розділ відкриваємо лише тому, кому він доступний. Майстер гостю
+    // доступний (ТЗ §3.4.1: його проходять до реєстрації), решта розділів —
+    // ні; тоді намір лишається в черзі й спрацьовує після входу. Це і є
+    // «живий перехід у студію для зареєстрованих»: гостя він не викидає на
+    // порожній екран, а чекає, поки той увійде.
+    const role = auth.user?.role ?? currentRole;
+    if (!canAccessTab(role, pendingEntry.tab)) return;
+    setCurrentTab(pendingEntry.tab);
+    setEntryIdea(pendingEntry.idea ?? null);
+    // Обидві кнопки блоку NOVA STUDIO обіцяють книгу («Створити книгу за
+    // 5 хвилин» і «Створити план книги»), тож розвилку «що створюємо?»
+    // проходимо за людину: вона вже сказала, що саме. Гілку все одно можна
+    // змінити в майстрі — для цього в нього є «назад до вибору напряму».
+    setEntryTrack(pendingEntry.tab === 'express' ? 'book' : null);
+    setPendingEntry(null);
+  }, [pendingEntry, auth.loading, auth.user?.role, currentRole]);
 
   // Перехід за посиланням cowork-запрошення (?invite=<token>) — токен читаємо
   // один раз і одразу прибираємо з адресного рядка, щоб він не залишався в
@@ -624,10 +643,18 @@ export default function App() {
     const serverRole = auth.user.role as UserRole;
     setCurrentRole((prev) => (prev === serverRole ? prev : serverRole));
     if (!canAccessTab(serverRole, currentTab)) {
-      setCurrentTab(getDefaultTabForRole(serverRole));
+      // Намір із маркетплейсу тут сильніший за «типову вкладку ролі».
+      // Інакше дві вимоги штовхаються в одному коміті: гість приходить із
+      // початковою вкладкою дашборда (гостю вона недоступна), роль вимагає
+      // перевести на типову для ролі — і перехід із блоку NOVA STUDIO
+      // скасовується, щойно його застосовано. Тому коли намір для цієї ролі
+      // доступний, перемагає він.
+      const requested =
+        pendingEntry && canAccessTab(serverRole, pendingEntry.tab) ? pendingEntry.tab : null;
+      setCurrentTab(requested ?? getDefaultTabForRole(serverRole));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auth.loading, auth.user?.role, coworkLock, book.id]);
+  }, [auth.loading, auth.user?.role, coworkLock, book.id, pendingEntry]);
 
   // Адреса ↔ вкладка (Т0.8, К3). Кожна вкладка — /projects/<книга>/<сторінка>:
   // перший раз адреса лише уточнюється (replaceState), далі кожен перехід —
@@ -2064,6 +2091,10 @@ export default function App() {
               }}
               onCourseCreated={() => handleSelectTab('course-studio')}
               onInstructionBookCreated={handleInstructionBookCreated}
+              // Задум і гілка приїхали з маркетплейсу (`?idea=…`, `?open=express`):
+              // вводити ідею вдруге й обирати «книгу» на розвилці — зайві кола.
+              initialSeed={entryIdea ?? undefined}
+              startTrack={entryTrack}
             />
           </div>
         )}

@@ -118,13 +118,19 @@ export const ExpressWizardView: React.FC<{
   trackTitle?: string;
   /** Повернутись до вибору напряму. Без цього гілка — пастка в один бік. */
   onChangeTrack?: () => void;
-}> = ({ onFinish, track, trackTitle, onChangeTrack }) => {
+  /**
+   * Задум, з яким людина прийшла з маркетплейсу (`?idea=…` на вході в
+   * Студію). Стає початковим «Зерном» — і, на відміну від чернетки, не
+   * перезаписується нею: це найсвіжіше, що людина сказала про свою книгу.
+   */
+  initialSeed?: string;
+}> = ({ onFinish, track, trackTitle, onChangeTrack, initialSeed }) => {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [step, setStep] = useState(1);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [seed, setSeed] = useState('');
+  const [seed, setSeed] = useState(() => (initialSeed ?? '').trim());
   const [genre, setGenre] = useState('');
   const [engines, setEngines] = useState<EngineInfo[]>([]);
   const [engine, setEngine] = useState<string>('');
@@ -154,7 +160,15 @@ export const ExpressWizardView: React.FC<{
   }, []);
 
   // Відновлення незавершеної чернетки.
+  //
+  // Задум із маркетплейсу сильніший за чернетку, і це не дрібниця: людина
+  // щойно сформулювала ідею на головній і прийшла саме з нею. Підставити
+  // замість неї стару заготовку означало б затерти те, що вона тільки-но
+  // написала. Тож із задумом майстер починається з чистого аркуша, а
+  // чернетка лишається в сховищі й повернеться, коли задуму немає (в т. ч.
+  // після F5 — параметр з адреси вже прибрано).
   useEffect(() => {
+    if ((initialSeed ?? '').trim()) return;
     let id: string | null = null;
     try {
       id = localStorage.getItem(DRAFT_KEY);
@@ -189,7 +203,7 @@ export const ExpressWizardView: React.FC<{
           /* не критично */
         }
       });
-  }, []);
+  }, [initialSeed]);
 
   const suggest = useCallback(
     async (draftId: string, stage: 'framework' | 'cast' | 'synopsis') => {
