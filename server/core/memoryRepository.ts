@@ -25,6 +25,8 @@ import {
   checkTimePoint,
   checkEmotionPoint,
   checkAssetLink,
+  checkAppearanceVersion,
+  appearanceHash,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isSearchableKind, isValidEmbedding, memoryTextScore } from './search/text';
 import type {
@@ -55,6 +57,9 @@ import type {
   EmotionPointRow,
   AssetLinkInput,
   AssetLinkRow,
+  AppearanceVersionInput,
+  AppearanceVersionRow,
+  AppearanceHistoryRow,
   ParagraphVersionRow,
   ProjectInput,
   ProjectRow,
@@ -95,6 +100,8 @@ export class MemoryCoreRepository implements CoreRepository {
   private timePoints = new Map<string, TimePointRow>();
   private emotionPoints = new Map<string, EmotionPointRow>();
   private assetLinks = new Map<string, AssetLinkRow>();
+  private appearanceVersions = new Map<string, AppearanceVersionRow>();
+  private appearanceHistory: AppearanceHistoryRow[] = [];
   private embeddings = new Map<string, { projectId: string; paragraphId: string; model: string; contentHash: string; vector: number[] }>();
 
   private requireProject(projectId: string): ProjectRow {
@@ -774,6 +781,11 @@ export class MemoryCoreRepository implements CoreRepository {
     // Як зовнішні ключі в базі: сутність і розділ — з цього ж проєкту.
     if (input.entityId && !this.entityIn(input.projectId, input.entityId)) throw notFound(`Сутність «${input.entityId}»`);
     if (input.sectionId && !this.documents.get(key(input.projectId, input.sectionId))) throw notFound(`Розділ «${input.sectionId}»`);
+    if (input.appearanceVersionId) {
+      const v = this.appearanceVersions.get(input.appearanceVersionId);
+      if (!v || v.projectId !== input.projectId) throw notFound(`Версію зовнішності «${input.appearanceVersionId}»`);
+      if (v.entityId !== input.entityId) throw new CoreRuleError('bad_input', 'Версія зовнішності належить іншому героєві');
+    }
     const target = input.entityId ? `e:${input.entityId}` : `s:${input.sectionId}`;
     const prev = [...this.assetLinks.values()].find(
       (l) => l.projectId === input.projectId && l.assetUrl === input.assetUrl && (l.entityId ? `e:${l.entityId}` : `s:${l.sectionId}`) === target && l.role === input.role,
@@ -793,6 +805,7 @@ export class MemoryCoreRepository implements CoreRepository {
       checkedHash: input.checkedHash !== undefined ? input.checkedHash : prev?.checkedHash ?? null,
       evidence: [...(input.evidence ?? prev?.evidence ?? [])],
       note: input.note ?? prev?.note ?? '',
+      appearanceVersionId: input.appearanceVersionId !== undefined ? input.appearanceVersionId : prev?.appearanceVersionId ?? null,
       createdBy: input.createdBy,
       createdAt: prev?.createdAt ?? at,
       updatedAt: at,
@@ -819,6 +832,66 @@ export class MemoryCoreRepository implements CoreRepository {
     const l = this.assetLinks.get(id);
     if (!l || l.projectId !== projectId) return false;
     return this.assetLinks.delete(id);
+  }
+
+  // ── Версії зовнішності (Т2.3 В3) ─────────────────────────────────────────
+
+  async listAppearanceVersions(projectId: string, entityId?: string) {
+    return [...this.appearanceVersions.values()]
+      .filter((v) => v.projectId === projectId && (!entityId || v.entityId === entityId))
+      .sort((a, b) => (a.fromChapter ?? 0) - (b.fromChapter ?? 0) || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+      .map(clone);
+  }
+
+  async getAppearanceVersion(projectId: string, id: string) {
+    const v = this.appearanceVersions.get(id);
+    return v && v.projectId === projectId ? clone(v) : null;
+  }
+
+  async upsertAppearanceVersion(input: AppearanceVersionInput) {
+    this.requireProject(input.projectId);
+    const n = checkAppearanceVersion(input);
+    const prev = input.id ? this.appearanceVersions.get(input.id) : undefined;
+    if (input.id && (!prev || prev.projectId !== input.projectId)) throw notFound(`Версію зовнішності «${input.id}»`);
+    if (prev && prev.entityId !== input.entityId) throw new CoreRuleError('bad_input', 'Версію не можна перенести до іншого героя');
+    if (!this.entityIn(input.projectId, input.entityId)) throw notFound(`Сутність «${input.entityId}»`);
+    const at = now();
+    const row: AppearanceVersionRow = {
+      id: prev?.id ?? randomUUID(),
+      projectId: input.projectId,
+      entityId: input.entityId,
+      ...n,
+      descriptionHash: appearanceHash(n.description),
+      createdBy: prev?.createdBy ?? input.createdBy,
+      createdAt: prev?.createdAt ?? at,
+      updatedAt: at,
+    };
+    this.appearanceVersions.set(row.id, row);
+    await this.addAppearanceHistory({ projectId: row.projectId, versionId: row.id, entityId: row.entityId, action: prev ? 'updated' : 'created', snapshot: { ...row }, actor: input.createdBy });
+    return clone(row);
+  }
+
+  async deleteAppearanceVersion(projectId: string, id: string, actor: string) {
+    const v = this.appearanceVersions.get(id);
+    if (!v || v.projectId !== projectId) return false;
+    this.appearanceVersions.delete(id);
+    // Як ON DELETE SET NULL: портрети версії лишаються загальними портретами героя.
+    for (const l of this.assetLinks.values()) if (l.appearanceVersionId === id) l.appearanceVersionId = null;
+    await this.addAppearanceHistory({ projectId, versionId: id, entityId: v.entityId, action: 'deleted', snapshot: { ...v }, actor });
+    return true;
+  }
+
+  async addAppearanceHistory(input: Omit<AppearanceHistoryRow, 'id' | 'at'>) {
+    if (!/^(user|ai|system):.+/.test(input.actor)) throw new CoreRuleError('bad_actor', `Автор запису «${input.actor}»`);
+    this.appearanceHistory.push({ ...clone(input), id: String(this.appearanceHistory.length + 1), at: now() });
+  }
+
+  async listAppearanceHistory(projectId: string, entityId: string, limit = 50) {
+    return this.appearanceHistory
+      .filter((h) => h.projectId === projectId && h.entityId === entityId)
+      .slice(-limit)
+      .reverse()
+      .map(clone);
   }
 
   // ── Збережені запити (Т1.3) ──────────────────────────────────────────────

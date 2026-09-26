@@ -28,6 +28,7 @@ import {
   type TimePointInput,
   type EmotionPointInput,
   type AssetLinkInput,
+  type AppearanceVersionInput,
   ASSET_ROLES,
 } from './types';
 
@@ -200,6 +201,53 @@ export function checkAssetLink(l: AssetLinkInput): void {
   if ((l.source === 'ai' || isAiActor(l.createdBy)) && l.status && l.status !== 'suggested') {
     throw new CoreRuleError('ai_suggests_only', 'Зв\'язок від AI — лише пропозиція (suggested)');
   }
+  if (l.appearanceVersionId && (!hasEntity || !VERSIONED_ROLES.includes(l.role))) {
+    throw new CoreRuleError('bad_input', 'Версію зовнішності можна вказати лише для портрета, повного зросту чи референсу героя');
+  }
+}
+
+/** Ролі зображення, які можуть належати версії зовнішності (Т2.3 В3). */
+export const VERSIONED_ROLES: readonly string[] = ['portrait', 'full_body', 'reference'];
+
+/** Відбиток опису зовнішності: без різниці в пробілах і регістрі (Т2.3 В3/В5). */
+export function appearanceHash(description: string): string {
+  return blockHash(String(description ?? '').replace(/\s+/g, ' ').trim().toLocaleLowerCase('uk'));
+}
+
+/**
+ * Версія зовнішності (Т2.3 В3): ті самі правила, що й CHECK у базі.
+ * Повертає нормалізовані поля (обрізані рядки, цілі глави).
+ */
+export function checkAppearanceVersion(v: AppearanceVersionInput): {
+  label: string;
+  age: string;
+  fromChapter: number | null;
+  toChapter: number | null;
+  description: string;
+  approved: boolean;
+} {
+  assertActor(v.createdBy);
+  const label = String(v.label ?? '').trim();
+  if (!label || label.length > 120) throw new CoreRuleError('bad_input', 'Назва версії зовнішності — від 1 до 120 символів');
+  const age = String(v.age ?? '').trim();
+  if (age.length > 40) throw new CoreRuleError('bad_input', 'Вік — до 40 символів');
+  const description = String(v.description ?? '').trim();
+  if (description.length > 4000) throw new CoreRuleError('bad_input', 'Опис зовнішності — до 4000 символів');
+  const chapter = (x: unknown, what: string): number | null => {
+    if (x == null || x === '') return null;
+    const n = Number(x);
+    if (!Number.isInteger(n) || n < 1 || n > 100000) throw new CoreRuleError('bad_input', `${what} — ціле число від 1`);
+    return n;
+  };
+  const fromChapter = chapter(v.fromChapter, 'Глава «від»');
+  const toChapter = chapter(v.toChapter, 'Глава «до»');
+  if (fromChapter != null && toChapter != null && toChapter < fromChapter) {
+    throw new CoreRuleError('bad_input', `Глава «до» (${toChapter}) раніше за «від» (${fromChapter})`);
+  }
+  const ai = isAiActor(v.createdBy);
+  const approved = v.approved ?? !ai;
+  if (ai && approved) throw new CoreRuleError('ai_suggests_only', 'Опис зовнішності від AI — лише пропозиція; затверджує автор');
+  return { label, age, fromChapter, toChapter, description, approved };
 }
 
 export function checkMention(m: MentionInput): void {

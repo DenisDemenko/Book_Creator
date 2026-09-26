@@ -2,7 +2,8 @@
  * «Хто в сцені» (Т2.3 В2, критерій сторінки 7) — у редакторі, вкладка
  * «Персонажі і сцена»: герої, згадані в активному розділі, з портретами з
  * бібліотеки ілюстрацій (а без прив'язки — з картки героя), і ілюстрації,
- * прив'язані до цієї сцени.
+ * прив'язані до цієї сцени. З Т2.3 В3 — портрет і підпис версії зовнішності,
+ * що діє в главі цього розділу («Олена, 8 років»).
  *
  * Дані — `GET /api/projects/:id/visual/scene?sectionId=`. Ядро недоступне,
  * розділ ще не синхронізовано чи гість — панель просто не показується: вона
@@ -16,7 +17,8 @@ import { useLanguage } from '../i18n/LanguageContext';
 interface SceneData {
   sectionId: string;
   title: string;
-  cast: { entityId: string; name: string; portraitUrl: string | null; portraitSource: 'link' | 'card' | null }[];
+  chapterNumber?: number | null;
+  cast: { entityId: string; name: string; portraitUrl: string | null; portraitSource: 'link' | 'card' | null; versionLabel?: string | null }[];
   illustrations: { linkId: string; url: string; source: string }[];
 }
 
@@ -62,7 +64,9 @@ export const SceneVisualsPanel: React.FC<Props> = ({ bookId, sectionId, refreshK
                 <img
                   src={c.portraitUrl}
                   alt={c.name}
-                  title={c.portraitSource === 'link' ? t('visualLibrary.scenePortraitLink') : t('visualLibrary.scenePortraitCard')}
+                  title={[c.portraitSource === 'link' ? t('visualLibrary.scenePortraitLink') : t('visualLibrary.scenePortraitCard'), c.versionLabel ? t('visualLibrary.sceneVersion', { label: c.versionLabel }) : '']
+                    .filter(Boolean)
+                    .join(' · ')}
                   data-scene-portrait={c.portraitSource ?? ''}
                   className="h-12 w-12 rounded-full border border-slate-700 object-cover"
                   referrerPolicy="no-referrer"
@@ -73,6 +77,11 @@ export const SceneVisualsPanel: React.FC<Props> = ({ bookId, sectionId, refreshK
                 </div>
               )}
               <span className="w-full truncate text-[10px] text-slate-300">{c.name}</span>
+              {c.versionLabel && (
+                <span className="w-full truncate text-[9px] text-sky-300" title={t('visualLibrary.sceneVersion', { label: c.versionLabel })} data-scene-version={c.versionLabel}>
+                  {c.versionLabel}
+                </span>
+              )}
             </div>
           ))}
         </div>

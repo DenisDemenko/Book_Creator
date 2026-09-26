@@ -26,6 +26,8 @@ import {
   checkTimePoint,
   checkEmotionPoint,
   checkAssetLink,
+  checkAppearanceVersion,
+  appearanceHash,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isValidEmbedding, SEARCHABLE_KINDS, tsQueryFromStems } from './search/text';
 import type {
@@ -65,6 +67,9 @@ import type {
   EmotionPointRow,
   AssetLinkInput,
   AssetLinkRow,
+  AppearanceVersionInput,
+  AppearanceVersionRow,
+  AppearanceHistoryRow,
 } from './types';
 
 type Q = Pool | PoolClient;
@@ -139,9 +144,41 @@ function toAssetLink(r: any): AssetLinkRow {
     checkedHash: r.checked_hash ?? null,
     evidence: r.evidence ?? [],
     note: r.note,
+    appearanceVersionId: r.appearance_version_id ?? null,
     createdBy: r.created_by,
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
+  };
+}
+
+function toAppearanceVersion(r: any): AppearanceVersionRow {
+  return {
+    id: r.id,
+    projectId: r.project_id,
+    entityId: r.entity_id,
+    label: r.label,
+    age: r.age,
+    fromChapter: r.from_chapter ?? null,
+    toChapter: r.to_chapter ?? null,
+    description: r.description,
+    descriptionHash: r.description_hash,
+    approved: !!r.approved,
+    createdBy: r.created_by,
+    createdAt: iso(r.created_at),
+    updatedAt: iso(r.updated_at),
+  };
+}
+
+function toAppearanceHistory(r: any): AppearanceHistoryRow {
+  return {
+    id: String(r.id),
+    projectId: r.project_id,
+    versionId: r.version_id,
+    entityId: r.entity_id,
+    action: r.action,
+    snapshot: r.snapshot ?? {},
+    actor: r.actor,
+    at: iso(r.at),
   };
 }
 
@@ -1150,23 +1187,31 @@ export class PgCoreRepository implements CoreRepository {
   async upsertAssetLink(input: AssetLinkInput) {
     checkAssetLink(input);
     if (input.entityId && !isUuid(input.entityId)) throw notFound(`Сутність «${input.entityId}»`);
+    if (input.appearanceVersionId) {
+      const v = await this.getAppearanceVersion(input.projectId, input.appearanceVersionId);
+      if (!v) throw notFound(`Версію зовнішності «${input.appearanceVersionId}»`);
+      if (v.entityId !== input.entityId) throw new CoreRuleError('bad_input', 'Версія зовнішності належить іншому героєві');
+    }
     const target = input.entityId ? `e:${input.entityId}` : `s:${input.sectionId}`;
     const assetId = /^\/api\/media\/file\/([A-Za-z0-9_-]+)/.exec(input.assetUrl)?.[1] ?? null;
     // Зовнішні ключі (сутність, розділ цього проєкту) → not_found, як у сховищі в пам'яті.
+    // Версія: undefined — лишити як є ($15 = false), null чи id — записати.
     const { rows } = await this.q(
       `INSERT INTO asset_entity_links
-         (project_id, asset_url, asset_id, entity_id, section_id, target, role, status, source, checked_hash, evidence, note, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+         (project_id, asset_url, asset_id, entity_id, section_id, target, role, status, source, checked_hash, evidence, note, created_by, appearance_version_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        ON CONFLICT (project_id, asset_url, target, role) DO UPDATE SET
          status = excluded.status, source = excluded.source,
          checked_hash = COALESCE(excluded.checked_hash, asset_entity_links.checked_hash),
          evidence = CASE WHEN cardinality(excluded.evidence) > 0 THEN excluded.evidence ELSE asset_entity_links.evidence END,
          note = CASE WHEN excluded.note <> '' THEN excluded.note ELSE asset_entity_links.note END,
+         appearance_version_id = CASE WHEN $15::boolean THEN excluded.appearance_version_id ELSE asset_entity_links.appearance_version_id END,
          created_by = excluded.created_by, updated_at = now()
        RETURNING *`,
       [
         input.projectId, input.assetUrl, assetId, input.entityId ?? null, input.sectionId ?? null, target, input.role,
         input.status ?? 'confirmed', input.source ?? 'author', input.checkedHash ?? null, input.evidence ?? [], input.note ?? '', input.createdBy,
+        input.appearanceVersionId ?? null, input.appearanceVersionId !== undefined,
       ],
     );
     return toAssetLink(rows[0]);
@@ -1192,6 +1237,87 @@ export class PgCoreRepository implements CoreRepository {
     if (!isUuid(id)) return false;
     const res = await this.q('DELETE FROM asset_entity_links WHERE project_id = $1 AND id = $2', [projectId, id]);
     return (res?.rowCount ?? 0) > 0;
+  }
+
+  // ── Версії зовнішності (Т2.3 В3) ─────────────────────────────────────────
+
+  async listAppearanceVersions(projectId: string, entityId?: string) {
+    if (entityId && !isUuid(entityId)) return [];
+    const { rows } = await this.q(
+      `SELECT * FROM appearance_versions WHERE project_id = $1 AND ($2::uuid IS NULL OR entity_id = $2)
+       ORDER BY COALESCE(from_chapter, 0), created_at, id`,
+      [projectId, entityId ?? null],
+    );
+    return rows.map(toAppearanceVersion);
+  }
+
+  async getAppearanceVersion(projectId: string, id: string) {
+    if (!isUuid(id)) return null;
+    const { rows } = await this.q('SELECT * FROM appearance_versions WHERE project_id = $1 AND id = $2', [projectId, id]);
+    return rows[0] ? toAppearanceVersion(rows[0]) : null;
+  }
+
+  async upsertAppearanceVersion(input: AppearanceVersionInput) {
+    const n = checkAppearanceVersion(input);
+    if (!isUuid(input.entityId)) throw notFound(`Сутність «${input.entityId}»`);
+    const hash = appearanceHash(n.description);
+    return this.tx(async (c) => {
+      let row: AppearanceVersionRow;
+      if (input.id) {
+        const prev = isUuid(input.id) ? (await this.q('SELECT * FROM appearance_versions WHERE project_id = $1 AND id = $2 FOR UPDATE', [input.projectId, input.id], c)).rows[0] : null;
+        if (!prev) throw notFound(`Версію зовнішності «${input.id}»`);
+        if (prev.entity_id !== input.entityId) throw new CoreRuleError('bad_input', 'Версію не можна перенести до іншого героя');
+        const { rows } = await this.q(
+          `UPDATE appearance_versions SET label = $3, age = $4, from_chapter = $5, to_chapter = $6, description = $7,
+             description_hash = $8, approved = $9, updated_at = now()
+           WHERE project_id = $1 AND id = $2 RETURNING *`,
+          [input.projectId, input.id, n.label, n.age, n.fromChapter, n.toChapter, n.description, hash, n.approved],
+          c,
+        );
+        row = toAppearanceVersion(rows[0]);
+      } else {
+        const { rows } = await this.q(
+          `INSERT INTO appearance_versions (project_id, entity_id, label, age, from_chapter, to_chapter, description, description_hash, approved, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+          [input.projectId, input.entityId, n.label, n.age, n.fromChapter, n.toChapter, n.description, hash, n.approved, input.createdBy],
+          c,
+        );
+        row = toAppearanceVersion(rows[0]);
+      }
+      await this.addAppearanceHistory(
+        { projectId: row.projectId, versionId: row.id, entityId: row.entityId, action: input.id ? 'updated' : 'created', snapshot: { ...row }, actor: input.createdBy },
+        c,
+      );
+      return row;
+    });
+  }
+
+  async deleteAppearanceVersion(projectId: string, id: string, actor: string) {
+    if (!isUuid(id)) return false;
+    return this.tx(async (c) => {
+      const { rows } = await this.q('DELETE FROM appearance_versions WHERE project_id = $1 AND id = $2 RETURNING *', [projectId, id], c);
+      if (!rows[0]) return false;
+      const v = toAppearanceVersion(rows[0]);
+      await this.addAppearanceHistory({ projectId, versionId: id, entityId: v.entityId, action: 'deleted', snapshot: { ...v }, actor }, c);
+      return true;
+    });
+  }
+
+  async addAppearanceHistory(input: Omit<AppearanceHistoryRow, 'id' | 'at'>, on?: PoolClient) {
+    await this.q(
+      `INSERT INTO appearance_version_history (project_id, version_id, entity_id, action, snapshot, actor) VALUES ($1, $2, $3, $4, $5, $6)`,
+      [input.projectId, input.versionId, input.entityId, input.action, JSON.stringify(input.snapshot ?? {}), input.actor],
+      on ?? this.pool,
+    );
+  }
+
+  async listAppearanceHistory(projectId: string, entityId: string, limit = 50) {
+    if (!isUuid(entityId)) return [];
+    const { rows } = await this.q(
+      'SELECT * FROM appearance_version_history WHERE project_id = $1 AND entity_id = $2 ORDER BY at DESC, id DESC LIMIT $3',
+      [projectId, entityId, limit],
+    );
+    return rows.map(toAppearanceHistory);
   }
 
   // ── Збережені запити (Т1.3) ──────────────────────────────────────────────

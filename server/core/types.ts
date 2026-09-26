@@ -388,6 +388,8 @@ export interface AssetLinkRow {
   checkedHash: string | null;
   evidence: string[];
   note: string;
+  /** Версія зовнішності (Т2.3 В3): портрет саме цього етапу героя. */
+  appearanceVersionId: string | null;
   createdBy: CoreActor;
   createdAt: string;
   updatedAt: string;
@@ -401,7 +403,54 @@ export type AssetLinkInput = Pick<AssetLinkRow, 'projectId' | 'assetUrl' | 'role
   evidence?: string[];
   note?: string;
   checkedHash?: string | null;
+  /** undefined — не змінювати; null — зняти позначку версії. */
+  appearanceVersionId?: string | null;
 };
+
+/**
+ * Версія зовнішності героя (Т2.3 В3): етап за віком чи подіями з власним
+ * описом і портретом. Глави дії `fromChapter`–`toChapter` (null — з початку /
+ * до кінця). Діють лише затверджені автором (`approved`).
+ */
+export interface AppearanceVersionRow {
+  id: string;
+  projectId: string;
+  entityId: string;
+  label: string;
+  age: string;
+  fromChapter: number | null;
+  toChapter: number | null;
+  description: string;
+  /** Відбиток опису — для «перевірити» після зміни (етап В5). */
+  descriptionHash: string;
+  approved: boolean;
+  createdBy: CoreActor;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type AppearanceVersionInput = Pick<AppearanceVersionRow, 'projectId' | 'entityId' | 'label' | 'createdBy'> & {
+  /** Є — оновити цю версію; немає — створити. */
+  id?: string;
+  age?: string;
+  fromChapter?: number | null;
+  toChapter?: number | null;
+  description?: string;
+  approved?: boolean;
+};
+
+export type AppearanceHistoryAction = 'created' | 'updated' | 'deleted' | 'portrait' | 'portrait_removed';
+
+export interface AppearanceHistoryRow {
+  id: string;
+  projectId: string;
+  versionId: string;
+  entityId: string;
+  action: AppearanceHistoryAction;
+  snapshot: Record<string, unknown>;
+  actor: CoreActor;
+  at: string;
+}
 
 /** Збережений пошуковий запит автора (Т1.3). */
 export interface SavedSearchRow {
@@ -540,6 +589,17 @@ export interface CoreRepository {
   getAssetLink(projectId: string, id: string): Promise<AssetLinkRow | null>;
   setAssetLinkStatus(projectId: string, id: string, status: CoreStatus): Promise<AssetLinkRow>;
   deleteAssetLink(projectId: string, id: string): Promise<boolean>;
+
+  /**
+   * Версії зовнішності (Т2.3 В3). Кожна зміна пише рядок історії; видалення
+   * версії лишає її портрети загальними портретами героя.
+   */
+  listAppearanceVersions(projectId: string, entityId?: string): Promise<AppearanceVersionRow[]>;
+  getAppearanceVersion(projectId: string, id: string): Promise<AppearanceVersionRow | null>;
+  upsertAppearanceVersion(input: AppearanceVersionInput): Promise<AppearanceVersionRow>;
+  deleteAppearanceVersion(projectId: string, id: string, actor: CoreActor): Promise<boolean>;
+  addAppearanceHistory(input: Omit<AppearanceHistoryRow, 'id' | 'at'>): Promise<void>;
+  listAppearanceHistory(projectId: string, entityId: string, limit?: number): Promise<AppearanceHistoryRow[]>;
 
   /** Збережені запити автора в книзі (Т1.3), новіші першими. */
   listSavedSearches(projectId: string, userId: string): Promise<SavedSearchRow[]>;

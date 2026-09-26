@@ -17,6 +17,7 @@ import type { Book } from '../types';
 import { calculateWordCount } from '../utils/helpers';
 import { countNameInBook, replaceNameInBook } from '../utils/heroRename';
 import { entityBySlug } from '../utils/coreEntities';
+import { AppearanceVersionsPanel } from './AppearanceVersionsPanel';
 
 interface Place {
   paragraphId: string;
@@ -51,7 +52,7 @@ interface Profile {
   entity: { id: string; name: string; type: string };
   aliases: string[];
   formerNames: string[];
-  canon: { fields: { key: string; label: string; value: string }[]; portraitUrl: string | null; portraitSource?: 'link' | 'card' | null; hidden: boolean; linked: boolean };
+  canon: { fields: { key: string; label: string; value: string }[]; portraitUrl: string | null; portraitSource?: 'link' | 'card' | null; portraitVersion?: { id: string; label: string } | null; hidden: boolean; linked: boolean };
   chapters: { id: string; number: number; title: string }[];
   upto: number | null;
   appearances: { total: number; items: Place[] };
@@ -95,10 +96,14 @@ export const CharacterProfilePage: React.FC<Props> = ({ book, entityId, onBack, 
   const [showAll, setShowAll] = useState(false);
   const poll = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const loadSeq = useRef(0);
   const load = useCallback(async () => {
+    const my = ++loadSeq.current;
     setLoading(true);
     const res = await api(`${base}/profile${upto ? `?chapter=${upto}` : ''}`).catch(() => null);
     const body = res ? await res.json().catch(() => ({})) : {};
+    // Перемкнули главу, поки йшов запит, — стара відповідь не перезаписує нову.
+    if (my !== loadSeq.current) return;
     if (!res || !res.ok) setError(res?.status === 403 ? 'Немає доступу до цієї книги.' : res?.status === 503 ? 'Семантичне ядро зараз недоступне.' : body.error || 'Не вдалося завантажити профіль.');
     else {
       setError(null);
@@ -232,7 +237,14 @@ export const CharacterProfilePage: React.FC<Props> = ({ book, entityId, onBack, 
                 src={profile.canon.portraitUrl}
                 alt=""
                 data-profile-portrait={profile.canon.portraitSource ?? 'card'}
-                title={profile.canon.portraitSource === 'link' ? 'Портрет із Медіатеки (прив\'язаний до героя)' : 'Портрет із картки героя'}
+                data-profile-portrait-version={profile.canon.portraitVersion?.label ?? ''}
+                title={
+                  profile.canon.portraitVersion
+                    ? `Портрет версії зовнішності «${profile.canon.portraitVersion.label}»`
+                    : profile.canon.portraitSource === 'link'
+                      ? 'Портрет із Медіатеки (прив\'язаний до героя)'
+                      : 'Портрет із картки героя'
+                }
                 className="h-20 w-20 shrink-0 rounded-xl object-cover"
               />
             ) : (
@@ -247,6 +259,9 @@ export const CharacterProfilePage: React.FC<Props> = ({ book, entityId, onBack, 
                 {profile.aliases.length ? ` · також: ${profile.aliases.join(', ')}` : ''}
                 {profile.formerNames.length ? ` · колишнє ім'я: ${profile.formerNames.join(', ')}` : ''}
               </p>
+              {profile.canon.portraitVersion && (
+                <p className="text-[11px] text-emerald-300" data-profile-version>Зовнішність: {profile.canon.portraitVersion.label}</p>
+              )}
             </div>
             <div className="flex min-w-0 flex-col gap-1.5 sm:items-end">
               <label className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
@@ -273,12 +288,15 @@ export const CharacterProfilePage: React.FC<Props> = ({ book, entityId, onBack, 
               )}
             </div>
           </header>
-          {upto && (
+          {/* За завантаженим профілем, а не за перемикачем: поки йде запит, пояснення не обіцяє того, чого ще не показано. */}
+          {profile.upto && (
             <p className="rounded-xl border border-sky-500/30 bg-sky-500/5 px-3 py-2 text-[11px] text-sky-200" data-profile-spoiler-note>
-              Стан на главі {upto}: показано лише те, що має джерела в главах 1–{upto}. Картку автора (вона не прив'язана до глав) приховано, щоб не було спойлерів.
+              Стан на главі {profile.upto}: показано лише те, що має джерела в главах 1–{profile.upto}. Картку автора (вона не прив'язана до глав) приховано, щоб не було спойлерів.
             </p>
           )}
           {message && <p className="text-[11px] text-amber-300" data-profile-message>{message}</p>}
+
+          {profile.entity.type === 'character' && <AppearanceVersionsPanel bookId={book.id} entityId={entityId} upto={upto} onChanged={() => void load()} />}
 
           {rename.length > 0 && onUpdateBook && profile.canEdit && (
             <Section title="Героя перейменовано" tone="text-amber-300" attr="rename">

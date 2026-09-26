@@ -22,15 +22,15 @@ import type { JobQueue } from './jobs/queue';
 import { AI_MENTIONS_JOB_KIND, MENTION_SUGGESTION, RELATION_SUGGESTION, publicSuggestion } from './ai/mentions';
 import { hybridSearch, type SearchDeps, type SearchRequest } from './search/service';
 import { buildStoryGraph, evidenceRefs } from './storyGraph';
-import { AI_PROFILE_JOB_KIND, PROFILE_FACT, buildCharacterProfile, type StudioCharacterLike } from './characterProfile';
+import { AI_PROFILE_JOB_KIND, PROFILE_FACT, buildCharacterProfile, studioCanon, type StudioCharacterLike } from './characterProfile';
 import type { EntityRow } from './types';
 import { runFlcCycle } from './flc/cycle';
 import { buildTimeline, characterKnowledge } from './timeline';
 import { normalizeStoryTime } from '../../src/utils/storyTime';
 import { AI_EMOTIONS_JOB_KIND, EMOTION_POINT, buildEmotionMonitor } from './emotions';
-import { ROLE_ENTITY_TYPES, describeLinks, heroPortrait, sceneVisuals } from './visual';
+import { ROLE_ENTITY_TYPES, appearanceOverview, describeLinks, heroPortrait, sceneVisuals } from './visual';
 import { ASSET_ROLES, type AssetRole } from './types';
-import { isLinkableAssetUrl } from './rules';
+import { VERSIONED_ROLES, isLinkableAssetUrl } from './rules';
 import { clampIntensity, emotionFamily } from '../../src/utils/emotionScale';
 import { LlmFallbackJevAdapter, type JevAdapter, type LlmJson } from './flc/jev';
 import { interpretSearchQuery, type SearchInterpretDeps, type SearchInterpretation } from './search/interpret';
@@ -1012,12 +1012,22 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       }
       entityId = e.id;
     }
+    // Версія зовнішності (Т2.3 В3) — лише для портрета, повного зросту, референсу героя.
+    const versionId = typeof b.appearanceVersionId === 'string' && b.appearanceVersionId ? b.appearanceVersionId : null;
+    if (versionId) {
+      const v = await repo.getAppearanceVersion(req.params.id, versionId);
+      if (!v || v.entityId !== entityId || !VERSIONED_ROLES.includes(role)) {
+        res.status(400).json({ error: 'Версія зовнішності — лише цього героя і для портрета, повного зросту чи референсу.', kind: 'bad_input' });
+        return;
+      }
+    }
     const link = await repo.upsertAssetLink({
       projectId: req.params.id,
       assetUrl,
       role,
       entityId,
       sectionId,
+      appearanceVersionId: versionId,
       status: 'confirmed',
       source: 'author',
       note: typeof b.note === 'string' ? b.note.slice(0, 500) : '',
@@ -1077,6 +1087,152 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       return;
     }
     res.json({ portrait: await heroPortrait(repo, req.params.id, e.id, await cardPortrait(req.params.id)(e)) });
+  }));
+
+  // ── Т2.3 В3: версії зовнішності героя за віком чи етапом ─────────────────
+
+  /** Герой книги (лише тип «персонаж») або 404. */
+  const heroOr404 = async (repo: CoreRepository, req: Request, res: Response): Promise<EntityRow | null> => {
+    const e = await repo.getEntity(req.params.id, req.params.entityId);
+    if (!e || e.status === 'rejected' || e.type !== 'character') {
+      res.status(404).json({ error: 'Героя не знайдено.', kind: 'not_found' });
+      return null;
+    }
+    return e;
+  };
+  /** Картка героя в Студії: опис зовнішності (канон автора) і портрет. */
+  const heroCard = async (projectId: string, e: EntityRow) => {
+    const st = deps.studio ? await deps.studio(projectId, e).catch(() => undefined) : undefined;
+    const c = studioCanon(st?.character ?? null, st?.all ?? []);
+    return { description: c.fields.find((f) => f.key === 'appearance')?.value ?? '', portraitUrl: c.portraitUrl };
+  };
+  const chapterList = async (repo: CoreRepository, projectId: string) =>
+    (await repo.listDocuments(projectId))
+      .filter((d) => d.kind === 'chapter' && !d.deletedAt)
+      .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
+      .map((d, i) => ({ number: i + 1, title: d.title }));
+  const versionBody = (b: any) => ({
+    label: typeof b.label === 'string' ? b.label : '',
+    age: typeof b.age === 'string' || typeof b.age === 'number' ? String(b.age) : undefined,
+    fromChapter: b.fromChapter ?? null,
+    toChapter: b.toChapter ?? null,
+    description: typeof b.description === 'string' ? b.description : undefined,
+    approved: typeof b.approved === 'boolean' ? b.approved : undefined,
+  });
+
+  /** Стрічка версій героя; `?chapter=N` — «стан на главі N» (діюча позначена, пізніші приховані). */
+  app.get('/api/projects/:id/visual/appearance/:entityId', withRepo(async (repo, req, res) => {
+    const e = await heroOr404(repo, req, res);
+    if (!e) return;
+    const chapters = await chapterList(repo, req.params.id);
+    const n = Number(req.query.chapter);
+    const upto = Number.isInteger(n) && n >= 1 ? Math.min(n, Math.max(1, chapters.length)) : null;
+    const view = await appearanceOverview(repo, req.params.id, e.id, await heroCard(req.params.id, e), upto);
+    res.json({ ...view, entity: { id: e.id, name: e.name }, chapters, canEdit: canEditStory(req.projectAccess!) });
+  }));
+
+  /** Нова версія. Опис не передано — береться з картки героя (канон автора). */
+  app.post('/api/projects/:id/visual/appearance/:entityId', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const e = await heroOr404(repo, req, res);
+    if (!e) return;
+    const b = versionBody(req.body ?? {});
+    const version = await repo.upsertAppearanceVersion({
+      projectId: req.params.id,
+      entityId: e.id,
+      ...b,
+      description: b.description ?? (await heroCard(req.params.id, e)).description,
+      approved: b.approved ?? true,
+      createdBy: `user:${req.projectAccess!.userId}`,
+    });
+    res.status(201).json({ version });
+  }));
+
+  /** Змінити версію (назва, вік, глави, опис, затвердження). */
+  app.patch('/api/projects/:id/visual/appearance/:entityId/versions/:versionId', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const prev = await repo.getAppearanceVersion(req.params.id, req.params.versionId);
+    if (!prev || prev.entityId !== req.params.entityId) {
+      res.status(404).json({ error: 'Версії зовнішності немає.', kind: 'not_found' });
+      return;
+    }
+    const raw = req.body ?? {};
+    const b = versionBody(raw);
+    const version = await repo.upsertAppearanceVersion({
+      id: prev.id,
+      projectId: req.params.id,
+      entityId: prev.entityId,
+      label: 'label' in raw ? b.label : prev.label,
+      age: b.age ?? prev.age,
+      fromChapter: 'fromChapter' in raw ? b.fromChapter : prev.fromChapter,
+      toChapter: 'toChapter' in raw ? b.toChapter : prev.toChapter,
+      description: b.description ?? prev.description,
+      approved: b.approved ?? prev.approved,
+      createdBy: `user:${req.projectAccess!.userId}`,
+    });
+    res.json({ version });
+  }));
+
+  /** Видалити версію; її портрети лишаються загальними портретами героя. */
+  app.delete('/api/projects/:id/visual/appearance/:entityId/versions/:versionId', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const prev = await repo.getAppearanceVersion(req.params.id, req.params.versionId);
+    if (!prev || prev.entityId !== req.params.entityId) {
+      res.status(404).json({ error: 'Версії зовнішності немає.', kind: 'not_found' });
+      return;
+    }
+    res.json({ ok: await repo.deleteAppearanceVersion(req.params.id, prev.id, `user:${req.projectAccess!.userId}`) });
+  }));
+
+  /**
+   * Портрет версії: `{ assetUrl }` — зображення з Медіатеки стає портретом
+   * цієї версії (зв'язок «портрет» героя з позначкою версії); попередній
+   * портрет версії, прив'язаний автором, відв'язується, перенесений з книги —
+   * стає загальним. `{ assetUrl: null }` — прибрати портрет версії.
+   */
+  app.put('/api/projects/:id/visual/appearance/:entityId/versions/:versionId/portrait', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const v = await repo.getAppearanceVersion(req.params.id, req.params.versionId);
+    if (!v || v.entityId !== req.params.entityId) {
+      res.status(404).json({ error: 'Версії зовнішності немає.', kind: 'not_found' });
+      return;
+    }
+    const raw = req.body?.assetUrl;
+    const assetUrl = typeof raw === 'string' ? raw.trim() : null;
+    if (raw != null && !isLinkableAssetUrl(assetUrl ?? '')) {
+      res.status(400).json({ error: 'Потрібне зображення з Медіатеки (не вбудований data:-URL).', kind: 'bad_input' });
+      return;
+    }
+    const actor = `user:${req.projectAccess!.userId}`;
+    const links = await repo.listAssetLinks(req.params.id, { entityId: v.entityId });
+    for (const l of links) {
+      if (l.role !== 'portrait' || l.appearanceVersionId !== v.id || l.assetUrl === assetUrl) continue;
+      if (l.source === 'author') await repo.deleteAssetLink(req.params.id, l.id);
+      else await repo.upsertAssetLink({ projectId: l.projectId, assetUrl: l.assetUrl, role: l.role, entityId: l.entityId, status: l.status, source: l.source, appearanceVersionId: null, createdBy: l.createdBy });
+    }
+    let link = null;
+    if (assetUrl) {
+      const same = links.find((l) => l.role === 'portrait' && l.assetUrl === assetUrl);
+      link = await repo.upsertAssetLink({
+        projectId: req.params.id,
+        assetUrl,
+        role: 'portrait',
+        entityId: v.entityId,
+        appearanceVersionId: v.id,
+        status: 'confirmed',
+        source: same && same.source !== 'ai' ? same.source : 'author',
+        createdBy: same && same.source === 'legacy' ? same.createdBy : actor,
+      });
+    }
+    await repo.addAppearanceHistory({
+      projectId: req.params.id,
+      versionId: v.id,
+      entityId: v.entityId,
+      action: assetUrl ? 'portrait' : 'portrait_removed',
+      snapshot: { label: v.label, assetUrl },
+      actor,
+    });
+    res.json({ link: link ? (await describeLinks(repo, req.params.id, [link]))[0] : null });
   }));
 
   // ── Т1.6: прототип FLC етапу 0 (лише адміністратор) ──────────────────────

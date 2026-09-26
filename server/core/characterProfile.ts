@@ -190,9 +190,17 @@ export interface CharacterProfile {
   /**
    * Канон автора. `portraitUrl` — портрет із бібліотеки ілюстрацій (Т2.3 В2:
    * підтверджений зв'язок «портрет»), а без нього — з картки героя;
-   * `portraitSource` каже, звідки саме.
+   * `portraitSource` каже, звідки саме. У режимі «стан на главі N» — портрет
+   * версії зовнішності, що діє в главі N (Т2.3 В3), `portraitVersion` — її назва.
    */
-  canon: { fields: CanonField[]; portraitUrl: string | null; portraitSource: 'link' | 'card' | null; hidden: boolean; linked: boolean };
+  canon: {
+    fields: CanonField[];
+    portraitUrl: string | null;
+    portraitSource: 'link' | 'card' | null;
+    portraitVersion: { id: string; label: string } | null;
+    hidden: boolean;
+    linked: boolean;
+  };
   chapters: { id: string; number: number; title: string }[];
   upto: number | null;
   appearances: { total: number; items: ProfilePlace[] };
@@ -362,11 +370,12 @@ export async function buildCharacterProfile(repo: CoreRepository, projectId: str
 
   const canonAll = studioCanon(opts.studio?.character ?? null, opts.studio?.all ?? []);
   const hidden = upto != null;
-  const portrait = await heroPortrait(repo, projectId, entityId, canonAll.portraitUrl);
+  const portrait = await heroPortrait(repo, projectId, entityId, canonAll.portraitUrl, { chapter: upto });
   const canon = {
     fields: hidden ? canonAll.fields.filter((f) => f.key === 'role') : canonAll.fields,
     portraitUrl: portrait?.url ?? null,
     portraitSource: portrait?.source ?? null,
+    portraitVersion: portrait?.version ?? null,
     hidden,
     linked: !!opts.studio?.character,
   };

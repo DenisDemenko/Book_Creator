@@ -35,7 +35,12 @@ export interface VisualLink {
   source: 'author' | 'ai' | 'legacy';
   targetName: string;
   targetType: string;
+  /** Т2.3 В3: версія зовнішності героя, чий це портрет. */
+  appearanceVersionId?: string | null;
+  versionLabel?: string | null;
 }
+
+const VERSIONED: readonly AssetRoleKey[] = ['portrait', 'full_body', 'reference'];
 
 interface Targets {
   entities: { id: string; type: string; name: string }[];
@@ -63,6 +68,8 @@ export const MediaLinksPanel: React.FC<Props> = ({ bookId, assetUrl, onChanged, 
   const [adding, setAdding] = useState(false);
   const [role, setRole] = useState<AssetRoleKey>('portrait');
   const [target, setTarget] = useState('');
+  const [versions, setVersions] = useState<{ id: string; label: string }[]>([]);
+  const [versionId, setVersionId] = useState('');
   const [busy, setBusy] = useState(false);
   const embedded = /^data:/i.test(assetUrl);
 
@@ -99,12 +106,30 @@ export const MediaLinksPanel: React.FC<Props> = ({ bookId, assetUrl, onChanged, 
     return targets.entities.filter((e) => !types || types.includes(e.type)).map((e) => ({ id: e.id, label: types ? e.name : `${e.name} · ${e.type}` }));
   })();
 
+  // Версії зовнішності обраного героя (Т2.3 В3) — для портрета, повного зросту, референсу.
+  const targetIsHero = !!targets?.entities.find((e) => e.id === target && e.type === 'character');
+  useEffect(() => {
+    setVersionId('');
+    setVersions([]);
+    if (!targetIsHero || !VERSIONED.includes(role)) return;
+    let cancelled = false;
+    api(`${base}/appearance/${encodeURIComponent(target)}`)
+      .then(async (r) => (r.ok ? await r.json() : null))
+      .catch(() => null)
+      .then((d) => {
+        if (!cancelled && d?.versions) setVersions(d.versions.map((v: { id: string; label: string }) => ({ id: v.id, label: v.label })));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [base, target, targetIsHero, role]);
+
   const save = async () => {
     if (!target) return;
     setBusy(true);
     const res = await api(`${base}/links`, {
       method: 'POST',
-      body: JSON.stringify(role === 'scene' ? { assetUrl, role, sectionId: target } : { assetUrl, role, entityId: target }),
+      body: JSON.stringify(role === 'scene' ? { assetUrl, role, sectionId: target } : { assetUrl, role, entityId: target, appearanceVersionId: versionId || null }),
     }).catch(() => null);
     const body = res ? await res.json().catch(() => ({})) : {};
     setBusy(false);
@@ -158,6 +183,7 @@ export const MediaLinksPanel: React.FC<Props> = ({ bookId, assetUrl, onChanged, 
                 <span key={l.id} className="flex max-w-full items-center gap-1 rounded-full border border-slate-700 bg-slate-950 px-2 py-0.5 text-[11px] text-slate-200" data-media-link={`${l.role}:${l.targetName}`}>
                   <span className="text-slate-400">{t(ROLE_LABEL_KEY[l.role])}</span>
                   <span className="min-w-0 truncate font-bold">{l.targetName || '—'}</span>
+                  {l.versionLabel && <span className="min-w-0 truncate text-sky-300" data-media-link-version={l.versionLabel}>· {l.versionLabel}</span>}
                   <span className="text-[10px] text-slate-500">· {sourceLabel(l.source)}</span>
                   {canEdit && (
                     <button type="button" disabled={busy} onClick={() => void remove(l)} title={t('visualLibrary.linkRemove')} aria-label={t('visualLibrary.linkRemove')} className="text-slate-500 hover:text-rose-300" data-media-link-remove={l.id}>
@@ -188,6 +214,14 @@ export const MediaLinksPanel: React.FC<Props> = ({ bookId, assetUrl, onChanged, 
                   <option key={o.id} value={o.id}>{o.label}</option>
                 ))}
               </select>
+              {versions.length > 0 && (
+                <select className={`${selectCls} sm:col-span-3`} value={versionId} aria-label={t('visualLibrary.linkVersion')} data-media-link-version-pick onChange={(e) => setVersionId(e.target.value)}>
+                  <option value="">{t('visualLibrary.linkVersion')}: {t('visualLibrary.linkVersionNone')}</option>
+                  {versions.map((v) => (
+                    <option key={v.id} value={v.id}>{v.label}</option>
+                  ))}
+                </select>
+              )}
               <div className="flex items-center gap-1.5">
                 <button type="button" disabled={!target || busy} onClick={() => void save()} data-media-link-save className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-sky-500 disabled:opacity-40">
                   {t('visualLibrary.linkSave')}
