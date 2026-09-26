@@ -24,6 +24,7 @@ import {
 import { markerStringToTiptapDoc, tiptapDocToMarkerBlocks } from '../../src/utils/manuscriptDoc';
 import { blockHash, deterministicParagraphId, reconcileParagraphIds } from '../../src/utils/paragraphIds';
 import { CoreRuleError } from './rules';
+import { reconcileLegacyAssetLinks, type LegacyImage } from './visual';
 import type { CoreRepository, DocumentRow, MentionInput, ParagraphKind, ParagraphRow } from './types';
 
 export const CORE_SYNC_ACTOR = 'system:core_sync';
@@ -51,12 +52,21 @@ export interface SyncCharacter {
   name?: string;
   surname?: string;
   alias?: string;
+  /** Портрет героя з картки — переноситься в бібліотеку ілюстрацій (Т2.3 В2). */
+  avatarUrl?: string;
+}
+export interface SyncIllustration {
+  id?: string;
+  url?: string;
+  sectionId?: string;
 }
 export interface SyncBook {
   id: string;
   title?: string;
   chapters?: SyncChapter[];
   characters?: SyncCharacter[];
+  /** Ілюстрації книги: із розділом — стають ілюстраціями сцени (Т2.3 В2). */
+  illustrations?: SyncIllustration[];
 }
 
 export interface StoredBookForSync {
@@ -76,6 +86,8 @@ export interface CoreSyncResult {
   entities: { created: number; updated: number };
   findingsNeedReview: number;
   notifications: number;
+  /** Зображення з книги в бібліотеці ілюстрацій (Т2.3 В2): прив'язано / прибрано. */
+  assets: { linked: number; unlinked: number };
   /** false — повторне збереження без змін: у базу не записано нічого. */
   wroteAnything: boolean;
 }
@@ -134,6 +146,7 @@ export async function syncBookToCore(
     entities: { created: 0, updated: 0 },
     findingsNeedReview: 0,
     notifications: 0,
+    assets: { linked: 0, unlinked: 0 },
     wroteAnything: false,
   };
   if (!stored.ownerId) return { ...result, skipped: 'no_owner' };
@@ -376,6 +389,24 @@ export async function syncBookToCore(
     result.mentions.written += mentions.length;
     wrote();
   }
+
+  // 5а. Зображення з книги → бібліотека ілюстрацій (Т2.3 В2) -------------------
+  // Портрет героя й ілюстрація розділу — зв'язки `legacy`: нове в книзі
+  // з'являється, прибране — зникає, відхилене автором не повертається.
+  // `data:`-URL (старі вбудовані файли) не переносяться: їх треба спершу
+  // покласти в Медіатеку.
+  const legacy: LegacyImage[] = [];
+  for (const ch of book.characters ?? []) {
+    const entityId = ch?.id ? heroByStudioId.get(ch.id) : undefined;
+    if (entityId && ch.avatarUrl) legacy.push({ assetUrl: String(ch.avatarUrl), role: 'portrait', entityId });
+  }
+  for (const ill of book.illustrations ?? []) {
+    if (ill?.url && ill.sectionId && seenDocs.has(ill.sectionId) && sectionOf.has(ill.sectionId)) {
+      legacy.push({ assetUrl: String(ill.url), role: 'scene', sectionId: ill.sectionId });
+    }
+  }
+  result.assets = await reconcileLegacyAssetLinks(repo, projectId, legacy);
+  if (result.assets.linked || result.assets.unlinked) wrote();
 
   // 6. Ревізія, висновки на перегляд, сповіщення -------------------------------
   const touched = [...textChanged.map((p) => p.id), ...deletedIds];

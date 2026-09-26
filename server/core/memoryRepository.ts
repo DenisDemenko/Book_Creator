@@ -24,6 +24,7 @@ import {
   paragraphTextHash,
   checkTimePoint,
   checkEmotionPoint,
+  checkAssetLink,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isSearchableKind, isValidEmbedding, memoryTextScore } from './search/text';
 import type {
@@ -52,6 +53,8 @@ import type {
   TimePointRow,
   EmotionPointInput,
   EmotionPointRow,
+  AssetLinkInput,
+  AssetLinkRow,
   ParagraphVersionRow,
   ProjectInput,
   ProjectRow,
@@ -64,6 +67,8 @@ import type {
 } from './types';
 
 const key = (projectId: string, id: string) => `${projectId}\u0000${id}`;
+/** id файлу Медіатеки з URL зображення (Т2.3 В2). */
+export const assetIdOf = (url: string): string | null => /^\/api\/media\/file\/([A-Za-z0-9_-]+)/.exec(url)?.[1] ?? null;
 const now = () => new Date().toISOString();
 const clone = <T>(v: T): T => structuredClone(v);
 
@@ -89,6 +94,7 @@ export class MemoryCoreRepository implements CoreRepository {
   private savedSearches: SavedSearchRow[] = [];
   private timePoints = new Map<string, TimePointRow>();
   private emotionPoints = new Map<string, EmotionPointRow>();
+  private assetLinks = new Map<string, AssetLinkRow>();
   private embeddings = new Map<string, { projectId: string; paragraphId: string; model: string; contentHash: string; vector: number[] }>();
 
   private requireProject(projectId: string): ProjectRow {
@@ -749,6 +755,70 @@ export class MemoryCoreRepository implements CoreRepository {
     const p = this.emotionPoints.get(id);
     if (!p || p.projectId !== projectId) return false;
     return this.emotionPoints.delete(id);
+  }
+
+  // ── Бібліотека ілюстрацій (Т2.3 В2) ──────────────────────────────────────
+
+  async listAssetLinks(projectId: string, filter: { entityId?: string; sectionId?: string; assetUrl?: string; source?: AssetLinkRow['source'] } = {}) {
+    return [...this.assetLinks.values()]
+      .filter((l) => l.projectId === projectId)
+      .filter((l) => (!filter.entityId || l.entityId === filter.entityId) && (!filter.sectionId || l.sectionId === filter.sectionId))
+      .filter((l) => (!filter.assetUrl || l.assetUrl === filter.assetUrl) && (!filter.source || l.source === filter.source))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+      .map(clone);
+  }
+
+  async upsertAssetLink(input: AssetLinkInput) {
+    this.requireProject(input.projectId);
+    checkAssetLink(input);
+    // Як зовнішні ключі в базі: сутність і розділ — з цього ж проєкту.
+    if (input.entityId && !this.entityIn(input.projectId, input.entityId)) throw notFound(`Сутність «${input.entityId}»`);
+    if (input.sectionId && !this.documents.get(key(input.projectId, input.sectionId))) throw notFound(`Розділ «${input.sectionId}»`);
+    const target = input.entityId ? `e:${input.entityId}` : `s:${input.sectionId}`;
+    const prev = [...this.assetLinks.values()].find(
+      (l) => l.projectId === input.projectId && l.assetUrl === input.assetUrl && (l.entityId ? `e:${l.entityId}` : `s:${l.sectionId}`) === target && l.role === input.role,
+    );
+    const at = now();
+    const row: AssetLinkRow = {
+      id: prev?.id ?? randomUUID(),
+      projectId: input.projectId,
+      assetUrl: input.assetUrl,
+      assetId: assetIdOf(input.assetUrl),
+      entityId: input.entityId ?? null,
+      sectionId: input.sectionId ?? null,
+      role: input.role,
+      status: input.status ?? 'confirmed',
+      source: input.source ?? 'author',
+      needsReview: prev?.needsReview ?? false,
+      checkedHash: input.checkedHash !== undefined ? input.checkedHash : prev?.checkedHash ?? null,
+      evidence: [...(input.evidence ?? prev?.evidence ?? [])],
+      note: input.note ?? prev?.note ?? '',
+      createdBy: input.createdBy,
+      createdAt: prev?.createdAt ?? at,
+      updatedAt: at,
+    };
+    this.assetLinks.set(row.id, row);
+    return clone(row);
+  }
+
+  async getAssetLink(projectId: string, id: string) {
+    const l = this.assetLinks.get(id);
+    return l && l.projectId === projectId ? clone(l) : null;
+  }
+
+  async setAssetLinkStatus(projectId: string, id: string, status: CoreStatus) {
+    const l = this.assetLinks.get(id);
+    if (!l || l.projectId !== projectId) throw notFound(`Зв'язок зображення «${id}»`);
+    if (!['suggested', 'confirmed', 'rejected'].includes(status)) throw new CoreRuleError('bad_input', `Невідомий статус «${status}»`);
+    const row = { ...l, status, updatedAt: now() };
+    this.assetLinks.set(id, row);
+    return clone(row);
+  }
+
+  async deleteAssetLink(projectId: string, id: string) {
+    const l = this.assetLinks.get(id);
+    if (!l || l.projectId !== projectId) return false;
+    return this.assetLinks.delete(id);
   }
 
   // ── Збережені запити (Т1.3) ──────────────────────────────────────────────

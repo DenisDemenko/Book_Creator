@@ -26,6 +26,7 @@
 
 import type { CoreRepository, DocumentRow, EntityRow, FindingRow, MentionRow, ParagraphRow } from './types';
 import { buildStoryGraph, evidenceRefs, type EvidenceRef } from './storyGraph';
+import { heroPortrait } from './visual';
 import { CORE_ENTITY_RELATIONS } from '../../src/utils/coreEntities';
 import { paragraphExcerpt, searchStems } from './search/text';
 import type { PreparedFinding, ModelFinding, AiRoleDeps } from './ai/roles';
@@ -186,7 +187,12 @@ export interface CharacterProfile {
   aliases: string[];
   /** Колишні імена (перейменування, П6) — з історії сутності. */
   formerNames: string[];
-  canon: { fields: CanonField[]; portraitUrl: string | null; hidden: boolean; linked: boolean };
+  /**
+   * Канон автора. `portraitUrl` — портрет із бібліотеки ілюстрацій (Т2.3 В2:
+   * підтверджений зв'язок «портрет»), а без нього — з картки героя;
+   * `portraitSource` каже, звідки саме.
+   */
+  canon: { fields: CanonField[]; portraitUrl: string | null; portraitSource: 'link' | 'card' | null; hidden: boolean; linked: boolean };
   chapters: { id: string; number: number; title: string }[];
   upto: number | null;
   appearances: { total: number; items: ProfilePlace[] };
@@ -356,9 +362,11 @@ export async function buildCharacterProfile(repo: CoreRepository, projectId: str
 
   const canonAll = studioCanon(opts.studio?.character ?? null, opts.studio?.all ?? []);
   const hidden = upto != null;
+  const portrait = await heroPortrait(repo, projectId, entityId, canonAll.portraitUrl);
   const canon = {
     fields: hidden ? canonAll.fields.filter((f) => f.key === 'role') : canonAll.fields,
-    portraitUrl: canonAll.portraitUrl,
+    portraitUrl: portrait?.url ?? null,
+    portraitSource: portrait?.source ?? null,
     hidden,
     linked: !!opts.studio?.character,
   };

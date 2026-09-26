@@ -28,6 +28,9 @@ import { runFlcCycle } from './flc/cycle';
 import { buildTimeline, characterKnowledge } from './timeline';
 import { normalizeStoryTime } from '../../src/utils/storyTime';
 import { AI_EMOTIONS_JOB_KIND, EMOTION_POINT, buildEmotionMonitor } from './emotions';
+import { ROLE_ENTITY_TYPES, describeLinks, heroPortrait, sceneVisuals } from './visual';
+import { ASSET_ROLES, type AssetRole } from './types';
+import { isLinkableAssetUrl } from './rules';
 import { clampIntensity, emotionFamily } from '../../src/utils/emotionScale';
 import { LlmFallbackJevAdapter, type JevAdapter, type LlmJson } from './flc/jev';
 import { interpretSearchQuery, type SearchInterpretDeps, type SearchInterpretation } from './search/interpret';
@@ -933,6 +936,147 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       status === 'confirmed' ? 'підтверджено автором (емоційний монітор)' : 'відхилено автором (емоційний монітор)',
     );
     res.json({ finding, point });
+  }));
+
+  // ── Т2.3 В2: бібліотека ілюстрацій — прив'язка зображень до сутностей ──────
+
+  /** Портрет із картки героя в Студії — запасний, коли зв'язку ще немає. */
+  const cardPortrait = (projectId: string) => async (entity: EntityRow) => {
+    if (!deps.studio) return null;
+    const st = await deps.studio(projectId, entity).catch(() => undefined);
+    return st?.character?.avatarUrl || null;
+  };
+
+  /** Зв'язки зображень книги; `?assetUrl=&entityId=&sectionId=` — фільтри. Відхилені — лише з `includeRejected=1`. */
+  app.get('/api/projects/:id/visual/links', withRepo(async (repo, req, res) => {
+    const q = req.query as Record<string, unknown>;
+    const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+    if (!(await repo.getProject(req.params.id))) {
+      res.json({ synced: false, links: [] });
+      return;
+    }
+    const links = (await repo.listAssetLinks(req.params.id, { assetUrl: str(q.assetUrl), entityId: str(q.entityId), sectionId: str(q.sectionId) }))
+      .filter((l) => q.includeRejected === '1' || l.status !== 'rejected');
+    res.json({ synced: true, canEdit: canEditStory(req.projectAccess!), links: await describeLinks(repo, req.params.id, links) });
+  }));
+
+  /** Для вибирача в Медіатеці: сутності (за типами ролей) і розділи книги. */
+  app.get('/api/projects/:id/visual/targets', withRepo(async (repo, req, res) => {
+    const [entities, docs] = await Promise.all([repo.listEntities(req.params.id), repo.listDocuments(req.params.id)]);
+    const chapters = docs.filter((d) => d.kind === 'chapter' && !d.deletedAt).sort((a, b) => a.order - b.order);
+    const chapterNo = new Map(chapters.map((c, i) => [c.id, i + 1]));
+    const sections = docs
+      .filter((d) => d.kind === 'section' && !d.deletedAt && d.parentId && chapterNo.has(d.parentId))
+      .sort((a, b) => chapterNo.get(a.parentId!)! - chapterNo.get(b.parentId!)! || a.order - b.order)
+      .map((d) => ({ id: d.id, title: d.title, chapterNumber: chapterNo.get(d.parentId!)! }));
+    res.json({
+      entities: entities
+        .filter((e) => e.status !== 'rejected')
+        .map((e) => ({ id: e.id, type: e.type, name: e.name }))
+        .sort((a, b) => a.name.localeCompare(b.name, 'uk')),
+      sections,
+      roles: ASSET_ROLES,
+      roleTypes: ROLE_ENTITY_TYPES,
+    });
+  }));
+
+  /** Прив'язати зображення: до сутності (портрет, повний зріст, референс, «зображено», локація, предмет) або до сцени. */
+  app.post('/api/projects/:id/visual/links', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const b = req.body ?? {};
+    const role = String(b.role ?? '') as AssetRole;
+    const assetUrl = typeof b.assetUrl === 'string' ? b.assetUrl.trim() : '';
+    if (!ASSET_ROLES.includes(role) || !isLinkableAssetUrl(assetUrl)) {
+      res.status(400).json({ error: 'Потрібні зображення з Медіатеки (не вбудований data:-URL) і роль.', kind: 'bad_input' });
+      return;
+    }
+    let entityId: string | null = null;
+    let sectionId: string | null = null;
+    if (role === 'scene') {
+      const doc = (await repo.listDocuments(req.params.id)).find((d) => d.id === b.sectionId && d.kind === 'section' && !d.deletedAt);
+      if (!doc) {
+        res.status(404).json({ error: 'Розділ не знайдено в книзі.', kind: 'not_found' });
+        return;
+      }
+      sectionId = doc.id;
+    } else {
+      const e = await repo.getEntity(req.params.id, String(b.entityId ?? ''));
+      if (!e || e.status === 'rejected') {
+        res.status(404).json({ error: 'Сутність не знайдено в книзі.', kind: 'not_found' });
+        return;
+      }
+      const types = ROLE_ENTITY_TYPES[role as Exclude<AssetRole, 'scene'>];
+      if (types && !types.includes(e.type)) {
+        res.status(400).json({ error: `Роль «${role}» — для сутностей типу ${types.join(' / ')}, а «${e.name}» — ${e.type}.`, kind: 'bad_input' });
+        return;
+      }
+      entityId = e.id;
+    }
+    const link = await repo.upsertAssetLink({
+      projectId: req.params.id,
+      assetUrl,
+      role,
+      entityId,
+      sectionId,
+      status: 'confirmed',
+      source: 'author',
+      note: typeof b.note === 'string' ? b.note.slice(0, 500) : '',
+      createdBy: `user:${req.projectAccess!.userId}`,
+    });
+    res.status(201).json({ link: (await describeLinks(repo, req.params.id, [link]))[0] });
+  }));
+
+  /** Підтвердити чи відхилити зв'язок (пропозиції AI-3 — етап В4; відхилений перенесений з книги не повертається). */
+  app.post('/api/projects/:id/visual/links/:linkId/status', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const status = req.body?.status;
+    if (status !== 'confirmed' && status !== 'rejected') {
+      res.status(400).json({ error: 'Статус — confirmed або rejected.', kind: 'bad_input' });
+      return;
+    }
+    const l = await repo.getAssetLink(req.params.id, req.params.linkId);
+    if (!l) {
+      res.status(404).json({ error: 'Зв\'язку немає.', kind: 'not_found' });
+      return;
+    }
+    res.json({ link: await repo.setAssetLinkStatus(req.params.id, l.id, status) });
+  }));
+
+  /**
+   * Відв'язати. Зв'язок, перенесений з книги, не видаляється, а стає
+   * відхиленим — інакше наступна синхронізація повернула б його.
+   */
+  app.delete('/api/projects/:id/visual/links/:linkId', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const l = await repo.getAssetLink(req.params.id, req.params.linkId);
+    if (!l) {
+      res.status(404).json({ error: 'Зв\'язку немає.', kind: 'not_found' });
+      return;
+    }
+    if (l.source === 'legacy') await repo.setAssetLinkStatus(req.params.id, l.id, 'rejected');
+    else await repo.deleteAssetLink(req.params.id, l.id);
+    res.json({ ok: true, rejected: l.source === 'legacy' });
+  }));
+
+  /** «Хто в сцені»: герої розділу з портретами й ілюстрації сцени — для редактора. */
+  app.get('/api/projects/:id/visual/scene', withRepo(async (repo, req, res) => {
+    const sectionId = typeof req.query.sectionId === 'string' ? req.query.sectionId : '';
+    const v = sectionId ? await sceneVisuals(repo, req.params.id, sectionId, cardPortrait(req.params.id)) : null;
+    if (!v) {
+      res.status(404).json({ error: 'Розділ ще не синхронізовано з ядром.', kind: 'not_found' });
+      return;
+    }
+    res.json(v);
+  }));
+
+  /** Портрет героя (зв'язок або картка). */
+  app.get('/api/projects/:id/visual/portrait/:entityId', withRepo(async (repo, req, res) => {
+    const e = await repo.getEntity(req.params.id, req.params.entityId);
+    if (!e || e.type !== 'character') {
+      res.status(404).json({ error: 'Героя не знайдено.', kind: 'not_found' });
+      return;
+    }
+    res.json({ portrait: await heroPortrait(repo, req.params.id, e.id, await cardPortrait(req.params.id)(e)) });
   }));
 
   // ── Т1.6: прототип FLC етапу 0 (лише адміністратор) ──────────────────────

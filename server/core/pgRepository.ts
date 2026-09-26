@@ -25,6 +25,7 @@ import {
   paragraphTextHash,
   checkTimePoint,
   checkEmotionPoint,
+  checkAssetLink,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isValidEmbedding, SEARCHABLE_KINDS, tsQueryFromStems } from './search/text';
 import type {
@@ -62,6 +63,8 @@ import type {
   VersionRow,
   EmotionPointInput,
   EmotionPointRow,
+  AssetLinkInput,
+  AssetLinkRow,
 } from './types';
 
 type Q = Pool | PoolClient;
@@ -117,6 +120,27 @@ function toEmotionPoint(r: any): EmotionPointRow {
     status: r.status,
     findingId: r.finding_id ?? null,
     createdBy: r.created_by,
+    updatedAt: iso(r.updated_at),
+  };
+}
+
+function toAssetLink(r: any): AssetLinkRow {
+  return {
+    id: r.id,
+    projectId: r.project_id,
+    assetUrl: r.asset_url,
+    assetId: r.asset_id ?? null,
+    entityId: r.entity_id ?? null,
+    sectionId: r.section_id ?? null,
+    role: r.role,
+    status: r.status,
+    source: r.source,
+    needsReview: !!r.needs_review,
+    checkedHash: r.checked_hash ?? null,
+    evidence: r.evidence ?? [],
+    note: r.note,
+    createdBy: r.created_by,
+    createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
   };
 }
@@ -1102,6 +1126,71 @@ export class PgCoreRepository implements CoreRepository {
   async deleteEmotionPoint(projectId: string, id: string) {
     if (!isUuid(id)) return false;
     const res = await this.q('DELETE FROM emotion_points WHERE project_id = $1 AND id = $2', [projectId, id]);
+    return (res?.rowCount ?? 0) > 0;
+  }
+
+  // ── Бібліотека ілюстрацій (Т2.3 В2) ──────────────────────────────────────
+
+  async listAssetLinks(projectId: string, filter: { entityId?: string; sectionId?: string; assetUrl?: string; source?: AssetLinkRow['source'] } = {}) {
+    if (filter.entityId && !isUuid(filter.entityId)) return [];
+    const where = ['project_id = $1'];
+    const params: unknown[] = [projectId];
+    const add = (sql: string, v: unknown) => {
+      params.push(v);
+      where.push(`${sql} = $${params.length}`);
+    };
+    if (filter.entityId) add('entity_id', filter.entityId);
+    if (filter.sectionId) add('section_id', filter.sectionId);
+    if (filter.assetUrl) add('asset_url', filter.assetUrl);
+    if (filter.source) add('source', filter.source);
+    const { rows } = await this.q(`SELECT * FROM asset_entity_links WHERE ${where.join(' AND ')} ORDER BY created_at, id`, params);
+    return rows.map(toAssetLink);
+  }
+
+  async upsertAssetLink(input: AssetLinkInput) {
+    checkAssetLink(input);
+    if (input.entityId && !isUuid(input.entityId)) throw notFound(`Сутність «${input.entityId}»`);
+    const target = input.entityId ? `e:${input.entityId}` : `s:${input.sectionId}`;
+    const assetId = /^\/api\/media\/file\/([A-Za-z0-9_-]+)/.exec(input.assetUrl)?.[1] ?? null;
+    // Зовнішні ключі (сутність, розділ цього проєкту) → not_found, як у сховищі в пам'яті.
+    const { rows } = await this.q(
+      `INSERT INTO asset_entity_links
+         (project_id, asset_url, asset_id, entity_id, section_id, target, role, status, source, checked_hash, evidence, note, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       ON CONFLICT (project_id, asset_url, target, role) DO UPDATE SET
+         status = excluded.status, source = excluded.source,
+         checked_hash = COALESCE(excluded.checked_hash, asset_entity_links.checked_hash),
+         evidence = CASE WHEN cardinality(excluded.evidence) > 0 THEN excluded.evidence ELSE asset_entity_links.evidence END,
+         note = CASE WHEN excluded.note <> '' THEN excluded.note ELSE asset_entity_links.note END,
+         created_by = excluded.created_by, updated_at = now()
+       RETURNING *`,
+      [
+        input.projectId, input.assetUrl, assetId, input.entityId ?? null, input.sectionId ?? null, target, input.role,
+        input.status ?? 'confirmed', input.source ?? 'author', input.checkedHash ?? null, input.evidence ?? [], input.note ?? '', input.createdBy,
+      ],
+    );
+    return toAssetLink(rows[0]);
+  }
+
+  async getAssetLink(projectId: string, id: string) {
+    if (!isUuid(id)) return null;
+    const { rows } = await this.q('SELECT * FROM asset_entity_links WHERE project_id = $1 AND id = $2', [projectId, id]);
+    return rows[0] ? toAssetLink(rows[0]) : null;
+  }
+
+  async setAssetLinkStatus(projectId: string, id: string, status: CoreStatus) {
+    if (!isUuid(id)) throw notFound(`Зв'язок зображення «${id}»`);
+    const { rows } = await this.q(
+      'UPDATE asset_entity_links SET status = $3, updated_at = now() WHERE project_id = $1 AND id = $2 RETURNING *',
+      [projectId, id, status],
+    );
+    if (!rows[0]) throw notFound(`Зв'язок зображення «${id}»`);
+    return toAssetLink(rows[0]);
+  }
+
+  async deleteAssetLink(projectId: string, id: string) {
+    if (!isUuid(id)) return false;
+    const res = await this.q('DELETE FROM asset_entity_links WHERE project_id = $1 AND id = $2', [projectId, id]);
     return (res?.rowCount ?? 0) > 0;
   }
 

@@ -179,6 +179,7 @@ import { ProofingLanguageModal } from './ProofingLanguageModal';
 import { BookSearchModal } from './BookSearchModal';
 import { InsertImageModal } from './InsertImageModal';
 import { HeroArcPanel } from './HeroArcPanel';
+import { SceneVisualsPanel } from './SceneVisualsPanel';
 import type { HeroArcState } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
 
@@ -5966,7 +5967,11 @@ export const EditorView: React.FC<EditorViewProps> = ({
             {/* TAB 1: CHARACTERS & SCENE PARTICIPANTS ("Вивести фотографії невеликого розміру з зображенням персонажів...") */}
             {rightPanelTab === 'scene' && (
               <div className="space-y-4">
-                
+
+                {/* Хто в сцені (Т2.3 В2): герої розділу з портретами з бібліотеки
+                    ілюстрацій і ілюстрації сцени — з ядра; без ядра не показується. */}
+                <SceneVisualsPanel bookId={book.id} sectionId={activeSection?.id} refreshKey={rightPanelTab} />
+
                 {/* Scene Participants Section */}
                 {renderChapterCast()}
                 {!participantsUnpinned && renderSceneParticipants()}

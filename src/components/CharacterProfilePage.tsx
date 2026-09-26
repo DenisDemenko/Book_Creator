@@ -51,7 +51,7 @@ interface Profile {
   entity: { id: string; name: string; type: string };
   aliases: string[];
   formerNames: string[];
-  canon: { fields: { key: string; label: string; value: string }[]; portraitUrl: string | null; hidden: boolean; linked: boolean };
+  canon: { fields: { key: string; label: string; value: string }[]; portraitUrl: string | null; portraitSource?: 'link' | 'card' | null; hidden: boolean; linked: boolean };
   chapters: { id: string; number: number; title: string }[];
   upto: number | null;
   appearances: { total: number; items: Place[] };
@@ -228,7 +228,13 @@ export const CharacterProfilePage: React.FC<Props> = ({ book, entityId, onBack, 
         <>
           <header className="flex min-w-0 flex-col gap-3 rounded-2xl border border-slate-800 bg-slate-900/60 p-4 sm:flex-row sm:items-center">
             {profile.canon.portraitUrl ? (
-              <img src={profile.canon.portraitUrl} alt="" className="h-20 w-20 shrink-0 rounded-xl object-cover" />
+              <img
+                src={profile.canon.portraitUrl}
+                alt=""
+                data-profile-portrait={profile.canon.portraitSource ?? 'card'}
+                title={profile.canon.portraitSource === 'link' ? 'Портрет із Медіатеки (прив\'язаний до героя)' : 'Портрет із картки героя'}
+                className="h-20 w-20 shrink-0 rounded-xl object-cover"
+              />
             ) : (
               <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-xl bg-slate-800">
                 <UserRound className="h-8 w-8 text-slate-500" />

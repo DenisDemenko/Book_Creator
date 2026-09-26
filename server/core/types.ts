@@ -367,6 +367,42 @@ export type EmotionPointInput = Omit<EmotionPointRow, 'id' | 'updatedAt' | 'note
   findingId?: string | null;
 };
 
+/** Роль зображення щодо сутності чи сцени (Т2.3 В2). */
+export type AssetRole = 'portrait' | 'full_body' | 'reference' | 'depicts' | 'location' | 'object' | 'scene';
+export const ASSET_ROLES: readonly AssetRole[] = ['portrait', 'full_body', 'reference', 'depicts', 'location', 'object', 'scene'];
+
+/** Зв'язок зображення Медіатеки з сутністю книги або сценою (Т2.3 В2). */
+export interface AssetLinkRow {
+  id: string;
+  projectId: string;
+  /** URL зображення (`/api/media/file/<id>` чи зовнішній; `data:` — ні). */
+  assetUrl: string;
+  /** id файлу Медіатеки, якщо URL — її. */
+  assetId: string | null;
+  entityId: string | null;
+  sectionId: string | null;
+  role: AssetRole;
+  status: CoreStatus;
+  source: 'author' | 'ai' | 'legacy';
+  needsReview: boolean;
+  checkedHash: string | null;
+  evidence: string[];
+  note: string;
+  createdBy: CoreActor;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type AssetLinkInput = Pick<AssetLinkRow, 'projectId' | 'assetUrl' | 'role' | 'createdBy'> & {
+  entityId?: string | null;
+  sectionId?: string | null;
+  status?: CoreStatus;
+  source?: AssetLinkRow['source'];
+  evidence?: string[];
+  note?: string;
+  checkedHash?: string | null;
+};
+
 /** Збережений пошуковий запит автора (Т1.3). */
 export interface SavedSearchRow {
   id: string;
@@ -494,6 +530,16 @@ export interface CoreRepository {
   listEmotionPoints(projectId: string, characterId?: string): Promise<EmotionPointRow[]>;
   upsertEmotionPoint(input: EmotionPointInput): Promise<EmotionPointRow>;
   deleteEmotionPoint(projectId: string, id: string): Promise<boolean>;
+
+  /**
+   * Бібліотека ілюстрацій (Т2.3 В2): зв'язки зображень із сутностями й
+   * сценами. Той самий URL, ціль і роль — оновлення (статус, джерело, примітка).
+   */
+  listAssetLinks(projectId: string, filter?: { entityId?: string; sectionId?: string; assetUrl?: string; source?: AssetLinkRow['source'] }): Promise<AssetLinkRow[]>;
+  upsertAssetLink(input: AssetLinkInput): Promise<AssetLinkRow>;
+  getAssetLink(projectId: string, id: string): Promise<AssetLinkRow | null>;
+  setAssetLinkStatus(projectId: string, id: string, status: CoreStatus): Promise<AssetLinkRow>;
+  deleteAssetLink(projectId: string, id: string): Promise<boolean>;
 
   /** Збережені запити автора в книзі (Т1.3), новіші першими. */
   listSavedSearches(projectId: string, userId: string): Promise<SavedSearchRow[]>;

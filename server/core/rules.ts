@@ -27,6 +27,8 @@ import {
   type RunCreateInput,
   type TimePointInput,
   type EmotionPointInput,
+  type AssetLinkInput,
+  ASSET_ROLES,
 } from './types';
 
 export type CoreRuleCode =
@@ -175,6 +177,29 @@ export function checkEmotionPoint(p: EmotionPointInput): void {
   if (p.layer && !['primary', 'secondary', 'hidden'].includes(p.layer)) throw new CoreRuleError('bad_input', `Невідомий шар емоції «${p.layer}»`);
   if (p.source && p.source !== 'author' && p.source !== 'ai') throw new CoreRuleError('bad_input', `Невідоме джерело точки «${p.source}»`);
   if (p.status) assertStatus(p.status);
+}
+
+/** URL зображення, яке можна прив'язати: свій файл Медіатеки, http(s) чи шлях сайту; `data:` — ні (Т2.3 В2). */
+export function isLinkableAssetUrl(url: unknown): url is string {
+  const s = typeof url === 'string' ? url.trim() : '';
+  if (!s || s.length > 2000 || /^data:/i.test(s)) return false;
+  return /^\/api\/media\/file\/[A-Za-z0-9_-]+([?#].*)?$/.test(s) || /^https?:\/\/\S+$/i.test(s) || /^\/[A-Za-z0-9_\-./]+$/.test(s);
+}
+
+/** Зв'язок зображення (Т2.3 В2): ті самі правила, що й CHECK у базі. */
+export function checkAssetLink(l: AssetLinkInput): void {
+  assertActor(l.createdBy);
+  if (!isLinkableAssetUrl(l.assetUrl)) throw new CoreRuleError('bad_input', 'Це зображення не можна прив\'язати: потрібен файл Медіатеки або посилання http(s), не вбудований data:-URL');
+  if (!ASSET_ROLES.includes(l.role)) throw new CoreRuleError('bad_input', `Невідома роль зображення «${l.role}»`);
+  const hasEntity = !!l.entityId;
+  const hasSection = !!l.sectionId;
+  if (hasEntity === hasSection) throw new CoreRuleError('bad_input', 'Зображення прив\'язується або до сутності, або до сцени');
+  if ((l.role === 'scene') !== hasSection) throw new CoreRuleError('bad_input', 'Роль «сцена» — лише для розділу книги, інші ролі — для сутностей');
+  if (l.status) assertStatus(l.status);
+  if (l.source && !['author', 'ai', 'legacy'].includes(l.source)) throw new CoreRuleError('bad_input', `Невідоме джерело зв'язку «${l.source}»`);
+  if ((l.source === 'ai' || isAiActor(l.createdBy)) && l.status && l.status !== 'suggested') {
+    throw new CoreRuleError('ai_suggests_only', 'Зв\'язок від AI — лише пропозиція (suggested)');
+  }
 }
 
 export function checkMention(m: MentionInput): void {

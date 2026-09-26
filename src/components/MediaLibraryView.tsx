@@ -32,6 +32,7 @@ import {
 } from '../utils/mediaSort';
 import { MediaGenerationPanel } from './MediaGenerationPanel';
 import { MediaPassportPanel, type PassportAsset } from './MediaPassportPanel';
+import { MediaLinksPanel, type VisualLink } from './MediaLinksPanel';
 import { mediaIdFromUrl, passportWarnings, replaceMediaUrlInBook } from '../utils/mediaPassport';
 import { ScanInboxPanel } from './ScanInboxPanel';
 import { DescribeCharacterModal } from './DescribeCharacterModal';
@@ -160,6 +161,9 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
   // усі вони MP4, тож за форматом їх не розрізнити, а порядок появи — можна).
   const [sort, setSort] = useState<MediaSortMethod>(DEFAULT_MEDIA_SORT);
   const [passportFilter, setPassportFilter] = useState<PassportFilter>('all');
+  // Бібліотека ілюстрацій (Т2.3 В2): прив'язки зображень до сутностей активної книги й фільтр за сутністю.
+  const [bookLinks, setBookLinks] = useState<VisualLink[]>([]);
+  const [entityFilter, setEntityFilter] = useState('');
   const [selectedMedia, setSelectedMedia] = useState<{ id: string; url: string; title: string; type: string; prompt?: string; source?: string } | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -219,6 +223,25 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
   useEffect(() => {
     loadLibrary();
   }, [loadLibrary]);
+
+  const loadBookLinks = useCallback(async () => {
+    if (!isRegistered) {
+      setBookLinks([]);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/projects/${encodeURIComponent(book.id)}/visual/links`, { credentials: 'same-origin' });
+      const data = res.ok ? await res.json() : null;
+      setBookLinks(Array.isArray(data?.links) ? data.links : []);
+    } catch {
+      setBookLinks([]);
+    }
+  }, [isRegistered, book.id]);
+
+  useEffect(() => {
+    void loadBookLinks();
+    setEntityFilter('');
+  }, [loadBookLinks]);
 
   // Перемикання активної книги в студії повертає галерею в її ж розділ —
   // інакше автор бачив би чужі файли під заголовком своєї книги.
@@ -363,10 +386,19 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
     return passportFilter === 'noLicense' ? w.includes('license') : w.includes('author');
   };
 
+  // Фільтр «Сутність»: ключ — `e:<id>` чи `s:<розділ>`, картки — ті, чий URL прив'язано.
+  const linkTargets = [...new Map(bookLinks.map((l) => [l.entityId ? `e:${l.entityId}` : `s:${l.sectionId}`, l])).entries()]
+    .map(([key, l]) => ({ key, label: l.targetName || '—', scene: !l.entityId }))
+    .sort((a, b) => Number(a.scene) - Number(b.scene) || a.label.localeCompare(b.label, 'uk'));
+  const entityUrls = entityFilter
+    ? new Set(bookLinks.filter((l) => (l.entityId ? `e:${l.entityId}` : `s:${l.sectionId}`) === entityFilter).map((l) => l.assetUrl))
+    : null;
+
   const visibleMedia = allMedia
     .filter((m) => selectedSectionId === ALL_SECTIONS || m.sectionId === selectedSectionId)
     .filter((m) => filter === 'all' || m.type === filter)
     .filter(passportMatches)
+    .filter((m) => !entityUrls || entityUrls.has(m.url))
     .sort(mediaComparator(sort));
 
   // У режимі «Усі книги» картки групуються під заголовком свого розділу —
@@ -890,6 +922,23 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
               <option value="noAuthor">{t('mediaPassport.filterPassportNoAuthor')}</option>
             </select>
           )}
+
+          {/* Сутність (Т2.3 В2): зображення героя, локації, предмета чи сцени активної книги. */}
+          {isRegistered && linkTargets.length > 0 && (
+            <select
+              value={entityFilter}
+              onChange={(e) => setEntityFilter(e.target.value)}
+              title={t('visualLibrary.filterEntity')}
+              aria-label={t('visualLibrary.filterEntity')}
+              data-media-entity-filter
+              className="px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:border-cyan-500 focus:outline-hidden max-w-[200px]"
+            >
+              <option value="">{t('visualLibrary.filterEntityAll')}</option>
+              {linkTargets.map((o) => (
+                <option key={o.key} value={o.key}>{o.scene ? `▸ ${o.label}` : o.label}</option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
 
@@ -1238,6 +1287,11 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
                   return count;
                 }}
               />
+            )}
+
+            {/* Прив'язки до книги (Т2.3 В2) — до героїв, локацій, предметів, сцен активної книги. */}
+            {isRegistered && (
+              <MediaLinksPanel key={`links-${selectedMedia.url}`} bookId={book.id} assetUrl={selectedMedia.url} onToast={showToast} onChanged={() => void loadBookLinks()} />
             )}
 
             {selectedMedia.prompt && (
