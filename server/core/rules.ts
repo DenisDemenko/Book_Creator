@@ -198,8 +198,13 @@ export function checkAssetLink(l: AssetLinkInput): void {
   if ((l.role === 'scene') !== hasSection) throw new CoreRuleError('bad_input', 'Роль «сцена» — лише для розділу книги, інші ролі — для сутностей');
   if (l.status) assertStatus(l.status);
   if (l.source && !['author', 'ai', 'legacy'].includes(l.source)) throw new CoreRuleError('bad_input', `Невідоме джерело зв'язку «${l.source}»`);
-  if ((l.source === 'ai' || isAiActor(l.createdBy)) && l.status && l.status !== 'suggested') {
+  // AI лише пропонує; затвердити (чи відхилити) пропозицію AI може автор —
+  // тоді джерело лишається «ai», а записує зміну вже користувач (як CHECK у базі).
+  if (isAiActor(l.createdBy) && l.status && l.status !== 'suggested') {
     throw new CoreRuleError('ai_suggests_only', 'Зв\'язок від AI — лише пропозиція (suggested)');
+  }
+  if (l.source === 'ai' && !isAiActor(l.createdBy) && l.status === 'suggested') {
+    throw new CoreRuleError('ai_suggests_only', 'Пропозицію AI записує лише AI; автор її затверджує чи відхиляє');
   }
   if (l.appearanceVersionId && (!hasEntity || !VERSIONED_ROLES.includes(l.role))) {
     throw new CoreRuleError('bad_input', 'Версію зовнішності можна вказати лише для портрета, повного зросту чи референсу героя');

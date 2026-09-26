@@ -28,6 +28,7 @@ import { runFlcCycle } from './flc/cycle';
 import { buildTimeline, characterKnowledge } from './timeline';
 import { normalizeStoryTime } from '../../src/utils/storyTime';
 import { AI_EMOTIONS_JOB_KIND, EMOTION_POINT, buildEmotionMonitor } from './emotions';
+import { AI_VISUAL_JOB_KIND, visualAnalysisView } from './visualAi';
 import { ROLE_ENTITY_TYPES, appearanceOverview, cardAppearanceHash, describeLinks, expectedLinkHash, heroPortrait, refreshVisualReview, sceneVisuals } from './visual';
 import { ASSET_ROLES, type AssetRole } from './types';
 import { VERSIONED_ROLES, isLinkableAssetUrl } from './rules';
@@ -93,6 +94,11 @@ export interface ProjectRoutesDeps {
   flc?: { jev: () => Promise<JevAdapter | null>; llm: (projectId: string, actor: string) => LlmJson };
   /** Порядок сцен у часі світу зі Студії (`Scene.timelineOrder`), Т2.1. */
   sceneOrder?: (projectId: string) => Promise<Map<string, number>>;
+  /**
+   * Т2.3 В4: чи може AI-3 бачити це зображення — файл Медіатеки, що належить
+   * авторові запиту або власникові книги. null — ні (немає, чуже, не зображення).
+   */
+  visualImage?: (projectId: string, assetUrl: string, actor: string) => Promise<{ mimeType: string; data: string } | null>;
 }
 
 /** Не більше стількох тлумачень запиту ШІ на користувача за хвилину — це платні виклики. */
@@ -1074,7 +1080,24 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       res.status(404).json({ error: 'Зв\'язку немає.', kind: 'not_found' });
       return;
     }
-    res.json({ link: await repo.setAssetLinkStatus(req.params.id, l.id, status) });
+    const actor = `user:${req.projectAccess!.userId}`;
+    // Пропозиція AI-3 (Т2.3 В4): затверджує автор — запис уже від нього (AI лише пропонує),
+    // а висновок-доказ отримує той самий статус.
+    const link =
+      l.source === 'ai' && status === 'confirmed'
+        ? await repo.upsertAssetLink({
+            projectId: l.projectId, assetUrl: l.assetUrl, role: l.role, entityId: l.entityId, sectionId: l.sectionId,
+            status: 'confirmed', source: 'ai', createdBy: actor,
+            checkedHash: (await expectedHash(repo, req.params.id, l)) ?? null,
+          })
+        : await repo.setAssetLinkStatus(req.params.id, l.id, status);
+    if (l.source === 'ai') {
+      for (const fid of l.evidence) {
+        const f = (await repo.listFindings(req.params.id)).find((x) => x.id === fid);
+        if (f && f.status === 'suggested') await repo.setFindingStatus(req.params.id, f.id, status, actor, status === 'confirmed' ? 'прив\'язано автором (AI-3)' : 'відхилено автором (AI-3)');
+      }
+    }
+    res.json({ link: (await describeLinks(repo, req.params.id, [link]))[0] });
   }));
 
   /** «Звірено» (Т2.3 В5): автор переглянув зображення після зміни опису — звірено з поточним описом. */
@@ -1105,9 +1128,80 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       res.status(404).json({ error: 'Зв\'язку немає.', kind: 'not_found' });
       return;
     }
-    if (l.source === 'legacy') await repo.setAssetLinkStatus(req.params.id, l.id, 'rejected');
+    // Перенесений з книги чи запропонований AI-3 — відхилити, а не видалити: інакше повернеться.
+    const keep = l.source === 'legacy' || l.source === 'ai';
+    if (keep) await repo.setAssetLinkStatus(req.params.id, l.id, 'rejected');
     else await repo.deleteAssetLink(req.params.id, l.id);
-    res.json({ ok: true, rejected: l.source === 'legacy' });
+    res.json({ ok: true, rejected: keep });
+  }));
+
+  // ── Т2.3 В4: AI-3 — розпізнати зображення, звірити з описом (лише за командою) ──
+
+  const enqueueVisual = async (req: Request, res: Response, payload: Record<string, unknown>) => {
+    const queue = deps.queue?.();
+    if (!queue) {
+      res.status(503).json({ error: 'Фонові задачі ядра зараз недоступні.', kind: 'core_unavailable' });
+      return;
+    }
+    try {
+      const { job } = await queue.enqueue({ projectId: req.params.id, kind: AI_VISUAL_JOB_KIND, payload, createdBy: `user:${req.projectAccess!.userId}` });
+      res.status(202).json({ jobId: job.id });
+    } catch (err) {
+      if (err instanceof JobRejectedError) {
+        const status = err.code === 'rate_limited' ? 429 : err.code === 'budget_exhausted' ? 402 : 422;
+        res.status(status).json({ error: err.message, kind: err.code, retryAfterMs: err.retryAfterMs });
+        return;
+      }
+      throw err;
+    }
+  };
+  /** AI-3 бачить лише файл Медіатеки автора запиту чи власника книги. */
+  const imageAllowed = async (req: Request, assetUrl: string) =>
+    !!deps.visualImage && !!(await deps.visualImage(req.params.id, assetUrl, `user:${req.projectAccess!.userId}`).catch(() => null));
+
+  /** «Розпізнати»: хто / що на зображенні, ознаки й розбіжності з описами — фонова задача AI-3. */
+  app.post('/api/projects/:id/visual/recognize', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const assetUrl = typeof req.body?.assetUrl === 'string' ? req.body.assetUrl.trim() : '';
+    if (!(await repo.getProject(req.params.id))) {
+      res.status(409).json({ error: 'Книгу ще не синхронізовано з ядром.', kind: 'not_synced' });
+      return;
+    }
+    if (!isLinkableAssetUrl(assetUrl) || !(await imageAllowed(req, assetUrl))) {
+      res.status(400).json({ error: 'Розпізнати можна лише зображення з вашої Медіатеки (чи Медіатеки власника книги).', kind: 'bad_input' });
+      return;
+    }
+    await enqueueVisual(req, res, { mode: 'recognize', assetUrl });
+  }));
+
+  /** «Звірити з описом»: прив'язаний портрет (повний зріст, референс) героя проти його опису. */
+  app.post('/api/projects/:id/visual/links/:linkId/compare', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const l = await repo.getAssetLink(req.params.id, req.params.linkId);
+    if (!l) {
+      res.status(404).json({ error: 'Зв\'язку немає.', kind: 'not_found' });
+      return;
+    }
+    if (l.status !== 'confirmed' || !l.entityId || !VERSIONED_ROLES.includes(l.role)) {
+      res.status(400).json({ error: 'Звірити з описом можна прив\'язаний портрет, повний зріст чи референс героя.', kind: 'bad_input' });
+      return;
+    }
+    if (!(await imageAllowed(req, l.assetUrl))) {
+      res.status(400).json({ error: 'Звірити можна лише зображення з Медіатеки.', kind: 'bad_input' });
+      return;
+    }
+    await enqueueVisual(req, res, { mode: 'compare', linkId: l.id });
+  }));
+
+  /** Висновки AI-3 про зображення: останнє розпізнавання й остання звірка кожного зв'язку. */
+  app.get('/api/projects/:id/visual/analysis', withRepo(async (repo, req, res) => {
+    const assetUrl = typeof req.query.assetUrl === 'string' ? req.query.assetUrl : '';
+    if (!assetUrl) {
+      res.status(400).json({ error: 'Потрібен assetUrl.', kind: 'bad_input' });
+      return;
+    }
+    const findings = (await repo.listFindings(req.params.id)).filter(visibleTo(req.projectAccess!));
+    res.json({ ...visualAnalysisView(findings, assetUrl), available: !!deps.visualImage && !!deps.queue?.() });
   }));
 
   /** «Хто в сцені»: герої розділу з портретами й ілюстрації сцени — для редактора. */

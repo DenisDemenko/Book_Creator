@@ -387,7 +387,9 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
   };
 
   // Фільтр «Сутність»: ключ — `e:<id>` чи `s:<розділ>`, картки — ті, чий URL прив'язано.
-  const linkTargets = [...new Map(bookLinks.map((l) => [l.entityId ? `e:${l.entityId}` : `s:${l.sectionId}`, l])).entries()]
+  // Лише підтверджені: пропозиції AI-3 (Т2.3 В4) ще не прив'язки.
+  const confirmedLinks = bookLinks.filter((l) => l.status === 'confirmed');
+  const linkTargets = [...new Map(confirmedLinks.map((l) => [l.entityId ? `e:${l.entityId}` : `s:${l.sectionId}`, l])).entries()]
     .map(([key, l]) => ({ key, label: l.targetName || '—', scene: !l.entityId }))
     .sort((a, b) => Number(a.scene) - Number(b.scene) || a.label.localeCompare(b.label, 'uk'));
   // Т2.3 В5: зображення, які треба звірити з новим описом героя.
@@ -395,7 +397,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
   const entityUrls = entityFilter === 'review'
     ? reviewUrls
     : entityFilter
-      ? new Set(bookLinks.filter((l) => (l.entityId ? `e:${l.entityId}` : `s:${l.sectionId}`) === entityFilter).map((l) => l.assetUrl))
+      ? new Set(confirmedLinks.filter((l) => (l.entityId ? `e:${l.entityId}` : `s:${l.sectionId}`) === entityFilter).map((l) => l.assetUrl))
       : null;
 
   const visibleMedia = allMedia

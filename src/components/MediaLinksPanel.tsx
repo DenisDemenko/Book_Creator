@@ -10,7 +10,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Link2, Loader2, Plus, X } from 'lucide-react';
+import { Link2, Loader2, Plus, ScanEye, X } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext';
 
 export const ASSET_ROLE_KEYS = ['portrait', 'full_body', 'reference', 'depicts', 'location', 'object', 'scene'] as const;
@@ -44,6 +44,21 @@ export interface VisualLink {
 
 const VERSIONED: readonly AssetRoleKey[] = ['portrait', 'full_body', 'reference'];
 
+/** Висновок AI-3 про зображення (Т2.3 В4). */
+interface AiItem {
+  id: string;
+  kind: string;
+  entityName: string;
+  field: string;
+  summary: string;
+  insufficientData: boolean;
+}
+interface Analysis {
+  recognize: AiItem[];
+  compare: Record<string, { verdict: 'match' | 'mismatch' | 'insufficient'; at: string; items: AiItem[] }>;
+  available: boolean;
+}
+
 interface Targets {
   entities: { id: string; type: string; name: string }[];
   sections: { id: string; title: string; chapterNumber: number }[];
@@ -73,6 +88,9 @@ export const MediaLinksPanel: React.FC<Props> = ({ bookId, assetUrl, onChanged, 
   const [versions, setVersions] = useState<{ id: string; label: string }[]>([]);
   const [versionId, setVersionId] = useState('');
   const [busy, setBusy] = useState(false);
+  const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  /** Що зараз робить AI-3: `recognize` або id зв'язку, який звіряється. */
+  const [aiBusy, setAiBusy] = useState<string | null>(null);
   const embedded = /^data:/i.test(assetUrl);
 
   const load = useCallback(async () => {
@@ -87,6 +105,8 @@ export const MediaLinksPanel: React.FC<Props> = ({ bookId, assetUrl, onChanged, 
     setLinks(body.links ?? []);
     setCanEdit(!!body.canEdit);
     setState('ok');
+    const a = await api(`${base}/analysis?assetUrl=${encodeURIComponent(assetUrl)}`).catch(() => null);
+    setAnalysis(a?.ok ? ((await a.json()) as Analysis) : null);
   }, [base, assetUrl, embedded]);
 
   useEffect(() => {
@@ -172,6 +192,63 @@ export const MediaLinksPanel: React.FC<Props> = ({ bookId, assetUrl, onChanged, 
     onChanged?.();
   };
 
+  // ── AI-3 (Т2.3 В4): лише за командою, фоновою задачею ──
+  const runAi = async (key: string, url: string, body: object) => {
+    setAiBusy(key);
+    const res = await api(url, { method: 'POST', body: JSON.stringify(body) }).catch(() => null);
+    const started = res ? await res.json().catch(() => ({})) : {};
+    if (!res?.ok || !started.jobId) {
+      setAiBusy(null);
+      onToast(res?.status === 400 ? t('visualLibrary.aiNoImage') : t('visualLibrary.aiFailed', { reason: started.error || res?.status || '—' }));
+      return null;
+    }
+    const jobUrl = `/api/projects/${encodeURIComponent(bookId)}/jobs/${started.jobId}`;
+    let job: any = null;
+    for (let i = 0; i < 120; i++) {
+      await new Promise((r) => setTimeout(r, 1500));
+      const r = await api(jobUrl).catch(() => null);
+      job = r?.ok ? await r.json() : null;
+      if (job && ['succeeded', 'failed', 'cancelled'].includes(job.status)) break;
+    }
+    setAiBusy(null);
+    if (!job || job.status !== 'succeeded') {
+      onToast(t('visualLibrary.aiFailed', { reason: job?.error || job?.status || '—' }));
+      return null;
+    }
+    await load();
+    onChanged?.();
+    return job.result as Record<string, any>;
+  };
+  const recognize = async () => {
+    const r = await runAi('recognize', `${base}/recognize`, { assetUrl });
+    if (!r) return;
+    if (r.status === 'no_image') onToast(t('visualLibrary.aiNoImage'));
+    else onToast(t('visualLibrary.aiDoneRecognize', { links: r.suggestedLinks ?? 0, traits: r.traits ?? 0, mismatches: r.mismatches ?? 0 }));
+  };
+  const compare = async (l: VisualLink) => {
+    const r = await runAi(l.id, `${base}/links/${l.id}/compare`, {});
+    if (!r) return;
+    if (r.status === 'no_description') onToast(t('visualLibrary.aiNoDescription'));
+    else if (r.status === 'no_image') onToast(t('visualLibrary.aiNoImage'));
+    else onToast(r.verdict === 'match' ? t('visualLibrary.aiVerdictMatch') : r.verdict === 'mismatch' ? t('visualLibrary.aiVerdictMismatch') : t('visualLibrary.aiVerdictInsufficient'));
+  };
+  const decide = async (l: VisualLink, status: 'confirmed' | 'rejected') => {
+    setBusy(true);
+    const res = await api(`${base}/links/${l.id}/status`, { method: 'POST', body: JSON.stringify({ status }) }).catch(() => null);
+    setBusy(false);
+    if (!res?.ok) {
+      onToast(t('visualLibrary.linkFailed', { reason: res?.status ?? '—' }));
+      return;
+    }
+    onToast(status === 'confirmed' ? t('visualLibrary.linkDone', { role: t(ROLE_LABEL_KEY[l.role]), name: l.targetName }) : t('visualLibrary.linkRemoved'));
+    await load();
+    onChanged?.();
+  };
+  const FIELDS = ['hair', 'eyes', 'build', 'face', 'clothing', 'marks', 'height', 'other'];
+  const fieldLabel = (f: string) => (FIELDS.includes(f) ? t(`visualLibrary.aiField_${f}`) : f);
+  const verdictLabel = (v: string) => (v === 'match' ? t('visualLibrary.aiVerdictMatch') : v === 'mismatch' ? t('visualLibrary.aiVerdictMismatch') : t('visualLibrary.aiVerdictInsufficient'));
+  const verdictCls = (v: string) => (v === 'match' ? 'text-emerald-300' : v === 'mismatch' ? 'text-rose-300' : 'text-slate-400');
+
   const sourceLabel = (s: VisualLink['source']) => (s === 'legacy' ? t('visualLibrary.sourceLegacy') : s === 'ai' ? t('visualLibrary.sourceAi') : t('visualLibrary.sourceAuthor'));
   const selectCls = 'min-w-0 rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-200 focus:border-cyan-500 focus:outline-hidden';
 
@@ -181,6 +258,19 @@ export const MediaLinksPanel: React.FC<Props> = ({ bookId, assetUrl, onChanged, 
         <Link2 className="h-4 w-4 text-sky-300" />
         <h4 className="text-xs font-bold text-slate-100">{t('visualLibrary.linksTitle')}</h4>
         <span className="text-[10px] text-slate-500">{t('visualLibrary.linksHint')}</span>
+        {state === 'ok' && canEdit && !embedded && analysis?.available && (
+          <button
+            type="button"
+            disabled={!!aiBusy}
+            onClick={() => void recognize()}
+            title={t('visualLibrary.aiRecognizeHint')}
+            data-media-ai-recognize
+            className="ml-auto flex items-center gap-1 rounded-lg border border-violet-500/40 bg-violet-500/10 px-2 py-1 text-[11px] font-bold text-violet-200 hover:bg-violet-500/20 disabled:opacity-50"
+          >
+            {aiBusy === 'recognize' ? <Loader2 className="h-3 w-3 animate-spin" /> : <ScanEye className="h-3 w-3" />}
+            {aiBusy === 'recognize' ? t('visualLibrary.aiRunning') : t('visualLibrary.aiRecognize')}
+          </button>
+        )}
       </div>
       {embedded ? (
         <p className="text-[11px] text-slate-500" data-media-links-state="embedded">{t('visualLibrary.linksDataUrl')}</p>
@@ -195,7 +285,13 @@ export const MediaLinksPanel: React.FC<Props> = ({ bookId, assetUrl, onChanged, 
           {links.length ? (
             <div className="flex flex-wrap gap-1.5">
               {links.map((l) => (
-                <span key={l.id} className="flex max-w-full items-center gap-1 rounded-full border border-slate-700 bg-slate-950 px-2 py-0.5 text-[11px] text-slate-200" data-media-link={`${l.role}:${l.targetName}`}>
+                <div key={l.id} className="flex max-w-full flex-col gap-0.5">
+                <span
+                  className={`flex max-w-full flex-wrap items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-slate-200 ${l.status === 'suggested' ? 'border-dashed border-violet-500/60 bg-violet-500/10' : 'border-slate-700 bg-slate-950'}`}
+                  data-media-link={`${l.role}:${l.targetName}`}
+                  data-media-link-status={l.status}
+                >
+                  {l.status === 'suggested' && <span className="text-[10px] font-bold text-violet-200">{t('visualLibrary.aiSuggested')}:</span>}
                   <span className="text-slate-400">{t(ROLE_LABEL_KEY[l.role])}</span>
                   <span className="min-w-0 truncate font-bold">{l.targetName || '—'}</span>
                   {l.versionLabel && <span className="min-w-0 truncate text-sky-300" data-media-link-version={l.versionLabel}>· {l.versionLabel}</span>}
@@ -210,16 +306,62 @@ export const MediaLinksPanel: React.FC<Props> = ({ bookId, assetUrl, onChanged, 
                     </button>
                   )}
                   <span className="text-[10px] text-slate-500">· {sourceLabel(l.source)}</span>
-                  {canEdit && (
+                  {l.status === 'suggested' && canEdit && (
+                    <>
+                      <button type="button" disabled={busy} onClick={() => void decide(l, 'confirmed')} className="rounded-full border border-emerald-500/50 px-1.5 text-[10px] text-emerald-200 hover:bg-emerald-500/10" data-media-link-accept={l.id}>
+                        ✓ {t('visualLibrary.aiAccept')}
+                      </button>
+                      <button type="button" disabled={busy} onClick={() => void decide(l, 'rejected')} title={t('visualLibrary.aiRejectHint')} className="rounded-full border border-rose-500/40 px-1.5 text-[10px] text-rose-200 hover:bg-rose-500/10" data-media-link-reject={l.id}>
+                        ✗ {t('visualLibrary.aiReject')}
+                      </button>
+                    </>
+                  )}
+                  {l.status === 'confirmed' && canEdit && l.entityId && VERSIONED.includes(l.role) && analysis?.available && (
+                    <button type="button" disabled={!!aiBusy} onClick={() => void compare(l)} title={t('visualLibrary.aiCompareHint')} className="flex items-center gap-0.5 rounded-full border border-violet-500/40 px-1.5 text-[10px] text-violet-200 hover:bg-violet-500/10 disabled:opacity-50" data-media-link-compare={l.id}>
+                      {aiBusy === l.id ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <ScanEye className="h-2.5 w-2.5" />} {t('visualLibrary.aiCompare')}
+                    </button>
+                  )}
+                  {canEdit && l.status !== 'suggested' && (
                     <button type="button" disabled={busy} onClick={() => void remove(l)} title={t('visualLibrary.linkRemove')} aria-label={t('visualLibrary.linkRemove')} className="text-slate-500 hover:text-rose-300" data-media-link-remove={l.id}>
                       <X className="h-3 w-3" />
                     </button>
                   )}
                 </span>
+                {analysis?.compare[l.id] && (
+                  <div className="ml-2 space-y-0.5 text-[10px]" data-media-link-verdict={analysis.compare[l.id].verdict}>
+                    <span className={`font-bold ${verdictCls(analysis.compare[l.id].verdict)}`}>AI-3: {verdictLabel(analysis.compare[l.id].verdict)}</span>
+                    {analysis.compare[l.id].items.filter((i) => i.kind !== 'visual_match').map((i) => (
+                      <p key={i.id} className={i.kind === 'visual_mismatch' ? 'text-rose-200' : 'text-slate-500'}>
+                        {i.field ? `${fieldLabel(i.field)}: ` : ''}{i.kind === 'visual_unknown' ? t('visualLibrary.aiUnknown') : i.summary}
+                      </p>
+                    ))}
+                  </div>
+                )}
+                </div>
               ))}
             </div>
           ) : (
             <p className="text-[11px] text-slate-500">{t('visualLibrary.linksEmpty')}</p>
+          )}
+          {analysis && analysis.recognize.some((i) => i.kind !== 'visual_link') && (
+            <div className="space-y-1 rounded-xl border border-violet-500/20 bg-violet-500/5 p-2 text-[10px]" data-media-ai-findings>
+              {analysis.recognize.some((i) => i.kind === 'visual_trait') && (
+                <div>
+                  <p className="font-bold text-violet-200">{t('visualLibrary.aiTraits')}</p>
+                  {analysis.recognize.filter((i) => i.kind === 'visual_trait').map((i) => (
+                    <p key={i.id} className="text-slate-300" data-media-ai-trait>{i.entityName ? `${i.entityName} · ` : ''}{i.field && i.field !== 'other' ? `${fieldLabel(i.field)}: ` : ''}{i.summary}</p>
+                  ))}
+                </div>
+              )}
+              {analysis.recognize.some((i) => i.kind === 'visual_mismatch') && (
+                <div>
+                  <p className="font-bold text-rose-200">{t('visualLibrary.aiMismatches')}</p>
+                  {analysis.recognize.filter((i) => i.kind === 'visual_mismatch').map((i) => (
+                    <p key={i.id} className="text-rose-100/80" data-media-ai-mismatch>{i.entityName ? `${i.entityName} · ` : ''}{i.field && i.field !== 'other' ? `${fieldLabel(i.field)}: ` : ''}{i.summary}</p>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
           {canEdit && !adding && (
             <button type="button" onClick={() => void openAdd()} data-media-link-add className="flex items-center gap-1 rounded-lg border border-slate-700 px-2.5 py-1 text-[11px] text-slate-200 hover:border-sky-500">

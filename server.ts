@@ -204,6 +204,23 @@ import { aiRoleGenerateViaCore, loadCoreAiRoleTemplate } from './server/core/ai/
 import { CORE_EMBED_KIND, coreEmbedJobKind, scheduleCoreEmbed } from './server/core/search/embedJob';
 import { AI_PROFILE_JOB_KIND, aiProfileJobKind, studioFromBook } from './server/core/characterProfile';
 import { AI_EMOTIONS_JOB_KIND, aiEmotionsJobKind } from './server/core/emotions';
+import { AI_VISUAL_JOB_KIND, aiVisualJobKind } from './server/core/visualAi';
+import { assetIdFromUrl as mediaAssetIdFromUrl, readAsset as readMediaAsset } from './server/media/mediaLibraryStore';
+
+/**
+ * Т2.3 В4: зображення для AI-3 — лише файл Медіатеки, що належить тому, хто
+ * запустив розпізнавання, або власникові книги; не більше 8 МБ.
+ */
+async function loadVisualImage(projectId: string, assetUrl: string, actor: string): Promise<{ mimeType: string; data: string } | null> {
+  const id = mediaAssetIdFromUrl(assetUrl);
+  if (!id) return null;
+  const got = await readMediaAsset(id);
+  if (!got || !String(got.record.mimeType).startsWith('image/') || got.bytes.byteLength > 8 * 1024 * 1024) return null;
+  const userId = actor.startsWith('user:') ? actor.slice(5) : '';
+  const bookOwner = (await getStoredBookForRealtime(projectId))?.ownerId ?? null;
+  if (got.record.ownerId !== userId && got.record.ownerId !== bookOwner) return null;
+  return { mimeType: got.record.mimeType, data: Buffer.from(got.bytes).toString('base64') };
+}
 import { HttpJevAdapter, JEV_MODEL } from './server/core/flc/jev';
 import { platformEmbedder, recordEmbeddingCost, embeddingKeyFor } from './server/core/search/platform';
 import {
@@ -566,6 +583,8 @@ registerGitCommandRoutes(app);
       recordQueryCost: (u) => recordEmbeddingCost(u, 'Ядро: ембединг запиту пошуку'),
     },
     // Порядок сцен у часі світу, якщо автор вів його в Студії (Scene.timelineOrder) — Т2.1.
+    // Бібліотека ілюстрацій (Т2.3 В4): що з Медіатеки може бачити AI-3.
+    visualImage: loadVisualImage,
     sceneOrder: async (projectId) => {
       const book = (await getStoredBookForRealtime(projectId))?.book as any;
       const out = new Map<string, number>();
@@ -6135,6 +6154,18 @@ ${JSON.stringify(bookContext || {}, null, 2)}
       generate: aiRoleGenerateViaCore,
       resolveModel: (module) => resolveModuleModelId(module),
       loadTemplate: loadCoreAiRoleTemplate,
+    }),
+  );
+  // Бібліотека ілюстрацій (Т2.3 В4): AI-3 розпізнає зображення й звіряє портрет з описом — кнопками в Медіатеці.
+  registerCoreJobKind(
+    AI_VISUAL_JOB_KIND,
+    aiVisualJobKind({
+      repo: getCoreRepository,
+      generate: aiRoleGenerateViaCore,
+      resolveModel: (module) => resolveModuleModelId(module),
+      loadTemplate: loadCoreAiRoleTemplate,
+      loadImage: loadVisualImage,
+      loadStudio: async (projectId, entity) => studioFromBook((await getStoredBookForRealtime(projectId))?.book as any, entity),
     }),
   );
   registerCoreJobKind(
