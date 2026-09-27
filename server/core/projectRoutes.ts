@@ -42,7 +42,7 @@ import {
 import { ROLE_ENTITY_TYPES, appearanceOverview, cardAppearanceHash, describeLinks, expectedLinkHash, heroPortrait, refreshVisualReview, sceneVisuals, visualEntitiesOverview } from './visual';
 import { ASSET_ROLES, type AssetRole } from './types';
 import { CONTINUITY_ISSUE_KINDS, CONTINUITY_ISSUE_STATUSES, type ContinuityIssueKind, type ContinuityIssueStatus } from './types';
-import { refreshTimeContinuity, refreshTraitContradictions, syncAgeTraitFromVersion, removeAgeTraitForVersion, refreshKnowledgeContinuity, AGE_TRAIT_LABEL } from './continuity';
+import { refreshTimeContinuity, refreshTraitContradictions, syncAgeTraitFromVersion, removeAgeTraitForVersion, refreshKnowledgeContinuity, refreshPlaceContinuity, refreshObjectContinuity, AGE_TRAIT_LABEL } from './continuity';
 import { VERSIONED_ROLES, isLinkableAssetUrl } from './rules';
 import { clampIntensity, emotionFamily } from '../../src/utils/emotionScale';
 import { LlmFallbackJevAdapter, type JevAdapter, type LlmJson } from './flc/jev';
@@ -1561,6 +1561,20 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
   app.post('/api/projects/:id/continuity/rules/knowledge', withRepo(async (repo, req, res) => {
     if (!requireStoryEdit(req, res)) return;
     const result = await refreshKnowledgeContinuity(repo, req.params.id);
+    res.json(result);
+  }));
+
+  /** Правило «місце» (Т2.4 В5): риси локацій + герой у двох місцях одночасно → проблеми безперервності (kind: place). Лише за командою. */
+  app.post('/api/projects/:id/continuity/rules/place', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const result = await refreshPlaceContinuity(repo, req.params.id);
+    res.json(result);
+  }));
+
+  /** Правило «предмет» (Т2.4 В5): риси предметів + предмет у двох власників одночасно → проблеми безперервності (kind: object). Лише за командою. */
+  app.post('/api/projects/:id/continuity/rules/object', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const result = await refreshObjectContinuity(repo, req.params.id);
     res.json(result);
   }));
 

@@ -23,7 +23,10 @@
  * згадано); `present` раніший за власний `subject` того самого героя й
  * факту — суперечність (`refreshKnowledgeContinuity`).
  *
- * Інші правила (місце, предмет) — наступний етап В5.
+ * В5: правила «місце» і «предмет» — (а) `trait_contradiction` на всіх мітках
+ * рис локацій / предметів, (б) за тегами сцени: герой у двох несумісних
+ * локаціях чи предмет у двох власників одночасно, без сцени переходу чи
+ * передачі (`refreshPlaceContinuity` / `refreshObjectContinuity`).
  *
  * Без бази — у пам'яті; з CORE_TEST_DATABASE_URL — ще й на PostgreSQL
  * (схема `fusion_core` видаляється — лише тестова база!).
@@ -40,7 +43,7 @@ import { createCorePool } from '../server/core/index.ts';
 import { CORE_SCHEMA, loadMigrations, resolveMigrationsDir, runMigrations } from '../server/core/migrate.ts';
 import { reconcileParagraphIds } from '../src/utils/paragraphIds.ts';
 import { CoreRuleError, checkEntityTrait, checkContinuityIssue } from '../server/core/rules.ts';
-import { refreshTimeContinuity, refreshTraitContradictions, syncAgeTraitFromVersion, removeAgeTraitForVersion, refreshKnowledgeContinuity, AGE_TRAIT_LABEL } from '../server/core/continuity.ts';
+import { refreshTimeContinuity, refreshTraitContradictions, syncAgeTraitFromVersion, removeAgeTraitForVersion, refreshKnowledgeContinuity, refreshPlaceContinuity, refreshObjectContinuity, AGE_TRAIT_LABEL } from '../server/core/continuity.ts';
 import { buildTimeline } from '../server/core/timeline.ts';
 import { normalizeStoryTime } from '../src/utils/storyTime.ts';
 import type { CoreRepository } from '../server/core/types.ts';
@@ -473,10 +476,153 @@ async function knowledgeRuleSuite(label: string, repo: CoreRepository, P: string
   void igor; void attack; void secret;
 }
 
+async function placeObjectRuleSuite(label: string, repo: CoreRepository, P: string) {
+  console.log(`\nПравила «місце» і «предмет» — Т2.4 В5 (${label}):`);
+  const sec = (id: string, order: number, content: string) => {
+    const r = reconcileParagraphIds({ sectionId: id, content });
+    return { id, title: `Сцена ${id}`, order, content, paragraphIds: r.ids, paragraphHashes: r.hashes };
+  };
+  const scenes: [string, string][] = [
+    ['p1', '[/character:Олена] [/location:Київ] Олена в Києві, з нею [/object:Меч @Олена].'],
+    ['p2', '[/character:Олена] [/character:Марко] [/location:Львів] Олена у Львові; меч у Марка: [/object:Меч @Марко].'],
+    ['p3', '[/character:Олена] [/location:Україна] Олена десь в Україні.'],
+    ['p4', '[/character:Ігор] [/location:Поділ] Ігор на Подолі.'],
+    ['p5', '[/character:Ігор] [/location:Київ] Ігор у Києві.'],
+    ['p6', '[/character:Марко] [/location:Київ] Марко в Києві.'],
+    ['p7', '[/character:Марко] [/location:Київ] [/location:Львів] Марко їде з Києва до Львова.'],
+    ['p8', '[/character:Марко] [/location:Львів] Марко у Львові.'],
+    ['p9', '[/character:Ігор] [/location:Київ] Ігор приблизно тоді ж у Києві.'],
+    ['p10', '[/character:Ігор] [/location:Львів] Ігор у Львові.'],
+    ['p11', '[/character:Олена] [/location:Київ] Олена знову в Києві.'],
+    ['p12', '[/character:Олена] [/location:Львів] Олена наступного року у Львові.'],
+    ['p13', '[/character:Ігор] Ігор тримав [/object:Ключ].'],
+    ['p14', '[/character:Марко] Марко тримав [/object:Ключ].'],
+    ['p15', 'На стіні висів [/object:Щит — дубовий — Олена].'],
+    ['p16', '[/character:Марко] Марко побачив [/object:Щит — дубовий — Ігор].'],
+    ['p17', '[/character:Олена] Олена віддала [/object:Ключ @Олена] Маркові: тепер [/object:Ключ @Марко].'],
+    ['p18', '[/character:Марко] [/object:Ключ @Марко] у Марка.'],
+    ['p19', '[/character:Олена] [/object:Ключ @Олена] знов в Олени.'],
+  ];
+  const book: any = {
+    id: P,
+    title: 'Книга',
+    characters: [{ id: 'c-o', name: 'Олена' }, { id: 'c-m', name: 'Марко' }, { id: 'c-i', name: 'Ігор' }],
+    chapters: [{ id: 'ch1', title: 'Усе', order: 0, sections: scenes.map(([id, text], i) => sec(id, i, text)) }],
+  };
+  await syncBookToCore(repo, { id: P, ownerId: 'u-owner', title: 'Книга', book });
+  const id = async (type: string, name: string) => (await repo.resolveAlias(P, type, name))!;
+  const [olena, marko, igor] = [await id('character', 'Олена'), await id('character', 'Марко'), await id('character', 'Ігор')];
+  const [kyiv, lviv, ukraine, podil] = [await id('location', 'Київ'), await id('location', 'Львів'), await id('location', 'Україна'), await id('location', 'Поділ')];
+  const [sword, key, shield] = [await id('object', 'Меч'), await id('object', 'Ключ'), await id('object', 'Щит')];
+  const put = (sectionId: string, start: string, kind: 'exact' | 'approximate' = 'exact') => {
+    const v = normalizeStoryTime({ kind, start, end: null }) as any;
+    return repo.upsertTimePoint({ projectId: P, subjectKind: 'scene', subjectId: sectionId, kind: v.kind, start: v.start, end: v.end, sortKey: v.key, endKey: v.endKey, label: v.label, createdBy: 'user:u-owner' });
+  };
+  for (const sid of ['p1', 'p2', 'p3', 'p4', 'p5']) await put(sid, '2000-05-01');
+  for (const sid of ['p6', 'p7', 'p8']) await put(sid, '2001-01-01');
+  await put('p9', '2002', 'approximate');
+  await put('p10', '2002');
+  await put('p11', '2003');
+  await put('p12', '2004');
+  for (const sid of ['p13', 'p14']) await put(sid, '2005-01-01');
+  for (const sid of ['p15', 'p16']) await put(sid, '2006');
+  for (const sid of ['p17', 'p18', 'p19']) await put(sid, '2007');
+  const rel = (type: string, fromId: string, toId: string) => repo.createRelation({ projectId: P, type, fromId, toId, evidence: [], status: 'confirmed', createdBy: 'user:u-owner' });
+  await rel('part_of', podil, kyiv);
+  await rel('part_of', kyiv, ukraine);
+  await rel('contains', ukraine, lviv);
+  // Риси: суперечність у локації й у предмета; різні мітки й риси героя — не займають.
+  const trait = (entityId: string, lbl: string, value: string, sectionId: string) => repo.upsertEntityTrait({ projectId: P, entityId, label: lbl, value, sectionId, createdBy: 'user:u-owner' });
+  await trait(kyiv, 'колір стін', 'білий', 'p1');
+  await trait(kyiv, 'Колір стін ', 'жовтий', 'p5');
+  await trait(kyiv, 'розмір', 'великий', 'p5');
+  await trait(sword, 'стан', 'новий', 'p1');
+  await trait(sword, 'стан', 'іржавий', 'p2');
+  await trait(olena, 'колір очей', 'сірі', 'p1');
+  await trait(olena, 'колір очей', 'карі', 'p3');
+
+  // ── Місце ──
+  const r1 = await refreshPlaceContinuity(repo, P);
+  const placeIssues = await repo.listContinuityIssues(P, { kind: 'place' });
+  const oPlace = r1.issues.find((i) => i.entityId === olena)!;
+  t('КРИТЕРІЙ «місце»: Олена в Києві (p1) і у Львові (p2) того самого дня — проблема, обидва докази, «твердий» час → confirmed',
+    !!oPlace && oPlace.evidenceA.sectionId === 'p1' && oPlace.evidenceB!.sectionId === 'p2' && oPlace.status === 'confirmed' &&
+    /Київ/.test(oPlace.summary) && /Львів/.test(oPlace.summary) && /Києв/.test(oPlace.evidenceA.quote), `${oPlace?.status} · ${oPlace?.evidenceA.quote}`);
+  const iPlace = r1.issues.find((i) => i.entityId === igor)!;
+  t('приблизний час з одного боку (p9 ≈ 2002 і p10 2002) — лише пропозиція (suggested)',
+    !!iPlace && iPlace.evidenceA.sectionId === 'p9' && iPlace.evidenceB!.sectionId === 'p10' && iPlace.status === 'suggested', iPlace?.summary);
+  t('негативні: Україна (вкладено: part_of / contains) не суперечить ні Києву, ні Львову; Поділ у складі Києва; сцена переходу p7 знімає p6/p8; різні роки — ні',
+    r1.parts.scenes.created === 2 && !r1.issues.some((i) => i.entityId === marko) &&
+    !r1.issues.some((i) => [i.evidenceA.sectionId, i.evidenceB?.sectionId].some((x) => x === 'p3' || x === 'p4' || x === 'p11' || x === 'p12')),
+    JSON.stringify(r1.issues.map((i) => [i.evidenceA.sectionId, i.evidenceB?.sectionId, i.kind])));
+  const kyivTrait = r1.issues.find((i) => i.entityId === kyiv)!;
+  t('(а) риси локації: «колір стін» Києва білий / жовтий — одна проблема (мітка без регістру й пробілів); «розмір» і риси героя — ні',
+    r1.parts.traits.created === 1 && !!kyivTrait && kyivTrait.kind === 'place' && /білий/.test(kyivTrait.summary + kyivTrait.evidenceA.quote + kyivTrait.evidenceB!.quote),
+    JSON.stringify(r1.parts));
+  t('разом — 3 проблеми kind «place»', placeIssues.length === 3 && r1.created === 3);
+
+  // ── Предмет ──
+  const r2 = await refreshObjectContinuity(repo, P);
+  const swordIssue = r2.issues.find((i) => i.entityId === sword && /власник/.test(i.summary))!;
+  t('КРИТЕРІЙ «предмет»: Меч у Олени (p1) і в Марка (p2) того самого дня, обидва власники явні (@Ім\'я) — confirmed',
+    !!swordIssue && swordIssue.evidenceA.sectionId === 'p1' && swordIssue.evidenceB!.sectionId === 'p2' && swordIssue.status === 'confirmed' &&
+    /Олена/.test(swordIssue.summary) && /Марко/.test(swordIssue.summary), swordIssue?.summary);
+  const keyIssue = r2.issues.find((i) => i.entityId === key)!;
+  t('власник виведений (найближчий герой, без @) — Ключ у Ігоря й Марка (p13/p14) — лише пропозиція з підказкою «перевірте»',
+    !!keyIssue && keyIssue.evidenceA.sectionId === 'p13' && keyIssue.evidenceB!.sectionId === 'p14' && keyIssue.status === 'suggested' && /перевірте/.test(keyIssue.summary),
+    keyIssue?.summary);
+  const shieldIssue = r2.issues.find((i) => i.entityId === shield)!;
+  t('поле «власник» у тезі (Щит — дубовий — Олена / … — Ігор) важить більше за найближчого героя (Марко) — Олена проти Ігоря, confirmed',
+    !!shieldIssue && shieldIssue.status === 'confirmed' && /Олена/.test(shieldIssue.summary) && /Ігор/.test(shieldIssue.summary) && !/Марко/.test(shieldIssue.summary),
+    shieldIssue?.summary);
+  t('сцена передачі (p17: Ключ від Олени до Марка) знімає p18/p19 того самого року; (а) «стан» Меча новий / іржавий — одна проблема',
+    r2.parts.scenes.created === 3 && r2.parts.traits.created === 1 && !r2.issues.some((i) => ['p17', 'p18', 'p19'].includes(i.evidenceA.sectionId)),
+    JSON.stringify(r2.issues.map((i) => [i.evidenceA.sectionId, i.evidenceB?.sectionId, i.status])));
+
+  // ── Повторний прогін, статуси автора ──
+  await repo.setContinuityIssueStatus(P, keyIssue.id, 'confirmed', 'user:u-owner');
+  await repo.setContinuityIssueStatus(P, oPlace.id, 'dismissed', 'user:u-owner');
+  const r3 = await refreshPlaceContinuity(repo, P);
+  const r4 = await refreshObjectContinuity(repo, P);
+  t('повторний прогін — оновлює, не дублює; відхилене автором не воскресає',
+    r3.created === 0 && r3.updated === 2 && r3.skipped === 1 && r4.created === 0 && r4.updated === 4 &&
+    (await repo.listContinuityIssues(P, { kind: 'place' })).length === 3 && (await repo.listContinuityIssues(P, { kind: 'object' })).length === 4 &&
+    (await repo.getContinuityIssue(P, oPlace.id))!.status === 'dismissed', JSON.stringify([r3.parts, r4.parts]));
+  t('статус, який поставив автор (Ключ: suggested → confirmed), повторний прогін не скидає', (await repo.getContinuityIssue(P, keyIssue.id))!.status === 'confirmed');
+  const age = await refreshTraitContradictions(repo, P, { label: AGE_TRAIT_LABEL, kind: 'age' });
+  t('правило «вік» (В3) на тій самій книзі — як і було: жодної риси «вік» — нічого', age.checked === 0 && age.created === 0);
+
+  // ── Маршрути ──
+  const access = {
+    async getBookOwnerId(x: string) { return x === P ? 'u-owner' : null; },
+    async getCollabOwnerId() { return undefined; },
+    async listAcceptedInvites() { return [{ acceptedUserId: 'u-reader', role: 'reader' }]; },
+  };
+  const who: Record<string, any> = { owner: { id: 'u-owner', role: 'writer', isGuest: false }, reader: { id: 'u-reader', role: 'reader', isGuest: false } };
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => { (req as any).principal = who[String(req.headers['x-user'])]; next(); });
+  registerProjectRoutes(app, { access, repo: () => repo, coreState: () => 'ready' });
+  const server = app.listen(0);
+  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/projects/${P}`;
+  const call = async (path: string, user: string) => {
+    const r = await fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'x-user': user } });
+    return { status: r.status, body: (await r.json().catch(() => ({}))) as any };
+  };
+  t('маршрути POST .../continuity/rules/place і /object: читачу — 403',
+    (await call('/continuity/rules/place', 'reader')).status === 403 && (await call('/continuity/rules/object', 'reader')).status === 403);
+  const rp = await call('/continuity/rules/place', 'owner');
+  const ro = await call('/continuity/rules/object', 'owner');
+  t('маршрути: власнику — 200, з розкладом на «сцени» і «риси»',
+    rp.status === 200 && ro.status === 200 && rp.body.parts?.scenes && rp.body.parts?.traits && ro.body.created === 0 && ro.body.updated === 4);
+  server.close();
+}
+
 await suite('memory', new MemoryCoreRepository(), 'book-m');
 await timeRuleSuite('memory', new MemoryCoreRepository(), 'book-tm');
 await ageRuleSuite('memory', new MemoryCoreRepository(), 'book-am');
 await knowledgeRuleSuite('memory', new MemoryCoreRepository(), 'book-km');
+await placeObjectRuleSuite('memory', new MemoryCoreRepository(), 'book-pm');
 
 const url = process.env.CORE_TEST_DATABASE_URL?.trim();
 if (!url) {
@@ -492,6 +638,7 @@ if (!url) {
     await timeRuleSuite('postgres', new PgCoreRepository(pool), 'book-tp');
     await ageRuleSuite('postgres', new PgCoreRepository(pool), 'book-ap');
     await knowledgeRuleSuite('postgres', new PgCoreRepository(pool), 'book-kp');
+    await placeObjectRuleSuite('postgres', new PgCoreRepository(pool), 'book-pp');
   } catch (err) {
     t('прогін на PostgreSQL без збоїв', false, (err as Error).stack ?? String(err));
   } finally {

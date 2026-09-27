@@ -35,18 +35,27 @@
  * факту — герой «в кімнаті», де про факт говорять, до того, як він
  * офіційно про нього дізнається — суперечність (kind: 'knowledge').
  *
+ * В5 — «місце» і «предмет», кожне з двох частин (§2 п.4–5 плану): (а)
+ * `trait_contradiction` на всіх мітках рис локацій/світу чи предметів
+ * (той самий виклик, що й «вік», лише без мітки й із фільтром типів); (б)
+ * за тегами сцени — герой у двох несумісних локаціях чи предмет у двох
+ * власників у сценах, одночасних у часі світу, без сцени переходу /
+ * передачі між ними. Приблизний час чи виведений (не явний) власник —
+ * лише пропозиція (`suggested`), не встановлений факт.
+ *
  * Автор запускає перевірку командою (як «Розпізнати» в Медіатеці,
  * Т2.3 В4) — не на кожній синхронізації книги: побудова хронології не
  * дешева, і час — не єдине, що могло змінитись між синхронізаціями.
  */
 import type { CoreRepository, ContinuityEvidence, ContinuityIssueRow, ContinuityIssueKind, EntityTraitRow } from './types';
 import type { AppearanceVersionRow } from './types';
-import { buildTimeline, knowledgeCandidates, sceneIsBefore, type TimelineEvent, type KnowledgeCandidate } from './timeline';
+import { buildTimeline, knowledgeCandidates, sceneIsBefore, scanScenes, type TimelineEvent, type KnowledgeCandidate, type SceneScan, type TimeValue } from './timeline';
+import { parseEntityValue } from '../../src/utils/coreEntities';
 import { bookIndex, type BookIndex } from './characterProfile';
 import { paragraphExcerpt } from './search/text';
 import { isAiActor } from './rules';
 import { overlaps } from './visual';
-import type { ParagraphRow } from './types';
+import type { MentionRow, ParagraphRow } from './types';
 
 /** Правило пише від імені системи — не автор, не AI (не пропозиція, а обчислений факт). */
 const TIME_RULE_ACTOR = 'system:continuity-rule-time';
@@ -255,23 +264,42 @@ export interface RefreshTraitContradictionsResult {
 }
 
 /**
- * Універсальне правило `trait_contradiction` (В3, перевикористає й В5):
- * дві підтверджені риси тієї самої сутності з міткою `label`, різне
+ * Універсальне правило `trait_contradiction` (В3, перевикористане В5):
+ * дві підтверджені риси тієї самої сутності з однаковою міткою, різне
  * значення (без урахування регістру й пробілів), без `supersedes` між
  * ними — суперечність (`kind`). Риса без свого розділу — `insufficientData`
  * (доказ лише з другого боку), обидві без розділу — пропускається.
+ *
+ * `label` — лише одна мітка (В3: «вік»); без неї — усі мітки, кожна
+ * окремо (В5: будь-яка риса локації чи предмета). `entityTypes` — лише
+ * сутності цих типів (В5: місце — локації й світ, предмет — предмети).
  */
-export async function refreshTraitContradictions(repo: CoreRepository, projectId: string, opts: { label: string; kind: ContinuityIssueKind }): Promise<RefreshTraitContradictionsResult> {
-  const [traits, existing] = await Promise.all([
+export async function refreshTraitContradictions(
+  repo: CoreRepository,
+  projectId: string,
+  opts: { label?: string; kind: ContinuityIssueKind; entityTypes?: readonly string[] },
+): Promise<RefreshTraitContradictionsResult> {
+  const [traits, existing, entities] = await Promise.all([
     repo.listEntityTraits(projectId),
     repo.listContinuityIssues(projectId, { kind: opts.kind }),
+    opts.entityTypes ? repo.listEntities(projectId) : Promise.resolve(null),
   ]);
-  const confirmed = traits.filter((t) => t.status === 'confirmed' && t.label.trim().toLocaleLowerCase('uk') === opts.label.trim().toLocaleLowerCase('uk'));
+  const norm = (x: string) => x.trim().toLocaleLowerCase('uk');
+  const allowed = entities ? new Set(entities.filter((e) => opts.entityTypes!.includes(e.type)).map((e) => e.id)) : null;
+  const confirmed = traits.filter((t) =>
+    t.status === 'confirmed' && (opts.label === undefined || norm(t.label) === norm(opts.label)) && (!allowed || allowed.has(t.entityId)));
+  // Групи «сутність + мітка»: риси з різними мітками не порівнюються між собою.
   const byEntity = new Map<string, EntityTraitRow[]>();
-  for (const t of confirmed) byEntity.set(t.entityId, [...(byEntity.get(t.entityId) ?? []), t]);
+  for (const t of confirmed) {
+    const key = `${t.entityId}|${norm(t.label)}`;
+    byEntity.set(key, [...(byEntity.get(key) ?? []), t]);
+  }
 
+  // Лише записи-риси: той самий kind (object/place) пише й правило сцен В5, але
+  // в рис доказ без абзацу (`traitEvidence`), а в сцен — завжди з абзацом.
+  // (`createdBy` не годиться: зміна статусу пише туди автора.)
   const byQuoteKey = new Map<string, ContinuityIssueRow>();
-  for (const i of existing) byQuoteKey.set(`${i.entityId ?? ''}|${i.evidenceA.quote}|${i.evidenceB?.quote ?? ''}`, i);
+  for (const i of existing) if (!i.evidenceA.paragraphId) byQuoteKey.set(`${i.entityId ?? ''}|${i.evidenceA.quote}|${i.evidenceB?.quote ?? ''}`, i);
 
   let checked = 0;
   let created = 0;
@@ -410,4 +438,306 @@ export async function refreshKnowledgeContinuity(repo: CoreRepository, projectId
     issues.push(row);
   }
   return { checked: leaks.size, created, updated, skipped, issues };
+}
+
+// ── В5: правила «місце» і «предмет» за тегами сцени ─────────────────────
+
+/** Правила пишуть від імені системи; «слабкий» доказ — пропозиція (suggested), автор підтверджує. */
+const PLACE_RULE_ACTOR = 'system:continuity-rule-place';
+const OBJECT_RULE_ACTOR = 'system:continuity-rule-object';
+
+/** Сутності, чиї риси — «місце» (trait_contradiction В3 на всіх мітках). */
+export const PLACE_ENTITY_TYPES = ['location', 'world'] as const;
+/** Сутності-предмети: `object` з реєстру, `tool`, і ті, що Медіатека вже вважає предметами (`visual.ts`). */
+export const OBJECT_ENTITY_TYPES = ['object', 'item', 'artifact', 'weapon', 'vehicle', 'tool'] as const;
+
+/** Де сутність «є» в одній сцені: локації (герой) чи власники (предмет) — і звідки це відомо. */
+interface ScenePosition {
+  sectionId: string;
+  sectionTitle: string;
+  narrativeIndex: number;
+  time: TimeValue;
+  /** id локацій чи героїв-власників у цій сцені. */
+  positions: Set<string>;
+  /** Абзац-доказ (перша згадка позиції в сцені). */
+  paragraphId: string;
+  /** Позицію визначено непрямо (власник — найближчий герой, без `@Ім'я` чи поля «власник»). */
+  inferred: boolean;
+}
+
+/** Відрізок часу світу сцени; null — час невідомий (сцена не бере участі). */
+function span(t: TimeValue | null): [number, number] | null {
+  if (!t || t.kind === 'unknown' || t.key == null) return null;
+  return [t.key, t.endKey ?? t.key];
+}
+
+function simultaneous(a: TimeValue, b: TimeValue): boolean {
+  const x = span(a);
+  const y = span(b);
+  return !!x && !!y && x[0] <= y[1] && y[0] <= x[1];
+}
+
+/** Точний час чи інтервал автора — «твердий»; приблизний (зокрема порядок зі Студії) — ні. */
+const hardTime = (t: TimeValue) => t.kind === 'exact' || t.kind === 'interval';
+
+interface SceneConflict {
+  entityId: string;
+  a: ScenePosition;
+  b: ScenePosition;
+  /** Скільки ще пар сцен тієї самої сутності з тими самими двома наборами позицій. */
+  more: number;
+}
+
+/**
+ * Спільне ядро обох правил В5: сутність у двох сценах, що перетинаються в
+ * часі світу, і позиції цих сцен несумісні (жодна пара не збігається і не
+ * вкладена одна в одну) — суперечність, ЯКЩО немає «сцени переходу»: третьої
+ * сцени тієї самої сутності, теж одночасної з обома, де є дві різні
+ * позиції — одна сумісна з боком А, інша з боком Б (герой у дорозі між
+ * містами, предмет переходить із рук у руки). Сцена, де позицій кілька й вони сумісні з обома, — сама і є
+ * переходом, тому непересічні набори — умова, а не просто «різні».
+ * Кілька пар сцен з тими самими двома наборами позицій — одна проблема
+ * (найраніша за порядком розкриття), решта — лічильник.
+ */
+function sceneConflicts(byEntity: Map<string, ScenePosition[]>, compatible: (x: string, y: string) => boolean): SceneConflict[] {
+  const fits = (p: Set<string>, q: Set<string>) => [...p].some((x) => [...q].some((y) => compatible(x, y)));
+  const sig = (p: Set<string>) => [...p].sort().join(',');
+  // Перехід — ДВІ різні позиції в одній сцені: одна з боку А, інша з боку Б
+  // (Київ і Львів; «від Олени до Марка»). Одна ширша позиція, сумісна з
+  // обома (Україна для Києва й Львова), — не перехід, а просто не суперечить.
+  const bridges = (c: Set<string>, p: Set<string>, q: Set<string>) =>
+    [...c].some((x) => [...p].some((y) => compatible(x, y)) && [...c].some((z) => z !== x && [...q].some((w) => compatible(z, w))));
+  const out = new Map<string, SceneConflict>();
+  for (const [entityId, list] of byEntity) {
+    const scenes = [...list].sort((x, y) => x.narrativeIndex - y.narrativeIndex);
+    for (let i = 0; i < scenes.length; i++) {
+      for (let j = i + 1; j < scenes.length; j++) {
+        const a = scenes[i];
+        const b = scenes[j];
+        if (!simultaneous(a.time, b.time) || fits(a.positions, b.positions)) continue;
+        const bridged = scenes.some((c) => c !== a && c !== b &&
+          simultaneous(c.time, a.time) && simultaneous(c.time, b.time) && bridges(c.positions, a.positions, b.positions));
+        if (bridged) continue;
+        const key = `${entityId}|${[sig(a.positions), sig(b.positions)].sort().join('|')}`;
+        const cur = out.get(key);
+        if (!cur) out.set(key, { entityId, a, b, more: 0 });
+        else cur.more++;
+      }
+    }
+  }
+  return [...out.values()];
+}
+
+/** Вкладеність локацій із зв'язків `contains` / `part_of` (Київ у складі України — не «два різні місця»). */
+function locationNesting(relations: { type: string; fromId: string; toId: string; status: string }[]): (x: string, y: string) => boolean {
+  const parents = new Map<string, Set<string>>();
+  const link = (child: string, parent: string) => parents.set(child, (parents.get(child) ?? new Set()).add(parent));
+  for (const r of relations) {
+    if (r.status === 'rejected') continue;
+    if (r.type === 'contains') link(r.toId, r.fromId);
+    if (r.type === 'part_of') link(r.fromId, r.toId);
+  }
+  const ancestors = (x: string) => {
+    const seen = new Set<string>();
+    const stack = [x];
+    while (stack.length) for (const p of parents.get(stack.pop()!) ?? []) if (!seen.has(p)) { seen.add(p); stack.push(p); }
+    return seen;
+  };
+  const memo = new Map<string, Set<string>>();
+  const anc = (x: string) => memo.get(x) ?? (memo.set(x, ancestors(x)), memo.get(x)!);
+  return (x, y) => x === y || anc(x).has(y) || anc(y).has(x);
+}
+
+export interface RefreshSceneRuleResult {
+  /** Скільки конфліктних груп (сутність + два набори позицій) знайдено. */
+  checked: number;
+  created: number;
+  updated: number;
+  /** Уже вирішено автором (dismissed/resolved). */
+  skipped: number;
+  issues: ContinuityIssueRow[];
+}
+
+async function writeSceneConflicts(
+  repo: CoreRepository,
+  projectId: string,
+  kind: ContinuityIssueKind,
+  actor: string,
+  conflicts: SceneConflict[],
+  ix: BookIndex,
+  summaryOf: (c: SceneConflict) => string,
+): Promise<RefreshSceneRuleResult> {
+  // Записи правила сцен: з абзацом-доказом (риси — без абзацу) і від правила, не AI-2.
+  // (`createdBy` не годиться: зміна статусу пише туди автора.)
+  const existing = (await repo.listContinuityIssues(projectId, { kind })).filter((i) => i.source === 'rule' && !!i.evidenceA.paragraphId);
+  const byKey = new Map<string, ContinuityIssueRow>();
+  for (const i of existing) byKey.set(`${i.entityId ?? ''}|${[i.evidenceA.sectionId, i.evidenceB?.sectionId ?? ''].sort().join('|')}`, i);
+  const quote = (paragraphId: string) => paragraphExcerpt(ix.paragraphs.get(paragraphId)?.text ?? '', 200).trim() || '(немає власного тексту в цьому місці)';
+
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+  const issues: ContinuityIssueRow[] = [];
+  for (const c of conflicts) {
+    const prev = byKey.get(`${c.entityId}|${[c.a.sectionId, c.b.sectionId].sort().join('|')}`);
+    if (prev && (prev.status === 'dismissed' || prev.status === 'resolved')) {
+      skipped++;
+      continue;
+    }
+    const firm = hardTime(c.a.time) && hardTime(c.b.time) && !c.a.inferred && !c.b.inferred;
+    const summary = summaryOf(c);
+    const row = await repo.upsertContinuityIssue({
+      id: prev?.id,
+      projectId,
+      kind,
+      entityId: c.entityId,
+      summary: summary.length <= 500 ? summary : summary.slice(0, 497) + '…',
+      evidenceA: { sectionId: c.a.sectionId, paragraphId: c.a.paragraphId, quote: quote(c.a.paragraphId), entityId: c.entityId },
+      evidenceB: { sectionId: c.b.sectionId, paragraphId: c.b.paragraphId, quote: quote(c.b.paragraphId), entityId: c.entityId },
+      // Статус, який автор уже поставив, не скидається повторним прогоном.
+      status: prev ? prev.status : firm ? 'confirmed' : 'suggested',
+      createdBy: actor,
+    });
+    prev ? updated++ : created++;
+    issues.push(row);
+  }
+  return { checked: conflicts.length, created, updated, skipped, issues };
+}
+
+const names = (ids: Set<string>, scan: SceneScan) => [...ids].map((id) => `«${scan.entities.get(id)?.name ?? id}»`).join(', ');
+const whenLabel = (t: TimeValue) => t.label || String(t.start ?? '');
+const moreLabel = (n: number) => (n > 0 ? ` (і ще ${n} така пара сцен)` : '');
+
+/**
+ * Правило «місце» (В5, б): герой у двох сценах, одночасних у часі світу, а
+ * локації цих сцен (теги `[/location:…]`) несумісні — і немає сцени
+ * переходу. Локації, вкладені одна в одну зв'язком `contains`/`part_of`,
+ * сумісні. Сцена без часу чи без локацій — не бере участі (нема що
+ * порівнювати, не помилка). Приблизний час бодай з одного боку — лише
+ * пропозиція (`suggested`): «приблизно одночасно» ще не суперечність.
+ */
+export async function refreshPlaceSceneContinuity(repo: CoreRepository, projectId: string): Promise<RefreshSceneRuleResult> {
+  const [points, relations] = await Promise.all([repo.listTimePoints(projectId), repo.listRelations(projectId)]);
+  const scan = await scanScenes(repo, projectId, points);
+  const byEntity = new Map<string, ScenePosition[]>();
+  for (const s of scan.scenes) {
+    if (!span(s.time) || s.locations.length === 0) continue;
+    const locIds = new Set(s.locations.map((l) => l.id));
+    const firstLocMention = scan.mentions
+      .filter((m) => locIds.has(m.entityId) && scan.sectionOfParagraph.get(m.paragraphId) === s.sectionId)
+      .sort((x, y) => (scan.ix.paragraphs.get(x.paragraphId)?.order ?? 0) - (scan.ix.paragraphs.get(y.paragraphId)?.order ?? 0) || x.spanStart - y.spanStart)[0];
+    const paragraphId = firstLocMention?.paragraphId ?? s.firstParagraphId;
+    if (!paragraphId) continue;
+    for (const hero of s.characters) {
+      const list = byEntity.get(hero.id) ?? [];
+      list.push({ sectionId: s.sectionId, sectionTitle: s.title, narrativeIndex: s.narrativeIndex, time: s.time!, positions: locIds, paragraphId, inferred: false });
+      byEntity.set(hero.id, list);
+    }
+  }
+  const conflicts = sceneConflicts(byEntity, locationNesting(relations));
+  return writeSceneConflicts(repo, projectId, 'place', PLACE_RULE_ACTOR, conflicts, scan.ix, (c) => {
+    const hero = scan.entities.get(c.entityId)?.name ?? c.entityId;
+    return `Герой «${hero}» в той самий час (${whenLabel(c.a.time)} / ${whenLabel(c.b.time)}) — у двох місцях: ${names(c.a.positions, scan)} (сцена «${c.a.sectionTitle}») і ${names(c.b.positions, scan)} (сцена «${c.b.sectionTitle}»), без сцени переходу між ними${moreLabel(c.more)}.`;
+  });
+}
+
+/** Поле «власник» (реєстр: «Назва, властивості, власник, стан») зі значення тега. */
+function ownerField(m: MentionRow): string | null {
+  const fields = (m.fields as { fields?: { name?: unknown; value?: unknown }[] }).fields;
+  if (!Array.isArray(fields)) return null;
+  const f = fields.find((x) => typeof x?.name === 'string' && x.name.trim().toLocaleLowerCase('uk') === 'власник');
+  return typeof f?.value === 'string' && f.value.trim() ? f.value.trim() : null;
+}
+
+/** У самому тезі стоїть `@Ім'я` (П1) — власника названо явно, а не виведено з найближчого героя. */
+function explicitSubject(text: string, m: MentionRow): boolean {
+  const tag = text.slice(m.spanStart, m.spanEnd);
+  const inner = /^\[\/[^:\]]+:([\s\S]*)\]$/.exec(tag);
+  return !!inner && !!parseEntityValue(undefined, inner[1]).subject;
+}
+
+/**
+ * Правило «предмет» (В5, б): той самий предмет у двох сценах, одночасних у
+ * часі світу, у різних власників — і немає сцени передачі (третьої
+ * одночасної сцени, де предмет у власників з обох боків). Власник згадки —
+ * поле «власник» у тезі, а без нього — суб'єкт згадки (`@Ім'я`; без
+ * приписки синхронізація бере найближчого героя — тоді доказ «непрямий», і
+ * проблема — лише пропозиція `suggested`, як і за приблизного часу).
+ */
+export async function refreshObjectSceneContinuity(repo: CoreRepository, projectId: string): Promise<RefreshSceneRuleResult> {
+  const points = await repo.listTimePoints(projectId);
+  const scan = await scanScenes(repo, projectId, points);
+  const objectTypes = new Set<string>(OBJECT_ENTITY_TYPES);
+  const ownerByName = new Map<string, string | null>();
+  const resolveOwner = async (name: string) => {
+    if (!ownerByName.has(name)) {
+      ownerByName.set(name, await repo.resolveAlias(projectId, 'character', name));
+    }
+    return ownerByName.get(name)!;
+  };
+
+  const perScene = new Map<string, ScenePosition>();
+  for (const m of scan.mentions) {
+    const e = scan.entities.get(m.entityId);
+    if (!e || !objectTypes.has(e.type)) continue;
+    const sectionId = scan.sectionOfParagraph.get(m.paragraphId);
+    const s = sectionId ? scan.bySection.get(sectionId) : undefined;
+    if (!s || !span(s.time)) continue;
+    const text = scan.ix.paragraphs.get(m.paragraphId)?.text ?? '';
+    const field = ownerField(m);
+    const fieldOwner = field ? await resolveOwner(field) : null;
+    const owner = fieldOwner ?? m.subjectEntityId;
+    if (!owner || scan.entities.get(owner)?.type !== 'character') continue;
+    const inferred = !fieldOwner && !explicitSubject(text, m);
+    const key = `${e.id}|${s.sectionId}`;
+    const cur = perScene.get(key);
+    if (!cur) {
+      perScene.set(key, { sectionId: s.sectionId, sectionTitle: s.title, narrativeIndex: s.narrativeIndex, time: s.time!, positions: new Set([owner]), paragraphId: m.paragraphId, inferred });
+    } else {
+      cur.positions.add(owner);
+      cur.inferred = cur.inferred || inferred;
+    }
+  }
+  const byEntity = new Map<string, ScenePosition[]>();
+  for (const [key, p] of perScene) {
+    const entityId = key.slice(0, key.indexOf('|'));
+    byEntity.set(entityId, [...(byEntity.get(entityId) ?? []), p]);
+  }
+  const conflicts = sceneConflicts(byEntity, (x, y) => x === y);
+  return writeSceneConflicts(repo, projectId, 'object', OBJECT_RULE_ACTOR, conflicts, scan.ix, (c) => {
+    const obj = scan.entities.get(c.entityId)?.name ?? c.entityId;
+    const hint = c.a.inferred || c.b.inferred ? ' Власника в одній зі сцен визначено за найближчим героєм, не явно — перевірте.' : '';
+    return `Предмет «${obj}» в той самий час (${whenLabel(c.a.time)} / ${whenLabel(c.b.time)}) — у двох власників: ${names(c.a.positions, scan)} (сцена «${c.a.sectionTitle}») і ${names(c.b.positions, scan)} (сцена «${c.b.sectionTitle}»), без сцени передачі між ними${moreLabel(c.more)}.${hint}`;
+  });
+}
+
+export interface RefreshPlaceObjectResult extends RefreshSceneRuleResult {
+  /** Окремо — що дали теги сцен, і що — суперечності рис (trait_contradiction на всіх мітках). */
+  parts: { scenes: Omit<RefreshSceneRuleResult, 'issues'>; traits: Omit<RefreshTraitContradictionsResult, 'issues'> };
+}
+
+function combine(scenes: RefreshSceneRuleResult, traits: RefreshTraitContradictionsResult): RefreshPlaceObjectResult {
+  const strip = <T extends { issues: unknown }>({ issues: _i, ...rest }: T) => rest;
+  return {
+    checked: scenes.checked + traits.checked,
+    created: scenes.created + traits.created,
+    updated: scenes.updated + traits.updated,
+    skipped: scenes.skipped + traits.skipped,
+    issues: [...scenes.issues, ...traits.issues],
+    parts: { scenes: strip(scenes), traits: strip(traits) },
+  };
+}
+
+/** Правило «місце» повністю (§2 п.4 плану): (а) риси локацій і світу, (б) герой у двох місцях одночасно. */
+export async function refreshPlaceContinuity(repo: CoreRepository, projectId: string): Promise<RefreshPlaceObjectResult> {
+  const scenes = await refreshPlaceSceneContinuity(repo, projectId);
+  const traits = await refreshTraitContradictions(repo, projectId, { kind: 'place', entityTypes: PLACE_ENTITY_TYPES });
+  return combine(scenes, traits);
+}
+
+/** Правило «предмет» повністю (§2 п.5 плану): (а) риси предмета, (б) предмет у двох власників одночасно. */
+export async function refreshObjectContinuity(repo: CoreRepository, projectId: string): Promise<RefreshPlaceObjectResult> {
+  const scenes = await refreshObjectSceneContinuity(repo, projectId);
+  const traits = await refreshTraitContradictions(repo, projectId, { kind: 'object', entityTypes: OBJECT_ENTITY_TYPES });
+  return combine(scenes, traits);
 }
