@@ -896,6 +896,8 @@ export class MemoryCoreRepository implements CoreRepository {
     this.appearanceVersions.delete(id);
     // Як ON DELETE SET NULL: портрети версії лишаються загальними портретами героя.
     for (const l of this.assetLinks.values()) if (l.appearanceVersionId === id) l.appearanceVersionId = null;
+    // Як ON DELETE CASCADE (Т2.4 В3): рисі «вік» цієї версії нема звідки взяти значення без неї.
+    for (const [tid, t] of [...this.entityTraits]) if (t.appearanceVersionId === id) await this.deleteEntityTrait(projectId, tid);
     await this.addAppearanceHistory({ projectId, versionId: id, entityId: v.entityId, action: 'deleted', snapshot: { ...v }, actor });
     return true;
   }
@@ -934,8 +936,17 @@ export class MemoryCoreRepository implements CoreRepository {
         throw new CoreRuleError('bad_input', 'Заміняти можна лише рису тієї самої сутності з тією самою міткою');
       }
     }
-    const prev = input.id ? this.entityTraits.get(input.id) : undefined;
+    if (input.appearanceVersionId) {
+      const v = this.appearanceVersions.get(input.appearanceVersionId);
+      if (!v || v.projectId !== input.projectId) throw notFound(`Версію зовнішності «${input.appearanceVersionId}»`);
+      if (v.entityId !== input.entityId) throw new CoreRuleError('bad_input', 'Версія зовнішності належить іншій сутності');
+    }
+    let prev = input.id ? this.entityTraits.get(input.id) : undefined;
     if (input.id && (!prev || prev.projectId !== input.projectId)) throw notFound(`Риса «${input.id}»`);
+    // Без явного id, але з версією зовнішності — та сама похідна риса (Т2.4 В3): оновити, не дублювати.
+    if (!prev && input.appearanceVersionId) {
+      prev = [...this.entityTraits.values()].find((t) => t.projectId === input.projectId && t.appearanceVersionId === input.appearanceVersionId);
+    }
     const at = now();
     const row: EntityTraitRow = {
       id: prev?.id ?? randomUUID(),
@@ -943,11 +954,12 @@ export class MemoryCoreRepository implements CoreRepository {
       entityId: input.entityId,
       label: n.label,
       value: n.value,
-      sectionId: input.sectionId ?? prev?.sectionId ?? null,
+      sectionId: input.sectionId !== undefined ? input.sectionId : prev?.sectionId ?? null,
       storyTimeKey: input.storyTimeKey !== undefined ? input.storyTimeKey : prev?.storyTimeKey ?? null,
       status: n.status,
       source: n.source,
       supersedes: input.supersedes !== undefined ? input.supersedes : prev?.supersedes ?? null,
+      appearanceVersionId: input.appearanceVersionId !== undefined ? input.appearanceVersionId : prev?.appearanceVersionId ?? null,
       createdBy: input.createdBy,
       createdAt: prev?.createdAt ?? at,
       updatedAt: at,
@@ -968,6 +980,8 @@ export class MemoryCoreRepository implements CoreRepository {
   async deleteEntityTrait(projectId: string, id: string) {
     const t = this.entityTraits.get(id);
     if (!t || t.projectId !== projectId) return false;
+    // Як ON DELETE SET NULL у базі: риси, що заміняли цю, більше не заміняють неіснуючу.
+    for (const other of this.entityTraits.values()) if (other.supersedes === id) other.supersedes = null;
     return this.entityTraits.delete(id);
   }
 

@@ -42,7 +42,7 @@ import {
 import { ROLE_ENTITY_TYPES, appearanceOverview, cardAppearanceHash, describeLinks, expectedLinkHash, heroPortrait, refreshVisualReview, sceneVisuals, visualEntitiesOverview } from './visual';
 import { ASSET_ROLES, type AssetRole } from './types';
 import { CONTINUITY_ISSUE_KINDS, CONTINUITY_ISSUE_STATUSES, type ContinuityIssueKind, type ContinuityIssueStatus } from './types';
-import { refreshTimeContinuity } from './continuity';
+import { refreshTimeContinuity, refreshTraitContradictions, syncAgeTraitFromVersion, removeAgeTraitForVersion, AGE_TRAIT_LABEL } from './continuity';
 import { VERSIONED_ROLES, isLinkableAssetUrl } from './rules';
 import { clampIntensity, emotionFamily } from '../../src/utils/emotionScale';
 import { LlmFallbackJevAdapter, type JevAdapter, type LlmJson } from './flc/jev';
@@ -1422,6 +1422,8 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       approved: b.approved ?? true,
       createdBy: `user:${req.projectAccess!.userId}`,
     });
+    // Вік цієї версії — жива риса «вік» (Т2.4 В3): trait_contradiction ловить суперечність.
+    await syncAgeTraitFromVersion(repo, req.params.id, version);
     res.status(201).json({ version });
   }));
 
@@ -1450,6 +1452,8 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
     // Опис змінився — портрети цієї версії, звірені зі старим, — «перевірити» (Т2.3 В5).
     const e = await repo.getEntity(req.params.id, prev.entityId);
     const review = version.descriptionHash !== prev.descriptionHash && e ? await refreshHero(repo, req.params.id, e, 'version') : null;
+    // Вік міг змінитись (чи версію знято із затвердження) — риса «вік» (Т2.4 В3) синхронізується так само.
+    await syncAgeTraitFromVersion(repo, req.params.id, version);
     res.json({ version, review });
   }));
 
@@ -1465,6 +1469,8 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
     // Портрети версії стали загальними — тепер їх звіряють з описом картки (Т2.3 В5).
     const e = await repo.getEntity(req.params.id, prev.entityId);
     const review = ok && e ? await refreshHero(repo, req.params.id, e, 'version_deleted') : null;
+    // Риса «вік» цієї версії зникла разом з нею (Т2.4 В3) — перелаштувати ланцюжок решти.
+    if (ok) await removeAgeTraitForVersion(repo, req.params.id, prev.entityId, prev.id);
     res.json({ ok, review });
   }));
 
@@ -1541,6 +1547,13 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
   app.post('/api/projects/:id/continuity/rules/time', withRepo(async (repo, req, res) => {
     if (!requireStoryEdit(req, res)) return;
     const result = await refreshTimeContinuity(repo, req.params.id);
+    res.json(result);
+  }));
+
+  /** Правило «вік» (Т2.4 В3): trait_contradiction на мітці «вік» → проблеми безперервності (kind: age). Лише за командою. */
+  app.post('/api/projects/:id/continuity/rules/age', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const result = await refreshTraitContradictions(repo, req.params.id, { label: AGE_TRAIT_LABEL, kind: 'age' });
     res.json(result);
   }));
 

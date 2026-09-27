@@ -470,19 +470,22 @@ export interface EntityTraitRow {
   source: 'author' | 'ai';
   /** Ця риса явно заміняє попередню (автор позначив «змінилось», не суперечність). */
   supersedes: string | null;
+  /** Риса «вік» живиться з версії зовнішності (Т2.3 В3, Т2.4 В3) — версію видалено, риса зникає разом з нею. */
+  appearanceVersionId: string | null;
   createdBy: CoreActor;
   createdAt: string;
   updatedAt: string;
 }
 
 export type EntityTraitInput = Pick<EntityTraitRow, 'projectId' | 'entityId' | 'label' | 'value' | 'createdBy'> & {
-  /** Є — оновити цю рису; немає — створити нову (не заміна попередньої — на це є `supersedes`). */
+  /** Є — оновити цю рису; немає, але є `appearanceVersionId` з наявною похідною рисою — оновити її; інакше — нова. */
   id?: string;
   sectionId?: string | null;
   storyTimeKey?: number | null;
   status?: CoreStatus;
   source?: 'author' | 'ai';
   supersedes?: string | null;
+  appearanceVersionId?: string | null;
 };
 
 export const CONTINUITY_ISSUE_KINDS = ['object', 'knowledge', 'place', 'age', 'time'] as const;

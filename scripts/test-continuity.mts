@@ -12,7 +12,12 @@
  * `continuity_issues` (kind: 'time') — перепаковка без нової логіки
  * виявлення (`server/core/continuity.ts: refreshTimeContinuity`).
  *
- * Інші правила (вік, місце, предмет, знання) — наступні етапи В3–В5.
+ * В3: універсальне правило `trait_contradiction` на `entity_traits` (дві
+ * підтверджені риси тієї самої сутності, однакова мітка, різне значення,
+ * без `supersedes` — суперечність) плюс перенесення `appearance_versions.age`
+ * у рису «вік» (`syncAgeTraitFromVersion`/`refreshTraitContradictions`).
+ *
+ * Інші правила (місце, предмет, знання) — наступні етапи В4–В5.
  *
  * Без бази — у пам'яті; з CORE_TEST_DATABASE_URL — ще й на PostgreSQL
  * (схема `fusion_core` видаляється — лише тестова база!).
@@ -29,7 +34,7 @@ import { createCorePool } from '../server/core/index.ts';
 import { CORE_SCHEMA, loadMigrations, resolveMigrationsDir, runMigrations } from '../server/core/migrate.ts';
 import { reconcileParagraphIds } from '../src/utils/paragraphIds.ts';
 import { CoreRuleError, checkEntityTrait, checkContinuityIssue } from '../server/core/rules.ts';
-import { refreshTimeContinuity } from '../server/core/continuity.ts';
+import { refreshTimeContinuity, refreshTraitContradictions, syncAgeTraitFromVersion, removeAgeTraitForVersion, AGE_TRAIT_LABEL } from '../server/core/continuity.ts';
 import { buildTimeline } from '../server/core/timeline.ts';
 import { normalizeStoryTime } from '../src/utils/storyTime.ts';
 import type { CoreRepository } from '../server/core/types.ts';
@@ -282,8 +287,111 @@ async function timeRuleSuite(label: string, repo: CoreRepository, P: string) {
   server.close();
 }
 
+async function ageRuleSuite(label: string, repo: CoreRepository, P: string) {
+  console.log(`\ntrait_contradiction і риса «вік» — Т2.4 В3 (${label}):`);
+  const sec = (id: string, order: number, content: string) => {
+    const r = reconcileParagraphIds({ sectionId: id, content });
+    return { id, title: `Розділ ${id}`, order, content, paragraphIds: r.ids, paragraphHashes: r.hashes };
+  };
+  const book: any = {
+    id: P,
+    title: 'Книга',
+    characters: [{ id: 'c-o', name: 'Олена' }, { id: 'c-m', name: 'Марко' }],
+    chapters: [
+      { id: 'ch1', title: 'Гл.1', order: 0, sections: [sec('s1', 0, '[/character:Олена] Олена мала 8 років.')] },
+      { id: 'ch2', title: 'Гл.2', order: 1, sections: [sec('s2', 0, '[/character:Марко] Марко саме одружувався.')] },
+      { id: 'ch3', title: 'Гл.3', order: 2, sections: [sec('s3', 0, '[/character:Олена] [/character:Марко] Обидва вже дорослі.')] },
+      { id: 'ch4', title: 'Гл.4', order: 3, sections: [sec('s4', 0, '[/character:Марко] Марко постарів.')] },
+    ],
+  };
+  await syncBookToCore(repo, { id: P, ownerId: 'u-owner', title: 'Книга', book });
+  const olena = (await repo.resolveAlias(P, 'character', 'Олена'))!;
+  const marko = (await repo.resolveAlias(P, 'character', 'Марко'))!;
+
+  // Олена: дві версії з НЕ перетинними главами — природне дорослішання, не суперечність.
+  const oChild = await repo.upsertAppearanceVersion({ projectId: P, entityId: olena, label: 'дитинство', age: '8', fromChapter: 1, toChapter: 1, createdBy: 'user:u-owner' });
+  await syncAgeTraitFromVersion(repo, P, oChild);
+  const oAdult = await repo.upsertAppearanceVersion({ projectId: P, entityId: olena, label: 'дорослість', age: '30', fromChapter: 3, createdBy: 'user:u-owner' });
+  await syncAgeTraitFromVersion(repo, P, oAdult);
+  const oTraits = await repo.listEntityTraits(P, olena);
+  t('дві похідні риси «вік» для Олени, з розділом і значенням версії', oTraits.length === 2 && oTraits.every((tr) => tr.label === AGE_TRAIT_LABEL) && oTraits.some((tr) => tr.value === '8' && tr.sectionId === 's1') && oTraits.some((tr) => tr.value === '30' && tr.sectionId === 's3'));
+  const oAdultTrait = oTraits.find((tr) => tr.value === '30')!;
+  const oChildTrait = oTraits.find((tr) => tr.value === '8')!;
+  t('глави не перетинаються — пізніша supersedes ранішу автоматично', oAdultTrait.supersedes === oChildTrait.id);
+
+  // Марко: дві версії з перетинними главами (2–4 і 1–3) і різним віком — справжня суперечність.
+  const mYoung = await repo.upsertAppearanceVersion({ projectId: P, entityId: marko, label: 'молодість', age: '20', fromChapter: 1, toChapter: 3, createdBy: 'user:u-owner' });
+  await syncAgeTraitFromVersion(repo, P, mYoung);
+  const mOld = await repo.upsertAppearanceVersion({ projectId: P, entityId: marko, label: 'старість', age: '60', fromChapter: 2, toChapter: 4, createdBy: 'user:u-owner' });
+  await syncAgeTraitFromVersion(repo, P, mOld);
+  const mTraits = await repo.listEntityTraits(P, marko);
+  const mYoungTrait = mTraits.find((tr) => tr.value === '20')!;
+  const mOldTrait = mTraits.find((tr) => tr.value === '60')!;
+  t('глави перетинаються — supersedes НЕ ставиться автоматично', mOldTrait.supersedes === null && mYoungTrait.supersedes === null);
+
+  const r1 = await refreshTraitContradictions(repo, P, { label: AGE_TRAIT_LABEL, kind: 'age' });
+  t('КРИТЕРІЙ: суперечність віку — та сама риса, різне значення, без supersedes — 1 проблема (Марко), Олену не займає', r1.created === 1 && r1.issues[0].entityId === marko && r1.issues[0].kind === 'age' && r1.issues[0].insufficientData === false, JSON.stringify(r1.issues));
+
+  const r2 = await refreshTraitContradictions(repo, P, { label: AGE_TRAIT_LABEL, kind: 'age' });
+  t('повторний прогін — оновлює ту саму проблему, не дублює', r2.created === 0 && r2.updated === 1 && (await repo.listContinuityIssues(P, { kind: 'age' })).length === 1);
+
+  await repo.setContinuityIssueStatus(P, r1.issues[0].id, 'dismissed', 'user:u-owner');
+  const r3 = await refreshTraitContradictions(repo, P, { label: AGE_TRAIT_LABEL, kind: 'age' });
+  t('автор відхилив — не воскресає', r3.created === 0 && r3.updated === 0 && r3.skipped >= 1);
+
+  // Автор явно позначає «це заміна» через supersedes — суперечність зникає, попри перетин.
+  await repo.upsertEntityTrait({ id: mOldTrait.id, projectId: P, entityId: marko, label: mOldTrait.label, value: mOldTrait.value, supersedes: mYoungTrait.id, createdBy: 'user:u-owner' });
+  const r4 = await refreshTraitContradictions(repo, P, { label: AGE_TRAIT_LABEL, kind: 'age' });
+  t('явний supersedes від автора — правило більше не бачить суперечності (те, що вже dismissed, тут не рахується)', r4.checked === 0);
+  await repo.upsertEntityTrait({ id: mOldTrait.id, projectId: P, entityId: marko, label: mOldTrait.label, value: mOldTrait.value, supersedes: null, createdBy: 'user:u-owner' });
+
+  // Універсальність правила: та сама функція на довільній мітці (В5 — «предмет»/«місце» пізніше).
+  await repo.upsertEntityTrait({ projectId: P, entityId: olena, label: 'колір волосся', value: 'руде', sectionId: 's1', createdBy: 'user:u-owner' });
+  await repo.upsertEntityTrait({ projectId: P, entityId: olena, label: 'колір волосся', value: 'чорне', sectionId: 's3', createdBy: 'user:u-owner' });
+  const r5 = await refreshTraitContradictions(repo, P, { label: 'колір волосся', kind: 'object' });
+  t('та сама функція, інша мітка й kind — теж ловить суперечність', r5.created === 1 && r5.issues[0].kind === 'object' && r5.issues[0].entityId === olena);
+
+  // Видалення версії знімає похідну рису й перелаштовує ланцюжок.
+  await repo.deleteAppearanceVersion(P, oChild.id, 'user:u-owner');
+  await removeAgeTraitForVersion(repo, P, olena, oChild.id);
+  const oTraitsAfter = await repo.listEntityTraits(P, olena);
+  const oAdultAfter = oTraitsAfter.find((tr) => tr.appearanceVersionId === oAdult.id);
+  t('версію видалено — її риса зникла разом з нею, у решти supersedes знято', !oTraitsAfter.some((tr) => tr.appearanceVersionId === oChild.id) && oAdultAfter?.supersedes === null);
+
+  // ── Маршрут і наскрізна синхронізація через POST/PATCH/DELETE версії ──
+  const access = {
+    async getBookOwnerId(x: string) { return x === P ? 'u-owner' : null; },
+    async getCollabOwnerId() { return undefined; },
+    async listAcceptedInvites() { return [{ acceptedUserId: 'u-reader', role: 'reader' }]; },
+  };
+  const who: Record<string, any> = { owner: { id: 'u-owner', role: 'writer', isGuest: false }, reader: { id: 'u-reader', role: 'reader', isGuest: false } };
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => { (req as any).principal = who[String(req.headers['x-user'])]; next(); });
+  registerProjectRoutes(app, { access, repo: () => repo, coreState: () => 'ready' });
+  const server = app.listen(0);
+  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/projects/${P}`;
+  const call = async (method: string, path: string, user: string, body?: unknown) => {
+    const r = await fetch(`${baseUrl}${path}`, { method, headers: { 'x-user': user, 'Content-Type': 'application/json' }, body: body !== undefined ? JSON.stringify(body) : undefined });
+    return { status: r.status, body: (await r.json().catch(() => ({}))) as any };
+  };
+  t('маршрут POST .../continuity/rules/age: читачу — 403', (await call('POST', '/continuity/rules/age', 'reader')).status === 403);
+  const ranAge = await call('POST', '/continuity/rules/age', 'owner');
+  t('маршрут: власнику — 200', ranAge.status === 200);
+
+  const mk = await call('POST', `/visual/appearance/${marko}`, 'owner', { label: 'дитинство', age: '5', fromChapter: 1, toChapter: 1 });
+  t('POST версії через маршрут — одразу створює похідну рису «вік»', mk.status === 201 && (await repo.listEntityTraits(P, marko)).some((tr) => tr.appearanceVersionId === mk.body.version.id && tr.value === '5'));
+  const vid = mk.body.version.id;
+  await call('PATCH', `/visual/appearance/${marko}/versions/${vid}`, 'owner', { age: '6' });
+  t('PATCH віку через маршрут — оновлює ту саму рису, не створює нову', (await repo.listEntityTraits(P, marko)).filter((tr) => tr.appearanceVersionId === vid).length === 1 && (await repo.listEntityTraits(P, marko)).find((tr) => tr.appearanceVersionId === vid)?.value === '6');
+  await call('DELETE', `/visual/appearance/${marko}/versions/${vid}`, 'owner');
+  t('DELETE версії через маршрут — прибирає похідну рису', !(await repo.listEntityTraits(P, marko)).some((tr) => tr.appearanceVersionId === vid));
+  server.close();
+}
+
 await suite('memory', new MemoryCoreRepository(), 'book-m');
 await timeRuleSuite('memory', new MemoryCoreRepository(), 'book-tm');
+await ageRuleSuite('memory', new MemoryCoreRepository(), 'book-am');
 
 const url = process.env.CORE_TEST_DATABASE_URL?.trim();
 if (!url) {
@@ -294,9 +402,10 @@ if (!url) {
     await pool.query(`DROP SCHEMA IF EXISTS ${CORE_SCHEMA} CASCADE`);
     await runMigrations(pool, loadMigrations(resolveMigrationsDir()));
     const { rows } = await pool.query(`SELECT max(version) AS v FROM ${CORE_SCHEMA}.core_schema_migrations`);
-    t('схема ядра — не старіша за v12 (безперервність: риси, проблеми)', Number(rows[0].v) >= 12, `v${rows[0].v}`);
+    t('схема ядра — не старіша за v13 (безперервність: риси, проблеми, зв\'язок з версією зовнішності)', Number(rows[0].v) >= 13, `v${rows[0].v}`);
     await suite('postgres', new PgCoreRepository(pool), 'book-p');
     await timeRuleSuite('postgres', new PgCoreRepository(pool), 'book-tp');
+    await ageRuleSuite('postgres', new PgCoreRepository(pool), 'book-ap');
   } catch (err) {
     t('прогін на PostgreSQL без збоїв', false, (err as Error).stack ?? String(err));
   } finally {

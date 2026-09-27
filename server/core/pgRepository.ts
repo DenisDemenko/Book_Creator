@@ -202,6 +202,7 @@ function toEntityTrait(r: any): EntityTraitRow {
     status: r.status,
     source: r.source,
     supersedes: r.supersedes ?? null,
+    appearanceVersionId: r.appearance_version_id ?? null,
     createdBy: r.created_by,
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
@@ -1400,21 +1401,43 @@ export class PgCoreRepository implements CoreRepository {
         throw new CoreRuleError('bad_input', 'Заміняти можна лише рису тієї самої сутності з тією самою міткою');
       }
     }
-    if (input.id) {
-      if (!isUuid(input.id)) throw notFound(`Риса «${input.id}»`);
+    if (input.appearanceVersionId) {
+      if (!isUuid(input.appearanceVersionId)) throw notFound(`Версію зовнішності «${input.appearanceVersionId}»`);
+      const { rows: vr } = await this.q('SELECT entity_id FROM appearance_versions WHERE project_id = $1 AND id = $2', [input.projectId, input.appearanceVersionId]);
+      if (!vr[0]) throw notFound(`Версію зовнішності «${input.appearanceVersionId}»`);
+      if (vr[0].entity_id !== input.entityId) throw new CoreRuleError('bad_input', 'Версія зовнішності належить іншій сутності');
+    }
+    let id = input.id;
+    if (id && !isUuid(id)) throw notFound(`Риса «${id}»`);
+    let prev: any = null;
+    if (id) {
+      const { rows } = await this.q('SELECT * FROM entity_traits WHERE project_id = $1 AND id = $2', [input.projectId, id]);
+      if (!rows[0]) throw notFound(`Риса «${id}»`);
+      prev = rows[0];
+    } else if (input.appearanceVersionId) {
+      // Без явного id, але з версією зовнішності — та сама похідна риса (Т2.4 В3): оновити, не дублювати.
+      const { rows } = await this.q('SELECT * FROM entity_traits WHERE project_id = $1 AND appearance_version_id = $2', [input.projectId, input.appearanceVersionId]);
+      prev = rows[0] ?? null;
+      if (prev) id = prev.id;
+    }
+    const sectionId = input.sectionId !== undefined ? input.sectionId : prev?.section_id ?? null;
+    const storyTimeKey = input.storyTimeKey !== undefined ? input.storyTimeKey : prev?.story_time_key ?? null;
+    const supersedes = input.supersedes !== undefined ? input.supersedes : prev?.supersedes ?? null;
+    const appearanceVersionId = input.appearanceVersionId !== undefined ? input.appearanceVersionId : prev?.appearance_version_id ?? null;
+    if (id) {
       const { rows } = await this.q(
         `UPDATE entity_traits SET label = $3, value = $4, section_id = $5, story_time_key = $6,
-           status = $7, source = $8, supersedes = $9, created_by = $10, updated_at = now()
+           status = $7, source = $8, supersedes = $9, appearance_version_id = $10, created_by = $11, updated_at = now()
          WHERE project_id = $1 AND id = $2 RETURNING *`,
-        [input.projectId, input.id, n.label, n.value, input.sectionId ?? null, input.storyTimeKey ?? null, n.status, n.source, input.supersedes ?? null, input.createdBy],
+        [input.projectId, id, n.label, n.value, sectionId, storyTimeKey, n.status, n.source, supersedes, appearanceVersionId, input.createdBy],
       );
-      if (!rows[0]) throw notFound(`Риса «${input.id}»`);
+      if (!rows[0]) throw notFound(`Риса «${id}»`);
       return toEntityTrait(rows[0]);
     }
     const { rows } = await this.q(
-      `INSERT INTO entity_traits (project_id, entity_id, label, value, section_id, story_time_key, status, source, supersedes, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
-      [input.projectId, input.entityId, n.label, n.value, input.sectionId ?? null, input.storyTimeKey ?? null, n.status, n.source, input.supersedes ?? null, input.createdBy],
+      `INSERT INTO entity_traits (project_id, entity_id, label, value, section_id, story_time_key, status, source, supersedes, appearance_version_id, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+      [input.projectId, input.entityId, n.label, n.value, sectionId, storyTimeKey, n.status, n.source, supersedes, appearanceVersionId, input.createdBy],
     );
     return toEntityTrait(rows[0]);
   }

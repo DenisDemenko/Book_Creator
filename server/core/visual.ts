@@ -267,7 +267,8 @@ export interface AppearanceOverview {
   history: { versionId: string; action: string; label: string; actor: string; at: string }[];
 }
 
-const overlaps = (a: AppearanceVersionRow, b: AppearanceVersionRow) =>
+/** Чи перетинаються глави дії двох версій — реекспортовано для `continuity.ts` (Т2.4 В3: чи природне дорослішання, чи справжня суперечність). */
+export const overlaps = (a: AppearanceVersionRow, b: AppearanceVersionRow) =>
   (a.fromChapter ?? 0) <= (b.toChapter ?? 1e9) && (b.fromChapter ?? 0) <= (a.toChapter ?? 1e9);
 
 /**
