@@ -29,6 +29,7 @@ import {
   appearanceHash,
   checkEntityTrait,
   checkContinuityIssue,
+  checkContinuityDraftCheck,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isSearchableKind, isValidEmbedding, memoryTextScore } from './search/text';
 import { CORE_STATUSES, CONTINUITY_ISSUE_STATUSES } from './types';
@@ -67,6 +68,8 @@ import type {
   EntityTraitRow,
   ContinuityIssueInput,
   ContinuityIssueRow,
+  ContinuityDraftCheckInput,
+  ContinuityDraftCheckRow,
   ContinuityIssueKind,
   ContinuityIssueStatus,
   ParagraphVersionRow,
@@ -114,6 +117,7 @@ export class MemoryCoreRepository implements CoreRepository {
   private embeddings = new Map<string, { projectId: string; paragraphId: string; model: string; contentHash: string; vector: number[] }>();
   private entityTraits = new Map<string, EntityTraitRow>();
   private continuityIssues = new Map<string, ContinuityIssueRow>();
+  private draftChecks: ContinuityDraftCheckRow[] = [];
 
   private requireProject(projectId: string): ProjectRow {
     const p = this.projects.get(projectId);
@@ -1040,6 +1044,42 @@ export class MemoryCoreRepository implements CoreRepository {
     const i = this.continuityIssues.get(id);
     if (!i || i.projectId !== projectId) return false;
     return this.continuityIssues.delete(id);
+  }
+
+  // ── Перевірки чернеток (Т2.4 В7) ───────────────────────────────────────────
+
+  async addContinuityDraftCheck(input: ContinuityDraftCheckInput) {
+    this.requireProject(input.projectId);
+    const n = checkContinuityDraftCheck(input);
+    if (!this.entityIn(input.projectId, input.characterId)) throw notFound(`Сутність «${input.characterId}»`);
+    const row: ContinuityDraftCheckRow = {
+      id: randomUUID(),
+      projectId: input.projectId,
+      characterId: input.characterId,
+      sectionId: input.sectionId ?? null,
+      draftText: n.draftText,
+      findings: clone(input.findings),
+      simulationId: input.simulationId ?? null,
+      createdBy: input.createdBy,
+      createdAt: now(),
+    };
+    this.draftChecks.push(row);
+    return clone(row);
+  }
+
+  async listContinuityDraftChecks(projectId: string, filter: { characterId?: string; simulationId?: string; limit?: number } = {}) {
+    const limit = Math.max(1, Math.min(filter.limit ?? 50, 200));
+    return this.draftChecks
+      .map((c, i) => ({ c, i }))
+      .filter(({ c }) => c.projectId === projectId && (!filter.characterId || c.characterId === filter.characterId) && (!filter.simulationId || c.simulationId === filter.simulationId))
+      .sort((a, b) => b.c.createdAt.localeCompare(a.c.createdAt) || b.i - a.i)
+      .slice(0, limit)
+      .map(({ c }) => clone(c));
+  }
+
+  async getContinuityDraftCheck(projectId: string, id: string) {
+    const c = this.draftChecks.find((x) => x.id === id && x.projectId === projectId);
+    return c ? clone(c) : null;
   }
 
   // ── Збережені запити (Т1.3) ──────────────────────────────────────────────

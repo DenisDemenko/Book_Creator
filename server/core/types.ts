@@ -537,6 +537,49 @@ export type ContinuityIssueInput = Pick<ContinuityIssueRow, 'projectId' | 'kind'
   insufficientData?: boolean;
 };
 
+/**
+ * Знахідка перевірки чернетки (Т2.4 В7, ТЗ-H): у чернетці героя згадано факт
+ * (розкриття таємниці чи подію), якого він станом на сцену ще не знає.
+ */
+export interface DraftCheckFinding {
+  entityId: string;
+  entityName: string;
+  entityType: string;
+  kind: 'revelation' | 'event';
+  /** Як знайдено в чернетці: тег `[/revelation:…]` чи назва / псевдонім у тексті. */
+  match: 'tag' | 'name';
+  /** Уривок чернетки навколо згадки. */
+  quote: string;
+  /** Позиція згадки в тексті чернетки. */
+  offset: number;
+  /** learns_later — дізнається пізніше (сцена нижче); never_learns — у книзі не дізнається зовсім. */
+  reason: 'learns_later' | 'never_learns';
+  learnsAt: { sectionId: string; paragraphId: string; title: string; chapterNumber: number | null; via: 'subject' | 'present' } | null;
+}
+
+/**
+ * Збережена перевірка чернетки (Т2.4 В7, рішення власника §6 п.4): історія
+ * перевірок, НЕ факти книги — у `continuity_issues` не пишеться. `sectionId` —
+ * сцена, станом на початок якої рахується знання героя (немає — кінець книги);
+ * `simulationId` — порожнє, доки немає Т2.7 («Допит живого персонажа»).
+ */
+export interface ContinuityDraftCheckRow {
+  id: string;
+  projectId: string;
+  characterId: string;
+  sectionId: string | null;
+  draftText: string;
+  findings: DraftCheckFinding[];
+  simulationId: string | null;
+  createdBy: CoreActor;
+  createdAt: string;
+}
+
+export type ContinuityDraftCheckInput = Pick<ContinuityDraftCheckRow, 'projectId' | 'characterId' | 'draftText' | 'findings' | 'createdBy'> & {
+  sectionId?: string | null;
+  simulationId?: string | null;
+};
+
 /** Збережений пошуковий запит автора (Т1.3). */
 export interface SavedSearchRow {
   id: string;
@@ -704,6 +747,12 @@ export interface CoreRepository {
   /** Автор змінює статус (стає новим `createdBy` — «хто востаннє вирішив», за зразком CHECK у базі). */
   setContinuityIssueStatus(projectId: string, id: string, status: ContinuityIssueStatus, actor: CoreActor): Promise<ContinuityIssueRow>;
   deleteContinuityIssue(projectId: string, id: string): Promise<boolean>;
+
+  /** Перевірки чернеток (Т2.4 В7): лише додати й прочитати — історія, не редагується. */
+  addContinuityDraftCheck(input: ContinuityDraftCheckInput): Promise<ContinuityDraftCheckRow>;
+  /** Новіші першими; фільтр за героєм і симуляцією. */
+  listContinuityDraftChecks(projectId: string, filter?: { characterId?: string; simulationId?: string; limit?: number }): Promise<ContinuityDraftCheckRow[]>;
+  getContinuityDraftCheck(projectId: string, id: string): Promise<ContinuityDraftCheckRow | null>;
 
   /** Збережені запити автора в книзі (Т1.3), новіші першими. */
   listSavedSearches(projectId: string, userId: string): Promise<SavedSearchRow[]>;

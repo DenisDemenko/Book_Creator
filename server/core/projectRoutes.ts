@@ -44,7 +44,8 @@ import { ASSET_ROLES, type AssetRole } from './types';
 import { CONTINUITY_ISSUE_KINDS, CONTINUITY_ISSUE_STATUSES, type ContinuityIssueKind, type ContinuityIssueStatus } from './types';
 import { refreshTimeContinuity, refreshTraitContradictions, syncAgeTraitFromVersion, removeAgeTraitForVersion, refreshKnowledgeContinuity, refreshPlaceContinuity, refreshObjectContinuity, sectionsNeedingReview, AGE_TRAIT_LABEL } from './continuity';
 import { AI_CONTINUITY_JOB_KIND, CONTINUITY_SECTIONS_PER_REQUEST } from './continuityAi';
-import { VERSIONED_ROLES, isLinkableAssetUrl } from './rules';
+import { checkDraftKnowledge } from './continuityDraft';
+import { DRAFT_TEXT_MAX, VERSIONED_ROLES, isLinkableAssetUrl } from './rules';
 import { clampIntensity, emotionFamily } from '../../src/utils/emotionScale';
 import { LlmFallbackJevAdapter, type JevAdapter, type LlmJson } from './flc/jev';
 import { interpretSearchQuery, type SearchInterpretDeps, type SearchInterpretation } from './search/interpret';
@@ -1634,6 +1635,67 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       }
     }
     res.status(202).json({ jobs, sections: jobs.map((j) => j.sectionId) });
+  }));
+
+  /**
+   * Перевірка чернетки на «витік знання» (Т2.4 В7, ТЗ-H): герой у чернетці
+   * згадує розкриття чи подію, яких станом на сцену ще не знає. Рахується
+   * одразу (без AI) і зберігається в історію перевірок; у книгу й у
+   * проблеми безперервності не пишеться. Чернетка — робочий матеріал автора:
+   * і перевірка, і історія — лише тим, хто може змінювати книгу.
+   */
+  app.post('/api/projects/:id/continuity/check-draft', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const body = req.body ?? {};
+    const characterId = typeof body.characterId === 'string' ? body.characterId : '';
+    const draftText = typeof body.draftText === 'string' ? body.draftText : '';
+    const sectionId = typeof body.sectionId === 'string' && body.sectionId ? body.sectionId : null;
+    const simulationId = typeof body.simulationId === 'string' && body.simulationId ? body.simulationId : null;
+    if (!characterId || !draftText.trim()) {
+      res.status(400).json({ error: 'Потрібні characterId і draftText.', kind: 'bad_input' });
+      return;
+    }
+    if (draftText.length > DRAFT_TEXT_MAX) {
+      res.status(400).json({ error: `Чернетка довша за ${DRAFT_TEXT_MAX} символів — перевірте частинами.`, kind: 'bad_input' });
+      return;
+    }
+    const result = await checkDraftKnowledge(repo, req.params.id, { characterId, draftText, sectionId });
+    if ('error' in result) {
+      res.status(404).json({ error: result.error === 'no_character' ? 'Героя не знайдено в цьому проєкті.' : 'Сцени не знайдено в ядрі книги.', kind: 'not_found' });
+      return;
+    }
+    const check = await repo.addContinuityDraftCheck({
+      projectId: req.params.id,
+      characterId,
+      sectionId,
+      draftText,
+      findings: result.findings,
+      simulationId,
+      createdBy: `user:${req.projectAccess!.userId}`,
+    });
+    res.status(201).json({ check, scene: result.scene, known: result.known, mentioned: result.mentioned, unknownTags: result.unknownTags, rule: result.rule });
+  }));
+
+  /** Історія перевірок чернеток, новіші першими; ?characterId, ?simulationId, ?limit (до 200). */
+  app.get('/api/projects/:id/continuity/draft-checks', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const q = req.query as Record<string, string | undefined>;
+    const checks = await repo.listContinuityDraftChecks(req.params.id, {
+      characterId: q.characterId || undefined,
+      simulationId: q.simulationId || undefined,
+      limit: q.limit ? Number(q.limit) || undefined : undefined,
+    });
+    res.json({ checks });
+  }));
+
+  app.get('/api/projects/:id/continuity/draft-checks/:checkId', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const check = await repo.getContinuityDraftCheck(req.params.id, req.params.checkId);
+    if (!check) {
+      res.status(404).json({ error: 'Перевірки не знайдено.', kind: 'not_found' });
+      return;
+    }
+    res.json({ check });
   }));
 
   /** Змінити статус проблеми (автор: підтвердити, відхилити, позначити виправленою чи «переглянуто»). */

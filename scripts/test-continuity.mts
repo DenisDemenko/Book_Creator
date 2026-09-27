@@ -34,6 +34,11 @@
  * перевірка лише змінених місць (відбиток абзаців-доказів → `needs_review`,
  * одне сповіщення на сутність) і перегін AI-2 лише там (`changed: true`).
  *
+ * В7: чернетка-симуляція (ТЗ-H) — той самий перевіряльник, що й правило
+ * «знання», над текстом, якого в книзі немає: навмисний «витік знання»
+ * знаходиться, у книгу й у проблеми нічого не пишеться, перевірка — в історії
+ * (`continuity_draft_checks`, міграція 0014).
+ *
  * Без бази — у пам'яті; з CORE_TEST_DATABASE_URL — ще й на PostgreSQL
  * (схема `fusion_core` видаляється — лише тестова база!).
  *
@@ -60,6 +65,7 @@ import type { JobStore } from '../server/core/jobs/types.ts';
 import type { AiGenerateInput } from '../server/core/ai/roles.ts';
 import { AI_CONTINUITY_JOB_KIND, aiContinuityJobKind, continuityTask, continuityWorldState } from '../server/core/continuityAi.ts';
 import { refreshContinuityReview } from '../server/core/continuity.ts';
+import { checkDraftKnowledge } from '../server/core/continuityDraft.ts';
 
 let pass = 0;
 let fail = 0;
@@ -785,12 +791,114 @@ async function aiContinuitySuite(label: string, repo: CoreRepository, jobStore: 
   server.close();
 }
 
+async function draftCheckSuite(label: string, repo: CoreRepository, P: string) {
+  console.log(`\nЧернетка-симуляція: перевірка «витоку знання» — Т2.4 В7 (${label}):`);
+  const sec = (id: string, order: number, content: string) => {
+    const r = reconcileParagraphIds({ sectionId: id, content });
+    return { id, title: `Сцена ${id}`, order, content, paragraphIds: r.ids, paragraphHashes: r.hashes };
+  };
+  const book: any = {
+    id: P,
+    title: 'Книга',
+    characters: [{ id: 'c-o', name: 'Олена' }, { id: 'c-m', name: 'Марко' }],
+    chapters: [
+      { id: 'ch1', title: 'Тоді', order: 0, sections: [
+        sec('s1', 0, '[/character:Марко] [/character:Олена] Марко пошепки згадав [/revelation:Таємниця @Марко], Олена не почула.'),
+        sec('s1b', 1, '[/character:Олена] [/character:Марко] Почався [/event:Напад @Марко], Олена бачила все.'),
+      ] },
+      { id: 'ch2', title: 'Правда', order: 1, sections: [sec('s2', 0, '[/character:Олена] Олені розповіли правду: [/revelation:Таємниця @Олена].')] },
+      { id: 'ch3', title: 'Далі', order: 2, sections: [
+        sec('s3', 0, '[/character:Марко] Марко сам знайшов [/revelation:Скарб @Марко].'),
+        sec('s4', 1, '[/character:Олена] Олена йде далі.'),
+      ] },
+    ],
+  };
+  await syncBookToCore(repo, { id: P, ownerId: 'u-owner', title: 'Книга', book });
+  const id = async (type: string, name: string) => (await repo.resolveAlias(P, type, name))!;
+  const olena = await id('character', 'Олена');
+  const secret = await id('revelation', 'Таємниця');
+  const issuesBefore = (await repo.listContinuityIssues(P)).length;
+  const parasBefore = (await Promise.all(['s1', 's1b', 's2', 's3', 's4'].map((x) => repo.listParagraphs(P, x)))).flat().map((x) => `${x.id}:${x.text}`).join('|');
+
+  const draft = 'Олена думала про [/revelation:Таємниця] і про напад, який бачила. А ще про [/event:Потоп].';
+  const atS2 = await checkDraftKnowledge(repo, P, { characterId: olena, draftText: draft, sectionId: 's2' }) as any;
+  const leak = atS2.findings?.[0];
+  t('КРИТЕРІЙ ТЗ-H: чернетка станом на s2 — навмисний «витік знання»: Олена згадує «Таємницю», яку дізнається лише в s2 (тег, «дізнається пізніше»)',
+    atS2.findings?.length === 1 && leak.entityId === secret && leak.kind === 'revelation' && leak.match === 'tag' && leak.reason === 'learns_later' &&
+    leak.learnsAt?.sectionId === 's2' && leak.learnsAt?.via === 'subject' && /Таємниця/.test(leak.quote),
+    JSON.stringify(atS2.findings));
+  t('подія «Напад» за назвою в тексті — відома (Олена була присутня в s1b); тег «Потоп», якого в книзі немає, — не витік, окремим списком',
+    atS2.known.join() === 'Напад' && atS2.mentioned === 2 && atS2.unknownTags.join() === 'event:Потоп', JSON.stringify({ known: atS2.known, unk: atS2.unknownTags }));
+  const atS4 = await checkDraftKnowledge(repo, P, { characterId: olena, draftText: draft, sectionId: 's4' }) as any;
+  t('та сама чернетка станом на s4 (після s2) — витоку немає', atS4.findings.length === 0 && atS4.known.sort().join() === ['Напад', 'Таємниця'].sort().join());
+  const atS1 = await checkDraftKnowledge(repo, P, { characterId: olena, draftText: 'На початку Олена вже знала про скарб і про напад.', sectionId: 's1' }) as any;
+  t('станом на s1: «Скарб» за назвою — Олена не дізнається ніколи; «Напад» — дізнається пізніше (s1b, присутня); порядок — як у тексті',
+    atS1.findings.map((f: any) => `${f.entityName}:${f.reason}:${f.match}`).join() === 'Скарб:never_learns:name,Напад:learns_later:name' &&
+    atS1.findings[1].learnsAt?.sectionId === 's1b' && atS1.findings[1].learnsAt?.via === 'present' && atS1.findings[0].learnsAt === null,
+    JSON.stringify(atS1.findings.map((f: any) => [f.entityName, f.reason, f.match, f.learnsAt?.sectionId])));
+  const atEnd = await checkDraftKnowledge(repo, P, { characterId: olena, draftText: 'Олена знала [/revelation:Таємниця] і [/revelation:Скарб].' }) as any;
+  t('без сцени — кінець книги: витік лише те, чого не дізнається зовсім («Скарб»)', atEnd.scene === null && atEnd.findings.map((f: any) => f.entityName).join() === 'Скарб');
+  t('розкриття, де Олена лише присутня (s1), знанням не рахується — станом на s1b «Таємниця» теж витік',
+    ((await checkDraftKnowledge(repo, P, { characterId: olena, draftText: '[/revelation:Таємниця]', sectionId: 's1b' })) as any).findings.length === 1);
+  t('не герой чи невідома сцена — помилка, а не порожній результат',
+    ((await checkDraftKnowledge(repo, P, { characterId: secret, draftText: 'x' })) as any).error === 'no_character' &&
+    ((await checkDraftKnowledge(repo, P, { characterId: olena, draftText: 'x', sectionId: 'nope' })) as any).error === 'no_section');
+  const parasAfter = (await Promise.all(['s1', 's1b', 's2', 's3', 's4'].map((x) => repo.listParagraphs(P, x)))).flat().map((x) => `${x.id}:${x.text}`).join('|');
+  t('у книгу нічого не записано: абзаци ті самі, проблем безперервності не додалось, «Потоп» не став сутністю',
+    parasAfter === parasBefore && (await repo.listContinuityIssues(P)).length === issuesBefore && !(await repo.resolveAlias(P, 'event', 'Потоп')));
+
+  // ── Сховище історії ──
+  t('історія: порожній текст — bad_input; невідомий герой — not_found',
+    (await codeAsync(() => repo.addContinuityDraftCheck({ projectId: P, characterId: olena, draftText: '  ', findings: [], createdBy: 'user:u-owner' }))) === 'bad_input' &&
+    (await codeAsync(() => repo.addContinuityDraftCheck({ projectId: P, characterId: '00000000-0000-4000-8000-000000000000', draftText: 'x', findings: [], createdBy: 'user:u-owner' }))) === 'not_found');
+
+  // ── Маршрути ──
+  const access = {
+    async getBookOwnerId(x: string) { return x === P ? 'u-owner' : null; },
+    async getCollabOwnerId() { return undefined; },
+    async listAcceptedInvites() { return [{ acceptedUserId: 'u-reader', role: 'reader' }]; },
+  };
+  const who: Record<string, any> = { owner: { id: 'u-owner', role: 'writer', isGuest: false }, reader: { id: 'u-reader', role: 'reader', isGuest: false } };
+  const app = express();
+  app.use(express.json({ limit: '1mb' }));
+  app.use((req, _res, next) => { (req as any).principal = who[String(req.headers['x-user'])]; next(); });
+  registerProjectRoutes(app, { access, repo: () => repo, coreState: () => 'ready' });
+  const server = app.listen(0);
+  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/projects/${P}`;
+  const call = async (method: string, path: string, user: string, body?: unknown) => {
+    const r = await fetch(`${baseUrl}${path}`, { method, headers: { 'x-user': user, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: r.status, body: (await r.json().catch(() => ({}))) as any };
+  };
+  t('POST check-draft: читачу — 403; без героя чи тексту — 400; задовга — 400; не герой / невідома сцена — 404',
+    (await call('POST', '/continuity/check-draft', 'reader', { characterId: olena, draftText: 'x' })).status === 403 &&
+    (await call('POST', '/continuity/check-draft', 'owner', { draftText: 'x' })).status === 400 &&
+    (await call('POST', '/continuity/check-draft', 'owner', { characterId: olena, draftText: 'x'.repeat(20001) })).status === 400 &&
+    (await call('POST', '/continuity/check-draft', 'owner', { characterId: secret, draftText: 'x' })).status === 404 &&
+    (await call('POST', '/continuity/check-draft', 'owner', { characterId: olena, draftText: 'x', sectionId: 'nope' })).status === 404);
+  const c1 = await call('POST', '/continuity/check-draft', 'owner', { characterId: olena, draftText: draft, sectionId: 's2' });
+  t('КРИТЕРІЙ: власник перевіряє чернетку — 201, витік знайдено й збережено в історії (сцена, текст, знахідка)',
+    c1.status === 201 && c1.body.check.findings.length === 1 && c1.body.check.findings[0].entityId === secret && c1.body.check.sectionId === 's2' &&
+    c1.body.check.draftText === draft && c1.body.check.simulationId === null && c1.body.known.join() === 'Напад' && c1.body.check.createdBy === 'user:u-owner',
+    JSON.stringify(c1.body));
+  const c2 = await call('POST', '/continuity/check-draft', 'owner', { characterId: olena, draftText: 'Нічого особливого.', simulationId: 'sim-1' });
+  t('перевірка без витоку — теж в історії; поле симуляції збережено (під Т2.7)', c2.status === 201 && c2.body.check.findings.length === 0 && c2.body.check.simulationId === 'sim-1');
+  const h = await call('GET', `/continuity/draft-checks?characterId=${olena}`, 'owner');
+  t('GET історії — новіші першими; фільтр за симуляцією; читачу — 403',
+    h.status === 200 && h.body.checks.map((x: any) => x.id).join() === [c2.body.check.id, c1.body.check.id].join() &&
+    (await call('GET', '/continuity/draft-checks?simulationId=sim-1', 'owner')).body.checks.map((x: any) => x.id).join() === c2.body.check.id &&
+    (await call('GET', '/continuity/draft-checks', 'reader')).status === 403, JSON.stringify(h.body.checks?.map((x: any) => x.id)));
+  const one = await call('GET', `/continuity/draft-checks/${c1.body.check.id}`, 'owner');
+  t('GET однієї перевірки — та сама; невідома — 404', one.status === 200 && one.body.check.findings[0].reason === 'learns_later' && (await call('GET', '/continuity/draft-checks/nope', 'owner')).status === 404);
+  server.close();
+}
+
 await suite('memory', new MemoryCoreRepository(), 'book-m');
 await timeRuleSuite('memory', new MemoryCoreRepository(), 'book-tm');
 await ageRuleSuite('memory', new MemoryCoreRepository(), 'book-am');
 await knowledgeRuleSuite('memory', new MemoryCoreRepository(), 'book-km');
 await placeObjectRuleSuite('memory', new MemoryCoreRepository(), 'book-pm');
 await aiContinuitySuite('memory', new MemoryCoreRepository(), new MemoryJobStore(), 'book-cm');
+await draftCheckSuite('memory', new MemoryCoreRepository(), 'book-dm');
 
 const url = process.env.CORE_TEST_DATABASE_URL?.trim();
 if (!url) {
@@ -801,13 +909,14 @@ if (!url) {
     await pool.query(`DROP SCHEMA IF EXISTS ${CORE_SCHEMA} CASCADE`);
     await runMigrations(pool, loadMigrations(resolveMigrationsDir()));
     const { rows } = await pool.query(`SELECT max(version) AS v FROM ${CORE_SCHEMA}.core_schema_migrations`);
-    t('схема ядра — не старіша за v13 (безперервність: риси, проблеми, зв\'язок з версією зовнішності)', Number(rows[0].v) >= 13, `v${rows[0].v}`);
+    t('схема ядра — не старіша за v14 (безперервність: риси, проблеми, зв\'язок з версією зовнішності, перевірки чернеток)', Number(rows[0].v) >= 14, `v${rows[0].v}`);
     await suite('postgres', new PgCoreRepository(pool), 'book-p');
     await timeRuleSuite('postgres', new PgCoreRepository(pool), 'book-tp');
     await ageRuleSuite('postgres', new PgCoreRepository(pool), 'book-ap');
     await knowledgeRuleSuite('postgres', new PgCoreRepository(pool), 'book-kp');
     await placeObjectRuleSuite('postgres', new PgCoreRepository(pool), 'book-pp');
     await aiContinuitySuite('postgres', new PgCoreRepository(pool), new PgJobStore(pool), 'book-cp');
+    await draftCheckSuite('postgres', new PgCoreRepository(pool), 'book-dp');
   } catch (err) {
     t('прогін на PostgreSQL без збоїв', false, (err as Error).stack ?? String(err));
   } finally {

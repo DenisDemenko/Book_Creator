@@ -30,6 +30,7 @@ import {
   appearanceHash,
   checkEntityTrait,
   checkContinuityIssue,
+  checkContinuityDraftCheck,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isValidEmbedding, SEARCHABLE_KINDS, tsQueryFromStems } from './search/text';
 import type {
@@ -78,6 +79,8 @@ import type {
   ContinuityIssueRow,
   ContinuityIssueKind,
   ContinuityIssueStatus,
+  ContinuityDraftCheckInput,
+  ContinuityDraftCheckRow,
 } from './types';
 
 type Q = Pool | PoolClient;
@@ -206,6 +209,20 @@ function toEntityTrait(r: any): EntityTraitRow {
     createdBy: r.created_by,
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
+  };
+}
+
+function toDraftCheck(r: any): ContinuityDraftCheckRow {
+  return {
+    id: r.id,
+    projectId: r.project_id,
+    characterId: r.character_id,
+    sectionId: r.section_id ?? null,
+    draftText: r.draft_text,
+    findings: Array.isArray(r.findings) ? r.findings : [],
+    simulationId: r.simulation_id ?? null,
+    createdBy: r.created_by,
+    createdAt: iso(r.created_at),
   };
 }
 
@@ -1528,6 +1545,41 @@ export class PgCoreRepository implements CoreRepository {
     if (!isUuid(id)) return false;
     const res = await this.q('DELETE FROM continuity_issues WHERE project_id = $1 AND id = $2', [projectId, id]);
     return (res?.rowCount ?? 0) > 0;
+  }
+
+  // ── Перевірки чернеток (Т2.4 В7) ─────────────────────────────────────────
+
+  async addContinuityDraftCheck(input: ContinuityDraftCheckInput) {
+    const n = checkContinuityDraftCheck(input);
+    if (!isUuid(input.characterId)) throw notFound(`Сутність «${input.characterId}»`);
+    const { rows: e } = await this.q('SELECT 1 FROM entities WHERE project_id = $1 AND id = $2', [input.projectId, input.characterId]);
+    if (!e[0]) throw notFound(`Сутність «${input.characterId}»`);
+    const { rows } = await this.q(
+      `INSERT INTO continuity_draft_checks (project_id, character_id, section_id, draft_text, findings, simulation_id, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [input.projectId, input.characterId, input.sectionId ?? null, n.draftText, JSON.stringify(input.findings), input.simulationId ?? null, input.createdBy],
+    );
+    return toDraftCheck(rows[0]);
+  }
+
+  async listContinuityDraftChecks(projectId: string, filter: { characterId?: string; simulationId?: string; limit?: number } = {}) {
+    if (filter.characterId && !isUuid(filter.characterId)) return [];
+    const where = ['project_id = $1'];
+    const params: unknown[] = [projectId];
+    if (filter.characterId) { params.push(filter.characterId); where.push(`character_id = $${params.length}`); }
+    if (filter.simulationId) { params.push(filter.simulationId); where.push(`simulation_id = $${params.length}`); }
+    params.push(Math.max(1, Math.min(filter.limit ?? 50, 200)));
+    const { rows } = await this.q(
+      `SELECT * FROM continuity_draft_checks WHERE ${where.join(' AND ')} ORDER BY created_at DESC, id DESC LIMIT $${params.length}`,
+      params,
+    );
+    return rows.map(toDraftCheck);
+  }
+
+  async getContinuityDraftCheck(projectId: string, id: string) {
+    if (!isUuid(id)) return null;
+    const { rows } = await this.q('SELECT * FROM continuity_draft_checks WHERE project_id = $1 AND id = $2', [projectId, id]);
+    return rows[0] ? toDraftCheck(rows[0]) : null;
   }
 
   // ── Збережені запити (Т1.3) ──────────────────────────────────────────────

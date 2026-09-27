@@ -33,6 +33,7 @@ import {
   type EntityTraitInput,
   type ContinuityIssueInput,
   type ContinuityIssueStatus,
+  type ContinuityDraftCheckInput,
   CONTINUITY_ISSUE_KINDS,
   CONTINUITY_ISSUE_STATUSES,
 } from './types';
@@ -311,6 +312,23 @@ export function checkContinuityIssue(input: ContinuityIssueInput): { summary: st
     throw new CoreRuleError('ai_suggests_only', 'Проблема від AI — лише пропозиція (suggested); статус змінює автор');
   }
   return { summary, source, status, insufficientData };
+}
+
+/** Найдовша чернетка, яку можна перевірити за раз (символів). */
+export const DRAFT_TEXT_MAX = 20000;
+
+/** Перевірка чернетки (Т2.4 В7): ті самі правила, що й CHECK у базі. */
+export function checkContinuityDraftCheck(input: ContinuityDraftCheckInput): { draftText: string } {
+  assertActor(input.createdBy);
+  const draftText = String(input.draftText ?? '');
+  if (!draftText.trim() || draftText.length > DRAFT_TEXT_MAX) {
+    throw new CoreRuleError('bad_input', `Текст чернетки — від 1 до ${DRAFT_TEXT_MAX} символів`);
+  }
+  if (!Array.isArray(input.findings)) throw new CoreRuleError('bad_input', 'Знахідки перевірки — список');
+  if (input.simulationId != null && (typeof input.simulationId !== 'string' || !input.simulationId.trim() || input.simulationId.length > 200)) {
+    throw new CoreRuleError('bad_input', 'Ідентифікатор симуляції — рядок до 200 символів');
+  }
+  return { draftText };
 }
 
 export function checkMention(m: MentionInput): void {
