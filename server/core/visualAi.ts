@@ -22,7 +22,7 @@ import type { AiRoleDeps } from './ai/roles';
 import type { AssetLinkRow, AssetRole, CoreRepository, EntityRow, FindingRow } from './types';
 import { studioAppearanceText, type StudioCharacterLike } from './characterProfile';
 import { VERSIONED_ROLES } from './rules';
-import { cardAppearanceHash, ROLE_ENTITY_TYPES } from './visual';
+import { cardAppearanceHash, ROLE_ENTITY_TYPES, VISUAL_ENTITY_TYPES } from './visual';
 
 export const AI_VISUAL_JOB_KIND = 'ai_visual';
 export const VISUAL_LINK = 'visual_link';
@@ -32,8 +32,12 @@ export const VISUAL_MATCH = 'visual_match';
 export const VISUAL_UNKNOWN = 'visual_unknown';
 export const VISUAL_KINDS = [VISUAL_LINK, VISUAL_TRAIT, VISUAL_MISMATCH, VISUAL_MATCH, VISUAL_UNKNOWN];
 
-/** Кого й що AI-3 може впізнати на зображенні: те, що має вигляд (не події, емоції, теми). */
-export const VISUAL_ENTITY_TYPES = ['character', 'group', 'location', 'world', 'object', 'item', 'artifact', 'weapon', 'vehicle', 'symbol', 'tool'];
+/**
+ * Кого й що AI-3 може впізнати на зображенні: те, що має вигляд (не події,
+ * емоції, теми). Перелік — у `visual.ts` (Т2.3 В7: щоб не було циклу
+ * імпортів), тут — лише перевикористання під тим самим іменем.
+ */
+export { VISUAL_ENTITY_TYPES };
 
 /** Скільки сутностей показати AI-3 у переліку (решта не влізе в запит розумно). */
 export const VISUAL_MAX_ENTITIES = 150;

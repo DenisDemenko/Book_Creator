@@ -26,6 +26,15 @@ import { bookIndex, placeOf } from './characterProfile';
 
 export const LEGACY_ACTOR = 'system:core_sync';
 
+/**
+ * Кого AI-3 і генерація можуть впізнати чи намалювати: сутність із виглядом
+ * (не подія, емоція чи тема). Визначено тут, а не в `visualAi.ts` — інакше
+ * цей файл залежав би від нього (`visualAi.ts` уже імпортує з `visual.ts`,
+ * цикл імпортів зламав би збірку); `visualAi.ts` і `visualGeneration.ts`
+ * перевикористовують цей самий перелік.
+ */
+export const VISUAL_ENTITY_TYPES = ['character', 'group', 'location', 'world', 'object', 'item', 'artifact', 'weapon', 'vehicle', 'symbol', 'tool'];
+
 /** Які типи сутностей пропонувати для ролі (у вибирачі Медіатеки). */
 export const ROLE_ENTITY_TYPES: Record<Exclude<AssetRole, 'scene'>, string[] | null> = {
   portrait: ['character'],
@@ -35,6 +44,18 @@ export const ROLE_ENTITY_TYPES: Record<Exclude<AssetRole, 'scene'>, string[] | n
   location: ['location'],
   object: ['object', 'item', 'artifact', 'weapon', 'vehicle'],
 };
+
+/**
+ * Роль, яка означає «в сутності вже є головне зображення» (Т2.3 В7,
+ * позначка «без портрета»): герой — портрет, локація (і світ) — «локація»,
+ * предмет — «предмет», решта («зображено») — група, символ, інструмент.
+ */
+export function primaryVisualRole(type: string): AssetRole {
+  if (type === 'character') return 'portrait';
+  if ((ROLE_ENTITY_TYPES.location ?? []).includes(type) || type === 'world') return 'location';
+  if ((ROLE_ENTITY_TYPES.object ?? []).includes(type)) return 'object';
+  return 'depicts';
+}
 
 /** Порядок довіри до портрета: те, що прив'язав автор, важить більше за перенесене з книги. */
 const SOURCE_RANK: Record<AssetLinkRow['source'], number> = { author: 0, ai: 1, legacy: 2 };
@@ -381,4 +402,108 @@ export async function refreshVisualReview(
     }
   }
   return out;
+}
+
+// ── Вкладка «За сутностями» (Т2.3 В7) ────────────────────────────────────────
+
+export interface VisualEntitySummary {
+  id: string;
+  type: string;
+  name: string;
+  /** Підтверджені зображення (унікальні файли, будь-яка роль). */
+  images: number;
+  /** Пропозиції AI-3, що чекають рішення автора (В4). */
+  suggested: number;
+  /** Підтверджені зображення з позначкою «перевірити» (В5). */
+  needsReview: number;
+  /** Є підтверджений зв'язок головної ролі типу (портрет / локація / предмет / «зображено»). */
+  hasPortrait: boolean;
+}
+
+export interface VisualSceneSummary {
+  sectionId: string;
+  title: string;
+  chapterNumber: number | null;
+  images: number;
+}
+
+export interface VisualEntitiesOverview {
+  characters: VisualEntitySummary[];
+  locations: VisualEntitySummary[];
+  objects: VisualEntitySummary[];
+  /** Група, світ, символ, інструмент — має вигляд, але не входить у три головні розділи. */
+  other: VisualEntitySummary[];
+  scenes: VisualSceneSummary[];
+}
+
+const BUCKET_TYPES = {
+  characters: ['character'],
+  locations: ['location', 'world'],
+  objects: ['object', 'item', 'artifact', 'weapon', 'vehicle'],
+} as const;
+
+/**
+ * Огляд для лівої колонки вкладки «За сутністю» (Т2.3 В7): герої, локації,
+ * предмети (і решта видів із виглядом), сцени — з кількістю зображень і
+ * позначками «перевірити» / «без портрета». Права колонка (обрана сутність)
+ * бере дані з наявних `heroPortrait` / `appearanceOverview` / `/visual/links`
+ * — тут лише перелік і лічильники.
+ */
+export async function visualEntitiesOverview(repo: CoreRepository, projectId: string): Promise<VisualEntitiesOverview> {
+  const [entities, links, docs] = await Promise.all([repo.listEntities(projectId), repo.listAssetLinks(projectId), repo.listDocuments(projectId)]);
+  const visible = entities.filter((e) => e.status !== 'rejected' && VISUAL_ENTITY_TYPES.includes(e.type));
+  const byEntity = new Map<string, AssetLinkRow[]>();
+  for (const l of links) {
+    if (!l.entityId) continue;
+    const list = byEntity.get(l.entityId);
+    if (list) list.push(l);
+    else byEntity.set(l.entityId, [l]);
+  }
+  const summarize = (e: EntityRow): VisualEntitySummary => {
+    const ls = byEntity.get(e.id) ?? [];
+    const confirmed = ls.filter((l) => l.status === 'confirmed');
+    const primaryRole = primaryVisualRole(e.type);
+    return {
+      id: e.id,
+      type: e.type,
+      name: e.name,
+      images: new Set(confirmed.map((l) => l.assetUrl)).size,
+      suggested: ls.filter((l) => l.status === 'suggested').length,
+      needsReview: confirmed.filter((l) => l.needsReview).length,
+      hasPortrait: confirmed.some((l) => l.role === primaryRole),
+    };
+  };
+  const bucket = (types: readonly string[]) =>
+    visible
+      .filter((e) => types.includes(e.type))
+      .map(summarize)
+      .sort((a, b) => a.name.localeCompare(b.name, 'uk'));
+  const known = new Set<string>([...BUCKET_TYPES.characters, ...BUCKET_TYPES.locations, ...BUCKET_TYPES.objects]);
+
+  const chapters = docs.filter((d) => d.kind === 'chapter' && !d.deletedAt).sort((a, b) => a.order - b.order);
+  const chapterNo = new Map(chapters.map((c, i) => [c.id, i + 1]));
+  const sceneLinksBySection = new Map<string, AssetLinkRow[]>();
+  for (const l of links) {
+    if (l.role !== 'scene' || !l.sectionId || l.status !== 'confirmed') continue;
+    const list = sceneLinksBySection.get(l.sectionId);
+    if (list) list.push(l);
+    else sceneLinksBySection.set(l.sectionId, [l]);
+  }
+  const scenes = docs
+    .filter((d) => d.kind === 'section' && !d.deletedAt && sceneLinksBySection.has(d.id))
+    .map((d) => ({
+      sectionId: d.id,
+      title: d.title,
+      chapterNumber: d.parentId ? chapterNo.get(d.parentId) ?? null : null,
+      images: new Set(sceneLinksBySection.get(d.id)!.map((l) => l.assetUrl)).size,
+    }))
+    .sort((a, b) => (a.chapterNumber ?? 1e9) - (b.chapterNumber ?? 1e9) || a.title.localeCompare(b.title, 'uk'));
+
+  return {
+    characters: bucket(BUCKET_TYPES.characters),
+    locations: bucket(BUCKET_TYPES.locations),
+    objects: bucket(BUCKET_TYPES.objects),
+    other: visible.filter((e) => !known.has(e.type)).map(summarize).sort((a, b) => a.name.localeCompare(b.name, 'uk')),
+    scenes,
+  };
 }

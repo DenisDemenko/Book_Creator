@@ -35,6 +35,7 @@ import { MediaPassportPanel, type PassportAsset } from './MediaPassportPanel';
 import { MediaLinksPanel, type VisualLink } from './MediaLinksPanel';
 import { mediaIdFromUrl, passportWarnings, replaceMediaUrlInBook } from '../utils/mediaPassport';
 import { ScanInboxPanel } from './ScanInboxPanel';
+import { EntityVisualLibraryPanel } from './EntityVisualLibraryPanel';
 import { DescribeCharacterModal } from './DescribeCharacterModal';
 import { loadInstructionDraft, saveInstructionDraft } from '../utils/instructionDraft';
 import {
@@ -68,6 +69,12 @@ interface MediaLibraryViewProps {
    * той самий шлях, яким уже ходить міст «чат → книга».
    */
   onRevealChapterText?: (target: DescribeRevealTarget) => void;
+  /**
+   * Відкрити одразу вкладку «За сутностями» (Т2.3 В7) — так `/visual-library`
+   * (`core-visual`, `CorePageView.tsx`) веде в цю саму Медіатеку, а не в
+   * окрему сторінку (рішення власника §6.1 плану).
+   */
+  initialTab?: 'gallery' | 'entities';
 }
 
 interface StorageInfo {
@@ -155,7 +162,18 @@ const SORT_LABEL_KEY: Record<MediaSortMethod, string> = {
   size: 'mediaLibraryView.sortSize',
 };
 
-export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpdateBook, authUser, onRevealChapterText }) => {
+export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpdateBook, authUser, onRevealChapterText, initialTab }) => {
+  // Т2.3 В7: «Медіатека» (галерея, як і була) чи «За сутностями» (герої,
+  // локації, предмети, сцени — той самий паспорт і ті самі зв'язки, лише
+  // подання). Не забуваємо режим при зміні книги: `/visual-library` завжди
+  // веде саме в сутності активної книги.
+  const [mode, setMode] = useState<'gallery' | 'entities'>(initialTab ?? 'gallery');
+  useEffect(() => {
+    if (initialTab) setMode(initialTab);
+  }, [initialTab, book.id]);
+  // «Відкрити в бібліотеці сутностей» (Т2.3 В7) з паспорта файлу в галереї —
+  // яку сутність вибрати одразу, щойно вкладка «За сутностями» завантажиться.
+  const [focusEntityId, setFocusEntityId] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'portraits' | 'illustrations' | 'covers' | 'videos'>('all');
   // Спосіб сортування галереї — спільний для фото й відео (задача про відео:
   // усі вони MP4, тож за форматом їх не розрізнити, а порядок появи — можна).
@@ -376,6 +394,24 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
   const passportOf = (m: { url: string }) => {
     const id = cardAssetId(m);
     return id ? assetById.get(id) ?? null : null;
+  };
+  /**
+   * Відкрити паспорт файлу за URL (Т2.3 В7): вкладка «За сутністю» показує
+   * зображення карткою свого дизайну, але клік на неї відкриває той самий
+   * лайтбокс-паспорт (`selectedMedia` нижче), що й у галереї — один діалог
+   * «паспорт + прив'язки», а не другий поруч.
+   */
+  const openAssetByUrl = (url: string) => {
+    const id = cardAssetId({ url });
+    const asset = id ? assetById.get(id) : undefined;
+    setSelectedMedia({
+      id: asset?.id ?? url,
+      url,
+      title: asset?.title || asset?.filename || url,
+      type: asset?.kind === 'cover_art' ? 'covers' : asset?.kind === 'character_art' ? 'portraits' : asset?.kind === 'video' ? 'videos' : 'illustrations',
+      prompt: asset?.prompt || undefined,
+      source: asset ? 'upload' : undefined,
+    });
   };
   const passportMatches = (m: MediaCard) => {
     if (passportFilter === 'all') return true;
@@ -777,16 +813,20 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
   return (
     <div className="flex-1 flex overflow-hidden bg-slate-900 text-slate-100">
 
-      {/* Панель генерації — на всю висоту вкладки, зліва від галереї. */}
-      <MediaGenerationPanel
-        book={book}
-        isRegistered={isRegistered}
-        onGenerated={handleGeneratedImage}
-        onVideoGenerated={loadLibrary}
-        onToast={showToast}
-        videoStartFrameRequest={videoStartFrameRequest}
-        onVideoStartFrameApplied={() => setVideoStartFrameRequest(null)}
-      />
+      {/* Панель генерації — на всю висоту вкладки, зліва від галереї; у
+          вкладці «За сутностями» (Т2.3 В7) кожна сутність генерує своєю
+          командою («✨ Згенерувати»), і панель лише забирала б місце. */}
+      {mode === 'gallery' && (
+        <MediaGenerationPanel
+          book={book}
+          isRegistered={isRegistered}
+          onGenerated={handleGeneratedImage}
+          onVideoGenerated={loadLibrary}
+          onToast={showToast}
+          videoStartFrameRequest={videoStartFrameRequest}
+          onVideoStartFrameApplied={() => setVideoStartFrameRequest(null)}
+        />
+      )}
 
       <div className="flex-1 p-4 lg:p-6 overflow-y-auto space-y-6">
 
@@ -807,6 +847,37 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
         onChange={handleDirectUpload}
       />
 
+      {/* Т2.3 В7: «Медіатека» (галерея) чи «За сутностями» (герої, локації,
+          предмети, сцени — та сама Медіатека, лише подання; сюди веде адреса
+          `/visual-library`, рішення власника §6.1 плану). */}
+      <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 self-start" data-media-mode>
+        {(['gallery', 'entities'] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => setMode(m)}
+            data-media-mode-tab={m}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              mode === m ? 'bg-slate-800 text-cyan-300 shadow-xs' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            {m === 'gallery' ? t('visualLibrary.galleryTab') : t('visualLibrary.entitiesTab')}
+          </button>
+        ))}
+      </div>
+
+      {mode === 'entities' && (
+        <EntityVisualLibraryPanel
+          book={book}
+          authUser={authUser}
+          onOpenAsset={openAssetByUrl}
+          focusEntityId={focusEntityId}
+          onFocusHandled={() => setFocusEntityId(null)}
+        />
+      )}
+
+      {mode === 'gallery' && (
+      <>
       {/* Top Banner */}
       <div className="nova-glass-dark rounded-2xl p-6 border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
@@ -1127,6 +1198,8 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
           </React.Fragment>
         ))}
       </div>
+      </>
+      )}
 
       {/* Задача #218-Б. Підтвердження видалення. Стоїть НАД лайтбоксом
           (z-[60] проти z-50), бо видаляти можна і з нього: автор має бачити
@@ -1304,7 +1377,18 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
 
             {/* Прив'язки до книги (Т2.3 В2) — до героїв, локацій, предметів, сцен активної книги. */}
             {isRegistered && (
-              <MediaLinksPanel key={`links-${selectedMedia.url}`} bookId={book.id} assetUrl={selectedMedia.url} onToast={showToast} onChanged={() => void loadBookLinks()} />
+              <MediaLinksPanel
+                key={`links-${selectedMedia.url}`}
+                bookId={book.id}
+                assetUrl={selectedMedia.url}
+                onToast={showToast}
+                onChanged={() => void loadBookLinks()}
+                onOpenEntity={(entityId) => {
+                  setSelectedMedia(null);
+                  setFocusEntityId(entityId);
+                  setMode('entities');
+                }}
+              />
             )}
 
             {selectedMedia.prompt && (

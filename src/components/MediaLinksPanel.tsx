@@ -10,7 +10,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Link2, Loader2, Plus, ScanEye, X } from 'lucide-react';
+import { ExternalLink, Link2, Loader2, Plus, ScanEye, X } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext';
 
 export const ASSET_ROLE_KEYS = ['portrait', 'full_body', 'reference', 'depicts', 'location', 'object', 'scene'] as const;
@@ -70,12 +70,14 @@ interface Props {
   assetUrl: string;
   onChanged?: () => void;
   onToast: (msg: string) => void;
+  /** Т2.3 В7: «Відкрити в бібліотеці сутностей» — перейти на вкладку «За сутностями» цієї сутності. */
+  onOpenEntity?: (entityId: string) => void;
 }
 
 const api = (url: string, init?: RequestInit) =>
   fetch(url, { credentials: 'same-origin', ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) } });
 
-export const MediaLinksPanel: React.FC<Props> = ({ bookId, assetUrl, onChanged, onToast }) => {
+export const MediaLinksPanel: React.FC<Props> = ({ bookId, assetUrl, onChanged, onToast, onOpenEntity }) => {
   const { t } = useLanguage();
   const base = `/api/projects/${encodeURIComponent(bookId)}/visual`;
   const [state, setState] = useState<'loading' | 'ok' | 'off' | 'nosync' | 'noaccess'>('loading');
@@ -306,6 +308,11 @@ export const MediaLinksPanel: React.FC<Props> = ({ bookId, assetUrl, onChanged, 
                     </button>
                   )}
                   <span className="text-[10px] text-slate-500">· {sourceLabel(l.source)}</span>
+                  {l.status === 'confirmed' && l.entityId && onOpenEntity && (
+                    <button type="button" onClick={() => onOpenEntity(l.entityId!)} title={t('visualLibrary.entOpenLibrary')} aria-label={t('visualLibrary.entOpenLibrary')} className="text-slate-500 hover:text-cyan-300" data-media-link-open-entity={l.entityId}>
+                      <ExternalLink className="h-3 w-3" />
+                    </button>
+                  )}
                   {l.status === 'suggested' && canEdit && (
                     <>
                       <button type="button" disabled={busy} onClick={() => void decide(l, 'confirmed')} className="rounded-full border border-emerald-500/50 px-1.5 text-[10px] text-emerald-200 hover:bg-emerald-500/10" data-media-link-accept={l.id}>

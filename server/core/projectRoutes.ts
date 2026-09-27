@@ -39,7 +39,7 @@ import {
   resolveGenerationTarget,
   type GenerationTarget,
 } from './visualGeneration';
-import { ROLE_ENTITY_TYPES, appearanceOverview, cardAppearanceHash, describeLinks, expectedLinkHash, heroPortrait, refreshVisualReview, sceneVisuals } from './visual';
+import { ROLE_ENTITY_TYPES, appearanceOverview, cardAppearanceHash, describeLinks, expectedLinkHash, heroPortrait, refreshVisualReview, sceneVisuals, visualEntitiesOverview } from './visual';
 import { ASSET_ROLES, type AssetRole } from './types';
 import { VERSIONED_ROLES, isLinkableAssetUrl } from './rules';
 import { clampIntensity, emotionFamily } from '../../src/utils/emotionScale';
@@ -1325,6 +1325,22 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       },
     });
     res.status(202).json({ jobId, target: { entityId: target.entity.id, role: target.role, versionId: target.version?.id ?? null }, references: referenceImageUrls.length });
+  }));
+
+  // ── Т2.3 В7: вкладка «За сутностями» (подання Медіатеки) ───────────────────
+
+  /**
+   * Ліва колонка вкладки «За сутностями»: герої, локації, предмети (і решта
+   * видів із виглядом), сцени — з кількістю зображень і позначками
+   * «перевірити» / пропозиції AI-3 / «без портрета». Права колонка бере
+   * дані з наявних маршрутів (`/visual/links?entityId=`, `/visual/appearance/:id`).
+   */
+  app.get('/api/projects/:id/visual/entities', withRepo(async (repo, req, res) => {
+    if (!(await repo.getProject(req.params.id))) {
+      res.json({ synced: false, characters: [], locations: [], objects: [], other: [], scenes: [] });
+      return;
+    }
+    res.json({ synced: true, ...(await visualEntitiesOverview(repo, req.params.id)) });
   }));
 
   /** «Хто в сцені»: герої розділу з портретами й ілюстрації сцени — для редактора. */

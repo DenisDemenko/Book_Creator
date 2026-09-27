@@ -12,13 +12,14 @@
 
 import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { Database, Loader2, ShieldAlert, UserRound } from 'lucide-react';
-import type { Book, NavigationTab } from '../types';
+import type { AuthUser, Book, NavigationTab } from '../types';
 import { corePageByTab } from '../utils/appRoutes';
 import { useLanguage } from '../i18n/LanguageContext';
 import { CoreSearchPage } from './CoreSearchPage';
 import { CharacterProfilePage } from './CharacterProfilePage';
 import { TimelinePage } from './TimelinePage';
 import { EmotionMonitorPage } from './EmotionMonitorPage';
+import { MediaLibraryView, type DescribeRevealTarget } from './MediaLibraryView';
 
 // Граф (Т1.4) тягне React Flow — вантажимо його лише на сторінці графа.
 const StoryGraphPage = lazy(() => import('./StoryGraphPage'));
@@ -32,6 +33,9 @@ interface Props {
   onOpenParagraph?: (target: { chapterId: string; sectionId: string; editorPid: string; text: string }) => void;
   /** Зміна книги (пакетна заміна старого імені героя, П6). */
   onUpdateBook?: (book: Book, logAction?: string, logDetails?: string) => void;
+  /** Сторінка 7 «Візуальна бібліотека» (Т2.3 В7) — Медіатека, вкладка «За сутностями». */
+  authUser?: AuthUser | null;
+  onRevealChapterText?: (target: DescribeRevealTarget) => void;
 }
 
 type Load<T> = { state: 'loading' } | { state: 'ok'; data: T } | { state: 'error'; status: number; message: string };
@@ -180,11 +184,28 @@ function CharacterList({ bookId, onOpen }: { bookId: string; onOpen: (id: string
   );
 }
 
-export const CorePageView: React.FC<Props> = ({ tab, book, characterId, onOpenCharacter, onOpenParagraph, onUpdateBook }) => {
+export const CorePageView: React.FC<Props> = ({ tab, book, characterId, onOpenCharacter, onOpenParagraph, onUpdateBook, authUser, onRevealChapterText }) => {
   const { t } = useLanguage();
   const page = corePageByTab(tab);
   const summary = useApi<Summary>(`/api/projects/${encodeURIComponent(book.id)}/summary`);
   if (!page) return null;
+
+  // Сторінка 7 «Візуальна бібліотека» (Т2.3 В7, рішення власника §6.1
+  // PLAN_VISUAL_LIBRARY.md): не окрема сторінка-заглушка, а сама Медіатека,
+  // одразу на вкладці «За сутностями» — інакше довелося б будувати другу
+  // бібліотеку поруч із наявною.
+  if (tab === 'core-visual') {
+    return (
+      <MediaLibraryView
+        book={book}
+        onUpdateBook={onUpdateBook ?? (() => {})}
+        authUser={authUser}
+        onRevealChapterText={onRevealChapterText}
+        initialTab="entities"
+      />
+    );
+  }
+
   return (
     <div className="flex-1 space-y-5 overflow-y-auto bg-slate-900 p-4 text-slate-100 lg:p-6" data-core-page={page.segment}>
       <header className="nova-glass-dark rounded-2xl border border-slate-800 p-6">
