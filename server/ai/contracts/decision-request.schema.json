@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://fusionlab.studio/ai/contracts/decision-request.schema.json",
+  "title": "DecisionRequest",
+  "description": "Запит на рішення героя одного з трьох рівнів (FLC 2.0 §3; ТЗ-H §6.2–6.3). Питання — атомарні: choice, score або noul; стан — знімок героя (character-snapshot.schema.json). Наш контракт, не формат провайдера.",
+  "type": "object",
+  "required": ["level", "character_id", "situation", "questions"],
+  "additionalProperties": false,
+  "properties": {
+    "level": { "enum": ["strategic", "scene", "tactical"] },
+    "character_id": { "type": "string", "minLength": 1 },
+    "scene_id": { "type": ["string", "null"] },
+    "simulation_id": { "type": ["string", "null"] },
+    "situation": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "allowed_actions": { "type": "array", "maxItems": 12, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z_]{2,40}$" } },
+    "forbidden_actions": { "type": "array", "maxItems": 12, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z_]{2,40}$" } },
+    "questions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "instructions"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z_]{2,40}$" },
+          "kind": { "enum": ["choice", "score", "noul"] },
+          "instructions": { "type": "string", "minLength": 1, "maxLength": 1000 },
+          "options": { "type": "object", "maxProperties": 255, "additionalProperties": { "type": ["string", "null"] } },
+          "levels": { "type": "array", "minItems": 2, "maxItems": 10, "items": { "type": "string" } }
+        },
+        "allOf": [
+          { "if": { "properties": { "kind": { "const": "choice" } } }, "then": { "required": ["options"] } },
+          { "if": { "properties": { "kind": { "const": "score" } } }, "then": { "required": ["levels"] } }
+        ]
+      }
+    }
+  }
+}

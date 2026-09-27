@@ -222,7 +222,8 @@ async function loadVisualImage(projectId: string, assetUrl: string, actor: strin
   if (got.record.ownerId !== userId && got.record.ownerId !== bookOwner) return null;
   return { mimeType: got.record.mimeType, data: Buffer.from(got.bytes).toString('base64') };
 }
-import { HttpJevAdapter, JEV_MODEL } from './server/core/flc/jev';
+import { HttpJevAdapter, JEV_MODEL } from './server/ai/adapters/jev';
+import { llmViaCore } from './server/ai/adapters/llm';
 import { platformEmbedder, recordEmbeddingCost, embeddingKeyFor } from './server/core/search/platform';
 import {
   DEFAULT_EMBEDDING_MODEL,
@@ -616,10 +617,8 @@ registerGitCommandRoutes(app);
         const key = (await platformKeyFor('typesafe').catch(() => undefined)) || process.env.TYPESAFE_API_KEY?.trim();
         return key ? new HttpJevAdapter(key, { model: process.env.TYPESAFE_JEV_MODEL?.trim() || JEV_MODEL }) : null;
       },
-      llm: (projectId, actor) => async (system, user) => {
-        const out = await aiRoleGenerateViaCore({ module: 'coreAi2Analysis', modelId: await resolveModuleModelId('coreAi2Analysis'), system, user, projectId, actor });
-        return { text: out.text, modelId: out.modelId, inputTokens: out.inputTokens, outputTokens: out.outputTokens };
-      },
+      // Т2.5 В1: адаптер LLM з `server/ai/adapters/llm` — той самий виклик ролі AI-2 через ядро ШІ.
+      llm: (projectId, actor) => llmViaCore(aiRoleGenerateViaCore, () => resolveModuleModelId('coreAi2Analysis'), projectId, actor),
     },
     // Канон автора для профілю героя (Т1.5): картка в «Персонажах».
     studio: async (projectId, entity) => studioFromBook((await getStoredBookForRealtime(projectId))?.book as any, entity),

@@ -1,0 +1,87 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://fusionlab.studio/ai/contracts/decision-result.schema.json",
+  "title": "DecisionResult",
+  "description": "Нормалізований результат рішення (ТЗ-H §6.3). Наш контракт, не формат провайдера.",
+  "type": "object",
+  "required": [
+    "selected_action",
+    "scores",
+    "raw_distributions",
+    "confidence",
+    "model_version",
+    "snapshot_hash",
+    "decision_trace_id",
+    "source",
+    "corrected"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "selected_action": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scores": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number"
+      }
+    },
+    "raw_distributions": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "number"
+        }
+      }
+    },
+    "confidence": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "model_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "snapshot_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{16,64}$"
+    },
+    "decision_trace_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "enum": [
+        "jev",
+        "mock",
+        "llm_fallback",
+        "author"
+      ]
+    },
+    "corrected": {
+      "type": "boolean"
+    },
+    "checks": {
+      "type": "object",
+      "description": "Noul: імовірність «так» 0–1 для кожного питання-перевірки (лише допоміжно, не підтвердження канону).",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "level": {
+      "enum": [
+        "strategic",
+        "scene",
+        "tactical"
+      ]
+    }
+  }
+}
