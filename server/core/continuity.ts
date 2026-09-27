@@ -845,3 +845,130 @@ export async function sectionsNeedingReview(repo: CoreRepository, projectId: str
   const issues = await repo.listContinuityIssues(projectId, { status: 'needs_review' });
   return [...new Set(issues.flatMap((i) => [i.evidenceB?.sectionId ?? i.evidenceA.sectionId]))];
 }
+
+// ── В8: сторінка 8 — огляд для інтерфейсу ───────────────────────────────
+
+export interface ContinuityPlace {
+  paragraphId: string | null;
+  editorPid: string | null;
+  sectionId: string;
+  sectionTitle: string;
+  chapterId: string | null;
+  chapterNumber: number | null;
+  /** Абзацу чи розділу вже немає в книзі (видалено після перевірки). */
+  missing: boolean;
+}
+
+export interface ContinuityOverview {
+  issues: ContinuityIssueRow[];
+  /** Де в книзі кожен доказ: ключ — `paragraphId` або `section:<id>` (риса без абзацу). */
+  places: Record<string, ContinuityPlace>;
+  entities: Record<string, { name: string; type: string }>;
+  /** Лічильники по всій книзі (без фільтрів) — для вкладок і фільтрів. */
+  counts: { byKind: Record<string, number>; byStatus: Record<string, number>; total: number };
+}
+
+export const continuityPlaceKey = (e: ContinuityEvidence) => e.paragraphId ?? `section:${e.sectionId}`;
+
+function placeFor(ix: BookIndex, e: ContinuityEvidence): ContinuityPlace {
+  const p = e.paragraphId ? ix.paragraphs.get(e.paragraphId) : undefined;
+  const section = ix.docs.get(p?.documentId ?? e.sectionId);
+  const chapter = section ? (section.kind === 'chapter' ? section : section.parentId ? ix.docs.get(section.parentId) : undefined) : undefined;
+  const chapterId = chapter && !chapter.deletedAt ? chapter.id : null;
+  return {
+    paragraphId: e.paragraphId,
+    editorPid: p ? p.editorPid ?? p.id : null,
+    sectionId: section?.id ?? e.sectionId,
+    sectionTitle: section?.title ?? '',
+    chapterId,
+    chapterNumber: chapterId ? ix.chapterNo.get(chapterId) ?? null : null,
+    missing: !section || !!section.deletedAt || (!!e.paragraphId && (!p || !!p.deletedAt)),
+  };
+}
+
+/**
+ * Проблеми для сторінки 8 разом з усім, що треба показати їх без додаткових
+ * запитів: місце кожного доказу в книзі (глава, розділ, абзац редактора —
+ * «відкрити в тексті»), назви сутностей і лічильники. Порядок — спершу ті,
+ * що чекають автора (на перегляд, пропозиції), далі підтверджені, наприкінці
+ * вирішені.
+ */
+export async function continuityOverview(
+  repo: CoreRepository,
+  projectId: string,
+  filter: { kind?: ContinuityIssueKind; status?: ContinuityIssueRow['status']; entityId?: string } = {},
+): Promise<ContinuityOverview> {
+  const [all, ix, entities] = await Promise.all([repo.listContinuityIssues(projectId), bookIndex(repo, projectId), repo.listEntities(projectId)]);
+  const byKind: Record<string, number> = {};
+  const byStatus: Record<string, number> = {};
+  for (const i of all) {
+    byKind[i.kind] = (byKind[i.kind] ?? 0) + 1;
+    byStatus[i.status] = (byStatus[i.status] ?? 0) + 1;
+  }
+  const rank: Record<string, number> = { needs_review: 0, suggested: 1, confirmed: 2, resolved: 3, dismissed: 4 };
+  const issues = all
+    .filter((i) => (!filter.kind || i.kind === filter.kind) && (!filter.status || i.status === filter.status) && (!filter.entityId || i.entityId === filter.entityId))
+    .sort((a, b) => (rank[a.status] ?? 9) - (rank[b.status] ?? 9) || b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
+  const places: Record<string, ContinuityPlace> = {};
+  const names = new Map(entities.map((e) => [e.id, e]));
+  const used: Record<string, { name: string; type: string }> = {};
+  for (const i of issues) {
+    for (const e of [i.evidenceA, i.evidenceB]) {
+      if (!e) continue;
+      places[continuityPlaceKey(e)] ??= placeFor(ix, e);
+      if (e.entityId && names.has(e.entityId)) used[e.entityId] = { name: names.get(e.entityId)!.name, type: names.get(e.entityId)!.type };
+    }
+    if (i.entityId && names.has(i.entityId)) used[i.entityId] = { name: names.get(i.entityId)!.name, type: names.get(i.entityId)!.type };
+  }
+  return { issues, places, entities: used, counts: { byKind, byStatus, total: all.length } };
+}
+
+export interface ContinuityTraitsOverview {
+  entities: { id: string; name: string; type: string; traits: EntityTraitRow[] }[];
+  sections: Record<string, { title: string; chapterNumber: number | null }>;
+  /** Пропозицій AI-2, що чекають автора. */
+  suggested: number;
+}
+
+/** Риси всіх сутностей книги, згруповані за сутністю (відхилені — ні): вкладка «Риси» сторінки 8. */
+export async function continuityTraitsOverview(repo: CoreRepository, projectId: string): Promise<ContinuityTraitsOverview> {
+  const [traits, entities, ix] = await Promise.all([repo.listEntityTraits(projectId), repo.listEntities(projectId), bookIndex(repo, projectId)]);
+  const byEntity = new Map<string, EntityTraitRow[]>();
+  for (const t of traits) if (t.status !== 'rejected') byEntity.set(t.entityId, [...(byEntity.get(t.entityId) ?? []), t]);
+  const sections: ContinuityTraitsOverview['sections'] = {};
+  for (const t of traits) {
+    if (!t.sectionId || sections[t.sectionId]) continue;
+    const s = ix.docs.get(t.sectionId);
+    const chapterNumber = s?.parentId ? ix.chapterNo.get(s.parentId) ?? null : null;
+    sections[t.sectionId] = { title: s?.title ?? '', chapterNumber };
+  }
+  const list = entities
+    .filter((e) => byEntity.has(e.id))
+    .map((e) => ({
+      id: e.id,
+      name: e.name,
+      type: e.type,
+      traits: byEntity.get(e.id)!.sort((a, b) => Number(b.status === 'suggested') - Number(a.status === 'suggested') || a.label.localeCompare(b.label, 'uk') || a.createdAt.localeCompare(b.createdAt)),
+    }))
+    .sort((a, b) => b.traits.filter((t) => t.status === 'suggested').length - a.traits.filter((t) => t.status === 'suggested').length || a.name.localeCompare(b.name, 'uk'));
+  return { entities: list, sections, suggested: traits.filter((t) => t.status === 'suggested').length };
+}
+
+export interface ContinuityRulesRun {
+  rules: Record<'time' | 'age' | 'knowledge' | 'place' | 'object', { checked: number; created: number; updated: number; skipped: number }>;
+  created: number;
+  updated: number;
+}
+
+/** «Перевірити зараз» (В8): усі п'ять правил без AI поспіль — одна команда автора. */
+export async function refreshAllContinuityRules(repo: CoreRepository, projectId: string): Promise<ContinuityRulesRun> {
+  const pick = (r: { checked: number; created: number; updated: number; skipped: number }) => ({ checked: r.checked, created: r.created, updated: r.updated, skipped: r.skipped });
+  const time = pick(await refreshTimeContinuity(repo, projectId));
+  const age = pick(await refreshTraitContradictions(repo, projectId, { label: AGE_TRAIT_LABEL, kind: 'age' }));
+  const knowledge = pick(await refreshKnowledgeContinuity(repo, projectId));
+  const place = pick(await refreshPlaceContinuity(repo, projectId));
+  const object = pick(await refreshObjectContinuity(repo, projectId));
+  const rules = { time, age, knowledge, place, object };
+  const all = Object.values(rules);
+  return { rules, created: all.reduce((n, r) => n + r.created, 0), updated: all.reduce((n, r) => n + r.updated, 0) };
+}

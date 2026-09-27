@@ -42,7 +42,7 @@ import {
 import { ROLE_ENTITY_TYPES, appearanceOverview, cardAppearanceHash, describeLinks, expectedLinkHash, heroPortrait, refreshVisualReview, sceneVisuals, visualEntitiesOverview } from './visual';
 import { ASSET_ROLES, type AssetRole } from './types';
 import { CONTINUITY_ISSUE_KINDS, CONTINUITY_ISSUE_STATUSES, type ContinuityIssueKind, type ContinuityIssueStatus } from './types';
-import { refreshTimeContinuity, refreshTraitContradictions, syncAgeTraitFromVersion, removeAgeTraitForVersion, refreshKnowledgeContinuity, refreshPlaceContinuity, refreshObjectContinuity, sectionsNeedingReview, AGE_TRAIT_LABEL } from './continuity';
+import { refreshTimeContinuity, refreshTraitContradictions, syncAgeTraitFromVersion, removeAgeTraitForVersion, refreshKnowledgeContinuity, refreshPlaceContinuity, refreshObjectContinuity, sectionsNeedingReview, continuityOverview, continuityTraitsOverview, refreshAllContinuityRules, AGE_TRAIT_LABEL } from './continuity';
 import { AI_CONTINUITY_JOB_KIND, CONTINUITY_SECTIONS_PER_REQUEST } from './continuityAi';
 import { checkDraftKnowledge } from './continuityDraft';
 import { DRAFT_TEXT_MAX, VERSIONED_ROLES, isLinkableAssetUrl } from './rules';
@@ -1541,8 +1541,20 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
     const status = typeof req.query.status === 'string' && (CONTINUITY_ISSUE_STATUSES as readonly string[]).includes(req.query.status)
       ? (req.query.status as ContinuityIssueStatus) : undefined;
     const entityId = typeof req.query.entityId === 'string' && req.query.entityId ? req.query.entityId : undefined;
-    const issues = await repo.listContinuityIssues(req.params.id, { kind, status, entityId });
-    res.json({ issues, canEdit: canEditStory(req.projectAccess!) });
+    // В8: разом із місцями доказів у книзі, назвами сутностей і лічильниками — сторінці 8 не треба дозапитів.
+    const overview = await continuityOverview(repo, req.params.id, { kind, status, entityId });
+    res.json({ ...overview, canEdit: canEditStory(req.projectAccess!) });
+  }));
+
+  /** «Перевірити зараз» (Т2.4 В8): усі п'ять правил без AI поспіль. */
+  app.post('/api/projects/:id/continuity/rules/all', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    res.json(await refreshAllContinuityRules(repo, req.params.id));
+  }));
+
+  /** Риси всіх сутностей книги (вкладка «Риси» сторінки 8), з пропозиціями AI-2 першими. */
+  app.get('/api/projects/:id/continuity/traits', withRepo(async (repo, req, res) => {
+    res.json({ ...(await continuityTraitsOverview(repo, req.params.id)), canEdit: canEditStory(req.projectAccess!) });
   }));
 
   /** Правило «час» (Т2.4 В2): попередження хронології → проблеми безперервності (kind: time). Лише за командою. */
@@ -1750,6 +1762,23 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       createdBy: `user:${req.projectAccess!.userId}`,
     });
     res.status(201).json({ trait });
+  }));
+
+  /** Рішення автора щодо риси (пропозиції AI-2 — В6): підтвердити чи відхилити, не змінюючи її походження. */
+  app.post('/api/projects/:id/entities/:entityId/traits/:traitId/status', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const status = req.body?.status;
+    if (status !== 'confirmed' && status !== 'rejected') {
+      res.status(400).json({ error: 'Статус — confirmed або rejected.', kind: 'bad_input' });
+      return;
+    }
+    const current = (await repo.listEntityTraits(req.params.id, req.params.entityId)).find((t) => t.id === req.params.traitId);
+    if (!current) {
+      res.status(404).json({ error: 'Риси немає.', kind: 'not_found' });
+      return;
+    }
+    const trait = await repo.setEntityTraitStatus(req.params.id, current.id, status, `user:${req.projectAccess!.userId}`);
+    res.json({ trait });
   }));
 
   /** Видалити рису (помилково внесена). */

@@ -19,6 +19,7 @@ import { CoreSearchPage } from './CoreSearchPage';
 import { CharacterProfilePage } from './CharacterProfilePage';
 import { TimelinePage } from './TimelinePage';
 import { EmotionMonitorPage } from './EmotionMonitorPage';
+import { ContinuityPage } from './ContinuityPage';
 import { MediaLibraryView, type DescribeRevealTarget } from './MediaLibraryView';
 
 // Граф (Т1.4) тягне React Flow — вантажимо його лише на сторінці графа.
@@ -217,7 +218,7 @@ export const CorePageView: React.FC<Props> = ({ tab, book, characterId, onOpenCh
         </div>
         <h1 className="text-2xl font-bold text-slate-100">{t(`header.nav.${tab}`)}</h1>
         <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-slate-400">{page.purposeUk}</p>
-        {tab !== 'core-search' && tab !== 'core-story-graph' && tab !== 'core-character' && tab !== 'core-timeline' && tab !== 'core-emotions' && (
+        {tab !== 'core-search' && tab !== 'core-story-graph' && tab !== 'core-character' && tab !== 'core-timeline' && tab !== 'core-emotions' && tab !== 'core-continuity' && (
           <p className="mt-2 text-xs text-slate-500">
             Сторінка з'явиться повністю на етапі {page.stage} дорожньої карти. Нижче — дані семантичного ядра цієї книги, на яких вона працюватиме.
           </p>
@@ -229,6 +230,9 @@ export const CorePageView: React.FC<Props> = ({ tab, book, characterId, onOpenCh
 
       {/* Сторінка 4 — «Емоційний монітор» (Т2.2). */}
       {tab === 'core-emotions' && <EmotionMonitorPage book={book} onOpenParagraph={(t) => onOpenParagraph?.(t)} />}
+
+      {/* Сторінка 8 — «Перевірка безперервності» (Т2.4 В8). */}
+      {tab === 'core-continuity' && <ContinuityPage book={book} onOpenParagraph={(t) => onOpenParagraph?.(t)} />}
 
       {/* Сторінка 6 — «Хронологія» (Т2.1). */}
       {tab === 'core-timeline' && <TimelinePage book={book} onOpenParagraph={(t) => onOpenParagraph?.(t)} />}

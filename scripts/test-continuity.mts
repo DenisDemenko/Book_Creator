@@ -39,6 +39,10 @@
  * знаходиться, у книгу й у проблеми нічого не пишеться, перевірка — в історії
  * (`continuity_draft_checks`, міграція 0014).
  *
+ * В8: маршрути сторінки 8 — огляд проблем із місцями доказів і
+ * лічильниками, «перевірити зараз» (усі п'ять правил), риси книги, рішення
+ * автора щодо риси AI-2.
+ *
  * Без бази — у пам'яті; з CORE_TEST_DATABASE_URL — ще й на PostgreSQL
  * (схема `fusion_core` видаляється — лише тестова база!).
  *
@@ -892,6 +896,77 @@ async function draftCheckSuite(label: string, repo: CoreRepository, P: string) {
   server.close();
 }
 
+async function pageRoutesSuite(label: string, repo: CoreRepository, P: string) {
+  console.log(`\nСторінка 8: маршрути інтерфейсу — Т2.4 В8 (${label}):`);
+  const sec = (id: string, order: number, content: string) => {
+    const r = reconcileParagraphIds({ sectionId: id, content });
+    return { id, title: `Сцена ${id}`, order, content, paragraphIds: r.ids, paragraphHashes: r.hashes };
+  };
+  const book: any = {
+    id: P,
+    title: 'Книга',
+    characters: [{ id: 'c-o', name: 'Олена' }, { id: 'c-m', name: 'Марко' }],
+    chapters: [
+      { id: 'ch1', title: 'Тоді', order: 0, sections: [
+        sec('s1', 0, '[/character:Марко] [/character:Олена] Марко натякнув на [/revelation:Таємниця @Марко].'),
+      ] },
+      { id: 'ch2', title: 'Правда', order: 1, sections: [sec('s2', 0, '[/character:Олена] [/location:Хата] Олені сказали: [/revelation:Таємниця @Олена].')] },
+    ],
+  };
+  await syncBookToCore(repo, { id: P, ownerId: 'u-owner', title: 'Книга', book });
+  const olena = (await repo.resolveAlias(P, 'character', 'Олена'))!;
+  const hut = (await repo.resolveAlias(P, 'location', 'Хата'))!;
+  await repo.upsertEntityTrait({ projectId: P, entityId: hut, label: 'дах', value: 'черепиця', sectionId: 's1', createdBy: 'user:u-owner' });
+  const aiTrait = await repo.upsertEntityTrait({ projectId: P, entityId: hut, label: 'дах', value: 'солома', sectionId: 's2', createdBy: 'ai:AI-2' });
+
+  const access = {
+    async getBookOwnerId(x: string) { return x === P ? 'u-owner' : null; },
+    async getCollabOwnerId() { return undefined; },
+    async listAcceptedInvites() { return [{ acceptedUserId: 'u-reader', role: 'reader' }]; },
+  };
+  const who: Record<string, any> = { owner: { id: 'u-owner', role: 'writer', isGuest: false }, reader: { id: 'u-reader', role: 'reader', isGuest: false } };
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => { (req as any).principal = who[String(req.headers['x-user'])]; next(); });
+  registerProjectRoutes(app, { access, repo: () => repo, coreState: () => 'ready' });
+  const server = app.listen(0);
+  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/projects/${P}`;
+  const call = async (method: string, path: string, user: string, body?: unknown) => {
+    const r = await fetch(`${baseUrl}${path}`, { method, headers: { 'x-user': user, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: r.status, body: (await r.json().catch(() => ({}))) as any };
+  };
+
+  t('«Перевірити зараз»: читачу — 403', (await call('POST', '/continuity/rules/all', 'reader')).status === 403);
+  const run = await call('POST', '/continuity/rules/all', 'owner');
+  t('«Перевірити зараз» — усі п\'ять правил, підсумок по кожному: «знання» знайшло витік Олени (s1 до s2)',
+    run.status === 200 && Object.keys(run.body.rules).sort().join() === 'age,knowledge,object,place,time' && run.body.rules.knowledge.created === 1 && run.body.created === 1,
+    JSON.stringify(run.body));
+  const ov = await call('GET', '/continuity/issues', 'reader');
+  const issue = ov.body.issues?.[0];
+  const pa = issue ? ov.body.places[issue.evidenceA.paragraphId] : null;
+  t('КРИТЕРІЙ сторінки 8 (дані): читач бачить проблему з обома доказами і місцем кожного в книзі (глава, розділ, абзац редактора), без права змін',
+    ov.status === 200 && ov.body.canEdit === false && ov.body.issues.length === 1 && !!pa && pa.chapterNumber === 1 && pa.sectionId === 's1' && !!pa.chapterId && !!pa.editorPid && !pa.missing &&
+    !!ov.body.places[issue.evidenceB.paragraphId] && ov.body.entities[olena]?.name === 'Олена' && ov.body.counts.byKind.knowledge === 1 && ov.body.counts.total === 1,
+    JSON.stringify({ pa, counts: ov.body.counts }));
+  const filtered = await call('GET', '/continuity/issues?kind=place', 'owner');
+  t('фільтр за видом звужує перелік, а лічильники — по всій книзі', filtered.body.issues.length === 0 && filtered.body.counts.total === 1 && filtered.body.canEdit === true);
+
+  const tr = await call('GET', '/continuity/traits', 'reader');
+  const hutBlock = tr.body.entities?.find((e: any) => e.id === hut);
+  t('риси книги: згруповано за сутністю, пропозиція AI-2 першою, розділ підписано; читачу — без права змін',
+    tr.status === 200 && tr.body.canEdit === false && tr.body.suggested === 1 && hutBlock?.traits.length === 2 && hutBlock.traits[0].id === aiTrait.id && tr.body.sections.s2?.chapterNumber === 2,
+    JSON.stringify(tr.body));
+  const bad = await call('POST', `/entities/${hut}/traits/${aiTrait.id}/status`, 'owner', { status: 'maybe' });
+  t('рішення щодо риси: читачу — 403; поганий статус — 400; чужа сутність — 404',
+    (await call('POST', `/entities/${hut}/traits/${aiTrait.id}/status`, 'reader', { status: 'confirmed' })).status === 403 && bad.status === 400 &&
+    (await call('POST', `/entities/${olena}/traits/${aiTrait.id}/status`, 'owner', { status: 'confirmed' })).status === 404);
+  const ok = await call('POST', `/entities/${hut}/traits/${aiTrait.id}/status`, 'owner', { status: 'confirmed' });
+  t('автор підтвердив пропозицію AI-2 — confirmed, походження (ai) збережено', ok.status === 200 && ok.body.trait.status === 'confirmed' && ok.body.trait.source === 'ai');
+  const run2 = await call('POST', '/continuity/rules/all', 'owner');
+  t('…і наступне «Перевірити зараз» ловить суперечність даху (правило «місце»)', run2.body.rules.place.created === 1 && run2.body.rules.knowledge.updated === 1, JSON.stringify(run2.body.rules));
+  server.close();
+}
+
 await suite('memory', new MemoryCoreRepository(), 'book-m');
 await timeRuleSuite('memory', new MemoryCoreRepository(), 'book-tm');
 await ageRuleSuite('memory', new MemoryCoreRepository(), 'book-am');
@@ -899,6 +974,7 @@ await knowledgeRuleSuite('memory', new MemoryCoreRepository(), 'book-km');
 await placeObjectRuleSuite('memory', new MemoryCoreRepository(), 'book-pm');
 await aiContinuitySuite('memory', new MemoryCoreRepository(), new MemoryJobStore(), 'book-cm');
 await draftCheckSuite('memory', new MemoryCoreRepository(), 'book-dm');
+await pageRoutesSuite('memory', new MemoryCoreRepository(), 'book-gm');
 
 const url = process.env.CORE_TEST_DATABASE_URL?.trim();
 if (!url) {
@@ -917,6 +993,7 @@ if (!url) {
     await placeObjectRuleSuite('postgres', new PgCoreRepository(pool), 'book-pp');
     await aiContinuitySuite('postgres', new PgCoreRepository(pool), new PgJobStore(pool), 'book-cp');
     await draftCheckSuite('postgres', new PgCoreRepository(pool), 'book-dp');
+    await pageRoutesSuite('postgres', new PgCoreRepository(pool), 'book-gp');
   } catch (err) {
     t('прогін на PostgreSQL без збоїв', false, (err as Error).stack ?? String(err));
   } finally {

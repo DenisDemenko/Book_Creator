@@ -110,6 +110,7 @@
     "live:visual-generation": "tsx scripts/live-visualGeneration.mts",
     "test:visual-entities": "tsx scripts/test-visualEntities.mts",
     "live:visual-entities": "tsx scripts/live-visualEntities.mts",
+    "live:continuity": "tsx scripts/live-continuity.mts",
     "core:migrate": "tsx scripts/core-migrate.mts",
     "test:paragraph-ids": "tsx scripts/test-paragraphIds.mts",
     "live:paragraph-ids": "tsx scripts/live-paragraphIds.mts",
