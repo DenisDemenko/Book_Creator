@@ -41,6 +41,7 @@ import {
 } from './visualGeneration';
 import { ROLE_ENTITY_TYPES, appearanceOverview, cardAppearanceHash, describeLinks, expectedLinkHash, heroPortrait, refreshVisualReview, sceneVisuals, visualEntitiesOverview } from './visual';
 import { ASSET_ROLES, type AssetRole } from './types';
+import { CONTINUITY_ISSUE_KINDS, CONTINUITY_ISSUE_STATUSES, type ContinuityIssueKind, type ContinuityIssueStatus } from './types';
 import { VERSIONED_ROLES, isLinkableAssetUrl } from './rules';
 import { clampIntensity, emotionFamily } from '../../src/utils/emotionScale';
 import { LlmFallbackJevAdapter, type JevAdapter, type LlmJson } from './flc/jev';
@@ -1520,6 +1521,84 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       actor,
     });
     res.json({ link: link ? (await describeLinks(repo, req.params.id, [link]))[0] : null });
+  }));
+
+  // ── Т2.4 В1: безперервність — таблиці, права, критерій сторінки 8 ────────
+
+  /** Проблеми безперервності книги: `?kind=&status=&entityId=`. */
+  app.get('/api/projects/:id/continuity/issues', withRepo(async (repo, req, res) => {
+    const kind = typeof req.query.kind === 'string' && (CONTINUITY_ISSUE_KINDS as readonly string[]).includes(req.query.kind)
+      ? (req.query.kind as ContinuityIssueKind) : undefined;
+    const status = typeof req.query.status === 'string' && (CONTINUITY_ISSUE_STATUSES as readonly string[]).includes(req.query.status)
+      ? (req.query.status as ContinuityIssueStatus) : undefined;
+    const entityId = typeof req.query.entityId === 'string' && req.query.entityId ? req.query.entityId : undefined;
+    const issues = await repo.listContinuityIssues(req.params.id, { kind, status, entityId });
+    res.json({ issues, canEdit: canEditStory(req.projectAccess!) });
+  }));
+
+  /** Змінити статус проблеми (автор: підтвердити, відхилити, позначити виправленою чи «переглянуто»). */
+  app.put('/api/projects/:id/continuity/issues/:issueId', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const status = req.body?.status;
+    if (!(CONTINUITY_ISSUE_STATUSES as readonly string[]).includes(status)) {
+      res.status(400).json({ error: 'Статус — suggested, confirmed, dismissed, resolved або needs_review.', kind: 'bad_input' });
+      return;
+    }
+    const issue = await repo.setContinuityIssueStatus(req.params.id, req.params.issueId, status, `user:${req.projectAccess!.userId}`);
+    res.json({ issue });
+  }));
+
+  /** Риси сутності (вік, колір, розмір…) — автор вписує на картці, AI-2 пропонує (В6). */
+  app.get('/api/projects/:id/entities/:entityId/traits', withRepo(async (repo, req, res) => {
+    const e = await repo.getEntity(req.params.id, req.params.entityId);
+    if (!e) {
+      res.status(404).json({ error: 'Сутність не знайдено в книзі.', kind: 'not_found' });
+      return;
+    }
+    const traits = await repo.listEntityTraits(req.params.id, e.id);
+    res.json({ traits, canEdit: canEditStory(req.projectAccess!) });
+  }));
+
+  /** Записати рису: без `id` — нова, з `id` — оновити (автор, уже підтверджена). */
+  app.put('/api/projects/:id/entities/:entityId/traits', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const e = await repo.getEntity(req.params.id, req.params.entityId);
+    if (!e) {
+      res.status(404).json({ error: 'Сутність не знайдено в книзі.', kind: 'not_found' });
+      return;
+    }
+    const b = req.body ?? {};
+    const label = typeof b.label === 'string' ? b.label.trim() : '';
+    const value = typeof b.value === 'string' ? b.value.trim() : '';
+    if (!label || !value) {
+      res.status(400).json({ error: 'Потрібні мітка і значення риси.', kind: 'bad_input' });
+      return;
+    }
+    const trait = await repo.upsertEntityTrait({
+      id: typeof b.id === 'string' && b.id ? b.id : undefined,
+      projectId: req.params.id,
+      entityId: e.id,
+      label,
+      value,
+      sectionId: typeof b.sectionId === 'string' && b.sectionId ? b.sectionId : undefined,
+      storyTimeKey: typeof b.storyTimeKey === 'number' ? b.storyTimeKey : undefined,
+      supersedes: typeof b.supersedes === 'string' && b.supersedes ? b.supersedes : undefined,
+      status: 'confirmed',
+      source: 'author',
+      createdBy: `user:${req.projectAccess!.userId}`,
+    });
+    res.status(201).json({ trait });
+  }));
+
+  /** Видалити рису (помилково внесена). */
+  app.delete('/api/projects/:id/entities/:entityId/traits/:traitId', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const ok = await repo.deleteEntityTrait(req.params.id, req.params.traitId);
+    if (!ok) {
+      res.status(404).json({ error: 'Риси немає.', kind: 'not_found' });
+      return;
+    }
+    res.json({ ok: true });
   }));
 
   // ── Т1.6: прототип FLC етапу 0 (лише адміністратор) ──────────────────────

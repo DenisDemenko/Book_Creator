@@ -30,6 +30,11 @@ import {
   type AssetLinkInput,
   type AppearanceVersionInput,
   ASSET_ROLES,
+  type EntityTraitInput,
+  type ContinuityIssueInput,
+  type ContinuityIssueStatus,
+  CONTINUITY_ISSUE_KINDS,
+  CONTINUITY_ISSUE_STATUSES,
 } from './types';
 
 export type CoreRuleCode =
@@ -253,6 +258,59 @@ export function checkAppearanceVersion(v: AppearanceVersionInput): {
   const approved = v.approved ?? !ai;
   if (ai && approved) throw new CoreRuleError('ai_suggests_only', 'Опис зовнішності від AI — лише пропозиція; затверджує автор');
   return { label, age, fromChapter, toChapter, description, approved };
+}
+
+/** Риса сутності (Т2.4 В1): ті самі правила, що й CHECK у базі. */
+export function checkEntityTrait(t: EntityTraitInput): { label: string; value: string; source: 'author' | 'ai'; status: CoreStatus } {
+  assertActor(t.createdBy);
+  const label = String(t.label ?? '').trim();
+  if (!label || label.length > 80) throw new CoreRuleError('bad_input', 'Мітка риси — від 1 до 80 символів');
+  const value = String(t.value ?? '').trim();
+  if (!value || value.length > 400) throw new CoreRuleError('bad_input', 'Значення риси — від 1 до 400 символів');
+  if (t.source && t.source !== 'author' && t.source !== 'ai') throw new CoreRuleError('bad_input', `Невідоме джерело риси «${t.source}»`);
+  const ai = isAiActor(t.createdBy);
+  const source = t.source ?? (ai ? 'ai' : 'author');
+  const status = t.status ?? (ai ? 'suggested' : 'confirmed');
+  assertStatus(status);
+  if (ai && status !== 'suggested') {
+    throw new CoreRuleError('ai_suggests_only', 'Риса від AI — лише пропозиція (suggested); затверджує автор');
+  }
+  if (source === 'ai' && !ai && t.status === 'suggested') {
+    throw new CoreRuleError('ai_suggests_only', 'Пропозицію AI записує лише AI; автор її підтверджує чи відхиляє');
+  }
+  return { label, value, source, status };
+}
+
+/**
+ * Проблема безперервності (Т2.4 В1): ті самі правила, що й CHECK у базі.
+ * Доказ Б відсутній лише коли `insufficientData` (та сама вимога, що й
+ * висновки AI-3 — `checkNewFinding`, `evidence_required`).
+ */
+export function checkContinuityIssue(input: ContinuityIssueInput): { summary: string; source: 'rule' | 'ai'; status: ContinuityIssueStatus; insufficientData: boolean } {
+  assertActor(input.createdBy);
+  if (!CONTINUITY_ISSUE_KINDS.includes(input.kind)) throw new CoreRuleError('bad_input', `Невідомий вид проблеми «${input.kind}»`);
+  const summary = String(input.summary ?? '').trim();
+  if (!summary || summary.length > 500) throw new CoreRuleError('bad_input', 'Опис проблеми — від 1 до 500 символів');
+  const evA = input.evidenceA;
+  if (!evA || !evA.sectionId || !String(evA.quote ?? '').trim()) {
+    throw new CoreRuleError('bad_input', 'Доказ А — обов\'язковий: розділ і цитата');
+  }
+  const hasB = !!input.evidenceB && !!input.evidenceB.sectionId && !!String(input.evidenceB.quote ?? '').trim();
+  const insufficientData = !!input.insufficientData && !hasB;
+  if (!hasB && !insufficientData) {
+    throw new CoreRuleError('evidence_required', 'Проблема без другого доказу не зберігається: вкажіть evidenceB або позначку «недостатньо даних»');
+  }
+  if (input.source && input.source !== 'rule' && input.source !== 'ai') {
+    throw new CoreRuleError('bad_input', `Невідоме джерело проблеми «${input.source}»`);
+  }
+  const ai = isAiActor(input.createdBy);
+  const source = input.source ?? (ai ? 'ai' : 'rule');
+  const status = input.status ?? (ai ? 'suggested' : 'confirmed');
+  if (!CONTINUITY_ISSUE_STATUSES.includes(status)) throw new CoreRuleError('bad_input', `Невідомий статус «${status}»`);
+  if (ai && status !== 'suggested') {
+    throw new CoreRuleError('ai_suggests_only', 'Проблема від AI — лише пропозиція (suggested); статус змінює автор');
+  }
+  return { summary, source, status, insufficientData };
 }
 
 export function checkMention(m: MentionInput): void {

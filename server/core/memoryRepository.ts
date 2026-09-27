@@ -27,8 +27,11 @@ import {
   checkAssetLink,
   checkAppearanceVersion,
   appearanceHash,
+  checkEntityTrait,
+  checkContinuityIssue,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isSearchableKind, isValidEmbedding, memoryTextScore } from './search/text';
+import { CORE_STATUSES, CONTINUITY_ISSUE_STATUSES } from './types';
 import type {
   AliasRow,
   CoreActor,
@@ -60,6 +63,12 @@ import type {
   AppearanceVersionInput,
   AppearanceVersionRow,
   AppearanceHistoryRow,
+  EntityTraitInput,
+  EntityTraitRow,
+  ContinuityIssueInput,
+  ContinuityIssueRow,
+  ContinuityIssueKind,
+  ContinuityIssueStatus,
   ParagraphVersionRow,
   ProjectInput,
   ProjectRow,
@@ -103,6 +112,8 @@ export class MemoryCoreRepository implements CoreRepository {
   private appearanceVersions = new Map<string, AppearanceVersionRow>();
   private appearanceHistory: AppearanceHistoryRow[] = [];
   private embeddings = new Map<string, { projectId: string; paragraphId: string; model: string; contentHash: string; vector: number[] }>();
+  private entityTraits = new Map<string, EntityTraitRow>();
+  private continuityIssues = new Map<string, ContinuityIssueRow>();
 
   private requireProject(projectId: string): ProjectRow {
     const p = this.projects.get(projectId);
@@ -900,6 +911,121 @@ export class MemoryCoreRepository implements CoreRepository {
       .slice(-limit)
       .reverse()
       .map(clone);
+  }
+
+  // ── Риси сутностей (Т2.4 В1) ─────────────────────────────────────────────
+
+  async listEntityTraits(projectId: string, entityId?: string) {
+    return [...this.entityTraits.values()]
+      .filter((t) => t.projectId === projectId && (!entityId || t.entityId === entityId))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+      .map(clone);
+  }
+
+  async upsertEntityTrait(input: EntityTraitInput) {
+    this.requireProject(input.projectId);
+    const n = checkEntityTrait(input);
+    if (!this.entityIn(input.projectId, input.entityId)) throw notFound(`Сутність «${input.entityId}»`);
+    if (input.sectionId && !this.documents.get(key(input.projectId, input.sectionId))) throw notFound(`Розділ «${input.sectionId}»`);
+    if (input.supersedes) {
+      const s = this.entityTraits.get(input.supersedes);
+      if (!s || s.projectId !== input.projectId) throw notFound(`Риса «${input.supersedes}»`);
+      if (s.entityId !== input.entityId || s.label.trim().toLocaleLowerCase('uk') !== input.label.trim().toLocaleLowerCase('uk')) {
+        throw new CoreRuleError('bad_input', 'Заміняти можна лише рису тієї самої сутності з тією самою міткою');
+      }
+    }
+    const prev = input.id ? this.entityTraits.get(input.id) : undefined;
+    if (input.id && (!prev || prev.projectId !== input.projectId)) throw notFound(`Риса «${input.id}»`);
+    const at = now();
+    const row: EntityTraitRow = {
+      id: prev?.id ?? randomUUID(),
+      projectId: input.projectId,
+      entityId: input.entityId,
+      label: n.label,
+      value: n.value,
+      sectionId: input.sectionId ?? prev?.sectionId ?? null,
+      storyTimeKey: input.storyTimeKey !== undefined ? input.storyTimeKey : prev?.storyTimeKey ?? null,
+      status: n.status,
+      source: n.source,
+      supersedes: input.supersedes !== undefined ? input.supersedes : prev?.supersedes ?? null,
+      createdBy: input.createdBy,
+      createdAt: prev?.createdAt ?? at,
+      updatedAt: at,
+    };
+    this.entityTraits.set(row.id, row);
+    return clone(row);
+  }
+
+  async setEntityTraitStatus(projectId: string, id: string, status: CoreStatus, actor: CoreActor) {
+    const t = this.entityTraits.get(id);
+    if (!t || t.projectId !== projectId) throw notFound(`Риса «${id}»`);
+    if (!(CORE_STATUSES as readonly string[]).includes(status)) throw new CoreRuleError('bad_input', `Невідомий статус «${status}»`);
+    const row = { ...t, status, createdBy: actor, updatedAt: now() };
+    this.entityTraits.set(id, row);
+    return clone(row);
+  }
+
+  async deleteEntityTrait(projectId: string, id: string) {
+    const t = this.entityTraits.get(id);
+    if (!t || t.projectId !== projectId) return false;
+    return this.entityTraits.delete(id);
+  }
+
+  // ── Проблеми безперервності (Т2.4 В1) ────────────────────────────────────
+
+  async listContinuityIssues(projectId: string, filter: { kind?: ContinuityIssueKind; status?: ContinuityIssueStatus; entityId?: string } = {}) {
+    return [...this.continuityIssues.values()]
+      .filter((i) => i.projectId === projectId)
+      .filter((i) => (!filter.kind || i.kind === filter.kind) && (!filter.status || i.status === filter.status) && (!filter.entityId || i.entityId === filter.entityId))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+      .map(clone);
+  }
+
+  async getContinuityIssue(projectId: string, id: string) {
+    const i = this.continuityIssues.get(id);
+    return i && i.projectId === projectId ? clone(i) : null;
+  }
+
+  async upsertContinuityIssue(input: ContinuityIssueInput) {
+    this.requireProject(input.projectId);
+    const n = checkContinuityIssue(input);
+    if (input.entityId && !this.entityIn(input.projectId, input.entityId)) throw notFound(`Сутність «${input.entityId}»`);
+    const prev = input.id ? this.continuityIssues.get(input.id) : undefined;
+    if (input.id && (!prev || prev.projectId !== input.projectId)) throw notFound(`Проблема «${input.id}»`);
+    const at = now();
+    const row: ContinuityIssueRow = {
+      id: prev?.id ?? randomUUID(),
+      projectId: input.projectId,
+      kind: input.kind,
+      entityId: input.entityId !== undefined ? input.entityId : prev?.entityId ?? null,
+      summary: n.summary,
+      evidenceA: clone(input.evidenceA),
+      evidenceB: input.evidenceB !== undefined ? (input.evidenceB ? clone(input.evidenceB) : null) : prev?.evidenceB ?? null,
+      status: n.status,
+      source: n.source,
+      checkedHash: input.checkedHash !== undefined ? input.checkedHash : prev?.checkedHash ?? null,
+      insufficientData: n.insufficientData,
+      createdBy: input.createdBy,
+      createdAt: prev?.createdAt ?? at,
+      updatedAt: at,
+    };
+    this.continuityIssues.set(row.id, row);
+    return clone(row);
+  }
+
+  async setContinuityIssueStatus(projectId: string, id: string, status: ContinuityIssueStatus, actor: CoreActor) {
+    const i = this.continuityIssues.get(id);
+    if (!i || i.projectId !== projectId) throw notFound(`Проблема «${id}»`);
+    if (!(CONTINUITY_ISSUE_STATUSES as readonly string[]).includes(status)) throw new CoreRuleError('bad_input', `Невідомий статус «${status}»`);
+    const row = { ...i, status, createdBy: actor, updatedAt: now() };
+    this.continuityIssues.set(id, row);
+    return clone(row);
+  }
+
+  async deleteContinuityIssue(projectId: string, id: string) {
+    const i = this.continuityIssues.get(id);
+    if (!i || i.projectId !== projectId) return false;
+    return this.continuityIssues.delete(id);
   }
 
   // ── Збережені запити (Т1.3) ──────────────────────────────────────────────

@@ -453,6 +453,87 @@ export interface AppearanceHistoryRow {
   at: string;
 }
 
+// ── Безперервність і Knowledge Check (Т2.4) ─────────────────────────────────
+
+/** Риса сутності — мітка → значення (вік, колір, розмір…). */
+export interface EntityTraitRow {
+  id: string;
+  projectId: string;
+  entityId: string;
+  label: string;
+  value: string;
+  /** Розділ, де риса встановлена/згадана — для «раніше/пізніше» без часу світу. */
+  sectionId: string | null;
+  /** Ключ часу світу (`story_time_points.sort_key`), якщо є — точніший порядок, ніж розділ. */
+  storyTimeKey: number | null;
+  status: CoreStatus;
+  source: 'author' | 'ai';
+  /** Ця риса явно заміняє попередню (автор позначив «змінилось», не суперечність). */
+  supersedes: string | null;
+  createdBy: CoreActor;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type EntityTraitInput = Pick<EntityTraitRow, 'projectId' | 'entityId' | 'label' | 'value' | 'createdBy'> & {
+  /** Є — оновити цю рису; немає — створити нову (не заміна попередньої — на це є `supersedes`). */
+  id?: string;
+  sectionId?: string | null;
+  storyTimeKey?: number | null;
+  status?: CoreStatus;
+  source?: 'author' | 'ai';
+  supersedes?: string | null;
+};
+
+export const CONTINUITY_ISSUE_KINDS = ['object', 'knowledge', 'place', 'age', 'time'] as const;
+export type ContinuityIssueKind = (typeof CONTINUITY_ISSUE_KINDS)[number];
+
+export const CONTINUITY_ISSUE_STATUSES = ['suggested', 'confirmed', 'dismissed', 'resolved', 'needs_review'] as const;
+export type ContinuityIssueStatus = (typeof CONTINUITY_ISSUE_STATUSES)[number];
+
+/** Одна сторона доказу суперечності: конкретне місце тексту. */
+export interface ContinuityEvidence {
+  sectionId: string;
+  paragraphId: string | null;
+  quote: string;
+  entityId: string | null;
+}
+
+/**
+ * Проблема безперервності (Т2.4): суперечність між двома доказами
+ * (`evidenceA`/`evidenceB`), знайдена правилом (`source: 'rule'`) чи AI-2
+ * (`source: 'ai'`). `evidenceB` — `null` лише коли `insufficientData`.
+ */
+export interface ContinuityIssueRow {
+  id: string;
+  projectId: string;
+  kind: ContinuityIssueKind;
+  /** Головна сутність, якої стосується проблема (герой, локація, предмет) — якщо є одна. */
+  entityId: string | null;
+  summary: string;
+  evidenceA: ContinuityEvidence;
+  evidenceB: ContinuityEvidence | null;
+  status: ContinuityIssueStatus;
+  source: 'rule' | 'ai';
+  /** Відбиток тексту доказів на момент останньої перевірки (В6: «повторна перевірка лише змінених місць»). */
+  checkedHash: string | null;
+  insufficientData: boolean;
+  createdBy: CoreActor;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ContinuityIssueInput = Pick<ContinuityIssueRow, 'projectId' | 'kind' | 'summary' | 'evidenceA' | 'createdBy'> & {
+  /** Є — оновити цю проблему (типово: перевірка за хешем); немає — створити нову. */
+  id?: string;
+  entityId?: string | null;
+  evidenceB?: ContinuityEvidence | null;
+  status?: ContinuityIssueStatus;
+  source?: 'rule' | 'ai';
+  checkedHash?: string | null;
+  insufficientData?: boolean;
+};
+
 /** Збережений пошуковий запит автора (Т1.3). */
 export interface SavedSearchRow {
   id: string;
@@ -606,6 +687,20 @@ export interface CoreRepository {
   deleteAppearanceVersion(projectId: string, id: string, actor: CoreActor): Promise<boolean>;
   addAppearanceHistory(input: Omit<AppearanceHistoryRow, 'id' | 'at'>): Promise<void>;
   listAppearanceHistory(projectId: string, entityId: string, limit?: number): Promise<AppearanceHistoryRow[]>;
+
+  /** Риси сутностей (Т2.4 В1): матеріал для правила `trait_contradiction` (В3). */
+  listEntityTraits(projectId: string, entityId?: string): Promise<EntityTraitRow[]>;
+  upsertEntityTrait(input: EntityTraitInput): Promise<EntityTraitRow>;
+  setEntityTraitStatus(projectId: string, id: string, status: CoreStatus, actor: CoreActor): Promise<EntityTraitRow>;
+  deleteEntityTrait(projectId: string, id: string): Promise<boolean>;
+
+  /** Проблеми безперервності (Т2.4 В1): сторінка 8. */
+  listContinuityIssues(projectId: string, filter?: { kind?: ContinuityIssueKind; status?: ContinuityIssueStatus; entityId?: string }): Promise<ContinuityIssueRow[]>;
+  getContinuityIssue(projectId: string, id: string): Promise<ContinuityIssueRow | null>;
+  upsertContinuityIssue(input: ContinuityIssueInput): Promise<ContinuityIssueRow>;
+  /** Автор змінює статус (стає новим `createdBy` — «хто востаннє вирішив», за зразком CHECK у базі). */
+  setContinuityIssueStatus(projectId: string, id: string, status: ContinuityIssueStatus, actor: CoreActor): Promise<ContinuityIssueRow>;
+  deleteContinuityIssue(projectId: string, id: string): Promise<boolean>;
 
   /** Збережені запити автора в книзі (Т1.3), новіші першими. */
   listSavedSearches(projectId: string, userId: string): Promise<SavedSearchRow[]>;

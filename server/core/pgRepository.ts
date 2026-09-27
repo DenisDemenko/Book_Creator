@@ -28,6 +28,8 @@ import {
   checkAssetLink,
   checkAppearanceVersion,
   appearanceHash,
+  checkEntityTrait,
+  checkContinuityIssue,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isValidEmbedding, SEARCHABLE_KINDS, tsQueryFromStems } from './search/text';
 import type {
@@ -70,6 +72,12 @@ import type {
   AppearanceVersionInput,
   AppearanceVersionRow,
   AppearanceHistoryRow,
+  EntityTraitInput,
+  EntityTraitRow,
+  ContinuityIssueInput,
+  ContinuityIssueRow,
+  ContinuityIssueKind,
+  ContinuityIssueStatus,
 } from './types';
 
 type Q = Pool | PoolClient;
@@ -179,6 +187,43 @@ function toAppearanceHistory(r: any): AppearanceHistoryRow {
     snapshot: r.snapshot ?? {},
     actor: r.actor,
     at: iso(r.at),
+  };
+}
+
+function toEntityTrait(r: any): EntityTraitRow {
+  return {
+    id: r.id,
+    projectId: r.project_id,
+    entityId: r.entity_id,
+    label: r.label,
+    value: r.value,
+    sectionId: r.section_id ?? null,
+    storyTimeKey: r.story_time_key == null ? null : Number(r.story_time_key),
+    status: r.status,
+    source: r.source,
+    supersedes: r.supersedes ?? null,
+    createdBy: r.created_by,
+    createdAt: iso(r.created_at),
+    updatedAt: iso(r.updated_at),
+  };
+}
+
+function toContinuityIssue(r: any): ContinuityIssueRow {
+  return {
+    id: r.id,
+    projectId: r.project_id,
+    kind: r.kind,
+    entityId: r.entity_id ?? null,
+    summary: r.summary,
+    evidenceA: r.evidence_a,
+    evidenceB: r.evidence_b ?? null,
+    status: r.status,
+    source: r.source,
+    checkedHash: r.checked_hash ?? null,
+    insufficientData: !!r.insufficient_data,
+    createdBy: r.created_by,
+    createdAt: iso(r.created_at),
+    updatedAt: iso(r.updated_at),
   };
 }
 
@@ -1331,6 +1376,135 @@ export class PgCoreRepository implements CoreRepository {
       [projectId, entityId, limit],
     );
     return rows.map(toAppearanceHistory);
+  }
+
+  // ── Риси сутностей (Т2.4 В1) ─────────────────────────────────────────────
+
+  async listEntityTraits(projectId: string, entityId?: string) {
+    if (entityId && !isUuid(entityId)) return [];
+    const { rows } = await this.q(
+      'SELECT * FROM entity_traits WHERE project_id = $1 AND ($2::uuid IS NULL OR entity_id = $2) ORDER BY created_at, id',
+      [projectId, entityId ?? null],
+    );
+    return rows.map(toEntityTrait);
+  }
+
+  async upsertEntityTrait(input: EntityTraitInput) {
+    const n = checkEntityTrait(input);
+    if (!isUuid(input.entityId)) throw notFound(`Сутність «${input.entityId}»`);
+    if (input.supersedes) {
+      if (!isUuid(input.supersedes)) throw notFound(`Риса «${input.supersedes}»`);
+      const { rows: sr } = await this.q('SELECT entity_id, label FROM entity_traits WHERE project_id = $1 AND id = $2', [input.projectId, input.supersedes]);
+      if (!sr[0]) throw notFound(`Риса «${input.supersedes}»`);
+      if (sr[0].entity_id !== input.entityId || String(sr[0].label).trim().toLocaleLowerCase('uk') !== n.label.toLocaleLowerCase('uk')) {
+        throw new CoreRuleError('bad_input', 'Заміняти можна лише рису тієї самої сутності з тією самою міткою');
+      }
+    }
+    if (input.id) {
+      if (!isUuid(input.id)) throw notFound(`Риса «${input.id}»`);
+      const { rows } = await this.q(
+        `UPDATE entity_traits SET label = $3, value = $4, section_id = $5, story_time_key = $6,
+           status = $7, source = $8, supersedes = $9, created_by = $10, updated_at = now()
+         WHERE project_id = $1 AND id = $2 RETURNING *`,
+        [input.projectId, input.id, n.label, n.value, input.sectionId ?? null, input.storyTimeKey ?? null, n.status, n.source, input.supersedes ?? null, input.createdBy],
+      );
+      if (!rows[0]) throw notFound(`Риса «${input.id}»`);
+      return toEntityTrait(rows[0]);
+    }
+    const { rows } = await this.q(
+      `INSERT INTO entity_traits (project_id, entity_id, label, value, section_id, story_time_key, status, source, supersedes, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+      [input.projectId, input.entityId, n.label, n.value, input.sectionId ?? null, input.storyTimeKey ?? null, n.status, n.source, input.supersedes ?? null, input.createdBy],
+    );
+    return toEntityTrait(rows[0]);
+  }
+
+  async setEntityTraitStatus(projectId: string, id: string, status: CoreStatus, actor: CoreActor) {
+    if (!isUuid(id)) throw notFound(`Риса «${id}»`);
+    const { rows } = await this.q(
+      'UPDATE entity_traits SET status = $3, created_by = $4, updated_at = now() WHERE project_id = $1 AND id = $2 RETURNING *',
+      [projectId, id, status, actor],
+    );
+    if (!rows[0]) throw notFound(`Риса «${id}»`);
+    return toEntityTrait(rows[0]);
+  }
+
+  async deleteEntityTrait(projectId: string, id: string) {
+    if (!isUuid(id)) return false;
+    const res = await this.q('DELETE FROM entity_traits WHERE project_id = $1 AND id = $2', [projectId, id]);
+    return (res?.rowCount ?? 0) > 0;
+  }
+
+  // ── Проблеми безперервності (Т2.4 В1) ────────────────────────────────────
+
+  async listContinuityIssues(projectId: string, filter: { kind?: ContinuityIssueKind; status?: ContinuityIssueStatus; entityId?: string } = {}) {
+    if (filter.entityId && !isUuid(filter.entityId)) return [];
+    const where = ['project_id = $1'];
+    const params: unknown[] = [projectId];
+    const add = (sql: string, v: unknown) => {
+      params.push(v);
+      where.push(`${sql} = $${params.length}`);
+    };
+    if (filter.kind) add('kind', filter.kind);
+    if (filter.status) add('status', filter.status);
+    if (filter.entityId) add('entity_id', filter.entityId);
+    const { rows } = await this.q(`SELECT * FROM continuity_issues WHERE ${where.join(' AND ')} ORDER BY created_at, id`, params);
+    return rows.map(toContinuityIssue);
+  }
+
+  async getContinuityIssue(projectId: string, id: string) {
+    if (!isUuid(id)) return null;
+    const { rows } = await this.q('SELECT * FROM continuity_issues WHERE project_id = $1 AND id = $2', [projectId, id]);
+    return rows[0] ? toContinuityIssue(rows[0]) : null;
+  }
+
+  async upsertContinuityIssue(input: ContinuityIssueInput) {
+    const n = checkContinuityIssue(input);
+    if (input.entityId && !isUuid(input.entityId)) throw notFound(`Сутність «${input.entityId}»`);
+    const evidenceB = input.evidenceB ?? null;
+    if (input.id) {
+      if (!isUuid(input.id)) throw notFound(`Проблема «${input.id}»`);
+      const { rows } = await this.q(
+        `UPDATE continuity_issues SET kind = $3, entity_id = $4, summary = $5, evidence_a = $6,
+           evidence_b = COALESCE($7::jsonb, evidence_b), status = $8, source = $9,
+           checked_hash = CASE WHEN $11::boolean THEN $10 ELSE checked_hash END,
+           insufficient_data = $12, created_by = $13, updated_at = now()
+         WHERE project_id = $1 AND id = $2 RETURNING *`,
+        [
+          input.projectId, input.id, input.kind, input.entityId ?? null, n.summary, JSON.stringify(input.evidenceA),
+          evidenceB ? JSON.stringify(evidenceB) : null, n.status, n.source,
+          input.checkedHash ?? null, input.checkedHash !== undefined, n.insufficientData, input.createdBy,
+        ],
+      );
+      if (!rows[0]) throw notFound(`Проблема «${input.id}»`);
+      return toContinuityIssue(rows[0]);
+    }
+    const { rows } = await this.q(
+      `INSERT INTO continuity_issues
+         (project_id, kind, entity_id, summary, evidence_a, evidence_b, status, source, checked_hash, insufficient_data, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+      [
+        input.projectId, input.kind, input.entityId ?? null, n.summary, JSON.stringify(input.evidenceA),
+        evidenceB ? JSON.stringify(evidenceB) : null, n.status, n.source, input.checkedHash ?? null, n.insufficientData, input.createdBy,
+      ],
+    );
+    return toContinuityIssue(rows[0]);
+  }
+
+  async setContinuityIssueStatus(projectId: string, id: string, status: ContinuityIssueStatus, actor: CoreActor) {
+    if (!isUuid(id)) throw notFound(`Проблема «${id}»`);
+    const { rows } = await this.q(
+      'UPDATE continuity_issues SET status = $3, created_by = $4, updated_at = now() WHERE project_id = $1 AND id = $2 RETURNING *',
+      [projectId, id, status, actor],
+    );
+    if (!rows[0]) throw notFound(`Проблема «${id}»`);
+    return toContinuityIssue(rows[0]);
+  }
+
+  async deleteContinuityIssue(projectId: string, id: string) {
+    if (!isUuid(id)) return false;
+    const res = await this.q('DELETE FROM continuity_issues WHERE project_id = $1 AND id = $2', [projectId, id]);
+    return (res?.rowCount ?? 0) > 0;
   }
 
   // ── Збережені запити (Т1.3) ──────────────────────────────────────────────

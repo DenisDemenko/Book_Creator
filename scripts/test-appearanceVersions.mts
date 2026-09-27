@@ -258,7 +258,7 @@ if (!url) {
     await pool.query(`DROP SCHEMA IF EXISTS ${CORE_SCHEMA} CASCADE`);
     await runMigrations(pool, loadMigrations(resolveMigrationsDir()));
     const { rows } = await pool.query(`SELECT max(version) AS v FROM ${CORE_SCHEMA}.core_schema_migrations`);
-    t('схема ядра — v11 (версії зовнішності)', Number(rows[0].v) === 11, `v${rows[0].v}`);
+    t('схема ядра — не старіша за v11 (версії зовнішності)', Number(rows[0].v) >= 11, `v${rows[0].v}`);
     await suite('postgres', new PgCoreRepository(pool), 'book-p');
   } catch (err) {
     t('прогін на PostgreSQL без збоїв', false, (err as Error).stack ?? String(err));
