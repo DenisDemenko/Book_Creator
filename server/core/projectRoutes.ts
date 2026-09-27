@@ -42,7 +42,8 @@ import {
 import { ROLE_ENTITY_TYPES, appearanceOverview, cardAppearanceHash, describeLinks, expectedLinkHash, heroPortrait, refreshVisualReview, sceneVisuals, visualEntitiesOverview } from './visual';
 import { ASSET_ROLES, type AssetRole } from './types';
 import { CONTINUITY_ISSUE_KINDS, CONTINUITY_ISSUE_STATUSES, type ContinuityIssueKind, type ContinuityIssueStatus } from './types';
-import { refreshTimeContinuity, refreshTraitContradictions, syncAgeTraitFromVersion, removeAgeTraitForVersion, refreshKnowledgeContinuity, refreshPlaceContinuity, refreshObjectContinuity, AGE_TRAIT_LABEL } from './continuity';
+import { refreshTimeContinuity, refreshTraitContradictions, syncAgeTraitFromVersion, removeAgeTraitForVersion, refreshKnowledgeContinuity, refreshPlaceContinuity, refreshObjectContinuity, sectionsNeedingReview, AGE_TRAIT_LABEL } from './continuity';
+import { AI_CONTINUITY_JOB_KIND, CONTINUITY_SECTIONS_PER_REQUEST } from './continuityAi';
 import { VERSIONED_ROLES, isLinkableAssetUrl } from './rules';
 import { clampIntensity, emotionFamily } from '../../src/utils/emotionScale';
 import { LlmFallbackJevAdapter, type JevAdapter, type LlmJson } from './flc/jev';
@@ -1576,6 +1577,63 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
     if (!requireStoryEdit(req, res)) return;
     const result = await refreshObjectContinuity(repo, req.params.id);
     res.json(result);
+  }));
+
+  /**
+   * AI-2 «стан світу» (Т2.4 В6): один прохід на розділ — фонова задача на
+   * кожен. `sectionId` чи `sectionIds` (до 10), або `changed: true` — лише
+   * розділи, де є проблеми «на перегляд» (текст доказу змінився). Лише за
+   * командою автора; бюджет і частота — як у решти задач AI.
+   */
+  app.post('/api/projects/:id/continuity/ai', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const queue = deps.queue?.();
+    if (!queue) {
+      res.status(503).json({ error: 'Фонові задачі ядра зараз недоступні.', kind: 'core_unavailable' });
+      return;
+    }
+    const body = req.body ?? {};
+    let requested: string[];
+    if (body.changed === true) requested = await sectionsNeedingReview(repo, req.params.id);
+    else if (Array.isArray(body.sectionIds)) requested = body.sectionIds.map(String);
+    else if (typeof body.sectionId === 'string') requested = [body.sectionId];
+    else {
+      res.status(400).json({ error: 'Вкажіть sectionId, sectionIds або changed: true.', kind: 'bad_input' });
+      return;
+    }
+    requested = [...new Set(requested.filter(Boolean))];
+    if (requested.length > CONTINUITY_SECTIONS_PER_REQUEST) {
+      res.status(400).json({ error: `Не більше ${CONTINUITY_SECTIONS_PER_REQUEST} розділів за раз.`, kind: 'bad_input' });
+      return;
+    }
+    if (!requested.length) {
+      res.status(200).json({ jobs: [], sections: [], note: body.changed === true ? 'Проблем «на перегляд» немає — переганяти нічого.' : 'Розділів не вказано.' });
+      return;
+    }
+    const docs = new Map((await repo.listDocuments(req.params.id)).map((d) => [d.id, d]));
+    const missing = requested.filter((id) => { const d = docs.get(id); return !d || d.kind !== 'section' || !!d.deletedAt; });
+    if (missing.length) {
+      res.status(404).json({ error: `Розділу немає в ядрі книги: ${missing.join(', ')}`, kind: 'not_found', missing });
+      return;
+    }
+    const jobs: { sectionId: string; jobId: string }[] = [];
+    for (const sectionId of requested) {
+      try {
+        const { job } = await queue.enqueue({ projectId: req.params.id, kind: AI_CONTINUITY_JOB_KIND, payload: { sectionId }, createdBy: `user:${req.projectAccess!.userId}` });
+        jobs.push({ sectionId, jobId: job.id });
+      } catch (err) {
+        if (!(err instanceof JobRejectedError)) throw err;
+        const status = err.code === 'rate_limited' ? 429 : err.code === 'budget_exhausted' ? 402 : 422;
+        // Частину вже поставлено — 202 з переліком і причиною зупинки; нічого не поставлено — помилка.
+        if (!jobs.length) {
+          res.status(status).json({ error: err.message, kind: err.code, retryAfterMs: err.retryAfterMs });
+          return;
+        }
+        res.status(202).json({ jobs, sections: jobs.map((j) => j.sectionId), stopped: { kind: err.code, error: err.message, retryAfterMs: err.retryAfterMs } });
+        return;
+      }
+    }
+    res.status(202).json({ jobs, sections: jobs.map((j) => j.sectionId) });
   }));
 
   /** Змінити статус проблеми (автор: підтвердити, відхилити, позначити виправленою чи «переглянуто»). */

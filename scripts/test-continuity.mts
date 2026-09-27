@@ -28,6 +28,12 @@
  * локаціях чи предмет у двох власників одночасно, без сцени переходу чи
  * передачі (`refreshPlaceContinuity` / `refreshObjectContinuity`).
  *
+ * В6: AI-2 «стан світу» по розділу (задача `ai_continuity`, підставна модель):
+ * що бачить модель (розділ + раніші абзаци про ті самі сутності, без
+ * майбутнього), проблеми й риси — лише пропозиції з доказами; повторна
+ * перевірка лише змінених місць (відбиток абзаців-доказів → `needs_review`,
+ * одне сповіщення на сутність) і перегін AI-2 лише там (`changed: true`).
+ *
  * Без бази — у пам'яті; з CORE_TEST_DATABASE_URL — ще й на PostgreSQL
  * (схема `fusion_core` видаляється — лише тестова база!).
  *
@@ -47,6 +53,13 @@ import { refreshTimeContinuity, refreshTraitContradictions, syncAgeTraitFromVers
 import { buildTimeline } from '../server/core/timeline.ts';
 import { normalizeStoryTime } from '../src/utils/storyTime.ts';
 import type { CoreRepository } from '../server/core/types.ts';
+import { MemoryJobStore } from '../server/core/jobs/memoryJobStore.ts';
+import { PgJobStore } from '../server/core/jobs/pgJobStore.ts';
+import { JobQueue } from '../server/core/jobs/queue.ts';
+import type { JobStore } from '../server/core/jobs/types.ts';
+import type { AiGenerateInput } from '../server/core/ai/roles.ts';
+import { AI_CONTINUITY_JOB_KIND, aiContinuityJobKind, continuityTask, continuityWorldState } from '../server/core/continuityAi.ts';
+import { refreshContinuityReview } from '../server/core/continuity.ts';
 
 let pass = 0;
 let fail = 0;
@@ -549,6 +562,7 @@ async function placeObjectRuleSuite(label: string, repo: CoreRepository, P: stri
     !!oPlace && oPlace.evidenceA.sectionId === 'p1' && oPlace.evidenceB!.sectionId === 'p2' && oPlace.status === 'confirmed' &&
     /Київ/.test(oPlace.summary) && /Львів/.test(oPlace.summary) && /Києв/.test(oPlace.evidenceA.quote), `${oPlace?.status} · ${oPlace?.evidenceA.quote}`);
   const iPlace = r1.issues.find((i) => i.entityId === igor)!;
+  t('В6: у проблеми правила — відбиток абзаців-доказів (повторна перевірка змінених місць)', !!oPlace?.checkedHash && r1.issues.filter((i) => i.evidenceA.paragraphId).every((i) => !!i.checkedHash) && r1.issues.filter((i) => !i.evidenceA.paragraphId).every((i) => i.checkedHash === null));
   t('приблизний час з одного боку (p9 ≈ 2002 і p10 2002) — лише пропозиція (suggested)',
     !!iPlace && iPlace.evidenceA.sectionId === 'p9' && iPlace.evidenceB!.sectionId === 'p10' && iPlace.status === 'suggested', iPlace?.summary);
   t('негативні: Україна (вкладено: part_of / contains) не суперечить ні Києву, ні Львову; Поділ у складі Києва; сцена переходу p7 знімає p6/p8; різні роки — ні',
@@ -618,11 +632,165 @@ async function placeObjectRuleSuite(label: string, repo: CoreRepository, P: stri
   server.close();
 }
 
+async function aiContinuitySuite(label: string, repo: CoreRepository, jobStore: JobStore, P: string) {
+  console.log(`\nAI-2 «стан світу» і повторна перевірка змінених місць — Т2.4 В6 (${label}):`);
+  const prev = new Map<string, { ids: string[]; hashes: string[] }>();
+  const sec = (id: string, order: number, content: string) => {
+    const old = prev.get(id);
+    const r = reconcileParagraphIds({ sectionId: id, content, prevIds: old?.ids, prevHashes: old?.hashes });
+    prev.set(id, { ids: r.ids, hashes: r.hashes });
+    return { id, title: `Розділ ${id}`, order, content, paragraphIds: r.ids, paragraphHashes: r.hashes };
+  };
+  const s3text = (edited: boolean) =>
+    `[/character:Олена] [/location:Хата] Олена повернулась до хати під солом'яним дахом${edited ? ', де все було як завжди' : ''}.\n\nЇї карі очі сльозились.`;
+  const book = (edited: boolean): any => ({
+    id: P,
+    title: 'Книга',
+    characters: [{ id: 'c-o', name: 'Олена' }, { id: 'c-m', name: 'Марко' }],
+    chapters: [
+      { id: 'ch1', title: 'Дім', order: 0, sections: [
+        sec('s1', 0, '[/character:Олена] [/location:Хата] Олена жила в хаті з червоною дахівкою.'),
+        sec('s2', 1, '[/character:Марко] Марко читав.'),
+      ] },
+      { id: 'ch2', title: 'Повернення', order: 1, sections: [sec('s3', 0, s3text(edited))] },
+      { id: 'ch3', title: 'Далі', order: 2, sections: [sec('s4', 0, '[/character:Олена] Олена поїхала з хати назавжди.')] },
+    ],
+  });
+  await syncBookToCore(repo, { id: P, ownerId: 'u-owner', title: 'Книга', book: book(false) });
+  const olena = (await repo.resolveAlias(P, 'character', 'Олена'))!;
+  const hut = (await repo.resolveAlias(P, 'location', 'Хата'))!;
+  const [p1] = (await repo.listParagraphs(P, 's1')).map((x) => x.id);
+  const [m1] = (await repo.listParagraphs(P, 's2')).map((x) => x.id);
+  const [q1, q2] = (await repo.listParagraphs(P, 's3')).map((x) => x.id);
+  const [f1] = (await repo.listParagraphs(P, 's4')).map((x) => x.id);
+  await repo.upsertEntityTrait({ projectId: P, entityId: olena, label: 'колір очей', value: 'сірі', sectionId: 's1', createdBy: 'user:u-owner' });
+  await repo.upsertEntityTrait({ projectId: P, entityId: hut, label: 'дах', value: 'червона дахівка', sectionId: 's1', createdBy: 'user:u-owner' });
+  // Проблема автора поза зміненими місцями (s1/s2) — повторна перевірка її не чіпає.
+  const manual = await repo.upsertContinuityIssue({ projectId: P, kind: 'place', entityId: null, summary: 'Ручна проблема автора', evidenceA: { sectionId: 's1', paragraphId: p1, quote: 'хаті', entityId: null }, evidenceB: { sectionId: 's2', paragraphId: m1, quote: 'читав', entityId: null }, createdBy: 'user:u-owner' });
+
+  const w = (await continuityWorldState(repo, P, 's3'))!;
+  t('стан світу станом на s3: абзаци розділу, раніші абзаци про ті самі сутності (s1), без чужих (s2, лише Марко) і без майбутнього (s4)',
+    w.current.map((x) => x.id).join() === [q1, q2].join() && w.earlier.map((x) => x.id).join() === p1 && w.traits.length === 2,
+    JSON.stringify({ cur: w.current.length, earlier: w.earlier.map((x) => x.sectionId), traits: w.traits.map((x) => x.label) }));
+
+  const calls: AiGenerateInput[] = [];
+  let answer: (user: string) => object = () => ({ findings: [] });
+  const generate = async (input: AiGenerateInput) => {
+    calls.push(input);
+    return { text: JSON.stringify(answer(input.user)), modelId: 'fake-ai2', engine: 'fake', inputTokens: 100, outputTokens: 50, costUsd: 0.001 };
+  };
+  let clock = Date.parse('2026-09-27T10:00:00Z');
+  const q = new JobQueue(jobStore, { workerId: 'w', now: () => new Date(clock), log: () => {} });
+  q.register(AI_CONTINUITY_JOB_KIND, aiContinuityJobKind({ repo: () => repo, generate, resolveModel: async () => 'fake-ai2' }));
+  const runSection = async (sectionId: string) => {
+    const { job } = await q.enqueue({ projectId: P, kind: AI_CONTINUITY_JOB_KIND, payload: { sectionId }, createdBy: 'user:u-owner' });
+    await q.runOnce();
+    clock += 61_000;
+    return (await jobStore.get(P, job.id))!;
+  };
+  const standard = () => ({ findings: [
+    { kind: 'continuity_issue', issue_kind: 'place', entity_type: 'location', entity_name: 'Хата', summary: 'Раніше дах хати — червона дахівка, тут — солом\'яний.', paragraph_ids: [p1, q1], quote: 'під солом\'яним дахом', confidence: 0.8 },
+    { kind: 'continuity_issue', issue_kind: 'age', entity_type: 'character', entity_name: 'Олена', summary: 'Вік Олени тут не узгоджується з попереднім.', paragraph_ids: [q2], confidence: 0.3, insufficient_data: true },
+    { kind: 'continuity_issue', issue_kind: 'style', summary: 'Не той вид.', paragraph_ids: [p1, q1], confidence: 0.5 },
+    { kind: 'continuity_issue', issue_kind: 'place', summary: 'Лише про минуле.', paragraph_ids: [p1], confidence: 0.5 },
+    { kind: 'continuity_issue', issue_kind: 'place', summary: 'Посилання на майбутнє.', paragraph_ids: [f1], confidence: 0.5 },
+    { kind: 'continuity_trait', entity_type: 'location', entity_name: 'Хата', label: 'дах', value: 'солом\'яний', summary: 'Дах хати солом\'яний.', paragraph_ids: [q1], quote: 'під солом\'яним дахом', confidence: 0.9 },
+    { kind: 'continuity_trait', entity_type: 'character', entity_name: 'Олена', label: 'Колір очей', value: 'карі', summary: 'У Олени карі очі.', paragraph_ids: [q2], confidence: 0.9 },
+    { kind: 'continuity_trait', entity_type: 'character', entity_name: 'Олена', label: 'колір очей', value: 'Сірі', summary: 'У Олени сірі очі.', paragraph_ids: [q2], confidence: 0.9 },
+  ] });
+  answer = standard;
+  const j1 = await runSection('s3');
+  const r1 = j1.result as any;
+  const prompt = calls[0];
+  t('AI-2 (coreAi2Analysis): у запиті — абзаци s3 і s1, риси й підказка; s2 і майбутнього s4 немає',
+    prompt.module === 'coreAi2Analysis' && prompt.user.includes(`[${q1}]`) && prompt.user.includes(`[${p1}]`) && !prompt.user.includes(`[${m1}]`) && !prompt.user.includes(`[${f1}]`) &&
+    prompt.user.includes('Олена: «колір очей» = «сірі»') && prompt.user.includes('continuity_issue'),
+    JSON.stringify(r1 ?? j1.error));
+  t('КРИТЕРІЙ: 2 проблеми (місце з двома доказами, вік — «недостатньо даних»), 2 риси; інший вид / без абзацу розділу / майбутнє / відома риса — відкинуто',
+    r1?.issues === 2 && r1?.traits === 2 && r1?.rejected === 4, JSON.stringify(r1));
+  const aiIssues = (await repo.listContinuityIssues(P)).filter((i) => i.source === 'ai');
+  const placeAi = aiIssues.find((i) => i.kind === 'place')!;
+  const ageAi = aiIssues.find((i) => i.kind === 'age')!;
+  t('проблема «місце» від AI-2: suggested, джерело ai, доказ А — s1 (раніше), доказ Б — s3 з цитатою моделі, відбиток є, сутність — Хата',
+    !!placeAi && placeAi.status === 'suggested' && placeAi.evidenceA.paragraphId === p1 && placeAi.evidenceB?.paragraphId === q1 &&
+    placeAi.evidenceB?.quote === 'під солом\'яним дахом' && !!placeAi.checkedHash && placeAi.entityId === hut && placeAi.createdBy === 'ai:AI-2',
+    JSON.stringify(placeAi));
+  t('«вік» без другої сторони — insufficientData, доказу Б немає', !!ageAi && ageAi.insufficientData && ageAi.evidenceB === null && ageAi.evidenceA.paragraphId === q2);
+  const traits = (await repo.listEntityTraits(P)).filter((x) => x.source === 'ai');
+  t('риси від AI-2 — suggested, у розділі s3: «дах» Хати й «колір очей» Олени (карі)',
+    traits.length === 2 && traits.every((x) => x.status === 'suggested' && x.sectionId === 's3') && traits.some((x) => x.entityId === hut && x.value === 'солом\'яний') && traits.some((x) => x.entityId === olena && x.value === 'карі'));
+
+  const j2 = await runSection('s3');
+  t('повторний прогін тієї ж відповіді — нічого не дублює', (j2.result as any)?.issues === 0 && (j2.result as any)?.traits === 0 &&
+    (await repo.listContinuityIssues(P)).filter((i) => i.source === 'ai').length === 2 && (await repo.listEntityTraits(P)).filter((x) => x.source === 'ai').length === 2,
+    JSON.stringify(j2.result));
+  t('…а в запиті — «уже відомі проблеми» цього розділу', calls[1].user.includes('Уже відомі проблеми цього розділу') && calls[1].user.includes('[place]'));
+
+  // Риса AI-2, яку підтвердив автор, живить правило (В5): «дах» Хати — дахівка / солом'яний.
+  const roof = traits.find((x) => x.entityId === hut)!;
+  await repo.upsertEntityTrait({ id: roof.id, projectId: P, entityId: hut, label: roof.label, value: roof.value, sectionId: 's3', status: 'confirmed', source: 'ai', createdBy: 'user:u-owner' });
+  const rp = await refreshPlaceContinuity(repo, P);
+  t('підтверджена риса від AI-2 → правило «місце» (а) ловить «дах»: дахівка / солом\'яний', rp.parts.traits.created === 1 && rp.issues.some((i) => i.entityId === hut && /дах/.test(i.summary)), JSON.stringify(rp.parts));
+
+  // ── Повторна перевірка лише змінених місць ──
+  const before = (await repo.listNotifications(P)).length;
+  const sync2 = await syncBookToCore(repo, { id: P, ownerId: 'u-owner', title: 'Книга', book: book(true) });
+  const [q1b, q2b] = (await repo.listParagraphs(P, 's3')).map((x) => x.id);
+  t('правка першого абзацу s3: id абзаців зберігаються (та сама пара доказів)', q1b === q1 && q2b === q2);
+  const placeNow = (await repo.getContinuityIssue(P, placeAi.id))!;
+  t('КРИТЕРІЙ: змінився абзац-доказ — проблема «на перегляд»; «вік» (незмінний абзац) і ручна (s1/s2) — як були',
+    (sync2 as any).continuityNeedReview === 1 && placeNow.status === 'needs_review' &&
+    (await repo.getContinuityIssue(P, ageAi.id))!.status === 'suggested' && (await repo.getContinuityIssue(P, manual.id))!.status === 'confirmed',
+    JSON.stringify({ n: (sync2 as any).continuityNeedReview, place: placeNow.status }));
+  const notes = (await repo.listNotifications(P)).filter((n) => n.kind === 'continuity_needs_review');
+  t('одне сповіщення на сутність (Хата), з розділом', notes.length === 1 && (await repo.listNotifications(P)).length > before && (notes[0].payload as any).entityId === hut && (notes[0].payload as any).sectionIds.includes('s3'), JSON.stringify(notes.map((n) => n.message)));
+  const again = await refreshContinuityReview(repo, P, { paragraphIds: [q1] });
+  t('повторний виклик — «на перегляд» уже стоїть, нових позначок і сповіщень немає', again.flagged === 0 && again.notifications === 0);
+
+  // ── Маршрут: перегнати AI-2 лише там, де є «на перегляд» ──
+  const access = {
+    async getBookOwnerId(x: string) { return x === P ? 'u-owner' : null; },
+    async getCollabOwnerId() { return undefined; },
+    async listAcceptedInvites() { return [{ acceptedUserId: 'u-reader', role: 'reader' }]; },
+  };
+  const who: Record<string, any> = { owner: { id: 'u-owner', role: 'writer', isGuest: false }, reader: { id: 'u-reader', role: 'reader', isGuest: false } };
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => { (req as any).principal = who[String(req.headers['x-user'])]; next(); });
+  registerProjectRoutes(app, { access, repo: () => repo, coreState: () => 'ready', queue: () => q });
+  const server = app.listen(0);
+  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/projects/${P}`;
+  const post = async (body: unknown, user = 'owner') => {
+    const r = await fetch(`${baseUrl}/continuity/ai`, { method: 'POST', headers: { 'x-user': user, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    return { status: r.status, body: (await r.json().catch(() => ({}))) as any };
+  };
+  t('маршрут POST .../continuity/ai: читачу — 403; без розділу — 400; невідомий розділ — 404; більше 10 — 400',
+    (await post({ sectionId: 's3' }, 'reader')).status === 403 && (await post({})).status === 400 &&
+    (await post({ sectionId: 'nope' })).status === 404 && (await post({ sectionIds: Array.from({ length: 11 }, (_, i) => `x${i}`) })).status === 400);
+  const ch = await post({ changed: true });
+  const w2 = (await continuityWorldState(repo, P, 's3'))!;
+  t('у завданні проблема «на перегляд» — не «не повторювати», а «перевір знову» з тими самими абзацами',
+    continuityTask(w2).includes('перевір знову') && continuityTask(w2).includes(`абзаци: ${p1}, ${q1}`));
+  t('changed: true — поставлено рівно розділ з проблемою «на перегляд» (s3)', ch.status === 202 && ch.body.sections.join() === 's3' && ch.body.jobs.length === 1, JSON.stringify(ch.body));
+  await q.runOnce();
+  clock += 61_000;
+  const j3 = (await jobStore.get(P, ch.body.jobs[0].jobId))!;
+  t('AI-2 знайшов ту саму суперечність у зміненому тексті — проблему оновлено (не дубль): знову suggested, новий відбиток',
+    (j3.result as any)?.refreshed === 1 && (j3.result as any)?.issues === 0 &&
+    (await repo.getContinuityIssue(P, placeAi.id))!.status === 'suggested' && (await repo.getContinuityIssue(P, placeAi.id))!.checkedHash !== placeAi.checkedHash &&
+    (await repo.listContinuityIssues(P)).filter((i) => i.source === 'ai').length === 2,
+    JSON.stringify(j3.result ?? j3.error));
+  const none = await post({ changed: true });
+  t('«на перегляд» більше немає — changed: true нічого не ставить (200, порожньо)', none.status === 200 && none.body.jobs.length === 0);
+  server.close();
+}
+
 await suite('memory', new MemoryCoreRepository(), 'book-m');
 await timeRuleSuite('memory', new MemoryCoreRepository(), 'book-tm');
 await ageRuleSuite('memory', new MemoryCoreRepository(), 'book-am');
 await knowledgeRuleSuite('memory', new MemoryCoreRepository(), 'book-km');
 await placeObjectRuleSuite('memory', new MemoryCoreRepository(), 'book-pm');
+await aiContinuitySuite('memory', new MemoryCoreRepository(), new MemoryJobStore(), 'book-cm');
 
 const url = process.env.CORE_TEST_DATABASE_URL?.trim();
 if (!url) {
@@ -639,6 +807,7 @@ if (!url) {
     await ageRuleSuite('postgres', new PgCoreRepository(pool), 'book-ap');
     await knowledgeRuleSuite('postgres', new PgCoreRepository(pool), 'book-kp');
     await placeObjectRuleSuite('postgres', new PgCoreRepository(pool), 'book-pp');
+    await aiContinuitySuite('postgres', new PgCoreRepository(pool), new PgJobStore(pool), 'book-cp');
   } catch (err) {
     t('прогін на PostgreSQL без збоїв', false, (err as Error).stack ?? String(err));
   } finally {

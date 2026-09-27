@@ -205,6 +205,7 @@ import { CORE_EMBED_KIND, coreEmbedJobKind, scheduleCoreEmbed } from './server/c
 import { AI_PROFILE_JOB_KIND, aiProfileJobKind, studioFromBook } from './server/core/characterProfile';
 import { AI_EMOTIONS_JOB_KIND, aiEmotionsJobKind } from './server/core/emotions';
 import { AI_VISUAL_JOB_KIND, aiVisualJobKind } from './server/core/visualAi';
+import { AI_CONTINUITY_JOB_KIND, aiContinuityJobKind } from './server/core/continuityAi';
 import { assetIdFromUrl as mediaAssetIdFromUrl, readAsset as readMediaAsset } from './server/media/mediaLibraryStore';
 
 /**
@@ -6228,6 +6229,16 @@ ${JSON.stringify(bookContext || {}, null, 2)}
       loadTemplate: loadCoreAiRoleTemplate,
       loadImage: loadVisualImage,
       loadStudio: async (projectId, entity) => studioFromBook((await getStoredBookForRealtime(projectId))?.book as any, entity),
+    }),
+  );
+  // Безперервність (Т2.4 В6): AI-2 «стан світу» по розділу — суперечності й риси сутностей, на розгляд автору.
+  registerCoreJobKind(
+    AI_CONTINUITY_JOB_KIND,
+    aiContinuityJobKind({
+      repo: getCoreRepository,
+      generate: aiRoleGenerateViaCore,
+      resolveModel: (module) => resolveModuleModelId(module),
+      loadTemplate: loadCoreAiRoleTemplate,
     }),
   );
   registerCoreJobKind(

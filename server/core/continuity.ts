@@ -56,6 +56,8 @@ import { paragraphExcerpt } from './search/text';
 import { isAiActor } from './rules';
 import { overlaps } from './visual';
 import type { MentionRow, ParagraphRow } from './types';
+import { createHash } from 'node:crypto';
+import { blockHash } from '../../src/utils/paragraphIds';
 
 /** Правило пише від імені системи — не автор, не AI (не пропозиція, а обчислений факт). */
 const TIME_RULE_ACTOR = 'system:continuity-rule-time';
@@ -98,6 +100,7 @@ export async function refreshTimeContinuity(repo: CoreRepository, projectId: str
     repo.listContinuityIssues(projectId, { kind: 'time' }),
   ]);
   const eventById = new Map(timeline.events.map((e) => [e.entityId, e]));
+  const textOf = paragraphTexts(ix);
   const byPair = new Map<string, ContinuityIssueRow>();
   for (const i of existing) {
     if (i.evidenceA.entityId && i.evidenceB?.entityId) {
@@ -145,6 +148,7 @@ export async function refreshTimeContinuity(repo: CoreRepository, projectId: str
       summary: summaryFor(g.messages),
       evidenceA: evA,
       evidenceB: evB,
+      checkedHash: continuityEvidenceHash(textOf, evA, evB),
       createdBy: TIME_RULE_ACTOR,
     });
     prev ? updated++ : created++;
@@ -405,6 +409,7 @@ export async function refreshKnowledgeContinuity(repo: CoreRepository, projectId
   }
 
   const quote = (paragraphId: string) => paragraphExcerpt(ix.paragraphs.get(paragraphId)?.text ?? '', 200).trim() || '(немає власного тексту в цьому місці)';
+  const textOf = paragraphTexts(ix);
   const byKey = new Map<string, ContinuityIssueRow>();
   for (const i of existing) byKey.set(`${i.evidenceA.entityId ?? ''}|${i.evidenceA.sectionId}|${i.evidenceB?.sectionId ?? ''}`, i);
 
@@ -432,6 +437,7 @@ export async function refreshKnowledgeContinuity(repo: CoreRepository, projectId
       summary: summary.length <= 500 ? summary : summary.slice(0, 497) + '…',
       evidenceA: evA,
       evidenceB: evB,
+      checkedHash: continuityEvidenceHash(textOf, evA, evB),
       createdBy: KNOWLEDGE_RULE_ACTOR,
     });
     prev ? updated++ : created++;
@@ -573,6 +579,7 @@ async function writeSceneConflicts(
   const byKey = new Map<string, ContinuityIssueRow>();
   for (const i of existing) byKey.set(`${i.entityId ?? ''}|${[i.evidenceA.sectionId, i.evidenceB?.sectionId ?? ''].sort().join('|')}`, i);
   const quote = (paragraphId: string) => paragraphExcerpt(ix.paragraphs.get(paragraphId)?.text ?? '', 200).trim() || '(немає власного тексту в цьому місці)';
+  const textOf = paragraphTexts(ix);
 
   let created = 0;
   let updated = 0;
@@ -586,16 +593,20 @@ async function writeSceneConflicts(
     }
     const firm = hardTime(c.a.time) && hardTime(c.b.time) && !c.a.inferred && !c.b.inferred;
     const summary = summaryOf(c);
+    const evidenceA: ContinuityEvidence = { sectionId: c.a.sectionId, paragraphId: c.a.paragraphId, quote: quote(c.a.paragraphId), entityId: c.entityId };
+    const evidenceB: ContinuityEvidence = { sectionId: c.b.sectionId, paragraphId: c.b.paragraphId, quote: quote(c.b.paragraphId), entityId: c.entityId };
     const row = await repo.upsertContinuityIssue({
       id: prev?.id,
       projectId,
       kind,
       entityId: c.entityId,
       summary: summary.length <= 500 ? summary : summary.slice(0, 497) + '…',
-      evidenceA: { sectionId: c.a.sectionId, paragraphId: c.a.paragraphId, quote: quote(c.a.paragraphId), entityId: c.entityId },
-      evidenceB: { sectionId: c.b.sectionId, paragraphId: c.b.paragraphId, quote: quote(c.b.paragraphId), entityId: c.entityId },
-      // Статус, який автор уже поставив, не скидається повторним прогоном.
-      status: prev ? prev.status : firm ? 'confirmed' : 'suggested',
+      evidenceA,
+      evidenceB,
+      // Статус, який автор уже поставив, не скидається повторним прогоном; «на перегляд» (В6) —
+      // правило щойно перевірило змінений текст і знайшло суперечність знову.
+      status: prev && prev.status !== 'needs_review' ? prev.status : firm ? 'confirmed' : 'suggested',
+      checkedHash: continuityEvidenceHash(textOf, evidenceA, evidenceB),
       createdBy: actor,
     });
     prev ? updated++ : created++;
@@ -740,4 +751,97 @@ export async function refreshObjectContinuity(repo: CoreRepository, projectId: s
   const scenes = await refreshObjectSceneContinuity(repo, projectId);
   const traits = await refreshTraitContradictions(repo, projectId, { kind: 'object', entityTypes: OBJECT_ENTITY_TYPES });
   return combine(scenes, traits);
+}
+
+// ── В6: повторна перевірка лише змінених місць ──────────────────────────
+
+/**
+ * Відбиток тексту абзаців-доказів проблеми (`checkedHash`): змінився текст
+ * бодай одного з двох абзаців — відбиток інший. Доказ без абзацу (риса,
+ * В3/В5) — `null`: тексту, що міг би змінитись, немає.
+ */
+export function continuityEvidenceHash(textOf: Map<string, string>, a: ContinuityEvidence, b: ContinuityEvidence | null): string | null {
+  const ids = [a.paragraphId, b?.paragraphId].filter((x): x is string => !!x);
+  if (!ids.length) return null;
+  const h = createHash('sha256');
+  for (const id of ids) h.update(`${id}\u0000${blockHash(textOf.get(id) ?? '')}\u0001`);
+  return h.digest('hex').slice(0, 24);
+}
+
+/** Текст живих абзаців книги — для відбитка доказів. */
+function paragraphTexts(ix: BookIndex): Map<string, string> {
+  return new Map([...ix.paragraphs.values()].filter((p) => !p.deletedAt).map((p) => [p.id, p.text]));
+}
+
+/** Хто позначає проблему «на перегляд» (зміна статусу пише актора в `createdBy`). */
+const REVIEW_ACTOR = 'system:continuity-review';
+
+export interface ContinuityReviewResult {
+  /** Позначено «на перегляд»: текст абзацу-доказу змінився чи абзац видалено. */
+  flagged: number;
+  /** Проблеми без відбитка (знайдені до В6) — прийнято поточний текст як перевірений. */
+  baselined: number;
+  notifications: number;
+}
+
+/**
+ * Повторна перевірка лише змінених місць (В6, за зразком
+ * `visual.ts: refreshVisualReview`): для відкритих проблем
+ * (`suggested`/`confirmed`), чиї абзаци-докази серед `paragraphIds`
+ * (типово — змінені синхронізацією; без переліку — усі), відбиток тексту
+ * рахується наново: збігся — нічого, розбігся — `needs_review` і ОДНЕ
+ * сповіщення на сутність (не на кожну проблему й не на весь розділ).
+ * Вирішені автором (`dismissed`/`resolved`) не чіпаються — виправлення
+ * тексту після `resolved` саме так і мало статись.
+ */
+export async function refreshContinuityReview(repo: CoreRepository, projectId: string, opts: { paragraphIds?: string[] } = {}): Promise<ContinuityReviewResult> {
+  const out: ContinuityReviewResult = { flagged: 0, baselined: 0, notifications: 0 };
+  const scope = opts.paragraphIds ? new Set(opts.paragraphIds) : null;
+  const issues = (await repo.listContinuityIssues(projectId)).filter((i) => {
+    if (i.status !== 'suggested' && i.status !== 'confirmed') return false;
+    const ids = [i.evidenceA.paragraphId, i.evidenceB?.paragraphId].filter((x): x is string => !!x);
+    return ids.length > 0 && (!scope || ids.some((id) => scope.has(id)));
+  });
+  if (!issues.length) return out;
+  const textOf = paragraphTexts(await bookIndex(repo, projectId));
+  const flaggedBy = new Map<string, ContinuityIssueRow[]>();
+  for (const i of issues) {
+    const now = continuityEvidenceHash(textOf, i.evidenceA, i.evidenceB);
+    if (i.checkedHash == null) {
+      // До В6 відбитка не писали. Змінений абзац без відбитка — не знаємо, з чим звіряли: на перегляд.
+      if (scope) {
+        await repo.setContinuityIssueStatus(projectId, i.id, 'needs_review', REVIEW_ACTOR);
+        out.flagged++;
+        flaggedBy.set(i.entityId ?? '', [...(flaggedBy.get(i.entityId ?? '') ?? []), i]);
+      } else {
+        await repo.upsertContinuityIssue({ id: i.id, projectId, kind: i.kind, entityId: i.entityId, summary: i.summary, evidenceA: i.evidenceA, evidenceB: i.evidenceB, insufficientData: i.insufficientData, status: i.status, source: i.source, checkedHash: now, createdBy: i.createdBy });
+        out.baselined++;
+      }
+    } else if (i.checkedHash !== now) {
+      await repo.setContinuityIssueStatus(projectId, i.id, 'needs_review', REVIEW_ACTOR);
+      out.flagged++;
+      flaggedBy.set(i.entityId ?? '', [...(flaggedBy.get(i.entityId ?? '') ?? []), i]);
+    }
+  }
+  if (flaggedBy.size) {
+    const names = new Map((await repo.listEntities(projectId)).map((e) => [e.id, e.name]));
+    for (const [entityId, list] of flaggedBy) {
+      const who = entityId ? `«${names.get(entityId) ?? '?'}»` : 'без головної сутності';
+      await repo.addNotification({
+        projectId,
+        kind: 'continuity_needs_review',
+        message: `Текст доказів змінився — проблеми безперервності ${who} на перегляд: ${list.length}`,
+        paragraphIds: [...new Set(list.flatMap((i) => [i.evidenceA.paragraphId, i.evidenceB?.paragraphId]).filter((x): x is string => !!x))],
+        payload: { entityId: entityId || null, issueIds: list.map((i) => i.id), sectionIds: [...new Set(list.flatMap((i) => [i.evidenceA.sectionId, i.evidenceB?.sectionId]).filter(Boolean))] },
+      });
+      out.notifications++;
+    }
+  }
+  return out;
+}
+
+/** Розділи, де є проблеми «на перегляд» — їх і переганяє AI-2 командою «змінені місця». */
+export async function sectionsNeedingReview(repo: CoreRepository, projectId: string): Promise<string[]> {
+  const issues = await repo.listContinuityIssues(projectId, { status: 'needs_review' });
+  return [...new Set(issues.flatMap((i) => [i.evidenceB?.sectionId ?? i.evidenceA.sectionId]))];
 }
