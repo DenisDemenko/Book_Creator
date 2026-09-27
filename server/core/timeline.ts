@@ -102,7 +102,7 @@ const fromPoint = (p: TimePointRow): TimeValue => ({
   status: p.status,
 });
 
-interface SceneScan {
+export interface SceneScan {
   scenes: TimelineScene[];
   bySection: Map<string, TimelineScene>;
   mentions: MentionRow[];
@@ -111,7 +111,8 @@ interface SceneScan {
   sectionOfParagraph: Map<string, string>;
 }
 
-async function scanScenes(repo: CoreRepository, projectId: string, points: TimePointRow[], studioOrder?: Map<string, number>): Promise<SceneScan> {
+/** Т2.4 В4: `scanScenes` — теж придатний поза `characterKnowledge()` (правило «знання»). */
+export async function scanScenes(repo: CoreRepository, projectId: string, points: TimePointRow[], studioOrder?: Map<string, number>): Promise<SceneScan> {
   const [ix, entitiesAll] = await Promise.all([bookIndex(repo, projectId), repo.listEntities(projectId)]);
   const entities = new Map(entitiesAll.filter((e) => e.status !== 'rejected').map((e) => [e.id, e]));
   const sections = [...ix.docs.values()]
@@ -398,4 +399,81 @@ export async function characterKnowledge(repo: CoreRepository, projectId: string
       ? 'Відомо те, що сталося раніше за цю сцену в часі світу (сцени без часу — раніше в книзі).'
       : 'У сцени немає часу у світі — відомо те, що розказано раніше в книзі.',
   };
+}
+
+// ── Т2.4 В4: узагальнення characterKnowledge() для правила «знання» ────────
+
+/** Сцена (чи будь-що з тим самим часом і місцем у розкритті) `a` раніша за `b` (час світу, а якщо його нема — порядок розкриття книги). */
+export function sceneIsBefore(a: { time: TimeValue | null; narrativeIndex: number }, b: { time: TimeValue | null; narrativeIndex: number }): boolean {
+  const ak = a.time?.key;
+  const bk = b.time?.key;
+  if (ak != null && bk != null) return ak < bk || (ak === bk && a.narrativeIndex < b.narrativeIndex);
+  return a.narrativeIndex < b.narrativeIndex;
+}
+
+export interface KnowledgeCandidate {
+  characterId: string;
+  characterName: string;
+  entityId: string;
+  entityName: string;
+  entityKind: 'revelation' | 'event';
+  /** «subject» — герой явно позначений суб'єктом розкриття/події (офіційний момент); «present» — герой лише присутній у сцені, де сутність згадано. */
+  via: 'subject' | 'present';
+  sectionId: string;
+  paragraphId: string;
+  narrativeIndex: number;
+  time: TimeValue | null;
+}
+
+/**
+ * Усі кандидати «герой ↔ факт» для ВСІХ героїв одразу (на відміну від
+ * `characterKnowledge()`, що бере одного героя й одну цільову сцену):
+ * `subject` — сцени, де тег `[/revelation:… @Герой]` чи подія прямо
+ * позначає героя суб'єктом (офіційний момент, коли він про це дізнається);
+ * `present` — БУДЬ-яка згадка розкриття чи події в сцені, де герой є серед
+ * персонажів сцени (байдуже, хто суб'єкт тегу, чи він є взагалі) — «герой
+ * був у кімнаті, коли про це говорили». Основа правила «знання» (В4):
+ * `present`-кандидат раніший за `subject`-момент того самого героя й факту
+ * — суперечність (герой «знає»/присутній до офіційного дізнання).
+ */
+export async function knowledgeCandidates(repo: CoreRepository, projectId: string, opts: TimelineOptions = {}): Promise<KnowledgeCandidate[]> {
+  const points = await repo.listTimePoints(projectId);
+  const scan = await scanScenes(repo, projectId, points, opts.studioOrder);
+  const presentIn = new Map<string, string[]>();
+  for (const s of scan.scenes) presentIn.set(s.sectionId, s.characters.map((c) => c.id));
+
+  const out: KnowledgeCandidate[] = [];
+  const seen = new Set<string>();
+  const addItem = (characterId: string, m: MentionRow, entityId: string, kind: KnowledgeCandidate['entityKind'], via: KnowledgeCandidate['via']) => {
+    const hero = scan.entities.get(characterId);
+    const e = scan.entities.get(entityId);
+    const sectionId = scan.sectionOfParagraph.get(m.paragraphId);
+    const s = sectionId ? scan.bySection.get(sectionId) : undefined;
+    if (!hero || hero.type !== 'character' || !e || !s) return;
+    const key = `${characterId}|${entityId}|${s.sectionId}|${via}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({
+      characterId,
+      characterName: hero.name,
+      entityId: e.id,
+      entityName: e.name,
+      entityKind: kind,
+      via,
+      sectionId: s.sectionId,
+      paragraphId: m.paragraphId,
+      narrativeIndex: s.narrativeIndex,
+      time: s.time,
+    });
+  };
+  for (const m of scan.mentions) {
+    const e = scan.entities.get(m.entityId);
+    if (!e || !EVENT_TYPES.has(e.type)) continue;
+    const kind: KnowledgeCandidate['entityKind'] = e.type === 'revelation' ? 'revelation' : 'event';
+    if (m.subjectEntityId) addItem(m.subjectEntityId, m, e.id, kind, 'subject');
+    const sectionId = scan.sectionOfParagraph.get(m.paragraphId);
+    const present = sectionId ? presentIn.get(sectionId) ?? [] : [];
+    for (const charId of present) addItem(charId, m, e.id, kind, 'present');
+  }
+  return out;
 }

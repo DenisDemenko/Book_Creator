@@ -42,7 +42,7 @@ import {
 import { ROLE_ENTITY_TYPES, appearanceOverview, cardAppearanceHash, describeLinks, expectedLinkHash, heroPortrait, refreshVisualReview, sceneVisuals, visualEntitiesOverview } from './visual';
 import { ASSET_ROLES, type AssetRole } from './types';
 import { CONTINUITY_ISSUE_KINDS, CONTINUITY_ISSUE_STATUSES, type ContinuityIssueKind, type ContinuityIssueStatus } from './types';
-import { refreshTimeContinuity, refreshTraitContradictions, syncAgeTraitFromVersion, removeAgeTraitForVersion, AGE_TRAIT_LABEL } from './continuity';
+import { refreshTimeContinuity, refreshTraitContradictions, syncAgeTraitFromVersion, removeAgeTraitForVersion, refreshKnowledgeContinuity, AGE_TRAIT_LABEL } from './continuity';
 import { VERSIONED_ROLES, isLinkableAssetUrl } from './rules';
 import { clampIntensity, emotionFamily } from '../../src/utils/emotionScale';
 import { LlmFallbackJevAdapter, type JevAdapter, type LlmJson } from './flc/jev';
@@ -1554,6 +1554,13 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
   app.post('/api/projects/:id/continuity/rules/age', withRepo(async (repo, req, res) => {
     if (!requireStoryEdit(req, res)) return;
     const result = await refreshTraitContradictions(repo, req.params.id, { label: AGE_TRAIT_LABEL, kind: 'age' });
+    res.json(result);
+  }));
+
+  /** Правило «знання» (Т2.4 В4): герой присутній там, де факт згадано, раніше за офіційний момент дізнання → проблеми безперервності (kind: knowledge). Лише за командою. */
+  app.post('/api/projects/:id/continuity/rules/knowledge', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const result = await refreshKnowledgeContinuity(repo, req.params.id);
     res.json(result);
   }));
 

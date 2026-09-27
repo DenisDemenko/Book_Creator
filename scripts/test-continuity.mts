@@ -17,7 +17,13 @@
  * без `supersedes` — суперечність) плюс перенесення `appearance_versions.age`
  * у рису «вік» (`syncAgeTraitFromVersion`/`refreshTraitContradictions`).
  *
- * Інші правила (місце, предмет, знання) — наступні етапи В4–В5.
+ * В4: правило «знання» — узагальнення `characterKnowledge()`: `timeline.ts:
+ * knowledgeCandidates()` дає всіх кандидатів «герой ↔ факт» одразу («subject»
+ * — офіційний момент дізнання, «present» — герой лише в сцені, де факт
+ * згадано); `present` раніший за власний `subject` того самого героя й
+ * факту — суперечність (`refreshKnowledgeContinuity`).
+ *
+ * Інші правила (місце, предмет) — наступний етап В5.
  *
  * Без бази — у пам'яті; з CORE_TEST_DATABASE_URL — ще й на PostgreSQL
  * (схема `fusion_core` видаляється — лише тестова база!).
@@ -34,7 +40,7 @@ import { createCorePool } from '../server/core/index.ts';
 import { CORE_SCHEMA, loadMigrations, resolveMigrationsDir, runMigrations } from '../server/core/migrate.ts';
 import { reconcileParagraphIds } from '../src/utils/paragraphIds.ts';
 import { CoreRuleError, checkEntityTrait, checkContinuityIssue } from '../server/core/rules.ts';
-import { refreshTimeContinuity, refreshTraitContradictions, syncAgeTraitFromVersion, removeAgeTraitForVersion, AGE_TRAIT_LABEL } from '../server/core/continuity.ts';
+import { refreshTimeContinuity, refreshTraitContradictions, syncAgeTraitFromVersion, removeAgeTraitForVersion, refreshKnowledgeContinuity, AGE_TRAIT_LABEL } from '../server/core/continuity.ts';
 import { buildTimeline } from '../server/core/timeline.ts';
 import { normalizeStoryTime } from '../src/utils/storyTime.ts';
 import type { CoreRepository } from '../server/core/types.ts';
@@ -389,9 +395,88 @@ async function ageRuleSuite(label: string, repo: CoreRepository, P: string) {
   server.close();
 }
 
+async function knowledgeRuleSuite(label: string, repo: CoreRepository, P: string) {
+  console.log(`\nПравило «знання» — Т2.4 В4 (${label}):`);
+  const sec = (id: string, order: number, content: string) => {
+    const r = reconcileParagraphIds({ sectionId: id, content });
+    return { id, title: `Розділ ${id}`, order, content, paragraphIds: r.ids, paragraphHashes: r.hashes };
+  };
+  const book: any = {
+    id: P,
+    title: 'Книга',
+    characters: [{ id: 'c-o', name: 'Олена' }, { id: 'c-m', name: 'Марко' }, { id: 'c-i', name: 'Ігор' }],
+    chapters: [
+      { id: 'ch1', title: 'Тоді', order: 0, sections: [
+        sec('s1', 0, '[/character:Марко] [/character:Олена] [/character:Ігор] Марко пошепки натякнув на [/revelation:Таємниця @Марко], а Олена мовчки слухала.'),
+        sec('s1b', 1, '[/character:Марко] [/character:Олена] Марко знову натякнув на [/revelation:Таємниця @Марко] за вечерею.'),
+        sec('s1c', 2, '[/character:Марко] [/character:Олена] Марко закричав, що почався [/event:Напад @Марко], і Олена теж побігла.'),
+      ] },
+      { id: 'ch2', title: 'Правда', order: 1, sections: [
+        sec('s2', 0, '[/character:Олена] Нарешті Олені сказали правду: [/revelation:Таємниця @Олена].'),
+      ] },
+      { id: 'ch3', title: 'Пізніше', order: 2, sections: [
+        sec('s3', 0, '[/character:Марко] [/character:Олена] Марко ще раз згадав [/revelation:Таємниця @Марко], Олена кивнула.'),
+      ] },
+      { id: 'ch4', title: 'Офіційно', order: 3, sections: [
+        sec('s4', 0, '[/character:Олена] Олені нарешті офіційно повідомили про [/event:Напад @Олена].'),
+      ] },
+    ],
+  };
+  await syncBookToCore(repo, { id: P, ownerId: 'u-owner', title: 'Книга', book });
+  const olena = (await repo.resolveAlias(P, 'character', 'Олена'))!;
+  const igor = (await repo.resolveAlias(P, 'character', 'Ігор'))!;
+  const secret = (await repo.resolveAlias(P, 'revelation', 'Таємниця'))!;
+  const attack = (await repo.resolveAlias(P, 'event', 'Напад'))!;
+
+  const r1 = await refreshKnowledgeContinuity(repo, P);
+  t('КРИТЕРІЙ: 2 пари «герой+факт» з витоком (Олена: «Таємниця» і «Напад»), Ігоря й Марка не займає',
+    r1.checked === 2 && r1.created === 2 && r1.issues.length === 2 && r1.issues.every((i) => i.kind === 'knowledge' && i.entityId === olena),
+    JSON.stringify(r1.issues.map((i) => i.summary)));
+  const secretIssue = r1.issues.find((i) => i.evidenceB!.sectionId === 's2')!;
+  const attackIssue = r1.issues.find((i) => i.evidenceB!.sectionId === 's4')!;
+  t('«Таємниця»: доказ А — найраніша сцена-виток (s1, дві такі), доказ Б — офіційне дізнання (s2), лічильник у описі',
+    secretIssue.evidenceA.sectionId === 's1' && secretIssue.evidenceA.entityId === olena && secretIssue.evidenceB!.entityId === olena &&
+    /Таємниця/.test(secretIssue.summary) && /ще 1 така сцена/.test(secretIssue.summary), secretIssue.summary);
+  t('«Напад»: та сама функція ловить і звичайну подію, не лише розкриття — доказ А s1c, доказ Б s4',
+    attackIssue.evidenceA.sectionId === 's1c' && attackIssue.evidenceB!.sectionId === 's4' && !/ще/.test(attackIssue.summary), attackIssue.summary);
+  t('негативні приклади: Ігор (немає власного офіційного дізнання) і сцена s3 (Олена вже знає) — жодної зайвої проблеми',
+    (await repo.listContinuityIssues(P, { kind: 'knowledge' })).length === 2);
+
+  const r2 = await refreshKnowledgeContinuity(repo, P);
+  t('повторний прогін — оновлює ті самі дві проблеми, не дублює', r2.created === 0 && r2.updated === 2 && (await repo.listContinuityIssues(P, { kind: 'knowledge' })).length === 2);
+
+  await repo.setContinuityIssueStatus(P, secretIssue.id, 'dismissed', 'user:u-owner');
+  const r3 = await refreshKnowledgeContinuity(repo, P);
+  t('автор відхилив одну — не воскресає, друга й далі оновлюється', r3.created === 0 && r3.updated === 1 && r3.skipped >= 1 && (await repo.getContinuityIssue(P, secretIssue.id))!.status === 'dismissed');
+
+  // ── Маршрут ──
+  const access = {
+    async getBookOwnerId(x: string) { return x === P ? 'u-owner' : null; },
+    async getCollabOwnerId() { return undefined; },
+    async listAcceptedInvites() { return [{ acceptedUserId: 'u-reader', role: 'reader' }]; },
+  };
+  const who: Record<string, any> = { owner: { id: 'u-owner', role: 'writer', isGuest: false }, reader: { id: 'u-reader', role: 'reader', isGuest: false } };
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => { (req as any).principal = who[String(req.headers['x-user'])]; next(); });
+  registerProjectRoutes(app, { access, repo: () => repo, coreState: () => 'ready' });
+  const server = app.listen(0);
+  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/projects/${P}`;
+  const call = async (method: string, path: string, user: string) => {
+    const r = await fetch(`${baseUrl}${path}`, { method, headers: { 'x-user': user } });
+    return { status: r.status, body: (await r.json().catch(() => ({}))) as any };
+  };
+  t('маршрут POST .../continuity/rules/knowledge: читачу — 403', (await call('POST', '/continuity/rules/knowledge', 'reader')).status === 403);
+  const ran = await call('POST', '/continuity/rules/knowledge', 'owner');
+  t('маршрут: власнику — 200', ran.status === 200 && ran.body.skipped >= 1);
+  server.close();
+  void igor; void attack; void secret;
+}
+
 await suite('memory', new MemoryCoreRepository(), 'book-m');
 await timeRuleSuite('memory', new MemoryCoreRepository(), 'book-tm');
 await ageRuleSuite('memory', new MemoryCoreRepository(), 'book-am');
+await knowledgeRuleSuite('memory', new MemoryCoreRepository(), 'book-km');
 
 const url = process.env.CORE_TEST_DATABASE_URL?.trim();
 if (!url) {
@@ -406,6 +491,7 @@ if (!url) {
     await suite('postgres', new PgCoreRepository(pool), 'book-p');
     await timeRuleSuite('postgres', new PgCoreRepository(pool), 'book-tp');
     await ageRuleSuite('postgres', new PgCoreRepository(pool), 'book-ap');
+    await knowledgeRuleSuite('postgres', new PgCoreRepository(pool), 'book-kp');
   } catch (err) {
     t('прогін на PostgreSQL без збоїв', false, (err as Error).stack ?? String(err));
   } finally {

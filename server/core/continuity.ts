@@ -24,13 +24,24 @@
  * перетинаються главами й різний вік — лишаються не зв'язаними, і
  * `trait_contradiction` справедливо це ловить.
  *
+ * В4 — «знання»: узагальнення `characterKnowledge()` (Т2.1, ТЗ-H) —
+ * той сам робив «що герой законно знає станом на ОДНУ сцену»; тут —
+ * `timeline.ts: knowledgeCandidates()` рахує це одразу для ВСІХ героїв:
+ * `subject`-кандидат — сцена, де тег розкриття/події прямо позначає
+ * героя суб'єктом (офіційний момент дізнання); `present`-кандидат — БУДЬ-
+ * яка згадка того самого факту в сцені, де герой лише серед персонажів
+ * сцени. Правило: `present`-кандидат раніший (час світу, а без нього —
+ * порядок розкриття) за власний `subject`-момент того самого героя й
+ * факту — герой «в кімнаті», де про факт говорять, до того, як він
+ * офіційно про нього дізнається — суперечність (kind: 'knowledge').
+ *
  * Автор запускає перевірку командою (як «Розпізнати» в Медіатеці,
  * Т2.3 В4) — не на кожній синхронізації книги: побудова хронології не
  * дешева, і час — не єдине, що могло змінитись між синхронізаціями.
  */
 import type { CoreRepository, ContinuityEvidence, ContinuityIssueRow, ContinuityIssueKind, EntityTraitRow } from './types';
 import type { AppearanceVersionRow } from './types';
-import { buildTimeline, type TimelineEvent, type TimelineWarning } from './timeline';
+import { buildTimeline, knowledgeCandidates, sceneIsBefore, type TimelineEvent, type KnowledgeCandidate } from './timeline';
 import { bookIndex, type BookIndex } from './characterProfile';
 import { paragraphExcerpt } from './search/text';
 import { isAiActor } from './rules';
@@ -307,4 +318,96 @@ export async function refreshTraitContradictions(repo: CoreRepository, projectId
     }
   }
   return { checked, created, updated, skipped, issues };
+}
+
+// ── В4: правило «знання» ────────────────────────────────────────────────
+
+/** Правило пише від імені системи — обчислений факт, не пропозиція. */
+const KNOWLEDGE_RULE_ACTOR = 'system:continuity-rule-knowledge';
+
+export interface RefreshKnowledgeContinuityResult {
+  /** Скільки пар «герой + факт» із «витоком» (present раніше за subject) перевірено. */
+  checked: number;
+  created: number;
+  updated: number;
+  /** Уже вирішено автором (dismissed/resolved). */
+  skipped: number;
+  issues: ContinuityIssueRow[];
+}
+
+/**
+ * Перевірка правила «знання» (В4): `knowledgeCandidates()` дає всіх
+ * кандидатів «герой ↔ факт» одразу (усі герої, один прохід); тут —
+ * групуємо за парою «герой + факт», знаходимо офіційний момент дізнання
+ * (найраніший `subject`-кандидат — тег розкриття чи події прямо на
+ * героя) і будь-які `present`-кандидати РАНІШЕ за нього (той самий факт
+ * згадано в сцені, де герой лише присутній) — це і є суперечність.
+ * Кілька таких сцен для тієї самої пари — одна проблема (найраніша —
+ * доказ А, решта — лічильник в описі), не декілька. Пара без офіційного
+ * `subject`-моменту взагалі — не оцінюється (нема з чим порівнювати,
+ * не помилка, а просто нетегована сутність).
+ */
+export async function refreshKnowledgeContinuity(repo: CoreRepository, projectId: string): Promise<RefreshKnowledgeContinuityResult> {
+  const [candidates, ix, existing] = await Promise.all([
+    knowledgeCandidates(repo, projectId),
+    bookIndex(repo, projectId),
+    repo.listContinuityIssues(projectId, { kind: 'knowledge' }),
+  ]);
+
+  const genesis = new Map<string, KnowledgeCandidate>();
+  for (const c of candidates) {
+    if (c.via !== 'subject') continue;
+    const key = `${c.characterId}|${c.entityId}`;
+    const prev = genesis.get(key);
+    if (!prev || sceneIsBefore(c, prev)) genesis.set(key, c);
+  }
+
+  const leaks = new Map<string, { genesis: KnowledgeCandidate; earliest: KnowledgeCandidate; count: number }>();
+  for (const c of candidates) {
+    if (c.via !== 'present') continue;
+    const key = `${c.characterId}|${c.entityId}`;
+    const g = genesis.get(key);
+    if (!g || g.sectionId === c.sectionId || !sceneIsBefore(c, g)) continue;
+    const cur = leaks.get(key);
+    if (!cur) leaks.set(key, { genesis: g, earliest: c, count: 1 });
+    else {
+      cur.count++;
+      if (sceneIsBefore(c, cur.earliest)) cur.earliest = c;
+    }
+  }
+
+  const quote = (paragraphId: string) => paragraphExcerpt(ix.paragraphs.get(paragraphId)?.text ?? '', 200).trim() || '(немає власного тексту в цьому місці)';
+  const byKey = new Map<string, ContinuityIssueRow>();
+  for (const i of existing) byKey.set(`${i.evidenceA.entityId ?? ''}|${i.evidenceA.sectionId}|${i.evidenceB?.sectionId ?? ''}`, i);
+
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+  const issues: ContinuityIssueRow[] = [];
+  for (const leak of leaks.values()) {
+    const { genesis: g, earliest: w, count } = leak;
+    const evA: ContinuityEvidence = { sectionId: w.sectionId, paragraphId: w.paragraphId, quote: quote(w.paragraphId), entityId: w.characterId };
+    const evB: ContinuityEvidence = { sectionId: g.sectionId, paragraphId: g.paragraphId, quote: quote(g.paragraphId), entityId: g.characterId };
+    const key = `${w.characterId}|${w.sectionId}|${g.sectionId}`;
+    const prev = byKey.get(key);
+    if (prev && (prev.status === 'dismissed' || prev.status === 'resolved')) {
+      skipped++;
+      continue;
+    }
+    const extra = count > 1 ? ` (і ще ${count - 1} така сцена)` : '';
+    const summary = `Сутність «${w.characterName}» присутня в сцені зі згадкою «${w.entityName}»${extra}, раніше за сцену, де це стає їй офіційно відомо.`;
+    const row = await repo.upsertContinuityIssue({
+      id: prev?.id,
+      projectId,
+      kind: 'knowledge',
+      entityId: w.characterId,
+      summary: summary.length <= 500 ? summary : summary.slice(0, 497) + '…',
+      evidenceA: evA,
+      evidenceB: evB,
+      createdBy: KNOWLEDGE_RULE_ACTOR,
+    });
+    prev ? updated++ : created++;
+    issues.push(row);
+  }
+  return { checked: leaks.size, created, updated, skipped, issues };
 }
