@@ -1,12 +1,18 @@
 /**
- * Безперервність — таблиці, права, критерій сторінки 8 — Т2.4 В1 (журнал #TBD).
+ * Безперервність — таблиці, права, критерій сторінки 8 (Т2.4 В1) і правило
+ * «час» (Т2.4 В2).
  *
- * Критерій етапу (PLAN_CONTINUITY.md §3 В1): список проблем безперервності
+ * Критерій етапу В1 (PLAN_CONTINUITY.md §3): список проблем безперервності
  * зі статусами й обома доказами, автор змінює статус; риси сутностей
- * (мітка → значення) — автор вписує на картці. Правила самі (час, вік,
- * місце, предмет, знання) — наступні етапи В2–В5; тут — лише фундамент:
- * таблиці (міграція 0012), `CoreRepository`, дзеркало CHECK-обмежень у
- * `rules.ts`, маршрути.
+ * (мітка → значення) — автор вписує на картці. Фундамент: таблиці
+ * (міграція 0012), `CoreRepository`, дзеркало CHECK-обмежень у `rules.ts`,
+ * маршрути.
+ *
+ * В2: `TimelineWarning` (уже обчислює `timeline.ts` для сторінки 6) →
+ * `continuity_issues` (kind: 'time') — перепаковка без нової логіки
+ * виявлення (`server/core/continuity.ts: refreshTimeContinuity`).
+ *
+ * Інші правила (вік, місце, предмет, знання) — наступні етапи В3–В5.
  *
  * Без бази — у пам'яті; з CORE_TEST_DATABASE_URL — ще й на PostgreSQL
  * (схема `fusion_core` видаляється — лише тестова база!).
@@ -23,6 +29,9 @@ import { createCorePool } from '../server/core/index.ts';
 import { CORE_SCHEMA, loadMigrations, resolveMigrationsDir, runMigrations } from '../server/core/migrate.ts';
 import { reconcileParagraphIds } from '../src/utils/paragraphIds.ts';
 import { CoreRuleError, checkEntityTrait, checkContinuityIssue } from '../server/core/rules.ts';
+import { refreshTimeContinuity } from '../server/core/continuity.ts';
+import { buildTimeline } from '../server/core/timeline.ts';
+import { normalizeStoryTime } from '../src/utils/storyTime.ts';
 import type { CoreRepository } from '../server/core/types.ts';
 
 let pass = 0;
@@ -187,7 +196,94 @@ async function suite(label: string, repo: CoreRepository, P: string) {
   server.close();
 }
 
+async function timeRuleSuite(label: string, repo: CoreRepository, P: string) {
+  console.log(`\nПравило «час» — Т2.4 В2 (${label}):`);
+  const sec = (id: string, order: number, content: string) => {
+    const r = reconcileParagraphIds({ sectionId: id, content });
+    return { id, title: `Розділ ${id}`, order, content, paragraphIds: r.ids, paragraphHashes: r.hashes };
+  };
+  const book: any = {
+    id: P,
+    title: 'Книга',
+    characters: [{ id: 'c-o', name: 'Олена' }, { id: 'c-m', name: 'Марко' }],
+    chapters: [
+      { id: 'ch1', title: 'Тоді', order: 0, sections: [
+        sec('s1', 0, '[/character:Олена] [/event:Пожежа] Маленька Олена бачила пожежу.'),
+        sec('s2', 1, '[/character:Марко] [/event:Суд] Марко прийшов на суд.'),
+      ] },
+      { id: 'ch2', title: 'Спокійно', order: 1, sections: [
+        sec('s3', 0, '[/character:Олена] [/event:Народження] Олена народилась.'),
+        sec('s4', 1, '[/character:Олена] [/event:Весілля] Олена вийшла заміж.'),
+      ] },
+    ],
+  };
+  await syncBookToCore(repo, { id: P, ownerId: 'u-owner', title: 'Книга', book });
+  const id = async (type: string, name: string) => (await repo.resolveAlias(P, type, name))!;
+  const fire = await id('event', 'Пожежа');
+  const trial = await id('event', 'Суд');
+  const birth = await id('event', 'Народження');
+  const wedding = await id('event', 'Весілля');
+  const put = (subjectKind: 'scene' | 'event', subjectId: string, start: string) => {
+    const v = normalizeStoryTime({ kind: 'exact', start, end: null }) as any;
+    return repo.upsertTimePoint({ projectId: P, subjectKind, subjectId, kind: v.kind, start: v.start, end: v.end, sortKey: v.key, endKey: v.endKey, label: v.label, createdBy: 'user:u-owner' });
+  };
+  await put('scene', 's1', '1998');
+  await put('scene', 's2', '2024');
+  await put('event', trial, '2024-03-10');
+  // Суперечність: «Суд» позначено як «передує» і «одночасно з» «Пожежею», і навпаки — та сама пара, три попередження (order, overlap, cycle).
+  await repo.createRelation({ projectId: P, type: 'precedes', fromId: trial, toId: fire, evidence: [], status: 'confirmed', createdBy: 'user:u-owner' });
+  await repo.createRelation({ projectId: P, type: 'overlaps', fromId: fire, toId: trial, evidence: [], status: 'confirmed', createdBy: 'user:u-owner' });
+  await repo.createRelation({ projectId: P, type: 'follows', fromId: trial, toId: fire, evidence: [], status: 'confirmed', createdBy: 'user:u-owner' });
+  // Без суперечності: «Народження» справді передує «Весіллю» (обидва — лише час сцени).
+  await put('scene', 's3', '1990');
+  await put('scene', 's4', '2015');
+  await repo.createRelation({ projectId: P, type: 'precedes', fromId: birth, toId: wedding, evidence: [], status: 'confirmed', createdBy: 'user:u-owner' });
+
+  const before = (await buildTimeline(repo, P)).warnings;
+  t('фікстура: 3 попередження (order/overlap/cycle), усі — та сама пара «Суд»/«Пожежа»', before.length === 3 && before.every((w) => [trial, fire].every((x) => w.subjects.includes(x))), JSON.stringify(before.map((w) => w.kind)));
+
+  const r1 = await refreshTimeContinuity(repo, P);
+  t('КРИТЕРІЙ: перевірка перепаковує суперечності хронології — 3 попередження, 1 пара → 1 проблема', r1.checked === 3 && r1.created === 1 && r1.updated === 0 && r1.issues.length === 1, JSON.stringify(r1));
+  const issue = r1.issues[0];
+  t('проблема: kind time, rule/confirmed, обидва докази — «Суд» і «Пожежа», опис зі всіх трьох повідомлень',
+    issue.kind === 'time' && issue.source === 'rule' && issue.status === 'confirmed' && issue.insufficientData === false &&
+    [issue.evidenceA.entityId, issue.evidenceB?.entityId].sort().join() === [fire, trial].sort().join() &&
+    /передувати/.test(issue.summary) && /одночасні/.test(issue.summary) && /Замкнене коло/.test(issue.summary), issue.summary);
+  t('негативний приклад: «Народження» → «Весілля» без суперечності — жодної проблеми для цієї пари',
+    (await repo.listContinuityIssues(P, { kind: 'time' })).every((i) => ![birth, wedding].every((x) => [i.evidenceA.entityId, i.evidenceB?.entityId].includes(x))));
+
+  const r2 = await refreshTimeContinuity(repo, P);
+  t('повторний прогін без змін — та сама проблема оновлюється, не дублюється', r2.created === 0 && r2.updated === 1 && r2.issues[0].id === issue.id && (await repo.listContinuityIssues(P, { kind: 'time' })).length === 1);
+
+  await repo.setContinuityIssueStatus(P, issue.id, 'dismissed', 'user:u-owner');
+  const r3 = await refreshTimeContinuity(repo, P);
+  t('автор відхилив — повторний прогін не воскрешає її (skipped, не updated/created)', r3.skipped >= 1 && r3.created === 0 && r3.updated === 0 && (await repo.getContinuityIssue(P, issue.id))!.status === 'dismissed');
+
+  // ── Маршрут ──
+  const access = {
+    async getBookOwnerId(x: string) { return x === P ? 'u-owner' : null; },
+    async getCollabOwnerId() { return undefined; },
+    async listAcceptedInvites() { return [{ acceptedUserId: 'u-reader', role: 'reader' }]; },
+  };
+  const who: Record<string, any> = { owner: { id: 'u-owner', role: 'writer', isGuest: false }, reader: { id: 'u-reader', role: 'reader', isGuest: false } };
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => { (req as any).principal = who[String(req.headers['x-user'])]; next(); });
+  registerProjectRoutes(app, { access, repo: () => repo, coreState: () => 'ready' });
+  const server = app.listen(0);
+  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/projects/${P}`;
+  const call = async (method: string, path: string, user: string) => {
+    const r = await fetch(`${baseUrl}${path}`, { method, headers: { 'x-user': user } });
+    return { status: r.status, body: (await r.json().catch(() => ({}))) as any };
+  };
+  t('маршрут POST .../continuity/rules/time: читачу — 403', (await call('POST', '/continuity/rules/time', 'reader')).status === 403);
+  const ran = await call('POST', '/continuity/rules/time', 'owner');
+  t('маршрут: власнику — 200, той самий результат (dismissed лишається пропущеним)', ran.status === 200 && ran.body.skipped >= 1 && ran.body.created === 0);
+  server.close();
+}
+
 await suite('memory', new MemoryCoreRepository(), 'book-m');
+await timeRuleSuite('memory', new MemoryCoreRepository(), 'book-tm');
 
 const url = process.env.CORE_TEST_DATABASE_URL?.trim();
 if (!url) {
@@ -200,6 +296,7 @@ if (!url) {
     const { rows } = await pool.query(`SELECT max(version) AS v FROM ${CORE_SCHEMA}.core_schema_migrations`);
     t('схема ядра — не старіша за v12 (безперервність: риси, проблеми)', Number(rows[0].v) >= 12, `v${rows[0].v}`);
     await suite('postgres', new PgCoreRepository(pool), 'book-p');
+    await timeRuleSuite('postgres', new PgCoreRepository(pool), 'book-tp');
   } catch (err) {
     t('прогін на PostgreSQL без збоїв', false, (err as Error).stack ?? String(err));
   } finally {

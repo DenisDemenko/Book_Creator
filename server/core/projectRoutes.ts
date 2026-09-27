@@ -42,6 +42,7 @@ import {
 import { ROLE_ENTITY_TYPES, appearanceOverview, cardAppearanceHash, describeLinks, expectedLinkHash, heroPortrait, refreshVisualReview, sceneVisuals, visualEntitiesOverview } from './visual';
 import { ASSET_ROLES, type AssetRole } from './types';
 import { CONTINUITY_ISSUE_KINDS, CONTINUITY_ISSUE_STATUSES, type ContinuityIssueKind, type ContinuityIssueStatus } from './types';
+import { refreshTimeContinuity } from './continuity';
 import { VERSIONED_ROLES, isLinkableAssetUrl } from './rules';
 import { clampIntensity, emotionFamily } from '../../src/utils/emotionScale';
 import { LlmFallbackJevAdapter, type JevAdapter, type LlmJson } from './flc/jev';
@@ -1534,6 +1535,13 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
     const entityId = typeof req.query.entityId === 'string' && req.query.entityId ? req.query.entityId : undefined;
     const issues = await repo.listContinuityIssues(req.params.id, { kind, status, entityId });
     res.json({ issues, canEdit: canEditStory(req.projectAccess!) });
+  }));
+
+  /** Правило «час» (Т2.4 В2): попередження хронології → проблеми безперервності (kind: time). Лише за командою. */
+  app.post('/api/projects/:id/continuity/rules/time', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const result = await refreshTimeContinuity(repo, req.params.id);
+    res.json(result);
   }));
 
   /** Змінити статус проблеми (автор: підтвердити, відхилити, позначити виправленою чи «переглянуто»). */
