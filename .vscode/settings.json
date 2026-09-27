@@ -77,6 +77,19 @@
         "/^Set-Location 'D:\\\\Rama\\\\Book_Creality'; node -e \"const s=require\\('\\./package\\.json'\\)\\.scripts\\.test; console\\.log\\(s\\.slice\\(-700\\)\\);\"$/": {
             "approve": true,
             "matchCommandLine": true
-        }
+        },
+        "/^Set-Location 'D:\\\\Rama\\\\furnivision-architecture\\\\marketplace'; node -e \"\nconst uk=require\\('\\./apps/web/messages/uk\\.json'\\), en=require\\('\\./apps/web/messages/en\\.json'\\);\nconst flat=\\(o,p=''\\)=>Object\\.entries\\(o\\)\\.flatMap\\(\\(\\[k,v\\]\\)=>v&&typeof v==='object'\\?flat\\(v,p\\+k\\+'\\.'\\):\\[p\\+k\\]\\);\nconst a=flat\\(uk\\)\\.sort\\(\\), b=flat\\(en\\)\\.sort\\(\\);\nconsole\\.log\\('uk keys:', a\\.length, 'en keys:', b\\.length\\);\nconsole\\.log\\('only uk:', a\\.filter\\(k=>!b\\.includes\\(k\\)\\)\\);\nconsole\\.log\\('only en:', b\\.filter\\(k=>!a\\.includes\\(k\\)\\)\\);\nconsole\\.log\\('studio band keys:', Object\\.keys\\(uk\\.homePage\\)\\.filter\\(k=>k\\.startsWith\\('studio'\\)\\)\\.length\\);\n\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^Set-Location 'D:\\\\Rama\\\\furnivision-architecture\\\\marketplace\\\\apps\\\\web'; node scripts/test-studio-band\\.mjs; node scripts/test-creative-marketplace\\.mjs; node -e \"const uk=require\\('\\./messages/uk\\.json'\\),en=require\\('\\./messages/en\\.json'\\);const flat=\\(o,p=''\\)=>Object\\.entries\\(o\\)\\.flatMap\\(\\(\\[k,v\\]\\)=>v&&typeof v==='object'\\?flat\\(v,p\\+k\\+'\\.'\\):\\[p\\+k\\]\\);const a=flat\\(uk\\)\\.sort\\(\\),b=flat\\(en\\)\\.sort\\(\\);console\\.log\\('parity:', JSON\\.stringify\\(a\\)===JSON\\.stringify\\(b\\), a\\.length\\);\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^Set-Location 'D:\\\\Rama\\\\furnivision-architecture\\\\marketplace\\\\apps\\\\web'; node scripts/test-studio-band\\.mjs; Set-Location 'D:\\\\Rama\\\\Book_Creality'; node tmp\\\\selftest-studio-band\\.cjs$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "npx eslint": true
     }
 }
