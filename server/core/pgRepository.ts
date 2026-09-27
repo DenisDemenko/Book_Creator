@@ -31,6 +31,7 @@ import {
   checkEntityTrait,
   checkContinuityIssue,
   checkContinuityDraftCheck,
+  checkCharacterDecision,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isValidEmbedding, SEARCHABLE_KINDS, tsQueryFromStems } from './search/text';
 import type {
@@ -81,6 +82,10 @@ import type {
   ContinuityIssueStatus,
   ContinuityDraftCheckInput,
   ContinuityDraftCheckRow,
+  CharacterDecisionInput,
+  CharacterDecisionRow,
+  CharacterDecisionFilter,
+  CharacterDecisionLevel,
 } from './types';
 
 type Q = Pool | PoolClient;
@@ -209,6 +214,37 @@ function toEntityTrait(r: any): EntityTraitRow {
     createdBy: r.created_by,
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
+  };
+}
+
+function toDecision(r: any): CharacterDecisionRow {
+  return {
+    id: r.id,
+    projectId: r.project_id,
+    characterId: r.character_id,
+    level: r.level,
+    sceneId: r.scene_id ?? null,
+    simulationId: r.simulation_id ?? null,
+    turnIndex: r.turn_index ?? null,
+    cacheKey: r.cache_key,
+    parentId: r.parent_id ?? null,
+    questions: Array.isArray(r.questions) ? r.questions : [],
+    options: r.options ?? {},
+    result: r.result ?? null,
+    selectedAction: r.selected_action ?? null,
+    validation: r.validation ?? {},
+    snapshotHash: r.snapshot_hash,
+    modelVersion: r.model_version,
+    source: r.source,
+    fallbackReason: r.fallback_reason ?? null,
+    basis: r.basis ?? {},
+    status: r.status,
+    usage: r.usage ?? {},
+    latencyMs: Number(r.latency_ms ?? 0),
+    createdBy: r.created_by,
+    createdAt: iso(r.created_at),
+    resolvedBy: r.resolved_by ?? null,
+    resolvedAt: isoOrNull(r.resolved_at),
   };
 }
 
@@ -1580,6 +1616,98 @@ export class PgCoreRepository implements CoreRepository {
     if (!isUuid(id)) return null;
     const { rows } = await this.q('SELECT * FROM continuity_draft_checks WHERE project_id = $1 AND id = $2', [projectId, id]);
     return rows[0] ? toDraftCheck(rows[0]) : null;
+  }
+
+  // ── Журнал рішень героя (Т2.5 В2) ────────────────────────────────────────
+
+  async addCharacterDecision(input: CharacterDecisionInput) {
+    const n = checkCharacterDecision(input);
+    if (!isUuid(input.characterId)) throw notFound(`Сутність «${input.characterId}»`);
+    if (input.parentId && !isUuid(input.parentId)) throw notFound(`Рішення «${input.parentId}»`);
+    const { rows: e } = await this.q('SELECT 1 FROM entities WHERE project_id = $1 AND id = $2', [input.projectId, input.characterId]);
+    if (!e[0]) throw notFound(`Сутність «${input.characterId}»`);
+    if (input.parentId) {
+      const { rows: p } = await this.q('SELECT 1 FROM character_decisions WHERE project_id = $1 AND id = $2', [input.projectId, input.parentId]);
+      if (!p[0]) throw notFound(`Рішення «${input.parentId}»`);
+    }
+    const json = (v: unknown) => JSON.stringify(v);
+    const { rows } = await this.q(
+      `INSERT INTO character_decisions
+         (project_id, character_id, level, scene_id, simulation_id, turn_index, cache_key, parent_id, questions, options, result,
+          selected_action, validation, snapshot_hash, model_version, source, fallback_reason, basis, status, usage, latency_ms, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22) RETURNING *`,
+      [
+        input.projectId, input.characterId, input.level, input.sceneId ?? null, input.simulationId ?? null, input.turnIndex ?? null, input.cacheKey,
+        input.parentId ?? null, json(input.questions ?? []), json(input.options ?? {}), input.result ? json(input.result) : null,
+        n.selectedAction, json(input.validation ?? {}), input.snapshotHash, input.modelVersion, input.source, input.fallbackReason ?? null,
+        json(input.basis ?? {}), n.status, json(input.usage ?? {}), Math.max(0, Math.round(input.latencyMs ?? 0)), input.createdBy,
+      ],
+    );
+    return toDecision(rows[0]);
+  }
+
+  async getCharacterDecision(projectId: string, id: string) {
+    if (!isUuid(id)) return null;
+    const { rows } = await this.q('SELECT * FROM character_decisions WHERE project_id = $1 AND id = $2', [projectId, id]);
+    return rows[0] ? toDecision(rows[0]) : null;
+  }
+
+  async listCharacterDecisions(projectId: string, f: CharacterDecisionFilter = {}) {
+    if (f.characterId && !isUuid(f.characterId)) return [];
+    const where = ['project_id = $1'];
+    const params: unknown[] = [projectId];
+    const add = (sql: string, v: unknown) => {
+      params.push(v);
+      where.push(`${sql} = $${params.length}`);
+    };
+    if (f.characterId) add('character_id', f.characterId);
+    if (f.level) add('level', f.level);
+    if (f.status) add('status', f.status);
+    if (f.simulationId) add('simulation_id', f.simulationId);
+    if (f.cacheKey) add('cache_key', f.cacheKey);
+    if (f.sceneId !== undefined) {
+      if (f.sceneId === null) where.push('scene_id IS NULL');
+      else add('scene_id', f.sceneId);
+    }
+    params.push(Math.max(1, Math.min(f.limit ?? 100, 500)));
+    const { rows } = await this.q(`SELECT * FROM character_decisions WHERE ${where.join(' AND ')} ORDER BY created_at DESC, id DESC LIMIT $${params.length}`, params);
+    return rows.map(toDecision);
+  }
+
+  async supersedeCharacterDecisions(projectId: string, f: { characterId: string; level: CharacterDecisionLevel; sceneId?: string | null; exceptId?: string }) {
+    if (!isUuid(f.characterId)) return 0;
+    const params: unknown[] = [projectId, f.characterId, f.level];
+    let sql = `UPDATE character_decisions SET status = 'superseded' WHERE project_id = $1 AND character_id = $2 AND level = $3 AND status = 'active'`;
+    if (f.exceptId && isUuid(f.exceptId)) {
+      params.push(f.exceptId);
+      sql += ` AND id <> $${params.length}`;
+    }
+    if (f.sceneId !== undefined) {
+      if (f.sceneId === null) sql += ' AND scene_id IS NULL';
+      else {
+        params.push(f.sceneId);
+        sql += ` AND scene_id = $${params.length}`;
+      }
+    }
+    const res = await this.q(sql, params);
+    return res?.rowCount ?? 0;
+  }
+
+  async resolveCharacterDecision(projectId: string, id: string, input: { selectedAction: string; result: Record<string, unknown>; actor: CoreActor }) {
+    if (!isUuid(id)) throw notFound(`Рішення «${id}»`);
+    if (!/^user:.+/.test(input.actor)) throw new CoreRuleError('bad_input', 'Рішення автора — лише від користувача');
+    const action = String(input.selectedAction ?? '').trim();
+    if (!action || action.length > 60) throw new CoreRuleError('bad_input', 'Обрана дія — від 1 до 60 символів');
+    const cur = await this.getCharacterDecision(projectId, id);
+    if (!cur) throw notFound(`Рішення «${id}»`);
+    if (cur.status !== 'awaiting_author') throw new CoreRuleError('conflict', 'Рішення вже прийнято — вибір автора потрібен лише для «чекає автора»');
+    const { rows } = await this.q(
+      `UPDATE character_decisions SET status = 'active', source = 'author', selected_action = $3, result = $4, resolved_by = $5, resolved_at = now()
+       WHERE project_id = $1 AND id = $2 AND status = 'awaiting_author' RETURNING *`,
+      [projectId, id, action, JSON.stringify(input.result), input.actor],
+    );
+    if (!rows[0]) throw new CoreRuleError('conflict', 'Рішення вже прийнято — вибір автора потрібен лише для «чекає автора»');
+    return toDecision(rows[0]);
   }
 
   // ── Збережені запити (Т1.3) ──────────────────────────────────────────────

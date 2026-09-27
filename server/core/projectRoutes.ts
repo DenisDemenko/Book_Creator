@@ -215,7 +215,7 @@ function visibleTo(access: ProjectAccess) {
 
 function fail(res: Response, err: unknown) {
   if (err instanceof CoreRuleError) {
-    res.status(err.code === 'not_found' ? 404 : 422).json({ error: err.message, kind: err.code });
+    res.status(err.code === 'not_found' ? 404 : err.code === 'conflict' ? 409 : 422).json({ error: err.message, kind: err.code });
     return;
   }
   console.error('[core] помилка маршруту проєкту:', err);

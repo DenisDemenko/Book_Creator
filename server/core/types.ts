@@ -580,6 +580,86 @@ export type ContinuityDraftCheckInput = Pick<ContinuityDraftCheckRow, 'projectId
   simulationId?: string | null;
 };
 
+// ── Журнал рішень героя (Т2.5 В2, ТЗ-H §10 `character_decisions`) ──────────
+
+export const CHARACTER_DECISION_LEVELS = ['strategic', 'scene', 'tactical'] as const;
+export type CharacterDecisionLevel = (typeof CHARACTER_DECISION_LEVELS)[number];
+export const CHARACTER_DECISION_SOURCES = ['jev', 'mock', 'llm_fallback', 'author'] as const;
+export type CharacterDecisionSource = (typeof CHARACTER_DECISION_SOURCES)[number];
+export const CHARACTER_DECISION_STATUSES = ['active', 'superseded', 'awaiting_author'] as const;
+export type CharacterDecisionStatus = (typeof CHARACTER_DECISION_STATUSES)[number];
+
+/** Підстави рішення — лише посилання (id абзаців і сутностей), без змісту знімка. */
+export interface CharacterDecisionBasis {
+  paragraphIds?: string[];
+  entityIds?: string[];
+  /** З чого зібрано ключ кешу (напр. «значущі події: 3»). */
+  note?: string;
+}
+
+/**
+ * Рішення героя одного з трьох рівнів (FLC 2.0 §3) — і водночас кеш рівня:
+ * доки `cacheKey` той самий, рішення використовується повторно (В3).
+ */
+export interface CharacterDecisionRow {
+  id: string;
+  projectId: string;
+  characterId: string;
+  level: CharacterDecisionLevel;
+  sceneId: string | null;
+  simulationId: string | null;
+  turnIndex: number | null;
+  cacheKey: string;
+  parentId: string | null;
+  questions: unknown[];
+  /** Дозволені / заборонені варіанти, поріг впевненості — з чим порівнював валідатор. */
+  options: Record<string, unknown>;
+  /** Нормалізований результат (`DecisionResult`); null — поки чекає автора. */
+  result: Record<string, unknown> | null;
+  selectedAction: string | null;
+  /** Що перевірив і що виправив серверний валідатор. */
+  validation: Record<string, unknown>;
+  snapshotHash: string;
+  modelVersion: string;
+  source: CharacterDecisionSource;
+  fallbackReason: string | null;
+  basis: CharacterDecisionBasis;
+  status: CharacterDecisionStatus;
+  usage: Record<string, unknown>;
+  latencyMs: number;
+  createdBy: CoreActor;
+  createdAt: string;
+  resolvedBy: CoreActor | null;
+  resolvedAt: string | null;
+}
+
+export type CharacterDecisionInput = Pick<CharacterDecisionRow, 'projectId' | 'characterId' | 'level' | 'cacheKey' | 'snapshotHash' | 'modelVersion' | 'source' | 'createdBy'> & {
+  sceneId?: string | null;
+  simulationId?: string | null;
+  turnIndex?: number | null;
+  parentId?: string | null;
+  questions?: unknown[];
+  options?: Record<string, unknown>;
+  result?: Record<string, unknown> | null;
+  selectedAction?: string | null;
+  validation?: Record<string, unknown>;
+  fallbackReason?: string | null;
+  basis?: CharacterDecisionBasis;
+  status?: CharacterDecisionStatus;
+  usage?: Record<string, unknown>;
+  latencyMs?: number;
+};
+
+export interface CharacterDecisionFilter {
+  characterId?: string;
+  level?: CharacterDecisionLevel;
+  status?: CharacterDecisionStatus;
+  simulationId?: string;
+  sceneId?: string;
+  cacheKey?: string;
+  limit?: number;
+}
+
 /** Збережений пошуковий запит автора (Т1.3). */
 export interface SavedSearchRow {
   id: string;
@@ -753,6 +833,15 @@ export interface CoreRepository {
   /** Новіші першими; фільтр за героєм і симуляцією. */
   listContinuityDraftChecks(projectId: string, filter?: { characterId?: string; simulationId?: string; limit?: number }): Promise<ContinuityDraftCheckRow[]>;
   getContinuityDraftCheck(projectId: string, id: string): Promise<ContinuityDraftCheckRow | null>;
+
+  /** Журнал рішень героя (Т2.5 В2): додати, знайти, перелік (новіші першими), змінити статус. */
+  addCharacterDecision(input: CharacterDecisionInput): Promise<CharacterDecisionRow>;
+  getCharacterDecision(projectId: string, id: string): Promise<CharacterDecisionRow | null>;
+  listCharacterDecisions(projectId: string, filter?: CharacterDecisionFilter): Promise<CharacterDecisionRow[]>;
+  /** Позначити чинні рішення рівня героя заміненими (крім `exceptId`); повертає кількість. */
+  supersedeCharacterDecisions(projectId: string, filter: { characterId: string; level: CharacterDecisionLevel; sceneId?: string | null; exceptId?: string }): Promise<number>;
+  /** Рішення автора (В4): чекало автора → чинне, з дією автора, джерелом `author` і хто / коли. */
+  resolveCharacterDecision(projectId: string, id: string, input: { selectedAction: string; result: Record<string, unknown>; actor: CoreActor }): Promise<CharacterDecisionRow>;
 
   /** Збережені запити автора в книзі (Т1.3), новіші першими. */
   listSavedSearches(projectId: string, userId: string): Promise<SavedSearchRow[]>;

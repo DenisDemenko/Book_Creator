@@ -34,6 +34,10 @@ import {
   type ContinuityIssueInput,
   type ContinuityIssueStatus,
   type ContinuityDraftCheckInput,
+  type CharacterDecisionInput,
+  CHARACTER_DECISION_LEVELS,
+  CHARACTER_DECISION_SOURCES,
+  CHARACTER_DECISION_STATUSES,
   CONTINUITY_ISSUE_KINDS,
   CONTINUITY_ISSUE_STATUSES,
 } from './types';
@@ -47,7 +51,9 @@ export type CoreRuleCode =
   | 'ai_suggests_only'
   | 'confirmed_is_author_only'
   | 'not_found'
-  | 'duplicate_alias';
+  | 'duplicate_alias'
+  /** Стан уже не той, для якого дія (напр. рішення героя вже прийнято, Т2.5). */
+  | 'conflict';
 
 /** Порушення правила ядра. Маршрути віддають його як 422 (або 404 для `not_found`). */
 export class CoreRuleError extends Error {
@@ -329,6 +335,28 @@ export function checkContinuityDraftCheck(input: ContinuityDraftCheckInput): { d
     throw new CoreRuleError('bad_input', 'Ідентифікатор симуляції — рядок до 200 символів');
   }
   return { draftText };
+}
+
+/** Рішення героя (Т2.5 В2): ті самі правила, що й CHECK у базі `character_decisions`. */
+export function checkCharacterDecision(input: CharacterDecisionInput): { status: CharacterDecisionInput['status'] & string; selectedAction: string | null } {
+  assertActor(input.createdBy);
+  if (!(CHARACTER_DECISION_LEVELS as readonly string[]).includes(input.level)) throw new CoreRuleError('bad_input', `Невідомий рівень рішення «${input.level}»`);
+  if (!(CHARACTER_DECISION_SOURCES as readonly string[]).includes(input.source)) throw new CoreRuleError('bad_input', `Невідоме джерело рішення «${input.source}»`);
+  const status = input.status ?? 'active';
+  if (!(CHARACTER_DECISION_STATUSES as readonly string[]).includes(status)) throw new CoreRuleError('bad_input', `Невідомий статус рішення «${status}»`);
+  const cacheKey = String(input.cacheKey ?? '');
+  if (!cacheKey || cacheKey.length > 200) throw new CoreRuleError('bad_input', 'Ключ кешу рішення — від 1 до 200 символів');
+  if (!/^[0-9a-f]{16,64}$/.test(String(input.snapshotHash ?? ''))) throw new CoreRuleError('bad_input', 'Відбиток знімка — 16–64 шістнадцяткових символи');
+  const model = String(input.modelVersion ?? '');
+  if (!model || model.length > 120) throw new CoreRuleError('bad_input', 'Версія моделі — від 1 до 120 символів');
+  const action = input.selectedAction == null || input.selectedAction === '' ? null : String(input.selectedAction);
+  if (action !== null && action.length > 60) throw new CoreRuleError('bad_input', 'Обрана дія — до 60 символів');
+  if (status !== 'awaiting_author' && action === null) throw new CoreRuleError('bad_input', 'Чинне рішення без обраної дії — лише «чекає автора»');
+  if (input.source === 'author') throw new CoreRuleError('bad_input', 'Рішення автора записується лише через resolveCharacterDecision');
+  if (input.turnIndex != null && (!Number.isInteger(input.turnIndex) || input.turnIndex < 0)) throw new CoreRuleError('bad_input', 'Номер ходу — ціле ≥ 0');
+  if (input.fallbackReason != null && String(input.fallbackReason).length > 1000) throw new CoreRuleError('bad_input', 'Причина запасного шляху — до 1000 символів');
+  if (input.questions !== undefined && !Array.isArray(input.questions)) throw new CoreRuleError('bad_input', 'Питання рішення — список');
+  return { status, selectedAction: action };
 }
 
 export function checkMention(m: MentionInput): void {

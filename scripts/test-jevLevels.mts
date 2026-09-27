@@ -11,6 +11,13 @@
  * об'єкти, заміна рантайму не торкається коду, що ним користується.
  * Мережі немає: Jev і LLM — підставні.
  *
+ * В2: журнал рішень героя `character_decisions` (міграція 0015) — правила
+ * запису (дзеркало CHECK), «чекає автора» без дії, рішення автора лише з
+ * цього стану, заміна чинних рішень рівня, фільтри; прототип циклу пише
+ * кожне рішення в журнал з відбитком, моделлю й підставами-посиланнями.
+ * Пам'ять і PostgreSQL (з CORE_TEST_DATABASE_URL; схема `fusion_core`
+ * видаляється — лише тестова база!).
+ *
  * Запуск: npm run test:jev-levels
  */
 import fs from 'node:fs';
@@ -38,6 +45,15 @@ import { createAgentRuntime, HarnessAgentRuntime, HarnessNotConfiguredError, InP
 import * as oldContracts from '../server/core/flc/contracts.ts';
 import * as oldJev from '../server/core/flc/jev.ts';
 import * as oldRuntime from '../server/core/flc/runtime.ts';
+import { MemoryCoreRepository } from '../server/core/memoryRepository.ts';
+import { PgCoreRepository } from '../server/core/pgRepository.ts';
+import { createCorePool } from '../server/core/index.ts';
+import { CORE_SCHEMA, loadMigrations, resolveMigrationsDir, runMigrations } from '../server/core/migrate.ts';
+import { syncBookToCore } from '../server/core/sync.ts';
+import { reconcileParagraphIds } from '../src/utils/paragraphIds.ts';
+import { runFlcCycle } from '../server/core/flc/cycle.ts';
+import { PROFILE_FACT } from '../server/core/characterProfile.ts';
+import type { CoreRepository } from '../server/core/types.ts';
 
 let pass = 0;
 let fail = 0;
@@ -168,6 +184,110 @@ console.log('\nСтарі шляхи прототипу (Т1.6) — ті сам�
 t('server/core/flc/{contracts,jev,runtime} реекспортують server/ai/*',
   oldContracts.validateSnapshot === validateSnapshot && oldContracts.CHARACTER_SNAPSHOT_SCHEMA === CHARACTER_SNAPSHOT_SCHEMA &&
   oldJev.HttpJevAdapter === HttpJevAdapter && oldJev.MockJevAdapter === MockJevAdapter && oldRuntime.InProcessAgentRuntime === InProcessAgentRuntime);
+
+const code = async (fn: () => Promise<unknown>) => {
+  try {
+    await fn();
+    return 'ok';
+  } catch (e) {
+    return (e as { code?: string }).code ?? String(e);
+  }
+};
+
+async function decisionsSuite(label: string, repo: CoreRepository, P: string) {
+  console.log(`\nЖурнал рішень героя character_decisions — В2 (${label}):`);
+  const sec = (id: string, order: number, content: string) => {
+    const r = reconcileParagraphIds({ sectionId: id, content });
+    return { id, title: id, order, content, paragraphIds: r.ids, paragraphHashes: r.hashes };
+  };
+  const book: any = {
+    id: P,
+    title: 'Книга',
+    characters: [{ id: 'c-o', name: 'Олена' }, { id: 'c-m', name: 'Марко' }],
+    chapters: [{ id: 'ch1', title: 'Ніч', order: 0, sections: [sec('s1', 0, '[/character:Олена] [/emotion:страх] Олена боялася води.\n\n[/character:Марко] Марко питав, де вона була.')] }],
+  };
+  await syncBookToCore(repo, { id: P, ownerId: 'u-owner', title: 'Книга', book });
+  const olena = (await repo.resolveAlias(P, 'character', 'Олена'))!;
+  const marko = (await repo.resolveAlias(P, 'character', 'Марко'))!;
+  const h = 'a'.repeat(32);
+  const base = { projectId: P, characterId: olena, cacheKey: 'k1', snapshotHash: h, modelVersion: 'jev-1.13.0', source: 'jev' as const, createdBy: 'user:u-owner' };
+
+  const s1 = await repo.addCharacterDecision({ ...base, level: 'strategic', selectedAction: 'find_brother', result: { selected_action: 'find_brother' }, basis: { paragraphIds: ['p1'], note: 'значущі події: 1' }, questions: [{ id: 'long_goal' }], usage: { input_tokens: 10 }, latencyMs: 12.7 });
+  t('рішення записано: чинне, рівень, модель, відбиток, підстави-посилання', s1.status === 'active' && s1.level === 'strategic' && s1.modelVersion === 'jev-1.13.0' && s1.snapshotHash === h && s1.basis.paragraphIds?.[0] === 'p1' && s1.latencyMs === 13 && s1.resolvedBy === null);
+  const sc = await repo.addCharacterDecision({ ...base, level: 'scene', sceneId: 's1', cacheKey: 'k-scene', parentId: s1.id, selectedAction: 'protect_self' });
+  t('сценічне — з посиланням на стратегічне (parent_id)', sc.parentId === s1.id && (await repo.getCharacterDecision(P, sc.id))?.sceneId === 's1');
+  t('правила: невідомий рівень, чинне без дії, джерело «автор» напряму, поганий відбиток, чужий герой, невідомий батько',
+    (await code(() => repo.addCharacterDecision({ ...base, level: 'weekly' as any, selectedAction: 'x' }))) === 'bad_input' &&
+    (await code(() => repo.addCharacterDecision({ ...base, level: 'tactical' }))) === 'bad_input' &&
+    (await code(() => repo.addCharacterDecision({ ...base, level: 'tactical', source: 'author', selectedAction: 'x' }))) === 'bad_input' &&
+    (await code(() => repo.addCharacterDecision({ ...base, level: 'tactical', snapshotHash: 'xyz', selectedAction: 'x' }))) === 'bad_input' &&
+    (await code(() => repo.addCharacterDecision({ ...base, characterId: '00000000-0000-4000-8000-000000000000', level: 'tactical', selectedAction: 'x' }))) === 'not_found' &&
+    (await code(() => repo.addCharacterDecision({ ...base, level: 'tactical', selectedAction: 'x', parentId: '00000000-0000-4000-8000-000000000000' }))) === 'not_found');
+
+  const waiting = await repo.addCharacterDecision({ ...base, level: 'tactical', status: 'awaiting_author', source: 'llm_fallback', fallbackReason: 'Jev 529; LLM: не JSON', options: { allowed: ['answer', 'lie'] } });
+  t('«чекає автора» — без дії, з причиною запасного шляху', waiting.status === 'awaiting_author' && waiting.selectedAction === null && /529/.test(waiting.fallbackReason ?? ''));
+  t('вибір автора: не від користувача — bad_input; порожня дія — bad_input',
+    (await code(() => repo.resolveCharacterDecision(P, waiting.id, { selectedAction: 'lie', result: {}, actor: 'ai:AI-2' as any }))) === 'bad_input' &&
+    (await code(() => repo.resolveCharacterDecision(P, waiting.id, { selectedAction: ' ', result: {}, actor: 'user:u-owner' }))) === 'bad_input');
+  const resolved = await repo.resolveCharacterDecision(P, waiting.id, { selectedAction: 'lie', result: { selected_action: 'lie', source: 'author' }, actor: 'user:u-owner' });
+  t('вибір автора — чинне, джерело «автор», хто й коли; причина збою лишилась у журналі', resolved.status === 'active' && resolved.source === 'author' && resolved.selectedAction === 'lie' && resolved.resolvedBy === 'user:u-owner' && !!resolved.resolvedAt && /529/.test(resolved.fallbackReason ?? ''));
+  t('повторний вибір автора — conflict (рішення вже прийнято); невідоме — not_found',
+    (await code(() => repo.resolveCharacterDecision(P, waiting.id, { selectedAction: 'answer', result: {}, actor: 'user:u-owner' }))) === 'conflict' &&
+    (await code(() => repo.resolveCharacterDecision(P, '00000000-0000-4000-8000-000000000000', { selectedAction: 'answer', result: {}, actor: 'user:u-owner' }))) === 'not_found');
+
+  const s2 = await repo.addCharacterDecision({ ...base, level: 'strategic', cacheKey: 'k2', selectedAction: 'protect_anna' });
+  const n = await repo.supersedeCharacterDecisions(P, { characterId: olena, level: 'strategic', exceptId: s2.id });
+  t('нове стратегічне — старе чинне стає «замінено» (лише свого рівня й героя)', n === 1 && (await repo.getCharacterDecision(P, s1.id))!.status === 'superseded' && (await repo.getCharacterDecision(P, s2.id))!.status === 'active' && (await repo.getCharacterDecision(P, sc.id))!.status === 'active');
+  await repo.addCharacterDecision({ ...base, characterId: marko, level: 'scene', sceneId: 's9', cacheKey: 'k-m', selectedAction: 'ask' });
+  t('заміна в межах сцени не чіпає інших сцен і героїв', (await repo.supersedeCharacterDecisions(P, { characterId: olena, level: 'scene', sceneId: 'інша' })) === 0 && (await repo.getCharacterDecision(P, sc.id))!.status === 'active');
+  const olenaList = await repo.listCharacterDecisions(P, { characterId: olena });
+  t('перелік героя — новіші першими; фільтри за рівнем, статусом, ключем кешу, сценою',
+    olenaList[0].id === s2.id && olenaList.length === 4 &&
+    (await repo.listCharacterDecisions(P, { characterId: olena, level: 'strategic', status: 'active' })).map((d) => d.id).join() === s2.id &&
+    (await repo.listCharacterDecisions(P, { characterId: olena, cacheKey: 'k-scene' })).length === 1 &&
+    (await repo.listCharacterDecisions(P, { sceneId: 's9' })).length === 1 && (await repo.listCharacterDecisions(P, { limit: 2 })).length === 2);
+
+  // Прототип циклу (Т1.6) пише рішення в журнал.
+  const [p1] = (await repo.listParagraphs(P, 's1')).map((p) => p.id);
+  const fact = await repo.addFinding({ projectId: P, entityId: olena, kind: PROFILE_FACT, payload: { field: 'fear', statement: 'Олена боїться води.', assessment: 'supported' }, sourceParagraphIds: [p1], createdBy: 'ai:AI-2' });
+  await repo.setFindingStatus(P, fact.id, 'confirmed', 'user:u-owner');
+  const llm = async () => ({ text: JSON.stringify({ reply: 'Не пам\'ятаю.', intent: 'приховати' }), modelId: 'fake-llm', inputTokens: 10, outputTokens: 5 });
+  const res = await runFlcCycle({ repo, jev: new MockJevAdapter(), fallback: new LlmFallbackJevAdapter(llm), llm }, { projectId: P, entityId: olena, question: 'Де ти була?', asOfChapter: 1, actorId: 'user:u-owner' });
+  const logged = await repo.getCharacterDecision(P, res.decisionId);
+  t('КРИТЕРІЙ В2: рішення прототипу — у журналі: тактичний рівень, прогін, відбиток знімка, модель, джерело, підстави — абзаци-докази',
+    !!logged && logged.level === 'tactical' && logged.simulationId === res.simulationId && logged.snapshotHash === res.decision.snapshot_hash &&
+    logged.modelVersion === 'mock-jev-0' && logged.source === 'mock' && logged.selectedAction === res.decision.selected_action && logged.basis.paragraphIds?.includes(p1) === true &&
+    JSON.stringify(logged.basis).length < 300, JSON.stringify(logged?.basis));
+}
+
+await decisionsSuite('memory', new MemoryCoreRepository(), 'jev-m');
+const url = process.env.CORE_TEST_DATABASE_URL?.trim();
+if (!url) {
+  console.log('\nPostgreSQL: пропущено (CORE_TEST_DATABASE_URL не задано) — перевірено на сховищі в пам\'яті');
+} else {
+  const pool = createCorePool(url);
+  try {
+    await pool.query(`DROP SCHEMA IF EXISTS ${CORE_SCHEMA} CASCADE`);
+    await runMigrations(pool, loadMigrations(resolveMigrationsDir()));
+    const { rows } = await pool.query(`SELECT max(version) AS v FROM ${CORE_SCHEMA}.core_schema_migrations`);
+    t('схема ядра — не старіша за v15 (журнал рішень героя)', Number(rows[0].v) >= 15, `v${rows[0].v}`);
+    await decisionsSuite('postgres', new PgCoreRepository(pool), 'jev-p');
+    const [d] = (await pool.query(`SELECT project_id, character_id FROM ${CORE_SCHEMA}.character_decisions LIMIT 1`)).rows;
+    let refused = false;
+    try {
+      await pool.query(`INSERT INTO ${CORE_SCHEMA}.character_decisions (project_id, character_id, level, cache_key, snapshot_hash, model_version, source, status, created_by) VALUES ($1, $2, 'tactical', 'k', '${'b'.repeat(32)}', 'm', 'jev', 'active', 'user:x')`, [d.project_id, d.character_id]);
+    } catch { refused = true; }
+    let refusedAuthor = false;
+    try {
+      await pool.query(`INSERT INTO ${CORE_SCHEMA}.character_decisions (project_id, character_id, level, cache_key, snapshot_hash, model_version, source, selected_action, created_by) VALUES ($1, $2, 'tactical', 'k', '${'b'.repeat(32)}', 'm', 'author', 'x', 'user:x')`, [d.project_id, d.character_id]);
+    } catch { refusedAuthor = true; }
+    t('CHECK у базі: чинне без дії — ні; «автор» без того, хто вирішив, — ні', refused && refusedAuthor);
+  } catch (err) {
+    t('прогін на PostgreSQL без збоїв', false, (err as Error).stack ?? String(err));
+  } finally {
+    await pool.end();
+  }
+}
 
 console.log(`\nПідсумок: ${pass} пройшло, ${fail} впало`);
 if (fail > 0) process.exit(1);

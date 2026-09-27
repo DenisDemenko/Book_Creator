@@ -30,6 +30,7 @@ import {
   checkEntityTrait,
   checkContinuityIssue,
   checkContinuityDraftCheck,
+  checkCharacterDecision,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isSearchableKind, isValidEmbedding, memoryTextScore } from './search/text';
 import { CORE_STATUSES, CONTINUITY_ISSUE_STATUSES } from './types';
@@ -70,6 +71,10 @@ import type {
   ContinuityIssueRow,
   ContinuityDraftCheckInput,
   ContinuityDraftCheckRow,
+  CharacterDecisionInput,
+  CharacterDecisionRow,
+  CharacterDecisionFilter,
+  CharacterDecisionLevel,
   ContinuityIssueKind,
   ContinuityIssueStatus,
   ParagraphVersionRow,
@@ -118,6 +123,7 @@ export class MemoryCoreRepository implements CoreRepository {
   private entityTraits = new Map<string, EntityTraitRow>();
   private continuityIssues = new Map<string, ContinuityIssueRow>();
   private draftChecks: ContinuityDraftCheckRow[] = [];
+  private decisions: CharacterDecisionRow[] = [];
 
   private requireProject(projectId: string): ProjectRow {
     const p = this.projects.get(projectId);
@@ -1080,6 +1086,84 @@ export class MemoryCoreRepository implements CoreRepository {
   async getContinuityDraftCheck(projectId: string, id: string) {
     const c = this.draftChecks.find((x) => x.id === id && x.projectId === projectId);
     return c ? clone(c) : null;
+  }
+
+  // ── Журнал рішень героя (Т2.5 В2) ─────────────────────────────────────────
+
+  async addCharacterDecision(input: CharacterDecisionInput) {
+    this.requireProject(input.projectId);
+    const n = checkCharacterDecision(input);
+    if (!this.entityIn(input.projectId, input.characterId)) throw notFound(`Сутність «${input.characterId}»`);
+    if (input.parentId && !this.decisions.some((d) => d.id === input.parentId && d.projectId === input.projectId)) throw notFound(`Рішення «${input.parentId}»`);
+    const row: CharacterDecisionRow = {
+      id: randomUUID(),
+      projectId: input.projectId,
+      characterId: input.characterId,
+      level: input.level,
+      sceneId: input.sceneId ?? null,
+      simulationId: input.simulationId ?? null,
+      turnIndex: input.turnIndex ?? null,
+      cacheKey: input.cacheKey,
+      parentId: input.parentId ?? null,
+      questions: clone(input.questions ?? []),
+      options: clone(input.options ?? {}),
+      result: input.result ? clone(input.result) : null,
+      selectedAction: n.selectedAction,
+      validation: clone(input.validation ?? {}),
+      snapshotHash: input.snapshotHash,
+      modelVersion: input.modelVersion,
+      source: input.source,
+      fallbackReason: input.fallbackReason ?? null,
+      basis: clone(input.basis ?? {}),
+      status: n.status,
+      usage: clone(input.usage ?? {}),
+      latencyMs: Math.max(0, Math.round(input.latencyMs ?? 0)),
+      createdBy: input.createdBy,
+      createdAt: now(),
+      resolvedBy: null,
+      resolvedAt: null,
+    };
+    this.decisions.push(row);
+    return clone(row);
+  }
+
+  async getCharacterDecision(projectId: string, id: string) {
+    const d = this.decisions.find((x) => x.id === id && x.projectId === projectId);
+    return d ? clone(d) : null;
+  }
+
+  async listCharacterDecisions(projectId: string, f: CharacterDecisionFilter = {}) {
+    const limit = Math.max(1, Math.min(f.limit ?? 100, 500));
+    return this.decisions
+      .map((d, i) => ({ d, i }))
+      .filter(({ d }) =>
+        d.projectId === projectId && (!f.characterId || d.characterId === f.characterId) && (!f.level || d.level === f.level) && (!f.status || d.status === f.status) &&
+        (!f.simulationId || d.simulationId === f.simulationId) && (f.sceneId === undefined || d.sceneId === f.sceneId) && (!f.cacheKey || d.cacheKey === f.cacheKey))
+      .sort((a, b) => b.d.createdAt.localeCompare(a.d.createdAt) || b.i - a.i)
+      .slice(0, limit)
+      .map(({ d }) => clone(d));
+  }
+
+  async supersedeCharacterDecisions(projectId: string, f: { characterId: string; level: CharacterDecisionLevel; sceneId?: string | null; exceptId?: string }) {
+    let n = 0;
+    for (const d of this.decisions) {
+      if (d.projectId !== projectId || d.characterId !== f.characterId || d.level !== f.level || d.status !== 'active' || d.id === f.exceptId) continue;
+      if (f.sceneId !== undefined && d.sceneId !== f.sceneId) continue;
+      d.status = 'superseded';
+      n++;
+    }
+    return n;
+  }
+
+  async resolveCharacterDecision(projectId: string, id: string, input: { selectedAction: string; result: Record<string, unknown>; actor: CoreActor }) {
+    const d = this.decisions.find((x) => x.id === id && x.projectId === projectId);
+    if (!d) throw notFound(`Рішення «${id}»`);
+    if (d.status !== 'awaiting_author') throw new CoreRuleError('conflict', 'Рішення вже прийнято — вибір автора потрібен лише для «чекає автора»');
+    if (!/^user:.+/.test(input.actor)) throw new CoreRuleError('bad_input', 'Рішення автора — лише від користувача');
+    const action = String(input.selectedAction ?? '').trim();
+    if (!action || action.length > 60) throw new CoreRuleError('bad_input', 'Обрана дія — від 1 до 60 символів');
+    Object.assign(d, { status: 'active', source: 'author', selectedAction: action, result: clone(input.result), resolvedBy: input.actor, resolvedAt: now() });
+    return clone(d);
   }
 
   // ── Збережені запити (Т1.3) ──────────────────────────────────────────────

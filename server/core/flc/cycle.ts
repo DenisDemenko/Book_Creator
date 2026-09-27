@@ -40,6 +40,8 @@ export interface FlcCycleRequest {
 
 export interface FlcCycleResult {
   simulationId: string;
+  /** Запис у журналі рішень героя (`character_decisions`, Т2.5 В2). */
+  decisionId: string;
   snapshot: CharacterSnapshot;
   decision: DecisionResult;
   fallbackReason: string | null;
@@ -151,6 +153,30 @@ export async function runFlcCycle(deps: FlcCycleDeps, req: FlcCycleRequest): Pro
   const decCheck = validateDecision(decision);
   if (!decCheck.ok) throw new Error(`Рішення не відповідає контракту: ${decCheck.errors.join('; ')}`);
   const decisionMs = Date.now() - td;
+  // Т2.5 В2: кожне рішення — у журнал рішень героя (відбиток знімка, модель, підстави-посилання; не канон).
+  const logged = await deps.repo.addCharacterDecision({
+    projectId: req.projectId,
+    characterId: req.entityId,
+    level: 'tactical',
+    simulationId,
+    cacheKey: decision.snapshot_hash,
+    questions: interrogationQuestions(snapshot.allowed_actions),
+    options: { allowed: snapshot.allowed_actions },
+    result: decision as unknown as Record<string, unknown>,
+    selectedAction: decision.selected_action,
+    validation: { corrected: decision.corrected },
+    snapshotHash: decision.snapshot_hash,
+    modelVersion: decision.model_version,
+    source: decision.source,
+    fallbackReason,
+    basis: {
+      paragraphIds: [...new Set([...snapshot.confirmed_facts.flatMap((f) => f.evidence.map((e) => e.paragraph_id)), ...snapshot.recent_appearances.map((e) => e.paragraph_id)])],
+      note: 'прототип FLC 0: допит',
+    },
+    usage: decision.usage,
+    latencyMs: decision.latency_ms,
+    createdBy: req.actorId,
+  });
 
   const tl = Date.now();
   const draft = await runtime.step('character-agent', ['draft-reply'], (ctx) =>
@@ -162,6 +188,7 @@ export async function runFlcCycle(deps: FlcCycleDeps, req: FlcCycleRequest): Pro
   const fbTokens = decision.source === 'llm_fallback' ? decision.usage : { input_tokens: 0, output_tokens: 0 };
   return {
     simulationId,
+    decisionId: logged.id,
     snapshot,
     decision,
     fallbackReason,
