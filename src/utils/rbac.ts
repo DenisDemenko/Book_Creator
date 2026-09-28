@@ -398,6 +398,57 @@ export const ALL_ROLES: RoleInfo[] = [
     }
   },
   {
+    id: 'seller',
+    nameUk: 'Продавець',
+    nameEn: 'Marketplace Seller',
+    badgeEmoji: '🛒',
+    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
+    bgGradient: 'from-emerald-500/20 to-teal-500/10 border-emerald-500/50',
+    descriptionUk: 'Готує власний товар до продажу: створює зображення в медіатеці та тексти за допомогою ШІ. Рукопис не редагує, не публікує, грошей і налаштувань не бачить.',
+    descriptionEn: 'Prepares their own goods for sale: generates images in the media library and text with AI. Does not edit the manuscript, publish, or touch money or settings.',
+    responsibilitiesUk: [
+      'Генерація зображень у медіатеці',
+      'Тексти за допомогою ШІ — у «Книга & Текст» і в чатах зі ШІ',
+      'Нічого поза цим: без редагування рукопису, публікації, експорту й грошей'
+    ],
+    responsibilitiesEn: [
+      'Generating images in the media library',
+      'AI text — in Book & Text and in AI chats',
+      'Nothing beyond that: no manuscript editing, publishing, export or money'
+    ],
+    permissions: {
+      canEditContent: false,
+      canEditTranslation: false,
+      canEditVisuals: false,
+      canEditLayout: false,
+      canExport: false,
+      canImportBook: false,
+      canManageCharacters: false,
+      canManagePlot: false,
+      canUseAi: true,
+      canManageSettings: false,
+      canViewAuditLog: false,
+      canManageRoles: false,
+      canAuthorCourses: false,
+      canGenerateImages: true,
+      canPublish: false,
+      canPublishExternal: false,
+      canManageApiKeys: false,
+      canMarketIntel: false,
+      isReadOnly: false,
+      allowedTabs: [
+        'editor',
+        'media',
+        'illustrations'
+      ]
+    },
+    defaultPersona: {
+      name: 'Ігор (Продавець)',
+      email: 'seller@novastudio.ua',
+      avatar: '🛒'
+    }
+  },
+  {
     id: 'expert',
     nameUk: 'Експерт',
     nameEn: 'Craft Expert',
@@ -683,6 +734,8 @@ export function getDefaultTabForRole(role?: UserRole | string | null): Navigatio
       return 'editor';
     case 'publisher':
       return 'layout';
+    case 'seller':
+      return 'editor';
     case 'expert':
       return 'course-studio';
     case 'teacher':

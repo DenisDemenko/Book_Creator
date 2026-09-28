@@ -27,6 +27,7 @@ export type StoredRole =
   | 'designer'
   | 'translator'
   | 'publisher'
+  | 'seller'
   | 'expert'
   | 'teacher'
   | 'reader'

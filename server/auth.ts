@@ -213,6 +213,9 @@ export const BASE_SERVER_PERMISSIONS: Record<StoredRole, ServerPermissions> = {
   designer:   { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false },
   translator: { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false },
   publisher:  { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: true,  canPublishExternal: true,  canManageApiKeys: false, canMarketIntel: true,  canAuthorCourses: false },
+  // Продавець: рівно те, що власник просив для цієї ролі — зображення
+  // в медіатеці та тексти ШІ. Рукопис, публікація, гроші й ключі — закриті.
+  seller:     { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false },
   // Експерт і викладач: автори самостійних курсів (docs/tech-spec-course-wizard-2026.md §6.1).
   // Генерації зображень і ШІ дозволені (медіа курсу), решта письменницько-видавничого — ні.
   expert:     { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: true },
