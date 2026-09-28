@@ -227,7 +227,7 @@ console.log('\nМаршрут прототипу:');
     async getCollabOwnerId() { return undefined; },
     async listAcceptedInvites() { return []; },
   };
-  const who: Record<string, any> = { owner: { id: 'u-owner', role: 'writer', isGuest: false }, admin: { id: 'u-admin', role: 'admin', isGuest: false } };
+  const who: Record<string, any> = { owner: { id: 'u-owner', role: 'writer', isGuest: false }, admin: { id: 'u-admin', role: 'admin', isGuest: false }, ownerAdmin: { id: 'u-owner', role: 'admin', isGuest: false } };
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => { (req as any).principal = who[String(req.headers['x-user'])]; next(); });
@@ -239,10 +239,12 @@ console.log('\nМаршрут прототипу:');
     const r = await fetch(`${base}/flc/prototype`, { method: 'POST', headers: { 'x-user': user, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     return { status: r.status, body: (await r.json().catch(() => ({}))) as any };
   };
-  const ok = await call('admin', { entityId: olena, question: 'Де ти була?', asOfChapter: 1 });
+  // Т2.5 В5: типовий режим маршруту — три рівні (перевіряє test:jev-levels); тут — режим звіту Т1.6.
+  const ok = await call('admin', { entityId: olena, question: 'Де ти була?', asOfChapter: 1, mode: 'single' });
   t('адмін — 200: чернетка, рішення, час, журнал', ok.status === 200 && ok.body.draft.reply === 'Не скажу.' && !!ok.body.decision.decision_trace_id && ok.body.trace.length > 0);
   t('власник книги (не адмін) — 403: прототип лише для звіту', (await call('owner', { entityId: olena, question: 'x' })).status === 403);
   t('без героя чи запитання — 400', (await call('admin', { entityId: olena, question: ' ' })).status === 400);
+  t('адміністратор платформи, що сам власник книги, — теж 200 (Т2.5 В5)', (await call('ownerAdmin', { entityId: olena, question: 'Де ти була?', mode: 'single' })).status === 200);
   server.close();
 }
 

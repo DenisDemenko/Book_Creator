@@ -5,7 +5,10 @@
  *
  * Запуск: npm run prototype:flc0
  *   TYPESAFE_API_KEY=… — справжній Jev (інакше підставний);
- *   DEEPSEEK_API_KEY=… — справжня LLM для чернетки (інакше підставна).
+ *   DEEPSEEK_API_KEY=… — справжня LLM для чернетки (інакше підставна);
+ *   FLC_MODE=single — один виклик Jev, як у звіті Т1.6; типово (Т2.5 В5) —
+ *     три рівні: перший прогін рахує стратегічний і сценічний, далі вони з
+ *     кешу, щоразу — лише тактичний.
  * Книга — у пам'яті (жодної бази не потрібно).
  */
 import { MemoryCoreRepository } from '../server/core/memoryRepository.ts';
@@ -16,6 +19,7 @@ import { runFlcCycle } from '../server/core/flc/cycle.ts';
 import { HttpJevAdapter, jevState, LlmFallbackJevAdapter, MockJevAdapter, JEV_MODEL, type LlmJson } from '../server/core/flc/jev.ts';
 
 const RUNS = Number(process.env.FLC_RUNS || 5);
+const MODE = process.env.FLC_MODE === 'single' ? 'single' : 'levels';
 const repo = new MemoryCoreRepository();
 const P = 'flc0';
 const sec = (id: string, content: string) => {
@@ -64,7 +68,7 @@ const jev = typesafe ? new HttpJevAdapter(typesafe, { model: JEV_MODEL }) : new 
 
 const rows = [];
 for (let i = 0; i < RUNS; i++) {
-  const r = await runFlcCycle({ repo, jev, fallback: new LlmFallbackJevAdapter(llm), llm }, { projectId: P, entityId: olena, question: 'Олено, де ти була тієї ночі?', asOfChapter: 1, actorId: 'user:u' });
+  const r = await runFlcCycle({ repo, jev, fallback: new LlmFallbackJevAdapter(llm), llm }, { projectId: P, entityId: olena, question: 'Олено, де ти була тієї ночі?', asOfChapter: 1, actorId: 'user:u', mode: MODE });
   rows.push(r);
 }
 const med = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
@@ -72,7 +76,8 @@ const last = rows[rows.length - 1];
 const stateChars = JSON.stringify(jevState(last.snapshot)).length;
 const report = {
   jev: typesafe ? `TypeSafe ${last.decision.model_version}` : 'підставний (немає TYPESAFE_API_KEY)',
-  llm: deepseek ? `DeepSeek ${last.draft.model}` : 'підставна (немає DEEPSEEK_API_KEY)',
+  llm: deepseek ? `DeepSeek ${last.draft?.model ?? '—'}` : 'підставна (немає DEEPSEEK_API_KEY)',
+  mode: MODE,
   runs: RUNS,
   medianMs: {
     retrieval: med(rows.map((r) => r.timings.retrieval)),
@@ -85,8 +90,12 @@ const report = {
   jevStateTokensEstimate: Math.ceil(stateChars / 3),
   snapshotChars: JSON.stringify(last.snapshot).length,
   cost: last.cost,
-  decision: { action: last.decision.selected_action, fear: last.decision.scores.fear_intensity, confidence: last.decision.confidence, source: last.decision.source, fallbackReason: last.fallbackReason },
-  draft: last.draft.reply,
+  firstRunCost: rows[0].cost,
+  // «Чекає автора» — дії немає (підставний Jev часто дає впевненість нижче порогу 0.35 — це й перевіряється).
+  decision: { action: last.awaitingAuthor ? null : last.decision.selected_action, partialAction: last.awaitingAuthor ? last.decision.selected_action || null : undefined, fear: last.decision.scores.fear_intensity ?? last.levels.find((l) => l.level === 'scene')?.scores.fear, confidence: last.decision.confidence, source: last.decision.source, fallbackReason: last.fallbackReason },
+  levels: last.levels.map((l) => ({ level: l.level, action: l.action, reused: l.reused, source: l.source })),
+  awaitingAuthor: last.awaitingAuthor ? last.blockedAt : null,
+  draft: last.draft?.reply ?? null,
   traceEvents: last.trace.length,
   canonChanged: last.canonChanged,
 };

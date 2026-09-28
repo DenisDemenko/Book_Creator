@@ -48,6 +48,9 @@ import { checkDraftKnowledge } from './continuityDraft';
 import { DRAFT_TEXT_MAX, VERSIONED_ROLES, isLinkableAssetUrl } from './rules';
 import { clampIntensity, emotionFamily } from '../../src/utils/emotionScale';
 import { LlmFallbackJevAdapter, type JevAdapter, type LlmJson } from './flc/jev';
+import { JevDecisionAdapter, resolveDecisionByAuthor, type DecideRequest } from './jevLevels';
+import { decisionView, decisionsSummary } from './jevDecisions';
+import { CHARACTER_DECISION_LEVELS, CHARACTER_DECISION_STATUSES, type CharacterDecisionLevel, type CharacterDecisionStatus } from './types';
 import { interpretSearchQuery, type SearchInterpretDeps, type SearchInterpretation } from './search/interpret';
 
 export interface ProjectAccess {
@@ -148,6 +151,9 @@ export interface VisualGenerationDeps {
     },
   ) => Promise<string>;
 }
+
+/** Не більше стількох рішень героя (Т2.5 В5) на користувача за хвилину — виклики Jev і LLM платні. */
+export const DECIDE_PER_MINUTE = 20;
 
 /** Не більше стількох тлумачень запиту ШІ на користувача за хвилину — це платні виклики. */
 export const INTERPRET_PER_MINUTE = 20;
@@ -1800,7 +1806,9 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
    * відповідь — чернетка з рішенням, часом кроків, вартістю й журналом агентів.
    */
   app.post('/api/projects/:id/flc/prototype', withRepo(async (repo, req, res) => {
-    if (req.projectAccess!.role !== 'admin') {
+    // Адміністратор платформи — навіть коли книга його власна (тоді роль у проєкті — owner).
+    const platformAdmin = ((req as any).principal as Principal | undefined)?.role === 'admin';
+    if (req.projectAccess!.role !== 'admin' && !platformAdmin) {
       res.status(403).json({ error: 'Прототип FLC доступний лише адміністратору.', kind: 'forbidden' });
       return;
     }
@@ -1833,12 +1841,146 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
           asOfChapter: Number(b.asOfChapter) || null,
           allowedActions: Array.isArray(b.allowedActions) ? b.allowedActions.map(String) : undefined,
           actorId: actor,
+          // Т2.5 В5: типово — три рівні Jev; `single` — один виклик, як у звіті Т1.6.
+          mode: b.mode === 'single' ? 'single' : 'levels',
+          sceneId: typeof b.sceneId === 'string' && b.sceneId ? b.sceneId.slice(0, 200) : null,
         },
       );
       res.json(result);
     } catch (err) {
       res.status(502).json({ error: `Цикл не завершився: ${(err as Error).message}`, kind: 'flc_failed' });
     }
+  }));
+
+  // ── Т2.5 В5: три рівні Jev — рішення героя, журнал, вибір автора ──────────
+
+  const decideCalls = new Map<string, number[]>();
+  const decideAllowed = (userId: string): boolean => {
+    const now = Date.now();
+    const recent = (decideCalls.get(userId) ?? []).filter((x) => now - x < 60_000);
+    if (recent.length >= DECIDE_PER_MINUTE) {
+      decideCalls.set(userId, recent);
+      return false;
+    }
+    recent.push(now);
+    decideCalls.set(userId, recent);
+    return true;
+  };
+  const requireDecisionEdit = (req: Request, res: Response): boolean => {
+    if (canEditStory(req.projectAccess!)) return true;
+    res.status(403).json({ error: 'Рішення героя ухвалюють власник, співавтор, редактор і адміністратор; решта — переглядає журнал.', kind: 'forbidden' });
+    return false;
+  };
+  const heroOf = async (repo: CoreRepository, req: Request, res: Response) => {
+    const entity = await repo.getEntity(req.params.id, req.params.entityId);
+    if (!entity || entity.status === 'rejected' || entity.type !== 'character') {
+      res.status(404).json({ error: 'Героя не знайдено в цьому проєкті.', kind: 'not_found' });
+      return null;
+    }
+    return entity;
+  };
+  const str = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined);
+  const strList = (v: unknown, maxItems: number, maxLen: number) =>
+    Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x.trim()).slice(0, maxItems).map((x: string) => x.trim().slice(0, maxLen)) : undefined;
+
+  /**
+   * Рішення героя на рівні (стратегічний / сценічний / тактичний): батьківські
+   * рівні — спершу, кожен з кешу, якщо ключ той самий; Jev → валідатор →
+   * запасний LLM → «чекає автора». Нічого не пише в канон — лише в журнал.
+   */
+  app.post('/api/projects/:id/characters/:entityId/decide', withRepo(async (repo, req, res) => {
+    if (!requireDecisionEdit(req, res)) return;
+    if (!deps.flc) {
+      res.status(503).json({ error: 'Рішення героя (Jev) тут не підключено.', kind: 'core_unavailable' });
+      return;
+    }
+    const b = req.body ?? {};
+    const level = String(b.level ?? '') as CharacterDecisionLevel;
+    if (!CHARACTER_DECISION_LEVELS.includes(level)) {
+      res.status(400).json({ error: `Рівень — один із: ${CHARACTER_DECISION_LEVELS.join(', ')}.`, kind: 'bad_input' });
+      return;
+    }
+    const entity = await heroOf(repo, req, res);
+    if (!entity) return;
+    if (!decideAllowed(req.projectAccess!.userId)) {
+      res.status(429).json({ error: `Забагато рішень героя за хвилину (не більше ${DECIDE_PER_MINUTE}).`, kind: 'rate_limited' });
+      return;
+    }
+    const asOf = Number(b.asOfChapter);
+    const turn = Number(b.turnIndex);
+    const actor = `user:${req.projectAccess!.userId}` as const;
+    const decideReq: DecideRequest = {
+      projectId: req.params.id,
+      characterId: entity.id,
+      level,
+      actor,
+      asOfChapter: Number.isInteger(asOf) && asOf >= 1 ? asOf : null,
+      sceneId: str(b.sceneId, 200) ?? null,
+      situation: str(b.situation, 2000),
+      participants: strList(b.participants, 20, 200),
+      sceneGoal: str(b.sceneGoal, 500),
+      turnMark: str(b.turnMark, 500),
+      allowedActions: strList(b.allowedActions, 12, 40),
+      forbiddenActions: strList(b.forbiddenActions, 12, 40),
+      checks: strList(b.checks, 4, 400),
+      simulationId: str(b.simulationId, 100) ?? null,
+      turnIndex: Number.isInteger(turn) && turn >= 0 ? turn : null,
+    };
+    const engine = new JevDecisionAdapter({
+      repo,
+      jev: await deps.flc.jev(),
+      fallback: new LlmFallbackJevAdapter(deps.flc.llm(req.params.id, actor)),
+      studio: deps.studio,
+    });
+    const r = await engine.decide(decideReq);
+    res.json({ decision: decisionView(r.decision), reused: r.reused, chain: r.chain, awaitingAuthor: r.awaitingAuthor, blockedAt: r.blockedAt });
+  }));
+
+  /** Журнал рішень героя (новіші першими): `?level=&status=&sceneId=&limit=`. Бачить кожен учасник книги. */
+  app.get('/api/projects/:id/characters/:entityId/decisions', withRepo(async (repo, req, res) => {
+    const entity = await heroOf(repo, req, res);
+    if (!entity) return;
+    const level = String(req.query.level ?? '') as CharacterDecisionLevel;
+    const status = String(req.query.status ?? '') as CharacterDecisionStatus;
+    const limit = Math.max(1, Math.min(Number(req.query.limit) || 50, 200));
+    const rows = await repo.listCharacterDecisions(req.params.id, {
+      characterId: entity.id,
+      ...(CHARACTER_DECISION_LEVELS.includes(level) ? { level } : {}),
+      ...(CHARACTER_DECISION_STATUSES.includes(status) ? { status } : {}),
+      ...(typeof req.query.sceneId === 'string' && req.query.sceneId ? { sceneId: req.query.sceneId } : {}),
+      limit,
+    });
+    res.json({ decisions: rows.map(decisionView), canDecide: canEditStory(req.projectAccess!) });
+  }));
+
+  /** Вибір автора для рішення «чекає автора»: лише з допустимих варіантів; далі — чинне й кешується. */
+  app.post('/api/projects/:id/characters/:entityId/decisions/:decisionId/resolve', withRepo(async (repo, req, res) => {
+    if (!requireDecisionEdit(req, res)) return;
+    const entity = await heroOf(repo, req, res);
+    if (!entity) return;
+    const d = await repo.getCharacterDecision(req.params.id, req.params.decisionId);
+    if (!d || d.characterId !== entity.id) {
+      res.status(404).json({ error: 'Рішення не знайдено.', kind: 'not_found' });
+      return;
+    }
+    const action = str(req.body?.action, 40);
+    if (!action) {
+      res.status(400).json({ error: 'Потрібна дія (action).', kind: 'bad_input' });
+      return;
+    }
+    const row = await resolveDecisionByAuthor(repo, req.params.id, d.id, action, `user:${req.projectAccess!.userId}`);
+    res.json({ decision: decisionView(row) });
+  }));
+
+  /**
+   * Зведення спостережуваності рішень героїв (ТЗ-H §13): виклики Jev, частка
+   * запасного шляху, класи збоїв, токени, вартість, затримка — лише числа.
+   * `?characterId=` — одного героя. Бачать ті, хто ухвалює рішення.
+   */
+  app.get('/api/projects/:id/decisions/summary', withRepo(async (repo, req, res) => {
+    if (!requireDecisionEdit(req, res)) return;
+    const characterId = typeof req.query.characterId === 'string' && req.query.characterId ? req.query.characterId : undefined;
+    res.json(await decisionsSummary(repo, req.params.id, { characterId }));
   }));
 
   /** Зв'язки проєкту або однієї сутності (`?entityId=`). */

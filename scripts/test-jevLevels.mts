@@ -32,6 +32,13 @@
  * відповіді в записі); низька впевненість — автору; вибір автора — лише з
  * допустимих, далі — кеш.
  *
+ * В5: маршрути (`decide`, журнал рішень героя, вибір автора, зведення
+ * спостережуваності) — права (чужий — ні, читач — лише перегляд), вигляд
+ * рішення без приватного змісту, «чекає автора» → вибір автора → далі кеш,
+ * ліміт викликів; прототип FLC через три рівні (чернетка лише коли ніхто не
+ * чекає автора); зведення — виклики Jev, частка запасного шляху, класи
+ * збоїв, токени, вартість, затримка.
+ *
  * Запуск: npm run test:jev-levels
  */
 import fs from 'node:fs';
@@ -70,6 +77,10 @@ import { PROFILE_FACT } from '../server/core/characterProfile.ts';
 import type { CoreRepository } from '../server/core/types.ts';
 import { DEFAULT_LEVEL_CONFIG, JevDecisionAdapter, significantState } from '../server/core/jevLevels.ts';
 import { validateHard } from '../server/ai/validator.ts';
+import express from 'express';
+import type { AddressInfo } from 'node:net';
+import { DECIDE_PER_MINUTE, registerProjectRoutes } from '../server/core/projectRoutes.ts';
+import { decisionOrigin, jevFailureClass, summarizeDecisions } from '../server/core/jevDecisions.ts';
 
 let pass = 0;
 let fail = 0;
@@ -513,9 +524,159 @@ async function authorSuite(label: string, repo: CoreRepository, P: string) {
   t('жорсткі обмеження записано в рішення (допустимі й заборонені, поріг), заборонене не обрано', opts.primary.forbidden.includes('lie') && opts.confidenceThreshold === 0.35 && forbidden.decision.selectedAction !== 'lie' && !forbidden.awaitingAuthor);
 }
 
+async function routesSuite(label: string, repo: CoreRepository, P: string) {
+  console.log(`\nМаршрути, прототип на рівнях і спостережуваність — В5 (${label}):`);
+  const sec = (id: string, order: number, content: string) => {
+    const r = reconcileParagraphIds({ sectionId: id, content });
+    return { id, title: id, order, content, paragraphIds: r.ids, paragraphHashes: r.hashes };
+  };
+  await syncBookToCore(repo, {
+    id: P, ownerId: 'u-owner', title: 'Книга',
+    book: { id: P, title: 'Книга', characters: [{ id: 'c-o', name: 'Олена' }, { id: 'c-m', name: 'Марко' }], chapters: [{ id: 'ch1', title: 'Гл. 1', order: 0, sections: [sec('s1', 0, '[/character:Олена] [/goal:Знайти брата @Олена] Олена таємно шукала брата біля старого млина.\n\n[/character:Марко] Марко стежив за нею.')] }] },
+  } as any);
+  const olena = (await repo.resolveAlias(P, 'character', 'Олена'))!;
+  const marko = (await repo.resolveAlias(P, 'character', 'Марко'))!;
+  const notHero = (await repo.listEntities(P)).find((e) => e.type !== 'character')!;
+  const mock = new MockJevAdapter();
+  let jevMode: 'ok' | 'low' | 'down' = 'ok';
+  const jevOk = { name: 'jev' as const, evaluate: async (s: any, q: any) => ({ ...(await mock.evaluate(s, q)), source: 'jev' as const, confidence: 0.9, model_version: 'jev-test', usage: { input_tokens: 1000, output_tokens: 0 } }) };
+  const jevLow = { name: 'jev' as const, evaluate: async (s: any, q: any) => ({ ...(await jevOk.evaluate(s, q)), confidence: 0.1 }) };
+  const jevDown = new HttpJevAdapter('k', { fetchImpl: (async () => new Response('{}', { status: 529 })) as any });
+  const llm = async (system: string, user: string) => {
+    if (/оцінюєш стан/.test(system)) {
+      const ans = /trajectory/.test(user) ? { trajectory: { choice: 'waver' } } : /scene_motive/.test(user) ? { scene_motive: { choice: 'seek_truth' } } : { next_action: { choice: 'silence' } };
+      return { text: JSON.stringify({ answers: ans }), modelId: 'fake-llm', inputTokens: 300, outputTokens: 20 };
+    }
+    return { text: JSON.stringify({ reply: 'Я нічого не шукала.', intent: 'приховати' }), modelId: 'fake-llm', inputTokens: 50, outputTokens: 10 };
+  };
+  const access = {
+    async getBookOwnerId(x: string) { return x === P ? 'u-owner' : null; },
+    async getCollabOwnerId() { return undefined; },
+    async listAcceptedInvites() { return [{ acceptedUserId: 'u-reader', role: 'reader' }, { acceptedUserId: 'u-ed', role: 'editor' }]; },
+  };
+  const who: Record<string, any> = {
+    owner: { id: 'u-owner', role: 'writer', isGuest: false },
+    admin: { id: 'u-admin', role: 'admin', isGuest: false },
+    reader: { id: 'u-reader', role: 'writer', isGuest: false },
+    editor: { id: 'u-ed', role: 'writer', isGuest: false },
+    stranger: { id: 'u-x', role: 'writer', isGuest: false },
+  };
+  const serve = (withFlc: boolean) => {
+    const app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => { (req as any).principal = who[String(req.headers['x-user'])]; next(); });
+    registerProjectRoutes(app, { access, repo: () => repo, coreState: () => 'ready', ...(withFlc ? { flc: { jev: async () => (jevMode === 'ok' ? jevOk : jevMode === 'low' ? jevLow : jevDown) as any, llm: () => llm } } : {}) });
+    const server = app.listen(0);
+    return { server, base: `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/projects/${P}` };
+  };
+  const { server, base } = serve(true);
+  const call = async (user: string, method: string, path: string, body?: unknown) => {
+    const r = await fetch(`${base}${path}`, { method, headers: { 'x-user': user, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const text = await r.text();
+    return { status: r.status, text, body: (() => { try { return JSON.parse(text); } catch { return {}; } })() as any };
+  };
+  const decide = (user: string, body: unknown, hero = olena) => call(user, 'POST', `/characters/${hero}/decide`, body);
+  try {
+    t('права: чужий — 403; читач не ухвалює рішень — 403', (await decide('stranger', { level: 'strategic' })).status === 403 && (await decide('reader', { level: 'strategic' })).status === 403);
+    t('поганий рівень — 400; не герой (інша сутність) чи невідомий — 404',
+      (await decide('owner', { level: 'epic' })).status === 400 && (await decide('owner', { level: 'strategic' }, notHero.id)).status === 404 && (await decide('owner', { level: 'strategic' }, 'nope')).status === 404);
+
+    const s1 = await decide('owner', { level: 'strategic' });
+    const v = s1.body.decision;
+    t('стратегічне — 200: рівень, дія з траєкторій і підпис, джерело jev, модель, відбиток, оцінки, підстави-посилання',
+      s1.status === 200 && v.level === 'strategic' && ['hold_course', 'waver', 'change_goal', 'break_down'].includes(v.selectedAction) && !!v.selectedLabel && v.origin === 'jev' &&
+      v.modelVersion === 'jev-test' && /^[0-9a-f]{32}$/.test(v.snapshotHash) && typeof v.scores.motive_conflict === 'number' && v.basis.paragraphIds.length > 0 && !s1.body.reused, JSON.stringify({ a: v.selectedAction, l: v.selectedLabel }));
+    t('без приватного змісту: у відповіді немає тексту книги, знімка, ситуації', !/млина|стежив|таємно|recent_appearances|situation/.test(s1.text));
+    t('повторно — з кешу (reused)', (await decide('owner', { level: 'strategic' })).body.reused === true);
+    const tac = await decide('editor', { level: 'tactical', sceneId: 's1', situation: 'Марко питає, куди вона ходила.', allowedActions: ['answer', 'lie', 'silence'], forbiddenActions: ['lie'], simulationId: 'sim-r', turnIndex: 1, participants: ['Марко'] });
+    t('тактичне від редактора — ланцюжок (стратегічне з кешу → сцена), без забороненого, стиль і батько',
+      tac.status === 200 && tac.body.chain.length === 2 && tac.body.chain[0].reused === true && tac.body.decision.level === 'tactical' && tac.body.decision.selectedAction !== 'lie' &&
+      typeof tac.body.decision.scores.style_fit === 'number' && tac.body.decision.parentId === tac.body.chain[1].id, JSON.stringify(tac.body.chain));
+
+    jevMode = 'low';
+    const low = await decide('owner', { level: 'tactical', sceneId: 's2', situation: 'Ніч біля млина.' });
+    const lv = low.body.decision;
+    t('низька впевненість на сцені — «чекає автора», зупинка на сцені; варіанти для автора з підписами',
+      low.status === 200 && low.body.awaitingAuthor && low.body.blockedAt === 'scene' && lv.status === 'awaiting_author' && lv.selectedAction === null &&
+      lv.authorOptions.length === 6 && lv.authorOptions.every((o: any) => o.label) && lv.validation.authorReason === 'low_confidence', JSON.stringify(lv.authorOptions?.slice(0, 2)));
+    const list = await call('reader', 'GET', `/characters/${olena}/decisions?status=awaiting_author`);
+    t('журнал: читач бачить (без права рішень), фільтр статусу', list.status === 200 && list.body.canDecide === false && list.body.decisions.length === 1 && list.body.decisions[0].id === lv.id);
+    const all = await call('owner', 'GET', `/characters/${olena}/decisions`);
+    t('журнал героя — новіші першими, лише цей герой; фільтр рівня', all.body.decisions[0].id === lv.id && all.body.decisions.every((d: any) => d.characterId === olena) &&
+      (await call('owner', 'GET', `/characters/${olena}/decisions?level=strategic`)).body.decisions.every((d: any) => d.level === 'strategic'));
+    t('чужий бачить журнал — ні (403)', (await call('stranger', 'GET', `/characters/${olena}/decisions`)).status === 403);
+
+    const res = (user: string, id: string, action: unknown, hero = olena) => call(user, 'POST', `/characters/${hero}/decisions/${id}/resolve`, { action });
+    t('вибір автора: читач — 403; через іншого героя — 404; без дії — 400; поза допустимими — 422',
+      (await res('reader', lv.id, 'seek_truth')).status === 403 && (await res('owner', lv.id, 'seek_truth', marko)).status === 404 &&
+      (await res('owner', lv.id, '')).status === 400 && (await res('owner', lv.id, 'fly')).status === 422);
+    const ok = await res('owner', lv.id, 'protect_self');
+    t('вибір автора — 200: чинне, джерело «автор», хто вирішив', ok.status === 200 && ok.body.decision.status === 'active' && ok.body.decision.source === 'author' && ok.body.decision.selectedAction === 'protect_self' && ok.body.decision.resolvedBy === 'user:u-owner' && ok.body.decision.authorOptions.length === 0);
+    t('повторний вибір — 409', (await res('owner', lv.id, 'hide_secret')).status === 409);
+    jevMode = 'ok';
+    const after = await decide('owner', { level: 'tactical', sceneId: 's2', situation: 'Ніч біля млина.' });
+    t('далі хід у цій сцені йде від рішення автора (сцена — з кешу, батько — рішення автора)', after.status === 200 && after.body.chain[1].id === lv.id && after.body.chain[1].reused && after.body.decision.parentId === lv.id);
+
+    jevMode = 'down';
+    const fb = await decide('owner', { level: 'scene', sceneId: 's3', situation: 'Допит у поліції.' });
+    t('Jev 529 — запасний LLM: походження llm, причина в журналі', fb.status === 200 && fb.body.decision.origin === 'llm' && /529/.test(fb.body.decision.fallbackReason ?? '') && fb.body.decision.selectedAction === 'seek_truth');
+    jevMode = 'ok';
+
+    const sum = await call('owner', 'GET', '/decisions/summary');
+    const S = sum.body;
+    t('зведення: виклики Jev, відповіді, запасний шлях і його частка, клас збою 529',
+      sum.status === 200 && S.jevCalls === S.jevAnswered + S.failures.overloaded && S.llmFallback === 1 && S.failures.overloaded === 1 && S.fallbackShare > 0 && S.fallbackShare < 1, JSON.stringify({ c: S.jevCalls, a: S.jevAnswered, f: S.llmFallback, sh: S.fallbackShare }));
+    t('зведення: «чекає автора» і вирішене автором, причини, токени й вартість Jev, затримка',
+      S.resolvedByAuthor === 1 && S.authorReasons.low_confidence >= 1 && S.tokens.jev.input === S.jevAnswered * 1000 && S.jevUsd === Math.round((S.tokens.jev.input / 1e6) * 0.042 * 1e8) / 1e8 &&
+      S.tokens.llm.input === 300 && typeof S.latencyMs.jev.avg === 'number' && S.byLevel.strategic >= 1 && S.total === S.window, JSON.stringify({ t: S.tokens, usd: S.jevUsd, r: S.authorReasons }));
+    t('зведення — лише числа (без тексту, причин і дій)', !/млина|Олена|529|seek_truth|protect_self/.test(sum.text));
+    t('зведення одного героя; читач — 403', (await call('owner', 'GET', `/decisions/summary?characterId=${marko}`)).body.total === 0 && (await call('reader', 'GET', '/decisions/summary')).status === 403);
+
+    // Прототип FLC — типово через три рівні.
+    const proto = await call('admin', 'POST', '/flc/prototype', { entityId: olena, question: 'Де ти була вночі?', sceneId: 's9' });
+    const pb = proto.body;
+    t('прототип FLC на рівнях: стратегічне → сцена → тактичне, чернетка, рішення в журналі з батьком-сценою',
+      proto.status === 200 && pb.mode === 'levels' && pb.levels.map((l: any) => l.level).join() === 'strategic,scene,tactical' && pb.draft?.reply === 'Я нічого не шукала.' &&
+      (await repo.getCharacterDecision(P, pb.decisionId))?.parentId === pb.levels[1].id && pb.awaitingAuthor === false, JSON.stringify(pb.levels?.map((l: any) => [l.level, l.reused])));
+    t('вартість циклу — лише пораховані рівні (стратегічне з кешу — безкоштовно)', pb.levels[0].reused === true && pb.cost.jevInputTokens === 2000, JSON.stringify({ c: pb.cost, l: pb.levels }));
+    jevMode = 'low';
+    const proto2 = await call('admin', 'POST', '/flc/prototype', { entityId: olena, question: 'А хто такий Марко?', sceneId: 's10' });
+    t('прототип: сцена чекає автора — без чернетки, LLM не пише репліку', proto2.status === 200 && proto2.body.draft === null && proto2.body.awaitingAuthor && proto2.body.blockedAt === 'scene' && proto2.body.timings.llm === 0);
+    jevMode = 'ok';
+    t('прототип у режимі звіту Т1.6 (single) — як раніше', (await call('admin', 'POST', '/flc/prototype', { entityId: olena, question: 'Де?', mode: 'single' })).body.mode === 'single');
+
+    let limited = 0;
+    for (let i = 0; i < DECIDE_PER_MINUTE + 1; i++) if ((await decide('admin', { level: 'strategic' })).status === 429) limited++;
+    t(`ліміт: не більше ${DECIDE_PER_MINUTE} рішень за хвилину на користувача — далі 429`, limited === 1);
+  } finally {
+    server.close();
+  }
+  const bare = serve(false);
+  try {
+    const r = await fetch(`${bare.base}/characters/${olena}/decide`, { method: 'POST', headers: { 'x-user': 'owner', 'Content-Type': 'application/json' }, body: JSON.stringify({ level: 'strategic' }) });
+    const l = await fetch(`${bare.base}/characters/${olena}/decisions`, { headers: { 'x-user': 'owner' } });
+    t('без Jev/LLM у сервері — рішення 503, журнал читається', r.status === 503 && l.status === 200);
+  } finally {
+    bare.server.close();
+  }
+}
+
+console.log('\nЗведення й походження рішення (без бази):');
+{
+  const row = (x: any) => ({ level: 'tactical', status: 'active', source: 'jev', modelVersion: 'jev-1.13.0', fallbackReason: null, validation: {}, usage: {}, latencyMs: 10, ...x });
+  t('походження: llm:… — запасний LLM, unavailable — ніхто, інше — Jev', decisionOrigin(row({ modelVersion: 'llm:x' })) === 'llm' && decisionOrigin(row({ modelVersion: 'unavailable' })) === 'none' && decisionOrigin(row({})) === 'jev');
+  const cls = ['Jev: Jev недоступний: The operation was aborted due to timeout', 'Jev: Jev 429: rate', 'Jev: Jev 529: помилка', 'Jev: Jev 401: bad key', 'Jev: Jev недоступний: fetch failed', 'Jev: допустимої альтернативи немає', 'Jev не налаштовано (немає ключа TypeSafe)', 'LLM: x'].map(jevFailureClass);
+  t('класи збою Jev за причиною', cls.join() === 'timeout,rate_limited,overloaded,auth,network,invalid_answer,not_configured,', cls.join());
+  const S = summarizeDecisions([row({ usage: { input_tokens: 1e6 } }), row({ modelVersion: 'llm:x', source: 'llm_fallback', fallbackReason: 'Jev: Jev 429: x', latencyMs: 30 }), row({ status: 'awaiting_author', modelVersion: 'unavailable', source: 'llm_fallback', fallbackReason: 'Jev: Jev недоступний: fetch failed; LLM: down', validation: { authorReason: 'unavailable' } }), row({ fallbackReason: 'Jev не налаштовано (немає ключа TypeSafe)', modelVersion: 'llm:x', source: 'llm_fallback' })] as any);
+  t('зведення: звернень до Jev 3 (без «не налаштовано»), частка запасного 2/3, 1М токенів Jev = $0.042, p95',
+    S.jevCalls === 3 && S.jevAnswered === 1 && S.llmFallback === 2 && S.fallbackShare === 0.667 && S.jevUsd === 0.042 && S.awaitingAuthor === 1 && S.failures.not_configured === 1 && S.latencyMs.llm.p95 === 30, JSON.stringify(S));
+  t('порожній журнал — частка null, затримки null', summarizeDecisions([]).fallbackShare === null && summarizeDecisions([]).latencyMs.jev.avg === null);
+}
+
 await decisionsSuite('memory', new MemoryCoreRepository(), 'jev-m');
 await levelsSuite('memory', new MemoryCoreRepository(), 'lvl-m');
 await authorSuite('memory', new MemoryCoreRepository(), 'aut-m');
+await routesSuite('memory', new MemoryCoreRepository(), 'rt-m');
 const url = process.env.CORE_TEST_DATABASE_URL?.trim();
 if (!url) {
   console.log('\nPostgreSQL: пропущено (CORE_TEST_DATABASE_URL не задано) — перевірено на сховищі в пам\'яті');
@@ -529,6 +690,7 @@ if (!url) {
     await decisionsSuite('postgres', new PgCoreRepository(pool), 'jev-p');
     await levelsSuite('postgres', new PgCoreRepository(pool), 'lvl-p');
     await authorSuite('postgres', new PgCoreRepository(pool), 'aut-p');
+    await routesSuite('postgres', new PgCoreRepository(pool), 'rt-p');
     const [d] = (await pool.query(`SELECT project_id, character_id FROM ${CORE_SCHEMA}.character_decisions LIMIT 1`)).rows;
     let refused = false;
     try {

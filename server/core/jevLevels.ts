@@ -246,43 +246,16 @@ export class JevDecisionAdapter {
    * далі воно чинне й кешується, як будь-яке інше.
    */
   async resolveByAuthor(projectId: string, decisionId: string, action: string, actor: CoreActor): Promise<CharacterDecisionRow> {
-    const d = await this.deps.repo.getCharacterDecision(projectId, decisionId);
-    if (!d) throw new CoreRuleError('not_found', `Рішення «${decisionId}»`);
-    if (d.status !== 'awaiting_author') throw new CoreRuleError('conflict', 'Рішення вже прийнято — вибір автора потрібен лише для «чекає автора»');
-    const primary = (d.options.primary ?? {}) as { id?: string; allowed?: string[]; forbidden?: string[] };
-    const allowed = (primary.allowed ?? []).filter((a) => !(primary.forbidden ?? []).includes(a));
-    if (!allowed.includes(action)) throw new CoreRuleError('bad_input', `Дія «${action}» — не з допустимих: ${allowed.join(', ')}`);
-    const partial = (d.result ?? {}) as Partial<DecisionResult>;
-    const result: DecisionResult = {
-      selected_action: action,
-      scores: partial.scores ?? {},
-      raw_distributions: partial.raw_distributions ?? {},
-      confidence: null,
-      model_version: d.modelVersion,
-      snapshot_hash: d.snapshotHash,
-      decision_trace_id: partial.decision_trace_id ?? d.id,
-      source: 'author',
-      corrected: false,
-      usage: partial.usage ?? { input_tokens: 0, output_tokens: 0 },
-      latency_ms: 0,
-      level: d.level,
-      ...(partial.choices ? { choices: partial.choices } : {}),
-      ...(partial.checks ? { checks: partial.checks } : {}),
-    };
-    const row = await this.deps.repo.resolveCharacterDecision(projectId, d.id, { selectedAction: action, result: result as unknown as Record<string, unknown>, actor });
-    if (d.level !== 'tactical') {
-      await this.deps.repo.supersedeCharacterDecisions(projectId, { characterId: d.characterId, level: d.level, exceptId: d.id, ...(d.level === 'scene' ? { sceneId: d.sceneId } : {}) });
-    }
-    return row;
+    return resolveDecisionByAuthor(this.deps.repo, projectId, decisionId, action, actor);
   }
 
   private async profile(req: DecideRequest) {
     const { repo } = this.deps;
     const entity = await repo.getEntity(req.projectId, req.characterId);
-    if (!entity || entity.status === 'rejected' || entity.type !== 'character') throw Object.assign(new Error('Героя не знайдено в ядрі книги'), { code: 'not_found' });
+    if (!entity || entity.status === 'rejected' || entity.type !== 'character') throw new CoreRuleError('not_found', 'Героя не знайдено в ядрі книги');
     const studio = this.deps.studio ? await this.deps.studio(req.projectId, entity).catch(() => undefined) : undefined;
     const profile = await buildCharacterProfile(repo, req.projectId, req.characterId, { upto: req.asOfChapter ?? null, studio });
-    if (!profile) throw Object.assign(new Error('Героя не знайдено в ядрі книги'), { code: 'not_found' });
+    if (!profile) throw new CoreRuleError('not_found', 'Героя не знайдено в ядрі книги');
     return profile;
   }
 
@@ -471,7 +444,7 @@ export class JevDecisionAdapter {
   private async tactical(req: DecideRequest, parent: CharacterDecisionRow): Promise<{ decision: CharacterDecisionRow; reused: boolean }> {
     const forbidden = new Set(req.forbiddenActions ?? []);
     const allowed = [...new Set((req.allowedActions?.length ? req.allowedActions : DEFAULT_TACTICAL_ACTIONS).filter((a) => actionId(a) && !forbidden.has(a)))];
-    if (allowed.length < 2) throw Object.assign(new Error('Для ходу потрібно щонайменше дві дозволені дії (без заборонених).'), { code: 'bad_input' });
+    if (allowed.length < 2) throw new CoreRuleError('bad_input', 'Для ходу потрібно щонайменше дві дозволені дії (без заборонених).');
     const profile = await this.profile(req);
     const r = (parent.result ?? {}) as Partial<DecisionResult>;
     const sceneLine = `Мотив у сцені: ${parent.selectedAction}${r.scores ? `; ${Object.entries(r.scores).map(([k, v]) => `${k} ${v}/10`).join(', ')}` : ''}.`;
@@ -496,4 +469,41 @@ export class JevDecisionAdapter {
     });
     return { decision, reused: false };
   }
+}
+
+/**
+ * Рішення автора для запису «чекає автора» (В4): дія — лише з допустимих
+ * варіантів цього рішення (дозволені й не заборонені), джерело `author`;
+ * далі воно чинне й кешується, як будь-яке інше. Без Jev і LLM — тому
+ * доступне й там, де адаптерів немає (маршрут В5).
+ */
+export async function resolveDecisionByAuthor(repo: CoreRepository, projectId: string, decisionId: string, action: string, actor: CoreActor): Promise<CharacterDecisionRow> {
+  const d = await repo.getCharacterDecision(projectId, decisionId);
+  if (!d) throw new CoreRuleError('not_found', `Рішення «${decisionId}»`);
+  if (d.status !== 'awaiting_author') throw new CoreRuleError('conflict', 'Рішення вже прийнято — вибір автора потрібен лише для «чекає автора»');
+  const primary = (d.options.primary ?? {}) as { id?: string; allowed?: string[]; forbidden?: string[] };
+  const allowed = (primary.allowed ?? []).filter((a) => !(primary.forbidden ?? []).includes(a));
+  if (!allowed.includes(action)) throw new CoreRuleError('bad_input', `Дія «${action}» — не з допустимих: ${allowed.join(', ')}`);
+  const partial = (d.result ?? {}) as Partial<DecisionResult>;
+  const result: DecisionResult = {
+    selected_action: action,
+    scores: partial.scores ?? {},
+    raw_distributions: partial.raw_distributions ?? {},
+    confidence: null,
+    model_version: d.modelVersion,
+    snapshot_hash: d.snapshotHash,
+    decision_trace_id: partial.decision_trace_id ?? d.id,
+    source: 'author',
+    corrected: false,
+    usage: partial.usage ?? { input_tokens: 0, output_tokens: 0 },
+    latency_ms: 0,
+    level: d.level,
+    ...(partial.choices ? { choices: partial.choices } : {}),
+    ...(partial.checks ? { checks: partial.checks } : {}),
+  };
+  const row = await repo.resolveCharacterDecision(projectId, d.id, { selectedAction: action, result: result as unknown as Record<string, unknown>, actor });
+  if (d.level !== 'tactical') {
+    await repo.supersedeCharacterDecisions(projectId, { characterId: d.characterId, level: d.level, exceptId: d.id, ...(d.level === 'scene' ? { sceneId: d.sceneId } : {}) });
+  }
+  return row;
 }

@@ -6,6 +6,12 @@
  *
  * Кроки йдуть через `AgentRuntime` (агенти бачать лише свої серверні tools),
  * рішення — через адаптер Jev із запасним шляхом на LLM (ТЗ-H №9).
+ *
+ * Т2.5 В5 — режим `levels`: рішення героя — через три рівні Jev
+ * (`JevDecisionAdapter`: стратегічний → сценічний → тактичний, кеш кожного,
+ * валідатор, ланцюжок Jev → LLM → автор). Рівень «чекає автора» — цикл
+ * зупиняється без чернетки (LLM замість автора не вирішує). Режим `single`
+ * — один виклик Jev, як у звіті Т1.6 (для відтворення його замірів).
  */
 
 import { randomUUID } from 'node:crypto';
@@ -16,6 +22,8 @@ import { parseModelJson } from '../ai/schema';
 import { validateDecision, validateSnapshot, type CharacterSnapshot, type DecisionResult, type SnapshotEvidence } from './contracts';
 import { evaluateWithFallback, interrogationQuestions, JEV_USD_PER_MTOK, type JevAdapter, type LlmJson } from './jev';
 import { InProcessAgentRuntime, type AgentTool, type TraceEvent } from './runtime';
+import { JevDecisionAdapter, type DecideResult } from '../jevLevels';
+import type { CharacterDecisionLevel, CharacterDecisionRow } from '../types';
 
 export const DEFAULT_ACTIONS = ['answer', 'lie', 'silence', 'deflect'];
 
@@ -36,6 +44,20 @@ export interface FlcCycleRequest {
   asOfChapter?: number | null;
   allowedActions?: string[];
   actorId: string;
+  /** `single` (типово) — один виклик Jev, як у Т1.6; `levels` — три рівні (Т2.5 В5). */
+  mode?: 'single' | 'levels';
+  /** Сцена для сценічного рівня (режим `levels`). */
+  sceneId?: string | null;
+}
+
+/** Рівні, з яких складено рішення (режим `levels`). */
+export interface FlcLevelStep {
+  level: CharacterDecisionLevel;
+  id: string;
+  action: string | null;
+  reused: boolean;
+  source: string;
+  scores: Record<string, number>;
 }
 
 export interface FlcCycleResult {
@@ -45,7 +67,12 @@ export interface FlcCycleResult {
   snapshot: CharacterSnapshot;
   decision: DecisionResult;
   fallbackReason: string | null;
-  draft: { reply: string; intent: string; action: string; model: string };
+  /** null — рівень чекає автора, чернетки немає (режим `levels`). */
+  draft: { reply: string; intent: string; action: string; model: string } | null;
+  mode: 'single' | 'levels';
+  levels: FlcLevelStep[];
+  awaitingAuthor: boolean;
+  blockedAt: CharacterDecisionLevel | null;
   timings: { retrieval: number; profile: number; decision: number; llm: number; total: number };
   cost: { jevInputTokens: number; jevUsd: number; llmInputTokens: number; llmOutputTokens: number };
   trace: readonly TraceEvent[];
@@ -112,12 +139,30 @@ export async function runFlcCycle(deps: FlcCycleDeps, req: FlcCycleRequest): Pro
       run: async (args: { snapshot: CharacterSnapshot }) => evaluateWithFallback(deps.jev, deps.fallback, args.snapshot, interrogationQuestions(args.snapshot.allowed_actions)),
     },
     {
+      name: 'decide-character-levels',
+      description: 'Три рівні Jev (стратегічний → сценічний → тактичний) з кешем, валідатором і рішенням автора.',
+      run: async (args: { situation: string }, scope) =>
+        new JevDecisionAdapter({ repo: deps.repo, jev: deps.jev, fallback: deps.fallback, studio: async () => deps.studio }).decide({
+          projectId: scope.projectId,
+          characterId: scope.characterId,
+          level: 'tactical',
+          actor: req.actorId as CharacterDecisionRow['createdBy'],
+          asOfChapter: upto,
+          sceneId: req.sceneId ?? null,
+          situation: args.situation,
+          allowedActions: allowed,
+          simulationId,
+          turnIndex: 0,
+        }),
+    },
+    {
       name: 'draft-reply',
       description: 'LLM пише репліку героя за рішенням — чернетка, не канон.',
-      run: async (args: { snapshot: CharacterSnapshot; decision: DecisionResult }) => {
+      run: async (args: { snapshot: CharacterSnapshot; decision: DecisionResult; context?: string }) => {
         const system = [
           `Ти — ${args.snapshot.name}, персонаж книги. Відповідай від першої особи, українською, 1–4 речення.`,
-          `Дія, яку обрано для героя: «${args.decision.selected_action}»; сила страху (0–10): ${args.decision.scores.fear_intensity ?? 'невідомо'}.`,
+          `Дія, яку обрано для героя: «${args.decision.selected_action}»; сила страху (0–10): ${args.decision.scores.fear_intensity ?? args.decision.scores.fear ?? 'невідомо'}.`,
+          ...(args.context ? [args.context] : []),
           'Використовуй лише факти зі знімка; не розкривай того, чого герой не знає. Це дослідницька чернетка, не канон.',
           'Поверни ЛИШЕ JSON: {"reply": "репліка героя", "intent": "намір одним реченням"}.',
         ].join('\n');
@@ -145,6 +190,8 @@ export async function runFlcCycle(deps: FlcCycleDeps, req: FlcCycleRequest): Pro
   const snapCheck = validateSnapshot(snapshot);
   if (!snapCheck.ok) throw new Error(`Знімок героя не відповідає контракту: ${snapCheck.errors.join('; ')}`);
   const profileMs = Date.now() - tp;
+
+  if (req.mode === 'levels') return levelsTail(deps, req, { runtime, simulationId, snapshot, t0, retrieval, profileMs });
 
   const td = Date.now();
   const { decision, fallbackReason } = await runtime.step('character-agent', ['evaluate-character-options'], (ctx) =>
@@ -202,5 +249,95 @@ export async function runFlcCycle(deps: FlcCycleDeps, req: FlcCycleRequest): Pro
     },
     trace: runtime.trace,
     canonChanged: false,
+    mode: 'single',
+    levels: [],
+    awaitingAuthor: false,
+    blockedAt: null,
+  };
+}
+
+type Draft = { reply: string; intent: string; model: string; inputTokens: number; outputTokens: number };
+
+/** Режим `levels`: рішення — трьома рівнями; чернетка — лише коли жоден рівень не чекає автора. */
+async function levelsTail(
+  deps: FlcCycleDeps,
+  req: FlcCycleRequest,
+  c: { runtime: InProcessAgentRuntime; simulationId: string; snapshot: CharacterSnapshot; t0: number; retrieval: number; profileMs: number },
+): Promise<FlcCycleResult> {
+  const { runtime, snapshot } = c;
+  const td = Date.now();
+  const r = await runtime.step('character-agent', ['decide-character-levels'], (ctx) => ctx.tool<DecideResult>('decide-character-levels', { situation: req.question }));
+  const rows = new Map<string, CharacterDecisionRow>();
+  for (const s of r.chain) {
+    const row = await deps.repo.getCharacterDecision(req.projectId, s.id);
+    if (row) rows.set(row.id, row);
+  }
+  rows.set(r.decision.id, r.decision);
+  const steps: FlcLevelStep[] = [...r.chain, { level: r.decision.level, id: r.decision.id, reused: r.reused }].map((s) => {
+    const row = rows.get(s.id)!;
+    const res = (row.result ?? {}) as Partial<DecisionResult>;
+    return { level: s.level, id: s.id, action: row.selectedAction, reused: s.reused, source: row.source, scores: { ...(res.scores ?? {}) } };
+  });
+  const decisionMs = Date.now() - td;
+  // Вартість — лише рівнів, порахованих у цьому циклі (з кешу — безкоштовно).
+  let jevTokens = 0;
+  let fbIn = 0;
+  let fbOut = 0;
+  for (const s of steps) {
+    if (s.reused) continue;
+    const row = rows.get(s.id)!;
+    const u = row.usage as { input_tokens?: number; output_tokens?: number };
+    if (row.modelVersion.startsWith('llm:')) {
+      fbIn += Number(u.input_tokens) || 0;
+      fbOut += Number(u.output_tokens) || 0;
+    } else if (row.source === 'jev') jevTokens += Number(u.input_tokens) || 0;
+  }
+  const decision = (r.decision.result ?? null) as unknown as DecisionResult | null;
+  let draft: Draft | null = null;
+  let llmMs = 0;
+  if (!r.awaitingAuthor && decision) {
+    const [strategic, scene] = steps;
+    const context = [
+      strategic?.action ? `Траєкторія героя: ${strategic.action}.` : '',
+      scene?.action ? `Мотив у сцені: ${scene.action}; ${Object.entries(scene.scores).map(([k, v]) => `${k} ${v}/10`).join(', ')}.` : '',
+    ].filter(Boolean).join(' ');
+    const withFear: DecisionResult = { ...decision, scores: { ...decision.scores, ...(scene?.scores.fear != null && decision.scores.fear == null ? { fear: scene.scores.fear } : {}) } };
+    const tl = Date.now();
+    draft = await runtime.step('character-agent', ['draft-reply'], (ctx) => ctx.tool<Draft>('draft-reply', { snapshot, decision: withFear, context }));
+    llmMs = Date.now() - tl;
+  }
+  const empty: DecisionResult = {
+    selected_action: '',
+    scores: {},
+    raw_distributions: {},
+    confidence: null,
+    model_version: r.decision.modelVersion,
+    snapshot_hash: r.decision.snapshotHash,
+    decision_trace_id: r.decision.id,
+    source: 'llm_fallback',
+    corrected: false,
+    usage: { input_tokens: 0, output_tokens: 0 },
+    latency_ms: 0,
+  };
+  return {
+    simulationId: c.simulationId,
+    decisionId: r.decision.id,
+    snapshot,
+    decision: decision ?? empty,
+    fallbackReason: r.decision.fallbackReason,
+    draft: draft && decision ? { reply: draft.reply, intent: draft.intent, action: decision.selected_action, model: draft.model } : null,
+    timings: { retrieval: c.retrieval, profile: c.profileMs, decision: decisionMs, llm: llmMs, total: Date.now() - c.t0 },
+    cost: {
+      jevInputTokens: jevTokens,
+      jevUsd: Math.round((jevTokens / 1_000_000) * JEV_USD_PER_MTOK * 1e8) / 1e8,
+      llmInputTokens: (draft?.inputTokens ?? 0) + fbIn,
+      llmOutputTokens: (draft?.outputTokens ?? 0) + fbOut,
+    },
+    trace: runtime.trace,
+    canonChanged: false,
+    mode: 'levels',
+    levels: steps,
+    awaitingAuthor: r.awaitingAuthor,
+    blockedAt: r.blockedAt,
   };
 }
