@@ -6,6 +6,9 @@
  * рівень не off; допит — лише з героєм; питання ставить лише автор; хід
  * героя — з героєм; тег — лише до фрагмента; вирішує пропозицію лише автор і
  * лише один раз), сховища в пам'яті й PostgreSQL.
+ *
+ * В2: «AI-персонаж» і рівні автономності — налаштування (лише відомі поля),
+ * допит лише для увімкненого героя, маршрути `…/agent` і `…/agents`, права.
  * PostgreSQL — з CORE_TEST_DATABASE_URL (схема `fusion_core` видаляється —
  * лише тестова база!).
  *
@@ -19,6 +22,10 @@ import { syncBookToCore } from '../server/core/sync.ts';
 import { reconcileParagraphIds } from '../src/utils/paragraphIds.ts';
 import { checkCanonProposal, checkCharacterAgent, checkSimulation, checkSimulationEvent, checkSimulationPatch } from '../server/core/rules.ts';
 import type { CoreRepository } from '../server/core/types.ts';
+import { getAgent, normalizeAgentConfig, requireInterviewAgent, setAgent } from '../server/core/interview.ts';
+import { registerProjectRoutes } from '../server/core/projectRoutes.ts';
+import express from 'express';
+import type { AddressInfo } from 'node:net';
 
 let pass = 0;
 let fail = 0;
@@ -128,7 +135,74 @@ async function repoSuite(label: string, repo: CoreRepository, P: string) {
   return { olena, sim };
 }
 
+async function agentSuite(label: string, repo: CoreRepository, P: string) {
+  console.log(`\n«AI-персонаж» і рівні автономності — В2 (${label}):`);
+  const sec = (id: string, order: number, content: string) => {
+    const r = reconcileParagraphIds({ sectionId: id, content });
+    return { id, title: id, order, content, paragraphIds: r.ids, paragraphHashes: r.hashes };
+  };
+  await syncBookToCore(repo, {
+    id: P, ownerId: 'u-owner', title: 'Архів',
+    book: { id: P, title: 'Архів', characters: [{ id: 'c-o', name: 'Олена' }, { id: 'c-m', name: 'Марко' }], chapters: [{ id: 'ch1', title: 'Гл. 1', order: 0, sections: [sec('s1', 0, '[/character:Олена] [/character:Марко] [/location:Лабораторія] Марко звинуватив Олену.')] }] },
+  } as any);
+  const olena = (await repo.resolveAlias(P, 'character', 'Олена'))!;
+  const marko = (await repo.resolveAlias(P, 'character', 'Марко'))!;
+  const lab = (await repo.resolveAlias(P, 'location', 'Лабораторія'))!;
+
+  t('налаштування: лише відомі поля, невідоме відкинуто; межі',
+    JSON.stringify(normalizeAgentConfig({ asOfChapter: '2', sceneId: 's1', note: ' говорить коротко ', maxTurns: 12, secret: 'x' })) === JSON.stringify({ asOfChapter: 2, sceneId: 's1', note: 'говорить коротко', maxTurns: 12 }) &&
+    (await code(() => normalizeAgentConfig({ asOfChapter: 0 }))) === 'bad_input' && (await code(() => normalizeAgentConfig({ maxTurns: 1000 }))) === 'bad_input' && (await code(() => normalizeAgentConfig([]))) === 'bad_input');
+  const v0 = await getAgent(repo, P, olena);
+  t('типово — вимкнено', !v0.enabled && v0.autonomyLevel === 'off' && v0.updatedBy === null);
+  t('допит вимкненого героя — conflict з підказкою', (await code(() => requireInterviewAgent(repo, P, olena))) === 'conflict');
+  const v1 = await setAgent(repo, P, olena, { autonomyLevel: 'interview', config: { asOfChapter: 1, note: 'уникає прямих відповідей' } }, 'user:u-owner');
+  t('увімкнено «Допит» з налаштуваннями', v1.enabled && v1.autonomyLevel === 'interview' && v1.config.asOfChapter === 1 && v1.config.note === 'уникає прямих відповідей' && v1.updatedBy === 'user:u-owner');
+  const v2 = await setAgent(repo, P, olena, { config: { maxTurns: 10 } }, 'user:u-ed');
+  t('зміна лише налаштувань — рівень і решта полів збережені', v2.autonomyLevel === 'interview' && v2.config.asOfChapter === 1 && v2.config.maxTurns === 10 && v2.updatedBy === 'user:u-ed');
+  t('допит увімкненого — так (герой і агент)', (await requireInterviewAgent(repo, P, olena)).hero.name === 'Олена');
+  await setAgent(repo, P, olena, { autonomyLevel: 'scene' }, 'user:u-owner');
+  t('«учасник сцени» включає допит', (await code(() => requireInterviewAgent(repo, P, olena))) === 'ok');
+  t('поганий рівень — bad_input; не герой (місце) чи невідомий — not_found',
+    (await code(() => setAgent(repo, P, olena, { autonomyLevel: 'god' }, 'user:u'))) === 'bad_input' &&
+    (await code(() => setAgent(repo, P, lab, { autonomyLevel: 'interview' }, 'user:u'))) === 'not_found' &&
+    (await code(() => getAgent(repo, P, '00000000-0000-4000-8000-000000000000'))) === 'not_found');
+
+  const access = {
+    async getBookOwnerId(x: string) { return x === P ? 'u-owner' : null; },
+    async getCollabOwnerId() { return undefined; },
+    async listAcceptedInvites() { return [{ acceptedUserId: 'u-reader', role: 'reader' }, { acceptedUserId: 'u-ed', role: 'editor' }]; },
+  };
+  const who: Record<string, any> = { owner: { id: 'u-owner', role: 'writer', isGuest: false }, reader: { id: 'u-reader', role: 'writer', isGuest: false }, editor: { id: 'u-ed', role: 'writer', isGuest: false }, stranger: { id: 'u-x', role: 'writer', isGuest: false } };
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => { (req as any).principal = who[String(req.headers['x-user'])]; next(); });
+  registerProjectRoutes(app, { access, repo: () => repo, coreState: () => 'ready' });
+  const server = app.listen(0);
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/projects/${P}`;
+  const call = async (user: string, method: string, path: string, body?: unknown) => {
+    const r = await fetch(`${base}${path}`, { method, headers: { 'x-user': user, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    return { status: r.status, body: (await r.json().catch(() => ({}))) as any };
+  };
+  try {
+    const g = await call('reader', 'GET', `/characters/${marko}/agent`);
+    t('GET …/agent (читач): вимкнено, три рівні з описом, «учасник сцени» — ще недоступний, без права змінювати',
+      g.status === 200 && g.body.agent.autonomyLevel === 'off' && Object.keys(g.body.levels).join() === 'off,interview,scene' && g.body.levels.scene.available === false && g.body.canEdit === false);
+    t('права: читач не вмикає (403), чужий не бачить (403)', (await call('reader', 'POST', `/characters/${marko}/agent`, { autonomyLevel: 'interview' })).status === 403 && (await call('stranger', 'GET', `/characters/${marko}/agent`)).status === 403);
+    const on = await call('editor', 'POST', `/characters/${marko}/agent`, { autonomyLevel: 'interview', config: { maxTurns: 15 } });
+    t('POST (редактор) — увімкнено; поганий рівень — 422; не герой — 404',
+      on.status === 200 && on.body.agent.enabled && on.body.agent.config.maxTurns === 15 &&
+      (await call('owner', 'POST', `/characters/${marko}/agent`, { autonomyLevel: 'x' })).status === 422 && (await call('owner', 'POST', `/characters/${lab}/agent`, { autonomyLevel: 'interview' })).status === 404);
+    const list = await call('reader', 'GET', '/agents');
+    t('GET /agents — усі увімкнені AI-персонажі з іменами', list.status === 200 && list.body.agents.map((a: any) => a.name).sort().join() === 'Марко,Олена');
+    await call('owner', 'POST', `/characters/${marko}/agent`, { autonomyLevel: 'off' });
+    t('вимкнено — зникає з переліку', (await call('owner', 'GET', '/agents')).body.agents.map((a: any) => a.name).join() === 'Олена');
+  } finally {
+    server.close();
+  }
+}
+
 await repoSuite('memory', new MemoryCoreRepository(), 'int-m');
+await agentSuite('memory', new MemoryCoreRepository(), 'agt-m');
 const url = process.env.CORE_TEST_DATABASE_URL?.trim();
 if (!url) {
   console.log('\nPostgreSQL: пропущено (CORE_TEST_DATABASE_URL не задано) — перевірено на сховищі в пам\'яті');
@@ -140,6 +214,7 @@ if (!url) {
     const { rows } = await pool.query(`SELECT max(version) AS v FROM ${CORE_SCHEMA}.core_schema_migrations`);
     t('схема ядра — не старіша за v17 (допит)', Number(rows[0].v) >= 17, `v${rows[0].v}`);
     const { olena, sim } = await repoSuite('postgres', new PgCoreRepository(pool), 'int-p');
+    await agentSuite('postgres', new PgCoreRepository(pool), 'agt-p');
     const refused = async (sql: string, params: unknown[]) => {
       try {
         await pool.query(sql, params);

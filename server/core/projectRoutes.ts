@@ -53,6 +53,7 @@ import { decisionView, decisionsSummary } from './jevDecisions';
 import { buildCharacterSnapshot } from './characterSnapshot';
 import { addAuthorMemory, collectTagMemories, memoryViews, reviewMemory } from './characterMemory';
 import { AI_MEMORY_JOB_KIND } from './memoryAi';
+import { AUTONOMY_LABELS, agentView, getAgent, setAgent } from './interview';
 import { scanScenes } from './timeline';
 import { CHARACTER_MEMORY_STATUSES, CHARACTER_MEMORY_TYPES, type CharacterMemoryStatus, type CharacterMemoryType } from './types';
 import { DEFAULT_TACTICAL_ACTIONS } from './jevLevels';
@@ -2180,6 +2181,32 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       }
       throw err;
     }
+  }));
+
+  // ── Т2.7 В2: «AI-персонаж» і рівні автономності (ТЗ-H §11 `…/agent`) ──────
+
+  /** Стан «AI-персонажа» героя (типово — вимкнено) і опис рівнів. Бачить кожен учасник книги. */
+  app.get('/api/projects/:id/characters/:entityId/agent', withRepo(async (repo, req, res) => {
+    const agent = await getAgent(repo, req.params.id, req.params.entityId);
+    res.json({ agent, levels: AUTONOMY_LABELS, canEdit: canEditStory(req.projectAccess!) });
+  }));
+
+  /** Увімкнути / вимкнути, рівень (`off` / `interview` / `scene`), налаштування (межа знань, сцена, нотатка, ліміт ходів). */
+  app.post('/api/projects/:id/characters/:entityId/agent', withRepo(async (repo, req, res) => {
+    if (!canEditStory(req.projectAccess!)) {
+      res.status(403).json({ error: '«AI-персонажа» вмикають власник, співавтор, редактор і адміністратор.', kind: 'forbidden' });
+      return;
+    }
+    const b = req.body ?? {};
+    const agent = await setAgent(repo, req.params.id, req.params.entityId, { autonomyLevel: b.autonomyLevel, config: b.config }, `user:${req.projectAccess!.userId}`);
+    res.json({ agent });
+  }));
+
+  /** Усі AI-персонажі книги (для переліку героїв і, далі, Magic Scene). */
+  app.get('/api/projects/:id/agents', withRepo(async (repo, req, res) => {
+    const names = new Map((await repo.listEntities(req.params.id)).map((e) => [e.id, e.name]));
+    const agents = (await repo.listCharacterAgents(req.params.id)).filter((a) => a.enabled).map((a) => ({ ...agentView(a.characterId, a), name: names.get(a.characterId) ?? '?' }));
+    res.json({ agents });
   }));
 
   /** Зв'язки проєкту або однієї сутності (`?entityId=`). */
