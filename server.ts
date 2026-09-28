@@ -206,6 +206,7 @@ import { AI_PROFILE_JOB_KIND, aiProfileJobKind, studioFromBook } from './server/
 import { AI_EMOTIONS_JOB_KIND, aiEmotionsJobKind } from './server/core/emotions';
 import { AI_VISUAL_JOB_KIND, aiVisualJobKind } from './server/core/visualAi';
 import { AI_CONTINUITY_JOB_KIND, aiContinuityJobKind } from './server/core/continuityAi';
+import { AI_MEMORY_JOB_KIND, aiMemoryJobKind } from './server/core/memoryAi';
 import { assetIdFromUrl as mediaAssetIdFromUrl, readAsset as readMediaAsset } from './server/media/mediaLibraryStore';
 
 /**
@@ -6234,6 +6235,16 @@ ${JSON.stringify(bookContext || {}, null, 2)}
   registerCoreJobKind(
     AI_CONTINUITY_JOB_KIND,
     aiContinuityJobKind({
+      repo: getCoreRepository,
+      generate: aiRoleGenerateViaCore,
+      resolveModel: (module) => resolveModuleModelId(module),
+      loadTemplate: loadCoreAiRoleTemplate,
+    }),
+  );
+  // Пам'ять героя (Т2.6 В4): AI-2 тлумачить події розділу очима кожного учасника — пропозиції спогадів, на розгляд автору.
+  registerCoreJobKind(
+    AI_MEMORY_JOB_KIND,
+    aiMemoryJobKind({
       repo: getCoreRepository,
       generate: aiRoleGenerateViaCore,
       resolveModel: (module) => resolveModuleModelId(module),

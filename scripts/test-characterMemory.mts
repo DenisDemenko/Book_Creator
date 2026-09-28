@@ -20,6 +20,13 @@
  * решта й спогади прогонів — без змін; сповіщення; «перевірити» — не в
  * пам'яті героя; автор: «досі так» (новий відбиток), «відхилити», «оновити з
  * тегів» (тег змінився — новий спогад; тегу немає — нічого).
+ *
+ * В4: AI-2 тлумачить подію очима кожного учасника (фонова задача
+ * `ai_memory`) — КРИТЕРІЙ FLC 2.0: сварка Сергія й Анни — один факт, дві
+ * різні інтерпретації (Сергій: «Анна збрехала» → перевірити її слова; Анна:
+ * «Сергій більше не довіряє» → приховати ще одну обставину), кожна лише в
+ * пам'яті свого героя; окремий запит на героя (приватне одного не йде в
+ * запит іншого); лише пропозиції з доказами; повторний прогін не дублює.
  * PostgreSQL — з CORE_TEST_DATABASE_URL (схема `fusion_core` видаляється —
  * лише тестова база!).
  *
@@ -34,6 +41,12 @@ import { reconcileParagraphIds } from '../src/utils/paragraphIds.ts';
 import { checkCharacterMemory, checkCharacterMemoryStatus } from '../server/core/rules.ts';
 import { addAuthorMemory, collectTagMemories, heroMemories, isVisibleToHero, memoriesAt, memoryEvidenceHash, reviewMemory } from '../server/core/characterMemory.ts';
 import type { CharacterMemoryInput, CoreRepository } from '../server/core/types.ts';
+import { MemoryJobStore } from '../server/core/jobs/memoryJobStore.ts';
+import { PgJobStore } from '../server/core/jobs/pgJobStore.ts';
+import { JobQueue } from '../server/core/jobs/queue.ts';
+import type { JobStore } from '../server/core/jobs/types.ts';
+import type { AiGenerateInput } from '../server/core/ai/roles.ts';
+import { AI_MEMORY_JOB_KIND, aiMemoryJobKind } from '../server/core/memoryAi.ts';
 
 let pass = 0;
 let fail = 0;
@@ -364,9 +377,109 @@ async function reviewSuite(label: string, repo: CoreRepository, P: string) {
   void q2;
 }
 
+async function aiSuite(label: string, repo: CoreRepository, jobStore: JobStore, P: string) {
+  console.log(`\nAI-2 тлумачить подію очима учасників — В4 (${label}):`);
+  const sec = (id: string, order: number, content: string) => {
+    const r = reconcileParagraphIds({ sectionId: id, content });
+    return { id, title: id, order, content, paragraphIds: r.ids, paragraphHashes: r.hashes };
+  };
+  await syncBookToCore(repo, {
+    id: P, ownerId: 'u-owner', title: 'Кухня',
+    book: {
+      id: P, title: 'Кухня', characters: [{ id: 'c-s', name: 'Сергій' }, { id: 'c-a', name: 'Анна' }, { id: 'c-m', name: 'Марко' }],
+      chapters: [{ id: 'ch1', title: 'Гл. 1', order: 0, sections: [
+        sec('s0', 0, '[/character:Анна] Анна сховала лист у шухляду.\n\n[/character:Марко] Марко ремонтував авто.'),
+        sec('s1', 1, '[/character:Сергій] [/character:Анна] [/conflict:Сварка на кухні] Сергій спитав про лист, Анна сказала, що нічого не знає.\n\nСергій грюкнув дверима.'),
+        sec('s2', 2, '[/character:Марко] Марко їхав містом.'),
+      ] }],
+    },
+  } as any);
+  const serhii = (await repo.resolveAlias(P, 'character', 'Сергій'))!;
+  const anna = (await repo.resolveAlias(P, 'character', 'Анна'))!;
+  const quarrel = (await repo.resolveAlias(P, 'conflict', 'Сварка на кухні'))!;
+  const [a0] = (await repo.listParagraphs(P, 's0')).sort((a, b) => a.order - b.order).map((p) => p.id);
+  const [p1, p2] = (await repo.listParagraphs(P, 's1')).sort((a, b) => a.order - b.order).map((p) => p.id);
+  // Пам'ять героїв станом на сварку: приватне Анни (лист) і переконання Сергія.
+  await addAuthorMemory(repo, { projectId: P, characterId: anna, memoryType: 'recollection', content: 'Я сховала лист у шухляду — ніхто не має знати.', sourceParagraphIds: [a0], visibility: 'hidden', actor: 'user:u-owner' });
+  await addAuthorMemory(repo, { projectId: P, characterId: serhii, memoryType: 'belief', content: 'Анна щось від мене приховує останнім часом.', actor: 'user:u-owner' });
+
+  const calls: AiGenerateInput[] = [];
+  const generate = async (input: AiGenerateInput) => {
+    calls.push(input);
+    const heroIs = (n: string) => input.user.includes(`ОЧИМА героя «${n}»`);
+    const findings = heroIs('Сергій')
+      ? [
+          { kind: 'memory_recollection', summary: 'Сергій вважає, що Анна збрехала йому просто в очі.', about: ['Анна'], paragraph_ids: [p1], quote: 'нічого не знає', confidence: 0.8 },
+          { kind: 'memory_consequence', summary: 'Сергій більше не вірить Анні й вирішує перевірити її слова.', trust: [{ towards: 'Анна', delta: -5 }], fear_delta: 0, goals: ['перевірити слова Анни'], paragraph_ids: [p1, p2], confidence: 0.7 },
+          { kind: 'memory_belief', summary: 'Анна в змові з Марком.', about: ['Марко'], paragraph_ids: [a0], confidence: 0.4 },
+        ]
+      : [
+          { kind: 'memory_recollection', summary: 'Анна вважає, що Сергій більше їй не довіряє.', about: ['Сергій'], paragraph_ids: [p1, p2], confidence: 0.8 },
+          { kind: 'memory_consequence', summary: 'Анна вирішує приховати ще одну обставину.', trust: [{ towards: 'Сергій', delta: -1 }], goals: ['приховати ще одну обставину'], paragraph_ids: [p2], confidence: 0.7 },
+          { kind: 'memory_belief', summary: 'Сергій знає про лист.', certainty: 'doubts', truth: 'false', about: ['Сергій'], paragraph_ids: [p1], confidence: 0.5 },
+          { kind: 'continuity_issue', summary: 'Не той вид.', paragraph_ids: [p1], confidence: 0.5 },
+        ];
+    return { text: JSON.stringify({ findings }), modelId: 'fake-ai2', engine: 'fake', inputTokens: 100, outputTokens: 50, costUsd: 0.001 };
+  };
+  let clock = Date.parse('2026-09-28T10:00:00Z');
+  const q = new JobQueue(jobStore, { workerId: 'w', now: () => new Date(clock), log: () => {} });
+  q.register(AI_MEMORY_JOB_KIND, aiMemoryJobKind({ repo: () => repo, generate, resolveModel: async () => 'fake-ai2' }));
+  const run = async (payload: Record<string, unknown>) => {
+    const { job } = await q.enqueue({ projectId: P, kind: AI_MEMORY_JOB_KIND, payload, createdBy: 'user:u-owner' });
+    await q.runOnce();
+    clock += 61_000;
+    return (await jobStore.get(P, job.id))!;
+  };
+  const j = await run({ sectionId: 's1' });
+  const r = j.result as any;
+  t('задача: окремий виклик AI-2 на кожного учасника сварки (Сергій, Анна), модуль coreAi2Analysis', calls.length === 2 && calls.every((c) => c.module === 'coreAi2Analysis') && r?.heroes?.length === 2, JSON.stringify(r ?? j.error));
+  const sPrompt = calls.find((c) => c.user.includes('ОЧИМА героя «Сергій»'))!.user;
+  const aPrompt = calls.find((c) => c.user.includes('ОЧИМА героя «Анна»'))!.user;
+  t('ТЗ-H §5.1: приватне Анни (лист у шухляді) — лише в її запиті; переконання Сергія — лише в його; абзаци — лише цього розділу',
+    aPrompt.includes('сховала лист') && !sPrompt.includes('сховала лист') && sPrompt.includes('щось від мене приховує') && !aPrompt.includes('щось від мене приховує') &&
+    sPrompt.includes(`[${p1}]`) && !sPrompt.includes(`[${a0}]`) && !aPrompt.includes(`[${a0}]`));
+  const sm = (await repo.listCharacterMemories(P, { characterId: serhii })).filter((m) => m.origin === 'ai');
+  const am = (await repo.listCharacterMemories(P, { characterId: anna })).filter((m) => m.origin === 'ai');
+  const sRec = sm.find((m) => m.memoryType === 'recollection')!;
+  const aRec = am.find((m) => m.memoryType === 'recollection')!;
+  t('КРИТЕРІЙ FLC 2.0: один факт (сварка) — дві різні інтерпретації, кожна в пам\'яті свого героя',
+    !!sRec && !!aRec && sRec.sourceEventId === quarrel && aRec.sourceEventId === quarrel && /Анна збрехала/.test(sRec.content) && /не довіряє/.test(aRec.content) &&
+    sRec.content !== aRec.content && !sm.some((m) => /не довіряє/.test(m.content)) && !am.some((m) => /збрехала/.test(m.content)));
+  const sCons = sm.find((m) => m.memoryType === 'consequence')!;
+  const aCons = am.find((m) => m.memoryType === 'consequence')!;
+  t('наслідки: Сергій — довіра до Анни ↓ (обмежено −3), мета «перевірити слова Анни»; Анна — приховати ще одну обставину',
+    (sCons.effects.trust as any)[0].towards === anna && (sCons.effects.trust as any)[0].delta === -3 && (sCons.effects.goals as string[])[0] === 'перевірити слова Анни' &&
+    (aCons.effects.goals as string[])[0] === 'приховати ще одну обставину' && sCons.aboutEntityIds.includes(anna), JSON.stringify(sCons.effects));
+  const aBel = am.find((m) => m.memoryType === 'belief')!;
+  t('хибне переконання Анни: «сумнівається», truth = false, шар — переконання', aBel.beliefStatus === 'doubts' && aBel.truth === 'false' && aBel.layer === 'character_belief');
+  t('лише пропозиції AI з доказами розділу, відбитком, сценою, ревізією; тлумачення без абзацу розділу й чужий вид — відкинуто',
+    [...sm, ...am].every((m) => m.status === 'suggested' && m.createdBy === 'ai:AI-2' && m.sceneId === 's1' && m.sourceParagraphIds.every((id) => id === p1 || id === p2) && !!m.evidenceHash && m.canonRevision !== null) &&
+    sm.length === 2 && am.length === 3 && r.heroes.find((h: any) => h.characterId === serhii).rejected === 1 && r.heroes.find((h: any) => h.characterId === anna).rejected === 1, JSON.stringify(r.heroes));
+  const findings = (await repo.listFindings(P, { entityId: serhii })).filter((f) => f.kind === 'memory_proposal');
+  t('аудит: висновки AI-2 в analysis_findings (прогін, модель, доказ)', findings.length === 2 && findings.every((f) => !!f.runId && f.sourceParagraphIds.length > 0));
+  t('до підтвердження автора — не в пам\'яті героя', !(await memoriesAt(repo, P, serhii, { sceneId: 's2' })).memories.some((m) => m.origin === 'ai'));
+  t('AI не підтверджує сам', (await code(() => repo.setCharacterMemoryStatus(P, sRec.id, 'confirmed', 'ai:AI-2'))) === 'confirmed_is_author_only');
+  await reviewMemory(repo, P, sRec.id, 'confirm', 'user:u-owner');
+  await reviewMemory(repo, P, aRec.id, 'confirm', 'user:u-owner');
+  const sAfter = (await memoriesAt(repo, P, serhii, { sceneId: 's2' })).memories;
+  const aAfter = (await memoriesAt(repo, P, anna, { sceneId: 's2' })).memories;
+  t('підтверджено автором — у пам\'яті свого героя станом на наступну сцену, не в пам\'яті іншого',
+    sAfter.some((m) => m.id === sRec.id) && !sAfter.some((m) => m.id === aRec.id) && aAfter.some((m) => m.id === aRec.id) && !aAfter.some((m) => m.id === sRec.id));
+  await reviewMemory(repo, P, aBel.id, 'reject', 'user:u-owner');
+  calls.length = 0;
+  const j2 = await run({ sectionId: 's1' });
+  t('повторний прогін: нових пропозицій немає — ні підтверджене, ні відхилене не повторюється', (j2.result as any)?.proposals === 0 && calls.length === 2 && calls[1].user.includes('не повторювати'), JSON.stringify(j2.result));
+  calls.length = 0;
+  const j3 = await run({ sectionId: 's1', characterIds: [anna] });
+  t('лише обраний герой — один виклик', calls.length === 1 && calls[0].user.includes('ОЧИМА героя «Анна»') && (j3.result as any).heroes.length === 1);
+  t('розділу немає — no_section; герой не учасник — no_heroes',
+    ((await run({ sectionId: 'nope' })).result as any).status === 'no_section' && ((await run({ sectionId: 's2', characterIds: [serhii] })).result as any).status === 'no_heroes');
+}
+
 await repoSuite('memory', new MemoryCoreRepository(), 'mem-m');
 await tagsSuite('memory', new MemoryCoreRepository(), 'tag-m');
 await reviewSuite('memory', new MemoryCoreRepository(), 'rev-m');
+await aiSuite('memory', new MemoryCoreRepository(), new MemoryJobStore(), 'ai-m');
 const url = process.env.CORE_TEST_DATABASE_URL?.trim();
 if (!url) {
   console.log('\nPostgreSQL: пропущено (CORE_TEST_DATABASE_URL не задано) — перевірено на сховищі в пам\'яті');
@@ -380,6 +493,7 @@ if (!url) {
     const { serhii } = await repoSuite('postgres', new PgCoreRepository(pool), 'mem-p');
     await tagsSuite('postgres', new PgCoreRepository(pool), 'tag-p');
     await reviewSuite('postgres', new PgCoreRepository(pool), 'rev-p');
+    await aiSuite('postgres', new PgCoreRepository(pool), new PgJobStore(pool), 'ai-p');
     const ins = async (cols: string, vals: string) => {
       try {
         await pool.query(`INSERT INTO ${CORE_SCHEMA}.character_memories (project_id, character_id, ${cols}) VALUES ('mem-p', $1, ${vals})`, [serhii]);
