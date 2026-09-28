@@ -744,6 +744,9 @@ export type CharacterMemoryInput = Pick<CharacterMemoryRow, 'projectId' | 'chara
   dedupeKey?: string | null;
 };
 
+/** Що може змінити автор чи перевірка (В3): зміст, певність, правда, видимість, наслідки, докази, ревізія. */
+export type CharacterMemoryPatch = Partial<Pick<CharacterMemoryRow, 'content' | 'effects' | 'beliefStatus' | 'truth' | 'visibility' | 'evidenceHash' | 'canonRevision' | 'aboutEntityIds'>>;
+
 export interface CharacterMemoryFilter {
   characterId?: string;
   memoryType?: CharacterMemoryType;
@@ -969,6 +972,8 @@ export interface CoreRepository {
   getCharacterMemory(projectId: string, id: string): Promise<CharacterMemoryRow | null>;
   listCharacterMemories(projectId: string, filter?: CharacterMemoryFilter): Promise<CharacterMemoryRow[]>;
   setCharacterMemoryStatus(projectId: string, id: string, status: CharacterMemoryStatus, actor: CoreActor, note?: string | null): Promise<CharacterMemoryRow>;
+  /** Змінити поля спогаду (не вид, не шар, не прогін / канон, не джерело); замінений — conflict. */
+  updateCharacterMemory(projectId: string, id: string, patch: CharacterMemoryPatch, actor: CoreActor): Promise<CharacterMemoryRow>;
   /** Стан героя на сцену (кеш будівника знімка, В5): додати й узяти найновіший за героєм, сценою, прогоном і ревізією. */
   addCharacterState(input: CharacterStateInput): Promise<CharacterStateRow>;
   getCharacterState(projectId: string, key: { characterId: string; sceneId: string | null; simulationId: string | null; canonRevision: number }): Promise<CharacterStateRow | null>;

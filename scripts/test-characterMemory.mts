@@ -14,6 +14,12 @@
  * AI; повторний збір не дублює, відхилене не відроджує), записи автора,
  * межа знань у часі — КРИТЕРІЙ ТЗ-H №5: станом на сцену немає спогадів із
  * пізніших сцен і чужої пам'яті; флешбек — за часом світу; станом на главу.
+ *
+ * В3: інвалідація за ревізією — КРИТЕРІЙ: правка сцени (синхронізація)
+ * позначає «перевірити» всі залежні спогади канону (з тегів, автора, AI),
+ * решта й спогади прогонів — без змін; сповіщення; «перевірити» — не в
+ * пам'яті героя; автор: «досі так» (новий відбиток), «відхилити», «оновити з
+ * тегів» (тег змінився — новий спогад; тегу немає — нічого).
  * PostgreSQL — з CORE_TEST_DATABASE_URL (схема `fusion_core` видаляється —
  * лише тестова база!).
  *
@@ -26,7 +32,7 @@ import { CORE_SCHEMA, loadMigrations, resolveMigrationsDir, runMigrations } from
 import { syncBookToCore } from '../server/core/sync.ts';
 import { reconcileParagraphIds } from '../src/utils/paragraphIds.ts';
 import { checkCharacterMemory, checkCharacterMemoryStatus } from '../server/core/rules.ts';
-import { addAuthorMemory, collectTagMemories, heroMemories, isVisibleToHero, memoriesAt, memoryEvidenceHash } from '../server/core/characterMemory.ts';
+import { addAuthorMemory, collectTagMemories, heroMemories, isVisibleToHero, memoriesAt, memoryEvidenceHash, reviewMemory } from '../server/core/characterMemory.ts';
 import type { CharacterMemoryInput, CoreRepository } from '../server/core/types.ts';
 
 let pass = 0;
@@ -277,8 +283,90 @@ async function tagsSuite(label: string, repo: CoreRepository, P: string) {
   void backstory;
 }
 
+async function reviewSuite(label: string, repo: CoreRepository, P: string) {
+  console.log(`\nІнвалідація за ревізією — В3 (${label}):`);
+  const prev = new Map<string, { ids: string[]; hashes: string[] }>();
+  const sec = (id: string, order: number, content: string) => {
+    const old = prev.get(id);
+    const r = reconcileParagraphIds({ sectionId: id, content, prevIds: old?.ids, prevHashes: old?.hashes });
+    prev.set(id, { ids: r.ids, hashes: r.hashes });
+    return { id, title: id, order, content, paragraphIds: r.ids, paragraphHashes: r.hashes };
+  };
+  const text = {
+    s1: '[/character:Сергій] [/character:Анна] [/conflict:Сварка на кухні] Сергій і Анна посварились.\n\n[/belief:Анна бреше @Сергій] Сергій вирішив, що Анна бреше.',
+    s2: '[/character:Сергій] [/revelation:Лист у шухляді @Сергій] Сергій знайшов лист.',
+  };
+  const sync = () => syncBookToCore(repo, {
+    id: P, ownerId: 'u-owner', title: 'Кухня',
+    book: { id: P, title: 'Кухня', characters: [{ id: 'c-s', name: 'Сергій' }, { id: 'c-a', name: 'Анна' }], chapters: [{ id: 'ch1', title: 'Гл. 1', order: 0, sections: [sec('s1', 0, text.s1), sec('s2', 1, text.s2)] }] },
+  } as any);
+  await sync();
+  const serhii = (await repo.resolveAlias(P, 'character', 'Сергій'))!;
+  const anna = (await repo.resolveAlias(P, 'character', 'Анна'))!;
+  await collectTagMemories(repo, P);
+  const [q1, q2] = (await repo.listParagraphs(P, 's1')).sort((a, b) => a.order - b.order).map((p) => p.id);
+  const author = await addAuthorMemory(repo, { projectId: P, characterId: anna, memoryType: 'recollection', content: 'Сергій на мене накричав.', sourceParagraphIds: [q1], actor: 'user:u-owner' });
+  const ai = await repo.addCharacterMemory({ projectId: P, characterId: serhii, memoryType: 'consequence', content: 'Довіра до Анни впала.', sourceEventKind: 'paragraph', sourceParagraphIds: [q1], evidenceHash: author.evidenceHash, sceneId: 's1', canonRevision: author.canonRevision, origin: 'ai', createdBy: 'ai:AI-2' });
+  const backstory = await addAuthorMemory(repo, { projectId: P, characterId: serhii, memoryType: 'belief', content: 'Людям не можна довіряти.', actor: 'user:u-owner' });
+  const run = await repo.addCharacterMemory({ projectId: P, characterId: serhii, memoryType: 'recollection', content: 'На допиті я згадав сварку.', sourceEventKind: 'simulation_event', sourceParagraphIds: [q1], origin: 'simulation', simulationId: 'run-1', createdBy: 'system:interview' });
+  const all0 = await repo.listCharacterMemories(P);
+  const byKey = (k: string) => all0.find((m) => m.dedupeKey?.startsWith(k))!;
+  const quarrelS = all0.find((m) => m.characterId === serhii && m.memoryType === 'world_fact')!;
+  const quarrelA = all0.find((m) => m.characterId === anna && m.memoryType === 'world_fact')!;
+  const belief = byKey('tag:belief');
+  const letter = byKey('tag:knowledge');
+  const revBefore = (await repo.getProject(P))!.revision;
+
+  // Автор правит перший абзац сцени 1 (сварка) — друга частина сцени й сцена 2 без змін.
+  text.s1 = text.s1.replace('Сергій і Анна посварились.', 'Сергій і Анна гучно посварились через лист.');
+  const res = await sync();
+  const st = async (id: string) => (await repo.getCharacterMemory(P, id))!;
+  t('КРИТЕРІЙ В3: правка сцени — «перевірити» всі залежні спогади канону: з тегів (обох героїв), автора, пропозиція AI',
+    (await st(quarrelS.id)).status === 'needs_review' && (await st(quarrelA.id)).status === 'needs_review' && (await st(author.id)).status === 'needs_review' && (await st(ai.id)).status === 'needs_review',
+    JSON.stringify(res.memoriesNeedReview));
+  t('решта без змін: переконання з другого абзацу, лист зі сцени 2, передісторія без доказів, спогад прогону',
+    (await st(belief.id)).status === 'confirmed' && (await st(letter.id)).status === 'confirmed' && (await st(backstory.id)).status === 'confirmed' && (await st(run.id)).status === 'suggested');
+  const flagged = await st(quarrelS.id);
+  t('хто й чому: синхронізація, примітка з ревізією; у підсумку синхронізації — 4', flagged.reviewedBy === 'system:core_sync' && /змінено \(ревізія \d+\)/.test(flagged.reviewNote ?? '') && res.memoriesNeedReview === 4 && res.revision > revBefore);
+  const notes = (await repo.listNotifications(P, 20)).filter((n) => n.kind === 'memories_need_review');
+  t('сповіщення — по одному на героя, з id спогадів і абзацом', notes.length === 2 && notes.some((n) => (n.payload as any).characterId === serhii && (n.payload as any).memoryIds.length === 2) && notes.every((n) => n.paragraphIds.includes(q1)), notes.map((n) => n.message).join(' | '));
+  t('«перевірити» — не в пам\'яті героя (fail closed); спогад прогону в прогоні — так',
+    !(await heroMemories(repo, P, { characterId: serhii })).some((m) => m.id === quarrelS.id) && (await heroMemories(repo, P, { characterId: serhii, simulationId: 'run-1' })).some((m) => m.id === run.id));
+  const again = await sync();
+  t('повторне збереження без змін — нових позначок немає', (again.memoriesNeedReview ?? 0) === 0);
+
+  // Рішення автора.
+  t('рішення — лише людина; невідомий — not_found',
+    (await code(() => reviewMemory(repo, P, author.id, 'confirm', 'ai:AI-2'))) === 'confirmed_is_author_only' && (await code(() => reviewMemory(repo, P, '00000000-0000-4000-8000-000000000000', 'confirm', 'user:u'))) === 'not_found');
+  const ok = await reviewMemory(repo, P, author.id, 'confirm', 'user:u-owner', 'досі так');
+  t('«досі так» — підтверджено, новий відбиток і ревізія; знову в пам\'яті героя',
+    ok.memory.status === 'confirmed' && ok.memory.evidenceHash !== author.evidenceHash && ok.memory.canonRevision! > author.canonRevision! && (await heroMemories(repo, P, { characterId: anna })).some((m) => m.id === author.id));
+  t('підтверджене з новим відбитком не позначається знову, доки текст той самий', ((await sync()).memoriesNeedReview ?? 0) === 0 && (await st(author.id)).status === 'confirmed');
+  t('відхилити пропозицію AI, яка «перевірити»', (await reviewMemory(repo, P, ai.id, 'reject', 'user:u-owner')).memory.status === 'rejected');
+  t('«оновити з тегів» — лише для спогаду з тегів', (await code(() => reviewMemory(repo, P, author.id, 'refresh', 'user:u-owner'))) === 'bad_input');
+  const upd = await reviewMemory(repo, P, quarrelS.id, 'refresh', 'user:u-owner');
+  t('«оновити з тегів»: старий — замінено, новий — підтверджений, з поточним відбитком (тег ще є)',
+    upd.memory.status === 'superseded' && !!upd.replacement && upd.replacement.status === 'confirmed' && upd.replacement.evidenceHash !== quarrelS.evidenceHash && upd.replacement.dedupeKey === quarrelS.dedupeKey);
+  t('замінений — більше не змінюється (conflict)', (await code(() => reviewMemory(repo, P, quarrelS.id, 'confirm', 'user:u-owner'))) === 'conflict');
+
+  // Автор прибрав тег розкриття зі сцени 2 — «оновити з тегів» нічого не створює.
+  text.s2 = 'Сергій знайшов лист.';
+  const r2 = await sync();
+  t('правка сцени 2 — лист «перевірити»', (await st(letter.id)).status === 'needs_review' && r2.memoriesNeedReview === 1);
+  const gone = await reviewMemory(repo, P, letter.id, 'refresh', 'user:u-owner');
+  t('тегу вже немає — старий замінено, нового немає', gone.memory.status === 'superseded' && gone.replacement === null);
+  // Абзац видалено зовсім.
+  text.s1 = '[/character:Сергій] [/character:Анна] [/conflict:Сварка на кухні] Сергій і Анна гучно посварились через лист.';
+  await sync();
+  const bf = await st(belief.id);
+  t('абзац-доказ видалено — «перевірити» з приміткою; «досі так» уже не можна (conflict)',
+    bf.status === 'needs_review' && /видалено/.test(bf.reviewNote ?? '') && (await code(() => reviewMemory(repo, P, belief.id, 'confirm', 'user:u-owner'))) === 'conflict');
+  void q2;
+}
+
 await repoSuite('memory', new MemoryCoreRepository(), 'mem-m');
 await tagsSuite('memory', new MemoryCoreRepository(), 'tag-m');
+await reviewSuite('memory', new MemoryCoreRepository(), 'rev-m');
 const url = process.env.CORE_TEST_DATABASE_URL?.trim();
 if (!url) {
   console.log('\nPostgreSQL: пропущено (CORE_TEST_DATABASE_URL не задано) — перевірено на сховищі в пам\'яті');
@@ -291,6 +379,7 @@ if (!url) {
     t('схема ядра — не старіша за v16 (пам\'ять героя)', Number(rows[0].v) >= 16, `v${rows[0].v}`);
     const { serhii } = await repoSuite('postgres', new PgCoreRepository(pool), 'mem-p');
     await tagsSuite('postgres', new PgCoreRepository(pool), 'tag-p');
+    await reviewSuite('postgres', new PgCoreRepository(pool), 'rev-p');
     const ins = async (cols: string, vals: string) => {
       try {
         await pool.query(`INSERT INTO ${CORE_SCHEMA}.character_memories (project_id, character_id, ${cols}) VALUES ('mem-p', $1, ${vals})`, [serhii]);

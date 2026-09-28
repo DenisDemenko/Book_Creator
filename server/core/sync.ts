@@ -25,6 +25,7 @@ import { markerStringToTiptapDoc, tiptapDocToMarkerBlocks } from '../../src/util
 import { blockHash, deterministicParagraphId, reconcileParagraphIds } from '../../src/utils/paragraphIds';
 import { CoreRuleError } from './rules';
 import { cardAppearanceHash, reconcileLegacyAssetLinks, refreshVisualReview, type LegacyImage } from './visual';
+import { refreshMemoryReview } from './characterMemory';
 import { refreshContinuityReview } from './continuity';
 import { studioAppearanceText } from './characterProfile';
 import type { CoreRepository, DocumentRow, MentionInput, ParagraphKind, ParagraphRow } from './types';
@@ -91,6 +92,8 @@ export interface CoreSyncResult {
   findingsNeedReview: number;
   /** Проблеми безперервності «на перегляд»: текст абзацу-доказу змінився (Т2.4 В6). */
   continuityNeedReview?: number;
+  /** Спогади героїв «перевірити»: змінено сцену, з якої вони (Т2.6 В3). */
+  memoriesNeedReview?: number;
   notifications: number;
   /** Зображення з книги в бібліотеці ілюстрацій (Т2.3 В2): прив'язано / прибрано. */
   /** Бібліотека ілюстрацій: перенесені з книги зв'язки (В2) і позначки «перевірити» після зміни опису (В5). */
@@ -449,6 +452,10 @@ export async function syncBookToCore(
     const continuity = await refreshContinuityReview(repo, projectId, { paragraphIds: touched });
     result.continuityNeedReview = continuity.flagged;
     result.notifications += continuity.notifications;
+    // Пам'ять героїв (Т2.6 В3): усі спогади канону на змінених абзацах — «перевірити», вирішує автор.
+    const memories = await refreshMemoryReview(repo, projectId, { paragraphIds: touched, revision: result.revision });
+    result.memoriesNeedReview = memories.flagged;
+    result.notifications += memories.notifications;
   } else {
     result.revision = project.revision;
   }

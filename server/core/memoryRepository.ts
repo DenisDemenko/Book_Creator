@@ -33,6 +33,7 @@ import {
   checkCharacterDecision,
   checkCharacterMemory,
   checkCharacterMemoryStatus,
+  checkCharacterMemoryPatch,
   assertActor,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isSearchableKind, isValidEmbedding, memoryTextScore } from './search/text';
@@ -93,6 +94,7 @@ import type {
   CharacterMemoryRow,
   CharacterMemoryFilter,
   CharacterMemoryStatus,
+  CharacterMemoryPatch,
   CharacterStateInput,
   CharacterStateRow,
 } from './types';
@@ -1253,6 +1255,17 @@ export class MemoryCoreRepository implements CoreRepository {
       ...(reviewed ? { reviewedBy: actor, reviewedAt: t } : {}),
       ...(note !== undefined ? { reviewNote: note ?? null } : {}),
     });
+    return clone(m);
+  }
+
+  async updateCharacterMemory(projectId: string, id: string, patch: CharacterMemoryPatch, actor: CoreActor) {
+    const m = this.memories.find((x) => x.id === id && x.projectId === projectId);
+    if (!m) throw notFound(`Спогад «${id}»`);
+    checkCharacterMemoryPatch(m, patch, actor);
+    const next = clone(patch) as Record<string, unknown>;
+    if (typeof next.content === 'string') next.content = next.content.trim();
+    for (const k of Object.keys(next)) if (next[k] === undefined) delete next[k];
+    Object.assign(m, next, { updatedAt: now() });
     return clone(m);
   }
 

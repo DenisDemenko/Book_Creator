@@ -34,6 +34,7 @@ import {
   checkCharacterDecision,
   checkCharacterMemory,
   checkCharacterMemoryStatus,
+  checkCharacterMemoryPatch,
   assertActor,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isValidEmbedding, SEARCHABLE_KINDS, tsQueryFromStems } from './search/text';
@@ -92,6 +93,7 @@ import type {
   CharacterMemoryRow,
   CharacterMemoryFilter,
   CharacterMemoryStatus,
+  CharacterMemoryPatch,
   CharacterStateInput,
   CharacterStateRow,
   CharacterDecisionLevel,
@@ -1838,6 +1840,37 @@ export class PgCoreRepository implements CoreRepository {
          review_note = CASE WHEN $6 THEN $7 ELSE review_note END
        WHERE project_id = $1 AND id = $2 AND status <> 'superseded' RETURNING *`,
       [projectId, id, status, reviewed, actor, note !== undefined, note ?? null],
+    );
+    if (!rows[0]) throw new CoreRuleError('conflict', 'Спогад уже замінено новішим');
+    return toMemory(rows[0]);
+  }
+
+  async updateCharacterMemory(projectId: string, id: string, patch: CharacterMemoryPatch, actor: CoreActor) {
+    const cur = await this.getCharacterMemory(projectId, id);
+    if (!cur) throw notFound(`Спогад «${id}»`);
+    checkCharacterMemoryPatch(cur, patch, actor);
+    const cols: Record<string, [string, (v: any) => unknown]> = {
+      content: ['content', (v) => String(v).trim()],
+      effects: ['effects', (v) => JSON.stringify(v)],
+      beliefStatus: ['belief_status', (v) => v],
+      truth: ['truth', (v) => v],
+      visibility: ['visibility', (v) => v],
+      evidenceHash: ['evidence_hash', (v) => v],
+      canonRevision: ['canon_revision', (v) => v],
+      aboutEntityIds: ['about_entity_ids', (v) => JSON.stringify(v)],
+    };
+    const sets: string[] = [];
+    const params: unknown[] = [projectId, id];
+    for (const [k, [col, conv]] of Object.entries(cols)) {
+      const v = (patch as Record<string, unknown>)[k];
+      if (v === undefined) continue;
+      params.push(v === null ? null : conv(v));
+      sets.push(`${col} = $${params.length}`);
+    }
+    if (!sets.length) return cur;
+    const { rows } = await this.q(
+      `UPDATE character_memories SET ${sets.join(', ')}, updated_at = now() WHERE project_id = $1 AND id = $2 AND status <> 'superseded' RETURNING *`,
+      params,
     );
     if (!rows[0]) throw new CoreRuleError('conflict', 'Спогад уже замінено новішим');
     return toMemory(rows[0]);

@@ -242,3 +242,93 @@ export async function memoriesAt(
   }
   return { memories: known, later };
 }
+
+// ── В3: інвалідація за ревізією і рішення автора ───────────────────────────
+
+export const MEMORY_REVIEW_ACTOR = 'system:core_sync';
+
+const liveTextHash = (ix: SceneScan['ix']) => (id: string) => {
+  const p = ix.paragraphs.get(id);
+  return p && !p.deletedAt ? p.textHash : null;
+};
+
+export interface MemoryReviewResult {
+  flagged: number;
+  notifications: number;
+}
+
+/**
+ * Після синхронізації: спогади канону на змінених абзацах, чий відбиток
+ * доказів уже не збігається, — «перевірити» (усі, зокрема з тегів) і по
+ * одному сповіщенню на героя.
+ */
+export async function refreshMemoryReview(repo: CoreRepository, projectId: string, opts: { paragraphIds: string[]; revision?: number }): Promise<MemoryReviewResult> {
+  const out: MemoryReviewResult = { flagged: 0, notifications: 0 };
+  if (!opts.paragraphIds.length) return out;
+  const touched = (await repo.listCharacterMemories(projectId, { paragraphIds: opts.paragraphIds, simulationId: null, limit: 1000 }))
+    .filter((m) => (m.status === 'confirmed' || m.status === 'suggested') && m.evidenceHash);
+  if (!touched.length) return out;
+  const scan = await scanScenes(repo, projectId, await repo.listTimePoints(projectId));
+  const hashOf = liveTextHash(scan.ix);
+  const byHero = new Map<string, CharacterMemoryRow[]>();
+  for (const m of touched) {
+    if (memoryEvidenceHash(hashOf, m.sourceParagraphIds) === m.evidenceHash) continue;
+    const gone = m.sourceParagraphIds.some((id) => !hashOf(id));
+    await repo.setCharacterMemoryStatus(projectId, m.id, 'needs_review', MEMORY_REVIEW_ACTOR, gone ? 'абзац-доказ видалено' : `текст абзацу-доказу змінено${opts.revision != null ? ` (ревізія ${opts.revision})` : ''}`);
+    out.flagged++;
+    byHero.set(m.characterId, [...(byHero.get(m.characterId) ?? []), m]);
+  }
+  for (const [heroId, list] of byHero) {
+    const name = scan.entities.get(heroId)?.name ?? '?';
+    await repo.addNotification({
+      projectId,
+      kind: 'memories_need_review',
+      message: `Сцену змінено — спогади героя «${name}» на перевірку: ${list.length}`,
+      paragraphIds: [...new Set(list.flatMap((m) => m.sourceParagraphIds))].filter((id) => opts.paragraphIds.includes(id)),
+      payload: { characterId: heroId, memoryIds: list.map((m) => m.id), sceneIds: [...new Set(list.map((m) => m.sceneId).filter(Boolean))], revision: opts.revision ?? null },
+    });
+    out.notifications++;
+  }
+  return out;
+}
+
+export type MemoryReviewAction = 'confirm' | 'reject' | 'refresh';
+
+export interface MemoryReviewOutcome {
+  memory: CharacterMemoryRow;
+  /** «Оновити з тегів»: новий спогад замість старого (null — тегу вже немає). */
+  replacement: CharacterMemoryRow | null;
+}
+
+/**
+ * Рішення автора щодо спогаду: підтвердити («досі так» — з новим відбитком
+ * доказів і ревізією), відхилити, або (для зібраного з тегів) оновити з
+ * поточних тегів.
+ */
+export async function reviewMemory(repo: CoreRepository, projectId: string, id: string, action: MemoryReviewAction, actor: CoreActor, note?: string | null): Promise<MemoryReviewOutcome> {
+  if (!actor.startsWith('user:')) throw new CoreRuleError('confirmed_is_author_only', 'Рішення щодо спогаду ухвалює автор');
+  const m = await repo.getCharacterMemory(projectId, id);
+  if (!m) throw new CoreRuleError('not_found', `Спогад «${id}»`);
+  if (m.status === 'superseded') throw new CoreRuleError('conflict', 'Спогад уже замінено новішим');
+  if (action === 'reject') return { memory: await repo.setCharacterMemoryStatus(projectId, id, 'rejected', actor, note), replacement: null };
+  if (action === 'confirm') {
+    if (m.simulationId === null && m.evidenceHash) {
+      const project = await repo.getProject(projectId);
+      const ix = (await scanScenes(repo, projectId, await repo.listTimePoints(projectId))).ix;
+      const hashOf = liveTextHash(ix);
+      if (m.sourceParagraphIds.some((p) => !hashOf(p))) {
+        throw new CoreRuleError('conflict', 'Абзацу-доказу вже немає в книзі — спогад можна лише відхилити чи оновити з тегів');
+      }
+      await repo.updateCharacterMemory(projectId, id, { evidenceHash: memoryEvidenceHash(hashOf, m.sourceParagraphIds), canonRevision: project?.revision ?? m.canonRevision ?? 0 }, actor);
+    }
+    return { memory: await repo.setCharacterMemoryStatus(projectId, id, 'confirmed', actor, note), replacement: null };
+  }
+  if (action === 'refresh') {
+    if (m.origin !== 'tag' || !m.dedupeKey) throw new CoreRuleError('bad_input', 'Оновити з тегів можна лише спогад, зібраний із тегів');
+    const old = await repo.setCharacterMemoryStatus(projectId, id, 'superseded', actor, note ?? 'оновлено з тегів');
+    await collectTagMemories(repo, projectId, { characterId: m.characterId });
+    const fresh = (await repo.listCharacterMemories(projectId, { characterId: m.characterId, dedupeKey: m.dedupeKey, limit: 5 })).find((x) => x.status !== 'superseded' && x.id !== id) ?? null;
+    return { memory: old, replacement: fresh };
+  }
+  throw new CoreRuleError('bad_input', `Невідома дія «${action}»`);
+}

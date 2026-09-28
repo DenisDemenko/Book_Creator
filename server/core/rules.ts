@@ -41,6 +41,7 @@ import {
   CONTINUITY_ISSUE_KINDS,
   CONTINUITY_ISSUE_STATUSES,
   type CharacterMemoryInput,
+  type CharacterMemoryPatch,
   type CharacterMemoryRow,
   type CharacterMemoryStatus,
   type CharacterMemoryLayer,
@@ -440,6 +441,27 @@ export function checkCharacterMemoryStatus(row: Pick<CharacterMemoryRow, 'status
   if (status === 'suggested') throw new CoreRuleError('bad_input', 'Повернути спогад у «пропозицію» не можна — лише підтвердити, відхилити чи позначити «перевірити»');
   if (row.status === 'superseded') throw new CoreRuleError('conflict', 'Спогад уже замінено новішим');
   if (note != null && String(note).length > 500) throw new CoreRuleError('bad_input', 'Примітка — до 500 символів');
+}
+
+/** Зміна полів спогаду (В3): те саме, що при записі, для змінених полів; вид, шар, прогін / канон — незмінні. */
+export function checkCharacterMemoryPatch(row: Pick<CharacterMemoryRow, 'status' | 'simulationId'>, patch: CharacterMemoryPatch, actor: CoreActor): void {
+  assertActor(actor);
+  const bad = (msg: string) => new CoreRuleError('bad_input', msg);
+  if (row.status === 'superseded') throw new CoreRuleError('conflict', 'Спогад уже замінено новішим');
+  if (patch.content !== undefined) {
+    const c = String(patch.content ?? '').trim();
+    if (!c || c.length > 2000) throw bad('Зміст спогаду — від 1 до 2000 символів');
+  }
+  if (patch.beliefStatus !== undefined && !(BELIEF_STATUSES as readonly string[]).includes(patch.beliefStatus)) throw bad(`Невідома певність «${patch.beliefStatus}»`);
+  if (patch.truth !== undefined && !(MEMORY_TRUTHS as readonly string[]).includes(patch.truth)) throw bad(`Невідоме відношення до правди «${patch.truth}»`);
+  if (patch.visibility !== undefined && !VISIBILITIES.includes(patch.visibility)) throw bad(`Невідома видимість «${patch.visibility}»`);
+  if (patch.evidenceHash != null && !/^[0-9a-f]{16,64}$/.test(patch.evidenceHash)) throw bad('Відбиток доказів — 16–64 шістнадцяткових символи');
+  if (patch.canonRevision !== undefined) {
+    if (row.simulationId !== null) throw bad('Спогад прогону не має ревізії канону');
+    if (patch.canonRevision === null || !Number.isInteger(patch.canonRevision) || patch.canonRevision < 0) throw bad('Ревізія канону — ціле ≥ 0');
+  }
+  if (patch.effects !== undefined && (typeof patch.effects !== 'object' || patch.effects === null || Array.isArray(patch.effects))) throw bad('Наслідки — обʼєкт');
+  if (patch.aboutEntityIds !== undefined && (!Array.isArray(patch.aboutEntityIds) || patch.aboutEntityIds.length > 50)) throw bad('«Про кого» — список до 50 id сутностей');
 }
 
 export function checkMention(m: MentionInput): void {
