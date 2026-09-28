@@ -25,6 +25,13 @@
  * тактичний — щоразу, повторно лише той самий хід прогону; ланцюжок
  * parent_id; питання рівнів із конфігурації; запасний шлях із причиною.
  *
+ * В4: серверний валідатор жорстких обмежень (`server/ai/validator.ts`) і
+ * ланцюжок Jev → запасний LLM → рішення автора — КРИТЕРІЙ ТЗ-H №9: будь-який
+ * збій Jev (мережа, 429, 529, 401, таймаут) → задекларований запасний шлях;
+ * збій обох → «чекає автора» без втрати стану (знімок, питання, часткові
+ * відповіді в записі); низька впевненість — автору; вибір автора — лише з
+ * допустимих, далі — кеш.
+ *
  * Запуск: npm run test:jev-levels
  */
 import fs from 'node:fs';
@@ -62,6 +69,7 @@ import { runFlcCycle } from '../server/core/flc/cycle.ts';
 import { PROFILE_FACT } from '../server/core/characterProfile.ts';
 import type { CoreRepository } from '../server/core/types.ts';
 import { DEFAULT_LEVEL_CONFIG, JevDecisionAdapter, significantState } from '../server/core/jevLevels.ts';
+import { validateHard } from '../server/ai/validator.ts';
 
 let pass = 0;
 let fail = 0;
@@ -164,6 +172,29 @@ const fakeLlm = async (_system: string, user: string) => {
   llmCalls = [];
   const r = await evaluateWithFallback(down, new LlmFallbackJevAdapter(fakeLlm), snap, questions);
   t('збій Jev (529) — запасний LLM у тій самій формі, причина збережена', r.decision.source === 'llm_fallback' && validateDecision(r.decision).ok && /529/.test(r.fallbackReason ?? '') && llmCalls.length === 1);
+}
+
+console.log('\nСерверний валідатор жорстких обмежень — В4:');
+{
+  const base = (over: Record<string, unknown> = {}): any => ({
+    selected_action: 'answer', scores: { fear: 4 }, raw_distributions: { next_action: { answer: 0.5, lie: 0.3, silence: 0.2 } },
+    confidence: 0.8, model_version: 'm', snapshot_hash: 'a'.repeat(32), decision_trace_id: 't', source: 'jev', corrected: false,
+    usage: { input_tokens: 0, output_tokens: 0 }, latency_ms: 0, ...over,
+  });
+  const c = { primary: { id: 'next_action', allowed: ['answer', 'lie', 'silence'], forbidden: ['lie'] }, confidenceThreshold: 0.35 };
+  const ok = validateHard(base(), c);
+  t('допустиме — без змін; заборонений варіант прибрано з розподілу', !ok.needsAuthor && ok.decision.selected_action === 'answer' && !('lie' in ok.decision.raw_distributions.next_action) && ok.violations.map((v) => v.rule).join() === 'distribution_key');
+  const forb = validateHard(base({ selected_action: 'lie', raw_distributions: { next_action: { lie: 0.7, silence: 0.2, answer: 0.1 } } }), c);
+  t('обрано заборонене — найімовірніша допустима альтернатива, позначка «виправлено»', forb.decision.selected_action === 'silence' && forb.corrected && !forb.needsAuthor && forb.violations[0].rule === 'forbidden');
+  const none = validateHard(base({ selected_action: 'attack', raw_distributions: { next_action: { attack: 0.9, lie: 0.1 } } }), c);
+  t('поза списком і допустимої альтернативи немає — рішення автора', none.needsAuthor && none.authorReason === 'no_alternative' && none.violations.some((v) => v.rule === 'no_alternative'));
+  const low = validateHard(base({ confidence: 0.2 }), c);
+  t('впевненість нижче порогу — рішення автора; без впевненості (запасний LLM) — ні', low.needsAuthor && low.authorReason === 'low_confidence' && !validateHard(base({ confidence: null }), c).needsAuthor);
+  const ranges = validateHard(base({ scores: { fear: 14, x: Number.NaN }, checks: { c1: 1.4 } }), c);
+  t('оцінки поза 0–10 і Noul поза 0–1 — обмежено, нечислове прибрано', ranges.decision.scores.fear === 10 && !('x' in ranges.decision.scores) && ranges.decision.checks?.c1 === 1 && ranges.corrected);
+  const sec = validateHard(base({ choices: { long_goal: 'goal_9' }, raw_distributions: { next_action: { answer: 1 }, long_goal: { goal_9: 0.6, goal_2: 0.4 } } }), { ...c, choices: { long_goal: ['goal_1', 'goal_2'] } });
+  t('другорядний вибір поза варіантами — найімовірніший допустимий', sec.decision.choices?.long_goal === 'goal_2' && sec.violations.some((v) => v.rule === 'choice_not_allowed'));
+  t('вхід не змінено (валідатор працює з копією)', base().raw_distributions.next_action.lie === 0.3);
 }
 
 console.log('\nАдаптер LLM через ядро ШІ:');
@@ -297,7 +328,8 @@ async function levelsSuite(label: string, repo: CoreRepository, P: string) {
   let card = { id: 'c-o', name: 'Олена', biography: 'Сестра зниклого брата.' };
   let calls = 0;
   const mock = new MockJevAdapter();
-  const counting = { name: 'mock' as const, evaluate: async (s: any, q: any) => { calls++; return mock.evaluate(s, q); } };
+  // Підставний Jev із лічильником; впевненість — висока, щоб поріг автора (В4) тут не заважав.
+  const counting = { name: 'mock' as const, evaluate: async (s: any, q: any) => { calls++; return { ...(await mock.evaluate(s, q)), confidence: 0.9 }; } };
   const fallbackLlm = async () => ({ text: JSON.stringify({ answers: { trajectory: { choice: 'waver' }, motive_conflict: { score: 2 } } }), modelId: 'fake-llm', inputTokens: 5, outputTokens: 5 });
   const engine = (jev: any = counting, config = DEFAULT_LEVEL_CONFIG) =>
     new JevDecisionAdapter({ repo, jev, fallback: new LlmFallbackJevAdapter(fallbackLlm), studio: async () => ({ character: card, all: [card] }), config });
@@ -395,8 +427,95 @@ async function levelsSuite(label: string, repo: CoreRepository, P: string) {
   t('журнал: стратегічних рішень — кожен перерахунок окремо, чинне — одне', hist.length >= 6 && hist.filter((d) => d.status === 'active').length === 1, `${hist.length}/${hist.filter((d) => d.status === 'active').length}`);
 }
 
+async function authorSuite(label: string, repo: CoreRepository, P: string) {
+  console.log(`\nЛанцюжок Jev → LLM → автор, ТЗ-H №9 — В4 (${label}):`);
+  const sec = (id: string, order: number, content: string) => {
+    const r = reconcileParagraphIds({ sectionId: id, content });
+    return { id, title: id, order, content, paragraphIds: r.ids, paragraphHashes: r.hashes };
+  };
+  await syncBookToCore(repo, { id: P, ownerId: 'u-owner', title: 'Книга', book: { id: P, title: 'Книга', characters: [{ id: 'c-o', name: 'Олена' }], chapters: [{ id: 'ch1', title: 'Гл. 1', order: 0, sections: [sec('s1', 0, '[/character:Олена] [/goal:Знайти брата @Олена] Олена шукала брата.')] }] } as any });
+  const olena = (await repo.resolveAlias(P, 'character', 'Олена'))!;
+  let jevCalls = 0;
+  let llmCalls = 0;
+  const mock = new MockJevAdapter();
+  const jevWith = (patch: (d: any) => any) => ({ name: 'jev' as const, evaluate: async (s: any, q: any) => { jevCalls++; return patch(await mock.evaluate(s, q)); } });
+  const llmOk = async (_s: string, user: string) => {
+    llmCalls++;
+    const ans = /trajectory/.test(user) ? { trajectory: { choice: 'waver' } } : /scene_motive/.test(user) ? { scene_motive: { choice: 'seek_truth' } } : { next_action: { choice: 'silence' } };
+    return { text: JSON.stringify({ answers: ans }), modelId: 'fake-llm', inputTokens: 1, outputTokens: 1 };
+  };
+  const llmDown = async () => { llmCalls++; throw new Error('LLM недоступна'); };
+  const make = (jev: any, llm: any, version: string) => new JevDecisionAdapter({ repo, jev, fallback: new LlmFallbackJevAdapter(llm), config: { ...DEFAULT_LEVEL_CONFIG, version } });
+  const strat = (e: JevDecisionAdapter) => e.decide({ projectId: P, characterId: olena, level: 'strategic', actor: 'user:u-owner' });
+
+  // КРИТЕРІЙ ТЗ-H №9: будь-який клас збою справжнього Jev → запасний LLM у тій самій формі, з причиною.
+  const classes: [string, typeof fetch][] = [
+    ['мережа', (async () => { throw new TypeError('fetch failed'); }) as any],
+    ['429', (async () => new Response(JSON.stringify({ error: { message: 'rate limited' } }), { status: 429 })) as any],
+    ['529', (async () => new Response('{}', { status: 529 })) as any],
+    ['401', (async () => new Response(JSON.stringify({ detail: 'bad key' }), { status: 401 })) as any],
+    // Власний setTimeout тримає цикл подій (AbortSignal.timeout — ні); перервано
+    // сигналом адаптера (timeoutMs 50) — раніше за запасні 2 с.
+    ['таймаут', ((_u: string, init: any) => new Promise((_r, rej) => {
+      const tm = setTimeout(() => rej(new Error('hang')), 2000);
+      init.signal.addEventListener('abort', () => { clearTimeout(tm); rej(init.signal.reason ?? new Error('timeout')); });
+    })) as any],
+  ];
+  const outcomes: string[] = [];
+  for (const [name, f] of classes) {
+    const e = make(new HttpJevAdapter('k', { fetchImpl: f, timeoutMs: 50 }), llmOk, `fb-${name}`);
+    const r = await strat(e);
+    outcomes.push(`${name}:${r.decision.source}:${r.decision.status}:${r.decision.fallbackReason ? 'причина' : '—'}`);
+  }
+  t('КРИТЕРІЙ ТЗ-H №9: мережа, 429, 529, 401, таймаут Jev — запасний LLM, чинне рішення, причина в журналі',
+    outcomes.every((o) => /:llm_fallback:active:причина$/.test(o)), outcomes.join(' · '));
+
+  llmCalls = 0;
+  jevCalls = 0;
+  const lowJev = jevWith((d) => ({ ...d, confidence: 0.1 }));
+  const low = await strat(make(lowJev, llmOk, 'low'));
+  t('низька впевненість Jev — «чекає автора», запасний LLM не вгадує замість автора', low.awaitingAuthor && low.decision.status === 'awaiting_author' && low.decision.selectedAction === null && llmCalls === 0 && (low.decision.validation as any).authorReason === 'low_confidence');
+  t('стан не загублено: питання, часткова відповідь Jev, відбиток і модель — у записі',
+    (low.decision.questions as any[]).length >= 2 && !!(low.decision.result as any)?.raw_distributions?.trajectory && /^[0-9a-f]{32}$/.test(low.decision.snapshotHash) && low.decision.modelVersion === 'mock-jev-0');
+  const again = await strat(make(lowJev, llmOk, 'low'));
+  t('повторний запит — те саме очікування, без нового виклику Jev', again.reused && again.decision.id === low.decision.id && jevCalls === 1);
+  const blocked = await make(lowJev, llmOk, 'low').decide({ projectId: P, characterId: olena, level: 'tactical', actor: 'user:u-owner', situation: 'хід' });
+  t('поки стратегічне чекає автора — нижчі рівні не рахуються (blockedAt: strategic)', blocked.awaitingAuthor && blocked.blockedAt === 'strategic' && blocked.decision.level === 'strategic' && (await repo.listCharacterDecisions(P, { characterId: olena, level: 'scene' })).length === 0);
+  const e = make(lowJev, llmOk, 'low');
+  const bad = await code(() => e.resolveByAuthor(P, low.decision.id, 'fly_away', 'user:u-owner'));
+  t('вибір автора поза допустимими — bad_input', bad === 'bad_input');
+  const chosen = await e.resolveByAuthor(P, low.decision.id, 'change_goal', 'user:u-owner');
+  t('вибір автора — чинне, джерело «автор», оцінки Jev збережено', chosen.status === 'active' && chosen.source === 'author' && chosen.selectedAction === 'change_goal' && typeof (chosen.result as any).scores?.motive_conflict === 'number');
+  const after = await strat(make(lowJev, llmOk, 'low'));
+  t('далі рішення автора — кеш рівня (Jev не кличеться)', after.reused && after.decision.id === low.decision.id && after.decision.source === 'author' && jevCalls === 1);
+  t('повторний вибір автора — conflict', (await code(() => e.resolveByAuthor(P, low.decision.id, 'waver', 'user:u-owner'))) === 'conflict');
+
+  llmCalls = 0;
+  const bothDown = await strat(make({ name: 'jev' as const, evaluate: async () => { throw new Error('Jev 529'); } }, llmDown, 'both-down'));
+  t('збій і Jev, і LLM — «чекає автора» з обома причинами; модель «unavailable», відбиток знімка є',
+    bothDown.awaitingAuthor && /Jev: Jev 529/.test(bothDown.decision.fallbackReason ?? '') && /LLM: LLM недоступна/.test(bothDown.decision.fallbackReason ?? '') &&
+    bothDown.decision.modelVersion === 'unavailable' && /^[0-9a-f]{32}$/.test(bothDown.decision.snapshotHash) && bothDown.decision.result === null && llmCalls === 1);
+  // Jev обрав недопустиме без альтернативи → запасний LLM (його адаптер сам зводить відповідь до допустимого).
+  const badJev = jevWith((d) => ({ ...d, confidence: 0.9, selected_action: 'fly', raw_distributions: { trajectory: { fly: 1 } } }));
+  const noAlt = await make(badJev, async () => ({ text: JSON.stringify({ answers: { trajectory: { choice: 'run' } } }), modelId: 'fake-llm', inputTokens: 1, outputTokens: 1 }), 'no-alt')
+    .decide({ projectId: P, characterId: olena, level: 'strategic', actor: 'user:u-owner' });
+  t('Jev обрав недопустиме без альтернативи → запасний LLM, дія — лише з допустимих, причина в журналі',
+    !noAlt.awaitingAuthor && noAlt.decision.source === 'llm_fallback' && ['hold_course', 'waver', 'change_goal', 'break_down'].includes(noAlt.decision.selectedAction!) &&
+    /Jev: допустимої альтернативи немає/.test(noAlt.decision.fallbackReason ?? ''), `${noAlt.decision.selectedAction} · ${noAlt.decision.fallbackReason}`);
+  // Запасний шлях, що теж повертає недопустиме (валідатор не довіряє й йому) → автор.
+  const rawBad = { name: 'llm_fallback' as const, evaluate: async (s: any, q: any) => ({ ...(await mock.evaluate(s, q)), source: 'llm_fallback', selected_action: 'run', raw_distributions: { trajectory: { run: 1 } } }) };
+  const noAlt2 = await new JevDecisionAdapter({ repo, jev: badJev, fallback: rawBad as any, config: { ...DEFAULT_LEVEL_CONFIG, version: 'no-alt-2' } })
+    .decide({ projectId: P, characterId: olena, level: 'strategic', actor: 'user:u-owner' });
+  t('і в запасного немає допустимого → «чекає автора», обидві причини',
+    noAlt2.awaitingAuthor && /Jev: допустимої альтернативи немає/.test(noAlt2.decision.fallbackReason ?? '') && /LLM: допустимої альтернативи немає/.test(noAlt2.decision.fallbackReason ?? ''), noAlt2.decision.fallbackReason ?? '');
+  const forbidden = await make(jevWith((d) => ({ ...d, confidence: 0.9 })), llmOk, 'forb').decide({ projectId: P, characterId: olena, level: 'tactical', actor: 'user:u-owner', situation: 'хід', allowedActions: ['answer', 'lie', 'silence'], forbiddenActions: ['lie'] });
+  const opts = forbidden.decision.options as any;
+  t('жорсткі обмеження записано в рішення (допустимі й заборонені, поріг), заборонене не обрано', opts.primary.forbidden.includes('lie') && opts.confidenceThreshold === 0.35 && forbidden.decision.selectedAction !== 'lie' && !forbidden.awaitingAuthor);
+}
+
 await decisionsSuite('memory', new MemoryCoreRepository(), 'jev-m');
 await levelsSuite('memory', new MemoryCoreRepository(), 'lvl-m');
+await authorSuite('memory', new MemoryCoreRepository(), 'aut-m');
 const url = process.env.CORE_TEST_DATABASE_URL?.trim();
 if (!url) {
   console.log('\nPostgreSQL: пропущено (CORE_TEST_DATABASE_URL не задано) — перевірено на сховищі в пам\'яті');
@@ -409,6 +528,7 @@ if (!url) {
     t('схема ядра — не старіша за v15 (журнал рішень героя)', Number(rows[0].v) >= 15, `v${rows[0].v}`);
     await decisionsSuite('postgres', new PgCoreRepository(pool), 'jev-p');
     await levelsSuite('postgres', new PgCoreRepository(pool), 'lvl-p');
+    await authorSuite('postgres', new PgCoreRepository(pool), 'aut-p');
     const [d] = (await pool.query(`SELECT project_id, character_id FROM ${CORE_SCHEMA}.character_decisions LIMIT 1`)).rows;
     let refused = false;
     try {

@@ -22,6 +22,16 @@
  * модель, джерело, підстави-посилання, ключ кешу, ланцюжок `parent_id`
  * (тактичне → сценічне → стратегічне). Той самий ключ — те саме рішення з
  * таблиці, без виклику Jev.
+ *
+ * В4 — серверний валідатор і рішення автора (`server/ai/validator.ts`;
+ * рішення власника §6 п.4): кожна відповідь проходить жорсткі обмеження
+ * рівня; ланцюжок — Jev → запасний LLM → **рішення автора** (запис
+ * `awaiting_author`, без автовибору), причини кожного переходу — у журналі.
+ * Низька впевненість Jev (нижче порогу конфігурації) — одразу автору: LLM
+ * замість нього не вгадує. Поки рівень чекає автора, нижчі рівні не
+ * рахуються (`blockedAt`), а повторний запит повертає те саме очікування
+ * без нового виклику Jev; вибір автора (`resolveByAuthor`) — лише з
+ * допустимих варіантів, і далі це рішення — кеш рівня, як будь-яке інше.
  */
 
 import { createHash } from 'node:crypto';
@@ -29,8 +39,10 @@ import type { CharacterDecisionLevel, CharacterDecisionRow, CoreActor, CoreRepos
 import { buildCharacterProfile, EVENT_TYPES, PROFILE_FACT, type StudioCharacterLike } from './characterProfile';
 import { scanScenes } from './timeline';
 import { snapshotFromProfile } from './flc/cycle';
-import { canonicalJson, validateSnapshot, type CharacterSnapshot, type DecisionResult, type JevQuestion } from '../ai/contracts';
-import { evaluateWithFallback, type JevAdapter } from '../ai/adapters/jev';
+import { canonicalJson, snapshotHash, validateSnapshot, type CharacterSnapshot, type DecisionResult, type JevQuestion } from '../ai/contracts';
+import type { JevAdapter } from '../ai/adapters/jev';
+import { validateHard, type HardConstraints, type ValidationOutcome } from '../ai/validator';
+import { CoreRuleError } from './rules';
 
 // ── Конфігурація рівнів (дані, не код) ─────────────────────────────────────
 
@@ -124,6 +136,10 @@ export interface DecideResult {
   reused: boolean;
   /** Батьківські рівні, що знадобились (і чи вони теж з кешу). */
   chain: { level: CharacterDecisionLevel; id: string; reused: boolean }[];
+  /** Рішення чекає автора (В4): `decision` — цей запис очікування. */
+  awaitingAuthor: boolean;
+  /** Рівень, на якому ланцюжок зупинився через очікування автора (нижчі не рахувались). */
+  blockedAt: CharacterDecisionLevel | null;
 }
 
 export interface JevLevelsDeps {
@@ -210,14 +226,54 @@ export class JevDecisionAdapter {
   /** Рішення рівня — з кешу, якщо ключ той самий, інакше через Jev (із запасним шляхом). Батьківські рівні — спершу. */
   async decide(req: DecideRequest): Promise<DecideResult> {
     const chain: DecideResult['chain'] = [];
+    const done = (r: { decision: CharacterDecisionRow; reused: boolean }, level: CharacterDecisionLevel): DecideResult => {
+      const waiting = r.decision.status === 'awaiting_author';
+      return { ...r, chain, awaitingAuthor: waiting, blockedAt: waiting ? level : null };
+    };
     const strategic = await this.strategic(req);
-    if (req.level === 'strategic') return { ...strategic, chain };
+    if (req.level === 'strategic' || strategic.decision.status === 'awaiting_author') return done(strategic, 'strategic');
     chain.push({ level: 'strategic', id: strategic.decision.id, reused: strategic.reused });
     const scene = await this.scene(req, strategic.decision);
-    if (req.level === 'scene') return { ...scene, chain };
+    if (req.level === 'scene' || scene.decision.status === 'awaiting_author') return done(scene, 'scene');
     chain.push({ level: 'scene', id: scene.decision.id, reused: scene.reused });
     const tactical = await this.tactical(req, scene.decision);
-    return { ...tactical, chain };
+    return done(tactical, 'tactical');
+  }
+
+  /**
+   * Рішення автора для запису «чекає автора» (В4): дія — лише з допустимих
+   * варіантів цього рішення (дозволені й не заборонені), джерело `author`;
+   * далі воно чинне й кешується, як будь-яке інше.
+   */
+  async resolveByAuthor(projectId: string, decisionId: string, action: string, actor: CoreActor): Promise<CharacterDecisionRow> {
+    const d = await this.deps.repo.getCharacterDecision(projectId, decisionId);
+    if (!d) throw new CoreRuleError('not_found', `Рішення «${decisionId}»`);
+    if (d.status !== 'awaiting_author') throw new CoreRuleError('conflict', 'Рішення вже прийнято — вибір автора потрібен лише для «чекає автора»');
+    const primary = (d.options.primary ?? {}) as { id?: string; allowed?: string[]; forbidden?: string[] };
+    const allowed = (primary.allowed ?? []).filter((a) => !(primary.forbidden ?? []).includes(a));
+    if (!allowed.includes(action)) throw new CoreRuleError('bad_input', `Дія «${action}» — не з допустимих: ${allowed.join(', ')}`);
+    const partial = (d.result ?? {}) as Partial<DecisionResult>;
+    const result: DecisionResult = {
+      selected_action: action,
+      scores: partial.scores ?? {},
+      raw_distributions: partial.raw_distributions ?? {},
+      confidence: null,
+      model_version: d.modelVersion,
+      snapshot_hash: d.snapshotHash,
+      decision_trace_id: partial.decision_trace_id ?? d.id,
+      source: 'author',
+      corrected: false,
+      usage: partial.usage ?? { input_tokens: 0, output_tokens: 0 },
+      latency_ms: 0,
+      level: d.level,
+      ...(partial.choices ? { choices: partial.choices } : {}),
+      ...(partial.checks ? { checks: partial.checks } : {}),
+    };
+    const row = await this.deps.repo.resolveCharacterDecision(projectId, d.id, { selectedAction: action, result: result as unknown as Record<string, unknown>, actor });
+    if (d.level !== 'tactical') {
+      await this.deps.repo.supersedeCharacterDecisions(projectId, { characterId: d.characterId, level: d.level, exceptId: d.id, ...(d.level === 'scene' ? { sceneId: d.sceneId } : {}) });
+    }
+    return row;
   }
 
   private async profile(req: DecideRequest) {
@@ -234,26 +290,62 @@ export class JevDecisionAdapter {
    * Кеш: рішення з тим самим ключем — чинне, навіть якщо пізніше його
    * «замінило» рішення з іншим ключем (інша межа знань, інший стан, до якого
    * книга потім повернулась): ключ уже містить усе, від чого рішення
-   * залежить. «Чекає автора» — не рішення, його не повторюємо.
+   * залежить.
    */
   private async reuse(req: DecideRequest, level: CharacterDecisionLevel, cacheKey: string, sceneId?: string | null) {
     const found = await this.deps.repo.listCharacterDecisions(req.projectId, { characterId: req.characterId, level, cacheKey, ...(sceneId !== undefined ? { sceneId } : {}), limit: 5 });
-    return found.find((d) => d.status !== 'awaiting_author' && d.selectedAction) ?? null;
+    // Готове рішення; немає — очікування автора з тим самим ключем (повторний запит не кличе Jev знову).
+    return found.find((d) => d.status !== 'awaiting_author' && d.selectedAction) ?? found.find((d) => d.status === 'awaiting_author') ?? null;
   }
 
-  /** Спільне для трьох рівнів: оцінити, перевірити знімок, записати в журнал, замінити попередні чинні. */
+  /**
+   * Спільне для трьох рівнів (В4): Jev → валідатор → (запасний LLM →
+   * валідатор) → інакше «чекає автора». Записати в журнал з причинами й
+   * порушеннями; чинне нове — замінює попередні чинні свого рівня.
+   */
   private async evaluateAndStore(
     req: DecideRequest,
     level: CharacterDecisionLevel,
     snapshot: CharacterSnapshot,
     questions: JevQuestion[],
     cacheKey: string,
+    constraints: HardConstraints,
     extra: { parentId?: string | null; sceneId?: string | null; basis: { paragraphIds?: string[]; entityIds?: string[]; note?: string }; options: Record<string, unknown> },
   ): Promise<CharacterDecisionRow> {
     const check = validateSnapshot(snapshot);
     if (!check.ok) throw new Error(`Знімок героя (${level}) не відповідає контракту: ${check.errors.join('; ')}`);
-    const { decision, fallbackReason } = await evaluateWithFallback(this.deps.jev, this.deps.fallback, snapshot, questions);
-    const result: DecisionResult = { ...decision, level };
+    const reasons: string[] = [];
+    const attempt = async (a: JevAdapter, label: string) => {
+      try {
+        return await a.evaluate(snapshot, questions);
+      } catch (err) {
+        reasons.push(`${label}: ${(err as Error).message}`);
+        return null;
+      }
+    };
+    let final: ValidationOutcome | null = null;
+    let partial: DecisionResult | null = null;
+    if (this.deps.jev) {
+      const d = await attempt(this.deps.jev, 'Jev');
+      if (d) {
+        const v = validateHard(d, constraints);
+        partial = v.decision;
+        if (!v.needsAuthor || v.authorReason === 'low_confidence') final = v;
+        else reasons.push('Jev: допустимої альтернативи немає');
+      }
+    } else reasons.push('Jev не налаштовано (немає ключа TypeSafe)');
+    if (!final) {
+      const d = await attempt(this.deps.fallback, 'LLM');
+      if (d) {
+        const v = validateHard(d, constraints);
+        partial = partial ?? v.decision;
+        final = v;
+        if (v.needsAuthor) reasons.push('LLM: допустимої альтернативи немає');
+      }
+    }
+    const waiting = !final || final.needsAuthor;
+    const got = final?.decision ?? partial;
+    const result = got ? ({ ...got, level } as DecisionResult) : null;
     const row = await this.deps.repo.addCharacterDecision({
       projectId: req.projectId,
       characterId: req.characterId,
@@ -264,20 +356,26 @@ export class JevDecisionAdapter {
       cacheKey,
       parentId: extra.parentId ?? null,
       questions,
-      options: extra.options,
-      result: result as unknown as Record<string, unknown>,
-      selectedAction: decision.selected_action,
-      validation: { corrected: decision.corrected },
-      snapshotHash: decision.snapshot_hash,
-      modelVersion: decision.model_version,
-      source: decision.source === 'author' ? 'llm_fallback' : decision.source,
-      fallbackReason,
+      options: { ...extra.options, primary: constraints.primary, ...(constraints.choices ? { choices: constraints.choices } : {}), confidenceThreshold: constraints.confidenceThreshold ?? null },
+      result: result as unknown as Record<string, unknown> | null,
+      selectedAction: waiting ? null : got!.selected_action,
+      validation: {
+        corrected: final?.corrected ?? false,
+        violations: final?.violations ?? [],
+        awaitingAuthor: waiting,
+        authorReason: final?.authorReason ?? (waiting ? 'unavailable' : null),
+      },
+      snapshotHash: got?.snapshot_hash ?? snapshotHash(snapshot),
+      modelVersion: got?.model_version ?? 'unavailable',
+      source: got && got.source !== 'author' ? got.source : 'llm_fallback',
+      fallbackReason: reasons.length ? reasons.join('; ').slice(0, 1000) : null,
       basis: extra.basis,
-      usage: decision.usage,
-      latencyMs: decision.latency_ms,
+      status: waiting ? 'awaiting_author' : 'active',
+      usage: got?.usage ?? {},
+      latencyMs: got?.latency_ms ?? 0,
       createdBy: req.actor,
     });
-    if (level !== 'tactical') {
+    if (!waiting && level !== 'tactical') {
       await this.deps.repo.supersedeCharacterDecisions(req.projectId, { characterId: req.characterId, level, exceptId: row.id, ...(level === 'scene' ? { sceneId: extra.sceneId ?? null } : {}) });
     }
     return row;
@@ -305,7 +403,12 @@ export class JevDecisionAdapter {
       sig.events.length ? `Пережите: ${sig.events.map((e) => `${e.name} (${e.type})`).join('; ')}.` : '',
     ].filter(Boolean).join(' ').slice(0, 2000);
     const snapshot = snapshotFromProfile(profile, [], situation, Object.keys(cfg.primary.options));
-    const decision = await this.evaluateAndStore(req, 'strategic', snapshot, questions, sig.key, {
+    const constraints: HardConstraints = {
+      primary: { id: cfg.primary.id, allowed: Object.keys(cfg.primary.options) },
+      ...(Object.keys(goalOptions).length >= 2 ? { choices: { long_goal: Object.keys(goalOptions) } } : {}),
+      confidenceThreshold: this.config.confidenceThreshold,
+    };
+    const decision = await this.evaluateAndStore(req, 'strategic', snapshot, questions, sig.key, constraints, {
       basis: { paragraphIds: [...new Set([...sig.paragraphIds, ...snapshot.confirmed_facts.flatMap((f) => f.evidence.map((e) => e.paragraph_id))])], entityIds: sig.events.map((e) => e.entityId), note: `значущі події: ${sig.events.length}, цілі: ${sig.goals.length}, факти: ${sig.facts.length}` },
       options: { version: this.config.version, trajectories: Object.keys(cfg.primary.options), goals: goalOptions },
     });
@@ -355,7 +458,7 @@ export class JevDecisionAdapter {
       conditions.turn ? `Поворот: ${conditions.turn}.` : '',
     ].filter(Boolean).join(' ').slice(0, 2000);
     const snapshot = snapshotFromProfile(profile, [], situation, Object.keys(cfg.primary.options));
-    const decision = await this.evaluateAndStore(req, 'scene', snapshot, questions, key, {
+    const decision = await this.evaluateAndStore(req, 'scene', snapshot, questions, key, { primary: { id: cfg.primary.id, allowed: Object.keys(cfg.primary.options) }, confidenceThreshold: this.config.confidenceThreshold }, {
       parentId: parent.id,
       sceneId,
       basis: { paragraphIds: snapshot.recent_appearances.map((a) => a.paragraph_id), note: `сцена: ${sceneId ?? 'без розділу'}; учасників: ${conditions.participants.length}` },
@@ -385,7 +488,7 @@ export class JevDecisionAdapter {
       const cached = await this.reuse(req, 'tactical', key);
       if (cached) return { decision: cached, reused: true };
     }
-    const decision = await this.evaluateAndStore(req, 'tactical', snapshot, questions, key, {
+    const decision = await this.evaluateAndStore(req, 'tactical', snapshot, questions, key, { primary: { id: 'next_action', allowed, forbidden: [...forbidden] }, confidenceThreshold: this.config.confidenceThreshold }, {
       parentId: parent.id,
       sceneId: req.sceneId ?? null,
       basis: { paragraphIds: snapshot.recent_appearances.map((a) => a.paragraph_id), note: `хід ${req.turnIndex ?? '—'}` },
