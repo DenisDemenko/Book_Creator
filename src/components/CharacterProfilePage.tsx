@@ -9,6 +9,9 @@
  * «стан на главі N» ховає все з пізніших глав. Якщо героя перейменовано (П6),
  * сторінка показує, де старе ім'я ще в книзі, і пропонує заміну окремо в
  * тегах і в тексті.
+ *
+ * Т2.6 В6: розділ «Пам'ять» (`CharacterMemoryPanel`) — світ, знання,
+ * переконання, спогади й наслідки героя з джерелами й рішеннями автора.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -18,6 +21,7 @@ import { calculateWordCount } from '../utils/helpers';
 import { countNameInBook, replaceNameInBook } from '../utils/heroRename';
 import { entityBySlug } from '../utils/coreEntities';
 import { AppearanceVersionsPanel } from './AppearanceVersionsPanel';
+import { CharacterMemoryPanel } from './CharacterMemoryPanel';
 
 interface Place {
   paragraphId: string;
@@ -396,6 +400,9 @@ export const CharacterProfilePage: React.FC<Props> = ({ book, entityId, onBack, 
               )}
             </Section>
           </div>
+
+          {/* Т2.6 В6: пам'ять героя — шари, джерела, рішення автора, AI-2. */}
+          <CharacterMemoryPanel book={book} entityId={entityId} heroName={profile.entity.name} upto={upto} onOpenParagraph={onOpenParagraph} />
 
           <Section title={`Появи в тексті (${profile.appearances.total})`} attr="appearances">
             {profile.appearances.items.length ? (

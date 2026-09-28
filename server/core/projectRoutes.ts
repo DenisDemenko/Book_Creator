@@ -51,6 +51,10 @@ import { LlmFallbackJevAdapter, type JevAdapter, type LlmJson } from './flc/jev'
 import { JevDecisionAdapter, resolveDecisionByAuthor, type DecideRequest } from './jevLevels';
 import { decisionView, decisionsSummary } from './jevDecisions';
 import { buildCharacterSnapshot } from './characterSnapshot';
+import { addAuthorMemory, collectTagMemories, memoryViews, reviewMemory } from './characterMemory';
+import { AI_MEMORY_JOB_KIND } from './memoryAi';
+import { scanScenes } from './timeline';
+import { CHARACTER_MEMORY_STATUSES, CHARACTER_MEMORY_TYPES, type CharacterMemoryStatus, type CharacterMemoryType } from './types';
 import { DEFAULT_TACTICAL_ACTIONS } from './jevLevels';
 import { CHARACTER_DECISION_LEVELS, CHARACTER_DECISION_STATUSES, type CharacterDecisionLevel, type CharacterDecisionStatus } from './types';
 import { interpretSearchQuery, type SearchInterpretDeps, type SearchInterpretation } from './search/interpret';
@@ -2029,6 +2033,153 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       state: r.state ? { id: r.state.id, stateVersion: r.state.stateVersion, snapshotHash: r.state.snapshotHash, canonRevision: r.state.canonRevision, createdAt: r.state.createdAt } : null,
       stateReused: r.stateReused,
     });
+  }));
+
+  // ── Т2.6 В6: пам'ять героя — перелік, свій спогад, збір із тегів, рішення, AI-2 ──
+
+  const memoryHero = async (repo: CoreRepository, req: Request, res: Response) => {
+    const entity = await repo.getEntity(req.params.id, req.params.entityId);
+    if (!entity || entity.status === 'rejected' || entity.type !== 'character') {
+      res.status(404).json({ error: 'Героя не знайдено в цьому проєкті.', kind: 'not_found' });
+      return null;
+    }
+    return entity;
+  };
+  const requireMemoryEdit = (req: Request, res: Response): boolean => {
+    if (canEditStory(req.projectAccess!)) return true;
+    res.status(403).json({ error: 'Пам\'ять героя змінюють власник, співавтор, редактор і адміністратор.', kind: 'forbidden' });
+    return false;
+  };
+  /** Приватне героя (`hidden`) і «для автора» бачать лише власник і адміністратор — як висновки AI. */
+  const memoryVisible = (access: ProjectAccess) => (m: { visibility: string }) => m.visibility === 'project' || access.isOwner || access.role === 'admin';
+
+  /**
+   * Пам'ять героя: канон (без прогонів) — усі статуси, щоб автор бачив
+   * пропозиції й «перевірити»; `?status=`, `?type=`, `?chapter=N` (лише зі
+   * сцен глав 1…N), `?simulationId=` — спогади прогону.
+   */
+  app.get('/api/projects/:id/characters/:entityId/memories', withRepo(async (repo, req, res) => {
+    const entity = await memoryHero(repo, req, res);
+    if (!entity) return;
+    const status = String(req.query.status ?? '') as CharacterMemoryStatus;
+    const type = String(req.query.type ?? '') as CharacterMemoryType;
+    const sim = typeof req.query.simulationId === 'string' && req.query.simulationId ? req.query.simulationId.slice(0, 100) : null;
+    const chapter = Number(req.query.chapter);
+    const rows = await repo.listCharacterMemories(req.params.id, {
+      characterId: entity.id,
+      simulationId: sim,
+      ...(CHARACTER_MEMORY_STATUSES.includes(status) ? { status } : {}),
+      ...(CHARACTER_MEMORY_TYPES.includes(type) ? { memoryType: type } : {}),
+      limit: 500,
+    });
+    const scan = await scanScenes(repo, req.params.id, await repo.listTimePoints(req.params.id));
+    const visible = rows
+      .filter(memoryVisible(req.projectAccess!))
+      .filter((m) => m.status !== 'superseded')
+      .filter((m) => {
+        if (!Number.isInteger(chapter) || chapter < 1 || !m.sceneId) return true;
+        const sc = scan.bySection.get(m.sceneId);
+        return !!sc && (sc.chapterNumber ?? Infinity) <= chapter;
+      });
+    const counts: Record<string, number> = {};
+    for (const m of visible) counts[m.status] = (counts[m.status] ?? 0) + 1;
+    res.json({ memories: memoryViews(visible, scan), counts, canEdit: canEditStory(req.projectAccess!), canSeePrivate: req.projectAccess!.isOwner || req.projectAccess!.role === 'admin' });
+  }));
+
+  /** Спогад, який вписує автор: одразу підтверджений (з абзаців чи сцени — з відбитком доказів). */
+  app.post('/api/projects/:id/characters/:entityId/memories', withRepo(async (repo, req, res) => {
+    if (!requireMemoryEdit(req, res)) return;
+    const entity = await memoryHero(repo, req, res);
+    if (!entity) return;
+    const b = req.body ?? {};
+    const type = String(b.memoryType ?? '') as CharacterMemoryType;
+    if (!CHARACTER_MEMORY_TYPES.includes(type)) {
+      res.status(400).json({ error: `Вид спогаду — один із: ${CHARACTER_MEMORY_TYPES.join(', ')}.`, kind: 'bad_input' });
+      return;
+    }
+    const visibility = b.visibility === 'hidden' || b.visibility === 'author' ? b.visibility : 'project';
+    if (visibility !== 'project' && !(req.projectAccess!.isOwner || req.projectAccess!.role === 'admin')) {
+      res.status(403).json({ error: 'Приватний спогад героя може вписати лише власник книги.', kind: 'forbidden' });
+      return;
+    }
+    const row = await addAuthorMemory(repo, {
+      projectId: req.params.id,
+      characterId: entity.id,
+      memoryType: type,
+      content: String(b.content ?? '').slice(0, 2000),
+      sceneId: typeof b.sceneId === 'string' && b.sceneId ? b.sceneId.slice(0, 200) : null,
+      sourceParagraphIds: Array.isArray(b.paragraphIds) ? b.paragraphIds.map(String).slice(0, 20) : [],
+      aboutEntityIds: Array.isArray(b.aboutEntityIds) ? b.aboutEntityIds.map(String).slice(0, 20) : [],
+      truth: b.truth === 'true' || b.truth === 'false' ? b.truth : undefined,
+      visibility,
+      layer: type === 'world_fact' && b.layer === 'reader_knowledge' ? 'reader_knowledge' : undefined,
+      actor: `user:${req.projectAccess!.userId}`,
+    });
+    const scan = await scanScenes(repo, req.params.id, await repo.listTimePoints(req.params.id));
+    res.status(201).json({ memory: memoryViews([row], scan)[0] });
+  }));
+
+  /** Зібрати пам'ять героя з тегів книги (без AI; повторно — без дублів). */
+  app.post('/api/projects/:id/characters/:entityId/memories/collect', withRepo(async (repo, req, res) => {
+    if (!requireMemoryEdit(req, res)) return;
+    const entity = await memoryHero(repo, req, res);
+    if (!entity) return;
+    res.json(await collectTagMemories(repo, req.params.id, { characterId: entity.id }));
+  }));
+
+  /** Рішення автора: confirm («досі так») / reject / refresh («оновити з тегів»). */
+  app.post('/api/projects/:id/characters/:entityId/memories/:memoryId/review', withRepo(async (repo, req, res) => {
+    if (!requireMemoryEdit(req, res)) return;
+    const entity = await memoryHero(repo, req, res);
+    if (!entity) return;
+    const m = await repo.getCharacterMemory(req.params.id, req.params.memoryId);
+    if (!m || m.characterId !== entity.id || !memoryVisible(req.projectAccess!)(m)) {
+      res.status(404).json({ error: 'Спогад не знайдено.', kind: 'not_found' });
+      return;
+    }
+    const action = String(req.body?.action ?? '');
+    if (action !== 'confirm' && action !== 'reject' && action !== 'refresh') {
+      res.status(400).json({ error: 'Дія — confirm, reject або refresh.', kind: 'bad_input' });
+      return;
+    }
+    const note = typeof req.body?.note === 'string' ? req.body.note.slice(0, 500) : undefined;
+    const out = await reviewMemory(repo, req.params.id, m.id, action, `user:${req.projectAccess!.userId}`, note);
+    const scan = await scanScenes(repo, req.params.id, await repo.listTimePoints(req.params.id));
+    res.json({ memory: memoryViews([out.memory], scan)[0], replacement: out.replacement ? memoryViews([out.replacement], scan)[0] : null });
+  }));
+
+  /** AI-2 тлумачить розділ очима героя — фонова задача `ai_memory` (пропозиції, бюджет проєкту). */
+  app.post('/api/projects/:id/characters/:entityId/memories/ai', withRepo(async (repo, req, res) => {
+    if (!requireMemoryEdit(req, res)) return;
+    const queue = deps.queue?.();
+    if (!queue) {
+      res.status(503).json({ error: 'Фонові задачі ядра зараз недоступні.', kind: 'core_unavailable' });
+      return;
+    }
+    const entity = await memoryHero(repo, req, res);
+    if (!entity) return;
+    const sectionId = typeof req.body?.sectionId === 'string' ? req.body.sectionId.slice(0, 200) : '';
+    const scan = await scanScenes(repo, req.params.id, await repo.listTimePoints(req.params.id));
+    const scene = scan.bySection.get(sectionId);
+    if (!scene) {
+      res.status(404).json({ error: 'Розділ не знайдено.', kind: 'not_found' });
+      return;
+    }
+    if (!scene.characters.some((c) => c.id === entity.id)) {
+      res.status(422).json({ error: `«${entity.name}» не бере участі в розділі «${scene.title}» — тлумачити нічого.`, kind: 'bad_input' });
+      return;
+    }
+    try {
+      const { job } = await queue.enqueue({ projectId: req.params.id, kind: AI_MEMORY_JOB_KIND, payload: { sectionId, characterIds: [entity.id] }, createdBy: `user:${req.projectAccess!.userId}` });
+      res.status(202).json({ jobId: job.id });
+    } catch (err) {
+      if (err instanceof JobRejectedError) {
+        const status = err.code === 'rate_limited' ? 429 : err.code === 'budget_exhausted' ? 402 : 422;
+        res.status(status).json({ error: err.message, kind: err.code, retryAfterMs: err.retryAfterMs });
+        return;
+      }
+      throw err;
+    }
   }));
 
   /** Зв'язки проєкту або однієї сутності (`?entityId=`). */

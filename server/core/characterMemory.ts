@@ -310,7 +310,8 @@ export async function reviewMemory(repo: CoreRepository, projectId: string, id: 
   const m = await repo.getCharacterMemory(projectId, id);
   if (!m) throw new CoreRuleError('not_found', `Спогад «${id}»`);
   if (m.status === 'superseded') throw new CoreRuleError('conflict', 'Спогад уже замінено новішим');
-  if (action === 'reject') return { memory: await repo.setCharacterMemoryStatus(projectId, id, 'rejected', actor, note), replacement: null };
+  // Примітка попередньої перевірки («абзац змінено…») після рішення автора вже не актуальна.
+  if (action === 'reject') return { memory: await repo.setCharacterMemoryStatus(projectId, id, 'rejected', actor, note ?? null), replacement: null };
   if (action === 'confirm') {
     if (m.simulationId === null && m.evidenceHash) {
       const project = await repo.getProject(projectId);
@@ -321,7 +322,7 @@ export async function reviewMemory(repo: CoreRepository, projectId: string, id: 
       }
       await repo.updateCharacterMemory(projectId, id, { evidenceHash: memoryEvidenceHash(hashOf, m.sourceParagraphIds), canonRevision: project?.revision ?? m.canonRevision ?? 0 }, actor);
     }
-    return { memory: await repo.setCharacterMemoryStatus(projectId, id, 'confirmed', actor, note), replacement: null };
+    return { memory: await repo.setCharacterMemoryStatus(projectId, id, 'confirmed', actor, note ?? null), replacement: null };
   }
   if (action === 'refresh') {
     if (m.origin !== 'tag' || !m.dedupeKey) throw new CoreRuleError('bad_input', 'Оновити з тегів можна лише спогад, зібраний із тегів');
@@ -331,4 +332,75 @@ export async function reviewMemory(repo: CoreRepository, projectId: string, id: 
     return { memory: old, replacement: fresh };
   }
   throw new CoreRuleError('bad_input', `Невідома дія «${action}»`);
+}
+
+// ── В6: вигляд спогаду для сторінки героя ─────────────────────────────────
+
+export interface MemoryView {
+  id: string;
+  memoryType: CharacterMemoryType;
+  layer: CharacterMemoryRow['layer'];
+  content: string;
+  about: { id: string; name: string }[];
+  effects: { trust: { towards: string; name: string; delta: number }[]; fear: number | null; goals: string[] };
+  beliefStatus: CharacterMemoryRow['beliefStatus'];
+  truth: MemoryTruth;
+  source: { kind: CharacterMemoryRow['sourceEventKind']; id: string | null; name: string | null };
+  /** Абзаци-докази — з місцем у книзі для переходу в редактор; зниклі — null. */
+  places: ({ paragraphId: string; editorPid: string; sectionId: string; sectionTitle: string; chapterId: string | null; chapterNumber: number | null; excerpt: string } | null)[];
+  scene: { id: string; title: string; chapterNumber: number | null; time: string | null } | null;
+  status: CharacterMemoryRow['status'];
+  origin: CharacterMemoryRow['origin'];
+  visibility: Visibility;
+  simulationId: string | null;
+  canonRevision: number | null;
+  reviewNote: string | null;
+  createdBy: string;
+  createdAt: string;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+}
+
+/** Спогади героя для сторінки (з назвами, місцями й сценами); `scan` — один на весь перелік. */
+export function memoryViews(rows: CharacterMemoryRow[], scan: SceneScan): MemoryView[] {
+  const name = (id: string) => scan.entities.get(id)?.name ?? null;
+  const place = (id: string) => {
+    const p = scan.ix.paragraphs.get(id);
+    const sectionId = scan.sectionOfParagraph.get(id);
+    const sc = sectionId ? scan.bySection.get(sectionId) : undefined;
+    if (!p || p.deletedAt || !sc) return null;
+    const text = p.text.replace(/\s+/g, ' ').trim();
+    return { paragraphId: p.id, editorPid: p.editorPid ?? p.id, sectionId: sc.sectionId, sectionTitle: sc.title, chapterId: sc.chapterId, chapterNumber: sc.chapterNumber, excerpt: text.length > 220 ? `${text.slice(0, 219)}…` : text };
+  };
+  return rows.map((m) => {
+    const sc = m.sceneId ? scan.bySection.get(m.sceneId) : undefined;
+    const e = (m.effects ?? {}) as MemoryEffects;
+    return {
+      id: m.id,
+      memoryType: m.memoryType,
+      layer: m.layer,
+      content: m.content,
+      about: m.aboutEntityIds.map((id) => ({ id, name: name(id) ?? '?' })),
+      effects: {
+        trust: (Array.isArray(e.trust) ? e.trust : []).map((t) => ({ towards: t.towards, name: name(t.towards) ?? '?', delta: Number(t.delta) || 0 })),
+        fear: typeof e.fear === 'number' ? e.fear : null,
+        goals: Array.isArray(e.goals) ? e.goals.map(String) : [],
+      },
+      beliefStatus: m.beliefStatus,
+      truth: m.truth,
+      source: { kind: m.sourceEventKind, id: m.sourceEventId, name: m.sourceEventKind === 'entity' && m.sourceEventId ? name(m.sourceEventId) : null },
+      places: m.sourceParagraphIds.map(place),
+      scene: sc ? { id: sc.sectionId, title: sc.title, chapterNumber: sc.chapterNumber, time: sc.time?.label ?? null } : m.sceneId ? { id: m.sceneId, title: m.sceneId, chapterNumber: m.storyTime.chapter ?? null, time: m.storyTime.label ?? null } : null,
+      status: m.status,
+      origin: m.origin,
+      visibility: m.visibility,
+      simulationId: m.simulationId,
+      canonRevision: m.canonRevision,
+      reviewNote: m.reviewNote,
+      createdBy: m.createdBy,
+      createdAt: m.createdAt,
+      reviewedBy: m.reviewedBy,
+      reviewedAt: m.reviewedAt,
+    };
+  });
 }

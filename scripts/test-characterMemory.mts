@@ -33,6 +33,10 @@
  * зі сцени 3 і з пам'яті іншого героя; ліміт Jev (канон і факти не
  * відкидаються); стан на сцену — кеш за відбитком; три рівні Jev — через
  * будівник, підтверджений спогад — значуща подія; `GET …/snapshot` і права.
+ *
+ * В6: маршрути пам'яті — перелік (статуси, приватне лише власнику,
+ * ?chapter), свій спогад, збір із тегів, рішення автора, запуск AI-2; права
+ * (чужий 403, читач — перегляд без змін).
  * PostgreSQL — з CORE_TEST_DATABASE_URL (схема `fusion_core` видаляється —
  * лише тестова база!).
  *
@@ -597,11 +601,91 @@ async function snapshotSuite(label: string, repo: CoreRepository, P: string) {
   }
 }
 
+async function routesSuite(label: string, repo: CoreRepository, jobStore: JobStore, P: string) {
+  console.log(`\nМаршрути пам'яті героя — В6 (${label}):`);
+  const sec = (id: string, order: number, content: string) => {
+    const r = reconcileParagraphIds({ sectionId: id, content });
+    return { id, title: id, order, content, paragraphIds: r.ids, paragraphHashes: r.hashes };
+  };
+  await syncBookToCore(repo, {
+    id: P, ownerId: 'u-owner', title: 'Кухня',
+    book: {
+      id: P, title: 'Кухня', characters: [{ id: 'c-s', name: 'Сергій' }, { id: 'c-a', name: 'Анна' }],
+      chapters: [
+        { id: 'ch1', title: 'Гл. 1', order: 0, sections: [sec('s1', 0, '[/character:Сергій] [/character:Анна] [/conflict:Сварка на кухні] Сергій і Анна посварились.')] },
+        { id: 'ch2', title: 'Гл. 2', order: 1, sections: [sec('s2', 0, '[/character:Сергій] [/revelation:Лист у шухляді @Сергій] Сергій знайшов лист.'), sec('s3', 1, '[/character:Анна] Анна поїхала.')] },
+      ],
+    },
+  } as any);
+  const serhii = (await repo.resolveAlias(P, 'character', 'Сергій'))!;
+  const anna = (await repo.resolveAlias(P, 'character', 'Анна'))!;
+  const [p1] = (await repo.listParagraphs(P, 's1')).map((p) => p.id);
+  const generate = async (input: AiGenerateInput) => ({
+    text: JSON.stringify({ findings: [{ kind: 'memory_recollection', summary: 'Сергій вважає, що Анна збрехала.', about: ['Анна'], paragraph_ids: [p1], confidence: 0.8 }] }),
+    modelId: 'fake-ai2', engine: 'fake', inputTokens: 10, outputTokens: 5, costUsd: 0,
+  });
+  let clock = Date.parse('2026-09-28T12:00:00Z');
+  const q = new JobQueue(jobStore, { workerId: 'w', now: () => new Date(clock), log: () => {} });
+  q.register(AI_MEMORY_JOB_KIND, aiMemoryJobKind({ repo: () => repo, generate, resolveModel: async () => 'fake-ai2' }));
+  const access = {
+    async getBookOwnerId(x: string) { return x === P ? 'u-owner' : null; },
+    async getCollabOwnerId() { return undefined; },
+    async listAcceptedInvites() { return [{ acceptedUserId: 'u-reader', role: 'reader' }, { acceptedUserId: 'u-ed', role: 'editor' }]; },
+  };
+  const who: Record<string, any> = { owner: { id: 'u-owner', role: 'writer', isGuest: false }, reader: { id: 'u-reader', role: 'writer', isGuest: false }, editor: { id: 'u-ed', role: 'writer', isGuest: false }, stranger: { id: 'u-x', role: 'writer', isGuest: false } };
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => { (req as any).principal = who[String(req.headers['x-user'])]; next(); });
+  registerProjectRoutes(app, { access, repo: () => repo, coreState: () => 'ready', queue: () => q as any });
+  const server = app.listen(0);
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/projects/${P}`;
+  const call = async (user: string, method: string, path: string, body?: unknown) => {
+    const r = await fetch(`${base}${path}`, { method, headers: { 'x-user': user, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    return { status: r.status, body: (await r.json().catch(() => ({}))) as any };
+  };
+  const M = `/characters/${serhii}/memories`;
+  try {
+    t('права: чужий — 403; читач — перелік так, зміни — 403', (await call('stranger', 'GET', M)).status === 403 && (await call('reader', 'GET', M)).status === 200 &&
+      (await call('reader', 'POST', `${M}/collect`, {})).status === 403 && (await call('reader', 'POST', M, { memoryType: 'belief', content: 'x' })).status === 403);
+    const col = await call('editor', 'POST', `${M}/collect`, {});
+    t('«Зібрати з тегів» (редактор): сварка й лист', col.status === 200 && col.body.created === 2, JSON.stringify(col.body));
+    const list = await call('owner', 'GET', M);
+    const fact = list.body.memories.find((m: any) => m.memoryType === 'world_fact');
+    t('перелік: вид, статус, сцена з назвою, джерело-подія з іменем, місця абзаців для переходу, лічильники',
+      list.status === 200 && list.body.canEdit && list.body.canSeePrivate && fact.status === 'confirmed' && fact.scene?.id === 's1' && fact.source.name === 'Сварка на кухні' &&
+      fact.places[0]?.paragraphId === p1 && fact.places[0]?.chapterId === 'ch1' && !!fact.places[0]?.editorPid && list.body.counts.confirmed === 2, JSON.stringify(fact).slice(0, 200));
+    const own = await call('owner', 'POST', M, { memoryType: 'belief', content: 'Анна щось приховує.', sceneId: 's1', visibility: 'hidden' });
+    const edPriv = await call('editor', 'POST', M, { memoryType: 'belief', content: 'x', visibility: 'hidden' });
+    t('свій спогад: власник — приватний (201); редактор приватний — 403; поганий вид — 400; невідома сцена — 404',
+      own.status === 201 && own.body.memory.visibility === 'hidden' && own.body.memory.status === 'confirmed' && edPriv.status === 403 &&
+      (await call('owner', 'POST', M, { memoryType: 'dream', content: 'x' })).status === 400 && (await call('owner', 'POST', M, { memoryType: 'belief', content: 'x', sceneId: 'nope' })).status === 404);
+    t('приватне бачить лише власник: редактор і читач — ні', !(await call('editor', 'GET', M)).body.memories.some((m: any) => m.id === own.body.memory.id) && !(await call('reader', 'GET', M)).body.memories.some((m: any) => m.id === own.body.memory.id) && (await call('owner', 'GET', M)).body.memories.some((m: any) => m.id === own.body.memory.id));
+    t('?chapter=1 — лише зі сцен глави 1 (без листа)', (await call('owner', 'GET', `${M}?chapter=1`)).body.memories.every((m: any) => m.scene?.chapterNumber !== 2) && (await call('owner', 'GET', `${M}?type=knowledge`)).body.memories.length === 1);
+    t('AI-2: розділ, де героя немає, — 422; невідомий — 404; читач — 403',
+      (await call('owner', 'POST', `${M}/ai`, { sectionId: 's3' })).status === 422 && (await call('owner', 'POST', `${M}/ai`, { sectionId: 'nope' })).status === 404 && (await call('reader', 'POST', `${M}/ai`, { sectionId: 's1' })).status === 403);
+    const ai = await call('owner', 'POST', `${M}/ai`, { sectionId: 's1' });
+    await q.runOnce();
+    clock += 61_000;
+    const job = await call('owner', 'GET', `/jobs/${ai.body.jobId}`);
+    const sug = (await call('owner', 'GET', `${M}?status=suggested`)).body.memories;
+    t('AI-2 — задача 202, лише для цього героя; пропозиція в переліку', ai.status === 202 && job.body.status === 'succeeded' && (job.body.result?.heroes ?? []).length === 1 && sug.length === 1 && sug[0].origin === 'ai' && sug[0].about[0]?.name === 'Анна', JSON.stringify(job.body.result));
+    const bad = await call('owner', 'POST', `${M}/${sug[0].id}/review`, { action: 'maybe' });
+    const foreign = await call('owner', 'POST', `/characters/${anna}/memories/${sug[0].id}/review`, { action: 'confirm' });
+    t('рішення: невідома дія — 400; через іншого героя — 404; читач — 403',
+      bad.status === 400 && foreign.status === 404 && (await call('reader', 'POST', `${M}/${sug[0].id}/review`, { action: 'confirm' })).status === 403);
+    const ok = await call('editor', 'POST', `${M}/${sug[0].id}/review`, { action: 'confirm' });
+    t('підтвердити — 200, спогад підтверджено; «оновити з тегів» не з тегів — 422', ok.status === 200 && ok.body.memory.status === 'confirmed' && (await call('owner', 'POST', `${M}/${sug[0].id}/review`, { action: 'refresh' })).status === 422);
+  } finally {
+    server.close();
+  }
+}
+
 await repoSuite('memory', new MemoryCoreRepository(), 'mem-m');
 await tagsSuite('memory', new MemoryCoreRepository(), 'tag-m');
 await reviewSuite('memory', new MemoryCoreRepository(), 'rev-m');
 await aiSuite('memory', new MemoryCoreRepository(), new MemoryJobStore(), 'ai-m');
 await snapshotSuite('memory', new MemoryCoreRepository(), 'snap-m');
+await routesSuite('memory', new MemoryCoreRepository(), new MemoryJobStore(), 'rts-m');
 const url = process.env.CORE_TEST_DATABASE_URL?.trim();
 if (!url) {
   console.log('\nPostgreSQL: пропущено (CORE_TEST_DATABASE_URL не задано) — перевірено на сховищі в пам\'яті');
@@ -617,6 +701,7 @@ if (!url) {
     await reviewSuite('postgres', new PgCoreRepository(pool), 'rev-p');
     await aiSuite('postgres', new PgCoreRepository(pool), new PgJobStore(pool), 'ai-p');
     await snapshotSuite('postgres', new PgCoreRepository(pool), 'snap-p');
+    await routesSuite('postgres', new PgCoreRepository(pool), new PgJobStore(pool), 'rts-p');
     const ins = async (cols: string, vals: string) => {
       try {
         await pool.query(`INSERT INTO ${CORE_SCHEMA}.character_memories (project_id, character_id, ${cols}) VALUES ('mem-p', $1, ${vals})`, [serhii]);
