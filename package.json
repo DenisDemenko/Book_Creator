@@ -103,6 +103,7 @@
     "live:appearance-versions": "tsx scripts/live-appearanceVersions.mts",
     "test:continuity": "tsx scripts/test-continuity.mts",
     "test:jev-levels": "tsx scripts/test-jevLevels.mts",
+    "test:character-memory": "tsx scripts/test-characterMemory.mts",
     "test:visual-review": "tsx scripts/test-visualReview.mts",
     "live:visual-review": "tsx scripts/live-visualReview.mts",
     "test:visual-ai": "tsx scripts/test-visualAi.mts",

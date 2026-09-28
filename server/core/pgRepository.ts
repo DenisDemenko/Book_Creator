@@ -32,6 +32,9 @@ import {
   checkContinuityIssue,
   checkContinuityDraftCheck,
   checkCharacterDecision,
+  checkCharacterMemory,
+  checkCharacterMemoryStatus,
+  assertActor,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isValidEmbedding, SEARCHABLE_KINDS, tsQueryFromStems } from './search/text';
 import type {
@@ -85,6 +88,12 @@ import type {
   CharacterDecisionInput,
   CharacterDecisionRow,
   CharacterDecisionFilter,
+  CharacterMemoryInput,
+  CharacterMemoryRow,
+  CharacterMemoryFilter,
+  CharacterMemoryStatus,
+  CharacterStateInput,
+  CharacterStateRow,
   CharacterDecisionLevel,
 } from './types';
 
@@ -245,6 +254,59 @@ function toDecision(r: any): CharacterDecisionRow {
     createdAt: iso(r.created_at),
     resolvedBy: r.resolved_by ?? null,
     resolvedAt: isoOrNull(r.resolved_at),
+  };
+}
+
+function toMemory(r: any): CharacterMemoryRow {
+  return {
+    id: r.id,
+    projectId: r.project_id,
+    characterId: r.character_id,
+    memoryType: r.memory_type,
+    layer: r.layer,
+    content: r.content,
+    aboutEntityIds: Array.isArray(r.about_entity_ids) ? r.about_entity_ids : [],
+    effects: r.effects ?? {},
+    beliefStatus: r.belief_status,
+    truth: r.truth,
+    sourceEventKind: r.source_event_kind,
+    sourceEventId: r.source_event_id ?? null,
+    sourceParagraphIds: Array.isArray(r.source_paragraph_ids) ? r.source_paragraph_ids : [],
+    evidenceHash: r.evidence_hash ?? null,
+    sceneId: r.scene_id ?? null,
+    storyTime: r.story_time ?? {},
+    simulationId: r.simulation_id ?? null,
+    canonRevision: r.canon_revision ?? null,
+    visibility: r.visibility,
+    origin: r.origin,
+    status: r.status,
+    dedupeKey: r.dedupe_key ?? null,
+    reviewNote: r.review_note ?? null,
+    createdBy: r.created_by,
+    createdAt: iso(r.created_at),
+    updatedAt: iso(r.updated_at),
+    reviewedBy: r.reviewed_by ?? null,
+    reviewedAt: isoOrNull(r.reviewed_at),
+  };
+}
+
+function toState(r: any): CharacterStateRow {
+  return {
+    id: r.id,
+    projectId: r.project_id,
+    characterId: r.character_id,
+    sceneId: r.scene_id ?? null,
+    simulationId: r.simulation_id ?? null,
+    canonRevision: Number(r.canon_revision),
+    goals: r.goals ?? [],
+    emotions: r.emotions ?? [],
+    beliefs: r.beliefs ?? [],
+    relationships: r.relationships ?? [],
+    memoryIds: r.memory_ids ?? [],
+    stateVersion: Number(r.state_version),
+    snapshotHash: r.snapshot_hash,
+    createdBy: r.created_by,
+    createdAt: iso(r.created_at),
   };
 }
 
@@ -472,6 +534,9 @@ function mapPgError(err: any): never {
   }
   if (code === '23505' && /entity_aliases/.test(constraint)) {
     throw new CoreRuleError('duplicate_alias', 'Псевдонім уже належить іншій сутності цього типу');
+  }
+  if (code === '23505' && /character_memories_dedupe/.test(constraint)) {
+    throw new CoreRuleError('conflict', 'Такий спогад героя вже є (той самий ключ повтору)');
   }
   if (code === '23503') {
     throw new CoreRuleError('not_found', 'Пов\'язаний запис не знайдено в цьому проєкті');
@@ -1708,6 +1773,101 @@ export class PgCoreRepository implements CoreRepository {
     );
     if (!rows[0]) throw new CoreRuleError('conflict', 'Рішення вже прийнято — вибір автора потрібен лише для «чекає автора»');
     return toDecision(rows[0]);
+  }
+
+  // ── Пам'ять героя (Т2.6 В1) ──────────────────────────────────────────────
+
+  async addCharacterMemory(input: CharacterMemoryInput) {
+    const n = checkCharacterMemory(input);
+    if (!isUuid(input.characterId)) throw notFound(`Сутність «${input.characterId}»`);
+    const { rows: e } = await this.q('SELECT 1 FROM entities WHERE project_id = $1 AND id = $2', [input.projectId, input.characterId]);
+    if (!e[0]) throw notFound(`Сутність «${input.characterId}»`);
+    const json = (v: unknown) => JSON.stringify(v);
+    const { rows } = await this.q(
+      `INSERT INTO character_memories
+         (project_id, character_id, memory_type, layer, content, about_entity_ids, effects, belief_status, truth, source_event_kind, source_event_id,
+          source_paragraph_ids, evidence_hash, scene_id, story_time, simulation_id, canon_revision, visibility, origin, status, dedupe_key, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22) RETURNING *`,
+      [
+        input.projectId, input.characterId, input.memoryType, n.layer, n.content, json(input.aboutEntityIds ?? []), json(input.effects ?? {}), n.beliefStatus, n.truth,
+        input.sourceEventKind, input.sourceEventId ?? null, json(input.sourceParagraphIds ?? []), input.evidenceHash ?? null, input.sceneId ?? null,
+        json(input.storyTime ?? {}), input.simulationId || null, input.canonRevision ?? null, n.visibility, input.origin, n.status, input.dedupeKey ?? null, input.createdBy,
+      ],
+    );
+    return toMemory(rows[0]);
+  }
+
+  async getCharacterMemory(projectId: string, id: string) {
+    if (!isUuid(id)) return null;
+    const { rows } = await this.q('SELECT * FROM character_memories WHERE project_id = $1 AND id = $2', [projectId, id]);
+    return rows[0] ? toMemory(rows[0]) : null;
+  }
+
+  async listCharacterMemories(projectId: string, f: CharacterMemoryFilter = {}) {
+    if (f.characterId && !isUuid(f.characterId)) return [];
+    const where = ['project_id = $1'];
+    const params: unknown[] = [projectId];
+    const add = (sql: string, v: unknown) => {
+      params.push(v);
+      where.push(sql.replace('$$', `$${params.length}`));
+    };
+    if (f.characterId) add('character_id = $$', f.characterId);
+    if (f.memoryType) add('memory_type = $$', f.memoryType);
+    if (f.status) add('status = $$', f.status);
+    if (f.simulationId === null) where.push('simulation_id IS NULL');
+    else if (f.simulationId !== undefined) add('simulation_id = $$', f.simulationId);
+    if (f.dedupeKey) add('dedupe_key = $$', f.dedupeKey);
+    if (f.paragraphIds) {
+      if (!f.paragraphIds.length) return [];
+      add('source_paragraph_ids ?| $$::text[]', f.paragraphIds);
+    }
+    params.push(Math.max(1, Math.min(f.limit ?? 200, 1000)));
+    const { rows } = await this.q(`SELECT * FROM character_memories WHERE ${where.join(' AND ')} ORDER BY created_at DESC, id LIMIT $${params.length}`, params);
+    return rows.map(toMemory);
+  }
+
+  async setCharacterMemoryStatus(projectId: string, id: string, status: CharacterMemoryStatus, actor: CoreActor, note?: string | null) {
+    const cur = await this.getCharacterMemory(projectId, id);
+    if (!cur) throw notFound(`Спогад «${id}»`);
+    checkCharacterMemoryStatus(cur, status, actor, note);
+    const reviewed = status === 'confirmed' || status === 'rejected' || status === 'needs_review';
+    const { rows } = await this.q(
+      `UPDATE character_memories SET status = $3, updated_at = now(),
+         reviewed_by = CASE WHEN $4 THEN $5 ELSE reviewed_by END,
+         reviewed_at = CASE WHEN $4 THEN now() ELSE reviewed_at END,
+         review_note = CASE WHEN $6 THEN $7 ELSE review_note END
+       WHERE project_id = $1 AND id = $2 AND status <> 'superseded' RETURNING *`,
+      [projectId, id, status, reviewed, actor, note !== undefined, note ?? null],
+    );
+    if (!rows[0]) throw new CoreRuleError('conflict', 'Спогад уже замінено новішим');
+    return toMemory(rows[0]);
+  }
+
+  async addCharacterState(input: CharacterStateInput) {
+    assertActor(input.createdBy);
+    if (!isUuid(input.characterId)) throw notFound(`Сутність «${input.characterId}»`);
+    if (!Number.isInteger(input.canonRevision) || input.canonRevision < 0) throw new CoreRuleError('bad_input', 'Ревізія канону — ціле ≥ 0');
+    if (!/^[0-9a-f]{16,64}$/.test(String(input.snapshotHash ?? ''))) throw new CoreRuleError('bad_input', 'Відбиток знімка — 16–64 шістнадцяткових символи');
+    const json = (v: unknown) => JSON.stringify(v);
+    const { rows } = await this.q(
+      `INSERT INTO character_states (project_id, character_id, scene_id, simulation_id, canon_revision, goals, emotions, beliefs, relationships, memory_ids, state_version, snapshot_hash, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+      [
+        input.projectId, input.characterId, input.sceneId ?? null, input.simulationId ?? null, input.canonRevision, json(input.goals ?? []), json(input.emotions ?? []),
+        json(input.beliefs ?? []), json(input.relationships ?? []), json(input.memoryIds ?? []), input.stateVersion ?? 1, input.snapshotHash, input.createdBy,
+      ],
+    );
+    return toState(rows[0]);
+  }
+
+  async getCharacterState(projectId: string, k: { characterId: string; sceneId: string | null; simulationId: string | null; canonRevision: number }) {
+    if (!isUuid(k.characterId)) return null;
+    const { rows } = await this.q(
+      `SELECT * FROM character_states WHERE project_id = $1 AND character_id = $2 AND scene_id IS NOT DISTINCT FROM $3 AND simulation_id IS NOT DISTINCT FROM $4 AND canon_revision = $5
+       ORDER BY created_at DESC, id LIMIT 1`,
+      [projectId, k.characterId, k.sceneId, k.simulationId, k.canonRevision],
+    );
+    return rows[0] ? toState(rows[0]) : null;
   }
 
   // ── Збережені запити (Т1.3) ──────────────────────────────────────────────

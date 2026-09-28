@@ -31,6 +31,9 @@ import {
   checkContinuityIssue,
   checkContinuityDraftCheck,
   checkCharacterDecision,
+  checkCharacterMemory,
+  checkCharacterMemoryStatus,
+  assertActor,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isSearchableKind, isValidEmbedding, memoryTextScore } from './search/text';
 import { CORE_STATUSES, CONTINUITY_ISSUE_STATUSES } from './types';
@@ -86,6 +89,12 @@ import type {
   RunFinishInput,
   RunRow,
   VersionRow,
+  CharacterMemoryInput,
+  CharacterMemoryRow,
+  CharacterMemoryFilter,
+  CharacterMemoryStatus,
+  CharacterStateInput,
+  CharacterStateRow,
 } from './types';
 
 const key = (projectId: string, id: string) => `${projectId}\u0000${id}`;
@@ -124,6 +133,8 @@ export class MemoryCoreRepository implements CoreRepository {
   private continuityIssues = new Map<string, ContinuityIssueRow>();
   private draftChecks: ContinuityDraftCheckRow[] = [];
   private decisions: CharacterDecisionRow[] = [];
+  private memories: CharacterMemoryRow[] = [];
+  private states: CharacterStateRow[] = [];
 
   private requireProject(projectId: string): ProjectRow {
     const p = this.projects.get(projectId);
@@ -1164,6 +1175,120 @@ export class MemoryCoreRepository implements CoreRepository {
     if (!action || action.length > 60) throw new CoreRuleError('bad_input', 'Обрана дія — від 1 до 60 символів');
     Object.assign(d, { status: 'active', source: 'author', selectedAction: action, result: clone(input.result), resolvedBy: input.actor, resolvedAt: now() });
     return clone(d);
+  }
+
+  // ── Пам'ять героя (Т2.6 В1) ──────────────────────────────────────────────
+
+  async addCharacterMemory(input: CharacterMemoryInput) {
+    this.requireProject(input.projectId);
+    const n = checkCharacterMemory(input);
+    if (!this.entityIn(input.projectId, input.characterId)) throw notFound(`Сутність «${input.characterId}»`);
+    const dedupeKey = input.dedupeKey ?? null;
+    if (dedupeKey && this.memories.some((m) => m.projectId === input.projectId && m.characterId === input.characterId && m.dedupeKey === dedupeKey && m.status !== 'rejected' && m.status !== 'superseded')) {
+      throw new CoreRuleError('conflict', 'Такий спогад героя вже є (той самий ключ повтору)');
+    }
+    const t = now();
+    const row: CharacterMemoryRow = {
+      id: randomUUID(),
+      projectId: input.projectId,
+      characterId: input.characterId,
+      memoryType: input.memoryType,
+      layer: n.layer,
+      content: n.content,
+      aboutEntityIds: clone(input.aboutEntityIds ?? []),
+      effects: clone(input.effects ?? {}),
+      beliefStatus: n.beliefStatus,
+      truth: n.truth,
+      sourceEventKind: input.sourceEventKind,
+      sourceEventId: input.sourceEventId ?? null,
+      sourceParagraphIds: clone(input.sourceParagraphIds ?? []),
+      evidenceHash: input.evidenceHash ?? null,
+      sceneId: input.sceneId ?? null,
+      storyTime: clone(input.storyTime ?? {}),
+      simulationId: input.simulationId || null,
+      canonRevision: input.canonRevision ?? null,
+      visibility: n.visibility,
+      origin: input.origin,
+      status: n.status,
+      dedupeKey,
+      reviewNote: null,
+      createdBy: input.createdBy,
+      createdAt: t,
+      updatedAt: t,
+      reviewedBy: null,
+      reviewedAt: null,
+    };
+    this.memories.push(row);
+    return clone(row);
+  }
+
+  async getCharacterMemory(projectId: string, id: string) {
+    const m = this.memories.find((x) => x.id === id && x.projectId === projectId);
+    return m ? clone(m) : null;
+  }
+
+  async listCharacterMemories(projectId: string, f: CharacterMemoryFilter = {}) {
+    const limit = Math.max(1, Math.min(f.limit ?? 200, 1000));
+    const paras = f.paragraphIds ? new Set(f.paragraphIds) : null;
+    return this.memories
+      .map((m, i) => ({ m, i }))
+      .filter(({ m }) =>
+        m.projectId === projectId && (!f.characterId || m.characterId === f.characterId) && (!f.memoryType || m.memoryType === f.memoryType) &&
+        (!f.status || m.status === f.status) && (f.simulationId === undefined || m.simulationId === f.simulationId) && (!f.dedupeKey || m.dedupeKey === f.dedupeKey) &&
+        (!paras || m.sourceParagraphIds.some((p) => paras.has(p))))
+      .sort((a, b) => b.m.createdAt.localeCompare(a.m.createdAt) || b.i - a.i)
+      .slice(0, limit)
+      .map(({ m }) => clone(m));
+  }
+
+  async setCharacterMemoryStatus(projectId: string, id: string, status: CharacterMemoryStatus, actor: CoreActor, note?: string | null) {
+    const m = this.memories.find((x) => x.id === id && x.projectId === projectId);
+    if (!m) throw notFound(`Спогад «${id}»`);
+    checkCharacterMemoryStatus(m, status, actor, note);
+    const t = now();
+    const reviewed = status === 'confirmed' || status === 'rejected' || status === 'needs_review';
+    Object.assign(m, {
+      status,
+      updatedAt: t,
+      ...(reviewed ? { reviewedBy: actor, reviewedAt: t } : {}),
+      ...(note !== undefined ? { reviewNote: note ?? null } : {}),
+    });
+    return clone(m);
+  }
+
+  async addCharacterState(input: CharacterStateInput) {
+    this.requireProject(input.projectId);
+    assertActor(input.createdBy);
+    if (!this.entityIn(input.projectId, input.characterId)) throw notFound(`Сутність «${input.characterId}»`);
+    if (!Number.isInteger(input.canonRevision) || input.canonRevision < 0) throw new CoreRuleError('bad_input', 'Ревізія канону — ціле ≥ 0');
+    if (!/^[0-9a-f]{16,64}$/.test(String(input.snapshotHash ?? ''))) throw new CoreRuleError('bad_input', 'Відбиток знімка — 16–64 шістнадцяткових символи');
+    const row: CharacterStateRow = {
+      id: randomUUID(),
+      projectId: input.projectId,
+      characterId: input.characterId,
+      sceneId: input.sceneId ?? null,
+      simulationId: input.simulationId ?? null,
+      canonRevision: input.canonRevision,
+      goals: clone(input.goals ?? []),
+      emotions: clone(input.emotions ?? []),
+      beliefs: clone(input.beliefs ?? []),
+      relationships: clone(input.relationships ?? []),
+      memoryIds: clone(input.memoryIds ?? []),
+      stateVersion: input.stateVersion ?? 1,
+      snapshotHash: input.snapshotHash,
+      createdBy: input.createdBy,
+      createdAt: now(),
+    };
+    this.states.push(row);
+    return clone(row);
+  }
+
+  async getCharacterState(projectId: string, k: { characterId: string; sceneId: string | null; simulationId: string | null; canonRevision: number }) {
+    for (let i = this.states.length - 1; i >= 0; i--) {
+      const s = this.states[i];
+      if (s.projectId === projectId && s.characterId === k.characterId && s.sceneId === k.sceneId && s.simulationId === k.simulationId && s.canonRevision === k.canonRevision) return clone(s);
+    }
+    return null;
   }
 
   // ── Збережені запити (Т1.3) ──────────────────────────────────────────────

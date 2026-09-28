@@ -660,6 +660,123 @@ export interface CharacterDecisionFilter {
   limit?: number;
 }
 
+// ── Пам'ять героя (Т2.6 В1, ТЗ-H §5.1, §10; FLC 2.0 §2, §4) ────────────────
+
+export const CHARACTER_MEMORY_TYPES = ['world_fact', 'knowledge', 'belief', 'recollection', 'consequence'] as const;
+export type CharacterMemoryType = (typeof CHARACTER_MEMORY_TYPES)[number];
+export const CHARACTER_MEMORY_LAYERS = ['world_truth', 'character_belief', 'reader_knowledge'] as const;
+export type CharacterMemoryLayer = (typeof CHARACTER_MEMORY_LAYERS)[number];
+export const BELIEF_STATUSES = ['knows', 'believes', 'doubts', 'abandoned'] as const;
+export type BeliefStatus = (typeof BELIEF_STATUSES)[number];
+export const MEMORY_TRUTHS = ['true', 'false', 'unknown'] as const;
+export type MemoryTruth = (typeof MEMORY_TRUTHS)[number];
+export const MEMORY_SOURCE_KINDS = ['entity', 'paragraph', 'decision', 'simulation_event', 'author'] as const;
+export type MemorySourceKind = (typeof MEMORY_SOURCE_KINDS)[number];
+export const MEMORY_ORIGINS = ['tag', 'ai', 'author', 'simulation'] as const;
+export type MemoryOrigin = (typeof MEMORY_ORIGINS)[number];
+export const CHARACTER_MEMORY_STATUSES = ['suggested', 'confirmed', 'needs_review', 'rejected', 'superseded'] as const;
+export type CharacterMemoryStatus = (typeof CHARACTER_MEMORY_STATUSES)[number];
+
+/** Наслідок події (FLC 2.0 §2): як змінились довіра, страх, цілі, стосунки — щодо кого. */
+export interface MemoryEffects {
+  trust?: { towards: string; delta: number }[];
+  fear?: number;
+  goals?: string[];
+  relationship?: { with: string; change: string }[];
+  [k: string]: unknown;
+}
+
+/** Час у світі на момент запису — для показу; порядок рахується наживо (Т2.1). */
+export interface MemoryStoryTime {
+  label?: string | null;
+  key?: number | null;
+  chapter?: number | null;
+  narrativeIndex?: number | null;
+}
+
+export interface CharacterMemoryRow {
+  id: string;
+  projectId: string;
+  characterId: string;
+  memoryType: CharacterMemoryType;
+  layer: CharacterMemoryLayer;
+  content: string;
+  aboutEntityIds: string[];
+  effects: MemoryEffects;
+  beliefStatus: BeliefStatus;
+  truth: MemoryTruth;
+  sourceEventKind: MemorySourceKind;
+  sourceEventId: string | null;
+  sourceParagraphIds: string[];
+  evidenceHash: string | null;
+  sceneId: string | null;
+  storyTime: MemoryStoryTime;
+  /** Рівно одне з двох: спогад прогону чи спогад канону з ревізією книги. */
+  simulationId: string | null;
+  canonRevision: number | null;
+  visibility: Visibility;
+  origin: MemoryOrigin;
+  status: CharacterMemoryStatus;
+  dedupeKey: string | null;
+  reviewNote: string | null;
+  createdBy: CoreActor;
+  createdAt: string;
+  updatedAt: string;
+  reviewedBy: CoreActor | null;
+  reviewedAt: string | null;
+}
+
+export type CharacterMemoryInput = Pick<CharacterMemoryRow, 'projectId' | 'characterId' | 'memoryType' | 'content' | 'sourceEventKind' | 'origin' | 'createdBy'> & {
+  layer?: CharacterMemoryLayer;
+  aboutEntityIds?: string[];
+  effects?: MemoryEffects;
+  beliefStatus?: BeliefStatus;
+  truth?: MemoryTruth;
+  sourceEventId?: string | null;
+  sourceParagraphIds?: string[];
+  evidenceHash?: string | null;
+  sceneId?: string | null;
+  storyTime?: MemoryStoryTime;
+  simulationId?: string | null;
+  canonRevision?: number | null;
+  visibility?: Visibility;
+  status?: CharacterMemoryStatus;
+  dedupeKey?: string | null;
+};
+
+export interface CharacterMemoryFilter {
+  characterId?: string;
+  memoryType?: CharacterMemoryType;
+  status?: CharacterMemoryStatus;
+  /** Лише цей прогін (`null` — лише канон). */
+  simulationId?: string | null;
+  dedupeKey?: string;
+  /** Спогади, серед абзаців-доказів яких є хоч один із цих. */
+  paragraphIds?: string[];
+  limit?: number;
+}
+
+export interface CharacterStateRow {
+  id: string;
+  projectId: string;
+  characterId: string;
+  sceneId: string | null;
+  simulationId: string | null;
+  canonRevision: number;
+  goals: unknown[];
+  emotions: unknown[];
+  beliefs: unknown[];
+  relationships: unknown[];
+  memoryIds: string[];
+  stateVersion: number;
+  snapshotHash: string;
+  createdBy: CoreActor;
+  createdAt: string;
+}
+
+export type CharacterStateInput = Pick<CharacterStateRow, 'projectId' | 'characterId' | 'canonRevision' | 'snapshotHash' | 'createdBy'> &
+  Partial<Pick<CharacterStateRow, 'sceneId' | 'simulationId' | 'goals' | 'emotions' | 'beliefs' | 'relationships' | 'memoryIds' | 'stateVersion'>>;
+
 /** Збережений пошуковий запит автора (Т1.3). */
 export interface SavedSearchRow {
   id: string;
@@ -842,6 +959,19 @@ export interface CoreRepository {
   supersedeCharacterDecisions(projectId: string, filter: { characterId: string; level: CharacterDecisionLevel; sceneId?: string | null; exceptId?: string }): Promise<number>;
   /** Рішення автора (В4): чекало автора → чинне, з дією автора, джерелом `author` і хто / коли. */
   resolveCharacterDecision(projectId: string, id: string, input: { selectedAction: string; result: Record<string, unknown>; actor: CoreActor }): Promise<CharacterDecisionRow>;
+
+  /**
+   * Пам'ять героя (Т2.6 В1): додати, знайти, перелік (новіші першими),
+   * рішення автора щодо статусу (підтвердити / відхилити / «перевірити» /
+   * замінено). AI лише пропонує — підтверджує людина.
+   */
+  addCharacterMemory(input: CharacterMemoryInput): Promise<CharacterMemoryRow>;
+  getCharacterMemory(projectId: string, id: string): Promise<CharacterMemoryRow | null>;
+  listCharacterMemories(projectId: string, filter?: CharacterMemoryFilter): Promise<CharacterMemoryRow[]>;
+  setCharacterMemoryStatus(projectId: string, id: string, status: CharacterMemoryStatus, actor: CoreActor, note?: string | null): Promise<CharacterMemoryRow>;
+  /** Стан героя на сцену (кеш будівника знімка, В5): додати й узяти найновіший за героєм, сценою, прогоном і ревізією. */
+  addCharacterState(input: CharacterStateInput): Promise<CharacterStateRow>;
+  getCharacterState(projectId: string, key: { characterId: string; sceneId: string | null; simulationId: string | null; canonRevision: number }): Promise<CharacterStateRow | null>;
 
   /** Збережені запити автора в книзі (Т1.3), новіші першими. */
   listSavedSearches(projectId: string, userId: string): Promise<SavedSearchRow[]>;

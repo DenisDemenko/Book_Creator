@@ -40,6 +40,20 @@ import {
   CHARACTER_DECISION_STATUSES,
   CONTINUITY_ISSUE_KINDS,
   CONTINUITY_ISSUE_STATUSES,
+  type CharacterMemoryInput,
+  type CharacterMemoryRow,
+  type CharacterMemoryStatus,
+  type CharacterMemoryLayer,
+  type BeliefStatus,
+  type MemoryTruth,
+  type Visibility,
+  CHARACTER_MEMORY_TYPES,
+  CHARACTER_MEMORY_LAYERS,
+  CHARACTER_MEMORY_STATUSES,
+  BELIEF_STATUSES,
+  MEMORY_TRUTHS,
+  MEMORY_SOURCE_KINDS,
+  MEMORY_ORIGINS,
 } from './types';
 
 export type CoreRuleCode =
@@ -357,6 +371,75 @@ export function checkCharacterDecision(input: CharacterDecisionInput): { status:
   if (input.fallbackReason != null && String(input.fallbackReason).length > 1000) throw new CoreRuleError('bad_input', 'Причина запасного шляху — до 1000 символів');
   if (input.questions !== undefined && !Array.isArray(input.questions)) throw new CoreRuleError('bad_input', 'Питання рішення — список');
   return { status, selectedAction: action };
+}
+
+// ── Пам'ять героя (Т2.6 В1) — дзеркало CHECK міграції 0016 ──────────────────
+
+/** Суб'єктивне героя — лише шар character_belief (переконання ніколи не world_truth, FLC 2.0 §4). */
+const SUBJECTIVE_MEMORY = new Set(['belief', 'recollection', 'consequence']);
+
+export function checkCharacterMemory(input: CharacterMemoryInput): {
+  layer: CharacterMemoryLayer;
+  status: CharacterMemoryStatus;
+  beliefStatus: BeliefStatus;
+  truth: MemoryTruth;
+  visibility: Visibility;
+  content: string;
+} {
+  assertActor(input.createdBy);
+  const bad = (msg: string) => new CoreRuleError('bad_input', msg);
+  if (!(CHARACTER_MEMORY_TYPES as readonly string[]).includes(input.memoryType)) throw bad(`Невідомий вид спогаду «${input.memoryType}»`);
+  if (!(MEMORY_ORIGINS as readonly string[]).includes(input.origin)) throw bad(`Невідоме походження спогаду «${input.origin}»`);
+  if (!(MEMORY_SOURCE_KINDS as readonly string[]).includes(input.sourceEventKind)) throw bad(`Невідоме джерело спогаду «${input.sourceEventKind}»`);
+  const layer = input.layer ?? (SUBJECTIVE_MEMORY.has(input.memoryType) ? 'character_belief' : 'world_truth');
+  if (!(CHARACTER_MEMORY_LAYERS as readonly string[]).includes(layer)) throw bad(`Невідомий шар «${layer}»`);
+  if (SUBJECTIVE_MEMORY.has(input.memoryType) && layer !== 'character_belief') throw bad('Переконання, спогад і наслідок — лише шар character_belief (не світова правда)');
+  if (input.memoryType === 'knowledge' && layer !== 'world_truth') throw bad('Знання героя — шар world_truth');
+  if (input.memoryType === 'world_fact' && layer === 'character_belief') throw bad('Світовий факт — world_truth чи reader_knowledge, не переконання');
+  const content = String(input.content ?? '').trim();
+  if (!content || content.length > 2000) throw bad('Зміст спогаду — від 1 до 2000 символів');
+  const sim = input.simulationId == null || input.simulationId === '' ? null : String(input.simulationId);
+  const rev = input.canonRevision ?? null;
+  if ((sim === null) === (rev === null)) throw bad('Спогад — або прогону (simulationId), або канону (canonRevision), рівно одне');
+  if (sim !== null && sim.length > 100) throw bad('Ідентифікатор прогону — до 100 символів');
+  if (rev !== null && (!Number.isInteger(rev) || rev < 0)) throw bad('Ревізія канону — ціле ≥ 0');
+  if (input.origin === 'simulation' && sim === null) throw bad('Спогад прогону пишеться лише з його simulationId');
+  const status = input.status ?? (input.origin === 'ai' || input.origin === 'simulation' ? 'suggested' : 'confirmed');
+  if (!(CHARACTER_MEMORY_STATUSES as readonly string[]).includes(status)) throw bad(`Невідомий статус спогаду «${status}»`);
+  if (input.origin === 'ai' && status === 'confirmed') throw new CoreRuleError('ai_suggests_only', 'Спогад від AI можна лише запропонувати — підтверджує автор');
+  const beliefStatus = input.beliefStatus ?? (SUBJECTIVE_MEMORY.has(input.memoryType) ? 'believes' : 'knows');
+  if (!(BELIEF_STATUSES as readonly string[]).includes(beliefStatus)) throw bad(`Невідома певність «${beliefStatus}»`);
+  const truth = input.truth ?? 'unknown';
+  if (!(MEMORY_TRUTHS as readonly string[]).includes(truth)) throw bad(`Невідоме відношення до правди «${truth}»`);
+  const visibility = input.visibility ?? 'project';
+  if (!VISIBILITIES.includes(visibility)) throw bad(`Невідома видимість «${visibility}»`);
+  const paras = input.sourceParagraphIds ?? [];
+  if (!Array.isArray(paras) || paras.length > 200 || paras.some((p) => typeof p !== 'string' || !p || p.length > 200)) throw bad('Абзаци-докази — список до 200 id');
+  const about = input.aboutEntityIds ?? [];
+  if (!Array.isArray(about) || about.length > 50 || about.some((p) => typeof p !== 'string' || !p)) throw bad('«Про кого» — список до 50 id сутностей');
+  if (input.effects !== undefined && (typeof input.effects !== 'object' || input.effects === null || Array.isArray(input.effects))) throw bad('Наслідки — обʼєкт');
+  if (input.evidenceHash != null && !/^[0-9a-f]{16,64}$/.test(input.evidenceHash)) throw bad('Відбиток доказів — 16–64 шістнадцяткових символи');
+  if (input.sourceEventId != null && (String(input.sourceEventId).length < 1 || String(input.sourceEventId).length > 200)) throw bad('Джерело спогаду — до 200 символів');
+  if (input.sceneId != null && (String(input.sceneId).length < 1 || String(input.sceneId).length > 200)) throw bad('Сцена спогаду — до 200 символів');
+  if (input.dedupeKey != null && (String(input.dedupeKey).length < 1 || String(input.dedupeKey).length > 200)) throw bad('Ключ повтору — до 200 символів');
+  return { layer, status, beliefStatus, truth, visibility, content };
+}
+
+/**
+ * Хто й куди може перевести спогад: підтвердити чи відхилити — людина
+ * (AI лише пропонує); «перевірити» — людина чи система (правка сцени, В3);
+ * «замінено» — будь-хто зі справжнім автором запису.
+ */
+export function checkCharacterMemoryStatus(row: Pick<CharacterMemoryRow, 'status' | 'origin'>, status: CharacterMemoryStatus, actor: CoreActor, note?: string | null): void {
+  assertActor(actor);
+  if (!(CHARACTER_MEMORY_STATUSES as readonly string[]).includes(status)) throw new CoreRuleError('bad_input', `Невідомий статус спогаду «${status}»`);
+  if ((status === 'confirmed' || status === 'rejected') && !actor.startsWith('user:') && !(row.origin === 'tag' && actor.startsWith('system:'))) {
+    throw new CoreRuleError('confirmed_is_author_only', 'Підтвердити чи відхилити спогад може лише автор');
+  }
+  if (status === 'needs_review' && actor.startsWith('ai:')) throw new CoreRuleError('bad_input', 'Позначку «перевірити» ставить автор чи синхронізація, не AI');
+  if (status === 'suggested') throw new CoreRuleError('bad_input', 'Повернути спогад у «пропозицію» не можна — лише підтвердити, відхилити чи позначити «перевірити»');
+  if (row.status === 'superseded') throw new CoreRuleError('conflict', 'Спогад уже замінено новішим');
+  if (note != null && String(note).length > 500) throw new CoreRuleError('bad_input', 'Примітка — до 500 символів');
 }
 
 export function checkMention(m: MentionInput): void {
