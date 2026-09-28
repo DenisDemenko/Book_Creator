@@ -488,6 +488,139 @@ export async function listBridgePayouts(
   }
 }
 
+export interface BridgeSellerApplication {
+  id: string;
+  displayName: string;
+  slug: string;
+  bio: string | null;
+  email: string | null;
+  userRole: string | null;
+  listings: number;
+  createdAt: string;
+}
+
+export interface BridgeSellerQueue {
+  count: number;
+  applications: BridgeSellerApplication[];
+}
+
+/**
+ * Черга заявок «хочу продавати» з маркетплейсу.
+ *
+ * Заявки лежать у базі маркетплейсу, але рішення про них власник ухвалює в
+ * панелі Студії — щоб погодження не доводилося шукати у двох місцях. Логіку
+ * схвалення тут не дублюємо: у маркетплейсі це дві записи однією транзакцією
+ * (профір продавця + роль користувача), і розійтись вони не мають.
+ */
+export async function listBridgeSellerApplications(
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<BridgeSellerQueue> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+
+  let response: Response;
+  try {
+    response = await doFetch(`${settings.url}/bridge/sellers`, {
+      headers: { 'x-bridge-key': settings.key },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  }
+
+  const text = await response.text().catch(() => '');
+  if (response.status === 401 || response.status === 403) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401
+    );
+  }
+  if (!response.ok) {
+    throw new MarketplaceBridgeError(
+      `Маркетплейс не віддав заявки: ${describeRejection(response.status, text)}`,
+      'rejected',
+      502
+    );
+  }
+
+  try {
+    const body = JSON.parse(text) as Partial<BridgeSellerQueue>;
+    return {
+      count: Number(body?.count ?? 0),
+      applications: Array.isArray(body?.applications) ? body.applications : [],
+    };
+  } catch {
+    return { count: 0, applications: [] };
+  }
+}
+
+/**
+ * Рішення про заявку — пишеться в маркетплейс, бо саме він володіє і профілем
+ * продавця, і роллю користувача. Тут лише передаємо намір власника.
+ */
+export async function decideBridgeSellerApplication(
+  id: string,
+  decision: 'approve' | 'reject',
+  reason?: string,
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<{ id: string; status: string }> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+  const fallbackStatus = decision === 'approve' ? 'approved' : 'rejected';
+
+  let response: Response;
+  try {
+    response = await doFetch(
+      `${settings.url}/bridge/sellers/${encodeURIComponent(id)}/${decision}`,
+      {
+        method: 'POST',
+        headers: {
+          'x-bridge-key': settings.key,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(decision === 'reject' ? { reason } : {}),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      }
+    );
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  }
+
+  const text = await response.text().catch(() => '');
+  if (response.status === 401 || response.status === 403) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401
+    );
+  }
+  if (!response.ok) {
+    throw new MarketplaceBridgeError(
+      `Маркетплейс відхилив рішення: ${describeRejection(response.status, text)}`,
+      'rejected',
+      502
+    );
+  }
+
+  try {
+    const body = JSON.parse(text) as { id?: string; status?: string };
+    return { id: body?.id ?? id, status: body?.status ?? fallbackStatus };
+  } catch {
+    return { id, status: fallbackStatus };
+  }
+}
+
 export async function listBridgeBooks(
   deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
 ): Promise<BridgeBookRow[]> {

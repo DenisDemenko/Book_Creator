@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Ban, CheckCircle2, RefreshCw } from 'lucide-react';
+import { AdminSellerApplications } from './AdminSellerApplications';
 
 /**
  * «Модерація» — окремий розділ адмінпанелі.
@@ -12,6 +13,10 @@ import { Ban, CheckCircle2, RefreshCw } from 'lucide-react';
  * Логіка, маршрути й вигляд рядків ПЕРЕНЕСЕНІ як були — змінився лише спосіб
  * відкриття (окремий вузол карти замість блоку під мостом), щоб уже перевірене
  * погодження курсів не довелося перевіряти вдруге.
+ *
+ * З 28.09.2026 тут же — черга заявок продавця з маркетплейсу: власник просив,
+ * щоб ПОГОДЖЕННЯ були в Студії, а не на сторінці адміна маркетплейсу. Це інший
+ * предмет (люди, а не публікації), тому окремий блок і окремий компонент.
  */
 
 type ModerationRow = {
@@ -84,6 +89,8 @@ export const AdminModerationView: React.FC = () => {
   };
 
   return (
+    <div className="space-y-4">
+    <AdminSellerApplications />
     <div className="rounded-2xl bg-slate-900/60 border border-white/[0.06] p-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
@@ -156,6 +163,7 @@ export const AdminModerationView: React.FC = () => {
           ))
         )}
       </div>
+    </div>
     </div>
   );
 };

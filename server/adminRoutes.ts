@@ -59,6 +59,8 @@ import {
   testBridgeConnection,
   listBridgeBooks,
   listBridgePayouts,
+  listBridgeSellerApplications,
+  decideBridgeSellerApplication,
   unpublishByExternalId,
   bridgeTestBook,
   bridgeTestBookContent,
@@ -77,6 +79,7 @@ const ALL_ROLES: StoredRole[] = [
   'designer',
   'translator',
   'publisher',
+  'seller',
   'expert',
   'teacher',
   'reader',
@@ -1036,6 +1039,39 @@ export function registerAdminRoutes(app: Express): void {
     } catch (err: any) {
       const status = err instanceof MarketplaceBridgeError ? err.status : 502;
       res.status(status).json({ error: err?.message || 'Не вдалося прочитати виплати.', kind: err?.kind });
+    }
+  });
+
+  /**
+   * Черга заявок продавця — те, що досі можна було погодити лише в панелі
+   * маркетплейсу. Заявки живуть у його базі, але рішення власник ухвалює тут;
+   * логіка схвалення лишається на боці маркетплейсу (профіль і роль однією
+   * транзакцією), бо дублювати її означало б дати їм розійтись.
+   */
+  app.get('/api/admin/marketplace-bridge/sellers', requireAdmin, async (_req, res) => {
+    try {
+      res.json(await listBridgeSellerApplications());
+    } catch (err: any) {
+      const status = err instanceof MarketplaceBridgeError ? err.status : 502;
+      res.status(status).json({ error: err?.message || 'Не вдалося прочитати заявки.', kind: err?.kind });
+    }
+  });
+
+  app.post('/api/admin/marketplace-bridge/sellers/:id/:decision', requireAdmin, async (req, res) => {
+    const id = String(req.params.id || '').trim();
+    const decision = String(req.params.decision || '').trim();
+    if (!id) {
+      return res.status(400).json({ error: 'Не вказано заявку.', kind: 'bad_input' });
+    }
+    if (decision !== 'approve' && decision !== 'reject') {
+      return res.status(400).json({ error: 'Рішення буває лише approve або reject.', kind: 'bad_input' });
+    }
+    const reason = String(req.body?.reason || '').trim();
+    try {
+      res.json(await decideBridgeSellerApplication(id, decision, reason || undefined));
+    } catch (err: any) {
+      const status = err instanceof MarketplaceBridgeError ? err.status : 502;
+      res.status(status).json({ error: err?.message || 'Маркетплейс не прийняв рішення.', kind: err?.kind });
     }
   });
 

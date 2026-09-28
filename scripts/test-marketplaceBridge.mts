@@ -504,5 +504,85 @@ console.log('\nВиплати з маркетплейсу (читання, як�
     empty.count === 0 && empty.payouts.length === 0);
 }
 
+console.log('\nЗаявки продавця (погодження перенесено в панель Студії):');
+{
+  const seen: { url: string; method?: string; key?: string; body?: string }[] = [];
+  const mkJson = (status: number, body: unknown) => (async (url: string, init: any = {}) => {
+    seen.push({
+      url: String(url),
+      method: init.method,
+      key: init.headers?.['x-bridge-key'],
+      body: init.body,
+    });
+    return { status, ok: status >= 200 && status < 300, text: async () => JSON.stringify(body) };
+  }) as never;
+
+  const queue = await bridge.listBridgeSellerApplications({
+    fetch: mkJson(200, {
+      count: 1,
+      applications: [
+        {
+          id: 'a1', displayName: 'Денис', slug: 'denys', bio: 'Пишу книги',
+          email: 'd@example.com', userRole: 'buyer', listings: 0,
+          createdAt: '2026-09-28T12:00:00.000Z',
+        },
+      ],
+    }),
+    settings,
+  });
+
+  t('GET /bridge/sellers із ключем',
+    seen[0]?.url === 'https://api.fusionlab.in.ua/bridge/sellers' && seen[0]?.key === 'secret-key',
+    String(seen[0]?.url));
+  t('черга прочитана', queue.count === 1 && queue.applications[0]?.email === 'd@example.com');
+  t('рядок несе роль акаунта, а не лише імʼя', queue.applications[0]?.userRole === 'buyer');
+
+  const approved = await bridge.decideBridgeSellerApplication('a1', 'approve', undefined, {
+    fetch: mkJson(200, { id: 'a1', status: 'approved' }),
+    settings,
+  });
+  t('схвалення йде POST-ом на потрібну адресу',
+    seen[1]?.url === 'https://api.fusionlab.in.ua/bridge/sellers/a1/approve' && seen[1]?.method === 'POST',
+    String(seen[1]?.url));
+  t('статус схвалення прочитано', approved.status === 'approved', approved.status);
+
+  const rejectedDecision = await bridge.decideBridgeSellerApplication('a1', 'reject', 'Немає портфоліо', {
+    fetch: mkJson(200, { id: 'a1', status: 'rejected' }),
+    settings,
+  });
+  t('відхилення везе причину', String(seen[2]?.body).includes('Немає портфоліо'), String(seen[2]?.body));
+  t('статус відхилення прочитано', rejectedDecision.status === 'rejected', rejectedDecision.status);
+
+  let unauthorized: any = null;
+  try {
+    await bridge.listBridgeSellerApplications({ fetch: mkJson(401, { message: 'Невірний ключ' }), settings });
+  } catch (e) { unauthorized = e; }
+  t('401 → помилка про ключ', unauthorized?.kind === 'unauthorized', String(unauthorized?.kind));
+
+  let missing: any = null;
+  try {
+    await bridge.decideBridgeSellerApplication('nope', 'approve', undefined, {
+      fetch: mkJson(404, { message: 'Заявку не знайдено' }),
+      settings,
+    });
+  } catch (e) { missing = e; }
+  t('404 від маркетплейсу → відмова, а не «схвалено»',
+    missing?.kind === 'rejected' && String(missing?.message).includes('Заявку не знайдено'),
+    String(missing?.message));
+
+  const emptyQueue = await bridge.listBridgeSellerApplications({
+    fetch: mkJson(200, { unexpected: 1 }),
+    settings,
+  });
+  t('несподіване тіло → порожня черга, а не падіння',
+    emptyQueue.count === 0 && emptyQueue.applications.length === 0);
+
+  const bare = await bridge.decideBridgeSellerApplication('a1', 'approve', undefined, {
+    fetch: mkJson(200, {}),
+    settings,
+  });
+  t('відповідь без тіла → рішення все одно повертається', bare.status === 'approved', bare.status);
+}
+
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);
 if (fail > 0) process.exit(1);
