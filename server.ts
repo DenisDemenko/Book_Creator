@@ -621,6 +621,14 @@ registerGitCommandRoutes(app);
       // Т2.5 В1: адаптер LLM з `server/ai/adapters/llm` — той самий виклик ролі AI-2 через ядро ШІ.
       llm: (projectId, actor) => llmViaCore(aiRoleGenerateViaCore, () => resolveModuleModelId('coreAi2Analysis'), projectId, actor),
     },
+    // Допит живого персонажа (Т2.7 В3): голос героя — модуль «Ядра AI» coreCharacterVoice (свій шаблон і модель).
+    interview: {
+      voice: (projectId, actor) => async (system, user) => {
+        const out = await aiRoleGenerateViaCore({ module: 'coreCharacterVoice', modelId: await resolveModuleModelId('coreCharacterVoice'), system, user, projectId, actor });
+        return { text: out.text, modelId: out.modelId, inputTokens: out.inputTokens, outputTokens: out.outputTokens };
+      },
+      loadTemplate: () => loadCoreAiRoleTemplate('coreCharacterVoice'),
+    },
     // Канон автора для профілю героя (Т1.5): картка в «Персонажах».
     studio: async (projectId, entity) => studioFromBook((await getStoredBookForRealtime(projectId))?.book as any, entity),
     // Тлумачення запиту сторінки «Пошук» (Т1.3): AI-2, модуль coreSearchInterpret —

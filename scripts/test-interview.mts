@@ -9,6 +9,14 @@
  *
  * В2: «AI-персонаж» і рівні автономності — налаштування (лише відомі поля),
  * допит лише для увімкненого героя, маршрути `…/agent` і `…/agents`, права.
+ *
+ * В3: хід допиту — питання → Jev (тактичний на хід, прогін = допит) →
+ * голос героя (модуль `coreCharacterVoice`) з історією допиту. КРИТЕРІЇ
+ * FLC 2.0 §7: 10 відповідей поспіль без втрати контексту й без зміни
+ * канону; немає майбутнього й чужих приватних секретів; збій Jev — запасний
+ * LLM, збій голосу — «не вдалося» зі збереженим питанням і «повторити»,
+ * рішення чекає автора — «чекає» з варіантами. Маршрути `…/interview`,
+ * `…/simulations/:id`, `/turn`, `/retry`, `/status`.
  * PostgreSQL — з CORE_TEST_DATABASE_URL (схема `fusion_core` видаляється —
  * лише тестова база!).
  *
@@ -22,7 +30,12 @@ import { syncBookToCore } from '../server/core/sync.ts';
 import { reconcileParagraphIds } from '../src/utils/paragraphIds.ts';
 import { checkCanonProposal, checkCharacterAgent, checkSimulation, checkSimulationEvent, checkSimulationPatch } from '../server/core/rules.ts';
 import type { CoreRepository } from '../server/core/types.ts';
-import { getAgent, normalizeAgentConfig, requireInterviewAgent, setAgent } from '../server/core/interview.ts';
+import { askQuestion, getAgent, INTERVIEW_ACTIONS, normalizeAgentConfig, requireInterviewAgent, retryTurn, setAgent, startInterview, type InterviewDeps } from '../server/core/interview.ts';
+import { addAuthorMemory, collectTagMemories } from '../server/core/characterMemory.ts';
+import { resolveDecisionByAuthor } from '../server/core/jevLevels.ts';
+import { HttpJevAdapter, LlmFallbackJevAdapter, MockJevAdapter } from '../server/ai/adapters/jev/index.ts';
+import { factoryCharacterVoiceTemplate } from '../server/core/interviewPrompt.ts';
+import { CORE_MODULE_KEYS, resolveCoreTemplate } from '../server/coreAiRegistry.ts';
 import { registerProjectRoutes } from '../server/core/projectRoutes.ts';
 import express from 'express';
 import type { AddressInfo } from 'node:net';
@@ -201,8 +214,187 @@ async function agentSuite(label: string, repo: CoreRepository, P: string) {
   }
 }
 
+async function turnSuite(label: string, repo: CoreRepository, P: string) {
+  console.log(`\nХід допиту — В3 (${label}):`);
+  const sec = (id: string, order: number, content: string) => {
+    const r = reconcileParagraphIds({ sectionId: id, content });
+    return { id, title: id, order, content, paragraphIds: r.ids, paragraphHashes: r.hashes };
+  };
+  await syncBookToCore(repo, {
+    id: P, ownerId: 'u-owner', title: 'Архів',
+    book: {
+      id: P, title: 'Архів', characters: [{ id: 'c-o', name: 'Олена', role: 'protagonist' }, { id: 'c-m', name: 'Марко' }],
+      chapters: [
+        { id: 'ch1', title: 'Гл. 1', order: 0, sections: [
+          sec('s1', 0, '[/character:Олена] [/character:Марко] [/conflict:Сварка в лабораторії] Марко звинуватив Олену в крадіжці архіву.'),
+          sec('s2', 1, '[/character:Олена] Олена сиділа сама в кабінеті.'),
+        ] },
+        { id: 'ch2', title: 'Гл. 2', order: 1, sections: [sec('s3', 0, '[/character:Олена] [/revelation:Марко зрадник @Олена] Олена дізналась, що Марко — зрадник.')] },
+      ],
+    },
+  } as any);
+  const olena = (await repo.resolveAlias(P, 'character', 'Олена'))!;
+  const marko = (await repo.resolveAlias(P, 'character', 'Марко'))!;
+  await collectTagMemories(repo, P);
+  await addAuthorMemory(repo, { projectId: P, characterId: marko, memoryType: 'recollection', content: 'Я сам вкрав архів уночі.', sceneId: 's1', visibility: 'hidden', actor: 'user:u-owner' });
+  await addAuthorMemory(repo, { projectId: P, characterId: olena, memoryType: 'belief', content: 'Марко мені заздрить.', sceneId: 's1', actor: 'user:u-owner' });
+
+  const prompts: { system: string; user: string }[] = [];
+  let voiceMode: 'ok' | 'down' | 'garbage' = 'ok';
+  const voice = async (system: string, user: string) => {
+    prompts.push({ system, user });
+    if (voiceMode === 'down') throw new Error('модель голосу недоступна');
+    if (voiceMode === 'garbage') return { text: 'не json', modelId: 'fake-voice', inputTokens: 5, outputTokens: 1 };
+    const q = (/Питання автора: (.*)$/m.exec(user) ?? [])[1] ?? '';
+    const prev = user.split('\n').filter((l) => l.startsWith('Автор: ')).length;
+    return { text: JSON.stringify({ reply: `Я пам'ятаю ${prev} попередніх питань. На «${q}» скажу: не знаю.`, intent: 'ухилитися', proposals: { memories: [{ type: 'recollection', content: 'Олена відчула тиск автора.' }] } }), modelId: 'fake-voice', inputTokens: 50, outputTokens: 20 };
+  };
+  const mock = new MockJevAdapter();
+  let jevMode: 'ok' | 'low' | 'down' = 'ok';
+  const jevOk = { name: 'jev' as const, evaluate: async (sn: any, q: any) => ({ ...(await mock.evaluate(sn, q)), source: 'jev' as const, confidence: jevMode === 'low' ? 0.1 : 0.9 }) };
+  const jevDown = new HttpJevAdapter('k', { fetchImpl: (async () => new Response('{}', { status: 529 })) as any });
+  const llm = async (_s: string, user: string) => {
+    const pick = (id: string, v: string) => (new RegExp(`"${id}"`).test(user) ? { [id]: { choice: v } } : {});
+    return { text: JSON.stringify({ answers: { ...pick('trajectory', 'waver'), ...pick('scene_motive', 'protect_self'), ...pick('next_action', 'deflect') } }), modelId: 'fake-llm', inputTokens: 10, outputTokens: 5 };
+  };
+  const deps = (): InterviewDeps => ({ repo, jev: jevMode === 'down' ? jevDown : jevOk, fallback: new LlmFallbackJevAdapter(llm), voice });
+  const actor = 'user:u-owner';
+
+  t('модуль «Голос героя (допит)» — у «Ядрі AI», зі схемою відповіді, яку адмін не зламає',
+    (CORE_MODULE_KEYS as readonly string[]).includes('coreCharacterVoice') && /ЖОРСТКИЙ КОНТРАКТ/.test(factoryCharacterVoiceTemplate().system) &&
+    /"reply"/.test(resolveCoreTemplate('coreCharacterVoice', { coreCharacterVoice: { system: 'Будь лаконічним. ⚠️ ЖОРСТКИЙ КОНТРАКТ ВІДПОВІДІ що завгодно', user: 'x' } } as any).system));
+  t('допит вимкненого героя — conflict', (await code(() => startInterview(repo, { projectId: P, characterId: olena, actor }))) === 'conflict');
+  await setAgent(repo, P, olena, { autonomyLevel: 'interview', config: { maxTurns: 12, note: 'говорить стримано' } }, actor);
+  t('невідома сцена — not_found', (await code(() => startInterview(repo, { projectId: P, characterId: olena, sceneId: 'nope', actor }))) === 'not_found');
+  const sim = await startInterview(repo, { projectId: P, characterId: olena, sceneId: 's2', actor });
+  t('допит почато: сцена 2, ревізія книги, ліміт і нотатка з налаштувань агента, назва',
+    sim.status === 'active' && sim.sceneId === 's2' && sim.baseBookRevision === (await repo.getProject(P))!.revision && (sim.config as any).maxTurns === 12 && (sim.config as any).note === 'говорить стримано' && sim.title === 'Допит: Олена');
+
+  const canonBefore = JSON.stringify({
+    f: await repo.listFindings(P), p: await repo.listAllParagraphs(P), e: await repo.listEntities(P), r: await repo.listRelations(P),
+    m: (await repo.listCharacterMemories(P, { simulationId: null })).map((m) => [m.id, m.status, m.content]),
+  });
+  const results = [];
+  for (let i = 1; i <= 10; i++) results.push(await askQuestion(deps(), { projectId: P, simulationId: sim.id, question: `Питання номер ${i}: де ти була?`, actor }));
+  t('КРИТЕРІЙ FLC 2.0 §7 (3): 10 відповідей поспіль — усі з відповіддю, ходи 1…10', results.every((r, i) => r.status === 'answered' && r.turn === i + 1), results.map((r) => r.status).join(','));
+  const last = results[9].event.publicPayload as any;
+  t('контекст не губиться: у 10-му запиті голосу — 9 попередніх питань і відповідей; відповідь це підтверджує',
+    (prompts[9].user.match(/^Автор: /gm) ?? []).length === 9 && (prompts[9].user.match(/^Олена: /gm) ?? []).length === 9 && /Я пам'ятаю 9 попередніх/.test(last.text), last.text);
+  const decision = (await repo.getCharacterDecision(P, last.decisionId))!;
+  t('кожна відповідь — з рішенням Jev на хід (тактичне, прогін = допит, хід 10, дія з дозволених), відбиток знімка',
+    decision.level === 'tactical' && decision.simulationId === sim.id && decision.turnIndex === 10 && INTERVIEW_ACTIONS.includes(last.action) && last.source === 'jev' && /^[0-9a-f]{32}$/.test(last.snapshotHash));
+  t('стратегічне й сценічне — раз на допит (з кешу), тактичних — 10',
+    (await repo.listCharacterDecisions(P, { characterId: olena, level: 'strategic' })).length === 1 && (await repo.listCharacterDecisions(P, { characterId: olena, level: 'scene' })).length === 1 &&
+    (await repo.listCharacterDecisions(P, { characterId: olena, level: 'tactical', simulationId: sim.id })).length === 10);
+  const canonAfter = JSON.stringify({
+    f: await repo.listFindings(P), p: await repo.listAllParagraphs(P), e: await repo.listEntities(P), r: await repo.listRelations(P),
+    m: (await repo.listCharacterMemories(P, { simulationId: null })).map((m) => [m.id, m.status, m.content]),
+  });
+  t('КРИТЕРІЙ FLC 2.0 §7 (3) / ТЗ-H №3: канон, рукопис, пам\'ять канону — без змін', canonBefore === canonAfter);
+  const allPrompts = prompts.map((p) => p.system + p.user).join('\n');
+  t('КРИТЕРІЙ FLC 2.0 §7 (2) / ТЗ-H №5: у запитах голосу немає майбутнього (гл. 2 — «зрадник») і чужого приватного (Марко вкрав архів)',
+    !/зрадник/.test(allPrompts) && !/вкрав архів/.test(allPrompts));
+  t('у запиті — своє: переконання «Марко заздрить», сварка (пам\'ять), нотатка голосу, рішення на хід',
+    /Марко мені заздрить/.test(prompts[0].user) && /Сварка в лабораторії/.test(prompts[0].user) && /говорить стримано/.test(prompts[0].system) && /дія: /.test(prompts[0].user));
+  t('пропозиції голосу збережено у відповіді (для В4)', Array.isArray(last.proposals?.memories) && last.proposals.memories.length === 1);
+
+  // Запасні шляхи.
+  const sim2 = await startInterview(repo, { projectId: P, characterId: olena, asOfChapter: 1, actor });
+  jevMode = 'down';
+  const fb = await askQuestion(deps(), { projectId: P, simulationId: sim2.id, question: 'Хто винен?', actor });
+  t('КРИТЕРІЙ FLC 2.0 §7 (6): Jev 529 — запасний LLM, відповідь є, причина збережена', fb.status === 'answered' && (fb.event.publicPayload as any).source === 'llm_fallback' && /529/.test((fb.event.publicPayload as any).fallbackReason ?? ''));
+  jevMode = 'ok';
+  voiceMode = 'down';
+  const failed = await askQuestion(deps(), { projectId: P, simulationId: sim2.id, question: 'А що було далі?', actor });
+  t('голос недоступний — «не вдалося», питання збережене, хід 2', failed.status === 'failed' && failed.turn === 2 && (failed.event.publicPayload as any).stage === 'voice');
+  t('нове питання, поки попереднє без відповіді, — conflict', (await code(() => askQuestion(deps(), { projectId: P, simulationId: sim2.id, question: 'Ще?', actor }))) === 'conflict');
+  voiceMode = 'garbage';
+  t('відповідь голосу не за схемою — теж «не вдалося»', (await retryTurn(deps(), { projectId: P, simulationId: sim2.id, actor })).status === 'failed');
+  voiceMode = 'ok';
+  const again = await retryTurn(deps(), { projectId: P, simulationId: sim2.id, actor });
+  const ev2 = await repo.listSimulationEvents(P, sim2.id);
+  t('«повторити» — відповідь на те саме питання, той самий хід, питання не продубльовано; стан цілий',
+    again.status === 'answered' && again.turn === 2 && ev2.filter((e) => e.eventType === 'question').length === 2 && /«А що було далі\?»/.test((again.event.publicPayload as any).text) && (await repo.getSimulation(P, sim2.id))!.currentTurn === 2);
+  t('повторювати нічого — conflict', (await code(() => retryTurn(deps(), { projectId: P, simulationId: sim2.id, actor }))) === 'conflict');
+
+  // Рішення чекає автора.
+  const sim3 = await startInterview(repo, { projectId: P, characterId: olena, sceneId: 's1', actor });
+  jevMode = 'low';
+  let r = await askQuestion(deps(), { projectId: P, simulationId: sim3.id, question: 'Чому ти мовчиш?', actor });
+  t('низька впевненість — «чекає автора» з варіантами, відповіді немає', r.status === 'awaiting' && Array.isArray((r.event.publicPayload as any).options) && (r.event.publicPayload as any).options.length >= 2);
+  let loops = 0;
+  while (r.status === 'awaiting' && loops < 4) {
+    const p = r.event.publicPayload as any;
+    await resolveDecisionByAuthor(repo, P, p.decisionId, p.options[0], actor);
+    r = await retryTurn(deps(), { projectId: P, simulationId: sim3.id, actor });
+    loops++;
+  }
+  t('автор вирішує за героя (рівень за рівнем) → «повторити» → відповідь з дією автора', r.status === 'answered' && (r.event.publicPayload as any).source === 'author' && loops >= 1, `кроків: ${loops}`);
+  jevMode = 'ok';
+
+  // Ліміт і статуси.
+  t('11-те питання при ліміті 12 — ще можна; ліміт вичерпано — conflict', (await askQuestion(deps(), { projectId: P, simulationId: sim.id, question: '11?', actor })).status === 'answered' &&
+    (await askQuestion(deps(), { projectId: P, simulationId: sim.id, question: '12?', actor })).status === 'answered' &&
+    (await code(() => askQuestion(deps(), { projectId: P, simulationId: sim.id, question: '13?', actor }))) === 'conflict');
+  await repo.updateSimulation(P, sim2.id, { status: 'paused' });
+  t('на паузі — conflict', (await code(() => askQuestion(deps(), { projectId: P, simulationId: sim2.id, question: 'x', actor }))) === 'conflict');
+  await setAgent(repo, P, olena, { autonomyLevel: 'off' }, actor);
+  t('героя вимкнено — допит зупинено (conflict)', (await code(() => askQuestion(deps(), { projectId: P, simulationId: sim3.id, question: 'x', actor }))) === 'conflict');
+  await setAgent(repo, P, olena, { autonomyLevel: 'interview' }, actor);
+  t('порожнє питання — bad_input; чужий id — not_found', (await code(() => askQuestion(deps(), { projectId: P, simulationId: sim3.id, question: '  ', actor }))) === 'bad_input' && (await code(() => askQuestion(deps(), { projectId: P, simulationId: '00000000-0000-4000-8000-000000000000', question: 'x', actor }))) === 'not_found');
+
+  // Маршрути.
+  const access = {
+    async getBookOwnerId(x: string) { return x === P ? 'u-owner' : null; },
+    async getCollabOwnerId() { return undefined; },
+    async listAcceptedInvites() { return [{ acceptedUserId: 'u-reader', role: 'reader' }]; },
+  };
+  const who: Record<string, any> = { owner: { id: 'u-owner', role: 'writer', isGuest: false }, reader: { id: 'u-reader', role: 'writer', isGuest: false } };
+  const serve = (full: boolean) => {
+    const app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => { (req as any).principal = who[String(req.headers['x-user'])]; next(); });
+    registerProjectRoutes(app, { access, repo: () => repo, coreState: () => 'ready', ...(full ? { flc: { jev: async () => jevOk as any, llm: () => llm }, interview: { voice: () => voice } } : {}) });
+    const server = app.listen(0);
+    return { server, base: `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/projects/${P}` };
+  };
+  const { server, base } = serve(true);
+  const call = async (user: string, method: string, path: string, body?: unknown, b = base) => {
+    const res = await fetch(`${b}${path}`, { method, headers: { 'x-user': user, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    return { status: res.status, body: (await res.json().catch(() => ({}))) as any };
+  };
+  try {
+    t('права: читач не допитує (403)', (await call('reader', 'POST', `/characters/${olena}/interview`, {})).status === 403 && (await call('reader', 'GET', `/characters/${olena}/interviews`)).status === 403);
+    const st = await call('owner', 'POST', `/characters/${olena}/interview`, { sceneId: 's2', title: 'Розмова про архів' });
+    t('POST …/interview — 201', st.status === 201 && st.body.simulation.title === 'Розмова про архів');
+    const sid = st.body.simulation.id;
+    const turn = await call('owner', 'POST', `/simulations/${sid}/turn`, { question: 'Де архів?' });
+    t('POST …/turn — відповідь героя з рішенням', turn.status === 200 && turn.body.status === 'answered' && !!turn.body.event.publicPayload.text && !!turn.body.event.sourceDecisionId);
+    const got = await call('owner', 'GET', `/simulations/${sid}`);
+    t('GET …/simulations/:id — допит і ходи', got.status === 200 && got.body.events.map((e: any) => e.eventType).join() === 'question,answer');
+    t('перелік допитів героя', (await call('owner', 'GET', `/characters/${olena}/interviews`)).body.simulations.some((s: any) => s.id === sid));
+    t('retry без потреби — 409; порожнє питання — 422', (await call('owner', 'POST', `/simulations/${sid}/retry`, {})).status === 409 && (await call('owner', 'POST', `/simulations/${sid}/turn`, { question: '' })).status === 422);
+    t('статус: пауза → продовжити → закрити; закритий не відкрити (409); поганий статус — 400',
+      (await call('owner', 'POST', `/simulations/${sid}/status`, { status: 'paused' })).body.simulation.status === 'paused' &&
+      (await call('owner', 'POST', `/simulations/${sid}/status`, { status: 'active' })).body.simulation.status === 'active' &&
+      (await call('owner', 'POST', `/simulations/${sid}/status`, { status: 'closed' })).body.simulation.status === 'closed' &&
+      (await call('owner', 'POST', `/simulations/${sid}/status`, { status: 'active' })).status === 409 && (await call('owner', 'POST', `/simulations/${sid}/status`, { status: 'x' })).status === 400);
+    t('невідомий допит — 404', (await call('owner', 'GET', '/simulations/00000000-0000-4000-8000-000000000000')).status === 404);
+  } finally {
+    server.close();
+  }
+  const bare = serve(false);
+  try {
+    const st = await call('owner', 'POST', `/characters/${olena}/interview`, {}, bare.base);
+    t('без Jev/голосу в сервері — хід 503 (почати й читати — можна)', st.status === 201 && (await call('owner', 'POST', `/simulations/${st.body.simulation.id}/turn`, { question: 'x' }, bare.base)).status === 503);
+  } finally {
+    bare.server.close();
+  }
+}
+
 await repoSuite('memory', new MemoryCoreRepository(), 'int-m');
 await agentSuite('memory', new MemoryCoreRepository(), 'agt-m');
+await turnSuite('memory', new MemoryCoreRepository(), 'trn-m');
 const url = process.env.CORE_TEST_DATABASE_URL?.trim();
 if (!url) {
   console.log('\nPostgreSQL: пропущено (CORE_TEST_DATABASE_URL не задано) — перевірено на сховищі в пам\'яті');
@@ -215,6 +407,7 @@ if (!url) {
     t('схема ядра — не старіша за v17 (допит)', Number(rows[0].v) >= 17, `v${rows[0].v}`);
     const { olena, sim } = await repoSuite('postgres', new PgCoreRepository(pool), 'int-p');
     await agentSuite('postgres', new PgCoreRepository(pool), 'agt-p');
+    await turnSuite('postgres', new PgCoreRepository(pool), 'trn-p');
     const refused = async (sql: string, params: unknown[]) => {
       try {
         await pool.query(sql, params);

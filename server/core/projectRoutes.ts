@@ -53,7 +53,7 @@ import { decisionView, decisionsSummary } from './jevDecisions';
 import { buildCharacterSnapshot } from './characterSnapshot';
 import { addAuthorMemory, collectTagMemories, memoryViews, reviewMemory } from './characterMemory';
 import { AI_MEMORY_JOB_KIND } from './memoryAi';
-import { AUTONOMY_LABELS, agentView, getAgent, setAgent } from './interview';
+import { AUTONOMY_LABELS, agentView, askQuestion, getAgent, retryTurn, setAgent, startInterview, type VoiceGenerate } from './interview';
 import { scanScenes } from './timeline';
 import { CHARACTER_MEMORY_STATUSES, CHARACTER_MEMORY_TYPES, type CharacterMemoryStatus, type CharacterMemoryType } from './types';
 import { DEFAULT_TACTICAL_ACTIONS } from './jevLevels';
@@ -116,6 +116,8 @@ export interface ProjectRoutesDeps {
   studio?: (projectId: string, entity: EntityRow) => Promise<{ character: StudioCharacterLike | null; all: StudioCharacterLike[] }>;
   /** Прототип FLC етапу 0 (Т1.6): адаптер Jev (null — ключа немає) і LLM. */
   flc?: { jev: () => Promise<JevAdapter | null>; llm: (projectId: string, actor: string) => LlmJson };
+  /** Т2.7 В3: голос героя на допиті — модуль «Ядра AI» `coreCharacterVoice` (шаблон адміна — за бажанням). */
+  interview?: { voice: (projectId: string, actor: string) => VoiceGenerate; loadTemplate?: () => Promise<{ system: string; user: string } | undefined> };
   /** Порядок сцен у часі світу зі Студії (`Scene.timelineOrder`), Т2.1. */
   sceneOrder?: (projectId: string) => Promise<Map<string, number>>;
   /**
@@ -158,6 +160,9 @@ export interface VisualGenerationDeps {
     },
   ) => Promise<string>;
 }
+
+/** Не більше стількох ходів допиту (Т2.7 В3) на користувача за хвилину — Jev і модель голосу платні. */
+export const INTERVIEW_TURNS_PER_MINUTE = 20;
 
 /** Не більше стількох рішень героя (Т2.5 В5) на користувача за хвилину — виклики Jev і LLM платні. */
 export const DECIDE_PER_MINUTE = 20;
@@ -2207,6 +2212,126 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
     const names = new Map((await repo.listEntities(req.params.id)).map((e) => [e.id, e.name]));
     const agents = (await repo.listCharacterAgents(req.params.id)).filter((a) => a.enabled).map((a) => ({ ...agentView(a.characterId, a), name: names.get(a.characterId) ?? '?' }));
     res.json({ agents });
+  }));
+
+  // ── Т2.7 В3: допит — почати, хід, повторити, статус, історія (ТЗ-H §11 `…/interview`) ──
+
+  const turnCalls = new Map<string, number[]>();
+  const turnAllowed = (userId: string): boolean => {
+    const now = Date.now();
+    const recent = (turnCalls.get(userId) ?? []).filter((x) => now - x < 60_000);
+    if (recent.length >= INTERVIEW_TURNS_PER_MINUTE) {
+      turnCalls.set(userId, recent);
+      return false;
+    }
+    recent.push(now);
+    turnCalls.set(userId, recent);
+    return true;
+  };
+  const requireInterviewRole = (req: Request, res: Response): boolean => {
+    if (canEditStory(req.projectAccess!)) return true;
+    res.status(403).json({ error: 'Допитують героя власник, співавтор, редактор і адміністратор (у розмові — його приватна пам\'ять).', kind: 'forbidden' });
+    return false;
+  };
+  const interviewDeps = (repo: CoreRepository, req: Request) => {
+    const actor = `user:${req.projectAccess!.userId}`;
+    return {
+      repo,
+      jev: null as JevAdapter | null,
+      fallback: new LlmFallbackJevAdapter(deps.flc!.llm(req.params.id, actor)),
+      voice: deps.interview!.voice(req.params.id, actor),
+      loadTemplate: deps.interview!.loadTemplate,
+      studio: deps.studio,
+    };
+  };
+  const interviewReady = (res: Response): boolean => {
+    if (deps.flc && deps.interview) return true;
+    res.status(503).json({ error: 'Допит (Jev і голос героя) тут не підключено.', kind: 'core_unavailable' });
+    return false;
+  };
+  const simulationOf = async (repo: CoreRepository, req: Request, res: Response) => {
+    const sim = await repo.getSimulation(req.params.id, req.params.simId);
+    if (!sim || sim.kind !== 'interview') {
+      res.status(404).json({ error: 'Допит не знайдено.', kind: 'not_found' });
+      return null;
+    }
+    return sim;
+  };
+
+  /** Почати допит героя: `{ sceneId?, asOfChapter?, title? }` — межа знань (типово — з налаштувань «AI-персонажа»). */
+  app.post('/api/projects/:id/characters/:entityId/interview', withRepo(async (repo, req, res) => {
+    if (!requireInterviewRole(req, res)) return;
+    const b = req.body ?? {};
+    const ch = b.asOfChapter === null ? null : b.asOfChapter === undefined ? undefined : Number(b.asOfChapter);
+    const sim = await startInterview(repo, {
+      projectId: req.params.id,
+      characterId: req.params.entityId,
+      sceneId: b.sceneId === undefined ? undefined : typeof b.sceneId === 'string' && b.sceneId ? b.sceneId.slice(0, 200) : null,
+      asOfChapter: ch,
+      title: typeof b.title === 'string' ? b.title : undefined,
+      actor: `user:${req.projectAccess!.userId}`,
+    });
+    res.status(201).json({ simulation: sim });
+  }));
+
+  /** Допити героя (новіші першими). */
+  app.get('/api/projects/:id/characters/:entityId/interviews', withRepo(async (repo, req, res) => {
+    if (!requireInterviewRole(req, res)) return;
+    res.json({ simulations: await repo.listSimulations(req.params.id, { characterId: req.params.entityId, kind: 'interview', limit: 50 }) });
+  }));
+
+  /** Допит і його ходи. */
+  app.get('/api/projects/:id/simulations/:simId', withRepo(async (repo, req, res) => {
+    if (!requireInterviewRole(req, res)) return;
+    const sim = await simulationOf(repo, req, res);
+    if (!sim) return;
+    res.json({ simulation: sim, events: await repo.listSimulationEvents(req.params.id, sim.id) });
+  }));
+
+  /** Хід: `{ question }` → рішення Jev → відповідь героя (або «чекає» / «не вдалося» — стан збережено). */
+  app.post('/api/projects/:id/simulations/:simId/turn', withRepo(async (repo, req, res) => {
+    if (!requireInterviewRole(req, res) || !interviewReady(res)) return;
+    const sim = await simulationOf(repo, req, res);
+    if (!sim) return;
+    if (!turnAllowed(req.projectAccess!.userId)) {
+      res.status(429).json({ error: `Забагато питань за хвилину (не більше ${INTERVIEW_TURNS_PER_MINUTE}).`, kind: 'rate_limited' });
+      return;
+    }
+    const d = interviewDeps(repo, req);
+    d.jev = await deps.flc!.jev();
+    const r = await askQuestion(d, { projectId: req.params.id, simulationId: sim.id, question: String(req.body?.question ?? ''), actor: `user:${req.projectAccess!.userId}` });
+    res.json(r);
+  }));
+
+  /** Повторити останній хід, що «чекає» чи «не вдався» (після рішення автора чи збою моделі). */
+  app.post('/api/projects/:id/simulations/:simId/retry', withRepo(async (repo, req, res) => {
+    if (!requireInterviewRole(req, res) || !interviewReady(res)) return;
+    const sim = await simulationOf(repo, req, res);
+    if (!sim) return;
+    if (!turnAllowed(req.projectAccess!.userId)) {
+      res.status(429).json({ error: `Забагато питань за хвилину (не більше ${INTERVIEW_TURNS_PER_MINUTE}).`, kind: 'rate_limited' });
+      return;
+    }
+    const d = interviewDeps(repo, req);
+    d.jev = await deps.flc!.jev();
+    res.json(await retryTurn(d, { projectId: req.params.id, simulationId: sim.id, actor: `user:${req.projectAccess!.userId}` }));
+  }));
+
+  /** Пауза / продовжити / закрити допит (застарілий — лише закрити). */
+  app.post('/api/projects/:id/simulations/:simId/status', withRepo(async (repo, req, res) => {
+    if (!requireInterviewRole(req, res)) return;
+    const sim = await simulationOf(repo, req, res);
+    if (!sim) return;
+    const status = String(req.body?.status ?? '');
+    if (status !== 'active' && status !== 'paused' && status !== 'closed') {
+      res.status(400).json({ error: 'Статус — active, paused або closed.', kind: 'bad_input' });
+      return;
+    }
+    if ((sim.status === 'closed' || sim.status === 'stale') && status !== 'closed') {
+      res.status(409).json({ error: sim.status === 'stale' ? 'Сцену допиту змінено — допит застарів, почніть новий.' : 'Допит закрито.', kind: 'conflict' });
+      return;
+    }
+    res.json({ simulation: await repo.updateSimulation(req.params.id, sim.id, { status }) });
   }));
 
   /** Зв'язки проєкту або однієї сутності (`?entityId=`). */

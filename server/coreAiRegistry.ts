@@ -129,6 +129,11 @@ import {
   renderCoreAiRoleTemplate,
 } from './core/ai/rolePrompts';
 import {
+  CHARACTER_VOICE_PLACEHOLDERS,
+  factoryCharacterVoiceTemplate,
+  renderCharacterVoiceTemplate,
+} from './core/interviewPrompt';
+import {
   factorySearchInterpretTemplate,
   renderSearchInterpretTemplate,
   SEARCH_INTERPRET_PLACEHOLDERS,
@@ -170,6 +175,8 @@ export const CORE_MODULE_KEYS = [
   'coreAi3Visual',
   // Т1.3: AI-2 тлумачить запит сторінки «Пошук» — лише фільтри, без відповіді.
   'coreSearchInterpret',
+  // Т2.7: «Голос героя (допит)» — відповідь AI-персонажа від першої особи.
+  'coreCharacterVoice',
 ] as const;
 
 export type CoreModuleKey = (typeof CORE_MODULE_KEYS)[number];
@@ -269,6 +276,7 @@ export const CORE_MODULE_PLACEHOLDERS: Record<CoreModuleKey, string[]> = {
   coreAi2Analysis: CORE_AI_ROLE_PLACEHOLDERS,
   coreAi3Visual: CORE_AI_ROLE_PLACEHOLDERS,
   coreSearchInterpret: SEARCH_INTERPRET_PLACEHOLDERS,
+  coreCharacterVoice: CHARACTER_VOICE_PLACEHOLDERS,
 };
 
 /** Чи модуль повертає JSON за жорсткою схемою (схема — readonly-текст у конструкторі, не редагується). */
@@ -301,6 +309,7 @@ export const CORE_MODULE_HAS_JSON_SCHEMA: Record<CoreModuleKey, boolean> = {
   coreAi2Analysis: true,
   coreAi3Visual: true,
   coreSearchInterpret: true,
+  coreCharacterVoice: true,
 };
 
 /**
@@ -412,6 +421,8 @@ export function factoryCoreTemplate(module: CoreModuleKey): CorePromptTemplate {
       return factoryCoreAiRoleTemplate(module);
     case 'coreSearchInterpret':
       return factorySearchInterpretTemplate();
+    case 'coreCharacterVoice':
+      return factoryCharacterVoiceTemplate();
   }
 }
 
@@ -773,6 +784,16 @@ export function renderCoreTemplate(
         query: fields.coreQuery,
         entities: fields.coreEntities,
         chapters: fields.coreChapters,
+        language: fields.language,
+      });
+    case 'coreCharacterVoice':
+      return renderCharacterVoiceTemplate(template, {
+        hero: fields.coreHero,
+        snapshot: fields.coreSnapshot,
+        decision: fields.coreDecision,
+        history: fields.coreHistory,
+        question: fields.coreQuestion,
+        note: fields.coreNote,
         language: fields.language,
       });
   }
