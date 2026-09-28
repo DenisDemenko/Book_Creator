@@ -24,6 +24,12 @@ type SellerApplication = {
   userRole: string | null;
   listings: number;
   createdAt: string;
+  /** Тариф заявника з боку Студії — підписки живуть тут, а не в маркетплейсі. */
+  plan: string | null;
+  planName: string;
+  /** Чи можна схвалювати: продавцем стає лише той, хто має платну підписку. */
+  maySell: boolean;
+  gate: string | null;
 };
 
 /** Ті самі назви, що й у кабінеті маркетплейсу: роль там — це `buyer`/`seller`. */
@@ -114,6 +120,11 @@ export const AdminSellerApplications: React.FC = () => {
             (<span className="font-mono">buyer → seller</span>) — тобто відкриває кабінет продавця,
             а не лише галочку в списку.
           </p>
+          <p className="text-[11px] text-amber-300/80 mt-1">
+            Схвалити можна лише того, хто придбав платну підписку — мінімум «Start»: продавець
+            витрачає саме ті засоби, які вона оплачує (зображення та тексти ШІ). Тариф кожного
+            заявника показано праворуч від ролі.
+          </p>
         </div>
         <button
           onClick={() => void load()}
@@ -150,6 +161,16 @@ export const AdminSellerApplications: React.FC = () => {
               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 bg-slate-800 text-slate-300 border-slate-700">
                 {ROLE_LABELS[row.userRole ?? ''] ?? row.userRole ?? 'роль невідома'}
               </span>
+              <span
+                className={`px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 ${
+                  row.maySell
+                    ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+                    : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                }`}
+                title={row.maySell ? 'Платна підписка — можна схвалювати' : row.gate ?? undefined}
+              >
+                {row.planName}
+              </span>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-semibold text-slate-200 truncate">{row.displayName}</p>
                 <p className="text-[10px] text-slate-500 font-mono truncate">
@@ -161,12 +182,16 @@ export const AdminSellerApplications: React.FC = () => {
                     {row.bio}
                   </p>
                 )}
+                {!row.maySell && row.gate && (
+                  <p className="text-[10px] text-amber-300/90 mt-0.5">{row.gate}</p>
+                )}
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
                 <button
                   onClick={() => void decide(row.id, 'approve')}
-                  disabled={busyId === row.id}
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold disabled:opacity-50"
+                  disabled={busyId === row.id || !row.maySell}
+                  title={row.maySell ? undefined : row.gate ?? 'Потрібна платна підписка'}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" /> Схвалити
                 </button>

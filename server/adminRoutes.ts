@@ -49,7 +49,8 @@ import { IMAGE_ENGINES, seedreamConfig } from './imageGeneration';
 import { SEEDREAM_FAL_MODEL } from './pricing';
 import { geminiClient } from './aiCore';
 import { mailConfig } from './mail';
-import { PLANS, PLAN_ORDER, priceFor, type PlanId } from './subscriptions';
+import { PLANS, PLAN_ORDER, priceFor, resolveSubscription, type PlanId } from './subscriptions';
+import { isPaidPlan, planLabel, sellerGateRefusal } from './sellerGate';
 import { platformKeyFor } from './platformKeys';
 import { paypalConfig } from './payments/paypal';
 import {
@@ -85,6 +86,22 @@ const ALL_ROLES: StoredRole[] = [
   'reader',
   'guest',
 ];
+
+/**
+ * Тариф заявника з боку Студії.
+ *
+ * Підписки живуть тут, а не в маркетплейсі: у нього моделі підписки немає
+ * взагалі (Фаза E була пропущена). Тож чергу заявок Студія збагачує сама —
+ * шукає обліковий запис за поштою і читає його тариф. `null` означає «акаунта
+ * немає», і це не помилка, а відповідь: без облікового запису немає й підписки.
+ */
+async function applicantPlan(email: string | null | undefined): Promise<string | null> {
+  if (!email) return null;
+  const user = await findUserByEmail(email);
+  if (!user) return null;
+  const subscription = await resolveSubscription(user.id);
+  return subscription.plan;
+}
 
 /** Групує записи витрат за довільним ключем і рахує суми. */
 function summarize(records: UsageRecord[], keyOf: (r: UsageRecord) => string) {
@@ -1047,10 +1064,26 @@ export function registerAdminRoutes(app: Express): void {
    * маркетплейсу. Заявки живуть у його базі, але рішення власник ухвалює тут;
    * логіка схвалення лишається на боці маркетплейсу (профіль і роль однією
    * транзакцією), бо дублювати її означало б дати їм розійтись.
+   *
+   * Кожен рядок збагачується тарифом заявника — і маркетплейс про це нічого
+   * не знає: підписки живуть у Студії.
    */
   app.get('/api/admin/marketplace-bridge/sellers', requireAdmin, async (_req, res) => {
     try {
-      res.json(await listBridgeSellerApplications());
+      const queue = await listBridgeSellerApplications();
+      const applications = await Promise.all(
+        queue.applications.map(async (application) => {
+          const plan = await applicantPlan(application.email);
+          return {
+            ...application,
+            plan,
+            planName: planLabel(plan),
+            maySell: isPaidPlan(plan),
+            gate: sellerGateRefusal(plan, application.email),
+          };
+        })
+      );
+      res.json({ count: applications.length, applications });
     } catch (err: any) {
       const status = err instanceof MarketplaceBridgeError ? err.status : 502;
       res.status(status).json({ error: err?.message || 'Не вдалося прочитати заявки.', kind: err?.kind });
@@ -1066,6 +1099,21 @@ export function registerAdminRoutes(app: Express): void {
     if (decision !== 'approve' && decision !== 'reject') {
       return res.status(400).json({ error: 'Рішення буває лише approve або reject.', kind: 'bad_input' });
     }
+
+    // Вимога власника 28.09.2026: продавцем стає лише той, хто придбав платну
+    // підписку. Перевірка тут, а не в інтерфейсі: кнопку можна намацати
+    // запитом, а маркетплейс про підписки не знає нічого.
+    if (decision === 'approve') {
+      const queue = await listBridgeSellerApplications().catch(() => null);
+      const application = queue?.applications.find((row) => row.id === id) ?? null;
+      const email = application?.email ?? null;
+      const plan = email ? await applicantPlan(email) : null;
+      const refusal = sellerGateRefusal(plan, email);
+      if (refusal) {
+        return res.status(400).json({ error: refusal, kind: 'plan_required', currentPlan: plan });
+      }
+    }
+
     const reason = String(req.body?.reason || '').trim();
     try {
       res.json(await decideBridgeSellerApplication(id, decision, reason || undefined));
