@@ -91,6 +91,9 @@ export function jevState(s: CharacterSnapshot): Record<string, unknown> {
     current_states: s.current_states.map((x) => `${x.type}: ${x.name}`),
     relations: s.relations.map((r) => (r.direction === 'out' ? `${s.name} → ${r.label} → ${r.other}` : `${r.other} → ${r.label} → ${s.name}`)),
     recent_text: s.recent_appearances.slice(-6).map((a) => a.excerpt),
+    // Т2.6 В5: пам'ять героя — лише коли є (знімки без неї не змінюються).
+    ...(s.beliefs?.length ? { beliefs: s.beliefs.map((b) => (b.certainty === 'doubts' ? `(сумнівається) ${b.statement}` : b.statement)) } : {}),
+    ...(s.memories?.length ? { memories: s.memories.map((m) => `${m.type}: ${m.content}`) } : {}),
   };
 }
 

@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://fusionlab.studio/ai/contracts/character-snapshot.schema.json",
   "title": "CharacterSnapshot",
-  "description": "Знімок героя для оцінювання (ТЗ-H §6.1, §7.2 contracts/). Наш контракт, не формат провайдера.",
+  "description": "Знімок героя для оцінювання (ТЗ-H §6.1, §7.2 contracts/). Наш контракт, не формат провайдера. Т2.6 В5: необов'язкові beliefs і memories — пам'ять героя станом на сцену.",
   "type": "object",
   "required": [
     "character_id",
@@ -133,6 +133,75 @@
       "maxItems": 12,
       "items": {
         "$ref": "#/$defs/evidence"
+      }
+    },
+    "beliefs": {
+      "description": "Переконання героя станом на сцену (Т2.6: лише його підтверджена пам'ять; може бути хибним — це не світова правда).",
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": [
+          "statement",
+          "certainty"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "statement": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "certainty": {
+            "enum": [
+              "believes",
+              "doubts"
+            ]
+          },
+          "scene": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "memories": {
+      "description": "Спогади героя станом на сцену (Т2.6): світові факти, які він пережив, знання, суб'єктивні спогади й наслідки — лише його, лише раніші за сцену.",
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "object",
+        "required": [
+          "type",
+          "content"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "enum": [
+              "world_fact",
+              "knowledge",
+              "recollection",
+              "consequence"
+            ]
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "scene": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "effects": {
+            "type": "object"
+          }
+        }
       }
     },
     "situation": {

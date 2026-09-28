@@ -38,7 +38,8 @@ import { createHash } from 'node:crypto';
 import type { CharacterDecisionLevel, CharacterDecisionRow, CoreActor, CoreRepository, EntityRow } from './types';
 import { buildCharacterProfile, EVENT_TYPES, PROFILE_FACT, type StudioCharacterLike } from './characterProfile';
 import { scanScenes } from './timeline';
-import { snapshotFromProfile } from './flc/cycle';
+import { memoriesAt } from './characterMemory';
+import { buildCharacterSnapshot } from './characterSnapshot';
 import { canonicalJson, snapshotHash, validateSnapshot, type CharacterSnapshot, type DecisionResult, type JevQuestion } from '../ai/contracts';
 import type { JevAdapter } from '../ai/adapters/jev';
 import { validateHard, type HardConstraints, type ValidationOutcome } from '../ai/validator';
@@ -163,6 +164,8 @@ export interface SignificantState {
   goals: { entityId: string; name: string; type: string; value: string }[];
   facts: { id: string; statement: string }[];
   canon: { label: string; value: string }[];
+  /** Т2.6 В5: підтверджена пам'ять героя канону (станом на главу) — теж значуща. */
+  memories: { id: string; type: string; content: string; evidenceHash: string | null }[];
   paragraphIds: string[];
 }
 
@@ -211,8 +214,12 @@ export async function significantState(
     }))
     .map((f) => ({ id: f.id, statement: String((f.payload as { statement?: unknown }).statement ?? '') }));
   const sort = <T>(xs: T[]) => [...xs].sort((a, b) => canonicalJson(a).localeCompare(canonicalJson(b)));
-  const key = hash({ v: opts.version, upto, events: sort(events), goals: sort(goals), facts: sort(facts), canon: sort(opts.canon) });
-  return { key, events, goals, facts, canon: opts.canon, paragraphIds: [...paragraphIds] };
+  // Т2.6 В5: підтверджений спогад канону — значуща подія (рішення власника §6 п.3 Т2.5 + план Т2.6 §2).
+  const memories = (await memoriesAt(repo, projectId, characterId, { asOfChapter: upto, scan })).memories
+    .filter((m) => m.simulationId === null)
+    .map((m) => ({ id: m.id, type: m.memoryType, content: m.content, evidenceHash: m.evidenceHash }));
+  const key = hash({ v: opts.version, upto, events: sort(events), goals: sort(goals), facts: sort(facts), canon: sort(opts.canon), ...(memories.length ? { memories: sort(memories) } : {}) });
+  return { key, events, goals, facts, canon: opts.canon, memories, paragraphIds: [...paragraphIds] };
 }
 
 // ── Рушій рівнів ───────────────────────────────────────────────────────────
@@ -247,6 +254,26 @@ export class JevDecisionAdapter {
    */
   async resolveByAuthor(projectId: string, decisionId: string, action: string, actor: CoreActor): Promise<CharacterDecisionRow> {
     return resolveDecisionByAuthor(this.deps.repo, projectId, decisionId, action, actor);
+  }
+
+  /** Т2.6 В5: знімок рівня — через будівник (профіль + знання в часі + пам'ять героя, під ліміт Jev). */
+  private async snapshot(req: DecideRequest, situation: string, allowed: string[], scoped: boolean): Promise<CharacterSnapshot> {
+    const { repo } = this.deps;
+    const entity = await repo.getEntity(req.projectId, req.characterId);
+    if (!entity || entity.status === 'rejected' || entity.type !== 'character') throw new CoreRuleError('not_found', 'Героя не знайдено в ядрі книги');
+    const studio = this.deps.studio ? await this.deps.studio(req.projectId, entity).catch(() => undefined) : undefined;
+    const built = await buildCharacterSnapshot(repo, {
+      projectId: req.projectId,
+      characterId: req.characterId,
+      sceneId: scoped ? req.sceneId ?? null : null,
+      asOfChapter: req.asOfChapter ?? null,
+      simulationId: scoped ? req.simulationId ?? null : null,
+      situation,
+      allowedActions: allowed,
+      studio,
+      lenientScene: true,
+    });
+    return built.snapshot;
   }
 
   private async profile(req: DecideRequest) {
@@ -375,14 +402,14 @@ export class JevDecisionAdapter {
       sig.goals.length ? `Цілі й потреби: ${sig.goals.map((g) => g.name).join('; ')}.` : '',
       sig.events.length ? `Пережите: ${sig.events.map((e) => `${e.name} (${e.type})`).join('; ')}.` : '',
     ].filter(Boolean).join(' ').slice(0, 2000);
-    const snapshot = snapshotFromProfile(profile, [], situation, Object.keys(cfg.primary.options));
+    const snapshot = await this.snapshot(req, situation, Object.keys(cfg.primary.options), false);
     const constraints: HardConstraints = {
       primary: { id: cfg.primary.id, allowed: Object.keys(cfg.primary.options) },
       ...(Object.keys(goalOptions).length >= 2 ? { choices: { long_goal: Object.keys(goalOptions) } } : {}),
       confidenceThreshold: this.config.confidenceThreshold,
     };
     const decision = await this.evaluateAndStore(req, 'strategic', snapshot, questions, sig.key, constraints, {
-      basis: { paragraphIds: [...new Set([...sig.paragraphIds, ...snapshot.confirmed_facts.flatMap((f) => f.evidence.map((e) => e.paragraph_id))])], entityIds: sig.events.map((e) => e.entityId), note: `значущі події: ${sig.events.length}, цілі: ${sig.goals.length}, факти: ${sig.facts.length}` },
+      basis: { paragraphIds: [...new Set([...sig.paragraphIds, ...snapshot.confirmed_facts.flatMap((f) => f.evidence.map((e) => e.paragraph_id))])], entityIds: sig.events.map((e) => e.entityId), note: `значущі події: ${sig.events.length}, цілі: ${sig.goals.length}, факти: ${sig.facts.length}, спогади: ${sig.memories.length}` },
       options: { version: this.config.version, trajectories: Object.keys(cfg.primary.options), goals: goalOptions },
     });
     return { decision, reused: false };
@@ -417,7 +444,6 @@ export class JevDecisionAdapter {
     const cached = await this.reuse(req, 'scene', key, sceneId);
     if (cached) return { decision: cached, reused: true };
 
-    const profile = await this.profile(req);
     const cfg = this.config.scene;
     const questions: JevQuestion[] = [
       { id: cfg.primary.id, kind: 'choice', instructions: cfg.primary.instructions, options: cfg.primary.options },
@@ -430,7 +456,7 @@ export class JevDecisionAdapter {
       conditions.goal ? `Мета сцени: ${conditions.goal}.` : '',
       conditions.turn ? `Поворот: ${conditions.turn}.` : '',
     ].filter(Boolean).join(' ').slice(0, 2000);
-    const snapshot = snapshotFromProfile(profile, [], situation, Object.keys(cfg.primary.options));
+    const snapshot = await this.snapshot(req, situation, Object.keys(cfg.primary.options), true);
     const decision = await this.evaluateAndStore(req, 'scene', snapshot, questions, key, { primary: { id: cfg.primary.id, allowed: Object.keys(cfg.primary.options) }, confidenceThreshold: this.config.confidenceThreshold }, {
       parentId: parent.id,
       sceneId,
@@ -445,11 +471,10 @@ export class JevDecisionAdapter {
     const forbidden = new Set(req.forbiddenActions ?? []);
     const allowed = [...new Set((req.allowedActions?.length ? req.allowedActions : DEFAULT_TACTICAL_ACTIONS).filter((a) => actionId(a) && !forbidden.has(a)))];
     if (allowed.length < 2) throw new CoreRuleError('bad_input', 'Для ходу потрібно щонайменше дві дозволені дії (без заборонених).');
-    const profile = await this.profile(req);
     const r = (parent.result ?? {}) as Partial<DecisionResult>;
     const sceneLine = `Мотив у сцені: ${parent.selectedAction}${r.scores ? `; ${Object.entries(r.scores).map(([k, v]) => `${k} ${v}/10`).join(', ')}` : ''}.`;
     const situation = [sceneLine, (req.situation ?? '').trim() || 'Хід героя.'].join(' ').slice(0, 2000);
-    const snapshot: CharacterSnapshot = snapshotFromProfile(profile, [], situation, allowed);
+    const snapshot: CharacterSnapshot = await this.snapshot(req, situation, allowed, true);
     const cfg = this.config.tactical;
     const questions: JevQuestion[] = [
       { id: 'next_action', kind: 'choice', instructions: cfg.instructions, options: Object.fromEntries(allowed.map((a) => [a, cfg.describe[a] ?? null])) },

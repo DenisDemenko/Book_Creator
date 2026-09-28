@@ -38,6 +38,10 @@ export interface CharacterSnapshot {
   current_states: { type: string; name: string; chapter: number | null }[];
   relations: { label: string; other: string; direction: 'out' | 'in' }[];
   recent_appearances: SnapshotEvidence[];
+  /** Т2.6 В5: переконання героя станом на сцену (його підтверджена пам'ять; може бути хибним). */
+  beliefs?: { statement: string; certainty: 'believes' | 'doubts'; scene?: string | null }[];
+  /** Т2.6 В5: спогади героя станом на сцену — лише його й лише раніші. */
+  memories?: { type: 'world_fact' | 'knowledge' | 'recollection' | 'consequence'; content: string; scene?: string | null; effects?: Record<string, unknown> }[];
   /** Ситуація, у якій герой має діяти (питання автора на допиті, умови сцени…). */
   situation: string;
   allowed_actions: string[];

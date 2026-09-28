@@ -50,6 +50,8 @@ import { clampIntensity, emotionFamily } from '../../src/utils/emotionScale';
 import { LlmFallbackJevAdapter, type JevAdapter, type LlmJson } from './flc/jev';
 import { JevDecisionAdapter, resolveDecisionByAuthor, type DecideRequest } from './jevLevels';
 import { decisionView, decisionsSummary } from './jevDecisions';
+import { buildCharacterSnapshot } from './characterSnapshot';
+import { DEFAULT_TACTICAL_ACTIONS } from './jevLevels';
 import { CHARACTER_DECISION_LEVELS, CHARACTER_DECISION_STATUSES, type CharacterDecisionLevel, type CharacterDecisionStatus } from './types';
 import { interpretSearchQuery, type SearchInterpretDeps, type SearchInterpretation } from './search/interpret';
 
@@ -1981,6 +1983,52 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
     if (!requireDecisionEdit(req, res)) return;
     const characterId = typeof req.query.characterId === 'string' && req.query.characterId ? req.query.characterId : undefined;
     res.json(await decisionsSummary(repo, req.params.id, { characterId }));
+  }));
+
+  /**
+   * Т2.6 В5 (ТЗ-H §11 `GET …/characters/:cid/snapshot`): знімок героя станом на
+   * сцену (`?sceneId=`) чи главу (`?chapter=`), з пам'яттю героя (`?simulationId=`
+   * — і свого прогону), під ліміт Jev; стан записується в `character_states`
+   * (той самий відбиток — той самий запис). Приватна пам'ять героя — тож лише
+   * для тих, хто веде історію.
+   */
+  app.get('/api/projects/:id/characters/:entityId/snapshot', withRepo(async (repo, req, res) => {
+    if (!canEditStory(req.projectAccess!)) {
+      res.status(403).json({ error: 'Знімок героя (з його приватною пам\'яттю) бачать власник, співавтор, редактор і адміністратор.', kind: 'forbidden' });
+      return;
+    }
+    const entity = await repo.getEntity(req.params.id, req.params.entityId);
+    if (!entity || entity.status === 'rejected' || entity.type !== 'character') {
+      res.status(404).json({ error: 'Героя не знайдено в цьому проєкті.', kind: 'not_found' });
+      return;
+    }
+    const q = req.query;
+    const chapter = Number(q.chapter);
+    const actions = typeof q.actions === 'string' && q.actions ? q.actions.split(',').map((a) => a.trim()).filter((a) => /^[a-z_]{2,40}$/.test(a)).slice(0, 12) : DEFAULT_TACTICAL_ACTIONS;
+    const studio = deps.studio ? await deps.studio(req.params.id, entity).catch(() => undefined) : undefined;
+    const r = await buildCharacterSnapshot(repo, {
+      projectId: req.params.id,
+      characterId: entity.id,
+      sceneId: typeof q.sceneId === 'string' && q.sceneId ? q.sceneId.slice(0, 200) : null,
+      asOfChapter: Number.isInteger(chapter) && chapter >= 1 ? chapter : null,
+      simulationId: typeof q.simulationId === 'string' && q.simulationId ? q.simulationId.slice(0, 100) : null,
+      situation: typeof q.situation === 'string' && q.situation.trim() ? q.situation.trim().slice(0, 2000) : 'Знімок героя для автора.',
+      allowedActions: actions.length >= 2 ? actions : DEFAULT_TACTICAL_ACTIONS,
+      studio,
+      persist: `user:${req.projectAccess!.userId}`,
+    });
+    res.json({
+      snapshot: r.snapshot,
+      hash: r.hash,
+      memoryIds: r.memoryIds,
+      later: r.later,
+      trimmed: r.trimmed,
+      jevStateChars: r.jevStateChars,
+      budgetChars: r.budgetChars,
+      sceneApplied: r.sceneApplied,
+      state: r.state ? { id: r.state.id, stateVersion: r.state.stateVersion, snapshotHash: r.state.snapshotHash, canonRevision: r.state.canonRevision, createdAt: r.state.createdAt } : null,
+      stateReused: r.stateReused,
+    });
   }));
 
   /** Зв'язки проєкту або однієї сутності (`?entityId=`). */

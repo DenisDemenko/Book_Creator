@@ -27,6 +27,12 @@
  * «Сергій більше не довіряє» → приховати ще одну обставину), кожна лише в
  * пам'яті свого героя; окремий запит на героя (приватне одного не йде в
  * запит іншого); лише пропозиції з доказами; повторний прогін не дублює.
+ *
+ * В5: CharacterSnapshotBuilder і character_states — знімок героя станом на
+ * сцену (профіль + пам'ять), КРИТЕРІЙ: знімок на сцену 2 не містить нічого
+ * зі сцени 3 і з пам'яті іншого героя; ліміт Jev (канон і факти не
+ * відкидаються); стан на сцену — кеш за відбитком; три рівні Jev — через
+ * будівник, підтверджений спогад — значуща подія; `GET …/snapshot` і права.
  * PostgreSQL — з CORE_TEST_DATABASE_URL (схема `fusion_core` видаляється —
  * лише тестова база!).
  *
@@ -47,6 +53,14 @@ import { JobQueue } from '../server/core/jobs/queue.ts';
 import type { JobStore } from '../server/core/jobs/types.ts';
 import type { AiGenerateInput } from '../server/core/ai/roles.ts';
 import { AI_MEMORY_JOB_KIND, aiMemoryJobKind } from '../server/core/memoryAi.ts';
+import { buildCharacterSnapshot } from '../server/core/characterSnapshot.ts';
+import { validateSnapshot } from '../server/ai/contracts/index.ts';
+import { jevState, LlmFallbackJevAdapter, MockJevAdapter } from '../server/ai/adapters/jev/index.ts';
+import { JevDecisionAdapter } from '../server/core/jevLevels.ts';
+import { PROFILE_FACT } from '../server/core/characterProfile.ts';
+import { registerProjectRoutes } from '../server/core/projectRoutes.ts';
+import express from 'express';
+import type { AddressInfo } from 'node:net';
 
 let pass = 0;
 let fail = 0;
@@ -476,10 +490,118 @@ async function aiSuite(label: string, repo: CoreRepository, jobStore: JobStore, 
     ((await run({ sectionId: 'nope' })).result as any).status === 'no_section' && ((await run({ sectionId: 's2', characterIds: [serhii] })).result as any).status === 'no_heroes');
 }
 
+async function snapshotSuite(label: string, repo: CoreRepository, P: string) {
+  console.log(`\nЗнімок героя станом на сцену — В5 (${label}):`);
+  const sec = (id: string, order: number, content: string) => {
+    const r = reconcileParagraphIds({ sectionId: id, content });
+    return { id, title: id, order, content, paragraphIds: r.ids, paragraphHashes: r.hashes };
+  };
+  await syncBookToCore(repo, {
+    id: P, ownerId: 'u-owner', title: 'Кухня',
+    book: {
+      id: P, title: 'Кухня', characters: [{ id: 'c-s', name: 'Сергій', role: 'protagonist' }, { id: 'c-a', name: 'Анна' }],
+      chapters: [{ id: 'ch1', title: 'Гл. 1', order: 0, sections: [
+        sec('s1', 0, '[/character:Сергій] [/character:Анна] [/conflict:Сварка на кухні] Сергій і Анна посварились.\n\n[/emotion:гнів @Сергій] Сергій кипів від гніву.'),
+        sec('s2', 1, '[/character:Сергій] [/goal:Перевірити слова Анни @Сергій] Сергій вирішив перевірити її слова.'),
+        sec('s3', 2, '[/character:Сергій] [/revelation:Лист у шухляді @Сергій] [/emotion:страх @Сергій] Сергій знайшов лист і злякався.'),
+        sec('s4', 3, '[/character:Анна] [/belief:Сергій не довіряє @Анна] Анна плакала на вокзалі.'),
+      ] }],
+    },
+  } as any);
+  const serhii = (await repo.resolveAlias(P, 'character', 'Сергій'))!;
+  const anna = (await repo.resolveAlias(P, 'character', 'Анна'))!;
+  const [p1] = (await repo.listParagraphs(P, 's1')).sort((a, b) => a.order - b.order).map((p) => p.id);
+  await collectTagMemories(repo, P);
+  await addAuthorMemory(repo, { projectId: P, characterId: serhii, memoryType: 'belief', content: 'Анна бреше про лист.', sceneId: 's1', actor: 'user:u-owner' });
+  await addAuthorMemory(repo, { projectId: P, characterId: anna, memoryType: 'recollection', content: 'Я сховала лист — Сергій не мусить знати.', sceneId: 's1', visibility: 'hidden', actor: 'user:u-owner' });
+  const fact = await repo.addFinding({ projectId: P, entityId: serhii, kind: PROFILE_FACT, payload: { field: 'fear', statement: 'Сергій боїться зради.', assessment: 'supported' }, sourceParagraphIds: [p1], createdBy: 'ai:AI-2' });
+  await repo.setFindingStatus(P, fact.id, 'confirmed', 'user:u-owner');
+
+  const snap = (hero: string, o: any = {}) => buildCharacterSnapshot(repo, { projectId: P, characterId: hero, situation: 'Ситуація.', allowedActions: ['answer', 'lie', 'silence'], ...o });
+  const at2 = await snap(serhii, { sceneId: 's2' });
+  const j2 = JSON.stringify(at2.snapshot);
+  t('знімок Сергія на сцену 2: сварка (пам\'ять), переконання «Анна бреше», гнів, підтверджений факт; за контрактом',
+    validateSnapshot(at2.snapshot).ok && at2.snapshot.memories?.some((m) => m.type === 'world_fact' && /Сварка/.test(m.content)) === true &&
+    at2.snapshot.beliefs?.some((b) => /Анна бреше/.test(b.statement)) === true && at2.snapshot.current_states.some((x) => x.name === 'гнів') &&
+    at2.snapshot.confirmed_facts.some((f) => /боїться зради/.test(f.statement)) && at2.sceneApplied, j2.slice(0, 300));
+  t('КРИТЕРІЙ В5 / ТЗ-H №5: на сцену 2 — нічого зі сцени 2–3 (ні мети, ні листа, ні страху, ні тексту) і нічого з пам\'яті Анни',
+    !/Лист у шухляді|знайшов лист|страх|Перевірити слова|сховала лист|вокзалі|Сергій не довіряє/.test(j2) && at2.later > 0, `later ${at2.later}`);
+  const at3 = await snap(serhii, { sceneId: 's3' });
+  const at4 = await snap(serhii, { sceneId: 's4' });
+  t('на сцену 3 — уже мета «перевірити», ще без листа; на сцену 4 — і лист (знання), і страх',
+    at3.snapshot.current_states.some((x) => x.name === 'Перевірити слова Анни') && !JSON.stringify(at3.snapshot).includes('Лист у шухляді') &&
+    at4.snapshot.memories?.some((m) => m.type === 'knowledge' && /Лист у шухляді/.test(m.content)) === true && at4.snapshot.current_states.some((x) => x.name === 'страх'));
+  const annaAt4 = await snap(anna, { sceneId: 's4' });
+  t('знімок Анни — її приватний спогад так, нічого з пам\'яті Сергія', JSON.stringify(annaAt4.snapshot).includes('сховала лист') && !/Анна бреше|Перевірити слова/.test(JSON.stringify(annaAt4.snapshot)));
+  const tight = await snap(serhii, { sceneId: 's4', budgetChars: 600 });
+  t('ліміт Jev: зайве відкинуто (давніші появи, потім спогади), канон і підтверджені факти лишились',
+    tight.trimmed.appearances + tight.trimmed.memories + tight.trimmed.beliefs > 0 && tight.snapshot.confirmed_facts.length === at4.snapshot.confirmed_facts.length &&
+    tight.snapshot.canon.length === at4.snapshot.canon.length && JSON.stringify(jevState(tight.snapshot)).length === tight.jevStateChars, JSON.stringify(tight.trimmed) + ` ${tight.jevStateChars}`);
+  t('невідома сцена — not_found; сцена прогону (lenient) — знімок без межі сцени; не герой — not_found',
+    (await code(() => snap(serhii, { sceneId: 'nope' }))) === 'not_found' && !(await snap(serhii, { sceneId: 'sim-scene', lenientScene: true })).sceneApplied &&
+    (await code(() => snap(fact.id))) === 'not_found');
+  const runMem = await repo.addCharacterMemory({ projectId: P, characterId: serhii, memoryType: 'recollection', content: 'На допиті я збрехав.', sourceEventKind: 'simulation_event', origin: 'simulation', simulationId: 'run-7', createdBy: 'system:interview' });
+  t('прогін: його спогад у знімку лише цього прогону', (await snap(serhii, { sceneId: 's2', simulationId: 'run-7' })).memoryIds.includes(runMem.id) && !(await snap(serhii, { sceneId: 's2', simulationId: 'run-8' })).memoryIds.includes(runMem.id));
+
+  // character_states — кеш за відбитком.
+  const st1 = await snap(serhii, { sceneId: 's2', persist: 'user:u-owner' });
+  const st2 = await snap(serhii, { sceneId: 's2', persist: 'user:u-owner' });
+  t('стан на сцену: записано (цілі, емоції, переконання, стосунки, спогади), повтор — той самий запис',
+    !!st1.state && !st1.stateReused && st2.stateReused && st2.state!.id === st1.state!.id && (st1.state!.emotions as any[]).some((e) => e.name === 'гнів') &&
+    (st1.state!.beliefs as any[]).some((b) => /Анна бреше/.test(b.statement)) && st1.state!.memoryIds.length === st1.memoryIds.length && st1.state!.snapshotHash === st1.hash);
+  await addAuthorMemory(repo, { projectId: P, characterId: serhii, memoryType: 'consequence', content: 'Після сварки Сергій зачинився в собі.', sceneId: 's1', effects: { trust: [{ towards: anna, delta: -2 }] }, actor: 'user:u-owner' });
+  const st3 = await snap(serhii, { sceneId: 's2', persist: 'user:u-owner' });
+  t('новий підтверджений спогад — новий відбиток і нова версія стану', !st3.stateReused && st3.hash !== st1.hash && st3.state!.stateVersion === 2 && st3.snapshot.memories!.some((m) => (m.effects as any)?.trust?.[0]?.delta === -2));
+  const runState = await snap(serhii, { sceneId: 's2', simulationId: 'run-7', persist: 'system:interview' });
+  t('стан прогону — окремий запис', runState.state!.id !== st3.state!.id && runState.state!.simulationId === 'run-7');
+
+  // Три рівні Jev — через будівник.
+  const seen: any[] = [];
+  const mock = new MockJevAdapter();
+  const jev = { name: 'jev' as const, evaluate: async (sn: any, q: any) => { seen.push(sn); return { ...(await mock.evaluate(sn, q)), confidence: 0.9 }; } };
+  const engine = new JevDecisionAdapter({ repo, jev, fallback: new LlmFallbackJevAdapter(async () => ({ text: '{}', modelId: 'x', inputTokens: 0, outputTokens: 0 })) });
+  const d1 = await engine.decide({ projectId: P, characterId: serhii, level: 'scene', sceneId: 's2', situation: 'Кухня', actor: 'user:u-owner' });
+  const [stratSnap, sceneSnap] = seen;
+  t('Jev: сценічний знімок на с.2 — з пам\'яттю й переконаннями, без листа й чужого; стратегічний — з пам\'яттю канону',
+    !!d1.decision && sceneSnap.memories?.some((m: any) => /Сварка/.test(m.content)) && sceneSnap.beliefs?.length > 0 && !/Лист у шухляді|сховала лист/.test(JSON.stringify(sceneSnap)) &&
+    stratSnap.memories?.length > 0 && /спогади: \d+/.test(String((await repo.getCharacterDecision(P, d1.chain[0].id))!.basis.note)));
+  const again = await engine.decide({ projectId: P, characterId: serhii, level: 'strategic', actor: 'user:u-owner' });
+  await addAuthorMemory(repo, { projectId: P, characterId: serhii, memoryType: 'belief', content: 'Анна не винна — лист підкинули.', sceneId: 's3', actor: 'user:u-owner' });
+  const after = await engine.decide({ projectId: P, characterId: serhii, level: 'strategic', actor: 'user:u-owner' });
+  t('підтверджений спогад канону — значуща подія: стратегічне перераховано (до того — з кешу)', again.reused && !after.reused && after.decision.cacheKey !== again.decision.cacheKey);
+
+  // Маршрут GET …/snapshot.
+  const access = {
+    async getBookOwnerId(x: string) { return x === P ? 'u-owner' : null; },
+    async getCollabOwnerId() { return undefined; },
+    async listAcceptedInvites() { return [{ acceptedUserId: 'u-reader', role: 'reader' }]; },
+  };
+  const who: Record<string, any> = { owner: { id: 'u-owner', role: 'writer', isGuest: false }, reader: { id: 'u-reader', role: 'writer', isGuest: false }, stranger: { id: 'u-x', role: 'writer', isGuest: false } };
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => { (req as any).principal = who[String(req.headers['x-user'])]; next(); });
+  registerProjectRoutes(app, { access, repo: () => repo, coreState: () => 'ready' });
+  const server = app.listen(0);
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/projects/${P}/characters`;
+  try {
+    const get = async (user: string, path: string) => { const r = await fetch(`${base}${path}`, { headers: { 'x-user': user } }); return { status: r.status, body: (await r.json().catch(() => ({}))) as any }; };
+    const ok = await get('owner', `/${serhii}/snapshot?sceneId=s2`);
+    t('GET …/snapshot?sceneId=s2 — знімок, відбиток, стан, ліміт', ok.status === 200 && ok.body.snapshot.name === 'Сергій' && ok.body.sceneApplied && /^[0-9a-f]{32}$/.test(ok.body.hash) && ok.body.state?.snapshotHash === ok.body.hash && ok.body.jevStateChars <= ok.body.budgetChars, JSON.stringify(ok.body).slice(0, 200));
+    t('права: читач — 403 (приватна пам\'ять), чужий — 403; невідома сцена — 404; не герой — 404',
+      (await get('reader', `/${serhii}/snapshot`)).status === 403 && (await get('stranger', `/${serhii}/snapshot`)).status === 403 &&
+      (await get('owner', `/${serhii}/snapshot?sceneId=nope`)).status === 404 && (await get('owner', `/${fact.id}/snapshot`)).status === 404);
+    const ch = await get('owner', `/${serhii}/snapshot?chapter=1&simulationId=run-7`);
+    t('?chapter і ?simulationId', ch.status === 200 && ch.body.snapshot.as_of_chapter === 1 && ch.body.memoryIds.includes(runMem.id));
+  } finally {
+    server.close();
+  }
+}
+
 await repoSuite('memory', new MemoryCoreRepository(), 'mem-m');
 await tagsSuite('memory', new MemoryCoreRepository(), 'tag-m');
 await reviewSuite('memory', new MemoryCoreRepository(), 'rev-m');
 await aiSuite('memory', new MemoryCoreRepository(), new MemoryJobStore(), 'ai-m');
+await snapshotSuite('memory', new MemoryCoreRepository(), 'snap-m');
 const url = process.env.CORE_TEST_DATABASE_URL?.trim();
 if (!url) {
   console.log('\nPostgreSQL: пропущено (CORE_TEST_DATABASE_URL не задано) — перевірено на сховищі в пам\'яті');
@@ -494,6 +616,7 @@ if (!url) {
     await tagsSuite('postgres', new PgCoreRepository(pool), 'tag-p');
     await reviewSuite('postgres', new PgCoreRepository(pool), 'rev-p');
     await aiSuite('postgres', new PgCoreRepository(pool), new PgJobStore(pool), 'ai-p');
+    await snapshotSuite('postgres', new PgCoreRepository(pool), 'snap-p');
     const ins = async (cols: string, vals: string) => {
       try {
         await pool.query(`INSERT INTO ${CORE_SCHEMA}.character_memories (project_id, character_id, ${cols}) VALUES ('mem-p', $1, ${vals})`, [serhii]);
