@@ -54,6 +54,7 @@ import { buildCharacterSnapshot } from './characterSnapshot';
 import { addAuthorMemory, collectTagMemories, memoryViews, reviewMemory } from './characterMemory';
 import { AI_MEMORY_JOB_KIND } from './memoryAi';
 import { AUTONOMY_LABELS, agentView, askQuestion, getAgent, retryTurn, setAgent, startInterview, type VoiceGenerate } from './interview';
+import { acceptProposal, proposalViews, refreshSimulationFreshness, rejectProposal } from './interviewProposals';
 import { scanScenes } from './timeline';
 import { CHARACTER_MEMORY_STATUSES, CHARACTER_MEMORY_TYPES, type CharacterMemoryStatus, type CharacterMemoryType } from './types';
 import { DEFAULT_TACTICAL_ACTIONS } from './jevLevels';
@@ -2285,7 +2286,12 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
     if (!requireInterviewRole(req, res)) return;
     const sim = await simulationOf(repo, req, res);
     if (!sim) return;
-    res.json({ simulation: sim, events: await repo.listSimulationEvents(req.params.id, sim.id) });
+    const fresh = await refreshSimulationFreshness(repo, sim);
+    res.json({
+      simulation: fresh,
+      events: await repo.listSimulationEvents(req.params.id, sim.id),
+      proposals: proposalViews(await repo.listCanonProposals(req.params.id, { simulationId: sim.id, limit: 1000 })),
+    });
   }));
 
   /** Хід: `{ question }` → рішення Jev → відповідь героя (або «чекає» / «не вдалося» — стан збережено). */
@@ -2315,6 +2321,58 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
     const d = interviewDeps(repo, req);
     d.jev = await deps.flc!.jev();
     res.json(await retryTurn(d, { projectId: req.params.id, simulationId: sim.id, actor: `user:${req.projectAccess!.userId}` }));
+  }));
+
+  // ── Т2.7 В4: пропозиції допиту в канон — автор приймає кожну окремо або відхиляє ──
+
+  /** Пропозиції героя з усіх допитів (`?status=pending|accepted|rejected`), з назвою й станом допиту. */
+  app.get('/api/projects/:id/characters/:entityId/proposals', withRepo(async (repo, req, res) => {
+    if (!requireInterviewRole(req, res)) return;
+    const status = req.query.status;
+    if (status !== undefined && status !== 'pending' && status !== 'accepted' && status !== 'rejected') {
+      res.status(400).json({ error: 'Статус — pending, accepted або rejected.', kind: 'bad_input' });
+      return;
+    }
+    const rows = await repo.listCanonProposals(req.params.id, { characterId: req.params.entityId, limit: 1000 });
+    // Тег іде за фрагментом: фільтр статусу — за фрагментом і самостійними пропозиціями.
+    const top = rows.filter((p) => p.kind !== 'tag' && (!status || p.status === status));
+    const keep = new Set(top.map((p) => p.id));
+    const views = proposalViews(rows.filter((p) => keep.has(p.id) || (p.kind === 'tag' && keep.has(p.parentId ?? ''))));
+    const sims = new Map<string, { id: string; title: string; status: string; sceneId: string | null; asOfChapter: number | null }>();
+    for (const id of new Set(top.map((p) => p.simulationId))) {
+      const sim = await repo.getSimulation(req.params.id, id);
+      if (sim) sims.set(id, { id, title: sim.title, status: sim.status, sceneId: sim.sceneId, asOfChapter: sim.asOfChapter });
+    }
+    res.json({ proposals: views, simulations: [...sims.values()] });
+  }));
+
+  /**
+   * Прийняти пропозицію: `{ content?, field?, memoryType?, sectionId?, tagIds?, acknowledgeStale? }`.
+   * Спогад — у пам'ять героя, факт — у профіль гіпотезою, фрагмент — відповідь
+   * `insert` (що й куди вставити «AI-чернеткою»; рукопис сервер не змінює).
+   */
+  app.post('/api/projects/:id/proposals/:proposalId/accept', withRepo(async (repo, req, res) => {
+    if (!requireInterviewRole(req, res)) return;
+    const b = req.body ?? {};
+    const str = (v: unknown) => (typeof v === 'string' ? v : null);
+    const out = await acceptProposal(repo, {
+      projectId: req.params.id,
+      proposalId: req.params.proposalId,
+      actor: `user:${req.projectAccess!.userId}`,
+      content: str(b.content),
+      field: str(b.field),
+      memoryType: str(b.memoryType),
+      sectionId: str(b.sectionId),
+      tagIds: Array.isArray(b.tagIds) ? b.tagIds.filter((x: unknown) => typeof x === 'string').slice(0, 50) : undefined,
+      acknowledgeStale: b.acknowledgeStale === true,
+    });
+    res.json(out);
+  }));
+
+  /** Відхилити пропозицію (`{ reason? }`); відхилений фрагмент відхиляє й свої неприйняті теги. */
+  app.post('/api/projects/:id/proposals/:proposalId/reject', withRepo(async (repo, req, res) => {
+    if (!requireInterviewRole(req, res)) return;
+    res.json(await rejectProposal(repo, { projectId: req.params.id, proposalId: req.params.proposalId, actor: `user:${req.projectAccess!.userId}`, reason: typeof req.body?.reason === 'string' ? req.body.reason : null }));
   }));
 
   /** Пауза / продовжити / закрити допит (застарілий — лише закрити). */

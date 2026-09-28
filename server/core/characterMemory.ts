@@ -161,6 +161,8 @@ export interface AuthorMemoryInput {
   truth?: MemoryTruth;
   visibility?: Visibility;
   layer?: CharacterMemoryInput['layer'];
+  /** Звідки запис, якщо не з тексту (Т2.7 В4: хід допиту, з якого автор прийняв спогад). */
+  source?: { kind: 'simulation_event' | 'decision'; id: string };
   actor: CoreActor;
 }
 
@@ -187,8 +189,8 @@ export async function addAuthorMemory(repo: CoreRepository, input: AuthorMemoryI
     effects: input.effects,
     truth: input.truth,
     visibility: input.visibility,
-    sourceEventKind: paras.length ? 'paragraph' : 'author',
-    sourceEventId: paras[0] ?? null,
+    sourceEventKind: input.source?.kind ?? (paras.length ? 'paragraph' : 'author'),
+    sourceEventId: input.source?.id ?? paras[0] ?? null,
     sourceParagraphIds: paras,
     evidenceHash: memoryEvidenceHash(textHash, paras),
     sceneId: sceneId ?? (paras.length ? scan.sectionOfParagraph.get(paras[0]) ?? null : null),

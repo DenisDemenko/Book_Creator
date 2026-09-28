@@ -26,6 +26,7 @@ import { blockHash, deterministicParagraphId, reconcileParagraphIds } from '../.
 import { CoreRuleError } from './rules';
 import { cardAppearanceHash, reconcileLegacyAssetLinks, refreshVisualReview, type LegacyImage } from './visual';
 import { refreshMemoryReview } from './characterMemory';
+import { refreshInterviewStaleness } from './interviewProposals';
 import { refreshContinuityReview } from './continuity';
 import { studioAppearanceText } from './characterProfile';
 import type { CoreRepository, DocumentRow, MentionInput, ParagraphKind, ParagraphRow } from './types';
@@ -94,6 +95,8 @@ export interface CoreSyncResult {
   continuityNeedReview?: number;
   /** Спогади героїв «перевірити»: змінено сцену, з якої вони (Т2.6 В3). */
   memoriesNeedReview?: number;
+  /** Т2.7 В4: допитів, що застаріли через правку їхньої сцени. */
+  interviewsStale?: number;
   notifications: number;
   /** Зображення з книги в бібліотеці ілюстрацій (Т2.3 В2): прив'язано / прибрано. */
   /** Бібліотека ілюстрацій: перенесені з книги зв'язки (В2) і позначки «перевірити» після зміни опису (В5). */
@@ -456,6 +459,10 @@ export async function syncBookToCore(
     const memories = await refreshMemoryReview(repo, projectId, { paragraphIds: touched, revision: result.revision });
     result.memoriesNeedReview = memories.flagged;
     result.notifications += memories.notifications;
+    // Допити (Т2.7 В4): змінено сцену допиту — допит «застарів», його пропозиції — лише явним рішенням автора.
+    const interviews = await refreshInterviewStaleness(repo, projectId, { revision: result.revision });
+    result.interviewsStale = interviews.stale;
+    result.notifications += interviews.notifications;
   } else {
     result.revision = project.revision;
   }

@@ -21,7 +21,7 @@ const CONTRACT = `⚠️ ЖОРСТКИЙ КОНТРАКТ ВІДПОВІДІ
   "intent": "намір героя в цій відповіді одним реченням (для автора, не для героя)",
   "proposals": {
     "memories": [ { "type": "recollection | belief | consequence", "content": "що герой після цієї розмови пам'ятає чи в що вірить — від третьої особи" } ],
-    "facts": [ { "statement": "факт про героя, який ця відповідь вигадала чи уточнила (гіпотеза, не канон)" } ],
+    "facts": [ { "statement": "факт про героя, який ця відповідь вигадала чи уточнила (гіпотеза, не канон)", "field": "goal | need | belief | fear | relationship | skill | biography | personality | appearance | other" } ],
     "fragment": { "text": "чистий фрагмент прози для книги за цією відповіддю, без тегів", "tags": ["[/emotion:… @Ім'я]", "…"] }
   }
 }
@@ -96,7 +96,7 @@ export const CHARACTER_VOICE_SCHEMA = {
         facts: {
           type: 'array',
           maxItems: 5,
-          items: { type: 'object', required: ['statement'], additionalProperties: true, properties: { statement: { type: 'string', minLength: 1, maxLength: 1000 } } },
+          items: { type: 'object', required: ['statement'], additionalProperties: true, properties: { statement: { type: 'string', minLength: 1, maxLength: 1000 }, field: { type: 'string', maxLength: 40 } } },
         },
         fragment: {
           type: 'object',

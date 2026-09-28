@@ -179,6 +179,12 @@ export interface ProfileFact {
   chapterNumber: number | null;
   createdBy: string;
   createdAt: string;
+  /** Звідки факт: Profile Builder (AI-2) чи допит героя (Т2.7 В4). */
+  origin: 'ai' | 'interview' | 'author';
+  /** Гіпотеза (з допиту) — доки автор не підтвердить (критерій 1 FLC 2.0 §7). */
+  hypothesis: boolean;
+  /** Допит, з якого факт (для переходу до розмови). */
+  simulationId: string | null;
 }
 
 export interface ProfileItem {
@@ -279,6 +285,9 @@ export function toProfileFact(ix: BookIndex, f: FindingRow): ProfileFact {
     chapterNumber: nums.length ? Math.max(...nums) : null,
     createdBy: f.createdBy,
     createdAt: f.createdAt,
+    origin: p.origin === 'interview' ? 'interview' : f.createdBy.startsWith('user:') ? 'author' : 'ai',
+    hypothesis: p.origin === 'interview' && f.status !== 'confirmed',
+    simulationId: typeof p.simulationId === 'string' ? p.simulationId : null,
   };
 }
 

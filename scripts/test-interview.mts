@@ -17,6 +17,12 @@
  * LLM, збій голосу — «не вдалося» зі збереженим питанням і «повторити»,
  * рішення чекає автора — «чекає» з варіантами. Маршрути `…/interview`,
  * `…/simulations/:id`, `/turn`, `/retry`, `/status`.
+ * В4: пропозиції в канон — з відповіді (спогад, факт-гіпотеза, фрагмент
+ * чистим текстом і теги П7 окремо), без повторів; КРИТЕРІЇ FLC 2.0 §7:
+ * (1) факт профілю — з джерелом або позначкою гіпотези; (4) вибіркове
+ * прийняття й відхилення; (5) правка сцени — прийнятий спогад «перевірити»,
+ * факт «на перегляд», допит «застарів» (нових ходів немає, пропозиції —
+ * лише явним рішенням). Маршрути `…/proposals`, `/accept`, `/reject`.
  * PostgreSQL — з CORE_TEST_DATABASE_URL (схема `fusion_core` видаляється —
  * лише тестова база!).
  *
@@ -31,7 +37,10 @@ import { reconcileParagraphIds } from '../src/utils/paragraphIds.ts';
 import { checkCanonProposal, checkCharacterAgent, checkSimulation, checkSimulationEvent, checkSimulationPatch } from '../server/core/rules.ts';
 import type { CoreRepository } from '../server/core/types.ts';
 import { askQuestion, getAgent, INTERVIEW_ACTIONS, normalizeAgentConfig, requireInterviewAgent, retryTurn, setAgent, startInterview, type InterviewDeps } from '../server/core/interview.ts';
-import { addAuthorMemory, collectTagMemories } from '../server/core/characterMemory.ts';
+import { addAuthorMemory, collectTagMemories, heroMemories } from '../server/core/characterMemory.ts';
+import { acceptProposal, cleanFragmentText, interviewBoundaryHash, proposalViews, rejectProposal, validProposalTag } from '../server/core/interviewProposals.ts';
+import { buildCharacterProfile } from '../server/core/characterProfile.ts';
+import { scanScenes } from '../server/core/timeline.ts';
 import { resolveDecisionByAuthor } from '../server/core/jevLevels.ts';
 import { HttpJevAdapter, LlmFallbackJevAdapter, MockJevAdapter } from '../server/ai/adapters/jev/index.ts';
 import { factoryCharacterVoiceTemplate } from '../server/core/interviewPrompt.ts';
@@ -392,9 +401,199 @@ async function turnSuite(label: string, repo: CoreRepository, P: string) {
   }
 }
 
+async function proposalSuite(label: string, repo: CoreRepository, P: string) {
+  console.log(`\nПропозиції в канон — В4 (${label}):`);
+  const prev = new Map<string, { ids: string[]; hashes: string[] }>();
+  const sec = (id: string, order: number, content: string) => {
+    const old = prev.get(id);
+    const r = reconcileParagraphIds({ sectionId: id, content, prevIds: old?.ids, prevHashes: old?.hashes });
+    prev.set(id, { ids: r.ids, hashes: r.hashes });
+    return { id, title: id, order, content, paragraphIds: r.ids, paragraphHashes: r.hashes };
+  };
+  const book = (s2: string) => ({
+    id: P, ownerId: 'u-owner', title: 'Архів',
+    book: {
+      id: P, title: 'Архів', characters: [{ id: 'c-o', name: 'Олена' }, { id: 'c-m', name: 'Марко' }],
+      chapters: [
+        { id: 'ch1', title: 'Гл. 1', order: 0, sections: [
+          sec('s1', 0, '[/character:Олена] [/character:Марко] Марко звинуватив Олену в крадіжці архіву.'),
+          sec('s2', 1, s2),
+        ] },
+        { id: 'ch2', title: 'Гл. 2', order: 1, sections: [sec('s3', 0, '[/character:Олена] Олена поїхала до столиці.')] },
+      ],
+    },
+  } as any);
+  await syncBookToCore(repo, book('[/character:Олена] Олена сиділа сама в кабінеті.\n\nЗа вікном ішов дощ.'));
+  const olena = (await repo.resolveAlias(P, 'character', 'Олена'))!;
+  const actor = 'user:u-owner';
+  await setAgent(repo, P, olena, { autonomyLevel: 'interview' }, actor);
+
+  t('П7: чистий фрагмент — без тегів і маркерів чернетки, абзаци збережено',
+    cleanFragmentText('[/character:Олена] Я мовчала.  [/emotion:страх @Олена]\n\n[AI-DRAFT]Дощ.') === 'Я мовчала.\n\nДощ.');
+  t('П7: тег — рівно один тег книги з реєстру зі значенням', validProposalTag('[/emotion:тривога @Олена]') === '[/emotion:тривога @Олена]' &&
+    validProposalTag('тривога') === null && validProposalTag('[/emotion:тривога] зайве') === null && validProposalTag('[/nonsense:x]') === null && validProposalTag('[/emotion:]') === null);
+
+  let n = 0;
+  const voice = async (_s: string, user: string) => {
+    n++;
+    const q = (/Питання автора: (.*)$/m.exec(user) ?? [])[1] ?? '';
+    return {
+      text: JSON.stringify({
+        reply: `Про «${q}» я не скажу.`,
+        proposals: {
+          memories: [{ type: 'recollection', content: 'Олена відчула, що їй не вірять.' }, { type: 'belief', content: `Автор питає про «${q}», бо підозрює мене.` }, { content: 'третій' }, { content: 'четвертий — зайвий' }],
+          facts: [{ statement: `Олена боїться допитів (хід ${n}).`, field: 'fear' }, { statement: 'Олена кульгає.', field: 'nonsense' }],
+          fragment: { text: `[/character:Олена] — Я була в кабінеті, — сказала Олена (хід ${n}).`, tags: ['[/emotion:тривога @Олена]', '[/emotion:втома @Олена]', 'не тег', '[/nonsense:x]'] },
+        },
+      }),
+      modelId: 'fake-voice', inputTokens: 40, outputTokens: 30,
+    };
+  };
+  const llm = async (_s: string, u: string) => {
+    const pick = (id: string, v: string) => (new RegExp(`"${id}"`).test(u) ? { [id]: { choice: v } } : {});
+    return { text: JSON.stringify({ answers: { ...pick('trajectory', 'waver'), ...pick('scene_motive', 'protect_self'), ...pick('next_action', 'deflect') } }), modelId: 'fake-llm', inputTokens: 1, outputTokens: 1 };
+  };
+  const mock = new MockJevAdapter();
+  const jev = { name: 'jev' as const, evaluate: async (sn: any, q: any) => ({ ...(await mock.evaluate(sn, q)), source: 'jev' as const, confidence: 0.9 }) };
+  const deps = (): InterviewDeps => ({ repo, jev, fallback: new LlmFallbackJevAdapter(llm), voice });
+
+  const sim = await startInterview(repo, { projectId: P, characterId: olena, sceneId: 's2', actor });
+  const scan0 = await scanScenes(repo, P, await repo.listTimePoints(P));
+  t('на старті — відбиток межі допиту (сцена 2)', typeof (sim.config as any).boundaryHash === 'string' && (sim.config as any).boundaryHash === interviewBoundaryHash(scan0, sim));
+  const simCh = await startInterview(repo, { projectId: P, characterId: olena, asOfChapter: 1, actor });
+  const simS1 = await startInterview(repo, { projectId: P, characterId: olena, sceneId: 's1', actor });
+
+  const r1 = await askQuestion(deps(), { projectId: P, simulationId: sim.id, question: 'Де ти була?', actor });
+  const kinds = r1.proposals.map((p) => p.kind).join();
+  t('відповідь → пропозиції: до 3 спогадів, факти, фрагмент і теги П7 до нього', r1.status === 'answered' && kinds === 'memory,memory,memory,fact,fact,fragment,tag,tag', kinds);
+  const frag1 = r1.proposals.find((p) => p.kind === 'fragment')!;
+  const tags1 = r1.proposals.filter((p) => p.kind === 'tag');
+  t('П7: фрагмент — чистий текст; теги — окремими пропозиціями до нього (лише з реєстру)',
+    !/\[\//.test(String(frag1.proposedChange.text)) && tags1.every((x) => x.parentId === frag1.id) && tags1.map((x) => x.proposedChange.tag).join() === '[/emotion:тривога @Олена],[/emotion:втома @Олена]');
+  t('пропозиції — від голосу, очікують автора, джерела — питання й відповідь, хід 1; факт із невідомим полем — «інше»',
+    r1.proposals.every((p) => p.status === 'pending' && p.createdBy === 'ai:character-voice' && p.sourceEventIds.join() === `${r1.question.id},${r1.event.id}` && p.proposedChange.turn === 1) &&
+    r1.proposals.filter((p) => p.kind === 'fact').map((p) => p.proposedChange.field).join() === 'fear,other');
+  const r2 = await askQuestion(deps(), { projectId: P, simulationId: sim.id, question: 'А вчора?', actor });
+  t('повтор у цьому допиті не дублюється (той самий спогад, «кульгає», «третій»)', r2.proposals.filter((p) => p.kind === 'memory').length === 1 && r2.proposals.filter((p) => p.kind === 'fact').length === 1);
+  t('допит не змінює канон: пропозиції — не спогади й не факти', (await repo.listFindings(P, { entityId: olena })).length === 0 && (await heroMemories(repo, P, { characterId: olena })).every((m) => m.origin === 'tag'));
+  const views = proposalViews(await repo.listCanonProposals(P, { simulationId: sim.id }));
+  t('показ: теги — всередині свого фрагмента; хід і зміст окремо', views.every((v) => v.kind !== 'tag') && views.filter((v) => v.kind === 'fragment').every((v) => v.tags!.length === 2) && views[0].turn === 1 && !('turn' in views[0].change));
+
+  // КРИТЕРІЙ 4 — вибірково.
+  const [mA, mB] = r1.proposals.filter((p) => p.kind === 'memory');
+  t('вирішує лише автор (AI — ні)', (await code(() => acceptProposal(repo, { projectId: P, proposalId: mA.id, actor: 'ai:x' }))) === 'confirmed_is_author_only');
+  const accM = await acceptProposal(repo, { projectId: P, proposalId: mA.id, actor, content: 'Олена відчула, що автор їй не вірить.' });
+  const mem = accM.memory!;
+  t('спогад прийнято → пам\'ять героя: підтверджений, від автора (з правкою), сцена допиту, джерело — хід допиту, доказ — абзаци сцени',
+    mem.status === 'confirmed' && mem.origin === 'author' && mem.content === 'Олена відчула, що автор їй не вірить.' && mem.sceneId === 's2' &&
+    mem.sourceEventKind === 'simulation_event' && mem.sourceEventId === r1.event.id && mem.sourceParagraphIds.length === 2 && !!mem.evidenceHash && mem.simulationId === null &&
+    accM.proposal.status === 'accepted' && accM.proposal.result.memoryId === mem.id && accM.proposal.result.edited === true);
+  const rejB = await rejectProposal(repo, { projectId: P, proposalId: mB.id, actor, reason: 'не так' });
+  t('КРИТЕРІЙ FLC 2.0 §7 (4): інший спогад тієї ж відповіді — відхилено, у пам\'ять не потрапив', rejB.proposal.status === 'rejected' && rejB.proposal.result.reason === 'не так' &&
+    !(await heroMemories(repo, P, { characterId: olena })).some((m) => /підозрює/.test(m.content)));
+  t('повторне рішення — conflict', (await code(() => acceptProposal(repo, { projectId: P, proposalId: mA.id, actor }))) === 'conflict' && (await code(() => rejectProposal(repo, { projectId: P, proposalId: mB.id, actor }))) === 'conflict');
+  t('прийнятий спогад герой пам\'ятає в новому допиті', (await heroMemories(repo, P, { characterId: olena, simulationId: simS1.id })).some((m) => m.id === mem.id));
+
+  const fP = r1.proposals.find((p) => p.kind === 'fact')!;
+  t('поганий вид поля — bad_input', (await code(() => acceptProposal(repo, { projectId: P, proposalId: fP.id, actor, field: 'x' }))) === 'bad_input');
+  const accF = await acceptProposal(repo, { projectId: P, proposalId: fP.id, actor });
+  const fact = accF.fact!;
+  t('факт прийнято → факт профілю: «гіпотеза з допиту», пропозиція (не канон), поле, доказ — абзаци сцени',
+    fact.kind === 'profile_fact' && fact.status === 'suggested' && (fact.payload as any).hypothesis === true && (fact.payload as any).origin === 'interview' && (fact.payload as any).field === 'fear' &&
+    (fact.payload as any).simulationId === sim.id && fact.sourceParagraphIds.length === 2);
+  const profile = (await buildCharacterProfile(repo, P, olena))!;
+  const allFacts = [...profile.facts.confirmed, ...profile.facts.suggested, ...profile.facts.contradicted, ...profile.facts.unknown];
+  t('КРИТЕРІЙ FLC 2.0 §7 (1): кожен факт профілю — з джерелом або позначкою гіпотези; факт допиту — «гіпотеза», з допиту',
+    allFacts.length === 1 && allFacts.every((f) => f.sources.length > 0 || f.hypothesis) && profile.facts.suggested[0].hypothesis && profile.facts.suggested[0].origin === 'interview' && profile.facts.suggested[0].simulationId === sim.id);
+  await repo.setFindingStatus(P, fact.id, 'confirmed', actor, 'підтверджено автором');
+  const p2 = (await buildCharacterProfile(repo, P, olena))!;
+  t('автор підтвердив у профілі — вже не гіпотеза, джерело — сцена допиту', p2.facts.confirmed.length === 1 && !p2.facts.confirmed[0].hypothesis && p2.facts.confirmed[0].sources.length === 2);
+
+  // Фрагмент і теги (П7).
+  const [tagA, tagB] = tags1;
+  t('тег до неприйнятого фрагмента — conflict (спершу фрагмент)', (await code(() => acceptProposal(repo, { projectId: P, proposalId: tagA.id, actor }))) === 'conflict');
+  t('фрагмент без розділу — bad_input; невідомий розділ — not_found; чужий тег — not_found',
+    (await code(() => acceptProposal(repo, { projectId: P, proposalId: frag1.id, actor }))) === 'bad_input' &&
+    (await code(() => acceptProposal(repo, { projectId: P, proposalId: frag1.id, actor, sectionId: 'nope' }))) === 'not_found' &&
+    (await code(() => acceptProposal(repo, { projectId: P, proposalId: frag1.id, actor, sectionId: 's2', tagIds: [r2.proposals.find((p) => p.kind === 'tag')!.id] }))) === 'not_found');
+  const accFr = await acceptProposal(repo, { projectId: P, proposalId: frag1.id, actor, sectionId: 's2', tagIds: [tagA.id] });
+  t('фрагмент прийнято з одним тегом → що вставити: «AI-чернетка» в розділ 2, тег дописано в кінець',
+    accFr.insert?.mode === 'ai_draft' && accFr.insert.sectionId === 's2' && accFr.insert.snippet === `[AI-DRAFT]\n\n${frag1.proposedChange.text} [/emotion:тривога @Олена]\n\n[/AI-DRAFT]` &&
+    accFr.tags.length === 1 && accFr.tags[0].status === 'accepted' && accFr.tags[0].result.withFragment === true, accFr.insert?.snippet);
+  t('рукопис сервер не змінює (вставляє редактор)', !(await repo.listAllParagraphs(P)).some((p) => /AI-DRAFT|кабінеті, — сказала/.test(p.text)));
+  t('другий тег лишився пропозицією; прийнятий окремо — дописати до фрагмента в тому ж розділі',
+    (await repo.getCanonProposal(P, tagB.id))!.status === 'pending' &&
+    JSON.stringify((await acceptProposal(repo, { projectId: P, proposalId: tagB.id, actor })).insert) === JSON.stringify({ sectionId: 's2', mode: 'append_tag', snippet: '[/emotion:втома @Олена]' }));
+  const frag2 = r2.proposals.find((p) => p.kind === 'fragment')!;
+  const rj = await rejectProposal(repo, { projectId: P, proposalId: frag2.id, actor });
+  t('відхилений фрагмент відхиляє свої неприйняті теги', rj.tags.length === 2 && rj.tags.every((x) => x.status === 'rejected'));
+
+  // КРИТЕРІЙ 5 — правка сцени.
+  const pendingMem = r2.proposals.find((p) => p.kind === 'memory')!;
+  const syncRes = await syncBookToCore(repo, book('[/character:Олена] Олена сиділа в кабінеті з Марком.\n\nЗа вікном ішов дощ.'));
+  const memAfter = (await repo.getCharacterMemory(P, mem.id))!;
+  t('КРИТЕРІЙ FLC 2.0 §7 (5): правка сцени допиту — прийнятий спогад «перевірити»', memAfter.status === 'needs_review', memAfter.status);
+  t('…факт з допиту — «на перегляд»', (await repo.getFinding(P, fact.id))!.needsReview === true);
+  const simAfter = (await repo.getSimulation(P, sim.id))!;
+  t('…допит сцени 2 і допит глави 1 — «застарів» (синхронізація), допит сцени 1 — ні',
+    simAfter.status === 'stale' && (await repo.getSimulation(P, simCh.id))!.status === 'stale' && (await repo.getSimulation(P, simS1.id))!.status === 'active' && (syncRes as any).interviewsStale === 2);
+  const note = (await repo.listNotifications(P, 20)).find((x) => x.kind === 'interviews_stale');
+  t('…сповіщення автору: скільки допитів і неприйнятих пропозицій', !!note && /застаріли: 2/.test(note.message) && (note.payload as any).characterId === olena, note?.message);
+  t('застарілий допит — нових ходів немає (conflict)', (await code(() => askQuestion(deps(), { projectId: P, simulationId: sim.id, question: 'Ще?', actor }))) === 'conflict');
+  t('пропозиція застарілого — лише явно: без позначки conflict, з нею — прийнято й позначено',
+    (await code(() => acceptProposal(repo, { projectId: P, proposalId: pendingMem.id, actor }))) === 'conflict' &&
+    (await acceptProposal(repo, { projectId: P, proposalId: pendingMem.id, actor, acknowledgeStale: true })).proposal.result.stale === true);
+  t('відхилити пропозицію застарілого — можна завжди', (await rejectProposal(repo, { projectId: P, proposalId: r2.proposals.find((p) => p.kind === 'fact')!.id, actor })).proposal.status === 'rejected');
+
+  // Застарів без синхронізації (перевірка при зверненні).
+  const simLazy = await startInterview(repo, { projectId: P, characterId: olena, sceneId: 's1', actor });
+  await repo.updateSimulation(P, simLazy.id, { config: { ...simLazy.config, boundaryHash: 'f'.repeat(32) } });
+  t('межа змінилась поза синхронізацією — допит сам стає «застарів» при ході', (await code(() => askQuestion(deps(), { projectId: P, simulationId: simLazy.id, question: 'x', actor }))) === 'conflict' && (await repo.getSimulation(P, simLazy.id))!.status === 'stale');
+
+  // Маршрути.
+  const r3 = await askQuestion(deps(), { projectId: P, simulationId: simS1.id, question: 'Хто винен?', actor });
+  const access = {
+    async getBookOwnerId(x: string) { return x === P ? 'u-owner' : null; },
+    async getCollabOwnerId() { return undefined; },
+    async listAcceptedInvites() { return [{ acceptedUserId: 'u-reader', role: 'reader' }]; },
+  };
+  const who: Record<string, any> = { owner: { id: 'u-owner', role: 'writer', isGuest: false }, reader: { id: 'u-reader', role: 'writer', isGuest: false } };
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => { (req as any).principal = who[String(req.headers['x-user'])]; next(); });
+  registerProjectRoutes(app, { access, repo: () => repo, coreState: () => 'ready' });
+  const server = app.listen(0);
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/projects/${P}`;
+  const call = async (user: string, method: string, path: string, body?: unknown) => {
+    const res = await fetch(`${base}${path}`, { method, headers: { 'x-user': user, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    return { status: res.status, body: (await res.json().catch(() => ({}))) as any };
+  };
+  try {
+    const g = await call('owner', 'GET', `/simulations/${simS1.id}`);
+    t('GET …/simulations/:id — з пропозиціями (теги всередині фрагмента)', g.status === 200 && g.body.proposals.length === 6 && g.body.proposals.find((v: any) => v.kind === 'fragment').tags.length === 2);
+    const pend = await call('owner', 'GET', `/characters/${olena}/proposals?status=pending`);
+    t('GET …/characters/:id/proposals?status=pending — усі неприйняті героя з назвами й станом допитів',
+      pend.status === 200 && pend.body.proposals.every((v: any) => v.status === 'pending') && pend.body.simulations.some((s: any) => s.id === simS1.id && s.status === 'active') && pend.body.simulations.some((s: any) => s.status === 'stale'));
+    t('права: читач не бачить і не приймає (403); поганий статус — 400',
+      (await call('reader', 'GET', `/characters/${olena}/proposals`)).status === 403 && (await call('reader', 'POST', `/proposals/${r3.proposals[0].id}/accept`, {})).status === 403 &&
+      (await call('owner', 'GET', `/characters/${olena}/proposals?status=x`)).status === 400);
+    const fr3 = r3.proposals.find((p) => p.kind === 'fragment')!;
+    const acc = await call('owner', 'POST', `/proposals/${fr3.id}/accept`, { sectionId: 's1', tagIds: r3.proposals.filter((p) => p.kind === 'tag').map((p) => p.id) });
+    t('POST …/accept (фрагмент з обома тегами) — insert для редактора', acc.status === 200 && acc.body.insert.mode === 'ai_draft' && acc.body.tags.length === 2 && /втома @Олена\]\n\n\[\/AI-DRAFT\]$/.test(acc.body.insert.snippet));
+    t('POST …/reject; повторно — 409; невідома — 404',
+      (await call('owner', 'POST', `/proposals/${r3.proposals[0].id}/reject`, { reason: 'ні' })).body.proposal.status === 'rejected' &&
+      (await call('owner', 'POST', `/proposals/${r3.proposals[0].id}/reject`, {})).status === 409 &&
+      (await call('owner', 'POST', '/proposals/00000000-0000-4000-8000-000000000000/accept', {})).status === 404);
+    t('застарілий допит у GET — позначено', (await call('owner', 'GET', `/simulations/${sim.id}`)).body.simulation.status === 'stale');
+  } finally {
+    server.close();
+  }
+}
+
 await repoSuite('memory', new MemoryCoreRepository(), 'int-m');
 await agentSuite('memory', new MemoryCoreRepository(), 'agt-m');
 await turnSuite('memory', new MemoryCoreRepository(), 'trn-m');
+await proposalSuite('memory', new MemoryCoreRepository(), 'prp-m');
 const url = process.env.CORE_TEST_DATABASE_URL?.trim();
 if (!url) {
   console.log('\nPostgreSQL: пропущено (CORE_TEST_DATABASE_URL не задано) — перевірено на сховищі в пам\'яті');
@@ -408,6 +607,7 @@ if (!url) {
     const { olena, sim } = await repoSuite('postgres', new PgCoreRepository(pool), 'int-p');
     await agentSuite('postgres', new PgCoreRepository(pool), 'agt-p');
     await turnSuite('postgres', new PgCoreRepository(pool), 'trn-p');
+    await proposalSuite('postgres', new PgCoreRepository(pool), 'prp-p');
     const refused = async (sql: string, params: unknown[]) => {
       try {
         await pool.query(sql, params);

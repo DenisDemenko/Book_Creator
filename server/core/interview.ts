@@ -20,13 +20,17 @@
  * пам'ять, зокрема цього допиту) → модуль «Голос героя (допит)» з історією
  * допиту → відповідь. Канон, рукопис і пам'ять канону допит не змінює —
  * лише ходи прогону (і, далі, пропозиції, В4).
+ * В4: відповідь голосу дає пропозиції в канон (`interviewProposals.ts`):
+ * спогад, факт-гіпотеза, фрагмент і теги П7 — автор приймає кожну окремо.
+ * На старті записано відбиток межі допиту (сцена чи глава); змінилась
+ * сцена — допит «застарів», нових ходів немає.
  * Запасні шляхи (ТЗ-H №9): Jev недоступний — запасний LLM (у `decide`);
  * рішення чекає автора — хід «чекає» з варіантами, відповіді немає;
  * модель голосу недоступна чи відповіла не за схемою — хід «не вдалося»,
  * питання збережене, «повторити» відповідає на те саме питання.
  */
 
-import type { AutonomyLevel, CharacterAgentRow, CoreActor, CoreRepository, EntityRow, SimulationEventRow, SimulationRow } from './types';
+import type { AutonomyLevel, CanonProposalRow, CharacterAgentRow, CoreActor, CoreRepository, EntityRow, SimulationEventRow, SimulationRow } from './types';
 import { AUTONOMY_LEVELS } from './types';
 import { CoreRuleError } from './rules';
 import { scanScenes } from './timeline';
@@ -36,6 +40,9 @@ import { parseModelJson, validateAgainstSchema } from './ai/schema';
 import { jevState, type JevAdapter } from '../ai/adapters/jev';
 import type { StudioCharacterLike } from './characterProfile';
 import { CHARACTER_VOICE_SCHEMA, factoryCharacterVoiceTemplate, renderCharacterVoiceTemplate } from './interviewPrompt';
+import { createProposals, interviewBoundaryHash, refreshSimulationFreshness, type VoiceProposals } from './interviewProposals';
+
+export type { VoiceProposals };
 
 export const AUTONOMY_LABELS: Record<AutonomyLevel, { title: string; hint: string; available: boolean }> = {
   off: { title: 'Вимкнено', hint: 'героя не допитують і в сценах він не діє сам', available: true },
@@ -163,12 +170,6 @@ export interface InterviewDeps {
   studio?: (projectId: string, entity: EntityRow) => Promise<{ character: StudioCharacterLike | null; all: StudioCharacterLike[] } | undefined>;
 }
 
-export interface VoiceProposals {
-  memories?: { type?: string; content: string }[];
-  facts?: { statement: string }[];
-  fragment?: { text?: string; tags?: string[] };
-}
-
 /** Почати допит героя: прогін з ревізією книги й межею знань (сцена чи глава; типово — з налаштувань агента). */
 export async function startInterview(
   repo: CoreRepository,
@@ -180,11 +181,11 @@ export async function startInterview(
   if (!project) throw new CoreRuleError('not_found', `Проєкт «${input.projectId}»`);
   const sceneId = input.sceneId !== undefined ? input.sceneId : cfg.sceneId ?? null;
   const asOfChapter = input.asOfChapter !== undefined ? input.asOfChapter : cfg.asOfChapter ?? null;
-  if (sceneId) {
-    const scan = await scanScenes(repo, input.projectId, await repo.listTimePoints(input.projectId));
-    if (!scan.bySection.has(sceneId)) throw new CoreRuleError('not_found', `Сцену «${sceneId}» не знайдено`);
-  }
+  const scan = await scanScenes(repo, input.projectId, await repo.listTimePoints(input.projectId));
+  if (sceneId && !scan.bySection.has(sceneId)) throw new CoreRuleError('not_found', `Сцену «${sceneId}» не знайдено`);
   if (asOfChapter != null && (!Number.isInteger(asOfChapter) || asOfChapter < 1)) throw new CoreRuleError('bad_input', 'Межа знань — глава ≥ 1');
+  // В4: відбиток межі допиту — змінилась сцена (глава) — допит «застарів».
+  const boundaryHash = interviewBoundaryHash(scan, { sceneId, asOfChapter });
   return repo.addSimulation({
     projectId: input.projectId,
     kind: 'interview',
@@ -193,7 +194,7 @@ export async function startInterview(
     asOfChapter,
     baseBookRevision: project.revision,
     title: (input.title ?? '').trim().slice(0, 200) || `Допит: ${hero.name}`,
-    config: { maxTurns: cfg.maxTurns ?? DEFAULT_MAX_TURNS, note: cfg.note ?? '' },
+    config: { maxTurns: cfg.maxTurns ?? DEFAULT_MAX_TURNS, note: cfg.note ?? '', ...(boundaryHash ? { boundaryHash } : {}) },
     createdBy: input.actor,
   });
 }
@@ -203,6 +204,8 @@ export interface TurnResult {
   turn: number;
   question: SimulationEventRow;
   event: SimulationEventRow;
+  /** В4: пропозиції в канон з цієї відповіді (лише для «answered»). */
+  proposals: CanonProposalRow[];
 }
 
 const lastByTurn = (events: SimulationEventRow[], turn: number) => events.filter((e) => e.turnIndex === turn).at(-1) ?? null;
@@ -239,8 +242,9 @@ export async function retryTurn(deps: InterviewDeps, input: { projectId: string;
 }
 
 async function activeInterview(repo: CoreRepository, projectId: string, simulationId: string): Promise<SimulationRow> {
-  const sim = await repo.getSimulation(projectId, simulationId);
-  if (!sim || sim.kind !== 'interview' || !sim.characterId) throw new CoreRuleError('not_found', 'Допит не знайдено');
+  const found = await repo.getSimulation(projectId, simulationId);
+  if (!found || found.kind !== 'interview' || !found.characterId) throw new CoreRuleError('not_found', 'Допит не знайдено');
+  const sim = await refreshSimulationFreshness(repo, found);
   if (sim.status !== 'active') throw new CoreRuleError('conflict', sim.status === 'stale' ? 'Сцену допиту змінено — допит застарів, почніть новий' : 'Допит не активний');
   await requireInterviewAgent(repo, projectId, sim.characterId);
   return sim;
@@ -283,7 +287,7 @@ async function answerTurn(deps: InterviewDeps, sim: SimulationRow, q: Simulation
     });
   } catch (err) {
     const event = await addEvent('failed', { stage: 'decision', error: (err as Error).message.slice(0, 500) });
-    return { status: 'failed', turn, question: q, event };
+    return { status: 'failed', turn, question: q, event, proposals: [] };
   }
   if (decided.awaitingAuthor) {
     const d = decided.decision;
@@ -294,7 +298,7 @@ async function answerTurn(deps: InterviewDeps, sim: SimulationRow, q: Simulation
       reason: d.fallbackReason ?? (d.validation as { authorReason?: unknown }).authorReason ?? null,
       options: (primary.allowed ?? []).filter((a) => !(primary.forbidden ?? []).includes(a)),
     }, d.id);
-    return { status: 'awaiting', turn, question: q, event };
+    return { status: 'awaiting', turn, question: q, event, proposals: [] };
   }
   const d = decided.decision;
   const r = (d.result ?? {}) as { scores?: Record<string, number>; confidence?: number | null };
@@ -343,19 +347,19 @@ async function answerTurn(deps: InterviewDeps, sim: SimulationRow, q: Simulation
     out = await deps.voice(rendered.system, rendered.user);
   } catch (err) {
     const event = await addEvent('failed', { stage: 'voice', error: (err as Error).message.slice(0, 500), ...decisionInfo }, d.id);
-    return { status: 'failed', turn, question: q, event };
+    return { status: 'failed', turn, question: q, event, proposals: [] };
   }
   let parsed: unknown;
   try {
     parsed = parseModelJson(out.text);
   } catch (err) {
     const event = await addEvent('failed', { stage: 'voice', error: `відповідь не JSON: ${(err as Error).message}`.slice(0, 500), ...decisionInfo }, d.id);
-    return { status: 'failed', turn, question: q, event };
+    return { status: 'failed', turn, question: q, event, proposals: [] };
   }
   const check = validateAgainstSchema<{ reply: string; intent?: string; proposals?: VoiceProposals }>(CHARACTER_VOICE_SCHEMA, parsed);
   if (!check.ok) {
     const event = await addEvent('failed', { stage: 'voice', error: `відповідь не за схемою: ${check.errors.join('; ')}`.slice(0, 500), ...decisionInfo }, d.id);
-    return { status: 'failed', turn, question: q, event };
+    return { status: 'failed', turn, question: q, event, proposals: [] };
   }
   const v = check.value!;
   const event = await addEvent('answer', {
@@ -367,5 +371,7 @@ async function answerTurn(deps: InterviewDeps, sim: SimulationRow, q: Simulation
     proposals: v.proposals ?? {},
     memoryIds: built.memoryIds,
   }, d.id);
-  return { status: 'answered', turn, question: q, event };
+  // В4: пропозиції в канон — окремими записами; вирішує автор.
+  const created = await createProposals(repo, sim, { turn, sourceEventIds: [q.id, event.id], proposals: v.proposals });
+  return { status: 'answered', turn, question: q, event, proposals: created.proposals };
 }
