@@ -35,6 +35,11 @@ import {
   checkCharacterMemory,
   checkCharacterMemoryStatus,
   checkCharacterMemoryPatch,
+  checkCharacterAgent,
+  checkSimulation,
+  checkSimulationPatch,
+  checkSimulationEvent,
+  checkCanonProposal,
   assertActor,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isValidEmbedding, SEARCHABLE_KINDS, tsQueryFromStems } from './search/text';
@@ -94,6 +99,19 @@ import type {
   CharacterMemoryFilter,
   CharacterMemoryStatus,
   CharacterMemoryPatch,
+  CharacterAgentInput,
+  CharacterAgentRow,
+  SimulationInput,
+  SimulationRow,
+  SimulationPatch,
+  SimulationKind,
+  SimulationStatus,
+  SimulationEventInput,
+  SimulationEventRow,
+  CanonProposalInput,
+  CanonProposalRow,
+  CanonProposalKind,
+  CanonProposalStatus,
   CharacterStateInput,
   CharacterStateRow,
   CharacterDecisionLevel,
@@ -309,6 +327,77 @@ function toState(r: any): CharacterStateRow {
     snapshotHash: r.snapshot_hash,
     createdBy: r.created_by,
     createdAt: iso(r.created_at),
+  };
+}
+
+function toAgent(r: any): CharacterAgentRow {
+  return {
+    id: r.id,
+    projectId: r.project_id,
+    characterId: r.character_id,
+    enabled: !!r.enabled,
+    autonomyLevel: r.autonomy_level,
+    agentConfig: r.agent_config ?? {},
+    modelPolicy: r.model_policy ?? {},
+    createdBy: r.created_by,
+    createdAt: iso(r.created_at),
+    updatedBy: r.updated_by,
+    updatedAt: iso(r.updated_at),
+  };
+}
+
+function toSimulation(r: any): SimulationRow {
+  return {
+    id: r.id,
+    projectId: r.project_id,
+    kind: r.kind,
+    characterId: r.character_id ?? null,
+    sceneId: r.scene_id ?? null,
+    asOfChapter: r.as_of_chapter ?? null,
+    baseBookRevision: Number(r.base_book_revision),
+    title: r.title ?? '',
+    config: r.config ?? {},
+    status: r.status,
+    currentTurn: Number(r.current_turn),
+    createdBy: r.created_by,
+    createdAt: iso(r.created_at),
+    updatedAt: iso(r.updated_at),
+  };
+}
+
+function toSimEvent(r: any): SimulationEventRow {
+  return {
+    id: r.id,
+    projectId: r.project_id,
+    simulationId: r.simulation_id,
+    turnIndex: Number(r.turn_index),
+    actor: r.actor,
+    actorCharacterId: r.actor_character_id ?? null,
+    eventType: r.event_type,
+    publicPayload: r.public_payload ?? {},
+    privatePayloadRef: r.private_payload_ref ?? null,
+    sourceDecisionId: r.source_decision_id ?? null,
+    createdBy: r.created_by,
+    createdAt: iso(r.created_at),
+  };
+}
+
+function toProposal(r: any): CanonProposalRow {
+  return {
+    id: r.id,
+    projectId: r.project_id,
+    simulationId: r.simulation_id,
+    characterId: r.character_id,
+    sourceEventIds: Array.isArray(r.source_event_ids) ? r.source_event_ids : [],
+    kind: r.kind,
+    proposedChange: r.proposed_change ?? {},
+    parentId: r.parent_id ?? null,
+    status: r.status,
+    result: r.result ?? {},
+    createdBy: r.created_by,
+    createdAt: iso(r.created_at),
+    reviewedBy: r.reviewed_by ?? null,
+    reviewedAt: isoOrNull(r.reviewed_at),
   };
 }
 
@@ -1901,6 +1990,154 @@ export class PgCoreRepository implements CoreRepository {
       [projectId, k.characterId, k.sceneId, k.simulationId, k.canonRevision],
     );
     return rows[0] ? toState(rows[0]) : null;
+  }
+
+  // ── Допит (Т2.7 В1) ──────────────────────────────────────────────────────
+
+  async getCharacterAgent(projectId: string, characterId: string) {
+    if (!isUuid(characterId)) return null;
+    const { rows } = await this.q('SELECT * FROM character_agents WHERE project_id = $1 AND character_id = $2', [projectId, characterId]);
+    return rows[0] ? toAgent(rows[0]) : null;
+  }
+
+  async upsertCharacterAgent(input: CharacterAgentInput) {
+    checkCharacterAgent(input);
+    if (!isUuid(input.characterId)) throw notFound(`Сутність «${input.characterId}»`);
+    const json = (v: unknown) => (v === undefined ? null : JSON.stringify(v));
+    const { rows } = await this.q(
+      `INSERT INTO character_agents (project_id, character_id, enabled, autonomy_level, agent_config, model_policy, created_by, updated_by)
+       VALUES ($1, $2, $3, $4, COALESCE($5::jsonb, '{}'::jsonb), COALESCE($6::jsonb, '{}'::jsonb), $7, $7)
+       ON CONFLICT (project_id, character_id) DO UPDATE SET
+         enabled = EXCLUDED.enabled, autonomy_level = EXCLUDED.autonomy_level,
+         agent_config = COALESCE($5::jsonb, character_agents.agent_config),
+         model_policy = COALESCE($6::jsonb, character_agents.model_policy),
+         updated_by = EXCLUDED.updated_by, updated_at = now()
+       RETURNING *`,
+      [input.projectId, input.characterId, input.autonomyLevel !== 'off', input.autonomyLevel, json(input.agentConfig), json(input.modelPolicy), input.actor],
+    );
+    return toAgent(rows[0]);
+  }
+
+  async listCharacterAgents(projectId: string) {
+    const { rows } = await this.q('SELECT * FROM character_agents WHERE project_id = $1 ORDER BY created_at, id', [projectId]);
+    return rows.map(toAgent);
+  }
+
+  async addSimulation(input: SimulationInput) {
+    checkSimulation(input);
+    if (input.characterId && !isUuid(input.characterId)) throw notFound(`Сутність «${input.characterId}»`);
+    const { rows } = await this.q(
+      `INSERT INTO scene_simulations (project_id, kind, character_id, scene_id, as_of_chapter, base_book_revision, title, config, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [input.projectId, input.kind, input.characterId ?? null, input.sceneId ?? null, input.asOfChapter ?? null, input.baseBookRevision, input.title ?? '', JSON.stringify(input.config ?? {}), input.createdBy],
+    );
+    return toSimulation(rows[0]);
+  }
+
+  async getSimulation(projectId: string, id: string) {
+    if (!isUuid(id)) return null;
+    const { rows } = await this.q('SELECT * FROM scene_simulations WHERE project_id = $1 AND id = $2', [projectId, id]);
+    return rows[0] ? toSimulation(rows[0]) : null;
+  }
+
+  async listSimulations(projectId: string, f: { characterId?: string; kind?: SimulationKind; status?: SimulationStatus; limit?: number } = {}) {
+    if (f.characterId && !isUuid(f.characterId)) return [];
+    const where = ['project_id = $1'];
+    const params: unknown[] = [projectId];
+    const add = (col: string, v: unknown) => {
+      params.push(v);
+      where.push(`${col} = $${params.length}`);
+    };
+    if (f.characterId) add('character_id', f.characterId);
+    if (f.kind) add('kind', f.kind);
+    if (f.status) add('status', f.status);
+    params.push(Math.max(1, Math.min(f.limit ?? 50, 500)));
+    const { rows } = await this.q(`SELECT * FROM scene_simulations WHERE ${where.join(' AND ')} ORDER BY created_at DESC, id LIMIT $${params.length}`, params);
+    return rows.map(toSimulation);
+  }
+
+  async updateSimulation(projectId: string, id: string, patch: SimulationPatch) {
+    const cur = await this.getSimulation(projectId, id);
+    if (!cur) throw notFound(`Прогін «${id}»`);
+    checkSimulationPatch(patch);
+    const { rows } = await this.q(
+      `UPDATE scene_simulations SET status = COALESCE($3, status), current_turn = COALESCE($4, current_turn), config = COALESCE($5::jsonb, config), title = COALESCE($6, title), updated_at = now()
+       WHERE project_id = $1 AND id = $2 RETURNING *`,
+      [projectId, id, patch.status ?? null, patch.currentTurn ?? null, patch.config === undefined ? null : JSON.stringify(patch.config), patch.title ?? null],
+    );
+    return toSimulation(rows[0]);
+  }
+
+  async addSimulationEvent(input: SimulationEventInput) {
+    checkSimulationEvent(input);
+    if (!isUuid(input.simulationId)) throw notFound(`Прогін «${input.simulationId}»`);
+    const sim = await this.getSimulation(input.projectId, input.simulationId);
+    if (!sim) throw notFound(`Прогін «${input.simulationId}»`);
+    if (input.sourceDecisionId && !isUuid(input.sourceDecisionId)) throw notFound(`Рішення «${input.sourceDecisionId}»`);
+    const { rows } = await this.q(
+      `INSERT INTO simulation_events (project_id, simulation_id, turn_index, actor, actor_character_id, event_type, public_payload, private_payload_ref, source_decision_id, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+      [input.projectId, input.simulationId, input.turnIndex, input.actor, input.actorCharacterId ?? null, input.eventType, JSON.stringify(input.publicPayload ?? {}), input.privatePayloadRef ?? null, input.sourceDecisionId ?? null, input.createdBy],
+    );
+    return toSimEvent(rows[0]);
+  }
+
+  async listSimulationEvents(projectId: string, simulationId: string) {
+    if (!isUuid(simulationId)) return [];
+    const { rows } = await this.q('SELECT * FROM simulation_events WHERE project_id = $1 AND simulation_id = $2 ORDER BY turn_index, created_at, id', [projectId, simulationId]);
+    return rows.map(toSimEvent);
+  }
+
+  async addCanonProposal(input: CanonProposalInput) {
+    checkCanonProposal(input);
+    if (!isUuid(input.simulationId)) throw notFound(`Прогін «${input.simulationId}»`);
+    if (!isUuid(input.characterId)) throw notFound(`Сутність «${input.characterId}»`);
+    if (input.parentId && !isUuid(input.parentId)) throw notFound(`Пропозиція «${input.parentId}»`);
+    const sim = await this.getSimulation(input.projectId, input.simulationId);
+    if (!sim) throw notFound(`Прогін «${input.simulationId}»`);
+    const { rows } = await this.q(
+      `INSERT INTO canon_proposals (project_id, simulation_id, character_id, source_event_ids, kind, proposed_change, parent_id, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [input.projectId, input.simulationId, input.characterId, JSON.stringify(input.sourceEventIds ?? []), input.kind, JSON.stringify(input.proposedChange), input.parentId ?? null, input.createdBy],
+    );
+    return toProposal(rows[0]);
+  }
+
+  async getCanonProposal(projectId: string, id: string) {
+    if (!isUuid(id)) return null;
+    const { rows } = await this.q('SELECT * FROM canon_proposals WHERE project_id = $1 AND id = $2', [projectId, id]);
+    return rows[0] ? toProposal(rows[0]) : null;
+  }
+
+  async listCanonProposals(projectId: string, f: { simulationId?: string; characterId?: string; status?: CanonProposalStatus; kind?: CanonProposalKind; limit?: number } = {}) {
+    if ((f.simulationId && !isUuid(f.simulationId)) || (f.characterId && !isUuid(f.characterId))) return [];
+    const where = ['project_id = $1'];
+    const params: unknown[] = [projectId];
+    const add = (col: string, v: unknown) => {
+      params.push(v);
+      where.push(`${col} = $${params.length}`);
+    };
+    if (f.simulationId) add('simulation_id', f.simulationId);
+    if (f.characterId) add('character_id', f.characterId);
+    if (f.status) add('status', f.status);
+    if (f.kind) add('kind', f.kind);
+    params.push(Math.max(1, Math.min(f.limit ?? 200, 1000)));
+    const { rows } = await this.q(`SELECT * FROM canon_proposals WHERE ${where.join(' AND ')} ORDER BY created_at, id LIMIT $${params.length}`, params);
+    return rows.map(toProposal);
+  }
+
+  async resolveCanonProposal(projectId: string, id: string, input: { status: 'accepted' | 'rejected'; actor: CoreActor; result?: Record<string, unknown> }) {
+    if (!/^user:.+/.test(input.actor)) throw new CoreRuleError('confirmed_is_author_only', 'Приймає чи відхиляє пропозицію лише автор');
+    if (input.status !== 'accepted' && input.status !== 'rejected') throw new CoreRuleError('bad_input', 'Рішення — accepted або rejected');
+    const cur = await this.getCanonProposal(projectId, id);
+    if (!cur) throw notFound(`Пропозиція «${id}»`);
+    if (cur.status !== 'pending') throw new CoreRuleError('conflict', 'Пропозицію вже вирішено');
+    const { rows } = await this.q(
+      `UPDATE canon_proposals SET status = $3, result = $4, reviewed_by = $5, reviewed_at = now() WHERE project_id = $1 AND id = $2 AND status = 'pending' RETURNING *`,
+      [projectId, id, input.status, JSON.stringify(input.result ?? {}), input.actor],
+    );
+    if (!rows[0]) throw new CoreRuleError('conflict', 'Пропозицію вже вирішено');
+    return toProposal(rows[0]);
   }
 
   // ── Збережені запити (Т1.3) ──────────────────────────────────────────────

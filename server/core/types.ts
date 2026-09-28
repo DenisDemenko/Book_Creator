@@ -780,6 +780,109 @@ export interface CharacterStateRow {
 export type CharacterStateInput = Pick<CharacterStateRow, 'projectId' | 'characterId' | 'canonRevision' | 'snapshotHash' | 'createdBy'> &
   Partial<Pick<CharacterStateRow, 'sceneId' | 'simulationId' | 'goals' | 'emotions' | 'beliefs' | 'relationships' | 'memoryIds' | 'stateVersion'>>;
 
+// ── Допит живого персонажа (Т2.7 В1, ТЗ-H §10; FLC 2.0 §7) ──────────────────
+
+export const AUTONOMY_LEVELS = ['off', 'interview', 'scene'] as const;
+export type AutonomyLevel = (typeof AUTONOMY_LEVELS)[number];
+
+export interface CharacterAgentRow {
+  id: string;
+  projectId: string;
+  characterId: string;
+  enabled: boolean;
+  autonomyLevel: AutonomyLevel;
+  agentConfig: Record<string, unknown>;
+  modelPolicy: Record<string, unknown>;
+  createdBy: CoreActor;
+  createdAt: string;
+  updatedBy: CoreActor;
+  updatedAt: string;
+}
+
+export interface CharacterAgentInput {
+  projectId: string;
+  characterId: string;
+  autonomyLevel: AutonomyLevel;
+  agentConfig?: Record<string, unknown>;
+  modelPolicy?: Record<string, unknown>;
+  actor: CoreActor;
+}
+
+export const SIMULATION_KINDS = ['interview', 'scene'] as const;
+export type SimulationKind = (typeof SIMULATION_KINDS)[number];
+export const SIMULATION_STATUSES = ['active', 'paused', 'closed', 'stale'] as const;
+export type SimulationStatus = (typeof SIMULATION_STATUSES)[number];
+
+export interface SimulationRow {
+  id: string;
+  projectId: string;
+  kind: SimulationKind;
+  characterId: string | null;
+  sceneId: string | null;
+  asOfChapter: number | null;
+  baseBookRevision: number;
+  title: string;
+  config: Record<string, unknown>;
+  status: SimulationStatus;
+  currentTurn: number;
+  createdBy: CoreActor;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type SimulationInput = Pick<SimulationRow, 'projectId' | 'kind' | 'baseBookRevision' | 'createdBy'> &
+  Partial<Pick<SimulationRow, 'characterId' | 'sceneId' | 'asOfChapter' | 'title' | 'config'>>;
+
+export type SimulationPatch = Partial<Pick<SimulationRow, 'status' | 'currentTurn' | 'config' | 'title'>>;
+
+export const SIMULATION_EVENT_TYPES = ['question', 'answer', 'awaiting', 'failed', 'note'] as const;
+export type SimulationEventType = (typeof SIMULATION_EVENT_TYPES)[number];
+export const SIMULATION_ACTORS = ['author', 'character', 'system'] as const;
+export type SimulationActor = (typeof SIMULATION_ACTORS)[number];
+
+export interface SimulationEventRow {
+  id: string;
+  projectId: string;
+  simulationId: string;
+  turnIndex: number;
+  actor: SimulationActor;
+  actorCharacterId: string | null;
+  eventType: SimulationEventType;
+  publicPayload: Record<string, unknown>;
+  privatePayloadRef: string | null;
+  sourceDecisionId: string | null;
+  createdBy: CoreActor;
+  createdAt: string;
+}
+
+export type SimulationEventInput = Pick<SimulationEventRow, 'projectId' | 'simulationId' | 'turnIndex' | 'actor' | 'eventType' | 'createdBy'> &
+  Partial<Pick<SimulationEventRow, 'actorCharacterId' | 'publicPayload' | 'privatePayloadRef' | 'sourceDecisionId'>>;
+
+export const CANON_PROPOSAL_KINDS = ['memory', 'fact', 'fragment', 'tag'] as const;
+export type CanonProposalKind = (typeof CANON_PROPOSAL_KINDS)[number];
+export const CANON_PROPOSAL_STATUSES = ['pending', 'accepted', 'rejected'] as const;
+export type CanonProposalStatus = (typeof CANON_PROPOSAL_STATUSES)[number];
+
+export interface CanonProposalRow {
+  id: string;
+  projectId: string;
+  simulationId: string;
+  characterId: string;
+  sourceEventIds: string[];
+  kind: CanonProposalKind;
+  proposedChange: Record<string, unknown>;
+  parentId: string | null;
+  status: CanonProposalStatus;
+  result: Record<string, unknown>;
+  createdBy: CoreActor;
+  createdAt: string;
+  reviewedBy: CoreActor | null;
+  reviewedAt: string | null;
+}
+
+export type CanonProposalInput = Pick<CanonProposalRow, 'projectId' | 'simulationId' | 'characterId' | 'kind' | 'proposedChange' | 'createdBy'> &
+  Partial<Pick<CanonProposalRow, 'sourceEventIds' | 'parentId'>>;
+
 /** Збережений пошуковий запит автора (Т1.3). */
 export interface SavedSearchRow {
   id: string;
@@ -977,6 +1080,24 @@ export interface CoreRepository {
   /** Стан героя на сцену (кеш будівника знімка, В5): додати й узяти найновіший за героєм, сценою, прогоном і ревізією. */
   addCharacterState(input: CharacterStateInput): Promise<CharacterStateRow>;
   getCharacterState(projectId: string, key: { characterId: string; sceneId: string | null; simulationId: string | null; canonRevision: number }): Promise<CharacterStateRow | null>;
+
+  /** Т2.7 В1: «AI-персонаж» героя — один запис на героя (увімкнено ⇔ рівень не off). */
+  getCharacterAgent(projectId: string, characterId: string): Promise<CharacterAgentRow | null>;
+  upsertCharacterAgent(input: CharacterAgentInput): Promise<CharacterAgentRow>;
+  listCharacterAgents(projectId: string): Promise<CharacterAgentRow[]>;
+  /** Дослідницькі прогони (допит, далі — сцена): новіші першими. */
+  addSimulation(input: SimulationInput): Promise<SimulationRow>;
+  getSimulation(projectId: string, id: string): Promise<SimulationRow | null>;
+  listSimulations(projectId: string, filter?: { characterId?: string; kind?: SimulationKind; status?: SimulationStatus; limit?: number }): Promise<SimulationRow[]>;
+  updateSimulation(projectId: string, id: string, patch: SimulationPatch): Promise<SimulationRow>;
+  /** Ходи прогону — лише дописуються; у порядку ходу й часу. */
+  addSimulationEvent(input: SimulationEventInput): Promise<SimulationEventRow>;
+  listSimulationEvents(projectId: string, simulationId: string): Promise<SimulationEventRow[]>;
+  /** Пропозиції в канон: додати, знайти, перелік, рішення автора (лише з pending). */
+  addCanonProposal(input: CanonProposalInput): Promise<CanonProposalRow>;
+  getCanonProposal(projectId: string, id: string): Promise<CanonProposalRow | null>;
+  listCanonProposals(projectId: string, filter?: { simulationId?: string; characterId?: string; status?: CanonProposalStatus; kind?: CanonProposalKind; limit?: number }): Promise<CanonProposalRow[]>;
+  resolveCanonProposal(projectId: string, id: string, input: { status: 'accepted' | 'rejected'; actor: CoreActor; result?: Record<string, unknown> }): Promise<CanonProposalRow>;
 
   /** Збережені запити автора в книзі (Т1.3), новіші першими. */
   listSavedSearches(projectId: string, userId: string): Promise<SavedSearchRow[]>;

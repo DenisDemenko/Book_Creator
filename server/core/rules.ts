@@ -55,6 +55,17 @@ import {
   MEMORY_TRUTHS,
   MEMORY_SOURCE_KINDS,
   MEMORY_ORIGINS,
+  type CharacterAgentInput,
+  type SimulationInput,
+  type SimulationPatch,
+  type SimulationEventInput,
+  type CanonProposalInput,
+  AUTONOMY_LEVELS,
+  SIMULATION_KINDS,
+  SIMULATION_STATUSES,
+  SIMULATION_EVENT_TYPES,
+  SIMULATION_ACTORS,
+  CANON_PROPOSAL_KINDS,
 } from './types';
 
 export type CoreRuleCode =
@@ -462,6 +473,57 @@ export function checkCharacterMemoryPatch(row: Pick<CharacterMemoryRow, 'status'
   }
   if (patch.effects !== undefined && (typeof patch.effects !== 'object' || patch.effects === null || Array.isArray(patch.effects))) throw bad('Наслідки — обʼєкт');
   if (patch.aboutEntityIds !== undefined && (!Array.isArray(patch.aboutEntityIds) || patch.aboutEntityIds.length > 50)) throw bad('«Про кого» — список до 50 id сутностей');
+}
+
+// ── Допит (Т2.7 В1) — дзеркало CHECK міграції 0017 ────────────────────────
+
+const objectLike = (v: unknown) => typeof v === 'object' && v !== null && !Array.isArray(v);
+const humanOrSystem = (actor: CoreActor, what: string) => {
+  assertActor(actor);
+  if (!/^(user|system):.+/.test(actor)) throw new CoreRuleError('bad_actor', `${what} — лише людина чи система, не AI`);
+};
+
+export function checkCharacterAgent(input: CharacterAgentInput): void {
+  humanOrSystem(input.actor, 'Перемикач «AI-персонаж»');
+  if (!(AUTONOMY_LEVELS as readonly string[]).includes(input.autonomyLevel)) throw new CoreRuleError('bad_input', `Рівень автономності — один із: ${AUTONOMY_LEVELS.join(', ')}`);
+  if (input.agentConfig !== undefined && !objectLike(input.agentConfig)) throw new CoreRuleError('bad_input', 'Налаштування агента — обʼєкт');
+  if (input.modelPolicy !== undefined && !objectLike(input.modelPolicy)) throw new CoreRuleError('bad_input', 'Політика моделі — обʼєкт');
+}
+
+export function checkSimulation(input: SimulationInput): void {
+  humanOrSystem(input.createdBy, 'Прогін');
+  if (!(SIMULATION_KINDS as readonly string[]).includes(input.kind)) throw new CoreRuleError('bad_input', `Невідомий вид прогону «${input.kind}»`);
+  if (input.kind === 'interview' && !input.characterId) throw new CoreRuleError('bad_input', 'Допит — лише з героєм');
+  if (!Number.isInteger(input.baseBookRevision) || input.baseBookRevision < 0) throw new CoreRuleError('bad_input', 'Ревізія книги — ціле ≥ 0');
+  if (input.asOfChapter != null && (!Number.isInteger(input.asOfChapter) || input.asOfChapter < 1)) throw new CoreRuleError('bad_input', 'Межа знань — глава ≥ 1');
+  if (input.sceneId != null && (String(input.sceneId).length < 1 || String(input.sceneId).length > 200)) throw new CoreRuleError('bad_input', 'Сцена — до 200 символів');
+  if (input.title != null && String(input.title).length > 200) throw new CoreRuleError('bad_input', 'Назва прогону — до 200 символів');
+  if (input.config !== undefined && !objectLike(input.config)) throw new CoreRuleError('bad_input', 'Налаштування прогону — обʼєкт');
+}
+
+export function checkSimulationPatch(patch: SimulationPatch): void {
+  if (patch.status !== undefined && !(SIMULATION_STATUSES as readonly string[]).includes(patch.status)) throw new CoreRuleError('bad_input', `Невідомий статус прогону «${patch.status}»`);
+  if (patch.currentTurn !== undefined && (!Number.isInteger(patch.currentTurn) || patch.currentTurn < 0)) throw new CoreRuleError('bad_input', 'Номер ходу — ціле ≥ 0');
+  if (patch.config !== undefined && !objectLike(patch.config)) throw new CoreRuleError('bad_input', 'Налаштування прогону — обʼєкт');
+  if (patch.title !== undefined && String(patch.title).length > 200) throw new CoreRuleError('bad_input', 'Назва прогону — до 200 символів');
+}
+
+export function checkSimulationEvent(input: SimulationEventInput): void {
+  assertActor(input.createdBy);
+  if (!(SIMULATION_EVENT_TYPES as readonly string[]).includes(input.eventType)) throw new CoreRuleError('bad_input', `Невідомий вид ходу «${input.eventType}»`);
+  if (!(SIMULATION_ACTORS as readonly string[]).includes(input.actor)) throw new CoreRuleError('bad_input', `Невідомий учасник «${input.actor}»`);
+  if (!Number.isInteger(input.turnIndex) || input.turnIndex < 0) throw new CoreRuleError('bad_input', 'Номер ходу — ціле ≥ 0');
+  if (input.actor === 'character' && !input.actorCharacterId) throw new CoreRuleError('bad_input', 'Хід героя — з героєм');
+  if (input.eventType === 'question' && input.actor !== 'author') throw new CoreRuleError('bad_input', 'Питання ставить лише автор');
+  if (input.publicPayload !== undefined && !objectLike(input.publicPayload)) throw new CoreRuleError('bad_input', 'Зміст ходу — обʼєкт');
+}
+
+export function checkCanonProposal(input: CanonProposalInput): void {
+  assertActor(input.createdBy);
+  if (!(CANON_PROPOSAL_KINDS as readonly string[]).includes(input.kind)) throw new CoreRuleError('bad_input', `Невідомий вид пропозиції «${input.kind}»`);
+  if (!objectLike(input.proposedChange)) throw new CoreRuleError('bad_input', 'Пропозиція — обʼєкт');
+  if (input.kind === 'tag' && !input.parentId) throw new CoreRuleError('bad_input', 'Тег (П7) — лише до фрагмента');
+  if (input.sourceEventIds !== undefined && (!Array.isArray(input.sourceEventIds) || input.sourceEventIds.length > 50)) throw new CoreRuleError('bad_input', 'Джерела пропозиції — список до 50 ходів');
 }
 
 export function checkMention(m: MentionInput): void {

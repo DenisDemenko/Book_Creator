@@ -34,6 +34,11 @@ import {
   checkCharacterMemory,
   checkCharacterMemoryStatus,
   checkCharacterMemoryPatch,
+  checkCharacterAgent,
+  checkSimulation,
+  checkSimulationPatch,
+  checkSimulationEvent,
+  checkCanonProposal,
   assertActor,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isSearchableKind, isValidEmbedding, memoryTextScore } from './search/text';
@@ -95,6 +100,19 @@ import type {
   CharacterMemoryFilter,
   CharacterMemoryStatus,
   CharacterMemoryPatch,
+  CharacterAgentInput,
+  CharacterAgentRow,
+  SimulationInput,
+  SimulationRow,
+  SimulationPatch,
+  SimulationKind,
+  SimulationStatus,
+  SimulationEventInput,
+  SimulationEventRow,
+  CanonProposalInput,
+  CanonProposalRow,
+  CanonProposalKind,
+  CanonProposalStatus,
   CharacterStateInput,
   CharacterStateRow,
 } from './types';
@@ -137,6 +155,10 @@ export class MemoryCoreRepository implements CoreRepository {
   private decisions: CharacterDecisionRow[] = [];
   private memories: CharacterMemoryRow[] = [];
   private states: CharacterStateRow[] = [];
+  private agents: CharacterAgentRow[] = [];
+  private simulations: SimulationRow[] = [];
+  private simEvents: SimulationEventRow[] = [];
+  private proposals: CanonProposalRow[] = [];
 
   private requireProject(projectId: string): ProjectRow {
     const p = this.projects.get(projectId);
@@ -1302,6 +1324,179 @@ export class MemoryCoreRepository implements CoreRepository {
       if (s.projectId === projectId && s.characterId === k.characterId && s.sceneId === k.sceneId && s.simulationId === k.simulationId && s.canonRevision === k.canonRevision) return clone(s);
     }
     return null;
+  }
+
+  // ── Допит (Т2.7 В1) ──────────────────────────────────────────────────────
+
+  async getCharacterAgent(projectId: string, characterId: string) {
+    const a = this.agents.find((x) => x.projectId === projectId && x.characterId === characterId);
+    return a ? clone(a) : null;
+  }
+
+  async upsertCharacterAgent(input: CharacterAgentInput) {
+    this.requireProject(input.projectId);
+    checkCharacterAgent(input);
+    if (!this.entityIn(input.projectId, input.characterId)) throw notFound(`Сутність «${input.characterId}»`);
+    const t = now();
+    const prev = this.agents.find((x) => x.projectId === input.projectId && x.characterId === input.characterId);
+    if (prev) {
+      Object.assign(prev, {
+        autonomyLevel: input.autonomyLevel,
+        enabled: input.autonomyLevel !== 'off',
+        ...(input.agentConfig !== undefined ? { agentConfig: clone(input.agentConfig) } : {}),
+        ...(input.modelPolicy !== undefined ? { modelPolicy: clone(input.modelPolicy) } : {}),
+        updatedBy: input.actor,
+        updatedAt: t,
+      });
+      return clone(prev);
+    }
+    const row: CharacterAgentRow = {
+      id: randomUUID(),
+      projectId: input.projectId,
+      characterId: input.characterId,
+      enabled: input.autonomyLevel !== 'off',
+      autonomyLevel: input.autonomyLevel,
+      agentConfig: clone(input.agentConfig ?? {}),
+      modelPolicy: clone(input.modelPolicy ?? {}),
+      createdBy: input.actor,
+      createdAt: t,
+      updatedBy: input.actor,
+      updatedAt: t,
+    };
+    this.agents.push(row);
+    return clone(row);
+  }
+
+  async listCharacterAgents(projectId: string) {
+    return this.agents.filter((a) => a.projectId === projectId).map(clone);
+  }
+
+  async addSimulation(input: SimulationInput) {
+    this.requireProject(input.projectId);
+    checkSimulation(input);
+    if (input.characterId && !this.entityIn(input.projectId, input.characterId)) throw notFound(`Сутність «${input.characterId}»`);
+    const t = now();
+    const row: SimulationRow = {
+      id: randomUUID(),
+      projectId: input.projectId,
+      kind: input.kind,
+      characterId: input.characterId ?? null,
+      sceneId: input.sceneId ?? null,
+      asOfChapter: input.asOfChapter ?? null,
+      baseBookRevision: input.baseBookRevision,
+      title: input.title ?? '',
+      config: clone(input.config ?? {}),
+      status: 'active',
+      currentTurn: 0,
+      createdBy: input.createdBy,
+      createdAt: t,
+      updatedAt: t,
+    };
+    this.simulations.push(row);
+    return clone(row);
+  }
+
+  async getSimulation(projectId: string, id: string) {
+    const s = this.simulations.find((x) => x.projectId === projectId && x.id === id);
+    return s ? clone(s) : null;
+  }
+
+  async listSimulations(projectId: string, f: { characterId?: string; kind?: SimulationKind; status?: SimulationStatus; limit?: number } = {}) {
+    const limit = Math.max(1, Math.min(f.limit ?? 50, 500));
+    return this.simulations
+      .map((s, i) => ({ s, i }))
+      .filter(({ s }) => s.projectId === projectId && (!f.characterId || s.characterId === f.characterId) && (!f.kind || s.kind === f.kind) && (!f.status || s.status === f.status))
+      .sort((a, b) => b.s.createdAt.localeCompare(a.s.createdAt) || b.i - a.i)
+      .slice(0, limit)
+      .map(({ s }) => clone(s));
+  }
+
+  async updateSimulation(projectId: string, id: string, patch: SimulationPatch) {
+    const s = this.simulations.find((x) => x.projectId === projectId && x.id === id);
+    if (!s) throw notFound(`Прогін «${id}»`);
+    checkSimulationPatch(patch);
+    const next = clone(patch) as Record<string, unknown>;
+    for (const k of Object.keys(next)) if (next[k] === undefined) delete next[k];
+    Object.assign(s, next, { updatedAt: now() });
+    return clone(s);
+  }
+
+  async addSimulationEvent(input: SimulationEventInput) {
+    checkSimulationEvent(input);
+    if (!this.simulations.some((x) => x.projectId === input.projectId && x.id === input.simulationId)) throw notFound(`Прогін «${input.simulationId}»`);
+    if (input.sourceDecisionId && !this.decisions.some((d) => d.projectId === input.projectId && d.id === input.sourceDecisionId)) throw notFound(`Рішення «${input.sourceDecisionId}»`);
+    const row: SimulationEventRow = {
+      id: randomUUID(),
+      projectId: input.projectId,
+      simulationId: input.simulationId,
+      turnIndex: input.turnIndex,
+      actor: input.actor,
+      actorCharacterId: input.actorCharacterId ?? null,
+      eventType: input.eventType,
+      publicPayload: clone(input.publicPayload ?? {}),
+      privatePayloadRef: input.privatePayloadRef ?? null,
+      sourceDecisionId: input.sourceDecisionId ?? null,
+      createdBy: input.createdBy,
+      createdAt: now(),
+    };
+    this.simEvents.push(row);
+    return clone(row);
+  }
+
+  async listSimulationEvents(projectId: string, simulationId: string) {
+    return this.simEvents
+      .map((e, i) => ({ e, i }))
+      .filter(({ e }) => e.projectId === projectId && e.simulationId === simulationId)
+      .sort((a, b) => a.e.turnIndex - b.e.turnIndex || a.e.createdAt.localeCompare(b.e.createdAt) || a.i - b.i)
+      .map(({ e }) => clone(e));
+  }
+
+  async addCanonProposal(input: CanonProposalInput) {
+    checkCanonProposal(input);
+    if (!this.simulations.some((x) => x.projectId === input.projectId && x.id === input.simulationId)) throw notFound(`Прогін «${input.simulationId}»`);
+    if (!this.entityIn(input.projectId, input.characterId)) throw notFound(`Сутність «${input.characterId}»`);
+    if (input.parentId && !this.proposals.some((p) => p.projectId === input.projectId && p.id === input.parentId)) throw notFound(`Пропозиція «${input.parentId}»`);
+    const row: CanonProposalRow = {
+      id: randomUUID(),
+      projectId: input.projectId,
+      simulationId: input.simulationId,
+      characterId: input.characterId,
+      sourceEventIds: clone(input.sourceEventIds ?? []),
+      kind: input.kind,
+      proposedChange: clone(input.proposedChange),
+      parentId: input.parentId ?? null,
+      status: 'pending',
+      result: {},
+      createdBy: input.createdBy,
+      createdAt: now(),
+      reviewedBy: null,
+      reviewedAt: null,
+    };
+    this.proposals.push(row);
+    return clone(row);
+  }
+
+  async getCanonProposal(projectId: string, id: string) {
+    const p = this.proposals.find((x) => x.projectId === projectId && x.id === id);
+    return p ? clone(p) : null;
+  }
+
+  async listCanonProposals(projectId: string, f: { simulationId?: string; characterId?: string; status?: CanonProposalStatus; kind?: CanonProposalKind; limit?: number } = {}) {
+    const limit = Math.max(1, Math.min(f.limit ?? 200, 1000));
+    return this.proposals
+      .filter((p) => p.projectId === projectId && (!f.simulationId || p.simulationId === f.simulationId) && (!f.characterId || p.characterId === f.characterId) && (!f.status || p.status === f.status) && (!f.kind || p.kind === f.kind))
+      .slice(0, limit)
+      .map(clone);
+  }
+
+  async resolveCanonProposal(projectId: string, id: string, input: { status: 'accepted' | 'rejected'; actor: CoreActor; result?: Record<string, unknown> }) {
+    const p = this.proposals.find((x) => x.projectId === projectId && x.id === id);
+    if (!p) throw notFound(`Пропозиція «${id}»`);
+    if (!/^user:.+/.test(input.actor)) throw new CoreRuleError('confirmed_is_author_only', 'Приймає чи відхиляє пропозицію лише автор');
+    if (input.status !== 'accepted' && input.status !== 'rejected') throw new CoreRuleError('bad_input', 'Рішення — accepted або rejected');
+    if (p.status !== 'pending') throw new CoreRuleError('conflict', 'Пропозицію вже вирішено');
+    Object.assign(p, { status: input.status, result: clone(input.result ?? {}), reviewedBy: input.actor, reviewedAt: now() });
+    return clone(p);
   }
 
   // ── Збережені запити (Т1.3) ──────────────────────────────────────────────
