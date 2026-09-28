@@ -456,5 +456,53 @@ console.log('\nФото виробу: чистимо набір перед по�
   t('кількість прибраних фото прочитано', res.cleared === 3, String(res.cleared));
 }
 
+console.log('\nВиплати з маркетплейсу (читання, якого міст досі не мав):');
+{
+  const seen: { url: string; method?: string; key?: string }[] = [];
+  const mkJson = (status: number, body: unknown) => (async (url: string, init: any = {}) => {
+    seen.push({ url: String(url), method: init.method, key: init.headers?.['x-bridge-key'] });
+    return { status, ok: status >= 200 && status < 300, text: async () => JSON.stringify(body) };
+  }) as never;
+
+  const ledger = await bridge.listBridgePayouts({
+    fetch: mkJson(200, {
+      totalMinor: 12345,
+      count: 1,
+      payouts: [
+        {
+          id: 'p1', seller: 'Fusion Lab', sellerSlug: 'fusion-lab', amountMinor: 12345,
+          note: 'За період', periodStart: null, periodEnd: null,
+          recordedBy: 'Ганна Адмін', createdAt: '2026-09-28T10:00:00.000Z',
+        },
+      ],
+    }),
+    settings,
+  });
+
+  t('GET /bridge/payouts із ключем',
+    seen[0]?.url === 'https://api.fusionlab.in.ua/bridge/payouts' && seen[0]?.key === 'secret-key',
+    String(seen[0]?.url));
+  t('сума й кількість прочитані',
+    ledger.totalMinor === 12345 && ledger.count === 1, `${ledger.totalMinor}/${ledger.count}`);
+  t('рядок несе автора виплати',
+    ledger.payouts[0]?.recordedBy === 'Ганна Адмін', String(ledger.payouts[0]?.recordedBy));
+  t('у рядку немає жодного карткового поля',
+    !/card|iban/i.test(JSON.stringify(ledger.payouts[0])));
+
+  let unauthorized: any = null;
+  try { await bridge.listBridgePayouts({ fetch: mkJson(401, { message: 'Невірний ключ мосту' }), settings }); }
+  catch (e) { unauthorized = e; }
+  t('401 → помилка про ключ', unauthorized?.kind === 'unauthorized', String(unauthorized?.kind));
+
+  let rejected: any = null;
+  try { await bridge.listBridgePayouts({ fetch: mkJson(500, { message: 'boom' }), settings }); }
+  catch (e) { rejected = e; }
+  t('500 → помилка про відмову', rejected?.kind === 'rejected', String(rejected?.kind));
+
+  const empty = await bridge.listBridgePayouts({ fetch: mkJson(200, { unexpected: 1 }), settings });
+  t('несподіване тіло → порожній леджер, а не падіння',
+    empty.count === 0 && empty.payouts.length === 0);
+}
+
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);
 if (fail > 0) process.exit(1);

@@ -410,6 +410,84 @@ export interface BridgeBookRow {
  * іншої машини. Перелік — єдиний спосіб зняти правильний лістинг, а не той,
  * який ми памʼятаємо.
  */
+/** Один рядок леджеру виплат із маркетплейсу. */
+export interface BridgePayoutRow {
+  id: string;
+  seller: string;
+  sellerSlug: string;
+  amountMinor: number;
+  note: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  /** Хто записав виплату. `null` — рядок старший за саму колонку. */
+  recordedBy: string | null;
+  createdAt: string;
+}
+
+/** Леджер цілком — саме те, що віддає `GET /bridge/payouts`. */
+export interface BridgePayoutLedger {
+  totalMinor: number;
+  count: number;
+  payouts: BridgePayoutRow[];
+}
+
+/**
+ * Леджер виплат із маркетплейсу — для адмін-панелі.
+ *
+ * Єдиний виклик мосту, який читає гроші, а не вітрину. Повертає й авторів:
+ * «хто записав виплату» — саме те питання, на яке цей журнал відповідає.
+ * Призначення платежу тут немає й не буде: номер карти маркетплейс не зберігає
+ * (ADR 0011 і 0012 маркетплейсу), тож і передати його не може.
+ */
+export async function listBridgePayouts(
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<BridgePayoutLedger> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+
+  let response: Response;
+  try {
+    response = await doFetch(`${settings.url}/bridge/payouts`, {
+      headers: { 'x-bridge-key': settings.key },
+      signal: AbortSignal.timeout(20000),
+    });
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  }
+
+  const text = await response.text().catch(() => '');
+  if (response.status === 401 || response.status === 403) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401
+    );
+  }
+  if (!response.ok) {
+    throw new MarketplaceBridgeError(
+      `Маркетплейс не віддав виплати: ${describeRejection(response.status, text)}`,
+      'rejected',
+      502
+    );
+  }
+
+  try {
+    const body = JSON.parse(text) as Partial<BridgePayoutLedger>;
+    return {
+      totalMinor: Number(body?.totalMinor ?? 0),
+      count: Number(body?.count ?? 0),
+      payouts: Array.isArray(body?.payouts) ? body.payouts : [],
+    };
+  } catch {
+    return { totalMinor: 0, count: 0, payouts: [] };
+  }
+}
+
 export async function listBridgeBooks(
   deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
 ): Promise<BridgeBookRow[]> {

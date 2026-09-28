@@ -58,6 +58,7 @@ import {
   readBridgeSettings,
   testBridgeConnection,
   listBridgeBooks,
+  listBridgePayouts,
   unpublishByExternalId,
   bridgeTestBook,
   bridgeTestBookContent,
@@ -1020,6 +1021,21 @@ export function registerAdminRoutes(app: Express): void {
     } catch (err: any) {
       const status = err instanceof MarketplaceBridgeError ? err.status : 502;
       res.status(status).json({ error: err?.message || 'Не вдалося прочитати перелік.', kind: err?.kind });
+    }
+  });
+
+  /**
+   * Леджер виплат із маркетплейсу — читання в тому напрямі, якого міст досі
+   * не мав: Студія вміла лише відправляти (книги, курси, вироби). Показуємо
+   * суми, отримувачів і авторів; призначення платежу маркетплейс не зберігає,
+   * тож його тут немає й бути не може (ADR 0011/0012 маркетплейсу).
+   */
+  app.get('/api/admin/marketplace-bridge/payouts', requireAdmin, async (_req, res) => {
+    try {
+      res.json(await listBridgePayouts());
+    } catch (err: any) {
+      const status = err instanceof MarketplaceBridgeError ? err.status : 502;
+      res.status(status).json({ error: err?.message || 'Не вдалося прочитати виплати.', kind: err?.kind });
     }
   });
 

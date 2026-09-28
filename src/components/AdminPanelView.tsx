@@ -50,7 +50,7 @@ import type { AdminUserRow, UserRole } from '../types';
 import { getRoleInfo } from '../utils/rbac';
 import { renderPdfFirstPageToPng } from '../utils/pdfCover';
 
-export type AdminTab = 'users' | 'roles' | 'costs' | 'business' | 'ai' | 'expenses' | 'bridge' | 'crm' | 'git' | 'moderation';
+export type AdminTab = 'users' | 'roles' | 'costs' | 'business' | 'ai' | 'expenses' | 'bridge' | 'crm' | 'git' | 'payouts' | 'moderation';
 
 interface RoleRow {
   role: UserRole;
@@ -165,6 +165,139 @@ interface BridgeBookRow {
   hasFile: boolean;
   fileName: string | null;
 }
+
+/**
+ * Суми виплат приходять у копійках (мінорні одиниці), на відміну від `uah`
+ * вище, який приймає гривні й округлює до цілих: у виплаті копійки видимі,
+ * і ховати їх за округленням означало б показувати не ту суму, яку записали.
+ */
+const payoutUah = (minor: number) =>
+  `${(minor / 100).toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₴`;
+const shortDateTime = (iso: string) =>
+  new Date(iso).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' });
+
+interface PayoutRow {
+  id: string;
+  seller: string;
+  sellerSlug: string;
+  amountMinor: number;
+  note: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  recordedBy: string | null;
+  createdAt: string;
+}
+
+/**
+ * Виплати продавцям — окремий розділ, який читає леджер маркетплейсу через
+ * міст. Це єдиний напрям, у якому Студія не віддає, а приймає дані: доти
+ * виплата, записана в маркетплейсі, була тут невидима.
+ *
+ * Показуємо суми, отримувачів і ЗАВЖДИ автора виплати — «хто заплатив» і є
+ * питанням, на яке цей журнал відповідає. Призначення платежу тут немає й
+ * бути не може: маркетплейс його не зберігає (ADR 0011/0012 маркетплейсу),
+ * тож у рядку не буде ні номера карти, ні натяку на нього.
+ */
+const PayoutsPanel: React.FC = () => {
+  const [ledger, setLedger] = useState<{
+    totalMinor: number;
+    count: number;
+    payouts: PayoutRow[];
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const res = await fetch('/api/admin/marketplace-bridge/payouts', {
+        credentials: 'same-origin',
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(body?.error || 'Не вдалося прочитати виплати.');
+      }
+      setLedger(body);
+    } catch (err: any) {
+      setError(err?.message || 'Не вдалося прочитати виплати.');
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  if (error) {
+    return (
+      <div
+        className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/40 text-rose-200 text-sm flex items-start gap-2"
+        role="alert"
+      >
+        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+        <span className="flex-1">{error}</span>
+        <button onClick={() => void load()} className="px-2 rounded hover:bg-white/10">
+          Спробувати ще
+        </button>
+      </div>
+    );
+  }
+
+  if (!ledger) {
+    return <p className="text-sm text-slate-400">Читаю виплати з маркетплейсу…</p>;
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap gap-6">
+        <div>
+          <p className="text-xs text-slate-400">Виплачено всього</p>
+          <p className="text-xl font-bold text-slate-100">{payoutUah(ledger.totalMinor)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-slate-400">Виплат</p>
+          <p className="text-xl font-bold text-slate-100">{ledger.count}</p>
+        </div>
+      </div>
+
+      {ledger.payouts.length === 0 ? (
+        <p className="text-sm text-slate-400">Виплат ще не було.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="text-slate-400">
+              <tr>
+                <th className="text-left py-2 font-medium">Дата</th>
+                <th className="text-left py-2 font-medium">Отримувач</th>
+                <th className="text-right py-2 font-medium">Сума</th>
+                <th className="text-left py-2 font-medium">Примітка</th>
+                <th className="text-left py-2 font-medium">Записав</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ledger.payouts.map((row) => (
+                <tr key={row.id} className="border-t border-slate-700/40">
+                  <td className="py-2 text-slate-300 whitespace-nowrap">
+                    {shortDateTime(row.createdAt)}
+                  </td>
+                  <td className="py-2 text-slate-100">{row.seller}</td>
+                  <td className="py-2 text-right font-bold text-slate-100 whitespace-nowrap">
+                    {payoutUah(row.amountMinor)}
+                  </td>
+                  <td className="py-2 text-slate-400">{row.note || '—'}</td>
+                  <td className="py-2 text-slate-300">{row.recordedBy || 'невідомо'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <p className="text-[11px] text-slate-500">
+        Виплати записуються в маркетплейсі; тут — лише читання. Рядки без автора
+        — ті, що старші за появу самого поля.
+      </p>
+    </div>
+  );
+};
 
 const MarketplaceBridgePanel: React.FC = () => {
   const [url, setUrl] = useState('');
@@ -893,6 +1026,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ tab: controlledT
         <div data-tour="admin__1" className="relative flex gap-1 mt-6 p-1 rounded-xl bg-slate-950/60 border border-white/[0.06] w-full sm:w-auto sm:inline-flex">
           {([
             ['business', 'Бізнес-аналітика', BarChart3],
+            ['payouts', 'Виплати', Wallet],
             ['costs', 'Витрати на API', Calculator],
             ['ai', 'Тарифи та аналітика ШІ', Coins],
             ['expenses', 'Борд витрат', Wallet],
@@ -940,6 +1074,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ tab: controlledT
       {tab === 'expenses' && <AdminExpenseBoardView />}
 
       {tab === 'bridge' && <MarketplaceBridgePanel />}
+
+      {tab === 'payouts' && <PayoutsPanel />}
 
       {/* Модерація — окремий розділ (див. AdminModerationView): доти вона
           показувалась блоком під «Мостом до вітрини». */}
