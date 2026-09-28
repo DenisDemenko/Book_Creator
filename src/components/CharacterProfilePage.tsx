@@ -12,6 +12,10 @@
  *
  * Т2.6 В6: розділ «Пам'ять» (`CharacterMemoryPanel`) — світ, знання,
  * переконання, спогади й наслідки героя з джерелами й рішеннями автора.
+ *
+ * Т2.7 В5: розділ «Допит» (`CharacterInterviewPanel`) — «AI-персонаж»,
+ * розмова з героєм і пропозиції в канон; факт із допиту — з позначкою
+ * «гіпотеза з допиту», доки автор не підтвердить.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -22,6 +26,7 @@ import { countNameInBook, replaceNameInBook } from '../utils/heroRename';
 import { entityBySlug } from '../utils/coreEntities';
 import { AppearanceVersionsPanel } from './AppearanceVersionsPanel';
 import { CharacterMemoryPanel } from './CharacterMemoryPanel';
+import { CharacterInterviewPanel } from './CharacterInterviewPanel';
 
 interface Place {
   paragraphId: string;
@@ -43,6 +48,9 @@ interface Fact {
   needsReview: boolean;
   sources: Place[];
   chapterNumber: number | null;
+  /** Т2.7 В4: звідки факт і чи це ще гіпотеза з допиту. */
+  origin?: 'ai' | 'interview' | 'author';
+  hypothesis?: boolean;
 }
 interface Item {
   entityId: string;
@@ -98,6 +106,7 @@ export const CharacterProfilePage: React.FC<Props> = ({ book, entityId, onBack, 
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
+  const [memoryKey, setMemoryKey] = useState(0);
   const poll = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadSeq = useRef(0);
@@ -193,6 +202,8 @@ export const CharacterProfilePage: React.FC<Props> = ({ book, entityId, onBack, 
       <div className="flex items-start gap-2">
         <span className="shrink-0 rounded bg-slate-800 px-1.5 text-[10px] text-slate-300">{f.fieldLabel}</span>
         <p className="flex-1 text-[12px] text-slate-100">{f.statement}</p>
+        {f.hypothesis && <span className="shrink-0 rounded border border-violet-500/40 px-1 text-[10px] text-violet-200" data-profile-fact-hypothesis title="Факт вигадано чи уточнено на допиті героя — не канон, доки ви не підтвердите">гіпотеза з допиту</span>}
+        {!f.hypothesis && f.origin === 'interview' && <span className="shrink-0 rounded border border-slate-700 px-1 text-[10px] text-slate-400" data-profile-fact-origin="interview">з допиту</span>}
         {f.needsReview && <span className="shrink-0 rounded border border-amber-500/40 px-1 text-[10px] text-amber-300">на перегляд</span>}
       </div>
       {f.quote && <p className="mt-1 text-[11px] italic text-slate-400">«{f.quote}»</p>}
@@ -402,7 +413,21 @@ export const CharacterProfilePage: React.FC<Props> = ({ book, entityId, onBack, 
           </div>
 
           {/* Т2.6 В6: пам'ять героя — шари, джерела, рішення автора, AI-2. */}
-          <CharacterMemoryPanel book={book} entityId={entityId} heroName={profile.entity.name} upto={upto} onOpenParagraph={onOpenParagraph} />
+          <CharacterMemoryPanel key={memoryKey} book={book} entityId={entityId} heroName={profile.entity.name} upto={upto} onOpenParagraph={onOpenParagraph} />
+
+          {/* Т2.7 В5: допит героя — розмова, рішення Jev, пропозиції в канон і фрагмент у книгу. */}
+          {profile.entity.type === 'character' && (
+            <CharacterInterviewPanel
+              book={book}
+              entityId={entityId}
+              heroName={profile.entity.name}
+              onUpdateBook={onUpdateBook}
+              onCanonChanged={() => {
+                setMemoryKey((k) => k + 1);
+                void load();
+              }}
+            />
+          )}
 
           <Section title={`Появи в тексті (${profile.appearances.total})`} attr="appearances">
             {profile.appearances.items.length ? (

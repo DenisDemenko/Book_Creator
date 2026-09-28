@@ -48,14 +48,20 @@ export const AI_DRAFT_CLOSE = '[/AI-DRAFT]';
 
 // ── Межа допиту і «застарів» ────────────────────────────────────────────────
 
-/** Абзаци межі допиту: сцени (розділу), а без сцени — глави межі знань; без обох — null (не застаріває). */
+/**
+ * Абзаци межі допиту: сцени (розділу), а без сцени — глави межі знань; без
+ * обох — null (не застаріває). Лише затверджений текст: AI-чернетки не
+ * рахуються — фрагмент, вставлений із допиту, допит не старить, а коли автор
+ * прийме чернетку (сцена стала іншою) — старить.
+ */
 export function interviewBoundaryParagraphs(scan: SceneScan, sim: Pick<SimulationRow, 'sceneId' | 'asOfChapter'>): string[] | null {
   let sections: Set<string>;
   if (sim.sceneId) sections = new Set([sim.sceneId]);
   else if (sim.asOfChapter != null) sections = new Set(scan.scenes.filter((s) => s.chapterNumber === sim.asOfChapter).map((s) => s.sectionId));
   else return null;
   return [...scan.ix.paragraphs.values()]
-    .filter((p) => !p.deletedAt && sections.has(p.documentId))
+    // AI-чернетка (`draft`) — ще не затверджений текст: ні межа допиту, ні доказ (вставлений фрагмент допиту свого допиту не старить).
+    .filter((p) => !p.deletedAt && p.kind !== 'draft' && sections.has(p.documentId))
     .sort((a, b) => a.documentId.localeCompare(b.documentId) || a.order - b.order || a.id.localeCompare(b.id))
     .map((p) => p.id);
 }
@@ -73,24 +79,42 @@ const boundaryOf = (sim: SimulationRow): string | null => {
   return typeof h === 'string' && h ? h : null;
 };
 
-/** Чи змінилась межа допиту; змінилась — позначити «застарів». Повертає актуальний прогін. */
-export async function refreshSimulationFreshness(repo: CoreRepository, sim: SimulationRow, scan?: SceneScan): Promise<SimulationRow> {
+export const STALE_ACTOR = 'system:core_sync';
+
+/**
+ * Чи змінилась межа допиту; змінилась — позначити «застарів», а спогади,
+ * уже прийняті з цього допиту, — «перевірити» (вони спирались на стару
+ * сцену; доданий абзац відбиток доказу спогаду не змінює, тож позначаємо
+ * тут). Повертає актуальний прогін і скільки спогадів позначено.
+ */
+export async function refreshSimulationFreshness(repo: CoreRepository, sim: SimulationRow, scan?: SceneScan): Promise<SimulationRow & { flaggedMemories?: number }> {
   if (sim.kind !== 'interview' || (sim.status !== 'active' && sim.status !== 'paused')) return sim;
   const saved = boundaryOf(sim);
   if (!saved) return sim;
   const s = scan ?? (await scanScenes(repo, sim.projectId, await repo.listTimePoints(sim.projectId)));
   if (interviewBoundaryHash(s, sim) === saved) return sim;
-  return repo.updateSimulation(sim.projectId, sim.id, { status: 'stale' });
+  const next = await repo.updateSimulation(sim.projectId, sim.id, { status: 'stale' });
+  let flaggedMemories = 0;
+  for (const p of await repo.listCanonProposals(sim.projectId, { simulationId: sim.id, kind: 'memory', status: 'accepted', limit: 1000 })) {
+    const id = String((p.result as { memoryId?: unknown }).memoryId ?? '');
+    const m = id ? await repo.getCharacterMemory(sim.projectId, id) : null;
+    if (!m || m.status !== 'confirmed') continue;
+    await repo.setCharacterMemoryStatus(sim.projectId, m.id, 'needs_review', STALE_ACTOR, 'сцену допиту, з якого спогад, змінено');
+    flaggedMemories++;
+  }
+  return { ...next, flaggedMemories };
 }
 
 export interface StalenessResult {
   stale: number;
+  /** Спогадів, прийнятих із застарілих допитів, — «перевірити». */
+  memories: number;
   notifications: number;
 }
 
 /** Після синхронізації (core_sync): допити, чию сцену змінено, — «застарів», по сповіщенню на героя. */
 export async function refreshInterviewStaleness(repo: CoreRepository, projectId: string, opts: { revision?: number } = {}): Promise<StalenessResult> {
-  const out: StalenessResult = { stale: 0, notifications: 0 };
+  const out: StalenessResult = { stale: 0, memories: 0, notifications: 0 };
   const live = [
     ...(await repo.listSimulations(projectId, { kind: 'interview', status: 'active', limit: 500 })),
     ...(await repo.listSimulations(projectId, { kind: 'interview', status: 'paused', limit: 500 })),
@@ -102,6 +126,7 @@ export async function refreshInterviewStaleness(repo: CoreRepository, projectId:
     const next = await refreshSimulationFreshness(repo, sim, scan);
     if (next.status !== 'stale') continue;
     out.stale++;
+    out.memories += next.flaggedMemories ?? 0;
     byHero.set(sim.characterId!, [...(byHero.get(sim.characterId!) ?? []), sim]);
   }
   for (const [heroId, list] of byHero) {

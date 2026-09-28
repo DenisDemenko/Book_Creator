@@ -34,7 +34,7 @@ import type { AutonomyLevel, CanonProposalRow, CharacterAgentRow, CoreActor, Cor
 import { AUTONOMY_LEVELS } from './types';
 import { CoreRuleError } from './rules';
 import { scanScenes } from './timeline';
-import { JevDecisionAdapter } from './jevLevels';
+import { DEFAULT_LEVEL_CONFIG, JevDecisionAdapter } from './jevLevels';
 import { buildCharacterSnapshot } from './characterSnapshot';
 import { parseModelJson, validateAgainstSchema } from './ai/schema';
 import { jevState, type JevAdapter } from '../ai/adapters/jev';
@@ -158,6 +158,17 @@ export const INTERVIEW_ACTIONS = ['answer', 'deflect', 'lie', 'silence', 'ask', 
 /** Скільки попередніх ходів іде в запит голосу (контекст допиту). */
 export const INTERVIEW_HISTORY_TURNS = 12;
 export const INTERVIEW_ACTOR = 'ai:character-voice';
+
+/** Підписи дій рівнів Jev і джерел рішення — для розділу «Допит» (В5). */
+export const INTERVIEW_LABELS = {
+  actions: {
+    ...DEFAULT_LEVEL_CONFIG.strategic.primary.options,
+    ...DEFAULT_LEVEL_CONFIG.scene.primary.options,
+    ...DEFAULT_LEVEL_CONFIG.tactical.describe,
+  } as Record<string, string>,
+  levels: { strategic: 'стратегічний', scene: 'сценічний', tactical: 'тактичний' } as Record<string, string>,
+  sources: { jev: 'Jev', llm_fallback: 'запасний LLM', author: 'рішення автора', mock: 'тестовий Jev', cache: 'з кешу' } as Record<string, string>,
+};
 
 export type VoiceGenerate = (system: string, user: string) => Promise<{ text: string; modelId: string; inputTokens: number; outputTokens: number }>;
 

@@ -200,6 +200,7 @@ export const CharacterMemoryPanel: React.FC<Props> = ({ book, entityId, heroName
       <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px]">
         <span className={`rounded border px-1.5 py-px ${STATUS_TONE[m.status]}`} data-memory-status-label>{STATUS[m.status]}</span>
         <span className="rounded border border-slate-700 px-1.5 py-px text-slate-400">{ORIGIN[m.origin]}</span>
+        {m.source.kind === 'simulation_event' && <span className="rounded border border-violet-500/40 px-1.5 py-px text-violet-200" data-memory-from-interview>з допиту</span>}
         {m.visibility === 'hidden' && <span className="rounded border border-slate-600 px-1.5 py-px text-slate-300" data-memory-private>приватне</span>}
         {m.layer === 'reader_knowledge' && <span className="rounded border border-sky-600/50 px-1.5 py-px text-sky-300">знає читач, не герой</span>}
         {m.memoryType === 'belief' && m.truth === 'false' && <span className="rounded border border-rose-500/40 px-1.5 py-px text-rose-300" data-memory-false>хибне</span>}

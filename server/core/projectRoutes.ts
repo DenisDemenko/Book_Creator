@@ -53,7 +53,7 @@ import { decisionView, decisionsSummary } from './jevDecisions';
 import { buildCharacterSnapshot } from './characterSnapshot';
 import { addAuthorMemory, collectTagMemories, memoryViews, reviewMemory } from './characterMemory';
 import { AI_MEMORY_JOB_KIND } from './memoryAi';
-import { AUTONOMY_LABELS, agentView, askQuestion, getAgent, retryTurn, setAgent, startInterview, type VoiceGenerate } from './interview';
+import { AUTONOMY_LABELS, INTERVIEW_LABELS, agentView, askQuestion, getAgent, retryTurn, setAgent, startInterview, type VoiceGenerate } from './interview';
 import { acceptProposal, proposalViews, refreshSimulationFreshness, rejectProposal } from './interviewProposals';
 import { scanScenes } from './timeline';
 import { CHARACTER_MEMORY_STATUSES, CHARACTER_MEMORY_TYPES, type CharacterMemoryStatus, type CharacterMemoryType } from './types';
@@ -2278,7 +2278,12 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
   /** Допити героя (новіші першими). */
   app.get('/api/projects/:id/characters/:entityId/interviews', withRepo(async (repo, req, res) => {
     if (!requireInterviewRole(req, res)) return;
-    res.json({ simulations: await repo.listSimulations(req.params.id, { characterId: req.params.entityId, kind: 'interview', limit: 50 }) });
+    const sims = await repo.listSimulations(req.params.id, { characterId: req.params.entityId, kind: 'interview', limit: 50 });
+    const pending = new Map<string, number>();
+    for (const p of await repo.listCanonProposals(req.params.id, { characterId: req.params.entityId, status: 'pending', limit: 1000 })) {
+      if (p.kind !== 'tag') pending.set(p.simulationId, (pending.get(p.simulationId) ?? 0) + 1);
+    }
+    res.json({ simulations: sims.map((sim) => ({ ...sim, pending: pending.get(sim.id) ?? 0 })) });
   }));
 
   /** Допит і його ходи. */
@@ -2291,6 +2296,7 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       simulation: fresh,
       events: await repo.listSimulationEvents(req.params.id, sim.id),
       proposals: proposalViews(await repo.listCanonProposals(req.params.id, { simulationId: sim.id, limit: 1000 })),
+      labels: INTERVIEW_LABELS,
     });
   }));
 

@@ -23,6 +23,11 @@
  * прийняття й відхилення; (5) правка сцени — прийнятий спогад «перевірити»,
  * факт «на перегляд», допит «застарів» (нових ходів немає, пропозиції —
  * лише явним рішенням). Маршрути `…/proposals`, `/accept`, `/reject`.
+ *
+ * В5: вставка результату допиту в книгу (`src/utils/interviewInsert.ts`);
+ * AI-чернетка в сцені допиту допит не старить; доданий абзац — старить, і
+ * прийняті з допиту спогади — «перевірити». Розділ «Допит» наживо —
+ * `npm run live:interview`.
  * PostgreSQL — з CORE_TEST_DATABASE_URL (схема `fusion_core` видаляється —
  * лише тестова база!).
  *
@@ -40,6 +45,7 @@ import { askQuestion, getAgent, INTERVIEW_ACTIONS, normalizeAgentConfig, require
 import { addAuthorMemory, collectTagMemories, heroMemories } from '../server/core/characterMemory.ts';
 import { acceptProposal, cleanFragmentText, interviewBoundaryHash, proposalViews, rejectProposal, validProposalTag } from '../server/core/interviewProposals.ts';
 import { buildCharacterProfile } from '../server/core/characterProfile.ts';
+import { applyInterviewInsert, fragmentEnd } from '../src/utils/interviewInsert.ts';
 import { scanScenes } from '../server/core/timeline.ts';
 import { resolveDecisionByAuthor } from '../server/core/jevLevels.ts';
 import { HttpJevAdapter, LlmFallbackJevAdapter, MockJevAdapter } from '../server/ai/adapters/jev/index.ts';
@@ -88,6 +94,19 @@ console.log('\nПравила — дзеркало CHECK міграції 0017:'
     (await code(() => checkCanonProposal({ projectId: 'p', simulationId: 's', characterId: 'c', kind: 'tag', proposedChange: {}, createdBy: 'ai:x' }))) === 'bad_input' &&
     (await code(() => checkCanonProposal({ projectId: 'p', simulationId: 's', characterId: 'c', kind: 'poem' as any, proposedChange: {}, createdBy: 'ai:x' }))) === 'bad_input' &&
     (await code(() => checkCanonProposal({ projectId: 'p', simulationId: 's', characterId: 'c', kind: 'fragment', proposedChange: { text: 'x' }, createdBy: 'ai:x' }))) === 'ok');
+}
+
+console.log('\nВставка результату допиту в книгу (В5, utils/interviewInsert):');
+{
+  const bk: any = { id: 'b', chapters: [{ id: 'c1', sections: [{ id: 's1', order: 0, content: 'Початок.' }, { id: 's2', order: 1, content: '' }] }] };
+  const r1 = applyInterviewInsert(bk, { sectionId: 's1', mode: 'ai_draft', snippet: '[AI-DRAFT]\n\nЦіна $& мовчання. [/emotion:страх @Олена]\n\n[/AI-DRAFT]' })!;
+  t('фрагмент — AI-чернеткою в кінець вибраного розділу (не останнього в главі); інші розділи без змін',
+    r1.sectionId === 's1' && r1.book.chapters[0].sections[0].content === 'Початок.\n\n[AI-DRAFT]\n\nЦіна $& мовчання. [/emotion:страх @Олена]\n\n[/AI-DRAFT]' && r1.book.chapters[0].sections[1].content === '' && bk.chapters[0].sections[0].content === 'Початок.');
+  const r2 = applyInterviewInsert(r1.book, { sectionId: 's1', mode: 'append_tag', snippet: '[/emotion:втома @Олена]' }, 'Ціна $& мовчання.')!;
+  t('тег окремо — одразу за фрагментом і його тегами, усередині чернетки («$» у тексті не ламає)', /мовчання\. \[\/emotion:страх @Олена\] \[\/emotion:втома @Олена\]\n\n\[\/AI-DRAFT\]$/.test(r2.book.chapters[0].sections[0].content));
+  const accepted: any = { ...bk, chapters: [{ ...bk.chapters[0], sections: [{ id: 's1', order: 0, content: 'Ціна $& мовчання. Далі текст.' }] }] };
+  t('чернетку вже прийнято (маркерів немає) — тег однаково за фрагментом', applyInterviewInsert(accepted, { sectionId: 's1', mode: 'append_tag', snippet: '[/e:x]' }, 'Ціна $& мовчання.')!.book.chapters[0].sections[0].content === 'Ціна $& мовчання. [/e:x] Далі текст.');
+  t('фрагмента вже немає чи розділу немає — null (нічого навмання)', applyInterviewInsert(r1.book, { sectionId: 's1', mode: 'append_tag', snippet: '[/e:x]' }, 'інший текст') === null && applyInterviewInsert(bk, { sectionId: 'zz', mode: 'ai_draft', snippet: 'x' }) === null && fragmentEnd('abc', '') === -1);
 }
 
 async function repoSuite(label: string, repo: CoreRepository, P: string) {
@@ -528,6 +547,12 @@ async function proposalSuite(label: string, repo: CoreRepository, P: string) {
   const rj = await rejectProposal(repo, { projectId: P, proposalId: frag2.id, actor });
   t('відхилений фрагмент відхиляє свої неприйняті теги', rj.tags.length === 2 && rj.tags.every((x) => x.status === 'rejected'));
 
+  // Вставлена AI-чернетка (ще не затверджений текст) допит не старить.
+  const draftSync = await syncBookToCore(repo, book(`[/character:Олена] Олена сиділа сама в кабінеті.\n\nЗа вікном ішов дощ.\n\n${accFr.insert!.snippet}`));
+  t('AI-чернетка з фрагментом у сцені допиту — допит не застарів, спогад не «перевірити» (незатверджений текст)',
+    (await repo.getSimulation(P, sim.id))!.status === 'active' && (draftSync as any).interviewsStale === 0 && (await repo.getCharacterMemory(P, mem.id))!.status === 'confirmed' &&
+    (await repo.listAllParagraphs(P)).some((p) => p.kind === 'draft' && /тихо|кабінеті, — сказала|хід 1/.test(p.text)));
+
   // КРИТЕРІЙ 5 — правка сцени.
   const pendingMem = r2.proposals.find((p) => p.kind === 'memory')!;
   const syncRes = await syncBookToCore(repo, book('[/character:Олена] Олена сиділа в кабінеті з Марком.\n\nЗа вікном ішов дощ.'));
@@ -549,6 +574,17 @@ async function proposalSuite(label: string, repo: CoreRepository, P: string) {
   const simLazy = await startInterview(repo, { projectId: P, characterId: olena, sceneId: 's1', actor });
   await repo.updateSimulation(P, simLazy.id, { config: { ...simLazy.config, boundaryHash: 'f'.repeat(32) } });
   t('межа змінилась поза синхронізацією — допит сам стає «застарів» при ході', (await code(() => askQuestion(deps(), { projectId: P, simulationId: simLazy.id, question: 'x', actor }))) === 'conflict' && (await repo.getSimulation(P, simLazy.id))!.status === 'stale');
+
+  // Доданий у сцену абзац не змінює доказ спогаду — але спогад із допиту цієї сцени однаково «перевірити».
+  const simS3 = await startInterview(repo, { projectId: P, characterId: olena, sceneId: 's3', actor });
+  const r4 = await askQuestion(deps(), { projectId: P, simulationId: simS3.id, question: 'Куди ти їдеш?', actor });
+  const acc4 = await acceptProposal(repo, { projectId: P, proposalId: r4.proposals.find((p) => p.kind === 'memory')!.id, actor });
+  const b4 = book('[/character:Олена] Олена сиділа в кабінеті з Марком.\n\nЗа вікном ішов дощ.');
+  b4.book.chapters[1].sections = [sec('s3', 0, '[/character:Олена] Олена поїхала до столиці.\n\nПотяг запізнився.')];
+  const s4 = await syncBookToCore(repo, b4);
+  const m4 = (await repo.getCharacterMemory(P, acc4.memory!.id))!;
+  t('КРИТЕРІЙ (5): новий абзац у сцені допиту — допит «застарів», прийнятий із нього спогад «перевірити» з приміткою',
+    (await repo.getSimulation(P, simS3.id))!.status === 'stale' && m4.status === 'needs_review' && /сцену допиту/.test(m4.reviewNote ?? '') && (s4 as any).interviewsStale === 1, `${m4.status} ${m4.reviewNote}`);
 
   // Маршрути.
   const r3 = await askQuestion(deps(), { projectId: P, simulationId: simS1.id, question: 'Хто винен?', actor });
