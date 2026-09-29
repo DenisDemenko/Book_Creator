@@ -129,6 +129,18 @@ const synced = await waitFor(
   (rows) => rows.length >= 4,
 );
 t('абзаци розділу — у ядрі', synced.length >= 4, `${synced.length}`);
+/*
+  Чекаємо, поки фонові задачі ядра ВІДПРАЦЮЮТЬ до кінця: пояснення релевантності
+  в картці, фільтр емоцій і збережений пошук спираються на те, що ядро ще
+  дописує (вбудовування й згадки). 29.09.2026 саме ці три перевірки впали в
+  батчі й пройшли поодинці.
+*/
+const pendingJobs = await waitFor(
+  () => q(`SELECT count(*)::int AS n FROM fusion_core.core_jobs WHERE project_id = $1 AND status IN ('queued', 'running')`, [BOOK]),
+  (r) => Number(r[0]?.n) === 0,
+  90000,
+);
+t('фонові задачі ядра відпрацювали до кінця', Number(pendingJobs[0]?.n) === 0, `у черзі ${pendingJobs[0]?.n}`);
 const byId = new Map(synced.map((r: any) => [r.id, r]));
 // Розмічена сцена: страх героїні книги в абзаці pFear; героїня без страху — pOlena.
 const [pFear, pOlena] = [pids[2], pids[3]];

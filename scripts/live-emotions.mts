@@ -126,6 +126,24 @@ const sections = await waitFor(
   (rows) => rows.length >= 3,
 );
 t('сцени книги — у ядрі', sections.length >= 3, `${sections.length}`);
+/*
+  Чекаємо АБЗАЦИ, а не лише сцени, і доки фонові задачі ядра відпрацюють.
+  29.09.2026 у батчі прогін падав на «висновок — confirmed» і проходив
+  поодинці: задачі ШІ ще дописували емоції та елементи аналізу, доки тест
+  уже їх звіряв. Той самий прийом, що в `live:core-sync` і `live:timeline`.
+*/
+const paragraphs = await waitFor(
+  () => q(`SELECT document_id, count(*)::int AS n FROM fusion_core.paragraphs WHERE project_id = $1 AND deleted_at IS NULL GROUP BY document_id`, [BOOK]),
+  (rows) => rows.filter((r: any) => Number(r.n) >= 2).length >= 3,
+  90000,
+);
+t('абзаци сцен — у ядрі', paragraphs.filter((r: any) => Number(r.n) >= 2).length >= 3, paragraphs.map((r: any) => `${r.document_id}:${r.n}`).join(' '));
+const pendingJobs = await waitFor(
+  () => q(`SELECT count(*)::int AS n FROM fusion_core.core_jobs WHERE project_id = $1 AND status IN ('queued', 'running')`, [BOOK]),
+  (r) => Number(r[0]?.n) === 0,
+  90000,
+);
+t('фонові задачі ядра відпрацювали до кінця', Number(pendingJobs[0]?.n) === 0, `у черзі ${pendingJobs[0]?.n}`);
 const para = async (sec: string) => (await q(`SELECT id FROM fusion_core.paragraphs WHERE project_id = $1 AND document_id = $2 AND deleted_at IS NULL ORDER BY ord LIMIT 1 OFFSET 1`, [BOOK, sec]))[0].id as string;
 const pA = await para('sec-1-1');
 const pB = await para('sec-1-2');
@@ -256,7 +274,8 @@ for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
 await page.click(`[data-emotions-confirm="${sug.id}"]`);
 const confirmed = await waitFor(() => q(`SELECT intensity, craft, layer, source, finding_id FROM fusion_core.emotion_points WHERE project_id = $1`, [BOOK]), (r) => r.length === 1, 10000);
 t('ГОТОВО: підтверджено з уточненою силою 4 → 7 (шар і майстерність — від AI)', confirmed[0]?.intensity === 7 && confirmed[0]?.craft === 6 && confirmed[0]?.layer === 'secondary' && confirmed[0]?.source === 'ai' && confirmed[0]?.finding_id === sug.id, JSON.stringify(confirmed));
-t('висновок — confirmed', (await q(`SELECT status FROM fusion_core.analysis_findings WHERE id = $1`, [sug.id]))[0]?.status === 'confirmed');
+t('висновок — confirmed', (await waitFor(() => q(`SELECT status FROM fusion_core.analysis_findings WHERE id = $1`, [sug.id]), (r) => r[0]?.status === 'confirmed', 30000))[0]?.status === 'confirmed',
+  `статус «${(await q(`SELECT status FROM fusion_core.analysis_findings WHERE id = $1`, [sug.id]))[0]?.status ?? '—'}»`);
 await page.waitForSelector('[data-emotions-series="Олена Ковальчук:hope"]', { timeout: 10000 }).catch(() => null);
 t('з\'явилась крива «надія»', await page.evaluate(() => !!document.querySelector('[data-emotions-series="Олена Ковальчук:hope"]')));
 await page.click(`[data-emotions-reject="${ins.id}"]`);

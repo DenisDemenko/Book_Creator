@@ -128,6 +128,19 @@ const synced = await waitFor(
   (rows) => rows.length >= 4,
 );
 t('абзаци розділу — у ядрі', synced.length >= 4, `${synced.length}`);
+/*
+  Чекаємо, поки фонові задачі ядра ВІДПРАЦЮЮТЬ до кінця, а не лише доки в ядрі
+  з'явились абзаци. 29.09.2026 прогін падав у батчі на трьох перевірках графа
+  (підписи ребер, зв'язки в картці героїні, фільтр емоцій) і проходив
+  поодинці: задачі ШІ дописували зв'язки й емоції тієї ж миті, коли граф уже
+  читався. Той самий прийом, що в `live:core-sync`.
+*/
+const pendingJobs = await waitFor(
+  () => q(`SELECT count(*)::int AS n FROM fusion_core.core_jobs WHERE project_id = $1 AND status IN ('queued', 'running')`, [BOOK]),
+  (r) => Number(r[0]?.n) === 0,
+  90000,
+);
+t('фонові задачі ядра відпрацювали до кінця', Number(pendingJobs[0]?.n) === 0, `у черзі ${pendingJobs[0]?.n}`);
 const ent = async (name: string) => (await q(`SELECT id FROM fusion_core.entities WHERE project_id = $1 AND name = $2`, [BOOK, name]))[0]?.id as string;
 const olena = await ent('Олена Ковальчук');
 const svarog = await ent('Сварог-9');

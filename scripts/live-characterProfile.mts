@@ -128,6 +128,18 @@ const synced = await waitFor(
   (rows) => rows.length >= 4,
 );
 t('абзаци розділу — у ядрі', synced.length >= 4, `${synced.length}`);
+/*
+  Чекаємо, поки фонові задачі ядра ВІДПРАЦЮЮТЬ до кінця: дуга героя й факти
+  профілю добираються задачами ШІ після синхронізації. 29.09.2026 у батчі
+  перевірка «арка: початковий стан — „тривога“ з тега» прочитала ще неповний
+  стан і впала, поодинці проходячи.
+*/
+const pendingJobs = await waitFor(
+  () => q(`SELECT count(*)::int AS n FROM fusion_core.core_jobs WHERE project_id = $1 AND status IN ('queued', 'running')`, [BOOK]),
+  (r) => Number(r[0]?.n) === 0,
+  90000,
+);
+t('фонові задачі ядра відпрацювали до кінця', Number(pendingJobs[0]?.n) === 0, `у черзі ${pendingJobs[0]?.n}`);
 const [olenaRow] = await q(`SELECT id, external_ref FROM fusion_core.entities WHERE project_id = $1 AND name = 'Олена Ковальчук'`, [BOOK]);
 const olena = olenaRow.id as string;
 t('героїня книги — сутність ядра, зв\'язана з карткою', /^studio:character:/.test(olenaRow.external_ref ?? ''));

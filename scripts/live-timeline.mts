@@ -124,6 +124,24 @@ const sections = await waitFor(
   (rows) => rows.length >= 3,
 );
 t('сцени книги — у ядрі', sections.length >= 3, `${sections.length}`);
+/*
+  Чекаємо АБЗАЦИ, а не лише сцени, і доки фонові задачі ядра відпрацюють.
+  29.09.2026 у батчі прогін упав із `TypeError: Cannot read properties of
+  undefined (reading 'id')` на `para(...)`: сцени в ядрі вже були, а абзаци ще
+  дописувались. Поодинці те саме проходило — різниця лише в навантаженні.
+*/
+const paragraphs = await waitFor(
+  () => q(`SELECT document_id, count(*)::int AS n FROM fusion_core.paragraphs WHERE project_id = $1 AND deleted_at IS NULL GROUP BY document_id`, [BOOK]),
+  (rows) => rows.filter((r: any) => Number(r.n) >= 2).length >= 3,
+  90000,
+);
+t('абзаци сцен — у ядрі', paragraphs.filter((r: any) => Number(r.n) >= 2).length >= 3, paragraphs.map((r: any) => `${r.document_id}:${r.n}`).join(' '));
+const pendingJobs = await waitFor(
+  () => q(`SELECT count(*)::int AS n FROM fusion_core.core_jobs WHERE project_id = $1 AND status IN ('queued', 'running')`, [BOOK]),
+  (r) => Number(r[0]?.n) === 0,
+  90000,
+);
+t('фонові задачі ядра відпрацювали до кінця', Number(pendingJobs[0]?.n) === 0, `у черзі ${pendingJobs[0]?.n}`);
 const para = async (sec: string) => (await q(`SELECT id FROM fusion_core.paragraphs WHERE project_id = $1 AND document_id = $2 AND deleted_at IS NULL ORDER BY ord LIMIT 1 OFFSET 1`, [BOOK, sec]))[0].id as string;
 const pA = await para('sec-1-1');
 const pB = await para('sec-1-2');
