@@ -341,7 +341,10 @@ console.log('\nДоступність Chromium');
   t('відсутній бінарник → недоступний', missing.ok === false);
   t('причина названа конкретно', String(missing.reasonUk).includes('/no/such/chromium'), String(missing.reasonUk));
   t('сказано, що робити', !!missing.fixUk);
-  t('наявний файл → доступний', chromiumAvailableAt('/bin/sh').ok === true);
+  // `/bin/sh` існує лише на Linux і в Docker — на Windows перевірка падала
+  // не через продукт, а через те, що самого файлу немає на машині.
+  // `process.execPath` — файл, який точно існує там, де запущено тест.
+  t('наявний файл → доступний', chromiumAvailableAt(process.execPath).ok === true);
 }
 
 // ---------------------------------------------------------------------------

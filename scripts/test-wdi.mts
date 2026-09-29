@@ -281,6 +281,19 @@ console.log('\n── Сховище: ідемпотентність трима�
   }
 }
 
-fs.rmSync(tmp, { recursive: true, force: true });
+// Базу треба закрити ДО видалення теки. SQLite у режимі WAL тримає файл
+// відкритим, і на Windows `rmSync` на зачиненому файлі відповідає EPERM —
+// через це тест падав у самому кінці, коли всі перевірки вже пройшли, і
+// виглядав як зламаний продукт, хоч ламалося лише прибирання.
+const { closeDb } = await import('../server/db.ts');
+closeDb();
+try {
+  fs.rmSync(tmp, { recursive: true, force: true });
+} catch (error) {
+  // Недоприбрана тека в %TEMP% не має фарбувати зелений набір у червоне:
+  // сенс цього скрипта — перевірки вище, а систему прибере сама ОС.
+  console.warn(`  ! тимчасову теку не прибрано (${(error as Error).message})`);
+}
+
 console.log(`\nПідсумок: ${pass} пройшло, ${fail} впало`);
 process.exit(fail ? 1 : 0);
