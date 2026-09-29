@@ -372,7 +372,15 @@ Object.assign(s2, { content: edited, paragraphIds: r2.ids, paragraphHashes: r2.h
 const put2 = await api('PUT', `/api/books/${BOOK}`, { book: b2, expectedRevision: got.body.revision });
 t('автор змінив сцену (збережено)', put2.status === 200, put2.text.slice(0, 160));
 const stale = await waitFor(() => q(`SELECT status FROM fusion_core.scene_simulations WHERE id = $1`, [sim.id]), (r) => r[0]?.status === 'stale', 40000);
-t('КРИТЕРІЙ (5): допит — «застарів» (синхронізація), сповіщення', stale[0]?.status === 'stale' && (await q(`SELECT 1 FROM fusion_core.core_notifications WHERE project_id = $1 AND kind = 'interviews_stale'`, [BOOK])).length === 1);
+// Сповіщення з'являється тим самим викликом синхронізації, але читати його
+// одразу після зміни статусу не можна: у батчі з 19 прогонів запис ще не
+// долетів до бази й перевірка падала (29.09.2026). Чекаємо самий рядок.
+const staleNote = await waitFor(
+  () => q(`SELECT 1 FROM fusion_core.core_notifications WHERE project_id = $1 AND kind = 'interviews_stale'`, [BOOK]),
+  (r) => r.length === 1,
+);
+t('КРИТЕРІЙ (5): допит — «застарів» (синхронізація), сповіщення', stale[0]?.status === 'stale' && staleNote.length === 1,
+  `статус «${stale[0]?.status ?? '—'}», сповіщень ${staleNote.length}`);
 const memAfter = await waitFor(() => q(`SELECT status FROM fusion_core.character_memories WHERE id = $1`, [m1[0]?.result?.memoryId]), (r) => r[0]?.status === 'needs_review', 20000);
 t('…прийнятий спогад із допиту — «перевірити»', memAfter[0]?.status === 'needs_review');
 await openProfile();

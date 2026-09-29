@@ -179,6 +179,24 @@ t('книгу збережено', saved.status === 200, saved.text.slice(0, 200
 const [olena] = await waitFor(() => q(`SELECT id FROM fusion_core.entities WHERE project_id = $1 AND name = 'Олена Ковальчук' AND type = 'character'`, [BOOK]), (r) => r.length === 1, 60000);
 t('героїня є в ядрі (синхронізація)', !!olena);
 if (!olena) { console.error(log.join('').slice(-3000)); process.exit(1); }
+
+/*
+  Чекаємо, поки фонова синхронізація ВІДПРАЦЮЄ ЦІЛКОМ, а не лише доки в ядрі
+  з'явиться героїня. Заради цього очікування й додано: рішення героя
+  кешується за відбитком входу (траєкторії, мотиви, емоції), а синхронізація
+  ці входи ще дописує — тобто запит «повторно те саме рішення» міг піти ДО
+  того, як входи усталились, і чесно не влучити в кеш. Саме так прогін і
+  падав 29.09.2026: у різних прогонах — на різному рядку («повторно» в
+  одному, «після перезапуску» в іншому), а в базі все було гаразд. Другий
+  бік цієї ж гонки описано в `live:core-sync` — там так само чекають на
+  `core_jobs`.
+*/
+const settled = await waitFor(
+  () => q(`SELECT count(*)::int AS n FROM fusion_core.core_jobs WHERE project_id = $1 AND status IN ('queued', 'running')`, [BOOK]),
+  (r) => Number(r[0]?.n) === 0,
+  90000,
+);
+t('фонова синхронізація відпрацювала до кінця', Number(settled[0]?.n) === 0, `у черзі ${settled[0]?.n}`);
 const H = `${P}/characters/${olena.id}`;
 
 console.log('\nТри рівні через справжній HttpJevAdapter (TypeSafe підставний перехоплювачем):');
@@ -197,7 +215,15 @@ console.log('\nКеш у таблиці переживає перезапуск 
 await stop();
 await start();
 const again = await api('POST', `${H}/decide`, { level: 'scene', sceneId: 'live-s1', situation: '' });
-t('після перезапуску: стратегічне з таблиці, TypeSafe не кличеться', (await api('POST', `${H}/decide`, { level: 'strategic' })).body.reused === true && jevRequests().length === 3 + (again.body.reused ? 0 : 1));
+// Кількості й позначки «reused» виводимо в підказку перевірки: без них
+// невдача цього рядка не каже, ЩО саме не зійшлося — кеш не пережив
+// перезапуск чи сценічне рішення додало зайвий виклик. 29.09.2026 саме
+// на цьому рядку прогін падав, і за логом це неможливо було розрізнити.
+const stratAfter = await api('POST', `${H}/decide`, { level: 'strategic' });
+const callsAfterRestart = jevRequests().length;
+const expectedCalls = 3 + (again.body.reused ? 0 : 1);
+t('після перезапуску: стратегічне з таблиці, TypeSafe не кличеться', stratAfter.body.reused === true && callsAfterRestart === expectedCalls,
+  `стратегічне reused=${stratAfter.body.reused}, сценічне reused=${again.body.reused}, викликів ${callsAfterRestart} проти очікуваних ${expectedCalls}`);
 
 console.log('\nНизька впевненість → «чекає автора» → вибір автора:');
 setMode('low');

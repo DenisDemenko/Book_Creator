@@ -166,7 +166,14 @@ const flagged = await waitFor(
   (r) => r.length === 2,
 );
 t('КРИТЕРІЙ: після синхронізації — обидва зображення Олени «перевірити»', flagged.length === 2, JSON.stringify(flagged));
-const notes = await q(`SELECT message, payload FROM fusion_core.core_notifications WHERE project_id = $1 AND kind = 'visual_needs_review'`, [BOOK]);
+// Сповіщення пише той самий виклик, який щойно позначив зображення, але
+// рядок з'являється в базі на запит пізніше — тому чекаємо його, а не
+// читаємо одразу: 29.09.2026 у батчі з 19 прогонів ця перевірка прочитала
+// порожньо й упала, хоч на спокійній машині минає з першого разу.
+const notes = await waitFor(
+  () => q(`SELECT message, payload FROM fusion_core.core_notifications WHERE project_id = $1 AND kind = 'visual_needs_review'`, [BOOK]),
+  (r) => r.length === 1,
+);
 t('сповіщення ядра: «Опис зовнішності «Олена Ковальчук» змінився — перевірте зображення: 2»', notes.length === 1 && /Олена Ковальчук/.test(notes[0].message) && /: 2$/.test(notes[0].message), notes[0]?.message);
 
 await page.reload({ waitUntil: 'domcontentloaded' });

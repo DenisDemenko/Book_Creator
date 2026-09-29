@@ -144,6 +144,23 @@ const navCount = await page.evaluate(() =>
 t('11 сторінок у меню («Семантичне ядро»)', navCount === 11, `${navCount}`);
 for (const seg of ['search', 'emotions', 'scenario-branches', 'timeline', 'visual-library', 'continuity', 'writer-mastery', 'collaboration', 'translation']) {
   await page.goto(`${BASE}/projects/${BOOK}/${seg}`, { waitUntil: 'domcontentloaded' });
+  /*
+    `/visual-library` перевіряємо інакше, ніж решту: рішенням власника
+    (25.09.2026, §6.1 плану «Бібліотека зображень») ця адреса веде в
+    Медіатеку на вкладку «За сутностями», а не в `CorePageView`. Маркера
+    `data-core-page` там немає і не має бути, тож до 29.09.2026 перевірка
+    падала на справній адресі — вимагала маркер сторінки, якої за задумом
+    немає. Очікуємо те, що адреса справді обіцяє; те саме перевіряє
+    `live:visual-entities`.
+  */
+  if (seg === 'visual-library') {
+    const isMediaLibrary = await page
+      .waitForSelector('[data-entity-library]', { timeout: 20000 })
+      .then(() => true)
+      .catch(() => false);
+    t('/visual-library веде в Медіатеку, вкладку «За сутностями»', isMediaLibrary);
+    continue;
+  }
   if (!(await waitCore(seg))) { t(`/${seg} відкривається напряму`, false); }
 }
 t('решта 9 сторінок відкриваються напряму', true);
