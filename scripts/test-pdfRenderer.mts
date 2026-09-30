@@ -445,5 +445,150 @@ console.log('\nМаркери зображень: картинка стає на
   t('решта тексту на місці', lostText.includes('Ще текст'), lostText.slice(0, 120));
 }
 
+console.log('\nПередмова книги: копірайт, присвята, епіграф і зміст зі справжніми номерами');
+{
+  /*
+    ЧОМУ ЦЕ ТУТ. Автор бачив у «Верстка PDF» чотири перемикачі
+    (`layoutConfig.frontMatter`) і вмикав їх, а серверна верстка Nova малювала
+    з них лише титул: у `PdfLayoutSpec` для решти полів не було місця. Знахідка
+    запису #119–199, закрита в #302.
+
+    Перевіряється не «текст десь є», а три речі:
+      1) блоки стоять на СВОЇХ сторінках перед тілом, а не в тілі;
+      2) зміст показує номер тієї сторінки, де глава СПРАВДІ починається —
+         і той самий номер надруковано внизу тієї сторінки;
+      3) книга без налаштувань передмови виглядає як раніше (титул і тіло).
+  */
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const path = await import('node:path');
+  const { pathToFileURL } = await import('node:url');
+  const src = await import('../server/pdf/pdfFromBook');
+  pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
+    path.resolve('node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs')
+  ).href;
+
+  /** Текст кожної сторінки окремо (1-based індекс = позиція в масиві). */
+  const pageTexts = async (bytes: Uint8Array): Promise<string[]> => {
+    const task = pdfjs.getDocument({
+      data: bytes.slice(),
+      useWorkerFetch: false,
+      standardFontDataUrl: `${pathToFileURL(path.resolve('node_modules/pdfjs-dist/standard_fonts')).href}/`,
+    } as never);
+    const doc = (await task.promise) as { numPages: number; getPage(n: number): Promise<any> };
+    const out: string[] = [];
+    for (let p = 1; p <= doc.numPages; p += 1) {
+      const content = await (await doc.getPage(p)).getTextContent();
+      out.push(content.items.map((i: { str: string }) => i.str).join(' '));
+    }
+    return out;
+  };
+
+  const body = 'Текст розділу. '.repeat(60);
+  const frontBook = {
+    id: 'bk-fm',
+    title: 'Книга з передмовою',
+    author: 'Денис Деменко',
+    genre: 'кіберпанк',
+    chapters: [
+      { id: 'c1', title: 'Глава 1', order: 1, sections: [{ id: 's1', order: 1, title: 'Початок', content: body }] },
+      { id: 'c2', title: 'Глава 2', order: 2, sections: [{ id: 's2', order: 2, title: '', content: body }] },
+    ],
+    layoutConfig: {
+      frontMatter: {
+        showTitlePage: true,
+        showCopyright: true,
+        showDedication: true,
+        showEpigraph: true,
+        showTableOfContents: true,
+        copyrightText: '© 2026 Денис Деменко. Усі права застережено.',
+        dedicationText: 'Присвячується всім мрійникам, які не здались.',
+        epigraphText: 'І кожен з нас те сонце носить в серці.',
+        epigraphAuthor: 'Ліна Костенко',
+      },
+      typography: { fontSizePt: 11, showPageNumbers: true, pageNumberStart: { mode: 'after-toc', startNumber: 1 } },
+      tocConfig: { title: 'ЗМІСТ' },
+    },
+    characters: [],
+  };
+
+  // Специфікацію беремо З КНИГИ (`specFromBook`) — саме цим шляхом іде
+  // експорт для вітрини: тільки так перевіряється, що авторські налаштування
+  // (назва змісту, режим нумерації) справді доїжджають до файлу.
+  const fmOut = await renderer.renderBookPdf(
+    src.bookToPdfInput(frontBook as never),
+    src.specFromBook(frontBook as never)
+  );
+  const pages = await pageTexts(fmOut.bytes);
+  const allText = pages.join(' \n ');
+  const findPage = (needle: string) => pages.findIndex((p) => p.includes(needle));
+
+  t('сторінка копірайту є і стоїть перед тілом',
+    findPage('Усі права застережено') > -1 && findPage('Усі права застережено') < findPage('Глава 1'),
+    `копірайт: стор. ${findPage('Усі права застережено') + 1}, тіло: ${findPage('Глава 1') + 1}`);
+  t('присвята надрукована', allText.includes('Присвячується всім мрійникам'), String(findPage('Присвячується') + 1));
+  t('епіграф надрукований разом з автором',
+    allText.includes('сонце носить в серці') && allText.includes('Ліна Костенко'));
+  t('заголовок змісту — авторський', allText.includes('ЗМІСТ'));
+
+  /*
+    Найважливіше: номер у змісті мусить збігатися з надрукованим номером
+    тієї сторінки, де глава справді починається. Перевірка взята не з
+    внутрішніх змінних рендерера, а з САМОГО PDF: рядок змісту з одного
+    боку, нижній колонцифр сторінки — з другого.
+  */
+  const tocPage = pages.find((p) => p.includes('ЗМІСТ') && p.includes('Глава 1')) ?? '';
+  // Сторінка ТІЛА, а не рядок змісту: у змісті теж стоїть «Глава 1», тому
+  // шукаємо сторінку, де разом із назвою є текст глави.
+  const chapterPage = pages.findIndex((p) => p.includes('Глава 1') && p.includes('Текст розділу'));
+  const printedNumberOnChapterPage = (
+    [...(pages[chapterPage]?.matchAll(/\b(\d{1,3})\b/g) ?? [])].pop()?.[1] ?? ''
+  ).trim();
+  const numberInToc = (tocPage.match(/Глава 1[\s.·]*(\d{1,3})/)?.[1] ?? '').trim();
+  t('номер глави в змісті — той самий, що надруковано на її сторінці',
+    !!numberInToc && numberInToc === printedNumberOnChapterPage,
+    `зміст каже «${numberInToc}», на сторінці «${printedNumberOnChapterPage}» (стор. ${chapterPage + 1})`);
+  t('підрозділи в змісті теж є (як їх просив автор)',
+    tocPage.includes('Початок'), tocPage.slice(0, 160));
+  t('сторінки передмови не нумеруються (режим «після змісту»)',
+    !/^\s*\d+\s*$/.test(pages[0]) && !pages[0].includes('ЗМІСТ'),
+    pages[0].slice(0, 80));
+  t('тіло залишилось у книзі', allText.includes('Текст розділу.'));
+
+  /*
+    Книга без налаштувань передмови (старі книги) мусить виглядати як раніше:
+    ані зайвих сторінок, ані змісту. Це захист від «полагодили — і змінили
+    вигляд усім, хто нічого не просив».
+  */
+  const plainBook = { ...frontBook, layoutConfig: undefined };
+  const plainOut = await renderer.renderBookPdf(src.bookToPdfInput(plainBook as never));
+  const plainPages = await pageTexts(plainOut.bytes);
+  const plainText = plainPages.join(' \n ');
+  t('без передмови змісту немає', !plainText.includes('ЗМІСТ'), plainText.slice(0, 80));
+  t('без передмови книга коротша', plainPages.length < pages.length, `${plainPages.length} проти ${pages.length}`);
+  t('без передмови тіло починається з першої сторінки тіла',
+    plainPages[1].includes('Глава 1'), plainPages[1].slice(0, 80));
+
+  /* Зміст на багато розділів мусить продовжуватись на другій сторінці, а не обрізатись. */
+  const manyBook = {
+    ...frontBook,
+    chapters: Array.from({ length: 90 }, (_, i) => ({
+      id: `c${i}`,
+      title: `Глава ${i + 1}`,
+      order: i + 1,
+      sections: [{ id: `s${i}`, order: 1, title: '', content: 'Короткий текст.' }],
+    })),
+  };
+  const manyOut = await renderer.renderBookPdf(
+    src.bookToPdfInput(manyBook as never),
+    src.specFromBook(manyBook as never)
+  );
+  const manyPages = await pageTexts(manyOut.bytes);
+  const tocPagesCount = manyPages.filter((p) => /ЗМІСТ/.test(p)).length;
+  const listedChapters = manyPages.filter((p) => /ЗМІСТ/.test(p)).reduce((n, p) => n + (p.match(/Глава \d+/g)?.length ?? 0), 0);
+  t('зміст на 90 глав не обрізається — продовжується на наступних сторінках',
+    tocPagesCount >= 2 && listedChapters >= 90,
+    `${tocPagesCount} стор. змісту, ${listedChapters} глав у ньому`);
+}
+
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);
 if (fail > 0) process.exit(1);

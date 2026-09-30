@@ -84,6 +84,27 @@ export function bookToPdfInput(book: Book): PdfBookInput {
     // (`utils/imageMarkers.ts`). Рендерер отримує карту «id → картинка», бо
     // сам він бачить лише плоский зріз книги, без героїв і обкладинки.
     markerImages: buildMarkerImageMap(book),
+    /*
+      Передмова їде в зріз РАЗОМ із перемикачами автора: до #302 рендерер про
+      неї не знав взагалі, і книга, де автор увімкнув присвяту, епіграф,
+      копірайт і зміст, їхала у вітрину з самим титулом. Книга без
+      `layoutConfig.frontMatter` (старі книги) віддає `undefined` — і тоді
+      вигляд не змінюється.
+    */
+    frontMatter: book.layoutConfig?.frontMatter
+      ? {
+          copyrightText: book.layoutConfig.frontMatter.copyrightText,
+          dedicationText: book.layoutConfig.frontMatter.dedicationText,
+          epigraphText: book.layoutConfig.frontMatter.epigraphText,
+          epigraphAuthor: book.layoutConfig.frontMatter.epigraphAuthor,
+          show: {
+            copyright: book.layoutConfig.frontMatter.showCopyright,
+            dedication: book.layoutConfig.frontMatter.showDedication,
+            epigraph: book.layoutConfig.frontMatter.showEpigraph,
+            contents: book.layoutConfig.frontMatter.showTableOfContents,
+          },
+        }
+      : undefined,
   };
 }
 
@@ -167,6 +188,18 @@ export function specFromBook(book: Book): PdfLayoutSpec {
       ...DEFAULT_LAYOUT_SPEC.runningHead,
       show: Boolean(typography.showHeaders),
       fontSize: Math.max(6, Math.round(baseFontSize * 0.72)),
+    },
+    /*
+      Передмова: розміри й назва змісту — з налаштувань книги, а не з
+      заводських значень. Назва змісту авторська (`tocConfig.title`), бо він
+      її бачить і править; заводська — «Зміст».
+    */
+    frontMatter: {
+      fontSize: Math.max(8, Math.round(baseFontSize * 0.9)),
+      contentsTitle: (layout.tocConfig?.title || DEFAULT_LAYOUT_SPEC.frontMatter.contentsTitle).trim(),
+      contentsSections: layout.tocConfig?.showSectionSubitems !== false,
+      contentsLeader: layout.tocConfig?.leaderStyle !== 'none',
+      upperShare: DEFAULT_LAYOUT_SPEC.frontMatter.upperShare,
     },
     designerNoteUk: notes.join(' '),
   };

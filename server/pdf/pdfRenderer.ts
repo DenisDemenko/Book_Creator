@@ -253,6 +253,19 @@ export async function renderBookPdf(
    */
   let bodyStartPage = spec.titlePage.show ? 1 : 0;
 
+  /**
+   * Де починається кожна глава (і, за потреби, її розділи) — у ФАЙЛІ, за
+   * індексом сторінки. Потрібно змісту: рядок змісту — це назва плюс номер
+   * сторінки, а номер відомий лише коли тіло вже зверстано. Тому зміст
+   * малюється ПІСЛЯ тіла, а його сторінки вставляються на початок тіла
+   * (`doc.insertPage`).
+   */
+  const chapterStarts: Array<{
+    title: string;
+    pageIndex: number;
+    sections: Array<{ title: string; pageIndex: number }>;
+  }> = [];
+
   const newPage = () => {
     page = doc.addPage([size.width, size.height]);
     pageIndex += 1;
@@ -511,6 +524,80 @@ export async function renderBookPdf(
     newPage();
   }
 
+  /*
+    --- передмова: копірайт, присвята, епіграф -----------------------------
+
+    Склад і порядок — ті самі, що автор бачить у «Верстка PDF» і що вже
+    малює HTML-шлях (`src/utils/helpers.ts`): правова сторінка, присвята,
+    епіграф, а зміст — четвертим і не тут: номери сторінок глав відомі лише
+    після тіла.
+
+    КОЖЕН БЛОК — на своїй сторінці, і кожен наступний зсуває тіло ще на
+    одну: саме тому `bodyStartPage` рахується як «сторінка в момент початку
+    першої глави», а не числом. Це вже було правильно (див. коментар вище),
+    а тепер це ще й важливо — передмова зробила кількість сторінок до тіла
+    змінною.
+  */
+  const frontMatter = book.frontMatter;
+  const showFront = frontMatter?.show ?? {};
+
+  const drawFrontBlock = (
+    lines: string[],
+    align: 'left' | 'center',
+    startY: number,
+    /** Ширина набору: присвята й епіграф стоять у вужчій колонці, ніж текст. */
+    width = contentWidth
+  ) => {
+    y = startY;
+    const x0 = curLeft + (contentWidth - width) / 2;
+    for (const line of lines) {
+      ensure(spec.frontMatter.fontSize * 1.6);
+      drawLine(line, serif, spec.frontMatter.fontSize, align, black, undefined, x0, width);
+      y -= spec.frontMatter.fontSize * 1.6;
+    }
+  };
+
+  if (showFront.copyright && frontMatter?.copyrightText?.trim()) {
+    // Правова сторінка стоїть УНИЗУ сторінки — так її шукає око й так її
+    // очікує видавництво.
+    drawFrontBlock(
+      wrapText(frontMatter.copyrightText.trim(), serif, spec.frontMatter.fontSize, contentWidth),
+      'left',
+      spec.margins.bottom + contentHeight * 0.18
+    );
+    newPage();
+  }
+  if (showFront.dedication && frontMatter?.dedicationText?.trim()) {
+    drawFrontBlock(
+      wrapText(
+        frontMatter.dedicationText.trim(),
+        serif,
+        spec.frontMatter.fontSize,
+        contentWidth * 0.72
+      ),
+      'center',
+      size.height - spec.margins.top - contentHeight * spec.frontMatter.upperShare,
+      contentWidth * 0.72
+    );
+    newPage();
+  }
+  if (showFront.epigraph && frontMatter?.epigraphText?.trim()) {
+    const epigraphLines = wrapText(
+      `«${frontMatter.epigraphText.trim()}»`,
+      serif,
+      spec.frontMatter.fontSize,
+      contentWidth * 0.68
+    );
+    if (frontMatter.epigraphAuthor) epigraphLines.push(`— ${frontMatter.epigraphAuthor}`);
+    drawFrontBlock(
+      epigraphLines,
+      'left',
+      size.height - spec.margins.top - contentHeight * spec.frontMatter.upperShare,
+      contentWidth * 0.68
+    );
+    newPage();
+  }
+
   // --- тіло --------------------------------------------------------------
   /*
     Картинки, на які в тексті книги Є маркер. Вони вже стоять на своєму
@@ -528,15 +615,22 @@ export async function renderBookPdf(
     if (spec.chapterStartsNewPage && (bodyStarted || !spec.titlePage.show)) {
       if (bodyStarted) newPage();
     }
-    if (!bodyStarted) {
-      bodyStartPage = doc.getPageCount() - 1;
-    }
+    const firstChapter = !bodyStarted;
     bodyStarted = true;
     currentChapter = chapter.title;
     drawHeading(chapter.title, spec.chapterTitle);
+    // Межі тіла ставимо ПІСЛЯ заголовка, а не до: заголовок глави може
+    // перейти на нову сторінку (довга назва + захисна вимога не лишати
+    // «сирітських» рядків), і тоді тіло починається саме з тієї сторінки.
+    // Від цього числа залежать і нумерація, і номери в змісті.
+    if (firstChapter) bodyStartPage = pageIndex;
+    chapterStarts.push({ title: chapter.title, pageIndex, sections: [] });
 
     for (const section of chapter.sections) {
-      if (section.title) drawHeading(section.title, spec.sectionTitle);
+      if (section.title) {
+        drawHeading(section.title, spec.sectionTitle);
+        chapterStarts[chapterStarts.length - 1].sections.push({ title: section.title, pageIndex });
+      }
       const paragraphs = toParagraphs(section.content);
       for (let index = 0; index < paragraphs.length; index += 1) {
         await drawParagraphWithImages(paragraphs[index], spec.paragraphIndent > 0 && index > 0);
@@ -552,6 +646,131 @@ export async function renderBookPdf(
       if (ill.id && markerIds.has(ill.id)) continue;
       await drawIllustration(ill);
     }
+  }
+
+  // --- зміст --------------------------------------------------------------
+  /*
+    Зміст стоїть у книзі ПЕРЕД тілом, а малюється ПІСЛЯ нього: рядок змісту —
+    це назва плюс НОМЕР СТОРІНКИ, а номер стає відомий лише коли тіло вже
+    зверстано. Тому сторінки змісту вставляються на місце початку тіла
+    (`doc.insertPage`), і після цього всі сторінки тіла зсуваються на їхню
+    кількість — про це треба пам'ятати в нумерації нижче.
+
+    Номери для змісту рахуються ДО вставки й тією самою формулою, що й
+    друковані номери: інакше зміст обіцяв би не ті сторінки, які читач
+    знайде. `first` — перша сторінка тіла (передмова не нумерується, якщо
+    автор обрав режим «після змісту»).
+  */
+  if (showFront.contents && chapterStarts.length) {
+    const labelOf = (index: number) => {
+      if (!spec.pageNumber.show) return '';
+      const first = spec.pageNumber.skipFrontMatter ? bodyStartPage : 0;
+      return String(spec.pageNumber.startAt + (index - first));
+    };
+
+    const rowStep = spec.frontMatter.fontSize * 1.7;
+    const tocTitleBlock = spec.sectionTitle.fontSize * 2.4;
+    const capacity = Math.max(1, Math.floor((contentHeight - tocTitleBlock) / rowStep));
+
+    type TocLine = { text: string; number: string; indent: number; bold: boolean; leader: boolean };
+    const tocLines: TocLine[] = [];
+    const pushRow = (title: string, pageIndexOf: number, indent: number, bold: boolean) => {
+      const font = bold ? pick(spec.chapterTitle.font, true) : serif;
+      const number = labelOf(pageIndexOf);
+      const numberWidth = number ? serif.widthOfTextAtSize(number, spec.frontMatter.fontSize) + 14 : 0;
+      const wrapped = wrapText(
+        title,
+        font,
+        spec.frontMatter.fontSize,
+        Math.max(60, contentWidth - indent - numberWidth)
+      );
+      wrapped.forEach((text, i) =>
+        tocLines.push({
+          text,
+          // Номер — на останньому рядку назви: багаторядкова назва без нього
+          // читалася б як обірвана.
+          number: i === wrapped.length - 1 ? number : '',
+          indent,
+          bold,
+          // Провідник малюємо лише там, де між назвою й номером справді є
+          // проміжок: у перенесеній назві його немає.
+          leader: wrapped.length === 1,
+        })
+      );
+    };
+    for (const chapter of chapterStarts) {
+      pushRow(chapter.title, chapter.pageIndex, 0, true);
+      if (spec.frontMatter.contentsSections) {
+        for (const section of chapter.sections) pushRow(section.title, section.pageIndex, 18, false);
+      }
+    }
+
+    const tocPageCount = Math.max(1, Math.ceil(tocLines.length / capacity));
+    const tocPages = [];
+    for (let i = 0; i < tocPageCount; i += 1) {
+      tocPages.push(doc.insertPage(bodyStartPage, [size.width, size.height]));
+    }
+
+    tocPages.forEach((tocPage, pageNo) => {
+      // Індекси вставлених сторінок — від bodyStartPage: тіло зсунеться, а
+      // самі сторінки змісту вже стоять на своїх місцях.
+      const left = leftOfPage(bodyStartPage + pageNo);
+      let ty = size.height - spec.margins.top;
+      const headingFont = pick(spec.sectionTitle.font, true);
+      const heading =
+        pageNo === 0
+          ? spec.frontMatter.contentsTitle
+          : `${spec.frontMatter.contentsTitle} ${pageNo + 1}`;
+      tocPage.drawText(spec.sectionTitle.uppercase ? heading.toUpperCase() : heading, {
+        x: left,
+        y: ty,
+        size: spec.sectionTitle.fontSize,
+        font: headingFont,
+        color: black,
+      });
+      ty -= tocTitleBlock;
+
+      for (const line of tocLines.slice(pageNo * capacity, (pageNo + 1) * capacity)) {
+        const font = line.bold ? pick(spec.chapterTitle.font, true) : serif;
+        const x = left + line.indent;
+        tocPage.drawText(line.text, {
+          x,
+          y: ty,
+          size: spec.frontMatter.fontSize,
+          font,
+          color: black,
+        });
+        if (line.number) {
+          const numberWidth = serif.widthOfTextAtSize(line.number, spec.frontMatter.fontSize);
+          tocPage.drawText(line.number, {
+            x: left + contentWidth - numberWidth,
+            y: ty,
+            size: spec.frontMatter.fontSize,
+            font: serif,
+            color: black,
+          });
+          if (spec.frontMatter.contentsLeader && line.leader) {
+            const used = font.widthOfTextAtSize(line.text, spec.frontMatter.fontSize);
+            const dotWidth = serif.widthOfTextAtSize('.', spec.frontMatter.fontSize);
+            const dots = Math.floor((contentWidth - line.indent - used - numberWidth - 8) / dotWidth);
+            if (dots > 2) {
+              tocPage.drawText('.'.repeat(dots), {
+                x: x + used + 4,
+                y: ty,
+                size: spec.frontMatter.fontSize,
+                font: serif,
+                color: grey,
+              });
+            }
+          }
+        }
+        ty -= rowStep;
+      }
+    });
+
+    // Тіло зсунулося на кількість сторінок змісту: нумерація нижче мусить
+    // знати нові межі, інакше номери «поїдуть» рівно на цю кількість.
+    bodyStartPage += tocPageCount;
   }
 
   // --- колонтитули й нумерація -------------------------------------------

@@ -90,6 +90,40 @@ export interface PdfLayoutSpec {
     authorSize: number;
   };
 
+  /**
+   * Передмова: правова сторінка, присвята, епіграф і зміст — те, що стоїть ДО
+   * першої глави.
+   *
+   * ЧОМУ ЦЕ З'ЯВИЛОСЯ. Автор бачив у «Верстка PDF» чотири перемикачі
+   * (`layoutConfig.frontMatter`) і вмикав їх, а серверна верстка Nova малювала
+   * з них лише титул: у специфікації для решти полів не було місця. Ані
+   * збій, ані помилка — просто нічого не робилось, і книга їхала у вітрину
+   * без присвяти й епіграфа, які автор бачив увімкненими (знахідка запису
+   * #119–199 і закрита в #301–#302).
+   *
+   * Розміри — тут, а ТЕКСТИ — у книзі (`PdfBookInput.frontMatter`):
+   * специфікація описує, ЯК верстати, а не ЩО саме надрукувати.
+   */
+  frontMatter: {
+    fontSize: number;
+    /** Назва сторінки змісту — те, що автор задав у налаштуваннях змісту. */
+    contentsTitle: string;
+    /** Показувати в змісті й підрозділи, а не лише глави. */
+    contentsSections: boolean;
+    /**
+     * Точка дотику змісту: лінія від назви до номера сторінки. Порожня
+     * крапка «...» — звична книжкова конвенція, але в деяких макетах її
+     * свідомо прибирають.
+     */
+    contentsLeader: boolean;
+    /**
+     * Де починати присвяту й епіграф — частка висоти сторінки від верху.
+     * У книжках вони стоять не вгорі: порожній верх — це те, що робить
+     * присвяту помітною.
+     */
+    upperShare: number;
+  };
+
   pageNumber: {
     show: boolean;
     position: PageNumberPosition;
@@ -143,6 +177,15 @@ export const DEFAULT_LAYOUT_SPEC: PdfLayoutSpec = {
     uppercase: false,
   },
   titlePage: { show: true, titleSize: 28, subtitleSize: 14, authorSize: 12 },
+  frontMatter: {
+    fontSize: 10,
+    contentsTitle: 'Зміст',
+    contentsSections: true,
+    contentsLeader: true,
+    // 28% висоти: присвята — трохи вище середини, епіграф — на тій самій лінії,
+    // щоб дві сусідні сторінки передмови не стрибали одна до одної.
+    upperShare: 0.28,
+  },
   pageNumber: {
     show: true,
     position: 'bottom-center',
@@ -193,4 +236,31 @@ export interface PdfBookInput {
    * бо отримує вже плоский зріз книги.
    */
   markerImages?: Record<string, { url: string; caption?: string }>;
+
+  /**
+   * Передмова книги: тексти й перемикачі автора. Не задано — друкується
+   * лише титул, як було до #302: книги без налаштувань верстки не мають
+   * раптом отримати нові сторінки.
+   */
+  frontMatter?: PdfFrontMatter;
+}
+
+/**
+ * Тексти передмови й те, які з них автор увімкнув.
+ *
+ * Один об'єкт, а не чотири поля в `PdfBookInput`, бо саме в такому вигляді
+ * він лежить у книзі (`layoutConfig.frontMatter`) — і мапиться один-в-один,
+ * без місця для розбіжності.
+ */
+export interface PdfFrontMatter {
+  copyrightText?: string;
+  dedicationText?: string;
+  epigraphText?: string;
+  epigraphAuthor?: string;
+  show?: {
+    copyright?: boolean;
+    dedication?: boolean;
+    epigraph?: boolean;
+    contents?: boolean;
+  };
 }
