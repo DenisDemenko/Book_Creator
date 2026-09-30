@@ -130,6 +130,15 @@ for (let i = 0; i < 40; i++) {
   if (n > 3) break;
   await sleep(1000);
 }
+// Фонові задачі ядра мусять відпрацювати до кінця: без цього перевірка читає
+// недописаний стан (розбір — запис #301).
+let pendingCoreJobs = -1;
+for (let i = 0; i < 180; i++) {
+  pendingCoreJobs = (await db.query(`SELECT count(*)::int AS n FROM fusion_core.core_jobs WHERE project_id = $1 AND status IN ('queued', 'running')`, [BOOK]).catch(() => ({ rows: [{ n: -1 }] }))).rows[0].n;
+  if (pendingCoreJobs === 0) break;
+  await sleep(500);
+}
+t('фонові задачі ядра відпрацювали до кінця', pendingCoreJobs === 0, `у черзі ${pendingCoreJobs}`);
 
 console.log('\nПряме відкриття сторінок ядра:');
 await page.goto(`${BASE}/projects/${BOOK}/story-graph`, { waitUntil: 'domcontentloaded' });

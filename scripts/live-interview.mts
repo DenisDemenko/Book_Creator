@@ -215,6 +215,14 @@ const [olena] = await waitFor(() => q(`SELECT id FROM fusion_core.entities WHERE
 await waitFor(() => q(`SELECT 1 FROM fusion_core.paragraphs WHERE project_id = $1 AND text LIKE '%зрадник%'`, [BOOK]), (r) => r.length === 1, 60000);
 t('героїня є в ядрі (синхронізація)', !!olena);
 if (!olena) { console.error(log.join('').slice(-3000)); process.exit(1); }
+// Фонові задачі ядра мусять відпрацювати до кінця: без цього перевірка читає
+// недописаний стан (розбір — запис #301).
+const pendingJobs = await waitFor(
+  () => q(`SELECT count(*)::int AS n FROM fusion_core.core_jobs WHERE project_id = $1 AND status IN ('queued', 'running')`, [BOOK]),
+  (r) => Number(r[0]?.n) === 0,
+  90000,
+);
+t('фонові задачі ядра відпрацювали до кінця', Number(pendingJobs[0]?.n) === 0, `у черзі ${pendingJobs[0]?.n}`);
 
 const openProfile = async () => {
   await page.goto(`${BASE}/projects/${BOOK}/characters/${olena.id}`, { waitUntil: 'domcontentloaded' });

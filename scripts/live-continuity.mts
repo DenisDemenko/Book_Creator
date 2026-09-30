@@ -147,6 +147,14 @@ const [kyiv] = await waitFor(() => q(`SELECT id FROM fusion_core.entities WHERE 
 const [secret] = await waitFor(() => q(`SELECT id FROM fusion_core.entities WHERE project_id = $1 AND name = 'Таємниця'`, [BOOK]), (r) => r.length === 1);
 const [olena] = await q(`SELECT id FROM fusion_core.entities WHERE project_id = $1 AND name = 'Олена Ковальчук'`, [BOOK]);
 t('синхронізовано: Київ, Таємниця (Олена — з фікстури)', !!(kyiv && secret && olena));
+// Фонові задачі ядра мусять відпрацювати до кінця: без цього перевірка читає
+// недописаний стан (розбір — запис #301).
+const pendingJobs = await waitFor(
+  () => q(`SELECT count(*)::int AS n FROM fusion_core.core_jobs WHERE project_id = $1 AND status IN ('queued', 'running')`, [BOOK]),
+  (r) => Number(r[0]?.n) === 0,
+  90000,
+);
+t('фонові задачі ядра відпрацювали до кінця', Number(pendingJobs[0]?.n) === 0, `у черзі ${pendingJobs[0]?.n}`);
 const [para] = await waitFor(
   () => q(`SELECT p.id, p.document_id, p.text FROM fusion_core.paragraphs p WHERE p.project_id = $1 AND p.text LIKE '%Таємниця @Марко%' AND p.deleted_at IS NULL`, [BOOK]),
   (r) => r.length === 1,

@@ -118,6 +118,14 @@ const synced = await waitFor(
 );
 console.log('\nПідготовка:');
 t('абзаци розділу — у ядрі з номерами канви', synced.length >= 3, `${synced.length} з ${pids.length}`);
+// Фонові задачі ядра мусять відпрацювати до кінця: без цього перевірка читає
+// недописаний стан (розбір — запис #301).
+const pendingJobs = await waitFor(
+  () => q(`SELECT count(*)::int AS n FROM fusion_core.core_jobs WHERE project_id = $1 AND status IN ('queued', 'running')`, [BOOK]),
+  (r) => Number(r[0]?.n) === 0,
+  90000,
+);
+t('фонові задачі ядра відпрацювали до кінця', Number(pendingJobs[0]?.n) === 0, `у черзі ${pendingJobs[0]?.n}`);
 
 // Пропозиції так, як їх записує AI-1 (kind mention_suggestion, suggested, від ai:AI-1).
 const target = pids[1];

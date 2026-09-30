@@ -128,6 +128,14 @@ const [olena] = await waitFor(() => q(`SELECT id FROM fusion_core.entities WHERE
 const locs = await q(`SELECT id, name FROM fusion_core.entities WHERE project_id = $1 AND type <> 'character' ORDER BY name LIMIT 2`, [BOOK]);
 const other = (await q(`SELECT id, name FROM fusion_core.entities WHERE project_id = $1 AND type = 'character' AND id <> $2 ORDER BY name LIMIT 1`, [BOOK, olena.id]))[0];
 t('книга в ядрі: Олена й ще герой', !!olena && !!other, other?.name);
+// Фонові задачі ядра мусять відпрацювати до кінця: без цього перевірка читає
+// недописаний стан (розбір — запис #301).
+const pendingJobs = await waitFor(
+  () => q(`SELECT count(*)::int AS n FROM fusion_core.core_jobs WHERE project_id = $1 AND status IN ('queued', 'running')`, [BOOK]),
+  (r) => Number(r[0]?.n) === 0,
+  90000,
+);
+t('фонові задачі ядра відпрацювали до кінця', Number(pendingJobs[0]?.n) === 0, `у черзі ${pendingJobs[0]?.n}`);
 
 console.log('\nМедіатека — «Розпізнати (ШІ)» без ключа:');
 await page.click('#nav-tab-media');

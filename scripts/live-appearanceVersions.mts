@@ -129,6 +129,15 @@ const sections = await waitFor(
   (rows) => rows.length >= 3,
 );
 t('сцени книги — у ядрі', sections.length >= 3, `${sections.length}`);
+// Фонові задачі ядра мусять відпрацювати до кінця: без цього перевірка читає
+// недописаний стан — у батчі 29.09.2026 саме такі прогони падали «щоразу
+// в іншому місці» (розбір — запис #301).
+const pendingJobs = await waitFor(
+  () => q(`SELECT count(*)::int AS n FROM fusion_core.core_jobs WHERE project_id = $1 AND status IN ('queued', 'running')`, [BOOK]),
+  (r) => Number(r[0]?.n) === 0,
+  90000,
+);
+t('фонові задачі ядра відпрацювали до кінця', Number(pendingJobs[0]?.n) === 0, `у черзі ${pendingJobs[0]?.n}`);
 const [olena] = await q(`SELECT id FROM fusion_core.entities WHERE project_id = $1 AND name = 'Олена Ковальчук'`, [BOOK]);
 const legacy = await waitFor(() => q(`SELECT asset_url FROM fusion_core.asset_entity_links WHERE project_id = $1 AND entity_id = $2 AND source = 'legacy' AND role = 'portrait'`, [BOOK, olena.id]), (r) => r.length >= 1);
 const cardUrl = legacy[0]?.asset_url as string;

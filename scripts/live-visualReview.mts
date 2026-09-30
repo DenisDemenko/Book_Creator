@@ -125,6 +125,14 @@ await page.keyboard.press('End');
 await page.keyboard.type(' ');
 await page.keyboard.press('Backspace');
 const [olena] = await waitFor(() => q(`SELECT id FROM fusion_core.entities WHERE project_id = $1 AND name = 'Олена Ковальчук'`, [BOOK]), (r) => r.length === 1);
+// Фонові задачі ядра мусять відпрацювати до кінця: без цього перевірка читає
+// недописаний стан (розбір — запис #301).
+const pendingJobs = await waitFor(
+  () => q(`SELECT count(*)::int AS n FROM fusion_core.core_jobs WHERE project_id = $1 AND status IN ('queued', 'running')`, [BOOK]),
+  (r) => Number(r[0]?.n) === 0,
+  90000,
+);
+t('фонові задачі ядра відпрацювали до кінця', Number(pendingJobs[0]?.n) === 0, `у черзі ${pendingJobs[0]?.n}`);
 const legacy = await waitFor(
   () => q(`SELECT id, asset_url, checked_hash, needs_review FROM fusion_core.asset_entity_links WHERE project_id = $1 AND entity_id = $2 AND source = 'legacy' AND role = 'portrait'`, [BOOK, olena.id]),
   (r) => r.length === 1 && !!r[0].checked_hash,

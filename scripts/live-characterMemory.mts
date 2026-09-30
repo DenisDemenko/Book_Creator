@@ -155,6 +155,14 @@ const [para] = await waitFor(
 );
 t('синхронізовано: сварка, Олена, абзац сцени', !!(conflict && olena && para));
 if (!conflict || !olena || !para) { console.error(log.join('').slice(-3000)); process.exit(1); }
+// Фонові задачі ядра мусять відпрацювати до кінця: без цього перевірка читає
+// недописаний стан (розбір — запис #301).
+const pendingJobs = await waitFor(
+  () => q(`SELECT count(*)::int AS n FROM fusion_core.core_jobs WHERE project_id = $1 AND status IN ('queued', 'running')`, [BOOK]),
+  (r) => Number(r[0]?.n) === 0,
+  90000,
+);
+t('фонові задачі ядра відпрацювали до кінця', Number(pendingJobs[0]?.n) === 0, `у черзі ${pendingJobs[0]?.n}`);
 
 console.log('\nСторінка героїні — розділ «Пам\'ять»:');
 const openProfile = async () => {

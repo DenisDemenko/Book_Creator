@@ -48,6 +48,11 @@ import express from 'express';
 import { DatabaseSync } from 'node:sqlite';
 import { coverScaleFor } from '../src/utils/pdfCover';
 import { isLocalHost } from '../server/publicOrigin';
+// Файл секретів читаємо так само, як сервер у бою: без нього немає ні
+// `USER_API_KEY_SECRET` (ним шифрується ключ мосту), ні `STUDIO_PUBLIC_URL`.
+// Той самий пропущений рядок був і в `live:diagn` — там він давав «немає
+// ключа» на ключі, який у `.env` лежить.
+import 'dotenv/config';
 const args = process.argv.slice(2);
 const argOf = (name: string): string | undefined =>
   args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
@@ -105,6 +110,62 @@ const store = await import('../server/store');
 const bridge = await import('../server/marketplaceBridge');
 const pdfRoutes = await import('../server/pdfRoutes');
 const bookRoutes = await import('../server/bookRoutes');
+
+/*
+  ПІДСТАВНИЙ МІСТ — щоб перевірити НАШУ половину контракту живцем.
+
+  Справжній міст (Fusion Lab) живе в Railway, і ключа до нього на цій машині
+  немає. Але без нього крок публікації не перевірявся зовсім: прогін зупинявся
+  з «міст не налаштований». Тепер, коли справжніх налаштувань немає,
+  піднімається міст-заглушка в цьому ж процесі: він приймає `POST /bridge/books`
+  і ЗАПИСУЄ, що саме Студія надіслала.
+
+  Що цим доводиться: запит іде на потрібний маршрут, із ключем у заголовку, з
+  обкладинкою, ціною й `externalId` того формату, якого чекає маркетплейс.
+  Чого НЕ доводиться: що справжній маркетплейс прийме картку — це перевіряє
+  власник зі Студії, яку маркетплейс бачить (`--book=` і без заглушки).
+*/
+type StubCall = { method: string; path: string; key: string; body: Record<string, unknown> };
+const stubCalls: StubCall[] = [];
+let stubServer: { close: () => void } | null = null;
+/** Повернення справжніх налаштувань мосту після підставного прогону. */
+let restoreBridge: (() => Promise<void>) | null = null;
+/** Адреса підставного мосту — щоб відрізнити свій залишок від справжніх налаштувань. */
+const isStubBridgeUrl = (url: string) => /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?/i.test(url || '');
+const STUB_KEY = 'live-stub-bridge-key';
+const startStubBridge = async (): Promise<string> => {
+  const http = await import('node:http');
+  const srv = http.createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (c) => chunks.push(Buffer.from(c)));
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf8');
+      let body: Record<string, unknown> = {};
+      try {
+        body = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+      } catch {
+        body = { raw };
+      }
+      stubCalls.push({
+        method: req.method || '',
+        path: req.url || '',
+        key: String(req.headers['x-bridge-key'] || ''),
+        body,
+      });
+      res.writeHead(201, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ id: `stub-${stubCalls.length}`, slug: 'stub-listing', created: true }));
+    });
+  });
+  await new Promise<void>((resolve) => srv.listen(0, '127.0.0.1', () => resolve()));
+  // `unref` — а не закриття: сервер не має тримати процес живим, але й
+  // закривати його на виході не треба (лише цей спосіб не давав на Windows
+  // падінь libuv «handle->flags & UV_HANDLE_CLOSING»).
+  srv.unref();
+  stubServer = srv;
+  const addr = srv.address();
+  const port = typeof addr === 'object' && addr ? addr.port : 0;
+  return `http://127.0.0.1:${port}`;
+};
 
 await store.initStore();
 
@@ -327,12 +388,13 @@ try {
       /*
         РЕШТА БЛОКІВ ПЕРЕДМОВИ. Книга просить сторінку копірайту, присвяту,
         епіграф і зміст (`layoutConfig.frontMatter`), і автор бачить ці
-        перемикачі в «Верстка & Поля». Серверна верстка Nova малює з них ЛИШЕ
-        титул: у `PdfLayoutSpec` (server/pdf/pdfTypes.ts) для решти полів
-        просто немає місця. Перевірка тут не для того, щоб «упасти», а щоб це
-        перестало бути невидимим: у PDF, який їде у вітрину, цих блоків немає.
+        перемикачі в «Верстка & Поля». До #302 серверна верстка Nova малювала
+        з них ЛИШЕ титул: у `PdfLayoutSpec` для решти полів не було місця.
+        Перевірка стояла як «щоб прогалина не була невидимою»; тепер вона —
+        ВИМОГА, бо блоки справді друкуються, і зміст іще й зі справжніми
+        номерами сторінок (той самий шлях перевіряє `npm run test:pdf`).
       */
-      const fmNote = 'серверна верстка Nova малює лише титул — у PdfLayoutSpec немає полів для цих блоків';
+      const fmNote = 'блок передмови мусить бути в PDF: автор увімкнув його у «Верстка PDF»';
       if (front.showCopyright && front.copyrightText) {
         t('сторінка копірайту в PDF', all.includes(String(front.copyrightText).slice(0, 25)), fmNote);
       }
@@ -384,7 +446,15 @@ try {
   if (stageRequested('publish')) {
       console.log('\nКрок 5 — публікація у вітрину (POST /api/books/:id/publish):');
     const view = await bridge.readBridgeSettingsView();
-    const configured = Boolean(view?.url) && Boolean(view?.keySet || view?.keyFingerprint);
+    /*
+      «Налаштований» — це справжні налаштування. Залишок підставного мосту з
+      ПОПЕРЕДНЬОГО прогону (127.0.0.1:порт, який уже закрито) за справжні не
+      рахуємо: інакше прогін стукав би в мертвий порт і казав «маркетплейс не
+      відповідає» — тобто звинувачував би чужий сервіс у своєму ж смітті.
+    */
+    const configured = Boolean(view?.url) && !isStubBridgeUrl(view?.url ?? '') && Boolean(view?.keySet || view?.keyFingerprint);
+    /* Перед підміною запам'ятовуємо справжні — повернемо їх у `finally`. */
+    const before = await bridge.readBridgeSettings().catch(() => null);
     if (!configured) {
       const envUrl = process.env.NOVA_BRIDGE_URL;
       const envKey = process.env.NOVA_BRIDGE_KEY;
@@ -392,15 +462,35 @@ try {
         await bridge.saveBridgeSettings({ url: envUrl, key: envKey });
         console.log('  · налаштування мосту взято зі змінних середовища й збережено');
       } else {
-        t(
-          'міст до вітрини налаштований',
-          false,
-          'немає ані в налаштуваннях Студії (Адмінка → «Міст до вітрини»), ані в NOVA_BRIDGE_URL/NOVA_BRIDGE_KEY'
-        );
+        /*
+          Спільного ключа з Fusion Lab на цій машині немає — піднімаємо міст у
+          собі й кажемо про це вголос: інакше легко переплутати «наша половина
+          контракту правильна» з «книга справді у вітрині».
+        */
+        const stubUrl = await startStubBridge();
+        process.env.NOVA_BRIDGE_URL = stubUrl;
+        process.env.NOVA_BRIDGE_KEY = STUB_KEY;
+        await bridge.saveBridgeSettings({ url: stubUrl, key: STUB_KEY });
         console.log(
-          '  Вітрина — зовнішній сервіс: без адреси й ключа крок не виконується за побутової причини,\n' +
-            '  і вдавати, що книга поїхала, було б гірше за чесну зупинку.'
+          `  · міст ПІДСТАВНИЙ: ${stubUrl} (спільного ключа з Fusion Lab тут немає) — перевіряємо, що саме\n` +
+            '    Студія надсилає у вітрину; справжню публікацію перевіряє власник зі Студії, яку бачить маркетплейс'
         );
+        t('міст до вітрини налаштований', true, 'підставний, у процесі прогону');
+        /*
+          Налаштування — частина РОБОЧОГО сховища Студії, тому підставний
+          запис прибираємо за собою: адмінка власника не має показувати
+          мертвий 127.0.0.1:порт як «міст налаштований».
+        */
+        restoreBridge = async () => {
+          /*
+            Повертаємо СПРАВЖНІ налаштування, а залишок від попереднього
+            підставного прогону — прибираємо: 127.0.0.1:мертвий-порт у
+            налаштуваннях Студії виглядає як «міст налаштований», хоч за ним
+            нічого немає, і наступний прогін звинуватив би в цьому маркетплейс.
+          */
+          const realUrl = before?.url && !isStubBridgeUrl(before.url) ? before.url : '';
+          await bridge.saveBridgeSettings({ url: realUrl, key: realUrl ? (before?.key ?? '') : '' });
+        };
       }
     }
 
@@ -432,11 +522,33 @@ try {
         });
         t('вітрина прийняла книгу', published.status === 200, `HTTP ${published.status} ${published.text?.slice(0, 200)}`);
         if (published.json) console.log(`  · редакції: ${JSON.stringify(published.json).slice(0, 400)}`);
+
+        /*
+          Що саме наша половина надіслала — перевіряємо за записом, який лишив
+          підставний міст, а не за власними змінними: мета саме в тому, щоб
+          бачити, що ВИЙШЛО З МЕРЕЖІ.
+        */
+        if (stubCalls.length) {
+          const posted = stubCalls.filter((c) => c.method === 'POST' && c.path.endsWith('/bridge/books'));
+          t('у вітрину пішло по запиту на кожну редакцію', posted.length >= 2, `запитів: ${posted.length}`);
+          t('кожен запит — з ключем мосту в заголовку',
+            posted.every((c) => c.key === STUB_KEY), posted[0]?.key || '—');
+          const first = posted[0]?.body ?? {};
+          t('у картці є назва книги', String(first.title ?? '').includes(String(bookRow.title).slice(0, 12)), String(first.title ?? ''));
+          t('обкладинка передана посиланням, а не порожньою',
+            typeof first.coverUrl === 'string' && /^https?:\/\//.test(String(first.coverUrl)), String(first.coverUrl ?? ''));
+          t('ціна передана в мінорних одиницях',
+            Number(first.priceMinor) > 0, String(first.priceMinor));
+          t('externalId містить книгу й формат',
+            String(first.externalId ?? '').includes(String(bookRow.id).slice(0, 8)) && String(first.externalId ?? '').includes('digital'),
+            String(first.externalId ?? ''));
+        }
       }
     }
   }
 } finally {
   server.close();
+  if (restoreBridge) await restoreBridge().catch(() => undefined);
 }
 
 console.log(`\nПідсумок: ${ok} перевірок пройдено, ${bad} не пройдено.`);
