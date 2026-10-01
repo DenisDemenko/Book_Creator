@@ -231,7 +231,8 @@ export class JevDecisionAdapter {
   }
 
   /** Рішення рівня — з кешу, якщо ключ той самий, інакше через Jev (із запасним шляхом). Батьківські рівні — спершу. */
-  async decide(req: DecideRequest): Promise<DecideResult> {
+  async decide(input: DecideRequest): Promise<DecideResult> {
+    const req = await this.boundToScene(input);
     const chain: DecideResult['chain'] = [];
     const done = (r: { decision: CharacterDecisionRow; reused: boolean }, level: CharacterDecisionLevel): DecideResult => {
       const waiting = r.decision.status === 'awaiting_author';
@@ -254,6 +255,26 @@ export class JevDecisionAdapter {
    */
   async resolveByAuthor(projectId: string, decisionId: string, action: string, actor: CoreActor): Promise<CharacterDecisionRow> {
     return resolveDecisionByAuthor(this.deps.repo, projectId, decisionId, action, actor);
+  }
+
+  /**
+   * Т2.8 В1: межа знань для батьківських рівнів. Стратегічний рівень не
+   * обмежений сценою (кешується між сценами) і бачить книгу «станом на главу
+   * N»; без глави — усю книгу. Тож рішення на сцену без явної глави брало в
+   * стратегічний знімок майбутнє (набір якості знайшов: розкриття з гл. 2
+   * потрапляло в стан Jev для допиту станом на сцену гл. 1). Тепер, якщо
+   * сцену задано, а главу ні, — глава береться зі сцени (крім останньої
+   * глави: там «станом на главу» і є вся книга, і кеш не дробиться). Межа стратегічного
+   * рівня — глава (пізніші сцени тієї самої глави він бачить; сценічний і
+   * тактичний рівні обмежені самою сценою).
+   */
+  private async boundToScene(req: DecideRequest): Promise<DecideRequest> {
+    if (!req.sceneId || req.asOfChapter != null) return req;
+    const scan = await scanScenes(this.deps.repo, req.projectId, await this.deps.repo.listTimePoints(req.projectId));
+    const chapter = scan.bySection.get(req.sceneId)?.chapterNumber ?? null;
+    // Сцена в останній главі: «станом на главу» = уся книга — ключ кешу лишається тим самим, що й без глави.
+    const last = Math.max(0, ...scan.scenes.map((x) => x.chapterNumber ?? 0));
+    return chapter != null && chapter < last ? { ...req, asOfChapter: chapter } : req;
   }
 
   /** Т2.6 В5: знімок рівня — через будівник (профіль + знання в часі + пам'ять героя, під ліміт Jev). */

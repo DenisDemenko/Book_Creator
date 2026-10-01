@@ -69,6 +69,7 @@ const waitFor = async <T,>(fn: () => Promise<T>, ok: (v: T) => boolean, ms = 400
 const MODE = path.join(DIR, 'jev-mode.txt');
 const VOICE_LOG = path.join(DIR, 'voice.jsonl');
 const VOICE_MODE = path.join(DIR, 'voice-mode.txt');
+const JEV_LOG = path.join(DIR, 'jev-states.jsonl');
 const FAKE = path.join(DIR, 'fake-interview.mjs');
 fs.writeFileSync(MODE, 'ok');
 fs.writeFileSync(VOICE_MODE, 'ok');
@@ -85,6 +86,8 @@ globalThis.fetch = async (input, init) => {
   if (/api\\.typesafe\\.ai/.test(url)) {
     const body = JSON.parse(await bodyOf(input, init));
     const mode = fs.readFileSync(${JSON.stringify(MODE)}, 'utf8').trim();
+    const st = JSON.stringify(body.state ?? {});
+    fs.appendFileSync(${JSON.stringify(JEV_LOG)}, JSON.stringify({ future: /зрадник/.test(st), secret: /вкрав архів/.test(st) }) + '\\n');
     if (mode === 'network') throw new TypeError('fetch failed');
     if (mode === '529') return new Response(JSON.stringify({ error: { message: 'перевантажено' } }), { status: 529 });
     const conf = mode === 'low' ? 0.1 : 0.9;
@@ -296,6 +299,8 @@ t('канон, рукопис і пам\'ять канону — без змін
 
 console.log('\nКРИТЕРІЙ (2): без майбутнього й чужих таємниць:');
 t('жоден із 10 запитів голосу не містить глави 2 («зрадник») і приватного спогаду Марка', vc.every((c) => !c.future && !c.secret), JSON.stringify(vc.map((c) => [c.future, c.secret])));
+const jevStates = fs.existsSync(JEV_LOG) ? fs.readFileSync(JEV_LOG, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
+t('…і в жодному стані, що пішов у Jev (усі три рівні), — теж (Т2.8 В1: межа — глава сцени)', jevStates.length >= 10 && jevStates.every((x: any) => !x.future && !x.secret), `станів: ${jevStates.length}, з майбутнім: ${jevStates.filter((x: any) => x.future).length}`);
 const leak = await q(`SELECT count(*)::int AS n FROM fusion_core.simulation_events WHERE simulation_id = $1 AND (public_payload::text LIKE '%вкрав архів%' OR public_payload::text LIKE '%зрадник%')`, [sim.id]);
 t('у ходах допиту — теж ні', leak[0].n === 0);
 

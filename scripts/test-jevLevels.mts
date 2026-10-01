@@ -391,9 +391,10 @@ async function levelsSuite(label: string, repo: CoreRepository, P: string) {
   calls = 0;
   const sc = (extra: Record<string, unknown> = {}) => e.decide({ projectId: P, characterId: olena, level: 'scene', actor: 'user:u-owner', sceneId: 's2', situation: 'Допит у поліції', participants: ['Марко', 'Слідчий'], ...extra });
   const sc1 = await sc();
-  const strNow = (await repo.listCharacterDecisions(P, { characterId: olena, level: 'strategic', cacheKey: afterFact.decision.cacheKey }))[0];
+  // Т2.8 В1: сцена s2 — у гл. 1, а є гл. 2: стратегічне для неї — «станом на гл. 1» (без майбутнього), тобто ch1.
+  const strNow = (await repo.listCharacterDecisions(P, { characterId: olena, level: 'strategic', cacheKey: ch1.decision.cacheKey }))[0];
   const scr = sc1.decision.result as any;
-  t('сценічне: мотив із конфігурації, страх / довіра / ризик; батько — чинне стратегічне (з кешу)',
+  t('сценічне: мотив із конфігурації, страх / довіра / ризик; батько — стратегічне станом на главу сцени (з кешу, без майбутнього)',
     !sc1.reused && calls === 1 && sc1.chain[0].reused && sc1.decision.parentId === strNow.id &&
     Object.keys(DEFAULT_LEVEL_CONFIG.scene.primary.options).includes(sc1.decision.selectedAction!) && ['fear', 'trust', 'risk'].every((k) => typeof scr.scores[k] === 'number'),
     JSON.stringify({ a: sc1.decision.selectedAction, s: scr.scores }));

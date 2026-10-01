@@ -279,7 +279,8 @@ async function turnSuite(label: string, repo: CoreRepository, P: string) {
   };
   const mock = new MockJevAdapter();
   let jevMode: 'ok' | 'low' | 'down' = 'ok';
-  const jevOk = { name: 'jev' as const, evaluate: async (sn: any, q: any) => ({ ...(await mock.evaluate(sn, q)), source: 'jev' as const, confidence: jevMode === 'low' ? 0.1 : 0.9 }) };
+  const jevStates: string[] = [];
+  const jevOk = { name: 'jev' as const, evaluate: async (sn: any, q: any) => (jevStates.push(JSON.stringify(sn)), { ...(await mock.evaluate(sn, q)), source: 'jev' as const, confidence: jevMode === 'low' ? 0.1 : 0.9 }) };
   const jevDown = new HttpJevAdapter('k', { fetchImpl: (async () => new Response('{}', { status: 529 })) as any });
   const llm = async (_s: string, user: string) => {
     const pick = (id: string, v: string) => (new RegExp(`"${id}"`).test(user) ? { [id]: { choice: v } } : {});
@@ -320,6 +321,8 @@ async function turnSuite(label: string, repo: CoreRepository, P: string) {
   });
   t('КРИТЕРІЙ FLC 2.0 §7 (3) / ТЗ-H №3: канон, рукопис, пам\'ять канону — без змін', canonBefore === canonAfter);
   const allPrompts = prompts.map((p) => p.system + p.user).join('\n');
+  t('Т2.8 В1: і в станах для Jev усіх трьох рівнів (зокрема стратегічного, що не обмежений сценою) — теж ні: межа — глава сцени',
+    jevStates.length >= 12 && !jevStates.some((x) => /зрадник|вкрав архів/.test(x)), `станів: ${jevStates.length}`);
   t('КРИТЕРІЙ FLC 2.0 §7 (2) / ТЗ-H №5: у запитах голосу немає майбутнього (гл. 2 — «зрадник») і чужого приватного (Марко вкрав архів)',
     !/зрадник/.test(allPrompts) && !/вкрав архів/.test(allPrompts));
   t('у запиті — своє: переконання «Марко заздрить», сварка (пам\'ять), нотатка голосу, рішення на хід',
