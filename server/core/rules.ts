@@ -67,6 +67,9 @@ import {
   QUALITY_RUN_STATUSES,
   ONTOLOGY_VERSION_STATUSES,
   ONTOLOGY_EVENT_ACTIONS,
+  PARTICIPANT_STATUSES,
+  PARTICIPANT_SOURCES,
+  COLLAB_EVENT_ACTIONS,
   AUTONOMY_LEVELS,
   SIMULATION_KINDS,
   SIMULATION_STATUSES,
@@ -646,4 +649,33 @@ export function checkOntologyEvent(input: { ontologyId: string; action: string; 
   checkOntologyActor(input.actor);
   if (!(ONTOLOGY_EVENT_ACTIONS as readonly string[]).includes(input.action)) throw new CoreRuleError('bad_input', `Невідома дія реєстру схем «${input.action}»`);
   if (input.details !== undefined && !objectLike(input.details)) throw new CoreRuleError('bad_input', 'Подробиці події — обʼєкт');
+}
+
+// ── Учасники проєкту (Т6.1 В2) ───────────────────────────────────────────────
+
+const ROLE_ID_RE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
+
+export function checkParticipant(input: { projectId: string; userId: string; source: string; sourceRef?: string | null; createdBy: CoreActor }): void {
+  checkOntologyActor(input.createdBy);
+  if (!input.projectId || String(input.projectId).length > 200) throw new CoreRuleError('bad_input', 'id проєкту — від 1 до 200 символів');
+  if (!input.userId || String(input.userId).length > 200) throw new CoreRuleError('bad_input', 'id людини — від 1 до 200 символів');
+  if (!(PARTICIPANT_SOURCES as readonly string[]).includes(input.source)) throw new CoreRuleError('bad_input', `Невідоме джерело участі «${input.source}»`);
+  if (input.sourceRef != null && String(input.sourceRef).length > 200) throw new CoreRuleError('bad_input', 'Посилання на джерело — до 200 символів');
+}
+
+export function checkParticipantStatus(status: string): void {
+  if (!(PARTICIPANT_STATUSES as readonly string[]).includes(status)) throw new CoreRuleError('bad_input', `Невідомий статус участі «${status}»`);
+}
+
+export function checkParticipantRole(input: { roleId: string; specialization?: string | null; assignedBy: CoreActor }): void {
+  if (typeof input.assignedBy === 'string' && input.assignedBy.startsWith('ai:')) throw new CoreRuleError('bad_actor', 'Роль призначає людина чи система, не AI');
+  checkOntologyActor(input.assignedBy);
+  if (!ROLE_ID_RE.test(String(input.roleId))) throw new CoreRuleError('bad_input', `id ролі «${input.roleId}» — snake_case`);
+  if (input.specialization != null && !ROLE_ID_RE.test(String(input.specialization))) throw new CoreRuleError('bad_input', `Спеціалізація «${input.specialization}» — snake_case`);
+}
+
+export function checkCollabEvent(input: { action: string; actor: CoreActor; details?: unknown }): void {
+  checkOntologyActor(input.actor);
+  if (!(COLLAB_EVENT_ACTIONS as readonly string[]).includes(input.action)) throw new CoreRuleError('bad_input', `Невідома дія участі «${input.action}»`);
+  if (input.details !== undefined && !objectLike(input.details)) throw new CoreRuleError('bad_input', 'Подробиці — обʼєкт');
 }

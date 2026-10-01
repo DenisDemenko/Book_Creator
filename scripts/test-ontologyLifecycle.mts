@@ -116,7 +116,7 @@ async function suite(name: string, repo: CoreRepository, raw?: (sql: string, par
   await editDraft(repo, d.id, { actor: ADMIN, ops: [{ op: 'set_entity_type', value: PROPHECY }] });
   const vok = await validateDraft(repo, d.id, ADMIN);
   t('виправлено — validated', vok.validation.ok && vok.version.status === 'validated');
-  const pv = await previewDraft(repo, d.id);
+  const pv = (await previewDraft(repo, d.id)) as any;
   t('перегляд: додано prophecy / foreshadows, вилучено mystery / unlocks, змінено character, застаріло ending',
     pv.diff.entityTypes.added.join() === 'prophecy' && pv.diff.entityTypes.removed.join() === 'mystery' && pv.diff.relationTypes.added.join() === 'foreshadows' && pv.diff.relationTypes.removed.join() === 'unlocks'
       && pv.diff.entityTypes.changed.some((c) => c.id === 'character') && pv.diff.entityTypes.deprecated.join() === 'ending', JSON.stringify(pv.diff.entityTypes));

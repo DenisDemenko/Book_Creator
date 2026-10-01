@@ -973,6 +973,52 @@ export interface OntologyUsage {
   relations: Record<string, number>;
 }
 
+// ── Учасники проєкту й ролі (Т6.1 В2) ─────────────────────────────────────────
+
+export const PARTICIPANT_STATUSES = ['active', 'suspended', 'left'] as const;
+export type ParticipantStatus = (typeof PARTICIPANT_STATUSES)[number];
+export const PARTICIPANT_SOURCES = ['owner', 'invitation', 'access_request', 'freelance_order', 'admin', 'legacy_member', 'onboarding'] as const;
+export type ParticipantSource = (typeof PARTICIPANT_SOURCES)[number];
+
+export interface ParticipantRow {
+  id: string;
+  projectId: string;
+  userId: string;
+  status: ParticipantStatus;
+  source: ParticipantSource;
+  sourceRef: string | null;
+  createdBy: CoreActor;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ParticipantRoleRow {
+  id: string;
+  participantId: string;
+  projectId: string;
+  roleId: string;
+  specialization: string | null;
+  status: 'active' | 'revoked';
+  assignedBy: CoreActor;
+  registryVersion: number | null;
+  createdAt: string;
+  revokedAt: string | null;
+  revokedBy: CoreActor | null;
+}
+
+export const COLLAB_EVENT_ACTIONS = ['participant_added', 'participant_status', 'role_assigned', 'role_revoked', 'legacy_import'] as const;
+export type CollabEventAction = (typeof COLLAB_EVENT_ACTIONS)[number];
+
+export interface CollabEventRow {
+  id: string;
+  projectId: string;
+  participantId: string | null;
+  action: CollabEventAction;
+  actor: CoreActor;
+  details: Record<string, unknown>;
+  createdAt: string;
+}
+
 /** Збережений пошуковий запит автора (Т1.3). */
 export interface SavedSearchRow {
   id: string;
@@ -1212,6 +1258,27 @@ export interface CoreRepository {
   listOntologyEvents(ontologyId: string, filter?: { versionId?: string; limit?: number }): Promise<OntologyEventRow[]>;
   /** Використання типів сутностей і зв'язків у всіх книгах. */
   ontologyUsage(): Promise<OntologyUsage>;
+
+  /**
+   * Т6.1 В2: учасники проєкту й їхні ролі. `upsertParticipant` — ідемпотентно
+   * (є — повертає наявного); правила ролей (реєстр, один власник, фрілансер зі
+   * спеціалізацією) перевіряє сервіс участі, сховище — формат і унікальність.
+   */
+  upsertParticipant(input: { projectId: string; userId: string; source: ParticipantSource; sourceRef?: string | null; createdBy: CoreActor }): Promise<{ participant: ParticipantRow; created: boolean }>;
+  getParticipant(projectId: string, userId: string): Promise<ParticipantRow | null>;
+  getParticipantById(id: string): Promise<ParticipantRow | null>;
+  listParticipants(projectId: string): Promise<ParticipantRow[]>;
+  setParticipantStatus(id: string, status: ParticipantStatus): Promise<ParticipantRow>;
+  addParticipantRole(input: { participantId: string; projectId: string; roleId: string; specialization?: string | null; assignedBy: CoreActor; registryVersion?: number | null }): Promise<ParticipantRoleRow>;
+  revokeParticipantRole(id: string, actor: CoreActor): Promise<ParticipantRoleRow>;
+  getParticipantRole(id: string): Promise<ParticipantRoleRow | null>;
+  listParticipantRoles(filter: { projectId?: string; participantId?: string; roleId?: string; status?: 'active' | 'revoked' }): Promise<ParticipantRoleRow[]>;
+  /** Скільки активних призначень кожної ролі в усіх проєктах — для впливу зміни реєстру ролей. */
+  countActiveRoleAssignments(): Promise<Record<string, number>>;
+  addCollabEvent(input: { projectId: string; participantId?: string | null; action: CollabEventAction; actor: CoreActor; details?: Record<string, unknown> }): Promise<CollabEventRow>;
+  listCollabEvents(projectId: string, filter?: { limit?: number }): Promise<CollabEventRow[]>;
+  /** Рядки старої таблиці `project_members` (для перенесення в учасників). */
+  listMembers(projectId: string): Promise<{ userId: string; role: MemberRole }[]>;
 
   /** Збережені запити автора в книзі (Т1.3), новіші першими. */
   listSavedSearches(projectId: string, userId: string): Promise<SavedSearchRow[]>;

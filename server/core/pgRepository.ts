@@ -46,6 +46,10 @@ import {
   checkOntologyVersionPatch,
   checkOntologyEvent,
   checkOntologyActor,
+  checkParticipant,
+  checkParticipantStatus,
+  checkParticipantRole,
+  checkCollabEvent,
   assertActor,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isValidEmbedding, SEARCHABLE_KINDS, tsQueryFromStems } from './search/text';
@@ -130,6 +134,12 @@ import type {
   OntologyEventRow,
   OntologyEventAction,
   OntologyUsage,
+  ParticipantRow,
+  ParticipantRoleRow,
+  ParticipantSource,
+  ParticipantStatus,
+  CollabEventRow,
+  CollabEventAction,
 } from './types';
 
 type Q = Pool | PoolClient;
@@ -185,6 +195,18 @@ function toOntologyVersion(r: any): OntologyVersionRow {
     publishedBy: r.published_by ?? null,
     publishedAt: isoOrNull(r.published_at),
   };
+}
+function toParticipant(r: any): ParticipantRow {
+  return { id: r.id, projectId: r.project_id, userId: r.user_id, status: r.status, source: r.source, sourceRef: r.source_ref ?? null, createdBy: r.created_by, createdAt: iso(r.created_at), updatedAt: iso(r.updated_at) };
+}
+function toParticipantRole(r: any): ParticipantRoleRow {
+  return {
+    id: r.id, participantId: r.participant_id, projectId: r.project_id, roleId: r.role_id, specialization: r.specialization ?? null, status: r.status,
+    assignedBy: r.assigned_by, registryVersion: r.registry_version == null ? null : Number(r.registry_version), createdAt: iso(r.created_at), revokedAt: isoOrNull(r.revoked_at), revokedBy: r.revoked_by ?? null,
+  };
+}
+function toCollabEvent(r: any): CollabEventRow {
+  return { id: r.id, projectId: r.project_id, participantId: r.participant_id ?? null, action: r.action, actor: r.actor, details: r.details ?? {}, createdAt: iso(r.created_at) };
 }
 function toOntologyEvent(r: any): OntologyEventRow {
   return { id: r.id, ontologyId: r.ontology_id, versionId: r.version_id ?? null, action: r.action, actor: r.actor, details: r.details ?? {}, createdAt: iso(r.created_at) };
@@ -694,6 +716,9 @@ function mapPgError(err: any): never {
   }
   if (code === '23505' && /ontology_versions_one_draft/.test(constraint)) {
     throw new CoreRuleError('conflict', 'Відкрита чернетка онтології вже є — одна за раз');
+  }
+  if (code === '23505' && /participant_roles_active/.test(constraint)) {
+    throw new CoreRuleError('conflict', 'Ця роль у учасника вже є');
   }
   if (code === '23503') {
     throw new CoreRuleError('not_found', 'Пов\'язаний запис не знайдено в цьому проєкті');
@@ -2343,6 +2368,108 @@ export class PgCoreRepository implements CoreRepository {
       count('SELECT type AS k, count(*) AS n FROM entity_relations GROUP BY type'),
     ]);
     return { entities, aliases, mentions, relations };
+  }
+
+  // ── Учасники проєкту (Т6.1 В2) ──────────────────────────────────────────
+
+  async upsertParticipant(input: { projectId: string; userId: string; source: ParticipantSource; sourceRef?: string | null; createdBy: CoreActor }) {
+    checkParticipant(input);
+    const { rows } = await this.q(
+      `INSERT INTO project_participants (project_id, user_id, source, source_ref, created_by) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (project_id, user_id) DO NOTHING RETURNING *`,
+      [input.projectId, input.userId, input.source, input.sourceRef ?? null, input.createdBy],
+    );
+    if (rows[0]) return { participant: toParticipant(rows[0]), created: true };
+    return { participant: (await this.getParticipant(input.projectId, input.userId))!, created: false };
+  }
+
+  async getParticipant(projectId: string, userId: string) {
+    const { rows } = await this.q('SELECT * FROM project_participants WHERE project_id = $1 AND user_id = $2', [projectId, userId]);
+    return rows[0] ? toParticipant(rows[0]) : null;
+  }
+
+  async getParticipantById(id: string) {
+    if (!isUuid(id)) return null;
+    const { rows } = await this.q('SELECT * FROM project_participants WHERE id = $1', [id]);
+    return rows[0] ? toParticipant(rows[0]) : null;
+  }
+
+  async listParticipants(projectId: string) {
+    const { rows } = await this.q('SELECT * FROM project_participants WHERE project_id = $1 ORDER BY created_at, id', [projectId]);
+    return rows.map(toParticipant);
+  }
+
+  async setParticipantStatus(id: string, status: ParticipantStatus) {
+    checkParticipantStatus(status);
+    if (!isUuid(id)) throw notFound(`Учасник «${id}»`);
+    const { rows } = await this.q('UPDATE project_participants SET status = $2, updated_at = now() WHERE id = $1 RETURNING *', [id, status]);
+    if (!rows[0]) throw notFound(`Учасник «${id}»`);
+    return toParticipant(rows[0]);
+  }
+
+  async addParticipantRole(input: { participantId: string; projectId: string; roleId: string; specialization?: string | null; assignedBy: CoreActor; registryVersion?: number | null }) {
+    checkParticipantRole(input);
+    const p = await this.getParticipantById(input.participantId);
+    if (!p || p.projectId !== input.projectId) throw notFound(`Учасник «${input.participantId}»`);
+    const { rows } = await this.q(
+      `INSERT INTO participant_roles (participant_id, project_id, role_id, specialization, assigned_by, registry_version) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [input.participantId, input.projectId, input.roleId, input.specialization ?? null, input.assignedBy, input.registryVersion ?? null],
+    );
+    return toParticipantRole(rows[0]);
+  }
+
+  async revokeParticipantRole(id: string, actor: CoreActor) {
+    checkOntologyActor(actor);
+    const cur = await this.getParticipantRole(id);
+    if (!cur) throw notFound(`Роль учасника «${id}»`);
+    const { rows } = await this.q(`UPDATE participant_roles SET status = 'revoked', revoked_at = now(), revoked_by = $2 WHERE id = $1 AND status = 'active' RETURNING *`, [id, actor]);
+    if (!rows[0]) throw new CoreRuleError('conflict', 'Роль уже відкликано');
+    return toParticipantRole(rows[0]);
+  }
+
+  async getParticipantRole(id: string) {
+    if (!isUuid(id)) return null;
+    const { rows } = await this.q('SELECT * FROM participant_roles WHERE id = $1', [id]);
+    return rows[0] ? toParticipantRole(rows[0]) : null;
+  }
+
+  async listParticipantRoles(f: { projectId?: string; participantId?: string; roleId?: string; status?: 'active' | 'revoked' }) {
+    if (f.participantId && !isUuid(f.participantId)) return [];
+    const { rows } = await this.q(
+      `SELECT * FROM participant_roles WHERE ($1::text IS NULL OR project_id = $1) AND ($2::uuid IS NULL OR participant_id = $2) AND ($3::text IS NULL OR role_id = $3) AND ($4::text IS NULL OR status = $4)
+       ORDER BY created_at, id`,
+      [f.projectId ?? null, f.participantId ?? null, f.roleId ?? null, f.status ?? null],
+    );
+    return rows.map(toParticipantRole);
+  }
+
+  async countActiveRoleAssignments() {
+    const { rows } = await this.q(
+      `SELECT k, count(*) AS n FROM (
+         SELECT role_id AS k FROM participant_roles WHERE status = 'active'
+         UNION ALL SELECT specialization AS k FROM participant_roles WHERE status = 'active' AND specialization IS NOT NULL
+       ) x GROUP BY k`,
+    );
+    return Object.fromEntries(rows.map((r: any) => [r.k, Number(r.n)])) as Record<string, number>;
+  }
+
+  async addCollabEvent(input: { projectId: string; participantId?: string | null; action: CollabEventAction; actor: CoreActor; details?: Record<string, unknown> }) {
+    checkCollabEvent(input);
+    const { rows } = await this.q(
+      `INSERT INTO collab_events (project_id, participant_id, action, actor, details) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [input.projectId, input.participantId ?? null, input.action, input.actor, JSON.stringify(input.details ?? {})],
+    );
+    return toCollabEvent(rows[0]);
+  }
+
+  async listCollabEvents(projectId: string, f: { limit?: number } = {}) {
+    const { rows } = await this.q('SELECT * FROM collab_events WHERE project_id = $1 ORDER BY created_at DESC, id LIMIT $2', [projectId, Math.max(1, Math.min(f.limit ?? 100, 500))]);
+    return rows.map(toCollabEvent);
+  }
+
+  async listMembers(projectId: string) {
+    const { rows } = await this.q('SELECT user_id, role FROM project_members WHERE project_id = $1 ORDER BY added_at', [projectId]);
+    return rows.map((r: any) => ({ userId: r.user_id, role: r.role }));
   }
 
   async addQualityRun(input: QualityRunInput) {

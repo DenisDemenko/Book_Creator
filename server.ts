@@ -575,6 +575,8 @@ registerGitCommandRoutes(app);
   registerQualityRoutes(app, { repo: getCoreRepository, requireAdmin, makeDeps: realQualityDeps });
   // Реєстр схем (Т5.1): активна версія онтології — усім із входом; зміни — адмін.
   registerOntologyRoutes(app, { repo: getCoreRepository, requireAuth, requireAdmin });
+  // Онтологія співпраці й реєстр ролей (Т6.1) — той самий життєвий цикл, окрема адреса.
+  registerOntologyRoutes(app, { repo: getCoreRepository, requireAuth, requireAdmin }, { ontologyId: 'fusion-collab', base: '/api/core/collaboration/ontology' });
   registerProjectRoutes(app, {
     access: realtimeAccessDeps,
     repo: getCoreRepository,

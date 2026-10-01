@@ -45,6 +45,10 @@ import {
   checkOntologyVersionPatch,
   checkOntologyEvent,
   checkOntologyActor,
+  checkParticipant,
+  checkParticipantStatus,
+  checkParticipantRole,
+  checkCollabEvent,
   assertActor,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isSearchableKind, isValidEmbedding, memoryTextScore } from './search/text';
@@ -130,6 +134,12 @@ import type {
   OntologyEventRow,
   OntologyEventAction,
   OntologyUsage,
+  ParticipantRow,
+  ParticipantRoleRow,
+  ParticipantSource,
+  ParticipantStatus,
+  CollabEventRow,
+  CollabEventAction,
 } from './types';
 
 const key = (projectId: string, id: string) => `${projectId}\u0000${id}`;
@@ -177,6 +187,9 @@ export class MemoryCoreRepository implements CoreRepository {
   private qualityRuns: QualityRunRow[] = [];
   private ontologyVersions: OntologyVersionRow[] = [];
   private ontologyEvents: OntologyEventRow[] = [];
+  private participants: ParticipantRow[] = [];
+  private participantRoles: ParticipantRoleRow[] = [];
+  private collabEvents: CollabEventRow[] = [];
 
   private requireProject(projectId: string): ProjectRow {
     const p = this.projects.get(projectId);
@@ -1699,6 +1712,107 @@ export class MemoryCoreRepository implements CoreRepository {
     }
     for (const r of this.relations.values()) inc(usage.relations, r.type);
     return usage;
+  }
+
+  // ── Учасники проєкту (Т6.1 В2) ──────────────────────────────────────────
+
+  async upsertParticipant(input: { projectId: string; userId: string; source: ParticipantSource; sourceRef?: string | null; createdBy: CoreActor }) {
+    checkParticipant(input);
+    const found = this.participants.find((p) => p.projectId === input.projectId && p.userId === input.userId);
+    if (found) return { participant: clone(found), created: false };
+    const t = now();
+    const row: ParticipantRow = { id: randomUUID(), projectId: input.projectId, userId: input.userId, status: 'active', source: input.source, sourceRef: input.sourceRef ?? null, createdBy: input.createdBy, createdAt: t, updatedAt: t };
+    this.participants.push(row);
+    return { participant: clone(row), created: true };
+  }
+
+  async getParticipant(projectId: string, userId: string) {
+    const p = this.participants.find((x) => x.projectId === projectId && x.userId === userId);
+    return p ? clone(p) : null;
+  }
+
+  async getParticipantById(id: string) {
+    const p = this.participants.find((x) => x.id === id);
+    return p ? clone(p) : null;
+  }
+
+  async listParticipants(projectId: string) {
+    return this.participants.filter((p) => p.projectId === projectId).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map(clone);
+  }
+
+  async setParticipantStatus(id: string, status: ParticipantStatus) {
+    checkParticipantStatus(status);
+    const p = this.participants.find((x) => x.id === id);
+    if (!p) throw notFound(`Учасник «${id}»`);
+    p.status = status;
+    p.updatedAt = now();
+    return clone(p);
+  }
+
+  async addParticipantRole(input: { participantId: string; projectId: string; roleId: string; specialization?: string | null; assignedBy: CoreActor; registryVersion?: number | null }) {
+    checkParticipantRole(input);
+    const p = this.participants.find((x) => x.id === input.participantId);
+    if (!p || p.projectId !== input.projectId) throw notFound(`Учасник «${input.participantId}»`);
+    const spec = input.specialization ?? null;
+    if (this.participantRoles.some((r) => r.participantId === input.participantId && r.roleId === input.roleId && r.specialization === spec && r.status === 'active')) {
+      throw new CoreRuleError('conflict', 'Ця роль у учасника вже є');
+    }
+    const row: ParticipantRoleRow = { id: randomUUID(), participantId: input.participantId, projectId: input.projectId, roleId: input.roleId, specialization: spec, status: 'active', assignedBy: input.assignedBy, registryVersion: input.registryVersion ?? null, createdAt: now(), revokedAt: null, revokedBy: null };
+    this.participantRoles.push(row);
+    return clone(row);
+  }
+
+  async revokeParticipantRole(id: string, actor: CoreActor) {
+    checkOntologyActor(actor);
+    const r = this.participantRoles.find((x) => x.id === id);
+    if (!r) throw notFound(`Роль учасника «${id}»`);
+    if (r.status !== 'active') throw new CoreRuleError('conflict', 'Роль уже відкликано');
+    r.status = 'revoked';
+    r.revokedAt = now();
+    r.revokedBy = actor;
+    return clone(r);
+  }
+
+  async getParticipantRole(id: string) {
+    const r = this.participantRoles.find((x) => x.id === id);
+    return r ? clone(r) : null;
+  }
+
+  async listParticipantRoles(f: { projectId?: string; participantId?: string; roleId?: string; status?: 'active' | 'revoked' }) {
+    return this.participantRoles
+      .filter((r) => (!f.projectId || r.projectId === f.projectId) && (!f.participantId || r.participantId === f.participantId) && (!f.roleId || r.roleId === f.roleId) && (!f.status || r.status === f.status))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .map(clone);
+  }
+
+  async countActiveRoleAssignments() {
+    const out: Record<string, number> = {};
+    for (const r of this.participantRoles) if (r.status === 'active') {
+      out[r.roleId] = (out[r.roleId] ?? 0) + 1;
+      if (r.specialization) out[r.specialization] = (out[r.specialization] ?? 0) + 1;
+    }
+    return out;
+  }
+
+  async addCollabEvent(input: { projectId: string; participantId?: string | null; action: CollabEventAction; actor: CoreActor; details?: Record<string, unknown> }) {
+    checkCollabEvent(input);
+    const row: CollabEventRow = { id: randomUUID(), projectId: input.projectId, participantId: input.participantId ?? null, action: input.action, actor: input.actor, details: clone(input.details ?? {}), createdAt: now() };
+    this.collabEvents.push(row);
+    return clone(row);
+  }
+
+  async listCollabEvents(projectId: string, f: { limit?: number } = {}) {
+    const limit = Math.max(1, Math.min(f.limit ?? 100, 500));
+    return this.collabEvents.filter((e) => e.projectId === projectId).slice().reverse().slice(0, limit).map(clone);
+  }
+
+  async listMembers(projectId: string) {
+    const out: { userId: string; role: MemberRole }[] = [];
+    for (const [k, v] of this.members) {
+      const [pid, uid] = k.split('\u0000');
+      if (pid === projectId) out.push({ userId: uid, role: v.role });
+    }
+    return out;
   }
 
   async listSavedSearches(projectId: string, userId: string) {

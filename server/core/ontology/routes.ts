@@ -23,7 +23,7 @@
 import type { Express, NextFunction, Request, Response } from 'express';
 import type { CoreRepository } from '../types';
 import { CoreRuleError } from '../rules';
-import { FUSION_ONTOLOGY_ID, factoryOntology } from '../../../src/utils/ontology';
+import { FUSION_ONTOLOGY_ID } from '../../../src/utils/ontology';
 import {
   OntologyPublishError,
   archiveVersion,
@@ -36,6 +36,7 @@ import {
   publishDraft,
   rollbackTo,
   validateDraft,
+  domainOf,
 } from './lifecycle';
 
 export interface OntologyRoutesDeps {
@@ -59,10 +60,31 @@ function sendError(res: Response, err: unknown): void {
   res.status(500).json({ error: (err as Error)?.message || 'Помилка реєстру схем', kind: 'error' });
 }
 
-let factoryCache: { definition: ReturnType<typeof factoryOntology>; hash: string } | null = null;
-const factory = () => (factoryCache ??= { definition: factoryOntology(), hash: definitionHash(factoryOntology()) });
+const factoryCache = new Map<string, { definition: Record<string, unknown>; hash: string }>();
+const factory = (ontologyId: string) => {
+  let f = factoryCache.get(ontologyId);
+  if (!f) {
+    const definition = domainOf(ontologyId).factory();
+    f = { definition, hash: definitionHash(definition) };
+    factoryCache.set(ontologyId, f);
+  }
+  return f;
+};
 
-export function registerOntologyRoutes(app: Express, d: OntologyRoutesDeps): void {
+/**
+ * Маршрути однієї онтології реєстру схем: твору (`/api/core/ontology`, Т5.1)
+ * чи співпраці (`/api/core/collaboration/ontology`, Т6.1). Версія з чужої
+ * онтології за цією адресою — «не знайдено».
+ */
+export function registerOntologyRoutes(app: Express, d: OntologyRoutesDeps, opts: { ontologyId?: string; base?: string } = {}): void {
+  const ONTOLOGY = opts.ontologyId ?? FUSION_ONTOLOGY_ID;
+  const BASE = opts.base ?? '/api/core/ontology';
+  domainOf(ONTOLOGY);
+  const own = async (repo: CoreRepository, id: string) => {
+    const v = await repo.getOntologyVersion(id);
+    if (!v || v.ontologyId !== ONTOLOGY) throw new CoreRuleError('not_found', 'Версію онтології не знайдено');
+    return v;
+  };
   const actor = (req: Request) => `user:${req.principal?.id ?? 'admin'}`;
   const withRepo = (fn: (repo: CoreRepository, req: Request, res: Response) => Promise<void>) => async (req: Request, res: Response) => {
     const repo = d.repo();
@@ -78,14 +100,14 @@ export function registerOntologyRoutes(app: Express, d: OntologyRoutesDeps): voi
   };
 
   // get_schema / get_schema_version — те, що бачать редактор, чат і правила ядра.
-  app.get('/api/core/ontology', d.requireAuth, async (req: Request, res: Response) => {
+  app.get(BASE, d.requireAuth, async (req: Request, res: Response) => {
     try {
       const repo = d.repo();
-      const active = repo ? await repo.getActiveOntologyVersion(FUSION_ONTOLOGY_ID) : null;
-      const f = factory();
+      const active = repo ? await repo.getActiveOntologyVersion(ONTOLOGY) : null;
+      const f = factory(ONTOLOGY);
       const payload = active?.definition
         ? { ontologyId: active.ontologyId, version: active.version, label: active.label, hash: active.definitionHash, publishedAt: active.publishedAt, source: 'registry' as const, definition: active.definition }
-        : { ontologyId: FUSION_ONTOLOGY_ID, version: 0, label: 'вбудований', hash: f.hash, publishedAt: null, source: 'factory' as const, definition: f.definition };
+        : { ontologyId: ONTOLOGY, version: 0, label: 'вбудований', hash: f.hash, publishedAt: null, source: 'factory' as const, definition: f.definition };
       const etag = `"${payload.hash}"`;
       res.set('ETag', etag).set('Cache-Control', 'private, no-cache');
       if (req.headers['if-none-match'] === etag) {
@@ -98,62 +120,62 @@ export function registerOntologyRoutes(app: Express, d: OntologyRoutesDeps): voi
     }
   });
 
-  app.get('/api/core/ontology/versions', d.requireAdmin, withRepo(async (repo, _req, res) => {
-    const versions = await repo.listOntologyVersions(FUSION_ONTOLOGY_ID, { limit: 200 });
+  app.get(`${BASE}/versions`, d.requireAdmin, withRepo(async (repo, _req, res) => {
+    const versions = await repo.listOntologyVersions(ONTOLOGY, { limit: 200 });
     const draft = versions.find((v) => v.status === 'draft' || v.status === 'validated') ?? null;
-    res.json({ ontologyId: FUSION_ONTOLOGY_ID, active: versions.find((v) => v.status === 'active') ?? null, draft, versions });
+    res.json({ ontologyId: ONTOLOGY, active: versions.find((v) => v.status === 'active') ?? null, draft, versions });
   }));
 
-  app.get('/api/core/ontology/versions/:id', d.requireAdmin, withRepo(async (repo, req, res) => {
-    const v = await repo.getOntologyVersion(String(req.params.id));
-    if (!v) throw new CoreRuleError('not_found', 'Версію онтології не знайдено');
-    res.json({ version: v });
+  app.get(`${BASE}/versions/:id`, d.requireAdmin, withRepo(async (repo, req, res) => {
+    res.json({ version: await own(repo, String(req.params.id)) });
   }));
 
-  app.get('/api/core/ontology/events', d.requireAdmin, withRepo(async (repo, req, res) => {
+  app.get(`${BASE}/events`, d.requireAdmin, withRepo(async (repo, req, res) => {
     const versionId = typeof req.query.versionId === 'string' ? req.query.versionId : undefined;
-    res.json({ events: await repo.listOntologyEvents(FUSION_ONTOLOGY_ID, { versionId, limit: 500 }) });
+    if (versionId) await own(repo, versionId);
+    res.json({ events: await repo.listOntologyEvents(ONTOLOGY, { versionId, limit: 500 }) });
   }));
 
-  app.post('/api/core/ontology/drafts', d.requireAdmin, withRepo(async (repo, req, res) => {
+  app.post(`${BASE}/drafts`, d.requireAdmin, withRepo(async (repo, req, res) => {
     const b = req.body ?? {};
-    const draft = await createDraft(repo, { actor: actor(req), basedOn: b.basedOn || undefined, label: b.label, notes: b.notes });
+    if (b.basedOn) await own(repo, String(b.basedOn));
+    const draft = await createDraft(repo, { actor: actor(req), ontologyId: ONTOLOGY, basedOn: b.basedOn || undefined, label: b.label, notes: b.notes });
     res.status(201).json({ version: draft });
   }));
 
-  app.patch('/api/core/ontology/drafts/:id', d.requireAdmin, withRepo(async (repo, req, res) => {
+  app.patch(`${BASE}/drafts/:id`, d.requireAdmin, withRepo(async (repo, req, res) => {
     const b = req.body ?? {};
     const expected = b.expectedRevision === undefined || b.expectedRevision === null ? undefined : Number(b.expectedRevision);
     if (expected !== undefined && !Number.isInteger(expected)) throw new CoreRuleError('bad_input', 'expectedRevision — ціле число');
-    res.json({ version: await editDraft(repo, String(req.params.id), { actor: actor(req), ops: b.ops, expectedRevision: expected }) });
+    res.json({ version: await editDraft(repo, (await own(repo, String(req.params.id))).id, { actor: actor(req), ops: b.ops, expectedRevision: expected }) });
   }));
 
-  app.post('/api/core/ontology/drafts/:id/validate', d.requireAdmin, withRepo(async (repo, req, res) => {
-    res.json(await validateDraft(repo, String(req.params.id), actor(req)));
+  app.post(`${BASE}/drafts/:id/validate`, d.requireAdmin, withRepo(async (repo, req, res) => {
+    res.json(await validateDraft(repo, (await own(repo, String(req.params.id))).id, actor(req)));
   }));
 
-  app.get('/api/core/ontology/drafts/:id/preview', d.requireAdmin, withRepo(async (repo, req, res) => {
-    res.json(await previewDraft(repo, String(req.params.id)));
+  app.get(`${BASE}/drafts/:id/preview`, d.requireAdmin, withRepo(async (repo, req, res) => {
+    res.json(await previewDraft(repo, (await own(repo, String(req.params.id))).id));
   }));
 
-  app.post('/api/core/ontology/drafts/:id/impact', d.requireAdmin, withRepo(async (repo, req, res) => {
-    res.json(await impactDraft(repo, String(req.params.id), actor(req)));
+  app.post(`${BASE}/drafts/:id/impact`, d.requireAdmin, withRepo(async (repo, req, res) => {
+    res.json(await impactDraft(repo, (await own(repo, String(req.params.id))).id, actor(req)));
   }));
 
-  app.post('/api/core/ontology/drafts/:id/publish', d.requireAdmin, withRepo(async (repo, req, res) => {
-    res.json({ version: await publishDraft(repo, String(req.params.id), actor(req)) });
+  app.post(`${BASE}/drafts/:id/publish`, d.requireAdmin, withRepo(async (repo, req, res) => {
+    res.json({ version: await publishDraft(repo, (await own(repo, String(req.params.id))).id, actor(req)) });
   }));
 
-  app.post('/api/core/ontology/versions/:id/rollback', d.requireAdmin, withRepo(async (repo, req, res) => {
-    res.json({ version: await rollbackTo(repo, String(req.params.id), actor(req)) });
+  app.post(`${BASE}/versions/:id/rollback`, d.requireAdmin, withRepo(async (repo, req, res) => {
+    res.json({ version: await rollbackTo(repo, (await own(repo, String(req.params.id))).id, actor(req)) });
   }));
 
-  app.post('/api/core/ontology/versions/:id/archive', d.requireAdmin, withRepo(async (repo, req, res) => {
-    res.json({ version: await archiveVersion(repo, String(req.params.id), actor(req)) });
+  app.post(`${BASE}/versions/:id/archive`, d.requireAdmin, withRepo(async (repo, req, res) => {
+    res.json({ version: await archiveVersion(repo, (await own(repo, String(req.params.id))).id, actor(req)) });
   }));
 
   // Відкрита чернетка одним запитом (зручно канві Т5.2).
-  app.get('/api/core/ontology/draft', d.requireAdmin, withRepo(async (repo, _req, res) => {
-    res.json({ version: await openDraft(repo) });
+  app.get(`${BASE}/draft`, d.requireAdmin, withRepo(async (repo, _req, res) => {
+    res.json({ version: await openDraft(repo, ONTOLOGY) });
   }));
 }
