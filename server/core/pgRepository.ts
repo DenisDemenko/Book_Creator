@@ -50,6 +50,7 @@ import {
   checkParticipantStatus,
   checkParticipantRole,
   checkCollabEvent,
+  checkAccessGrant,
   assertActor,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isValidEmbedding, SEARCHABLE_KINDS, tsQueryFromStems } from './search/text';
@@ -140,6 +141,8 @@ import type {
   ParticipantStatus,
   CollabEventRow,
   CollabEventAction,
+  AccessGrantInput,
+  AccessGrantRow,
 } from './types';
 
 type Q = Pool | PoolClient;
@@ -203,6 +206,13 @@ function toParticipantRole(r: any): ParticipantRoleRow {
   return {
     id: r.id, participantId: r.participant_id, projectId: r.project_id, roleId: r.role_id, specialization: r.specialization ?? null, status: r.status,
     assignedBy: r.assigned_by, registryVersion: r.registry_version == null ? null : Number(r.registry_version), createdAt: iso(r.created_at), revokedAt: isoOrNull(r.revoked_at), revokedBy: r.revoked_by ?? null,
+  };
+}
+function toAccessGrant(r: any): AccessGrantRow {
+  return {
+    id: r.id, projectId: r.project_id, participantId: r.participant_id, level: r.level, scopeType: r.scope_type, scopeRef: r.scope_ref ?? null,
+    validFrom: iso(r.valid_from), validUntil: isoOrNull(r.valid_until), status: r.status, source: r.source, sourceRef: r.source_ref ?? null,
+    grantedBy: r.granted_by, createdAt: iso(r.created_at), revokedAt: isoOrNull(r.revoked_at), revokedBy: r.revoked_by ?? null,
   };
 }
 function toCollabEvent(r: any): CollabEventRow {
@@ -2465,6 +2475,43 @@ export class PgCoreRepository implements CoreRepository {
   async listCollabEvents(projectId: string, f: { limit?: number } = {}) {
     const { rows } = await this.q('SELECT * FROM collab_events WHERE project_id = $1 ORDER BY created_at DESC, id LIMIT $2', [projectId, Math.max(1, Math.min(f.limit ?? 100, 500))]);
     return rows.map(toCollabEvent);
+  }
+
+  // ── Наданий доступ (Т6.2 В1) ────────────────────────────────────────────
+
+  async addAccessGrant(input: AccessGrantInput) {
+    checkAccessGrant(input);
+    const p = await this.getParticipantById(input.participantId);
+    if (!p || p.projectId !== input.projectId) throw notFound(`Учасник «${input.participantId}»`);
+    const { rows } = await this.q(
+      `INSERT INTO access_grants (project_id, participant_id, level, scope_type, scope_ref, valid_from, valid_until, source, source_ref, granted_by)
+       VALUES ($1, $2, $3, $4, $5, COALESCE($6::timestamptz, now()), $7, $8, $9, $10) RETURNING *`,
+      [input.projectId, input.participantId, input.level, input.scopeType, input.scopeRef ?? null, input.validFrom ?? null, input.validUntil ?? null, input.source ?? 'manual', input.sourceRef ?? null, input.grantedBy],
+    );
+    return toAccessGrant(rows[0]);
+  }
+
+  async getAccessGrant(id: string) {
+    if (!isUuid(id)) return null;
+    const { rows } = await this.q('SELECT * FROM access_grants WHERE id = $1', [id]);
+    return rows[0] ? toAccessGrant(rows[0]) : null;
+  }
+
+  async listAccessGrants(f: { projectId?: string; participantId?: string; status?: 'active' | 'revoked' }) {
+    if (f.participantId && !isUuid(f.participantId)) return [];
+    const { rows } = await this.q(
+      `SELECT * FROM access_grants WHERE ($1::text IS NULL OR project_id = $1) AND ($2::uuid IS NULL OR participant_id = $2) AND ($3::text IS NULL OR status = $3) ORDER BY created_at, id`,
+      [f.projectId ?? null, f.participantId ?? null, f.status ?? null],
+    );
+    return rows.map(toAccessGrant);
+  }
+
+  async revokeAccessGrant(id: string, actor: CoreActor) {
+    checkOntologyActor(actor);
+    if (!(await this.getAccessGrant(id))) throw notFound(`Доступ «${id}»`);
+    const { rows } = await this.q(`UPDATE access_grants SET status = 'revoked', revoked_at = now(), revoked_by = $2 WHERE id = $1 AND status = 'active' RETURNING *`, [id, actor]);
+    if (!rows[0]) throw new CoreRuleError('conflict', 'Доступ уже відкликано');
+    return toAccessGrant(rows[0]);
   }
 
   async listMembers(projectId: string) {

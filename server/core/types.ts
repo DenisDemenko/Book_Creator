@@ -1006,7 +1006,7 @@ export interface ParticipantRoleRow {
   revokedBy: CoreActor | null;
 }
 
-export const COLLAB_EVENT_ACTIONS = ['participant_added', 'participant_status', 'role_assigned', 'role_revoked', 'legacy_import'] as const;
+export const COLLAB_EVENT_ACTIONS = ['participant_added', 'participant_status', 'role_assigned', 'role_revoked', 'legacy_import', 'access_granted', 'access_revoked'] as const;
 export type CollabEventAction = (typeof COLLAB_EVENT_ACTIONS)[number];
 
 export interface CollabEventRow {
@@ -1018,6 +1018,37 @@ export interface CollabEventRow {
   details: Record<string, unknown>;
   createdAt: string;
 }
+
+// ── Наданий доступ (Т6.2 В1) ─────────────────────────────────────────────────
+
+/** Рівні за зростанням; `work` — робочий доступ до медіатеки (перегляд і власні завантаження). */
+export const ACCESS_LEVELS = ['view', 'comment', 'review', 'edit', 'create', 'approve', 'manage', 'work'] as const;
+export type AccessLevel = (typeof ACCESS_LEVELS)[number];
+export const ACCESS_SCOPES = ['book', 'chapter', 'scene', 'character', 'location', 'media_library', 'style_bible', 'task', 'deliverable'] as const;
+export type AccessScope = (typeof ACCESS_SCOPES)[number];
+export const ACCESS_SOURCES = ['manual', 'admin', 'legacy_invite'] as const;
+export type AccessSource = (typeof ACCESS_SOURCES)[number];
+
+export interface AccessGrantRow {
+  id: string;
+  projectId: string;
+  participantId: string;
+  level: AccessLevel;
+  scopeType: AccessScope;
+  scopeRef: string | null;
+  validFrom: string;
+  validUntil: string | null;
+  status: 'active' | 'revoked';
+  source: AccessSource;
+  sourceRef: string | null;
+  grantedBy: CoreActor;
+  createdAt: string;
+  revokedAt: string | null;
+  revokedBy: CoreActor | null;
+}
+
+export type AccessGrantInput = Pick<AccessGrantRow, 'projectId' | 'participantId' | 'level' | 'scopeType' | 'grantedBy'> &
+  Partial<Pick<AccessGrantRow, 'scopeRef' | 'validFrom' | 'validUntil' | 'source' | 'sourceRef'>>;
 
 /** Збережений пошуковий запит автора (Т1.3). */
 export interface SavedSearchRow {
@@ -1279,6 +1310,12 @@ export interface CoreRepository {
   listCollabEvents(projectId: string, filter?: { limit?: number }): Promise<CollabEventRow[]>;
   /** Рядки старої таблиці `project_members` (для перенесення в учасників). */
   listMembers(projectId: string): Promise<{ userId: string; role: MemberRole }[]>;
+
+  /** Т6.2 В1: наданий доступ. Перелік — у порядку створення; без `status` — усі записи (зокрема відкликані). */
+  addAccessGrant(input: AccessGrantInput): Promise<AccessGrantRow>;
+  getAccessGrant(id: string): Promise<AccessGrantRow | null>;
+  listAccessGrants(filter: { projectId?: string; participantId?: string; status?: 'active' | 'revoked' }): Promise<AccessGrantRow[]>;
+  revokeAccessGrant(id: string, actor: CoreActor): Promise<AccessGrantRow>;
 
   /** Збережені запити автора в книзі (Т1.3), новіші першими. */
   listSavedSearches(projectId: string, userId: string): Promise<SavedSearchRow[]>;

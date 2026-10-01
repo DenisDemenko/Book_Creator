@@ -70,6 +70,10 @@ import {
   PARTICIPANT_STATUSES,
   PARTICIPANT_SOURCES,
   COLLAB_EVENT_ACTIONS,
+  ACCESS_LEVELS,
+  ACCESS_SCOPES,
+  ACCESS_SOURCES,
+  type AccessGrantInput,
   AUTONOMY_LEVELS,
   SIMULATION_KINDS,
   SIMULATION_STATUSES,
@@ -678,4 +682,26 @@ export function checkCollabEvent(input: { action: string; actor: CoreActor; deta
   checkOntologyActor(input.actor);
   if (!(COLLAB_EVENT_ACTIONS as readonly string[]).includes(input.action)) throw new CoreRuleError('bad_input', `Невідома дія участі «${input.action}»`);
   if (input.details !== undefined && !objectLike(input.details)) throw new CoreRuleError('bad_input', 'Подробиці — обʼєкт');
+}
+
+// ── Наданий доступ (Т6.2 В1) ─────────────────────────────────────────────────
+
+export function checkAccessGrant(input: AccessGrantInput): void {
+  if (typeof input.grantedBy === 'string' && input.grantedBy.startsWith('ai:')) throw new CoreRuleError('bad_actor', 'Доступ надає людина чи система, не AI (ТЗ v3 №44)');
+  checkOntologyActor(input.grantedBy);
+  if (!input.projectId || String(input.projectId).length > 200) throw new CoreRuleError('bad_input', 'id проєкту — від 1 до 200 символів');
+  if (!(ACCESS_LEVELS as readonly string[]).includes(input.level)) throw new CoreRuleError('bad_input', `Невідомий рівень доступу «${input.level}»`);
+  if (!(ACCESS_SCOPES as readonly string[]).includes(input.scopeType)) throw new CoreRuleError('bad_input', `Невідома область доступу «${input.scopeType}»`);
+  if (input.source !== undefined && !(ACCESS_SOURCES as readonly string[]).includes(input.source)) throw new CoreRuleError('bad_input', `Невідоме джерело доступу «${input.source}»`);
+  const needsRef = !['book', 'media_library'].includes(input.scopeType);
+  if (needsRef && (!input.scopeRef || String(input.scopeRef).length > 200)) throw new CoreRuleError('bad_input', `Область «${input.scopeType}» потребує id (розділу, сцени, сутності…)`);
+  if (!needsRef && input.scopeRef) throw new CoreRuleError('bad_input', `Область «${input.scopeType}» — без id`);
+  if (input.level === 'work' && input.scopeType !== 'media_library') throw new CoreRuleError('bad_input', 'Робочий доступ (work) — лише до медіатеки');
+  const from = input.validFrom ? Date.parse(input.validFrom) : Date.now();
+  if (input.validFrom && !Number.isFinite(from)) throw new CoreRuleError('bad_input', 'validFrom — дата ISO');
+  if (input.validUntil != null) {
+    const until = Date.parse(input.validUntil);
+    if (!Number.isFinite(until)) throw new CoreRuleError('bad_input', 'validUntil — дата ISO');
+    if (until <= from) throw new CoreRuleError('bad_input', 'Строк дії має закінчуватися пізніше, ніж починається');
+  }
 }

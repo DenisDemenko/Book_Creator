@@ -49,6 +49,7 @@ import {
   checkParticipantStatus,
   checkParticipantRole,
   checkCollabEvent,
+  checkAccessGrant,
   assertActor,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isSearchableKind, isValidEmbedding, memoryTextScore } from './search/text';
@@ -140,6 +141,8 @@ import type {
   ParticipantStatus,
   CollabEventRow,
   CollabEventAction,
+  AccessGrantInput,
+  AccessGrantRow,
 } from './types';
 
 const key = (projectId: string, id: string) => `${projectId}\u0000${id}`;
@@ -190,6 +193,7 @@ export class MemoryCoreRepository implements CoreRepository {
   private participants: ParticipantRow[] = [];
   private participantRoles: ParticipantRoleRow[] = [];
   private collabEvents: CollabEventRow[] = [];
+  private accessGrants: AccessGrantRow[] = [];
 
   private requireProject(projectId: string): ProjectRow {
     const p = this.projects.get(projectId);
@@ -1804,6 +1808,42 @@ export class MemoryCoreRepository implements CoreRepository {
   async listCollabEvents(projectId: string, f: { limit?: number } = {}) {
     const limit = Math.max(1, Math.min(f.limit ?? 100, 500));
     return this.collabEvents.filter((e) => e.projectId === projectId).slice().reverse().slice(0, limit).map(clone);
+  }
+
+  // ── Наданий доступ (Т6.2 В1) ────────────────────────────────────────────
+
+  async addAccessGrant(input: AccessGrantInput) {
+    checkAccessGrant(input);
+    const p = this.participants.find((x) => x.id === input.participantId);
+    if (!p || p.projectId !== input.projectId) throw notFound(`Учасник «${input.participantId}»`);
+    const t = now();
+    const row: AccessGrantRow = {
+      id: randomUUID(), projectId: input.projectId, participantId: input.participantId, level: input.level, scopeType: input.scopeType, scopeRef: input.scopeRef ?? null,
+      validFrom: input.validFrom ? new Date(input.validFrom).toISOString() : t, validUntil: input.validUntil ? new Date(input.validUntil).toISOString() : null,
+      status: 'active', source: input.source ?? 'manual', sourceRef: input.sourceRef ?? null, grantedBy: input.grantedBy, createdAt: t, revokedAt: null, revokedBy: null,
+    };
+    this.accessGrants.push(row);
+    return clone(row);
+  }
+
+  async getAccessGrant(id: string) {
+    const g = this.accessGrants.find((x) => x.id === id);
+    return g ? clone(g) : null;
+  }
+
+  async listAccessGrants(f: { projectId?: string; participantId?: string; status?: 'active' | 'revoked' }) {
+    return this.accessGrants.filter((g) => (!f.projectId || g.projectId === f.projectId) && (!f.participantId || g.participantId === f.participantId) && (!f.status || g.status === f.status)).map(clone);
+  }
+
+  async revokeAccessGrant(id: string, actor: CoreActor) {
+    checkOntologyActor(actor);
+    const g = this.accessGrants.find((x) => x.id === id);
+    if (!g) throw notFound(`Доступ «${id}»`);
+    if (g.status !== 'active') throw new CoreRuleError('conflict', 'Доступ уже відкликано');
+    g.status = 'revoked';
+    g.revokedAt = now();
+    g.revokedBy = actor;
+    return clone(g);
   }
 
   async listMembers(projectId: string) {
