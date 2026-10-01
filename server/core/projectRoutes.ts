@@ -13,9 +13,9 @@
  * власнику й адміністратору, `project` — усім учасникам.
  */
 
-import { studioRoleFor } from '../../src/utils/collabOntology';
 import type { Express, NextFunction, Request, RequestHandler, Response } from 'express';
-import { isValidBookId, type RealtimeAccessDeps } from '../realtimeAuth';
+import { isValidBookId, participantAccess, type RealtimeAccessDeps } from '../realtimeAuth';
+import { canRead, canWrite as levelWrites, computeEffective, describeAccess, entityLevel, type EffectiveAccess } from './collaboration/access';
 import { CoreRuleError } from './rules';
 import type { CoreRepository, FindingRow } from './types';
 import { JobRejectedError } from './jobs/types';
@@ -69,6 +69,8 @@ export interface ProjectAccess {
   role: string;
   isOwner: boolean;
   canWrite: boolean;
+  /** Т6.2: фактичні права з наданих доступів (власник і адмін — `full`). */
+  effective: EffectiveAccess;
 }
 
 declare module 'express-serve-static-core' {
@@ -92,11 +94,16 @@ export async function resolveProjectAccess(
   const userId = principal.id;
   const collabOwner = await deps.getCollabOwnerId(projectId);
   const owner = collabOwner ?? (await deps.getBookOwnerId(projectId)) ?? undefined;
-  if (owner && owner === userId) return { projectId, userId, role: 'owner', isOwner: true, canWrite: true };
-  if (principal.role === 'admin') return { projectId, userId, role: 'admin', isOwner: false, canWrite: true };
+  const full = () => computeEffective(projectId, userId, [], { full: true });
+  if (owner && owner === userId) return { projectId, userId, role: 'owner', isOwner: true, canWrite: true, effective: full() };
+  if (principal.role === 'admin') return { projectId, userId, role: 'admin', isOwner: false, canWrite: true, effective: full() };
   if (owner) {
-    const invite = (await deps.listAcceptedInvites(projectId)).find((inv) => inv.acceptedUserId === userId);
-    if (invite) return { projectId, userId, role: invite.role, isOwner: false, canWrite: (studioRoleFor(invite.role) ?? 'reader') !== 'reader' };
+    // Т6.2: права учасника — з наданих доступів (без ядра — за запрошенням);
+    // ядро недоступне — закрито.
+    const found = await participantAccess(projectId, userId, deps);
+    if (found && found !== 'unavailable') {
+      return { projectId, userId, role: found.inviteRole ?? 'participant', isOwner: false, canWrite: levelWrites(found.eff.book), effective: found.eff };
+    }
   }
   return null;
 }
@@ -129,6 +136,23 @@ export interface ProjectRoutesDeps {
   visualImage?: (projectId: string, assetUrl: string, actor: string) => Promise<{ mimeType: string; data: string } | null>;
   /** Т2.3 В6: генерація зображення від сутності (лише за командою автора). */
   visualGeneration?: VisualGenerationDeps;
+  /**
+   * Т6.2: медіатека книги — файли власника книги (і учасників із робочим
+   * доступом), прив'язані до цієї книги. Без неї маршрути медіатеки — 404.
+   */
+  media?: ProjectMediaDeps;
+}
+
+export interface ProjectMediaAsset {
+  id: string;
+  ownerId: string;
+  bookId: string | null;
+  mimeType: string;
+  [k: string]: unknown;
+}
+export interface ProjectMediaDeps {
+  listAssets(ownerId: string, opts: { bookId: string }): Promise<ProjectMediaAsset[]>;
+  readAsset(id: string): Promise<{ record: ProjectMediaAsset; bytes: Uint8Array } | null>;
 }
 
 /** Генерація від сутності (Т2.3 В6): сам виклик моделі й черга задач — у сервері Студії. */
@@ -198,7 +222,37 @@ export function parseSearchParams(src: Record<string, unknown>) {
   };
 }
 
-export function requireProjectAccess(deps: Pick<ProjectRoutesDeps, 'access'>) {
+/**
+ * Т6.2: що відкрито ОБМЕЖЕНОМУ учаснику (на книгу немає навіть перегляду).
+ * Усе інше — 403 `scope_restricted`: пошук, граф, хронологія, профілі з
+ * цитатами, допит, ШІ — у них зміст усієї книги. Сутність — лише та, на яку
+ * є доступ (персонаж, локація).
+ */
+const RESTRICTED_ROUTES: Array<{ re: RegExp; entity?: boolean }> = [
+  { re: /^\/access\/?$/ },
+  { re: /^\/entities\/?$/ },
+  { re: /^\/entities\/([^/]+)\/?$/, entity: true },
+  { re: /^\/visual\/portrait\/([^/]+)\/?$/, entity: true },
+  { re: /^\/visual\/appearance\/([^/]+)\/?$/, entity: true },
+  { re: /^\/media\/?$/ },
+  { re: /^\/media\/file\/([^/]+)\/?$/ },
+];
+
+/** Чи пускати обмеженого учасника за цією адресою (шлях — після `/api/projects/:id`). */
+export async function restrictedAllows(path: string, method: string, eff: EffectiveAccess, repo: CoreRepository | null): Promise<boolean> {
+  if (method !== 'GET' && method !== 'HEAD') return false;
+  for (const r of RESTRICTED_ROUTES) {
+    const m = r.re.exec(path);
+    if (!m) continue;
+    if (!r.entity) return true;
+    if (!repo) return true; // далі маршрут сам відповість 503
+    const e = await repo.getEntity(eff.projectId, decodeURIComponent(m[1]));
+    return !!e && canRead(entityLevel(eff, e.type, e.id)) && (e.type === 'character' || e.type === 'location');
+  }
+  return false;
+}
+
+export function requireProjectAccess(deps: Pick<ProjectRoutesDeps, 'access'> & Partial<Pick<ProjectRoutesDeps, 'repo'>>) {
   return async (req: Request, res: Response, next: NextFunction) => {
     const principal = (req as any).principal as Principal | undefined;
     if (!principal || principal.isGuest) {
@@ -212,6 +266,10 @@ export function requireProjectAccess(deps: Pick<ProjectRoutesDeps, 'access'>) {
         return;
       }
       req.projectAccess = access;
+      if (access.effective.restricted && !(await restrictedAllows(req.path, req.method, access.effective, deps.repo?.() ?? null))) {
+        res.status(403).json({ error: 'Ваш доступ до цієї книги обмежений: це вам не надано.', kind: 'scope_restricted' });
+        return;
+      }
       next();
     } catch (err) {
       next(err);
@@ -224,8 +282,9 @@ export function requireProjectAccess(deps: Pick<ProjectRoutesDeps, 'access'>) {
  * адміністратор, співавтор і редактор. Дизайнер, перекладач, видавець і
  * читач бачать граф, але не змінюють його.
  */
-export function canEditStory(access: ProjectAccess): boolean {
-  return access.isOwner || access.role === 'admin' || access.role === 'coauthor' || access.role === 'co_author' || access.role === 'editor';
+export function canEditStory(access: Pick<ProjectAccess, 'isOwner' | 'role' | 'canWrite'>): boolean {
+  // Т6.2: роль лише звужує — потрібне ще й надане редагування книги.
+  return access.isOwner || access.role === 'admin' || (access.canWrite && (access.role === 'coauthor' || access.role === 'co_author' || access.role === 'editor'));
 }
 
 function visibleTo(access: ProjectAccess) {
@@ -266,7 +325,72 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
 
   /** Хто я в проєкті — для інтерфейсу сторінок (що показувати, що дозволити). */
   app.get('/api/projects/:id/access', (req, res) => {
-    res.json({ access: req.projectAccess, core: deps.coreState() });
+    const { effective, ...access } = req.projectAccess!;
+    res.json({ access: { ...access, effective: describeAccess(effective) }, core: deps.coreState() });
+  });
+
+  // ── Т6.2: медіатека книги за наданим доступом ──────────────────────────────
+
+  /** Чиї файли належать медіатеці книги: власник і учасники з робочим доступом. */
+  const mediaOwners = async (projectId: string): Promise<Set<string>> => {
+    const owners = new Set<string>();
+    const owner = (await deps.access.getCollabOwnerId(projectId)) ?? (await deps.access.getBookOwnerId(projectId)) ?? null;
+    if (owner) owners.add(owner);
+    const repo = deps.repo();
+    if (repo) {
+      const now = Date.now();
+      const workers = (await repo.listAccessGrants({ projectId, status: 'active' }))
+        .filter((g) => g.scopeType === 'media_library' && g.level === 'work' && Date.parse(g.validFrom) <= now && (!g.validUntil || Date.parse(g.validUntil) > now));
+      for (const g of workers) {
+        const p = await repo.getParticipantById(g.participantId);
+        if (p && p.status === 'active') owners.add(p.userId);
+      }
+    }
+    return owners;
+  };
+  const mediaDenied = (req: Request, res: Response): boolean => {
+    if (!deps.media) {
+      res.status(404).json({ error: 'Медіатека книги недоступна.', kind: 'not_found' });
+      return true;
+    }
+    if (req.projectAccess!.effective.media === 'none') {
+      res.status(403).json({ error: 'Доступу до медіатеки цієї книги вам не надано.', kind: 'scope_restricted' });
+      return true;
+    }
+    return false;
+  };
+
+  /** Файли медіатеки книги (опис, без байтів). */
+  app.get('/api/projects/:id/media', async (req, res) => {
+    if (mediaDenied(req, res)) return;
+    try {
+      const owners = await mediaOwners(req.params.id);
+      const lists = await Promise.all([...owners].map((o) => deps.media!.listAssets(o, { bookId: req.params.id })));
+      const assets = lists.flat().filter((a) => a.bookId === req.params.id);
+      res.json({ assets, media: req.projectAccess!.effective.media });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  /** Байти файлу медіатеки книги. Файл не з цієї книги чи чужого автора — 404. */
+  app.get('/api/projects/:id/media/file/:assetId', async (req, res) => {
+    if (mediaDenied(req, res)) return;
+    try {
+      const found = await deps.media!.readAsset(String(req.params.assetId || ''));
+      if (!found || found.record.bookId !== req.params.id || !(await mediaOwners(req.params.id)).has(found.record.ownerId)) {
+        res.status(404).json({ error: 'Файл не знайдено.', kind: 'not_found' });
+        return;
+      }
+      res.setHeader('Content-Type', found.record.mimeType);
+      res.setHeader('Content-Length', String(found.bytes.length));
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      if (found.record.mimeType === 'image/svg+xml') res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+      res.setHeader('Cache-Control', 'private, max-age=3600');
+      res.end(Buffer.from(found.bytes));
+    } catch (err) {
+      fail(res, err);
+    }
   });
 
   /** Підсумок ядра для сторінок: скільки абзаців, сутностей за типами, зв'язків, висновків. */
@@ -307,9 +431,12 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
     const type = typeof req.query.type === 'string' && req.query.type ? req.query.type : undefined;
     const includeRejected = req.query.includeRejected === '1';
     const [entities, counts] = await Promise.all([repo.listEntities(req.params.id, type), repo.countMentionsByEntity(req.params.id)]);
+    const eff = req.projectAccess!.effective;
     res.json({
       entities: entities
         .filter((e) => includeRejected || e.status !== 'rejected')
+        // Т6.2: обмеженому — лише герої й локації, на які надано доступ.
+        .filter((e) => !eff.restricted || ((e.type === 'character' || e.type === 'location') && canRead(entityLevel(eff, e.type, e.id))))
         .map((e) => ({ ...e, mentions: counts[e.id] ?? 0 })),
     });
   }));
@@ -320,6 +447,12 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
     const entity = await repo.getEntity(id, entityId);
     if (!entity) {
       res.status(404).json({ error: 'Сутність не знайдено в цьому проєкті.', kind: 'not_found' });
+      return;
+    }
+    if (req.projectAccess!.effective.restricted) {
+      // Т6.2: сама картка без згадок, зв'язків і висновків — у них текст інших сцен.
+      const aliases = await repo.listAliases(id, entityId);
+      res.json({ entity, aliases: aliases.map((a) => ({ alias: a.alias, kind: a.kind })), mentions: [], relations: [], findings: [], restricted: true });
       return;
     }
     const [aliases, mentions, relations, findings] = await Promise.all([
@@ -1423,7 +1556,8 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
   app.get('/api/projects/:id/visual/appearance/:entityId', withRepo(async (repo, req, res) => {
     const e = await heroOr404(repo, req, res);
     if (!e) return;
-    const chapters = await chapterList(repo, req.params.id);
+    // Т6.2: обмеженому — без переліку розділів книги.
+    const chapters = req.projectAccess!.effective.restricted ? [] : await chapterList(repo, req.params.id);
     const n = Number(req.query.chapter);
     const upto = Number.isInteger(n) && n >= 1 ? Math.min(n, Math.max(1, chapters.length)) : null;
     const view = await appearanceOverview(repo, req.params.id, e.id, await heroCard(req.params.id, e), upto);

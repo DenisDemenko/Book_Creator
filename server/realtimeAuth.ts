@@ -26,9 +26,13 @@
  *     демо-книги в різних людей).
  *   • Гість без сесії — не підключається.
  * Роль і право писати визначає сервер: учасник із роллю `reader` лише читає.
+ *
+ * Т6.2 (`PLAN_ACCESS.md`): права учасника — з наданих доступів; частковий
+ * доступ (сцена, розділ) кімната фільтрує (`scoped`), а якщо ядро недоступне —
+ * учаснику закрито.
  */
-import { studioRoleFor } from '../src/utils/collabOntology';
 import crypto from 'node:crypto';
+import { hasAnyAccess, isScoped, legacyEffective, type EffectiveAccess, type EffectiveResolver } from './core/collaboration/access';
 
 export interface RealtimeAccess {
   roomKey: string;
@@ -37,6 +41,13 @@ export interface RealtimeAccess {
   role: string;
   canWrite: boolean;
   shared: boolean;
+  /**
+   * Т6.2: частковий доступ (книгу цілком не редагує) — кімната фільтрує для
+   * нього видачу й приймає лише правки дозволених сцен.
+   */
+  scoped?: boolean;
+  /** Т6.2: на книгу немає навіть перегляду — бачить лише дозволене. */
+  restricted?: boolean;
 }
 
 export interface RealtimeAccessDeps {
@@ -45,7 +56,34 @@ export interface RealtimeAccessDeps {
   /** Власник спільної роботи (`book_collab_owners`), або undefined. */
   getCollabOwnerId(bookId: string): Promise<string | undefined>;
   /** Прийняті запрошення книги. */
-  listAcceptedInvites(bookId: string): Promise<{ acceptedUserId?: string; role: string }[]>;
+  listAcceptedInvites(bookId: string): Promise<{ id?: string; acceptedUserId?: string; role: string }[]>;
+  /**
+   * Т6.2: фактичні права учасника з наданих доступів (`access_grants`).
+   * Немає — стара схема (запрошення = вся книга); `null` — ядра немає;
+   * `'unavailable'` — ядро недоступне: учаснику закрито.
+   */
+  effectiveAccess?: EffectiveResolver;
+}
+
+/**
+ * Фактичні права не-власника в книзі, або null — нічого. `'unavailable'` —
+ * перевірити не вдалося (закрито).
+ */
+export async function participantAccess(
+  bookId: string,
+  userId: string,
+  deps: RealtimeAccessDeps,
+): Promise<{ eff: EffectiveAccess; inviteRole: string | null } | 'unavailable' | null> {
+  const invite = (await deps.listAcceptedInvites(bookId)).find((inv) => inv.acceptedUserId === userId) ?? null;
+  let eff: EffectiveAccess | null = null;
+  if (deps.effectiveAccess) {
+    const r = await deps.effectiveAccess({ projectId: bookId, userId, invite: invite ? { id: invite.id, role: invite.role } : null });
+    if (r === 'unavailable') return invite ? 'unavailable' : null;
+    eff = r;
+  }
+  if (!eff && invite) eff = legacyEffective(bookId, userId, invite.role);
+  if (!eff || !hasAnyAccess(eff)) return null;
+  return { eff, inviteRole: invite?.role ?? null };
 }
 
 export interface RealtimePrincipal {
@@ -80,17 +118,21 @@ export async function resolveRealtimeAccess(
   }
 
   if (owner) {
-    const invites = await deps.listAcceptedInvites(bookId);
-    const mine = invites.find((inv) => inv.acceptedUserId === userId);
-    if (mine) {
+    const found = await participantAccess(bookId, userId, deps);
+    // Ядро недоступне — учаснику закрито (а не «вся книга»): Т6.2.
+    if (found === 'unavailable') return null;
+    if (found) {
       return {
         roomKey: `book:${bookId}`,
         bookId,
         userId,
-        role: mine.role,
-        // Пише той, чия роль із реєстру (Т6.1) веде не в простір читача; старе `reader` — читач.
-        canWrite: (studioRoleFor(mine.role) ?? 'reader') !== 'reader',
+        role: found.inviteRole ?? 'participant',
+        // Пише той, кому надано редагування хоч чогось у тексті (Т6.2);
+        // частковий доступ кімната ще й фільтрує.
+        canWrite: found.eff.canWriteAny,
         shared: true,
+        scoped: isScoped(found.eff),
+        restricted: found.eff.restricted,
       };
     }
   }
@@ -156,6 +198,8 @@ export function verifyRealtimeTicket(ticket: unknown, now = Date.now()): Realtim
     role: String(data.role || 'writer'),
     canWrite: data.canWrite === true,
     shared: data.shared === true,
+    scoped: data.scoped === true,
+    restricted: data.restricted === true,
   };
 }
 

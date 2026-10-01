@@ -5,7 +5,7 @@
  * Обрізана книга: лише розділи, у яких є хоч одна дозволена сцена, і лише
  * дозволені сцени (зміст повністю); картки героїв — лише ті, на кого є
  * доступ (за `externalRef` сутності ядра); решта полів книги — порожні
- * (сюжетна дошка, нотатки, біблія, ілюстрації, курс, налаштування макета…),
+ * (сюжетна дошка, нотатки, біблія, ілюстрації, курс…; обов'язкові — порожні),
  * бо в них — зміст усієї книги.
  *
  * Злиття правки: від обмеженого учасника приймається лише зміст сцен, які він
@@ -35,6 +35,16 @@ export function restrictBook(book: AnyBook | null | undefined, eff: EffectiveAcc
   const out: AnyBook = {};
   for (const k of KEEP_FIELDS) if (book[k] !== undefined) out[k] = book[k];
   for (const k of EMPTY_ARRAYS) out[k] = [];
+  // Обов'язкові поля книги — порожні, а не відсутні (інтерфейс на них розраховує).
+  out.synopsis = '';
+  out.logline = '';
+  out.theme = '';
+  // Налаштування макета змісту не несуть; обкладинка — без тексту звороту.
+  if (book.layoutConfig !== undefined) out.layoutConfig = book.layoutConfig;
+  if (book.coverConfig && typeof book.coverConfig === 'object') out.coverConfig = { ...book.coverConfig, backDescription: '', authorBio: undefined, tagline: undefined };
+  // Стиль-біблія — окрема область (застосування — Т7): поки порожня.
+  const vb = book.visualBible && typeof book.visualBible === 'object' ? book.visualBible : {};
+  out.visualBible = { id: vb.id ?? '', bookId: vb.bookId ?? book.id, styleName: '', artStyle: '', colorPalette: [], lighting: '', mood: '', referenceNotes: '', keyMotifs: [], aspectRatio: vb.aspectRatio ?? '' };
   out.chapters = (Array.isArray(book.chapters) ? book.chapters : [])
     .map((ch: AnyBook) => {
       const sections = (Array.isArray(ch.sections) ? ch.sections : []).filter((s: AnyBook) => canRead(sceneLevel(eff, ch.id, s.id)));
@@ -56,6 +66,35 @@ export function canSeeSection(eff: EffectiveAccess, chapterId: string, sectionId
 
 export function canEditSection(eff: EffectiveAccess, chapterId: string, sectionId: string): boolean {
   return canWrite(sceneLevel(eff, chapterId, sectionId));
+}
+
+/** Що кімната знає про учасника з частковим доступом. */
+export interface RoomView {
+  eff: EffectiveAccess;
+  characterRefs: Set<string>;
+}
+
+/**
+ * Подія кімнати очима учасника з частковим доступом: книга — обрізана, чужі
+ * точкові правки недозволених сцен — не надходять, журнал правок і знімки
+ * версій (там зміст усієї книги) — лише тому, хто бачить книгу. null — не
+ * надсилати.
+ */
+export function shapeRoomEvent(event: AnyBook, view: RoomView | null | undefined): AnyBook | null {
+  if (!view || view.eff.full) return event;
+  const { eff, characterRefs } = view;
+  const p = event?.payload ?? {};
+  switch (event?.type) {
+    case 'book:remote_update':
+      return { ...event, payload: { ...p, book: restrictBook(p.book, eff, characterRefs), ...(eff.restricted ? { logEntry: undefined } : {}) } };
+    case 'version:snapshot_created':
+      if (eff.restricted) return { ...event, payload: { book: restrictBook(p.book, eff, characterRefs) } };
+      return event;
+    case 'section:remote_patch':
+      return p.patch && canSeeSection(eff, String(p.patch.chapterId), String(p.patch.sectionId)) ? event : null;
+    default:
+      return event;
+  }
 }
 
 /**

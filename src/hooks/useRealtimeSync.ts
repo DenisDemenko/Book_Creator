@@ -272,8 +272,12 @@ export function useRealtimeSync({
               if (payload.chatHistory) {
                 setChatMessages(payload.chatHistory);
               }
-              // If server has newer book state, sync it
-              if (payload.book && payload.book.updatedAt && bookRef.current.updatedAt) {
+              // Т6.2: доступ обмежений — книга кімнати і є межа учасника: береться
+              // як є (так зникає й те, до чого доступ відкликали).
+              if (payload.restricted && payload.book) {
+                onRemoteBookUpdate(payload.book);
+              } else if (payload.book && payload.book.updatedAt && bookRef.current.updatedAt) {
+                // If server has newer book state, sync it
                 const serverTime = new Date(payload.book.updatedAt).getTime();
                 const localTime = new Date(bookRef.current.updatedAt).getTime();
                 if (serverTime > localTime) {
@@ -378,6 +382,13 @@ export function useRealtimeSync({
         // 4401 (квиток прострочений чи вже використаний) лишається звичайним
         // обривом — нова спроба візьме свіжий квиток.
         if (ev?.code === 4403) return;
+        // 4409 — доступ змінився (Т6.2): одразу нове з'єднання з новими правами.
+        if (ev?.code === 4409) {
+          reconnectAttemptsRef.current = 0;
+          if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+          reconnectTimeoutRef.current = setTimeout(() => connectWebSocket(), 300);
+          return;
+        }
 
         // Наростаюча пауза: 3, 6, 12, 24, далі 30 с — щоб не бомбардувати
         // сервер, який лежить, і не палити батарею на мобільному.

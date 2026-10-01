@@ -31,7 +31,7 @@ const errOf = async (fn: () => Promise<unknown>) => {
 const OWNER = { userId: 'u-owner', isOwner: true, isAdmin: false };
 const P = 'acc-1';
 const BOOK = {
-  id: P, title: 'Маяк', author: 'Олена', updatedAt: '2026-10-01T10:00:00.000Z', synopsis: 'ТАЄМНИЙ СИНОПСИС', mindBoard: { nodes: [{ id: 'n1', text: 'ТАЄМНА ДОШКА' }] }, visualBible: [{ id: 'vb' }],
+  id: P, title: 'Маяк', author: 'Олена', updatedAt: '2026-10-01T10:00:00.000Z', synopsis: 'ТАЄМНИЙ СИНОПСИС', mindBoard: { nodes: [{ id: 'n1', text: 'ТАЄМНА ДОШКА' }] }, visualBible: { id: 'vb', styleName: 'ТАЄМНИЙ СТИЛЬ', referenceNotes: 'ТАЄМНІ НОТАТКИ', aspectRatio: '3:4' }, coverConfig: { frontTitle: 'Маяк', backDescription: 'ТАЄМНИЙ ЗВОРОТ' },
   characters: [{ id: 'ch-sofia', name: 'Софія' }, { id: 'ch-mark', name: 'Марк' }, { id: 'ch-villain', name: 'Лиходій' }],
   chapters: [
     { id: 'c1', bookId: P, title: 'Розділ 1', order: 1, description: 'ОПИС 1', sections: [{ id: 's1', chapterId: 'c1', title: 'Початок', order: 1, content: 'ТЕКСТ 1' }, { id: 's2', chapterId: 'c1', title: 'Сварка', order: 2, content: 'ТЕКСТ 2' }] },
@@ -60,7 +60,8 @@ console.log('Фактичні права з записів (чиста функ�
   const rb = restrictBook(BOOK, maria, new Set(['ch-sofia']))!;
   const text = JSON.stringify(rb);
   t('лише розділ 2 і лише сцена 17', rb.chapters.length === 1 && rb.chapters[0].sections.map((s: any) => s.id).join() === 's17' && /СЦЕНА 17/.test(text));
-  t('немає тексту інших сцен, опису розділу, синопсису, сюжетної дошки, біблії', !/ТЕКСТ 1|ТЕКСТ 2|ФІНАЛ|ОПИС 2|СИНОПСИС|ДОШКА/.test(text) && rb.visualBible === undefined, text.slice(0, 200));
+  t('немає тексту інших сцен, опису розділу, синопсису, сюжетної дошки, біблії', !/ТЕКСТ 1|ТЕКСТ 2|ФІНАЛ|ОПИС 2|СИНОПСИС|ДОШКА|ТАЄМНИЙ СТИЛЬ|ТАЄМНІ НОТАТКИ|ТАЄМНИЙ ЗВОРОТ/.test(text) && rb.mindBoard === undefined, text.slice(0, 200));
+  t('обов\'язкові поля — порожні, а не відсутні (інтерфейс не падає)', rb.synopsis === '' && rb.visualBible?.styleName === '' && rb.visualBible.aspectRatio === '3:4' && rb.coverConfig?.frontTitle === 'Маяк');
   t('картки героїв — лише Софія; позначка обмеження', rb.characters.map((c: any) => c.id).join() === 'ch-sofia' && rb.accessRestricted === true);
   t('повний доступ — книга без змін', restrictBook(BOOK, full) === BOOK);
 

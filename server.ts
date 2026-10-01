@@ -8,7 +8,9 @@ import { randomUUID } from 'node:crypto';
 import { Type } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { WebSocketServer, WebSocket } from 'ws';
-import { issueRealtimeTicket, resolveRealtimeAccess, ticketFromUrl, verifyRealtimeTicket, isValidBookId, type RealtimeAccess, type RealtimeAccessDeps } from './server/realtimeAuth';
+import { issueRealtimeTicket, resolveRealtimeAccess, ticketFromUrl, verifyRealtimeTicket, isValidBookId, participantAccess, type RealtimeAccess, type RealtimeAccessDeps } from './server/realtimeAuth';
+import { describeAccess, makeEffectiveResolver, visibleCharacterRefs } from './server/core/collaboration/access';
+import { mergeRestrictedUpdate, restrictBook, canEditSection, shapeRoomEvent, type RoomView } from './server/core/collaboration/accessView';
 import { getBook as getStoredBookForRealtime } from './server/bookStore';
 import { getBookOwner as getCollabOwnerForRealtime, listCollabInvitesForBook as listInvitesForRealtime } from './server/store';
 import {
@@ -211,7 +213,7 @@ import { AI_EMOTIONS_JOB_KIND, aiEmotionsJobKind } from './server/core/emotions'
 import { AI_VISUAL_JOB_KIND, aiVisualJobKind } from './server/core/visualAi';
 import { AI_CONTINUITY_JOB_KIND, aiContinuityJobKind } from './server/core/continuityAi';
 import { AI_MEMORY_JOB_KIND, aiMemoryJobKind } from './server/core/memoryAi';
-import { assetIdFromUrl as mediaAssetIdFromUrl, readAsset as readMediaAsset } from './server/media/mediaLibraryStore';
+import { assetIdFromUrl as mediaAssetIdFromUrl, readAsset as readMediaAsset, listAssets as listMediaAssets } from './server/media/mediaLibraryStore';
 
 /**
  * Т2.3 В4: зображення для AI-3 — лише файл Медіатеки, що належить тому, хто
@@ -264,6 +266,8 @@ interface CollabUser {
 interface RoomClient {
   ws: WebSocket;
   info: CollabUser;
+  /** Т6.2: частковий доступ — що цьому учаснику можна бачити (null — уся книга). */
+  view?: RoomView | null;
 }
 
 interface RoomData {
@@ -314,9 +318,42 @@ const realtimeAccessDeps: RealtimeAccessDeps = {
   async listAcceptedInvites(bookId) {
     return (await listInvitesForRealtime(bookId))
       .filter((inv) => inv.status === 'accepted')
-      .map((inv) => ({ acceptedUserId: inv.acceptedUserId, role: inv.role }));
+      .map((inv) => ({ id: inv.id, acceptedUserId: inv.acceptedUserId, role: inv.role }));
   },
+  // Т6.2: права учасника — з наданих доступів ядра; ядро недоступне — закрито.
+  effectiveAccess: makeEffectiveResolver(getCoreRepository, () => getCoreStatus().state),
 };
+
+/**
+ * Т6.2: що бачить у кімнаті учасник із частковим доступом. null — доступу
+ * більше немає (або ядро недоступне): з'єднання закривається.
+ */
+async function loadRoomView(access: RealtimeAccess): Promise<RoomView | null> {
+  const found = await participantAccess(access.bookId, access.userId, realtimeAccessDeps);
+  if (!found || found === 'unavailable') return null;
+  const repo = getCoreRepository();
+  return { eff: found.eff, characterRefs: repo ? await visibleCharacterRefs(repo, found.eff) : new Set() };
+}
+
+/**
+ * Т6.2: доступ людини до книги змінився — її з'єднання з кімнатою
+ * закриваються (4409), клієнт перепідключається з новими правами.
+ */
+function dropRealtimeParticipant(bookId: string, userId: string): number {
+  const room = collabRooms.get(`book:${bookId}`);
+  if (!room) return 0;
+  let n = 0;
+  for (const client of room.clients.values()) {
+    if (client.info.userId !== userId) continue;
+    try {
+      client.ws.close(4409, 'access_changed');
+      n++;
+    } catch {
+      // ignore
+    }
+  }
+  return n;
+}
 
 function getOrCreateRoom(roomKey: string, bookId: string): RoomData {
   if (!collabRooms.has(roomKey)) {
@@ -346,16 +383,24 @@ function broadcastToRoom(roomKey: string, event: any, senderId?: string) {
   const room = collabRooms.get(roomKey);
   if (!room) return;
 
+  const timestamp = new Date().toISOString();
   const payloadStr = JSON.stringify({
     ...event,
     senderId,
-    timestamp: new Date().toISOString()
+    timestamp
   });
 
   room.clients.forEach((client, clientId) => {
     if (senderId && clientId === senderId) return; // Skip sender if specified
     if (client.ws.readyState === WebSocket.OPEN) {
       try {
+        // Т6.2: учаснику з частковим доступом — лише дозволене (обрізана
+        // книга, без чужих правок недозволених сцен).
+        if (client.view) {
+          const shaped = shapeRoomEvent(event, client.view);
+          if (shaped) client.ws.send(JSON.stringify({ ...shaped, senderId, timestamp }));
+          return;
+        }
         client.ws.send(payloadStr);
       } catch (err) {
         console.error(`Failed to send to client ${clientId}:`, err);
@@ -584,6 +629,8 @@ registerGitCommandRoutes(app);
     access: realtimeAccessDeps,
     repo: getCoreRepository,
     coreState: () => getCoreStatus().state,
+    // Т6.2: медіатека книги за наданим доступом (файли власника й учасників із робочим доступом).
+    media: { listAssets: (ownerId, opts) => listMediaAssets(ownerId, opts) as any, readAsset: (id) => readMediaAsset(id) as any },
     queue: getCoreJobQueue,
     // Гібридний пошук (Т1.2): смислова частина — модель ембедингів, яку обрав
     // адмін (типово gemini-embedding-001, див. server/core/search/embeddingModels.ts).
@@ -5782,7 +5829,7 @@ ${JSON.stringify(bookContext || {}, null, 2)}
     if (!isValidBookId(bookId)) return res.status(400).json({ error: 'Некоректний id книги.' });
     const access = await resolveRealtimeAccess(req.principal as any, bookId, realtimeAccessDeps);
     if (!access) return res.status(403).json({ error: 'Немає доступу до спільного редагування цієї книги.' });
-    res.json({ ticket: issueRealtimeTicket(access), role: access.role, canWrite: access.canWrite, shared: access.shared });
+    res.json({ ticket: issueRealtimeTicket(access), role: access.role, canWrite: access.canWrite, shared: access.shared, restricted: access.restricted === true });
   });
 
   /** Кімната, до якої має доступ автор запиту, — або null. */
@@ -5909,14 +5956,26 @@ ${JSON.stringify(bookContext || {}, null, 2)}
     const roomKey = access.roomKey;
     const bookId = access.bookId;
     let currentClientId: string | null = null;
+    // Т6.2: частковий доступ — права перечитуються при підключенні (квиток
+    // лише каже, що фільтр потрібен); доступу вже немає — з'єднання закрито.
+    const viewReady: Promise<RoomView | null> = access.scoped ? loadRoomView(access).catch(() => null) : Promise.resolve(null);
 
     /** Повідомлення лише про «свою» книгу й лише після входу в кімнату. */
     const isOwnBook = (payloadBookId: unknown) => payloadBookId === bookId;
 
-    ws.on('message', (raw) => {
+    ws.on('message', async (raw) => {
       try {
         const message = JSON.parse(raw.toString());
         const { type, payload } = message || {};
+        const view = await viewReady;
+        if (access.scoped && !view) {
+          try {
+            ws.close(4409, 'access_changed');
+          } catch {
+            // ignore
+          }
+          return;
+        }
 
         switch (type) {
           case 'client:join': {
@@ -5931,12 +5990,31 @@ ${JSON.stringify(bookContext || {}, null, 2)}
             // журналі): інакше учасник зі старою книгою затирав свіжу роботу.
             // Приймається лише від того, хто має право писати, і лише копія
             // саме цієї книги.
-            const offered = access.canWrite && initialBook && initialBook.id === bookId ? initialBook : null;
-            const clientIsNewer = offered && bookRevisionMs(offered) > bookRevisionMs(room.book);
-            if (!room.book && offered) {
-              room.book = offered;
-            } else if (clientIsNewer) {
-              room.book = offered;
+            // Т6.2: від учасника з частковим доступом книга не береться цілком —
+            // лише зміст сцен, які він може редагувати, зливається в серверну.
+            if (view && !room.book) {
+              // Кімната порожня (власник не в мережі) — серверна копія власника.
+              const stored = await getStoredBookForRealtime(bookId).catch(() => null);
+              const owner = (await realtimeAccessDeps.getCollabOwnerId(bookId)) ?? stored?.ownerId;
+              if (stored?.book && stored.ownerId === owner) room.book = stored.book;
+            }
+            let clientIsNewer = false;
+            if (view) {
+              if (access.canWrite && room.book && initialBook && initialBook.id === bookId && bookRevisionMs(initialBook) > bookRevisionMs(room.book)) {
+                const merged = mergeRestrictedUpdate(room.book, initialBook, view.eff);
+                if (merged.changed.length) {
+                  room.book = merged.book;
+                  clientIsNewer = true;
+                }
+              }
+            } else {
+              const offered = access.canWrite && initialBook && initialBook.id === bookId ? initialBook : null;
+              clientIsNewer = !!offered && bookRevisionMs(offered) > bookRevisionMs(room.book);
+              if (!room.book && offered) {
+                room.book = offered;
+              } else if (clientIsNewer) {
+                room.book = offered;
+              }
             }
 
             const clientId = typeof user?.clientId === 'string' && user.clientId.length <= 100
@@ -5962,7 +6040,7 @@ ${JSON.stringify(bookContext || {}, null, 2)}
               isTyping: false
             };
 
-            room.clients.set(clientId, { ws, info: userInfo });
+            room.clients.set(clientId, { ws, info: userInfo, view });
 
             const presenceList = Array.from(room.clients.values()).map(c => c.info);
 
@@ -5971,12 +6049,15 @@ ${JSON.stringify(bookContext || {}, null, 2)}
               type: 'room:sync',
               payload: {
                 bookId,
-                book: room.book,
+                book: view ? restrictBook(room.book, view.eff, view.characterRefs) : room.book,
                 presenceList,
                 chatHistory: room.messages,
-                changelog: room.changelog,
+                changelog: view?.eff.restricted ? [] : room.changelog,
                 assignedClientId: clientId,
-                canWrite: access.canWrite
+                canWrite: access.canWrite,
+                // Т6.2: обмежений доступ — клієнт бере книгу кімнати як є (вона — його межа).
+                restricted: !!view?.eff.restricted,
+                access: view ? describeAccess(view.eff) : null
               },
               timestamp: new Date().toISOString()
             }));
@@ -6008,19 +6089,39 @@ ${JSON.stringify(bookContext || {}, null, 2)}
             if (updatedBook.id && updatedBook.id !== bookId) return;
 
             const room = getOrCreateRoom(roomKey, bookId);
-            // Старіша копія не має відкочувати кімнату. Таке приходить від
-            // сесії, що прокинулась із застарілим станом; її власний клієнт
-            // уже отримає свіжу версію нижче.
-            if (room.book && bookRevisionMs(updatedBook) < bookRevisionMs(room.book)) {
+            const sendBack = () => {
               if (ws.readyState === ws.OPEN) {
                 ws.send(
                   JSON.stringify({
                     type: 'book:remote_update',
-                    payload: { book: room.book },
+                    payload: { book: view ? restrictBook(room.book, view.eff, view.characterRefs) : room.book },
                     timestamp: new Date().toISOString(),
                   })
                 );
               }
+            };
+            // Старіша копія не має відкочувати кімнату. Таке приходить від
+            // сесії, що прокинулась із застарілим станом; її власний клієнт
+            // уже отримає свіжу версію нижче.
+            if (room.book && bookRevisionMs(updatedBook) < bookRevisionMs(room.book)) {
+              sendBack();
+              break;
+            }
+            if (view) {
+              // Т6.2: лише зміст сцен, які учасник може редагувати; решта книги —
+              // як на сервері.
+              if (!room.book) break;
+              const merged = mergeRestrictedUpdate(room.book, updatedBook, view.eff);
+              if (!merged.changed.length) {
+                sendBack();
+                break;
+              }
+              room.book = merged.book;
+              if (logEntry) {
+                room.changelog.unshift(logEntry);
+                if (room.changelog.length > 200) room.changelog.pop();
+              }
+              broadcastToRoom(roomKey, { type: 'book:remote_update', payload: { book: room.book, logEntry } }, currentClientId);
               break;
             }
             room.book = updatedBook;
@@ -6048,6 +6149,8 @@ ${JSON.stringify(bookContext || {}, null, 2)}
             const { patch } = payload || {};
             if (!currentClientId || !access.canWrite || !isOwnBook(payload?.bookId)) return;
             if (!patch?.chapterId || !patch?.sectionId) return;
+            // Т6.2: точкова правка — лише в сцені, яку учаснику дозволено редагувати.
+            if (view && !canEditSection(view.eff, String(patch.chapterId), String(patch.sectionId))) return;
 
             const room = getOrCreateRoom(roomKey, bookId);
 
@@ -6128,6 +6231,8 @@ ${JSON.stringify(bookContext || {}, null, 2)}
           case 'version:snapshot_created': {
             const { snapshot, updatedBook } = payload || {};
             if (!currentClientId || !access.canWrite || !isOwnBook(payload?.bookId)) return;
+            // Т6.2: знімок версії — це вся книга; учасник із частковим доступом його не робить.
+            if (view) return;
 
             const room = getOrCreateRoom(roomKey, bookId);
             if (updatedBook && (!updatedBook.id || updatedBook.id === bookId)) {

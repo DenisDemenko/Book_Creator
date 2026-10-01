@@ -198,15 +198,15 @@ async function migrateInvite(repo: CoreRepository, projectId: string, userId: st
   let p = await repo.getParticipant(projectId, userId);
   if (!p) {
     try {
-      p = (await assignRole(repo, { projectId, userId, roleId: invite.role, actor: MIGRATION_ACTOR, source: 'invitation', sourceRef: invite.id })).participant;
+      p = (await assignRole(repo, { projectId, userId, roleId: invite.role, actor: MIGRATION_ACTOR, source: 'invitation', sourceRef: invite.id || null })).participant;
     } catch {
-      p = (await repo.upsertParticipant({ projectId, userId, source: 'invitation', sourceRef: invite.id, createdBy: MIGRATION_ACTOR })).participant;
+      p = (await repo.upsertParticipant({ projectId, userId, source: 'invitation', sourceRef: invite.id || null, createdBy: MIGRATION_ACTOR })).participant;
     }
   }
   const any = await repo.listAccessGrants({ participantId: p.id });
   if (any.length) return p;
   const level: AccessLevel = (studioRoleFor(invite.role) ?? 'reader') === 'reader' ? 'view' : 'edit';
-  const row = await repo.addAccessGrant({ projectId, participantId: p.id, level, scopeType: 'book', source: 'legacy_invite', sourceRef: invite.id, grantedBy: MIGRATION_ACTOR });
+  const row = await repo.addAccessGrant({ projectId, participantId: p.id, level, scopeType: 'book', source: 'legacy_invite', sourceRef: invite.id || null, grantedBy: MIGRATION_ACTOR });
   await repo.addCollabEvent({ projectId, participantId: p.id, action: 'access_granted', actor: MIGRATION_ACTOR, details: { grantId: row.id, userId, level, scopeType: 'book', source: 'legacy_invite', inviteRole: invite.role } });
   return p;
 }
@@ -217,6 +217,64 @@ export async function resolveEffectiveAccess(repo: CoreRepository, input: Resolv
   if (input.acceptedInvite) p = (await migrateInvite(repo, input.projectId, input.userId, input.acceptedInvite)) ?? p;
   if (!p || p.status !== 'active') return computeEffective(input.projectId, input.userId, [], { full: false, now: input.now });
   return computeEffective(input.projectId, input.userId, await repo.listAccessGrants({ participantId: p.id, status: 'active' }), { full: false, now: input.now });
+}
+
+/**
+ * Права за старою схемою — коли ядра немає зовсім (`disabled`): прийняте
+ * запрошення = вся книга (читач — перегляд, решта — редагування). Записів
+ * доступу без ядра не буває, тож і звужувати нічого.
+ */
+export function legacyEffective(projectId: string, userId: string, inviteRole: string): EffectiveAccess {
+  const level: AccessLevel = (studioRoleFor(inviteRole) ?? 'reader') === 'reader' ? 'view' : 'edit';
+  const eff = computeEffective(projectId, userId, [], { full: false });
+  eff.book = level;
+  eff.media = 'view';
+  eff.restricted = false;
+  eff.canWriteAny = level === 'edit';
+  return eff;
+}
+
+/** Чи є хоч щось, що людина може бачити в книзі. */
+export function hasAnyAccess(eff: EffectiveAccess): boolean {
+  return eff.full || !eff.restricted || eff.media !== 'none' ||
+    [eff.chapters, eff.scenes, eff.characters, eff.locations].some((m) => Object.values(m).some((l) => canRead(l)));
+}
+
+/** Частковий доступ: книгу не можна редагувати цілком — правки й видача потребують фільтра. */
+export function isScoped(eff: EffectiveAccess): boolean {
+  return !eff.full && !canWrite(eff.book);
+}
+
+/**
+ * Фактичні права для каналів (API ядра, кімната): `null` — ядра немає зовсім
+ * (стара схема, лише запрошення), `'unavailable'` — ядро налаштоване, але
+ * зараз недоступне (тоді учасникам — закрито, а не «все»).
+ */
+export type EffectiveResolver = (input: { projectId: string; userId: string; isAdmin?: boolean; invite: { id?: string; role: string } | null }) => Promise<EffectiveAccess | 'unavailable' | null>;
+
+export function makeEffectiveResolver(repo: () => CoreRepository | null, coreState: () => string): EffectiveResolver {
+  return async ({ projectId, userId, isAdmin, invite }) => {
+    if (coreState() === 'disabled') return null;
+    const r = repo();
+    if (!r) return 'unavailable';
+    return resolveEffectiveAccess(r, { projectId, userId, isOwner: false, isAdmin: !!isAdmin, acceptedInvite: invite ? { id: invite.id ?? '', role: invite.role } : null });
+  };
+}
+
+const STUDIO_CHARACTER_PREFIX = 'studio:character:';
+
+/** Id карток героїв у Студії (з `externalRef` сутностей) персонажів, які людина може бачити. */
+export async function visibleCharacterRefs(repo: CoreRepository, eff: EffectiveAccess): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (!eff.restricted) return out;
+  for (const id of Object.keys(eff.characters)) {
+    if (!canRead(eff.characters[id])) continue;
+    const e = await repo.getEntity(eff.projectId, id);
+    // Синхронізація пише `studio:character:<id картки>` (server/core/sync.ts, characterRef).
+    const ref = e?.externalRef ? String(e.externalRef) : '';
+    if (ref) out.add(ref.startsWith(STUDIO_CHARACTER_PREFIX) ? ref.slice(STUDIO_CHARACTER_PREFIX.length) : ref);
+  }
+  return out;
 }
 
 /** Короткий опис прав для клієнта (без самих записів). */
