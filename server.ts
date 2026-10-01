@@ -625,7 +625,7 @@ registerGitCommandRoutes(app);
     interview: {
       voice: (projectId, actor) => async (system, user) => {
         const out = await aiRoleGenerateViaCore({ module: 'coreCharacterVoice', modelId: await resolveModuleModelId('coreCharacterVoice'), system, user, projectId, actor });
-        return { text: out.text, modelId: out.modelId, inputTokens: out.inputTokens, outputTokens: out.outputTokens };
+        return { text: out.text, modelId: out.modelId, inputTokens: out.inputTokens, outputTokens: out.outputTokens, costUsd: out.costUsd };
       },
       loadTemplate: () => loadCoreAiRoleTemplate('coreCharacterVoice'),
     },

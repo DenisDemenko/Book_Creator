@@ -170,7 +170,8 @@ export const INTERVIEW_LABELS = {
   sources: { jev: 'Jev', llm_fallback: 'запасний LLM', author: 'рішення автора', mock: 'тестовий Jev', cache: 'з кешу' } as Record<string, string>,
 };
 
-export type VoiceGenerate = (system: string, user: string) => Promise<{ text: string; modelId: string; inputTokens: number; outputTokens: number }>;
+/** Модель голосу; `costUsd` — вартість виклику, якщо рушій її знає (Т2.8: час і вартість у звіті якості). */
+export type VoiceGenerate = (system: string, user: string) => Promise<{ text: string; modelId: string; inputTokens: number; outputTokens: number; costUsd?: number }>;
 
 export interface InterviewDeps {
   repo: CoreRepository;
@@ -378,7 +379,7 @@ async function answerTurn(deps: InterviewDeps, sim: SimulationRow, q: Simulation
     intent: (v.intent ?? '').trim(),
     ...decisionInfo,
     model: out.modelId,
-    usage: { inputTokens: out.inputTokens, outputTokens: out.outputTokens },
+    usage: { inputTokens: out.inputTokens, outputTokens: out.outputTokens, ...(typeof out.costUsd === 'number' ? { costUsd: out.costUsd } : {}) },
     proposals: v.proposals ?? {},
     memoryIds: built.memoryIds,
   }, d.id);
