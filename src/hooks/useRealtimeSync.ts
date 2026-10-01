@@ -31,7 +31,8 @@ interface UseRealtimeSyncProps {
   activeChapterId?: string;
   activeSectionId?: string;
   userName?: string;
-  onRemoteBookUpdate: (updatedBook: Book, logEntry?: AuditLogEntry) => void;
+  /** `authoritative` — книга кімнати є межею доступу учасника (Т6.2): брати як є, без порівняння версій. */
+  onRemoteBookUpdate: (updatedBook: Book, logEntry?: AuditLogEntry, opts?: { authoritative?: boolean }) => void;
   onRemoteVersionSnapshot?: (snapshot: BookVersionSnapshot, updatedBook: Book) => void;
   onRemoteLogEntry?: (logEntry: AuditLogEntry) => void;
   /** Точкова правка секції від співавтора. */
@@ -275,7 +276,7 @@ export function useRealtimeSync({
               // Т6.2: доступ обмежений — книга кімнати і є межа учасника: береться
               // як є (так зникає й те, до чого доступ відкликали).
               if (payload.restricted && payload.book) {
-                onRemoteBookUpdate(payload.book);
+                onRemoteBookUpdate(payload.book, undefined, { authoritative: true });
               } else if (payload.book && payload.book.updatedAt && bookRef.current.updatedAt) {
                 // If server has newer book state, sync it
                 const serverTime = new Date(payload.book.updatedAt).getTime();

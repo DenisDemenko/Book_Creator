@@ -198,7 +198,7 @@ import { CORE_VISION_MODULES } from './server/coreAiRegistry';
 import { normalizePromptEntities, buildCoachEntityInstruction, normalizeEntityFeedback, buildExerciseEntityInstruction, normalizeGeneratedEntities } from './server/masteryEntityPrompt';
 import { formatManuscriptWithClaude, anthropicConfig, ClaudeManuscriptError, MAX_MANUSCRIPT_CHARS } from './server/claudeManuscript';
 import { initCore, getCoreStatus, shutdownCore, registerCoreJobKind, getCoreRepository, getCoreJobQueue } from './server/core';
-import { registerProjectRoutes } from './server/core/projectRoutes';
+import { registerProjectRoutes, resolveProjectAccess, bookMediaOwners } from './server/core/projectRoutes';
 import { CORE_SYNC_KIND, coreSyncJobKind } from './server/core/sync';
 import { AI_ROLE_JOB_KIND, aiRoleJobKind } from './server/core/ai/job';
 import { AI_MENTIONS_JOB_KIND, aiMentionsJobKind } from './server/core/ai/mentions';
@@ -466,7 +466,15 @@ async function startServer() {
   registerAdminRoutes(app);
   registerUsageRoutes(app);
   registerSubscriptionRoutes(app);
-  registerMediaRoutes(app);
+  // Т6.2: файл книги — учасникам із доступом до її медіатеки.
+  registerMediaRoutes(app, {
+    canViewBookAsset: async (req, record) => {
+      if (!record.bookId) return false;
+      const access = await resolveProjectAccess(req.principal as any, record.bookId, realtimeAccessDeps);
+      if (!access || access.effective.media === 'none') return false;
+      return (await bookMediaOwners(record.bookId, realtimeAccessDeps, getCoreRepository())).has(record.ownerId);
+    },
+  });
   // Зовнішній API (WriterScan — фото сторінки з телефону → «Вхідні» медіатеки).
   // Токен застосунку, а не cookie; розпізнавання — модель зору ядра AI.
   registerExternalApiRoutes(app, {

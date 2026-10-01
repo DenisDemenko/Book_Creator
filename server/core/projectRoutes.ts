@@ -301,6 +301,26 @@ function fail(res: Response, err: unknown) {
   res.status(500).json({ error: 'Не вдалося прочитати дані ядра.', kind: 'server_error' });
 }
 
+/**
+ * Т6.2: чиї файли належать медіатеці книги — власник книги й учасники з
+ * робочим доступом (`work` на медіатеку).
+ */
+export async function bookMediaOwners(projectId: string, access: RealtimeAccessDeps, repo: CoreRepository | null): Promise<Set<string>> {
+  const owners = new Set<string>();
+  const owner = (await access.getCollabOwnerId(projectId)) ?? (await access.getBookOwnerId(projectId)) ?? null;
+  if (owner) owners.add(owner);
+  if (repo) {
+    const now = Date.now();
+    const workers = (await repo.listAccessGrants({ projectId, status: 'active' }))
+      .filter((g) => g.scopeType === 'media_library' && g.level === 'work' && Date.parse(g.validFrom) <= now && (!g.validUntil || Date.parse(g.validUntil) > now));
+    for (const g of workers) {
+      const p = await repo.getParticipantById(g.participantId);
+      if (p && p.status === 'active') owners.add(p.userId);
+    }
+  }
+  return owners;
+}
+
 export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): void {
   // Префікс цілком: і наявні, і майбутні маршрути проєкту — лише з правом.
   app.use('/api/projects/:id', requireProjectAccess(deps));
@@ -331,23 +351,7 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
 
   // ── Т6.2: медіатека книги за наданим доступом ──────────────────────────────
 
-  /** Чиї файли належать медіатеці книги: власник і учасники з робочим доступом. */
-  const mediaOwners = async (projectId: string): Promise<Set<string>> => {
-    const owners = new Set<string>();
-    const owner = (await deps.access.getCollabOwnerId(projectId)) ?? (await deps.access.getBookOwnerId(projectId)) ?? null;
-    if (owner) owners.add(owner);
-    const repo = deps.repo();
-    if (repo) {
-      const now = Date.now();
-      const workers = (await repo.listAccessGrants({ projectId, status: 'active' }))
-        .filter((g) => g.scopeType === 'media_library' && g.level === 'work' && Date.parse(g.validFrom) <= now && (!g.validUntil || Date.parse(g.validUntil) > now));
-      for (const g of workers) {
-        const p = await repo.getParticipantById(g.participantId);
-        if (p && p.status === 'active') owners.add(p.userId);
-      }
-    }
-    return owners;
-  };
+  const mediaOwners = (projectId: string) => bookMediaOwners(projectId, deps.access, deps.repo());
   const mediaDenied = (req: Request, res: Response): boolean => {
     if (!deps.media) {
       res.status(404).json({ error: 'Медіатека книги недоступна.', kind: 'not_found' });

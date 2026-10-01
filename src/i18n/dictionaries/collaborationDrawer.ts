@@ -1,6 +1,7 @@
 export const collaborationDrawer = {
   uk: {
     drawerTitle: 'Командна співпраця',
+    accessRestrictedBanner: 'Обмежений доступ: ви бачите лише надані вам сцени й героїв.',
     connectingLabel: 'Підключення...',
     roomLabelPrefix: 'Кімната:',
     collabRolesLabel: 'Спільна робота 6 ролей',
@@ -51,6 +52,7 @@ export const collaborationDrawer = {
   },
   en: {
     drawerTitle: 'Team Collaboration',
+    accessRestrictedBanner: 'Limited access: you see only the scenes and characters granted to you.',
     connectingLabel: 'Connecting...',
     roomLabelPrefix: 'Room:',
     collabRolesLabel: 'Collaborative work of 6 roles',

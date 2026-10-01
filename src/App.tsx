@@ -304,7 +304,7 @@ export default function App() {
     currentTab,
     activeChapterId,
     activeSectionId,
-    onRemoteBookUpdate: useCallback((remoteBook: Book, remoteLogEntry?: AuditLogEntry) => {
+    onRemoteBookUpdate: useCallback((remoteBook: Book, remoteLogEntry?: AuditLogEntry, opts?: { authoritative?: boolean }) => {
       // Друга лінія захисту від затирання. Перевірка є і в самому хуку, але
       // власником стану книги є саме App — а між надходженням повідомлення
       // й цим колбеком локальна копія могла піти вперед (автор саме набирав
@@ -312,7 +312,8 @@ export default function App() {
       // ухвалюється на найсвіжіших даних.
       let applied = true;
       setBook((prev) => {
-        if (!isNewerBook(remoteBook, prev)) {
+        // Т6.2: обмежений доступ — книга кімнати і є межа учасника, береться як є.
+        if (!opts?.authoritative && !isNewerBook(remoteBook, prev)) {
           applied = false;
           return prev;
         }
@@ -2060,6 +2061,13 @@ export default function App() {
           </div>
         );
       })()}
+
+      {/* Т6.2: учасник з обмеженим доступом бачить лише надані сцени — кажемо про це прямо. */}
+      {book.accessRestricted && (
+        <div data-access-restricted-banner className="fixed top-2 left-1/2 -translate-x-1/2 z-40 max-w-[calc(100vw-2rem)] px-3 py-1.5 rounded-full bg-slate-900/95 text-amber-200 border border-amber-500/50 text-[11px] shadow-lg truncate">
+          {t('collaborationDrawer.accessRestrictedBanner')}
+        </div>
+      )}
 
       {syncToast && (
         <div className="fixed bottom-6 left-6 z-50 px-4 py-2 rounded-lg bg-slate-900 text-slate-100 border border-emerald-500/50 font-semibold text-xs shadow-xl flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2">

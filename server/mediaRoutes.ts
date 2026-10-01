@@ -15,7 +15,7 @@
  * саму перевірку сам — двічі рахувати ті самі байти не можна.
  */
 
-import type { Express } from 'express';
+import type { Express, Request } from 'express';
 import { requireAuth } from './auth';
 import { checkAndRecordStorageUpload, getStorageUsage } from './mediaStorage';
 import { listBooks } from './bookStore';
@@ -72,7 +72,16 @@ export function decodeImagePayload(raw: unknown): { mimeType: string; bytes: Buf
   }
 }
 
-export function registerMediaRoutes(app: Express): void {
+export interface MediaRoutesOptions {
+  /**
+   * Т6.2: чужий файл, прив'язаний до книги, — чи можна його віддати цій людині
+   * (учасник із доступом до медіатеки книги, файл власника книги чи учасника з
+   * робочим доступом). Без опції — лише свої файли, як і раніше.
+   */
+  canViewBookAsset?: (req: Request, record: { ownerId: string; bookId: string | null }) => Promise<boolean>;
+}
+
+export function registerMediaRoutes(app: Express, opts: MediaRoutesOptions = {}): void {
   /** Поточне використання фотоальбому — для індикатора у Медіатеці й на сторінці Підписка. */
   app.get('/api/media/storage', requireAuth, async (req, res) => {
     try {
@@ -254,7 +263,11 @@ export function registerMediaRoutes(app: Express): void {
     try {
       const principal = req.principal!;
       const found = await readAsset(String(req.params.id || ''));
-      if (!found || found.record.ownerId !== principal.id) {
+      const own = !!found && found.record.ownerId === principal.id;
+      // Т6.2: файл книги — учаснику з доступом до її медіатеки (ілюстрації в
+      // наданих сценах, портрети героїв); решта чужого — як і досі, 404.
+      const shared = !!found && !own && !!found.record.bookId && !!opts.canViewBookAsset && (await opts.canViewBookAsset(req, found.record).catch(() => false));
+      if (!found || (!own && !shared)) {
         return res.status(404).json({ error: 'Файл не знайдено.' });
       }
 

@@ -878,6 +878,8 @@ export interface Book {
   knowledgeFiles?: KnowledgeFile[];
   createdAt: string;
   updatedAt: string;
+  /** Т6.2: книга очима учасника з обмеженим доступом (лише дозволені сцени); серверна копія — у власника. */
+  accessRestricted?: boolean;
 }
 
 /**

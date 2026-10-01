@@ -309,6 +309,9 @@ const serverRevisions = new Map<string, number>();
 async function mirrorBookToServer(book: Book): Promise<void> {
   const id = book.id;
   if (!id) return;
+  // Т6.2: книга з обмеженим доступом — лише частина чужої книги; серверна
+  // копія належить власнику, і її не перезаписують.
+  if (book.accessRestricted) return;
   try {
     const known = serverRevisions.get(id);
     const res = await fetch(`/api/books/${encodeURIComponent(id)}`, {
