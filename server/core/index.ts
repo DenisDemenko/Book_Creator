@@ -23,6 +23,7 @@ import {
   resolveMigrationsDir,
   runMigrations,
 } from './migrate';
+import { bootstrapOntology } from './ontology/lifecycle';
 import { PgCoreRepository } from './pgRepository';
 import { PgJobStore } from './jobs/pgJobStore';
 import { JobQueue, type JobKind } from './jobs/queue';
@@ -103,6 +104,14 @@ export function initCore(log: (msg: string) => void = (m) => console.log(m)): Pr
       const migrations = loadMigrations(resolveMigrationsDir());
       const res = await runMigrations(pool, migrations, log);
       repository = new PgCoreRepository(pool, true);
+      // Реєстр схем (Т5.1): на першому старті — імпорт чинного реєстру як
+      // онтології 1.0; далі активна версія стає реєстром процесу. Збій тут
+      // ядра не валить — лишається вбудований реєстр (документ власника).
+      try {
+        await bootstrapOntology(repository, log);
+      } catch (err) {
+        console.warn(`[ontology] активну версію не застосовано, працює вбудований реєстр: ${(err as Error).message}`);
+      }
       // Фонова черга ядра (Т0.7). Види задач реєструють модулі, що їх
       // потребують (`getCoreJobQueue().register(...)`: core_sync — Т0.6,
       // ролі AI — Т0.9); воркер бере лише зареєстровані види.

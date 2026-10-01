@@ -910,6 +910,69 @@ export interface QualityRunRow {
 export type QualityRunInput = Pick<QualityRunRow, 'setId' | 'setVersion' | 'createdBy'> & Partial<Pick<QualityRunRow, 'label' | 'budgetUsd' | 'models'>>;
 export type QualityRunPatch = Partial<Pick<QualityRunRow, 'status' | 'passed' | 'summary' | 'report' | 'models' | 'costUsd' | 'error' | 'label'>>;
 
+// ── Реєстр схем: версії онтології (Т5.1 В2) ─────────────────────────────────
+
+/** draft → validated → active → deprecated → archived; відкинута чернетка — archived. */
+export const ONTOLOGY_VERSION_STATUSES = ['draft', 'validated', 'active', 'deprecated', 'archived'] as const;
+export type OntologyVersionStatus = (typeof ONTOLOGY_VERSION_STATUSES)[number];
+
+export interface OntologyVersionRow {
+  id: string;
+  ontologyId: string;
+  /** ontology_version (ТЗ §34): 1, 2, 3… у межах онтології. */
+  version: number;
+  label: string;
+  status: OntologyVersionStatus;
+  basedOn: string | null;
+  /** Визначення `fusion-ontology/1`; у переліку версій — null (воно важке). */
+  definition: Record<string, unknown> | null;
+  definitionHash: string;
+  validation: Record<string, unknown> | null;
+  impact: Record<string, unknown> | null;
+  notes: string;
+  /** Лічильник правок чернетки. */
+  revision: number;
+  createdBy: CoreActor;
+  createdAt: string;
+  updatedAt: string;
+  publishedBy: CoreActor | null;
+  publishedAt: string | null;
+}
+
+export type OntologyVersionInput = Pick<OntologyVersionRow, 'ontologyId' | 'definitionHash' | 'createdBy'> & {
+  definition: Record<string, unknown>;
+  label?: string;
+  notes?: string;
+  basedOn?: string | null;
+  /** `active` — лише для імпорту першої версії (одразу опублікована системою). */
+  status?: 'draft' | 'active';
+};
+
+export type OntologyVersionPatch = Partial<Pick<OntologyVersionRow, 'status' | 'definitionHash' | 'validation' | 'impact' | 'label' | 'notes'>> & {
+  definition?: Record<string, unknown>;
+};
+
+export const ONTOLOGY_EVENT_ACTIONS = ['import', 'create_draft', 'edit', 'validate', 'impact', 'publish', 'rollback', 'archive', 'discard'] as const;
+export type OntologyEventAction = (typeof ONTOLOGY_EVENT_ACTIONS)[number];
+
+export interface OntologyEventRow {
+  id: string;
+  ontologyId: string;
+  versionId: string | null;
+  action: OntologyEventAction;
+  actor: CoreActor;
+  details: Record<string, unknown>;
+  createdAt: string;
+}
+
+/** Скільки даних у всіх книгах має кожен тип — для MIGRATION IMPACT (ТЗ §4.5). */
+export interface OntologyUsage {
+  entities: Record<string, number>;
+  aliases: Record<string, number>;
+  mentions: Record<string, number>;
+  relations: Record<string, number>;
+}
+
 /** Збережений пошуковий запит автора (Т1.3). */
 export interface SavedSearchRow {
   id: string;
@@ -1131,6 +1194,24 @@ export interface CoreRepository {
   getQualityRun(id: string): Promise<QualityRunRow | null>;
   listQualityRuns(filter?: { setId?: string; limit?: number }): Promise<QualityRunRow[]>;
   updateQualityRun(id: string, patch: QualityRunPatch): Promise<QualityRunRow>;
+
+  /**
+   * Т5.1 В2: версії онтології (реєстр схем) — рівень платформи. Номер версії
+   * ставить сховище (наступний у межах онтології); опубліковане визначення
+   * не змінюється; `updateOntologyVersion` з `expectedRevision` — лише якщо
+   * чернетку ніхто не змінив; `activateOntologyVersion` — одна транзакція:
+   * попередня активна стає `deprecated`, ця — `active`.
+   */
+  addOntologyVersion(input: OntologyVersionInput): Promise<OntologyVersionRow>;
+  getOntologyVersion(id: string): Promise<OntologyVersionRow | null>;
+  getActiveOntologyVersion(ontologyId: string): Promise<OntologyVersionRow | null>;
+  listOntologyVersions(ontologyId: string, filter?: { limit?: number }): Promise<OntologyVersionRow[]>;
+  updateOntologyVersion(id: string, patch: OntologyVersionPatch, expectedRevision?: number): Promise<OntologyVersionRow>;
+  activateOntologyVersion(id: string, actor: CoreActor): Promise<OntologyVersionRow>;
+  addOntologyEvent(input: { ontologyId: string; versionId?: string | null; action: OntologyEventAction; actor: CoreActor; details?: Record<string, unknown> }): Promise<OntologyEventRow>;
+  listOntologyEvents(ontologyId: string, filter?: { versionId?: string; limit?: number }): Promise<OntologyEventRow[]>;
+  /** Використання типів сутностей і зв'язків у всіх книгах. */
+  ontologyUsage(): Promise<OntologyUsage>;
 
   /** Збережені запити автора в книзі (Т1.3), новіші першими. */
   listSavedSearches(projectId: string, userId: string): Promise<SavedSearchRow[]>;

@@ -62,7 +62,11 @@ import {
   type CanonProposalInput,
   type QualityRunInput,
   type QualityRunPatch,
+  type OntologyVersionInput,
+  type OntologyVersionPatch,
   QUALITY_RUN_STATUSES,
+  ONTOLOGY_VERSION_STATUSES,
+  ONTOLOGY_EVENT_ACTIONS,
   AUTONOMY_LEVELS,
   SIMULATION_KINDS,
   SIMULATION_STATUSES,
@@ -593,4 +597,53 @@ export function checkQualityRunPatch(patch: QualityRunPatch): void {
   for (const k of ['summary', 'models'] as const) if (patch[k] !== undefined && !objectLike(patch[k])) throw new CoreRuleError('bad_input', `${k} — обʼєкт`);
   if (patch.report !== undefined && patch.report !== null && !objectLike(patch.report)) throw new CoreRuleError('bad_input', 'Звіт — обʼєкт');
   if (patch.error != null && String(patch.error).length > 2000) throw new CoreRuleError('bad_input', 'Помилка — до 2000 символів');
+}
+
+// ── Реєстр схем (Т5.1 В2) ────────────────────────────────────────────────────
+
+const ONTOLOGY_ACTOR_RE = /^(user|system):.+/;
+
+/** Схему змінює людина чи система — не AI (ТЗ §37: зміна схеми — окреме право). */
+export function checkOntologyActor(actor: CoreActor): void {
+  assertActor(actor);
+  if (!ONTOLOGY_ACTOR_RE.test(actor)) throw new CoreRuleError('bad_actor', 'Онтологію змінює людина чи система, не AI');
+}
+
+export function checkOntologyVersion(input: OntologyVersionInput): void {
+  checkOntologyActor(input.createdBy);
+  if (!input.ontologyId || String(input.ontologyId).length > 100) throw new CoreRuleError('bad_input', 'id онтології — від 1 до 100 символів');
+  if (!objectLike(input.definition)) throw new CoreRuleError('bad_input', 'Визначення онтології — обʼєкт');
+  if (!/^[0-9a-f]{64}$/.test(String(input.definitionHash))) throw new CoreRuleError('bad_input', 'Хеш визначення — sha256 (64 hex)');
+  if (input.status !== undefined && input.status !== 'draft' && input.status !== 'active') throw new CoreRuleError('bad_input', 'Нова версія — чернетка (або активна при імпорті)');
+  if (input.label !== undefined && String(input.label).length > 100) throw new CoreRuleError('bad_input', 'Підпис версії — до 100 символів');
+  if (input.notes !== undefined && String(input.notes).length > 2000) throw new CoreRuleError('bad_input', 'Нотатки версії — до 2000 символів');
+}
+
+/** Правка версії: опубліковане визначення незмінне; `active` — лише через activateOntologyVersion. */
+export function checkOntologyVersionPatch(current: { status: string; publishedAt: string | null }, patch: OntologyVersionPatch): void {
+  if (patch.status !== undefined) {
+    if (!(ONTOLOGY_VERSION_STATUSES as readonly string[]).includes(patch.status)) throw new CoreRuleError('bad_input', `Невідомий статус версії «${patch.status}»`);
+    if (patch.status === 'active') throw new CoreRuleError('bad_input', 'Активною версію робить лише публікація');
+    if (patch.status === 'deprecated' && !current.publishedAt) throw new CoreRuleError('bad_input', 'Застарілою стає лише опублікована версія');
+    if ((patch.status === 'draft' || patch.status === 'validated') && current.publishedAt) throw new CoreRuleError('conflict', 'Опублікована версія не повертається в чернетку');
+    if (current.status === 'active' && patch.status !== 'deprecated') throw new CoreRuleError('conflict', 'Активну версію змінює лише публікація іншої');
+    if (current.status === 'archived') throw new CoreRuleError('conflict', 'Архівна версія не змінюється');
+  }
+  if ((patch.definition !== undefined || patch.definitionHash !== undefined) && current.publishedAt) {
+    throw new CoreRuleError('conflict', 'Опублікована версія онтології незмінна — зміна йде новою версією');
+  }
+  if ((patch.definition !== undefined || patch.definitionHash !== undefined) && current.status === 'archived') {
+    throw new CoreRuleError('conflict', 'Архівна версія не змінюється');
+  }
+  if (patch.definition !== undefined && !objectLike(patch.definition)) throw new CoreRuleError('bad_input', 'Визначення онтології — обʼєкт');
+  if (patch.definitionHash !== undefined && !/^[0-9a-f]{64}$/.test(String(patch.definitionHash))) throw new CoreRuleError('bad_input', 'Хеш визначення — sha256 (64 hex)');
+  for (const k of ['validation', 'impact'] as const) if (patch[k] != null && !objectLike(patch[k])) throw new CoreRuleError('bad_input', `${k} — обʼєкт`);
+  if (patch.label !== undefined && String(patch.label).length > 100) throw new CoreRuleError('bad_input', 'Підпис версії — до 100 символів');
+  if (patch.notes !== undefined && String(patch.notes).length > 2000) throw new CoreRuleError('bad_input', 'Нотатки версії — до 2000 символів');
+}
+
+export function checkOntologyEvent(input: { ontologyId: string; action: string; actor: CoreActor; details?: unknown }): void {
+  checkOntologyActor(input.actor);
+  if (!(ONTOLOGY_EVENT_ACTIONS as readonly string[]).includes(input.action)) throw new CoreRuleError('bad_input', `Невідома дія реєстру схем «${input.action}»`);
+  if (input.details !== undefined && !objectLike(input.details)) throw new CoreRuleError('bad_input', 'Подробиці події — обʼєкт');
 }

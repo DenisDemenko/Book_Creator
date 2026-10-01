@@ -41,6 +41,10 @@ import {
   checkCanonProposal,
   checkQualityRun,
   checkQualityRunPatch,
+  checkOntologyVersion,
+  checkOntologyVersionPatch,
+  checkOntologyEvent,
+  checkOntologyActor,
   assertActor,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isSearchableKind, isValidEmbedding, memoryTextScore } from './search/text';
@@ -120,6 +124,12 @@ import type {
   QualityRunInput,
   QualityRunPatch,
   QualityRunRow,
+  OntologyVersionInput,
+  OntologyVersionPatch,
+  OntologyVersionRow,
+  OntologyEventRow,
+  OntologyEventAction,
+  OntologyUsage,
 } from './types';
 
 const key = (projectId: string, id: string) => `${projectId}\u0000${id}`;
@@ -165,6 +175,8 @@ export class MemoryCoreRepository implements CoreRepository {
   private simEvents: SimulationEventRow[] = [];
   private proposals: CanonProposalRow[] = [];
   private qualityRuns: QualityRunRow[] = [];
+  private ontologyVersions: OntologyVersionRow[] = [];
+  private ontologyEvents: OntologyEventRow[] = [];
 
   private requireProject(projectId: string): ProjectRow {
     const p = this.projects.get(projectId);
@@ -1556,6 +1568,137 @@ export class MemoryCoreRepository implements CoreRepository {
       if (patch[k] !== undefined) (r as any)[k] = clone(patch[k] as any);
     }
     return clone(r);
+  }
+
+  // ── Реєстр схем: версії онтології (Т5.1 В2) ───────────────────────────────
+
+  async addOntologyVersion(input: OntologyVersionInput) {
+    checkOntologyVersion(input);
+    const status = input.status ?? 'draft';
+    const same = this.ontologyVersions.filter((v) => v.ontologyId === input.ontologyId);
+    if (status === 'active' && same.some((v) => v.status === 'active')) throw new CoreRuleError('conflict', 'Активна версія онтології вже є');
+    if (status === 'draft' && same.some((v) => v.status === 'draft' || v.status === 'validated')) throw new CoreRuleError('conflict', 'Відкрита чернетка онтології вже є — одна за раз');
+    if (input.basedOn && !this.ontologyVersions.some((v) => v.id === input.basedOn)) throw notFound(`Версія онтології «${input.basedOn}»`);
+    const t = now();
+    const row: OntologyVersionRow = {
+      id: randomUUID(),
+      ontologyId: input.ontologyId,
+      version: same.reduce((m, v) => Math.max(m, v.version), 0) + 1,
+      label: input.label ?? '',
+      status,
+      basedOn: input.basedOn ?? null,
+      definition: clone(input.definition),
+      definitionHash: input.definitionHash,
+      validation: null,
+      impact: null,
+      notes: input.notes ?? '',
+      revision: 1,
+      createdBy: input.createdBy,
+      createdAt: t,
+      updatedAt: t,
+      publishedBy: status === 'active' ? input.createdBy : null,
+      publishedAt: status === 'active' ? t : null,
+    };
+    this.ontologyVersions.push(row);
+    return clone(row);
+  }
+
+  async getOntologyVersion(id: string) {
+    const v = this.ontologyVersions.find((x) => x.id === id);
+    return v ? clone(v) : null;
+  }
+
+  async getActiveOntologyVersion(ontologyId: string) {
+    const v = this.ontologyVersions.find((x) => x.ontologyId === ontologyId && x.status === 'active');
+    return v ? clone(v) : null;
+  }
+
+  async listOntologyVersions(ontologyId: string, f: { limit?: number } = {}) {
+    const limit = Math.max(1, Math.min(f.limit ?? 50, 200));
+    return this.ontologyVersions
+      .filter((v) => v.ontologyId === ontologyId)
+      .sort((a, b) => b.version - a.version)
+      .slice(0, limit)
+      .map((v) => ({ ...clone(v), definition: null }));
+  }
+
+  async updateOntologyVersion(id: string, patch: OntologyVersionPatch, expectedRevision?: number) {
+    const v = this.ontologyVersions.find((x) => x.id === id);
+    if (!v) throw notFound(`Версія онтології «${id}»`);
+    checkOntologyVersionPatch(v, patch);
+    if (expectedRevision !== undefined && v.revision !== expectedRevision) {
+      throw new CoreRuleError('conflict', `Чернетку вже змінено (ревізія ${v.revision}, а не ${expectedRevision}) — перечитайте її`);
+    }
+    if ((patch.status === 'draft' || patch.status === 'validated') && v.status !== 'draft' && v.status !== 'validated') {
+      throw new CoreRuleError('conflict', 'Повернути в чернетку можна лише відкриту чернетку');
+    }
+    for (const k of ['status', 'definition', 'definitionHash', 'validation', 'impact', 'label', 'notes'] as const) {
+      if (patch[k] !== undefined) (v as any)[k] = clone(patch[k] as any);
+    }
+    v.revision += 1;
+    v.updatedAt = now();
+    return clone(v);
+  }
+
+  async activateOntologyVersion(id: string, actor: CoreActor) {
+    checkOntologyActor(actor);
+    const v = this.ontologyVersions.find((x) => x.id === id);
+    if (!v) throw notFound(`Версія онтології «${id}»`);
+    if (v.status !== 'validated') throw new CoreRuleError('conflict', `Опублікувати можна лише перевірену чернетку, а ця — «${v.status}»`);
+    const t = now();
+    for (const o of this.ontologyVersions) {
+      if (o.ontologyId === v.ontologyId && o.status === 'active') {
+        o.status = 'deprecated';
+        o.revision += 1;
+        o.updatedAt = t;
+      }
+    }
+    v.status = 'active';
+    v.publishedBy = actor;
+    v.publishedAt = t;
+    v.revision += 1;
+    v.updatedAt = t;
+    return clone(v);
+  }
+
+  async addOntologyEvent(input: { ontologyId: string; versionId?: string | null; action: OntologyEventAction; actor: CoreActor; details?: Record<string, unknown> }) {
+    checkOntologyEvent(input);
+    const row: OntologyEventRow = {
+      id: randomUUID(),
+      ontologyId: input.ontologyId,
+      versionId: input.versionId ?? null,
+      action: input.action,
+      actor: input.actor,
+      details: clone(input.details ?? {}),
+      createdAt: now(),
+    };
+    this.ontologyEvents.push(row);
+    return clone(row);
+  }
+
+  async listOntologyEvents(ontologyId: string, f: { versionId?: string; limit?: number } = {}) {
+    const limit = Math.max(1, Math.min(f.limit ?? 100, 500));
+    return this.ontologyEvents
+      .filter((e) => e.ontologyId === ontologyId && (!f.versionId || e.versionId === f.versionId))
+      .slice()
+      .reverse()
+      .slice(0, limit)
+      .map(clone);
+  }
+
+  async ontologyUsage(): Promise<OntologyUsage> {
+    const inc = (m: Record<string, number>, k: string) => {
+      m[k] = (m[k] ?? 0) + 1;
+    };
+    const usage: OntologyUsage = { entities: {}, aliases: {}, mentions: {}, relations: {} };
+    for (const e of this.entities.values()) inc(usage.entities, e.type);
+    for (const a of this.aliases.values()) inc(usage.aliases, a.entityType);
+    for (const m of this.mentions.values()) {
+      const e = this.entities.get(m.entityId);
+      if (e) inc(usage.mentions, e.type);
+    }
+    for (const r of this.relations.values()) inc(usage.relations, r.type);
+    return usage;
   }
 
   async listSavedSearches(projectId: string, userId: string) {

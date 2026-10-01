@@ -42,6 +42,10 @@ import {
   checkCanonProposal,
   checkQualityRun,
   checkQualityRunPatch,
+  checkOntologyVersion,
+  checkOntologyVersionPatch,
+  checkOntologyEvent,
+  checkOntologyActor,
   assertActor,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isValidEmbedding, SEARCHABLE_KINDS, tsQueryFromStems } from './search/text';
@@ -120,6 +124,12 @@ import type {
   QualityRunInput,
   QualityRunPatch,
   QualityRunRow,
+  OntologyVersionInput,
+  OntologyVersionPatch,
+  OntologyVersionRow,
+  OntologyEventRow,
+  OntologyEventAction,
+  OntologyUsage,
 } from './types';
 
 type Q = Pool | PoolClient;
@@ -154,6 +164,30 @@ function toQualityRun(r: any): QualityRunRow {
     startedAt: isoOrNull(r.started_at),
     finishedAt: isoOrNull(r.finished_at),
   };
+}
+function toOntologyVersion(r: any): OntologyVersionRow {
+  return {
+    id: r.id,
+    ontologyId: r.ontology_id,
+    version: Number(r.version),
+    label: r.label ?? '',
+    status: r.status,
+    basedOn: r.based_on ?? null,
+    definition: r.definition ?? null,
+    definitionHash: r.definition_hash,
+    validation: r.validation ?? null,
+    impact: r.impact ?? null,
+    notes: r.notes ?? '',
+    revision: Number(r.revision),
+    createdBy: r.created_by,
+    createdAt: iso(r.created_at),
+    updatedAt: iso(r.updated_at),
+    publishedBy: r.published_by ?? null,
+    publishedAt: isoOrNull(r.published_at),
+  };
+}
+function toOntologyEvent(r: any): OntologyEventRow {
+  return { id: r.id, ontologyId: r.ontology_id, versionId: r.version_id ?? null, action: r.action, actor: r.actor, details: r.details ?? {}, createdAt: iso(r.created_at) };
 }
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Рядок, що не є UUID, у колонці `uuid` дав би помилку бази; для ядра це просто «не знайдено». */
@@ -654,6 +688,12 @@ function mapPgError(err: any): never {
   }
   if (code === '23505' && /character_memories_dedupe/.test(constraint)) {
     throw new CoreRuleError('conflict', 'Такий спогад героя вже є (той самий ключ повтору)');
+  }
+  if (code === '23505' && /ontology_versions_one_active/.test(constraint)) {
+    throw new CoreRuleError('conflict', 'Активна версія онтології вже є');
+  }
+  if (code === '23505' && /ontology_versions_one_draft/.test(constraint)) {
+    throw new CoreRuleError('conflict', 'Відкрита чернетка онтології вже є — одна за раз');
   }
   if (code === '23503') {
     throw new CoreRuleError('not_found', 'Пов\'язаний запис не знайдено в цьому проєкті');
@@ -2167,6 +2207,143 @@ export class PgCoreRepository implements CoreRepository {
   }
 
   // ── Збережені запити (Т1.3) ──────────────────────────────────────────────
+
+  // ── Реєстр схем: версії онтології (Т5.1 В2) ───────────────────────────────
+
+  async addOntologyVersion(input: OntologyVersionInput) {
+    checkOntologyVersion(input);
+    if (input.basedOn != null && !isUuid(input.basedOn)) throw notFound(`Версія онтології «${input.basedOn}»`);
+    const status = input.status ?? 'draft';
+    try {
+      return await this.tx(async (c) => {
+        // Номер версії — наступний у межах онтології; замок на онтологію, щоб два записи не взяли один номер.
+        await c.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`ontology:${input.ontologyId}`]);
+        const { rows } = await c.query(
+          `INSERT INTO ontology_versions (ontology_id, version, label, status, based_on, definition, definition_hash, notes, created_by, published_by, published_at)
+           SELECT $1, COALESCE(MAX(version), 0) + 1, $2, $3, $4, $5, $6, $7, $8,
+                  CASE WHEN $3 = 'active' THEN $8 END, CASE WHEN $3 = 'active' THEN now() END
+           FROM ontology_versions WHERE ontology_id = $1
+           RETURNING *`,
+          [input.ontologyId, input.label ?? '', status, input.basedOn ?? null, JSON.stringify(input.definition), input.definitionHash, input.notes ?? '', input.createdBy],
+        );
+        return toOntologyVersion(rows[0]);
+      });
+    } catch (err) {
+      mapPgError(err);
+    }
+  }
+
+  async getOntologyVersion(id: string) {
+    if (!isUuid(id)) return null;
+    const { rows } = await this.q('SELECT * FROM ontology_versions WHERE id = $1', [id]);
+    return rows[0] ? toOntologyVersion(rows[0]) : null;
+  }
+
+  async getActiveOntologyVersion(ontologyId: string) {
+    const { rows } = await this.q(`SELECT * FROM ontology_versions WHERE ontology_id = $1 AND status = 'active'`, [ontologyId]);
+    return rows[0] ? toOntologyVersion(rows[0]) : null;
+  }
+
+  async listOntologyVersions(ontologyId: string, f: { limit?: number } = {}) {
+    const { rows } = await this.q(
+      `SELECT id, ontology_id, version, label, status, based_on, NULL::jsonb AS definition, definition_hash, validation, impact, notes, revision,
+              created_by, created_at, updated_at, published_by, published_at
+       FROM ontology_versions WHERE ontology_id = $1 ORDER BY version DESC LIMIT $2`,
+      [ontologyId, Math.max(1, Math.min(f.limit ?? 50, 200))],
+    );
+    return rows.map(toOntologyVersion);
+  }
+
+  async updateOntologyVersion(id: string, patch: OntologyVersionPatch, expectedRevision?: number) {
+    const cur = await this.getOntologyVersion(id);
+    if (!cur) throw notFound(`Версія онтології «${id}»`);
+    checkOntologyVersionPatch(cur, patch);
+    if ((patch.status === 'draft' || patch.status === 'validated') && cur.status !== 'draft' && cur.status !== 'validated') {
+      throw new CoreRuleError('conflict', 'Повернути в чернетку можна лише відкриту чернетку');
+    }
+    const has = (k: keyof OntologyVersionPatch) => patch[k] !== undefined;
+    const { rows } = await this.q(
+      `UPDATE ontology_versions SET
+         status = COALESCE($2, status),
+         definition = COALESCE($3::jsonb, definition),
+         definition_hash = COALESCE($4, definition_hash),
+         validation = CASE WHEN $5 THEN $6::jsonb ELSE validation END,
+         impact = CASE WHEN $7 THEN $8::jsonb ELSE impact END,
+         label = COALESCE($9, label),
+         notes = COALESCE($10, notes),
+         revision = revision + 1
+       WHERE id = $1 AND ($11::integer IS NULL OR revision = $11) RETURNING *`,
+      [
+        id,
+        patch.status ?? null,
+        patch.definition === undefined ? null : JSON.stringify(patch.definition),
+        patch.definitionHash ?? null,
+        has('validation'),
+        patch.validation == null ? null : JSON.stringify(patch.validation),
+        has('impact'),
+        patch.impact == null ? null : JSON.stringify(patch.impact),
+        patch.label ?? null,
+        patch.notes ?? null,
+        expectedRevision ?? null,
+      ],
+    );
+    if (!rows[0]) throw new CoreRuleError('conflict', `Чернетку вже змінено (ревізія ${cur.revision}, а не ${expectedRevision}) — перечитайте її`);
+    return toOntologyVersion(rows[0]);
+  }
+
+  async activateOntologyVersion(id: string, actor: CoreActor) {
+    checkOntologyActor(actor);
+    const cur = await this.getOntologyVersion(id);
+    if (!cur) throw notFound(`Версія онтології «${id}»`);
+    try {
+      return await this.tx(async (c) => {
+        await c.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`ontology:${cur.ontologyId}`]);
+        const { rows: me } = await c.query('SELECT status FROM ontology_versions WHERE id = $1 FOR UPDATE', [id]);
+        if (me[0]?.status !== 'validated') throw new CoreRuleError('conflict', `Опублікувати можна лише перевірену чернетку, а ця — «${me[0]?.status}»`);
+        await c.query(`UPDATE ontology_versions SET status = 'deprecated', revision = revision + 1 WHERE ontology_id = $1 AND status = 'active'`, [cur.ontologyId]);
+        const { rows } = await c.query(
+          `UPDATE ontology_versions SET status = 'active', published_by = $2, published_at = now(), revision = revision + 1 WHERE id = $1 RETURNING *`,
+          [id, actor],
+        );
+        return toOntologyVersion(rows[0]);
+      });
+    } catch (err) {
+      if (err instanceof CoreRuleError) throw err;
+      mapPgError(err);
+    }
+  }
+
+  async addOntologyEvent(input: { ontologyId: string; versionId?: string | null; action: OntologyEventAction; actor: CoreActor; details?: Record<string, unknown> }) {
+    checkOntologyEvent(input);
+    const { rows } = await this.q(
+      `INSERT INTO ontology_events (ontology_id, version_id, action, actor, details) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [input.ontologyId, input.versionId ?? null, input.action, input.actor, JSON.stringify(input.details ?? {})],
+    );
+    return toOntologyEvent(rows[0]);
+  }
+
+  async listOntologyEvents(ontologyId: string, f: { versionId?: string; limit?: number } = {}) {
+    if (f.versionId && !isUuid(f.versionId)) return [];
+    const { rows } = await this.q(
+      `SELECT * FROM ontology_events WHERE ontology_id = $1 AND ($2::uuid IS NULL OR version_id = $2) ORDER BY created_at DESC, id LIMIT $3`,
+      [ontologyId, f.versionId ?? null, Math.max(1, Math.min(f.limit ?? 100, 500))],
+    );
+    return rows.map(toOntologyEvent);
+  }
+
+  async ontologyUsage(): Promise<OntologyUsage> {
+    const count = async (sql: string) => {
+      const { rows } = await this.q(sql);
+      return Object.fromEntries(rows.map((r: any) => [r.k, Number(r.n)])) as Record<string, number>;
+    };
+    const [entities, aliases, mentions, relations] = await Promise.all([
+      count('SELECT type AS k, count(*) AS n FROM entities GROUP BY type'),
+      count('SELECT entity_type AS k, count(*) AS n FROM entity_aliases GROUP BY entity_type'),
+      count('SELECT e.type AS k, count(*) AS n FROM entity_mentions m JOIN entities e ON e.id = m.entity_id GROUP BY e.type'),
+      count('SELECT type AS k, count(*) AS n FROM entity_relations GROUP BY type'),
+    ]);
+    return { entities, aliases, mentions, relations };
+  }
 
   async addQualityRun(input: QualityRunInput) {
     checkQualityRun(input);
