@@ -619,6 +619,8 @@ function Editor({ abilities }: { abilities: GsAbilities }) {
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
+              onNodeClick={(_, n) => setSelected({ kind: 'node', id: n.id })}
+              onEdgeClick={(_, e) => setSelected({ kind: 'edge', id: e.id })}
               onPaneClick={() => setSelected(null)}
               nodesConnectable={editable}
               deleteKeyCode={editable ? ['Delete', 'Backspace'] : null}

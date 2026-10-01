@@ -229,6 +229,19 @@ try {
 
   for (const label of nodes) {
     const title = label.split('.')[0].trim();
+    // Т5.2: Graph Studio — не розділ консолі, а окрема сторінка з власною адресою.
+    if (title === 'Graph Studio') {
+      await page.evaluate((lbl: string) => {
+        const el = Array.from(document.querySelectorAll('.os-pill')).find((p) => (p.getAttribute('aria-label') || '') === lbl);
+        (el as HTMLElement | undefined)?.click();
+      }, label);
+      const opened = await page.waitForSelector('[data-gs-page]', { timeout: 30000 }).then(() => true, () => false);
+      t('«Graph Studio»: відкривається окрема сторінка /admin/graph-studio', opened && page.url().includes('/admin/graph-studio'), page.url());
+      await page.evaluate(() => (document.querySelector('#nav-tab-admin') as HTMLElement | null)?.click());
+      await page.waitForSelector('.os-pill', { timeout: 30000 }).catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 800));
+      continue;
+    }
     await page.evaluate((lbl: string) => {
       const el = Array.from(document.querySelectorAll('.os-pill')).find((p) => (p.getAttribute('aria-label') || '') === lbl);
       (el as HTMLElement | undefined)?.click();
