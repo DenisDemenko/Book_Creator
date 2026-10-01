@@ -29,7 +29,7 @@ import type { AdminTab } from '../AdminPanelView';
  */
 export type NodeAction = { kind: 'panel'; tab: AdminTab } | { kind: 'view'; view: AdminView };
 
-export type AdminView = 'api-keys' | 'core-ai' | 'moderation' | 'products' | 'price-management' | 'procurement';
+export type AdminView = 'api-keys' | 'core-ai' | 'moderation' | 'products' | 'price-management' | 'procurement' | 'quality';
 
 export interface AdminNode {
   id: string;
@@ -150,6 +150,16 @@ export const ADMIN_NODES: AdminNode[] = [
     description:
       'Хто створив книгу чи курс, почав і не опублікував, опублікував, лише зареєструвався, писав у чат підтримки — одна таблиця з фільтрами-сегментами і переписка прямо звідси.',
     action: { kind: 'panel', tab: 'crm' },
+    group: 'core',
+    slot: 'right',
+  },
+  {
+    id: 'quality',
+    title: 'Якість персонажів',
+    hint: 'контрольний набір · з Jev і без',
+    description:
+      'Контрольний набір допитів «живих персонажів» на справжніх моделях: витоки чужих таємниць і майбутнього, памʼять, різноманітність дій, сталість, оцінка судді Jev і стилометрія — у режимах з Jev і без нього. Запуск з лімітом витрат, журнал прогонів і звіт .md.',
+    action: { kind: 'view', view: 'quality' },
     group: 'core',
     slot: 'right',
   },

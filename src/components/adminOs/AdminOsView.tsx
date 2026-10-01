@@ -31,6 +31,7 @@ import { AdminPanelView } from '../AdminPanelView';
 import { AdminModerationView } from '../AdminModerationView';
 import { AdminProductsView } from '../AdminProductsView';
 import { AdminProcurementView } from '../AdminProcurementView';
+import { AdminQualityView } from '../AdminQualityView';
 import { FurnitureCalculatorPanel } from './furnitureCalculator/FurnitureCalculatorPanel';
 import { ApiKeysView } from '../ApiKeysView';
 import { CoreAiPanel } from '../QuickAiModal';
@@ -299,9 +300,10 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser }) => {
   const opsNodes = restrictedToNodeId ? [] : ADMIN_NODES.filter((n) => n.group === 'operations');
 
   /**
-   * Який екран малює обраний вузол. Три вузли — самостійні сторінки: ключі API,
-   * редактор промтів ядра й черга модерації. Решта — вкладки наявного
-   * AdminPanelView, який для цього й отримав режим `chromeless`.
+   * Який екран малює обраний вузол. Самостійні сторінки (`AdminView` у
+   * `nodes.ts`): ключі API, редактор промтів ядра, модерація, товари, ціни,
+   * закупівлі, якість персонажів. Решта — вкладки наявного AdminPanelView,
+   * який для цього й отримав режим `chromeless`.
    */
   const renderView = (view: AdminView) => {
     if (view === 'api-keys') return <ApiKeysView authUser={authUser} />;
@@ -309,6 +311,7 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser }) => {
     if (view === 'products') return <AdminProductsView />;
     if (view === 'price-management') return <FurnitureCalculatorPanel />;
     if (view === 'procurement') return <AdminProcurementView />;
+    if (view === 'quality') return <AdminQualityView />;
     if (view === 'core-ai') {
       return (
         <CoreAiPanel
