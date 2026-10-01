@@ -13,9 +13,11 @@ import { EditorView, type PromptConstructorRequest } from './components/EditorVi
 import { MasteryFrameworkView } from './components/MasteryFrameworkView';
 import { SunLightingProvider } from './context/SunLightingContext';
 import { WriterBookProvider } from './context/WriterBookContext';
+import { BlocksOpacityProvider } from './context/BlocksOpacityContext';
 import { DraggableSun } from './components/mastery/DraggableSun';
 import { SunAmbientOverlay } from './components/mastery/SunAmbientOverlay';
 import { SunAuraManager } from './components/SunAuraManager';
+import { StudioBackdrop } from './components/StudioBackdrop';
 import { DashboardView } from './components/DashboardView';
 import { KnowledgeView } from './components/KnowledgeView';
 import { TrainersView } from './components/TrainersView';
@@ -1885,6 +1887,13 @@ export default function App() {
       <WriterBookProvider book={book}>
     <div className="app-shell-root min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-400/20 selection:text-amber-200 relative">
 
+      {/* Фото-фон студії (StudioBackdrop.tsx) — 12 знімків власника, по
+          одному на кожен колір сонечка. Живе ПЕРШИМ нащадком шкаралупи й
+          нічого не перекриває: сам шар нерухомий (fixed) і без подій
+          (pointer-events: none), а прозорість блоків над ним задає
+          `.app-shell-root > …` в index.css. */}
+      <StudioBackdrop />
+
       {/* Сонечко на сторінках студії: динамічне освітлення + перетягуване
           3D-сонце. У світлій темі дає тіні, у темній — сяйво
           (див. SunLightingContext).
@@ -1906,6 +1915,17 @@ export default function App() {
         </>
       )}
       <SunAuraManager />
+
+      {/* Прозорість блоків студії (BlocksOpacityProvider). Провайдер не
+          додає жодного DOM-вузла — він лише тримає значення й пише його в
+          CSS-змінну `--ui-blocks-opacity`, яку читає правило в index.css.
+          Обгорнуті ним елементи стають прямими дітьми `.app-shell-root`,
+          тож і значення діє саме на них. Поза обгорткою свідомо лишились
+          модалки, довідка й панель командної роботи: це вікна ПОВЕРХ
+          студії, і розмивати їх разом із фоном означало б читати форми крізь
+          фотографію. Плюс рятівна пігулка цього ж провайдера (див. поріг
+          BLOCKS_OPACITY_RESCUE_BELOW) — вона теж поза правилом прозорості. */}
+      <BlocksOpacityProvider>
 
       {/* Top Header Navigation */}
       <HeaderNav
@@ -2436,6 +2456,8 @@ export default function App() {
       </div>
       </ErrorBoundary>
       </div>
+
+      </BlocksOpacityProvider>
 
       {/* Аналітика ринку Etsy — плаваюче вікно поверх студії, а не вкладка.
           Стоїть поза перемикачем вкладок навмисно: за ним лишається видимим

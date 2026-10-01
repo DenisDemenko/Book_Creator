@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Sparkles, Gauge, Sun, ChevronDown } from 'lucide-react';
+import { Sparkles, Gauge, Sun, ChevronDown, Layers } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext';
 import { useSunLighting } from '../context/SunLightingContext';
+import { useBlocksOpacity } from '../context/BlocksOpacityContext';
 
 /** Ключі localStorage для персистентності налаштувань сяйва. */
 const POINTS_KEY = 'nova_glow_points';
@@ -172,6 +173,10 @@ export const GlowIntensityControl: React.FC = () => {
   // її споживає SunAuraManager і кільцевий повзунок у DraggableSun, і два
   // джерела істини для одного значення розійшлися б.
   const { sunStrength, setSunStrength } = useSunLighting();
+  // Прозорість блоків студії над фото-фоном живе в окремому контексті:
+  // її ставить цей повзунок, а споживає index.css через CSS-змінну на
+  // :root — див. BlocksOpacityContext.tsx про те, чому не localStorage тут.
+  const { blocksOpacity, setBlocksOpacity } = useBlocksOpacity();
   const [points, setPoints] = useState<number>(readInitialPoints);
   const [paletteId, setPaletteId] = useState<string>(readInitialPaletteId);
   const [speed, setSpeed] = useState<number>(readInitialSpeed);
@@ -453,7 +458,33 @@ export const GlowIntensityControl: React.FC = () => {
         </span>
       </div>
 
-      {/* Ряд 4 — палітра сяйва */}
+      {/* Ряд 4 — прозорість блоків студії над фото-фоном. Типово 75%.
+          «Прозорість» у підписові, а значення — навпаки, прозорість
+          НЕПРОЗОРОСТІ: 100% = блоки суцільні, 0% = лишається тільки фон.
+          Саме так це читає людина («постав прозорість 75%») — тому на
+          повзунку 75%, а не 25%. */}
+      <div className="flex items-center gap-2" title={t('header.blocksOpacityTitle')}>
+        <Layers className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
+        <span className="w-12 shrink-0 text-[11px] font-semibold text-slate-300 whitespace-nowrap">
+          {t('header.blocksOpacity')}
+        </span>
+        <input
+          id="blocks-opacity-slider"
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={Math.round(blocksOpacity * 100)}
+          onChange={(e) => setBlocksOpacity(Number(e.target.value) / 100)}
+          className="min-w-0 flex-1 accent-emerald-400"
+          aria-label={t('header.blocksOpacity')}
+        />
+        <span className="w-9 shrink-0 text-right text-[10px] font-mono text-slate-500">
+          {Math.round(blocksOpacity * 100)}%
+        </span>
+      </div>
+
+      {/* Ряд 5 — палітра сяйва */}
       <div className="flex items-center gap-1.5" title={t('header.glowPaletteTitle')}>
         {/* Прев'ю трьох кольорів обраної схеми */}
         <span className="flex items-center gap-0.5 shrink-0" aria-hidden="true">
