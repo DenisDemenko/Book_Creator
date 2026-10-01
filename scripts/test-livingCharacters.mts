@@ -63,6 +63,18 @@ const fakeJev: JevAdapter = {
   name: 'jev',
   evaluate: async (snapshot, questions) => {
     const situation = snapshot.situation ?? '';
+    // Суддя (В2): характер — відповідь спирається на пам'ять / переконання героя; стиль — діалогове тире, як у книзі.
+    if (questions.some((q) => q.id === 'character_fit')) {
+      const reply = (/Відповідь героя: «([\s\S]*)»$/.exec(situation) ?? [])[1] ?? '';
+      const own = [...(snapshot.memories ?? []).map((m) => m.content), ...(snapshot.beliefs ?? []).map((b) => b.statement)];
+      const grounded = own.some((l) => stems(l).some((x) => stems(reply).includes(x) && !STOP.has(x)));
+      return {
+        selected_action: '', raw_distributions: {}, confidence: 0.8, model_version: 'jev-fake', snapshot_hash: 'e'.repeat(32), decision_trace_id: 'judge', source: 'jev', corrected: false,
+        usage: { input_tokens: 500, output_tokens: 0 }, latency_ms: 2,
+        scores: { character_fit: grounded ? 8 : 4, style_fit: /^\s*—/.test(reply) ? 7 : 3 },
+        checks: { contradicts_state: 0.1 },
+      } as any;
+    }
     const cls = CLASS.find(([re]) => re.test(situation))?.[1];
     const answers: Record<string, any> = {};
     let selected = '';
@@ -138,6 +150,18 @@ t('час і вартість: голос ($0.0001 × ходи) + рішення
 t('ворота: з Jev — усі пройдено; без Jev — жорсткі пройдено', withJev.passed && noJev.gates.filter((g) => g.kind === 'hard').every((g) => g.passed) && noJev.gates.every((g) => g.kind === 'hard'), JSON.stringify(withJev.gates.filter((g) => !g.passed)));
 t('підсумок прогону — пройдено', report.passed);
 
+console.log('\nJev-суддя і стилометрія (В2):');
+{
+  t('кожна відповідь оцінена суддею в обох режимах (один суддя — чесне порівняння)', report.modes.every((m) => m.metrics.judge.judged === n && m.metrics.judge.errors === 0), report.modes.map((m) => m.metrics.judge.judged).join('/'));
+  t('«у характері героя» вище там, де відповідь спирається на пам\'ять героя', withJev.turns.find((x) => x.caseId === 'mem-compass')!.judge!.characterFit === 8 && withJev.turns.find((x) => x.caseId === 'div-tired')!.judge!.characterFit === 4);
+  t('середні оцінки й частка суперечностей — у звіті; ворота судді пройдено', withJev.metrics.judge.characterFitAvg! >= 6 && withJev.metrics.judge.styleFitAvg === 7 && withJev.metrics.judge.contradictionRate === 0 && ['character_fit', 'style_fit', 'contradiction'].every((id) => withJev.gates.find((g) => g.id === id)?.passed && !withJev.gates.find((g) => g.id === id)?.skipped), JSON.stringify(withJev.metrics.judge));
+  t('стан для судді теж перевірено на витоки (по два стани Jev на хід: рішення + суддя)', withJev.turns.every((x) => x.seen.jevStates.length >= 2) && withJev.metrics.isolation.leaks === 0);
+  t('вартість судді — окремо і в разом', withJev.metrics.judge.costUsd > 0 && withJev.metrics.performance.totalCostUsd > withJev.metrics.performance.voiceCostUsd + withJev.metrics.performance.decisionCostUsd);
+  t('стилометрія: слова в реченні й діалогове тире — відповіді проти тексту автора', withJev.metrics.style.authorSentenceWords! > 0 && withJev.metrics.style.replySentenceWords! > 0 && withJev.metrics.style.replyDashShare === 1 && withJev.metrics.style.authorDashShare! > 0, JSON.stringify(withJev.metrics.style));
+  const noJudge = await runMode(LIVING_CHARACTERS_SET, 'with_jev', { ...deps, judge: null });
+  t('без судді — ворота характеру й стилю пропущено (і так і показано), не пройдено мовчки', noJudge.metrics.judge.judged === 0 && ['character_fit', 'style_fit', 'contradiction'].every((id) => noJudge.gates.find((g) => g.id === id)?.skipped) && /пропущено/.test(renderQualityReport({ ...report, modes: [noJudge] })));
+}
+
 console.log('\nВорота самі ловлять поломки:');
 {
   const leaky = await runMode(LIVING_CHARACTERS_SET, 'with_jev', { ...deps, voice: honestVoice((r) => `${r} Архів у котельні.`) });
@@ -145,12 +169,13 @@ console.log('\nВорота самі ловлять поломки:');
   t('…витік у відповіді названо (де саме)', leaky.metrics.isolation.examples.some((e) => /котельн.*відповідь/.test(e)));
   const parrot = await runMode(LIVING_CHARACTERS_SET, 'with_jev', { ...deps, voice: async () => ({ text: JSON.stringify({ reply: 'Не знаю.' }), modelId: 'parrot', inputTokens: 1, outputTokens: 1 }) });
   t('однакова відповідь на все — повтори 100%, пам\'ять 0%, ворота не пройдено', parrot.metrics.diversity.repetitionRate === 1 && parrot.metrics.memory.accuracy === 0 && !parrot.passed);
+  t('…і суддя бачить: не в характері (4/10) і не в стилі автора (3/10) — ворота судді не пройдено', parrot.metrics.judge.characterFitAvg === 4 && parrot.metrics.judge.styleFitAvg === 3 && !parrot.gates.find((g) => g.id === 'character_fit')!.passed && !parrot.gates.find((g) => g.id === 'style_fit')!.passed);
   const sameAction: JevAdapter = { name: 'jev', evaluate: async (s, q) => ({ ...(await fakeJev.evaluate({ ...s, situation: 'x' }, q)) }) };
   const flat = await runMode(LIVING_CHARACTERS_SET, 'with_jev', { ...deps, jev: sameAction });
   t('Jev завжди обирає одне — різних дій 1, ворота «різноманітність» не пройдено', flat.metrics.diversity.distinctActions === 1 && !flat.gates.find((g) => g.id === 'diversity')!.passed);
   const turn = (over: Partial<QualityTurn>): QualityTurn => ({
     caseId: 'x', hero: 'Олена', dimension: 'spoiler', pair: null, expect: [], question: 'q', status: 'answered', reply: 'ні', action: 'answer', source: 'jev', fallbackReason: null, error: null, latencyMs: 10,
-    voice: { inputTokens: 1, outputTokens: 1, costUsd: 0, model: 'm' }, seen: { prompts: ['…креслення…'], jevStates: ['{}'] }, forbidden: { secret: [], future: ['креслення'] }, ...over,
+    voice: { inputTokens: 1, outputTokens: 1, costUsd: 0, model: 'm' }, seen: { prompts: ['…креслення…'], jevStates: ['{}'] }, forbidden: { secret: [], future: ['креслення'] }, judge: null, ...over,
   });
   const m = computeMetrics([turn({}), turn({ caseId: 'y', seen: { prompts: [''], jevStates: ['{"memories":["Конкурент"]}'] }, forbidden: { secret: [], future: ['конкурент'] } })], { calls: 0, bySource: {}, inputTokens: 0, outputTokens: 0, costUsd: 0, latencyMs: 0 });
   t('майбутнє в запиті голосу чи в стані Jev — спойлер, із місцем', m.spoilers.leaks === 2 && m.spoilers.examples.some((e) => /запит голосу/.test(e)) && m.spoilers.examples.some((e) => /стан Jev/.test(e)) && !evaluateGates(LIVING_CHARACTERS_SET.gates, m, 'without_jev').find((g) => g.id === 'spoilers')!.passed);
@@ -160,7 +185,7 @@ console.log('\nВорота самі ловлять поломки:');
 
 console.log('\nЗвіт:');
 const md = renderQualityReport(report);
-t('Markdown: кожен вимір — рядком з числами для обох режимів', ['ізоляція знань', 'спойлери', 'точність пам\'яті', 'різних дій Jev', 'повторів відповіді', 'сталість на перефразуваннях', 'затримка ходу', 'вартість на хід'].every((s) => md.includes(s)) && md.includes('з Jev') && md.includes('без Jev'));
+t('Markdown: кожен вимір — рядком з числами для обох режимів', ['ізоляція знань', 'спойлери', 'точність пам\'яті', 'різних дій Jev', 'повторів відповіді', 'сталість на перефразуваннях', 'у характері героя', 'у стилі автора', 'слів у реченні', 'затримка ходу', 'вартість на хід'].every((s) => md.includes(s)) && md.includes('з Jev') && md.includes('без Jev'));
 t('JSON-звіт серіалізується (для збереження прогонів, В3)', JSON.parse(JSON.stringify(report)).modes.length === 2);
 const at = process.argv.indexOf('--report');
 if (at > 0 && process.argv[at + 1]) {

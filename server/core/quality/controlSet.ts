@@ -46,6 +46,11 @@ export interface QualityGates {
   distinctActionsMin: number;
   repetitionMax: number;
   consistencyMin: number;
+  /** Jev-суддя (В2), шкала 0–10; без судді — ворота пропущено, не пройдено мовчки. */
+  characterFitMin: number;
+  styleFitMin: number;
+  /** Частка відповідей, які Jev вважає такими, що суперечать підтвердженому стану героя (імовірність ≥ 0.5). */
+  contradictionMax: number;
 }
 
 export interface ControlSet {
@@ -70,7 +75,7 @@ export interface ControlSet {
 
 export const LIVING_CHARACTERS_SET: ControlSet = {
   id: 'living-characters',
-  version: 1,
+  version: 2,
   title: 'Архів — контрольний набір живих персонажів',
   book: {
     title: 'Архів',
@@ -155,6 +160,9 @@ export const LIVING_CHARACTERS_SET: ControlSet = {
     distinctActionsMin: 2,
     repetitionMax: 0.34,
     consistencyMin: 0.5,
+    characterFitMin: 6,
+    styleFitMin: 5,
+    contradictionMax: 0.2,
   },
 };
 

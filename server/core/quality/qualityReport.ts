@@ -32,11 +32,16 @@ export function renderQualityReport(r: QualityReport): string {
     row('унікальних біграм у відповідях', (m) => pct(m.metrics.diversity.distinctBigramRatio), modes),
     row('повторів відповіді', (m) => pct(m.metrics.diversity.repetitionRate), modes),
     row('сталість на перефразуваннях', (m) => `${pct(m.metrics.consistency.rate)} (${m.metrics.consistency.consistent}/${m.metrics.consistency.pairs})`, modes),
+    row('у характері героя (суддя, 0–10, оцінено)', (m) => `${num(m.metrics.judge.characterFitAvg)} (${m.metrics.judge.judged}${Object.keys(m.metrics.judge.sources).length ? `; суддя: ${Object.entries(m.metrics.judge.sources).map(([k, v]) => `${k} ${v}`).join(', ')}` : ''})`, modes),
+    row('у стилі автора (суддя, 0–10)', (m) => num(m.metrics.judge.styleFitAvg), modes),
+    row('суперечить стану героя (суддя)', (m) => pct(m.metrics.judge.contradictionRate), modes),
+    row('слів у реченні: відповіді / автор', (m) => `${num(m.metrics.style.replySentenceWords)} / ${num(m.metrics.style.authorSentenceWords)}`, modes),
+    row('діалогове тире: відповіді / автор', (m) => `${pct(m.metrics.style.replyDashShare)} / ${pct(m.metrics.style.authorDashShare)}`, modes),
     row('частка запасного шляху', (m) => pct(m.metrics.performance.fallbackShare), modes),
     row('затримка ходу, середня / p95', (m) => `${m.metrics.performance.latencyAvgMs} / ${m.metrics.performance.latencyP95Ms} мс`, modes),
     row('голос: токени вхід / вихід', (m) => `${m.metrics.performance.voiceInputTokens} / ${m.metrics.performance.voiceOutputTokens}`, modes),
     row('рішення: викликів, токени вхід / вихід', (m) => `${m.metrics.performance.decisionCalls}, ${m.metrics.performance.decisionInputTokens} / ${m.metrics.performance.decisionOutputTokens}`, modes),
-    row('вартість: голос + рішення = разом', (m) => `${usd(m.metrics.performance.voiceCostUsd)} + ${usd(m.metrics.performance.decisionCostUsd)} = ${usd(m.metrics.performance.totalCostUsd)}`, modes),
+    row('вартість: голос + рішення + суддя = разом', (m) => `${usd(m.metrics.performance.voiceCostUsd)} + ${usd(m.metrics.performance.decisionCostUsd)} + ${usd(m.metrics.judge.costUsd)} = ${usd(m.metrics.performance.totalCostUsd)}`, modes),
     row('вартість на хід', (m) => usd(m.metrics.performance.costPerTurnUsd), modes),
     row('тривалість прогону', (m) => `${Math.round(m.durationMs / 100) / 10} с`, modes),
     '',
@@ -45,7 +50,7 @@ export function renderQualityReport(r: QualityReport): string {
   ];
   for (const m of modes) {
     lines.push(`**${MODE_TITLE[m.mode] ?? m.mode}** — ${m.passed ? 'пройдено' : 'НЕ пройдено'}`, '');
-    for (const g of m.gates) lines.push(`- ${g.passed ? '✓' : '✗'} ${g.title}: ${num(g.value)} (${g.limit})${g.kind === 'hard' ? '' : ' — якісні'}`);
+    for (const g of m.gates) lines.push(`- ${g.skipped ? '–' : g.passed ? '✓' : '✗'} ${g.title}: ${num(g.value)} (${g.limit})${g.skipped ? ' — пропущено' : g.kind === 'hard' ? '' : ' — якісні'}`);
     const ex = [...m.metrics.isolation.examples, ...m.metrics.spoilers.examples];
     if (ex.length) lines.push('', 'Витоки:', ...ex.map((e) => `- ${e}`));
     if (m.metrics.memory.misses.length) lines.push('', `Пам'ять не прозвучала: ${m.metrics.memory.misses.join(', ')}.`);
@@ -53,10 +58,11 @@ export function renderQualityReport(r: QualityReport): string {
   }
   lines.push('## Ходи', '');
   for (const m of modes) {
-    lines.push(`### ${MODE_TITLE[m.mode] ?? m.mode}`, '', '| Кейс | Вимір | Дія | Джерело | Відповідь |', '|---|---|---|---|---|');
+    lines.push(`### ${MODE_TITLE[m.mode] ?? m.mode}`, '', '| Кейс | Вимір | Дія | Джерело | Характер / стиль | Відповідь |', '|---|---|---|---|---|---|');
     for (const t of m.turns) {
       const text = t.status === 'answered' ? t.reply : `[${t.status}] ${t.error ?? ''}`;
-      lines.push(`| ${t.caseId} | ${t.dimension} | ${t.action ?? '—'} | ${t.source ?? '—'} | ${text.replace(/\|/g, '\\|').replace(/\s+/g, ' ').slice(0, 160)} |`);
+      const jd = t.judge && !t.judge.error ? `${num(t.judge.characterFit)} / ${num(t.judge.styleFit)}` : '—';
+      lines.push(`| ${t.caseId} | ${t.dimension} | ${t.action ?? '—'} | ${t.source ?? '—'} | ${jd} | ${text.replace(/\|/g, '\\|').replace(/\s+/g, ' ').slice(0, 160)} |`);
     }
     lines.push('');
   }

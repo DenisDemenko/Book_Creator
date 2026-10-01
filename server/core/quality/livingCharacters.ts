@@ -14,13 +14,23 @@
  * Кожен виклик моделі голосу й кожен стан, переданий Jev, перехоплюються —
  * саме в них (і у відповіді) шукаються витоки приватного й майбутнього.
  * Виміри рахує `qualityMetrics.ts` — чисті функції без моделі.
+ *
+ * В2: Jev-суддя (рішення власника §2 п.1 — EVALUATOR, ТЗ Graph Studio §21):
+ * кожну відповідь Jev оцінює над знімком того самого героя станом на ту саму
+ * сцену — «у характері героя» (SCORE), «у стилі автора» (SCORE, зразок —
+ * текст книги в знімку), «суперечить підтвердженому стану героя» (NOUL).
+ * Оцінка лишається числом у звіті — фактом канону вона не стає. Суддя один
+ * для обох режимів, тож порівняння з Jev / без Jev чесне.
  */
 
 import { MemoryCoreRepository } from '../memoryRepository';
 import { syncBookToCore } from '../sync';
 import { reconcileParagraphIds } from '../../../src/utils/paragraphIds';
 import { addAuthorMemory, collectTagMemories } from '../characterMemory';
-import { askQuestion, setAgent, startInterview, type InterviewDeps, type VoiceGenerate } from '../interview';
+import { askQuestion, INTERVIEW_ACTIONS, setAgent, startInterview, type InterviewDeps, type VoiceGenerate } from '../interview';
+import { buildCharacterSnapshot } from '../characterSnapshot';
+import { stripEntityTags } from '../../../src/utils/coreEntities';
+import type { JevQuestion } from '../../ai/contracts';
 import { jevState, LlmFallbackJevAdapter, JEV_USD_PER_MTOK, type JevAdapter, type LlmJson } from '../../ai/adapters/jev';
 import type { CharacterDecisionRow, CoreRepository } from '../types';
 import { forbiddenFor, type ControlSet, type QualityCase } from './controlSet';
@@ -49,7 +59,42 @@ export interface QualityTurn {
   /** Що саме модель голосу й Jev бачили на цьому ході (для пошуку витоків). */
   seen: { prompts: string[]; jevStates: string[] };
   forbidden: { secret: string[]; future: string[] };
+  /** Оцінка Jev-судді (В2); null — судді немає чи хід без відповіді. */
+  judge: TurnJudgement | null;
 }
+
+export interface TurnJudgement {
+  /** 0–10. */
+  characterFit: number | null;
+  styleFit: number | null;
+  /** Імовірність «суперечить» 0–1. */
+  contradiction: number | null;
+  source: string;
+  inputTokens: number;
+  costUsd: number;
+  error: string | null;
+}
+
+/** Питання судді (Jev як EVALUATOR): дві шкали й одна перевірка «так / ні». */
+export const JUDGE_QUESTIONS: JevQuestion[] = [
+  {
+    id: 'character_fit',
+    kind: 'score',
+    instructions: 'Ситуація — питання автора й відповідь героя. Наскільки ця відповідь у характері героя, зважаючи на його стан, переконання, пам\'ять і пережите?',
+    levels: ['зовсім не схоже на героя', 'нетипово для героя', 'можливо', 'типово для героя', 'цілком у його характері'],
+  },
+  {
+    id: 'style_fit',
+    kind: 'score',
+    instructions: 'Наскільки мова відповіді героя відповідає авторському стилю книги — фрагменти тексту в recent_text (довжина речень, ритм, діалогова манера, лексика)?',
+    levels: ['зовсім інший стиль', 'помітно інший', 'нейтрально', 'близько до стилю автора', 'як у тексті автора'],
+  },
+  {
+    id: 'contradicts_state',
+    kind: 'noul',
+    instructions: 'Чи суперечить відповідь героя підтвердженим фактам, його пам\'яті чи переконанням, наданим у стані?',
+  },
+];
 
 export interface DecisionTotals {
   calls: number;
@@ -89,6 +134,8 @@ export interface QualityRunDeps {
   fallbackLlm: LlmJson;
   /** Вартість рішення запасного LLM, $ (модель, токени); без неї — 0. */
   priceLlm?: (modelId: string, inputTokens: number, outputTokens: number) => number;
+  /** Jev-суддя (В2); за замовчуванням — `jev`; null — без судді (виміри характеру й стилю пропущено). */
+  judge?: JevAdapter | null;
   /** Підпис прогону у звіті (напр. «підставні моделі», «справжні: gemini-… / jev-1.13.0»). */
   label?: string;
   /** Годинник (тести). */
@@ -96,6 +143,11 @@ export interface QualityRunDeps {
 }
 
 const PROJECT = 'qa-living-characters';
+
+/** Текст автора без тегів — зразок стилю для стилометрії. */
+export function authorText(set: ControlSet): string {
+  return set.book.chapters.flatMap((ch) => ch.sections.map((s) => stripEntityTags(s.content))).join('\n\n');
+}
 
 const sceneChapterOf = (set: ControlSet) => {
   const map = new Map<string, number>();
@@ -189,6 +241,7 @@ export async function runMode(set: ControlSet, mode: QualityMode, deps: QualityR
   const fallback = watchJev(new LlmFallbackJevAdapter(deps.fallbackLlm), jevStates);
   const jev = mode === 'with_jev' && deps.jev ? watchJev(deps.jev, jevStates) : null;
   const interviewDeps: InterviewDeps = { repo, jev, fallback, voice };
+  const judge = deps.judge === undefined ? deps.jev : deps.judge;
 
   const turns: QualityTurn[] = [];
   for (const c of set.cases) {
@@ -210,6 +263,7 @@ export async function runMode(set: ControlSet, mode: QualityMode, deps: QualityR
       voice: { inputTokens: 0, outputTokens: 0, costUsd: 0, model: null },
       seen: { prompts: [], jevStates: [] },
       forbidden: forbiddenFor(set, c, chapterOf),
+      judge: null,
     };
     current = turn;
     const t0 = now();
@@ -231,13 +285,43 @@ export async function runMode(set: ControlSet, mode: QualityMode, deps: QualityR
       turn.error = (err as Error).message.slice(0, 500);
     }
     turn.latencyMs = Math.max(0, now() - t0);
+    if (judge && heroId && turn.status === 'answered') turn.judge = await judgeTurn(repo, judge, turn, c, heroId);
     turns.push(turn);
   }
   current = null;
   const decisions = decisionTotals(await repo.listCharacterDecisions(PROJECT, { limit: 5000 }), deps.priceLlm);
-  const metrics = computeMetrics(turns, decisions);
+  const metrics = computeMetrics(turns, decisions, { authorText: authorText(set) });
   const gates = evaluateGates(set.gates, metrics, mode);
   return { mode, turns, decisions, metrics, gates, passed: gates.every((g) => g.passed), durationMs: Math.max(0, now() - started) };
+}
+
+/** Jev-суддя над знімком того самого героя станом на ту саму сцену; стан теж перевіряється на витоки. */
+async function judgeTurn(repo: CoreRepository, judge: JevAdapter, turn: QualityTurn, c: QualityCase, heroId: string): Promise<TurnJudgement> {
+  try {
+    const built = await buildCharacterSnapshot(repo, {
+      projectId: PROJECT,
+      characterId: heroId,
+      sceneId: c.sceneId ?? null,
+      asOfChapter: c.asOfChapter ?? null,
+      situation: `Питання автора: «${turn.question}»\nВідповідь героя: «${turn.reply}»`.slice(0, 2000),
+      allowedActions: INTERVIEW_ACTIONS,
+      lenientScene: true,
+    });
+    turn.seen.jevStates.push(JSON.stringify(jevState(built.snapshot)));
+    const r = await judge.evaluate(built.snapshot, JUDGE_QUESTIONS);
+    const inTok = Number(r.usage?.input_tokens ?? 0) || 0;
+    return {
+      characterFit: typeof r.scores.character_fit === 'number' ? r.scores.character_fit : null,
+      styleFit: typeof r.scores.style_fit === 'number' ? r.scores.style_fit : null,
+      contradiction: typeof r.checks?.contradicts_state === 'number' ? r.checks.contradicts_state : null,
+      source: r.source,
+      inputTokens: inTok,
+      costUsd: r.source === 'jev' ? Math.round((inTok / 1_000_000) * JEV_USD_PER_MTOK * 1e6) / 1e6 : 0,
+      error: null,
+    };
+  } catch (err) {
+    return { characterFit: null, styleFit: null, contradiction: null, source: 'error', inputTokens: 0, costUsd: 0, error: (err as Error).message.slice(0, 300) };
+  }
 }
 
 /** Увесь набір в обох режимах — звіт із числами для кожного виміру. */

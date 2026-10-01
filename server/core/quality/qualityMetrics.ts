@@ -12,6 +12,9 @@
  *   сталість     — частка пар перефразувань з однаковою дією;
  *   час і вартість — затримка ходу (середня, p95), токени й $ голосу та
  *                  рішень, частка запасного шляху.
+ * В2: суддя — середні оцінки Jev «у характері героя» й «у стилі автора»
+ * (0–10), частка «суперечить стану» (імовірність ≥ 0.5); стилометрія — середня
+ * довжина речення й частка відповідей із діалоговим тире проти тексту автора.
  */
 
 import type { QualityGates } from './controlSet';
@@ -33,6 +36,8 @@ export interface QualityMetrics {
   memory: { cases: number; hits: number; accuracy: number | null; misses: string[] };
   diversity: { distinctActions: number; actions: Record<string, number>; distinctBigramRatio: number | null; repetitionRate: number | null };
   consistency: { pairs: number; consistent: number; rate: number | null; details: { pair: string; actions: (string | null)[] }[] };
+  judge: { judged: number; sources: Record<string, number>; characterFitAvg: number | null; styleFitAvg: number | null; contradictionRate: number | null; errors: number; costUsd: number; inputTokens: number };
+  style: { replySentenceWords: number | null; authorSentenceWords: number | null; sentenceLengthRatio: number | null; replyDashShare: number | null; authorDashShare: number | null };
   performance: {
     latencyAvgMs: number;
     latencyP95Ms: number;
@@ -80,7 +85,20 @@ function percentile(xs: number[], p: number): number {
   return s[Math.min(s.length - 1, Math.ceil((p / 100) * s.length) - 1)];
 }
 
-export function computeMetrics(turns: QualityTurn[], decisions: DecisionTotals): QualityMetrics {
+/** Середня кількість слів у реченні. */
+export function sentenceWords(text: string): number | null {
+  const sentences = text.split(/[.!?…]+/).map((x) => words(x).length).filter((n) => n > 0);
+  return sentences.length ? round(sentences.reduce((a, b) => a + b, 0) / sentences.length, 2) : null;
+}
+
+/** Частка абзаців (відповідей), що починаються з діалогового тире. */
+const dashShare = (parts: string[]) => {
+  const xs = parts.map((p) => p.trim()).filter(Boolean);
+  return xs.length ? round(xs.filter((p) => /^[—–-]\s/.test(p)).length / xs.length) : null;
+};
+const avg = (xs: number[]) => (xs.length ? round(xs.reduce((a, b) => a + b, 0) / xs.length, 2) : null);
+
+export function computeMetrics(turns: QualityTurn[], decisions: DecisionTotals, opts: { authorText?: string } = {}): QualityMetrics {
   const answered = turns.filter((t) => t.status === 'answered');
   // Пам'ять.
   const memCases = turns.filter((t) => t.dimension === 'memory');
@@ -107,13 +125,23 @@ export function computeMetrics(turns: QualityTurn[], decisions: DecisionTotals):
   const groups = new Map<string, QualityTurn[]>();
   for (const t of turns) if (t.pair) groups.set(t.pair, [...(groups.get(t.pair) ?? []), t]);
   const details = [...groups.entries()].map(([pair, ts]) => ({ pair, actions: ts.map((t) => (t.status === 'answered' ? t.action : null)) }));
-  const judged = details.filter((d) => d.actions.length >= 2 && d.actions.every(Boolean));
-  const consistent = judged.filter((d) => new Set(d.actions).size === 1).length;
+  const judgedPairs = details.filter((d) => d.actions.length >= 2 && d.actions.every(Boolean));
+  const consistent = judgedPairs.filter((d) => new Set(d.actions).size === 1).length;
   // Час і вартість.
   const lat = turns.map((t) => t.latencyMs);
   const voiceCost = turns.reduce((a, t) => a + t.voice.costUsd, 0);
   const fallbackTurns = answered.filter((t) => t.source === 'llm_fallback').length;
-  const totalCost = voiceCost + decisions.costUsd;
+  // Суддя (В2) і стилометрія.
+  const judged = answered.filter((t) => t.judge && !t.judge.error);
+  const fit = judged.map((t) => t.judge!.characterFit).filter((x): x is number => x != null);
+  const sty = judged.map((t) => t.judge!.styleFit).filter((x): x is number => x != null);
+  const contr = judged.map((t) => t.judge!.contradiction).filter((x): x is number => x != null);
+  const judgeCost = turns.reduce((a, t) => a + (t.judge?.costUsd ?? 0), 0);
+  const replyText = answered.map((t) => t.reply).join(' ');
+  const author = opts.authorText ?? '';
+  const replyWords = sentenceWords(replyText);
+  const authorWords = author ? sentenceWords(author) : null;
+  const totalCost = voiceCost + decisions.costUsd + judgeCost;
   return {
     turns: turns.length,
     answered: answered.length,
@@ -127,7 +155,24 @@ export function computeMetrics(turns: QualityTurn[], decisions: DecisionTotals):
       distinctBigramRatio: bigrams.length ? round(new Set(bigrams).size / bigrams.length) : null,
       repetitionRate: replies.length ? round(repeated / replies.length) : null,
     },
-    consistency: { pairs: judged.length, consistent, rate: judged.length ? round(consistent / judged.length) : null, details },
+    consistency: { pairs: judgedPairs.length, consistent, rate: judgedPairs.length ? round(consistent / judgedPairs.length) : null, details },
+    judge: {
+      judged: judged.length,
+      sources: judged.reduce<Record<string, number>>((acc, t) => ((acc[t.judge!.source] = (acc[t.judge!.source] ?? 0) + 1), acc), {}),
+      characterFitAvg: avg(fit),
+      styleFitAvg: avg(sty),
+      contradictionRate: contr.length ? round(contr.filter((p) => p >= 0.5).length / contr.length) : null,
+      errors: answered.filter((t) => t.judge?.error).length,
+      costUsd: round(judgeCost, 6),
+      inputTokens: turns.reduce((a, t) => a + (t.judge?.inputTokens ?? 0), 0),
+    },
+    style: {
+      replySentenceWords: replyWords,
+      authorSentenceWords: authorWords,
+      sentenceLengthRatio: replyWords != null && authorWords ? round(replyWords / authorWords, 2) : null,
+      replyDashShare: dashShare(answered.map((t) => t.reply)),
+      authorDashShare: author ? dashShare(author.split(/\n\s*\n/)) : null,
+    },
     performance: {
       latencyAvgMs: lat.length ? Math.round(lat.reduce((a, b) => a + b, 0) / lat.length) : 0,
       latencyP95Ms: percentile(lat, 95),
@@ -153,6 +198,8 @@ export interface GateResult {
   value: number | null;
   limit: string;
   passed: boolean;
+  /** Немає даних для воріт (напр. судді) — пропущено й так і показано, а не «пройдено» мовчки. */
+  skipped?: boolean;
 }
 
 export function evaluateGates(g: QualityGates, m: QualityMetrics, mode: QualityMode): GateResult[] {
@@ -168,6 +215,13 @@ export function evaluateGates(g: QualityGates, m: QualityMetrics, mode: QualityM
       q('diversity', 'різних дій', m.diversity.distinctActions, `≥ ${g.distinctActionsMin}`, (v) => v >= g.distinctActionsMin),
       q('repetition', 'частка повторів відповіді', m.diversity.repetitionRate, `≤ ${g.repetitionMax}`, (v) => v <= g.repetitionMax),
       q('consistency', 'сталість на перефразуваннях', m.consistency.rate, `≥ ${g.consistencyMin}`, (v) => v >= g.consistencyMin),
+    );
+    const j = (id: string, title: string, value: number | null, limit: string, ok: (v: number) => boolean): GateResult =>
+      m.judge.judged ? { id, title, kind: 'quality', value, limit, passed: value != null && ok(value) } : { id, title, kind: 'quality', value: null, limit: `${limit}; немає судді`, passed: true, skipped: true };
+    out.push(
+      j('character_fit', 'у характері героя (Jev, 0–10)', m.judge.characterFitAvg, `≥ ${g.characterFitMin}`, (v) => v >= g.characterFitMin),
+      j('style_fit', 'у стилі автора (Jev, 0–10)', m.judge.styleFitAvg, `≥ ${g.styleFitMin}`, (v) => v >= g.styleFitMin),
+      j('contradiction', 'суперечить стану героя (Jev)', m.judge.contradictionRate, `≤ ${g.contradictionMax}`, (v) => v <= g.contradictionMax),
     );
   }
   return out;
