@@ -198,7 +198,7 @@ export function specFromBook(book: Book): PdfLayoutSpec {
       fontSize: Math.max(8, Math.round(baseFontSize * 0.9)),
       contentsTitle: (layout.tocConfig?.title || DEFAULT_LAYOUT_SPEC.frontMatter.contentsTitle).trim(),
       contentsSections: layout.tocConfig?.showSectionSubitems !== false,
-      contentsLeader: layout.tocConfig?.leaderStyle !== 'none',
+      contentsLeader: layout.tocConfig?.leaderStyle !== 'blank',
       upperShare: DEFAULT_LAYOUT_SPEC.frontMatter.upperShare,
     },
     designerNoteUk: notes.join(' '),
