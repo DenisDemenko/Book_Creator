@@ -27,7 +27,7 @@ import type { AdminTab } from '../AdminPanelView';
  * «Промти ядра» замість редактора показував текст «відкривається в іншому
  * місці». Тепер у кожного вузла є справжня сторінка.
  */
-export type NodeAction = { kind: 'panel'; tab: AdminTab } | { kind: 'view'; view: AdminView };
+export type NodeAction = { kind: 'panel'; tab: AdminTab } | { kind: 'view'; view: AdminView } | { kind: 'page'; page: 'graph-studio' };
 
 export type AdminView = 'api-keys' | 'core-ai' | 'moderation' | 'products' | 'price-management' | 'procurement' | 'quality';
 
@@ -160,6 +160,16 @@ export const ADMIN_NODES: AdminNode[] = [
     description:
       'Контрольний набір допитів «живих персонажів» на справжніх моделях: витоки чужих таємниць і майбутнього, памʼять, різноманітність дій, сталість, оцінка судді Jev і стилометрія — у режимах з Jev і без нього. Запуск з лімітом витрат, журнал прогонів і звіт .md.',
     action: { kind: 'view', view: 'quality' },
+    group: 'core',
+    slot: 'right',
+  },
+  {
+    id: 'graph-studio',
+    title: 'Graph Studio',
+    hint: 'онтологія · процеси ШІ · версії',
+    description:
+      'Студія графів (Т5.2): онтологія твору на канві, процеси ШІ з палітрою вузлів (ядро, ШІ, Jev, керування, перевірка, людина, вихід), середовища Draft / Test / Production / Archived і відкат. Публікація — окреме право PUBLISH_SCHEMA. Відкривається власною адресою /admin/graph-studio.',
+    action: { kind: 'page', page: 'graph-studio' },
     group: 'core',
     slot: 'right',
   },

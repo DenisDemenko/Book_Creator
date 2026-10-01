@@ -715,6 +715,9 @@ export function hasPermission(role: UserRole | string | undefined | null, permis
 
 export function canAccessTab(role: UserRole | string | undefined | null, tab: NavigationTab): boolean {
   if (role === 'admin') return true;
+  // Т5.2: Graph Studio — адмін або роль із правом публікації схем (перевизначення
+  // ролі знає лише сервер); сторінка сама питає сервер і показує відмову.
+  if (tab === 'graph-studio') return !!role && role !== 'guest';
   const perms = getRolePermissions(role);
   // Сторінки семантичного ядра (Т0.8) — для всіх, хто працює з текстом книги:
   // доступ до самих даних перевіряє сервер (requireProjectAccess), тут лише меню.

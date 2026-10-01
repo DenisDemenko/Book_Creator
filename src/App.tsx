@@ -94,7 +94,8 @@ import {
   META_ACTIVE_BOOK,
   type BookSummary,
 } from './utils/storage';
-import { parseAppPath, buildAppPath, isCorePageTab } from './utils/appRoutes';
+import { parseAppPath, buildAppPath, isCorePageTab, type GraphStudioTab } from './utils/appRoutes';
+import { GraphStudioPage } from './components/graphStudio/GraphStudioPage';
 import {
   STUDIO_ENTRY_PARAMS,
   parseStudioEntry,
@@ -216,6 +217,8 @@ export default function App() {
   const initialRouteRef = useRef(typeof window !== 'undefined' ? parseAppPath(window.location.pathname, API_BASE) : null);
   /** Герой відкритого профілю (сторінка «Профіль персонажа», /characters/:id). */
   const [coreCharacterId, setCoreCharacterId] = useState<string | undefined>(initialRouteRef.current?.characterId);
+  // Т5.2: вкладка Graph Studio (/admin/graph-studio/<вкладка>).
+  const [graphTab, setGraphTab] = useState<GraphStudioTab>(initialRouteRef.current?.graphTab ?? 'workflows');
   /** Адресу вже приведено до стану хоча б раз — далі кожна зміна вкладки йде в історію браузера. */
   const routeSyncedRef = useRef(false);
   const [activeChapterId, setActiveChapterId] = useState<string>(book.chapters[0]?.id || '');
@@ -684,7 +687,7 @@ export default function App() {
   useEffect(() => {
     if (isHydrating) return;
     const path = buildAppPath(
-      { projectId: book.id, tab: currentTab, characterId: currentTab === 'core-character' ? coreCharacterId : undefined },
+      { projectId: book.id, tab: currentTab, characterId: currentTab === 'core-character' ? coreCharacterId : undefined, graphTab },
       API_BASE
     );
     if (!path) return;
@@ -694,7 +697,7 @@ export default function App() {
       else window.history.replaceState({ tab: currentTab }, '', url);
     }
     routeSyncedRef.current = true;
-  }, [isHydrating, book.id, currentTab, coreCharacterId]);
+  }, [isHydrating, book.id, currentTab, coreCharacterId, graphTab]);
 
   const bookIdRef = useRef(book.id);
   bookIdRef.current = book.id;
@@ -702,6 +705,13 @@ export default function App() {
     const onPop = () => {
       const route = parseAppPath(window.location.pathname, API_BASE);
       if (!route) return;
+      // Graph Studio — без книги: лише вкладка.
+      if (route.tab === 'graph-studio') {
+        setMarketOpen(false);
+        setGraphTab(route.graphTab ?? 'workflows');
+        setCurrentTab('graph-studio');
+        return;
+      }
       // Інша книга в історії — робимо її активною й перезавантажуємо: гідратація відкриє саме її.
       if (route.projectId !== bookIdRef.current) {
         saveMeta(META_ACTIVE_BOOK, route.projectId)
@@ -2332,7 +2342,11 @@ export default function App() {
           />
         )}
 
-        {currentTab === 'admin' && canOpenAdminPanel(auth.user?.role) && <AdminOsView authUser={auth.user} />}
+        {currentTab === 'admin' && canOpenAdminPanel(auth.user?.role) && <AdminOsView authUser={auth.user} onOpenPage={() => handleSelectTab('graph-studio')} />}
+
+        {currentTab === 'graph-studio' && (
+          <GraphStudioPage tab={graphTab} onTabChange={setGraphTab} bookTitle={book.title} onOpenStoryGraph={() => handleSelectTab('core-story-graph')} />
+        )}
 
         {currentTab === 'subscription' && <SubscriptionView authUser={auth.user} />}
 

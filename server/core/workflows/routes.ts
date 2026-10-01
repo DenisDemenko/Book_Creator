@@ -2,6 +2,7 @@
  * API процесів ШІ Graph Studio (Т5.2 В2, `PLAN_GRAPH_STUDIO.md`; ТЗ §34,
  * §37, §38, №7, 27, 28).
  *
+ *   GET    /api/core/graph-studio/me                           — що можу: правити, публікувати               (Graph Studio)
  *   GET    /api/core/workflows                                 — процеси з робочою, тестовою й чернеткою    (Graph Studio)
  *   POST   /api/core/workflows                                 — новий { id, name, description?, template? } (адмін)
  *   GET    /api/core/workflows/:id                             — процес і версії                             (Graph Studio)
@@ -44,6 +45,8 @@ export interface WorkflowRoutesDeps {
   requireStudio: Mw;
   requireAdmin: Mw;
   requirePublish: Mw;
+  /** Що може людина в Graph Studio (правити — адмін; публікувати — право canPublishSchema). */
+  abilities?: (req: Request) => Promise<{ canEdit: boolean; canPublish: boolean }>;
 }
 
 const STATUS: Record<string, number> = { not_found: 404, conflict: 409, bad_actor: 403 };
@@ -70,6 +73,11 @@ export function registerWorkflowRoutes(app: Express, d: WorkflowRoutesDeps): voi
   };
   const wid = (req: Request) => String(req.params.id);
   const vid = (req: Request) => String(req.params.vid);
+
+  app.get('/api/core/graph-studio/me', d.requireStudio, async (req, res) => {
+    const a = d.abilities ? await d.abilities(req) : { canEdit: req.principal?.role === 'admin', canPublish: req.principal?.role === 'admin' };
+    res.json({ role: req.principal?.role ?? null, ...a });
+  });
 
   app.get(BASE, d.requireStudio, withRepo(async (repo, _req, res) => {
     res.json({ workflows: await listWorkflowSummaries(repo) });

@@ -45,6 +45,7 @@ import {
   requireAdmin,
   requireSchemaPublisher,
   requireGraphStudio,
+  can as canRole,
   ensureAdminExists,
   firebaseAuthStatus,
   ADMIN_EMAIL,
@@ -637,7 +638,13 @@ registerGitCommandRoutes(app);
   // Онтологія співпраці й реєстр ролей (Т6.1) — той самий життєвий цикл, окрема адреса.
   registerOntologyRoutes(app, { repo: getCoreRepository, requireAuth, requireAdmin, ...schemaGuards }, { ontologyId: 'fusion-collab', base: '/api/core/collaboration/ontology' });
   // Т5.2: процеси ШІ Graph Studio — версії й середовища (виконання — Т5.4).
-  registerWorkflowRoutes(app, { repo: getCoreRepository, requireStudio: requireGraphStudio as any, requireAdmin, requirePublish: requireSchemaPublisher as any });
+  registerWorkflowRoutes(app, {
+    repo: getCoreRepository,
+    requireStudio: requireGraphStudio as any,
+    requireAdmin,
+    requirePublish: requireSchemaPublisher as any,
+    abilities: async (req) => ({ canEdit: req.principal?.role === 'admin', canPublish: await canRole(req.principal?.role ?? 'guest', 'canPublishSchema') }),
+  });
   // Учасники проєкту й ролі з реєстру ролей (Т6.1) — до маршрутів проєкту, щоб їхні адреси не перехопив загальний обробник.
   registerParticipantRoutes(app, {
     repo: getCoreRepository,

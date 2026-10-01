@@ -31,7 +31,7 @@ const ADMIN_PANEL = read('src/components/AdminPanelView.tsx');
 // ---------------------------------------------------------------------------
 console.log('Реєстр вузлів:');
 {
-  t('вузлів шістнадцять — з «Якістю персонажів»', ADMIN_NODES.length === 16, String(ADMIN_NODES.length));
+  t('вузлів сімнадцять — з «Якістю персонажів» і Graph Studio', ADMIN_NODES.length === 17, String(ADMIN_NODES.length));
 
   const ids = ADMIN_NODES.map((n) => n.id);
   t('усі id унікальні', new Set(ids).size === ids.length, ids.join(', '));
@@ -42,7 +42,7 @@ console.log('Реєстр вузлів:');
   const top = ADMIN_NODES.filter((n) => n.slot === 'top');
   const left = ADMIN_NODES.filter((n) => n.slot === 'left');
   const right = ADMIN_NODES.filter((n) => n.slot === 'right');
-  t('карта розкладена 3 / 8 / 5', top.length === 3 && left.length === 8 && right.length === 5,
+  t('карта розкладена 3 / 8 / 6', top.length === 3 && left.length === 8 && right.length === 6,
     `${top.length} / ${left.length} / ${right.length}`);
 
   const danger = ADMIN_NODES.filter((n) => n.tone === 'danger');
@@ -86,6 +86,8 @@ console.log('\nДії вузлів відповідають тому, що ст�
     t(`сторінка «${view}» має обробник на екрані`, ADMIN_OS.includes(`'${view}'`));
   }
 
+  const pageNodes = ADMIN_NODES.filter((n) => n.action.kind === 'page');
+  t('Graph Studio — вузол-сторінка з власною адресою (Т5.2)', pageNodes.length === 1 && pageNodes[0].id === 'graph-studio' && ADMIN_OS.includes('onOpenPage'));
   t('модальних дій у реєстрі більше немає', !ADMIN_OS.includes("kind: 'modal'") && !ADMIN_OS.includes('setModal'));
 }
 

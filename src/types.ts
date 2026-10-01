@@ -18,6 +18,7 @@ export type NavigationTab =
   | 'changelog'    // Лог-файл прогресу та аудит змін
   | 'export'       // Експорт PDF / DOCX / EPUB
   | 'admin'        // Панель адміністратора: користувачі, права, витрати на API
+  | 'graph-studio' // Т5.2: Graph Studio — онтологія, процеси ШІ, версії (/admin/graph-studio)
   | 'subscription' // Тарифи, оформлення підписки та оплата (PrivatBank / PayPal)
   | 'api-keys'     // Ключі API провайдерів ШІ для всієї платформи (вводить лише адміністратор)
   | 'kdp-format'   // Форматування готового файлу під Amazon KDP (Claude, Pro/Ultra)

@@ -81,11 +81,20 @@ const ROUTABLE_TABS: NavigationTab[] = [
 ];
 
 export interface AppRoute {
+  /** Для Graph Studio — порожньо: студія спільна для платформи, не для книги. */
   projectId: string;
   tab: NavigationTab;
   /** Лише для профілю персонажа: id сутності ядра. */
   characterId?: string;
+  /** Лише для Graph Studio: вкладка (`ontology`, `workflows`…). */
+  graphTab?: GraphStudioTab;
 }
+
+/** Вкладки Graph Studio (ТЗ §35), у порядку документа. */
+export const GRAPH_STUDIO_TABS = ['ontology', 'workflows', 'story-graph', 'runs', 'versions', 'evaluations'] as const;
+export type GraphStudioTab = (typeof GRAPH_STUDIO_TABS)[number];
+/** Адреса Graph Studio (рішення власника Т5.2 §2 п.1). */
+export const GRAPH_STUDIO_SEGMENT = 'admin/graph-studio';
 
 /** Id книги в адресі: той самий набір символів, що приймає сервер (isValidBookId). */
 const ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
@@ -108,6 +117,11 @@ export function parseAppPath(pathname: string, base = ''): AppRoute | null {
       return p;
     }
   });
+  // Т5.2: /admin/graph-studio[/<вкладка>] — без книги.
+  if (parts[0] === 'admin' && parts[1] === 'graph-studio') {
+    const tab = parts[2] && (GRAPH_STUDIO_TABS as readonly string[]).includes(parts[2]) ? (parts[2] as GraphStudioTab) : 'workflows';
+    return { projectId: '', tab: 'graph-studio', graphTab: tab };
+  }
   if (parts[0] !== 'projects' || !parts[1] || !ID_RE.test(parts[1])) return null;
   const projectId = parts[1];
   const page = parts[2];
@@ -124,6 +138,7 @@ export function parseAppPath(pathname: string, base = ''): AppRoute | null {
 /** Вкладка й книга → адреса. `null` — у вкладки немає адреси (market). */
 export function buildAppPath(route: AppRoute, base = ''): string | null {
   const b = base.replace(/\/$/, '');
+  if (route.tab === 'graph-studio') return `${b}/${GRAPH_STUDIO_SEGMENT}/${route.graphTab ?? 'workflows'}`;
   const id = encodeURIComponent(route.projectId);
   if (route.tab === 'core-character') {
     return route.characterId

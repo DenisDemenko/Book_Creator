@@ -117,9 +117,11 @@ const BandTile: React.FC<{ label: string; value?: string }> = ({ label, value })
 export interface AdminOsViewProps {
   /** Потрібен розділу «Ключі API»: він показує, чий ключ і чи це гість. */
   authUser?: AuthUser | null;
+  /** Т5.2: вузол-сторінка (Graph Studio) відкривається власною вкладкою Студії з адресою. */
+  onOpenPage?: (page: 'graph-studio') => void;
 }
 
-export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser }) => {
+export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser, onOpenPage }) => {
   useAdminOsFonts();
 
   /**
@@ -287,6 +289,10 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser }) => {
    */
   const openNode = (node: AdminNode) => {
     if (restrictedToNodeId && node.id !== restrictedToNodeId) return;
+    if (node.action.kind === 'page') {
+      onOpenPage?.(node.action.page);
+      return;
+    }
     setActiveId(node.id);
   };
 
@@ -547,9 +553,9 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser }) => {
 
             {active.action.kind === 'panel' ? (
               <AdminPanelView tab={active.action.tab} chromeless />
-            ) : (
+            ) : active.action.kind === 'view' ? (
               renderView(active.action.view)
-            )}
+            ) : null}
           </div>
 
           {/* Інспектор вузла */}

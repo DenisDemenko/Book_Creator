@@ -54,5 +54,13 @@ const tabs = ['express', 'dashboard', 'start', 'editor', 'mastery', 'scenario', 
   'course-studio', 'narration', 'pdf-editor', 'knowledge', 'trainers', 'diagn', 'structure', 'portfolio', 'publishing'] as const;
 t('туди й назад: кожна звичайна вкладка', tabs.every((tab) => eq(parseAppPath(buildAppPath({ projectId: 'B', tab })!), { projectId: 'B', tab })));
 
+
+console.log('\nGraph Studio (Т5.2, /admin/graph-studio):');
+t('адреса без вкладки — процеси ШІ, без книги', eq(parseAppPath('/admin/graph-studio'), { projectId: '', tab: 'graph-studio', graphTab: 'workflows' }));
+t('вкладка з адреси', eq(parseAppPath('/studio/admin/graph-studio/ontology', '/studio'), { projectId: '', tab: 'graph-studio', graphTab: 'ontology' }));
+t('невідома вкладка — процеси ШІ', parseAppPath('/admin/graph-studio/magic')?.graphTab === 'workflows');
+t('побудова адреси не залежить від книги', buildAppPath({ projectId: 'BK-1', tab: 'graph-studio', graphTab: 'versions' }, '/studio') === '/studio/admin/graph-studio/versions');
+t('інші /admin/… — не наші', parseAppPath('/admin/other') === null);
+
 console.log(`\nПідсумок: ${pass} пройшло, ${fail} впало`);
 if (fail > 0) process.exit(1);
