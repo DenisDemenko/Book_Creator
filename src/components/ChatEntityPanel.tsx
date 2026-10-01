@@ -6,9 +6,12 @@ import {
   CORE_ENTITY_GROUPS,
   entityTooltip,
   searchEntities,
+  activeEntities,
+  entitiesInGroup,
   textColorOnDark,
   type CoreEntity,
 } from '../utils/coreEntities';
+import { useRegistryRevision } from '../utils/ontologyClient';
 
 export interface ChatEntityPanelProps {
   /** Вставити тег у поле чату (у позицію курсора). */
@@ -42,7 +45,9 @@ export const ChatEntityPanel: React.FC<ChatEntityPanelProps> = ({ onPick, showTa
 
   const useEnglish = lang === 'en';
   const name = (entity: CoreEntity) => (useEnglish ? entity.nameEn : entity.nameUk);
-  const found = useMemo(() => (query.trim() ? searchEntities(query, 30) : []), [query]);
+  // Нова версія онтології (реєстр схем, Т5.1) — перемальовуємо й перешукуємо.
+  const registryRev = useRegistryRevision();
+  const found = useMemo(() => (query.trim() ? searchEntities(query, 30) : []), [query, registryRev]);
   const usedSlugs = useMemo(() => new Set(groups.map((g) => g.slug)), [groups]);
 
   const row = (entity: CoreEntity) => (
@@ -132,7 +137,7 @@ export const ChatEntityPanel: React.FC<ChatEntityPanelProps> = ({ onPick, showTa
         ) : (
           CORE_ENTITY_GROUPS.map((group) => {
             const open = openGroup === group.id;
-            const entities = CORE_ENTITIES.filter((e) => e.groupId === group.id);
+            const entities = entitiesInGroup(group.id);
             return (
               <div key={group.id}>
                 <button

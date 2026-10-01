@@ -27,7 +27,7 @@ import {
   listCoreRelations,
   listSessionsMentioningEntity,
 } from './coreEntityStore';
-import { CORE_ENTITY_GROUPS, entityTagRegexp, MAX_ENTITIES_PER_PARAGRAPH } from '../src/utils/coreEntities';
+import { CORE_ENTITY_GROUPS, activeRegistryLabel, entityTagRegexp, MAX_ENTITIES_PER_PARAGRAPH } from '../src/utils/coreEntities';
 
 export function registerCoreEntityRoutes(app: Express): void {
   /**
@@ -50,6 +50,8 @@ export function registerCoreEntityRoutes(app: Express): void {
         groups: CORE_ENTITY_GROUPS,
         stats,
         maxPerParagraph: MAX_ENTITIES_PER_PARAGRAPH,
+        // Яка версія онтології (реєстр схем, Т5.1) дала цей словник: `factory` — вбудований.
+        ontology: activeRegistryLabel(),
         // Формат тега віддається разом із даними, а не лише живе в коді
         // клієнта: якщо формат колись зміниться, інтерфейс, який будується
         // з цієї відповіді, не розійдеться з тим, що сервер уміє розібрати.

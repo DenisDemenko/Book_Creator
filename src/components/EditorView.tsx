@@ -9,6 +9,7 @@ import { paginationSnapshotsEqual, type PaginationSnapshot } from '../utils/page
 import { characterMentionKey } from './manuscriptEditor/CharacterMentionPlugin';
 import { readabilityKey } from './manuscriptEditor/ReadabilityHighlightPlugin';
 import { entityTagKey } from './manuscriptEditor/EntityTagPlugin';
+import { useRegistryRevision } from '../utils/ontologyClient';
 import { CoreEntityPanel } from './CoreEntityPanel';
 import { AiSuggestionsPanel } from './AiSuggestionsPanel';
 import { EntitySlashMenu } from './EntitySlashMenu';
@@ -862,6 +863,15 @@ export const EditorView: React.FC<EditorViewProps> = ({
     enEditor?.view.dispatch(enEditor.state.tr.setMeta(entityTagKey, true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entityTooltipEnglish]);
+  // Нова версія онтології (реєстр схем, Т5.1): кольори й підказки тегів —
+  // з неї, тож декорації перемальовуються, щойно версію застосовано.
+  const registryRev = useRegistryRevision();
+  useEffect(() => {
+    if (!registryRev) return;
+    uaEditor?.view.dispatch(uaEditor.state.tr.setMeta(entityTagKey, true));
+    enEditor?.view.dispatch(enEditor.state.tr.setMeta(entityTagKey, true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [registryRev]);
   useEffect(() => {
     entityTagsVisibleRef.current = entityTagsVisible;
     uaEditor?.view.dispatch(uaEditor.state.tr.setMeta(entityTagKey, true));

@@ -202,6 +202,7 @@ import { AI_ROLE_JOB_KIND, aiRoleJobKind } from './server/core/ai/job';
 import { AI_MENTIONS_JOB_KIND, aiMentionsJobKind } from './server/core/ai/mentions';
 import { aiRoleGenerateViaCore, loadCoreAiRoleTemplate } from './server/core/ai/generate';
 import { registerQualityRoutes } from './server/core/quality/qualityRoutes';
+import { registerOntologyRoutes } from './server/core/ontology/routes';
 import { realQualityDeps } from './server/core/quality/realDeps';
 import { CORE_EMBED_KIND, coreEmbedJobKind, scheduleCoreEmbed } from './server/core/search/embedJob';
 import { AI_PROFILE_JOB_KIND, aiProfileJobKind, studioFromBook } from './server/core/characterProfile';
@@ -572,6 +573,8 @@ registerGitCommandRoutes(app);
   // на книгу (власник, прийняте запрошення, адміністратор).
   // Якість живих персонажів (Т2.8 В3): прогони набору на справжніх моделях — лише адміністратор.
   registerQualityRoutes(app, { repo: getCoreRepository, requireAdmin, makeDeps: realQualityDeps });
+  // Реєстр схем (Т5.1): активна версія онтології — усім із входом; зміни — адмін.
+  registerOntologyRoutes(app, { repo: getCoreRepository, requireAuth, requireAdmin });
   registerProjectRoutes(app, {
     access: realtimeAccessDeps,
     repo: getCoreRepository,

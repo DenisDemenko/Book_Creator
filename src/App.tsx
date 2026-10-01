@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { initialBookData } from './data/initialBook';
+import { loadActiveOntology } from './utils/ontologyClient';
 import { Book, NavigationTab, AuditLogEntry, UserRole, BookVersionSnapshot, HeroArcState } from './types';
 import { HeaderNav } from './components/HeaderNav';
 import { SidebarNav } from './components/SidebarNav';
@@ -359,6 +360,24 @@ export default function App() {
       setTimeout(() => setSyncToast(null), 4000);
     }, [])
   });
+
+  // Реєстр схем (Т5.1): після входу — активна версія онтології з сервера
+  // (назви, кольори, нові й застарілі типи); далі — щоразу, коли вкладка
+  // повертається у фокус, але не частіше, ніж раз на п'ять хвилин. Без мережі
+  // лишається збережена копія чи вбудований реєстр.
+  const authUserId = auth.user?.id ?? null;
+  useEffect(() => {
+    if (!authUserId) return;
+    void loadActiveOntology();
+    let last = Date.now();
+    const onFocus = () => {
+      if (Date.now() - last < 5 * 60_000) return;
+      last = Date.now();
+      void loadActiveOntology();
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [authUserId]);
 
   // Повернення з LiqPay/PayPal після оплати завжди веде на сторінку
   // «Підписка», де SubscriptionView сам розбере параметри запиту.

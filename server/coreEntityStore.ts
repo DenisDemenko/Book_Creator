@@ -29,6 +29,7 @@ import {
   duplicateColors,
   parseEntityTags,
   registryStats,
+  activeRegistryLabel,
   type CoreEntityRegistry,
   type CoreRelationRegistry,
 } from '../src/utils/coreEntities';
@@ -110,6 +111,9 @@ function toEntity(row: EntityRow): StoredCoreEntity {
  * якщо бази немає.
  */
 export async function listCoreEntities(): Promise<StoredCoreEntity[]> {
+  // Застосовано версію реєстру схем (Т5.1) — словник беремо з неї: таблиця
+  // SQLite засіяна вбудованим реєстром і про нові типи чи назви не знає.
+  if (activeRegistryLabel() !== 'factory') return CORE_ENTITIES.map((e) => ({ ...e, characteristics: [...e.characteristics] }));
   const db = getDb();
   if (!db) return CORE_ENTITIES.map((e) => ({ ...e, characteristics: [...e.characteristics] }));
   try {
@@ -130,6 +134,7 @@ export async function listCoreEntities(): Promise<StoredCoreEntity[]> {
 }
 
 export async function listCoreRelations(): Promise<StoredCoreRelation[]> {
+  if (activeRegistryLabel() !== 'factory') return CORE_ENTITY_RELATIONS.map((r) => ({ ...r }));
   const db = getDb();
   if (!db) return CORE_ENTITY_RELATIONS.map((r) => ({ ...r }));
   try {

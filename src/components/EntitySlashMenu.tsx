@@ -2,14 +2,15 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/core';
 import { useLanguage } from '../i18n/LanguageContext';
 import {
-  CORE_ENTITIES,
   buildEntityTag,
   entityBySlug,
   readableTextOn,
   searchCharacteristics,
   searchEntities,
+  activeEntities,
   type CoreEntity,
 } from '../utils/coreEntities';
+import { useRegistryRevision } from '../utils/ontologyClient';
 import {
   DIALOGUE_CHARACTER_SLUG,
   buildDialogueInsertText,
@@ -77,6 +78,8 @@ export const EntitySlashMenu: React.FC<EntitySlashMenuProps> = ({ editor, charac
   const hero = stage === 'dialogue' ? matchCharacterBySlashCandidate(characters, heroName) : undefined;
   const heroDisplayName = hero ? `${hero.name}${hero.surname ? ' ' + hero.surname : ''}`.trim() : heroName;
 
+  // Нова версія онтології (реєстр схем, Т5.1) — свіжі типи й назви в підказках.
+  const registryRev = useRegistryRevision();
   const items = useMemo(() => {
     if (stage === 'entity') return searchEntities(query, 8);
     // Третій стан: готові діалоги героя (або його поводження — фолбек, якщо
@@ -91,7 +94,7 @@ export const EntitySlashMenu: React.FC<EntitySlashMenuProps> = ({ editor, charac
       return characteristics.length > 0 ? characteristics : entity.characteristics.slice(0, 8);
     }
     return [] as string[];
-  }, [stage, query, entity, hero]);
+  }, [stage, query, entity, hero, registryRev]);
 
   /**
    * Що стоїть перед курсором. Повертає `null`, якщо тригера немає — тоді
@@ -407,7 +410,7 @@ export const EntitySlashMenu: React.FC<EntitySlashMenuProps> = ({ editor, charac
           ))}
 
       <div className="px-2 py-1 mt-1 border-t border-slate-800 text-[9px] text-slate-600">
-        {stage === 'entity' ? `${CORE_ENTITIES.length} · ` : ''}↑↓ · Tab · Esc
+        {stage === 'entity' ? `${activeEntities().length} · ` : ''}↑↓ · Tab · Esc
       </div>
     </div>
   );

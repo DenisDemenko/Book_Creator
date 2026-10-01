@@ -6,8 +6,11 @@ import {
   CORE_ENTITY_GROUPS,
   readableTextOn,
   searchEntities,
+  activeEntities,
+  entitiesInGroup,
   type CoreEntity,
 } from '../utils/coreEntities';
+import { useRegistryRevision } from '../utils/ontologyClient';
 
 export interface EntityChatPickerProps {
   /** Вставити тег сутності у поле чату (у позицію курсора). */
@@ -37,7 +40,9 @@ export const EntityChatPicker: React.FC<EntityChatPickerProps> = ({ onPick, onCl
 
   const useEnglish = lang === 'en';
   const name = (entity: CoreEntity) => (useEnglish ? entity.nameEn : entity.nameUk);
-  const found = useMemo(() => (query.trim() ? searchEntities(query, 24) : []), [query]);
+  // Нова версія онтології (реєстр схем, Т5.1) — перемальовуємо й перешукуємо.
+  const registryRev = useRegistryRevision();
+  const found = useMemo(() => (query.trim() ? searchEntities(query, 24) : []), [query, registryRev]);
 
   return (
     <div
@@ -46,7 +51,7 @@ export const EntityChatPicker: React.FC<EntityChatPickerProps> = ({ onPick, onCl
     >
       <div className="flex items-center justify-between mb-2">
         <span className="text-[11px] font-bold text-[var(--on-surface)]">
-          {t('coreEntities.chatPickerTitle', { n: CORE_ENTITIES.length })}
+          {t('coreEntities.chatPickerTitle', { n: activeEntities().length })}
         </span>
         <button onClick={onClose} className="p-1 text-[var(--outline)] hover:text-[var(--on-surface)]">
           <X className="w-3.5 h-3.5" />
@@ -90,7 +95,7 @@ export const EntityChatPicker: React.FC<EntityChatPickerProps> = ({ onPick, onCl
         <div className="space-y-1">
           {CORE_ENTITY_GROUPS.map((group) => {
             const open = openGroup === group.id;
-            const entities = CORE_ENTITIES.filter((e) => e.groupId === group.id);
+            const entities = entitiesInGroup(group.id);
             return (
               <div key={group.id}>
                 <button

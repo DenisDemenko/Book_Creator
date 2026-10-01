@@ -11,8 +11,11 @@ import {
   parseAnyEntityTags,
   readableTextOn,
   searchEntities,
+  activeEntities,
+  entitiesInGroup,
   type CoreEntity,
 } from '../utils/coreEntities';
+import { useRegistryRevision } from '../utils/ontologyClient';
 
 export interface CoreEntityPanelProps {
   /** Текст активного розділу — з нього рахується «що вже заявлено». */
@@ -71,7 +74,9 @@ export const CoreEntityPanel: React.FC<CoreEntityPanelProps> = ({
   const useEnglishNames = lang === 'en';
   const entityName = (entity: CoreEntity) => (useEnglishNames ? entity.nameEn : entity.nameUk);
 
-  const found = useMemo(() => (query.trim() ? searchEntities(query, 40) : []), [query]);
+  // Нова версія онтології (реєстр схем, Т5.1) — перемальовуємо й перешукуємо.
+  const registryRev = useRegistryRevision();
+  const found = useMemo(() => (query.trim() ? searchEntities(query, 40) : []), [query, registryRev]);
 
   /** Скільки разів кожна сутність заявлена в активному розділі. */
   const sectionUsage = useMemo(() => {
@@ -156,7 +161,7 @@ export const CoreEntityPanel: React.FC<CoreEntityPanelProps> = ({
           {t('coreEntities.heading')}
         </h3>
         <p className="text-[10px] text-slate-500 mt-0.5">
-          {t('coreEntities.totalLabel', { n: CORE_ENTITIES.length })} ·{' '}
+          {t('coreEntities.totalLabel', { n: activeEntities().length })} ·{' '}
           {t('coreEntities.groupsLabel', {
             n: CORE_ENTITY_GROUPS.length,
             relations: CORE_ENTITY_RELATIONS.length,
@@ -273,7 +278,7 @@ export const CoreEntityPanel: React.FC<CoreEntityPanelProps> = ({
         <div className="space-y-2" data-entity-groups>
           {CORE_ENTITY_GROUPS.map((group) => {
             const open = !!openGroups[group.id];
-            const entities = CORE_ENTITIES.filter((e) => e.groupId === group.id);
+            const entities = entitiesInGroup(group.id);
             return (
               <div key={group.id} className="rounded-xl border border-slate-800 overflow-hidden">
                 <button
