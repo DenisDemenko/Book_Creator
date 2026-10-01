@@ -29,6 +29,8 @@ import {
   duplicateColors,
   parseEntityTags,
   registryStats,
+  type CoreEntityRegistry,
+  type CoreRelationRegistry,
 } from '../src/utils/coreEntities';
 
 function requireDb() {
@@ -47,15 +49,19 @@ export interface StoredCoreEntity {
   groupId: string;
   color: string;
   characteristics: string[];
-  registry: 'base' | 'critic';
+  registry: CoreEntityRegistry;
+  /** Застарілий тип активної версії онтології (Т5.1). */
+  deprecated?: boolean;
 }
 
 export interface StoredCoreRelation {
   key: string;
   nameUk: string;
   example: string;
-  /** `spec` — зв'язки з ТЗ «11 сторінок» (`follows`, `overlaps`), запис #238. */
-  registry: 'base' | 'critic' | 'spec';
+  /** `spec` — зв'язки з ТЗ «11 сторінок» (`follows`, `overlaps`), запис #238; `custom` — з реєстру схем (Т5.1). */
+  registry: CoreRelationRegistry;
+  nameEn?: string;
+  deprecated?: boolean;
 }
 
 export interface StoredChatMessageEntity {

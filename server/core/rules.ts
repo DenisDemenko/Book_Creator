@@ -7,7 +7,7 @@
  * одному місці. Сховище викликає ці перевірки ДО запису.
  */
 
-import { CORE_ENTITIES, CORE_ENTITY_RELATIONS } from '../../src/utils/coreEntities';
+import { isRegisteredEntityType, relationByKey } from '../../src/utils/coreEntities';
 import { blockHash } from '../../src/utils/paragraphIds';
 import {
   AI_ROLES,
@@ -93,8 +93,9 @@ export class CoreRuleError extends Error {
 }
 
 const ACTOR_RE = /^(user|ai|system):.+/;
-const ENTITY_TYPES = new Set(CORE_ENTITIES.map((e) => e.slug));
-const RELATION_TYPES = new Set(CORE_ENTITY_RELATIONS.map((r) => r.key));
+// Типи сутностей і зв'язків — з АКТИВНОЇ версії онтології (реєстр схем, Т5.1),
+// а не набір, застиглий при завантаженні модуля: після публікації нової
+// версії правила ядра мусять бачити її без перезапуску.
 
 export function assertActor(actor: CoreActor): void {
   if (typeof actor !== 'string' || !ACTOR_RE.test(actor)) {
@@ -143,7 +144,7 @@ export function checkParagraph(input: ParagraphInput, actor: CoreActor): void {
 export function checkNewEntity(input: EntityInput): CoreStatus {
   assertActor(input.createdBy);
   assertNonEmpty(input.name, 'Назва сутності');
-  if (!ENTITY_TYPES.has(input.type)) {
+  if (!isRegisteredEntityType(input.type)) {
     throw new CoreRuleError('unknown_entity_type', `Тип сутності «${input.type}» відсутній у реєстрі ядра`);
   }
   const ai = isAiActor(input.createdBy);
@@ -177,7 +178,7 @@ export function checkStatusChange(status: CoreStatus, actor: CoreActor): void {
 
 export function checkNewRelation(input: RelationInput): CoreStatus {
   assertActor(input.createdBy);
-  if (!RELATION_TYPES.has(input.type)) {
+  if (!relationByKey(input.type)) {
     throw new CoreRuleError('unknown_relation_type', `Тип зв'язку «${input.type}» відсутній у реєстрі ядра`);
   }
   assertNonEmpty(input.fromId, 'Початок зв\'язку');

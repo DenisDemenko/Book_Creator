@@ -28,7 +28,7 @@ import type { CharacterMemoryInput, CharacterMemoryRow, CharacterMemoryType, Cor
 import { CoreRuleError } from './rules';
 import { EVENT_TYPES } from './characterProfile';
 import { scanScenes, sceneIsBefore, type SceneScan, type TimelineScene } from './timeline';
-import { CORE_ENTITIES } from '../../src/utils/coreEntities';
+import { entityBySlug } from '../../src/utils/coreEntities';
 
 export interface MemoryScope {
   characterId: string;
@@ -64,7 +64,6 @@ export function memoryEvidenceHash(textHashOf: (paragraphId: string) => string |
 const storyTimeOf = (sc: TimelineScene | undefined): MemoryStoryTime =>
   sc ? { label: sc.time?.label ?? null, key: sc.time?.key ?? null, chapter: sc.chapterNumber, narrativeIndex: sc.narrativeIndex } : {};
 
-const TYPE_LABEL = new Map(CORE_ENTITIES.map((e) => [e.slug, e.nameUk]));
 export const TAG_MEMORY_ACTOR = 'system:memory-tags';
 
 export interface TagMemoryResult {
@@ -108,7 +107,7 @@ export async function collectTagMemories(repo: CoreRepository, projectId: string
       if (!type) continue;
       const key = `tag:${type}:${e.id}:${sectionId}`;
       const value = String((m.fields as { value?: unknown })?.value ?? '').trim();
-      const label = TYPE_LABEL.get(e.type) ?? e.type;
+      const label = entityBySlug(e.type)?.nameUk ?? e.type;
       const prev = wanted.get(key);
       if (prev) {
         if (!prev.sourceParagraphIds!.includes(m.paragraphId)) prev.sourceParagraphIds!.push(m.paragraphId);

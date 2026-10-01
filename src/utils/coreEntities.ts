@@ -36,8 +36,11 @@
  * кожному — гарантований спосіб розійтися з документом.
  */
 
-/** Склад реєстру: базовий документ чи додаток про літературну критику. */
-export type CoreEntityRegistry = 'base' | 'critic';
+/**
+ * Склад реєстру: базовий документ, додаток про літературну критику чи
+ * `custom` — тип, доданий у реєстрі схем (Т5.1) уже після документа.
+ */
+export type CoreEntityRegistry = 'base' | 'critic' | 'custom';
 
 /** Мова характеристики: у документі вони лише українською. */
 export interface CoreEntityGroup {
@@ -62,6 +65,11 @@ export interface CoreEntity {
   /** Характеристики сутності — те, що підказується після двокрапки. */
   characteristics: string[];
   registry: CoreEntityRegistry;
+  /**
+   * Застарілий тип (реєстр схем, Т5.1): наявні дані й теги лишаються
+   * дійсними, але в панелі, підказках і пропозиціях AI його немає.
+   */
+  deprecated?: boolean;
 }
 
 /**
@@ -78,6 +86,10 @@ export interface CoreEntityRelation {
   /** Приклад застосування з документа: «Сергій → подія». */
   example: string;
   registry: CoreRelationRegistry;
+  /** Англійська назва (§0 ТЗ Graph Studio: «English (Українська)»). */
+  nameEn?: string;
+  /** Застарілий зв'язок — наявні лишаються, нових AI не пропонує. */
+  deprecated?: boolean;
 }
 
 /**
@@ -85,7 +97,7 @@ export interface CoreEntityRelation {
  * реєстру», а підгрупи додатка: тому в `registry` вони позначені `critic`,
  * і в інтерфейсі їх видно окремим блоком.
  */
-export const CORE_ENTITY_GROUPS: CoreEntityGroup[] = [
+const GROUP_ROWS: CoreEntityGroup[] = [
   { id: 'A', nameUk: 'Структура документа та зміст', nameEn: 'Document structure', registry: 'base' },
   { id: 'B', nameUk: 'Сценарій і драматургія', nameEn: 'Plot and dramaturgy', registry: 'base' },
   { id: 'C', nameUk: 'Персонажі, психологія та взаємини', nameEn: 'Characters and psychology', registry: 'base' },
@@ -256,7 +268,7 @@ const ENTITY_ROWS: EntityRow[] = [
 
 function expand(row: EntityRow): CoreEntity {
   const [slug, nameEn, nameUk, groupId, color, characteristics] = row;
-  const group = CORE_ENTITY_GROUPS.find((g) => g.id === groupId);
+  const group = GROUP_ROWS.find((g) => g.id === groupId);
   return {
     tag: `/${slug}`,
     slug,
@@ -269,8 +281,37 @@ function expand(row: EntityRow): CoreEntity {
   };
 }
 
-/** Усі 118 типів сутностей. Порядок — як у документі (A → I, далі J1 → J3). */
-export const CORE_ENTITIES: CoreEntity[] = ENTITY_ROWS.map(expand);
+/**
+ * Заводський реєстр — рівно документ власника (118 / 39 / 12). З нього
+ * збирається Fusion Story Ontology 1.0 (`src/utils/ontology.ts`), і до нього
+ * реєстр повертається `resetRegistry()`. Заморожений: правити реєстр можна
+ * лише публікацією нової версії онтології.
+ */
+const deepFreeze = <T,>(x: T): T => {
+  if (x && typeof x === 'object') {
+    Object.values(x as object).forEach(deepFreeze);
+    Object.freeze(x);
+  }
+  return x;
+};
+export const FACTORY_ENTITY_GROUPS: readonly CoreEntityGroup[] = deepFreeze(GROUP_ROWS.map((g) => ({ ...g })));
+export const FACTORY_ENTITIES: readonly CoreEntity[] = deepFreeze(ENTITY_ROWS.map(expand));
+
+const cloneEntity = (e: CoreEntity): CoreEntity => ({ ...e, characteristics: [...e.characteristics] });
+
+/**
+ * Групи активної версії онтології. Масив той самий весь час роботи — при
+ * публікації нової версії він оновлюється НА МІСЦІ (`applyRegistry`), тож
+ * кожен, хто тримає посилання, бачить нове.
+ */
+export const CORE_ENTITY_GROUPS: CoreEntityGroup[] = FACTORY_ENTITY_GROUPS.map((g) => ({ ...g }));
+
+/**
+ * Типи сутностей активної версії онтології. На старті — заводські 118 у
+ * порядку документа (A → I, далі J1 → J3); після публікації версії реєстру
+ * схем (Т5.1) — те, що в ній, на місці цього ж масиву.
+ */
+export const CORE_ENTITIES: CoreEntity[] = FACTORY_ENTITIES.map(cloneEntity);
 
 /**
  * Зв'язки. Базові 21 — з розділу J базового документа, критичні 16 — з J4
@@ -327,11 +368,24 @@ const RELATION_ROWS: [key: string, nameUk: string, example: string, registry: Co
   ['overlaps', 'Перекривається в часі', '/event → /event', 'spec'],
 ];
 
-export const CORE_ENTITY_RELATIONS: CoreEntityRelation[] = RELATION_ROWS.map(
-  ([key, nameUk, example, registry]) => ({ key, nameUk, example, registry })
+/** Англійська назва зв'язку з його ключа: `participates_in` → «Participates in». */
+export function relationNameEn(key: string): string {
+  const words = String(key || '').split('_').filter(Boolean);
+  return words.length ? [words[0][0].toUpperCase() + words[0].slice(1), ...words.slice(1)].join(' ') : key;
+}
+
+export const FACTORY_ENTITY_RELATIONS: readonly CoreEntityRelation[] = deepFreeze(
+  RELATION_ROWS.map(([key, nameUk, example, registry]) => ({ key, nameUk, example, registry, nameEn: relationNameEn(key) })),
 );
 
-/** Скільки саме сутностей мусить бути в реєстрі — охорона від випадкового видалення рядка. */
+/** Зв'язки активної версії онтології — оновлюються на місці, як і `CORE_ENTITIES`. */
+export const CORE_ENTITY_RELATIONS: CoreEntityRelation[] = FACTORY_ENTITY_RELATIONS.map((r) => ({ ...r }));
+
+/**
+ * Скільки саме сутностей у ЗАВОДСЬКОМУ реєстрі (документ власника, онтологія
+ * 1.0) — охорона від випадкового видалення рядка. Активна версія реєстру
+ * схем може мати більше чи менше (Т5.1); її склад — `CORE_ENTITIES.length`.
+ */
 export const CORE_ENTITY_COUNT = 118;
 /** Скількох типів зв'язків — те саме: 37 із документів + 2 з ТЗ «11 сторінок». */
 export const CORE_RELATION_COUNT = 39;
@@ -354,8 +408,9 @@ export const MAX_ENTITIES_PER_PARAGRAPH = 12;
 // Пошук і звернення до записів
 // ---------------------------------------------------------------------------
 
-const BY_SLUG = new Map(CORE_ENTITIES.map((e) => [e.slug, e]));
-const BY_TAG = new Map(CORE_ENTITIES.map((e) => [e.tag, e]));
+let BY_SLUG = new Map<string, CoreEntity>();
+let BY_TAG = new Map<string, CoreEntity>();
+let RELATIONS_BY_KEY = new Map<string, CoreEntityRelation>();
 
 /** Нормалізація псевдоніма: регістр, « / » та подвійні пропуски. */
 function normalizeAlias(value: string): string {
@@ -384,25 +439,7 @@ function normalizeAlias(value: string): string {
  *     Без цього складене ім'я вимагало б набирати слеш усередині тега, а він
  *     там службовий — тег `/глава розділ:x` виглядав би як дві сутності.
  */
-const ALIASES = new Map<string, CoreEntity>();
-for (const entity of CORE_ENTITIES) {
-  const candidates = [
-    entity.nameEn,
-    entity.nameUk,
-    entity.nameUk.split('/')[0],
-    // Українська назва-«рід» без уточнення в дужках: «Емоційний стан (тип)» — немає,
-    // але «Проблема безперервності» лишається як є.
-  ];
-  for (const candidate of candidates) {
-    const alias = normalizeAlias(candidate);
-    // Перша реєстрація виграє: інакше однакові українські назви в різних
-    // сутностей (їх у документі 32 за кольорами, а за назвами теж буває)
-    // перезаписували б одна одну в непередбачуваному порядку.
-    if (alias && !ALIASES.has(alias)) ALIASES.set(alias, entity);
-  }
-  const bySlugAlias = normalizeAlias(entity.slug.replace(/-/g, ' '));
-  if (!ALIASES.has(bySlugAlias)) ALIASES.set(bySlugAlias, entity);
-}
+let ALIASES = new Map<string, CoreEntity>();
 
 /**
  * Слова, якими автор реально називає сутність, але яких немає серед назв
@@ -418,15 +455,126 @@ for (const entity of CORE_ENTITIES) {
  * Розширювати цей список «на всяк випадок» не можна: кожен аліас — це ще один
  * спосіб написати ключ, і зайвий аліас тихо зробить тегом те, що тегом не
  * задумано (саме тому «сирі» теги перевіряються реєстром, див. `stripEntityTags`).
+ * У реєстрі схем (Т5.1) ці слова — поле `aliases` типу сутності.
  */
-const EXTRA_ALIASES: Record<string, string> = {
+export const FACTORY_EXTRA_ALIASES: Readonly<Record<string, string>> = Object.freeze({
   герой: 'character',
   героїня: 'character',
   емоція: 'emotion',
-};
-for (const [alias, slug] of Object.entries(EXTRA_ALIASES)) {
-  const entity = CORE_ENTITIES.find((e) => e.slug === slug);
-  if (entity && !ALIASES.has(normalizeAlias(alias))) ALIASES.set(normalizeAlias(alias), entity);
+});
+let EXTRA_ALIASES: Record<string, string> = { ...FACTORY_EXTRA_ALIASES };
+
+function rebuildIndexes(): void {
+  BY_SLUG = new Map(CORE_ENTITIES.map((e) => [e.slug, e]));
+  BY_TAG = new Map(CORE_ENTITIES.map((e) => [e.tag, e]));
+  RELATIONS_BY_KEY = new Map(CORE_ENTITY_RELATIONS.map((r) => [r.key, r]));
+  ALIASES = new Map();
+  for (const entity of CORE_ENTITIES) {
+    const candidates = [entity.nameEn, entity.nameUk, entity.nameUk.split('/')[0]];
+    for (const candidate of candidates) {
+      const alias = normalizeAlias(candidate);
+      // Перша реєстрація виграє: інакше однакові українські назви в різних
+      // сутностей перезаписували б одна одну в непередбачуваному порядку.
+      if (alias && !ALIASES.has(alias)) ALIASES.set(alias, entity);
+    }
+    const bySlugAlias = normalizeAlias(entity.slug.replace(/-/g, ' '));
+    if (!ALIASES.has(bySlugAlias)) ALIASES.set(bySlugAlias, entity);
+  }
+  for (const [alias, slug] of Object.entries(EXTRA_ALIASES)) {
+    const entity = BY_SLUG.get(slug);
+    if (entity && !ALIASES.has(normalizeAlias(alias))) ALIASES.set(normalizeAlias(alias), entity);
+  }
+}
+rebuildIndexes();
+
+// ---------------------------------------------------------------------------
+// Активна версія онтології (реєстр схем, Т5.1)
+// ---------------------------------------------------------------------------
+
+/** Склад реєстру для `applyRegistry` — те, що дає активна версія онтології. */
+export interface RegistrySnapshot {
+  groups: CoreEntityGroup[];
+  entities: CoreEntity[];
+  relations: CoreEntityRelation[];
+  /** Додаткові слова-ключі: «герой» → `character`. */
+  extraAliases?: Record<string, string>;
+  /** Позначка версії для журналу й тестів: `fusion-story@2`. */
+  label?: string;
+}
+
+let revision = 0;
+let registryLabel = 'factory';
+const listeners = new Set<() => void>();
+
+/**
+ * Замінити склад реєстру активною версією онтології — на місці тих самих
+ * масивів, тож усі споживачі (панель, теги, правила ядра, AI-1) бачать нове
+ * без перезапуску й без переписування. Машинні ключі не перекладаються:
+ * що в тексті книги стоїть `[/character:…]`, те й лишається.
+ */
+export function applyRegistry(next: RegistrySnapshot): void {
+  CORE_ENTITY_GROUPS.splice(0, CORE_ENTITY_GROUPS.length, ...next.groups.map((g) => ({ ...g })));
+  CORE_ENTITIES.splice(0, CORE_ENTITIES.length, ...next.entities.map(cloneEntity));
+  CORE_ENTITY_RELATIONS.splice(0, CORE_ENTITY_RELATIONS.length, ...next.relations.map((r) => ({ ...r })));
+  EXTRA_ALIASES = { ...(next.extraAliases ?? {}) };
+  registryLabel = next.label ?? 'custom';
+  rebuildIndexes();
+  revision++;
+  for (const fn of listeners) {
+    try {
+      fn();
+    } catch {
+      /* слухач не ламає застосування */
+    }
+  }
+}
+
+/** Повернути заводський реєстр (документ власника) — для тестів і відкату без бази. */
+export function resetRegistry(): void {
+  applyRegistry({
+    groups: FACTORY_ENTITY_GROUPS.map((g) => ({ ...g })),
+    entities: FACTORY_ENTITIES.map(cloneEntity),
+    relations: FACTORY_ENTITY_RELATIONS.map((r) => ({ ...r })),
+    extraAliases: { ...FACTORY_EXTRA_ALIASES },
+    label: 'factory',
+  });
+}
+
+/** Лічильник змін реєстру — для `useSyncExternalStore` в інтерфейсі. */
+export function registryRevision(): number {
+  return revision;
+}
+
+/** Яка версія онтології зараз у реєстрі: `factory` або `fusion-story@N`. */
+export function activeRegistryLabel(): string {
+  return registryLabel;
+}
+
+export function subscribeRegistry(fn: () => void): () => void {
+  listeners.add(fn);
+  return () => {
+    listeners.delete(fn);
+  };
+}
+
+/** Чи є такий тип сутності в активній версії — строго за машинним ключем (правила ядра). */
+export function isRegisteredEntityType(slug: string): boolean {
+  return BY_SLUG.has(String(slug ?? ''));
+}
+
+/** Зв'язок активної версії за ключем. */
+export function relationByKey(key: string): CoreEntityRelation | undefined {
+  return RELATIONS_BY_KEY.get(String(key ?? ''));
+}
+
+/** Типи, які можна пропонувати й показувати в панелях: без застарілих. */
+export function activeEntities(): CoreEntity[] {
+  return CORE_ENTITIES.filter((e) => !e.deprecated);
+}
+
+/** Зв'язки, які можна пропонувати: без застарілих. */
+export function activeRelations(): CoreEntityRelation[] {
+  return CORE_ENTITY_RELATIONS.filter((r) => !r.deprecated);
 }
 
 /** Сутність за ключем без слеша (`character`), зі слешем або за назвою (`Персонаж`, `Character`). */
@@ -448,7 +596,7 @@ export function entityGroup(groupId: string): CoreEntityGroup | undefined {
 
 /** Сутності одної групи — у порядку документа. */
 export function entitiesInGroup(groupId: string): CoreEntity[] {
-  return CORE_ENTITIES.filter((e) => e.groupId === groupId);
+  return CORE_ENTITIES.filter((e) => e.groupId === groupId && !e.deprecated);
 }
 
 /**
@@ -466,10 +614,11 @@ export function entitiesInGroup(groupId: string): CoreEntity[] {
  */
 export function searchEntities(query: string, limit = 8): CoreEntity[] {
   const q = String(query || '').trim().toLowerCase().replace(/^\//, '');
-  if (!q) return CORE_ENTITIES.slice(0, limit);
+  const pool = activeEntities();
+  if (!q) return pool.slice(0, limit);
 
   const scored: { entity: CoreEntity; score: number; index: number }[] = [];
-  CORE_ENTITIES.forEach((entity, index) => {
+  pool.forEach((entity, index) => {
     const slug = entity.slug.toLowerCase();
     const nameEn = entity.nameEn.toLowerCase();
     const nameUk = entity.nameUk.toLowerCase();

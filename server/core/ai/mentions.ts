@@ -19,7 +19,7 @@
  * — теж ні.
  */
 
-import { CORE_ENTITIES, CORE_ENTITY_RELATIONS, buildEntityTag, entityBySlug } from '../../../src/utils/coreEntities';
+import { activeEntities, activeRelations, buildEntityTag, entityBySlug, relationByKey } from '../../../src/utils/coreEntities';
 import { normalizeAlias } from '../rules';
 import type { CoreRepository, FindingRow } from '../types';
 import type { ModelFinding, PreparedFinding } from './roles';
@@ -27,7 +27,6 @@ import type { ModelFinding, PreparedFinding } from './roles';
 export const MENTION_SUGGESTION = 'mention_suggestion';
 export const RELATION_SUGGESTION = 'relation_suggestion';
 
-const RELATION_KEYS = new Set(CORE_ENTITY_RELATIONS.map((r) => r.key));
 
 /** Ключ «цей абзац — ця сутність» для відсіву повторів. */
 export function suggestionKey(paragraphId: string, entityType: string, name: string): string {
@@ -36,8 +35,9 @@ export function suggestionKey(paragraphId: string, entityType: string, name: str
 
 /** Інструкція для AI-1: що шукати, у якому вигляді, що вже відомо. */
 export function mentionTask(known: { type: string; name: string }[]): string {
-  const types = CORE_ENTITIES.map((e) => e.slug).join(', ');
-  const relations = CORE_ENTITY_RELATIONS.map((r) => r.key).join(', ');
+  // Лише активні типи й зв'язки онтології: застарілих AI не пропонує (Т5.1).
+  const types = activeEntities().map((e) => e.slug).join(', ');
+  const relations = activeRelations().map((r) => r.key).join(', ');
   const knownList = known.length
     ? known.slice(0, 200).map((e) => `${e.type}: ${e.name}`).join('; ')
     : '(поки немає)';
@@ -101,7 +101,8 @@ export async function createMentionPreparer(ctx: MentionPrepareContext) {
   return async (f: ModelFinding, evidence: { paragraphIds: string[] }): Promise<PreparedFinding[]> => {
     const type = String(f.entity_type ?? '').replace(/^\//, '').trim();
     const name = String(f.entity_name ?? '').trim();
-    if (!entityBySlug(type) || !name) return [];
+    // Застарілий тип онтології (Т5.1) AI не пропонує — наявні дані лишаються, нових немає.
+    if (!entityBySlug(type) || entityBySlug(type)?.deprecated || !name) return [];
     const entityId = await resolve(type, name);
 
     if (f.kind === 'relation') {
@@ -110,7 +111,7 @@ export async function createMentionPreparer(ctx: MentionPrepareContext) {
       const targetName = String(f.target_entity_name ?? '').trim();
       const targetId = entityBySlug(targetType) ? await resolve(targetType, targetName) : null;
       // Зв'язок пропонується лише між уже відомими сутностями й лише реєстровий.
-      if (!RELATION_KEYS.has(relationType) || !entityId || !targetId || entityId === targetId) return [];
+      if (!relationByKey(relationType) || relationByKey(relationType)?.deprecated || !entityId || !targetId || entityId === targetId) return [];
       const key = `${entityId}\u0000${relationType}\u0000${targetId}`;
       if (pendingRelations.has(key)) return [];
       const existing = await repo.listRelations(projectId, entityId);
