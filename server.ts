@@ -43,6 +43,8 @@ import {
   requirePermission,
   requireAuth,
   requireAdmin,
+  requireSchemaPublisher,
+  requireGraphStudio,
   ensureAdminExists,
   firebaseAuthStatus,
   ADMIN_EMAIL,
@@ -199,6 +201,7 @@ import { normalizePromptEntities, buildCoachEntityInstruction, normalizeEntityFe
 import { formatManuscriptWithClaude, anthropicConfig, ClaudeManuscriptError, MAX_MANUSCRIPT_CHARS } from './server/claudeManuscript';
 import { initCore, getCoreStatus, shutdownCore, registerCoreJobKind, getCoreRepository, getCoreJobQueue } from './server/core';
 import { registerProjectRoutes, resolveProjectAccess, bookMediaOwners } from './server/core/projectRoutes';
+import { registerWorkflowRoutes } from './server/core/workflows/routes';
 import { CORE_SYNC_KIND, coreSyncJobKind } from './server/core/sync';
 import { AI_ROLE_JOB_KIND, aiRoleJobKind } from './server/core/ai/job';
 import { AI_MENTIONS_JOB_KIND, aiMentionsJobKind } from './server/core/ai/mentions';
@@ -628,9 +631,13 @@ registerGitCommandRoutes(app);
   // Якість живих персонажів (Т2.8 В3): прогони набору на справжніх моделях — лише адміністратор.
   registerQualityRoutes(app, { repo: getCoreRepository, requireAdmin, makeDeps: realQualityDeps });
   // Реєстр схем (Т5.1): активна версія онтології — усім із входом; зміни — адмін.
-  registerOntologyRoutes(app, { repo: getCoreRepository, requireAuth, requireAdmin });
+  // Т5.2: публікація й відкат схем — право canPublishSchema (ТЗ §37 PUBLISH_SCHEMA); читання — Graph Studio.
+  const schemaGuards = { requirePublish: requireSchemaPublisher as any, requireStudio: requireGraphStudio as any };
+  registerOntologyRoutes(app, { repo: getCoreRepository, requireAuth, requireAdmin, ...schemaGuards });
   // Онтологія співпраці й реєстр ролей (Т6.1) — той самий життєвий цикл, окрема адреса.
-  registerOntologyRoutes(app, { repo: getCoreRepository, requireAuth, requireAdmin }, { ontologyId: 'fusion-collab', base: '/api/core/collaboration/ontology' });
+  registerOntologyRoutes(app, { repo: getCoreRepository, requireAuth, requireAdmin, ...schemaGuards }, { ontologyId: 'fusion-collab', base: '/api/core/collaboration/ontology' });
+  // Т5.2: процеси ШІ Graph Studio — версії й середовища (виконання — Т5.4).
+  registerWorkflowRoutes(app, { repo: getCoreRepository, requireStudio: requireGraphStudio as any, requireAdmin, requirePublish: requireSchemaPublisher as any });
   // Учасники проєкту й ролі з реєстру ролей (Т6.1) — до маршрутів проєкту, щоб їхні адреси не перехопив загальний обробник.
   registerParticipantRoutes(app, {
     repo: getCoreRepository,

@@ -143,6 +143,30 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
 }
 
 /**
+ * Т5.2 (ТЗ Graph Studio §37 `PUBLISH_SCHEMA`): публікувати й відкочувати
+ * онтології та процеси ШІ — лише з правом ролі `canPublishSchema` (в адміна —
+ * завжди; іншій ролі його вмикає адмін у матриці прав).
+ */
+export async function requireSchemaPublisher(req: Request, res: Response, next: NextFunction): Promise<void> {
+  if (!req.principal || req.principal.isGuest) {
+    res.status(401).json({ error: 'Потрібен вхід у систему.', kind: 'unauthenticated' });
+    return;
+  }
+  if (await can(req.principal.role, 'canPublishSchema')) return next();
+  res.status(403).json({ error: 'Публікувати схеми й процеси може лише той, кому надано право «Публікація схем» (PUBLISH_SCHEMA).', kind: 'forbidden', permission: 'canPublishSchema' });
+}
+
+/** Т5.2: Graph Studio відкривають адмін і ролі з правом публікації схем. */
+export async function requireGraphStudio(req: Request, res: Response, next: NextFunction): Promise<void> {
+  if (!req.principal || req.principal.isGuest) {
+    res.status(401).json({ error: 'Потрібен вхід у систему.', kind: 'unauthenticated' });
+    return;
+  }
+  if (req.principal.role === 'admin' || (await can(req.principal.role, 'canPublishSchema'))) return next();
+  res.status(403).json({ error: 'Graph Studio доступна адміністратору й тим, хто публікує схеми.', kind: 'forbidden' });
+}
+
+/**
  * Хто має право відповідати в чаті підтримки: адміністратор і менеджер
  * сайту. Перелік один, і саме він перевіряється тестом — інакше наступна
  * правка зачепить три маршрути з чотирьох, а четвертий тихо лишиться
@@ -183,6 +207,8 @@ type ServerPermissions = {
   canManageApiKeys: boolean;
   canMarketIntel: boolean;
   canAuthorCourses: boolean;
+  /** Т5.2 (ТЗ Graph Studio §37 `PUBLISH_SCHEMA`): публікація й відкат онтологій і процесів ШІ. */
+  canPublishSchema: boolean;
 };
 
 /**
@@ -206,22 +232,22 @@ type ServerPermissions = {
  * ще й за requirePlanAtLeast(['pro','ultra']) у маршрутах.
  */
 export const BASE_SERVER_PERMISSIONS: Record<StoredRole, ServerPermissions> = {
-  admin:      { canGenerateImages: true,  canUseAi: true,  canEditContent: true,  canPublish: true,  canPublishExternal: true,  canManageApiKeys: true,  canMarketIntel: true,  canAuthorCourses: true },
+  admin:      { canGenerateImages: true,  canUseAi: true,  canEditContent: true,  canPublish: true,  canPublishExternal: true,  canManageApiKeys: true,  canMarketIntel: true,  canAuthorCourses: true, canPublishSchema: true },
   // Лише чат підтримки (requireSupportAgent нижче) — жодних платних чи контентних прав.
-  site_manager: { canGenerateImages: false, canUseAi: false, canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false },
-  writer:     { canGenerateImages: true,  canUseAi: true,  canEditContent: true,  canPublish: true,  canPublishExternal: true,  canManageApiKeys: false, canMarketIntel: true,  canAuthorCourses: false },
-  designer:   { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false },
-  translator: { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false },
-  publisher:  { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: true,  canPublishExternal: true,  canManageApiKeys: false, canMarketIntel: true,  canAuthorCourses: false },
+  site_manager: { canGenerateImages: false, canUseAi: false, canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false, canPublishSchema: false },
+  writer:     { canGenerateImages: true,  canUseAi: true,  canEditContent: true,  canPublish: true,  canPublishExternal: true,  canManageApiKeys: false, canMarketIntel: true,  canAuthorCourses: false, canPublishSchema: false },
+  designer:   { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false, canPublishSchema: false },
+  translator: { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false, canPublishSchema: false },
+  publisher:  { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: true,  canPublishExternal: true,  canManageApiKeys: false, canMarketIntel: true,  canAuthorCourses: false, canPublishSchema: false },
   // Продавець: рівно те, що власник просив для цієї ролі — зображення
   // в медіатеці та тексти ШІ. Рукопис, публікація, гроші й ключі — закриті.
-  seller:     { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false },
+  seller:     { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false, canPublishSchema: false },
   // Експерт і викладач: автори самостійних курсів (docs/tech-spec-course-wizard-2026.md §6.1).
   // Генерації зображень і ШІ дозволені (медіа курсу), решта письменницько-видавничого — ні.
-  expert:     { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: true },
-  teacher:    { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: true },
-  reader:     { canGenerateImages: false, canUseAi: false, canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false },
-  guest:      { canGenerateImages: false, canUseAi: false, canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false },
+  expert:     { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: true, canPublishSchema: false },
+  teacher:    { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: true, canPublishSchema: false },
+  reader:     { canGenerateImages: false, canUseAi: false, canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false, canPublishSchema: false },
+  guest:      { canGenerateImages: false, canUseAi: false, canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false, canPublishSchema: false },
 };
 
 export async function effectivePermissions(role: StoredRole) {

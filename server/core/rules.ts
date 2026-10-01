@@ -73,6 +73,7 @@ import {
   ACCESS_LEVELS,
   ACCESS_SCOPES,
   ACCESS_SOURCES,
+  WORKFLOW_EVENT_ACTIONS,
   type AccessGrantInput,
   AUTONOMY_LEVELS,
   SIMULATION_KINDS,
@@ -704,4 +705,45 @@ export function checkAccessGrant(input: AccessGrantInput): void {
     if (!Number.isFinite(until)) throw new CoreRuleError('bad_input', 'validUntil — дата ISO');
     if (until <= from) throw new CoreRuleError('bad_input', 'Строк дії має закінчуватися пізніше, ніж починається');
   }
+}
+
+// ── Процеси ШІ (Т5.2 В2) ─────────────────────────────────────────────────────
+
+const WORKFLOW_ROW_ID_RE = /^[a-z][a-z0-9_]{1,63}$/;
+const HASH_RE = /^[0-9a-f]{64}$/;
+
+/** Процес змінює людина чи система — не AI (ТЗ §37). */
+export function checkWorkflow(input: { id: string; name: { en: string; uk: string }; description?: string; createdBy: CoreActor }): void {
+  checkOntologyActor(input.createdBy);
+  if (!WORKFLOW_ROW_ID_RE.test(String(input.id ?? ''))) throw new CoreRuleError('bad_input', 'Id процесу — латиниця, цифри й «_», від 2 до 64 символів, з літери');
+  checkWorkflowName(input.name);
+  if (input.description !== undefined && String(input.description).length > 2000) throw new CoreRuleError('bad_input', 'Опис процесу — до 2000 символів');
+}
+
+export function checkWorkflowName(name: { en: string; uk: string } | undefined): void {
+  const ok = (v: unknown) => typeof v === 'string' && v.trim().length > 0 && v.length <= 200;
+  if (!name || !ok(name.en) || !ok(name.uk)) throw new CoreRuleError('bad_input', 'Назва процесу — англійською й українською, до 200 символів (ТЗ §0)');
+}
+
+export function checkWorkflowVersion(input: { workflowId: string; definition: unknown; definitionHash: string; notes?: string; createdBy: CoreActor }): void {
+  checkOntologyActor(input.createdBy);
+  if (!WORKFLOW_ROW_ID_RE.test(String(input.workflowId ?? ''))) throw new CoreRuleError('bad_input', 'Невідомий id процесу');
+  if (!objectLike(input.definition)) throw new CoreRuleError('bad_input', 'Визначення процесу — обʼєкт');
+  if ((input.definition as { id?: unknown }).id !== input.workflowId) throw new CoreRuleError('bad_input', 'id у визначенні не збігається з процесом');
+  if (!HASH_RE.test(String(input.definitionHash))) throw new CoreRuleError('bad_input', 'Хеш визначення — sha256 (64 hex)');
+  if (input.notes !== undefined && String(input.notes).length > 2000) throw new CoreRuleError('bad_input', 'Нотатки версії — до 2000 символів');
+}
+
+export function checkWorkflowEvent(input: { workflowId: string; action: string; actor: CoreActor }): void {
+  checkOntologyActor(input.actor);
+  if (!(WORKFLOW_EVENT_ACTIONS as readonly string[]).includes(input.action)) throw new CoreRuleError('bad_input', `Невідома дія журналу процесів «${input.action}»`);
+}
+
+export function checkGraphLayout(input: { graphKind: string; graphId: string; versionRef: string; layout: unknown; updatedBy: CoreActor }): void {
+  checkOntologyActor(input.updatedBy);
+  if (input.graphKind !== 'workflow' && input.graphKind !== 'ontology') throw new CoreRuleError('bad_input', 'Розкладка — для процесу чи онтології');
+  if (!input.graphId || String(input.graphId).length > 100) throw new CoreRuleError('bad_input', 'id графа — від 1 до 100 символів');
+  if (!input.versionRef || String(input.versionRef).length > 64) throw new CoreRuleError('bad_input', 'Посилання на версію — від 1 до 64 символів');
+  if (!objectLike(input.layout)) throw new CoreRuleError('bad_input', 'Розкладка — обʼєкт');
+  if (Object.keys(input.layout as object).length > 2000) throw new CoreRuleError('bad_input', 'Розкладка — до 2000 вузлів');
 }

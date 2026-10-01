@@ -15,9 +15,14 @@
  *   POST  /api/core/ontology/versions/:id/rollback   — ROLLBACK (нова версія з визначенням цієї)
  *   POST  /api/core/ontology/versions/:id/archive    — ARCHIVED / відкинути чернетку
  *
- * Зміни — лише адміністратор платформи (рішення власника §2 п.4; окремий
- * дозвіл PUBLISH_SCHEMA — у Т5.2). Без ядра читання віддає вбудований
- * реєстр (документ власника), а зміни — 503.
+ *   GET   /api/core/ontology/layout                  — розкладка канви Graph Studio     (Т5.2)
+ *   PUT   /api/core/ontology/layout                  — зберегти розкладку { layout }     (адмін)
+ *
+ * Чернетки править адміністратор платформи (рішення власника Т5.1 §2 п.4);
+ * публікація й відкат — окреме право `canPublishSchema` (ТЗ §37
+ * `PUBLISH_SCHEMA`, Т5.2); читати версії й журнал — адмін або той, хто
+ * публікує. Розкладка канви — поза визначенням (№28). Без ядра читання
+ * віддає вбудований реєстр (документ власника), а зміни — 503.
  */
 
 import type { Express, NextFunction, Request, Response } from 'express';
@@ -43,6 +48,10 @@ export interface OntologyRoutesDeps {
   repo: () => CoreRepository | null;
   requireAuth: (req: Request, res: Response, next: NextFunction) => void;
   requireAdmin: (req: Request, res: Response, next: NextFunction) => void;
+  /** Т5.2: публікація й відкат — право `canPublishSchema`. Типово — як `requireAdmin`. */
+  requirePublish?: (req: Request, res: Response, next: NextFunction) => void;
+  /** Т5.2: читання версій і журналу в Graph Studio — адмін або право публікації. Типово — як `requireAdmin`. */
+  requireStudio?: (req: Request, res: Response, next: NextFunction) => void;
 }
 
 const STATUS: Record<string, number> = { not_found: 404, conflict: 409, bad_actor: 403 };
@@ -86,6 +95,8 @@ export function registerOntologyRoutes(app: Express, d: OntologyRoutesDeps, opts
     return v;
   };
   const actor = (req: Request) => `user:${req.principal?.id ?? 'admin'}`;
+  const requirePublish = d.requirePublish ?? d.requireAdmin;
+  const requireStudio = d.requireStudio ?? d.requireAdmin;
   const withRepo = (fn: (repo: CoreRepository, req: Request, res: Response) => Promise<void>) => async (req: Request, res: Response) => {
     const repo = d.repo();
     if (!repo) {
@@ -120,17 +131,17 @@ export function registerOntologyRoutes(app: Express, d: OntologyRoutesDeps, opts
     }
   });
 
-  app.get(`${BASE}/versions`, d.requireAdmin, withRepo(async (repo, _req, res) => {
+  app.get(`${BASE}/versions`, requireStudio, withRepo(async (repo, _req, res) => {
     const versions = await repo.listOntologyVersions(ONTOLOGY, { limit: 200 });
     const draft = versions.find((v) => v.status === 'draft' || v.status === 'validated') ?? null;
     res.json({ ontologyId: ONTOLOGY, active: versions.find((v) => v.status === 'active') ?? null, draft, versions });
   }));
 
-  app.get(`${BASE}/versions/:id`, d.requireAdmin, withRepo(async (repo, req, res) => {
+  app.get(`${BASE}/versions/:id`, requireStudio, withRepo(async (repo, req, res) => {
     res.json({ version: await own(repo, String(req.params.id)) });
   }));
 
-  app.get(`${BASE}/events`, d.requireAdmin, withRepo(async (repo, req, res) => {
+  app.get(`${BASE}/events`, requireStudio, withRepo(async (repo, req, res) => {
     const versionId = typeof req.query.versionId === 'string' ? req.query.versionId : undefined;
     if (versionId) await own(repo, versionId);
     res.json({ events: await repo.listOntologyEvents(ONTOLOGY, { versionId, limit: 500 }) });
@@ -154,7 +165,7 @@ export function registerOntologyRoutes(app: Express, d: OntologyRoutesDeps, opts
     res.json(await validateDraft(repo, (await own(repo, String(req.params.id))).id, actor(req)));
   }));
 
-  app.get(`${BASE}/drafts/:id/preview`, d.requireAdmin, withRepo(async (repo, req, res) => {
+  app.get(`${BASE}/drafts/:id/preview`, requireStudio, withRepo(async (repo, req, res) => {
     res.json(await previewDraft(repo, (await own(repo, String(req.params.id))).id));
   }));
 
@@ -162,11 +173,11 @@ export function registerOntologyRoutes(app: Express, d: OntologyRoutesDeps, opts
     res.json(await impactDraft(repo, (await own(repo, String(req.params.id))).id, actor(req)));
   }));
 
-  app.post(`${BASE}/drafts/:id/publish`, d.requireAdmin, withRepo(async (repo, req, res) => {
+  app.post(`${BASE}/drafts/:id/publish`, requirePublish, withRepo(async (repo, req, res) => {
     res.json({ version: await publishDraft(repo, (await own(repo, String(req.params.id))).id, actor(req)) });
   }));
 
-  app.post(`${BASE}/versions/:id/rollback`, d.requireAdmin, withRepo(async (repo, req, res) => {
+  app.post(`${BASE}/versions/:id/rollback`, requirePublish, withRepo(async (repo, req, res) => {
     res.json({ version: await rollbackTo(repo, (await own(repo, String(req.params.id))).id, actor(req)) });
   }));
 
@@ -174,8 +185,26 @@ export function registerOntologyRoutes(app: Express, d: OntologyRoutesDeps, opts
     res.json({ version: await archiveVersion(repo, (await own(repo, String(req.params.id))).id, actor(req)) });
   }));
 
+  // Т5.2: розкладка канви онтології — спільна для версій, поза визначенням (№28).
+  app.get(`${BASE}/layout`, requireStudio, withRepo(async (repo, _req, res) => {
+    res.json({ layout: (await repo.getGraphLayout('ontology', ONTOLOGY, '*'))?.layout ?? {} });
+  }));
+  app.put(`${BASE}/layout`, d.requireAdmin, withRepo(async (repo, req, res) => {
+    const raw = req.body?.layout;
+    const clean: Record<string, { x: number; y: number }> = {};
+    if (raw && typeof raw === 'object') {
+      for (const [k, p] of Object.entries(raw as Record<string, any>)) {
+        const x = Number(p?.x);
+        const y = Number(p?.y);
+        if (k.length <= 100 && Number.isFinite(x) && Number.isFinite(y) && Math.abs(x) < 1e6 && Math.abs(y) < 1e6) clean[k] = { x: Math.round(x), y: Math.round(y) };
+      }
+    }
+    const row = await repo.saveGraphLayout({ graphKind: 'ontology', graphId: ONTOLOGY, versionRef: '*', layout: clean, updatedBy: actor(req) as `user:${string}` });
+    res.json({ layout: row.layout });
+  }));
+
   // Відкрита чернетка одним запитом (зручно канві Т5.2).
-  app.get(`${BASE}/draft`, d.requireAdmin, withRepo(async (repo, _req, res) => {
+  app.get(`${BASE}/draft`, requireStudio, withRepo(async (repo, _req, res) => {
     res.json({ version: await openDraft(repo, ONTOLOGY) });
   }));
 }

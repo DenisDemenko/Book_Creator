@@ -51,6 +51,11 @@ import {
   checkParticipantRole,
   checkCollabEvent,
   checkAccessGrant,
+  checkWorkflow,
+  checkWorkflowName,
+  checkWorkflowVersion,
+  checkWorkflowEvent,
+  checkGraphLayout,
   assertActor,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isValidEmbedding, SEARCHABLE_KINDS, tsQueryFromStems } from './search/text';
@@ -143,6 +148,12 @@ import type {
   CollabEventAction,
   AccessGrantInput,
   AccessGrantRow,
+  WorkflowRow,
+  WorkflowVersionRow,
+  WorkflowVersionInput,
+  WorkflowEventRow,
+  WorkflowEventAction,
+  GraphLayoutRow,
 } from './types';
 
 type Q = Pool | PoolClient;
@@ -207,6 +218,23 @@ function toParticipantRole(r: any): ParticipantRoleRow {
     id: r.id, participantId: r.participant_id, projectId: r.project_id, roleId: r.role_id, specialization: r.specialization ?? null, status: r.status,
     assignedBy: r.assigned_by, registryVersion: r.registry_version == null ? null : Number(r.registry_version), createdAt: iso(r.created_at), revokedAt: isoOrNull(r.revoked_at), revokedBy: r.revoked_by ?? null,
   };
+}
+function toWorkflow(r: any): WorkflowRow {
+  return { id: r.id, name: r.name, description: r.description ?? '', status: r.status, createdBy: r.created_by, createdAt: iso(r.created_at), updatedAt: iso(r.updated_at) };
+}
+function toWorkflowVersion(r: any): WorkflowVersionRow {
+  return {
+    id: r.id, workflowId: r.workflow_id, version: Number(r.version), environment: r.environment, basedOn: r.based_on ?? null,
+    definition: r.definition ?? null, definitionHash: r.definition_hash, validation: r.validation ?? null, notes: r.notes ?? '',
+    revision: Number(r.revision), createdBy: r.created_by, createdAt: iso(r.created_at), updatedAt: iso(r.updated_at),
+    testedBy: r.tested_by ?? null, testedAt: isoOrNull(r.tested_at), publishedBy: r.published_by ?? null, publishedAt: isoOrNull(r.published_at),
+  };
+}
+function toWorkflowEvent(r: any): WorkflowEventRow {
+  return { id: r.id, workflowId: r.workflow_id, versionId: r.version_id ?? null, action: r.action, actor: r.actor, details: r.details ?? {}, createdAt: iso(r.created_at) };
+}
+function toGraphLayout(r: any): GraphLayoutRow {
+  return { graphKind: r.graph_kind, graphId: r.graph_id, versionRef: r.version_ref, layout: r.layout ?? {}, updatedBy: r.updated_by, updatedAt: iso(r.updated_at) };
 }
 function toAccessGrant(r: any): AccessGrantRow {
   return {
@@ -726,6 +754,12 @@ function mapPgError(err: any): never {
   }
   if (code === '23505' && /ontology_versions_one_draft/.test(constraint)) {
     throw new CoreRuleError('conflict', 'Відкрита чернетка онтології вже є — одна за раз');
+  }
+  if (code === '23505' && /workflow_versions_one_draft/.test(constraint)) {
+    throw new CoreRuleError('conflict', 'Чернетка процесу вже є — одна за раз');
+  }
+  if (code === '23505' && /workflows_pkey/.test(constraint)) {
+    throw new CoreRuleError('conflict', 'Процес із таким id уже є');
   }
   if (code === '23505' && /participant_roles_active/.test(constraint)) {
     throw new CoreRuleError('conflict', 'Ця роль у учасника вже є');
@@ -2512,6 +2546,163 @@ export class PgCoreRepository implements CoreRepository {
     const { rows } = await this.q(`UPDATE access_grants SET status = 'revoked', revoked_at = now(), revoked_by = $2 WHERE id = $1 AND status = 'active' RETURNING *`, [id, actor]);
     if (!rows[0]) throw new CoreRuleError('conflict', 'Доступ уже відкликано');
     return toAccessGrant(rows[0]);
+  }
+
+  // ── Процеси ШІ (Т5.2 В2) ───────────────────────────────────────────────────
+
+  async addWorkflow(input: { id: string; name: { en: string; uk: string }; description?: string; createdBy: CoreActor }) {
+    checkWorkflow(input);
+    const { rows } = await this.q(`INSERT INTO workflows (id, name, description, created_by) VALUES ($1, $2, $3, $4) RETURNING *`, [input.id, JSON.stringify(input.name), input.description ?? '', input.createdBy]);
+    return toWorkflow(rows[0]);
+  }
+
+  async getWorkflow(id: string) {
+    const { rows } = await this.q('SELECT * FROM workflows WHERE id = $1', [id]);
+    return rows[0] ? toWorkflow(rows[0]) : null;
+  }
+
+  async listWorkflows() {
+    const { rows } = await this.q('SELECT * FROM workflows ORDER BY id');
+    return rows.map(toWorkflow);
+  }
+
+  async updateWorkflow(id: string, patch: { name?: { en: string; uk: string }; description?: string; status?: 'active' | 'archived' }) {
+    if (patch.name !== undefined) checkWorkflowName(patch.name);
+    if (patch.description !== undefined && String(patch.description).length > 2000) throw new CoreRuleError('bad_input', 'Опис процесу — до 2000 символів');
+    if (patch.status !== undefined && patch.status !== 'active' && patch.status !== 'archived') throw new CoreRuleError('bad_input', 'Статус процесу — active або archived');
+    const { rows } = await this.q(
+      `UPDATE workflows SET name = COALESCE($2::jsonb, name), description = COALESCE($3, description), status = COALESCE($4, status), updated_at = now() WHERE id = $1 RETURNING *`,
+      [id, patch.name ? JSON.stringify(patch.name) : null, patch.description ?? null, patch.status ?? null],
+    );
+    if (!rows[0]) throw notFound(`Процес «${id}»`);
+    return toWorkflow(rows[0]);
+  }
+
+  async addWorkflowVersion(input: WorkflowVersionInput) {
+    checkWorkflowVersion(input);
+    if (!(await this.getWorkflow(input.workflowId))) throw notFound(`Процес «${input.workflowId}»`);
+    if (input.basedOn && (!isUuid(input.basedOn) || (await this.getWorkflowVersion(input.basedOn))?.workflowId !== input.workflowId)) throw notFound(`Версія процесу «${input.basedOn}»`);
+    const env = input.environment ?? 'draft';
+    if (env !== 'draft' && env !== 'test') throw new CoreRuleError('bad_input', 'Нова версія процесу — чернетка (або тестова при відкаті)');
+    try {
+      return await this.tx(async (c) => {
+        await c.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`workflow:${input.workflowId}`]);
+        if (env === 'test') await c.query(`UPDATE workflow_versions SET environment = 'archived', revision = revision + 1 WHERE workflow_id = $1 AND environment = 'test'`, [input.workflowId]);
+        const { rows } = await c.query(
+          `INSERT INTO workflow_versions (workflow_id, version, environment, based_on, definition, definition_hash, notes, created_by, tested_by, tested_at)
+           VALUES ($1, (SELECT COALESCE(MAX(version), 0) + 1 FROM workflow_versions WHERE workflow_id = $1), $7, $2, $3, $4, $5, $6,
+                   CASE WHEN $7 = 'test' THEN $6 END, CASE WHEN $7 = 'test' THEN now() END) RETURNING *`,
+          [input.workflowId, input.basedOn ?? null, JSON.stringify(input.definition), input.definitionHash, input.notes ?? '', input.createdBy, env],
+        );
+        return toWorkflowVersion(rows[0]);
+      });
+    } catch (err) {
+      if (err instanceof CoreRuleError) throw err;
+      mapPgError(err);
+    }
+  }
+
+  async getWorkflowVersion(id: string) {
+    if (!isUuid(id)) return null;
+    const { rows } = await this.q('SELECT * FROM workflow_versions WHERE id = $1', [id]);
+    return rows[0] ? toWorkflowVersion(rows[0]) : null;
+  }
+
+  async listWorkflowVersions(workflowId: string, f: { limit?: number } = {}) {
+    const { rows } = await this.q(
+      `SELECT id, workflow_id, version, environment, based_on, NULL::jsonb AS definition, definition_hash, validation, notes, revision,
+              created_by, created_at, updated_at, tested_by, tested_at, published_by, published_at
+       FROM workflow_versions WHERE workflow_id = $1 ORDER BY version DESC LIMIT $2`,
+      [workflowId, Math.max(1, Math.min(f.limit ?? 50, 200))],
+    );
+    return rows.map(toWorkflowVersion);
+  }
+
+  async updateWorkflowDraft(id: string, patch: { definition?: Record<string, unknown>; definitionHash?: string; validation?: Record<string, unknown> | null; notes?: string }, expectedRevision?: number) {
+    const cur = await this.getWorkflowVersion(id);
+    if (!cur) throw notFound(`Версія процесу «${id}»`);
+    if (cur.environment !== 'draft') throw new CoreRuleError('conflict', `Правити можна лише чернетку, а ця версія — «${cur.environment}»`);
+    if (patch.definition !== undefined || patch.definitionHash !== undefined) {
+      checkWorkflowVersion({ workflowId: cur.workflowId, definition: patch.definition ?? cur.definition, definitionHash: patch.definitionHash ?? cur.definitionHash, createdBy: cur.createdBy });
+    }
+    if (patch.notes !== undefined && String(patch.notes).length > 2000) throw new CoreRuleError('bad_input', 'Нотатки версії — до 2000 символів');
+    const { rows } = await this.q(
+      `UPDATE workflow_versions SET
+         definition = COALESCE($2::jsonb, definition),
+         definition_hash = COALESCE($3, definition_hash),
+         validation = CASE WHEN $4 THEN $5::jsonb ELSE validation END,
+         notes = COALESCE($6, notes),
+         revision = revision + 1
+       WHERE id = $1 AND environment = 'draft' AND ($7::integer IS NULL OR revision = $7) RETURNING *`,
+      [id, patch.definition === undefined ? null : JSON.stringify(patch.definition), patch.definitionHash ?? null, patch.validation !== undefined,
+        patch.validation == null ? null : JSON.stringify(patch.validation), patch.notes ?? null, expectedRevision ?? null],
+    );
+    if (!rows[0]) throw new CoreRuleError('conflict', `Чернетку вже змінено (ревізія ${cur.revision}, а не ${expectedRevision}) — перечитайте її`);
+    return toWorkflowVersion(rows[0]);
+  }
+
+  async transitionWorkflowVersion(id: string, to: 'test' | 'production' | 'archived', actor: CoreActor) {
+    checkOntologyActor(actor);
+    const cur = await this.getWorkflowVersion(id);
+    if (!cur) throw notFound(`Версія процесу «${id}»`);
+    try {
+      return await this.tx(async (c) => {
+        await c.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`workflow:${cur.workflowId}`]);
+        const { rows: me } = await c.query('SELECT environment FROM workflow_versions WHERE id = $1 FOR UPDATE', [id]);
+        const env = me[0]?.environment;
+        let sql: string;
+        if (to === 'test') {
+          if (env !== 'draft') throw new CoreRuleError('conflict', `У тест переходить лише чернетка, а ця версія — «${env}»`);
+          await c.query(`UPDATE workflow_versions SET environment = 'archived', revision = revision + 1 WHERE workflow_id = $1 AND environment = 'test'`, [cur.workflowId]);
+          sql = `UPDATE workflow_versions SET environment = 'test', tested_by = $2, tested_at = now(), revision = revision + 1 WHERE id = $1 RETURNING *`;
+        } else if (to === 'production') {
+          if (env !== 'test') throw new CoreRuleError('conflict', `Опублікувати можна лише тестову версію, а ця — «${env}»`);
+          await c.query(`UPDATE workflow_versions SET environment = 'archived', revision = revision + 1 WHERE workflow_id = $1 AND environment = 'production'`, [cur.workflowId]);
+          sql = `UPDATE workflow_versions SET environment = 'production', published_by = $2, published_at = now(), revision = revision + 1 WHERE id = $1 RETURNING *`;
+        } else {
+          if (env === 'archived') throw new CoreRuleError('conflict', 'Версія вже в архіві');
+          if (env === 'production') throw new CoreRuleError('conflict', 'Робочу версію замінює лише публікація чи відкат');
+          sql = `UPDATE workflow_versions SET environment = 'archived', revision = revision + 1 WHERE id = $1 AND $2::text IS NOT NULL RETURNING *`;
+        }
+        const { rows } = await c.query(sql, [id, actor]);
+        return toWorkflowVersion(rows[0]);
+      });
+    } catch (err) {
+      if (err instanceof CoreRuleError) throw err;
+      mapPgError(err);
+    }
+  }
+
+  async addWorkflowEvent(input: { workflowId: string; versionId?: string | null; action: WorkflowEventAction; actor: CoreActor; details?: Record<string, unknown> }) {
+    checkWorkflowEvent(input);
+    const { rows } = await this.q(
+      `INSERT INTO workflow_events (workflow_id, version_id, action, actor, details) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [input.workflowId, input.versionId ?? null, input.action, input.actor, JSON.stringify(input.details ?? {})],
+    );
+    return toWorkflowEvent(rows[0]);
+  }
+
+  async listWorkflowEvents(f: { workflowId?: string; limit?: number }) {
+    const { rows } = await this.q(
+      `SELECT * FROM workflow_events WHERE ($1::text IS NULL OR workflow_id = $1) ORDER BY created_at DESC, id LIMIT $2`,
+      [f.workflowId ?? null, Math.max(1, Math.min(f.limit ?? 100, 500))],
+    );
+    return rows.map(toWorkflowEvent);
+  }
+
+  async getGraphLayout(kind: 'workflow' | 'ontology', graphId: string, versionRef: string) {
+    const { rows } = await this.q('SELECT * FROM graph_layouts WHERE graph_kind = $1 AND graph_id = $2 AND version_ref = $3', [kind, graphId, versionRef]);
+    return rows[0] ? toGraphLayout(rows[0]) : null;
+  }
+
+  async saveGraphLayout(input: { graphKind: 'workflow' | 'ontology'; graphId: string; versionRef: string; layout: Record<string, { x: number; y: number }>; updatedBy: CoreActor }) {
+    checkGraphLayout(input);
+    const { rows } = await this.q(
+      `INSERT INTO graph_layouts (graph_kind, graph_id, version_ref, layout, updated_by) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (graph_kind, graph_id, version_ref) DO UPDATE SET layout = EXCLUDED.layout, updated_by = EXCLUDED.updated_by, updated_at = now() RETURNING *`,
+      [input.graphKind, input.graphId, input.versionRef, JSON.stringify(input.layout), input.updatedBy],
+    );
+    return toGraphLayout(rows[0]);
   }
 
   async listMembers(projectId: string) {

@@ -971,6 +971,12 @@ export interface RolePermission {
    * серверну перевірку `canMarketIntel` на маршрутах /api/market/*.
    */
   canMarketIntel: boolean;
+  /**
+   * Т5.2: публікація й відкат онтологій і процесів ШІ в робоче середовище
+   * (ТЗ Graph Studio §37 — окремий дозвіл `PUBLISH_SCHEMA`). Дзеркалить
+   * серверну перевірку `canPublishSchema`.
+   */
+  canPublishSchema: boolean;
   isReadOnly: boolean;
   allowedTabs: NavigationTab[];
 }

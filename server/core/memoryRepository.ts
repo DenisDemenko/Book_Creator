@@ -50,6 +50,11 @@ import {
   checkParticipantRole,
   checkCollabEvent,
   checkAccessGrant,
+  checkWorkflow,
+  checkWorkflowName,
+  checkWorkflowVersion,
+  checkWorkflowEvent,
+  checkGraphLayout,
   assertActor,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isSearchableKind, isValidEmbedding, memoryTextScore } from './search/text';
@@ -143,6 +148,12 @@ import type {
   CollabEventAction,
   AccessGrantInput,
   AccessGrantRow,
+  WorkflowRow,
+  WorkflowVersionRow,
+  WorkflowVersionInput,
+  WorkflowEventRow,
+  WorkflowEventAction,
+  GraphLayoutRow,
 } from './types';
 
 const key = (projectId: string, id: string) => `${projectId}\u0000${id}`;
@@ -194,6 +205,10 @@ export class MemoryCoreRepository implements CoreRepository {
   private participantRoles: ParticipantRoleRow[] = [];
   private collabEvents: CollabEventRow[] = [];
   private accessGrants: AccessGrantRow[] = [];
+  private workflows: WorkflowRow[] = [];
+  private workflowVersions: WorkflowVersionRow[] = [];
+  private workflowEvents: WorkflowEventRow[] = [];
+  private graphLayouts: GraphLayoutRow[] = [];
 
   private requireProject(projectId: string): ProjectRow {
     const p = this.projects.get(projectId);
@@ -1844,6 +1859,140 @@ export class MemoryCoreRepository implements CoreRepository {
     g.revokedAt = now();
     g.revokedBy = actor;
     return clone(g);
+  }
+
+  // ── Процеси ШІ (Т5.2 В2) ───────────────────────────────────────────────────
+
+  async addWorkflow(input: { id: string; name: { en: string; uk: string }; description?: string; createdBy: CoreActor }) {
+    checkWorkflow(input);
+    if (this.workflows.some((w) => w.id === input.id)) throw new CoreRuleError('conflict', `Процес «${input.id}» уже є`);
+    const t = now();
+    const row: WorkflowRow = { id: input.id, name: clone(input.name), description: input.description ?? '', status: 'active', createdBy: input.createdBy, createdAt: t, updatedAt: t };
+    this.workflows.push(row);
+    return clone(row);
+  }
+
+  async getWorkflow(id: string) {
+    const w = this.workflows.find((x) => x.id === id);
+    return w ? clone(w) : null;
+  }
+
+  async listWorkflows() {
+    return this.workflows.slice().sort((a, b) => a.id.localeCompare(b.id)).map(clone);
+  }
+
+  async updateWorkflow(id: string, patch: { name?: { en: string; uk: string }; description?: string; status?: 'active' | 'archived' }) {
+    const w = this.workflows.find((x) => x.id === id);
+    if (!w) throw notFound(`Процес «${id}»`);
+    if (patch.name !== undefined) checkWorkflowName(patch.name);
+    if (patch.description !== undefined && String(patch.description).length > 2000) throw new CoreRuleError('bad_input', 'Опис процесу — до 2000 символів');
+    if (patch.status !== undefined && patch.status !== 'active' && patch.status !== 'archived') throw new CoreRuleError('bad_input', 'Статус процесу — active або archived');
+    if (patch.name) w.name = clone(patch.name);
+    if (patch.description !== undefined) w.description = patch.description;
+    if (patch.status) w.status = patch.status;
+    w.updatedAt = now();
+    return clone(w);
+  }
+
+  async addWorkflowVersion(input: WorkflowVersionInput) {
+    checkWorkflowVersion(input);
+    if (!this.workflows.some((w) => w.id === input.workflowId)) throw notFound(`Процес «${input.workflowId}»`);
+    const same = this.workflowVersions.filter((v) => v.workflowId === input.workflowId);
+    const env = input.environment ?? 'draft';
+    if (env !== 'draft' && env !== 'test') throw new CoreRuleError('bad_input', 'Нова версія процесу — чернетка (або тестова при відкаті)');
+    if (env === 'draft' && same.some((v) => v.environment === 'draft')) throw new CoreRuleError('conflict', 'Чернетка процесу вже є — одна за раз');
+    if (input.basedOn && !same.some((v) => v.id === input.basedOn)) throw notFound(`Версія процесу «${input.basedOn}»`);
+    const t = now();
+    if (env === 'test') for (const o of same) if (o.environment === 'test') { o.environment = 'archived'; o.revision += 1; o.updatedAt = t; }
+    const row: WorkflowVersionRow = {
+      id: randomUUID(), workflowId: input.workflowId, version: same.reduce((m, v) => Math.max(m, v.version), 0) + 1, environment: env,
+      basedOn: input.basedOn ?? null, definition: clone(input.definition), definitionHash: input.definitionHash, validation: null, notes: input.notes ?? '',
+      revision: 1, createdBy: input.createdBy, createdAt: t, updatedAt: t, testedBy: env === 'test' ? input.createdBy : null, testedAt: env === 'test' ? t : null, publishedBy: null, publishedAt: null,
+    };
+    this.workflowVersions.push(row);
+    return clone(row);
+  }
+
+  async getWorkflowVersion(id: string) {
+    const v = this.workflowVersions.find((x) => x.id === id);
+    return v ? clone(v) : null;
+  }
+
+  async listWorkflowVersions(workflowId: string, f: { limit?: number } = {}) {
+    const limit = Math.max(1, Math.min(f.limit ?? 50, 200));
+    return this.workflowVersions.filter((v) => v.workflowId === workflowId).sort((a, b) => b.version - a.version).slice(0, limit).map((v) => ({ ...clone(v), definition: null }));
+  }
+
+  async updateWorkflowDraft(id: string, patch: { definition?: Record<string, unknown>; definitionHash?: string; validation?: Record<string, unknown> | null; notes?: string }, expectedRevision?: number) {
+    const v = this.workflowVersions.find((x) => x.id === id);
+    if (!v) throw notFound(`Версія процесу «${id}»`);
+    if (v.environment !== 'draft') throw new CoreRuleError('conflict', `Правити можна лише чернетку, а ця версія — «${v.environment}»`);
+    if (patch.definition !== undefined || patch.definitionHash !== undefined) {
+      checkWorkflowVersion({ workflowId: v.workflowId, definition: patch.definition ?? v.definition, definitionHash: patch.definitionHash ?? v.definitionHash, createdBy: v.createdBy });
+    }
+    if (patch.notes !== undefined && String(patch.notes).length > 2000) throw new CoreRuleError('bad_input', 'Нотатки версії — до 2000 символів');
+    if (expectedRevision !== undefined && v.revision !== expectedRevision) throw new CoreRuleError('conflict', `Чернетку вже змінено (ревізія ${v.revision}, а не ${expectedRevision}) — перечитайте її`);
+    if (patch.definition !== undefined) v.definition = clone(patch.definition);
+    if (patch.definitionHash !== undefined) v.definitionHash = patch.definitionHash;
+    if (patch.validation !== undefined) v.validation = clone(patch.validation);
+    if (patch.notes !== undefined) v.notes = patch.notes;
+    v.revision += 1;
+    v.updatedAt = now();
+    return clone(v);
+  }
+
+  async transitionWorkflowVersion(id: string, to: 'test' | 'production' | 'archived', actor: CoreActor) {
+    checkOntologyActor(actor);
+    const v = this.workflowVersions.find((x) => x.id === id);
+    if (!v) throw notFound(`Версія процесу «${id}»`);
+    const t = now();
+    const retire = (env: 'test' | 'production') => {
+      for (const o of this.workflowVersions) if (o.workflowId === v.workflowId && o.environment === env && o.id !== v.id) { o.environment = 'archived'; o.revision += 1; o.updatedAt = t; }
+    };
+    if (to === 'test') {
+      if (v.environment !== 'draft') throw new CoreRuleError('conflict', `У тест переходить лише чернетка, а ця версія — «${v.environment}»`);
+      retire('test');
+      v.testedBy = actor;
+      v.testedAt = t;
+    } else if (to === 'production') {
+      if (v.environment !== 'test') throw new CoreRuleError('conflict', `Опублікувати можна лише тестову версію, а ця — «${v.environment}»`);
+      retire('production');
+      v.publishedBy = actor;
+      v.publishedAt = t;
+    } else {
+      if (v.environment === 'archived') throw new CoreRuleError('conflict', 'Версія вже в архіві');
+      if (v.environment === 'production') throw new CoreRuleError('conflict', 'Робочу версію замінює лише публікація чи відкат');
+    }
+    v.environment = to;
+    v.revision += 1;
+    v.updatedAt = t;
+    return clone(v);
+  }
+
+  async addWorkflowEvent(input: { workflowId: string; versionId?: string | null; action: WorkflowEventAction; actor: CoreActor; details?: Record<string, unknown> }) {
+    checkWorkflowEvent(input);
+    const row: WorkflowEventRow = { id: randomUUID(), workflowId: input.workflowId, versionId: input.versionId ?? null, action: input.action, actor: input.actor, details: clone(input.details ?? {}), createdAt: now() };
+    this.workflowEvents.push(row);
+    return clone(row);
+  }
+
+  async listWorkflowEvents(f: { workflowId?: string; limit?: number }) {
+    const limit = Math.max(1, Math.min(f.limit ?? 100, 500));
+    return this.workflowEvents.filter((e) => !f.workflowId || e.workflowId === f.workflowId).slice().reverse().slice(0, limit).map(clone);
+  }
+
+  async getGraphLayout(kind: 'workflow' | 'ontology', graphId: string, versionRef: string) {
+    const l = this.graphLayouts.find((x) => x.graphKind === kind && x.graphId === graphId && x.versionRef === versionRef);
+    return l ? clone(l) : null;
+  }
+
+  async saveGraphLayout(input: { graphKind: 'workflow' | 'ontology'; graphId: string; versionRef: string; layout: Record<string, { x: number; y: number }>; updatedBy: CoreActor }) {
+    checkGraphLayout(input);
+    const row: GraphLayoutRow = { ...clone(input), updatedAt: now() };
+    const i = this.graphLayouts.findIndex((x) => x.graphKind === input.graphKind && x.graphId === input.graphId && x.versionRef === input.versionRef);
+    if (i >= 0) this.graphLayouts[i] = row;
+    else this.graphLayouts.push(row);
+    return clone(row);
   }
 
   async listMembers(projectId: string) {

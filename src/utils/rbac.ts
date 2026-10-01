@@ -43,6 +43,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canPublishExternal: true,
       canManageApiKeys: true,
       canMarketIntel: true,
+      canPublishSchema: true,
       isReadOnly: false,
       allowedTabs: [
 'express',
@@ -122,6 +123,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canPublishExternal: false,
       canManageApiKeys: false,
       canMarketIntel: false,
+      canPublishSchema: false,
       isReadOnly: true,
       allowedTabs: [
         'admin'
@@ -178,6 +180,7 @@ export const ALL_ROLES: RoleInfo[] = [
       // Ключі провайдерів вводить лише адміністратор (див. server/auth.ts).
       canManageApiKeys: false,
       canMarketIntel: true,
+      canPublishSchema: false,
       isReadOnly: false,
       allowedTabs: [
 'express',
@@ -253,6 +256,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canPublishExternal: false,
       canManageApiKeys: false,
       canMarketIntel: false,
+      canPublishSchema: false,
       isReadOnly: false,
       allowedTabs: [
         'subscription',
@@ -315,6 +319,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canPublishExternal: false,
       canManageApiKeys: false,
       canMarketIntel: false,
+      canPublishSchema: false,
       isReadOnly: false,
       allowedTabs: [
         'subscription',
@@ -374,6 +379,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canPublishExternal: true,
       canManageApiKeys: false,
       canMarketIntel: true,
+      canPublishSchema: false,
       isReadOnly: false,
       allowedTabs: [
         'subscription',
@@ -435,6 +441,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canPublishExternal: false,
       canManageApiKeys: false,
       canMarketIntel: false,
+      canPublishSchema: false,
       isReadOnly: false,
       allowedTabs: [
         'editor',
@@ -488,6 +495,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canPublishExternal: false,
       canManageApiKeys: false,
       canMarketIntel: false,
+      canPublishSchema: false,
       isReadOnly: false,
       allowedTabs: [
         'start',
@@ -545,6 +553,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canPublishExternal: false,
       canManageApiKeys: false,
       canMarketIntel: false,
+      canPublishSchema: false,
       isReadOnly: false,
       allowedTabs: [
         'start',
@@ -603,6 +612,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canPublishExternal: false,
       canManageApiKeys: false,
       canMarketIntel: false,
+      canPublishSchema: false,
       canAuthorCourses: false,
       isReadOnly: true,
       allowedTabs: [
@@ -658,6 +668,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canPublishExternal: false,
       canManageApiKeys: false,
       canMarketIntel: false,
+      canPublishSchema: false,
       canAuthorCourses: false,
       isReadOnly: true,
       allowedTabs: [

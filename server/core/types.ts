@@ -1050,6 +1050,74 @@ export interface AccessGrantRow {
 export type AccessGrantInput = Pick<AccessGrantRow, 'projectId' | 'participantId' | 'level' | 'scopeType' | 'grantedBy'> &
   Partial<Pick<AccessGrantRow, 'scopeRef' | 'validFrom' | 'validUntil' | 'source' | 'sourceRef'>>;
 
+// ── Процеси ШІ й розкладка канви (Т5.2 В2) ──────────────────────────────────
+
+export const WORKFLOW_ENVIRONMENTS = ['draft', 'test', 'production', 'archived'] as const;
+export type WorkflowEnvironment = (typeof WORKFLOW_ENVIRONMENTS)[number];
+export const WORKFLOW_EVENT_ACTIONS = ['create', 'create_draft', 'edit', 'validate', 'to_test', 'publish', 'rollback', 'archive', 'discard', 'rename'] as const;
+export type WorkflowEventAction = (typeof WORKFLOW_EVENT_ACTIONS)[number];
+
+export interface WorkflowRow {
+  id: string;
+  name: { en: string; uk: string };
+  description: string;
+  status: 'active' | 'archived';
+  createdBy: CoreActor;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkflowVersionRow {
+  id: string;
+  workflowId: string;
+  version: number;
+  environment: WorkflowEnvironment;
+  basedOn: string | null;
+  /** У переліку версій — null (визначення лише в однієї версії). */
+  definition: Record<string, unknown> | null;
+  definitionHash: string;
+  validation: Record<string, unknown> | null;
+  notes: string;
+  revision: number;
+  createdBy: CoreActor;
+  createdAt: string;
+  updatedAt: string;
+  testedBy: CoreActor | null;
+  testedAt: string | null;
+  publishedBy: CoreActor | null;
+  publishedAt: string | null;
+}
+
+export interface WorkflowVersionInput {
+  workflowId: string;
+  definition: Record<string, unknown>;
+  definitionHash: string;
+  basedOn?: string | null;
+  notes?: string;
+  createdBy: CoreActor;
+  /** `test` — лише для відкату (копія опублікованої версії, одразу замороженої); стара тестова йде в архів. */
+  environment?: 'draft' | 'test';
+}
+
+export interface WorkflowEventRow {
+  id: string;
+  workflowId: string;
+  versionId: string | null;
+  action: WorkflowEventAction;
+  actor: CoreActor;
+  details: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface GraphLayoutRow {
+  graphKind: 'workflow' | 'ontology';
+  graphId: string;
+  versionRef: string;
+  layout: Record<string, { x: number; y: number }>;
+  updatedBy: CoreActor;
+  updatedAt: string;
+}
+
 /** Збережений пошуковий запит автора (Т1.3). */
 export interface SavedSearchRow {
   id: string;
@@ -1316,6 +1384,25 @@ export interface CoreRepository {
   getAccessGrant(id: string): Promise<AccessGrantRow | null>;
   listAccessGrants(filter: { projectId?: string; participantId?: string; status?: 'active' | 'revoked' }): Promise<AccessGrantRow[]>;
   revokeAccessGrant(id: string, actor: CoreActor): Promise<AccessGrantRow>;
+  /**
+   * Т5.2 В2: процеси ШІ. `addWorkflowVersion` — нова чернетка (одна на
+   * процес); `updateWorkflowDraft` — лише чернетка, з `expectedRevision`;
+   * `transitionWorkflowVersion` — одна транзакція: `test` (заморозити, стара
+   * тестова — в архів), `production` (стара робоча — в архів), `archived`.
+   */
+  addWorkflow(input: { id: string; name: { en: string; uk: string }; description?: string; createdBy: CoreActor }): Promise<WorkflowRow>;
+  getWorkflow(id: string): Promise<WorkflowRow | null>;
+  listWorkflows(): Promise<WorkflowRow[]>;
+  updateWorkflow(id: string, patch: { name?: { en: string; uk: string }; description?: string; status?: 'active' | 'archived' }): Promise<WorkflowRow>;
+  addWorkflowVersion(input: WorkflowVersionInput): Promise<WorkflowVersionRow>;
+  getWorkflowVersion(id: string): Promise<WorkflowVersionRow | null>;
+  listWorkflowVersions(workflowId: string, filter?: { limit?: number }): Promise<WorkflowVersionRow[]>;
+  updateWorkflowDraft(id: string, patch: { definition?: Record<string, unknown>; definitionHash?: string; validation?: Record<string, unknown> | null; notes?: string }, expectedRevision?: number): Promise<WorkflowVersionRow>;
+  transitionWorkflowVersion(id: string, to: 'test' | 'production' | 'archived', actor: CoreActor): Promise<WorkflowVersionRow>;
+  addWorkflowEvent(input: { workflowId: string; versionId?: string | null; action: WorkflowEventAction; actor: CoreActor; details?: Record<string, unknown> }): Promise<WorkflowEventRow>;
+  listWorkflowEvents(filter: { workflowId?: string; limit?: number }): Promise<WorkflowEventRow[]>;
+  getGraphLayout(kind: 'workflow' | 'ontology', graphId: string, versionRef: string): Promise<GraphLayoutRow | null>;
+  saveGraphLayout(input: { graphKind: 'workflow' | 'ontology'; graphId: string; versionRef: string; layout: Record<string, { x: number; y: number }>; updatedBy: CoreActor }): Promise<GraphLayoutRow>;
 
   /** Збережені запити автора в книзі (Т1.3), новіші першими. */
   listSavedSearches(projectId: string, userId: string): Promise<SavedSearchRow[]>;
