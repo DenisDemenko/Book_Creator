@@ -201,6 +201,8 @@ import { CORE_SYNC_KIND, coreSyncJobKind } from './server/core/sync';
 import { AI_ROLE_JOB_KIND, aiRoleJobKind } from './server/core/ai/job';
 import { AI_MENTIONS_JOB_KIND, aiMentionsJobKind } from './server/core/ai/mentions';
 import { aiRoleGenerateViaCore, loadCoreAiRoleTemplate } from './server/core/ai/generate';
+import { registerQualityRoutes } from './server/core/quality/qualityRoutes';
+import { realQualityDeps } from './server/core/quality/realDeps';
 import { CORE_EMBED_KIND, coreEmbedJobKind, scheduleCoreEmbed } from './server/core/search/embedJob';
 import { AI_PROFILE_JOB_KIND, aiProfileJobKind, studioFromBook } from './server/core/characterProfile';
 import { AI_EMOTIONS_JOB_KIND, aiEmotionsJobKind } from './server/core/emotions';
@@ -568,6 +570,8 @@ registerGitCommandRoutes(app);
   registerBookRoutes(app, storedBookOps);
   // API сторінок семантичного ядра (Т0.8): /api/projects/:id/* — лише з правом
   // на книгу (власник, прийняте запрошення, адміністратор).
+  // Якість живих персонажів (Т2.8 В3): прогони набору на справжніх моделях — лише адміністратор.
+  registerQualityRoutes(app, { repo: getCoreRepository, requireAdmin, makeDeps: realQualityDeps });
   registerProjectRoutes(app, {
     access: realtimeAccessDeps,
     repo: getCoreRepository,

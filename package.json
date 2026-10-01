@@ -106,6 +106,7 @@
     "test:character-memory": "tsx scripts/test-characterMemory.mts",
     "test:interview": "tsx scripts/test-interview.mts",
     "test:living-characters": "tsx scripts/test-livingCharacters.mts",
+    "quality:living-characters": "tsx scripts/quality-livingCharacters.mts",
     "test:visual-review": "tsx scripts/test-visualReview.mts",
     "live:visual-review": "tsx scripts/live-visualReview.mts",
     "test:visual-ai": "tsx scripts/test-visualAi.mts",

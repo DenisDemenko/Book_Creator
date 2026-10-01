@@ -883,6 +883,33 @@ export interface CanonProposalRow {
 export type CanonProposalInput = Pick<CanonProposalRow, 'projectId' | 'simulationId' | 'characterId' | 'kind' | 'proposedChange' | 'createdBy'> &
   Partial<Pick<CanonProposalRow, 'sourceEventIds' | 'parentId'>>;
 
+// ── Якість живих персонажів (Т2.8 В3) ────────────────────────────────────────
+
+export const QUALITY_RUN_STATUSES = ['queued', 'running', 'succeeded', 'failed'] as const;
+export type QualityRunStatus = (typeof QUALITY_RUN_STATUSES)[number];
+
+export interface QualityRunRow {
+  id: string;
+  setId: string;
+  setVersion: number;
+  status: QualityRunStatus;
+  label: string;
+  passed: boolean | null;
+  summary: Record<string, unknown>;
+  report: Record<string, unknown> | null;
+  models: Record<string, unknown>;
+  costUsd: number;
+  budgetUsd: number | null;
+  error: string | null;
+  createdBy: CoreActor;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export type QualityRunInput = Pick<QualityRunRow, 'setId' | 'setVersion' | 'createdBy'> & Partial<Pick<QualityRunRow, 'label' | 'budgetUsd' | 'models'>>;
+export type QualityRunPatch = Partial<Pick<QualityRunRow, 'status' | 'passed' | 'summary' | 'report' | 'models' | 'costUsd' | 'error' | 'label'>>;
+
 /** Збережений пошуковий запит автора (Т1.3). */
 export interface SavedSearchRow {
   id: string;
@@ -1098,6 +1125,12 @@ export interface CoreRepository {
   getCanonProposal(projectId: string, id: string): Promise<CanonProposalRow | null>;
   listCanonProposals(projectId: string, filter?: { simulationId?: string; characterId?: string; status?: CanonProposalStatus; kind?: CanonProposalKind; limit?: number }): Promise<CanonProposalRow[]>;
   resolveCanonProposal(projectId: string, id: string, input: { status: 'accepted' | 'rejected'; actor: CoreActor; result?: Record<string, unknown> }): Promise<CanonProposalRow>;
+
+  /** Т2.8 В3: прогони набору якості (рівень платформи), новіші першими; час старту й завершення ставить сховище за статусом. */
+  addQualityRun(input: QualityRunInput): Promise<QualityRunRow>;
+  getQualityRun(id: string): Promise<QualityRunRow | null>;
+  listQualityRuns(filter?: { setId?: string; limit?: number }): Promise<QualityRunRow[]>;
+  updateQualityRun(id: string, patch: QualityRunPatch): Promise<QualityRunRow>;
 
   /** Збережені запити автора в книзі (Т1.3), новіші першими. */
   listSavedSearches(projectId: string, userId: string): Promise<SavedSearchRow[]>;

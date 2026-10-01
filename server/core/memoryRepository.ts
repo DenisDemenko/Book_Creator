@@ -39,6 +39,8 @@ import {
   checkSimulationPatch,
   checkSimulationEvent,
   checkCanonProposal,
+  checkQualityRun,
+  checkQualityRunPatch,
   assertActor,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isSearchableKind, isValidEmbedding, memoryTextScore } from './search/text';
@@ -115,6 +117,9 @@ import type {
   CanonProposalStatus,
   CharacterStateInput,
   CharacterStateRow,
+  QualityRunInput,
+  QualityRunPatch,
+  QualityRunRow,
 } from './types';
 
 const key = (projectId: string, id: string) => `${projectId}\u0000${id}`;
@@ -159,6 +164,7 @@ export class MemoryCoreRepository implements CoreRepository {
   private simulations: SimulationRow[] = [];
   private simEvents: SimulationEventRow[] = [];
   private proposals: CanonProposalRow[] = [];
+  private qualityRuns: QualityRunRow[] = [];
 
   private requireProject(projectId: string): ProjectRow {
     const p = this.projects.get(projectId);
@@ -1500,6 +1506,57 @@ export class MemoryCoreRepository implements CoreRepository {
   }
 
   // ── Збережені запити (Т1.3) ──────────────────────────────────────────────
+
+  async addQualityRun(input: QualityRunInput) {
+    checkQualityRun(input);
+    const row: QualityRunRow = {
+      id: randomUUID(),
+      setId: input.setId,
+      setVersion: input.setVersion,
+      status: 'queued',
+      label: input.label ?? '',
+      passed: null,
+      summary: {},
+      report: null,
+      models: clone(input.models ?? {}),
+      costUsd: 0,
+      budgetUsd: input.budgetUsd ?? null,
+      error: null,
+      createdBy: input.createdBy,
+      createdAt: now(),
+      startedAt: null,
+      finishedAt: null,
+    };
+    this.qualityRuns.push(row);
+    return clone(row);
+  }
+
+  async getQualityRun(id: string) {
+    const r = this.qualityRuns.find((x) => x.id === id);
+    return r ? clone(r) : null;
+  }
+
+  async listQualityRuns(f: { setId?: string; limit?: number } = {}) {
+    const limit = Math.max(1, Math.min(f.limit ?? 50, 200));
+    return this.qualityRuns
+      .filter((r) => !f.setId || r.setId === f.setId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+      .slice(0, limit)
+      .map((r) => ({ ...clone(r), report: null }));
+  }
+
+  async updateQualityRun(id: string, patch: QualityRunPatch) {
+    const r = this.qualityRuns.find((x) => x.id === id);
+    if (!r) throw notFound(`Прогін якості «${id}»`);
+    checkQualityRunPatch(patch);
+    const t = now();
+    if (patch.status === 'running' && !r.startedAt) r.startedAt = t;
+    if (patch.status === 'succeeded' || patch.status === 'failed') r.finishedAt = t;
+    for (const k of ['status', 'passed', 'summary', 'report', 'models', 'costUsd', 'error', 'label'] as const) {
+      if (patch[k] !== undefined) (r as any)[k] = clone(patch[k] as any);
+    }
+    return clone(r);
+  }
 
   async listSavedSearches(projectId: string, userId: string) {
     return this.savedSearches

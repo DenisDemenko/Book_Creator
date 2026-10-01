@@ -60,6 +60,9 @@ import {
   type SimulationPatch,
   type SimulationEventInput,
   type CanonProposalInput,
+  type QualityRunInput,
+  type QualityRunPatch,
+  QUALITY_RUN_STATUSES,
   AUTONOMY_LEVELS,
   SIMULATION_KINDS,
   SIMULATION_STATUSES,
@@ -570,4 +573,23 @@ export function checkNewFinding(input: FindingInput): CoreStatus {
 
 export function notFound(what: string): CoreRuleError {
   return new CoreRuleError('not_found', `${what} не знайдено в цьому проєкті`);
+}
+
+/** Т2.8 В3: прогін набору якості — набір, версія, хто; бюджет — додатний. */
+export function checkQualityRun(input: QualityRunInput): void {
+  assertActor(input.createdBy);
+  if (!/^(user|system):.+/.test(input.createdBy)) throw new CoreRuleError('bad_actor', 'Прогін якості запускає людина чи система, не AI');
+  if (!input.setId || String(input.setId).length > 100) throw new CoreRuleError('bad_input', 'Набір якості — від 1 до 100 символів');
+  if (!Number.isInteger(input.setVersion) || input.setVersion < 1) throw new CoreRuleError('bad_input', 'Версія набору — ціле ≥ 1');
+  if (input.budgetUsd != null && !(Number(input.budgetUsd) > 0)) throw new CoreRuleError('bad_input', 'Бюджет прогону — додатне число');
+  if (input.label !== undefined && String(input.label).length > 300) throw new CoreRuleError('bad_input', 'Підпис прогону — до 300 символів');
+  if (input.models !== undefined && !objectLike(input.models)) throw new CoreRuleError('bad_input', 'Моделі прогону — обʼєкт');
+}
+
+export function checkQualityRunPatch(patch: QualityRunPatch): void {
+  if (patch.status !== undefined && !(QUALITY_RUN_STATUSES as readonly string[]).includes(patch.status)) throw new CoreRuleError('bad_input', `Невідомий статус прогону «${patch.status}»`);
+  if (patch.costUsd !== undefined && !(Number(patch.costUsd) >= 0)) throw new CoreRuleError('bad_input', 'Вартість — число ≥ 0');
+  for (const k of ['summary', 'models'] as const) if (patch[k] !== undefined && !objectLike(patch[k])) throw new CoreRuleError('bad_input', `${k} — обʼєкт`);
+  if (patch.report !== undefined && patch.report !== null && !objectLike(patch.report)) throw new CoreRuleError('bad_input', 'Звіт — обʼєкт');
+  if (patch.error != null && String(patch.error).length > 2000) throw new CoreRuleError('bad_input', 'Помилка — до 2000 символів');
 }

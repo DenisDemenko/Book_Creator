@@ -134,6 +134,8 @@ export interface QualityRunDeps {
   fallbackLlm: LlmJson;
   /** Вартість рішення запасного LLM, $ (модель, токени); без неї — 0. */
   priceLlm?: (modelId: string, inputTokens: number, outputTokens: number) => number;
+  /** Шаблон модуля голосу з правками адміна (як у Студії); без нього — заводський. */
+  loadTemplate?: () => Promise<{ system: string; user: string } | undefined>;
   /** Jev-суддя (В2); за замовчуванням — `jev`; null — без судді (виміри характеру й стилю пропущено). */
   judge?: JevAdapter | null;
   /** Підпис прогону у звіті (напр. «підставні моделі», «справжні: gemini-… / jev-1.13.0»). */
@@ -240,7 +242,7 @@ export async function runMode(set: ControlSet, mode: QualityMode, deps: QualityR
   };
   const fallback = watchJev(new LlmFallbackJevAdapter(deps.fallbackLlm), jevStates);
   const jev = mode === 'with_jev' && deps.jev ? watchJev(deps.jev, jevStates) : null;
-  const interviewDeps: InterviewDeps = { repo, jev, fallback, voice };
+  const interviewDeps: InterviewDeps = { repo, jev, fallback, voice, loadTemplate: deps.loadTemplate };
   const judge = deps.judge === undefined ? deps.jev : deps.judge;
 
   const turns: QualityTurn[] = [];
@@ -277,7 +279,8 @@ export async function runMode(set: ControlSet, mode: QualityMode, deps: QualityR
       turn.action = typeof p.action === 'string' ? p.action : null;
       turn.source = typeof p.source === 'string' ? p.source : null;
       turn.fallbackReason = typeof p.fallbackReason === 'string' ? p.fallbackReason : null;
-      turn.error = typeof p.error === 'string' ? p.error : null;
+      // «Не вдалося» — помилка; «чекає автора» — причина (Jev і запасний шлях не дали рішення).
+      turn.error = typeof p.error === 'string' ? p.error : r.status === 'awaiting' ? `рішення чекає автора (${p.level ?? '?'}): ${p.reason ?? 'немає причини'}` : null;
       const u = (p.usage ?? {}) as { inputTokens?: number; outputTokens?: number; costUsd?: number };
       turn.voice = { inputTokens: Number(u.inputTokens ?? 0) || 0, outputTokens: Number(u.outputTokens ?? 0) || 0, costUsd: Number(u.costUsd ?? 0) || 0, model: typeof p.model === 'string' ? p.model : null };
     } catch (err) {

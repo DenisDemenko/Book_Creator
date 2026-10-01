@@ -40,6 +40,8 @@ import {
   checkSimulationPatch,
   checkSimulationEvent,
   checkCanonProposal,
+  checkQualityRun,
+  checkQualityRunPatch,
   assertActor,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isValidEmbedding, SEARCHABLE_KINDS, tsQueryFromStems } from './search/text';
@@ -115,6 +117,9 @@ import type {
   CharacterStateInput,
   CharacterStateRow,
   CharacterDecisionLevel,
+  QualityRunInput,
+  QualityRunPatch,
+  QualityRunRow,
 } from './types';
 
 type Q = Pool | PoolClient;
@@ -129,6 +134,27 @@ function vectorLiteral(v: number[]): string {
 
 const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : String(v));
 const isoOrNull = (v: unknown): string | null => (v == null ? null : iso(v));
+
+function toQualityRun(r: any): QualityRunRow {
+  return {
+    id: r.id,
+    setId: r.set_id,
+    setVersion: Number(r.set_version),
+    status: r.status,
+    label: r.label ?? '',
+    passed: r.passed ?? null,
+    summary: r.summary ?? {},
+    report: r.report ?? null,
+    models: r.models ?? {},
+    costUsd: Number(r.cost_usd ?? 0),
+    budgetUsd: r.budget_usd == null ? null : Number(r.budget_usd),
+    error: r.error ?? null,
+    createdBy: r.created_by,
+    createdAt: iso(r.created_at),
+    startedAt: isoOrNull(r.started_at),
+    finishedAt: isoOrNull(r.finished_at),
+  };
+}
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Рядок, що не є UUID, у колонці `uuid` дав би помилку бази; для ядра це просто «не знайдено». */
 const isUuid = (v: unknown): v is string => typeof v === 'string' && UUID_RE.test(v);
@@ -2141,6 +2167,73 @@ export class PgCoreRepository implements CoreRepository {
   }
 
   // ── Збережені запити (Т1.3) ──────────────────────────────────────────────
+
+  async addQualityRun(input: QualityRunInput) {
+    checkQualityRun(input);
+    const { rows } = await this.q(
+      `INSERT INTO quality_runs (set_id, set_version, label, budget_usd, models, created_by) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [input.setId, input.setVersion, input.label ?? '', input.budgetUsd ?? null, JSON.stringify(input.models ?? {}), input.createdBy],
+    );
+    return toQualityRun(rows[0]);
+  }
+
+  async getQualityRun(id: string) {
+    if (!isUuid(id)) return null;
+    const { rows } = await this.q('SELECT * FROM quality_runs WHERE id = $1', [id]);
+    return rows[0] ? toQualityRun(rows[0]) : null;
+  }
+
+  async listQualityRuns(f: { setId?: string; limit?: number } = {}) {
+    const params: unknown[] = [];
+    let where = '';
+    if (f.setId) {
+      params.push(f.setId);
+      where = 'WHERE set_id = $1';
+    }
+    params.push(Math.max(1, Math.min(f.limit ?? 50, 200)));
+    // Перелік — без повного звіту (він важкий); звіт — у getQualityRun.
+    const { rows } = await this.q(
+      `SELECT id, set_id, set_version, status, label, passed, summary, NULL::jsonb AS report, models, cost_usd, budget_usd, error, created_by, created_at, started_at, finished_at
+       FROM quality_runs ${where} ORDER BY created_at DESC, id LIMIT $${params.length}`,
+      params,
+    );
+    return rows.map(toQualityRun);
+  }
+
+  async updateQualityRun(id: string, patch: QualityRunPatch) {
+    const cur = await this.getQualityRun(id);
+    if (!cur) throw notFound(`Прогін якості «${id}»`);
+    checkQualityRunPatch(patch);
+    const { rows } = await this.q(
+      `UPDATE quality_runs SET
+         status = COALESCE($2, status),
+         passed = CASE WHEN $3::boolean IS NULL AND NOT $10 THEN passed ELSE $3::boolean END,
+         summary = COALESCE($4::jsonb, summary),
+         report = CASE WHEN $11 THEN $5::jsonb ELSE report END,
+         models = COALESCE($6::jsonb, models),
+         cost_usd = COALESCE($7, cost_usd),
+         error = CASE WHEN $12 THEN $8 ELSE error END,
+         label = COALESCE($9, label),
+         started_at = CASE WHEN $2 = 'running' AND started_at IS NULL THEN now() ELSE started_at END,
+         finished_at = CASE WHEN $2 IN ('succeeded', 'failed') THEN now() ELSE finished_at END
+       WHERE id = $1 RETURNING *`,
+      [
+        id,
+        patch.status ?? null,
+        patch.passed ?? null,
+        patch.summary === undefined ? null : JSON.stringify(patch.summary),
+        patch.report == null ? null : JSON.stringify(patch.report),
+        patch.models === undefined ? null : JSON.stringify(patch.models),
+        patch.costUsd ?? null,
+        patch.error ?? null,
+        patch.label ?? null,
+        patch.passed !== undefined,
+        patch.report !== undefined,
+        patch.error !== undefined,
+      ],
+    );
+    return toQualityRun(rows[0]);
+  }
 
   async listSavedSearches(projectId: string, userId: string) {
     const { rows } = await this.q(

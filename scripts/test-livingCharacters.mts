@@ -20,6 +20,15 @@ import { runLivingCharacters, runMode, type QualityTurn } from '../server/core/q
 import { computeMetrics, evaluateGates } from '../server/core/quality/qualityMetrics.ts';
 import { renderQualityReport } from '../server/core/quality/qualityReport.ts';
 import type { JevAdapter } from '../server/ai/adapters/jev/index.ts';
+import { executeQualityRun, failInterruptedRuns, reportForStorage, startQualityRun, withBudget } from '../server/core/quality/qualityRuns.ts';
+import { registerQualityRoutes } from '../server/core/quality/qualityRoutes.ts';
+import { MemoryCoreRepository } from '../server/core/memoryRepository.ts';
+import { PgCoreRepository } from '../server/core/pgRepository.ts';
+import { createCorePool } from '../server/core/index.ts';
+import { CORE_SCHEMA, loadMigrations, resolveMigrationsDir, runMigrations } from '../server/core/migrate.ts';
+import type { CoreRepository } from '../server/core/types.ts';
+import express from 'express';
+import type { AddressInfo } from 'node:net';
 
 let pass = 0;
 let fail = 0;
@@ -181,6 +190,98 @@ console.log('\nВорота самі ловлять поломки:');
   t('майбутнє в запиті голосу чи в стані Jev — спойлер, із місцем', m.spoilers.leaks === 2 && m.spoilers.examples.some((e) => /запит голосу/.test(e)) && m.spoilers.examples.some((e) => /стан Jev/.test(e)) && !evaluateGates(LIVING_CHARACTERS_SET.gates, m, 'without_jev').find((g) => g.id === 'spoilers')!.passed);
   const failed = computeMetrics([turn({ status: 'failed', reply: '', forbidden: { secret: [], future: [] } })], { calls: 0, bySource: {}, inputTokens: 0, outputTokens: 0, costUsd: 0, latencyMs: 0 });
   t('хід без відповіді — ворота «усі кейси з відповіддю» не пройдено', !evaluateGates(LIVING_CHARACTERS_SET.gates, failed, 'without_jev').find((g) => g.id === 'answered')!.passed);
+}
+
+console.log('\nЛіміт витрат і журнал прогонів (В3):');
+{
+  const tight = withBudget(deps, 0.0005);
+  const r = await runMode(LIVING_CHARACTERS_SET, 'with_jev', tight.deps);
+  t('бюджет $0.0005: голос по $0.0001 — після вичерпання платних викликів немає, ходи — збій, ворота не пройдено', tight.meter.exceeded() && tight.meter.spent() < 0.0012 && r.metrics.failed > 0 && !r.passed, `витрачено ${tight.meter.spent().toFixed(6)}, збоїв ${r.metrics.failed}`);
+  const stored = reportForStorage(report) as any;
+  t('звіт для бази — без промптів і станів Jev (лише кількість)', stored.modes.every((m: any) => m.turns.every((x: any) => typeof x.seen.prompts === 'number' && typeof x.seen.jevStates === 'number')) && !JSON.stringify(stored).includes('Знімок героя станом'));
+}
+
+async function runsSuite(label: string, repo: CoreRepository) {
+  console.log(`\nЖурнал прогонів — ${label}:`);
+  const { run, done } = await startQualityRun(repo, { set: LIVING_CHARACTERS_SET, deps, actor: 'user:admin', budgetUsd: 1, models: { voice: 'fake-voice' }, label: 'тест' });
+  t('запуск — запис одразу (у черзі), набір і версія, бюджет, моделі', run.status === 'queued' && run.setId === 'living-characters' && run.setVersion === LIVING_CHARACTERS_SET.version && run.budgetUsd === 1 && (run.models as any).voice === 'fake-voice');
+  const fin = await done;
+  t('завершено: succeeded, ворота пройдено, підсумок двох режимів, вартість, час старту й кінця', fin.status === 'succeeded' && fin.passed === true && (fin.summary as any).modes.length === 2 && fin.costUsd > 0 && !!fin.startedAt && !!fin.finishedAt && fin.error === null, JSON.stringify({ s: fin.status, c: fin.costUsd, e: fin.error }));
+  const got = (await repo.getQualityRun(run.id))!;
+  t('повний звіт — у getQualityRun; у переліку — без звіту (легкий)', (got.report as any)?.modes?.[0]?.turns?.length === LIVING_CHARACTERS_SET.cases.length && (await repo.listQualityRuns({ setId: 'living-characters' }))[0].report === null);
+  const over = await repo.addQualityRun({ setId: 'living-characters', setVersion: 2, createdBy: 'user:admin', budgetUsd: 0.0003 });
+  const overFin = await executeQualityRun(repo, over.id, { set: LIVING_CHARACTERS_SET, deps, actor: 'user:admin', budgetUsd: 0.0003, modes: ['with_jev'] });
+  t('бюджет вичерпано — failed, частковий звіт, причина з сумою', overFin.status === 'failed' && overFin.passed === false && !!overFin.report && /Бюджет прогону вичерпано/.test(overFin.error ?? ''), overFin.error ?? '');
+  const hang = await repo.addQualityRun({ setId: 'living-characters', setVersion: 2, createdBy: 'user:admin' });
+  await repo.updateQualityRun(hang.id, { status: 'running' });
+  let conflict = '';
+  try {
+    await startQualityRun(repo, { set: LIVING_CHARACTERS_SET, deps, actor: 'user:admin', budgetUsd: 1 });
+  } catch (err) {
+    conflict = (err as any).code;
+  }
+  t('поки прогін іде — другий не запускається (conflict)', conflict === 'conflict');
+  t('після перезапуску — «йде» стає «перервано»', (await failInterruptedRuns(repo)) === 1 && (await repo.getQualityRun(hang.id))!.status === 'failed' && /перезапуском/.test((await repo.getQualityRun(hang.id))!.error ?? ''));
+  t('правила: статус і бюджет у межах', (await repo.addQualityRun({ setId: 'x', setVersion: 1, createdBy: 'user:a', budgetUsd: -1 }).then(() => 'ok', (e) => e.code)) === 'bad_input' &&
+    (await repo.updateQualityRun(run.id, { status: 'done' as any }).then(() => 'ok', (e) => e.code)) === 'bad_input' && (await repo.addQualityRun({ setId: 'x', setVersion: 1, createdBy: 'ai:x' as any }).then(() => 'ok', (e) => e.code)) !== 'ok');
+}
+
+await runsSuite('пам\'ять', new MemoryCoreRepository());
+
+console.log('\nМаршрути адмінки (В3):');
+{
+  const repo = new MemoryCoreRepository();
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => { (req as any).principal = req.headers['x-user'] ? { id: String(req.headers['x-user']), role: req.headers['x-admin'] ? 'admin' : 'writer' } : undefined; next(); });
+  const requireAdmin = (req: any, res: any, next: any) => (req.principal?.role === 'admin' ? next() : res.status(403).json({ error: 'лише адміністратор' }));
+  registerQualityRoutes(app, { repo: () => repo, requireAdmin, makeDeps: async () => ({ deps, models: { voice: 'fake-voice' } }) });
+  const server = app.listen(0);
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/admin/quality`;
+  const call = async (method: string, p: string, body?: unknown, admin = true) => {
+    const r = await fetch(base + p, { method, headers: { 'Content-Type': 'application/json', 'x-user': 'u1', ...(admin ? { 'x-admin': '1' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    return { status: r.status, text: await r.clone().text(), body: (await r.json().catch(() => ({}))) as any };
+  };
+  try {
+    t('не адміністратор — 403', (await call('GET', '/living-characters', undefined, false)).status === 403 && (await call('POST', '/runs', {}, false)).status === 403);
+    const g = await call('GET', '/living-characters');
+    t('GET набору: кейси, герої, ворота, бюджет, прогонів ще немає', g.status === 200 && g.body.set.cases.length === LIVING_CHARACTERS_SET.cases.length && g.body.set.heroes.join() === 'Олена,Марко' && g.body.budget.maxUsd === 20 && g.body.runs.length === 0 && g.body.running === false);
+    t('POST з бюджетом поза межами чи без режимів — 400', (await call('POST', '/runs', { budgetUsd: 100 })).status === 400 && (await call('POST', '/runs', { modes: ['x'] })).status === 400);
+    const st = await call('POST', '/runs', { budgetUsd: 0.5, modes: ['with_jev'] });
+    t('POST — 202, прогін у черзі, хто запустив', st.status === 202 && st.body.run.status === 'queued' && st.body.run.createdBy === 'user:u1' && st.body.run.budgetUsd === 0.5);
+    let run: any = null;
+    for (let i = 0; i < 50 && run?.status !== 'succeeded' && run?.status !== 'failed'; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      run = (await call('GET', `/runs/${st.body.run.id}`)).body.run;
+    }
+    t('GET прогону — завершено, звіт одного режиму', run?.status === 'succeeded' && run.report.modes.length === 1 && run.report.modes[0].mode === 'with_jev', run?.status);
+    const md = await call('GET', `/runs/${st.body.run.id}/report.md`);
+    t('звіт Markdown — для завантаження', md.status === 200 && /# Якість живих персонажів/.test(md.text));
+    t('невідомий прогін — 404', (await call('GET', '/runs/00000000-0000-4000-8000-000000000000')).status === 404);
+    t('перелік — з прогоном і без звіту', (await call('GET', '/living-characters')).body.runs.length === 1);
+  } finally {
+    server.close();
+  }
+}
+
+const pgUrl = process.env.CORE_TEST_DATABASE_URL?.trim();
+if (pgUrl) {
+  const pool = createCorePool(pgUrl);
+  try {
+    await pool.query(`DROP SCHEMA IF EXISTS ${CORE_SCHEMA} CASCADE`);
+    await runMigrations(pool, loadMigrations(resolveMigrationsDir()));
+    const { rows } = await pool.query(`SELECT max(version) AS v FROM ${CORE_SCHEMA}.core_schema_migrations`);
+    t('схема ядра — не старіша за v18 (прогони якості)', Number(rows[0].v) >= 18, `v${rows[0].v}`);
+    await runsSuite('PostgreSQL', new PgCoreRepository(pool));
+    const refused = await pool.query(`INSERT INTO ${CORE_SCHEMA}.quality_runs (set_id, set_version, status, created_by) VALUES ('x', 1, 'succeeded', 'user:a')`).then(() => false, () => true);
+    t('CHECK у базі: завершений прогін без часу завершення — ні', refused);
+  } catch (err) {
+    t('прогони якості на PostgreSQL без збоїв', false, (err as Error).stack ?? String(err));
+  } finally {
+    await pool.end();
+  }
+} else {
+  console.log('\nPostgreSQL: пропущено (CORE_TEST_DATABASE_URL не задано) — журнал прогонів перевірено на сховищі в пам\'яті');
 }
 
 console.log('\nЗвіт:');
