@@ -173,7 +173,11 @@ page.on('pageerror', (e) => errors.push(String(e)));
 // книгу як зразок полів і кладемо свою — з тими самими полями — і в браузер, і на сервер.
 await page.goto(`${BASE}/projects/BK-2084-CYBER/editor`, { waitUntil: 'domcontentloaded' });
 // Спершу застосунок сам створює сховище й кладе стартову книгу (інакше наш indexedDB.open випередить його оновлення схеми).
-await page.waitForSelector('#book-content-editor-ua .ProseMirror', { timeout: 40000 });
+if (!(await page.waitForSelector('#book-content-editor-ua .ProseMirror', { timeout: 40000 }).catch(() => null))) {
+  await page.screenshot({ path: path.join(DIR, 'fail-editor.png') });
+  console.error('Редактор не відкрився:', page.url(), (await page.evaluate(() => document.body.innerText.slice(0, 800))).replace(/\n+/g, ' | '));
+  process.exit(1);
+}
 await sleep(1500);
 const idb = (code: string) => page.evaluate(`new Promise((ok, bad) => { const r = indexedDB.open('nova_studio', 1); r.onerror = () => bad(r.error); r.onsuccess = () => { const db = r.result; ${code} }; })`);
 const fixture: any = await waitFor(

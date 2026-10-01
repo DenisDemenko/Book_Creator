@@ -117,6 +117,7 @@
     "live:jev-levels": "tsx scripts/live-jevLevels.mts",
     "live:character-memory": "tsx scripts/live-characterMemory.mts",
     "live:interview": "tsx scripts/live-interview.mts",
+    "live:interview-criteria": "tsx scripts/live-interviewCriteria.mts",
     "core:migrate": "tsx scripts/core-migrate.mts",
     "test:paragraph-ids": "tsx scripts/test-paragraphIds.mts",
     "live:paragraph-ids": "tsx scripts/live-paragraphIds.mts",
