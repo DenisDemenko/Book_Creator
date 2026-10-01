@@ -8,9 +8,17 @@
  *   GET    /api/core/projects/:projectId/participants/events            — журнал участі (власник / адмін)
  *   POST   /api/core/projects/:projectId/participants/import-legacy     — перенести project_members (адмін)
  *
+ * Наданий доступ (Т6.2 В3, `PLAN_ACCESS.md`):
+ *   GET    /api/core/projects/:projectId/access              — мій доступ; керівнику — учасники з доступами й цілі (розділи, сцени, герої, локації)
+ *   POST   /api/core/projects/:projectId/access              — надати { userId, level, scopeType, scopeRef?, validUntil? }
+ *   DELETE /api/core/projects/:projectId/access/:grantId     — відкликати
+ *   GET    /api/core/projects/:projectId/access/events       — журнал надань і відкликань
+ * Керує доступом власник книги, адміністратор або учасник із правом керування
+ * (manage) на книгу; зміна доступу перепідключає людину в кімнаті.
+ *
  * Роль ≠ дозвіл (Onboarding §19): призначення не відкриває доступу до книги —
- * доступ і далі дає власність чи прийняте запрошення, а Т6.2 замінить його
- * наданим доступом (Access Grant).
+ * доступ дає власність або наданий доступ (Access Grant, Т6.2); прийняте
+ * запрошення один раз переноситься в доступ на книгу.
  */
 
 import type { Express, Request, Response } from 'express';
@@ -19,11 +27,27 @@ import { CoreRuleError } from '../rules';
 import type { RealtimeAccessDeps } from '../../realtimeAuth';
 import { resolveProjectAccess, type ProjectAccess } from '../projectRoutes';
 import { assignRole, importLegacyMembers, participantsOf, revokeRole, rolesOf } from './participants';
+import { describeAccess, grantAccess, revokeAccess, type BookIndex, type Granter } from './access';
+import { ACCESS_LEVELS, ACCESS_SCOPES, type AccessLevel, type AccessScope } from '../types';
+
+/** Структура книги для вибору цілі доступу: розділи й сцени з назвами. */
+export interface BookOutline {
+  chapters: Array<{ id: string; title: string; sections: Array<{ id: string; title: string }> }>;
+}
 
 export interface ParticipantRoutesDeps {
   repo: () => CoreRepository | null;
   access: RealtimeAccessDeps;
+  /** Т6.2: розділи й сцени книги (серверна копія власника) — для цілей доступу. */
+  bookOutline?: (projectId: string) => Promise<BookOutline | null>;
+  /** Т6.2: ім'я й пошта людини — для панелі «Доступ». */
+  describeUser?: (userId: string) => Promise<{ name?: string; email?: string } | null>;
+  /** Т6.2: доступ людини змінився — перепідключити її в кімнаті. */
+  onAccessChanged?: (projectId: string, userId: string) => void;
 }
+
+/** Області, які застосовуються зараз (рішення власника §2 п.2); решта — у моделі, Т7. */
+export const ACTIVE_ACCESS_SCOPES: AccessScope[] = ['book', 'chapter', 'scene', 'character', 'location', 'media_library'];
 
 const STATUS: Record<string, number> = { not_found: 404, conflict: 409, bad_actor: 403 };
 
@@ -98,5 +122,84 @@ export function registerParticipantRoutes(app: Express, d: ParticipantRoutesDeps
 
   app.post(`${base}/import-legacy`, handler('admin', async (repo, access, _req, res) => {
     res.json(await importLegacyMembers(repo, access.projectId, `user:${access.userId}`));
+  }));
+
+  // ── Т6.2 В3: наданий доступ ─────────────────────────────────────────────────
+
+  const accessBase = '/api/core/projects/:projectId/access';
+  const granterOf = (access: ProjectAccess): Granter => ({ userId: access.userId, isOwner: access.isOwner, isAdmin: access.role === 'admin' });
+  const canManage = (access: ProjectAccess) => access.isOwner || access.role === 'admin' || access.effective.book === 'manage';
+  const indexOf = (outline: BookOutline | null): BookIndex | null =>
+    outline ? new Map(outline.chapters.map((c) => [c.id, c.sections.map((s) => s.id)])) : null;
+
+  app.get(accessBase, handler('member', async (repo, access, _req, res) => {
+    const me = { userId: access.userId, isOwner: access.isOwner, role: access.role, effective: describeAccess(access.effective) };
+    const meta = { levels: ACCESS_LEVELS, scopes: ACTIVE_ACCESS_SCOPES, modelScopes: ACCESS_SCOPES };
+    if (!canManage(access)) {
+      res.json({ projectId: access.projectId, canManage: false, me, participants: [], targets: null, ...meta });
+      return;
+    }
+    const [people, grants, outline, characters, locations] = await Promise.all([
+      participantsOf(repo, access.projectId),
+      repo.listAccessGrants({ projectId: access.projectId }),
+      d.bookOutline ? d.bookOutline(access.projectId).catch(() => null) : Promise.resolve(null),
+      repo.listEntities(access.projectId, 'character'),
+      repo.listEntities(access.projectId, 'location'),
+    ]);
+    const participants = await Promise.all(people.map(async (p) => ({
+      ...p,
+      user: d.describeUser ? await d.describeUser(p.participant.userId).catch(() => null) : null,
+      grants: grants
+        .filter((g) => g.participantId === p.participant.id)
+        .sort((a, b) => (a.status === b.status ? b.createdAt.localeCompare(a.createdAt) : a.status === 'active' ? -1 : 1)),
+    })));
+    const live = (e: { status: string }) => e.status !== 'rejected';
+    res.json({
+      projectId: access.projectId,
+      canManage: true,
+      me,
+      participants,
+      targets: {
+        chapters: outline?.chapters ?? [],
+        characters: characters.filter(live).map((e) => ({ id: e.id, name: e.name })),
+        locations: locations.filter(live).map((e) => ({ id: e.id, name: e.name })),
+      },
+      ...meta,
+    });
+  }));
+
+  app.post(accessBase, handler('member', async (repo, access, req, res) => {
+    if (!canManage(access)) throw new CoreRuleError('bad_actor', 'Надавати доступ може власник книги, адміністратор або учасник із правом керування');
+    const b = req.body ?? {};
+    if (typeof b.userId !== 'string' || !b.userId.trim()) throw new CoreRuleError('bad_input', 'Вкажіть, кому надати доступ (userId)');
+    if (!(ACTIVE_ACCESS_SCOPES as string[]).includes(b.scopeType)) throw new CoreRuleError('bad_input', `Область «${b.scopeType}» поки не застосовується (стиль-біблія, завдання, результати — Т7)`);
+    const outline = d.bookOutline ? await d.bookOutline(access.projectId).catch(() => null) : null;
+    if ((b.scopeType === 'chapter' || b.scopeType === 'scene') && !outline) throw new CoreRuleError('conflict', 'Серверної копії книги немає — розділи й сцени перевірити нема з чим. Збережіть книгу на сервері.');
+    const grant = await grantAccess(repo, {
+      projectId: access.projectId,
+      granter: granterOf(access),
+      userId: b.userId.trim(),
+      level: b.level as AccessLevel,
+      scopeType: b.scopeType as AccessScope,
+      scopeRef: typeof b.scopeRef === 'string' && b.scopeRef ? b.scopeRef : null,
+      validUntil: typeof b.validUntil === 'string' && b.validUntil ? b.validUntil : null,
+      bookIndex: indexOf(outline),
+    });
+    d.onAccessChanged?.(access.projectId, b.userId.trim());
+    res.status(201).json({ grant });
+  }));
+
+  app.delete(`${accessBase}/:grantId`, handler('member', async (repo, access, req, res) => {
+    if (!canManage(access)) throw new CoreRuleError('bad_actor', 'Відкликати доступ може власник книги, адміністратор або учасник із правом керування');
+    const grant = await revokeAccess(repo, { projectId: access.projectId, grantId: String(req.params.grantId), granter: granterOf(access) });
+    const p = await repo.getParticipantById(grant.participantId);
+    if (p) d.onAccessChanged?.(access.projectId, p.userId);
+    res.json({ grant });
+  }));
+
+  app.get(`${accessBase}/events`, handler('member', async (repo, access, _req, res) => {
+    if (!canManage(access)) throw new CoreRuleError('bad_actor', 'Журнал доступу бачить власник книги, адміністратор або учасник із правом керування');
+    const events = (await repo.listCollabEvents(access.projectId, { limit: 200 })).filter((e) => e.action === 'access_granted' || e.action === 'access_revoked');
+    res.json({ events });
   }));
 }

@@ -12,7 +12,7 @@ import { issueRealtimeTicket, resolveRealtimeAccess, ticketFromUrl, verifyRealti
 import { describeAccess, makeEffectiveResolver, visibleCharacterRefs } from './server/core/collaboration/access';
 import { mergeRestrictedUpdate, restrictBook, canEditSection, shapeRoomEvent, type RoomView } from './server/core/collaboration/accessView';
 import { getBook as getStoredBookForRealtime } from './server/bookStore';
-import { getBookOwner as getCollabOwnerForRealtime, listCollabInvitesForBook as listInvitesForRealtime } from './server/store';
+import { getBookOwner as getCollabOwnerForRealtime, listCollabInvitesForBook as listInvitesForRealtime, findUserById as findUserForAccess } from './server/store';
 import {
   ensureGeneratedDir,
   listEngines,
@@ -624,7 +624,29 @@ registerGitCommandRoutes(app);
   // Онтологія співпраці й реєстр ролей (Т6.1) — той самий життєвий цикл, окрема адреса.
   registerOntologyRoutes(app, { repo: getCoreRepository, requireAuth, requireAdmin }, { ontologyId: 'fusion-collab', base: '/api/core/collaboration/ontology' });
   // Учасники проєкту й ролі з реєстру ролей (Т6.1) — до маршрутів проєкту, щоб їхні адреси не перехопив загальний обробник.
-  registerParticipantRoutes(app, { repo: getCoreRepository, access: realtimeAccessDeps });
+  registerParticipantRoutes(app, {
+    repo: getCoreRepository,
+    access: realtimeAccessDeps,
+    // Т6.2 В3: цілі доступу — розділи й сцени серверної копії власника книги.
+    bookOutline: async (projectId) => {
+      const stored = await getStoredBookForRealtime(projectId);
+      const owner = (await realtimeAccessDeps.getCollabOwnerId(projectId)) ?? stored?.ownerId;
+      const book: any = stored && stored.ownerId === owner ? stored.book : null;
+      if (!book) return null;
+      return {
+        chapters: (book.chapters ?? []).map((c: any) => ({
+          id: String(c.id),
+          title: String(c.title ?? ''),
+          sections: (c.sections ?? []).map((s: any) => ({ id: String(s.id), title: String(s.title ?? '') })),
+        })),
+      };
+    },
+    describeUser: async (userId) => {
+      const u = await findUserForAccess(userId);
+      return u ? { name: u.name, email: u.email } : null;
+    },
+    onAccessChanged: (projectId, userId) => void dropRealtimeParticipant(projectId, userId),
+  });
   registerProjectRoutes(app, {
     access: realtimeAccessDeps,
     repo: getCoreRepository,

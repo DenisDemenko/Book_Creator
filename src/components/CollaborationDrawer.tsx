@@ -37,6 +37,7 @@ import {
 import { getRoleInfo } from '../utils/rbac';
 import { useLanguage } from '../i18n/LanguageContext';
 import { activeCollabOntology, invitableRoles as bundledInvitableRoles, roleById as bundledRoleById } from '../utils/collabOntology';
+import { AccessPanel } from './AccessPanel';
 
 /** id ролі з реєстру ролей (Т6.1) або старе значення (`reader`). */
 type CoworkInviteRole = string;
@@ -94,7 +95,7 @@ export const CollaborationDrawer: React.FC<CollaborationDrawerProps> = ({
   onJumpToTab,
   authUser
 }) => {
-  const [activeView, setActiveView] = useState<'chat' | 'collaborators' | 'invite'>('chat');
+  const [activeView, setActiveView] = useState<'chat' | 'collaborators' | 'invite' | 'access'>('chat');
   const [inputMessage, setInputMessage] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { t, lang } = useLanguage();
@@ -250,7 +251,10 @@ export const CollaborationDrawer: React.FC<CollaborationDrawerProps> = ({
     if (activeView === 'invite' && !canManageInvites) {
       setActiveView('chat');
     }
-  }, [activeView, canManageInvites]);
+    if (activeView === 'access' && !isRegistered) {
+      setActiveView('chat');
+    }
+  }, [activeView, canManageInvites, isRegistered]);
 
   if (!isOpen) return null;
 
@@ -369,40 +373,56 @@ export const CollaborationDrawer: React.FC<CollaborationDrawerProps> = ({
         <div className="p-2 border-b border-slate-800 bg-slate-900/60 flex gap-1">
           <button
             onClick={() => setActiveView('chat')}
-            className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+            className={`flex-1 min-w-0 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
               activeView === 'chat'
                 ? 'bg-amber-500 text-slate-950 shadow-md'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
             }`}
           >
-            <MessageSquare className="w-3.5 h-3.5" />
-            <span>{t('collaborationDrawer.chatTabBtn', { n: String(chatMessages.length) })}</span>
+            <MessageSquare className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">{t('collaborationDrawer.chatTabBtn', { n: String(chatMessages.length) })}</span>
           </button>
 
           <button
             onClick={() => setActiveView('collaborators')}
-            className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+            className={`flex-1 min-w-0 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
               activeView === 'collaborators'
                 ? 'bg-amber-500 text-slate-950 shadow-md'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
             }`}
           >
-            <Users className="w-3.5 h-3.5" />
-            <span>{t('collaborationDrawer.participantsTabBtn', { n: String(collaborators.length) })}</span>
+            <Users className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">{t('collaborationDrawer.participantsTabBtn', { n: String(collaborators.length) })}</span>
           </button>
 
           {canManageInvites && (
             <button
               onClick={() => setActiveView('invite')}
               data-collab-tab="invite"
-              className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+              className={`flex-1 min-w-0 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
                 activeView === 'invite'
                   ? 'bg-amber-500 text-slate-950 shadow-md'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
               }`}
             >
-              <UserPlus className="w-3.5 h-3.5" />
-              <span>{t('collaborationDrawer.coworkTabBtn')}</span>
+              <UserPlus className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">{t('collaborationDrawer.coworkTabBtn')}</span>
+            </button>
+          )}
+
+          {/* Т6.2: наданий доступ — свій; власнику й керівнику — надання й відкликання. */}
+          {isRegistered && (
+            <button
+              onClick={() => setActiveView('access')}
+              data-collab-tab="access"
+              className={`flex-1 min-w-0 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                activeView === 'access'
+                  ? 'bg-amber-500 text-slate-950 shadow-md'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+              }`}
+            >
+              <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">{lang === 'en' ? 'Access' : 'Доступ'}</span>
             </button>
           )}
         </div>
@@ -458,6 +478,8 @@ export const CollaborationDrawer: React.FC<CollaborationDrawerProps> = ({
               )}
               <div ref={messagesEndRef} />
             </>
+          ) : activeView === 'access' ? (
+            <AccessPanel bookId={book.id} lang={lang === 'en' ? 'en' : 'uk'} />
           ) : activeView === 'invite' ? (
             <div className="space-y-4">
               <div className="text-xs text-slate-400">

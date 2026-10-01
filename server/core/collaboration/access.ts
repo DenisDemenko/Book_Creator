@@ -170,7 +170,8 @@ export async function revokeAccess(repo: CoreRepository, input: { projectId: str
   if (g.level === 'manage' && !input.granter.isOwner && !input.granter.isAdmin) throw new CoreRuleError('bad_actor', 'Право керування відкликає лише власник книги чи адміністратор');
   const actor: CoreActor = `user:${input.granter.userId}`;
   const out = await repo.revokeAccessGrant(g.id, actor);
-  await repo.addCollabEvent({ projectId: input.projectId, participantId: g.participantId, action: 'access_revoked', actor, details: { grantId: g.id, level: g.level, scopeType: g.scopeType, scopeRef: g.scopeRef } });
+  const who = await repo.getParticipantById(g.participantId);
+  await repo.addCollabEvent({ projectId: input.projectId, participantId: g.participantId, action: 'access_revoked', actor, details: { grantId: g.id, userId: who?.userId ?? null, level: g.level, scopeType: g.scopeType, scopeRef: g.scopeRef } });
   return out;
 }
 
