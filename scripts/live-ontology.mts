@@ -107,7 +107,7 @@ const api = async (method: string, p: string, body?: unknown, token = TOKEN) => 
 console.log('(1) Перший старт ядра:');
 const [{ v: schemaV }] = await q('SELECT max(version) AS v FROM fusion_core.core_schema_migrations');
 t('схема ядра v19 (реєстр схем)', Number(schemaV) >= 19, `v${schemaV}`);
-const v1rows = await q(`SELECT version, status, label, created_by, jsonb_array_length(definition->'entityTypes') AS n, jsonb_array_length(definition->'relationTypes') AS r FROM fusion_core.ontology_versions`);
+const v1rows = await q(`SELECT version, status, label, created_by, jsonb_array_length(definition->'entityTypes') AS n, jsonb_array_length(definition->'relationTypes') AS r FROM fusion_core.ontology_versions WHERE ontology_id = 'fusion-story'`);
 t('імпортовано онтологію 1.0: 118 типів, 39 зв\'язків, активна, system:ontology-import (№1)', v1rows.length === 1 && v1rows[0].status === 'active' && Number(v1rows[0].n) === 118 && Number(v1rows[0].r) === 39 && v1rows[0].created_by === 'system:ontology-import', JSON.stringify(v1rows[0]));
 t('журнал сервера: імпорт і активна версія', /імпортовано Fusion Story Ontology 1\.0/.test(log.join('')) && /активна версія — fusion-story@1/.test(log.join('')));
 const g1 = await api('GET', '/api/core/ontology', undefined, WRITER);
@@ -282,7 +282,7 @@ try {
   // ── (6) відкат ─────────────────────────────────────────────────────────────
   console.log('\n(6) Відкат:');
   await q(`INSERT INTO fusion_core.entities (project_id, type, name, created_by, status) VALUES ('onto-live', 'prophecy', 'Пророцтво Сивіли', 'user:u-onto', 'confirmed')`);
-  const v1id = (await q(`SELECT id FROM fusion_core.ontology_versions WHERE version = 1`))[0].id;
+  const v1id = (await q(`SELECT id FROM fusion_core.ontology_versions WHERE ontology_id = 'fusion-story' AND version = 1`))[0].id;
   const rb1 = await api('POST', `/api/core/ontology/versions/${v1id}/rollback`);
   t('відкат до 1 — 409: у книзі вже є сутність prophecy (її тип зник би)', rb1.status === 409 && /prophecy/.test(rb1.body.error) && !!rb1.body.details?.draftId, rb1.body.error);
   t('…чернетку відкату лишено з блокерами; відкидаємо', (await api('POST', `/api/core/ontology/versions/${rb1.body.details?.draftId}/archive`)).body.version?.status === 'archived');
@@ -296,13 +296,13 @@ try {
   await openEditor();
   t('редактор: prophecy червоний', (await marks()).some((x) => x.slug === 'prophecy' && x.color === rgb(textColorOnWhite('#B91C1C'))));
   const rb2 = await api('POST', `/api/core/ontology/versions/${v2id}/rollback`);
-  const hashes = await q(`SELECT version, definition_hash, status FROM fusion_core.ontology_versions ORDER BY version`);
+  const hashes = await q(`SELECT version, definition_hash, status FROM fusion_core.ontology_versions WHERE ontology_id = 'fusion-story' ORDER BY version`);
   const h2 = hashes.find((h: any) => Number(h.version) === 2)?.definition_hash;
   t('відкат до 2 — НОВА активна версія з визначенням 2 (№4)', rb2.status === 200 && rb2.body.version.definitionHash === h2 && rb2.body.version.version > 3, `${rb2.status} v${rb2.body.version?.version}`);
   t('у базі одна активна; опубліковані версії не змінились', hashes.filter((h: any) => h.status === 'active').length === 1, hashes.map((h: any) => `${h.version}:${h.status}`).join(' '));
   await openEditor();
   t('редактор: prophecy знову фіолетовий', (await marks()).some((x) => x.slug === 'prophecy' && x.color === rgb(textColorOnWhite('#7C3AED'))));
-  const trig = await q(`UPDATE fusion_core.ontology_versions SET definition = '{"x":1}'::jsonb WHERE version = 2`).then(() => false, () => true);
+  const trig = await q(`UPDATE fusion_core.ontology_versions SET definition = '{"x":1}'::jsonb WHERE ontology_id = 'fusion-story' AND version = 2`).then(() => false, () => true);
   t('опубліковане визначення не змінити навіть SQL-ем', trig);
 
   // ── (7) журнал ─────────────────────────────────────────────────────────────

@@ -122,6 +122,7 @@
     "live:interview-criteria": "tsx scripts/live-interviewCriteria.mts",
     "live:quality-admin": "tsx scripts/live-qualityAdmin.mts",
     "live:ontology": "tsx scripts/live-ontology.mts",
+    "live:collab-roles": "tsx scripts/live-collabRoles.mts",
     "core:migrate": "tsx scripts/core-migrate.mts",
     "test:paragraph-ids": "tsx scripts/test-paragraphIds.mts",
     "live:paragraph-ids": "tsx scripts/live-paragraphIds.mts",

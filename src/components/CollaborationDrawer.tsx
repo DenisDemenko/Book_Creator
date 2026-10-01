@@ -394,6 +394,7 @@ export const CollaborationDrawer: React.FC<CollaborationDrawerProps> = ({
           {canManageInvites && (
             <button
               onClick={() => setActiveView('invite')}
+              data-collab-tab="invite"
               className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
                 activeView === 'invite'
                   ? 'bg-amber-500 text-slate-950 shadow-md'

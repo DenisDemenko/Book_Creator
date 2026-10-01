@@ -83,6 +83,12 @@ async function suite(label: string, repo: CoreRepository, makeJobStore: () => Jo
   const r1 = await syncBookToCore(repo, stored(book));
   t('книгу не змінено ні на байт', JSON.stringify(book) === snapshot);
   t('проєкт і власник', (await repo.getProject(P))?.ownerId === 'author-1' && (await repo.getMemberRole(P, 'author-1')) === 'owner');
+  {
+    // Т6.1: власник — учасник проєкту з ролями з реєстру ролей.
+    const own = await repo.getParticipant(P, 'author-1');
+    const roles = own ? (await repo.listParticipantRoles({ participantId: own.id, status: 'active' })).map((r) => r.roleId).sort().join() : '';
+    t('власник — учасник проєкту: project_owner + author, джерело — власник', own?.source === 'owner' && roles === 'author,project_owner', roles);
+  }
   const docs = await repo.listDocuments(P);
   t('глави й розділи — документи', docs.length === 5 && docs.find((d) => d.id === 's-2')?.parentId === 'ch-1', docs.map((d) => d.id).join());
   const s1 = await repo.listParagraphs(P, 's-1');
