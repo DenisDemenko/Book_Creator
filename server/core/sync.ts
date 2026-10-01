@@ -15,6 +15,7 @@
  * розділі), воно лагодить у себе детерміновано — однаково на кожному прогоні.
  */
 
+import { ensureOwnerParticipant } from './collaboration/participants';
 import {
   entityBySlug,
   parseEntityTagsInSource,
@@ -175,6 +176,12 @@ export async function syncBookToCore(
   if ((await repo.getMemberRole(projectId, stored.ownerId)) !== 'owner') {
     await repo.setMember(projectId, stored.ownerId, 'owner');
     wrote();
+  }
+  // Т6.1: власник — учасник проєкту з ролями з реєстру ролей. Збій участі синхронізацію тексту не зупиняє.
+  try {
+    if (await ensureOwnerParticipant(repo, projectId, stored.ownerId)) wrote();
+  } catch (err) {
+    console.warn(`[core-sync] учасника-власника не записано (${projectId}):`, (err as Error).message);
   }
 
   // Сутності за псевдонімом — кеш на прогін, щоб тег, що повторюється, не

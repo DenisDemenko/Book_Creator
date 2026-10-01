@@ -13,6 +13,7 @@
  * власнику й адміністратору, `project` — усім учасникам.
  */
 
+import { studioRoleFor } from '../../src/utils/collabOntology';
 import type { Express, NextFunction, Request, RequestHandler, Response } from 'express';
 import { isValidBookId, type RealtimeAccessDeps } from '../realtimeAuth';
 import { CoreRuleError } from './rules';
@@ -95,7 +96,7 @@ export async function resolveProjectAccess(
   if (principal.role === 'admin') return { projectId, userId, role: 'admin', isOwner: false, canWrite: true };
   if (owner) {
     const invite = (await deps.listAcceptedInvites(projectId)).find((inv) => inv.acceptedUserId === userId);
-    if (invite) return { projectId, userId, role: invite.role, isOwner: false, canWrite: invite.role !== 'reader' };
+    if (invite) return { projectId, userId, role: invite.role, isOwner: false, canWrite: (studioRoleFor(invite.role) ?? 'reader') !== 'reader' };
   }
   return null;
 }
@@ -224,7 +225,7 @@ export function requireProjectAccess(deps: Pick<ProjectRoutesDeps, 'access'>) {
  * читач бачать граф, але не змінюють його.
  */
 export function canEditStory(access: ProjectAccess): boolean {
-  return access.isOwner || access.role === 'admin' || access.role === 'coauthor' || access.role === 'editor';
+  return access.isOwner || access.role === 'admin' || access.role === 'coauthor' || access.role === 'co_author' || access.role === 'editor';
 }
 
 function visibleTo(access: ProjectAccess) {

@@ -11,8 +11,8 @@ CREATE TABLE project_participants (
   project_id  text NOT NULL CHECK (length(project_id) BETWEEN 1 AND 200),
   user_id     text NOT NULL CHECK (length(user_id) BETWEEN 1 AND 200),
   status      text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'left')),
-  -- Звідки участь: власник книги, запрошення, запит доступу, замовлення біржі, адмін, перенесено, онбординг.
-  source      text NOT NULL CHECK (source IN ('owner', 'invitation', 'access_request', 'freelance_order', 'admin', 'legacy_member', 'onboarding')),
+  -- Звідки участь: власник книги, запрошення, запит доступу, замовлення біржі, адмін, власник додав вручну, перенесено, онбординг.
+  source      text NOT NULL CHECK (source IN ('owner', 'invitation', 'access_request', 'freelance_order', 'admin', 'manual', 'legacy_member', 'onboarding')),
   source_ref  text CHECK (source_ref IS NULL OR length(source_ref) <= 200),
   created_by  text NOT NULL CHECK (created_by ~ '^(user|system):.+'),
   created_at  timestamptz NOT NULL DEFAULT now(),

@@ -36,8 +36,18 @@ import {
 } from '../types';
 import { getRoleInfo } from '../utils/rbac';
 import { useLanguage } from '../i18n/LanguageContext';
+import { activeCollabOntology, invitableRoles as bundledInvitableRoles, roleById as bundledRoleById } from '../utils/collabOntology';
 
-type CoworkInviteRole = 'designer' | 'publisher' | 'translator' | 'reader';
+/** id ролі з реєстру ролей (Т6.1) або старе значення (`reader`). */
+type CoworkInviteRole = string;
+
+/** Роль, яку можна запросити, — з реєстру ролей (`GET /api/collaboration/roles`). */
+interface InvitableRole {
+  id: string;
+  label: { uk: string; en: string };
+  description: { uk: string; en: string } | null;
+  category: string;
+}
 
 interface CoworkInvite {
   id: string;
@@ -45,6 +55,8 @@ interface CoworkInvite {
   bookTitle: string;
   inviteeEmail: string;
   role: CoworkInviteRole;
+  roleId?: string;
+  roleLabel?: { uk: string; en: string } | null;
   status: 'pending' | 'accepted' | 'revoked';
   emailSent: boolean;
   createdAt: string;
@@ -103,12 +115,30 @@ export const CollaborationDrawer: React.FC<CollaborationDrawerProps> = ({
   const [inviteNotice, setInviteNotice] = useState<{ kind: 'success' | 'error'; text: string; link?: string } | null>(null);
   const [copiedInviteId, setCopiedInviteId] = useState<string | null>(null);
 
-  const roleLabels: Record<CoworkInviteRole, string> = {
-    designer: t('collaborationDrawer.coworkRoleDesigner'),
-    publisher: t('collaborationDrawer.coworkRolePublisher'),
-    translator: t('collaborationDrawer.coworkRoleTranslator'),
-    reader: t('collaborationDrawer.coworkRoleReader'),
-  };
+  // Ролі запрошення — з реєстру ролей на сервері; без мережі — вбудований реєстр 1.0.
+  const [invitable, setInvitable] = useState<InvitableRole[]>(() =>
+    bundledInvitableRoles().map((r) => ({ id: r.id, label: r.label, description: r.description ?? null, category: r.category })),
+  );
+  const [roleCategories, setRoleCategories] = useState<{ id: string; name: { uk: string; en: string } }[]>(() => activeCollabOntology().roleCategories);
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    fetch('/api/collaboration/roles', { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data?.invitable?.length) return;
+        setInvitable(data.invitable);
+        if (Array.isArray(data.categories)) setRoleCategories(data.categories);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+  const pickLabel = (l: { uk: string; en: string } | null | undefined, fallback: string) => (l ? (lang === 'en' ? l.en : l.uk) : fallback);
+  const roleLabel = (inv: { role: string; roleLabel?: { uk: string; en: string } | null }) =>
+    pickLabel(inv.roleLabel ?? invitable.find((r) => r.id === inv.role)?.label ?? bundledRoleById(inv.role)?.label, inv.role);
+  const selectedRole = invitable.find((r) => r.id === inviteRole);
 
   const loadInvites = useCallback(async () => {
     if (!book.id || !canManageInvites) return;
@@ -447,22 +477,30 @@ export const CollaborationDrawer: React.FC<CollaborationDrawerProps> = ({
                   placeholder={t('collaborationDrawer.coworkEmailPlaceholder')}
                   className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-amber-400 focus:ring-1 focus:ring-amber-400"
                 />
-                <div className="flex items-center gap-1.5">
-                  {(['designer', 'publisher', 'translator', 'reader'] as const).map((r) => (
-                    <button
-                      key={r}
-                      type="button"
-                      onClick={() => setInviteRole(r)}
-                      className={`flex-1 px-2 py-1.5 rounded-lg text-[11px] font-bold border transition-all ${
-                        inviteRole === r
-                          ? 'bg-amber-500 border-amber-400 text-slate-950'
-                          : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500'
-                      }`}
-                    >
-                      {roleLabels[r]}
-                    </button>
-                  ))}
-                </div>
+                <label className="block text-[11px] text-slate-400">
+                  {lang === 'en' ? 'Role in the project' : 'Роль у проєкті'}
+                  <select
+                    value={inviteRole}
+                    onChange={(e) => setInviteRole(e.target.value)}
+                    data-invite-role
+                    className="mt-1 w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-hidden focus:border-amber-400"
+                  >
+                    {roleCategories
+                      .filter((c) => invitable.some((r) => r.category === c.id))
+                      .map((c) => (
+                        <optgroup key={c.id} label={pickLabel(c.name, c.id)}>
+                          {invitable
+                            .filter((r) => r.category === c.id)
+                            .map((r) => (
+                              <option key={r.id} value={r.id} data-invite-role-option={r.id}>
+                                {pickLabel(r.label, r.id)}
+                              </option>
+                            ))}
+                        </optgroup>
+                      ))}
+                  </select>
+                </label>
+                {selectedRole?.description && <p className="text-[10px] text-slate-500 leading-snug" data-invite-role-description>{pickLabel(selectedRole.description, '')}</p>}
                 <button
                   type="submit"
                   disabled={inviteSending}
@@ -518,7 +556,7 @@ export const CollaborationDrawer: React.FC<CollaborationDrawerProps> = ({
                         <div className="text-xs font-bold text-slate-200 truncate">{inv.inviteeEmail}</div>
                         <div className="flex items-center gap-1.5 mt-0.5">
                           <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-slate-800 text-amber-300 border border-slate-700">
-                            {roleLabels[inv.role]}
+                            {roleLabel(inv)}
                           </span>
                           <span
                             className={`px-1.5 py-0.2 rounded text-[10px] font-bold border ${

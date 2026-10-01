@@ -977,7 +977,7 @@ export interface OntologyUsage {
 
 export const PARTICIPANT_STATUSES = ['active', 'suspended', 'left'] as const;
 export type ParticipantStatus = (typeof PARTICIPANT_STATUSES)[number];
-export const PARTICIPANT_SOURCES = ['owner', 'invitation', 'access_request', 'freelance_order', 'admin', 'legacy_member', 'onboarding'] as const;
+export const PARTICIPANT_SOURCES = ['owner', 'invitation', 'access_request', 'freelance_order', 'admin', 'manual', 'legacy_member', 'onboarding'] as const;
 export type ParticipantSource = (typeof PARTICIPANT_SOURCES)[number];
 
 export interface ParticipantRow {

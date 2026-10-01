@@ -203,6 +203,7 @@ import { AI_MENTIONS_JOB_KIND, aiMentionsJobKind } from './server/core/ai/mentio
 import { aiRoleGenerateViaCore, loadCoreAiRoleTemplate } from './server/core/ai/generate';
 import { registerQualityRoutes } from './server/core/quality/qualityRoutes';
 import { registerOntologyRoutes } from './server/core/ontology/routes';
+import { registerParticipantRoutes } from './server/core/collaboration/routes';
 import { realQualityDeps } from './server/core/quality/realDeps';
 import { CORE_EMBED_KIND, coreEmbedJobKind, scheduleCoreEmbed } from './server/core/search/embedJob';
 import { AI_PROFILE_JOB_KIND, aiProfileJobKind, studioFromBook } from './server/core/characterProfile';
@@ -577,6 +578,8 @@ registerGitCommandRoutes(app);
   registerOntologyRoutes(app, { repo: getCoreRepository, requireAuth, requireAdmin });
   // Онтологія співпраці й реєстр ролей (Т6.1) — той самий життєвий цикл, окрема адреса.
   registerOntologyRoutes(app, { repo: getCoreRepository, requireAuth, requireAdmin }, { ontologyId: 'fusion-collab', base: '/api/core/collaboration/ontology' });
+  // Учасники проєкту й ролі з реєстру ролей (Т6.1) — до маршрутів проєкту, щоб їхні адреси не перехопив загальний обробник.
+  registerParticipantRoutes(app, { repo: getCoreRepository, access: realtimeAccessDeps });
   registerProjectRoutes(app, {
     access: realtimeAccessDeps,
     repo: getCoreRepository,

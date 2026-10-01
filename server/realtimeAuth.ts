@@ -27,6 +27,7 @@
  *   • Гість без сесії — не підключається.
  * Роль і право писати визначає сервер: учасник із роллю `reader` лише читає.
  */
+import { studioRoleFor } from '../src/utils/collabOntology';
 import crypto from 'node:crypto';
 
 export interface RealtimeAccess {
@@ -87,7 +88,8 @@ export async function resolveRealtimeAccess(
         bookId,
         userId,
         role: mine.role,
-        canWrite: mine.role !== 'reader',
+        // Пише той, чия роль із реєстру (Т6.1) веде не в простір читача; старе `reader` — читач.
+        canWrite: (studioRoleFor(mine.role) ?? 'reader') !== 'reader',
         shared: true,
       };
     }

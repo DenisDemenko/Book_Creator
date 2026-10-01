@@ -82,7 +82,8 @@ export interface StoredCollabInvite {
   bookTitle: string;
   inviterUserId: string;
   inviteeEmail: string;
-  role: 'designer' | 'publisher' | 'translator' | 'reader';
+  /** id ролі з реєстру ролей (Т6.1) або старе значення (`reader`). */
+  role: string;
   token: string;
   status: 'pending' | 'accepted' | 'revoked';
   emailSent: boolean;

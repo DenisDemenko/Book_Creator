@@ -94,6 +94,8 @@ export interface RoleDefinition {
   /** Старі значення, що відповідають цій ролі: запрошення (`reader`), `project_members` (`coauthor`). */
   legacyIds: string[];
   order: number;
+  /** Що робить людина в цій ролі — для листа-запрошення й вибору ролі. */
+  description?: LocalizedName;
 }
 
 export interface CollabOntologyDefinition {
@@ -251,24 +253,24 @@ const ROLE_ROWS: RoleRow[] = [
   ['literary_critic', 'Literary Critic', 'Літературний критик', 'editorial', 'reviewer', 'view comment review'],
   ['fact_checker', 'Fact Checker', 'Фактчекер', 'editorial', 'reviewer', 'view comment review propose'],
   ['reviewer', 'Reviewer', 'Рецензент', 'editorial', 'reviewer', 'view comment review'],
-  ['beta_reader', 'Beta Reader', 'Читач (бета-рідер)', 'editorial', 'reviewer', 'view comment', { invitable: true, legacyIds: ['reader'] }],
-  ['designer', 'Designer', 'Дизайнер', 'visual_creative', 'designer', 'view comment create upload propose', { invitable: true, projectTypes: ALL_TYPES }],
-  ['book_designer', 'Book Designer', 'Дизайнер книги', 'visual_creative', 'designer', 'view comment create upload propose', { invitable: true }],
-  ['illustrator', 'Illustrator', 'Ілюстратор', 'visual_creative', 'illustrator', 'view comment create upload propose', { invitable: true, projectTypes: [...BOOKISH, 'illustration_project'] }],
-  ['cover_designer', 'Cover Designer', 'Дизайнер обкладинки', 'visual_creative', 'designer', 'view comment create upload propose', { invitable: true }],
-  ['layout_designer', 'Layout Designer', 'Верстальник', 'visual_creative', 'designer', 'view comment create upload propose', { invitable: true }],
-  ['photographer', 'Photographer', 'Фотограф', 'visual_creative', 'illustrator', 'view comment upload propose', { invitable: true, projectTypes: ALL_TYPES }],
-  ['video_creator', 'Video Creator', 'Автор відео', 'visual_creative', 'illustrator', 'view comment create upload propose', { invitable: true, projectTypes: ALL_TYPES }],
-  ['animator', 'Animator', 'Аніматор', 'visual_creative', 'illustrator', 'view comment create upload propose', { invitable: true, projectTypes: ALL_TYPES }],
-  ['translator', 'Translator', 'Перекладач', 'language', 'translator', 'view comment create edit propose', { invitable: true }],
-  ['localization_specialist', 'Localization Specialist', 'Спеціаліст з локалізації', 'language', 'translator', 'view comment edit propose', { invitable: true }],
+  ['beta_reader', 'Beta Reader', 'Читач (бета-рідер)', 'editorial', 'reviewer', 'view comment', { invitable: true, legacyIds: ['reader'], description: n('Reads the manuscript and gives the author feedback (beta reading), without editing rights.', 'Читання рукопису та відгуки для автора (бета-рідинг), без права редагування.') }],
+  ['designer', 'Designer', 'Дизайнер', 'visual_creative', 'designer', 'view comment create upload propose', { invitable: true, projectTypes: ALL_TYPES, description: n("Book cover, illustrations, Visual Bible and the edition's media library.", 'Обкладинка книги, ілюстрації, Visual Bible та медіатека видання.') }],
+  ['book_designer', 'Book Designer', 'Дизайнер книги', 'visual_creative', 'designer', 'view comment create upload propose', { invitable: true, description: n('Book design: layout look, typography and visual consistency of the edition.', 'Дизайн книги: вигляд верстки, типографіка й цілісність видання.') }],
+  ['illustrator', 'Illustrator', 'Ілюстратор', 'visual_creative', 'illustrator', 'view comment create upload propose', { invitable: true, projectTypes: [...BOOKISH, 'illustration_project'], description: n('Illustrations of scenes, characters and places from the book.', 'Ілюстрації сцен, персонажів і місць книги.') }],
+  ['cover_designer', 'Cover Designer', 'Дизайнер обкладинки', 'visual_creative', 'designer', 'view comment create upload propose', { invitable: true, description: n('The book cover for print and the storefront.', 'Обкладинка книги для друку й вітрини.') }],
+  ['layout_designer', 'Layout Designer', 'Верстальник', 'visual_creative', 'designer', 'view comment create upload propose', { invitable: true, description: n('Layout of the print edition to printing standards.', 'Верстка друкованої редакції за поліграфічними стандартами.') }],
+  ['photographer', 'Photographer', 'Фотограф', 'visual_creative', 'illustrator', 'view comment upload propose', { invitable: true, projectTypes: ALL_TYPES, description: n('Photos for the book, the cover and promotion.', 'Фото для книги, обкладинки й просування.') }],
+  ['video_creator', 'Video Creator', 'Автор відео', 'visual_creative', 'illustrator', 'view comment create upload propose', { invitable: true, projectTypes: ALL_TYPES, description: n('Video about the book: trailer, reels, presentations.', 'Відео про книгу: трейлер, ролики, презентації.') }],
+  ['animator', 'Animator', 'Аніматор', 'visual_creative', 'illustrator', 'view comment create upload propose', { invitable: true, projectTypes: ALL_TYPES, description: n('Animation for the book and its promotion.', 'Анімація для книги та її просування.') }],
+  ['translator', 'Translator', 'Перекладач', 'language', 'translator', 'view comment create edit propose', { invitable: true, description: n('Translating the book into English (English Edition) in bilingual mode.', 'Переклад книги англійською (English Edition) у двомовному режимі.') }],
+  ['localization_specialist', 'Localization Specialist', 'Спеціаліст з локалізації', 'language', 'translator', 'view comment edit propose', { invitable: true, description: n('Adapting the book for another language and market.', 'Адаптація книги до іншої мови й ринку.') }],
   ['project_owner', 'Project Owner', 'Власник проєкту', 'management_commercial', 'author', 'view comment create edit upload review propose approve publish manage', { singleHolder: true, legacyIds: ['owner'], projectTypes: ALL_TYPES }],
   ['project_manager', 'Project Manager', 'Менеджер проєкту', 'management_commercial', 'manager', 'view comment review manage', { projectTypes: ALL_TYPES }],
-  ['book_manager', 'Book Manager', 'Менеджер книги', 'management_commercial', 'manager', 'view comment publish manage', { invitable: true, projectTypes: ['book'] }],
+  ['book_manager', 'Book Manager', 'Менеджер книги', 'management_commercial', 'manager', 'view comment publish manage', { invitable: true, projectTypes: ['book'], description: n('Publication, storefront listings and coordination of the book.', 'Публікація, картки вітрини й координація книги.') }],
   ['course_manager', 'Course Manager', 'Менеджер курсу', 'management_commercial', 'manager', 'view comment publish manage', { projectTypes: ['course', 'educational_program'] }],
-  ['sales_manager', 'Sales Manager', 'Менеджер з продажу', 'management_commercial', 'manager', 'view comment publish', { invitable: true }],
-  ['marketing_manager', 'Marketing Manager', 'Маркетинговий менеджер', 'management_commercial', 'manager', 'view comment create upload', { invitable: true }],
-  ['publisher', 'Publisher', 'Видавець', 'management_commercial', 'manager', 'view comment review approve publish', { invitable: true }],
+  ['sales_manager', 'Sales Manager', 'Менеджер з продажу', 'management_commercial', 'manager', 'view comment publish', { invitable: true, description: n('Sales of the book: prices, channels, listings.', 'Продажі книги: ціни, канали, картки товару.') }],
+  ['marketing_manager', 'Marketing Manager', 'Маркетинговий менеджер', 'management_commercial', 'manager', 'view comment create upload', { invitable: true, description: n('Marketing of the book: descriptions, promo texts, materials.', 'Маркетинг книги: описи, рекламні тексти, матеріали.') }],
+  ['publisher', 'Publisher', 'Видавець', 'management_commercial', 'manager', 'view comment review approve publish', { invitable: true, description: n('Layout, print standards, Amazon KDP audit and print-run export.', 'Верстка, поліграфічні стандарти, аудит Amazon KDP і експорт тиражу.') }],
   ['developer', 'Developer', 'Програміст / розробник', 'technical', 'developer', 'view comment create upload', { projectTypes: ALL_TYPES }],
   ['web_developer', 'Web Developer', 'Веброзробник', 'technical', 'developer', 'view comment create upload', { projectTypes: ALL_TYPES }],
   ['ai_specialist', 'AI Specialist', 'Спеціаліст із ШІ', 'technical', 'developer', 'view comment create', { projectTypes: ALL_TYPES }],
@@ -425,6 +427,7 @@ export function validateCollabOntology(def: CollabOntologyDefinition, ctx: Colla
     if (!Array.isArray(r.suggestedCapabilities)) err('bad_capabilities', `${path}.suggestedCapabilities`, 'Можливості — масив');
     else for (const c of r.suggestedCapabilities) if (!caps.has(c)) err('unknown_capability', `${path}.suggestedCapabilities`, `Можливості «${c}» немає`);
     if (!nonEmpty(r.aiProfile)) err('bad_ai_profile', `${path}.aiProfile`, 'Немає AI-профілю');
+    if (r.description !== undefined) names(r.description, `${path}.description`);
     if (!['active', 'deprecated'].includes(r.status)) err('bad_status', `${path}.status`, `Невідомий статус «${r.status}»`);
     if (r.requiresSpecialization && (!Array.isArray(r.specializations) || !r.specializations.length)) err('no_specializations', `${path}.specializations`, 'Роль вимагає спеціалізації, але дозволених немає');
     for (const s of r.specializations ?? []) {
@@ -456,7 +459,7 @@ export interface CollabDiff {
   changed: boolean;
 }
 
-const ROLE_FIELDS: (keyof RoleDefinition)[] = ['label', 'category', 'projectTypes', 'defaultWorkspace', 'suggestedCapabilities', 'aiProfile', 'status', 'requiresSpecialization', 'specializations', 'singleHolder', 'combinable', 'invitable', 'legacyIds', 'order'];
+const ROLE_FIELDS: (keyof RoleDefinition)[] = ['label', 'category', 'projectTypes', 'defaultWorkspace', 'suggestedCapabilities', 'aiProfile', 'status', 'requiresSpecialization', 'specializations', 'singleHolder', 'combinable', 'invitable', 'legacyIds', 'order', 'description'];
 
 export function diffCollabOntologies(before: CollabOntologyDefinition, after: CollabOntologyDefinition): CollabDiff {
   const map = <T extends { id: string }>(l: T[]) => new Map(l.map((x) => [x.id, x]));

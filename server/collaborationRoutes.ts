@@ -28,26 +28,25 @@ import {
   type StoredCollabInvite,
 } from './store';
 import { sendMail } from './mail';
+import { invitableRoles, roleById, studioRoleFor, activeCollabLabel, activeCollabOntology, type RoleDefinition } from '../src/utils/collabOntology';
+import { getCoreRepository } from './core';
+import { assignRole } from './core/collaboration/participants';
 
-const INVITE_ROLES: StoredCollabInvite['role'][] = ['designer', 'publisher', 'translator', 'reader'];
+/**
+ * Ролі запрошення — з реєстру ролей (онтологія співпраці, Т6.1; рішення
+ * власника: наявні ролі — на реєстр). Запросити можна активну роль із
+ * позначкою `invitable`; старі значення (`reader`) зводяться до id реєстру
+ * (`beta_reader`). Назва й опис у листі — з реєстру, а не з коду.
+ */
+function inviteRole(role: unknown): RoleDefinition | null {
+  const r = typeof role === 'string' ? roleById(role) : undefined;
+  return r && r.invitable && r.status === 'active' ? r : null;
+}
 
-const ROLE_NAMES_UK: Record<StoredCollabInvite['role'], string> = {
-  designer: 'Дизайнер',
-  publisher: 'Видавець',
-  translator: 'Перекладач',
-  reader: 'Читач (бета-рідер)',
-};
-
-/** Короткий опис того, чим займатиметься запрошений у своїй ролі (лист-запрошення). */
-const ROLE_BLURBS_UK: Record<StoredCollabInvite['role'], string> = {
-  designer: 'Обкладинка книги, ілюстрації, Visual Bible та медіатека видання.',
-  publisher: 'Верстка, поліграфічні стандарти, аудит Amazon KDP і експорт тиражу.',
-  translator: 'Переклад книги англійською (English Edition) у двомовному режимі.',
-  reader: 'Читання рукопису та відгуки для автора (бета-рідинг), без права редагування.',
-};
-
-function isValidRole(role: unknown): role is StoredCollabInvite['role'] {
-  return typeof role === 'string' && (INVITE_ROLES as string[]).includes(role);
+/** Як роль запрошення бачить клієнт: простір Студії (designer / publisher / translator / reader) + id і назва з реєстру. */
+function inviteRoleView(role: string): { role: string; roleId: string; roleLabel: { uk: string; en: string } | null } {
+  const def = roleById(role);
+  return { role: studioRoleFor(role) ?? 'reader', roleId: def?.id ?? role, roleLabel: def?.label ?? null };
 }
 
 function isValidEmail(email: unknown): email is string {
@@ -206,8 +205,9 @@ export function registerCollaborationRoutes(app: Express): void {
       if (!isValidEmail(email)) {
         return res.status(400).json({ error: 'Вкажіть коректну електронну пошту запрошуваного.' });
       }
-      if (!isValidRole(role)) {
-        return res.status(400).json({ error: 'Роль запрошення має бути designer, publisher, translator або reader.' });
+      const roleDef = inviteRole(role);
+      if (!roleDef) {
+        return res.status(400).json({ error: `Цю роль не можна запросити. Доступні: ${invitableRoles().map((r) => r.label.uk).join(', ')}.` });
       }
 
       const principal = req.principal!;
@@ -221,7 +221,7 @@ export function registerCollaborationRoutes(app: Express): void {
         bookTitle: typeof bookTitle === 'string' && bookTitle.trim() ? bookTitle.trim() : 'Без назви',
         inviterUserId: principal.id || 'admin',
         inviteeEmail: String(email).trim().toLowerCase(),
-        role,
+        role: roleDef.id,
         token,
         status: 'pending',
         emailSent: false,
@@ -231,9 +231,9 @@ export function registerCollaborationRoutes(app: Express): void {
       const inviteLink = `${appBaseUrl(req)}/?invite=${token}`;
       const mailResult = await sendMail({
         to: invite.inviteeEmail,
-        subject: `Запрошення до книги «${invite.bookTitle}» — роль: ${ROLE_NAMES_UK[role]}`,
-        html: inviteEmailHtml(invite.bookTitle, ROLE_NAMES_UK[role], ROLE_BLURBS_UK[role], principal.name || 'Автор', invite.inviteeEmail, inviteLink),
-        text: inviteEmailText(invite.bookTitle, ROLE_NAMES_UK[role], ROLE_BLURBS_UK[role], principal.name || 'Автор', invite.inviteeEmail, inviteLink),
+        subject: `Запрошення до книги «${invite.bookTitle}» — роль: ${roleDef.label.uk}`,
+        html: inviteEmailHtml(invite.bookTitle, roleDef.label.uk, roleDef.description?.uk ?? '', principal.name || 'Автор', invite.inviteeEmail, inviteLink),
+        text: inviteEmailText(invite.bookTitle, roleDef.label.uk, roleDef.description?.uk ?? '', principal.name || 'Автор', invite.inviteeEmail, inviteLink),
       });
       invite.emailSent = mailResult.ok;
 
@@ -251,6 +251,40 @@ export function registerCollaborationRoutes(app: Express): void {
     }
   });
 
+  /**
+   * Реєстр ролей (Т6.1): що можна запросити, усі ролі з категоріями й
+   * довідники — для вікна запрошення й онбордингу (Т6.3). Без ядра —
+   * вбудована версія 1.0.
+   */
+  app.get('/api/collaboration/roles', requireAuth, (_req, res) => {
+    const def = activeCollabOntology();
+    const view = (r: RoleDefinition) => ({
+      id: r.id,
+      label: r.label,
+      description: r.description ?? null,
+      category: r.category,
+      projectTypes: r.projectTypes,
+      workspace: r.defaultWorkspace,
+      studioRole: studioRoleFor(r.id),
+      suggestedCapabilities: r.suggestedCapabilities,
+      requiresSpecialization: r.requiresSpecialization,
+      specializations: r.specializations,
+      singleHolder: r.singleHolder,
+      invitable: r.invitable,
+      deprecated: r.status === 'deprecated',
+    });
+    res.json({
+      registry: activeCollabLabel(),
+      invitable: invitableRoles().map(view),
+      roles: [...def.roles].sort((a, b) => a.order - b.order).map(view),
+      categories: def.roleCategories,
+      projectTypes: def.projectTypes,
+      entryIntents: def.entryIntents,
+      scopeTypes: def.scopeTypes,
+      capabilities: def.capabilities,
+    });
+  });
+
   /** Список запрошень для книги — лише власнику/адміну (панель у CollaborationDrawer). */
   app.get('/api/collaboration/invites', requireAuth, async (req, res) => {
     try {
@@ -266,7 +300,7 @@ export function registerCollaborationRoutes(app: Express): void {
       }
 
       const invites = await listCollabInvitesForBook(bookId);
-      res.json({ invites });
+      res.json({ invites: invites.map((inv) => ({ ...inv, roleId: inviteRoleView(inv.role).roleId, roleLabel: inviteRoleView(inv.role).roleLabel })) });
     } catch (err) {
       console.error('[collaboration] list invites:', err);
       res.status(500).json({ error: 'Не вдалося завантажити список запрошень.' });
@@ -281,7 +315,7 @@ export function registerCollaborationRoutes(app: Express): void {
       res.json({
         bookId: invite.bookId,
         bookTitle: invite.bookTitle,
-        role: invite.role,
+        ...inviteRoleView(invite.role),
         inviteeEmail: invite.inviteeEmail,
         status: invite.status,
       });
@@ -313,7 +347,21 @@ export function registerCollaborationRoutes(app: Express): void {
         acceptedUserId: principal.id || undefined,
       });
 
-      res.json({ ok: true, bookId: invite.bookId, bookTitle: invite.bookTitle, role: invite.role, invite: updated });
+      // Учасник проєкту з роллю з реєстру (Т6.1). Права до книги це не змінює —
+      // їх і далі дає прийняте запрошення (Т6.2 замінить). Без ядра — пропускаємо.
+      let participant: { id: string; roleId: string } | null = null;
+      let participantError: string | null = null;
+      const repo = getCoreRepository();
+      if (repo && principal.id) {
+        try {
+          const r = await assignRole(repo, { projectId: invite.bookId, userId: principal.id, roleId: invite.role, actor: `user:${principal.id}`, source: 'invitation', sourceRef: invite.id });
+          participant = { id: r.participant.id, roleId: r.role.roleId };
+        } catch (err) {
+          participantError = (err as Error).message;
+          console.warn('[collaboration] учасника за запрошенням не записано:', participantError);
+        }
+      }
+      res.json({ ok: true, bookId: invite.bookId, bookTitle: invite.bookTitle, ...inviteRoleView(invite.role), invite: updated, participant, participantError });
     } catch (err) {
       console.error('[collaboration] accept invite:', err);
       res.status(500).json({ error: 'Не вдалося прийняти запрошення.' });

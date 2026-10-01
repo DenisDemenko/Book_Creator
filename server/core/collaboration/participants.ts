@@ -148,3 +148,19 @@ export async function importLegacyMembers(repo: CoreRepository, projectId: strin
   if (imported) await repo.addCollabEvent({ projectId, action: 'legacy_import', actor, details: { imported, skipped: skipped.length } });
   return { imported, skipped };
 }
+
+/**
+ * Власник книги — учасник проєкту з ролями «власник проєкту» й «автор»
+ * (ТЗ v3 §46: «Denis → AUTHOR + OWNER»). Викликається синхронізацією книги
+ * в ядро; повторно нічого не робить. Збій тут синхронізацію не зупиняє.
+ */
+export async function ensureOwnerParticipant(repo: CoreRepository, projectId: string, userId: string, actor: CoreActor = 'system:collab-sync'): Promise<boolean> {
+  const have = await rolesOf(repo, projectId, userId);
+  let wrote = false;
+  for (const roleId of ['project_owner', 'author']) {
+    if (have.includes(roleId)) continue;
+    const r = await assignRole(repo, { projectId, userId, roleId, actor, source: 'owner' });
+    wrote = wrote || r.created;
+  }
+  return wrote;
+}
