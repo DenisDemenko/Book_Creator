@@ -130,6 +130,7 @@
     "live:story-core": "tsx scripts/live-storyCore.mts",
     "live:role-onboarding": "tsx scripts/live-roleOnboarding.mts",
     "live:role-studio": "tsx scripts/live-roleStudio.mts",
+    "live:workflow-runs": "tsx scripts/live-workflowRuns.mts",
     "core:migrate": "tsx scripts/core-migrate.mts",
     "test:paragraph-ids": "tsx scripts/test-paragraphIds.mts",
     "live:paragraph-ids": "tsx scripts/live-paragraphIds.mts",

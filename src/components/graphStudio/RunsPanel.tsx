@@ -320,7 +320,7 @@ export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) =
                         <td className="px-2 py-1.5 text-slate-500">{s.seq}</td>
                         <td className="px-2 py-1.5"><span className="font-semibold text-slate-100">{labelOf(s.nodeId)}</span> <span className="font-mono text-[10px] text-slate-500">{s.nodeType}</span></td>
                         <td className={`px-2 py-1.5 font-bold ${STEP_CLS[s.status]}`}>{s.status}</td>
-                        <td className="px-2 py-1.5 text-slate-300">{[s.decision, s.validationResult, s.branch && s.branch !== s.decision ? `→ ${s.branch}` : null].filter(Boolean).join(' · ') || '—'}</td>
+                        <td className="px-2 py-1.5 text-slate-300">{[s.decision, s.validationResult, s.branch && s.branch !== s.decision && s.branch !== s.validationResult ? `→ ${s.branch}` : null].filter(Boolean).join(' · ') || '—'}</td>
                         <td className="px-2 py-1.5 text-slate-300">{s.confidence == null ? '—' : s.confidence.toFixed(2)}</td>
                         <td className="px-2 py-1.5 font-mono text-[10px] text-slate-300">{s.model ?? '—'}</td>
                         <td className="px-2 py-1.5 text-slate-300">{s.tokensIn || s.tokensOut ? `${s.tokensIn} → ${s.tokensOut}` : '—'}</td>
