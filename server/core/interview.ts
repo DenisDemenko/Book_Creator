@@ -391,55 +391,81 @@ export async function voicePersist(
   return { event, proposals: created.proposals };
 }
 
-async function answerTurn(deps: InterviewDeps, sim: SimulationRow, q: SimulationEventRow, events: SimulationEventRow[], actor: CoreActor): Promise<TurnResult> {
-  const { repo } = deps;
-  const heroId = sim.characterId!;
-  const hero = (await repo.getEntity(sim.projectId, heroId))!;
-  const question = String((q.publicPayload as { text?: unknown }).text ?? '');
-  const turn = q.turnIndex;
-  const early = { sim, hero, q, events, turn, question } as unknown as VoiceTurnContext;
+/** Контекст ходу до рішення Jev (Т5.5 В3: рішення — вузол процесу `character_voice`). */
+export type EarlyTurnContext = Omit<VoiceTurnContext, 'decision' | 'sceneDecision'>;
 
-  // 1. Рішення Jev на цей хід (стратегічне й сценічне — з кешу).
+export type TurnDecision =
+  | { status: 'decided'; decision: CharacterDecisionRow; sceneDecision: CharacterDecisionRow | null; chain: { level: string; id: string; reused: boolean }[] }
+  | { status: 'awaiting' | 'failed'; event: SimulationEventRow };
+
+/**
+ * Рішення Jev ходу допиту (Т2.5: стратегічне й сценічне — з кешу, тактичне —
+ * на хід). Обидва — Jev і запасний LLM — не змогли: «чекає автора». Т5.5 В3:
+ * тим самим кроком користуються і старий шлях, і вузол «Пакет рішень Jev»
+ * процесу `character_voice`; `allowedActions` — варіанти вузла.
+ */
+export async function decideTurn(
+  deps: Pick<InterviewDeps, 'repo' | 'jev' | 'fallback' | 'studio'>,
+  early: EarlyTurnContext,
+  actor: CoreActor,
+  allowedActions: string[] = INTERVIEW_ACTIONS,
+): Promise<TurnDecision> {
+  const { repo } = deps;
+  const { sim } = early;
   const engine = new JevDecisionAdapter({ repo, jev: deps.jev, fallback: deps.fallback, studio: deps.studio });
   let decided;
   try {
     decided = await engine.decide({
       projectId: sim.projectId,
-      characterId: heroId,
+      characterId: sim.characterId!,
       level: 'tactical',
       actor,
       asOfChapter: sim.asOfChapter,
       sceneId: sim.sceneId,
-      situation: `Автор питає: «${question}»`,
-      allowedActions: INTERVIEW_ACTIONS,
+      situation: `Автор питає: «${early.question}»`,
+      allowedActions,
       simulationId: sim.id,
-      turnIndex: turn,
+      turnIndex: early.turn,
     });
   } catch (err) {
-    const event = await addTurnEvent(repo, early, 'failed', { stage: 'decision', error: (err as Error).message.slice(0, 500) });
-    return { status: 'failed', turn, question: q, event, proposals: [] };
+    const event = await addTurnEvent(repo, early as VoiceTurnContext, 'failed', { stage: 'decision', error: (err as Error).message.slice(0, 500) });
+    return { status: 'failed', event };
   }
   if (decided.awaitingAuthor) {
     const d = decided.decision;
     const primary = (d.options.primary ?? {}) as { allowed?: string[]; forbidden?: string[] };
-    const event = await addTurnEvent(repo, early, 'awaiting', {
+    const event = await addTurnEvent(repo, early as VoiceTurnContext, 'awaiting', {
       level: decided.blockedAt,
       decisionId: d.id,
       reason: d.fallbackReason ?? (d.validation as { authorReason?: unknown }).authorReason ?? null,
       options: (primary.allowed ?? []).filter((a) => !(primary.forbidden ?? []).includes(a)),
     }, d.id);
-    return { status: 'awaiting', turn, question: q, event, proposals: [] };
+    return { status: 'awaiting', event };
   }
   const scene = decided.chain.find((c) => c.level === 'scene');
-  const ctx: VoiceTurnContext = { ...early, decision: decided.decision, sceneDecision: scene ? await repo.getCharacterDecision(sim.projectId, scene.id) : null };
+  return { status: 'decided', decision: decided.decision, sceneDecision: scene ? await repo.getCharacterDecision(sim.projectId, scene.id) : null, chain: decided.chain };
+}
 
-  // 2–3. Т5.4: є опублікований процес `character_voice` — через рушій LangGraph.
+async function answerTurn(deps: InterviewDeps, sim: SimulationRow, q: SimulationEventRow, events: SimulationEventRow[], actor: CoreActor): Promise<TurnResult> {
+  const { repo } = deps;
+  const hero = (await repo.getEntity(sim.projectId, sim.characterId!))!;
+  const question = String((q.publicPayload as { text?: unknown }).text ?? '');
+  const turn = q.turnIndex;
+  const early: EarlyTurnContext = { sim, hero, q, events, turn, question };
+
+  // Т5.4–Т5.5: є опублікований процес `character_voice` — увесь хід через рушій
+  // LangGraph: рішення Jev (вузол «Пакет рішень Jev»), знімок, голос, перевірка.
   const wf = deps.workflows?.() ?? null;
   if (wf) {
-    const { voiceTurnViaWorkflow } = await import('./workflows/bindings/voice');
-    const res = await voiceTurnViaWorkflow(wf, deps, ctx, actor);
+    const { interviewTurnViaWorkflow } = await import('./workflows/bindings/voice');
+    const res = await interviewTurnViaWorkflow(wf, deps, early, actor);
     if (res) return res;
   }
+
+  // 1. Рішення Jev на цей хід (стратегічне й сценічне — з кешу).
+  const dec = await decideTurn(deps, early, actor);
+  if (dec.status !== 'decided') return { status: dec.status, turn, question: q, event: dec.event, proposals: [] };
+  const ctx: VoiceTurnContext = { ...early, decision: dec.decision, sceneDecision: dec.sceneDecision };
 
   // 2. Знімок героя станом на сцену.
   const built = await voiceSnapshot(deps, ctx);

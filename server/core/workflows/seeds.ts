@@ -11,6 +11,7 @@ import type { CoreActor, CoreRepository } from '../types';
 import type { WorkflowDefinition, WorkflowEdge, WorkflowNode } from '../../../src/utils/workflowGraph';
 import { WORKFLOW_FORMAT } from '../../../src/utils/workflowGraph';
 import { CHARACTER_VOICE_SCHEMA } from '../interviewPrompt';
+import { INTERVIEW_ACTIONS } from '../interview';
 import { createWorkflow, promoteToTest, publishVersion, saveDraft, validateVersion } from './lifecycle';
 
 const SEED_ACTOR: CoreActor = 'system:workflow-seed';
@@ -43,9 +44,26 @@ export function systemWorkflowDefinitions(): WorkflowDefinition[] {
     format: WORKFLOW_FORMAT,
     id: 'character_voice',
     name: { en: 'Character voice (interview)', uk: 'Голос героя (допит)' },
-    description: 'Відповідь героя на допиті після рішення Jev: знімок героя, історія ходів, шаблон «Ядра AI», модель, схема відповіді, відповідь і пропозиції в канон (вирішує автор).',
+    description: 'Хід допиту: рішення Jev (рівні Т2.5 — стратегічний і сценічний з кешу, тактичний на хід; запасний LLM; коли не змогли — вирішує автор), знімок героя, історія ходів, шаблон «Ядра AI», модель, схема відповіді, відповідь і пропозиції в канон (вирішує автор).',
     nodes: [
       { id: 'start', type: 'START', label: 'Question (Питання)', params: {} },
+      // Т5.5 В3 (рішення власника §2 п.4): рішення Jev ходу — вузол процесу.
+      {
+        id: 'decide',
+        type: 'JEV_DECISION_BUNDLE',
+        label: 'Hero decision (Рішення героя, Jev)',
+        params: {
+          question: 'Що зробить герой у відповідь на питання автора: «{{input.question}}»?',
+          questions: [
+            { id: 'next_action', kind: 'choice', question: 'Яку дію з дозволеного списку обере персонаж у цій ситуації, зважаючи лише на наданий стан?', options: [...INTERVIEW_ACTIONS] },
+            { id: 'fear_intensity', kind: 'score', question: 'Наскільки сильний страх персонажа в цій ситуації?', levels: ['спокій, страху немає', 'легке занепокоєння', 'помітний страх, але контроль', 'сильний страх, контроль слабне', 'паніка'] },
+          ],
+          threshold: 0,
+          logging: true,
+          // Jev і запасний LLM не змогли — вирішує автор (гілка review, §16 HUMAN_REVIEW).
+          on_low: 'HUMAN_REVIEW',
+        },
+      },
       { id: 'memory', type: 'MEMORY', label: 'Hero snapshot (Знімок героя)', params: { scope: 'character' } },
       { id: 'context', type: 'CONTEXT', label: 'History & decision (Історія й рішення)', params: { context_policy: 'scene', max_tokens: 8000 } },
       { id: 'prompt', type: 'PROMPT', label: 'Voice template (Шаблон голосу)', params: { template: 'core:coreCharacterVoice' } },
@@ -54,9 +72,11 @@ export function systemWorkflowDefinitions(): WorkflowDefinition[] {
       { id: 'answer', type: 'PROPOSAL', label: 'Answer & proposals (Відповідь і пропозиції)', params: { target: 'text', min_confidence: 0 } },
       { id: 'end', type: 'END', label: 'Answered (Відповів)', params: {} },
       { id: 'end_invalid', type: 'END', label: 'Failed turn (Хід не вдався)', params: {} },
+      { id: 'end_author', type: 'END', label: 'Author decides (Вирішує автор)', params: {} },
+      { id: 'end_no_decision', type: 'END', label: 'No decision (Рішення не ухвалено)', params: {} },
     ],
     edges: [
-      e('start', 'out', 'memory'), e('memory', 'out', 'context'), e('context', 'out', 'prompt'), e('prompt', 'out', 'llm'), e('llm', 'out', 'validate'),
+      e('start', 'out', 'decide'), e('decide', 'out', 'memory'), e('decide', 'review', 'end_author'), e('decide', 'fallback', 'end_no_decision'), e('memory', 'out', 'context'), e('context', 'out', 'prompt'), e('prompt', 'out', 'llm'), e('llm', 'out', 'validate'),
       e('validate', 'valid', 'answer'), e('validate', 'invalid', 'end_invalid'), e('answer', 'out', 'end'),
     ],
   };

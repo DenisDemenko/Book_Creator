@@ -317,6 +317,10 @@ async function turnSuite(label: string, repo: CoreRepository, P: string) {
   if (VIA_WORKFLOWS) {
     const runs = await workflowRunsOf(repo, 'character_voice');
     t('Т5.4: 10 ходів — 10 запусків процесу character_voice (LangGraph)', runs.length === 10 && runs.every((r) => r.status === 'succeeded' && r.trigger === 'interview'), `${runs.length}`);
+    const steps = await repo.listWorkflowSteps(runs[0].id);
+    const decide = steps.find((s) => s.nodeId === 'decide');
+    t('Т5.5: рішення Jev ходу — вузол процесу перед знімком і голосом', steps.map((s) => s.nodeId).join() === 'start,decide,memory,context,prompt,llm,validate,answer,end' && decide?.nodeType === 'JEV_DECISION_BUNDLE' && decide.branch === 'out', steps.map((s) => s.nodeId).join());
+    t('Т5.5: у кроці рішення — дія з дозволених, джерело й рівні (з кешу)', INTERVIEW_ACTIONS.some((a) => decide?.decision?.includes(a)) && (decide?.details as any)?.source === 'jev' && ((decide?.details as any)?.chain ?? []).map((c: any) => `${c.level}:${c.reused}`).join() === 'strategic:true,scene:true', `${decide?.decision} ${JSON.stringify((decide?.details as any)?.chain)} ${(decide?.details as any)?.source}`);
   }
   t('КРИТЕРІЙ FLC 2.0 §7 (3): 10 відповідей поспіль — усі з відповіддю, ходи 1…10', results.every((r, i) => r.status === 'answered' && r.turn === i + 1), results.map((r) => r.status).join(','));
   const last = results[9].event.publicPayload as any;
@@ -366,6 +370,11 @@ async function turnSuite(label: string, repo: CoreRepository, P: string) {
   jevMode = 'low';
   let r = await askQuestion(deps(), { projectId: P, simulationId: sim3.id, question: 'Чому ти мовчиш?', actor });
   t('низька впевненість — «чекає автора» з варіантами, відповіді немає', r.status === 'awaiting' && Array.isArray((r.event.publicPayload as any).options) && (r.event.publicPayload as any).options.length >= 2);
+  if (VIA_WORKFLOWS) {
+    const run = (await workflowRunsOf(repo, 'character_voice')).sort((x, y) => (x.createdAt < y.createdAt ? 1 : -1))[0];
+    const st = await repo.listWorkflowSteps(run.id);
+    t('Т5.5: «чекає автора» — гілка review процесу до «Вирішує автор», без голосу', run.status === 'succeeded' && st.find((s) => s.nodeId === 'decide')?.branch === 'review' && st.at(-1)?.nodeId === 'end_author' && !st.some((s) => s.nodeId === 'llm'), st.map((s) => `${s.nodeId}:${s.branch}`).join());
+  }
   let loops = 0;
   while (r.status === 'awaiting' && loops < 4) {
     const p = r.event.publicPayload as any;
