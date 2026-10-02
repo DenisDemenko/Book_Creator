@@ -107,6 +107,15 @@ const center = async (page: Page, sel: string) => {
   return b ? { x: b.x + b.width / 2, y: b.y + b.height / 2 } : null;
 };
 const WF = 'canon_pipeline';
+// Ядро саме публікує системні процеси (Т5.4: ai1_mentions, ai2_*,
+// character_voice), а редактор відкриває перший за абеткою — тож після
+// перезавантаження процес прогону обираємо явно.
+const openWf = async (page: any) => {
+  await page.waitForSelector(`[data-wf-item="${WF}"]`, { timeout: 20000 }).catch(() => null);
+  await page.evaluate((id: string) => (document.querySelector(`[data-wf-item="${id}"]`) as HTMLElement | null)?.click(), WF);
+  await page.waitForSelector('[data-wf-node="review"]', { timeout: 20000 }).catch(() => null);
+  await sleep(1500);
+};
 const versionsOf = () => q(`SELECT version, environment, definition_hash, revision, definition FROM fusion_core.workflow_versions WHERE workflow_id = $1 ORDER BY version`, [WF]);
 
 try {
@@ -190,7 +199,7 @@ try {
   const pubPage = await openAs('u-pub');
   await pubPage.goto(`${BASE}/admin/graph-studio/workflows`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await pubPage.waitForSelector('[data-wf-env]', { timeout: 40000 }).catch(() => null);
-  await sleep(1500);
+  await openWf(pubPage);
   t('видавець бачить студію без правки: немає палітри й «нового процесу»', !(await pubPage.$('[data-wf-palette]')) && !(await pubPage.$('[data-wf-new]')) && !!(await pubPage.$('[data-wf-action="publish"]')));
   await click(pubPage, '[data-wf-action="publish"]', 2500);
   t('видавець публікує: v1 — робоча', (await pubPage.$eval('[data-wf-env]', (e) => e.getAttribute('data-wf-env'))) === 'production');
@@ -201,7 +210,7 @@ try {
   console.log('\n(4) Розкладка не змінює семантики (№28):');
   await admin.reload({ waitUntil: 'domcontentloaded' });
   await admin.waitForSelector('[data-wf-env]', { timeout: 40000 });
-  await sleep(1500);
+  await openWf(admin);
   const before = (await versionsOf())[0];
   const node = await center(admin, '[data-wf-node="review"]');
   if (node) {
@@ -283,7 +292,7 @@ try {
   child.kill();
   await db.end();
 }
-const serverErrs = log.join('').split('\n').filter((l) => /\bError\b|помилка маршруту|\[workflows\]/i.test(l) && !/SMTP|smtp|GEMINI|API key|ключ/i.test(l));
+const serverErrs = log.join('').split('\n').filter((l) => /\bError\b|помилка маршруту|\[workflows\]/i.test(l) && !/SMTP|smtp|GEMINI|API key|ключ|опубліковано v1 системних процесів/i.test(l));
 t('журнал сервера — без помилок', serverErrs.length === 0, serverErrs.slice(0, 3).join(' | '));
 console.log(`\nПідсумок: ${pass} пройшло, ${fail} впало`);
 process.exit(fail ? 1 : 0);
