@@ -7,6 +7,7 @@
  * Роль нічого не дозволяє — дозволяє лише наданий доступ; перевіряє все
  * сервер (`/api/core/projects/:id/access`).
  */
+import { summarizeAccess, type AccessSummaryInput } from '../utils/accessSummary';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Ban, History, Loader2, ShieldCheck, ShieldPlus } from 'lucide-react';
 import { AccessRequestsSection } from './onboarding/AccessRequestsSection';
@@ -239,23 +240,8 @@ export const AccessPanel: React.FC<{ bookId: string; lang: Lang }> = ({ bookId, 
     setEvents(res.ok ? body.events ?? [] : []);
   };
 
-  const mySummary = (eff: Effective): string => {
-    if (eff.full) return L('Повний доступ (власник книги чи адміністратор).', 'Full access (book owner or administrator).');
-    if (!eff.restricted) {
-      const lv = LEVELS[eff.book as Level]?.[lang] ?? eff.book;
-      return L(`Уся книга: ${lv.toLowerCase()}.`, `Whole book: ${lv.toLowerCase()}.`);
-    }
-    const parts: string[] = [];
-    const n = (m: Record<string, Level>) => Object.keys(m).length;
-    if (n(eff.chapters)) parts.push(L(`розділів: ${n(eff.chapters)}`, `chapters: ${n(eff.chapters)}`));
-    if (n(eff.scenes)) parts.push(L(`сцен: ${n(eff.scenes)}`, `scenes: ${n(eff.scenes)}`));
-    if (n(eff.characters)) parts.push(L(`персонажів: ${n(eff.characters)}`, `characters: ${n(eff.characters)}`));
-    if (n(eff.locations)) parts.push(L(`локацій: ${n(eff.locations)}`, `locations: ${n(eff.locations)}`));
-    if (eff.media !== 'none') parts.push(L(`медіатека (${LEVELS[eff.media as Level].uk.toLowerCase()})`, `media library (${LEVELS[eff.media as Level].en.toLowerCase()})`));
-    return parts.length
-      ? L(`Обмежений доступ — ${parts.join(', ')}. Решта книги вам не показується.`, `Limited access — ${parts.join(', ')}. The rest of the book is hidden from you.`)
-      : L('Доступу до змісту книги немає.', 'No access to the book content.');
-  };
+  // Т6.4: той самий текст, що й у «Моєму просторі».
+  const mySummary = (eff: Effective): string => summarizeAccess(eff as unknown as AccessSummaryInput, lang);
 
   if (loading && !state) {
     return (
@@ -288,6 +274,16 @@ export const AccessPanel: React.FC<{ bookId: string; lang: Lang }> = ({ bookId, 
             data-access-onboarding
           >
             {L('Моя роль / запросити доступ…', 'My role / request access…')}
+          </button>
+        )}
+        {!state.me.isOwner && (
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent('nova:open-tab', { detail: { tab: 'my-space' } }))}
+            className="mt-2 ml-3 text-[11px] font-bold text-violet-300 hover:underline"
+            data-access-my-space
+          >
+            {L('Мій простір →', 'My space →')}
           </button>
         )}
       </div>

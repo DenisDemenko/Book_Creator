@@ -74,7 +74,7 @@ export function corePageByTab(tab: NavigationTab): CorePageDef | undefined {
  * поточної (App.tsx: handleSelectTab), тож адреси не має.
  */
 const ROUTABLE_TABS: NavigationTab[] = [
-  'express', 'dashboard', 'start', 'editor', 'mastery', 'scenario', 'characters', 'mindboard', 'toc',
+  'my-space', 'express', 'dashboard', 'start', 'editor', 'mastery', 'scenario', 'characters', 'mindboard', 'toc',
   'qr-footnotes', 'ai-studio', 'illustrations', 'layout', 'preview', 'cover', 'media', 'changelog', 'export',
   'admin', 'subscription', 'api-keys', 'kdp-format', 'courses', 'course-studio', 'narration', 'pdf-editor',
   'knowledge', 'trainers', 'diagn', 'structure', 'portfolio', 'publishing',

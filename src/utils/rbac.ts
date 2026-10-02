@@ -718,6 +718,8 @@ export function canAccessTab(role: UserRole | string | undefined | null, tab: Na
   // Т5.2: Graph Studio — адмін або роль із правом публікації схем (перевизначення
   // ролі знає лише сервер); сторінка сама питає сервер і показує відмову.
   if (tab === 'graph-studio') return !!role && role !== 'guest';
+  // Т6.4: «Мій простір» — кожному, хто увійшов; що саме відкрито, вирішує сервер.
+  if (tab === 'my-space') return !!role && role !== 'guest';
   const perms = getRolePermissions(role);
   // Сторінки семантичного ядра (Т0.8) — для всіх, хто працює з текстом книги:
   // доступ до самих даних перевіряє сервер (requireProjectAccess), тут лише меню.

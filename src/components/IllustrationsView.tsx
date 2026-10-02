@@ -1,3 +1,4 @@
+import { AiWorkflowHint } from './roleStudio/AiWorkflowHint';
 import React, { useState, useRef } from 'react';
 import { 
   Palette, 
@@ -363,6 +364,8 @@ export const IllustrationsView: React.FC<IllustrationsViewProps> = ({ book, onUp
           <h1 className="text-xl font-bold text-white font-heading">
             {t('illustrationsView.headerTitle')}
           </h1>
+          {/* Т6.4: процес ШІ за роллю — для цього модуля. */}
+          <AiWorkflowHint projectId={book.id} task="illustration" className="mt-1" />
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">

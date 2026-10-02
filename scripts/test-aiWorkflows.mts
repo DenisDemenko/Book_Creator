@@ -45,6 +45,20 @@ t('кожен простір реєстру має процес ШІ', regWs.eve
 t('завдання процесів — з довідника', W.AI_WORKFLOWS.every((w) => [...w.primary, ...w.secondary, ...w.suggestions.map((x) => x.task)].every((x) => (W.AI_TASKS as readonly string[]).includes(x))));
 t('назви процесів uk / en', W.AI_WORKFLOWS.every((w) => w.name.uk && w.name.en && w.suggestions.every((x) => x.label.uk && x.label.en)));
 
+console.log('\nПростори Студії за роллю (§15):');
+{
+  const RW = await import('../src/utils/roleWorkspaces.ts');
+  const AR = await import('../src/utils/appRoutes.ts');
+  t('кожен простір реєстру має розділи Студії', regWs.every((w) => RW.workspaceById(w)?.tabs.length), regWs.filter((w) => !RW.workspaceById(w)).join());
+  const allTabs = [...new Set([...RW.ROLE_WORKSPACES.flatMap((w) => w.tabs), ...W.AI_WORKFLOWS.flatMap((w) => w.suggestions.map((x) => x.tab))])];
+  const bad = allTabs.filter((tab) => { const p = AR.buildAppPath({ projectId: 'b1', tab: tab as any }); return !p || AR.parseAppPath(p)?.tab !== tab; });
+  t('розділи просторів і дії ШІ мають адреси Студії', bad.length === 0, bad.join());
+  t('«Мій простір» — адреса /projects/<книга>/my-space', AR.buildAppPath({ projectId: 'b1', tab: 'my-space' }) === '/projects/b1/my-space' && AR.parseAppPath('/projects/b1/my-space')?.tab === 'my-space');
+  t('простір ілюстратора (обліковий запис дизайнера): ілюстрації, візуальна бібліотека, персонажі, медіатека', RW.workspaceTabs('illustrator', 'designer').join() === 'illustrations,core-visual,characters,media');
+  t('права облікового запису фільтрують розділи (читач — без обкладинки)', !RW.workspaceTabs('designer', 'reader').includes('cover'));
+  t('ТЗ §15: «з’явиться пізніше» для ілюстратора — завдання й результати', RW.workspaceById('illustrator')!.later.map((x) => x.uk).join() === 'Призначені завдання,Результати');
+}
+
 console.log('\nМаршрут (§21):');
 const ill = W.routeAiWorkflow({ workspaces: ['illustrator'], task: 'illustration', scope: 'project' })!;
 t('ілюстратор + ілюстрація → процес ілюстратора, основне', ill.workflow === 'illustration' && ill.fit === 'primary' && ill.instruction.includes('ІЛЮСТРАТОРУ'));

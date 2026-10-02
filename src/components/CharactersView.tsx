@@ -1,3 +1,4 @@
+import { AiWorkflowHint } from './roleStudio/AiWorkflowHint';
 import React, { useState, useMemo } from 'react';
 import { 
   Users, 
@@ -617,6 +618,8 @@ export const CharactersView: React.FC<CharactersViewProps> = ({
           <h1 className="text-xl font-bold text-slate-100 font-heading">
             {t('charactersView.headerTitle', { title: book.title, n: String(book.characters.length) })}
           </h1>
+          {/* Т6.4: процес ШІ за роллю — для цього модуля. */}
+          <AiWorkflowHint projectId={book.id} task="character" className="mt-1" />
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">

@@ -1,3 +1,4 @@
+import { AiWorkflowHint } from './roleStudio/AiWorkflowHint';
 import React, { useEffect, useState } from 'react';
 import {
   Sparkles,
@@ -242,6 +243,8 @@ export const AIStudioView: React.FC<AIStudioViewProps> = ({ book, onUpdateBook }
           <h1 className="text-xl font-bold text-white font-heading">
             {t('aiStudio.headerTitle')}
           </h1>
+          {/* Т6.4: процес ШІ за роллю — для цього модуля. */}
+          <AiWorkflowHint projectId={book.id} task="editing" className="mt-1" />
         </div>
       </div>
 

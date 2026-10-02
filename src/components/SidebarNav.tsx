@@ -35,6 +35,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   ChevronDown,
+  Compass,
   Search,
   UserRound,
   HeartPulse,
@@ -51,7 +52,16 @@ import { useLanguage } from '../i18n/LanguageContext';
 import { useSunAccentVars } from '../utils/sunAccent';
 import { GlowIntensityControl } from './GlowIntensityControl';
 
+/** Т6.4: простір ролі в проєкті — його розділи нагорі, решта груп — у згорнутому «Інше». */
+export interface SidebarFocus {
+  /** Назва простору («Простір ілюстратора»). */
+  title: string;
+  tabs: NavigationTab[];
+}
+
 interface SidebarNavProps {
+  /** Т6.4: простір ролі (null — меню як завжди). */
+  focus?: SidebarFocus | null;
   /** Т6.3: вкладки, відкриті не роллю, а участю (спільний курс). Права перевіряє сервер. */
   extraTabs?: NavigationTab[];
   currentTab: NavigationTab;
@@ -75,7 +85,11 @@ type NavGroup = { id: string; numeral: string; labelKey: string; tabs: Navigatio
 
 function readInitialCollapsed(): boolean {
   try {
-    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
+    const stored = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+    // Т6.4: на телефоні (вужче 640 px) без збереженого вибору — згорнуто:
+    // розгорнуте меню (256 px) лишало сторінці на 390 px близько третини ширини.
+    if (stored === null && typeof window !== 'undefined' && window.innerWidth < 640) return true;
+    return stored === '1';
   } catch {
     /* localStorage недоступний (приватний режим тощо) — використовуємо типове значення */
     return false;
@@ -140,6 +154,7 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   'core-mastery': GraduationCap,
   'core-collaboration': UsersRound,
   'core-translation': Languages,
+  'my-space': Compass,
 };
 
 /**
@@ -231,6 +246,9 @@ const NAV_GROUPS: NavGroup[] = [
  */
 const OTHER_TABS: NavigationTab[] = ['subscription', 'admin'];
 
+/** Т6.4: ключ стану згорнутого «Інше» (решта груп, коли є простір ролі). */
+const OTHERS_KEY = '__others';
+
 function isGroupOpen(state: Record<string, boolean>, groupId: string): boolean {
   // За замовчуванням групи розкриті, поки користувач явно не згорнув.
   return state[groupId] !== false;
@@ -249,6 +267,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
   logCount = 0,
   currentRole,
   extraTabs = [],
+  focus = null,
   onQuickAi,
   onOpenHelp,
 }) => {
@@ -258,6 +277,9 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
   const sunVars = useSunAccentVars();
   const [collapsed, setCollapsed] = useState<boolean>(readInitialCollapsed);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(readInitialGroups);
+  const focusTabs = focus?.tabs ?? [];
+  // «Інше» за замовчуванням згорнуте (на відміну від груп): простір ролі — головне.
+  const othersOpen = (state: Record<string, boolean>) => state[OTHERS_KEY] === true;
 
   const toggleCollapsed = useCallback(() => {
     setCollapsed((prev) => {
@@ -273,7 +295,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
 
   const toggleGroup = useCallback((groupId: string) => {
     setOpenGroups((prev) => {
-      const next = { ...prev, [groupId]: !isGroupOpen(prev, groupId) };
+      const next = { ...prev, [groupId]: groupId === OTHERS_KEY ? !othersOpen(prev) : !isGroupOpen(prev, groupId) };
       try {
         localStorage.setItem(SIDEBAR_GROUPS_KEY, JSON.stringify(next));
       } catch {
@@ -295,6 +317,11 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
           changed = true;
         }
       }
+      // Т6.4: активна вкладка поза простором — розкрити «Інше».
+      if (focusTabs.length && !focusTabs.includes(currentTab) && currentTab !== 'my-space' && NAV_GROUPS.some((g) => g.tabs.includes(currentTab)) && !othersOpen(prev)) {
+        next[OTHERS_KEY] = true;
+        changed = true;
+      }
       if (!changed) return prev;
       try {
         localStorage.setItem(SIDEBAR_GROUPS_KEY, JSON.stringify(next));
@@ -303,7 +330,8 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
       }
       return next;
     });
-  }, [currentTab]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTab, focus]);
 
   const visibleBadges: Partial<Record<NavigationTab, number>> = {
     characters: book.characters.length,
@@ -403,8 +431,35 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
       }`}
     >
       <nav className="flex-1 overflow-y-auto no-scrollbar py-2 px-2 space-y-1">
-        {NAV_GROUPS.map((group) => {
-          const allowed = group.tabs.filter((tab) => canAccessTab(currentRole, tab) || extraTabs.includes(tab));
+        {/* Т6.4: «Мій простір» — завжди першим; розділи простору ролі — під ним. */}
+        {canAccessTab(currentRole, 'my-space') && (
+          <div className="space-y-0.5 pb-1 mb-1 border-b border-white/[0.06]" data-nav-focus={focusTabs.length ? 'on' : 'off'}>
+            {collapsed ? renderTabCollapsed('my-space', { id: 'my-space', icon: Compass }) : renderTab('my-space', { id: 'my-space', icon: Compass })}
+            {focusTabs.length > 0 && !collapsed && (
+              <p className="px-3 pt-1 text-[10px] font-bold uppercase tracking-wider text-violet-300/80 truncate" title={focus?.title}>{focus?.title}</p>
+            )}
+            {focusTabs.map((tab) => (
+              <React.Fragment key={tab}>
+                {collapsed ? renderTabCollapsed(tab, toNavItem(tab)) : renderTab(tab, toNavItem(tab))}
+                {tab === 'editor' && currentRole !== 'reader' && (collapsed ? renderQuickAiCollapsed() : renderQuickAi())}
+              </React.Fragment>
+            ))}
+          </div>
+        )}
+        {focusTabs.length > 0 && (
+          <button
+            onClick={() => toggleGroup(OTHERS_KEY)}
+            title={t('header.group.other')}
+            className={`w-full flex items-center gap-1.5 rounded-lg transition-all ${collapsed ? 'justify-center py-1.5' : 'px-2 py-1.5 hover:bg-white/[0.04]'}`}
+            data-nav-others={othersOpen(openGroups) ? 'open' : 'closed'}
+          >
+            {!collapsed && <ChevronDown className={`w-3 h-3 text-slate-500 transition-transform ${othersOpen(openGroups) ? '' : '-rotate-90'}`} />}
+            <span className="text-[11px] font-extrabold [color:var(--sun-acc)] leading-none">⋯</span>
+            {!collapsed && <span className="text-[11px] font-bold uppercase tracking-wider [color:var(--sun-soft)] truncate">{t('header.group.other')}</span>}
+          </button>
+        )}
+        {(focusTabs.length === 0 || othersOpen(openGroups)) && NAV_GROUPS.map((group) => {
+          const allowed = group.tabs.filter((tab) => (canAccessTab(currentRole, tab) || extraTabs.includes(tab)) && !focusTabs.includes(tab));
           if (allowed.length === 0) return null;
           const isOpen = isGroupOpen(openGroups, group.id);
 

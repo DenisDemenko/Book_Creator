@@ -52,6 +52,9 @@ import { CollaborationDrawer } from './components/CollaborationDrawer';
 import { InviteRoleChoiceModal } from './components/InviteRoleChoiceModal';
 import { InviteLoginForm } from './components/InviteLoginForm';
 import { CourseStudioView } from './components/CourseStudioView';
+import { MySpaceView } from './components/roleStudio/MySpaceView';
+import { fetchMyRole, ROLE_SPACE_EVENT } from './components/roleStudio/roleStudioApi';
+import { workspaceById, workspaceTabs } from './utils/roleWorkspaces';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { AuthScreen } from './components/AuthScreen';
 import { AdminOsView } from './components/adminOs/AdminOsView';
@@ -209,6 +212,10 @@ export default function App() {
   const [sharedCourseIds, setSharedCourseIds] = useState<string[]>([]);
   const [initialCourseId, setInitialCourseId] = useState<string | null>(null);
   const extraTabs = useMemo<NavigationTab[]>(() => (sharedCourseIds.length ? ['course-studio'] : []), [sharedCourseIds]);
+  // Т6.4: простір ролі в цій книзі (учасник чужого проєкту — акцент у меню; власнику й адміну меню повне).
+  const [roleSpace, setRoleSpace] = useState<{ projectId: string; workspace: string | null; participantOnly: boolean } | null>(null);
+  const [roleSpaceTick, setRoleSpaceTick] = useState(0);
+  const selectTabRef = useRef<((tab: NavigationTab) => void) | null>(null);
 
   // Стан прийняття cowork-запрошення за посиланням `?invite=<token>`.
   const [inviteToken, setInviteToken] = useState<string | null>(null);
@@ -509,6 +516,9 @@ export default function App() {
     setOnboarding(null);
     if (!result.completed) return;
     void onb('POST', '/api/core/onboarding/events', { event: 'studio_entered', projectId: launched?.projectId ?? null, tab: currentTab }).catch(() => {});
+    // Т6.4: ролі змінились — перечитати простір; учасник чужої книги — одразу в «Мій простір».
+    setRoleSpaceTick((x) => x + 1);
+    if (launched?.projectId && launched.projectId === book.id && ['invitation', 'has_access', 'access_request'].includes(String(result.outcome?.kind))) setCurrentTab('my-space');
     if (result.next === 'create_book') setIsCreateBookModalOpen(true);
     if (result.next === 'create_course' && canAccessTab(auth.user?.role ?? currentRole, 'courses')) setCurrentTab('courses');
   };
@@ -522,6 +532,41 @@ export default function App() {
     window.addEventListener('nova:role-onboarding', onRequest);
     return () => window.removeEventListener('nova:role-onboarding', onRequest);
   }, []);
+
+  // Т6.4: «Мій простір» — простір ролі в поточній книзі (ядро недоступне чи книга локальна — меню як завжди).
+  useEffect(() => {
+    if (isHydrating || auth.loading || auth.isGuest || !auth.user || !book.id) {
+      setRoleSpace(null);
+      return;
+    }
+    let live = true;
+    fetchMyRole(book.id)
+      .then((v) => live && setRoleSpace({ projectId: v.projectId, workspace: v.activeWorkspace, participantOnly: !v.isOwner && !v.isAdmin && v.roles.length > 0 }))
+      .catch(() => live && setRoleSpace(null));
+    return () => {
+      live = false;
+    };
+  }, [isHydrating, auth.loading, auth.isGuest, auth.user?.id, book.id, roleSpaceTick]);
+  useEffect(() => {
+    const onChanged = () => setRoleSpaceTick((x) => x + 1);
+    const onOpenTab = (e: Event) => {
+      const tab = (e as CustomEvent<{ tab?: NavigationTab }>).detail?.tab;
+      if (tab) selectTabRef.current?.(tab);
+    };
+    window.addEventListener(ROLE_SPACE_EVENT, onChanged);
+    window.addEventListener('nova:open-tab', onOpenTab);
+    return () => {
+      window.removeEventListener(ROLE_SPACE_EVENT, onChanged);
+      window.removeEventListener('nova:open-tab', onOpenTab);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const sidebarFocus = useMemo(() => {
+    if (!roleSpace?.participantOnly || roleSpace.projectId !== book.id) return null;
+    const ws = workspaceById(roleSpace.workspace);
+    const tabs = workspaceTabs(roleSpace.workspace, currentRole, extraTabs);
+    return ws && tabs.length ? { title: ws.name[lang === 'en' ? 'en' : 'uk'], tabs } : null;
+  }, [roleSpace, book.id, currentRole, extraTabs, lang]);
 
   /** Т6.3: точки запуску «створити / імпортувати проєкт» і «прийняти запрошення». */
   const launchOnboarding = (launch: { source: string; projectId: string; projectType?: string; projectTitle?: string }) => {
@@ -1743,6 +1788,8 @@ export default function App() {
     if (targetTab === currentTab) return;
     setCurrentTab(targetTab);
   };
+  selectTabRef.current = handleSelectTab;
+
 
   // Jump from Scenario/Dossier directly to section in Editor
   const handleNavigateToSection = (chapterId: string, sectionId: string) => {
@@ -2223,6 +2270,7 @@ export default function App() {
            пункт лишається активним, а сам currentTab не рухається. */
         currentTab={marketOpen ? 'market' : currentTab}
         extraTabs={extraTabs}
+        focus={sidebarFocus}
         onSelectTab={handleSelectTab}
         book={book}
         logCount={logEntries.length}
@@ -2265,6 +2313,11 @@ export default function App() {
         )}
 
         {currentTab === 'diagn' && <DiagnosticsView book={book} />}
+
+        {/* Т6.4: «Мій простір» — простір ролі, процес ШІ, «Моя роль у проєкті». */}
+        {currentTab === 'my-space' && (
+          <MySpaceView projectId={book.id} bookTitle={book.title} role={currentRole} lang={lang === 'en' ? 'en' : 'uk'} onNavigate={handleSelectTab} />
+        )}
 
         {currentTab === 'start' && (
           <StartPageView

@@ -7,6 +7,10 @@
  * запитано; «Змінити» — інший рівень, область чи цілі (саме тут власник
  * обирає розділи, сцени чи героїв, яких людина ще не бачила); «Відхилити» —
  * з причиною. Схвалення = наданий доступ Т6.2.
+ *
+ * Т6.4: запити РОЛІ («Моя роль у проєкті» в чужому проєкті) — тут само:
+ * «Схвалити» додає роль (і доступ, лише якщо його просили), «Змінити» — частина
+ * ролей, з доступом чи без; заміна спеціалізації — позначена.
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { Check, Inbox, Loader2, PencilLine, X } from 'lucide-react';
@@ -17,12 +21,14 @@ type Scope = 'book' | 'chapter' | 'scene' | 'character' | 'media_library';
 
 interface RequestRow {
   id: string;
+  kind?: 'access' | 'role';
+  replaces?: string[];
   userId: string;
   roles: { roleId: string; specialization: string | null }[];
   scope: string;
   scopeRefs: string[];
   capabilities: string[];
-  level: string;
+  level: string | null;
   message: string;
   orderId: string | null;
   status: string;
@@ -59,7 +65,7 @@ export const AccessRequestsSection: React.FC<{ bookId: string; lang: Lang; chara
   const [outline, setOutline] = useState<Outline | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [edit, setEdit] = useState<Record<string, { level: string; scope: Scope; refs: string[]; media: boolean; reason: string }>>({});
+  const [edit, setEdit] = useState<Record<string, { level: string; scope: Scope; refs: string[]; media: boolean; reason: string; roles: string[]; withAccess: boolean }>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [labels, setLabels] = useState<Record<string, { uk: string; en: string }>>({});
   useEffect(() => {
@@ -90,14 +96,21 @@ export const AccessRequestsSection: React.FC<{ bookId: string; lang: Lang; chara
   const pending = rows.filter((r) => r.status === 'pending');
   const decided = rows.filter((r) => r.status !== 'pending').slice(0, 8);
 
-  const draft = (r: RequestRow) => edit[r.id] ?? { level: r.level, scope: FROM_SCOPE[r.scope] ?? 'book', refs: r.scopeRefs, media: r.capabilities.includes('upload'), reason: '' };
+  const draft = (r: RequestRow) =>
+    edit[r.id] ?? { level: r.level ?? 'view', scope: FROM_SCOPE[r.scope] ?? 'book', refs: r.scopeRefs, media: r.capabilities.includes('upload'), reason: '', roles: r.roles.map((x) => x.roleId), withAccess: r.kind !== 'role' || !!r.level };
   const patch = (r: RequestRow, p: Partial<ReturnType<typeof draft>>) => setEdit((e) => ({ ...e, [r.id]: { ...draft(r), ...p } }));
   const decide = async (r: RequestRow, action: 'approve' | 'modify' | 'reject') => {
     const d = draft(r);
     setBusy(r.id);
     setErrors((m) => ({ ...m, [r.id]: '' }));
     try {
-      await onb('POST', `${base}/${r.id}/decide`, action === 'modify' ? { action, level: d.level, scopeType: d.scope, scopeRefs: d.refs, mediaWork: d.media, reason: d.reason } : { action, reason: d.reason });
+      const body =
+        action !== 'modify'
+          ? { action, reason: d.reason }
+          : r.kind === 'role'
+            ? { action, reason: d.reason, roles: d.roles, ...(d.withAccess ? { level: d.level, scopeType: d.scope, scopeRefs: d.refs, mediaWork: d.media } : { noAccess: true }) }
+            : { action, level: d.level, scopeType: d.scope, scopeRefs: d.refs, mediaWork: d.media, reason: d.reason };
+      await onb('POST', `${base}/${r.id}/decide`, body);
       await load();
       onChanged?.();
     } catch (e) {
@@ -117,20 +130,39 @@ export const AccessRequestsSection: React.FC<{ bookId: string; lang: Lang; chara
   return (
     <div className="p-3 rounded-2xl bg-slate-950/70 border border-amber-500/30 space-y-2" data-access-requests>
       <div className="flex items-center gap-2 text-xs font-bold text-white">
-        <Inbox className="w-3.5 h-3.5 text-amber-400" /> {L('Запити доступу', 'Access requests')} {pending.length > 0 && <span className="rounded-full bg-amber-500 px-1.5 text-[10px] text-slate-950" data-access-requests-count>{pending.length}</span>}
+        <Inbox className="w-3.5 h-3.5 text-amber-400" /> {L('Запити доступу й ролей', 'Access and role requests')} {pending.length > 0 && <span className="rounded-full bg-amber-500 px-1.5 text-[10px] text-slate-950" data-access-requests-count>{pending.length}</span>}
       </div>
       {!pending.length && <p className="text-[11px] text-slate-500">{L('Нових запитів немає.', 'No new requests.')}</p>}
       {pending.map((r) => {
         const d = draft(r);
         const opts = refOptions(d.scope);
         return (
-          <div key={r.id} className="space-y-1.5 rounded-xl border border-slate-800 bg-slate-900/60 p-2.5" data-access-request={r.id}>
-            <p className="text-xs font-bold text-slate-100">{who(r.userId)}</p>
+          <div key={r.id} className="space-y-1.5 rounded-xl border border-slate-800 bg-slate-900/60 p-2.5" data-access-request={r.id} data-access-request-kind={r.kind ?? 'access'}>
+            <p className="text-xs font-bold text-slate-100">
+              {who(r.userId)}
+              {r.kind === 'role' && <span className="ml-1.5 rounded-full border border-violet-400/50 px-1.5 text-[10px] font-semibold text-violet-200">{r.replaces?.length ? L('зміна спеціалізації', 'specialization change') : L('запит ролі', 'role request')}</span>}
+            </p>
             <p className="text-[11px] text-slate-300">
-              {r.roles.map((x) => [roleName(x.roleId), x.specialization ? `(${roleName(x.specialization)})` : ''].join(' ').trim()).join(', ')} · {LV[r.level]?.[lang] ?? r.level} · {SC[FROM_SCOPE[r.scope] ?? 'book'][lang]}
+              {r.roles.map((x) => [roleName(x.roleId), x.specialization ? `(${roleName(x.specialization)})` : ''].join(' ').trim()).join(', ')} ·{' '}
+              {r.level ? `${LV[r.level]?.[lang] ?? r.level} · ${SC[FROM_SCOPE[r.scope] ?? 'book'][lang]}` : L('без нового доступу', 'no new access')}
               {r.orderId ? ` · ${L('замовлення', 'order')} ${r.orderId}` : ''}
             </p>
             {r.message && <p className="text-[11px] italic text-slate-400">«{r.message}»</p>}
+            {r.kind === 'role' && r.roles.length > 1 && (
+              <div className="flex flex-wrap gap-2" data-access-request-roles>
+                {r.roles.map((x) => (
+                  <label key={x.roleId} className="flex items-center gap-1 text-[11px] text-slate-300">
+                    <input type="checkbox" checked={d.roles.includes(x.roleId)} onChange={(e) => patch(r, { roles: e.target.checked ? [...d.roles, x.roleId] : d.roles.filter((y) => y !== x.roleId) })} /> {roleName(x.roleId)}
+                  </label>
+                ))}
+              </div>
+            )}
+            {r.kind === 'role' && (
+              <label className="flex items-center gap-1.5 text-[11px] text-slate-300">
+                <input type="checkbox" checked={d.withAccess} onChange={(e) => patch(r, { withAccess: e.target.checked })} data-access-request-with-access /> {L('надати доступ разом із роллю', 'grant access together with the role')}
+              </label>
+            )}
+            {(r.kind !== 'role' || d.withAccess) && (<>
             <div className="grid grid-cols-2 gap-1.5">
               <select value={d.level} onChange={(e) => patch(r, { level: e.target.value })} className={sel} data-access-request-level>
                 {(d.scope === 'media_library' ? ['view', 'work'] : ['view', 'comment', 'review', 'edit', 'create', 'approve']).map((l) => <option key={l} value={l}>{LV[l][lang]}</option>)}
@@ -149,6 +181,7 @@ export const AccessRequestsSection: React.FC<{ bookId: string; lang: Lang; chara
                 <input type="checkbox" checked={d.media} onChange={(e) => patch(r, { media: e.target.checked })} data-access-request-media /> {L('ще й робота з файлами в медіатеці', 'plus work with files in the media library')}
               </label>
             )}
+            </>)}
             <input value={d.reason} onChange={(e) => patch(r, { reason: e.target.value })} placeholder={L('Коментар / причина (необовʼязково)', 'Comment / reason (optional)')} className={sel} data-access-request-reason />
             {errors[r.id] && <p className="text-[11px] text-rose-300" data-access-request-error>{errors[r.id]}</p>}
             <div className="flex flex-wrap gap-1.5">
@@ -162,7 +195,7 @@ export const AccessRequestsSection: React.FC<{ bookId: string; lang: Lang; chara
       {decided.length > 0 && (
         <ul className="space-y-0.5 border-t border-slate-800 pt-1.5 text-[10px] text-slate-500" data-access-requests-history>
           {decided.map((r) => (
-            <li key={r.id} data-access-request-done={r.status}>{who(r.userId)} · {{ approved: L('схвалено', 'approved'), modified: L('змінено й надано', 'modified'), rejected: L('відхилено', 'rejected'), cancelled: L('відкликано', 'cancelled') }[r.status] ?? r.status}{r.reason ? ` · ${r.reason}` : ''}</li>
+            <li key={r.id} data-access-request-done={r.status}>{who(r.userId)}{r.kind === 'role' ? ` · ${L('роль', 'role')} ${r.roles.map((x) => roleName(x.roleId)).join(', ')}` : ''} · {{ approved: L('схвалено', 'approved'), modified: L('змінено й надано', 'modified'), rejected: L('відхилено', 'rejected'), cancelled: L('відкликано', 'cancelled') }[r.status] ?? r.status}{r.reason ? ` · ${r.reason}` : ''}</li>
           ))}
         </ul>
       )}

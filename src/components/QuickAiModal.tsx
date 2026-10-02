@@ -1,3 +1,4 @@
+import { AiWorkflowHint } from './roleStudio/AiWorkflowHint';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Sparkles, Send, Bot, User, Trash2, Plus, Coins, Loader2, Search, X, Paperclip, FileText, Image as ImageIcon, BookPlus, Copy, Check, FileCode2, TerminalSquare, Cpu, Lock as LockIcon, AlertTriangle, Save, RotateCcw, Terminal, Quote, MessagesSquare, Wand2, MousePointerClick, Boxes } from 'lucide-react';
 import { Book, Chapter, AuthUser } from '../types';
@@ -2390,6 +2391,8 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
                 Ядро AI (адмін)
               </button>
             )}
+            {/* Т6.4: процес ШІ асистента за роллю в цій книзі. */}
+            <span className="ml-auto min-w-0"><AiWorkflowHint projectId={book.id} task="chat" /></span>
           </div>
         )}
 

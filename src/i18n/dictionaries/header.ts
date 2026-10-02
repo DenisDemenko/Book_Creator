@@ -67,6 +67,7 @@ export const header = {
     glowSpeedTitle: 'Швидкість переливання кольорів палітри: правіше — швидше. Праворуч показано період повного оберту в секундах.',
     glowPaletteTitle: 'Кольорова схема сяйва — 10 наборів по три кольори: два холодних плюс теплий або навпаки.',
     nav: {
+      'my-space': 'Мій простір',
       express: 'Книга за 5 хвилин',
       dashboard: 'Дашборд',
       start: 'Старт & Задум',
@@ -120,6 +121,7 @@ export const header = {
       training: 'Тренування',
       core: 'Семантичне ядро',
       other: 'Інше',
+      mySpace: 'Мій простір',
     },
   },
   en: {
@@ -190,6 +192,7 @@ export const header = {
     glowSpeedTitle: 'How fast the palette colours drift into each other: further right is faster. The number on the right is the full-cycle period in seconds.',
     glowPaletteTitle: 'Glow colour scheme — 10 sets of three colours: two cool plus one warm, or the other way round.',
     nav: {
+      'my-space': 'My space',
       dashboard: 'Dashboard',
       express: 'Book in 5 minutes',
       start: 'Start & Concept',
@@ -243,6 +246,7 @@ export const header = {
       training: 'Training',
       core: 'Semantic core',
       other: 'Other',
+      mySpace: 'My space',
     },
   },
 };

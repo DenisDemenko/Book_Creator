@@ -1,3 +1,4 @@
+import { AiWorkflowHint } from './roleStudio/AiWorkflowHint';
 import React, { useState } from 'react';
 import { 
   Sparkles, 
@@ -140,6 +141,8 @@ export const CoverDesignerView: React.FC<CoverDesignerViewProps> = ({
           <h1 className="text-xl font-bold text-white font-heading">
             {t('coverDesignerView.headerTitle')}
           </h1>
+          {/* Т6.4: процес ШІ за роллю — для цього модуля. */}
+          <AiWorkflowHint projectId={book.id} task="cover" className="mt-1" />
         </div>
 
         <div className="flex items-center gap-2">

@@ -1,3 +1,4 @@
+import { AiWorkflowHint } from './roleStudio/AiWorkflowHint';
 import React, { useState } from 'react';
 import { 
   LayoutTemplate, 
@@ -134,6 +135,8 @@ export const LayoutView: React.FC<LayoutViewProps> = ({ book, onUpdateBook, tota
           <h1 className="text-xl font-bold text-white font-heading">
             {t('layoutView.headerTitle')}
           </h1>
+          {/* Т6.4: процес ШІ за роллю — для цього модуля. */}
+          <AiWorkflowHint projectId={book.id} task="layout" className="mt-1" />
         </div>
 
         {/* Action Controls & Dynamic Page Counter Badge */}
