@@ -17,7 +17,9 @@
  * їх не вміє — тому перевірки по ньому йдуть читанням джерельних текстів
  * (той самий прийом, що в test-expressTracks.mts і test-journal.mts).
  */
-import { readFileSync, statSync, existsSync } from 'node:fs';
+import { readFileSync, statSync, existsSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { SUN_12_COLORS } from '../src/context/SunLightingContext.tsx';
 
 let pass = 0, fail = 0;
@@ -50,6 +52,30 @@ console.log('\nКольори сонечка мають свою фотогра�
       isWebp ? 'файл замалий — перекодування обірвалось' : 'не RIFF/WEBP'
     );
   }
+}
+
+console.log('\nТека фонів без сторонніх файлів:');
+{
+  const dir = fileURLToPath(new URL('../src/assets/backgrounds/', import.meta.url));
+  const files = readdirSync(dir).sort();
+  const expected = ids.map((id) => `${id}.webp`).sort();
+  t('у теці рівно 12 файлів — по одному на колір',
+    files.length === expected.length, `їх ${files.length}: ${files.join(', ')}`);
+  t('зайвих файлів немає (бекапи з «~», дублі, чужі формати)',
+    files.every((f) => expected.includes(f)),
+    files.filter((f) => !expected.includes(f)).join(', '));
+
+  // Межа розміру — не смак, а захист від реального випадку 01.10.2026:
+  // сторонній процес (не скрипт репозиторію) перезаписав частину файлів
+  // LOSSLESS-кодеком, лишивши поруч копію з «~», і кожен такий файл
+  // виріс у 5–6 разів (200 КБ → 1.4 МБ, 379 КБ → 1.9 МБ). Оригінали
+  // власника у WebP 0.82 важать 109–379 КБ, тож 600 КБ лишає запас
+  // на майбутні знімки й ловить саме це.
+  const tooBig = files
+    .map((f) => ({ f, kb: Math.round(statSync(path.join(dir, f)).size / 1024) }))
+    .filter((x) => x.kb > 600);
+  t('жоден фон не «роздувся» (менше 600 КБ)', tooBig.length === 0,
+    tooBig.map((x) => `${x.f} ${x.kb} КБ`).join(', '));
 }
 
 console.log('\nРеєстр фонів (src/data/sunBackgrounds.ts):');
