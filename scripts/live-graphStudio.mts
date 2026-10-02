@@ -135,7 +135,7 @@ try {
   await click(admin, 'button[title^="Graph Studio"]', 2500);
   t('з карти адмінки — Graph Studio з адресою /admin/graph-studio/workflows', admin.url().endsWith('/admin/graph-studio/workflows') && !!(await admin.$('[data-gs-page="workflows"]')), admin.url());
   const tabs = await admin.$$eval('[data-gs-tab]', (es) => es.map((e) => e.getAttribute('data-gs-tab')));
-  t('шість вкладок §35', tabs.join() === 'ontology,workflows,story-graph,runs,versions,evaluations', tabs.join());
+  t('шість вкладок §35 і «Напрямки» (Т5.5)', tabs.join() === 'ontology,workflows,destinations,story-graph,runs,versions,evaluations', tabs.join());
   t('адмін: правка чернеток і PUBLISH_SCHEMA', /правка чернеток/.test(await admin.$eval('[data-gs-abilities]', (e) => (e as HTMLElement).innerText)) && /PUBLISH_SCHEMA/.test(await admin.$eval('[data-gs-abilities]', (e) => (e as HTMLElement).innerText)));
 
   // ── (2) ────────────────────────────────────────────────────────────────────

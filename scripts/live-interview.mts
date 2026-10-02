@@ -279,6 +279,10 @@ t('відповідь героїні від першої особи з ріше�
 t('під відповіддю — пропозиції: 2 спогади, факт, фрагмент із 2 тегами (П7)', a1?.props.join() === 'memory,memory,fact,fragment' && a1?.tags === 2, JSON.stringify(a1?.props));
 const vc = voiceCalls();
 t('у запиті голосу немає майбутнього (глава 2 — «зрадник»)', vc.length === 1 && vc[0].future === false && vc[0].action === 'deflect', JSON.stringify(vc));
+// Т5.5 В3: хід допиту — опублікований процес character_voice, рішення Jev — його вузол.
+const voiceRun = (await q(`SELECT id, status FROM fusion_core.workflow_runs WHERE workflow_id = 'character_voice' ORDER BY created_at DESC LIMIT 1`))[0];
+const voiceSteps = voiceRun ? await q(`SELECT node_id, branch, decision FROM fusion_core.workflow_run_steps WHERE run_id = $1 ORDER BY seq`, [voiceRun.id]) : [];
+t('Т5.5: хід — запуск character_voice, перший вузол — рішення Jev (дія deflect)', voiceRun?.status === 'succeeded' && voiceSteps[1]?.node_id === 'decide' && voiceSteps[1].branch === 'out' && /deflect/.test(voiceSteps[1].decision ?? ''), JSON.stringify(voiceSteps.map((s: any) => s.node_id)));
 
 const props = await q(`SELECT id, kind, proposed_change, parent_id FROM fusion_core.canon_proposals WHERE simulation_id = $1 ORDER BY created_at`, [sim.id]);
 const mem1 = props.find((p) => p.kind === 'memory' && /не вірить/.test(p.proposed_change.content));
