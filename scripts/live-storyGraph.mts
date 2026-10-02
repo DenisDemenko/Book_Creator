@@ -206,19 +206,23 @@ const made = await waitFor(
 t('створено вручну — підтверджений, від автора', made[0]?.status === 'confirmed' && made[0]?.created_by === 'user:u-admin');
 
 console.log('\nПошук і фільтр:');
-await page.click('[data-graph-search]', { clickCount: 3 });
+// Сторінка прокручена до картки, а шапка Студії закріплена (фото-тло, #326):
+// клік по координатах пошукового поля після прокрутки міг влучити в шапку.
+// Тому — нагору й натискання через DOM, а не по координатах.
+await page.evaluate('window.scrollTo(0, 0)');
+await page.focus('[data-graph-search]');
 await page.type('[data-graph-search]', 'Тарас');
-await page.click('[data-graph-search-go]');
+await page.evaluate(`document.querySelector('[data-graph-search-go]').click()`);
 await page.waitForSelector(`[data-graph-card="${taras}"]`, { timeout: 10000 }).catch(() => null);
 t('пошук вузла — картка знайденого', !!(await page.$(`[data-graph-card="${taras}"]`)));
-await page.click('[data-graph-type="emotion"]');
+await page.evaluate(`document.querySelector('[data-graph-type="emotion"]').click()`);
 const types = await waitFor(
   () => page.evaluate(() => Array.from(document.querySelectorAll('[data-graph-node-type]')).map((e) => e.getAttribute('data-graph-node-type'))),
   (v) => v.length > 0 && v.every((x) => x === 'emotion'),
   8000,
 );
 t('фільтр типу «Емоційний стан» — лише емоції', types.length > 0 && types.every((x) => x === 'emotion'), types.join());
-await page.click('[data-graph-type="emotion"]');
+await page.evaluate(`document.querySelector('[data-graph-type="emotion"]').click()`);
 await sleep(1200);
 
 console.log('\nПерехід у редактор із джерела:');

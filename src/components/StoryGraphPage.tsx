@@ -136,6 +136,12 @@ function GraphInner({ book, onOpenParagraph }: Props) {
   const [message, setMessage] = useState<string | null>(null);
   const positionsRef = useRef(positions);
   positionsRef.current = positions;
+  /**
+   * Номер останнього запиту графа: відповідь на давніший (швидкий клік по
+   * двох вузлах, огляд після кліку) не перезаписує картку й не домішує
+   * старих вузлів у новий фільтр.
+   */
+  const requestSeq = useRef(0);
 
   const query = useCallback(
     (focus?: string) => {
@@ -154,6 +160,7 @@ function GraphInner({ book, onOpenParagraph }: Props) {
 
   // Огляд книги (або перезавантаження після зміни фільтрів).
   const loadOverview = useCallback(async () => {
+    const seq = ++requestSeq.current;
     setLoading(true);
     setError(null);
     setSelected(null);
@@ -161,6 +168,7 @@ function GraphInner({ book, onOpenParagraph }: Props) {
     try {
       const res = await api(query());
       const body = await res.json().catch(() => ({}));
+      if (seq !== requestSeq.current) return;
       if (!res.ok) {
         setError(res.status === 403 ? 'Немає доступу до цієї книги.' : res.status === 503 ? 'Семантичне ядро зараз недоступне.' : body.error || `Помилка ${res.status}`);
         return;
@@ -177,7 +185,7 @@ function GraphInner({ book, onOpenParagraph }: Props) {
     } catch {
       setError('Немає зв\'язку з сервером.');
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
   }, [query, flow]);
 
@@ -195,6 +203,7 @@ function GraphInner({ book, onOpenParagraph }: Props) {
   /** Клік по вузлу: картка з першим рівнем зв'язків і довантаження сусідів на граф. */
   const openNode = useCallback(
     async (id: string) => {
+      const seq = ++requestSeq.current;
       setSelected(id);
       setMessage(null);
       setCard({ edges: [], loading: true, mentions: [], aliases: [] });
@@ -204,6 +213,7 @@ function GraphInner({ book, onOpenParagraph }: Props) {
       ]);
       const g: GraphResponse | null = gRes?.ok ? await gRes.json() : null;
       const e = eRes?.ok ? await eRes.json() : null;
+      if (seq !== requestSeq.current) return;
       if (!g) {
         setCard({ edges: [], loading: false, mentions: [], aliases: [] });
         return;

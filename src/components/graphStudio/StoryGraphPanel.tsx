@@ -128,6 +128,8 @@ function Inner() {
   const [positions, setPositions] = useState<Positions>({});
   const positionsRef = useRef(positions);
   positionsRef.current = positions;
+  /** Останній запит графа: відповідь на давніший не перезаписує новішого. */
+  const requestSeq = useRef(0);
   const [meta, setMeta] = useState<{ truncated: boolean; totals: { entities: number; edges: number } }>({ truncated: false, totals: { entities: 0, edges: 0 } });
   const [groups, setGroups] = useState<string[]>([]);
   const [stateFilter, setStateFilter] = useState<'all' | 'confirmed' | 'suggested'>('all');
@@ -176,23 +178,26 @@ function Inner() {
 
   const loadGraph = useCallback(async () => {
     if (!bookId) return;
+    const seq = ++requestSeq.current;
     setLoading(true);
     setError(null);
     setSelected(null);
     setEntityCard(null);
     try {
       const g = await call<Graph>('get_graph', bookId, graphArgs());
+      if (seq !== requestSeq.current) return;
       setNodes(new Map(g.nodes.map((n) => [n.id, n])));
       setEdges(new Map(g.edges.map((e) => [e.id, e])));
       setPositions(forceLayout(g.nodes, g.edges));
       setMeta({ truncated: g.truncated, totals: g.totals });
       setTimeout(() => flow.fitView({ padding: 0.2, duration: 300 }), 50);
     } catch (e) {
+      if (seq !== requestSeq.current) return;
       setError((e as Error).message);
       setNodes(new Map());
       setEdges(new Map());
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
   }, [bookId, graphArgs, flow]);
 
@@ -208,11 +213,13 @@ function Inner() {
   }, [bookId, loadProposals]);
 
   const openNode = useCallback(async (id: string) => {
+    const seq = ++requestSeq.current;
     setSelected({ kind: 'node', id });
     setTab('card');
     setEntityCard(null);
     try {
       const [g, card] = await Promise.all([call<Graph>('get_graph', bookId, graphArgs(id)), call<any>('get_entity', bookId, { entityId: id })]);
+      if (seq !== requestSeq.current) return;
       setEntityCard(card);
       const fresh = g.nodes.filter((n) => !nodes.has(n.id));
       setNodes((prev) => { const next = new Map(prev); g.nodes.forEach((n) => next.set(n.id, n)); return next; });
