@@ -70,6 +70,7 @@ import {
   checkWorkflowRun,
   checkWorkflowRunPatch,
   checkWorkflowStep,
+  checkWorkflowDestination,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isValidEmbedding, SEARCHABLE_KINDS, tsQueryFromStems } from './search/text';
 import type {
@@ -192,6 +193,8 @@ import type {
   WorkflowRunStatus,
   WorkflowStepRow,
   WorkflowStepInput,
+  WorkflowDestinationRow,
+  WorkflowDestinationInput,
 } from './types';
 
 type Q = Pool | PoolClient;
@@ -286,6 +289,12 @@ function toWorkflowStep(r: any): WorkflowStepRow {
     startedAt: iso(r.started_at), endedAt: iso(r.ended_at), latencyMs: Number(r.latency_ms), model: r.model ?? null, tokensIn: Number(r.tokens_in), tokensOut: Number(r.tokens_out),
     costUsd: Number(r.cost_usd), decision: r.decision ?? null, confidence: r.confidence == null ? null : Number(r.confidence), validationResult: r.validation_result ?? null,
     humanResult: r.human_result ?? null, error: r.error ?? null, warnings: r.warnings ?? [], details: r.details ?? {},
+  };
+}
+function toWorkflowDestination(r: any): WorkflowDestinationRow {
+  return {
+    registry: r.registry, option: r.option, label: { en: r.label_en, uk: r.label_uk }, description: r.description ?? '', workflowId: r.workflow_id,
+    enabled: !!r.enabled, updatedBy: r.updated_by, createdAt: iso(r.created_at), updatedAt: iso(r.updated_at),
   };
 }
 function toGraphLayout(r: any): GraphLayoutRow {
@@ -2887,6 +2896,39 @@ export class PgCoreRepository implements CoreRepository {
     if (!UUID_RE.test(runId)) return null;
     const { rows } = await this.q('SELECT data FROM workflow_checkpoints WHERE run_id = $1', [runId]);
     return rows[0]?.data ?? null;
+  }
+
+  // ── Напрямки маршрутизатора Jev (Т5.5 В1) ──────────────────────────────────
+
+  async listWorkflowDestinations(f: { registry?: string; enabledOnly?: boolean } = {}) {
+    const { rows } = await this.q(
+      `SELECT * FROM workflow_destinations WHERE ($1::text IS NULL OR registry = $1) AND (NOT $2 OR enabled) ORDER BY registry, option`,
+      [f.registry ?? null, !!f.enabledOnly],
+    );
+    return rows.map(toWorkflowDestination);
+  }
+
+  async saveWorkflowDestination(input: WorkflowDestinationInput) {
+    checkWorkflowDestination(input);
+    try {
+      const { rows } = await this.q(
+        `INSERT INTO workflow_destinations (registry, option, label_en, label_uk, description, workflow_id, enabled, updated_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (registry, option) DO UPDATE SET label_en = EXCLUDED.label_en, label_uk = EXCLUDED.label_uk, description = EXCLUDED.description,
+           workflow_id = EXCLUDED.workflow_id, enabled = EXCLUDED.enabled, updated_by = EXCLUDED.updated_by, updated_at = now()
+         RETURNING *`,
+        [input.registry, input.option, input.label.en.trim(), input.label.uk.trim(), input.description.trim(), input.workflowId, input.enabled, input.updatedBy],
+      );
+      return toWorkflowDestination(rows[0]);
+    } catch (err) {
+      if ((err as { code?: string }).code === '23503') throw new CoreRuleError('not_found', `Процес «${input.workflowId}» не знайдено`);
+      mapPgError(err);
+    }
+  }
+
+  async deleteWorkflowDestination(registry: string, option: string) {
+    const { rowCount } = await this.q('DELETE FROM workflow_destinations WHERE registry = $1 AND option = $2', [registry, option]);
+    return (rowCount ?? 0) > 0;
   }
 
   // ── Role Onboarding (Т6.3 В1) ───────────────────────────────────────────────

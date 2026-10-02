@@ -14,6 +14,7 @@ import { parseModelJson, validateAgainstSchema } from '../../ai/schema';
 import type { CoreAiModule } from '../../ai/rolePrompts';
 import { callStoryCore } from '../../storyCore/api';
 import { NodeError, type ExecEnv, type NodeExecutor, type NodeOutcome, type WfState } from './types';
+import { JEV_EXECUTORS } from './jev';
 
 const CORE_MODULES: CoreAiModule[] = ['coreAi1Classify', 'coreAi2Analysis', 'coreAi3Visual', 'coreSearchInterpret', 'coreCharacterVoice'];
 export const DEFAULT_WORKFLOW_MODULE: CoreAiModule = 'coreAi2Analysis';
@@ -218,12 +219,13 @@ export function executorFor(node: WorkflowNode, env: ExecEnv): NodeExecutor {
   if (own) return own;
   if (!isExecutableNode(node.type)) {
     const name = nodeTypeById(node.type)?.name.uk ?? node.type;
-    const when = node.type.startsWith('JEV_') ? 'Т5.5' : ['HUMAN_REVIEW', 'CANON_WRITE', 'CONTINUITY_GATE'].includes(node.type) ? 'Т5.6' : 'пізніших етапах';
+    const when = ['HUMAN_REVIEW', 'CANON_WRITE'].includes(node.type) ? 'Т5.6' : node.type === 'CONTINUITY_GATE' ? 'Т5.7' : 'пізніших етапах';
     return async () => {
       throw new NodeError(`Вузол «${name}» (${node.type}) рушій виконуватиме з ${when}`, 'not_executable');
     };
   }
-  return GENERIC_EXECUTORS[node.type];
+  // Т5.5: вузли Jev і підпроцес — у `jev.ts` (бере звідси `renderPlaceholders`; тому — лише під час виклику).
+  return GENERIC_EXECUTORS[node.type] ?? JEV_EXECUTORS[node.type];
 }
 
 export type { NodeOutcome };

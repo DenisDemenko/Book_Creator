@@ -46,6 +46,8 @@ export interface StartInput {
   extras?: Record<string, unknown>;
   /** Запуск створено (ще до виконання) — для API, що відповідає одразу. */
   onCreated?: (run: WorkflowRunRow) => void;
+  /** Т5.5: підпроцес — дочірній запуск вузла SUBGRAPH чи маршрутизатора Jev. */
+  parentRunId?: string;
 }
 
 export interface RunOutcome {
@@ -159,7 +161,7 @@ async function loadDefinition(repo: CoreRepository, run: WorkflowRunRow): Promis
 async function envFor(deps: EngineDeps, run: WorkflowRunRow, def: WorkflowDefinition, opts: { actor: CoreActor; recordUsage?: ExecEnv['recordUsage']; signal?: AbortSignal; extras?: Record<string, unknown> }): Promise<ExecEnv> {
   const binding = deps.bindings?.[run.workflowId];
   const runtime = binding ? await binding.prepare({ repo: deps.repo, run, input: run.input, services: deps.services, extras: opts.extras }) : null;
-  return { repo: deps.repo, run, definition: def, services: deps.services, binding: runtime, actor: opts.actor, recordUsage: opts.recordUsage, signal: opts.signal };
+  return { repo: deps.repo, run, definition: def, services: deps.services, binding: runtime, actor: opts.actor, recordUsage: opts.recordUsage, signal: opts.signal, engine: deps };
 }
 
 /** Виконати (чи продовжити) граф до кінця або паузи; підсумувати запуск. */
@@ -196,6 +198,7 @@ export async function startRun(deps: EngineDeps, s: StartInput): Promise<RunOutc
   const run = await repo.addWorkflowRun({
     workflowId: s.workflowId, versionId: version.id, version: version.version, definitionHash: version.definitionHash,
     projectId: s.projectId ?? null, trigger: s.trigger, jobId: s.jobId ?? null, input: s.input, inputHash: inputHashOf(s.input), startedBy: s.actor,
+    ...(s.parentRunId ? { mode: 'subgraph' as const, parentRunId: s.parentRunId } : {}),
   });
   s.onCreated?.(run);
   const def = version.definition as unknown as WorkflowDefinition;

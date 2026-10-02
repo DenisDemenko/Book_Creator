@@ -783,7 +783,13 @@ registerGitCommandRoutes(app);
       void dropRealtimeParticipant(projectId, userId);
     },
   });
-  // Т5.4: рушій процесів ШІ (LangGraph) — опубліковані процеси AI-1, AI-2, голосу героя.
+  // Jev (TypeSafe) за ключем платформи чи TYPESAFE_API_KEY; без ключа — null (запасний LLM).
+  const typesafeJev = async () => {
+    const key = (await platformKeyFor('typesafe').catch(() => undefined)) || process.env.TYPESAFE_API_KEY?.trim();
+    return key ? new HttpJevAdapter(key, { model: process.env.TYPESAFE_JEV_MODEL?.trim() || JEV_MODEL }) : null;
+  };
+  // Т5.4: рушій процесів ШІ (LangGraph) — опубліковані процеси AI-1, AI-2, голосу героя;
+  // Т5.5: вузли Jev (Jev → запасний LLM AI-2).
   const workflowBindings = systemBindings({
     loadStudio: async (projectId, entity) => studioFromBook((await getStoredBookForRealtime(projectId))?.book as any, entity),
     interview: {
@@ -794,7 +800,7 @@ registerGitCommandRoutes(app);
   const workflowEngine = (): EngineDeps | null => {
     const repo = getCoreRepository();
     return repo
-      ? { repo, services: { generate: aiRoleGenerateViaCore, resolveModel: (module) => resolveModuleModelId(module), loadTemplate: loadCoreAiRoleTemplate }, bindings: workflowBindings }
+      ? { repo, services: { generate: aiRoleGenerateViaCore, resolveModel: (module) => resolveModuleModelId(module), loadTemplate: loadCoreAiRoleTemplate, jev: typesafeJev }, bindings: workflowBindings }
       : null;
   };
   registerProjectRoutes(app, {
@@ -845,10 +851,7 @@ registerGitCommandRoutes(app);
     // Прототип FLC етапу 0 (Т1.6): Jev (TypeSafe) за ключем платформи чи TYPESAFE_API_KEY,
     // LLM — модель ролі AI-2 з «Ядра AI»; без ключа Jev — запасний шлях через LLM.
     flc: {
-      jev: async () => {
-        const key = (await platformKeyFor('typesafe').catch(() => undefined)) || process.env.TYPESAFE_API_KEY?.trim();
-        return key ? new HttpJevAdapter(key, { model: process.env.TYPESAFE_JEV_MODEL?.trim() || JEV_MODEL }) : null;
-      },
+      jev: typesafeJev,
       // Т2.5 В1: адаптер LLM з `server/ai/adapters/llm` — той самий виклик ролі AI-2 через ядро ШІ.
       llm: (projectId, actor) => llmViaCore(aiRoleGenerateViaCore, () => resolveModuleModelId('coreAi2Analysis'), projectId, actor),
     },

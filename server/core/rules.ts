@@ -100,6 +100,7 @@ import {
   type WorkflowRunPatch,
   type WorkflowRunRow,
   type WorkflowStepInput,
+  type WorkflowDestinationInput,
   WORKFLOW_RUN_MODES,
   WORKFLOW_RUN_STATUSES,
 } from './types';
@@ -762,7 +763,7 @@ export function checkWorkflowEvent(input: { workflowId: string; action: string; 
 
 // ── Запуски процесів ШІ (Т5.4 В1) ────────────────────────────────────────────
 
-const RUN_TRIGGER_RE = /^(job:[a-z_]{1,40}|interview|manual|replay|fork)$/;
+const RUN_TRIGGER_RE = /^(job:[a-z_]{1,40}|interview|manual|replay|fork|subgraph)$/;
 const RUN_ACTOR_RE = /^(user|system|ai):.+/;
 
 export function checkWorkflowRun(input: WorkflowRunInput): void {
@@ -776,6 +777,7 @@ export function checkWorkflowRun(input: WorkflowRunInput): void {
   if (!RUN_ACTOR_RE.test(input.startedBy)) throw new CoreRuleError('bad_actor', 'Хто запустив — людина, система чи ШІ');
   if (input.mode !== undefined && !(WORKFLOW_RUN_MODES as readonly string[]).includes(input.mode)) throw new CoreRuleError('bad_input', `Невідомий режим «${input.mode}»`);
   if ((input.mode === 'replay' || input.mode === 'fork') && !input.parentRunId) throw new CoreRuleError('bad_input', 'Повтор і відгалуження — від наявного запуску');
+  if (input.mode === 'subgraph' && !input.parentRunId) throw new CoreRuleError('bad_input', 'Підпроцес — лише з батьківського запуску');
   if (input.projectId != null && (String(input.projectId).length < 1 || String(input.projectId).length > 200)) throw new CoreRuleError('bad_input', 'id проєкту — до 200 символів');
 }
 
@@ -789,6 +791,20 @@ export function checkWorkflowRunPatch(current: Pick<WorkflowRunRow, 'status'>, p
   for (const k of ['tokensIn', 'tokensOut', 'latencyMs'] as const) if (patch[k] !== undefined && (!Number.isInteger(patch[k]) || patch[k]! < 0)) throw new CoreRuleError('bad_input', `${k} — ціле ≥ 0`);
   if (patch.costUsd !== undefined && (!Number.isFinite(patch.costUsd) || patch.costUsd < 0)) throw new CoreRuleError('bad_input', 'Вартість ≥ 0');
   if (patch.error != null && String(patch.error).length > 4000) patch.error = String(patch.error).slice(0, 4000);
+}
+
+const DEST_ID_RE = /^[a-z][a-z0-9_]{0,63}$/;
+/** Т5.5: напрямок маршрутизатора Jev (§10). */
+export function checkWorkflowDestination(input: WorkflowDestinationInput): void {
+  if (!DEST_ID_RE.test(String(input.registry ?? ''))) throw new CoreRuleError('bad_input', 'Реєстр — латиниця, цифри й «_», з літери, до 64 символів');
+  if (!DEST_ID_RE.test(String(input.option ?? ''))) throw new CoreRuleError('bad_input', 'Варіант — латиниця, цифри й «_», з літери, до 64 символів');
+  const en = String(input.label?.en ?? '').trim();
+  const uk = String(input.label?.uk ?? '').trim();
+  if (!en || !uk || en.length > 200 || uk.length > 200) throw new CoreRuleError('bad_input', 'Назва напрямку — англійською й українською, до 200 символів (ТЗ §0)');
+  if (typeof input.description !== 'string' || input.description.length > 255) throw new CoreRuleError('bad_input', 'Опис для Jev — до 255 символів');
+  if (!WORKFLOW_ROW_ID_RE.test(String(input.workflowId ?? ''))) throw new CoreRuleError('bad_input', 'Оберіть процес напрямку');
+  if (typeof input.enabled !== 'boolean') throw new CoreRuleError('bad_input', 'Увімкнено — так чи ні');
+  checkOntologyActor(input.updatedBy);
 }
 
 export function checkWorkflowStep(input: WorkflowStepInput): void {

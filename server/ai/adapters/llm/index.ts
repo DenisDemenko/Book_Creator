@@ -9,7 +9,8 @@
  * крок чернетки прототипу (Т1.6).
  */
 
-export type LlmJson = (system: string, user: string) => Promise<{ text: string; modelId: string; inputTokens: number; outputTokens: number }>;
+/** `costUsd` — вартість виклику, коли рушій її знає (Т5.5: облік у процесах ШІ). */
+export type LlmJson = (system: string, user: string) => Promise<{ text: string; modelId: string; inputTokens: number; outputTokens: number; costUsd?: number }>;
 
 /** Те, що потрібно від ядра ШІ, — лише форма виклику ролі (без імпорту `aiCore` тут: адаптер не тягне сервер у тести). */
 export type CoreRoleGenerate = (input: {

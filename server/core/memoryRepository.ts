@@ -68,6 +68,7 @@ import {
   checkWorkflowRun,
   checkWorkflowRunPatch,
   checkWorkflowStep,
+  checkWorkflowDestination,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isSearchableKind, isValidEmbedding, memoryTextScore } from './search/text';
 import { CORE_STATUSES, CONTINUITY_ISSUE_STATUSES,
@@ -77,6 +78,8 @@ import { CORE_STATUSES, CONTINUITY_ISSUE_STATUSES,
   WorkflowRunStatus,
   WorkflowStepRow,
   WorkflowStepInput,
+  WorkflowDestinationRow,
+  WorkflowDestinationInput,
 } from './types';
 import type {
   AliasRow,
@@ -248,6 +251,7 @@ export class MemoryCoreRepository implements CoreRepository {
   private workflowVersions: WorkflowVersionRow[] = [];
   private workflowEvents: WorkflowEventRow[] = [];
   private workflowRuns: WorkflowRunRow[] = [];
+  private workflowDestinations: WorkflowDestinationRow[] = [];
   private workflowSteps: WorkflowStepRow[] = [];
   private workflowCheckpoints = new Map<string, Record<string, unknown>>();
   private graphLayouts: GraphLayoutRow[] = [];
@@ -2105,6 +2109,35 @@ export class MemoryCoreRepository implements CoreRepository {
   async getWorkflowCheckpoint(runId: string) {
     const d = this.workflowCheckpoints.get(runId);
     return d ? clone(d) : null;
+  }
+
+  // ── Напрямки маршрутизатора Jev (Т5.5 В1) ──────────────────────────────────
+
+  async listWorkflowDestinations(f: { registry?: string; enabledOnly?: boolean } = {}) {
+    return this.workflowDestinations
+      .filter((d) => (!f.registry || d.registry === f.registry) && (!f.enabledOnly || d.enabled))
+      .slice().sort((a, b) => a.registry.localeCompare(b.registry) || a.option.localeCompare(b.option)).map(clone);
+  }
+
+  async saveWorkflowDestination(input: WorkflowDestinationInput) {
+    checkWorkflowDestination(input);
+    if (!this.workflows.some((w) => w.id === input.workflowId)) throw notFound(`Процес «${input.workflowId}»`);
+    const t = now();
+    const i = this.workflowDestinations.findIndex((d) => d.registry === input.registry && d.option === input.option);
+    const row: WorkflowDestinationRow = {
+      registry: input.registry, option: input.option, label: { en: input.label.en.trim(), uk: input.label.uk.trim() }, description: input.description.trim(),
+      workflowId: input.workflowId, enabled: input.enabled, updatedBy: input.updatedBy, createdAt: i >= 0 ? this.workflowDestinations[i].createdAt : t, updatedAt: t,
+    };
+    if (i >= 0) this.workflowDestinations[i] = row;
+    else this.workflowDestinations.push(row);
+    return clone(row);
+  }
+
+  async deleteWorkflowDestination(registry: string, option: string) {
+    const i = this.workflowDestinations.findIndex((d) => d.registry === registry && d.option === option);
+    if (i < 0) return false;
+    this.workflowDestinations.splice(i, 1);
+    return true;
   }
 
   async getGraphLayout(kind: 'workflow' | 'ontology', graphId: string, versionRef: string) {

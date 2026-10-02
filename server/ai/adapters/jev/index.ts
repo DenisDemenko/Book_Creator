@@ -30,9 +30,9 @@
  * дія — з дозволеного списку; інакше — найімовірніша дозволена, з позначкою.
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { CharacterSnapshot, DecisionResult, JevQuestion } from '../../contracts';
-import { snapshotHash } from '../../contracts';
+import { canonicalJson, snapshotHash } from '../../contracts';
 import { parseModelJson } from '../../../core/ai/schema';
 
 export type { JevQuestion } from '../../contracts';
@@ -46,6 +46,19 @@ export interface JevAdapter {
   readonly name: 'jev' | 'mock' | 'llm_fallback';
   /** Оцінити знімок атомарними питаннями. Головний вибір — `next_action`, а без нього — перше питання choice. */
   evaluate(snapshot: CharacterSnapshot, questions: JevQuestion[], opts?: { signal?: AbortSignal }): Promise<DecisionResult>;
+  /**
+   * Т5.5: ті самі питання над довільним станом процесу ШІ (не лише знімком
+   * героя). Відповіді — у формі провайдера (`answers`), нормалізує рушій.
+   */
+  askState?(state: Record<string, unknown>, questions: JevQuestion[], opts?: { signal?: AbortSignal }): Promise<JevRawAnswer>;
+}
+
+/** Сира відповідь Jev над станом (Т5.5): відповіді за id питань, модель, витрата. */
+export interface JevRawAnswer {
+  answers: Record<string, any>;
+  model: string;
+  usage: { input_tokens: number; output_tokens: number };
+  latency_ms: number;
 }
 
 export class JevError extends Error {
@@ -199,9 +212,19 @@ export class HttpJevAdapter implements JevAdapter {
 
   async evaluate(snapshot: CharacterSnapshot, questions: JevQuestion[], opts: { signal?: AbortSignal } = {}): Promise<DecisionResult> {
     const started = Date.now();
+    const raw = await this.request(jevState(snapshot), questions, opts);
+    return normalize('jev', snapshot, questions, raw.answers, raw.model, raw.usage, started);
+  }
+
+  async askState(state: Record<string, unknown>, questions: JevQuestion[], opts: { signal?: AbortSignal } = {}): Promise<JevRawAnswer> {
+    return this.request(state, questions, opts);
+  }
+
+  private async request(state: Record<string, unknown>, questions: JevQuestion[], opts: { signal?: AbortSignal }): Promise<JevRawAnswer> {
+    const started = Date.now();
     const body = {
       model: this.opts.model ?? JEV_MODEL,
-      state: jevState(snapshot),
+      state,
       questions: Object.fromEntries(
         questions.map((q) => [
           q.id,
@@ -231,10 +254,12 @@ export class HttpJevAdapter implements JevAdapter {
       const retryable = res.status === 429 || res.status === 529 || res.status >= 500;
       throw new JevError(`Jev ${res.status}: ${json?.error?.message ?? json?.detail ?? 'помилка'}`, res.status, retryable);
     }
-    return normalize('jev', snapshot, questions, json.answers ?? {}, String(json.model ?? body.model), {
-      input_tokens: Number(json.usage?.input_tokens) || 0,
-      output_tokens: Number(json.usage?.output_tokens) || 0,
-    }, started);
+    return {
+      answers: json.answers ?? {},
+      model: String(json.model ?? body.model),
+      usage: { input_tokens: Number(json.usage?.input_tokens) || 0, output_tokens: Number(json.usage?.output_tokens) || 0 },
+      latency_ms: Date.now() - started,
+    };
   }
 }
 
@@ -246,26 +271,37 @@ export class MockJevAdapter implements JevAdapter {
   readonly name = 'mock' as const;
   async evaluate(snapshot: CharacterSnapshot, questions: JevQuestion[]): Promise<DecisionResult> {
     const started = Date.now();
-    const h = snapshotHash(snapshot);
-    const seed = (i: number) => parseInt(h.slice(i * 4, i * 4 + 4), 16) / 0xffff;
-    const answers: Record<string, any> = {};
-    questions.forEach((q, qi) => {
-      if (q.kind === 'choice') {
-        const keys = Object.keys(q.options);
-        const w = keys.map((_, i) => 0.2 + seed((qi + i) % 8));
-        const sum = w.reduce((a, b) => a + b, 0);
-        const probabilities = Object.fromEntries(keys.map((k, i) => [k, Math.round((w[i] / sum) * 1000) / 1000]));
-        const choice = keys[w.indexOf(Math.max(...w))];
-        answers[q.id] = { type: 'choice', choice, probabilities, confidence: Math.round((Math.max(...w) / sum) * 100) / 100 };
-      } else if (q.kind === 'noul') {
-        answers[q.id] = { type: 'noul', probability: Math.round(seed(qi) * 1000) / 1000, confidence: 0.5 };
-      } else {
-        const level = Math.floor(seed(qi) * q.levels.length) % q.levels.length;
-        answers[q.id] = { type: 'score', score: level, probabilities: Object.fromEntries(q.levels.map((_, i) => [String(i), i === level ? 1 : 0])), confidence: 0.5 };
-      }
-    });
+    const answers = mockAnswers(snapshotHash(snapshot), questions);
     return normalize('mock', snapshot, questions, answers, 'mock-jev-0', { input_tokens: 0, output_tokens: 0 }, started);
   }
+
+  /** Т5.5: детерміновано від відбитка стану процесу. */
+  async askState(state: Record<string, unknown>, questions: JevQuestion[]): Promise<JevRawAnswer> {
+    const h = createHash('sha256').update(canonicalJson({ state, questions })).digest('hex');
+    return { answers: mockAnswers(h, questions), model: 'mock-jev-0', usage: { input_tokens: 0, output_tokens: 0 }, latency_ms: 0 };
+  }
+}
+
+/** Відповіді підставного Jev із відбитка (форма справжнього Jev). */
+function mockAnswers(h: string, questions: JevQuestion[]): Record<string, any> {
+  const seed = (i: number) => parseInt(h.slice(i * 4, i * 4 + 4), 16) / 0xffff;
+  const answers: Record<string, any> = {};
+  questions.forEach((q, qi) => {
+    if (q.kind === 'choice') {
+      const keys = Object.keys(q.options);
+      const w = keys.map((_, i) => 0.2 + seed((qi + i) % 8));
+      const sum = w.reduce((a, b) => a + b, 0);
+      const probabilities = Object.fromEntries(keys.map((k, i) => [k, Math.round((w[i] / sum) * 1000) / 1000]));
+      const choice = keys[w.indexOf(Math.max(...w))];
+      answers[q.id] = { type: 'choice', choice, probabilities, confidence: Math.round((Math.max(...w) / sum) * 100) / 100 };
+    } else if (q.kind === 'noul') {
+      answers[q.id] = { type: 'noul', probability: Math.round(seed(qi) * 1000) / 1000, confidence: 0.5 };
+    } else {
+      const level = Math.floor(seed(qi) * q.levels.length) % q.levels.length;
+      answers[q.id] = { type: 'score', score: level, probabilities: Object.fromEntries(q.levels.map((_, i) => [String(i), i === level ? 1 : 0])), confidence: 0.5 };
+    }
+  });
+  return answers;
 }
 
 import type { LlmJson } from '../llm';
@@ -281,9 +317,19 @@ export class LlmFallbackJevAdapter implements JevAdapter {
   constructor(private readonly llm: LlmJson) {}
   async evaluate(snapshot: CharacterSnapshot, questions: JevQuestion[]): Promise<DecisionResult> {
     const started = Date.now();
-    const system = 'Ти оцінюєш стан персонажа книги за наданим знімком. Відповідай ЛИШЕ JSON без пояснень. Не вигадуй фактів поза знімком.';
+    const raw = await this.ask(jevState(snapshot), questions, 'Ти оцінюєш стан персонажа книги за наданим знімком. Відповідай ЛИШЕ JSON без пояснень. Не вигадуй фактів поза знімком.');
+    return normalize('llm_fallback', snapshot, questions, raw.answers, raw.model, raw.usage, started);
+  }
+
+  /** Т5.5: ті самі питання над станом процесу ШІ. */
+  async askState(state: Record<string, unknown>, questions: JevQuestion[]): Promise<JevRawAnswer> {
+    return this.ask(state, questions, 'Ти ухвалюєш типізоване рішення над наданим станом процесу. Відповідай ЛИШЕ JSON без пояснень. Не вигадуй фактів поза станом.');
+  }
+
+  private async ask(state: Record<string, unknown>, questions: JevQuestion[], system: string): Promise<JevRawAnswer & { costUsd?: number }> {
+    const started = Date.now();
     const user = [
-      `Стан:\n${JSON.stringify(jevState(snapshot), null, 1)}`,
+      `Стан:\n${JSON.stringify(state, null, 1)}`,
       ...questions.map((q) =>
         q.kind === 'choice'
           ? `Питання "${q.id}" (вибір): ${q.instructions}\nВаріанти: ${Object.keys(q.options).join(', ')}`
@@ -306,7 +352,7 @@ export class LlmFallbackJevAdapter implements JevAdapter {
       }
       else if (Number.isFinite(Number(a.score))) answers[q.id] = { score: Math.max(0, Math.min(q.levels.length - 1, Number(a.score))) };
     }
-    return normalize('llm_fallback', snapshot, questions, answers, `llm:${out.modelId}`, { input_tokens: out.inputTokens, output_tokens: out.outputTokens }, started);
+    return { answers, model: `llm:${out.modelId}`, usage: { input_tokens: out.inputTokens, output_tokens: out.outputTokens }, latency_ms: Date.now() - started, ...(typeof out.costUsd === 'number' ? { costUsd: out.costUsd } : {}) };
   }
 }
 

@@ -105,14 +105,75 @@ const MODEL_PARAMS: ParamDef[] = [
   { id: 'alternate_model', name: N('Alternate model', 'Резервна модель'), type: 'string', hint: 'Id моделі для повтору після збою чи тайм-ауту' },
 ];
 
-/** Спільні поля вузлів Jev (§36): питання, вхідний стан, поріг, відображення, журналювання. */
-const JEV_COMMON: ParamDef[] = [
-  { id: 'question', name: N('Question / Definition', 'Питання / визначення'), type: 'text', required: true },
-  { id: 'input_state', name: N('Input state', 'Вхідний стан'), type: 'string_list', hint: 'Ключі стану, які бачить Jev' },
-  { id: 'threshold', name: N('Threshold', 'Поріг'), type: 'number', min: 0, max: 1, default: 0.6 },
-  { id: 'output_mapping', name: N('Output mapping', 'Відображення виходу'), type: 'json' },
+/**
+ * Спільні поля вузлів Jev (§36): питання, вхідний стан, поріг, відображення,
+ * журналювання. Поріг (§8.2) — для NOUL і GATE це імовірність «так»; для
+ * решти — найменша впевненість, нижче якої рішення йде резервним маршрутом
+ * (0 — без порогу).
+ */
+const jevCommon = (threshold: number, hint: string): ParamDef[] => [
+  { id: 'question', name: N('Question / Definition', 'Питання / визначення'), type: 'text', required: true, hint: '{{input.ключ}} і {{змінна}} підставляються зі стану' },
+  { id: 'input_state', name: N('Input state', 'Вхідний стан'), type: 'string_list', hint: 'Ключі стану, які бачить Jev: input.*, vars.*, output, confidence; порожньо — вхід, змінні й вихід' },
+  { id: 'threshold', name: N('Threshold', 'Поріг'), type: 'number', min: 0, max: 1, default: threshold, hint },
+  { id: 'output_mapping', name: N('Output mapping', 'Відображення виходу'), type: 'json', hint: '{"змінна": "поле"}: selected, distribution, confidence, probability, score, value, source…; без нього — vars.<id вузла>' },
   { id: 'logging', name: N('Logging', 'Журналювання'), type: 'boolean', default: true },
 ];
+
+/** Дії маршрутизації за впевненістю (§16). */
+export const CONFIDENCE_ACTIONS = ['AUTO_ROUTE', 'SECOND_OPINION', 'HUMAN_REVIEW', 'FALLBACK'];
+export const DECISION_IMPORTANCE = ['low', 'medium', 'high', 'critical'];
+export const DECISION_RISK = ['low', 'medium', 'high'];
+
+/**
+ * Т5.5: маршрутизація за впевненістю (§16) і узгодження кількох моделей
+ * (§17) — на кожен вузол окремо. Типово все AUTO_ROUTE і без узгодження:
+ * вузол поводиться як просте рішення.
+ */
+const JEV_ROUTING: ParamDef[] = [
+  { id: 'confidence_high', name: N('High confidence from', 'Висока впевненість від'), type: 'number', min: 0, max: 1, default: 0.9 },
+  { id: 'confidence_medium', name: N('Medium confidence from', 'Середня впевненість від'), type: 'number', min: 0, max: 1, default: 0.6 },
+  { id: 'on_high', name: N('On high confidence', 'Якщо впевненість висока'), type: 'enum', options: CONFIDENCE_ACTIONS, default: 'AUTO_ROUTE' },
+  { id: 'on_medium', name: N('On medium confidence', 'Якщо середня'), type: 'enum', options: CONFIDENCE_ACTIONS, default: 'AUTO_ROUTE', hint: 'Невідома впевненість (запасний LLM її не дає) — середня' },
+  { id: 'on_low', name: N('On low confidence', 'Якщо низька'), type: 'enum', options: CONFIDENCE_ACTIONS, default: 'AUTO_ROUTE' },
+  { id: 'second_opinion_model', name: N('Second opinion model', 'Модель другої перевірки'), type: 'string', hint: 'Порожньо — модель AI-2 з «Ядра AI»' },
+  { id: 'importance', name: N('Importance', 'Важливість рішення'), type: 'enum', options: DECISION_IMPORTANCE, default: 'medium' },
+  { id: 'risk', name: N('Risk', 'Ризик рішення'), type: 'enum', options: DECISION_RISK, default: 'low' },
+  { id: 'consensus_from_importance', name: N('Consensus from importance', 'Узгодження моделей від важливості'), type: 'enum', options: ['never', 'medium', 'high', 'critical'], default: 'never' },
+  { id: 'consensus_from_risk', name: N('Consensus from risk', 'Узгодження моделей від ризику'), type: 'enum', options: ['never', 'medium', 'high'], default: 'never' },
+  { id: 'consensus_budget', name: N('Consensus budget, $', 'Узгодження — поки витрати запуску менші, $'), type: 'number', min: 0, max: 100, default: 0.05 },
+  { id: 'consensus_model_a', name: N('Consensus model A', 'Модель A узгодження'), type: 'string', hint: 'Порожньо — модель AI-2 з «Ядра AI»' },
+  { id: 'consensus_model_b', name: N('Consensus model B', 'Модель B узгодження'), type: 'string', hint: 'Порожньо — модель AI-1 з «Ядра AI»' },
+];
+
+const JEV_CONFIDENCE_HINT = 'Найменша впевненість; нижче — резервний маршрут (0 — без порогу)';
+const JEV_PROBABILITY_HINT = 'Імовірність «так», від якої відповідь — «так» (§8.2)';
+const jevParams = (own: ParamDef[], probability = false): ParamDef[] => [
+  ...jevCommon(probability ? 0.6 : 0, probability ? JEV_PROBABILITY_HINT : JEV_CONFIDENCE_HINT),
+  ...own,
+  ...JEV_ROUTING,
+];
+
+const REVIEW_ACTIONS = ['SECOND_OPINION', 'HUMAN_REVIEW'];
+/** Т5.5: чи потрібна вузлу гілка `review` (§16 — друга перевірка чи людина, §17 — розбіжність моделей). */
+export function needsReviewBranch(node: Pick<WorkflowNode, 'type' | 'params'>): boolean {
+  if (!node.type?.startsWith('JEV_')) return false;
+  const p = node.params ?? {};
+  return ['on_high', 'on_medium', 'on_low'].some((k) => REVIEW_ACTIONS.includes(String(p[k] ?? ''))) || (!!p.consensus_from_importance && p.consensus_from_importance !== 'never') || (!!p.consensus_from_risk && p.consensus_from_risk !== 'never');
+}
+
+/** Т5.5: реєстр напрямків маршрутизатора (порожньо — гілки на канві). */
+export const routerRegistry = (node: Pick<WorkflowNode, 'type' | 'params'>): string => (node.type === 'JEV_ROUTER' && typeof node.params?.registry === 'string' ? node.params.registry.trim() : '');
+
+export const DESTINATION_ID_RE = /^[a-z][a-z0-9_]{0,63}$/;
+
+/** Питання пакета рішень Jev (§22). */
+export interface BundleQuestion {
+  id: string;
+  kind: 'choice' | 'score' | 'noul';
+  question: string;
+  options?: string[];
+  levels?: string[];
+}
 
 /** Операції Story Core API (§33) — графи не мають довільного SQL. */
 export const STORY_CORE_READ_OPS = ['get_schema', 'get_schema_version', 'get_entity', 'search_entities', 'get_relations', 'get_mentions', 'get_sources'];
@@ -150,19 +211,27 @@ export const NODE_TYPES: NodeTypeDef[] = [
     params: [...MODEL_PARAMS, { id: 'tools', name: N('Tools', 'Інструменти'), type: 'string_list' }, { id: 'max_steps', name: N('Max steps', 'Найбільше кроків'), type: 'integer', min: 1, max: 20, required: true, default: 5 }] },
   { id: 'TOOL', group: 'ai', name: N('Tool', 'Інструмент'), description: 'Виклик інструмента з реєстру платформи.', inputs: 'one', outputs: ['out'],
     params: [{ id: 'tool', name: N('Tool', 'Інструмент'), type: 'string', required: true }, { id: 'timeout', name: N('Timeout, s', 'Тайм-аут, с'), type: 'integer', min: 1, max: 600, default: 30 }] },
-  // JEV (§36)
+  // JEV (§36; виконання — Т5.5)
   { id: 'JEV_CHOICE', group: 'jev', name: N('Jev Choice', 'Jev-вибір'), description: 'Вибір одного з варіантів; кожен варіант — окрема гілка.', inputs: 'one', outputs: ['fallback'], dynamicOutputs: 'options',
-    params: [...JEV_COMMON, { id: 'options', name: N('Options', 'Варіанти'), type: 'string_list', required: true, minItems: 2 }] },
+    params: jevParams([{ id: 'options', name: N('Options', 'Варіанти'), type: 'string_list', required: true, minItems: 2 }]) },
   { id: 'JEV_SCORE', group: 'jev', name: N('Jev Score', 'Jev-оцінка за шкалою'), description: 'Оцінка за шкалою.', inputs: 'one', outputs: ['out', 'fallback'],
-    params: [...JEV_COMMON, { id: 'scale_min', name: N('Scale min', 'Шкала від'), type: 'number', default: 0 }, { id: 'scale_max', name: N('Scale max', 'Шкала до'), type: 'number', default: 10 }] },
-  { id: 'JEV_NOUL', group: 'jev', name: N('Jev Noul', 'Jev-оцінка істинності'), description: 'Істинність твердження проти порогу.', inputs: 'one', outputs: ['true', 'false', 'fallback'], params: JEV_COMMON },
-  { id: 'JEV_ROUTER', group: 'jev', name: N('Jev Router', 'Jev-маршрутизатор'), description: 'Направляє виконання в одну з гілок (підграф — без переписування маршрутизатора).', inputs: 'one', outputs: ['fallback'], dynamicOutputs: 'routes',
-    params: [...JEV_COMMON, { id: 'routes', name: N('Routes', 'Маршрути'), type: 'string_list', required: true, minItems: 2 }] },
-  { id: 'JEV_GATE', group: 'jev', name: N('Jev Gate', 'Jev-шлюз'), description: 'Пропускає далі лише вище порогу.', inputs: 'one', outputs: ['pass', 'block', 'fallback'], params: JEV_COMMON },
-  { id: 'JEV_EVALUATOR', group: 'jev', name: N('Jev Evaluator', 'Jev-оцінювач'), description: 'Оцінка за критеріями; не стає фактом канону.', inputs: 'one', outputs: ['out', 'fallback'],
-    params: [...JEV_COMMON, { id: 'criteria', name: N('Criteria', 'Критерії'), type: 'string_list', required: true, minItems: 1 }] },
-  { id: 'JEV_DECISION_BUNDLE', group: 'jev', name: N('Jev Decision Bundle', 'Пакет рішень Jev'), description: 'Кілька питань Jev одним пакетом.', inputs: 'one', outputs: ['out', 'fallback'],
-    params: [...JEV_COMMON, { id: 'questions', name: N('Questions', 'Питання'), type: 'string_list', required: true, minItems: 1 }] },
+    params: jevParams([
+      { id: 'scale_min', name: N('Scale min', 'Шкала від'), type: 'number', default: 0 },
+      { id: 'scale_max', name: N('Scale max', 'Шкала до'), type: 'number', default: 10 },
+      { id: 'levels', name: N('Levels', 'Рівні шкали'), type: 'string_list', hint: 'Від найнижчого, 2–10; порожньо — 6 рівнів між «від» і «до»' },
+    ]) },
+  { id: 'JEV_NOUL', group: 'jev', name: N('Jev Noul', 'Jev-оцінка істинності'), description: 'Істинність твердження проти порогу.', inputs: 'one', outputs: ['true', 'false', 'fallback'], params: jevParams([], true) },
+  { id: 'JEV_ROUTER', group: 'jev', name: N('Jev Router', 'Jev-маршрутизатор'), description: 'Направляє виконання в одну з гілок або в процес із реєстру напрямків (новий напрямок — без переписування маршрутизатора).', inputs: 'one', outputs: ['fallback'], dynamicOutputs: 'routes',
+    params: jevParams([
+      { id: 'registry', name: N('Destination registry', 'Реєстр напрямків'), type: 'string', hint: 'Задано — варіанти беруться з реєстру, обраний процес виконується як підпроцес (гілка out)' },
+      { id: 'routes', name: N('Routes', 'Маршрути'), type: 'string_list', hint: 'Без реєстру — щонайменше дві гілки на канві' },
+    ]) },
+  { id: 'JEV_GATE', group: 'jev', name: N('Jev Gate', 'Jev-шлюз'), description: 'Питання + поріг + маршрут (§20): пропускає далі, коли відповідь потрібна.', inputs: 'one', outputs: ['pass', 'block', 'fallback'],
+    params: jevParams([{ id: 'pass_when', name: N('Pass when', 'Пропускати, коли відповідь'), type: 'enum', options: ['true', 'false'], default: 'true', hint: '«Суперечить канону?» — пропускати, коли «ні» (false)' }], true) },
+  { id: 'JEV_EVALUATOR', group: 'jev', name: N('Jev Evaluator', 'Jev-оцінювач'), description: 'Оцінка 0–10 за критеріями; не стає фактом канону (§21).', inputs: 'one', outputs: ['out', 'fallback'],
+    params: jevParams([{ id: 'criteria', name: N('Criteria', 'Критерії'), type: 'string_list', required: true, minItems: 1 }]) },
+  { id: 'JEV_DECISION_BUNDLE', group: 'jev', name: N('Jev Decision Bundle', 'Пакет рішень Jev'), description: 'Кілька незалежних питань Jev над одним станом одним запитом (§22).', inputs: 'one', outputs: ['out', 'fallback'],
+    params: jevParams([{ id: 'questions', name: N('Questions', 'Питання'), type: 'json', required: true, hint: '[{"id","kind":"choice|score|noul","question","options"|"levels"}], 1–10' }]) },
   // CONTROL
   { id: 'CONDITION', group: 'control', name: N('Condition', 'Умова'), description: 'Розгалуження за умовою над станом.', inputs: 'one', outputs: ['true', 'false'],
     params: [{ id: 'expression', name: N('Expression', 'Умова'), type: 'string', required: true, hint: 'Напр. state.confidence >= 0.7' }] },
@@ -193,11 +262,15 @@ export const NODE_TYPES: NodeTypeDef[] = [
 const NODE_TYPE_MAP = new Map(NODE_TYPES.map((t) => [t.id, t]));
 
 /**
- * Т5.4: вузли, які рушій уже виконує. Решта зупиняє запуск зрозумілою
- * помилкою: Jev — Т5.5; HUMAN_REVIEW, CANON_WRITE, CONTINUITY_GATE — Т5.6;
- * AGENT, PARALLEL / MERGE / LOOP, SUBGRAPH — пізніше.
+ * Вузли, які рушій уже виконує (Т5.4, Т5.5). Решта зупиняє запуск
+ * зрозумілою помилкою: HUMAN_REVIEW, CANON_WRITE — Т5.6; CONTINUITY_GATE —
+ * Т5.7; AGENT, PARALLEL / MERGE / LOOP — пізніше.
  */
-export const EXECUTABLE_NODE_TYPES = ['START', 'END', 'CONTEXT', 'MEMORY', 'QUERY', 'PROMPT', 'LLM', 'TOOL', 'CONDITION', 'VALIDATOR', 'PROPOSAL'];
+export const EXECUTABLE_NODE_TYPES = [
+  'START', 'END', 'CONTEXT', 'MEMORY', 'QUERY', 'PROMPT', 'LLM', 'TOOL', 'CONDITION', 'VALIDATOR', 'PROPOSAL',
+  // Т5.5: шар рішень Jev і підпроцес.
+  'SUBGRAPH', 'JEV_CHOICE', 'JEV_SCORE', 'JEV_NOUL', 'JEV_ROUTER', 'JEV_GATE', 'JEV_EVALUATOR', 'JEV_DECISION_BUNDLE',
+];
 export const isExecutableNode = (type: string): boolean => EXECUTABLE_NODE_TYPES.includes(type);
 export const nodeTypeById = (id: string): NodeTypeDef | undefined => NODE_TYPE_MAP.get(id);
 
@@ -240,8 +313,31 @@ const NODE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 export function nodeOutputs(node: WorkflowNode): string[] {
   const t = nodeTypeById(node.type);
   if (!t) return [];
+  const review = needsReviewBranch(node) ? ['review'] : [];
+  // Т5.5: маршрутизатор із реєстром напрямків — підпроцес і далі `out`.
+  if (routerRegistry(node)) return ['out', ...t.outputs, ...review];
   const extra = t.dynamicOutputs && Array.isArray(node.params?.[t.dynamicOutputs]) ? (node.params[t.dynamicOutputs] as unknown[]).map(String).filter(Boolean) : [];
-  return [...extra, ...t.outputs];
+  return [...extra, ...t.outputs, ...review];
+}
+
+/** Т5.5: питання пакета рішень Jev — розбір і перевірка (null — гаразд). */
+export function bundleQuestionsError(v: unknown): string | null {
+  if (!Array.isArray(v) || v.length < 1 || v.length > 10) return 'від 1 до 10 питань';
+  const ids = new Set<string>();
+  for (const [i, q] of v.entries()) {
+    const at = `питання ${i + 1}`;
+    if (!q || typeof q !== 'object') return `${at}: має бути об'єктом`;
+    const x = q as Record<string, unknown>;
+    if (typeof x.id !== 'string' || !DESTINATION_ID_RE.test(x.id)) return `${at}: id — латиниця, цифри й «_», з літери`;
+    if (ids.has(x.id)) return `${at}: id «${x.id}» повторюється`;
+    ids.add(x.id);
+    if (!['choice', 'score', 'noul'].includes(String(x.kind))) return `${at}: kind — choice, score чи noul`;
+    if (typeof x.question !== 'string' || !x.question.trim()) return `${at}: потрібен текст питання`;
+    const list = (k: string) => (Array.isArray(x[k]) ? (x[k] as unknown[]).filter((s) => typeof s === 'string' && s.trim()).length : 0);
+    if (x.kind === 'choice' && list('options') < 2) return `${at}: щонайменше два варіанти (options)`;
+    if (x.kind === 'score' && (list('levels') < 2 || list('levels') > 10)) return `${at}: від 2 до 10 рівнів (levels)`;
+  }
+  return null;
 }
 
 /** Параметри за замовчуванням для нового вузла палітри. */
@@ -394,7 +490,30 @@ export function validateWorkflow(def: WorkflowDefinition): WorkflowValidation {
     for (const k of Object.keys(params)) if (!t.params.some((p) => p.id === k)) warn('unknown_param', `${path}.params.${k}`, `Параметр «${k}» не належить типу ${t.id} — буде проігноровано`, { nodeId: n.id });
     if (t.dynamicOutputs) {
       const outs = nodeOutputs(n);
-      if (new Set(outs).size !== outs.length) err('duplicate_branch', `${path}.params.${t.dynamicOutputs}`, `Гілки вузла «${n.label || n.id}» повторюються (зокрема з «fallback»)`, { nodeId: n.id });
+      if (new Set(outs).size !== outs.length) err('duplicate_branch', `${path}.params.${t.dynamicOutputs}`, `Гілки вузла «${n.label || n.id}» повторюються (зокрема з «fallback» чи «review»)`, { nodeId: n.id });
+    }
+    // Т5.5: шар рішень Jev — узгодженість параметрів.
+    if (t.group === 'jev') {
+      const pr = params as Record<string, unknown>;
+      const hi = typeof pr.confidence_high === 'number' ? pr.confidence_high : 0.9;
+      const mid = typeof pr.confidence_medium === 'number' ? pr.confidence_medium : 0.6;
+      if (mid > hi) err('bad_confidence_levels', `${path}.params.confidence_medium`, `${t.name.uk} «${n.label || n.id}»: середня впевненість не може бути вищою за високу`, { nodeId: n.id });
+      if (t.id === 'JEV_ROUTER' && !routerRegistry(n)) {
+        const routes = Array.isArray(pr.routes) ? (pr.routes as unknown[]).filter((x) => typeof x === 'string' && x.trim()) : [];
+        if (routes.length < 2) err('bad_param', `${path}.params.routes`, `${t.name.uk} «${n.label || n.id}»: без реєстру напрямків потрібні щонайменше дві гілки`, { nodeId: n.id });
+      }
+      if (t.id === 'JEV_ROUTER' && routerRegistry(n) && !DESTINATION_ID_RE.test(routerRegistry(n))) err('bad_param', `${path}.params.registry`, `${t.name.uk} «${n.label || n.id}»: реєстр — латиниця, цифри й «_», з літери`, { nodeId: n.id });
+      if (t.id === 'JEV_SCORE') {
+        const lv = Array.isArray(pr.levels) ? (pr.levels as unknown[]).length : 0;
+        if (lv && (lv < 2 || lv > 10)) err('bad_param', `${path}.params.levels`, `${t.name.uk} «${n.label || n.id}»: рівнів шкали — від 2 до 10`, { nodeId: n.id });
+        const lo = typeof pr.scale_min === 'number' ? pr.scale_min : 0;
+        const up = typeof pr.scale_max === 'number' ? pr.scale_max : 10;
+        if (!(lo < up)) err('bad_param', `${path}.params.scale_max`, `${t.name.uk} «${n.label || n.id}»: «шкала до» має бути більшою за «шкала від»`, { nodeId: n.id });
+      }
+      if (t.id === 'JEV_DECISION_BUNDLE' && pr.questions !== undefined) {
+        const problem = bundleQuestionsError(pr.questions);
+        if (problem) err('bad_bundle', `${path}.params.questions`, `${t.name.uk} «${n.label || n.id}»: ${problem}`, { nodeId: n.id });
+      }
     }
   }
   const starts = nodes.filter((n) => n?.type === 'START');

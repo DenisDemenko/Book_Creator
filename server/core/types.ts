@@ -1215,7 +1215,8 @@ export interface WorkflowEventRow {
 
 export const WORKFLOW_RUN_STATUSES = ['running', 'paused', 'succeeded', 'failed', 'cancelled'] as const;
 export type WorkflowRunStatus = (typeof WORKFLOW_RUN_STATUSES)[number];
-export const WORKFLOW_RUN_MODES = ['normal', 'replay', 'fork'] as const;
+/** Т5.5: `subgraph` — дочірній запуск вузла SUBGRAPH чи маршрутизатора Jev із реєстром. */
+export const WORKFLOW_RUN_MODES = ['normal', 'replay', 'fork', 'subgraph'] as const;
 export type WorkflowRunMode = (typeof WORKFLOW_RUN_MODES)[number];
 
 export interface WorkflowRunRow {
@@ -1229,7 +1230,7 @@ export interface WorkflowRunRow {
   mode: WorkflowRunMode;
   parentRunId: string | null;
   forkStep: number | null;
-  /** `job:<kind>`, `interview`, `manual`, `replay`, `fork`. */
+  /** `job:<kind>`, `interview`, `manual`, `replay`, `fork`, `subgraph`. */
   trigger: string;
   jobId: string | null;
   input: Record<string, unknown>;
@@ -1289,6 +1290,22 @@ export interface WorkflowStepRow {
 }
 
 export type WorkflowStepInput = Omit<WorkflowStepRow, 'id' | 'seq'>;
+
+/** Т5.5: напрямок маршрутизатора Jev — реєстр → варіант → процес (§10). */
+export interface WorkflowDestinationRow {
+  registry: string;
+  option: string;
+  label: { en: string; uk: string };
+  /** Опис варіанта для Jev (≤255). */
+  description: string;
+  workflowId: string;
+  enabled: boolean;
+  updatedBy: CoreActor;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type WorkflowDestinationInput = Pick<WorkflowDestinationRow, 'registry' | 'option' | 'label' | 'description' | 'workflowId' | 'enabled' | 'updatedBy'>;
 
 export interface GraphLayoutRow {
   graphKind: 'workflow' | 'ontology';
@@ -1702,6 +1719,10 @@ export interface CoreRepository {
   listWorkflowSteps(runId: string): Promise<WorkflowStepRow[]>;
   saveWorkflowCheckpoint(runId: string, data: Record<string, unknown>): Promise<void>;
   getWorkflowCheckpoint(runId: string): Promise<Record<string, unknown> | null>;
+  /** Т5.5: реєстр напрямків маршрутизатора Jev. */
+  listWorkflowDestinations(filter?: { registry?: string; enabledOnly?: boolean }): Promise<WorkflowDestinationRow[]>;
+  saveWorkflowDestination(input: WorkflowDestinationInput): Promise<WorkflowDestinationRow>;
+  deleteWorkflowDestination(registry: string, option: string): Promise<boolean>;
   getGraphLayout(kind: 'workflow' | 'ontology', graphId: string, versionRef: string): Promise<GraphLayoutRow | null>;
   saveGraphLayout(input: { graphKind: 'workflow' | 'ontology'; graphId: string; versionRef: string; layout: Record<string, { x: number; y: number }>; updatedBy: CoreActor }): Promise<GraphLayoutRow>;
 

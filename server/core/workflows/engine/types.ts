@@ -6,6 +6,7 @@ import type { CoreActor, CoreRepository, WorkflowRunRow } from '../../types';
 import type { WorkflowDefinition, WorkflowNode } from '../../../../src/utils/workflowGraph';
 import type { AiGenerateInput, AiGenerateOutput } from '../../ai/roles';
 import type { CoreAiModule } from '../../ai/rolePrompts';
+import type { JevAdapter } from '../../../ai/adapters/jev';
 
 /** Стан процесу: один об'єкт, який вузли доповнюють. Серіалізовний (контрольні точки). */
 export interface WfState {
@@ -75,6 +76,11 @@ export interface EngineServices {
   loadTemplate?: (module: CoreAiModule) => Promise<{ system: string; user: string } | undefined>;
   /** Пауза між повторами (тести — миттєво). */
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Т5.5: справжній Jev (ключ платформи чи `TYPESAFE_API_KEY`); null — ключа
+   * немає, вузли Jev ідуть запасним LLM (модуль AI-2 через `generate`).
+   */
+  jev?: () => Promise<JevAdapter | null>;
   now?: () => number;
 }
 
@@ -88,6 +94,8 @@ export interface ExecEnv {
   /** Списання з бюджету задачі черги (Т0.7), якщо запуск — у задачі. */
   recordUsage?: (usage: { tokens: number; requests: number }) => Promise<void>;
   signal?: AbortSignal;
+  /** Т5.5: рушій цього запуску — для підпроцесів (SUBGRAPH, маршрутизатор Jev із реєстром). */
+  engine?: import('./runner').EngineDeps;
 }
 
 /** Помилка вузла з класом (для §30 і трасування). */

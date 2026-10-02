@@ -193,10 +193,11 @@ async function suite(name: string, repo: CoreRepository, raw?: (sql: string, par
   t('завершений запуск не оживає', (await errOf(() => repo.updateWorkflowRun(cancelled.id, { status: 'running' })))?.code === 'conflict');
 
   console.log(`\n${name} — вузли, яких рушій ще не виконує:`);
-  const jev: WorkflowDefinition = { format: 'fusion-workflow/1', id: 'jev_flow', name: { en: 'J', uk: 'Й' }, description: '', nodes: [{ id: 's', type: 'START', params: {} }, { id: 'j', type: 'JEV_NOUL', params: { question: 'Чи правда?', threshold: 0.6 } }, { id: 'e', type: 'END', params: {} }], edges: [e('s', 'out', 'j'), e('j', 'true', 'e'), e('j', 'false', 'e'), e('j', 'fallback', 'e')] };
-  await publish(repo, jev);
-  r = await startRun(deps, { workflowId: 'jev_flow', input: {}, trigger: 'manual', actor });
-  t('Jev — зрозуміла помилка «з Т5.5»', r.run.status === 'failed' && /Т5\.5/.test(r.run.error ?? ''));
+  // Т5.5: Jev уже виконується (test:jev-nodes); перевірка людиною — з Т5.6.
+  const human: WorkflowDefinition = { format: 'fusion-workflow/1', id: 'human_flow', name: { en: 'H', uk: 'Л' }, description: '', nodes: [{ id: 's', type: 'START', params: {} }, { id: 'h', type: 'HUMAN_REVIEW', params: { reviewer: 'author' } }, { id: 'e', type: 'END', params: {} }], edges: [e('s', 'out', 'h'), e('h', 'accept', 'e'), e('h', 'edit', 'e'), e('h', 'reject', 'e')] };
+  await publish(repo, human);
+  r = await startRun(deps, { workflowId: 'human_flow', input: {}, trigger: 'manual', actor });
+  t('перевірка людиною — зрозуміла помилка «з Т5.6»', r.run.status === 'failed' && /Т5\.6/.test(r.run.error ?? ''));
   const sample = { ...samplePipeline(), id: 'sample_flow' };
   await publish(repo, sample);
   r = await startRun(deps, { workflowId: 'sample_flow', input: {}, trigger: 'manual', actor });
