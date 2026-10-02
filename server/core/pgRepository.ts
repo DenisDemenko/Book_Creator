@@ -179,6 +179,7 @@ import type {
   AccessRequestInput,
   AccessRequestDecision,
   AccessRequestStatus,
+  AccessRequestKind,
   ParticipantPreferenceRow,
   OnboardingEventRow,
   OnboardingEventName,
@@ -287,8 +288,8 @@ function toOnboardingSession(r: any): OnboardingSessionRow {
 }
 function toAccessRequest(r: any): AccessRequestRow {
   return {
-    id: r.id, projectId: r.project_id, participantId: r.participant_id, userId: r.user_id, sessionId: r.session_id ?? null, roles: r.roles ?? [], scope: r.scope,
-    scopeRefs: r.scope_refs ?? [], capabilities: r.capabilities ?? [], level: r.level, message: r.message ?? '', orderId: r.order_id ?? null, status: r.status,
+    id: r.id, kind: r.kind ?? 'access', replaces: r.replaces ?? [], projectId: r.project_id, participantId: r.participant_id, userId: r.user_id, sessionId: r.session_id ?? null, roles: r.roles ?? [], scope: r.scope,
+    scopeRefs: r.scope_refs ?? [], capabilities: r.capabilities ?? [], level: r.level ?? null, message: r.message ?? '', orderId: r.order_id ?? null, status: r.status,
     decision: r.decision ?? null, grantIds: r.grant_ids ?? [], decidedBy: r.decided_by ?? null, decidedAt: isoOrNull(r.decided_at), reason: r.reason ?? '',
     createdAt: iso(r.created_at), updatedAt: iso(r.updated_at),
   };
@@ -2846,9 +2847,9 @@ export class PgCoreRepository implements CoreRepository {
   async addAccessRequest(input: AccessRequestInput) {
     checkAccessRequest(input);
     const { rows } = await this.q(
-      `INSERT INTO access_requests (project_id, participant_id, user_id, session_id, roles, scope, scope_refs, capabilities, level, message, order_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-      [input.projectId, input.participantId, input.userId, input.sessionId ?? null, JSON.stringify(input.roles ?? []), input.scope, input.scopeRefs ?? [], input.capabilities ?? [], input.level, input.message ?? '', input.orderId ?? null],
+      `INSERT INTO access_requests (project_id, participant_id, user_id, session_id, roles, scope, scope_refs, capabilities, level, message, order_id, kind, replaces)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+      [input.projectId, input.participantId, input.userId, input.sessionId ?? null, JSON.stringify(input.roles ?? []), input.scope, input.scopeRefs ?? [], input.capabilities ?? [], input.level ?? null, input.message ?? '', input.orderId ?? null, input.kind ?? 'access', input.replaces ?? []],
     );
     return toAccessRequest(rows[0]);
   }
@@ -2859,11 +2860,12 @@ export class PgCoreRepository implements CoreRepository {
     return rows[0] ? toAccessRequest(rows[0]) : null;
   }
 
-  async listAccessRequests(f: { projectId?: string; userId?: string; status?: AccessRequestStatus; limit?: number }) {
+  async listAccessRequests(f: { projectId?: string; userId?: string; status?: AccessRequestStatus; kind?: AccessRequestKind; limit?: number }) {
     const { rows } = await this.q(
       `SELECT * FROM access_requests WHERE ($1::text IS NULL OR project_id = $1) AND ($2::text IS NULL OR user_id = $2) AND ($3::text IS NULL OR status = $3)
+         AND ($5::text IS NULL OR kind = $5)
        ORDER BY created_at DESC, id LIMIT $4`,
-      [f.projectId ?? null, f.userId ?? null, f.status ?? null, Math.max(1, Math.min(f.limit ?? 100, 500))],
+      [f.projectId ?? null, f.userId ?? null, f.status ?? null, Math.max(1, Math.min(f.limit ?? 100, 500)), f.kind ?? null],
     );
     return rows.map(toAccessRequest);
   }

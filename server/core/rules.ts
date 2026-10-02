@@ -879,7 +879,14 @@ export function checkAccessRequest(input: AccessRequestInput): void {
   idText(input.userId, 'людину', false);
   idText(input.participantId, 'учасника', false);
   slug(input.scope, 'Область');
-  if (!(ACCESS_LEVELS as readonly string[]).includes(input.level)) throw new CoreRuleError('bad_input', `Невідомий рівень доступу «${input.level}»`);
+  const kind = input.kind ?? 'access';
+  if (kind !== 'access' && kind !== 'role') throw new CoreRuleError('bad_input', `Невідомий вид запиту «${kind}»`);
+  if (kind === 'role') {
+    if (!Array.isArray(input.roles) || !input.roles.length) throw new CoreRuleError('bad_input', 'Запит ролі — хоча б одна роль');
+  } else if (input.level == null) throw new CoreRuleError('bad_input', 'Запит доступу — з рівнем доступу');
+  if (input.replaces !== undefined && (!Array.isArray(input.replaces) || input.replaces.length > 10 || input.replaces.some((x) => typeof x !== 'string' || !x))) throw new CoreRuleError('bad_input', 'Замінювані ролі — до 10');
+  if (kind === 'access' && input.replaces?.length) throw new CoreRuleError('bad_input', 'Замінювати ролі може лише запит ролі');
+  if (input.level != null && !(ACCESS_LEVELS as readonly string[]).includes(input.level)) throw new CoreRuleError('bad_input', `Невідомий рівень доступу «${input.level}»`);
   if (input.level === 'work' && input.scope !== 'media_library') throw new CoreRuleError('bad_input', 'Робочий доступ (work) — лише до медіатеки');
   if (input.level === 'manage') throw new CoreRuleError('bad_input', 'Право керування запитом не видається — його надає власник окремо');
   const list = (v: unknown, what: string, max: number) => {
@@ -894,14 +901,14 @@ export function checkAccessRequest(input: AccessRequestInput): void {
 }
 
 /** Рішення — лише щодо нерозглянутого; схвалення — лише з наданим доступом; людина чи система, не AI (№22). */
-export function checkAccessRequestDecision(current: Pick<AccessRequestRow, 'status'>, d: AccessRequestDecision): void {
+export function checkAccessRequestDecision(current: Pick<AccessRequestRow, 'status'> & Partial<Pick<AccessRequestRow, 'kind'>>, d: AccessRequestDecision): void {
   if (current.status !== 'pending') throw new CoreRuleError('conflict', 'Запит уже розглянуто');
   if (!['approved', 'modified', 'rejected', 'cancelled'].includes(d.status)) throw new CoreRuleError('bad_input', `Невідоме рішення «${d.status}»`);
   if (d.status !== 'cancelled') {
     if (!d.decidedBy) throw new CoreRuleError('bad_input', 'Не вказано, хто вирішив');
     checkOntologyActor(d.decidedBy);
   }
-  if ((d.status === 'approved' || d.status === 'modified') && !(d.grantIds ?? []).length) throw new CoreRuleError('bad_input', 'Схвалений запит — лише з наданим доступом');
+  if ((d.status === 'approved' || d.status === 'modified') && current.kind !== 'role' && !(d.grantIds ?? []).length) throw new CoreRuleError('bad_input', 'Схвалений запит — лише з наданим доступом');
   if (d.reason !== undefined && String(d.reason).length > 2000) throw new CoreRuleError('bad_input', 'Причина — до 2000 символів');
 }
 

@@ -178,6 +178,7 @@ import type {
   AccessRequestInput,
   AccessRequestDecision,
   AccessRequestStatus,
+  AccessRequestKind,
   ParticipantPreferenceRow,
   OnboardingEventRow,
   OnboardingEventName,
@@ -2202,12 +2203,14 @@ export class MemoryCoreRepository implements CoreRepository {
 
   async addAccessRequest(input: AccessRequestInput) {
     checkAccessRequest(input);
-    if (this.accessRequests.some((x) => x.projectId === input.projectId && x.userId === input.userId && x.status === 'pending')) throw new CoreRuleError('conflict', 'Запит доступу вже чекає рішення');
+    const kind = input.kind ?? 'access';
+    if (this.accessRequests.some((x) => x.projectId === input.projectId && x.userId === input.userId && x.kind === kind && x.status === 'pending'))
+      throw new CoreRuleError('conflict', kind === 'role' ? 'Запит ролі вже чекає рішення' : 'Запит доступу вже чекає рішення');
     if (!this.participants.some((x) => x.id === input.participantId && x.projectId === input.projectId)) throw notFound('Учасник');
     const t = now();
     const row: AccessRequestRow = {
-      id: randomUUID(), projectId: input.projectId, participantId: input.participantId, userId: input.userId, sessionId: input.sessionId ?? null, roles: clone(input.roles ?? []),
-      scope: input.scope, scopeRefs: [...(input.scopeRefs ?? [])], capabilities: [...(input.capabilities ?? [])], level: input.level, message: input.message ?? '', orderId: input.orderId ?? null,
+      id: randomUUID(), kind, replaces: [...(input.replaces ?? [])], projectId: input.projectId, participantId: input.participantId, userId: input.userId, sessionId: input.sessionId ?? null, roles: clone(input.roles ?? []),
+      scope: input.scope, scopeRefs: [...(input.scopeRefs ?? [])], capabilities: [...(input.capabilities ?? [])], level: input.level ?? null, message: input.message ?? '', orderId: input.orderId ?? null,
       status: 'pending', decision: null, grantIds: [], decidedBy: null, decidedAt: null, reason: '', createdAt: t, updatedAt: t,
     };
     this.accessRequests.push(row);
@@ -2219,10 +2222,10 @@ export class MemoryCoreRepository implements CoreRepository {
     return r ? clone(r) : null;
   }
 
-  async listAccessRequests(f: { projectId?: string; userId?: string; status?: AccessRequestStatus; limit?: number }) {
+  async listAccessRequests(f: { projectId?: string; userId?: string; status?: AccessRequestStatus; kind?: AccessRequestKind; limit?: number }) {
     const limit = Math.max(1, Math.min(f.limit ?? 100, 500));
     return this.accessRequests
-      .filter((x) => (!f.projectId || x.projectId === f.projectId) && (!f.userId || x.userId === f.userId) && (!f.status || x.status === f.status))
+      .filter((x) => (!f.projectId || x.projectId === f.projectId) && (!f.userId || x.userId === f.userId) && (!f.status || x.status === f.status) && (!f.kind || x.kind === f.kind))
       .slice().reverse().slice(0, limit).map(clone);
   }
 

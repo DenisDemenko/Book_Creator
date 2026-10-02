@@ -14,6 +14,16 @@
  *   POST /api/core/projects/:projectId/access-requests/:id/decide — { action: approve|modify|reject, level?, scopeType?, scopeRefs?, mediaWork?, validUntil?, reason? }
  *   POST /api/core/projects/:projectId/access-requests/:id/cancel — відкликати свій запит
  *
+ * «Моя роль у проєкті» (Т6.4 В1, `PLAN_ROLE_STUDIO.md`):
+ *   GET    /api/core/projects/:projectId/my-role                         — мої ролі, простори, активний простір, нерозглянуті запити
+ *   POST   /api/core/projects/:projectId/my-role/roles                   — додати роль { roleId, specialization?, scope?, scopeRefs?, capabilities?, message? }
+ *   PUT    /api/core/projects/:projectId/my-role/roles/:id/specialization — { specialization, message? }
+ *   DELETE /api/core/projects/:projectId/my-role/roles/:id               — відмовитися від ролі (доступ лишається)
+ *   POST   /api/core/projects/:projectId/my-role/leave                   — вийти з проєкту
+ *   PUT    /api/core/projects/:projectId/my-role/workspace               — { workspace }
+ * Власник книги й адміністратор змінюють свої ролі одразу; решта — запитом
+ * ролі (розглядають там само, у «Запитах»; рішення — `roles?`, `noAccess?`).
+ *
  * Сесії й запити — лише свої; вирішує власник книги, адміністратор або
  * учасник із правом керування. Схвалення = наданий доступ Т6.2, і людину в
  * кімнаті перепідключає (`onAccessChanged`).
@@ -28,6 +38,7 @@ import { isValidBookId } from '../../realtimeAuth';
 import { resolveProjectAccess } from '../projectRoutes';
 import { computeEffective, levelRank, type BookIndex } from './access';
 import type { BookOutline } from './routes';
+import { addMyRole, changeMySpecialization, leaveProject, myRoleView, removeMyRole, setMyWorkspace, type MyRoleContext } from './myRole';
 import {
   cancelAccessRequest,
   cancelOnboarding,
@@ -211,6 +222,8 @@ export function registerOnboardingRoutes(app: Express, d: OnboardingRoutesDeps):
       mediaWork: typeof b.mediaWork === 'boolean' ? b.mediaWork : undefined,
       validUntil: typeof b.validUntil === 'string' && b.validUntil ? b.validUntil : null,
       reason: typeof b.reason === 'string' ? b.reason : '',
+      roles: Array.isArray(b.roles) ? b.roles.map(String).slice(0, 10) : undefined,
+      noAccess: b.noAccess === true,
       bookIndex,
     });
     if (request.status !== 'rejected') d.onAccessChanged?.(access.projectId, request.userId);
@@ -221,5 +234,58 @@ export function registerOnboardingRoutes(app: Express, d: OnboardingRoutesDeps):
     const projectId = String(req.params.projectId);
     if (!isValidBookId(projectId)) throw new CoreRuleError('bad_input', 'Неправильний id проєкту');
     res.json({ request: await cancelAccessRequest(repo, who, projectId, String(req.params.id)) });
+  }));
+
+  // ── Т6.4 В1: «Моя роль у проєкті» ────────────────────────────────────────────
+
+  const myCtx = async (req: Request): Promise<MyRoleContext> => {
+    const projectId = String(req.params.projectId);
+    if (!isValidBookId(projectId)) throw new CoreRuleError('bad_input', 'Неправильний id проєкту');
+    if (projectId.startsWith('course-')) await d.ensureProject?.(projectId).catch(() => {});
+    const access = await resolveProjectAccess(req.principal as never, projectId, d.access).catch(() => null);
+    if (!access) throw new CoreRuleError('bad_actor', 'Немає доступу до цього проєкту');
+    return { projectId: access.projectId, userId: access.userId, isOwner: access.isOwner, isAdmin: access.role === 'admin' };
+  };
+  const myBase = '/api/core/projects/:projectId/my-role';
+
+  app.get(myBase, d.requireAuth, run(async (repo, _who, req, res) => {
+    res.json(await myRoleView(repo, await myCtx(req)));
+  }));
+
+  app.post(`${myBase}/roles`, d.requireAuth, run(async (repo, _who, req, res) => {
+    const b = req.body ?? {};
+    const out = await addMyRole(repo, await myCtx(req), {
+      roleId: typeof b.roleId === 'string' ? b.roleId : '',
+      specialization: typeof b.specialization === 'string' && b.specialization ? b.specialization : null,
+      scope: typeof b.scope === 'string' && b.scope ? b.scope : null,
+      scopeRefs: Array.isArray(b.scopeRefs) ? b.scopeRefs.map(String).slice(0, 100) : [],
+      capabilities: Array.isArray(b.capabilities) ? b.capabilities.map(String).slice(0, 20) : [],
+      message: typeof b.message === 'string' ? b.message : '',
+    });
+    res.status(out.kind === 'assigned' ? 201 : 202).json(out);
+  }));
+
+  app.put(`${myBase}/roles/:id/specialization`, d.requireAuth, run(async (repo, _who, req, res) => {
+    const b = req.body ?? {};
+    if (typeof b.specialization !== 'string' || !b.specialization) throw new CoreRuleError('bad_input', 'Оберіть спеціалізацію');
+    const out = await changeMySpecialization(repo, await myCtx(req), { assignmentId: String(req.params.id), specialization: b.specialization, message: typeof b.message === 'string' ? b.message : '' });
+    res.status(out.kind === 'assigned' ? 200 : 202).json(out);
+  }));
+
+  app.delete(`${myBase}/roles/:id`, d.requireAuth, run(async (repo, _who, req, res) => {
+    res.json(await removeMyRole(repo, await myCtx(req), { assignmentId: String(req.params.id) }));
+  }));
+
+  app.post(`${myBase}/leave`, d.requireAuth, run(async (repo, _who, req, res) => {
+    const ctx = await myCtx(req);
+    const out = await leaveProject(repo, ctx);
+    d.onAccessChanged?.(ctx.projectId, ctx.userId);
+    res.json(out);
+  }));
+
+  app.put(`${myBase}/workspace`, d.requireAuth, run(async (repo, _who, req, res) => {
+    const w = (req.body ?? {}).workspace;
+    if (typeof w !== 'string' || !w) throw new CoreRuleError('bad_input', 'Оберіть простір');
+    res.json(await setMyWorkspace(repo, await myCtx(req), w));
   }));
 }

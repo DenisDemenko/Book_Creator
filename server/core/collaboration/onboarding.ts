@@ -34,7 +34,7 @@ import {
   type OnboardingAnswers,
   type OnboardingRoleChoice,
 } from '../../../src/utils/roleOnboarding';
-import { assignRole, rolesOf } from './participants';
+import { assignRole, planRoleAssignment, revokeRole, rolesOf } from './participants';
 import { computeEffective, grantAccess, levelRank, type BookIndex } from './access';
 
 export interface OnboardingDeps {
@@ -315,6 +315,10 @@ export interface DecideInput {
   action: 'approve' | 'modify' | 'reject';
   /** Для «змінити»: інший рівень, область чи цілі. */
   level?: AccessLevel;
+  /** Запит ролі, «змінити»: які з запитаних ролей схвалити (id реєстру). */
+  roles?: string[];
+  /** Запит ролі, «змінити»: схвалити ролі без доступу. */
+  noAccess?: boolean;
   scopeType?: 'book' | 'chapter' | 'scene' | 'character' | 'location' | 'media_library';
   scopeRefs?: string[];
   mediaWork?: boolean;
@@ -333,6 +337,7 @@ export async function decideAccessRequest(repo: CoreRepository, input: DecideInp
   if (!r || r.projectId !== input.projectId) throw new CoreRuleError('not_found', 'Запит доступу не знайдено');
   if (r.status !== 'pending') throw new CoreRuleError('conflict', 'Запит уже розглянуто');
   const actor = actorOf(input.decider.userId);
+  if (r.userId === input.decider.userId && !input.decider.isAdmin) throw new CoreRuleError('bad_actor', 'Свій запит розглядає власник книги, адміністратор чи інший керівник');
   // Право вирішувати — те саме, що й надавати доступ: перевіряємо до будь-якого запису.
   await assertCanDecide(repo, input);
   if (input.action === 'reject') {
@@ -342,11 +347,27 @@ export async function decideAccessRequest(repo: CoreRepository, input: DecideInp
     return out;
   }
   const modify = input.action === 'modify';
-  const fromRequest = requestedAccessFromRow(r);
+  if (r.kind === 'role') return decideRoleRequest(repo, r, input, actor);
+  const fromRequest = requestedAccessFromRow(r)!;
   const level = (modify && input.level) || fromRequest.level;
   const scopeType = (modify && input.scopeType) || fromRequest.scopeType;
   const refs = modify && input.scopeRefs ? input.scopeRefs : fromRequest.refs;
   const mediaWork = modify && input.mediaWork !== undefined ? input.mediaWork : fromRequest.mediaWork;
+  const { grants, decision } = await grantDecided(repo, r, input, { level, scopeType, refs, mediaWork });
+  const out = await repo.decideAccessRequest(r.id, { status: modify ? 'modified' : 'approved', decidedBy: actor, decision, grantIds: grants, reason: (input.reason ?? '').slice(0, 2000) });
+  await repo.addCollabEvent({ projectId: r.projectId, participantId: r.participantId, action: 'access_request_decided', actor, details: { requestId: r.id, status: out.status, ...decision, grantIds: grants } });
+  await repo.addOnboardingEvent({ userId: r.userId, sessionId: r.sessionId, projectId: r.projectId, event: 'access_approved', details: { requestId: r.id, by: input.decider.userId, modified: modify } }).catch(() => {});
+  return out;
+}
+
+/** Записи доступу за рішенням (спільне для запиту доступу й запиту ролі з доступом). */
+async function grantDecided(
+  repo: CoreRepository,
+  r: AccessRequestRow,
+  input: DecideInput,
+  a: { level: AccessLevel; scopeType: NonNullable<DecideInput['scopeType']>; refs: string[]; mediaWork: boolean },
+): Promise<{ grants: string[]; decision: Record<string, unknown> }> {
+  const { level, scopeType, refs, mediaWork } = a;
   if (level === 'manage') throw new CoreRuleError('bad_input', 'Керування через запит не надається — надайте його окремо в панелі «Доступ»');
   if (level === 'work' && scopeType !== 'media_library') throw new CoreRuleError('bad_input', 'Робочий доступ (work) — лише до медіатеки');
   const needRefs = scopeType === 'chapter' || scopeType === 'scene' || scopeType === 'character' || scopeType === 'location';
@@ -361,14 +382,52 @@ export async function decideAccessRequest(repo: CoreRepository, input: DecideInp
     const g = await grantAccess(repo, { projectId: r.projectId, granter, userId: r.userId, level: 'work', scopeType: 'media_library', validUntil: input.validUntil ?? null });
     grants.push(g.id);
   }
-  const decision = { level, scopeType, scopeRefs: needRefs ? refs : [], mediaWork, validUntil: input.validUntil ?? null };
-  const out = await repo.decideAccessRequest(r.id, { status: modify ? 'modified' : 'approved', decidedBy: actor, decision, grantIds: grants, reason: (input.reason ?? '').slice(0, 2000) });
-  await repo.addCollabEvent({ projectId: r.projectId, participantId: r.participantId, action: 'access_request_decided', actor, details: { requestId: r.id, status: out.status, ...decision, grantIds: grants } });
-  await repo.addOnboardingEvent({ userId: r.userId, sessionId: r.sessionId, projectId: r.projectId, event: 'access_approved', details: { requestId: r.id, by: input.decider.userId, modified: modify } }).catch(() => {});
+  return { grants, decision: { level, scopeType, scopeRefs: needRefs ? refs : [], mediaWork, validUntil: input.validUntil ?? null } };
+}
+
+/**
+ * Запит ролі (Т6.4, «Моя роль у проєкті»): схвалення призначає запитані ролі
+ * (за реєстром, як звичайне призначення), відкликає замінювані (зміна
+ * спеціалізації) і — лише якщо просили — надає доступ. «Змінити» — частина
+ * ролей та / або інший доступ чи без доступу.
+ */
+async function decideRoleRequest(repo: CoreRepository, r: AccessRequestRow, input: DecideInput, actor: CoreActor): Promise<AccessRequestRow> {
+  const modify = input.action === 'modify';
+  const wanted = modify && input.roles ? r.roles.filter((x) => input.roles!.includes(x.roleId)) : r.roles;
+  if (!wanted.length) throw new CoreRuleError('bad_input', 'Оберіть хоча б одну роль зі запиту');
+  const project = await repo.getProject(r.projectId);
+  const projectType = project?.projectType ?? projectTypeById(r.projectId) ?? 'book';
+  // Спершу перевірити все: невдале рішення не лишає половини змін.
+  const replaces = r.replaces.length ? await Promise.all(r.replaces.map((id) => repo.getParticipantRole(id))) : [];
+  const stillReplaced = replaces.filter((x): x is NonNullable<typeof x> => !!x && x.status === 'active' && x.projectId === r.projectId && x.participantId === r.participantId);
+  for (const w of wanted) await planRoleAssignment(repo, { projectId: r.projectId, userId: r.userId, roleId: w.roleId, specialization: w.specialization, projectType }, { excluding: stillReplaced.map((x) => x.id) });
+  let access: { level: AccessLevel; scopeType: NonNullable<DecideInput['scopeType']>; refs: string[]; mediaWork: boolean } | null = null;
+  if (!(modify && input.noAccess)) {
+    if (modify && input.level) {
+      access = { level: input.level, scopeType: input.scopeType ?? 'book', refs: input.scopeRefs ?? [], mediaWork: !!input.mediaWork };
+    } else if (r.level) {
+      const from = requestedAccessFromRow(r)!;
+      access = modify ? { ...from, scopeType: input.scopeType ?? from.scopeType, refs: input.scopeRefs ?? from.refs, mediaWork: input.mediaWork ?? from.mediaWork } : from;
+    }
+  }
+  // Доступ — першим: його перевірки (цілі, право того, хто вирішує) найширші.
+  const granted = access ? await grantDecided(repo, r, input, access) : { grants: [] as string[], decision: { level: null } as Record<string, unknown> };
+  for (const old of stillReplaced) await revokeRole(repo, { projectId: r.projectId, assignmentId: old.id, actor });
+  const assigned: string[] = [];
+  for (const w of wanted) {
+    const a = await assignRole(repo, { projectId: r.projectId, userId: r.userId, roleId: w.roleId, specialization: w.specialization, projectType, actor, source: 'access_request', sourceRef: r.id });
+    assigned.push(a.role.id);
+  }
+  const partial = modify && (wanted.length !== r.roles.length || !!input.noAccess || !!input.level || !!input.scopeType || !!input.scopeRefs);
+  const decision = { ...granted.decision, roles: wanted, assignmentIds: assigned, replaced: stillReplaced.map((x) => x.id) };
+  const out = await repo.decideAccessRequest(r.id, { status: partial ? 'modified' : 'approved', decidedBy: actor, decision, grantIds: granted.grants, reason: (input.reason ?? '').slice(0, 2000) });
+  await repo.addCollabEvent({ projectId: r.projectId, participantId: r.participantId, action: 'access_request_decided', actor, details: { requestId: r.id, kind: 'role', status: out.status, ...decision, grantIds: granted.grants } });
+  await repo.addOnboardingEvent({ userId: r.userId, sessionId: r.sessionId, projectId: r.projectId, event: 'role_changed', details: { requestId: r.id, by: input.decider.userId, roles: wanted.map((x) => x.roleId), modified: partial } }).catch(() => {});
   return out;
 }
 
-function requestedAccessFromRow(r: AccessRequestRow): { level: AccessLevel; scopeType: NonNullable<DecideInput['scopeType']>; refs: string[]; mediaWork: boolean } {
+function requestedAccessFromRow(r: AccessRequestRow): { level: AccessLevel; scopeType: NonNullable<DecideInput['scopeType']>; refs: string[]; mediaWork: boolean } | null {
+  if (!r.level) return null;
   const want = requestedAccess(r.scope, r.scopeRefs, r.capabilities);
   if (!want) throw new CoreRuleError('conflict', `Область «${r.scope}» ще не застосовується — змініть її`);
   return { level: r.level, scopeType: want.scopeType, refs: r.scopeRefs, mediaWork: want.mediaWork };
@@ -417,7 +476,7 @@ export async function onboardingGate(repo: CoreRepository, deps: OnboardingDeps,
   out.session = await repo.findOnboardingDraft(who.userId, projectId);
   if (projectId) {
     out.roles = await rolesOf(repo, projectId, who.userId);
-    out.request = (await repo.listAccessRequests({ projectId, userId: who.userId, status: 'pending', limit: 1 }))[0] ?? null;
+    out.request = (await repo.listAccessRequests({ projectId, userId: who.userId, status: 'pending', kind: 'access', limit: 1 }))[0] ?? null;
   }
   if (!input.enabled) return out;
   if (out.session) return { ...out, required: true, reason: 'resume' };

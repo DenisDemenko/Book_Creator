@@ -1086,8 +1086,13 @@ export type OnboardingSessionPatch = Partial<Pick<OnboardingSessionRow, 'project
 export const ACCESS_REQUEST_STATUSES = ['pending', 'approved', 'modified', 'rejected', 'cancelled'] as const;
 export type AccessRequestStatus = (typeof ACCESS_REQUEST_STATUSES)[number];
 
+export const ACCESS_REQUEST_KINDS = ['access', 'role'] as const;
+/** Вид запиту: доступ (Т6.3) чи роль / спеціалізація (Т6.4, «Моя роль у проєкті»). */
+export type AccessRequestKind = (typeof ACCESS_REQUEST_KINDS)[number];
+
 export interface AccessRequestRow {
   id: string;
+  kind: AccessRequestKind;
   projectId: string;
   participantId: string;
   userId: string;
@@ -1096,7 +1101,10 @@ export interface AccessRequestRow {
   scope: string;
   scopeRefs: string[];
   capabilities: string[];
-  level: AccessLevel;
+  /** Запит ролі може бути без доступу — тоді null. */
+  level: AccessLevel | null;
+  /** Призначення ролей, які замінює запит (зміна спеціалізації). */
+  replaces: string[];
   message: string;
   orderId: string | null;
   status: AccessRequestStatus;
@@ -1110,7 +1118,7 @@ export interface AccessRequestRow {
 }
 
 export type AccessRequestInput = Pick<AccessRequestRow, 'projectId' | 'participantId' | 'userId' | 'scope' | 'level'> &
-  Partial<Pick<AccessRequestRow, 'sessionId' | 'roles' | 'scopeRefs' | 'capabilities' | 'message' | 'orderId'>>;
+  Partial<Pick<AccessRequestRow, 'kind' | 'sessionId' | 'roles' | 'scopeRefs' | 'capabilities' | 'message' | 'orderId' | 'replaces'>>;
 export interface AccessRequestDecision {
   status: 'approved' | 'modified' | 'rejected' | 'cancelled';
   decision?: Record<string, unknown> | null;
@@ -1629,7 +1637,7 @@ export interface CoreRepository {
   /** Запит доступу: один нерозглянутий на людину й проєкт; рішення — лише з `pending`. */
   addAccessRequest(input: AccessRequestInput): Promise<AccessRequestRow>;
   getAccessRequest(id: string): Promise<AccessRequestRow | null>;
-  listAccessRequests(filter: { projectId?: string; userId?: string; status?: AccessRequestStatus; limit?: number }): Promise<AccessRequestRow[]>;
+  listAccessRequests(filter: { projectId?: string; userId?: string; status?: AccessRequestStatus; kind?: AccessRequestKind; limit?: number }): Promise<AccessRequestRow[]>;
   decideAccessRequest(id: string, decision: AccessRequestDecision): Promise<AccessRequestRow>;
   getParticipantPreference(userId: string, projectId: string): Promise<ParticipantPreferenceRow | null>;
   saveParticipantPreference(input: Omit<ParticipantPreferenceRow, 'updatedAt'>): Promise<ParticipantPreferenceRow>;

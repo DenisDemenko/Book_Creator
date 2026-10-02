@@ -48,9 +48,16 @@ function resolveRole(roleId: string): RoleDefinition {
   return role;
 }
 
-/** Призначити роль (учасника створює, якщо його ще немає). Те саме призначення вдруге — повертає наявне. */
-export async function assignRole(repo: CoreRepository, input: AssignRoleInput): Promise<{ participant: ParticipantRow; role: ParticipantRoleRow; created: boolean }> {
-  if (typeof input.actor === 'string' && input.actor.startsWith('ai:')) throw new CoreRuleError('bad_actor', 'Роль призначає людина чи система, не AI');
+/**
+ * Перевірити призначення за реєстром, нічого не записуючи (Т6.4: запит ролі
+ * перевіряється так само, як призначення). `excluding` — призначення, які
+ * замінюються (зміна спеціалізації), не заважають поєднуваності.
+ */
+export async function planRoleAssignment(
+  repo: CoreRepository,
+  input: Pick<AssignRoleInput, 'projectId' | 'userId' | 'roleId' | 'specialization' | 'projectType'>,
+  opts: { excluding?: string[] } = {},
+): Promise<{ role: RoleDefinition; specialization: string | null; existing: ParticipantRow | null; same: ParticipantRoleRow | null }> {
   const role = resolveRole(input.roleId);
   if (role.status !== 'active') throw new CoreRuleError('conflict', `Роль «${role.id}» застаріла — нових призначень немає`);
   const projectType = input.projectType ?? 'book';
@@ -67,12 +74,12 @@ export async function assignRole(repo: CoreRepository, input: AssignRoleInput): 
     throw new CoreRuleError('bad_input', `Роль «${role.id}» не має спеціалізацій`);
   }
 
-  // Усі перевірки — ДО створення учасника: невдале призначення не лишає порожньої участі.
   const existing = await repo.getParticipant(input.projectId, input.userId);
-  if (existing && existing.status !== 'active') throw new CoreRuleError('conflict', `Учасник «${input.userId}» — «${existing.status}», ролі не призначаються`);
-  const mine = existing ? await repo.listParticipantRoles({ participantId: existing.id, status: 'active' }) : [];
-  const same = mine.find((r) => r.roleId === role.id && r.specialization === specialization);
-  if (existing && same) return { participant: existing, role: same, created: false };
+  if (existing && existing.status === 'suspended') throw new CoreRuleError('conflict', `Учасник «${input.userId}» — «${existing.status}», ролі не призначаються`);
+  const skip = new Set(opts.excluding ?? []);
+  const mine = existing && existing.status === 'active' ? (await repo.listParticipantRoles({ participantId: existing.id, status: 'active' })).filter((r) => !skip.has(r.id)) : [];
+  const same = mine.find((r) => r.roleId === role.id && r.specialization === specialization) ?? null;
+  if (same) return { role, specialization, existing, same };
   if (!role.combinable && mine.length) throw new CoreRuleError('conflict', `Роль «${role.id}» не поєднується з іншими ролями учасника`);
   const blocker = mine.map((r) => roleById(r.roleId)).find((r) => r && !r.combinable);
   if (blocker) throw new CoreRuleError('conflict', `У учасника вже є роль «${blocker.id}», яка не поєднується з іншими`);
@@ -80,9 +87,27 @@ export async function assignRole(repo: CoreRepository, input: AssignRoleInput): 
     const holders = await repo.listParticipantRoles({ projectId: input.projectId, roleId: role.id, status: 'active' });
     if (holders.some((h) => h.participantId !== existing?.id)) throw new CoreRuleError('conflict', `Роль «${role.id}» у проєкті вже має інший учасник — вона одна на проєкт`);
   }
+  return { role, specialization, existing, same: null };
+}
 
-  const { participant, created } = await repo.upsertParticipant({ projectId: input.projectId, userId: input.userId, source: input.source, sourceRef: input.sourceRef ?? null, createdBy: input.actor });
+/**
+ * Призначити роль (учасника створює, якщо його ще немає). Те саме призначення
+ * вдруге — повертає наявне. Учасник, який сам вийшов із проєкту (`left`),
+ * повертається (Т6.4); призупиненому (`suspended`) ролі не призначаються.
+ */
+export async function assignRole(repo: CoreRepository, input: AssignRoleInput): Promise<{ participant: ParticipantRow; role: ParticipantRoleRow; created: boolean }> {
+  if (typeof input.actor === 'string' && input.actor.startsWith('ai:')) throw new CoreRuleError('bad_actor', 'Роль призначає людина чи система, не AI');
+  // Усі перевірки — ДО створення учасника: невдале призначення не лишає порожньої участі.
+  const { role, specialization, existing, same } = await planRoleAssignment(repo, input);
+  if (existing && same && existing.status === 'active') return { participant: existing, role: same, created: false };
+
+  const { participant: p0, created } = await repo.upsertParticipant({ projectId: input.projectId, userId: input.userId, source: input.source, sourceRef: input.sourceRef ?? null, createdBy: input.actor });
+  let participant = p0;
   if (created) await repo.addCollabEvent({ projectId: input.projectId, participantId: participant.id, action: 'participant_added', actor: input.actor, details: { userId: input.userId, source: input.source, sourceRef: input.sourceRef ?? null } });
+  if (participant.status === 'left') {
+    participant = await repo.setParticipantStatus(participant.id, 'active');
+    await repo.addCollabEvent({ projectId: input.projectId, participantId: participant.id, action: 'participant_status', actor: input.actor, details: { status: 'active', from: 'left', source: input.source } });
+  }
 
   const row = await repo.addParticipantRole({ participantId: participant.id, projectId: input.projectId, roleId: role.id, specialization, assignedBy: input.actor, registryVersion: activeCollabRegistryVersion() });
   await repo.addCollabEvent({ projectId: input.projectId, participantId: participant.id, action: 'role_assigned', actor: input.actor, details: { roleId: role.id, specialization, requested: input.roleId, registryVersion: row.registryVersion } });
