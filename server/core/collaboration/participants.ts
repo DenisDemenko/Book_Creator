@@ -151,16 +151,27 @@ export async function importLegacyMembers(repo: CoreRepository, projectId: strin
 
 /**
  * Власник книги — учасник проєкту з ролями «власник проєкту» й «автор»
- * (ТЗ v3 §46: «Denis → AUTHOR + OWNER»). Викликається синхронізацією книги
+ * (ТЗ v3 §46: «Denis → AUTHOR + OWNER») — або «власник проєкту» й ролі, які
+ * він обрав в опитувальнику (Т6.3, налаштування проєкту). Викликається синхронізацією книги
  * в ядро; повторно нічого не робить. Збій тут синхронізацію не зупиняє.
  */
 export async function ensureOwnerParticipant(repo: CoreRepository, projectId: string, userId: string, actor: CoreActor = 'system:collab-sync'): Promise<boolean> {
   const have = await rolesOf(repo, projectId, userId);
   let wrote = false;
-  for (const roleId of ['project_owner', 'author']) {
+  // Т6.3: ролі, які власник обрав в опитувальнику до того, як книга з'явилась на сервері.
+  const pref = await repo.getParticipantPreference(userId, projectId).catch(() => null);
+  const project = await repo.getProject(projectId).catch(() => null);
+  const chosen = (pref?.roles ?? []).filter((r) => r.roleId !== 'project_owner');
+  const wanted = chosen.length ? ['project_owner', ...chosen.map((r) => r.roleId)] : ['project_owner', 'author'];
+  for (const roleId of wanted) {
     if (have.includes(roleId)) continue;
-    const r = await assignRole(repo, { projectId, userId, roleId, actor, source: 'owner' });
-    wrote = wrote || r.created;
+    const specialization = chosen.find((r) => r.roleId === roleId)?.specialization ?? null;
+    try {
+      const r = await assignRole(repo, { projectId, userId, roleId, specialization, projectType: project?.projectType ?? 'book', actor, source: 'owner' });
+      wrote = wrote || r.created;
+    } catch (err) {
+      if (roleId === 'project_owner') throw err;
+    }
   }
   return wrote;
 }

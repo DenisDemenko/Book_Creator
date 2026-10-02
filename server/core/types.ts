@@ -35,6 +35,8 @@ export interface ProjectRow {
   ownerId: string;
   title: string;
   languages: string[];
+  /** Т6.3: `book` чи `course` (курс — проєкт `course-<id>`). */
+  projectType: string;
   revision: number;
   createdAt: string;
   updatedAt: string;
@@ -196,6 +198,8 @@ export interface ProjectInput {
   ownerId: string;
   title?: string;
   languages?: string[];
+  /** Типово — `book`; змінюється лише явно. */
+  projectType?: string;
 }
 
 export interface DocumentInput {
@@ -1006,7 +1010,7 @@ export interface ParticipantRoleRow {
   revokedBy: CoreActor | null;
 }
 
-export const COLLAB_EVENT_ACTIONS = ['participant_added', 'participant_status', 'role_assigned', 'role_revoked', 'legacy_import', 'access_granted', 'access_revoked'] as const;
+export const COLLAB_EVENT_ACTIONS = ['participant_added', 'participant_status', 'role_assigned', 'role_revoked', 'legacy_import', 'access_granted', 'access_revoked', 'access_requested', 'access_request_decided'] as const;
 export type CollabEventAction = (typeof COLLAB_EVENT_ACTIONS)[number];
 
 export interface CollabEventRow {
@@ -1049,6 +1053,96 @@ export interface AccessGrantRow {
 
 export type AccessGrantInput = Pick<AccessGrantRow, 'projectId' | 'participantId' | 'level' | 'scopeType' | 'grantedBy'> &
   Partial<Pick<AccessGrantRow, 'scopeRef' | 'validFrom' | 'validUntil' | 'source' | 'sourceRef'>>;
+
+// ── Role Onboarding (Т6.3 В1) ───────────────────────────────────────────────
+
+export const ONBOARDING_SOURCES = ['first_login', 'marketplace', 'create_project', 'import_project', 'open_project', 'invitation', 'freelance_order', 'new_studio', 'manual'] as const;
+export type OnboardingSource = (typeof ONBOARDING_SOURCES)[number];
+export type OnboardingStatus = 'draft' | 'completed' | 'cancelled';
+
+export interface OnboardingSessionRow {
+  id: string;
+  userId: string;
+  projectId: string | null;
+  projectType: string | null;
+  entryIntent: string | null;
+  source: OnboardingSource;
+  sourceOrderId: string | null;
+  sourceRef: string | null;
+  currentStep: number;
+  status: OnboardingStatus;
+  answers: Record<string, unknown>;
+  result: Record<string, unknown> | null;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
+export type OnboardingSessionInput = Pick<OnboardingSessionRow, 'userId' | 'source'> &
+  Partial<Pick<OnboardingSessionRow, 'projectId' | 'projectType' | 'entryIntent' | 'sourceOrderId' | 'sourceRef' | 'answers' | 'currentStep'>>;
+export type OnboardingSessionPatch = Partial<Pick<OnboardingSessionRow, 'projectId' | 'projectType' | 'entryIntent' | 'currentStep' | 'answers' | 'status' | 'result' | 'sourceOrderId'>>;
+
+export const ACCESS_REQUEST_STATUSES = ['pending', 'approved', 'modified', 'rejected', 'cancelled'] as const;
+export type AccessRequestStatus = (typeof ACCESS_REQUEST_STATUSES)[number];
+
+export interface AccessRequestRow {
+  id: string;
+  projectId: string;
+  participantId: string;
+  userId: string;
+  sessionId: string | null;
+  roles: { roleId: string; specialization: string | null }[];
+  scope: string;
+  scopeRefs: string[];
+  capabilities: string[];
+  level: AccessLevel;
+  message: string;
+  orderId: string | null;
+  status: AccessRequestStatus;
+  decision: Record<string, unknown> | null;
+  grantIds: string[];
+  decidedBy: CoreActor | null;
+  decidedAt: string | null;
+  reason: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type AccessRequestInput = Pick<AccessRequestRow, 'projectId' | 'participantId' | 'userId' | 'scope' | 'level'> &
+  Partial<Pick<AccessRequestRow, 'sessionId' | 'roles' | 'scopeRefs' | 'capabilities' | 'message' | 'orderId'>>;
+export interface AccessRequestDecision {
+  status: 'approved' | 'modified' | 'rejected' | 'cancelled';
+  decision?: Record<string, unknown> | null;
+  grantIds?: string[];
+  decidedBy?: CoreActor | null;
+  reason?: string;
+}
+
+export interface ParticipantPreferenceRow {
+  userId: string;
+  /** `*` — загальні налаштування першого входу. */
+  projectId: string;
+  roles: { roleId: string; specialization: string | null }[];
+  workspace: string | null;
+  aiProfile: string | null;
+  aiAssistance: string[];
+  roleDetails: Record<string, string[]>;
+  updatedAt: string;
+}
+
+export const ONBOARDING_EVENTS = ['onboarding_started', 'onboarding_step_completed', 'role_selected', 'role_changed', 'onboarding_completed', 'onboarding_abandoned', 'access_requested', 'access_approved', 'access_rejected', 'studio_entered'] as const;
+export type OnboardingEventName = (typeof ONBOARDING_EVENTS)[number];
+
+export interface OnboardingEventRow {
+  id: string;
+  userId: string;
+  sessionId: string | null;
+  projectId: string | null;
+  event: OnboardingEventName;
+  details: Record<string, unknown>;
+  createdAt: string;
+}
 
 // ── Процеси ШІ й розкладка канви (Т5.2 В2) ──────────────────────────────────
 
@@ -1523,6 +1617,24 @@ export interface CoreRepository {
   updateStoryProposal(projectId: string, id: string, patch: StoryProposalPatch, actor: CoreActor, expectedRevision?: number): Promise<StoryProposalRow>;
   addStoryProposalEvent(input: { projectId: string; proposalId: string; action: ProposalEventAction; actor: CoreActor; fromState?: ProposalState | null; toState?: ProposalState | null; details?: Record<string, unknown> }): Promise<StoryProposalEventRow>;
   listStoryProposalEvents(projectId: string, filter?: { proposalId?: string; limit?: number }): Promise<StoryProposalEventRow[]>;
+  /**
+   * Т6.3 В1: опитувальник ролі. Одна чернетка на людину й проєкт;
+   * `updateOnboardingSession` — лише чернетку, з `expectedRevision`.
+   */
+  addOnboardingSession(input: OnboardingSessionInput): Promise<OnboardingSessionRow>;
+  getOnboardingSession(id: string): Promise<OnboardingSessionRow | null>;
+  findOnboardingDraft(userId: string, projectId: string | null): Promise<OnboardingSessionRow | null>;
+  listOnboardingSessions(filter: { userId?: string; projectId?: string; status?: OnboardingStatus; limit?: number }): Promise<OnboardingSessionRow[]>;
+  updateOnboardingSession(id: string, patch: OnboardingSessionPatch, expectedRevision?: number): Promise<OnboardingSessionRow>;
+  /** Запит доступу: один нерозглянутий на людину й проєкт; рішення — лише з `pending`. */
+  addAccessRequest(input: AccessRequestInput): Promise<AccessRequestRow>;
+  getAccessRequest(id: string): Promise<AccessRequestRow | null>;
+  listAccessRequests(filter: { projectId?: string; userId?: string; status?: AccessRequestStatus; limit?: number }): Promise<AccessRequestRow[]>;
+  decideAccessRequest(id: string, decision: AccessRequestDecision): Promise<AccessRequestRow>;
+  getParticipantPreference(userId: string, projectId: string): Promise<ParticipantPreferenceRow | null>;
+  saveParticipantPreference(input: Omit<ParticipantPreferenceRow, 'updatedAt'>): Promise<ParticipantPreferenceRow>;
+  addOnboardingEvent(input: { userId: string; sessionId?: string | null; projectId?: string | null; event: OnboardingEventName; details?: Record<string, unknown> }): Promise<OnboardingEventRow>;
+  listOnboardingEvents(filter: { userId?: string; event?: OnboardingEventName; sessionId?: string; limit?: number }): Promise<OnboardingEventRow[]>;
   /** Одна транзакція: стара відкрита пропозиція → `superseded`, нова (з тим самим чи іншим ключем) — на її місце. */
   supersedeStoryProposal(projectId: string, oldId: string, input: StoryProposalInput, actor: CoreActor): Promise<{ old: StoryProposalRow; created: StoryProposalRow }>;
 

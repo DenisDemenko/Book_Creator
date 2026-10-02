@@ -60,6 +60,12 @@ import {
   checkStoryProposal,
   checkProposalPatch,
   checkProposalEvent,
+  checkOnboardingSession,
+  checkOnboardingPatch,
+  checkAccessRequest,
+  checkAccessRequestDecision,
+  checkParticipantPreference,
+  checkOnboardingEvent,
   assertActor,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isValidEmbedding, SEARCHABLE_KINDS, tsQueryFromStems } from './search/text';
@@ -165,6 +171,17 @@ import type {
   StoryProposalInput,
   StoryProposalPatch,
   StoryProposalRow,
+  OnboardingSessionRow,
+  OnboardingSessionInput,
+  OnboardingSessionPatch,
+  OnboardingStatus,
+  AccessRequestRow,
+  AccessRequestInput,
+  AccessRequestDecision,
+  AccessRequestStatus,
+  ParticipantPreferenceRow,
+  OnboardingEventRow,
+  OnboardingEventName,
 } from './types';
 
 type Q = Pool | PoolClient;
@@ -260,6 +277,27 @@ function toStoryProposalEvent(r: any): StoryProposalEventRow {
     id: r.id, projectId: r.project_id, proposalId: r.proposal_id, action: r.action, actor: r.actor, fromState: r.from_state ?? null, toState: r.to_state ?? null,
     details: r.details ?? {}, createdAt: iso(r.created_at),
   };
+}
+function toOnboardingSession(r: any): OnboardingSessionRow {
+  return {
+    id: r.id, userId: r.user_id, projectId: r.project_id ?? null, projectType: r.project_type ?? null, entryIntent: r.entry_intent ?? null, source: r.source,
+    sourceOrderId: r.source_order_id ?? null, sourceRef: r.source_ref ?? null, currentStep: Number(r.current_step), status: r.status, answers: r.answers ?? {}, result: r.result ?? null,
+    revision: Number(r.revision), createdAt: iso(r.created_at), updatedAt: iso(r.updated_at), completedAt: isoOrNull(r.completed_at),
+  };
+}
+function toAccessRequest(r: any): AccessRequestRow {
+  return {
+    id: r.id, projectId: r.project_id, participantId: r.participant_id, userId: r.user_id, sessionId: r.session_id ?? null, roles: r.roles ?? [], scope: r.scope,
+    scopeRefs: r.scope_refs ?? [], capabilities: r.capabilities ?? [], level: r.level, message: r.message ?? '', orderId: r.order_id ?? null, status: r.status,
+    decision: r.decision ?? null, grantIds: r.grant_ids ?? [], decidedBy: r.decided_by ?? null, decidedAt: isoOrNull(r.decided_at), reason: r.reason ?? '',
+    createdAt: iso(r.created_at), updatedAt: iso(r.updated_at),
+  };
+}
+function toPreference(r: any): ParticipantPreferenceRow {
+  return { userId: r.user_id, projectId: r.project_id, roles: r.roles ?? [], workspace: r.workspace ?? null, aiProfile: r.ai_profile ?? null, aiAssistance: r.ai_assistance ?? [], roleDetails: r.role_details ?? {}, updatedAt: iso(r.updated_at) };
+}
+function toOnboardingEvent(r: any): OnboardingEventRow {
+  return { id: r.id, userId: r.user_id, sessionId: r.session_id ?? null, projectId: r.project_id ?? null, event: r.event, details: r.details ?? {}, createdAt: iso(r.created_at) };
 }
 function toAccessGrant(r: any): AccessGrantRow {
   return {
@@ -596,6 +634,7 @@ function toProject(r: any): ProjectRow {
     ownerId: r.owner_id,
     title: r.title,
     languages: r.languages,
+    projectType: r.project_type ?? 'book',
     revision: r.revision,
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
@@ -789,6 +828,12 @@ function mapPgError(err: any): never {
   if (code === '23505' && /participant_roles_active/.test(constraint)) {
     throw new CoreRuleError('conflict', 'Ця роль у учасника вже є');
   }
+  if (code === '23505' && /onboarding_sessions_one_draft/.test(constraint)) {
+    throw new CoreRuleError('conflict', 'Незавершений опитувальник для цього проєкту вже є — продовжте його');
+  }
+  if (code === '23505' && /access_requests_one_pending/.test(constraint)) {
+    throw new CoreRuleError('conflict', 'Запит доступу вже чекає рішення');
+  }
   if (code === '23505' && /story_proposals_open_dedupe/.test(constraint)) {
     throw new CoreRuleError('conflict', 'Така пропозиція вже чекає рішення');
   }
@@ -833,15 +878,16 @@ export class PgCoreRepository implements CoreRepository {
 
   async upsertProject(input: ProjectInput) {
     const { rows } = await this.q(
-      `INSERT INTO projects (id, owner_id, title, languages)
-       VALUES ($1, $2, COALESCE($3, ''), COALESCE($4, '{uk}'::text[]))
+      `INSERT INTO projects (id, owner_id, title, languages, project_type)
+       VALUES ($1, $2, COALESCE($3, ''), COALESCE($4, '{uk}'::text[]), COALESCE($5, 'book'))
        ON CONFLICT (id) DO UPDATE SET
          owner_id = EXCLUDED.owner_id,
          title = COALESCE($3, projects.title),
          languages = COALESCE($4, projects.languages),
+         project_type = COALESCE($5, projects.project_type),
          updated_at = now()
        RETURNING *`,
-      [input.id, input.ownerId, input.title ?? null, input.languages ?? null],
+      [input.id, input.ownerId, input.title ?? null, input.languages ?? null, input.projectType ?? null],
     );
     return toProject(rows[0]);
   }
@@ -2727,6 +2773,153 @@ export class PgCoreRepository implements CoreRepository {
       [f.workflowId ?? null, Math.max(1, Math.min(f.limit ?? 100, 500))],
     );
     return rows.map(toWorkflowEvent);
+  }
+
+  // ── Role Onboarding (Т6.3 В1) ───────────────────────────────────────────────
+
+  async addOnboardingSession(input: OnboardingSessionInput) {
+    checkOnboardingSession(input);
+    const { rows } = await this.q(
+      `INSERT INTO onboarding_sessions (user_id, project_id, project_type, entry_intent, source, source_order_id, source_ref, current_step, answers)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [input.userId, input.projectId ?? null, input.projectType ?? null, input.entryIntent ?? null, input.source, input.sourceOrderId ?? null, input.sourceRef ?? null, input.currentStep ?? 1, JSON.stringify(input.answers ?? {})],
+    );
+    return toOnboardingSession(rows[0]);
+  }
+
+  async getOnboardingSession(id: string) {
+    if (!UUID_RE.test(id)) return null;
+    const { rows } = await this.q('SELECT * FROM onboarding_sessions WHERE id = $1', [id]);
+    return rows[0] ? toOnboardingSession(rows[0]) : null;
+  }
+
+  async findOnboardingDraft(userId: string, projectId: string | null) {
+    const { rows } = await this.q(`SELECT * FROM onboarding_sessions WHERE user_id = $1 AND COALESCE(project_id, '') = COALESCE($2, '') AND status = 'draft'`, [userId, projectId]);
+    return rows[0] ? toOnboardingSession(rows[0]) : null;
+  }
+
+  async listOnboardingSessions(f: { userId?: string; projectId?: string; status?: OnboardingStatus; limit?: number }) {
+    const { rows } = await this.q(
+      `SELECT * FROM onboarding_sessions WHERE ($1::text IS NULL OR user_id = $1) AND ($2::text IS NULL OR project_id = $2) AND ($3::text IS NULL OR status = $3)
+       ORDER BY updated_at DESC, id LIMIT $4`,
+      [f.userId ?? null, f.projectId ?? null, f.status ?? null, Math.max(1, Math.min(f.limit ?? 100, 500))],
+    );
+    return rows.map(toOnboardingSession);
+  }
+
+  async updateOnboardingSession(id: string, patch: OnboardingSessionPatch, expectedRevision?: number) {
+    try {
+      return await this.tx(async (c) => {
+        const { rows: cur } = await c.query('SELECT * FROM onboarding_sessions WHERE id = $1 FOR UPDATE', [UUID_RE.test(id) ? id : '00000000-0000-0000-0000-000000000000']);
+        if (!cur[0]) throw notFound(`Опитувальник «${id}»`);
+        const row = toOnboardingSession(cur[0]);
+        checkOnboardingPatch(row, patch);
+        if (expectedRevision !== undefined && row.revision !== expectedRevision) throw new CoreRuleError('conflict', `Опитувальник уже змінено (ревізія ${row.revision}, а не ${expectedRevision}) — перечитайте його`);
+        const has = (k: keyof OnboardingSessionPatch) => patch[k] !== undefined;
+        const { rows } = await c.query(
+          `UPDATE onboarding_sessions SET
+             project_id = CASE WHEN $2 THEN $3 ELSE project_id END,
+             project_type = CASE WHEN $4 THEN $5 ELSE project_type END,
+             entry_intent = CASE WHEN $6 THEN $7 ELSE entry_intent END,
+             current_step = COALESCE($8, current_step),
+             answers = COALESCE($9::jsonb, answers),
+             result = CASE WHEN $10 THEN $11::jsonb ELSE result END,
+             source_order_id = CASE WHEN $12 THEN $13 ELSE source_order_id END,
+             status = COALESCE($14, status),
+             completed_at = CASE WHEN $14 = 'completed' THEN now() ELSE completed_at END,
+             revision = revision + 1, updated_at = now()
+           WHERE id = $1 RETURNING *`,
+          [
+            row.id, has('projectId'), patch.projectId ?? null, has('projectType'), patch.projectType ?? null, has('entryIntent'), patch.entryIntent ?? null,
+            patch.currentStep ?? null, patch.answers === undefined ? null : JSON.stringify(patch.answers), has('result'), patch.result == null ? null : JSON.stringify(patch.result),
+            has('sourceOrderId'), patch.sourceOrderId ?? null, patch.status ?? null,
+          ],
+        );
+        return toOnboardingSession(rows[0]);
+      });
+    } catch (err) {
+      if (err instanceof CoreRuleError) throw err;
+      mapPgError(err);
+    }
+  }
+
+  async addAccessRequest(input: AccessRequestInput) {
+    checkAccessRequest(input);
+    const { rows } = await this.q(
+      `INSERT INTO access_requests (project_id, participant_id, user_id, session_id, roles, scope, scope_refs, capabilities, level, message, order_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+      [input.projectId, input.participantId, input.userId, input.sessionId ?? null, JSON.stringify(input.roles ?? []), input.scope, input.scopeRefs ?? [], input.capabilities ?? [], input.level, input.message ?? '', input.orderId ?? null],
+    );
+    return toAccessRequest(rows[0]);
+  }
+
+  async getAccessRequest(id: string) {
+    if (!UUID_RE.test(id)) return null;
+    const { rows } = await this.q('SELECT * FROM access_requests WHERE id = $1', [id]);
+    return rows[0] ? toAccessRequest(rows[0]) : null;
+  }
+
+  async listAccessRequests(f: { projectId?: string; userId?: string; status?: AccessRequestStatus; limit?: number }) {
+    const { rows } = await this.q(
+      `SELECT * FROM access_requests WHERE ($1::text IS NULL OR project_id = $1) AND ($2::text IS NULL OR user_id = $2) AND ($3::text IS NULL OR status = $3)
+       ORDER BY created_at DESC, id LIMIT $4`,
+      [f.projectId ?? null, f.userId ?? null, f.status ?? null, Math.max(1, Math.min(f.limit ?? 100, 500))],
+    );
+    return rows.map(toAccessRequest);
+  }
+
+  async decideAccessRequest(id: string, d: AccessRequestDecision) {
+    try {
+      return await this.tx(async (c) => {
+        const { rows: cur } = await c.query('SELECT * FROM access_requests WHERE id = $1 FOR UPDATE', [UUID_RE.test(id) ? id : '00000000-0000-0000-0000-000000000000']);
+        if (!cur[0]) throw notFound(`Запит доступу «${id}»`);
+        checkAccessRequestDecision(toAccessRequest(cur[0]), d);
+        const cancelled = d.status === 'cancelled';
+        const { rows } = await c.query(
+          `UPDATE access_requests SET status = $2, decision = $3, grant_ids = $4, decided_by = $5, decided_at = CASE WHEN $6 THEN NULL ELSE now() END, reason = $7, updated_at = now()
+           WHERE id = $1 RETURNING *`,
+          [id, d.status, d.decision ? JSON.stringify(d.decision) : null, d.grantIds ?? [], cancelled ? null : d.decidedBy ?? null, cancelled, d.reason ?? ''],
+        );
+        return toAccessRequest(rows[0]);
+      });
+    } catch (err) {
+      if (err instanceof CoreRuleError) throw err;
+      mapPgError(err);
+    }
+  }
+
+  async getParticipantPreference(userId: string, projectId: string) {
+    const { rows } = await this.q('SELECT * FROM participant_preferences WHERE user_id = $1 AND project_id = $2', [userId, projectId]);
+    return rows[0] ? toPreference(rows[0]) : null;
+  }
+
+  async saveParticipantPreference(input: Omit<ParticipantPreferenceRow, 'updatedAt'>) {
+    checkParticipantPreference(input);
+    const { rows } = await this.q(
+      `INSERT INTO participant_preferences (user_id, project_id, roles, workspace, ai_profile, ai_assistance, role_details) VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (user_id, project_id) DO UPDATE SET roles = EXCLUDED.roles, workspace = EXCLUDED.workspace, ai_profile = EXCLUDED.ai_profile,
+         ai_assistance = EXCLUDED.ai_assistance, role_details = EXCLUDED.role_details, updated_at = now() RETURNING *`,
+      [input.userId, input.projectId, JSON.stringify(input.roles), input.workspace, input.aiProfile, input.aiAssistance, JSON.stringify(input.roleDetails)],
+    );
+    return toPreference(rows[0]);
+  }
+
+  async addOnboardingEvent(input: { userId: string; sessionId?: string | null; projectId?: string | null; event: OnboardingEventName; details?: Record<string, unknown> }) {
+    checkOnboardingEvent(input);
+    const { rows } = await this.q(
+      `INSERT INTO onboarding_events (user_id, session_id, project_id, event, details) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [input.userId, input.sessionId ?? null, input.projectId ?? null, input.event, JSON.stringify(input.details ?? {})],
+    );
+    return toOnboardingEvent(rows[0]);
+  }
+
+  async listOnboardingEvents(f: { userId?: string; event?: OnboardingEventName; sessionId?: string; limit?: number }) {
+    const { rows } = await this.q(
+      `SELECT * FROM (SELECT * FROM onboarding_events WHERE ($1::text IS NULL OR user_id = $1) AND ($2::text IS NULL OR event = $2) AND ($3::uuid IS NULL OR session_id = $3)
+         ORDER BY created_at DESC, id DESC LIMIT $4) e ORDER BY created_at, id`,
+      [f.userId ?? null, f.event ?? null, f.sessionId ? (UUID_RE.test(f.sessionId) ? f.sessionId : '00000000-0000-0000-0000-000000000000') : null, Math.max(1, Math.min(f.limit ?? 200, 1000))],
+    );
+    return rows.map(toOnboardingEvent);
   }
 
   // ── Пропозиції до канону (Т5.3 В1) ─────────────────────────────────────────

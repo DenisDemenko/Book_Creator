@@ -76,6 +76,15 @@ import {
   WORKFLOW_EVENT_ACTIONS,
   PROPOSAL_STATES,
   PROPOSAL_EVENT_ACTIONS,
+  ONBOARDING_SOURCES,
+  ONBOARDING_EVENTS,
+  type OnboardingSessionInput,
+  type OnboardingSessionPatch,
+  type OnboardingSessionRow,
+  type AccessRequestInput,
+  type AccessRequestDecision,
+  type AccessRequestRow,
+  type ParticipantPreferenceRow,
   type ProposalState,
   type StoryProposalInput,
   type StoryProposalPatch,
@@ -820,4 +829,93 @@ export function checkProposalPatch(current: Pick<StoryProposalRow, 'state' | 'cr
 export function checkProposalEvent(input: { action: string; actor: CoreActor }): void {
   assertActor(input.actor);
   if (!(PROPOSAL_EVENT_ACTIONS as readonly string[]).includes(input.action)) throw new CoreRuleError('bad_input', `Невідома дія журналу пропозицій «${input.action}»`);
+}
+
+// ── Role Onboarding (Т6.3 В1) ────────────────────────────────────────────────
+
+const SLUG_RE = /^[a-z][a-z0-9_]{1,39}$/;
+const idText = (v: unknown, what: string, nullable = true) => {
+  if (v == null) {
+    if (nullable) return;
+    throw new CoreRuleError('bad_input', `Не вказано ${what}`);
+  }
+  if (typeof v !== 'string' || !v.length || v.length > 200) throw new CoreRuleError('bad_input', `${what} — від 1 до 200 символів`);
+};
+const slug = (v: unknown, what: string) => {
+  if (v != null && (typeof v !== 'string' || !SLUG_RE.test(v))) throw new CoreRuleError('bad_input', `${what} — id реєстру (латиниця, «_»)`);
+};
+
+export function checkOnboardingSession(input: OnboardingSessionInput): void {
+  idText(input.userId, 'людину', false);
+  if (!(ONBOARDING_SOURCES as readonly string[]).includes(input.source)) throw new CoreRuleError('bad_input', `Невідома точка запуску «${input.source}»`);
+  idText(input.projectId, 'проєкт');
+  idText(input.sourceOrderId, 'замовлення');
+  if (input.sourceRef != null && String(input.sourceRef).length > 200) throw new CoreRuleError('bad_input', 'Посилання на джерело — до 200 символів');
+  slug(input.projectType, 'Тип проєкту');
+  slug(input.entryIntent, 'Мета входу');
+  checkOnboardingPatchShape({ answers: input.answers, currentStep: input.currentStep });
+}
+
+function checkOnboardingPatchShape(patch: OnboardingSessionPatch): void {
+  if (patch.currentStep !== undefined && !(Number.isInteger(patch.currentStep) && patch.currentStep >= 1 && patch.currentStep <= 8)) throw new CoreRuleError('bad_input', 'Крок опитувальника — від 1 до 8');
+  if (patch.answers !== undefined && !objectLike(patch.answers)) throw new CoreRuleError('bad_input', 'Відповіді — обʼєкт');
+  if (patch.answers !== undefined && JSON.stringify(patch.answers).length > 20000) throw new CoreRuleError('bad_input', 'Відповіді — до 20 000 символів');
+  if (patch.result !== undefined && patch.result !== null && !objectLike(patch.result)) throw new CoreRuleError('bad_input', 'Результат — обʼєкт');
+}
+
+/** Змінюється лише чернетка; завершена й скасована незмінні (§25). */
+export function checkOnboardingPatch(current: Pick<OnboardingSessionRow, 'status'>, patch: OnboardingSessionPatch): void {
+  if (current.status !== 'draft') throw new CoreRuleError('conflict', `Опитувальник уже «${current.status === 'completed' ? 'завершено' : 'скасовано'}»`);
+  checkOnboardingPatchShape(patch);
+  idText(patch.projectId, 'проєкт');
+  idText(patch.sourceOrderId, 'замовлення');
+  slug(patch.projectType, 'Тип проєкту');
+  slug(patch.entryIntent, 'Мета входу');
+  if (patch.status !== undefined && !['draft', 'completed', 'cancelled'].includes(patch.status)) throw new CoreRuleError('bad_input', `Невідомий стан «${patch.status}»`);
+}
+
+export function checkAccessRequest(input: AccessRequestInput): void {
+  idText(input.projectId, 'проєкт', false);
+  idText(input.userId, 'людину', false);
+  idText(input.participantId, 'учасника', false);
+  slug(input.scope, 'Область');
+  if (!(ACCESS_LEVELS as readonly string[]).includes(input.level)) throw new CoreRuleError('bad_input', `Невідомий рівень доступу «${input.level}»`);
+  if (input.level === 'work' && input.scope !== 'media_library') throw new CoreRuleError('bad_input', 'Робочий доступ (work) — лише до медіатеки');
+  if (input.level === 'manage') throw new CoreRuleError('bad_input', 'Право керування запитом не видається — його надає власник окремо');
+  const list = (v: unknown, what: string, max: number) => {
+    if (v === undefined) return;
+    if (!Array.isArray(v) || v.length > max || v.some((x) => typeof x !== 'string' || !x || x.length > 200)) throw new CoreRuleError('bad_input', `${what} — до ${max} рядків`);
+  };
+  list(input.scopeRefs, 'Цілі області', 100);
+  list(input.capabilities, 'Можливості', 20);
+  if (input.roles !== undefined && (!Array.isArray(input.roles) || input.roles.length > 10 || input.roles.some((r) => !r || typeof r.roleId !== 'string'))) throw new CoreRuleError('bad_input', 'Ролі — до 10');
+  if (input.message !== undefined && String(input.message).length > 2000) throw new CoreRuleError('bad_input', 'Повідомлення — до 2000 символів');
+  idText(input.orderId, 'замовлення');
+}
+
+/** Рішення — лише щодо нерозглянутого; схвалення — лише з наданим доступом; людина чи система, не AI (№22). */
+export function checkAccessRequestDecision(current: Pick<AccessRequestRow, 'status'>, d: AccessRequestDecision): void {
+  if (current.status !== 'pending') throw new CoreRuleError('conflict', 'Запит уже розглянуто');
+  if (!['approved', 'modified', 'rejected', 'cancelled'].includes(d.status)) throw new CoreRuleError('bad_input', `Невідоме рішення «${d.status}»`);
+  if (d.status !== 'cancelled') {
+    if (!d.decidedBy) throw new CoreRuleError('bad_input', 'Не вказано, хто вирішив');
+    checkOntologyActor(d.decidedBy);
+  }
+  if ((d.status === 'approved' || d.status === 'modified') && !(d.grantIds ?? []).length) throw new CoreRuleError('bad_input', 'Схвалений запит — лише з наданим доступом');
+  if (d.reason !== undefined && String(d.reason).length > 2000) throw new CoreRuleError('bad_input', 'Причина — до 2000 символів');
+}
+
+export function checkParticipantPreference(input: Omit<ParticipantPreferenceRow, 'updatedAt'>): void {
+  idText(input.userId, 'людину', false);
+  idText(input.projectId, 'проєкт', false);
+  slug(input.workspace, 'Простір');
+  if (!Array.isArray(input.roles) || input.roles.length > 10) throw new CoreRuleError('bad_input', 'Ролі — до 10');
+  if (!Array.isArray(input.aiAssistance) || input.aiAssistance.length > 20) throw new CoreRuleError('bad_input', 'Допомога ШІ — до 20 пунктів');
+  if (!objectLike(input.roleDetails)) throw new CoreRuleError('bad_input', 'Параметри ролі — обʼєкт');
+}
+
+export function checkOnboardingEvent(input: { userId: string; event: string; details?: unknown }): void {
+  idText(input.userId, 'людину', false);
+  if (!(ONBOARDING_EVENTS as readonly string[]).includes(input.event)) throw new CoreRuleError('bad_input', `Невідома подія аналітики «${input.event}»`);
+  if (input.details !== undefined && !objectLike(input.details)) throw new CoreRuleError('bad_input', 'Подробиці — обʼєкт');
 }

@@ -58,6 +58,12 @@ import {
   checkStoryProposal,
   checkProposalPatch,
   checkProposalEvent,
+  checkOnboardingSession,
+  checkOnboardingPatch,
+  checkAccessRequest,
+  checkAccessRequestDecision,
+  checkParticipantPreference,
+  checkOnboardingEvent,
   assertActor,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isSearchableKind, isValidEmbedding, memoryTextScore } from './search/text';
@@ -164,6 +170,17 @@ import type {
   StoryProposalInput,
   StoryProposalPatch,
   StoryProposalRow,
+  OnboardingSessionRow,
+  OnboardingSessionInput,
+  OnboardingSessionPatch,
+  OnboardingStatus,
+  AccessRequestRow,
+  AccessRequestInput,
+  AccessRequestDecision,
+  AccessRequestStatus,
+  ParticipantPreferenceRow,
+  OnboardingEventRow,
+  OnboardingEventName,
 } from './types';
 import { OPEN_PROPOSAL_STATES } from './types';
 
@@ -222,6 +239,10 @@ export class MemoryCoreRepository implements CoreRepository {
   private graphLayouts: GraphLayoutRow[] = [];
   private storyProposals: StoryProposalRow[] = [];
   private storyProposalEvents: StoryProposalEventRow[] = [];
+  private onboardingSessions: OnboardingSessionRow[] = [];
+  private accessRequests: AccessRequestRow[] = [];
+  private preferences: ParticipantPreferenceRow[] = [];
+  private onboardingEvents: OnboardingEventRow[] = [];
 
   private requireProject(projectId: string): ProjectRow {
     const p = this.projects.get(projectId);
@@ -258,6 +279,7 @@ export class MemoryCoreRepository implements CoreRepository {
       ownerId: input.ownerId,
       title: input.title ?? prev?.title ?? '',
       languages: input.languages ?? prev?.languages ?? ['uk'],
+      projectType: input.projectType ?? prev?.projectType ?? 'book',
       revision: prev?.revision ?? 0,
       createdAt: prev?.createdAt ?? t,
       updatedAt: t,
@@ -2119,6 +2141,132 @@ export class MemoryCoreRepository implements CoreRepository {
   async listStoryProposalEvents(projectId: string, f: { proposalId?: string; limit?: number } = {}) {
     const limit = Math.max(1, Math.min(f.limit ?? 200, 1000));
     return this.storyProposalEvents.filter((e) => e.projectId === projectId && (!f.proposalId || e.proposalId === f.proposalId)).slice(-limit).map(clone);
+  }
+
+  // ── Role Onboarding (Т6.3 В1) ─────────────────────────────────────────────
+
+  async addOnboardingSession(input: OnboardingSessionInput) {
+    checkOnboardingSession(input);
+    const pid = input.projectId ?? null;
+    if (this.onboardingSessions.some((x) => x.userId === input.userId && x.projectId === pid && x.status === 'draft')) throw new CoreRuleError('conflict', 'Незавершений опитувальник для цього проєкту вже є — продовжте його');
+    const t = now();
+    const row: OnboardingSessionRow = {
+      id: randomUUID(), userId: input.userId, projectId: pid, projectType: input.projectType ?? null, entryIntent: input.entryIntent ?? null, source: input.source,
+      sourceOrderId: input.sourceOrderId ?? null, sourceRef: input.sourceRef ?? null, currentStep: input.currentStep ?? 1, status: 'draft', answers: clone(input.answers ?? {}),
+      result: null, revision: 1, createdAt: t, updatedAt: t, completedAt: null,
+    };
+    this.onboardingSessions.push(row);
+    return clone(row);
+  }
+
+  async getOnboardingSession(id: string) {
+    const r = this.onboardingSessions.find((x) => x.id === id);
+    return r ? clone(r) : null;
+  }
+
+  async findOnboardingDraft(userId: string, projectId: string | null) {
+    const r = this.onboardingSessions.find((x) => x.userId === userId && x.projectId === (projectId ?? null) && x.status === 'draft');
+    return r ? clone(r) : null;
+  }
+
+  async listOnboardingSessions(f: { userId?: string; projectId?: string; status?: OnboardingStatus; limit?: number }) {
+    const limit = Math.max(1, Math.min(f.limit ?? 100, 500));
+    return this.onboardingSessions
+      .filter((x) => (!f.userId || x.userId === f.userId) && (f.projectId === undefined || x.projectId === f.projectId) && (!f.status || x.status === f.status))
+      .slice().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, limit).map(clone);
+  }
+
+  async updateOnboardingSession(id: string, patch: OnboardingSessionPatch, expectedRevision?: number) {
+    const r = this.onboardingSessions.find((x) => x.id === id);
+    if (!r) throw notFound(`Опитувальник «${id}»`);
+    checkOnboardingPatch(r, patch);
+    if (expectedRevision !== undefined && r.revision !== expectedRevision) throw new CoreRuleError('conflict', `Опитувальник уже змінено (ревізія ${r.revision}, а не ${expectedRevision}) — перечитайте його`);
+    const nextProject = patch.projectId !== undefined ? patch.projectId : r.projectId;
+    if (nextProject !== r.projectId && this.onboardingSessions.some((x) => x.id !== id && x.userId === r.userId && x.projectId === nextProject && x.status === 'draft')) throw new CoreRuleError('conflict', 'Незавершений опитувальник для цього проєкту вже є');
+    const t = now();
+    if (patch.projectId !== undefined) r.projectId = patch.projectId;
+    if (patch.projectType !== undefined) r.projectType = patch.projectType;
+    if (patch.entryIntent !== undefined) r.entryIntent = patch.entryIntent;
+    if (patch.currentStep !== undefined) r.currentStep = patch.currentStep;
+    if (patch.answers !== undefined) r.answers = clone(patch.answers);
+    if (patch.result !== undefined) r.result = clone(patch.result);
+    if (patch.sourceOrderId !== undefined) r.sourceOrderId = patch.sourceOrderId;
+    if (patch.status !== undefined) {
+      r.status = patch.status;
+      if (patch.status === 'completed') r.completedAt = t;
+    }
+    r.revision += 1;
+    r.updatedAt = t;
+    return clone(r);
+  }
+
+  async addAccessRequest(input: AccessRequestInput) {
+    checkAccessRequest(input);
+    if (this.accessRequests.some((x) => x.projectId === input.projectId && x.userId === input.userId && x.status === 'pending')) throw new CoreRuleError('conflict', 'Запит доступу вже чекає рішення');
+    if (!this.participants.some((x) => x.id === input.participantId && x.projectId === input.projectId)) throw notFound('Учасник');
+    const t = now();
+    const row: AccessRequestRow = {
+      id: randomUUID(), projectId: input.projectId, participantId: input.participantId, userId: input.userId, sessionId: input.sessionId ?? null, roles: clone(input.roles ?? []),
+      scope: input.scope, scopeRefs: [...(input.scopeRefs ?? [])], capabilities: [...(input.capabilities ?? [])], level: input.level, message: input.message ?? '', orderId: input.orderId ?? null,
+      status: 'pending', decision: null, grantIds: [], decidedBy: null, decidedAt: null, reason: '', createdAt: t, updatedAt: t,
+    };
+    this.accessRequests.push(row);
+    return clone(row);
+  }
+
+  async getAccessRequest(id: string) {
+    const r = this.accessRequests.find((x) => x.id === id);
+    return r ? clone(r) : null;
+  }
+
+  async listAccessRequests(f: { projectId?: string; userId?: string; status?: AccessRequestStatus; limit?: number }) {
+    const limit = Math.max(1, Math.min(f.limit ?? 100, 500));
+    return this.accessRequests
+      .filter((x) => (!f.projectId || x.projectId === f.projectId) && (!f.userId || x.userId === f.userId) && (!f.status || x.status === f.status))
+      .slice().reverse().slice(0, limit).map(clone);
+  }
+
+  async decideAccessRequest(id: string, d: AccessRequestDecision) {
+    const r = this.accessRequests.find((x) => x.id === id);
+    if (!r) throw notFound(`Запит доступу «${id}»`);
+    checkAccessRequestDecision(r, d);
+    const t = now();
+    r.status = d.status;
+    r.decision = d.decision ? clone(d.decision) : null;
+    r.grantIds = [...(d.grantIds ?? [])];
+    r.decidedBy = d.status === 'cancelled' ? null : d.decidedBy ?? null;
+    r.decidedAt = d.status === 'cancelled' ? null : t;
+    r.reason = d.reason ?? '';
+    r.updatedAt = t;
+    return clone(r);
+  }
+
+  async getParticipantPreference(userId: string, projectId: string) {
+    const r = this.preferences.find((x) => x.userId === userId && x.projectId === projectId);
+    return r ? clone(r) : null;
+  }
+
+  async saveParticipantPreference(input: Omit<ParticipantPreferenceRow, 'updatedAt'>) {
+    checkParticipantPreference(input);
+    const row: ParticipantPreferenceRow = { ...clone(input), updatedAt: now() };
+    const i = this.preferences.findIndex((x) => x.userId === input.userId && x.projectId === input.projectId);
+    if (i >= 0) this.preferences[i] = row;
+    else this.preferences.push(row);
+    return clone(row);
+  }
+
+  async addOnboardingEvent(input: { userId: string; sessionId?: string | null; projectId?: string | null; event: OnboardingEventName; details?: Record<string, unknown> }) {
+    checkOnboardingEvent(input);
+    const row: OnboardingEventRow = { id: randomUUID(), userId: input.userId, sessionId: input.sessionId ?? null, projectId: input.projectId ?? null, event: input.event, details: clone(input.details ?? {}), createdAt: now() };
+    this.onboardingEvents.push(row);
+    return clone(row);
+  }
+
+  async listOnboardingEvents(f: { userId?: string; event?: OnboardingEventName; sessionId?: string; limit?: number }) {
+    const limit = Math.max(1, Math.min(f.limit ?? 200, 1000));
+    return this.onboardingEvents
+      .filter((x) => (!f.userId || x.userId === f.userId) && (!f.event || x.event === f.event) && (!f.sessionId || x.sessionId === f.sessionId))
+      .slice(-limit).map(clone);
   }
 
   async listMembers(projectId: string) {
