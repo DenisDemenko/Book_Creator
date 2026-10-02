@@ -189,6 +189,11 @@ async function suite(name: string, repo: CoreRepository, raw?: (sql: string, par
   t('канон змінився — запис зупинено (409), пропозиція повертається на розгляд', stale?.code === 'conflict' && back.state === 'proposed' && back.validation?.errors.some((e) => e.code === 'duplicate_relation'));
   t('стара ревізія при рішенні — 409', (await errOf(() => S.rejectProposal(repo, P, back.id, { actor: AUTHOR, expectedRevision: back.revision - 1 })))?.code === 'conflict');
 
+  await repo.upsertProject({ id: 'book-other', ownerId: 'u-other', title: 'Інша' });
+  await repo.upsertParticipant({ projectId: 'book-other', userId: 'u-author', source: 'manual', createdBy: 'user:u-other' });
+  t('книги ядра: усі / власні / де учасник', (await repo.listProjects()).length === 2 && (await repo.listProjects({ ownerId: 'u-author' })).map((x) => x.id).join() === P
+    && (await repo.listProjects({ ownerId: 'u-author', participantUserId: 'u-author' })).length === 2 && (await repo.listProjects({ ownerId: 'nobody', participantUserId: 'nobody' })).length === 0);
+
   const details = await S.proposalDetails(repo, P, rel.id);
   t('картка пропозиції: журнал і докази з уривками', details.events.length >= 3 && details.evidence.length === 2 && details.evidence[0].excerpt.includes('Оракул'));
   const open = await repo.listStoryProposals(P, { states: ['detected', 'proposed', 'validated', 'approved'] });

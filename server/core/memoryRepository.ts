@@ -271,6 +271,17 @@ export class MemoryCoreRepository implements CoreRepository {
     return p ? clone(p) : null;
   }
 
+  async listProjects(f: { ownerId?: string; participantUserId?: string; limit?: number } = {}) {
+    const limit = Math.max(1, Math.min(f.limit ?? 500, 2000));
+    const any = f.ownerId !== undefined || f.participantUserId !== undefined;
+    const member = new Set(this.participants.filter((x) => x.userId === f.participantUserId && x.status === 'active').map((x) => x.projectId));
+    return [...this.projects.values()]
+      .filter((p) => !any || p.ownerId === f.ownerId || member.has(p.id))
+      .sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id))
+      .slice(0, limit)
+      .map(clone);
+  }
+
   async bumpProjectRevision(id: string) {
     const p = this.requireProject(id);
     p.revision += 1;

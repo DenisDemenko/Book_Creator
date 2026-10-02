@@ -851,6 +851,17 @@ export class PgCoreRepository implements CoreRepository {
     return rows[0] ? toProject(rows[0]) : null;
   }
 
+  async listProjects(f: { ownerId?: string; participantUserId?: string; limit?: number } = {}) {
+    const any = f.ownerId !== undefined || f.participantUserId !== undefined;
+    const { rows } = await this.q(
+      `SELECT * FROM projects p WHERE NOT $1::boolean OR p.owner_id = $2
+         OR EXISTS (SELECT 1 FROM project_participants x WHERE x.project_id = p.id AND x.user_id = $3 AND x.status = 'active')
+       ORDER BY p.title, p.id LIMIT $4`,
+      [any, f.ownerId ?? null, f.participantUserId ?? null, Math.max(1, Math.min(f.limit ?? 500, 2000))],
+    );
+    return rows.map(toProject);
+  }
+
   async bumpProjectRevision(id: string) {
     const { rows } = await this.q(
       'UPDATE projects SET revision = revision + 1, updated_at = now() WHERE id = $1 RETURNING revision',

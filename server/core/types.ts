@@ -1258,6 +1258,11 @@ export interface CoreRepository {
 
   upsertProject(input: ProjectInput): Promise<ProjectRow>;
   getProject(id: string): Promise<ProjectRow | null>;
+  /**
+   * Т5.3 В2: книги в ядрі (за назвою). Без фільтра — усі; `ownerId` і/або
+   * `participantUserId` — власні АБО ті, де людина — активний учасник.
+   */
+  listProjects(filter?: { ownerId?: string; participantUserId?: string; limit?: number }): Promise<ProjectRow[]>;
   /** +1 до ревізії книги; повертає нову ревізію. */
   bumpProjectRevision(id: string): Promise<number>;
 

@@ -203,6 +203,7 @@ import { formatManuscriptWithClaude, anthropicConfig, ClaudeManuscriptError, MAX
 import { initCore, getCoreStatus, shutdownCore, registerCoreJobKind, getCoreRepository, getCoreJobQueue } from './server/core';
 import { registerProjectRoutes, resolveProjectAccess, bookMediaOwners } from './server/core/projectRoutes';
 import { registerWorkflowRoutes } from './server/core/workflows/routes';
+import { registerStoryCoreRoutes } from './server/core/storyCore/routes';
 import { CORE_SYNC_KIND, coreSyncJobKind } from './server/core/sync';
 import { AI_ROLE_JOB_KIND, aiRoleJobKind } from './server/core/ai/job';
 import { AI_MENTIONS_JOB_KIND, aiMentionsJobKind } from './server/core/ai/mentions';
@@ -644,6 +645,13 @@ registerGitCommandRoutes(app);
     requireAdmin,
     requirePublish: requireSchemaPublisher as any,
     abilities: async (req) => ({ canEdit: req.principal?.role === 'admin', canPublish: await canRole(req.principal?.role ?? 'guest', 'canPublishSchema') }),
+  });
+  // Т5.3: Story Core API — операції §33 над ядром для Graph Studio (права — з доступу до книги).
+  registerStoryCoreRoutes(app, {
+    repo: getCoreRepository,
+    access: realtimeAccessDeps,
+    requireAuth,
+    canPublishSchema: async (req) => canRole(req.principal?.role ?? 'guest', 'canPublishSchema'),
   });
   // Учасники проєкту й ролі з реєстру ролей (Т6.1) — до маршрутів проєкту, щоб їхні адреси не перехопив загальний обробник.
   registerParticipantRoutes(app, {
