@@ -137,6 +137,8 @@ console.log('\nHTTP: читання — граф із справжніх дан�
   const g = await op('get_graph', 'u-viewer');
   const nodeIds = new Set(g.body.result?.nodes.map((n: any) => n.id));
   t('граф: вузли — справжні сутності, ребра — справжні зв\'язки', g.status === 200 && [olena.id, port.id, light.id].every((id) => nodeIds.has(id)) && g.body.result.edges.some((e: any) => e.id === aiRel.id && e.status === 'suggested'));
+  const lone = await repo.createEntity({ projectId: P, type: 'object', name: 'Ключ', createdBy: 'system:core_sync' });
+  t('огляд — лише зв\'язні й згадувані; з isolated — і самотні сутності', !g.body.result.nodes.some((n: any) => n.id === lone.id) && (await op('get_graph', 'u-viewer', { isolated: true })).body.result.nodes.some((n: any) => n.id === lone.id));
   const only = await call('GET', `/call/get_graph?projectId=${P}&suggested=0`, 'u-viewer');
   t('фільтр: лише підтверджені (GET для читання)', only.status === 200 && only.body.result.edges.every((e: any) => e.status === 'confirmed'));
   t('GET для зміни — 405', (await call('GET', `/call/write_canon?projectId=${P}`, 'u-owner')).status === 405);

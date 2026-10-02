@@ -203,7 +203,7 @@ export const STORY_CORE_OPS: StoryCoreOpDef[] = [
   },
   {
     // Не з §33, але №18: Story Graph — з тих самих справжніх даних.
-    id: 'get_graph', name: { en: 'Get story graph', uk: 'Отримати граф твору' }, kind: 'read', project: true, args: ['focus', 'depth', 'types', 'suggested', 'tags', 'limit'],
+    id: 'get_graph', name: { en: 'Get story graph', uk: 'Отримати граф твору' }, kind: 'read', project: true, args: ['focus', 'depth', 'types', 'suggested', 'tags', 'isolated', 'limit'],
     async run(ctx, a) {
       return buildStoryGraph(ctx.repo, ctx.projectId, {
         focus: str(a.focus) || undefined,
@@ -211,6 +211,7 @@ export const STORY_CORE_OPS: StoryCoreOpDef[] = [
         types: list(a.types, 200),
         includeSuggested: bool(a.suggested, true),
         includeTagLinks: bool(a.tags, true),
+        includeIsolated: bool(a.isolated, false),
         limit: int(a.limit, 80, 1, 300),
       });
     },

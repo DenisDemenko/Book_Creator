@@ -4,8 +4,9 @@
  * RUNS / VERSIONS / EVALUATIONS).
  *
  * Рішення власника (§2): адреса в адмінці; повноцінно в Т5.2 — Онтологія,
- * Процеси ШІ й Версії; Граф твору — посилання на граф книги (повністю —
- * Т5.3), Запуски — до Т5.4, Оцінювання — прогони якості Т2.8.
+ * Процеси ШІ й Версії; Запуски — до Т5.4, Оцінювання — прогони якості Т2.8.
+ * Т5.3: Граф твору — вибір книги, справжні сутності й зв'язки через Story
+ * Core API, походження, пропозиції й запис у канон (`StoryGraphPanel`).
  *
  * Відкривають адмін і ролі з правом публікації схем (сервер перевіряє кожен
  * запит; тут — лише що показати).
@@ -17,6 +18,7 @@ import type { GraphStudioTab } from '../../utils/appRoutes';
 import { ENV_CLASS, ENV_LABEL, gs, type GsAbilities } from './gsApi';
 import { WorkflowEditor } from './WorkflowEditor';
 import { OntologyCanvas } from './OntologyCanvas';
+import { StoryGraphPanel } from './StoryGraphPanel';
 
 const TABS: { id: GraphStudioTab; en: string; uk: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'ontology', en: 'Ontology', uk: 'Онтологія', icon: Network },
@@ -223,11 +225,11 @@ export const GraphStudioPage: React.FC<Props> = ({ tab, onTabChange, bookTitle, 
       ) : tab === 'evaluations' ? (
         <EvaluationsPanel isAdmin={abilities.role === 'admin'} />
       ) : tab === 'story-graph' ? (
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 text-xs text-slate-300" data-gs-story>
-          <p className="mb-3">Story Graph (Граф твору) — справжні сутності й зв'язки конкретної книги з ядра. Повне представлення в Graph Studio з фільтрами й походженням — Т5.3; зараз — граф відкритої книги в Студії.</p>
+        <div className="space-y-2">
+          <StoryGraphPanel />
           {onOpenStoryGraph && (
-            <button type="button" onClick={onOpenStoryGraph} className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/50 px-3 py-1.5 text-sky-200 hover:bg-sky-500/10" data-gs-open-story>
-              <ExternalLink className="h-3.5 w-3.5" /> Граф книги{bookTitle ? ` «${bookTitle}»` : ''}
+            <button type="button" onClick={onOpenStoryGraph} className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/50 px-3 py-1.5 text-xs text-sky-200 hover:bg-sky-500/10" data-gs-open-story>
+              <ExternalLink className="h-3.5 w-3.5" /> Граф відкритої книги в Студії{bookTitle ? ` «${bookTitle}»` : ''}
             </button>
           )}
         </div>

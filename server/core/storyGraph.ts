@@ -70,6 +70,8 @@ export interface StoryGraphOptions {
   includeSuggested?: boolean;
   /** Показувати зв'язки з тегів (типово — так). */
   includeTagLinks?: boolean;
+  /** Огляд і з сутностями без зв'язків і згадок (Graph Studio, Т5.3) — після зв'язних, у межах ліміту. */
+  includeIsolated?: boolean;
   limit?: number;
 }
 
@@ -210,7 +212,7 @@ export async function buildStoryGraph(repo: CoreRepository, projectId: string, o
     const ranked = [...entities.keys()]
       .filter(typeOk)
       .map((id) => ({ id, score: (degree.get(id) ?? 0) * 3 + (counts[id] ?? 0) }))
-      .filter((x) => x.score > 0)
+      .filter((x) => x.score > 0 || opts.includeIsolated)
       .sort((a, b) => b.score - a.score || entities.get(a.id)!.name.localeCompare(entities.get(b.id)!.name));
     truncated = ranked.length > limit;
     chosen = new Set(ranked.slice(0, limit).map((x) => x.id));
