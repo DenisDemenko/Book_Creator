@@ -126,7 +126,7 @@ export interface ProjectRoutesDeps {
   /** Прототип FLC етапу 0 (Т1.6): адаптер Jev (null — ключа немає) і LLM. */
   flc?: { jev: () => Promise<JevAdapter | null>; llm: (projectId: string, actor: string) => LlmJson };
   /** Т2.7 В3: голос героя на допиті — модуль «Ядра AI» `coreCharacterVoice` (шаблон адміна — за бажанням). */
-  interview?: { voice: (projectId: string, actor: string) => VoiceGenerate; loadTemplate?: () => Promise<{ system: string; user: string } | undefined> };
+  interview?: { voice: (projectId: string, actor: string) => VoiceGenerate; loadTemplate?: () => Promise<{ system: string; user: string } | undefined>; workflows?: () => import('./workflows/engine/runner').EngineDeps | null };
   /** Порядок сцен у часі світу зі Студії (`Scene.timelineOrder`), Т2.1. */
   sceneOrder?: (projectId: string) => Promise<Map<string, number>>;
   /**
@@ -2382,6 +2382,7 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       voice: deps.interview!.voice(req.params.id, actor),
       loadTemplate: deps.interview!.loadTemplate,
       studio: deps.studio,
+      workflows: deps.interview!.workflows,
     };
   };
   const interviewReady = (res: Response): boolean => {

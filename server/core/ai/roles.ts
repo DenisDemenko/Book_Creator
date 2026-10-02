@@ -127,26 +127,148 @@ function templateVersion(t: { system: string; user: string }): string {
   return createHash('sha256').update(`${t.system}\u0000${t.user}`).digest('hex').slice(0, 12);
 }
 
-export async function runAiRole(deps: AiRoleDeps, req: AiRoleRequest): Promise<AiRoleResult> {
+// ── Кроки ролі окремо (Т5.4 В2): ними користуються і `runAiRole`, і вузли процесу ШІ ──
+
+export interface RolePrompt {
+  module: CoreAiRoleModule;
+  template: { system: string; user: string };
+  rendered: { system: string; user: string };
+  promptVersion: string;
+}
+
+/** Шаблон ролі (адмінський шар чи заводський; або власний системний текст вузла PROMPT) → готова інструкція. */
+export async function prepareRolePrompt(deps: Pick<AiRoleDeps, 'loadTemplate'>, req: AiRoleRequest, override?: { system?: string }): Promise<RolePrompt> {
   const module = CORE_AI_ROLE_MODULE[req.role];
-  const modelId = await deps.resolveModel(module);
-  const template = (await deps.loadTemplate?.(module)) ?? factoryCoreAiRoleTemplate(module);
+  const base = (await deps.loadTemplate?.(module)) ?? factoryCoreAiRoleTemplate(module);
+  const template = override?.system ? { system: override.system, user: base.user } : base;
   const rendered = renderCoreAiRoleTemplate(template, {
     task: req.task,
     paragraphs: formatParagraphs(req.paragraphs),
     images: (req.images ?? []).map((i) => `[${i.id}] ${i.description ?? ''}`.trim()).join('\n'),
     language: req.language,
   });
+  return { module, template, rendered, promptVersion: templateVersion(template) };
+}
 
-  const run = await deps.repo.createRun({
+/** Рядок `analysis_runs` для виклику ролі. */
+export function beginRoleRun(deps: Pick<AiRoleDeps, 'repo'>, req: AiRoleRequest, modelId: string | undefined, prompt: RolePrompt): Promise<RunRow> {
+  return deps.repo.createRun({
     projectId: req.projectId,
     role: req.role,
-    module,
+    module: prompt.module,
     model: modelId ?? '',
-    promptVersion: templateVersion(template),
+    promptVersion: prompt.promptVersion,
     inputs: req.paragraphs.map((p) => ({ paragraphId: p.id, hash: blockHash(p.text) })),
     createdBy: req.createdBy,
   });
+}
+
+/** Висновок моделі зі звіреним доказом (серіалізовний — для стану процесу). */
+export interface CheckedFinding {
+  finding: ModelFinding;
+  paragraphIds: string[];
+  imageIds: string[];
+  insufficient: boolean;
+  payload: Record<string, unknown>;
+}
+
+export type RoleOutputCheck =
+  | { ok: true; checked: CheckedFinding[]; rejected: RejectedFinding[] }
+  | { ok: false; status: 'invalid'; message: string; errors: string[] };
+
+/** Розбір відповіді: JSON → схема ролі → доказ лише з того, що модель справді отримала. */
+export function checkRoleOutput(text: string, req: Pick<AiRoleRequest, 'paragraphs' | 'images'>): RoleOutputCheck {
+  let parsed: unknown;
+  try {
+    parsed = parseModelJson(text);
+  } catch (err) {
+    const message = `Відповідь не збережено: ${(err as Error).message}`;
+    return { ok: false, status: 'invalid', message, errors: [message] };
+  }
+  const check = validateAgainstSchema<{ findings: ModelFinding[] }>(CORE_AI_ROLE_RESPONSE_SCHEMA, parsed);
+  if (!check.ok) return { ok: false, status: 'invalid', message: `Відповідь не збережено — не відповідає схемі: ${check.errors.join('; ')}`, errors: check.errors };
+  const inputParagraphs = new Set(req.paragraphs.map((p) => p.id));
+  const inputImages = new Set((req.images ?? []).map((i) => i.id));
+  const checked: CheckedFinding[] = [];
+  const rejected: RejectedFinding[] = [];
+  for (const f of check.value!.findings) {
+    const paragraphIds = [...new Set((f.paragraph_ids ?? []).filter((id) => inputParagraphs.has(id)))];
+    const imageIds = [...new Set((f.image_ids ?? []).filter((id) => inputImages.has(id)))];
+    const insufficient = !!f.insufficient_data && !paragraphIds.length && !imageIds.length;
+    if (!paragraphIds.length && !imageIds.length && !insufficient) {
+      rejected.push({ reason: 'no_evidence', kind: f.kind, summary: f.summary });
+      continue;
+    }
+    const payload: Record<string, unknown> = { summary: f.summary, confidence: f.confidence };
+    if (f.entity_type) payload.entityType = f.entity_type;
+    if (f.entity_name) payload.entityName = f.entity_name;
+    if (f.quote) payload.quote = f.quote;
+    const dropped = (f.paragraph_ids ?? []).length - paragraphIds.length + (f.image_ids ?? []).length - imageIds.length;
+    if (dropped > 0) payload.droppedUnknownEvidence = dropped;
+    checked.push({ finding: f, paragraphIds, imageIds, insufficient, payload });
+  }
+  return { ok: true, checked, rejected };
+}
+
+export type RoleCost = { engine: string; model: string; inputTokens: number; outputTokens: number; costUsd: number };
+
+/**
+ * Зберегти висновки: `prepare` (зіставлення, відсів), `analysis_findings`,
+ * завершити прогін. Т5.4: `minConfidence` — поріг вузла PROPOSAL (за
+ * замовчуванням 0 — як раніше).
+ */
+export async function persistRoleFindings(
+  deps: Pick<AiRoleDeps, 'repo'>,
+  req: AiRoleRequest,
+  run: RunRow,
+  check: { checked: CheckedFinding[]; rejected: RejectedFinding[] },
+  cost: RoleCost,
+  opts: { minConfidence?: number } = {},
+): Promise<AiRoleResult> {
+  const findings: FindingRow[] = [];
+  const rejected: RejectedFinding[] = [...check.rejected];
+  const min = opts.minConfidence ?? 0;
+  for (const c of check.checked) {
+    const f = c.finding;
+    if (min > 0 && typeof f.confidence === 'number' && f.confidence < min) {
+      rejected.push({ reason: 'filtered', kind: f.kind, summary: f.summary });
+      continue;
+    }
+    const prepared: PreparedFinding[] = req.prepare
+      ? await req.prepare(f, { paragraphIds: c.paragraphIds, imageIds: c.imageIds })
+      : [{ kind: f.kind, entityId: req.entityId ?? null, payload: c.payload, paragraphIds: c.paragraphIds, imageIds: c.imageIds }];
+    if (!prepared.length) {
+      rejected.push({ reason: 'filtered', kind: f.kind, summary: f.summary });
+      continue;
+    }
+    for (const p of prepared) {
+      findings.push(
+        await deps.repo.addFinding({
+          projectId: req.projectId,
+          runId: run.id,
+          entityId: p.entityId ?? null,
+          kind: p.kind,
+          payload: { ...c.payload, ...p.payload },
+          sourceParagraphIds: p.paragraphIds,
+          sourceAssetIds: p.imageIds ?? [],
+          sourceRevision: req.sourceRevision ?? null,
+          insufficientData: c.insufficient && !p.paragraphIds.length && !(p.imageIds ?? []).length,
+          visibility: req.visibility ?? 'project',
+          createdBy: `ai:${req.role}`,
+        }),
+      );
+    }
+  }
+  const done = await deps.repo.finishRun(req.projectId, run.id, { status: 'done', cost: { ...cost, accepted: findings.length, rejected: rejected.length } });
+  return { run: done, status: 'done', findings, rejected, errors: [] };
+}
+
+export async function runAiRole(deps: AiRoleDeps, req: AiRoleRequest): Promise<AiRoleResult> {
+  const prompt = await prepareRolePrompt(deps, req);
+  const module = prompt.module;
+  const modelId = await deps.resolveModel(module);
+  const rendered = prompt.rendered;
+  const run = await beginRoleRun(deps, req, modelId, prompt);
 
   let out: AiGenerateOutput;
   try {
@@ -168,13 +290,7 @@ export async function runAiRole(deps: AiRoleDeps, req: AiRoleRequest): Promise<A
     return { run: failed, status: 'failed', findings: [], rejected: [], errors: [message] };
   }
 
-  const cost = {
-    engine: out.engine,
-    model: out.modelId,
-    inputTokens: out.inputTokens,
-    outputTokens: out.outputTokens,
-    costUsd: out.costUsd,
-  };
+  const cost: RoleCost = { engine: out.engine, model: out.modelId, inputTokens: out.inputTokens, outputTokens: out.outputTokens, costUsd: out.costUsd };
   // Бюджет — до розбору відповіді: витрачене витрачене, навіть якщо відповідь зіпсована.
   if (deps.recordUsage) {
     try {
@@ -186,69 +302,11 @@ export async function runAiRole(deps: AiRoleDeps, req: AiRoleRequest): Promise<A
     }
   }
 
-  let parsed: unknown;
-  try {
-    parsed = parseModelJson(out.text);
-  } catch (err) {
-    const message = `Відповідь не збережено: ${(err as Error).message}`;
-    const invalid = await deps.repo.finishRun(req.projectId, run.id, { status: 'failed', cost, error: message });
-    return { run: invalid, status: 'invalid', findings: [], rejected: [], errors: [message] };
+  const check = checkRoleOutput(out.text, req);
+  if (check.ok === false) {
+    const bad = check as Extract<RoleOutputCheck, { ok: false }>;
+    const invalid = await deps.repo.finishRun(req.projectId, run.id, { status: 'failed', cost, error: bad.message });
+    return { run: invalid, status: 'invalid', findings: [], rejected: [], errors: bad.errors };
   }
-  const check = validateAgainstSchema<{ findings: ModelFinding[] }>(CORE_AI_ROLE_RESPONSE_SCHEMA, parsed);
-  if (!check.ok) {
-    const message = `Відповідь не збережено — не відповідає схемі: ${check.errors.join('; ')}`;
-    const invalid = await deps.repo.finishRun(req.projectId, run.id, { status: 'failed', cost, error: message });
-    return { run: invalid, status: 'invalid', findings: [], rejected: [], errors: check.errors };
-  }
-
-  // Доказ — лише з того, що модель справді отримала.
-  const inputParagraphs = new Set(req.paragraphs.map((p) => p.id));
-  const inputImages = new Set((req.images ?? []).map((i) => i.id));
-  const findings: FindingRow[] = [];
-  const rejected: RejectedFinding[] = [];
-  for (const f of check.value!.findings) {
-    const paragraphIds = [...new Set((f.paragraph_ids ?? []).filter((id) => inputParagraphs.has(id)))];
-    const imageIds = [...new Set((f.image_ids ?? []).filter((id) => inputImages.has(id)))];
-    const insufficient = !!f.insufficient_data && !paragraphIds.length && !imageIds.length;
-    if (!paragraphIds.length && !imageIds.length && !insufficient) {
-      rejected.push({ reason: 'no_evidence', kind: f.kind, summary: f.summary });
-      continue;
-    }
-    const payload: Record<string, unknown> = { summary: f.summary, confidence: f.confidence };
-    if (f.entity_type) payload.entityType = f.entity_type;
-    if (f.entity_name) payload.entityName = f.entity_name;
-    if (f.quote) payload.quote = f.quote;
-    const dropped = (f.paragraph_ids ?? []).length - paragraphIds.length + (f.image_ids ?? []).length - imageIds.length;
-    if (dropped > 0) payload.droppedUnknownEvidence = dropped;
-    const prepared: PreparedFinding[] = req.prepare
-      ? await req.prepare(f, { paragraphIds, imageIds })
-      : [{ kind: f.kind, entityId: req.entityId ?? null, payload, paragraphIds, imageIds }];
-    if (!prepared.length) {
-      rejected.push({ reason: 'filtered', kind: f.kind, summary: f.summary });
-      continue;
-    }
-    for (const p of prepared) {
-      findings.push(
-        await deps.repo.addFinding({
-          projectId: req.projectId,
-          runId: run.id,
-          entityId: p.entityId ?? null,
-          kind: p.kind,
-          payload: { ...payload, ...p.payload },
-          sourceParagraphIds: p.paragraphIds,
-          sourceAssetIds: p.imageIds ?? [],
-          sourceRevision: req.sourceRevision ?? null,
-          insufficientData: insufficient && !p.paragraphIds.length && !(p.imageIds ?? []).length,
-          visibility: req.visibility ?? 'project',
-          createdBy: `ai:${req.role}`,
-        }),
-      );
-    }
-  }
-
-  const done = await deps.repo.finishRun(req.projectId, run.id, {
-    status: 'done',
-    cost: { ...cost, accepted: findings.length, rejected: rejected.length },
-  });
-  return { run: done, status: 'done', findings, rejected, errors: [] };
+  return persistRoleFindings(deps, req, run, check as Extract<RoleOutputCheck, { ok: true }>, cost);
 }

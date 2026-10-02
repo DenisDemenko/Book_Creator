@@ -27,6 +27,7 @@ import { createCorePool } from '../server/core/index.ts';
 import { CORE_SCHEMA, loadMigrations, resolveMigrationsDir, runMigrations } from '../server/core/migrate.ts';
 import { reconcileParagraphIds } from '../src/utils/paragraphIds.ts';
 import type { AiGenerateInput } from '../server/core/ai/roles.ts';
+import { VIA_WORKFLOWS, workflowEngineFor, workflowRunsOf } from './lib/workflowTestEngine.mts';
 import type { CoreRepository } from '../server/core/types.ts';
 import type { JobStore } from '../server/core/jobs/types.ts';
 
@@ -74,7 +75,8 @@ async function suite(label: string, repo: CoreRepository, jobStore: JobStore, P:
   };
   let clock = Date.parse('2026-09-25T10:00:00Z');
   const q = new JobQueue(jobStore, { workerId: 'w', now: () => new Date(clock), log: () => {} });
-  q.register(AI_MENTIONS_JOB_KIND, aiMentionsJobKind({ repo: () => repo, generate, resolveModel: async () => 'model-ai1' }));
+  const workflows = await workflowEngineFor(repo, { generate, resolveModel: async () => 'model-ai1' });
+  q.register(AI_MENTIONS_JOB_KIND, aiMentionsJobKind({ repo: () => repo, generate, resolveModel: async () => 'model-ai1', workflows }));
 
   reply = JSON.stringify({ findings: [
     { kind: 'mention', entity_type: 'emotion', entity_name: 'страх', subject_name: 'Олена', summary: 'Олені страшно', paragraph_ids: [p2], quote: 'Її охопив страх', confidence: 0.8 },
@@ -115,6 +117,10 @@ async function suite(label: string, repo: CoreRepository, jobStore: JobStore, P:
   t('і нерозглянуте не дублюється', after.filter((f) => f.status === 'suggested').length === 4, `${after.filter((f) => f.status === 'suggested').length}`);
 
   // ── Маршрути ──
+  if (VIA_WORKFLOWS) {
+    const runs = await workflowRunsOf(repo, 'ai1_mentions');
+    t('Т5.4: задачі AI-1 пройшли через процес ai1_mentions (LangGraph)', runs.length >= 2 && runs.every((r) => r.status === 'succeeded' && r.trigger === 'job:ai_mentions'), `${runs.length}`);
+  }
   console.log(`\nМаршрути пропозицій (${label}):`);
   const access = {
     async getBookOwnerId(id: string) { return id === P ? 'u-owner' : null; },

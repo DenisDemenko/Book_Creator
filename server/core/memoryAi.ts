@@ -24,8 +24,8 @@
  */
 
 import { createHash } from 'node:crypto';
-import type { AiRoleDeps, ModelFinding, PreparedFinding } from './ai/roles';
-import type { CharacterMemoryRow, CharacterMemoryType, CoreRepository, EntityRow, MemoryEffects } from './types';
+import type { AiRoleDeps, AiRoleRequest, ModelFinding, PreparedFinding } from './ai/roles';
+import type { CharacterMemoryRow, CharacterMemoryType, CoreActor, CoreRepository, EntityRow, FindingRow, MemoryEffects } from './types';
 import { EVENT_TYPES } from './characterProfile';
 import { scanScenes, type TimelineScene } from './timeline';
 import { memoriesAt, memoryEvidenceHash } from './characterMemory';
@@ -171,6 +171,71 @@ export interface AiMemoryJobDeps {
   generate: AiRoleDeps['generate'];
   resolveModel: AiRoleDeps['resolveModel'];
   loadTemplate?: AiRoleDeps['loadTemplate'];
+  /** Т5.4: рушій процесів ШІ — є опублікований `ai2_memory`, то через нього. */
+  workflows?: () => import('./workflows/engine/runner').EngineDeps | null;
+}
+
+/** Т5.4: id процесу AI-2 «пам'ять героя». */
+export const AI2_MEMORY_WORKFLOW = 'ai2_memory';
+
+/** Контекст героя в сцені + запит AI-2 (спільний для задачі й процесу). null — у сцені героя нема чого читати. */
+export async function buildMemoryRequest(repo: CoreRepository, projectId: string, sectionId: string, heroId: string, createdBy: string, signal?: AbortSignal) {
+  const c = await heroMemoryContext(repo, projectId, sectionId, heroId);
+  if (!c || !c.current.length) return null;
+  const project = await repo.getProject(projectId);
+  const req: AiRoleRequest = {
+    projectId,
+    role: 'AI-2',
+    task: heroMemoryTask(c),
+    paragraphs: c.current,
+    entityId: heroId,
+    sourceRevision: project?.revision ?? null,
+    createdBy: createdBy as CoreActor,
+    signal,
+    prepare: createMemoryPreparer(c),
+  };
+  return { req, c };
+}
+
+/** Висновки AI-2 → записи пам'яті героя «запропоновано» (без дублів). Повертає, скільки додано. */
+export async function persistMemoryProposals(repo: CoreRepository, projectId: string, sectionId: string, heroId: string, findings: FindingRow[]): Promise<number> {
+  const scan = await scanScenes(repo, projectId, await repo.listTimePoints(projectId));
+  const scene = scan.bySection.get(sectionId);
+  if (!scene) return 0;
+  const c = await heroMemoryContext(repo, projectId, sectionId, heroId);
+  const project = await repo.getProject(projectId);
+  const hashOf = (id: string) => scan.ix.paragraphs.get(id)?.textHash;
+  let proposals = 0;
+  for (const f of findings) {
+    const p = f.payload as unknown as MemoryProposalPayload & { summary?: string };
+    const content = clip(String(p.summary ?? '').trim(), 2000);
+    if (!content || !p.memoryType) continue;
+    const key = aiMemoryKey(sectionId, content);
+    if ((await repo.listCharacterMemories(projectId, { characterId: heroId, dedupeKey: key, limit: 5 })).some((m) => m.status !== 'superseded')) continue;
+    await repo.addCharacterMemory({
+      projectId,
+      characterId: heroId,
+      memoryType: p.memoryType,
+      content,
+      aboutEntityIds: p.aboutEntityIds ?? [],
+      effects: p.effects ?? {},
+      beliefStatus: p.beliefStatus ?? 'believes',
+      truth: p.truth ?? 'unknown',
+      sourceEventKind: c?.eventId ? 'entity' : 'paragraph',
+      sourceEventId: c?.eventId ?? f.sourceParagraphIds[0] ?? null,
+      sourceParagraphIds: f.sourceParagraphIds,
+      evidenceHash: memoryEvidenceHash(hashOf, f.sourceParagraphIds),
+      sceneId: sectionId,
+      storyTime: { label: scene.time?.label ?? null, key: scene.time?.key ?? null, chapter: scene.chapterNumber, narrativeIndex: scene.narrativeIndex },
+      canonRevision: project?.revision ?? 0,
+      origin: 'ai',
+      status: 'suggested',
+      dedupeKey: key,
+      createdBy: MEMORY_AI_ACTOR,
+    });
+    proposals++;
+  }
+  return proposals;
 }
 
 export function aiMemoryJobKind(deps: AiMemoryJobDeps) {
@@ -178,13 +243,13 @@ export function aiMemoryJobKind(deps: AiMemoryJobDeps) {
     maxAttempts: 2,
     rateLimit: { max: 20, windowMs: 60_000 },
     handler: async (ctx: {
-      job: { projectId: string; payload: Record<string, unknown>; createdBy: string };
+      job: { id?: string; projectId: string; payload: Record<string, unknown>; createdBy: string };
       signal: AbortSignal;
       checkpoint(): Promise<void>;
       setProgress(p: Record<string, unknown>): Promise<void>;
       recordUsage(u: { tokens?: number; requests?: number }): Promise<void>;
     }) => {
-      const { runAiRole } = await import('./ai/roles');
+      const { runAiRoleWorkflow } = await import('./workflows/bindings/aiRole');
       const repo = deps.repo();
       if (!repo) throw new Error('Ядро недоступне');
       const projectId = ctx.job.projectId;
@@ -195,63 +260,25 @@ export function aiMemoryJobKind(deps: AiMemoryJobDeps) {
       const wanted = Array.isArray(ctx.job.payload.characterIds) ? new Set((ctx.job.payload.characterIds as unknown[]).map(String)) : null;
       const heroes = scene.characters.filter((h) => !wanted || wanted.has(h.id)).slice(0, MEMORY_HEROES_MAX);
       if (!heroes.length) return { status: 'no_heroes', sectionId };
-      const project = await repo.getProject(projectId);
-      const out: { characterId: string; name: string; proposals: number; rejected: number; runId: string | null; status: string }[] = [];
+      const out: { characterId: string; name: string; proposals: number; rejected: number; runId: string | null; status: string; workflowRunId?: string }[] = [];
       for (const h of heroes) {
-        const c = await heroMemoryContext(repo, projectId, sectionId, h.id);
-        if (!c || !c.current.length) {
+        const built = await buildMemoryRequest(repo, projectId, sectionId, h.id, ctx.job.createdBy, ctx.signal);
+        if (!built) {
           out.push({ characterId: h.id, name: h.name, proposals: 0, rejected: 0, runId: null, status: 'nothing' });
           continue;
         }
         await ctx.setProgress({ step: 'model', sectionId, hero: h.name, done: out.length, total: heroes.length });
         await ctx.checkpoint();
-        const res = await runAiRole(
+        const res = await runAiRoleWorkflow(
+          deps.workflows?.() ?? null,
+          { workflowId: AI2_MEMORY_WORKFLOW, trigger: 'job:ai_memory', jobId: ctx.job.id ?? null, input: { sectionId, characterId: h.id } },
           { repo, generate: deps.generate, resolveModel: deps.resolveModel, loadTemplate: deps.loadTemplate, recordUsage: (u) => ctx.recordUsage(u) },
-          {
-            projectId,
-            role: 'AI-2',
-            task: heroMemoryTask(c),
-            paragraphs: c.current,
-            entityId: h.id,
-            sourceRevision: project?.revision ?? null,
-            createdBy: ctx.job.createdBy,
-            signal: ctx.signal,
-            prepare: createMemoryPreparer(c),
-          },
+          built.req,
+          { afterLegacy: async (r) => ({ memories: await persistMemoryProposals(repo, projectId, sectionId, h.id, r.findings) }) },
         );
         if (res.status === 'failed') throw new Error(res.errors[0] ?? 'Виклик моделі не вдався');
-        const hashOf = (id: string) => scan.ix.paragraphs.get(id)?.textHash;
-        let proposals = 0;
-        for (const f of res.findings) {
-          const p = f.payload as unknown as MemoryProposalPayload & { summary?: string };
-          const content = clip(String(p.summary ?? '').trim(), 2000);
-          if (!content || !p.memoryType) continue;
-          const key = aiMemoryKey(sectionId, content);
-          if ((await repo.listCharacterMemories(projectId, { characterId: h.id, dedupeKey: key, limit: 5 })).some((m) => m.status !== 'superseded')) continue;
-          await repo.addCharacterMemory({
-            projectId,
-            characterId: h.id,
-            memoryType: p.memoryType,
-            content,
-            aboutEntityIds: p.aboutEntityIds ?? [],
-            effects: p.effects ?? {},
-            beliefStatus: p.beliefStatus ?? 'believes',
-            truth: p.truth ?? 'unknown',
-            sourceEventKind: c.eventId ? 'entity' : 'paragraph',
-            sourceEventId: c.eventId ?? f.sourceParagraphIds[0] ?? null,
-            sourceParagraphIds: f.sourceParagraphIds,
-            evidenceHash: memoryEvidenceHash(hashOf, f.sourceParagraphIds),
-            sceneId: sectionId,
-            storyTime: { label: scene.time?.label ?? null, key: scene.time?.key ?? null, chapter: scene.chapterNumber, narrativeIndex: scene.narrativeIndex },
-            canonRevision: project?.revision ?? 0,
-            origin: 'ai',
-            status: 'suggested',
-            dedupeKey: key,
-            createdBy: MEMORY_AI_ACTOR,
-          });
-          proposals++;
-        }
-        out.push({ characterId: h.id, name: h.name, proposals, rejected: res.rejected.length, runId: res.run.id, status: res.status });
+        const proposals = Number((res.extra as { memories?: number } | undefined)?.memories ?? 0);
+        out.push({ characterId: h.id, name: h.name, proposals, rejected: res.rejected.length, runId: res.run.id, status: res.status, ...(res.workflowRunId ? { workflowRunId: res.workflowRunId } : {}) });
       }
       return { status: 'done', sectionId, heroes: out, proposals: out.reduce((a, h) => a + h.proposals, 0) };
     },

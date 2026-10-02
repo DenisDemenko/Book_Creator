@@ -94,21 +94,11 @@ const LLM: NodeExecutor = async (node, state, env) => {
   let attempt = 0;
   let current = model;
   let switched = false;
-  for (;;) {
+  let out: Awaited<ReturnType<ExecEnv['services']['generate']>> | null = null;
+  while (!out) {
     try {
-      const out = await env.services.generate({ module, modelId: current, system, user: state.prompt.user, projectId: env.run.projectId ?? '', actor: env.actor, signal: env.signal, generation });
-      if (env.recordUsage) await env.recordUsage({ tokens: out.inputTokens + out.outputTokens, requests: 1 });
-      const cost = state.cost + out.costUsd;
-      const trace = { model: out.modelId, tokensIn: out.inputTokens, tokensOut: out.outputTokens, costUsd: out.costUsd, retryCount: attempt, warnings, details: { provider, module, switchedToAlternate: switched } };
-      if (costLimit !== undefined && costLimit > 0 && cost > costLimit) {
-        throw new NodeError(`Ліміт витрат вузла $${costLimit} перевищено ($${cost.toFixed(4)})`, 'cost_limit', trace);
-      }
-      return {
-        patch: { llm: { text: out.text, model: out.modelId, engine: out.engine, tokensIn: out.inputTokens, tokensOut: out.outputTokens, costUsd: out.costUsd }, cost },
-        trace,
-      };
+      out = await env.services.generate({ module, modelId: current, system, user: state.prompt.user, projectId: env.run.projectId ?? '', actor: env.actor, signal: env.signal, generation });
     } catch (err) {
-      if (err instanceof NodeError) throw err;
       const e = err as Error;
       const timeout = e.name === 'AiTimeoutError';
       const policy = str(timeout ? p.on_timeout : p.on_provider_error) || 'fail';
@@ -128,6 +118,21 @@ const LLM: NodeExecutor = async (node, state, env) => {
       throw new NodeError(e.message, timeout ? 'timeout' : 'provider', { model: current ?? null, retryCount: attempt, warnings });
     }
   }
+  const trace = { model: out.modelId, tokensIn: out.inputTokens, tokensOut: out.outputTokens, costUsd: out.costUsd, retryCount: attempt, warnings, details: { provider, module, switchedToAlternate: switched } };
+  const llm = { text: out.text, model: out.modelId, engine: out.engine, tokensIn: out.inputTokens, tokensOut: out.outputTokens, costUsd: out.costUsd };
+  // Бюджет задачі — поза повторами: вичерпаний бюджет не повторюють (помилка задачі як є).
+  if (env.recordUsage) {
+    try {
+      await env.recordUsage({ tokens: out.inputTokens + out.outputTokens, requests: 1 });
+    } catch (err) {
+      throw Object.assign(err as Error, { trace, llm });
+    }
+  }
+  const cost = state.cost + out.costUsd;
+  if (costLimit !== undefined && costLimit > 0 && cost > costLimit) {
+    throw Object.assign(new NodeError(`Ліміт витрат вузла $${costLimit} перевищено ($${cost.toFixed(4)})`, 'cost_limit', trace), { llm });
+  }
+  return { patch: { llm, cost }, trace };
 };
 
 /** VALIDATOR: JSON зі звіркою схеми вузла; гілки valid / invalid. */

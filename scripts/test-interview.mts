@@ -54,6 +54,7 @@ import { CORE_MODULE_KEYS, resolveCoreTemplate } from '../server/coreAiRegistry.
 import { registerProjectRoutes } from '../server/core/projectRoutes.ts';
 import express from 'express';
 import type { AddressInfo } from 'node:net';
+import { VIA_WORKFLOWS, workflowEngineFor, workflowRunsOf } from './lib/workflowTestEngine.mts';
 
 let pass = 0;
 let fail = 0;
@@ -286,7 +287,15 @@ async function turnSuite(label: string, repo: CoreRepository, P: string) {
     const pick = (id: string, v: string) => (new RegExp(`"${id}"`).test(user) ? { [id]: { choice: v } } : {});
     return { text: JSON.stringify({ answers: { ...pick('trajectory', 'waver'), ...pick('scene_motive', 'protect_self'), ...pick('next_action', 'deflect') } }), modelId: 'fake-llm', inputTokens: 10, outputTokens: 5 };
   };
-  const deps = (): InterviewDeps => ({ repo, jev: jevMode === 'down' ? jevDown : jevOk, fallback: new LlmFallbackJevAdapter(llm), voice });
+  // Т5.4: з --workflows голос іде через процес character_voice — модель та сама (підставний голос).
+  const wfVoice = await workflowEngineFor(repo, {
+    generate: async (input) => {
+      const o = await voice(input.system, input.user);
+      return { text: o.text, modelId: o.modelId, engine: 'fake', inputTokens: o.inputTokens, outputTokens: o.outputTokens, costUsd: 0 };
+    },
+    resolveModel: async () => 'fake-voice',
+  });
+  const deps = (): InterviewDeps => ({ repo, jev: jevMode === 'down' ? jevDown : jevOk, fallback: new LlmFallbackJevAdapter(llm), voice, workflows: wfVoice });
   const actor = 'user:u-owner';
 
   t('модуль «Голос героя (допит)» — у «Ядрі AI», зі схемою відповіді, яку адмін не зламає',
@@ -305,6 +314,10 @@ async function turnSuite(label: string, repo: CoreRepository, P: string) {
   });
   const results = [];
   for (let i = 1; i <= 10; i++) results.push(await askQuestion(deps(), { projectId: P, simulationId: sim.id, question: `Питання номер ${i}: де ти була?`, actor }));
+  if (VIA_WORKFLOWS) {
+    const runs = await workflowRunsOf(repo, 'character_voice');
+    t('Т5.4: 10 ходів — 10 запусків процесу character_voice (LangGraph)', runs.length === 10 && runs.every((r) => r.status === 'succeeded' && r.trigger === 'interview'), `${runs.length}`);
+  }
   t('КРИТЕРІЙ FLC 2.0 §7 (3): 10 відповідей поспіль — усі з відповіддю, ходи 1…10', results.every((r, i) => r.status === 'answered' && r.turn === i + 1), results.map((r) => r.status).join(','));
   const last = results[9].event.publicPayload as any;
   t('контекст не губиться: у 10-му запиті голосу — 9 попередніх питань і відповідей; відповідь це підтверджує',
@@ -477,7 +490,15 @@ async function proposalSuite(label: string, repo: CoreRepository, P: string) {
   };
   const mock = new MockJevAdapter();
   const jev = { name: 'jev' as const, evaluate: async (sn: any, q: any) => ({ ...(await mock.evaluate(sn, q)), source: 'jev' as const, confidence: 0.9 }) };
-  const deps = (): InterviewDeps => ({ repo, jev, fallback: new LlmFallbackJevAdapter(llm), voice });
+  // Т5.4: з --workflows голос іде через процес character_voice — модель та сама (підставний голос).
+  const wfVoice = await workflowEngineFor(repo, {
+    generate: async (input) => {
+      const o = await voice(input.system, input.user);
+      return { text: o.text, modelId: o.modelId, engine: 'fake', inputTokens: o.inputTokens, outputTokens: o.outputTokens, costUsd: 0 };
+    },
+    resolveModel: async () => 'fake-voice',
+  });
+  const deps = (): InterviewDeps => ({ repo, jev, fallback: new LlmFallbackJevAdapter(llm), voice, workflows: wfVoice });
 
   const sim = await startInterview(repo, { projectId: P, characterId: olena, sceneId: 's2', actor });
   const scan0 = await scanScenes(repo, P, await repo.listTimePoints(P));

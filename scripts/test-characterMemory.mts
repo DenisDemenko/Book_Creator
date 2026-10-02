@@ -51,6 +51,7 @@ import { reconcileParagraphIds } from '../src/utils/paragraphIds.ts';
 import { checkCharacterMemory, checkCharacterMemoryStatus } from '../server/core/rules.ts';
 import { addAuthorMemory, collectTagMemories, heroMemories, isVisibleToHero, memoriesAt, memoryEvidenceHash, reviewMemory } from '../server/core/characterMemory.ts';
 import type { CharacterMemoryInput, CoreRepository } from '../server/core/types.ts';
+import { VIA_WORKFLOWS, workflowEngineFor, workflowRunsOf } from './lib/workflowTestEngine.mts';
 import { MemoryJobStore } from '../server/core/jobs/memoryJobStore.ts';
 import { PgJobStore } from '../server/core/jobs/pgJobStore.ts';
 import { JobQueue } from '../server/core/jobs/queue.ts';
@@ -441,7 +442,7 @@ async function aiSuite(label: string, repo: CoreRepository, jobStore: JobStore, 
   };
   let clock = Date.parse('2026-09-28T10:00:00Z');
   const q = new JobQueue(jobStore, { workerId: 'w', now: () => new Date(clock), log: () => {} });
-  q.register(AI_MEMORY_JOB_KIND, aiMemoryJobKind({ repo: () => repo, generate, resolveModel: async () => 'fake-ai2' }));
+  q.register(AI_MEMORY_JOB_KIND, aiMemoryJobKind({ repo: () => repo, generate, resolveModel: async () => 'fake-ai2', workflows: await workflowEngineFor(repo, { generate, resolveModel: async () => 'fake-ai2' }) }));
   const run = async (payload: Record<string, unknown>) => {
     const { job } = await q.enqueue({ projectId: P, kind: AI_MEMORY_JOB_KIND, payload, createdBy: 'user:u-owner' });
     await q.runOnce();
@@ -492,6 +493,10 @@ async function aiSuite(label: string, repo: CoreRepository, jobStore: JobStore, 
   t('лише обраний герой — один виклик', calls.length === 1 && calls[0].user.includes('ОЧИМА героя «Анна»') && (j3.result as any).heroes.length === 1);
   t('розділу немає — no_section; герой не учасник — no_heroes',
     ((await run({ sectionId: 'nope' })).result as any).status === 'no_section' && ((await run({ sectionId: 's2', characterIds: [serhii] })).result as any).status === 'no_heroes');
+  if (VIA_WORKFLOWS) {
+    const runs = await workflowRunsOf(repo, 'ai2_memory');
+    t('Т5.4: пам\'ять героя — через процес ai2_memory (LangGraph)', runs.length >= 1 && runs.every((r) => r.trigger === 'job:ai_memory'), `${runs.length}`);
+  }
 }
 
 async function snapshotSuite(label: string, repo: CoreRepository, P: string) {
@@ -626,7 +631,7 @@ async function routesSuite(label: string, repo: CoreRepository, jobStore: JobSto
   });
   let clock = Date.parse('2026-09-28T12:00:00Z');
   const q = new JobQueue(jobStore, { workerId: 'w', now: () => new Date(clock), log: () => {} });
-  q.register(AI_MEMORY_JOB_KIND, aiMemoryJobKind({ repo: () => repo, generate, resolveModel: async () => 'fake-ai2' }));
+  q.register(AI_MEMORY_JOB_KIND, aiMemoryJobKind({ repo: () => repo, generate, resolveModel: async () => 'fake-ai2', workflows: await workflowEngineFor(repo, { generate, resolveModel: async () => 'fake-ai2' }) }));
   const access = {
     async getBookOwnerId(x: string) { return x === P ? 'u-owner' : null; },
     async getCollabOwnerId() { return undefined; },

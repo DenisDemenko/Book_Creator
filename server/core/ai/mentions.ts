@@ -182,6 +182,43 @@ export interface AiMentionsJobDeps {
   generate: import('./roles').AiRoleDeps['generate'];
   resolveModel: import('./roles').AiRoleDeps['resolveModel'];
   loadTemplate?: import('./roles').AiRoleDeps['loadTemplate'];
+  /** Т5.4: рушій процесів ШІ — є опублікований `ai1_mentions`, то через нього. */
+  workflows?: () => import('../workflows/engine/runner').EngineDeps | null;
+}
+
+/** Т5.4: id процесу AI-1 у Graph Studio. */
+export const AI1_MENTIONS_WORKFLOW = 'ai1_mentions';
+
+/**
+ * Запит AI-1 над абзацами (Т5.4 В2: спільний для задачі й процесу — повтор і
+ * відгалуження будують його з того самого входу). null — нема чого читати.
+ */
+export async function buildMentionsRequest(repo: CoreRepository, projectId: string, input: { paragraphIds?: unknown }, createdBy: string, signal?: AbortSignal): Promise<import('./roles').AiRoleRequest | null> {
+  const ids = Array.isArray(input.paragraphIds) ? (input.paragraphIds as string[]) : [];
+  const paragraphs: { id: string; text: string }[] = [];
+  for (const id of ids) {
+    const row = await repo.getParagraph(projectId, id);
+    // Порожні абзаци, розділювачі й картинки моделі нічого не дадуть.
+    if (row && !row.deletedAt && row.text.trim() && (row.kind === 'paragraph' || row.kind === 'heading' || row.kind === 'blockquote')) {
+      paragraphs.push({ id: row.id, text: row.text });
+    }
+  }
+  if (!paragraphs.length) return null;
+  const known = (await repo.listEntities(projectId))
+    .filter((e) => e.status !== 'rejected')
+    .map((e) => ({ type: e.type, name: e.name }));
+  const prepare = await createMentionPreparer({ repo, projectId, paragraphTexts: new Map(paragraphs.map((p) => [p.id, p.text])) });
+  const project = await repo.getProject(projectId);
+  return {
+    projectId,
+    role: 'AI-1',
+    task: mentionTask(known),
+    paragraphs,
+    sourceRevision: project?.revision ?? null,
+    createdBy: createdBy as import('../types').CoreActor,
+    signal,
+    prepare,
+  };
 }
 
 /** Вид задачі `ai_mentions`: AI-1 над абзацами (payload.paragraphIds) → пропозиції. */
@@ -190,45 +227,25 @@ export function aiMentionsJobKind(deps: AiMentionsJobDeps) {
     maxAttempts: 2,
     rateLimit: { max: 20, windowMs: 60_000 },
     handler: async (ctx: {
-      job: { projectId: string; payload: Record<string, unknown>; createdBy: string };
+      job: { id?: string; projectId: string; payload: Record<string, unknown>; createdBy: string };
       signal: AbortSignal;
       checkpoint(): Promise<void>;
       setProgress(p: Record<string, unknown>): Promise<void>;
       recordUsage(u: { tokens?: number; requests?: number }): Promise<void>;
     }) => {
-      const { runAiRole } = await import('./roles');
+      const { runAiRoleWorkflow } = await import('../workflows/bindings/aiRole');
       const repo = deps.repo();
       if (!repo) throw new Error('Ядро недоступне');
       const projectId = ctx.job.projectId;
-      const ids = Array.isArray(ctx.job.payload.paragraphIds) ? (ctx.job.payload.paragraphIds as string[]) : [];
-      const paragraphs: { id: string; text: string }[] = [];
-      for (const id of ids) {
-        const row = await repo.getParagraph(projectId, id);
-        // Порожні абзаци, розділювачі й картинки моделі нічого не дадуть.
-        if (row && !row.deletedAt && row.text.trim() && (row.kind === 'paragraph' || row.kind === 'heading' || row.kind === 'blockquote')) {
-          paragraphs.push({ id: row.id, text: row.text });
-        }
-      }
-      if (!paragraphs.length) return { status: 'nothing', suggestions: 0 };
-      const known = (await repo.listEntities(projectId))
-        .filter((e) => e.status !== 'rejected')
-        .map((e) => ({ type: e.type, name: e.name }));
-      const prepare = await createMentionPreparer({ repo, projectId, paragraphTexts: new Map(paragraphs.map((p) => [p.id, p.text])) });
-      const project = await repo.getProject(projectId);
-      await ctx.setProgress({ step: 'model', paragraphs: paragraphs.length });
+      const req = await buildMentionsRequest(repo, projectId, ctx.job.payload, ctx.job.createdBy, ctx.signal);
+      if (!req) return { status: 'nothing', suggestions: 0 };
+      await ctx.setProgress({ step: 'model', paragraphs: req.paragraphs.length });
       await ctx.checkpoint();
-      const res = await runAiRole(
+      const res = await runAiRoleWorkflow(
+        deps.workflows?.() ?? null,
+        { workflowId: AI1_MENTIONS_WORKFLOW, trigger: 'job:ai_mentions', jobId: ctx.job.id ?? null, input: { paragraphIds: req.paragraphs.map((p) => p.id), ...(ctx.job.payload.sectionId ? { sectionId: ctx.job.payload.sectionId } : {}) } },
         { repo, generate: deps.generate, resolveModel: deps.resolveModel, loadTemplate: deps.loadTemplate, recordUsage: (u) => ctx.recordUsage(u) },
-        {
-          projectId,
-          role: 'AI-1',
-          task: mentionTask(known),
-          paragraphs,
-          sourceRevision: project?.revision ?? null,
-          createdBy: ctx.job.createdBy,
-          signal: ctx.signal,
-          prepare,
-        },
+        req,
       );
       if (res.status === 'failed') throw new Error(res.errors[0] ?? 'Виклик моделі не вдався');
       return {
@@ -238,6 +255,8 @@ export function aiMentionsJobKind(deps: AiMentionsJobDeps) {
         relations: res.findings.filter((f) => f.kind === RELATION_SUGGESTION).length,
         filtered: res.rejected.length,
         errors: res.errors,
+        ...(res.workflowRunId ? { workflowRunId: res.workflowRunId } : {}),
+        ...(res.paused ? { paused: true } : {}),
       };
     },
   };

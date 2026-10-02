@@ -112,6 +112,15 @@ export function initCore(log: (msg: string) => void = (m) => console.log(m)): Pr
       } catch (err) {
         console.warn(`[ontology] активну версію не застосовано, працює вбудований реєстр: ${(err as Error).message}`);
       }
+      // Т5.4: системні процеси ШІ (AI-1, AI-2, голос героя) — v1 публікується
+      // на першому старті й відтворює поведінку старого шляху. Збій — не фатальний:
+      // без опублікованої версії конвеєри працюють як раніше.
+      try {
+        const { ensureSystemWorkflows } = await import('./workflows/seeds');
+        await ensureSystemWorkflows(repository, log);
+      } catch (err) {
+        console.warn(`[workflows] системні процеси не створено, конвеєри працюють як раніше: ${(err as Error).message}`);
+      }
       // Фонова черга ядра (Т0.7). Види задач реєструють модулі, що їх
       // потребують (`getCoreJobQueue().register(...)`: core_sync — Т0.6,
       // ролі AI — Т0.9); воркер бере лише зареєстровані види.

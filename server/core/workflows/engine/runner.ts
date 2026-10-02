@@ -49,6 +49,8 @@ export interface StartInput {
 export interface RunOutcome {
   run: WorkflowRunRow;
   state: WfState | null;
+  /** Помилка, на якій упав запуск (для задачі черги: бюджет — фатально). */
+  error?: Error;
 }
 
 export const inputHashOf = (input: Record<string, unknown>) => createHash('sha256').update(canonicalJson(input)).digest('hex');
@@ -136,7 +138,7 @@ function nodeRunner(node: WorkflowNode, env: ExecEnv) {
     } catch (err) {
       if (isGraphInterrupt(err)) throw err;
       const e = err as Error;
-      await record('failed', err instanceof NodeError ? err.trace : {}, null, e.message);
+      await record('failed', err instanceof NodeError ? err.trace : ((err as { trace?: Parameters<typeof record>[1] }).trace ?? {}), null, e.message);
       throw err;
     }
     const branch = out.branch ?? null;
@@ -171,7 +173,7 @@ async function drive(deps: EngineDeps, env: ExecEnv, how: { input?: WfState; res
     const state = (await app.getState({ configurable: { thread_id: env.run.id } }).catch(() => null))?.values?.s ?? null;
     if (env.binding?.onFailure) await env.binding.onFailure(state ?? { input: env.run.input, vars: {}, steps: 0, cost: 0 }, e, env).catch(() => {});
     const run = await deps.repo.updateWorkflowRun(env.run.id, { status: 'failed', error: e.message.slice(0, 4000), currentNode: null });
-    return { run, state };
+    return { run, state, error: e };
   }
   if (Array.isArray(result.__interrupt__) && result.__interrupt__.length) {
     return { run: (await deps.repo.getWorkflowRun(env.run.id))!, state: result.s ?? null };

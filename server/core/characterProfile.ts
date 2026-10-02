@@ -24,12 +24,12 @@
  * `buildCharacterProfile` дає доказовий snapshot.
  */
 
-import type { CoreRepository, DocumentRow, EntityRow, FindingRow, MentionRow, ParagraphRow } from './types';
+import type { CoreActor, CoreRepository, DocumentRow, EntityRow, FindingRow, MentionRow, ParagraphRow } from './types';
 import { buildStoryGraph, evidenceRefs, type EvidenceRef } from './storyGraph';
 import { heroPortrait } from './visual';
 import { CORE_ENTITY_RELATIONS } from '../../src/utils/coreEntities';
 import { paragraphExcerpt, searchStems } from './search/text';
-import type { PreparedFinding, ModelFinding, AiRoleDeps } from './ai/roles';
+import type { PreparedFinding, ModelFinding, AiRoleDeps, AiRoleRequest } from './ai/roles';
 
 export const PROFILE_FACT = 'profile_fact';
 
@@ -495,6 +495,47 @@ export interface AiProfileJobDeps {
   loadTemplate?: AiRoleDeps['loadTemplate'];
   /** Картка героя в Студії — канон для порівняння. */
   loadStudio?: (projectId: string, entity: EntityRow) => Promise<{ character: StudioCharacterLike | null; all: StudioCharacterLike[] }>;
+  /** Т5.4: рушій процесів ШІ — є опублікований `ai2_profile`, то через нього. */
+  workflows?: () => import('./workflows/engine/runner').EngineDeps | null;
+}
+
+/** Т5.4: id процесу AI-2 «профіль героя». */
+export const AI2_PROFILE_WORKFLOW = 'ai2_profile';
+
+/** Запит AI-2 для профілю героя (спільний для задачі й процесу). `reason` — чому запиту немає. */
+export async function buildProfileRequest(
+  repo: CoreRepository,
+  projectId: string,
+  input: { entityId?: unknown },
+  createdBy: string,
+  loadStudio?: AiProfileJobDeps['loadStudio'],
+  signal?: AbortSignal,
+): Promise<{ req: AiRoleRequest | null; reason?: 'no_entity' | 'nothing' }> {
+  const entityId = String(input.entityId ?? '');
+  const entity = await repo.getEntity(projectId, entityId);
+  if (!entity) return { req: null, reason: 'no_entity' };
+  const paragraphs = await profileParagraphs(repo, projectId, entityId);
+  if (!paragraphs.length) return { req: null, reason: 'nothing' };
+  const existing = await repo.listFindings(projectId, { entityId });
+  const studio = loadStudio ? await loadStudio(projectId, entity) : { character: null, all: [] };
+  const canon = studioCanon(studio.character, studio.all).fields;
+  const known = existing
+    .filter((f) => f.kind === PROFILE_FACT && f.status !== 'rejected')
+    .map((f) => ({ field: String((f.payload as any).field ?? 'other'), statement: String((f.payload as any).statement ?? ''), status: f.status }));
+  const project = await repo.getProject(projectId);
+  return {
+    req: {
+      projectId,
+      role: 'AI-2',
+      task: profileTask(entity.name, canon, known),
+      paragraphs,
+      entityId,
+      sourceRevision: project?.revision ?? null,
+      createdBy: createdBy as CoreActor,
+      signal,
+      prepare: createProfilePreparer(entityId, existing),
+    },
+  };
 }
 
 export function aiProfileJobKind(deps: AiProfileJobDeps) {
@@ -502,46 +543,30 @@ export function aiProfileJobKind(deps: AiProfileJobDeps) {
     maxAttempts: 2,
     rateLimit: { max: 10, windowMs: 60_000 },
     handler: async (ctx: {
-      job: { projectId: string; payload: Record<string, unknown>; createdBy: string };
+      job: { id?: string; projectId: string; payload: Record<string, unknown>; createdBy: string };
       signal: AbortSignal;
       checkpoint(): Promise<void>;
       setProgress(p: Record<string, unknown>): Promise<void>;
       recordUsage(u: { tokens?: number; requests?: number }): Promise<void>;
     }) => {
-      const { runAiRole } = await import('./ai/roles');
+      const { runAiRoleWorkflow } = await import('./workflows/bindings/aiRole');
       const repo = deps.repo();
       if (!repo) throw new Error('Ядро недоступне');
       const projectId = ctx.job.projectId;
-      const entityId = String(ctx.job.payload.entityId ?? '');
-      const entity = await repo.getEntity(projectId, entityId);
-      if (!entity) return { status: 'no_entity', facts: 0 };
-      const paragraphs = await profileParagraphs(repo, projectId, entityId);
-      if (!paragraphs.length) return { status: 'nothing', facts: 0 };
-      const existing = await repo.listFindings(projectId, { entityId });
-      const studio = deps.loadStudio ? await deps.loadStudio(projectId, entity) : { character: null, all: [] };
-      const canon = studioCanon(studio.character, studio.all).fields;
-      const known = existing
-        .filter((f) => f.kind === PROFILE_FACT && f.status !== 'rejected')
-        .map((f) => ({ field: String((f.payload as any).field ?? 'other'), statement: String((f.payload as any).statement ?? ''), status: f.status }));
-      const project = await repo.getProject(projectId);
+      const built = await buildProfileRequest(repo, projectId, ctx.job.payload, ctx.job.createdBy, deps.loadStudio, ctx.signal);
+      if (!built.req) return built.reason === 'no_entity' ? { status: 'no_entity', facts: 0 } : { status: 'nothing', facts: 0 };
+      const req = built.req;
+      const paragraphs = req.paragraphs;
       await ctx.setProgress({ step: 'model', paragraphs: paragraphs.length });
       await ctx.checkpoint();
-      const res = await runAiRole(
+      const res = await runAiRoleWorkflow(
+        deps.workflows?.() ?? null,
+        { workflowId: AI2_PROFILE_WORKFLOW, trigger: 'job:ai_profile', jobId: ctx.job.id ?? null, input: { entityId: req.entityId } },
         { repo, generate: deps.generate, resolveModel: deps.resolveModel, loadTemplate: deps.loadTemplate, recordUsage: (u) => ctx.recordUsage(u) },
-        {
-          projectId,
-          role: 'AI-2',
-          task: profileTask(entity.name, canon, known),
-          paragraphs,
-          entityId,
-          sourceRevision: project?.revision ?? null,
-          createdBy: ctx.job.createdBy,
-          signal: ctx.signal,
-          prepare: createProfilePreparer(entityId, existing),
-        },
+        req,
       );
       if (res.status === 'failed') throw new Error(res.errors[0] ?? 'Виклик моделі не вдався');
-      return { runId: res.run.id, status: res.status, facts: res.findings.length, rejected: res.rejected.length, paragraphs: paragraphs.length, errors: res.errors };
+      return { runId: res.run.id, status: res.status, facts: res.findings.length, rejected: res.rejected.length, paragraphs: paragraphs.length, errors: res.errors, ...(res.workflowRunId ? { workflowRunId: res.workflowRunId } : {}), ...(res.paused ? { paused: true } : {}) };
     },
   };
 }

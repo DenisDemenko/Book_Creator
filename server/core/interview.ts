@@ -30,7 +30,7 @@
  * питання збережене, «повторити» відповідає на те саме питання.
  */
 
-import type { AutonomyLevel, CanonProposalRow, CharacterAgentRow, CoreActor, CoreRepository, EntityRow, SimulationEventRow, SimulationRow } from './types';
+import type { AutonomyLevel, CanonProposalRow, CharacterAgentRow, CharacterDecisionRow, CoreActor, CoreRepository, EntityRow, SimulationEventRow, SimulationRow } from './types';
 import { AUTONOMY_LEVELS } from './types';
 import { CoreRuleError } from './rules';
 import { scanScenes } from './timeline';
@@ -180,6 +180,8 @@ export interface InterviewDeps {
   voice: VoiceGenerate;
   loadTemplate?: () => Promise<{ system: string; user: string } | undefined>;
   studio?: (projectId: string, entity: EntityRow) => Promise<{ character: StudioCharacterLike | null; all: StudioCharacterLike[] } | undefined>;
+  /** Т5.4: рушій процесів ШІ — є опублікований `character_voice`, то голос через нього. */
+  workflows?: () => import('./workflows/engine/runner').EngineDeps | null;
 }
 
 /** Почати допит героя: прогін з ревізією книги й межею знань (сцена чи глава; типово — з налаштувань агента). */
@@ -262,24 +264,140 @@ async function activeInterview(repo: CoreRepository, projectId: string, simulati
   return sim;
 }
 
+// ── Голос героя окремими кроками (Т5.4 В2: ними користуються і старий шлях, і процес `character_voice`) ──
+
+/** Т5.4: id процесу ШІ «голос героя на допиті». */
+export const CHARACTER_VOICE_WORKFLOW = 'character_voice';
+
+export interface VoiceTurnContext {
+  sim: SimulationRow;
+  hero: EntityRow;
+  q: SimulationEventRow;
+  events: SimulationEventRow[];
+  turn: number;
+  question: string;
+  decision: CharacterDecisionRow;
+  sceneDecision: CharacterDecisionRow | null;
+}
+
+export type VoiceDecisionInfo = { decisionId: string; action: string | null; source: string; fallbackReason: string | null; snapshotHash: string; confidence: number | null };
+
+/** Подія ходу допиту. */
+export function addTurnEvent(repo: CoreRepository, ctx: VoiceTurnContext, eventType: 'answer' | 'awaiting' | 'failed', publicPayload: Record<string, unknown>, sourceDecisionId?: string | null) {
+  return repo.addSimulationEvent({
+    projectId: ctx.sim.projectId,
+    simulationId: ctx.sim.id,
+    turnIndex: ctx.turn,
+    actor: eventType === 'answer' ? 'character' : 'system',
+    actorCharacterId: eventType === 'answer' ? ctx.hero.id : null,
+    eventType,
+    publicPayload,
+    sourceDecisionId: sourceDecisionId ?? null,
+    createdBy: eventType === 'answer' ? INTERVIEW_ACTOR : 'system:interview',
+  });
+}
+
+/** Рішення Jev цього ходу й сцени — текстом для голосу. */
+export function voiceDecisionText(ctx: VoiceTurnContext): string {
+  const d = ctx.decision;
+  const r = (d.result ?? {}) as { scores?: Record<string, number> };
+  const sceneScores = ((ctx.sceneDecision?.result ?? {}) as { scores?: Record<string, number> }).scores ?? {};
+  return [
+    `дія: ${d.selectedAction}`,
+    ctx.sceneDecision?.selectedAction ? `мотив у сцені: ${ctx.sceneDecision.selectedAction}` : '',
+    Object.keys(sceneScores).length ? `сцена: ${Object.entries(sceneScores).map(([k, v]) => `${k} ${v}/10`).join(', ')}` : '',
+    r.scores ? `хід: ${Object.entries(r.scores).map(([k, v]) => `${k} ${v}/10`).join(', ')}` : '',
+  ].filter(Boolean).join('; ');
+}
+
+export function voiceDecisionInfo(ctx: VoiceTurnContext, snapshotHash: string): VoiceDecisionInfo {
+  const d = ctx.decision;
+  const r = (d.result ?? {}) as { confidence?: number | null };
+  return { decisionId: d.id, action: d.selectedAction, source: d.source, fallbackReason: d.fallbackReason, snapshotHash, confidence: r.confidence ?? null };
+}
+
+/** Знімок героя станом на сцену (його пам'ять, зокрема цього допиту). */
+export async function voiceSnapshot(deps: Pick<InterviewDeps, 'repo' | 'studio'>, ctx: VoiceTurnContext) {
+  const studio = deps.studio ? await deps.studio(ctx.sim.projectId, ctx.hero).catch(() => undefined) : undefined;
+  return buildCharacterSnapshot(deps.repo, {
+    projectId: ctx.sim.projectId,
+    characterId: ctx.hero.id,
+    sceneId: ctx.sim.sceneId,
+    asOfChapter: ctx.sim.asOfChapter,
+    simulationId: ctx.sim.id,
+    situation: ctx.question.slice(0, 2000),
+    allowedActions: INTERVIEW_ACTIONS,
+    studio,
+    lenientScene: true,
+  });
+}
+
+/** Історія останніх ходів допиту. */
+export function voiceHistory(ctx: VoiceTurnContext): string {
+  return ctx.events
+    .filter((e) => e.turnIndex < ctx.turn && (e.eventType === 'question' || e.eventType === 'answer'))
+    .filter((e) => e.turnIndex > ctx.turn - 1 - INTERVIEW_HISTORY_TURNS)
+    .map((e) => `${e.eventType === 'question' ? 'Автор' : ctx.hero.name}: ${String((e.publicPayload as { text?: unknown }).text ?? '')}`)
+    .join('\n');
+}
+
+/** Інструкція голосу (шаблон адміна «Ядра AI» чи заводський). */
+export async function voiceRender(deps: Pick<InterviewDeps, 'loadTemplate'>, ctx: VoiceTurnContext, snapshot: Awaited<ReturnType<typeof voiceSnapshot>>, history: string) {
+  const template = (await deps.loadTemplate?.().catch(() => undefined)) ?? factoryCharacterVoiceTemplate();
+  return renderCharacterVoiceTemplate(template, {
+    hero: ctx.hero.name,
+    snapshot: JSON.stringify({ as_of_chapter: snapshot.snapshot.as_of_chapter, ...jevState(snapshot.snapshot) }, null, 1),
+    decision: voiceDecisionText(ctx),
+    history,
+    question: ctx.question,
+    note: String((ctx.sim.config as { note?: unknown }).note ?? ''),
+  });
+}
+
+export type VoiceReply = { reply: string; intent?: string; proposals?: VoiceProposals };
+
+/** Розбір відповіді голосу: JSON і схема (за замовчуванням CHARACTER_VOICE_SCHEMA). */
+export function checkVoiceOutput(text: string, schema: object = CHARACTER_VOICE_SCHEMA): { ok: true; value: VoiceReply } | { ok: false; error: string } {
+  let parsed: unknown;
+  try {
+    parsed = parseModelJson(text);
+  } catch (err) {
+    return { ok: false, error: `відповідь не JSON: ${(err as Error).message}` };
+  }
+  const check = validateAgainstSchema<VoiceReply>(schema, parsed);
+  if (!check.ok) return { ok: false, error: `відповідь не за схемою: ${check.errors.join('; ')}` };
+  return { ok: true, value: check.value! };
+}
+
+/** Відповідь героя — подія ходу; пропозиції в канон — окремими записами (вирішує автор). */
+export async function voicePersist(
+  repo: CoreRepository,
+  ctx: VoiceTurnContext,
+  v: VoiceReply,
+  out: { modelId: string; inputTokens: number; outputTokens: number; costUsd?: number },
+  info: VoiceDecisionInfo,
+  memoryIds: string[],
+): Promise<{ event: SimulationEventRow; proposals: CanonProposalRow[] }> {
+  const event = await addTurnEvent(repo, ctx, 'answer', {
+    text: v.reply.trim(),
+    intent: (v.intent ?? '').trim(),
+    ...info,
+    model: out.modelId,
+    usage: { inputTokens: out.inputTokens, outputTokens: out.outputTokens, ...(typeof out.costUsd === 'number' ? { costUsd: out.costUsd } : {}) },
+    proposals: v.proposals ?? {},
+    memoryIds,
+  }, ctx.decision.id);
+  const created = await createProposals(repo, ctx.sim, { turn: ctx.turn, sourceEventIds: [ctx.q.id, event.id], proposals: v.proposals });
+  return { event, proposals: created.proposals };
+}
+
 async function answerTurn(deps: InterviewDeps, sim: SimulationRow, q: SimulationEventRow, events: SimulationEventRow[], actor: CoreActor): Promise<TurnResult> {
   const { repo } = deps;
   const heroId = sim.characterId!;
   const hero = (await repo.getEntity(sim.projectId, heroId))!;
   const question = String((q.publicPayload as { text?: unknown }).text ?? '');
   const turn = q.turnIndex;
-  const addEvent = (eventType: 'answer' | 'awaiting' | 'failed', publicPayload: Record<string, unknown>, sourceDecisionId?: string | null) =>
-    repo.addSimulationEvent({
-      projectId: sim.projectId,
-      simulationId: sim.id,
-      turnIndex: turn,
-      actor: eventType === 'answer' ? 'character' : 'system',
-      actorCharacterId: eventType === 'answer' ? heroId : null,
-      eventType,
-      publicPayload,
-      sourceDecisionId: sourceDecisionId ?? null,
-      createdBy: eventType === 'answer' ? INTERVIEW_ACTOR : 'system:interview',
-    });
+  const early = { sim, hero, q, events, turn, question } as unknown as VoiceTurnContext;
 
   // 1. Рішення Jev на цей хід (стратегічне й сценічне — з кешу).
   const engine = new JevDecisionAdapter({ repo, jev: deps.jev, fallback: deps.fallback, studio: deps.studio });
@@ -298,13 +416,13 @@ async function answerTurn(deps: InterviewDeps, sim: SimulationRow, q: Simulation
       turnIndex: turn,
     });
   } catch (err) {
-    const event = await addEvent('failed', { stage: 'decision', error: (err as Error).message.slice(0, 500) });
+    const event = await addTurnEvent(repo, early, 'failed', { stage: 'decision', error: (err as Error).message.slice(0, 500) });
     return { status: 'failed', turn, question: q, event, proposals: [] };
   }
   if (decided.awaitingAuthor) {
     const d = decided.decision;
     const primary = (d.options.primary ?? {}) as { allowed?: string[]; forbidden?: string[] };
-    const event = await addEvent('awaiting', {
+    const event = await addTurnEvent(repo, early, 'awaiting', {
       level: decided.blockedAt,
       decisionId: d.id,
       reason: d.fallbackReason ?? (d.validation as { authorReason?: unknown }).authorReason ?? null,
@@ -312,78 +430,34 @@ async function answerTurn(deps: InterviewDeps, sim: SimulationRow, q: Simulation
     }, d.id);
     return { status: 'awaiting', turn, question: q, event, proposals: [] };
   }
-  const d = decided.decision;
-  const r = (d.result ?? {}) as { scores?: Record<string, number>; confidence?: number | null };
   const scene = decided.chain.find((c) => c.level === 'scene');
-  const sceneRow = scene ? await repo.getCharacterDecision(sim.projectId, scene.id) : null;
-  const sceneScores = ((sceneRow?.result ?? {}) as { scores?: Record<string, number> }).scores ?? {};
+  const ctx: VoiceTurnContext = { ...early, decision: decided.decision, sceneDecision: scene ? await repo.getCharacterDecision(sim.projectId, scene.id) : null };
 
-  // 2. Знімок героя станом на сцену (його пам'ять, зокрема цього допиту).
-  const studio = deps.studio ? await deps.studio(sim.projectId, hero).catch(() => undefined) : undefined;
-  const built = await buildCharacterSnapshot(repo, {
-    projectId: sim.projectId,
-    characterId: heroId,
-    sceneId: sim.sceneId,
-    asOfChapter: sim.asOfChapter,
-    simulationId: sim.id,
-    situation: question.slice(0, 2000),
-    allowedActions: INTERVIEW_ACTIONS,
-    studio,
-    lenientScene: true,
-  });
+  // 2–3. Т5.4: є опублікований процес `character_voice` — через рушій LangGraph.
+  const wf = deps.workflows?.() ?? null;
+  if (wf) {
+    const { voiceTurnViaWorkflow } = await import('./workflows/bindings/voice');
+    const res = await voiceTurnViaWorkflow(wf, deps, ctx, actor);
+    if (res) return res;
+  }
 
+  // 2. Знімок героя станом на сцену.
+  const built = await voiceSnapshot(deps, ctx);
   // 3. Голос героя.
-  const history = events
-    .filter((e) => e.turnIndex < turn && (e.eventType === 'question' || e.eventType === 'answer'))
-    .filter((e) => e.turnIndex > turn - 1 - INTERVIEW_HISTORY_TURNS)
-    .map((e) => `${e.eventType === 'question' ? 'Автор' : hero.name}: ${String((e.publicPayload as { text?: unknown }).text ?? '')}`)
-    .join('\n');
-  const decisionText = [
-    `дія: ${d.selectedAction}`,
-    sceneRow?.selectedAction ? `мотив у сцені: ${sceneRow.selectedAction}` : '',
-    Object.keys(sceneScores).length ? `сцена: ${Object.entries(sceneScores).map(([k, v]) => `${k} ${v}/10`).join(', ')}` : '',
-    r.scores ? `хід: ${Object.entries(r.scores).map(([k, v]) => `${k} ${v}/10`).join(', ')}` : '',
-  ].filter(Boolean).join('; ');
-  const template = (await deps.loadTemplate?.().catch(() => undefined)) ?? factoryCharacterVoiceTemplate();
-  const rendered = renderCharacterVoiceTemplate(template, {
-    hero: hero.name,
-    snapshot: JSON.stringify({ as_of_chapter: built.snapshot.as_of_chapter, ...jevState(built.snapshot) }, null, 1),
-    decision: decisionText,
-    history,
-    question,
-    note: String((sim.config as { note?: unknown }).note ?? ''),
-  });
-  const decisionInfo = { decisionId: d.id, action: d.selectedAction, source: d.source, fallbackReason: d.fallbackReason, snapshotHash: built.hash, confidence: r.confidence ?? null };
+  const rendered = await voiceRender(deps, ctx, built, voiceHistory(ctx));
+  const decisionInfo = voiceDecisionInfo(ctx, built.hash);
   let out;
   try {
     out = await deps.voice(rendered.system, rendered.user);
   } catch (err) {
-    const event = await addEvent('failed', { stage: 'voice', error: (err as Error).message.slice(0, 500), ...decisionInfo }, d.id);
+    const event = await addTurnEvent(repo, ctx, 'failed', { stage: 'voice', error: (err as Error).message.slice(0, 500), ...decisionInfo }, ctx.decision.id);
     return { status: 'failed', turn, question: q, event, proposals: [] };
   }
-  let parsed: unknown;
-  try {
-    parsed = parseModelJson(out.text);
-  } catch (err) {
-    const event = await addEvent('failed', { stage: 'voice', error: `відповідь не JSON: ${(err as Error).message}`.slice(0, 500), ...decisionInfo }, d.id);
+  const check = checkVoiceOutput(out.text);
+  if (check.ok === false) {
+    const event = await addTurnEvent(repo, ctx, 'failed', { stage: 'voice', error: (check as { error: string }).error.slice(0, 500), ...decisionInfo }, ctx.decision.id);
     return { status: 'failed', turn, question: q, event, proposals: [] };
   }
-  const check = validateAgainstSchema<{ reply: string; intent?: string; proposals?: VoiceProposals }>(CHARACTER_VOICE_SCHEMA, parsed);
-  if (!check.ok) {
-    const event = await addEvent('failed', { stage: 'voice', error: `відповідь не за схемою: ${check.errors.join('; ')}`.slice(0, 500), ...decisionInfo }, d.id);
-    return { status: 'failed', turn, question: q, event, proposals: [] };
-  }
-  const v = check.value!;
-  const event = await addEvent('answer', {
-    text: v.reply.trim(),
-    intent: (v.intent ?? '').trim(),
-    ...decisionInfo,
-    model: out.modelId,
-    usage: { inputTokens: out.inputTokens, outputTokens: out.outputTokens, ...(typeof out.costUsd === 'number' ? { costUsd: out.costUsd } : {}) },
-    proposals: v.proposals ?? {},
-    memoryIds: built.memoryIds,
-  }, d.id);
-  // В4: пропозиції в канон — окремими записами; вирішує автор.
-  const created = await createProposals(repo, sim, { turn, sourceEventIds: [q.id, event.id], proposals: v.proposals });
-  return { status: 'answered', turn, question: q, event, proposals: created.proposals };
+  const saved = await voicePersist(repo, ctx, (check as { value: VoiceReply }).value, out, decisionInfo, built.memoryIds);
+  return { status: 'answered', turn, question: q, event: saved.event, proposals: saved.proposals };
 }

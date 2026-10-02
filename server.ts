@@ -206,6 +206,8 @@ import { registerWorkflowRoutes } from './server/core/workflows/routes';
 import { registerStoryCoreRoutes } from './server/core/storyCore/routes';
 import { registerOnboardingRoutes } from './server/core/collaboration/onboardingRoutes';
 import { aiRouteMiddleware, createAiRouter, registerAiRouteRoutes } from './server/core/collaboration/aiRoute';
+import { systemBindings } from './server/core/workflows/bindings';
+import type { EngineDeps } from './server/core/workflows/engine/runner';
 import { COURSE_PREFIX, type OnboardingDeps } from './server/core/collaboration/onboarding';
 import { ensureOwnerParticipant } from './server/core/collaboration/participants';
 import { getCourse } from './server/courseStore';
@@ -773,6 +775,20 @@ registerGitCommandRoutes(app);
       void dropRealtimeParticipant(projectId, userId);
     },
   });
+  // Т5.4: рушій процесів ШІ (LangGraph) — опубліковані процеси AI-1, AI-2, голосу героя.
+  const workflowBindings = systemBindings({
+    loadStudio: async (projectId, entity) => studioFromBook((await getStoredBookForRealtime(projectId))?.book as any, entity),
+    interview: {
+      loadTemplate: () => loadCoreAiRoleTemplate('coreCharacterVoice'),
+      studio: async (projectId, entity) => studioFromBook((await getStoredBookForRealtime(projectId))?.book as any, entity),
+    },
+  });
+  const workflowEngine = (): EngineDeps | null => {
+    const repo = getCoreRepository();
+    return repo
+      ? { repo, services: { generate: aiRoleGenerateViaCore, resolveModel: (module) => resolveModuleModelId(module), loadTemplate: loadCoreAiRoleTemplate }, bindings: workflowBindings }
+      : null;
+  };
   registerProjectRoutes(app, {
     access: realtimeAccessDeps,
     repo: getCoreRepository,
@@ -835,6 +851,7 @@ registerGitCommandRoutes(app);
         return { text: out.text, modelId: out.modelId, inputTokens: out.inputTokens, outputTokens: out.outputTokens, costUsd: out.costUsd };
       },
       loadTemplate: () => loadCoreAiRoleTemplate('coreCharacterVoice'),
+      workflows: workflowEngine,
     },
     // Канон автора для профілю героя (Т1.5): картка в «Персонажах».
     studio: async (projectId, entity) => studioFromBook((await getStoredBookForRealtime(projectId))?.book as any, entity),
@@ -6471,6 +6488,7 @@ ${JSON.stringify(bookContext || {}, null, 2)}
       generate: aiRoleGenerateViaCore,
       resolveModel: (module) => resolveModuleModelId(module),
       loadTemplate: loadCoreAiRoleTemplate,
+      workflows: workflowEngine,
     }),
   );
   // Profile Builder (Т1.5): AI-2 складає доказовий профіль героя — кнопкою на сторінці героя.
@@ -6481,6 +6499,7 @@ ${JSON.stringify(bookContext || {}, null, 2)}
       generate: aiRoleGenerateViaCore,
       resolveModel: (module) => resolveModuleModelId(module),
       loadTemplate: loadCoreAiRoleTemplate,
+      workflows: workflowEngine,
       loadStudio: async (projectId, entity) => studioFromBook((await getStoredBookForRealtime(projectId))?.book as any, entity),
     }),
   );
@@ -6524,6 +6543,7 @@ ${JSON.stringify(bookContext || {}, null, 2)}
       generate: aiRoleGenerateViaCore,
       resolveModel: (module) => resolveModuleModelId(module),
       loadTemplate: loadCoreAiRoleTemplate,
+      workflows: workflowEngine,
     }),
   );
   registerCoreJobKind(

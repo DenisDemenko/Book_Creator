@@ -38,6 +38,7 @@ import {
 import { countNameInBook, findNameRanges, replaceNameInBook } from '../src/utils/heroRename.ts';
 import type { AiGenerateInput } from '../server/core/ai/roles.ts';
 import type { CoreRepository } from '../server/core/types.ts';
+import { VIA_WORKFLOWS, workflowEngineFor, workflowRunsOf } from './lib/workflowTestEngine.mts';
 import type { JobStore } from '../server/core/jobs/types.ts';
 
 let pass = 0;
@@ -124,7 +125,8 @@ async function suite(label: string, repo: CoreRepository, jobStore: JobStore, P:
   };
   let clock = Date.parse('2026-09-25T10:00:00Z');
   const q = new JobQueue(jobStore, { workerId: 'w', now: () => new Date(clock), log: () => {} });
-  q.register(AI_PROFILE_JOB_KIND, aiProfileJobKind({ repo: () => repo, generate, resolveModel: async () => 'fake-ai2', loadStudio: async () => studio() }));
+  const workflows = await workflowEngineFor(repo, { generate, resolveModel: async () => 'fake-ai2' }, { loadStudio: async () => studio() });
+  q.register(AI_PROFILE_JOB_KIND, aiProfileJobKind({ repo: () => repo, generate, resolveModel: async () => 'fake-ai2', loadStudio: async () => studio(), workflows }));
   const runBuilder = async () => {
     const { job } = await q.enqueue({ projectId: P, kind: AI_PROFILE_JOB_KIND, payload: { entityId: olena }, createdBy: 'user:u-owner' });
     await q.runOnce();
@@ -154,6 +156,10 @@ async function suite(label: string, repo: CoreRepository, jobStore: JobStore, P:
   p = (await buildCharacterProfile(repo, P, olena, { studio: studio() }))!;
   t('повторний прогін: ті самі факти не дублюються', (j2?.result as any)?.facts === 0 && p.facts.confirmed.length === 1 && p.facts.suggested.length === 0, JSON.stringify(j2?.result));
   t('…а в завданні — «уже відомі факти» із затвердженим', calls[1].user.includes('[fear] Олена боїться води. (confirmed)'));
+  if (VIA_WORKFLOWS) {
+    const runs = await workflowRunsOf(repo, 'ai2_profile');
+    t('Т5.4: профіль героя — через процес ai2_profile (LangGraph)', runs.length >= 2 && runs.every((r) => r.status === 'succeeded' && r.trigger === 'job:ai_profile'), `${runs.length}`);
+  }
 
   // ── КРИТЕРІЙ: нова глава ──
   current = book(true);
