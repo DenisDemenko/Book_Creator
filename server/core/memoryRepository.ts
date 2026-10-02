@@ -55,6 +55,9 @@ import {
   checkWorkflowVersion,
   checkWorkflowEvent,
   checkGraphLayout,
+  checkStoryProposal,
+  checkProposalPatch,
+  checkProposalEvent,
   assertActor,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isSearchableKind, isValidEmbedding, memoryTextScore } from './search/text';
@@ -154,7 +157,15 @@ import type {
   WorkflowEventRow,
   WorkflowEventAction,
   GraphLayoutRow,
+  ProposalEventAction,
+  ProposalKind,
+  ProposalState,
+  StoryProposalEventRow,
+  StoryProposalInput,
+  StoryProposalPatch,
+  StoryProposalRow,
 } from './types';
+import { OPEN_PROPOSAL_STATES } from './types';
 
 const key = (projectId: string, id: string) => `${projectId}\u0000${id}`;
 /** id файлу Медіатеки з URL зображення (Т2.3 В2). */
@@ -209,6 +220,8 @@ export class MemoryCoreRepository implements CoreRepository {
   private workflowVersions: WorkflowVersionRow[] = [];
   private workflowEvents: WorkflowEventRow[] = [];
   private graphLayouts: GraphLayoutRow[] = [];
+  private storyProposals: StoryProposalRow[] = [];
+  private storyProposalEvents: StoryProposalEventRow[] = [];
 
   private requireProject(projectId: string): ProjectRow {
     const p = this.projects.get(projectId);
@@ -1993,6 +2006,108 @@ export class MemoryCoreRepository implements CoreRepository {
     if (i >= 0) this.graphLayouts[i] = row;
     else this.graphLayouts.push(row);
     return clone(row);
+  }
+
+  // ── Пропозиції до канону (Т5.3 В1) ─────────────────────────────────────────
+
+  async addStoryProposal(input: StoryProposalInput, id: string = randomUUID()) {
+    checkStoryProposal(input);
+    this.requireProject(input.projectId);
+    if (this.storyProposals.some((p) => p.projectId === input.projectId && p.dedupeKey === input.dedupeKey && OPEN_PROPOSAL_STATES.includes(p.state))) {
+      throw new CoreRuleError('conflict', 'Така пропозиція вже чекає рішення');
+    }
+    const t = now();
+    const row: StoryProposalRow = {
+      id, projectId: input.projectId, kind: input.kind, state: input.state ?? 'proposed', payload: clone(input.payload), dedupeKey: input.dedupeKey,
+      evidence: [...(input.evidence ?? [])], confidence: input.confidence ?? null, provenance: clone(input.provenance ?? {}), validation: null, authorEdit: null,
+      canonRef: null, supersededBy: null, revision: 1, createdBy: input.createdBy, createdAt: t, updatedAt: t, decidedBy: null, decidedAt: null, reason: '',
+    };
+    this.storyProposals.push(row);
+    return clone(row);
+  }
+
+  async getStoryProposal(projectId: string, id: string) {
+    const p = this.storyProposals.find((x) => x.projectId === projectId && x.id === id);
+    return p ? clone(p) : null;
+  }
+
+  async listStoryProposals(projectId: string, f: { states?: ProposalState[]; kind?: ProposalKind; dedupeKey?: string; limit?: number } = {}) {
+    const limit = Math.max(1, Math.min(f.limit ?? 200, 1000));
+    return this.storyProposals
+      .filter((p) => p.projectId === projectId && (!f.states?.length || f.states.includes(p.state)) && (!f.kind || p.kind === f.kind) && (!f.dedupeKey || p.dedupeKey === f.dedupeKey))
+      .slice()
+      .reverse()
+      .slice(0, limit)
+      .map(clone);
+  }
+
+  async updateStoryProposal(projectId: string, id: string, patch: StoryProposalPatch, actor: CoreActor, expectedRevision?: number) {
+    const p = this.storyProposals.find((x) => x.projectId === projectId && x.id === id);
+    if (!p) throw notFound(`Пропозиція «${id}»`);
+    checkProposalPatch(p, patch, actor);
+    if (expectedRevision !== undefined && p.revision !== expectedRevision) throw new CoreRuleError('conflict', `Пропозицію вже змінено (ревізія ${p.revision}, а не ${expectedRevision}) — перечитайте її`);
+    if (patch.supersededBy && !this.storyProposals.some((x) => x.projectId === projectId && x.id === patch.supersededBy && x.id !== id)) throw notFound(`Пропозиція «${patch.supersededBy}»`);
+    const nextKey = patch.dedupeKey ?? p.dedupeKey;
+    const nextState = patch.state ?? p.state;
+    if (OPEN_PROPOSAL_STATES.includes(nextState) && this.storyProposals.some((x) => x.id !== id && x.projectId === projectId && x.dedupeKey === nextKey && OPEN_PROPOSAL_STATES.includes(x.state))) {
+      throw new CoreRuleError('conflict', 'Така пропозиція вже чекає рішення');
+    }
+    const t = now();
+    if (patch.payload !== undefined) p.payload = clone(patch.payload);
+    if (patch.dedupeKey !== undefined) p.dedupeKey = patch.dedupeKey;
+    if (patch.evidence !== undefined) p.evidence = [...patch.evidence];
+    if (patch.validation !== undefined) p.validation = clone(patch.validation);
+    if (patch.authorEdit !== undefined) p.authorEdit = clone(patch.authorEdit);
+    if (patch.canonRef !== undefined) p.canonRef = patch.canonRef;
+    if (patch.supersededBy !== undefined) p.supersededBy = patch.supersededBy;
+    if (patch.reason !== undefined) p.reason = patch.reason;
+    if (patch.state !== undefined && patch.state !== p.state) {
+      p.state = patch.state;
+      if (['approved', 'canon', 'rejected', 'superseded'].includes(patch.state)) {
+        p.decidedBy = actor;
+        p.decidedAt = t;
+      }
+    }
+    p.revision += 1;
+    p.updatedAt = t;
+    return clone(p);
+  }
+
+  async addStoryProposalEvent(input: { projectId: string; proposalId: string; action: ProposalEventAction; actor: CoreActor; fromState?: ProposalState | null; toState?: ProposalState | null; details?: Record<string, unknown> }) {
+    checkProposalEvent(input);
+    if (!this.storyProposals.some((x) => x.projectId === input.projectId && x.id === input.proposalId)) throw notFound(`Пропозиція «${input.proposalId}»`);
+    const row: StoryProposalEventRow = {
+      id: randomUUID(), projectId: input.projectId, proposalId: input.proposalId, action: input.action, actor: input.actor,
+      fromState: input.fromState ?? null, toState: input.toState ?? null, details: clone(input.details ?? {}), createdAt: now(),
+    };
+    this.storyProposalEvents.push(row);
+    return clone(row);
+  }
+
+  async supersedeStoryProposal(projectId: string, oldId: string, input: StoryProposalInput, actor: CoreActor) {
+    checkStoryProposal(input);
+    if (input.projectId !== projectId) throw new CoreRuleError('bad_input', 'Нова пропозиція — у тій самій книзі');
+    const p = this.storyProposals.find((x) => x.projectId === projectId && x.id === oldId);
+    if (!p) throw notFound(`Пропозиція «${oldId}»`);
+    const newId = randomUUID();
+    checkProposalPatch(p, { state: 'superseded', supersededBy: newId }, actor);
+    if (this.storyProposals.some((x) => x.id !== oldId && x.projectId === projectId && x.dedupeKey === input.dedupeKey && OPEN_PROPOSAL_STATES.includes(x.state))) {
+      throw new CoreRuleError('conflict', 'Така пропозиція вже чекає рішення');
+    }
+    const t = now();
+    p.state = 'superseded';
+    p.supersededBy = newId;
+    p.decidedBy = actor;
+    p.decidedAt = t;
+    p.revision += 1;
+    p.updatedAt = t;
+    const created = await this.addStoryProposal(input, newId);
+    return { old: clone(p), created };
+  }
+
+  async listStoryProposalEvents(projectId: string, f: { proposalId?: string; limit?: number } = {}) {
+    const limit = Math.max(1, Math.min(f.limit ?? 200, 1000));
+    return this.storyProposalEvents.filter((e) => e.projectId === projectId && (!f.proposalId || e.proposalId === f.proposalId)).slice(-limit).map(clone);
   }
 
   async listMembers(projectId: string) {

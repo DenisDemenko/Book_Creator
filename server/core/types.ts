@@ -1118,6 +1118,109 @@ export interface GraphLayoutRow {
   updatedAt: string;
 }
 
+// ── Пропозиції до канону (Т5.3 В1; ТЗ Graph Studio §24–25) ───────────────────
+
+export const PROPOSAL_STATES = ['detected', 'proposed', 'validated', 'approved', 'canon', 'rejected', 'superseded'] as const;
+export type ProposalState = (typeof PROPOSAL_STATES)[number];
+/** Відкриті — ще чекають рішення; решта кінцеві. */
+export const OPEN_PROPOSAL_STATES: readonly ProposalState[] = ['detected', 'proposed', 'validated', 'approved'];
+export type ProposalKind = 'entity' | 'relation';
+export const PROPOSAL_EVENT_ACTIONS = ['create', 'edit', 'propose', 'validate', 'approve', 'reject', 'write_canon', 'supersede'] as const;
+export type ProposalEventAction = (typeof PROPOSAL_EVENT_ACTIONS)[number];
+
+export interface EntityProposalPayload {
+  type: string;
+  name: string;
+  canonical: Record<string, unknown>;
+  /** Уточнення наявної сутності (правка назви чи полів), а не нова сутність. */
+  targetId?: string | null;
+}
+export interface RelationProposalPayload {
+  type: string;
+  fromId: string;
+  toId: string;
+  note: string;
+}
+
+/** Походження §25: хто й чим запропонував. */
+export interface ProposalProvenance {
+  /** `author` — вручну; `ai` — роль AI поза процесом; `workflow` — вузол процесу ШІ (Т5.4). */
+  source?: 'author' | 'ai' | 'workflow' | 'import';
+  workflowId?: string;
+  workflowVersion?: number;
+  nodeId?: string;
+  ontologyVersion?: number;
+  model?: string;
+  promptVersion?: string;
+  runId?: string;
+  jevDecisions?: Array<Record<string, unknown>>;
+  [k: string]: unknown;
+}
+
+export interface ProposalIssue {
+  code: string;
+  message: string;
+  field?: string;
+}
+
+export interface ProposalValidation {
+  ok: boolean;
+  errors: ProposalIssue[];
+  warnings: ProposalIssue[];
+  ontologyVersion: number | null;
+  at: string;
+}
+
+export interface StoryProposalRow {
+  id: string;
+  projectId: string;
+  kind: ProposalKind;
+  state: ProposalState;
+  payload: EntityProposalPayload | RelationProposalPayload;
+  dedupeKey: string;
+  evidence: string[];
+  confidence: number | null;
+  provenance: ProposalProvenance;
+  validation: ProposalValidation | null;
+  authorEdit: { before: Record<string, unknown>; after: Record<string, unknown>; fields: string[] } | null;
+  canonRef: string | null;
+  supersededBy: string | null;
+  revision: number;
+  createdBy: CoreActor;
+  createdAt: string;
+  updatedAt: string;
+  decidedBy: CoreActor | null;
+  decidedAt: string | null;
+  reason: string;
+}
+
+export interface StoryProposalInput {
+  projectId: string;
+  kind: ProposalKind;
+  payload: EntityProposalPayload | RelationProposalPayload;
+  dedupeKey: string;
+  /** Типово — `proposed`. */
+  state?: 'detected' | 'proposed';
+  evidence?: string[];
+  confidence?: number | null;
+  provenance?: ProposalProvenance;
+  createdBy: CoreActor;
+}
+
+export type StoryProposalPatch = Partial<Pick<StoryProposalRow, 'state' | 'payload' | 'dedupeKey' | 'evidence' | 'validation' | 'authorEdit' | 'canonRef' | 'supersededBy' | 'reason'>>;
+
+export interface StoryProposalEventRow {
+  id: string;
+  projectId: string;
+  proposalId: string;
+  action: ProposalEventAction;
+  actor: CoreActor;
+  fromState: ProposalState | null;
+  toState: ProposalState | null;
+  details: Record<string, unknown>;
+  createdAt: string;
+}
+
 /** Збережений пошуковий запит автора (Т1.3). */
 export interface SavedSearchRow {
   id: string;
@@ -1403,6 +1506,20 @@ export interface CoreRepository {
   listWorkflowEvents(filter: { workflowId?: string; limit?: number }): Promise<WorkflowEventRow[]>;
   getGraphLayout(kind: 'workflow' | 'ontology', graphId: string, versionRef: string): Promise<GraphLayoutRow | null>;
   saveGraphLayout(input: { graphKind: 'workflow' | 'ontology'; graphId: string; versionRef: string; layout: Record<string, { x: number; y: number }>; updatedBy: CoreActor }): Promise<GraphLayoutRow>;
+
+  /**
+   * Т5.3 В1: пропозиції до канону (§24). `updateStoryProposal` перевіряє
+   * перехід стану (`checkProposalPatch`) і, з `expectedRevision`, що
+   * пропозицію ніхто не змінив; кінцеві стани незмінні.
+   */
+  addStoryProposal(input: StoryProposalInput): Promise<StoryProposalRow>;
+  getStoryProposal(projectId: string, id: string): Promise<StoryProposalRow | null>;
+  listStoryProposals(projectId: string, filter?: { states?: ProposalState[]; kind?: ProposalKind; dedupeKey?: string; limit?: number }): Promise<StoryProposalRow[]>;
+  updateStoryProposal(projectId: string, id: string, patch: StoryProposalPatch, actor: CoreActor, expectedRevision?: number): Promise<StoryProposalRow>;
+  addStoryProposalEvent(input: { projectId: string; proposalId: string; action: ProposalEventAction; actor: CoreActor; fromState?: ProposalState | null; toState?: ProposalState | null; details?: Record<string, unknown> }): Promise<StoryProposalEventRow>;
+  listStoryProposalEvents(projectId: string, filter?: { proposalId?: string; limit?: number }): Promise<StoryProposalEventRow[]>;
+  /** Одна транзакція: стара відкрита пропозиція → `superseded`, нова (з тим самим чи іншим ключем) — на її місце. */
+  supersedeStoryProposal(projectId: string, oldId: string, input: StoryProposalInput, actor: CoreActor): Promise<{ old: StoryProposalRow; created: StoryProposalRow }>;
 
   /** Збережені запити автора в книзі (Т1.3), новіші першими. */
   listSavedSearches(projectId: string, userId: string): Promise<SavedSearchRow[]>;

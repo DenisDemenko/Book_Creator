@@ -74,6 +74,12 @@ import {
   ACCESS_SCOPES,
   ACCESS_SOURCES,
   WORKFLOW_EVENT_ACTIONS,
+  PROPOSAL_STATES,
+  PROPOSAL_EVENT_ACTIONS,
+  type ProposalState,
+  type StoryProposalInput,
+  type StoryProposalPatch,
+  type StoryProposalRow,
   type AccessGrantInput,
   AUTONOMY_LEVELS,
   SIMULATION_KINDS,
@@ -746,4 +752,72 @@ export function checkGraphLayout(input: { graphKind: string; graphId: string; ve
   if (!input.versionRef || String(input.versionRef).length > 64) throw new CoreRuleError('bad_input', 'Посилання на версію — від 1 до 64 символів');
   if (!objectLike(input.layout)) throw new CoreRuleError('bad_input', 'Розкладка — обʼєкт');
   if (Object.keys(input.layout as object).length > 2000) throw new CoreRuleError('bad_input', 'Розкладка — до 2000 вузлів');
+}
+
+// ── Пропозиції до канону (Т5.3 В1; ТЗ Graph Studio §24) ──────────────────────
+
+const OPEN_RANK: Record<string, number> = { detected: 0, proposed: 1, validated: 2, approved: 3 };
+const FINAL_STATES = new Set<ProposalState>(['canon', 'rejected', 'superseded']);
+const PARAGRAPH_ID_MAX = 200;
+
+/** Нова пропозиція: AI лише пропонує (detected / proposed) і лише з доказом (§24). */
+export function checkStoryProposal(input: StoryProposalInput): void {
+  assertActor(input.createdBy);
+  if (input.kind !== 'entity' && input.kind !== 'relation') throw new CoreRuleError('bad_input', 'Пропозиція — сутності (entity) чи зв\'язку (relation)');
+  const state = input.state ?? 'proposed';
+  if (state !== 'detected' && state !== 'proposed') throw new CoreRuleError('ai_suggests_only', 'Нова пропозиція — лише «виявлено» чи «запропоновано»; далі її веде перевірка й людина');
+  if (!objectLike(input.payload)) throw new CoreRuleError('bad_input', 'Зміст пропозиції — обʼєкт');
+  const key = String(input.dedupeKey ?? '');
+  if (key.length < 3 || key.length > 400) throw new CoreRuleError('bad_input', 'Ключ дубля — від 3 до 400 символів');
+  checkProposalEvidence(input.evidence ?? []);
+  if (isAiActor(input.createdBy) && !(input.evidence ?? []).length) {
+    throw new CoreRuleError('evidence_required', 'Пропозиція від AI має посилатися хоча б на один абзац');
+  }
+  if (input.confidence != null && !(Number.isFinite(input.confidence) && input.confidence >= 0 && input.confidence <= 1)) {
+    throw new CoreRuleError('bad_input', 'Впевненість — число від 0 до 1');
+  }
+  if (input.provenance !== undefined && !objectLike(input.provenance)) throw new CoreRuleError('bad_input', 'Походження — обʼєкт');
+}
+
+function checkProposalEvidence(evidence: unknown): void {
+  if (!Array.isArray(evidence) || evidence.length > 50 || evidence.some((e) => typeof e !== 'string' || !e || e.length > PARAGRAPH_ID_MAX)) {
+    throw new CoreRuleError('bad_input', 'Докази — до 50 id абзаців');
+  }
+}
+
+/**
+ * Зміна пропозиції. Стан іде лише вперед (назад — лише в «запропоновано»
+ * після правки змісту); у канон — лише схвалена й з посиланням на запис;
+ * кінцеві стани незмінні; AI стан і зміст не змінює.
+ */
+export function checkProposalPatch(current: Pick<StoryProposalRow, 'state' | 'createdBy'>, patch: StoryProposalPatch, actor: CoreActor): void {
+  assertActor(actor);
+  if (isAiActor(actor)) throw new CoreRuleError('ai_suggests_only', 'Пропозицію веде людина чи система, а не AI');
+  if (FINAL_STATES.has(current.state)) throw new CoreRuleError('conflict', `Пропозиція вже в кінцевому стані «${current.state}»`);
+  if (patch.evidence !== undefined) checkProposalEvidence(patch.evidence);
+  if (patch.payload !== undefined && !objectLike(patch.payload)) throw new CoreRuleError('bad_input', 'Зміст пропозиції — обʼєкт');
+  if (patch.dedupeKey !== undefined && (patch.dedupeKey.length < 3 || patch.dedupeKey.length > 400)) throw new CoreRuleError('bad_input', 'Ключ дубля — від 3 до 400 символів');
+  if (patch.reason !== undefined && String(patch.reason).length > 2000) throw new CoreRuleError('bad_input', 'Причина — до 2000 символів');
+  const to = patch.state;
+  if (to === undefined || to === current.state) return;
+  if (!(PROPOSAL_STATES as readonly string[]).includes(to)) throw new CoreRuleError('bad_input', `Невідомий стан пропозиції «${to}»`);
+  if (to === 'canon') {
+    if (current.state !== 'approved') throw new CoreRuleError('conflict', 'У канон записується лише схвалена пропозиція');
+    if (!patch.canonRef) throw new CoreRuleError('bad_input', 'Канон — лише з посиланням на запис');
+    return;
+  }
+  if (to === 'superseded') {
+    if (!patch.supersededBy) throw new CoreRuleError('bad_input', 'Замінена пропозиція — лише з посиланням на новішу');
+    return;
+  }
+  if (to === 'rejected') return;
+  if (OPEN_RANK[to] < OPEN_RANK[current.state] && to !== 'proposed') {
+    throw new CoreRuleError('conflict', `Стан пропозиції не повертається з «${current.state}» у «${to}»`);
+  }
+  if (to === 'approved' && current.state !== 'validated') throw new CoreRuleError('conflict', 'Схвалити можна лише перевірену пропозицію');
+}
+
+export function checkProposalEvent(input: { action: string; actor: CoreActor }): void {
+  assertActor(input.actor);
+  if (!(PROPOSAL_EVENT_ACTIONS as readonly string[]).includes(input.action)) throw new CoreRuleError('bad_input', `Невідома дія журналу пропозицій «${input.action}»`);
 }

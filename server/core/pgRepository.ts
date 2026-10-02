@@ -8,6 +8,7 @@
  * якщо хтось запише повз цей шар.
  */
 
+import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import {
   checkEntityUpdate,
@@ -56,6 +57,9 @@ import {
   checkWorkflowVersion,
   checkWorkflowEvent,
   checkGraphLayout,
+  checkStoryProposal,
+  checkProposalPatch,
+  checkProposalEvent,
   assertActor,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isValidEmbedding, SEARCHABLE_KINDS, tsQueryFromStems } from './search/text';
@@ -154,6 +158,13 @@ import type {
   WorkflowEventRow,
   WorkflowEventAction,
   GraphLayoutRow,
+  ProposalEventAction,
+  ProposalKind,
+  ProposalState,
+  StoryProposalEventRow,
+  StoryProposalInput,
+  StoryProposalPatch,
+  StoryProposalRow,
 } from './types';
 
 type Q = Pool | PoolClient;
@@ -235,6 +246,20 @@ function toWorkflowEvent(r: any): WorkflowEventRow {
 }
 function toGraphLayout(r: any): GraphLayoutRow {
   return { graphKind: r.graph_kind, graphId: r.graph_id, versionRef: r.version_ref, layout: r.layout ?? {}, updatedBy: r.updated_by, updatedAt: iso(r.updated_at) };
+}
+function toStoryProposal(r: any): StoryProposalRow {
+  return {
+    id: r.id, projectId: r.project_id, kind: r.kind, state: r.state, payload: r.payload ?? {}, dedupeKey: r.dedupe_key, evidence: r.evidence ?? [],
+    confidence: r.confidence == null ? null : Number(r.confidence), provenance: r.provenance ?? {}, validation: r.validation ?? null, authorEdit: r.author_edit ?? null,
+    canonRef: r.canon_ref ?? null, supersededBy: r.superseded_by ?? null, revision: Number(r.revision), createdBy: r.created_by, createdAt: iso(r.created_at),
+    updatedAt: iso(r.updated_at), decidedBy: r.decided_by ?? null, decidedAt: isoOrNull(r.decided_at), reason: r.reason ?? '',
+  };
+}
+function toStoryProposalEvent(r: any): StoryProposalEventRow {
+  return {
+    id: r.id, projectId: r.project_id, proposalId: r.proposal_id, action: r.action, actor: r.actor, fromState: r.from_state ?? null, toState: r.to_state ?? null,
+    details: r.details ?? {}, createdAt: iso(r.created_at),
+  };
 }
 function toAccessGrant(r: any): AccessGrantRow {
   return {
@@ -763,6 +788,9 @@ function mapPgError(err: any): never {
   }
   if (code === '23505' && /participant_roles_active/.test(constraint)) {
     throw new CoreRuleError('conflict', 'Ця роль у учасника вже є');
+  }
+  if (code === '23505' && /story_proposals_open_dedupe/.test(constraint)) {
+    throw new CoreRuleError('conflict', 'Така пропозиція вже чекає рішення');
   }
   if (code === '23503') {
     throw new CoreRuleError('not_found', 'Пов\'язаний запис не знайдено в цьому проєкті');
@@ -2688,6 +2716,108 @@ export class PgCoreRepository implements CoreRepository {
       [f.workflowId ?? null, Math.max(1, Math.min(f.limit ?? 100, 500))],
     );
     return rows.map(toWorkflowEvent);
+  }
+
+  // ── Пропозиції до канону (Т5.3 В1) ─────────────────────────────────────────
+
+  async addStoryProposal(input: StoryProposalInput) {
+    checkStoryProposal(input);
+    const { rows } = await this.q(
+      `INSERT INTO story_proposals (project_id, kind, state, payload, dedupe_key, evidence, confidence, provenance, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [input.projectId, input.kind, input.state ?? 'proposed', JSON.stringify(input.payload), input.dedupeKey, input.evidence ?? [], input.confidence ?? null, JSON.stringify(input.provenance ?? {}), input.createdBy],
+    );
+    return toStoryProposal(rows[0]);
+  }
+
+  async getStoryProposal(projectId: string, id: string) {
+    if (!UUID_RE.test(id)) return null;
+    const { rows } = await this.q('SELECT * FROM story_proposals WHERE project_id = $1 AND id = $2', [projectId, id]);
+    return rows[0] ? toStoryProposal(rows[0]) : null;
+  }
+
+  async listStoryProposals(projectId: string, f: { states?: ProposalState[]; kind?: ProposalKind; dedupeKey?: string; limit?: number } = {}) {
+    const { rows } = await this.q(
+      `SELECT * FROM story_proposals WHERE project_id = $1 AND ($2::text[] IS NULL OR state = ANY($2)) AND ($3::text IS NULL OR kind = $3)
+         AND ($4::text IS NULL OR dedupe_key = $4) ORDER BY created_at DESC, id LIMIT $5`,
+      [projectId, f.states?.length ? f.states : null, f.kind ?? null, f.dedupeKey ?? null, Math.max(1, Math.min(f.limit ?? 200, 1000))],
+    );
+    return rows.map(toStoryProposal);
+  }
+
+  async updateStoryProposal(projectId: string, id: string, patch: StoryProposalPatch, actor: CoreActor, expectedRevision?: number) {
+    try {
+      return await this.tx(async (c) => {
+        const { rows: cur } = await c.query('SELECT * FROM story_proposals WHERE project_id = $1 AND id = $2 FOR UPDATE', [projectId, UUID_RE.test(id) ? id : '00000000-0000-0000-0000-000000000000']);
+        if (!cur[0]) throw notFound(`Пропозиція «${id}»`);
+        const p = toStoryProposal(cur[0]);
+        checkProposalPatch(p, patch, actor);
+        if (expectedRevision !== undefined && p.revision !== expectedRevision) throw new CoreRuleError('conflict', `Пропозицію вже змінено (ревізія ${p.revision}, а не ${expectedRevision}) — перечитайте її`);
+        const decides = patch.state !== undefined && patch.state !== p.state && ['approved', 'canon', 'rejected', 'superseded'].includes(patch.state);
+        const { rows } = await c.query(
+          `UPDATE story_proposals SET
+             state = COALESCE($3, state), payload = COALESCE($4, payload), dedupe_key = COALESCE($5, dedupe_key), evidence = COALESCE($6, evidence),
+             validation = CASE WHEN $7 THEN $8::jsonb ELSE validation END, author_edit = CASE WHEN $9 THEN $10::jsonb ELSE author_edit END,
+             canon_ref = COALESCE($11, canon_ref), superseded_by = COALESCE($12, superseded_by), reason = COALESCE($13, reason),
+             decided_by = CASE WHEN $14 THEN $15 ELSE decided_by END, decided_at = CASE WHEN $14 THEN now() ELSE decided_at END,
+             revision = revision + 1
+           WHERE project_id = $1 AND id = $2 RETURNING *`,
+          [
+            projectId, p.id, patch.state ?? null, patch.payload === undefined ? null : JSON.stringify(patch.payload), patch.dedupeKey ?? null, patch.evidence ?? null,
+            patch.validation !== undefined, patch.validation == null ? null : JSON.stringify(patch.validation),
+            patch.authorEdit !== undefined, patch.authorEdit == null ? null : JSON.stringify(patch.authorEdit),
+            patch.canonRef ?? null, patch.supersededBy ?? null, patch.reason ?? null, decides, actor,
+          ],
+        );
+        return toStoryProposal(rows[0]);
+      });
+    } catch (err) {
+      if (err instanceof CoreRuleError) throw err;
+      mapPgError(err);
+    }
+  }
+
+  async supersedeStoryProposal(projectId: string, oldId: string, input: StoryProposalInput, actor: CoreActor) {
+    checkStoryProposal(input);
+    if (input.projectId !== projectId) throw new CoreRuleError('bad_input', 'Нова пропозиція — у тій самій книзі');
+    try {
+      return await this.tx(async (c) => {
+        const { rows: cur } = await c.query('SELECT * FROM story_proposals WHERE project_id = $1 AND id = $2 FOR UPDATE', [projectId, UUID_RE.test(oldId) ? oldId : '00000000-0000-0000-0000-000000000000']);
+        if (!cur[0]) throw notFound(`Пропозиція «${oldId}»`);
+        const newId = randomUUID();
+        checkProposalPatch(toStoryProposal(cur[0]), { state: 'superseded', supersededBy: newId }, actor);
+        const { rows: old } = await c.query(
+          `UPDATE story_proposals SET state = 'superseded', superseded_by = $3, decided_by = $4, decided_at = now(), revision = revision + 1 WHERE project_id = $1 AND id = $2 RETURNING *`,
+          [projectId, oldId, newId, actor],
+        );
+        const { rows } = await c.query(
+          `INSERT INTO story_proposals (id, project_id, kind, state, payload, dedupe_key, evidence, confidence, provenance, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+          [newId, projectId, input.kind, input.state ?? 'proposed', JSON.stringify(input.payload), input.dedupeKey, input.evidence ?? [], input.confidence ?? null, JSON.stringify(input.provenance ?? {}), input.createdBy],
+        );
+        return { old: toStoryProposal(old[0]), created: toStoryProposal(rows[0]) };
+      });
+    } catch (err) {
+      if (err instanceof CoreRuleError) throw err;
+      mapPgError(err);
+    }
+  }
+
+  async addStoryProposalEvent(input: { projectId: string; proposalId: string; action: ProposalEventAction; actor: CoreActor; fromState?: ProposalState | null; toState?: ProposalState | null; details?: Record<string, unknown> }) {
+    checkProposalEvent(input);
+    const { rows } = await this.q(
+      `INSERT INTO story_proposal_events (project_id, proposal_id, action, actor, from_state, to_state, details) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [input.projectId, input.proposalId, input.action, input.actor, input.fromState ?? null, input.toState ?? null, JSON.stringify(input.details ?? {})],
+    );
+    return toStoryProposalEvent(rows[0]);
+  }
+
+  async listStoryProposalEvents(projectId: string, f: { proposalId?: string; limit?: number } = {}) {
+    const { rows } = await this.q(
+      `SELECT * FROM (SELECT * FROM story_proposal_events WHERE project_id = $1 AND ($2::uuid IS NULL OR proposal_id = $2) ORDER BY created_at DESC, id DESC LIMIT $3) e ORDER BY created_at, id`,
+      [projectId, f.proposalId && UUID_RE.test(f.proposalId) ? f.proposalId : f.proposalId ? '00000000-0000-0000-0000-000000000000' : null, Math.max(1, Math.min(f.limit ?? 200, 1000))],
+    );
+    return rows.map(toStoryProposalEvent);
   }
 
   async getGraphLayout(kind: 'workflow' | 'ontology', graphId: string, versionRef: string) {
