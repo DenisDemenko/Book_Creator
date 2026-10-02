@@ -99,8 +99,12 @@ import { GraphStudioPage } from './components/graphStudio/GraphStudioPage';
 import {
   STUDIO_ENTRY_PARAMS,
   parseStudioEntry,
+  parseProjectEntry,
+  type ProjectEntry,
   type StudioEntryIntent,
 } from './utils/studioEntry';
+import { RoleOnboardingWizard, type WizardResult } from './components/onboarding/RoleOnboardingWizard';
+import { fetchGate, onb } from './components/onboarding/onboardingApi';
 import { API_BASE } from './utils/basePath';
 import { CorePageView } from './components/CorePageView';
 import { stampBookRevision, isNewerBook, describeRevisionGap } from './utils/bookVersion';
@@ -167,7 +171,7 @@ const INITIAL_LOG_ENTRIES: AuditLogEntry[] = [
 export default function App() {
   const auth = useAuth();
   const { theme, toggleTheme } = useTheme();
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
 
   // Книга підвантажується з IndexedDB асинхронно — до завершення показуємо заставку.
   const [book, setBook] = useState<Book>(initialBookData);
@@ -193,6 +197,18 @@ export default function App() {
   // книги (bookId), перемикач ролей для цієї книги блокується — учасник
   // працює лише в межах ролі, яку йому надав письменник.
   const [coworkLock, setCoworkLock] = useState<{ bookId: string; role: UserRole } | null>(null);
+
+  // Т6.3: опитувальник ролі (Role Onboarding) — хто відкрив, для якого проєкту.
+  const [onboarding, setOnboarding] = useState<{ source: string; projectId?: string | null; projectType?: string | null; orderId?: string | null; projectTitle?: string | null; pending?: boolean } | null>(null);
+  /** Чи сервер показує майстер автоматично (ROLE_ONBOARDING ≠ off). */
+  const [onboardingEnabled, setOnboardingEnabled] = useState(false);
+  /** «Відкрити у Студії» конкретний проєкт (з маркетплейсу) — чекає входу. */
+  const [projectEntry, setProjectEntry] = useState<ProjectEntry | null>(null);
+  const onboardingGateChecked = useRef(false);
+  /** Т6.3: спільні курси (за наданим доступом) — відкривають «Створити курс» і без ролі експерта. */
+  const [sharedCourseIds, setSharedCourseIds] = useState<string[]>([]);
+  const [initialCourseId, setInitialCourseId] = useState<string | null>(null);
+  const extraTabs = useMemo<NavigationTab[]>(() => (sharedCourseIds.length ? ['course-studio'] : []), [sharedCourseIds]);
 
   // Стан прийняття cowork-запрошення за посиланням `?invite=<token>`.
   const [inviteToken, setInviteToken] = useState<string | null>(null);
@@ -410,8 +426,18 @@ export default function App() {
   const [entryTrack, setEntryTrack] = useState<ExpressTrackId | null>(null);
 
   useEffect(() => {
+    // Т6.3: проєкт і замовлення з «Відкрити у Студії» — до розбору розділу.
+    const project = parseProjectEntry(window.location.search);
+    if (project) setProjectEntry(project);
     const intent = parseStudioEntry(window.location.search);
-    if (!intent) return;
+    if (!intent) {
+      if (project) {
+        const url = new URL(window.location.href);
+        for (const key of STUDIO_ENTRY_PARAMS) url.searchParams.delete(key);
+        window.history.replaceState({}, '', url.toString());
+      }
+      return;
+    }
     setPendingEntry(intent);
     // Прибираємо з адреси одразу, як і `invite` нижче: інакше параметри
     // лишаться в історії, і кнопка «назад» відкриє те саме вдруге.
@@ -439,6 +465,74 @@ export default function App() {
     setEntryTrack(pendingEntry.tab === 'express' ? 'book' : null);
     setPendingEntry(null);
   }, [pendingEntry, auth.loading, auth.user?.role, currentRole]);
+
+  // Т6.3: шлюз входу (§4). Перший вхід кожного, незавершений опитувальник, а
+  // для «Відкрити у Студії» проєкту — роль у ньому невідома чи запит чекає
+  // рішення. Під час прийняття запрошення — чекаємо: там свій короткий шлях.
+  useEffect(() => {
+    if (auth.loading || auth.isGuest || !auth.user || inviteToken) return;
+    if (onboardingGateChecked.current) return;
+    onboardingGateChecked.current = true;
+    (async () => {
+      try {
+        if (projectEntry) {
+          const g = await fetchGate(projectEntry.projectId);
+          setOnboardingEnabled(g.enabled);
+          if (g.reason === 'pending_request') {
+            setOnboarding((prev) => prev ?? { source: 'marketplace', projectId: projectEntry.projectId, pending: true });
+            return;
+          }
+          if (g.required) {
+            setOnboarding((prev) => prev ?? { source: projectEntry.orderId ? 'marketplace' : 'open_project', projectId: projectEntry.projectId, orderId: projectEntry.orderId ?? null });
+            return;
+          }
+        }
+        const g = await fetchGate();
+        setOnboardingEnabled(g.enabled);
+        setSharedCourseIds(g.sharedCourses ?? []);
+        // «Відкрити у Студії» курс, до якого вже є доступ, — одразу в Студію курсів на ньому.
+        const courseId = projectEntry?.projectId.startsWith('course-') ? projectEntry.projectId.slice('course-'.length) : null;
+        if (courseId && (g.sharedCourses ?? []).includes(courseId)) {
+          setInitialCourseId(courseId);
+          setCurrentTab('course-studio');
+        }
+        if (g.required) setOnboarding((prev) => prev ?? { source: g.session?.source ?? 'first_login', projectId: g.session?.projectId ?? null });
+      } catch {
+        // Ядро недоступне — Студія працює як раніше, без майстра.
+      }
+    })();
+  }, [auth.loading, auth.isGuest, auth.user, inviteToken, projectEntry]);
+
+  /** Майстер закрито: перейти до Студії, створити книгу чи курс. */
+  const handleOnboardingClose = (result: WizardResult) => {
+    const launched = onboarding;
+    setOnboarding(null);
+    if (!result.completed) return;
+    void onb('POST', '/api/core/onboarding/events', { event: 'studio_entered', projectId: launched?.projectId ?? null, tab: currentTab }).catch(() => {});
+    if (result.next === 'create_book') setIsCreateBookModalOpen(true);
+    if (result.next === 'create_course' && canAccessTab(auth.user?.role ?? currentRole, 'courses')) setCurrentTab('courses');
+  };
+
+  // Т6.3: «Пройти опитувальник ролі» з панелі «Доступ» (додати роль чи запросити доступ пізніше, №23).
+  useEffect(() => {
+    const onRequest = (e: Event) => {
+      const projectId = (e as CustomEvent<{ projectId?: string }>).detail?.projectId;
+      if (projectId) setOnboarding({ source: 'manual', projectId });
+    };
+    window.addEventListener('nova:role-onboarding', onRequest);
+    return () => window.removeEventListener('nova:role-onboarding', onRequest);
+  }, []);
+
+  /** Т6.3: точки запуску «створити / імпортувати проєкт» і «прийняти запрошення». */
+  const launchOnboarding = (launch: { source: string; projectId: string; projectType?: string; projectTitle?: string }) => {
+    if (!auth.user || auth.isGuest) return;
+    void fetchGate(launch.projectId)
+      .then((g) => {
+        setOnboardingEnabled(g.enabled);
+        if (g.enabled && !g.roles.length) setOnboarding({ ...launch, projectType: launch.projectType ?? null, projectTitle: launch.projectTitle ?? null });
+      })
+      .catch(() => {});
+  };
 
   // Перехід за посиланням cowork-запрошення (?invite=<token>) — токен читаємо
   // один раз і одразу прибираємо з адресного рядка, щоб він не залишався в
@@ -554,6 +648,8 @@ export default function App() {
     }
 
     handleSelectRole(role);
+    // Т6.3: коротке підтвердження ролі з запрошення (§24) — без повторного схвалення.
+    launchOnboarding({ source: 'invitation', projectId: lock.bookId, projectTitle: roleChoice.bookTitle });
     setInviteToken(null);
     setInviteScreenStatus('idle');
     setRoleChoice(null);
@@ -667,7 +763,7 @@ export default function App() {
     }
     const serverRole = auth.user.role as UserRole;
     setCurrentRole((prev) => (prev === serverRole ? prev : serverRole));
-    if (!canAccessTab(serverRole, currentTab)) {
+    if (!canAccessTab(serverRole, currentTab) && !extraTabs.includes(currentTab)) {
       // Намір із маркетплейсу тут сильніший за «типову вкладку ролі».
       // Інакше дві вимоги штовхаються в одному коміті: гість приходить із
       // початковою вкладкою дашборда (гостю вона недоступна), роль вимагає
@@ -679,7 +775,7 @@ export default function App() {
       setCurrentTab(requested ?? getDefaultTabForRole(serverRole));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auth.loading, auth.user?.role, coworkLock, book.id, pendingEntry]);
+  }, [auth.loading, auth.user?.role, coworkLock, book.id, pendingEntry, extraTabs]);
 
   // Адреса ↔ вкладка (Т0.8, К3). Кожна вкладка — /projects/<книга>/<сторінка>:
   // перший раз адреса лише уточнюється (replaceState), далі кожен перехід —
@@ -1237,6 +1333,8 @@ export default function App() {
     setActiveChapterId(newBook.chapters[0]?.id || '');
     setActiveSectionId(newBook.chapters[0]?.sections[0]?.id || '');
     persistBook(newBook);
+    // Т6.3: «Створити проєкт» — точка запуску опитувальника ролі (§3).
+    launchOnboarding({ source: 'create_project', projectId: bookId, projectType: 'book', projectTitle: title });
 
     // Write primary creation audit log
     addLogEntry(
@@ -1263,6 +1361,8 @@ export default function App() {
     setActiveChapterId(firstChapter?.id || '');
     setActiveSectionId(firstChapter?.sections[0]?.id || '');
     persistBook(importedBook);
+    // Т6.3: «Імпортувати проєкт» — точка запуску опитувальника ролі (§3).
+    launchOnboarding({ source: 'import_project', projectId: importedBook.id, projectType: 'book', projectTitle: importedBook.title });
 
     addLogEntry(
       'Імпорт книги з ZIP',
@@ -2122,6 +2222,7 @@ export default function App() {
         /* Та сама причина, що й у верхньому меню: поки вікно відкрите,
            пункт лишається активним, а сам currentTab не рухається. */
         currentTab={marketOpen ? 'market' : currentTab}
+        extraTabs={extraTabs}
         onSelectTab={handleSelectTab}
         book={book}
         logCount={logEntries.length}
@@ -2159,7 +2260,7 @@ export default function App() {
         {/* Створити курс: самостійні навчальні курси (експерт/викладач/адмін) */}
         {currentTab === 'course-studio' && (
           <div className="flex-1 overflow-y-auto">
-            <CourseStudioView onOpenWizard={() => handleSelectTab('express')} />
+            <CourseStudioView onOpenWizard={() => handleSelectTab('express')} initialCourseId={initialCourseId} lang={lang === 'en' ? 'en' : 'uk'} />
           </div>
         )}
 
@@ -2545,6 +2646,21 @@ export default function App() {
         authUser={auth.user}
         onUpdateBook={handleUpdateBook}
       />
+
+      {/* Т6.3: опитувальник ролі (Role Onboarding) */}
+      {onboarding && (
+        <RoleOnboardingWizard
+          key={`${onboarding.source}:${onboarding.projectId ?? '*'}:${onboarding.pending ? 'p' : ''}`}
+          lang={lang === 'en' ? 'en' : 'uk'}
+          source={onboarding.source}
+          projectId={onboarding.projectId ?? null}
+          projectType={onboarding.projectType ?? null}
+          orderId={onboarding.orderId ?? null}
+          projectTitle={onboarding.projectTitle ?? null}
+          pending={!!onboarding.pending}
+          onClose={handleOnboardingClose}
+        />
+      )}
 
       {/* Create New Book Project Modal */}
       <CreateBookModal

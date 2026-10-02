@@ -96,11 +96,12 @@ async function requireOwnSession(repo: CoreRepository, sessionId: string, userId
   return s;
 }
 
-/** Чи це робота в чужому проєкті (потрібні область і можливості). */
-async function joiningFor(deps: OnboardingDeps, who: Who, projectId: string | null): Promise<boolean> {
+/** Чи це робота в чужому проєкті без запрошення (потрібні область, можливості й запит доступу). */
+export async function joiningFor(deps: OnboardingDeps, who: Who, projectId: string | null): Promise<boolean> {
   if (!projectId || who.isAdmin) return false;
   const owner = await deps.ownerOf(projectId);
-  return owner !== null && owner !== who.userId;
+  if (owner === null || owner === who.userId) return false;
+  return !(deps.acceptedInvite && (await deps.acceptedInvite(projectId, who.userId)));
 }
 
 // ---------------------------------------------------------------------------

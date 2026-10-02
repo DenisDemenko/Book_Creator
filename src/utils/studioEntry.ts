@@ -61,7 +61,35 @@ export interface StudioEntryIntent {
 }
 
 /** Параметри наміру: після розбору їх прибирають з адреси (як `invite`). */
-export const STUDIO_ENTRY_PARAMS: readonly string[] = ['open', 'idea', 'create'];
+export const STUDIO_ENTRY_PARAMS: readonly string[] = ['open', 'idea', 'create', 'project', 'order'];
+
+/**
+ * Т6.3 (Role Onboarding §14): «Відкрити у Студії» конкретний проєкт — книгу
+ * (`?project=<id книги>`) чи курс (`?project=course-<id>`), за бажанням із
+ * фріланс-замовленням (`&order=<order_id>`). Студія визначає учасника й, якщо
+ * роль у проєкті невідома, запускає опитувальник; замовлення поки не
+ * перевіряється маркетплейсом — це запит доступу з його контекстом.
+ */
+export interface ProjectEntry {
+  projectId: string;
+  orderId?: string;
+}
+
+const ENTRY_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
+
+export function parseProjectEntry(search: string): ProjectEntry | null {
+  if (!search) return null;
+  let params: URLSearchParams;
+  try {
+    params = new URLSearchParams(search);
+  } catch {
+    return null;
+  }
+  const projectId = (params.get('project') ?? '').trim();
+  if (!ENTRY_ID_RE.test(projectId)) return null;
+  const orderId = (params.get('order') ?? '').trim();
+  return ENTRY_ID_RE.test(orderId) ? { projectId, orderId } : { projectId };
+}
 
 export function studioEntrySection(slug: string): StudioEntrySection | undefined {
   const key = slug.trim().toLowerCase();

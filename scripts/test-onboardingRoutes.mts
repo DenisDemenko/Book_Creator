@@ -195,6 +195,7 @@ console.log('\nКурс — проєкт ядра зі співавторами 
   t('…і править його (без глобального права авторства курсів)', put.status === 200 && getCourse(cid)?.subtitle === 'від співавтора' && getCourse(cid)?.ownerId === 'u-teacher');
   const list = await call('GET', '/api/courses', 'u-co');
   t('у списку — серед спільних', list.status === 200 && list.body.shared.some((x: any) => x.id === cid) && list.body.canAuthor === false);
+  t('шлюз знає спільні курси (меню «Створити курс» без ролі експерта)', (await call('GET', `${O}/gate`, 'u-co')).body.sharedCourses?.includes(cid) && !(await call('GET', `${O}/gate`, 'u-teacher')).body.sharedCourses?.includes(cid));
   t('публікує й видаляє — лише власник (співавтору — 403 за правом)', (await call('POST', `/api/courses/${cid}/publish`, 'u-co')).status === 403 && (await call('DELETE', `/api/courses/${cid}`, 'u-co')).status === 403);
 }
 server.close();

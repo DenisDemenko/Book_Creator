@@ -12,6 +12,8 @@ import {
   ENTRY_IDEA_MAX,
   STUDIO_ENTRY_SECTIONS,
   parseStudioEntry,
+  parseProjectEntry,
+  STUDIO_ENTRY_PARAMS,
   studioEntrySection,
 } from '../src/utils/studioEntry.ts';
 import { buildAppPath, parseAppPath } from '../src/utils/appRoutes.ts';
@@ -50,6 +52,11 @@ t('порожній open — не намір', parseStudioEntry('?open=') === nu
 t('невідомий слаг — не намір', parseStudioEntry('?open=nope') === null);
 t('слаг вкладки замість розділу не приймається', parseStudioEntry('?open=core-story-graph') === null);
 t('create=book лишається робочим (давня адреса кнопки)', eq(parseStudioEntry('?create=book'), { tab: 'express' }));
+t('Т6.3: «Відкрити у Студії» книгу з замовленням', eq(parseProjectEntry('?project=book-17&order=ord-9'), { projectId: 'book-17', orderId: 'ord-9' }));
+t('Т6.3: курс без замовлення', eq(parseProjectEntry('?project=course-1f2e'), { projectId: 'course-1f2e' }));
+t('Т6.3: сміття замість id — не намір', parseProjectEntry('?project=a%20b%3Ac') === null && parseProjectEntry('?order=ord-1') === null);
+t('Т6.3: проблемне замовлення відкидається, проєкт лишається', eq(parseProjectEntry('?project=b1&order=%3Cscript%3E'), { projectId: 'b1' }));
+t('Т6.3: project і order прибираються з адреси', STUDIO_ENTRY_PARAMS.includes('project') && STUDIO_ENTRY_PARAMS.includes('order'));
 t('create=<інше> — не намір', parseStudioEntry('?create=course') === null);
 t('open має пріоритет над невідомим create', parseStudioEntry('?create=course&open=characters')?.tab === 'characters');
 

@@ -218,8 +218,14 @@ function collectReadiness(course: CourseV2): string[] {
 // Екран
 // ---------------------------------------------------------------------------
 
-export const CourseStudioView: React.FC<{ onOpenWizard?: () => void }> = ({ onOpenWizard }) => {
+export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCourseId?: string | null; lang?: 'uk' | 'en' }> = ({ onOpenWizard, initialCourseId = null, lang = 'uk' }) => {
   const [courses, setCourses] = useState<CourseV2[] | null>(null);
+  /** Т6.3: чужі курси, де людина — співавтор за наданим доступом. */
+  const [shared, setShared] = useState<CourseV2[]>([]);
+  const [canAuthor, setCanAuthor] = useState(true);
+  /** Доступ до відкритого курсу: власник / адмін — manage, співавтор — edit чи view. */
+  const [access, setAccess] = useState<'manage' | 'edit' | 'view'>('manage');
+  const L = (uk: string, en: string) => (lang === 'en' ? en : uk);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [course, setCourse] = useState<CourseV2 | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -233,8 +239,10 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void }> = ({ onOp
   const loadCourses = useCallback(async () => {
     setError(null);
     try {
-      const data = await api<{ courses: CourseV2[] }>('/api/courses');
+      const data = await api<{ courses: CourseV2[]; shared?: CourseV2[]; canAuthor?: boolean }>('/api/courses');
       setCourses(data.courses);
+      setShared(data.shared ?? []);
+      setCanAuthor(data.canAuthor !== false);
     } catch (e) {
       setError((e as Error).message);
       setCourses([]);
@@ -249,8 +257,9 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void }> = ({ onOp
     async (id: string) => {
       setError(null);
       try {
-        const data = await api<{ course: CourseV2 }>(`/api/courses/${id}`);
+        const data = await api<{ course: CourseV2; access?: 'manage' | 'edit' | 'view' }>(`/api/courses/${id}`);
         setCourse(data.course);
+        setAccess(data.access ?? 'manage');
         setActiveId(id);
         setDirty(false);
         setSelection({ type: 'course' });
@@ -260,6 +269,11 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void }> = ({ onOp
     },
     []
   );
+
+  // Т6.3: «Відкрити у Студії» спільний курс — одразу на ньому.
+  useEffect(() => {
+    if (initialCourseId) void openCourse(initialCourseId);
+  }, [initialCourseId, openCourse]);
 
   const patch = useCallback((fn: (c: CourseV2) => CourseV2) => {
     setCourse((prev) => {
@@ -278,6 +292,7 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void }> = ({ onOp
         body: JSON.stringify({ title: 'Новий курс' }),
       });
       setCourse(data.course);
+      setAccess('manage');
       setActiveId(data.course.id);
       setDirty(false);
       setSelection({ type: 'course' });
@@ -459,7 +474,7 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void }> = ({ onOp
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {onOpenWizard && (
+            {canAuthor && onOpenWizard && (
               <button
                 onClick={onOpenWizard}
                 className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition-all"
@@ -468,13 +483,13 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void }> = ({ onOp
                 Майстер (за 5 хвилин)
               </button>
             )}
-            <button
+            {canAuthor && <button
               onClick={createCourse}
               className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold transition-all"
             >
               <Plus className="w-4 h-4" />
               Новий курс
-            </button>
+            </button>}
             <button
               onClick={() => void loadCourses()}
               className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 transition-all"
@@ -489,7 +504,23 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void }> = ({ onOp
           <div className="mt-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-rose-200 text-xs">{error}</div>
         )}
 
-        {courses.length === 0 ? (
+        {shared.length > 0 && (
+          <section className="mt-5" data-course-shared>
+            <h2 className="text-xs font-bold uppercase tracking-wide text-sky-300">{L('Спільні курси — ви співавтор', 'Shared courses — you are a co-author')}</h2>
+            <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {shared.map((c) => (
+                <button key={c.id} onClick={() => void openCourse(c.id)} className="text-left p-4 rounded-2xl bg-slate-900 border border-sky-500/30 hover:border-sky-400/60 transition-all" data-course-shared-item={c.id}>
+                  <span className="text-sm font-bold text-slate-100 truncate block">{c.title}</span>
+                  <div className="mt-1.5 text-[11px] text-slate-500">
+                    {c.modules.length} модулів · {c.modules.reduce((n, m) => n + m.lessons.length, 0)} уроків
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {courses.length === 0 && shared.length > 0 ? null : courses.length === 0 ? (
           <div className="mt-10 text-center text-slate-500 text-sm py-16 border border-dashed border-slate-800 rounded-2xl">
             Курсів ще немає. Створіть перший вручну або через майстер.
           </div>
@@ -552,9 +583,14 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void }> = ({ onOp
           <option value="ready">Готовий</option>
           <option value="published">Опубліковано</option>
         </select>
+        {access !== 'manage' && (
+          <span className="px-2 py-1 rounded-full text-[10px] font-bold border border-sky-500/40 bg-sky-500/10 text-sky-200" data-course-access={access}>
+            {access === 'edit' ? L('Співавтор · редагування', 'Co-author · edit') : L('Лише перегляд', 'View only')}
+          </span>
+        )}
         <button
           onClick={() => void saveCourse()}
-          disabled={saving || !dirty}
+          disabled={saving || !dirty || access === 'view'}
           className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
             dirty
               ? 'bg-amber-500 hover:bg-amber-400 text-slate-950'
@@ -564,6 +600,7 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void }> = ({ onOp
           {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : dirty ? <Save className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
           {saving ? 'Збереження…' : dirty ? 'Зберегти' : savedAt ? `Збережено ${savedAt}` : 'Збережено'}
         </button>
+        {access === 'manage' && (<>
         <button
           onClick={() => void publishCourse()}
           disabled={publishing || saving}
@@ -584,6 +621,7 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void }> = ({ onOp
         >
           <Trash2 className="w-4 h-4" />
         </button>
+        </>)}
       </div>
 
       {error && (

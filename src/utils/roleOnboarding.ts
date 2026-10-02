@@ -252,7 +252,8 @@ export function validateAnswers(reg: CollabOntologyDefinition, a: OnboardingAnsw
     if (!a.scope) out.push(issue(5, 'scope', 'required', 'Choose the work scope', 'Оберіть область роботи'));
     else if (!reg.scopeTypes.some((s) => s.id === a.scope)) out.push(issue(5, 'scope', 'unknown', `Unknown scope «${a.scope}»`, `Невідома область «${a.scope}»`));
     else if (!scopeAvailable(a.scope, pt)) out.push(issue(5, 'scope', 'unavailable', 'This scope is not available yet — choose another', 'Ця область поки недоступна — оберіть іншу'));
-    else if (SCOPE_TO_ACCESS[a.scope]?.refs && !(a.scopeRefs ?? []).length) out.push(issue(5, 'scopeRefs', 'required', 'Choose what exactly', 'Оберіть, що саме'));
+    // Цілі (розділи, сцени, персонажі) людина в чужій книзі ще не бачить — їх може
+    // назвати в повідомленні, а обирає власник під час рішення («змінити»).
   }
   if (upTo >= 6 && opts.joining) {
     const caps = a.capabilities ?? [];

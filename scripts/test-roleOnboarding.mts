@@ -152,6 +152,13 @@ async function suite(name: string, repo: CoreRepository, raw?: (sql: string, par
   const rj = await O.decideAccessRequest(repo, { projectId: P, requestId: rjOut.request.id, decider: { userId: 'u-owner', isOwner: true, isAdmin: false }, action: 'reject', reason: 'інший виконавець' });
   eff = await resolveEffectiveAccess(repo, { projectId: P, userId: 'u-rj', isOwner: false, isAdmin: false });
   t('відхилено — доступу немає, роль лишилась (можна запросити пізніше, №23)', rj.status === 'rejected' && eff.media === 'none' && (await rolesOf(repo, P, 'u-rj')).includes('freelancer'));
+  const nrS = (await O.startOnboarding(repo, deps, who('u-nr'), { userId: 'u-nr', source: 'open_project', projectId: P })).session;
+  await O.saveOnboardingStep(repo, deps, who('u-nr'), { sessionId: nrS.id, step: 6, answers: { entryIntent: 'join_existing_project', roles: [{ roleId: 'illustrator' }], scope: 'selected_scenes', capabilities: ['view'], message: 'Сцена з маяком' } });
+  const nrReq = ((await O.completeOnboarding(repo, deps, who('u-nr'), { sessionId: nrS.id })).outcome as any).request;
+  t('сцени ще невідомі людині — запит без цілей, з повідомленням', nrReq.scopeRefs.length === 0 && nrReq.message === 'Сцена з маяком');
+  t('…«схвалити як є» не можна — власник обирає, що саме', (await errOf(() => O.decideAccessRequest(repo, { projectId: P, requestId: nrReq.id, decider: { userId: 'u-owner', isOwner: true, isAdmin: false }, action: 'approve', bookIndex: BOOK_INDEX })))?.code === 'bad_input');
+  const nrOk = await O.decideAccessRequest(repo, { projectId: P, requestId: nrReq.id, decider: { userId: 'u-owner', isOwner: true, isAdmin: false }, action: 'modify', scopeType: 'scene', scopeRefs: ['sec-1'], bookIndex: BOOK_INDEX });
+  t('…«змінити» з обраною сценою — так', nrOk.status === 'modified' && (nrOk.decision as any).scopeRefs.join() === 'sec-1');
   const cxS = (await O.startOnboarding(repo, deps, who('u-cx'), { userId: 'u-cx', source: 'open_project', projectId: P })).session;
   await O.saveOnboardingStep(repo, deps, who('u-cx'), { sessionId: cxS.id, step: 6, answers: { entryIntent: 'join_existing_project', roles: [{ roleId: 'translator' }], scope: 'selected_chapters', scopeRefs: ['ch-1'], capabilities: ['view', 'edit'] } });
   const cxReq = ((await O.completeOnboarding(repo, deps, who('u-cx'), { sessionId: cxS.id })).outcome as any).request;

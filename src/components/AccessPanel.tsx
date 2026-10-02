@@ -9,6 +9,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Ban, History, Loader2, ShieldCheck, ShieldPlus } from 'lucide-react';
+import { AccessRequestsSection } from './onboarding/AccessRequestsSection';
 
 type Lang = 'uk' | 'en';
 type Level = 'view' | 'comment' | 'review' | 'edit' | 'create' | 'approve' | 'manage' | 'work';
@@ -279,6 +280,16 @@ export const AccessPanel: React.FC<{ bookId: string; lang: Lang }> = ({ bookId, 
           <ShieldCheck className="w-3.5 h-3.5" /> {L('Мій доступ', 'My access')}
         </div>
         <p className="text-[11px] text-slate-300 leading-relaxed">{mySummary(state.me.effective)}</p>
+        {!state.me.isOwner && (
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent('nova:role-onboarding', { detail: { projectId: bookId } }))}
+            className="mt-2 text-[11px] font-bold text-amber-300 hover:underline"
+            data-access-onboarding
+          >
+            {L('Моя роль / запросити доступ…', 'My role / request access…')}
+          </button>
+        )}
       </div>
 
       {!state.canManage ? (
@@ -287,6 +298,8 @@ export const AccessPanel: React.FC<{ bookId: string; lang: Lang }> = ({ bookId, 
         </p>
       ) : (
         <>
+          {/* Т6.3: запити доступу з опитувальника ролі — схвалити / змінити / відхилити. */}
+          <AccessRequestsSection bookId={bookId} lang={lang} characters={targets?.characters ?? []} onChanged={() => void load()} />
           <form onSubmit={submit} className="p-3 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-2" data-access-form>
             <div className="flex items-center gap-2 text-xs font-bold text-white">
               <ShieldPlus className="w-3.5 h-3.5 text-amber-400" /> {L('Надати доступ', 'Grant access')}

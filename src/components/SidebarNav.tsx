@@ -52,6 +52,8 @@ import { useSunAccentVars } from '../utils/sunAccent';
 import { GlowIntensityControl } from './GlowIntensityControl';
 
 interface SidebarNavProps {
+  /** Т6.3: вкладки, відкриті не роллю, а участю (спільний курс). Права перевіряє сервер. */
+  extraTabs?: NavigationTab[];
   currentTab: NavigationTab;
   onSelectTab: (tab: NavigationTab) => void;
   book: Book;
@@ -246,6 +248,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
   book,
   logCount = 0,
   currentRole,
+  extraTabs = [],
   onQuickAi,
   onOpenHelp,
 }) => {
@@ -401,7 +404,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
     >
       <nav className="flex-1 overflow-y-auto no-scrollbar py-2 px-2 space-y-1">
         {NAV_GROUPS.map((group) => {
-          const allowed = group.tabs.filter((tab) => canAccessTab(currentRole, tab));
+          const allowed = group.tabs.filter((tab) => canAccessTab(currentRole, tab) || extraTabs.includes(tab));
           if (allowed.length === 0) return null;
           const isOpen = isGroupOpen(openGroups, group.id);
 

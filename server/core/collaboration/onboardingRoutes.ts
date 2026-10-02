@@ -26,13 +26,14 @@ import { CoreRuleError } from '../rules';
 import type { RealtimeAccessDeps } from '../../realtimeAuth';
 import { isValidBookId } from '../../realtimeAuth';
 import { resolveProjectAccess } from '../projectRoutes';
-import type { BookIndex } from './access';
+import { computeEffective, levelRank, type BookIndex } from './access';
 import type { BookOutline } from './routes';
 import {
   cancelAccessRequest,
   cancelOnboarding,
   completeOnboarding,
   decideAccessRequest,
+  joiningFor,
   onboardingGate,
   saveOnboardingStep,
   startOnboarding,
@@ -94,7 +95,18 @@ export function registerOnboardingRoutes(app: Express, d: OnboardingRoutesDeps):
     const projectId = projectParam(req.query.projectId);
     if (projectId) await d.ensureProject?.(projectId).catch(() => {});
     const gate = await onboardingGate(repo, d.onboarding, who, { projectId, enabled: d.enabled() });
-    res.json({ enabled: d.enabled(), ...gate });
+    // Т6.3: спільні курси (учасник із доступом до чужого курсу) — щоб Студія показала «Створити курс» і без права авторства.
+    const sharedCourses: string[] = [];
+    if (!projectId) {
+      for (const p of await repo.listProjects({ participantUserId: who.userId })) {
+        if (p.projectType !== 'course' || p.ownerId === who.userId) continue;
+        const part = await repo.getParticipant(p.id, who.userId);
+        if (!part || part.status !== 'active') continue;
+        const eff = computeEffective(p.id, who.userId, await repo.listAccessGrants({ participantId: part.id, status: 'active' }), { full: false });
+        if (levelRank(eff.book) >= levelRank('view') && eff.book !== 'work') sharedCourses.push(p.id.replace(/^course-/, ''));
+      }
+    }
+    res.json({ enabled: d.enabled(), ...gate, sharedCourses });
   }));
 
   app.post('/api/core/onboarding/sessions', d.requireAuth, run(async (repo, who, req, res) => {
@@ -115,7 +127,7 @@ export function registerOnboardingRoutes(app: Express, d: OnboardingRoutesDeps):
       projectType: typeof b.projectType === 'string' && b.projectType ? b.projectType : null,
       orderId,
     });
-    res.status(r.resumed ? 200 : 201).json(r);
+    res.status(r.resumed ? 200 : 201).json({ ...r, joining: await joiningFor(d.onboarding, who, r.session.projectId) });
   }));
 
   const own = async (repo: CoreRepository, userId: string, id: string) => {
@@ -125,7 +137,8 @@ export function registerOnboardingRoutes(app: Express, d: OnboardingRoutesDeps):
   };
 
   app.get('/api/core/onboarding/sessions/:id', d.requireAuth, run(async (repo, who, req, res) => {
-    res.json({ session: await own(repo, who.userId, String(req.params.id)) });
+    const session = await own(repo, who.userId, String(req.params.id));
+    res.json({ session, joining: await joiningFor(d.onboarding, who, session.projectId) });
   }));
 
   app.put('/api/core/onboarding/sessions/:id/steps/:step', d.requireAuth, run(async (repo, who, req, res) => {
