@@ -36,6 +36,7 @@ import {
   nodeOutputs,
   nodeTypeById,
   isExecutableNode,
+  needsReviewBranch,
   type GraphLayout,
   type ParamDef,
   type WorkflowDefinition,
@@ -45,6 +46,9 @@ import {
 } from '../../utils/workflowGraph';
 import { readableTextOn } from '../../utils/coreEntities';
 import { ENV_CLASS, ENV_LABEL, gs, type GsAbilities } from './gsApi';
+
+/** Т5.5: параметри §16–17 вузлів Jev — окремою згорнутою групою. */
+const ROUTING_PARAMS = new Set(['confidence_high', 'confidence_medium', 'on_high', 'on_medium', 'on_low', 'second_opinion_model', 'importance', 'risk', 'consensus_from_importance', 'consensus_from_risk', 'consensus_budget', 'consensus_model_a', 'consensus_model_b']);
 
 interface Summary {
   workflow: { id: string; name: { en: string; uk: string }; description: string; status: string };
@@ -251,6 +255,13 @@ const ParamField: React.FC<{ def: ParamDef; value: unknown; disabled: boolean; o
 function Editor({ abilities }: { abilities: GsAbilities }) {
   const [list, setList] = useState<Summary[]>([]);
   const [wfId, setWfId] = useState<string | null>(null);
+  // Т5.5: відомі реєстри напрямків — підказка для маршрутизатора Jev.
+  const [registries, setRegistries] = useState<string[]>([]);
+  useEffect(() => {
+    void gs<{ destinations: { registry: string }[]; routers: Record<string, unknown> }>('GET', '/api/core/workflow-destinations')
+      .then((r) => setRegistries([...new Set([...r.destinations.map((d) => d.registry), ...Object.keys(r.routers ?? {})])].sort()))
+      .catch(() => {});
+  }, []);
   const [versions, setVersions] = useState<VersionRow[]>([]);
   const [version, setVersion] = useState<VersionRow | null>(null);
   const [def, setDef] = useState<WorkflowDefinition | null>(null);
@@ -667,9 +678,30 @@ function Editor({ abilities }: { abilities: GsAbilities }) {
               <span className="mb-0.5 block text-[10px] text-slate-400">Підпис на канві</span>
               <input className={inputCls} value={selNode.label ?? ''} disabled={!editable} onChange={(e) => setNode(selNode.id, { label: e.target.value || undefined })} data-wf-node-label />
             </label>
-            {(nodeTypeById(selNode.type)?.params ?? []).map((p) => (
-              <ParamField key={`${selNode.id}:${p.id}`} def={p} value={selNode.params?.[p.id]} disabled={!editable} onChange={(v) => setParam(selNode.id, p.id, v)} />
+            {(nodeTypeById(selNode.type)?.params ?? []).filter((p) => !ROUTING_PARAMS.has(p.id)).map((p) => (
+              p.id === 'registry' && selNode.type === 'JEV_ROUTER' ? (
+                <label key={`${selNode.id}:${p.id}`} className="block">
+                  <span className="mb-0.5 block text-[10px] text-slate-400">{bi(p.name)} <span className="font-mono text-slate-600">{p.id}</span></span>
+                  <input className={inputCls} list="wf-registries" value={typeof selNode.params?.registry === 'string' ? selNode.params.registry : ''} placeholder="порожньо — гілки на канві" disabled={!editable}
+                    onChange={(e) => setParam(selNode.id, 'registry', e.target.value.trim() || undefined)} data-wf-param="registry" />
+                  <datalist id="wf-registries">{registries.map((r) => <option key={r} value={r} />)}</datalist>
+                  <span className="text-[10px] text-slate-500">{p.hint} Напрямки — вкладка «Destinations».</span>
+                </label>
+              ) : (
+                <ParamField key={`${selNode.id}:${p.id}`} def={p} value={selNode.params?.[p.id]} disabled={!editable} onChange={(v) => setParam(selNode.id, p.id, v)} />
+              )
             ))}
+            {selNode.type.startsWith('JEV_') && (
+              <details className="rounded-xl border border-slate-800 bg-slate-950/50 p-2" data-wf-param-group="routing" open={needsReviewBranch(selNode)}>
+                <summary className="cursor-pointer text-[11px] font-semibold text-amber-200">Confidence routing &amp; consensus (Впевненість і узгодження, §16–17)</summary>
+                <p className="my-1 text-[10px] text-slate-500">Типово все AUTO_ROUTE і без узгодження. «Друга перевірка», «Перевірка людиною» чи узгодження додають гілку <b>review</b> — її треба під'єднати.</p>
+                <div className="space-y-2">
+                  {(nodeTypeById(selNode.type)?.params ?? []).filter((p) => ROUTING_PARAMS.has(p.id)).map((p) => (
+                    <ParamField key={`${selNode.id}:${p.id}`} def={p} value={selNode.params?.[p.id]} disabled={!editable} onChange={(v) => setParam(selNode.id, p.id, v)} />
+                  ))}
+                </div>
+              </details>
+            )}
             {(issuesByNode.get(selNode.id) ?? []).map((i, k) => (
               <div key={k} className="flex gap-1.5 text-[11px] text-rose-300"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />{i.message}</div>
             ))}
@@ -700,7 +732,7 @@ function Editor({ abilities }: { abilities: GsAbilities }) {
               <textarea className={`${inputCls} h-16`} value={def.description} disabled={!editable} onChange={(e) => mutate((d) => ({ ...d, description: e.target.value }))} />
             </label>
             <p className="text-[10px] text-slate-500">Вузлів: {def.nodes.length}, ребер: {def.edges.length}. Виконується опублікована версія (LangGraph); запуски — у вкладці «Runs».
-              {def.nodes.some((n) => !isExecutableNode(n.type)) && <span className="text-amber-300" data-wf-not-executable> Вузли пунктиром рушій поки не виконує (Jev — Т5.5, перевірка людиною й канон — Т5.6).</span>}</p>
+              {def.nodes.some((n) => !isExecutableNode(n.type)) && <span className="text-amber-300" data-wf-not-executable> Вузли пунктиром рушій поки не виконує (перевірка людиною й канон — Т5.6, шлюз безперервності — Т5.7).</span>}</p>
           </div>
         ) : null}
 

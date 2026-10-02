@@ -7,6 +7,10 @@
  * Керування (рішення власника §2 п.3 — адмін і право публікації схем):
  * PAUSE / RESUME / CANCEL, REPLAY (та сама версія й вхід), FORK (від кроку),
  * ручний запуск. Сервер перевіряє кожну дію.
+ *
+ * Т5.5: вузли Jev — джерело рішення (Jev, запасний LLM), розподіл,
+ * маршрутизація за впевненістю, друга перевірка й узгодження моделей;
+ * підпроцеси — посилання на дочірній запуск.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, GitFork, Loader2, Pause, Play, PlayCircle, RefreshCcw, RotateCcw, Square } from 'lucide-react';
@@ -19,7 +23,7 @@ interface Run {
   version: number;
   projectId: string | null;
   status: 'running' | 'paused' | 'succeeded' | 'failed' | 'cancelled';
-  mode: 'normal' | 'replay' | 'fork';
+  mode: 'normal' | 'replay' | 'fork' | 'subgraph';
   parentRunId: string | null;
   forkStep: number | null;
   trigger: string;
@@ -61,8 +65,8 @@ interface Detail {
   run: Run;
   steps: Step[];
   version: { id: string; version: number; environment: string; definition: { nodes: { id: string; type: string; label?: string }[] } | null } | null;
-  parent: { id: string; status: string; mode: string } | null;
-  children: { id: string; mode: string; status: string; createdAt: string }[];
+  parent: { id: string; workflowId?: string; status: string; mode: string } | null;
+  children: { id: string; workflowId?: string; mode: string; status: string; createdAt: string }[];
 }
 
 const STATUS: Record<Run['status'], { label: string; cls: string }> = {
@@ -73,11 +77,74 @@ const STATUS: Record<Run['status'], { label: string; cls: string }> = {
   cancelled: { label: 'Cancelled (Скасовано)', cls: 'border-slate-600 bg-slate-800 text-slate-300' },
 };
 const STEP_CLS: Record<Step['status'], string> = { succeeded: 'text-emerald-300', failed: 'text-rose-300', paused: 'text-amber-300' };
-const MODE: Record<Run['mode'], string> = { normal: '', replay: 'REPLAY (Повтор)', fork: 'FORK (Відгалуження)' };
+const MODE: Record<Run['mode'], string> = { normal: '', replay: 'REPLAY (Повтор)', fork: 'FORK (Відгалуження)', subgraph: 'SUBGRAPH (Підпроцес)' };
 const fmtTime = (iso: string | null) => (iso ? new Date(iso).toLocaleString('uk-UA') : '—');
 const fmtCost = (v: number) => `$${v.toFixed(v < 0.01 ? 4 : 3)}`;
 const fmtMs = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)} с` : `${v} мс`);
 const sel = 'min-w-0 rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100';
+
+const SOURCE: Record<string, string> = { jev: 'Jev', llm_fallback: 'Fallback LLM (запасний LLM)', mock: 'Mock Jev (тестовий)' };
+const ACTION: Record<string, string> = { AUTO_ROUTE: 'Автоматично', SECOND_OPINION: 'Друга перевірка', HUMAN_REVIEW: 'Перевірка людиною', FALLBACK: 'Резервний маршрут' };
+const TIER: Record<string, string> = { high: 'висока', medium: 'середня', low: 'низька' };
+
+/** Т5.5: рішення вузла Jev і підпроцес — що відповіло, з яким розподілом і куди повело. */
+const JevStepDetails: React.FC<{ s: Step; onOpenRun: (id: string) => void }> = ({ s, onOpenRun }) => {
+  const d = s.details as {
+    source?: string; fallbackReason?: string; answers?: Record<string, { kind: string; selected?: string; distribution?: Record<string, number>; value?: number; probability?: number; confidence: number | null }>;
+    routing?: { tier: string; action: string; by?: string }; consensus?: { policy?: string; agree?: boolean; jev?: Record<string, unknown>; a?: { model?: string; answers?: Record<string, unknown>; error?: string }; b?: { model?: string; answers?: Record<string, unknown>; error?: string } };
+    secondOpinion?: { model?: string; agree?: boolean; error?: string }; subgraph?: { runId: string; workflowId: string; version: number; status: string };
+  };
+  const isJev = s.nodeType.startsWith('JEV_');
+  if (!isJev && !d.subgraph) return null;
+  return (
+    <div className="space-y-1 rounded-lg border border-amber-500/20 bg-amber-500/5 p-2" data-run-jev={s.nodeId}>
+      {isJev && (
+        <p className="flex flex-wrap items-center gap-1.5">
+          <span className="rounded border border-amber-500/40 px-1.5 text-amber-200" data-run-jev-source={d.source ?? 'none'}>{d.source ? SOURCE[d.source] ?? d.source : 'без відповіді'}</span>
+          {d.fallbackReason && <span className="text-slate-400">чому запасний: {d.fallbackReason}</span>}
+          {d.routing && <span className="text-slate-300" data-run-jev-routing={d.routing.action}>впевненість {TIER[d.routing.tier] ?? d.routing.tier} → {ACTION[d.routing.action] ?? d.routing.action}{d.routing.by === 'consensus' ? ' (за згодою моделей)' : ''}</span>}
+        </p>
+      )}
+      {Object.entries(d.answers ?? {}).map(([qid, a]) => {
+        const dist = Object.entries(a.distribution ?? {}).sort((x, y) => y[1] - x[1]).slice(0, 6);
+        return (
+          <div key={qid} className="text-slate-300" data-run-jev-answer={qid}>
+            <span className="font-mono text-slate-500">{qid}</span>{' '}
+            {a.kind === 'choice' ? <b className="text-amber-200">{a.selected}</b> : a.kind === 'score' ? <b className="text-amber-200">{a.value}</b> : <b className="text-amber-200">p = {a.probability}</b>}
+            {a.confidence != null && <span className="text-slate-500"> · впевненість {a.confidence.toFixed(2)}</span>}
+            {dist.length > 0 && (
+              <div className="mt-0.5 grid max-w-md gap-0.5" data-run-jev-dist={qid}>
+                {dist.map(([k, v]) => (
+                  <div key={k} className="flex items-center gap-1.5">
+                    <span className="w-24 truncate text-right text-slate-400">{k}</span>
+                    <span className="h-1.5 rounded bg-amber-400/70" style={{ width: `${Math.max(2, Math.round(v * 160))}px` }} />
+                    <span className="text-slate-500">{v.toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {d.secondOpinion && (
+        <p className={d.secondOpinion.agree ? 'text-emerald-300' : 'text-rose-300'} data-run-jev-second={d.secondOpinion.agree ? 'agree' : 'disagree'}>
+          Друга перевірка{d.secondOpinion.model ? ` (${d.secondOpinion.model})` : ''}: {d.secondOpinion.error ? `помилка — ${d.secondOpinion.error}` : d.secondOpinion.agree ? 'збіглась' : 'не збіглась → review'}
+        </p>
+      )}
+      {d.consensus && d.consensus.agree !== undefined && (
+        <p className={d.consensus.agree ? 'text-emerald-300' : 'text-rose-300'} data-run-jev-consensus={d.consensus.agree ? 'agree' : 'disagree'}>
+          Узгодження ({d.consensus.policy}): Jev {JSON.stringify(d.consensus.jev)} · A{d.consensus.a?.model ? ` ${d.consensus.a.model}` : ''} {d.consensus.a?.error ?? JSON.stringify(d.consensus.a?.answers)} · B{d.consensus.b?.model ? ` ${d.consensus.b.model}` : ''} {d.consensus.b?.error ?? JSON.stringify(d.consensus.b?.answers)} → {d.consensus.agree ? 'згода' : 'розбіжність → review'}
+        </p>
+      )}
+      {d.consensus && d.consensus.agree === undefined && d.consensus.policy && d.consensus.policy !== 'вимкнено' && <p className="text-slate-500">Узгодження не запускалось: {d.consensus.policy}</p>}
+      {d.subgraph && (
+        <button type="button" onClick={() => onOpenRun(d.subgraph!.runId)} className="text-violet-300 hover:underline" data-run-subgraph={d.subgraph.workflowId}>
+          ↳ підпроцес {d.subgraph.workflowId} v{d.subgraph.version} — {d.subgraph.status} ({d.subgraph.runId.slice(0, 8)})
+        </button>
+      )}
+    </div>
+  );
+};
 
 export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) => {
   const [runs, setRuns] = useState<Run[] | null>(null);
@@ -236,7 +303,7 @@ export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) =
                 </p>
                 {detail.parent && (
                   <button type="button" onClick={() => setSelected(detail.parent!.id)} className="text-[11px] text-violet-300 hover:underline" data-run-parent>
-                    {MODE[detail.run.mode]} від запуску {detail.parent.id.slice(0, 8)}{detail.run.forkStep ? `, після кроку ${detail.run.forkStep}` : ''}
+                    {MODE[detail.run.mode]} від запуску {detail.parent.workflowId && detail.run.mode === 'subgraph' ? `${detail.parent.workflowId} ` : ''}{detail.parent.id.slice(0, 8)}{detail.run.forkStep ? `, після кроку ${detail.run.forkStep}` : ''}
                   </button>
                 )}
               </div>
@@ -328,10 +395,11 @@ export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) =
                         <td className="px-2 py-1.5 text-slate-300">{fmtMs(s.latencyMs)}</td>
                         <td className="px-2 py-1.5 text-slate-300">{s.retryCount || '—'}</td>
                       </tr>
-                      {(s.error || s.warnings.length > 0) && (
+                      {(s.error || s.warnings.length > 0 || s.nodeType.startsWith('JEV_') || (s.details as { subgraph?: unknown }).subgraph) && (
                         <tr className="border-t border-slate-900/80">
                           <td />
-                          <td colSpan={9} className="px-2 pb-1.5 text-[10px]">
+                          <td colSpan={9} className="space-y-1 px-2 pb-1.5 text-[10px]">
+                            <JevStepDetails s={s} onOpenRun={setSelected} />
                             {s.error && <p className="text-rose-300" data-run-step-error>✗ {s.error}</p>}
                             {s.warnings.map((w, i) => <p key={i} className="text-amber-300">⚠ {w}</p>)}
                           </td>
@@ -351,7 +419,7 @@ export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) =
             </details>
             {detail.children.length > 0 && (
               <p className="text-[11px] text-slate-400">Похідні запуски: {detail.children.map((c) => (
-                <button key={c.id} type="button" onClick={() => setSelected(c.id)} className="mr-2 text-violet-300 hover:underline">{c.mode} {c.id.slice(0, 8)} ({c.status})</button>
+                <button key={c.id} type="button" onClick={() => setSelected(c.id)} className="mr-2 text-violet-300 hover:underline" data-run-child={c.mode}>{c.mode}{c.workflowId && c.mode === 'subgraph' ? ` ${c.workflowId}` : ''} {c.id.slice(0, 8)} ({c.status})</button>
               ))}</p>
             )}
           </>

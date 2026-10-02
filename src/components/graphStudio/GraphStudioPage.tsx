@@ -9,23 +9,27 @@
  * Core API, походження, пропозиції й запис у канон (`StoryGraphPanel`).
  * Т5.4: Запуски — журнал і трасування виконань опублікованих процесів,
  * пауза / продовження / повтор / відгалуження (`RunsPanel`).
+ * Т5.5: Напрямки — реєстр напрямків маршрутизатора Jev (`DestinationsPanel`);
+ * у «Запусках» — рішення Jev (розподіл, джерело, узгодження) і підпроцеси.
  *
  * Відкривають адмін і ролі з правом публікації схем (сервер перевіряє кожен
  * запит; тут — лише що показати).
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { ExternalLink, GitBranch, History, Loader2, Network, PlayCircle, ShieldAlert, Sparkles, Workflow } from 'lucide-react';
+import { ExternalLink, GitBranch, History, Loader2, Network, PlayCircle, Route, ShieldAlert, Sparkles, Workflow } from 'lucide-react';
 import type { GraphStudioTab } from '../../utils/appRoutes';
 import { ENV_CLASS, ENV_LABEL, gs, type GsAbilities } from './gsApi';
 import { WorkflowEditor } from './WorkflowEditor';
 import { OntologyCanvas } from './OntologyCanvas';
 import { StoryGraphPanel } from './StoryGraphPanel';
 import { RunsPanel } from './RunsPanel';
+import { DestinationsPanel } from './DestinationsPanel';
 
 const TABS: { id: GraphStudioTab; en: string; uk: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'ontology', en: 'Ontology', uk: 'Онтологія', icon: Network },
   { id: 'workflows', en: 'AI Workflows', uk: 'Процеси ШІ', icon: Workflow },
+  { id: 'destinations', en: 'Destinations', uk: 'Напрямки', icon: Route },
   { id: 'story-graph', en: 'Story Graph', uk: 'Граф твору', icon: GitBranch },
   { id: 'runs', en: 'Runs', uk: 'Запуски', icon: PlayCircle },
   { id: 'versions', en: 'Versions', uk: 'Версії', icon: History },
@@ -221,6 +225,8 @@ export const GraphStudioPage: React.FC<Props> = ({ tab, onTabChange, bookTitle, 
         <div className="grid place-items-center py-16 text-slate-400"><Loader2 className="h-5 w-5 animate-spin" /></div>
       ) : tab === 'workflows' ? (
         <WorkflowEditor abilities={abilities} />
+      ) : tab === 'destinations' ? (
+        <DestinationsPanel abilities={abilities} />
       ) : tab === 'ontology' ? (
         <OntologyCanvas abilities={abilities} />
       ) : tab === 'versions' ? (

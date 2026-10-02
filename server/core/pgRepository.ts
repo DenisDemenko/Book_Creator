@@ -2836,11 +2836,13 @@ export class PgCoreRepository implements CoreRepository {
     return rows[0] ? toWorkflowRun(rows[0]) : null;
   }
 
-  async listWorkflowRuns(f: { workflowId?: string; projectId?: string; status?: WorkflowRunStatus; limit?: number }) {
+  async listWorkflowRuns(f: { workflowId?: string; projectId?: string; status?: WorkflowRunStatus; parentRunId?: string; limit?: number }) {
+    if (f.parentRunId !== undefined && !UUID_RE.test(f.parentRunId)) return [];
     const { rows } = await this.q(
       `SELECT * FROM workflow_runs WHERE ($1::text IS NULL OR workflow_id = $1) AND ($2::text IS NULL OR project_id = $2) AND ($3::text IS NULL OR status = $3)
+         AND ($5::uuid IS NULL OR parent_run_id = $5)
        ORDER BY created_at DESC, id LIMIT $4`,
-      [f.workflowId ?? null, f.projectId ?? null, f.status ?? null, Math.max(1, Math.min(f.limit ?? 100, 500))],
+      [f.workflowId ?? null, f.projectId ?? null, f.status ?? null, Math.max(1, Math.min(f.limit ?? 100, 500)), f.parentRunId ?? null],
     );
     return rows.map(toWorkflowRun);
   }

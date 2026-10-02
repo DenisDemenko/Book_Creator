@@ -1713,7 +1713,7 @@ export interface CoreRepository {
    */
   addWorkflowRun(input: WorkflowRunInput): Promise<WorkflowRunRow>;
   getWorkflowRun(id: string): Promise<WorkflowRunRow | null>;
-  listWorkflowRuns(filter: { workflowId?: string; projectId?: string; status?: WorkflowRunStatus; limit?: number }): Promise<WorkflowRunRow[]>;
+  listWorkflowRuns(filter: { workflowId?: string; projectId?: string; status?: WorkflowRunStatus; parentRunId?: string; limit?: number }): Promise<WorkflowRunRow[]>;
   updateWorkflowRun(id: string, patch: WorkflowRunPatch): Promise<WorkflowRunRow>;
   addWorkflowStep(input: WorkflowStepInput): Promise<WorkflowStepRow>;
   listWorkflowSteps(runId: string): Promise<WorkflowStepRow[]>;

@@ -100,14 +100,14 @@ export function registerWorkflowRunRoutes(app: Express, d: WorkflowRunRoutesDeps
     const [steps, version, children] = await Promise.all([
       repo.listWorkflowSteps(run.id),
       repo.getWorkflowVersion(run.versionId),
-      repo.listWorkflowRuns({ workflowId: run.workflowId, limit: 200 }).then((all) => all.filter((r) => r.parentRunId === run.id).map((r) => ({ id: r.id, mode: r.mode, status: r.status, createdAt: r.createdAt }))),
+      repo.listWorkflowRuns({ parentRunId: run.id, limit: 200 }).then((all) => all.map((r) => ({ id: r.id, workflowId: r.workflowId, mode: r.mode, status: r.status, createdAt: r.createdAt }))),
     ]);
     const parent = run.parentRunId ? await repo.getWorkflowRun(run.parentRunId) : null;
     res.json({
       run,
       steps,
       version: version ? { id: version.id, version: version.version, environment: version.environment, definition: version.definition } : null,
-      parent: parent ? { id: parent.id, status: parent.status, mode: parent.mode } : null,
+      parent: parent ? { id: parent.id, workflowId: parent.workflowId, status: parent.status, mode: parent.mode } : null,
       children,
     });
   }));

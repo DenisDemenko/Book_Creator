@@ -2068,10 +2068,10 @@ export class MemoryCoreRepository implements CoreRepository {
     return r ? clone(r) : null;
   }
 
-  async listWorkflowRuns(f: { workflowId?: string; projectId?: string; status?: WorkflowRunStatus; limit?: number }) {
+  async listWorkflowRuns(f: { workflowId?: string; projectId?: string; status?: WorkflowRunStatus; parentRunId?: string; limit?: number }) {
     const limit = Math.max(1, Math.min(f.limit ?? 100, 500));
     return this.workflowRuns
-      .filter((r) => (!f.workflowId || r.workflowId === f.workflowId) && (!f.projectId || r.projectId === f.projectId) && (!f.status || r.status === f.status))
+      .filter((r) => (!f.workflowId || r.workflowId === f.workflowId) && (!f.projectId || r.projectId === f.projectId) && (!f.status || r.status === f.status) && (!f.parentRunId || r.parentRunId === f.parentRunId))
       .slice().reverse().slice(0, limit).map(clone);
   }
 

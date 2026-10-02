@@ -208,6 +208,7 @@ import { registerOnboardingRoutes } from './server/core/collaboration/onboarding
 import { aiRouteMiddleware, createAiRouter, registerAiRouteRoutes } from './server/core/collaboration/aiRoute';
 import { systemBindings } from './server/core/workflows/bindings';
 import { registerWorkflowRunRoutes } from './server/core/workflows/runRoutes';
+import { registerDestinationRoutes } from './server/core/workflows/destinationRoutes';
 import type { EngineDeps } from './server/core/workflows/engine/runner';
 import { COURSE_PREFIX, type OnboardingDeps } from './server/core/collaboration/onboarding';
 import { ensureOwnerParticipant } from './server/core/collaboration/participants';
@@ -724,6 +725,8 @@ registerGitCommandRoutes(app);
     requireStudio: requireGraphStudio as any,
     requireControl: requireSchemaPublisher as any,
   });
+  // Т5.5: реєстр напрямків маршрутизатора Jev (правити — як публікувати).
+  registerDestinationRoutes(app, { repo: getCoreRepository, requireStudio: requireGraphStudio as any, requirePublish: requireSchemaPublisher as any });
   // Т5.3: Story Core API — операції §33 над ядром для Graph Studio (права — з доступу до книги).
   registerStoryCoreRoutes(app, {
     repo: getCoreRepository,
