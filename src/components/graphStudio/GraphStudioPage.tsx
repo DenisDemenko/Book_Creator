@@ -7,6 +7,8 @@
  * Процеси ШІ й Версії; Запуски — до Т5.4, Оцінювання — прогони якості Т2.8.
  * Т5.3: Граф твору — вибір книги, справжні сутності й зв'язки через Story
  * Core API, походження, пропозиції й запис у канон (`StoryGraphPanel`).
+ * Т5.4: Запуски — журнал і трасування виконань опублікованих процесів,
+ * пауза / продовження / повтор / відгалуження (`RunsPanel`).
  *
  * Відкривають адмін і ролі з правом публікації схем (сервер перевіряє кожен
  * запит; тут — лише що показати).
@@ -19,6 +21,7 @@ import { ENV_CLASS, ENV_LABEL, gs, type GsAbilities } from './gsApi';
 import { WorkflowEditor } from './WorkflowEditor';
 import { OntologyCanvas } from './OntologyCanvas';
 import { StoryGraphPanel } from './StoryGraphPanel';
+import { RunsPanel } from './RunsPanel';
 
 const TABS: { id: GraphStudioTab; en: string; uk: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'ontology', en: 'Ontology', uk: 'Онтологія', icon: Network },
@@ -234,9 +237,7 @@ export const GraphStudioPage: React.FC<Props> = ({ tab, onTabChange, bookTitle, 
           )}
         </div>
       ) : (
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 text-xs text-slate-300" data-gs-runs>
-          <p>Runs (Запуски) — журнал виконань опублікованих процесів: рішення вузлів, впевненість, затримка, токени й помилки (§27, №24). З'явиться разом із виконанням процесів (Т5.4); зараз процеси лише проєктуються, версіюються й публікуються.</p>
-        </div>
+        <RunsPanel abilities={abilities} />
       )}
     </div>
   );

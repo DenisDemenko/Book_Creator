@@ -207,6 +207,7 @@ import { registerStoryCoreRoutes } from './server/core/storyCore/routes';
 import { registerOnboardingRoutes } from './server/core/collaboration/onboardingRoutes';
 import { aiRouteMiddleware, createAiRouter, registerAiRouteRoutes } from './server/core/collaboration/aiRoute';
 import { systemBindings } from './server/core/workflows/bindings';
+import { registerWorkflowRunRoutes } from './server/core/workflows/runRoutes';
 import type { EngineDeps } from './server/core/workflows/engine/runner';
 import { COURSE_PREFIX, type OnboardingDeps } from './server/core/collaboration/onboarding';
 import { ensureOwnerParticipant } from './server/core/collaboration/participants';
@@ -715,6 +716,13 @@ registerGitCommandRoutes(app);
     requireAdmin,
     requirePublish: requireSchemaPublisher as any,
     abilities: async (req) => ({ canEdit: req.principal?.role === 'admin', canPublish: await canRole(req.principal?.role ?? 'guest', 'canPublishSchema') }),
+  });
+  // Т5.4: запуски процесів ШІ — журнал, трасування й керування (адмін і право публікації схем).
+  registerWorkflowRunRoutes(app, {
+    repo: getCoreRepository,
+    engine: () => workflowEngine(),
+    requireStudio: requireGraphStudio as any,
+    requireControl: requireSchemaPublisher as any,
   });
   // Т5.3: Story Core API — операції §33 над ядром для Graph Studio (права — з доступу до книги).
   registerStoryCoreRoutes(app, {

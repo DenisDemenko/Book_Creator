@@ -18,7 +18,7 @@
  *   PUT    /api/core/workflows/:id/versions/:vid/layout        — розкладка канви (будь-якої версії, №28)    (адмін)
  *
  * «Graph Studio» — адмін або роль із правом `canPublishSchema` (рішення
- * власника §2 п.3). Виконання процесів — Т5.4.
+ * власника §2 п.3). Виконання й запуски — Т5.4: `engine/`, `runRoutes.ts`.
  */
 
 import type { Express, NextFunction, Request, Response } from 'express';

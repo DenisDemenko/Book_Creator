@@ -35,6 +35,7 @@ import {
   defaultParams,
   nodeOutputs,
   nodeTypeById,
+  isExecutableNode,
   type GraphLayout,
   type ParamDef,
   type WorkflowDefinition,
@@ -546,10 +547,11 @@ function Editor({ abilities }: { abilities: GsAbilities }) {
                         <button
                           key={t.id}
                           type="button"
-                          title={`${t.name.en} (${t.name.uk}) — ${t.description}`}
+                          title={`${t.name.en} (${t.name.uk}) — ${t.description}${isExecutableNode(t.id) ? '' : ' · рушій виконуватиме пізніше'}`}
                           onClick={() => addNode(t.id)}
-                          className="rounded-md border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[10px] text-slate-200 hover:border-amber-400"
+                          className={`rounded-md border bg-slate-950 px-1.5 py-0.5 text-[10px] hover:border-amber-400 ${isExecutableNode(t.id) ? 'border-slate-700 text-slate-200' : 'border-dashed border-slate-700 text-slate-500'}`}
                           data-wf-palette-item={t.id}
+                          data-wf-executable={isExecutableNode(t.id) ? 'yes' : 'no'}
                         >
                           {t.name.uk}
                         </button>
@@ -697,7 +699,8 @@ function Editor({ abilities }: { abilities: GsAbilities }) {
               <span className="mb-0.5 block text-[10px] text-slate-400">Опис</span>
               <textarea className={`${inputCls} h-16`} value={def.description} disabled={!editable} onChange={(e) => mutate((d) => ({ ...d, description: e.target.value }))} />
             </label>
-            <p className="text-[10px] text-slate-500">Вузлів: {def.nodes.length}, ребер: {def.edges.length}. Виконання — Т5.4.</p>
+            <p className="text-[10px] text-slate-500">Вузлів: {def.nodes.length}, ребер: {def.edges.length}. Виконується опублікована версія (LangGraph); запуски — у вкладці «Runs».
+              {def.nodes.some((n) => !isExecutableNode(n.type)) && <span className="text-amber-300" data-wf-not-executable> Вузли пунктиром рушій поки не виконує (Jev — Т5.5, перевірка людиною й канон — Т5.6).</span>}</p>
           </div>
         ) : null}
 

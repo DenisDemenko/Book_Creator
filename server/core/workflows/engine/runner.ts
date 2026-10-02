@@ -44,6 +44,8 @@ export interface StartInput {
   signal?: AbortSignal;
   /** Не серіалізовне середовище прив'язки (функції підготовки тощо) — лише для першого виконання. */
   extras?: Record<string, unknown>;
+  /** Запуск створено (ще до виконання) — для API, що відповідає одразу. */
+  onCreated?: (run: WorkflowRunRow) => void;
 }
 
 export interface RunOutcome {
@@ -195,6 +197,7 @@ export async function startRun(deps: EngineDeps, s: StartInput): Promise<RunOutc
     workflowId: s.workflowId, versionId: version.id, version: version.version, definitionHash: version.definitionHash,
     projectId: s.projectId ?? null, trigger: s.trigger, jobId: s.jobId ?? null, input: s.input, inputHash: inputHashOf(s.input), startedBy: s.actor,
   });
+  s.onCreated?.(run);
   const def = version.definition as unknown as WorkflowDefinition;
   let env: ExecEnv;
   try {
@@ -233,13 +236,14 @@ export async function cancelRun(repo: CoreRepository, runId: string): Promise<Wo
 }
 
 /** REPLAY: той самий вхід і та сама версія — новий запуск від початку. */
-export async function replayRun(deps: EngineDeps, runId: string, actor: CoreActor): Promise<RunOutcome> {
+export async function replayRun(deps: EngineDeps, runId: string, actor: CoreActor, onCreated?: (run: WorkflowRunRow) => void): Promise<RunOutcome> {
   const parent = await deps.repo.getWorkflowRun(runId);
   if (!parent) throw new CoreRuleError('not_found', 'Запуск не знайдено');
   const run = await deps.repo.addWorkflowRun({
     workflowId: parent.workflowId, versionId: parent.versionId, version: parent.version, definitionHash: parent.definitionHash, projectId: parent.projectId,
     trigger: 'replay', input: parent.input, inputHash: parent.inputHash, startedBy: actor, mode: 'replay', parentRunId: parent.id,
   });
+  onCreated?.(run);
   const def = await loadDefinition(deps.repo, run);
   let env: ExecEnv;
   try {
@@ -251,7 +255,7 @@ export async function replayRun(deps: EngineDeps, runId: string, actor: CoreActo
 }
 
 /** FORK: від стану після кроку `afterStep` (1…) іншого запуску — новий запуск на тій самій версії. */
-export async function forkRun(deps: EngineDeps, runId: string, afterStep: number, actor: CoreActor): Promise<RunOutcome> {
+export async function forkRun(deps: EngineDeps, runId: string, afterStep: number, actor: CoreActor, onCreated?: (run: WorkflowRunRow) => void): Promise<RunOutcome> {
   const parent = await deps.repo.getWorkflowRun(runId);
   if (!parent) throw new CoreRuleError('not_found', 'Запуск не знайдено');
   if (!Number.isInteger(afterStep) || afterStep < 1) throw new CoreRuleError('bad_input', 'Крок відгалуження — від 1');
@@ -272,6 +276,7 @@ export async function forkRun(deps: EngineDeps, runId: string, afterStep: number
     trigger: 'fork', input: parent.input, inputHash: parent.inputHash, startedBy: actor, mode: 'fork', parentRunId: parent.id, forkStep: afterStep,
   });
   await saver.copyThread(parent.id, run.id);
+  onCreated?.(run);
   const env = await envFor(deps, run, parentDef, { actor });
   return drive(deps, env, { checkpointId });
 }
