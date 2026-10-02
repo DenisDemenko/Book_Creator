@@ -127,6 +127,7 @@
     "live:access-realtime": "tsx scripts/live-accessRealtime.mts",
     "live:access-grants": "tsx scripts/live-accessGrants.mts",
     "live:graph-studio": "tsx scripts/live-graphStudio.mts",
+    "live:story-core": "tsx scripts/live-storyCore.mts",
     "core:migrate": "tsx scripts/core-migrate.mts",
     "test:paragraph-ids": "tsx scripts/test-paragraphIds.mts",
     "live:paragraph-ids": "tsx scripts/live-paragraphIds.mts",
