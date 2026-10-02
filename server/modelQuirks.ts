@@ -145,6 +145,8 @@ export function buildOpenAiBody(params: {
   messages: unknown[];
   json?: boolean;
   maxOutputTokens?: number;
+  /** Т5.4: температура з вузла LLM; без неї — 0,7. */
+  temperature?: number;
   quirks: ModelQuirks;
 }): Record<string, unknown> {
   const { modelId, messages, json, quirks } = params;
@@ -154,7 +156,7 @@ export function buildOpenAiBody(params: {
     stream: false,
     [quirks.tokenParam]: params.maxOutputTokens ?? 4096,
   };
-  if (quirks.supportsTemperature) body.temperature = 0.7;
+  if (quirks.supportsTemperature) body.temperature = params.temperature ?? 0.7;
   if (json && quirks.supportsJsonMode) body.response_format = { type: 'json_object' };
   return body;
 }

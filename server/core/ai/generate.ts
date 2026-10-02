@@ -56,6 +56,7 @@ export async function aiRoleGenerateViaCore(input: AiGenerateInput): Promise<AiG
     req,
     label: `core:${input.module}`,
     bookId: input.projectId,
+    generation: input.generation,
   });
   return {
     text: result.text,

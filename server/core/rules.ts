@@ -96,6 +96,12 @@ import {
   SIMULATION_EVENT_TYPES,
   SIMULATION_ACTORS,
   CANON_PROPOSAL_KINDS,
+  type WorkflowRunInput,
+  type WorkflowRunPatch,
+  type WorkflowRunRow,
+  type WorkflowStepInput,
+  WORKFLOW_RUN_MODES,
+  WORKFLOW_RUN_STATUSES,
 } from './types';
 
 export type CoreRuleCode =
@@ -752,6 +758,46 @@ export function checkWorkflowVersion(input: { workflowId: string; definition: un
 export function checkWorkflowEvent(input: { workflowId: string; action: string; actor: CoreActor }): void {
   checkOntologyActor(input.actor);
   if (!(WORKFLOW_EVENT_ACTIONS as readonly string[]).includes(input.action)) throw new CoreRuleError('bad_input', `Невідома дія журналу процесів «${input.action}»`);
+}
+
+// ── Запуски процесів ШІ (Т5.4 В1) ────────────────────────────────────────────
+
+const RUN_TRIGGER_RE = /^(job:[a-z_]{1,40}|interview|manual|replay|fork)$/;
+const RUN_ACTOR_RE = /^(user|system|ai):.+/;
+
+export function checkWorkflowRun(input: WorkflowRunInput): void {
+  if (!WORKFLOW_ROW_ID_RE.test(String(input.workflowId ?? ''))) throw new CoreRuleError('bad_input', 'Невідомий id процесу');
+  if (!input.versionId) throw new CoreRuleError('bad_input', 'Запуск — лише конкретної версії');
+  if (!Number.isInteger(input.version) || input.version < 1) throw new CoreRuleError('bad_input', 'Номер версії — від 1');
+  if (!HASH_RE.test(String(input.definitionHash)) || !HASH_RE.test(String(input.inputHash))) throw new CoreRuleError('bad_input', 'Хеші визначення й входу — sha256');
+  if (!RUN_TRIGGER_RE.test(String(input.trigger))) throw new CoreRuleError('bad_input', `Невідоме джерело запуску «${input.trigger}»`);
+  if (!objectLike(input.input)) throw new CoreRuleError('bad_input', 'Вхід запуску — обʼєкт');
+  assertActor(input.startedBy);
+  if (!RUN_ACTOR_RE.test(input.startedBy)) throw new CoreRuleError('bad_actor', 'Хто запустив — людина, система чи ШІ');
+  if (input.mode !== undefined && !(WORKFLOW_RUN_MODES as readonly string[]).includes(input.mode)) throw new CoreRuleError('bad_input', `Невідомий режим «${input.mode}»`);
+  if ((input.mode === 'replay' || input.mode === 'fork') && !input.parentRunId) throw new CoreRuleError('bad_input', 'Повтор і відгалуження — від наявного запуску');
+  if (input.projectId != null && (String(input.projectId).length < 1 || String(input.projectId).length > 200)) throw new CoreRuleError('bad_input', 'id проєкту — до 200 символів');
+}
+
+/** Завершений запуск не оживає; призупинений — лише продовжується чи скасовується. */
+export function checkWorkflowRunPatch(current: Pick<WorkflowRunRow, 'status'>, patch: WorkflowRunPatch): void {
+  if (patch.status !== undefined) {
+    if (!(WORKFLOW_RUN_STATUSES as readonly string[]).includes(patch.status)) throw new CoreRuleError('bad_input', `Невідомий стан «${patch.status}»`);
+    const terminal = current.status === 'succeeded' || current.status === 'failed' || current.status === 'cancelled';
+    if (terminal && patch.status !== current.status) throw new CoreRuleError('conflict', 'Запуск уже завершено — повторіть чи відгалузіть його');
+  }
+  for (const k of ['tokensIn', 'tokensOut', 'latencyMs'] as const) if (patch[k] !== undefined && (!Number.isInteger(patch[k]) || patch[k]! < 0)) throw new CoreRuleError('bad_input', `${k} — ціле ≥ 0`);
+  if (patch.costUsd !== undefined && (!Number.isFinite(patch.costUsd) || patch.costUsd < 0)) throw new CoreRuleError('bad_input', 'Вартість ≥ 0');
+  if (patch.error != null && String(patch.error).length > 4000) patch.error = String(patch.error).slice(0, 4000);
+}
+
+export function checkWorkflowStep(input: WorkflowStepInput): void {
+  if (!input.runId) throw new CoreRuleError('bad_input', 'Крок — лише в запуску');
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(String(input.nodeId))) throw new CoreRuleError('bad_input', 'Невідомий id вузла');
+  if (!/^[A-Z][A-Z_]{1,39}$/.test(String(input.nodeType))) throw new CoreRuleError('bad_input', 'Невідомий тип вузла');
+  if (!['succeeded', 'failed', 'paused'].includes(input.status)) throw new CoreRuleError('bad_input', `Невідомий стан кроку «${input.status}»`);
+  if (input.confidence != null && (!Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1)) throw new CoreRuleError('bad_input', 'Впевненість — від 0 до 1');
+  if (!objectLike(input.details)) throw new CoreRuleError('bad_input', 'Подробиці кроку — обʼєкт');
 }
 
 export function checkGraphLayout(input: { graphKind: string; graphId: string; versionRef: string; layout: unknown; updatedBy: CoreActor }): void {

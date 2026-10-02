@@ -67,6 +67,9 @@ import {
   checkParticipantPreference,
   checkOnboardingEvent,
   assertActor,
+  checkWorkflowRun,
+  checkWorkflowRunPatch,
+  checkWorkflowStep,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isValidEmbedding, SEARCHABLE_KINDS, tsQueryFromStems } from './search/text';
 import type {
@@ -183,6 +186,12 @@ import type {
   ParticipantPreferenceRow,
   OnboardingEventRow,
   OnboardingEventName,
+  WorkflowRunRow,
+  WorkflowRunInput,
+  WorkflowRunPatch,
+  WorkflowRunStatus,
+  WorkflowStepRow,
+  WorkflowStepInput,
 } from './types';
 
 type Q = Pool | PoolClient;
@@ -261,6 +270,23 @@ function toWorkflowVersion(r: any): WorkflowVersionRow {
 }
 function toWorkflowEvent(r: any): WorkflowEventRow {
   return { id: r.id, workflowId: r.workflow_id, versionId: r.version_id ?? null, action: r.action, actor: r.actor, details: r.details ?? {}, createdAt: iso(r.created_at) };
+}
+function toWorkflowRun(r: any): WorkflowRunRow {
+  return {
+    id: r.id, workflowId: r.workflow_id, versionId: r.version_id, version: Number(r.version), definitionHash: r.definition_hash, projectId: r.project_id ?? null,
+    status: r.status, mode: r.mode, parentRunId: r.parent_run_id ?? null, forkStep: r.fork_step ?? null, trigger: r.trigger, jobId: r.job_id ?? null,
+    input: r.input ?? {}, inputHash: r.input_hash, output: r.output ?? null, currentNode: r.current_node ?? null, pauseRequested: !!r.pause_requested,
+    error: r.error ?? null, tokensIn: Number(r.tokens_in), tokensOut: Number(r.tokens_out), costUsd: Number(r.cost_usd), latencyMs: Number(r.latency_ms),
+    startedBy: r.started_by, createdAt: iso(r.created_at), updatedAt: iso(r.updated_at), finishedAt: isoOrNull(r.finished_at),
+  };
+}
+function toWorkflowStep(r: any): WorkflowStepRow {
+  return {
+    id: r.id, runId: r.run_id, seq: Number(r.seq), nodeId: r.node_id, nodeType: r.node_type, status: r.status, retryCount: Number(r.retry_count), branch: r.branch ?? null,
+    startedAt: iso(r.started_at), endedAt: iso(r.ended_at), latencyMs: Number(r.latency_ms), model: r.model ?? null, tokensIn: Number(r.tokens_in), tokensOut: Number(r.tokens_out),
+    costUsd: Number(r.cost_usd), decision: r.decision ?? null, confidence: r.confidence == null ? null : Number(r.confidence), validationResult: r.validation_result ?? null,
+    humanResult: r.human_result ?? null, error: r.error ?? null, warnings: r.warnings ?? [], details: r.details ?? {},
+  };
 }
 function toGraphLayout(r: any): GraphLayoutRow {
   return { graphKind: r.graph_kind, graphId: r.graph_id, versionRef: r.version_ref, layout: r.layout ?? {}, updatedBy: r.updated_by, updatedAt: iso(r.updated_at) };
@@ -2774,6 +2800,93 @@ export class PgCoreRepository implements CoreRepository {
       [f.workflowId ?? null, Math.max(1, Math.min(f.limit ?? 100, 500))],
     );
     return rows.map(toWorkflowEvent);
+  }
+
+  // ── Запуски процесів ШІ (Т5.4 В1) ──────────────────────────────────────────
+
+  async addWorkflowRun(input: WorkflowRunInput) {
+    checkWorkflowRun(input);
+    try {
+      const { rows } = await this.q(
+        `INSERT INTO workflow_runs (workflow_id, version_id, version, definition_hash, project_id, mode, parent_run_id, fork_step, trigger, job_id, input, input_hash, started_by)
+         SELECT $1, v.id, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13 FROM workflow_versions v WHERE v.id = $2 AND v.workflow_id = $1 RETURNING *`,
+        [input.workflowId, UUID_RE.test(input.versionId) ? input.versionId : '00000000-0000-0000-0000-000000000000', input.version, input.definitionHash, input.projectId ?? null,
+          input.mode ?? 'normal', input.parentRunId ?? null, input.forkStep ?? null, input.trigger, input.jobId ?? null, JSON.stringify(input.input), input.inputHash, input.startedBy],
+      );
+      if (!rows[0]) throw new CoreRuleError('not_found', `Версія процесу «${input.versionId}» не знайдена`);
+      return toWorkflowRun(rows[0]);
+    } catch (err) {
+      if (err instanceof CoreRuleError) throw err;
+      mapPgError(err);
+    }
+  }
+
+  async getWorkflowRun(id: string) {
+    if (!UUID_RE.test(id)) return null;
+    const { rows } = await this.q('SELECT * FROM workflow_runs WHERE id = $1', [id]);
+    return rows[0] ? toWorkflowRun(rows[0]) : null;
+  }
+
+  async listWorkflowRuns(f: { workflowId?: string; projectId?: string; status?: WorkflowRunStatus; limit?: number }) {
+    const { rows } = await this.q(
+      `SELECT * FROM workflow_runs WHERE ($1::text IS NULL OR workflow_id = $1) AND ($2::text IS NULL OR project_id = $2) AND ($3::text IS NULL OR status = $3)
+       ORDER BY created_at DESC, id LIMIT $4`,
+      [f.workflowId ?? null, f.projectId ?? null, f.status ?? null, Math.max(1, Math.min(f.limit ?? 100, 500))],
+    );
+    return rows.map(toWorkflowRun);
+  }
+
+  async updateWorkflowRun(id: string, patch: WorkflowRunPatch) {
+    return this.tx(async (c) => {
+      const { rows: cur } = await c.query('SELECT * FROM workflow_runs WHERE id = $1 FOR UPDATE', [UUID_RE.test(id) ? id : '00000000-0000-0000-0000-000000000000']);
+      if (!cur[0]) throw new CoreRuleError('not_found', `Запуск «${id}» не знайдено`);
+      const r = toWorkflowRun(cur[0]);
+      checkWorkflowRunPatch(r, patch);
+      const next = { ...r, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) } as WorkflowRunRow;
+      const live = next.status === 'running' || next.status === 'paused';
+      const { rows } = await c.query(
+        `UPDATE workflow_runs SET status = $2, output = $3, current_node = $4, pause_requested = $5, error = $6, tokens_in = $7, tokens_out = $8, cost_usd = $9, latency_ms = $10,
+           finished_at = CASE WHEN $11 THEN NULL ELSE COALESCE(finished_at, now()) END, updated_at = now() WHERE id = $1 RETURNING *`,
+        [id, next.status, next.output ? JSON.stringify(next.output) : null, next.currentNode, next.pauseRequested, next.error, next.tokensIn, next.tokensOut, next.costUsd, next.latencyMs, live],
+      );
+      return toWorkflowRun(rows[0]);
+    });
+  }
+
+  async addWorkflowStep(input: WorkflowStepInput) {
+    checkWorkflowStep(input);
+    return this.tx(async (c) => {
+      const { rows: run } = await c.query('SELECT id FROM workflow_runs WHERE id = $1 FOR UPDATE', [UUID_RE.test(input.runId) ? input.runId : '00000000-0000-0000-0000-000000000000']);
+      if (!run[0]) throw new CoreRuleError('not_found', `Запуск «${input.runId}» не знайдено`);
+      const { rows } = await c.query(
+        `INSERT INTO workflow_run_steps (run_id, seq, node_id, node_type, status, retry_count, branch, started_at, ended_at, latency_ms, model, tokens_in, tokens_out, cost_usd,
+           decision, confidence, validation_result, human_result, error, warnings, details)
+         SELECT $1, COALESCE(MAX(seq), 0) + 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20 FROM workflow_run_steps WHERE run_id = $1
+         RETURNING *`,
+        [input.runId, input.nodeId, input.nodeType, input.status, input.retryCount, input.branch, input.startedAt, input.endedAt, input.latencyMs, input.model, input.tokensIn, input.tokensOut,
+          input.costUsd, input.decision, input.confidence, input.validationResult, input.humanResult, input.error ? String(input.error).slice(0, 4000) : null, input.warnings ?? [], JSON.stringify(input.details ?? {})],
+      );
+      return toWorkflowStep(rows[0]);
+    });
+  }
+
+  async listWorkflowSteps(runId: string) {
+    if (!UUID_RE.test(runId)) return [];
+    const { rows } = await this.q('SELECT * FROM workflow_run_steps WHERE run_id = $1 ORDER BY seq', [runId]);
+    return rows.map(toWorkflowStep);
+  }
+
+  async saveWorkflowCheckpoint(runId: string, data: Record<string, unknown>) {
+    await this.q(
+      `INSERT INTO workflow_checkpoints (run_id, data) VALUES ($1, $2) ON CONFLICT (run_id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
+      [runId, JSON.stringify(data)],
+    );
+  }
+
+  async getWorkflowCheckpoint(runId: string) {
+    if (!UUID_RE.test(runId)) return null;
+    const { rows } = await this.q('SELECT data FROM workflow_checkpoints WHERE run_id = $1', [runId]);
+    return rows[0]?.data ?? null;
   }
 
   // ── Role Onboarding (Т6.3 В1) ───────────────────────────────────────────────

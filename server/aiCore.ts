@@ -37,6 +37,7 @@ import {
   PROVIDERS,
   resolveEngine as resolveChatEngine,
   type EngineId as ChatEngineId,
+  type GenerationOptions,
   type ImageAttachment,
 } from './chatProviders';
 import {
@@ -76,6 +77,34 @@ interface UsageLogCtx {
   req: any;
   label: string;
   bookId?: string;
+}
+
+/** Т5.4: модель не відповіла за тайм-аут вузла LLM (§30 `on_timeout`). */
+export class AiTimeoutError extends Error {
+  constructor(readonly timeoutMs: number) {
+    super(`Модель не відповіла за ${Math.round(timeoutMs / 1000)} с`);
+    this.name = 'AiTimeoutError';
+  }
+}
+
+/** Виклик із тайм-аутом: скасовує запит до провайдера й кидає AiTimeoutError. */
+async function withTimeout<T>(timeoutMs: number | undefined, run: (signal?: AbortSignal) => Promise<T>): Promise<T> {
+  if (!timeoutMs) return run(undefined);
+  const ctrl = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      run(ctrl.signal),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          ctrl.abort();
+          reject(new AiTimeoutError(timeoutMs));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export async function logTextUsage(
@@ -215,9 +244,10 @@ export async function dispatch(
   systemInstruction: string,
   apiKeyOverride?: string,
   images?: ImageAttachment[],
-  json?: boolean
+  json?: boolean,
+  opts?: GenerationOptions
 ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
-  return PROVIDERS[engine](prompt, systemInstruction, modelId, apiKeyOverride, images, json);
+  return PROVIDERS[engine](prompt, systemInstruction, modelId, apiKeyOverride, images, json, opts);
 }
 
 /**
@@ -228,7 +258,8 @@ export async function dispatch(
 async function dispatchGeminiSdk(
   prompt: string,
   systemInstruction: string | undefined,
-  json: boolean
+  json: boolean,
+  opts?: GenerationOptions
 ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
   if (!geminiClient) {
     throw new Error('GEMINI_API_KEY is not configured on server.');
@@ -240,7 +271,9 @@ async function dispatchGeminiSdk(
       systemInstruction:
         systemInstruction || 'Ти — професійний український літературний редактор, сценарист та видавничий експерт.',
       responseMimeType: json ? 'application/json' : undefined,
-      temperature: 0.7,
+      temperature: opts?.temperature ?? 0.7,
+      ...(opts?.maxTokens ? { maxOutputTokens: opts.maxTokens } : {}),
+      ...(opts?.signal ? { abortSignal: opts.signal } : {}),
     },
   });
   const usage = response.usageMetadata;
@@ -264,6 +297,8 @@ interface GenerateTextParams {
   req: any;
   label: string;
   bookId?: string;
+  /** Т5.4: параметри вузла LLM — температура, ліміт токенів, тайм-аут (мс). Без них — як раніше. */
+  generation?: { temperature?: number; maxTokens?: number; timeoutMs?: number };
 }
 
 /** Скільки РАЗІВ ПОВТОРИТИ виклик після тимчасової відмови (усього спроб — на одну більше). */
@@ -376,13 +411,20 @@ export async function generateText(
 
   for (let attempt = 0; ; attempt++) {
     try {
-      const result =
-        p.engine === 'gemini' && p.json
-          ? await dispatchGeminiSdk(p.prompt, systemInstruction, true)
-          : await dispatch(p.engine, modelId, p.prompt, systemInstruction || '', p.apiKeyOverride, p.images, p.json);
+      const g = p.generation;
+      const result = await withTimeout(g?.timeoutMs, (signal) => {
+        const opts: GenerationOptions | undefined = g || signal ? { temperature: g?.temperature, maxTokens: g?.maxTokens, signal } : undefined;
+        return p.engine === 'gemini' && p.json
+          ? dispatchGeminiSdk(p.prompt, systemInstruction, true, opts)
+          : dispatch(p.engine, modelId, p.prompt, systemInstruction || '', p.apiKeyOverride, p.images, p.json, opts);
+      });
       await logTextUsage(ctx, modelId, p.engine, result.inputTokens, result.outputTokens, true);
       return result;
     } catch (err) {
+      if (err instanceof AiTimeoutError) {
+        await logTextUsage(ctx, modelId, p.engine, 0, 0, false);
+        throw err;
+      }
       const canRetry = attempt < TRANSIENT_RETRIES && isTransientAiError(err);
       if (!canRetry) {
         // Лог невдачі пишеться один раз — за підсумком, а не на кожну

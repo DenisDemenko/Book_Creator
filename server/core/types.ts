@@ -1211,6 +1211,85 @@ export interface WorkflowEventRow {
   createdAt: string;
 }
 
+// ── Виконання процесів ШІ (Т5.4 В1) ──────────────────────────────────────────
+
+export const WORKFLOW_RUN_STATUSES = ['running', 'paused', 'succeeded', 'failed', 'cancelled'] as const;
+export type WorkflowRunStatus = (typeof WORKFLOW_RUN_STATUSES)[number];
+export const WORKFLOW_RUN_MODES = ['normal', 'replay', 'fork'] as const;
+export type WorkflowRunMode = (typeof WORKFLOW_RUN_MODES)[number];
+
+export interface WorkflowRunRow {
+  id: string;
+  workflowId: string;
+  versionId: string;
+  version: number;
+  definitionHash: string;
+  projectId: string | null;
+  status: WorkflowRunStatus;
+  mode: WorkflowRunMode;
+  parentRunId: string | null;
+  forkStep: number | null;
+  /** `job:<kind>`, `interview`, `manual`, `replay`, `fork`. */
+  trigger: string;
+  jobId: string | null;
+  input: Record<string, unknown>;
+  inputHash: string;
+  output: Record<string, unknown> | null;
+  currentNode: string | null;
+  pauseRequested: boolean;
+  error: string | null;
+  tokensIn: number;
+  tokensOut: number;
+  costUsd: number;
+  latencyMs: number;
+  startedBy: CoreActor;
+  createdAt: string;
+  updatedAt: string;
+  finishedAt: string | null;
+}
+
+export type WorkflowRunInput = Pick<WorkflowRunRow, 'workflowId' | 'versionId' | 'version' | 'definitionHash' | 'trigger' | 'input' | 'inputHash' | 'startedBy'> &
+  Partial<Pick<WorkflowRunRow, 'projectId' | 'mode' | 'parentRunId' | 'forkStep' | 'jobId'>>;
+
+export interface WorkflowRunPatch {
+  status?: WorkflowRunStatus;
+  output?: Record<string, unknown> | null;
+  currentNode?: string | null;
+  pauseRequested?: boolean;
+  error?: string | null;
+  tokensIn?: number;
+  tokensOut?: number;
+  costUsd?: number;
+  latencyMs?: number;
+}
+
+export interface WorkflowStepRow {
+  id: string;
+  runId: string;
+  seq: number;
+  nodeId: string;
+  nodeType: string;
+  status: 'succeeded' | 'failed' | 'paused';
+  retryCount: number;
+  branch: string | null;
+  startedAt: string;
+  endedAt: string;
+  latencyMs: number;
+  model: string | null;
+  tokensIn: number;
+  tokensOut: number;
+  costUsd: number;
+  decision: string | null;
+  confidence: number | null;
+  validationResult: string | null;
+  humanResult: string | null;
+  error: string | null;
+  warnings: string[];
+  details: Record<string, unknown>;
+}
+
+export type WorkflowStepInput = Omit<WorkflowStepRow, 'id' | 'seq'>;
+
 export interface GraphLayoutRow {
   graphKind: 'workflow' | 'ontology';
   graphId: string;
@@ -1611,6 +1690,18 @@ export interface CoreRepository {
   transitionWorkflowVersion(id: string, to: 'test' | 'production' | 'archived', actor: CoreActor): Promise<WorkflowVersionRow>;
   addWorkflowEvent(input: { workflowId: string; versionId?: string | null; action: WorkflowEventAction; actor: CoreActor; details?: Record<string, unknown> }): Promise<WorkflowEventRow>;
   listWorkflowEvents(filter: { workflowId?: string; limit?: number }): Promise<WorkflowEventRow[]>;
+  /**
+   * Т5.4 В1: запуски процесів ШІ, кроки (трасування §27) і контрольні точки
+   * LangGraph (§31). `addWorkflowStep` сам дає наступний номер кроку.
+   */
+  addWorkflowRun(input: WorkflowRunInput): Promise<WorkflowRunRow>;
+  getWorkflowRun(id: string): Promise<WorkflowRunRow | null>;
+  listWorkflowRuns(filter: { workflowId?: string; projectId?: string; status?: WorkflowRunStatus; limit?: number }): Promise<WorkflowRunRow[]>;
+  updateWorkflowRun(id: string, patch: WorkflowRunPatch): Promise<WorkflowRunRow>;
+  addWorkflowStep(input: WorkflowStepInput): Promise<WorkflowStepRow>;
+  listWorkflowSteps(runId: string): Promise<WorkflowStepRow[]>;
+  saveWorkflowCheckpoint(runId: string, data: Record<string, unknown>): Promise<void>;
+  getWorkflowCheckpoint(runId: string): Promise<Record<string, unknown> | null>;
   getGraphLayout(kind: 'workflow' | 'ontology', graphId: string, versionRef: string): Promise<GraphLayoutRow | null>;
   saveGraphLayout(input: { graphKind: 'workflow' | 'ontology'; graphId: string; versionRef: string; layout: Record<string, { x: number; y: number }>; updatedBy: CoreActor }): Promise<GraphLayoutRow>;
 

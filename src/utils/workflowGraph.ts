@@ -16,6 +16,7 @@
  */
 
 import { canonicalJson, type LocalizedName } from './ontology';
+import { exprError } from './workflowExpr';
 
 export const WORKFLOW_FORMAT = 'fusion-workflow/1';
 
@@ -97,6 +98,11 @@ const MODEL_PARAMS: ParamDef[] = [
   { id: 'relation_scope', name: N('Relation scope', 'Область зв\'язків'), type: 'string_list' },
   { id: 'confidence_policy', name: N('Confidence policy', 'Політика впевненості'), type: 'enum', options: ['propose_only', 'auto_accept_above_threshold', 'human_review_below_threshold'], default: 'propose_only' },
   { id: 'cost_limit', name: N('Cost limit, $', 'Ліміт витрат, $'), type: 'number', min: 0, max: 100, default: 0.5 },
+  // Т5.4: повтор і відновлення (§30).
+  { id: 'backoff', name: N('Backoff', 'Пауза між повторами'), type: 'enum', options: ['none', 'exponential'], default: 'exponential' },
+  { id: 'on_timeout', name: N('On timeout', 'Якщо тайм-аут'), type: 'enum', options: ['fail', 'alternate_model'], default: 'fail' },
+  { id: 'on_provider_error', name: N('On provider error', 'Якщо збій постачальника'), type: 'enum', options: ['fail', 'alternate_model'], default: 'fail' },
+  { id: 'alternate_model', name: N('Alternate model', 'Резервна модель'), type: 'string', hint: 'Id моделі для повтору після збою чи тайм-ауту' },
 ];
 
 /** Спільні поля вузлів Jev (§36): питання, вхідний стан, поріг, відображення, журналювання. */
@@ -175,12 +181,24 @@ export const NODE_TYPES: NodeTypeDef[] = [
     params: [{ id: 'reviewer', name: N('Reviewer', 'Хто перевіряє'), type: 'enum', options: ['author', 'editor', 'any_with_canon_write'], required: true, default: 'author' }] },
   // OUTPUT
   { id: 'PROPOSAL', group: 'output', name: N('Proposal', 'Пропозиція'), description: 'Вихід ШІ — пропозиція, не канон (§24).', inputs: 'one', outputs: ['out'],
-    params: [{ id: 'target', name: N('Target', 'Що пропонує'), type: 'enum', options: ['entity', 'relation', 'mention', 'fact', 'memory', 'text'], required: true, default: 'fact' }] },
+    params: [
+      { id: 'target', name: N('Target', 'Що пропонує'), type: 'enum', options: ['entity', 'relation', 'mention', 'fact', 'memory', 'text'], required: true, default: 'fact' },
+      // Т5.4: поріг (№11) — нижче нього висновок не стає пропозицією.
+      { id: 'min_confidence', name: N('Min confidence', 'Поріг впевненості'), type: 'number', min: 0, max: 1, default: 0 },
+    ] },
   { id: 'CANON_WRITE', group: 'output', name: N('Canon Write', 'Запис у канон'), description: 'Ревізія + походження + аудит (§24, §25); лише після перевірки людиною.', inputs: 'many', outputs: ['out'],
     params: [{ id: 'target', name: N('Target', 'Що записує'), type: 'enum', options: ['entity', 'relation', 'mention', 'fact', 'memory'], required: true, default: 'fact' }] },
 ];
 
 const NODE_TYPE_MAP = new Map(NODE_TYPES.map((t) => [t.id, t]));
+
+/**
+ * Т5.4: вузли, які рушій уже виконує. Решта зупиняє запуск зрозумілою
+ * помилкою: Jev — Т5.5; HUMAN_REVIEW, CANON_WRITE, CONTINUITY_GATE — Т5.6;
+ * AGENT, PARALLEL / MERGE / LOOP, SUBGRAPH — пізніше.
+ */
+export const EXECUTABLE_NODE_TYPES = ['START', 'END', 'CONTEXT', 'MEMORY', 'QUERY', 'PROMPT', 'LLM', 'TOOL', 'CONDITION', 'VALIDATOR', 'PROPOSAL'];
+export const isExecutableNode = (type: string): boolean => EXECUTABLE_NODE_TYPES.includes(type);
 export const nodeTypeById = (id: string): NodeTypeDef | undefined => NODE_TYPE_MAP.get(id);
 
 // ---------------------------------------------------------------------------
@@ -368,6 +386,10 @@ export function validateWorkflow(def: WorkflowDefinition): WorkflowValidation {
     for (const p of t.params) {
       const problem = checkParam(p, (params as Record<string, unknown>)[p.id]);
       if (problem) err('bad_param', `${path}.params.${p.id}`, `${t.name.uk} «${n.label || n.id}»: ${p.name.uk} — ${problem}`, { nodeId: n.id });
+    }
+    if (t.id === 'CONDITION' && typeof (params as Record<string, unknown>).expression === 'string') {
+      const problem = exprError((params as Record<string, unknown>).expression);
+      if (problem) err('bad_expression', `${path}.params.expression`, `Умова «${n.label || n.id}»: ${problem}`, { nodeId: n.id });
     }
     for (const k of Object.keys(params)) if (!t.params.some((p) => p.id === k)) warn('unknown_param', `${path}.params.${k}`, `Параметр «${k}» не належить типу ${t.id} — буде проігноровано`, { nodeId: n.id });
     if (t.dynamicOutputs) {

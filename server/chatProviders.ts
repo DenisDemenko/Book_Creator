@@ -101,8 +101,17 @@ export type Generate = (
    * (openAiCompatible: `response_format`, Claude: assistant-prefill),
    * використовуємо її, а не лише інструкцію в тексті промту.
    */
-  json?: boolean
+  json?: boolean,
+  /** Т5.4: параметри вузла LLM (§5.3) — температура, ліміт вихідних токенів, скасування. */
+  opts?: GenerationOptions
 ) => Promise<GenerateResult>;
+
+/** Т5.4: параметри генерації з вузла LLM; без них — типові значення рушія (0,7 і 4096). */
+export interface GenerationOptions {
+  temperature?: number;
+  maxTokens?: number;
+  signal?: AbortSignal;
+}
 
 export interface ChatModelInfo {
   id: string;
@@ -317,7 +326,8 @@ async function openAiCompatible(
   systemInstruction: string,
   apiKeyOverride?: string,
   images?: ImageAttachment[],
-  json?: boolean
+  json?: boolean,
+  opts?: GenerationOptions
 ): Promise<GenerateResult> {
   const key = apiKeyOverride?.trim() || process.env[envKey]?.trim();
   if (!key) throw missingKeyError(envKey);
@@ -371,7 +381,8 @@ async function openAiCompatible(
     const upstream = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: JSON.stringify(buildOpenAiBody({ modelId: model, messages, json, quirks })),
+      body: JSON.stringify(buildOpenAiBody({ modelId: model, messages, json, quirks, maxOutputTokens: opts?.maxTokens, temperature: opts?.temperature })),
+      signal: opts?.signal,
     });
     const payload = await upstream.json().catch(() => ({}));
     return { upstream, payload };
@@ -410,7 +421,9 @@ async function generateGemini(
   systemInstruction: string,
   modelId: string,
   apiKeyOverride?: string,
-  images?: ImageAttachment[]
+  images?: ImageAttachment[],
+  _json?: boolean,
+  opts?: GenerationOptions
 ): Promise<GenerateResult> {
   const key = apiKeyOverride?.trim() || process.env.GEMINI_API_KEY?.trim();
   if (!key) throw missingKeyError('GEMINI_API_KEY');
@@ -426,8 +439,9 @@ async function generateGemini(
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: systemInstruction }] },
       contents: [{ parts: [...imageParts, { text: prompt }] }],
-      generationConfig: { temperature: 0.7 },
+      generationConfig: { temperature: opts?.temperature ?? 0.7, ...(opts?.maxTokens ? { maxOutputTokens: opts.maxTokens } : {}) },
     }),
+    signal: opts?.signal,
   });
 
   const data = await upstream.json().catch(() => ({}));
@@ -454,7 +468,8 @@ async function generateClaude(
   modelId: string,
   apiKeyOverride?: string,
   images?: ImageAttachment[],
-  json?: boolean
+  json?: boolean,
+  opts?: GenerationOptions
 ): Promise<GenerateResult> {
   const key = apiKeyOverride?.trim() || process.env.ANTHROPIC_API_KEY?.trim();
   if (!key) throw missingKeyError('ANTHROPIC_API_KEY');
@@ -514,8 +529,9 @@ async function generateClaude(
         model,
         system: systemInstruction,
         messages,
-        max_tokens: 4096,
+        max_tokens: opts?.maxTokens ?? 4096,
       }),
+      signal: opts?.signal,
     });
 
     const data = await upstream.json().catch(() => ({}));
@@ -558,9 +574,9 @@ async function generateClaude(
 /** Всі рушії під єдиною сигнатурою. */
 export const PROVIDERS: Record<EngineId, Generate> = {
   gemini: generateGemini,
-  gpt: (p, s, m, k, img, json) => openAiCompatible('https://api.openai.com/v1/chat/completions', 'OPENAI_API_KEY', m, p, s, k, img, json),
+  gpt: (p, s, m, k, img, json, o) => openAiCompatible('https://api.openai.com/v1/chat/completions', 'OPENAI_API_KEY', m, p, s, k, img, json, o),
   claude: generateClaude,
-  deepseek: (p, s, m, k, img, json) => openAiCompatible('https://api.deepseek.com/chat/completions', 'DEEPSEEK_API_KEY', m, p, s, k, img, json),
-  groq: (p, s, m, k, img, json) => openAiCompatible('https://api.groq.com/openai/v1/chat/completions', 'GROQ_API_KEY', m, p, s, k, img, json),
-  mistral: (p, s, m, k, img, json) => openAiCompatible('https://api.mistral.ai/v1/chat/completions', 'MISTRAL_API_KEY', m, p, s, k, img, json),
+  deepseek: (p, s, m, k, img, json, o) => openAiCompatible('https://api.deepseek.com/chat/completions', 'DEEPSEEK_API_KEY', m, p, s, k, img, json, o),
+  groq: (p, s, m, k, img, json, o) => openAiCompatible('https://api.groq.com/openai/v1/chat/completions', 'GROQ_API_KEY', m, p, s, k, img, json, o),
+  mistral: (p, s, m, k, img, json, o) => openAiCompatible('https://api.mistral.ai/v1/chat/completions', 'MISTRAL_API_KEY', m, p, s, k, img, json, o),
 };

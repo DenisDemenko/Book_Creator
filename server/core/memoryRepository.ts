@@ -65,9 +65,19 @@ import {
   checkParticipantPreference,
   checkOnboardingEvent,
   assertActor,
+  checkWorkflowRun,
+  checkWorkflowRunPatch,
+  checkWorkflowStep,
 } from './rules';
 import { EMBEDDING_DIMENSIONS, isSearchableKind, isValidEmbedding, memoryTextScore } from './search/text';
-import { CORE_STATUSES, CONTINUITY_ISSUE_STATUSES } from './types';
+import { CORE_STATUSES, CONTINUITY_ISSUE_STATUSES,
+  WorkflowRunRow,
+  WorkflowRunInput,
+  WorkflowRunPatch,
+  WorkflowRunStatus,
+  WorkflowStepRow,
+  WorkflowStepInput,
+} from './types';
 import type {
   AliasRow,
   CoreActor,
@@ -237,6 +247,9 @@ export class MemoryCoreRepository implements CoreRepository {
   private workflows: WorkflowRow[] = [];
   private workflowVersions: WorkflowVersionRow[] = [];
   private workflowEvents: WorkflowEventRow[] = [];
+  private workflowRuns: WorkflowRunRow[] = [];
+  private workflowSteps: WorkflowStepRow[] = [];
+  private workflowCheckpoints = new Map<string, Record<string, unknown>>();
   private graphLayouts: GraphLayoutRow[] = [];
   private storyProposals: StoryProposalRow[] = [];
   private storyProposalEvents: StoryProposalEventRow[] = [];
@@ -2026,6 +2039,72 @@ export class MemoryCoreRepository implements CoreRepository {
   async listWorkflowEvents(f: { workflowId?: string; limit?: number }) {
     const limit = Math.max(1, Math.min(f.limit ?? 100, 500));
     return this.workflowEvents.filter((e) => !f.workflowId || e.workflowId === f.workflowId).slice().reverse().slice(0, limit).map(clone);
+  }
+
+  // ── Запуски процесів ШІ (Т5.4 В1) ──────────────────────────────────────────
+
+  async addWorkflowRun(input: WorkflowRunInput) {
+    checkWorkflowRun(input);
+    const v = this.workflowVersions.find((x) => x.id === input.versionId && x.workflowId === input.workflowId);
+    if (!v) throw notFound(`Версія процесу «${input.versionId}»`);
+    if (input.parentRunId && !this.workflowRuns.some((r) => r.id === input.parentRunId)) throw notFound('Батьківський запуск');
+    const t = now();
+    const row: WorkflowRunRow = {
+      id: randomUUID(), workflowId: input.workflowId, versionId: input.versionId, version: input.version, definitionHash: input.definitionHash,
+      projectId: input.projectId ?? null, status: 'running', mode: input.mode ?? 'normal', parentRunId: input.parentRunId ?? null, forkStep: input.forkStep ?? null,
+      trigger: input.trigger, jobId: input.jobId ?? null, input: clone(input.input), inputHash: input.inputHash, output: null, currentNode: null, pauseRequested: false,
+      error: null, tokensIn: 0, tokensOut: 0, costUsd: 0, latencyMs: 0, startedBy: input.startedBy, createdAt: t, updatedAt: t, finishedAt: null,
+    };
+    this.workflowRuns.push(row);
+    return clone(row);
+  }
+
+  async getWorkflowRun(id: string) {
+    const r = this.workflowRuns.find((x) => x.id === id);
+    return r ? clone(r) : null;
+  }
+
+  async listWorkflowRuns(f: { workflowId?: string; projectId?: string; status?: WorkflowRunStatus; limit?: number }) {
+    const limit = Math.max(1, Math.min(f.limit ?? 100, 500));
+    return this.workflowRuns
+      .filter((r) => (!f.workflowId || r.workflowId === f.workflowId) && (!f.projectId || r.projectId === f.projectId) && (!f.status || r.status === f.status))
+      .slice().reverse().slice(0, limit).map(clone);
+  }
+
+  async updateWorkflowRun(id: string, patch: WorkflowRunPatch) {
+    const r = this.workflowRuns.find((x) => x.id === id);
+    if (!r) throw notFound(`Запуск «${id}»`);
+    checkWorkflowRunPatch(r, patch);
+    const t = now();
+    for (const k of ['status', 'currentNode', 'pauseRequested', 'error', 'tokensIn', 'tokensOut', 'costUsd', 'latencyMs'] as const) if (patch[k] !== undefined) (r as any)[k] = patch[k];
+    if (patch.output !== undefined) r.output = patch.output ? clone(patch.output) : null;
+    if (patch.status && !['running', 'paused'].includes(patch.status) && !r.finishedAt) r.finishedAt = t;
+    if (patch.status === 'running' || patch.status === 'paused') r.finishedAt = null;
+    r.updatedAt = t;
+    return clone(r);
+  }
+
+  async addWorkflowStep(input: WorkflowStepInput) {
+    checkWorkflowStep(input);
+    if (!this.workflowRuns.some((r) => r.id === input.runId)) throw notFound(`Запуск «${input.runId}»`);
+    const seq = this.workflowSteps.filter((x) => x.runId === input.runId).reduce((m, x) => Math.max(m, x.seq), 0) + 1;
+    const row: WorkflowStepRow = { ...clone(input), id: randomUUID(), seq };
+    this.workflowSteps.push(row);
+    return clone(row);
+  }
+
+  async listWorkflowSteps(runId: string) {
+    return this.workflowSteps.filter((x) => x.runId === runId).sort((a, b) => a.seq - b.seq).map(clone);
+  }
+
+  async saveWorkflowCheckpoint(runId: string, data: Record<string, unknown>) {
+    if (!this.workflowRuns.some((r) => r.id === runId)) throw notFound(`Запуск «${runId}»`);
+    this.workflowCheckpoints.set(runId, clone(data));
+  }
+
+  async getWorkflowCheckpoint(runId: string) {
+    const d = this.workflowCheckpoints.get(runId);
+    return d ? clone(d) : null;
   }
 
   async getGraphLayout(kind: 'workflow' | 'ontology', graphId: string, versionRef: string) {

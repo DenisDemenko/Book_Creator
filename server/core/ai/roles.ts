@@ -35,6 +35,8 @@ export interface AiGenerateInput {
   actor: CoreActor;
   images?: { id: string; mimeType: string; data: string }[];
   signal?: AbortSignal;
+  /** Т5.4: параметри вузла LLM (температура, ліміт токенів, тайм-аут); без них — як раніше. */
+  generation?: { temperature?: number; maxTokens?: number; timeoutMs?: number };
 }
 
 export interface AiGenerateOutput {
