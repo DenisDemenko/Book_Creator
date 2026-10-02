@@ -96,6 +96,7 @@ const serverLog: string[] = [];
 const child = spawn(process.execPath, [path.join(ROOT, 'dist/server.mjs')], {
   cwd: ROOT,
   env: {
+    ROLE_ONBOARDING: 'off',
     ...process.env,
     DATA_DIR: DIR,
     DATABASE_PATH: `${DIR}/nova-studio.db`,

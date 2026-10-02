@@ -60,7 +60,7 @@ const STRANGER = await session('u-stranger');
 const log: string[] = [];
 const child = spawn(process.execPath, [path.join(ROOT, 'dist/server.mjs')], {
   cwd: ROOT,
-  env: { ...process.env, PORT: String(PORT), NODE_ENV: 'production', DATA_DIR: DIR, DATABASE_PATH: `${DIR}/nova-studio.db`, CORE_DATABASE_URL: DB_URL },
+  env: { ROLE_ONBOARDING: 'off', ...process.env, PORT: String(PORT), NODE_ENV: 'production', DATA_DIR: DIR, DATABASE_PATH: `${DIR}/nova-studio.db`, CORE_DATABASE_URL: DB_URL },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 child.stdout.on('data', (d) => log.push(String(d)));

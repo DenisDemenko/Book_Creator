@@ -128,6 +128,7 @@
     "live:access-grants": "tsx scripts/live-accessGrants.mts",
     "live:graph-studio": "tsx scripts/live-graphStudio.mts",
     "live:story-core": "tsx scripts/live-storyCore.mts",
+    "live:role-onboarding": "tsx scripts/live-roleOnboarding.mts",
     "core:migrate": "tsx scripts/core-migrate.mts",
     "test:paragraph-ids": "tsx scripts/test-paragraphIds.mts",
     "live:paragraph-ids": "tsx scripts/live-paragraphIds.mts",

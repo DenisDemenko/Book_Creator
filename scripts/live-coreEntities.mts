@@ -142,7 +142,7 @@ const TEST_BOOK = {
 const serverLog: string[] = [];
 const child = spawn(process.execPath, [path.join(ROOT, 'dist/server.mjs')], {
   cwd: ROOT,
-  env: { ...process.env, DATA_DIR: DIR, DATABASE_PATH: `${DIR}/nova-studio.db`, PORT: String(PORT), NODE_ENV: 'production' },
+  env: { ROLE_ONBOARDING: 'off', ...process.env, DATA_DIR: DIR, DATABASE_PATH: `${DIR}/nova-studio.db`, PORT: String(PORT), NODE_ENV: 'production' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 child.stdout.on('data', (d) => serverLog.push(String(d)));

@@ -46,7 +46,7 @@ await createSession({ token: TOKEN, userId: 'u-mastery', createdAt: new Date().t
 const log: string[] = [];
 const child = spawn(process.execPath, [path.join(ROOT, 'dist/server.mjs')], {
   cwd: ROOT,
-  env: { ...process.env, PORT: String(PORT), NODE_ENV: 'production', DATA_DIR: DIR, DATABASE_PATH: `${DIR}/nova-studio.db` },
+  env: { ROLE_ONBOARDING: 'off', ...process.env, PORT: String(PORT), NODE_ENV: 'production', DATA_DIR: DIR, DATABASE_PATH: `${DIR}/nova-studio.db` },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 child.stdout.on('data', (d) => log.push(String(d)));
