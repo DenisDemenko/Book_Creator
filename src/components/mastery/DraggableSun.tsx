@@ -880,10 +880,11 @@ export const DraggableSun: React.FC<{ onScreenshotForAi?: (file: File) => void }
           </div>
         )}
 
-        {/* Toggle Button */}
+        {/* Toggle Button. Аура (ореол) — sun-accent-aura: того самого кольору,
+            що й обране сонечко (--sun-acc*), а не сіра неоморфна тінь. */}
         <button
           onClick={() => setShowToolbar(!showToolbar)}
-          className="neo-extruded neo-button-interactive bg-[#f9f9f9] text-[#1a1c1c] px-3.5 py-2 rounded-full text-xs font-bold flex items-center gap-2 border border-white/80 shadow-md cursor-pointer hover:bg-white"
+          className="sun-accent-aura bg-[#f9f9f9] text-[#1a1c1c] px-3.5 py-2 rounded-full text-xs font-bold flex items-center gap-2 border border-white/80 cursor-pointer hover:bg-white"
         >
           <span
             className="w-3.5 h-3.5 rounded-full shadow-sm animate-spin"

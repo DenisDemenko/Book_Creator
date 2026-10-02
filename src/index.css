@@ -978,6 +978,43 @@
   .neo-glow-emerald {
     box-shadow: 0 0 20px rgba(46, 204, 113, 0.35);
   }
+
+  /*
+    АУРА ПІГУЛКИ «СОНЦЕ (12 КОЛЬОРІВ & 10ХВ)» (DraggableSun).
+
+    Раніше цю пігулку ніс .neo-extruded — сіра тінь сонця (--shadow-color),
+    тож ореол навколо неї був СІРИЙ, хоч сама пігулка вже фарбувалась
+    обраним кольором сонця (кулька-індикатор). Власник попросив, щоб і аура
+    була того самого кольору, що й обране сонечко.
+
+    Джерело кольору — ті самі --sun-acc* змінні, якими SunLightingContext
+    фарбує акцент по всій студії (utils/sunAccentVars.ts): у світлій темі
+    це primary, у темній — яскравий secondary, плюс напівпрозорі похідні.
+    Клас стоїть ПІСЛЯ neo-* у цьому ж шарі, тому його box-shadow перекриває
+    і неоморфну тінь, і Tailwind-овий shadow-md; hover/active повертають
+    пігулці той самий відгук на натискання, що давав .neo-button-interactive.
+  */
+  .sun-accent-aura {
+    box-shadow:
+      0 0 0 1px var(--sun-acc-25),
+      0 4px 12px -2px var(--sun-acc-40),
+      0 0 18px 1px var(--sun-acc-30);
+    transition: box-shadow 0.25s ease-out, transform 0.15s ease;
+  }
+  .sun-accent-aura:hover {
+    box-shadow:
+      0 0 0 1px var(--sun-acc-40),
+      0 6px 16px -2px var(--sun-acc-70),
+      0 0 26px 3px var(--sun-acc-40);
+    transform: translateY(-1px);
+  }
+  .sun-accent-aura:active {
+    box-shadow:
+      0 0 0 1px var(--sun-acc-70),
+      0 2px 8px -2px var(--sun-acc-40),
+      0 0 16px 1px var(--sun-acc-30);
+    transform: translateY(1px);
+  }
 }
 
 /* ============================================================
