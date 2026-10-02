@@ -30,6 +30,7 @@
  *     usage_log без ризику для наявних тестів.
  */
 
+import { withWorkflowInstruction } from '../src/utils/aiWorkflows';
 import { GoogleGenAI } from '@google/genai';
 import {
   ChatProviderError,
@@ -369,13 +370,16 @@ export async function generateText(
 ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
   const modelId = p.modelId || (p.engine === 'gemini' ? GEMINI_MODEL : '');
   const ctx: UsageLogCtx = { req: p.req, label: p.label, bookId: p.bookId };
+  // Т6.4: процес ШІ за роллю (маршрутизатор §21, server/core/collaboration/aiRoute.ts)
+  // — інструкція процесу дописується до системного промту модуля. Права не змінює.
+  const systemInstruction = withWorkflowInstruction(p.systemInstruction, p.req?.aiRoute);
 
   for (let attempt = 0; ; attempt++) {
     try {
       const result =
         p.engine === 'gemini' && p.json
-          ? await dispatchGeminiSdk(p.prompt, p.systemInstruction, true)
-          : await dispatch(p.engine, modelId, p.prompt, p.systemInstruction || '', p.apiKeyOverride, p.images, p.json);
+          ? await dispatchGeminiSdk(p.prompt, systemInstruction, true)
+          : await dispatch(p.engine, modelId, p.prompt, systemInstruction || '', p.apiKeyOverride, p.images, p.json);
       await logTextUsage(ctx, modelId, p.engine, result.inputTokens, result.outputTokens, true);
       return result;
     } catch (err) {

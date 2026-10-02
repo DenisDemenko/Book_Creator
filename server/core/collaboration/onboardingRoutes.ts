@@ -63,6 +63,8 @@ export interface OnboardingRoutesDeps {
   bookOutline?: (projectId: string) => Promise<BookOutline | null>;
   describeUser?: (userId: string) => Promise<{ name?: string; email?: string } | null>;
   onAccessChanged?: (projectId: string, userId: string) => void;
+  /** Т6.4: ролі чи простір людини змінились (скинути кеш маршрутизатора ШІ). */
+  onRoleChanged?: (projectId: string, userId: string) => void;
 }
 
 const STATUS: Record<string, number> = { not_found: 404, conflict: 409, bad_actor: 403 };
@@ -254,7 +256,8 @@ export function registerOnboardingRoutes(app: Express, d: OnboardingRoutesDeps):
 
   app.post(`${myBase}/roles`, d.requireAuth, run(async (repo, _who, req, res) => {
     const b = req.body ?? {};
-    const out = await addMyRole(repo, await myCtx(req), {
+    const ctx = await myCtx(req);
+    const out = await addMyRole(repo, ctx, {
       roleId: typeof b.roleId === 'string' ? b.roleId : '',
       specialization: typeof b.specialization === 'string' && b.specialization ? b.specialization : null,
       scope: typeof b.scope === 'string' && b.scope ? b.scope : null,
@@ -262,18 +265,24 @@ export function registerOnboardingRoutes(app: Express, d: OnboardingRoutesDeps):
       capabilities: Array.isArray(b.capabilities) ? b.capabilities.map(String).slice(0, 20) : [],
       message: typeof b.message === 'string' ? b.message : '',
     });
+    if (out.kind === 'assigned') d.onRoleChanged?.(ctx.projectId, ctx.userId);
     res.status(out.kind === 'assigned' ? 201 : 202).json(out);
   }));
 
   app.put(`${myBase}/roles/:id/specialization`, d.requireAuth, run(async (repo, _who, req, res) => {
     const b = req.body ?? {};
     if (typeof b.specialization !== 'string' || !b.specialization) throw new CoreRuleError('bad_input', 'Оберіть спеціалізацію');
-    const out = await changeMySpecialization(repo, await myCtx(req), { assignmentId: String(req.params.id), specialization: b.specialization, message: typeof b.message === 'string' ? b.message : '' });
+    const ctx = await myCtx(req);
+    const out = await changeMySpecialization(repo, ctx, { assignmentId: String(req.params.id), specialization: b.specialization, message: typeof b.message === 'string' ? b.message : '' });
+    if (out.kind === 'assigned') d.onRoleChanged?.(ctx.projectId, ctx.userId);
     res.status(out.kind === 'assigned' ? 200 : 202).json(out);
   }));
 
   app.delete(`${myBase}/roles/:id`, d.requireAuth, run(async (repo, _who, req, res) => {
-    res.json(await removeMyRole(repo, await myCtx(req), { assignmentId: String(req.params.id) }));
+    const ctx = await myCtx(req);
+    const view = await removeMyRole(repo, ctx, { assignmentId: String(req.params.id) });
+    d.onRoleChanged?.(ctx.projectId, ctx.userId);
+    res.json(view);
   }));
 
   app.post(`${myBase}/leave`, d.requireAuth, run(async (repo, _who, req, res) => {
@@ -286,6 +295,9 @@ export function registerOnboardingRoutes(app: Express, d: OnboardingRoutesDeps):
   app.put(`${myBase}/workspace`, d.requireAuth, run(async (repo, _who, req, res) => {
     const w = (req.body ?? {}).workspace;
     if (typeof w !== 'string' || !w) throw new CoreRuleError('bad_input', 'Оберіть простір');
-    res.json(await setMyWorkspace(repo, await myCtx(req), w));
+    const ctx = await myCtx(req);
+    const view = await setMyWorkspace(repo, ctx, w);
+    d.onRoleChanged?.(ctx.projectId, ctx.userId);
+    res.json(view);
   }));
 }

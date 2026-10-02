@@ -131,6 +131,11 @@ export interface ChatRoutesDeps {
   /** Файл стилю автора, якщо він увімкнув «Автоматично використовувати стиль». */
   loadStyleGuide?: (userId: string) => Promise<string | null>;
   /**
+   * Т6.4: процес ШІ за роллю людини в книзі сесії (маршрутизатор §21). `forbidden`
+   * — людина вже не має доступу до книги (403); null — книга поза ядром чи без ролі.
+   */
+  aiRoute?: (req: any, bookId: string | null | undefined) => Promise<{ instruction: string; workflow: string } | null | 'forbidden'>;
+  /**
    * Рушії, для яких автор задав власний ключ (розділ «Ключі API»). Потрібно
    * для GET /api/chat/models — модель має бути обрана (не задизейблена), якщо
    * є ХОЧ ОДИН з двох ключів, серверний або власний, а не лише серверний.
@@ -412,7 +417,18 @@ export function registerChatRoutes(app: Express, deps: ChatRoutesDeps): void {
         styleGuide = await deps.loadStyleGuide(session.userId).catch(() => null);
       }
       const modelLabel = CHAT_MODELS.find((m) => m.id === modelId)?.label || modelId;
-      const systemPrompt = buildSystemPrompt(styleGuide, req.body?.bookContext, modelLabel);
+      let systemPrompt = buildSystemPrompt(styleGuide, req.body?.bookContext, modelLabel);
+      if (deps.aiRoute) {
+        const route = await deps.aiRoute(req, session.bookId).catch(() => null);
+        if (route === 'forbidden') {
+          res.status(403).json({ error: 'Немає доступу до книги цієї розмови — ШІ не працює з нею.', kind: 'no_project_access' });
+          return;
+        }
+        if (route) {
+          systemPrompt = `${systemPrompt}\n\n${route.instruction}`;
+          res.setHeader('X-Nova-AI-Workflow', `${route.workflow}; task=chat`);
+        }
+      }
 
       const now = new Date().toISOString();
       const userMessage: StoredChatMessage = {

@@ -205,6 +205,7 @@ import { registerProjectRoutes, resolveProjectAccess, bookMediaOwners } from './
 import { registerWorkflowRoutes } from './server/core/workflows/routes';
 import { registerStoryCoreRoutes } from './server/core/storyCore/routes';
 import { registerOnboardingRoutes } from './server/core/collaboration/onboardingRoutes';
+import { aiRouteMiddleware, createAiRouter, registerAiRouteRoutes } from './server/core/collaboration/aiRoute';
 import { COURSE_PREFIX, type OnboardingDeps } from './server/core/collaboration/onboarding';
 import { ensureOwnerParticipant } from './server/core/collaboration/participants';
 import { getCourse } from './server/courseStore';
@@ -379,6 +380,9 @@ async function loadRoomView(access: RealtimeAccess): Promise<RoomView | null> {
  * Т6.2: доступ людини до книги змінився — її з'єднання з кімнатою
  * закриваються (4409), клієнт перепідключається з новими правами.
  */
+/** Т6.4: маршрутизатор процесів ШІ (роль + тип проєкту + завдання + область → процес). */
+const aiRouter = createAiRouter({ repo: () => getCoreRepository(), access: realtimeAccessDeps, ensureProject: ensureCourseInCore });
+
 function dropRealtimeParticipant(bookId: string, userId: string): number {
   const room = collabRooms.get(`book:${bookId}`);
   if (!room) return 0;
@@ -484,6 +488,8 @@ async function startServer() {
 
   // Кожен запит отримує req.principal: користувача сесії або гостя.
   app.use(attachPrincipal);
+  // Т6.4: маршрутизатор процесів ШІ за роллю — охорона книги й інструкція процесу на точках ШІ.
+  app.use(aiRouteMiddleware(aiRouter));
 
   const storeInfo = await initStore();
   console.log(
@@ -624,7 +630,12 @@ registerGitCommandRoutes(app);
       return style?.autoUseStyle && style.contentMd ? style.contentMd : null;
     },
     listUserConfiguredEngines: async (userId: string) => (await listUserApiKeys(userId)).map((k) => k.engine),
+    aiRoute: async (req, bookId) => {
+      const r = await aiRouter.resolve(req.principal, bookId, 'chat');
+      return r.kind === 'forbidden' ? 'forbidden' : r.kind === 'route' ? r.route : null;
+    },
   });
+  registerAiRouteRoutes(app, { router: aiRouter, requireAuth });
 
   registerApiKeysRoutes(app);
   registerExpressRoutes(app);
@@ -729,7 +740,11 @@ registerGitCommandRoutes(app);
       const u = await findUserForAccess(userId);
       return u ? { name: u.name, email: u.email } : null;
     },
-    onAccessChanged: (projectId, userId) => void dropRealtimeParticipant(projectId, userId),
+    onRoleChanged: (_projectId, userId) => aiRouter.forget(userId),
+    onAccessChanged: (projectId, userId) => {
+      aiRouter.forget(userId);
+      void dropRealtimeParticipant(projectId, userId);
+    },
   });
   // Учасники проєкту й ролі з реєстру ролей (Т6.1) — до маршрутів проєкту, щоб їхні адреси не перехопив загальний обробник.
   registerParticipantRoutes(app, {
@@ -753,7 +768,10 @@ registerGitCommandRoutes(app);
       const u = await findUserForAccess(userId);
       return u ? { name: u.name, email: u.email } : null;
     },
-    onAccessChanged: (projectId, userId) => void dropRealtimeParticipant(projectId, userId),
+    onAccessChanged: (projectId, userId) => {
+      aiRouter.forget(userId);
+      void dropRealtimeParticipant(projectId, userId);
+    },
   });
   registerProjectRoutes(app, {
     access: realtimeAccessDeps,
@@ -2392,6 +2410,7 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
         chapterTitle,
         captionHint,
         ownerId: req.principal?.id as string | undefined,
+        workflowInstruction: req.aiRoute?.instruction,
       });
 
       // Логування (і ціна за фактично витраченими токенами) — через ядро,
@@ -2537,6 +2556,7 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
         genre,
         ownerId: userId,
         character: characterOptions,
+        workflowInstruction: req.aiRoute?.instruction,
       });
 
       await recordTextUsageByModel(
@@ -4164,7 +4184,7 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
           return res.status(400).json({ error: 'Потрібен текст рукопису для форматування.' });
         }
 
-        const result = await formatManuscriptWithClaude({ text, bookTitle, author, genre });
+        const result = await formatManuscriptWithClaude({ text, bookTitle, author, genre, workflowInstruction: req.aiRoute?.instruction });
 
         // recordTextUsageByModel передає result.model у priceForTextEngine,
         // тож Claude Opus/Haiku тарифікуються за своєю реальною ціною, а не

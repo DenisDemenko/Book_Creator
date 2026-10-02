@@ -69,6 +69,8 @@ export async function resolveImageBytes(
 
 export interface GenerateTextFromImageOptions {
   engine: TextEngine;
+  /** Т6.4: інструкція процесу ШІ за роллю (маршрутизатор §21) — дописується до системної. */
+  workflowInstruction?: string;
   imageUrl: string;
   bookTitle?: string;
   genre?: string;
@@ -164,7 +166,8 @@ function buildPrompt(opts: GenerateTextFromImageOptions): string {
 
 /** Системна інструкція — своя для кожного виду роботи (див. `kind` вище). */
 function systemInstructionFor(opts: GenerateTextFromImageOptions): string {
-  return opts.kind === 'character' ? characterFromImageSystemInstruction() : textFromImageSystemInstruction();
+  const base = opts.kind === 'character' ? characterFromImageSystemInstruction() : textFromImageSystemInstruction();
+  return opts.workflowInstruction ? `${base}\n\n${opts.workflowInstruction}` : base;
 }
 
 export function classifyGenericError(kind: 'gemini' | 'gpt', message: string): TextFromImageErrorKind {

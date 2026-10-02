@@ -47,6 +47,8 @@ export interface FormatManuscriptOptions {
   bookTitle?: string;
   author?: string;
   genre?: string;
+  /** Т6.4: інструкція процесу ШІ за роллю — дописується до системної (формат відповіді не змінює). */
+  workflowInstruction?: string;
 }
 
 export const anthropicConfig = {
@@ -124,7 +126,10 @@ export async function formatManuscriptWithClaude(opts: FormatManuscriptOptions):
     throw new ClaudeManuscriptError('no_key', 'Ключ Anthropic не налаштований (ANTHROPIC_API_KEY).');
   }
 
-  const { system, user } = buildPrompt(opts);
+  const built = buildPrompt(opts);
+  const user = built.user;
+  // Вимоги до формату (JSON) лишаються останнім словом: інструкцію процесу — перед ними.
+  const system = opts.workflowInstruction ? `${opts.workflowInstruction}\n\n${built.system}` : built.system;
 
   let res: Response;
   try {
