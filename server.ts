@@ -9,7 +9,7 @@ import { Type } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { WebSocketServer, WebSocket } from 'ws';
 import { issueRealtimeTicket, resolveRealtimeAccess, ticketFromUrl, verifyRealtimeTicket, isValidBookId, participantAccess, type RealtimeAccess, type RealtimeAccessDeps } from './server/realtimeAuth';
-import { describeAccess, makeEffectiveResolver, visibleCharacterRefs } from './server/core/collaboration/access';
+import { describeAccess, makeEffectiveResolver, visibleCharacterRefs, levelRank as levelRankOf } from './server/core/collaboration/access';
 import { mergeRestrictedUpdate, restrictBook, canEditSection, shapeRoomEvent, type RoomView } from './server/core/collaboration/accessView';
 import { getBook as getStoredBookForRealtime } from './server/bookStore';
 import { getBookOwner as getCollabOwnerForRealtime, listCollabInvitesForBook as listInvitesForRealtime, findUserById as findUserForAccess } from './server/store';
@@ -204,6 +204,10 @@ import { initCore, getCoreStatus, shutdownCore, registerCoreJobKind, getCoreRepo
 import { registerProjectRoutes, resolveProjectAccess, bookMediaOwners } from './server/core/projectRoutes';
 import { registerWorkflowRoutes } from './server/core/workflows/routes';
 import { registerStoryCoreRoutes } from './server/core/storyCore/routes';
+import { registerOnboardingRoutes } from './server/core/collaboration/onboardingRoutes';
+import { COURSE_PREFIX, type OnboardingDeps } from './server/core/collaboration/onboarding';
+import { ensureOwnerParticipant } from './server/core/collaboration/participants';
+import { getCourse } from './server/courseStore';
 import { CORE_SYNC_KIND, coreSyncJobKind } from './server/core/sync';
 import { AI_ROLE_JOB_KIND, aiRoleJobKind } from './server/core/ai/job';
 import { AI_MENTIONS_JOB_KIND, aiMentionsJobKind } from './server/core/ai/mentions';
@@ -315,6 +319,8 @@ const collabRooms = new Map<string, RoomData>();
 /** Звідки сокет і REST кімнат дізнаються власника й учасників книги. */
 const realtimeAccessDeps: RealtimeAccessDeps = {
   async getBookOwnerId(bookId) {
+    // Т6.3: курс — теж проєкт ядра (`course-<id>`), власник — автор курсу.
+    if (bookId.startsWith(COURSE_PREFIX)) return getCourse(bookId.slice(COURSE_PREFIX.length))?.ownerId ?? null;
     return (await getStoredBookForRealtime(bookId))?.ownerId ?? null;
   },
   async getCollabOwnerId(bookId) {
@@ -327,6 +333,35 @@ const realtimeAccessDeps: RealtimeAccessDeps = {
   },
   // Т6.2: права учасника — з наданих доступів ядра; ядро недоступне — закрито.
   effectiveAccess: makeEffectiveResolver(getCoreRepository, () => getCoreStatus().state),
+};
+
+/**
+ * Т6.3: курс як проєкт ядра — назва й власник з курсу, власник — учасник із
+ * ролями. Викликається, коли курс створено чи змінено, і перед доступом до
+ * нього як до проєкту (давні курси реєструються під час першого звернення).
+ */
+async function ensureCourseInCore(projectId: string): Promise<void> {
+  if (!projectId.startsWith(COURSE_PREFIX)) return;
+  const repo = getCoreRepository();
+  const course = getCourse(projectId.slice(COURSE_PREFIX.length));
+  if (!repo || !course) return;
+  const p = await repo.getProject(projectId);
+  if (!p || p.title !== course.title || p.ownerId !== course.ownerId || p.projectType !== 'course') {
+    await repo.upsertProject({ id: projectId, ownerId: course.ownerId, title: course.title, projectType: 'course' });
+  }
+  if (!p) await ensureOwnerParticipant(repo, projectId, course.ownerId).catch((err) => console.warn('[courses] власник курсу не став учасником:', (err as Error).message));
+}
+
+/** Т6.3: власник проєкту для опитувальника й запрошення людини (книга чи курс). */
+const onboardingDeps: OnboardingDeps = {
+  async ownerOf(projectId) {
+    if (projectId.startsWith(COURSE_PREFIX)) return getCourse(projectId.slice(COURSE_PREFIX.length))?.ownerId ?? null;
+    return (await realtimeAccessDeps.getCollabOwnerId(projectId)) ?? (await realtimeAccessDeps.getBookOwnerId(projectId)) ?? null;
+  },
+  async acceptedInvite(projectId, userId) {
+    const inv = (await realtimeAccessDeps.listAcceptedInvites(projectId)).find((i) => i.acceptedUserId === userId);
+    return inv ? { id: inv.id ?? '', role: inv.role } : null;
+  },
 };
 
 /**
@@ -489,7 +524,29 @@ async function startServer() {
   });
   registerKnowledgeRoutes(app);
   registerCollaborationRoutes(app);
-registerCourseRoutes(app);
+registerCourseRoutes(app, {
+  // Т6.3: співавтори курсу — за наданим доступом ядра.
+  async courseAccess(principal, course) {
+    const projectId = `${COURSE_PREFIX}${course.id}`;
+    await ensureCourseInCore(projectId);
+    const access = await resolveProjectAccess(principal as any, projectId, realtimeAccessDeps);
+    if (!access) return 'none';
+    const rank = levelRankOf(access.effective.book);
+    return rank >= levelRankOf('edit') ? 'edit' : rank >= levelRankOf('view') ? 'view' : 'none';
+  },
+  async sharedCourseIds(userId) {
+    const repo = getCoreRepository();
+    if (!repo) return [];
+    const out: string[] = [];
+    for (const p of await repo.listProjects({ participantUserId: userId })) {
+      if (p.projectType !== 'course' || p.ownerId === userId) continue;
+      const access = await resolveProjectAccess({ id: userId, role: 'writer', isGuest: false } as any, p.id, realtimeAccessDeps).catch(() => null);
+      if (access && levelRankOf(access.effective.book) >= levelRankOf('view')) out.push(p.id.slice(COURSE_PREFIX.length));
+    }
+    return out;
+  },
+  onCourseChanged: (course) => void ensureCourseInCore(`${COURSE_PREFIX}${course.id}`).catch(() => {}),
+});
 registerCourseWizardRoutes(app);
 registerModerationRoutes(app);
 registerFurnitureProductRoutes(app);
@@ -652,6 +709,27 @@ registerGitCommandRoutes(app);
     access: realtimeAccessDeps,
     requireAuth,
     canPublishSchema: async (req) => canRole(req.principal?.role ?? 'guest', 'canPublishSchema'),
+  });
+  // Т6.3: опитувальник ролі й запити доступу. ROLE_ONBOARDING=off — без автоматичного показу майстра.
+  registerOnboardingRoutes(app, {
+    repo: getCoreRepository,
+    access: realtimeAccessDeps,
+    requireAuth,
+    onboarding: onboardingDeps,
+    enabled: () => String(process.env.ROLE_ONBOARDING ?? 'on').toLowerCase() !== 'off',
+    ensureProject: ensureCourseInCore,
+    bookOutline: async (projectId) => {
+      const stored = await getStoredBookForRealtime(projectId);
+      const owner = (await realtimeAccessDeps.getCollabOwnerId(projectId)) ?? stored?.ownerId;
+      const book: any = stored && stored.ownerId === owner ? stored.book : null;
+      if (!book) return null;
+      return { chapters: (book.chapters ?? []).map((c: any) => ({ id: String(c.id), title: String(c.title ?? ''), sections: (c.sections ?? []).map((x: any) => ({ id: String(x.id), title: String(x.title ?? '') })) })) };
+    },
+    describeUser: async (userId) => {
+      const u = await findUserForAccess(userId);
+      return u ? { name: u.name, email: u.email } : null;
+    },
+    onAccessChanged: (projectId, userId) => void dropRealtimeParticipant(projectId, userId),
   });
   // Учасники проєкту й ролі з реєстру ролей (Т6.1) — до маршрутів проєкту, щоб їхні адреси не перехопив загальний обробник.
   registerParticipantRoutes(app, {

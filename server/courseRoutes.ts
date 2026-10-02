@@ -2,14 +2,17 @@
  * Маршрути самостійних навчальних курсів
  * (docs/tech-spec-course-wizard-2026.md, Фаза 1).
  *
- * Курс — окрема сутність із власним сховищем (courseStore.ts). Доступ
- * лише ролям із правом canAuthorCourses (експерт, викладач, адміністратор).
- * Чужий курс віддається як 404, а не 403: існування чужого курсу —
- * зайва інформація для того, кому він недоступний.
+ * Курс — окрема сутність із власним сховищем (courseStore.ts). Створюють
+ * курси ролі з правом canAuthorCourses (експерт, викладач, адміністратор).
+ * Т6.3: курс — ще й проєкт ядра (`course-<id>`) з учасниками й наданим
+ * доступом: співавтор курсу бачить і править чужий курс за наданим доступом
+ * (без глобального права авторства курсів); публікує й видаляє — власник чи
+ * адмін. Чужий курс без доступу віддається як 404, а не 403: існування
+ * чужого курсу — зайва інформація для того, кому він недоступний.
  */
 
 import type { Express } from 'express';
-import { requireAuth, requirePermission } from './auth';
+import { can, requireAuth, requirePermission } from './auth';
 import { submitForModeration } from './moderationStore';
 import {
   createCourse,
@@ -25,6 +28,22 @@ const OWNER_ERROR = 'Курс не знайдено.';
 
 function canManage(principal: { id: string | null; role: string }, course: Course): boolean {
   return principal.role === 'admin' || course.ownerId === principal.id;
+}
+
+/** Т6.3: доступ учасника до чужого курсу (наданий доступ ядра) і реєстрація курсу в ядрі. */
+export interface CourseRoutesDeps {
+  /** 'view' | 'edit' за наданим доступом; 'none' — немає. Власник і адмін сюди не потрапляють. */
+  courseAccess?: (principal: { id: string | null; role: string; isGuest?: boolean }, course: Course) => Promise<'none' | 'view' | 'edit'>;
+  /** Курси, де людина — учасник із доступом (не власник). */
+  sharedCourseIds?: (userId: string) => Promise<string[]>;
+  /** Курс створено чи змінено — оновити проєкт ядра. */
+  onCourseChanged?: (course: Course) => void;
+}
+
+async function accessTo(deps: CourseRoutesDeps, principal: { id: string | null; role: string }, course: Course): Promise<'none' | 'view' | 'edit' | 'manage'> {
+  if (canManage(principal, course)) return 'manage';
+  if (!deps.courseAccess) return 'none';
+  return deps.courseAccess(principal, course).catch(() => 'none' as const);
 }
 
 // Server-side gate before a course reaches the storefront. A subset of the
@@ -47,13 +66,19 @@ function publishProblems(course: Course): string[] {
   return problems;
 }
 
-export function registerCourseRoutes(app: Express): void {
-  /** Список курсів: автор бачить свої, адміністратор — усі. */
-  app.get('/api/courses', requireAuth, requirePermission('canAuthorCourses'), async (req, res) => {
+export function registerCourseRoutes(app: Express, deps: CourseRoutesDeps = {}): void {
+  /** Список курсів: автор бачить свої, адміністратор — усі; учасник — ще й спільні (`shared`). */
+  app.get('/api/courses', requireAuth, async (req, res) => {
     try {
       const principal = req.principal!;
-      const courses = principal.role === 'admin' ? listAllCourses() : listCoursesForOwner(principal.id as string);
-      res.json({ courses });
+      const author = await can(principal.role, 'canAuthorCourses');
+      const mine = !author ? [] : principal.role === 'admin' ? listAllCourses() : listCoursesForOwner(principal.id as string);
+      const sharedIds = deps.sharedCourseIds && principal.id ? await deps.sharedCourseIds(principal.id).catch(() => []) : [];
+      const shared = sharedIds.filter((id) => !mine.some((c) => c.id === id)).map((id) => getCourse(id)).filter((c): c is Course => !!c);
+      if (!author && !shared.length) {
+        return res.status(403).json({ error: 'Курси створюють експерти й викладачі; спільних курсів у вас ще немає.', permission: 'canAuthorCourses' });
+      }
+      res.json({ courses: mine, shared, canAuthor: author });
     } catch (err) {
       res.status(503).json({ error: String((err as Error).message) });
     }
@@ -64,34 +89,41 @@ export function registerCourseRoutes(app: Express): void {
     try {
       const principal = req.principal!;
       const course = createCourse(principal.id as string, req.body || {});
+      deps.onCourseChanged?.(course);
       res.status(201).json({ course });
     } catch (err) {
       res.status(503).json({ error: String((err as Error).message) });
     }
   });
 
-  app.get('/api/courses/:id', requireAuth, requirePermission('canAuthorCourses'), async (req, res) => {
+  app.get('/api/courses/:id', requireAuth, async (req, res) => {
     try {
       const course = getCourse(req.params.id);
-      if (!course || !canManage(req.principal!, course)) {
+      const level = course ? await accessTo(deps, req.principal!, course) : 'none';
+      if (!course || level === 'none') {
         return res.status(404).json({ error: OWNER_ERROR });
       }
-      res.json({ course });
+      res.json({ course, access: level });
     } catch (err) {
       res.status(503).json({ error: String((err as Error).message) });
     }
   });
 
   /** Повне збереження курсу (автор надсилає весь стан). */
-  app.put('/api/courses/:id', requireAuth, requirePermission('canAuthorCourses'), async (req, res) => {
+  app.put('/api/courses/:id', requireAuth, async (req, res) => {
     try {
       const existing = getCourse(req.params.id);
-      if (!existing || !canManage(req.principal!, existing)) {
+      const level = existing ? await accessTo(deps, req.principal!, existing) : 'none';
+      if (!existing || level === 'none') {
         return res.status(404).json({ error: OWNER_ERROR });
+      }
+      if (level === 'view') {
+        return res.status(403).json({ error: 'У вас доступ лише на перегляд цього курсу.', kind: 'forbidden' });
       }
       const course = updateCourse(req.params.id, req.body || {});
       if (!course) return res.status(404).json({ error: OWNER_ERROR });
-      res.json({ course });
+      deps.onCourseChanged?.(course);
+      res.json({ course, access: level });
     } catch (err) {
       res.status(503).json({ error: String((err as Error).message) });
     }
