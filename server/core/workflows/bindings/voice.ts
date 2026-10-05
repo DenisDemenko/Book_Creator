@@ -26,7 +26,7 @@ import {
   type VoiceReply,
   type VoiceTurnContext,
 } from '../../interview';
-import { LlmFallbackJevAdapter, type JevAdapter } from '../../../ai/adapters/jev';
+import { LlmFallbackJevAdapter, jevCostUsd, type JevAdapter } from '../../../ai/adapters/jev';
 import { nodeOutputs, type WorkflowNode } from '../../../../src/utils/workflowGraph';
 import { publishedVersion, startRun, type EngineDeps } from '../engine/runner';
 import type { BindingDef, EngineServices, WfState } from '../engine/types';
@@ -121,19 +121,29 @@ export function voiceBinding(base: TurnDeps = {}): BindingDef {
               };
             }
             const d = dec.decision;
-            const r = (d.result ?? {}) as { confidence?: number | null; raw_distributions?: Record<string, Record<string, number>>; scores?: Record<string, number> };
+            const r = (d.result ?? {}) as { confidence?: number | null; raw_distributions?: Record<string, Record<string, number>>; scores?: Record<string, number>; costUsd?: unknown };
             const usage = (d.usage ?? {}) as { input_tokens?: number; output_tokens?: number };
             const confidence = typeof r.confidence === 'number' ? Math.max(0, Math.min(1, r.confidence)) : null;
+            // Витрати: Jev тарифікується за вхідні токени, запасний LLM — своєю
+            // ціною, якщо рушій її знає. Без цього рядка крок показував токени,
+            // але $0.0000 — і витрати Jev не потрапляли ані в крок, ані в запуск.
+            const tokensIn = Number(usage.input_tokens) || 0;
+            const tokensOut = Number(usage.output_tokens) || 0;
+            const costUsd = d.source === 'jev'
+              ? jevCostUsd(tokensIn)
+              : typeof r.costUsd === 'number' ? Math.round(r.costUsd * 1_000_000) / 1_000_000 : 0;
             return {
               branch: 'out',
               patch: {
                 vars: { ...state.vars, decisionId: d.id, sceneDecisionId: dec.sceneDecision?.id ?? null, decision: d.selectedAction, [node.id]: { selected: d.selectedAction, scores: r.scores ?? {}, source: d.source, chain: dec.chain } },
                 confidence,
+                cost: state.cost + costUsd,
               },
               trace: {
                 model: d.modelVersion,
-                tokensIn: Number(usage.input_tokens) || 0,
-                tokensOut: Number(usage.output_tokens) || 0,
+                tokensIn,
+                tokensOut,
+                costUsd,
                 decision: `дія: ${d.selectedAction}${dec.sceneDecision?.selectedAction ? ` · мотив сцени: ${dec.sceneDecision.selectedAction}` : ''}`,
                 confidence,
                 warnings: d.fallbackReason ? [`запасний LLM: ${d.fallbackReason}`.slice(0, 400)] : [],
