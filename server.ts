@@ -6111,6 +6111,24 @@ ${JSON.stringify(bookContext || {}, null, 2)}
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
+
+    // Ассет, якого немає, не має права на SPA-фолбек (05.10.2026).
+    //
+    // Було: `/assets/смарагд-….webp`, якого немає в цій збірці, отримував
+    // index.html **із кодом 200**. Для браузера це не «файла немає», а
+    // «відповідь є»: у мережі видно 200, у консолі — нічого, а <img> просто
+    // не декодується. Найгірше те, що така відповідь кешується за адресою
+    // картинки: одного разу отримавши HTML замість фото, браузер віддає його
+    // й далі — і фон у студії перестає мінятися, хоч на диску все є.
+    // Саме тому це не косметика: без справжнього 404 така поломка невидима
+    // й невиліковна для того, хто вже на неї натрапив.
+    app.get('*', (req, res, next) => {
+      const url = req.path;
+      const looksLikeFile = url.startsWith('/assets/') || /\.[a-z0-9]{2,5}$/i.test(url);
+      if (!looksLikeFile) return next();
+      res.status(404).type('text/plain').send('Not found');
+    });
+
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
