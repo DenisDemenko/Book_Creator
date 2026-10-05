@@ -11,10 +11,10 @@ interface ApiKeyRow {
   fingerprint?: string;
   updatedAt?: string;
   /**
-   * Текстовий рушій чи генератор зображень. Поле опційне, бо старіший
-   * сервер його не віддає — тоді рядок вважається текстовим, як раніше.
+   * Категорія провайдера. Поле опційне, бо старіший сервер його не
+   * віддає — тоді рядок вважається текстовим, як раніше.
    */
-  kind?: 'text' | 'image' | 'audio';
+  kind?: 'text' | 'image' | 'audio' | 'decision';
 }
 
 interface ApiKeysViewProps {
@@ -216,9 +216,10 @@ export const ApiKeysView: React.FC<ApiKeysViewProps> = ({ authUser }) => {
     );
   };
 
-  const textKeys = keys.filter((k) => k.kind !== 'image' && k.kind !== 'audio');
+  const textKeys = keys.filter((k) => k.kind !== 'image' && k.kind !== 'audio' && k.kind !== 'decision');
   const imageKeys = keys.filter((k) => k.kind === 'image');
   const audioKeys = keys.filter((k) => k.kind === 'audio');
+  const decisionKeys = keys.filter((k) => k.kind === 'decision');
 
   if (!isRegistered) {
     return (
@@ -290,6 +291,18 @@ export const ApiKeysView: React.FC<ApiKeysViewProps> = ({ authUser }) => {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {audioKeys.map(renderRow)}
+              </div>
+            </section>
+          )}
+
+          {decisionKeys.length > 0 && (
+            <section className="flex flex-col gap-3">
+              <div>
+                <h2 className="text-[13px] font-bold text-[var(--on-surface)]">{t('apiKeysView.sectionDecision')}</h2>
+                <p className="text-[11px] text-[var(--on-surface-variant)] mt-0.5">{t('apiKeysView.sectionDecisionHint')}</p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {decisionKeys.map(renderRow)}
               </div>
             </section>
           )}

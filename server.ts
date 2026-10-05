@@ -243,7 +243,7 @@ async function loadVisualImage(projectId: string, assetUrl: string, actor: strin
   if (got.record.ownerId !== userId && got.record.ownerId !== bookOwner) return null;
   return { mimeType: got.record.mimeType, data: Buffer.from(got.bytes).toString('base64') };
 }
-import { HttpJevAdapter, JEV_MODEL } from './server/ai/adapters/jev';
+import { HttpJevAdapter, jevKeyFromEnv, jevModelFromEnv } from './server/ai/adapters/jev';
 import { llmViaCore } from './server/ai/adapters/llm';
 import { platformEmbedder, recordEmbeddingCost, embeddingKeyFor } from './server/core/search/platform';
 import {
@@ -786,10 +786,10 @@ registerGitCommandRoutes(app);
       void dropRealtimeParticipant(projectId, userId);
     },
   });
-  // Jev (TypeSafe) за ключем платформи чи TYPESAFE_API_KEY; без ключа — null (запасний LLM).
+  // Jev (TypeSafe) за ключем платформи чи JEV_API_KEY / TYPESAFE_API_KEY; без ключа — null (запасний LLM).
   const typesafeJev = async () => {
-    const key = (await platformKeyFor('typesafe').catch(() => undefined)) || process.env.TYPESAFE_API_KEY?.trim();
-    return key ? new HttpJevAdapter(key, { model: process.env.TYPESAFE_JEV_MODEL?.trim() || JEV_MODEL }) : null;
+    const key = (await platformKeyFor('typesafe').catch(() => undefined)) || jevKeyFromEnv();
+    return key ? new HttpJevAdapter(key, { model: jevModelFromEnv() }) : null;
   };
   // Т5.4: рушій процесів ШІ (LangGraph) — опубліковані процеси AI-1, AI-2, голосу героя;
   // Т5.5: вузли Jev (Jev → запасний LLM AI-2).

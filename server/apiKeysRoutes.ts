@@ -18,6 +18,7 @@ import { encryptApiKey, apiKeyFingerprint, isApiKeyCryptoConfigured } from './us
 import { CHAT_MODELS, ENGINE_LABELS, ENGINE_ENV_KEY, engineConfigured, type EngineId } from './chatProviders';
 import { dispatch } from './aiCore';
 import { platformKeyFor, resolveEngineKey } from './platformKeys';
+import { HttpJevAdapter, JEV_ENV_KEYS, jevKeyFromEnv, jevModelFromEnv } from './ai/adapters/jev';
 
 const KNOWN_ENGINES = new Set<string>(Object.keys(ENGINE_LABELS));
 
@@ -76,8 +77,42 @@ function audioServerKeyConfigured(engine: string): boolean {
   return p.envKeys.some((k) => !!process.env[k]);
 }
 
+/**
+ * Провайдер РІШЕНЬ — Jev (TypeSafe System One). Окрема категорія: це не
+ * чат-модель і не генератор, а модель структурованих відповідей («яку дію
+ * обере персонаж»), і платформа ходить до неї адаптером `HttpJevAdapter`, а
+ * не через `dispatch`. Ключ читає `platformKeyFor('typesafe')`; назва рушія
+ * саме `typesafe`, бо так його вже шукають `server.ts` і `realDeps.ts`.
+ */
+const DECISION_KEY_PROVIDERS = [
+  {
+    engine: 'typesafe',
+    label: 'Jev (TypeSafe System One)',
+    envKeys: JEV_ENV_KEYS,
+  },
+] as const;
+
+const DECISION_KEY_ENGINES = new Set<string>(DECISION_KEY_PROVIDERS.map((p) => p.engine));
+
+function decisionServerKeyConfigured(engine: string): boolean {
+  const p = DECISION_KEY_PROVIDERS.find((x) => x.engine === engine);
+  if (!p) return false;
+  return p.envKeys.some((k) => !!process.env[k]?.trim());
+}
+
 function isEngineId(value: string): value is EngineId {
   return KNOWN_ENGINES.has(value);
+}
+
+/** Людська назва провайдера для відповіді PUT — для всіх чотирьох категорій. */
+function labelForEngine(engine: string): string {
+  if (isEngineId(engine)) return ENGINE_LABELS[engine];
+  return (
+    IMAGE_KEY_PROVIDERS.find((p) => p.engine === engine)?.label ??
+    AUDIO_KEY_PROVIDERS.find((p) => p.engine === engine)?.label ??
+    DECISION_KEY_PROVIDERS.find((p) => p.engine === engine)?.label ??
+    engine
+  );
 }
 
 /** Унікальний префікс ключа Anthropic — єдина ознака, яку можна перевіряти без здогадів. */
@@ -162,6 +197,21 @@ export function registerApiKeysRoutes(app: Express): void {
       });
       keys.push(...(audioKeys as unknown as typeof keys));
 
+      // Провайдер рішень (Jev) — четверта секція панелі, тим самим списком.
+      const decisionKeys = DECISION_KEY_PROVIDERS.map((p) => {
+        const own = byEngine.get(p.engine);
+        return {
+          engine: p.engine,
+          label: p.label,
+          serverKeyConfigured: decisionServerKeyConfigured(p.engine),
+          configured: !!own,
+          fingerprint: own?.fingerprint,
+          updatedAt: own?.updatedAt,
+          kind: 'decision' as const,
+        };
+      });
+      keys.push(...(decisionKeys as unknown as typeof keys));
+
       res.json({ keys, cryptoConfigured: isApiKeyCryptoConfigured() });
     } catch (err) {
       console.error('[api-keys] list:', err);
@@ -173,7 +223,7 @@ export function registerApiKeysRoutes(app: Express): void {
   app.put('/api/account/api-keys/:engine', requireAuth, requirePermission('canManageApiKeys'), async (req, res) => {
     try {
       const engine = req.params.engine;
-      if (!isEngineId(engine) && !IMAGE_KEY_ENGINES.has(engine) && !AUDIO_KEY_ENGINES.has(engine)) {
+      if (!isEngineId(engine) && !IMAGE_KEY_ENGINES.has(engine) && !AUDIO_KEY_ENGINES.has(engine) && !DECISION_KEY_ENGINES.has(engine)) {
         return res.status(400).json({ error: `Невідомий провайдер: ${engine}.` });
       }
       const apiKey = typeof req.body?.apiKey === 'string' ? req.body.apiKey.trim() : '';
@@ -205,7 +255,7 @@ export function registerApiKeysRoutes(app: Express): void {
 
       res.json({
         engine,
-        label: ENGINE_LABELS[engine],
+        label: labelForEngine(engine),
         configured: true,
         fingerprint: apiKeyFingerprint(apiKey),
         updatedAt: now,
@@ -222,7 +272,8 @@ export function registerApiKeysRoutes(app: Express): void {
       const engine = req.params.engine;
       const isImage = IMAGE_KEY_ENGINES.has(engine);
       const isAudio = AUDIO_KEY_ENGINES.has(engine);
-      if (!isEngineId(engine) && !isImage && !isAudio) {
+      const isDecision = DECISION_KEY_ENGINES.has(engine);
+      if (!isEngineId(engine) && !isImage && !isAudio && !isDecision) {
         return res.status(400).json({ error: `Невідомий провайдер: ${engine}.` });
       }
       const userId = req.principal!.id as string;
@@ -234,7 +285,9 @@ export function registerApiKeysRoutes(app: Express): void {
           ? engineConfigured(engine)
           : isAudio
             ? audioServerKeyConfigured(engine)
-            : imageServerKeyConfigured(engine),
+            : isDecision
+              ? decisionServerKeyConfigured(engine)
+              : imageServerKeyConfigured(engine),
       });
     } catch (err) {
       console.error('[api-keys] delete:', err);
@@ -262,30 +315,60 @@ export function registerApiKeysRoutes(app: Express): void {
    */
   app.post('/api/account/api-keys/:engine/test', requireAuth, requirePermission('canManageApiKeys'), async (req, res) => {
     const engine = req.params.engine;
-    if (!isEngineId(engine)) {
-      return res.status(400).json({ error: `Перевірка доступна лише для текстових рушіїв, а не для «${engine}».` });
+    const isDecision = DECISION_KEY_ENGINES.has(engine);
+    if (!isEngineId(engine) && !isDecision) {
+      return res.status(400).json({ error: `Перевірка доступна лише для текстових рушіїв і Jev, а не для «${engine}».` });
     }
     try {
       const userId = req.principal!.id as string;
-      const key = await resolveEngineKey(userId, engine, 'key-test');
+      // Рушій розділу «текстові» (з EngineId) або null для Jev. Звужуємо тип
+      // один раз — далі ним користуються engineConfigured / ENGINE_ENV_KEY / dispatch.
+      const textEngine: EngineId | null = isEngineId(engine) ? engine : null;
+      // Резолвер знає про платформний і власний ключ; Jev додає змінні
+      // оточення своїми назвами (JEV_API_KEY / TYPESAFE_API_KEY), бо
+      // універсальний ENGINE_ENV_KEY їх не знає.
+      const resolved = await resolveEngineKey(userId, engine, 'key-test');
+      const key = resolved || (isDecision ? jevKeyFromEnv() : undefined);
       const source = key
         ? (await platformKeyFor(engine)) === key
           ? 'платформний ключ із цієї панелі'
-          : 'власний ключ цього користувача'
+          : isDecision && jevKeyFromEnv() === key
+            ? `змінна оточення сервера (${JEV_ENV_KEYS.join(' / ')})`
+            : 'власний ключ цього користувача'
         : 'змінна оточення сервера';
 
-      if (!key && !engineConfigured(engine)) {
+      const serverConfigured = textEngine ? engineConfigured(textEngine) : decisionServerKeyConfigured(engine);
+      if (!key && !serverConfigured) {
+        const envHint = textEngine ? ENGINE_ENV_KEY[textEngine] : JEV_ENV_KEYS.join(' або ');
         return res.json({
           ok: false,
           engine,
           source,
-          error: `Ключа немає ніде: ні в цій панелі, ні у змінній оточення ${ENGINE_ENV_KEY[engine]}.`,
+          error: `Ключа немає ніде: ні в цій панелі, ні у змінній оточення ${envHint}.`,
         });
       }
 
-      const modelId = CHAT_MODELS.find((m) => m.engine === engine)?.id || '';
+      if (isDecision) {
+        // Найдешевший осмислений запит до Jev — одне choice-питання над
+        // мінімальним станом: той самий шлях, яким ходить продукт.
+        const modelId = jevModelFromEnv();
+        await new HttpJevAdapter(key!, { model: modelId }).askState(
+          { ping: 'перевірка ключа з панелі «Ключі API»' },
+          [{ id: 'ok', kind: 'choice', instructions: 'Підтверди, що звʼязок працює: обери «ok».', options: { ok: 'звʼязок працює', fail: 'звʼязку немає' } }],
+        );
+        return res.json({
+          ok: true,
+          engine,
+          source,
+          fingerprint: key ? apiKeyFingerprint(key) : undefined,
+          last4: key ? key.slice(-4) : undefined,
+          modelId,
+        });
+      }
+
+      const modelId = CHAT_MODELS.find((m) => m.engine === textEngine)?.id || '';
       // Найдешевший осмислений запит: одне слово на вхід, одне на вихід.
-      await dispatch(engine, modelId, 'ping', 'Reply with the single word: pong.', key);
+      await dispatch(textEngine!, modelId, 'ping', 'Reply with the single word: pong.', key);
 
       res.json({
         ok: true,

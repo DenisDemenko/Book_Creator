@@ -42,6 +42,28 @@ export const JEV_MODEL = 'jev-1.13.0';
 /** USD за 1 млн вхідних токенів (docs.typesafe.ai/models, 25.09.2026). */
 export const JEV_USD_PER_MTOK = 0.042;
 
+/**
+ * Змінні оточення, з яких береться ключ Jev, коли адміністратор не ввів його
+ * в панелі «Ключі API». `JEV_API_KEY` — історична назва (її вживають локальні
+ * та Railway-конфігурації цього проєкту), `TYPESAFE_API_KEY` — назва
+ * провайдера. Обидві читаються одним кодом, тож ключ можна покласти в будь-яку.
+ */
+export const JEV_ENV_KEYS = ['JEV_API_KEY', 'TYPESAFE_API_KEY'] as const;
+
+/** Ключ Jev зі змінних оточення — перший непорожній із `JEV_ENV_KEYS`. */
+export function jevKeyFromEnv(): string | undefined {
+  for (const name of JEV_ENV_KEYS) {
+    const value = process.env[name]?.trim();
+    if (value) return value;
+  }
+  return undefined;
+}
+
+/** Модель Jev зі змінної оточення; без неї — закріплена константа. */
+export function jevModelFromEnv(): string {
+  return process.env.TYPESAFE_JEV_MODEL?.trim() || JEV_MODEL;
+}
+
 export interface JevAdapter {
   readonly name: 'jev' | 'mock' | 'llm_fallback';
   /** Оцінити знімок атомарними питаннями. Головний вибір — `next_action`, а без нього — перше питання choice. */

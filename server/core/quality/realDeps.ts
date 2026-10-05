@@ -13,7 +13,7 @@ import { platformKeyFor } from '../../platformKeys';
 import { GEMINI_MODEL, resolveTextEngine } from '../../aiCore';
 import { priceForTextEngine, type TextEngine } from '../../pricing';
 import { llmViaCore } from '../../ai/adapters/llm';
-import { HttpJevAdapter, JEV_MODEL, LlmFallbackJevAdapter } from '../../ai/adapters/jev';
+import { HttpJevAdapter, LlmFallbackJevAdapter, jevKeyFromEnv, jevModelFromEnv } from '../../ai/adapters/jev';
 import type { QualityRunDeps } from './livingCharacters';
 
 export const QUALITY_PROJECT_TAG = 'qa-living-characters';
@@ -21,8 +21,8 @@ export const QUALITY_PROJECT_TAG = 'qa-living-characters';
 export async function realQualityDeps(actor: string): Promise<{ deps: QualityRunDeps; models: Record<string, unknown> }> {
   const voiceModel = (await resolveModuleModelId('coreCharacterVoice')) || GEMINI_MODEL;
   const llmModel = (await resolveModuleModelId('coreAi2Analysis')) || GEMINI_MODEL;
-  const key = (await platformKeyFor('typesafe').catch(() => undefined)) || process.env.TYPESAFE_API_KEY?.trim();
-  const jevModel = process.env.TYPESAFE_JEV_MODEL?.trim() || JEV_MODEL;
+  const key = (await platformKeyFor('typesafe').catch(() => undefined)) || jevKeyFromEnv();
+  const jevModel = jevModelFromEnv();
   const jev = key ? new HttpJevAdapter(key, { model: jevModel }) : null;
   const llm = llmViaCore(aiRoleGenerateViaCore, async () => llmModel, QUALITY_PROJECT_TAG, actor);
   const deps: QualityRunDeps = {

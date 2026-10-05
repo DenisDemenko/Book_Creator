@@ -140,6 +140,16 @@ console.log('\nHTTP-роути (server/apiKeysRoutes.ts):');
     initialKeys.some((k) => k.engine === 'elevenlabs' && k.kind === 'audio'),
     initialKeys.map((k) => `${k.engine}:${k.kind}`).join(', ')
   );
+  t(
+    'Jev (TypeSafe) присутній як провайдер рішень',
+    initialKeys.some((k) => k.engine === 'typesafe' && k.kind === 'decision'),
+    initialKeys.map((k) => `${k.engine}:${k.kind}`).join(', ')
+  );
+  t(
+    'рівно один провайдер рішень — щоб секція не роздувалась випадково',
+    initialKeys.filter((k) => k.kind === 'decision').length === 1,
+    String(initialKeys.filter((k) => k.kind === 'decision').length)
+  );
   t('спочатку жоден власний ключ не заданий', initial.data.keys.every((k: any) => k.configured === false));
   t('відповідь не містить сам ключ', !JSON.stringify(initial.data).includes('sk-'));
 
@@ -165,6 +175,35 @@ console.log('\nHTTP-роути (server/apiKeysRoutes.ts):');
 
   const emptyKey = await call('PUT', '/api/account/api-keys/groq', { apiKey: '   ' });
   t('порожній ключ → 400', emptyKey.status === 400, String(emptyKey.status));
+
+  // Ключ Jev (TypeSafe) — четверта категорія панелі. Зберігається й читається
+  // тим самим сховищем; перевірку «живим» запитом тут не робимо (мережа), але
+  // доводимо, що маршрут перевірки знає цей рушій і без ключа каже, де його брати.
+  const savedJev = await call('PUT', '/api/account/api-keys/typesafe', { apiKey: 'apikey_test_jev_key_123' });
+  t('PUT ключа Jev (typesafe) → 200', savedJev.status === 200, String(savedJev.status));
+  t('відповідь Jev підтверджує configured: true', savedJev.data?.configured === true);
+  t('відповідь Jev має відбиток, а не сам ключ', !!savedJev.data?.fingerprint && !JSON.stringify(savedJev.data).includes('apikey_test_jev_key_123'));
+  const afterJev = await call('GET', '/api/account/api-keys');
+  t(
+    'GET після збереження показує configured: true для typesafe',
+    (afterJev.data?.keys ?? []).some((k: any) => k.engine === 'typesafe' && k.configured === true)
+  );
+  const deletedJev = await call('DELETE', '/api/account/api-keys/typesafe');
+  t('DELETE ключа Jev → 200', deletedJev.status === 200, String(deletedJev.status));
+  t('після видалення Jev знову configured: false',
+    (await call('GET', '/api/account/api-keys')).data.keys.find((k: any) => k.engine === 'typesafe')?.configured === false);
+
+  delete process.env.JEV_API_KEY;
+  delete process.env.TYPESAFE_API_KEY;
+  const jevNoKey = await call('POST', '/api/account/api-keys/typesafe/test');
+  t('перевірка Jev без ключа → ok:false', jevNoKey.status === 200 && jevNoKey.data?.ok === false, JSON.stringify(jevNoKey.data?.ok));
+  t(
+    'повідомлення Jev називає обидві змінні оточення',
+    /JEV_API_KEY/.test(jevNoKey.data?.error || '') && /TYPESAFE_API_KEY/.test(jevNoKey.data?.error || ''),
+    String(jevNoKey.data?.error)
+  );
+  const imageTest = await call('POST', '/api/account/api-keys/seedream/test');
+  t('перевірка ключа зображень усе ще → 400', imageTest.status === 400, String(imageTest.status));
 
   const saved = await call('PUT', '/api/account/api-keys/groq', { apiKey: 'gsk-user-own-key-123' });
   t('PUT дійсний ключ → 200', saved.status === 200, String(saved.status));
