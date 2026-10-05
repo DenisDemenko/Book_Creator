@@ -128,10 +128,27 @@ console.log('\nПрозорість блоків (BlocksOpacityContext + пов�
     /\.app-shell-root\s*>\s*:not\(\.studio-backdrop\):not\(\.ui-opacity-exempt\)/.test(css));
   t('є фолбек 0.75 у самому CSS-правилі (до першого рендера)',
     /var\(--ui-blocks-opacity,\s*0\.75\)/.test(css));
-  t('рятівна пігулка нижче порога (щоб повзунок на 0% не замикав UI)',
+  t('рятівна пігулка нижче порога (щоб повзунок на мінімумі не замикав UI)',
     /BLOCKS_OPACITY_RESCUE_BELOW\s*=\s*0\.2\b/.test(ctx) && /ui-opacity-exempt/.test(ctx));
-  t('повзунок у блоці «Сяйво та аура», діапазон 0–100',
-    /id="blocks-opacity-slider"/.test(glow) && /min=\{0\}[\s\S]{0,80}max=\{100\}/.test(glow));
+  t('мінімум повзунка — 5%, а не 0%',
+    /BLOCKS_OPACITY_MIN\s*=\s*0\.05\b/.test(ctx) &&
+    /clampBlocks/.test(ctx) &&
+    /Math\.max\(BLOCKS_OPACITY_MIN/.test(ctx));
+  t('повзунок у блоці «Сяйво та аура», діапазон від 5 до 100',
+    /id="blocks-opacity-slider"/.test(glow) &&
+    /min=\{Math\.round\(BLOCKS_OPACITY_MIN \* 100\)\}[\s\S]{0,80}max=\{100\}/.test(glow));
+  t('збережене значення теж затискається до межі (а не скидається)',
+    /n >= 0 && n <= 1\) return clampBlocks\(n\)/.test(ctx));
+
+  // Накладання фону — окремий баг власника (05.10.2026): з `z-index: 0`
+  // фото (позиційоване) малювалося ПІСЛЯ звичайних блоків у потоці й
+  // закривало всю центральну частину студії, а видно лишались тільки
+  // позиційовані блоки (сайдбар, шапка). На 100% «Блоки» це виглядало як
+  // «блоки зникли» — тому тут стежимо, щоб фон лежав ПІД блоками.
+  t('фото-фон лежить ПІД блоками (z-index: -1)',
+    /\.studio-backdrop\s*\{[^}]*z-index:\s*-1/.test(css));
+  t('шкаралупа — контекст накладання (інакше -1 просідає під її тло)',
+    /\.app-shell-root\s*\{[^}]*isolation:\s*isolate/.test(css));
 }
 
 console.log('\nФон підключено до студії (App.tsx):');

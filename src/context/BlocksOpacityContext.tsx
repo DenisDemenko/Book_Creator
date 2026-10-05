@@ -25,16 +25,27 @@ const STORAGE_KEY = 'nova_blocks_opacity';
 export const BLOCKS_OPACITY_DEFAULT = 0.75;
 
 /**
+ * Нижня межа повзунка — 5%, а не 0%.
+ *
+ * Власник 05.10.2026: «0% прозорості не потрібно — давай обмежимо до 5%».
+ * На нулі зникає весь інтерфейс, і повернути його можна лише рятівною
+ * пігулкою; п'ять відсотків лишають блоки ледь видимими, тож видно, що
+ * саме сталося. Значення, нижчі за межу (зокрема збережені давнішими
+ * сесіями), піднімаються до неї, а не скидаються на типове.
+ */
+export const BLOCKS_OPACITY_MIN = 0.05;
+
+/**
  * Нижче цього порогу повертаємо «рятівну» пігулку (див. RescuePill у цьому ж
- * файлі). Причина: повзунок доходить до 0% і гасить повзунок теж — разом із
- * блоком «Сяйво та аура», у якому він живе. Без видимої пігулки людина
- * лишилась би з порожнім екраном і без жодного способу повернути значення
- * назад, крім ручного чищення localStorage.
+ * файлі). Причина: повзунок доходить до 5%, і на такому значенні не видно вже
+ * ні самого блока «Сяйво та аура», у якому живе повзунок. Без видимої пігулки
+ * людина лишилась би з порожнім екраном і без жодного способу повернути
+ * значення назад, крім ручного чищення localStorage.
  */
 export const BLOCKS_OPACITY_RESCUE_BELOW = 0.2;
 
 interface BlocksOpacityValue {
-  /** 0..1 — прозорість блоків студії. */
+  /** 0.05..1 — непрозорість блоків студії. */
   blocksOpacity: number;
   /** Приймає 0..1 (затискає в межі), пише в CSS-змінну й у localStorage. */
   setBlocksOpacity: (value: number) => void;
@@ -44,9 +55,9 @@ interface BlocksOpacityValue {
 
 const BlocksOpacityContext = createContext<BlocksOpacityValue | null>(null);
 
-function clamp01(value: number): number {
+function clampBlocks(value: number): number {
   if (!Number.isFinite(value)) return BLOCKS_OPACITY_DEFAULT;
-  return Math.min(1, Math.max(0, value));
+  return Math.min(1, Math.max(BLOCKS_OPACITY_MIN, value));
 }
 
 function readInitial(): number {
@@ -54,7 +65,9 @@ function readInitial(): number {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored !== null) {
       const n = Number(stored);
-      if (Number.isFinite(n) && n >= 0 && n <= 1) return n;
+      // Нуль чи 2% із давнішої сесії — не привід кидати весь стан: підносимо
+      // до нової межі, щоб людина побачила те саме, що й на повзунку.
+      if (Number.isFinite(n) && n >= 0 && n <= 1) return clampBlocks(n);
     }
   } catch {
     /* localStorage недоступний (приватний режим тощо) — типове значення */
@@ -93,7 +106,7 @@ export const BlocksOpacityProvider: React.FC<{ children: React.ReactNode }> = ({
   const [blocksOpacity, setValue] = useState<number>(readInitial);
 
   const setBlocksOpacity = useCallback((value: number) => {
-    setValue(clamp01(value));
+    setValue(clampBlocks(value));
   }, []);
 
   const resetBlocksOpacity = useCallback(() => {

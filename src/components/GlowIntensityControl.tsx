@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Sparkles, Gauge, Sun, ChevronDown, Layers } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext';
 import { useSunLighting } from '../context/SunLightingContext';
-import { useBlocksOpacity } from '../context/BlocksOpacityContext';
+import { useBlocksOpacity, BLOCKS_OPACITY_MIN } from '../context/BlocksOpacityContext';
 
 /** Ключі localStorage для персистентності налаштувань сяйва. */
 const POINTS_KEY = 'nova_glow_points';
@@ -460,9 +460,13 @@ export const GlowIntensityControl: React.FC = () => {
 
       {/* Ряд 4 — прозорість блоків студії над фото-фоном. Типово 75%.
           «Прозорість» у підписові, а значення — навпаки, прозорість
-          НЕПРОЗОРОСТІ: 100% = блоки суцільні, 0% = лишається тільки фон.
+          НЕПРОЗОРОСТІ: 100% = блоки суцільні, 5% = лишається майже тільки фон.
           Саме так це читає людина («постав прозорість 75%») — тому на
-          повзунку 75%, а не 25%. */}
+          повзунку 75%, а не 25%.
+
+          Мінімум — 5%, не 0% (власник, 05.10.2026): на нулі зникає весь
+          інтерфейс разом із самим повзунком, і повернути його можна лише
+          рятівною пігулкою. П'ять відсотків лишають блоки ледь видимими. */}
       <div className="flex items-center gap-2" title={t('header.blocksOpacityTitle')}>
         <Layers className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
         <span className="w-12 shrink-0 text-[11px] font-semibold text-slate-300 whitespace-nowrap">
@@ -471,7 +475,7 @@ export const GlowIntensityControl: React.FC = () => {
         <input
           id="blocks-opacity-slider"
           type="range"
-          min={0}
+          min={Math.round(BLOCKS_OPACITY_MIN * 100)}
           max={100}
           step={1}
           value={Math.round(blocksOpacity * 100)}
