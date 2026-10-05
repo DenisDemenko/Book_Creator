@@ -190,6 +190,15 @@ Railway (`Book_Creator`).
 `76156e1` (запис #361). **Не приписувати ці файли #359/#360.** У теці лежить
 чужий `.vscode/settings.json` (не чіпано).
 
+**Облік витрат Jev — закомічено як `fdc9375`** (на прохання власника: «щоб 851
+токен не показувались як $0.0000»). Файли: `server/ai/adapters/jev/index.ts`
+(`jevCostUsd`), `server/core/workflows/engine/jev.ts`,
+`server/core/workflows/bindings/voice.ts`,
+`src/components/graphStudio/RunsPanel.tsx`, `scripts/test-jevLevels.mts` + журнал.
+Що перевірити після деплою: у «Запусках» хід допиту, де голос упав, а Jev
+відповів, має показувати ціну кроку `decide` (≈$0.00003), а не $0.0000.
+Старі запуски не перераховуються.
+
 **Запис #360 — кнопка згортання верхньої панелі — теж закомічено й запушено**
 (`b08e5eb`) в обидва remote на пряме прохання власника. Файли:
 `src/components/HeaderNav.tsx`, `src/index.css`,
