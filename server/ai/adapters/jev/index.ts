@@ -20,10 +20,11 @@
  *
  * Noul (Т2.5 В1): відповідь нормалізується в імовірність «так» 0–1
  * (`checks`) із будь-якої з форм, які може дати провайдер (`probability`,
- * `probabilities.yes|true`, `score` 0–1, `answer`/`value` так/ні +
- * `confidence`). Точну форму ще не звірено справжнім ключем — у хмарі немає
- * мережі до TypeSafe (відкрите питання №1 звіту Т1.6); різниця ізольована
- * тут, у `noulProbability`.
+ * `probabilities.yes|true`, `score` 0–1, `noul` 0–1, `answer`/`value` так/ні +
+ * `confidence`). Форму звірено живим ключем 05.10.2026: TypeSafe відповідає
+ * `{"type":"noul","noul":0.4}` — числом, а не булевим; доти вузол `JEV_NOUL`
+ * вважав відповідь відсутньою й ішов запасним LLM (відкрите питання №1 звіту
+ * Т1.6 закрито). Різниця ізольована тут, у `noulProbability`.
  *
  * Значення Jev — модельні евристики, не психологічний діагноз і не доказ
  * істини у світі книги (ТЗ-H §2). Серверний валідатор перевіряє, що обрана
@@ -156,6 +157,11 @@ export function noulProbability(a: any): number | null {
   }
   if (typeof a.score === 'number' && a.score >= 0 && a.score <= 1) return clamp(a.score);
   const v = a.answer ?? a.value ?? a.noul;
+  // Справжній TypeSafe віддає Noul ЧИСЛОМ 0…1 у полі `noul`
+  // (`{"type":"noul","noul":0.4}` — звірено живим ключем 05.10.2026): це та
+  // сама імовірність «так». Без цієї гілки відповідь вважалася відсутньою й
+  // вузол `JEV_NOUL` мовчки йшов запасним LLM.
+  if (typeof v === 'number') return clamp(v);
   if (typeof v === 'boolean' || v === 'yes' || v === 'no') {
     const yes = v === true || v === 'yes';
     const c = typeof a.confidence === 'number' ? clamp(a.confidence) : 1;

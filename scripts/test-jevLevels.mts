@@ -168,6 +168,11 @@ const fakeLlm = async (_system: string, user: string) => {
     noulProbability({ probability: 0.4 }) === 0.4 && noulProbability({ probabilities: { yes: 0.7, no: 0.3 } }) === 0.7 &&
     noulProbability({ answer: 'no', confidence: 0.9 }) === 0.1 && noulProbability({ value: true }) === 1 && noulProbability({ score: 0.25 }) === 0.25 &&
     noulProbability({ probability: 7 }) === 1 && noulProbability({}) === null);
+  // Справжній TypeSafe (звірено живим ключем 05.10.2026) віддає імовірність
+  // «так» числом у полі `noul` — без цієї форми вузол JEV_NOUL ішов запасним LLM.
+  t('Noul: справжня форма TypeSafe — число в полі `noul`',
+    noulProbability({ type: 'noul', noul: 0.4 }) === 0.4 && noulProbability({ type: 'noul', noul: 0.06 }) === 0.06 &&
+    noulProbability({ type: 'noul', noul: 1 }) === 1 && noulProbability({ type: 'noul', noul: 0 }) === 0);
   const strategic: JevQuestion[] = [
     { id: 'long_goal', kind: 'choice', instructions: 'Провідна довга ціль?', options: { find_brother: null, protect_anna: null } },
     { id: 'motive_conflict', kind: 'score', instructions: 'Конфлікт мотивів?', levels: ['немає', 'слабкий', 'сильний'] },
