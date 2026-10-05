@@ -1,6 +1,10 @@
 export const header = {
   uk: {
     brandSubtitle: 'Видавнича майстерня',
+    collapsePanel: 'Згорнути',
+    expandPanel: 'Розгорнути',
+    collapsePanelTitle: 'Згорнути верхню панель — більше висоти для роботи',
+    expandPanelTitle: 'Розгорнути верхню панель',
     goToStart: 'Перейти на Стартову сторінку книги',
     untitledBook: 'Нова книга',
     copyBookId: 'Скопіювати ID книги',
@@ -126,6 +130,10 @@ export const header = {
   },
   en: {
     brandSubtitle: 'Publishing Studio',
+    collapsePanel: 'Collapse',
+    expandPanel: 'Expand',
+    collapsePanelTitle: 'Collapse the top panel — more room to work',
+    expandPanelTitle: 'Expand the top panel',
     goToStart: 'Go to the book Start page',
     untitledBook: 'New book',
     copyBookId: 'Copy book ID',

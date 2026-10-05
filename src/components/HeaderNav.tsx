@@ -4,6 +4,7 @@ import {
   Save,
   ShieldCheck,
   ChevronDown,
+  ChevronUp,
   Lock,
   Check,
   Sliders,
@@ -127,6 +128,29 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState<boolean>(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState<boolean>(false);
   const [isPluginsOpen, setIsPluginsOpen] = useState<boolean>(false);
+  /**
+   * Згорнута верхня панель — на прохання власника («потрібна вся висота
+   * екрану»). Стан живе в localStorage, тож згортання зберігається між
+   * розділами й перезавантаженнями, а не скидається на кожному екрані.
+   * Сама висота шапки для решти студії (сайдбар, канва) задається змінною
+   * `--app-header-h`, яку перемикає атрибут `data-header-collapsed` на
+   * `<html>` (правило в index.css).
+   */
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('nova.header.collapsed') === '1';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    document.documentElement.dataset.headerCollapsed = collapsed ? 'true' : 'false';
+    try {
+      localStorage.setItem('nova.header.collapsed', collapsed ? '1' : '0');
+    } catch {
+      /* приватний режим браузера — стан просто не переживе перезавантаження */
+    }
+  }, [collapsed]);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const pluginsRef = useRef<HTMLDivElement>(null);
   const [copiedId, setCopiedId] = useState<boolean>(false);
@@ -225,7 +249,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
           з підписом (SupportChatWidget.tsx, fixed top-1.5 right-4). Без
           цього відступу вона лягала б поверх чипа «Формат: A4 …» на
           екранах, де шапка заповнена. */}
-      <div className="max-w-[1780px] mx-auto px-4 sm:px-6 pr-20 sm:pr-24 py-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+      <div className={`max-w-[1780px] mx-auto px-4 sm:px-6 pr-20 sm:pr-24 ${collapsed ? 'py-1' : 'py-2'} flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5`}>
         {/* Ряд 1 — інформаційні блоки (неклікабельні).
             `contents` на обгортці рядка: рядок більше НЕ окремий рядок, його
             вміст стає безпосередніми елементами шапки. Так шапка з двох
@@ -280,6 +304,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
               справді влазить в ОДИН рядок. На 1280–1536 вони переносили
               другий рядок, і канва втрачала 40 пікселів висоти тексту —
               саме те, чого власник просив не робити. */}
+          {!collapsed && (
           <div className="hidden 2xl:flex items-center gap-2">
             {saveIndicator && (
               <div
@@ -317,10 +342,13 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
               <span className="[color:var(--sun-acc-70)]">{t('header.pagesShort', { n: totalPages })}</span>
             </div>
           </div>
+          )}
         </div>
 
         {/* Ряд 2 — клікабельні кнопки. Той самий прийом: `contents` вкладає
-            їх у спільний рядок шапки, а не в окремий. */}
+            їх у спільний рядок шапки, а не в окремий. У згорнутому стані
+            ряд ховається повністю — лишається тільки блок бренду й книга. */}
+        {!collapsed && (
         <div className="contents">
           <div className="flex items-center gap-2 flex-wrap">
             {/* Primary Save Button */}
@@ -663,6 +691,23 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
             </button>
           </div>
         </div>
+        )}
+
+        {/* Згортання/розгортання верхньої панелі по вертикалі (на прохання
+            власника: «потрібна вся висота екрану»). Кнопка лишається
+            видимою і в згорнутому стані — інакше не було б як розгорнути. */}
+        <button
+          id="header-collapse-btn"
+          onClick={() => setCollapsed((v) => !v)}
+          aria-expanded={!collapsed}
+          className="shrink-0 ml-auto flex items-center gap-1 px-2.5 py-1.5 rounded-lg badge-glass [color:var(--sun-acc)] hover:[border-color:var(--sun-acc-40)] transition-all"
+          title={collapsed ? t('header.expandPanelTitle') : t('header.collapsePanelTitle')}
+        >
+          {collapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+          <span className="hidden sm:inline text-[11px] font-medium">
+            {collapsed ? t('header.expandPanel') : t('header.collapsePanel')}
+          </span>
+        </button>
       </div>
     </header>
   );
