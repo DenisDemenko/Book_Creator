@@ -1,11 +1,12 @@
 /** Тести SQLite-сховища та міграції з JSON. Запуск: npm run test:sqlite */
-const DIR = '/tmp/nova-sqlite-test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'nova-sqlite-test-'));
 process.env.DATA_DIR = DIR;
 process.env.DATABASE_PATH = `${DIR}/nova-studio.db`;
 
-import fs from 'node:fs';
-fs.rmSync(DIR, { recursive: true, force: true });
-fs.mkdirSync(DIR, { recursive: true });
 
 // Кладемо «старі» JSON-файли ДО першого відкриття бази — імітуємо оновлення
 // вже працюючої інсталяції.
@@ -120,10 +121,8 @@ console.log('\nУнікальність пошти:');
 // Тому тут база створюється саме у СТАРОМУ вигляді, а не з нуля.
 console.log('\nВідкриття бази, створеної до появи firebase_uid:');
 {
-  const OLD_DIR = '/tmp/nova-sqlite-oldshape';
+  const OLD_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'nova-sqlite-oldshape-'));
   const OLD_DB = `${OLD_DIR}/nova-studio.db`;
-  fs.rmSync(OLD_DIR, { recursive: true, force: true });
-  fs.mkdirSync(OLD_DIR, { recursive: true });
 
   const { DatabaseSync } = await import('node:sqlite');
   const legacy = new DatabaseSync(OLD_DB);
@@ -175,4 +174,10 @@ console.log('\nВідкриття бази, створеної до появи f
 }
 
 console.log(`\nРезультат: ${pass} пройдено, ${fail} провалено`);
+db.closeDb();
+try {
+  fs.rmSync(DIR, { recursive: true, force: true });
+} catch (error) {
+  console.warn('Не вдалося прибрати тимчасову папку тесту:', (error as NodeJS.ErrnoException).code);
+}
 process.exit(fail ? 1 : 0);
