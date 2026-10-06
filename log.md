@@ -217,7 +217,7 @@ remote перевірити можна, запушити — ні**.
 
 Зміни #376 — `9d832d7` запушено в origin/master: platform-keys завершується через exitCode із закритою SQLite. 16/0 Linux; після оновлення повторити Windows platform-keys і npm test. Поточні незапушені коміти — git log origin/master..HEAD.
 
-Зміни #378: закриття SQLite перед cleanup collaboration-source, 39/0 Linux. Після оновлення повторити Windows source тест і npm test. Поточні незапушені коміти — git log origin/master..HEAD.
+Зміни #378 — `535912b` запушено в origin/master: закриття SQLite перед cleanup collaboration-source, 39/0 Linux. Після оновлення повторити Windows source тест і npm test. Поточні незапушені коміти — git log origin/master..HEAD.
 
 У хмарній копії один remote `origin` — **DenisDemenko/Book_Creator**, правильний репозиторій продакшну. Гілка `work`, пуш `HEAD:master`, без force. Результат перевіряється порівнянням HEAD із `git ls-remote origin refs/heads/master`. Після деплою перевірити Magic Scene у гілках, міграцію 0032 і збереження памʼяті. Живий платний AI та продакшн у цій сесії не перевірено. Перенесення на компʼютер відкладено.
 
