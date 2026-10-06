@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { initialBookData } from './data/initialBook';
+import { buildStarterBook, withoutDemoContent } from './utils/starterBook';
 import { loadActiveOntology } from './utils/ontologyClient';
 import { Book, NavigationTab, AuditLogEntry, UserRole, BookVersionSnapshot, HeroArcState } from './types';
 import { HeaderNav } from './components/HeaderNav';
@@ -679,13 +680,16 @@ export default function App() {
     // Якщо ця книга ще не відкрита локально — створюємо мінімальну
     // заглушку з тим самим ID: реальний вміст прийде через WS-кімнату
     // спільної роботи (server.ts, room:sync), щойно письменник буде онлайн.
+    // Демо-контент зразка з заглушки прибираємо: учасник не має бачити в
+    // себе ні демо-персонажів, ні їхніх портретів у Медіатеці, поки книга
+    // автора ще не прийшла (звернення власника 06.10.2026).
     if (book.id !== lock.bookId) {
-      const stubBook: Book = {
+      const stubBook: Book = withoutDemoContent({
         ...initialBookData,
         id: lock.bookId,
         title: roleChoice.bookTitle,
         chapters: [],
-      };
+      });
       setBook(stubBook);
       setActiveChapterId('');
       setActiveSectionId('');
@@ -755,11 +759,13 @@ export default function App() {
           setActiveChapterId(storedBook.chapters[0]?.id || '');
           setActiveSectionId(storedBook.chapters[0]?.sections[0]?.id || '');
         }
-        if (!storedBook) {
-          // Перший запуск: одразу кладемо початковий проект у сховище,
-          // щоб наступне завантаження читалося зі сховища, а не з коду.
-          await saveBook(initialBookData).catch(() => undefined);
-        }
+        // Книги на цьому пристрої немає — у стані лишається демо-книга
+        // (`initialBookData`, початковий стан). У сховище її НЕ пишемо: там
+        // вона не відрізнялася б від книги автора, а гість, який потім
+        // зареєструється, отримав би її собі — разом із портретами
+        // демо-персонажів у медіатеці. Стартову книгу створює ефект нижче,
+        // коли вже відомо, хто в Студії: гостю — цей самий зразок, а
+        // зареєстрованому авторові — порожню.
         if (storedLog && storedLog.length) setLogEntries(storedLog);
         if (
           storedRole &&
@@ -935,6 +941,57 @@ export default function App() {
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     };
   }, [book, hasUnsavedChanges, persistBook]);
+
+  /**
+   * Стартова книга того, хто вже увійшов як зареєстрований автор.
+   *
+   * Демо-книга (`initialBookData`) — зразок контенту: у Студії вона лишається
+   * тільки гостю. Щойно людина зареєстрована, а своєї книги на цьому пристрої
+   * немає, Студія відкриває порожню. Без цього демо-книга ставала книгою
+   * акаунта: у медіатеці нового автора лежали портрети демо-персонажів
+   * (стокові фото сторонніх людей), а сама демо-книга їхала на сервер під
+   * його обліковим записом — звернення власника 06.10.2026.
+   *
+   * Гостя, який уже щось написав у зразку, не чіпаємо: у нього зʼявився
+   * власний текст, і порожня книга замість нього була б втратою роботи.
+   * Ознака — незбережені зміни або вже збережена копія демо-книги.
+   */
+  const starterBookIdentityRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (isHydrating || auth.loading) return;
+    const user = auth.user;
+    if (!user || user.isGuest) return;
+
+    const identity = String(user.id ?? user.email ?? 'user');
+    if (starterBookIdentityRef.current === identity) return;
+    starterBookIdentityRef.current = identity;
+
+    // Відкрита книга — не демо-книга: своя книга вже є, стартову не чіпаємо.
+    if (book.id !== initialBookData.id) return;
+    if (hasUnsavedChanges) return;
+
+    let cancelled = false;
+    void (async () => {
+      const touched = await loadBook(initialBookData.id).catch(() => undefined);
+      if (cancelled || touched) return;
+
+      const starter = buildStarterBook({
+        bookId: `BK-${Date.now().toString(36).toUpperCase()}`,
+        title: 'Нова книга',
+        author: user.name?.trim() || 'Олександр Радченко',
+        role: currentRole,
+      });
+      setBook(starter);
+      setActiveChapterId(starter.chapters[0]?.id || '');
+      setActiveSectionId(starter.chapters[0]?.sections[0]?.id || '');
+      setHasUnsavedChanges(false);
+      void persistBook(starter);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isHydrating, auth.loading, auth.user, book.id, hasUnsavedChanges, currentRole, persistBook]);
 
   // --- Авторство книги: службове «Невідомий автор» не має лишатись у тексті ---
   //
@@ -1343,36 +1400,39 @@ export default function App() {
       pageCount: 1,
     };
 
-    const newBook: Book = {
-      ...initialBookData,
-      id: bookId,
-      title,
-      author,
-      genre,
-      version: initialVersion,
-      revisionNumber: 1,
-      createdAt: new Date().toISOString(),
-      versionHistory: [initialSnapshot],
-      chapters: [
-        {
-          id: `chap-${Date.now()}-1`,
-          bookId,
-          title: 'Глава 1: Новий початок',
-          order: 1,
-          sections: [
-            {
-              id: `sec-${Date.now()}-1`,
-              chapterId: `chap-${Date.now()}-1`,
-              title: 'Пролог',
-              order: 1,
-              content: 'Почніть писати перший розділ вашої нової книги тут...',
-              wordCount: 10,
-              lastModified: new Date().toISOString(),
-            }
-          ]
-        }
-      ]
-    };
+    const newBook: Book = withoutDemoContent(
+      {
+        ...initialBookData,
+        id: bookId,
+        title,
+        author,
+        genre,
+        version: initialVersion,
+        revisionNumber: 1,
+        createdAt: new Date().toISOString(),
+        versionHistory: [initialSnapshot],
+        chapters: [
+          {
+            id: `chap-${Date.now()}-1`,
+            bookId,
+            title: 'Глава 1: Новий початок',
+            order: 1,
+            sections: [
+              {
+                id: `sec-${Date.now()}-1`,
+                chapterId: `chap-${Date.now()}-1`,
+                title: 'Пролог',
+                order: 1,
+                content: 'Почніть писати перший розділ вашої нової книги тут...',
+                wordCount: 10,
+                lastModified: new Date().toISOString(),
+              }
+            ]
+          }
+        ]
+      },
+      { title, author }
+    );
 
     setBook(newBook);
     setActiveChapterId(newBook.chapters[0]?.id || '');
@@ -1445,66 +1505,11 @@ export default function App() {
     // auth.user?.name — тут те саме джерело правди й той самий, уже
     // усталений у проєкті, резервний варіант на випадок порожнього імені.
     const author = auth.user?.name?.trim() || 'Олександр Радченко';
-    const initialSnapshot: BookVersionSnapshot = {
-      id: `snap-init-${now}`,
-      bookId,
-      versionNumber: 'v1.0.0',
-      revisionNumber: 1,
-      timestamp: new Date().toISOString(),
-      author,
-      authorName: author,
-      authorRole: currentRole,
-      label: 'Ініціалізація та старт проекту',
-      comment: 'Порожній аркуш — книгу створено з нульової планки.',
-      note: 'Порожній аркуш — книгу створено з нульової планки.',
-      tags: ['Створення', 'З нульової планки'],
-      wordCount: 0,
-      chapterCount: 1,
-      pageCount: 1,
-    };
-    const chapterId = `chap-${now}-1`;
-    const newBook: Book = {
-      ...initialBookData,
-      id: bookId,
-      title,
-      author,
-      genre: '',
-      version: 'v1.0.0',
-      revisionNumber: 1,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      versionHistory: [initialSnapshot],
-      synopsis: '',
-      logline: '',
-      theme: '',
-      status: 'draft',
-      characters: [],
-      heroArc: undefined,
-      mindBoard: undefined,
-      qrTags: [],
-      illustrations: [],
-      footnotes: [],
-      visualBible: { ...initialBookData.visualBible, id: `vb-${now}`, bookId },
-      chapters: [
-        {
-          id: chapterId,
-          bookId,
-          title: 'Глава 1: Новий початок',
-          order: 1,
-          sections: [
-            {
-              id: `sec-${now}-1`,
-              chapterId,
-              title: 'Пролог',
-              order: 1,
-              content: '',
-              wordCount: 0,
-              lastModified: new Date().toISOString(),
-            }
-          ]
-        }
-      ]
-    };
+    // Сам каркас порожньої книги — спільний (`utils/starterBook.ts`), щоб
+    // «Нова книга» і стартова книга зареєстрованого автора були однією й тією
+    // самою книгою: без демо-персонажів, демо-фото в медіатеці та підписів
+    // обкладинки з демо-книги.
+    const newBook = buildStarterBook({ bookId, title, author, role: currentRole, now });
 
     setBook(newBook);
     setActiveChapterId(newBook.chapters[0]?.id || '');
@@ -1571,38 +1576,32 @@ export default function App() {
       wordCount: calculateWordCount(s.content),
       lastModified: new Date().toISOString(),
     }));
-    const newBook: Book = {
-      ...initialBookData,
-      id: bookId,
-      title,
-      author,
-      genre: '',
-      version: 'v1.0.0',
-      revisionNumber: 1,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      versionHistory: [initialSnapshot],
-      synopsis: '',
-      logline: '',
-      theme: '',
-      status: 'draft',
-      characters: [],
-      heroArc: undefined,
-      mindBoard: undefined,
-      qrTags: [],
-      illustrations: [],
-      footnotes: [],
-      visualBible: { ...initialBookData.visualBible, id: `vb-${now}`, bookId },
-      chapters: [
-        {
-          id: chapterId,
-          bookId,
-          title,
-          order: 1,
-          sections,
-        },
-      ],
-    };
+    const newBook: Book = withoutDemoContent(
+      {
+        ...initialBookData,
+        id: bookId,
+        title,
+        author,
+        genre: '',
+        version: 'v1.0.0',
+        revisionNumber: 1,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        versionHistory: [initialSnapshot],
+        status: 'draft',
+        visualBible: { ...initialBookData.visualBible, id: `vb-${now}`, bookId },
+        chapters: [
+          {
+            id: chapterId,
+            bookId,
+            title,
+            order: 1,
+            sections,
+          },
+        ],
+      },
+      { title, author }
+    );
 
     setBook(newBook);
     setActiveChapterId(chapterId);
@@ -1697,11 +1696,21 @@ export default function App() {
     const bookId = result.chapters[0]?.bookId || `BK-${Date.now().toString(36).toUpperCase()}`;
     const now = new Date().toISOString();
 
+    // Демо-контент зразка прибираємо ПЕРШИМ, а вже потім кладемо матеріали
+    // автора: інакше перенесені зображення зникли б разом із демо-портретами
+    // (звернення власника 06.10.2026 — у новій книзі не має бути чужого).
+    const base = withoutDemoContent(
+      {
+        ...initialBookData,
+        id: bookId,
+        title: result.title,
+        author: result.author,
+      },
+      { title: result.title, author: result.author }
+    );
+
     const newBook: Book = {
-      ...initialBookData,
-      id: bookId,
-      title: result.title,
-      author: result.author,
+      ...base,
       version: 'v1.0.0',
       revisionNumber: 1,
       createdAt: now,
