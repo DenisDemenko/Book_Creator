@@ -41,6 +41,7 @@ import {
 import { priceForTextEngine, priceRateForModel } from './pricing';
 import { CHAT_MODELS, chatModelLabel, engineConfigured, isKnownModel, modelSupportsVision, normalizeModelId, resolveEngine, visionEngineHint, type ImageAttachment } from './chatProviders';
 import { CONTEXT_WINDOW_MESSAGES, buildPromptContext, buildSystemPrompt } from './chatPrompt';
+import { platformKeyFor } from './platformKeys';
 import { indexChatMessageEntities, listChosenChatEntityGroups, listSessionMessageEntities } from './coreEntityStore';
 
 /** Один прикріплений файл-текст (txt/md/pdf) — вміст уже витягнутий на клієнті. */
@@ -138,7 +139,7 @@ export interface ChatRoutesDeps {
   /**
    * Рушії, для яких автор задав власний ключ (розділ «Ключі API»). Потрібно
    * для GET /api/chat/models — модель має бути обрана (не задизейблена), якщо
-   * є ХОЧ ОДИН з двох ключів, серверний або власний, а не лише серверний.
+   * є власний ключ; платформні та env-ключі перевіряються самим маршрутом.
    */
   listUserConfiguredEngines?: (userId: string) => Promise<string[]>;
 }
@@ -215,13 +216,18 @@ export function registerChatRoutes(app: Express, deps: ChatRoutesDeps): void {
 
   /**
    * Доступні моделі чату — щоб клієнт не хардкодив список і бачив, які
-   * провайдери реально налаштовані на сервері (available = env-ключ є).
+   * провайдери налаштовані через платформний, власний або env-ключ.
    */
   app.get('/api/chat/models', requireAuth, requirePermission('canUseAi'), async (req, res) => {
     try {
       const userId = req.principal!.id as string;
       const ownEngines = new Set(
         deps.listUserConfiguredEngines ? await deps.listUserConfiguredEngines(userId) : []
+      );
+      const platformEngines = new Set(
+        (await Promise.all([...new Set(CHAT_MODELS.map(m => m.engine))].map(async engine =>
+          (await platformKeyFor(engine)) ? engine : null
+        ))).filter((engine): engine is NonNullable<typeof engine> => engine !== null)
       );
       res.json({
         defaultModelId: deps.defaultModelId,
@@ -234,7 +240,7 @@ export function registerChatRoutes(app: Express, deps: ChatRoutesDeps): void {
           const rate = priceRateForModel(m.engine, m.id);
           return {
             ...m,
-            available: engineConfigured(m.engine) || ownEngines.has(m.engine),
+            available: platformEngines.has(m.engine) || engineConfigured(m.engine) || ownEngines.has(m.engine),
             inputPerMillionUsd: rate?.inputPerMillionUsd ?? null,
             outputPerMillionUsd: rate?.outputPerMillionUsd ?? null,
           };

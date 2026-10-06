@@ -67,6 +67,32 @@ t('ІНШИЙ адміністратор отримує ключ платфор�
 t('сам вставляч отримує свій же ключ', (await resolveEngineKey('admin-one', 'deepseek', 'test')) === ADMIN_KEY);
 t('без userId (фонова задача) теж працює', (await resolveEngineKey(undefined, 'deepseek', 'test')) === ADMIN_KEY);
 
+// Реальний маршрут списку моделей: автор без власного ключа бачить платформний.
+const express = (await import('express')).default;
+const { registerChatRoutes } = await import('../server/chatRoutes');
+const app = express();
+app.use((req: any, _res, next) => {
+  req.principal = { id: 'writer-one', role: 'writer', isGuest: false };
+  next();
+});
+registerChatRoutes(app, { generate: null, defaultModelId: 'deepseek-flash', listUserConfiguredEngines: async () => [] });
+const server = app.listen(0, '127.0.0.1');
+await new Promise<void>(r => server.once('listening', r));
+try {
+  const url = `http://127.0.0.1:${(server.address() as any).port}/api/chat/models`;
+  const response = await fetch(url);
+  const body = await response.json();
+  t('письменник отримує список моделей', response.status === 200);
+  t('усі моделі DeepSeek доступні за платформним ключем', body.models.filter((m: any) => m.engine === 'deepseek').every((m: any) => m.available));
+  t('відповідь списку не розкриває ключ', !JSON.stringify(body).includes(ADMIN_KEY));
+  await deleteUserApiKey('admin-one', 'deepseek');
+  const withoutKey = await (await fetch(url)).json();
+  t('після видалення платформного ключа моделі недоступні без запасного', withoutKey.models.filter((m: any) => m.engine === 'deepseek').every((m: any) => !m.available));
+  await putKey('admin-one', 'deepseek', ADMIN_KEY);
+} finally {
+  await new Promise<void>((resolve, reject) => server.close(err => err ? reject(err) : resolve()));
+}
+
 console.log('\nІнший рушій — ключа немає, має бути undefined (далі підхопить оточення):');
 t('для рушія без ключа повертає undefined', (await resolveEngineKey('writer-one', 'mistral', 'test')) === undefined);
 
