@@ -83,6 +83,14 @@ async function suite(repo:CoreRepository,name:string,browser=false) {
     check('два одночасні записи: один успіх один конфлікт',parallel.filter(r=>r.status===200).length===1&&parallel.filter(r=>r.status===409).length===1);
     check('статус завдання збережений',(await call('owner')).body.items.find((i:any)=>i.id===ti.id).status==='done');
     check('зміна не приймає сторонні поля',(await edit('owner',{expectedVersion:2,authorId:'attacker'})).status===400);
+    const reassigned=await edit('owner',{expectedVersion:2,status:'open',assigneeId:'commenter',dueAt:'2026-10-09T14:00:00Z'});
+    check('керівник змінює виконавця та строк',reassigned.status===200&&reassigned.body.item.assigneeId==='commenter'&&reassigned.body.item.dueAt==='2026-10-09T14:00:00.000Z');
+    check('новий виконавець має особисте сповіщення',(await call('commenter')).body.notifications.some((n:any)=>n.itemId===ti.id));
+    check('колишній виконавець не змінює статус',(await edit('editor',{expectedVersion:3,status:'done'})).status===403);
+    check('новий виконавець не змінює строк',(await edit('commenter',{expectedVersion:3,dueAt:'2026-10-10T14:00:00Z'})).status===403);
+    check('перепризначення без доступу відхиляється',(await edit('owner',{expectedVersion:3,assigneeId:'hidden'})).status===403);
+    check('відмова не змінює виконавця й версію',(await call('owner')).body.items.some((i:any)=>i.id===ti.id&&i.assigneeId==='commenter'&&i.version===3));
+    check('новий виконавець завершує завдання',(await edit('commenter',{expectedVersion:3,status:'done'})).status===200);
     const past=await task('editor',scene,{dueAt:'2000-01-01T00:00:00Z'});
     const expired=(await call('editor')).body.notifications.filter((n:any)=>n.itemId===past.body.item.id&&n.kind==='overdue');
     check('особисте сповіщення про прострочення',expired.length===1);
