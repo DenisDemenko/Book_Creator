@@ -19,6 +19,8 @@
 export type AiErrorKind =
   | 'no_key'
   | 'quota'
+  | 'plan_required'
+  | 'no_project_access'
   | 'safety'
   | 'guest_restricted'
   | 'forbidden'
@@ -54,10 +56,12 @@ export interface AiErrorDetail {
 function classify(status: number, payload: unknown): AiErrorKind {
   const kind = (payload as { kind?: string } | null)?.kind;
   if (kind === 'guest_restricted') return 'guest_restricted';
+  if (kind === 'plan_required') return 'plan_required';
+  if (kind === 'no_project_access') return 'no_project_access';
   if (kind === 'forbidden') return 'forbidden';
   if (kind === 'unauthenticated') return 'unauthenticated';
   if (kind === 'no_key' || status === 503) return 'no_key';
-  if (kind === 'quota' || kind === 'quota_exceeded' || status === 429 || status === 402) return 'quota';
+  if (kind === 'quota' || kind === 'quota_exceeded' || kind === 'chat_quota_exceeded' || status === 429 || status === 402) return 'quota';
   if (kind === 'safety') return 'safety';
   if (status >= 500) return 'server';
   return 'unknown';
@@ -70,6 +74,10 @@ function fallbackMessage(kind: AiErrorKind): string {
       return 'Функції ШІ недоступні: на сервері не налаштований ключ Gemini (GEMINI_API_KEY).';
     case 'quota':
       return 'Вичерпано ліміт запитів до моделі або ліміт вашого тарифу. Спробуйте за кілька хвилин або перейдіть на сторінку «Підписка».';
+    case 'plan_required':
+      return 'Виберіть підписку, що включає цю функцію ШІ.';
+    case 'no_project_access':
+      return 'Для роботи ШІ з цією книгою потрібен доступ від її власника.';
     case 'safety':
       return 'Модель відхилила запит через фільтри безпеки. Спробуйте пом’якшити формулювання.';
     case 'guest_restricted':
