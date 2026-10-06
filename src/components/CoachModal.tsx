@@ -22,11 +22,18 @@ import { useLanguage } from '../i18n/LanguageContext';
  *
  * Вкладки: Аналіз (сцена/фрагмент, MESO+MICRO), Чат (розмова з ментором),
  * Аудит книги (MACRO, Phase 2 — Continuity/Threads/Arc/Setup-Payoff).
- * Знизу — постійна панель «Текст для вставки»: сюди копіюється відповідь
- * ШІ чи власний варіант автора, і звідти єдиною кнопкою текст повертається
- * в рукопис через вже наявний, перевірений маркер [AI-DRAFT]…[/AI-DRAFT]
- * (onInsertToBook, реалізовано в EditorView.tsx — той самий шлях, що й
- * «Вставити абзац за виділенням»).
+ *
+ * Панель «Текст для вставки в книгу» належить вкладці АНАЛІЗ (запис #363):
+ * у макеті v4 вона була «постійною» — на всіх вкладках, — але власник
+ * 06.10.2026 зауважив, що «панель набору текста книги зʼявилася в чаті
+ * з АІ, її там не повинно бути». Тут вона й потрібна: саме в ній
+ * редагуються уривок сцени, вправа коуча чи власний варіант автора, і
+ * звідти єдиною кнопкою текст повертається в рукопис через уже наявний,
+ * перевірений маркер [AI-DRAFT]…[/AI-DRAFT] (onInsertToBook,
+ * реалізовано в EditorView.tsx — той самий шлях, що й «Вставити абзац за
+ * виділенням»). У ЧАТІ панелі немає, тому кнопка «У чернетку» біля
+ * відповіді коуча веде на вкладку «Аналіз» (див. toDraft) — функція
+ * збережена, але форма вставки в рукопис не стоїть посеред розмови.
  */
 
 export interface CoachSeed {
@@ -271,6 +278,17 @@ export const CoachModal: React.FC<CoachModalProps> = ({
     setTimeout(() => setInsertedFlash(false), 2500);
   };
 
+  /**
+   * Єдина дія «У чернетку»: кладе текст у панель вставки Й переводить на
+   * вкладку «Аналіз», бо саме там ця панель живе (запис #363). З вкладки
+   * «Чат» це єдиний спосіб дістатися вставки — жодної другої копії форми
+   * в розмові немає.
+   */
+  const toDraft = (text: string) => {
+    setDraftText(text);
+    setTab('analysis');
+  };
+
   // Стиль попапу переюзаний з QuickAiModal.tsx («AI Літературний
   // Консультант») — та сама неоморфна тема Modul_token
   // (src/styles/tokenModuleTheme.css, клас .token-module-scope + nm-*),
@@ -398,7 +416,7 @@ export const CoachModal: React.FC<CoachModalProps> = ({
                         <p className="text-sm text-[var(--on-surface)]">{analysis.exercise}</p>
                       </div>
                       <button
-                        onClick={() => setDraftText(analysis.exercise)}
+                        onClick={() => toDraft(analysis.exercise)}
                         className="nm-btn shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs text-[var(--on-surface)]"
                       >
                         <PenLine className="w-3.5 h-3.5" />
@@ -429,7 +447,8 @@ export const CoachModal: React.FC<CoachModalProps> = ({
                     {m.role === 'coach' && (
                       <div className="mt-1.5">
                         <button
-                          onClick={() => setDraftText(m.text)}
+                          onClick={() => toDraft(m.text)}
+                          title={t('editor.coachToDraftHint')}
                           className="text-[11px] text-[var(--primary)] hover:opacity-80"
                         >
                           {t('editor.coachToDraft')} →
@@ -541,43 +560,48 @@ export const CoachModal: React.FC<CoachModalProps> = ({
           )}
         </div>
 
-        {/* Постійна панель вставки — доступна на будь-якій вкладці.
-            Кнопка вставки лишається смарагдовою (не var(--primary)) —
-            єдиний свідомий відступ від чат-дровера: це дія іншого типу
-            (закомітити текст у рукопис, а не надіслати повідомлення), тож
-            зберігає власний колірний акцент, але в тій самій неоморфній
-            мові тіней (nm-btn/nm-outset), що й решта попапу. */}
-        <div className="shrink-0 border-t border-[var(--border-subtle)] nm-outset-sm px-5 py-3 space-y-2">
-          <div className="flex items-center justify-between">
-            <label className="text-[11px] uppercase tracking-wide text-[var(--outline)]">{t('editor.coachDraftLabel')}</label>
-            <button
-              onClick={() => setDraftText(seed?.text || '')}
-              className="flex items-center gap-1 text-[11px] text-[var(--outline)] hover:text-[var(--on-surface)]"
-            >
-              <RotateCcw className="w-3 h-3" />
-              {t('editor.coachDraftReset')}
-            </button>
+        {/* Панель вставки в рукопис — ЛИШЕ на вкладці «Аналіз» (запис
+            #363). У чаті й аудиті її немає: у макеті v4 вона була
+            «постійною», і саме це власник назвав помилкою — «панель
+            набору текста книги зʼявилася в чаті з АІ». Кнопка вставки
+            лишається смарагдовою (не var(--primary)) — єдиний свідомий
+            відступ від чат-дровера: це дія іншого типу (закомітити текст
+            у рукопис, а не надіслати повідомлення), тож зберігає власний
+            колірний акцент, але в тій самій неоморфній мові тіней
+            (nm-btn/nm-outset), що й решта попапу. */}
+        {tab === 'analysis' && (
+          <div className="shrink-0 border-t border-[var(--border-subtle)] nm-outset-sm px-5 py-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] uppercase tracking-wide text-[var(--outline)]">{t('editor.coachDraftLabel')}</label>
+              <button
+                onClick={() => setDraftText(seed?.text || '')}
+                className="flex items-center gap-1 text-[11px] text-[var(--outline)] hover:text-[var(--on-surface)]"
+              >
+                <RotateCcw className="w-3 h-3" />
+                {t('editor.coachDraftReset')}
+              </button>
+            </div>
+            <textarea
+              value={draftText}
+              onChange={(e) => setDraftText(e.target.value)}
+              rows={3}
+              className="w-full px-3 py-2 rounded-lg nm-inset text-sm text-[var(--on-surface)] outline-none bg-transparent resize-none"
+            />
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-emerald-400" style={{ opacity: insertedFlash ? 1 : 0, transition: 'opacity .3s' }}>
+                {t('editor.coachInserted')}
+              </span>
+              <button
+                onClick={doInsert}
+                disabled={!draftText.trim()}
+                className="nm-btn flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-sm text-emerald-300 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <PenLine className="w-4 h-4" />
+                {t('editor.coachInsertToBook')}
+              </button>
+            </div>
           </div>
-          <textarea
-            value={draftText}
-            onChange={(e) => setDraftText(e.target.value)}
-            rows={3}
-            className="w-full px-3 py-2 rounded-lg nm-inset text-sm text-[var(--on-surface)] outline-none bg-transparent resize-none"
-          />
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-emerald-400" style={{ opacity: insertedFlash ? 1 : 0, transition: 'opacity .3s' }}>
-              {t('editor.coachInserted')}
-            </span>
-            <button
-              onClick={doInsert}
-              disabled={!draftText.trim()}
-              className="nm-btn flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-sm text-emerald-300 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <PenLine className="w-4 h-4" />
-              {t('editor.coachInsertToBook')}
-            </button>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );

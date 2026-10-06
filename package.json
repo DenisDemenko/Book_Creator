@@ -163,6 +163,7 @@
     "live:agni-import": "tsx scripts/live-agniImport.mts",
     "live:admin-map": "tsx scripts/live-adminMap.mts",
     "live:furniture-editor": "tsx scripts/live-furnitureEditor.mts",
+    "live:coach-draft": "tsx scripts/live-coachDraft.mts",
     "test:style-trainer": "tsx scripts/test-styleTrainer.mts",
     "test:invite-mail": "tsx scripts/test-invite-mail.mts",
     "test:pdf-engines": "tsx scripts/test-pdfEngines.mts",
