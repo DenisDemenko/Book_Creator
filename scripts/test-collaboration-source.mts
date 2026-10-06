@@ -86,4 +86,12 @@ try {
   check('SQLite увімкнено', db.isAvailable());
   await suite('SQLite');
   console.log(`Підсумок: ${passed} пройшло.`);
-} finally { await fs.rm(dir, { recursive: true, force: true }); }
+} finally {
+  db.closeDb();
+  try {
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  } catch (error) {
+    // Cleanup must not mask assertion failures or fail a successful Windows run.
+    console.warn('Не вдалося прибрати тестову папку SQLite:', (error as NodeJS.ErrnoException).code);
+  }
+}
