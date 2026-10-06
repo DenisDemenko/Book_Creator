@@ -24,6 +24,7 @@ import {SecretVaultPanel} from './SecretVaultPanel';
 import { MagicScenePage } from './MagicScenePage';
 import { WriterMasteryPage } from './WriterMasteryPage';
 import { BranchesPage } from './BranchesPage';
+import { CollaborationPage } from './CollaborationPage';
 import { TranslationPage } from './TranslationPage';
 import { MediaLibraryView, type DescribeRevealTarget } from './MediaLibraryView';
 
@@ -193,7 +194,7 @@ function CharacterList({ bookId, onOpen }: { bookId: string; onOpen: (id: string
 export const CorePageView: React.FC<Props> = ({ tab, book, characterId, onOpenCharacter, onOpenParagraph, onUpdateBook, authUser, onRevealChapterText }) => {
   const { t } = useLanguage();
   const page = corePageByTab(tab);
-  const summary = useApi<Summary>(`/api/projects/${encodeURIComponent(book.id)}/summary`);
+  const summary = useApi<Summary>(tab==='core-collaboration'?null:`/api/projects/${encodeURIComponent(book.id)}/summary`);
   if (!page) return null;
 
   // Сторінка 7 «Візуальна бібліотека» (Т2.3 В7, рішення власника §6.1
@@ -217,13 +218,13 @@ export const CorePageView: React.FC<Props> = ({ tab, book, characterId, onOpenCh
       <header className="nova-glass-dark rounded-2xl border border-slate-800 p-6">
         <div className="mb-1 flex items-center gap-2 text-emerald-400">
           <span className="font-mono text-xs font-bold uppercase tracking-widest">/{page.segment}</span>
-          <span className="rounded-full border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold text-emerald-300">
+          {tab!=='core-collaboration' && <span className="rounded-full border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold text-emerald-300">
             етап {page.stage}
-          </span>
+          </span>}
         </div>
         <h1 className="text-2xl font-bold text-slate-100">{t(`header.nav.${tab}`)}</h1>
         <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-slate-400">{page.purposeUk}</p>
-        {tab !== 'core-search' && tab !== 'core-story-graph' && tab !== 'core-character' && tab !== 'core-timeline' && tab !== 'core-emotions' && tab !== 'core-continuity' && tab !== 'core-translation' && tab !== 'core-branches' && tab !== 'core-mastery' && (
+        {tab !== 'core-search' && tab !== 'core-story-graph' && tab !== 'core-character' && tab !== 'core-timeline' && tab !== 'core-emotions' && tab !== 'core-continuity' && tab !== 'core-translation' && tab !== 'core-branches' && tab !== 'core-mastery' && tab !== 'core-collaboration' && (
           <p className="mt-2 text-xs text-slate-500">
             Сторінка з'явиться повністю на етапі {page.stage} дорожньої карти. Нижче — дані семантичного ядра цієї книги, на яких вона працюватиме.
           </p>
@@ -240,6 +241,7 @@ export const CorePageView: React.FC<Props> = ({ tab, book, characterId, onOpenCh
       {tab === 'core-continuity' && <ContinuityPage book={book} onOpenParagraph={(t) => onOpenParagraph?.(t)} />}
       {tab === 'core-mastery' && <WriterMasteryPage key={book.id} book={book} />}
       {tab === 'core-branches' && <React.Fragment key={book.id}><MagicScenePage book={book} onUpdateBook={onUpdateBook} /><SecretVaultPanel book={book} onBranchCreated={()=>window.dispatchEvent(new Event('vault:branch-created'))}/><BranchesPage book={book} onUpdateBook={onUpdateBook} /></React.Fragment>}
+      {tab === 'core-collaboration' && <CollaborationPage key={book.id} book={book} onUpdateBook={onUpdateBook} onOpenCharacter={onOpenCharacter} onOpenParagraph={onOpenParagraph} />}
       {tab === 'core-translation' && <TranslationPage key={book.id} book={book} />}
 
       {/* Сторінка 6 — «Хронологія» (Т2.1). */}
@@ -252,9 +254,9 @@ export const CorePageView: React.FC<Props> = ({ tab, book, characterId, onOpenCh
         </Suspense>
       )}
 
-      {summary.state === 'loading' && <Loader2 className="h-5 w-5 animate-spin text-slate-500" />}
-      {summary.state === 'error' && <Problem load={summary} />}
-      {summary.state === 'ok' && <SummaryCard summary={summary.data} />}
+      {tab!=='core-collaboration' && summary.state === 'loading' && <Loader2 className="h-5 w-5 animate-spin text-slate-500" />}
+      {tab!=='core-collaboration' && summary.state === 'error' && <Problem load={summary} />}
+      {tab!=='core-collaboration' && summary.state === 'ok' && <SummaryCard summary={summary.data} />}
 
       {tab === 'core-character' && summary.state === 'ok' && (
         <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">

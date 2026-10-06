@@ -1,11 +1,14 @@
 import type { Express, Request, Response } from 'express';
 import type { RealtimeAccessDeps } from '../../realtimeAuth';
 import { resolveProjectAccess, type ProjectAccess } from '../projectRoutes';
+import type { CoreRepository } from '../types';
+import { visibleCharacterRefs } from './access';
 import { canEditSection, restrictBook, SECTION_CONTENT_FIELDS } from './accessView';
 import { BookRevisionConflict, getBook, getBookRevision, listBookRevisions, patchBookSection, saveBook, type StoredBook } from '../../bookStore';
 
 export interface SourceRoutesDeps {
   access: RealtimeAccessDeps;
+  repo?: () => CoreRepository | null;
   onSaved?: (stored: StoredBook, access: ProjectAccess) => void;
 }
 
@@ -30,10 +33,11 @@ export function registerSourceRoutes(app: Express, deps: SourceRoutesDeps): void
         }
       }
     };
+  const filtered = async (book: Record<string, unknown>, access: ProjectAccess) => { const repo=deps.repo?.(); return restrictBook(book,access.effective,repo?await visibleCharacterRefs(repo,access.effective):new Set()); };
   const revision = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 
   app.get(base, handle(async (_req, res, access, stored) => {
-    res.json({ revision: stored.revision, book: restrictBook(stored.book, access.effective), canWrite: access.effective.canWriteAny });
+    res.json({ revision: stored.revision, book: await filtered(stored.book, access), canWrite: access.effective.canWriteAny });
   }));
   app.get(`${base}/history`, handle(async (_req, res, access, stored) => {
     res.json({ current: stored.revision, revisions: await listBookRevisions(access.projectId) });
@@ -43,7 +47,7 @@ export function registerSourceRoutes(app: Express, deps: SourceRoutesDeps): void
     if (!revision(n)) { res.status(400).json({ error: 'Некоректна ревізія.' }); return; }
     const book = await getBookRevision(access.projectId, n);
     if (!book) { res.status(404).json({ error: 'Ревізію не знайдено.' }); return; }
-    res.json({ revision: n, book: restrictBook(book, access.effective) });
+    res.json({ revision: n, book: await filtered(book, access) });
   }));
   app.patch(`${base}/chapters/:chapterId/sections/:sectionId`, handle(async (req, res, access, stored) => {
     const { chapterId, sectionId } = req.params;
@@ -59,7 +63,7 @@ export function registerSourceRoutes(app: Express, deps: SourceRoutesDeps): void
     for (const k of ['paragraphIds', 'paragraphHashes', 'footnotes']) if (patch[k] !== undefined && !Array.isArray(patch[k])) { res.status(400).json({ error: `Некоректне поле ${k}.` }); return; }
     const saved = await patchBookSection({ bookId: access.projectId, chapterId: String(chapterId), sectionId: String(sectionId), expectedRevision, patch });
     deps.onSaved?.(saved, access);
-    res.json({ revision: saved.revision, book: restrictBook(saved.book, access.effective) });
+    res.json({ revision: saved.revision, book: await filtered(saved.book, access) });
   }));
   // Restoring whole source is an author's explicit operation; participants use scene patches.
   app.post(`${base}/restore`, handle(async (req, res, access, _stored) => {

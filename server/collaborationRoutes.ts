@@ -4,14 +4,10 @@
  * потребує — він і так має права письменника в будь-якій кімнаті спільної
  * роботи (див. requireBookOwner нижче та клієнтську перевірку ролі).
  *
- * Хто «власник» книги (тобто хто саме «письменник», якому дозволено
- * запрошувати): книги в цьому застосунку не мають серверного власника
- * (вони живуть у IndexedDB браузера — src/utils/storage.ts, синхронізуються
- * лише через WS-кімнату спільної роботи за bookId — server.ts). Тому
- * власника «книги» для cowork фіксуємо лениво: перший зареєстрований
- * користувач, який звернувся з запрошенням для цього bookId, стає її
- * власником назавжди (book_collab_owners); усі наступні запити на
- * запрошення для того самого bookId дозволені лише йому (або admin).
+ * Власник визначається book_collab_owners, а до першого запрошення —
+ * серверною копією books.ownerId. Лише для старої, ще не збереженої на
+ * сервері книги власність фіксується першим авторським запрошенням.
+ * Знання bookId чужої серверної книги не дозволяє привласнити її.
  */
 
 import crypto from 'node:crypto';
@@ -27,6 +23,7 @@ import {
   setBookOwnerIfAbsent,
   type StoredCollabInvite,
 } from './store';
+import { getBook } from './bookStore';
 import { sendMail } from './mail';
 import { invitableRoles, roleById, studioRoleFor, activeCollabLabel, activeCollabOntology, type RoleDefinition } from '../src/utils/collabOntology';
 import { getCoreRepository } from './core';
@@ -78,6 +75,9 @@ async function assertCanManageInvites(bookId: string, principal: { id: string | 
   if (principal.role === 'admin') return { ok: true, status: 200, error: '' };
   if (!principal.id) return { ok: false, status: 401, error: 'Потрібен вхід у систему.' };
 
+  const registered = await getBookOwner(bookId);
+  const storedOwner = registered ? null : (await getBook(bookId))?.ownerId;
+  if (storedOwner && storedOwner !== principal.id) return { ok: false, status: 403, error: 'Запрошувати може лише власник серверної книги.' };
   const owner = await setBookOwnerIfAbsent(bookId, principal.id);
   if (owner.ownerUserId !== principal.id) {
     return { ok: false, status: 403, error: 'Запрошувати співавторів до цієї книги може лише її письменник (власник) або адміністратор сайту.' };
@@ -296,8 +296,8 @@ export function registerCollaborationRoutes(app: Express): void {
 
       const principal = req.principal!;
       if (principal.role !== 'admin') {
-        const owner = await getBookOwner(bookId);
-        if (owner && owner.ownerUserId !== principal.id) {
+        const ownerId = (await getBookOwner(bookId))?.ownerUserId ?? (await getBook(bookId))?.ownerId;
+        if (ownerId !== principal.id) {
           return res.status(403).json({ error: 'Перегляд запрошень доступний лише письменнику (власнику) книги або адміністратору.' });
         }
       }

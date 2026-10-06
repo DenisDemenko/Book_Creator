@@ -221,6 +221,7 @@ import {SceneTokenBudget} from './server/core/sceneScheduler';
 import { registerQualityRoutes } from './server/core/quality/qualityRoutes';
 import { registerOntologyRoutes } from './server/core/ontology/routes';
 import { registerParticipantRoutes } from './server/core/collaboration/routes';
+import { registerCollaborationWorkspaceRoutes } from './server/core/collaboration/workspaceRoutes';
 import { registerSourceRoutes } from './server/core/collaboration/sourceRoutes';
 import { registerTranslationRoutes } from './server/core/translationRoutes';
 import {registerSecretVaultRoutes} from './server/core/secretVaultRoutes';
@@ -796,7 +797,9 @@ registerGitCommandRoutes(app);
       void dropRealtimeParticipant(projectId, userId);
     },
   });
+  registerCollaborationWorkspaceRoutes(app, {access: realtimeAccessDeps, repo: getCoreRepository, describeUser: async id => (await findUserForAccess(id))?.name ?? null});
   registerSourceRoutes(app, {
+    repo: getCoreRepository,
     access: realtimeAccessDeps,
     onSaved: (stored, access) => {
       const key = `book:${stored.id}`;

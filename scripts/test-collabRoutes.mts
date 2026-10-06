@@ -83,6 +83,13 @@ const call = async (method: string, p: string, who: keyof typeof PEOPLE | 'guest
 const BOOK = 'BK-COLLAB-1';
 
 try {
+  const {saveBook}=await import('../server/bookStore');
+  await saveBook({ownerId:PEOPLE.owner.id,book:{id:'BK-COLLAB-STORED',title:'Серверна книга',chapters:[]}});
+  t('чужий не привласнює серверну книгу першим запрошенням',(await call('POST','/api/collaboration/invite','maria',{bookId:'BK-COLLAB-STORED',email:'other@example.invalid',role:'illustrator'})).status===403);
+  t('чужий не читає запрошення серверної книги до реєстрації cowork',(await call('GET','/api/collaboration/invites?bookId=BK-COLLAB-STORED','maria')).status===403);
+  t('відмова не створила стороннього власника',!(await getBookOwner('BK-COLLAB-STORED')));
+  t('власник серверної книги бачить її запрошення',(await call('GET','/api/collaboration/invites?bookId=BK-COLLAB-STORED','owner')).status===200);
+  t('власник створює перше запрошення серверної книги',(await call('POST','/api/collaboration/invite','owner',{bookId:'BK-COLLAB-STORED',email:'other@example.invalid',role:'illustrator'})).status===200);
   console.log('Реєстр ролей через API:');
   const roles = await call('GET', '/api/collaboration/roles', 'maria');
   t('ролі запрошення, усі ролі й довідники — з реєстру (Onboarding №4)', roles.status === 200 && roles.body.invitable.length >= 15 && roles.body.roles.length === 35 && roles.body.categories.length === 7 && roles.body.projectTypes.some((p: any) => p.id === 'course'));
