@@ -2177,9 +2177,14 @@ export default function App() {
           <AlertTriangle className="w-4 h-4 text-rose-300 shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             <div className="text-xs font-bold text-rose-200">
-              {endpointLabel(aiError.endpoint)} — не вдалося
+              {aiError.kind === 'plan_required' ? 'Виберіть підписку для роботи з ШІ' : aiError.kind === 'no_project_access' ? 'Доступ до ШІ та книги' : `${endpointLabel(aiError.endpoint)} — не вдалося`}
             </div>
-            <div className="text-xs text-rose-100/90 mt-0.5 leading-relaxed">{aiError.message}</div>
+            <div className="text-xs text-rose-100/90 mt-0.5 leading-relaxed">{aiError.kind === 'no_project_access' ? 'Виберіть підписку та працюйте з доступними моделями ШІ на сторінці «Підписка». Для аналізу цієї книги спершу отримайте доступ від її власника.' : aiError.message}</div>
+            {['quota', 'plan_required'].includes(aiError.kind) && !auth.isGuest && (
+              <div className="text-xs text-rose-100/90 mt-2 leading-relaxed">
+                Виберіть підписку для роботи з доступними моделями ШІ, зокрема DeepSeek, у межах лімітів тарифу.
+              </div>
+            )}
             {aiError.kind === 'guest_restricted' && (
               <button
                 onClick={() => {
@@ -2191,12 +2196,12 @@ export default function App() {
                 Зареєструватися
               </button>
             )}
-            {aiError.kind === 'quota' && !auth.isGuest && (
+            {['quota', 'plan_required', 'no_project_access'].includes(aiError.kind) && !auth.isGuest && (
               <button
                 onClick={() => { setAiError(null); handleSelectTab('subscription'); }}
                 className="mt-2 px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-[11px] font-bold transition-colors"
               >
-                Переглянути тарифи
+                Вибрати підписку
               </button>
             )}
           </div>
