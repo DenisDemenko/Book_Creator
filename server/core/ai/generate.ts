@@ -48,6 +48,7 @@ export async function aiRoleGenerateViaCore(input: AiGenerateInput): Promise<AiG
   const result = await generateText({
     engine,
     modelId,
+    privateContent:input.privateContent,
     prompt: input.user,
     systemInstruction: input.system,
     json: true,

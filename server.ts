@@ -222,6 +222,7 @@ import { registerOntologyRoutes } from './server/core/ontology/routes';
 import { registerParticipantRoutes } from './server/core/collaboration/routes';
 import { registerSourceRoutes } from './server/core/collaboration/sourceRoutes';
 import { registerTranslationRoutes } from './server/core/translationRoutes';
+import {registerSecretVaultRoutes} from './server/core/secretVaultRoutes';
 import { registerMagicSceneRoutes } from './server/core/magicSceneRoutes';
 import { JevDecisionAdapter as MagicJevDecisionAdapter } from './server/core/jevLevels';
 import { LlmFallbackJevAdapter as MagicFallbackAdapter } from './server/ai/adapters/jev';
@@ -844,6 +845,8 @@ registerGitCommandRoutes(app);
     const key = (await platformKeyFor('typesafe').catch(() => undefined)) || jevKeyFromEnv();
     return key ? new HttpJevAdapter(key, { model: jevModelFromEnv() }) : null;
   };
+  const privateVaultModel=async(req:any,projectId:string,system:string,context:Record<string,unknown>)=>{const out=await aiRoleGenerateViaCore({module:'coreCharacterVoice',modelId:await resolveModuleModelId('coreCharacterVoice'),system,user:JSON.stringify(context),projectId,actor:`user:${req.principal.id}`,privateContent:true,generation:{maxTokens:1800,timeoutMs:30000}});try{return JSON.parse(out.text.replace(/^```(?:json)?\s*|\s*```$/g,''));}catch{throw new Error('Приватна відповідь не відповідає JSON.');}};
+  registerSecretVaultRoutes(app,{repo:getCoreRepository,access:realtimeAccessDeps,aiGuard:requirePermission('canUseAi'),generate:(req,p,ctx)=>privateVaultModel(req,p,'Ти одноразовий Secret Curator. Межі автора обов’язкові. Для false_belief створюй хибне переконання, для world_secret факт невідомий героям. JSON {"text":"секрет до 2000 символів"}. Без тегів і запису канону.',ctx),direct:(req,p,ctx)=>privateVaultModel(req,p,'Ти окремий Mystery Director лише цієї світової таємниці. Плануй до 5 натяків і докази; не змінюй секрет. Весь результат лишиться зашифрованим. JSON {"hints":["натяк"]}.',ctx)});
   registerMagicSceneRoutes(app,{
     repo:getCoreRepository,access:realtimeAccessDeps,aiGuard:requirePermission('canUseAi'),
     engines:async(req,repo,access)=>{
@@ -860,6 +863,7 @@ registerGitCommandRoutes(app);
       };
       return {
         studio,
+        secretChoice:context=>privateVaultModel(req,access.projectId,'Ти приватний агент одного героя. false_belief — переконання, не світовий факт. Обери тільки дію з allowedActions. Не повторюй privateFacts у відповіді. JSON {"action":"дозволена дія"}; жодних інших полів.',context),
         decide:async({run,characterId,situation,actor})=>{
           const result=await new MagicJevDecisionAdapter({repo,jev:await typesafeJev(),fallback,studio}).decide({projectId:access.projectId,characterId,level:'tactical',sceneId:run.sceneId,asOfChapter:run.asOfChapter,simulationId:run.simulationId,turnIndex:run.events.length+1,situation,allowedActions:['answer','ask','act','silence','deflect','confess'],actor});
           return{action:result.decision.selectedAction??'silence',awaitingAuthor:result.awaitingAuthor,decisionId:result.decision.id,source:result.decision.source};
@@ -1516,7 +1520,7 @@ ${MASTERY_SECTION_MARKER}
   function masteryFallbackSection(existingMasteryPart: string, skillTitle: string, category: string, score: number): string {
     const prevSkills = existingMasteryPart.match(/^- .+$/gm) || [];
     const line = `- ${skillTitle} (${category}) — ${score}/100`;
-    const skillsList = [...prevSkills.filter((l) => !l.startsWith(`- ${skillTitle} `)), line].join('\n');
+    const skillsList = [...prevSkills.filter((l:string) => !l.startsWith(`- ${skillTitle} `)), line].join('\n');
     return `${MASTERY_SECTION_MARKER}
 ### Опановані_навички
 ${skillsList}

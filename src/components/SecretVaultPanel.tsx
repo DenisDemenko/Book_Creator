@@ -1,0 +1,43 @@
+import React,{useEffect,useState} from 'react';
+import type {Book} from '../types';
+export function SecretVaultPanel({book,onBranchCreated}:{book:Book;onBranchCreated?:()=>void}){
+ const [vault,setVault]=useState<any>(),[workspace,setWorkspace]=useState<any>(),[runId,setRunId]=useState(''),[kind,setKind]=useState('personal_secret'),[hero,setHero]=useState(''),[hidden,setHidden]=useState(true),[bounds,setBounds]=useState(''),[text,setText]=useState(''),[earliest,setEarliest]=useState(''),[required,setRequired]=useState(''),[scene,setScene]=useState(''),[confirm,setConfirm]=useState(false),[error,setError]=useState(''),[busy,setBusy]=useState(false),[emergency,setEmergency]=useState<any>(),[proposal,setProposal]=useState<any>(),[director,setDirector]=useState<any>();
+ const base=`/api/core/projects/${encodeURIComponent(book.id)}`;
+ async function api(path:string,method='GET',body?:any){const r=await fetch(base+path,{method,credentials:'same-origin',headers:{'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});const data=await r.json();if(!r.ok)throw new Error(data.error??'Дія Vault не виконана.');return data;}
+ const load=async()=>{const [v,w]=await Promise.all([api('/vault'),api('/magic-scenes')]);setVault(v);setWorkspace(w);};
+ useEffect(()=>{load().catch(e=>setError(e.message));return()=>{setEmergency(undefined);setProposal(undefined);};},[book.id]);
+ const act=async(fn:()=>Promise<any>)=>{setBusy(true);setError('');setEmergency(undefined);setProposal(undefined);try{const result=await fn();if(result?.emergency)setEmergency(result.emergency);if(result?.revelation)setProposal(result.revelation);if(result?.director)setDirector(result.director);await load();}catch(e){setError(e instanceof Error?e.message:'Vault не виконав дію.');await load().catch(()=>{});}finally{setBusy(false);setConfirm(false);}};
+ const mutation=(path:string,body:any)=>api('/vault'+path,'POST',{...body,expectedRevision:vault?.revision});
+ const run=workspace?.runs.find((r:any)=>r.simulationId===runId);
+ return <section data-secret-vault className="border-b border-slate-700 pb-8 mb-8 space-y-3 min-w-0 text-slate-200">
+ <h2 className="text-xl font-semibold">Secret Vault</h2><p>{vault?.notice??'Зашифровані особисті секрети, хибні переконання й світові таємниці.'}</p><p>До розкриття секрет не потрапляє у рукопис. Приватний агент може лише обрати дозволену дію; літературний автор не отримує прихований зміст.</p>
+ {error&&<p role="alert" className="text-amber-300 break-words">{error}</p>}
+ {vault&&!vault.configured&&<p role="status">Vault недоступний: на сервері потрібно налаштувати захищений ключ шифрування.</p>}
+ {vault&&workspace&&<>
+ <fieldset disabled={busy||!vault.configured} className="space-y-2"><legend>Секрет до першого ходу</legend>
+ <select aria-label="Прогін для секрету" value={runId} onChange={e=>setRunId(e.target.value)} className="bg-slate-900 p-2 max-w-full"><option value="">Оберіть прогін Magic Scene без ходів</option>{workspace.runs.filter((r:any)=>!r.events.length&&r.status==='active').map((r:any)=><option key={r.simulationId} value={r.simulationId}>{r.goal}</option>)}</select>
+ <select aria-label="Тип секрету" value={kind} onChange={e=>setKind(e.target.value)} className="bg-slate-900 p-2 max-w-full"><option value="personal_secret">Особистий секрет</option><option value="false_belief">Хибне переконання</option><option value="world_secret">Світова таємниця</option></select>
+ {kind!=='world_secret'&&<select aria-label="Власник секрету" value={hero} onChange={e=>setHero(e.target.value)} className="bg-slate-900 p-2 max-w-full"><option value="">Оберіть героя</option>{run?.participants.map((id:string)=><option key={id} value={id}>{workspace.characters.find((c:any)=>c.id===id)?.name??id}</option>)}</select>}
+ <label className="block"><input type="checkbox" checked={hidden} onChange={e=>setHidden(e.target.checked)}/> Приховати зміст від автора — створює куратор</label>
+ <textarea aria-label="Межі секрету" value={bounds} onChange={e=>setBounds(e.target.value)} maxLength={2000} rows={2} placeholder="Теми, жанр, недопустимі повороти" className="bg-slate-900 p-2 w-full"/>
+ {!hidden&&<textarea aria-label="Відомий автору секрет" value={text} onChange={e=>setText(e.target.value)} maxLength={2000} rows={2} className="bg-slate-900 p-2 w-full"/>}
+ <select aria-label="Найраніше розкриття" value={earliest} onChange={e=>setEarliest(e.target.value)} className="bg-slate-900 p-2 max-w-full"><option value="">Не раніше сцени прогону</option>{workspace.scenes.map((s:any)=><option key={s.id} value={s.id}>{s.title}</option>)}</select>
+ <input aria-label="Події-докази секрету" value={required} onChange={e=>setRequired(e.target.value)} placeholder="ID потрібних канонічних подій через кому" className="bg-slate-900 p-2 w-full"/>
+ <button disabled={!run||!bounds.trim()||kind!=='world_secret'&&!hero||!hidden&&!text.trim()} onClick={()=>act(()=>mutation('',{simulationId:runId,kind,characterId:kind==='world_secret'?null:hero,hiddenFromAuthor:hidden,bounds,...(!hidden?{text}:{}),policy:{notBeforeSceneId:earliest||run.sceneId,requiredEventIds:required.split(',').map(x=>x.trim()).filter(Boolean),allowedCharacterIds:run.participants}}))}>Створити й зафіксувати секрет</button>
+ </fieldset>
+ <select aria-label="Сцена розкриття" value={scene} onChange={e=>setScene(e.target.value)} className="bg-slate-900 p-2 max-w-full"><option value="">Сцена розкриття / планування</option>{workspace.scenes.map((s:any)=><option key={s.id} value={s.id}>{s.title}</option>)}</select>
+ <label className="block"><input aria-label="Підтвердження дії Vault" type="checkbox" checked={confirm} onChange={e=>setConfirm(e.target.checked)}/> Я підтверджую вибрану дію: аварійне читання автором, розкриття в історії або архівування</label>
+ {vault.secrets.map((s:any)=><article data-vault-secret={s.id} key={s.id} className="border border-slate-700 rounded p-3 space-y-2 break-words"><p>{s.kind} · {s.characterId?workspace.characters.find((c:any)=>c.id===s.characterId)?.name:'Mystery Director'} · {s.status} · версія {s.version}</p><p>Секрет створено. {s.used?'Використаний — незмінний.':'Ще не використаний.'} {s.frozen?'Заморожений.':''}</p><p className="text-xs">Commitment: {s.commitment}</p>
+ <div className="flex flex-wrap gap-3"><button disabled={busy||s.frozen||s.status!=='sealed'} onClick={()=>act(()=>mutation(`/${s.id}/control`,{action:'freeze'}))}>Заморозити</button><button disabled={busy||s.used||s.frozen||s.status!=='sealed'} onClick={()=>act(()=>mutation(`/${s.id}/control`,{action:'regenerate',...(s.hiddenFromAuthor?{}:{text})}))}>Нова версія до використання</button>
+ <button disabled={busy||!confirm} onClick={()=>act(()=>mutation(`/${s.id}/control`,{action:'emergency_reveal',confirm:true}))}>Аварійно прочитати автору</button>
+ {s.kind==='world_secret'&&s.status==='sealed'&&<button disabled={busy||!scene} onClick={()=>act(()=>mutation(`/${s.id}/director`,{sceneId:scene}))}>Mystery Director: план і докази</button>}
+ <button disabled={busy||!scene||!confirm||s.status!=='sealed'} onClick={()=>act(()=>mutation(`/${s.id}/reveal`,{sceneId:scene,confirm:true}))}>Підтвердити розкриття в історії</button>
+ <button disabled={busy||!confirm||s.status!=='sealed'} onClick={()=>act(()=>mutation(`/simulations/${s.originSimulationId}/archive`,{confirm:true}))}>Архівувати прогін</button>
+ {s.status==='revealed'&&<button disabled={busy} onClick={()=>act(async()=>{const result=await mutation(`/${s.id}/branch`,{expectedBranchRevision:workspace.branchRevision});onBranchCreated?.();return result;})}>Пропозиція /revelation у гілку</button>}</div></article>)}
+ {emergency&&<aside className="border border-amber-500 p-3 break-words"><p>{emergency.notice}</p><p>{emergency.text}</p><button onClick={()=>setEmergency(undefined)}>Приховати прочитане</button></aside>}
+ {proposal&&<aside className="border border-slate-700 p-3 break-words"><p>Пропозиція розкриття для сцени {proposal.sectionId}; рукопис ще не змінено.</p><p>{proposal.text}</p><p>{proposal.tag}</p></aside>}
+ {director&&<p>План Mystery Director зашифровано: натяків {director.hintCount}; умови {director.checks.allowed?'виконано':'ще не виконано'}. {director.checks.blocked.join(', ')}</p>}
+ <details><summary>Незмінний журнал Vault без приватного змісту</summary>{vault.audit.map((e:any)=><p key={e.seq} className="text-xs break-words">{e.seq} · {e.action} · {e.at} · {e.hash}</p>)}</details>
+ </>}
+ </section>;
+}

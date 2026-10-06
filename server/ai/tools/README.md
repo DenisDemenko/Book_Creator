@@ -18,7 +18,7 @@ agent allowlists, call limits and timeout; a completed context cannot call tools
 | get-scene-context | Director situation and observable events; no source prose or private thoughts. |
 | search-character-mentions | Search only evidence already included in the authorized snapshot. |
 | evaluate-character-options | Bound server adapter and a subset of allowed actions; validate its result. |
-| read-authorized-secret | Denied until T4.1 supplies encrypted Vault and disclosure grants. No plaintext fallback. |
+| read-authorized-secret | Encrypted Vault with the server key and character/scene disclosure rules. No key or grant means denial. |
 | write-simulation-event | Append an actor-only note to the current active run. Does not advance a scene turn or touch canon. |
 | propose-canon-change | Pending memory, fact, fragment or tag, with observed event IDs. Tag requires this character's pending fragment. |
 

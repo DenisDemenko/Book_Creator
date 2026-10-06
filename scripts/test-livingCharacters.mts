@@ -38,7 +38,7 @@ const t = (name: string, ok: boolean, extra = '') => {
 };
 
 // ── Підставні моделі ─────────────────────────────────────────────────────────
-const stems = (s: string) => (s.toLowerCase().match(/[\p{L}']+/gu) ?? []).filter((w) => w.length >= 4).map((w) => w.slice(0, 4));
+const stems = (s: string) => (s.toLowerCase().match(/[\p{L}']+/gu) ?? []).filter((w:string) => w.length >= 4).map((w:string) => w.slice(0, 4));
 const STOP = new Set(['тобі', 'твоє', 'твій', 'чому', 'якщо', 'зараз', 'насп']);
 
 /** Голос героя: відповідає тим спогадом / переконанням із СВОГО запиту, що має спільне слово з питанням. */

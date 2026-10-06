@@ -1,4 +1,4 @@
 import type {BookToolHandler} from '../types';
 import {ToolDeniedError} from '../../adapters/harness';
-/** No plaintext fallback. T4.1 will supply Vault grants and disclosure conditions. */
-export const readAuthorizedSecret:BookToolHandler=async()=>{throw new ToolDeniedError('Secret Vault ще не підключений (Т4.1). Доступ до таємниці заборонено.');};
+import {readCharacterSecret} from '../../../core/secretVault';
+export const readAuthorizedSecret:BookToolHandler=async s=>{if(!s.deps.vaultKey||typeof s.args.secretId!=='string')throw new ToolDeniedError('Vault або дозвіл секрету недоступні.');return readCharacterSecret(s.deps.repo,s.deps.vaultKey(),s.scope,s.args.secretId);};

@@ -144,7 +144,7 @@ console.log('\nПошук за словами:');
 const byId = new Map(synced.map((r: any) => [r.id, r]));
 const target = pids.find((id) => (byId.get(id)?.text ?? '').length > 40) ?? pids[1];
 const words = String(byId.get(target)!.text).replace(/\[[^\]]*\]/g, ' ').match(/[\p{L}]{7,}/gu) ?? [];
-const word = words.sort((a, b) => b.length - a.length)[0];
+const word = words.sort((a:string, b:string) => b.length - a.length)[0];
 const w = await api('GET', `/api/projects/${BOOK}/search?q=${encodeURIComponent(word)}`);
 t(`слово з абзацу («${word}») знаходить цей абзац`, w.status === 200 && w.body.results.some((r: any) => r.paragraphId === target && r.editorPid === target && r.sources.text), `${w.status} ${w.body.results?.length}`);
 t('без ключа ембедингів — пошук за словами, причина у відповіді', w.body.sources?.vector?.used === false && /Немає ключа/.test(w.body.sources?.vector?.reason ?? '') && w.body.sources?.vector?.model === 'gemini-embedding-001', JSON.stringify(w.body.sources?.vector));

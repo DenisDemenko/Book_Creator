@@ -145,3 +145,18 @@ export async function refreshCausalityContinuity(repo: CoreRepository, projectId
   }
   return { checked: report.checked, created, updated, skipped, issues };
 }
+
+/** Vault reveal gate: only metadata and canonical evidence, never secret plaintext. */
+export async function checkSecretReveal(repo:CoreRepository,projectId:string,policy:import('./secretVaultTypes').RevealPolicy,sceneId:string){
+ const scan=await scanScenes(repo,projectId,await repo.listTimePoints(projectId));
+ const target=scan.bySection.get(sceneId),earliest=scan.bySection.get(policy.notBeforeSceneId);
+ if(!target||!earliest)throw new CoreRuleError('not_found','Сцену розкриття не знайдено.');
+ const blocked:string[]=[];
+ if(target.sectionId!==earliest.sectionId&&!sceneIsBefore(earliest,target))blocked.push('earliest_scene');
+ for(const id of policy.requiredEventIds){const entity=scan.entities.get(id);const proof=scan.mentions.some(m=>m.entityId===id&&m.status==='confirmed'&&(()=>{const p=scan.ix.paragraphs.get(m.paragraphId),s=p&&scan.bySection.get(p.documentId);return s&&(s.sectionId===target.sectionId||sceneIsBefore(s,target));})());if(!entity||entity.status!=='confirmed'||!EVENT_TYPES.has(entity.type)||!proof)blocked.push('missing_evidence');}
+ const traits=await repo.listEntityTraits(projectId);
+ for(const claim of policy.claims){if(!scan.entities.has(claim.entityId)||traits.some(t=>t.entityId===claim.entityId&&t.label===claim.label&&t.value!==claim.value))blocked.push('canon_conflict');}
+ const report=await analyzeCausality(repo,projectId,{entityIds:policy.requiredEventIds});
+ if(report.warnings.length)blocked.push('causality');
+ return {allowed:!blocked.length,blocked:[...new Set(blocked)],sceneId,evidenceCount:policy.requiredEventIds.length};
+}

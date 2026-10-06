@@ -20,6 +20,7 @@ import { CharacterProfilePage } from './CharacterProfilePage';
 import { TimelinePage } from './TimelinePage';
 import { EmotionMonitorPage } from './EmotionMonitorPage';
 import { ContinuityPage } from './ContinuityPage';
+import {SecretVaultPanel} from './SecretVaultPanel';
 import { MagicScenePage } from './MagicScenePage';
 import { WriterMasteryPage } from './WriterMasteryPage';
 import { BranchesPage } from './BranchesPage';
@@ -238,7 +239,7 @@ export const CorePageView: React.FC<Props> = ({ tab, book, characterId, onOpenCh
       {/* Сторінка 8 — «Перевірка безперервності» (Т2.4 В8). */}
       {tab === 'core-continuity' && <ContinuityPage book={book} onOpenParagraph={(t) => onOpenParagraph?.(t)} />}
       {tab === 'core-mastery' && <WriterMasteryPage key={book.id} book={book} />}
-      {tab === 'core-branches' && <React.Fragment key={book.id}><MagicScenePage book={book} onUpdateBook={onUpdateBook} /><BranchesPage book={book} onUpdateBook={onUpdateBook} /></React.Fragment>}
+      {tab === 'core-branches' && <React.Fragment key={book.id}><MagicScenePage book={book} onUpdateBook={onUpdateBook} /><SecretVaultPanel book={book} onBranchCreated={()=>window.dispatchEvent(new Event('vault:branch-created'))}/><BranchesPage book={book} onUpdateBook={onUpdateBook} /></React.Fragment>}
       {tab === 'core-translation' && <TranslationPage key={book.id} book={book} />}
 
       {/* Сторінка 6 — «Хронологія» (Т2.1). */}

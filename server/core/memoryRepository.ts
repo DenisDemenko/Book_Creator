@@ -1,3 +1,4 @@
+import {checkVaultTransition} from './secretVaultIntegrity';
 /**
  * Сховище ядра в пам'яті — для тестів і для запуску без PostgreSQL.
  *
@@ -2443,6 +2444,9 @@ export class MemoryCoreRepository implements CoreRepository {
   }
 
   private translationWorkspaces = new Map<string, import('./translationTypes').TranslationWorkspace>();
+  private secretVaults=new Map<string,import('./secretVaultTypes').SecretVaultState>();
+  async getSecretVault(projectId:string){return clone(this.secretVaults.get(projectId)??{revision:0,secrets:[],audit:[]});}
+  async saveSecretVault(projectId:string,state:import('./secretVaultTypes').SecretVaultState,expectedRevision:number){this.requireProject(projectId);checkVaultTransition(this.secretVaults.get(projectId)??{revision:0,secrets:[],audit:[]},state,expectedRevision);this.secretVaults.set(projectId,clone(state));}
   private magicSceneRuns=new Map<string,import('./magicSceneTypes').MagicSceneRun>();
   async getMagicSceneRun(projectId:string,simulationId:string){return clone(this.magicSceneRuns.get(JSON.stringify([projectId,simulationId]))??null);}
   async saveMagicSceneRun(projectId:string,state:import('./magicSceneTypes').MagicSceneRun,expectedRevision:number){

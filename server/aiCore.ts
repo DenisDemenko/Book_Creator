@@ -289,6 +289,7 @@ interface GenerateTextParams {
   /** За замовчуванням — GEMINI_MODEL для engine==='gemini'. Для решти рушіїв обов'язковий. */
   modelId?: string;
   prompt: string;
+  privateContent?:boolean;
   systemInstruction?: string;
   /** Тільки engine==='gemini' підтримує структурований JSON-режим. */
   json?: boolean;
@@ -431,11 +432,12 @@ export async function generateText(
         // спробу: інакше один клік автора давав би три записи «провал»
         // у бізнес-аналітиці й спотворював би статистику надійності.
         await logTextUsage(ctx, modelId, p.engine, 0, 0, false);
+        if(p.privateContent)throw new Error('Приватний AI-виклик не завершено.');
         throw humanizeAiError(err, p.engine);
       }
       console.warn(
         `[aiCore] ${p.label}: тимчасова відмова ${p.engine} (спроба ${attempt + 1}/${TRANSIENT_RETRIES + 1}), ` +
-          `повтор через ${RETRY_DELAYS_MS[attempt]} мс — ${String((err as Error)?.message ?? err).slice(0, 160)}`
+          `повтор через ${RETRY_DELAYS_MS[attempt]} мс — ${p.privateContent?'private provider failure':String((err as Error)?.message ?? err).slice(0, 160)}`
       );
       await sleep(RETRY_DELAYS_MS[attempt]);
     }

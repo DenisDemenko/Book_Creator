@@ -1,3 +1,4 @@
+import {checkVaultTransition} from './secretVaultIntegrity';
 /**
  * Сховище ядра в PostgreSQL (рішення К1). Схема — `fusion_core`
  * (migrations/0002_core_schema.sql); шлях пошуку з'єднань задає `db.ts`.
@@ -3315,6 +3316,8 @@ export class PgCoreRepository implements CoreRepository {
     const { rows } = await this.q('SELECT revision, state FROM translation_workspaces WHERE project_id = $1', [projectId]);
     return rows[0] ? { ...rows[0].state, revision: Number(rows[0].revision) } : { revision: 0, glossary: [], records: [] };
   }
+  async getSecretVault(projectId:string):Promise<import('./secretVaultTypes').SecretVaultState>{const {rows}=await this.q('SELECT revision,state FROM secret_vaults WHERE project_id=$1',[projectId]);return rows[0]?{...rows[0].state,revision:Number(rows[0].revision)}:{revision:0,secrets:[],audit:[]};}
+  async saveSecretVault(projectId:string,state:import('./secretVaultTypes').SecretVaultState,expectedRevision:number){checkVaultTransition(await this.getSecretVault(projectId),state,expectedRevision);const result=expectedRevision===0?await this.q('INSERT INTO secret_vaults (project_id,revision,state) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING',[projectId,state.revision,JSON.stringify(state)]):await this.q('UPDATE secret_vaults SET revision=$2,state=$3 WHERE project_id=$1 AND revision=$4',[projectId,state.revision,JSON.stringify(state),expectedRevision]);if(!result.rowCount)throw new CoreRuleError('conflict','Vault уже змінили.');}
   async getMagicSceneRun(projectId:string,simulationId:string):Promise<import('./magicSceneTypes').MagicSceneRun|null>{
     const {rows}=await this.q('SELECT revision,state FROM magic_scene_runs WHERE project_id=$1 AND simulation_id=$2',[projectId,simulationId]);
     return rows[0]?{...rows[0].state,revision:Number(rows[0].revision)}:null;

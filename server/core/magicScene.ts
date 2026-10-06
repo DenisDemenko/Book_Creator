@@ -4,6 +4,7 @@ import type {MagicSceneRun,MagicEvent,MagicFragment} from './magicSceneTypes';
 import {CoreRuleError} from './rules';
 import type {SnapshotResult} from './characterSnapshot';
 import {createBookToolRuntime,type BookToolScope} from '../ai/tools';
+import {characterSecretIds,vaultKeyFromEnv} from './secretVault';
 import {skillInstructions} from '../ai/skills';
 import {branchHash,branchCanonHash,createBranch,getBranch,mergeBranchFragment,checkBranch} from './branches';
 import {getBook,getBookRevision,type StoredBook} from '../bookStore';
@@ -16,6 +17,8 @@ import type {StudioCharacterLike} from './characterProfile';
 export const SCENE_ACTIONS=['answer','ask','act','silence','deflect','confess'];
 export interface MagicSceneDeps {
  repo:CoreRepository;
+ vaultKey?:()=>Buffer;
+ secretChoice?:(context:Record<string,unknown>)=>Promise<unknown>;
  authorizeTools?:(scope:Readonly<BookToolScope>)=>Promise<boolean>;
  studio?:(projectId:string,entity:EntityRow)=>Promise<{character:StudioCharacterLike|null;all:StudioCharacterLike[]}|undefined>;
  decide:(context:{run:MagicSceneRun;characterId:string;situation:string;actor:CoreActor})=>Promise<{action:string;awaitingAuthor?:boolean;[key:string]:unknown}>;
@@ -71,13 +74,22 @@ export async function stepMagic(d:MagicSceneDeps,p:string,id:string,input:any,ac
  const characterId=run.participants[run.events.length%run.participants.length];const hero=await d.repo.getEntity(p,characterId);if(!hero)throw new CoreRuleError('not_found','Героя видалено.');
  const agent=await d.repo.getCharacterAgent(p,characterId);if(!agent?.enabled||agent.autonomyLevel!=='scene')throw new CoreRuleError('conflict','Автономність героя вимкнено.');
  const observed=run.events.filter(e=>e.audience.includes(characterId));const situation=[run.goal,run.constraints,...observed.slice(-12).map(publicText)].join('\n').slice(0,10000);
- const runtime=createBookToolRuntime({repo:d.repo,scope:{projectId:p,actorId:actor,characterId,sceneId:run.sceneId,simulationId:id},authorize:d.authorizeTools??(async scope=>scope.actorId===actor),allowedActions:SCENE_ACTIONS,situation,studio:await d.studio?.(p,hero),evaluate:async()=>d.decide({run,characterId,situation,actor})});
+ const runtime=createBookToolRuntime({repo:d.repo,scope:{projectId:p,actorId:actor,characterId,sceneId:run.sceneId,simulationId:id},authorize:d.authorizeTools??(async scope=>scope.actorId===actor),allowedActions:SCENE_ACTIONS,situation,vaultKey:d.vaultKey??vaultKeyFromEnv,studio:await d.studio?.(p,hero),evaluate:async()=>d.decide({run,characterId,situation,actor})});
  const snapshot=await runtime.step('character-profile-agent',['get-character-snapshot'],ctx=>ctx.tool<SnapshotResult>('get-character-snapshot'));
  const scene=await runtime.step('character-agent',['get-scene-context'],ctx=>ctx.tool<{observed:Record<string,unknown>[]}>('get-scene-context'));
  let decision:Record<string,unknown>;
  if(input.authorAction!==undefined){if(!SCENE_ACTIONS.includes(input.authorAction))throw new CoreRuleError('bad_input','Некоректна дія автора.');decision={action:input.authorAction,source:'author'};}
  else decision=await runtime.step('character-agent',['evaluate-character-options'],ctx=>ctx.tool<Record<string,unknown>>('evaluate-character-options'));
  if(decision.awaitingAuthor){run=await held(d.repo,p,id,token);run.status='paused';run.busy=null;run.lastError='Jev і запасний LLM не обрали дію. Автор може обрати її явно й продовжити.';return saveMagic(d.repo,p,run);}
+ const ids=await characterSecretIds(d.repo,d.vaultKey??vaultKeyFromEnv,p,characterId,run.sceneId);
+ if(ids.length&&!input.authorAction){if(!d.secretChoice)throw new CoreRuleError('conflict','Приватний рушій секретів недоступний.');try{
+  const record=typeof decision.decisionId==='string'?await d.repo.getCharacterDecision(p,decision.decisionId):null;
+  if(record&&record.characterId!==characterId)throw new Error();
+  const primary=(record?.options.primary??{}) as {allowed?:string[];forbidden?:string[]};const privateAllowed=SCENE_ACTIONS.filter(action=>(!primary.allowed||primary.allowed.includes(action))&&!primary.forbidden?.includes(action));if(!privateAllowed.length)throw new Error();
+  const privateFacts=[];for(const secretId of ids)privateFacts.push(await runtime.step('character-agent',['read-authorized-secret'],ctx=>ctx.tool('read-authorized-secret',{secretId})));
+  const choice:any=await d.secretChoice({hero:{id:hero.id,name:hero.name},snapshot:snapshot.snapshot,privateFacts,allowedActions:privateAllowed,situation,decision:{action:decision.action}});
+  if(!choice||!privateAllowed.includes(choice.action))throw new Error();decision={action:choice.action,source:'sealed-private-choice'};
+ }catch{throw new CoreRuleError('conflict','Приватний крок секрету не завершено. Секрет не розкрито.');}}
  if(typeof decision.action!=='string'||!SCENE_ACTIONS.includes(decision.action))throw new CoreRuleError('bad_input','Рішення містить недозволену дію.');
  const result:any=await d.voice({hero:{id:hero.id,name:hero.name},cast:await Promise.all(run.participants.map(async id=>({id,name:(await d.repo.getEntity(p,id))?.name??id}))),snapshot:snapshot.snapshot,goal:run.goal,constraints:run.constraints,decision,observed:scene.observed.slice(-12),skills:skillInstructions(['character-arc','dialogue-craft','emotion-dynamics','mystery-foreshadowing']),ownThoughts:run.privateSteps.filter(s=>s.characterId===characterId).slice(-4).map(s=>({thought:s.thought,intent:s.intent})),allowedAudience:run.participants,turn:run.events.length+1});
  for(const field of ['speech','actionText','privateThought','intent'])if(typeof result?.[field]!=='string'||result[field].length>(field==='intent'?1000:4000))throw new CoreRuleError('bad_input','Неправильна відповідь агента.');

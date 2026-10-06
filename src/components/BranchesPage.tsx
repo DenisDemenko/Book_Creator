@@ -8,7 +8,7 @@ export function BranchesPage({book,onUpdateBook}:{book:Book;onUpdateBook?:(book:
  const base=`/api/core/projects/${encodeURIComponent(book.id)}/branches`;
  const api=async(path='',method='GET',body?:unknown)=>{const r=await fetch(base+path,{method,credentials:'same-origin',headers:{'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});const data=await r.json();if(!r.ok)throw new Error(data.error??`Помилка ${r.status}`);return data;};
  const load=async()=>setState(await api());
- useEffect(()=>{load().catch(e=>setError(e.message));},[book.id]);
+ useEffect(()=>{const refresh=()=>load().catch(e=>setError(e.message));refresh();window.addEventListener('vault:branch-created',refresh);return()=>window.removeEventListener('vault:branch-created',refresh);},[book.id]);
  const b=state?.branches.find(b=>b.id===selected),other=state?.branches.find(b=>b.id===compare);
  const action=async(fn:()=>Promise<void>)=>{setBusy(true);setError('');try{await fn();await load();}catch(e){setError(e instanceof Error?e.message:String(e));await load().catch(()=>{});}finally{setBusy(false);setConfirm(false);}};
  const mutation=(path:string,body:object,method='POST')=>api(path,method,{...body,expectedRevision:state?.revision});

@@ -9,6 +9,7 @@ export interface BookToolDeps {
  authorize:(scope:Readonly<BookToolScope>)=>Promise<boolean>;
  allowedActions:readonly string[];
  situation:string;
+ vaultKey?:()=>Buffer;
  studio?:SnapshotRequest['studio'];
  evaluate?:(actions:readonly string[],signal:AbortSignal)=>Promise<{action:string;awaitingAuthor?:boolean;source?:unknown;decisionId?:unknown}>;
 }

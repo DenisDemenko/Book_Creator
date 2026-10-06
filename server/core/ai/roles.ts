@@ -33,6 +33,8 @@ export interface AiGenerateInput {
   projectId: string;
   /** Для витрати в usage_log: хто запустив. */
   actor: CoreActor;
+  /** Suppress provider error content for private Vault requests. */
+  privateContent?:boolean;
   images?: { id: string; mimeType: string; data: string }[];
   signal?: AbortSignal;
   /** Т5.4: параметри вузла LLM (температура, ліміт токенів, тайм-аут); без них — як раніше. */
