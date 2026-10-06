@@ -2,7 +2,9 @@ import {randomUUID} from 'node:crypto';
 import type {CoreRepository,CoreActor,EntityRow} from './types';
 import type {MagicSceneRun,MagicEvent,MagicFragment} from './magicSceneTypes';
 import {CoreRuleError} from './rules';
-import {buildCharacterSnapshot} from './characterSnapshot';
+import type {SnapshotResult} from './characterSnapshot';
+import {createBookToolRuntime,type BookToolScope} from '../ai/tools';
+import {skillInstructions} from '../ai/skills';
 import {branchHash,branchCanonHash,createBranch,getBranch,mergeBranchFragment,checkBranch} from './branches';
 import {getBook,getBookRevision,type StoredBook} from '../bookStore';
 import {cleanFragmentText,validProposalTag} from './interviewProposals';
@@ -14,6 +16,7 @@ import type {StudioCharacterLike} from './characterProfile';
 export const SCENE_ACTIONS=['answer','ask','act','silence','deflect','confess'];
 export interface MagicSceneDeps {
  repo:CoreRepository;
+ authorizeTools?:(scope:Readonly<BookToolScope>)=>Promise<boolean>;
  studio?:(projectId:string,entity:EntityRow)=>Promise<{character:StudioCharacterLike|null;all:StudioCharacterLike[]}|undefined>;
  decide:(context:{run:MagicSceneRun;characterId:string;situation:string;actor:CoreActor})=>Promise<{action:string;awaitingAuthor?:boolean;[key:string]:unknown}>;
  voice:(context:Record<string,unknown>)=>Promise<unknown>;
@@ -68,18 +71,20 @@ export async function stepMagic(d:MagicSceneDeps,p:string,id:string,input:any,ac
  const characterId=run.participants[run.events.length%run.participants.length];const hero=await d.repo.getEntity(p,characterId);if(!hero)throw new CoreRuleError('not_found','Героя видалено.');
  const agent=await d.repo.getCharacterAgent(p,characterId);if(!agent?.enabled||agent.autonomyLevel!=='scene')throw new CoreRuleError('conflict','Автономність героя вимкнено.');
  const observed=run.events.filter(e=>e.audience.includes(characterId));const situation=[run.goal,run.constraints,...observed.slice(-12).map(publicText)].join('\n').slice(0,10000);
- const snapshot=await buildCharacterSnapshot(d.repo,{projectId:p,characterId,sceneId:run.sceneId,asOfChapter:run.asOfChapter,simulationId:id,situation,allowedActions:SCENE_ACTIONS,studio:await d.studio?.(p,hero)});
+ const runtime=createBookToolRuntime({repo:d.repo,scope:{projectId:p,actorId:actor,characterId,sceneId:run.sceneId,simulationId:id},authorize:d.authorizeTools??(async scope=>scope.actorId===actor),allowedActions:SCENE_ACTIONS,situation,studio:await d.studio?.(p,hero),evaluate:async()=>d.decide({run,characterId,situation,actor})});
+ const snapshot=await runtime.step('character-profile-agent',['get-character-snapshot'],ctx=>ctx.tool<SnapshotResult>('get-character-snapshot'));
+ const scene=await runtime.step('character-agent',['get-scene-context'],ctx=>ctx.tool<{observed:Record<string,unknown>[]}>('get-scene-context'));
  let decision:Record<string,unknown>;
  if(input.authorAction!==undefined){if(!SCENE_ACTIONS.includes(input.authorAction))throw new CoreRuleError('bad_input','Некоректна дія автора.');decision={action:input.authorAction,source:'author'};}
- else decision=await d.decide({run,characterId,situation,actor});
+ else decision=await runtime.step('character-agent',['evaluate-character-options'],ctx=>ctx.tool<Record<string,unknown>>('evaluate-character-options'));
  if(decision.awaitingAuthor){run=await held(d.repo,p,id,token);run.status='paused';run.busy=null;run.lastError='Jev і запасний LLM не обрали дію. Автор може обрати її явно й продовжити.';return saveMagic(d.repo,p,run);}
  if(typeof decision.action!=='string'||!SCENE_ACTIONS.includes(decision.action))throw new CoreRuleError('bad_input','Рішення містить недозволену дію.');
- const result:any=await d.voice({hero:{id:hero.id,name:hero.name},cast:await Promise.all(run.participants.map(async id=>({id,name:(await d.repo.getEntity(p,id))?.name??id}))),snapshot:snapshot.snapshot,goal:run.goal,constraints:run.constraints,decision,observed:observed.slice(-12).map(observable),ownThoughts:run.privateSteps.filter(s=>s.characterId===characterId).slice(-4).map(s=>({thought:s.thought,intent:s.intent})),allowedAudience:run.participants,turn:run.events.length+1});
+ const result:any=await d.voice({hero:{id:hero.id,name:hero.name},cast:await Promise.all(run.participants.map(async id=>({id,name:(await d.repo.getEntity(p,id))?.name??id}))),snapshot:snapshot.snapshot,goal:run.goal,constraints:run.constraints,decision,observed:scene.observed.slice(-12),skills:skillInstructions(['character-arc','dialogue-craft','emotion-dynamics','mystery-foreshadowing']),ownThoughts:run.privateSteps.filter(s=>s.characterId===characterId).slice(-4).map(s=>({thought:s.thought,intent:s.intent})),allowedAudience:run.participants,turn:run.events.length+1});
  for(const field of ['speech','actionText','privateThought','intent'])if(typeof result?.[field]!=='string'||result[field].length>(field==='intent'?1000:4000))throw new CoreRuleError('bad_input','Неправильна відповідь агента.');
  if(!result.speech.trim()&&!result.actionText.trim()&&decision.action!=='silence')throw new CoreRuleError('bad_input','Потрібна спостережувана репліка або дія.');
  const audience=result.audience??run.participants;if(!Array.isArray(audience)||audience.some(x=>!run.participants.includes(x)))throw new CoreRuleError('bad_input','Спостерігачі мають бути учасниками сцени.');
  await fresh(d.repo,p,run);run=await held(d.repo,p,id,token);
- const event:MagicEvent={id:randomUUID(),turn:run.events.length+1,characterId,characterName:hero.name,action:String(decision.action),speech:result.speech,actionText:result.actionText,audience:[...new Set([characterId,...audience])],at:new Date().toISOString()};run.events.push(event);run.privateSteps.push({eventId:event.id,characterId,thought:result.privateThought,intent:result.intent,decision,snapshotHash:snapshot.hash});run.requests.push({id:requestId,operation:'step'});run.busy=null;delete run.lastError;if(run.events.length>=run.maxTurns)run.status='closed';await saveMagic(d.repo,p,run);await d.repo.updateSimulation(p,id,{currentTurn:run.events.length,status:run.status==='closed'?'closed':'active'});return run;
+ const event:MagicEvent={id:randomUUID(),turn:run.events.length+1,characterId,characterName:hero.name,action:String(decision.action),speech:result.speech,actionText:result.actionText,audience:[...new Set([characterId,...audience])],at:new Date().toISOString()};run.events.push(event);run.privateSteps.push({eventId:event.id,characterId,thought:result.privateThought,intent:result.intent,decision,toolTrace:runtime.trace,snapshotHash:snapshot.hash});run.requests.push({id:requestId,operation:'step'});run.busy=null;delete run.lastError;if(run.events.length>=run.maxTurns)run.status='closed';await saveMagic(d.repo,p,run);await d.repo.updateSimulation(p,id,{currentTurn:run.events.length,status:run.status==='closed'?'closed':'active'});return run;
  }catch(error){await failure(d.repo,p,id,token,error);throw error;}
 }
 export async function draftMagic(d:MagicSceneDeps,p:string,id:string,input:any){
@@ -87,7 +92,7 @@ export async function draftMagic(d:MagicSceneDeps,p:string,id:string,input:any){
  if(!run.events.length||run.fragments.length)throw new CoreRuleError('conflict','Потрібні події й відсутність попередньої чернетки.');
  const token=await lock(d.repo,p,run,'draft');
  try{
- const result:any=await d.writer({cast:await Promise.all(run.participants.map(async id=>({id,name:(await d.repo.getEntity(p,id))?.name??id}))),source:run.sourceText,goal:run.goal,constraints:run.constraints,events:run.events.map(observable),rule:'Лише спостережувані події. Збережіть авторський стиль; теги — пропозиції. Кожен фрагмент посилається на свої події.'});
+ const result:any=await d.writer({cast:await Promise.all(run.participants.map(async id=>({id,name:(await d.repo.getEntity(p,id))?.name??id}))),source:run.sourceText,goal:run.goal,constraints:run.constraints,events:run.events.map(observable),skills:skillInstructions(['author-style','continuity-check']),rule:'Лише спостережувані події. Збережіть авторський стиль; теги — пропозиції. Кожен фрагмент посилається на свої події.'});
  if(!Array.isArray(result?.fragments)||!result.fragments.length||result.fragments.length>12)throw new CoreRuleError('bad_input','Потрібні 1–12 фрагментів.');
  const fragments:MagicFragment[]=result.fragments.map((f:any)=>{
  if(typeof f?.text!=='string'||!f.text.trim()||f.text.length>6000||!Array.isArray(f.eventIds)||!f.eventIds.length||f.eventIds.some((e:unknown)=>!run.events.some(x=>x.id===e)))throw new CoreRuleError('bad_input','Некоректний фрагмент або його докази.');

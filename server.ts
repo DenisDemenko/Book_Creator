@@ -854,7 +854,8 @@ registerGitCommandRoutes(app);
         return {text:out.text,modelId:out.modelId,inputTokens:out.inputTokens,outputTokens:out.outputTokens};
       });
       const model=async(system:string,context:Record<string,unknown>)=>{
-        const out=await aiRoleGenerateViaCore({module:'coreCharacterVoice',modelId:await resolveModuleModelId('coreCharacterVoice'),system,user:JSON.stringify(context),projectId:access.projectId,actor});
+        if(typeof context.skills==='string')system+='\n\n'+context.skills;
+        const out=await aiRoleGenerateViaCore({module:'coreCharacterVoice',modelId:await resolveModuleModelId('coreCharacterVoice'),system,user:JSON.stringify(Object.fromEntries(Object.entries(context).filter(([key])=>key!=='skills'))),projectId:access.projectId,actor});
         return JSON.parse(out.text.replace(/^```(?:json)?\s*|\s*```$/g,''));
       };
       return {

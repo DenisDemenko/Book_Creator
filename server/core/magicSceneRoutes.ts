@@ -13,7 +13,7 @@ export function registerMagicSceneRoutes(app:Express,d:MagicRoutesDeps){
   const stored=await getBook(a.projectId),owner=await d.access.getCollabOwnerId(a.projectId)??await d.access.getBookOwnerId(a.projectId);
   if(!stored||stored.ownerId!==owner)throw new CoreRuleError('not_found','Збережіть книгу на сервері.');await fn(req,res,repo,a);
  }catch(err){if(err instanceof ChatProviderError){res.status(err.status).json({error:err.message});return;}if(err instanceof CoreRuleError){res.status(({not_found:404,conflict:409,bad_input:400,bad_actor:403} as Record<string,number>)[err.code]??422).json({error:err.message,kind:err.code});return;}console.error('[magic-scene]',err);res.status(500).json({error:'Не вдалося виконати дію Magic Scene.'});}};
- const engines=async(req:Request,repo:CoreRepository,a:ProjectAccess):Promise<MagicSceneDeps>=>({repo,...await d.engines(req,repo,a)});
+ const engines=async(req:Request,repo:CoreRepository,a:ProjectAccess):Promise<MagicSceneDeps>=>({repo,...await d.engines(req,repo,a),authorizeTools:async scope=>{const current=await resolveProjectAccess(req.principal as never,scope.projectId,d.access);return !!current?.effective.full&&scope.projectId===a.projectId&&scope.actorId===`user:${a.userId}`;}});
  const ai=d.aiGuard?[d.aiGuard]:[];
  app.get(`${base}/magic-scenes`,handle(async(_req,res,repo,a)=>{
   const docs=(await repo.listDocuments(a.projectId)).filter(d=>d.kind==='section'&&!d.deletedAt),entities=(await repo.listEntities(a.projectId)).filter(e=>e.type==='character'&&e.status==='confirmed');

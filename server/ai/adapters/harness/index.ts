@@ -21,6 +21,8 @@ export interface RuntimeScope {
   actorId: string;
   characterId: string;
   simulationId: string;
+  /** Required by book tools; optional for legacy prototype callers. */
+  sceneId?: string;
 }
 
 export interface AgentTool<A = any, R = any> {
@@ -66,7 +68,7 @@ export class InProcessAgentRuntime implements AgentRuntime {
 
   constructor(private readonly scope: RuntimeScope, tools: AgentTool[]) {
     for (const t of tools) this.tools.set(t.name, t);
-    Object.freeze(this.scope);
+    this.scope = Object.freeze({...scope});
   }
 
   get trace(): readonly TraceEvent[] {
@@ -82,6 +84,7 @@ export class InProcessAgentRuntime implements AgentRuntime {
     const timeoutMs = opts.timeoutMs ?? 30_000;
     const maxCalls = opts.maxToolCalls ?? 8;
     const controller = new AbortController();
+    let finished = false;
     const timer = setTimeout(() => controller.abort(new Error(`Крок «${agent}» перевищив ${timeoutMs} мс`)), timeoutMs);
     let calls = 0;
     const allowed = new Set(allow);
@@ -89,6 +92,7 @@ export class InProcessAgentRuntime implements AgentRuntime {
       scope: this.scope,
       signal: controller.signal,
       tool: async <T>(name: string, args?: unknown): Promise<T> => {
+        if (finished) throw new ToolDeniedError('Крок агента вже завершився');
         const tool = this.tools.get(name);
         if (!tool || !allowed.has(name)) {
           this.log({ agent, kind: 'tool_denied', tool: name, detail: tool ? 'не дозволено цьому агенту' : 'такого tool немає' });
@@ -102,6 +106,7 @@ export class InProcessAgentRuntime implements AgentRuntime {
         const t0 = Date.now();
         this.log({ agent, kind: 'tool_call', tool: name });
         const out = (await tool.run(args, this.scope, controller.signal)) as T;
+        controller.signal.throwIfAborted();
         this.log({ agent, kind: 'tool_result', tool: name, ms: Date.now() - t0 });
         return out;
       },
@@ -118,6 +123,8 @@ export class InProcessAgentRuntime implements AgentRuntime {
       this.log({ agent, kind: 'step_error', ms: Date.now() - started, detail: (err as Error).message });
       throw err;
     } finally {
+      finished = true;
+      controller.abort(new Error('Крок агента завершився'));
       clearTimeout(timer);
     }
   }

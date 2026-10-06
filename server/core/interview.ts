@@ -30,6 +30,7 @@
  * питання збережене, «повторити» відповідає на те саме питання.
  */
 
+import {skillInstructions} from '../ai/skills';
 import type { AutonomyLevel, CanonProposalRow, CharacterAgentRow, CharacterDecisionRow, CoreActor, CoreRepository, EntityRow, SimulationEventRow, SimulationRow } from './types';
 import { AUTONOMY_LEVELS } from './types';
 import { CoreRuleError } from './rules';
@@ -344,7 +345,7 @@ export function voiceHistory(ctx: VoiceTurnContext): string {
 /** Інструкція голосу (шаблон адміна «Ядра AI» чи заводський). */
 export async function voiceRender(deps: Pick<InterviewDeps, 'loadTemplate'>, ctx: VoiceTurnContext, snapshot: Awaited<ReturnType<typeof voiceSnapshot>>, history: string) {
   const template = (await deps.loadTemplate?.().catch(() => undefined)) ?? factoryCharacterVoiceTemplate();
-  return renderCharacterVoiceTemplate(template, {
+  const rendered = renderCharacterVoiceTemplate(template, {
     hero: ctx.hero.name,
     snapshot: JSON.stringify({ as_of_chapter: snapshot.snapshot.as_of_chapter, ...jevState(snapshot.snapshot) }, null, 1),
     decision: voiceDecisionText(ctx),
@@ -352,6 +353,7 @@ export async function voiceRender(deps: Pick<InterviewDeps, 'loadTemplate'>, ctx
     question: ctx.question,
     note: String((ctx.sim.config as { note?: unknown }).note ?? ''),
   });
+  return {...rendered,system:rendered.system+'\n\n'+skillInstructions(['interrogation','dialogue-craft','continuity-check'])};
 }
 
 export type VoiceReply = { reply: string; intent?: string; proposals?: VoiceProposals };
