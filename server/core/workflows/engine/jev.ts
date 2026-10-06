@@ -19,9 +19,9 @@
  */
 
 import {
-  JEV_USD_PER_MTOK,
   LlmFallbackJevAdapter,
   enforceAllowed,
+  jevCostUsd,
   noulProbability,
   type JevAdapter,
   type JevQuestion,
@@ -137,7 +137,7 @@ function toOutcome(raw: JevRawAnswer & { costUsd?: number }, source: JevOutcome[
     else missing.push(q.id);
   }
   if (missing.length) throw new JevUnavailable(`${source === 'llm_fallback' ? 'Запасний LLM' : 'Jev'} не відповів на: ${missing.join(', ')}`);
-  const costUsd = source === 'jev' ? round((raw.usage.input_tokens / 1_000_000) * JEV_USD_PER_MTOK, 1_000_000) : round(raw.costUsd ?? 0, 1_000_000);
+  const costUsd = source === 'jev' ? jevCostUsd(raw.usage.input_tokens) : round(raw.costUsd ?? 0, 1_000_000);
   return { source, model: raw.model, answers, tokensIn: raw.usage.input_tokens, tokensOut: raw.usage.output_tokens, costUsd, fallbackReason };
 }
 

@@ -109,8 +109,12 @@ console.log('\nПлавна зміна за 7 секунд (StudioBackdrop.tsx):
     /type Slots = \[string, string\]/.test(src));
   t('перехід опитує систему про «зменшити рух»',
     /prefers-reduced-motion/.test(src));
+  // Доти тут стояло `img.onload = swap`. Тепер завантаження ще й перевіряють
+  // на `naturalWidth` (200-HTML замість картинки теж викликає onload-подібну
+  // «успішну» відповідь), тож умова сильніша: перемикання — тільки всередині
+  // onload і тільки для справжнього зображення.
   t('новий фон загорається лише після завантаження',
-    /img\.onload\s*=\s*swap/.test(src));
+    /img\.onload\s*=\s*\(\)\s*=>\s*\{[\s\S]{0,160}?return swap\(\)/.test(src));
   t('фон не перехоплює кліки (pointer-events: none у CSS)',
     /\.studio-backdrop\s*\{[^}]*pointer-events:\s*none/.test(read('src/index.css')));
 }
@@ -160,6 +164,31 @@ console.log('\nФон підключено до студії (App.tsx):');
     /<BlocksOpacityProvider>/.test(app) && /<\/BlocksOpacityProvider>/.test(app));
   t('модалки лишились ПОЗА прозорістю (закриття після робочої області)',
     app.indexOf('</BlocksOpacityProvider>') < app.indexOf('<VersionSnapshotModal'));
+}
+
+// Ассет, якого немає, і SPA-фолбек — окрема історія (05.10.2026). Сервер
+// віддавав index.html із кодом 200 на будь-який неіснуючий шлях, тож
+// `/assets/фото.webp`, якого немає, приходив як «успішна» HTML-відповідь:
+// у мережі — 200, у консолі — тиша, <img> не декодується — і фон студії
+// тихо перестає мінятися. Тепер файли отримують справжній 404, а сам фон
+// перевіряє, що прийшло зображення, і раз обходить кеш.
+console.log('\nАссет, якого немає, отримує 404, а фон це помічає:');
+{
+  const server = read('server.ts');
+  const backdrop = read('src/components/StudioBackdrop.tsx');
+
+  t('сервер відрізняє файл від сторінки',
+    /looksLikeFile/.test(server) && /startsWith\('\/assets\/'\)/.test(server));
+  t('і віддає саме 404, а не index.html із кодом 200',
+    /res\.status\(404\)\.type\('text\/plain'\)/.test(server));
+  t('фолбек на index.html лишився лише для сторінок',
+    /sendFile\(path\.join\(distPath, 'index\.html'\)\)/.test(server));
+  t('фон перевіряє, що прийшло зображення (naturalWidth)',
+    /naturalWidth\s*>\s*0/.test(backdrop));
+  t('і один раз повторює з обходом кеша',
+    /backdrop-retry/.test(backdrop) && /let retried = false/.test(backdrop));
+  t('після невдалого повтору лишає попередній фон, а не чистий екран',
+    /фон не завантажився/.test(backdrop));
 }
 
 console.log(`\n${fail === 0 ? '✓' : '✗'} Разом: ${pass} успішних, ${fail} невдалих\n`);

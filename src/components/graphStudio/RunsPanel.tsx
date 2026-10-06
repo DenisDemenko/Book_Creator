@@ -79,7 +79,13 @@ const STATUS: Record<Run['status'], { label: string; cls: string }> = {
 const STEP_CLS: Record<Step['status'], string> = { succeeded: 'text-emerald-300', failed: 'text-rose-300', paused: 'text-amber-300' };
 const MODE: Record<Run['mode'], string> = { normal: '', replay: 'REPLAY (Повтор)', fork: 'FORK (Відгалуження)', subgraph: 'SUBGRAPH (Підпроцес)' };
 const fmtTime = (iso: string | null) => (iso ? new Date(iso).toLocaleString('uk-UA') : '—');
-const fmtCost = (v: number) => `$${v.toFixed(v < 0.01 ? 4 : 3)}`;
+/**
+ * Ціна запуску. Суми, менші за десятитисячну долара, досі друкувались як
+ * «$0.0000» — тобто як нуль, хоч токени витрачено (один хід Jev коштує
+ * ≈$0.00003 при $0.042 за 1 млн вхідних токенів). Для таких сум показуємо
+ * шість знаків; для решти — як було.
+ */
+const fmtCost = (v: number) => (v && Math.abs(v) < 0.0001 ? `$${v.toFixed(6)}` : `$${v.toFixed(v < 0.01 ? 4 : 3)}`);
 const fmtMs = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)} с` : `${v} мс`);
 const sel = 'min-w-0 rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100';
 

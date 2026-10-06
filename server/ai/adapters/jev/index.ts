@@ -51,6 +51,18 @@ export const JEV_USD_PER_MTOK = 0.042;
  */
 export const JEV_ENV_KEYS = ['JEV_API_KEY', 'TYPESAFE_API_KEY'] as const;
 
+/**
+ * Вартість звернення до Jev у доларах: тариф за **вхідні** токени (вихідні
+ * безкоштовні, docs.typesafe.ai/models). Одна формула на всі місця — і на
+ * виконавців вузлів (`engine/jev.ts`), і на прив'язку голосу героя
+ * (`bindings/voice.ts`), щоб облік витрат не розходився між шляхами.
+ *
+ * Округлення до 6 знаків: дрібніші частки долара у звітах нечитабельні, а
+ * один хід — це ≈$0.00003.
+ */
+export const jevCostUsd = (inputTokens: number): number =>
+  Math.round((Math.max(0, inputTokens) / 1_000_000) * JEV_USD_PER_MTOK * 1_000_000) / 1_000_000;
+
 /** Ключ Jev зі змінних оточення — перший непорожній із `JEV_ENV_KEYS`. */
 export function jevKeyFromEnv(): string | undefined {
   for (const name of JEV_ENV_KEYS) {

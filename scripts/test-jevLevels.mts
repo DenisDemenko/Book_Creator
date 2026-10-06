@@ -58,6 +58,7 @@ import {
   HttpJevAdapter,
   LlmFallbackJevAdapter,
   MockJevAdapter,
+  jevCostUsd,
   noulProbability,
   type JevAdapter,
 } from '../server/ai/adapters/jev/index.ts';
@@ -173,6 +174,11 @@ const fakeLlm = async (_system: string, user: string) => {
   t('Noul: справжня форма TypeSafe — число в полі `noul`',
     noulProbability({ type: 'noul', noul: 0.4 }) === 0.4 && noulProbability({ type: 'noul', noul: 0.06 }) === 0.06 &&
     noulProbability({ type: 'noul', noul: 1 }) === 1 && noulProbability({ type: 'noul', noul: 0 }) === 0);
+  // Ціна Jev: $0.042 за 1 млн ВХІДНИХ токенів (вихідні безкоштовні). Один хід
+  // допиту — 772 вхідні токени ≈ $0.000032; без цієї функції крок показував
+  // токени, але «$0.0000».
+  t('ціна Jev: 772 вхідні токени ≈ $0.000032, мільйон — $0.042, нуль — $0',
+    jevCostUsd(772) === 0.000032 && jevCostUsd(1_000_000) === 0.042 && jevCostUsd(0) === 0 && jevCostUsd(-5) === 0);
   const strategic: JevQuestion[] = [
     { id: 'long_goal', kind: 'choice', instructions: 'Провідна довга ціль?', options: { find_brother: null, protect_anna: null } },
     { id: 'motive_conflict', kind: 'score', instructions: 'Конфлікт мотивів?', levels: ['немає', 'слабкий', 'сильний'] },
