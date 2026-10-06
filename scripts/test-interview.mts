@@ -228,7 +228,7 @@ async function agentSuite(label: string, repo: CoreRepository, P: string) {
   try {
     const g = await call('reader', 'GET', `/characters/${marko}/agent`);
     t('GET …/agent (читач): вимкнено, три рівні з описом, «учасник сцени» — ще недоступний, без права змінювати',
-      g.status === 200 && g.body.agent.autonomyLevel === 'off' && Object.keys(g.body.levels).join() === 'off,interview,scene' && g.body.levels.scene.available === false && g.body.canEdit === false);
+      g.status === 200 && g.body.agent.autonomyLevel === 'off' && Object.keys(g.body.levels).join() === 'off,interview,scene' && g.body.levels.scene.available === true && g.body.canEdit === false);
     t('права: читач не вмикає (403), чужий не бачить (403)', (await call('reader', 'POST', `/characters/${marko}/agent`, { autonomyLevel: 'interview' })).status === 403 && (await call('stranger', 'GET', `/characters/${marko}/agent`)).status === 403);
     const on = await call('editor', 'POST', `/characters/${marko}/agent`, { autonomyLevel: 'interview', config: { maxTurns: 15 } });
     t('POST (редактор) — увімкнено; поганий рівень — 422; не герой — 404',

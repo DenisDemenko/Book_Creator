@@ -77,7 +77,7 @@ const api = (url: string, init?: RequestInit) =>
 const LEVELS: { key: Level; title: string; hint: string }[] = [
   { key: 'off', title: 'Вимкнено', hint: 'героя не допитують' },
   { key: 'interview', title: 'Допит', hint: 'відповідає на ваші питання від першої особи' },
-  { key: 'scene', title: 'Учасник сцени', hint: 'діятиме в сценах (Magic Scene, згодом); допит — теж' },
+  { key: 'scene', title: 'Учасник сцени', hint: 'діє по черзі з іншими героями в Magic Scene; допит — теж' },
 ];
 const SIM_STATUS: Record<SimStatus, string> = { active: 'триває', paused: 'на паузі', closed: 'закрито', stale: 'застарів' };
 const KIND: Record<Proposal['kind'], string> = { memory: 'Спогад', fact: 'Факт (гіпотеза)', fragment: 'Фрагмент для книги', tag: 'Тег' };

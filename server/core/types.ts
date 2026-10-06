@@ -1483,6 +1483,8 @@ export interface CoreRepository {
   markParagraphDeleted(projectId: string, id: string): Promise<boolean>;
   getParagraph(projectId: string, id: string): Promise<ParagraphRow | null>;
   getTranslationWorkspace(projectId: string): Promise<import('./translationTypes').TranslationWorkspace>;
+  getMagicSceneRun(projectId:string,simulationId:string):Promise<import('./magicSceneTypes').MagicSceneRun|null>;
+  saveMagicSceneRun(projectId:string,state:import('./magicSceneTypes').MagicSceneRun,expectedRevision:number):Promise<void>;
   getMasteryWorkspace(projectId: string,userId: string): Promise<import('./masteryTypes').MasteryWorkspace>;
   saveMasteryWorkspace(projectId: string,userId: string,state: import('./masteryTypes').MasteryWorkspace,expectedRevision: number): Promise<void>;
   getBranchWorkspace(projectId: string): Promise<import('./branchTypes').BranchWorkspace>;

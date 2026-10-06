@@ -2443,6 +2443,13 @@ export class MemoryCoreRepository implements CoreRepository {
   }
 
   private translationWorkspaces = new Map<string, import('./translationTypes').TranslationWorkspace>();
+  private magicSceneRuns=new Map<string,import('./magicSceneTypes').MagicSceneRun>();
+  async getMagicSceneRun(projectId:string,simulationId:string){return clone(this.magicSceneRuns.get(JSON.stringify([projectId,simulationId]))??null);}
+  async saveMagicSceneRun(projectId:string,state:import('./magicSceneTypes').MagicSceneRun,expectedRevision:number){
+    this.requireProject(projectId);const key=JSON.stringify([projectId,state.simulationId]);
+    if((this.magicSceneRuns.get(key)?.revision??0)!==expectedRevision||state.revision!==expectedRevision+1)throw new CoreRuleError('conflict','Прогін уже змінили.');
+    this.magicSceneRuns.set(key,clone(state));
+  }
   private masteryWorkspaces=new Map<string,import('./masteryTypes').MasteryWorkspace>();
   async getMasteryWorkspace(projectId:string,userId:string){return clone(this.masteryWorkspaces.get(JSON.stringify([projectId,userId]))??{revision:0,plan:{skills:[],goal:''},exercises:[]});}
   async saveMasteryWorkspace(projectId:string,userId:string,state:import('./masteryTypes').MasteryWorkspace,expectedRevision:number){

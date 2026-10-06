@@ -3315,6 +3315,17 @@ export class PgCoreRepository implements CoreRepository {
     const { rows } = await this.q('SELECT revision, state FROM translation_workspaces WHERE project_id = $1', [projectId]);
     return rows[0] ? { ...rows[0].state, revision: Number(rows[0].revision) } : { revision: 0, glossary: [], records: [] };
   }
+  async getMagicSceneRun(projectId:string,simulationId:string):Promise<import('./magicSceneTypes').MagicSceneRun|null>{
+    const {rows}=await this.q('SELECT revision,state FROM magic_scene_runs WHERE project_id=$1 AND simulation_id=$2',[projectId,simulationId]);
+    return rows[0]?{...rows[0].state,revision:Number(rows[0].revision)}:null;
+  }
+  async saveMagicSceneRun(projectId:string,state:import('./magicSceneTypes').MagicSceneRun,expectedRevision:number){
+    if(state.revision!==expectedRevision+1)throw new CoreRuleError('conflict','Некоректна ревізія прогону.');
+    const result=expectedRevision===0
+      ?await this.q('INSERT INTO magic_scene_runs (project_id,simulation_id,revision,state) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING',[projectId,state.simulationId,state.revision,JSON.stringify(state)])
+      :await this.q('UPDATE magic_scene_runs SET revision=$3,state=$4 WHERE project_id=$1 AND simulation_id=$2 AND revision=$5',[projectId,state.simulationId,state.revision,JSON.stringify(state),expectedRevision]);
+    if(!result.rowCount)throw new CoreRuleError('conflict','Прогін уже змінили.');
+  }
   async getMasteryWorkspace(projectId:string,userId:string):Promise<import('./masteryTypes').MasteryWorkspace>{
     const {rows}=await this.q('SELECT revision,state FROM mastery_workspaces WHERE project_id=$1 AND user_id=$2',[projectId,userId]);
     return rows[0]?{...rows[0].state,revision:Number(rows[0].revision)}:{revision:0,plan:{skills:[],goal:''},exercises:[]};
