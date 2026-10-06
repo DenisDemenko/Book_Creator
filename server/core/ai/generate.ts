@@ -1,3 +1,4 @@
+import {metric} from '../performance';
 /**
  * Виклик моделі для ролей AI ядра через ядро ШІ Студії (Т0.9).
  *
@@ -45,6 +46,7 @@ export async function aiRoleGenerateViaCore(input: AiGenerateInput): Promise<AiG
       ? { id: user.id, email: user.email, role: user.role, isGuest: false }
       : { id: null, email: 'system@core', role: 'system', isGuest: false },
   };
+  metric('ai_call');
   const result = await generateText({
     engine,
     modelId,
@@ -58,7 +60,9 @@ export async function aiRoleGenerateViaCore(input: AiGenerateInput): Promise<AiG
     label: `core:${input.module}`,
     bookId: input.projectId,
     generation: input.generation,
-  });
+  }).catch(error=>{metric('ai_error');throw error;});
+  metric('tokens',(result.inputTokens??0)+(result.outputTokens??0));
+  metric('cost_usd',priceForTextEngine(engine,result.inputTokens,result.outputTokens,modelId));
   return {
     text: result.text,
     modelId,

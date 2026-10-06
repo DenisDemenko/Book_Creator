@@ -1,3 +1,4 @@
+import {buildCharacterSnapshot} from './characterSnapshot';
 import {randomUUID} from 'node:crypto';
 import type {CoreRepository,CoreActor,EntityRow} from './types';
 import type {MagicSceneRun,MagicEvent,MagicFragment} from './magicSceneTypes';
@@ -57,7 +58,7 @@ const observable=(event:MagicEvent)=>({id:event.id,turn:event.turn,characterId:e
 const publicText=(event:MagicEvent)=>`${event.characterName}: ${event.speech} ${event.actionText}`;
 async function lock(repo:CoreRepository,p:string,run:MagicSceneRun,kind:NonNullable<MagicSceneRun['busy']>['kind']){run.busy={kind,token:randomUUID(),at:new Date().toISOString()};await saveMagic(repo,p,run);return run.busy.token;}
 async function held(repo:CoreRepository,p:string,id:string,token:string){const run=await getMagic(repo,p,id);if(run.busy?.token!==token)throw new CoreRuleError('conflict','Дію скасовано або прогін уже змінили.');return run;}
-async function failure(repo:CoreRepository,p:string,id:string,token:string,error:unknown){const run=await getMagic(repo,p,id);if(run.busy?.token===token){run.busy=null;run.lastError=error instanceof Error?error.message.slice(0,500):'Збій моделі';await saveMagic(repo,p,run);}}
+async function failure(repo:CoreRepository,p:string,id:string,token:string,error:unknown){const run=await getMagic(repo,p,id);if(run.busy?.token===token){run.busy=null;run.lastError=error instanceof CoreRuleError?error.message.slice(0,500):'Генерація не завершена. Повторіть дію.';await saveMagic(repo,p,run);}}
 export async function pauseMagic(repo:CoreRepository,p:string,id:string,expected:unknown,status:'active'|'paused'){
  const run=await getMagic(repo,p,id);checkRevision(run,expected);if(run.status==='closed')throw new CoreRuleError('conflict','Прогін завершено.');
  if(run.busy?.kind==='approve')throw new CoreRuleError('conflict','Дочекайтеся завершення затвердження.');
@@ -70,7 +71,10 @@ export async function stepMagic(d:MagicSceneDeps,p:string,id:string,input:any,ac
  checkRevision(run,input.expectedRevision);free(run);if(run.status!=='active'||run.fragments.length)throw new CoreRuleError('conflict','Для нового ходу потрібен активний прогін без літературної чернетки.');await fresh(d.repo,p,run);
  if(run.events.length>=run.maxTurns)throw new CoreRuleError('conflict','Ліміт ходів вичерпано.');
  const token=await lock(d.repo,p,run,'step');
+ // Independent preparation only: decisions and public events remain sequential.
+
  try{
+ await Promise.all(run.participants.map(async characterId=>{const entity=await d.repo.getEntity(p,characterId);if(entity)await buildCharacterSnapshot(d.repo,{projectId:p,characterId,sceneId:run.sceneId,asOfChapter:run.asOfChapter,simulationId:id,situation:run.goal,allowedActions:SCENE_ACTIONS,studio:await d.studio?.(p,entity)});}));
  const characterId=run.participants[run.events.length%run.participants.length];const hero=await d.repo.getEntity(p,characterId);if(!hero)throw new CoreRuleError('not_found','Героя видалено.');
  const agent=await d.repo.getCharacterAgent(p,characterId);if(!agent?.enabled||agent.autonomyLevel!=='scene')throw new CoreRuleError('conflict','Автономність героя вимкнено.');
  const observed=run.events.filter(e=>e.audience.includes(characterId));const situation=[run.goal,run.constraints,...observed.slice(-12).map(publicText)].join('\n').slice(0,10000);
@@ -182,5 +186,6 @@ export async function rejectMagic(repo:CoreRepository,p:string,id:string,fragmen
 
 export async function checkMagic(repo:CoreRepository,p:string,run:MagicSceneRun){
  const stored=await getBook(p);if(!stored)throw new CoreRuleError('not_found','Книгу не знайдено.');
- return checkBranch(repo,p,{id:run.simulationId,name:'Magic Scene',pointEntityId:null,source:'magic_scene',sourceId:run.simulationId,baseBookRevision:stored.revision,baseBookHash:branchHash(stored.book),baseCanonHash:await branchCanonHash(repo,p),baseParagraphs:(await repo.listAllParagraphs(p)).filter(p=>!p.deletedAt&&p.kind!=='draft'),status:'active',history:[],createdAt:run.createdAt,fragments:run.fragments.filter(f=>f.status==='draft'||f.status==='applying').map(f=>({id:f.id,paragraphId:null,sectionId:run.sceneId,text:f.text,original:'',originalHash:'',status:'draft'}))});
+ const report=await checkBranch(repo,p,{id:run.simulationId,name:'Magic Scene',pointEntityId:null,source:'magic_scene',sourceId:run.simulationId,baseBookRevision:stored.revision,baseBookHash:branchHash(stored.book),baseCanonHash:await branchCanonHash(repo,p),baseParagraphs:(await repo.listAllParagraphs(p)).filter(p=>!p.deletedAt&&p.kind!=='draft'),status:'active',history:[],createdAt:run.createdAt,fragments:run.fragments.filter(f=>f.status==='draft'||f.status==='applying').map(f=>({id:f.id,paragraphId:null,sectionId:run.sceneId,text:f.text,original:'',originalHash:'',status:'draft'}))});
+ return report;
 }

@@ -1,3 +1,4 @@
+import {cachedRead} from './readCache';
 /**
  * CharacterSnapshotBuilder — знімок героя станом на сцену (Т2.6 В5,
  * `PLAN_CHARACTER_MEMORY.md`; ТЗ-H §6.1, §8 п.3, §16 п.2; FLC 2.0 §2).
@@ -73,6 +74,11 @@ export interface SnapshotResult {
 const MEMORY_TYPES = new Set(['world_fact', 'knowledge', 'recollection', 'consequence']);
 
 export async function buildCharacterSnapshot(repo: CoreRepository, req: SnapshotRequest): Promise<SnapshotResult> {
+  if (req.persist) return buildSnapshotUncached(repo,req);
+  const project = await repo.getProject(req.projectId);
+  return cachedRead(repo, 'snapshot', [req,project?.revision], tracked => buildSnapshotUncached(tracked,req));
+}
+async function buildSnapshotUncached(repo: CoreRepository, req: SnapshotRequest): Promise<SnapshotResult> {
   const entity: EntityRow | null = await repo.getEntity(req.projectId, req.characterId);
   if (!entity || entity.status === 'rejected' || entity.type !== 'character') throw new CoreRuleError('not_found', 'Героя не знайдено в ядрі книги');
   const scan = await scanScenes(repo, req.projectId, await repo.listTimePoints(req.projectId));

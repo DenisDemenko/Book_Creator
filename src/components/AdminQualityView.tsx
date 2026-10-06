@@ -76,6 +76,7 @@ const ROWS: { title: string; cell: (m: Metrics) => string; hint?: string }[] = [
 ];
 
 export const AdminQualityView: React.FC = () => {
+  const [performanceData,setPerformanceData]=useState<{totals:Record<string,number>;fallbackShare:number|null;startedAt:string;latency:{averageMs:number|null;p95Ms:number|null}}|null>(null);
   const [set, setSet] = useState<SetInfo | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
   const [budgetMax, setBudgetMax] = useState(20);
@@ -88,6 +89,7 @@ export const AdminQualityView: React.FC = () => {
   const poll = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
+    const perf=await fetch('/api/admin/quality/performance',{credentials:'same-origin'}).catch(()=>null);if(perf?.ok)setPerformanceData(await perf.json());
     const res = await fetch('/api/admin/quality/living-characters', { credentials: 'same-origin' }).catch(() => null);
     const data = res ? await res.json().catch(() => ({})) : {};
     if (!res?.ok) {
@@ -145,6 +147,7 @@ export const AdminQualityView: React.FC = () => {
 
   return (
     <div className="space-y-4" data-quality-view>
+      {performanceData&&<section data-performance-metrics className="rounded-xl border border-slate-700 p-4"><h3>Продуктивність поточного сервера</h3><p>Від {when(performanceData.startedAt)}. Лічильники скидаються після перезапуску. Частка fallback: {pct(performanceData.fallbackShare)}. Середня затримка: {num(performanceData.latency.averageMs)} мс; p95: {num(performanceData.latency.p95Ms)} мс.</p><dl className="grid grid-cols-2 gap-2 text-xs">{Object.entries(performanceData.totals).map(([name,value])=><React.Fragment key={name}><dt className="break-words">{name}</dt><dd>{Number(value.toFixed(4))}</dd></React.Fragment>)}</dl><button onClick={()=>void load()}>Оновити метрики</button></section>}
       <div className="rounded-2xl bg-slate-900/60 border border-white/[0.06] p-5">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div className="min-w-0">

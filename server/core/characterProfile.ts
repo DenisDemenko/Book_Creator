@@ -1,3 +1,4 @@
+import {cachedRead} from './readCache';
 /**
  * Жива біографія персонажа (Т1.5, ТЗ-11 §4) і Profile Builder (AI-2, ТЗ-H
  * §4.1 п.2).
@@ -299,6 +300,9 @@ export interface ProfileOptions {
 }
 
 export async function buildCharacterProfile(repo: CoreRepository, projectId: string, entityId: string, opts: ProfileOptions = {}): Promise<CharacterProfile | null> {
+  return cachedRead(repo, 'profile', [projectId,entityId,opts], tracked => buildProfileUncached(tracked,projectId,entityId,opts));
+}
+async function buildProfileUncached(repo: CoreRepository, projectId: string, entityId: string, opts: ProfileOptions): Promise<CharacterProfile | null> {
   const entity = await repo.getEntity(projectId, entityId);
   if (!entity || entity.status === 'rejected') return null;
   const [ix, aliases, versions, own, subjectAll, entities, findings, graph] = await Promise.all([

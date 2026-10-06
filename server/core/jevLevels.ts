@@ -1,3 +1,4 @@
+import {metric} from './performance';
 /**
  * Три рівні Jev Character Decision Engine (Т2.5 В3; FLC 2.0 §3;
  * `PLAN_JEV_LEVELS.md` §2).
@@ -316,7 +317,9 @@ export class JevDecisionAdapter {
   private async reuse(req: DecideRequest, level: CharacterDecisionLevel, cacheKey: string, sceneId?: string | null) {
     const found = await this.deps.repo.listCharacterDecisions(req.projectId, { characterId: req.characterId, level, cacheKey, ...(sceneId !== undefined ? { sceneId } : {}), limit: 5 });
     // Готове рішення; немає — очікування автора з тим самим ключем (повторний запит не кличе Jev знову).
-    return found.find((d) => d.status !== 'awaiting_author' && d.selectedAction) ?? found.find((d) => d.status === 'awaiting_author') ?? null;
+    const hit = found.find((d) => d.status !== 'awaiting_author' && d.selectedAction) ?? found.find((d) => d.status === 'awaiting_author') ?? null;
+    if(hit)metric(`jev_hit_${level}`);
+    return hit;
   }
 
   /**
@@ -338,7 +341,10 @@ export class JevDecisionAdapter {
     const reasons: string[] = [];
     const attempt = async (a: JevAdapter, label: string) => {
       try {
-        return await a.evaluate(snapshot, questions);
+        metric(label==='Jev'?'jev_call':'fallback_call');
+        const evaluated=await a.evaluate(snapshot, questions);
+        if(label==='Jev')metric('tokens',(evaluated.usage?.input_tokens??0)+(evaluated.usage?.output_tokens??0));
+        return evaluated;
       } catch (err) {
         reasons.push(`${label}: ${(err as Error).message}`);
         return null;
@@ -365,6 +371,7 @@ export class JevDecisionAdapter {
       }
     }
     const waiting = !final || final.needsAuthor;
+    metric('decision');if(waiting)metric('rejected_decision');
     const got = final?.decision ?? partial;
     const result = got ? ({ ...got, level } as DecisionResult) : null;
     const row = await this.deps.repo.addCharacterDecision({

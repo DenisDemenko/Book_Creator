@@ -1,3 +1,4 @@
+import {metric} from './performance';
 import { createHash, randomUUID } from 'node:crypto';
 import type { CoreRepository, MentionRow, ParagraphRow } from './types';
 import type { BranchWorkspace, ScenarioBranch, BranchFragment } from './branchTypes';
@@ -120,6 +121,7 @@ export async function checkBranch(repo: CoreRepository,projectId: string,branch:
     if(!f.text.includes(hero.name))continue;
     knowledge.push({fragmentId:f.id,...await checkDraftKnowledge(virtual,projectId,{characterId:hero.id,sectionId:f.sectionId,draftText:f.text})});
   }
+  metric('continuity_violation',issues.length);metric('causality_violation',causality.warnings.length);
   return {causality,knowledge,continuity,issues,rule:'Попередження й залежності гіпотези. Основа й канон не змінюються.'};
 }
 export async function mergeBranchFragment(repo: CoreRepository,projectId: string,branchId: string,fragmentId: string,input: {

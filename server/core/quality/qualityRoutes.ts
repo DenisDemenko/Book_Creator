@@ -1,3 +1,4 @@
+import {performanceReport} from '../performance';
 /**
  * Маршрути розділу «Якість персонажів» (Т2.8 В3–В4, `PLAN_QUALITY.md`) —
  * лише для адміністратора платформи: прогін іде на справжніх моделях і
@@ -26,6 +27,7 @@ export interface QualityRoutesDeps {
 }
 
 export function registerQualityRoutes(app: Express, d: QualityRoutesDeps): void {
+  app.get('/api/admin/quality/performance',d.requireAdmin,(_req,res)=>res.set('Cache-Control','no-store').json(performanceReport()));
   let swept = false;
   const withRepo = (fn: (repo: CoreRepository, req: Request, res: Response) => Promise<void>) => async (req: Request, res: Response) => {
     const repo = d.repo();
