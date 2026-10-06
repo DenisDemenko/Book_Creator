@@ -7,15 +7,16 @@
  * письменник або другий адміністратор. До фікса такий виклик ключа не
  * знаходив і мовчки йшов на змінну оточення.
  */
-process.env.DATA_DIR = '/tmp/nova-test-platform-keys';
-process.env.DATABASE_PATH = '/tmp/nova-test-platform-keys/n.db';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'nova-test-platform-keys-'));
+process.env.DATA_DIR = DIR;
+process.env.DATABASE_PATH = path.join(DIR, 'n.db');
 // Ключ шифрування сховища ключів — інакше isApiKeyCryptoConfigured() = false
 // і резолвер свідомо повертає undefined (працює лише оточення).
 process.env.USER_API_KEY_SECRET = 'test-secret-for-platform-key-resolution-32b';
 
-import fs from 'node:fs';
-fs.rmSync('/tmp/nova-test-platform-keys', { recursive: true, force: true });
-fs.mkdirSync('/tmp/nova-test-platform-keys', { recursive: true });
 
 const { initStore, saveUser, upsertUserApiKey, deleteUserApiKey } = await import('../server/store');
 const { encryptApiKey, isApiKeyCryptoConfigured } = await import('../server/userApiKeyCrypto');
@@ -114,4 +115,9 @@ await putKey('admin-off', 'deepseek', 'sk-disabled-admin');
 t('ключ вимкненого адміністратора ігнорується', (await platformKeyFor('deepseek')) === undefined);
 
 console.log(`\nПідсумок: ${pass} пройшло, ${fail} впало`);
-process.exit(fail ? 1 : 0);
+const { closeDb } = await import('../server/db');
+closeDb();
+try { fs.rmSync(DIR, { recursive: true, force: true }); }
+catch (error) { console.warn('Не вдалося прибрати тестову папку:', (error as NodeJS.ErrnoException).code); }
+// Дати Node завершити закриття HTTP/undici handles, особливо на Windows.
+process.exitCode = fail ? 1 : 0;
