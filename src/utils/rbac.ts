@@ -150,7 +150,8 @@ export const ALL_ROLES: RoleInfo[] = [
       'Розвиток майстерності та виконання практичних завдань',
       'Розробка досьє та взаємозв’язків персонажів',
       'Сценарне планування та емоційні арки',
-      'Робота з AI Редактором та стилістикою'
+      'Робота з AI Редактором та стилістикою',
+      'Ілюстрації та медіатека: генерація зображень, завантаження й порядок файлів'
     ],
     responsibilitiesEn: [
       'Writing and editing the book text',
@@ -158,7 +159,8 @@ export const ALL_ROLES: RoleInfo[] = [
       'Developing mastery and completing practical exercises',
       'Building character dossiers and relationships',
       'Scenario planning and emotional arcs',
-      'Working with the AI Editor and stylistics'
+      'Working with the AI Editor and stylistics',
+      'Illustrations and the media library: image generation, uploads and file order'
     ],
     permissions: {
       canEditContent: true,
@@ -194,6 +196,11 @@ export const ALL_ROLES: RoleInfo[] = [
         'scenario',
         'mindboard',
         'characters',
+        // Медіатека (запит власника 06.10.2026): письменник генерує й кладе
+        // зображення так само, як дизайнер, а сама сторінка вже містить панель
+        // «Генерація медіа» і ліміт сховища за тарифом — окремої вкладки
+        // «Ілюстрації» для цього не потрібно.
+        'media',
         'ai-studio',
         'preview',
         'changelog',

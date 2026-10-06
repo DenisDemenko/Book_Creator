@@ -29,8 +29,8 @@ export const ROLE_WORKSPACES: RoleWorkspaceDef[] = [
   {
     id: 'author',
     name: n('Author workspace', 'Простір автора'),
-    about: n('Text, story board, characters, story graph and AI analysis.', 'Текст, дошка історії, персонажі, граф твору й аналіз ШІ.'),
-    tabs: ['editor', 'scenario', 'mindboard', 'characters', 'core-story-graph', 'ai-studio', 'core-continuity'],
+    about: n('Text, story board, characters, illustrations and AI analysis.', 'Текст, дошка історії, персонажі, ілюстрації та аналіз ШІ.'),
+    tabs: ['editor', 'scenario', 'mindboard', 'characters', 'media', 'core-story-graph', 'ai-studio', 'core-continuity'],
     later: [],
   },
   {
