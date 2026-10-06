@@ -46,6 +46,7 @@ import { CONTINUITY_ISSUE_KINDS, CONTINUITY_ISSUE_STATUSES, type ContinuityIssue
 import { refreshTimeContinuity, refreshTraitContradictions, syncAgeTraitFromVersion, removeAgeTraitForVersion, refreshKnowledgeContinuity, refreshPlaceContinuity, refreshObjectContinuity, sectionsNeedingReview, continuityOverview, continuityTraitsOverview, refreshAllContinuityRules, AGE_TRAIT_LABEL } from './continuity';
 import { AI_CONTINUITY_JOB_KIND, CONTINUITY_SECTIONS_PER_REQUEST } from './continuityAi';
 import { checkDraftKnowledge } from './continuityDraft';
+import { analyzeCausality, refreshCausalityContinuity, parseCausalityPolicy } from './causality';
 import { DRAFT_TEXT_MAX, VERSIONED_ROLES, isLinkableAssetUrl } from './rules';
 import { clampIntensity, emotionFamily } from '../../src/utils/emotionScale';
 import { LlmFallbackJevAdapter, type JevAdapter, type LlmJson } from './flc/jev';
@@ -1691,6 +1692,31 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
   }));
 
   // ── Т2.4 В1: безперервність — таблиці, права, критерій сторінки 8 ────────
+
+  // Т2.9: read-only shared analysis for branches/simulations, scoped by the same project guard.
+  app.post('/api/projects/:id/causality/check', withRepo(async (repo, req, res) => {
+    const ids = req.body?.entityIds;
+    if (ids !== undefined && (!Array.isArray(ids) || ids.length > 100 || ids.some((id: unknown) => typeof id !== 'string' || !id))) {
+      res.status(400).json({ error: 'entityIds — до 100 ID сутностей.', kind: 'bad_input' }); return;
+    }
+    res.json(await analyzeCausality(repo, req.params.id, { entityIds: ids }));
+  }));
+  app.put('/api/projects/:id/causality/entities/:entityId/policy', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    const e = await repo.getEntity(req.params.id, req.params.entityId);
+    if (!e) { res.status(404).json({ error: 'Сутність не знайдено.', kind: 'not_found' }); return; }
+    const policy = parseCausalityPolicy(req.body);
+    for (const id of [...policy.requiresKnowledge, ...policy.claims.map(c => c.entityId)]) {
+      const target = await repo.getEntity(req.params.id, id);
+      if (!target || target.status !== 'confirmed') { res.status(400).json({ error: 'Правила можуть посилатися лише на підтверджені сутності цієї книги.', kind: 'bad_input' }); return; }
+    }
+    await repo.updateEntity(req.params.id, e.id, { canonical: { ...e.canonical, causality: policy } }, `user:${req.projectAccess!.userId}`, 'Правила причинності автора');
+    res.json({ policy });
+  }));
+  app.post('/api/projects/:id/continuity/rules/causality', withRepo(async (repo, req, res) => {
+    if (!requireStoryEdit(req, res)) return;
+    res.json(await refreshCausalityContinuity(repo, req.params.id));
+  }));
 
   /** Проблеми безперервності книги: `?kind=&status=&entityId=`. */
   app.get('/api/projects/:id/continuity/issues', withRepo(async (repo, req, res) => {

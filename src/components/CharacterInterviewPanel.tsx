@@ -287,6 +287,17 @@ export const CharacterInterviewPanel: React.FC<Props> = ({ book, entityId, heroN
       body.sectionId = target[p.id] || sim?.sceneId || '';
       body.tagIds = (p.tags ?? []).filter((t) => t.status === 'pending' && tagPick[t.id]).map((t) => t.id);
     }
+    if(p.kind==='fragment') {
+      try {
+        const url=`/api/core/projects/${encodeURIComponent(book.id)}/branches`;
+        const stateResponse=await fetch(url,{credentials:'same-origin'});const state=await stateResponse.json();
+        if(!stateResponse.ok)throw new Error(state.error);
+        const response=await fetch(`${url}/from-proposal`,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,proposalId:p.id,expectedRevision:state.revision})});
+        const result=await response.json();if(!response.ok)throw new Error(result.error);
+        setMessage(`Створено ізольовану гілку «${result.branch.name}». Перевірте й підтвердьте фрагмент на сторінці «Гілки сценарію».`);
+      }catch(error){setMessage(error instanceof Error?error.message:'Не вдалося створити гілку.');}
+      setBusy(null);return;
+    }
     const r = await post(`${project}/proposals/${encodeURIComponent(p.id)}/accept`, body);
     setBusy(null);
     if (!r.ok) {
@@ -400,7 +411,7 @@ export const CharacterInterviewPanel: React.FC<Props> = ({ book, entityId, heroN
               className={`${btn} border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10`}
               title={!parentOk ? 'Спершу прийміть фрагмент' : undefined}
             >
-              <Check size={11} /> {p.kind === 'fragment' ? 'Вставити в розділ' : p.kind === 'tag' ? 'Дописати до фрагмента' : 'Прийняти'}
+              <Check size={11} /> {p.kind === 'fragment' ? 'До ізольованої гілки' : p.kind === 'tag' ? 'Дописати до фрагмента' : 'Прийняти'}
             </button>
             {p.kind !== 'tag' && edit[p.id] === undefined && (
               <button type="button" onClick={() => setEdit((x) => ({ ...x, [p.id]: String(text ?? '') }))} data-proposal-edit-open className={`${btn} border-slate-700 text-slate-300 hover:border-sky-500`}>

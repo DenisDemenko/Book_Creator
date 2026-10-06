@@ -2442,6 +2442,44 @@ export class MemoryCoreRepository implements CoreRepository {
       .map(clone);
   }
 
+  private translationWorkspaces = new Map<string, import('./translationTypes').TranslationWorkspace>();
+  private masteryWorkspaces=new Map<string,import('./masteryTypes').MasteryWorkspace>();
+  async getMasteryWorkspace(projectId:string,userId:string){return clone(this.masteryWorkspaces.get(JSON.stringify([projectId,userId]))??{revision:0,plan:{skills:[],goal:''},exercises:[]});}
+  async saveMasteryWorkspace(projectId:string,userId:string,state:import('./masteryTypes').MasteryWorkspace,expectedRevision:number){
+    this.requireProject(projectId);const key=JSON.stringify([projectId,userId]);
+    if((this.masteryWorkspaces.get(key)?.revision??0)!==expectedRevision||state.revision!==expectedRevision+1)throw new CoreRuleError('conflict','Вправи вже змінили. Оновіть сторінку.');
+    this.masteryWorkspaces.set(key,clone(state));
+  }
+  private branchWorkspaces = new Map<string, import('./branchTypes').BranchWorkspace>();
+  async getBranchWorkspace(projectId: string) {
+    return clone(this.branchWorkspaces.get(projectId) ?? { revision: 0, branches: [] });
+  }
+  async saveBranchWorkspace(projectId: string, state: import('./branchTypes').BranchWorkspace, expectedRevision: number) {
+    this.requireProject(projectId);
+    if ((this.branchWorkspaces.get(projectId)?.revision ?? 0) !== expectedRevision || state.revision !== expectedRevision + 1) throw new CoreRuleError('conflict', 'Гілку вже змінили. Оновіть сторінку.');
+    this.branchWorkspaces.set(projectId, clone(state));
+  }
+  async getTranslationWorkspace(projectId: string) {
+    return clone(this.translationWorkspaces.get(projectId) ?? { revision: 0, glossary: [], records: [] });
+  }
+  async saveTranslationWorkspace(projectId: string, state: import('./translationTypes').TranslationWorkspace, expectedRevision: number, aliases: { entityId: string; alias: string }[] = []) {
+    this.requireProject(projectId);
+    if ((this.translationWorkspaces.get(projectId)?.revision ?? 0) !== expectedRevision || state.revision !== expectedRevision + 1) {
+      throw new CoreRuleError('conflict', 'Переклад уже змінили. Оновіть сторінку.');
+    }
+    const additions = aliases.map(input => {
+      const entity = this.entityIn(projectId, input.entityId);
+      if (!entity) throw notFound('Сутність');
+      const aliasNorm = normalizeAlias(input.alias);
+      const k = `${projectId}\u0000${entity.type}\u0000${aliasNorm}`;
+      const existing = this.aliases.get(k);
+      if (existing && existing.entityId !== entity.id) throw new CoreRuleError('conflict', 'Ім’я вже належить іншій сутності.');
+      const row: AliasRow = existing ?? { id: randomUUID(), projectId, entityId: entity.id, entityType: entity.type, alias: input.alias, aliasNorm, kind: 'tag' };
+      return { k, row };
+    });
+    this.translationWorkspaces.set(projectId, clone(state));
+    for (const { k, row } of additions) this.aliases.set(k, row);
+  }
   async close() {}
 }
 

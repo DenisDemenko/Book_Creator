@@ -154,6 +154,47 @@ async function runSuite(label: string) {
   t('невідомий артефакт → null', (await store.readArtifact('book-1', 'pdf', 'print'))?.record.pageCount === 34);
   t('артефакт неіснуючої книги → null', (await store.readArtifact('нема', 'pdf')) === null);
   t('неіснуюча книга → null', (await store.getBook('нема')) === null);
+
+  // Real contention, rather than sequential stale-write tests.
+  const concurrent = await Promise.allSettled([
+    store.saveBook({ book: bookOf({ id: 'race', title: 'Перша' }), ownerId: 'u-1' }),
+    store.saveBook({ book: bookOf({ id: 'race', title: 'Друга' }), ownerId: 'u-2' }),
+  ]);
+  t('одночасне створення: рівно один запис прийнято', concurrent.filter(r => r.status === 'fulfilled').length === 1);
+  t('одночасне створення: другий отримав конфлікт', concurrent.some(r => r.status === 'rejected' && r.reason instanceof store.BookRevisionConflict));
+  const updates = await Promise.allSettled([
+    store.saveBook({ book: bookOf({ id: 'race', title: 'Правка А' }), expectedRevision: 1 }),
+    store.saveBook({ book: bookOf({ id: 'race', title: 'Правка Б' }), expectedRevision: 1 }),
+  ]);
+  t('дві правки однієї ревізії: рівно одна прийнята', updates.filter(r => r.status === 'fulfilled').length === 1);
+  t('друга правка не перезаписала першу', (await store.getBook('race'))?.title === 'Правка А');
+  t('конфлікт називає вже прийняту ревізію', updates.some(r => r.status === 'rejected' && r.reason.current === 2));
+  const mutable = bookOf({ id: 'snapshot', title: 'До зміни' });
+  const saving = store.saveBook({ book: mutable });
+  mutable.title = 'Після виклику';
+  const saved = await saving;
+  t('запис бере знімок на момент виклику', saved.title === 'До зміни');
+  (saved.book as any).title = 'Підміна результату';
+  const detached = await store.getBook('snapshot');
+  (detached!.book as any).title = 'Підміна читання';
+  t('зміна повернутого об’єкта не змінює сховище', (await store.getBook('snapshot'))?.book.title === 'До зміни');
+  await store.saveBook({ book: bookOf({ id: 'race', title: 'Після конфлікту' }), expectedRevision: 2 });
+  t('черга продовжує роботу після відхиленої правки', (await store.getBook('race'))?.revision === 3);
+  const revisions = await store.listBookRevisions('race');
+  t('історія містить лише прийняті ревізії', revisions.map(r => r.revision).join(',') === '3,2,1');
+  const original = await store.getBookRevision('race', 1);
+  t('історія зберегла початковий текст', original?.title === 'Перша');
+  const restored = await store.saveBook({ book: original!, expectedRevision: 3 });
+  t('відновлення створює нову ревізію', restored.revision === 4 && restored.title === 'Перша');
+  t('попередня ревізія залишається в історії', (await store.getBookRevision('race', 3))?.title === 'Після конфлікту');
+  await store.saveBook({ book: bookOf({ id: 'scoped', chapters: [{ id: 'ch', sections: [{ id: 's1', content: 'А' }, { id: 's2', content: 'Таємниця' }] }] }) });
+  const patched = await store.patchBookSection({ bookId: 'scoped', chapterId: 'ch', sectionId: 's1', expectedRevision: 1, patch: { content: 'Б' } });
+  t('точкова правка змінює лише свою сцену', (patched.book as any).chapters[0].sections[0].content === 'Б' && (patched.book as any).chapters[0].sections[1].content === 'Таємниця');
+  const stalePatch = await Promise.allSettled([store.patchBookSection({ bookId: 'scoped', chapterId: 'ch', sectionId: 's1', expectedRevision: 1, patch: { content: 'Застаріле' } })]);
+  t('точкова застаріла правка отримує конфлікт', stalePatch[0].status === 'rejected' && stalePatch[0].reason instanceof store.BookRevisionConflict);
+  const structural = await Promise.allSettled([store.patchBookSection({ bookId: 'scoped', chapterId: 'ch', sectionId: 's1', expectedRevision: 2, patch: { id: 'інша-сцена' } })]);
+  t('патч не приймає зміну структури', structural[0].status === 'rejected');
+  t('відхилений патч не створює історію', (await store.listBookRevisions('scoped')).length === 2);
 }
 
 console.log('Бекенд JSON (SQLite ще не піднято):');

@@ -3311,6 +3311,48 @@ export class PgCoreRepository implements CoreRepository {
     return rows.map(toNotification);
   }
 
+  async getTranslationWorkspace(projectId: string): Promise<import('./translationTypes').TranslationWorkspace> {
+    const { rows } = await this.q('SELECT revision, state FROM translation_workspaces WHERE project_id = $1', [projectId]);
+    return rows[0] ? { ...rows[0].state, revision: Number(rows[0].revision) } : { revision: 0, glossary: [], records: [] };
+  }
+  async getMasteryWorkspace(projectId:string,userId:string):Promise<import('./masteryTypes').MasteryWorkspace>{
+    const {rows}=await this.q('SELECT revision,state FROM mastery_workspaces WHERE project_id=$1 AND user_id=$2',[projectId,userId]);
+    return rows[0]?{...rows[0].state,revision:Number(rows[0].revision)}:{revision:0,plan:{skills:[],goal:''},exercises:[]};
+  }
+  async saveMasteryWorkspace(projectId:string,userId:string,state:import('./masteryTypes').MasteryWorkspace,expectedRevision:number){
+    if(state.revision!==expectedRevision+1)throw new CoreRuleError('conflict','Некоректна ревізія вправ.');
+    const result=expectedRevision===0
+      ?await this.q('INSERT INTO mastery_workspaces (project_id,user_id,revision,state) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING',[projectId,userId,state.revision,JSON.stringify(state)])
+      :await this.q('UPDATE mastery_workspaces SET revision=$3,state=$4 WHERE project_id=$1 AND user_id=$2 AND revision=$5',[projectId,userId,state.revision,JSON.stringify(state),expectedRevision]);
+    if(!result.rowCount)throw new CoreRuleError('conflict','Вправи вже змінили. Оновіть сторінку.');
+  }
+  async getBranchWorkspace(projectId: string): Promise<import('./branchTypes').BranchWorkspace> {
+    const { rows } = await this.q('SELECT revision, state FROM branch_workspaces WHERE project_id=$1', [projectId]);
+    return rows[0] ? { ...rows[0].state, revision: Number(rows[0].revision) } : { revision: 0, branches: [] };
+  }
+  async saveBranchWorkspace(projectId: string, state: import('./branchTypes').BranchWorkspace, expectedRevision: number) {
+    if (state.revision !== expectedRevision + 1) throw new CoreRuleError('conflict', 'Некоректна ревізія гілки.');
+    const result = expectedRevision === 0
+      ? await this.q('INSERT INTO branch_workspaces (project_id,revision,state) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [projectId,state.revision,JSON.stringify(state)])
+      : await this.q('UPDATE branch_workspaces SET revision=$2,state=$3 WHERE project_id=$1 AND revision=$4', [projectId,state.revision,JSON.stringify(state),expectedRevision]);
+    if (!result.rowCount) throw new CoreRuleError('conflict', 'Гілку вже змінили. Оновіть сторінку.');
+  }
+  async saveTranslationWorkspace(projectId: string, state: import('./translationTypes').TranslationWorkspace, expectedRevision: number, aliases: { entityId: string; alias: string }[] = []) {
+    if (state.revision !== expectedRevision + 1) throw new CoreRuleError('conflict', 'Некоректна ревізія перекладу.');
+    await this.tx(async c => {
+      const result = expectedRevision === 0
+        ? await this.q('INSERT INTO translation_workspaces (project_id, revision, state) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [projectId, state.revision, JSON.stringify(state)], c)
+        : await this.q('UPDATE translation_workspaces SET revision=$2, state=$3 WHERE project_id=$1 AND revision=$4', [projectId, state.revision, JSON.stringify(state), expectedRevision], c);
+      if (!result.rowCount) throw new CoreRuleError('conflict', 'Переклад уже змінили. Оновіть сторінку.');
+      for (const input of aliases) {
+        const result = await this.q(`INSERT INTO entity_aliases (project_id, entity_id, entity_type, alias, alias_norm, kind)
+          SELECT project_id, id, type, $3, $4, 'tag' FROM entities WHERE project_id=$1 AND id=$2
+          ON CONFLICT (project_id, entity_type, alias_norm) DO UPDATE SET alias=entity_aliases.alias
+          WHERE entity_aliases.entity_id=EXCLUDED.entity_id RETURNING entity_id`, [projectId, input.entityId, input.alias, normalizeAlias(input.alias)], c);
+        if (!result.rowCount) throw new CoreRuleError('conflict', 'Ім’я вже належить іншій сутності або сутність видалена.');
+      }
+    });
+  }
   async close() {
     if (this.ownsPool) await this.pool.end();
   }

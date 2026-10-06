@@ -492,7 +492,7 @@ export type EntityTraitInput = Pick<EntityTraitRow, 'projectId' | 'entityId' | '
   appearanceVersionId?: string | null;
 };
 
-export const CONTINUITY_ISSUE_KINDS = ['object', 'knowledge', 'place', 'age', 'time'] as const;
+export const CONTINUITY_ISSUE_KINDS = ['object', 'knowledge', 'place', 'age', 'time', 'causality'] as const;
 export type ContinuityIssueKind = (typeof CONTINUITY_ISSUE_KINDS)[number];
 
 export const CONTINUITY_ISSUE_STATUSES = ['suggested', 'confirmed', 'dismissed', 'resolved', 'needs_review'] as const;
@@ -1482,6 +1482,12 @@ export interface CoreRepository {
   upsertParagraph(input: ParagraphInput, actor: CoreActor): Promise<UpsertParagraphResult>;
   markParagraphDeleted(projectId: string, id: string): Promise<boolean>;
   getParagraph(projectId: string, id: string): Promise<ParagraphRow | null>;
+  getTranslationWorkspace(projectId: string): Promise<import('./translationTypes').TranslationWorkspace>;
+  getMasteryWorkspace(projectId: string,userId: string): Promise<import('./masteryTypes').MasteryWorkspace>;
+  saveMasteryWorkspace(projectId: string,userId: string,state: import('./masteryTypes').MasteryWorkspace,expectedRevision: number): Promise<void>;
+  getBranchWorkspace(projectId: string): Promise<import('./branchTypes').BranchWorkspace>;
+  saveBranchWorkspace(projectId: string, state: import('./branchTypes').BranchWorkspace, expectedRevision: number): Promise<void>;
+  saveTranslationWorkspace(projectId: string, state: import('./translationTypes').TranslationWorkspace, expectedRevision: number, aliases?: { entityId: string; alias: string }[]): Promise<void>;
   /** Лише живі абзаци, у порядку документа. */
   listParagraphs(projectId: string, documentId: string): Promise<ParagraphRow[]>;
   /** Усі абзаци проєкту, зокрема видалені, — для звірки під час синхронізації. */

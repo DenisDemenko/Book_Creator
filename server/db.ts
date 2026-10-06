@@ -524,6 +524,21 @@ CREATE TABLE IF NOT EXISTS books (
 );
 CREATE INDEX IF NOT EXISTS idx_books_owner ON books(owner_id, updated_at DESC);
 
+-- Accepted source revisions for comparison and explicit restore (T3.1).
+CREATE TABLE IF NOT EXISTS book_revisions (
+  book_id TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  payload TEXT NOT NULL,
+  saved_at TEXT NOT NULL,
+  PRIMARY KEY (book_id, revision)
+);
+CREATE TABLE IF NOT EXISTS book_merge_receipts (
+  book_id TEXT NOT NULL,
+  merge_key TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  PRIMARY KEY (book_id, merge_key)
+);
+
 -- Зверстані файли книги: що саме лежить у DATA_DIR/books/<book_id>/.
 --
 -- Рядок тут — не сам файл, а його опис: чим зібраний, скільки сторінок,

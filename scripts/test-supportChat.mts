@@ -101,7 +101,9 @@ async function runStoreSuite(label: string) {
   t('обидві репліки читаються за хронологією', messages.length === 2 && messages[0].senderRole === 'user' && messages[1].senderRole === 'admin');
 
   // Другий користувач — щоб перевірити, що треди не змішуються.
-  await store.createSupportThread(threadOf('u-2', { id: 'support-u-2', lastMessageAt: new Date(Date.now() + 1000).toISOString() }));
+  const later = new Date(Date.now() + 1000).toISOString();
+  // The inbox sorts by updatedAt; both timestamps must describe this newer thread.
+  await store.createSupportThread(threadOf('u-2', { id: 'support-u-2', lastMessageAt: later, updatedAt: later }));
   const all = await store.listAllSupportThreads();
   t('усі треди видно адміну', all.length === 2, String(all.length));
   t('найсвіжіший тред першим', all[0].userId === 'u-2', all.map((x) => x.userId).join(','));

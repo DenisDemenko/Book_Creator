@@ -58,6 +58,7 @@ import { overlaps } from './visual';
 import type { MentionRow, ParagraphRow } from './types';
 import { createHash } from 'node:crypto';
 import { blockHash } from '../../src/utils/paragraphIds';
+import { refreshCausalityContinuity } from './causality';
 
 /** Правило пише від імені системи — не автор, не AI (не пропозиція, а обчислений факт). */
 const TIME_RULE_ACTOR = 'system:continuity-rule-time';
@@ -955,7 +956,7 @@ export async function continuityTraitsOverview(repo: CoreRepository, projectId: 
 }
 
 export interface ContinuityRulesRun {
-  rules: Record<'time' | 'age' | 'knowledge' | 'place' | 'object', { checked: number; created: number; updated: number; skipped: number }>;
+  rules: Record<'time' | 'age' | 'knowledge' | 'place' | 'object' | 'causality', { checked: number; created: number; updated: number; skipped: number }>;
   created: number;
   updated: number;
 }
@@ -968,7 +969,8 @@ export async function refreshAllContinuityRules(repo: CoreRepository, projectId:
   const knowledge = pick(await refreshKnowledgeContinuity(repo, projectId));
   const place = pick(await refreshPlaceContinuity(repo, projectId));
   const object = pick(await refreshObjectContinuity(repo, projectId));
-  const rules = { time, age, knowledge, place, object };
+  const causality = pick(await refreshCausalityContinuity(repo, projectId));
+  const rules = { time, age, knowledge, place, object, causality };
   const all = Object.values(rules);
   return { rules, created: all.reduce((n, r) => n + r.created, 0), updated: all.reduce((n, r) => n + r.updated, 0) };
 }

@@ -22,6 +22,7 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { SECTION_CONTENT_FIELDS } from './core/collaboration/accessView';
 import { getDb, isAvailable, DATA_DIR } from './db';
 
 export const BOOK_FILES_ROOT = path.join(DATA_DIR, 'books');
@@ -79,12 +80,17 @@ const JSON_FILE = 'books.json';
 interface JsonShape {
   books: StoredBook[];
   artifacts: StoredArtifact[];
+  revisions: Array<{ bookId: string; revision: number; book: Record<string, unknown>; savedAt: string }>;
+  merges: Array<{ bookId: string; key: string; revision: number }>;
 }
 
-const EMPTY: JsonShape = { books: [], artifacts: [] };
+const EMPTY: JsonShape = { books: [], artifacts: [], revisions: [], merges: [] };
 
 let jsonCache: JsonShape | null = null;
 let writeChain: Promise<unknown> = Promise.resolve();
+// Serialize read/check/write, including initial JSON loading. Checking a revision
+// outside this queue lets two requests both accept the same stale revision.
+let bookWriteChain: Promise<unknown> = Promise.resolve();
 
 async function loadJson(): Promise<JsonShape> {
   if (jsonCache) return jsonCache;
@@ -98,16 +104,16 @@ async function loadJson(): Promise<JsonShape> {
 }
 
 function persistJson(): Promise<void> {
-  writeChain = writeChain
+  const pending = writeChain
     .then(async () => {
       await fs.mkdir(DATA_DIR, { recursive: true });
       const target = path.join(DATA_DIR, JSON_FILE);
       const temp = `${target}.${process.pid}.tmp`;
       await fs.writeFile(temp, JSON.stringify(jsonCache, null, 2), 'utf8');
       await fs.rename(temp, target);
-    })
-    .catch((err) => console.error('[bookStore] Не вдалося зберегти books.json:', err));
-  return writeChain as Promise<void>;
+    });
+  writeChain = pending.catch((err) => console.error('[bookStore] Не вдалося зберегти books.json:', err));
+  return pending;
 }
 
 function useJson(): boolean {
@@ -148,7 +154,8 @@ export async function getBook(id: string): Promise<StoredBook | null> {
   const bookId = String(id || '').trim();
   if (!bookId) return null;
   if (useJson()) {
-    return (await loadJson()).books.find((b) => b.id === bookId) ?? null;
+    const found = (await loadJson()).books.find((b) => b.id === bookId);
+    return found ? structuredClone(found) : null;
   }
   const row = getDb()!.prepare('SELECT * FROM books WHERE id = ?').get(bookId);
   return row ? rowToBook(row) : null;
@@ -187,8 +194,24 @@ export async function saveBook(params: {
   ownerId?: string | null;
   expectedRevision?: number;
   now?: () => Date;
+  /** Server-generated key: accepted branch fragment is written at most once. */
+  mergeKey?: string;
 }): Promise<StoredBook> {
-  const book = params.book || {};
+  // Take a snapshot before yielding: callers must not mutate pending writes.
+  const snapshot = { ...params, book: JSON.parse(JSON.stringify(params.book || {})) };
+  const result = bookWriteChain.then(() => saveBookSerial(snapshot));
+  bookWriteChain = result.catch(() => undefined);
+  return result;
+}
+
+async function saveBookSerial(params: {
+  book: Record<string, unknown>;
+  ownerId?: string | null;
+  expectedRevision?: number;
+  now?: () => Date;
+  mergeKey?: string;
+}): Promise<StoredBook> {
+  const book = params.book;
   const id = String((book as any).id || '').trim();
   if (!id) throw new Error('Книга без id — зберігати нікуди.');
 
@@ -198,6 +221,7 @@ export async function saveBook(params: {
   const at = (params.now?.() ?? new Date()).toISOString();
 
   const existing = await getBook(id);
+  if (existing && params.mergeKey && await hasBookMergeReceipt(id, params.mergeKey)) return existing;
   if (existing) {
     if (params.expectedRevision === undefined) {
       throw new BookRevisionConflict(existing.revision, 0);
@@ -225,33 +249,105 @@ export async function saveBook(params: {
     const at_i = data.books.findIndex((b) => b.id === id);
     if (at_i >= 0) data.books[at_i] = next;
     else data.books.push(next);
-    await persistJson();
-    return next;
+    const historyLength = data.revisions.length;
+    const receiptLength = data.merges.length;
+    // Older books have no history: preserve their first known source too.
+    if (existing && !data.revisions.some(r => r.bookId === id && r.revision === existing.revision)) {
+      data.revisions.push({ bookId: id, revision: existing.revision, book: existing.book, savedAt: existing.updatedAt });
+    }
+    data.revisions.push({ bookId: id, revision: next.revision, book: structuredClone(book), savedAt: at });
+    if (params.mergeKey) data.merges.push({ bookId: id, key: params.mergeKey, revision: next.revision });
+    try {
+      await persistJson();
+    } catch (err) {
+      if (at_i >= 0) data.books[at_i] = existing!;
+      else data.books.splice(data.books.indexOf(next), 1);
+      data.revisions.splice(historyLength);
+      data.merges.splice(receiptLength);
+      throw err;
+    }
+    return structuredClone(next);
   }
 
-  getDb()!
-    .prepare(
-      `INSERT INTO books (id, owner_id, title, revision, payload, size_bytes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         owner_id = excluded.owner_id,
-         title = excluded.title,
-         revision = excluded.revision,
-         payload = excluded.payload,
-         size_bytes = excluded.size_bytes,
-         updated_at = excluded.updated_at`
-    )
-    .run(
-      next.id,
-      next.ownerId,
-      next.title,
-      next.revision,
-      payload,
-      next.sizeBytes,
-      next.createdAt,
-      next.updatedAt
-    );
+  // SQL also checks the revision atomically, protecting against another process.
+  const db = getDb()!;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const written = existing
+      ? db.prepare(`UPDATE books SET title = ?, revision = ?, payload = ?, size_bytes = ?, updated_at = ?
+          WHERE id = ? AND revision = ?`).run(next.title, next.revision, payload, next.sizeBytes, at, id, existing.revision)
+      : db.prepare(`INSERT INTO books (id, owner_id, title, revision, payload, size_bytes, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`)
+        .run(id, next.ownerId, title, next.revision, payload, sizeBytes, at, at);
+    if (Number((written as { changes: number | bigint }).changes) !== 1) {
+      const current = db.prepare('SELECT revision FROM books WHERE id = ?').get(id) as { revision: number } | undefined;
+      throw new BookRevisionConflict(current?.revision ?? 0, params.expectedRevision ?? 0);
+    }
+    const history = db.prepare('INSERT OR IGNORE INTO book_revisions (book_id, revision, payload, saved_at) VALUES (?, ?, ?, ?)');
+    if (existing) history.run(id, existing.revision, JSON.stringify(existing.book), existing.updatedAt);
+    history.run(id, next.revision, payload, at);
+    if (params.mergeKey) db.prepare('INSERT INTO book_merge_receipts (book_id, merge_key, revision) VALUES (?, ?, ?)').run(id, params.mergeKey, next.revision);
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
   return next;
+}
+
+export async function hasBookMergeReceipt(bookId: string, mergeKey: string): Promise<boolean> {
+  if (useJson()) return (await loadJson()).merges.some(r => r.bookId === bookId && r.key === mergeKey);
+  return !!getDb()!.prepare('SELECT 1 FROM book_merge_receipts WHERE book_id=? AND merge_key=?').get(bookId, mergeKey);
+}
+
+export async function listBookRevisions(bookId: string): Promise<Array<{ revision: number; savedAt: string }>> {
+  if (useJson()) return (await loadJson()).revisions.filter(r => r.bookId === bookId)
+    .map(({ revision, savedAt }) => ({ revision, savedAt })).sort((a, b) => b.revision - a.revision);
+  return getDb()!.prepare('SELECT revision, saved_at AS savedAt FROM book_revisions WHERE book_id = ? ORDER BY revision DESC')
+    .all(bookId) as Array<{ revision: number; savedAt: string }>;
+}
+
+export async function getBookRevision(bookId: string, revision: number): Promise<Record<string, unknown> | null> {
+  if (useJson()) {
+    const found = (await loadJson()).revisions.find(r => r.bookId === bookId && r.revision === revision);
+    return found ? structuredClone(found.book) : null;
+  }
+  const row = getDb()!.prepare('SELECT payload FROM book_revisions WHERE book_id = ? AND revision = ?').get(bookId, revision) as { payload: string } | undefined;
+  return row ? JSON.parse(row.payload) : null;
+}
+
+/** Scope authorization belongs to the API/WS caller. This never accepts structure changes. */
+export async function patchBookSection(params: {
+  bookId: string; chapterId: string; sectionId: string;
+  expectedRevision: number; patch: Record<string, unknown>;
+}): Promise<StoredBook> {
+  const patch = structuredClone(params.patch);
+  if (!patch || Array.isArray(patch) || Object.keys(patch).some(k => !SECTION_CONTENT_FIELDS.includes(k))) {
+    throw new Error('Правка може містити лише поля змісту сцени.');
+  }
+  for (const key of ['content', 'contentEn', 'lastModified']) {
+    if (patch[key] !== undefined && typeof patch[key] !== 'string') throw new Error(`Некоректне поле ${key}.`);
+  }
+  for (const key of ['wordCount', 'characterCount']) {
+    if (patch[key] !== undefined && (!Number.isFinite(patch[key]) || Number(patch[key]) < 0)) throw new Error(`Некоректне поле ${key}.`);
+  }
+  for (const key of ['paragraphIds', 'paragraphHashes', 'footnotes']) {
+    if (patch[key] !== undefined && !Array.isArray(patch[key])) throw new Error(`Некоректне поле ${key}.`);
+  }
+  const result = bookWriteChain.then(async () => {
+    const current = await getBook(params.bookId);
+    if (!current) throw new Error('Книгу не знайдено.');
+    if (current.revision !== params.expectedRevision) throw new BookRevisionConflict(current.revision, params.expectedRevision);
+    const book = structuredClone(current.book) as Record<string, any>;
+    const chapter = book.chapters?.find((c: any) => c.id === params.chapterId);
+    const section = chapter?.sections?.find((s: any) => s.id === params.sectionId);
+    if (!section) throw new Error('Сцену не знайдено в цьому розділі.');
+    Object.assign(section, patch);
+    book.updatedAt = new Date().toISOString();
+    return saveBookSerial({ book, expectedRevision: current.revision });
+  });
+  bookWriteChain = result.catch(() => undefined);
+  return result;
 }
 
 // ---------------------------------------------------------------------------

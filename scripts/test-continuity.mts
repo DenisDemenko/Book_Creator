@@ -938,8 +938,8 @@ async function pageRoutesSuite(label: string, repo: CoreRepository, P: string) {
 
   t('«Перевірити зараз»: читачу — 403', (await call('POST', '/continuity/rules/all', 'reader')).status === 403);
   const run = await call('POST', '/continuity/rules/all', 'owner');
-  t('«Перевірити зараз» — усі п\'ять правил, підсумок по кожному: «знання» знайшло витік Олени (s1 до s2)',
-    run.status === 200 && Object.keys(run.body.rules).sort().join() === 'age,knowledge,object,place,time' && run.body.rules.knowledge.created === 1 && run.body.created === 1,
+  t('«Перевірити зараз» — усі шість правил, підсумок по кожному: «знання» знайшло витік Олени (s1 до s2)',
+    run.status === 200 && Object.keys(run.body.rules).sort().join() === 'age,causality,knowledge,object,place,time' && run.body.rules.knowledge.created === 1 && run.body.created === 1,
     JSON.stringify(run.body));
   const ov = await call('GET', '/continuity/issues', 'reader');
   const issue = ov.body.issues?.[0];

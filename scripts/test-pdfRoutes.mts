@@ -13,6 +13,8 @@ const DIR = '/tmp/nova-pdfroutes-test';
 process.env.DATA_DIR = DIR;
 process.env.DATABASE_PATH = `${DIR}/nova-studio.db`;
 process.env.USER_API_KEY_SECRET = 'test-secret-for-bridge-key';
+// This suite exercises an unavailable engine, regardless of host-installed Chromium.
+process.env.CHROMIUM_PATH = `${DIR}/intentionally-missing-chromium`;
 
 import fs from 'node:fs';
 fs.rmSync(DIR, { recursive: true, force: true });

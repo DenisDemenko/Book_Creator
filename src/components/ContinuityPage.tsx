@@ -18,7 +18,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, CheckCircle2, ExternalLink, FileSearch, Loader2, ListChecks, Play, Plus, Sparkles, Tags, Trash2, X } from 'lucide-react';
 import type { Book } from '../types';
 
-type IssueKind = 'object' | 'knowledge' | 'place' | 'age' | 'time';
+type IssueKind = 'object' | 'knowledge' | 'place' | 'age' | 'time' | 'causality';
 type IssueStatus = 'suggested' | 'confirmed' | 'dismissed' | 'resolved' | 'needs_review';
 
 interface Evidence {
@@ -103,8 +103,8 @@ interface Props {
   onOpenParagraph: (t: { chapterId: string; sectionId: string; editorPid: string; text: string }) => void;
 }
 
-const KIND_UK: Record<IssueKind, string> = { time: 'Час', age: 'Вік', knowledge: 'Знання', place: 'Місце', object: 'Предмет' };
-const KINDS: IssueKind[] = ['time', 'age', 'knowledge', 'place', 'object'];
+const KIND_UK: Record<IssueKind, string> = { time: 'Час', age: 'Вік', knowledge: 'Знання', place: 'Місце', object: 'Предмет', causality: 'Причинність' };
+const KINDS: IssueKind[] = ['time', 'age', 'knowledge', 'place', 'object', 'causality'];
 const STATUS_UK: Record<IssueStatus, string> = {
   needs_review: 'На перегляд',
   suggested: 'Пропозиція',
@@ -666,7 +666,71 @@ function DraftTab({ book }: { book: Book }) {
 
 // ── Сторінка ────────────────────────────────────────────────────────────────
 
-type Tab = 'issues' | 'traits' | 'draft';
+function CausalityTab({ book }: { book: Book }) {
+  type Policy = { exception?: string; requiresKnowledge: string[]; claims: { entityId: string; label: string; value: string }[] };
+  const empty: Policy = { requiresKnowledge: [], claims: [] };
+  const [entities, setEntities] = useState<{ id: string; name: string; type: string; canonical: { causality?: Policy } }[]>([]);
+  const [selected, setSelected] = useState('');
+  const [policy, setPolicy] = useState<Policy>(empty);
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void api(`/api/projects/${encodeURIComponent(book.id)}/entities`).then(r => {
+      if (!live) return;
+      if (r.ok) setEntities(r.body.entities.filter((e: any) => e.status === 'confirmed'));
+      else setMessage(problemText(r.status, r.body.error));
+    });
+    return () => { live = false; };
+  }, [book.id]);
+  const choose = (id: string) => {
+    setSelected(id); setMessage('');
+    const p = entities.find(e => e.id === id)?.canonical?.causality;
+    setPolicy(p && Array.isArray(p.requiresKnowledge) && Array.isArray(p.claims) ? p : empty);
+  };
+  const save = async () => {
+    setBusy(true);
+    const r = await api(`/api/projects/${encodeURIComponent(book.id)}/causality/entities/${encodeURIComponent(selected)}/policy`, { method: 'PUT', body: JSON.stringify(policy) });
+    setBusy(false);
+    if (r.ok) { setEntities(es => es.map(e => e.id === selected ? { ...e, canonical: { ...e.canonical, causality: r.body.policy } } : e)); setMessage('Збережено. На вкладці «Проблеми» запустіть перевірку правил.'); }
+    else setMessage(problemText(r.status, r.body.error));
+  };
+  return <section className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900/40 p-3" data-causality-policy>
+    <h3 className="text-sm font-semibold text-slate-100">Причини й потрібні знання героя</h3>
+    <p className="text-xs text-slate-400">Причинні зв’язки задаються у графі твору. Тут можна вказати потрібні факти, твердження про канон та навмисний виняток. Перевірка дає попередження й не переписує книгу.</p>
+    <label className="block text-xs text-slate-300">Подія або рішення
+      <select className={`${selectCls} mt-1 block w-full`} value={selected} onChange={e => choose(e.target.value)} data-causality-event>
+        <option value="">Оберіть подію</option>
+        {entities.filter(e => ['event', 'decision', 'threshold', 'turning-point', 'conflict', 'revelation', 'consequence'].includes(e.type)).map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+      </select>
+    </label>
+    {selected && <>
+      <label className="block text-xs text-slate-300">Навмисний виняток
+        <select className={`${selectCls} mt-1 block w-full`} value={policy.exception ?? ''} onChange={e => setPolicy(p => ({ ...p, exception: e.target.value || undefined }))} data-causality-exception>
+          <option value="">Звичайний причинний перехід</option><option value="coincidence">Випадковість</option><option value="false_belief">Хибне переконання героя</option><option value="mystery">Навмисна загадка</option>
+        </select>
+      </label>
+      <fieldset className="space-y-1"><legend className="text-xs text-slate-300">Факти, потрібні герою для цієї дії</legend>
+        {entities.filter(e => ['event', 'revelation', 'consequence'].includes(e.type) && e.id !== selected).map(e => <label key={e.id} className="flex items-center gap-2 text-xs text-slate-300">
+          <input type="checkbox" checked={policy.requiresKnowledge.includes(e.id)} onChange={x => setPolicy(p => ({ ...p, requiresKnowledge: x.target.checked ? [...p.requiresKnowledge, e.id] : p.requiresKnowledge.filter(id => id !== e.id) }))} />{e.name}
+        </label>)}
+      </fieldset>
+      <fieldset className="space-y-2"><legend className="text-xs text-slate-300">Твердження події про затверджені риси</legend>
+        {policy.claims.map((c, i) => <div key={i} className="flex flex-wrap gap-2">
+          <select aria-label="Сутність твердження" className={selectCls} value={c.entityId} onChange={e => setPolicy(p => ({ ...p, claims: p.claims.map((v, n) => n === i ? { ...v, entityId: e.target.value } : v) }))}><option value="">Сутність</option>{entities.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}</select>
+          <input aria-label="Назва риси" placeholder="Риса, наприклад очі" className={selectCls} value={c.label} maxLength={80} onChange={e => setPolicy(p => ({ ...p, claims: p.claims.map((v, n) => n === i ? { ...v, label: e.target.value } : v) }))} />
+          <input aria-label="Значення риси" placeholder="Значення у цій події" className={selectCls} value={c.value} maxLength={400} onChange={e => setPolicy(p => ({ ...p, claims: p.claims.map((v, n) => n === i ? { ...v, value: e.target.value } : v) }))} />
+          <button type="button" className={btn} onClick={() => setPolicy(p => ({ ...p, claims: p.claims.filter((_, n) => n !== i) }))}>Видалити твердження</button>
+        </div>)}
+        <button type="button" className={btn} disabled={policy.claims.length >= 100} onClick={() => setPolicy(p => ({ ...p, claims: [...p.claims, { entityId: '', label: '', value: '' }] }))}>Додати твердження</button>
+      </fieldset>
+      <button type="button" className={`${btn} text-emerald-200`} disabled={busy} onClick={save} data-causality-save>{busy ? 'Збереження…' : 'Зберегти правила події'}</button>
+    </>}
+    {message && <p role="status" className="text-xs text-slate-300">{message}</p>}
+  </section>;
+}
+
+type Tab = 'issues' | 'traits' | 'draft' | 'causality';
 
 export const ContinuityPage: React.FC<Props> = ({ book, onOpenParagraph }) => {
   const [tab, setTab] = useState<Tab>('issues');
@@ -678,6 +742,7 @@ export const ContinuityPage: React.FC<Props> = ({ book, onOpenParagraph }) => {
     { key: 'issues', label: 'Проблеми', icon: <ListChecks className="h-3.5 w-3.5" /> },
     { key: 'traits', label: 'Риси', icon: <Tags className="h-3.5 w-3.5" /> },
     ...(canEdit ? [{ key: 'draft' as Tab, label: 'Чернетка', icon: <FileSearch className="h-3.5 w-3.5" /> }] : []),
+    ...(canEdit ? [{ key: 'causality' as Tab, label: 'Причинність', icon: <ListChecks className="h-3.5 w-3.5" /> }] : []),
   ];
   return (
     <section className="min-w-0 space-y-3" data-continuity>
@@ -699,6 +764,7 @@ export const ContinuityPage: React.FC<Props> = ({ book, onOpenParagraph }) => {
       {tab === 'issues' && <IssuesTab book={book} onOpenParagraph={onOpenParagraph} />}
       {tab === 'traits' && <TraitsTab book={book} />}
       {tab === 'draft' && canEdit && <DraftTab book={book} />}
+      {tab === 'causality' && canEdit && <CausalityTab key={book.id} book={book} />}
     </section>
   );
 };
