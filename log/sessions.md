@@ -10,7 +10,7 @@
 
 **Запис #382:** Т5.6 — HUMAN_REVIEW/CANON_WRITE, форма рішення, book-level дозвіл і ревізія, походження моделі/промпту/Jev та авторські правки; test:workflow-human-review 82/0 Memory + PostgreSQL, live 17/0, регресії рушія/API успішні. Два повні npm test, фінальні lint/build — exit 0. Ручний сценарій — docs/acceptance/T5.6.md.
 
-**Запис #383:** Т5.7 В1 — Continuity Gate, проєкція без запису, повторна перевірка CANON_WRITE, видима причина. Memory + PostgreSQL 58/0, Chromium 9/0 включно з 390 px. Повний npm test, фінальні lint/build — exit 0. Т5.7 загалом відкритий; наступний В2 — Semantic Change Detector.
+**Запис #383:** Т5.7 В1 — Continuity Gate, проєкція без запису, повторна перевірка CANON_WRITE, видима причина. Memory + PostgreSQL 58/0, Chromium 9/0 включно з 390 px. Повний npm test, фінальні lint/build — exit 0. Реалізація c189dac запушена в origin/master. Т5.7 загалом відкритий; наступний В2 — Semantic Change Detector.
 
 **Не зроблено і чому:** наскрізний full App/Firebase, браузерні переходи вправи-абзацу/героя та editor+AI ще не перевірені; PostgreSQL для переходів Т4.3 не запускали. Т4.3 залишається частковим. Windows full npm test очікує результату від власника. Т5.6 production/Firebase/платний DeepSeek і мобільний UI ще не прийняті; Т5.7 В1 реалізовано (#383); В2–В6 ще не почато.
 

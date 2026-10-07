@@ -246,7 +246,7 @@ remote перевірити можна, запушити — ні**.
 Запис #382 — `66a8072` запушено в origin/master: людське рішення й канон entity/relation у workflow. Після деплою виконати docs/acceptance/T5.6.md під реальною сесією й DeepSeek; нагадати про Т4.3 #380–381. Незапушені коміти — git log origin/master..HEAD.
 
 
-Запис #383 — Т5.7 В1: Continuity Gate і повторна перевірка перед каноном. Memory + PostgreSQL 58/0, Chromium 9/0, повний npm test/lint/build exit 0. Ручний сценарій docs/acceptance/T5.7-V1.md; Т5.7 загалом відкритий, наступний В2 — Semantic Change Detector. Коміт і пуш оформлюються після фінальної перевірки; актуальний стан — git log origin/master..HEAD.
+Запис #383 — `c189dac` запушено в origin/master: Т5.7 В1: Continuity Gate і повторна перевірка перед каноном. Memory + PostgreSQL 58/0, Chromium 9/0, повний npm test/lint/build exit 0. Ручний сценарій docs/acceptance/T5.7-V1.md; Т5.7 загалом відкритий, наступний В2 — Semantic Change Detector. Поточні незапушені коміти — git log origin/master..HEAD; цей запис стану синхронізується окремим документаційним комітом.
 
 У хмарній копії один remote `origin` — **DenisDemenko/Book_Creator**, правильний репозиторій продакшну. Гілка `work`, пуш `HEAD:master`, без force. Результат перевіряється порівнянням HEAD із `git ls-remote origin refs/heads/master`. Після деплою перевірити Magic Scene у гілках, міграцію 0032 і збереження памʼяті. Живий платний AI та продакшн у цій сесії не перевірено. Перенесення на компʼютер відкладено.
 
