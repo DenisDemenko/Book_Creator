@@ -451,7 +451,7 @@ export async function runSubgraph(env: ExecEnv, workflowId: string, state: WfSta
   if (chain.includes(workflowId)) throw new NodeError(`Підпроцес «${workflowId}» уже виконується вище в ланцюжку (${chain.reverse().join(' → ')}) — цикл`, 'bad_input');
   if (chain.length > MAX_SUBGRAPH_DEPTH) throw new NodeError(`Підпроцеси вкладені глибше за ${MAX_SUBGRAPH_DEPTH}`, 'bad_input');
   const { startRun } = await import('./runner');
-  const input = { ...state.input, ...(env.run.input.semanticAutomatic === true || env.actor === 'system:semantic_change' || [ADAPTIVE_WORKFLOW, 'causality_engine'].includes(env.run.workflowId) ? { semanticAutomatic: true } : {}), parent: { runId: env.run.id, workflowId: env.run.workflowId, node: nodeId, vars: clip(state.vars), ...(state.output !== undefined ? { output: clip(state.output) } : {}) } };
+  const input = { ...state.input, ...(env.run.input.semanticAutomatic === true || env.actor === 'system:semantic_change' || [ADAPTIVE_WORKFLOW, 'causality_engine', 'character_decision_engine'].includes(env.run.workflowId) ? { semanticAutomatic: true } : {}), parent: { runId: env.run.id, workflowId: env.run.workflowId, node: nodeId, vars: clip(state.vars), ...(state.output !== undefined ? { output: clip(state.output) } : {}) } };
   let out;
   try {
     out = await startRun(env.engine, { workflowId, input, projectId: env.run.projectId, trigger: 'subgraph', actor: env.actor, parentRunId: env.run.id, recordUsage: env.recordUsage, signal: env.signal });

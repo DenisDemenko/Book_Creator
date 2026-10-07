@@ -402,16 +402,16 @@ async function levelsSuite(label: string, repo: CoreRepository, P: string) {
   calls = 0;
   const sc = (extra: Record<string, unknown> = {}) => e.decide({ projectId: P, characterId: olena, level: 'scene', actor: 'user:u-owner', sceneId: 's2', situation: 'Допит у поліції', participants: ['Марко', 'Слідчий'], ...extra });
   const sc1 = await sc();
-  // Т2.8 В1: сцена s2 — у гл. 1, а є гл. 2: стратегічне для неї — «станом на гл. 1» (без майбутнього), тобто ch1.
-  const strNow = (await repo.listCharacterDecisions(P, { characterId: olena, level: 'strategic', cacheKey: ch1.decision.cacheKey }))[0];
+  // Межа сцени суворіша за главу: стратегічний рівень також перераховано.
+  const strNow = await repo.getCharacterDecision(P, sc1.chain[0].id);
   const scr = sc1.decision.result as any;
-  t('сценічне: мотив із конфігурації, страх / довіра / ризик; батько — стратегічне станом на главу сцени (з кешу, без майбутнього)',
-    !sc1.reused && calls === 1 && sc1.chain[0].reused && sc1.decision.parentId === strNow.id &&
+  t('сценічне: мотив із конфігурації, страх / довіра / ризик; батько — стратегічне до сцени (без майбутнього)',
+    !sc1.reused && calls === 2 && !sc1.chain[0].reused && sc1.decision.parentId === strNow!.id &&
     Object.keys(DEFAULT_LEVEL_CONFIG.scene.primary.options).includes(sc1.decision.selectedAction!) && ['fear', 'trust', 'risk'].every((k) => typeof scr.scores[k] === 'number'),
     JSON.stringify({ a: sc1.decision.selectedAction, s: scr.scores }));
-  t('ті самі умови сцени (учасники в іншому порядку) — з кешу', (await sc({ participants: ['Слідчий', 'Марко'] })).reused && calls === 1);
+  t('ті самі умови сцени (учасники в іншому порядку) — з кешу', (await sc({ participants: ['Слідчий', 'Марко'] })).reused && calls === 2);
   const sc2 = await sc({ turnMark: 'Слідчий показав фото' });
-  t('«поворот» від режисера — перераховано, попереднє в цій сцені — «замінено»', !sc2.reused && calls === 2 && (await repo.getCharacterDecision(P, sc1.decision.id))!.status === 'superseded');
+  t('«поворот» від режисера — перераховано, попереднє в цій сцені — «замінено»', !sc2.reused && calls === 3 && (await repo.getCharacterDecision(P, sc1.decision.id))!.status === 'superseded');
   const other = await e.decide({ projectId: P, characterId: olena, level: 'scene', actor: 'user:u-owner', sceneId: 's1', situation: 'Вдома' });
   t('інша сцена — окреме рішення; сцену s2 не чіпає', !other.reused && (await repo.getCharacterDecision(P, sc2.decision.id))!.status === 'active');
 
@@ -428,14 +428,14 @@ async function levelsSuite(label: string, repo: CoreRepository, P: string) {
   const sim = { simulationId: 'sim-1', turnIndex: 3 };
   const t3 = await tac(sim);
   t('той самий хід того самого прогону — з кешу (повтор запиту), наступний хід — ні',
-    !t3.reused && (await tac(sim)).reused && !(await tac({ ...sim, turnIndex: 4 })).reused && calls === 4);
+    !t3.reused && (await tac(sim)).reused && !(await tac({ ...sim, turnIndex: 4 })).reused && calls === 6);
   let refused = '';
   try { await tac({ allowedActions: ['answer', 'lie'], forbiddenActions: ['lie'] }); } catch (err) { refused = (err as any).code; }
   t('менше двох дозволених дій — відмова (bad_input)', refused === 'bad_input');
 
   console.log('  — зміна стратегічного тягне сцену:');
   calls = 0;
-  text.s2 += '\n\n[/revelation:Правда про брата @Олена] Олена дізналась правду.';
+  text.s1 += '\n\n[/revelation:Правда про брата @Олена] Олена дізналась правду.';
   await sync();
   const sc3 = await sc({ turnMark: 'Слідчий показав фото' });
   t('нова значуща подія → нове стратегічне → сцена з тими самими умовами рахується наново (інший батько)',
@@ -601,8 +601,8 @@ async function routesSuite(label: string, repo: CoreRepository, P: string) {
     t('без приватного змісту: у відповіді немає тексту книги, знімка, ситуації', !/млина|стежив|таємно|recent_appearances|situation/.test(s1.text));
     t('повторно — з кешу (reused)', (await decide('owner', { level: 'strategic' })).body.reused === true);
     const tac = await decide('editor', { level: 'tactical', sceneId: 's1', situation: 'Марко питає, куди вона ходила.', allowedActions: ['answer', 'lie', 'silence'], forbiddenActions: ['lie'], simulationId: 'sim-r', turnIndex: 1, participants: ['Марко'] });
-    t('тактичне від редактора — ланцюжок (стратегічне з кешу → сцена), без забороненого, стиль і батько',
-      tac.status === 200 && tac.body.chain.length === 2 && tac.body.chain[0].reused === true && tac.body.decision.level === 'tactical' && tac.body.decision.selectedAction !== 'lie' &&
+    t('тактичне від редактора — ланцюжок (окреме стратегічне прогону → сцена), без забороненого, стиль і батько',
+      tac.status === 200 && tac.body.chain.length === 2 && tac.body.chain[0].reused === false && tac.body.decision.level === 'tactical' && tac.body.decision.selectedAction !== 'lie' &&
       typeof tac.body.decision.scores.style_fit === 'number' && tac.body.decision.parentId === tac.body.chain[1].id, JSON.stringify(tac.body.chain));
 
     jevMode = 'low';
@@ -650,10 +650,10 @@ async function routesSuite(label: string, repo: CoreRepository, P: string) {
     t('прототип FLC на рівнях: стратегічне → сцена → тактичне, чернетка, рішення в журналі з батьком-сценою',
       proto.status === 200 && pb.mode === 'levels' && pb.levels.map((l: any) => l.level).join() === 'strategic,scene,tactical' && pb.draft?.reply === 'Я нічого не шукала.' &&
       (await repo.getCharacterDecision(P, pb.decisionId))?.parentId === pb.levels[1].id && pb.awaitingAuthor === false, JSON.stringify(pb.levels?.map((l: any) => [l.level, l.reused])));
-    t('вартість циклу — лише пораховані рівні (стратегічне з кешу — безкоштовно)', pb.levels[0].reused === true && pb.cost.jevInputTokens === 2000, JSON.stringify({ c: pb.cost, l: pb.levels }));
+    t('вартість циклу — лише пораховані рівні (нова межа знань: усі три рівні)', pb.levels[0].reused === false && pb.cost.jevInputTokens === 3000, JSON.stringify({ c: pb.cost, l: pb.levels }));
     jevMode = 'low';
     const proto2 = await call('admin', 'POST', '/flc/prototype', { entityId: olena, question: 'А хто такий Марко?', sceneId: 's10' });
-    t('прототип: сцена чекає автора — без чернетки, LLM не пише репліку', proto2.status === 200 && proto2.body.draft === null && proto2.body.awaitingAuthor && proto2.body.blockedAt === 'scene' && proto2.body.timings.llm === 0);
+    t('прототип: нове стратегічне чекає автора — без чернетки, LLM не пише репліку', proto2.status === 200 && proto2.body.draft === null && proto2.body.awaitingAuthor && proto2.body.blockedAt === 'strategic' && proto2.body.timings.llm === 0);
     jevMode = 'ok';
     t('прототип у режимі звіту Т1.6 (single) — як раніше', (await call('admin', 'POST', '/flc/prototype', { entityId: olena, question: 'Де?', mode: 'single' })).body.mode === 'single');
 

@@ -1,3 +1,4 @@
+import { characterDecisionBinding } from '../characterDecisionEngine';
 import { mysteryDirectorBinding } from '../mysteryDirector';
 import { causalityEngineBinding } from '../causalityEngine';
 /**
@@ -48,6 +49,7 @@ export function systemBindings(deps: SystemBindingDeps = {}): Record<string, Bin
     adaptiveWorkflowBinding(),
     causalityEngineBinding(),
     mysteryDirectorBinding(),
+    characterDecisionBinding(),
   ];
   return Object.fromEntries(list.map((b) => [b.workflowId, b]));
 }

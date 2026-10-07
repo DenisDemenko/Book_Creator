@@ -574,10 +574,12 @@ async function snapshotSuite(label: string, repo: CoreRepository, P: string) {
   t('Jev: сценічний знімок на с.2 — з пам\'яттю й переконаннями, без листа й чужого; стратегічний — з пам\'яттю канону',
     !!d1.decision && sceneSnap.memories?.some((m: any) => /Сварка/.test(m.content)) && sceneSnap.beliefs?.length > 0 && !/Лист у шухляді|сховала лист/.test(JSON.stringify(sceneSnap)) &&
     stratSnap.memories?.length > 0 && /спогади: \d+/.test(String((await repo.getCharacterDecision(P, d1.chain[0].id))!.basis.note)));
+  // Спочатку окреме рішення без межі сцени: його не можна брати з кешу до s2.
+  const unbounded = await engine.decide({ projectId: P, characterId: serhii, level: 'strategic', actor: 'user:u-owner' });
   const again = await engine.decide({ projectId: P, characterId: serhii, level: 'strategic', actor: 'user:u-owner' });
   await addAuthorMemory(repo, { projectId: P, characterId: serhii, memoryType: 'belief', content: 'Анна не винна — лист підкинули.', sceneId: 's3', actor: 'user:u-owner' });
   const after = await engine.decide({ projectId: P, characterId: serhii, level: 'strategic', actor: 'user:u-owner' });
-  t('підтверджений спогад канону — значуща подія: стратегічне перераховано (до того — з кешу)', again.reused && !after.reused && after.decision.cacheKey !== again.decision.cacheKey);
+  t('підтверджений спогад канону — значуща подія: стратегічне перераховано (до того — з кешу)', !unbounded.reused && again.reused && again.decision.id === unbounded.decision.id && !after.reused && after.decision.cacheKey !== again.decision.cacheKey);
 
   // Маршрут GET …/snapshot.
   const access = {

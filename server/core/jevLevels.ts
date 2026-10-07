@@ -1,3 +1,4 @@
+import { JobFatalError, JobCancelledError } from './jobs/queue';
 import {metric} from './performance';
 /**
  * Три рівні Jev Character Decision Engine (Т2.5 В3; FLC 2.0 §3;
@@ -38,7 +39,7 @@ import {metric} from './performance';
 import { createHash } from 'node:crypto';
 import type { CharacterDecisionLevel, CharacterDecisionRow, CoreActor, CoreRepository, EntityRow } from './types';
 import { buildCharacterProfile, EVENT_TYPES, PROFILE_FACT, type StudioCharacterLike } from './characterProfile';
-import { scanScenes } from './timeline';
+import { scanScenes, sceneIsBefore } from './timeline';
 import { memoriesAt } from './characterMemory';
 import { buildCharacterSnapshot } from './characterSnapshot';
 import { canonicalJson, snapshotHash, validateSnapshot, type CharacterSnapshot, type DecisionResult, type JevQuestion } from '../ai/contracts';
@@ -180,13 +181,14 @@ export async function significantState(
   repo: CoreRepository,
   projectId: string,
   characterId: string,
-  opts: { asOfChapter?: number | null; canon: { label: string; value: string }[]; version: string },
+  opts: { asOfChapter?: number | null; sceneId?: string | null; simulationId?: string | null; canon: { label: string; value: string }[]; version: string },
 ): Promise<SignificantState> {
   const scan = await scanScenes(repo, projectId, await repo.listTimePoints(projectId));
   const upto = opts.asOfChapter ?? null;
+  const target = opts.sceneId ? scan.bySection.get(opts.sceneId) : undefined;
   const inRange = (sectionId: string) => {
     const s = scan.bySection.get(sectionId);
-    return !!s && (upto == null || (s.chapterNumber ?? 0) <= upto);
+    return !!s && (upto == null || (s.chapterNumber ?? 0) <= upto) && (!target || sceneIsBefore(s, target));
   };
   const heroScenes = new Set(scan.scenes.filter((s) => s.characters.some((c) => c.id === characterId)).map((s) => s.sectionId));
   const events: SignificantState['events'] = [];
@@ -209,17 +211,16 @@ export async function significantState(
   }
   const facts = (await repo.listFindings(projectId, { entityId: characterId, status: 'confirmed' }))
     .filter((f) => f.kind === PROFILE_FACT && f.visibility !== 'hidden')
-    .filter((f) => f.sourceParagraphIds.some((p) => {
+    .filter((f) => f.sourceParagraphIds.length > 0 && f.sourceParagraphIds[target ? "every" : "some"]((p) => {
       const sid = scan.sectionOfParagraph.get(p);
       return !!sid && inRange(sid);
     }))
     .map((f) => ({ id: f.id, statement: String((f.payload as { statement?: unknown }).statement ?? '') }));
   const sort = <T>(xs: T[]) => [...xs].sort((a, b) => canonicalJson(a).localeCompare(canonicalJson(b)));
   // Т2.6 В5: підтверджений спогад канону — значуща подія (рішення власника §6 п.3 Т2.5 + план Т2.6 §2).
-  const memories = (await memoriesAt(repo, projectId, characterId, { asOfChapter: upto, scan })).memories
-    .filter((m) => m.simulationId === null)
+  const memories = (await memoriesAt(repo, projectId, characterId, { asOfChapter: upto, sceneId: target?.sectionId, simulationId: opts.simulationId, scan })).memories
     .map((m) => ({ id: m.id, type: m.memoryType, content: m.content, evidenceHash: m.evidenceHash }));
-  const key = hash({ v: opts.version, upto, events: sort(events), goals: sort(goals), facts: sort(facts), canon: sort(opts.canon), ...(memories.length ? { memories: sort(memories) } : {}) });
+  const key = hash({ v: opts.version, upto, simulationId: opts.simulationId ?? null, events: sort(events), goals: sort(goals), facts: sort(facts), canon: sort(opts.canon), ...(memories.length ? { memories: sort(memories) } : {}) });
   return { key, events, goals, facts, canon: opts.canon, memories, paragraphIds: [...paragraphIds] };
 }
 
@@ -259,15 +260,9 @@ export class JevDecisionAdapter {
   }
 
   /**
-   * Т2.8 В1: межа знань для батьківських рівнів. Стратегічний рівень не
-   * обмежений сценою (кешується між сценами) і бачить книгу «станом на главу
-   * N»; без глави — усю книгу. Тож рішення на сцену без явної глави брало в
-   * стратегічний знімок майбутнє (набір якості знайшов: розкриття з гл. 2
-   * потрапляло в стан Jev для допиту станом на сцену гл. 1). Тепер, якщо
-   * сцену задано, а главу ні, — глава береться зі сцени (крім останньої
-   * глави: там «станом на главу» і є вся книга, і кеш не дробиться). Межа стратегічного
-   * рівня — глава (пізніші сцени тієї самої глави він бачить; сценічний і
-   * тактичний рівні обмежені самою сценою).
+   * Межа знань батьківських рівнів: глава береться зі сцени, якщо автор
+   * її не задав. Кожен рівень також обмежено початком сцени в часі світу;
+   * пізніша сцена тієї самої глави не стає знанням стратегічного рівня.
    */
   private async boundToScene(req: DecideRequest): Promise<DecideRequest> {
     if (!req.sceneId || req.asOfChapter != null) return req;
@@ -346,6 +341,7 @@ export class JevDecisionAdapter {
         if(label==='Jev')metric('tokens',(evaluated.usage?.input_tokens??0)+(evaluated.usage?.output_tokens??0));
         return evaluated;
       } catch (err) {
+        if (err instanceof CoreRuleError || err instanceof JobFatalError || err instanceof JobCancelledError || (err instanceof Error && err.name === 'AbortError')) throw err;
         reasons.push(`${label}: ${(err as Error).message}`);
         return null;
       }
@@ -413,7 +409,7 @@ export class JevDecisionAdapter {
   private async strategic(req: DecideRequest): Promise<{ decision: CharacterDecisionRow; reused: boolean }> {
     const profile = await this.profile(req);
     const canon = profile.canon.fields.map((f) => ({ label: f.label, value: f.value }));
-    const sig = await significantState(this.deps.repo, req.projectId, req.characterId, { asOfChapter: req.asOfChapter ?? null, canon, version: this.config.version });
+    const sig = await significantState(this.deps.repo, req.projectId, req.characterId, { asOfChapter: req.asOfChapter ?? null, sceneId: req.sceneId, simulationId: req.simulationId, canon, version: this.config.version });
     const cached = await this.reuse(req, 'strategic', sig.key);
     if (cached) return { decision: cached, reused: true };
 
@@ -430,7 +426,7 @@ export class JevDecisionAdapter {
       sig.goals.length ? `Цілі й потреби: ${sig.goals.map((g) => g.name).join('; ')}.` : '',
       sig.events.length ? `Пережите: ${sig.events.map((e) => `${e.name} (${e.type})`).join('; ')}.` : '',
     ].filter(Boolean).join(' ').slice(0, 2000);
-    const snapshot = await this.snapshot(req, situation, Object.keys(cfg.primary.options), false);
+    const snapshot = await this.snapshot(req, situation, Object.keys(cfg.primary.options), !!req.sceneId || !!req.simulationId);
     const constraints: HardConstraints = {
       primary: { id: cfg.primary.id, allowed: Object.keys(cfg.primary.options) },
       ...(Object.keys(goalOptions).length >= 2 ? { choices: { long_goal: Object.keys(goalOptions) } } : {}),

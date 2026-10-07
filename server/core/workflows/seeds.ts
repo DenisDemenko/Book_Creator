@@ -1,3 +1,4 @@
+import { characterDecisionWorkflowDefinition } from './characterDecisionEngine';
 import { mysteryWorkflowDefinition } from './mysteryDirector';
 import { causalityWorkflowDefinition } from './causalityEngine';
 /**
@@ -93,6 +94,7 @@ export function systemWorkflowDefinitions(): WorkflowDefinition[] {
     adaptiveWorkflowDefinition(),
     causalityWorkflowDefinition(),
     mysteryWorkflowDefinition(),
+    characterDecisionWorkflowDefinition(),
   ];
 }
 
