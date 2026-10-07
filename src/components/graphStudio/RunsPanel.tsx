@@ -152,6 +152,32 @@ const JevStepDetails: React.FC<{ s: Step; onOpenRun: (id: string) => void }> = (
   );
 };
 
+const ContinuityStepDetails: React.FC<{ s: Step }> = ({ s }) => {
+  const report = s.details.continuity as {
+    passed: boolean;
+    checks: string[];
+    blockerCount: number;
+    warningCount: number;
+    blockers: { code: string; kind: string; summary: string; evidence?: string[] }[];
+    warnings: { summary: string }[];
+  } | undefined;
+  if (!report) return null;
+  return (
+    <div data-run-continuity={s.nodeId} data-continuity-result={report.passed ? 'pass' : 'block'} className="space-y-1 break-words rounded border border-slate-700 p-2">
+      <p className={report.passed ? 'text-emerald-300' : 'text-rose-300'}>
+        Continuity Gate (Шлюз безперервності): {report.passed ? 'пройдено' : 'запис у канон заблоковано'}
+      </p>
+      <p>Перевірки: {report.checks.join(', ')} · Блокувань: {report.blockerCount} · Попереджень: {report.warningCount}</p>
+      {report.blockers.map((issue, i) => (
+        <p key={i} data-continuity-blocker>
+          {issue.summary}{issue.evidence?.length ? ` · Докази: ${issue.evidence.join(', ')}` : ''}
+        </p>
+      ))}
+      {report.warnings.map((issue, i) => <p key={i} className="text-amber-300">{issue.summary}</p>)}
+    </div>
+  );
+};
+
 export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) => {
   const [runs, setRuns] = useState<Run[] | null>(null);
   const [workflows, setWorkflows] = useState<{ id: string; name: string; production: number | null }[]>([]);
@@ -384,6 +410,12 @@ export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) =
 
             {/* §27: RUN LOG / TRACE */}
             <div className="overflow-x-auto rounded-xl border border-slate-800" data-run-trace>
+              {detail.steps.filter(s => s.details.continuity).map(s => (
+                <div key={s.id} className="space-y-1 border-b border-slate-800 p-2 text-[11px]">
+                  <p className="font-semibold text-slate-100">{labelOf(s.nodeId)}</p>
+                  <ContinuityStepDetails s={s} />
+                </div>
+              ))}
               <table className="w-full min-w-[46rem] text-left text-[11px]">
                 <thead className="bg-slate-950/80 text-[10px] uppercase tracking-wider text-slate-500">
                   <tr>
@@ -414,13 +446,13 @@ export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) =
                         <td className="px-2 py-1.5 text-slate-300">{fmtMs(s.latencyMs)}</td>
                         <td className="px-2 py-1.5 text-slate-300">{s.retryCount || '—'}</td>
                       </tr>
-                      {(s.error || s.warnings.length > 0 || s.nodeType.startsWith('JEV_') || (s.details as { subgraph?: unknown }).subgraph) && (
+                      {(s.error || (s.warnings.length > 0 && !s.details.continuity) || s.nodeType.startsWith('JEV_') || (s.details as { subgraph?: unknown }).subgraph) && (
                         <tr className="border-t border-slate-900/80">
                           <td />
                           <td colSpan={9} className="space-y-1 px-2 pb-1.5 text-[10px]">
                             <JevStepDetails s={s} onOpenRun={setSelected} />
                             {s.error && <p className="text-rose-300" data-run-step-error>✗ {s.error}</p>}
-                            {s.warnings.map((w, i) => <p key={i} className="text-amber-300">⚠ {w}</p>)}
+                            {!s.details.continuity && s.warnings.map((w, i) => <p key={i} className="text-amber-300">⚠ {w}</p>)}
                           </td>
                         </tr>
                       )}

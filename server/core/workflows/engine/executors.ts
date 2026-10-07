@@ -14,6 +14,7 @@ import { parseModelJson, validateAgainstSchema } from '../../ai/schema';
 import type { CoreAiModule } from '../../ai/rolePrompts';
 import { callStoryCore } from '../../storyCore/api';
 import { NodeError, type ExecEnv, type NodeExecutor, type NodeOutcome, type WfState } from './types';
+import { CONTINUITY_GATE } from './continuityGate';
 import { JEV_EXECUTORS } from './jev';
 import { CREATE_STORY_PROPOSAL, HUMAN_REVIEW, CANON_WRITE } from './humanReview';
 
@@ -211,6 +212,7 @@ export const GENERIC_EXECUTORS: Record<string, NodeExecutor> = {
   QUERY,
   TOOL,
   PROPOSAL,
+  CONTINUITY_GATE,
   HUMAN_REVIEW,
   CANON_WRITE,
   CONTEXT: needsBinding('Контекст'),

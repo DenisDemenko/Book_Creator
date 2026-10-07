@@ -1,4 +1,10 @@
+import { assertCanonPermission } from "./canonPermissions";
 /** T5.6: durable human review; no automatic canon permission. */
+import {
+  evaluateContinuityGate,
+  type ContinuityGateReport,
+} from "./continuityGate";
+import { NodeError } from "./types";
 import { parseModelJson } from "../../ai/schema";
 import { interrupt } from "@langchain/langgraph";
 import {
@@ -14,22 +20,6 @@ export interface HumanReviewDecision {
   expectedRevision: number;
   payload?: Record<string, unknown>;
   reason?: string;
-}
-export async function assertCanonPermission(env: ExecEnv, reviewer?: string) {
-  const id = env.run.projectId;
-  if (!id || !env.actor.startsWith("user:"))
-    throw new CoreRuleError(
-      "bad_actor",
-      "Канон підтверджує авторизована людина.",
-    );
-  const allowed = env.services.canWriteCanon
-    ? await env.services.canWriteCanon(env.actor, id, reviewer)
-    : (await env.repo.getProject(id))?.ownerId === env.actor.slice(5);
-  if (!allowed)
-    throw new CoreRuleError(
-      "bad_actor",
-      "Потрібен доступ CANON_WRITE до цієї книги.",
-    );
 }
 export const CREATE_STORY_PROPOSAL: NodeExecutor = async (node, state, env) => {
   await assertCanonPermission(env);
@@ -223,6 +213,28 @@ export const CANON_WRITE: NodeExecutor = async (node, state, env) => {
       "conflict",
       "Схвалену пропозицію змінено — потрібна повторна перевірка.",
     );
+  // Recompute after author edits and a potentially long human-review pause.
+  const previous = state.vars.continuityGate as
+    | ContinuityGateReport
+    | undefined;
+  const gate = await evaluateContinuityGate(env.repo, proposal, {
+    checks: previous?.checks,
+    draft: state.input.continuityDraft,
+  });
+  if (!gate.passed)
+    throw new NodeError(
+      `Continuity Gate заблокував канон: ${gate.blockers
+        .slice(0, 3)
+        .map((x) => x.summary)
+        .join("; ")}`,
+      "schema",
+      {
+        decision: "block",
+        validationResult: "block",
+        warnings: gate.warnings.map(x => x.summary),
+        details: { continuity: gate },
+      },
+    );
   const result = await writeCanon(
     env.repo,
     env.run.projectId!,
@@ -240,7 +252,13 @@ export const CANON_WRITE: NodeExecutor = async (node, state, env) => {
     trace: {
       humanResult: review.action,
       decision: "canon",
-      details: { proposalId: result.proposal.id, recordId: result.recordId },
+      validationResult: "pass",
+      warnings: gate.warnings.map(x => x.summary),
+      details: {
+        proposalId: result.proposal.id,
+        recordId: result.recordId,
+        continuity: gate,
+      },
     },
   };
 };

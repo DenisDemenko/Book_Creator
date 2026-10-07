@@ -19,6 +19,7 @@ import { canonicalJson, type LocalizedName } from './ontology';
 import { exprError } from './workflowExpr';
 
 export const WORKFLOW_FORMAT = 'fusion-workflow/1';
+export const CONTINUITY_CHECKS = ['time', 'age', 'knowledge', 'place', 'object', 'causality'] as const;
 
 // ---------------------------------------------------------------------------
 // Палітра (§35) і реєстр вузлів (§5.2, §36)
@@ -244,7 +245,7 @@ export const NODE_TYPES: NodeTypeDef[] = [
   { id: 'VALIDATOR', group: 'validation', name: N('Validator', 'Перевіряльник'), description: 'Перевірка виходу за схемою й правилами онтології.', inputs: 'one', outputs: ['valid', 'invalid'],
     params: [{ id: 'rules', name: N('Rules', 'Правила'), type: 'string_list' }, { id: 'output_schema', name: N('Output schema', 'Схема'), type: 'json' }] },
   { id: 'CONTINUITY_GATE', group: 'validation', name: N('Continuity Gate', 'Шлюз безперервності'), description: 'Блокує запис, що суперечить канону (§15).', inputs: 'one', outputs: ['pass', 'block'],
-    params: [{ id: 'checks', name: N('Checks', 'Перевірки'), type: 'string_list', default: ['time', 'age', 'knowledge', 'place', 'object'] }] },
+    params: [{ id: 'checks', name: N('Checks', 'Перевірки'), type: 'string_list', default: [...CONTINUITY_CHECKS] }] },
   // HUMAN
   { id: 'HUMAN_REVIEW', group: 'human', name: N('Human Review', 'Перевірка людиною'), description: 'Автор приймає, править або відхиляє (§24).', inputs: 'one', outputs: ['accept', 'edit', 'reject'],
     params: [{ id: 'reviewer', name: N('Reviewer', 'Хто перевіряє'), type: 'enum', options: ['author', 'editor', 'any_with_canon_write'], required: true, default: 'author' }] },
@@ -262,12 +263,11 @@ export const NODE_TYPES: NodeTypeDef[] = [
 const NODE_TYPE_MAP = new Map(NODE_TYPES.map((t) => [t.id, t]));
 
 /**
- * Вузли, які рушій уже виконує (Т5.4–Т5.6). Решта зупиняє запуск
- * зрозумілою помилкою: CONTINUITY_GATE —
- * Т5.7; AGENT, PARALLEL / MERGE / LOOP — пізніше.
+ * Вузли, які рушій уже виконує (Т5.4–Т5.7 В1). Решта зупиняє запуск
+ * зрозумілою помилкою: AGENT, PARALLEL / MERGE / LOOP — пізніше.
  */
 export const EXECUTABLE_NODE_TYPES = [
-  'START', 'END', 'CONTEXT', 'MEMORY', 'QUERY', 'PROMPT', 'LLM', 'TOOL', 'CONDITION', 'VALIDATOR', 'PROPOSAL', 'HUMAN_REVIEW', 'CANON_WRITE',
+  'START', 'END', 'CONTEXT', 'MEMORY', 'QUERY', 'PROMPT', 'LLM', 'TOOL', 'CONDITION', 'VALIDATOR', 'PROPOSAL', 'HUMAN_REVIEW', 'CANON_WRITE', 'CONTINUITY_GATE',
   // Т5.5: шар рішень Jev і підпроцес.
   'SUBGRAPH', 'JEV_CHOICE', 'JEV_SCORE', 'JEV_NOUL', 'JEV_ROUTER', 'JEV_GATE', 'JEV_EVALUATOR', 'JEV_DECISION_BUNDLE',
 ];
@@ -514,6 +514,12 @@ export function validateWorkflow(def: WorkflowDefinition): WorkflowValidation {
         const problem = bundleQuestionsError(pr.questions);
         if (problem) err('bad_bundle', `${path}.params.questions`, `${t.name.uk} «${n.label || n.id}»: ${problem}`, { nodeId: n.id });
       }
+    }
+  }
+  for (const node of nodes) if (node?.type === 'CONTINUITY_GATE' && node.params?.checks !== undefined) {
+    const checks = node.params.checks;
+    if (!Array.isArray(checks) || !checks.length || checks.some(x => !CONTINUITY_CHECKS.includes(x as typeof CONTINUITY_CHECKS[number]))) {
+      err('bad_param', `nodes.${node.id}.params.checks`, 'Continuity Gate: оберіть чинні правила безперервності', { nodeId: node.id });
     }
   }
   const starts = nodes.filter((n) => n?.type === 'START');

@@ -23,7 +23,7 @@ import { CoreRuleError } from '../../rules';
 import type { CoreActor, CoreRepository, WorkflowRunRow, WorkflowVersionRow } from '../../types';
 import { CoreCheckpointSaver } from './checkpointer';
 import { executorFor } from './executors';
-import { assertCanonPermission } from './humanReview';
+import { assertCanonPermission } from './canonPermissions';
 import { NodeError, type BindingDef, type EngineServices, type ExecEnv, type WfState } from './types';
 
 export interface EngineDeps {
