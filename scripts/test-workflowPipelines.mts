@@ -31,21 +31,21 @@ const t = (name: string, ok: boolean, extra = '') => {
 
 console.log('\nСистемні процеси (§2 п.1):');
 const defs = systemWorkflowDefinitions();
-t('сім процесів: AI-1, AI-2 профіль і пам’ять, голос героя, детектор змін, адаптивний аналіз, причинність', defs.map((d) => d.id).join() === 'ai1_mentions,ai2_profile,ai2_memory,character_voice,semantic_change_detector,adaptive_workflow,causality_engine');
+t('вісім процесів: AI-1, AI-2 профіль і пам’ять, голос героя, детектор змін, адаптивний аналіз, причинність, загадка', defs.map((d) => d.id).join() === 'ai1_mentions,ai2_profile,ai2_memory,character_voice,semantic_change_detector,adaptive_workflow,causality_engine,mystery_director');
 t('кожен проходить перевірку Graph Studio', defs.every((d) => validateWorkflow(d).ok), JSON.stringify(defs.map((d) => validateWorkflow(d).errors.map((e) => e.message))));
-t('v1 = поведінка до Т5.4: температура 0,7, без ліміту токенів, без повторів вузла, поріг 0', defs.filter(d => !['semantic_change_detector', 'adaptive_workflow', 'causality_engine'].includes(d.id)).every((d) => {
+t('v1 = поведінка до Т5.4: температура 0,7, без ліміту токенів, без повторів вузла, поріг 0', defs.filter(d => !['semantic_change_detector', 'adaptive_workflow', 'causality_engine', 'mystery_director'].includes(d.id)).every((d) => {
   const llm = d.nodes.find((n) => n.type === 'LLM')!.params;
   const prop = d.nodes.find((n) => n.type === 'PROPOSAL')!.params;
   return llm.temperature === 0.7 && llm.max_tokens === undefined && llm.retry_count === 0 && prop.min_confidence === 0;
 }));
-t('шаблони — з «Ядра AI» (адмін їх і далі править там)', defs.filter(d => !['semantic_change_detector', 'adaptive_workflow', 'causality_engine'].includes(d.id)).map((d) => d.nodes.find((n) => n.type === 'PROMPT')!.params.template).join() === 'core:coreAi1Classify,core:coreAi2Analysis,core:coreAi2Analysis,core:coreCharacterVoice');
+t('шаблони — з «Ядра AI» (адмін їх і далі править там)', defs.filter(d => !['semantic_change_detector', 'adaptive_workflow', 'causality_engine', 'mystery_director'].includes(d.id)).map((d) => d.nodes.find((n) => n.type === 'PROMPT')!.params.template).join() === 'core:coreAi1Classify,core:coreAi2Analysis,core:coreAi2Analysis,core:coreCharacterVoice');
 
 const repo = new MemoryCoreRepository();
 resetActiveRegistry();
 await bootstrapOntology(repo);
 
 console.log('\nАвтопублікація v1 (§2 п.2):');
-t('перший старт — створено й опубліковано всі сім', (await ensureSystemWorkflows(repo)).length === 7);
+t('перший старт — створено й опубліковано всі вісім', (await ensureSystemWorkflows(repo)).length === 8);
 for (const d of defs) {
   const v = await publishedVersion(repo, d.id);
   if (!v || v.version !== 1 || v.publishedBy !== 'system:workflow-seed') t(`«${d.id}» опубліковано v1 системою`, false);

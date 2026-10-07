@@ -450,7 +450,10 @@
   пороги та підграфи minimal/light/normal/deep, траса (критерій 20).
   В4 реалізовано 07.10.2026, журнал #386: кандидати з доказами, Jev Choice/Noul,
   перевірена причинна пропозиція, авторське рішення (критерій 23).
-  Наступний В5 — Mystery Director.
+  В5 реалізовано 07.10.2026, журнал #387: приватний Mystery Director, три
+  шари знань, Jev Score/Noul/Choice, зашифрований план і рекомендація (критерій 22).
+  Наступний В6 — Character Decision Engine.
+  Прогін В5: [T5.7 В5](docs/acceptance/T5.7-V5.md).
   Прогін В4: [T5.7 В4](docs/acceptance/T5.7-V4.md).
   Прогін В3: [T5.7 В3](docs/acceptance/T5.7-V3.md).
   Прогін В2: [T5.7 В2](docs/acceptance/T5.7-V2.md).

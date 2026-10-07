@@ -9,7 +9,7 @@
 | В2 | Semantic Change Detector: після core_sync запуск лише зачеплених підграфів | Реалізовано, журнал #384; production-приймання очікує |
 | В3 | Adaptive Workflow: глибина аналізу за важливістю, шкали в конфігурації | Реалізовано, журнал #385; production-приймання очікує |
 | В4 | Causality Engine: пропозиції CAUSES без автоматичного запису | Реалізовано, журнал #386; production-приймання очікує |
-| В5 | Mystery Director: World Truth / Reader Knowledge / Character Knowledge | Не почато |
+| В5 | Mystery Director: World Truth / Reader Knowledge / Character Knowledge | Реалізовано, журнал #387; production-приймання очікує |
 | В6 | Character Decision Engine: симуляція без зміни канону | Не почато |
 
 В1 використовує наявні детерміновані правила, а не оцінку правдоподібності
@@ -22,4 +22,4 @@
 
 В2: [прогін і межі](docs/acceptance/T5.7-V2.md). Реєстр semantic_change
 вмикає автоматичний аналіз лише для прив’язаних категорій; без напрямків
-модельні запити не запускаються. В3: [прогін і межі](docs/acceptance/T5.7-V3.md). В4: [прогін і межі](docs/acceptance/T5.7-V4.md). Наступний В5 — Mystery Director.
+модельні запити не запускаються. В3: [прогін і межі](docs/acceptance/T5.7-V3.md). В4: [прогін і межі](docs/acceptance/T5.7-V4.md). В5: [прогін і межі](docs/acceptance/T5.7-V5.md). Наступний В6 — Character Decision Engine.

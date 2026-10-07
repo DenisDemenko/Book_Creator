@@ -233,6 +233,12 @@ const CausalityStepDetails: React.FC<{s:Step}> = ({s}) => {
   </div>;
 };
 
+const MysteryStepDetails: React.FC<{s:Step}> = ({s}) => {
+ const r=s.details.mysteryDirector as {action:string;readerScore:number|null;earlyProbability:number|null;needsReview:boolean;layers:{readerParagraphs:number;characters:{characterId:string;knownCount:number}[]}}|undefined;
+ if(!r)return null;
+ return <div data-run-mystery className="space-y-1 break-words rounded border border-slate-700 p-2"><p className="text-sky-300">Mystery Director: {r.action}{r.needsReview?' · рішення автора':''}</p><p>World Truth: зашифровано. Reader Knowledge: {r.layers.readerParagraphs} абзаців, оцінка {r.readerScore??'невідома'} / 10.</p><p>Character Knowledge: {r.layers.characters.length} окремих героїв; світову таємницю їм не розкрито.</p>{r.layers.characters.map(c=><p key={c.characterId}>{c.characterId}: {c.knownCount} підтверджених знань.</p>)}<p>Ризик передчасного розкриття: {r.earlyProbability??'невідомий'}. Лише рекомендація; підтвердьте розкриття окремо у Vault.</p></div>;
+};
+
 export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) => {
   const [runs, setRuns] = useState<Run[] | null>(null);
   const [workflows, setWorkflows] = useState<{ id: string; name: string; production: number | null }[]>([]);
@@ -465,13 +471,14 @@ export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) =
 
             {/* §27: RUN LOG / TRACE */}
             <div className="overflow-x-auto rounded-xl border border-slate-800" data-run-trace>
-              {detail.steps.filter(s => s.details.continuity || s.details.semanticChange || s.details.adaptiveWorkflow || s.details.causalityEngine).map(s => (
+              {detail.steps.filter(s => s.details.continuity || s.details.semanticChange || s.details.adaptiveWorkflow || s.details.causalityEngine || s.details.mysteryDirector).map(s => (
                 <div key={s.id} className="space-y-1 border-b border-slate-800 p-2 text-[11px]">
                   <p className="font-semibold text-slate-100">{labelOf(s.nodeId)}</p>
                   <ContinuityStepDetails s={s} />
                   <SemanticChangeStepDetails s={s} />
                   <AdaptiveStepDetails s={s} />
                   <CausalityStepDetails s={s} />
+                  <MysteryStepDetails s={s} />
                 </div>
               ))}
               <table className="w-full min-w-[46rem] text-left text-[11px]">

@@ -71,6 +71,8 @@ export interface BindingDef {
 
 /** Залежності рушія від Студії (у тестах — підставні). */
 export interface EngineServices {
+  /** Private Vault requires full book access, not merely canon approval. */
+  canDirectMystery?: (actor:CoreActor,projectId:string)=>Promise<boolean>;
   canWriteCanon?: (actor:CoreActor,projectId:string,reviewer?:string)=>Promise<boolean>;
   generate: (input: AiGenerateInput) => Promise<AiGenerateOutput>;
   resolveModel: (module: CoreAiModule) => Promise<string | undefined>;

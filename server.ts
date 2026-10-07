@@ -1,5 +1,7 @@
 // Завантажуємо .env найпершим, поки жоден модуль ще не прочитав process.env.
 import 'dotenv/config';
+import { evaluatePrivateMystery } from './server/core/mysteryDirector';
+import { MYSTERY_FALLBACK_SYSTEM } from './server/core/workflows/mysteryDirector';
 import express from 'express';
 import http from 'http';
 import path from 'path';
@@ -853,7 +855,7 @@ registerGitCommandRoutes(app);
     return key ? new HttpJevAdapter(key, { model: jevModelFromEnv() }) : null;
   };
   const privateVaultModel=async(req:any,projectId:string,system:string,context:Record<string,unknown>)=>{const out=await aiRoleGenerateViaCore({module:'coreCharacterVoice',modelId:await resolveModuleModelId('coreCharacterVoice'),system,user:JSON.stringify(context),projectId,actor:`user:${req.principal.id}`,privateContent:true,generation:{maxTokens:1800,timeoutMs:30000}});try{return JSON.parse(out.text.replace(/^```(?:json)?\s*|\s*```$/g,''));}catch{throw new Error('Приватна відповідь не відповідає JSON.');}};
-  registerSecretVaultRoutes(app,{repo:getCoreRepository,access:realtimeAccessDeps,aiGuard:requirePermission('canUseAi'),generate:(req,p,ctx)=>privateVaultModel(req,p,'Ти одноразовий Secret Curator. Межі автора обов’язкові. Для false_belief створюй хибне переконання, для world_secret факт невідомий героям. JSON {"text":"секрет до 2000 символів"}. Без тегів і запису канону.',ctx),direct:(req,p,ctx)=>privateVaultModel(req,p,'Ти окремий Mystery Director лише цієї світової таємниці. Плануй до 5 натяків і докази; не змінюй секрет. Весь результат лишиться зашифрованим. JSON {"hints":["натяк"]}.',ctx)});
+  registerSecretVaultRoutes(app,{repo:getCoreRepository,access:realtimeAccessDeps,aiGuard:requirePermission('canUseAi'),generate:(req,p,ctx)=>privateVaultModel(req,p,'Ти одноразовий Secret Curator. Межі автора обов’язкові. Для false_belief створюй хибне переконання, для world_secret факт невідомий героям. JSON {"text":"секрет до 2000 символів"}. Без тегів і запису канону.',ctx),direct:(req,p,ctx)=>evaluatePrivateMystery(ctx,{jev:typesafeJev,fallback:context=>privateVaultModel(req,p,MYSTERY_FALLBACK_SYSTEM,context)})});
   registerMagicSceneRoutes(app,{
     repo:getCoreRepository,access:realtimeAccessDeps,aiGuard:requirePermission('canUseAi'),
     engines:async(req,repo,access)=>{
@@ -901,7 +903,13 @@ registerGitCommandRoutes(app);
   const workflowEngine = (): EngineDeps | null => {
     const repo = getCoreRepository();
     return repo
-      ? { repo, services: { canWriteCanon: async (actor, projectId, reviewer) => {
+      ? { repo, services: { canDirectMystery: async (actor, projectId) => {
+          if (!actor.startsWith('user:')) return false;
+          const user = await findUserForAccess(actor.slice(5));
+          if (!user || user.disabled) return false;
+          const access = await resolveProjectAccess({ id: user.id, role: user.role, isGuest: false } as any, projectId, realtimeAccessDeps).catch(() => null);
+          return !!access?.effective.full;
+        }, canWriteCanon: async (actor, projectId, reviewer) => {
           const user = await findUserForAccess(actor.slice(5));
           if (!user || user.disabled) return false;
           const access = await resolveProjectAccess({ id: user.id, role: user.role, isGuest: false } as any, projectId, realtimeAccessDeps).catch(() => null);

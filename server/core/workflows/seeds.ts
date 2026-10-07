@@ -1,3 +1,4 @@
+import { mysteryWorkflowDefinition } from './mysteryDirector';
 import { causalityWorkflowDefinition } from './causalityEngine';
 /**
  * Системні процеси ШІ (Т5.4 В2; рішення власника §2 п.1–2): наявні конвеєри
@@ -91,6 +92,7 @@ export function systemWorkflowDefinitions(): WorkflowDefinition[] {
     semanticWorkflowDefinition(),
     adaptiveWorkflowDefinition(),
     causalityWorkflowDefinition(),
+    mysteryWorkflowDefinition(),
   ];
 }
 

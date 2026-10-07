@@ -1,3 +1,4 @@
+import { mysteryDirectorBinding } from '../mysteryDirector';
 import { causalityEngineBinding } from '../causalityEngine';
 /**
  * Прив'язки системних процесів ШІ (Т5.4 В2): id процесу → кроки конвеєра.
@@ -46,6 +47,7 @@ export function systemBindings(deps: SystemBindingDeps = {}): Record<string, Bin
     semanticChangeBinding(),
     adaptiveWorkflowBinding(),
     causalityEngineBinding(),
+    mysteryDirectorBinding(),
   ];
   return Object.fromEntries(list.map((b) => [b.workflowId, b]));
 }
