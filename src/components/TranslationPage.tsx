@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import type { Book } from '../types';
 
 interface ParagraphTranslation {
+  sourceLocation?: {chapterId:string|null;sectionId:string;editorPid:string|null;text:string};
   paragraphId: string; original: string; sourceHash: string; glossaryHash: string; sourceLanguage: string; needsUpdate: boolean;
   current: { text: string; status: string; version: number } | null;
   versions: { text: string; version: number; status: string; createdAt: string }[];
@@ -10,7 +11,7 @@ interface Workspace {
   revision: number; canEdit: boolean; canApprove: boolean;
   glossary: {id:string;source:string;target:string}[]; paragraphs: ParagraphTranslation[];
 }
-export function TranslationPage({ book }: { book: Book }) {
+export function TranslationPage({ book, onOpenParagraph }: { book: Book; onOpenParagraph?: (target: {chapterId:string;sectionId:string;editorPid:string;text:string})=>void }) {
   const [language,setLanguage]=useState('en'),[sourceLanguage,setSourceLanguage]=useState('uk');
   const [state,setState]=useState<Workspace|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
   const [selected,setSelected]=useState(''),[text,setText]=useState('');
@@ -69,6 +70,7 @@ export function TranslationPage({ book }: { book: Book }) {
           <button className={button} disabled={busy||!state.canApprove} onClick={()=>run(()=>save('approved'))}>Затвердити переклад</button>
           <button className={button} disabled={busy||!state.canEdit} onClick={()=>run(async()=>{const result=await api('/generate','POST',{paragraphId:selected,language,sourceLanguage,modelId:book.preferredAiModelId});setText(result.text);})}>Перекласти AI</button>
         </div>
+        {paragraph.sourceLocation?.chapterId && paragraph.sourceLocation.editorPid && onOpenParagraph && <button type="button" className={button} onClick={()=>{const loc=paragraph.sourceLocation!;onOpenParagraph({chapterId:loc.chapterId!,sectionId:loc.sectionId,editorPid:loc.editorPid!,text:loc.text});}}>Відкрити оригінал у редакторі</button>}
         <details><summary>Історія перекладу ({paragraph.versions.length})</summary>{paragraph.versions.map(v=><div key={v.version} className="my-2 rounded border border-slate-700 p-3"><p>Версія {v.version} · {v.status} · {v.createdAt}</p><pre className="whitespace-pre-wrap break-words">{v.text}</pre><button className={button} disabled={!state.canEdit||busy} onClick={()=>setText(v.text)}>Взяти текст за основу</button></div>)}</details>
       </>}
     </>}

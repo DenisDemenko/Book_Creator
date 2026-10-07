@@ -239,10 +239,10 @@ export const CorePageView: React.FC<Props> = ({ tab, book, characterId, onOpenCh
 
       {/* Сторінка 8 — «Перевірка безперервності» (Т2.4 В8). */}
       {tab === 'core-continuity' && <ContinuityPage book={book} onOpenParagraph={(t) => onOpenParagraph?.(t)} />}
-      {tab === 'core-mastery' && <WriterMasteryPage key={book.id} book={book} />}
+      {tab === 'core-mastery' && <WriterMasteryPage key={book.id} book={book} onOpenParagraph={onOpenParagraph} onOpenCharacter={onOpenCharacter} />}
       {tab === 'core-branches' && <React.Fragment key={book.id}><MagicScenePage book={book} onUpdateBook={onUpdateBook} /><SecretVaultPanel book={book} onBranchCreated={()=>window.dispatchEvent(new Event('vault:branch-created'))}/><BranchesPage book={book} onUpdateBook={onUpdateBook} /></React.Fragment>}
       {tab === 'core-collaboration' && <CollaborationPage key={book.id} book={book} onUpdateBook={onUpdateBook} onOpenCharacter={onOpenCharacter} onOpenParagraph={onOpenParagraph} />}
-      {tab === 'core-translation' && <TranslationPage key={book.id} book={book} />}
+      {tab === 'core-translation' && <TranslationPage key={book.id} book={book} onOpenParagraph={onOpenParagraph} />}
 
       {/* Сторінка 6 — «Хронологія» (Т2.1). */}
       {tab === 'core-timeline' && <TimelinePage book={book} onOpenParagraph={(t) => onOpenParagraph?.(t)} />}

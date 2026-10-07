@@ -38,8 +38,9 @@ export function registerTranslationRoutes(app: Express, d: TranslationRoutesDeps
   app.get(base,handle(async(req,res,repo,a)=>{
     const language=translationLanguage(req.query.language??'en'),state=await repo.getTranslationWorkspace(a.projectId);
     const visible=await paragraphs(repo,a);
+    const documents=new Map((await repo.listDocuments(a.projectId)).filter(d=>!d.deletedAt).map(d=>[d.id,d]));
     res.json({revision:state.revision,language,glossary:state.glossary.filter(e=>e.language===language && (!a.effective.restricted || visible.some(p=>p.text.includes(e.source)))),canEdit:await editor(repo,a),canApprove:a.effective.full,
-      paragraphs:visible.map(p=>({...translationView(state,p,language)}))});
+      paragraphs:visible.map(p=>({...translationView(state,p,language),sourceLocation:{chapterId:documents.get(p.documentId)?.parentId??null,sectionId:p.documentId,editorPid:p.editorPid??null,text:p.text}}))});
   }));
   app.put(`${base}/paragraphs/:paragraphId`,handle(async(req,res,repo,a)=>{
     await assertEditor(repo,a); assertRevision(req.body?.expectedRevision);
