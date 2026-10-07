@@ -248,7 +248,7 @@ remote перевірити можна, запушити — ні**.
 
 Запис #383 — `c189dac` запушено в origin/master: Т5.7 В1: Continuity Gate і повторна перевірка перед каноном. Memory + PostgreSQL 58/0, Chromium 9/0, повний npm test/lint/build exit 0. Ручний сценарій docs/acceptance/T5.7-V1.md; Т5.7 загалом відкритий, наступний В2 — Semantic Change Detector. Поточні незапушені коміти — git log origin/master..HEAD; цей запис стану синхронізується окремим документаційним комітом.
 
-Запис #384 — Т5.7 В2: Semantic Change Detector після core_sync. Memory + PostgreSQL 64/0, Chromium 9/0, повний npm test і фінальні lint/build успішні. Сценарій docs/acceptance/T5.7-V2.md; production і платний Jev/DeepSeek у цьому ланцюгу ще не прийняті. Т5.7 відкритий; наступний В3 — Adaptive Workflow. Коміт і пуш оформлюються; актуальний стан — git log origin/master..HEAD.
+Запис #384 — `367c0db` запушено в origin/master: Т5.7 В2: Semantic Change Detector після core_sync. Memory + PostgreSQL 64/0, Chromium 9/0, повний npm test і фінальні lint/build успішні. Сценарій docs/acceptance/T5.7-V2.md; production і платний Jev/DeepSeek у цьому ланцюгу ще не прийняті. Т5.7 відкритий; наступний В3 — Adaptive Workflow. Поточні незапушені коміти — git log origin/master..HEAD; цей запис стану синхронізується окремим документаційним комітом.
 
 У хмарній копії один remote `origin` — **DenisDemenko/Book_Creator**, правильний репозиторій продакшну. Гілка `work`, пуш `HEAD:master`, без force. Результат перевіряється порівнянням HEAD із `git ls-remote origin refs/heads/master`. Після деплою перевірити Magic Scene у гілках, міграцію 0032 і збереження памʼяті. Живий платний AI та продакшн у цій сесії не перевірено. Перенесення на компʼютер відкладено.
 

@@ -12,7 +12,7 @@
 
 **Запис #383:** Т5.7 В1 — Continuity Gate, проєкція без запису, повторна перевірка CANON_WRITE, видима причина. Memory + PostgreSQL 58/0, Chromium 9/0 включно з 390 px. Повний npm test, фінальні lint/build — exit 0. Реалізація c189dac запушена в origin/master. Т5.7 загалом відкритий; наступний В2 — Semantic Change Detector.
 
-**Запис #384:** Т5.7 В2 — Semantic Change Detector після core_sync, Jev Choice, категорії й scoped підграфи, реєстр напрямків та видима область зміни. PostgreSQL/Memory 64/0 і браузерний прогін 9/0; повний npm test і фінальні lint/build — exit 0; Jev 57/0, pipelines 19/0. Т5.7 загалом відкритий; наступний В3 — Adaptive Workflow.
+**Запис #384:** Т5.7 В2 — Semantic Change Detector після core_sync, Jev Choice, категорії й scoped підграфи, реєстр напрямків та видима область зміни. PostgreSQL/Memory 64/0 і браузерний прогін 9/0; повний npm test і фінальні lint/build — exit 0; Jev 57/0, pipelines 19/0. Реалізація 367c0db запушена в origin/master. Т5.7 загалом відкритий; наступний В3 — Adaptive Workflow.
 
 **Не зроблено і чому:** наскрізний full App/Firebase, браузерні переходи вправи-абзацу/героя та editor+AI ще не перевірені; PostgreSQL для переходів Т4.3 не запускали. Т4.3 залишається частковим. Windows full npm test очікує результату від власника. Т5.6 production/Firebase/платний DeepSeek і мобільний UI ще не прийняті; Т5.7 В1 реалізовано (#383); В2 реалізовано (#384); В3–В6 ще не почато.
 
