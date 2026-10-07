@@ -1,3 +1,4 @@
+import { trustedAnalysisTool } from '../../../src/utils/adaptiveWorkflow';
 /** Semantic Change Detector: published Jev classifier → scoped subgraph. */
 import {
   WORKFLOW_FORMAT,
@@ -97,7 +98,10 @@ export async function assertAnalysisWorkflow(
   const next = new Set([...seen, id]);
   const def = v.definition as unknown as WorkflowDefinition;
   for (const n of def.nodes) {
-    if (["CANON_WRITE", "HUMAN_REVIEW", "TOOL", "JEV_ROUTER"].includes(n.type))
+    if (
+      ["CANON_WRITE", "HUMAN_REVIEW", "TOOL", "JEV_ROUTER"].includes(n.type) &&
+      !trustedAnalysisTool(id, n.type, n.params.tool)
+    )
       throw new NodeError(
         `Автоматичний аналіз не виконує ${n.type}; потрібен процес читання/пропозицій.`,
         "bad_input",

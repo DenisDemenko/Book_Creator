@@ -4,6 +4,7 @@
  * самими функціями, що й задачі черги.
  */
 
+import { adaptiveWorkflowBinding } from '../adaptiveWorkflow';
 import { semanticChangeBinding } from '../semanticChange';
 import type { EntityRow } from '../../types';
 import type { StudioCharacterLike } from '../../characterProfile';
@@ -42,6 +43,7 @@ export function systemBindings(deps: SystemBindingDeps = {}): Record<string, Bin
     }),
     voiceBinding(deps.interview ?? {}),
     semanticChangeBinding(),
+    adaptiveWorkflowBinding(),
   ];
   return Object.fromEntries(list.map((b) => [b.workflowId, b]));
 }

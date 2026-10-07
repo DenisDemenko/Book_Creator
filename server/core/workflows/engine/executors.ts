@@ -1,4 +1,4 @@
-import { SEMANTIC_WORKFLOW } from '../../../../src/utils/semanticChange';
+import { ADAPTIVE_WORKFLOW, trustedAnalysisTool } from '../../../../src/utils/adaptiveWorkflow';
 /**
  * Загальні виконавці вузлів (Т5.4 В1; ТЗ Graph Studio §5.2–5.3, §16, §30).
  *
@@ -222,9 +222,9 @@ export const GENERIC_EXECUTORS: Record<string, NodeExecutor> = {
 
 /** Виконавець вузла: прив'язки, інакше загальний; невиконуваний тип — зрозуміла помилка. */
 export function executorFor(node: WorkflowNode, env: ExecEnv): NodeExecutor {
-  if ((env.actor === 'system:semantic_change' || env.run.input.semanticAutomatic === true) &&
+  if ((env.actor === 'system:semantic_change' || env.run.input.semanticAutomatic === true || env.run.workflowId === ADAPTIVE_WORKFLOW) &&
       ['CANON_WRITE', 'HUMAN_REVIEW', 'TOOL', 'JEV_ROUTER'].includes(node.type) &&
-      !(env.run.workflowId === SEMANTIC_WORKFLOW && node.type === 'TOOL' && node.params.tool === 'semantic_dispatch')) {
+      !trustedAnalysisTool(env.run.workflowId, node.type, node.params.tool)) {
     return async () => { throw new NodeError(`Автоматичний аналіз не виконує ${node.type}; потрібен процес читання/пропозицій.`, 'bad_input'); };
   }
 

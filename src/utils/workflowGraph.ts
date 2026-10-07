@@ -1,3 +1,4 @@
+import { adaptivePolicyError } from './adaptiveWorkflow';
 /**
  * Граф процесу ШІ (AI Workflow Graph) — формат `fusion-workflow/1`, реєстр
  * вузлів і перевірка (Т5.2 В1, `PLAN_GRAPH_STUDIO.md`; ТЗ Graph Studio §5,
@@ -211,7 +212,7 @@ export const NODE_TYPES: NodeTypeDef[] = [
   { id: 'AGENT', group: 'ai', name: N('Agent', 'Агент'), description: 'Модель з інструментами й лімітом кроків.', inputs: 'one', outputs: ['out'],
     params: [...MODEL_PARAMS, { id: 'tools', name: N('Tools', 'Інструменти'), type: 'string_list' }, { id: 'max_steps', name: N('Max steps', 'Найбільше кроків'), type: 'integer', min: 1, max: 20, required: true, default: 5 }] },
   { id: 'TOOL', group: 'ai', name: N('Tool', 'Інструмент'), description: 'Виклик інструмента з реєстру платформи.', inputs: 'one', outputs: ['out'],
-    params: [{ id: 'tool', name: N('Tool', 'Інструмент'), type: 'string', required: true }, { id: 'timeout', name: N('Timeout, s', 'Тайм-аут, с'), type: 'integer', min: 1, max: 600, default: 30 }] },
+    params: [{ id: 'tool', name: N('Tool', 'Інструмент'), type: 'string', required: true }, { id: 'adaptive_policy', name: N('Adaptive policy', 'Пороги та глибина аналізу'), type: 'json', hint: 'Для adaptive_dispatch: medium, high, critical, low (skip/minimal), targets {minimal,light,normal,deep}: id підграфів. Шкала — у вузлі importance.' }, { id: 'timeout', name: N('Timeout, s', 'Тайм-аут, с'), type: 'integer', min: 1, max: 600, default: 30 }] },
   // JEV (§36; виконання — Т5.5)
   { id: 'JEV_CHOICE', group: 'jev', name: N('Jev Choice', 'Jev-вибір'), description: 'Вибір одного з варіантів; кожен варіант — окрема гілка.', inputs: 'one', outputs: ['fallback'], dynamicOutputs: 'options',
     params: jevParams([{ id: 'options', name: N('Options', 'Варіанти'), type: 'string_list', required: true, minItems: 2 }]) },
@@ -482,6 +483,11 @@ export function validateWorkflow(def: WorkflowDefinition): WorkflowValidation {
     for (const p of t.params) {
       const problem = checkParam(p, (params as Record<string, unknown>)[p.id]);
       if (problem) err('bad_param', `${path}.params.${p.id}`, `${t.name.uk} «${n.label || n.id}»: ${p.name.uk} — ${problem}`, { nodeId: n.id });
+    }
+    if (t.id === 'TOOL' && params.tool === 'adaptive_dispatch') {
+      const score = nodes.find(x => x.id === 'importance' && x.type === 'JEV_SCORE');
+      const problem = score ? adaptivePolicyError(params.adaptive_policy, Number(score.params.scale_min ?? 0), Number(score.params.scale_max ?? 10)) : 'Потрібен вузол importance типу JEV_SCORE';
+      if (problem) err('bad_adaptive_policy', `${path}.params.adaptive_policy`, problem, { nodeId: n.id });
     }
     if (t.id === 'CONDITION' && typeof (params as Record<string, unknown>).expression === 'string') {
       const problem = exprError((params as Record<string, unknown>).expression);

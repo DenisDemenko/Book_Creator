@@ -92,6 +92,8 @@ export async function semanticFixture(repo: CoreRepository) {
     });
   const control = {
     category: "EVENT",
+    score: 4,
+    scoreConfidence: 0.99,
     confidence: 0.99,
     down: false,
     fallback: false,
@@ -117,9 +119,9 @@ export async function semanticFixture(repo: CoreRepository) {
           questions.map((q) => [
             q.id,
             {
-              choice: control.category,
-              probabilities: { [control.category]: 1 },
-              confidence: control.confidence,
+              ...(q.kind === 'score'
+                ? { score: control.score, confidence: control.scoreConfidence }
+                : { choice: control.category, probabilities: { [control.category]: 1 }, confidence: control.confidence }),
             },
           ]),
         ),
@@ -159,7 +161,10 @@ export async function semanticFixture(repo: CoreRepository) {
           throw new Error("controlled fallback unavailable");
         return {
           text: JSON.stringify({
-            answers: { choice: { choice: control.category } },
+            answers: {
+              choice: { choice: control.category },
+              score: { score: control.score },
+            },
           }),
           modelId: "controlled-deepseek",
           engine: "deepseek",

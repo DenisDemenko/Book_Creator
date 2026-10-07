@@ -206,6 +206,18 @@ const SemanticChangeStepDetails: React.FC<{ s: Step }> = ({ s }) => {
   );
 };
 
+const AdaptiveStepDetails: React.FC<{ s: Step }> = ({ s }) => {
+  const r = s.details.adaptiveWorkflow as { value: number | null; tier: string | null; depth: string | null; reason: string | null; source: string; confidence: number | null; paragraphIds: string[]; policy: {medium:number; high:number; critical:number}; scale:{min:number;max:number} } | undefined;
+  if (!r) return null;
+  const reasons: Record<string,string> = {stale:'Джерело змінилось — аналіз пропущено',no_semantic_change:'Зміст не змінився',importance_review:'Оцінка важливості потребує перевірки',low_skip:'Мала важливість — пропуск за політикою',no_destination:'Підграф цієї глибини ще не налаштовано'};
+  return <div className="space-y-1 break-words rounded border border-slate-700 p-2" data-run-adaptive>
+    <p className="text-sky-300">Adaptive Workflow (Глибина аналізу): {r.tier ?? 'не визначено'} → {r.depth ?? '—'}</p>
+    <p>Важливість: {r.value ?? '—'} ({r.scale.min}…{r.scale.max}) · Пороги: {r.policy.medium} / {r.policy.high} / {r.policy.critical}</p>
+    <p>{r.reason ? reasons[r.reason] ?? r.reason : 'Запущено підграф вибраної глибини'}</p>
+    <p>Абзаци: {r.paragraphIds.join(', ')} · Джерело: {r.source} · Впевненість: {r.confidence == null ? 'невідома' : r.confidence.toFixed(2)}</p>
+  </div>;
+};
+
 export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) => {
   const [runs, setRuns] = useState<Run[] | null>(null);
   const [workflows, setWorkflows] = useState<{ id: string; name: string; production: number | null }[]>([]);
@@ -438,11 +450,12 @@ export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) =
 
             {/* §27: RUN LOG / TRACE */}
             <div className="overflow-x-auto rounded-xl border border-slate-800" data-run-trace>
-              {detail.steps.filter(s => s.details.continuity || s.details.semanticChange).map(s => (
+              {detail.steps.filter(s => s.details.continuity || s.details.semanticChange || s.details.adaptiveWorkflow).map(s => (
                 <div key={s.id} className="space-y-1 border-b border-slate-800 p-2 text-[11px]">
                   <p className="font-semibold text-slate-100">{labelOf(s.nodeId)}</p>
                   <ContinuityStepDetails s={s} />
                   <SemanticChangeStepDetails s={s} />
+                  <AdaptiveStepDetails s={s} />
                 </div>
               ))}
               <table className="w-full min-w-[46rem] text-left text-[11px]">

@@ -446,7 +446,10 @@
   перевірка CANON_WRITE (критерій 17). Т5.7 загалом залишається відкритим.
   В2 реалізовано 07.10.2026, журнал #384: дельти core_sync, Jev Choice,
   реєстр semantic_change, scoped підграфи й траса (критерій 19).
-  Наступний В3 — Adaptive Workflow.
+  В3 реалізовано 07.10.2026, журнал #385: JEV_SCORE, налаштовувані шкали,
+  пороги та підграфи minimal/light/normal/deep, траса (критерій 20).
+  Наступний В4 — Causality Engine.
+  Прогін В3: [T5.7 В3](docs/acceptance/T5.7-V3.md).
   Прогін В2: [T5.7 В2](docs/acceptance/T5.7-V2.md).
   План: [PLAN_STORY_INTELLIGENCE.md](PLAN_STORY_INTELLIGENCE.md);
   прогін: [T5.7 В1](docs/acceptance/T5.7-V1.md).
