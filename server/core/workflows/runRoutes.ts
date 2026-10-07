@@ -22,6 +22,8 @@ import { WORKFLOW_RUN_STATUSES } from '../types';
 import { CoreRuleError } from '../rules';
 import { cancelRun, forkRun, replayRun, requestPause, resumeRun, startRun, type EngineDeps, type RunOutcome } from './engine/runner';
 
+import {workflowAnalytics,workflowFeedback,evaluateFeedback} from './observability';
+
 type Mw = (req: Request, res: Response, next: NextFunction) => void;
 
 export interface WorkflowRunRoutesDeps {
@@ -82,6 +84,24 @@ export function registerWorkflowRunRoutes(app: Express, d: WorkflowRunRoutesDeps
       });
   };
 
+  const scope = async (repo:CoreRepository,req:Request) => {
+    const projectId=typeof req.query.projectId==='string'?req.query.projectId:'';
+    const workflowId=typeof req.query.workflowId==='string'?req.query.workflowId:undefined;
+    if(!projectId)throw new CoreRuleError('bad_input','Оберіть книгу для аналітики та feedback.');
+    const engine=d.engine();
+    if(!await engine?.services.canInspectWorkflowProject?.(actor(req),projectId))throw new CoreRuleError('bad_actor','Feedback доступний власнику та адміністратору книги.');
+    return {projectId,workflowId};
+  };
+  app.get(`${BASE}/analytics`,d.requireStudio,withRepo(async(repo,req,res)=>{
+    res.set('Cache-Control','no-store');res.json(await workflowAnalytics(repo,await scope(repo,req)));
+  }));
+  app.get(`${BASE}/feedback`,d.requireStudio,withRepo(async(repo,req,res)=>{
+    res.set('Cache-Control','no-store');const f=await scope(repo,req);res.json({rows:await workflowFeedback(repo,f.projectId,f.workflowId),limit:1000,selfTraining:false});
+  }));
+  app.post(`${BASE}/feedback/evaluate`,d.requireControl,withRepo(async(repo,req,res)=>{
+    res.set('Cache-Control','no-store');const f=await scope(repo,req);res.json(await evaluateFeedback(repo,f.projectId,f.workflowId,req.body?.cases));
+  }));
+
   app.get(BASE, d.requireStudio, withRepo(async (repo, req, res) => {
     const status = typeof req.query.status === 'string' && (WORKFLOW_RUN_STATUSES as readonly string[]).includes(req.query.status) ? (req.query.status as WorkflowRunStatus) : undefined;
     const limit = Math.max(1, Math.min(Number(req.query.limit) || 50, 200));
@@ -112,8 +132,14 @@ export function registerWorkflowRunRoutes(app: Express, d: WorkflowRunRoutesDeps
       evidence: proposal.evidence, validation: proposal.validation, confidence: proposal.confidence,
       provenance: proposal.provenance,
     } } } : run;
+    let records:{entities:string[];relations:string[];available:boolean}={entities:[],relations:[],available:false};
+    if(run.projectId&&await d.engine()?.services.canInspectWorkflowProject?.(actor(req),run.projectId)){
+      const proposals=(await repo.listStoryProposals(run.projectId,{limit:1000})).filter(p=>p.provenance.runId===run.id&&p.state==='canon'&&p.canonRef);
+      records={entities:proposals.filter(p=>p.kind==='entity').map(p=>p.canonRef!),relations:proposals.filter(p=>p.kind==='relation').map(p=>p.canonRef!),available:true};
+    }
     res.json({
       run: viewRun,
+      records,
       steps,
       version: version ? { id: version.id, version: version.version, environment: version.environment, definition: version.definition } : null,
       parent: parent ? { id: parent.id, workflowId: parent.workflowId, status: parent.status, mode: parent.mode } : null,

@@ -71,6 +71,8 @@ export interface BindingDef {
 
 /** Залежності рушія від Студії (у тестах — підставні). */
 export interface EngineServices {
+  /** Feedback contains book text and author corrections: full book access only. */
+  canInspectWorkflowProject?: (actor:CoreActor,projectId:string)=>Promise<boolean>;
   /** Full-access simulation entry; returns only safe metadata, never thoughts/secrets. */
   simulateCharacterTurn?: (ctx:{projectId:string;actor:CoreActor;input:Record<string,unknown>;signal?:AbortSignal;recordUsage?:ExecEnv['recordUsage']})=>Promise<import('../../characterSimulation').CharacterSimulationReport>;
 

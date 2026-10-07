@@ -247,6 +247,8 @@ export interface CreateProposalInput {
   actor: CoreActor;
   /** Одразу перевірити: успіх → `validated`, інакше лишається з результатом перевірки. */
   validate?: boolean;
+  /** T5.8: actual prompt used for a public workflow proposal; private tools never pass it. */
+  feedbackContext?: Record<string, unknown>;
 }
 
 /** Походження §25: джерело, версія онтології, модель і промпт прогону (якщо є). */
@@ -292,7 +294,7 @@ export async function createProposal(repo: CoreRepository, input: CreateProposal
     provenance: await fillProvenance(repo, input.projectId, input.actor, input.provenance, onto.version),
     createdBy: input.actor,
   });
-  await log(repo, row, 'create', input.actor, null, { provenance: row.provenance, confidence: row.confidence });
+  await log(repo, row, 'create', input.actor, null, { provenance: row.provenance, confidence: row.confidence, aiProposal: row.payload, ...(input.feedbackContext ? {inputContext:input.feedbackContext} : {}) });
   if (input.validate) {
     // Перевірку від імені AI записує система (стан змінює не AI, §24).
     row = await validateProposal(repo, input.projectId, row.id, isAiActor(input.actor) ? 'system:story-core' : input.actor, onto);
@@ -441,6 +443,7 @@ export async function writeCanon(repo: CoreRepository, projectId: string, id: st
   }
   const reason = `Пропозиція ${p.id} (${String(p.provenance.source ?? 'author')})`;
   let recordId: string;
+  let canonPayload:EntityProposalPayload|RelationProposalPayload=p.payload;
   let created = false;
   let recordVersion: number | undefined;
   let undo: (() => Promise<unknown>) | null = null;
@@ -455,10 +458,12 @@ export async function writeCanon(repo: CoreRepository, projectId: string, id: st
         row = await repo.updateEntity(projectId, existing.id, { name: e.name, canonical: { ...existing.canonical, ...e.canonical } }, input.actor, reason);
       }
       if (row.status !== 'confirmed') row = await repo.setEntityStatus(projectId, existing.id, 'confirmed', input.actor, reason);
+      canonPayload={...e,type:row.type,name:row.name,canonical:row.canonical};
       recordId = row.id;
       recordVersion = row.version;
     } else {
       const row = await repo.createEntity({ projectId, type: e.type, name: e.name, canonical: e.canonical, status: 'confirmed', createdBy: input.actor });
+      canonPayload={...e,type:row.type,name:row.name,canonical:row.canonical};
       recordId = row.id;
       recordVersion = row.version;
       created = true;
@@ -469,10 +474,12 @@ export async function writeCanon(repo: CoreRepository, projectId: string, id: st
     const existing = (await repo.listRelations(projectId, r.fromId)).find((x) => x.fromId === r.fromId && x.toId === r.toId && x.type === r.type && x.status === 'suggested');
     if (existing) {
       const row = await repo.setRelationStatus(projectId, existing.id, 'confirmed', input.actor, reason);
+      canonPayload={type:row.type,fromId:row.fromId,toId:row.toId,note:row.note};
       recordId = row.id;
       recordVersion = row.version;
     } else {
       const row = await repo.createRelation({ projectId, type: r.type, fromId: r.fromId, toId: r.toId, evidence: p.evidence, note: r.note, status: 'confirmed', createdBy: input.actor });
+      canonPayload={type:row.type,fromId:row.fromId,toId:row.toId,note:row.note};
       recordId = row.id;
       recordVersion = row.version;
       created = true;
@@ -487,7 +494,7 @@ export async function writeCanon(repo: CoreRepository, projectId: string, id: st
     if (undo) await undo().catch(() => {});
     throw err;
   }
-  await log(repo, out, 'write_canon', input.actor, p.state, { recordKind: p.kind, recordId, created, recordVersion, provenance: p.provenance, authorEdit: p.authorEdit?.fields ?? [] });
+  await log(repo, out, 'write_canon', input.actor, p.state, { recordKind: p.kind, recordId, created, recordVersion, provenance: p.provenance, authorEdit: p.authorEdit?.fields ?? [], finalCanon:{recordId,payload:canonPayload} });
   return { proposal: out, recordKind: p.kind, recordId, created, recordVersion };
 }
 

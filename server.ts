@@ -908,7 +908,12 @@ registerGitCommandRoutes(app);
   const workflowEngine = (): EngineDeps | null => {
     const repo = getCoreRepository();
     return repo
-      ? { repo, services: { simulateCharacterTurn: async ({projectId,actor,input,signal,recordUsage}) => {
+      ? { repo, services: { canInspectWorkflowProject: async (actor,projectId) => {
+          const user=actor.startsWith('user:')?await findUserForAccess(actor.slice(5)):null;
+          if(!user||user.disabled)return false;
+          const access=await resolveProjectAccess({id:user.id,role:user.role,isGuest:false} as any,projectId,realtimeAccessDeps).catch(()=>null);
+          return !!access?.effective.full;
+        }, simulateCharacterTurn: async ({projectId,actor,input,signal,recordUsage}) => {
           const user = actor.startsWith('user:') ? await findUserForAccess(actor.slice(5)) : null;
           if (!user || user.disabled || !(await canRole(user.role, 'canUseAi'))) throw new Error('Немає доступу до симуляції.');
           const principal = {id:user.id,role:user.role,isGuest:false};

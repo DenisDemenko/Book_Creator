@@ -245,6 +245,11 @@ export async function resumeRun(deps: EngineDeps, runId: string, actor: CoreActo
       throw new CoreRuleError('conflict', 'Пропозицію змінено — перечитайте її.');
     }
   }
+  if(run.output?.costRoutingApproval){
+    if((opts.review as {approve?:boolean}|undefined)?.approve!==true)throw new CoreRuleError('bad_input','Потрібне явне схвалення вибору моделі.');
+    if(!(run.output.costRoutingApproval as {selectedModel?:string}).selectedModel)throw new CoreRuleError('bad_input','Немає придатної моделі; змініть політику в новій версії.');
+    if(run.projectId&&!await deps.services.canInspectWorkflowProject?.(actor,run.projectId))throw new CoreRuleError('bad_actor','Схвалення моделі доступне власнику та адміністратору книги.');
+  }
   const live = await deps.repo.updateWorkflowRun(runId, { status: 'running', pauseRequested: false });
   const env = await envFor(deps, live, def, { actor, recordUsage: opts.recordUsage });
   return drive(deps, env, { resume: true, review: opts.review });

@@ -14,6 +14,7 @@
  */
 
 import crypto from 'node:crypto';
+import {validateCostPolicy} from './engine/costRouting';
 import type { CoreActor, CoreRepository, WorkflowRow, WorkflowVersionRow } from '../types';
 import { CoreRuleError } from '../rules';
 import {
@@ -73,6 +74,10 @@ const isFresh = (v: WorkflowVersionRow) => {
 export async function validateOnServer(repo: CoreRepository, def: WorkflowDefinition): Promise<WorkflowValidation> {
   const v = validateWorkflow(def);
   for (const n of def.nodes ?? []) {
+    if(n.params?.cost_policy!==undefined){
+      try{if(n.type!=='LLM')throw new Error('cost_policy підтримує вузол LLM.');validateCostPolicy(n.params.cost_policy);}
+      catch(e){v.errors.push({code:'bad_cost_policy',path:`nodes.${n.id}.params.cost_policy`,message:(e as Error).message,nodeId:n.id});}
+    }
     if (n.type !== 'SUBGRAPH') continue;
     const ref = String(n.params?.workflow_id ?? '');
     if (!ref || ref === def.id) continue;

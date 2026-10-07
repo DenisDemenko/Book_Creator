@@ -12,6 +12,7 @@
  * маршрутизація за впевненістю, друга перевірка й узгодження моделей;
  * підпроцеси — посилання на дочірній запуск.
  */
+import {WorkflowInsightsPanel} from './WorkflowInsightsPanel';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, GitFork, Loader2, Pause, Play, PlayCircle, RefreshCcw, RotateCcw, Square } from 'lucide-react';
 import { gs, type GsAbilities } from './gsApi';
@@ -43,6 +44,8 @@ interface Run {
 interface Step {
   id: string;
   seq: number;
+  startedAt?:string;
+  endedAt?:string;
   nodeId: string;
   nodeType: string;
   status: 'succeeded' | 'failed' | 'paused';
@@ -63,6 +66,7 @@ interface Step {
 }
 interface Detail {
   run: Run;
+  records?:{entities:string[];relations:string[];available:boolean};
   steps: Step[];
   version: { id: string; version: number; environment: string; definition: { nodes: { id: string; type: string; label?: string }[] } | null } | null;
   parent: { id: string; workflowId?: string; status: string; mode: string } | null;
@@ -259,6 +263,7 @@ export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) =
   const [forkStep, setForkStep] = useState<number | ''>('');
   const [manual, setManual] = useState<{ workflowId: string; projectId: string; input: string }>({ workflowId: '', projectId: '', input: '{}' });
   const canControl = abilities.canPublish;
+  const costReview=detail?.run.output?.costRoutingApproval as {selectedModel:string|null;reason:string;estimatedUsd:number|null;budgetUsd:number}|undefined;
 
   const loadRuns = useCallback(async () => {
     const q = new URLSearchParams({ limit: '100', ...(filter.workflowId ? { workflowId: filter.workflowId } : {}), ...(filter.status ? { status: filter.status } : {}) });
@@ -392,6 +397,7 @@ export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) =
       {/* Запуск і трасування */}
       <div className="min-w-0 space-y-3 rounded-2xl border border-slate-800 bg-slate-900/70 p-3" data-run-detail={detail?.run.id ?? ''}>
         {notice && <p className={`rounded-lg px-2.5 py-1.5 text-[11px] ${notice.kind === 'ok' ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'}`} data-runs-notice={notice.kind}>{notice.text}</p>}
+        <WorkflowInsightsPanel key={`${detail?.run.projectId??manual.projectId}:${detail?.run.workflowId??manual.workflowId}`} projectId={detail?.run.projectId??manual.projectId} workflowId={detail?.run.workflowId??manual.workflowId} canEvaluate={canControl}/>
         {!detail ? (
           <p className="text-xs text-slate-500">Оберіть запуск у журналі — тут буде трасування: рішення вузлів, впевненість, затримка, токени, вартість і помилки (§27).</p>
         ) : (
@@ -439,6 +445,7 @@ export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) =
               <textarea aria-label="Виправлений зміст пропозиції" className="w-full bg-slate-950 p-2 text-xs" rows={6} value={reviewPayload} onChange={e=>setReviewPayload(e.target.value)}/>
               <div className="flex gap-2">{(['accept','edit','reject'] as const).map(action=><button type="button" key={action} disabled={busy} className="rounded border border-amber-500/50 px-2 py-1 text-xs" onClick={()=>void act(async()=>{const decision={action,expectedRevision:review.expectedRevision,...(action==='edit'?{payload:JSON.parse(reviewPayload)}:{})};return gs('POST',`/api/core/workflow-runs/${detail.run.id}/resume`,{review:decision});},'Рішення передано до процесу.')}>{action==='accept'?'Прийняти':action==='edit'?'Прийняти з правками':'Відхилити'}</button>)}</div>
             </section>}
+            {costReview&&detail.run.status==='paused'&&<div data-run-cost-review className="rounded border border-amber-500 p-2 text-xs"><p>Маршрутизація вартості: {costReview.reason} · модель {costReview.selectedModel??'немає придатної'} · оцінка ${costReview.estimatedUsd??'—'} / бюджет ${costReview.budgetUsd}.</p>{canControl&&costReview.selectedModel&&<button data-cost-approve disabled={busy} onClick={()=>void act(()=>gs('POST',`/api/core/workflow-runs/${detail.run.id}/resume`,{review:{approve:true}}),'Вибір моделі схвалено.')} className="mt-1 rounded border border-amber-500 px-2 py-1">Схвалити модель і продовжити</button>}<p>Якщо придатної моделі немає, скасуйте запуск і змініть політику в новій версії.</p></div>}
             {canControl && (
               <div className="flex flex-wrap items-center gap-1.5" data-run-actions>
                 {detail.run.status === 'running' && (
@@ -448,7 +455,7 @@ export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) =
                 )}
                 {detail.run.status === 'paused' && (
                   <>
-                    {!review && <button type="button" disabled={busy} onClick={() => void act(() => gs('POST', `/api/core/workflow-runs/${detail.run.id}/resume`), 'Продовжено з контрольної точки.')} className="flex items-center gap-1 rounded-lg border border-emerald-500/50 px-2 py-1 text-[11px] text-emerald-200" data-run-action="resume">
+                    {!review && !costReview && <button type="button" disabled={busy} onClick={() => void act(() => gs('POST', `/api/core/workflow-runs/${detail.run.id}/resume`), 'Продовжено з контрольної точки.')} className="flex items-center gap-1 rounded-lg border border-emerald-500/50 px-2 py-1 text-[11px] text-emerald-200" data-run-action="resume">
                       <Play className="h-3 w-3" /> RESUME (Продовжити)
                     </button>}
                     <button type="button" disabled={busy} onClick={() => void act(() => gs('POST', `/api/core/workflow-runs/${detail.run.id}/cancel`), 'Скасовано.')} className="flex items-center gap-1 rounded-lg border border-slate-600 px-2 py-1 text-[11px] text-slate-300" data-run-action="cancel">
@@ -475,17 +482,20 @@ export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) =
               </div>
             )}
 
+            {detail.records?.available&&<p data-run-records className="break-words text-xs">Сутності: {detail.records.entities.length} {detail.records.entities.join(', ')} · Зв’язки: {detail.records.relations.length} {detail.records.relations.join(', ')}</p>}
             {/* §27: RUN LOG / TRACE */}
             <div className="overflow-x-auto rounded-xl border border-slate-800" data-run-trace>
-              {detail.steps.filter(s => s.details.continuity || s.details.semanticChange || s.details.adaptiveWorkflow || s.details.causalityEngine || s.details.mysteryDirector || s.details.characterDecision).map(s => (
+              {detail.steps.filter(s => s.details.continuity || s.details.semanticChange || s.details.adaptiveWorkflow || s.details.causalityEngine || s.details.mysteryDirector || s.details.characterDecision || s.details.costRouting).map(s => (
                 <div key={s.id} className="space-y-1 border-b border-slate-800 p-2 text-[11px]">
                   <p className="font-semibold text-slate-100">{labelOf(s.nodeId)}</p>
+                  {s.startedAt&&<p className="text-slate-400">{fmtTime(s.startedAt)} → {s.endedAt?fmtTime(s.endedAt):'—'}</p>}
                   <ContinuityStepDetails s={s} />
                   <SemanticChangeStepDetails s={s} />
                   <AdaptiveStepDetails s={s} />
                   <CausalityStepDetails s={s} />
                   <MysteryStepDetails s={s} />
                   <CharacterDecisionStepDetails s={s} />
+                  {!!s.details.costRouting&&<div data-run-cost-routing className="break-words text-sky-200">Вибір моделі за вартістю: <pre className="max-h-48 overflow-auto whitespace-pre-wrap text-[10px]">{JSON.stringify(s.details.costRouting,null,2)}</pre></div>}
                 </div>
               ))}
               <table className="w-full min-w-[46rem] text-left text-[11px]">
@@ -508,7 +518,7 @@ export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) =
                     <React.Fragment key={s.id}>
                       <tr className="border-t border-slate-800" data-run-step={s.nodeId} data-run-step-status={s.status}>
                         <td className="px-2 py-1.5 text-slate-500">{s.seq}</td>
-                        <td className="px-2 py-1.5"><span className="font-semibold text-slate-100">{labelOf(s.nodeId)}</span> <span className="font-mono text-[10px] text-slate-500">{s.nodeType}</span></td>
+                        <td className="px-2 py-1.5"><span className="font-semibold text-slate-100">{labelOf(s.nodeId)}</span> <span className="font-mono text-[10px] text-slate-500">{s.nodeType}</span>{s.startedAt&&<p className="text-[10px] text-slate-500">{fmtTime(s.startedAt)} → {s.endedAt?fmtTime(s.endedAt):'—'}</p>}</td>
                         <td className={`px-2 py-1.5 font-bold ${STEP_CLS[s.status]}`}>{s.status}</td>
                         <td className="px-2 py-1.5 text-slate-300">{[s.decision, s.validationResult, s.branch && s.branch !== s.decision && s.branch !== s.validationResult ? `→ ${s.branch}` : null].filter(Boolean).join(' · ') || '—'}</td>
                         <td className="px-2 py-1.5 text-slate-300">{s.confidence == null ? '—' : s.confidence.toFixed(2)}</td>

@@ -1,3 +1,6 @@
+import {JobFatalError,JobCancelledError} from '../../jobs/queue';
+import {interrupt} from '@langchain/langgraph';
+import {routeByCost} from './costRouting';
 import { ADAPTIVE_WORKFLOW, trustedAnalysisTool } from '../../../../src/utils/adaptiveWorkflow';
 /**
  * Загальні виконавці вузлів (Т5.4 В1; ТЗ Graph Studio §5.2–5.3, §16, §30).
@@ -82,9 +85,10 @@ const LLM: NodeExecutor = async (node, state, env) => {
   const module = (state.prompt.module as CoreAiModule | undefined) ?? env.binding?.module ?? DEFAULT_WORKFLOW_MODULE;
   const provider = str(p.model_provider) || 'core_module';
   let model = str(p.model).trim() || undefined;
-  if (!model && provider === 'core_module') model = await env.services.resolveModel(module);
-  if (!model && provider !== 'core_module') throw new NodeError(`Для постачальника «${provider}» вкажіть модель`, 'bad_input');
+  if (!model && provider === 'core_module' && p.cost_policy===undefined) model = await env.services.resolveModel(module);
+  if (!model && provider !== 'core_module' && p.cost_policy===undefined) throw new NodeError(`Для постачальника «${provider}» вкажіть модель`, 'bad_input');
   const costLimit = num(p.cost_limit);
+  const spentUsd=p.cost_policy===undefined?state.cost:Math.max(state.cost,(await env.repo.getWorkflowRun(env.run.id))?.costUsd??0);
   if (costLimit !== undefined && costLimit > 0 && state.cost >= costLimit) throw new NodeError(`Ліміт витрат $${costLimit} вичерпано до виклику моделі`, 'cost_limit');
   const system = [state.prompt.system, str(p.system_prompt).trim()].filter(Boolean).join('\n\n');
   const generation = {
@@ -92,6 +96,21 @@ const LLM: NodeExecutor = async (node, state, env) => {
     maxTokens: num(p.max_tokens),
     timeoutMs: num(p.timeout) !== undefined ? num(p.timeout)! * 1000 : undefined,
   };
+  let initialRoute: ReturnType<typeof routeByCost>|undefined;
+  let humanApproved=false;
+  if(p.cost_policy!==undefined){
+    initialRoute=routeByCost(p.cost_policy,{system,user:state.prompt.user,maxTokens:generation.maxTokens??2048,spentUsd,costLimit,override:state.input.costRouting});
+    if(initialRoute.reviewRequired){
+      await env.repo.updateWorkflowRun(env.run.id,{status:'paused',currentNode:node.id,output:{costRoutingApproval:{nodeId:node.id,...initialRoute}}});
+      const approval=interrupt({costRoutingApproval:initialRoute}) as {approve?:boolean};
+      if(approval?.approve!==true)throw new NodeError('Вибір моделі потребує явного схвалення людини.','bad_input',{details:{costRouting:initialRoute}});
+      humanApproved=true;
+      if(!initialRoute.selectedModel)throw new NodeError('У межах бюджету й затримки немає придатної моделі. Змініть політику в новій версії.','cost_limit',{details:{costRouting:initialRoute},humanResult:'approve'});
+      await env.repo.updateWorkflowRun(env.run.id,{status:'running',output:null});
+    }
+    model=initialRoute.selectedModel!;
+    generation.maxTokens=generation.maxTokens??2048;
+  }
   const retries = Math.max(0, Math.min(5, num(p.retry_count, 0)!));
   const sleep = env.services.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   const warnings: string[] = [];
@@ -99,11 +118,20 @@ const LLM: NodeExecutor = async (node, state, env) => {
   let current = model;
   let switched = false;
   let out: Awaited<ReturnType<ExecEnv['services']['generate']>> | null = null;
+  const routingAttempts:ReturnType<typeof routeByCost>[]=[];
+  let reservedUsd=0;
   while (!out) {
+    if(env.signal?.aborted)throw new JobCancelledError();
+    if(p.cost_policy!==undefined){
+      const routed=routeByCost(p.cost_policy,{system,user:state.prompt.user,maxTokens:generation.maxTokens!,spentUsd,reservedUsd,costLimit,override:state.input.costRouting,preferredModel:current});
+      if(!routed.selectedModel)throw new NodeError('Бюджет або правила не дозволяють наступний модельний запит.','cost_limit',{model:current??null,retryCount:attempt,warnings,details:{costRouting:{...routed,attempts:routingAttempts}}});
+      routingAttempts.push(routed);reservedUsd+=routed.estimatedUsd!;
+    }
     try {
       out = await env.services.generate({ module, modelId: current, system, user: state.prompt.user, projectId: env.run.projectId ?? '', actor: env.actor, signal: env.signal, generation });
     } catch (err) {
       const e = err as Error;
+      if(e instanceof JobFatalError||e instanceof JobCancelledError||e.name==='AbortError')throw Object.assign(e,{trace:{model:current??null,retryCount:attempt,warnings,...(initialRoute?{details:{costRouting:{...initialRoute,attempts:routingAttempts}}}:{})}});
       const timeout = e.name === 'AiTimeoutError';
       const policy = str(timeout ? p.on_timeout : p.on_provider_error) || 'fail';
       if (attempt < retries) {
@@ -119,10 +147,10 @@ const LLM: NodeExecutor = async (node, state, env) => {
         warnings.push(`${timeout ? 'тайм-аут' : 'збій'}: ${e.message.slice(0, 200)} — резервна модель ${alt}`);
         continue;
       }
-      throw new NodeError(e.message, timeout ? 'timeout' : 'provider', { model: current ?? null, retryCount: attempt, warnings });
+      throw new NodeError(e.message, timeout ? 'timeout' : 'provider', { model: current ?? null, retryCount: attempt, warnings, ...(initialRoute?{details:{costRouting:{...initialRoute,attempts:routingAttempts}}}:{}) });
     }
   }
-  const trace = { model: out.modelId, tokensIn: out.inputTokens, tokensOut: out.outputTokens, costUsd: out.costUsd, retryCount: attempt, warnings, details: { provider, module, switchedToAlternate: switched } };
+  const trace = { model: out.modelId, tokensIn: out.inputTokens, tokensOut: out.outputTokens, costUsd: out.costUsd, retryCount: attempt, warnings, details: { provider, module, switchedToAlternate: switched, ...(initialRoute?{costRouting:{...initialRoute,attempts:routingAttempts,actualModel:out.modelId,actualProvider:out.engine??null,costSource:'adapter_estimate',actualUsd:out.costUsd,estimatedReservationsUsd:reservedUsd},...(humanApproved?{approvedBy:env.actor}:{})}:{}) }, ...(initialRoute?{decision:initialRoute.route,humanResult:humanApproved?'approve':null}:{}) };
   const llm = { text: out.text, model: out.modelId, engine: out.engine, tokensIn: out.inputTokens, tokensOut: out.outputTokens, costUsd: out.costUsd };
   // Бюджет задачі — поза повторами: вичерпаний бюджет не повторюють (помилка задачі як є).
   if (env.recordUsage) {
@@ -132,7 +160,9 @@ const LLM: NodeExecutor = async (node, state, env) => {
       throw Object.assign(err as Error, { trace, llm });
     }
   }
-  const cost = state.cost + out.costUsd;
+  if(initialRoute&&out.modelId!==current)throw Object.assign(new NodeError('Провайдер використав іншу модель, ніж дозволила політика.','provider',trace),{llm});
+  const cost = spentUsd + out.costUsd;
+  if(initialRoute && spentUsd+Math.max(out.costUsd,reservedUsd)>initialRoute.budgetUsd)throw Object.assign(new NodeError('Фактична вартість перевищила бюджет політики.','cost_limit',trace),{llm});
   if (costLimit !== undefined && costLimit > 0 && cost > costLimit) {
     throw Object.assign(new NodeError(`Ліміт витрат вузла $${costLimit} перевищено ($${cost.toFixed(4)})`, 'cost_limit', trace), { llm });
   }

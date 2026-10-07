@@ -99,6 +99,7 @@ const MODEL_PARAMS: ParamDef[] = [
   { id: 'entity_scope', name: N('Entity scope', 'Область сутностей'), type: 'string_list', hint: 'Типи сутностей (slug онтології)' },
   { id: 'relation_scope', name: N('Relation scope', 'Область зв\'язків'), type: 'string_list' },
   { id: 'confidence_policy', name: N('Confidence policy', 'Політика впевненості'), type: 'enum', options: ['propose_only', 'auto_accept_above_threshold', 'human_review_below_threshold'], default: 'propose_only' },
+  { id: 'cost_policy', name: N('Cost-aware routing', 'Політика вибору моделі за вартістю'), type: 'json', hint: 'Необов’язково: version, budgetUsd, latencyTargetMs, complexity/risk 0–1, candidates (modelId, tier, тарифи за 1M токенів, latencyMs).' },
   { id: 'cost_limit', name: N('Cost limit, $', 'Ліміт витрат, $'), type: 'number', min: 0, max: 100, default: 0.5 },
   // Т5.4: повтор і відновлення (§30).
   { id: 'backoff', name: N('Backoff', 'Пауза між повторами'), type: 'enum', options: ['none', 'exponential'], default: 'exponential' },

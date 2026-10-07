@@ -75,6 +75,7 @@ export const CREATE_STORY_PROPOSAL: NodeExecutor = async (node, state, env) => {
     confidence,
     actor: "ai:workflow",
     validate: true,
+    feedbackContext: state.prompt ? { ...state.prompt } : {inputRef:env.run.id},
     provenance: {
       source: "workflow",
       workflowId: env.run.workflowId,
