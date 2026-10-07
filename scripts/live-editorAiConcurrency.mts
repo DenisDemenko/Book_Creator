@@ -36,7 +36,7 @@ let browser:Awaited<ReturnType<typeof puppeteer.launch>>|undefined;let checks=0;
 const check=(label:string)=>{checks++;results.push(label);console.log('✓ '+label);};
 try{
  browser=await puppeteer.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
- const page=await browser.newPage();const errors:string[]=[];page.on('pageerror',e=>{errors.push(String(e));console.error('Browser:',e.stack??String(e));});await page.setViewport({width:1440,height:1000});await page.goto(origin);await page.waitForSelector('[contenteditable="true"]',{timeout:10000});
+ const page=await browser.newPage();const errors:string[]=[];page.on('pageerror',e=>{errors.push(String(e));console.error('Browser:',e instanceof Error?e.stack:String(e));});await page.setViewport({width:1440,height:1000});await page.goto(origin);await page.waitForSelector('[contenteditable="true"]',{timeout:10000});
  for(const mode of ['success','failure']){
   fail=mode==='failure';await page.click('#run-ai');await page.waitForFunction(()=>document.querySelector('#ai-status')?.textContent==='pending');assert.equal(pending,true);check(mode+': AI HTTP запит залишається незавершеним');
   const marker=mode==='success'?' ПРАВКА ПІД ЧАС ШІ.':' ПРАВКА ПІД ЧАС ЗБОЮ.';

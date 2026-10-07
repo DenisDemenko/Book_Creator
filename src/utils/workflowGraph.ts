@@ -262,12 +262,12 @@ export const NODE_TYPES: NodeTypeDef[] = [
 const NODE_TYPE_MAP = new Map(NODE_TYPES.map((t) => [t.id, t]));
 
 /**
- * Вузли, які рушій уже виконує (Т5.4, Т5.5). Решта зупиняє запуск
- * зрозумілою помилкою: HUMAN_REVIEW, CANON_WRITE — Т5.6; CONTINUITY_GATE —
+ * Вузли, які рушій уже виконує (Т5.4–Т5.6). Решта зупиняє запуск
+ * зрозумілою помилкою: CONTINUITY_GATE —
  * Т5.7; AGENT, PARALLEL / MERGE / LOOP — пізніше.
  */
 export const EXECUTABLE_NODE_TYPES = [
-  'START', 'END', 'CONTEXT', 'MEMORY', 'QUERY', 'PROMPT', 'LLM', 'TOOL', 'CONDITION', 'VALIDATOR', 'PROPOSAL',
+  'START', 'END', 'CONTEXT', 'MEMORY', 'QUERY', 'PROMPT', 'LLM', 'TOOL', 'CONDITION', 'VALIDATOR', 'PROPOSAL', 'HUMAN_REVIEW', 'CANON_WRITE',
   // Т5.5: шар рішень Jev і підпроцес.
   'SUBGRAPH', 'JEV_CHOICE', 'JEV_SCORE', 'JEV_NOUL', 'JEV_ROUTER', 'JEV_GATE', 'JEV_EVALUATOR', 'JEV_DECISION_BUNDLE',
 ];

@@ -23,6 +23,7 @@ import { CoreRuleError } from '../../rules';
 import type { CoreActor, CoreRepository, WorkflowRunRow, WorkflowVersionRow } from '../../types';
 import { CoreCheckpointSaver } from './checkpointer';
 import { executorFor } from './executors';
+import { assertCanonPermission } from './humanReview';
 import { NodeError, type BindingDef, type EngineServices, type ExecEnv, type WfState } from './types';
 
 export interface EngineDeps {
@@ -110,7 +111,9 @@ function nodeRunner(node: WorkflowNode, env: ExecEnv) {
   return async ({ s }: { s: WfState }): Promise<{ s: WfState }> => {
     const { repo } = env;
     const fresh = await repo.getWorkflowRun(env.run.id);
-    if (fresh?.pauseRequested) {
+    // HUMAN_REVIEW має власну паузу зі змістом пропозиції; не підміняти її технічним interrupt.
+    if (fresh?.pauseRequested && node.type === 'HUMAN_REVIEW') await repo.updateWorkflowRun(env.run.id, { pauseRequested: false });
+    if (fresh?.pauseRequested && node.type !== 'HUMAN_REVIEW') {
       await repo.updateWorkflowRun(env.run.id, { status: 'paused', pauseRequested: false, currentNode: node.id });
       const t = new Date().toISOString();
       await repo.addWorkflowStep({ runId: env.run.id, nodeId: node.id, nodeType: node.type, status: 'paused', retryCount: 0, branch: null, startedAt: t, endedAt: t, latencyMs: 0, model: null, tokensIn: 0, tokensOut: 0, costUsd: 0, decision: 'pause', confidence: null, validationResult: null, humanResult: null, error: null, warnings: [], details: { before: node.id } });
@@ -165,13 +168,13 @@ async function envFor(deps: EngineDeps, run: WorkflowRunRow, def: WorkflowDefini
 }
 
 /** Виконати (чи продовжити) граф до кінця або паузи; підсумувати запуск. */
-async function drive(deps: EngineDeps, env: ExecEnv, how: { input?: WfState; resume?: boolean; checkpointId?: string }): Promise<RunOutcome> {
+async function drive(deps: EngineDeps, env: ExecEnv, how: { input?: WfState; resume?: boolean; review?: unknown; checkpointId?: string }): Promise<RunOutcome> {
   const saver = new CoreCheckpointSaver(deps.repo);
   const app = buildGraph(env.definition, env).compile({ checkpointer: saver });
   const config = { configurable: { thread_id: env.run.id, ...(how.checkpointId ? { checkpoint_id: how.checkpointId } : {}) }, recursionLimit: 200 };
   let result: { s?: WfState; __interrupt__?: unknown[] };
   try {
-    result = how.resume ? await app.invoke(new Command({ resume: true }), config) : how.checkpointId ? await app.invoke(null, config) : await app.invoke({ s: how.input }, config);
+    result = how.resume ? await app.invoke(new Command({ resume: how.review ?? true }), config) : how.checkpointId ? await app.invoke(null, config) : await app.invoke({ s: how.input }, config);
   } catch (err) {
     const e = err as Error;
     const state = (await app.getState({ configurable: { thread_id: env.run.id } }).catch(() => null))?.values?.s ?? null;
@@ -220,14 +223,31 @@ export async function requestPause(repo: CoreRepository, runId: string): Promise
 }
 
 /** RESUME: продовжити призупинений запуск із контрольної точки. */
-export async function resumeRun(deps: EngineDeps, runId: string, actor: CoreActor, opts: { recordUsage?: ExecEnv['recordUsage'] } = {}): Promise<RunOutcome> {
+export async function resumeRun(deps: EngineDeps, runId: string, actor: CoreActor, opts: { recordUsage?: ExecEnv['recordUsage']; review?: unknown } = {}): Promise<RunOutcome> {
   const run = await deps.repo.getWorkflowRun(runId);
   if (!run) throw new CoreRuleError('not_found', 'Запуск не знайдено');
   if (run.status !== 'paused') throw new CoreRuleError('conflict', 'Продовжити можна лише призупинений запуск');
+  const def = await loadDefinition(deps.repo, run);
+  const current = def.nodes.find((node) => node.id === run.currentNode);
+  if (current?.type === 'HUMAN_REVIEW' && run.output?.review) {
+    const decision = opts.review as { action?: string; expectedRevision?: number; payload?: unknown } | undefined;
+    if (!decision || !['accept', 'edit', 'reject'].includes(decision.action ?? '') || !Number.isSafeInteger(decision.expectedRevision)) {
+      throw new CoreRuleError('bad_input', 'Потрібне явне рішення Accept/Edit/Reject та ревізія.');
+    }
+    if (decision.action === 'edit' && (!decision.payload || typeof decision.payload !== 'object' || Array.isArray(decision.payload))) {
+      throw new CoreRuleError('bad_input', 'Вкажіть виправлений зміст пропозиції.');
+    }
+    const env = await envFor(deps, run, def, { actor });
+    await assertCanonPermission(env, String(current.params.reviewer));
+    const review = run.output?.review as { proposalId?: string } | undefined;
+    const proposal = review?.proposalId && run.projectId ? await deps.repo.getStoryProposal(run.projectId, review.proposalId) : null;
+    if (!proposal || proposal.revision !== decision.expectedRevision) {
+      throw new CoreRuleError('conflict', 'Пропозицію змінено — перечитайте її.');
+    }
+  }
   const live = await deps.repo.updateWorkflowRun(runId, { status: 'running', pauseRequested: false });
-  const def = await loadDefinition(deps.repo, live);
   const env = await envFor(deps, live, def, { actor, recordUsage: opts.recordUsage });
-  return drive(deps, env, { resume: true });
+  return drive(deps, env, { resume: true, review: opts.review });
 }
 
 /** Скасувати призупинений запуск. */

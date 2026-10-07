@@ -37,6 +37,8 @@ import {
   GEMINI_MODEL,
 } from './server/aiCore';
 import { platformKeyFor, resolveEngineKey } from './server/platformKeys';
+import {rightsFor as storyRightsFor} from './server/core/storyCore/routes';
+import {rolesOf as workflowParticipantRoles} from './server/core/collaboration/participants';
 import {
   attachPrincipal,
   registerAuthRoutes,
@@ -898,7 +900,14 @@ registerGitCommandRoutes(app);
   const workflowEngine = (): EngineDeps | null => {
     const repo = getCoreRepository();
     return repo
-      ? { repo, services: { generate: aiRoleGenerateViaCore, resolveModel: (module) => resolveModuleModelId(module), loadTemplate: loadCoreAiRoleTemplate, jev: typesafeJev }, bindings: workflowBindings }
+      ? { repo, services: { canWriteCanon: async (actor, projectId, reviewer) => {
+          const user = await findUserForAccess(actor.slice(5));
+          if (!user || user.disabled) return false;
+          const access = await resolveProjectAccess({ id: user.id, role: user.role, isGuest: false } as any, projectId, realtimeAccessDeps).catch(() => null);
+          if (!access || !storyRightsFor(access, false).approve) return false;
+          if (!reviewer || reviewer === 'any_with_canon_write' || access.isOwner || access.role === 'admin') return true;
+          return reviewer === 'editor' && (await workflowParticipantRoles(repo, projectId, user.id)).includes('editor');
+        }, generate: aiRoleGenerateViaCore, resolveModel: (module) => resolveModuleModelId(module), loadTemplate: loadCoreAiRoleTemplate, jev: typesafeJev }, bindings: workflowBindings }
       : null;
   };
   registerProjectRoutes(app, {

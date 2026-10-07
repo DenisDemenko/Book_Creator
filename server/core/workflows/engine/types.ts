@@ -71,6 +71,7 @@ export interface BindingDef {
 
 /** Залежності рушія від Студії (у тестах — підставні). */
 export interface EngineServices {
+  canWriteCanon?: (actor:CoreActor,projectId:string,reviewer?:string)=>Promise<boolean>;
   generate: (input: AiGenerateInput) => Promise<AiGenerateOutput>;
   resolveModel: (module: CoreAiModule) => Promise<string | undefined>;
   loadTemplate?: (module: CoreAiModule) => Promise<{ system: string; user: string } | undefined>;

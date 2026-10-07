@@ -103,8 +103,17 @@ export function registerWorkflowRunRoutes(app: Express, d: WorkflowRunRoutesDeps
       repo.listWorkflowRuns({ parentRunId: run.id, limit: 200 }).then((all) => all.map((r) => ({ id: r.id, workflowId: r.workflowId, mode: r.mode, status: r.status, createdAt: r.createdAt }))),
     ]);
     const parent = run.parentRunId ? await repo.getWorkflowRun(run.parentRunId) : null;
+    // Перечитування після конфлікту має показувати актуальний зміст і ревізію.
+    const pending = run.output?.review as { proposalId?: string } | undefined;
+    const proposal = run.status === 'paused' && run.projectId && pending?.proposalId
+      ? await repo.getStoryProposal(run.projectId, pending.proposalId) : null;
+    const viewRun = proposal ? { ...run, output: { ...run.output, review: {
+      ...pending, expectedRevision: proposal.revision, payload: proposal.payload,
+      evidence: proposal.evidence, validation: proposal.validation, confidence: proposal.confidence,
+      provenance: proposal.provenance,
+    } } } : run;
     res.json({
-      run,
+      run: viewRun,
       steps,
       version: version ? { id: version.id, version: version.version, environment: version.environment, definition: version.definition } : null,
       parent: parent ? { id: parent.id, workflowId: parent.workflowId, status: parent.status, mode: parent.mode } : null,
@@ -140,7 +149,7 @@ export function registerWorkflowRunRoutes(app: Express, d: WorkflowRunRoutesDeps
     if (!run) throw new CoreRuleError('not_found', 'Запуск не знайдено');
     if (run.status !== 'paused') throw new CoreRuleError('conflict', 'Продовжити можна лише призупинений запуск');
     background(res, async (onCreated) => {
-      const p = resumeRun(engine, run.id, actor(req));
+      const p = resumeRun(engine, run.id, actor(req),{review:req.body?.review});
       // Той самий запуск — відповідаємо, щойно рушій підхопив його.
       setTimeout(async () => onCreated((await engine.repo.getWorkflowRun(run.id)) ?? run), 50);
       return p;

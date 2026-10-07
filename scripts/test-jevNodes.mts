@@ -34,7 +34,7 @@ const node = (id: string, type: string, params: Record<string, unknown> = {}): W
 // ── Реєстр і перевірка ──────────────────────────────────────────────────────
 console.log('\nРеєстр вузлів Jev (№9):');
 const JEV = ['JEV_CHOICE', 'JEV_SCORE', 'JEV_NOUL', 'JEV_ROUTER', 'JEV_GATE', 'JEV_EVALUATOR', 'JEV_DECISION_BUNDLE'];
-t('усі сім вузлів Jev і SUBGRAPH — виконувані', [...JEV, 'SUBGRAPH'].every(isExecutableNode) && !isExecutableNode('HUMAN_REVIEW'));
+t('усі сім вузлів Jev і SUBGRAPH — виконувані', [...JEV, 'SUBGRAPH'].every(isExecutableNode) && isExecutableNode('HUMAN_REVIEW') && isExecutableNode('CANON_WRITE'));
 t('гілка review — лише коли потрібна (§16, §17)',
   !needsReviewBranch(node('c', 'JEV_CHOICE')) && needsReviewBranch(node('c', 'JEV_CHOICE', { on_low: 'HUMAN_REVIEW' })) && needsReviewBranch(node('c', 'JEV_NOUL', { on_medium: 'SECOND_OPINION' })) && needsReviewBranch(node('c', 'JEV_SCORE', { consensus_from_risk: 'high' })) && !needsReviewBranch(node('c', 'JEV_SCORE', { on_low: 'FALLBACK' })));
 t('гілки: вибір — варіанти + fallback (+ review)', nodeOutputs(node('c', 'JEV_CHOICE', { options: ['a', 'b'] })).join() === 'a,b,fallback' && nodeOutputs(node('c', 'JEV_CHOICE', { options: ['a', 'b'], on_low: 'HUMAN_REVIEW' })).join() === 'a,b,fallback,review');

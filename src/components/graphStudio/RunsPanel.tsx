@@ -160,6 +160,9 @@ export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) =
   const [detail, setDetail] = useState<Detail | null>(null);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [reviewPayload,setReviewPayload]=useState('');
+  const review=detail?.run.output?.review as {proposalId:string;expectedRevision:number;payload:Record<string,unknown>;evidence:string[];validation:{ok:boolean;errors:{message:string}[]}|null;confidence:number|null;provenance:Record<string,unknown>}|undefined;
+  useEffect(()=>{setReviewPayload(review?JSON.stringify(review.payload,null,2):'');},[detail?.run.id,review?.expectedRevision]);
   const [forkStep, setForkStep] = useState<number | ''>('');
   const [manual, setManual] = useState<{ workflowId: string; projectId: string; input: string }>({ workflowId: '', projectId: '', input: '{}' });
   const canControl = abilities.canPublish;
@@ -333,6 +336,16 @@ export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) =
             </div>
             {detail.run.error && <p className="flex items-start gap-1.5 rounded-lg bg-rose-500/10 px-2.5 py-1.5 text-[11px] text-rose-200" data-run-error><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {detail.run.error}</p>}
 
+            {canControl && detail.run.status==='paused' && review && <section data-human-review className="space-y-2 rounded-xl border border-amber-500/50 p-3">
+              <h3>Перевірка пропозиції людиною</h3><p className="text-xs">Перевірте зміст і докази. Лише ваше явне підтвердження дозволяє наступному вузлу запис у канон.</p>
+              <button type="button" disabled={busy} data-review-refresh onClick={()=>void loadDetail(detail.run.id).catch(e=>setNotice({kind:'error',text:(e as Error).message}))} className="rounded border border-slate-600 px-2 py-1 text-xs">Перечитати пропозицію</button>
+              <p className="text-xs">Докази: {review.evidence.join(', ')||'не вказані'}</p>
+              <p className="text-xs">Впевненість: {review.confidence??"невідома"} · Перевірка: {review.validation?.ok?"пройдено":"потребує правок"}</p>
+              {review.validation?.errors.map((e,i)=><p key={i} className="text-xs text-rose-300">{e.message}</p>)}
+              <details className="text-xs"><summary>Походження пропозиції</summary><pre className="whitespace-pre-wrap">{JSON.stringify(review.provenance,null,2)}</pre></details>
+              <textarea aria-label="Виправлений зміст пропозиції" className="w-full bg-slate-950 p-2 text-xs" rows={6} value={reviewPayload} onChange={e=>setReviewPayload(e.target.value)}/>
+              <div className="flex gap-2">{(['accept','edit','reject'] as const).map(action=><button type="button" key={action} disabled={busy} className="rounded border border-amber-500/50 px-2 py-1 text-xs" onClick={()=>void act(async()=>{const decision={action,expectedRevision:review.expectedRevision,...(action==='edit'?{payload:JSON.parse(reviewPayload)}:{})};return gs('POST',`/api/core/workflow-runs/${detail.run.id}/resume`,{review:decision});},'Рішення передано до процесу.')}>{action==='accept'?'Прийняти':action==='edit'?'Прийняти з правками':'Відхилити'}</button>)}</div>
+            </section>}
             {canControl && (
               <div className="flex flex-wrap items-center gap-1.5" data-run-actions>
                 {detail.run.status === 'running' && (
@@ -342,9 +355,9 @@ export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) =
                 )}
                 {detail.run.status === 'paused' && (
                   <>
-                    <button type="button" disabled={busy} onClick={() => void act(() => gs('POST', `/api/core/workflow-runs/${detail.run.id}/resume`), 'Продовжено з контрольної точки.')} className="flex items-center gap-1 rounded-lg border border-emerald-500/50 px-2 py-1 text-[11px] text-emerald-200" data-run-action="resume">
+                    {!review && <button type="button" disabled={busy} onClick={() => void act(() => gs('POST', `/api/core/workflow-runs/${detail.run.id}/resume`), 'Продовжено з контрольної точки.')} className="flex items-center gap-1 rounded-lg border border-emerald-500/50 px-2 py-1 text-[11px] text-emerald-200" data-run-action="resume">
                       <Play className="h-3 w-3" /> RESUME (Продовжити)
-                    </button>
+                    </button>}
                     <button type="button" disabled={busy} onClick={() => void act(() => gs('POST', `/api/core/workflow-runs/${detail.run.id}/cancel`), 'Скасовано.')} className="flex items-center gap-1 rounded-lg border border-slate-600 px-2 py-1 text-[11px] text-slate-300" data-run-action="cancel">
                       <Square className="h-3 w-3" /> CANCEL (Скасувати)
                     </button>

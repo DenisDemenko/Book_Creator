@@ -15,6 +15,7 @@ import type { CoreAiModule } from '../../ai/rolePrompts';
 import { callStoryCore } from '../../storyCore/api';
 import { NodeError, type ExecEnv, type NodeExecutor, type NodeOutcome, type WfState } from './types';
 import { JEV_EXECUTORS } from './jev';
+import { CREATE_STORY_PROPOSAL, HUMAN_REVIEW, CANON_WRITE } from './humanReview';
 
 const CORE_MODULES: CoreAiModule[] = ['coreAi1Classify', 'coreAi2Analysis', 'coreAi3Visual', 'coreSearchInterpret', 'coreCharacterVoice'];
 export const DEFAULT_WORKFLOW_MODULE: CoreAiModule = 'coreAi2Analysis';
@@ -190,12 +191,13 @@ const needsBinding = (what: string): NodeExecutor => async () => {
   throw new NodeError(`${what}: цей вузол виконується лише в процесі з прив'язкою до конвеєра (AI-1, AI-2, голос героя)`, 'binding');
 };
 
-/** PROPOSAL без прив'язки: результат — вихід моделі (пропозицію створює прив'язка). */
-const PROPOSAL: NodeExecutor = async (node, state) => {
+/** PROPOSAL: реєстр сутностей/зв’язків; інші виходи обробляє прив’язка. */
+const PROPOSAL: NodeExecutor = async (node, state, env) => {
   const min = num(node.params?.min_confidence, 0)!;
   if (state.confidence != null && state.confidence < min) {
     return { patch: { result: { proposed: false, reason: 'low_confidence', confidence: state.confidence } }, trace: { decision: 'below_threshold', confidence: state.confidence } };
   }
+  if (['entity', 'relation'].includes(String(node.params?.target))) return CREATE_STORY_PROPOSAL(node, state, env);
   return { patch: { result: { proposed: true, target: node.params?.target, output: state.output ?? null } }, trace: { decision: 'proposed', confidence: state.confidence ?? null } };
 };
 
@@ -209,6 +211,8 @@ export const GENERIC_EXECUTORS: Record<string, NodeExecutor> = {
   QUERY,
   TOOL,
   PROPOSAL,
+  HUMAN_REVIEW,
+  CANON_WRITE,
   CONTEXT: needsBinding('Контекст'),
   MEMORY: needsBinding('Пам\'ять'),
 };
