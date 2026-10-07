@@ -239,6 +239,7 @@
     "test:performance": "tsx scripts/test-performance.mts",
     "test:adapter-contract": "tsx scripts/test-adapterContract.mts",
     "live:acceptance": "tsx scripts/live-acceptance.mts",
+    "live:editor-ai-concurrency": "tsx scripts/live-editorAiConcurrency.mts",
     "test:collaboration-workspace": "tsx scripts/test-collaborationWorkspace.mts",
     "live:collaboration-workspace": "tsx scripts/test-collaborationWorkspace.mts --browser"
   },
