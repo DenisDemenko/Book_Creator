@@ -1,3 +1,6 @@
+import {getDb} from '../../db';
+import {contributionIdentity} from './contributionRoutes';
+import {contributionDb,newContribution,recordContribution} from './contributionStore';
 import type { Express, Request, Response } from 'express';
 import type { RealtimeAccessDeps } from '../../realtimeAuth';
 import { resolveProjectAccess, type ProjectAccess } from '../projectRoutes';
@@ -61,7 +64,11 @@ export function registerSourceRoutes(app: Express, deps: SourceRoutesDeps): void
     for (const k of ['content', 'contentEn', 'lastModified']) if (patch[k] !== undefined && typeof patch[k] !== 'string') { res.status(400).json({ error: `Некоректне поле ${k}.` }); return; }
     for (const k of ['wordCount', 'characterCount']) if (patch[k] !== undefined && (!Number.isFinite(patch[k]) || patch[k] < 0)) { res.status(400).json({ error: `Некоректне поле ${k}.` }); return; }
     for (const k of ['paragraphIds', 'paragraphHashes', 'footnotes']) if (patch[k] !== undefined && !Array.isArray(patch[k])) { res.status(400).json({ error: `Некоректне поле ${k}.` }); return; }
-    const saved = await patchBookSection({ bookId: access.projectId, chapterId: String(chapterId), sectionId: String(sectionId), expectedRevision, patch });
+    const identity=await contributionIdentity(deps.repo?.()??null,access.projectId,access.userId);
+    if (!access.isOwner && access.role!=='admin' && (['coauthor','co_author'].includes(access.role)||identity.roleIds.includes('co_author'))) {res.status(409).json({error:'Співавтор надсилає Change Proposal для схвалення.',kind:'proposal_required'});return;}
+    const audit=!!getDb();if(audit)contributionDb();
+    const saved = await patchBookSection({ bookId: access.projectId, chapterId: String(chapterId), sectionId: String(sectionId), expectedRevision, patch,
+      ...(audit?{onSqlCommit:s=>recordContribution(newContribution({projectId:access.projectId,userId:access.userId,...identity,actionType:'EDITED',resourceType:'scene',resourceId:String(sectionId),chapterId:String(chapterId),sourceRevision:expectedRevision,resultRevision:s.revision,taskId:null,deliverableId:null,approvedBy:access.userId,provenance:{source:'source_patch'}}))}:{}) });
     deps.onSaved?.(saved, access);
     res.json({ revision: saved.revision, book: await filtered(saved.book, access) });
   }));

@@ -1,3 +1,4 @@
+import {CollaborationChanges} from './CollaborationChanges';
 import React, { useCallback, useEffect, useState } from 'react';
 import type { Book } from '../types';
 import type { WorkItem, WorkNotice, WorkTarget } from '../../server/core/collaboration/workspaceStore';
@@ -11,7 +12,7 @@ const button='rounded border border-slate-600 px-3 py-2 disabled:opacity-40';
 export function CollaborationPage({book,onUpdateBook,onOpenCharacter,onOpenParagraph}:{book:Book;onUpdateBook?:(book:Book)=>void;onOpenCharacter:(id:string)=>void;onOpenParagraph?:(target:{chapterId:string;sectionId:string;editorPid:string;text:string})=>void}) {
   const {lang}=useLanguage();
   const [data,setData]=useState<State|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
-  const [view,setView]=useState<'work'|'access'|'history'>('work');
+  const [view,setView]=useState<'work'|'access'|'history'|'changes'>('work');
   const [detail,setDetail]=useState<any>(null);
   const [target,setTarget]=useState(''),[kind,setKind]=useState<'comment'|'task'>('comment'),[text,setText]=useState(''),[assignee,setAssignee]=useState(''),[dueAt,setDueAt]=useState('');
   const [source,setSource]=useState<Source|null>(null),[history,setHistory]=useState<Array<{revision:number;savedAt:string}>>([]),[selected,setSelected]=useState(''),[old,setOld]=useState<Source|null>(null),[confirm,setConfirm]=useState(false);
@@ -40,10 +41,11 @@ export function CollaborationPage({book,onUpdateBook,onOpenCharacter,onOpenParag
     if(previous?.content!==s.content) changes.push({label:`${c.title} / ${s.title}`,before:previous?.content??'Сцени в цій версії немає.',after:s.content});
   }
   return <section data-collaboration-workspace className="space-y-4 min-w-0">
-    <nav aria-label="Розділи співпраці" className="flex flex-wrap gap-2">{(['work','access','history'] as const).map(v=><button key={v} className={button} aria-pressed={view===v} onClick={()=>{setView(v);if(v==='history')void action(loadHistory);}}>{v==='work'?'Коментарі й завдання':v==='access'?'Команда й доступ':'Історія правок'}</button>)}</nav>
+    <nav aria-label="Розділи співпраці" className="flex flex-wrap gap-2">{(['work','access','history','changes'] as const).map(v=><button key={v} className={button} aria-pressed={view===v} onClick={()=>{setView(v);if(v==='history')void action(loadHistory);}}>{v==='work'?'Коментарі й завдання':v==='access'?'Команда й доступ':v==='changes'?'Пропозиції та внески':'Історія правок'}</button>)}</nav>
     {detail&&<aside className="rounded-xl border border-slate-700 p-4 break-words"><button className={button} onClick={()=>setDetail(null)}>Закрити джерело</button>{detail.entity&&<><h3>{detail.entity.name}</h3><pre className="whitespace-pre-wrap break-words">{JSON.stringify(detail.entity.canonical,null,2)}</pre></>}{detail.material&&<><h3>{detail.material.title??detail.material.name??detail.material.id}</h3>{detail.material.url&&<a href={detail.material.url} target="_blank" rel="noreferrer">Відкрити матеріал</a>}</>}</aside>}
     {error&&<p role="alert" className="break-words text-red-400">{error}</p>}
     {!data&&!error&&<p role="status">Завантаження співпраці…</p>}
+    {view==='changes'&&<CollaborationChanges key={book.id} bookId={book.id} onUpdateBook={onUpdateBook}/>}
     {view==='access'&&data&&<><CollaborationTeam bookId={book.id} bookTitle={book.title} canManage={data.canRestore} names={data.names}/><AccessPanel key={book.id} bookId={book.id} lang={lang==='en'?'en':'uk'}/></>}
     {view==='work'&&data&&<>
       <section aria-label="Особисті сповіщення" className="space-y-2"><h2 className="font-bold">Мої сповіщення ({data.notifications.filter(n=>!n.readAt).length})</h2>{data.notifications.filter(n=>!n.readAt).map(n=>{const i=data.items.find(i=>i.id===n.itemId);return <div key={n.id} className="flex flex-wrap items-center gap-2"><span className="break-words">{n.kind==='overdue'?'Прострочено':i?.kind==='task'?'Завдання':'Коментар'}: {i?.text.slice(0,100)}</span><button disabled={busy} className={button} onClick={()=>void action(async()=>{await api(`/collaboration/notifications/${n.id}/read`,'POST');await load();})}>Прочитано</button></div>;})}</section>

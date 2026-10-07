@@ -63,6 +63,8 @@ export interface RealtimeAccessDeps {
    * `'unavailable'` — ядро недоступне: учаснику закрито.
    */
   effectiveAccess?: EffectiveResolver;
+  /** Co-authors submit reviewed proposals; realtime cannot silently merge their text. */
+  requiresChangeProposal?: (projectId:string,userId:string)=>Promise<boolean>;
 }
 
 /**
@@ -129,7 +131,7 @@ export async function resolveRealtimeAccess(
         role: found.inviteRole ?? 'participant',
         // Пише той, кому надано редагування хоч чогось у тексті (Т6.2);
         // частковий доступ кімната ще й фільтрує.
-        canWrite: found.eff.canWriteAny,
+        canWrite: found.eff.canWriteAny && !(['coauthor','co_author'].includes(found.inviteRole??'') || await deps.requiresChangeProposal?.(bookId,userId)),
         shared: true,
         scoped: isScoped(found.eff),
         restricted: found.eff.restricted,

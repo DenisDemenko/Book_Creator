@@ -1,3 +1,4 @@
+import {COLLABORATION_DOMAIN_EVENTS} from '../collaboration/domainEvents';
 /**
  * Процеси ШІ: версії й середовища (Т5.2 В2, `PLAN_GRAPH_STUDIO.md`; ТЗ Graph
  * Studio §34, §37, §38, №7, 27, 28).
@@ -74,6 +75,7 @@ const isFresh = (v: WorkflowVersionRow) => {
 export async function validateOnServer(repo: CoreRepository, def: WorkflowDefinition): Promise<WorkflowValidation> {
   const v = validateWorkflow(def);
   for (const n of def.nodes ?? []) {
+    if(n.params?.collaboration_events!==undefined && (n.type!=='START'||!Array.isArray(n.params.collaboration_events)||n.params.collaboration_events.length>32||n.params.collaboration_events.some((x:unknown)=>!(COLLABORATION_DOMAIN_EVENTS as readonly unknown[]).includes(x))))v.errors.push({code:'bad_collaboration_events',path:`nodes.${n.id}.params.collaboration_events`,message:'START підтримує список відомих подій співпраці.',nodeId:n.id});
     if(n.params?.cost_policy!==undefined){
       try{if(n.type!=='LLM')throw new Error('cost_policy підтримує вузол LLM.');validateCostPolicy(n.params.cost_policy);}
       catch(e){v.errors.push({code:'bad_cost_policy',path:`nodes.${n.id}.params.cost_policy`,message:(e as Error).message,nodeId:n.id});}

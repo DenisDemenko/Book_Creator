@@ -228,6 +228,7 @@ import { registerQualityRoutes } from './server/core/quality/qualityRoutes';
 import { registerOntologyRoutes } from './server/core/ontology/routes';
 import { registerParticipantRoutes } from './server/core/collaboration/routes';
 import { registerCollaborationWorkspaceRoutes } from './server/core/collaboration/workspaceRoutes';
+import {registerContributionRoutes} from './server/core/collaboration/contributionRoutes';
 import { registerSourceRoutes } from './server/core/collaboration/sourceRoutes';
 import { registerTranslationRoutes } from './server/core/translationRoutes';
 import {registerSecretVaultRoutes} from './server/core/secretVaultRoutes';
@@ -355,6 +356,10 @@ const realtimeAccessDeps: RealtimeAccessDeps = {
   },
   // Т6.2: права учасника — з наданих доступів ядра; ядро недоступне — закрито.
   effectiveAccess: makeEffectiveResolver(getCoreRepository, () => getCoreStatus().state),
+  requiresChangeProposal: async(projectId,userId)=>{
+    const repo=getCoreRepository();const participant=await repo?.getParticipant(projectId,userId);
+    return !!participant&&participant.status==='active'&&(await repo!.listParticipantRoles({participantId:participant.id,status:'active'})).some(r=>r.roleId==='co_author');
+  },
 };
 
 /**
@@ -804,6 +809,11 @@ registerGitCommandRoutes(app);
     },
   });
   registerCollaborationWorkspaceRoutes(app, {access: realtimeAccessDeps, repo: getCoreRepository, describeUser: async id => (await findUserForAccess(id))?.name ?? null});
+  registerContributionRoutes(app,{repo:getCoreRepository,access:realtimeAccessDeps,onSaved:(stored,access)=>{
+    const key=`book:${stored.id}`;const room=collabRooms.get(key);if(room)room.book=stored.book;
+    broadcastToRoom(key,{type:'book:remote_update',payload:{book:stored.book,serverRevision:stored.revision,authoritative:true}});
+    void scheduleCoreSync({repo:getCoreRepository(),queue:getCoreJobQueue()},stored,`user:${access.userId}`);
+  }});
   registerSourceRoutes(app, {
     repo: getCoreRepository,
     access: realtimeAccessDeps,
@@ -6311,6 +6321,11 @@ ${JSON.stringify(bookContext || {}, null, 2)}
       try {
         const message = JSON.parse(raw.toString());
         const { type, payload } = message || {};
+        if(access.shared && ['coauthor','co_author'].includes(access.role))access.canWrite=false;
+        if(access.shared && await realtimeAccessDeps.requiresChangeProposal?.(bookId,access.userId)){
+          const owner=(await realtimeAccessDeps.getCollabOwnerId(bookId))??(await realtimeAccessDeps.getBookOwnerId(bookId));
+          if(owner!==access.userId && access.role!=='admin')access.canWrite=false;
+        }
         const view = await viewReady;
         if (access.scoped && !view) {
           try {

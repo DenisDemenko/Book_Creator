@@ -92,7 +92,7 @@ export interface AppRoute {
 
 /** Вкладки Graph Studio (ТЗ §35), у порядку документа. */
 /** Т5.5: + «Напрямки» (реєстр напрямків маршрутизатора Jev, §10) — поруч із процесами. */
-export const GRAPH_STUDIO_TABS = ['ontology', 'workflows', 'destinations', 'story-graph', 'runs', 'versions', 'evaluations'] as const;
+export const GRAPH_STUDIO_TABS = ['ontology', 'workflows', 'destinations', 'collaboration-graph', 'story-graph', 'runs', 'versions', 'evaluations'] as const;
 export type GraphStudioTab = (typeof GRAPH_STUDIO_TABS)[number];
 /** Адреса Graph Studio (рішення власника Т5.2 §2 п.1). */
 export const GRAPH_STUDIO_SEGMENT = 'admin/graph-studio';

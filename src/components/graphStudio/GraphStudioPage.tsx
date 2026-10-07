@@ -23,6 +23,7 @@ import { ENV_CLASS, ENV_LABEL, gs, type GsAbilities } from './gsApi';
 import { WorkflowEditor } from './WorkflowEditor';
 import { OntologyCanvas } from './OntologyCanvas';
 import { StoryGraphPanel } from './StoryGraphPanel';
+import {CollaborationGraphPanel} from './CollaborationGraphPanel';
 import { RunsPanel } from './RunsPanel';
 import { DestinationsPanel } from './DestinationsPanel';
 
@@ -30,6 +31,7 @@ const TABS: { id: GraphStudioTab; en: string; uk: string; icon: React.ComponentT
   { id: 'ontology', en: 'Ontology', uk: 'Онтологія', icon: Network },
   { id: 'workflows', en: 'AI Workflows', uk: 'Процеси ШІ', icon: Workflow },
   { id: 'destinations', en: 'Destinations', uk: 'Напрямки', icon: Route },
+  {id:'collaboration-graph',en:'Collaboration Graph',uk:'Граф співпраці',icon:Network},
   { id: 'story-graph', en: 'Story Graph', uk: 'Граф твору', icon: GitBranch },
   { id: 'runs', en: 'Runs', uk: 'Запуски', icon: PlayCircle },
   { id: 'versions', en: 'Versions', uk: 'Версії', icon: History },
@@ -233,6 +235,8 @@ export const GraphStudioPage: React.FC<Props> = ({ tab, onTabChange, bookTitle, 
         <VersionsPanel abilities={abilities} />
       ) : tab === 'evaluations' ? (
         <EvaluationsPanel isAdmin={abilities.role === 'admin'} />
+      ) : tab === 'collaboration-graph' ? (
+        <CollaborationGraphPanel/>
       ) : tab === 'story-graph' ? (
         <div className="space-y-2">
           <StoryGraphPanel />

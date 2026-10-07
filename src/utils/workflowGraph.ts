@@ -184,7 +184,7 @@ export const STORY_CORE_READ_OPS = ['get_schema', 'get_schema_version', 'get_ent
 export const NODE_TYPES: NodeTypeDef[] = [
   // CORE
   { id: 'START', group: 'core', name: N('Start', 'Початок'), description: 'Вхід процесу: вхідні дані запуску.', inputs: 'none', outputs: ['out'],
-    params: [{ id: 'input_schema', name: N('Input schema', 'Схема входу'), type: 'json' }] },
+    params: [{ id: 'input_schema', name: N('Input schema', 'Схема входу'), type: 'json' },{id:'collaboration_events',name:N('Collaboration events','Події співпраці'),type:'json',hint:'Список типів подій для явного запуску production-процесу людиною.'}] },
   { id: 'END', group: 'core', name: N('End', 'Завершення'), description: 'Кінець гілки процесу.', inputs: 'many', outputs: [], params: [] },
   { id: 'SUBGRAPH', group: 'core', name: N('Subgraph', 'Підграф'), description: 'Виклик іншого опублікованого процесу.', inputs: 'one', outputs: ['out'],
     params: [{ id: 'workflow_id', name: N('Workflow', 'Процес'), type: 'string', required: true }] },

@@ -196,6 +196,8 @@ export async function saveBook(params: {
   now?: () => Date;
   /** Server-generated key: accepted branch fragment is written at most once. */
   mergeKey?: string;
+  /** Synchronous server-only audit; SQLite commit is atomic with the book. */
+  onSqlCommit?: (stored: StoredBook) => void;
 }): Promise<StoredBook> {
   // Take a snapshot before yielding: callers must not mutate pending writes.
   const snapshot = { ...params, book: JSON.parse(JSON.stringify(params.book || {})) };
@@ -210,6 +212,8 @@ async function saveBookSerial(params: {
   expectedRevision?: number;
   now?: () => Date;
   mergeKey?: string;
+  /** Synchronous server-only audit; SQLite commit is atomic with the book. */
+  onSqlCommit?: (stored: StoredBook) => void;
 }): Promise<StoredBook> {
   const book = params.book;
   const id = String((book as any).id || '').trim();
@@ -287,6 +291,7 @@ async function saveBookSerial(params: {
     if (existing) history.run(id, existing.revision, JSON.stringify(existing.book), existing.updatedAt);
     history.run(id, next.revision, payload, at);
     if (params.mergeKey) db.prepare('INSERT INTO book_merge_receipts (book_id, merge_key, revision) VALUES (?, ?, ?)').run(id, params.mergeKey, next.revision);
+    params.onSqlCommit?.(next);
     db.exec('COMMIT');
   } catch (err) {
     db.exec('ROLLBACK');
@@ -320,6 +325,7 @@ export async function getBookRevision(bookId: string, revision: number): Promise
 export async function patchBookSection(params: {
   bookId: string; chapterId: string; sectionId: string;
   expectedRevision: number; patch: Record<string, unknown>;
+  onSqlCommit?: (stored: StoredBook) => void;
 }): Promise<StoredBook> {
   const patch = structuredClone(params.patch);
   if (!patch || Array.isArray(patch) || Object.keys(patch).some(k => !SECTION_CONTENT_FIELDS.includes(k))) {
@@ -344,7 +350,7 @@ export async function patchBookSection(params: {
     if (!section) throw new Error('Сцену не знайдено в цьому розділі.');
     Object.assign(section, patch);
     book.updatedAt = new Date().toISOString();
-    return saveBookSerial({ book, expectedRevision: current.revision });
+    return saveBookSerial({ book, expectedRevision: current.revision, onSqlCommit: params.onSqlCommit });
   });
   bookWriteChain = result.catch(() => undefined);
   return result;

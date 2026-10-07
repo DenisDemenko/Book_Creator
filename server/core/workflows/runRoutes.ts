@@ -1,3 +1,5 @@
+import type {WorkflowDefinition} from '../../../src/utils/workflowGraph';
+import {collaborationDomainEvents} from '../collaboration/domainEvents';
 /**
  * Запуски процесів ШІ — API Graph Studio (Т5.4 В3, `PLAN_WORKFLOW_ENGINE.md`;
  * ТЗ Graph Studio §27, §31, §39 №24; рішення власника §2 п.3).
@@ -151,6 +153,20 @@ export function registerWorkflowRunRoutes(app: Express, d: WorkflowRunRoutesDeps
     const b = req.body ?? {};
     if (typeof b.workflowId !== 'string' || !b.workflowId) throw new CoreRuleError('bad_input', 'Оберіть процес');
     const input = b.input && typeof b.input === 'object' && !Array.isArray(b.input) ? (b.input as Record<string, unknown>) : {};
+    if(input.collaborationEventId!==undefined){
+      const projectId=typeof b.projectId==='string'?b.projectId:'';
+      if(!projectId||!await engine.services.canInspectWorkflowProject?.(actor(req),projectId))throw new CoreRuleError('bad_actor','Подія співпраці потребує повного доступу книги.');
+      const event=(await collaborationDomainEvents(engine.repo,projectId)).find(e=>e.id===input.collaborationEventId);
+      if(!event)throw new CoreRuleError('not_found','Подію не знайдено в цій книзі.');
+      const type=event.type;
+      const published=(await engine.repo.listWorkflowVersions(b.workflowId)).find(v=>v.environment==='production');
+      const def=published?await engine.repo.getWorkflowVersion(published.id):null;
+      if(!(def?.definition as unknown as WorkflowDefinition|undefined)?.nodes.some(n=>n.type==='START'&&Array.isArray(n.params?.collaboration_events)&&n.params.collaboration_events.includes(type)))throw new CoreRuleError('bad_input','Production-процес не підписаний на цю подію.');
+      for(const k of Object.keys(input))delete input[k];
+      Object.assign(input,{collaborationEvent:event});
+      // Event dispatch always uses the current published definition, never client-selected drafts.
+      b.versionId=undefined;
+    }
     background(res, (onCreated) => startRun(engine, {
       workflowId: b.workflowId,
       input,
