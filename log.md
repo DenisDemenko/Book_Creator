@@ -805,4 +805,4 @@ JS-файлу напряму, як зроблено тут.
 | 2 | Шість позицій номера сторінки | ✅ Виконано | [001-047.md](log/001-047.md) |
 | 1 | Початок нумерації сторінок має задаватися явно | ✅ Виконано | [001-047.md](log/001-047.md) |
 
-Запис #385 — Т5.7 В3: Adaptive Workflow, шкали й пороги у версії, підграфи minimal/light/normal/deep, видимий звіт. Memory + PostgreSQL 58/0, Chromium 9/0, повний npm test і lint/build успішні. Ручний сценарій docs/acceptance/T5.7-V3.md; production-приймання та налаштування цільових підграфів очікують. Наступний В4 — Causality Engine. Коміт і пуш фіксуються після перевірки журналу.
+Запис #385 — Т5.7 В3: Adaptive Workflow, шкали й пороги у версії, підграфи minimal/light/normal/deep, видимий звіт. Memory + PostgreSQL 58/0, Chromium 9/0, повний npm test і lint/build успішні. Ручний сценарій docs/acceptance/T5.7-V3.md; production-приймання та налаштування цільових підграфів очікують. Наступний В4 — Causality Engine. Реалізація `53aabf0` запушена без force в origin/master (DenisDemenko/Book_Creator); запис #385 перевірено у коміті. Поточні незапушені коміти — git log origin/master..HEAD; цей стан синхронізується окремим документаційним комітом.
