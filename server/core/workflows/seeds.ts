@@ -1,3 +1,4 @@
+import { causalityWorkflowDefinition } from './causalityEngine';
 /**
  * Системні процеси ШІ (Т5.4 В2; рішення власника §2 п.1–2): наявні конвеєри
  * як визначення `fusion-workflow/1`. На першому старті ядра процес
@@ -89,6 +90,7 @@ export function systemWorkflowDefinitions(): WorkflowDefinition[] {
     voice,
     semanticWorkflowDefinition(),
     adaptiveWorkflowDefinition(),
+    causalityWorkflowDefinition(),
   ];
 }
 

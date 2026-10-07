@@ -8,7 +8,7 @@
 | В1 | Continuity Gate перед каноном: правила Т2.4 і причинність Т2.9, pass/block, траса, повторна перевірка після людського рішення | Реалізовано, журнал #383; production-приймання очікує |
 | В2 | Semantic Change Detector: після core_sync запуск лише зачеплених підграфів | Реалізовано, журнал #384; production-приймання очікує |
 | В3 | Adaptive Workflow: глибина аналізу за важливістю, шкали в конфігурації | Реалізовано, журнал #385; production-приймання очікує |
-| В4 | Causality Engine: пропозиції CAUSES без автоматичного запису | Не почато |
+| В4 | Causality Engine: пропозиції CAUSES без автоматичного запису | Реалізовано, журнал #386; production-приймання очікує |
 | В5 | Mystery Director: World Truth / Reader Knowledge / Character Knowledge | Не почато |
 | В6 | Character Decision Engine: симуляція без зміни канону | Не почато |
 
@@ -22,4 +22,4 @@
 
 В2: [прогін і межі](docs/acceptance/T5.7-V2.md). Реєстр semantic_change
 вмикає автоматичний аналіз лише для прив’язаних категорій; без напрямків
-модельні запити не запускаються. В3: [прогін і межі](docs/acceptance/T5.7-V3.md). Наступний В4 — Causality Engine.
+модельні запити не запускаються. В3: [прогін і межі](docs/acceptance/T5.7-V3.md). В4: [прогін і межі](docs/acceptance/T5.7-V4.md). Наступний В5 — Mystery Director.

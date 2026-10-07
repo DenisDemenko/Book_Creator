@@ -62,6 +62,7 @@ export function trustedAnalysisTool(
     type === "TOOL" &&
     ((workflowId === "semantic_change_detector" &&
       tool === "semantic_dispatch") ||
-      (workflowId === ADAPTIVE_WORKFLOW && tool === "adaptive_dispatch"))
+      (workflowId === ADAPTIVE_WORKFLOW && tool === "adaptive_dispatch") ||
+      (workflowId === "causality_engine" && tool === "causality_propose"))
   );
 }

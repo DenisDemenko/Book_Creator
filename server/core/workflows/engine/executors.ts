@@ -222,7 +222,7 @@ export const GENERIC_EXECUTORS: Record<string, NodeExecutor> = {
 
 /** Виконавець вузла: прив'язки, інакше загальний; невиконуваний тип — зрозуміла помилка. */
 export function executorFor(node: WorkflowNode, env: ExecEnv): NodeExecutor {
-  if ((env.actor === 'system:semantic_change' || env.run.input.semanticAutomatic === true || env.run.workflowId === ADAPTIVE_WORKFLOW) &&
+  if ((env.actor === 'system:semantic_change' || env.run.input.semanticAutomatic === true || [ADAPTIVE_WORKFLOW, 'causality_engine'].includes(env.run.workflowId)) &&
       ['CANON_WRITE', 'HUMAN_REVIEW', 'TOOL', 'JEV_ROUTER'].includes(node.type) &&
       !trustedAnalysisTool(env.run.workflowId, node.type, node.params.tool)) {
     return async () => { throw new NodeError(`Автоматичний аналіз не виконує ${node.type}; потрібен процес читання/пропозицій.`, 'bad_input'); };

@@ -1,3 +1,4 @@
+import { causalityEngineBinding } from '../causalityEngine';
 /**
  * Прив'язки системних процесів ШІ (Т5.4 В2): id процесу → кроки конвеєра.
  * Повтор, відгалуження й продовження відновлюють запит із входу запуску тими
@@ -44,6 +45,7 @@ export function systemBindings(deps: SystemBindingDeps = {}): Record<string, Bin
     voiceBinding(deps.interview ?? {}),
     semanticChangeBinding(),
     adaptiveWorkflowBinding(),
+    causalityEngineBinding(),
   ];
   return Object.fromEntries(list.map((b) => [b.workflowId, b]));
 }

@@ -218,6 +218,21 @@ const AdaptiveStepDetails: React.FC<{ s: Step }> = ({ s }) => {
   </div>;
 };
 
+const CausalityStepDetails: React.FC<{s:Step}> = ({s}) => {
+  const r=s.details.causalityEngine as {eventId:string|null;causeId:string|null;candidateIds:string[];reason:string|null;probability:number|null;proposalId:string|null;proposalState:string|null}|undefined;
+  if(!r)return null;
+  const checks=s.details.causalityCheck as {blockerCount:number;warningCount:number;blockers:{summary:string}[];warnings:{summary:string}[]}|undefined;
+  const reasons:Record<string,string>={stale:'Джерело вже змінилось',select_event:'Оберіть одну подію для аналізу',no_new_event:'Немає нової підтвердженої події',no_candidates:'Немає попередніх причин із доказами',no_cause:'Причини не знайдено',choice_review:'Вибір причини потребує перевірки',support_review:'Причинна підтримка потребує перевірки',insufficient_support:'Причинної підтримки недостатньо',already_proposed:'Цей зв’язок уже очікує рішення',already_linked:'Причинний зв’язок уже є в каноні'};
+  return <div className="space-y-1 break-all rounded border border-slate-700 p-2" data-run-causality>
+    <p className="text-sky-300">Causality Engine (Причинність)</p>
+    <p>Причина: {r.causeId??'—'} → подія: {r.eventId??'—'}</p>
+    <p>{r.reason?reasons[r.reason]??r.reason:'Створено пропозицію CAUSES; рішення приймає автор'}</p>
+    <p>Кандидатів: {r.candidateIds.length} · Підтримка: {r.probability??'—'}</p>
+    {checks && <div className="text-amber-200" data-causality-checks><p>Перевірка Т2.9 у проєкції: висновків для розгляду автором — {checks.blockerCount+checks.warningCount}</p>{[...checks.blockers,...checks.warnings].map((x,i)=><p key={i}>{x.summary}</p>)}</div>}
+    {r.proposalId && <p>Пропозиція: {r.proposalId} · Стан: {r.proposalState}. Відкрийте «Граф історії» → «Пропозиції» для перевірки та рішення.</p>}
+  </div>;
+};
+
 export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) => {
   const [runs, setRuns] = useState<Run[] | null>(null);
   const [workflows, setWorkflows] = useState<{ id: string; name: string; production: number | null }[]>([]);
@@ -450,12 +465,13 @@ export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) =
 
             {/* §27: RUN LOG / TRACE */}
             <div className="overflow-x-auto rounded-xl border border-slate-800" data-run-trace>
-              {detail.steps.filter(s => s.details.continuity || s.details.semanticChange || s.details.adaptiveWorkflow).map(s => (
+              {detail.steps.filter(s => s.details.continuity || s.details.semanticChange || s.details.adaptiveWorkflow || s.details.causalityEngine).map(s => (
                 <div key={s.id} className="space-y-1 border-b border-slate-800 p-2 text-[11px]">
                   <p className="font-semibold text-slate-100">{labelOf(s.nodeId)}</p>
                   <ContinuityStepDetails s={s} />
                   <SemanticChangeStepDetails s={s} />
                   <AdaptiveStepDetails s={s} />
+                  <CausalityStepDetails s={s} />
                 </div>
               ))}
               <table className="w-full min-w-[46rem] text-left text-[11px]">

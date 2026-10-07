@@ -448,7 +448,10 @@
   реєстр semantic_change, scoped підграфи й траса (критерій 19).
   В3 реалізовано 07.10.2026, журнал #385: JEV_SCORE, налаштовувані шкали,
   пороги та підграфи minimal/light/normal/deep, траса (критерій 20).
-  Наступний В4 — Causality Engine.
+  В4 реалізовано 07.10.2026, журнал #386: кандидати з доказами, Jev Choice/Noul,
+  перевірена причинна пропозиція, авторське рішення (критерій 23).
+  Наступний В5 — Mystery Director.
+  Прогін В4: [T5.7 В4](docs/acceptance/T5.7-V4.md).
   Прогін В3: [T5.7 В3](docs/acceptance/T5.7-V3.md).
   Прогін В2: [T5.7 В2](docs/acceptance/T5.7-V2.md).
   План: [PLAN_STORY_INTELLIGENCE.md](PLAN_STORY_INTELLIGENCE.md);
