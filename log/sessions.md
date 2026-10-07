@@ -18,7 +18,7 @@
 
 **Запис #386:** Т5.7 В4 — Causality Engine: кандидати з доказами, Choice/Noul, перевірена пропозиція caused_by та авторський розгляд. Memory + PostgreSQL 50/0, Chromium 7/0, повний npm test і фінальні lint/build — exit 0; Т2.9 23/0, Adaptive 29/0. Реалізація ec6fe9b запушена в origin/master. Наступний В5 — Mystery Director.
 
-**Запис #387:** Т5.7 В5 — приватний Mystery Director: три шари знань, Score/Noul/Choice, зашифрований план і рекомендація без канону. Memory + PostgreSQL 50/0; live 29/0 (25 серверних + 4 Chromium), pipelines 19/0. Повторний повний npm test і фінальні lint/build — exit 0; історичні дописки з log.md збережено в log/deploy-notes.md, покажчик 111 КБ. Наступний В6 — Character Decision Engine.
+**Запис #387:** Т5.7 В5 — приватний Mystery Director: три шари знань, Score/Noul/Choice, зашифрований план і рекомендація без канону. Memory + PostgreSQL 50/0; live 29/0 (25 серверних + 4 Chromium), pipelines 19/0. Повторний повний npm test і фінальні lint/build — exit 0; історичні дописки з log.md збережено в log/deploy-notes.md, покажчик 111 КБ. Реалізація 798467e запушена в origin/master. Наступний В6 — Character Decision Engine.
 
 **Не зроблено і чому:** наскрізний full App/Firebase, браузерні переходи вправи-абзацу/героя та editor+AI ще не перевірені; PostgreSQL для переходів Т4.3 не запускали. Т4.3 залишається частковим. Windows full npm test очікує результату від власника. Т5.6 production/Firebase/платний DeepSeek і мобільний UI ще не прийняті; Т5.7 В1 реалізовано (#383); В2 реалізовано (#384); В3 реалізовано (#385); В4 реалізовано (#386); В5 реалізовано (#387); В6 ще не почато.
 
