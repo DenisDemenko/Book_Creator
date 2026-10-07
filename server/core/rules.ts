@@ -1,3 +1,4 @@
+import { SEMANTIC_REGISTRY, SEMANTIC_OPTIONS } from '../../src/utils/semanticChange';
 /**
  * Правила ядра, спільні для обох сховищ (PostgreSQL і пам'ять).
  *
@@ -796,6 +797,7 @@ export function checkWorkflowRunPatch(current: Pick<WorkflowRunRow, 'status'>, p
 const DEST_ID_RE = /^[a-z][a-z0-9_]{0,63}$/;
 /** Т5.5: напрямок маршрутизатора Jev (§10). */
 export function checkWorkflowDestination(input: WorkflowDestinationInput): void {
+  if (input.registry === SEMANTIC_REGISTRY && !SEMANTIC_OPTIONS.includes(input.option)) throw new CoreRuleError('bad_input', 'Детектор: оберіть style_only, character_state, event, relationship, location, timeline або fact.');
   if (!DEST_ID_RE.test(String(input.registry ?? ''))) throw new CoreRuleError('bad_input', 'Реєстр — латиниця, цифри й «_», з літери, до 64 символів');
   if (!DEST_ID_RE.test(String(input.option ?? ''))) throw new CoreRuleError('bad_input', 'Варіант — латиниця, цифри й «_», з літери, до 64 символів');
   const en = String(input.label?.en ?? '').trim();

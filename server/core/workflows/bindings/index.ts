@@ -4,6 +4,7 @@
  * самими функціями, що й задачі черги.
  */
 
+import { semanticChangeBinding } from '../semanticChange';
 import type { EntityRow } from '../../types';
 import type { StudioCharacterLike } from '../../characterProfile';
 import { AI1_MENTIONS_WORKFLOW, buildMentionsRequest } from '../../ai/mentions';
@@ -40,6 +41,7 @@ export function systemBindings(deps: SystemBindingDeps = {}): Record<string, Bin
       }),
     }),
     voiceBinding(deps.interview ?? {}),
+    semanticChangeBinding(),
   ];
   return Object.fromEntries(list.map((b) => [b.workflowId, b]));
 }

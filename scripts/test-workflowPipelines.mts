@@ -31,21 +31,21 @@ const t = (name: string, ok: boolean, extra = '') => {
 
 console.log('\nСистемні процеси (§2 п.1):');
 const defs = systemWorkflowDefinitions();
-t('чотири процеси: AI-1, AI-2 профіль і пам\'ять, голос героя', defs.map((d) => d.id).join() === 'ai1_mentions,ai2_profile,ai2_memory,character_voice');
+t('п’ять процесів: AI-1, AI-2 профіль і пам’ять, голос героя, детектор змін', defs.map((d) => d.id).join() === 'ai1_mentions,ai2_profile,ai2_memory,character_voice,semantic_change_detector');
 t('кожен проходить перевірку Graph Studio', defs.every((d) => validateWorkflow(d).ok), JSON.stringify(defs.map((d) => validateWorkflow(d).errors.map((e) => e.message))));
-t('v1 = поведінка до Т5.4: температура 0,7, без ліміту токенів, без повторів вузла, поріг 0', defs.every((d) => {
+t('v1 = поведінка до Т5.4: температура 0,7, без ліміту токенів, без повторів вузла, поріг 0', defs.filter(d => d.id !== 'semantic_change_detector').every((d) => {
   const llm = d.nodes.find((n) => n.type === 'LLM')!.params;
   const prop = d.nodes.find((n) => n.type === 'PROPOSAL')!.params;
   return llm.temperature === 0.7 && llm.max_tokens === undefined && llm.retry_count === 0 && prop.min_confidence === 0;
 }));
-t('шаблони — з «Ядра AI» (адмін їх і далі править там)', defs.map((d) => d.nodes.find((n) => n.type === 'PROMPT')!.params.template).join() === 'core:coreAi1Classify,core:coreAi2Analysis,core:coreAi2Analysis,core:coreCharacterVoice');
+t('шаблони — з «Ядра AI» (адмін їх і далі править там)', defs.filter(d => d.id !== 'semantic_change_detector').map((d) => d.nodes.find((n) => n.type === 'PROMPT')!.params.template).join() === 'core:coreAi1Classify,core:coreAi2Analysis,core:coreAi2Analysis,core:coreCharacterVoice');
 
 const repo = new MemoryCoreRepository();
 resetActiveRegistry();
 await bootstrapOntology(repo);
 
 console.log('\nАвтопублікація v1 (§2 п.2):');
-t('перший старт — створено й опубліковано всі чотири', (await ensureSystemWorkflows(repo)).length === 4);
+t('перший старт — створено й опубліковано всі п’ять', (await ensureSystemWorkflows(repo)).length === 5);
 for (const d of defs) {
   const v = await publishedVersion(repo, d.id);
   if (!v || v.version !== 1 || v.publishedBy !== 'system:workflow-seed') t(`«${d.id}» опубліковано v1 системою`, false);

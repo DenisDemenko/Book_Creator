@@ -215,6 +215,7 @@ import type { EngineDeps } from './server/core/workflows/engine/runner';
 import { COURSE_PREFIX, type OnboardingDeps } from './server/core/collaboration/onboarding';
 import { ensureOwnerParticipant } from './server/core/collaboration/participants';
 import { getCourse } from './server/courseStore';
+import { SEMANTIC_CHANGE_KIND, scheduleSemanticChange, semanticChangeJobKind } from './server/core/semanticChangeJob';
 import { CORE_SYNC_KIND, coreSyncJobKind } from './server/core/sync';
 import { AI_ROLE_JOB_KIND, aiRoleJobKind } from './server/core/ai/job';
 import { AI_MENTIONS_JOB_KIND, aiMentionsJobKind } from './server/core/ai/mentions';
@@ -6601,9 +6602,14 @@ ${JSON.stringify(bookContext || {}, null, 2)}
       repo: getCoreRepository,
       loadBook: getStoredBookForRealtime,
       // Нові чи змінені абзаци → вектори для пошуку за змістом (Т1.2), лише для них.
+      afterSynchronized: async result => {
+        const repo = getCoreRepository();
+        return repo ? scheduleSemanticChange(repo, getCoreJobQueue(), result) : { queued: 0, reason: 'core_unavailable' };
+      },
       afterTextChanged: (projectId) => scheduleCoreEmbed(getCoreJobQueue(), projectId, 'system:core_sync'),
     }),
   );
+  registerCoreJobKind(SEMANTIC_CHANGE_KIND, semanticChangeJobKind(workflowEngine));
   // Ембединги абзаців для гібридного пошуку (Т1.2).
   registerCoreJobKind(
     CORE_EMBED_KIND,

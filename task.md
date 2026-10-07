@@ -444,7 +444,10 @@
   Залежить: Т5.5, Т5.6.
   В1 реалізовано 07.10.2026, журнал #383: Continuity Gate і повторна
   перевірка CANON_WRITE (критерій 17). Т5.7 загалом залишається відкритим.
-  Наступний В2 — Semantic Change Detector.
+  В2 реалізовано 07.10.2026, журнал #384: дельти core_sync, Jev Choice,
+  реєстр semantic_change, scoped підграфи й траса (критерій 19).
+  Наступний В3 — Adaptive Workflow.
+  Прогін В2: [T5.7 В2](docs/acceptance/T5.7-V2.md).
   План: [PLAN_STORY_INTELLIGENCE.md](PLAN_STORY_INTELLIGENCE.md);
   прогін: [T5.7 В1](docs/acceptance/T5.7-V1.md).
 - ⬜ **Т5.8 · Спостережуваність, зворотний зв'язок, оптимізатор (M).** Журнал

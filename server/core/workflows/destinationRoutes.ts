@@ -1,3 +1,4 @@
+import { SEMANTIC_REGISTRY, SEMANTIC_WORKFLOW } from '../../../src/utils/semanticChange';
 /**
  * Реєстр напрямків маршрутизатора Jev — API Graph Studio (Т5.5 В2,
  * `PLAN_JEV_NODES.md`; ТЗ Graph Studio §10, №10; рішення власника §2 п.2).
@@ -35,6 +36,7 @@ async function overview(repo: CoreRepository) {
   for (const w of workflows) {
     const prod = await publishedVersion(repo, w.id).catch(() => null);
     out.push({ id: w.id, name: w.name, published: prod?.version ?? null });
+    if (w.id === SEMANTIC_WORKFLOW && prod) (routers[SEMANTIC_REGISTRY] ??= []).push({ workflowId: w.id, nodeId: 'dispatch', label: 'Зачеплений підграф після core_sync' });
     const def = prod?.definition as unknown as WorkflowDefinition | null;
     for (const n of def?.nodes ?? []) {
       const reg = routerRegistry(n);

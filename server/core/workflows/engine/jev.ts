@@ -1,3 +1,4 @@
+import { JobFatalError, JobCancelledError } from '../../jobs/queue';
 /**
  * Шар рішень Jev у процесах ШІ (Т5.5 В1, `PLAN_JEV_NODES.md`; ТЗ Graph
  * Studio §6–§10, §16, §17, §20–§22, §36, §39 №9–12).
@@ -127,6 +128,11 @@ interface AskOpts {
 }
 
 class JevUnavailable extends Error {}
+function providerError(env: ExecEnv, err: unknown): Error {
+  if (err instanceof JobFatalError || err instanceof JobCancelledError || env.signal?.aborted || (err instanceof Error && err.name === 'AbortError')) throw err;
+  return err instanceof Error ? err : new Error(String(err));
+}
+
 
 function toOutcome(raw: JevRawAnswer & { costUsd?: number }, source: JevOutcome['source'], questions: JevQuestion[], opts: AskOpts, fallbackReason: string | null): JevOutcome {
   const answers: Record<string, JevAnswerN> = {};
@@ -150,22 +156,33 @@ export async function askJev(env: ExecEnv, jevState: Record<string, unknown>, qu
     try {
       primary = (await env.services.jev?.()) ?? null;
     } catch (err) {
-      reason = `ключ Jev недоступний: ${(err as Error).message}`;
+      reason = `ключ Jev недоступний: ${providerError(env, err).message}`;
     }
+    let rawPrimary: JevRawAnswer | null = null;
     if (primary?.askState) {
       try {
-        const raw = await primary.askState(jevState, questions, { signal: env.signal });
-        return toOutcome(raw, primary.name === 'mock' ? 'mock' : primary.name === 'llm_fallback' ? 'llm_fallback' : 'jev', questions, opts, null);
+        rawPrimary = await primary.askState(jevState, questions, { signal: env.signal });
       } catch (err) {
-        reason = (err as Error).message;
+        reason = providerError(env, err).message;
       }
     } else if (!reason) reason = 'Jev не налаштовано (немає ключа TypeSafe)';
+    // Charge an actual response even when its typed answer is invalid.
+    // Budget/cancellation failures must not trigger a second provider request.
+    if (rawPrimary) {
+      await env.recordUsage?.({ tokens: rawPrimary.usage.input_tokens + rawPrimary.usage.output_tokens, requests: 1 });
+      try {
+        return toOutcome(rawPrimary, primary!.name === 'mock' ? 'mock' : primary!.name === 'llm_fallback' ? 'llm_fallback' : 'jev', questions, opts, null);
+      } catch (err) {
+        reason = providerError(env, err).message;
+      }
+    }
   }
   try {
     const raw = await fallback.askState(jevState, questions);
     return toOutcome(raw, 'llm_fallback', questions, opts, reason);
   } catch (err) {
-    throw new JevUnavailable(reason ? `${reason}; запасний LLM: ${(err as Error).message}` : (err as Error).message);
+    const failure = providerError(env, err);
+    throw new JevUnavailable(reason ? `${reason}; запасний LLM: ${failure.message}` : failure.message);
   }
 }
 
@@ -367,8 +384,8 @@ async function runJevNode(node: WorkflowNode, state: WfState, env: ExecEnv, spec
   details.consensus = { policy: policy.reason };
   let agreed = false;
   if (policy.on) {
-    const a = await askJev(env, jevState, spec.questions, { scale: spec.scale, llmOnly: { model: str(p.consensus_model_a), module: 'coreAi2Analysis' } }).catch((e) => e as Error);
-    const b = await askJev(env, jevState, spec.questions, { scale: spec.scale, llmOnly: { model: str(p.consensus_model_b), module: 'coreAi1Classify' } }).catch((e) => e as Error);
+    const a = await askJev(env, jevState, spec.questions, { scale: spec.scale, llmOnly: { model: str(p.consensus_model_a), module: 'coreAi2Analysis' } }).catch((e) => providerError(env, e));
+    const b = await askJev(env, jevState, spec.questions, { scale: spec.scale, llmOnly: { model: str(p.consensus_model_b), module: 'coreAi1Classify' } }).catch((e) => providerError(env, e));
     if (!(a instanceof Error)) spend(a);
     if (!(b instanceof Error)) spend(b);
     const ok = !(a instanceof Error) && !(b instanceof Error) && allAgree(o, a, agreeAt) && allAgree(o, b, agreeAt);
@@ -390,7 +407,7 @@ async function runJevNode(node: WorkflowNode, state: WfState, env: ExecEnv, spec
   if (action === 'FALLBACK') return finish('fallback', `впевненість ${tier === 'low' ? 'низька' : tier === 'medium' ? 'середня' : 'висока'} → резервний маршрут`, confidence, { ...result, routing: action });
   if (action === 'HUMAN_REVIEW') return finish('review', 'на перевірку людиною (§16)', confidence, { ...result, routing: action });
   if (action === 'SECOND_OPINION') {
-    const second = await askJev(env, jevState, spec.questions, { scale: spec.scale, llmOnly: { model: str(p.second_opinion_model), module: 'coreAi2Analysis' } }).catch((e) => e as Error);
+    const second = await askJev(env, jevState, spec.questions, { scale: spec.scale, llmOnly: { model: str(p.second_opinion_model), module: 'coreAi2Analysis' } }).catch((e) => providerError(env, e));
     if (!(second instanceof Error)) spend(second);
     const ok = !(second instanceof Error) && allAgree(o, second, agreeAt);
     details.secondOpinion = second instanceof Error ? { error: second.message.slice(0, 200) } : { model: second.model, answers: brief(second), agree: ok };
@@ -433,7 +450,7 @@ export async function runSubgraph(env: ExecEnv, workflowId: string, state: WfSta
   if (chain.includes(workflowId)) throw new NodeError(`Підпроцес «${workflowId}» уже виконується вище в ланцюжку (${chain.reverse().join(' → ')}) — цикл`, 'bad_input');
   if (chain.length > MAX_SUBGRAPH_DEPTH) throw new NodeError(`Підпроцеси вкладені глибше за ${MAX_SUBGRAPH_DEPTH}`, 'bad_input');
   const { startRun } = await import('./runner');
-  const input = { ...state.input, parent: { runId: env.run.id, workflowId: env.run.workflowId, node: nodeId, vars: clip(state.vars), ...(state.output !== undefined ? { output: clip(state.output) } : {}) } };
+  const input = { ...state.input, ...(env.run.input.semanticAutomatic === true || env.actor === 'system:semantic_change' ? { semanticAutomatic: true } : {}), parent: { runId: env.run.id, workflowId: env.run.workflowId, node: nodeId, vars: clip(state.vars), ...(state.output !== undefined ? { output: clip(state.output) } : {}) } };
   let out;
   try {
     out = await startRun(env.engine, { workflowId, input, projectId: env.run.projectId, trigger: 'subgraph', actor: env.actor, parentRunId: env.run.id, recordUsage: env.recordUsage, signal: env.signal });

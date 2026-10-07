@@ -7,6 +7,7 @@
  * зміни — новими версіями через тест і публікацію; сід їх не чіпає.
  */
 
+import { semanticWorkflowDefinition } from './semanticChange';
 import type { CoreActor, CoreRepository } from '../types';
 import type { WorkflowDefinition, WorkflowEdge, WorkflowNode } from '../../../src/utils/workflowGraph';
 import { WORKFLOW_FORMAT } from '../../../src/utils/workflowGraph';
@@ -85,6 +86,7 @@ export function systemWorkflowDefinitions(): WorkflowDefinition[] {
     aiRolePipeline({ id: 'ai2_profile', en: 'AI-2: character profile', uk: 'AI-2: профіль героя', description: 'Абзаци з героєм → шаблон AI-2 → модель → схема й доказ → факти профілю (Т1.5).', module: 'coreAi2Analysis', target: 'fact' }),
     aiRolePipeline({ id: 'ai2_memory', en: 'AI-2: hero memory in scene', uk: 'AI-2: пам\'ять героя в сцені', description: 'Сцена й пам\'ять героя → шаблон AI-2 → модель → схема й доказ → записи пам\'яті «запропоновано» (Т2.6).', module: 'coreAi2Analysis', target: 'memory', memory: true }),
     voice,
+    semanticWorkflowDefinition(),
   ];
 }
 

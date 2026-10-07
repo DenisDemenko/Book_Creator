@@ -178,6 +178,34 @@ const ContinuityStepDetails: React.FC<{ s: Step }> = ({ s }) => {
   );
 };
 
+const SemanticChangeStepDetails: React.FC<{ s: Step }> = ({ s }) => {
+  const report = s.details.semanticChange as {
+    category: string | null;
+    reason: string | null;
+    paragraphIds: string[];
+    sectionIds: string[];
+    entityIds: string[];
+    source: string;
+    confidence: number | null;
+    childRunId: string | null;
+  } | undefined;
+  if (!report) return null;
+  const reasons: Record<string, string> = {
+    stale: 'Джерело вже змінилося — аналіз пропущено',
+    no_semantic_change: 'Зміст не змінився — аналіз не потрібен',
+    classification_review: 'Класифікація потребує перевірки',
+    no_destination: 'Для цієї категорії немає увімкненого напрямку',
+  };
+  return (
+    <div className="space-y-1 break-words rounded border border-slate-700 p-2" data-run-semantic-change>
+      <p className="text-sky-300">Semantic Change Detector (Детектор змін): {report.category ?? 'категорію не визначено'}</p>
+      <p>{report.reason ? reasons[report.reason] ?? report.reason : 'Запущено лише зачеплений підграф'}</p>
+      <p>Абзаци: {report.paragraphIds.join(', ')} · Сцени: {report.sectionIds.join(', ')}</p>
+      <p>Сутності: {report.entityIds.join(', ') || '—'} · Джерело: {report.source} · Впевненість: {report.confidence == null ? 'невідома' : report.confidence.toFixed(2)}</p>
+    </div>
+  );
+};
+
 export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) => {
   const [runs, setRuns] = useState<Run[] | null>(null);
   const [workflows, setWorkflows] = useState<{ id: string; name: string; production: number | null }[]>([]);
@@ -410,10 +438,11 @@ export const RunsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilities }) =
 
             {/* §27: RUN LOG / TRACE */}
             <div className="overflow-x-auto rounded-xl border border-slate-800" data-run-trace>
-              {detail.steps.filter(s => s.details.continuity).map(s => (
+              {detail.steps.filter(s => s.details.continuity || s.details.semanticChange).map(s => (
                 <div key={s.id} className="space-y-1 border-b border-slate-800 p-2 text-[11px]">
                   <p className="font-semibold text-slate-100">{labelOf(s.nodeId)}</p>
                   <ContinuityStepDetails s={s} />
+                  <SemanticChangeStepDetails s={s} />
                 </div>
               ))}
               <table className="w-full min-w-[46rem] text-left text-[11px]">

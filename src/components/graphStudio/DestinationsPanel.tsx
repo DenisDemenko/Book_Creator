@@ -8,6 +8,7 @@
  * одразу); бачать — усі, хто відкриває Graph Studio.
  */
 
+import { SEMANTIC_REGISTRY, SEMANTIC_OPTIONS } from '../../utils/semanticChange';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, Plus, Route, Save, Trash2 } from 'lucide-react';
 import { ENV_CLASS, gs, type GsAbilities } from './gsApi';
@@ -88,7 +89,7 @@ export const DestinationsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilit
 
   if (!data) return <div className="grid place-items-center py-16 text-slate-400"><Loader2 className="h-5 w-5 animate-spin" /></div>;
   const keyOf = (d: Destination) => `${d.registry}/${d.option}`;
-  const draftOk = ID_RE.test(draft.registry) && ID_RE.test(draft.option) && draft.en.trim() && draft.uk.trim() && draft.workflowId && draft.description.length <= 255;
+  const draftOk = ID_RE.test(draft.registry) && ID_RE.test(draft.option) && (draft.registry !== SEMANTIC_REGISTRY || SEMANTIC_OPTIONS.includes(draft.option)) && draft.en.trim() && draft.uk.trim() && draft.workflowId && draft.description.length <= 255;
 
   return (
     <div className="space-y-3" data-gs-destinations>
@@ -97,6 +98,12 @@ export const DestinationsPanel: React.FC<{ abilities: GsAbilities }> = ({ abilit
         Destination Registry (Реєстр напрямків, §10): маршрутизатор Jev із параметром «Реєстр напрямків» пропонує Jev увімкнені напрямки свого реєстру
         (опис — це те, що Jev читає про варіант) і виконує обраний процес як підпроцес. Новий напрямок не потребує правки маршрутизатора.
         {!canEdit && <span className="text-amber-300"> Правити може адмін або роль із правом публікації схем.</span>}
+      </p>
+      <p className="rounded-xl border border-slate-800 p-3 text-[11px] text-slate-400" data-semantic-destinations-help>
+        Для аналізу після збереження книги додайте реєстр «semantic_change» і категорію:
+        {' '}{SEMANTIC_OPTIONS.join(', ')}. Детектор запускатиме лише відповідний опублікований процес
+        із зачепленими абзацами, сценами та сутностями. Без напрямків автоматичних AI-запитів немає.
+        Процес може читати й пропонувати; запис у канон та довільні інструменти недоступні.
       </p>
       {notice && (
         <div className={`rounded-xl border px-3 py-2 text-xs ${notice.kind === 'ok' ? 'border-emerald-500/40 text-emerald-200' : notice.kind === 'warn' ? 'border-amber-500/40 text-amber-200' : 'border-rose-500/40 text-rose-200'}`} data-gs-dest-notice={notice.kind}>{notice.text}</div>

@@ -15,6 +15,7 @@
  * розділі), воно лагодить у себе детерміновано — однаково на кожному прогоні.
  */
 
+import { collectSemanticChanges, type SemanticChanges } from './semanticChanges';
 import { ensureOwnerParticipant } from './collaboration/participants';
 import {
   entityBySlug,
@@ -85,6 +86,8 @@ export interface StoredBookForSync {
 
 export interface CoreSyncResult {
   projectId: string;
+  semanticChanges: SemanticChanges;
+  semanticDispatch?: { queued: number; reason: string | null };
   skipped?: 'no_owner' | 'no_book';
   revision: number;
   documents: { written: number; deleted: number };
@@ -153,6 +156,7 @@ export async function syncBookToCore(
   const projectId = stored.id;
   const result: CoreSyncResult = {
     projectId,
+    semanticChanges: { baseline: true, paragraphs: [] },
     revision: 0,
     documents: { written: 0, deleted: 0 },
     paragraphs: { created: 0, changed: 0, moved: 0, unchanged: 0, deleted: 0, duplicateIdsRemapped: 0 },
@@ -262,6 +266,7 @@ export async function syncBookToCore(
 
   // 4. Абзаци -------------------------------------------------------------------
   const allParagraphs = await repo.listAllParagraphs(projectId);
+  const beforeMentions = await repo.listMentionsByParagraphs(projectId, allParagraphs.filter(p => !p.deletedAt).map(p => p.id));
   const paragraphById = new Map<string, ParagraphRow>(allParagraphs.map((p) => [p.id, p]));
   const liveByDocument = new Map<string, ParagraphRow[]>();
   for (const p of allParagraphs) {
@@ -473,6 +478,7 @@ export async function syncBookToCore(
   } else {
     result.revision = project.revision;
   }
+  result.semanticChanges = await collectSemanticChanges(repo, projectId, { paragraphs: allParagraphs, documents: [...existingDocs.values()], mentions: beforeMentions });
   return result;
 }
 
@@ -487,6 +493,8 @@ export interface CoreSyncDeps {
    * Збій тут не робить синхронізацію невдалою.
    */
   afterTextChanged?: (projectId: string, changedParagraphs: number) => Promise<unknown> | void;
+  /** Т5.7 В2: дельти після синхронізації; збій планування не скасовує збереження. */
+  afterSynchronized?: (result: CoreSyncResult) => Promise<{ queued: number; reason: string | null }>;
 }
 
 /** Опис виду задачі `core_sync` для `JobQueue.register`. */
@@ -513,6 +521,10 @@ export function coreSyncJobKind(deps: CoreSyncDeps) {
         } catch (err) {
           console.warn(`[core] після синхронізації ${ctx.job.projectId}: ${(err as Error).message}`);
         }
+      }
+      if (!result.skipped && deps.afterSynchronized) {
+        try { result.semanticDispatch = await deps.afterSynchronized(result); }
+        catch (err) { result.semanticDispatch = { queued: 0, reason: `schedule_failed: ${(err as Error).message}` }; }
       }
       return result;
     },
