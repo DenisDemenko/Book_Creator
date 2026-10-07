@@ -129,7 +129,7 @@ remote перевірити можна, запушити — ні**.
 Актуальні результати: [сесія](log/sessions.md), [сценарій В6](docs/acceptance/T5.7-V6.md).
 Етап 9 додано після всіх етапів: [розгорнуте завдання книги-лабіринта](PLAN_LABYRINTH_BOOK.md); Т9.1–Т9.10 не почато; завдання запушено як `c87f4d5` в origin/master.
 Т5.8 реалізовано й запушено як `c4db2d0` в origin/master (Book_Creator): Memory/PostgreSQL 36/0, live 23/0; повний npm test і фінальні lint/build — exit 0. Production-приймання очікує. [План](PLAN_WORKFLOW_OBSERVABILITY.md), [приймання](docs/acceptance/T5.8.md).
-Т6.5 реалізовано: live 22/0, PostgreSQL 18/0; npm test, lint/build — exit 0. [План](PLAN_CONTRIBUTIONS.md), [приймання](docs/acceptance/T6.5.md). Production-прогін очікує.
+Т6.5 реалізовано й запушено як `4e54404` в origin/master (Book_Creator): live 22/0, PostgreSQL 18/0; npm test, lint/build — exit 0. [План](PLAN_CONTRIBUTIONS.md), [приймання](docs/acceptance/T6.5.md). Production-прогін очікує.
 Незапушені коміти: `git log origin/master..HEAD`; цей документаційний коміт синхронізує стан після пуша завдання #391. Команда пуша: `git push origin HEAD:master`. Після деплою — сценарій В6, захищений ключ Vault і відкладене приймання Т4.3.
 
 Історичні стани #374, #377, #379 з результатами й ручними перевірками:
