@@ -1,3 +1,4 @@
+import {registerCreativeProjectRoutes} from './server/core/creative/projects';
 import {registerCollaborationAiRoutes} from './server/core/collaboration/aiCollaborationRoutes';
 import {queryCollaboration,proposeCollaborationTask} from './server/core/collaboration/aiCollaboration';
 // Завантажуємо .env найпершим, поки жоден модуль ще не прочитав process.env.
@@ -813,6 +814,7 @@ registerGitCommandRoutes(app);
   registerCollaborationWorkspaceRoutes(app, {access: realtimeAccessDeps, repo: getCoreRepository, describeUser: async id => (await findUserForAccess(id))?.name ?? null});
   const collaborationAiDeps={repo:getCoreRepository,access:realtimeAccessDeps,principal:async(userId:string)=>{const u=await findUserForAccess(userId);return u&&!u.disabled?{id:u.id,role:u.role,isGuest:false} as any:null;}};
   registerCollaborationAiRoutes(app,collaborationAiDeps);
+  registerCreativeProjectRoutes(app,collaborationAiDeps);
   registerContributionRoutes(app,{repo:getCoreRepository,access:realtimeAccessDeps,onSaved:(stored,access)=>{
     const key=`book:${stored.id}`;const room=collabRooms.get(key);if(room)room.book=stored.book;
     broadcastToRoom(key,{type:'book:remote_update',payload:{book:stored.book,serverRevision:stored.revision,authoritative:true}});

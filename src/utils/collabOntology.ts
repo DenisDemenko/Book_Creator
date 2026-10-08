@@ -133,7 +133,7 @@ const ENTITY_ROWS: [string, string, string, boolean, string][] = [
   ['ACCESS_GRANT', 'Access Grant', 'Наданий доступ', false, 'Доступ у межах проєкту й ресурсу (Т6.2).'],
   ['APPLICATION', 'Application', 'Заявка', false, 'Заявка фахівця на замовлення (біржа).'],
   ['ORDER', 'Order', 'Замовлення', false, 'Замовлення з біржі маркетплейсу.'],
-  ['CREATIVE_PROJECT', 'Creative Project', 'Творчий проєкт', false, 'Проєкт Creative Studio (Т7).'],
+  ['CREATIVE_PROJECT', 'Creative Project', 'Творчий проєкт', true, 'Проєкт Creative Studio (Т7).'],
   ['SPECIALIST_PROFILE', 'Specialist Profile', 'Профіль спеціаліста', false, 'Профіль фахівця на біржі.'],
   ['ASSET', 'Asset', 'Ресурс', false, 'Файл чи медіаоб\'єкт проєкту.'],
   ['REVIEW', 'Review', 'Перевірка', false, 'Рецензія роботи.'],

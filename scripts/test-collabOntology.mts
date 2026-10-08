@@ -37,7 +37,7 @@ const c1 = factoryCollabOntology();
   const v = validateCollabOntology(c1, { story });
   t('проходить перевірку проти онтології твору 1.0, без помилок і попереджень', v.ok && v.warnings.length === 0, JSON.stringify([...v.errors, ...v.warnings].slice(0, 3)));
   t('окремий домен fusion-collab, свій формат (№31)', c1.id === COLLAB_ONTOLOGY_ID && c1.format === 'fusion-collab/1' && c1.id !== story.id);
-  t('18 базових сутностей §45; реалізовані — PERSON, PARTICIPANT, ROLE, BOOK_PROJECT', c1.entityTypes.length === 18 && c1.entityTypes.filter((e) => e.implemented).map((e) => e.id).join() === 'PERSON,PARTICIPANT,ROLE,BOOK_PROJECT');
+  t('18 базових сутностей §45; реалізовані — PERSON, PARTICIPANT, ROLE, BOOK_PROJECT, CREATIVE_PROJECT', c1.entityTypes.length === 18 && c1.entityTypes.filter((e) => e.implemented).map((e) => e.id).join() === 'PERSON,PARTICIPANT,ROLE,BOOK_PROJECT,CREATIVE_PROJECT');
   t('типи співпраці — ВЕЛИКИМИ, жоден не збігається зі slug-ом твору (№32)', c1.entityTypes.every((e) => /^[A-Z_]+$/.test(e.id) && !isRegisteredEntityType(e.id)));
   t('PERSON — не тип твору: ядро не прийме сутність твору типу PERSON', !isRegisteredEntityType('PERSON') && !isRegisteredEntityType('person'));
   t('9 міждоменних зв\'язків §48, усі кваліфіковані collab → story', c1.crossDomainRelations.length === 9 && c1.crossDomainRelations.every((r) => r.from.every((x) => x.startsWith('collab:')) && r.to.every((x) => x.startsWith('story:'))));
