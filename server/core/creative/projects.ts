@@ -11,11 +11,23 @@ export interface CreativeProject {
   id: string;
   orderId: string | null;
   ownerId: string;
-  specialistId: null;
+  specialistId: string | null;
+  specialistFirebaseUid?: string | null;
+  specialistName?: string | null;
+  marketplaceVersion?: number;
   sourceProjectId: string;
   bookId: string;
   title: string;
-  status: "DRAFT";
+  status:
+    | "DRAFT"
+    | "MODERATION"
+    | "OPEN"
+    | "SPECIALIST_SELECTED"
+    | "IN_PROGRESS"
+    | "REVIEW"
+    | "COMPLETED"
+    | "CANCELLED"
+    | "ARCHIVED";
   startedAt: null;
   completedAt: null;
   createdAt: string;
@@ -101,14 +113,12 @@ export function registerCreativeProjectRoutes(
           throw new WorkspaceError(401, "Увійдіть у систему.");
         await fn(req, res, req.principal.id, String(req.params.projectId));
       } catch (e) {
-        res
-          .status(e instanceof WorkspaceError ? e.status : 500)
-          .json({
-            error:
-              e instanceof WorkspaceError
-                ? e.message
-                : "Не вдалося відкрити творчі проєкти.",
-          });
+        res.status(e instanceof WorkspaceError ? e.status : 500).json({
+          error:
+            e instanceof WorkspaceError
+              ? e.message
+              : "Не вдалося відкрити творчі проєкти.",
+        });
       }
     };
   app.get(
@@ -126,11 +136,9 @@ export function registerCreativeProjectRoutes(
   app.post(
     base,
     handle(async (req, res, user, book) => {
-      res
-        .status(201)
-        .json({
-          project: await createCreativeProject(d, user, book, req.body),
-        });
+      res.status(201).json({
+        project: await createCreativeProject(d, user, book, req.body),
+      });
     }),
   );
 }

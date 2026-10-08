@@ -30,9 +30,11 @@ export const CREATIVE_WORK_TYPES = [
   "social",
   "advertising",
   "layout",
+  "3d",
   "other",
 ] as const;
 export interface BriefData {
+  language?: "uk" | "en" | "other";
   type: (typeof CREATIVE_WORK_TYPES)[number];
   title: string;
   description: string;
@@ -132,6 +134,7 @@ export function validateBrief(raw: unknown): BriefData {
           "concepts",
           "revisionRounds",
           "references",
+          "language",
           "aiPolicy",
           ...Object.keys(limits),
         ].includes(k),
@@ -189,8 +192,10 @@ export function validateBrief(raw: unknown): BriefData {
       );
     }
   }
+  if(r.language!==undefined&&!['uk','en','other'].includes(String(r.language)))throw new WorkspaceError(422,'Оберіть мову брифу.');
   return {
     ...out,
+    ...(r.language===undefined?{}:{language:r.language}),
     type: r.type,
     concepts: r.concepts,
     revisionRounds: r.revisionRounds,

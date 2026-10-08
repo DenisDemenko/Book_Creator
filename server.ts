@@ -1,3 +1,6 @@
+import {registerCreativeOrderBindingRoutes} from './server/core/creative/orderBinding';
+import {findUserByFirebaseUid} from './server/store';
+import {fetchCreativeOrderSelection} from './server/marketplaceBridge';
 import {registerCreativeBriefRoutes} from './server/core/creative/briefs';
 import {publishCreativeBrief} from './server/marketplaceBridge';
 import {assetLevel,canRead} from './server/core/collaboration/access';
@@ -818,6 +821,16 @@ registerGitCommandRoutes(app);
   const collaborationAiDeps={repo:getCoreRepository,access:realtimeAccessDeps,principal:async(userId:string)=>{const u=await findUserForAccess(userId);return u&&!u.disabled?{id:u.id,role:u.role,isGuest:false} as any:null;}};
   registerCollaborationAiRoutes(app,collaborationAiDeps);
   registerCreativeProjectRoutes(app,collaborationAiDeps);
+  registerCreativeOrderBindingRoutes(app, {
+    ...collaborationAiDeps,
+    specialistUser: findUserByFirebaseUid,
+    fetchSelection: async (req, orderId) => {
+      const user = await findUserForAccess(req.principal!.id as string);
+      if (!user?.firebaseUid || user.disabled) throw new Error('Firebase account required.');
+      return fetchCreativeOrderSelection(orderId, user.firebaseUid);
+    },
+  });
+
   registerCreativeBriefRoutes(app, {
     ...collaborationAiDeps,
     aiGuard: requirePermission("canUseAi"),

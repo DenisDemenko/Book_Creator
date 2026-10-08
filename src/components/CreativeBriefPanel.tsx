@@ -1,3 +1,5 @@
+import { CreativeOrderBinding } from "./CreativeOrderBinding";
+import type { CreativeProject } from "../../server/core/creative/projects";
 import { useCallback, useEffect, useState } from "react";
 import type {
   BriefData,
@@ -7,6 +9,7 @@ import type {
 } from "../../server/core/creative/briefs";
 const empty: BriefData = {
   type: "cover",
+  language: "uk",
   title: "",
   description: "",
   result: "",
@@ -33,6 +36,7 @@ const names: Record<BriefData["type"], string> = {
   social: "Соцмережі",
   advertising: "Реклама",
   layout: "Верстка",
+  "3d": "3D модель",
   other: "Інше",
 };
 const labels = {
@@ -49,7 +53,7 @@ const field =
   "w-full min-w-0 rounded border border-slate-600 bg-slate-950 p-2 text-slate-100";
 const button = "rounded border border-slate-600 px-3 py-2 disabled:opacity-40";
 interface State {
-  project: { id: string; title: string };
+  project: CreativeProject;
   bookTitle: string;
   brief: CreativeBrief | null;
   targets: CreativeTarget[];
@@ -152,6 +156,7 @@ export function CreativeBriefPanel({
       )}
       {state && (
         <>
+          <CreativeOrderBinding project={state.project} onSynced={load} />
           <p>
             Бриф: {state.brief?.status ?? "Не збережено"} · Версія {version}.
             Статус MODERATION означає надсилання в Marketplace, біржа замовлень
@@ -194,6 +199,23 @@ export function CreativeBriefPanel({
                     {label}
                   </option>
                 ))}
+              </select>
+            </label>
+            <label>
+              Мова брифу
+              <select
+                className={field}
+                value={data.language ?? "other"}
+                onChange={(e) =>
+                  setData({
+                    ...data,
+                    language: e.target.value as BriefData["language"],
+                  })
+                }
+              >
+                <option value="uk">Українська</option>
+                <option value="en">English</option>
+                <option value="other">Інша / не вказано</option>
               </select>
             </label>
             {Object.entries(labels).map(([key, label]) => (

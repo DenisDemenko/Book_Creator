@@ -1646,3 +1646,11 @@ export async function publishCreativeBrief(input:{externalId:string;sourceRevisi
  if(typeof result.id!=='string'||result.status!=='MODERATION')throw new MarketplaceBridgeError('Невідома відповідь Marketplace.','rejected',502);
  return result;
 }
+
+/** Owner-scoped selection lookup: no book content crosses this endpoint. */
+export async function fetchCreativeOrderSelection(orderId:string,ownerFirebaseUid:string,deps:{fetch?:typeof fetch;settings?:BridgeSettings}={}){
+ const settings=deps.settings??await readBridgeSettings();
+ const r=await (deps.fetch??fetch)(`${settings.url}/bridge/creative-orders/${encodeURIComponent(orderId)}/selection?ownerFirebaseUid=${encodeURIComponent(ownerFirebaseUid)}`,{headers:{'x-bridge-key':settings.key},signal:AbortSignal.timeout(20000)});
+ if(!r.ok)throw new MarketplaceBridgeError('Marketplace не повернув вибір фахівця.','rejected',r.status);
+ return await r.json() as import('./core/creative/orderBinding').OrderSelection;
+}

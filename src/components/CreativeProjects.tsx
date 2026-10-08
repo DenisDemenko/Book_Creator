@@ -87,7 +87,7 @@ export function CreativeProjects({ bookId }: { bookId: string }) {
       <ul className="space-y-2">
         {projects.map((p) => (
           <li key={p.id} className="rounded border border-slate-700 p-3">
-            <a className="underline" href={buildCreativeAccessPath(p.id,API_BASE)}>{p.title} — бриф і доступ</a> · Чернетка{" "}
+            <a className="underline" href={buildCreativeAccessPath(p.id,API_BASE)}>{p.title} — бриф і доступ</a> · {p.status}{" "}
             <small>{new Date(p.createdAt).toLocaleDateString("uk-UA")}</small>
           </li>
         ))}

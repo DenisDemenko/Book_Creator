@@ -611,13 +611,17 @@
   План: PLAN_CREATIVE_BRIEF.md; приймання: docs/acceptance/T7.2.md.
   Production/Firebase/реальний AI очікують ручного прогону.
   Залежить: Т6.2, Т7.1.
-- ⬜ **Т7.3 · Біржа творчих замовлень (M).** Каталог (категорії, фільтри,
+- ✅ **Т7.3 · Біржа творчих замовлень (M).** Каталог (категорії, фільтри,
   картка без приватного змісту книги), сторінка замовлення, заявки фахівців,
   порівняння й вибір виконавця → CreativeProject; статуси DRAFT /
   MODERATION / OPEN / SPECIALIST_SELECTED / IN_PROGRESS / REVIEW / COMPLETED /
   CANCELLED / ARCHIVED. Дизайн — макет Stitch 9 `fusion_lab_creative_studio`
   (див. Т8.3).
-  Готово: «фахівець подає заявку», «автор обирає фахівця».
+  Реалізовано: каталог UA/EN, модерація, заявки/CAS, порівняння, явний вибір,
+  синхронізація CreativeProject за Firebase UID без автоматичних grants.
+  Локально: API 145/145, browser 6/0, Studio 13/0; npm test/types/build успішні.
+  Приймання: docs/acceptance/T7.3.md; production/Firebase ще очікують.
+  Макет Stitch 9 — окремий Т8.3.
   Залежить: Т7.1; рішення власника щодо репозиторію.
 - ⬜ **Т7.4 · Creative Workspace (L).** Вкладки §6.1; три колонки на
   компʼютері (бриф і дозволені сутності — перегляд — чат і дії
