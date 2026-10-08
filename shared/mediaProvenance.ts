@@ -203,7 +203,7 @@ export function normalizeMediaMetadata(
       !(CREATIVE_MEDIA_STATUSES as readonly unknown[]).includes(b.status) ||
       b.status === "CANON"
     )
-      fail("CANON додається окремою дією Visual Bible (Т7.6).");
+      fail("CANON додається окремою підтвердженою дією Visual Bible.");
     out.status = b.status as CreativeMediaStatus;
   }
   for (const key of [

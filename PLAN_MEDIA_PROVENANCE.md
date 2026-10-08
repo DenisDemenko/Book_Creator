@@ -17,7 +17,8 @@
 
 Типи: IMAGE, VIDEO, COVER, REFERENCE, DOCUMENT, AUDIO, SOURCE_FILE, OTHER.
 Статуси: DRAFT, REVIEW, APPROVED, REJECTED, ARCHIVED; CANON відображається
-в переліку, але його встановлення заборонене до окремого Т7.6.
+в переліку; його встановлює лише окрема підтверджена дія Visual Bible (Т7.6),
+не звичайний редактор метаданих. Див. PLAN_CREATIVE_BIBLE.md.
 Старий паспорт draft/final і ліцензії збережено. Legacy final означає готовий
 файл, а не зафіксоване людське затвердження: новий статус DRAFT, approval=null.
 Для старих записів автор/використання ШІ, яких не зафіксовано, не вигадуються.
@@ -85,4 +86,4 @@ Quota перенесення перевіряється на власника д
 конкурентність, privacy/CAS/AI policy/історія, браузерні компоненти й 390px.
 Реальні Firebase-логіни, production volume/redeploy та платні AI-виклики —
 окреме приймання [T7.5](docs/acceptance/T7.5.md). Marketplace цього етапу не
-потребує нової міграції чи зміни коду. Наступний пункт — Т7.6, Visual Bible.
+потребує нової міграції чи зміни коду. Visual/Style Bible реалізовано окремим Т7.6: PLAN_CREATIVE_BIBLE.md.

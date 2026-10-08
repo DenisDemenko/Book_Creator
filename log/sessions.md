@@ -1,6 +1,6 @@
 # Журнал сесій — і єдиний дім записів #114–#118
 
-## Сесія 08.10.2026 #01 — записи #392–#398
+## Сесія 08.10.2026 #01 — записи #392–#399
 
 **Тема:** наступний пункт після Т6.5 — Т6.6, ШІ з урахуванням співпраці.
 
@@ -23,6 +23,10 @@
 **Запис #398:** Т7.5 — явний імпорт APPROVED/FINAL до приватної медіатеки зі збереженням походження, версій і review; типи/статуси/фільтри, AI декларації/параметри/policy, metadata CAS й історія. SQLite/JSON і справжній Core: Memory/PostgreSQL по 18/0, Chromium 22/0; повний npm test — exit 0, image regression 157/0, media-passport 53/0; фінальні lint/build — exit 0, Workspace browser 38/0, video 115/0, journal/encoding/diff-check — успішні. PLAN_MEDIA_PROVENANCE.md і docs/acceptance/T7.5.md. Реалізація 79f745d запушена в origin/master, remote SHA звірено; identity Денис Деменко <tropazemli@gmail.com>. Наступне — Т7.6.
 
 **Не зроблено і чому (Т7.5):** production/Firebase/volume/redeploy/платні AI — окреме ручне приймання; CANON/Visual Bible — Т7.6, не почато. Зовнішні AI-файли — декларація, без перевірки чужого провайдера; quota refund/ліцензії не автоматичні. Marketplace цього етапу не змінено. Т4.3 і захищений SECRET_VAULT_KEY_BASE64 на Railway лишаються відкладеними.
+
+**Запис #399:** Т7.6 — private Visual Bible / Style Bible, окремі module grants, explicit CAS додавання / вилучення канону, immutable snapshots і atomic SQLite provenance/history/audit. Типізовані Core links / approved appearance, десять категорій і scoped scenes; версії стилю й structured context, без переписування approved files. Memory/PostgreSQL по 23/0, Chromium 27/0, full npm test — exit 0; фінальні lint/build — exit 0; journal/encoding/diff-check — успішні. PLAN_CREATIVE_BIBLE.md, docs/acceptance/T7.6.md. Наступне — Т7.7.
+
+**Не зроблено і чому (Т7.6):** production/Firebase/реальні логіни/volume/redeploy — ручне приймання. AI генерація / task-specific style override — Т7.7, не почато. JSON-only Bible — свідомо не реалізовано, для atomic canon потрібен спільний SQLite; старі операції медіатеки з JSON збережені. Marketplace не змінено. Т4.3 і SECRET_VAULT_KEY_BASE64 Railway лишаються відкладеними.
 
 ## Сесія 07.10.2026 #01 — записи #380–#391
 

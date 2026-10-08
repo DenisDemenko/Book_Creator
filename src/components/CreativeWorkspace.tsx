@@ -1,7 +1,7 @@
 import { emptyAi } from '../../shared/mediaProvenance';
 import { AiDeclarationFields } from './MediaProvenancePanel';
 import { WorkspaceMediaTransfer } from './WorkspaceMediaTransfer';
-import { buildAppPath } from "../utils/appRoutes";
+import { buildCreativeBiblePath, buildAppPath } from "../utils/appRoutes";
 import { API_BASE } from "../utils/basePath";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
@@ -1058,7 +1058,8 @@ export function CreativeWorkspace({
   return (
     <section className="space-y-4 min-w-0" aria-label="Creative Workspace">
       <header>
-        <h1 className="text-2xl font-bold">
+        <a className="underline" href={buildCreativeBiblePath(state.project.bookId, API_BASE)}>Visual Bible і Style Bible</a>
+      <h1 className="text-2xl font-bold">
           {state.project.title} — Creative Workspace
         </h1>
         <p>

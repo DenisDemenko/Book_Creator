@@ -600,6 +600,25 @@ export async function deleteAsset(id: string, ownerId: string): Promise<boolean>
   const record = await getAsset(id);
   if (!record || record.ownerId !== String(ownerId)) return false;
 
+  if (record.provenance.status === 'CANON') throw new MediaPassportError('Спочатку вилучіть матеріал із Visual Bible.');
+
+  // Remove metadata before asynchronous unlink so a concurrent CANON CAS cannot
+  // approve a file that this deletion is already taking away.
+  if (!useJson()) {
+    const c = getDb()!;
+    c.exec('BEGIN IMMEDIATE');
+    try {
+      const fresh = c.prepare('SELECT provenance FROM media_assets WHERE id=? AND owner_id=?').get(record.id, record.ownerId) as any;
+      if (!fresh) { c.exec('COMMIT'); return false; }
+      if (fresh.provenance && JSON.parse(fresh.provenance).status === 'CANON') throw new MediaPassportError('Спочатку вилучіть матеріал із Visual Bible.');
+      c.prepare('INSERT INTO media_asset_history(asset_id,root_id,owner_id,at,actor,action,details) VALUES(?,?,?,?,?,?,?)').run(record.id,record.rootId,record.ownerId,new Date().toISOString(),`user:${record.ownerId}`,'deleted',JSON.stringify({version:record.version,filename:record.filename}));
+      c.prepare('DELETE FROM media_assets WHERE id=?').run(record.id);
+      c.exec('COMMIT');
+    } catch (e) { c.exec('ROLLBACK'); throw e; }
+    try { await fs.unlink(assetPath(record)); } catch { /* Metadata/audit are already durable. */ }
+    return true;
+  }
+
   try {
     await fs.unlink(assetPath(record));
   } catch {

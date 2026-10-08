@@ -273,6 +273,7 @@ export function MediaProvenancePanel({
           )}
         </pre>
       )}
+      {p.status === "CANON" && <p>Матеріал у Visual Bible. Щоб змінити метадані, спочатку вилучіть його з канону окремою дією.</p>}
       <label className="block">
         Тип матеріалу
         <select
@@ -357,7 +358,7 @@ export function MediaProvenancePanel({
       {error && <p role="alert">{error}</p>}
       <button
         className={button}
-        disabled={!confirmed || busy}
+        disabled={!confirmed || busy || p.status === "CANON"}
         onClick={async () => {
           setBusy(true);
           setError("");

@@ -1,3 +1,4 @@
+import { canReadBibleAsset } from './server/core/creative/bible';
 import { registerCreativeWorkspaceRoutes } from './server/core/creative/workspace';
 import {registerCreativeOrderBindingRoutes} from './server/core/creative/orderBinding';
 import {findUserByFirebaseUid} from './server/store';
@@ -552,6 +553,7 @@ async function startServer() {
   registerMediaRoutes(app, {
     canViewBookAsset: async (req, record) => {
       if (!record.bookId) return false;
+      if (await canReadBibleAsset(collaborationAiDeps, req.principal!.id, record as any)) return true;
       const access = await resolveProjectAccess(req.principal as any, record.bookId, realtimeAccessDeps);
       if (!access || !canRead(assetLevel(access.effective,record.id??''))) return false;
       return (await bookMediaOwners(record.bookId, realtimeAccessDeps, getCoreRepository())).has(record.ownerId);

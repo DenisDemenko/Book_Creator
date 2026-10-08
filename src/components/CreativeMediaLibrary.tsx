@@ -1,3 +1,5 @@
+import { buildCreativeBiblePath } from '../utils/appRoutes';
+import { API_BASE } from '../utils/basePath';
 import { apiPath } from "../utils/basePath";
 import { useState } from "react";
 import {
@@ -190,6 +192,7 @@ export function CreativeMediaLibrary({
           <a href={apiPath(a.url)} download={a.filename} className="underline">
             Завантажити оригінал ({a.mimeType})
           </a>
+          {a.bookId&&<a className="underline block" href={buildCreativeBiblePath(a.bookId,API_BASE)}>Visual Bible · окремо додати до канону</a>}
           <MediaProvenancePanel asset={a} onChanged={onChanged} />
           <MediaPassportPanel
             assetId={a.id}

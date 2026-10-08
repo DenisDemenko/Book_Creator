@@ -1,4 +1,5 @@
 /** Private T7.4 workspace. Files and revisions stay in Studio; approval is not canon. */
+import { registerCreativeBibleRoutes } from "./bible";
 import { randomUUID } from "node:crypto";
 import type { Express, Request, Response } from "express";
 import type { CollaborationAiDeps } from "../collaboration/aiCollaboration";
@@ -366,6 +367,7 @@ export function registerCreativeWorkspaceRoutes(
   d: CreativeWorkspaceDeps,
 ) {
   registerMediaProvenanceRoutes(app, d);
+  registerCreativeBibleRoutes(app, d);
   const base = "/api/creative/projects/:id/workspace";
   const handle =
     (fn: (q: Request, r: Response, u: string, id: string) => Promise<void>) =>
@@ -1175,6 +1177,8 @@ function registerMediaProvenanceRoutes(app: Express, d: CreativeWorkspaceDeps) {
       const a = await getAsset(String(q.params.assetId));
       if (!a || a.ownerId !== u)
         throw new WorkspaceError(404, "Матеріал не знайдено.");
+      if (a.provenance.status === "CANON")
+        throw new WorkspaceError(422, "Спочатку вилучіть матеріал із Visual Bible окремою дією.");
       const b = payload(q.body);
       if (b.confirmed !== true)
         throw new WorkspaceError(422, "Підтвердьте зміни метаданих.");

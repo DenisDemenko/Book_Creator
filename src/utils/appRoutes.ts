@@ -159,3 +159,10 @@ export function buildCreativeAccessPath(id:string,base=''){return `${base.replac
 /** T7.4: private creative workspace; normal app route sync must not replace it. */
 export function parseCreativeWorkspacePath(pathname:string,base=''):string|null{const rest=stripBase(pathname,base);const match=rest?.match(/^\/creative\/workspace\/([A-Za-z0-9._-]{1,128})\/?$/);return match?.[1]??null;}
 export function buildCreativeWorkspacePath(id:string,base=''){return `${base.replace(/\/$/,'')}/creative/workspace/${encodeURIComponent(id)}`;}
+
+/** T7.6: dedicated visual/style bible book routes. */
+export function parseCreativeBiblePath(pathname:string,base=''):{bookId:string;style:boolean}|null{
+ const m=stripBase(pathname,base)?.match(/^\/creative\/(bible|style)\/([A-Za-z0-9._-]{1,128})\/?$/);
+ return m?{bookId:m[2],style:m[1]==='style'}:null;
+}
+export function buildCreativeBiblePath(id:string,base='',style=false){return `${base.replace(/\/$/,'')}/creative/${style?'style':'bible'}/${encodeURIComponent(id)}`;}
