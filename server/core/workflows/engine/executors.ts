@@ -80,6 +80,7 @@ const PROMPT: NodeExecutor = async (node, state, env) => {
  * тайм-аут, повтори з паузою, резервна модель, ліміт витрат.
  */
 const LLM: NodeExecutor = async (node, state, env) => {
+  await guardCollaborationContext(state,env);
   const p = node.params ?? {};
   if (!state.prompt) throw new NodeError('Перед моделлю потрібна інструкція (PROMPT)', 'bad_input');
   const module = (state.prompt.module as CoreAiModule | undefined) ?? env.binding?.module ?? DEFAULT_WORKFLOW_MODULE;
@@ -121,6 +122,7 @@ const LLM: NodeExecutor = async (node, state, env) => {
   const routingAttempts:ReturnType<typeof routeByCost>[]=[];
   let reservedUsd=0;
   while (!out) {
+    await guardCollaborationContext(state,env);
     if(env.signal?.aborted)throw new JobCancelledError();
     if(p.cost_policy!==undefined){
       const routed=routeByCost(p.cost_policy,{system,user:state.prompt.user,maxTokens:generation.maxTokens!,spentUsd,reservedUsd,costLimit,override:state.input.costRouting,preferredModel:current});
@@ -128,7 +130,7 @@ const LLM: NodeExecutor = async (node, state, env) => {
       routingAttempts.push(routed);reservedUsd+=routed.estimatedUsd!;
     }
     try {
-      out = await env.services.generate({ module, modelId: current, system, user: state.prompt.user, projectId: env.run.projectId ?? '', actor: env.actor, signal: env.signal, generation });
+    out = await env.services.generate({ module, modelId: current, system, user: state.prompt.user, projectId: env.run.projectId ?? '', actor: env.actor, signal: env.signal, generation });
     } catch (err) {
       const e = err as Error;
       if(e instanceof JobFatalError||e instanceof JobCancelledError||e.name==='AbortError')throw Object.assign(e,{trace:{model:current??null,retryCount:attempt,warnings,...(initialRoute?{details:{costRouting:{...initialRoute,attempts:routingAttempts}}}:{})}});
@@ -210,6 +212,29 @@ const QUERY: NodeExecutor = async (node, state, env) => {
   return { patch: { vars: { ...state.vars, [`query_${node.id}`]: data } }, trace: { details: { operation: op } } };
 };
 
+const COLLAB_QUERY:NodeExecutor=async(node,state,env)=>{
+ if(!env.run.projectId||!env.services.queryCollaboration)throw new NodeError('Потрібна книга та авторизований сервіс співпраці.','binding');
+ const operation=str(node.params?.operation),args=(node.params?.args??{}) as Record<string,unknown>;
+ const data=await env.services.queryCollaboration({actor:env.run.startedBy,projectId:env.run.projectId,operation,args});
+ const digest=createHash('sha256').update(JSON.stringify(data)).digest('hex');
+ const guards=[...((state.vars.collaborationGuards??[]) as Array<unknown>),{operation,args,digest}];
+ return {patch:{vars:{...state.vars,[`query_${node.id}`]:data,collaborationGuards:guards}},trace:{details:{operation,authorizedActor:env.run.startedBy},validationResult:'authorized'}};
+};
+const COLLAB_PROPOSAL:NodeExecutor=async(node,state,env)=>{
+ await guardCollaborationContext(state,env);
+ if(!env.run.projectId||!env.services.proposeCollaborationTask)throw new NodeError('Потрібна книга та сервіс пропозицій співпраці.','binding');
+ const generated=node.params?.from_output===true&&state.output&&typeof state.output==='object'&&!Array.isArray(state.output)?state.output as Record<string,unknown>:{};
+ const input={title:node.params?.from_output===true?generated.title:renderPlaceholders(str(node.params?.title),state),target:node.params?.target??generated.target,candidateId:node.params?.candidateId??generated.candidateId,reason:node.params?.from_output===true?generated.reason:renderPlaceholders(str(node.params?.reason),state)};
+ const p=await env.services.proposeCollaborationTask({actor:env.run.startedBy,projectId:env.run.projectId,input});
+ return{patch:{vars:{...state.vars,collaborationProposalId:p.id}},trace:{decision:'propose_only',details:{proposalId:p.id},humanResult:'pending'}};
+};
+async function guardCollaborationContext(state:WfState,env:ExecEnv){
+ const guards=state.vars.collaborationGuards as Array<{operation:string;args:Record<string,unknown>;digest:string}>|undefined;
+ for(const guard of guards??[]){if(!env.run.projectId||!env.services.queryCollaboration)throw new NodeError('Немає авторизації контексту співпраці.','binding');
+ const fresh=await env.services.queryCollaboration({actor:env.run.startedBy,projectId:env.run.projectId,operation:guard.operation,args:guard.args});
+ if(createHash('sha256').update(JSON.stringify(fresh)).digest('hex')!==guard.digest)throw new NodeError('Контекст або права співпраці змінилися. Запустіть процес заново.','bad_input');}
+}
+
 /** TOOL: інструмент прив'язки чи платформи. */
 const TOOL: NodeExecutor = async (node, state, env) => {
   const id = str(node.params?.tool);
@@ -241,6 +266,8 @@ export const GENERIC_EXECUTORS: Record<string, NodeExecutor> = {
   VALIDATOR,
   CONDITION,
   QUERY,
+  COLLAB_QUERY,
+  COLLAB_PROPOSAL,
   TOOL,
   PROPOSAL,
   CONTINUITY_GATE,

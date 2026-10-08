@@ -195,6 +195,8 @@ export const NODE_TYPES: NodeTypeDef[] = [
       { id: 'entity_scope', name: N('Entity scope', 'Область сутностей'), type: 'string_list' },
       { id: 'limit', name: N('Limit', 'Скільки'), type: 'integer', min: 1, max: 500, default: 50 },
     ] },
+  {id:'COLLAB_QUERY',group:'story_core',name:N('Collaboration query','Запит співпраці'),description:'Авторизоване читання учасників, прав, завдань і доступного контексту.',inputs:'one',outputs:['out'],params:[{id:'operation',name:N('Operation','Операція'),type:'enum',required:true,options:['FIND_PARTICIPANT','FIND_SPECIALIST','GET_PROJECT_ROLES','GET_ACCESS_SCOPE','GET_CONTRIBUTIONS','GET_OPEN_TASKS','GET_DELIVERABLES','GET_AVAILABLE_CONTEXT']},{id:'args',name:N('Arguments','Аргументи'),type:'json'}]},
+  {id:'COLLAB_PROPOSAL',group:'story_core',name:N('Task suggestion','Пропозиція завдання'),description:'Лише пропозиція; виконавця явно обирає людина при схваленні.',inputs:'one',outputs:['out'],params:[{id:'from_output',name:N('Use validated output','З перевіреного JSON'),type:'boolean'},{id:'title',name:N('Title','Назва'),type:'text'},{id:'target',name:N('Target','Ціль'),type:'json'},{id:'candidateId',name:N('Suggested participant','Запропонований учасник'),type:'string'},{id:'reason',name:N('Reason','Обґрунтування'),type:'text'}]},
   { id: 'CONTEXT', group: 'story_core', name: N('Context', 'Контекст'), description: 'Збирає контекст для моделі в межах області (§37: Context Scope).', inputs: 'one', outputs: ['out'],
     params: [
       { id: 'context_policy', name: N('Context policy', 'Політика контексту'), type: 'enum', options: ['scene', 'chapter', 'entity_scope', 'book_summary'], required: true, default: 'scene' },
@@ -269,7 +271,7 @@ const NODE_TYPE_MAP = new Map(NODE_TYPES.map((t) => [t.id, t]));
  * зрозумілою помилкою: AGENT, PARALLEL / MERGE / LOOP — пізніше.
  */
 export const EXECUTABLE_NODE_TYPES = [
-  'START', 'END', 'CONTEXT', 'MEMORY', 'QUERY', 'PROMPT', 'LLM', 'TOOL', 'CONDITION', 'VALIDATOR', 'PROPOSAL', 'HUMAN_REVIEW', 'CANON_WRITE', 'CONTINUITY_GATE',
+  'START', 'END', 'COLLAB_QUERY', 'COLLAB_PROPOSAL', 'CONTEXT', 'MEMORY', 'QUERY', 'PROMPT', 'LLM', 'TOOL', 'CONDITION', 'VALIDATOR', 'PROPOSAL', 'HUMAN_REVIEW', 'CANON_WRITE', 'CONTINUITY_GATE',
   // Т5.5: шар рішень Jev і підпроцес.
   'SUBGRAPH', 'JEV_CHOICE', 'JEV_SCORE', 'JEV_NOUL', 'JEV_ROUTER', 'JEV_GATE', 'JEV_EVALUATOR', 'JEV_DECISION_BUNDLE',
 ];

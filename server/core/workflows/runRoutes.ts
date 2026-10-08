@@ -45,10 +45,21 @@ export function registerWorkflowRunRoutes(app: Express, d: WorkflowRunRoutesDeps
     console.error('[workflow-runs]', err);
     res.status(500).json({ error: (err as Error)?.message || 'Помилка запуску процесу ШІ', kind: 'error' });
   };
+  const canViewRun=async(repo:CoreRepository,req:Request,run:WorkflowRunRow)=>{
+    let current:WorkflowRunRow|null=run;
+    for(let depth=0;current&&depth<32;depth++){
+      const version=await repo.getWorkflowVersion(current.versionId);
+      if((version?.definition as unknown as WorkflowDefinition|undefined)?.nodes.some(n=>['COLLAB_QUERY','COLLAB_PROPOSAL'].includes(n.type))){return !!run.projectId&&!!await d.engine()?.services.canInspectWorkflowProject?.(actor(req),run.projectId);}
+      current=current.parentRunId?await repo.getWorkflowRun(current.parentRunId):null;
+    }
+    return !current;
+  };
   const withRepo = (fn: (repo: CoreRepository, req: Request, res: Response) => Promise<void>) => async (req: Request, res: Response) => {
     const repo = d.repo();
     if (!repo) return void res.status(503).json({ error: 'Семантичне ядро зараз недоступне — запуски процесів живуть у ньому.', kind: 'core_unavailable' });
     try {
+      if(req.params.runId){const run=await repo.getWorkflowRun(String(req.params.runId));if(run&&!await canViewRun(repo,req,run))throw new CoreRuleError('bad_actor','Журнал співпраці потребує повного доступу книги.');}
+      res.set('Cache-Control','no-store');
       await fn(repo, req, res);
     } catch (err) {
       fail(res, err);
@@ -113,7 +124,8 @@ export function registerWorkflowRunRoutes(app: Express, d: WorkflowRunRoutesDeps
       status,
       limit,
     });
-    res.json({ runs });
+    const visible=[];for(const run of runs)if(await canViewRun(repo,req,run))visible.push(run);
+    res.json({ runs:visible });
   }));
 
   app.get(`${BASE}/:runId`, d.requireStudio, withRepo(async (repo, req, res) => {

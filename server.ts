@@ -1,3 +1,5 @@
+import {registerCollaborationAiRoutes} from './server/core/collaboration/aiCollaborationRoutes';
+import {queryCollaboration,proposeCollaborationTask} from './server/core/collaboration/aiCollaboration';
 // Завантажуємо .env найпершим, поки жоден модуль ще не прочитав process.env.
 import 'dotenv/config';
 import { evaluatePrivateMystery } from './server/core/mysteryDirector';
@@ -809,6 +811,8 @@ registerGitCommandRoutes(app);
     },
   });
   registerCollaborationWorkspaceRoutes(app, {access: realtimeAccessDeps, repo: getCoreRepository, describeUser: async id => (await findUserForAccess(id))?.name ?? null});
+  const collaborationAiDeps={repo:getCoreRepository,access:realtimeAccessDeps,principal:async(userId:string)=>{const u=await findUserForAccess(userId);return u&&!u.disabled?{id:u.id,role:u.role,isGuest:false} as any:null;}};
+  registerCollaborationAiRoutes(app,collaborationAiDeps);
   registerContributionRoutes(app,{repo:getCoreRepository,access:realtimeAccessDeps,onSaved:(stored,access)=>{
     const key=`book:${stored.id}`;const room=collabRooms.get(key);if(room)room.book=stored.book;
     broadcastToRoom(key,{type:'book:remote_update',payload:{book:stored.book,serverRevision:stored.revision,authoritative:true}});
@@ -918,7 +922,10 @@ registerGitCommandRoutes(app);
   const workflowEngine = (): EngineDeps | null => {
     const repo = getCoreRepository();
     return repo
-      ? { repo, services: { canInspectWorkflowProject: async (actor,projectId) => {
+      ? { repo, services: {
+        queryCollaboration: async({actor,projectId,operation,args})=>{if(!actor.startsWith('user:'))throw new Error('Потрібна людина.');return queryCollaboration(collaborationAiDeps,actor.slice(5),projectId,operation,args);},
+        proposeCollaborationTask: async({actor,projectId,input})=>{if(!actor.startsWith('user:'))throw new Error('Потрібна людина.');return proposeCollaborationTask(collaborationAiDeps,actor.slice(5),projectId,input);},
+        canInspectWorkflowProject: async (actor,projectId) => {
           const user=actor.startsWith('user:')?await findUserForAccess(actor.slice(5)):null;
           if(!user||user.disabled)return false;
           const access=await resolveProjectAccess({id:user.id,role:user.role,isGuest:false} as any,projectId,realtimeAccessDeps).catch(()=>null);

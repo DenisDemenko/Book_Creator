@@ -27,7 +27,7 @@ export function workItems(projectId: string): WorkItem[] {
 export function workNotices(projectId: string, userId: string): WorkNotice[] {
   return db().prepare('SELECT payload FROM collaboration_notices WHERE project_id=? AND user_id=?').all(projectId,userId).map((r: any) => JSON.parse(r.payload));
 }
-export function saveWorkItem(projectId: string, item: WorkItem, expectedVersion: number | null, recipients: string[]): WorkItem {
+export function saveWorkItem(projectId: string, item: WorkItem, expectedVersion: number | null, recipients: string[], onCommit?:()=>void): WorkItem {
   const conn = db();
   conn.exec('BEGIN IMMEDIATE');
   try {
@@ -42,6 +42,7 @@ export function saveWorkItem(projectId: string, item: WorkItem, expectedVersion:
       conn.prepare(`DELETE FROM collaboration_notices WHERE project_id=? AND user_id=? AND rowid NOT IN
         (SELECT rowid FROM collaboration_notices WHERE project_id=? AND user_id=? ORDER BY rowid DESC LIMIT 500)`).run(projectId,userId,projectId,userId);
     }
+    onCommit?.();
     conn.exec('COMMIT');
   } catch (e) { conn.exec('ROLLBACK'); throw e; }
   return item;

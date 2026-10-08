@@ -71,6 +71,8 @@ export interface BindingDef {
 
 /** Залежності рушія від Студії (у тестах — підставні). */
 export interface EngineServices {
+  queryCollaboration?: (ctx:{actor:CoreActor;projectId:string;operation:string;args:Record<string,unknown>})=>Promise<unknown>;
+  proposeCollaborationTask?: (ctx:{actor:CoreActor;projectId:string;input:Record<string,unknown>})=>Promise<{id:string}>;
   /** Feedback contains book text and author corrections: full book access only. */
   canInspectWorkflowProject?: (actor:CoreActor,projectId:string)=>Promise<boolean>;
   /** Full-access simulation entry; returns only safe metadata, never thoughts/secrets. */

@@ -1,3 +1,4 @@
+import {CollaborationTaskSuggestions} from './CollaborationTaskSuggestions';
 import React, { useState } from "react";
 import type { Book } from "../types";
 import { gs } from "./graphStudio/gsApi";
@@ -87,6 +88,7 @@ export function CollaborationChanges({
   return (
     <section className="space-y-3 min-w-0" data-collaboration-changes>
       <h2 className="font-bold">Пропозиції змін і внески</h2>
+      <CollaborationTaskSuggestions bookId={bookId}/>
       <button className={button} disabled={busy} onClick={() => void act(load)}>
         Завантажити зміни
       </button>

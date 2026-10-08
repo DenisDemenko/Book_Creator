@@ -69,11 +69,13 @@ async function main() {
     assert.equal(check.allowed, true);
   });
 
+  // These lifetime records precede activation; equal millisecond timestamps belong to the new period.
+  const historicalUsageAt = new Date(Date.now() - 1000).toISOString();
   // Симулюємо 10 успішних генерацій.
   for (let i = 0; i < 10; i++) {
     await recordUsage({
       id: `use-test-${i}`,
-      timestamp: new Date().toISOString(),
+      timestamp: historicalUsageAt,
       userId,
       userEmail: 'sub-test@example.com',
       role: 'writer',
@@ -96,7 +98,7 @@ async function main() {
   await test('невдалі спроби не рахуються в квоту', async () => {
     await recordUsage({
       id: 'use-test-failed',
-      timestamp: new Date().toISOString(),
+      timestamp: historicalUsageAt,
       userId,
       userEmail: 'sub-test@example.com',
       role: 'writer',

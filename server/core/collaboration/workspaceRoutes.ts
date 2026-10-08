@@ -9,9 +9,7 @@ import { entityLevel, levelRank, sceneLevel } from './access';
 import { ensureDeadlineNotices, readWorkNotice, saveWorkItem, workItems, workNotices, WorkspaceError, type WorkTarget, type WorkItem } from './workspaceStore';
 
 interface Deps { access: RealtimeAccessDeps; repo: () => CoreRepository | null; describeUser?: (userId:string)=>Promise<string|null> }
-export function registerCollaborationWorkspaceRoutes(app: Express, deps: Deps) {
-  const base = '/api/core/projects/:projectId/collaboration';
-  async function level(target: WorkTarget, a: ProjectAccess, book: StoredBook, repo: CoreRepository): Promise<number> {
+export async function collaborationTargetLevel(target: WorkTarget, a: ProjectAccess, book: StoredBook, repo: CoreRepository): Promise<number> {
     if (!target || typeof target !== 'object') return 0;
     switch(target.kind) {
       case 'book': return levelRank(a.effective.book);
@@ -27,6 +25,9 @@ export function registerCollaborationWorkspaceRoutes(app: Express, deps: Deps) {
       default: return 0;
     }
   }
+
+export function registerCollaborationWorkspaceRoutes(app: Express, deps: Deps) {
+  const base = '/api/core/projects/:projectId/collaboration';
   const handle = (fn:(req:Request,res:Response,a:ProjectAccess,b:StoredBook,r:CoreRepository)=>Promise<void>) => async(req:Request,res:Response)=> {
     res.set('Cache-Control','no-store');
     try {
@@ -52,12 +53,12 @@ export function registerCollaborationWorkspaceRoutes(app: Express, deps: Deps) {
     for(const m of b.book.illustrations as any[] ?? []) candidates.push({target:{kind:'material',id:m.id},label:m.title ?? m.name ?? m.id});
     for(const m of await listAssets(b.ownerId,{bookId:a.projectId})) if(!candidates.some(c=>c.target.kind==='material'&&c.target.id===m.id)) candidates.push({target:{kind:'material',id:m.id},label:m.title || m.filename});
     const out = [];
-    for(const c of candidates) { const rank = await level(c.target,a,b,r); if(rank>0) out.push({...c,canComment:rank>=2}); }
+    for(const c of candidates) { const rank = await collaborationTargetLevel(c.target,a,b,r); if(rank>0) out.push({...c,canComment:rank>=2}); }
     return out;
   };
   app.get(base,handle(async(_req,res,a,b,r)=> {
     const visible: WorkItem[] = [];
-    for(const item of workItems(a.projectId)) if(await level(item.target,a,b,r)>0) visible.push(item);
+    for(const item of workItems(a.projectId)) if(await collaborationTargetLevel(item.target,a,b,r)>0) visible.push(item);
     const ids = new Set(visible.map(i=>i.id));
     ensureDeadlineNotices(a.projectId,a.userId,visible);
     const people = (await r.listParticipants(a.projectId)).filter(p=>p.status==='active');
@@ -71,7 +72,7 @@ export function registerCollaborationWorkspaceRoutes(app: Express, deps: Deps) {
   }));
   app.get(`${base}/target`,handle(async(req,res,a,b,r)=> {
     const target:WorkTarget = {kind:String(req.query.kind) as WorkTarget['kind'],id:String(req.query.id ?? ''),chapterId:String(req.query.chapterId ?? ''),sectionId:String(req.query.sectionId ?? '')};
-    if (!await level(target,a,b,r)) throw new WorkspaceError(404,'Ціль не знайдено.');
+    if (!await collaborationTargetLevel(target,a,b,r)) throw new WorkspaceError(404,'Ціль не знайдено.');
     if(target.kind==='paragraph') {const p=await r.getParagraph(a.projectId,target.id);res.json({kind:'paragraph',paragraph:{chapterId:target.chapterId,sectionId:target.sectionId,editorPid:p.editorPid??p.id,text:p.text}});}
     else if(target.kind==='entity') { const e=await r.getEntity(a.projectId,target.id); res.json({kind:'entity',entity:e}); }
     else if(target.kind==='material') { const m=await getAsset(target.id);const item=m && m.bookId===a.projectId && m.ownerId===b.ownerId ? {id:m.id,title:m.title||m.filename,url:m.url} : (b.book.illustrations as any[]).find(m=>m.id===target.id);res.json({kind:'material',material:item}); }
@@ -88,7 +89,7 @@ export function registerCollaborationWorkspaceRoutes(app: Express, deps: Deps) {
       if(id===b.ownerId) out.push(id);
       else if(eff && eff !== 'unavailable') {
         const access:ProjectAccess = {projectId:a.projectId,userId:id,role:'participant',isOwner:false,canWrite:false,effective:eff};
-        if(await level(item.target,access,b,r)>0) out.push(id);
+        if(await collaborationTargetLevel(item.target,access,b,r)>0) out.push(id);
       }
     }
     return out;
@@ -99,7 +100,7 @@ export function registerCollaborationWorkspaceRoutes(app: Express, deps: Deps) {
     const p = await r.getParticipant(a.projectId,id);
     if(!p || p.status!=='active') throw new WorkspaceError(400,'Виконавець має бути активним учасником.');
     const eff = await deps.access.effectiveAccess?.({projectId:a.projectId,userId:id,invite:null});
-    if(!eff || eff==='unavailable' || !await level(target,{...a,userId:id,isOwner:false,effective:eff},b,r)) throw new WorkspaceError(403,'Виконавцю недоступна ціль завдання.');
+    if(!eff || eff==='unavailable' || !await collaborationTargetLevel(target,{...a,userId:id,isOwner:false,effective:eff},b,r)) throw new WorkspaceError(403,'Виконавцю недоступна ціль завдання.');
     return id;
   }
   const text = (v:unknown)=> { if(typeof v !== 'string' || !v.trim() || v.length>4000) throw new WorkspaceError(400,'Текст має містити від 1 до 4000 символів.'); return v.trim(); };
@@ -110,7 +111,7 @@ export function registerCollaborationWorkspaceRoutes(app: Express, deps: Deps) {
     if (!target || typeof target !== 'object' || Array.isArray(target) || Object.keys(target).some(k=>!['kind','id','chapterId','sectionId'].includes(k)) || target.kind !== 'book' && (typeof target.id !== 'string' || !target.id || target.id.length>200) || ['scene','paragraph'].includes(target.kind) && (typeof target.chapterId !== 'string' || !target.chapterId || target.chapterId.length>200)) throw new WorkspaceError(400,'Некоректна ціль запису.');
     if(target.kind==='book' && Object.keys(target).length!==1 || target.kind!=='paragraph' && target.sectionId!==undefined || !['scene','paragraph'].includes(target.kind) && target.chapterId!==undefined) throw new WorkspaceError(400,'Зайві поля цілі.');
     if(target.kind==='paragraph' && (typeof target.sectionId!=='string'||!target.sectionId||target.sectionId.length>200)) throw new WorkspaceError(400,'Потрібна сцена абзацу.');
-    if(await level(target,a,b,r)<2) throw new WorkspaceError(403,'Немає права коментувати цю ціль.');
+    if(await collaborationTargetLevel(target,a,b,r)<2) throw new WorkspaceError(403,'Немає права коментувати цю ціль.');
     if(!['comment','task'].includes(body.kind)) throw new WorkspaceError(400,'Невідомий тип запису.');
     if(body.kind==='task' && !manage(a)) throw new WorkspaceError(403,'Завдання створює керівник проєкту.');
     const at=new Date().toISOString();
@@ -119,11 +120,11 @@ export function registerCollaborationWorkspaceRoutes(app: Express, deps: Deps) {
   }));
   app.patch(`${base}/items/:id`,handle(async(req,res,a,b,r)=> {
     const item=workItems(a.projectId).find(i=>i.id===req.params.id);
-    if(!item || !await level(item.target,a,b,r)) throw new WorkspaceError(404,'Запис не знайдено.');
+    if(!item || !await collaborationTargetLevel(item.target,a,b,r)) throw new WorkspaceError(404,'Запис не знайдено.');
     const body=req.body ?? {}; const keys=Object.keys(body);
     if(keys.length<2 || keys.some(k=>!['expectedVersion','text','status','assigneeId','dueAt'].includes(k)) || (!Number.isSafeInteger(body.expectedVersion)||body.expectedVersion<1)) throw new WorkspaceError(400,'Потрібні версія та дозволені поля.');
     if(!manage(a)) {
-      if(item.kind==='comment' ? item.authorId!==a.userId || await level(item.target,a,b,r)<2 : item.assigneeId!==a.userId || keys.some(k=>!['expectedVersion','status'].includes(k))) throw new WorkspaceError(403,'Немає права змінювати цей запис.');
+      if(item.kind==='comment' ? item.authorId!==a.userId || await collaborationTargetLevel(item.target,a,b,r)<2 : item.assigneeId!==a.userId || keys.some(k=>!['expectedVersion','status'].includes(k))) throw new WorkspaceError(403,'Немає права змінювати цей запис.');
     }
     if(body.status!==undefined && !['open','done'].includes(body.status)) throw new WorkspaceError(400,'Невідомий стан.');
     if(item.kind==='comment' && (body.assigneeId!==undefined||body.dueAt!==undefined)) throw new WorkspaceError(400,'Виконавець і строк стосуються завдання.');
@@ -135,7 +136,7 @@ export function registerCollaborationWorkspaceRoutes(app: Express, deps: Deps) {
   app.post(`${base}/notifications/:id/read`,handle(async(req,res,a,b,r)=> {
     const notice=workNotices(a.projectId,a.userId).find(n=>n.id===req.params.id);
     const item=notice && workItems(a.projectId).find(i=>i.id===notice.itemId);
-    if(!item || !await level(item.target,a,b,r)) throw new WorkspaceError(404,'Сповіщення не знайдено.');
+    if(!item || !await collaborationTargetLevel(item.target,a,b,r)) throw new WorkspaceError(404,'Сповіщення не знайдено.');
     readWorkNotice(a.projectId,a.userId,String(req.params.id)); res.json({ok:true});
   }));
 }
