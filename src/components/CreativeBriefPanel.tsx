@@ -1,5 +1,5 @@
-import { buildCreativeWorkspacePath } from '../utils/appRoutes';
-import { API_BASE } from '../utils/basePath';
+import { buildCreativeWorkspacePath } from "../utils/appRoutes";
+import { API_BASE } from "../utils/basePath";
 import { CreativeOrderBinding } from "./CreativeOrderBinding";
 import type { CreativeProject } from "../../server/core/creative/projects";
 import { useCallback, useEffect, useState } from "react";
@@ -75,6 +75,8 @@ export function CreativeBriefPanel({
     [notice, setNotice] = useState(""),
     [confirmed, setConfirmed] = useState(false),
     [preview, setPreview] = useState(false),
+    [step, setStep] = useState(1),
+    [fullForm, setFullForm] = useState(false),
     [access, setAccess] = useState<{ grants: any[]; events: any[] }>({
       grants: [],
       events: [],
@@ -158,15 +160,69 @@ export function CreativeBriefPanel({
       )}
       {state && (
         <>
-          <a className="block underline" href={buildCreativeWorkspacePath(creativeProjectId,API_BASE)}>Відкрити Creative Workspace</a>
-      <CreativeOrderBinding project={state.project} onSynced={load} />
+          <a
+            className="block underline"
+            href={buildCreativeWorkspacePath(creativeProjectId, API_BASE)}
+          >
+            Відкрити Creative Workspace
+          </a>
+          <CreativeOrderBinding project={state.project} onSynced={load} />
           <p>
             Бриф: {state.brief?.status ?? "Не збережено"} · Версія {version}.
-            Статус MODERATION означає надсилання в Marketplace, біржа замовлень
-            — наступний етап.
+            Статус MODERATION означає надсилання в Marketplace. Після схвалення
+            бриф з’явиться на біржі замовлень.
           </p>
+          <nav
+            aria-label="Кроки створення замовлення"
+            className="flex flex-wrap gap-2"
+          >
+            {[
+              "Проєкт",
+              "Тип роботи",
+              "Бриф",
+              "Scope ACL",
+              "Умови",
+              "Публікація",
+            ].map((label, i) => (
+              <button
+                key={label}
+                type="button"
+                className={button}
+                aria-current={!fullForm && step === i + 1 ? "step" : undefined}
+                onClick={() => {
+                  setFullForm(false);
+                  setStep(i + 1);
+                }}
+              >
+                {i + 1}. {label}
+              </button>
+            ))}
+            <button
+              type="button"
+              className={button}
+              aria-pressed={fullForm}
+              onClick={() => setFullForm(!fullForm)}
+            >
+              Усі поля
+            </button>
+          </nav>
+          {(fullForm || step === 1) && (
+            <section
+              aria-label="Проєкт замовлення"
+              className="rounded border border-slate-700 p-4 space-y-2"
+            >
+              <h2 className="font-bold">1. Проєкт</h2>
+              <p>Книга: {state.bookTitle}</p>
+              <p>Творчий проєкт: {state.project.title}</p>
+              <p>
+                Бриф належить цьому проєкту. Для іншої книги поверніться до
+                «Творчих проєктів» і створіть проєкт у потрібній книзі.
+              </p>
+            </section>
+          )}
           <form
             className="grid gap-3"
+            hidden={!fullForm && ![2, 3, 5].includes(step)}
             onSubmit={(e) => {
               e.preventDefault();
               void run(async () => {
@@ -185,7 +241,7 @@ export function CreativeBriefPanel({
               });
             }}
           >
-            <label>
+            <label hidden={!fullForm && step !== 2}>
               Тип роботи
               <select
                 className={field}
@@ -204,7 +260,7 @@ export function CreativeBriefPanel({
                 ))}
               </select>
             </label>
-            <label>
+            <label hidden={!fullForm && step !== 3}>
               Мова брифу
               <select
                 className={field}
@@ -222,7 +278,14 @@ export function CreativeBriefPanel({
               </select>
             </label>
             {Object.entries(labels).map(([key, label]) => (
-              <label key={key}>
+              <label
+                key={key}
+                hidden={
+                  !fullForm &&
+                  step !==
+                    (["budgetTerms", "sourceFiles"].includes(key) ? 5 : 3)
+                }
+              >
                 {label}
                 <textarea
                   className={field}
@@ -248,7 +311,10 @@ export function CreativeBriefPanel({
                 />
               </label>
             ))}
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div
+              className="grid gap-3 sm:grid-cols-3"
+              hidden={!fullForm && step !== 5}
+            >
               <label>
                 Концепти
                 <input
@@ -287,7 +353,7 @@ export function CreativeBriefPanel({
                 />
               </label>
             </div>
-            <label>
+            <label hidden={!fullForm && step !== 5}>
               AI policy
               <select
                 className={field}
@@ -306,7 +372,7 @@ export function CreativeBriefPanel({
                 <option value="FORBIDDEN">AI заборонено</option>
               </select>
             </label>
-            <label>
+            <label hidden={!fullForm && step !== 3}>
               Публічні референси — HTTP(S), по рядку
               <textarea
                 className={field}
@@ -323,7 +389,10 @@ export function CreativeBriefPanel({
               Зберегти бриф і scope
             </button>
           </form>
-          <aside className="space-y-2 rounded border border-slate-700 p-3">
+          <aside
+            hidden={!fullForm && step !== 3}
+            className="space-y-2 rounded border border-slate-700 p-3"
+          >
             <label>
               Модель AI (порожньо — автоматично)
               <input
@@ -362,7 +431,11 @@ export function CreativeBriefPanel({
               Допомогти скласти ТЗ
             </button>
           </aside>
-          <section aria-label="Дерево матеріалів" className="space-y-2">
+          <section
+            hidden={!fullForm && step !== 4}
+            aria-label="Дерево матеріалів"
+            className="space-y-2"
+          >
             <h2 className="font-bold">Scope майбутнього виконавця</h2>
             <p>
               Вибір глави включає всі її сцени; вибір книги — всю книгу.
@@ -418,7 +491,7 @@ export function CreativeBriefPanel({
               );
             })}
           </section>
-          <section className="space-y-3">
+          <section hidden={!fullForm && step !== 6} className="space-y-3">
             <h2 className="font-bold">Підтвердження публічного брифу</h2>
             <button
               className={button}
@@ -477,6 +550,35 @@ export function CreativeBriefPanel({
               </p>
             )}
           </section>
+          {!fullForm && (
+            <div
+              className="flex flex-wrap items-center gap-3"
+              aria-label="Навігація майстра"
+            >
+              <button
+                type="button"
+                className={button}
+                disabled={busy || step === 1}
+                onClick={() => setStep(step - 1)}
+              >
+                Назад
+              </button>
+              <span>Крок {step} з 6</span>
+              <button
+                type="button"
+                className={button}
+                disabled={busy || step === 6}
+                onClick={() => setStep(step + 1)}
+              >
+                Далі
+              </button>
+              <p className="text-sm">
+                Перехід між кроками не зберігає і не публікує. Після scope й
+                умов збережіть бриф на кроці 5; на кроці 6 перегляньте
+                збережений текст і підтвердьте надсилання.
+              </p>
+            </div>
+          )}
           <section className="space-y-3">
             <h2 className="font-bold">Явно надати доступ активному учаснику</h2>
             <p>

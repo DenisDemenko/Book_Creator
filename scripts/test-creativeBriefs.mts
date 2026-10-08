@@ -471,6 +471,7 @@ try {
       write: false,
       platform: "browser",
       format: "iife",
+      define: { "import.meta.env": JSON.stringify({ BASE_URL: "/" }) },
     });
     const css = (await fs.readdir("dist/assets")).find((f) =>
       /^index-.*\.css$/.test(f),
@@ -497,7 +498,7 @@ try {
         errors: string[] = [];
       page.on("pageerror", (e) => errors.push(String(e)));
       await page.goto(new URL("/probe", base).href);
-      await page.waitForSelector("[data-creative-brief] textarea");
+      await page.waitForSelector("[aria-label=\"Кроки створення замовлення\"]").catch(async e => { console.log("BROWSER DIAGNOSTIC", errors, await page.evaluate(()=>document.body.innerText)); throw e; });
       const click = async (text: string) => {
         await page.evaluate((text) => {
           const b = Array.from(document.querySelectorAll("button")).find(
@@ -507,6 +508,18 @@ try {
           b.click();
         }, text);
       };
+      assert.ok(await page.$('[aria-label="Проєкт замовлення"]'));
+      assert.equal(await page.$eval('[data-creative-brief] form', e => getComputedStyle(e).display), 'none');
+      const beforeWizard = JSON.stringify(getCreativeBrief(project.id));
+      for (let step = 2; step <= 6; step++) {
+        await click("Далі");
+        await page.waitForFunction((step) => document.querySelector('[aria-label="Навігація майстра"]')?.textContent?.includes(`Крок ${step} з 6`), {}, step);
+      }
+      assert.equal(JSON.stringify(getCreativeBrief(project.id)), beforeWizard);
+      assert.ok(await page.$('[data-creative-brief] section:not([hidden])'));
+      check("BROWSER: six wizard steps preserve a private draft; navigation never saves or publishes");
+      await click("3. Бриф");
+      await page.waitForSelector("[data-creative-brief] textarea", {visible:true});
       await click("Допомогти скласти ТЗ");
       await page.waitForFunction(() =>
         Array.from(document.querySelectorAll("textarea")).some(
@@ -521,6 +534,7 @@ try {
       );
       assert.equal(getCreativeBrief(project.id)?.data.title, "AI draft");
       check("BROWSER: explicit private save");
+      await click("6. Публікація");
       await click("Переглянути збережений публічний бриф");
       await page.waitForSelector("pre");
       assert.ok(

@@ -139,7 +139,7 @@ remote перевірити можна, запушити — ні**.
 Т7.6 реалізовано (#399): окремі Visual/Style grants, CAS канон/вилучення/аудит, знімки образів, immutable версії стилю й scoped context. Memory/Pg 23/0, Chromium 27/0; full npm test і фінальні lint/build — exit 0. [Приймання](docs/acceptance/T7.6.md). Наступне — Т7.7.
 Т7.7 реалізовано (#400): приватні AI Tools, scoped context, grants/ліміти/jobs/DRAFT версії; Memory/Pg 22/0, adapters 2/0, Chromium 24/0. npm test та фінальні lint/build — exit 0. [Приймання](docs/acceptance/T7.7.md). Наступне — Т8.1.
 Т8.1 реалізовано (#401): чотири Stitch 9 лендінги UA/EN, public data і статуси; npm test/types/build — exit 0, Chromium 56/0, outage 8/0, teachers 2/0. [Приймання](docs/acceptance/T8.1.md). Наступне — Т8.2.
-Незапушені коміти: `git log origin/master..HEAD`. Marketplace Т8.2 ff6808f запушено; зведення залишку й live-сценаріїв ae19b0b запушено (#405) (`git push origin HEAD:master`). Identity Денис Деменко <tropazemli@gmail.com>. Т8.2 екрани готові, реєстр ролей відкритий; production-приймання docs/acceptance/T8.2.md. Т4.3 / SECRET_VAULT_KEY_BASE64 Railway відкладені.
+Незапушені: `git log origin/master..HEAD`. Marketplace Т8.3 72acb12 запушено; Studio wizard готовий до `git push origin HEAD:master`. Identity Денис Деменко <tropazemli@gmail.com>. Після деплою: docs/acceptance/T8.3.md. Т8.2 ролі, Т4.3/Vault відкриті.
 
 Історичні стани #374, #377, #379 з результатами й ручними перевірками:
 [повний текст](log/deploy-notes.md).
@@ -337,7 +337,7 @@ JS-файлу напряму, як зроблено тут.
 
 ---
 
-# Покажчик записів (405 записів, #1–#405)
+# Покажчик записів (406 записів, #1–#406)
 
 > Повні тексти записів лежать у теці `log/`, розбиті на частини — журнал
 > одним файлом доріс до 840 КБ, а його читає кожна нова сесія. Цей
@@ -352,6 +352,7 @@ JS-файлу напряму, як зроблено тут.
 
 | # | Назва | Статус | Файл |
 |---:|---|---|---|
+| 406 | Т8.3 — біржа творчих замовлень Stitch 9 і майстер брифу | ✅ Реалізовано | [301-350.md](log/301-350.md) |
 | 405 | Зведений залишок плану й усі відкладені живі прогони 7–8 жовтня | ✅ Документ створено | [301-350.md](log/301-350.md) |
 | 404 | Т8.2 — STEAM Teams v2.0 за макетами Stitch 9 | ⚠ Екрани готові; ролі відкриті | [301-350.md](log/301-350.md) |
 | 403 | Узгодження статусів дорожньої карти з журналом | ✅ Виконано | [301-350.md](log/301-350.md) |

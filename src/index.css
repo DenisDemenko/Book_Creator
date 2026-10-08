@@ -2254,3 +2254,8 @@ html[data-header-collapsed='true'] {
   margin-top: 0;
   margin-bottom: 0.25rem;
 }
+
+/* Creative brief wizard: utility display classes must respect hidden steps. */
+[data-creative-brief] [hidden] {
+  display: none !important;
+}
