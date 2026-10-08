@@ -151,7 +151,7 @@ const png = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6zX8AAAAASUVORK5CYII=",
   "base64",
 );
-await promisify(execFile)("/usr/bin/ffmpeg", [
+await promisify(execFile)(process.env.FFMPEG_PATH || "ffmpeg", [
   "-v",
   "error",
   "-f",
