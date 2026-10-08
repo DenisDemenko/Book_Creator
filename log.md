@@ -139,7 +139,7 @@ remote перевірити можна, запушити — ні**.
 Т7.6 реалізовано (#399): окремі Visual/Style grants, CAS канон/вилучення/аудит, знімки образів, immutable версії стилю й scoped context. Memory/Pg 23/0, Chromium 27/0; full npm test і фінальні lint/build — exit 0. [Приймання](docs/acceptance/T7.6.md). Наступне — Т7.7.
 Т7.7 реалізовано (#400): приватні AI Tools, scoped context, grants/ліміти/jobs/DRAFT версії; Memory/Pg 22/0, adapters 2/0, Chromium 24/0. npm test та фінальні lint/build — exit 0. [Приймання](docs/acceptance/T7.7.md). Наступне — Т8.1.
 Т8.1 реалізовано (#401): чотири Stitch 9 лендінги UA/EN, public data і статуси; npm test/types/build — exit 0, Chromium 56/0, outage 8/0, teachers 2/0. [Приймання](docs/acceptance/T8.1.md). Наступне — Т8.2.
-Незапушені коміти: `git log origin/master..HEAD`. Marketplace Т8.1 0c45a8a запушено; журнал Studio 8794c02 запушено; FFmpeg fix запушено, Windows npm test/build підтверджені власником; статуси task.md узгоджено (#403), коміт 7869382; `git push origin HEAD:master`; identity Денис Деменко <tropazemli@gmail.com>. Production/Firebase/Studio rewrite — ручне приймання docs/acceptance/T8.1.md. Нагадування: SECRET_VAULT_KEY_BASE64 Railway і Т4.3. Наступне — Т8.2, архів наданий.
+Незапушені коміти: `git log origin/master..HEAD`. Marketplace Т8.2 ff6808f запушено; журнал Studio готовий до пуша (`git push origin HEAD:master`). Identity Денис Деменко <tropazemli@gmail.com>. Т8.2 екрани готові, реєстр ролей відкритий; production-приймання docs/acceptance/T8.2.md. Т4.3 / SECRET_VAULT_KEY_BASE64 Railway відкладені.
 
 Історичні стани #374, #377, #379 з результатами й ручними перевірками:
 [повний текст](log/deploy-notes.md).
@@ -337,7 +337,7 @@ JS-файлу напряму, як зроблено тут.
 
 ---
 
-# Покажчик записів (403 записи, #1–#403)
+# Покажчик записів (404 записи, #1–#404)
 
 > Повні тексти записів лежать у теці `log/`, розбиті на частини — журнал
 > одним файлом доріс до 840 КБ, а його читає кожна нова сесія. Цей
@@ -352,6 +352,7 @@ JS-файлу напряму, як зроблено тут.
 
 | # | Назва | Статус | Файл |
 |---:|---|---|---|
+| 404 | Т8.2 — STEAM Teams v2.0 за макетами Stitch 9 | ⚠ Екрани готові; ролі відкриті | [301-350.md](log/301-350.md) |
 | 403 | Узгодження статусів дорожньої карти з журналом | ✅ Виконано | [301-350.md](log/301-350.md) |
 | 402 | Сумісність Creative AI тесту з Windows FFmpeg | ✅ Реалізовано | [301-350.md](log/301-350.md) |
 | 401 | Т8.1 — чотири лендінги аудиторій за Stitch 9 | ✅ Реалізовано | [301-350.md](log/301-350.md) |
