@@ -138,7 +138,7 @@ remote перевірити можна, запушити — ні**.
 Т7.5 реалізовано (#398): явне перенесення затверджених версій до приватної медіатеки, походження/AI policy/CAS/історія, усі типи й фільтри. Memory/Pg 18/0, Chromium 22/0; npm test — exit 0. [Приймання](docs/acceptance/T7.5.md). Наступне — Т7.6.
 Т7.6 реалізовано (#399): окремі Visual/Style grants, CAS канон/вилучення/аудит, знімки образів, immutable версії стилю й scoped context. Memory/Pg 23/0, Chromium 27/0; full npm test і фінальні lint/build — exit 0. [Приймання](docs/acceptance/T7.6.md). Наступне — Т7.7.
 Т7.7 реалізовано (#400): приватні AI Tools, scoped context, grants/ліміти/jobs/DRAFT версії; Memory/Pg 22/0, adapters 2/0, Chromium 24/0. npm test та фінальні lint/build — exit 0. [Приймання](docs/acceptance/T7.7.md). Наступне — Т8.1.
-Незапушені коміти: `git log origin/master..HEAD`. Т7.7 підготовлено до коміту й пуша `git push origin HEAD:master`; identity Денис Деменко <tropazemli@gmail.com>. Production/Firebase/paid AI/volume/Docker — ручне приймання docs/acceptance/T7.7.md. Marketplace не змінено. Нагадування: SECRET_VAULT_KEY_BASE64 Railway і Т4.3. Наступне — Т8.1 (Stitch 9).
+Незапушені коміти: `git log origin/master..HEAD`. Т7.7: реалізація `e410679` запушена в origin/master без force, remote SHA звірено; цей документаційний коміт фіксує результат; пуш `git push origin HEAD:master`; identity Денис Деменко <tropazemli@gmail.com>. Production/Firebase/paid AI/volume/Docker — ручне приймання docs/acceptance/T7.7.md. Marketplace не змінено. Нагадування: SECRET_VAULT_KEY_BASE64 Railway і Т4.3. Наступне — Т8.1 (Stitch 9).
 
 Історичні стани #374, #377, #379 з результатами й ручними перевірками:
 [повний текст](log/deploy-notes.md).

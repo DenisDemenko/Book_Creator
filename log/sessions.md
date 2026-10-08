@@ -28,7 +28,7 @@
 
 **Не зроблено і чому (Т7.6):** production/Firebase/реальні логіни/volume/redeploy — ручне приймання. AI генерація / task-specific style override — Т7.7, не почато. JSON-only Bible — свідомо не реалізовано, для atomic canon потрібен спільний SQLite; старі операції медіатеки з JSON збережені. Marketplace не змінено. Т4.3 і SECRET_VAULT_KEY_BASE64 Railway лишаються відкладеними.
 
-**Запис #400:** Т7.7 — приватні AI Tools у Creative Workspace: чотири окремі дії, CAS дозволів, дозволений контекст / активний Style Bible, task override, приватні references, durable jobs / idempotency / ліміти, DRAFT version chains і generationContext до медіатеки. Memory/Pg по 22/0, adapters 2/0, інтегрований Chromium 24/0; npm test, фінальні lint/build — exit 0. PLAN_CREATIVE_AI.md, docs/acceptance/T7.7.md.
+**Запис #400:** Т7.7 — приватні AI Tools у Creative Workspace: чотири окремі дії, CAS дозволів, дозволений контекст / активний Style Bible, task override, приватні references, durable jobs / idempotency / ліміти, DRAFT version chains і generationContext до медіатеки. Memory/Pg по 22/0, adapters 2/0, інтегрований Chromium 24/0; npm test, фінальні lint/build — exit 0. PLAN_CREATIVE_AI.md, docs/acceptance/T7.7.md. Реалізація e410679 запушена в origin/master, remote SHA звірено.
 
 **Не зроблено і чому (Т7.7):** production/Firebase/реальні paid providers та Docker rebuild — ручне приймання після деплою; video edit створює новий ролик за першим кадром. Worker не відновлює paid provider після crash і не повторює автоматично. Marketplace не змінено. Т4.3 / SECRET_VAULT_KEY_BASE64 лишаються відкладені. Наступне — Т8.1, потрібен архів Stitch 9.
 
