@@ -123,7 +123,7 @@ remote перевірити можна, запушити — ні**.
 > прохання власника** (AGENTS.md), тому між сесіями тут завжди щось лежить —
 > і наступна сесія має знати, що саме, бо `git log` вона не памʼятає.
 
-## Стан на 08.10.2026 (сесія #01, запис #400)
+## Стан на 08.10.2026 (сесія #01, запис #401)
 
 Т5.7 В6 реалізовано: Memory/PostgreSQL 44/0, live 25/0; повторний повний npm test і фінальні lint/build — exit 0. Реалізація `c4ad332` запушена без force в origin/master (Book_Creator). Усі шість етапів реалізовано, production-приймання очікує.
 Актуальні результати: [сесія](log/sessions.md), [сценарій В6](docs/acceptance/T5.7-V6.md).
@@ -138,7 +138,8 @@ remote перевірити можна, запушити — ні**.
 Т7.5 реалізовано (#398): явне перенесення затверджених версій до приватної медіатеки, походження/AI policy/CAS/історія, усі типи й фільтри. Memory/Pg 18/0, Chromium 22/0; npm test — exit 0. [Приймання](docs/acceptance/T7.5.md). Наступне — Т7.6.
 Т7.6 реалізовано (#399): окремі Visual/Style grants, CAS канон/вилучення/аудит, знімки образів, immutable версії стилю й scoped context. Memory/Pg 23/0, Chromium 27/0; full npm test і фінальні lint/build — exit 0. [Приймання](docs/acceptance/T7.6.md). Наступне — Т7.7.
 Т7.7 реалізовано (#400): приватні AI Tools, scoped context, grants/ліміти/jobs/DRAFT версії; Memory/Pg 22/0, adapters 2/0, Chromium 24/0. npm test та фінальні lint/build — exit 0. [Приймання](docs/acceptance/T7.7.md). Наступне — Т8.1.
-Незапушені коміти: `git log origin/master..HEAD`. Т7.7: реалізація `e410679` запушена в origin/master без force, remote SHA звірено; цей документаційний коміт фіксує результат; пуш `git push origin HEAD:master`; identity Денис Деменко <tropazemli@gmail.com>. Production/Firebase/paid AI/volume/Docker — ручне приймання docs/acceptance/T7.7.md. Marketplace не змінено. Нагадування: SECRET_VAULT_KEY_BASE64 Railway і Т4.3. Наступне — Т8.1 (Stitch 9).
+Т8.1 реалізовано (#401): чотири Stitch 9 лендінги UA/EN, public data і статуси; npm test/types/build — exit 0, Chromium 56/0, outage 8/0, teachers 2/0. [Приймання](docs/acceptance/T8.1.md). Наступне — Т8.2.
+Незапушені коміти: `git log origin/master..HEAD`. Marketplace Т8.1 0c45a8a запушено; журнал Studio готовий до пуша; `git push origin HEAD:master`; identity Денис Деменко <tropazemli@gmail.com>. Production/Firebase/Studio rewrite — ручне приймання docs/acceptance/T8.1.md. Нагадування: SECRET_VAULT_KEY_BASE64 Railway і Т4.3. Наступне — Т8.2, архів наданий.
 
 Історичні стани #374, #377, #379 з результатами й ручними перевірками:
 [повний текст](log/deploy-notes.md).
@@ -336,7 +337,7 @@ JS-файлу напряму, як зроблено тут.
 
 ---
 
-# Покажчик записів (400 записів, #1–#400)
+# Покажчик записів (401 запис, #1–#401)
 
 > Повні тексти записів лежать у теці `log/`, розбиті на частини — журнал
 > одним файлом доріс до 840 КБ, а його читає кожна нова сесія. Цей
@@ -351,6 +352,7 @@ JS-файлу напряму, як зроблено тут.
 
 | # | Назва | Статус | Файл |
 |---:|---|---|---|
+| 401 | Т8.1 — чотири лендінги аудиторій за Stitch 9 | ✅ Реалізовано | [301-350.md](log/301-350.md) |
 | 400 | Т7.7 — приватні інструменти ШІ у Creative Workspace | ✅ Реалізовано | [301-350.md](log/301-350.md) |
 | 399 | Т7.6 — Visual Bible та версійований Style Bible | ✅ Реалізовано | [301-350.md](log/301-350.md) |
 | 398 | Т7.5 — медіатека з походженням і перенесення затверджених версій | ✅ Реалізовано | [301-350.md](log/301-350.md) |
