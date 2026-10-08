@@ -139,7 +139,7 @@ try {
   ])
     assert.ok(await query("writer", op));
   check(
-    "усі вісім query-операцій працюють; deliverables чесно недоступні до Т7",
+    "усі вісім query-операцій працюють; deliverables повертаються за доступом Workspace",
   );
   await assert.rejects(() => query("owner", "GRANT_ACCESS"));
   check("query не має операції видачі доступу");

@@ -1,3 +1,4 @@
+import { registerCreativeWorkspaceRoutes } from './server/core/creative/workspace';
 import {registerCreativeOrderBindingRoutes} from './server/core/creative/orderBinding';
 import {findUserByFirebaseUid} from './server/store';
 import {fetchCreativeOrderSelection} from './server/marketplaceBridge';
@@ -821,6 +822,15 @@ registerGitCommandRoutes(app);
   const collaborationAiDeps={repo:getCoreRepository,access:realtimeAccessDeps,principal:async(userId:string)=>{const u=await findUserForAccess(userId);return u&&!u.disabled?{id:u.id,role:u.role,isGuest:false} as any:null;}};
   registerCollaborationAiRoutes(app,collaborationAiDeps);
   registerCreativeProjectRoutes(app,collaborationAiDeps);
+  registerCreativeWorkspaceRoutes(app, {
+    ...collaborationAiDeps,
+    describeUser: async (id) => (await findUserForAccess(id))?.name ?? null,
+    chargeUpload: async (req, bytes, bookId, filename) => {
+      const p = req.principal!;
+      const quota = await checkAndRecordStorageUpload(p.id as string, p.email, p.role, bytes, bookId, filename);
+      if (!quota.allowed) throw new (await import('./server/core/collaboration/workspaceStore')).WorkspaceError(402, quota.reasonUk ?? 'Ліміт сховища вичерпано.');
+    },
+  });
   registerCreativeOrderBindingRoutes(app, {
     ...collaborationAiDeps,
     specialistUser: findUserByFirebaseUid,

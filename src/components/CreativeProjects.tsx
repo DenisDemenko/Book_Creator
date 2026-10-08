@@ -1,4 +1,4 @@
-import {buildCreativeAccessPath} from '../utils/appRoutes';
+import {buildCreativeAccessPath,buildCreativeWorkspacePath} from '../utils/appRoutes';
 import {API_BASE} from '../utils/basePath';
 import { useCallback, useEffect, useState } from "react";
 import type { CreativeProject } from "../../server/core/creative/projects";
@@ -34,8 +34,7 @@ export function CreativeProjects({ bookId }: { bookId: string }) {
     <section className="space-y-3" aria-label="Творчі проєкти">
       <h2 className="font-bold">Creative Studio — творчі проєкти</h2>
       <p>
-        Доступно: створення чернетки проєкту. Бриф, вибір фахівця та робочий
-        простір ще розробляються. Створення проєкту не відкриває книгу іншим
+        Доступно: бриф, біржа замовлень, вибір фахівця та робочий простір. Створення проєкту не відкриває книгу іншим
         людям.
       </p>
       <a
@@ -88,7 +87,7 @@ export function CreativeProjects({ bookId }: { bookId: string }) {
         {projects.map((p) => (
           <li key={p.id} className="rounded border border-slate-700 p-3">
             <a className="underline" href={buildCreativeAccessPath(p.id,API_BASE)}>{p.title} — бриф і доступ</a> · {p.status}{" "}
-            <small>{new Date(p.createdAt).toLocaleDateString("uk-UA")}</small>
+            <a className="underline" href={buildCreativeWorkspacePath(p.id,API_BASE)}>Workspace</a> · <small>{new Date(p.createdAt).toLocaleDateString("uk-UA")}</small>
           </li>
         ))}
       </ul>

@@ -1,3 +1,5 @@
+import { buildCreativeWorkspacePath } from '../utils/appRoutes';
+import { API_BASE } from '../utils/basePath';
 import { CreativeOrderBinding } from "./CreativeOrderBinding";
 import type { CreativeProject } from "../../server/core/creative/projects";
 import { useCallback, useEffect, useState } from "react";
@@ -156,7 +158,8 @@ export function CreativeBriefPanel({
       )}
       {state && (
         <>
-          <CreativeOrderBinding project={state.project} onSynced={load} />
+          <a className="block underline" href={buildCreativeWorkspacePath(creativeProjectId,API_BASE)}>Відкрити Creative Workspace</a>
+      <CreativeOrderBinding project={state.project} onSynced={load} />
           <p>
             Бриф: {state.brief?.status ?? "Не збережено"} · Версія {version}.
             Статус MODERATION означає надсилання в Marketplace, біржа замовлень

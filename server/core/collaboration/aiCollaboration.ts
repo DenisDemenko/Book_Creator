@@ -59,6 +59,10 @@ export async function queryCollaboration(
 ) {
   if (!(COLLAB_QUERY_OPERATIONS as readonly string[]).includes(operation))
     throw new WorkspaceError(422, "Невідома операція співпраці.");
+  if(operation==='GET_DELIVERABLES'){
+    const {readableCreativeDeliverables}=await import('../creative/workspace');
+    return {deliverables:await readableCreativeDeliverables(d,userId,projectId),available:true,limit:200};
+  }
   const { a, b, repo } = await collaborationScope(d, userId, projectId);
   switch (operation) {
     case "FIND_PARTICIPANT":
@@ -122,12 +126,6 @@ export async function queryCollaboration(
           tasks.push(i);
       return { tasks: tasks.slice(0, 200), limit: 200 };
     }
-    case "GET_DELIVERABLES":
-      return {
-        deliverables: [],
-        available: false,
-        reason: "Результати фахівців реалізуються на етапі 7.",
-      };
     case "GET_AVAILABLE_CONTEXT": {
       const filtered = restrictBook(
         b.book,

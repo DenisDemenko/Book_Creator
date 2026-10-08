@@ -155,3 +155,7 @@ export function buildAppPath(route: AppRoute, base = ''): string | null {
 /** Т7.2: dedicated private creative access URL. */
 export function parseCreativeAccessPath(pathname:string,base=''):string|null{const rest=stripBase(pathname,base);const match=rest?.match(/^\/creative\/access\/([A-Za-z0-9._-]{1,128})\/?$/);return match?.[1]??null;}
 export function buildCreativeAccessPath(id:string,base=''){return `${base.replace(/\/$/,'')}/creative/access/${encodeURIComponent(id)}`;}
+
+/** T7.4: private creative workspace; normal app route sync must not replace it. */
+export function parseCreativeWorkspacePath(pathname:string,base=''):string|null{const rest=stripBase(pathname,base);const match=rest?.match(/^\/creative\/workspace\/([A-Za-z0-9._-]{1,128})\/?$/);return match?.[1]??null;}
+export function buildCreativeWorkspacePath(id:string,base=''){return `${base.replace(/\/$/,'')}/creative/workspace/${encodeURIComponent(id)}`;}
