@@ -16,7 +16,7 @@
 
 **Не зроблено і чому (Т7.3):** реальні акаунти/production — приймання після деплою; Stitch 9 — Т8.3; бюджет текстовий, проєкт книга. Workspace і платежі — наступні етапи. Наступне — Т7.4.
 
-**Запис #397:** Т7.4 — приватний Workspace, файли/незмінні версії, review/annotations, чат/історія/read, явний workspace grant без права на всю медіатеку, scoped context і Marketplace entry. Memory/PostgreSQL по 28/0, Chromium 38/0; Marketplace API 146/146. Два повні npm test Studio, фінальні типи/збірки, journal/encoding — exit 0. Сценарій docs/acceptance/T7.4.md.
+**Запис #397:** Т7.4 — приватний Workspace, файли/незмінні версії, review/annotations, чат/історія/read, явний workspace grant без права на всю медіатеку, scoped context і Marketplace entry. Memory/PostgreSQL по 28/0, Chromium 38/0; Marketplace API 146/146. Два повні npm test Studio, фінальні типи/збірки, journal/encoding — exit 0. Сценарій docs/acceptance/T7.4.md. Marketplace cba53d9 і Studio 906b988 запушено в master, remote SHA перевірені.
 
 **Не зроблено і чому (Т7.4):** production/Firebase/том — ручне приймання; Media Library/provenance — Т7.5, Bible/канон — Т7.6. Chat polling 5 с, файли до 20 МБ; PDF залежить від браузера. Автоматичних grants/approval немає. Наступне — Т7.5.
 
