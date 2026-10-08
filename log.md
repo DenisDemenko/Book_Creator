@@ -137,7 +137,7 @@ remote перевірити можна, запушити — ні**.
 Т7.4 реалізовано (#397): приватні файли/версії/review/pins/chat, окремий явний Workspace grant без доступу до книги. Memory/Pg 28/0, browser 38/0, Marketplace API 146/146; повторний npm test Studio, типи/збірки, journal/encoding — exit 0. [Приймання](docs/acceptance/T7.4.md). Наступне — Т7.5.
 Т7.5 реалізовано (#398): явне перенесення затверджених версій до приватної медіатеки, походження/AI policy/CAS/історія, усі типи й фільтри. Memory/Pg 18/0, Chromium 22/0; npm test — exit 0. [Приймання](docs/acceptance/T7.5.md). Наступне — Т7.6.
 Т7.6 реалізовано (#399): окремі Visual/Style grants, CAS канон/вилучення/аудит, знімки образів, immutable версії стилю й scoped context. Memory/Pg 23/0, Chromium 27/0; full npm test і фінальні lint/build — exit 0. [Приймання](docs/acceptance/T7.6.md). Наступне — Т7.7.
-Незапушені коміти: `git log origin/master..HEAD`. Т7.6 підготовлено до коміту / пуша `git push origin HEAD:master`; identity Денис Деменко <tropazemli@gmail.com>. Production/Firebase/volume/redeploy — ручне приймання docs/acceptance/T7.6.md. Marketplace не змінено. Нагадування: SECRET_VAULT_KEY_BASE64 на Railway і відкладений Т4.3. Наступне — Т7.7.
+Незапушені коміти: `git log origin/master..HEAD`. Т7.6: реалізація `a1f4108` запушена в origin/master без force, remote SHA звірено; цей документаційний коміт фіксує результат; пуш `git push origin HEAD:master`; identity Денис Деменко <tropazemli@gmail.com>. Production/Firebase/volume/redeploy — ручне приймання docs/acceptance/T7.6.md. Marketplace не змінено. Нагадування: SECRET_VAULT_KEY_BASE64 на Railway і відкладений Т4.3. Наступне — Т7.7.
 
 Історичні стани #374, #377, #379 з результатами й ручними перевірками:
 [повний текст](log/deploy-notes.md).
