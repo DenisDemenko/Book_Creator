@@ -541,6 +541,9 @@ async function saveImageForOwner(
       bytes: new Uint8Array(buffer),
       prompt: p.prompt,
       model: modelId,
+      actor: `ai:${modelId}`,
+      ai: { used: true, provider: resolveImageEngine(p.engine).provider, model: modelId, generationId: null, promptReference: null,
+        settings: { imageSize: resolveImageEngine(p.engine).maxSize === '1K' ? '1K' : p.imageSize === '1K' || p.imageSize === '4K' ? p.imageSize : '2K', ...(p.aspectRatio ? { aspectRatio: p.aspectRatio } : {}), ...(p.quality ? { quality: p.quality } : {}) } },
     });
     return { url: asset.url, filename: asset.filename, bytes: asset.sizeBytes };
   } catch (err) {
@@ -666,7 +669,8 @@ interface GenerateVideoParams {
 async function saveVideoForOwner(
   p: GenerateVideoParams,
   buffer: Buffer,
-  mimeType: string
+  mimeType: string,
+  generated: { modelId: string; resolution: string; aspectRatio: string; durationSec: number | null }
 ): Promise<{ url: string; filename: string; bytes: number }> {
   const ownerId = p.req?.principal?.id ? String(p.req.principal.id) : '';
   if (!ownerId) {
@@ -680,7 +684,10 @@ async function saveVideoForOwner(
     mimeType,
     bytes: new Uint8Array(buffer),
     prompt: p.prompt,
-    model: p.engine,
+    model: generated.modelId,
+    actor: `ai:${generated.modelId}`,
+    ai: { used: true, provider: 'leonardo', model: generated.modelId, generationId: null, promptReference: null,
+      settings: { resolution: generated.resolution, aspectRatio: generated.aspectRatio, ...(generated.durationSec !== null ? { duration: generated.durationSec } : {}) } },
   });
   return { url: asset.url, filename: asset.filename, bytes: asset.sizeBytes };
 }
@@ -716,7 +723,7 @@ export async function generateVideo(p: GenerateVideoParams): Promise<{
       endFrameImageUrl: p.endFrameImageUrl,
       apiKeyOverride,
     });
-    const saved = await saveVideoForOwner(p, generated.buffer, generated.mimeType);
+    const saved = await saveVideoForOwner(p, generated.buffer, generated.mimeType, generated);
     await logVideoUsage(ctx, generated.engine.id, generated.modelId, generated.resolution, generated.durationSec, true);
     return {
       url: saved.url,

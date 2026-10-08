@@ -30,6 +30,8 @@ import {
   mediaComparator,
   type MediaSortMethod,
 } from '../utils/mediaSort';
+import { CreativeMediaLibrary } from './CreativeMediaLibrary';
+import { MediaProvenancePanel } from './MediaProvenancePanel';
 import { MediaGenerationPanel } from './MediaGenerationPanel';
 import { MediaPassportPanel, type PassportAsset } from './MediaPassportPanel';
 import { MediaLinksPanel, type VisualLink } from './MediaLinksPanel';
@@ -167,7 +169,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
   // локації, предмети, сцени — той самий паспорт і ті самі зв'язки, лише
   // подання). Не забуваємо режим при зміні книги: `/visual-library` завжди
   // веде саме в сутності активної книги.
-  const [mode, setMode] = useState<'gallery' | 'entities'>(initialTab ?? 'gallery');
+  const [mode, setMode] = useState<'gallery' | 'entities' | 'provenance'>(initialTab ?? 'gallery');
   useEffect(() => {
     if (initialTab) setMode(initialTab);
   }, [initialTab, book.id]);
@@ -222,8 +224,8 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
     try {
       const [sectionsRes, listRes] = await Promise.all([
         fetch('/api/media/sections', { credentials: 'same-origin' }),
-        // Лише останні версії: попередні видно в паспорті, а не окремими картками (Т2.3 В1).
-        fetch('/api/media/list?latest=1', { credentials: 'same-origin' }),
+        // Т7.5: усі версії для походження; галерея нижче лишає тільки останню в групі.
+        fetch('/api/media/list', { credentials: 'same-origin' }),
       ]);
       if (sectionsRes.ok) {
         const data = await sectionsRes.json();
@@ -236,7 +238,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
     } catch {
       /* тихо — галерея просто лишиться книжковою, як була до розділів */
     }
-  }, [isRegistered]);
+  }, [isRegistered, authUser?.id]);
 
   useEffect(() => {
     loadLibrary();
@@ -366,6 +368,8 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
   const sectionTitleById = new Map(sections.map((s) => [s.bookId ?? NO_BOOK_SECTION, s.title || '']));
 
   const serverCards: MediaCard[] = serverAssets
+    .filter(a => !serverAssets.some(b => b.rootId === a.rootId && (b.version ?? 1) > (a.version ?? 1)))
+    .filter(a => !a.mimeType || a.mimeType.startsWith('image/') || a.mimeType.startsWith('video/'))
     .filter((a) => !(a.bookId === book.id && objectUrls.has(a.url)))
     .map((asset) => {
       const sectionId = asset.bookId ?? NO_BOOK_SECTION;
@@ -503,12 +507,13 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
     setIsDownloading(true);
     try {
       const res = await fetch(url, { credentials: 'same-origin' });
+      if (!res.ok) throw new Error(`Download failed: ${res.status}`);
       const blob = await res.blob();
       const blobUrl = URL.createObjectURL(blob);
       const cleanBaseName = (title || 'video').replace(/[^a-zA-Z0-9А-Яа-яЇїІіЄєҐґ_\-\s]/g, '_');
       const a = document.createElement('a');
       a.href = blobUrl;
-      a.download = `${cleanBaseName || 'video'}.mp4`;
+      a.download = `${cleanBaseName || 'video'}.${blob.type.split(';')[0] === 'video/webm' ? 'webm' : 'mp4'}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -851,7 +856,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
           предмети, сцени — та сама Медіатека, лише подання; сюди веде адреса
           `/visual-library`, рішення власника §6.1 плану). */}
       <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 self-start" data-media-mode>
-        {(['gallery', 'entities'] as const).map((m) => (
+        {(['gallery', 'entities', 'provenance'] as const).map((m) => (
           <button
             key={m}
             type="button"
@@ -861,11 +866,12 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
               mode === m ? 'bg-slate-800 text-cyan-300 shadow-xs' : 'text-slate-400 hover:text-white'
             }`}
           >
-            {m === 'gallery' ? t('visualLibrary.galleryTab') : t('visualLibrary.entitiesTab')}
+            {m === 'gallery' ? t('visualLibrary.galleryTab') : m === 'entities' ? t('visualLibrary.entitiesTab') : 'Походження'}
           </button>
         ))}
       </div>
 
+      {mode === 'provenance' && <CreativeMediaLibrary assets={serverAssets} onChanged={asset => setServerAssets(prev => prev.map(a => a.id === asset.id ? { ...a, ...asset } : a))} onReload={() => void loadLibrary()} onToast={showToast} />}
       {mode === 'entities' && (
         <EntityVisualLibraryPanel
           book={book}
@@ -1143,7 +1149,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
                     title={t('mediaLibraryView.downloadVideoLabel')}
                   >
                     <Download className="w-2.5 h-2.5" />
-                    <span>MP4</span>
+                    <span>{passportOf(item)?.mimeType === 'video/webm' ? 'WEBM' : 'MP4'}</span>
                   </button>
                 ) : (
                 <div className="flex items-center gap-1.5 flex-wrap justify-end">
@@ -1354,11 +1360,13 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
               )}
             </div>
 
+            {passportOf(selectedMedia) && <MediaProvenancePanel asset={passportOf(selectedMedia)!} onChanged={asset => setServerAssets(prev => prev.map(a => a.id === asset.id ? { ...a, ...asset } : a))} />}
             {/* Паспорт зображення (Т2.3 В1) — лише для файлів сховища. */}
             {isRegistered && mediaIdFromUrl(selectedMedia.url) && (
               <MediaPassportPanel
                 key={mediaIdFromUrl(selectedMedia.url)!}
                 assetId={mediaIdFromUrl(selectedMedia.url)!}
+                metadataRevision={passportOf(selectedMedia)?.provenance?.revision}
                 bookId={book.id}
                 onToast={showToast}
                 onChanged={(asset) => setServerAssets((prev) => prev.map((a) => (a.id === asset.id ? { ...a, ...asset } : a)))}

@@ -1,6 +1,6 @@
 # Журнал сесій — і єдиний дім записів #114–#118
 
-## Сесія 08.10.2026 #01 — записи #392–#397
+## Сесія 08.10.2026 #01 — записи #392–#398
 
 **Тема:** наступний пункт після Т6.5 — Т6.6, ШІ з урахуванням співпраці.
 
@@ -19,6 +19,10 @@
 **Запис #397:** Т7.4 — приватний Workspace, файли/незмінні версії, review/annotations, чат/історія/read, явний workspace grant без права на всю медіатеку, scoped context і Marketplace entry. Memory/PostgreSQL по 28/0, Chromium 38/0; Marketplace API 146/146. Два повні npm test Studio, фінальні типи/збірки, journal/encoding — exit 0. Сценарій docs/acceptance/T7.4.md. Marketplace cba53d9 і Studio 906b988 запушено в master, remote SHA перевірені.
 
 **Не зроблено і чому (Т7.4):** production/Firebase/том — ручне приймання; Media Library/provenance — Т7.5, Bible/канон — Т7.6. Chat polling 5 с, файли до 20 МБ; PDF залежить від браузера. Автоматичних grants/approval немає. Наступне — Т7.5.
+
+**Запис #398:** Т7.5 — явний імпорт APPROVED/FINAL до приватної медіатеки зі збереженням походження, версій і review; типи/статуси/фільтри, AI декларації/параметри/policy, metadata CAS й історія. SQLite/JSON і справжній Core: Memory/PostgreSQL по 18/0, Chromium 22/0; повний npm test — exit 0, image regression 157/0, media-passport 53/0; фінальні lint/build — exit 0, Workspace browser 38/0, video 115/0, journal/encoding/diff-check — успішні. PLAN_MEDIA_PROVENANCE.md і docs/acceptance/T7.5.md. Наступне — Т7.6.
+
+**Не зроблено і чому (Т7.5):** production/Firebase/volume/redeploy/платні AI — окреме ручне приймання; CANON/Visual Bible — Т7.6, не почато. Зовнішні AI-файли — декларація, без перевірки чужого провайдера; quota refund/ліцензії не автоматичні. Marketplace цього етапу не змінено. Т4.3 і захищений SECRET_VAULT_KEY_BASE64 на Railway лишаються відкладеними.
 
 ## Сесія 07.10.2026 #01 — записи #380–#391
 

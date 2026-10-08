@@ -24,6 +24,8 @@ import {
 import { formatMediaDate } from '../utils/mediaSort';
 
 export interface PassportAsset {
+  provenance?: import('../../shared/mediaProvenance').MediaProvenance;
+  mimeType?: string;
   id: string;
   url: string;
   bookId: string | null;
@@ -51,12 +53,13 @@ interface HistoryEntry {
   assetId: string;
   at: string;
   actor: string;
-  action: 'created' | 'version' | 'passport' | 'deleted';
+  action: 'created' | 'version' | 'passport' | 'deleted' | 'provenance';
   details: Record<string, any>;
 }
 
 interface Props {
   assetId: string;
+  metadataRevision?: number;
   bookId: string;
   /** Паспорт змінено — Медіатека оновлює картку. */
   onChanged: (asset: PassportAsset) => void;
@@ -79,7 +82,7 @@ const toForm = (a: PassportAsset): Form => ({
 const KB = 1024;
 const size = (b: number) => (b >= KB * KB ? `${(b / (KB * KB)).toFixed(1)} MB` : `${Math.max(1, Math.round(b / KB))} KB`);
 
-export const MediaPassportPanel: React.FC<Props> = ({ assetId, bookId, onChanged, onNewVersion, onToast }) => {
+export const MediaPassportPanel: React.FC<Props> = ({ assetId, metadataRevision, bookId, onChanged, onNewVersion, onToast }) => {
   const { t, lang } = useLanguage();
   const [data, setData] = useState<{ asset: PassportAsset; versions: PassportAsset[]; history: HistoryEntry[] } | null>(null);
   const [state, setState] = useState<'loading' | 'ok' | 'missing'>('loading');
@@ -108,7 +111,7 @@ export const MediaPassportPanel: React.FC<Props> = ({ assetId, bookId, onChanged
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, metadataRevision]);
 
   if (state === 'loading') {
     return (
@@ -186,8 +189,9 @@ export const MediaPassportPanel: React.FC<Props> = ({ assetId, bookId, onChanged
   };
 
   const action = (h: HistoryEntry) =>
-    h.action === 'created' ? t('mediaPassport.actionCreated') : h.action === 'version' ? t('mediaPassport.actionVersion') : h.action === 'passport' ? t('mediaPassport.actionPassport') : t('mediaPassport.actionDeleted');
+    h.action === 'provenance' ? (lang === 'en' ? 'Metadata changed' : 'Змінено метадані') : h.action === 'created' ? t('mediaPassport.actionCreated') : h.action === 'version' ? t('mediaPassport.actionVersion') : h.action === 'passport' ? t('mediaPassport.actionPassport') : t('mediaPassport.actionDeleted');
   const detail = (h: HistoryEntry) => {
+    if (h.action === 'provenance') return `r${h.details.before?.revision ?? '—'} → r${h.details.after?.revision ?? '—'} · ${h.details.before?.status ?? ''} → ${h.details.after?.status ?? ''}`;
     if (h.action === 'version') return `v${h.details.version} · ${h.details.filename ?? ''}`;
     if (h.action === 'passport') return Object.keys(h.details.changes ?? {}).join(', ');
     if (h.action === 'created') return [h.details.source, h.details.model].filter(Boolean).join(' · ');
@@ -264,8 +268,9 @@ export const MediaPassportPanel: React.FC<Props> = ({ assetId, bookId, onChanged
         <button type="button" disabled={!dirty || saving} onClick={() => void save()} data-passport-save className="flex items-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-600 disabled:opacity-40">
           {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} {saving ? t('mediaPassport.saving') : t('mediaPassport.save')}
         </button>
+        {asset.provenance?.origin === "workspace" && <p className="text-xs text-slate-400">Нові версії цього результату створюються й затверджуються у Workspace. Походження попередніх версій зберігається.</p>}
         <input ref={fileRef} type="file" accept="image/png, image/jpeg, image/jpg, image/webp, image/svg+xml" className="hidden" onChange={uploadVersion} data-passport-version-input />
-        <button type="button" disabled={uploading} onClick={() => fileRef.current?.click()} data-passport-new-version className="flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-200 hover:border-cyan-500 disabled:opacity-50">
+        <button type="button" disabled={uploading || asset.provenance?.origin === "workspace"} onClick={() => fileRef.current?.click()} data-passport-new-version className="flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-200 hover:border-cyan-500 disabled:opacity-50">
           {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />} {uploading ? t('mediaPassport.uploading') : t('mediaPassport.newVersion')}
         </button>
       </div>

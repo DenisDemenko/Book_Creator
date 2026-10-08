@@ -20,7 +20,22 @@ import {
   entityLevel,
   levelRank,
 } from "../collaboration/access";
-import { listAssets } from "../../media/mediaLibraryStore";
+import {
+  listAssets,
+  getAsset,
+  saveAsset,
+  updateMediaProvenance,
+  MediaPassportError,
+} from "../../media/mediaLibraryStore";
+import {
+  emptyAi,
+  inferMediaType,
+  normalizeAi,
+  normalizeMediaMetadata,
+  type AiDeclaration,
+  type MediaProvenance,
+  type MediaMetadataInput,
+} from "../../../shared/mediaProvenance";
 export const CREATIVE_ASSET_STATES = [
   "DRAFT",
   "SUBMITTED_FOR_REVIEW",
@@ -46,6 +61,8 @@ export interface CreativeAsset {
   createdAt: string;
   approvedBy: string | null;
   approvedAt: string | null;
+  ai?: AiDeclaration;
+  libraryAssetId?: string | null;
 }
 export interface CreativeAnnotation {
   id: string;
@@ -74,6 +91,7 @@ export function creativeWorkspaceDb() {
   const db = creativeProjectDb();
   if (!initialized.has(db)) {
     db.exec(`CREATE TABLE IF NOT EXISTS creative_workspace_assets(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES creative_projects(id) ON DELETE CASCADE,root_id TEXT NOT NULL,version INTEGER NOT NULL,revision INTEGER NOT NULL,payload TEXT NOT NULL,content BLOB NOT NULL,UNIQUE(project_id,root_id,version));
+ CREATE TABLE IF NOT EXISTS creative_workspace_imports(asset_id TEXT PRIMARY KEY REFERENCES creative_workspace_assets(id) ON DELETE CASCADE,media_id TEXT NOT NULL UNIQUE,payload TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS creative_workspace_annotations(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES creative_projects(id) ON DELETE CASCADE,asset_id TEXT NOT NULL REFERENCES creative_workspace_assets(id) ON DELETE CASCADE,revision INTEGER NOT NULL,payload TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS creative_workspace_events(seq INTEGER PRIMARY KEY AUTOINCREMENT,project_id TEXT NOT NULL REFERENCES creative_projects(id) ON DELETE CASCADE,payload TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS creative_workspace_events_project ON creative_workspace_events(project_id,seq);
@@ -218,12 +236,12 @@ function decode(data: unknown) {
   if (typeof data !== "string" || data.length > 29 * 1024 * 1024)
     throw new WorkspaceError(413, "Максимум 20 МБ за файл.");
   const m = data.match(
-    /^data:(image\/(?:png|jpeg|webp|gif)|video\/(?:mp4|webm)|application\/(?:pdf|zip)|model\/gltf-binary);base64,([A-Za-z0-9+/]+={0,2})$/,
+    /^data:(image\/(?:png|jpeg|webp|gif)|video\/(?:mp4|webm)|application\/(?:pdf|zip)|audio\/(?:mpeg|wav|ogg)|model\/gltf-binary);base64,([A-Za-z0-9+/]+={0,2})$/,
   );
   if (!m)
     throw new WorkspaceError(
       422,
-      "Підтримуються PNG/JPEG/WEBP/GIF, MP4/WEBM, PDF, ZIP і GLB.",
+      "Підтримуються PNG/JPEG/WEBP/GIF, MP4/WEBM, MP3/WAV/OGG, PDF, ZIP і GLB.",
     );
   const bytes = Buffer.from(m[2], "base64");
   if (
@@ -243,15 +261,24 @@ function decode(data: unknown) {
           ? ascii.startsWith("GIF8")
           : m[1] === "image/webp"
             ? ascii.startsWith("RIFF") && ascii.slice(8) === "WEBP"
-            : m[1] === "application/pdf"
-              ? ascii.startsWith("%PDF-")
-              : m[1] === "video/mp4"
-                ? ascii.slice(4, 8) === "ftyp"
-                : m[1] === "video/webm"
-                  ? hex.startsWith("1a45dfa3")
-                  : m[1] === "application/zip"
-                    ? hex.startsWith("504b0304")
-                    : ascii.startsWith("glTF");
+            : m[1] === "audio/wav"
+              ? ascii.startsWith("RIFF") && ascii.slice(8) === "WAVE"
+              : m[1] === "audio/ogg"
+                ? ascii.startsWith("OggS")
+                : m[1] === "audio/mpeg"
+                  ? ascii.startsWith("ID3") ||
+                    (bytes[0] === 255 &&
+                      (bytes[1] & 224) === 224 &&
+                      (bytes[1] & 6) !== 0)
+                  : m[1] === "application/pdf"
+                    ? ascii.startsWith("%PDF-")
+                    : m[1] === "video/mp4"
+                      ? ascii.slice(4, 8) === "ftyp"
+                      : m[1] === "video/webm"
+                        ? hex.startsWith("1a45dfa3")
+                        : m[1] === "application/zip"
+                          ? hex.startsWith("504b0304")
+                          : ascii.startsWith("glTF");
   if (!valid)
     throw new WorkspaceError(422, "Вміст не відповідає формату файла.");
   return { bytes, mimeType: m[1] };
@@ -283,10 +310,62 @@ export async function readableCreativeDeliverables(
   }
   return out.slice(0, 200);
 }
+function enforceAiPolicy(id: string, ai: AiDeclaration) {
+  const brief = getCreativeBrief(id),
+    policy = brief?.published?.data.aiPolicy ?? brief?.data.aiPolicy;
+  if (policy === "FORBIDDEN" && ai.used !== false)
+    throw new WorkspaceError(
+      422,
+      "Бриф забороняє ШІ: потрібна декларація ручної роботи без ШІ.",
+    );
+  if (policy === "DISCLOSE" && ai.used === null)
+    throw new WorkspaceError(422, "Бриф вимагає вказати використання ШІ.");
+}
+async function validateTargets(
+  ctx: Awaited<ReturnType<typeof scope>>,
+  m: Partial<MediaMetadataInput>,
+) {
+  const entities = await ctx.repo.listEntities(ctx.p.bookId);
+  for (const [key, type] of [
+    ["characterIds", "character"],
+    ["locationIds", "location"],
+  ] as const) {
+    for (const id of m[key] ?? []) {
+      const e = entities.find(
+        (e) => e.id === id && e.type === type && e.status !== "rejected",
+      );
+      if (!e || !canRead(entityLevel(ctx.a.effective, e.type, id)))
+        throw new WorkspaceError(
+          422,
+          "Сутність не належить дозволеному контексту книги.",
+        );
+    }
+  }
+  const scenes = new Set(
+    (Array.isArray(ctx.b.book.chapters) ? ctx.b.book.chapters : []).flatMap(
+      (c: any) => (c.sections ?? []).map((s: any) => s.id),
+    ),
+  );
+  if ((m.sceneIds ?? []).some((id) => !scenes.has(id)))
+    throw new WorkspaceError(422, "Сцена не належить цій книзі.");
+}
+// Serialize imports of one version chain; deterministic IDs and SQLite PK also protect restarts.
+const imports = new Map<string, Promise<unknown>>();
+async function serialImport<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = imports.get(key) ?? Promise.resolve();
+  const next = prev.catch(() => {}).then(fn);
+  imports.set(key, next);
+  try {
+    return await next;
+  } finally {
+    if (imports.get(key) === next) imports.delete(key);
+  }
+}
 export function registerCreativeWorkspaceRoutes(
   app: Express,
   d: CreativeWorkspaceDeps,
 ) {
+  registerMediaProvenanceRoutes(app, d);
   const base = "/api/creative/projects/:id/workspace";
   const handle =
     (fn: (q: Request, r: Response, u: string, id: string) => Promise<void>) =>
@@ -381,7 +460,32 @@ export function registerCreativeWorkspaceRoutes(
           status: ctx.p.status,
         },
         brief: brief?.published?.data ?? brief?.data ?? null,
-        assets: all,
+        assets: all.map((a) => ({
+          ...a,
+          libraryAssetId:
+            (
+              creativeWorkspaceDb()
+                .prepare(
+                  "SELECT media_id FROM creative_workspace_imports WHERE asset_id=?",
+                )
+                .get(a.id) as any
+            )?.media_id ?? null,
+        })),
+        mediaTargets: ctx.owner
+          ? {
+              characters: entities.filter((e) => e.type === "character"),
+              locations: entities.filter((e) => e.type === "location"),
+              scenes: (Array.isArray(ctx.b.book.chapters)
+                ? ctx.b.book.chapters
+                : []
+              ).flatMap((c: any) =>
+                (c.sections ?? []).map((x: any) => ({
+                  id: x.id,
+                  name: x.title || x.id,
+                })),
+              ),
+            }
+          : null,
         annotations,
         entities,
         references: refs,
@@ -511,6 +615,13 @@ export function registerCreativeWorkspaceRoutes(
       const b = payload(q.body),
         file = decode(b.dataUrl),
         filename = text(b.filename, 200).replace(/[\r\n\\/]/g, "_");
+      let ai: AiDeclaration;
+      try {
+        ai = normalizeAi(b.ai);
+      } catch (e) {
+        throw new WorkspaceError(422, (e as Error).message);
+      }
+      enforceAiPolicy(id, ai);
       let parent: CreativeAsset | null = null;
       if (b.parentId) {
         parent = asset(id, String(b.parentId));
@@ -531,6 +642,7 @@ export function registerCreativeWorkspaceRoutes(
       await d.chargeUpload?.(q, file.bytes.length, ctx.p.bookId, filename);
       ctx = await scope(d, u, id);
       requireRight(ctx.work);
+      enforceAiPolicy(id, ai);
       const at = new Date().toISOString(),
         aid = randomUUID();
       const a: CreativeAsset = {
@@ -548,6 +660,7 @@ export function registerCreativeWorkspaceRoutes(
         createdAt: at,
         approvedBy: null,
         approvedAt: null,
+        ai,
       };
       transaction(() => {
         if (parent) {
@@ -568,6 +681,177 @@ export function registerCreativeWorkspaceRoutes(
         event(id, u, "ASSET_UPLOADED", { assetId: a.id, version: a.version });
       });
       r.status(201).json({ asset: a });
+    }),
+  );
+  app.post(
+    `${base}/assets/:assetId/library`,
+    handle(async (q, r, u, id) => {
+      const initial = await scope(d, u, id),
+        b = payload(q.body),
+        aid = String(q.params.assetId);
+      requireRight(initial.owner && initial.writable);
+      if (b.confirmed !== true)
+        throw new WorkspaceError(422, "Підтвердьте перенесення до медіатеки.");
+      const expected = revision(b.expectedRevision),
+        a0 = asset(id, aid);
+      await serialImport(id + ":" + a0.rootId, async () => {
+        let ctx = await scope(d, u, id);
+        requireRight(ctx.owner && ctx.writable);
+        const a = asset(id, aid);
+        if (
+          a.revision !== expected ||
+          !["APPROVED", "FINAL"].includes(a.status) ||
+          !a.approvedBy ||
+          !a.approvedAt
+        )
+          throw new WorkspaceError(
+            409,
+            "Переноситься тільки точна затверджена версія. Оновіть Workspace.",
+          );
+        const previous = creativeWorkspaceDb()
+          .prepare(
+            "SELECT media_id FROM creative_workspace_imports WHERE asset_id=?",
+          )
+          .get(aid) as any;
+        if (previous) {
+          const existing = await getAsset(previous.media_id);
+          if (!existing || existing.ownerId !== u)
+            throw new WorkspaceError(
+              410,
+              "Матеріал медіатеки видалено. Історію перенесення збережено.",
+            );
+          await scope(d, u, id);
+          r.json({ asset: existing, reused: true, canonChanged: false });
+          return;
+        }
+        let metadata: Partial<MediaMetadataInput>;
+        try {
+          metadata = normalizeMediaMetadata(b.metadata ?? {});
+        } catch (e) {
+          throw new WorkspaceError(422, (e as Error).message);
+        }
+        if (metadata.status && metadata.status !== "APPROVED")
+          throw new WorkspaceError(
+            422,
+            "Під час перенесення статус — APPROVED.",
+          );
+        const ai = a.ai ?? emptyAi();
+        enforceAiPolicy(id, ai);
+        await validateTargets(ctx, metadata);
+        const row = creativeWorkspaceDb()
+          .prepare(
+            "SELECT content FROM creative_workspace_assets WHERE id=? AND project_id=?",
+          )
+          .get(aid, id) as any;
+        const imported = (await listAssets(u, { bookId: ctx.p.bookId }))
+          .filter(
+            (x) =>
+              x.provenance.creativeProjectId === id &&
+              x.provenance.workspace?.rootId === a.rootId &&
+              x.provenance.workspace.version < a.version,
+          )
+          .sort(
+            (x, y) =>
+              y.provenance.workspace!.version - x.provenance.workspace!.version,
+          )[0];
+        await d.chargeUpload?.(q, a.bytes, ctx.p.bookId, a.filename);
+        const at = new Date().toISOString();
+        const provenance: MediaProvenance = {
+          schema: 1,
+          revision: 1,
+          type: metadata.type ?? inferMediaType(a.mimeType, "upload"),
+          status: "APPROVED",
+          origin: "workspace",
+          createdBy: a.createdBy,
+          createdAt: a.createdAt,
+          creativeProjectId: id,
+          workspace: {
+            assetId: a.id,
+            rootId: a.rootId,
+            parentId: a.parentId,
+            version: a.version,
+            revision: a.revision,
+          },
+          importedBy: u,
+          importedAt: at,
+          approval: {
+            by: a.approvedBy,
+            at: a.approvedAt,
+            version: a.version,
+            assetId: a.id,
+          },
+          canon: null,
+          ai,
+          declaration: a.ai ? { by: a.createdBy, at: a.createdAt } : null,
+          characterIds: metadata.characterIds ?? [],
+          locationIds: metadata.locationIds ?? [],
+          sceneIds: metadata.sceneIds ?? [],
+          tags: metadata.tags ?? [],
+        };
+        const result = await saveAsset({
+          id: "cw-" + a.id,
+          rootId: "cw-" + a.rootId,
+          version: a.version,
+          ownerId: u,
+          bookId: ctx.p.bookId,
+          kind:
+            provenance.type === "COVER"
+              ? "cover_art"
+              : a.mimeType.startsWith("video/")
+                ? "video"
+                : "upload",
+          filename: a.filename,
+          mimeType: a.mimeType,
+          bytes: Buffer.from(row.content),
+          parentId: imported?.id,
+          passport: {
+            title: a.filename,
+            source: ai.used === true ? "ai" : "commission",
+            author: (await d.describeUser?.(a.createdBy)) ?? a.createdBy,
+            status: "final",
+            license: "unknown",
+          },
+          actor: "user:" + u,
+          provenance,
+          beforePersist: async () => {
+            ctx = await scope(d, u, id);
+            requireRight(ctx.owner && ctx.writable);
+            const fresh = asset(id, aid);
+            if (
+              fresh.revision !== expected ||
+              !["APPROVED", "FINAL"].includes(fresh.status)
+            )
+              throw new WorkspaceError(
+                409,
+                "Версія змінилася під час перенесення.",
+              );
+            enforceAiPolicy(id, ai);
+            await validateTargets(ctx, metadata);
+            // Async dependency reads must not permit a stale review to slip through.
+            if (asset(id, aid).revision !== expected)
+              throw new WorkspaceError(409, "Ревізія змінилася.");
+          },
+          commit: (media) => {
+            if (asset(id, aid).revision !== expected)
+              throw new WorkspaceError(409, "Ревізія змінилася.");
+            creativeWorkspaceDb()
+              .prepare(
+                "INSERT INTO creative_workspace_imports(asset_id,media_id,payload) VALUES(?,?,?)",
+              )
+              .run(aid, media.id, JSON.stringify(provenance));
+            event(id, u, "ASSET_IMPORTED_TO_LIBRARY", {
+              assetId: aid,
+              mediaId: media.id,
+              version: a.version,
+            });
+          },
+        });
+        r.status(201).json({
+          asset: result,
+          reused: false,
+          canonChanged: false,
+        });
+      });
     }),
   );
   app.post(
@@ -829,4 +1113,165 @@ export function registerCreativeWorkspaceRoutes(
       r.json({ read: true });
     }),
   );
+}
+
+/** Metadata editing does not grant access, publish a file or change manuscript/canon. */
+function registerMediaProvenanceRoutes(app: Express, d: CreativeWorkspaceDeps) {
+  app.get("/api/media/:assetId/provenance-targets", async (q, r) => {
+    try {
+      const u = q.principal?.id as string;
+      if (!u || q.principal?.isGuest || !(await d.principal(u)))
+        throw new WorkspaceError(401, "Увійдіть у систему.");
+      const a = await getAsset(String(q.params.assetId));
+      if (!a || a.ownerId !== u)
+        throw new WorkspaceError(404, "Матеріал не знайдено.");
+      const b = a.bookId ? await getBook(a.bookId) : null,
+        repo = d.repo();
+      if (a.bookId && (!b || b.ownerId !== u))
+        throw new WorkspaceError(403, "Власність книги змінилася.");
+      if (a.bookId && !repo) throw new WorkspaceError(503, "Ядро недоступне.");
+      const entities =
+        b && repo
+          ? (await repo.listEntities(b.id))
+              .filter(
+                (e) =>
+                  e.status !== "rejected" &&
+                  ["character", "location"].includes(e.type),
+              )
+              .map((e) => ({ id: e.id, type: e.type, name: e.name }))
+          : [];
+      if (
+        !(await d.principal(u)) ||
+        (a.bookId && (await getBook(a.bookId))?.ownerId !== u)
+      )
+        throw new WorkspaceError(403, "Доступ змінився.");
+      r.setHeader("Cache-Control", "private, no-store");
+      r.json({
+        entities,
+        sections: b
+          ? (Array.isArray(b.book.chapters) ? b.book.chapters : []).flatMap(
+              (c: any) =>
+                (c.sections ?? []).map((s: any) => ({
+                  id: s.id,
+                  title: s.title || s.id,
+                })),
+            )
+          : [],
+      });
+    } catch (e) {
+      r.status(e instanceof WorkspaceError ? e.status : 500).json({
+        error:
+          e instanceof WorkspaceError
+            ? e.message
+            : "Не вдалося прочитати контекст.",
+      });
+    }
+  });
+  app.patch("/api/media/:assetId/provenance", async (q, r) => {
+    try {
+      const u = q.principal?.id as string;
+      if (!u || q.principal?.isGuest || !(await d.principal(u)))
+        throw new WorkspaceError(401, "Увійдіть у систему.");
+      const a = await getAsset(String(q.params.assetId));
+      if (!a || a.ownerId !== u)
+        throw new WorkspaceError(404, "Матеріал не знайдено.");
+      const b = payload(q.body);
+      if (b.confirmed !== true)
+        throw new WorkspaceError(422, "Підтвердьте зміни метаданих.");
+      const expected = revision(b.expectedRevision);
+      let m: Partial<MediaMetadataInput>, ai: AiDeclaration | undefined;
+      try {
+        m = normalizeMediaMetadata(b.metadata ?? {});
+        ai = b.ai === undefined ? undefined : normalizeAi(b.ai);
+      } catch (e) {
+        throw new WorkspaceError(422, (e as Error).message);
+      }
+      if (["workspace", "ai"].includes(a.provenance.origin) && ai !== undefined)
+        throw new WorkspaceError(
+          422,
+          "Дані ШІ належать вихідній версії Workspace або серверній генерації.",
+        );
+      const book = a.bookId ? await getBook(a.bookId) : null;
+      if (a.bookId && (!book || book.ownerId !== u))
+        throw new WorkspaceError(403, "Власність книги змінилася.");
+      const repo = d.repo();
+      if (a.bookId && !repo) throw new WorkspaceError(503, "Ядро недоступне.");
+      if (book && repo) {
+        const entities = await repo.listEntities(book.id);
+        for (const [key, type] of [
+          ["characterIds", "character"],
+          ["locationIds", "location"],
+        ] as const) {
+          if (
+            (m[key] ?? []).some(
+              (id) =>
+                !entities.some(
+                  (e) =>
+                    e.id === id && e.type === type && e.status !== "rejected",
+                ),
+            )
+          )
+            throw new WorkspaceError(422, "Сутність не належить книзі.");
+        }
+        const scenes = new Set(
+          (Array.isArray(book.book.chapters) ? book.book.chapters : []).flatMap(
+            (c: any) => (c.sections ?? []).map((s: any) => s.id),
+          ),
+        );
+        if ((m.sceneIds ?? []).some((id) => !scenes.has(id)))
+          throw new WorkspaceError(422, "Сцена не належить книзі.");
+      } else if (
+        [
+          ...(m.characterIds ?? []),
+          ...(m.locationIds ?? []),
+          ...(m.sceneIds ?? []),
+        ].length
+      )
+        throw new WorkspaceError(422, "Для прив’язок потрібна книга.");
+      if (
+        !(await d.principal(u)) ||
+        (a.bookId && (await getBook(a.bookId))?.ownerId !== u)
+      )
+        throw new WorkspaceError(403, "Доступ змінився.");
+      const fresh = await getAsset(a.id);
+      if (!fresh || fresh.provenance.revision !== expected)
+        throw new WorkspaceError(409, "Метадані змінилися. Оновіть паспорт.");
+      const at = new Date().toISOString();
+      const next: MediaProvenance = {
+        ...fresh.provenance,
+        ...m,
+        revision: expected + 1,
+        ...(ai ? { ai, declaration: { by: u, at } } : {}),
+      };
+      if (
+        m.status === "APPROVED" &&
+        fresh.provenance.origin !== "workspace" &&
+        fresh.provenance.status !== "APPROVED"
+      )
+        next.approval = {
+          by: u,
+          at,
+          version: fresh.version,
+          assetId: fresh.id,
+        };
+      r.setHeader("Cache-Control", "private, no-store");
+      r.json({
+        asset: await updateMediaProvenance(a.id, u, expected, next),
+        canonChanged: false,
+      });
+    } catch (e) {
+      r.status(
+        e instanceof WorkspaceError
+          ? e.status
+          : e instanceof MediaPassportError
+            ? 409
+            : 500,
+      ).json({
+        error:
+          e instanceof WorkspaceError || e instanceof MediaPassportError
+            ? e.message
+            : "Не вдалося змінити метадані.",
+      });
+    }
+  });
 }

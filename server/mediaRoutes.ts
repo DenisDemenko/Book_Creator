@@ -18,6 +18,7 @@
 import type { Express, Request } from 'express';
 import { requireAuth } from './auth';
 import { checkAndRecordStorageUpload, getStorageUsage } from './mediaStorage';
+import { mediaMatches, normalizeAi } from '../shared/mediaProvenance';
 import { listBooks } from './bookStore';
 import {
   deleteAsset,
@@ -147,6 +148,9 @@ export function registerMediaRoutes(app: Express, opts: MediaRoutesOptions = {})
       const principal = req.principal!;
       const { dataUrl, filename, bookId, kind, prompt, model, parentId, passport } = req.body || {};
 
+      let ai;
+      try { ai = req.body?.ai === undefined ? undefined : normalizeAi(req.body.ai); }
+      catch (e) { return res.status(400).json({ error: (e as Error).message }); }
       const payload = decodeImagePayload(dataUrl);
       if (!payload) {
         return res.status(400).json({
@@ -188,6 +192,7 @@ export function registerMediaRoutes(app: Express, opts: MediaRoutesOptions = {})
         parentId: typeof parentId === 'string' && parentId ? parentId : null,
         passport: passport && typeof passport === 'object' ? passport : undefined,
         actor: `user:${principal.id}`,
+        ai,
       });
 
       res.json({ asset, storage: quota });
@@ -206,7 +211,10 @@ export function registerMediaRoutes(app: Express, opts: MediaRoutesOptions = {})
       const bookId = typeof req.query.bookId === 'string' ? req.query.bookId : null;
       const all = await listAssets(principal.id as string, { bookId });
       // `?latest=1` — лише останні версії (галерея); без нього — усе, як і раніше.
-      const assets = req.query.latest === '1' ? latestVersionsOnly(all) : all;
+      const filters = Object.fromEntries(['type','status','author','project','ai','tag','character','location','scene','from','to'].filter(k => typeof req.query[k] === 'string').map(k => [k, String(req.query[k])]));
+      const matched = all.filter(a => mediaMatches(a.provenance, filters));
+      const assets = req.query.latest === '1' ? latestVersionsOnly(matched) : matched;
+      res.setHeader('Cache-Control', 'private, no-store');
       res.json({ assets });
     } catch (err) {
       console.error('[media] list:', err);
@@ -280,7 +288,11 @@ export function registerMediaRoutes(app: Express, opts: MediaRoutesOptions = {})
         res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
       }
       // Приватне: файл автора не має осідати в спільних кешах проксі.
-      res.setHeader('Cache-Control', 'private, max-age=86400');
+      res.setHeader('Cache-Control', 'private, no-store');
+      if (!found.record.mimeType.startsWith('image/') && !found.record.mimeType.startsWith('video/') && !found.record.mimeType.startsWith('audio/')) {
+        res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(found.record.filename)}`);
+        res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
+      }
       res.end(Buffer.from(found.bytes));
     } catch (err) {
       console.error('[media] file:', err);

@@ -135,7 +135,8 @@ remote перевірити можна, запушити — ні**.
 Т7.2 реалізовано (#394): приватний бриф, AI-чернетка, підтверджений snapshot MODERATION, конкретні grants і аудит. Studio npm test/lint/build — exit 0; Marketplace e2e 137/137, npm test/types/build — exit 0. [План](PLAN_CREATIVE_BRIEF.md), [приймання](docs/acceptance/T7.2.md). Production/Firebase/реальний AI очікують. Наступне — Т7.3.
 Т7.3 реалізовано (#396): каталог/модерація/заявки/вибір і синхронізація Studio без grants; API 145/145, browser 6/0, Studio live 13/0, повні тести й збірки успішні. [Приймання](docs/acceptance/T7.3.md). Наступне — Т7.4.
 Т7.4 реалізовано (#397): приватні файли/версії/review/pins/chat, окремий явний Workspace grant без доступу до книги. Memory/Pg 28/0, browser 38/0, Marketplace API 146/146; повторний npm test Studio, типи/збірки, journal/encoding — exit 0. [Приймання](docs/acceptance/T7.4.md). Наступне — Т7.5.
-Незапушені коміти: `git log origin/master..HEAD`. Т7.4: Marketplace `cba53d9` і Studio `906b988` запушено в master без force; цей документаційний коміт фіксує результат. Git identity: Денис Деменко <tropazemli@gmail.com>. Production/Firebase/том/bridge — сценарій docs/acceptance/T7.4.md після деплою; нових міграцій Marketplace цього етапу немає. Команда пуша: `git push origin HEAD:master`. Нагадування: захищений SECRET_VAULT_KEY_BASE64 на Railway і відкладений Т4.3. Наступне — Т7.5.
+Т7.5 реалізовано (#398): явне перенесення затверджених версій до приватної медіатеки, походження/AI policy/CAS/історія, усі типи й фільтри. Memory/Pg 18/0, Chromium 22/0; npm test — exit 0. [Приймання](docs/acceptance/T7.5.md). Наступне — Т7.6.
+Незапушені коміти: `git log origin/master..HEAD`. Т7.5: повний npm test і фінальні lint/build — exit 0, Workspace browser 38/0, video 115/0; коміт підготовлено, пуш `git push origin HEAD:master`, identity Денис Деменко <tropazemli@gmail.com>. Production/Firebase/volume/redeploy/платні AI — ручне приймання docs/acceptance/T7.5.md; Marketplace цього етапу не змінено. Попередні Т7.4 Marketplace cba53d9 і Studio 906b988/a68d3b4 запушено. Нагадування: SECRET_VAULT_KEY_BASE64 на Railway і відкладений Т4.3. Наступне — Т7.6.
 
 Історичні стани #374, #377, #379 з результатами й ручними перевірками:
 [повний текст](log/deploy-notes.md).
@@ -333,7 +334,7 @@ JS-файлу напряму, як зроблено тут.
 
 ---
 
-# Покажчик записів (397 записів, #1–#397)
+# Покажчик записів (398 записів, #1–#398)
 
 > Повні тексти записів лежать у теці `log/`, розбиті на частини — журнал
 > одним файлом доріс до 840 КБ, а його читає кожна нова сесія. Цей
@@ -348,6 +349,7 @@ JS-файлу напряму, як зроблено тут.
 
 | # | Назва | Статус | Файл |
 |---:|---|---|---|
+| 398 | Т7.5 — медіатека з походженням і перенесення затверджених версій | 🚧 У роботі | [301-350.md](log/301-350.md) |
 | 397 | Т7.4 — Creative Workspace, версії й людська перевірка | ✅ Реалізовано | [301-350.md](log/301-350.md) |
 | 396 | Т7.3 — біржа творчих замовлень | ✅ Реалізовано | [301-350.md](log/301-350.md) |
 | 395 | Git identity власника — tropazemli та повтор деплою | ✅ Налаштовано | [301-350.md](log/301-350.md) |

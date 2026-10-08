@@ -1058,6 +1058,7 @@ function migrateUsersColumns(instance: Database): void {
  * виводяться при читанні, тож переливати дані не треба.
  */
 const MEDIA_ASSET_NEW_COLUMNS: [string, string][] = [
+  ['provenance', 'TEXT'],
   ['title', 'TEXT'],
   ['alt_text', 'TEXT'],
   ['source', 'TEXT'],

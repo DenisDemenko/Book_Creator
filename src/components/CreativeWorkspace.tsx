@@ -1,3 +1,6 @@
+import { emptyAi } from '../../shared/mediaProvenance';
+import { AiDeclarationFields } from './MediaProvenancePanel';
+import { WorkspaceMediaTransfer } from './WorkspaceMediaTransfer';
 import { buildAppPath } from "../utils/appRoutes";
 import { API_BASE } from "../utils/basePath";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -17,6 +20,7 @@ interface State {
   userId: string;
   permissions: { owner: boolean; work: boolean; comment: boolean };
   unread: number;
+  mediaTargets?: { characters: Array<{ id: string; name: string }>; locations: Array<{ id: string; name: string }>; scenes: Array<{ id: string; name: string }> } | null;
   workspaceGrants: Array<{
     id: string;
     level: string;
@@ -82,6 +86,7 @@ const labels: Record<string, string> = {
   WORKSPACE_ACCESS_GRANTED: "Надано доступ Workspace",
   WORKSPACE_ACCESS_REVOKED: "Відкликано доступ Workspace",
   ASSET_UPLOADED: "Завантажено нову версію",
+  ASSET_IMPORTED_TO_LIBRARY: "Результат збережено в медіатеку",
   ASSET_STATE_CHANGED: "Змінено статус",
   ANNOTATION_ADDED: "Додано коментар",
   ANNOTATION_RESOLVED: "Закрито коментар",
@@ -117,6 +122,7 @@ export function CreativeWorkspace({
     [context, setContext] = useState<any>(null),
     [contextOpen, setContextOpen] = useState(false),
     [historyCursor, setHistoryCursor] = useState<number | null>(null);
+  const [uploadAi, setUploadAi] = useState(emptyAi);
   const [workspaceLevel, setWorkspaceLevel] = useState("WORK"),
     [accessConfirm, setAccessConfirm] = useState(false),
     [validFrom, setValidFrom] = useState(""),
@@ -317,6 +323,7 @@ export function CreativeWorkspace({
           : "");
     return api("/assets", "POST", {
       filename: file.name,
+      ai: uploadAi,
       dataUrl: dataUrl.replace(/^data:[^;]*;/, `data:${safeMime};`),
       ...(parent
         ? { parentId: parent.id, expectedRevision: parent.revision }
@@ -759,12 +766,13 @@ export function CreativeWorkspace({
       </label>
       {canUpload && (
         <div className="space-y-2">
+          <AiDeclarationFields value={uploadAi} onChange={setUploadAi} />
           <label className="block">
             Нова робота
             <input
               aria-label="Нова робота"
               type="file"
-              accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,application/pdf,application/zip,.glb"
+              accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,audio/mpeg,audio/wav,audio/ogg,application/pdf,application/zip,.glb"
               disabled={busy}
               onChange={(e) => {
                 const f = e.target.files?.[0];
@@ -812,6 +820,8 @@ export function CreativeWorkspace({
               Затвердив: {name(a.approvedBy)} · {a.approvedAt}
             </p>
           )}
+          {state.permissions.owner && state.permissions.work && ['APPROVED', 'FINAL'].includes(a.status) && <WorkspaceMediaTransfer key={a.id} asset={a} targets={state.mediaTargets} busy={busy} onTransfer={metadata => void action(() => api(`/assets/${a.id}/library`, 'POST', { expectedRevision: a.revision, confirmed: true, metadata }), `Версію v${a.version} збережено в медіатеці зі збереженням походження.`)} />}
+          <p>ШІ: {a.ai?.used === true ? `${a.ai.provider} / ${a.ai.model}` : a.ai?.used === false ? 'не використано' : 'не заявлено'}</p>
           <div className="flex flex-wrap gap-2">
             <label>
               Масштаб
@@ -971,7 +981,7 @@ export function CreativeWorkspace({
                   }}
                   onTimeUpdate={(e) => setTimecode(e.currentTarget.currentTime)}
                 />
-              ) : url && a.mimeType === "application/pdf" ? (
+              ) : url && a.mimeType.startsWith("audio/") ? (<audio src={url} controls className="max-w-full" />) : url && a.mimeType === "application/pdf" ? (
                 <iframe
                   title="Перегляд PDF"
                   src={url}
@@ -1007,6 +1017,7 @@ export function CreativeWorkspace({
               <label className="block">
                 <input
                   type="checkbox"
+                  aria-label="Підтвердити рішення"
                   checked={confirmed}
                   onChange={(e) => setConfirmed(e.target.checked)}
                 />{" "}

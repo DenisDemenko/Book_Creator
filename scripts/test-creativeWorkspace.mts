@@ -766,21 +766,21 @@ try {
         document.body.textContent?.includes("Browser pin"),
       );
       check("BROWSER image pin is saved and appears in annotations");
-      await page.click("input[type=checkbox]");
+      await page.click('input[aria-label="Підтвердити рішення"]');
       await click("На перевірці");
       await page.waitForFunction(() =>
         document
           .querySelector("[role=status]")
           ?.textContent?.includes("На перевірці"),
       );
-      await page.click("input[type=checkbox]");
+      await page.click('input[aria-label="Підтвердити рішення"]');
       await click("Затверджено");
       await page.waitForFunction(() =>
         document
           .querySelector("[role=status]")
           ?.textContent?.includes("Затверджено"),
       );
-      await page.click("input[type=checkbox]");
+      await page.click('input[aria-label="Підтвердити рішення"]');
       await click("Фінальний");
       await page.waitForFunction(() =>
         document

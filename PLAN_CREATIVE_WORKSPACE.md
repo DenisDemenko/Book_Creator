@@ -31,3 +31,6 @@ AI Tools веде до наявної AI Studio; ключі не віддают�
 контенту; auth/expiry/revoke/frozen status; незмінні файли й CAS; review/annotation
 і chat/read; браузерний цикл та 390px; повні npm test, lint/build, журнал.
 Production Firebase і реальні акаунти — окремий ручний сценарій.
+
+Т7.5: явне перенесення затверджених файлів до медіатеки, включно з аудіо,
+реалізовано в [PLAN_MEDIA_PROVENANCE.md](PLAN_MEDIA_PROVENANCE.md).

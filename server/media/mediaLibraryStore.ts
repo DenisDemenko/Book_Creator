@@ -23,6 +23,7 @@
  */
 
 import fs from 'node:fs/promises';
+import { inferMediaType, emptyAi, type MediaProvenance, type AiDeclaration } from '../../shared/mediaProvenance';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { getDb, isAvailable, DATA_DIR } from '../db';
@@ -59,6 +60,13 @@ export const MEDIA_MIME_EXTENSIONS: Record<string, string> = {
   'image/gif': 'gif',
   'image/svg+xml': 'svg',
   'video/mp4': 'mp4',
+  'video/webm': 'webm',
+  'application/pdf': 'pdf',
+  'application/zip': 'zip',
+  'model/gltf-binary': 'glb',
+  'audio/mpeg': 'mp3',
+  'audio/wav': 'wav',
+  'audio/ogg': 'ogg',
 };
 
 // ---------------------------------------------------------------------------
@@ -104,6 +112,7 @@ export interface MediaAsset {
   rootId: string;
   version: number;
   updatedAt: string;
+  provenance: MediaProvenance;
 }
 
 /** Що автор може змінити в паспорті. */
@@ -117,7 +126,7 @@ export interface MediaPassportPatch {
   status?: MediaStatus;
 }
 
-export type MediaHistoryAction = 'created' | 'version' | 'passport' | 'deleted';
+export type MediaHistoryAction = 'created' | 'version' | 'passport' | 'deleted' | 'provenance';
 
 export interface MediaHistoryEntry {
   id: number;
@@ -206,6 +215,7 @@ async function loadJson(): Promise<JsonShape> {
 
 function persistJson(): Promise<void> {
   writeChain = writeChain
+    .catch(() => {}) // A failed write must not poison subsequent attempts.
     .then(async () => {
       await fs.mkdir(DATA_DIR, { recursive: true });
       const target = path.join(DATA_DIR, JSON_FILE);
@@ -213,7 +223,11 @@ function persistJson(): Promise<void> {
       await fs.writeFile(temp, JSON.stringify(jsonCache, null, 2), 'utf8');
       await fs.rename(temp, target);
     })
-    .catch((err) => console.error('[mediaLibrary] Не вдалося зберегти media-assets.json:', err));
+    .catch((err) => {
+      jsonCache = null;
+      console.error('[mediaLibrary] Не вдалося зберегти media-assets.json:', err);
+      throw err;
+    });
   return writeChain as Promise<void>;
 }
 
@@ -290,6 +304,13 @@ function withPassportDefaults(a: Partial<MediaAsset> & { id: string; createdAt: 
     rootId: a.rootId || a.id,
     version: Number(a.version) > 0 ? Number(a.version) : 1,
     updatedAt: a.updatedAt || a.createdAt,
+    provenance: a.provenance ?? {
+      schema: 1, revision: 1, type: inferMediaType(a.mimeType || '', a.kind || ''), status: 'DRAFT',
+      origin: 'legacy', createdBy: null, createdAt: a.createdAt,
+      creativeProjectId: null, workspace: null, importedBy: null, importedAt: null, approval: null, canon: null,
+      ai: { ...emptyAi(), used: source === 'ai' ? true : null, model: a.model || null }, declaration: null,
+      characterIds: [], locationIds: [], sceneIds: [], tags: [],
+    },
   };
 }
 
@@ -318,6 +339,7 @@ function rowToAsset(row: any): MediaAsset {
     rootId: row.root_id ?? undefined,
     version: row.version ?? undefined,
     updatedAt: row.updated_at ?? undefined,
+    provenance: row.provenance ? JSON.parse(row.provenance) : undefined,
   });
 }
 
@@ -375,6 +397,15 @@ export async function saveAsset(params: {
   passport?: MediaPassportPatch;
   /** Хто зберіг — для історії; типово `user:<власник>`. */
   actor?: string;
+  /** Trusted server metadata, never copied wholesale from request bodies. */
+  provenance?: MediaProvenance;
+  ai?: AiDeclaration;
+  /** Workspace imports are deterministic, with a fresh authorization check immediately before persistence. */
+  id?: string;
+  rootId?: string;
+  version?: number;
+  beforePersist?: () => Promise<void>;
+  commit?: (record: MediaAsset) => void;
 }): Promise<MediaAsset> {
   const ownerId = String(params.ownerId || '').trim();
   if (!ownerId) throw new Error('Медіафайл без власника — зберігати нікуди.');
@@ -390,10 +421,11 @@ export async function saveAsset(params: {
   if (params.parentId) {
     parent = await getAsset(String(params.parentId));
     if (!parent || parent.ownerId !== ownerId) throw new Error('Попередню версію зображення не знайдено.');
+    if (parent.provenance.origin === 'workspace' && params.provenance?.origin !== 'workspace') throw new MediaPassportError('Нова версія цього результату створюється й затверджується у Workspace.');
   }
   const passport = normalizePassportPatch(params.passport ?? {});
   const nowIso = (params.now?.() ?? new Date()).toISOString();
-  const id = newAssetId();
+  const id = params.id ?? newAssetId();
   let version = 1;
   if (parent) {
     const group = (await listAssets(ownerId)).filter((a) => a.rootId === parent!.rootId);
@@ -420,9 +452,17 @@ export async function saveAsset(params: {
     licenseUrl: passport.licenseUrl ?? parent?.licenseUrl,
     status: passport.status ?? parent?.status,
     parentId: parent?.id ?? null,
-    rootId: parent?.rootId ?? id,
-    version,
+    rootId: params.rootId ?? parent?.rootId ?? id,
+    version: params.version ?? version,
     updatedAt: nowIso,
+    provenance: params.provenance ?? {
+      schema: 1, revision: 1, type: inferMediaType(mimeType, params.kind), status: 'DRAFT',
+      origin: params.actor?.startsWith('ai:') ? 'ai' : 'upload', createdBy: ownerId, createdAt: nowIso,
+      creativeProjectId: null, workspace: null, importedBy: null, importedAt: null, approval: null, canon: null,
+      ai: params.ai ?? { ...emptyAi(), used: params.prompt || params.model ? true : null, model: params.model || null },
+      declaration: params.ai ? { by: ownerId, at: nowIso } : null,
+      characterIds: [], locationIds: [], sceneIds: [], tags: [],
+    },
   });
   record.url = urlForAsset(record.id);
 
@@ -431,54 +471,72 @@ export async function saveAsset(params: {
   await fs.mkdir(userDir(ownerId), { recursive: true });
   await fs.writeFile(assetPath(record), params.bytes);
 
-  if (useJson()) {
-    const data = await loadJson();
-    data.assets.push(record);
-    await persistJson();
-  } else {
-    getDb()!
-      .prepare(
-        `INSERT INTO media_assets
-           (id, owner_id, book_id, kind, filename, mime_type, size_bytes, prompt, model, created_at,
-            title, alt_text, source, author, license, license_url, status, parent_id, root_id, version, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        record.id,
-        record.ownerId,
-        record.bookId,
-        record.kind,
-        record.filename,
-        record.mimeType,
-        record.sizeBytes,
-        record.prompt,
-        record.model,
-        record.createdAt,
-        record.title,
-        record.altText,
-        record.source,
-        record.author,
-        record.license,
-        record.licenseUrl,
-        record.status,
-        record.parentId,
-        record.rootId,
-        record.version,
-        record.updatedAt
-      );
+  try {
+    await params.beforePersist?.();
+    if (params.commit && useJson()) throw new Error('Workspace import requires SQLite.');
+    if (params.commit) getDb()!.exec('BEGIN IMMEDIATE');
+    if (useJson()) {
+      const data = await loadJson();
+      data.assets.push(record);
+      await persistJson();
+    } else {
+      getDb()!
+        .prepare(
+          `INSERT INTO media_assets
+             (id, owner_id, book_id, kind, filename, mime_type, size_bytes, prompt, model, created_at,
+              title, alt_text, source, author, license, license_url, status, parent_id, root_id, version, updated_at, provenance)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          record.id,
+          record.ownerId,
+          record.bookId,
+          record.kind,
+          record.filename,
+          record.mimeType,
+          record.sizeBytes,
+          record.prompt,
+          record.model,
+          record.createdAt,
+          record.title,
+          record.altText,
+          record.source,
+          record.author,
+          record.license,
+          record.licenseUrl,
+          record.status,
+          record.parentId,
+          record.rootId,
+          record.version,
+          record.updatedAt,
+          JSON.stringify(record.provenance)
+        );
+    }
+    const history = {
+      assetId: record.id,
+      rootId: record.rootId,
+      ownerId,
+      at: nowIso,
+      actor: params.actor || `user:${ownerId}`,
+      action: (parent ? 'version' : 'created') as MediaHistoryAction,
+      details: parent
+        ? { version: record.version, from: parent.id, filename: record.filename }
+        : { source: record.source, kind: record.kind, filename: record.filename, ...(record.model ? { model: record.model } : {}) },
+    };
+    if (params.commit) {
+      // No await inside the SQLite transaction: metadata and Workspace event commit together.
+      getDb()!.prepare('INSERT INTO media_asset_history (asset_id, root_id, owner_id, at, actor, action, details) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(history.assetId, history.rootId, history.ownerId, nowIso, history.actor, history.action, JSON.stringify({ ...history.details, provenance: record.provenance }));
+      params.commit(record);
+      getDb()!.exec('COMMIT');
+    } else await recordAssetHistory(history);
+    return record;
+  } catch (err) {
+    if (params.commit) { try { getDb()!.exec('ROLLBACK'); } catch {} }
+    // A conflicting deterministic import must never remove the successfully persisted file.
+    if (!(await getAsset(record.id))) await fs.unlink(assetPath(record)).catch(() => {});
+    throw err;
   }
-  await recordAssetHistory({
-    assetId: record.id,
-    rootId: record.rootId,
-    ownerId,
-    at: nowIso,
-    actor: params.actor || `user:${ownerId}`,
-    action: parent ? 'version' : 'created',
-    details: parent
-      ? { version: record.version, from: parent.id, filename: record.filename }
-      : { source: record.source, kind: record.kind, filename: record.filename, ...(record.model ? { model: record.model } : {}) },
-  });
-  return record;
 }
 
 export async function getAsset(id: string): Promise<MediaAsset | null> {
@@ -655,4 +713,23 @@ export function latestVersionsOnly(assets: MediaAsset[]): MediaAsset[] {
 export async function totalBytesForOwner(ownerId: string): Promise<number> {
   const all = await listAssets(ownerId);
   return all.reduce((sum, a) => sum + a.sizeBytes, 0);
+}
+
+/** CAS metadata editing; origin/identity/Workspace approval remain immutable. */
+export async function updateMediaProvenance(id: string, owner: string, expected: number, next: MediaProvenance): Promise<MediaAsset | null> {
+  const a = await getAsset(id);
+  if (!a || a.ownerId !== owner) return null;
+  if (a.provenance.revision !== expected) throw new MediaPassportError('Метадані змінилися. Оновіть паспорт.');
+  if (useJson()) {
+    const data = await loadJson();
+    const fresh = data.assets.find(x => x.id === id)!;
+    if (fresh.provenance.revision !== expected) throw new MediaPassportError('Метадані змінилися.');
+    fresh.provenance = next;
+    await persistJson();
+  } else {
+    const result = getDb()!.prepare(`UPDATE media_assets SET provenance=? WHERE id=? AND owner_id=? AND COALESCE(json_extract(provenance, '$.revision'), 1)=?`).run(JSON.stringify(next), id, owner, expected) as { changes: number };
+    if (result.changes !== 1) throw new MediaPassportError('Метадані змінилися.');
+  }
+  await recordAssetHistory({ assetId: a.id, rootId: a.rootId, ownerId: owner, actor: `user:${owner}`, action: 'provenance', details: { before: a.provenance, after: next } });
+  return { ...a, provenance: next };
 }
