@@ -133,7 +133,7 @@ remote перевірити можна, запушити — ні**.
 Т6.6 реалізовано й запушено як `ce37eed` в origin/master (Book_Creator): Memory/PostgreSQL 19/0, live 21/0; повторний npm test і build — exit 0, фінальний lint — exit 0. [План](PLAN_COLLABORATION_AI.md), [приймання](docs/acceptance/T6.6.md). Production-прогін очікує.
 Т7.1 реалізовано: Marketplace `37f35e7` запушено в master; Studio `d1e4226` запушено в origin/master. E2e 132/132, Marketplace npm test 11 unit + web checks; Studio test 9/0, live 11/0; повторний повний npm test, lint/types/build — exit 0. [План](PLAN_CREATIVE_STUDIO.md), [приймання](docs/acceptance/T7.1.md). API-міграцію перевірити після деплою; production/Firebase очікують ручного прогону. Наступне — Т7.2.
 Т7.2 реалізовано (#394): приватний бриф, AI-чернетка, підтверджений snapshot MODERATION, конкретні grants і аудит. Studio npm test/lint/build — exit 0; Marketplace e2e 137/137, npm test/types/build — exit 0. [План](PLAN_CREATIVE_BRIEF.md), [приймання](docs/acceptance/T7.2.md). Production/Firebase/реальний AI очікують. Наступне — Т7.3.
-Незапушені коміти: `git log origin/master..HEAD`; Marketplace Т7.2 `0d6fcdc` запушено. Studio Т7.2 підготовлено до коміту/пуша; стан буде уточнено після remote-перевірки. Команда пуша: `git push origin HEAD:master`. Після деплою — сценарій В6, захищений ключ Vault і відкладене приймання Т4.3.
+Незапушені коміти: `git log origin/master..HEAD`; Marketplace Т7.2 `0d6fcdc` і Studio `c639f39` запушені в master без force; цей документаційний коміт синхронізує стан після пуша. Команда пуша: `git push origin HEAD:master`. Після деплою — сценарій В6, захищений ключ Vault і відкладене приймання Т4.3.
 
 Історичні стани #374, #377, #379 з результатами й ручними перевірками:
 [повний текст](log/deploy-notes.md).
