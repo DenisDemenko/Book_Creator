@@ -140,7 +140,7 @@ export async function logTextUsage(
   }
 }
 
-async function logImageUsage(
+export async function logImageUsage(
   ctx: UsageLogCtx,
   engineId: string,
   modelId: string,
@@ -182,7 +182,7 @@ async function logImageUsage(
  * першоджерела (Google, Kling, ByteDance, Alibaba, Black Forest Labs).
  * Це орієнтир для звірки з реальним рахунком Leonardo, не точна цифра.
  */
-async function logVideoUsage(
+export async function logVideoUsage(
   ctx: UsageLogCtx,
   engineId: string,
   modelId: string,

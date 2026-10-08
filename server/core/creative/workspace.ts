@@ -1,3 +1,4 @@
+import { registerCreativeAiRoutes, type CreativeAiDeps } from "./ai";
 /** Private T7.4 workspace. Files and revisions stay in Studio; approval is not canon. */
 import { registerCreativeBibleRoutes } from "./bible";
 import { randomUUID } from "node:crypto";
@@ -35,6 +36,7 @@ import {
   normalizeMediaMetadata,
   type AiDeclaration,
   type MediaProvenance,
+  type MediaGenerationContext,
   type MediaMetadataInput,
 } from "../../../shared/mediaProvenance";
 export const CREATIVE_ASSET_STATES = [
@@ -63,6 +65,7 @@ export interface CreativeAsset {
   approvedBy: string | null;
   approvedAt: string | null;
   ai?: AiDeclaration;
+  generationContext?:MediaGenerationContext;
   libraryAssetId?: string | null;
 }
 export interface CreativeAnnotation {
@@ -79,6 +82,7 @@ export interface CreativeAnnotation {
   resolvedAt: string | null;
 }
 export interface CreativeWorkspaceDeps extends CollaborationAiDeps {
+  creativeAi?: CreativeAiDeps["ai"];
   chargeUpload?: (
     req: Request,
     bytes: number,
@@ -111,7 +115,7 @@ function revision(v: unknown) {
     throw new WorkspaceError(422, "Потрібна поточна ревізія.");
   return Number(v);
 }
-function asset(project: string, id: string): CreativeAsset {
+export function workspaceAsset(project: string, id: string): CreativeAsset {
   const row = creativeWorkspaceDb()
     .prepare(
       "SELECT payload FROM creative_workspace_assets WHERE project_id=? AND id=?",
@@ -120,7 +124,7 @@ function asset(project: string, id: string): CreativeAsset {
   if (!row) throw new WorkspaceError(404, "Матеріал не знайдено.");
   return JSON.parse(row.payload);
 }
-function assets(id: string): CreativeAsset[] {
+export function workspaceAssets(id: string): CreativeAsset[] {
   return creativeWorkspaceDb()
     .prepare(
       "SELECT payload FROM creative_workspace_assets WHERE project_id=? ORDER BY rowid DESC",
@@ -128,7 +132,7 @@ function assets(id: string): CreativeAsset[] {
     .all(id)
     .map((r: any) => JSON.parse(r.payload));
 }
-function event(
+export function workspaceEvent(
   id: string,
   actorId: string,
   type: string,
@@ -159,7 +163,7 @@ function transaction<T>(fn: () => T): T {
     throw e;
   }
 }
-async function scope(d: CreativeWorkspaceDeps, user: string, id: string) {
+export async function creativeWorkspaceScope(d: CreativeWorkspaceDeps, user: string, id: string) {
   const row = creativeProjectDb()
     .prepare("SELECT payload FROM creative_projects WHERE id=?")
     .get(id) as any;
@@ -233,7 +237,7 @@ function payload(raw: unknown) {
     throw new WorkspaceError(422, "Некоректний запит.");
   return raw as Record<string, any>;
 }
-function decode(data: unknown) {
+export function decodeWorkspaceFile(data: unknown) {
   if (typeof data !== "string" || data.length > 29 * 1024 * 1024)
     throw new WorkspaceError(413, "Максимум 20 МБ за файл.");
   const m = data.match(
@@ -297,9 +301,9 @@ export async function readableCreativeDeliverables(
   let authorized = 0;
   for (const row of rows) {
     try {
-      await scope(d, userId, row.id);
+      await creativeWorkspaceScope(d, userId, row.id);
       authorized++;
-      out.push(...assets(row.id));
+      out.push(...workspaceAssets(row.id));
     } catch (e) {
       if (!(e instanceof WorkspaceError && e.status === 403)) throw e;
     }
@@ -311,7 +315,7 @@ export async function readableCreativeDeliverables(
   }
   return out.slice(0, 200);
 }
-function enforceAiPolicy(id: string, ai: AiDeclaration) {
+export function enforceWorkspaceAiPolicy(id: string, ai: AiDeclaration) {
   const brief = getCreativeBrief(id),
     policy = brief?.published?.data.aiPolicy ?? brief?.data.aiPolicy;
   if (policy === "FORBIDDEN" && ai.used !== false)
@@ -323,7 +327,7 @@ function enforceAiPolicy(id: string, ai: AiDeclaration) {
     throw new WorkspaceError(422, "Бриф вимагає вказати використання ШІ.");
 }
 async function validateTargets(
-  ctx: Awaited<ReturnType<typeof scope>>,
+  ctx: Awaited<ReturnType<typeof creativeWorkspaceScope>>,
   m: Partial<MediaMetadataInput>,
 ) {
   const entities = await ctx.repo.listEntities(ctx.p.bookId);
@@ -368,6 +372,7 @@ export function registerCreativeWorkspaceRoutes(
 ) {
   registerMediaProvenanceRoutes(app, d);
   registerCreativeBibleRoutes(app, d);
+  registerCreativeAiRoutes(app, { ...d, ai:d.creativeAi });
   const base = "/api/creative/projects/:id/workspace";
   const handle =
     (fn: (q: Request, r: Response, u: string, id: string) => Promise<void>) =>
@@ -399,9 +404,9 @@ export function registerCreativeWorkspaceRoutes(
   app.get(
     base,
     handle(async (_q, r, u, id) => {
-      const ctx = await scope(d, u, id),
+      const ctx = await creativeWorkspaceScope(d, u, id),
         brief = getCreativeBrief(id),
-        all = assets(id);
+        all = workspaceAssets(id);
       const annotations = creativeWorkspaceDb()
         .prepare(
           "SELECT payload FROM creative_workspace_annotations WHERE project_id=? ORDER BY rowid",
@@ -453,7 +458,7 @@ export function registerCreativeWorkspaceRoutes(
             (g) => g.scopeType === "deliverable" && g.scopeRef === id,
           )
         : [];
-      await scope(d, u, id);
+      await creativeWorkspaceScope(d, u, id);
       r.json({
         project: {
           id: ctx.p.id,
@@ -502,7 +507,7 @@ export function registerCreativeWorkspaceRoutes(
   app.post(
     `${base}/access`,
     handle(async (q, r, u, id) => {
-      const ctx = await scope(d, u, id);
+      const ctx = await creativeWorkspaceScope(d, u, id);
       requireRight(ctx.owner);
       const b = payload(q.body);
       if (b.confirmed !== true)
@@ -532,7 +537,7 @@ export function registerCreativeWorkspaceRoutes(
         validFrom: b.validFrom || undefined,
         validUntil: b.validUntil || null,
       });
-      event(id, u, "WORKSPACE_ACCESS_GRANTED", {
+      workspaceEvent(id, u, "WORKSPACE_ACCESS_GRANTED", {
         grantId: grant.id,
         level: b.level,
       });
@@ -542,7 +547,7 @@ export function registerCreativeWorkspaceRoutes(
   app.post(
     `${base}/access/:grantId/revoke`,
     handle(async (q, r, u, id) => {
-      const ctx = await scope(d, u, id);
+      const ctx = await creativeWorkspaceScope(d, u, id);
       requireRight(ctx.owner);
       if (q.body?.confirmed !== true)
         throw new WorkspaceError(422, "Підтвердьте відкликання.");
@@ -559,14 +564,14 @@ export function registerCreativeWorkspaceRoutes(
         grantId: g.id,
         granter: { userId: u, isOwner: true, isAdmin: false },
       });
-      event(id, u, "WORKSPACE_ACCESS_REVOKED", { grantId: g.id });
+      workspaceEvent(id, u, "WORKSPACE_ACCESS_REVOKED", { grantId: g.id });
       r.json({ grant });
     }),
   );
   app.get(
     `${base}/context`,
     handle(async (_q, r, u, id) => {
-      const ctx = await scope(d, u, id);
+      const ctx = await creativeWorkspaceScope(d, u, id);
       const filtered = restrictBook(
         ctx.b.book,
         ctx.a.effective,
@@ -582,15 +587,15 @@ export function registerCreativeWorkspaceRoutes(
         },
         scope: ctx.a.effective.full ? "book" : "restricted",
       };
-      await scope(d, u, id);
+      await creativeWorkspaceScope(d, u, id);
       r.json(result);
     }),
   );
   app.get(
     `${base}/assets/:assetId/file`,
     handle(async (q, r, u, id) => {
-      await scope(d, u, id);
-      const a = asset(id, String(q.params.assetId));
+      await creativeWorkspaceScope(d, u, id);
+      const a = workspaceAsset(id, String(q.params.assetId));
       const row = creativeWorkspaceDb()
         .prepare(
           "SELECT content FROM creative_workspace_assets WHERE id=? AND project_id=?",
@@ -612,10 +617,10 @@ export function registerCreativeWorkspaceRoutes(
   app.post(
     `${base}/assets`,
     handle(async (q, r, u, id) => {
-      let ctx = await scope(d, u, id);
+      let ctx = await creativeWorkspaceScope(d, u, id);
       requireRight(ctx.work);
       const b = payload(q.body),
-        file = decode(b.dataUrl),
+        file = decodeWorkspaceFile(b.dataUrl),
         filename = text(b.filename, 200).replace(/[\r\n\\/]/g, "_");
       let ai: AiDeclaration;
       try {
@@ -623,15 +628,15 @@ export function registerCreativeWorkspaceRoutes(
       } catch (e) {
         throw new WorkspaceError(422, (e as Error).message);
       }
-      enforceAiPolicy(id, ai);
+      enforceWorkspaceAiPolicy(id, ai);
       let parent: CreativeAsset | null = null;
       if (b.parentId) {
-        parent = asset(id, String(b.parentId));
+        parent = workspaceAsset(id, String(b.parentId));
         revision(b.expectedRevision);
         requireRight(ctx.owner || parent.createdBy === u);
         if (
           parent.revision !== b.expectedRevision ||
-          assets(id).some(
+          workspaceAssets(id).some(
             (a) => a.rootId === parent!.rootId && a.version > parent!.version,
           ) ||
           ["FINAL", "ARCHIVED"].includes(parent.status)
@@ -642,9 +647,9 @@ export function registerCreativeWorkspaceRoutes(
           );
       }
       await d.chargeUpload?.(q, file.bytes.length, ctx.p.bookId, filename);
-      ctx = await scope(d, u, id);
+      ctx = await creativeWorkspaceScope(d, u, id);
       requireRight(ctx.work);
-      enforceAiPolicy(id, ai);
+      enforceWorkspaceAiPolicy(id, ai);
       const at = new Date().toISOString(),
         aid = randomUUID();
       const a: CreativeAsset = {
@@ -666,10 +671,10 @@ export function registerCreativeWorkspaceRoutes(
       };
       transaction(() => {
         if (parent) {
-          const fresh = asset(id, parent.id);
+          const fresh = workspaceAsset(id, parent.id);
           if (
             fresh.revision !== b.expectedRevision ||
-            assets(id).some(
+            workspaceAssets(id).some(
               (x) => x.rootId === parent!.rootId && x.version > parent!.version,
             )
           )
@@ -680,7 +685,7 @@ export function registerCreativeWorkspaceRoutes(
             "INSERT INTO creative_workspace_assets(id,project_id,root_id,version,revision,payload,content) VALUES(?,?,?,?,?,?,?)",
           )
           .run(a.id, id, a.rootId, a.version, 1, JSON.stringify(a), file.bytes);
-        event(id, u, "ASSET_UPLOADED", { assetId: a.id, version: a.version });
+        workspaceEvent(id, u, "ASSET_UPLOADED", { assetId: a.id, version: a.version });
       });
       r.status(201).json({ asset: a });
     }),
@@ -688,18 +693,18 @@ export function registerCreativeWorkspaceRoutes(
   app.post(
     `${base}/assets/:assetId/library`,
     handle(async (q, r, u, id) => {
-      const initial = await scope(d, u, id),
+      const initial = await creativeWorkspaceScope(d, u, id),
         b = payload(q.body),
         aid = String(q.params.assetId);
       requireRight(initial.owner && initial.writable);
       if (b.confirmed !== true)
         throw new WorkspaceError(422, "Підтвердьте перенесення до медіатеки.");
       const expected = revision(b.expectedRevision),
-        a0 = asset(id, aid);
+        a0 = workspaceAsset(id, aid);
       await serialImport(id + ":" + a0.rootId, async () => {
-        let ctx = await scope(d, u, id);
+        let ctx = await creativeWorkspaceScope(d, u, id);
         requireRight(ctx.owner && ctx.writable);
-        const a = asset(id, aid);
+        const a = workspaceAsset(id, aid);
         if (
           a.revision !== expected ||
           !["APPROVED", "FINAL"].includes(a.status) ||
@@ -722,7 +727,7 @@ export function registerCreativeWorkspaceRoutes(
               410,
               "Матеріал медіатеки видалено. Історію перенесення збережено.",
             );
-          await scope(d, u, id);
+          await creativeWorkspaceScope(d, u, id);
           r.json({ asset: existing, reused: true, canonChanged: false });
           return;
         }
@@ -738,7 +743,7 @@ export function registerCreativeWorkspaceRoutes(
             "Під час перенесення статус — APPROVED.",
           );
         const ai = a.ai ?? emptyAi();
-        enforceAiPolicy(id, ai);
+        enforceWorkspaceAiPolicy(id, ai);
         await validateTargets(ctx, metadata);
         const row = creativeWorkspaceDb()
           .prepare(
@@ -784,6 +789,7 @@ export function registerCreativeWorkspaceRoutes(
           },
           canon: null,
           ai,
+          ...(a.generationContext?{generationContext:a.generationContext}:{}),
           declaration: a.ai ? { by: a.createdBy, at: a.createdAt } : null,
           characterIds: metadata.characterIds ?? [],
           locationIds: metadata.locationIds ?? [],
@@ -816,9 +822,9 @@ export function registerCreativeWorkspaceRoutes(
           actor: "user:" + u,
           provenance,
           beforePersist: async () => {
-            ctx = await scope(d, u, id);
+            ctx = await creativeWorkspaceScope(d, u, id);
             requireRight(ctx.owner && ctx.writable);
-            const fresh = asset(id, aid);
+            const fresh = workspaceAsset(id, aid);
             if (
               fresh.revision !== expected ||
               !["APPROVED", "FINAL"].includes(fresh.status)
@@ -827,21 +833,21 @@ export function registerCreativeWorkspaceRoutes(
                 409,
                 "Версія змінилася під час перенесення.",
               );
-            enforceAiPolicy(id, ai);
+            enforceWorkspaceAiPolicy(id, ai);
             await validateTargets(ctx, metadata);
             // Async dependency reads must not permit a stale review to slip through.
-            if (asset(id, aid).revision !== expected)
+            if (workspaceAsset(id, aid).revision !== expected)
               throw new WorkspaceError(409, "Ревізія змінилася.");
           },
           commit: (media) => {
-            if (asset(id, aid).revision !== expected)
+            if (workspaceAsset(id, aid).revision !== expected)
               throw new WorkspaceError(409, "Ревізія змінилася.");
             creativeWorkspaceDb()
               .prepare(
                 "INSERT INTO creative_workspace_imports(asset_id,media_id,payload) VALUES(?,?,?)",
               )
               .run(aid, media.id, JSON.stringify(provenance));
-            event(id, u, "ASSET_IMPORTED_TO_LIBRARY", {
+            workspaceEvent(id, u, "ASSET_IMPORTED_TO_LIBRARY", {
               assetId: aid,
               mediaId: media.id,
               version: a.version,
@@ -859,9 +865,9 @@ export function registerCreativeWorkspaceRoutes(
   app.post(
     `${base}/assets/:assetId/state`,
     handle(async (q, r, u, id) => {
-      const ctx = await scope(d, u, id),
+      const ctx = await creativeWorkspaceScope(d, u, id),
         b = payload(q.body),
-        a = asset(id, String(q.params.assetId)),
+        a = workspaceAsset(id, String(q.params.assetId)),
         expected = revision(b.expectedRevision);
       if (a.revision !== expected)
         throw new WorkspaceError(409, "Матеріал змінився. Оновіть сторінку.");
@@ -870,7 +876,7 @@ export function registerCreativeWorkspaceRoutes(
         throw new WorkspaceError(422, "Невідомий статус.");
       requireRight(ctx.writable);
       if (
-        assets(id).some((x) => x.rootId === a.rootId && x.version > a.version)
+        workspaceAssets(id).some((x) => x.rootId === a.rootId && x.version > a.version)
       )
         throw new WorkspaceError(
           409,
@@ -919,7 +925,7 @@ export function registerCreativeWorkspaceRoutes(
         };
         if (result.changes !== 1)
           throw new WorkspaceError(409, "Матеріал змінився. Оновіть сторінку.");
-        event(id, u, "ASSET_STATE_CHANGED", {
+        workspaceEvent(id, u, "ASSET_STATE_CHANGED", {
           assetId: a.id,
           from: a.status,
           to: target,
@@ -932,10 +938,10 @@ export function registerCreativeWorkspaceRoutes(
   app.post(
     `${base}/annotations`,
     handle(async (q, r, u, id) => {
-      const ctx = await scope(d, u, id);
+      const ctx = await creativeWorkspaceScope(d, u, id);
       requireRight(ctx.comment);
       const b = payload(q.body),
-        a = asset(id, text(b.assetId, 128));
+        a = workspaceAsset(id, text(b.assetId, 128));
       const point = (v: unknown) =>
         typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1;
       let x: number | null = null,
@@ -984,7 +990,7 @@ export function registerCreativeWorkspaceRoutes(
             "INSERT INTO creative_workspace_annotations(id,project_id,asset_id,revision,payload) VALUES(?,?,?,?,?)",
           )
           .run(aNote.id, id, a.id, 1, JSON.stringify(aNote));
-        event(id, u, "ANNOTATION_ADDED", {
+        workspaceEvent(id, u, "ANNOTATION_ADDED", {
           assetId: a.id,
           annotationId: aNote.id,
         });
@@ -995,7 +1001,7 @@ export function registerCreativeWorkspaceRoutes(
   app.post(
     `${base}/annotations/:annotationId/resolve`,
     handle(async (q, r, u, id) => {
-      const ctx = await scope(d, u, id);
+      const ctx = await creativeWorkspaceScope(d, u, id);
       requireRight(ctx.comment);
       const b = payload(q.body),
         expected = revision(b.expectedRevision),
@@ -1028,7 +1034,7 @@ export function registerCreativeWorkspaceRoutes(
           ).changes !== 1
         )
           throw new WorkspaceError(409, "Коментар змінився.");
-        event(id, u, "ANNOTATION_RESOLVED", {
+        workspaceEvent(id, u, "ANNOTATION_RESOLVED", {
           annotationId: a.id,
           assetId: a.assetId,
         });
@@ -1039,7 +1045,7 @@ export function registerCreativeWorkspaceRoutes(
   app.get(
     `${base}/chat`,
     handle(async (q, r, u, id) => {
-      await scope(d, u, id);
+      await creativeWorkspaceScope(d, u, id);
       const cursor = Number(q.query.before ?? Number.MAX_SAFE_INTEGER);
       if (!Number.isSafeInteger(cursor) || cursor < 1)
         throw new WorkspaceError(422, "Некоректний курсор історії.");
@@ -1059,7 +1065,7 @@ export function registerCreativeWorkspaceRoutes(
   app.post(
     `${base}/chat`,
     handle(async (q, r, u, id) => {
-      const ctx = await scope(d, u, id);
+      const ctx = await creativeWorkspaceScope(d, u, id);
       requireRight(ctx.comment);
       const b = payload(q.body),
         message = text(b.text);
@@ -1075,7 +1081,7 @@ export function registerCreativeWorkspaceRoutes(
       for (const v of attached) {
         if (typeof v !== "string")
           throw new WorkspaceError(422, "Некоректне вкладення.");
-        asset(id, v);
+        workspaceAsset(id, v);
       }
       for (const v of mentions)
         if (![ctx.p.ownerId, ctx.p.specialistId].includes(v))
@@ -1084,7 +1090,7 @@ export function registerCreativeWorkspaceRoutes(
             "Згадувати можна учасників цього Workspace.",
           );
       transaction(() =>
-        event(id, u, "CHAT_MESSAGE", {
+        workspaceEvent(id, u, "CHAT_MESSAGE", {
           text: message,
           assetIds: [...new Set(attached)],
           mentions: [...new Set(mentions)],
@@ -1096,7 +1102,7 @@ export function registerCreativeWorkspaceRoutes(
   app.post(
     `${base}/read`,
     handle(async (q, r, u, id) => {
-      await scope(d, u, id);
+      await creativeWorkspaceScope(d, u, id);
       const seq = revision(q.body?.seq),
         max =
           (

@@ -1,3 +1,11 @@
+import type { StyleRules } from "./creativeBible";
+export interface MediaGenerationContext {
+  jobId: string;
+  styleVersionId: string | null;
+  entityIds: string[];
+  referenceAssetIds: string[];
+  styleOverride: StyleRules | null;
+}
 /** T7.5 metadata. Ownership, approval and origin are supplied only by the server. */
 export const MEDIA_TYPES = [
   "IMAGE",
@@ -48,6 +56,7 @@ export interface MediaProvenance {
   approval: { by: string; at: string; version: number; assetId: string } | null;
   canon: { by: string; at: string } | null;
   ai: AiDeclaration;
+  generationContext?: MediaGenerationContext;
   declaration: { by: string; at: string } | null;
   characterIds: string[];
   locationIds: string[];

@@ -1045,7 +1045,7 @@ async function generateWithNanoBanana(
   // base64), тому маршрут заздалегідь перетворює завантажені файли на
   // публічні URL, а не шле сюди сирі байти.
   const input: unknown = referenceImageUrls?.length
-    ? [{ type: 'text', text: prompt }, ...referenceImageUrls.map((uri) => ({ type: 'image', uri }))]
+    ? [{ type: 'text', text: prompt }, ...referenceImageUrls.map((uri) => {const inline=uri.match(/^data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/);return inline?{type:'image',mime_type:inline[1],data:inline[2]}:{type:'image',uri};})]
     : prompt;
 
   const request: Record<string, unknown> = {

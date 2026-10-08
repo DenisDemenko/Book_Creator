@@ -64,6 +64,7 @@ ENV NODE_ENV=production
 # ---------------------------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
       chromium \
+      ffmpeg \
       pandoc \
       texlive-xetex \
       texlive-latex-extra \

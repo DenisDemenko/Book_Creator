@@ -1,3 +1,4 @@
+import { creativeAiModels, generateCreativeMedia } from './server/core/creative/aiProvider';
 import { canReadBibleAsset } from './server/core/creative/bible';
 import { registerCreativeWorkspaceRoutes } from './server/core/creative/workspace';
 import {registerCreativeOrderBindingRoutes} from './server/core/creative/orderBinding';
@@ -102,7 +103,7 @@ import { readGammaConfig, GAMMA_RATE_LIMIT_PER_SECOND } from './server/gamma/gam
 import { createGammaClient } from './server/gamma/gammaClient';
 import { registerNarrationRoutes } from './server/narrationRoutes';
 import { registerPublishingRoutes } from './server/publishingRoutes';
-import { requireImageQuota, requirePlanAtLeast, checkChatQuota, resolveSubscription } from './server/subscriptions';
+import { checkImageQuota, requireImageQuota, requirePlanAtLeast, checkChatQuota, resolveSubscription } from './server/subscriptions';
 import {
   resolveEngine as resolveChatEngine,
   engineConfigured,
@@ -826,6 +827,11 @@ registerGitCommandRoutes(app);
   registerCreativeProjectRoutes(app,collaborationAiDeps);
   registerCreativeWorkspaceRoutes(app, {
     ...collaborationAiDeps,
+    creativeAi:{models:creativeAiModels,generate:generateCreativeMedia,check:async(req,action,quota)=>{
+      const u=await findUserForAccess(req.principal!.id);if(!u||u.disabled||!await canRole(u.role,'canGenerateImages')) throw new (await import('./server/core/collaboration/workspaceStore')).WorkspaceError(403,'Немає дозволу на генерацію медіа.');
+      req.principal={...req.principal!,role:u.role,email:u.email};
+      if(quota&&action.includes(':image:')) {const q=await checkImageQuota(u.id,u.role);if(!q.allowed)throw new (await import('./server/core/collaboration/workspaceStore')).WorkspaceError(402,q.reasonUk??'Ліміт генерацій вичерпано.');}
+    }},
     describeUser: async (id) => (await findUserForAccess(id))?.name ?? null,
     chargeUpload: async (req, bytes, bookId, filename) => {
       const p = req.principal!;

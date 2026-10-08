@@ -241,6 +241,16 @@ export async function canReadBibleAsset(
     return false;
   }
 }
+export async function readCreativeStyle(d:CollaborationAiDeps,user:string,bookId:string){
+ const s=await scope(d,user,bookId,'style');
+ const value=styles(bookId).find(v=>v.id===active(bookId).versionId)??null;
+ await ensureUnchangedScope(d,s,'style');return {value,canOverride:s.level==='manage'};
+}
+export async function readCreativeCanon(d:CollaborationAiDeps,user:string,bookId:string){
+ let s;try{s=await scope(d,user,bookId,'visual');}catch(e){if(e instanceof WorkspaceError&&e.status===403)return [];throw e;}
+ const out=[];for(const e of entries(bookId))if(e.active&&await visible(s,e))out.push({entryId:e.id,entityId:e.entityId,rules:e.rules,assetId:e.assetId,assetVersion:e.snapshot.assetVersion});
+ await ensureUnchangedScope(d,s,'visual');return out;
+}
 export function registerCreativeBibleRoutes(
   app: Express,
   d: CollaborationAiDeps,

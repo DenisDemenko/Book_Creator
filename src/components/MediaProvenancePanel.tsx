@@ -267,6 +267,7 @@ export function MediaProvenancePanel({
               generationId: p.ai.generationId,
               promptReference: p.ai.promptReference,
               settings: p.ai.settings,
+              ...(p.generationContext?{generationContext:p.generationContext}:{}),
             },
             null,
             2,

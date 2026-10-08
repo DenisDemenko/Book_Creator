@@ -1,6 +1,6 @@
 # Журнал сесій — і єдиний дім записів #114–#118
 
-## Сесія 08.10.2026 #01 — записи #392–#399
+## Сесія 08.10.2026 #01 — записи #392–#400
 
 **Тема:** наступний пункт після Т6.5 — Т6.6, ШІ з урахуванням співпраці.
 
@@ -27,6 +27,10 @@
 **Запис #399:** Т7.6 — private Visual Bible / Style Bible, окремі module grants, explicit CAS додавання / вилучення канону, immutable snapshots і atomic SQLite provenance/history/audit. Типізовані Core links / approved appearance, десять категорій і scoped scenes; версії стилю й structured context, без переписування approved files. Memory/PostgreSQL по 23/0, Chromium 27/0, full npm test — exit 0; фінальні lint/build — exit 0; journal/encoding/diff-check — успішні. PLAN_CREATIVE_BIBLE.md, docs/acceptance/T7.6.md. Реалізація a1f4108 запушена в origin/master, remote SHA звірено; identity Денис Деменко <tropazemli@gmail.com>. Наступне — Т7.7.
 
 **Не зроблено і чому (Т7.6):** production/Firebase/реальні логіни/volume/redeploy — ручне приймання. AI генерація / task-specific style override — Т7.7, не почато. JSON-only Bible — свідомо не реалізовано, для atomic canon потрібен спільний SQLite; старі операції медіатеки з JSON збережені. Marketplace не змінено. Т4.3 і SECRET_VAULT_KEY_BASE64 Railway лишаються відкладеними.
+
+**Запис #400:** Т7.7 — приватні AI Tools у Creative Workspace: чотири окремі дії, CAS дозволів, дозволений контекст / активний Style Bible, task override, приватні references, durable jobs / idempotency / ліміти, DRAFT version chains і generationContext до медіатеки. Memory/Pg по 22/0, adapters 2/0, інтегрований Chromium 24/0; npm test, фінальні lint/build — exit 0. PLAN_CREATIVE_AI.md, docs/acceptance/T7.7.md.
+
+**Не зроблено і чому (Т7.7):** production/Firebase/реальні paid providers та Docker rebuild — ручне приймання після деплою; video edit створює новий ролик за першим кадром. Worker не відновлює paid provider після crash і не повторює автоматично. Marketplace не змінено. Т4.3 / SECRET_VAULT_KEY_BASE64 лишаються відкладені. Наступне — Т8.1, потрібен архів Stitch 9.
 
 ## Сесія 07.10.2026 #01 — записи #380–#391
 

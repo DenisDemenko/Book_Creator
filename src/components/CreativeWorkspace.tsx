@@ -1,3 +1,4 @@
+import { CreativeAiTools } from './CreativeAiTools';
 import { emptyAi } from '../../shared/mediaProvenance';
 import { AiDeclarationFields } from './MediaProvenancePanel';
 import { WorkspaceMediaTransfer } from './WorkspaceMediaTransfer';
@@ -330,6 +331,10 @@ export function CreativeWorkspace({
         : {}),
     }).then((r) => setSelected(r.asset.id));
   }
+  const handleAiCreated = useCallback((id: string) => {
+    setSelected(id);
+    void load().catch((e) => setError(e.message));
+  }, [load]);
   if (!state)
     return (
       <section aria-label="Creative Workspace">
@@ -1134,26 +1139,8 @@ export function CreativeWorkspace({
           )}
         </section>
       ) : (
-        <section>
-          <h2>AI Tools</h2>
-          <p>
-            Бриф: ШІ {state.brief?.aiPolicy ?? "не задано"}. Використання
-            провайдерів і квоти залишається у наявній AI Studio, з перевіркою
-            доступу на сервері. Автоматичної генерації або затвердження тут
-            немає.
-          </p>
-          <a
-            className="underline"
-            href={
-              buildAppPath(
-                { projectId: state.project.bookId, tab: "ai-studio" },
-                API_BASE,
-              ) ?? "#"
-            }
-          >
-            Відкрити AI Studio
-          </a>
-        </section>
+        <CreativeAiTools projectId={creativeProjectId} owner={state.permissions.owner} specialistId={specialist?.id??null} selectedAsset={a??null} onCreated={handleAiCreated}/>
+
       )}
     </section>
   );
