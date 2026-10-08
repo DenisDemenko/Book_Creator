@@ -1,6 +1,6 @@
 # Журнал сесій — і єдиний дім записів #114–#118
 
-## Сесія 08.10.2026 #01 — записи #392–#394
+## Сесія 08.10.2026 #01 — записи #392–#395
 
 **Тема:** наступний пункт після Т6.5 — Т6.6, ШІ з урахуванням співпраці.
 
@@ -657,6 +657,8 @@ Docker у `./docker-data` (щоб reset чи оновлення Docker Desktop �
 **Запис #394:** Т7.2: приватний бриф/CAS і AI draft без auto-save; публічний snapshot тільки після preview/checkbox, Marketplace CreativeOrder MODERATION. Дерево і конкретні grants предмета/медіареференса/Visual Bible на Т6.2, validFrom/validUntil, відкликання/аудит. API/source/download не видають заборонений зміст. Повний Studio npm test, lint/build — exit 0; Marketplace 137/137 API e2e, 11 unit + web checks, types/build і новий код eslint — exit 0. Production-сценарій docs/acceptance/T7.2.md. Memory 25/0, PostgreSQL 24/0, Chromium live 30/0; actual Marketplace guest UA/EN і 390 px. Marketplace 0d6fcdc і Studio c639f39 запушено в master без force.
 
 **Не зроблено і чому (Т7.2):** реальні Firebase/DeepSeek/bridge і production-міграції очікують ручного приймання після деплою. Частин у Book немає, Style Bible — Т7.5; біржа/вибір фахівця — Т7.3, робочі доставки — Т7.4, платежі — пізніше. Автоматичних grants/призначень немає. Відкладений Т4.3 і Vault — production-нагадування. Наступне — Т7.3.
+
+**Запис #395:** локальна Git identity обох репозиторіїв змінена на Денис Деменко <tropazemli@gmail.com>; Marketplace 6279bb0 — повторний trigger деплою. Git credentials і Vercel membership не змінювались. Успіх deployment/verified email — зовнішня перевірка, доступу до dashboard немає.
 
 ---
 
