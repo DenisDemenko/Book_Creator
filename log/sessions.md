@@ -20,7 +20,7 @@
 
 **Не зроблено і чому (Т7.4):** production/Firebase/том — ручне приймання; Media Library/provenance — Т7.5, Bible/канон — Т7.6. Chat polling 5 с, файли до 20 МБ; PDF залежить від браузера. Автоматичних grants/approval немає. Наступне — Т7.5.
 
-**Запис #398:** Т7.5 — явний імпорт APPROVED/FINAL до приватної медіатеки зі збереженням походження, версій і review; типи/статуси/фільтри, AI декларації/параметри/policy, metadata CAS й історія. SQLite/JSON і справжній Core: Memory/PostgreSQL по 18/0, Chromium 22/0; повний npm test — exit 0, image regression 157/0, media-passport 53/0; фінальні lint/build — exit 0, Workspace browser 38/0, video 115/0, journal/encoding/diff-check — успішні. PLAN_MEDIA_PROVENANCE.md і docs/acceptance/T7.5.md. Наступне — Т7.6.
+**Запис #398:** Т7.5 — явний імпорт APPROVED/FINAL до приватної медіатеки зі збереженням походження, версій і review; типи/статуси/фільтри, AI декларації/параметри/policy, metadata CAS й історія. SQLite/JSON і справжній Core: Memory/PostgreSQL по 18/0, Chromium 22/0; повний npm test — exit 0, image regression 157/0, media-passport 53/0; фінальні lint/build — exit 0, Workspace browser 38/0, video 115/0, journal/encoding/diff-check — успішні. PLAN_MEDIA_PROVENANCE.md і docs/acceptance/T7.5.md. Реалізація 79f745d запушена в origin/master, remote SHA звірено; identity Денис Деменко <tropazemli@gmail.com>. Наступне — Т7.6.
 
 **Не зроблено і чому (Т7.5):** production/Firebase/volume/redeploy/платні AI — окреме ручне приймання; CANON/Visual Bible — Т7.6, не почато. Зовнішні AI-файли — декларація, без перевірки чужого провайдера; quota refund/ліцензії не автоматичні. Marketplace цього етапу не змінено. Т4.3 і захищений SECRET_VAULT_KEY_BASE64 на Railway лишаються відкладеними.
 
