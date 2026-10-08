@@ -139,7 +139,7 @@ remote перевірити можна, запушити — ні**.
 Т7.6 реалізовано (#399): окремі Visual/Style grants, CAS канон/вилучення/аудит, знімки образів, immutable версії стилю й scoped context. Memory/Pg 23/0, Chromium 27/0; full npm test і фінальні lint/build — exit 0. [Приймання](docs/acceptance/T7.6.md). Наступне — Т7.7.
 Т7.7 реалізовано (#400): приватні AI Tools, scoped context, grants/ліміти/jobs/DRAFT версії; Memory/Pg 22/0, adapters 2/0, Chromium 24/0. npm test та фінальні lint/build — exit 0. [Приймання](docs/acceptance/T7.7.md). Наступне — Т8.1.
 Т8.1 реалізовано (#401): чотири Stitch 9 лендінги UA/EN, public data і статуси; npm test/types/build — exit 0, Chromium 56/0, outage 8/0, teachers 2/0. [Приймання](docs/acceptance/T8.1.md). Наступне — Т8.2.
-Незапушені: `git log origin/master..HEAD`. Marketplace Т8.3 72acb12 запушено; Studio wizard готовий до `git push origin HEAD:master`. Identity Денис Деменко <tropazemli@gmail.com>. Після деплою: docs/acceptance/T8.3.md. Т8.2 ролі, Т4.3/Vault відкриті.
+Незапушені: `git log origin/master..HEAD`. Marketplace Т8.3 72acb12 запушено; Studio Т8.3 051bad3 запушено (`git push origin HEAD:master`); цей запис синхронізує статус. Identity Денис Деменко <tropazemli@gmail.com>. Після деплою: docs/acceptance/T8.3.md. Т8.2 ролі, Т4.3/Vault відкриті.
 
 Історичні стани #374, #377, #379 з результатами й ручними перевірками:
 [повний текст](log/deploy-notes.md).
