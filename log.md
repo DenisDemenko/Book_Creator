@@ -132,7 +132,8 @@ remote перевірити можна, запушити — ні**.
 Т6.5 реалізовано й запушено як `4e54404` в origin/master (Book_Creator): live 22/0, PostgreSQL 18/0; npm test, lint/build — exit 0. [План](PLAN_CONTRIBUTIONS.md), [приймання](docs/acceptance/T6.5.md). Production-прогін очікує.
 Т6.6 реалізовано й запушено як `ce37eed` в origin/master (Book_Creator): Memory/PostgreSQL 19/0, live 21/0; повторний npm test і build — exit 0, фінальний lint — exit 0. [План](PLAN_COLLABORATION_AI.md), [приймання](docs/acceptance/T6.6.md). Production-прогін очікує.
 Т7.1 реалізовано: Marketplace `37f35e7` запушено в master; Studio `d1e4226` запушено в origin/master. E2e 132/132, Marketplace npm test 11 unit + web checks; Studio test 9/0, live 11/0; повторний повний npm test, lint/types/build — exit 0. [План](PLAN_CREATIVE_STUDIO.md), [приймання](docs/acceptance/T7.1.md). API-міграцію перевірити після деплою; production/Firebase очікують ручного прогону. Наступне — Т7.2.
-Незапушені коміти: `git log origin/master..HEAD`; реалізація Т7.1 в обох репозиторіях запушена; цей документаційний коміт синхронізує стан після пуша. Команда пуша: `git push origin HEAD:master`. Після деплою — сценарій В6, захищений ключ Vault і відкладене приймання Т4.3.
+Т7.2 реалізовано (#394): приватний бриф, AI-чернетка, підтверджений snapshot MODERATION, конкретні grants і аудит. Studio npm test/lint/build — exit 0; Marketplace e2e 137/137, npm test/types/build — exit 0. [План](PLAN_CREATIVE_BRIEF.md), [приймання](docs/acceptance/T7.2.md). Production/Firebase/реальний AI очікують. Наступне — Т7.3.
+Незапушені коміти: `git log origin/master..HEAD`; Marketplace Т7.2 `0d6fcdc` запушено. Studio Т7.2 підготовлено до коміту/пуша; стан буде уточнено після remote-перевірки. Команда пуша: `git push origin HEAD:master`. Після деплою — сценарій В6, захищений ключ Vault і відкладене приймання Т4.3.
 
 Історичні стани #374, #377, #379 з результатами й ручними перевірками:
 [повний текст](log/deploy-notes.md).
@@ -330,7 +331,7 @@ JS-файлу напряму, як зроблено тут.
 
 ---
 
-# Покажчик записів (393 записи, #1–#393)
+# Покажчик записів (394 записи, #1–#394)
 
 > Повні тексти записів лежать у теці `log/`, розбиті на частини — журнал
 > одним файлом доріс до 840 КБ, а його читає кожна нова сесія. Цей
@@ -345,6 +346,7 @@ JS-файлу напряму, як зроблено тут.
 
 | # | Назва | Статус | Файл |
 |---:|---|---|---|
+| 394 | Т7.2 — приватний бриф і явний доступ до книги | ✅ Реалізовано | [301-350.md](log/301-350.md) |
 | 393 | Т7.1 — основа Creative Studio, профілі фахівців і чернетки проєктів | 🚧 У роботі | [301-350.md](log/301-350.md) |
 | 392 | Т6.6 — авторизовані запити співпраці та людське підтвердження завдань | ✅ Реалізовано, production-приймання очікує | [301-350.md](log/301-350.md) |
 | 391 | Т6.5 — внески, пропозиції змін, події та Collaboration Graph | ✅ Реалізовано, production-приймання очікує | [301-350.md](log/301-350.md) |

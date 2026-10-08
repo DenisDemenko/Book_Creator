@@ -1028,7 +1028,7 @@ export interface CollabEventRow {
 /** Рівні за зростанням; `work` — робочий доступ до медіатеки (перегляд і власні завантаження). */
 export const ACCESS_LEVELS = ['view', 'comment', 'review', 'edit', 'create', 'approve', 'manage', 'work'] as const;
 export type AccessLevel = (typeof ACCESS_LEVELS)[number];
-export const ACCESS_SCOPES = ['book', 'chapter', 'scene', 'character', 'location', 'media_library', 'style_bible', 'task', 'deliverable'] as const;
+export const ACCESS_SCOPES = ['book', 'chapter', 'scene', 'character', 'location', 'object', 'media_asset', 'visual_bible', 'media_library', 'style_bible', 'task', 'deliverable'] as const;
 export type AccessScope = (typeof ACCESS_SCOPES)[number];
 export const ACCESS_SOURCES = ['manual', 'admin', 'legacy_invite'] as const;
 export type AccessSource = (typeof ACCESS_SOURCES)[number];

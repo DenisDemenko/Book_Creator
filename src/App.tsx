@@ -1,3 +1,5 @@
+import { CreativeBriefPanel } from './components/CreativeBriefPanel';
+import { parseCreativeAccessPath } from './utils/appRoutes';
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { initialBookData } from './data/initialBook';
 import { buildStarterBook, withoutDemoContent } from './utils/starterBook';
@@ -173,6 +175,7 @@ const INITIAL_LOG_ENTRIES: AuditLogEntry[] = [
 ];
 
 export default function App() {
+  const creativeAccessIdRef = useRef(parseCreativeAccessPath(window.location.pathname, API_BASE));
   const auth = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { t, lang } = useLanguage();
@@ -833,6 +836,7 @@ export default function App() {
   // запис в історії, тож «назад» у браузері повертає попередню вкладку.
   useEffect(() => {
     if (isHydrating) return;
+    if (creativeAccessIdRef.current) return;
     const path = buildAppPath(
       { projectId: book.id, tab: currentTab, characterId: currentTab === 'core-character' ? coreCharacterId : undefined, graphTab },
       API_BASE
@@ -1912,7 +1916,7 @@ export default function App() {
   // Поки книга читається зі сховища — показуємо заставку, щоб користувач
   // не встиг почати правити початкові дані, які потім будуть перезаписані.
   if (isHydrating || auth.loading) {
-    return (
+      return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center gap-4">
         <Loader2 className="w-8 h-8 text-amber-400 animate-spin" />
         <div className="text-center">
@@ -2047,6 +2051,15 @@ export default function App() {
   // ролей вимикається в усьому інтерфейсі (адміністратор — виняток, він
   // завжди має власні права письменника незалежно від запрошень).
   const isRoleLocked = !!coworkLock && coworkLock.bookId === book.id && auth.user?.role !== 'admin';
+
+  if (creativeAccessIdRef.current) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-100 p-4">
+        <a className="underline" href={API_BASE || '/'}>Повернутися до Студії</a>
+        <CreativeBriefPanel creativeProjectId={creativeAccessIdRef.current} />
+      </main>
+    );
+  }
 
   return (
     <SunLightingProvider theme={theme}>

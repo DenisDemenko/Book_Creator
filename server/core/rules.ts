@@ -720,7 +720,7 @@ export function checkAccessGrant(input: AccessGrantInput): void {
   const needsRef = !['book', 'media_library'].includes(input.scopeType);
   if (needsRef && (!input.scopeRef || String(input.scopeRef).length > 200)) throw new CoreRuleError('bad_input', `Область «${input.scopeType}» потребує id (розділу, сцени, сутності…)`);
   if (!needsRef && input.scopeRef) throw new CoreRuleError('bad_input', `Область «${input.scopeType}» — без id`);
-  if (input.level === 'work' && input.scopeType !== 'media_library') throw new CoreRuleError('bad_input', 'Робочий доступ (work) — лише до медіатеки');
+  if (input.level === 'work' && !['media_library','media_asset'].includes(input.scopeType)) throw new CoreRuleError('bad_input', 'Робочий доступ (work) — лише до медіатеки чи окремого медіафайлу');
   const from = input.validFrom ? Date.parse(input.validFrom) : Date.now();
   if (input.validFrom && !Number.isFinite(from)) throw new CoreRuleError('bad_input', 'validFrom — дата ISO');
   if (input.validUntil != null) {

@@ -9,7 +9,7 @@ import {
 import { WorkspaceError } from "../collaboration/workspaceStore";
 export interface CreativeProject {
   id: string;
-  orderId: null;
+  orderId: string | null;
   ownerId: string;
   specialistId: null;
   sourceProjectId: string;
@@ -20,7 +20,7 @@ export interface CreativeProject {
   completedAt: null;
   createdAt: string;
 }
-function database() {
+export function creativeProjectDb() {
   const db = contributionDb();
   db.exec(
     `CREATE TABLE IF NOT EXISTS creative_projects(id TEXT PRIMARY KEY, book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE, owner_id TEXT NOT NULL, payload TEXT NOT NULL);`,
@@ -31,7 +31,7 @@ export function listCreativeProjects(
   bookId: string,
   ownerId: string,
 ): CreativeProject[] {
-  return database()
+  return creativeProjectDb()
     .prepare(
       "SELECT payload FROM creative_projects WHERE book_id=? AND owner_id=? ORDER BY rowid DESC",
     )
@@ -73,7 +73,7 @@ export async function createCreativeProject(
     completedAt: null,
     createdAt: new Date().toISOString(),
   };
-  database()
+  creativeProjectDb()
     .prepare(
       "INSERT INTO creative_projects(id,book_id,owner_id,payload) VALUES(?,?,?,?)",
     )

@@ -151,3 +151,7 @@ export function buildAppPath(route: AppRoute, base = ''): string | null {
   if ((ROUTABLE_TABS as string[]).includes(route.tab)) return `${b}/projects/${id}/${route.tab}`;
   return null;
 }
+
+/** Т7.2: dedicated private creative access URL. */
+export function parseCreativeAccessPath(pathname:string,base=''):string|null{const rest=stripBase(pathname,base);const match=rest?.match(/^\/creative\/access\/([A-Za-z0-9._-]{1,128})\/?$/);return match?.[1]??null;}
+export function buildCreativeAccessPath(id:string,base=''){return `${base.replace(/\/$/,'')}/creative/access/${encodeURIComponent(id)}`;}

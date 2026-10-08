@@ -78,7 +78,7 @@ export interface MediaRoutesOptions {
    * (учасник із доступом до медіатеки книги, файл власника книги чи учасника з
    * робочим доступом). Без опції — лише свої файли, як і раніше.
    */
-  canViewBookAsset?: (req: Request, record: { ownerId: string; bookId: string | null }) => Promise<boolean>;
+  canViewBookAsset?: (req: Request, record: { id?:string; ownerId: string; bookId: string | null }) => Promise<boolean>;
 }
 
 export function registerMediaRoutes(app: Express, opts: MediaRoutesOptions = {}): void {

@@ -41,6 +41,10 @@ export interface EffectiveAccess {
   scenes: Record<string, AccessLevel>;
   characters: Record<string, AccessLevel>;
   locations: Record<string, AccessLevel>;
+  objects?: Record<string,AccessLevel>;
+  mediaAssets?: Record<string,AccessLevel>;
+  visualBibles?: Record<string,AccessLevel>;
+  styleBibles?: Record<string,AccessLevel>;
   /** Медіатека книги: `none`, `view` або `work` (перегляд + власні завантаження). */
   media: 'none' | 'view' | 'work';
   /** На всю книгу немає навіть перегляду — бачить лише дозволене. */
@@ -70,8 +74,12 @@ export function computeEffective(projectId: string, userId: string, grants: Acce
       case 'scene': put(eff.scenes, g.scopeRef!, g.level); break;
       case 'character': put(eff.characters, g.scopeRef!, g.level); break;
       case 'location': put(eff.locations, g.scopeRef!, g.level); break;
+      case 'object': put(eff.objects ??= {}, g.scopeRef!,g.level); break;
+      case 'media_asset': put(eff.mediaAssets ??= {},g.scopeRef!,g.level); break;
+      case 'visual_bible': put(eff.visualBibles ??= {},g.scopeRef!,g.level); break;
+      case 'style_bible': put(eff.styleBibles ??= {},g.scopeRef!,g.level); break;
       case 'media_library': eff.media = g.level === 'work' || eff.media === 'work' ? 'work' : 'view'; break;
-      default: break; // style_bible, task, deliverable — у моделі; застосування — Т7.
+      default: break; // task/deliverable застосовуються у наступних етапах Т7.
     }
   }
   if (canRead(eff.book) && eff.media === 'none') eff.media = 'view';
@@ -87,10 +95,10 @@ export function sceneLevel(eff: EffectiveAccess, chapterId: string, sectionId: s
   return levels.reduce<AccessLevel | 'none'>((a, b) => maxLevel(a, b), 'none');
 }
 
-/** Рівень на сутність ядра (персонаж, локація; решта — лише через книгу). */
+/** Рівень на сутність ядра (персонаж, локація, предмет; решта — лише через книгу). */
 export function entityLevel(eff: EffectiveAccess, type: string, entityId: string): AccessLevel | 'none' {
   if (eff.full) return 'manage';
-  const own = type === 'character' ? eff.characters[entityId] : type === 'location' ? eff.locations[entityId] : undefined;
+  const own = type === 'character' ? eff.characters[entityId] : type === 'location' ? eff.locations[entityId] : type==='object' ? eff.objects?.[entityId] : undefined;
   return maxLevel(eff.book, own ?? 'none');
 }
 
@@ -116,6 +124,7 @@ export interface GrantInput {
   scopeType: AccessScope;
   scopeRef?: string | null;
   validUntil?: string | null;
+  validFrom?: string | null;
   bookIndex?: BookIndex | null;
 }
 
@@ -143,7 +152,7 @@ export async function grantAccess(repo: CoreRepository, input: GrantInput): Prom
     const ok = input.scopeType === 'chapter' ? input.bookIndex.has(String(ref)) : [...input.bookIndex.values()].some((s) => s.includes(String(ref)));
     if (!ok) throw new CoreRuleError('not_found', `${input.scopeType === 'chapter' ? 'Розділу' : 'Сцени'} «${ref}» у книзі немає`);
   }
-  if (input.scopeType === 'character' || input.scopeType === 'location') {
+  if (input.scopeType === 'character' || input.scopeType === 'location' || input.scopeType === 'object') {
     const e = ref ? await repo.getEntity(input.projectId, ref) : null;
     if (!e || e.type !== input.scopeType) throw new CoreRuleError('not_found', `Сутності «${ref}» типу ${input.scopeType} у книзі немає`);
   }
@@ -154,11 +163,12 @@ export async function grantAccess(repo: CoreRepository, input: GrantInput): Prom
     level: input.level,
     scopeType: input.scopeType,
     scopeRef: ref,
+    validFrom: input.validFrom ?? undefined,
     validUntil: input.validUntil ?? null,
     source: input.granter.isAdmin && !input.granter.isOwner ? 'admin' : 'manual',
     grantedBy: actor,
   });
-  await repo.addCollabEvent({ projectId: input.projectId, participantId: participant.id, action: 'access_granted', actor, details: { grantId: row.id, userId: input.userId, level: row.level, scopeType: row.scopeType, scopeRef: row.scopeRef, validUntil: row.validUntil } });
+  await repo.addCollabEvent({ projectId: input.projectId, participantId: participant.id, action: 'access_granted', actor, details: { grantId: row.id, userId: input.userId, level: row.level, scopeType: row.scopeType, scopeRef: row.scopeRef, validFrom: row.validFrom, validUntil: row.validUntil } });
   return row;
 }
 
@@ -238,7 +248,7 @@ export function legacyEffective(projectId: string, userId: string, inviteRole: s
 /** Чи є хоч щось, що людина може бачити в книзі. */
 export function hasAnyAccess(eff: EffectiveAccess): boolean {
   return eff.full || !eff.restricted || eff.media !== 'none' ||
-    [eff.chapters, eff.scenes, eff.characters, eff.locations].some((m) => Object.values(m).some((l) => canRead(l)));
+    [eff.chapters, eff.scenes, eff.characters, eff.locations,eff.objects??{},eff.mediaAssets??{},eff.visualBibles??{},eff.styleBibles??{}].some((m) => Object.values(m).some((l) => canRead(l)));
 }
 
 /** Частковий доступ: книгу не можна редагувати цілком — правки й видача потребують фільтра. */
@@ -289,6 +299,12 @@ export function describeAccess(eff: EffectiveAccess) {
     characters: eff.characters,
     locations: eff.locations,
     media: eff.media,
+    objects:eff.objects??{},mediaAssets:eff.mediaAssets??{},visualBibles:eff.visualBibles??{},styleBibles:eff.styleBibles??{},
     canWriteAny: eff.canWriteAny,
   };
+}
+
+/** Specific file grants never open the whole media library. */
+export function assetLevel(eff:EffectiveAccess,id:string): AccessLevel|'none' {
+ if(eff.full)return 'manage';return maxLevel(eff.media==='work'?'work':eff.media==='view'?'view':'none',eff.mediaAssets?.[id]??'none');
 }

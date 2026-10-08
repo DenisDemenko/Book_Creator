@@ -15,7 +15,7 @@
 
 import type { Express, NextFunction, Request, RequestHandler, Response } from 'express';
 import { isValidBookId, participantAccess, type RealtimeAccessDeps } from '../realtimeAuth';
-import { canRead, canWrite as levelWrites, computeEffective, describeAccess, entityLevel, type EffectiveAccess } from './collaboration/access';
+import { canRead, canWrite as levelWrites, computeEffective, describeAccess, entityLevel, assetLevel, type EffectiveAccess } from './collaboration/access';
 import { CoreRuleError } from './rules';
 import type { CoreRepository, FindingRow } from './types';
 import { JobRejectedError } from './jobs/types';
@@ -248,7 +248,7 @@ export async function restrictedAllows(path: string, method: string, eff: Effect
     if (!r.entity) return true;
     if (!repo) return true; // далі маршрут сам відповість 503
     const e = await repo.getEntity(eff.projectId, decodeURIComponent(m[1]));
-    return !!e && canRead(entityLevel(eff, e.type, e.id)) && (e.type === 'character' || e.type === 'location');
+    return !!e && canRead(entityLevel(eff, e.type, e.id)) && (e.type === 'character' || e.type === 'location' || e.type==='object');
   }
   return false;
 }
@@ -358,7 +358,7 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       res.status(404).json({ error: 'Медіатека книги недоступна.', kind: 'not_found' });
       return true;
     }
-    if (req.projectAccess!.effective.media === 'none') {
+    if (req.projectAccess!.effective.media === 'none' && !Object.values(req.projectAccess!.effective.mediaAssets??{}).some(canRead)) {
       res.status(403).json({ error: 'Доступу до медіатеки цієї книги вам не надано.', kind: 'scope_restricted' });
       return true;
     }
@@ -371,7 +371,7 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
     try {
       const owners = await mediaOwners(req.params.id);
       const lists = await Promise.all([...owners].map((o) => deps.media!.listAssets(o, { bookId: req.params.id })));
-      const assets = lists.flat().filter((a) => a.bookId === req.params.id);
+      const assets = lists.flat().filter((a) => a.bookId === req.params.id && canRead(assetLevel(req.projectAccess!.effective,a.id)));
       res.json({ assets, media: req.projectAccess!.effective.media });
     } catch (err) {
       fail(res, err);
@@ -441,7 +441,7 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       entities: entities
         .filter((e) => includeRejected || e.status !== 'rejected')
         // Т6.2: обмеженому — лише герої й локації, на які надано доступ.
-        .filter((e) => !eff.restricted || ((e.type === 'character' || e.type === 'location') && canRead(entityLevel(eff, e.type, e.id))))
+        .filter((e) => !eff.restricted || ((e.type === 'character' || e.type === 'location' || e.type==='object') && canRead(entityLevel(eff, e.type, e.id))))
         .map((e) => ({ ...e, mentions: counts[e.id] ?? 0 })),
     });
   }));

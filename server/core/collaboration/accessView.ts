@@ -42,9 +42,10 @@ export function restrictBook(book: AnyBook | null | undefined, eff: EffectiveAcc
   // Налаштування макета змісту не несуть; обкладинка — без тексту звороту.
   if (book.layoutConfig !== undefined) out.layoutConfig = book.layoutConfig;
   if (book.coverConfig && typeof book.coverConfig === 'object') out.coverConfig = { ...book.coverConfig, backDescription: '', authorBio: undefined, tagline: undefined };
-  // Стиль-біблія — окрема область (застосування — Т7): поки порожня.
+  // Біблії видимі тільки за окремим grant; без нього — порожня проєкція.
   const vb = book.visualBible && typeof book.visualBible === 'object' ? book.visualBible : {};
-  out.visualBible = { id: vb.id ?? '', bookId: vb.bookId ?? book.id, styleName: '', artStyle: '', colorPalette: [], lighting: '', mood: '', referenceNotes: '', keyMotifs: [], aspectRatio: vb.aspectRatio ?? '' };
+  out.visualBible = canRead(eff.visualBibles?.[String(book.id)]??'none') ? vb : { id: vb.id ?? '', bookId: vb.bookId ?? book.id, styleName: '', artStyle: '', colorPalette: [], lighting: '', mood: '', referenceNotes: '', keyMotifs: [], aspectRatio: vb.aspectRatio ?? '' };
+  if(canRead(eff.styleBibles?.[String(book.id)]??'none')&&book.styleBible)out.styleBible=book.styleBible;
   out.chapters = (Array.isArray(book.chapters) ? book.chapters : [])
     .map((ch: AnyBook) => {
       const sections = (Array.isArray(ch.sections) ? ch.sections : []).filter((s: AnyBook) => canRead(sceneLevel(eff, ch.id, s.id)));

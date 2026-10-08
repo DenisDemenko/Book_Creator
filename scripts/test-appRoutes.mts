@@ -1,3 +1,4 @@
+import { parseCreativeAccessPath, buildCreativeAccessPath } from '../src/utils/appRoutes.ts';
 /**
  * Адреси вкладок і сторінок ядра — задача Т0.8 (журнал #251), рішення К3.
  * Чисті функції `src/utils/appRoutes.ts`: розбір і побудова адреси
@@ -62,5 +63,9 @@ t('невідома вкладка — процеси ШІ', parseAppPath('/admi
 t('побудова адреси не залежить від книги', buildAppPath({ projectId: 'BK-1', tab: 'graph-studio', graphTab: 'versions' }, '/studio') === '/studio/admin/graph-studio/versions');
 t('інші /admin/… — не наші', parseAppPath('/admin/other') === null);
 
+t('creative access — прямий URL з префіксом', parseCreativeAccessPath('/studio/creative/access/project-1','/studio')==='project-1');
+t('creative access — інший префікс закрито', parseCreativeAccessPath('/other/creative/access/project-1','/studio')===null);
+t('creative access — небезпечний id закрито', parseCreativeAccessPath('/creative/access/..%2Fsecret')===null);
+t('creative access — побудова URL', buildCreativeAccessPath('project-1','/studio')==='/studio/creative/access/project-1');
 console.log(`\nПідсумок: ${pass} пройшло, ${fail} впало`);
 if (fail > 0) process.exit(1);

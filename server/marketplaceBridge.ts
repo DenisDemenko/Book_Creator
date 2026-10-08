@@ -1636,3 +1636,13 @@ export async function clearProductMedia(
   }
   return { cleared: Number(body?.cleared ?? 0) };
 }
+
+/** T7.2: only the author-confirmed public brief crosses the bridge. */
+export async function publishCreativeBrief(input:{externalId:string;sourceRevision:number;publicBrief:unknown;ownerFirebaseUid:string;ownerEmail:string;ownerName:string},deps:{fetch?:typeof fetch;settings?:BridgeSettings}={}){
+ const settings=deps.settings??await readBridgeSettings();
+ const response=await (deps.fetch??fetch)(`${settings.url}/bridge/creative-briefs`,{method:'POST',headers:{'content-type':'application/json','x-bridge-key':settings.key},body:JSON.stringify(input),signal:AbortSignal.timeout(20000)});
+ if(!response.ok)throw new MarketplaceBridgeError('Marketplace не прийняв бриф.','rejected',response.status);
+ const result=await response.json() as {id:string;status:string};
+ if(typeof result.id!=='string'||result.status!=='MODERATION')throw new MarketplaceBridgeError('Невідома відповідь Marketplace.','rejected',502);
+ return result;
+}
