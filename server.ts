@@ -219,6 +219,7 @@ import { normalizePromptEntities, buildCoachEntityInstruction, normalizeEntityFe
 import { formatManuscriptWithClaude, anthropicConfig, ClaudeManuscriptError, MAX_MANUSCRIPT_CHARS } from './server/claudeManuscript';
 import { initCore, getCoreStatus, shutdownCore, registerCoreJobKind, getCoreRepository, getCoreJobQueue } from './server/core';
 import { registerLabyrinthRoutes } from './server/core/labyrinth/routes';
+import { LabyrinthError } from './server/core/labyrinth/model';
 import { getLabyrinthStore } from './server/core/index';
 import { registerProjectRoutes, resolveProjectAccess, bookMediaOwners } from './server/core/projectRoutes';
 import { registerWorkflowRoutes } from './server/core/workflows/routes';
@@ -1047,7 +1048,18 @@ registerGitCommandRoutes(app);
         }, generate: aiRoleGenerateViaCore, resolveModel: (module) => resolveModuleModelId(module), loadTemplate: loadCoreAiRoleTemplate, jev: typesafeJev }, bindings: workflowBindings }
       : null;
   };
-  registerLabyrinthRoutes(app, { access: realtimeAccessDeps, store: getLabyrinthStore });
+  registerLabyrinthRoutes(app, {
+    access: realtimeAccessDeps, store: getLabyrinthStore, aiGuard: requirePermission('canUseAi'),
+    refreshPrincipal: async req => {const u=await findUserForAccess(req.principal!.id!);if(!u || u.disabled)throw new LabyrinthError(403,'Обліковий запис недоступний.');const {passwordHash,...principal}=u;req.principal={...principal,isGuest:false};},
+    recheckAi: async req => {const u=await findUserForAccess(req.principal!.id!);if(!u || u.disabled || !(await canRole(u.role,'canUseAi')))throw new LabyrinthError(403,'Доступ до ШІ відкликано.');},
+    directorServices: (req,projectId,actor) => ({
+      primary: async () => typesafeJev(),
+      fallback: async signal => new MagicFallbackAdapter(async(system,user)=>{
+        const out=await aiRoleGenerateViaCore({module:'coreAi2Analysis',modelId:await resolveModuleModelId('coreAi2Analysis'),system,user,projectId,actor,privateContent:true,signal,generation:{maxTokens:500,timeoutMs:3000,temperature:0}});
+        return {text:out.text,modelId:out.modelId,inputTokens:out.inputTokens,outputTokens:out.outputTokens,costUsd:out.costUsd};
+      }),
+    }),
+  });
   registerProjectRoutes(app, {
     access: realtimeAccessDeps,
     repo: getCoreRepository,

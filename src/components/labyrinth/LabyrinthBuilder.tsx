@@ -1,3 +1,4 @@
+import { DIRECTOR_DEFAULTS } from "../../../shared/labyrinthDirector";
 import { RuntimeControls } from "./RuntimeControls";
 import { RouteDescription } from "./RouteDescription";
 import { ReferenceMaze, hasSvgPoint } from "./ReferenceMaze";
@@ -518,6 +519,86 @@ export function LabyrinthBuilder({
           {notice}
         </p>
       )}
+      <fieldset
+        disabled={busy}
+        className="space-y-3 rounded-lg border border-violet-700 p-3"
+      >
+        <legend>Jev-директор напруги</legend>
+        <label>
+          <input
+            type="checkbox"
+            checked={d.director?.enabled ?? false}
+            onChange={(e) =>
+              edit({
+                ...d,
+                director: {
+                  ...DIRECTOR_DEFAULTS,
+                  ...d.director,
+                  enabled: e.target.checked,
+                },
+              })
+            }
+          />{" "}
+          Увімкнути для безпечних прогонів
+        </label>
+        {d.director?.enabled && (
+          <>
+            <p className="text-xs">
+              Оцінюється маршрут героя, а не емоції людини. ШІ необов’язковий;
+              після руху директор може вибрати лише безпечну авторську подію.
+            </p>
+            <div className="grid gap-3 md:grid-cols-3">
+              {(
+                [
+                  ["targetTension", "Цільова напруга", 100],
+                  ["cooldown", "Перерва між рішеннями (кроки)", 10000],
+                  ["maxModelCalls", "Бюджет спроб ШІ на прогін", 1000],
+                  ["timeoutMs", "Timeout ШІ (мс)", 10000],
+                  ["maxCandidates", "Подій на перевірку", 12],
+                ] as const
+              ).map(([key, label, max]) => (
+                <Num
+                  key={key}
+                  label={label}
+                  min={
+                    key === "timeoutMs" ? 100 : key === "maxCandidates" ? 1 : 0
+                  }
+                  value={d.director![key]}
+                  onChange={(value) =>
+                    edit({
+                      ...d,
+                      director: { ...d.director!, [key]: Math.min(max, value) },
+                    })
+                  }
+                />
+              ))}
+              {(
+                [
+                  ["criticalHealthRatio", "Критичне здоров’я (% початкового)"],
+                  ["confidenceThreshold", "Поріг впевненого маршруту (%)"],
+                  ["minModelConfidence", "Мінімальна впевненість ШІ (%)"],
+                  ["noulThreshold", "Поріг авторської відповідності Noul (%)"],
+                ] as const
+              ).map(([key, label]) => (
+                <Num
+                  key={key}
+                  label={label}
+                  value={Math.round(d.director![key] * 100)}
+                  onChange={(value) =>
+                    edit({
+                      ...d,
+                      director: {
+                        ...d.director!,
+                        [key]: Math.min(100, value) / 100,
+                      },
+                    })
+                  }
+                />
+              ))}
+            </div>
+          </>
+        )}
+      </fieldset>
       <fieldset disabled={busy} className="space-y-4">
         <div className="flex flex-wrap gap-2">
           <button className={btn} onClick={() => reset()}>
@@ -1328,6 +1409,45 @@ export function LabyrinthBuilder({
             )}
             {tab === "events" && event && (
               <>
+                <Pick
+                  label="Подія директора"
+                  value={event.director?.intent ?? "manual"}
+                  options={[
+                    ["manual", "Лише вручну"],
+                    ["challenge", "Ускладнення"],
+                    ["rescue", "Порятунок"],
+                    ["rest", "Перепочинок"],
+                    ["hint", "Підказка"],
+                  ]}
+                  onChange={(intent) => {
+                    const next = { ...event };
+                    if (intent === "manual") delete next.director;
+                    else
+                      next.director = {
+                        intent: intent as
+                          | "challenge"
+                          | "rescue"
+                          | "rest"
+                          | "hint",
+                        priority: event.director?.priority ?? 50,
+                      };
+                    update("events", event.id, next);
+                  }}
+                />
+                {event.director && (
+                  <Num
+                    label="Пріоритет події директора"
+                    value={event.director.priority}
+                    onChange={(priority) =>
+                      update("events", event.id, {
+                        director: {
+                          ...event.director!,
+                          priority: Math.min(100, priority),
+                        },
+                      })
+                    }
+                  />
+                )}
                 <Num
                   label="Шкода здоров’ю за крок небезпеки"
                   value={event.hazard?.resourceCosts.health ?? 0}

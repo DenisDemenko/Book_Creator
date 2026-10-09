@@ -197,6 +197,10 @@ export async function liveLabyrinthBuilder(
     await click("Додати подію");
     await text("Попередження", "Газ починає підійматися");
     await text("Підказка обходу", "Сходами до верхнього мосту");
+    await pick("Подія директора", "Підказка");
+    await page.click(await field("Увімкнути для безпечних прогонів"));
+    await text("Бюджет спроб ШІ на прогін", "1");
+    check("Авторські форми налаштували директора, бюджет і роль події");
     check("Створено механізм і подію з попередженням та обходом");
     // Bind an existing manuscript scene; this uses the existing editor, no canonical text write.
     await click("Сцени");
@@ -283,6 +287,64 @@ export async function liveLabyrinthBuilder(
     );
     check("Після ходу опис і маркер показують одну позицію/ревізію");
     check("Автор пройшов сходи → міст → драбину через справжній API");
+    await click("Безпечний прогін");
+    await page.waitForSelector("[data-labyrinth-director]");
+    await click("Хід директора");
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector("[data-labyrinth-director]")
+          ?.getAttribute("data-director-reason") === "offline",
+    );
+    assert.ok(
+      await page.$eval("[data-labyrinth-director]", (e) =>
+        e.textContent?.includes("0 / 1"),
+      ),
+    );
+    check("Без ШІ директор обирає авторську підказку та пояснює рішення");
+    await click("Хід директора");
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector("[data-labyrinth-director]")
+          ?.getAttribute("data-director-reason") === "cooldown",
+    );
+    check("Повтор під час cooldown лишає світ і бюджет без змін");
+    await click("Безпечний прогін");
+    await page.waitForFunction(() =>
+      document
+        .querySelector("[data-labyrinth-director]")
+        ?.textContent?.includes("ще не викликано"),
+    );
+    await page.click(await field("Використати Jev / запасний ШІ"));
+    await click("Йти: Верхній лівий");
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector("[data-labyrinth-director]")
+          ?.getAttribute("data-director-source") === "mock",
+    );
+    assert.ok(
+      await page.$eval("[data-labyrinth-director]", (e) =>
+        e.textContent?.includes("1 / 1"),
+      ),
+    );
+    assert.equal(
+      await page.$eval("[data-route-description]", (e) =>
+        e.getAttribute("data-description-node"),
+      ),
+      map.definition.nodes.find((n: any) => n.title === "Верхній лівий").id,
+    );
+    assert.equal(
+      await page.$$eval("[data-route-description]", (els) => els.length),
+      1,
+    );
+    check(
+      "Після руху автоматичний директор використовує контрольовану модель і один бюджетний слот",
+    );
+    await (await page.$("[data-labyrinth-run]"))!.screenshot({
+      path: "/tmp/t94-director-browser.png",
+    });
     await click("Сцени");
     await click("Вхід");
     // Drag the lower node; persisted grid coordinates must change without hiding nodes.

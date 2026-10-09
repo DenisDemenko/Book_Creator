@@ -1,6 +1,7 @@
+import type { DirectorServices } from "./director";
 import { headings, type Heading } from "../../../shared/labyrinthNarration";
 import { analyzeLabyrinth } from "../../../shared/labyrinthDesign";
-import type { Express, Request, Response } from "express";
+import type { Express, Request, Response, RequestHandler } from "express";
 import type { RealtimeAccessDeps } from "../../realtimeAuth";
 import { resolveProjectAccess } from "../projectRoutes";
 import { LabyrinthError } from "./model";
@@ -18,7 +19,18 @@ const body = (req: Request, keys: string[]) => {
 };
 export function registerLabyrinthRoutes(
   app: Express,
-  d: { access: RealtimeAccessDeps; store: () => PgLabyrinthStore | null },
+  d: {
+    access: RealtimeAccessDeps;
+    store: () => PgLabyrinthStore | null;
+    aiGuard?: RequestHandler;
+    directorServices?: (
+      req: Request,
+      projectId: string,
+      actor: string,
+    ) => DirectorServices;
+    recheckAi?: (req: Request) => Promise<void>;
+    refreshPrincipal?: (req: Request) => Promise<void>;
+  },
 ) {
   const base = "/api/core/projects/:projectId/labyrinth";
   const handle =
@@ -244,6 +256,54 @@ export function registerLabyrinthRoutes(
           revisionNumber(b.expectedRevision),
           revisionNumber(b.sourceRevision),
           a,
+        ),
+      );
+    }),
+  );
+  app.post(
+    `${base}/runs/:runId/director-actions`,
+    (req, res, next) => {
+      if (req.body?.useAI !== true) return next();
+      if (!d.aiGuard) {
+        res.status(503).json({
+          error: "ШІ-директор не налаштовано; використайте режим без ШІ.",
+        });
+        return;
+      }
+      d.aiGuard(req, res, next);
+    },
+    handle(async (q, r, s, p, a) => {
+      const b = body(q, ["expectedRevision", "key", "useAI"]);
+      if (typeof b.useAI !== "boolean")
+        throw new LabyrinthError(422, "Виберіть режим директора.");
+      await d.refreshPrincipal?.(q);
+      if (b.useAI) await d.recheckAi?.(q);
+      const currentAccess = await resolveProjectAccess(
+        q.principal,
+        p,
+        d.access,
+      );
+      if (
+        !currentAccess ||
+        (!currentAccess.isOwner && currentAccess.role !== "admin")
+      )
+        throw new LabyrinthError(403, "Доступ до книги відкликано.");
+      r.json(
+        await s.directorStep(
+          p,
+          String(q.params.runId),
+          revisionNumber(b.expectedRevision),
+          a,
+          b.useAI,
+          b.key,
+          b.useAI ? d.directorServices?.(q, p, a) : {},
+          async () => {
+            await d.refreshPrincipal?.(q);
+            if (b.useAI) await d.recheckAi?.(q);
+            const latest = await resolveProjectAccess(q.principal, p, d.access);
+            if (!latest || (!latest.isOwner && latest.role !== "admin"))
+              throw new LabyrinthError(403, "Доступ до книги відкликано.");
+          },
         ),
       );
     }),

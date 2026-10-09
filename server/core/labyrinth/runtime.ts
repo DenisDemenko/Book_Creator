@@ -243,6 +243,13 @@ export function runtimeInitialState(d: World) {
   if (d.heroes[0].resources.health === 0)
     reject("Герой не може почати прогін без здоров’я.");
   state.engine = { version: 1, events: [] };
+  if (d.director?.enabled)
+    state.engine.director = {
+      decisions: 0,
+      modelCalls: 0,
+      lastDecisionTime: null,
+      recentMoves: [],
+    };
   proveExit(d, state);
   return state;
 }
@@ -274,5 +281,14 @@ export function runtimeAction(d: World, s: State, input: unknown) {
   const action = r as RuntimeAction,
     state = simulate(d, s, action),
     proof = proveExit(d, state);
+  if (action.kind === "move" && state.engine?.director)
+    state.engine.director.recentMoves = [
+      ...state.engine.director.recentMoves,
+      {
+        from: s.heroes[action.heroId].nodeId,
+        to: state.heroes[action.heroId].nodeId,
+        edgeId: action.edgeId,
+      },
+    ].slice(-8);
   return { action, state, proof };
 }

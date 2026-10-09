@@ -66,7 +66,40 @@ export interface LabyrinthHero {
   fears: string[];
   knowledge: string[];
 }
+export interface LabyrinthDirectorConfig {
+  enabled: boolean;
+  targetTension: number;
+  criticalHealthRatio: number;
+  confidenceThreshold: number;
+  minModelConfidence: number;
+  noulThreshold: number;
+  cooldown: number;
+  maxModelCalls: number;
+  timeoutMs: number;
+  maxCandidates: number;
+}
+export interface LabyrinthDirectorState {
+  decisions: number;
+  modelCalls: number;
+  lastDecisionTime: number | null;
+  recentMoves: Array<{ from: string; to: string; edgeId: string }>;
+  last?: {
+    eventId: string | null;
+    source: "rules" | "jev" | "mock" | "llm_fallback";
+    reason: string;
+    scores: {
+      health: number;
+      resources: number;
+      confidence: number;
+      tension: number;
+    };
+  };
+}
 export interface LabyrinthEventTemplate {
+  director?: {
+    intent: "challenge" | "rescue" | "rest" | "hint";
+    priority: number;
+  };
   id: string;
   nodeIds: string[];
   conditions: ObjectCondition[];
@@ -79,6 +112,7 @@ export interface LabyrinthEventTemplate {
   hazard?: { resourceCosts: Record<string, number>; blocksMovement: boolean };
 }
 export interface LabyrinthDefinition {
+  director?: LabyrinthDirectorConfig;
   schemaVersion: 1;
   title: string;
   startNodeId: string;
@@ -101,6 +135,7 @@ export interface LabyrinthVersion {
 }
 export interface LabyrinthRunState {
   engine?: {
+    director?: LabyrinthDirectorState;
     version: 1;
     events: Array<{ eventId: string; startedAt: number }>;
   };
@@ -141,7 +176,7 @@ export type RuntimeAction =
 export interface LabyrinthRunEvent {
   revision: number;
   actor: string;
-  action: RuntimeAction;
+  action: RuntimeAction | { kind: "director"; useAI: boolean };
   reason: string;
   mapRevision: number;
   beforeHash: string;

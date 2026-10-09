@@ -1,3 +1,4 @@
+import { directLabyrinth, type DirectorServices } from "./director";
 import {
   runtimeInitialState,
   runtimeAction,
@@ -442,6 +443,110 @@ export class PgLabyrinthStore {
         afterHash: stateHash(next.state),
         state: next.state,
         proof: next.proof,
+        createdAt: new Date().toISOString(),
+      };
+      const updated = await c.query(
+        "UPDATE labyrinth_runs SET revision=$3,state=$4 WHERE project_id=$1 AND id=$2 RETURNING *",
+        [projectId, runId, event.revision, JSON.stringify(next.state)],
+      );
+      await c.query(
+        "INSERT INTO labyrinth_run_events(project_id,run_id,revision,event) VALUES($1,$2,$3,$4)",
+        [projectId, runId, event.revision, JSON.stringify(event)],
+      );
+      const response = { run: run(updated.rows[0]), event };
+      await c.query(
+        "INSERT INTO labyrinth_action_receipts(project_id,run_id,key,request_hash,response) VALUES($1,$2,$3,$4,$5)",
+        [projectId, runId, key, hash, JSON.stringify(response)],
+      );
+      return response;
+    });
+  }
+  async directorStep(
+    projectId: string,
+    runId: string,
+    expectedRevision: number,
+    actor: string,
+    useAI: boolean,
+    key: unknown,
+    services: DirectorServices = {},
+    recheck?: () => Promise<void>,
+  ) {
+    uuid(runId);
+    revisionNumber(expectedRevision);
+    if (
+      typeof key !== "string" ||
+      !key.trim() ||
+      key.length > 128 ||
+      typeof useAI !== "boolean"
+    )
+      throw new LabyrinthError(
+        422,
+        "Потрібні режим директора та ключ повтору.",
+      );
+    const hash = stateHash({
+      expectedRevision,
+      actor,
+      action: { kind: "director", useAI },
+    });
+    return this.transaction(async (c) => {
+      const { rows } = await c.query(
+        "SELECT * FROM labyrinth_runs WHERE project_id=$1 AND id=$2 FOR NO KEY UPDATE",
+        [projectId, runId],
+      );
+      if (!rows.length)
+        throw new LabyrinthError(404, "Проходження не знайдено.");
+      const receipt = await c.query(
+        "SELECT * FROM labyrinth_action_receipts WHERE project_id=$1 AND run_id=$2 AND key=$3",
+        [projectId, runId, key],
+      );
+      if (receipt.rows.length) {
+        if (receipt.rows[0].request_hash !== hash)
+          throw new LabyrinthError(409, "Ключ повтору вже використано.");
+        return receipt.rows[0].response;
+      }
+      const r = run(rows[0]);
+      if (r.revision !== expectedRevision)
+        throw new LabyrinthError(409, "Оновіть поточну ревізію прогону.");
+      const v = await c.query(
+        "SELECT definition FROM labyrinth_versions WHERE project_id=$1 AND map_id=$2 AND revision=$3",
+        [projectId, r.mapId, r.mapRevision],
+      );
+      const base = structuredClone(r);
+      const budget = await c.query(
+        "SELECT attempts FROM labyrinth_director_budget WHERE project_id=$1 AND run_id=$2",
+        [projectId, runId],
+      );
+      if (base.state.engine?.director)
+        base.state.engine.director.modelCalls = Math.max(
+          base.state.engine.director.modelCalls,
+          budget.rows[0]?.attempts ?? 0,
+        );
+      const maxCalls = v.rows[0].definition.director?.maxModelCalls ?? 0;
+      const initial = base.state.engine?.director?.modelCalls ?? 0;
+      const next = await directLabyrinth(v.rows[0].definition, base, useAI, {
+        ...services,
+        reserveAttempt: async () => {
+          if (initial >= maxCalls) return false;
+          // Independent commit: the outer action may later roll back, but the paid attempt never becomes free.
+          const reservation = await this.pool.query(
+            "INSERT INTO labyrinth_director_budget(project_id,run_id,attempts) VALUES($1,$2,$3) ON CONFLICT(project_id,run_id) DO UPDATE SET attempts=labyrinth_director_budget.attempts+1 WHERE labyrinth_director_budget.attempts<$4 RETURNING attempts",
+            [projectId, runId, initial + 1, maxCalls],
+          );
+          return reservation.rows.length > 0;
+        },
+      });
+      await recheck?.();
+      const event = {
+        revision: r.revision + 1,
+        actor,
+        action: { kind: "director", useAI },
+        reason: next.trace.reason,
+        mapRevision: r.mapRevision,
+        beforeHash: stateHash(r.state),
+        afterHash: stateHash(next.state),
+        state: next.state,
+        proof: next.proof,
+        directorTrace: next.trace,
         createdAt: new Date().toISOString(),
       };
       const updated = await c.query(

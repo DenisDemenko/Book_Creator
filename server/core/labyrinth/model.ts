@@ -84,6 +84,7 @@ function unique<T extends { id: string }>(items: T[]) {
 }
 export function validateDefinition(input: unknown): LabyrinthDefinition {
   const r = record(input, [
+    "director",
     "schemaVersion",
     "title",
     "startNodeId",
@@ -309,6 +310,7 @@ export function validateDefinition(input: unknown): LabyrinthDefinition {
       "duration",
       "cooldown",
       "effects",
+      "director",
       "avoidance",
       "hazard",
     ]);
@@ -321,6 +323,22 @@ export function validateDefinition(input: unknown): LabyrinthDefinition {
       duration: num(e.duration, 1, 10000),
       cooldown: num(e.cooldown),
       effects: conditions(e.effects),
+      ...(e.director === undefined
+        ? {}
+        : {
+            director: (() => {
+              const v = record(e.director, ["intent", "priority"]);
+              return {
+                intent: choice(v.intent, [
+                  "challenge",
+                  "rescue",
+                  "rest",
+                  "hint",
+                ] as const),
+                priority: num(v.priority, 0, 100),
+              };
+            })(),
+          }),
       avoidance: text(e.avoidance, 2000),
       ...(e.hazard === undefined
         ? {}
@@ -345,7 +363,52 @@ export function validateDefinition(input: unknown): LabyrinthDefinition {
   const exitNodeIds = list(r.exitNodeIds, 100, (x) => exists(id(x)));
   if (!exitNodeIds.length || new Set(exitNodeIds).size !== exitNodeIds.length)
     bad("Потрібні унікальні виходи.");
+  const dc =
+    r.director === undefined
+      ? undefined
+      : record(r.director, [
+          "enabled",
+          "targetTension",
+          "criticalHealthRatio",
+          "confidenceThreshold",
+          "minModelConfidence",
+          "noulThreshold",
+          "cooldown",
+          "maxModelCalls",
+          "timeoutMs",
+          "maxCandidates",
+        ]);
+  const ratio = (v: unknown) => {
+    if (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > 1)
+      bad("Поріг має бути від 0 до 1.");
+    return v as number;
+  };
+  const director = dc
+    ? {
+        enabled: bool(dc.enabled),
+        targetTension: num(dc.targetTension, 0, 100),
+        criticalHealthRatio: ratio(dc.criticalHealthRatio),
+        confidenceThreshold: ratio(dc.confidenceThreshold),
+        minModelConfidence: ratio(dc.minModelConfidence),
+        noulThreshold: ratio(dc.noulThreshold),
+        cooldown: num(dc.cooldown, 0, 10000),
+        maxModelCalls: num(dc.maxModelCalls, 0, 1000),
+        timeoutMs: num(dc.timeoutMs, 100, 10000),
+        maxCandidates: num(dc.maxCandidates, 1, 12),
+      }
+    : undefined;
+  for (const e of events)
+    if (
+      e.director &&
+      e.director.intent !== "challenge" &&
+      (e.hazard?.blocksMovement ||
+        Object.values(e.hazard?.resourceCosts ?? {}).some((v) => v > 0))
+    )
+      bad(
+        "Рятувальна/резервна подія не може завдавати шкоди або блокувати вхід.",
+      );
   return {
+    ...(director ? { director } : {}),
     schemaVersion: 1,
     title: text(r.title),
     startNodeId: exists(id(r.startNodeId)),

@@ -1,3 +1,5 @@
+import { DIRECTOR_DEFAULTS } from "../shared/labyrinthDirector";
+import type { JevAdapter } from "../server/ai/adapters/jev";
 import assert from "node:assert/strict";
 import express from "express";
 import type { AddressInfo } from "node:net";
@@ -197,8 +199,8 @@ if (process.env.CORE_TEST_DATABASE_URL) {
     pool,
     loadMigrations(resolveMigrationsDir()),
   );
-  check("Міграція 36 та її повтор без змін", () =>
-    assert.equal(migrated.schemaVersion, 36),
+  check("Міграція 37 та її повтор без змін", () =>
+    assert.equal(migrated.schemaVersion, 37),
   );
   const again = await runMigrations(
     pool,
@@ -212,10 +214,10 @@ if (process.env.CORE_TEST_DATABASE_URL) {
   try {
     const status = await initCore(() => {});
     check(
-      "Штатний startup ядра підключає store лише після готовності v36",
+      "Штатний startup ядра підключає store лише після готовності v37",
       () => {
         assert.equal(status.state, "ready");
-        assert.equal(status.schemaVersion, 36);
+        assert.equal(status.schemaVersion, 37);
         assert.ok(getLabyrinthStore());
       },
     );
@@ -246,7 +248,40 @@ if (process.env.CORE_TEST_DATABASE_URL) {
     } as any;
     next();
   });
+  let modelCalls = 0;
+  const controlledAdapter = {
+    name: "mock",
+    evaluate: async () => {
+      throw new Error("Test uses askState only");
+    },
+    askState: async (_context: any, questions: any[]) => {
+      modelCalls++;
+      return {
+        answers: {
+          tension: { score: 2, confidence: 0.95 },
+          fit: { noul: 0.95 },
+          next_action: {
+            choice: Object.keys(
+              questions.find((q) => q.id === "next_action").options,
+            )[0],
+            confidence: 0.95,
+          },
+        },
+        model: "controlled-director",
+        usage: { input_tokens: 100, output_tokens: 30 },
+        latency_ms: 1,
+      };
+    },
+  } as JevAdapter;
   registerLabyrinthRoutes(app, {
+    aiGuard: (req, res, next) => {
+      if (req.principal?.id !== "owner") {
+        res.status(403).json({ error: "Немає дозволу ШІ" });
+        return;
+      }
+      next();
+    },
+    directorServices: () => ({ primary: async () => controlledAdapter }),
     store: () => store,
     access: {
       getCollabOwnerId: async () => undefined,
@@ -914,6 +949,251 @@ if (process.env.CORE_TEST_DATABASE_URL) {
       request(`/maps/${v1.mapId}/runs?mapRevision=bad`),
       422,
     );
+
+    const directorWorld = structuredClone(labyrinthDemo);
+    directorWorld.director = {
+      ...DIRECTOR_DEFAULTS,
+      enabled: true,
+      confidenceThreshold: 0.5,
+      maxModelCalls: 1,
+      timeoutMs: 200,
+    };
+    directorWorld.events[0].conditions = [];
+    directorWorld.events[0].director = { intent: "challenge", priority: 60 };
+    directorWorld.events[0].hazard = {
+      resourceCosts: { health: 10 },
+      blocksMovement: false,
+    };
+    directorWorld.objects.find(
+      (o) => o.id === "generator",
+    )!.transitions[0].consequences = {
+      resourceDelta: { health: -80 },
+      inventoryAdd: [],
+      inventoryRemove: [],
+      knowledgeAdd: [],
+    };
+    directorWorld.events.push({
+      ...directorWorld.events[0],
+      id: "rescue",
+      hazard: undefined,
+      director: { intent: "rescue", priority: 90 },
+      effects: [{ objectId: "bridge-gate", state: "open" }],
+    });
+    const directorMap = await accepted(
+      "Авторські правила директора збережено",
+      request("/maps", "POST", {
+        definition: directorWorld,
+        expectedRevision: 0,
+      }),
+      201,
+    );
+    const directorRun = await accepted(
+      "Новий safe прогін з директором",
+      request(`/maps/${directorMap.mapId}/runs`, "POST", {
+        mapRevision: 1,
+        seed: "director",
+        mode: "runtime",
+      }),
+      201,
+    );
+    const directorBody = {
+      expectedRevision: 0,
+      key: "director-once",
+      useAI: true,
+    };
+    const modelBefore = modelCalls;
+    const concurrentDirector = await Promise.all([
+      request(`/runs/${directorRun.id}/director-actions`, "POST", directorBody),
+      request(`/runs/${directorRun.id}/director-actions`, "POST", directorBody),
+    ]);
+    check("Однакові паралельні рішення викликають модель лише раз", () => {
+      assert.equal(concurrentDirector[0].status, 200);
+      assert.equal(concurrentDirector[1].status, 200);
+      assert.deepEqual(concurrentDirector[0].body, concurrentDirector[1].body);
+      assert.equal(modelCalls - modelBefore, 1);
+      assert.equal(
+        concurrentDirector[0].body.event.directorTrace.source,
+        "mock",
+      );
+    });
+    const reserved = await pool.query(
+      "SELECT attempts FROM labyrinth_director_budget WHERE project_id=$1 AND run_id=$2",
+      [project, directorRun.id],
+    );
+    check("Спробу зарезервовано окремим commit до платного виклику", () =>
+      assert.equal(reserved.rows[0].attempts, 1),
+    );
+    await accepted(
+      "Інше рішення з тим самим ключем відхиляється",
+      request(`/runs/${directorRun.id}/director-actions`, "POST", {
+        ...directorBody,
+        useAI: false,
+      }),
+      409,
+    );
+    const cooled = await accepted(
+      "Cooldown не викликає ШІ повторно",
+      request(`/runs/${directorRun.id}/director-actions`, "POST", {
+        expectedRevision: 1,
+        key: "cooled",
+        useAI: true,
+      }),
+    );
+    check("У cooldown збережена причина й нуль викликів", () => {
+      assert.equal(cooled.event.directorTrace.reason, "cooldown");
+      assert.equal(modelCalls - modelBefore, 1);
+    });
+    const exactDirectorRestore = await accepted(
+      "Checkpoint директора відновлюється з бюджетом і cooldown",
+      request(`/runs/${directorRun.id}/restore`, "POST", {
+        expectedRevision: 2,
+        sourceRevision: 1,
+      }),
+      201,
+    );
+    check("Стан рішення відновлений точно", () =>
+      assert.deepEqual(
+        exactDirectorRestore.state,
+        concurrentDirector[0].body.run.state,
+      ),
+    );
+    await accepted(
+      "Читач не запускає директора",
+      request(
+        `/runs/${directorRun.id}/director-actions`,
+        "POST",
+        { expectedRevision: 2, key: "reader", useAI: false },
+        "reader",
+      ),
+      403,
+    );
+    await accepted(
+      "Без дозволу ШІ платний шлях закритий",
+      request(
+        `/runs/${directorRun.id}/director-actions`,
+        "POST",
+        { expectedRevision: 2, key: "ai-reader", useAI: true },
+        "reader",
+      ),
+      403,
+    );
+    await accepted(
+      "Невідомі параметри/URL не передаються провайдеру",
+      request(`/runs/${directorRun.id}/director-actions`, "POST", {
+        ...directorBody,
+        url: "https://example.com",
+      }),
+      422,
+    );
+    const weakRun = await accepted(
+      "Друга копія тієї ж карти для слабкого героя",
+      request(`/maps/${directorMap.mapId}/runs`, "POST", {
+        mapRevision: 1,
+        seed: "weak",
+        mode: "runtime",
+      }),
+      201,
+    );
+    const weakened = await accepted(
+      "Авторський наслідок знижує здоров’я до 20",
+      request(`/runs/${weakRun.id}/runtime-actions`, "POST", {
+        expectedRevision: 0,
+        key: "weaken",
+        action: {
+          kind: "interact",
+          heroId: "hero",
+          objectId: "generator",
+          to: "off",
+        },
+      }),
+    );
+    const rescueReply = await accepted(
+      "Критичному герою сервер обирає порятунок",
+      request(`/runs/${weakRun.id}/director-actions`, "POST", {
+        expectedRevision: 1,
+        key: "rescue",
+        useAI: false,
+      }),
+    );
+    check("Немає автоматичного лікування чи ускладнення слабкого героя", () => {
+      assert.equal(rescueReply.event.directorTrace.eventId, "rescue");
+      assert.equal(rescueReply.run.state.heroes.hero.resources.health, 20);
+      assert.equal(weakened.run.state.heroes.hero.resources.health, 20);
+    });
+    const revokedRun = await store!.createRun(
+      project,
+      directorMap.mapId,
+      1,
+      "user:owner",
+      "revoked-director",
+      "runtime",
+    );
+    const revokedBefore = modelCalls;
+    await assert.rejects(
+      () =>
+        store!.directorStep(
+          project,
+          revokedRun.id,
+          0,
+          "user:owner",
+          true,
+          "revoked",
+          { primary: async () => controlledAdapter },
+          async () => {
+            throw new LabyrinthError(403, "Відкликано");
+          },
+        ),
+      (e: any) => e.status === 403,
+    );
+    const unmodified = await store!.getRun(project, revokedRun.id);
+    const durable = await pool.query(
+      "SELECT attempts FROM labyrinth_director_budget WHERE project_id=$1 AND run_id=$2",
+      [project, revokedRun.id],
+    );
+    check(
+      "Відкликання скасовує подію, але не повертає витрачений бюджет",
+      () => {
+        assert.deepEqual(unmodified.state, revokedRun.state);
+        assert.equal(unmodified.revision, 0);
+        assert.equal(durable.rows[0].attempts, 1);
+      },
+    );
+    const recovered = await store!.directorStep(
+      project,
+      revokedRun.id,
+      0,
+      "user:owner",
+      true,
+      "retry-after-revoke",
+      { primary: async () => controlledAdapter },
+    );
+    check(
+      "Після rollback бюджет не обходиться повторним платним запитом",
+      () => {
+        assert.equal(modelCalls - revokedBefore, 1);
+        assert.equal(recovered.event.directorTrace.reason, "budget");
+        assert.equal(recovered.run.state.engine.director.modelCalls, 1);
+      },
+    );
+    await pool.end();
+    pool = createCorePool(process.env.CORE_TEST_DATABASE_URL);
+    store = new PgLabyrinthStore(pool);
+    const remembered = await store.directorStep(
+      project,
+      directorRun.id,
+      0,
+      "user:owner",
+      true,
+      "director-once",
+      { primary: async () => controlledAdapter },
+    );
+    check(
+      "Перепідключення зберігає рішення, receipt і бюджет без нового виклику",
+      () => {
+        assert.deepEqual(remembered, concurrentDirector[0].body);
+        assert.equal(modelCalls - modelBefore, 2);
+      },
+    );
     if (process.argv.includes("--browser")) {
       const { liveLabyrinthBuilder } = await import(
         "./live-labyrinthBuilder.mts"
@@ -927,6 +1207,13 @@ if (process.env.CORE_TEST_DATABASE_URL) {
     );
     check("Видалення тестового проєкту прибирає його прогін", () =>
       assert.equal(removed.rows[0].n, 0),
+    );
+    const goneBudget = await pool.query(
+      "SELECT count(*)::int n FROM labyrinth_director_budget WHERE project_id=$1",
+      [project],
+    );
+    check("Видалення книги прибирає окремий журнал бюджету", () =>
+      assert.equal(goneBudget.rows[0].n, 0),
     );
     const response = await request("/maps");
     check("Приватні відповіді не кешуються", () =>
