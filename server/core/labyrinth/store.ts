@@ -96,14 +96,21 @@ export class PgLabyrinthStore {
       }
     }
   }
+  async validateDesign(projectId: string, input: unknown) {
+    const definition = validateDefinition(input);
+    await this.transaction((c) =>
+      this.verifyReferences(c, projectId, definition),
+    );
+    return definition;
+  }
   async listMaps(projectId: string) {
     const { rows } = await this.pool.query(
-      "SELECT v.project_id,v.map_id,v.revision,v.book_revision,v.hash,v.created_by,v.created_at FROM labyrinth_maps m JOIN labyrinth_versions v ON(v.project_id=m.project_id AND v.map_id=m.id AND v.revision=m.revision) WHERE m.project_id=$1 ORDER BY v.created_at DESC LIMIT 100",
+      "SELECT v.project_id,v.map_id,v.revision,v.book_revision,v.hash,v.created_by,v.created_at,v.definition->>'title' AS title FROM labyrinth_maps m JOIN labyrinth_versions v ON(v.project_id=m.project_id AND v.map_id=m.id AND v.revision=m.revision) WHERE m.project_id=$1 ORDER BY v.created_at DESC LIMIT 100",
       [projectId],
     );
     return rows.map((r) => {
       const { definition, ...metadata } = version(r);
-      return metadata;
+      return { ...metadata, title: r.title };
     });
   }
   async getVersion(projectId: string, mapId: string, revision: number) {

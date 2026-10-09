@@ -1,11 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { Blocks, Sparkles, Loader2, CheckCircle2, ArrowRight, RotateCcw, AlertTriangle, BookOpen } from 'lucide-react';
 import type { Book, Chapter, NavigationTab } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
 import { calculateWordCount } from '../utils/helpers';
 
+const LabyrinthBuilder = lazy(() => import('./labyrinth/LabyrinthBuilder'));
+
 interface BookStructureBuilderProps {
   book: Book;
+  onLabyrinthDirtyChange?: (dirty: boolean) => void;
+  onOpenSection?: (chapterId: string, sectionId: string) => void;
   onUpdateBook: (updatedBook: Book, logAction?: string, logDetails?: string) => void;
   onNavigateToTab: (tab: NavigationTab) => void;
 }
@@ -61,8 +65,11 @@ function emptyBlockState(): BlockDraftState {
   return { text: '', suggestions: [], selectedTitle: '', loadingSuggestions: false, suggestError: false };
 }
 
-export const BookStructureBuilder: React.FC<BookStructureBuilderProps> = ({ book, onUpdateBook, onNavigateToTab }) => {
+export const BookStructureBuilder: React.FC<BookStructureBuilderProps> = ({ book, onUpdateBook, onNavigateToTab, onOpenSection, onLabyrinthDirtyChange }) => {
   const { t } = useLanguage();
+  const [mode, setMode] = useState('structure');
+  const [labyrinthDirty, setLabyrinthDirty] = useState(false);
+  const dirtyChanged = React.useCallback((value: boolean) => { setLabyrinthDirty(value); onLabyrinthDirtyChange?.(value); }, [onLabyrinthDirtyChange]);
   const [templateKind, setTemplateKind] = useState<TemplateKind | null>(null);
   const [blocks, setBlocks] = useState<Record<string, BlockDraftState>>({});
   const [createdCount, setCreatedCount] = useState<number | null>(null);
@@ -221,6 +228,10 @@ export const BookStructureBuilder: React.FC<BookStructureBuilderProps> = ({ book
 
   return (
     <div className="flex-1 p-4 lg:p-6 overflow-y-auto bg-slate-900 text-slate-100 space-y-5">
+      <nav className="flex gap-2" aria-label="Режим конструктора">
+        {[['structure', 'Структура розділів'], ['labyrinth', 'Книга-лабіринт']].map(([id, title]) => <button key={id} aria-pressed={mode === id} className="rounded-lg border border-slate-600 px-3 py-2 text-sm" onClick={() => { if (id !== mode && mode === 'labyrinth' && labyrinthDirty && !window.confirm('Незбережені зміни карти буде втрачено. Продовжити?')) return; if(id !== mode) dirtyChanged(false); setMode(id); }}>{title}</button>)}
+      </nav>
+      {mode === 'labyrinth' ? <Suspense fallback={<p>Завантаження конструктора…</p>}><LabyrinthBuilder key={book.id} book={book} onOpenSection={onOpenSection} onDirtyChange={dirtyChanged}/></Suspense> : <>
       <div className="nova-glass-dark rounded-2xl p-5 border border-slate-800 flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-violet-500/20 text-violet-400 flex items-center justify-center shrink-0">
@@ -354,6 +365,7 @@ export const BookStructureBuilder: React.FC<BookStructureBuilderProps> = ({ book
           </button>
         </div>
       )}
+      </>}
     </div>
   );
 };

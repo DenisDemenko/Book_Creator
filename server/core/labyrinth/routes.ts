@@ -1,3 +1,4 @@
+import { analyzeLabyrinth } from "../../../shared/labyrinthDesign";
 import type { Express, Request, Response } from "express";
 import type { RealtimeAccessDeps } from "../../realtimeAuth";
 import { resolveProjectAccess } from "../projectRoutes";
@@ -64,6 +65,14 @@ export function registerLabyrinthRoutes(
           .json({ error: "Не вдалося виконати дію з лабіринтом." });
       }
     };
+  app.post(
+    `${base}/validate`,
+    handle(async (q, r, s, p) => {
+      const b = body(q, ["definition"]);
+      const definition = await s.validateDesign(p, b.definition);
+      r.json({ issues: analyzeLabyrinth(definition), scope: "static_design" });
+    }),
+  );
   app.get(
     `${base}/maps`,
     handle(async (_q, r, s, p) => {

@@ -239,6 +239,7 @@ export default function App() {
   // Після прийняття запрошення — вікно вибору ролі входу перед студією.
   const [roleChoice, setRoleChoice] = useState<{ bookId: string; bookTitle: string; invitedRole: UserRole } | null>(null);
 
+  const [labyrinthDirty, setLabyrinthDirty] = useState(false);
   const [currentTab, setCurrentTab] = useState<NavigationTab>('dashboard');
   /**
    * Адреса, з якою відкрили Студію (Т0.8, К3): /projects/<книга>/<сторінка>.
@@ -1803,6 +1804,8 @@ export default function App() {
     // «Переглянути тарифи» зсередини самої аналітики.
     setMarketOpen(false);
     if (targetTab === currentTab) return;
+    if (currentTab === 'structure' && labyrinthDirty && !window.confirm('Незбережені зміни карти буде втрачено. Продовжити?')) return;
+    setLabyrinthDirty(false);
     setCurrentTab(targetTab);
   };
   selectTabRef.current = handleSelectTab;
@@ -2602,6 +2605,8 @@ export default function App() {
         {currentTab === 'structure' && (
           <BookStructureBuilder
             book={book}
+            onOpenSection={handleNavigateToSection}
+            onLabyrinthDirtyChange={setLabyrinthDirty}
             onUpdateBook={handleUpdateBook}
             onNavigateToTab={handleSelectTab}
           />

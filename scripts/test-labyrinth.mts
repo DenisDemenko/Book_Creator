@@ -305,6 +305,49 @@ if (process.env.CORE_TEST_DATABASE_URL) {
       request("/maps", "GET", undefined, "owner", "missing"),
       403,
     );
+    for (const who of ["guest", "disabled", "stranger", "reader", "editor"])
+      await accepted(
+        `${who}: перевірка дизайну теж приватна`,
+        request("/validate", "POST", { definition: d }, who),
+        ["guest", "disabled"].includes(who) ? 401 : 403,
+      );
+    const validated = await accepted(
+      "Сервер перевіряє дизайн без запису версії",
+      request("/validate", "POST", { definition: d }),
+    );
+    check("Приклад проходить статичну перевірку", () =>
+      assert.deepEqual(validated.issues, []),
+    );
+    const badDesign = structuredClone(d);
+    badDesign.exitNodeIds = ["isolated-room"];
+    const warning = await accepted(
+      "Недосяжний вихід повертається як зауваження",
+      request("/validate", "POST", { definition: badDesign }),
+    );
+    check("Зауваження має код і ціль", () =>
+      assert.ok(
+        warning.issues.some(
+          (i: any) =>
+            i.code === "unreachable_exit" && i.targetId === "isolated-room",
+        ),
+      ),
+    );
+    const badRef = structuredClone(d);
+    badRef.nodes[0].sceneId = "not-in-this-book";
+    await accepted(
+      "Design API відхиляє чужу/відсутню сцену",
+      request("/validate", "POST", { definition: badRef }),
+      422,
+    );
+    await accepted(
+      "Design API відхиляє підміну actor",
+      request("/validate", "POST", { definition: d, actor: "user:admin" }),
+      422,
+    );
+    const mapsAfterValidation = await request("/maps");
+    check("Валідація не створює карту", () =>
+      assert.equal(mapsAfterValidation.body.maps.length, 0),
+    );
     const v1 = await accepted(
       "Автор зберігає незмінну карту v1",
       request("/maps", "POST", { definition: d, expectedRevision: 0 }),
@@ -591,6 +634,11 @@ if (process.env.CORE_TEST_DATABASE_URL) {
         revision: 7,
       }),
     );
+    if (process.argv.includes("--browser")) {
+      const { liveLabyrinthBuilder } =
+        await import("./live-labyrinthBuilder.mts");
+      passed += await liveLabyrinthBuilder(app, origin, project, pool);
+    }
     await pool.query("DELETE FROM projects WHERE id=$1", [project]);
     const removed = await pool.query(
       "SELECT count(*)::int n FROM labyrinth_runs WHERE project_id=$1",
@@ -615,7 +663,11 @@ if (process.env.CORE_TEST_DATABASE_URL) {
     ]);
     await pool.end();
   }
-} else
+} else if (process.argv.includes("--browser"))
+  throw new Error(
+    "Browser acceptance requires an isolated CORE_TEST_DATABASE_URL.",
+  );
+else
   console.log(
     "PostgreSQL/API: не запускалися; задайте окрему CORE_TEST_DATABASE_URL.",
   );
