@@ -125,8 +125,7 @@ remote перевірити можна, запушити — ні**.
 
 ## Стан на 08.10.2026 (сесія #01, запис #401)
 
-Т5.7 В6 реалізовано: Memory/PostgreSQL 44/0, live 25/0; повторний повний npm test і фінальні lint/build — exit 0. Реалізація `c4ad332` запушена без force в origin/master (Book_Creator). Усі шість етапів реалізовано, production-приймання очікує.
-Актуальні результати: [сесія](log/sessions.md), [сценарій В6](docs/acceptance/T5.7-V6.md).
+Т5.7 В6 `c4ad332` запушено; перевірки — [сесія](log/sessions.md). Production: [приймання](docs/acceptance/T5.7-V6.md), очікує.
 Етап 9 додано після всіх етапів: [розгорнуте завдання книги-лабіринта](PLAN_LABYRINTH_BOOK.md); Т9.1–Т9.10 не почато; завдання запушено як `c87f4d5` в origin/master.
 Т5.8 реалізовано й запушено як `c4db2d0` в origin/master (Book_Creator): Memory/PostgreSQL 36/0, live 23/0; повний npm test і фінальні lint/build — exit 0. Production-приймання очікує. [План](PLAN_WORKFLOW_OBSERVABILITY.md), [приймання](docs/acceptance/T5.8.md).
 Т6.5 реалізовано й запушено як `4e54404` в origin/master (Book_Creator): live 22/0, PostgreSQL 18/0; npm test, lint/build — exit 0. [План](PLAN_CONTRIBUTIONS.md), [приймання](docs/acceptance/T6.5.md). Production-прогін очікує.
@@ -139,7 +138,7 @@ remote перевірити можна, запушити — ні**.
 Т7.6 реалізовано (#399): окремі Visual/Style grants, CAS канон/вилучення/аудит, знімки образів, immutable версії стилю й scoped context. Memory/Pg 23/0, Chromium 27/0; full npm test і фінальні lint/build — exit 0. [Приймання](docs/acceptance/T7.6.md). Наступне — Т7.7.
 Т7.7 реалізовано (#400): приватні AI Tools, scoped context, grants/ліміти/jobs/DRAFT версії; Memory/Pg 22/0, adapters 2/0, Chromium 24/0. npm test та фінальні lint/build — exit 0. [Приймання](docs/acceptance/T7.7.md). Наступне — Т8.1.
 Т8.1 реалізовано (#401): чотири Stitch 9 лендінги UA/EN, public data і статуси; npm test/types/build — exit 0, Chromium 56/0, outage 8/0, teachers 2/0. [Приймання](docs/acceptance/T8.1.md). Наступне — Т8.2.
-Т9.4 `bd5e652` запушено. #412 `c52144a` запушено: Jev для книг і практик — PLAN_JEV_AUTHOR_BOOKS.md; реалізація не почата. Статус: `git log origin/master..HEAD`. Production/Т8.2/Т4.3/Vault відкриті.
+Т9.4 `bd5e652` запушено. #412 `c52144a` запушено: Jev для книг і практик — PLAN_JEV_AUTHOR_BOOKS.md; реалізація не почата. #413 Mafia: PLAN_MAFIA_STORY_STUDIO.md, не почато. Статус: `git log origin/master..HEAD`. Production/Т8.2/Т4.3/Vault відкриті.
 
 Історичні стани #374, #377, #379 з результатами й ручними перевірками:
 [повний текст](log/deploy-notes.md).
@@ -337,7 +336,7 @@ JS-файлу напряму, як зроблено тут.
 
 ---
 
-# Покажчик записів (412 записів, #1–#412)
+# Покажчик записів (413 записів, #1–#413)
 
 > Повні тексти записів лежать у теці `log/`, розбиті на частини — журнал
 > одним файлом доріс до 840 КБ, а його читає кожна нова сесія. Цей
@@ -352,6 +351,7 @@ JS-файлу напряму, як зроблено тут.
 
 | # | Назва | Статус | Файл |
 |---:|---|---|---|
+| 413 | Mafia Story Studio — ТЗ та етап 10 | ✅ План підготовлено | [301-350.md](log/301-350.md) |
 | 412 | Jev для авторських книг — уточнення меж | ✅ План уточнено | [301-350.md](log/301-350.md) |
 | 411 | Т9.4 — Jev-директор напруги | ✅ Реалізовано | [301-350.md](log/301-350.md) |
 | 410 | Т9.3 — безпечний прогін | ✅ | [301-350.md](log/301-350.md) |
