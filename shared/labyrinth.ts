@@ -26,6 +26,7 @@ export interface LabyrinthEdge {
   costs: Record<string, number>;
   conditions: ObjectCondition[];
   overNodeIds: string[];
+  requiredItems?: string[];
 }
 export interface LabyrinthObject {
   id: string;
@@ -46,6 +47,12 @@ export interface LabyrinthObject {
     to: string;
     conditions: ObjectCondition[];
     effects: ObjectEffect[];
+    consequences?: {
+      resourceDelta: Record<string, number>;
+      inventoryAdd: string[];
+      inventoryRemove: string[];
+      knowledgeAdd: string[];
+    };
   }>;
 }
 export interface LabyrinthHero {
@@ -69,6 +76,7 @@ export interface LabyrinthEventTemplate {
   cooldown: number;
   effects: ObjectEffect[];
   avoidance: string;
+  hazard?: { resourceCosts: Record<string, number>; blocksMovement: boolean };
 }
 export interface LabyrinthDefinition {
   schemaVersion: 1;
@@ -92,6 +100,10 @@ export interface LabyrinthVersion {
   createdAt: string;
 }
 export interface LabyrinthRunState {
+  engine?: {
+    version: 1;
+    events: Array<{ eventId: string; startedAt: number }>;
+  };
   turn: number;
   storyTime: number;
   heroes: Record<
@@ -112,6 +124,7 @@ export interface LabyrinthRun {
   mapRevision: number;
   seed: string;
   difficulty: "author_preview";
+  mode?: "structural" | "runtime";
   participants: Array<{ userId: string; heroIds: string[] }>;
   revision: number;
   state: LabyrinthRunState;
@@ -121,10 +134,14 @@ export interface LabyrinthRun {
 export type StructuralAction =
   | { kind: "move"; heroId: string; edgeId: string }
   | { kind: "interact"; heroId: string; objectId: string; to: string };
+export type RuntimeAction =
+  | StructuralAction
+  | { kind: "wait"; heroId: string }
+  | { kind: "start_event"; eventId: string };
 export interface LabyrinthRunEvent {
   revision: number;
   actor: string;
-  action: StructuralAction;
+  action: RuntimeAction;
   reason: string;
   mapRevision: number;
   beforeHash: string;

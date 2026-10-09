@@ -70,6 +70,14 @@ export async function liveLabyrinthBuilder(
     await page.setViewport({ width: 1440, height: 1000 });
     await page.goto(origin + "/labyrinth-probe");
     const click = async (text: string) => {
+      await page.waitForFunction(
+        (t) =>
+          [...document.querySelectorAll("button")].some(
+            (e) => e.textContent?.trim() === t && !e.disabled,
+          ),
+        {},
+        text,
+      );
       const handle = await page.evaluateHandle(
         (t) =>
           [...document.querySelectorAll("button")].find(
@@ -407,6 +415,95 @@ export async function liveLabyrinthBuilder(
       path: "/tmp/maze-description-svg.png",
     });
     check("Хід у SVG оновив точку та словесне розгалуження разом");
+
+    await click("Безпечний прогін");
+    await page.waitForSelector("[data-runtime-controls]");
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector("[data-route-description]")
+          ?.getAttribute("data-description-node") === "svg-cell-0-0",
+    );
+    check("Безпечний прогін SVG створюється після доказу прохідності");
+    await click("Йти: Коридор 1:2");
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector("[data-route-description]")
+          ?.getAttribute("data-description-node") === "svg-cell-0-1",
+    );
+    await click("Чекати один крок");
+    await page.waitForFunction(() =>
+      document
+        .querySelector("[data-runtime-controls]")
+        ?.textContent?.includes("час 2"),
+    );
+    check("Рушій рухає героя та час, маркер і опис збігаються");
+    const restoreReply = page.waitForResponse((r) =>
+      r.url().endsWith("/restore"),
+    );
+    await click("Відновити як новий прогін");
+    const restoreResponse = await restoreReply;
+    const restoredBody = await restoreResponse.json();
+    assert.equal(restoreResponse.status(), 201, JSON.stringify(restoredBody));
+    assert.equal(restoredBody.state.heroes.ivan.nodeId, "svg-cell-0-0");
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector("[data-route-description]")
+          ?.getAttribute("data-description-node") === "svg-cell-0-0",
+    );
+    assert.equal(
+      await page.$eval('[data-maze-marker="ivan"]', (e) =>
+        e.getAttribute("data-marker-node"),
+      ),
+      "svg-cell-0-0",
+    );
+    assert.ok(
+      await page.$eval("[data-runtime-controls]", (e) =>
+        e.textContent?.includes("час 0"),
+      ),
+    );
+    assert.equal(
+      await page.$$eval("[data-route-description]", (els) => els.length),
+      1,
+    );
+    assert.deepEqual(errors, []);
+    check(
+      "Відновлення з контрольної точки повертає позицію, час і словесний опис",
+    );
+    await page.screenshot({
+      path: "/tmp/t93-runtime-browser.png",
+      fullPage: true,
+    });
+    await click("Збережені прогони");
+    await page.waitForSelector("[data-saved-runs] button");
+    const savedButton = await page.$eval("[data-saved-runs] button", (e) =>
+      e.textContent!.trim(),
+    );
+    const resumeBody = restoredBody;
+    await page.reload();
+    await click("Книга-лабіринт");
+    await page.waitForSelector("[data-labyrinth-builder]");
+    const mapSelect = await field("Збережена карта");
+    await page.select(mapSelect, resumeBody.mapId);
+    await click("Збережені прогони");
+    await click(savedButton);
+    await page.waitForSelector("[data-runtime-controls]");
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector("[data-route-description]")
+          ?.getAttribute("data-description-node") === "svg-cell-0-0",
+    );
+    assert.ok(
+      await page.$eval("[data-runtime-controls]", (e) =>
+        e.textContent?.includes("час 0"),
+      ),
+    );
+    check(
+      "Після перезавантаження збережений прогін відкривається з тим самим часом і позицією",
+    );
     user = "reader";
     await page.reload();
     await click("Книга-лабіринт");

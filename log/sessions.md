@@ -1,6 +1,6 @@
 # Журнал сесій — і єдиний дім записів #114–#118
 
-## Сесія 09.10.2026 #01 — записи #407–#409
+## Сесія 09.10.2026 #01 — записи #407–#410
 
 **Тема:** Т9.1 — приватна модель дворівневого лабіринта, версії й авторський structural preview.
 
@@ -17,6 +17,11 @@
 **Запис #409:** словесний огляд локальних маршрутів, напрямок погляду, gates/resources/bridge, pinned server node/revision, маркер графа й SVG. Наданий зразок інтерпретовано як899вузлів/62мости/958переходів; stairs припущення явне. Model/API/PG/Chromium120/0 (23 browser), narration15/0, повний npm test/types/build(/studio/) exit0. Генератор власника записано окремим Т9.11. Реалізація `f7036bd` запушена в origin/master.
 
 **Не зроблено і чому (#409):** production/Firebase — після деплою; Т9.11 пізніше, generator code/API не надано; stairs SVG звіряє автор. Огляд зараз авторський, reader/visibility/group не реалізовані. Повна safety Т9.3, Jev/видання — наступні задачі. Сценарій docs/acceptance/LABYRINTH_ROUTE_DESCRIPTION.md. Т8.2/Т4.3/Vault лишаються відкритими.
+
+
+**Запис #410:** Т9.3 — приватний safe runtime одного героя, фази небезпек/час/ресурси/предмети/знання, доказ виходу, CAS/idempotency та точний checkpoint fork; Core v36. Runtime15/0, Model/API/PG/Chromium152/0 (27 browser), Core DB157/0; повний npm test exit0. tsc/build(/studio/)/journal exit0. Narration16/0, journal76/0. Список збережених прогонів і відновлення після перезавантаження перевірено. Приймання docs/acceptance/T9.3.md. React keys при відновленні виправлено за реальним браузерним збоєм.
+
+**Не зроблено і чому (#410):** production/Firebase/restart — після деплою; група, Jev, читач і явний authored defeat — наступні розширення. Бюджет пошуку відхиляє недоведену безпеку, а не гарантує розв’язання будь-якої карти. Т9.11 generator code/API не надано. Т8.2/Т4.3/Vault відкриті; Marketplace не чіпали.
 
 ---
 

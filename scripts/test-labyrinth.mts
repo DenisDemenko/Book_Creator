@@ -197,8 +197,8 @@ if (process.env.CORE_TEST_DATABASE_URL) {
     pool,
     loadMigrations(resolveMigrationsDir()),
   );
-  check("Міграція 35 та її повтор без змін", () =>
-    assert.equal(migrated.schemaVersion, 35),
+  check("Міграція 36 та її повтор без змін", () =>
+    assert.equal(migrated.schemaVersion, 36),
   );
   const again = await runMigrations(
     pool,
@@ -212,10 +212,10 @@ if (process.env.CORE_TEST_DATABASE_URL) {
   try {
     const status = await initCore(() => {});
     check(
-      "Штатний startup ядра підключає store лише після готовності v35",
+      "Штатний startup ядра підключає store лише після готовності v36",
       () => {
         assert.equal(status.state, "ready");
-        assert.equal(status.schemaVersion, 35);
+        assert.equal(status.schemaVersion, 36);
         assert.ok(getLabyrinthStore());
       },
     );
@@ -691,9 +691,233 @@ if (process.env.CORE_TEST_DATABASE_URL) {
         revision: 7,
       }),
     );
+
+    const gasWorld = structuredClone(labyrinthDemo);
+    gasWorld.events[0].conditions = [];
+    gasWorld.events[0].hazard = {
+      resourceCosts: { health: 100 },
+      blocksMovement: false,
+    };
+    const gasMap = await accepted(
+      "Зберігається шаблон газу з наслідками",
+      request("/maps", "POST", { definition: gasWorld, expectedRevision: 0 }),
+      201,
+    );
+    const gasRun = await accepted(
+      "Створюється прогін із небезпекою",
+      request(`/maps/${gasMap.mapId}/runs`, "POST", {
+        mapRevision: 1,
+        seed: "gas",
+        mode: "runtime",
+      }),
+      201,
+    );
+    const gasWarningResponse = await accepted(
+      "Попередження газу збережене без витрати часу",
+      request(`/runs/${gasRun.id}/runtime-actions`, "POST", {
+        expectedRevision: 0,
+        key: "gas-start",
+        action: { kind: "start_event", eventId: "gas-warning" },
+      }),
+    );
+    check("Таймер попередження входить до контрольної точки", () =>
+      assert.deepEqual(gasWarningResponse.run.state.engine, {
+        version: 1,
+        events: [{ eventId: "gas-warning", startedAt: 0 }],
+      }),
+    );
+    const escaped = await accepted(
+      "Драбина дає порятунок до газу",
+      request(`/runs/${gasRun.id}/runtime-actions`, "POST", {
+        expectedRevision: 1,
+        key: "gas-up",
+        action: { kind: "move", heroId: "hero", edgeId: "up" },
+      }),
+    );
+    check("Рятувальний перехід не забирає здоров’я", () =>
+      assert.equal(escaped.run.state.heroes.hero.resources.health, 100),
+    );
+    const gasRestore = await accepted(
+      "Відновлення попередження не скидає таймер",
+      request(`/runs/${gasRun.id}/restore`, "POST", {
+        expectedRevision: 2,
+        sourceRevision: 1,
+      }),
+      201,
+    );
+    check("Усі ресурси, знання й відлік попередження відновлені без змін", () =>
+      assert.deepEqual(gasRestore.state, gasWarningResponse.run.state),
+    );
+    const safe = await accepted(
+      "Безпечний прогін створено",
+      request(`/maps/${v1.mapId}/runs`, "POST", {
+        mapRevision: 1,
+        seed: "runtime",
+        mode: "runtime",
+      }),
+      201,
+    );
+    await accepted(
+      "Структурна дія не обходить безпечний рушій",
+      request(`/runs/${safe.id}/structural-actions`, "POST", {
+        expectedRevision: 0,
+        action: { kind: "move", heroId: "hero", edgeId: "up" },
+      }),
+      409,
+    );
+    const safeBody = {
+      expectedRevision: 0,
+      key: "once",
+      action: { kind: "move", heroId: "hero", edgeId: "up" },
+    };
+    const simultaneous = await Promise.all([
+      request(`/runs/${safe.id}/runtime-actions`, "POST", safeBody),
+      request(`/runs/${safe.id}/runtime-actions`, "POST", safeBody),
+    ]);
+    check(
+      "Паралельний повтор повертає ту саму ревізію без подвійної витрати",
+      () => {
+        assert.equal(simultaneous[0].status, 200);
+        assert.equal(simultaneous[1].status, 200);
+        assert.deepEqual(simultaneous[0].body, simultaneous[1].body);
+        assert.equal(
+          simultaneous[0].body.run.state.heroes.hero.resources.energy,
+          9,
+        );
+      },
+    );
+    await accepted(
+      "Ключ повтору не приймає іншу дію",
+      request(`/runs/${safe.id}/runtime-actions`, "POST", {
+        ...safeBody,
+        action: { kind: "wait", heroId: "hero" },
+      }),
+      409,
+    );
+    await accepted(
+      "Застаріла нова дія відхиляється",
+      request(`/runs/${safe.id}/runtime-actions`, "POST", {
+        ...safeBody,
+        key: "stale",
+      }),
+      409,
+    );
+    await accepted(
+      "Читач не керує рушієм",
+      request(`/runs/${safe.id}/runtime-actions`, "POST", safeBody, "reader"),
+      403,
+    );
+    await accepted(
+      "Чужа книга не бачить прогін",
+      request(
+        `/runs/${safe.id}/runtime-actions`,
+        "POST",
+        safeBody,
+        "owner",
+        other,
+      ),
+      403,
+    );
+    const restoredSafe = await accepted(
+      "Контрольна точка відновлюється новим прогоном",
+      request(`/runs/${safe.id}/restore`, "POST", {
+        expectedRevision: 1,
+        sourceRevision: 0,
+      }),
+      201,
+    );
+    check("Ресурси, seed, час і інвентар відновлені точно", () => {
+      assert.deepEqual(restoredSafe.state, safe.state);
+      assert.equal(restoredSafe.seed, safe.seed);
+      assert.notEqual(restoredSafe.id, safe.id);
+    });
+    const oldSafe = await accepted(
+      "Попередній прогін не переписано",
+      request(`/runs/${safe.id}`),
+    );
+    check("Старий прогін зберігає свою витрату", () =>
+      assert.equal(oldSafe.state.heroes.hero.resources.energy, 9),
+    );
+    await accepted(
+      "Невідома контрольна точка відхиляється",
+      request(`/runs/${safe.id}/restore`, "POST", {
+        expectedRevision: 1,
+        sourceRevision: 99,
+      }),
+      404,
+    );
+    await accepted(
+      "Відновлення із застарілою ревізією відхиляється",
+      request(`/runs/${safe.id}/restore`, "POST", {
+        expectedRevision: 0,
+        sourceRevision: 0,
+      }),
+      409,
+    );
+    await accepted(
+      "Невідомий режим прогону відхиляється",
+      request(`/maps/${v1.mapId}/runs`, "POST", {
+        mapRevision: 1,
+        seed: "bad",
+        mode: "anything",
+      }),
+      422,
+    );
+    await pool.end();
+    pool = createCorePool(process.env.CORE_TEST_DATABASE_URL);
+    const restarted = new PgLabyrinthStore(pool);
+    store = restarted;
+    check("Перепідключення зберігає checkpoint і час", () =>
+      assert.ok(restoredSafe.id),
+    );
+    assert.deepEqual(
+      (await restarted.getRun(project, restoredSafe.id)).state,
+      safe.state,
+    );
+    assert.deepEqual(
+      await restarted.runtimeStep(
+        project,
+        safe.id,
+        0,
+        "user:owner",
+        safeBody.action,
+        "once",
+      ),
+      simultaneous[0].body,
+    );
+    passed++;
+    console.log("✓ Після перепідключення receipt не повторює дію");
+    const savedRuns = await accepted(
+      "Список збережених прогонів прив’язаний до версії карти",
+      request(`/maps/${v1.mapId}/runs?mapRevision=1`),
+    );
+    check("Список містить fork без прихованого стану", () => {
+      assert.ok(savedRuns.runs.some((r: any) => r.id === restoredSafe.id));
+      assert.ok(
+        savedRuns.runs.every(
+          (r: any) => r.mapRevision === 1 && r.state === undefined,
+        ),
+      );
+    });
+    await accepted(
+      "Читач не отримує список прогонів",
+      request(
+        `/maps/${v1.mapId}/runs?mapRevision=1`,
+        "GET",
+        undefined,
+        "reader",
+      ),
+      403,
+    );
+    await accepted(
+      "Невірний курсор версії відхиляється",
+      request(`/maps/${v1.mapId}/runs?mapRevision=bad`),
+      422,
+    );
     if (process.argv.includes("--browser")) {
-      const { liveLabyrinthBuilder } =
-        await import("./live-labyrinthBuilder.mts");
+      const { liveLabyrinthBuilder } = await import(
+        "./live-labyrinthBuilder.mts"
+      );
       passed += await liveLabyrinthBuilder(app, origin, project, pool);
     }
     await pool.query("DELETE FROM projects WHERE id=$1", [project]);

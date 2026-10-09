@@ -65,10 +65,12 @@ const list = <T>(v: unknown, max: number, fn: (v: unknown) => T): T[] => {
   return (v as unknown[]).map(fn);
 };
 const strings = (v: unknown) => list(v, 100, (x) => text(x, 500));
-const resources = (v: unknown) => {
+const resources = (v: unknown, signed = false) => {
   const r = record(v, Object.keys(v && typeof v === "object" ? v : {}));
   if (Object.keys(r).length > 30) bad("Забагато ресурсів.");
-  return Object.fromEntries(Object.entries(r).map(([k, n]) => [id(k), num(n)]));
+  return Object.fromEntries(
+    Object.entries(r).map(([k, n]) => [id(k), num(n, signed ? -1000000 : 0)]),
+  );
 };
 const conditions = (v: unknown) =>
   list(v, 50, (x) => {
@@ -147,8 +149,33 @@ export function validateDefinition(input: unknown): LabyrinthDefinition {
       states: list(o.states, 30, id),
       initialState: id(o.initialState),
       transitions: list(o.transitions, 100, (x) => {
-        const t = record(x, ["from", "to", "conditions", "effects"]);
+        const t = record(x, [
+          "from",
+          "to",
+          "conditions",
+          "effects",
+          "consequences",
+        ]);
+        const c =
+          t.consequences === undefined
+            ? undefined
+            : record(t.consequences, [
+                "resourceDelta",
+                "inventoryAdd",
+                "inventoryRemove",
+                "knowledgeAdd",
+              ]);
         return {
+          ...(c
+            ? {
+                consequences: {
+                  resourceDelta: resources(c.resourceDelta, true),
+                  inventoryAdd: strings(c.inventoryAdd),
+                  inventoryRemove: strings(c.inventoryRemove),
+                  knowledgeAdd: strings(c.knowledgeAdd),
+                },
+              }
+            : {}),
           from: id(t.from),
           to: id(t.to),
           conditions: conditions(t.conditions),
@@ -201,6 +228,7 @@ export function validateDefinition(input: unknown): LabyrinthDefinition {
       "costs",
       "conditions",
       "overNodeIds",
+      "requiredItems",
     ]);
     return {
       id: id(e.id),
@@ -217,6 +245,9 @@ export function validateDefinition(input: unknown): LabyrinthDefinition {
       duration: num(e.duration, 1, 10000),
       costs: resources(e.costs),
       conditions: conditions(e.conditions),
+      ...(e.requiredItems === undefined
+        ? {}
+        : { requiredItems: strings(e.requiredItems) }),
       overNodeIds: list(e.overNodeIds, 100, (x) => exists(id(x))),
     };
   });
@@ -279,6 +310,7 @@ export function validateDefinition(input: unknown): LabyrinthDefinition {
       "cooldown",
       "effects",
       "avoidance",
+      "hazard",
     ]);
     return {
       id: id(e.id),
@@ -290,6 +322,17 @@ export function validateDefinition(input: unknown): LabyrinthDefinition {
       cooldown: num(e.cooldown),
       effects: conditions(e.effects),
       avoidance: text(e.avoidance, 2000),
+      ...(e.hazard === undefined
+        ? {}
+        : {
+            hazard: (() => {
+              const h = record(e.hazard, ["resourceCosts", "blocksMovement"]);
+              return {
+                resourceCosts: resources(h.resourceCosts),
+                blocksMovement: bool(h.blocksMovement),
+              };
+            })(),
+          }),
     };
   });
   unique(events);

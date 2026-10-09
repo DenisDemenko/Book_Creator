@@ -134,7 +134,7 @@ export function registerLabyrinthRoutes(
   app.post(
     `${base}/maps/:mapId/runs`,
     handle(async (q, r, s, p, a) => {
-      const b = body(q, ["mapRevision", "seed"]);
+      const b = body(q, ["mapRevision", "seed", "mode"]);
       r.status(201).json(
         await s.createRun(
           p,
@@ -142,8 +142,26 @@ export function registerLabyrinthRoutes(
           revisionNumber(b.mapRevision),
           a,
           b.seed,
+          b.mode,
         ),
       );
+    }),
+  );
+  app.get(
+    `${base}/maps/:mapId/runs`,
+    handle(async (q, r, s, p) => {
+      if (
+        Object.keys(q.query).some((k) => k !== "mapRevision") ||
+        typeof q.query.mapRevision !== "string"
+      )
+        throw new LabyrinthError(422, "Вкажіть версію карти.");
+      r.json({
+        runs: await s.listRuns(
+          p,
+          String(q.params.mapId),
+          revisionNumber(Number(q.query.mapRevision)),
+        ),
+      });
     }),
   );
   app.get(
@@ -195,6 +213,37 @@ export function registerLabyrinthRoutes(
           revisionNumber(b.expectedRevision),
           a,
           b.action,
+        ),
+      );
+    }),
+  );
+  app.post(
+    `${base}/runs/:runId/runtime-actions`,
+    handle(async (q, r, s, p, a) => {
+      const b = body(q, ["expectedRevision", "action", "key"]);
+      r.json(
+        await s.runtimeStep(
+          p,
+          String(q.params.runId),
+          revisionNumber(b.expectedRevision),
+          a,
+          b.action,
+          b.key,
+        ),
+      );
+    }),
+  );
+  app.post(
+    `${base}/runs/:runId/restore`,
+    handle(async (q, r, s, p, a) => {
+      const b = body(q, ["expectedRevision", "sourceRevision"]);
+      r.status(201).json(
+        await s.restoreRun(
+          p,
+          String(q.params.runId),
+          revisionNumber(b.expectedRevision),
+          revisionNumber(b.sourceRevision),
+          a,
         ),
       );
     }),

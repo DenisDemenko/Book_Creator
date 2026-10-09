@@ -93,7 +93,9 @@ export function describeRoutes(
         ? "прохід зараз закритий"
         : exhausted
           ? "бракує ресурсів"
-          : null;
+          : e.requiredItems?.some((item) => !s.inventory.includes(item))
+            ? "потрібен предмет"
+            : null;
       const kind = {
         corridor: "коридором",
         bridge: "мостом",

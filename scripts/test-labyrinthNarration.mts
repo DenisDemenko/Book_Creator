@@ -163,4 +163,17 @@ check("Розгалуження й міст у реальному SVG описа
   assert.ok(v.description.includes("Іван"));
   assert.ok(v.visibleBridgeIds.includes(bridge.id));
 });
+check("Опис не пропонує прохід без необхідного предмета", () => {
+  const world = structuredClone(d);
+  world.edges.find((e) => e.id === "corridor")!.requiredItems = ["Ключ"];
+  const view = describeRoutes(world, s, "hero", "east");
+  assert.equal(
+    view.choices.find((c) => c.edgeId === "corridor")?.available,
+    false,
+  );
+  assert.equal(
+    view.choices.find((c) => c.edgeId === "corridor")?.reason,
+    "потрібен предмет",
+  );
+});
 console.log(`Підсумок: ${count} пройшло.`);

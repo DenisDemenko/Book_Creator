@@ -1,3 +1,4 @@
+import { RuntimeControls } from "./RuntimeControls";
 import { RouteDescription } from "./RouteDescription";
 import { ReferenceMaze, hasSvgPoint } from "./ReferenceMaze";
 import svgExample from "../../../shared/labyrinthSvgExample.json";
@@ -263,7 +264,19 @@ export function LabyrinthBuilder({
     [tab, setTab] = useState("nodes"),
     [selected, setSelected] = useState("entry"),
     [level, setLevel] = useState("both"),
-    [run, setRun] = useState<LabyrinthRun | null>(null);
+    [run, setRun] = useState<LabyrinthRun | null>(null),
+    [storedRuns, setStoredRuns] = useState<
+      Array<{
+        id: string;
+        mapId: string;
+        mapRevision: number;
+        mode: string;
+        revision: number;
+        turn: number;
+        storyTime: number;
+        createdAt: string;
+      }>
+    >([]);
   const nodeOptions: [string, string][] = d.nodes.map((n) => [
     n.id,
     `${n.title} (${n.level === "upper" ? "верх" : "низ"})`,
@@ -489,8 +502,8 @@ export function LabyrinthBuilder({
         <h2 className="text-lg font-bold">Книга-лабіринт</h2>
         <p className="text-sm text-slate-300">
           Карта й правила проходження. Текст сцен редагується у наявному
-          редакторі книги. Події поки є шаблонами; повний рушій — наступний
-          етап.
+          редакторі книги. У безпечному прогоні автор запускає події й перевіряє
+          час, ресурси та маршрут порятунку.
         </p>
         <p role="status">
           {dirty
@@ -588,6 +601,63 @@ export function LabyrinthBuilder({
           >
             Тестовий прогін
           </button>
+          <button
+            className={btn}
+            disabled={busy || dirty || !loaded}
+            onClick={() =>
+              void act(async () => {
+                setRun(
+                  await gs<LabyrinthRun>("POST", `${base}/maps/${mapId}/runs`, {
+                    mapRevision: loaded,
+                    seed: crypto.randomUUID(),
+                    mode: "runtime",
+                  }),
+                );
+              })
+            }
+          >
+            Безпечний прогін
+          </button>
+        </div>
+        <button
+          className={btn}
+          disabled={dirty || !loaded}
+          onClick={() =>
+            void act(async () => {
+              setStoredRuns(
+                (
+                  await gs<{ runs: typeof storedRuns }>(
+                    "GET",
+                    `${base}/maps/${mapId}/runs?mapRevision=${loaded}`,
+                  )
+                ).runs,
+              );
+              setNotice("Завантажено останні 20 прогонів цієї версії.");
+            })
+          }
+        >
+          Збережені прогони
+        </button>
+        <div className="flex flex-wrap gap-2" data-saved-runs>
+          {storedRuns
+            .filter((r) => r.mapId === mapId && r.mapRevision === loaded)
+            .map((r) => (
+              <button
+                className={btn}
+                key={r.id}
+                onClick={() =>
+                  void act(async () =>
+                    setRun(
+                      await gs<LabyrinthRun>("GET", `${base}/runs/${r.id}`),
+                    ),
+                  )
+                }
+              >
+                Відкрити прогін {r.id.slice(0, 8)} ·{" "}
+                {r.mode === "runtime" ? "безпечний" : "структурний"} · хід{" "}
+                {r.turn} · час {r.storyTime}
+              </button>
+            ))}
         </div>
         <div className="grid gap-3 md:grid-cols-3">
           <Pick
@@ -1001,6 +1071,18 @@ export function LabyrinthBuilder({
                   />{" "}
                   Двосторонній
                 </label>
+                <Text
+                  label="Потрібні предмети (через кому)"
+                  value={(edge.requiredItems ?? []).join(", ")}
+                  onChange={(v) =>
+                    update("edges", edge.id, {
+                      requiredItems: v
+                        .split(",")
+                        .map((x) => x.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                />
                 <Num
                   label="Тривалість переходу"
                   min={1}
@@ -1118,6 +1200,78 @@ export function LabyrinthBuilder({
                     >
                       Видалити перехід стану
                     </button>
+                    <Num
+                      label="Зміна енергії після взаємодії"
+                      min={-1000000}
+                      value={t.consequences?.resourceDelta.energy ?? 0}
+                      onChange={(energy) =>
+                        update("objects", object.id, {
+                          transitions: object.transitions.map((v, j) =>
+                            j === i
+                              ? {
+                                  ...v,
+                                  consequences: {
+                                    resourceDelta: {
+                                      ...v.consequences?.resourceDelta,
+                                      energy,
+                                    },
+                                    inventoryAdd:
+                                      v.consequences?.inventoryAdd ?? [],
+                                    inventoryRemove:
+                                      v.consequences?.inventoryRemove ?? [],
+                                    knowledgeAdd:
+                                      v.consequences?.knowledgeAdd ?? [],
+                                  },
+                                }
+                              : v,
+                          ),
+                        })
+                      }
+                    />
+                    {(
+                      [
+                        "inventoryAdd",
+                        "inventoryRemove",
+                        "knowledgeAdd",
+                      ] as const
+                    ).map((key) => (
+                      <Text
+                        key={key}
+                        label={
+                          key === "inventoryAdd"
+                            ? "Додати предмети (через кому)"
+                            : key === "inventoryRemove"
+                              ? "Витратити предмети (через кому)"
+                              : "Додати знання (через кому)"
+                        }
+                        value={(t.consequences?.[key] ?? []).join(", ")}
+                        onChange={(value) =>
+                          update("objects", object.id, {
+                            transitions: object.transitions.map((v, j) =>
+                              j === i
+                                ? {
+                                    ...v,
+                                    consequences: {
+                                      resourceDelta:
+                                        v.consequences?.resourceDelta ?? {},
+                                      inventoryAdd:
+                                        v.consequences?.inventoryAdd ?? [],
+                                      inventoryRemove:
+                                        v.consequences?.inventoryRemove ?? [],
+                                      knowledgeAdd:
+                                        v.consequences?.knowledgeAdd ?? [],
+                                      [key]: value
+                                        .split(",")
+                                        .map((x) => x.trim())
+                                        .filter(Boolean),
+                                    },
+                                  }
+                                : v,
+                            ),
+                          })
+                        }
+                      />
+                    ))}
                     <Rules
                       label="Умови активації"
                       d={d}
@@ -1174,6 +1328,37 @@ export function LabyrinthBuilder({
             )}
             {tab === "events" && event && (
               <>
+                <Num
+                  label="Шкода здоров’ю за крок небезпеки"
+                  value={event.hazard?.resourceCosts.health ?? 0}
+                  onChange={(health) =>
+                    update("events", event.id, {
+                      hazard: {
+                        resourceCosts: {
+                          ...event.hazard?.resourceCosts,
+                          health,
+                        },
+                        blocksMovement: event.hazard?.blocksMovement ?? false,
+                      },
+                    })
+                  }
+                />
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={event.hazard?.blocksMovement ?? false}
+                    onChange={(e) =>
+                      update("events", event.id, {
+                        hazard: {
+                          resourceCosts: event.hazard?.resourceCosts ?? {},
+                          blocksMovement: e.target.checked,
+                        },
+                      })
+                    }
+                  />{" "}
+                  Блокувати вхід у небезпечну зону
+                </label>
+
                 <Multi
                   label="Зона події"
                   values={event.nodeIds}
@@ -1319,95 +1504,108 @@ export function LabyrinthBuilder({
             Авторський прогін v{run.mapRevision} · хід {run.state.turn}
           </h3>
           <p className="text-xs">
-            Структурна перевірка переходів і механізмів; події автоматично не
-            запускаються.
+            {run.mode === "runtime"
+              ? "Перевірка часу, ресурсів і маршруту порятунку."
+              : "Структурна перевірка переходів і механізмів; події автоматично не запускаються."}
           </p>
           <RouteDescription
-            key={run.id}
+            key={`view:${run.id}`}
             base={base}
             run={run}
             onRunChange={setRun}
           />
-          {Object.entries(run.state.heroes).map(([heroId, h]) => (
-            <div key={heroId}>
-              <p>
-                {d.heroes.find((v) => v.id === heroId)?.name}:{" "}
-                {d.nodes.find((n) => n.id === h.nodeId)?.title} · енергія{" "}
-                {h.resources.energy ?? 0}
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {d.edges
-                  .filter(
-                    (e) =>
-                      e.from === h.nodeId ||
-                      (e.bidirectional && e.to === h.nodeId),
-                  )
-                  .map((e) => (
-                    <button
-                      disabled={busy}
-                      className={btn}
-                      key={e.id}
-                      onClick={() =>
-                        void act(async () => {
-                          const result = await gs<{ run: LabyrinthRun }>(
-                            "POST",
-                            `${base}/runs/${run.id}/structural-actions`,
-                            {
-                              expectedRevision: run.revision,
-                              action: { kind: "move", heroId, edgeId: e.id },
-                            },
-                          );
-                          setRun(result.run);
-                        })
-                      }
-                    >
-                      Йти:{" "}
-                      {
-                        d.nodes.find(
-                          (n) => n.id === (e.from === h.nodeId ? e.to : e.from),
-                        )?.title
-                      }
-                    </button>
-                  ))}
-                {d.objects
-                  .filter((o) => o.nodeId === h.nodeId)
-                  .flatMap((o) =>
-                    o.transitions
-                      .filter((t) => t.from === run.state.objects[o.id])
-                      .map((t) => (
-                        <button
-                          disabled={busy}
-                          className={btn}
-                          key={`${o.id}-${t.to}`}
-                          onClick={() =>
-                            void act(async () => {
-                              setRun(
-                                (
-                                  await gs<{ run: LabyrinthRun }>(
-                                    "POST",
-                                    `${base}/runs/${run.id}/structural-actions`,
-                                    {
-                                      expectedRevision: run.revision,
-                                      action: {
-                                        kind: "interact",
-                                        heroId,
-                                        objectId: o.id,
-                                        to: t.to,
+          {run.mode === "runtime" && (
+            <RuntimeControls
+              key={`runtime:${run.id}`}
+              base={base}
+              run={run}
+              definition={d}
+              onRunChange={setRun}
+              onBusyChange={setBusy}
+            />
+          )}
+          {run.mode !== "runtime" &&
+            Object.entries(run.state.heroes).map(([heroId, h]) => (
+              <div key={heroId}>
+                <p>
+                  {d.heroes.find((v) => v.id === heroId)?.name}:{" "}
+                  {d.nodes.find((n) => n.id === h.nodeId)?.title} · енергія{" "}
+                  {h.resources.energy ?? 0}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {d.edges
+                    .filter(
+                      (e) =>
+                        e.from === h.nodeId ||
+                        (e.bidirectional && e.to === h.nodeId),
+                    )
+                    .map((e) => (
+                      <button
+                        disabled={busy}
+                        className={btn}
+                        key={e.id}
+                        onClick={() =>
+                          void act(async () => {
+                            const result = await gs<{ run: LabyrinthRun }>(
+                              "POST",
+                              `${base}/runs/${run.id}/structural-actions`,
+                              {
+                                expectedRevision: run.revision,
+                                action: { kind: "move", heroId, edgeId: e.id },
+                              },
+                            );
+                            setRun(result.run);
+                          })
+                        }
+                      >
+                        Йти:{" "}
+                        {
+                          d.nodes.find(
+                            (n) =>
+                              n.id === (e.from === h.nodeId ? e.to : e.from),
+                          )?.title
+                        }
+                      </button>
+                    ))}
+                  {d.objects
+                    .filter((o) => o.nodeId === h.nodeId)
+                    .flatMap((o) =>
+                      o.transitions
+                        .filter((t) => t.from === run.state.objects[o.id])
+                        .map((t) => (
+                          <button
+                            disabled={busy}
+                            className={btn}
+                            key={`${o.id}-${t.to}`}
+                            onClick={() =>
+                              void act(async () => {
+                                setRun(
+                                  (
+                                    await gs<{ run: LabyrinthRun }>(
+                                      "POST",
+                                      `${base}/runs/${run.id}/structural-actions`,
+                                      {
+                                        expectedRevision: run.revision,
+                                        action: {
+                                          kind: "interact",
+                                          heroId,
+                                          objectId: o.id,
+                                          to: t.to,
+                                        },
                                       },
-                                    },
-                                  )
-                                ).run,
-                              );
-                            })
-                          }
-                        >
-                          {o.id} → {t.to}
-                        </button>
-                      )),
-                  )}
+                                    )
+                                  ).run,
+                                );
+                              })
+                            }
+                          >
+                            {o.id} → {t.to}
+                          </button>
+                        )),
+                    )}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
         </section>
       )}
     </section>

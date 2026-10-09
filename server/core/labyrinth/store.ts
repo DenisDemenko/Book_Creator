@@ -1,4 +1,9 @@
 import {
+  runtimeInitialState,
+  runtimeAction,
+  effectiveObjects,
+} from "./runtime";
+import {
   describeRoutes,
   headingFromEvents,
   type Heading,
@@ -49,6 +54,7 @@ const run = (r: any): LabyrinthRun => ({
   revision: r.revision,
   seed: r.seed,
   difficulty: r.difficulty,
+  mode: r.mode,
   participants: r.participants,
   state: r.state,
   createdBy: r.created_by,
@@ -125,7 +131,7 @@ export class PgLabyrinthStore {
     return {
       ...describeRoutes(
         v.definition,
-        r.state,
+        { ...r.state, objects: effectiveObjects(v.definition, r.state) },
         heroId,
         heading ??
           headingFromEvents(
@@ -236,7 +242,10 @@ export class PgLabyrinthStore {
     mapRevision: number,
     actor: string,
     seed: string,
+    mode: unknown = "structural",
   ) {
+    if (mode !== "structural" && mode !== "runtime")
+      throw new LabyrinthError(422, "Невідомий режим прогону.");
     uuid(mapId);
     revisionNumber(mapRevision);
     if (typeof seed !== "string" || !seed.trim() || seed.length > 128)
@@ -248,9 +257,12 @@ export class PgLabyrinthStore {
       );
       if (!rows.length)
         throw new LabyrinthError(404, "Версію карти не знайдено.");
-      const state = initialState(rows[0].definition);
+      const state =
+        mode === "runtime"
+          ? runtimeInitialState(rows[0].definition)
+          : initialState(rows[0].definition);
       const result = await c.query(
-        "INSERT INTO labyrinth_runs(project_id,map_id,map_revision,seed,state,created_by,participants) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *",
+        "INSERT INTO labyrinth_runs(project_id,map_id,map_revision,seed,state,created_by,participants,mode) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *",
         [
           projectId,
           mapId,
@@ -264,6 +276,7 @@ export class PgLabyrinthStore {
               heroIds: rows[0].definition.heroes.map((h: any) => h.id),
             },
           ]),
+          mode,
         ],
       );
       const r = run(result.rows[0]);
@@ -283,6 +296,24 @@ export class PgLabyrinthStore {
       );
       return r;
     });
+  }
+  async listRuns(projectId: string, mapId: string, mapRevision: number) {
+    uuid(mapId);
+    revisionNumber(mapRevision);
+    const { rows } = await this.pool.query(
+      "SELECT id,map_id,map_revision,mode,revision,state->>'turn' AS turn,state->>'storyTime' AS story_time,created_at FROM labyrinth_runs WHERE project_id=$1 AND map_id=$2 AND map_revision=$3 ORDER BY created_at DESC,id LIMIT 20",
+      [projectId, mapId, mapRevision],
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      mapId: r.map_id,
+      mapRevision: r.map_revision,
+      mode: r.mode,
+      revision: r.revision,
+      turn: Number(r.turn),
+      storyTime: Number(r.story_time),
+      createdAt: timestamp(r.created_at),
+    }));
   }
   async getRun(projectId: string, runId: string) {
     uuid(runId);
@@ -324,6 +355,11 @@ export class PgLabyrinthStore {
       if (!rows.length)
         throw new LabyrinthError(404, "Проходження не знайдено.");
       const r = run(rows[0]);
+      if (r.mode === "runtime")
+        throw new LabyrinthError(
+          409,
+          "Використайте захищені дії безпечного прогону.",
+        );
       if (r.revision !== expectedRevision)
         throw new LabyrinthError(
           409,
@@ -354,6 +390,134 @@ export class PgLabyrinthStore {
         [projectId, runId, event.revision, JSON.stringify(event)],
       );
       return { run: run(updated.rows[0]), event };
+    });
+  }
+  async runtimeStep(
+    projectId: string,
+    runId: string,
+    expectedRevision: number,
+    actor: string,
+    action: unknown,
+    key: unknown,
+  ) {
+    uuid(runId);
+    revisionNumber(expectedRevision);
+    if (typeof key !== "string" || !key.trim() || key.length > 128)
+      throw new LabyrinthError(422, "Потрібен ключ повтору запиту.");
+    const hash = stateHash({ expectedRevision, actor, action });
+    return this.transaction(async (c) => {
+      const { rows } = await c.query(
+        "SELECT * FROM labyrinth_runs WHERE project_id=$1 AND id=$2 FOR UPDATE",
+        [projectId, runId],
+      );
+      if (!rows.length)
+        throw new LabyrinthError(404, "Проходження не знайдено.");
+      const r = run(rows[0]);
+      const receipt = await c.query(
+        "SELECT * FROM labyrinth_action_receipts WHERE project_id=$1 AND run_id=$2 AND key=$3",
+        [projectId, runId, key],
+      );
+      if (receipt.rows.length) {
+        if (receipt.rows[0].request_hash !== hash)
+          throw new LabyrinthError(
+            409,
+            "Ключ повтору вже використано для іншої дії.",
+          );
+        return receipt.rows[0].response;
+      }
+      if (r.mode !== "runtime" || r.revision !== expectedRevision)
+        throw new LabyrinthError(409, "Оновіть ревізію безпечного прогону.");
+      const v = await c.query(
+        "SELECT definition FROM labyrinth_versions WHERE project_id=$1 AND map_id=$2 AND revision=$3",
+        [projectId, r.mapId, r.mapRevision],
+      );
+      const next = runtimeAction(v.rows[0].definition, r.state, action);
+      const event = {
+        revision: r.revision + 1,
+        actor,
+        action: next.action,
+        reason: "Доведений маршрут порятунку",
+        mapRevision: r.mapRevision,
+        beforeHash: stateHash(r.state),
+        afterHash: stateHash(next.state),
+        state: next.state,
+        proof: next.proof,
+        createdAt: new Date().toISOString(),
+      };
+      const updated = await c.query(
+        "UPDATE labyrinth_runs SET revision=$3,state=$4 WHERE project_id=$1 AND id=$2 RETURNING *",
+        [projectId, runId, event.revision, JSON.stringify(next.state)],
+      );
+      await c.query(
+        "INSERT INTO labyrinth_run_events(project_id,run_id,revision,event) VALUES($1,$2,$3,$4)",
+        [projectId, runId, event.revision, JSON.stringify(event)],
+      );
+      const response = { run: run(updated.rows[0]), event };
+      await c.query(
+        "INSERT INTO labyrinth_action_receipts(project_id,run_id,key,request_hash,response) VALUES($1,$2,$3,$4,$5)",
+        [projectId, runId, key, hash, JSON.stringify(response)],
+      );
+      return response;
+    });
+  }
+  async restoreRun(
+    projectId: string,
+    runId: string,
+    expectedRevision: number,
+    sourceRevision: number,
+    actor: string,
+  ) {
+    uuid(runId);
+    revisionNumber(expectedRevision);
+    revisionNumber(sourceRevision);
+    return this.transaction(async (c) => {
+      const { rows } = await c.query(
+        "SELECT * FROM labyrinth_runs WHERE project_id=$1 AND id=$2 FOR UPDATE",
+        [projectId, runId],
+      );
+      if (!rows.length)
+        throw new LabyrinthError(404, "Проходження не знайдено.");
+      const r = run(rows[0]);
+      if (r.revision !== expectedRevision)
+        throw new LabyrinthError(409, "Проходження вже змінено.");
+      const checkpoint = await c.query(
+        "SELECT event FROM labyrinth_run_events WHERE project_id=$1 AND run_id=$2 AND revision=$3",
+        [projectId, runId, sourceRevision],
+      );
+      if (!checkpoint.rows.length)
+        throw new LabyrinthError(404, "Контрольну точку не знайдено.");
+      const state = checkpoint.rows[0].event.state;
+      const fork = await c.query(
+        "INSERT INTO labyrinth_runs(project_id,map_id,map_revision,seed,state,created_by,participants,mode) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *",
+        [
+          projectId,
+          r.mapId,
+          r.mapRevision,
+          r.seed,
+          JSON.stringify(state),
+          actor,
+          JSON.stringify(r.participants),
+          r.mode,
+        ],
+      );
+      const result = run(fork.rows[0]);
+      await c.query(
+        "INSERT INTO labyrinth_run_events(project_id,run_id,revision,event) VALUES($1,$2,0,$3)",
+        [
+          projectId,
+          result.id,
+          JSON.stringify({
+            kind: "restored",
+            actor,
+            sourceRunId: runId,
+            sourceRevision,
+            mapRevision: r.mapRevision,
+            state,
+            afterHash: stateHash(state),
+          }),
+        ],
+      );
+      return result;
     });
   }
 }
