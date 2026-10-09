@@ -1,3 +1,4 @@
+import { headings, type Heading } from "../../../shared/labyrinthNarration";
 import { analyzeLabyrinth } from "../../../shared/labyrinthDesign";
 import type { Express, Request, Response } from "express";
 import type { RealtimeAccessDeps } from "../../realtimeAuth";
@@ -149,6 +150,26 @@ export function registerLabyrinthRoutes(
     `${base}/runs/:runId`,
     handle(async (q, r, s, p) => {
       r.json(await s.getRun(p, String(q.params.runId)));
+    }),
+  );
+  app.get(
+    `${base}/runs/:runId/view`,
+    handle(async (q, r, s, p) => {
+      if (
+        Object.keys(q.query).some((k) => !["heroId", "heading"].includes(k)) ||
+        typeof q.query.heroId !== "string" ||
+        (q.query.heading !== undefined &&
+          !headings.includes(q.query.heading as Heading))
+      )
+        throw new LabyrinthError(422, "Виберіть героя й напрямок погляду.");
+      r.json(
+        await s.routeView(
+          p,
+          String(q.params.runId),
+          q.query.heroId,
+          q.query.heading as Heading | undefined,
+        ),
+      );
     }),
   );
   app.get(

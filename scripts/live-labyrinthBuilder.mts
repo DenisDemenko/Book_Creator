@@ -22,6 +22,11 @@ export async function liveLabyrinthBuilder(
     format: "esm",
     outdir: "/tmp/labyrinth-probe",
   });
+  app.get("/labyrinth/maze-reference.svg", async (_q, r) =>
+    r
+      .type("svg")
+      .send(await fs.readFile("public/labyrinth/maze-reference.svg", "utf8")),
+  );
   app.get("/labyrinth-probe.js", (_q, r) =>
     r
       .type("js")
@@ -240,12 +245,35 @@ export async function liveLabyrinthBuilder(
     await page.screenshot({ path: "/tmp/t92-desktop.png", fullPage: true });
     await click("Тестовий прогін");
     await page.waitForSelector("[data-labyrinth-run]");
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector("[data-route-description]")
+          ?.getAttribute("data-description-node") === "entry",
+    );
+    assert.ok(await page.$('.react-flow__node[aria-label*="Герой"]'));
+    check("Поточна позиція героя позначена на графі та в описі");
     await click("Йти: Верхній лівий");
     await waitText("хід 1");
     await click("Йти: Верхній правий");
     await waitText("хід 2");
     await click("Йти: Нижній вихід");
     await waitText("хід 3");
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector("[data-route-description]")
+          ?.getAttribute("data-description-revision") === "3",
+    );
+    const descriptionNode = await page.$eval("[data-route-description]", (e) =>
+      e.getAttribute("data-description-node"),
+    );
+    assert.ok(
+      await page.$(
+        `.react-flow__node[data-id="${descriptionNode}"][aria-label*="Герой"]`,
+      ),
+    );
+    check("Після ходу опис і маркер показують одну позицію/ревізію");
     check("Автор пройшов сходи → міст → драбину через справжній API");
     await click("Сцени");
     await click("Вхід");
@@ -334,6 +362,51 @@ export async function liveLabyrinthBuilder(
     );
     assert.deepEqual(errors, []);
     check("Немає помилок виконання React");
+    await click("Приклад із вашого SVG");
+    await click("Зберегти версію");
+    await waitText("Збережено v1");
+    await click("Тестовий прогін");
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector("[data-route-description]")
+          ?.getAttribute("data-description-node") === "svg-cell-0-0",
+    );
+    assert.equal(
+      await page.$eval('[data-maze-marker="ivan"]', (e) =>
+        e.getAttribute("data-marker-node"),
+      ),
+      "svg-cell-0-0",
+    );
+    check("Наданий SVG відображає початкове місце Івана");
+    await click("Йти: Коридор 1:2");
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector("[data-route-description]")
+          ?.getAttribute("data-description-node") === "svg-cell-0-1",
+    );
+    assert.equal(
+      await page.$eval('[data-maze-marker="ivan"]', (e) =>
+        e.getAttribute("data-marker-node"),
+      ),
+      "svg-cell-0-1",
+    );
+    assert.equal(
+      await page.$eval('[data-maze-marker="ivan"] circle', (e) =>
+        e.getAttribute("cy"),
+      ),
+      "60",
+    );
+    assert.ok(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+      ),
+    );
+    await (await page.$("figure"))!.screenshot({
+      path: "/tmp/maze-description-svg.png",
+    });
+    check("Хід у SVG оновив точку та словесне розгалуження разом");
     user = "reader";
     await page.reload();
     await click("Книга-лабіринт");

@@ -235,7 +235,7 @@ if (process.env.CORE_TEST_DATABASE_URL) {
     [project, "owner", "Канон оригіналу", other, "other", "Інша книга"],
   );
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: "40mb" }));
   app.use((req, _res, next) => {
     const who = String(req.headers["x-test-user"] ?? "guest");
     req.principal = {
@@ -366,6 +366,47 @@ if (process.env.CORE_TEST_DATABASE_URL) {
       }),
       201,
     );
+    const viewStart = await accepted(
+      "Словесний огляд прив’язаний до поточного run",
+      request(`/runs/${r1.id}/view?heroId=hero&heading=east`),
+    );
+    check("Огляд і позиція мають одну ревізію", () => {
+      assert.equal(viewStart.runRevision, 0);
+      assert.equal(viewStart.nodeId, "lower-entry");
+      assert.ok(viewStart.description.includes("міст"));
+    });
+    for (const who of ["guest", "reader", "editor", "stranger"])
+      await accepted(
+        `${who}: приватний огляд закрито`,
+        request(`/runs/${r1.id}/view?heroId=hero`, "GET", undefined, who),
+        who === "guest" ? 401 : 403,
+      );
+    await accepted(
+      "Чужий run не розкриває словесний огляд",
+      request(
+        `/runs/${r1.id}/view?heroId=hero`,
+        "GET",
+        undefined,
+        "other",
+        other,
+      ),
+      404,
+    );
+    await accepted(
+      "Невідомий герой огляду відхилений",
+      request(`/runs/${r1.id}/view?heroId=constructor`),
+      404,
+    );
+    await accepted(
+      "Невідомий напрямок огляду відхилений",
+      request(`/runs/${r1.id}/view?heroId=hero&heading=foo`),
+      422,
+    );
+    await accepted(
+      "Огляд не приймає підміну вузла",
+      request(`/runs/${r1.id}/view?heroId=hero&nodeId=lower-exit`),
+      422,
+    );
     check("Авторський preview має явного учасника, героїв і режим", () => {
       assert.equal(r1.difficulty, "author_preview");
       assert.deepEqual(r1.participants, [
@@ -466,6 +507,15 @@ if (process.env.CORE_TEST_DATABASE_URL) {
       "Журнал містить initial checkpoint і кожну успішну дію",
       request(`/runs/${r1.id}/events`),
     );
+    const movedView = await accepted(
+      "Огляд після ходів читає серверний checkpoint",
+      request(`/runs/${r1.id}/view?heroId=hero`),
+    );
+    check("Напрямок після мосту й вертикального спуску збережено", () => {
+      assert.equal(movedView.heading, "east");
+      assert.equal(movedView.nodeId, "lower-exit");
+      assert.equal(movedView.runRevision, 3);
+    });
     check("Невдала дія не створила дубля", () =>
       assert.deepEqual(
         events.events.map((e: any) => e.revision),
@@ -598,6 +648,13 @@ if (process.env.CORE_TEST_DATABASE_URL) {
       "Чужий персонаж не потрапляє в карту",
       request("/maps", "POST", { definition: linked, expectedRevision: 0 }),
       422,
+    );
+    const pinnedView = await accepted(
+      "Словесний огляд використовує незмінну v1 після v2",
+      request(`/runs/${r1.id}/view?heroId=hero`),
+    );
+    check("Огляд v1 містить старий міст, відсутній у v2", () =>
+      assert.ok(pinnedView.visibleBridgeIds.includes("bridge")),
     );
     const r3 = await accepted(
       "Новий прогін використовує v2",

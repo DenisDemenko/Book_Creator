@@ -1,3 +1,8 @@
+import {
+  describeRoutes,
+  headingFromEvents,
+  type Heading,
+} from "../../../shared/labyrinthNarration";
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import type {
@@ -102,6 +107,37 @@ export class PgLabyrinthStore {
       this.verifyReferences(c, projectId, definition),
     );
     return definition;
+  }
+  async routeView(
+    projectId: string,
+    runId: string,
+    heroId: string,
+    heading?: Heading,
+  ) {
+    const r = await this.getRun(projectId, runId);
+    if (!Object.hasOwn(r.state.heroes, heroId))
+      throw new LabyrinthError(404, "Героя немає в цьому проходженні.");
+    const v = await this.getVersion(projectId, r.mapId, r.mapRevision);
+    const { rows } = await this.pool.query(
+      "SELECT event FROM labyrinth_run_events WHERE project_id=$1 AND run_id=$2 AND revision<=$3 AND event->'action'->>'kind'='move' AND event->'action'->>'heroId'=$4 ORDER BY revision DESC LIMIT 100",
+      [projectId, runId, r.revision, heroId],
+    );
+    return {
+      ...describeRoutes(
+        v.definition,
+        r.state,
+        heroId,
+        heading ??
+          headingFromEvents(
+            v.definition,
+            rows.map((row) => row.event),
+            heroId,
+          ),
+      ),
+      runId: r.id,
+      runRevision: r.revision,
+      mapRevision: r.mapRevision,
+    };
   }
   async listMaps(projectId: string) {
     const { rows } = await this.pool.query(

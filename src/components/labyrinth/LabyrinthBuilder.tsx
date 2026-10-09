@@ -1,3 +1,6 @@
+import { RouteDescription } from "./RouteDescription";
+import { ReferenceMaze, hasSvgPoint } from "./ReferenceMaze";
+import svgExample from "../../../shared/labyrinthSvgExample.json";
 import React, { useEffect, useState } from "react";
 import {
   Background,
@@ -253,6 +256,8 @@ export function LabyrinthBuilder({
     [mapId, setMapId] = useState(""),
     [head, setHead] = useState(0),
     [loaded, setLoaded] = useState(0);
+  const [mapView, setMapView] = useState("graph");
+  const svgMap = d.nodes.some((n) => n.id.startsWith("svg-cell-"));
   const [notice, setNotice] = useState(""),
     [issues, setIssues] = useState<DesignIssue[] | null>(null),
     [tab, setTab] = useState("nodes"),
@@ -508,6 +513,24 @@ export function LabyrinthBuilder({
           <button className={btn} onClick={() => reset(true)}>
             Дворівневий приклад
           </button>
+          <button
+            className={btn}
+            onClick={() => {
+              if (!replace()) return;
+              setD(structuredClone(svgExample) as LabyrinthDefinition);
+              setMapId("");
+              setHead(0);
+              setLoaded(0);
+              setVersions([]);
+              setRun(null);
+              setDirty(true);
+              setIssues(null);
+              setSelected("svg-cell-0-0");
+              setMapView("svg");
+            }}
+          >
+            Приклад із вашого SVG
+          </button>
           <button className={btn} onClick={() => void save()}>
             Зберегти версію
           </button>
@@ -632,70 +655,117 @@ export function LabyrinthBuilder({
           ]}
           onChange={setLevel}
         />
-        <div
-          className="h-[420px] rounded-lg border border-slate-600"
-          data-labyrinth-canvas
-        >
-          <ReactFlow
-            key={`${mapId}-${loaded}-${level}-${d.nodes.length}`}
-            nodes={visible.map((n) => ({
-              id: n.id,
-              width: 180,
-              height: 64,
-              measured: { width: 180, height: 64 },
-              position: {
-                x: n.x * 160,
-                y: n.y * 160 + (n.level === "upper" ? -350 : 0),
-              },
-              data: {
-                label: `${n.level === "upper" ? "↑" : "↓"} ${n.title}${d.exitNodeIds.includes(n.id) ? " · Вихід" : ""}`,
-              },
-              style: {
+        {svgMap && (
+          <div className="flex gap-2">
+            <button
+              className={btn}
+              aria-pressed={mapView === "svg"}
+              onClick={() => setMapView("svg")}
+            >
+              Зразок SVG
+            </button>
+            <button
+              className={btn}
+              aria-pressed={mapView === "graph"}
+              onClick={() => setMapView("graph")}
+            >
+              Граф карти
+            </button>
+          </div>
+        )}
+        {svgMap &&
+        mapView === "svg" &&
+        (!run ||
+          Object.values(run.state.heroes).every((h) =>
+            hasSvgPoint(h.nodeId),
+          )) ? (
+          <ReferenceMaze heroes={run?.state.heroes ?? {}} />
+        ) : (
+          <div
+            className="h-[420px] rounded-lg border border-slate-600"
+            data-labyrinth-canvas
+          >
+            <ReactFlow
+              key={`${mapId}-${loaded}-${level}-${d.nodes.length}`}
+              nodes={visible.map((n) => ({
+                id: n.id,
                 width: 180,
                 height: 64,
-                color: "#0f172a",
-                background: n.level === "upper" ? "#dbeafe" : "#dcfce7",
-                border:
-                  selected === n.id ? "3px solid #d97706" : "1px solid #475569",
-              },
-            }))}
-            edges={d.edges
-              .filter((e) => shown.has(e.from) && shown.has(e.to))
-              .map((e) => ({
-                id: e.id,
-                source: e.from,
-                target: e.to,
-                label: edgeNames.find((k) => k[0] === e.kind)?.[1],
-                style: { stroke: e.kind === "bridge" ? "#38bdf8" : "#a3e635" },
+                measured: { width: 180, height: 64 },
+                position: {
+                  x: n.x * 160,
+                  y: n.y * 160 + (n.level === "upper" ? -350 : 0),
+                },
+                ariaLabel: `${n.title}${
+                  run
+                    ? Object.entries(run.state.heroes)
+                        .filter(([, h]) => h.nodeId === n.id)
+                        .map(
+                          ([id]) =>
+                            ` · Герой ${d.heroes.find((h) => h.id === id)?.name ?? id} тут`,
+                        )
+                        .join("")
+                    : ""
+                }`,
+                data: {
+                  label: `${n.level === "upper" ? "↑" : "↓"} ${n.title}${d.exitNodeIds.includes(n.id) ? " · Вихід" : ""}${run && Object.values(run.state.heroes).some((h) => h.nodeId === n.id) ? " · 📍 Герой тут" : ""}`,
+                },
+                style: {
+                  width: 180,
+                  height: 64,
+                  color: "#0f172a",
+                  background: n.level === "upper" ? "#dbeafe" : "#dcfce7",
+                  border:
+                    run &&
+                    Object.values(run.state.heroes).some(
+                      (h) => h.nodeId === n.id,
+                    )
+                      ? "4px solid #facc15"
+                      : selected === n.id
+                        ? "3px solid #d97706"
+                        : "1px solid #475569",
+                },
               }))}
-            onNodeClick={(_, n) => {
-              setSelected(n.id);
-              setTab("nodes");
-            }}
-            onEdgeClick={(_, e) => {
-              setSelected(e.id);
-              setTab("edges");
-            }}
-            onNodeDragStop={(_, n) => {
-              const original = d.nodes.find((v) => v.id === n.id)!;
-              update("nodes", n.id, {
-                x: Math.round(n.position.x / 160),
-                y: Math.round(
-                  (n.position.y - (original.level === "upper" ? -350 : 0)) /
-                    160,
-                ),
-              });
-            }}
-            nodesDraggable={!busy}
-            nodesConnectable={!busy}
-            onConnect={connect}
-            fitView
-            minZoom={0.1}
-          >
-            <Background />
-            <Controls style={{ color: "#0f172a" }} />
-          </ReactFlow>
-        </div>
+              edges={d.edges
+                .filter((e) => shown.has(e.from) && shown.has(e.to))
+                .map((e) => ({
+                  id: e.id,
+                  source: e.from,
+                  target: e.to,
+                  label: edgeNames.find((k) => k[0] === e.kind)?.[1],
+                  style: {
+                    stroke: e.kind === "bridge" ? "#38bdf8" : "#a3e635",
+                  },
+                }))}
+              onNodeClick={(_, n) => {
+                setSelected(n.id);
+                setTab("nodes");
+              }}
+              onEdgeClick={(_, e) => {
+                setSelected(e.id);
+                setTab("edges");
+              }}
+              onNodeDragStop={(_, n) => {
+                const original = d.nodes.find((v) => v.id === n.id)!;
+                update("nodes", n.id, {
+                  x: Math.round(n.position.x / 160),
+                  y: Math.round(
+                    (n.position.y - (original.level === "upper" ? -350 : 0)) /
+                      160,
+                  ),
+                });
+              }}
+              nodesDraggable={!busy}
+              nodesConnectable={!busy}
+              onConnect={connect}
+              fitView
+              minZoom={0.1}
+            >
+              <Background />
+              <Controls style={{ color: "#0f172a" }} />
+            </ReactFlow>
+          </div>
+        )}
         <p className="text-xs text-slate-300">
           ↑ верхній, ↓ нижній рівень. Перетягування змінює координати; переходи
           можна створити з’єднанням вузлів або формою нижче.
@@ -722,7 +792,7 @@ export function LabyrinthBuilder({
           ))}
         </nav>
         <div className="grid gap-4 lg:grid-cols-[240px_1fr]">
-          <aside className="space-y-2">
+          <aside className="max-h-[480px] overflow-y-auto space-y-2">
             {tab !== "heroes" && (
               <button
                 className={btn}
@@ -1252,6 +1322,12 @@ export function LabyrinthBuilder({
             Структурна перевірка переходів і механізмів; події автоматично не
             запускаються.
           </p>
+          <RouteDescription
+            key={run.id}
+            base={base}
+            run={run}
+            onRunChange={setRun}
+          />
           {Object.entries(run.state.heroes).map(([heroId, h]) => (
             <div key={heroId}>
               <p>
