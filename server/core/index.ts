@@ -15,6 +15,7 @@
  */
 
 import pg from 'pg';
+import { PgLabyrinthStore } from './labyrinth/store';
 import {
   CORE_SCHEMA,
   describePgError,
@@ -44,6 +45,8 @@ let status: CoreStatusInfo = {
   message: 'Ядро не запускалось',
 };
 let repository: CoreRepository | null = null;
+let labyrinthStore: PgLabyrinthStore | null = null;
+export const getLabyrinthStore = () => status.state === 'ready' ? labyrinthStore : null;
 let jobQueue: JobQueue | null = null;
 let stopWorker: (() => void) | null = null;
 /** Види задач, зареєстровані до старту ядра, — застосовуються, щойно черга з'явиться. */
@@ -104,6 +107,7 @@ export function initCore(log: (msg: string) => void = (m) => console.log(m)): Pr
       const migrations = loadMigrations(resolveMigrationsDir());
       const res = await runMigrations(pool, migrations, log);
       repository = new PgCoreRepository(pool, true);
+      labyrinthStore = new PgLabyrinthStore(pool);
       // Реєстр схем (Т5.1): на першому старті — імпорт чинного реєстру як
       // онтології 1.0; далі активна версія стає реєстром процесу. Збій тут
       // ядра не валить — лишається вбудований реєстр (документ власника).
@@ -174,6 +178,7 @@ export async function shutdownCore(): Promise<void> {
   jobQueue = null;
   const r = repository;
   repository = null;
+  labyrinthStore = null;
   startPromise = null;
   if (r) await r.close();
 }

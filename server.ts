@@ -218,6 +218,8 @@ import { CORE_VISION_MODULES } from './server/coreAiRegistry';
 import { normalizePromptEntities, buildCoachEntityInstruction, normalizeEntityFeedback, buildExerciseEntityInstruction, normalizeGeneratedEntities } from './server/masteryEntityPrompt';
 import { formatManuscriptWithClaude, anthropicConfig, ClaudeManuscriptError, MAX_MANUSCRIPT_CHARS } from './server/claudeManuscript';
 import { initCore, getCoreStatus, shutdownCore, registerCoreJobKind, getCoreRepository, getCoreJobQueue } from './server/core';
+import { registerLabyrinthRoutes } from './server/core/labyrinth/routes';
+import { getLabyrinthStore } from './server/core/index';
 import { registerProjectRoutes, resolveProjectAccess, bookMediaOwners } from './server/core/projectRoutes';
 import { registerWorkflowRoutes } from './server/core/workflows/routes';
 import { registerStoryCoreRoutes } from './server/core/storyCore/routes';
@@ -1045,6 +1047,7 @@ registerGitCommandRoutes(app);
         }, generate: aiRoleGenerateViaCore, resolveModel: (module) => resolveModuleModelId(module), loadTemplate: loadCoreAiRoleTemplate, jev: typesafeJev }, bindings: workflowBindings }
       : null;
   };
+  registerLabyrinthRoutes(app, { access: realtimeAccessDeps, store: getLabyrinthStore });
   registerProjectRoutes(app, {
     access: realtimeAccessDeps,
     repo: getCoreRepository,
