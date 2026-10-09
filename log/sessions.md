@@ -23,7 +23,7 @@
 
 **Не зроблено і чому (#410):** production/Firebase/restart — після деплою; група, Jev, читач і явний authored defeat — наступні розширення. Бюджет пошуку відхиляє недоведену безпеку, а не гарантує розв’язання будь-якої карти. Т9.11 generator code/API не надано. Т8.2/Т4.3/Vault відкриті; Marketplace не чіпали.
 
-**Запис #411:** Т9.4 — адаптивний Jev-директор одного героя, typed Score/Noul/Choice, безпечні шаблони, локальний fallback, авторські пороги/cooldown/timeout і durable budget Core v37. Director20/0, PG/API/Chromium176/0 (31 browser), CoreDB157/0; повний npm test, типи й build /studio/ — exit0. Приймання docs/acceptance/T9.4.md. Готується до коміту й пуша.
+**Запис #411:** Т9.4 — адаптивний Jev-директор одного героя, typed Score/Noul/Choice, безпечні шаблони, локальний fallback, авторські пороги/cooldown/timeout і durable budget Core v37. Director20/0, PG/API/Chromium176/0 (31 browser), CoreDB157/0; повний npm test, типи й build /studio/ — exit0. Приймання docs/acceptance/T9.4.md. Реалізація `bd5e652` запушена в origin/master; Денис Деменко <tropazemli@gmail.com>.
 
 **Не зроблено і чому (#411):** реальний Jev/DeepSeek та production/Firebase — приймання після деплою; локальні моделі контрольовані. Механіки/читач/група Т9.5–Т9.7 не почато, генератор Т9.11 пізніше; Т8.2/Т4.3/Vault відкриті. Бюджет спроб не є фінансовим обліком. Marketplace не змінено.
 
