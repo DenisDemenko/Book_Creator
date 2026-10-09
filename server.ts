@@ -1,3 +1,6 @@
+import { jevCostUsd as kittenJevCost } from "./server/ai/adapters/jev";
+import { registerMazeKittenRoutes, KITTEN_USAGE_CONTEXT } from "./server/mazeKitten";
+import { listUsageSince, recordUsage as recordKittenUsage } from "./server/store";
 import { creativeAiModels, generateCreativeMedia } from './server/core/creative/aiProvider';
 import { canReadBibleAsset } from './server/core/creative/bible';
 import { registerCreativeWorkspaceRoutes } from './server/core/creative/workspace';
@@ -949,6 +952,69 @@ registerGitCommandRoutes(app);
     const key = (await platformKeyFor('typesafe').catch(() => undefined)) || jevKeyFromEnv();
     return key ? new HttpJevAdapter(key, { model: jevModelFromEnv() }) : null;
   };
+  registerMazeKittenRoutes(app, {
+    guard: requirePermission("canUseAi"),
+    adapter: typesafeJev,
+    recheck: async (id) => {
+      const u = await findUserForAccess(id);
+      return !!u && !u.disabled && (await canRole(u.role, "canUseAi"));
+    },
+    reserve: async (id, requestId, hash) => {
+      const u = await findUserForAccess(id);
+      if (!u || u.disabled) return "budget";
+      const rows = (
+        await listUsageSince(new Date(Date.now() - 3600000).toISOString())
+      ).filter(
+        (r) => r.userId === id && r.context === KITTEN_USAGE_CONTEXT + ":attempt",
+      );
+      if (
+        rows.some(
+          (r) =>
+            r.id ===
+            `kitten:${id}:${requestId}:${Math.floor(Date.now() / 3600000)}`,
+        )
+      )
+        return "duplicate";
+      if (
+        rows.length >= 12 ||
+        rows.some((r) => Date.now() - Date.parse(r.timestamp) < 5000)
+      )
+        return "budget";
+      await recordKittenUsage({
+        id: `kitten:${id}:${requestId}:${Math.floor(Date.now() / 3600000)}`,
+        timestamp: new Date().toISOString(),
+        userId: id,
+        userEmail: u.email,
+        role: u.role,
+        kind: "text",
+        engineId: "typesafe",
+        modelId: "request-" + hash,
+        costUsd: 0,
+        context: KITTEN_USAGE_CONTEXT + ":attempt",
+        success: false,
+      });
+      return "ok";
+    },
+    record: async (id, requestId, raw) => {
+      const u = await findUserForAccess(id);
+      if (!u) return;
+      const tokens = Number(raw.usage?.input_tokens);
+      if (!Number.isFinite(tokens) || tokens < 0) return;
+      await recordKittenUsage({
+        id: `kitten-result:${id}:${requestId}:${Math.floor(Date.now() / 3600000)}`,
+        timestamp: new Date().toISOString(),
+        userId: id,
+        userEmail: u.email,
+        role: u.role,
+        kind: "text",
+        engineId: "typesafe",
+        modelId: String(raw.model ?? "jev").slice(0, 80),
+        costUsd: kittenJevCost(tokens),
+        context: KITTEN_USAGE_CONTEXT,
+        success: true,
+      });
+    },
+  });
   const privateVaultModel=async(req:any,projectId:string,system:string,context:Record<string,unknown>)=>{const out=await aiRoleGenerateViaCore({module:'coreCharacterVoice',modelId:await resolveModuleModelId('coreCharacterVoice'),system,user:JSON.stringify(context),projectId,actor:`user:${req.principal.id}`,privateContent:true,signal:req.simulationSignal,generation:{maxTokens:1800,timeoutMs:30000}});await req.simulationRecordUsage?.({tokens:out.inputTokens+out.outputTokens,requests:1});try{return JSON.parse(out.text.replace(/^```(?:json)?\s*|\s*```$/g,''));}catch{throw new Error('Приватна відповідь не відповідає JSON.');}};
   registerSecretVaultRoutes(app,{repo:getCoreRepository,access:realtimeAccessDeps,aiGuard:requirePermission('canUseAi'),generate:(req,p,ctx)=>privateVaultModel(req,p,'Ти одноразовий Secret Curator. Межі автора обов’язкові. Для false_belief створюй хибне переконання, для world_secret факт невідомий героям. JSON {"text":"секрет до 2000 символів"}. Без тегів і запису канону.',ctx),direct:(req,p,ctx)=>evaluatePrivateMystery(ctx,{jev:typesafeJev,fallback:context=>privateVaultModel(req,p,MYSTERY_FALLBACK_SYSTEM,context)})});
   let magicSimulationEngines: Parameters<typeof registerMagicSceneRoutes>[1]["engines"];

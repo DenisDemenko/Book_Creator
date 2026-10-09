@@ -1,6 +1,6 @@
 # Журнал сесій — і єдиний дім записів #114–#118
 
-## Сесія 09.10.2026 #01 — записи #407–#414
+## Сесія 09.10.2026 #01 — записи #407–#415
 
 **Тема:** Т9.1 — приватна модель дворівневого лабіринта, версії й авторський structural preview.
 
@@ -3155,3 +3155,7 @@ Marketplace Т8.2 ff6808f запушено в origin/master; SHA звірено.
 **Запис #406:** Т8.3 каталог Stitch9, приватні заявки та 6-кроковий Studio бриф; API14/14, browser25/0+31/0, повні npm test/types/build/ESLint exit0. **Не зроблено і чому:** production Firebase/bridge/платний AI потребують приймання T8.3; Т8.2 role bridge, Т4.3/Vault та етап9 відкриті.
 
 Т8.3 Marketplace 72acb12 і Studio 051bad3 запушені в master; remote SHA звірено. Продакшн-приймання ще відкрите.
+
+**Запис #415:** особисте портфоліо Дениса, повна MazeFinal у Marketplace, JSON→нова карта Studio, opt-in Jev для локального кошеняти. Імпорт/API14/0, PG/API/Chromium177/0 та реальний export177/0, портфоліо6/0, Marketplace web test/typecheck/lint/build exit0, Book tsc/build exit0. Повний npm test exit0.
+
+**Не зроблено і чому (#415):** production/Firebase/реальний Jev/сенсори після деплою; TypeSafe-ключ для перевірки відсутній. Т9.11 seed/replay/API залишились, Т9.5–Т9.10/JEV-BOOKS-1/Mafia/Lila не виконувались. Див. docs/acceptance/MAZE_FINAL_PORTFOLIO.md.

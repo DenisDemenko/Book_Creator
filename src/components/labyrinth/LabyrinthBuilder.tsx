@@ -1,3 +1,4 @@
+import { importMazeFinal } from "../../../shared/mazeFinalImport";
 import { DIRECTOR_DEFAULTS } from "../../../shared/labyrinthDirector";
 import { RuntimeControls } from "./RuntimeControls";
 import { RouteDescription } from "./RouteDescription";
@@ -481,6 +482,28 @@ export function LabyrinthBuilder({
     edit({ ...d, [key]: d[key].filter((v) => v.id !== id) });
     setSelected("");
   };
+  const importMaze = async (raw: unknown) => {
+    if (busy) return;
+    await act(async () => {
+      const candidate = importMazeFinal(raw);
+      await gs("POST", `${base}/validate`, { definition: candidate });
+      if (!replace()) return;
+      setD(candidate);
+      setMapId("");
+      setHead(0);
+      setLoaded(0);
+      setVersions([]);
+      setRun(null);
+      setDirty(true);
+      setIssues(null);
+      setSelected(candidate.startNodeId);
+      setMapView("graph");
+      sessionStorage.removeItem("fusion-lab.maze-final.import");
+      setNotice(
+        "MazeFinal імпортовано як нову чернетку. Перегляньте карту й збережіть версію; рукопис і старі прогони не змінено.",
+      );
+    });
+  };
   const visible = d.nodes.filter((n) => level === "both" || n.level === level);
   const shown = new Set(visible.map((n) => n.id));
   const staticIssues = issues ?? analyzeLabyrinth(d);
@@ -601,6 +624,52 @@ export function LabyrinthBuilder({
       </fieldset>
       <fieldset disabled={busy} className="space-y-4">
         <div className="flex flex-wrap gap-2">
+          <label className={btn}>
+            Імпортувати MazeFinal (.json)
+            <input
+              type="file"
+              accept=".json,application/json"
+              className="block text-xs"
+              data-maze-final-import
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (!file) return;
+                if (file.size > 2 * 1024 * 1024) {
+                  setNotice("Файл завеликий: максимум 2 МБ.");
+                  return;
+                }
+                try {
+                  await importMaze(JSON.parse(await file.text()));
+                } catch {
+                  setNotice("Файл не є коректним JSON MazeFinal.");
+                }
+              }}
+            />
+          </label>
+          <button
+            className={btn}
+            onClick={async () => {
+              const pending = sessionStorage.getItem(
+                "fusion-lab.maze-final.import",
+              );
+              if (!pending) {
+                setNotice(
+                  "У Marketplace на сторінці Дениса Деменка експортуйте карту й натисніть «Перенести в Studio», або імпортуйте JSON-файл.",
+                );
+                return;
+              }
+              try {
+                await importMaze(JSON.parse(pending));
+              } catch {
+                setNotice(
+                  "Переданий лабіринт пошкоджено. Скористайтеся JSON-файлом.",
+                );
+              }
+            }}
+          >
+            Забрати лабіринт із Marketplace
+          </button>
           <button className={btn} onClick={() => reset()}>
             Нова карта
           </button>

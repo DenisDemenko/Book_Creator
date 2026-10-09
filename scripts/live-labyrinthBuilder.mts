@@ -351,6 +351,8 @@ export async function liveLabyrinthBuilder(
     await page.$eval('.react-flow__node[data-id="entry"]', (e) =>
       e.scrollIntoView({ block: "center" }),
     );
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+
     const beforeDrag = await page.$eval(
       '.react-flow__node[data-id="entry"]',
       (e) => e.getBoundingClientRect().toJSON(),
@@ -566,6 +568,23 @@ export async function liveLabyrinthBuilder(
     check(
       "Після перезавантаження збережений прогін відкривається з тим самим часом і позицією",
     );
+    // The Marketplace transfer is explicit and creates a new draft, never mutates a saved map.
+    const { mazeFinalFixture } = await import("./mazeFinalFixture.mts");
+    const transfer = process.env.MAZE_GAME_EXPORT
+      ? JSON.parse(await fs.readFile(process.env.MAZE_GAME_EXPORT, "utf8"))
+      : {format:"fusion-lab.maze-final",version:1,maze:mazeFinalFixture()};
+    await page.evaluate((payload) => sessionStorage.setItem("fusion-lab.maze-final.import", JSON.stringify(payload)), transfer);
+    await click("Забрати лабіринт із Marketplace");
+    await waitText("MazeFinal імпортовано як нову чернетку");
+    assert.equal(await page.$eval(await field('Назва карти'), e => (e as HTMLInputElement).value), `MazeFinal · ${transfer.maze.width}×${transfer.maze.height}`);
+    assert.equal(await page.evaluate(() => sessionStorage.getItem("fusion-lab.maze-final.import")), null);
+    const mapsBefore = await pool.query("SELECT count(*)::int n FROM labyrinth_maps WHERE project_id=$1", [project]);
+    await click("Зберегти версію");
+    await waitText("Збережено v1");
+    const mapsAfter = await pool.query("SELECT count(*)::int n FROM labyrinth_maps WHERE project_id=$1", [project]);
+    assert.equal(mapsAfter.rows[0].n, mapsBefore.rows[0].n + 1);
+    assert.equal(await page.evaluate(() => (window as any).canonWrites ?? 0), 0);
+    check("MazeFinal із Marketplace зберігається як окрема карта PostgreSQL без запису рукопису");
     user = "reader";
     await page.reload();
     await click("Книга-лабіринт");
