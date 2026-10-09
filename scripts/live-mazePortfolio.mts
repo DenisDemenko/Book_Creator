@@ -7,7 +7,7 @@ const origin = process.env.MAZE_PORTFOLIO_ORIGIN || "http://127.0.0.1:3110";
 const browser = await launch({
   executablePath: "/usr/bin/chromium",
   headless: true,
-  args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  args: ["--no-sandbox", "--disable-dev-shm-usage", ...(origin.startsWith("https:") && process.env.HTTPS_PROXY ? ["--proxy-server=" + process.env.HTTPS_PROXY] : [])],
 });
 try {
   const page = await browser.newPage(),

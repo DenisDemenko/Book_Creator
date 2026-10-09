@@ -3159,3 +3159,7 @@ Marketplace Т8.2 ff6808f запушено в origin/master; SHA звірено.
 **Запис #415:** особисте портфоліо Дениса, повна MazeFinal у Marketplace, JSON→нова карта Studio, opt-in Jev для локального кошеняти. Імпорт/API14/0, PG/API/Chromium177/0 та реальний export177/0, портфоліо6/0, Marketplace web test/typecheck/lint/build exit0, Book tsc/build exit0. Повний npm test exit0.
 
 **Не зроблено і чому (#415):** production/Firebase/реальний Jev/сенсори після деплою; TypeSafe-ключ для перевірки відсутній. Т9.11 seed/replay/API залишились, Т9.5–Т9.10/JEV-BOOKS-1/Mafia/Lila не виконувались. Див. docs/acceptance/MAZE_FINAL_PORTFOLIO.md.
+
+**Публікація #415:** MazeFinal main `2b06699`, Book_Creator master `4687a60`, Marketplace master `d5718e4` запушено та звірено з віддаленими гілками; автор Денис Деменко <tropazemli@gmail.com>. Production-приймання не підміняється пушем.
+
+**Production #415:** Vercel/Railway success, сторінка/гра200, HTTPS Chromium6/0 та гостьовий Jev403. Авторизовані Firebase/Jev/сенсори залишились відкритими; production-збереження книги не виконували. Cloud install/start draft збережено, публікація середовища й fresh-task restore не перевірені.
