@@ -2944,3 +2944,7 @@ test-publish` або власна «Опублікувати у вітрину»
 - `src/utils/bookText.ts` — `appendTextToChapterEnd`.
 - `src/context/WriterBookContext.tsx` — `bookExcerpts` (уривки для запитань ШІ).
 - `server.ts:3757` — `/api/ai/evaluate-trainer` (критерії character/dialogue).
+
+## Уточнення Jev для всіх авторських книг — 09.10.2026
+
+Jev — спільний директор розвитку подій і напруги авторських книг. Т9.4 реалізує лише його лабіринтний режим. ⬜ **JEV-BOOKS-1:** перевірити наявні модулі та доповнити звичайні й інтерактивні книги зі збереженням авторського підтвердження, канону, доступу й бюджету. Повне завдання та живі сценарії: [PLAN_JEV_AUTHOR_BOOKS.md](PLAN_JEV_AUTHOR_BOOKS.md).
