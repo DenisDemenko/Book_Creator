@@ -27,6 +27,11 @@ await test('Відсутня мова/недоступне відео/немає
  await assert.rejects(loadYoutube(url,'xx',mock));
  for(const p of [{playabilityStatus:{status:'LOGIN_REQUIRED'}},{playabilityStatus:{status:'OK'}}])await assert.rejects(loadYoutube(url,undefined,async()=>new Response(`ytInitialPlayerResponse = ${JSON.stringify(p)};`)));
 });
+await test('Блокування сервера/вхід/віковий контроль не названі недоступністю відео',async()=>{
+ for(const [status,reason,kind] of [['LOGIN_REQUIRED',"Sign in to confirm you're not a bot",'youtube_server_blocked'],['LOGIN_REQUIRED','Please sign in','youtube_login_required'],['AGE_CHECK_REQUIRED','Age check','youtube_access_check'],['ERROR','Video unavailable','youtube_playability_unavailable']]) {
+   await assert.rejects(loadYoutube(url,undefined,async()=>new Response(`ytInitialPlayerResponse = ${JSON.stringify({playabilityStatus:{status,reason}})};`)),(e:any)=>e.kind===kind && !e.message.startsWith('Відео недоступне.'));
+ }
+});
 await test('SSRF caption URL і великі/помилкові відповіді закриті',async()=>{
  await assert.rejects(boundedYoutubeText('https://evil/api/timedtext',mock));
  await assert.rejects(boundedYoutubeText(url,async()=>new Response('x'.repeat(8*1024*1024+1))));

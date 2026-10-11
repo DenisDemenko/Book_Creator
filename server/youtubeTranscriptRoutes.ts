@@ -36,7 +36,7 @@ export function registerYoutubeTranscriptRoutes(app: Express, deps: RealtimeAcce
       } else result=await loadYoutube(b.url,b.language,fetcher);
       if(!await allowed(req)) return res.status(403).json({error:'Доступ відкликано.'});
       res.json({...result,text:transcriptText(result.source.segments)});
-    }catch(e){res.status(e instanceof TranscriptError?e.status:422).json({error:e instanceof TranscriptError?e.message:(e instanceof SyntaxError?'Некоректні субтитри YouTube.':(e as Error).message || 'Некоректний імпорт.')});}
+    }catch(e){res.status(e instanceof TranscriptError?e.status:422).json({kind:e instanceof TranscriptError?e.kind:'invalid_transcript',error:e instanceof TranscriptError?e.message:(e instanceof SyntaxError?'Некоректні субтитри YouTube.':(e as Error).message || 'Некоректний імпорт.')});}
     finally{if(locked) active.delete(key);}
   });
 }

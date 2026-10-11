@@ -1,5 +1,5 @@
 import { normalizeSegments, youtubeVideoId, type TranscriptSource } from '../shared/youtubeTranscript';
-export class TranscriptError extends Error { constructor(public status: number, message: string) { super(message); } }
+export class TranscriptError extends Error { constructor(public status: number, message: string, public kind = 'transcript_unavailable') { super(message); } }
 export async function boundedYoutubeText(url: string, fetcher: typeof fetch = fetch): Promise<string> {
   const u = new URL(url);
   if (u.protocol !== 'https:' || u.hostname !== 'www.youtube.com' || u.port || u.username || u.password || !['/watch','/api/timedtext'].includes(u.pathname)) throw new TranscriptError(422, 'Недозволена адреса субтитрів.');
@@ -23,7 +23,17 @@ export function playerResponse(html: string): any {
 export async function loadYoutube(raw: unknown, language?: unknown, fetcher: typeof fetch = fetch) {
   const id = youtubeVideoId(raw), url=`https://www.youtube.com/watch?v=${id}`;
   const p=playerResponse(await boundedYoutubeText(url,fetcher));
-  if(p.playabilityStatus?.status !== 'OK') throw new TranscriptError(422,'Відео недоступне. Імпорт не обходить обмеження YouTube.');
+  const playability = p.playabilityStatus;
+  if (playability?.status !== 'OK') {
+    const reason = typeof playability?.reason === 'string' ? playability.reason : '';
+    if (/bot|automated|unusual traffic|robot/i.test(reason))
+      throw new TranscriptError(503, 'YouTube блокує автоматичний запит із сервера. Це не означає, що відео недоступне для перегляду. Відкрийте розшифровку на YouTube та вставте текст у ручному імпорті.', 'youtube_server_blocked');
+    if (playability?.status === 'LOGIN_REQUIRED')
+      throw new TranscriptError(422, 'YouTube вимагає авторизації для доступу до цього відео із сервера. Ваш вхід у Studio не є входом у YouTube. Скористайтеся дозволеною розшифровкою через ручний імпорт.', 'youtube_login_required');
+    if (playability?.status === 'AGE_CHECK_REQUIRED' || playability?.status === 'CONTENT_CHECK_REQUIRED')
+      throw new TranscriptError(422, 'YouTube вимагає підтвердження віку або доступу. Автоматичний імпорт не обходить ці обмеження; доступний ручний імпорт дозволеного тексту.', 'youtube_access_check');
+    throw new TranscriptError(422, 'YouTube не дозволив серверу отримати дані цього відео. Відкрийте відео на YouTube, щоб перевірити доступність; за наявності розшифровки вставте її текст вручну.', 'youtube_playability_unavailable');
+  }
   const tracks = p.captions?.playerCaptionsTracklistRenderer?.captionTracks;
   if(!Array.isArray(tracks) || !tracks.length) throw new TranscriptError(422,'Субтитрів немає. Завантажте SRT/VTT або вставте текст.');
   const languages = tracks.map((t:any)=>({id:String(t.vssId),language:String(t.languageCode),name:String(t.name?.simpleText || t.languageCode),origin:t.kind==='asr'?'automatic':'author'}));
