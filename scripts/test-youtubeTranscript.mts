@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import express from 'express';
 import { parseSubtitles, normalizeSegments, youtubeVideoId, MAX_TRANSCRIPT_BYTES } from '../shared/youtubeTranscript';
-import { loadYoutube, boundedYoutubeText, playerResponse } from '../server/youtubeTranscript';
+import { loadYoutube, boundedYoutubeText, playerResponse, parseYoutubeCaptions } from '../server/youtubeTranscript';
 import { registerYoutubeTranscriptRoutes } from '../server/youtubeTranscriptRoutes';
 let count=0;const test=async(name:string,fn:()=>unknown)=>{await fn();count++;console.log('✓ '+name);};
 const url='https://www.youtube.com/watch?v=abcdefghijk';
@@ -36,6 +36,18 @@ await test('SSRF caption URL і великі/помилкові відповід
  await assert.rejects(boundedYoutubeText('https://evil/api/timedtext',mock));
  await assert.rejects(boundedYoutubeText(url,async()=>new Response('x'.repeat(8*1024*1024+1))));
  await assert.rejects(boundedYoutubeText(url,async()=>new Response('',{status:403})));
+});
+await test('Legacy XML: Unicode/entities/секундні таймкоди',()=>assert.deepEqual(parseYoutubeCaptions('<?xml version="1.0"?><transcript><text start="1.25" dur="2.5">Привіт &amp; світ</text></transcript>'),[{start:1.25,duration:2.5,text:'Привіт & світ'}]));
+await test('srv3 XML: послідовні inline сегменти і мілісекунди',()=>assert.deepEqual(parseYoutubeCaptions('<timedtext><body><p t="1000" d="2000"><s>Привіт </s><s>світе</s></p></body></timedtext>'),[{start:1,duration:2,text:'Привіт світе'}]));
+await test('WEBVTT response: supported without JSON.parse',()=>assert.equal(parseYoutubeCaptions('WEBVTT\n\n00:01.000 --> 00:02.000\nПривіт')[0].text,'Привіт'));
+await test('Empty/HTML/malformed JSON/DTD мають окрему контрольовану помилку',()=>{
+ for(const raw of ['', '<html>Sign in</html>', '{bad', '<!DOCTYPE transcript [<!ENTITY x SYSTEM "file:///etc/passwd">]><transcript/>','{"error":{}}'])assert.throws(()=>parseYoutubeCaptions(raw),(e:any)=>typeof e.kind==='string' && e.status===502);
+});
+await test('Порожній JSON3 → один повтор оригінального public track → XML',async()=>{
+ let attempts=0;const r=await loadYoutube(url,undefined,async(input)=>{const u=new URL(String(input));if(u.pathname==='/watch')return new Response(`ytInitialPlayerResponse = ${JSON.stringify(player)};`);attempts++;return new Response(u.searchParams.get('fmt')==='json3'?'':'<transcript><text start="1" dur="2">Привіт</text></transcript>');});assert.equal(attempts,2);assert.equal(r.source.segments[0].text,'Привіт');
+});
+await test('Два порожні caption responses не створюють текст і не зациклюються',async()=>{
+ let attempts=0;await assert.rejects(loadYoutube(url,undefined,async(input)=>{if(new URL(String(input)).pathname==='/watch')return new Response(`ytInitialPlayerResponse = ${JSON.stringify(player)};`);attempts++;return new Response('');}),(e:any)=>e.kind==='youtube_empty_captions');assert.equal(attempts,2);
 });
 const deps:any={getBookOwnerId:async()=> 'owner',getCollabOwnerId:async()=>undefined,listAcceptedInvites:async()=>revoked?[]:[{acceptedUserId:'editor',role:'literary_editor'},{acceptedUserId:'reader',role:'beta_reader'}]};
 const app=express();app.use(express.json({limit:'3mb'}));app.use((q,_r,n)=>{const id=q.headers['x-user'] as string;if(id)(q as any).principal={id,role:'writer',isGuest:false,disabled:id==='disabled'};n();});registerYoutubeTranscriptRoutes(app,deps,mock);

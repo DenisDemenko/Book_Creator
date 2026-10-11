@@ -10,7 +10,7 @@
 
 ## Виконані локальні перевірки
 
-- 13/0 parser/API: SRT/VTT, Unicode, таймкоди, дублі перекриттів, реальні повтори, розмір, SSRF, авторські/автоматичні tracks, відсутні captions/мова, guest/reader/stranger/disabled, редактор/власник, відкликання під час запиту.
+- 20/0 parser/API (оновлення #420): JSON3/XML legacy/srv3/VTT, порожні відповіді та один fallback, SRT/VTT, Unicode, таймкоди, дублі перекриттів, реальні повтори, розмір, SSRF, авторські/автоматичні tracks, відсутні captions/мова, guest/reader/stranger/disabled, редактор/власник, відкликання під час запиту.
 - Chromium компонентний прогін з контрольованим API 5/0: preview, consent, cancel, confirmed save, відсутність JS помилок. Це не production або платний AI-прогін.
 - Повний `npm test`, типізація та production build успішні (exit0).
 - Прямий YouTube-запит у хмарі заблоковано мережевим проксі: CONNECT 403. Реальне отримання субтитрів не підтверджено.
