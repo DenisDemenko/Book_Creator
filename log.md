@@ -121,7 +121,7 @@ remote перевірити можна, запушити — ні**.
 
 > Стан комітів/пуша; див. AGENTS.md.
 
-YouTube #420: formats/fallback20/0, готується дозволений пуш. [приймання](docs/acceptance/YOUTUBE_TRANSCRIPT.md) відкрите.
+YouTube #420: `1a13ff6` запушено; реальна розшифровка не підтверджена. [приймання](docs/acceptance/YOUTUBE_TRANSCRIPT.md) відкрите.
 
 ## Стан на 08.10.2026 (сесія #01, запис #401)
 

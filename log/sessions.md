@@ -3181,3 +3181,5 @@ Marketplace Т8.2 ff6808f запушено в origin/master; SHA звірено.
 **Пуш #419:** `5e24d26` у origin/master перевірено. Змінена діагностика; реальний subtitle fetch для відео не підтверджено.
 
 **Запис #420:** captions JSON3/XML/VTT та bounded fallback, API20/0. **Не зроблено і чому:** точна production-відповідь/успішна розшифровка цього відео не підтверджені.
+
+**Пуш #420:** `1a13ff6` у origin/master перевірено; API20/0, tsc/build exit0. Реальні captions/production-приймання не підтверджені.
