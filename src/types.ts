@@ -890,6 +890,9 @@ export interface Book {
  * тарифної квоти (server/mediaStorage.ts, той самий облік, що й Медіатека).
  */
 export interface KnowledgeFile {
+  transcriptSource?: import("../shared/youtubeTranscript").TranscriptSource;
+  /** User reviewed/edited text may differ from the original timed cues. */
+  transcriptEdited?: boolean;
   id: string;
   fileName: string;
   fileType: 'txt' | 'md' | 'docx' | 'image';

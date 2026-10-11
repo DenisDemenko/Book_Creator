@@ -1,3 +1,4 @@
+import { registerYoutubeTranscriptRoutes } from './server/youtubeTranscriptRoutes';
 import { jevCostUsd as kittenJevCost } from "./server/ai/adapters/jev";
 import { registerMazeKittenRoutes, KITTEN_USAGE_CONTEXT } from "./server/mazeKitten";
 import { listUsageSince, recordUsage as recordKittenUsage } from "./server/store";
@@ -574,6 +575,7 @@ async function startServer() {
       checkAndRecordStorageUpload(userId, email, role, bytes, bookId, filename),
   });
   registerKnowledgeRoutes(app);
+  registerYoutubeTranscriptRoutes(app, realtimeAccessDeps);
   registerCollaborationRoutes(app);
 registerCourseRoutes(app, {
   // Т6.3: співавтори курсу — за наданим доступом ядра.

@@ -1,3 +1,4 @@
+import { YoutubeTranscriptImport } from './YoutubeTranscriptImport';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Library,
@@ -77,7 +78,8 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
   activeSectionId,
   onSendToChat,
 }) => {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
+  const [youtubeOpen, setYoutubeOpen] = useState(false);
   const files = book.knowledgeFiles || [];
   const fileInputRef = useRef<HTMLInputElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
@@ -326,7 +328,16 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
     setSaveModalOpen(true);
   };
 
-  const confirmSaveToBook = () => {
+  const confirmSaveToBook = async () => {
+    if (selectedFile?.transcriptSource) {
+      try {
+        const response = await fetch(`/api/knowledge/books/${encodeURIComponent(book.id)}/youtube/confirm`, {
+          method: 'POST', credentials: 'same-origin', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({...selectedFile.transcriptSource, text: saveText, confirmed: true}),
+        });
+        if (!response.ok) throw new Error((await response.json()).error);
+      } catch (error) { setUploadError((error as Error).message); return; }
+    }
     const text = saveText.trim();
     if (!text) return;
     if (saveMode === 'tag') {
@@ -355,7 +366,7 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
       onUpdateBook(
         { ...book, chapters: updatedChapters },
         'Текст із Бази знань вставлено в тег',
-        `Тег «${tag.name}» → «${selectedFile?.fileName || ''}»`
+        `Тег «${tag.name}» → «${selectedFile?.fileName || ''}» ${selectedFile?.transcriptSource?.url || ''}`
       );
     } else {
       const chapter = book.chapters.find((c) => c.id === saveChapterId) || book.chapters[0];
@@ -380,7 +391,7 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
       onUpdateBook(
         { ...book, chapters: updatedChapters },
         'Текст із Бази знань збережено в кінець глави',
-        `Глава «${chapter.title}» → «${selectedFile?.fileName || ''}»`
+        `Глава «${chapter.title}» → «${selectedFile?.fileName || ''}» ${selectedFile?.transcriptSource?.url || ''}`
       );
     }
     setSaveModalOpen(false);
@@ -424,6 +435,7 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
               </div>
             </div>
           )}
+          <button className="px-3 py-2 rounded-xl bg-slate-800 text-xs" disabled={!isRegistered} onClick={() => setYoutubeOpen(true)}>YouTube · {lang === 'en' ? 'Transcript' : 'Розшифровка'}</button>
           <input ref={fileInputRef} type="file" accept=".txt,.md,.docx,image/*,.png,.jpg,.jpeg,.bmp,.webp,.gif,.tif,.tiff,.pbm,.pgm,.ppm" onChange={handleUpload} className="hidden" />
           <button
             onClick={() => fileInputRef.current?.click()}
@@ -436,6 +448,11 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
         </div>
       </div>
 
+      {youtubeOpen && <YoutubeTranscriptImport book={book} onClose={() => setYoutubeOpen(false)} onImport={file => {
+        onUpdateBook({ ...book, knowledgeFiles: [...files, file] }, 'Імпорт розшифровки YouTube', file.transcriptSource?.url);
+        setSelectedFileId(file.id);
+      }} />}
+      {selectedFile?.transcriptSource && <div className="text-xs text-slate-400"><a href={selectedFile.transcriptSource.url} target="_blank" rel="noopener noreferrer">YouTube: {selectedFile.transcriptSource.title}</a> · {selectedFile.transcriptSource.language} · {selectedFile.transcriptSource.origin} · {selectedFile.transcriptSource.importedAt}{selectedFile.transcriptEdited ? ' · edited' : ''}</div>}
       {uploadError && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
