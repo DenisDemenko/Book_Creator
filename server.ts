@@ -33,7 +33,8 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { issueRealtimeTicket, resolveRealtimeAccess, ticketFromUrl, verifyRealtimeTicket, isValidBookId, participantAccess, type RealtimeAccess, type RealtimeAccessDeps } from './server/realtimeAuth';
 import { describeAccess, makeEffectiveResolver, visibleCharacterRefs, levelRank as levelRankOf } from './server/core/collaboration/access';
 import { mergeRestrictedUpdate, restrictBook, canEditSection, shapeRoomEvent, type RoomView } from './server/core/collaboration/accessView';
-import { getBook as getStoredBookForRealtime } from './server/bookStore';
+import { getBook as getStoredBookForRealtime, saveBook as saveStoryBook } from './server/bookStore';
+import { STORY_SYSTEM } from './server/core/labyrinth/story';
 import { getBookOwner as getCollabOwnerForRealtime, listCollabInvitesForBook as listInvitesForRealtime, findUserById as findUserForAccess } from './server/store';
 import {
   ensureGeneratedDir,
@@ -1126,6 +1127,19 @@ registerGitCommandRoutes(app);
       : null;
   };
   registerLabyrinthRoutes(app, {
+    storyBooks: { read: getStoredBookForRealtime,
+      write: (book, ownerId, recheck) => saveStoryBook({book,ownerId,beforeWrite:recheck,mergeKey:'labyrinth-story:'+String((book.labyrinthStory as any)?.draftId)}),
+      created: (book, userId) => scheduleCoreSync({repo:getCoreRepository(),queue:getCoreJobQueue()},book,'user:'+userId).then(()=>{}),
+    },
+    generateStory: async (req,input,_signal) => {
+      const modelId=await resolveModuleModelId('coreAi2Analysis');
+      const engine=await resolveCoachEngine(req.principal?.id as string,modelId);
+      const result=await generateAiText({engine:engine.engine,modelId:engine.resolvedModelId,apiKeyOverride:engine.userKey,req,
+        json:true,privateContent:true,label:'Лабіринт: літературна редакція',bookId:String(req.params.projectId),
+        systemInstruction:STORY_SYSTEM,prompt:input,generation:{maxTokens:12000,temperature:0.3,timeoutMs:55000}});
+      return {text:result.text,modelId:engine.resolvedModelId,inputTokens:result.inputTokens,outputTokens:result.outputTokens,
+        costUsd:priceForTextEngine(engine.engine,result.inputTokens,result.outputTokens,engine.resolvedModelId)};
+    },
     groupPrincipal: async userId => {const u=await findUserForAccess(userId);return u&&!u.disabled?{id:u.id,role:u.role,isGuest:false,name:u.name}:null;},
     groupUserIds: async projectId => (await getCoreRepository()?.listParticipants(projectId) ?? []).filter(p=>p.status==='active').map(p=>p.userId),
     access: realtimeAccessDeps, store: getLabyrinthStore, aiGuard: requirePermission('canUseAi'),

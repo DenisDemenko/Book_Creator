@@ -1,4 +1,5 @@
 import { GroupSetup } from "./GroupSetup";
+import { StoryAssembly } from "./StoryAssembly";
 import React, { useEffect, useRef, useState } from "react";
 import type { LabyrinthHero, LabyrinthDefinition } from "../../../shared/labyrinth";
 import type { ReaderPublication as Publication } from "../../../shared/labyrinthReader";
@@ -63,5 +64,6 @@ export function ReaderPublication({ base, mapId, mapRevision, heroes, definition
     </div>
     {notice && <p role="status">{notice}</p>}
     {definition && publication?.active && publication.mapRevision===mapRevision && <GroupSetup base={base} mapId={mapId} definition={definition} publication={publication} disabled={dirty||busy||authorBusy}/>}
+    <StoryAssembly base={base} mapId={mapId} disabled={dirty||busy||authorBusy}/>
   </section>;
 }

@@ -1,4 +1,5 @@
 import { registerLabyrinthGroupRoutes, type GroupRouteDeps } from "./groupRoutes";
+import { registerLabyrinthStoryRoutes, type StoryRouteDeps } from "./storyRoutes";
 import { registerLabyrinthReaderRoutes } from "./readerRoutes";
 import { compileMechanic } from "./mechanics";
 import type { DirectorServices } from "./director";
@@ -35,10 +36,13 @@ export function registerLabyrinthRoutes(
     refreshPrincipal?: (req: Request) => Promise<void>;
     groupPrincipal?: GroupRouteDeps["groupPrincipal"];
     groupUserIds?: GroupRouteDeps["groupUserIds"];
+    generateStory?: StoryRouteDeps["generateStory"];
+    storyBooks?: StoryRouteDeps["storyBooks"];
   },
 ) {
   registerLabyrinthReaderRoutes(app, d);
   registerLabyrinthGroupRoutes(app, d);
+  registerLabyrinthStoryRoutes(app, d);
   const base = "/api/core/projects/:projectId/labyrinth";
   const handle =
     (

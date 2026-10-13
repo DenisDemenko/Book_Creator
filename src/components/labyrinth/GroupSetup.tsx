@@ -89,6 +89,6 @@ export function GroupSetup({base,mapId,definition,publication,disabled}:{base:st
       <button className={button} disabled={busy} data-group-author-journal={g.id} onClick={()=>void gs<{contributions:typeof journal}>("GET",base+"/groups/"+g.id+"/contributions").then(v=>setJournal(v.contributions)).catch(e=>setNotice(e.message))}>Переглянути погоджені внески</button>
     </div>)}
     <section data-group-author-contributions>{journal.map(c=><p key={c.id}>{c.alias}: {c.text} · джерело r{c.sourceRevision}{c.aiAssisted?" · ШІ":""}</p>)}</section>
-    <p>Літературна збірка завершеного проходження — наступний етап Т9.8. Остаточне співавторство погоджується окремо. Чати до журналу внесків не копіюються.</p>
+    <p>Завершену групу можна зібрати в нову чернетку книги нижче. Остаточне співавторство погоджується окремо. Чати до журналу внесків не копіюються.</p>
   </section>;
 }

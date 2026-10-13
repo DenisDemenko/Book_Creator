@@ -196,6 +196,8 @@ export async function saveBook(params: {
   now?: () => Date;
   /** Server-generated key: accepted branch fragment is written at most once. */
   mergeKey?: string;
+  /** Server-only permission recheck inside the serialized write queue (T9.8). */
+  beforeWrite?: () => Promise<void>;
   /** Synchronous server-only audit; SQLite commit is atomic with the book. */
   onSqlCommit?: (stored: StoredBook) => void;
 }): Promise<StoredBook> {
@@ -212,6 +214,7 @@ async function saveBookSerial(params: {
   expectedRevision?: number;
   now?: () => Date;
   mergeKey?: string;
+  beforeWrite?: () => Promise<void>;
   /** Synchronous server-only audit; SQLite commit is atomic with the book. */
   onSqlCommit?: (stored: StoredBook) => void;
 }): Promise<StoredBook> {
@@ -225,6 +228,7 @@ async function saveBookSerial(params: {
   const at = (params.now?.() ?? new Date()).toISOString();
 
   const existing = await getBook(id);
+  await params.beforeWrite?.();
   if (existing && params.mergeKey && await hasBookMergeReceipt(id, params.mergeKey)) return existing;
   if (existing) {
     if (params.expectedRevision === undefined) {

@@ -17,7 +17,7 @@ if (!["127.0.0.1","localhost"].includes(parsed.hostname) || !parsed.pathname.end
   throw new Error("Reader test refuses a non-local or non-_t96 database.");
 let pool = createCorePool(url), store: PgLabyrinthStore | null = new PgLabyrinthStore(pool);
 const migrations = await runMigrations(pool, loadMigrations(resolveMigrationsDir()));
-assert.equal(migrations.schemaVersion, 39);
+assert.equal(migrations.schemaVersion, 40);
 const p = "t96-" + Date.now(), foreign = p + "-foreign";
 await pool.query("INSERT INTO projects(id,owner_id,title,revision) VALUES($1,'owner','Канон',7),($2,'other-owner','Чуже',1)", [p,foreign]);
 const revoked = new Set<string>(), disabled = new Set(["disabled"]);

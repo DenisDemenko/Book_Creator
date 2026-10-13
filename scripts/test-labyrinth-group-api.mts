@@ -20,7 +20,7 @@ if(!url)throw new Error("Use a disposable local CORE_TEST_DATABASE_URL ending in
 const parsed=new URL(url);
 if(!["127.0.0.1","localhost"].includes(parsed.hostname)||!parsed.pathname.endsWith("_t97"))throw new Error("Group tests refuse non-local/non-_t97 databases.");
 let pool=createCorePool(url),store=new PgLabyrinthStore(pool);
-assert.equal((await runMigrations(pool,loadMigrations(resolveMigrationsDir()))).schemaVersion,39);
+assert.equal((await runMigrations(pool,loadMigrations(resolveMigrationsDir()))).schemaVersion,40);
 const project="t97-"+Date.now(),foreign=project+"-foreign";
 await pool.query("INSERT INTO projects(id,owner_id,title,revision) VALUES($1,'owner','Канон',7),($2,'foreign-owner','Чуже',1)",[project,foreign]);
 const revoked=new Set<string>(),disabled=new Set(["disabled"]);
