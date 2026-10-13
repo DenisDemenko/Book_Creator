@@ -39,6 +39,12 @@ ENV VITE_FIREBASE_API_KEY=$VITE_FIREBASE_API_KEY \
     VITE_NOVA_WS_URL=$VITE_NOVA_WS_URL
 
 RUN npm run build
+# One-shot Gate B verifier. It is dormant unless Railway pre-deploy explicitly
+# runs it; bundling keeps the production image self-contained without copying
+# the TypeScript source tree.
+RUN npx esbuild scripts/gate-b-publish-arhat.mts \
+      --bundle --platform=node --format=esm --packages=external \
+      --outfile=dist/gate-b-publish-arhat.mjs
 
 FROM node:22-bookworm-slim AS runtime
 WORKDIR /app
