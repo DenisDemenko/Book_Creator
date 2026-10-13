@@ -10,7 +10,9 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     env:
-      DESIGNCRAFT_PATH: ./scripts/designcraft-cli-compat.sh
+      # The renderer changes cwd to an isolated /tmp job. Keep the shim path
+      # absolute so child_process can still spawn it from there.
+      DESIGNCRAFT_PATH: ${{ github.workspace }}/scripts/designcraft-cli-compat.sh
       DESIGNCRAFT_REAL_PATH: /tmp/designcraft/bin/designcraft-cli
       DATA_DIR: /tmp/nova-designcraft-gateb
     steps:
