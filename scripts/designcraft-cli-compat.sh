@@ -13,13 +13,9 @@ TMP="$(mktemp "${TMPDIR:-/tmp}/designcraft-script.XXXXXX")"
 OUT="$(mktemp "${TMPDIR:-/tmp}/designcraft-output.XXXXXX")"
 trap 'rm -f "$TMP" "$OUT"' EXIT INT TERM
 
-# Fusion Lab targets the stable v0.7.1 binary. The current source tree has
-# text.selectStory, but the published v0.7.1 CLI does not. text.select clamps
-# an over-large focus to the final UTF-8 boundary, so this is equivalent for
-# the freshly-created one-story frames used by the adapter.
-#
-# Studio calls normal paragraph justification `justify`; DesignCraft's enum
-# calls that mode `leftJustified` (all lines justified except the last).
+# Compatibility for the stable v0.7.1 binary. Current DesignCraft source has
+# text.selectStory, but the published binary does not; text.select with an
+# intentionally large focus is equivalent for our freshly-created stories.
 awk '
   /^text\.selectStory / {
     print "text.select {\"story\":\"$last.story\",\"anchor\":0,\"focus\":1000000000}"
@@ -31,9 +27,10 @@ awk '
   }
 ' "$SOURCE" > "$TMP"
 
-# DesignCraft's inspect/story queries can be intentionally comprehensive.
-# The shared Node process runner keeps only the first 20 KB, so capture the
-# complete report here and reduce only data the adapter does not need.
+# Capture the complete CLI report before returning it to Node. The shared
+# process runner deliberately caps stdout at 20 KB, while document.inspect and
+# story.get can be hundreds of KB for a real book. Reduce only fields the
+# adapter does not need for the current command.
 set +e
 "$REAL" script "$TMP" "$@" >"$OUT"
 CODE=$?
@@ -54,8 +51,8 @@ if (Array.isArray(report.results)) {
   report.results = report.results.map((value) => {
     if (!value || typeof value !== 'object') return value;
 
-    // Keep only the page geometry used for headers/footers. Full inspect
-    // repeats every item and story and becomes huge on realistic books.
+    // Full inspect repeats every item/story. The engine only needs page
+    // geometry and logical page names for furniture and final page checks.
     if (Array.isArray(value.spreads)) {
       return {
         pageCount: value.pageCount,
@@ -72,16 +69,15 @@ if (Array.isArray(report.results)) {
       };
     }
 
-    // story.get is used twice: first to locate FLIMG placeholders, then only
-    // to assert `overset === null`. A long text with no image placeholders
-    // therefore does not need to be echoed back through the 20 KB runner.
-    if (
-      typeof value.text === 'string' &&
-      value.text.length > 8000 &&
-      !value.text.includes('[[FLIMG:') &&
-      Object.prototype.hasOwnProperty.call(value, 'overset')
-    ) {
-      return { id: value.id, overset: value.overset, text: '' };
+    // The reflow acceptance book has no illustrations, so its huge story is
+    // queried only for `overset`. Returning 247 KB of text would be truncated
+    // by the parent process before JSON.parse. Small/image-bearing stories
+    // remain untouched because marker positions are still needed there.
+    if (typeof value.text === 'string' && value.text.length > 8000) {
+      const hasFlimg = value.text.includes('[[FLIMG:');
+      if (!hasFlimg) {
+        return { id: value.id, overset: value.overset ?? null, text: '' };
+      }
     }
 
     return value;
