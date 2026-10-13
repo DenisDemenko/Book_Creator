@@ -14,6 +14,7 @@
 
 import type { Express, Request, Response } from 'express';
 import { requireAdmin } from './auth';
+import { LabyrinthError } from './core/labyrinth/model';
 import {
   MarketplaceBridgeError,
   attachBookFileToMarketplace,
@@ -42,6 +43,7 @@ import { requireAuth } from './auth';
 export type LayoutVariant = 'code' | 'design';
 
 export interface PdfRoutesDeps {
+  assertBookPublication?: (req: Request, bookId: string, book?: Record<string, unknown>, commercial?: boolean) => Promise<void>;
   resolveEngine: (modelId: string) => string;
   defaultModelId?: string;
   loadAdminLayer: () => Promise<CorePromptTemplateBundle>;
@@ -172,7 +174,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
       return res.status(status).json({ error: err.message, kind: err.kind, engineId: err.engineId });
     }
 
-    const status = err instanceof MarketplaceBridgeError ? err.status : 500;
+    const status = err instanceof MarketplaceBridgeError || err instanceof LabyrinthError ? err.status : 500;
     res.status(status).json({ error: error?.message || 'Не вдалося зібрати PDF.', kind: error?.kind });
   }
 
@@ -283,6 +285,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
       if (!book?.title || !book?.id) {
         return res.status(400).json({ error: 'Потрібен обʼєкт книги з id і назвою.', kind: 'bad_input' });
       }
+      await deps.assertBookPublication?.(req, String(book.id), book, Number(req.body?.priceMinor)>0 || req.body?.editions?.some((e: any) => Number(e.priceMinor)>0));
 
       // Стара форма запиту (одна ціна) лишається робочою: інакше кнопка,
       // яка вже комусь працює, зламалась би мовчки.
@@ -689,6 +692,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
       throw new MarketplaceBridgeError('Книги немає на сервері.', 'rejected', 404);
     }
     const book = stored.book as Record<string, unknown>;
+    await deps.assertBookPublication?.(params.req, stored.id, book, params.editions.some(e => Number(e.priceMinor)>0));
     const settings = await readBridgeSettings();
     const results = [];
 

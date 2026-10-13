@@ -1,4 +1,5 @@
 import { PgLabyrinthGroupStore } from "./groupStore";
+import { PgLabyrinthEditionStore } from "./editionStore";
 import { PgLabyrinthStoryStore } from "./storyStore";
 import { PgLabyrinthReaderStore } from "./readerStore";
 import { directLabyrinth, type DirectorServices } from "./director";
@@ -69,7 +70,8 @@ export class PgLabyrinthStore {
   readonly reader: PgLabyrinthReaderStore;
   readonly group: PgLabyrinthGroupStore;
   readonly story: PgLabyrinthStoryStore;
-  constructor(private readonly pool: Pool) { this.reader = new PgLabyrinthReaderStore(pool); this.group = new PgLabyrinthGroupStore(pool); this.story = new PgLabyrinthStoryStore(pool); }
+  readonly editions: PgLabyrinthEditionStore;
+  constructor(private readonly pool: Pool) { this.reader = new PgLabyrinthReaderStore(pool); this.group = new PgLabyrinthGroupStore(pool); this.story = new PgLabyrinthStoryStore(pool); this.editions = new PgLabyrinthEditionStore(pool); }
   private async transaction<T>(fn: (c: PoolClient) => Promise<T>): Promise<T> {
     const c = await this.pool.connect();
     try {

@@ -227,6 +227,9 @@ import { normalizePromptEntities, buildCoachEntityInstruction, normalizeEntityFe
 import { formatManuscriptWithClaude, anthropicConfig, ClaudeManuscriptError, MAX_MANUSCRIPT_CHARS } from './server/claudeManuscript';
 import { initCore, getCoreStatus, shutdownCore, registerCoreJobKind, getCoreRepository, getCoreJobQueue } from './server/core';
 import { registerLabyrinthRoutes } from './server/core/labyrinth/routes';
+import { registerLabyrinthEditionRoutes, assertLabyrinthPublication, type EditionRouteDeps } from './server/core/labyrinth/editionRoutes';
+import { getDb } from './server/db';
+import { contributions as editionContributions, changeProposals as editionProposals } from './server/core/collaboration/contributionStore';
 import { LabyrinthError } from './server/core/labyrinth/model';
 import { getLabyrinthStore } from './server/core/index';
 import { registerProjectRoutes, resolveProjectAccess, bookMediaOwners } from './server/core/projectRoutes';
@@ -626,7 +629,9 @@ registerGitCommandRoutes(app);
    * лист метаданих) і пакувальник набору працюють повністю, а Etsy-гілка
    * чесно повідомляє, чого бракує в .env.
    */
-  const publishing = registerPublishingRoutes(app, { appUrl: process.env.APP_URL });
+  const publishing = registerPublishingRoutes(app, { appUrl: process.env.APP_URL,
+    assertBookPublication: (req,id,commercial) => assertLabyrinthPublication(req,editionDeps(),id,undefined,commercial),
+  });
 
   // Клієнт Gemini SDK (`ai`) і generateWithGemini() тепер живуть у
   // server/aiCore.ts — імпортовані на початку файлу. `apiKey` тут більше
@@ -741,6 +746,7 @@ registerGitCommandRoutes(app);
     залежачи від порядку реєстрації маршрутів.
   */
   const storedBookOps = registerPdfRoutes(app, {
+    assertBookPublication: (req,id,book,commercial) => assertLabyrinthPublication(req,editionDeps(),id,book,commercial),
     resolveEngine: resolveChatEngine as never,
     defaultModelId: GEMINI_MODEL,
     loadAdminLayer: () => loadCoreAdminLayer(),
@@ -1126,6 +1132,21 @@ registerGitCommandRoutes(app);
         }, generate: aiRoleGenerateViaCore, resolveModel: (module) => resolveModuleModelId(module), loadTemplate: loadCoreAiRoleTemplate, jev: typesafeJev }, bindings: workflowBindings }
       : null;
   };
+  function editionDeps(): EditionRouteDeps {
+    return {
+      access: realtimeAccessDeps, store: getLabyrinthStore,
+      groupPrincipal: async id => {const u=await findUserForAccess(id);return u&&!u.disabled?{id:u.id,role:u.role,isGuest:false,name:u.name}:null;},
+      refreshPrincipal: async req => {const u=await findUserForAccess(req.principal!.id!);if(!u||u.disabled)throw new LabyrinthError(401,'Обліковий запис недоступний.');const {passwordHash,...principal}=u;req.principal={...principal,isGuest:false};},
+      editionCanPublish: async req => {const u=await findUserForAccess(req.principal!.id!);return !!u&&!u.disabled&&await canRole(u.role,'canPublish');},
+      editionPendingProposals: async id => !!getDb()&&editionProposals(id).some(p=>p.status==='pending'),
+      editionEditorContributions: async id => getDb()?editionContributions(id).map(c=>({userId:c.userId,sectionId:c.resourceId,resultRevision:c.resultRevision})):[],
+      editionCandidates: async (bookId,sourceId) => {
+        const ids=new Set((await Promise.all([realtimeAccessDeps.listAcceptedInvites(bookId),realtimeAccessDeps.listAcceptedInvites(sourceId)])).flat().map(p=>p.acceptedUserId).filter((id):id is string=>!!id));
+        const result=[];for(const id of [...ids].slice(0,200)){const u=await findUserForAccess(id);if(u&&!u.disabled)result.push({userId:id,alias:u.name});}return result;
+      },
+    };
+  }
+  registerLabyrinthEditionRoutes(app, editionDeps());
   registerLabyrinthRoutes(app, {
     storyBooks: { read: getStoredBookForRealtime,
       write: (book, ownerId, recheck) => saveStoryBook({book,ownerId,beforeWrite:recheck,mergeKey:'labyrinth-story:'+String((book.labyrinthStory as any)?.draftId)}),

@@ -18,6 +18,7 @@
  * проєкту: числа живуть в одному місці, екран лише показує їх.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { EditionPanel } from './labyrinth/EditionPanel';
 import {
   AlertTriangle,
   BookMarked,
@@ -188,6 +189,7 @@ export const PublishingHubView: React.FC<PublishingHubViewProps> = ({
         <p className="text-slate-400 text-sm mt-1">{t('publishingHub.subtitle')}</p>
       </header>
 
+      {book.id.startsWith('LB-STORY-') && !isGuest && <EditionPanel key={book.id+':'+authUser?.id} bookId={book.id}/>}
       <nav className="flex flex-wrap gap-2">
         {([
           ['kdp', t('publishingHub.tabKdp'), BookMarked],

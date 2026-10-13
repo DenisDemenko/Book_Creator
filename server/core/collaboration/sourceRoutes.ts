@@ -20,6 +20,7 @@ export function registerSourceRoutes(app: Express, deps: SourceRoutesDeps): void
   const base = '/api/core/projects/:projectId/source';
   const handle = (fn: (req: Request, res: Response, access: ProjectAccess, stored: StoredBook) => Promise<void>) =>
     async (req: Request, res: Response) => {
+      res.setHeader('Cache-Control', 'no-store');
       try {
         const access = await resolveProjectAccess(req.principal as never, String(req.params.projectId), deps.access);
         if (!access) { res.status(req.principal && !req.principal.isGuest ? 403 : 401).json({ error: 'Немає доступу до книги.' }); return; }

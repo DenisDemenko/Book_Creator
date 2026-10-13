@@ -279,6 +279,9 @@ export async function exportBookToDocx(book: Book, options?: { isEnglish?: boole
   });
 
   const doc = new Document({
+    creator: author,
+    title,
+    description: (book as Book & { editionMetadata?: { licenseText?: string } }).editionMetadata?.licenseText,
     sections: [
       {
         properties: {

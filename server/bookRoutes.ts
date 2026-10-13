@@ -19,6 +19,7 @@
 
 import type { Express, Request, Response } from 'express';
 import { requireAdmin, requireAuth } from './auth';
+import { LabyrinthError } from './core/labyrinth/model';
 import { getCoreJobQueue, getCoreRepository } from './core';
 import { scheduleCoreSync } from './core/sync';
 import {
@@ -68,7 +69,7 @@ function fail(res: Response, err: unknown, fallback: string): void {
   }
   const message = (err as Error)?.message || fallback;
   console.error('[books]', message);
-  res.status(500).json({ error: message });
+  res.status(err instanceof LabyrinthError ? err.status : 500).json({ error: message });
 }
 
 export function registerBookRoutes(app: Express, deps: BookRoutesDeps): void {

@@ -208,6 +208,14 @@ export async function saveBook(params: {
   return result;
 }
 
+/** Hold the existing book write queue while a version-bound agreement is committed.
+ * The callback reads snapshots directly; it must never enqueue another book write. */
+export async function withBookSnapshot<T>(bookId: string, fn: (book: StoredBook | null) => Promise<T>): Promise<T> {
+  const result = bookWriteChain.then(async () => fn(await getBook(bookId)));
+  bookWriteChain = result.catch(() => undefined);
+  return result;
+}
+
 async function saveBookSerial(params: {
   book: Record<string, unknown>;
   ownerId?: string | null;

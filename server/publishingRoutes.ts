@@ -48,6 +48,7 @@ import {
   validateManuscriptForKdp,
 } from './kdpSpec';
 import { readEtsyConfig, ETSY_SCOPES, ETSY_RATE_LIMIT_PER_SECOND } from './etsy/etsyConfig';
+import { LabyrinthError } from './core/labyrinth/model';
 import { buildAuthorizeUrl, createPkcePair, exchangeCodeForToken, type FetchLike } from './etsy/etsyOAuth';
 import { createTokenBucket, type TokenBucket } from './etsy/rateLimiter';
 import { createEtsyClient, EtsyApiError, type EtsyClient } from './etsy/etsyClient';
@@ -80,6 +81,7 @@ import { enqueuePublishJob, startPublishWorker } from './etsy/publishQueue';
 import { researchTopic, startResearchScheduler, topicTrend } from './etsy/researchService';
 
 export interface PublishingRoutesDeps {
+  assertBookPublication?: (req: Request, bookId: string, commercial: boolean) => Promise<void>;
   fetchImpl?: FetchLike;
   now?: () => Date;
   /** Куди повертати автора після OAuth-колбека. */
@@ -154,6 +156,7 @@ export function registerPublishingRoutes(app: Express, deps: PublishingRoutesDep
   }
 
   function handleError(res: Response, err: unknown, fallback: string): void {
+    if(err instanceof LabyrinthError){res.status(err.status).json({error:err.message});return;}
     if (err instanceof EtsyApiError) {
       console.error('[publishing] Etsy:', err.status, err.message, err.rawBody);
       res.status(err.status >= 400 && err.status < 600 ? err.status : 502).json({ error: err.message });
@@ -648,6 +651,7 @@ export function registerPublishingRoutes(app: Express, deps: PublishingRoutesDep
     try {
       const product = await loadOwnProduct(req, res);
       if (!product) return;
+      if(product.bookId)await deps.assertBookPublication?.(req, product.bookId, Number(req.body?.priceUsd??product.priceUsd)>0);
 
       const cfg = config();
       if (!cfg.configured) return res.status(503).json({ error: cfg.reasonUk });

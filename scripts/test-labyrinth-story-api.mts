@@ -16,7 +16,7 @@ const [{createCorePool},{loadMigrations,resolveMigrationsDir,runMigrations},{PgL
   import("../server/bookStore"),import("../server/db"),import("../server/core/collaboration/access"),import("../server/core/labyrinth/model"),import("../server/core/labyrinth/model")]);
 if(!process.argv.includes("--json"))assert.equal(await db.initDb(),true,"SQLite must execute, not skip");
 let pool=createCorePool(url),store=new PgLabyrinthStore(pool);
-assert.equal((await runMigrations(pool,loadMigrations(resolveMigrationsDir()))).schemaVersion,40);
+assert.equal((await runMigrations(pool,loadMigrations(resolveMigrationsDir()))).schemaVersion,41);
 const project="t98-"+randomUUID(),foreign=project+"-foreign";
 await pool.query("INSERT INTO projects(id,owner_id,title,revision) VALUES($1,'owner','Канон',7),($2,'foreign-owner','Чуже',1)",[project,foreign]);
 const sourceBook={id:project,title:"Оригінальна книга",author:"Автор",chapters:[{id:"canon",sections:[{id:"canon-scene",content:"UNCHANGED_CANON"}]}],privateNotes:"AUTHOR_PRIVATE"};

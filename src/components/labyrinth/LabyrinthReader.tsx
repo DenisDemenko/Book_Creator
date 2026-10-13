@@ -1,4 +1,5 @@
 import LabyrinthGroupReader from "./LabyrinthGroupReader";
+import { EditionInbox } from './EditionPanel';
 import ReaderMap from "./ReaderMap";
 import React, { useEffect, useRef, useState } from "react";
 import type { ReaderAction, ReaderEdition, ReaderSessionSummary, ReaderView } from "../../../shared/labyrinthReader";
@@ -91,8 +92,10 @@ export default function LabyrinthReader({ projectId }: { projectId: string }) {
   if(groupMode)return <div className="min-w-0 space-y-3">
     <button className={button} onClick={()=>{const u=new URL(location.href);u.searchParams.delete("groupRun");u.searchParams.set("labyrinth","reader");history.replaceState(history.state,"",u);setGroupMode(false);}}>Читати самостійно</button>
     <LabyrinthGroupReader projectId={projectId}/>
+    <EditionInbox projectId={projectId}/>
   </div>;
   return <section className="min-w-0 space-y-4 rounded-xl bg-slate-900 p-3 text-slate-100 [overflow-wrap:anywhere]" data-labyrinth-reader aria-busy={busy}>
+    <EditionInbox projectId={projectId}/>
     <header className="space-y-2">
       <h2 className="text-xl font-bold">Читач книги-лабіринта</h2>
       <button className={button} data-reader-group-mode onClick={()=>setGroupMode(true)}>Групове проходження</button>
