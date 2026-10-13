@@ -10,7 +10,7 @@ function t(name: string, condition: boolean, details = ''): void {
   console.log(`${condition ? '  ✓' : '  ✗'} ${name}${details ? ` — ${details}` : ''}`);
 }
 
-const { designcraftGateBEngine: designcraftEngine } = await import('../server/pdf/engines/designcraftGateBEngine');
+const { designcraftEngine } = await import('../server/pdf/engines/designcraftEngine');
 const { listPdfEngines } = await import('../server/pdf/engines/registry');
 
 const PNG =
@@ -60,6 +60,7 @@ const baseBook: any = {
 
 const spec: any = {
   pageSize: 'A5',
+  bodyAlign: 'justify',
   runningHead: { show: true, content: 'chapter', fontSize: 8 },
   pageNumber: { show: true, position: 'bottom-center', fontSize: 9, startAt: 1, skipFrontMatter: true },
   frontMatter: { contentsTitle: 'Зміст', contentsSections: true, contentsLeader: true, fontSize: 10, upperShare: 0.28 },
@@ -78,6 +79,7 @@ const first = await designcraftEngine.render({ book: baseBook, kind: 'book', spe
 t('рушій повернув designcraft', first.engineId === 'designcraft');
 t('PDF має щонайменше титул, зміст і 2 глави', first.pageCount >= 4, String(first.pageCount));
 t('внутрішня перевірка бачить 1 ілюстрацію', first.notesUk.some((n) => n.includes('1 ілюстрацій')), first.notesUk.join(' | '));
+t('макет позначено як виконаний', first.honoredSpec === true, first.notesUk.join(' | '));
 const firstPdf = await PDFDocument.load(first.bytes);
 t('pdf-lib відкриває результат', firstPdf.getPageCount() === first.pageCount);
 
