@@ -38,4 +38,14 @@ jobs:
         run: npm run lint
 
       - name: Gate B live engine test
+        id: gateb
+        continue-on-error: true
         run: npx tsx scripts/test-designcraftGateB.mts
+
+      - name: DesignCraft diagnostics
+        if: steps.gateb.outcome == 'failure'
+        run: npx tsx scripts/debug-designcraftGateB.mts
+
+      - name: Fail if Gate B failed
+        if: steps.gateb.outcome == 'failure'
+        run: exit 1
