@@ -31,11 +31,9 @@ awk '
   }
 ' "$SOURCE" > "$TMP"
 
-# DesignCraft's document.inspect is intentionally comprehensive. On a long
-# book its JSON can be hundreds of KB, while the shared process runner keeps
-# only the first 20 KB to prevent noisy external tools from flooding logs.
-# Capture the complete report here and compact only inspect results to the
-# exact page geometry the adapter needs. Other command results stay intact.
+# DesignCraft's inspect/story queries can be intentionally comprehensive.
+# The shared Node process runner keeps only the first 20 KB, so capture the
+# complete report here and reduce only data the adapter does not need.
 set +e
 "$REAL" script "$TMP" "$@" >"$OUT"
 CODE=$?
@@ -54,20 +52,39 @@ try {
 }
 if (Array.isArray(report.results)) {
   report.results = report.results.map((value) => {
-    if (!value || typeof value !== 'object' || !Array.isArray(value.spreads)) return value;
-    return {
-      pageCount: value.pageCount,
-      spreads: value.spreads.map((spread) => ({
-        index: spread.index,
-        pages: Array.isArray(spread.pages)
-          ? spread.pages.map((page) => ({
-              index: page.index,
-              name: page.name,
-              bounds: page.bounds,
-            }))
-          : [],
-      })),
-    };
+    if (!value || typeof value !== 'object') return value;
+
+    // Keep only the page geometry used for headers/footers. Full inspect
+    // repeats every item and story and becomes huge on realistic books.
+    if (Array.isArray(value.spreads)) {
+      return {
+        pageCount: value.pageCount,
+        spreads: value.spreads.map((spread) => ({
+          index: spread.index,
+          pages: Array.isArray(spread.pages)
+            ? spread.pages.map((page) => ({
+                index: page.index,
+                name: page.name,
+                bounds: page.bounds,
+              }))
+            : [],
+        })),
+      };
+    }
+
+    // story.get is used twice: first to locate FLIMG placeholders, then only
+    // to assert `overset === null`. A long text with no image placeholders
+    // therefore does not need to be echoed back through the 20 KB runner.
+    if (
+      typeof value.text === 'string' &&
+      value.text.length > 8000 &&
+      !value.text.includes('[[FLIMG:') &&
+      Object.prototype.hasOwnProperty.call(value, 'overset')
+    ) {
+      return { id: value.id, overset: value.overset, text: '' };
+    }
+
+    return value;
   });
 }
 process.stdout.write(JSON.stringify(report));
