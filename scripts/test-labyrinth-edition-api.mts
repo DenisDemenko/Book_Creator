@@ -26,7 +26,7 @@ const original=stateHash(await bookStore.getBook(project));
 const access={getBookOwnerId:async(id:string)=>(await bookStore.getBook(id))?.ownerId??null,getCollabOwnerId:async()=>undefined,
   listAcceptedInvites:async(id:string)=>id===project?['reader','reader2','designer'].map(acceptedUserId=>({acceptedUserId,role:'reader'})):editorialBooks.has(id)?[{acceptedUserId:'reader',role:'coauthor'}]:[],
   effectiveAccess:async({projectId,userId}:any)=>computeEffective(projectId,userId,!revoked.has(userId)&&(projectId===project&&['reader','reader2','designer'].includes(userId)||editorialBooks.has(projectId)&&userId==='reader')?[{id:userId,projectId,participantId:userId,status:'active',level:editorialBooks.has(projectId)?'edit':'view',scopeType:'book',scopeRef:null,validFrom:'2020-01-01T00:00:00Z',validUntil:null}] as any:[],{full:false})};
-const app=express();app.use(express.json({limit:'12mb'}));
+const app=express();app.use((q,_r,next)=>{if(q.url.startsWith('/studio/api/'))q.url=q.url.slice('/studio'.length);next();});app.use(express.json({limit:'12mb'}));
 app.use((q,_r,next)=>{const id=String(q.headers['x-test-user']??'guest');q.principal={id:id==='guest'?null:id,role:id==='admin'?'admin':'writer',isGuest:id==='guest'} as any;next();});
 const refreshPrincipal=async(q:any)=>{if(!principal(q.principal?.id))throw new LabyrinthError(401,'account disabled');};
 registerLabyrinthRoutes(app,{access,store:()=>store,groupPrincipal:async id=>principal(id),refreshPrincipal,
@@ -99,6 +99,7 @@ try{
   renderStarted=new Promise(r=>{renderStartedResolve=r;});const v3Ready=await allApprove(v3.id);renderMode='delay';const latePdf=call(endpoint()+'/'+v3.id+'/export/pdf');await renderStarted;expect(await decide(v3.id,'reader','withdraw'),200);renderFinish();assert.equal((await latePdf).status,409);check('Відкликання під час рендеру не видає пізній PDF');
   const guarded=await call('/api/admin/pdf/publish',{book:{...(await bookStore.getBook(bookId))!.book,labyrinthStory:undefined},editions:[{format:'digital',priceMinor:0}]},'admin');assert.equal(guarded.status,409);check('Старий publish API не обходить погодження після видалення клієнтського прапорця');
   if(process.argv.includes('--browser')){const {liveLabyrinthEdition}=await import('./live-labyrinth-edition.mts');await liveLabyrinthEdition({app,origin,project,bookId});}
+  if(process.argv.includes('--studio')){const {liveEditionStudio}=await import('./live-labyrinth-edition-studio.mts');await liveEditionStudio({app,server,origin,project,bookId,terms});}
   await send({kind:'withdraw_contribution',contributionId});expect(await create(),409);
   const without=expect(await create({...terms,credits:[terms.credits[0]],excludeContributionIds:[contributionId]}),201);assert.ok(!JSON.stringify(without.manuscript).includes('Погоджений літературний внесок.'));check('Вилучення відкликаного внеску прибирає його текст із нової версії');
   expect(await decide(without.id,'owner'),200);const withoutReady=await get(without.id);revoked.add('reader');const noSourceCredit=expect(await publish(withoutReady),200);assert.equal(noSourceCredit.status,'published');revoked.clear();check('Видання без вилученого внеску не залежить від його колишнього автора');

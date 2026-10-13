@@ -292,7 +292,8 @@
     "test:labyrinth-story:browser": "tsx scripts/test-labyrinth-story-api.mts --browser",
     "test:labyrinth-edition": "tsx scripts/test-labyrinth-edition.mts",
     "test:labyrinth-edition:api": "tsx scripts/test-labyrinth-edition-api.mts",
-    "test:labyrinth-edition:browser": "tsx scripts/test-labyrinth-edition-api.mts --browser"
+    "test:labyrinth-edition:browser": "tsx scripts/test-labyrinth-edition-api.mts --browser",
+    "test:labyrinth-edition:studio": "tsx scripts/test-labyrinth-edition-api.mts --studio"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

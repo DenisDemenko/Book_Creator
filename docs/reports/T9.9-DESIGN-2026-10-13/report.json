@@ -1,0 +1,201 @@
+{
+  "phase": "after",
+  "mode": "real App.tsx + local identity/peripheral fixtures + real PostgreSQL edition/reader APIs",
+  "externalRequests": "blocked; declared site fonts use local fallback",
+  "productionAcceptance": false,
+  "results": [
+    {
+      "name": "studio-owner-dark-1440",
+      "kind": "studio",
+      "width": 1440,
+      "scroll": 1440,
+      "theme": "dark",
+      "shell": true,
+      "header": true,
+      "background": true,
+      "panel": true,
+      "body": "\"Plus Jakarta Sans\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif",
+      "titleWidths": [
+        988,
+        794.234375
+      ],
+      "savedScreenshot": "studio-owner-dark-1440.png"
+    },
+    {
+      "name": "studio-owner-dark-390",
+      "kind": "studio",
+      "width": 390,
+      "scroll": 390,
+      "theme": "dark",
+      "shell": true,
+      "header": true,
+      "background": true,
+      "panel": true,
+      "body": "\"Plus Jakarta Sans\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif",
+      "titleWidths": [
+        198,
+        164
+      ],
+      "savedScreenshot": "studio-owner-dark-390.png"
+    },
+    {
+      "name": "studio-owner-light-1440",
+      "kind": "studio",
+      "width": 1440,
+      "scroll": 1440,
+      "theme": "light",
+      "shell": true,
+      "header": true,
+      "background": true,
+      "panel": true,
+      "body": "\"Plus Jakarta Sans\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif",
+      "titleWidths": [
+        988,
+        794.234375
+      ],
+      "savedScreenshot": "studio-owner-light-1440.png"
+    },
+    {
+      "name": "studio-owner-light-390",
+      "kind": "studio",
+      "width": 390,
+      "scroll": 390,
+      "theme": "light",
+      "shell": true,
+      "header": true,
+      "background": true,
+      "panel": true,
+      "body": "\"Plus Jakarta Sans\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif",
+      "titleWidths": [
+        198,
+        164
+      ],
+      "savedScreenshot": null
+    },
+    {
+      "name": "studio-coauthor-dark-1440",
+      "kind": "studio",
+      "width": 1440,
+      "scroll": 1440,
+      "theme": "dark",
+      "shell": true,
+      "header": true,
+      "background": true,
+      "panel": true,
+      "body": "\"Plus Jakarta Sans\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif",
+      "titleWidths": [
+        766.78125,
+        802.234375
+      ],
+      "savedScreenshot": null
+    },
+    {
+      "name": "studio-pending-dark-1440",
+      "kind": "studio",
+      "width": 1440,
+      "scroll": 1440,
+      "theme": "dark",
+      "shell": true,
+      "header": true,
+      "background": true,
+      "panel": true,
+      "body": "\"Plus Jakarta Sans\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif",
+      "titleWidths": [
+        988,
+        794.234375
+      ],
+      "savedScreenshot": null
+    },
+    {
+      "name": "studio-pending-dark-390",
+      "kind": "studio",
+      "width": 390,
+      "scroll": 390,
+      "theme": "dark",
+      "shell": true,
+      "header": true,
+      "background": true,
+      "panel": true,
+      "body": "\"Plus Jakarta Sans\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif",
+      "titleWidths": [
+        198,
+        164
+      ],
+      "savedScreenshot": null
+    },
+    {
+      "name": "studio-coauthor-pending-dark-390",
+      "kind": "studio",
+      "width": 390,
+      "scroll": 390,
+      "theme": "dark",
+      "shell": true,
+      "header": true,
+      "background": true,
+      "panel": true,
+      "body": "\"Plus Jakarta Sans\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif",
+      "titleWidths": [
+        190,
+        156
+      ],
+      "savedScreenshot": "studio-coauthor-pending-dark-390.png"
+    },
+    {
+      "name": "reader-dark-1440",
+      "kind": "public",
+      "width": 1440,
+      "scroll": 1440,
+      "theme": "dark",
+      "shell": false,
+      "header": false,
+      "background": false,
+      "panel": false,
+      "body": "\"Plus Jakarta Sans\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+      "titleWidths": [],
+      "savedScreenshot": "reader-dark-1440.png"
+    },
+    {
+      "name": "reader-light-1440",
+      "kind": "public",
+      "width": 1440,
+      "scroll": 1440,
+      "theme": "light",
+      "shell": false,
+      "header": false,
+      "background": false,
+      "panel": false,
+      "body": "\"Plus Jakarta Sans\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+      "titleWidths": [],
+      "savedScreenshot": null
+    },
+    {
+      "name": "reader-dark-390",
+      "kind": "public",
+      "width": 390,
+      "scroll": 390,
+      "theme": "dark",
+      "shell": false,
+      "header": false,
+      "background": false,
+      "panel": false,
+      "body": "\"Plus Jakarta Sans\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+      "titleWidths": [],
+      "savedScreenshot": null
+    },
+    {
+      "name": "reader-light-390",
+      "kind": "public",
+      "width": 390,
+      "scroll": 390,
+      "theme": "light",
+      "shell": false,
+      "header": false,
+      "background": false,
+      "panel": false,
+      "body": "\"Plus Jakarta Sans\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+      "titleWidths": [],
+      "savedScreenshot": "reader-light-390.png"
+    }
+  ],
+  "errors": []
+}

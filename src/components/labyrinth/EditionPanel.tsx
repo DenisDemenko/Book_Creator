@@ -3,9 +3,11 @@ import {EDITION_ROLES,EDITION_ROLE_LABELS,type EditionContext,type EditionCredit
 import {gs,GsError} from '../graphStudio/gsApi';
 import {exportBookToDocx,exportBookToEpub} from '../../utils/fileExporters';
 import type {Book} from '../../types';
+import {BookOpen,UsersRound,FileDown,RefreshCw,ShieldCheck} from 'lucide-react';
+import {EDITION_THEME} from '../../../shared/labyrinthEditionTheme';
 
-const button='min-h-11 rounded-lg border border-slate-500 px-3 py-2 hover:bg-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-300 disabled:opacity-50';
-const field='min-h-11 w-full min-w-0 rounded-lg border border-slate-500 bg-slate-950 p-2 text-slate-100';
+const button='ed-button';
+const field='ed-field';
 type Operation={path:string;body:unknown};
 const baseOf=(id:string)=>'/api/core/projects/'+encodeURIComponent(id)+'/labyrinth-editions';
 const link=(id:string,tab:string)=>import.meta.env.BASE_URL+'projects/'+encodeURIComponent(id)+'/'+tab;
@@ -49,51 +51,52 @@ export function EditionReview({bookId,editionId,onChanged}:{bookId:string;editio
       }
     }catch(e){if(token===generation.current)failed(e);}finally{if(token===generation.current)setBusy(false);}
   };
-  return <section className="min-w-0 space-y-4 rounded-xl border border-teal-700 bg-slate-900 p-3 text-slate-100 [overflow-wrap:anywhere]" data-edition-review aria-busy={busy}>
-    <div className="flex flex-wrap items-center gap-3"><h3 className="text-lg font-bold">Погодження видання</h3><button className={button} onClick={()=>void reload()} disabled={busy} data-edition-refresh>Оновити</button></div>
+  return <section className="edition-studio ed-panel space-y-4" data-edition-review aria-busy={busy}>
+    <style>{EDITION_THEME}</style>
+    <header className="ed-header"><span className="ed-symbol" aria-hidden="true"><ShieldCheck size={24}/></span><div><p className="ed-kicker">Текст · авторство · умови</p><h3>Погодження видання</h3></div><button className={button} onClick={()=>void reload()} disabled={busy} data-edition-refresh><RefreshCw/>Оновити</button></header>
     {error&&<p role="alert">{error}</p>}{busy&&<p role="status">Завантаження…</p>}
     {pending&&!busy&&<button className={button} data-edition-retry onClick={()=>void perform(pending)}>Повторити запит</button>}
     {view&&<>
-      <p data-edition-status>Версія {view.version} · рукопис r{view.bookRevision} · {view.status==='published'?'Опубліковано':view.status==='withdrawn'?'Відкликано':'На погодженні'}</p>
+      <div className="ed-meta" data-edition-status><span className={'ed-badge ed-badge--'+view.status}>{view.status==='published'?'Опубліковано':view.status==='withdrawn'?'Відкликано':'На погодженні'}</span><span>Версія {view.version}</span><span>Редакція рукопису {view.bookRevision}</span></div>
       {!view.fresh&&view.status==='review'&&<p role="status" className="rounded-lg border border-amber-400 p-2">Рукопис змінився. Потрібна нова версія та повторні погодження.</p>}
-      <h4 className="font-bold">Склад і умови цієї версії</h4>
-      <ul className="space-y-2">{view.agreements.map(a=><li key={a.id}>{a.name} · {EDITION_ROLE_LABELS[a.role]} · {states[a.status]}{view.commercial?' · '+(a.shareBps/100)+'% доходу':''}</li>)}</ul>
-      <p className="whitespace-pre-wrap" data-edition-license>{view.manuscript.licenseText}</p>
-      <p>{view.commercial?'Дозволено комерційне розповсюдження. Погоджені частки фіксуються в умовах; виплати здійснюються окремо.':'Безоплатне розповсюдження цієї версії.'}</p>
-      <details data-edition-manuscript><summary>Повний текст для погодження</summary>
+      <section className="ed-card"><div className="flex items-center justify-between gap-3 flex-wrap"><h4 className="font-semibold">Склад і умови цієї версії</h4><span className="ed-progress">Погоджено {view.agreements.filter(a=>a.status==='approved').length} із {view.agreements.length}</span></div>
+      <ul className="ed-roster">{view.agreements.map(a=><li key={a.id}><UsersRound size={18} className="ed-muted" aria-hidden="true"/><div className="ed-person"><strong>{a.name}</strong><small>{EDITION_ROLE_LABELS[a.role]}{view.commercial?' · '+(a.shareBps/100)+'% доходу':''}</small></div><span className={'ed-badge ed-badge--'+a.status}>{states[a.status]}</span></li>)}</ul>
+      <p className="ed-license whitespace-pre-wrap" data-edition-license>{view.manuscript.licenseText}</p>
+      <p className="ed-muted text-sm mt-3">{view.commercial?'Дозволено комерційне розповсюдження. Погоджені частки фіксуються в умовах; виплати здійснюються окремо.':'Безоплатне розповсюдження цієї версії.'}</p></section>
+      <details className="ed-details" data-edition-manuscript><summary>Повний текст для погодження</summary><div className="ed-paper">
         <h4 className="font-bold">{view.manuscript.title}</h4>
         {view.manuscript.cover&&<img src={view.manuscript.cover} alt="Обкладинка для погодження" className="max-h-72 max-w-full"/>}
         <p className="whitespace-pre-wrap">{view.manuscript.foreword}</p>
         {view.manuscript.pages.map(p=><article className="my-4 space-y-2" key={p.id}><h5 className="font-bold">{p.title}</h5><p className="whitespace-pre-wrap">{p.text}</p>{p.aiAssisted&&<p className="text-sm">Створено за участю ШІ; текст потребує вашої перевірки.</p>}</article>)}
         <p className="whitespace-pre-wrap">{view.manuscript.acknowledgements}</p>
-      </details>
-      {view.ownContributions.length>0&&<details data-edition-own-contributions><summary>Мої внески та їхня редакція</summary>{view.ownContributions.map(c=><article key={c.sectionId} className="my-3 space-y-2"><p className="whitespace-pre-wrap">Оригінал: {c.originalText}</p><p className="whitespace-pre-wrap">У рукописі: {c.text}</p></article>)}</details>}
-      {me&&<fieldset disabled={busy||!!pending} className="space-y-3 rounded-lg border border-slate-500 p-3">
+      </div></details>
+      {view.ownContributions.length>0&&<details className="ed-details" data-edition-own-contributions><summary>Мої внески та їхня редакція</summary>{view.ownContributions.map(c=><article key={c.sectionId} className="ed-contribution-grid my-3"><p>Оригінал: {c.originalText}</p><p>У рукописі: {c.text}</p></article>)}</details>}
+      {me&&<fieldset disabled={busy||!!pending} className="ed-card space-y-3">
         <legend>Моє рішення — {me.name}, {EDITION_ROLE_LABELS[me.role]}</legend>
         {view.status==='review'&&me.status!=='approved'&&['Я прочитав текст і перевірив свій внесок','Погоджую публічне ім’я та вказану роль','Погоджую ліцензію й умови використання','Погоджую публікацію повного тексту онлайн та розповсюдження файлів','Погоджую спосіб розповсюдження й зазначені частки'].map((label,i)=><label className="flex min-h-11 items-start gap-3" key={label}>
           <input type="checkbox" checked={checks[i]} data-edition-check={i} onChange={e=>setChecks(c=>c.map((v,j)=>j===i?e.target.checked:v))}/><span>{label}</span>
         </label>)}
         <label className="block">Примітка до мого рішення<textarea className={field} value={note} maxLength={2000} onChange={e=>setNote(e.target.value)} data-edition-note/></label>
         <div className="flex flex-wrap gap-2">
-          {view.status==='review'&&me.status!=='approved'&&<button className={button} disabled={!view.fresh||!checks.every(Boolean)} data-edition-approve onClick={()=>decide('approve')}>Погодити цю версію</button>}
+          {view.status==='review'&&me.status!=='approved'&&<button className={button+' ed-button--primary'} disabled={!view.fresh||!checks.every(Boolean)} data-edition-approve onClick={()=>decide('approve')}><ShieldCheck/>Погодити цю версію</button>}
           {view.status==='review'&&me.status!=='approved'&&<button className={button} data-edition-decline onClick={()=>decide('decline')}>Відмовитися</button>}
           {me.status==='approved'&&<button className={button} data-edition-withdraw onClick={()=>decide('withdraw')}>Відкликати мою згоду</button>}
         </div>
       </fieldset>}
-      <div className="space-y-2" data-edition-export>
+      <div className="ed-card space-y-2" data-edition-export>
         <h4 className="font-bold">Файли погодженої версії</h4>
-        <div className="flex flex-wrap gap-2">{['pdf','epub','docx','html','md','json'].map(format=><button key={format} className={button} disabled={busy||!view.ready} data-edition-download={format} onClick={()=>void download(format)}>{format.toUpperCase()}</button>)}</div>
+        <div className="ed-downloads">{['pdf','epub','docx','html','md','json'].map(format=><button key={format} className={button} disabled={busy||!view.ready} data-edition-download={format} onClick={()=>void download(format)}><FileDown/>{format.toUpperCase()}</button>)}</div>
         {!view.ready&&<p>Публікація й фінальний експорт доступні після всіх необхідних погоджень.</p>}
       </div>
-      {view.status==='review'&&(view.canManage||view.canPublish)&&<fieldset disabled={busy||!!pending} className="space-y-2 rounded-lg border border-teal-500 p-3">
+      {view.status==='review'&&(view.canManage||view.canPublish)&&<fieldset disabled={busy||!!pending} className="ed-card space-y-2">
         <legend>Опублікувати інтерактивне видання</legend>
         <label className="flex min-h-11 gap-3"><input type="checkbox" checked={publishConfirmed} onChange={e=>setPublishConfirmed(e.target.checked)} data-edition-publish-check/><span>Підтверджую відкриття повного погодженого тексту за публічним посиланням.</span></label>
-        <button className={button} disabled={!view.canPublish||!publishConfirmed} data-edition-publish onClick={()=>void perform({path:base+'/publish',body:{expectedRevision:view.revision,confirm:true,key:crypto.randomUUID()}})}>Опублікувати</button>
+        <button className={button+' ed-button--primary'} disabled={!view.canPublish||!publishConfirmed} data-edition-publish onClick={()=>void perform({path:base+'/publish',body:{expectedRevision:view.revision,confirm:true,key:crypto.randomUUID()}})}>Опублікувати</button>
       </fieldset>}
-      {view.status==='published'&&view.ready&&<a className="inline-block min-h-11 underline" data-edition-public-link href={publicLink(view.id)} target="_blank" rel="noopener noreferrer">Відкрити опубліковане інтерактивне видання</a>}
+      {view.status==='published'&&view.ready&&<a className={button+' ed-button--primary'} data-edition-public-link href={publicLink(view.id)} target="_blank" rel="noopener noreferrer"><BookOpen/>Відкрити опубліковане інтерактивне видання</a>}
       {(view.canManage||view.canEditBook)&&<nav className="flex flex-wrap gap-4"><a className="min-h-11 underline" href={link(bookId,'editor')}>Редактор рукопису</a><a className="min-h-11 underline" href={link(bookId,'collaboration')}>Команда, пропозиції правок та історія внесків</a></nav>}
       {!view.canEditBook&&!view.canManage&&<p className="text-sm">Погодження цієї версії не дає права редагувати рукопис. Потрібну роль у редакційній команді надає письменник.</p>}
-      <details><summary>Обговорення цієї версії — для її учасників</summary>
+      <details className="ed-details"><summary>Обговорення цієї версії — для її учасників</summary>
         {view.comments.map(c=><p className="my-2 whitespace-pre-wrap" key={c.id}>{c.name}: {c.text}</p>)}
         <label className="block">Коментар<textarea className={field} value={comment} maxLength={4000} onChange={e=>setComment(e.target.value)} data-edition-comment/></label>
         <button className={button} disabled={busy||!!pending||!comment.trim()} data-edition-comment-send onClick={()=>void perform({path:base+'/comments',body:{text:comment,key:crypto.randomUUID()}}).then(ok=>{if(ok)setComment('');})}>Додати коментар</button>
@@ -115,14 +118,16 @@ export function EditionPanel({bookId}:{bookId:string}){
   useEffect(()=>{generation.current++;setContext(null);setEditionId('');setPending(null);setLicense('all-rights-reserved');setCommercial(false);setForeword('');setAcknowledgements('');setCover(null);void refresh(true);return()=>{generation.current++;};},[base]);
   const perform=async(op:Operation)=>{const token=generation.current;setPending(op);setBusy(true);setError('');try{const v=await gs<EditionView>('POST',op.path,op.body);if(token===generation.current){setPending(null);setEditionId(v.id);await refresh(false);}}catch(e){if(token===generation.current){setError((e as Error).message);if(e instanceof GsError&&e.status<500){setPending(null);if([401,403,404].includes(e.status)){setContext(null);setCredits([]);setEditionId('');}else if(e.status===409)await refresh(false);}}}finally{if(token===generation.current)setBusy(false);}};
   const patchCredit=(userId:string,patch:Partial<EditionCreditInput>)=>setCredits(c=>c.map(p=>p.userId===userId?{...p,...patch}:p));
-  return <section className="min-w-0 space-y-4 rounded-xl border border-teal-600 p-3 text-slate-100 [overflow-wrap:anywhere]" data-edition-panel>
-    <h2 className="text-xl font-bold">Видання проходження</h2>
-    <p>Збережіть рукопис у редакторі. Для видання підготуйте окрему версію, оберіть склад та умови й отримайте особисті погодження учасників.</p>
+  return <section className="edition-studio ed-panel space-y-4" data-edition-panel>
+    <style>{EDITION_THEME}</style>
+    <header className="ed-header"><span className="ed-symbol" aria-hidden="true"><BookOpen size={25}/></span><div><p className="ed-kicker">Книга-лабіринт</p><h2>Видання проходження</h2></div></header>
+    <p className="ed-intro">Збережіть рукопис у редакторі. Підготуйте версію видання, оберіть склад та умови й отримайте особисті погодження учасників.</p>
+    <ol className="ed-steps" aria-label="Етапи підготовки видання"><li><span>1</span>Редакція</li><li><span>2</span>Погодження</li><li><span>3</span>Публікація</li></ol>
     {error&&<p role="alert">{error}</p>}{busy&&<p role="status">Завантаження…</p>}
     {pending&&!busy&&<button className={button} data-edition-create-retry onClick={()=>void perform(pending)}>Повторити запит</button>}
     {context&&<>
       <button className={button} disabled={busy} onClick={()=>void refresh(false)}>Оновити серверний рукопис r{context.bookRevision}</button>
-      <details><summary>Підготувати нову версію видання</summary>
+      <details className="ed-details"><summary>Підготувати нову версію видання</summary>
         <fieldset disabled={busy||!!pending} className="space-y-4 py-3">
           <legend>Склад, внески та умови</legend>
           {context.contributions.length>0&&<div className="space-y-2"><h3 className="font-bold">Вилучення внесків</h3>{context.contributions.map(c=><label className="flex min-h-11 items-start gap-3" key={c.id}>
@@ -144,7 +149,7 @@ export function EditionPanel({bookId}:{bookId:string}){
           <label className="block">Подяки<textarea className={field} value={acknowledgements} maxLength={4000} onChange={e=>setAcknowledgements(e.target.value)}/></label>
           <label className="block">Обкладинка PNG/JPEG до 2 МБ<input className={field} type="file" accept="image/png,image/jpeg" onChange={e=>{const file=e.target.files?.[0];if(!file)return;if(file.size>2*1024*1024){setError('Обкладинка завелика.');return;}const token=generation.current,reader=new FileReader();reader.onload=()=>{if(token===generation.current)setCover(String(reader.result));};reader.readAsDataURL(file);}}/></label>
           {cover&&<><img src={cover} alt="Вибрана обкладинка" className="max-h-48 max-w-full"/><button className={button} onClick={()=>setCover(null)}>Прибрати обкладинку</button></>}
-          <button className={button} data-edition-create onClick={()=>void perform({path:base,body:{expectedBookRevision:context.bookRevision,terms:{license,licenseText,commercial,credits:credits.filter(c=>selected.includes(c.userId)).map(c=>({...c,shareBps:commercial?c.shareBps:0})),excludeContributionIds:excluded,foreword,acknowledgements,cover},key:crypto.randomUUID()}})}>Створити версію для погодження</button>
+          <button className={button+' ed-button--primary'} data-edition-create onClick={()=>void perform({path:base,body:{expectedBookRevision:context.bookRevision,terms:{license,licenseText,commercial,credits:credits.filter(c=>selected.includes(c.userId)).map(c=>({...c,shareBps:commercial?c.shareBps:0})),excludeContributionIds:excluded,foreword,acknowledgements,cover},key:crypto.randomUUID()}})}>Створити версію для погодження</button>
           <p className="text-sm">Зміна тексту, складу чи умов потребує нової версії. Попередні згоди до неї не переносяться.</p>
         </fieldset>
       </details>
@@ -160,11 +165,13 @@ export function EditionInbox({projectId}:{projectId:string}){
   const reload=async()=>{const token=generation.current;setError('');try{const v=await gs<{editions:typeof editions}>('GET',base);if(token===generation.current)setEditions(v.editions);}catch(e){if(token===generation.current){setEditions([]);setSelected('');if(!(e instanceof GsError&&[401,403,404].includes(e.status)))setError((e as Error).message);}}};
   useEffect(()=>{generation.current++;setEditions([]);setSelected('');void reload();return()=>{generation.current++;};},[base]);
   const current=editions.find(e=>e.id===selected);
-  return <section className="space-y-3 rounded-xl border border-slate-500 p-3" data-edition-inbox>
-    <h3 className="font-bold">Мої погодження видань</h3><button className={button} data-edition-inbox-refresh onClick={()=>void reload()}>Оновити запрошення</button>
+  return <section className="edition-studio ed-panel space-y-4" data-edition-inbox>
+    <style>{EDITION_THEME}</style>
+    <header className="ed-header"><span className="ed-symbol" aria-hidden="true"><UsersRound size={24}/></span><div><p className="ed-kicker">Спільне авторство</p><h3>Мої погодження видань</h3></div><button className={button} data-edition-inbox-refresh onClick={()=>void reload()}><RefreshCw/>Оновити запрошення</button></header>
+    <p className="ed-intro">Перегляньте текст і власні внески, звірте умови та прийміть особисте рішення щодо цієї версії.</p>
     {error&&<p role="status">{error}</p>}
     {!editions.length&&<p>Автор ще не надіслав вам версію для погодження.</p>}
-    {editions.map(e=><button className={button+' mr-2'} key={e.id} onClick={()=>setSelected(e.id)} data-edition-inbox-open={e.id}>v{e.version} · {e.title}</button>)}
+    <div className="ed-edition-links">{editions.map(e=><button className={button} key={e.id} onClick={()=>setSelected(e.id)} data-edition-inbox-open={e.id}><BookOpen/>v{e.version} · {e.title}</button>)}</div>
     {current&&<EditionReview key={current.id} bookId={current.bookId} editionId={current.id} onChanged={()=>void reload()}/>}
   </section>;
 }
