@@ -6,7 +6,7 @@
 import { novaEngine } from './novaEngine';
 import { chromiumEngine } from './chromiumEngine';
 import { pandocEngine } from './pandocEngine';
-import { designcraftEngine } from './designcraftEngine';
+import { designcraftGateBEngine as designcraftEngine } from './designcraftGateBEngine';
 import {
   DEFAULT_PDF_ENGINE,
   PDF_ENGINE_IDS,
