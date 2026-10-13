@@ -10,7 +10,8 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     env:
-      DESIGNCRAFT_PATH: /tmp/designcraft/bin/designcraft-cli
+      DESIGNCRAFT_PATH: ./scripts/designcraft-cli-compat.sh
+      DESIGNCRAFT_REAL_PATH: /tmp/designcraft/bin/designcraft-cli
       DATA_DIR: /tmp/nova-designcraft-gateb
     steps:
       - uses: actions/checkout@v4
@@ -32,6 +33,8 @@ jobs:
           echo "05a2b2531f6f26746b4a743081fd00f9ea77822fa178663802a0eaeced6c1437  /tmp/designcraft.tar.gz" | sha256sum -c -
           mkdir -p /tmp/designcraft
           tar -xzf /tmp/designcraft.tar.gz --strip-components=1 -C /tmp/designcraft
+          chmod +x ./scripts/designcraft-cli-compat.sh
+          "$DESIGNCRAFT_REAL_PATH" --version
           "$DESIGNCRAFT_PATH" --version
 
       - name: TypeScript
