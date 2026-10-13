@@ -10,7 +10,7 @@ function t(name: string, condition: boolean, details = ''): void {
   console.log(`${condition ? '  ✓' : '  ✗'} ${name}${details ? ` — ${details}` : ''}`);
 }
 
-const { designcraftEngine } = await import('../server/pdf/engines/designcraftEngine');
+const { designcraftGateBEngine: designcraftEngine } = await import('../server/pdf/engines/designcraftGateBEngine');
 const { listPdfEngines } = await import('../server/pdf/engines/registry');
 
 const PNG =
