@@ -179,12 +179,10 @@ function textFrame(
   align: 'left' | 'center' | 'right' = 'center'
 ): string[] {
   if (!text.trim()) return [];
+  // frame.create leaves the new frame selected. In DesignCraft v0.7.1 both
+  // type.para and type.char can format a selected text frame directly.
   return [
     cmd('frame.create', { spread, rect, content: 'text', text }),
-    cmd('text.selectStory', {
-      frame: '$last.id',
-      point: [(rect[0] + rect[2]) / 2, rect[1] + 8],
-    }),
     cmd('type.para', { attrs: { align } }),
     cmd('type.char', { attrs: { size } }),
   ];
@@ -227,8 +225,7 @@ function firstScript(request: PdfRenderRequest, spec: PdfLayoutSpec, manuscriptP
       title: request.book.title || 'Fusion Lab book',
     }),
     ...createStyles(spec),
-    // Import after the final paragraph styles exist so autoflow composes the
-    // exact typography that will be exported, not an interim layout.
+    // Import after final styles exist so autoflow composes final typography.
     cmd('file.place', {
       path: manuscriptPath,
       page: bodyPage,
@@ -330,8 +327,6 @@ function secondScript(
 ): string {
   const commands: string[] = [];
 
-  // Replace reserved image blocks from the end backwards so earlier UTF-8
-  // offsets remain valid. The reservation keeps the page count stable.
   for (const image of placements) {
     commands.push(cmd('story.replaceRange', { story, start: image.start, end: image.end, text: '' }));
     if (image.path) {
@@ -385,10 +380,7 @@ function secondScript(
       if (numberThisPage) {
         const n = numberRect(page, spec);
         commands.push(cmd('frame.create', { spread: spread.index, rect: n.rect, content: 'text', text: PAGE_NUMBER_MARKER }));
-        commands.push(cmd('text.selectStory', {
-          frame: '$last.id',
-          point: [(n.rect[0] + n.rect[2]) / 2, n.rect[1] + 6],
-        }));
+        // v0.7.1 formats the selected text frame directly; no text.selectStory command exists.
         commands.push(cmd('type.para', { attrs: { align: n.align } }));
         commands.push(cmd('type.char', { attrs: { size: spec.pageNumber.fontSize } }));
       }
