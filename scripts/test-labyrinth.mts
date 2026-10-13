@@ -199,8 +199,8 @@ if (process.env.CORE_TEST_DATABASE_URL) {
     pool,
     loadMigrations(resolveMigrationsDir()),
   );
-  check("Міграція 37 та її повтор без змін", () =>
-    assert.equal(migrated.schemaVersion, 37),
+  check("Міграція 38 та її повтор без змін", () =>
+    assert.equal(migrated.schemaVersion, 39),
   );
   const again = await runMigrations(
     pool,
@@ -214,10 +214,10 @@ if (process.env.CORE_TEST_DATABASE_URL) {
   try {
     const status = await initCore(() => {});
     check(
-      "Штатний startup ядра підключає store лише після готовності v37",
+      "Штатний startup ядра підключає store лише після готовності v38",
       () => {
         assert.equal(status.state, "ready");
-        assert.equal(status.schemaVersion, 37);
+        assert.equal(status.schemaVersion, 39);
         assert.ok(getLabyrinthStore());
       },
     );

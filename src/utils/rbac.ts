@@ -726,7 +726,7 @@ export function canAccessTab(role: UserRole | string | undefined | null, tab: Na
   // ролі знає лише сервер); сторінка сама питає сервер і показує відмову.
   if (tab === 'graph-studio') return !!role && role !== 'guest';
   // Т6.4: «Мій простір» — кожному, хто увійшов; що саме відкрито, вирішує сервер.
-  if (tab === 'my-space') return !!role && role !== 'guest';
+  if (tab === 'my-space' || tab === 'labyrinth-reader') return !!role && role !== 'guest';
   const perms = getRolePermissions(role);
   // Сторінки семантичного ядра (Т0.8) — для всіх, хто працює з текстом книги:
   // доступ до самих даних перевіряє сервер (requireProjectAccess), тут лише меню.

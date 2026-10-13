@@ -1,3 +1,6 @@
+import { ReaderPublication } from "./ReaderPublication";
+import { MechanicLibrary } from "./MechanicLibrary";
+import { mechanicTitle } from "../../../shared/labyrinthMechanics";
 import { importMazeFinal } from "../../../shared/mazeFinalImport";
 import { DIRECTOR_DEFAULTS } from "../../../shared/labyrinthDirector";
 import { RuntimeControls } from "./RuntimeControls";
@@ -537,6 +540,7 @@ export function LabyrinthBuilder({
               : "Нова карта"}
         </p>
       </header>
+      <ReaderPublication base={base} mapId={mapId} mapRevision={loaded} heroes={d.heroes} definition={d} dirty={dirty} busy={busy} />
       {notice && (
         <p className="rounded-lg border border-amber-500 p-3" role="alert">
           {notice}
@@ -1011,6 +1015,17 @@ export function LabyrinthBuilder({
             </button>
           ))}
         </nav>
+        <MechanicLibrary
+          key={book.id}
+          base={base}
+          definition={d}
+          onWorking={setBusy}
+          onDraft={(definition, eventId) => {
+            edit(definition);
+            setTab("events");
+            setSelected(eventId);
+          }}
+        />
         <div className="grid gap-4 lg:grid-cols-[240px_1fr]">
           <aside className="max-h-[480px] overflow-y-auto space-y-2">
             {tab !== "heroes" && (
@@ -1478,6 +1493,69 @@ export function LabyrinthBuilder({
             )}
             {tab === "events" && event && (
               <>
+                {event.mechanic && (
+                  <p data-mechanic-kind={event.mechanic.kind}>
+                    Механіка: {mechanicTitle(event)} · відповідь:{" "}
+                    {event.mechanic.responseObjectId}. Зона прив’язана до
+                    вибраного мосту.
+                  </p>
+                )}
+                {event.mechanic?.belief && (
+                  <>
+                    <Text
+                      label="Хибна підказка (переконання, не факт)"
+                      value={event.mechanic.belief.claim}
+                      onChange={(claim) =>
+                        update("events", event.id, {
+                          mechanic: {
+                            ...event.mechanic!,
+                            belief: { ...event.mechanic!.belief!, claim },
+                          },
+                        })
+                      }
+                    />
+                    <Text
+                      label="Ознаки обману — по одній у рядку"
+                      area
+                      value={event.mechanic.belief.clues.join("\n")}
+                      onChange={(value) =>
+                        update("events", event.id, {
+                          mechanic: {
+                            ...event.mechanic!,
+                            belief: {
+                              ...event.mechanic!.belief!,
+                              clues: value.split("\n").filter(Boolean),
+                            },
+                          },
+                        })
+                      }
+                    />
+                  </>
+                )}
+                {event.resolution && (
+                  <>
+                    <Rules
+                      label="Умови припинення небезпеки"
+                      d={d}
+                      value={event.resolution.conditions}
+                      onChange={(conditions) =>
+                        update("events", event.id, {
+                          resolution: { ...event.resolution!, conditions },
+                        })
+                      }
+                    />
+                    <Text
+                      label="Опис припинення"
+                      area
+                      value={event.resolution.description}
+                      onChange={(description) =>
+                        update("events", event.id, {
+                          resolution: { ...event.resolution!, description },
+                        })
+                      }
+                    />
+                  </>
+                )}
                 <Pick
                   label="Подія директора"
                   value={event.director?.intent ?? "manual"}
@@ -1494,10 +1572,7 @@ export function LabyrinthBuilder({
                     else
                       next.director = {
                         intent: intent as
-                          | "challenge"
-                          | "rescue"
-                          | "rest"
-                          | "hint",
+                          "challenge" | "rescue" | "rest" | "hint",
                         priority: event.director?.priority ?? 50,
                       };
                     update("events", event.id, next);
@@ -1523,6 +1598,7 @@ export function LabyrinthBuilder({
                   onChange={(health) =>
                     update("events", event.id, {
                       hazard: {
+                        ...event.hazard,
                         resourceCosts: {
                           ...event.hazard?.resourceCosts,
                           health,
@@ -1539,6 +1615,7 @@ export function LabyrinthBuilder({
                     onChange={(e) =>
                       update("events", event.id, {
                         hazard: {
+                          ...event.hazard,
                           resourceCosts: event.hazard?.resourceCosts ?? {},
                           blocksMovement: e.target.checked,
                         },
@@ -1547,6 +1624,23 @@ export function LabyrinthBuilder({
                   />{" "}
                   Блокувати вхід у небезпечну зону
                 </label>
+                {event.hazard?.growthPerTick && (
+                  <Num
+                    label="Наростання шкоди за активний крок"
+                    value={event.hazard.growthPerTick.health ?? 0}
+                    onChange={(health) =>
+                      update("events", event.id, {
+                        hazard: {
+                          ...event.hazard!,
+                          growthPerTick: {
+                            ...event.hazard!.growthPerTick,
+                            health,
+                          },
+                        },
+                      })
+                    }
+                  />
+                )}
 
                 <Multi
                   label="Зона події"

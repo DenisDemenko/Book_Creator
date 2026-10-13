@@ -1,3 +1,6 @@
+import { registerLabyrinthGroupRoutes, type GroupRouteDeps } from "./groupRoutes";
+import { registerLabyrinthReaderRoutes } from "./readerRoutes";
+import { compileMechanic } from "./mechanics";
 import type { DirectorServices } from "./director";
 import { headings, type Heading } from "../../../shared/labyrinthNarration";
 import { analyzeLabyrinth } from "../../../shared/labyrinthDesign";
@@ -30,8 +33,12 @@ export function registerLabyrinthRoutes(
     ) => DirectorServices;
     recheckAi?: (req: Request) => Promise<void>;
     refreshPrincipal?: (req: Request) => Promise<void>;
+    groupPrincipal?: GroupRouteDeps["groupPrincipal"];
+    groupUserIds?: GroupRouteDeps["groupUserIds"];
   },
 ) {
+  registerLabyrinthReaderRoutes(app, d);
+  registerLabyrinthGroupRoutes(app, d);
   const base = "/api/core/projects/:projectId/labyrinth";
   const handle =
     (
@@ -54,7 +61,7 @@ export function registerLabyrinthRoutes(
           throw new LabyrinthError(401, "Увійдіть у систему.");
         const projectId = String(req.params.projectId),
           a = await resolveProjectAccess(req.principal, projectId, d.access);
-        // Full definitions contain hidden nodes and planned events. Participant views are T9.6–T9.7.
+        // Author endpoints retain full definitions; T9.6 reader endpoints have a separate server projection.
         if (!a || (!a.isOwner && a.role !== "admin"))
           throw new LabyrinthError(
             403,
@@ -79,6 +86,19 @@ export function registerLabyrinthRoutes(
       }
     };
   app.post(
+    `${base}/mechanics/preview`,
+    handle(async (q, r, s, p) => {
+      const b = body(q, ["definition", "binding"]);
+      const result = compileMechanic(b.definition, b.binding);
+      await s.validateDesign(p, result.definition);
+      r.json({
+        ...result,
+        issues: analyzeLabyrinth(result.definition),
+        persisted: false,
+      });
+    }),
+  );
+  app.post(
     `${base}/validate`,
     handle(async (q, r, s, p) => {
       const b = body(q, ["definition"]);
@@ -92,7 +112,7 @@ export function registerLabyrinthRoutes(
       r.json({
         maps: await s.listMaps(p),
         mode: "author_structural_preview",
-        readerAvailable: false,
+        readerAvailable: true,
       });
     }),
   );

@@ -1,3 +1,6 @@
+import { subscribeGroupUpdates } from "./server/core/labyrinth/groupRealtime";
+import { registerTeamRoleRoutes } from './server/core/collaboration/teamRoles';
+import { fetchTeamRoleSnapshot } from './server/marketplaceBridge';
 import { registerYoutubeTranscriptRoutes } from './server/youtubeTranscriptRoutes';
 import { jevCostUsd as kittenJevCost } from "./server/ai/adapters/jev";
 import { registerMazeKittenRoutes, KITTEN_USAGE_CONTEXT } from "./server/mazeKitten";
@@ -847,6 +850,12 @@ registerGitCommandRoutes(app);
       if (!quota.allowed) throw new (await import('./server/core/collaboration/workspaceStore')).WorkspaceError(402, quota.reasonUk ?? 'Ліміт сховища вичерпано.');
     },
   });
+  registerTeamRoleRoutes(app, {
+    repo: getCoreRepository, access: realtimeAccessDeps,
+    identity: async req => {const u=await findUserForAccess(req.principal!.id as string);return u?.firebaseUid?{firebaseUid:u.firebaseUid,disabled:u.disabled}:null;},
+    findUser: findUserByFirebaseUid,
+    fetchTeam: async (req,teamId) => {const u=await findUserForAccess(req.principal!.id as string);if(!u?.firebaseUid||u.disabled)throw new Error('Firebase identity required');return fetchTeamRoleSnapshot(teamId,u.firebaseUid);},
+  });
   registerCreativeOrderBindingRoutes(app, {
     ...collaborationAiDeps,
     specialistUser: findUserByFirebaseUid,
@@ -1117,6 +1126,8 @@ registerGitCommandRoutes(app);
       : null;
   };
   registerLabyrinthRoutes(app, {
+    groupPrincipal: async userId => {const u=await findUserForAccess(userId);return u&&!u.disabled?{id:u.id,role:u.role,isGuest:false,name:u.name}:null;},
+    groupUserIds: async projectId => (await getCoreRepository()?.listParticipants(projectId) ?? []).filter(p=>p.status==='active').map(p=>p.userId),
     access: realtimeAccessDeps, store: getLabyrinthStore, aiGuard: requirePermission('canUseAi'),
     refreshPrincipal: async req => {const u=await findUserForAccess(req.principal!.id!);if(!u || u.disabled)throw new LabyrinthError(403,'Обліковий запис недоступний.');const {passwordHash,...principal}=u;req.principal={...principal,isGuest:false};},
     recheckAi: async req => {const u=await findUserForAccess(req.principal!.id!);if(!u || u.disabled || !(await canRole(u.role,'canUseAi')))throw new LabyrinthError(403,'Доступ до ШІ відкликано.');},
@@ -6477,6 +6488,7 @@ ${JSON.stringify(bookContext || {}, null, 2)}
     const roomKey = access.roomKey;
     const bookId = access.bookId;
     let currentClientId: string | null = null;
+    let labyrinthSubscription = false;
     // Т6.2: частковий доступ — права перечитуються при підключенні (квиток
     // лише каже, що фільтр потрібен); доступу вже немає — з'єднання закрито.
     const viewReady: Promise<RoomView | null> = access.scoped ? loadRoomView(access).catch(() => null) : Promise.resolve(null);
@@ -6488,6 +6500,23 @@ ${JSON.stringify(bookContext || {}, null, 2)}
       try {
         const message = JSON.parse(raw.toString());
         const { type, payload } = message || {};
+        if(labyrinthSubscription){ws.close(4400,'read_only_subscription');return;}
+        if(type==='labyrinth:subscribe'){
+          if(currentClientId || !payload || Object.keys(payload).length!==1 || typeof payload.runId!=='string'){
+            ws.close(4403,'invalid_group_subscription');return;
+          }
+          labyrinthSubscription=true;
+          subscribeGroupUpdates(ws,async()=>{
+            const u=await findUserForAccess(access.userId);
+            if(!u||u.disabled)throw new Error('account_unavailable');
+            const a=await resolveProjectAccess({id:u.id,role:u.role,isGuest:false},bookId,realtimeAccessDeps);
+            if(!a || !canRead(a.effective.book))throw new Error('access_revoked');
+            const store=getLabyrinthStore();if(!store)throw new Error('core_unavailable');
+            return store.group.realtimeRevision(bookId,payload.runId,access.userId);
+          });
+          return;
+        }
+
         if(access.shared && ['coauthor','co_author'].includes(access.role))access.canWrite=false;
         if(access.shared && await realtimeAccessDeps.requiresChangeProposal?.(bookId,access.userId)){
           const owner=(await realtimeAccessDeps.getCollabOwnerId(bookId))??(await realtimeAccessDeps.getBookOwnerId(bookId));

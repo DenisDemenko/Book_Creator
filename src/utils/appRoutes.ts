@@ -77,7 +77,7 @@ const ROUTABLE_TABS: NavigationTab[] = [
   'my-space', 'express', 'dashboard', 'start', 'editor', 'mastery', 'scenario', 'characters', 'mindboard', 'toc',
   'qr-footnotes', 'ai-studio', 'illustrations', 'layout', 'preview', 'cover', 'media', 'changelog', 'export',
   'admin', 'subscription', 'api-keys', 'kdp-format', 'courses', 'course-studio', 'narration', 'pdf-editor',
-  'knowledge', 'trainers', 'diagn', 'structure', 'portfolio', 'publishing',
+  'knowledge', 'trainers', 'diagn', 'structure', 'labyrinth-reader', 'portfolio', 'publishing',
 ];
 
 export interface AppRoute {

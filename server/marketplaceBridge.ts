@@ -1654,3 +1654,11 @@ export async function fetchCreativeOrderSelection(orderId:string,ownerFirebaseUi
  if(!r.ok)throw new MarketplaceBridgeError('Marketplace не повернув вибір фахівця.','rejected',r.status);
  return await r.json() as import('./core/creative/orderBinding').OrderSelection;
 }
+
+/** Team owner scoped, server-to-server only. No book bytes cross the bridge. */
+export async function fetchTeamRoleSnapshot(teamId:string,ownerFirebaseUid:string,deps:{fetch?:typeof fetch;settings?:BridgeSettings}={}) {
+ const settings=deps.settings??await readBridgeSettings();
+ const r=await (deps.fetch??fetch)(`${settings.url}/bridge/teams/${encodeURIComponent(teamId)}/roles?ownerFirebaseUid=${encodeURIComponent(ownerFirebaseUid)}`,{headers:{'x-bridge-key':settings.key},signal:AbortSignal.timeout(15000)});
+ if(!r.ok)throw new MarketplaceBridgeError('Команда недоступна цьому власнику.','rejected',r.status);
+ return await r.json() as import('./core/collaboration/teamRoles').TeamRoleSnapshot;
+}

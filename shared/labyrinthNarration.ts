@@ -1,3 +1,4 @@
+import { eventPhase } from "./labyrinthEventState";
 import type {
   LabyrinthDefinition,
   LabyrinthRunState,
@@ -136,6 +137,19 @@ export function describeRoutes(
     sentences.push(
       `${below ? "Над цим місцем" : "Над сусіднім коридором"} видно міст між «${a.title}» та «${z.title}», перекинутий через стіни.`,
     );
+  }
+  for (const event of d.events) {
+    const belief = event.mechanic?.belief;
+    const bridge = d.edges.find((e) => e.id === event.mechanic?.bridgeId);
+    if (
+      belief &&
+      bridge &&
+      [bridge.from, bridge.to, ...bridge.overNodeIds].includes(node.id) &&
+      ["warning", "active"].includes(eventPhase(d, state, event.id))
+    )
+      sentences.push(
+        `Помітна підказка: «${belief.claim}» — це переконання, не підтверджений факт. Ознаки обману: ${belief.clues.join(" ")}`,
+      );
   }
   return {
     heroId,

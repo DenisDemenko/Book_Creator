@@ -122,6 +122,7 @@ import { AlertTriangle, CheckCircle2, Radio, Loader2, HardDriveDownload, Mail, L
 import { useLanguage } from './i18n/LanguageContext';
 
 /** Пауза після останнього натискання клавіші перед автозбереженням. */
+const LabyrinthReaderPage = React.lazy(() => import('./components/labyrinth/LabyrinthReader'));
 const AUTOSAVE_DEBOUNCE_MS = 2000;
 
 /** Скільки записів журналу тримати в сховищі (старіші відкидаємо). */
@@ -2600,6 +2601,14 @@ export default function App() {
             onSendTextToChapter={handleSendChatTextToChapter}
             onUpdateBook={handleUpdateBook}
           />
+        )}
+
+        {currentTab === 'labyrinth-reader' && (
+          <div className="flex-1 min-w-0 overflow-y-auto bg-slate-900 p-4 lg:p-6">
+            <React.Suspense fallback={<p>Завантаження читача…</p>}>
+              <LabyrinthReaderPage key={book.id} projectId={book.id} />
+            </React.Suspense>
+          </div>
         )}
 
         {currentTab === 'structure' && (

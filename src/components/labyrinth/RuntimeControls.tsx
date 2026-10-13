@@ -1,3 +1,8 @@
+import { eventPhase } from "../../../shared/labyrinthEventState";
+import {
+  mechanicTitle,
+  MECHANIC_LIBRARY,
+} from "../../../shared/labyrinthMechanics";
 import { useRef, useState } from "react";
 import type {
   LabyrinthDefinition,
@@ -194,26 +199,43 @@ export function RuntimeControls({
         const elapsed = scheduled
           ? run.state.storyTime - scheduled.startedAt
           : -1;
-        const phase =
-          elapsed < 0
-            ? "готова"
-            : elapsed < e.preparation
-              ? "попередження"
-              : elapsed < e.preparation + e.duration
-                ? "активна"
-                : elapsed < e.preparation + e.duration + e.cooldown
-                  ? "перезаряджання"
-                  : "готова";
+        const phaseKey = eventPhase(d, run.state, e.id);
+        const phase = {
+          ready: "готова",
+          warning: "попередження",
+          active: "активна",
+          cooldown: "перезаряджання",
+        }[phaseKey];
         return (
-          <div key={e.id}>
+          <div
+            key={e.id}
+            data-event-id={e.id}
+            data-phase={phaseKey}
+            data-resolved={
+              scheduled?.resolvedAt !== undefined ? "true" : "false"
+            }
+          >
             <button
               className={btn}
               disabled={busy || phase !== "готова"}
               onClick={() => void step({ kind: "start_event", eventId: e.id })}
             >
-              Запустити: {e.id}
+              Запустити: {mechanicTitle(e)}
             </button>{" "}
             <span>{phase}</span>
+            {scheduled?.resolvedAt !== undefined && (
+              <p role="status">
+                {e.resolution?.description} · припинено на кроці{" "}
+                {scheduled.resolvedAt}
+              </p>
+            )}
+            {phaseKey === "active" && <p role="status">{e.avoidance}</p>}
+            {["warning", "active"].includes(phaseKey) && e.mechanic?.belief && (
+              <p data-mechanic-belief>
+                Хибна підказка (переконання): «{e.mechanic.belief.claim}» ·
+                Ознаки обману: {e.mechanic.belief.clues.join(" ")}
+              </p>
+            )}
             {phase === "попередження" && (
               <p role="status">
                 {e.warning} · {e.avoidance} · до активації:{" "}
@@ -278,7 +300,14 @@ export function RuntimeControls({
                     })
                   }
                 >
-                  {o.id}: {t.from} → {t.to}
+                  {(() => {
+                    const e = d.events.find(
+                      (e) => e.mechanic?.responseObjectId === o.id,
+                    );
+                    return e?.mechanic
+                      ? `${t.to === "resolved" ? MECHANIC_LIBRARY[e.mechanic.kind].response : "Підготувати механіку повторно"}: ${t.from} → ${t.to}`
+                      : `${o.id}: ${t.from} → ${t.to}`;
+                  })()}
                 </button>
               )),
             )}

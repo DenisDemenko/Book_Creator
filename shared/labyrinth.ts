@@ -1,5 +1,6 @@
 /** T9.1: declarative world data, immutable versions and isolated playthroughs.
  * References reuse Core scene/entity ids. No permissions, AI execution or canon writes. */
+import type { MechanicKind } from "./labyrinthMechanics";
 export type LabyrinthLevel = "lower" | "upper";
 export interface LabyrinthNode {
   id: string;
@@ -96,6 +97,13 @@ export interface LabyrinthDirectorState {
   };
 }
 export interface LabyrinthEventTemplate {
+  mechanic?: {
+    kind: MechanicKind;
+    bridgeId: string;
+    responseObjectId: string;
+    belief?: { claim: string; clues: string[] };
+  };
+  resolution?: { conditions: ObjectCondition[]; description: string };
   director?: {
     intent: "challenge" | "rescue" | "rest" | "hint";
     priority: number;
@@ -109,7 +117,11 @@ export interface LabyrinthEventTemplate {
   cooldown: number;
   effects: ObjectEffect[];
   avoidance: string;
-  hazard?: { resourceCosts: Record<string, number>; blocksMovement: boolean };
+  hazard?: {
+    resourceCosts: Record<string, number>;
+    blocksMovement: boolean;
+    growthPerTick?: Record<string, number>;
+  };
 }
 export interface LabyrinthDefinition {
   director?: LabyrinthDirectorConfig;
@@ -137,7 +149,7 @@ export interface LabyrinthRunState {
   engine?: {
     director?: LabyrinthDirectorState;
     version: 1;
-    events: Array<{ eventId: string; startedAt: number }>;
+    events: Array<{ eventId: string; startedAt: number; resolvedAt?: number }>;
   };
   turn: number;
   storyTime: number;
@@ -158,7 +170,7 @@ export interface LabyrinthRun {
   mapId: string;
   mapRevision: number;
   seed: string;
-  difficulty: "author_preview";
+  difficulty: "author_preview" | "reader" | "reader_group";
   mode?: "structural" | "runtime";
   participants: Array<{ userId: string; heroIds: string[] }>;
   revision: number;

@@ -1,3 +1,4 @@
+import { StudioTeamRoleImport } from './StudioTeamRoleImport';
 import React, { useEffect, useState } from 'react';
 import { activeCollabOntology } from '../utils/collabOntology';
 interface Props {bookId:string;bookTitle:string;canManage:boolean;names:Record<string,string>}
@@ -26,6 +27,7 @@ export function CollaborationTeam({bookId,bookTitle,canManage,names}:Props) {
       <form aria-label="Запросити учасника" className="grid gap-2" onSubmit={e=>{e.preventDefault();void action(async()=>{const b=await request('/api/collaboration/invite','POST',{bookId,bookTitle,email,role:inviteRole});setInviteLink(b.inviteLink ?? '');setNotice(b.emailSent?'Запрошення надіслано.':'Запрошення створено. Скопіюйте посилання нижче.');setEmail('');});}}>
         <h3 className="font-bold">Запросити до книги</h3><label>Електронна пошта<input className={field} type="email" required value={email} onChange={e=>setEmail(e.target.value)}/></label><label>Роль запрошення<select className={field} aria-label="Роль запрошення" value={inviteRole} onChange={e=>setInviteRole(e.target.value)}>{roles.filter(r=>r.invitable&&r.status==='active').map(r=><option key={r.id} value={r.id}>{r.label.uk}</option>)}</select></label><button className={button} disabled={busy||!roles.some(r=>r.invitable&&r.status==='active'&&r.id===inviteRole)}>Запросити</button>
       </form>
+      <StudioTeamRoleImport key={bookId} bookId={bookId} onChanged={load}/>
       {inviteLink&&<label>Посилання запрошення<input aria-label="Посилання запрошення" className={field} readOnly value={inviteLink} onFocus={e=>e.target.select()}/></label>}
     </>}
   </section>;

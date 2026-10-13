@@ -1,3 +1,5 @@
+import { PgLabyrinthGroupStore } from "./groupStore";
+import { PgLabyrinthReaderStore } from "./readerStore";
 import { directLabyrinth, type DirectorServices } from "./director";
 import {
   runtimeInitialState,
@@ -63,7 +65,9 @@ const run = (r: any): LabyrinthRun => ({
 });
 /** Shares the existing Core pool and migration lifecycle; never owns or closes it. */
 export class PgLabyrinthStore {
-  constructor(private readonly pool: Pool) {}
+  readonly reader: PgLabyrinthReaderStore;
+  readonly group: PgLabyrinthGroupStore;
+  constructor(private readonly pool: Pool) { this.reader = new PgLabyrinthReaderStore(pool); this.group = new PgLabyrinthGroupStore(pool); }
   private async transaction<T>(fn: (c: PoolClient) => Promise<T>): Promise<T> {
     const c = await this.pool.connect();
     try {
@@ -302,7 +306,7 @@ export class PgLabyrinthStore {
     uuid(mapId);
     revisionNumber(mapRevision);
     const { rows } = await this.pool.query(
-      "SELECT id,map_id,map_revision,mode,revision,state->>'turn' AS turn,state->>'storyTime' AS story_time,created_at FROM labyrinth_runs WHERE project_id=$1 AND map_id=$2 AND map_revision=$3 ORDER BY created_at DESC,id LIMIT 20",
+      "SELECT id,map_id,map_revision,mode,revision,state->>'turn' AS turn,state->>'storyTime' AS story_time,created_at FROM labyrinth_runs WHERE project_id=$1 AND map_id=$2 AND map_revision=$3 AND difficulty='author_preview' ORDER BY created_at DESC,id LIMIT 20",
       [projectId, mapId, mapRevision],
     );
     return rows.map((r) => ({
@@ -355,6 +359,8 @@ export class PgLabyrinthStore {
       );
       if (!rows.length)
         throw new LabyrinthError(404, "Проходження не знайдено.");
+      if (rows[0].difficulty !== "author_preview")
+        throw new LabyrinthError(403, "Читацьке проходження змінюється лише через власні читацькі дії.");
       const r = run(rows[0]);
       if (r.mode === "runtime")
         throw new LabyrinthError(
@@ -413,6 +419,8 @@ export class PgLabyrinthStore {
       );
       if (!rows.length)
         throw new LabyrinthError(404, "Проходження не знайдено.");
+      if (rows[0].difficulty !== "author_preview")
+        throw new LabyrinthError(403, "Читацьке проходження змінюється лише через власні читацькі дії.");
       const r = run(rows[0]);
       const receipt = await c.query(
         "SELECT * FROM labyrinth_action_receipts WHERE project_id=$1 AND run_id=$2 AND key=$3",
@@ -495,6 +503,8 @@ export class PgLabyrinthStore {
       );
       if (!rows.length)
         throw new LabyrinthError(404, "Проходження не знайдено.");
+      if (rows[0].difficulty !== "author_preview")
+        throw new LabyrinthError(403, "Читацьке проходження змінюється лише через власні читацькі дії.");
       const receipt = await c.query(
         "SELECT * FROM labyrinth_action_receipts WHERE project_id=$1 AND run_id=$2 AND key=$3",
         [projectId, runId, key],
@@ -582,6 +592,8 @@ export class PgLabyrinthStore {
       );
       if (!rows.length)
         throw new LabyrinthError(404, "Проходження не знайдено.");
+      if (rows[0].difficulty !== "author_preview")
+        throw new LabyrinthError(403, "Читацьке проходження змінюється лише через власні читацькі дії.");
       const r = run(rows[0]);
       if (r.revision !== expectedRevision)
         throw new LabyrinthError(409, "Проходження вже змінено.");

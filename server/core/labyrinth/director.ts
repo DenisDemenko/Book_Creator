@@ -47,6 +47,7 @@ export async function directLabyrinth(
   run: LabyrinthRun,
   useAI: boolean,
   services: DirectorServices = {},
+  execution: { step: typeof runtimeAction; prove: typeof proveExit } = { step: runtimeAction, prove: proveExit },
 ) {
   const started = performance.now(),
     cfg = d.director;
@@ -140,7 +141,7 @@ export async function directLabyrinth(
       try {
         candidates.push({
           id: e.id,
-          next: runtimeAction(d, current, {
+          next: execution.step(d, current, {
             kind: "start_event",
             eventId: e.id,
           }),
@@ -358,7 +359,7 @@ export async function directLabyrinth(
     scores,
   };
   state.engine!.director = nextMemory;
-  const proof = chosen?.next.proof ?? proveExit(d, state);
+  const proof = chosen?.next.proof ?? execution.prove(d, state);
   trace.latencyMs = Math.round((performance.now() - started) * 100) / 100;
   return { state, trace, proof };
 }

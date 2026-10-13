@@ -1,3 +1,4 @@
+import { MECHANIC_KINDS } from "../../../shared/labyrinthMechanics";
 import { createHash } from "node:crypto";
 import type {
   LabyrinthDefinition,
@@ -313,8 +314,54 @@ export function validateDefinition(input: unknown): LabyrinthDefinition {
       "director",
       "avoidance",
       "hazard",
+      "mechanic",
+      "resolution",
     ]);
     return {
+      ...(e.mechanic === undefined
+        ? {}
+        : {
+            mechanic: (() => {
+              const m = record(e.mechanic, [
+                "kind",
+                "bridgeId",
+                "responseObjectId",
+                "belief",
+              ]);
+              const belief =
+                m.belief === undefined
+                  ? null
+                  : record(m.belief, ["claim", "clues"]);
+              const kind = choice(m.kind, MECHANIC_KINDS);
+              if (belief && kind !== "false_route")
+                bad("Хибна підказка належить лише механіці ілюзії.");
+              if (kind === "false_route" && !belief)
+                bad("Ілюзії потрібні підказка й ознаки обману.");
+              const clues = belief
+                ? list(belief.clues, 10, (x) => text(x, 500))
+                : [];
+              if (belief && !clues.length)
+                bad("Потрібна доступна ознака обману.");
+              return {
+                kind,
+                bridgeId: id(m.bridgeId),
+                responseObjectId: id(m.responseObjectId),
+                ...(belief
+                  ? { belief: { claim: text(belief.claim, 1000), clues } }
+                  : {}),
+              };
+            })(),
+          }),
+      ...(e.resolution === undefined
+        ? {}
+        : {
+            resolution: (() => {
+              const v = record(e.resolution, ["conditions", "description"]);
+              const cs = conditions(v.conditions);
+              if (!cs.length) bad("Потрібна умова припинення події.");
+              return { conditions: cs, description: text(v.description, 2000) };
+            })(),
+          }),
       id: id(e.id),
       nodeIds: list(e.nodeIds, 100, (x) => exists(id(x))),
       conditions: conditions(e.conditions),
@@ -344,8 +391,15 @@ export function validateDefinition(input: unknown): LabyrinthDefinition {
         ? {}
         : {
             hazard: (() => {
-              const h = record(e.hazard, ["resourceCosts", "blocksMovement"]);
+              const h = record(e.hazard, [
+                "resourceCosts",
+                "blocksMovement",
+                "growthPerTick",
+              ]);
               return {
+                ...(h.growthPerTick === undefined
+                  ? {}
+                  : { growthPerTick: resources(h.growthPerTick) }),
                 resourceCosts: resources(h.resourceCosts),
                 blocksMovement: bool(h.blocksMovement),
               };
@@ -357,6 +411,35 @@ export function validateDefinition(input: unknown): LabyrinthDefinition {
   events.forEach((e) => {
     e.conditions.forEach(validCondition);
     e.effects.forEach(validCondition);
+    e.resolution?.conditions.forEach(validCondition);
+    if (e.mechanic) {
+      const bridge = edges.find(
+        (v) => v.id === e.mechanic!.bridgeId && v.kind === "bridge",
+      );
+      const response = byObject.get(e.mechanic.responseObjectId);
+      if (
+        !bridge ||
+        !bridge.overNodeIds.length ||
+        !response ||
+        !e.resolution?.conditions.some((c) => c.objectId === response.id)
+      )
+        bad("Механіці потрібен міст і дієва відповідь.");
+      const upper = [
+        "bridge_block",
+        "drawbridge",
+        "barrier",
+        "false_route",
+      ].includes(e.mechanic.kind);
+      const zone = upper ? [bridge!.from, bridge!.to] : bridge!.overNodeIds;
+      if (!e.nodeIds.length || e.nodeIds.some((id) => !zone.includes(id)))
+        bad("Зона механіки не відповідає її мосту.");
+      if (
+        e.mechanic.kind === "false_route"
+          ? response!.nodeId !== bridge!.from
+          : byNode.get(response!.nodeId)!.level !== "lower"
+      )
+        bad("Місце відповіді має відповідати рівню механіки.");
+    }
     if (new Set(e.effects.map((c) => c.objectId)).size !== e.effects.length)
       bad("Конфлікт ефектів події.");
   });
@@ -402,7 +485,10 @@ export function validateDefinition(input: unknown): LabyrinthDefinition {
       e.director &&
       e.director.intent !== "challenge" &&
       (e.hazard?.blocksMovement ||
-        Object.values(e.hazard?.resourceCosts ?? {}).some((v) => v > 0))
+        [
+          ...Object.values(e.hazard?.resourceCosts ?? {}),
+          ...Object.values(e.hazard?.growthPerTick ?? {}),
+        ].some((v) => v > 0))
     )
       bad(
         "Рятувальна/резервна подія не може завдавати шкоди або блокувати вхід.",

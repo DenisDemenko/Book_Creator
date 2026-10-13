@@ -52,7 +52,7 @@ const roundTrip = CORE_PAGES.every((p) => {
 t('туди й назад: кожна з 11 сторінок', roundTrip);
 const tabs = ['express', 'dashboard', 'start', 'editor', 'mastery', 'scenario', 'characters', 'mindboard', 'toc', 'qr-footnotes', 'ai-studio',
   'illustrations', 'layout', 'preview', 'cover', 'media', 'changelog', 'export', 'admin', 'subscription', 'api-keys', 'kdp-format', 'courses',
-  'course-studio', 'narration', 'pdf-editor', 'knowledge', 'trainers', 'diagn', 'structure', 'portfolio', 'publishing'] as const;
+  'course-studio', 'narration', 'pdf-editor', 'knowledge', 'trainers', 'diagn', 'structure', 'labyrinth-reader', 'portfolio', 'publishing'] as const;
 t('туди й назад: кожна звичайна вкладка', tabs.every((tab) => eq(parseAppPath(buildAppPath({ projectId: 'B', tab })!), { projectId: 'B', tab })));
 
 

@@ -12,36 +12,36 @@ import {
 const reject = (message: string): never => {
   throw new LabyrinthError(409, message);
 };
-export function eventPhase(d: World, s: State, eventId: string) {
-  const scheduled = s.engine?.events.find((e) => e.eventId === eventId);
-  const event = d.events.find((e) => e.id === eventId);
-  if (!scheduled || !event) return "ready";
-  const elapsed = s.storyTime - scheduled.startedAt;
-  return elapsed < event.preparation
-    ? "warning"
-    : elapsed < event.preparation + event.duration
-      ? "active"
-      : elapsed < event.preparation + event.duration + event.cooldown
-        ? "cooldown"
-        : "ready";
-}
-export function effectiveObjects(d: World, s: State) {
-  const objects = { ...s.objects };
-  for (const e of d.events)
-    if (eventPhase(d, s, e.id) === "active")
-      for (const effect of e.effects) objects[effect.objectId] = effect.state;
-  return objects;
+export {
+  eventPhase,
+  effectiveObjects,
+} from "../../../shared/labyrinthEventState";
+import {
+  eventPhase,
+  effectiveObjects,
+  hazardCosts,
+} from "../../../shared/labyrinthEventState";
+function resolveEvents(d: World, s: State) {
+  for (const scheduled of s.engine!.events) {
+    const e = d.events.find((e) => e.id === scheduled.eventId)!;
+    if (
+      scheduled.resolvedAt === undefined &&
+      ["warning", "active"].includes(eventPhase(d, s, e.id)) &&
+      e.resolution?.conditions.every((c) => s.objects[c.objectId] === c.state)
+    )
+      scheduled.resolvedAt = s.storyTime;
+  }
 }
 function compatible(d: World, s: State) {
   const effects = new Map<string, string>();
   for (const scheduled of s.engine!.events) {
     const e = d.events.find((e) => e.id === scheduled.eventId)!;
     const start = scheduled.startedAt + e.preparation,
-      end = start + e.duration;
+      end = scheduled.resolvedAt ?? start + e.duration;
     for (const other of s.engine!.events) {
       const o = d.events.find((e) => e.id === other.eventId)!;
       const os = other.startedAt + o.preparation,
-        oe = os + o.duration;
+        oe = other.resolvedAt ?? os + o.duration;
       if (
         Math.max(start, os) < Math.min(end, oe) &&
         e.effects.some((a) =>
@@ -64,7 +64,7 @@ function compatible(d: World, s: State) {
   }
 }
 /** Arrival occurs before damage at the arrival tick; the origin is occupied during all earlier ticks. */
-function simulate(d: World, state: State, action: RuntimeAction): State {
+export function simulateRuntime(d: World, state: State, action: RuntimeAction, group = false): State {
   const next = structuredClone(state);
   if (action.kind === "start_event") {
     const e = d.events.find((e) => e.id === action.eventId);
@@ -77,6 +77,7 @@ function simulate(d: World, state: State, action: RuntimeAction): State {
     next.engine!.events = next.engine!.events.filter((x) => x.eventId !== e.id);
     next.engine!.events.push({ eventId: e.id, startedAt: next.storyTime });
     next.turn++;
+    resolveEvents(d, next);
     compatible(d, next);
     return next;
   }
@@ -131,6 +132,7 @@ function simulate(d: World, state: State, action: RuntimeAction): State {
       }
     }
   }
+  resolveEvents(d, next);
   const h = next.heroes[action.heroId];
   if (h.resources.health === 0) reject("Дія виснажує здоров’я героя.");
   h.nodeId = origin;
@@ -144,26 +146,34 @@ function simulate(d: World, state: State, action: RuntimeAction): State {
       if (!edge.conditions.every((c) => objects[c.objectId] === c.state))
         reject("Маршрут перекривається до завершення переходу.");
     }
+    const occupants = group ? d.heroes.map((hero) => next.heroes[hero.id]) : [h];
+    for (const occupant of occupants) {
+      if (group && d.exitNodeIds.includes(occupant.nodeId)) continue;
     for (const e of d.events)
       if (
         eventPhase(d, next, e.id) === "active" &&
-        e.nodeIds.includes(h.nodeId)
+        e.nodeIds.includes(occupant.nodeId)
       ) {
         if (
           e.hazard?.blocksMovement &&
           destination !== origin &&
-          h.nodeId === destination
+          occupant === h && occupant.nodeId === destination
         )
           reject("Вхід у небезпечну зону заблокований.");
         for (const [key, cost] of Object.entries(
-          e.hazard?.resourceCosts ?? {},
+          hazardCosts(
+            e,
+            next.engine!.events.find((s) => s.eventId === e.id)!.startedAt,
+            next.storyTime,
+          ),
         )) {
-          const value = (h.resources[key] ?? 0) - cost;
+          const value = (occupant.resources[key] ?? 0) - cost;
           if (value < 0 || (key === "health" && value === 0))
             reject("Небезпека виснажує ресурси до порятунку.");
-          h.resources[key] = value;
+          occupant.resources[key] = value;
         }
       }
+    }
   }
   next.turn++;
   return next;
@@ -185,7 +195,7 @@ export function proveExit(
     state.storyTime,
     ...(state.engine?.events ?? []).map((s) => {
       const e = d.events.find((e) => e.id === s.eventId)!;
-      return s.startedAt + e.preparation + e.duration;
+      return s.resolvedAt ?? s.startedAt + e.preparation + e.duration;
     }),
   );
   while (cursor < queue.length && work++ < budget) {
@@ -219,7 +229,7 @@ export function proveExit(
       if (work > budget) break;
       try {
         queue.push({
-          state: simulate(d, s, action),
+          state: simulateRuntime(d, s, action),
           path: [...current.path, action],
         });
       } catch (e) {
@@ -279,7 +289,7 @@ export function runtimeAction(d: World, s: State, input: unknown) {
   )
     throw new LabyrinthError(422, "Некоректні поля дії.");
   const action = r as RuntimeAction,
-    state = simulate(d, s, action),
+    state = simulateRuntime(d, s, action),
     proof = proveExit(d, state);
   if (action.kind === "move" && state.engine?.director)
     state.engine.director.recentMoves = [

@@ -1,0 +1,270 @@
+import assert from "node:assert/strict";
+import express from "express";
+import type { AddressInfo } from "node:net";
+import { createCorePool } from "../server/core/index";
+import {
+  loadMigrations,
+  resolveMigrationsDir,
+  runMigrations,
+} from "../server/core/migrate";
+import { PgLabyrinthStore } from "../server/core/labyrinth/store";
+import { registerLabyrinthRoutes } from "../server/core/labyrinth/routes";
+import { labyrinthDemo } from "../shared/labyrinthDemo";
+import { MECHANIC_KINDS } from "../shared/labyrinthMechanics";
+import { eventPhase } from "../shared/labyrinthEventState";
+import type {
+  LabyrinthRun,
+  LabyrinthDefinition,
+  RuntimeAction,
+} from "../shared/labyrinth";
+const url = process.env.CORE_TEST_DATABASE_URL;
+if (!url) throw new Error("Set isolated CORE_TEST_DATABASE_URL");
+const parsed = new URL(url);
+if (
+  !["127.0.0.1", "localhost"].includes(parsed.hostname) ||
+  !parsed.pathname.endsWith("_t95")
+)
+  throw new Error("This test requires a local database ending in _t95");
+let pool = createCorePool(url),
+  store: PgLabyrinthStore | null = new PgLabyrinthStore(pool);
+await runMigrations(pool, loadMigrations(resolveMigrationsDir()));
+const project = `t95-${Date.now()}`;
+await pool.query(
+  "INSERT INTO projects(id,owner_id,title,revision) VALUES($1,'owner','Незмінний канон',7)",
+  [project],
+);
+const app = express();
+app.use(express.json({ limit: "40mb" }));
+app.use((req, _res, next) => {
+  const who = String(req.headers["x-test-user"] ?? "guest");
+  req.principal = {
+    id: who === "guest" ? null : who,
+    role: "user",
+    isGuest: who === "guest",
+    disabled: who === "disabled",
+  } as any;
+  next();
+});
+registerLabyrinthRoutes(app, {
+  store: () => store,
+  access: {
+    getCollabOwnerId: async () => undefined,
+    getBookOwnerId: async (id) => (id === project ? "owner" : null),
+    listAcceptedInvites: async () => [
+      { acceptedUserId: "editor", role: "editor" },
+      { acceptedUserId: "reader", role: "reader" },
+    ],
+  },
+});
+const server = app.listen(0, "127.0.0.1");
+await new Promise<void>((r) => server.once("listening", r));
+const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+let passed = 0;
+const check = (name: string) => {
+  passed++;
+  console.log(`✓ API/PG: ${name}`);
+};
+const request = async (
+  path: string,
+  body?: unknown,
+  who = "owner",
+  method = body === undefined ? "GET" : "POST",
+) => {
+  const res = await fetch(
+    `${origin}/api/core/projects/${project}/labyrinth${path}`,
+    {
+      method,
+      headers: { "content-type": "application/json", "x-test-user": who },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    },
+  );
+  return {
+    status: res.status,
+    body: await res.json(),
+    cache: res.headers.get("cache-control"),
+  };
+};
+try {
+  const source = structuredClone(labyrinthDemo);
+  source.events = [];
+  source.heroes[0].resources = { health: 200, energy: 100 };
+  const initialBinding = {
+    id: "mechanic",
+    kind: "barrier",
+    bridgeId: "bridge",
+    responseNodeId: "lower-entry",
+    preparation: 2,
+    duration: 4,
+    cooldown: 3,
+    damage: 2,
+  };
+  for (const [who, status] of [
+    ["guest", 401],
+    ["disabled", 401],
+    ["outsider", 403],
+    ["editor", 403],
+    ["reader", 403],
+  ] as const) {
+    const a = await request(
+      "/mechanics/preview",
+      { definition: source, binding: initialBinding },
+      who,
+    );
+    assert.equal(a.status, status);
+    assert.equal(a.cache, "no-store");
+    check(`${who}: preview закритий`);
+  }
+  for (const payload of [
+    { definition: source, binding: { ...initialBinding, extra: true } },
+    { definition: source, binding: { ...initialBinding, preparation: 0 } },
+    { definition: source, binding: initialBinding, save: true },
+  ])
+    assert.equal((await request("/mechanics/preview", payload)).status, 422);
+  check("Невідомі поля/параметри відхилено сервером");
+  const foreign = structuredClone(source);
+  foreign.nodes[0].sceneId = "foreign-scene";
+  assert.equal(
+    (
+      await request("/mechanics/preview", {
+        definition: foreign,
+        binding: initialBinding,
+      })
+    ).status,
+    422,
+  );
+  check("Прив’язка чужої сцени не проходить preview");
+  for (const kind of MECHANIC_KINDS) {
+    const preview = await request("/mechanics/preview", {
+      definition: source,
+      binding: {
+        ...initialBinding,
+        id: kind,
+        kind,
+        responseNodeId: kind === "false_route" ? "upper-left" : "lower-entry",
+      },
+    });
+    assert.equal(preview.status, 200);
+    assert.equal(preview.body.persisted, false);
+    const definition = preview.body.definition as LabyrinthDefinition;
+    assert.equal(definition.events[0].mechanic?.kind, kind);
+    check(`${kind}: приватний preview із валідованою прив’язкою`);
+    const before = await pool.query(
+      "SELECT revision FROM projects WHERE id=$1",
+      [project],
+    );
+    assert.equal(before.rows[0].revision, 7);
+    const saved = await request("/maps", { definition, expectedRevision: 0 });
+    assert.equal(saved.status, 201);
+    const version = saved.body;
+    const started = await request(`/maps/${version.mapId}/runs`, {
+      mapRevision: version.revision,
+      seed: "t95",
+      mode: "runtime",
+    });
+    assert.equal(started.status, 201);
+    let run = started.body as LabyrinthRun;
+    const step = async (action: RuntimeAction) => {
+      const x = await request(`/runs/${run.id}/runtime-actions`, {
+        expectedRevision: run.revision,
+        action,
+        key: `key-${run.revision}`,
+      });
+      assert.equal(x.status, 200);
+      run = x.body.run;
+      return x.body;
+    };
+    await step({ kind: "start_event", eventId: preview.body.eventId });
+    assert.equal(
+      eventPhase(definition, run.state, preview.body.eventId),
+      "warning",
+    );
+    if (kind === "false_route")
+      await step({ kind: "move", heroId: "hero", edgeId: "up" });
+    else await step({ kind: "wait", heroId: "hero" });
+    await step({ kind: "wait", heroId: "hero" });
+    const active = structuredClone(run);
+    assert.equal(
+      eventPhase(definition, run.state, preview.body.eventId),
+      "active",
+    );
+    const payload = {
+      expectedRevision: run.revision,
+      action: {
+        kind: "interact",
+        heroId: "hero",
+        objectId: definition.events[0].mechanic!.responseObjectId,
+        to: "resolved",
+      },
+      key: `key-${run.revision}`,
+    };
+    const resolved = await request(`/runs/${run.id}/runtime-actions`, payload);
+    assert.equal(resolved.status, 200);
+    run = resolved.body.run;
+    assert.equal(run.state.engine!.events[0].resolvedAt, 2);
+    check(`${kind}: warning/active/відповідь записано у PostgreSQL`);
+    assert.deepEqual(
+      (await request(`/runs/${run.id}/runtime-actions`, payload)).body,
+      resolved.body,
+    );
+    const events = await request(`/runs/${run.id}/events`);
+    assert.equal(events.body.events.length, run.revision + 1);
+    check(`${kind}: retry не дублює припинення або знання`);
+    const second = structuredClone(definition);
+    second.events[0].warning += " Нова версія.";
+    assert.equal(
+      (
+        await request(`/maps/${version.mapId}/versions`, {
+          definition: second,
+          expectedRevision: 1,
+        })
+      ).status,
+      201,
+    );
+    const old = await request(`/runs/${run.id}`);
+    assert.equal(old.body.mapRevision, 1);
+    assert.deepEqual(old.body.state, run.state);
+    const restored = await request(`/runs/${run.id}/restore`, {
+      expectedRevision: run.revision,
+      sourceRevision: active.revision,
+    });
+    assert.equal(restored.status, 201);
+    assert.notEqual(restored.body.id, run.id);
+    assert.deepEqual(restored.body.state, active.state);
+    check(
+      `${kind}: нова карта не змінює прогін; restore повертає точну активну фазу`,
+    );
+    const original = structuredClone(run);
+    await pool.end();
+    pool = createCorePool(url);
+    store = new PgLabyrinthStore(pool);
+    const reopened = await request(`/runs/${run.id}`);
+    assert.deepEqual(reopened.body, original);
+    check(`${kind}: після перепідключення resolvedAt і checkpoint збережені`);
+  }
+  if (process.argv.includes("--browser")) {
+    const { liveMechanics } = await import("./live-labyrinth-mechanics.mts");
+    passed += await liveMechanics(app, origin, project);
+  }
+  const canon = await pool.query(
+    "SELECT title,revision FROM projects WHERE id=$1",
+    [project],
+  );
+  assert.deepEqual(canon.rows, [{ title: "Незмінний канон", revision: 7 }]);
+  check("Чернетки/прогони не переписали книгу");
+  store = null;
+  assert.equal(
+    (
+      await request("/mechanics/preview", {
+        definition: source,
+        binding: initialBinding,
+      })
+    ).status,
+    503,
+  );
+  check("Без ядра — явний 503");
+} finally {
+  await new Promise<void>((r) => server.close(() => r()));
+  await pool.query("DELETE FROM projects WHERE id=$1", [project]);
+  await pool.end();
+}
+console.log(`Підсумок: ${passed} пройшло.`);
