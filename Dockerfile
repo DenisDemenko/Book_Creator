@@ -61,9 +61,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*
 
-# DesignCraft CLI — тільки headless binary; GUI в серверний образ не потрібен.
-COPY --from=designcraft /opt/designcraft/bin/designcraft-cli /usr/local/bin/designcraft-cli
-ENV DESIGNCRAFT_PATH=/usr/local/bin/designcraft-cli \
+# Headless DesignCraft binary + вузький compatibility shim для стабільного
+# release v0.7.1. GUI в серверний образ не потрапляє.
+COPY --from=designcraft /opt/designcraft/bin/designcraft-cli /usr/local/lib/designcraft/designcraft-cli
+COPY --from=build /app/scripts/designcraft-cli-compat.sh /usr/local/bin/designcraft-cli-compat
+RUN chmod +x /usr/local/bin/designcraft-cli-compat /usr/local/lib/designcraft/designcraft-cli
+ENV DESIGNCRAFT_REAL_PATH=/usr/local/lib/designcraft/designcraft-cli \
+    DESIGNCRAFT_PATH=/usr/local/bin/designcraft-cli-compat \
     CHROMIUM_PATH=/usr/bin/chromium
 
 # NODE_ENV=production вмикає роздачу готового dist/.
