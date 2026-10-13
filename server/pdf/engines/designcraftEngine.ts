@@ -1,9 +1,6 @@
 /**
  * DesignCraft — headless book compositor for Fusion Lab Studio.
- *
- * Studio's book JSON stays the source of truth. Each render gets an isolated
- * job directory, a disposable RTF manuscript and a fresh .designcraft file.
- * No DesignCraft object/story ids are persisted back into Studio.
+ * Studio's book JSON stays canonical; every render uses an isolated temp job.
  */
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -91,11 +88,17 @@ function reportFailed(report: any): boolean {
 }
 
 function errorSummary(stdout: string, stderr: string): string {
-  const joined = `${stderr}\n${stdout}`
-    .split(/\r?\n/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return joined.slice(-5).join(' · ').slice(0, 1200) || 'DesignCraft завершився помилкою без пояснення.';
+  try {
+    const report = reportFrom(stdout);
+    if (reportFailed(report)) {
+      return `Крок ${report.failedIndex}: ${JSON.stringify(report.failed)}`;
+    }
+  } catch {
+    // Fall through to stderr/plain output.
+  }
+  const err = stderr.trim();
+  if (err) return err.slice(-1600);
+  return stdout.trim().slice(-1600) || 'DesignCraft завершився помилкою без пояснення.';
 }
 
 async function cliWorks(): Promise<boolean> {
@@ -150,7 +153,7 @@ function titleCommands(request: PdfRenderRequest, spec: PdfLayoutSpec): string[]
   ];
 }
 
-function initialScript(request: PdfRenderRequest, spec: PdfLayoutSpec, rtfPath: string): string {
+function initialScript(request: PdfRenderRequest, spec: PdfLayoutSpec, manuscriptPath: string): string {
   const { width, height } = pageSize(spec);
   const tocPage = spec.titlePage.show ? 2 : 1;
   const bodyPage = tocPage + 1;
@@ -169,18 +172,39 @@ function initialScript(request: PdfRenderRequest, spec: PdfLayoutSpec, rtfPath: 
       },
       title: request.book.title || 'Fusion Lab book',
     }),
-    ...titleCommands(request, spec),
+    // IMPORTANT: import the manuscript before creating/selecting title frames.
+    // file.place prioritises the current text caret over its `page` argument.
     jsonLine('file.place', {
-      path: rtfPath,
+      path: manuscriptPath,
       page: bodyPage,
       autoflow: true,
       styleConflicts: 'useExisting',
+    }),
+    jsonLine('style.paragraph.edit', {
+      name: 'Body',
+      para: {
+        align: spec.bodyAlign === 'left' ? 'left' : 'justify',
+        firstLineIndent: spec.paragraphIndent,
+        spaceAfter: spec.paragraphSpacing,
+      },
+      chars: { size: spec.baseFontSize, fontFamily: 'DejaVu Serif' },
+    }),
+    jsonLine('style.paragraph.edit', {
+      name: 'Heading 1',
+      para: { align: spec.chapterTitle.align || 'left', spaceBefore: spec.chapterTitle.spaceBefore, spaceAfter: spec.chapterTitle.spaceAfter },
+      chars: { size: spec.chapterTitle.fontSize, fontFamily: 'DejaVu Serif', fontStyle: 'Bold' },
+    }),
+    jsonLine('style.paragraph.edit', {
+      name: 'Heading 2',
+      para: { align: spec.sectionTitle.align || 'left', spaceBefore: spec.sectionTitle.spaceBefore, spaceAfter: spec.sectionTitle.spaceAfter },
+      chars: { size: spec.sectionTitle.fontSize, fontFamily: 'DejaVu Serif', fontStyle: 'Bold' },
     }),
     jsonLine('layout.section', {
       page: bodyPage,
       startNumber: Math.max(1, Math.round(spec.pageNumber.startAt || 1)),
       style: 'arabic',
     }),
+    ...titleCommands(request, spec),
     jsonLine('toc.generate', {
       styles: entries,
       title: spec.frontMatter.contentsTitle || 'Зміст',
@@ -208,7 +232,7 @@ function locateImageBlocks(text: string, manuscript: DesigncraftManuscript): Ima
     const a = text.indexOf(begin);
     const b0 = text.indexOf(end, a >= 0 ? a + begin.length : 0);
     if (a < 0 || b0 < 0) {
-      throw new Error(`У імпортованому RTF зник маркер ілюстрації ${image.placeholder}.`);
+      throw new Error(`У імпортованому рукописі зник маркер ілюстрації ${image.placeholder}.`);
     }
     const b = b0 + end.length;
     result.push({
@@ -279,8 +303,7 @@ function finalScript(
   const bodyStart = bodyStartPhysicalPage(spec);
   const commands: string[] = [];
 
-  // Images are processed from the end of the story backwards. Deleting a
-  // later placeholder therefore cannot invalidate an earlier byte offset.
+  // Work from the end backwards so earlier UTF-8 offsets stay valid.
   for (const image of placements) {
     commands.push(jsonLine('story.replaceRange', {
       story,
@@ -383,7 +406,9 @@ async function runScript(
     timeoutMs: DESIGNCRAFT_TIMEOUT_MS,
   });
   if (result.timedOut) throw new PdfEngineError('designcraft', 'timeout', timeoutMessage);
-  if (result.code !== 0) throw new PdfEngineError('designcraft', 'engine', errorSummary(result.stdout, result.stderr));
+  if (result.code !== 0) {
+    throw new PdfEngineError('designcraft', 'engine', errorSummary(result.stdout, result.stderr));
+  }
   const report = reportFrom(result.stdout);
   if (reportFailed(report)) {
     throw new PdfEngineError(
@@ -415,11 +440,15 @@ export const designcraftEngine: PdfEngine = {
 
   async render(request: PdfRenderRequest): Promise<PdfRenderResult> {
     const state = await this.available();
-    if (!state.ok) throw new PdfEngineError('designcraft', 'unavailable', state.reasonUk || 'DesignCraft недоступний.');
+    if (!state.ok) {
+      throw new PdfEngineError('designcraft', 'unavailable', state.reasonUk || 'DesignCraft недоступний.');
+    }
 
     const spec = mergedSpec(request.spec);
     const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'nova-designcraft-'));
-    const manuscriptPath = path.join(workDir, 'manuscript.rtf');
+    // Tagged Text must have a plain-text extension; the DesignCraft importer
+    // sniffs its <ASCII-WIN> header and preserves paragraph style names.
+    const manuscriptPath = path.join(workDir, 'manuscript.txt');
     const buildScript = path.join(workDir, 'build.dcs');
     const storyScript = path.join(workDir, 'story.dcs');
     const finalPath = path.join(workDir, 'final.dcs');
@@ -439,7 +468,9 @@ export const designcraftEngine: PdfEngine = {
         'DesignCraft не завершив первинну верстку вчасно.'
       );
       const firstResults = Array.isArray(firstReport.results) ? firstReport.results : [];
-      const placed = firstResults.find((v: any) => v && typeof v === 'object' && 'pagesAdded' in v && 'overset' in v);
+      const placed = firstResults.find(
+        (v: any) => v && typeof v === 'object' && 'pagesAdded' in v && 'overset' in v
+      );
       if (!placed || !Number.isFinite(Number(placed.story))) {
         throw new PdfEngineError('designcraft', 'engine', 'DesignCraft не повернув story після імпорту рукопису.');
       }
@@ -452,8 +483,6 @@ export const designcraftEngine: PdfEngine = {
         throw new PdfEngineError('designcraft', 'engine', 'Після автоперетікання немає структури сторінок.');
       }
 
-      // Read the imported story exactly as DesignCraft sees it, then locate
-      // image reservation blocks in UTF-8 byte offsets (its native API unit).
       await fs.writeFile(storyScript, jsonLine('story.get', { story }) + '\n', 'utf8');
       const storyReport = await runScript(
         storyScript,
@@ -477,9 +506,6 @@ export const designcraftEngine: PdfEngine = {
       let finalReport: any = null;
       let fittedWidth = Math.min(260, textWidth * widthFactors[0]);
 
-      // A real image may be taller than the RTF reservation. Retry from the
-      // clean flowed document with a smaller image instead of publishing an
-      // overset book.
       for (const factor of widthFactors) {
         fittedWidth = Math.min(260, textWidth * factor);
         await fs.writeFile(
@@ -538,7 +564,10 @@ export const designcraftEngine: PdfEngine = {
       }
       const pdf = await PDFDocument.load(bytes);
       const pageCount = pdf.getPageCount();
-      const inspectedPages = (finalInspect?.spreads || []).reduce((n, spread) => n + (spread.pages?.length || 0), 0);
+      const inspectedPages = (finalInspect?.spreads || []).reduce(
+        (n, spread) => n + (spread.pages?.length || 0),
+        0
+      );
       if (pageCount !== inspectedPages || pageCount < bodyStartPhysicalPage(spec)) {
         throw new PdfEngineError(
           'designcraft',
