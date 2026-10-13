@@ -1,6 +1,8 @@
 /**
  * DesignCraft — headless book compositor for Fusion Lab Studio.
- * Studio's book JSON stays canonical; every render uses an isolated temp job.
+ *
+ * Studio JSON is canonical. Every render is isolated in a temporary job and
+ * builds a fresh DesignCraft document; no DesignCraft ids leak into Studio.
  */
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -24,7 +26,7 @@ import {
 } from './types';
 
 export const DESIGNCRAFT_PATH = process.env.DESIGNCRAFT_PATH || 'designcraft-cli';
-const DESIGNCRAFT_TIMEOUT_MS = Number(process.env.DESIGNCRAFT_TIMEOUT_MS) || 180_000;
+const TIMEOUT_MS = Number(process.env.DESIGNCRAFT_TIMEOUT_MS) || 180_000;
 const PAGE_NUMBER_MARKER = '\uE000';
 
 interface InspectPage {
@@ -41,14 +43,13 @@ interface InspectResult {
 }
 interface ImagePlacement {
   placeholder: string;
-  path?: string;
   captionUk: string;
-  errorUk?: string;
   start: number;
   end: number;
+  path?: string;
 }
 
-function mergedSpec(input?: Partial<PdfLayoutSpec>): PdfLayoutSpec {
+function specOf(input?: Partial<PdfLayoutSpec>): PdfLayoutSpec {
   return {
     ...DEFAULT_LAYOUT_SPEC,
     ...(input || {}),
@@ -69,44 +70,108 @@ function pageSize(spec: PdfLayoutSpec): { width: number; height: number } {
   return PAGE_SIZES[spec.pageSize] || PAGE_SIZES.A5;
 }
 
-function jsonLine(command: string, params: Record<string, unknown> = {}): string {
+function cmd(command: string, params: Record<string, unknown> = {}): string {
   return `${command} ${JSON.stringify(params)}`;
 }
 
-function reportFrom(stdout: string): any {
+function parseReport(stdout: string): any {
   const text = stdout.trim();
-  if (!text) throw new Error('DesignCraft не повернув звіт виконання.');
+  if (!text) throw new Error('DesignCraft не повернув JSON-звіт.');
   try {
     return JSON.parse(text);
   } catch (err) {
-    throw new Error(`DesignCraft повернув не JSON: ${text.slice(0, 400)}`, { cause: err as Error });
+    throw new Error(`DesignCraft повернув не JSON: ${text.slice(0, 500)}`, { cause: err as Error });
   }
 }
 
-function reportFailed(report: any): boolean {
+function failed(report: any): boolean {
   return report?.failedIndex !== undefined && report?.failedIndex !== null;
 }
 
-function errorSummary(stdout: string, stderr: string): string {
+function reportError(report: any): string {
+  const index = report?.failedIndex;
+  const command = report?.failedCommand ? ` (${report.failedCommand})` : '';
+  const message = report?.error || report?.failed || 'невідома помилка';
+  return index === undefined || index === null
+    ? String(message)
+    : `Крок ${index}${command}: ${String(message)}`;
+}
+
+async function runScript(
+  scriptPath: string,
+  args: string[],
+  cwd: string,
+  timeoutMessage: string
+): Promise<any> {
+  const result = await run(DESIGNCRAFT_PATH, ['script', scriptPath, ...args], {
+    cwd,
+    timeoutMs: TIMEOUT_MS,
+  });
+  if (result.timedOut) throw new PdfEngineError('designcraft', 'timeout', timeoutMessage);
+
+  let report: any = null;
   try {
-    const report = reportFrom(stdout);
-    if (reportFailed(report)) {
-      return `Крок ${report.failedIndex}: ${JSON.stringify(report.failed)}`;
-    }
-  } catch {
-    // Fall through to stderr/plain output.
+    report = parseReport(result.stdout);
+  } catch (err) {
+    if (result.code === 0) throw err;
   }
-  const err = stderr.trim();
-  if (err) return err.slice(-1600);
-  return stdout.trim().slice(-1600) || 'DesignCraft завершився помилкою без пояснення.';
+  if (report && failed(report)) {
+    throw new PdfEngineError('designcraft', 'engine', reportError(report));
+  }
+  if (result.code !== 0) {
+    const message = result.stderr.trim() || result.stdout.trim() || 'DesignCraft завершився з помилкою.';
+    throw new PdfEngineError('designcraft', 'engine', message.slice(-1800));
+  }
+  if (!report) report = parseReport(result.stdout);
+  return report;
 }
 
-async function cliWorks(): Promise<boolean> {
-  const result = await run(DESIGNCRAFT_PATH, ['--version'], { timeoutMs: 12_000 });
-  return result.code === 0;
+function dcAlign(value: string | undefined): 'left' | 'center' | 'right' | 'leftJustified' {
+  if (value === 'center' || value === 'right' || value === 'left') return value;
+  return 'leftJustified';
 }
 
-function frameTextCommands(
+function createStyles(spec: PdfLayoutSpec): string[] {
+  return [
+    cmd('style.paragraph.create', {
+      name: 'Body',
+      para: {
+        align: dcAlign(spec.bodyAlign),
+        firstLineIndent: spec.paragraphIndent,
+        spaceAfter: spec.paragraphSpacing,
+      },
+      chars: { size: spec.baseFontSize, fontFamily: 'DejaVu Serif' },
+    }),
+    cmd('style.paragraph.create', {
+      name: 'Heading 1',
+      para: {
+        align: dcAlign(spec.chapterTitle.align),
+        spaceBefore: spec.chapterTitle.spaceBefore,
+        spaceAfter: spec.chapterTitle.spaceAfter,
+      },
+      chars: {
+        size: spec.chapterTitle.fontSize,
+        fontFamily: 'DejaVu Serif',
+        fontStyle: 'Bold',
+      },
+    }),
+    cmd('style.paragraph.create', {
+      name: 'Heading 2',
+      para: {
+        align: dcAlign(spec.sectionTitle.align),
+        spaceBefore: spec.sectionTitle.spaceBefore,
+        spaceAfter: spec.sectionTitle.spaceAfter,
+      },
+      chars: {
+        size: spec.sectionTitle.fontSize,
+        fontFamily: 'DejaVu Serif',
+        fontStyle: 'Bold',
+      },
+    }),
+  ];
+}
+
+function textFrame(
   spread: number,
   rect: [number, number, number, number],
   text: string,
@@ -115,51 +180,40 @@ function frameTextCommands(
 ): string[] {
   if (!text.trim()) return [];
   return [
-    jsonLine('frame.create', { spread, rect, content: 'text', text }),
-    jsonLine('text.selectStory', {
+    cmd('frame.create', { spread, rect, content: 'text', text }),
+    cmd('text.selectStory', {
       frame: '$last.id',
       point: [(rect[0] + rect[2]) / 2, rect[1] + 8],
     }),
-    jsonLine('type.para', { attrs: { align } }),
-    jsonLine('type.char', { attrs: { size } }),
+    cmd('type.para', { attrs: { align } }),
+    cmd('type.char', { attrs: { size } }),
   ];
 }
 
-function titleCommands(request: PdfRenderRequest, spec: PdfLayoutSpec): string[] {
+function titleFrames(request: PdfRenderRequest, spec: PdfLayoutSpec): string[] {
   if (!spec.titlePage.show) return [];
   const { width, height } = pageSize(spec);
   const left = spec.margins.left;
   const right = width - spec.margins.right;
-  const titleY = height * 0.27;
+  const y = height * 0.27;
   return [
-    ...frameTextCommands(
-      0,
-      [left, titleY, right, titleY + 100],
-      String(request.book.title || 'Без назви'),
-      spec.titlePage.titleSize
-    ),
-    ...frameTextCommands(
-      0,
-      [left, titleY + 115, right, titleY + 165],
-      String(request.book.subtitle || ''),
-      spec.titlePage.subtitleSize
-    ),
-    ...frameTextCommands(
-      0,
-      [left, height * 0.70, right, height * 0.70 + 45],
-      String(request.book.author || ''),
-      spec.titlePage.authorSize
-    ),
+    ...textFrame(0, [left, y, right, y + 100], String(request.book.title || 'Без назви'), spec.titlePage.titleSize),
+    ...textFrame(0, [left, y + 115, right, y + 165], String(request.book.subtitle || ''), spec.titlePage.subtitleSize),
+    ...textFrame(0, [left, height * 0.70, right, height * 0.70 + 45], String(request.book.author || ''), spec.titlePage.authorSize),
   ];
 }
 
-function initialScript(request: PdfRenderRequest, spec: PdfLayoutSpec, manuscriptPath: string): string {
+function bodyPhysicalStart(spec: PdfLayoutSpec): number {
+  return spec.titlePage.show ? 3 : 2;
+}
+
+function firstScript(request: PdfRenderRequest, spec: PdfLayoutSpec, manuscriptPath: string): string {
   const { width, height } = pageSize(spec);
   const tocPage = spec.titlePage.show ? 2 : 1;
   const bodyPage = tocPage + 1;
-  const entries = spec.frontMatter.contentsSections ? ['Heading 1', 'Heading 2'] : ['Heading 1'];
-  const commands = [
-    jsonLine('file.new', {
+  const tocStyles = spec.frontMatter.contentsSections ? ['Heading 1', 'Heading 2'] : ['Heading 1'];
+  return [
+    cmd('file.new', {
       width,
       height,
       pages: bodyPage,
@@ -172,127 +226,101 @@ function initialScript(request: PdfRenderRequest, spec: PdfLayoutSpec, manuscrip
       },
       title: request.book.title || 'Fusion Lab book',
     }),
-    // IMPORTANT: import the manuscript before creating/selecting title frames.
-    // file.place prioritises the current text caret over its `page` argument.
-    jsonLine('file.place', {
+    ...createStyles(spec),
+    // Import after the final paragraph styles exist so autoflow composes the
+    // exact typography that will be exported, not an interim layout.
+    cmd('file.place', {
       path: manuscriptPath,
       page: bodyPage,
       autoflow: true,
       styleConflicts: 'useExisting',
     }),
-    jsonLine('style.paragraph.edit', {
-      name: 'Body',
-      para: {
-        align: spec.bodyAlign === 'left' ? 'left' : 'justify',
-        firstLineIndent: spec.paragraphIndent,
-        spaceAfter: spec.paragraphSpacing,
-      },
-      chars: { size: spec.baseFontSize, fontFamily: 'DejaVu Serif' },
-    }),
-    jsonLine('style.paragraph.edit', {
-      name: 'Heading 1',
-      para: { align: spec.chapterTitle.align || 'left', spaceBefore: spec.chapterTitle.spaceBefore, spaceAfter: spec.chapterTitle.spaceAfter },
-      chars: { size: spec.chapterTitle.fontSize, fontFamily: 'DejaVu Serif', fontStyle: 'Bold' },
-    }),
-    jsonLine('style.paragraph.edit', {
-      name: 'Heading 2',
-      para: { align: spec.sectionTitle.align || 'left', spaceBefore: spec.sectionTitle.spaceBefore, spaceAfter: spec.sectionTitle.spaceAfter },
-      chars: { size: spec.sectionTitle.fontSize, fontFamily: 'DejaVu Serif', fontStyle: 'Bold' },
-    }),
-    jsonLine('layout.section', {
+    cmd('layout.section', {
       page: bodyPage,
       startNumber: Math.max(1, Math.round(spec.pageNumber.startAt || 1)),
       style: 'arabic',
     }),
-    ...titleCommands(request, spec),
-    jsonLine('toc.generate', {
-      styles: entries,
+    ...titleFrames(request, spec),
+    cmd('toc.generate', {
+      styles: tocStyles,
       title: spec.frontMatter.contentsTitle || 'Зміст',
       pageNumbers: true,
       page: tocPage,
     }),
-    jsonLine('document.inspect'),
-  ];
-  return commands.join('\n') + '\n';
-}
-
-function bodyStartPhysicalPage(spec: PdfLayoutSpec): number {
-  return spec.titlePage.show ? 3 : 2;
+    cmd('document.inspect'),
+  ].join('\n') + '\n';
 }
 
 function byteOffset(text: string, charIndex: number): number {
   return Buffer.byteLength(text.slice(0, charIndex), 'utf8');
 }
 
-function locateImageBlocks(text: string, manuscript: DesigncraftManuscript): ImagePlacement[] {
-  const result: ImagePlacement[] = [];
+function imageBlocks(text: string, manuscript: DesigncraftManuscript): ImagePlacement[] {
+  const out: ImagePlacement[] = [];
   for (const image of manuscript.images) {
     const begin = IMAGE_BEGIN(image.placeholder);
     const end = IMAGE_END(image.placeholder);
     const a = text.indexOf(begin);
-    const b0 = text.indexOf(end, a >= 0 ? a + begin.length : 0);
-    if (a < 0 || b0 < 0) {
-      throw new Error(`У імпортованому рукописі зник маркер ілюстрації ${image.placeholder}.`);
+    const e = text.indexOf(end, Math.max(0, a + begin.length));
+    if (a < 0 || e < 0) {
+      throw new Error(`Зник службовий маркер ілюстрації ${image.placeholder}.`);
     }
-    const b = b0 + end.length;
-    result.push({
+    const b = e + end.length;
+    out.push({
       placeholder: image.placeholder,
       captionUk: image.captionUk,
       start: byteOffset(text, a),
       end: byteOffset(text, b),
     });
   }
-  return result.sort((a, b) => b.start - a.start);
+  return out.sort((a, b) => b.start - a.start);
 }
 
-async function prepareImages(
+async function loadImages(
   workDir: string,
   manuscript: DesigncraftManuscript,
   placements: ImagePlacement[],
   ownerId?: string | null
 ): Promise<string[]> {
   const notes: string[] = [];
-  const byPlaceholder = new Map(placements.map((p) => [p.placeholder, p]));
+  const targets = new Map(placements.map((p) => [p.placeholder, p]));
   for (const image of manuscript.images) {
-    const target = byPlaceholder.get(image.placeholder);
+    const target = targets.get(image.placeholder);
     if (!target) continue;
     try {
       const loaded = await loadImageBytes(image.url, ownerId);
       const ext = extensionForMime(loaded.mimeType);
-      const imagePath = path.join(workDir, `${image.placeholder}.${ext}`);
-      await fs.writeFile(imagePath, loaded.bytes);
-      target.path = imagePath;
+      target.path = path.join(workDir, `${image.placeholder}.${ext}`);
+      await fs.writeFile(target.path, loaded.bytes);
     } catch (err) {
-      target.errorUk = (err as Error).message;
-      notes.push(`Ілюстрація «${image.captionUk || image.placeholder}» не вставлена: ${target.errorUk}`);
+      notes.push(`Ілюстрація «${image.captionUk || image.placeholder}» не вставлена: ${(err as Error).message}`);
     }
   }
   return notes;
 }
 
-function pageNumberRect(
+function numberRect(
   page: InspectPage,
   spec: PdfLayoutSpec
 ): { rect: [number, number, number, number]; align: 'left' | 'center' | 'right' } {
   const [x0, y0, x1, y1] = page.bounds;
-  const w = 72;
-  const h = 18;
-  const position = spec.pageNumber.position || 'bottom-center';
-  const top = position.startsWith('top');
+  const pos = spec.pageNumber.position || 'bottom-center';
+  const top = pos.startsWith('top');
   const y = top
     ? y0 + Math.max(10, spec.margins.top * 0.25)
     : y1 - Math.max(30, spec.margins.bottom * 0.62);
-  if (position.endsWith('left')) {
-    return { rect: [x0 + spec.margins.left, y, x0 + spec.margins.left + w, y + h], align: 'left' };
+  const w = 72;
+  if (pos.endsWith('left')) {
+    return { rect: [x0 + spec.margins.left, y, x0 + spec.margins.left + w, y + 18], align: 'left' };
   }
-  if (position.endsWith('right')) {
-    return { rect: [x1 - spec.margins.right - w, y, x1 - spec.margins.right, y + h], align: 'right' };
+  if (pos.endsWith('right')) {
+    return { rect: [x1 - spec.margins.right - w, y, x1 - spec.margins.right, y + 18], align: 'right' };
   }
   const cx = (x0 + x1) / 2;
-  return { rect: [cx - w / 2, y, cx + w / 2, y + h], align: 'center' };
+  return { rect: [cx - w / 2, y, cx + w / 2, y + 18], align: 'center' };
 }
 
-function finalScript(
+function secondScript(
   request: PdfRenderRequest,
   inspect: InspectResult,
   story: number,
@@ -300,26 +328,15 @@ function finalScript(
   spec: PdfLayoutSpec,
   imageWidth: number
 ): string {
-  const bodyStart = bodyStartPhysicalPage(spec);
   const commands: string[] = [];
 
-  // Work from the end backwards so earlier UTF-8 offsets stay valid.
+  // Replace reserved image blocks from the end backwards so earlier UTF-8
+  // offsets remain valid. The reservation keeps the page count stable.
   for (const image of placements) {
-    commands.push(jsonLine('story.replaceRange', {
-      story,
-      start: image.start,
-      end: image.end,
-      text: '',
-    }));
+    commands.push(cmd('story.replaceRange', { story, start: image.start, end: image.end, text: '' }));
     if (image.path) {
-      commands.push(jsonLine('file.place', {
-        path: image.path,
-        spread: 0,
-        x: 0,
-        y: 0,
-        width: imageWidth,
-      }));
-      commands.push(jsonLine('anchored.insert', {
+      commands.push(cmd('file.place', { path: image.path, spread: 0, x: 0, y: 0, width: imageWidth }));
+      commands.push(cmd('anchored.insert', {
         ids: ['$last.id'],
         story,
         pos: image.start,
@@ -332,7 +349,7 @@ function finalScript(
   }
 
   if (spec.runningHead.show && spec.runningHead.content === 'chapter') {
-    commands.push(jsonLine('variables.define', {
+    commands.push(cmd('variables.define', {
       name: 'FusionLab Chapter',
       type: 'runningHeader',
       style: 'Heading 1',
@@ -340,84 +357,51 @@ function finalScript(
     }));
   }
 
+  const bodyStart = bodyPhysicalStart(spec);
   for (const spread of inspect.spreads || []) {
     for (const page of spread.pages || []) {
       const physical = Number(page.index) + 1;
-      if (physical < bodyStart) continue;
+      const isBody = physical >= bodyStart;
       const [x0, y0, x1] = page.bounds;
 
-      if (spec.runningHead.show) {
+      if (isBody && spec.runningHead.show) {
         const y = y0 + Math.max(12, spec.margins.top * 0.28);
-        const rect: [number, number, number, number] = [
-          x0 + spec.margins.left,
-          y,
-          x1 - spec.margins.right,
-          y + 18,
-        ];
+        const rect: [number, number, number, number] = [x0 + spec.margins.left, y, x1 - spec.margins.right, y + 18];
         if (spec.runningHead.content === 'chapter') {
-          commands.push(jsonLine('frame.create', { spread: spread.index, rect, content: 'text', text: '' }));
-          commands.push(jsonLine('text.select', { story: '$last.story', anchor: 0, focus: 0 }));
-          commands.push(jsonLine('variables.insert', { name: 'FusionLab Chapter' }));
-          commands.push(jsonLine('type.para', { attrs: { align: 'center' } }));
-          commands.push(jsonLine('type.char', { attrs: { size: spec.runningHead.fontSize } }));
+          commands.push(cmd('frame.create', { spread: spread.index, rect, content: 'text', text: '' }));
+          commands.push(cmd('text.select', { story: '$last.story', anchor: 0, focus: 0 }));
+          commands.push(cmd('variables.insert', { name: 'FusionLab Chapter' }));
+          commands.push(cmd('type.para', { attrs: { align: 'center' } }));
+          commands.push(cmd('type.char', { attrs: { size: spec.runningHead.fontSize } }));
         } else {
           const value = spec.runningHead.content === 'author'
             ? String(request.book.author || '')
             : String(request.book.title || '');
-          commands.push(...frameTextCommands(spread.index, rect, value, spec.runningHead.fontSize));
+          commands.push(...textFrame(spread.index, rect, value, spec.runningHead.fontSize));
         }
       }
 
-      if (spec.pageNumber.show) {
-        const number = pageNumberRect(page, spec);
-        commands.push(jsonLine('frame.create', {
-          spread: spread.index,
-          rect: number.rect,
-          content: 'text',
-          text: PAGE_NUMBER_MARKER,
-        }));
-        commands.push(jsonLine('text.selectStory', {
+      const numberThisPage = spec.pageNumber.show && (isBody || !spec.pageNumber.skipFrontMatter);
+      if (numberThisPage) {
+        const n = numberRect(page, spec);
+        commands.push(cmd('frame.create', { spread: spread.index, rect: n.rect, content: 'text', text: PAGE_NUMBER_MARKER }));
+        commands.push(cmd('text.selectStory', {
           frame: '$last.id',
-          point: [(number.rect[0] + number.rect[2]) / 2, number.rect[1] + 6],
+          point: [(n.rect[0] + n.rect[2]) / 2, n.rect[1] + 6],
         }));
-        commands.push(jsonLine('type.para', { attrs: { align: number.align } }));
-        commands.push(jsonLine('type.char', { attrs: { size: spec.pageNumber.fontSize } }));
+        commands.push(cmd('type.para', { attrs: { align: n.align } }));
+        commands.push(cmd('type.char', { attrs: { size: spec.pageNumber.fontSize } }));
       }
     }
   }
 
   const tocStyles = spec.frontMatter.contentsSections ? ['Heading 1', 'Heading 2'] : ['Heading 1'];
-  commands.push(jsonLine('toc.update'));
-  commands.push(jsonLine('story.get', { story }));
-  commands.push(jsonLine('anchored.list', { story }));
-  commands.push(jsonLine('toc.entries', { styles: tocStyles }));
-  commands.push(jsonLine('document.inspect'));
+  commands.push(cmd('toc.update'));
+  commands.push(cmd('story.get', { story }));
+  commands.push(cmd('anchored.list', { story }));
+  commands.push(cmd('toc.entries', { styles: tocStyles }));
+  commands.push(cmd('document.inspect'));
   return commands.join('\n') + '\n';
-}
-
-async function runScript(
-  scriptPath: string,
-  args: string[],
-  cwd: string,
-  timeoutMessage: string
-): Promise<any> {
-  const result = await run(DESIGNCRAFT_PATH, ['script', scriptPath, ...args], {
-    cwd,
-    timeoutMs: DESIGNCRAFT_TIMEOUT_MS,
-  });
-  if (result.timedOut) throw new PdfEngineError('designcraft', 'timeout', timeoutMessage);
-  if (result.code !== 0) {
-    throw new PdfEngineError('designcraft', 'engine', errorSummary(result.stdout, result.stderr));
-  }
-  const report = reportFrom(result.stdout);
-  if (reportFailed(report)) {
-    throw new PdfEngineError(
-      'designcraft',
-      'engine',
-      `Помилка кроку ${report.failedIndex}: ${JSON.stringify(report.failed)}`
-    );
-  }
-  return report;
 }
 
 export const designcraftEngine: PdfEngine = {
@@ -430,7 +414,8 @@ export const designcraftEngine: PdfEngine = {
   supportsPrint: false,
 
   async available(): Promise<PdfEngineAvailability> {
-    if (await cliWorks()) return { ok: true };
+    const result = await run(DESIGNCRAFT_PATH, ['--version'], { timeoutMs: 12_000 });
+    if (result.code === 0) return { ok: true };
     return {
       ok: false,
       reasonUk: `DesignCraft CLI не знайдено (${DESIGNCRAFT_PATH}).`,
@@ -439,97 +424,74 @@ export const designcraftEngine: PdfEngine = {
   },
 
   async render(request: PdfRenderRequest): Promise<PdfRenderResult> {
-    const state = await this.available();
-    if (!state.ok) {
-      throw new PdfEngineError('designcraft', 'unavailable', state.reasonUk || 'DesignCraft недоступний.');
+    const availability = await this.available();
+    if (!availability.ok) {
+      throw new PdfEngineError('designcraft', 'unavailable', availability.reasonUk || 'DesignCraft недоступний.');
     }
 
-    const spec = mergedSpec(request.spec);
+    const spec = specOf(request.spec);
     const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'nova-designcraft-'));
-    // Tagged Text must have a plain-text extension; the DesignCraft importer
-    // sniffs its <ASCII-WIN> header and preserves paragraph style names.
     const manuscriptPath = path.join(workDir, 'manuscript.txt');
-    const buildScript = path.join(workDir, 'build.dcs');
-    const storyScript = path.join(workDir, 'story.dcs');
+    const buildPath = path.join(workDir, 'build.dcs');
+    const storyPath = path.join(workDir, 'story.dcs');
     const finalPath = path.join(workDir, 'final.dcs');
-    const doc1 = path.join(workDir, 'book-flow.designcraft');
-    const doc2 = path.join(workDir, 'book-final.designcraft');
+    const doc1 = path.join(workDir, 'flow.designcraft');
+    const doc2 = path.join(workDir, 'final.designcraft');
     const pdfPath = path.join(workDir, 'book.pdf');
 
     try {
       const manuscript = buildDesigncraftRtf(request.book, spec);
       await fs.writeFile(manuscriptPath, manuscript.rtf, 'utf8');
-      await fs.writeFile(buildScript, initialScript(request, spec, manuscriptPath), 'utf8');
+      await fs.writeFile(buildPath, firstScript(request, spec, manuscriptPath), 'utf8');
 
-      const firstReport = await runScript(
-        buildScript,
-        ['--save', doc1],
-        workDir,
-        'DesignCraft не завершив первинну верстку вчасно.'
-      );
-      const firstResults = Array.isArray(firstReport.results) ? firstReport.results : [];
-      const placed = firstResults.find(
-        (v: any) => v && typeof v === 'object' && 'pagesAdded' in v && 'overset' in v
-      );
+      const first = await runScript(buildPath, ['--save', doc1], workDir, 'DesignCraft не завершив автоперетікання вчасно.');
+      const results = Array.isArray(first.results) ? first.results : [];
+      const placed = results.find((v: any) => v && typeof v === 'object' && 'pagesAdded' in v && 'overset' in v);
       if (!placed || !Number.isFinite(Number(placed.story))) {
         throw new PdfEngineError('designcraft', 'engine', 'DesignCraft не повернув story після імпорту рукопису.');
       }
       if (placed.overset) {
-        throw new PdfEngineError('designcraft', 'engine', 'Автоперетікання завершилось із прихованим текстом (overset).');
+        throw new PdfEngineError('designcraft', 'engine', 'Автоперетікання лишило прихований текст (overset).');
       }
       const story = Number(placed.story);
-      const inspect = [...firstResults].reverse().find((v: any) => v?.spreads) as InspectResult | undefined;
+      const inspect = [...results].reverse().find((v: any) => v?.spreads) as InspectResult | undefined;
       if (!inspect?.spreads?.length) {
-        throw new PdfEngineError('designcraft', 'engine', 'Після автоперетікання немає структури сторінок.');
+        throw new PdfEngineError('designcraft', 'engine', 'DesignCraft не повернув структуру сторінок.');
       }
 
-      await fs.writeFile(storyScript, jsonLine('story.get', { story }) + '\n', 'utf8');
-      const storyReport = await runScript(
-        storyScript,
-        ['--in', doc1],
-        workDir,
-        'DesignCraft не повернув текст для перевірки ілюстрацій.'
-      );
+      await fs.writeFile(storyPath, cmd('story.get', { story }) + '\n', 'utf8');
+      const storyReport = await runScript(storyPath, ['--in', doc1], workDir, 'Не вдалося прочитати story DesignCraft.');
       const storyText = String(storyReport.results?.[0]?.text || '');
-      const placements = locateImageBlocks(storyText, manuscript);
-      const notesUk = await prepareImages(workDir, manuscript, placements, request.ownerId);
+      const placements = imageBlocks(storyText, manuscript);
+      const notesUk = await loadImages(workDir, manuscript, placements, request.ownerId);
       if (manuscript.unresolvedMarkers.length) {
-        notesUk.push(
-          `Картинок за маркером не знайдено: ${manuscript.unresolvedMarkers.join(', ')}. ` +
-          'Службовий маркер у PDF не друкується.'
-        );
+        notesUk.push(`Не знайдено ілюстрацій для маркерів: ${manuscript.unresolvedMarkers.join(', ')}.`);
       }
 
       const { width } = pageSize(spec);
       const textWidth = width - spec.margins.left - spec.margins.right;
-      const widthFactors = placements.some((p) => p.path) ? [0.64, 0.52, 0.42] : [0.64];
+      const factors = placements.some((p) => p.path) ? [0.64, 0.52, 0.42] : [0.64];
       let finalReport: any = null;
-      let fittedWidth = Math.min(260, textWidth * widthFactors[0]);
+      let fittedWidth = Math.min(260, textWidth * factors[0]);
 
-      for (const factor of widthFactors) {
+      for (const factor of factors) {
         fittedWidth = Math.min(260, textWidth * factor);
-        await fs.writeFile(
-          finalPath,
-          finalScript(request, inspect, story, placements, spec, fittedWidth),
-          'utf8'
-        );
-        finalReport = await runScript(
+        await fs.writeFile(finalPath, secondScript(request, inspect, story, placements, spec, fittedWidth), 'utf8');
+        const candidate = await runScript(
           finalPath,
           ['--in', doc1, '--save', doc2, '--export', pdfPath],
           workDir,
           'DesignCraft не завершив фінальний PDF вчасно.'
         );
-        const results = Array.isArray(finalReport.results) ? finalReport.results : [];
-        const storyState = results.at(-4);
-        if (!storyState?.overset) break;
-        finalReport = null;
+        const r = Array.isArray(candidate.results) ? candidate.results : [];
+        const storyState = r.at(-4);
+        if (!storyState?.overset) {
+          finalReport = candidate;
+          break;
+        }
       }
       if (!finalReport) {
-        throw new PdfEngineError(
-          'designcraft',
-          'engine',
-          'Ілюстрації спричинили overset навіть після автоматичного зменшення. Публікацію зупинено.'
-        );
+        throw new PdfEngineError('designcraft', 'engine', 'Після вставлення ілюстрацій лишився overset навіть після зменшення.');
       }
 
       const finalResults = Array.isArray(finalReport.results) ? finalReport.results : [];
@@ -538,23 +500,25 @@ export const designcraftEngine: PdfEngine = {
       const toc = finalResults.at(-2);
       const finalInspect = finalResults.at(-1) as InspectResult;
       if (storyState?.overset) {
-        throw new PdfEngineError('designcraft', 'engine', 'Фінальна перевірка: у книзі лишився overset.');
+        throw new PdfEngineError('designcraft', 'engine', 'Фінальна перевірка знайшла overset.');
       }
-      const loadedImageCount = placements.filter((p) => p.path).length;
-      if (!Array.isArray(anchored) || anchored.length !== loadedImageCount) {
+
+      const loadedImages = placements.filter((p) => p.path).length;
+      if (!Array.isArray(anchored) || anchored.length !== loadedImages) {
         throw new PdfEngineError(
           'designcraft',
           'engine',
-          `Фінальна перевірка ілюстрацій: очікувалось ${loadedImageCount}, отримано ${Array.isArray(anchored) ? anchored.length : 0}.`
+          `Ілюстрації: очікувалось ${loadedImages}, в anchored story знайдено ${Array.isArray(anchored) ? anchored.length : 0}.`
         );
       }
+
       const chapterCount = request.book.chapters?.length || 0;
       const chapterEntries = Array.isArray(toc) ? toc.filter((e: any) => Number(e?.level) === 1) : [];
-      if (chapterCount > 0 && chapterEntries.length !== chapterCount) {
+      if (chapterCount && chapterEntries.length !== chapterCount) {
         throw new PdfEngineError(
           'designcraft',
           'engine',
-          `Фінальна перевірка змісту: глав ${chapterCount}, а записів першого рівня ${chapterEntries.length}.`
+          `Зміст: глав ${chapterCount}, записів першого рівня ${chapterEntries.length}.`
         );
       }
 
@@ -564,21 +528,18 @@ export const designcraftEngine: PdfEngine = {
       }
       const pdf = await PDFDocument.load(bytes);
       const pageCount = pdf.getPageCount();
-      const inspectedPages = (finalInspect?.spreads || []).reduce(
-        (n, spread) => n + (spread.pages?.length || 0),
-        0
-      );
-      if (pageCount !== inspectedPages || pageCount < bodyStartPhysicalPage(spec)) {
+      const inspectedPages = (finalInspect?.spreads || []).reduce((n, s) => n + (s.pages?.length || 0), 0);
+      if (pageCount !== inspectedPages || pageCount < bodyPhysicalStart(spec)) {
         throw new PdfEngineError(
           'designcraft',
           'engine',
-          `Фінальна перевірка сторінок не пройшла: PDF=${pageCount}, документ=${inspectedPages}.`
+          `Сторінки не збігаються: PDF=${pageCount}, DesignCraft=${inspectedPages}.`
         );
       }
 
       notesUk.unshift(
         `DesignCraft: ${pageCount} стор., автоматичне перетікання без overset, зміст синхронізовано, ` +
-        `${loadedImageCount} ілюстрацій перевірено${loadedImageCount ? ` (ширина до ${Math.round(fittedWidth)} pt)` : ''}.`
+          `${loadedImages} ілюстрацій перевірено${loadedImages ? ` (ширина до ${Math.round(fittedWidth)} pt)` : ''}.`
       );
       return {
         bytes,
