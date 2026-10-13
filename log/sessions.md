@@ -4,7 +4,7 @@
 
 **Тема:** запитаний коміт/пуш дизайну Т9.9, усі сценарії приймання й команди Windows.
 
-**Запис #435:** до коміту підготовлено перевірений дизайн #434, новий чекліст Т9.10 з 18 сценаріїв і збірник 36 чинних acceptance-документів та майбутніх Jev/Mafia/Lila/Story Entity/Nano Banana/STL тестів. PowerShell оновлює D:\Rama\Book_Creality через production/master, зберігає локальні правки у stash і зупиняється при помилці ff-only. Нова логіка застосунку в цьому запиті не змінювалася. Git fetch успішний, база HEAD/origin/master bace3d2, розходження 0/0; автор tropazemli@gmail.com. Фактичні SHA й пуш додаються після виконання.
+**Запис #435:** дизайн #434, чекліст Т9.10 (18 сценаріїв) і збірник 36 acceptance-документів та майбутніх Jev/Mafia/Lila/Story Entity/Nano Banana/STL тестів у коміті 884cb6b, 26 файлів, автор/committer tropazemli@gmail.com. Native push у origin/master без force успішний; git ls-remote підтвердив повний SHA 884cb6b2919318c6f71915e8633fff8d60123d25. Journal-check435, journal76/0, 125 локальних MD-посилань і staged diff пройшли. Код відповідає перевіреному #434; цього разу доповнювали документацію. PowerShell оновлює D:\Rama\Book_Creality через production/master, зі stash і ff-only. Запис підтвердження пуша відправляється окремо.
 
 **Не зроблено і чому:** production-приймання Т9.9 0/16, Т9.10 0/18 — цей запит готує/публікує сценарії, а не виконує їх. Railway-deployment, real Firebase/AI/платежі, Safari/Android/екранний читач і staging restart не перевіряли. Команди Windows на комп'ютері власника тут не запускалися; локальні тести не зараховуються як реальне приймання.
 
