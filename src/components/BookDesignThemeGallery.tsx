@@ -8,6 +8,7 @@ import {
   type BookDesignThemeCard,
   type BookDesignThemeId,
 } from '../data/bookDesignThemeCatalog';
+import { DesignerThemeStudio } from './DesignerThemeStudio';
 
 interface BookDesignThemeGalleryProps {
   book: Book;
@@ -63,7 +64,7 @@ function ThemeBookPreview({ book, theme, compact = false }: { book: Book; theme:
           {displayNumber ? (
             <div className={`${compact ? 'text-3xl' : 'text-5xl'} mb-1 font-semibold leading-none text-slate-300`}>03</div>
           ) : technical ? (
-            <div className={`mb-2 font-mono text-slate-500`}>РОЗДІЛ 03</div>
+            <div className="mb-2 font-mono text-slate-500">РОЗДІЛ 03</div>
           ) : ornamental ? (
             <div className="mb-2 text-slate-500">✦ РОЗДІЛ ТРЕТІЙ ✦</div>
           ) : (
@@ -217,6 +218,8 @@ export const BookDesignThemeGallery: React.FC<BookDesignThemeGalleryProps> = ({
           </div>
         )}
       </div>
+
+      <DesignerThemeStudio book={book} />
     </section>
   );
 };
