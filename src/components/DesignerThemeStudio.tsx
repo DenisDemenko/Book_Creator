@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Copy, Download, Plus, Save, Settings2, Trash2 } from 'lucide-react';
 import type { Book } from '../types';
 import {
@@ -6,12 +6,15 @@ import {
   cloneCustomBookDesignTheme,
   emptyCustomBookDesignTheme,
   type CustomBookDesignTheme,
+  type DesignerBlockPlacement,
+  type DesignerBlockRepeat,
   type DesignerCustomBlock,
   type DesignerEntityStyle,
   type DesignerFontAsset,
   type DesignerSemanticSource,
   type DesignerThemeEntity,
 } from '../data/customBookDesignTheme';
+import { defaultPlacementFor, defaultRepeatFor, placementOf } from '../data/bookDesignPlacement';
 
 interface Props {
   book: Book;
@@ -31,7 +34,9 @@ function normalizeTheme(raw: Partial<CustomBookDesignTheme>): CustomBookDesignTh
     page: { ...fallback.page, ...(raw.page || {}) },
     chapterOpening: { ...fallback.chapterOpening, ...(raw.chapterOpening || {}) },
     entities: raw.entities || {},
-    customBlocks: Array.isArray(raw.customBlocks) ? raw.customBlocks : [],
+    customBlocks: Array.isArray(raw.customBlocks)
+      ? raw.customBlocks.map((block) => ({ ...block, ...placementOf(block, block.source) }))
+      : [],
     editorRoles: ['designer', 'writer'],
     assetUrls: Array.isArray(raw.assetUrls) ? raw.assetUrls : [],
   };
@@ -100,6 +105,12 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book }) => {
   const [entity, setEntity] = useState<DesignerThemeEntity>('running-header');
   const active = useMemo(() => themes.find((item) => item.id === activeId) || null, [themes, activeId]);
 
+  useEffect(() => {
+    const next = loadThemes(book.id);
+    setThemes(next);
+    setActiveId(next[0]?.id || null);
+  }, [book.id]);
+
   function createTheme() {
     const theme = emptyCustomBookDesignTheme(`Тема для «${book.title || 'книги'}»`);
     const next = [theme, ...themes];
@@ -162,6 +173,8 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book }) => {
       name: source === 'character' ? 'Картка персонажа' : source === 'scene' ? 'Картка сцени' : source === 'conflict' ? 'Картка конфлікту' : 'Новий блок',
       source,
       selector: '',
+      placement: defaultPlacementFor(source),
+      repeat: defaultRepeatFor(source),
       fields: defaultFields(source),
       style: { ...entityStyle(active, styleEntity), entity: styleEntity },
     };
@@ -296,18 +309,25 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book }) => {
                 <div className="flex flex-wrap gap-2"><button type="button" onClick={() => addCustomBlock('manual')} className="rounded-lg border border-amber-700 px-2.5 py-1.5 text-xs text-amber-200">+ Власний</button><button type="button" onClick={() => addCustomBlock('character')} className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300">+ Персонаж</button><button type="button" onClick={() => addCustomBlock('scene')} className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300">+ Сцена</button><button type="button" onClick={() => addCustomBlock('conflict')} className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300">+ Конфлікт</button></div>
               </div>
               <div className="mt-3 space-y-3">
-                {active.customBlocks.map((block) => (
+                {active.customBlocks.map((block) => {
+                  const placement = placementOf(block, block.source);
+                  return (
                   <div key={block.id} className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
                     <div className="grid gap-2 md:grid-cols-[1.1fr_180px_1fr_auto]">
                       <input value={block.name} onChange={(e) => patchCustomBlock(block.id, { name: e.target.value })} className={inputClass()} placeholder="Назва блоку" />
-                      <select value={block.source} onChange={(e) => { const source = e.target.value as DesignerSemanticSource; patchCustomBlock(block.id, { source, fields: defaultFields(source), style: { ...block.style, entity: source === 'character' || source === 'scene' || source === 'conflict' ? source : 'body' } }); }} className={inputClass()}><option value="manual">Ручний</option><option value="character">Персонаж</option><option value="scene">Сцена</option><option value="conflict">Конфлікт</option><option value="tag">Тег</option><option value="paragraph-style">Стиль абзацу</option></select>
+                      <select value={block.source} onChange={(e) => { const source = e.target.value as DesignerSemanticSource; patchCustomBlock(block.id, { source, fields: defaultFields(source), placement: defaultPlacementFor(source), repeat: defaultRepeatFor(source), style: { ...block.style, entity: source === 'character' || source === 'scene' || source === 'conflict' ? source : 'body' } }); }} className={inputClass()}><option value="manual">Ручний</option><option value="character">Персонаж</option><option value="scene">Сцена</option><option value="conflict">Конфлікт</option><option value="tag">Тег</option><option value="paragraph-style">Стиль абзацу</option></select>
                       <input value={block.selector || ''} onChange={(e) => patchCustomBlock(block.id, { selector: e.target.value })} className={inputClass()} placeholder="Умова / selector: ім’я, тег, тип…" />
                       <button type="button" onClick={() => removeCustomBlock(block.id)} className="rounded-lg border border-red-900/70 px-2.5 text-red-300"><Trash2 className="h-4 w-4" /></button>
                     </div>
+                    <div className="mt-2 grid gap-2 md:grid-cols-2">
+                      <label className="text-[11px] text-slate-500">Розміщення<select value={placement.placement} onChange={(e) => patchCustomBlock(block.id, { placement: e.target.value as DesignerBlockPlacement })} className={`${inputClass()} mt-1`}><option value="inline">У тексті</option><option value="scene-opening">На початку сцени</option><option value="chapter-opening">На початку розділу</option><option value="full-width">На всю ширину</option><option value="full-page">Окрема сторінка</option><option value="appendix">У додатку</option></select></label>
+                      <label className="text-[11px] text-slate-500">Повторення<select value={placement.repeat} onChange={(e) => patchCustomBlock(block.id, { repeat: e.target.value as DesignerBlockRepeat })} className={`${inputClass()} mt-1`}><option value="once">Один раз</option><option value="per-character">Для кожного персонажа</option><option value="per-scene">Для кожної сцени</option><option value="per-conflict">Для кожного конфлікту</option><option value="matched">Для кожного збігу selector</option></select></label>
+                    </div>
                     <input value={(block.fields || []).join(', ')} onChange={(e) => patchCustomBlock(block.id, { fields: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) })} className={`${inputClass()} mt-2`} placeholder="Поля блоку через кому" />
-                    <p className="mt-2 text-[11px] text-slate-500">Джерело «{block.source}» може бути прив’язане до реальної сутності книги. Renderer adapter пізніше підставить ці поля у готовий блок DesignCraft.</p>
+                    <p className="mt-2 text-[11px] text-slate-500">Renderer adapter уже зв’язує джерела character / scene / conflict з реальними сутностями книги та передає для них розміщення «{placement.placement}» і повторення «{placement.repeat}».</p>
                   </div>
-                ))}
+                  );
+                })}
                 {active.customBlocks.length === 0 && <div className="rounded-lg border border-dashed border-slate-700 px-3 py-4 text-xs text-slate-500">Ще немає власних блоків.</div>}
               </div>
             </div>
