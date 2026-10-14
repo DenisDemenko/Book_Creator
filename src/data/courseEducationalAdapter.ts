@@ -194,20 +194,100 @@ export function courseToEducationalDocument(
   };
 }
 
-function blockToPlainText(item: EducationalDocumentBlock): string {
-  const chunks = [
-    item.title ? `## ${item.title}` : '',
-    item.body || '',
-    ...(item.items || []).map((line, index) => `${index + 1}. ${line}`),
-    ...(item.media || []).map((media) => media.caption || media.url || ''),
-  ];
-  return chunks.filter(Boolean).join('\n');
+type DesigncraftEducationalStyle =
+  | 'Body'
+  | 'Quote'
+  | 'LocationTime'
+  | 'SystemMessage'
+  | 'Evidence'
+  | 'Lore'
+  | 'CaseStudy'
+  | 'KeyIdea'
+  | 'Footnote';
+
+function stripStyleMarkup(value: string): string {
+  return value.replace(/\[\/?STYLE[^\]]*\]/gi, '').trim();
+}
+
+function styleMarker(style: DesigncraftEducationalStyle, value: string): string {
+  const text = stripStyleMarkup(value);
+  return text ? `[STYLE:${style}]${text}[/STYLE]` : '';
+}
+
+/**
+ * Map the educational vocabulary to the renderer's existing semantic styles.
+ * The public educational template stays independent from the 15 book themes;
+ * this only reuses the mature DesignCraft paragraph-style protocol.
+ *
+ * A few entities deliberately vary by template: e.g. an instruction step is
+ * a technical strip in Clear Steps, a boxed system block in Visual Flow, and
+ * a compact key idea in Compact Manual. This makes educational templates
+ * differ at block level rather than only by base typography.
+ */
+function designcraftStyleForBlock(
+  entity: EducationalSemanticEntity,
+  templateId: EducationalPdfTemplateId | undefined,
+): DesigncraftEducationalStyle {
+  switch (entity) {
+    case 'learning-goal':
+    case 'learning-result':
+      return 'KeyIdea';
+    case 'theory':
+      return templateId === 'methodic-visual-pro' ? 'Lore' : 'Body';
+    case 'example':
+      return 'CaseStudy';
+    case 'step':
+      if (templateId === 'instruction-visual-flow') return 'SystemMessage';
+      if (templateId === 'instruction-compact-manual') return 'KeyIdea';
+      return 'LocationTime';
+    case 'practice':
+    case 'project':
+      return 'CaseStudy';
+    case 'homework':
+      return templateId === 'worksheet-interactive' ? 'KeyIdea' : 'CaseStudy';
+    case 'question':
+    case 'reflection':
+      return templateId === 'worksheet-interactive' ? 'KeyIdea' : 'Quote';
+    case 'materials':
+    case 'equipment':
+      return 'SystemMessage';
+    case 'warning':
+    case 'safety':
+    case 'common-mistake':
+      return 'Evidence';
+    case 'checklist':
+    case 'assessment':
+      return 'Evidence';
+    case 'teacher-note':
+      return 'KeyIdea';
+    case 'additional-resource':
+      return 'Footnote';
+    default:
+      return 'Body';
+  }
+}
+
+function blockToDesigncraftText(
+  item: EducationalDocumentBlock,
+  templateId: EducationalPdfTemplateId | undefined,
+): string {
+  const style = designcraftStyleForBlock(item.entity, templateId);
+  const title = item.title ? styleMarker(style, item.title) : '';
+  const body = item.body ? styleMarker(style, item.body) : '';
+  const items = (item.items || []).map((line, index) => styleMarker(style, `${index + 1}. ${line}`));
+  const media = (item.media || []).map((mediaItem) =>
+    styleMarker('Footnote', mediaItem.caption || mediaItem.url || ''),
+  );
+  return [title, body, ...items, ...media].filter(Boolean).join('\n\n');
 }
 
 /**
  * Compatibility projection for the current authoritative DesignCraft preview,
  * which consumes a Book-shaped payload. It carries educational content only;
  * it does not turn the course into a stored Book and never mutates the course.
+ *
+ * Semantic educational entities are materialized as DesignCraft STYLE markers
+ * in this transient preview copy. The stored course/document remains clean.
  */
 export function educationalDocumentToPreviewBook(document: EducationalDocument): Record<string, unknown> {
   return {
@@ -229,7 +309,12 @@ export function educationalDocumentToPreviewBook(document: EducationalDocument):
         id: lesson.id,
         title: lesson.title,
         order: lessonIndex,
-        content: [module.summary || '', ...lesson.blocks.map(blockToPlainText)].filter(Boolean).join('\n\n'),
+        content: [
+          module.summary ? styleMarker('Body', module.summary) : '',
+          ...lesson.blocks.map((item) => blockToDesigncraftText(item, document.templateId)),
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
       })),
     })),
     characters: [],
