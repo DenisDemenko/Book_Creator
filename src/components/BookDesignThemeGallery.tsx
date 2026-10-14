@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { Check, ChevronRight, Sparkles } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Check, ChevronRight, Loader2, Palette, Sparkles, SlidersHorizontal } from 'lucide-react';
 import type { Book } from '../types';
 import {
   BOOK_DESIGN_THEME_CARDS,
@@ -13,9 +13,12 @@ import { DesignerThemeStudio } from './DesignerThemeStudio';
 interface BookDesignThemeGalleryProps {
   book: Book;
   selectedThemeId?: BookDesignThemeId | null;
-  onSelectTheme: (themeId: BookDesignThemeId) => void;
+  onApplyTheme: (themeId: BookDesignThemeId) => void;
   onOpenPreview?: (themeId: BookDesignThemeId) => void;
+  previewLoading?: boolean;
 }
+
+type StudioMode = 'author' | 'designer';
 
 function plainText(value: string): string {
   return String(value || '')
@@ -103,29 +106,35 @@ function ThemeBookPreview({ book, theme, compact = false }: { book: Book; theme:
 function ThemeCard({
   book,
   theme,
-  selected,
+  active,
+  candidate,
   recommendedReason,
   large,
-  onSelect,
+  previewLoading,
+  onChoose,
+  onApply,
   onPreview,
 }: {
   book: Book;
   theme: BookDesignThemeCard;
-  selected: boolean;
+  active: boolean;
+  candidate: boolean;
   recommendedReason?: string;
   large?: boolean;
-  onSelect: () => void;
+  previewLoading?: boolean;
+  onChoose: () => void;
+  onApply: () => void;
   onPreview?: () => void;
 }) {
   return (
-    <article className={`group rounded-2xl border transition-all ${selected ? 'border-cyan-400 bg-cyan-500/10 shadow-lg shadow-cyan-950/20' : 'border-slate-800 bg-slate-950/75 hover:border-slate-600'} ${large ? 'p-4' : 'p-3'}`}>
-      <button type="button" className="w-full text-left" onClick={onSelect}>
+    <article className={`group rounded-2xl border transition-all ${candidate ? 'border-cyan-400 bg-cyan-500/10 shadow-lg shadow-cyan-950/20' : 'border-slate-800 bg-slate-950/75 hover:border-slate-600'} ${large ? 'p-4' : 'p-3'}`}>
+      <button type="button" className="w-full text-left" onClick={onChoose} aria-pressed={candidate}>
         <ThemeBookPreview book={book} theme={theme} compact={!large} />
         <div className="mt-3 flex items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
               <h3 className={`${large ? 'text-base' : 'text-sm'} font-bold text-white`}>{theme.label}</h3>
-              {selected && <Check className="h-4 w-4 text-cyan-300" />}
+              {active && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-300"><Check className="h-3 w-3" /> Активна</span>}
             </div>
             <p className="mt-1 text-xs leading-relaxed text-slate-400">{theme.taglineUk}</p>
           </div>
@@ -138,11 +147,22 @@ function ThemeCard({
         </div>
       )}
 
-      {onPreview && (
-        <button type="button" onClick={onPreview} className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-cyan-300 hover:text-cyan-200">
-          Відкрити живий розворот <ChevronRight className="h-3.5 w-3.5" />
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={onApply}
+          disabled={active}
+          className="rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-bold text-slate-950 hover:bg-cyan-400 disabled:cursor-default disabled:bg-slate-800 disabled:text-slate-500"
+        >
+          {active ? 'Застосовано' : 'Застосувати'}
         </button>
-      )}
+        {onPreview && (
+          <button type="button" onClick={onPreview} disabled={previewLoading} className="inline-flex items-center gap-1 rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:border-cyan-500 hover:text-cyan-200 disabled:opacity-50">
+            {previewLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ChevronRight className="h-3.5 w-3.5" />}
+            {previewLoading ? 'Готуємо…' : 'Подивитися книгу'}
+          </button>
+        )}
+      </div>
     </article>
   );
 }
@@ -150,76 +170,98 @@ function ThemeCard({
 export const BookDesignThemeGallery: React.FC<BookDesignThemeGalleryProps> = ({
   book,
   selectedThemeId,
-  onSelectTheme,
+  onApplyTheme,
   onOpenPreview,
+  previewLoading = false,
 }) => {
   const [showAll, setShowAll] = useState(true);
+  const [mode, setMode] = useState<StudioMode>('author');
+  const [candidateThemeId, setCandidateThemeId] = useState<BookDesignThemeId | null>(selectedThemeId || null);
   const recommendations = useMemo(() => recommendBookDesignThemes(book, 3), [book]);
   const recommendedIds = new Set(recommendations.map((item) => item.themeId));
 
+  useEffect(() => {
+    if (selectedThemeId) setCandidateThemeId(selectedThemeId);
+  }, [selectedThemeId]);
+
+  const candidateTheme = candidateThemeId ? getBookDesignThemeCard(candidateThemeId) : null;
+
   return (
     <section className="space-y-6" data-book-design-gallery>
-      <div className="rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-cyan-950/25 via-slate-950 to-slate-950 p-5">
-        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <div className="mb-1 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-cyan-300">
-              <Sparkles className="h-4 w-4" /> Рекомендовано для вашої книги
+      <div className="flex flex-col gap-3 rounded-2xl border border-slate-800 bg-slate-950/75 p-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-cyan-300"><Palette className="h-4 w-4" /> Book Design Studio</div>
+          <h1 className="mt-1 text-xl font-bold text-white">Як повинна відчуватися ваша книга?</h1>
+          <p className="mt-1 text-sm text-slate-400">Спочатку оберіть художній характер. Технічні налаштування можна відкрити пізніше.</p>
+        </div>
+        <div className="inline-flex self-start rounded-xl border border-slate-700 bg-slate-900 p-1">
+          <button type="button" onClick={() => setMode('author')} className={`rounded-lg px-3 py-2 text-xs font-semibold ${mode === 'author' ? 'bg-cyan-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}>Автор</button>
+          <button type="button" onClick={() => setMode('designer')} className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold ${mode === 'designer' ? 'bg-violet-500 text-white' : 'text-slate-400 hover:text-white'}`}><SlidersHorizontal className="h-3.5 w-3.5" /> Дизайнер</button>
+        </div>
+      </div>
+
+      {mode === 'author' ? (
+        <>
+          {candidateTheme && candidateTheme.id !== selectedThemeId && (
+            <div className="flex flex-col gap-3 rounded-2xl border border-cyan-500/30 bg-cyan-500/[0.07] p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wider text-cyan-300">Вибрано для перегляду</div>
+                <div className="mt-1 text-base font-bold text-white">{candidateTheme.label}</div>
+                <div className="mt-1 text-xs text-slate-400">Поточне оформлення книги ще не змінено.</div>
+              </div>
+              <div className="flex gap-2">
+                {onOpenPreview && <button type="button" onClick={() => onOpenPreview(candidateTheme.id)} disabled={previewLoading} className="rounded-xl border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-200 disabled:opacity-50">Подивитися</button>}
+                <button type="button" onClick={() => onApplyTheme(candidateTheme.id)} className="rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-400">Застосувати стиль</button>
+              </div>
             </div>
-            <h2 className="text-xl font-bold text-white">Один текст — три художні характери</h2>
-            <p className="mt-1 max-w-3xl text-sm text-slate-400">
-              Це не демо-текст: картки беруть заголовок і фрагмент із поточної книги. Рекомендації пояснюються жанром, структурою, ілюстраціями та виносками.
-            </p>
+          )}
+
+          <div className="rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-cyan-950/25 via-slate-950 to-slate-950 p-5">
+            <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <div className="mb-1 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-cyan-300"><Sparkles className="h-4 w-4" /> Рекомендовано для вашої книги</div>
+                <h2 className="text-xl font-bold text-white">Один текст — три художні характери</h2>
+                <p className="mt-1 max-w-3xl text-sm text-slate-400">Картки використовують реальний текст поточної книги. Вибір картки лише готує стиль до перегляду; книга змінюється тільки після «Застосувати».</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+              {recommendations.map((recommendation) => {
+                const theme = getBookDesignThemeCard(recommendation.themeId);
+                return (
+                  <ThemeCard key={theme.id} book={book} theme={theme} large active={selectedThemeId === theme.id} candidate={candidateThemeId === theme.id} recommendedReason={recommendation.reasonsUk[0]} previewLoading={previewLoading} onChoose={() => setCandidateThemeId(theme.id)} onApply={() => onApplyTheme(theme.id)} onPreview={onOpenPreview ? () => onOpenPreview(theme.id) : undefined} />
+                );
+              })}
+            </div>
           </div>
-        </div>
 
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-          {recommendations.map((recommendation) => {
-            const theme = getBookDesignThemeCard(recommendation.themeId);
-            return (
-              <ThemeCard
-                key={theme.id}
-                book={book}
-                theme={theme}
-                large
-                selected={selectedThemeId === theme.id}
-                recommendedReason={recommendation.reasonsUk[0]}
-                onSelect={() => onSelectTheme(theme.id)}
-                onPreview={onOpenPreview ? () => onOpenPreview(theme.id) : undefined}
-              />
-            );
-          })}
-        </div>
-      </div>
-
-      <div>
-        <div className="mb-3 flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-base font-bold text-white">Усі 15 дизайн-систем</h2>
-            <p className="text-xs text-slate-500">Рекомендовані теми залишаються у загальному каталозі — нічого не приховується від автора.</p>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-white">Усі 15 дизайн-систем</h2>
+                <p className="text-xs text-slate-500">Три великі картки в ряд на широкому екрані; усі теми використовують той самий фрагмент вашої книги.</p>
+              </div>
+              <button type="button" onClick={() => setShowAll((value) => !value)} className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-slate-500">{showAll ? 'Згорнути' : 'Показати всі'}</button>
+            </div>
+
+            {showAll && (
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {BOOK_DESIGN_THEME_CARDS.map((theme) => (
+                  <ThemeCard key={theme.id} book={book} theme={theme} active={selectedThemeId === theme.id} candidate={candidateThemeId === theme.id} recommendedReason={recommendedIds.has(theme.id) ? 'Одна з трьох рекомендацій для цієї книги.' : undefined} previewLoading={previewLoading} onChoose={() => setCandidateThemeId(theme.id)} onApply={() => onApplyTheme(theme.id)} onPreview={onOpenPreview ? () => onOpenPreview(theme.id) : undefined} />
+                ))}
+              </div>
+            )}
           </div>
-          <button type="button" onClick={() => setShowAll((value) => !value)} className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-slate-500">
-            {showAll ? 'Згорнути' : 'Показати всі'}
-          </button>
+        </>
+      ) : (
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-violet-500/25 bg-violet-500/[0.06] p-4">
+            <div className="text-sm font-bold text-white">Designer Mode</div>
+            <p className="mt-1 text-xs leading-relaxed text-slate-400">Розширені налаштування теми: типографіка, семантичні блоки, placement, repeat, кольори та параметри фону. Вбудовані теми не змінюються — створюйте власну тему на їх основі.</p>
+          </div>
+          <DesignerThemeStudio book={book} />
         </div>
-
-        {showAll && (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-            {BOOK_DESIGN_THEME_CARDS.map((theme) => (
-              <ThemeCard
-                key={theme.id}
-                book={book}
-                theme={theme}
-                selected={selectedThemeId === theme.id}
-                recommendedReason={recommendedIds.has(theme.id) ? 'Одна з трьох рекомендацій для цієї книги.' : undefined}
-                onSelect={() => onSelectTheme(theme.id)}
-                onPreview={onOpenPreview ? () => onOpenPreview(theme.id) : undefined}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-
-      <DesignerThemeStudio book={book} />
+      )}
     </section>
   );
 };
