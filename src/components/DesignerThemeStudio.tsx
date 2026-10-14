@@ -46,6 +46,7 @@ interface PreviewPage {
 
 type PreviewMode = 'page' | 'spread';
 type ZoomMode = 75 | 100 | 'fit';
+type MobilePanel = 'preview' | 'structure' | 'properties' | 'blocks';
 
 function storageKey(bookId: string): string {
   return `book-design-studio:custom-themes:${bookId || 'draft'}`;
@@ -252,6 +253,7 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId }) => {
   const [previewMode, setPreviewMode] = useState<PreviewMode>('page');
   const [zoom, setZoom] = useState<ZoomMode>('fit');
   const [pageIndex, setPageIndex] = useState(0);
+  const [mobilePanel, setMobilePanel] = useState<MobilePanel>('preview');
   const pages = useMemo(() => previewPages(book), [book]);
   const active = useMemo(() => themes.find((item) => item.id === activeId) || null, [themes, activeId]);
 
@@ -265,6 +267,7 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId }) => {
     setUndoStack([]);
     setRedoStack([]);
     setPageIndex(0);
+    setMobilePanel('preview');
   }, [book.id]);
 
   function createTheme() {
@@ -330,6 +333,11 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId }) => {
     setRedoStack([]);
     setPreviewError(null);
     setPreviewInfo(null);
+  }
+
+  function selectEntity(nextEntity: DesignerThemeEntity) {
+    setEntity(nextEntity);
+    if (typeof window !== 'undefined' && window.innerWidth < 1280) setMobilePanel('properties');
   }
 
   function removeActive() {
@@ -461,7 +469,7 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId }) => {
   const zoomScale = zoom === 'fit' ? 0.82 : zoom / 100;
 
   return (
-    <section className="rounded-2xl border border-violet-500/25 bg-violet-950/10 p-4" data-designer-theme-studio>
+    <section className="rounded-2xl border border-violet-500/25 bg-violet-950/10 p-3 sm:p-4" data-designer-theme-studio>
       <div className="flex flex-col gap-3 border-b border-slate-800 pb-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-violet-300"><Settings2 className="h-4 w-4" /> Designer Theme Studio</div>
@@ -489,8 +497,19 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId }) => {
         </div>
       ) : (
         <>
-          <div className="mt-5 grid min-h-[720px] gap-4 xl:grid-cols-[260px_minmax(420px,1fr)_320px]">
-            <aside className="space-y-4 rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+          <div className="mt-4 grid grid-cols-2 gap-1 rounded-xl border border-slate-800 bg-slate-950/70 p-1 sm:grid-cols-4 xl:hidden" aria-label="Мобільна навігація Designer Studio">
+            {([
+              ['preview', 'Preview'],
+              ['structure', 'Структура'],
+              ['properties', 'Властивості'],
+              ['blocks', 'Блоки'],
+            ] as Array<[MobilePanel, string]>).map(([id, label]) => (
+              <button key={id} type="button" onClick={() => setMobilePanel(id)} className={`rounded-lg px-2 py-2 text-[11px] font-semibold ${mobilePanel === id ? 'bg-cyan-500/15 text-cyan-200' : 'text-slate-400'}`}>{label}</button>
+            ))}
+          </div>
+
+          <div className="mt-4 grid gap-4 xl:min-h-[720px] xl:grid-cols-[260px_minmax(420px,1fr)_320px]">
+            <aside className={`${mobilePanel === 'structure' ? 'block' : 'hidden'} space-y-4 rounded-xl border border-slate-800 bg-slate-950/70 p-3 xl:block`}>
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Тема</div>
                 <input value={active.name} onChange={(e) => updateActive({ ...active, name: e.target.value, updatedAt: new Date().toISOString() })} className={`${inputClass()} mt-2`} />
@@ -501,21 +520,21 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId }) => {
 
               <div className="border-t border-slate-800 pt-3">
                 <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Структура</div>
-                <div className="space-y-1">{DESIGNER_THEME_ENTITIES.map((item) => <button key={item.id} type="button" onClick={() => setEntity(item.id)} className={`w-full rounded-lg px-2.5 py-2 text-left text-[11px] transition ${entity === item.id ? 'bg-cyan-500/15 font-semibold text-cyan-200' : 'text-slate-400 hover:bg-slate-900 hover:text-white'}`}>{item.labelUk}</button>)}</div>
+                <div className="space-y-1">{DESIGNER_THEME_ENTITIES.map((item) => <button key={item.id} type="button" onClick={() => selectEntity(item.id)} className={`w-full rounded-lg px-2.5 py-2 text-left text-[11px] transition ${entity === item.id ? 'bg-cyan-500/15 font-semibold text-cyan-200' : 'text-slate-400 hover:bg-slate-900 hover:text-white'}`}>{item.labelUk}</button>)}</div>
               </div>
 
               <div className="border-t border-slate-800 pt-3">
-                <div className="mb-2 flex items-center justify-between"><div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Блоки</div><button type="button" onClick={() => addCustomBlock('manual')} className="text-xs font-semibold text-amber-300">+ Додати</button></div>
-                <div className="space-y-1">{active.customBlocks.map((block) => <button key={block.id} type="button" onClick={() => setEntity(block.style.entity)} className="w-full rounded-lg border border-slate-800 px-2.5 py-2 text-left text-[11px] text-slate-400 hover:border-amber-600/50 hover:text-amber-200">{block.name}</button>)}{active.customBlocks.length === 0 && <div className="rounded-lg border border-dashed border-slate-800 p-3 text-[11px] text-slate-600">Блоків ще немає.</div>}</div>
+                <div className="mb-2 flex items-center justify-between"><div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Блоки</div><button type="button" onClick={() => { addCustomBlock('manual'); setMobilePanel('blocks'); }} className="text-xs font-semibold text-amber-300">+ Додати</button></div>
+                <div className="space-y-1">{active.customBlocks.map((block) => <button key={block.id} type="button" onClick={() => { selectEntity(block.style.entity); }} className="w-full rounded-lg border border-slate-800 px-2.5 py-2 text-left text-[11px] text-slate-400 hover:border-amber-600/50 hover:text-amber-200">{block.name}</button>)}{active.customBlocks.length === 0 && <div className="rounded-lg border border-dashed border-slate-800 p-3 text-[11px] text-slate-600">Блоків ще немає.</div>}</div>
               </div>
             </aside>
 
-            <main className="flex min-w-0 flex-col rounded-xl border border-slate-800 bg-slate-900/55">
+            <main className={`${mobilePanel === 'preview' ? 'flex' : 'hidden'} min-w-0 flex-col rounded-xl border border-slate-800 bg-slate-900/55 xl:flex`}>
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-3 py-2.5">
-                <div className="inline-flex rounded-lg border border-slate-700 bg-slate-950 p-1"><button type="button" onClick={() => setPreviewMode('page')} className={`rounded-md px-2.5 py-1.5 text-[11px] ${previewMode === 'page' ? 'bg-slate-700 text-white' : 'text-slate-400'}`}>Одна сторінка</button><button type="button" onClick={() => setPreviewMode('spread')} className={`rounded-md px-2.5 py-1.5 text-[11px] ${previewMode === 'spread' ? 'bg-slate-700 text-white' : 'text-slate-400'}`}>Розворот</button></div>
+                <div className="inline-flex rounded-lg border border-slate-700 bg-slate-950 p-1"><button type="button" onClick={() => setPreviewMode('page')} className={`rounded-md px-2.5 py-1.5 text-[11px] ${previewMode === 'page' ? 'bg-slate-700 text-white' : 'text-slate-400'}`}>Одна сторінка</button><button type="button" onClick={() => setPreviewMode('spread')} className={`hidden rounded-md px-2.5 py-1.5 text-[11px] sm:block ${previewMode === 'spread' ? 'bg-slate-700 text-white' : 'text-slate-400'}`}>Розворот</button></div>
                 <div className="flex items-center gap-1">{([75, 100, 'fit'] as const).map((value) => <button key={String(value)} type="button" onClick={() => setZoom(value)} className={`rounded-md px-2 py-1 text-[10px] ${zoom === value ? 'bg-cyan-500/15 text-cyan-200' : 'text-slate-500'}`}>{value === 'fit' ? 'Fit' : `${value}%`}</button>)}</div>
               </div>
-              <div className="flex flex-1 items-start justify-center overflow-auto bg-slate-950/40 p-6">
+              <div className="flex flex-1 items-start justify-center overflow-auto bg-slate-950/40 p-3 sm:p-6">
                 <div className="flex origin-top items-start justify-center gap-5 transition-transform" style={{ transform: `scale(${zoomScale})` }}>
                   <PreviewPageCard theme={active} page={currentPage} entity={entity} />
                   {previewMode === 'spread' && <PreviewPageCard theme={active} page={nextPage} entity={entity} />}
@@ -528,7 +547,7 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId }) => {
               </div>
             </main>
 
-            <aside className="space-y-3 overflow-y-auto rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+            <aside className={`${mobilePanel === 'properties' ? 'block' : 'hidden'} space-y-3 overflow-y-auto rounded-xl border border-slate-800 bg-slate-950/70 p-3 xl:block`}>
               <div className="flex items-start justify-between gap-2"><div><div className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-400">Властивості</div><h3 className="mt-1 text-sm font-bold text-white">{DESIGNER_THEME_ENTITIES.find((item) => item.id === entity)?.labelUk}</h3></div>{entity !== 'page' && <label className="flex items-center gap-1.5 text-[11px] text-slate-400"><input type="checkbox" checked={entityStyle(active, entity).enabled} onChange={(e) => patchEntity({ enabled: e.target.checked })} /> On</label>}</div>
 
               {entity !== 'page' && <details open className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
@@ -581,7 +600,7 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId }) => {
             </aside>
           </div>
 
-          <div className="mt-4">
+          <div className={`${mobilePanel === 'blocks' ? 'block' : 'hidden'} mt-4 xl:block`}>
             <BookDesignSemanticBlockEditor
               blocks={active.customBlocks}
               onAdd={addCustomBlock}
