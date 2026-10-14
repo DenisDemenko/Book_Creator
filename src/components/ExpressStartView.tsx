@@ -5,6 +5,7 @@ import { ExpressWizardView, type ExpressWizardPayload } from './ExpressWizardVie
 import { CourseWizardView } from './CourseWizardView';
 import { InstructionBuilderView, type InstructionBookCreationPayload } from './InstructionBuilderView';
 import type { CourseV2 } from '../types';
+import { prependExpressSemanticTags } from '../utils/expressSemanticHandoff';
 
 /**
  * Розвилка перед експрес-майстром (Завдання 4).
@@ -13,12 +14,6 @@ import type { CourseV2 } from '../types';
  * ExpressWizardView напряму. Так гілка перестає бути припущенням «усе, що
  * створюють у Nova, — книга», і стає явним вибором, який видно і людині,
  * і серверу (напрям іде в чернетку).
- *
- * Чому вибір запамʼятовується. Майстер проходять анонімно, а чернетка
- * живе в localStorage і переживає перезавантаження сторінки. Якби напрям
- * не зберігався поруч, людина після F5 посеред роботи поверталася б на
- * екран вибору — і другий вибір міг би не збігтися з тим, під який уже
- * зібрана чернетка.
  */
 
 const TRACK_KEY = 'nova_express_track';
@@ -33,12 +28,32 @@ const ICONS: Record<ExpressTrackId, React.ComponentType<{ className?: string }>>
 function readSavedTrack(): ExpressTrackId | null {
   try {
     const saved = localStorage.getItem(TRACK_KEY);
-    // Збережений напрям поважаємо лише поки гілка справді проходиться:
-    // інакше старий вибір заведе в глухий кут після зміни статусу.
     return isTrackRunnable(saved) ? (saved as ExpressTrackId) : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * Перед передачею плану в App додаємо тільки ті semantic tags, які wizard
+ * знає напевно: chapter, outline та involved characters.
+ *
+ * JEV-enrichment навмисно не робимо тут: цей крок детермінований і не має
+ * залежати від доступності зовнішньої моделі. JEV буде другим шаром поверх
+ * уже коректного semantic handoff.
+ */
+function withDeterministicSemanticHandoff(payload: ExpressWizardPayload): ExpressWizardPayload {
+  const cast = payload.cast ?? [];
+  return {
+    ...payload,
+    parts: (payload.parts ?? []).map((part) => ({
+      ...part,
+      chapters: (part.chapters ?? []).map((chapter) => ({
+        ...chapter,
+        summary: prependExpressSemanticTags(chapter.summary ?? '', chapter, cast),
+      })),
+    })),
+  };
 }
 
 const TrackCard: React.FC<{ track: ExpressTrack; onPick: (t: ExpressTrack) => void }> = ({ track, onPick }) => {
@@ -146,30 +161,11 @@ const PlannedTrackNotice: React.FC<{ track: ExpressTrack; onBack: () => void }> 
 
 export const ExpressStartView: React.FC<{
   onFinish?: (payload: ExpressWizardPayload) => void;
-  /** Майстер курсів створив курс — батько переходить на екран «Створити курс». */
   onCourseCreated?: (course: CourseV2) => void;
-  /** Конструктор інструкцій зібрав документ у книгу — батько створює нову книгу й веде в «Книга & Текст» (журнал #199). */
   onInstructionBookCreated?: (payload: InstructionBookCreationPayload) => void;
-  /**
-   * Задум книги, з яким прийшли з маркетплейсу (`?idea=…`). Їде просто в
-   * поле «Зерно» майстра: на головній людина вже виклала ідею реченням, і
-   * набирати її вдруге тут було б найгіршим першим кроком.
-   */
   initialSeed?: string;
-  /**
-   * Гілка, з якої почати. Потрібна входу з маркетплейсу: там кнопка обіцяє
-   * книгу, тож розвилка «що створюємо?» перед нею — зайве коло. Гілку
-   * поважаємо лише якщо вона справді проходиться (isTrackRunnable): інакше
-   * замість попередження «чекає на опис» людина дістала б порожній майстер.
-   */
   startTrack?: ExpressTrackId | null;
 }> = ({ onFinish, onCourseCreated, onInstructionBookCreated, initialSeed, startTrack }) => {
-  // Напрям із минулого візиту підхоплюємо одразу при першому рендері,
-  // щоб не блимнути екраном вибору перед тим, як показати майстер.
-  //
-  // Напрям із маркетплейсу — сильніший за збережений: людина щойно натисла
-  // кнопку про книгу, і старий вибір (скажімо, «курс») завів би її не туди,
-  // звідки вона прийшла.
   const [track, setTrack] = useState<ExpressTrackId | null>(() =>
     isTrackRunnable(startTrack) ? startTrack! : readSavedTrack()
   );
@@ -203,7 +199,7 @@ export const ExpressStartView: React.FC<{
     const active = findExpressTrack(track);
     return (
       <ExpressWizardView
-        onFinish={onFinish}
+        onFinish={(payload) => onFinish?.(withDeterministicSemanticHandoff(payload))}
         track={track}
         trackTitle={active?.title}
         onChangeTrack={backToChoice}
@@ -224,7 +220,7 @@ export const ExpressStartView: React.FC<{
     <div className="mx-auto w-full max-w-4xl px-4 py-8">
       <header className="mb-6">
         <div className="flex items-center gap-2 text-emerald-400">
-          <Wand2 className="w-5 h-5" />
+          <Wand2 className="h-5 w-5" />
           <span className="font-mono text-xs font-bold tracking-widest uppercase">За 5 хвилин</span>
         </div>
         <h1 className="mt-2 text-3xl font-bold text-slate-100">Що створюємо?</h1>

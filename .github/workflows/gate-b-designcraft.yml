@@ -45,6 +45,9 @@ jobs:
       - name: Express wizard integrity contract
         run: npx tsx scripts/test-expressWizardIntegrity.mts
 
+      - name: Express semantic handoff contract
+        run: npx tsx scripts/test-expressSemanticHandoff.mts
+
       - name: Book Design UI regression contract
         run: npx tsx scripts/test-bookDesignUi.mts
 
