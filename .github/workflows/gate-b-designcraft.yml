@@ -42,6 +42,9 @@ jobs:
       - name: TypeScript
         run: npm run lint
 
+      - name: Book Design UI regression contract
+        run: npx tsx scripts/test-bookDesignUi.mts
+
       - name: Preview sample metadata test
         run: npx tsx scripts/test-designcraftThemePreviewSample.mts
 
