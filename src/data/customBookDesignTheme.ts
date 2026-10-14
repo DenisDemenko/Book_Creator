@@ -52,7 +52,18 @@ export type DesignerThemeEntity =
   | 'footnote'
   | 'illustration'
   | 'table'
-  | 'toc';
+  | 'toc'
+  | 'character'
+  | 'scene'
+  | 'conflict';
+
+export type DesignerSemanticSource =
+  | 'manual'
+  | 'character'
+  | 'scene'
+  | 'conflict'
+  | 'tag'
+  | 'paragraph-style';
 
 export interface DesignerEntityStyle {
   entity: DesignerThemeEntity;
@@ -78,6 +89,18 @@ export interface DesignerEntityStyle {
   radiusMm?: number;
   before?: string;
   after?: string;
+}
+
+export interface DesignerCustomBlock {
+  id: string;
+  name: string;
+  descriptionUk?: string;
+  source: DesignerSemanticSource;
+  /** Optional semantic selector, e.g. character id/name, tag, scene property or conflict kind. */
+  selector?: string;
+  style: DesignerEntityStyle;
+  /** Which entity fields may be surfaced by renderer in the block. */
+  fields?: string[];
 }
 
 export interface DesignerPageSystem {
@@ -108,13 +131,16 @@ export interface CustomBookDesignTheme {
   name: string;
   descriptionUk: string;
   basedOn?: BookDesignThemeId;
-  version: 1;
+  version: 2;
   createdAt: string;
   updatedAt: string;
   fonts: DesignerFontAsset[];
   page: DesignerPageSystem;
   chapterOpening: DesignerChapterOpening;
   entities: Partial<Record<DesignerThemeEntity, DesignerEntityStyle>>;
+  customBlocks: DesignerCustomBlock[];
+  /** Writer has the same capabilities as designer in Theme Studio. */
+  editorRoles: Array<'designer' | 'writer'>;
   /** Assets are references only. Binary upload will live in Media Library. */
   assetUrls: string[];
 }
@@ -145,6 +171,9 @@ export const DESIGNER_THEME_ENTITIES: readonly Array<{ id: DesignerThemeEntity; 
   { id: 'illustration', labelUk: 'Ілюстрація' },
   { id: 'table', labelUk: 'Таблиця' },
   { id: 'toc', labelUk: 'Зміст' },
+  { id: 'character', labelUk: 'Персонаж' },
+  { id: 'scene', labelUk: 'Сцена' },
+  { id: 'conflict', labelUk: 'Конфлікт' },
 ] as const;
 
 export function emptyCustomBookDesignTheme(name = 'Моя тема'): CustomBookDesignTheme {
@@ -153,7 +182,7 @@ export function emptyCustomBookDesignTheme(name = 'Моя тема'): CustomBook
     id: `custom-${Date.now().toString(36)}`,
     name,
     descriptionUk: '',
-    version: 1,
+    version: 2,
     createdAt: now,
     updatedAt: now,
     fonts: [
@@ -184,14 +213,20 @@ export function emptyCustomBookDesignTheme(name = 'Моя тема'): CustomBook
       sceneBreak: '· · ·',
     },
     entities: {},
+    customBlocks: [],
+    editorRoles: ['designer', 'writer'],
     assetUrls: [],
   };
 }
 
 export function cloneCustomBookDesignTheme(theme: CustomBookDesignTheme): CustomBookDesignTheme {
   const now = new Date().toISOString();
+  const cloned = JSON.parse(JSON.stringify(theme)) as CustomBookDesignTheme;
   return {
-    ...JSON.parse(JSON.stringify(theme)),
+    ...cloned,
+    version: 2,
+    customBlocks: cloned.customBlocks || [],
+    editorRoles: ['designer', 'writer'],
     id: `custom-${Date.now().toString(36)}`,
     name: `${theme.name} — копія`,
     createdAt: now,
