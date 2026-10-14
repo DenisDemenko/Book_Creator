@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { initDb, DATA_DIR } from '../server/db';
 import { getBook, listBooks, readArtifact, saveArtifact } from '../server/bookStore';
-import { designcraftEngineV2 } from '../server/pdf/engines/designcraftEngineV2';
+import { designcraftEngineV3 } from '../server/pdf/engines/designcraftEngineV3';
 import { specFromBook } from '../server/pdf/pdfFromBook';
 import { clampSamplePages, extractSamplePages } from '../server/pdf/pdfSample';
 import {
@@ -112,7 +112,7 @@ if (chapters.length === 0 || contentChars < 200) {
   throw new Error('Кандидат схожий на порожню/службову книгу; автоматичну публікацію зупинено.');
 }
 
-const rendered = await designcraftEngineV2.render({
+const rendered = await designcraftEngineV3.render({
   book,
   kind: 'book',
   spec,
