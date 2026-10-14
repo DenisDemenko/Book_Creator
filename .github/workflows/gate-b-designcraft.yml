@@ -54,6 +54,9 @@ jobs:
       - name: Educational semantic styles contract
         run: npx tsx scripts/test-educationalSemanticStyles.mts
 
+      - name: Course educational design UI contract
+        run: npx tsx scripts/test-courseEducationalDesignUi.mts
+
       - name: Preview sample metadata test
         run: npx tsx scripts/test-designcraftThemePreviewSample.mts
 
