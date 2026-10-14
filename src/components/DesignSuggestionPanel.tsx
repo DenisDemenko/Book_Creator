@@ -1,5 +1,15 @@
-import React, { useMemo, useState } from 'react';
-import { AlertTriangle, ArrowRight, Check, Loader2, ShieldCheck, Sparkles, X } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  AlertTriangle,
+  ArrowRight,
+  Check,
+  ExternalLink,
+  FileText,
+  Loader2,
+  ShieldCheck,
+  Sparkles,
+  X,
+} from 'lucide-react';
 import type { Book } from '../types';
 import {
   applyDesignPatch,
@@ -36,10 +46,40 @@ interface DesignResponse {
   engine?: string;
 }
 
+interface PdfEngineOption {
+  id: string;
+  label: string;
+  available: boolean;
+  strengthUk?: string;
+  limitUk?: string;
+  reasonUk?: string;
+  fixUk?: string;
+  supportsPrint?: boolean;
+}
+
+const DEFAULT_PDF_ENGINE_ID = 'nova';
+
+function readPdfNote(res: Response): string {
+  const raw = res.headers.get('X-Pdf-Note') || '';
+  if (!raw) return '';
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
 export const DesignSuggestionPanel: React.FC<Props> = ({ book, onUpdateBook }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DesignResponse | null>(null);
+
+  const [pdfEngines, setPdfEngines] = useState<PdfEngineOption[]>([]);
+  const [pdfEngineId, setPdfEngineId] = useState(DEFAULT_PDF_ENGINE_ID);
+  const [pdfEnginesLoading, setPdfEnginesLoading] = useState(true);
+  const [pdfPreviewLoading, setPdfPreviewLoading] = useState(false);
+  const [pdfPreviewError, setPdfPreviewError] = useState<string | null>(null);
+  const [pdfPreviewInfo, setPdfPreviewInfo] = useState<string | null>(null);
 
   const fonts = useMemo(() => availableFontFamilies(book), [book]);
   const sample = useMemo(() => designSampleText(book), [book]);
@@ -49,6 +89,48 @@ export const DesignSuggestionPanel: React.FC<Props> = ({ book, onUpdateBook }) =
     () => (result ? describeDesignChanges(book.layoutConfig, result.patch) : []),
     [result, book.layoutConfig]
   );
+
+  const selectedPdfEngine = useMemo(
+    () => pdfEngines.find((engine) => engine.id === pdfEngineId) || null,
+    [pdfEngines, pdfEngineId]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    setPdfEnginesLoading(true);
+
+    void fetch('/api/pdf/engines', { credentials: 'same-origin' })
+      .then(async (res) => {
+        const body = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(body?.error || `Не вдалося прочитати PDF-рушії (${res.status}).`);
+        return body;
+      })
+      .then((body) => {
+        if (cancelled) return;
+        const engines = Array.isArray(body?.engines) ? (body.engines as PdfEngineOption[]) : [];
+        setPdfEngines(engines);
+        const requestedDefault = String(body?.defaultEngineId || DEFAULT_PDF_ENGINE_ID);
+        setPdfEngineId((current) => {
+          const currentItem = engines.find((item) => item.id === current);
+          if (currentItem?.available) return current;
+          const serverDefault = engines.find((item) => item.id === requestedDefault && item.available);
+          return serverDefault?.id || engines.find((item) => item.available)?.id || requestedDefault;
+        });
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setPdfEngines([]);
+          setPdfPreviewError((err as Error).message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setPdfEnginesLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function ask() {
     setBusy(true);
@@ -80,6 +162,60 @@ export const DesignSuggestionPanel: React.FC<Props> = ({ book, onUpdateBook }) =
     }
   }
 
+  async function previewPdf() {
+    setPdfPreviewLoading(true);
+    setPdfPreviewError(null);
+    setPdfPreviewInfo(null);
+    try {
+      const res = await fetch('/api/admin/pdf/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          book,
+          variant: 'code',
+          format: 'digital',
+          engineId: pdfEngineId,
+        }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || `Не вдалося створити PDF (${res.status}).`);
+      }
+
+      const blob = await res.blob();
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = href;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(href), 60_000);
+
+      const pages = res.headers.get('X-Pdf-Pages');
+      const engine = res.headers.get('X-Pdf-Engine') || pdfEngineId;
+      const honored = res.headers.get('X-Pdf-Honored-Spec');
+      const note = readPdfNote(res);
+      setPdfPreviewInfo(
+        [
+          `Рушій: ${engine}`,
+          pages ? `${pages} стор.` : '',
+          honored === '0' ? 'частину параметрів макета не підтримано' : '',
+          note,
+        ]
+          .filter(Boolean)
+          .join(' · ')
+      );
+    } catch (e) {
+      setPdfPreviewError((e as Error).message);
+    } finally {
+      setPdfPreviewLoading(false);
+    }
+  }
+
   function apply() {
     if (!result) return;
     const updated = applyDesignPatch(book, result.patch);
@@ -95,6 +231,66 @@ export const DesignSuggestionPanel: React.FC<Props> = ({ book, onUpdateBook }) =
 
   return (
     <div className="nova-glass-dark rounded-2xl border border-slate-800 p-5">
+      <div className="mb-5 rounded-xl border border-sky-500/20 bg-sky-500/[0.06] p-3.5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+          <label className="min-w-0 flex-1">
+            <span className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-sky-200">
+              <FileText className="h-3.5 w-3.5" />
+              Рушій PDF
+            </span>
+            <select
+              value={pdfEngineId}
+              disabled={pdfEnginesLoading || pdfPreviewLoading || pdfEngines.length === 0}
+              onChange={(e) => {
+                setPdfEngineId(e.target.value);
+                setPdfPreviewError(null);
+                setPdfPreviewInfo(null);
+              }}
+              className="w-full rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-200 outline-none transition-colors focus:border-sky-500 disabled:opacity-50"
+            >
+              {pdfEnginesLoading && <option value={pdfEngineId}>Завантаження рушіїв…</option>}
+              {!pdfEnginesLoading && pdfEngines.length === 0 && <option value={pdfEngineId}>Рушії недоступні</option>}
+              {pdfEngines.map((engine) => (
+                <option key={engine.id} value={engine.id} disabled={!engine.available}>
+                  {engine.label}{engine.available ? '' : ' — недоступний'}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <button
+            type="button"
+            onClick={() => void previewPdf()}
+            disabled={pdfPreviewLoading || pdfEnginesLoading || !selectedPdfEngine?.available}
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-sky-500 px-4 py-2.5 text-sm font-bold text-slate-950 transition-colors hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {pdfPreviewLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
+            {pdfPreviewLoading ? 'Верстаю книгу…' : 'Відкрити PDF-прев’ю'}
+          </button>
+        </div>
+
+        {selectedPdfEngine && (
+          <div className="mt-2.5 space-y-1 text-[11px] leading-relaxed text-slate-400">
+            {selectedPdfEngine.strengthUk && <p>{selectedPdfEngine.strengthUk}</p>}
+            {selectedPdfEngine.limitUk && <p className="text-slate-500">Обмеження: {selectedPdfEngine.limitUk}</p>}
+            {!selectedPdfEngine.available && selectedPdfEngine.reasonUk && (
+              <p className="text-amber-300">{selectedPdfEngine.reasonUk}</p>
+            )}
+            {!selectedPdfEngine.available && selectedPdfEngine.fixUk && (
+              <p className="text-slate-500">{selectedPdfEngine.fixUk}</p>
+            )}
+          </div>
+        )}
+
+        {pdfPreviewError && (
+          <p role="alert" className="mt-2.5 flex items-start gap-2 text-xs text-red-300">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            {pdfPreviewError}
+          </p>
+        )}
+        {pdfPreviewInfo && <p className="mt-2.5 text-[11px] leading-relaxed text-emerald-300">{pdfPreviewInfo}</p>}
+      </div>
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="mb-1 flex items-center gap-2">
