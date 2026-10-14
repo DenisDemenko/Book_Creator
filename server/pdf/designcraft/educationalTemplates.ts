@@ -1,4 +1,4 @@
-import type { DesignCraftThemeId } from './themes';
+import type { BookDesignThemeId } from './themes';
 
 export type EducationalDocumentType = 'methodic' | 'instruction' | 'worksheet';
 
@@ -16,7 +16,7 @@ export type EducationalPdfTemplateId =
 export interface EducationalTemplateRenderProfile {
   id: EducationalPdfTemplateId;
   documentType: EducationalDocumentType;
-  rendererBaseTheme: DesignCraftThemeId;
+  rendererBaseTheme: BookDesignThemeId;
   /**
    * Stable semantic style family. It is intentionally descriptive rather
    * than a set of raw DesignCraft commands: the educational adapter may add
@@ -64,6 +64,6 @@ export function findEducationalTemplateRenderProfile(
 
 export function resolveEducationalRendererTheme(
   id: string | null | undefined,
-): DesignCraftThemeId | null {
+): BookDesignThemeId | null {
   return findEducationalTemplateRenderProfile(id)?.rendererBaseTheme || null;
 }
