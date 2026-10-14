@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import {
   buildExpressSemanticTagPrefix,
   prependExpressSemanticTags,
@@ -49,5 +50,11 @@ const idempotent = prependExpressSemanticTags(
 );
 assert.equal((idempotent.match(/\[\/chapter:/g) ?? []).length, 1);
 console.log('  ✓ repeated handoff does not duplicate an existing semantic prefix');
+
+const startView = await readFile(new URL('../src/components/ExpressStartView.tsx', import.meta.url), 'utf8');
+assert.match(startView, /prependExpressSemanticTags/);
+assert.match(startView, /summary:\s*prependExpressSemanticTags\(chapter\.summary \?\? '', chapter, cast\)/);
+assert.match(startView, /onFinish=\{\(payload\) => onFinish\?\.\(withDeterministicSemanticHandoff\(payload\)\)\}/);
+console.log('  ✓ ExpressStartView applies semantic tags before handing the wizard payload to App');
 
 console.log('\nExpress semantic handoff regression contract passed.');
