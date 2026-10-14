@@ -45,6 +45,9 @@ jobs:
       - name: Scene semantic adapter test
         run: npx tsx scripts/test-designcraftSceneSemantics.mts
 
+      - name: Semantic placement test
+        run: npx tsx scripts/test-bookDesignPlacement.mts
+
       - name: Gate B live engine test
         id: gateb
         continue-on-error: true
