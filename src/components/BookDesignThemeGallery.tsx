@@ -114,6 +114,7 @@ function ThemeCard({
   onChoose,
   onApply,
   onPreview,
+  onCustomize,
 }: {
   book: Book;
   theme: BookDesignThemeCard;
@@ -125,6 +126,7 @@ function ThemeCard({
   onChoose: () => void;
   onApply: () => void;
   onPreview?: () => void;
+  onCustomize?: () => void;
 }) {
   return (
     <article className={`group rounded-2xl border transition-all ${candidate ? 'border-cyan-400 bg-cyan-500/10 shadow-lg shadow-cyan-950/20' : 'border-slate-800 bg-slate-950/75 hover:border-slate-600'} ${large ? 'p-4' : 'p-3'}`}>
@@ -148,18 +150,18 @@ function ThemeCard({
       )}
 
       <div className="mt-3 flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={onApply}
-          disabled={active}
-          className="rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-bold text-slate-950 hover:bg-cyan-400 disabled:cursor-default disabled:bg-slate-800 disabled:text-slate-500"
-        >
+        <button type="button" onClick={onApply} disabled={active} className="rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-bold text-slate-950 hover:bg-cyan-400 disabled:cursor-default disabled:bg-slate-800 disabled:text-slate-500">
           {active ? 'Застосовано' : 'Застосувати'}
         </button>
         {onPreview && (
           <button type="button" onClick={onPreview} disabled={previewLoading} className="inline-flex items-center gap-1 rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:border-cyan-500 hover:text-cyan-200 disabled:opacity-50">
             {previewLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ChevronRight className="h-3.5 w-3.5" />}
             {previewLoading ? 'Готуємо…' : 'Подивитися книгу'}
+          </button>
+        )}
+        {onCustomize && (
+          <button type="button" onClick={onCustomize} className="inline-flex items-center gap-1.5 rounded-lg border border-violet-700/80 px-3 py-1.5 text-xs font-semibold text-violet-200 hover:bg-violet-500/10">
+            <SlidersHorizontal className="h-3.5 w-3.5" /> Налаштувати
           </button>
         )}
       </div>
@@ -185,6 +187,10 @@ export const BookDesignThemeGallery: React.FC<BookDesignThemeGalleryProps> = ({
   }, [selectedThemeId]);
 
   const candidateTheme = candidateThemeId ? getBookDesignThemeCard(candidateThemeId) : null;
+  const customize = (themeId: BookDesignThemeId) => {
+    setCandidateThemeId(themeId);
+    setMode('designer');
+  };
 
   return (
     <section className="space-y-6" data-book-design-gallery>
@@ -209,8 +215,9 @@ export const BookDesignThemeGallery: React.FC<BookDesignThemeGalleryProps> = ({
                 <div className="mt-1 text-base font-bold text-white">{candidateTheme.label}</div>
                 <div className="mt-1 text-xs text-slate-400">Поточне оформлення книги ще не змінено.</div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 {onOpenPreview && <button type="button" onClick={() => onOpenPreview(candidateTheme.id)} disabled={previewLoading} className="rounded-xl border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-200 disabled:opacity-50">Подивитися</button>}
+                <button type="button" onClick={() => customize(candidateTheme.id)} className="rounded-xl border border-violet-700 px-3 py-2 text-xs font-semibold text-violet-200">Створити свою версію</button>
                 <button type="button" onClick={() => onApplyTheme(candidateTheme.id)} className="rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-400">Застосувати стиль</button>
               </div>
             </div>
@@ -229,7 +236,7 @@ export const BookDesignThemeGallery: React.FC<BookDesignThemeGalleryProps> = ({
               {recommendations.map((recommendation) => {
                 const theme = getBookDesignThemeCard(recommendation.themeId);
                 return (
-                  <ThemeCard key={theme.id} book={book} theme={theme} large active={selectedThemeId === theme.id} candidate={candidateThemeId === theme.id} recommendedReason={recommendation.reasonsUk[0]} previewLoading={previewLoading} onChoose={() => setCandidateThemeId(theme.id)} onApply={() => onApplyTheme(theme.id)} onPreview={onOpenPreview ? () => onOpenPreview(theme.id) : undefined} />
+                  <ThemeCard key={theme.id} book={book} theme={theme} large active={selectedThemeId === theme.id} candidate={candidateThemeId === theme.id} recommendedReason={recommendation.reasonsUk[0]} previewLoading={previewLoading} onChoose={() => setCandidateThemeId(theme.id)} onApply={() => onApplyTheme(theme.id)} onPreview={onOpenPreview ? () => onOpenPreview(theme.id) : undefined} onCustomize={() => customize(theme.id)} />
                 );
               })}
             </div>
@@ -247,7 +254,7 @@ export const BookDesignThemeGallery: React.FC<BookDesignThemeGalleryProps> = ({
             {showAll && (
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {BOOK_DESIGN_THEME_CARDS.map((theme) => (
-                  <ThemeCard key={theme.id} book={book} theme={theme} active={selectedThemeId === theme.id} candidate={candidateThemeId === theme.id} recommendedReason={recommendedIds.has(theme.id) ? 'Одна з трьох рекомендацій для цієї книги.' : undefined} previewLoading={previewLoading} onChoose={() => setCandidateThemeId(theme.id)} onApply={() => onApplyTheme(theme.id)} onPreview={onOpenPreview ? () => onOpenPreview(theme.id) : undefined} />
+                  <ThemeCard key={theme.id} book={book} theme={theme} active={selectedThemeId === theme.id} candidate={candidateThemeId === theme.id} recommendedReason={recommendedIds.has(theme.id) ? 'Одна з трьох рекомендацій для цієї книги.' : undefined} previewLoading={previewLoading} onChoose={() => setCandidateThemeId(theme.id)} onApply={() => onApplyTheme(theme.id)} onPreview={onOpenPreview ? () => onOpenPreview(theme.id) : undefined} onCustomize={() => customize(theme.id)} />
                 ))}
               </div>
             )}
@@ -257,9 +264,10 @@ export const BookDesignThemeGallery: React.FC<BookDesignThemeGalleryProps> = ({
         <div className="space-y-4">
           <div className="rounded-2xl border border-violet-500/25 bg-violet-500/[0.06] p-4">
             <div className="text-sm font-bold text-white">Designer Mode</div>
-            <p className="mt-1 text-xs leading-relaxed text-slate-400">Розширені налаштування теми: типографіка, семантичні блоки, placement, repeat, кольори та параметри фону. Вбудовані теми не змінюються — створюйте власну тему на їх основі.</p>
+            <p className="mt-1 text-xs leading-relaxed text-slate-400">Розширені налаштування теми: типографіка, семантичні блоки, placement, repeat, кольори та параметри фону. Вбудовані теми не змінюються — власна тема успадковує вибрану дизайн-систему.</p>
+            {candidateTheme && <p className="mt-2 text-xs font-semibold text-violet-200">База для нової теми: {candidateTheme.label}</p>}
           </div>
-          <DesignerThemeStudio book={book} />
+          <DesignerThemeStudio book={book} baseThemeId={candidateThemeId || selectedThemeId || undefined} />
         </div>
       )}
     </section>
