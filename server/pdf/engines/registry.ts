@@ -125,5 +125,28 @@ export async function renderWithEngine(
     );
   }
 
-  return engine.render(request);
+  /*
+   * Book Design Studio theme is a DesignCraft concern, not a generic PDF
+   * engine setting. Keep the public request backward-compatible (`theme`) and
+   * bridge it into the renderer's layout spec only for DesignCraft. This means
+   * Nova/Chromium/Pandoc continue to receive exactly the same request shape and
+   * behavior as before.
+   *
+   * `themeId` is intentionally an extension of PdfLayoutSpec during this
+   * migration slice. `buildDesigncraftRtf` reads it without requiring a schema
+   * migration for every stored book. Once the writer-facing picker lands, the
+   * field can become first-class in PdfLayoutSpec without changing stored ids.
+   */
+  const effectiveRequest: PdfRenderRequest =
+    engine.id === 'designcraft' && request.theme
+      ? {
+          ...request,
+          spec: {
+            ...(request.spec || {}),
+            themeId: request.theme,
+          } as PdfRenderRequest['spec'],
+        }
+      : request;
+
+  return engine.render(effectiveRequest);
 }

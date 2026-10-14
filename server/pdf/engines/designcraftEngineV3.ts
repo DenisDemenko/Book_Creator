@@ -21,6 +21,7 @@ import {
   IMAGE_END,
   type DesigncraftManuscript,
 } from '../designcraft/rtf';
+import { serializeDesigncraftParagraphStyles } from '../designcraft/styleCommands';
 import { extensionForMime, loadImageBytes } from '../../media/imageBytes';
 import {
   PdfEngineError,
@@ -125,11 +126,6 @@ function overset(state: any): boolean {
   return state?.overset !== null && state?.overset !== undefined && state?.overset !== false;
 }
 
-function align(value: string | undefined): 'left' | 'center' | 'right' | 'leftJustified' {
-  if (value === 'left' || value === 'center' || value === 'right') return value;
-  return 'leftJustified';
-}
-
 /** Same normalization as bookToMarkdown's headingText, used only for TOC diagnostics. */
 function normalizedHeading(value: unknown): string {
   return String(value || '')
@@ -153,26 +149,6 @@ function missingChapterTitles(request: PdfRenderRequest, chapterEntries: any[]):
     else missing.push(title);
   }
   return missing;
-}
-
-function styles(spec: PdfLayoutSpec): string[] {
-  return [
-    command('style.paragraph.create', {
-      name: 'Body',
-      para: { align: align(spec.bodyAlign), firstLineIndent: spec.paragraphIndent, spaceAfter: spec.paragraphSpacing },
-      chars: { size: spec.baseFontSize, fontFamily: 'DejaVu Serif' },
-    }),
-    command('style.paragraph.create', {
-      name: 'Heading 1',
-      para: { align: align(spec.chapterTitle.align), spaceBefore: spec.chapterTitle.spaceBefore, spaceAfter: spec.chapterTitle.spaceAfter },
-      chars: { size: spec.chapterTitle.fontSize, fontFamily: 'DejaVu Serif', fontStyle: 'Bold' },
-    }),
-    command('style.paragraph.create', {
-      name: 'Heading 2',
-      para: { align: align(spec.sectionTitle.align), spaceBefore: spec.sectionTitle.spaceBefore, spaceAfter: spec.sectionTitle.spaceAfter },
-      chars: { size: spec.sectionTitle.fontSize, fontFamily: 'DejaVu Serif', fontStyle: 'Bold' },
-    }),
-  ];
 }
 
 function frame(
@@ -317,8 +293,6 @@ async function minimizePages(
   }
 
   if (high === maxPages) return { doc: sourceDoc, pageCount: maxPages, state: bestState };
-  // `bestDoc` may be a larger successful probe than the final high when the
-  // last binary step was a failure. Materialize the exact boundary once.
   const exact = path.join(workDir, `${label}-exact.designcraft`);
   const exactScript = path.join(workDir, `${label}-exact.dcs`);
   await fs.writeFile(exactScript, [command('layout.documentSetup', { pages: high }), command('story.get', { story })].join('\n') + '\n', 'utf8');
@@ -367,7 +341,7 @@ export const designcraftEngineV3: PdfEngine = {
             margins: { top: spec.margins.top, bottom: spec.margins.bottom, inside: spec.margins.left, outside: spec.margins.right },
             title: request.book.title || 'Fusion Lab book',
           }),
-          ...styles(spec),
+          ...serializeDesigncraftParagraphStyles(spec, manuscript.semanticStylesUsed),
           command('file.place', { path: manuscriptPath, page: bodyPage, autoflow: true, styleConflicts: 'useExisting' }),
         ].join('\n') + '\n',
         'utf8'
@@ -381,10 +355,6 @@ export const designcraftEngineV3: PdfEngine = {
       const allocatedPages = bodyPage + pagesAdded;
       let minimized = await minimizePages(workDir, initialDoc, story, bodyPage, allocatedPages, 'text');
 
-      // Locate and place illustrations. Reservation paragraphs in the source
-      // deliberately make the text layout pessimistic, so normal images fit
-      // without adding pages. If they do not, retry narrower from the same
-      // clean minimized document.
       const beforeImages = await getStory(workDir, minimized.doc, story, 'locate-images.dcs');
       const placements = locateImages(String(beforeImages?.text || ''), manuscript);
       const notesUk = await prepareImages(workDir, manuscript, placements, request.ownerId);
@@ -436,10 +406,6 @@ export const designcraftEngineV3: PdfEngine = {
           command('story.get', { story }),
           command('anchored.list', { story }),
           command('toc.entries', { styles: tocStyles }),
-          // Ask DesignCraft for Heading 1 separately. In v0.7.1 the numeric
-          // `level` is assigned from the POSITION in the styles request, not
-          // stored on the paragraph, so this direct query is the canonical
-          // chapter count and cannot be confused by optional Heading 2 rows.
           command('toc.entries', { styles: ['Heading 1'] }),
         ].join('\n') + '\n',
         'utf8'
@@ -469,8 +435,6 @@ export const designcraftEngineV3: PdfEngine = {
           ].filter(Boolean).join(' ')
         );
       }
-      // Keep the mixed TOC query alive as a sanity check: if sections are
-      // enabled it must include at least every chapter found above.
       if (!Array.isArray(toc) || toc.length < chapterEntries.length) {
         throw new PdfEngineError('designcraft', 'engine', 'Зміст: загальний TOC повернув менше записів, ніж окремий список глав.');
       }
@@ -481,6 +445,8 @@ export const designcraftEngineV3: PdfEngine = {
       const pageCount = pdf.getPageCount();
       if (pageCount !== minimized.pageCount) throw new PdfEngineError('designcraft', 'engine', `Кількість сторінок не збігається: PDF=${pageCount}, reflow=${minimized.pageCount}.`);
 
+      const semanticNames = manuscript.semanticStylesUsed.filter((name) => !['Body', 'Heading 1', 'Heading 2'].includes(name));
+      if (semanticNames.length) notesUk.unshift(`Тема DesignCraft застосувала семантичні стилі: ${semanticNames.join(', ')}.`);
       notesUk.unshift(
         `DesignCraft: ${pageCount} стор. (первинно виділено ${allocatedPages}, зайвий хвіст прибрано бінарною перевіркою), без overset, зміст синхронізовано (${chapterEntries.length}/${chapterCount} глав), ${loadedImages} ілюстрацій перевірено.`
       );
