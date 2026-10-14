@@ -40,8 +40,6 @@ function customThemeOf(raw: unknown): CustomBookDesignTheme | null {
   if (typeof value.name !== 'string' || !value.name.trim()) return null;
   if (!Array.isArray(value.customBlocks) || value.customBlocks.length > MAX_CUSTOM_BLOCKS) return null;
 
-  // Runtime preview only needs the already versioned schema. Never execute or
-  // fetch arbitrary values here; renderer adapters consume whitelisted fields.
   return value as CustomBookDesignTheme;
 }
 
@@ -75,7 +73,16 @@ async function renderThemePreview(req: Request, res: Response) {
 
     const principal = req.principal;
     const sampleBook = sample.book as unknown as Book;
-    const spec = specFromBook(book as never);
+    const baseSpec = specFromBook(book as never);
+    const spec = customTheme
+      ? ({
+          ...baseSpec,
+          customThemeVisuals: {
+            fonts: customTheme.fonts || [],
+            entities: customTheme.entities || {},
+          },
+        } as typeof baseSpec)
+      : baseSpec;
     const neutralInput = bookToPdfInput(sampleBook);
     const semanticInput = injectDesigncraftSceneSemantics(neutralInput, sampleBook, theme);
     const custom = customTheme
@@ -100,7 +107,7 @@ async function renderThemePreview(req: Request, res: Response) {
 
     const noteUk = [
       `Швидке preview: ${sample.chapterCount} розд., ${sample.sectionCount} секц., ${sample.sourceChars} символів реального рукопису.`,
-      customTheme ? `Власна тема «${customTheme.name}»: застосовано ${custom.applied} семантичних блоків${custom.appendix ? `, у додатку ${custom.appendix}` : ''}.` : '',
+      customTheme ? `Власна тема «${customTheme.name}»: застосовано ${custom.applied} семантичних блоків${custom.appendix ? `, у додатку ${custom.appendix}` : ''}; типографіка передана в DesignCraft.` : '',
       ...rendered.notesUk,
       cropped?.noteUk || '',
     ].filter(Boolean).join(' ');
