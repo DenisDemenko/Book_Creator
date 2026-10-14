@@ -33,6 +33,12 @@ function eq(name: string, actual: unknown, expected: unknown) {
   ok(name, actual === expected, actual === expected ? '' : `отримано ${JSON.stringify(actual)}, очікували ${JSON.stringify(expected)}`);
 }
 
+const INDEX_BYTE_LIMIT = 120 * 1024;
+// Git stores LF; Windows core.autocrlf adds bytes without adding content.
+function journalIndexBytes(text: string): number {
+  return Buffer.byteLength(text.replace(/\r\n?/g, '\n'), 'utf8');
+}
+
 console.log('\n── Три форми заголовків ──');
 {
   const a = parseHeading('## 150. Схема всіх комітів в адмінці → ✅ Зроблено');
@@ -149,10 +155,11 @@ if (!source) {
         perFile.reduce((a, b) => a + b, 0) >= entries.size, true);
 
       const index = fs.readFileSync(path.join(process.cwd(), 'log.md'), 'utf8');
+      const indexBytes = journalIndexBytes(index);
       ok('покажчик згадує кожен номер', nums.every((n) => index.includes(`| ${n} |`)));
       ok('покажчик компактний (його читає кожна сесія)',
-        Buffer.byteLength(index, 'utf8') < 120 * 1024,
-        `${Math.round(Buffer.byteLength(index, 'utf8') / 1024)} КБ`);
+        indexBytes < INDEX_BYTE_LIMIT,
+        `${Math.round(indexBytes / 1024)} КБ`);
       // Критичні операційні секції мусять лишитись у покажчику.
       //
       // Розділ про пуш перевіряємо за початком назви, а не за всією: його
@@ -178,6 +185,18 @@ if (!source) {
 
 console.log('\n── CRLF: журнал із машини власника ──');
 {
+  const nearLimit = 'Я\n'.repeat(Math.floor(INDEX_BYTE_LIMIT / 3) - 1);
+  const nearLimitCrlf = nearLimit.replace(/\n/g, '\r\n');
+  eq('LF і CRLF мають однаковий розмір покажчика',
+    journalIndexBytes(nearLimitCrlf), journalIndexBytes(nearLimit));
+  ok('Windows CRLF біля межі не дає хибного перевищення',
+    journalIndexBytes(nearLimitCrlf) < INDEX_BYTE_LIMIT &&
+    Buffer.byteLength(nearLimitCrlf, 'utf8') > INDEX_BYTE_LIMIT);
+  ok('справжнє перевищення 120 КБ лишається забороненим',
+    journalIndexBytes(nearLimit + 'ЯЯ') >= INDEX_BYTE_LIMIT);
+  eq('кирилиця рахується в UTF-8 байтах, а не символах',
+    journalIndexBytes('Я\r\n'), 3);
+
   // Справжній баг 12.09.2026: у власника core.autocrlf=true, тож журнал у
   // робочій теці з CRLF. Розбиття по «\n» лишало «\r», і зі 156 записів
   // знаходилось 10 — усі формою C. Причина точна: у JS «.» не відповідає
