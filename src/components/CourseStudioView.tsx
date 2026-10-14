@@ -42,6 +42,7 @@ export const CourseStudioView: React.FC<CourseStudioViewProps> = ({
 }) => {
   const [mode, setMode] = useState<WorkspaceMode>('course');
   const [courses, setCourses] = useState<CourseV2[]>([]);
+  const [coursesLoaded, setCoursesLoaded] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(initialCourseId);
   const [selectedCourse, setSelectedCourse] = useState<CourseV2 | null>(null);
   const [loadingList, setLoadingList] = useState(false);
@@ -64,13 +65,14 @@ export const CourseStudioView: React.FC<CourseStudioViewProps> = ({
       setCourses([]);
       setError(cause instanceof Error ? cause.message : L('Не вдалося завантажити курси.', 'Could not load courses.'));
     } finally {
+      setCoursesLoaded(true);
       setLoadingList(false);
     }
   }, [L, initialCourseId]);
 
   useEffect(() => {
-    if (mode === 'design' && courses.length === 0 && !loadingList) void loadCourses();
-  }, [mode, courses.length, loadingList, loadCourses]);
+    if (mode === 'design' && !coursesLoaded && !loadingList) void loadCourses();
+  }, [mode, coursesLoaded, loadingList, loadCourses]);
 
   useEffect(() => {
     if (initialCourseId) setSelectedId(initialCourseId);
