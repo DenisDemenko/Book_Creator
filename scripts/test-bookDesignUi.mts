@@ -60,6 +60,23 @@ assert.match(designer, /theme: theme\.basedOn \|\| 'classic'/);
 assert.match(designer, /customTheme: theme/);
 console.log('  ✓ custom theme preview payload keeps base theme + customTheme + DesignCraft');
 
+assert.match(designer, /window\.addEventListener\('beforeunload'/);
+assert.match(designer, /onDirtyChange\?\.\(dirty\)/);
+assert.match(designer, /window\.confirm\('Є незбережені зміни/);
+console.log('  ✓ unsaved custom theme edits are guarded and exposed to parent UI');
+
+assert.match(designer, /window\.open\('about:blank', '_blank'\)/);
+assert.match(designer, /reservedWindow\.location\.replace\(href\)/);
+assert.match(designer, /Готуємо розворот книги/);
+assert.match(designer, /Спробувати ще/);
+assert.match(designer, /Ваш дизайн не втрачено/);
+console.log('  ✓ PDF preview reserves a user-gesture window and has loading/retry/error states');
+
+assert.match(designer, /function hasBookText/);
+assert.match(designer, /У книзі ще немає тексту для живого preview/);
+assert.match(designer, /Щоб створити PDF preview, додайте хоча б один фрагмент тексту/);
+console.log('  ✓ empty books keep theme editing available while PDF preview is disabled');
+
 assert.match(designSuggestion, /isThemePreview \? '\/api\/pdf\/designcraft\/theme-preview' : '\/api\/admin\/pdf\/preview'/);
 assert.match(designSuggestion, /\? \{ book, engineId: DESIGNCRAFT_ENGINE_ID, theme: themeId \}/);
 assert.match(designSuggestion, /: \{ book, variant: 'code', format: 'digital', engineId: pdfEngineId \}/);
