@@ -1,26 +1,16 @@
-import type { DesignerCustomBlock, DesignerSemanticSource } from './customBookDesignTheme';
+import type {
+  DesignerBlockPlacement,
+  DesignerBlockRepeat,
+  DesignerCustomBlock,
+  DesignerSemanticSource,
+} from './customBookDesignTheme';
 
-export type DesignerBlockPlacement =
-  | 'inline'
-  | 'scene-opening'
-  | 'chapter-opening'
-  | 'full-width'
-  | 'full-page'
-  | 'appendix';
-
-export type DesignerBlockRepeat =
-  | 'once'
-  | 'per-character'
-  | 'per-scene'
-  | 'per-conflict'
-  | 'matched';
+export type { DesignerBlockPlacement, DesignerBlockRepeat } from './customBookDesignTheme';
 
 export interface DesignerPlacementOptions {
   placement: DesignerBlockPlacement;
   repeat: DesignerBlockRepeat;
 }
-
-type BlockWithPlacement = DesignerCustomBlock & Partial<DesignerPlacementOptions>;
 
 const PLACEMENTS: readonly DesignerBlockPlacement[] = [
   'inline',
@@ -66,9 +56,8 @@ export function defaultRepeatFor(source: DesignerSemanticSource): DesignerBlockR
  * deterministic placement derived from the semantic source.
  */
 export function placementOf(block: DesignerCustomBlock | undefined, source: DesignerSemanticSource): DesignerPlacementOptions {
-  const candidate = block as BlockWithPlacement | undefined;
   return {
-    placement: isPlacement(candidate?.placement) ? candidate.placement : defaultPlacementFor(source),
-    repeat: isRepeat(candidate?.repeat) ? candidate.repeat : defaultRepeatFor(source),
+    placement: isPlacement(block?.placement) ? block.placement : defaultPlacementFor(source),
+    repeat: isRepeat(block?.repeat) ? block.repeat : defaultRepeatFor(source),
   };
 }
