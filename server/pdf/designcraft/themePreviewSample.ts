@@ -51,7 +51,7 @@ export function buildDesigncraftThemePreviewSample(
   let sourceChars = 0;
   let sectionCount = 0;
 
-  outer: for (const chapter of chapters) {
+  for (const chapter of chapters) {
     if (selectedChapters.length >= maxChapters) break;
     const sections = Array.isArray(chapter?.sections) ? chapter.sections : [];
     const selectedSections: PreviewSection[] = [];
@@ -59,7 +59,7 @@ export function buildDesigncraftThemePreviewSample(
     for (const section of sections) {
       const chars = meaningfulChars(section);
       if (chars <= 0) continue;
-      if (sourceChars >= charBudget && sectionCount > 0) break outer;
+      if (sourceChars >= charBudget && sectionCount > 0) break;
 
       selectedSections.push({ ...section });
       sourceChars += chars;
