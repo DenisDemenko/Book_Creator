@@ -29,6 +29,8 @@ import {
   type DesignerThemeEntity,
 } from '../data/customBookDesignTheme';
 import { defaultPlacementFor, defaultRepeatFor, placementOf } from '../data/bookDesignPlacement';
+import { BookDesignBackgroundEditor } from './BookDesignBackgroundEditor';
+import { BookDesignBackgroundLayers } from './BookDesignBackgroundLayers';
 
 interface Props {
   book: Book;
@@ -56,7 +58,14 @@ function normalizeTheme(raw: Partial<CustomBookDesignTheme>): CustomBookDesignTh
     ...raw,
     version: 2,
     fonts: Array.isArray(raw.fonts) && raw.fonts.length ? raw.fonts : fallback.fonts,
-    page: { ...fallback.page, ...(raw.page || {}) },
+    page: {
+      ...fallback.page,
+      ...(raw.page || {}),
+      pageBackground: {
+        ...fallback.page.pageBackground,
+        ...(raw.page?.pageBackground || {}),
+      },
+    },
     chapterOpening: { ...fallback.chapterOpening, ...(raw.chapterOpening || {}) },
     entities: raw.entities || {},
     customBlocks: Array.isArray(raw.customBlocks)
@@ -107,7 +116,7 @@ function entityStyle(theme: CustomBookDesignTheme, entity: DesignerThemeEntity):
     enabled: true,
     fontSlot: entity === 'body' || entity === 'quote' || entity === 'epigraph' ? 'body' : 'heading',
     align: 'left',
-    background: { kind: 'none' },
+    background: { kind: 'none', opacity: 1 },
     border: { style: 'none', sides: [] },
   };
 }
@@ -159,20 +168,6 @@ function readPdfNote(res: Response): string {
   try { return decodeURIComponent(raw); } catch { return raw; }
 }
 
-function cssBackground(theme: CustomBookDesignTheme): React.CSSProperties {
-  const background = theme.page.pageBackground;
-  if (background.kind === 'gradient' && background.gradient) return { background: background.gradient };
-  if (background.kind === 'image' && background.imageUrl) {
-    return {
-      backgroundImage: `url(${background.imageUrl})`,
-      backgroundPosition: 'center',
-      backgroundRepeat: background.fit === 'tile' ? 'repeat' : 'no-repeat',
-      backgroundSize: background.fit === 'contain' ? 'contain' : background.fit === 'stretch' ? '100% 100%' : background.fit === 'tile' ? 'auto' : 'cover',
-    };
-  }
-  return { background: background.color || '#fffdf8' };
-}
-
 function entityPreviewText(entity: DesignerThemeEntity): { eyebrow: string; text: string } {
   if (entity === 'character') return { eyebrow: 'Персонаж', text: 'Марта Лис · інженерка станції · мета: врятувати екіпаж.' };
   if (entity === 'scene') return { eyebrow: 'Сцена', text: 'Закритий шлюз · Орбіта · 02:47 · учасники: Марта, Лео.' };
@@ -188,19 +183,12 @@ function PreviewPageCard({ theme, page, entity }: { theme: CustomBookDesignTheme
   const preview = entityPreviewText(entity);
   const bodyFont = font(theme, 'body').family;
   const headingFont = font(theme, 'heading').family;
-  const bgOpacity = Math.max(0, Math.min(1, Number(theme.page.pageBackground.opacity ?? 1)));
-  const background = style.background;
-  const blockBackground = background?.kind === 'color'
-    ? background.color
-    : background?.kind === 'gradient'
-      ? background.gradient
-      : background?.kind === 'image' && background.imageUrl
-        ? `url(${background.imageUrl}) center/cover`
-        : 'transparent';
+  const blockBackground = style.background || { kind: 'none' as const, opacity: 1 };
+  const paperColor = theme.page.pageBackground.color || '#fffdf8';
 
   return (
     <div className="relative aspect-[0.705] w-[360px] max-w-full overflow-hidden rounded-[4px] bg-[#fffdf8] shadow-2xl shadow-black/30 ring-1 ring-black/10">
-      <div className="absolute inset-0" style={{ ...cssBackground(theme), opacity: bgOpacity }} />
+      <BookDesignBackgroundLayers background={theme.page.pageBackground} paperColor={paperColor} />
       <div className="relative z-10 flex h-full flex-col px-[10%] pb-[8%] pt-[9%]" style={{ color: theme.page.textColor, fontFamily: bodyFont }}>
         {page.sceneMeta && <div className="mb-4 text-[9px] font-semibold uppercase tracking-[0.2em] opacity-50">{page.sceneMeta}</div>}
         <div className="text-[10px] uppercase tracking-[0.18em] opacity-50">Розділ</div>
@@ -209,9 +197,8 @@ function PreviewPageCard({ theme, page, entity }: { theme: CustomBookDesignTheme
         <p className="mt-6 text-[11px] leading-[1.75] text-current opacity-90">{page.body.slice(0, 610)}{page.body.length > 610 ? '…' : ''}</p>
 
         <div
-          className="mt-6 rounded-md p-3"
+          className="relative mt-6 overflow-hidden rounded-md p-3"
           style={{
-            background: blockBackground,
             color: style.textColor || theme.page.textColor,
             fontFamily: font(theme, style.fontSlot || 'body').family,
             fontSize: style.fontSizePt ? `${Math.max(8, Math.min(20, style.fontSizePt))}px` : '11px',
@@ -219,11 +206,13 @@ function PreviewPageCard({ theme, page, entity }: { theme: CustomBookDesignTheme
             fontStyle: style.italic ? 'italic' : undefined,
             textAlign: style.align === 'justify' ? 'justify' : style.align || 'left',
             border: style.border?.style === 'solid' ? `${style.border.widthPt || 1}px solid ${style.border.color || theme.page.accentColor}` : undefined,
-            opacity: background?.opacity ?? 1,
           }}
         >
-          <div className="text-[8px] font-bold uppercase tracking-[0.18em] opacity-55">{preview.eyebrow}</div>
-          <div className="mt-1.5 leading-relaxed">{preview.text}</div>
+          <BookDesignBackgroundLayers background={blockBackground} paperColor="transparent" />
+          <div className="relative z-10">
+            <div className="text-[8px] font-bold uppercase tracking-[0.18em] opacity-55">{preview.eyebrow}</div>
+            <div className="mt-1.5 leading-relaxed">{preview.text}</div>
+          </div>
         </div>
         <div className="mt-auto text-center text-[9px] opacity-40">{page.chapter}</div>
       </div>
@@ -279,8 +268,6 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId }) => {
     }
     const next = themes.map((item) => item.id === nextTheme.id ? nextTheme : item);
     setThemes(next);
-    // Local draft autosave prevents accidental loss; the explicit Save button
-    // marks the user's checkpoint and clears the dirty state.
     persistThemes(book.id, next);
     setDirty(true);
     setPreviewError(null);
@@ -412,6 +399,15 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId }) => {
     });
   }
 
+  function patchPageBackground(background: CustomBookDesignTheme['page']['pageBackground']) {
+    if (!active) return;
+    updateActive({
+      ...active,
+      page: { ...active.page, pageBackground: background },
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
   function addCustomBlock(source: DesignerSemanticSource = 'manual') {
     if (!active) return;
     const styleEntity: DesignerThemeEntity = source === 'character' || source === 'scene' || source === 'conflict' ? source : 'body';
@@ -515,30 +511,37 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId }) => {
             </main>
 
             <aside className="space-y-3 overflow-y-auto rounded-xl border border-slate-800 bg-slate-950/70 p-3">
-              <div className="flex items-start justify-between gap-2"><div><div className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-400">Властивості</div><h3 className="mt-1 text-sm font-bold text-white">{DESIGNER_THEME_ENTITIES.find((item) => item.id === entity)?.labelUk}</h3></div><label className="flex items-center gap-1.5 text-[11px] text-slate-400"><input type="checkbox" checked={entityStyle(active, entity).enabled} onChange={(e) => patchEntity({ enabled: e.target.checked })} /> On</label></div>
+              <div className="flex items-start justify-between gap-2"><div><div className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-400">Властивості</div><h3 className="mt-1 text-sm font-bold text-white">{DESIGNER_THEME_ENTITIES.find((item) => item.id === entity)?.labelUk}</h3></div>{entity !== 'page' && <label className="flex items-center gap-1.5 text-[11px] text-slate-400"><input type="checkbox" checked={entityStyle(active, entity).enabled} onChange={(e) => patchEntity({ enabled: e.target.checked })} /> On</label>}</div>
 
-              <details open className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
+              {entity !== 'page' && <details open className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
                 <summary className="cursor-pointer text-xs font-semibold text-slate-200">Типографіка</summary>
                 <div className="mt-3 space-y-2">
                   <label className="block text-[11px] text-slate-500">Шрифт<select value={entityStyle(active, entity).fontSlot || 'body'} onChange={(e) => patchEntity({ fontSlot: e.target.value as DesignerFontAsset['slot'] })} className={`${inputClass()} mt-1`}><option value="body">Основний</option><option value="heading">Заголовки</option><option value="mono">Mono</option><option value="display">Display</option></select></label>
                   <div className="grid grid-cols-2 gap-2"><label className="text-[11px] text-slate-500">Кегль, pt<input type="number" min={7} max={56} step={0.5} value={entityStyle(active, entity).fontSizePt ?? ''} onChange={(e) => patchEntity({ fontSizePt: e.target.value === '' ? undefined : Number(e.target.value) })} className={`${inputClass()} mt-1`} placeholder="За темою" /></label><label className="text-[11px] text-slate-500">Вирівнювання<select value={entityStyle(active, entity).align || 'left'} onChange={(e) => patchEntity({ align: e.target.value as DesignerEntityStyle['align'] })} className={`${inputClass()} mt-1`}><option value="left">Ліворуч</option><option value="center">Центр</option><option value="right">Праворуч</option><option value="justify">По ширині</option></select></label></div>
                   <div className="grid grid-cols-2 gap-2"><label className="flex items-center gap-2 rounded-lg border border-slate-800 px-2.5 py-2 text-xs text-slate-300"><input type="checkbox" checked={Number(entityStyle(active, entity).fontWeight || 0) >= 600} onChange={(e) => patchEntity({ fontWeight: e.target.checked ? 700 : 400 })} /> <strong>Bold</strong></label><label className="flex items-center gap-2 rounded-lg border border-slate-800 px-2.5 py-2 text-xs text-slate-300"><input type="checkbox" checked={Boolean(entityStyle(active, entity).italic)} onChange={(e) => patchEntity({ italic: e.target.checked })} /> <em>Italic</em></label></div>
                 </div>
-              </details>
+              </details>}
 
-              <details className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
+              {entity !== 'page' && <details className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
                 <summary className="cursor-pointer text-xs font-semibold text-slate-200">Колір</summary>
                 <div className="mt-3 grid grid-cols-2 gap-2"><label className="text-[11px] text-slate-500">Текст<input type="color" value={entityStyle(active, entity).textColor || active.page.textColor} onChange={(e) => patchEntity({ textColor: e.target.value })} className="mt-1 h-9 w-full rounded-lg border border-slate-700 bg-slate-950" /></label><label className="text-[11px] text-slate-500">Акцент<input type="color" value={entityStyle(active, entity).accentColor || active.page.accentColor} onChange={(e) => patchEntity({ accentColor: e.target.value })} className="mt-1 h-9 w-full rounded-lg border border-slate-700 bg-slate-950" /></label></div>
-              </details>
+              </details>}
 
-              <details className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
+              {entity === 'page' && <details open className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
+                <summary className="cursor-pointer text-xs font-semibold text-slate-200">Кольори сторінки</summary>
+                <div className="mt-3 grid grid-cols-2 gap-2"><label className="text-[11px] text-slate-500">Текст<input type="color" value={active.page.textColor} onChange={(e) => updateActive({ ...active, page: { ...active.page, textColor: e.target.value }, updatedAt: new Date().toISOString() })} className="mt-1 h-9 w-full rounded-lg border border-slate-700 bg-slate-950" /></label><label className="text-[11px] text-slate-500">Акцент<input type="color" value={active.page.accentColor} onChange={(e) => updateActive({ ...active, page: { ...active.page, accentColor: e.target.value }, updatedAt: new Date().toISOString() })} className="mt-1 h-9 w-full rounded-lg border border-slate-700 bg-slate-950" /></label></div>
+              </details>}
+
+              <details open={entity === 'page'} className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
                 <summary className="cursor-pointer text-xs font-semibold text-slate-200">Фон</summary>
-                <div className="mt-3 space-y-2">
-                  <select value={entityStyle(active, entity).background?.kind || 'none'} onChange={(e) => patchEntity({ background: { ...entityStyle(active, entity).background, kind: e.target.value as NonNullable<DesignerEntityStyle['background']>['kind'] } })} className={inputClass()}><option value="none">Немає</option><option value="color">Колір</option><option value="gradient">Градієнт</option><option value="image">Зображення</option></select>
-                  {entityStyle(active, entity).background?.kind === 'color' && <input type="color" value={entityStyle(active, entity).background?.color || '#e2e8f0'} onChange={(e) => patchEntity({ background: { ...entityStyle(active, entity).background, kind: 'color', color: e.target.value } })} className="h-9 w-full rounded-lg border border-slate-700 bg-slate-950" />}
-                  {entityStyle(active, entity).background?.kind === 'gradient' && <input value={entityStyle(active, entity).background?.gradient || ''} onChange={(e) => patchEntity({ background: { ...entityStyle(active, entity).background, kind: 'gradient', gradient: e.target.value } })} placeholder="linear-gradient(...)" className={inputClass()} />}
-                  {entityStyle(active, entity).background?.kind === 'image' && <input value={entityStyle(active, entity).background?.imageUrl || ''} onChange={(e) => patchEntity({ background: { ...entityStyle(active, entity).background, kind: 'image', imageUrl: e.target.value, fit: 'cover' } })} placeholder="URL зображення" className={inputClass()} />}
-                  <label className="block text-[11px] text-slate-500">Прозорість<input type="range" min={0} max={1} step={0.05} value={entityStyle(active, entity).background?.opacity ?? 1} onChange={(e) => patchEntity({ background: { ...entityStyle(active, entity).background, kind: entityStyle(active, entity).background?.kind || 'none', opacity: Number(e.target.value) } })} className="mt-1 w-full" /></label>
+                <div className="mt-3">
+                  <BookDesignBackgroundEditor
+                    bookId={book.id}
+                    background={entity === 'page' ? active.page.pageBackground : entityStyle(active, entity).background || { kind: 'none', opacity: 1 }}
+                    paperColor={active.page.pageBackground.color || '#fffdf8'}
+                    compact={entity !== 'page'}
+                    onChange={(background) => entity === 'page' ? patchPageBackground(background) : patchEntity({ background })}
+                  />
                 </div>
               </details>
 
