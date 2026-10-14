@@ -7,6 +7,10 @@ import { extractSamplePages } from '../pdfSample';
 import { renderWithEngine } from '../engines/registry';
 import { PdfEngineError } from '../engines/types';
 import { applyCustomThemeBlocksToPdfInput } from './customThemeBlocks';
+import {
+  findEducationalTemplateRenderProfile,
+  type EducationalPdfTemplateId,
+} from './educationalTemplates';
 import { injectDesigncraftSceneSemantics } from './sceneSemantics';
 import { isBookDesignThemeId, type BookDesignThemeId } from './themes';
 import { buildDesigncraftThemePreviewSample } from './themePreviewSample';
@@ -43,8 +47,22 @@ function customThemeOf(raw: unknown): CustomBookDesignTheme | null {
   return value as CustomBookDesignTheme;
 }
 
-function baseThemeFor(custom: CustomBookDesignTheme | null, requested: string): BookDesignThemeId | null {
+function educationalTemplateOf(raw: unknown): {
+  id: EducationalPdfTemplateId;
+  rendererBaseTheme: BookDesignThemeId;
+  styleFamily: string;
+} | null {
+  if (typeof raw !== 'string') return null;
+  return findEducationalTemplateRenderProfile(raw.trim());
+}
+
+function baseThemeFor(
+  custom: CustomBookDesignTheme | null,
+  requested: string,
+  educationalBaseTheme: BookDesignThemeId | null,
+): BookDesignThemeId | null {
   if (custom?.basedOn && isBookDesignThemeId(custom.basedOn)) return custom.basedOn;
+  if (educationalBaseTheme) return educationalBaseTheme;
   if (isBookDesignThemeId(requested)) return requested;
   return custom ? 'classic' : null;
 }
@@ -54,10 +72,17 @@ async function renderThemePreview(req: Request, res: Response) {
     const book = req.body?.book as Record<string, unknown> | undefined;
     const requestedTheme = typeof req.body?.theme === 'string' ? req.body.theme.trim() : '';
     const customTheme = customThemeOf(req.body?.customTheme);
-    const theme = baseThemeFor(customTheme, requestedTheme);
+    const educationalTemplate = educationalTemplateOf(req.body?.educationalTemplateId);
+    const theme = baseThemeFor(customTheme, requestedTheme, educationalTemplate?.rendererBaseTheme || null);
 
     if (!book || !String(book.title || '').trim()) {
       return res.status(400).json({ error: 'Потрібен об’єкт книги з назвою.', kind: 'bad_input' });
+    }
+    if (req.body?.educationalTemplateId && !educationalTemplate) {
+      return res.status(400).json({
+        error: `Невідомий навчальний PDF-шаблон: ${String(req.body.educationalTemplateId)}.`,
+        kind: 'bad_input',
+      });
     }
     if (!theme) {
       return res.status(400).json({ error: `Невідома дизайн-система: ${requestedTheme || 'порожньо'}.`, kind: 'bad_input' });
@@ -108,17 +133,26 @@ async function renderThemePreview(req: Request, res: Response) {
 
     const noteUk = [
       `Швидке preview: ${sample.chapterCount} розд., ${sample.sectionCount} секц., ${sample.sourceChars} символів реального рукопису.`,
+      educationalTemplate
+        ? `Навчальний шаблон «${educationalTemplate.id}» використовує базову DesignCraft тему «${educationalTemplate.rendererBaseTheme}» і стильову сім’ю «${educationalTemplate.styleFamily}».`
+        : '',
       customTheme ? `Власна тема «${customTheme.name}»: застосовано ${custom.applied} семантичних блоків${custom.appendix ? `, у додатку ${custom.appendix}` : ''}; типографіка й кольори передані в DesignCraft.` : '',
       ...rendered.notesUk,
       cropped?.noteUk || '',
     ].filter(Boolean).join(' ');
 
+    const publicThemeId = educationalTemplate?.id || customTheme?.id || theme;
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="theme-preview-${customTheme?.id || theme}.pdf"`);
+    res.setHeader('Content-Disposition', `inline; filename="theme-preview-${publicThemeId}.pdf"`);
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('X-Pdf-Pages', String(pageCount));
     res.setHeader('X-Pdf-Engine', rendered.engineId);
-    res.setHeader('X-Pdf-Theme', customTheme?.id || theme);
+    res.setHeader('X-Pdf-Theme', publicThemeId);
+    res.setHeader('X-Pdf-Renderer-Base-Theme', theme);
+    if (educationalTemplate) {
+      res.setHeader('X-Pdf-Educational-Template', educationalTemplate.id);
+      res.setHeader('X-Pdf-Educational-Style-Family', educationalTemplate.styleFamily);
+    }
     res.setHeader('X-Pdf-Honored-Spec', rendered.honoredSpec ? '1' : '0');
     res.setHeader('X-Pdf-Sample-Chars', String(sample.sourceChars));
     res.setHeader('X-Pdf-Sample-Sections', String(sample.sectionCount));
@@ -130,7 +164,7 @@ async function renderThemePreview(req: Request, res: Response) {
   }
 }
 
-/** Author-facing Book Design Studio preview. */
+/** Author-facing Book Design Studio and educational document preview. */
 export function registerDesigncraftThemePreviewRoutes(app: Express): void {
   app.post('/api/pdf/designcraft/theme-preview', requireAuth, renderThemePreview);
 }
