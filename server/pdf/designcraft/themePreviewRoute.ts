@@ -80,6 +80,7 @@ async function renderThemePreview(req: Request, res: Response) {
           customThemeVisuals: {
             fonts: customTheme.fonts || [],
             entities: customTheme.entities || {},
+            page: customTheme.page,
           },
         } as typeof baseSpec)
       : baseSpec;
@@ -107,7 +108,7 @@ async function renderThemePreview(req: Request, res: Response) {
 
     const noteUk = [
       `Швидке preview: ${sample.chapterCount} розд., ${sample.sectionCount} секц., ${sample.sourceChars} символів реального рукопису.`,
-      customTheme ? `Власна тема «${customTheme.name}»: застосовано ${custom.applied} семантичних блоків${custom.appendix ? `, у додатку ${custom.appendix}` : ''}; типографіка передана в DesignCraft.` : '',
+      customTheme ? `Власна тема «${customTheme.name}»: застосовано ${custom.applied} семантичних блоків${custom.appendix ? `, у додатку ${custom.appendix}` : ''}; типографіка й кольори передані в DesignCraft.` : '',
       ...rendered.notesUk,
       cropped?.noteUk || '',
     ].filter(Boolean).join(' ');
