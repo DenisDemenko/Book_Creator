@@ -6,7 +6,7 @@
 import { novaEngine } from './novaEngine';
 import { chromiumEngine } from './chromiumEngine';
 import { pandocEngine } from './pandocEngine';
-import { designcraftEngineV2 } from './designcraftEngineV2';
+import { designcraftEngineV3 } from './designcraftEngineV3';
 import {
   DEFAULT_PDF_ENGINE,
   PDF_ENGINE_IDS,
@@ -21,7 +21,7 @@ import {
 /** Рушії в порядку показу автору. */
 const ENGINES: Partial<Record<PdfEngineId, PdfEngine>> = {
   nova: novaEngine,
-  designcraft: designcraftEngineV2,
+  designcraft: designcraftEngineV3,
   chromium: chromiumEngine,
   pandoc: pandocEngine,
   // gamma: свідомо НЕ зареєстрована. Код підсистеми лишається на місці.
