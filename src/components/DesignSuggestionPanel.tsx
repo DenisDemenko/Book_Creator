@@ -196,25 +196,26 @@ export const DesignSuggestionPanel: React.FC<Props> = ({ book, onUpdateBook }) =
     setPdfPreviewError(null);
     setPdfPreviewInfo(null);
     try {
-      const requestedTheme = themeId || selectedBookDesignTheme || undefined;
-      const designcraft = pdfEngines.find((engine) => engine.id === DESIGNCRAFT_ENGINE_ID);
-      const requestedEngineId = requestedTheme && designcraft?.available ? DESIGNCRAFT_ENGINE_ID : pdfEngineId;
+      const isThemePreview = Boolean(themeId);
+      const requestedEngineId = isThemePreview ? DESIGNCRAFT_ENGINE_ID : pdfEngineId;
+      const endpoint = isThemePreview ? '/api/pdf/designcraft/theme-preview' : '/api/admin/pdf/preview';
 
-      if (requestedTheme && !designcraft?.available) {
-        throw new Error('Живий preview теми потребує доступного рушія DesignCraft. Перевірте його стан у списку PDF-рушіїв.');
+      if (isThemePreview) {
+        const designcraft = pdfEngines.find((engine) => engine.id === DESIGNCRAFT_ENGINE_ID);
+        if (!designcraft?.available) {
+          throw new Error('Живий preview теми потребує доступного рушія DesignCraft. Перевірте його стан у списку PDF-рушіїв.');
+        }
       }
 
-      const res = await fetch('/api/admin/pdf/preview', {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({
-          book,
-          variant: 'code',
-          format: 'digital',
-          engineId: requestedEngineId,
-          theme: requestedTheme,
-        }),
+        body: JSON.stringify(
+          isThemePreview
+            ? { book, engineId: DESIGNCRAFT_ENGINE_ID, theme: themeId }
+            : { book, variant: 'code', format: 'digital', engineId: pdfEngineId }
+        ),
       });
 
       if (!res.ok) {
@@ -240,7 +241,7 @@ export const DesignSuggestionPanel: React.FC<Props> = ({ book, onUpdateBook }) =
       setPdfPreviewInfo(
         [
           `Рушій: ${engine}`,
-          requestedTheme ? `тема: ${requestedTheme}` : '',
+          themeId ? `тема: ${themeId}` : '',
           pages ? `${pages} стор.` : '',
           honored === '0' ? 'частину параметрів макета не підтримано' : '',
           note,
