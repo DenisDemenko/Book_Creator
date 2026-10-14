@@ -12,6 +12,17 @@ import {
   type SemanticStyleRule,
 } from './themes';
 
+interface ParagraphRule {
+  on: boolean;
+  weight: number;
+  color: string;
+  tint: number;
+  columnWidth: boolean;
+  offset: number;
+  leftIndent: number;
+  rightIndent: number;
+}
+
 export interface DesigncraftParagraphStyleDefinition {
   name: SemanticParagraphStyle;
   para: {
@@ -19,6 +30,17 @@ export interface DesigncraftParagraphStyleDefinition {
     firstLineIndent?: number;
     spaceBefore?: number;
     spaceAfter?: number;
+    shadingOn?: boolean;
+    shadingColor?: string;
+    shadingTint?: number;
+    shadingOffsets?: [number, number, number, number];
+    borderOn?: boolean;
+    borderWeights?: [number, number, number, number];
+    borderColor?: string;
+    borderTint?: number;
+    borderOffsets?: [number, number, number, number];
+    ruleAbove?: ParagraphRule;
+    ruleBelow?: ParagraphRule;
   };
   chars: {
     size: number;
@@ -32,6 +54,7 @@ type CustomVisuals = Pick<CustomBookDesignTheme, 'fonts' | 'entities' | 'page'>;
 type ThemeSpec = PdfLayoutSpec & { themeId?: unknown; customThemeVisuals?: CustomVisuals };
 
 const SAFE_CUSTOM_FONTS = new Set(['DejaVu Serif', 'DejaVu Sans', 'DejaVu Sans Mono']);
+const MM_TO_PT = 72 / 25.4;
 
 function dcAlign(value: string | undefined): 'left' | 'center' | 'right' | 'leftJustified' {
   if (value === 'left' || value === 'center' || value === 'right') return value;
@@ -82,6 +105,48 @@ function fillForEntity(spec: PdfLayoutSpec, entity: DesignerThemeEntity, fallbac
   const custom = customEntityStyle(spec, entity);
   const hex = safeHex(custom?.textColor) || fallback;
   return hex ? colorSwatchName(hex) : undefined;
+}
+
+function mmOffsets(style: DesignerEntityStyle | null): [number, number, number, number] | undefined {
+  const p = style?.paddingMm;
+  if (!p) return undefined;
+  return [p.top, p.left, p.bottom, p.right].map((value) => clamp(Number(value) * MM_TO_PT, 0, 72, 0)) as [number, number, number, number];
+}
+
+function decorationFor(style: DesignerEntityStyle | null): Partial<DesigncraftParagraphStyleDefinition['para']> {
+  if (!style) return {};
+  const out: Partial<DesigncraftParagraphStyleDefinition['para']> = {};
+  const offsets = mmOffsets(style);
+
+  if (style.background?.kind === 'color') {
+    const hex = safeHex(style.background.color);
+    if (hex) {
+      out.shadingOn = true;
+      out.shadingColor = colorSwatchName(hex);
+      out.shadingTint = clamp(style.background.opacity, 0, 1, 1);
+      if (offsets) out.shadingOffsets = offsets;
+    }
+  }
+
+  if (style.border?.style === 'solid') {
+    const hex = safeHex(style.border.color);
+    if (hex) {
+      const sides = new Set(style.border.sides?.length ? style.border.sides : ['top', 'right', 'bottom', 'left']);
+      const weight = clamp(style.border.widthPt, 0.25, 6, 1);
+      out.borderOn = true;
+      out.borderColor = colorSwatchName(hex);
+      out.borderTint = 1;
+      out.borderWeights = [
+        sides.has('top') ? weight : 0,
+        sides.has('left') ? weight : 0,
+        sides.has('bottom') ? weight : 0,
+        sides.has('right') ? weight : 0,
+      ];
+      if (offsets) out.borderOffsets = offsets;
+    }
+  }
+
+  return out;
 }
 
 function semanticEntity(name: SemanticParagraphStyle): DesignerThemeEntity | null {
@@ -178,6 +243,7 @@ function semanticDefinition(
       firstLineIndent,
       spaceBefore: before,
       spaceAfter: after,
+      ...decorationFor(custom),
     },
     chars: {
       size: clamp(custom?.fontSizePt, 7, 36, size),
@@ -215,6 +281,7 @@ export function buildDesigncraftParagraphStyles(
         align: dcAlign(bodyAlign),
         firstLineIndent: spec.paragraphIndent * (theme?.paragraphIndentMultiplier ?? 1),
         spaceAfter: spec.paragraphSpacing * (theme?.paragraphSpacingMultiplier ?? 1),
+        ...decorationFor(bodyCustom),
       },
       chars: {
         size: bodySize,
@@ -229,6 +296,7 @@ export function buildDesigncraftParagraphStyles(
         align: dcAlign(chapterAlign),
         spaceBefore: spec.chapterTitle.spaceBefore,
         spaceAfter: spec.chapterTitle.spaceAfter,
+        ...decorationFor(h1Custom),
       },
       chars: {
         size: chapterSize,
@@ -243,6 +311,7 @@ export function buildDesigncraftParagraphStyles(
         align: dcAlign(h2Custom?.align || spec.sectionTitle.align),
         spaceBefore: spec.sectionTitle.spaceBefore,
         spaceAfter: spec.sectionTitle.spaceAfter,
+        ...decorationFor(h2Custom),
       },
       chars: {
         size: sectionSize,
@@ -274,15 +343,21 @@ function colorCommands(spec: PdfLayoutSpec, styles: readonly DesigncraftParagrap
   const candidates = [
     visuals?.page?.textColor,
     visuals?.page?.accentColor,
-    ...Object.values(visuals?.entities || {}).map((style) => style?.textColor),
+    ...Object.values(visuals?.entities || {}).flatMap((style) => [
+      style?.textColor,
+      style?.background?.kind === 'color' ? style.background.color : undefined,
+      style?.border?.style === 'solid' ? style.border.color : undefined,
+    ]),
   ];
   for (const value of candidates) {
     const hex = safeHex(value);
     if (hex) colors.add(hex);
   }
   for (const style of styles) {
-    const fill = style.chars.fill;
-    if (fill?.startsWith('BookDesign ')) colors.add(`#${fill.slice('BookDesign '.length)}`);
+    const names = [style.chars.fill, style.para.shadingColor, style.para.borderColor];
+    for (const fill of names) {
+      if (fill?.startsWith('BookDesign ')) colors.add(`#${fill.slice('BookDesign '.length)}`);
+    }
   }
   return [...colors].map((hex) => `swatch.create ${JSON.stringify({ name: colorSwatchName(hex), color: hex })}`);
 }
