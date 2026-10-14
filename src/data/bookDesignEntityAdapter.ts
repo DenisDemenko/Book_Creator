@@ -19,6 +19,10 @@ export interface ResolvedDesignerBlock {
   sourceLabel: string;
   chapterId?: string;
   sectionId?: string;
+  /** Stable semantic scope ids used by renderer placement/repeat logic. */
+  characterId?: string;
+  sceneId?: string;
+  conflictKey?: string;
   style: DesignerEntityStyle;
   /** Safe renderer-neutral fields selected by the theme. */
   fields: Record<string, string>;
@@ -243,6 +247,7 @@ export function resolveBookDesignEntityBlocks(book: Book, theme: CustomBookDesig
         entity: 'character',
         sourceId: character.id,
         sourceLabel: label,
+        characterId: character.id,
         style,
         fields: values,
         fallbackText: formatFallback(label, values),
@@ -268,6 +273,7 @@ export function resolveBookDesignEntityBlocks(book: Book, theme: CustomBookDesig
         sourceLabel: label,
         chapterId: chapterBySection.get(scene.sectionId),
         sectionId: scene.sectionId,
+        sceneId: scene.id,
         style,
         fields: values,
         fallbackText: formatFallback(label, values),
@@ -280,7 +286,9 @@ export function resolveBookDesignEntityBlocks(book: Book, theme: CustomBookDesig
     for (const scene of scenes) {
       const participations = scene.characters?.length ? scene.characters : [undefined];
       for (const participation of participations) {
-        const conflict = clean(participation?.conflict || scene.conflict);
+        const participantConflict = clean(participation?.conflict);
+        const sceneConflict = clean(scene.conflict);
+        const conflict = participantConflict || sceneConflict;
         if (!conflict) continue;
         const character = participation ? characters.get(participation.characterId) : undefined;
         if (!matchesSelector(definition?.selector, [conflict, scene.title, nameOf(character), participation?.goal || ''])) continue;
@@ -288,6 +296,9 @@ export function resolveBookDesignEntityBlocks(book: Book, theme: CustomBookDesig
         if (!style.enabled) continue;
         const values = Object.fromEntries(fields.map((field) => [field, conflictField(scene, participation, field, characters)]).filter(([, value]) => Boolean(value)));
         const sourceId = `${scene.id}:${participation?.characterId || 'scene'}`;
+        const conflictKey = participantConflict
+          ? `${scene.id}:character:${participation?.characterId || 'unknown'}:${participantConflict}`
+          : `${scene.id}:scene:${sceneConflict}`;
         const label = nameOf(character) ? `${nameOf(character)} — конфлікт` : `${clean(scene.title) || 'Сцена'} — конфлікт`;
         result.push({
           id: `${definition?.id || 'conflict'}:${sourceId}`,
@@ -299,6 +310,9 @@ export function resolveBookDesignEntityBlocks(book: Book, theme: CustomBookDesig
           sourceLabel: label,
           chapterId: chapterBySection.get(scene.sectionId),
           sectionId: scene.sectionId,
+          characterId: participation?.characterId,
+          sceneId: scene.id,
+          conflictKey,
           style,
           fields: values,
           fallbackText: formatFallback(label, values),
