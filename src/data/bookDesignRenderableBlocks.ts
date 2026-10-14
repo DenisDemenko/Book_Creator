@@ -1,4 +1,4 @@
-import type { Book } from '../types';
+import type { Book, Scene } from '../types';
 import type { CustomBookDesignTheme, DesignerCustomBlock } from './customBookDesignTheme';
 import { resolveBookDesignEntityBlocks, type ResolvedDesignerBlock } from './bookDesignEntityAdapter';
 import {
@@ -21,33 +21,66 @@ function definitionById(theme: CustomBookDesignTheme): Map<string, PlacementBloc
   return new Map((theme.customBlocks || []).map((block) => [block.id, block as PlacementBlock]));
 }
 
+function scenesById(book: Book): Map<string, Scene> {
+  const result = new Map<string, Scene>();
+  for (const chapter of book.chapters || []) {
+    for (const section of chapter.sections || []) {
+      if (section.scene) result.set(section.scene.id, section.scene);
+    }
+  }
+  return result;
+}
+
+function sceneConflictFallback(block: ResolvedDesignerBlock, scene: Scene): ResolvedDesignerBlock {
+  const fields = { ...block.fields };
+  delete fields.character;
+  delete fields.goal;
+  fields.conflict = String(scene.conflict || fields.conflict || '').trim();
+  const label = `${String(scene.title || 'Сцена').trim() || 'Сцена'} — конфлікт`;
+  return {
+    ...block,
+    id: `${block.blockId}:${scene.id}:scene`,
+    sourceId: `${scene.id}:scene`,
+    sourceLabel: label,
+    fields,
+    fallbackText: [label, ...Object.entries(fields).filter(([, value]) => value).map(([key, value]) => `${key}: ${value}`)].join('\n'),
+  };
+}
+
 /**
  * Renderer-facing semantic block list.
  *
  * The older entity adapter intentionally stays renderer-neutral. This layer
- * adds deterministic placement/repetition and removes the one ambiguity that
- * would otherwise be visible in a PDF: a scene-level conflict must not be
- * repeated once for every participant when none of them has an individual
- * conflict. Participant conflicts remain separate because they are genuinely
- * distinct semantic facts.
+ * adds deterministic placement/repetition and resolves conflict scope. A
+ * scene-level conflict is emitted once when participants have no individual
+ * conflict; participant conflicts remain separate because they are distinct
+ * semantic facts.
  */
 export function resolveRenderableBookDesignBlocks(
   book: Book,
   theme: CustomBookDesignTheme
 ): RenderableDesignerBlock[] {
   const definitions = definitionById(theme);
+  const scenes = scenesById(book);
   const raw = resolveBookDesignEntityBlocks(book, theme);
-  const seenSceneConflicts = new Set<string>();
+  const emittedSceneConflict = new Set<string>();
   const out: RenderableDesignerBlock[] = [];
 
-  for (const block of raw) {
+  for (const original of raw) {
+    let block = original;
+
     if (block.source === 'conflict') {
-      const conflictText = block.fields.conflict || '';
-      const hasCharacter = Boolean(block.fields.character);
-      if (!hasCharacter && block.sectionId) {
-        const key = `${block.blockId}:${block.sectionId}:${conflictText}`;
-        if (seenSceneConflicts.has(key)) continue;
-        seenSceneConflicts.add(key);
+      const [sceneId, participantId] = block.sourceId.split(':');
+      const scene = scenes.get(sceneId);
+      const participation = scene?.characters?.find((item) => item.characterId === participantId);
+      const participantConflict = String(participation?.conflict || '').trim();
+      const sceneConflict = String(scene?.conflict || '').trim();
+
+      if (scene && !participantConflict && sceneConflict) {
+        const key = `${block.blockId}:${scene.id}:${sceneConflict}`;
+        if (emittedSceneConflict.has(key)) continue;
+        emittedSceneConflict.add(key);
+        block = sceneConflictFallback(block, scene);
       }
     }
 
