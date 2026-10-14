@@ -42,6 +42,9 @@ jobs:
       - name: TypeScript
         run: npm run lint
 
+      - name: Preview sample metadata test
+        run: npx tsx scripts/test-designcraftThemePreviewSample.mts
+
       - name: Scene semantic adapter test
         run: npx tsx scripts/test-designcraftSceneSemantics.mts
 
