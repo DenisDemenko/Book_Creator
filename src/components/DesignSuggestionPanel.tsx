@@ -274,8 +274,9 @@ export const DesignSuggestionPanel: React.FC<Props> = ({ book, onUpdateBook }) =
       <BookDesignThemeGallery
         book={book}
         selectedThemeId={selectedBookDesignTheme}
-        onSelectTheme={selectBookDesignTheme}
+        onApplyTheme={selectBookDesignTheme}
         onOpenPreview={(themeId) => void previewPdf(themeId)}
+        previewLoading={pdfPreviewLoading}
       />
 
       <div className="nova-glass-dark rounded-2xl border border-slate-800 p-5">

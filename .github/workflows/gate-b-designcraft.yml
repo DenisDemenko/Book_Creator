@@ -42,6 +42,21 @@ jobs:
       - name: TypeScript
         run: npm run lint
 
+      - name: Book Design UI regression contract
+        run: npx tsx scripts/test-bookDesignUi.mts
+
+      - name: Preview sample metadata test
+        run: npx tsx scripts/test-designcraftThemePreviewSample.mts
+
+      - name: Scene semantic adapter test
+        run: npx tsx scripts/test-designcraftSceneSemantics.mts
+
+      - name: Semantic placement test
+        run: npx tsx scripts/test-bookDesignPlacement.mts
+
+      - name: Custom theme placement test
+        run: npx tsx scripts/test-designcraftCustomThemeBlocks.mts
+
       - name: Gate B live engine test
         id: gateb
         continue-on-error: true

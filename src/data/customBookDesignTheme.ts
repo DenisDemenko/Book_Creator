@@ -17,14 +17,81 @@ export interface DesignerFontAsset {
 }
 
 export type DesignerBackgroundKind = 'none' | 'color' | 'gradient' | 'image';
+export type DesignerBackgroundFit = 'cover' | 'contain' | 'stretch' | 'tile';
+export type DesignerBackgroundPosition =
+  | 'center'
+  | 'top'
+  | 'bottom'
+  | 'left'
+  | 'right'
+  | 'top-left'
+  | 'top-right'
+  | 'bottom-left'
+  | 'bottom-right';
+export type DesignerBackgroundFadeDirection =
+  | 'top-to-bottom'
+  | 'bottom-to-top'
+  | 'left-to-right'
+  | 'right-to-left'
+  | 'radial-center'
+  | 'radial-top'
+  | 'radial-bottom';
+
+/** Stable reference to an existing server Media Library asset. */
+export interface DesignerBackgroundMediaAsset {
+  assetId: string;
+  url: string;
+  filename?: string;
+  mimeType?: string;
+  altText?: string;
+}
+
+export interface DesignerBackgroundOverlay {
+  enabled: boolean;
+  kind: 'solid' | 'gradient';
+  color?: string;
+  gradient?: string;
+  /** 0..1. Applied to the overlay layer only. */
+  opacity?: number;
+}
+
+export interface DesignerBackgroundFade {
+  enabled: boolean;
+  /** Fade is a visual mask/overlay and does not affect foreground text. */
+  target: 'paper' | 'white' | 'color' | 'transparent';
+  targetColor?: string;
+  direction: DesignerBackgroundFadeDirection;
+  startPercent: number;
+  endPercent: number;
+  /** 0..1. Strength of the fade at its target edge. */
+  strength: number;
+}
+
+export interface DesignerBackgroundEffects {
+  blurPx?: number;
+  /** CSS-like multiplier: 1 = unchanged. */
+  brightness?: number;
+  /** CSS-like multiplier: 1 = unchanged. */
+  contrast?: number;
+  /** 0..1. */
+  grayscale?: number;
+}
 
 export interface DesignerBackground {
   kind: DesignerBackgroundKind;
   color?: string;
   gradient?: string;
+  /** Kept for backward compatibility; Media Library assets also populate it. */
   imageUrl?: string;
+  /** Stable Media Library reference. Do not embed base64 in the theme manifest. */
+  mediaAsset?: DesignerBackgroundMediaAsset;
+  /** 0..1. Applies to the background layer only, never to foreground text. */
   opacity?: number;
-  fit?: 'cover' | 'contain' | 'stretch' | 'tile';
+  fit?: DesignerBackgroundFit;
+  position?: DesignerBackgroundPosition;
+  overlay?: DesignerBackgroundOverlay;
+  fade?: DesignerBackgroundFade;
+  effects?: DesignerBackgroundEffects;
 }
 
 export type DesignerThemeEntity =
@@ -65,6 +132,21 @@ export type DesignerSemanticSource =
   | 'tag'
   | 'paragraph-style';
 
+export type DesignerBlockPlacement =
+  | 'inline'
+  | 'scene-opening'
+  | 'chapter-opening'
+  | 'full-width'
+  | 'full-page'
+  | 'appendix';
+
+export type DesignerBlockRepeat =
+  | 'once'
+  | 'per-character'
+  | 'per-scene'
+  | 'per-conflict'
+  | 'matched';
+
 export interface DesignerEntityStyle {
   entity: DesignerThemeEntity;
   enabled: boolean;
@@ -98,6 +180,10 @@ export interface DesignerCustomBlock {
   source: DesignerSemanticSource;
   /** Optional semantic selector, e.g. character id/name, tag, scene property or conflict kind. */
   selector?: string;
+  /** Where the block belongs in the book. Old themes may omit this and use source-derived defaults. */
+  placement?: DesignerBlockPlacement;
+  /** How often a resolved semantic block may appear. */
+  repeat?: DesignerBlockRepeat;
   style: DesignerEntityStyle;
   /** Which entity fields may be surfaced by renderer in the block. */
   fields?: string[];
@@ -192,7 +278,7 @@ export function emptyCustomBookDesignTheme(name = 'Моя тема'): CustomBook
       { slot: 'display', source: 'system', family: 'DejaVu Sans', weights: [700], styles: ['normal'] },
     ],
     page: {
-      pageBackground: { kind: 'color', color: '#fffdf8', opacity: 1 },
+      pageBackground: { kind: 'color', color: '#fffdf8', opacity: 1, fit: 'cover', position: 'center' },
       textColor: '#1f2937',
       accentColor: '#0f766e',
       headerHeightMm: 8,

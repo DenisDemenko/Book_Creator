@@ -212,7 +212,12 @@ export interface PdfBookInput {
     /** Потрібен лише для прив'язки ілюстрацій (`BookIllustration.chapterId`). */
     id?: string;
     title: string;
-    sections: Array<{ title?: string; content: string }>;
+    sections: Array<{
+      /** Stable source id for renderer-only semantic adapters. */
+      id?: string;
+      title?: string;
+      content: string;
+    }>;
   }>;
   /**
    * Ілюстрації.

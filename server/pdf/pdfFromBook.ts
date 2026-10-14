@@ -72,7 +72,7 @@ export function bookToPdfInput(book: Book): PdfBookInput {
         sections: (chapter.sections || [])
           .slice()
           .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-          .map((section) => ({ title: section.title, content: section.content || '' })),
+          .map((section) => ({ id: section.id, title: section.title, content: section.content || '' })),
       })),
     illustrations: (book.illustrations || []).map((ill) => ({
       id: ill.id,
