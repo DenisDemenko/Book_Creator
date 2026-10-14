@@ -7,6 +7,7 @@ import { extractSamplePages } from '../pdfSample';
 import { renderWithEngine } from '../engines/registry';
 import { PdfEngineError } from '../engines/types';
 import { applyCustomThemeBlocksToPdfInput } from './customThemeBlocks';
+import { educationalVisualsFor } from './educationalStyleVisuals';
 import {
   findEducationalTemplateRenderProfile,
   type EducationalPdfTemplateId,
@@ -67,6 +68,29 @@ function baseThemeFor(
   return custom ? 'classic' : null;
 }
 
+function visualOverrides(
+  customTheme: CustomBookDesignTheme | null,
+  educationalTemplate: ReturnType<typeof educationalTemplateOf>,
+) {
+  const educational = educationalTemplate ? educationalVisualsFor(educationalTemplate.id) : null;
+  const custom = customTheme
+    ? {
+        fonts: customTheme.fonts || [],
+        entities: customTheme.entities || {},
+        page: customTheme.page,
+      }
+    : null;
+
+  if (!educational) return custom;
+  if (!custom) return educational;
+
+  return {
+    fonts: [...educational.fonts, ...custom.fonts],
+    entities: { ...educational.entities, ...custom.entities },
+    page: { ...educational.page, ...custom.page },
+  };
+}
+
 async function renderThemePreview(req: Request, res: Response) {
   try {
     const book = req.body?.book as Record<string, unknown> | undefined;
@@ -99,14 +123,11 @@ async function renderThemePreview(req: Request, res: Response) {
     const principal = req.principal;
     const sampleBook = sample.book as unknown as Book;
     const baseSpec = specFromBook(book as never);
-    const spec = customTheme
+    const visuals = visualOverrides(customTheme, educationalTemplate);
+    const spec = visuals
       ? ({
           ...baseSpec,
-          customThemeVisuals: {
-            fonts: customTheme.fonts || [],
-            entities: customTheme.entities || {},
-            page: customTheme.page,
-          },
+          customThemeVisuals: visuals,
         } as typeof baseSpec)
       : baseSpec;
     const neutralInput = bookToPdfInput(sampleBook);
@@ -134,7 +155,7 @@ async function renderThemePreview(req: Request, res: Response) {
     const noteUk = [
       `Швидке preview: ${sample.chapterCount} розд., ${sample.sectionCount} секц., ${sample.sourceChars} символів реального рукопису.`,
       educationalTemplate
-        ? `Навчальний шаблон «${educationalTemplate.id}» використовує базову DesignCraft тему «${educationalTemplate.rendererBaseTheme}» і стильову сім’ю «${educationalTemplate.styleFamily}».`
+        ? `Навчальний шаблон «${educationalTemplate.id}» використовує базову DesignCraft тему «${educationalTemplate.rendererBaseTheme}», стильову сім’ю «${educationalTemplate.styleFamily}» і власні semantic block visuals.`
         : '',
       customTheme ? `Власна тема «${customTheme.name}»: застосовано ${custom.applied} семантичних блоків${custom.appendix ? `, у додатку ${custom.appendix}` : ''}; типографіка й кольори передані в DesignCraft.` : '',
       ...rendered.notesUk,
@@ -152,6 +173,7 @@ async function renderThemePreview(req: Request, res: Response) {
     if (educationalTemplate) {
       res.setHeader('X-Pdf-Educational-Template', educationalTemplate.id);
       res.setHeader('X-Pdf-Educational-Style-Family', educationalTemplate.styleFamily);
+      res.setHeader('X-Pdf-Educational-Visuals', '1');
     }
     res.setHeader('X-Pdf-Honored-Spec', rendered.honoredSpec ? '1' : '0');
     res.setHeader('X-Pdf-Sample-Chars', String(sample.sourceChars));
