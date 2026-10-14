@@ -130,6 +130,31 @@ function align(value: string | undefined): 'left' | 'center' | 'right' | 'leftJu
   return 'leftJustified';
 }
 
+/** Same normalization as bookToMarkdown's headingText, used only for TOC diagnostics. */
+function normalizedHeading(value: unknown): string {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .replace(/[#*_`\[\]]/g, '')
+    .trim() || 'Розділ';
+}
+
+function missingChapterTitles(request: PdfRenderRequest, chapterEntries: any[]): string[] {
+  const actual = new Map<string, number>();
+  for (const entry of chapterEntries) {
+    const text = normalizedHeading(entry?.text);
+    actual.set(text, (actual.get(text) || 0) + 1);
+  }
+  const missing: string[] = [];
+  const chapters = (request.book.chapters || []).slice().sort((a: any, b: any) => (a?.order ?? 0) - (b?.order ?? 0));
+  for (const chapter of chapters) {
+    const title = normalizedHeading(chapter?.title);
+    const count = actual.get(title) || 0;
+    if (count > 0) actual.set(title, count - 1);
+    else missing.push(title);
+  }
+  return missing;
+}
+
 function styles(spec: PdfLayoutSpec): string[] {
   return [
     command('style.paragraph.create', {
@@ -411,21 +436,44 @@ export const designcraftEngineV3: PdfEngine = {
           command('story.get', { story }),
           command('anchored.list', { story }),
           command('toc.entries', { styles: tocStyles }),
+          // Ask DesignCraft for Heading 1 separately. In v0.7.1 the numeric
+          // `level` is assigned from the POSITION in the styles request, not
+          // stored on the paragraph, so this direct query is the canonical
+          // chapter count and cannot be confused by optional Heading 2 rows.
+          command('toc.entries', { styles: ['Heading 1'] }),
         ].join('\n') + '\n',
         'utf8'
       );
       const final = await runScript(finalScript, ['--in', contentDoc, '--save', finalDoc, '--export', pdfPath], workDir, 'DesignCraft не завершив фінальний PDF вчасно.');
       const r = Array.isArray(final.results) ? final.results : [];
-      const finalState = r.at(-3);
-      const anchored = r.at(-2);
-      const toc = r.at(-1);
+      const finalState = r.at(-4);
+      const anchored = r.at(-3);
+      const toc = r.at(-2);
+      const chapterToc = r.at(-1);
       if (overset(finalState)) throw new PdfEngineError('designcraft', 'engine', 'Фінальна перевірка знайшла overset.');
       if (!Array.isArray(anchored) || anchored.length !== loadedImages) {
         throw new PdfEngineError('designcraft', 'engine', `Ілюстрації: очікувалось ${loadedImages}, знайдено ${Array.isArray(anchored) ? anchored.length : 0}.`);
       }
       const chapterCount = request.book.chapters?.length || 0;
-      const chapterEntries = Array.isArray(toc) ? toc.filter((e: any) => Number(e?.level) === 1) : [];
-      if (chapterCount && chapterEntries.length !== chapterCount) throw new PdfEngineError('designcraft', 'engine', `Зміст: глав ${chapterCount}, записів першого рівня ${chapterEntries.length}.`);
+      const chapterEntries = Array.isArray(chapterToc) ? chapterToc : [];
+      if (chapterCount && chapterEntries.length !== chapterCount) {
+        const missing = missingChapterTitles(request, chapterEntries);
+        const returned = chapterEntries.map((e: any) => normalizedHeading(e?.text));
+        throw new PdfEngineError(
+          'designcraft',
+          'engine',
+          [
+            `Зміст: глав ${chapterCount}, Heading 1 на сторінках ${chapterEntries.length}.`,
+            missing.length ? `Не потрапили до змісту: ${missing.map((x) => `«${x}»`).join(', ')}.` : '',
+            `DesignCraft повернув: ${returned.map((x) => `«${x}»`).join(', ')}.`,
+          ].filter(Boolean).join(' ')
+        );
+      }
+      // Keep the mixed TOC query alive as a sanity check: if sections are
+      // enabled it must include at least every chapter found above.
+      if (!Array.isArray(toc) || toc.length < chapterEntries.length) {
+        throw new PdfEngineError('designcraft', 'engine', 'Зміст: загальний TOC повернув менше записів, ніж окремий список глав.');
+      }
 
       const bytes = new Uint8Array(await fs.readFile(pdfPath));
       if (bytes.length < 1000) throw new PdfEngineError('designcraft', 'engine', 'DesignCraft створив підозріло малий PDF.');
@@ -434,7 +482,7 @@ export const designcraftEngineV3: PdfEngine = {
       if (pageCount !== minimized.pageCount) throw new PdfEngineError('designcraft', 'engine', `Кількість сторінок не збігається: PDF=${pageCount}, reflow=${minimized.pageCount}.`);
 
       notesUk.unshift(
-        `DesignCraft: ${pageCount} стор. (первинно виділено ${allocatedPages}, зайвий хвіст прибрано бінарною перевіркою), без overset, зміст синхронізовано, ${loadedImages} ілюстрацій перевірено.`
+        `DesignCraft: ${pageCount} стор. (первинно виділено ${allocatedPages}, зайвий хвіст прибрано бінарною перевіркою), без overset, зміст синхронізовано (${chapterEntries.length}/${chapterCount} глав), ${loadedImages} ілюстрацій перевірено.`
       );
       return { bytes, pageCount, engineId: 'designcraft', honoredSpec: true, notesUk };
     } catch (err) {
