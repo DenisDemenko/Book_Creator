@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   ChevronLeft,
   ChevronRight,
   Copy,
@@ -35,6 +36,7 @@ import { BookDesignSemanticBlockEditor } from './BookDesignSemanticBlockEditor';
 interface Props {
   book: Book;
   baseThemeId?: BookDesignThemeId | null;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 interface PreviewPage {
@@ -143,6 +145,10 @@ function plainText(value: string): string {
     .trim();
 }
 
+function hasBookText(book: Book): boolean {
+  return (book.chapters || []).some((chapter) => (chapter.sections || []).some((section) => plainText(section.content || '').length > 0));
+}
+
 function previewPages(book: Book): PreviewPage[] {
   const pages: PreviewPage[] = [];
   for (const chapter of [...(book.chapters || [])].sort((a, b) => a.order - b.order)) {
@@ -239,7 +245,7 @@ function PreviewPageCard({ theme, page, entity }: { theme: CustomBookDesignTheme
   );
 }
 
-export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId }) => {
+export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId, onDirtyChange }) => {
   const initialThemes = useMemo(() => loadThemes(book.id), [book.id]);
   const [themes, setThemes] = useState<CustomBookDesignTheme[]>(initialThemes);
   const [activeId, setActiveId] = useState<string | null>(initialThemes[0]?.id || null);
@@ -255,6 +261,7 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId }) => {
   const [pageIndex, setPageIndex] = useState(0);
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>('preview');
   const pages = useMemo(() => previewPages(book), [book]);
+  const bookHasText = useMemo(() => hasBookText(book), [book]);
   const active = useMemo(() => themes.find((item) => item.id === activeId) || null, [themes, activeId]);
 
   useEffect(() => {
@@ -269,6 +276,20 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId }) => {
     setPageIndex(0);
     setMobilePanel('preview');
   }, [book.id]);
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  useEffect(() => {
+    if (!dirty || typeof window === 'undefined') return;
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', beforeUnload);
+    return () => window.removeEventListener('beforeunload', beforeUnload);
+  }, [dirty]);
 
   function createTheme() {
     const theme = emptyCustomBookDesignTheme(`Тема для «${book.title || 'книги'}»`);
@@ -377,6 +398,18 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId }) => {
   }
 
   async function previewTheme(theme: CustomBookDesignTheme) {
+    if (!bookHasText) {
+      setPreviewError('Щоб створити PDF preview, додайте хоча б один фрагмент тексту в розділі «Книга та текст».');
+      setMobilePanel('preview');
+      return;
+    }
+
+    const reservedWindow = typeof window !== 'undefined' ? window.open('about:blank', '_blank') : null;
+    if (reservedWindow) {
+      reservedWindow.document.title = 'Готуємо PDF preview…';
+      reservedWindow.document.body.innerHTML = '<p style="font-family:system-ui;padding:24px">Готуємо PDF preview…</p>';
+    }
+
     setPreviewingId(theme.id);
     setPreviewError(null);
     setPreviewInfo(null);
@@ -393,8 +426,9 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId }) => {
       }
       const blob = await res.blob();
       const href = URL.createObjectURL(blob);
-      const popup = window.open(href, '_blank', 'noopener,noreferrer');
-      if (!popup) {
+      if (reservedWindow && !reservedWindow.closed) {
+        reservedWindow.location.replace(href);
+      } else {
         const link = document.createElement('a');
         link.href = href;
         link.target = '_blank';
@@ -409,6 +443,7 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId }) => {
       const note = readPdfNote(res);
       setPreviewInfo([`Власна тема: ${theme.name}`, pagesHeader ? `${pagesHeader} стор.` : '', blocks ? `${blocks} семантичних блоків` : '', note].filter(Boolean).join(' · '));
     } catch (error) {
+      if (reservedWindow && !reservedWindow.closed) reservedWindow.close();
       setPreviewError((error as Error).message);
     } finally {
       setPreviewingId(null);
@@ -481,11 +516,24 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId }) => {
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={undo} disabled={!undoStack.length} className="rounded-lg border border-slate-700 p-2 text-slate-300 disabled:opacity-30" title="Скасувати"><Undo2 className="h-4 w-4" /></button>
           <button type="button" onClick={redo} disabled={!redoStack.length} className="rounded-lg border border-slate-700 p-2 text-slate-300 disabled:opacity-30" title="Повторити"><Redo2 className="h-4 w-4" /></button>
-          {active && <button type="button" onClick={() => void previewTheme(active)} disabled={previewingId === active.id} className="inline-flex items-center gap-2 rounded-lg border border-cyan-700 px-3 py-2 text-xs font-semibold text-cyan-200 disabled:opacity-50">{previewingId === active.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />} PDF preview</button>}
-          {active && <button type="button" onClick={saveActive} className="inline-flex items-center gap-2 rounded-lg bg-violet-500 px-3 py-2 text-xs font-bold text-white hover:bg-violet-400"><Save className="h-4 w-4" /> Зберегти</button>}
+          {active && <button type="button" onClick={() => void previewTheme(active)} disabled={previewingId === active.id || !bookHasText} className="inline-flex items-center gap-2 rounded-lg border border-cyan-700 px-3 py-2 text-xs font-semibold text-cyan-200 disabled:cursor-not-allowed disabled:opacity-40">{previewingId === active.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />} {previewingId === active.id ? 'Готуємо PDF…' : 'PDF preview'}</button>}
+          {active && <button type="button" onClick={saveActive} disabled={!dirty} className="inline-flex items-center gap-2 rounded-lg bg-violet-500 px-3 py-2 text-xs font-bold text-white hover:bg-violet-400 disabled:cursor-default disabled:bg-slate-800 disabled:text-slate-500"><Save className="h-4 w-4" /> Зберегти</button>}
           <button type="button" onClick={createTheme} className="inline-flex items-center gap-2 rounded-lg border border-violet-600 px-3 py-2 text-xs font-semibold text-violet-200"><Plus className="h-4 w-4" /> Нова тема</button>
         </div>
       </div>
+
+      {previewingId && (
+        <div className="mt-3 flex items-center gap-2 rounded-xl border border-cyan-500/25 bg-cyan-500/[0.07] px-3 py-2 text-xs text-cyan-100" role="status">
+          <Loader2 className="h-4 w-4 animate-spin" /> Готуємо розворот книги… DesignCraft формує живий PDF preview.
+        </div>
+      )}
+      {previewError && (
+        <div className="mt-3 flex flex-col gap-2 rounded-xl border border-red-500/30 bg-red-500/[0.07] px-3 py-3 text-xs text-red-100 sm:flex-row sm:items-center sm:justify-between" role="alert">
+          <div className="flex items-start gap-2"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span><strong>Не вдалося створити PDF preview.</strong> {previewError} Ваш дизайн не втрачено.</span></div>
+          {active && bookHasText && <button type="button" onClick={() => void previewTheme(active)} className="rounded-lg border border-red-400/40 px-3 py-1.5 font-semibold text-red-100">Спробувати ще</button>}
+        </div>
+      )}
+      {previewInfo && <div className="mt-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-2 text-[11px] leading-relaxed text-emerald-200">{previewInfo}</div>}
 
       {themes.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{themes.map((theme) => <button key={theme.id} type="button" onClick={() => chooseTheme(theme.id)} className={`rounded-lg border px-3 py-1.5 text-xs ${activeId === theme.id ? 'border-violet-400 bg-violet-500/15 text-violet-200' : 'border-slate-700 text-slate-400 hover:border-slate-500'}`}>{theme.name}</button>)}</div>}
 
@@ -497,6 +545,13 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId }) => {
         </div>
       ) : (
         <>
+          {!bookHasText && (
+            <div className="mt-4 rounded-2xl border border-dashed border-amber-500/30 bg-amber-500/[0.05] p-5 text-center">
+              <div className="text-sm font-semibold text-amber-100">У книзі ще немає тексту для живого preview</div>
+              <p className="mx-auto mt-1 max-w-xl text-xs leading-relaxed text-slate-400">Додайте хоча б один фрагмент у розділі «Книга та текст». Налаштування теми можна продовжувати — вони не втратяться.</p>
+            </div>
+          )}
+
           <div className="mt-4 grid grid-cols-2 gap-1 rounded-xl border border-slate-800 bg-slate-950/70 p-1 sm:grid-cols-4 xl:hidden" aria-label="Мобільна навігація Designer Studio">
             {([
               ['preview', 'Preview'],
@@ -595,8 +650,6 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId }) => {
               </details>
 
               <div className="flex flex-wrap gap-2 border-t border-slate-800 pt-3"><button type="button" onClick={duplicateActive} className="inline-flex items-center gap-1 rounded-lg border border-slate-700 px-2.5 py-1.5 text-[11px] text-slate-300"><Copy className="h-3.5 w-3.5" /> Копія</button><button type="button" onClick={exportActive} className="inline-flex items-center gap-1 rounded-lg border border-slate-700 px-2.5 py-1.5 text-[11px] text-slate-300"><Download className="h-3.5 w-3.5" /> JSON</button><button type="button" onClick={removeActive} className="inline-flex items-center gap-1 rounded-lg border border-red-900/70 px-2.5 py-1.5 text-[11px] text-red-300"><Trash2 className="h-3.5 w-3.5" /> Видалити</button></div>
-              {previewError && <p role="alert" className="text-xs leading-relaxed text-red-300">{previewError}</p>}
-              {previewInfo && <p className="text-[11px] leading-relaxed text-emerald-300">{previewInfo}</p>}
             </aside>
           </div>
 
