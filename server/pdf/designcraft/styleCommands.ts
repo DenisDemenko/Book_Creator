@@ -24,10 +24,11 @@ export interface DesigncraftParagraphStyleDefinition {
     size: number;
     fontFamily: string;
     fontStyle?: 'Bold' | 'Italic' | 'Bold Italic';
+    fill?: string;
   };
 }
 
-type CustomVisuals = Pick<CustomBookDesignTheme, 'fonts' | 'entities'>;
+type CustomVisuals = Pick<CustomBookDesignTheme, 'fonts' | 'entities' | 'page'>;
 type ThemeSpec = PdfLayoutSpec & { themeId?: unknown; customThemeVisuals?: CustomVisuals };
 
 const SAFE_CUSTOM_FONTS = new Set(['DejaVu Serif', 'DejaVu Sans', 'DejaVu Sans Mono']);
@@ -58,6 +59,29 @@ function customFontFamily(spec: PdfLayoutSpec, slot: DesignerFontSlot | undefine
   if (!slot) return null;
   const family = String(customVisualsOf(spec)?.fonts?.find((item) => item.slot === slot)?.family || '').trim();
   return SAFE_CUSTOM_FONTS.has(family) ? family : null;
+}
+
+function safeHex(value: unknown): string | null {
+  const text = String(value || '').trim();
+  return /^#[0-9a-fA-F]{6}$/.test(text) ? text.toUpperCase() : null;
+}
+
+function colorSwatchName(hex: string): string {
+  return `BookDesign ${hex.slice(1)}`;
+}
+
+function defaultTextColor(spec: PdfLayoutSpec): string | null {
+  return safeHex(customVisualsOf(spec)?.page?.textColor);
+}
+
+function accentColor(spec: PdfLayoutSpec): string | null {
+  return safeHex(customVisualsOf(spec)?.page?.accentColor);
+}
+
+function fillForEntity(spec: PdfLayoutSpec, entity: DesignerThemeEntity, fallback: string | null = null): string | undefined {
+  const custom = customEntityStyle(spec, entity);
+  const hex = safeHex(custom?.textColor) || fallback;
+  return hex ? colorSwatchName(hex) : undefined;
 }
 
 function semanticEntity(name: SemanticParagraphStyle): DesignerThemeEntity | null {
@@ -116,10 +140,6 @@ function semanticDefinition(
   const entity = semanticEntity(name);
   const custom = entity ? customEntityStyle(spec, entity) : null;
 
-  // A custom theme may explicitly introduce a semantic style that is not part
-  // of the selected base theme (for example Evidence on top of Sci-Fi). It may
-  // also explicitly disable a base-theme style. This keeps custom Theme Studio
-  // semantics authoritative without changing any of the 15 factory themes.
   if (custom?.enabled === false) return null;
   if (!rule?.enabled && !custom?.enabled) return null;
 
@@ -130,68 +150,26 @@ function semanticDefinition(
   let firstLineIndent = 0;
 
   switch (name) {
-    case 'Quote':
-      before = Math.max(8, before);
-      after = Math.max(8, after);
-      break;
-    case 'Epigraph':
-      size = Math.max(8, base - 0.75);
-      before = Math.max(10, before);
-      after = Math.max(12, after);
-      break;
-    case 'Letter':
-      before = Math.max(8, before);
-      after = Math.max(8, after);
-      break;
-    case 'InnerThought':
-      firstLineIndent = spec.paragraphIndent * theme.paragraphIndentMultiplier;
-      break;
+    case 'Quote': before = Math.max(8, before); after = Math.max(8, after); break;
+    case 'Epigraph': size = Math.max(8, base - 0.75); before = Math.max(10, before); after = Math.max(12, after); break;
+    case 'Letter': before = Math.max(8, before); after = Math.max(8, after); break;
+    case 'InnerThought': firstLineIndent = spec.paragraphIndent * theme.paragraphIndentMultiplier; break;
     case 'ChatMessage':
     case 'SystemMessage':
-    case 'Evidence':
-      size = Math.max(8, base - 0.4);
-      before = Math.max(6, before);
-      after = Math.max(6, after);
-      break;
-    case 'LocationTime':
-      size = Math.max(7.5, base - 1.25);
-      before = Math.max(10, before);
-      after = Math.max(6, after);
-      break;
-    case 'SceneBreak':
-      size = Math.max(8, base - 0.75);
-      before = Math.max(12, before);
-      after = Math.max(12, after);
-      break;
-    case 'Caption':
-      size = Math.max(7.5, base - 1.5);
-      before = Math.max(4, before);
-      after = Math.max(8, after);
-      break;
-    case 'Lore':
-      before = Math.max(8, before);
-      after = Math.max(8, after);
-      break;
-    case 'CaseStudy':
-      before = Math.max(10, before);
-      after = Math.max(10, after);
-      break;
-    case 'KeyIdea':
-      size = Math.max(base, base + 0.6);
-      before = Math.max(10, before);
-      after = Math.max(8, after);
-      break;
-    case 'Footnote':
-      size = Math.max(7.5, base - 2);
-      before = Math.max(2, before);
-      after = Math.max(2, after);
-      break;
-    default:
-      break;
+    case 'Evidence': size = Math.max(8, base - 0.4); before = Math.max(6, before); after = Math.max(6, after); break;
+    case 'LocationTime': size = Math.max(7.5, base - 1.25); before = Math.max(10, before); after = Math.max(6, after); break;
+    case 'SceneBreak': size = Math.max(8, base - 0.75); before = Math.max(12, before); after = Math.max(12, after); break;
+    case 'Caption': size = Math.max(7.5, base - 1.5); before = Math.max(4, before); after = Math.max(8, after); break;
+    case 'Lore': before = Math.max(8, before); after = Math.max(8, after); break;
+    case 'CaseStudy': before = Math.max(10, before); after = Math.max(10, after); break;
+    case 'KeyIdea': size = Math.max(base, base + 0.6); before = Math.max(10, before); after = Math.max(8, after); break;
+    case 'Footnote': size = Math.max(7.5, base - 2); before = Math.max(2, before); after = Math.max(2, after); break;
+    default: break;
   }
 
   const family = customFontFamily(spec, custom?.fontSlot) || fontForRule(theme, rule);
   const fallbackStyle = fontStyle(rule);
+  const fill = entity ? fillForEntity(spec, entity, defaultTextColor(spec)) : undefined;
 
   return {
     name,
@@ -205,17 +183,11 @@ function semanticDefinition(
       size: clamp(custom?.fontSizePt, 7, 36, size),
       fontFamily: family,
       ...(customFontStyle(custom, fallbackStyle) ? { fontStyle: customFontStyle(custom, fallbackStyle) } : {}),
+      ...(fill ? { fill } : {}),
     },
   };
 }
 
-/**
- * Build only paragraph/character attributes that are proven by the production
- * DesignCraft v0.7.1 path. Custom themes may override installed font family,
- * size, alignment and bold/italic. Colors, backgrounds, borders, radius and
- * remote font URLs stay in the manifest until their DesignCraft commands are
- * validated by a separate Gate B slice.
- */
 export function buildDesigncraftParagraphStyles(
   spec: PdfLayoutSpec,
   used: readonly SemanticParagraphStyle[]
@@ -233,6 +205,8 @@ export function buildDesigncraftParagraphStyles(
   const h2Font = customFontFamily(spec, h2Custom?.fontSlot) || headingFont;
   const bodyAlign = bodyCustom?.align || theme?.bodyAlign || spec.bodyAlign;
   const chapterAlign = h1Custom?.align || theme?.chapterAlign || spec.chapterTitle.align;
+  const textColor = defaultTextColor(spec);
+  const accent = accentColor(spec);
 
   const definitions: DesigncraftParagraphStyleDefinition[] = [
     {
@@ -246,6 +220,7 @@ export function buildDesigncraftParagraphStyles(
         size: bodySize,
         fontFamily: bodyFont,
         ...(customFontStyle(bodyCustom, undefined) ? { fontStyle: customFontStyle(bodyCustom, undefined) } : {}),
+        ...(fillForEntity(spec, 'body', textColor) ? { fill: fillForEntity(spec, 'body', textColor) } : {}),
       },
     },
     {
@@ -259,6 +234,7 @@ export function buildDesigncraftParagraphStyles(
         size: chapterSize,
         fontFamily: h1Font,
         fontStyle: customFontStyle(h1Custom, 'Bold') || 'Bold',
+        ...(fillForEntity(spec, 'heading-1', accent || textColor) ? { fill: fillForEntity(spec, 'heading-1', accent || textColor) } : {}),
       },
     },
     {
@@ -272,6 +248,7 @@ export function buildDesigncraftParagraphStyles(
         size: sectionSize,
         fontFamily: h2Font,
         fontStyle: customFontStyle(h2Custom, 'Bold') || 'Bold',
+        ...(fillForEntity(spec, 'heading-2', accent || textColor) ? { fill: fillForEntity(spec, 'heading-2', accent || textColor) } : {}),
       },
     },
   ];
@@ -291,11 +268,32 @@ export function buildDesigncraftParagraphStyles(
   return definitions;
 }
 
+function colorCommands(spec: PdfLayoutSpec, styles: readonly DesigncraftParagraphStyleDefinition[]): string[] {
+  const colors = new Set<string>();
+  const visuals = customVisualsOf(spec);
+  const candidates = [
+    visuals?.page?.textColor,
+    visuals?.page?.accentColor,
+    ...Object.values(visuals?.entities || {}).map((style) => style?.textColor),
+  ];
+  for (const value of candidates) {
+    const hex = safeHex(value);
+    if (hex) colors.add(hex);
+  }
+  for (const style of styles) {
+    const fill = style.chars.fill;
+    if (fill?.startsWith('BookDesign ')) colors.add(`#${fill.slice('BookDesign '.length)}`);
+  }
+  return [...colors].map((hex) => `swatch.create ${JSON.stringify({ name: colorSwatchName(hex), color: hex })}`);
+}
+
 export function serializeDesigncraftParagraphStyles(
   spec: PdfLayoutSpec,
   used: readonly SemanticParagraphStyle[]
 ): string[] {
-  return buildDesigncraftParagraphStyles(spec, used).map(
-    (style) => `style.paragraph.create ${JSON.stringify({ name: style.name, para: style.para, chars: style.chars })}`
-  );
+  const styles = buildDesigncraftParagraphStyles(spec, used);
+  return [
+    ...colorCommands(spec, styles),
+    ...styles.map((style) => `style.paragraph.create ${JSON.stringify({ name: style.name, para: style.para, chars: style.chars })}`),
+  ];
 }
