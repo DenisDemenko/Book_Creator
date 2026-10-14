@@ -15,6 +15,7 @@
 import type { Express } from 'express';
 import { requireAuth, requirePermission } from './auth';
 import { generateText } from './aiCore';
+import { registerJevSemanticRoutes } from './jevSemantic';
 import {
   availableEngines,
   noEngineMessage,
@@ -101,6 +102,11 @@ async function ask(
 }
 
 export function registerExpressRoutes(app: Express): void {
+  // Загальний JEV-classifier реєструємо поруч із wizard routes, щоб не
+  // роздувати server bootstrap ще одним модулем. Його використовуватиме і
+  // wizard handoff, і контекстне меню редактора.
+  registerJevSemanticRoutes(app);
+
   /**
    * Які рушії доступні цьому користувачеві — для селектора в майстрі.
    * Значення ключів назовні не віддаються, лише факт наявності й джерело.
