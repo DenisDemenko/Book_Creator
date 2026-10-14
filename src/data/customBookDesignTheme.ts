@@ -145,7 +145,7 @@ export interface CustomBookDesignTheme {
   assetUrls: string[];
 }
 
-export const DESIGNER_THEME_ENTITIES: readonly Array<{ id: DesignerThemeEntity; labelUk: string }> = [
+export const DESIGNER_THEME_ENTITIES: ReadonlyArray<{ id: DesignerThemeEntity; labelUk: string }> = [
   { id: 'page', labelUk: 'Сторінка' },
   { id: 'chapter-opening', labelUk: 'Початок розділу' },
   { id: 'running-header', labelUk: 'Колонтитул зверху' },
