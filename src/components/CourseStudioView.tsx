@@ -34,6 +34,9 @@ async function api<T>(path: string): Promise<T> {
  * Educational design is a sibling workspace, not a replacement of course
  * authoring: CourseV2 remains the single source of truth and design choices
  * are stored separately by CourseEducationalDesignPanel.
+ *
+ * The legacy editor intentionally stays mounted while Designer mode is open.
+ * This preserves unsaved React state when the author switches between tabs.
  */
 export const CourseStudioView: React.FC<CourseStudioViewProps> = ({
   onOpenWizard,
@@ -42,6 +45,7 @@ export const CourseStudioView: React.FC<CourseStudioViewProps> = ({
 }) => {
   const [mode, setMode] = useState<WorkspaceMode>('course');
   const [courses, setCourses] = useState<CourseV2[]>([]);
+  const [coursesLoaded, setCoursesLoaded] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(initialCourseId);
   const [selectedCourse, setSelectedCourse] = useState<CourseV2 | null>(null);
   const [loadingList, setLoadingList] = useState(false);
@@ -64,13 +68,14 @@ export const CourseStudioView: React.FC<CourseStudioViewProps> = ({
       setCourses([]);
       setError(cause instanceof Error ? cause.message : L('Не вдалося завантажити курси.', 'Could not load courses.'));
     } finally {
+      setCoursesLoaded(true);
       setLoadingList(false);
     }
   }, [L, initialCourseId]);
 
   useEffect(() => {
-    if (mode === 'design' && courses.length === 0 && !loadingList) void loadCourses();
-  }, [mode, courses.length, loadingList, loadCourses]);
+    if (mode === 'design' && !coursesLoaded && !loadingList) void loadCourses();
+  }, [mode, coursesLoaded, loadingList, loadCourses]);
 
   useEffect(() => {
     if (initialCourseId) setSelectedId(initialCourseId);
@@ -145,12 +150,15 @@ export const CourseStudioView: React.FC<CourseStudioViewProps> = ({
         </div>
       </div>
 
-      {mode === 'course' ? (
-        <div className="min-h-0 flex-1">
-          <LegacyCourseStudioView onOpenWizard={onOpenWizard} initialCourseId={initialCourseId} lang={lang} />
-        </div>
-      ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <div
+        className={`min-h-0 flex-1 ${mode === 'course' ? '' : 'hidden'}`}
+        data-course-content-workspace
+      >
+        <LegacyCourseStudioView onOpenWizard={onOpenWizard} initialCourseId={initialCourseId} lang={lang} />
+      </div>
+
+      {mode === 'design' ? (
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4" data-course-design-workspace>
           <div className="mx-auto w-full max-w-7xl space-y-4">
             <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
               <div className="flex flex-wrap items-end gap-3">
@@ -201,7 +209,7 @@ export const CourseStudioView: React.FC<CourseStudioViewProps> = ({
             )}
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 };

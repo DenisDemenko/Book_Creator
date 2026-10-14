@@ -21,6 +21,20 @@ assert.match(shell, /data-course-design-tab/);
 assert.match(shell, /Оберіть курс/);
 console.log('  ✓ design workspace resolves a real stored course and keeps an explicit course selector');
 
+assert.match(shell, /const \[coursesLoaded, setCoursesLoaded\] = useState\(false\)/);
+assert.match(shell, /if \(mode === 'design' && !coursesLoaded && !loadingList\) void loadCourses\(\)/);
+assert.match(shell, /setCoursesLoaded\(true\)/);
+assert.doesNotMatch(shell, /mode === 'design' && courses\.length === 0 && !loadingList/);
+console.log('  ✓ empty course lists are treated as loaded and cannot trigger an automatic refetch loop');
+
+assert.match(shell, /data-course-content-workspace/);
+assert.match(shell, /mode === 'course' \? '' : 'hidden'/);
+assert.match(shell, /<LegacyCourseStudioView onOpenWizard=\{onOpenWizard\} initialCourseId=\{initialCourseId\} lang=\{lang\} \/>/);
+assert.match(shell, /\{mode === 'design' \? \(/);
+assert.match(shell, /data-course-design-workspace/);
+assert.doesNotMatch(shell, /\{mode === 'course' \? \(\s*<div[^>]*>\s*<LegacyCourseStudioView/s);
+console.log('  ✓ course authoring editor stays mounted while design workspace is shown, preserving unsaved local state');
+
 assert.match(legacy, /Створити курс/);
 assert.match(legacy, /Дерево курсу/);
 assert.match(legacy, /Готовність/);
