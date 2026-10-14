@@ -1,6 +1,10 @@
 import type { Book } from '../../../src/types';
 import type { CustomBookDesignTheme } from '../../../src/data/customBookDesignTheme';
-import { resolveRenderableBookDesignBlocks, type RenderableDesignerBlock } from '../../../src/data/bookDesignRenderableBlocks';
+import {
+  applyDesignerBlockRepeatPolicy,
+  resolveRenderableBookDesignBlocks,
+  type RenderableDesignerBlock,
+} from '../../../src/data/bookDesignRenderableBlocks';
 import type { PdfBookInput } from '../pdfTypes';
 import type { SemanticParagraphStyle } from './themes';
 
@@ -37,20 +41,6 @@ function blockText(block: RenderableDesignerBlock): string {
   return lines.join('\n\n').slice(0, MAX_BLOCK_CHARS);
 }
 
-function applyRepeat(blocks: readonly RenderableDesignerBlock[]): RenderableDesignerBlock[] {
-  const once = new Set<string>();
-  const out: RenderableDesignerBlock[] = [];
-  for (const block of blocks) {
-    if (out.length >= MAX_BLOCKS) break;
-    if (block.repeat === 'once') {
-      if (once.has(block.blockId)) continue;
-      once.add(block.blockId);
-    }
-    out.push(block);
-  }
-  return out;
-}
-
 function append(content: string, text: string): string {
   return [content, text].filter(Boolean).join('\n\n');
 }
@@ -73,7 +63,7 @@ export function applyCustomThemeBlocksToPdfInput(
   sourceBook: Book,
   theme: CustomBookDesignTheme
 ): { input: PdfBookInput; applied: number; appendix: number } {
-  const blocks = applyRepeat(resolveRenderableBookDesignBlocks(sourceBook, theme));
+  const blocks = applyDesignerBlockRepeatPolicy(resolveRenderableBookDesignBlocks(sourceBook, theme)).slice(0, MAX_BLOCKS);
   if (!blocks.length) return { input, applied: 0, appendix: 0 };
 
   const chapters = input.chapters.map((chapter) => ({
