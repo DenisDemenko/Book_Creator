@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 const shell = await readFile(new URL('../src/components/CourseStudioView.tsx', import.meta.url), 'utf8');
 const legacy = await readFile(new URL('../src/components/CourseStudioLegacy.tsx', import.meta.url), 'utf8');
 const panel = await readFile(new URL('../src/components/CourseEducationalDesignPanel.tsx', import.meta.url), 'utf8');
+const designer = await readFile(new URL('../src/components/EducationalTemplateDesigner.tsx', import.meta.url), 'utf8');
 
 console.log('\nCourse educational design UI regression contract:');
 
@@ -31,7 +32,31 @@ for (const label of ['Методичка', 'Інструкція', 'Вправи
 }
 assert.match(panel, /\/api\/pdf\/designcraft\/theme-preview/);
 assert.match(panel, /educationalTemplateId: templateId/);
-assert.match(panel, /localStorage/);
-console.log('  ✓ panel keeps three educational categories, DesignCraft preview, and presentation-only preferences');
+assert.match(panel, /customTheme: options\.customTheme/);
+assert.match(panel, /nova-course-educational-custom-themes/);
+assert.match(panel, /EducationalTemplateDesigner/);
+assert.match(panel, /setDesignerTemplateId\(template\.id\)/);
+console.log('  ✓ panel keeps three categories, DesignCraft preview, custom themes, and a real Customize handoff');
+
+assert.match(designer, /data-educational-designer-mode/);
+assert.match(designer, /Designer Mode/);
+assert.match(designer, /basedOn = template\.rendererBaseTheme/);
+assert.match(designer, /Зберегти тему/);
+assert.match(designer, /PDF preview/);
+for (const semanticLabel of [
+  'Мета / ключова ідея',
+  'Практика / проєкт',
+  'Безпека / оцінювання',
+  'Матеріали / flow-картки',
+  'Крок інструкції',
+  'Рефлексія / питання',
+]) {
+  assert.ok(designer.includes(semanticLabel), `Designer semantic control is missing: ${semanticLabel}`);
+}
+console.log('  ✓ educational Designer Mode edits presentation only and exposes semantic block controls');
+
+assert.doesNotMatch(designer, /fetch\(['"]\/api\/courses/);
+assert.doesNotMatch(designer, /PUT.*\/api\/courses|PATCH.*\/api\/courses/s);
+console.log('  ✓ Designer Mode does not mutate CourseV2 content APIs');
 
 console.log('\nCourse educational design UI regression contract passed.');
