@@ -42,6 +42,9 @@ jobs:
       - name: TypeScript
         run: npm run lint
 
+      - name: Express wizard integrity contract
+        run: npx tsx scripts/test-expressWizardIntegrity.mts
+
       - name: Book Design UI regression contract
         run: npx tsx scripts/test-bookDesignUi.mts
 
