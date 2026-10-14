@@ -42,7 +42,11 @@ theme.entities['heading-1'] = {
   entity: 'heading-1', enabled: true, fontSlot: 'heading', fontSizePt: 26, align: 'center', fontWeight: 700,
 };
 theme.entities.evidence = {
-  entity: 'evidence', enabled: true, fontSlot: 'mono', fontSizePt: 10, align: 'right', italic: true, textColor: '#7A1234',
+  entity: 'evidence', enabled: true, fontSlot: 'mono', fontSizePt: 10, align: 'right', italic: true,
+  textColor: '#7A1234',
+  background: { kind: 'color', color: '#FFF2CC', opacity: 0.65 },
+  border: { style: 'solid', widthPt: 1.5, color: '#7A1234', sides: ['top', 'bottom', 'left'] },
+  paddingMm: { top: 2, right: 3, bottom: 2, left: 3 },
 };
 theme.customBlocks = [
   {
@@ -97,11 +101,21 @@ assert.equal(evidence.chars.fontFamily, 'DejaVu Sans Mono');
 assert.equal(evidence.para.align, 'right');
 assert.equal(evidence.chars.fontStyle, 'Italic');
 assert.equal(evidence.chars.fill, 'BookDesign 7A1234');
+assert.equal(evidence.para.shadingOn, true);
+assert.equal(evidence.para.shadingColor, 'BookDesign FFF2CC');
+assert.equal(evidence.para.shadingTint, 0.65);
+assert.equal(evidence.para.borderOn, true);
+assert.equal(evidence.para.borderColor, 'BookDesign 7A1234');
+assert.deepEqual(evidence.para.borderWeights, [1.5, 1.5, 1.5, 0]);
+assert.ok((evidence.para.shadingOffsets?.[0] || 0) > 5.6);
+assert.ok((evidence.para.borderOffsets?.[1] || 0) > 8.4);
 
 const commands = serializeDesigncraftParagraphStyles(visualSpec, ['Evidence']);
 assert.ok(commands.some((line) => line.includes('swatch.create') && line.includes('BookDesign 223344')));
 assert.ok(commands.some((line) => line.includes('swatch.create') && line.includes('BookDesign CC5500')));
 assert.ok(commands.some((line) => line.includes('swatch.create') && line.includes('BookDesign 7A1234')));
+assert.ok(commands.some((line) => line.includes('swatch.create') && line.includes('BookDesign FFF2CC')));
 assert.ok(commands.some((line) => line.includes('style.paragraph.create') && line.includes('BookDesign 7A1234')));
+assert.ok(commands.some((line) => line.includes('"shadingOn":true') && line.includes('"borderOn":true')));
 
-console.log('DesignCraft custom theme block + typography + color tests passed.');
+console.log('DesignCraft custom theme block + typography + color + decoration tests passed.');
