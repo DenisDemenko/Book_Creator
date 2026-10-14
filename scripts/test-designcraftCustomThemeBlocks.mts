@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { emptyCustomBookDesignTheme } from '../src/data/customBookDesignTheme';
 import { bookToPdfInput, specFromBook } from '../server/pdf/pdfFromBook';
 import { applyCustomThemeBlocksToPdfInput } from '../server/pdf/designcraft/customThemeBlocks';
-import { buildDesigncraftParagraphStyles } from '../server/pdf/designcraft/styleCommands';
+import { buildDesigncraftParagraphStyles, serializeDesigncraftParagraphStyles } from '../server/pdf/designcraft/styleCommands';
 
 const book: any = {
   id: 'book-placements',
@@ -30,6 +30,8 @@ const book: any = {
 
 const theme = emptyCustomBookDesignTheme('Placement theme');
 theme.basedOn = 'sci-fi';
+theme.page.textColor = '#223344';
+theme.page.accentColor = '#CC5500';
 theme.fonts = theme.fonts.map((asset) =>
   asset.slot === 'body' ? { ...asset, family: 'DejaVu Sans' } : asset
 );
@@ -40,7 +42,7 @@ theme.entities['heading-1'] = {
   entity: 'heading-1', enabled: true, fontSlot: 'heading', fontSizePt: 26, align: 'center', fontWeight: 700,
 };
 theme.entities.evidence = {
-  entity: 'evidence', enabled: true, fontSlot: 'mono', fontSizePt: 10, align: 'right', italic: true,
+  entity: 'evidence', enabled: true, fontSlot: 'mono', fontSizePt: 10, align: 'right', italic: true, textColor: '#7A1234',
 };
 theme.customBlocks = [
   {
@@ -76,7 +78,7 @@ const baseSpec = specFromBook(book);
 const visualSpec = {
   ...baseSpec,
   themeId: 'sci-fi',
-  customThemeVisuals: { fonts: theme.fonts, entities: theme.entities },
+  customThemeVisuals: { fonts: theme.fonts, entities: theme.entities, page: theme.page },
 } as any;
 const styles = buildDesigncraftParagraphStyles(visualSpec, ['Evidence']);
 const body = styles.find((style) => style.name === 'Body')!;
@@ -86,11 +88,20 @@ const evidence = styles.find((style) => style.name === 'Evidence')!;
 assert.equal(body.chars.size, 13);
 assert.equal(body.chars.fontFamily, 'DejaVu Sans');
 assert.equal(body.para.align, 'left');
+assert.equal(body.chars.fill, 'BookDesign 223344');
 assert.equal(h1.chars.size, 26);
 assert.equal(h1.para.align, 'center');
+assert.equal(h1.chars.fill, 'BookDesign CC5500');
 assert.equal(evidence.chars.size, 10);
 assert.equal(evidence.chars.fontFamily, 'DejaVu Sans Mono');
 assert.equal(evidence.para.align, 'right');
 assert.equal(evidence.chars.fontStyle, 'Italic');
+assert.equal(evidence.chars.fill, 'BookDesign 7A1234');
 
-console.log('DesignCraft custom theme block + typography tests passed.');
+const commands = serializeDesigncraftParagraphStyles(visualSpec, ['Evidence']);
+assert.ok(commands.some((line) => line.includes('swatch.create') && line.includes('BookDesign 223344')));
+assert.ok(commands.some((line) => line.includes('swatch.create') && line.includes('BookDesign CC5500')));
+assert.ok(commands.some((line) => line.includes('swatch.create') && line.includes('BookDesign 7A1234')));
+assert.ok(commands.some((line) => line.includes('style.paragraph.create') && line.includes('BookDesign 7A1234')));
+
+console.log('DesignCraft custom theme block + typography + color tests passed.');
