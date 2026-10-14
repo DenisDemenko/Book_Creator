@@ -102,8 +102,8 @@ Reusable gallery має:
 - mini preview;
 - staged selection;
 - explicit `Застосувати`;
-- `Налаштувати` для майбутнього спільного Designer Mode;
-- активний template marker.
+- активний template marker;
+- `Налаштувати`, що відкриває реальний educational Designer Mode для створення власного presentation layer поверх immutable built-in template.
 
 Course educational design panel перемикає:
 
@@ -111,16 +111,19 @@ Course educational design panel перемикає:
 - Інструкція;
 - Вправи / домашнє.
 
+Designer Mode дозволяє змінювати presentation layer без мутації `CourseV2`: назву власної теми, accent/text/paper colors, body/heading fonts, header/footer spacing та візуальні параметри ключових semantic entities.
+
 PDF preview відкривається вручну, не генерується на кожен click.
 
 ## DesignCraft preview contract
 
-`POST /api/pdf/designcraft/theme-preview` приймає optional:
+`POST /api/pdf/designcraft/theme-preview` приймає optional educational template та optional custom presentation overlay:
 
 ```json
 {
   "book": { "...compatibility preview payload...": true },
-  "educationalTemplateId": "instruction-clear-steps"
+  "educationalTemplateId": "instruction-clear-steps",
+  "customTheme": { "...CustomBookDesignTheme...": true }
 }
 ```
 
@@ -129,15 +132,42 @@ PDF preview відкривається вручну, не генерується
 - `X-Pdf-Theme` — public educational template ID;
 - `X-Pdf-Renderer-Base-Theme` — фактична DesignCraft book theme;
 - `X-Pdf-Educational-Template`;
-- `X-Pdf-Educational-Style-Family`.
+- `X-Pdf-Educational-Style-Family`;
+- `X-Pdf-Educational-Visuals: 1`.
 
 Невідомий educational template ID → `400 bad_input`.
 
-## Важливе обмеження поточної фази
+## Поточний стан PDF styling
 
-Поточний authoritative DesignCraft renderer уже підтримує typography/theme base. Educational semantic style families створені як стабільний контракт, але повний block-level PDF styling для кожного типу (`warning`, `safety`, `worksheet answer area` тощо) має нарощуватися окремими adapters/style commands.
+Educational semantic style families уже реалізовані через наявний DesignCraft semantic/custom-theme engine. Для educational preview використовуються окремі stable style profiles для всіх 9 шаблонів без створення нового renderer і без мутації 15 книжкових тем.
 
-Не декларувати повну fidelity educational block styling, доки відповідні PDF tests не підтверджують її.
+Наразі підтримуються, зокрема, presentation mappings для таких semantic families:
+
+- learning goal / learning result;
+- theory;
+- example;
+- instruction step;
+- practice / project / homework;
+- question / reflection;
+- materials / equipment;
+- warning / safety / common mistake;
+- checklist / assessment;
+- teacher note;
+- additional resource.
+
+Educational Designer Mode може накладати custom presentation style поверх educational template, при цьому built-in шаблон залишається immutable, а custom theme має `basedOn` на відповідну renderer base theme.
+
+## Відомі обмеження поточної фази
+
+Поточна реалізація має такі свідомі обмеження:
+
+1. **Media placement у PDF.** Фото та відео з CourseV2 уже потрапляють у semantic/media projection, але в authoritative educational PDF preview вони ще не мають повноцінного довільного image placement. Media може бути представлена як resource/caption/URL metadata або текстове посилання. Не декларувати повну image-layout fidelity.
+2. **Worksheet answer areas.** Поля для відповіді зараз є статичними візуальними зонами, а не інтерактивними PDF form fields.
+3. **Page backgrounds.** HTML presentation може мати гнучкіший media background stack, але для PDF не гарантується довільний image background / full-page background image. Безпечна гарантія для PDF — підтримувані presentation styles і solid borders.
+4. **Custom educational themes.** Власні educational themes і вибір presentation зараз зберігаються у browser `localStorage`, окремо від `CourseV2`. Тому вони поки не синхронізуються між пристроями та співавторами.
+5. **Designer scope.** Educational Designer Mode редагує presentation layer, а не структуру або зміст курсу. Content authoring залишається у Course Studio.
+
+Ці обмеження є частиною поточного product contract і мають бути явно враховані у UI, документації та ручній прийомці.
 
 ## Сумісність
 
@@ -151,6 +181,8 @@ PDF preview відкривається вручну, не генерується
 - current course content/editor;
 - Marketplace publishing workflow.
 
+Course Studio і Educational Design Studio є sibling workspaces. Перемикання між ними не повинно втрачати незбережений локальний editor state.
+
 ## Regression contract
 
 Gate B повинен перевіряти:
@@ -163,4 +195,8 @@ Gate B повинен перевіряти:
 6. client/server template registries узгоджені;
 7. CourseV2 adapter зберігає stable IDs;
 8. assignment semantics коректно відрізняються для instruction/worksheet/project;
-9. live DesignCraft engine test не регресує.
+9. semantic educational style mappings і 9 visual profiles залишаються валідними;
+10. Educational Designer Mode не мутує CourseV2 і передає `customTheme` тільки у preview/presentation layer;
+11. Course Studio не робить нескінченний refetch при порожньому списку курсів;
+12. перемикання `Курс і зміст ↔ Дизайн навчальних матеріалів` не розмонтовує content editor і не губить його локальний unsaved state;
+13. live DesignCraft engine test не регресує.
