@@ -70,11 +70,14 @@ export function CourseEducationalDesignPanel({ course }: { course: CourseV2 }) {
   }, [course.id]);
 
   const appliedId = preferences[type] || firstTemplate(type);
-  const document = useMemo(
+  const educationalDocument = useMemo(
     () => courseToEducationalDocument(course, type, appliedId),
     [course, type, appliedId],
   );
-  const stats = useMemo(() => educationalDocumentStats(document), [document]);
+  const stats = useMemo(
+    () => educationalDocumentStats(educationalDocument),
+    [educationalDocument],
+  );
 
   function apply(template: EducationalPdfTemplate) {
     const next = { ...preferences, [type]: template.id };
@@ -116,7 +119,7 @@ export function CourseEducationalDesignPanel({ course }: { course: CourseV2 }) {
       if (reserved && !reserved.closed) {
         reserved.location.href = url;
       } else {
-        const anchor = document.createElement('a');
+        const anchor = window.document.createElement('a');
         anchor.href = url;
         anchor.target = '_blank';
         anchor.rel = 'noopener noreferrer';
