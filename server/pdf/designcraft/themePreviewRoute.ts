@@ -1,4 +1,4 @@
-import type { Express, NextFunction, Request, Response } from 'express';
+import type { Express, Request, Response } from 'express';
 import { requireAuth } from '../../auth';
 import { bookToPdfInput, specFromBook } from '../pdfFromBook';
 import { extractSamplePages } from '../pdfSample';
@@ -9,19 +9,6 @@ import { buildDesigncraftThemePreviewSample } from './themePreviewSample';
 
 const DESIGNCRAFT_ENGINE_ID = 'designcraft';
 const THEME_PREVIEW_PAGES = 8;
-
-function themedDesigncraftOnly(req: Request, _res: Response, next: NextFunction) {
-  const isThemedDesigncraft =
-    String(req.body?.engineId || '') === DESIGNCRAFT_ENGINE_ID &&
-    typeof req.body?.theme === 'string' &&
-    req.body.theme.trim().length > 0;
-
-  // This compatibility route sits before the old admin preview. Requests
-  // that are not Book Design Studio previews must continue to the old route
-  // unchanged, including its existing admin policy.
-  if (!isThemedDesigncraft) return next('route');
-  return next();
-}
 
 function fail(res: Response, err: unknown) {
   if (err instanceof PdfEngineError) {
@@ -93,15 +80,7 @@ async function renderThemePreview(req: Request, res: Response) {
   }
 }
 
-/**
- * Author-facing Book Design Studio preview.
- *
- * The dedicated route is the public contract. The compatibility route keeps
- * the already-landed gallery UI working without weakening the old admin PDF
- * endpoint: only DesignCraft + a valid theme is intercepted; every other
- * `/api/admin/pdf/preview` request falls through to the untouched old route.
- */
+/** Author-facing Book Design Studio preview. */
 export function registerDesigncraftThemePreviewRoutes(app: Express): void {
   app.post('/api/pdf/designcraft/theme-preview', requireAuth, renderThemePreview);
-  app.post('/api/admin/pdf/preview', themedDesigncraftOnly, requireAuth, renderThemePreview);
 }
