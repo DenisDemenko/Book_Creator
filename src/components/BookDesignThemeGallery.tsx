@@ -8,6 +8,7 @@ import {
   type BookDesignThemeCard,
   type BookDesignThemeId,
 } from '../data/bookDesignThemeCatalog';
+import { BookDesignAuthorQuickSetup } from './BookDesignAuthorQuickSetup';
 import { DesignerThemeStudio } from './DesignerThemeStudio';
 
 interface BookDesignThemeGalleryProps {
@@ -178,6 +179,7 @@ export const BookDesignThemeGallery: React.FC<BookDesignThemeGalleryProps> = ({
 }) => {
   const [showAll, setShowAll] = useState(true);
   const [mode, setMode] = useState<StudioMode>('author');
+  const [showQuickSetup, setShowQuickSetup] = useState(false);
   const [candidateThemeId, setCandidateThemeId] = useState<BookDesignThemeId | null>(selectedThemeId || null);
   const recommendations = useMemo(() => recommendBookDesignThemes(book, 3), [book]);
   const recommendedIds = new Set(recommendations.map((item) => item.themeId));
@@ -187,8 +189,21 @@ export const BookDesignThemeGallery: React.FC<BookDesignThemeGalleryProps> = ({
   }, [selectedThemeId]);
 
   const candidateTheme = candidateThemeId ? getBookDesignThemeCard(candidateThemeId) : null;
+
+  const chooseCandidate = (themeId: BookDesignThemeId) => {
+    setCandidateThemeId(themeId);
+    setShowQuickSetup(false);
+  };
+
   const customize = (themeId: BookDesignThemeId) => {
     setCandidateThemeId(themeId);
+    setShowQuickSetup(true);
+    setMode('author');
+  };
+
+  const openDesigner = (themeId?: BookDesignThemeId) => {
+    if (themeId) setCandidateThemeId(themeId);
+    setShowQuickSetup(false);
     setMode('designer');
   };
 
@@ -202,7 +217,7 @@ export const BookDesignThemeGallery: React.FC<BookDesignThemeGalleryProps> = ({
         </div>
         <div className="inline-flex self-start rounded-xl border border-slate-700 bg-slate-900 p-1">
           <button type="button" onClick={() => setMode('author')} className={`rounded-lg px-3 py-2 text-xs font-semibold ${mode === 'author' ? 'bg-cyan-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}>Автор</button>
-          <button type="button" onClick={() => setMode('designer')} className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold ${mode === 'designer' ? 'bg-violet-500 text-white' : 'text-slate-400 hover:text-white'}`}><SlidersHorizontal className="h-3.5 w-3.5" /> Дизайнер</button>
+          <button type="button" onClick={() => openDesigner()} className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold ${mode === 'designer' ? 'bg-violet-500 text-white' : 'text-slate-400 hover:text-white'}`}><SlidersHorizontal className="h-3.5 w-3.5" /> Дизайнер</button>
         </div>
       </div>
 
@@ -223,6 +238,16 @@ export const BookDesignThemeGallery: React.FC<BookDesignThemeGalleryProps> = ({
             </div>
           )}
 
+          {showQuickSetup && candidateTheme && (
+            <BookDesignAuthorQuickSetup
+              book={book}
+              baseThemeId={candidateTheme.id}
+              baseThemeLabel={candidateTheme.label}
+              onCreated={() => openDesigner(candidateTheme.id)}
+              onOpenDesigner={() => openDesigner(candidateTheme.id)}
+            />
+          )}
+
           <div className="rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-cyan-950/25 via-slate-950 to-slate-950 p-5">
             <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
               <div>
@@ -236,7 +261,7 @@ export const BookDesignThemeGallery: React.FC<BookDesignThemeGalleryProps> = ({
               {recommendations.map((recommendation) => {
                 const theme = getBookDesignThemeCard(recommendation.themeId);
                 return (
-                  <ThemeCard key={theme.id} book={book} theme={theme} large active={selectedThemeId === theme.id} candidate={candidateThemeId === theme.id} recommendedReason={recommendation.reasonsUk[0]} previewLoading={previewLoading} onChoose={() => setCandidateThemeId(theme.id)} onApply={() => onApplyTheme(theme.id)} onPreview={onOpenPreview ? () => onOpenPreview(theme.id) : undefined} onCustomize={() => customize(theme.id)} />
+                  <ThemeCard key={theme.id} book={book} theme={theme} large active={selectedThemeId === theme.id} candidate={candidateThemeId === theme.id} recommendedReason={recommendation.reasonsUk[0]} previewLoading={previewLoading} onChoose={() => chooseCandidate(theme.id)} onApply={() => onApplyTheme(theme.id)} onPreview={onOpenPreview ? () => onOpenPreview(theme.id) : undefined} onCustomize={() => customize(theme.id)} />
                 );
               })}
             </div>
@@ -254,7 +279,7 @@ export const BookDesignThemeGallery: React.FC<BookDesignThemeGalleryProps> = ({
             {showAll && (
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {BOOK_DESIGN_THEME_CARDS.map((theme) => (
-                  <ThemeCard key={theme.id} book={book} theme={theme} active={selectedThemeId === theme.id} candidate={candidateThemeId === theme.id} recommendedReason={recommendedIds.has(theme.id) ? 'Одна з трьох рекомендацій для цієї книги.' : undefined} previewLoading={previewLoading} onChoose={() => setCandidateThemeId(theme.id)} onApply={() => onApplyTheme(theme.id)} onPreview={onOpenPreview ? () => onOpenPreview(theme.id) : undefined} onCustomize={() => customize(theme.id)} />
+                  <ThemeCard key={theme.id} book={book} theme={theme} active={selectedThemeId === theme.id} candidate={candidateThemeId === theme.id} recommendedReason={recommendedIds.has(theme.id) ? 'Одна з трьох рекомендацій для цієї книги.' : undefined} previewLoading={previewLoading} onChoose={() => chooseCandidate(theme.id)} onApply={() => onApplyTheme(theme.id)} onPreview={onOpenPreview ? () => onOpenPreview(theme.id) : undefined} onCustomize={() => customize(theme.id)} />
                 ))}
               </div>
             )}
