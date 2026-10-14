@@ -113,7 +113,15 @@ function semanticDefinition(
   name: SemanticParagraphStyle
 ): DesigncraftParagraphStyleDefinition | null {
   const rule = theme.semanticStyles[name];
-  if (!rule?.enabled) return null;
+  const entity = semanticEntity(name);
+  const custom = entity ? customEntityStyle(spec, entity) : null;
+
+  // A custom theme may explicitly introduce a semantic style that is not part
+  // of the selected base theme (for example Evidence on top of Sci-Fi). It may
+  // also explicitly disable a base-theme style. This keeps custom Theme Studio
+  // semantics authoritative without changing any of the 15 factory themes.
+  if (custom?.enabled === false) return null;
+  if (!rule?.enabled && !custom?.enabled) return null;
 
   const base = Math.max(8, spec.baseFontSize + theme.bodySizeDelta);
   let size = base;
@@ -182,15 +190,13 @@ function semanticDefinition(
       break;
   }
 
-  const entity = semanticEntity(name);
-  const custom = entity ? customEntityStyle(spec, entity) : null;
   const family = customFontFamily(spec, custom?.fontSlot) || fontForRule(theme, rule);
   const fallbackStyle = fontStyle(rule);
 
   return {
     name,
     para: {
-      align: dcAlign(custom?.align || rule.align || theme.bodyAlign),
+      align: dcAlign(custom?.align || rule?.align || theme.bodyAlign),
       firstLineIndent,
       spaceBefore: before,
       spaceAfter: after,
