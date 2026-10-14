@@ -1,9 +1,11 @@
 import type { Express, Request, Response } from 'express';
+import type { Book } from '../../../src/types';
 import { requireAuth } from '../../auth';
 import { bookToPdfInput, specFromBook } from '../pdfFromBook';
 import { extractSamplePages } from '../pdfSample';
 import { renderWithEngine } from '../engines/registry';
 import { PdfEngineError } from '../engines/types';
+import { injectDesigncraftSceneSemantics } from './sceneSemantics';
 import { isBookDesignThemeId } from './themes';
 import { buildDesigncraftThemePreviewSample } from './themePreviewSample';
 
@@ -37,8 +39,10 @@ async function renderThemePreview(req: Request, res: Response) {
     }
 
     const principal = req.principal;
+    const sampleBook = sample.book as unknown as Book;
     const spec = specFromBook(book as never);
-    const input = bookToPdfInput(sample.book as never);
+    const neutralInput = bookToPdfInput(sampleBook);
+    const input = injectDesigncraftSceneSemantics(neutralInput, sampleBook, theme);
     const rendered = await renderWithEngine(DESIGNCRAFT_ENGINE_ID, {
       book: input,
       kind: 'book',
