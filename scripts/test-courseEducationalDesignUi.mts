@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const shell = await readFile(new URL('../src/components/CourseStudioView.ts', import.meta.url), 'utf8');
+const shell = await readFile(new URL('../src/components/CourseStudioView.tsx', import.meta.url), 'utf8');
 const legacy = await readFile(new URL('../src/components/CourseStudioLegacy.tsx', import.meta.url), 'utf8');
 const panel = await readFile(new URL('../src/components/CourseEducationalDesignPanel.tsx', import.meta.url), 'utf8');
 
