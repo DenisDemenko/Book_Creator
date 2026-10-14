@@ -8,7 +8,6 @@ interface Props {
   baseThemeId: BookDesignThemeId;
   baseThemeLabel: string;
   onCreated?: (theme: CustomBookDesignTheme) => void;
-  onOpenDesigner?: () => void;
 }
 
 type AuthorPreset = 'literary' | 'compact' | 'airy' | 'large';
@@ -41,7 +40,7 @@ function saveTheme(bookId: string, theme: CustomBookDesignTheme) {
   window.localStorage.setItem(storageKey(bookId), JSON.stringify([theme, ...existing]));
 }
 
-export const BookDesignAuthorQuickSetup: React.FC<Props> = ({ book, baseThemeId, baseThemeLabel, onCreated, onOpenDesigner }) => {
+export const BookDesignAuthorQuickSetup: React.FC<Props> = ({ book, baseThemeId, baseThemeLabel, onCreated }) => {
   const [preset, setPreset] = useState<AuthorPreset>('literary');
   const [bodyFont, setBodyFont] = useState<'DejaVu Serif' | 'DejaVu Sans'>('DejaVu Serif');
   const [headingStyle, setHeadingStyle] = useState<AuthorHeadingStyle>('classic');
@@ -118,7 +117,6 @@ export const BookDesignAuthorQuickSetup: React.FC<Props> = ({ book, baseThemeId,
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <button type="button" onClick={createCustomTheme} className="rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-400">Зберегти як свою тему</button>
-            {onOpenDesigner && <button type="button" onClick={onOpenDesigner} className="rounded-xl border border-violet-700 px-4 py-2 text-xs font-semibold text-violet-200 hover:bg-violet-500/10">Розширені налаштування</button>}
             <span className="text-[10px] text-slate-500">Вбудована тема {baseThemeLabel} не змінюється — створюється окрема копія.</span>
           </div>
         </div>
