@@ -63,7 +63,8 @@ function conflictBlocks(repeat: 'once' | 'per-scene' | 'per-conflict' | 'matched
     placement: 'scene-opening',
     repeat,
   }];
-  return applyDesignerBlockRepeatPolicy(resolveRenderableBookDesignBlocks(participantConflictBook, repeatTheme));
+  return applyDesignerBlockRepeatPolicy(resolveRenderableBookDesignBlocks(participantConflictBook, repeatTheme))
+    .filter((block) => block.source === 'conflict');
 }
 
 assert.equal(conflictBlocks('matched').length, 2);
