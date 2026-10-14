@@ -29,6 +29,12 @@ function requireDb() {
 }
 
 export interface ExpressCastMember {
+  /**
+   * Стабільна ідентичність героя. Імʼя дозволено редагувати, тому name не
+   * може бути ключем між кроками wizard, synopsis, семантичними тегами та
+   * майбутньою JEV-оцінкою.
+   */
+  id?: string;
   firstName: string;
   lastName: string;
   psychotype?: string;
@@ -90,6 +96,50 @@ interface Row {
   expires_at: string;
 }
 
+function castName(member: ExpressCastMember): string {
+  return `${member.firstName ?? ''}\u0000${member.lastName ?? ''}`.trim().toLocaleLowerCase();
+}
+
+/**
+ * Додає stable id новим героям і максимально зберігає id при редагуванні.
+ * Поточний wizard редагує cast за індексом, тому індекс має пріоритет над
+ * name matching: перейменування героя не повинно створювати нову сутність.
+ * Name matching лишається запасним шляхом для майбутнього reorder UI.
+ */
+export function withStableCastIds(
+  incoming: ExpressCastMember[],
+  existing: ExpressCastMember[] = []
+): ExpressCastMember[] {
+  const used = new Set<string>();
+  const existingByName = new Map<string, ExpressCastMember[]>();
+  for (const member of existing) {
+    const key = castName(member);
+    const bucket = existingByName.get(key) ?? [];
+    bucket.push(member);
+    existingByName.set(key, bucket);
+  }
+
+  return incoming.map((member, index) => {
+    let id = member.id?.trim() || '';
+    if (id && used.has(id)) id = '';
+
+    if (!id) {
+      const sameSlot = existing[index]?.id?.trim();
+      if (sameSlot && !used.has(sameSlot)) id = sameSlot;
+    }
+
+    if (!id) {
+      const candidates = existingByName.get(castName(member)) ?? [];
+      const match = candidates.find((candidate) => candidate.id && !used.has(candidate.id));
+      if (match?.id) id = match.id;
+    }
+
+    if (!id) id = randomUUID();
+    used.add(id);
+    return { ...member, id };
+  });
+}
+
 function toDraft(row: Row): ExpressDraft {
   let payload: ExpressPayload = {};
   try {
@@ -99,6 +149,7 @@ function toDraft(row: Row): ExpressDraft {
     // пятисотка на кроці, куди людина щойно повернулась.
     payload = {};
   }
+  if (payload.cast?.length) payload.cast = withStableCastIds(payload.cast);
   return {
     id: row.id,
     userId: row.user_id,
@@ -113,11 +164,14 @@ function toDraft(row: Row): ExpressDraft {
 export function createDraft(userId: string | null, payload: ExpressPayload = {}): ExpressDraft {
   const db = requireDb();
   const now = new Date();
+  const normalizedPayload = payload.cast
+    ? { ...payload, cast: withStableCastIds(payload.cast) }
+    : payload;
   const draft: ExpressDraft = {
     id: randomUUID(),
     userId,
     step: 1,
-    payload,
+    payload: normalizedPayload,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + TTL_MS).toISOString(),
@@ -163,7 +217,10 @@ export function updateDraft(
   if (!current) return undefined;
 
   const db = requireDb();
-  const payload = { ...current.payload, ...patch };
+  const normalizedPatch = patch.cast
+    ? { ...patch, cast: withStableCastIds(patch.cast, current.payload.cast ?? []) }
+    : patch;
+  const payload = { ...current.payload, ...normalizedPatch };
   const updatedAt = new Date().toISOString();
   const nextStep = step ?? current.step;
 
