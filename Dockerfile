@@ -39,8 +39,9 @@ ENV VITE_FIREBASE_API_KEY=$VITE_FIREBASE_API_KEY \
     VITE_NOVA_WS_URL=$VITE_NOVA_WS_URL
 
 RUN npm run build
-# One-shot Gate B verifier. Bundled into the production image so it can read
-# the same /data volume as Studio and exercise the real marketplace bridge.
+# One-shot Gate B verifier is still bundled for explicit diagnostics, but it is
+# not part of web-server startup: a long book render must never delay or block
+# the public Studio service.
 RUN npx esbuild scripts/gate-b-publish-arhat.mts \
       --bundle --platform=node --format=esm --packages=external \
       --outfile=dist/gate-b-publish-arhat.mjs
@@ -90,8 +91,4 @@ ENV DATA_DIR=/data \
     GENERATED_IMAGES_DIR=/data/generated
 
 EXPOSE 3000
-# Gate B deliberately runs once before the web server. In audit mode it only
-# inspects the stored book list; in publish mode it renders/publishes the
-# isolated DesignCraft TEST listing. Any real error stops this new deployment,
-# leaving Railway's previous healthy deployment live for diagnosis.
-CMD ["/bin/sh", "-lc", "node dist/gate-b-publish-arhat.mjs && exec node dist/server.mjs"]
+CMD ["node", "dist/server.mjs"]
