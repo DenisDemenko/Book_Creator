@@ -48,6 +48,9 @@ jobs:
       - name: Semantic placement test
         run: npx tsx scripts/test-bookDesignPlacement.mts
 
+      - name: Custom theme placement test
+        run: npx tsx scripts/test-designcraftCustomThemeBlocks.mts
+
       - name: Gate B live engine test
         id: gateb
         continue-on-error: true
