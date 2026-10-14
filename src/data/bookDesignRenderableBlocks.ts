@@ -35,13 +35,17 @@ function sceneConflictFallback(block: ResolvedDesignerBlock, scene: Scene): Reso
   const fields = { ...block.fields };
   delete fields.character;
   delete fields.goal;
-  fields.conflict = String(scene.conflict || fields.conflict || '').trim();
+  const sceneConflict = String(scene.conflict || fields.conflict || '').trim();
+  fields.conflict = sceneConflict;
   const label = `${String(scene.title || 'Сцена').trim() || 'Сцена'} — конфлікт`;
   return {
     ...block,
     id: `${block.blockId}:${scene.id}:scene`,
     sourceId: `${scene.id}:scene`,
     sourceLabel: label,
+    characterId: undefined,
+    sceneId: scene.id,
+    conflictKey: `${scene.id}:scene:${sceneConflict}`,
     fields,
     fallbackText: [label, ...Object.entries(fields).filter(([, value]) => value).map(([key, value]) => `${key}: ${value}`)].join('\n'),
   };
@@ -70,9 +74,8 @@ export function resolveRenderableBookDesignBlocks(
     let block = original;
 
     if (block.source === 'conflict') {
-      const [sceneId, participantId] = block.sourceId.split(':');
-      const scene = scenes.get(sceneId);
-      const participation = scene?.characters?.find((item) => item.characterId === participantId);
+      const scene = block.sceneId ? scenes.get(block.sceneId) : undefined;
+      const participation = scene?.characters?.find((item) => item.characterId === block.characterId);
       const participantConflict = String(participation?.conflict || '').trim();
       const sceneConflict = String(scene?.conflict || '').trim();
 
@@ -87,6 +90,44 @@ export function resolveRenderableBookDesignBlocks(
     const definition = definitions.get(block.blockId);
     const placement = placementOf(definition, block.source);
     out.push({ ...block, ...placement });
+  }
+
+  return out;
+}
+
+function repeatScopeKey(block: RenderableDesignerBlock): string | null {
+  switch (block.repeat) {
+    case 'once':
+      return `${block.blockId}:once`;
+    case 'per-character':
+      return block.characterId ? `${block.blockId}:character:${block.characterId}` : `${block.blockId}:fallback:${block.id}`;
+    case 'per-scene':
+      return block.sceneId ? `${block.blockId}:scene:${block.sceneId}` : `${block.blockId}:fallback:${block.id}`;
+    case 'per-conflict':
+      return block.conflictKey ? `${block.blockId}:conflict:${block.conflictKey}` : `${block.blockId}:fallback:${block.id}`;
+    case 'matched':
+    default:
+      return null;
+  }
+}
+
+/**
+ * Enforce the repeat contract independently from physical placement.
+ * `matched` preserves every resolved match. Scoped repeat modes collapse only
+ * when the corresponding stable semantic id is known, avoiding accidental
+ * data loss for future source types.
+ */
+export function applyDesignerBlockRepeatPolicy(
+  blocks: readonly RenderableDesignerBlock[]
+): RenderableDesignerBlock[] {
+  const seen = new Set<string>();
+  const out: RenderableDesignerBlock[] = [];
+
+  for (const block of blocks) {
+    const key = repeatScopeKey(block);
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+    out.push(block);
   }
 
   return out;
