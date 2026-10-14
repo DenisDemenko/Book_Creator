@@ -20,8 +20,6 @@ import {
   cloneCustomBookDesignTheme,
   emptyCustomBookDesignTheme,
   type CustomBookDesignTheme,
-  type DesignerBlockPlacement,
-  type DesignerBlockRepeat,
   type DesignerCustomBlock,
   type DesignerEntityStyle,
   type DesignerFontAsset,
@@ -32,6 +30,7 @@ import { defaultPlacementFor, defaultRepeatFor, placementOf } from '../data/book
 import { BookDesignBackgroundEditor } from './BookDesignBackgroundEditor';
 import { BookDesignBackgroundLayers } from './BookDesignBackgroundLayers';
 import { BookDesignBoxModelEditor } from './BookDesignBoxModelEditor';
+import { BookDesignSemanticBlockEditor } from './BookDesignSemanticBlockEditor';
 
 interface Props {
   book: Book;
@@ -582,9 +581,13 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId }) => {
             </aside>
           </div>
 
-          <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-950/10 p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="text-sm font-bold text-white">Власні семантичні блоки</h3><p className="mt-1 text-xs text-slate-500">Character / Scene / Conflict використовують реальні сутності книги. Розміщення та повторення залишаються частиною theme manifest.</p></div><div className="flex flex-wrap gap-2"><button type="button" onClick={() => addCustomBlock('character')} className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300">+ Персонаж</button><button type="button" onClick={() => addCustomBlock('scene')} className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300">+ Сцена</button><button type="button" onClick={() => addCustomBlock('conflict')} className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300">+ Конфлікт</button></div></div>
-            <div className="mt-3 space-y-3">{active.customBlocks.map((block) => { const placement = placementOf(block, block.source); return <div key={block.id} className="rounded-xl border border-slate-800 bg-slate-950/70 p-3"><div className="grid gap-2 md:grid-cols-[1.1fr_170px_1fr_auto]"><input value={block.name} onChange={(e) => patchCustomBlock(block.id, { name: e.target.value })} className={inputClass()} placeholder="Назва блоку" /><select value={block.source} onChange={(e) => { const source = e.target.value as DesignerSemanticSource; patchCustomBlock(block.id, { source, fields: defaultFields(source), placement: defaultPlacementFor(source), repeat: defaultRepeatFor(source), style: { ...block.style, entity: source === 'character' || source === 'scene' || source === 'conflict' ? source : 'body' } }); }} className={inputClass()}><option value="manual">Ручний</option><option value="character">Персонаж</option><option value="scene">Сцена</option><option value="conflict">Конфлікт</option><option value="tag">Тег</option><option value="paragraph-style">Стиль абзацу</option></select><input value={block.selector || ''} onChange={(e) => patchCustomBlock(block.id, { selector: e.target.value })} className={inputClass()} placeholder="Умова / selector" /><button type="button" onClick={() => removeCustomBlock(block.id)} className="rounded-lg border border-red-900/70 px-2.5 text-red-300"><Trash2 className="h-4 w-4" /></button></div><div className="mt-2 grid gap-2 md:grid-cols-2"><label className="text-[11px] text-slate-500">Розміщення<select value={placement.placement} onChange={(e) => patchCustomBlock(block.id, { placement: e.target.value as DesignerBlockPlacement })} className={`${inputClass()} mt-1`}><option value="inline">У тексті</option><option value="scene-opening">На початку сцени</option><option value="chapter-opening">На початку розділу</option><option value="full-width">На всю ширину</option><option value="full-page">Окрема сторінка</option><option value="appendix">У додатку</option></select></label><label className="text-[11px] text-slate-500">Повторення<select value={placement.repeat} onChange={(e) => patchCustomBlock(block.id, { repeat: e.target.value as DesignerBlockRepeat })} className={`${inputClass()} mt-1`}><option value="once">Один раз</option><option value="per-character">Для кожного персонажа</option><option value="per-scene">Для кожної сцени</option><option value="per-conflict">Для кожного конфлікту</option><option value="matched">Для кожного збігу</option></select></label></div><input value={(block.fields || []).join(', ')} onChange={(e) => patchCustomBlock(block.id, { fields: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) })} className={`${inputClass()} mt-2`} placeholder="Поля блоку через кому" /></div>; })}{active.customBlocks.length === 0 && <div className="rounded-lg border border-dashed border-slate-700 px-3 py-4 text-xs text-slate-500">Ще немає власних блоків.</div>}</div>
+          <div className="mt-4">
+            <BookDesignSemanticBlockEditor
+              blocks={active.customBlocks}
+              onAdd={addCustomBlock}
+              onChange={patchCustomBlock}
+              onRemove={removeCustomBlock}
+            />
           </div>
         </>
       )}
