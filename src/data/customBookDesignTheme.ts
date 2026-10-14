@@ -65,6 +65,21 @@ export type DesignerSemanticSource =
   | 'tag'
   | 'paragraph-style';
 
+export type DesignerBlockPlacement =
+  | 'inline'
+  | 'scene-opening'
+  | 'chapter-opening'
+  | 'full-width'
+  | 'full-page'
+  | 'appendix';
+
+export type DesignerBlockRepeat =
+  | 'once'
+  | 'per-character'
+  | 'per-scene'
+  | 'per-conflict'
+  | 'matched';
+
 export interface DesignerEntityStyle {
   entity: DesignerThemeEntity;
   enabled: boolean;
@@ -98,6 +113,10 @@ export interface DesignerCustomBlock {
   source: DesignerSemanticSource;
   /** Optional semantic selector, e.g. character id/name, tag, scene property or conflict kind. */
   selector?: string;
+  /** Where the block belongs in the book. Old themes may omit this and use source-derived defaults. */
+  placement?: DesignerBlockPlacement;
+  /** How often a resolved semantic block may appear. */
+  repeat?: DesignerBlockRepeat;
   style: DesignerEntityStyle;
   /** Which entity fields may be surfaced by renderer in the block. */
   fields?: string[];
