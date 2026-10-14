@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { initDb, DATA_DIR } from '../server/db';
 import { getBook, listBooks, readArtifact, saveArtifact } from '../server/bookStore';
-import { designcraftEngine } from '../server/pdf/engines/designcraftEngine';
+import { designcraftEngineV3 } from '../server/pdf/engines/designcraftEngineV3';
 import { specFromBook } from '../server/pdf/pdfFromBook';
 import { clampSamplePages, extractSamplePages } from '../server/pdf/pdfSample';
 import {
@@ -78,6 +78,7 @@ const contentChars = chapters.reduce(
 const existingCover =
   (await readArtifact(stored.id, 'cover', 'digital')) ||
   (await readArtifact(stored.id, 'cover', 'print'));
+const spec = specFromBook(book as never);
 console.log('[gate-b-arhat] candidate_detail=', {
   id: stored.id,
   title: stored.title,
@@ -87,6 +88,19 @@ console.log('[gate-b-arhat] candidate_detail=', {
   sections: sectionCount,
   contentChars,
   cover: existingCover ? { mimeType: existingCover.record.mimeType, bytes: existingCover.bytes.length } : null,
+});
+console.log('[gate-b-arhat] layout_spec=', {
+  pageSize: spec.pageSize,
+  pageWidthPt: spec.pageWidthPt,
+  pageHeightPt: spec.pageHeightPt,
+  margins: spec.margins,
+  baseFontSize: spec.baseFontSize,
+  lineHeight: spec.lineHeight,
+  paragraphSpacing: spec.paragraphSpacing,
+  paragraphIndent: spec.paragraphIndent,
+  chapterStartsNewPage: spec.chapterStartsNewPage,
+  pageNumber: spec.pageNumber,
+  runningHead: spec.runningHead,
 });
 
 if (MODE === 'audit') {
@@ -98,8 +112,7 @@ if (chapters.length === 0 || contentChars < 200) {
   throw new Error('Кандидат схожий на порожню/службову книгу; автоматичну публікацію зупинено.');
 }
 
-const spec = specFromBook(book as never);
-const rendered = await designcraftEngine.render({
+const rendered = await designcraftEngineV3.render({
   book,
   kind: 'book',
   spec,
