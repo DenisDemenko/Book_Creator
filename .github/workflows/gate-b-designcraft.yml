@@ -48,6 +48,9 @@ jobs:
       - name: Educational PDF templates regression contract
         run: npx tsx scripts/test-educationalPdfTemplates.mts
 
+      - name: Course educational adapter contract
+        run: npx tsx scripts/test-courseEducationalAdapter.mts
+
       - name: Preview sample metadata test
         run: npx tsx scripts/test-designcraftThemePreviewSample.mts
 
