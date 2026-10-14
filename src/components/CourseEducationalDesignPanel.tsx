@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { FileText, Loader2, Printer, Sparkles } from 'lucide-react';
 import type { CourseV2 } from '../types';
+import type { CustomBookDesignTheme } from '../data/customBookDesignTheme';
 import { EducationalPdfTemplateGallery } from './EducationalPdfTemplateGallery';
+import { EducationalTemplateDesigner } from './EducationalTemplateDesigner';
 import {
   courseToEducationalDocument,
   educationalDocumentToPreviewBook,
@@ -9,6 +11,7 @@ import {
 import { educationalDocumentStats } from '../data/educationalDocument';
 import {
   educationalPdfTemplatesFor,
+  findEducationalPdfTemplate,
   type EducationalDocumentType,
   type EducationalPdfTemplate,
   type EducationalPdfTemplateId,
@@ -20,6 +23,8 @@ interface CourseTemplatePreferences {
   worksheet?: EducationalPdfTemplateId;
 }
 
+type CourseCustomThemes = Partial<Record<EducationalPdfTemplateId, CustomBookDesignTheme>>;
+
 const TYPE_LABELS: Record<EducationalDocumentType, string> = {
   methodic: 'Методичка',
   instruction: 'Інструкція',
@@ -28,6 +33,10 @@ const TYPE_LABELS: Record<EducationalDocumentType, string> = {
 
 function storageKey(courseId: string): string {
   return `nova-course-educational-design:${courseId}`;
+}
+
+function customThemesStorageKey(courseId: string): string {
+  return `nova-course-educational-custom-themes:${courseId}`;
 }
 
 function readPreferences(courseId: string): CourseTemplatePreferences {
@@ -47,6 +56,23 @@ function writePreferences(courseId: string, value: CourseTemplatePreferences): v
   }
 }
 
+function readCustomThemes(courseId: string): CourseCustomThemes {
+  try {
+    const raw = localStorage.getItem(customThemesStorageKey(courseId));
+    return raw ? (JSON.parse(raw) as CourseCustomThemes) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeCustomThemes(courseId: string, value: CourseCustomThemes): void {
+  try {
+    localStorage.setItem(customThemesStorageKey(courseId), JSON.stringify(value));
+  } catch {
+    // Preview remains available even when persistence is unavailable.
+  }
+}
+
 function firstTemplate(type: EducationalDocumentType): EducationalPdfTemplateId {
   return educationalPdfTemplatesFor(type)[0].id;
 }
@@ -62,11 +88,17 @@ export function CourseEducationalDesignPanel({ course }: { course: CourseV2 }) {
   const [preferences, setPreferences] = useState<CourseTemplatePreferences>(() =>
     typeof window === 'undefined' ? {} : readPreferences(course.id),
   );
+  const [customThemes, setCustomThemes] = useState<CourseCustomThemes>(() =>
+    typeof window === 'undefined' ? {} : readCustomThemes(course.id),
+  );
+  const [designerTemplateId, setDesignerTemplateId] = useState<EducationalPdfTemplateId | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
   useEffect(() => {
     setPreferences(readPreferences(course.id));
+    setCustomThemes(readCustomThemes(course.id));
+    setDesignerTemplateId(null);
   }, [course.id]);
 
   const appliedId = preferences[type] || firstTemplate(type);
@@ -78,15 +110,27 @@ export function CourseEducationalDesignPanel({ course }: { course: CourseV2 }) {
     () => educationalDocumentStats(educationalDocument),
     [educationalDocument],
   );
+  const designerTemplate = designerTemplateId ? findEducationalPdfTemplate(designerTemplateId) : null;
 
   function apply(template: EducationalPdfTemplate) {
     const next = { ...preferences, [type]: template.id };
     setPreferences(next);
     writePreferences(course.id, next);
+    setPreviewError(null);
   }
 
-  async function previewPdf() {
-    const templateId = preferences[type] || firstTemplate(type);
+  function saveCustomTheme(templateId: EducationalPdfTemplateId, theme: CustomBookDesignTheme) {
+    const next = { ...customThemes, [templateId]: theme };
+    setCustomThemes(next);
+    writeCustomThemes(course.id, next);
+    setPreviewError(null);
+  }
+
+  async function previewPdf(options?: {
+    templateId?: EducationalPdfTemplateId;
+    customTheme?: CustomBookDesignTheme | null;
+  }) {
+    const templateId = options?.templateId || preferences[type] || firstTemplate(type);
     const educational = courseToEducationalDocument(course, type, templateId);
     const previewBook = educationalDocumentToPreviewBook(educational);
     const reserved = window.open('', '_blank');
@@ -101,6 +145,7 @@ export function CourseEducationalDesignPanel({ course }: { course: CourseV2 }) {
         body: JSON.stringify({
           book: previewBook,
           educationalTemplateId: templateId,
+          ...(options?.customTheme ? { customTheme: options.customTheme } : {}),
         }),
       });
       if (!response.ok) {
@@ -128,7 +173,9 @@ export function CourseEducationalDesignPanel({ course }: { course: CourseV2 }) {
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (error) {
       reserved?.close();
-      setPreviewError(error instanceof Error ? error.message : 'Не вдалося створити PDF preview.');
+      const message = error instanceof Error ? error.message : 'Не вдалося створити PDF preview.';
+      setPreviewError(message);
+      throw error;
     } finally {
       setPreviewing(false);
     }
@@ -149,12 +196,12 @@ export function CourseEducationalDesignPanel({ course }: { course: CourseV2 }) {
           </div>
           <button
             type="button"
-            onClick={() => void previewPdf()}
+            onClick={() => void previewPdf({ customTheme: customThemes[appliedId] || null }).catch(() => undefined)}
             disabled={previewing || stats.lessons === 0}
             className="flex items-center gap-2 rounded-xl bg-amber-500 px-3.5 py-2 text-xs font-bold text-slate-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {previewing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
-            {previewing ? 'Створюю PDF…' : 'PDF preview'}
+            {previewing ? 'Створюю PDF…' : customThemes[appliedId] ? 'PDF preview · власна тема' : 'PDF preview'}
           </button>
         </div>
 
@@ -163,7 +210,10 @@ export function CourseEducationalDesignPanel({ course }: { course: CourseV2 }) {
             <button
               key={item}
               type="button"
-              onClick={() => setType(item)}
+              onClick={() => {
+                setType(item);
+                setDesignerTemplateId(null);
+              }}
               className={`rounded-xl border px-3 py-2 text-xs font-semibold transition ${
                 type === item
                   ? 'border-amber-500/50 bg-amber-500/10 text-amber-200'
@@ -179,6 +229,9 @@ export function CourseEducationalDesignPanel({ course }: { course: CourseV2 }) {
           <span className="rounded-full bg-slate-900 px-2.5 py-1">{stats.modules} модулів</span>
           <span className="rounded-full bg-slate-900 px-2.5 py-1">{stats.lessons} уроків</span>
           <span className="rounded-full bg-slate-900 px-2.5 py-1">{stats.blocks} semantic blocks</span>
+          {customThemes[appliedId] ? (
+            <span className="rounded-full bg-violet-500/10 px-2.5 py-1 text-violet-300">власна тема активна</span>
+          ) : null}
         </div>
 
         {stats.lessons === 0 ? (
@@ -195,19 +248,30 @@ export function CourseEducationalDesignPanel({ course }: { course: CourseV2 }) {
         ) : null}
       </div>
 
-      <div className="[&>section]:border-slate-800 [&>section]:bg-slate-950/40 [&>section]:text-slate-100">
-        <EducationalPdfTemplateGallery
-          key={`${course.id}:${type}:${appliedId}`}
-          documentType={type}
-          value={appliedId}
-          onApply={apply}
-          onCustomize={(template) => {
-            setPreviewError(
-              `«${template.shortLabelUk}»: розширене налаштування буде відкривати спільний Designer Mode; базовий шаблон лишається незмінним.`,
-            );
-          }}
+      {designerTemplate ? (
+        <EducationalTemplateDesigner
+          key={`${course.id}:${designerTemplate.id}`}
+          courseId={course.id}
+          template={designerTemplate}
+          value={customThemes[designerTemplate.id] || null}
+          onSave={(theme) => saveCustomTheme(designerTemplate.id, theme)}
+          onPreview={(theme) => previewPdf({ templateId: designerTemplate.id, customTheme: theme })}
+          onClose={() => setDesignerTemplateId(null)}
         />
-      </div>
+      ) : (
+        <div className="[&>section]:border-slate-800 [&>section]:bg-slate-950/40 [&>section]:text-slate-100">
+          <EducationalPdfTemplateGallery
+            key={`${course.id}:${type}:${appliedId}`}
+            documentType={type}
+            value={appliedId}
+            onApply={apply}
+            onCustomize={(template) => {
+              setDesignerTemplateId(template.id);
+              setPreviewError(null);
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }
