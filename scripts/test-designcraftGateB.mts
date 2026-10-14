@@ -10,7 +10,7 @@ function t(name: string, condition: boolean, details = ''): void {
   console.log(`${condition ? '  ✓' : '  ✗'} ${name}${details ? ` — ${details}` : ''}`);
 }
 
-const { designcraftEngine } = await import('../server/pdf/engines/designcraftEngine');
+const { designcraftEngineV2: designcraftEngine } = await import('../server/pdf/engines/designcraftEngineV2');
 const { listPdfEngines } = await import('../server/pdf/engines/registry');
 
 const PNG =
@@ -94,6 +94,9 @@ longBook.chapters[0].sections[0].content = Array.from({ length: 420 }, (_, i) =>
 const long = await designcraftEngine.render({ book: longBook, kind: 'book', spec, print: false });
 t('довший рукопис створює більше сторінок', long.pageCount > first.pageCount, `${first.pageCount} → ${long.pageCount}`);
 t('довга книга пройшла без overset', long.notesUk.some((n) => n.includes('без overset')), long.notesUk.join(' | '));
+// Regression gate for the production failure: the controlled renderer must
+// not jump to DesignCraft's 2000-page autoflow ceiling for a moderate book.
+t('reflow не створює тисячі порожніх сторінок', long.pageCount < 300, String(long.pageCount));
 
 console.log('\nІзоляція job та повторюваність');
 const [repeatA, repeatB] = await Promise.all([
