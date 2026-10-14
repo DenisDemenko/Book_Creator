@@ -34,7 +34,10 @@ const CHARACTER_FIELDS = [
   'age',
   'gender',
   'profession',
+  'description',
   'biography',
+  'goal',
+  'emotionalState',
   'motivation',
   'internalConflict',
   'goals',
@@ -84,7 +87,16 @@ function nameOf(character: Character | undefined): string {
   return [character.name, character.surname].map(clean).filter(Boolean).join(' ') || clean(character.alias);
 }
 
-function characterField(character: Character, field: string): string {
+function firstParticipationFor(characterId: string, scenes: Scene[]): CharacterInScene | undefined {
+  for (const scene of scenes) {
+    const participation = scene.characters?.find((item) => item.characterId === characterId);
+    if (participation) return participation;
+  }
+  return undefined;
+}
+
+function characterField(character: Character, field: string, scenes: Scene[]): string {
+  const participation = firstParticipationFor(character.id, scenes);
   switch (field) {
     case 'name': return clean(character.name);
     case 'surname': return clean(character.surname);
@@ -93,7 +105,10 @@ function characterField(character: Character, field: string): string {
     case 'age': return clean(character.age);
     case 'gender': return clean(character.gender);
     case 'profession': return clean(character.profession);
+    case 'description': return clean(character.biography);
     case 'biography': return clean(character.biography);
+    case 'goal': return clean(participation?.goal || character.personality?.goals?.[0]);
+    case 'emotionalState': return clean(participation?.emotionalState);
     case 'motivation': return clean(character.personality?.motivation);
     case 'internalConflict': return clean(character.personality?.internalConflict);
     case 'goals': return clean(character.personality?.goals);
@@ -218,7 +233,7 @@ export function resolveBookDesignEntityBlocks(book: Book, theme: CustomBookDesig
       if (!matchesSelector(definition?.selector, [character.id, character.name, character.surname || '', character.alias || '', character.role, ...(character.tags || [])])) continue;
       const style = styleOf(theme, 'character', definition);
       if (!style.enabled) continue;
-      const values = Object.fromEntries(fields.map((field) => [field, characterField(character, field)]).filter(([, value]) => Boolean(value)));
+      const values = Object.fromEntries(fields.map((field) => [field, characterField(character, field, scenes)]).filter(([, value]) => Boolean(value)));
       const label = nameOf(character) || 'Персонаж';
       result.push({
         id: `${definition?.id || 'character'}:${character.id}`,
