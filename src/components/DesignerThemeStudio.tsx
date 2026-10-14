@@ -31,6 +31,7 @@ import {
 import { defaultPlacementFor, defaultRepeatFor, placementOf } from '../data/bookDesignPlacement';
 import { BookDesignBackgroundEditor } from './BookDesignBackgroundEditor';
 import { BookDesignBackgroundLayers } from './BookDesignBackgroundLayers';
+import { BookDesignBoxModelEditor } from './BookDesignBoxModelEditor';
 
 interface Props {
   book: Book;
@@ -178,6 +179,11 @@ function entityPreviewText(entity: DesignerThemeEntity): { eyebrow: string; text
   return { eyebrow: DESIGNER_THEME_ENTITIES.find((item) => item.id === entity)?.labelUk || entity, text: 'Так виглядатиме вибрана сутність у дизайн-системі книги.' };
 }
 
+function pxFromMm(value: number | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  return value * 3.2;
+}
+
 function PreviewPageCard({ theme, page, entity }: { theme: CustomBookDesignTheme; page: PreviewPage; entity: DesignerThemeEntity }) {
   const style = entityStyle(theme, entity);
   const preview = entityPreviewText(entity);
@@ -185,6 +191,8 @@ function PreviewPageCard({ theme, page, entity }: { theme: CustomBookDesignTheme
   const headingFont = font(theme, 'heading').family;
   const blockBackground = style.background || { kind: 'none' as const, opacity: 1 };
   const paperColor = theme.page.pageBackground.color || '#fffdf8';
+  const padding = style.paddingMm;
+  const margin = style.marginMm;
 
   return (
     <div className="relative aspect-[0.705] w-[360px] max-w-full overflow-hidden rounded-[4px] bg-[#fffdf8] shadow-2xl shadow-black/30 ring-1 ring-black/10">
@@ -197,7 +205,7 @@ function PreviewPageCard({ theme, page, entity }: { theme: CustomBookDesignTheme
         <p className="mt-6 text-[11px] leading-[1.75] text-current opacity-90">{page.body.slice(0, 610)}{page.body.length > 610 ? '…' : ''}</p>
 
         <div
-          className="relative mt-6 overflow-hidden rounded-md p-3"
+          className="relative mt-6 overflow-hidden"
           style={{
             color: style.textColor || theme.page.textColor,
             fontFamily: font(theme, style.fontSlot || 'body').family,
@@ -205,7 +213,18 @@ function PreviewPageCard({ theme, page, entity }: { theme: CustomBookDesignTheme
             fontWeight: style.fontWeight,
             fontStyle: style.italic ? 'italic' : undefined,
             textAlign: style.align === 'justify' ? 'justify' : style.align || 'left',
-            border: style.border?.style === 'solid' ? `${style.border.widthPt || 1}px solid ${style.border.color || theme.page.accentColor}` : undefined,
+            borderStyle: style.border?.style === 'none' ? undefined : style.border?.style,
+            borderWidth: style.border?.style === 'none' ? undefined : `${style.border?.widthPt || 1}px`,
+            borderColor: style.border?.style === 'none' ? undefined : style.border?.color || theme.page.accentColor,
+            borderRadius: style.radiusMm ? `${pxFromMm(style.radiusMm)}px` : '6px',
+            paddingTop: pxFromMm(padding?.top) ?? 12,
+            paddingRight: pxFromMm(padding?.right) ?? 12,
+            paddingBottom: pxFromMm(padding?.bottom) ?? 12,
+            paddingLeft: pxFromMm(padding?.left) ?? 12,
+            marginTop: pxFromMm(margin?.top),
+            marginRight: pxFromMm(margin?.right),
+            marginBottom: pxFromMm(margin?.bottom),
+            marginLeft: pxFromMm(margin?.left),
           }}
         >
           <BookDesignBackgroundLayers background={blockBackground} paperColor="transparent" />
@@ -544,6 +563,13 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId }) => {
                   />
                 </div>
               </details>
+
+              {entity !== 'page' && <details className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
+                <summary className="cursor-pointer text-xs font-semibold text-slate-200">Рамка та відступи</summary>
+                <div className="mt-3">
+                  <BookDesignBoxModelEditor style={entityStyle(active, entity)} onChange={patchEntity} />
+                </div>
+              </details>}
 
               <details className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
                 <summary className="cursor-pointer text-xs font-semibold text-slate-200">Шрифти теми</summary>
