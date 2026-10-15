@@ -3198,8 +3198,8 @@ P0: revision/CAS, локальний резерв правок, збережен
 ---
 
 ### PREVIEW-MEDIA-1 — P0: фото й browser pagination, блок B
-Статус: реалізовано локально, production-приймання 0/12; журнал #443.
+Статус: код опубліковано в master, [65fc34b](https://github.com/DenisDemenko/Book_Creator/commit/65fc34bfff9a67a2623c6c1b8a1580ce4b70ef21); deployment не підтверджено, production-приймання0/12; журнал #443/#444.
 
 Спільний assetUrl для HTML/CSS/QR/макетів і image node, валідні figure поза p, load/error/decode/font-aware вимір із bounded wait та повторним розрахунком, скасування старого snapshot, фото без автоматичних дублів, owner-check серверних медіа. Локально523 цільові тести й16 Chromium; фінальні types/build/evidence — у журналі.
 
-[Контракт, межі та12 ручних сценаріїв](docs/acceptance/PREVIEW_MEDIA.md). D — розворот за обраним PDF-рушієм, F — pageMap/номери, G/H — навігація/масштаб та інші відкриті роботи цим пунктом не закриті. Новий код поки не закомічено й не запушено.
+[Контракт, межі та12 ручних сценаріїв](docs/acceptance/PREVIEW_MEDIA.md). D — розворот за обраним PDF-рушієм, F — pageMap/номери, G/H — навігація/масштаб та інші відкриті роботи цим пунктом не закриті. Push і точний SHA master підтверджено; це не закриває ручне production-приймання.

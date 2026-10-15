@@ -1,9 +1,9 @@
 {
   "generatedAt": "2026-10-15T19:36:09.173237+00:00",
-  "source": "Uncommitted working tree",
+  "source": "Pre-commit measurements; published code is identical by all 15 implementation hashes",
   "baseHead": "a0d086dd3e16d95ceb468c4f5d47f6c0df0c6916",
-  "committed": false,
-  "published": false,
+  "committed": true,
+  "published": true,
   "deploymentVerified": false,
   "productionAcceptance": {
     "passed": 0,
@@ -86,5 +86,20 @@
   "deploymentProbe": {
     "url": "https://bookcreator-production-7304.up.railway.app/api/health",
     "result": "CONNECT tunnel failed, response 403 from environment proxy; no application HTTP status received"
+  },
+  "measurementSnapshot": {
+    "source": "Uncommitted working tree",
+    "committed": false,
+    "published": false,
+    "generatedAt": "2026-10-15T19:36:09.173237+00:00"
+  },
+  "publication": {
+    "repository": "DenisDemenko/Book_Creator",
+    "branch": "master",
+    "codeCommit": "65fc34bfff9a67a2623c6c1b8a1580ce4b70ef21",
+    "githubMasterVerified": true,
+    "verifiedAt": "2026-10-15T19:46:30.430701+00:00",
+    "deploymentVerified": false,
+    "productionAcceptance": false
   }
 }
