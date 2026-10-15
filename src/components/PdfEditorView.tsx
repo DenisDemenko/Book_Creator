@@ -1,3 +1,4 @@
+import { assetUrl } from '../utils/assetUrl';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   LayoutPanelTop,
@@ -332,7 +333,7 @@ export const PdfEditorView: React.FC<PdfEditorViewProps> = ({ book, onUpdateBook
                         margin: obj.wrapMode !== 'top-bottom' ? `0 ${mmToPx(obj.wrapMarginMm)}px ${mmToPx(obj.wrapMarginMm)}px ${mmToPx(obj.wrapMarginMm)}px` : `${mmToPx(obj.wrapMarginMm)}px auto`,
                       }}
                     >
-                      <img src={obj.imageUrl} alt={obj.caption || ''} className="w-full h-full object-cover" draggable={false} />
+                      <img src={assetUrl(obj.imageUrl)} alt={obj.caption || ''} className="w-full h-full object-cover" draggable={false} />
                       <div
                         onPointerDown={(e) => beginObjectResize(e, obj)}
                         className="absolute bottom-0 right-0 w-3 h-3 bg-amber-400 cursor-nwse-resize"
@@ -353,7 +354,7 @@ export const PdfEditorView: React.FC<PdfEditorViewProps> = ({ book, onUpdateBook
                   className={`absolute cursor-move border-2 ${selectedObjectId === obj.id ? 'border-amber-400' : 'border-slate-400/50'} bg-black/5`}
                   style={{ left: mmToPx(obj.xMm), top: mmToPx(obj.yMm), width: mmToPx(obj.widthMm), height: mmToPx(obj.heightMm), zIndex: 10 + obj.zIndex }}
                 >
-                  <img src={obj.imageUrl} alt={obj.caption || ''} className="w-full h-full object-cover pointer-events-none" draggable={false} />
+                  <img src={assetUrl(obj.imageUrl)} alt={obj.caption || ''} className="w-full h-full object-cover pointer-events-none" draggable={false} />
                   <div className="absolute top-0 left-0 p-0.5 bg-slate-900/70 text-amber-300"><Move className="w-2.5 h-2.5" /></div>
                   <div
                     onPointerDown={(e) => beginObjectResize(e, obj)}
@@ -432,7 +433,7 @@ export const PdfEditorView: React.FC<PdfEditorViewProps> = ({ book, onUpdateBook
                     className="aspect-square rounded-lg overflow-hidden border border-slate-800 hover:border-amber-400 transition-all"
                     title={t('pdfEditorView.addToPageBtn')}
                   >
-                    <img src={ill.url} alt={ill.caption} className="w-full h-full object-cover" />
+                    <img src={assetUrl(ill.url)} alt={ill.caption} className="w-full h-full object-cover" />
                   </button>
                 ))}
               </div>
@@ -543,7 +544,7 @@ export const PdfEditorView: React.FC<PdfEditorViewProps> = ({ book, onUpdateBook
             ) : (
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
-                  <img src={selectedObject.imageUrl} alt="" className="w-10 h-10 rounded-lg object-cover border border-slate-800" />
+                  <img src={assetUrl(selectedObject.imageUrl)} alt="" className="w-10 h-10 rounded-lg object-cover border border-slate-800" />
                   <span className="text-xs text-slate-300 truncate flex-1">{selectedObject.caption || t('pdfEditorView.untitledObject')}</span>
                   <button onClick={() => deleteObject(selectedObject.id)} className="text-slate-500 hover:text-rose-400">
                     <Trash2 className="w-3.5 h-3.5" />
@@ -633,7 +634,7 @@ export const PdfEditorView: React.FC<PdfEditorViewProps> = ({ book, onUpdateBook
                     selectedObjectId === obj.id ? 'bg-amber-500/20' : 'hover:bg-slate-900'
                   }`}
                 >
-                  <img src={obj.imageUrl} alt="" className="w-7 h-7 rounded object-cover border border-slate-800" />
+                  <img src={assetUrl(obj.imageUrl)} alt="" className="w-7 h-7 rounded object-cover border border-slate-800" />
                   <span className="text-[11px] text-slate-300 truncate flex-1">{obj.caption || t('pdfEditorView.untitledObject')}</span>
                   <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">{obj.wrapMode}</span>
                 </button>

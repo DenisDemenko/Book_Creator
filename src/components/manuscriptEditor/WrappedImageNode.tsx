@@ -1,3 +1,4 @@
+import { assetUrl, assetCssUrl } from '../../utils/assetUrl';
 import React, { useRef, useState } from 'react';
 import { Node, mergeAttributes } from '@tiptap/core';
 import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react';
@@ -75,7 +76,7 @@ function outerFigureStyle(
     const shapeCss = shape
       ? `shape-outside:polygon(${shape});`
       : url
-        ? `shape-outside:url(${url});shape-image-threshold:0.5;`
+        ? `shape-outside:${assetCssUrl(url)};shape-image-threshold:0.5;`
         : '';
     return `float:left;margin:0 16px 8px 0;${shapeCss}shape-margin:8px;${size}`;
   }
@@ -121,7 +122,7 @@ const WrappedImageView: React.FC<ReactNodeViewProps> = ({ node, selected, extens
   const getPageContentWidthMm = extension.options.getPageContentWidthMm as WrappedImageOptions['getPageContentWidthMm'];
   const onRequestAiText = extension.options.onRequestAiText as WrappedImageOptions['onRequestAiText'];
   const isGeneratingAiText = extension.options.isGeneratingAiText as WrappedImageOptions['isGeneratingAiText'];
-  const url = resolveImageUrl(imageId);
+  const url = assetUrl(resolveImageUrl(imageId));
   const generating = !!isGeneratingAiText?.(imageId);
 
   const imgRef = useRef<HTMLImageElement>(null);
@@ -275,7 +276,7 @@ export const WrappedImageNode = Node.create<WrappedImageOptions>({
       attrs: ({ node }) => {
         const wrap = (node.attrs.wrap || 'left') as ImageWrapMode;
         const widthMm = (node.attrs.widthMm as number | null) ?? options.getPageContentWidthMm() / 2;
-        const url = options.resolveImageUrl(node.attrs.imageId as string);
+        const url = assetUrl(options.resolveImageUrl(node.attrs.imageId as string));
         return {
           'data-wrapped-image': '',
           'data-wrap': wrap,

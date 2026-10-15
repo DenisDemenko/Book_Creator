@@ -19,6 +19,7 @@
  */
 
 import fs from 'node:fs/promises';
+import { internalAssetPath } from '../../src/utils/assetUrl';
 import path from 'node:path';
 import { GENERATED_DIR, GENERATED_URL_PREFIX } from '../imageGeneration';
 import { assetIdFromUrl, readAsset } from './mediaLibraryStore';
@@ -77,7 +78,7 @@ export async function loadImageBytes(
   imageUrl: string,
   ownerId?: string | null
 ): Promise<{ mimeType: string; bytes: Buffer }> {
-  const url = String(imageUrl || '');
+  const url = internalAssetPath(String(imageUrl || ''), process.env.NOVA_BASE_PATH || '/studio/');
   if (!url) throw new ImageBytesError('Немає посилання на зображення.');
 
   if (url.startsWith('data:')) {
@@ -99,7 +100,7 @@ export async function loadImageBytes(
 
   if (url.startsWith(`${GENERATED_URL_PREFIX}/`)) {
     // Захист від виходу за межі каталогу згенерованих файлів.
-    const safeName = path.basename(url.slice(GENERATED_URL_PREFIX.length + 1));
+    const safeName = path.basename(url.slice(GENERATED_URL_PREFIX.length + 1).split(/[?#]/)[0]);
     try {
       const bytes = await fs.readFile(path.join(GENERATED_DIR, safeName));
       const ext = path.extname(safeName).slice(1).toLowerCase();

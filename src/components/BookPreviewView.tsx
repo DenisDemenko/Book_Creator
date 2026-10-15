@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   ChevronLeft, 
   ChevronRight, 
@@ -15,7 +15,8 @@ import {
 } from 'lucide-react';
 import { Book } from '../types';
 import { computeTableOfContents, getLeaderSymbol, getDisplayPageNumber } from '../utils/helpers';
-import { useRealBookPages } from '../utils/useRealBookPages';
+import { useBookPreviewMeasurement } from '../utils/useRealBookPages';
+import { assetUrl } from '../utils/assetUrl';
 import { PX_PER_MM } from '../utils/mmUnits';
 import { bodyFontStack, resolveParagraphGeometry } from '../utils/typography';
 import { useLanguage } from '../i18n/LanguageContext';
@@ -75,9 +76,12 @@ export const BookPreviewView: React.FC<BookPreviewViewProps> = ({ book, totalWor
   // тексту (жирний/курсив/шрифт/кегль/картинки) проти реального формату
   // сторінки — не та сама евристика, що в «Змісті»/«Верстці PDF» (там усе
   // ще швидка оцінка на символах, свідомо не змінена цим заходом).
-  const pages = useRealBookPages(book);
+  const { pages, measuring, pendingImages, failedImages } = useBookPreviewMeasurement(book);
 
   const totalBookPages = pages.length;
+  useEffect(() => {
+    setCurrentPageIndex(index => Math.min(index, Math.max(0, Math.floor((pages.length - 1) / 2) * 2)));
+  }, [pages.length]);
   const leftPageIndex = currentPageIndex;
   const rightPageIndex = currentPageIndex + 1 < totalBookPages ? currentPageIndex + 1 : null;
 
@@ -233,7 +237,6 @@ export const BookPreviewView: React.FC<BookPreviewViewProps> = ({ book, totalWor
     // Body text page with footnotes & QR codes
     const pageFootnotes = (book.footnotes || []).filter(f => f.sectionId === page.sectionId);
     const pageQrTags = (book.qrTags || []).filter(q => q.sectionId === page.sectionId);
-    const pageIllustrations = (book.illustrations || []).filter(ill => ill.sectionId === page.sectionId);
 
     return (
       <div className="w-full h-full p-8 py-7 bg-[#fffefc] text-slate-900 flex flex-col justify-between font-serif-book">
@@ -251,24 +254,12 @@ export const BookPreviewView: React.FC<BookPreviewViewProps> = ({ book, totalWor
           dangerouslySetInnerHTML={{ __html: page.content || '' }}
         />
 
-        {/* Ілюстрації розділу (введені в «Книга & Текст») */}
-        {pageIllustrations.length > 0 && (
-          <div className="grid grid-cols-2 gap-2 py-2">
-            {pageIllustrations.map((ill) => (
-              <figure key={ill.id} className="m-0">
-                <img src={ill.url} alt={ill.caption || ''} className="w-full h-24 object-cover rounded border border-slate-200" />
-                {ill.caption && <figcaption className="text-[8px] text-slate-500 italic mt-0.5">{ill.caption}</figcaption>}
-              </figure>
-            ))}
-          </div>
-        )}
-
         {/* Footnotes & QR tags at bottom of page */}
         {(pageFootnotes.length > 0 || pageQrTags.length > 0) && (
           <div className="border-t border-slate-200 pt-2 space-y-1.5 text-[9px] text-slate-600">
             {pageQrTags.slice(0, 1).map((q) => (
               <div key={q.id} className="flex items-center gap-2 p-1 bg-slate-50 rounded border border-slate-200">
-                {q.svgData && <img src={q.svgData} alt={q.title} className="w-6 h-6" />}
+                {q.svgData && <img src={assetUrl(q.svgData)} alt={q.title} className="w-6 h-6" />}
                 <div className="truncate">
                   <span className="font-bold text-slate-900">📱 {q.title}</span>: <span className="font-mono text-[8px] text-slate-500">{q.payload}</span>
                 </div>
@@ -296,7 +287,7 @@ export const BookPreviewView: React.FC<BookPreviewViewProps> = ({ book, totalWor
   };
 
   return (
-    <div className="flex-1 p-4 lg:p-6 overflow-y-auto bg-slate-900 text-slate-100 flex flex-col space-y-6">
+    <div data-book-preview className="flex-1 min-w-0 p-4 lg:p-6 overflow-y-auto bg-slate-900 text-slate-100 flex flex-col space-y-6">
       
       {/* Top Controls Bar */}
       <div className="nova-glass-dark rounded-2xl p-4 border border-slate-800 flex flex-wrap items-center justify-between gap-4">
@@ -310,7 +301,7 @@ export const BookPreviewView: React.FC<BookPreviewViewProps> = ({ book, totalWor
         </div>
 
         {/* Pagination navigator */}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <button
             onClick={handlePrevSpread}
             disabled={currentPageIndex === 0}
@@ -361,6 +352,13 @@ export const BookPreviewView: React.FC<BookPreviewViewProps> = ({ book, totalWor
           </button>
         </div>
       </div>
+
+      <p role="status" data-preview-status className="text-xs text-slate-300">
+        {measuring ? 'Розраховуємо сторінки та завантажуємо зображення…'
+          : pendingImages ? 'Деякі зображення ще завантажуються; сторінки буде перераховано.'
+          : 'Орієнтовна браузерна пагінація. Точні сторінки визначає обраний PDF-рушій.'}
+        {failedImages > 0 && ' Не завантажено зображень: ' + failedImages + '.'}
+      </p>
 
       {/* Book Spread Realistic Canvas */}
       <div className="flex-1 overflow-auto p-2 sm:p-6 bg-slate-950 rounded-3xl border border-slate-800 shadow-2xl min-h-[560px]">

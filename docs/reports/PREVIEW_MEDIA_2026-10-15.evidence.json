@@ -1,0 +1,90 @@
+{
+  "generatedAt": "2026-10-15T19:36:09.173237+00:00",
+  "source": "Uncommitted working tree",
+  "baseHead": "a0d086dd3e16d95ceb468c4f5d47f6c0df0c6916",
+  "committed": false,
+  "published": false,
+  "deploymentVerified": false,
+  "productionAcceptance": {
+    "passed": 0,
+    "total": 12
+  },
+  "implementationSha256": {
+    "package.json": "3be387299b94c405dafddc9d295c5a3026dd95e1d1b2dd22fcb35baa80761d1c",
+    "scripts/lib/previewMediaBrowser.ts": "2d1bb409ed37789f4fa062f90fbe27686ad50388c64f52bd63312cd427fedac6",
+    "scripts/live-previewMedia.mts": "6082975475ac0e1507b180fc9e552fd5e198226004af1590252d5bee531326b8",
+    "scripts/test-previewMedia.mts": "e67dca19361b7ead636e291c6361b8d5fb8ea420f9dd361eb871b8b96c310dfb",
+    "server/media/imageBytes.ts": "b2ba721a2abfe14a88e634d830596041ad72ed2ce5eb251aa5857958d7f1bda0",
+    "src/components/BookDesignBackgroundEditor.tsx": "1960aaa4a72e8a879c1ea75719070a9b92302cbac9b7424a8969a32adbb6de45",
+    "src/components/BookDesignBackgroundLayers.tsx": "4f7e5b791146431d44d1d8815aed37a5f8204dcbe2f861fc783b5c951224b4ad",
+    "src/components/BookPreviewView.tsx": "59f006245c4c6dfcbe4fc9d93b3c93d3f8c44e79e673ccf7ceaeee8d80a3ffbf",
+    "src/components/PdfEditorView.tsx": "bae0d6ec2ae10082742499b24682af44fdcc91e885921f901e2fade5e1d561f0",
+    "src/components/manuscriptEditor/WrappedImageNode.tsx": "8ea61b568aa7583fe6a2f2e79c85bb804ac5e1fc84b5d8384cccf2dabd15e448",
+    "src/utils/assetUrl.ts": "6cc82ae6bdeff9a0ba598c2cd74f600dceeb0b1ff4f47af448503443e151b7ea",
+    "src/utils/basePath.ts": "d4914e62f9f49a9bf84c3db59957e812916b8fa1be7413e64237dcba2a9b4f39",
+    "src/utils/helpers.ts": "7ca9fc23f2a3f48322ced9cf71d29396900838bc799873a76e27c47ba6021f8a",
+    "src/utils/previewPagination.ts": "a20275eadf6661943e75a6ea249894a4e047f0ff17beaa92934b59f19a6f56c3",
+    "src/utils/useRealBookPages.ts": "cbfdb307ce5bbcefc6259424d7aae927f56d4df8c005f200f93dcb4157678cff"
+  },
+  "validation": {
+    "test:preview-media": 21,
+    "test:image-wrap": 27,
+    "test:image-markers": 40,
+    "test:table-markers": 27,
+    "test:world-origin": 45,
+    "test:pdf-engines": 143,
+    "test:design-layout": 30,
+    "test:publishing": 164,
+    "test:book-text": 26,
+    "targetedTotal": 523,
+    "typescriptExitCode": 0,
+    "buildExitCode": 0,
+    "fullNpmTestRun": false,
+    "browser": {
+      "mode": "Real App/CSS + controlled slow/broken image routes; identity fixture",
+      "productionAcceptance": false,
+      "checks": [
+        "innerHTML photo and contour CSS use /studio/ without native src patch",
+        "browser does not repair p/figure nesting or add empty paragraphs",
+        "HTML export resolves QR and manuscript images",
+        "stalled images have a bounded initial wait and visible pending status",
+        "late load/decode triggers repagination after the initial deadline",
+        "broken image terminates without hanging and is counted",
+        "marker and legacy images are included once each in measured pages",
+        "loaded page content fits the measured page budget",
+        "loaded page content fits the measured page budget",
+        "loaded page content fits the measured page budget",
+        "abort removes measurement DOM and listeners",
+        "cancelled snapshot never publishes a stale callback",
+        "Actual App renders a marker photo once, fully loaded",
+        "Styled App at 1440px without document overflow",
+        "Styled App at 390px without document overflow",
+        "No browser JavaScript errors"
+      ],
+      "shots": [
+        "spread-media-1440.png",
+        "spread-media-390.png"
+      ],
+      "errors": []
+    },
+    "limits": "Unit/API adapters and local Chromium with identity/image route fixtures; no authenticated production or real AI; no four-engine visual PDF acceptance."
+  },
+  "artifacts": [
+    {
+      "path": "/tmp/preview-media-ui/report.json",
+      "sha256": "99ecdf658c8c3d2d94d9b0b7906dadbef272c3a2d79c979aeb0afa998541cad3"
+    },
+    {
+      "path": "/tmp/preview-media-ui/spread-media-1440.png",
+      "sha256": "d391e42d9bb1e44ffb5560ba613b3444dcdd14b04853f80f30c273bb6e9b0e4f"
+    },
+    {
+      "path": "/tmp/preview-media-ui/spread-media-390.png",
+      "sha256": "084a72de8236e2586953b0498627532d77ca2e2777c1ab842d90f6f1ed7233db"
+    }
+  ],
+  "deploymentProbe": {
+    "url": "https://bookcreator-production-7304.up.railway.app/api/health",
+    "result": "CONNECT tunnel failed, response 403 from environment proxy; no application HTTP status received"
+  }
+}

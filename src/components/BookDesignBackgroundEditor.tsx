@@ -1,3 +1,4 @@
+import { assetUrl, assetCssUrl } from '../utils/assetUrl';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Image as ImageIcon, Loader2, RefreshCcw, Search, X } from 'lucide-react';
 import type {
@@ -90,7 +91,7 @@ function sourceStyle(background: DesignerBackground): React.CSSProperties {
     const url = backgroundImageUrl(background);
     if (!url) return {};
     return {
-      backgroundImage: `url(${url})`,
+      backgroundImage: assetCssUrl(assetUrl(url)),
       backgroundPosition: cssPosition(background.position),
       backgroundRepeat: background.fit === 'tile' ? 'repeat' : 'no-repeat',
       backgroundSize: background.fit === 'contain' ? 'contain' : background.fit === 'stretch' ? '100% 100%' : background.fit === 'tile' ? 'auto' : 'cover',
@@ -209,7 +210,7 @@ function MediaLibraryPicker({ bookId, selectedId, onPick, onClose }: { bookId: s
       {loading && <div className="flex items-center justify-center gap-2 py-8 text-xs text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Завантаження…</div>}
       {error && <div className="mt-3 rounded-lg border border-red-900/60 bg-red-950/30 p-2 text-xs text-red-300">{error}</div>}
       {!loading && !error && filtered.length === 0 && <div className="py-8 text-center text-xs text-slate-500">У цій книзі ще немає зображень у медіатеці.</div>}
-      {!loading && filtered.length > 0 && <div className="mt-3 grid max-h-72 grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3">{filtered.map((asset) => <button key={asset.id} type="button" onClick={() => onPick({ assetId: asset.id, url: asset.url, filename: asset.filename, mimeType: asset.mimeType, altText: asset.altText })} className={`overflow-hidden rounded-lg border text-left ${selectedId === asset.id ? 'border-cyan-400 ring-1 ring-cyan-400' : 'border-slate-800 hover:border-slate-600'}`}><div className="aspect-[4/3] bg-slate-900"><img src={asset.url} alt={asset.altText || asset.title || asset.filename} className="h-full w-full object-cover" loading="lazy" /></div><div className="truncate px-2 py-1.5 text-[10px] text-slate-400">{asset.title || asset.filename}</div></button>)}</div>}
+      {!loading && filtered.length > 0 && <div className="mt-3 grid max-h-72 grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3">{filtered.map((asset) => <button key={asset.id} type="button" onClick={() => onPick({ assetId: asset.id, url: asset.url, filename: asset.filename, mimeType: asset.mimeType, altText: asset.altText })} className={`overflow-hidden rounded-lg border text-left ${selectedId === asset.id ? 'border-cyan-400 ring-1 ring-cyan-400' : 'border-slate-800 hover:border-slate-600'}`}><div className="aspect-[4/3] bg-slate-900"><img src={assetUrl(asset.url)} alt={asset.altText || asset.title || asset.filename} className="h-full w-full object-cover" loading="lazy" /></div><div className="truncate px-2 py-1.5 text-[10px] text-slate-400">{asset.title || asset.filename}</div></button>)}</div>}
     </div>
   );
 }

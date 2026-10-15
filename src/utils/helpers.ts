@@ -1,5 +1,6 @@
 // Text diff calculation, QR code generation, and document layout utilities
 import QRCode from 'qrcode';
+import { assetUrl, assetCssUrl, htmlAttribute } from './assetUrl';
 import { Book, Chapter, Section, Footnote, QRTag, TOCLeaderStyle, TOCNumberingStyle, PdfChapterLayout, PdfFrameObject, TOCConfig } from '../types';
 import { imageMarkerRegexp, resolveImageMarker } from './imageMarkers';
 import { replaceTableBlocks } from './tableMarkers';
@@ -467,10 +468,10 @@ function renderImageMarkers(text: string, book: Book): string {
       // Розбір і розвʼязання id — спільні з серверною версткою
       // (`utils/imageMarkers.ts`, запис #169): доки правил було два набори,
       // PDF друкував маркер голим текстом, а браузер малював картинку.
-      const url = resolveImageMarker(id, book)?.url;
+      const url = assetUrl(resolveImageMarker(id, book)?.url);
 
       if (!url) return full;
-      const cap = (caption || '').trim();
+      const cap = htmlAttribute((caption || '').trim());
       // Той самий літеральний mm, що й у живому редакторі (WrappedImageNode.tsx) —
       // без конвертації в px, розмір на екрані й в експорті лишається однаковим.
       const sizeCss = widthMm ? `width:${widthMm}mm;` : '';
@@ -491,7 +492,7 @@ function renderImageMarkers(text: string, book: Book): string {
           // прозорість самого файлу: працює для PNG/SVG.
           figureStyle += shape
             ? `shape-outside:polygon(${shape});shape-margin:0.5em;`
-            : `shape-outside:url(${url});shape-image-threshold:0.5;shape-margin:0.5em;`;
+            : `shape-outside:${htmlAttribute(assetCssUrl(url))};shape-image-threshold:0.5;shape-margin:0.5em;`;
         }
       }
 
@@ -499,7 +500,7 @@ function renderImageMarkers(text: string, book: Book): string {
 
       return (
         `<figure style="${figureStyle}">` +
-        `<img src="${url}" alt="${cap}" style="${imgStyle}" />` +
+        `<img src="${htmlAttribute(url)}" alt="${cap}" style="${imgStyle}" />` +
         (cap ? `<figcaption style="font-size:0.82em;opacity:0.75;margin-top:0.4em;">${cap}</figcaption>` : '') +
         `</figure>`
       );
@@ -727,6 +728,21 @@ export function renderSectionBlocksHtml(
     // друкованій сторінці, чого пункт 6 постановки прямо не дозволяє.
     .filter((p) => stripEntityTags(p).trim().length > 0);
 
+  // Flow blocks are never children of <p>, including IMG inserted in prose.
+  const wrapBlocks = (html: string): string => {
+    const block = /<(figure|table|h[1-6])\b[\s\S]*?<\/\1>|<hr\b[^>]*>/gi;
+    const pieces: string[] = [];
+    let offset = 0;
+    for (const match of html.matchAll(block)) {
+      const before = html.slice(offset, match.index).trim();
+      if (before) pieces.push('<p>' + before + '</p>');
+      pieces.push(match[0]);
+      offset = match.index! + match[0].length;
+    }
+    const tail = html.slice(offset).trim();
+    if (tail) pieces.push('<p>' + tail + '</p>');
+    return pieces.join('');
+  };
   return paragraphs
     .map((para) => {
       // Ціла таблиця — один «абзац» у цьому спліті (усередині [TABLE]…
@@ -743,7 +759,7 @@ export function renderSectionBlocksHtml(
       const html = renderSectionContentHtml(rawText, book, sectionFootnotes, allFootnotes);
       return isCallout
         ? `<div style="margin:0.8em 0;padding:0.5em 1em;border-left:3px solid rgba(180,130,20,0.5);font-style:italic;">${html}</div>`
-        : `<p>${html}</p>`;
+        : wrapBlocks(html);
     })
     .join('');
 }
@@ -788,7 +804,7 @@ function renderFlowObjectHtml(obj: PdfFrameObject): string {
       : `margin: 0 0 ${obj.wrapMarginMm}mm ${obj.wrapMarginMm}mm;`;
   return `
       <div style="${floatCss} ${marginCss} width: ${obj.widthMm}mm; page-break-inside: avoid;">
-        <img src="${obj.imageUrl}" alt="${obj.caption || ''}" style="width: ${obj.widthMm}mm; height: ${obj.heightMm}mm; object-fit: cover; display: block;" />
+        <img src="${htmlAttribute(assetUrl(obj.imageUrl))}" alt="${obj.caption || ''}" style="width: ${obj.widthMm}mm; height: ${obj.heightMm}mm; object-fit: cover; display: block;" />
         ${obj.caption ? `<div style="font-size: 8pt; color: #64748b; text-align: center; margin-top: 2px;">${obj.caption}</div>` : ''}
       </div>
     `;
@@ -802,7 +818,7 @@ function renderFlowObjectHtml(obj: PdfFrameObject): string {
 function renderFreeObjectHtml(obj: PdfFrameObject): string {
   return `
     <div style="display: block; clear: both; margin: 8mm auto; width: ${obj.widthMm}mm; page-break-inside: avoid;">
-      <img src="${obj.imageUrl}" alt="${obj.caption || ''}" style="width: ${obj.widthMm}mm; height: ${obj.heightMm}mm; object-fit: cover; display: block; margin: 0 auto;" />
+      <img src="${htmlAttribute(assetUrl(obj.imageUrl))}" alt="${obj.caption || ''}" style="width: ${obj.widthMm}mm; height: ${obj.heightMm}mm; object-fit: cover; display: block; margin: 0 auto;" />
       ${obj.caption ? `<div style="font-size: 8pt; color: #64748b; text-align: center; margin-top: 2px;">${obj.caption}</div>` : ''}
     </div>
   `;
@@ -932,7 +948,7 @@ export function generateBookExportHtml(book: Book): string {
               <div style="display: flex; gap: 16px; flex-wrap: wrap;">
                 ${secQrTags.map(q => `
                   <div style="display: flex; align-items: center; gap: 8px; font-size: 9pt;">
-                    ${q.svgData ? `<img src="${q.svgData}" style="width: 48px; height: 48px;" alt="${q.title}" />` : ''}
+                    ${q.svgData ? `<img src="${htmlAttribute(assetUrl(q.svgData))}" style="width: 48px; height: 48px;" alt="${q.title}" />` : ''}
                     <div>
                       <strong>${q.title}</strong>
                       <div style="color: #64748b; font-size: 8pt;">${q.payload}</div>
@@ -1152,7 +1168,7 @@ function generateEditorialBookExportHtml(book: Book, tocItems: ComputedTOCItem[]
           </div>
         ` : ''}
         ${book.coverConfig?.frontArtUrl ? `
-          <div class="ed-cover-art"><img src="${book.coverConfig.frontArtUrl}" alt="${book.title}" /></div>
+          <div class="ed-cover-art"><img src="${htmlAttribute(assetUrl(book.coverConfig.frontArtUrl))}" alt="${book.title}" /></div>
         ` : ''}
       </div>
       <div class="ed-cover-footer">
@@ -1212,7 +1228,7 @@ function generateEditorialBookExportHtml(book: Book, tocItems: ComputedTOCItem[]
               <div class="ed-qr-list">
                 ${secQrTags.map((q) => `
                   <div class="ed-qr-item">
-                    ${q.svgData ? `<img src="${q.svgData}" alt="${q.title}" />` : ''}
+                    ${q.svgData ? `<img src="${htmlAttribute(assetUrl(q.svgData))}" alt="${q.title}" />` : ''}
                     <div>
                       <strong>${q.title}</strong>
                       <div class="ed-qr-payload">${q.payload}</div>

@@ -1,3 +1,4 @@
+import { assetUrl, assetCssUrl } from '../utils/assetUrl';
 import React from 'react';
 import type { DesignerBackground, DesignerBackgroundPosition } from '../data/customBookDesignTheme';
 
@@ -37,7 +38,7 @@ function sourceStyle(background: DesignerBackground): React.CSSProperties {
     const url = imageUrl(background);
     if (!url) return {};
     return {
-      backgroundImage: `url(${url})`,
+      backgroundImage: assetCssUrl(assetUrl(url)),
       backgroundPosition: position(background.position),
       backgroundRepeat: background.fit === 'tile' ? 'repeat' : 'no-repeat',
       backgroundSize: background.fit === 'contain' ? 'contain' : background.fit === 'stretch' ? '100% 100%' : background.fit === 'tile' ? 'auto' : 'cover',

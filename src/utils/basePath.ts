@@ -1,3 +1,5 @@
+import { assetUrl } from './assetUrl';
+
 /**
  * Робота під префіксом шляху (docs/migration-plan.md Фаза G3).
  *
@@ -85,10 +87,9 @@ function installAssetAttributePrefix(): void {
   Element.prototype.setAttribute = function (name: string, value: string) {
     if (
       (name === 'src' || name === 'href') &&
-      typeof value === 'string' &&
-      value.startsWith('/api/')
+      typeof value === 'string'
     ) {
-      return nativeSetAttribute.call(this, name, `${API_BASE}${value}`);
+      return nativeSetAttribute.call(this, name, assetUrl(value));
     }
     return nativeSetAttribute.call(this, name, value);
   };
@@ -106,7 +107,7 @@ function installAssetAttributePrefix(): void {
       ...desc,
       set(value: unknown) {
         const next =
-          typeof value === 'string' && value.startsWith('/api/') ? `${API_BASE}${value}` : value;
+          typeof value === 'string' ? assetUrl(value) : value;
         desc.set!.call(this, next);
       },
     });
