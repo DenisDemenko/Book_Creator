@@ -1,6 +1,6 @@
 # Світ, обстановка та походження ШІ — перевірка реалізації
 
-15.10.2026 · докази підготовленої реалізації. Поточний статус коміту/push — запис #442 у [журналі](../../log.md).
+15.10.2026 · код [1d27e44](https://github.com/DenisDemenko/Book_Creator/commit/1d27e4457cb8b8c417b6c18d3c473e37dff0d6ba) запушено у Book_Creator/master. Статус Railway-деплою та production-приймання не підтверджено; запис #442 у [журналі](../../log.md).
 
 Реалізовано WORLD-SCENE-1 та AI-TEXT-PROVENANCE-1 з [плану](../../PLAN_WORLD_SCENE_AND_AI_ORIGIN.md).
 

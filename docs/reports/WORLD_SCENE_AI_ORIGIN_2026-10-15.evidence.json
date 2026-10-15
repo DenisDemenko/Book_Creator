@@ -217,5 +217,14 @@
     "Source book photo analysis currently owner-only",
     "Production manual acceptance 0/24",
     "All four PDF adapters checked; all four production renderers not executed"
-  ]
+  ],
+  "publication": {
+    "codeCommit": "1d27e4457cb8b8c417b6c18d3c473e37dff0d6ba",
+    "repository": "https://github.com/DenisDemenko/Book_Creator",
+    "branch": "master",
+    "gitHubRefVerifiedAt": "2026-10-15T13:46:45.258620+00:00",
+    "snapshotFieldsDescribePreCommitMeasurements": true,
+    "deploymentVerified": false,
+    "productionAcceptance": false
+  }
 }
