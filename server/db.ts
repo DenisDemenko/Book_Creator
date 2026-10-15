@@ -389,6 +389,7 @@ CREATE TABLE IF NOT EXISTS express_drafts (
   id          TEXT PRIMARY KEY,            -- UUID; віддається клієнту й лежить у localStorage
   user_id     TEXT,                        -- NULL, поки користувач анонімний
   step        INTEGER NOT NULL DEFAULT 1,  -- Е1..Е5 — точка відновлення майстра
+  revision    INTEGER NOT NULL DEFAULT 1,  -- CAS: застаріла вкладка не перезаписує новішу
   payload     TEXT NOT NULL,               -- JSON: зерно, модель, прапорці, каст, синопсис
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL,
@@ -1022,6 +1023,13 @@ CREATE INDEX IF NOT EXISTS idx_chat_message_entities_slug ON chat_message_entiti
  * тож для баз, створених до появи поля `bytes` (облік МБ фотоальбому),
  * додаємо колонку вручну, якщо її ще нема.
  */
+function migrateExpressDraftRevision(instance: Database): void {
+  const columns = instance.prepare('PRAGMA table_info(express_drafts)').all() as { name: string }[];
+  if (!columns.some((c) => c.name === 'revision')) {
+    instance.exec('ALTER TABLE express_drafts ADD COLUMN revision INTEGER NOT NULL DEFAULT 1');
+  }
+}
+
 function migrateUsageLogColumns(instance: Database): void {
   try {
     const cols = instance.prepare('PRAGMA table_info(usage_log)').all() as { name: string }[];
@@ -1278,6 +1286,7 @@ export async function initDb(): Promise<boolean> {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     const instance = new sqlite.DatabaseSync(DB_PATH);
     instance.exec(SCHEMA);
+    migrateExpressDraftRevision(instance);
     migrateUsageLogColumns(instance);
     migrateUsersColumns(instance);
     migrateSupportMessageColumns(instance);

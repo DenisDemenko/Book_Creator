@@ -1,3 +1,4 @@
+import { stripAiTextMarkers } from '../../shared/aiTextOrigin';
 /**
  * ЯДРО СУТНОСТЕЙ СТУДІЇ — 118 типів сутностей і 39 типів зв'язків.
  *
@@ -817,7 +818,7 @@ export function parseEntityTags(text: string): ParsedEntityTag[] {
  *      з самими тегами — єдиний наслідок, якого автор не побачив би заздалегідь.
  */
 export function stripEntityTags(text: string): string {
-  const original = String(text ?? '');
+  const original = stripAiTextMarkers(String(text ?? ''));
   if (!original.includes('/')) return original;
   // Спершу — теги, розрізані маркерами форматування (див. removeFormattedEntityTags).
   // Перевірка на `/` — ДО цього кроку: після нього тегів уже може не лишитись,

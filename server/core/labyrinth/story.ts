@@ -1,3 +1,4 @@
+import { aiDraftText } from '../../../shared/aiTextOrigin';
 import type { LabyrinthDefinition, LabyrinthRunState } from "../../../shared/labyrinth";
 import type { ReaderScene } from "../../../shared/labyrinthReader";
 import type { StoryBlock, StorySource, StoryDraft } from "../../../shared/labyrinthStory";
@@ -169,7 +170,7 @@ export function buildStoryBook(draft: StoryDraft, author: string) {
   book.genre = "Пригодницька історія";
   book.chapters = [{ id: chapterId, bookId: id, title: "Історія проходження", order: 1,
     sections: draft.blocks.map((b, i) => ({ id: id + "-s" + i, chapterId, title: b.title, order: i + 1,
-      content: b.proposalOrigin === "ai" && b.proposal ? "[AI-DRAFT]" + b.proposal + "[/AI-DRAFT]" : b.proposal ?? b.text,
+      content: b.proposalOrigin === "ai" && b.proposal ? aiDraftText(b.proposal) : b.proposal ?? b.text,
       wordCount: (b.proposal ?? b.text).split(/\s+/).filter(Boolean).length, lastModified: new Date(now).toISOString(),
     })) }];
   if(book.versionHistory?.[0])Object.assign(book.versionHistory[0],{label:"Збірка завершеного проходження",comment:"Окрема чернетка з перевіреними джерелами проходження.",note:"Окрема чернетка з перевіреними джерелами проходження.",tags:["Лабіринт","Збірка"],wordCount:book.chapters[0].sections.reduce((sum,s)=>sum+s.wordCount,0)});

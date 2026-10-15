@@ -1,3 +1,4 @@
+import { stripAiTextMarkers } from '../../../shared/aiTextOrigin';
 import { EDITION_ROLES, EDITION_ROLE_LABELS, type EditionTerms, type EditionManuscript } from '../../../shared/labyrinthEdition';
 import { LabyrinthError, stateHash } from './model';
 import { toParagraphs } from '../../pdf/pdfRenderer';
@@ -63,7 +64,7 @@ export function editionManuscript(book:Record<string,any>,id:string,version:numb
         if(!places.has(node.id)){places.set(node.id,nodeId);nodes.push({id:nodeId,label:'Місце '+places.size,x:node.x,y:node.y,level:node.level});}
         if(origin?.heroId){const previous=lastPlace.get(origin.heroId);if(previous&&previous!==nodeId&&!edges.some(e=>e.from===previous&&e.to===nodeId))edges.push({from:previous,to:nodeId});lastPlace.set(origin.heroId,nodeId);}
       }
-      const content=editionText(section.content??'',100000,true).replace(/\[\/?AI-DRAFT\]/g,'');
+      const content=stripAiTextMarkers(editionText(section.content??'',100000,true));
       const text=toParagraphs(content).join('\n\n');
       if(text)pages.push({id:'page-'+(pages.length+1),title:editionText(section.title||chapter.title||'Розділ',300),text,nodeId,aiAssisted:!!origin?.aiAssisted});
     }

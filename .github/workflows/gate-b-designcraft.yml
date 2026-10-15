@@ -45,6 +45,9 @@ jobs:
       - name: Express wizard integrity contract
         run: npx tsx scripts/test-expressWizardIntegrity.mts
 
+      - name: Wizard draft behavior and source/scenario API
+        run: npm run test:express-draft-session && npm run test:wizard-scenarios && npm run test:wizard-scenario-routes
+
       - name: Express semantic handoff contract
         run: npx tsx scripts/test-expressSemanticHandoff.mts
 

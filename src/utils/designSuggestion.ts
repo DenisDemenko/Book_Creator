@@ -1,3 +1,4 @@
+import { stripEntityTags } from './coreEntities';
 /**
  * Клієнтська частина скіла /design (Завдання 3в).
  *
@@ -70,7 +71,7 @@ export function availableFontFamilies(book: Pick<Book, 'layoutConfig'>): string[
  * оформлення під неї.
  */
 export function stripManuscriptMarkup(raw: string): string {
-  return raw
+  return stripEntityTags(raw)
     .replace(/\[IMG:[^\]]*\]/g, ' ')
     .replace(/\[\/?AI-DRAFT\]/g, ' ')
     .replace(/\[FONT="[^"]*"\]/g, ' ')

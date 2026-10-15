@@ -1,0 +1,92 @@
+{
+  "auditedAt": "2026-10-15",
+  "master": "63f01189e190ac2dd678850fc79cf7e5eee9b32a",
+  "pullRequest": {
+    "number": 11,
+    "state": "MERGED",
+    "head": "9f46a875b93b055822963649d177841b62eb281a",
+    "mergedAt": "2026-10-14T20:43:23Z",
+    "mergeCommit": "63f01189e190ac2dd678850fc79cf7e5eee9b32a"
+  },
+  "gateB": {
+    "runId": 38632284392,
+    "event": "pull_request",
+    "conclusion": "success",
+    "headSha": "9f46a875b93b055822963649d177841b62eb281a",
+    "url": "https://github.com/DenisDemenko/Book_Creator/actions/runs/38632284392",
+    "rawLogDownload": "Forbidden; no log content verified"
+  },
+  "treeEquality": {
+    "prHead": "ccf35bd6e743358d6c6e235407e2605d3cb88f4f",
+    "master": "ccf35bd6e743358d6c6e235407e2605d3cb88f4f"
+  },
+  "localChecks": {
+    "node": "v24.19.0",
+    "master": "63f01189e190ac2dd678850fc79cf7e5eee9b32a",
+    "expressWizardIntegrity": {
+      "exitCode": 0,
+      "scenarios": 4
+    },
+    "expressSemanticHandoff": {
+      "exitCode": 0,
+      "scenarios": 5
+    },
+    "imageMarkers": {
+      "passed": 40,
+      "failed": 0
+    },
+    "pdfCover": {
+      "passed": 19,
+      "failed": 0
+    },
+    "typeScript": {
+      "exitCode": 0
+    }
+  },
+  "controlledProbes": {
+    "method": "Real functions extracted from source with TypeScript AST, compiled, invoked with controlled inputs and mocked failing API. HTML helpers invoked directly. No React browser execution, production calls or paid AI.",
+    "results": {
+      "idAfterDeletingFirstMemberWithoutClientIds": {
+        "expected": "hero-b",
+        "actual": "hero-a",
+        "reproduced": true
+      },
+      "failedSaveStillGeneratesSynopsis": {
+        "actions": [
+          "step:4",
+          "PATCH_failed",
+          "suggest:synopsis"
+        ],
+        "reproduced": true
+      },
+      "imageHtml": {
+        "paragraphContainsFigure": true,
+        "rawApiUrlInImage": true,
+        "rawApiUrlInContour": true
+      },
+      "realWizardToAppHandoff": {
+        "knownTagsPresent": true,
+        "stableCastIdPreserved": false,
+        "semanticTagsBeforeAiDraft": false,
+        "content": "[AI-DRAFT]\n\n[/chapter:Початок] [/outline:Початок] [/character:Олена Коваль]\n\nКонтрольний текст.\n\n[/AI-DRAFT]"
+      },
+      "partialSemanticPrefix": {
+        "outlineMissing": true,
+        "characterMissing": true
+      },
+      "spineFor200Pages": {
+        "uiMm": 10.4,
+        "kdpWhiteMm": 11.43,
+        "kdpCreamMm": 12.7
+      }
+    }
+  },
+  "registeredEngines": [
+    "nova",
+    "designcraft",
+    "chromium",
+    "pandoc"
+  ],
+  "manualAcceptance": "Not executed in this audit; no SHA-linked manual acceptance record supplied or found in PR #11.",
+  "repositoryScope": "Source audit and documentation only; no feature implementation or commit/push requested."
+}

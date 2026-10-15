@@ -21,6 +21,7 @@ import { appendTextToChapterEnd } from './bookText';
 export type DescriptionTarget = 'book' | 'instruction' | 'course';
 
 export interface DescriptionPayload {
+  origin?: 'author' | 'ai';
   /** Заголовок, під яким текст ляже в ціль. */
   title: string;
   /** Сам опис — те, що ШІ написав і автор відредагував. */
@@ -194,7 +195,7 @@ export function insertDescriptionIntoBook(
     photoMarker = `[IMG: ${illustration.id} "${illustration.caption.replace(/"/g, '')}" wrap=none]`;
   }
 
-  const insertText = [photoMarker, buildDescriptionDraft(text)].filter(Boolean).join('\n\n');
+  const insertText = [photoMarker, (payload.origin === 'author' ? descriptionParagraphs(text) : buildDescriptionDraft(text))].filter(Boolean).join('\n\n');
 
   // Порожня глава: секції немає — створюємо її разом із текстом.
   const sortedSections = [...(target.sections || [])].sort((a, b) => a.order - b.order);

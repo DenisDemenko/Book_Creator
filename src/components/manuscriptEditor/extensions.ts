@@ -25,6 +25,8 @@ export interface ManuscriptAiTextOptions {
   aiDraftLabel: string;
   aiDraftReviewLabel: string;
   aiDraftRejectLabel: string;
+  reviewer?: () => string;
+  acceptedLabel?: string;
 }
 
 /**
@@ -94,6 +96,8 @@ export function buildManuscriptExtensions(
       label: aiText.aiDraftLabel,
       reviewLabel: aiText.aiDraftReviewLabel,
       rejectLabel: aiText.aiDraftRejectLabel,
+      reviewer: aiText.reviewer,
+      acceptedLabel: aiText.acceptedLabel,
     }),
     // Таблиці (запис #193) — utils/tableMarkers.ts/manuscriptDoc.ts вміють
     // серіалізувати назад у маркери лише РІВНО цей набір: table/tableRow/

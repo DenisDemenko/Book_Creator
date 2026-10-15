@@ -1,4 +1,8 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { WorldFields } from './WorldFields';
+import { WorldPhotoAnalysis } from './WorldPhotoAnalysis';
+import { acceptAiOrigin } from '../../shared/aiTextOrigin';
+import { WIZARD_STEPS, wizardStepKey, type StoryWorld, type WizardStepKey } from '../../shared/storyWorld';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Wand2,
   Dices,
@@ -15,7 +19,12 @@ import {
 import { POLTI_PATTERNS } from '../data/poltiPatterns';
 import { HeroArcPanel } from './HeroArcPanel';
 import { defaultHeroArcState } from '../data/heroArc';
-import type { HeroArcState } from '../types';
+import type { Book, HeroArcState } from '../types';
+import { WizardDraftSession, WizardApiError, wizardApi as api, type WizardDraft } from '../utils/expressDraftSession';
+import { registerNavigationGuard } from '../utils/navigationGuard';
+import { STORY_MODELS, bookScenario, storyModel, scenarioErrors, type WizardScenarioState } from '../../shared/wizardScenarios';
+import { WizardScenarioFields } from './WizardScenarioFields';
+import { WizardSourcesPanel } from './WizardSourcesPanel';
 
 /**
  * Експрес-майстер «Книга за 5 хвилин» (Wisart Book Crealiry.md §3.4).
@@ -34,6 +43,7 @@ const DRAFT_KEY = 'nova_express_draft_id';
 const TOTAL_PARTS = 3;
 
 interface CastMember {
+  id: string;
   firstName: string;
   lastName: string;
   psychotype?: string;
@@ -41,9 +51,19 @@ interface CastMember {
   poltiPatternId?: number;
   poltiRoleName?: string;
   hook?: string;
+  appearance?: string;
+  goal?: string;
+  flaw?: string;
+  approved?: boolean;
 }
 
-export interface ExpressWizardPayload {
+export interface ExpressWizardPayload extends WizardScenarioState {
+  storyWorld?: StoryWorld;
+  navigationVersion?: 2;
+  stepKey?: WizardStepKey;
+  useAi?: boolean;
+  reviewConfirmed?: boolean;
+  structureConfirmed?: boolean;
   seed?: string;
   genre?: string;
   framework?: string;
@@ -60,9 +80,13 @@ interface Chapter {
   chapterNumber?: number;
   chapterTitle?: string;
   involvedCharacters?: string[];
+  involvedCharacterIds?: string[];
   environmentalContext?: string | null;
   summary?: string;
   turningPoint?: string;
+  source?: 'ai' | 'author';
+  sourceIds?: string[];
+  choices?: { label: string; destination: string; consequence: string }[];
 }
 
 interface Part {
@@ -72,11 +96,7 @@ interface Part {
   chapters?: Chapter[];
 }
 
-interface Draft {
-  id: string;
-  step: number;
-  payload: ExpressWizardPayload;
-}
+type Draft = WizardDraft<ExpressWizardPayload>;
 
 interface EngineInfo {
   engine: string;
@@ -84,31 +104,9 @@ interface EngineInfo {
   source: 'platform' | 'server';
 }
 
-const FRAMEWORKS: Array<{ id: string; name: string; blurb: string }> = [
-  { id: 'hero_journey', name: 'Подорож героя', blurb: '12 стадій Кемпбелла — класична дуга змін.' },
-  { id: 'psychotypes', name: 'Психотипи', blurb: 'Сюжет росте зі зіткнення характерів.' },
-  { id: 'vedic_archetypes', name: 'Ведичні архетипи', blurb: 'Еволюція через гуни: Тамас → Раджас → Саттва.' },
-  { id: 'buddhist_skandhas', name: 'Буддійські скандхи', blurb: 'Розгортання через пʼять скандх.' },
-];
+const FRAMEWORKS = STORY_MODELS.map(m => ({ id: m.id, name: m.title, blurb: m.description }));
 
-const STEPS = ['Зерно', 'Модель', 'Герої', 'Синопсис', 'Структура'];
-
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin',
-    ...init,
-  });
-  const text = await res.text();
-  let body: any;
-  try {
-    body = JSON.parse(text);
-  } catch {
-    body = { error: 'Сервер повернув не JSON.' };
-  }
-  if (!res.ok) throw new Error(body?.error || `Помилка ${res.status}`);
-  return body as T;
-}
+const STEPS = WIZARD_STEPS;
 
 export const ExpressWizardView: React.FC<{
   onFinish?: (payload: ExpressWizardPayload) => void;
@@ -124,287 +122,203 @@ export const ExpressWizardView: React.FC<{
    * перезаписується нею: це найсвіжіше, що людина сказала про свою книгу.
    */
   initialSeed?: string;
-}> = ({ onFinish, track, trackTitle, onChangeTrack, initialSeed }) => {
-  const [draft, setDraft] = useState<Draft | null>(null);
-  const [step, setStep] = useState(1);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const [seed, setSeed] = useState(() => (initialSeed ?? '').trim());
-  const [genre, setGenre] = useState('');
+  currentBook?: Book;
+}> = ({ onFinish, track, trackTitle, onChangeTrack, initialSeed, currentBook }) => {
+  const [session] = useState(() => {
+    let storage: Storage | undefined;
+    try { storage = window.sessionStorage; } catch { /* server save remains available */ }
+    return new WizardDraftSession<ExpressWizardPayload>({
+      seed: (initialSeed ?? '').trim(), heroArc: defaultHeroArcState(),
+      navigationVersion: 2, stepKey: 'seed', entryMode: 'idea', targetCastSize: 2, natureConnection: false, archetypes36: false, useAi: true,
+    }, api, storage);
+  });
+  const [view, setView] = useState(session.view);
+  const [loadingDraft, setLoadingDraft] = useState(true);
+  const initialization = useRef<Promise<Draft> | null>(null);
+  const [sourceBusy, setSourceBusy] = useState(false);
+  const [working, setWorking] = useState<string | null>(null);
+  const workingRef = useRef(false);
+  const [localError, setLocalError] = useState<string | null>(null);
   const [engines, setEngines] = useState<EngineInfo[]>([]);
-  const [engine, setEngine] = useState<string>('');
+  const [engine, setEngine] = useState('');
+  const [proposal, setProposal] = useState<{ cast: CastMember[]; revision: number } | null>(null);
+  const { draft, step } = view;
+  const busy = loadingDraft ? 'draft' : sourceBusy ? 'sources' : working;
+  const error = localError || view.error;
+  const { seed = '', genre = '', framework = '', frameworkRationale: rationale = '',
+    natureConnection: nature = false, archetypes36: archetypes = false,
+    cast = [], heroArc = defaultHeroArcState(), synopsis = '', parts = [] } = view.payload;
 
-  const [framework, setFramework] = useState<string>('');
-  const [rationale, setRationale] = useState<string>('');
-  const [nature, setNature] = useState(true);
-  const [archetypes, setArchetypes] = useState(true);
+  const useAi = view.payload.useAi !== false;
+  const selectedScenario = bookScenario(view.payload.entryMode);
+  function editInputs(patch: Partial<ExpressWizardPayload>) {
+    session.edit({ ...patch, ...(patch.storyWorld && session.view.payload.entryMode==='world'?{scenarioInputs:{...session.view.payload.scenarioInputs,worldRules:[patch.storyWorld.name,patch.storyWorld.description,patch.storyWorld.rules].filter(Boolean).join('\n')}}:{}), reviewConfirmed: false, structureConfirmed: false });
+  }
+  function setField<K extends keyof ExpressWizardPayload>(key: K, value: ExpressWizardPayload[K]) {
+    editInputs({ [key]: value });
+  }
+  const setSeed = (v: string) => setField('seed', v);
+  const setGenre = (v: string) => setField('genre', v);
+  const setFramework = (v: string) => setField('framework', v);
+  const setNature = (v: boolean) => setField('natureConnection', v);
+  const setArchetypes = (v: boolean) => setField('archetypes36', v);
+  const setCast = (v: React.SetStateAction<CastMember[]>) =>
+    editInputs({ cast: typeof v === 'function' ? v(session.view.payload.cast ?? []) : v });
+  const setHeroArc = (v: HeroArcState) => setField('heroArc', v);
+  const setSynopsis = (v: string) => setField('synopsis', v);
 
-  const [cast, setCast] = useState<CastMember[]>([]);
-  const [heroArc, setHeroArc] = useState<HeroArcState>(defaultHeroArcState());
-  const [synopsis, setSynopsis] = useState('');
-  const [parts, setParts] = useState<Part[]>([]);
-
-  // Стежить, щоб автозапит кроку не полетів двічі на один вхід — у
-  // StrictMode ефекти виконуються парою, а кожен зайвий запит тут коштує
-  // грошей на ключі користувача.
-  const autoRan = useRef<Record<number, boolean>>({});
-
+  useEffect(() => session.subscribe(() => setView(session.view)), [session]);
   useEffect(() => {
     void api<{ engines: EngineInfo[] }>('/api/express/engines')
-      .then((r) => {
-        setEngines(r.engines);
-        if (r.engines[0]) setEngine(r.engines[0].engine);
-      })
+      .then((r) => { setEngines(r.engines); if (r.engines[0]) setEngine(r.engines[0].engine); })
       .catch(() => setEngines([]));
   }, []);
-
-  // Відновлення незавершеної чернетки.
-  //
-  // Задум із маркетплейсу сильніший за чернетку, і це не дрібниця: людина
-  // щойно сформулювала ідею на головній і прийшла саме з нею. Підставити
-  // замість неї стару заготовку означало б затерти те, що вона тільки-но
-  // написала. Тож із задумом майстер починається з чистого аркуша, а
-  // чернетка лишається в сховищі й повернеться, коли задуму немає (в т. ч.
-  // після F5 — параметр з адреси вже прибрано).
   useEffect(() => {
-    if ((initialSeed ?? '').trim()) return;
-    let id: string | null = null;
-    try {
-      id = localStorage.getItem(DRAFT_KEY);
-    } catch {
-      /* приватний режим — просто почнемо заново */
-    }
-    if (!id) return;
-
-    void api<Draft>(`/api/express/draft/${id}`)
-      .then((d) => {
-        setDraft(d);
-        setStep(d.step || 1);
-        setSeed(d.payload.seed ?? '');
-        setGenre(d.payload.genre ?? '');
-        setFramework(d.payload.framework ?? '');
-        setRationale(d.payload.frameworkRationale ?? '');
-        setNature(d.payload.natureConnection !== false);
-        setArchetypes(d.payload.archetypes36 !== false);
-        setCast(d.payload.cast ?? []);
-        if (d.payload.heroArc) setHeroArc(d.payload.heroArc);
-        setSynopsis(d.payload.synopsis ?? '');
-        setParts((d.payload.parts ?? []).filter(Boolean) as Part[]);
-        // Крок уже пройдено — не переганяємо його ще раз.
-        for (let i = 1; i <= (d.step || 1); i++) autoRan.current[i] = true;
-      })
-      .catch(() => {
-        // Чернетка протермінувалась або зникла — прибираємо посилання,
-        // щоб наступний вхід не спотикався об те саме.
-        try {
-          localStorage.removeItem(DRAFT_KEY);
-        } catch {
-          /* не критично */
-        }
-      });
-  }, [initialSeed]);
-
-  const suggest = useCallback(
-    async (draftId: string, stage: 'framework' | 'cast' | 'synopsis') => {
-      setBusy(stage);
-      setError(null);
-      try {
-        const r = await api<{ payload: ExpressWizardPayload; draft: Draft }>('/api/express/suggest', {
-          method: 'POST',
-          body: JSON.stringify({ draftId, stage, engine }),
-        });
-        if (stage === 'framework') {
-          setFramework(r.payload.framework ?? '');
-          setRationale(r.payload.frameworkRationale ?? '');
-          setNature(r.payload.natureConnection !== false);
-          setArchetypes(r.payload.archetypes36 !== false);
-        }
-        if (stage === 'cast') setCast(r.payload.cast ?? []);
-        if (stage === 'synopsis') setSynopsis(r.payload.synopsis ?? '');
-        setDraft(r.draft);
-      } catch (e) {
-        setError((e as Error).message);
-      } finally {
-        setBusy(null);
+    let active = true;
+    if (!initialization.current) initialization.current = (async () => {
+      let id: string | null = null;
+      try { if (!(initialSeed ?? '').trim()) id = localStorage.getItem(DRAFT_KEY); } catch { /* optional storage */ }
+      if (id) {
+        session.recover(id); setView(session.view);
+        try { return await api<Draft>('/api/express/draft/' + id); }
+        catch (error) { if (!(error instanceof WizardApiError) || error.status !== 404) throw error; }
       }
-    },
-    [engine]
-  );
-
-  /** Крок Е1 → Е2. Створює чернетку й одразу просить модель розповіді. */
-  async function startWizard() {
-    if (!seed.trim()) return;
-    setBusy('draft');
-    setError(null);
-    try {
-      const d = await api<Draft>('/api/express/draft', {
-        method: 'POST',
-        body: JSON.stringify({ seed: seed.trim(), genre: genre.trim(), ...(track ? { track } : {}) }),
+      const created = await api<Draft>('/api/express/draft', {
+        method: 'POST', body: JSON.stringify({ payload: session.view.payload, track: track || 'book' }),
       });
-      setDraft(d);
-      try {
-        localStorage.setItem(DRAFT_KEY, d.id);
-      } catch {
-        /* не критично */
-      }
-      setStep(2);
-      autoRan.current[2] = true;
-      await suggest(d.id, 'framework');
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function rollDice() {
-    setBusy('seed');
-    setError(null);
-    try {
-      const r = await api<{ seed: string; genre: string }>('/api/express/seed', {
-        method: 'POST',
-        body: JSON.stringify({ engine }),
-      });
-      setSeed(r.seed);
-      if (r.genre) setGenre(r.genre);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  /** Перехід на крок, який ще не запитували, тягне свою пропозицію сам. */
-  async function goTo(next: number) {
-    setStep(next);
-    if (!draft) return;
-    if (autoRan.current[next]) return;
-    autoRan.current[next] = true;
-    if (next === 3) await suggest(draft.id, 'cast');
-    if (next === 4) {
-      await flushCastSave(draft.id);
-      await suggest(draft.id, 'synopsis');
-    }
-    if (next === 5) {
-      await flushCastSave(draft.id);
-      await generateParts(draft.id);
-    }
-  }
-
-  /** Крок Е5: частини приходять по одній — структура росте на очах. */
-  async function generateParts(draftId: string) {
-    setError(null);
-    setParts([]);
-    for (let n = 1; n <= TOTAL_PARTS; n++) {
-      setBusy(`part-${n}`);
-      try {
-        const r = await api<{ part: Part; draft: Draft }>('/api/express/generate', {
-          method: 'POST',
-          body: JSON.stringify({ draftId, partNumber: n, engine }),
-        });
-        setParts((prev) => [...prev, r.part]);
-        setDraft(r.draft);
-      } catch (e) {
-        setError((e as Error).message);
-        break;
-      }
-    }
-    setBusy(null);
-  }
-
-  /**
-   * Каст і крива головного героя майстер віддає лише як пропозицію
-   * (§3.4.5): за ТЗ письменник має право поправити ім'я, роль, додати
-   * власного героя чи довести дугу героя, не чекаючи нової генерації.
-   * Обидва зберігаються разом одним дебаунсом — вони заповнюються на
-   * тому самому кроці Е3, і окремий таймер на кожен дав би два майже
-   * ідентичні PATCH-запити на кожну паузу в наборі тексту.
-   */
-  const castSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const castRef = useRef(cast);
-  castRef.current = cast;
-  const heroArcRef = useRef(heroArc);
-  heroArcRef.current = heroArc;
-
-  const persistCast = useCallback(
-    (id: string) =>
-      api(`/api/express/draft/${id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ payload: { cast: castRef.current, heroArc: heroArcRef.current } }),
-      }).catch(() => {
-        /* чернетка — не критично, наступна успішна правка перезапише */
-      }),
-    []
-  );
-
+      try { localStorage.setItem(DRAFT_KEY, created.id); } catch { /* server draft exists */ }
+      return created;
+    })();
+    void initialization.current.then(d => {
+      if (active) { session.open(d); setView(session.view); }
+    }).catch(error => { if (active) setLocalError((error as Error).message); })
+      .finally(() => { if (active) setLoadingDraft(false); });
+    return () => { active = false; };
+  }, [initialSeed, session, track]);
   useEffect(() => {
-    if (!draft || step < 3) return;
-    if (castSaveTimer.current) clearTimeout(castSaveTimer.current);
-    castSaveTimer.current = setTimeout(() => void persistCast(draft.id), 600);
-    return () => {
-      if (castSaveTimer.current) clearTimeout(castSaveTimer.current);
+    if (!view.draft || !view.dirty || view.conflict || working) return;
+    const timer = setTimeout(() => { void session.flush().catch(() => undefined); }, 600);
+    return () => clearTimeout(timer);
+  }, [view.payload, view.dirty, view.conflict, view.draft?.id, working, session]);
+  useEffect(() => {
+    const unregister = registerNavigationGuard(() => session.flush());
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (session.view.dirty || session.view.pending || workingRef.current) {
+        event.preventDefault(); event.returnValue = '';
+      }
     };
-  }, [cast, heroArc, draft, step, persistCast]);
-
-  /**
-   * Кроки Е4/Е5 читають каст із СЕРВЕРНОЇ чернетки (synopsisPrompt,
-   * partPrompt), а не з локального стану клієнта — тож перехід «Далі»
-   * одразу після правки касту мусить дочекатись збереження, інакше AI
-   * дописуватиме синопсис за іменами, які письменник щойно змінив.
-   */
-  async function flushCastSave(draftId: string) {
-    if (castSaveTimer.current) clearTimeout(castSaveTimer.current);
-    await persistCast(draftId);
+    const saveHidden = () => {
+      if (document.visibilityState === 'hidden' && session.view.dirty && !workingRef.current) {
+        void session.flush().catch(() => undefined);
+      }
+    };
+    window.addEventListener('beforeunload', beforeUnload);
+    document.addEventListener('visibilitychange', saveHidden);
+    return () => {
+      unregister();
+      window.removeEventListener('beforeunload', beforeUnload);
+      document.removeEventListener('visibilitychange', saveHidden);
+      void session.flush().catch(() => undefined);
+    };
+  }, [session]);
+  async function perform(label: string, action: () => Promise<unknown>) {
+    if (workingRef.current) return;
+    workingRef.current = true; setWorking(label); setLocalError(null);
+    try { await action(); }
+    catch (err) { setLocalError((err as Error).message); }
+    finally { workingRef.current = false; setWorking(null); }
   }
-
+  async function suggest(stage: 'framework' | 'cast' | 'synopsis' | 'plan') {
+    const r = await session.generate<{
+      payload: ExpressWizardPayload; draft: Draft; needsConfirmation?: boolean;
+    }>('/api/express/suggest', { stage, engine });
+    if (stage === 'cast' && r.needsConfirmation) {
+      setProposal({ cast: r.payload.cast ?? [], revision: r.draft.revision });
+    }
+  }
+  const requestSuggestion = (stage: 'framework' | 'cast' | 'synopsis' | 'plan') =>
+    perform(stage, () => suggest(stage));
+  async function startWizard(allowAi = true) {
+    if (!seed.trim()) return;
+    await perform('draft', async () => {
+      const errors = scenarioErrors(session.view.payload);
+      if (errors.length) throw new Error(errors.join(' '));
+      session.edit({ useAi: allowAi });
+      if (!session.view.draft) {
+        const d = await api<Draft>('/api/express/draft', {
+          method: 'POST', body: JSON.stringify({ payload: session.view.payload, track: track || 'book' }),
+        });
+        session.open(d);
+        try { localStorage.setItem(DRAFT_KEY, d.id); } catch { /* saved on server */ }
+      }
+      session.edit({navigationVersion:2,stepKey:'world',...(!session.view.payload.storyWorld && session.view.payload.entryMode==='world'?{storyWorld:{id:crypto.randomUUID(),name:'Світ книги',description:'',rules:session.view.payload.scenarioInputs?.worldRules||'',approved:false}}:{})});
+      await session.flush(6);
+    });
+  }
+  async function rollDice() {
+    await perform('seed', async () => {
+      const r = await api<{ seed: string; genre: string }>('/api/express/seed', {
+        method: 'POST', body: JSON.stringify({ engine }),
+      });
+      session.edit({ seed: r.seed, ...(r.genre ? { genre: r.genre } : {}) });
+    });
+  }
+  async function goTo(next: number) {
+    await perform('save', async () => {
+      session.edit({navigationVersion:2,stepKey:wizardStepKey(next)});
+      await session.flush(next);
+      if (next === 2 && !session.view.payload.framework) {
+        if (session.view.payload.useAi !== false) await suggest('framework');
+        if (!session.view.payload.framework) { session.edit({framework:selectedScenario.documentary?'documentary':'hero_journey'}); await session.flush(); }
+      }
+      if (next === 3 && session.view.payload.entryMode !== 'characters_photos' && session.view.payload.useAi !== false && (session.view.payload.targetCastSize ?? 2) > 0 && !session.view.payload.cast?.length) await suggest('cast');
+      // Step 4 shows the source before the author explicitly starts generation.
+      if (next === 5 && session.view.payload.useAi !== false && !session.view.payload.parts?.length) await generateParts();
+    });
+  }
+  async function generateParts() {
+    for (let n = 1; n <= TOTAL_PARTS; n++) {
+      if (session.view.payload.parts?.[n - 1]) continue;
+      setWorking('part-' + n);
+      await session.generate<{ part: Part; draft: Draft }>('/api/express/generate', { partNumber: n, engine });
+    }
+  }
+  async function acceptCast(mode: 'add' | 'replace') {
+    if (!proposal) return;
+    await perform('save', async () => {
+      if (session.view.draft?.revision !== proposal.revision) {
+        throw new Error('Склад героїв змінився після цієї пропозиції. Запитайте нову пропозицію.');
+      }
+      editInputs({ cast: mode === 'add' ? [...(session.view.payload.cast ?? []), ...proposal.cast] : proposal.cast });
+      await session.flush(); setProposal(null);
+    });
+  }
   function updateCastMember(index: number, patch: Partial<CastMember>) {
-    setCast((prev) => prev.map((c, i) => (i === index ? { ...c, ...patch } : c)));
+    setCast((prev) => prev.map((c, i) => i === index ? { ...c, approved: false, ...patch } : c));
   }
-
-  /**
-   * Довільний текст ролі завжди лишається джерелом істини; номер патерну —
-   * лише підказка, яку скидаємо, щойно текст перестає збігатися з
-   * канонічною назвою. Інакше картка могла б показувати «№33» поруч із
-   * роллю, яку письменник насправді вже переписав на свою.
-   */
   function updateCastRoleText(index: number, text: string) {
     const match = POLTI_PATTERNS.find((p) => p.name === text.trim());
     updateCastMember(index, { poltiRoleName: text, poltiPatternId: match?.id });
   }
-
   function applyPoltiPreset(index: number, patternId: number) {
     const pattern = POLTI_PATTERNS.find((p) => p.id === patternId);
-    if (!pattern) return;
-    updateCastMember(index, { poltiPatternId: pattern.id, poltiRoleName: pattern.name });
+    if (pattern) updateCastMember(index, { poltiPatternId: pattern.id, poltiRoleName: pattern.name });
   }
-
-  /** Новий герой власного вигаду — ім'я й роль порожні, письменник заповнює сам. */
   function addOwnCharacter() {
-    setCast((prev) => [...prev, { firstName: '', lastName: '', poltiRoleName: '' }]);
+    setCast((prev) => [...prev, { id: crypto.randomUUID(), firstName: '', lastName: '', poltiRoleName: '' }]);
   }
-
-  async function saveSynopsis() {
-    if (!draft) return;
-    setBusy('save-synopsis');
-    try {
-      const d = await api<Draft>(`/api/express/draft/${draft.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ payload: { synopsis }, step: 4 }),
-      });
-      setDraft(d);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(null);
-    }
-  }
+  const saveSynopsis = () => perform('save-synopsis', () => session.flush());
+  const changeTrack = () => perform('save', async () => { await session.flush(); onChangeTrack?.(); });
+  const finish = () => perform('save', async () => {
+    const saved = await session.flush();
+    if (saved) await onFinish?.(saved.payload);
+  });
 
   const words = synopsis.trim() ? synopsis.trim().split(/\s+/).length : 0;
   const chapters = parts.reduce((s, p) => s + (p.chapters?.length ?? 0), 0);
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 py-8">
+    <div data-book-wizard className="mx-auto w-full max-w-4xl px-4 py-8">
       <header className="mb-6">
         <div className="flex items-center gap-2 text-emerald-400">
           <Wand2 className="w-5 h-5" />
@@ -420,7 +334,8 @@ export const ExpressWizardView: React.FC<{
           {onChangeTrack && (
             <button
               type="button"
-              onClick={onChangeTrack}
+              onClick={() => void changeTrack()}
+              disabled={busy !== null}
               className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-400 transition-colors hover:text-slate-200"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
@@ -436,15 +351,15 @@ export const ExpressWizardView: React.FC<{
 
       {/* Смуга кроків */}
       <ol className="mb-6 flex flex-wrap items-center gap-1.5">
-        {STEPS.map((label, i) => {
-          const n = i + 1;
-          const done = n < step;
+        {STEPS.map(({label, number:n}, i) => {
+          const currentIndex = STEPS.findIndex(s => s.number === step);
+          const done = i < currentIndex;
           const active = n === step;
           return (
             <li key={label} className="flex items-center gap-1.5">
               <button
                 type="button"
-                disabled={!draft || n > step}
+                disabled={!draft || i > currentIndex || busy !== null}
                 onClick={() => void goTo(n)}
                 className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
                   active
@@ -452,10 +367,10 @@ export const ExpressWizardView: React.FC<{
                     : done
                       ? 'text-emerald-400 hover:bg-white/[0.04]'
                       : 'text-slate-500'
-                } ${!draft || n > step ? 'cursor-default' : 'cursor-pointer'}`}
+                } ${!draft || i > currentIndex ? 'cursor-default' : 'cursor-pointer'}`}
               >
                 <span className="grid h-5 w-5 place-items-center rounded-full border border-current text-[10px] font-mono">
-                  {done ? <Check className="h-3 w-3" /> : n}
+                  {done ? <Check className="h-3 w-3" /> : i + 1}
                 </span>
                 {label}
               </button>
@@ -465,12 +380,11 @@ export const ExpressWizardView: React.FC<{
         })}
       </ol>
 
-      {engines.length === 0 && (
+      {useAi && engines.length === 0 && (
         <div className="mb-5 flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>
-            Немає жодного налаштованого рушія ШІ. Додайте власний ключ у розділі «Ключі API» — без
-            нього майстер не зможе нічого запропонувати.
+            Немає жодного налаштованого рушія ШІ. Зверніться до адміністратора щодо доступу до моделей або продовжте вручну.
           </span>
         </div>
       )}
@@ -482,14 +396,37 @@ export const ExpressWizardView: React.FC<{
         </div>
       )}
 
+      {view.draft && <p role="status" className="mb-3 text-xs text-slate-400">
+        {view.dirty ? 'Є незбережені правки' : 'Чернетку збережено'}{view.pending ? ' · зберігаю…' : ''}
+      </p>}
+      {view.conflict && <div className="mb-4 rounded-xl border border-amber-500/40 p-4 text-sm text-slate-200">
+        <p>Інша вкладка змінила чернетку. Порівняйте версії перед продовженням.</p>
+        <details className="mt-2"><summary>Мої незбережені правки</summary>
+          <pre className="max-h-56 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(view.payload, null, 2)}</pre>
+        </details>
+        <details className="mt-2"><summary>Поточна серверна версія</summary>
+          <pre className="max-h-56 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(view.conflict.payload, null, 2)}</pre>
+        </details>
+        <button type="button" className="mt-3 underline" onClick={() => {
+          const url = URL.createObjectURL(new Blob([JSON.stringify(view.payload, null, 2)], { type: 'application/json' }));
+          const a = document.createElement('a'); a.href = url; a.download = 'wizard-local-draft.json'; a.click();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }}>Завантажити мою копію</button>
+        <button type="button" className="ml-4 mt-3 underline" onClick={() => {
+          session.useServer(); setProposal(null); setLocalError(null);
+        }}>Продовжити із серверною версією</button>
+      </div>}
+      <fieldset disabled={busy !== null} className="min-w-0">
       {/* Крок Е1 — зерно задуму */}
       {step === 1 && (
         <section className="glass-panel rounded-2xl p-6">
+          <WizardScenarioFields value={view.payload} onChange={editInputs} currentBook={currentBook}
+            onBeforeLeave={() => session.flush()} onBusyChange={setSourceBusy}/>
           <label className="mb-1.5 block text-sm font-semibold text-slate-200">
             Про що ваша книга?
           </label>
           <textarea
-            value={seed}
+            name="wizard-seed" value={seed}
             onChange={(e) => setSeed(e.target.value)}
             rows={3}
             maxLength={400}
@@ -529,13 +466,16 @@ export const ExpressWizardView: React.FC<{
           <div className="mt-5 flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => void startWizard()}
-              disabled={seed.trim().length < 20 || busy !== null || engines.length === 0}
+              onClick={() => void startWizard(true)}
+              disabled={seed.trim().length < 20 || busy !== null || engines.length === 0 || scenarioErrors(view.payload).length > 0}
               className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-bold text-slate-950 transition-colors hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {busy === 'draft' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
               Почати
             </button>
+            <button type="button" onClick={() => void startWizard(false)}
+              disabled={seed.trim().length < 20 || busy !== null || scenarioErrors(view.payload).length > 0}
+              className="rounded-xl border border-slate-600 px-4 py-2 text-sm text-slate-200 disabled:opacity-40">Продовжити без ШІ</button>
             <button
               type="button"
               onClick={() => void rollDice()}
@@ -550,6 +490,16 @@ export const ExpressWizardView: React.FC<{
         </section>
       )}
 
+      {step === 6 && <section className="glass-panel rounded-2xl p-6" data-wizard-world>
+        <h2 className="text-xl font-bold mb-2">Світ книги · необов’язковий крок</h2>
+        <p className="text-sm text-slate-400 mb-3">Правила та обстановка підтримають усі наступні пропозиції. Нотатки не стають текстом книги. Можна пропустити.</p>
+        <WorldFields value={view.payload.storyWorld} onChange={patch=>editInputs({storyWorld:{id:session.view.payload.storyWorld?.id||crypto.randomUUID(),name:'',description:'',approved:false,...session.view.payload.storyWorld,...patch}})}/>
+        <WorldPhotoAnalysis target="world" snapshotKey={JSON.stringify(view.payload.storyWorld)}
+          beforeAnalyze={async()=>{await session.flush();let d=session.view.draft;if(!d)throw new Error('Збережіть чернетку.');if(!d.userId){d=await api<Draft>('/api/express/claim',{method:'POST',body:JSON.stringify({draftId:d.id,expectedRevision:d.revision})});session.open(d);}return {draftId:d.id,expectedRevision:d.revision};}}
+          onAccept={(text,p)=>editInputs({storyWorld:{id:session.view.payload.storyWorld?.id||crypto.randomUUID(),name:'Світ книги',...session.view.payload.storyWorld,description:text,approved:false,descriptionOrigin:acceptAiOrigin(session.view.draft?.userId||'local-author',null,undefined,crypto.randomUUID())}})}/>
+        <StepNav onBack={()=>void goTo(1)} onNext={()=>void goTo(2)} nextDisabled={busy !== null}/>
+      </section>}
+
       {/* Крок Е2 — модель розповіді */}
       {step === 2 && (
         <section className="glass-panel rounded-2xl p-6">
@@ -560,7 +510,7 @@ export const ExpressWizardView: React.FC<{
             </div>
             <button
               type="button"
-              onClick={() => draft && void suggest(draft.id, 'framework')}
+              onClick={() => draft && void requestSuggestion('framework')}
               disabled={busy !== null}
               className="shrink-0 rounded-lg border border-white/15 p-2 text-slate-300 hover:bg-white/[0.06] disabled:opacity-40"
               title="Запропонувати ще раз"
@@ -572,9 +522,10 @@ export const ExpressWizardView: React.FC<{
           <div className="grid gap-2 sm:grid-cols-2">
             {FRAMEWORKS.map((f) => (
               <button
-                key={f.id}
+                data-story-model={f.id} key={f.id}
                 type="button"
-                onClick={() => setFramework(f.id)}
+                aria-pressed={framework === f.id}
+                onClick={() => { editInputs({ framework: f.id, frameworkRationale: '' }); }}
                 className={`rounded-xl border p-3 text-left transition-colors ${
                   framework === f.id
                     ? 'border-emerald-500/60 bg-emerald-500/10'
@@ -590,6 +541,10 @@ export const ExpressWizardView: React.FC<{
             ))}
           </div>
 
+          <p className="mt-3 rounded-lg bg-slate-950/70 p-3 text-xs text-slate-300">{storyModel(framework).beats.join(' → ')}</p>
+          <label className="mt-3 block text-xs text-slate-300">Скільки героїв пропонувати? (для нонфікшну можна 0)
+            <input type="number" min={0} max={20} value={view.payload.targetCastSize ?? 2} onChange={e=>setField('targetCastSize',Number(e.target.value))} className="ml-2 w-20 rounded border border-slate-700 bg-slate-900 p-2"/>
+          </label>
           <div className="mt-4 flex flex-wrap gap-4">
             <label className="flex items-center gap-2 text-xs text-slate-300">
               <input type="checkbox" checked={nature} onChange={(e) => setNature(e.target.checked)} className="accent-emerald-500" />
@@ -601,7 +556,7 @@ export const ExpressWizardView: React.FC<{
             </label>
           </div>
 
-          <StepNav onBack={() => setStep(1)} onNext={() => void goTo(3)} nextDisabled={!framework || busy !== null} />
+          <StepNav onBack={() => void goTo(6)} onNext={() => void goTo(3)} nextDisabled={!framework || busy !== null} />
         </section>
       )}
 
@@ -612,27 +567,40 @@ export const ExpressWizardView: React.FC<{
             <div>
               <h2 className="text-lg font-bold text-slate-100">Герої та звʼязки</h2>
               <p className="mt-1 text-sm text-slate-400">
-                Ведичні ролі не повторюються, а патерни Польті підібрані парами — саме з них потім
-                росте граф конфліктів.
+                Задайте героїв, їхні цілі й зв’язки. Ролі та образи приймає автор; додаткові варіанти не замінюють наявний склад.
               </p>
             </div>
             <button
               type="button"
-              onClick={() => draft && void suggest(draft.id, 'cast')}
+              onClick={() => draft && void requestSuggestion('cast')}
               disabled={busy !== null}
               className="shrink-0 rounded-lg border border-white/15 p-2 text-slate-300 hover:bg-white/[0.06] disabled:opacity-40"
               title="Запропонувати інший каст"
             >
-              {busy === 'cast' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+
+
+          {busy === 'cast' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             </button>
           </div>
+
+              {proposal && <div className="mb-4 rounded-xl border border-emerald-500/40 p-4">
+            <h3 className="text-sm font-semibold text-emerald-300">Нова пропозиція героїв</h3>
+            <ul className="my-2 space-y-1 text-sm text-slate-300">{proposal.cast.map((c) =>
+              <li key={c.id}>{c.firstName} {c.lastName} — {c.poltiRoleName || c.hook}</li>
+            )}</ul>
+            <div className="flex flex-wrap gap-4 text-sm text-emerald-300">
+              <button type="button" onClick={() => void acceptCast('add')}>Додати</button>
+              <button type="button" onClick={() => void acceptCast('replace')}>Замінити наявних героїв</button>
+              <button type="button" onClick={() => setProposal(null)}>Ігнорувати</button>
+            </div>
+          </div>}
 
           {busy === 'cast' && cast.length === 0 ? (
             <Waiting label="Придумую героїв…" />
           ) : (
             <div className="grid gap-2 sm:grid-cols-2">
               {cast.map((c, i) => (
-                <div key={i} className="rounded-xl border border-white/10 bg-slate-900/40 p-3">
+                <div key={c.id} className="rounded-xl border border-white/10 bg-slate-900/40 p-3">
                   <div className="flex items-start justify-between gap-2">
                     {/* Ім'я — редаговане: майстер лише пропонує, письменник
                         може перейменувати героя, не чекаючи перегенерації
@@ -641,13 +609,13 @@ export const ExpressWizardView: React.FC<{
                       <input
                         value={c.firstName}
                         onChange={(e) => updateCastMember(i, { firstName: e.target.value })}
-                        placeholder="Ім'я"
+                        aria-label="Ім’я героя" placeholder="Ім'я"
                         className="w-full rounded-lg border border-white/10 bg-slate-950/60 px-2 py-1 text-sm font-semibold text-slate-100 outline-none placeholder:text-slate-600 focus:border-emerald-500/50"
                       />
                       <input
                         value={c.lastName}
                         onChange={(e) => updateCastMember(i, { lastName: e.target.value })}
-                        placeholder="Прізвище"
+                        aria-label="Прізвище героя" placeholder="Прізвище"
                         className="w-full rounded-lg border border-white/10 bg-slate-950/60 px-2 py-1 text-sm font-semibold text-slate-100 outline-none placeholder:text-slate-600 focus:border-emerald-500/50"
                       />
                     </div>
@@ -673,10 +641,10 @@ export const ExpressWizardView: React.FC<{
                     <input
                       value={c.poltiRoleName ?? ''}
                       onChange={(e) => updateCastRoleText(i, e.target.value)}
-                      placeholder="Своя роль або оберіть із 36 типів нижче…"
+                      placeholder="Роль у творі своїми словами"
                       className="w-full rounded-lg border border-white/10 bg-slate-950/60 px-2 py-1 text-xs text-slate-200 outline-none placeholder:text-slate-600 focus:border-emerald-500/50"
                     />
-                    <select
+                    {archetypes && <select
                       value=""
                       onChange={(e) => {
                         const id = Number(e.target.value);
@@ -693,7 +661,7 @@ export const ExpressWizardView: React.FC<{
                           №{p.id} {p.name}
                         </option>
                       ))}
-                    </select>
+                    </select>}
                   </div>
 
                   <div className="mt-2 flex flex-wrap gap-1">
@@ -707,6 +675,14 @@ export const ExpressWizardView: React.FC<{
                         {c.vedicRole}
                       </span>
                     )}
+                  </div>
+                  <div className="mt-3 grid gap-2">
+                    <label className="text-xs text-slate-300">Зовнішність / авторський опис
+                      <textarea value={c.appearance ?? ''} onChange={e=>updateCastMember(i,{appearance:e.target.value,approved:false})} rows={3} className="mt-1 w-full rounded border border-slate-700 bg-slate-950/70 p-2"/>
+                    </label>
+                    <label className="text-xs text-slate-300">Мета<input value={c.goal ?? ''} onChange={e=>updateCastMember(i,{goal:e.target.value,approved:false})} className="mt-1 w-full rounded border border-slate-700 bg-slate-950/70 p-2"/></label>
+                    <label className="text-xs text-slate-300">Внутрішня суперечність<input value={c.flaw ?? ''} onChange={e=>updateCastMember(i,{flaw:e.target.value,approved:false})} className="mt-1 w-full rounded border border-slate-700 bg-slate-950/70 p-2"/></label>
+                    <label className="flex items-center gap-2 text-xs text-emerald-200"><input type="checkbox" checked={c.approved===true} onChange={e=>updateCastMember(i,{approved:e.target.checked})}/> Опис героя перевірено</label>
                   </div>
                   {c.hook && <p className="mt-2 text-xs italic leading-relaxed text-slate-500">{c.hook}</p>}
                 </div>
@@ -725,22 +701,27 @@ export const ExpressWizardView: React.FC<{
             </button>
           )}
 
+          {view.payload.entryMode === 'characters_photos' && <WizardSourcesPanel value={view.payload.sourceMaterials ?? []}
+            onChange={sourceMaterials=>editInputs({sourceMaterials})} characters={cast}
+            onBeforeLeave={()=>session.flush()} onBusyChange={setSourceBusy}
+            onApplyCharacter={(id,text)=>setCast(prev=>prev.map(c=>c.id===id?{...c,appearance:text,approved:false}:c))}/>}
           {/* Крива головного героя — заповнюється тут-таки, поки протагоніст
               і решта касту вже перед очима. Той самий стан переноситься в
               книгу разом з рештою плану (App.tsx::applyExpressPlan). */}
-          {cast.length > 0 && (
+          {cast.length > 0 && framework === 'hero_journey' && (
             <div className="mt-4">
               <HeroArcPanel value={heroArc} onChange={setHeroArc} heroName={`${cast[0].firstName} ${cast[0].lastName}`.trim()} />
             </div>
           )}
 
           <StepNav
-            onBack={() => setStep(2)}
+            onBack={() => void goTo(2)}
             onNext={() => void goTo(4)}
             nextDisabled={
-              cast.length === 0 ||
+              ((view.payload.targetCastSize ?? 2) > 0 && cast.length === 0) ||
+              (view.payload.entryMode === 'characters_photos' && (cast.length === 0 || cast.some(c=>!c.approved))) ||
               busy !== null ||
-              cast.some((c) => !c.firstName.trim() || !c.poltiRoleName?.trim())
+              cast.some((c) => !c.firstName.trim())
             }
           />
         </section>
@@ -756,7 +737,7 @@ export const ExpressWizardView: React.FC<{
             </div>
             <button
               type="button"
-              onClick={() => draft && void suggest(draft.id, 'synopsis')}
+              onClick={() => draft && void requestSuggestion('synopsis')}
               disabled={busy !== null}
               className="shrink-0 rounded-lg border border-white/15 p-2 text-slate-300 hover:bg-white/[0.06] disabled:opacity-40"
               title="Переписати"
@@ -765,12 +746,23 @@ export const ExpressWizardView: React.FC<{
             </button>
           </div>
 
+          <div className="mb-4 rounded-xl border border-white/10 bg-slate-900/40 p-3 text-sm text-slate-300">
+            <p className="font-semibold">Синопсис буде створено на основі:</p>
+            <p className="mt-1">{cast.map((c) => c.firstName + ' ' + c.lastName + ' (' + (c.poltiRoleName || 'роль не задано') + ')').join(', ')}</p>
+            <p className="mt-1">Задум і конфлікт: {seed}</p>
+            {cast.some((c) => c.hook) && <p className="mt-1">{cast.filter((c) => c.hook).map((c) => c.hook).join(' · ')}</p>}
+            <p className="mt-1">Сценарій: {selectedScenario.title}</p>
+            <p className="mt-1">Модель: {FRAMEWORKS.find((f) => f.id === framework)?.name || framework}</p>
+            <p className="mt-1">Джерела: {(view.payload.sourceMaterials ?? []).filter(s=>s.approved).map(s=>s.title).join(', ') || 'лише авторські поля'}</p>
+            <button type="button" className="mt-3 font-semibold text-emerald-300 underline"
+              onClick={() => void requestSuggestion('synopsis')}>{synopsis ? 'Створити новий синопсис із цих даних' : 'Створити синопсис із цих даних'}</button>
+          </div>
           {busy === 'synopsis' && !synopsis ? (
             <Waiting label="Пишу синопсис…" />
           ) : (
             <>
               <textarea
-                value={synopsis}
+                name="wizard-synopsis" value={synopsis}
                 onChange={(e) => setSynopsis(e.target.value)}
                 onBlur={() => void saveSynopsis()}
                 rows={14}
@@ -789,7 +781,14 @@ export const ExpressWizardView: React.FC<{
             </>
           )}
 
-          <StepNav onBack={() => setStep(3)} onNext={() => void goTo(5)} nextDisabled={!synopsis || busy !== null} />
+          <label className="mt-4 block text-sm text-slate-300">Загальний план трьох частин
+            <textarea name="wizard-composition" value={view.payload.compositionPlan ?? ''} rows={7} onChange={e=>setField('compositionPlan',e.target.value)}
+              placeholder="Початковий стан, ключові події й наслідки кожної частини" className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm"/>
+          </label>
+          {useAi && <button type="button" className="mt-2 text-xs text-emerald-300 underline" disabled={!synopsis.trim()} onClick={()=>void requestSuggestion('plan')}>Запропонувати загальний план</button>}
+          <label className="mt-4 flex items-center gap-2 text-xs text-emerald-200"><input type="checkbox" checked={view.payload.reviewConfirmed===true}
+            onChange={e=>session.edit({reviewConfirmed:e.target.checked})}/> Перевірив джерела, синопсис і загальний план</label>
+          <StepNav onBack={() => void goTo(3)} onNext={() => void goTo(5)} nextDisabled={!synopsis || !view.payload.compositionPlan?.trim() || !view.payload.reviewConfirmed || busy !== null} />
         </section>
       )}
 
@@ -820,7 +819,13 @@ export const ExpressWizardView: React.FC<{
                       <p className="text-sm font-medium text-slate-200">
                         {ch.chapterNumber}. {ch.chapterTitle}
                       </p>
-                      {ch.summary && <p className="mt-1 text-xs leading-relaxed text-slate-400">{ch.summary}</p>}
+                      <label className="mt-2 block text-xs text-slate-300">Назва глави<input value={ch.chapterTitle ?? ''} onChange={e=>{
+                        const next=structuredClone(session.view.payload.parts ?? []);next[i].chapters![j].chapterTitle=e.target.value;editInputs({parts:next});
+                      }} className="mt-1 w-full rounded border border-slate-700 bg-slate-900 p-2"/></label>
+                      <label className="mt-2 block text-xs text-slate-300">Зміст глави<textarea value={ch.summary ?? ''} rows={4} onChange={e=>{
+                        const next=structuredClone(session.view.payload.parts ?? []);next[i].chapters![j].summary=e.target.value;editInputs({parts:next});
+                      }} className="mt-1 w-full rounded border border-slate-700 bg-slate-900 p-2"/></label>
+                      {ch.choices?.map((choice,k)=><p key={k} className="mt-1 text-xs text-cyan-300">{choice.label} → {choice.destination}: {choice.consequence}</p>)}
                       {ch.turningPoint && (
                         <p className="mt-1.5 text-xs text-emerald-300/80">Поворот: {ch.turningPoint}</p>
                       )}
@@ -836,22 +841,15 @@ export const ExpressWizardView: React.FC<{
             {busy?.startsWith('part-') && <Waiting label={`Пишу частину ${parts.length + 1}…`} />}
           </div>
 
-          {parts.length === TOTAL_PARTS && busy === null && (
+          {parts.length < TOTAL_PARTS && !busy && <div className="mt-4 flex flex-wrap gap-4 text-xs text-emerald-300">
+            {useAi && <button type="button" onClick={()=>void perform('structure',generateParts)}>Згенерувати решту частин</button>}
+            <button type="button" onClick={()=>editInputs({parts:[...parts,{partNumber:parts.length+1,partTitle:'Частина '+(parts.length+1),chapters:[{chapterNumber:chapters+1,chapterTitle:'Нова глава',summary:'',source:'author'}]}]})}>Додати частину вручну</button>
+          </div>}
+          {parts.length > 0 && <label className="mt-4 flex items-center gap-2 text-xs text-emerald-200"><input type="checkbox" checked={view.payload.structureConfirmed===true} onChange={e=>session.edit({structureConfirmed:e.target.checked})}/> Структуру та зміст глав перевірено</label>}
+          {parts.length === TOTAL_PARTS && view.payload.structureConfirmed && parts.every(p=>p.chapters?.every(ch=>ch.chapterTitle?.trim() && ch.summary?.trim())) && busy === null && (
             <button
               type="button"
-              onClick={() =>
-                onFinish?.({
-                  seed,
-                  genre,
-                  framework,
-                  natureConnection: nature,
-                  archetypes36: archetypes,
-                  cast,
-                  heroArc,
-                  synopsis,
-                  parts,
-                })
-              }
+              onClick={() => void finish()}
               className="mt-5 inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-bold text-slate-950 transition-colors hover:bg-emerald-400"
             >
               <BookOpen className="h-4 w-4" />
@@ -860,6 +858,7 @@ export const ExpressWizardView: React.FC<{
           )}
         </section>
       )}
+      </fieldset>
     </div>
   );
 };

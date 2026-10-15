@@ -7,7 +7,8 @@
  * `[/character:Олена]`. Тепер кожен збіг знає, де він — у тексті книги чи в
  * тезі, — і автор обирає, що замінювати.
  */
-import { entityTagSpans } from './coreEntities';
+import { editorialTagSpans as entityTagSpans } from './manuscriptTagIndex';
+import { aiMetadataSpans } from '../../shared/aiTextOrigin';
 
 export type SearchScope = 'all' | 'text' | 'tags';
 
@@ -31,7 +32,9 @@ export function filterRangesByScope(
 export function replaceRanges(text: string, ranges: [number, number][], replacement: string): string {
   let out = '';
   let cursor = 0;
+  const metadata = aiMetadataSpans(text);
   for (const [s, e] of ranges) {
+    if (metadata.some(([a,b]) => s < b && a < e)) continue;
     out += text.slice(cursor, s) + replacement;
     cursor = e;
   }

@@ -18,14 +18,14 @@ const marinaId = generated[0].id;
 const oleksandraId = generated[1].id;
 const edited = withStableCastIds(
   [
-    { firstName: 'Марія', lastName: 'Василенко' },
+    { id: marinaId, firstName: 'Марія', lastName: 'Василенко' },
     { firstName: 'Олександра', lastName: 'Радченко' },
   ],
   generated,
 );
-assert.equal(edited[0].id, marinaId, 'rename must preserve the same character id');
+assert.equal(edited[0].id, marinaId, 'rename with explicit id must preserve identity');
 assert.equal(edited[1].id, oleksandraId);
-console.log('  ✓ renaming a character preserves identity by slot');
+console.log('  ✓ renaming a character preserves explicit identity');
 
 const reordered = withStableCastIds(
   [
@@ -48,3 +48,10 @@ assert.ok(duplicateId[1].id);
 console.log('  ✓ duplicate incoming ids are repaired instead of aliasing two heroes');
 
 console.log('\nExpress wizard integrity contract passed.');
+
+const removedFirst = withStableCastIds([{ firstName: 'Олександра', lastName: 'Радченко' }], generated);
+assert.equal(removedFirst[0].id, oleksandraId, 'deletion cannot transfer the removed identity');
+const reversedLegacy = withStableCastIds([...generated].reverse().map(({ id: _id, ...c }) => c), generated);
+assert.equal(reversedLegacy[0].id, oleksandraId);
+assert.equal(reversedLegacy[1].id, marinaId);
+console.log('  ✓ deletion and legacy name-based reorder preserve the correct identities');

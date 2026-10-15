@@ -1,3 +1,4 @@
+import { WorldSettingPanel } from './WorldSettingPanel';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   FolderArchive,
@@ -196,6 +197,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
   // кошика нічого не стирає — вона лише відкриває попередження.
   const [pendingDelete, setPendingDelete] = useState<DeletableMedia | null>(null);
   // Задача #220. Фото, для якого відкрито вікно «Описати ШІ».
+  const [worldPhoto, setWorldPhoto] = useState<string | null>(null);
   const [describePhoto, setDescribePhoto] = useState<{ url: string; title: string; prompt?: string } | null>(null);
   // Задача #220. Фото-запит «зробити стартовим кадром відео»: летить у
   // панель генерації, а вона, застосувавши його, очищає цей стан.
@@ -1157,6 +1159,9 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
                       стартового кадру, ні сенсу «описати персонажа»):
                       взяти кадр для відео та попросити ШІ описати персонажа
                       так, як він його СПРАВДІ бачить на цьому знімку. */}
+                  <button type="button" data-describe-world={item.id} onClick={()=>setWorldPhoto(passportOf(item)?.id || item.url.match(/\/api\/media\/file\/([^/?]+)/)?.[1] || '')} className="px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-teal-300 text-[10px] font-bold border border-slate-700">
+                    {t('mediaLibraryView.promptLabel') === 'Prompt' ? 'World / setting' : 'Світ / обстановка'}
+                  </button>
                   <button
                     onClick={() => handleUseAsVideoStartFrame(item)}
                     data-use-start-frame={item.id}
@@ -1296,6 +1301,13 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
           (за бажанням — разом із фото) у книгу, інструкцію або курс.
           Задача #224 додала вибір ГЛАВИ книги й підтвердження: до цього
           текст ішов в останню главу без відома автора. */}
+      {worldPhoto !== null && <div className="fixed inset-0 z-50 bg-black/80 p-4 overflow-auto" role="dialog" aria-modal="true" aria-label="Світ за фото">
+        <div className="glass-panel max-w-xl mx-auto p-4 rounded-2xl">
+          <button type="button" onClick={()=>setWorldPhoto(null)} className="btn-glass p-2 rounded-xl mb-3">× Закрити / Close</button>
+          <WorldSettingPanel book={book} onUpdateBook={onUpdateBook} actor={authUser?.id} readOnly={!isRegistered} initialAssetId={worldPhoto||undefined}
+            onReveal={(chapterId,sectionId,text)=>{setWorldPhoto(null);onRevealChapterText?.({chapterId,sectionId,chapterTitle:book.chapters.find(c=>c.id===chapterId)?.title||'',start:0,end:text.length,text});}}/>
+        </div>
+      </div>}
       {describePhoto && (
         <DescribeCharacterModal
           photo={describePhoto}

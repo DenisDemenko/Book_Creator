@@ -30,21 +30,21 @@ const t = (n: string, c: boolean, e = '') => { c ? pass++ : fail++; console.log(
 
 console.log('\nСклад реєстру:');
 {
-  t('чотири напрями, як у постановці', EXPRESS_TRACKS.length === 4);
-  t('порядок 1-4 без дірок', EXPRESS_TRACKS.map((x) => x.order).join() === '1,2,3,4');
+  t('п’ять напрямів із технічною інструкцією', EXPRESS_TRACKS.length === 5);
+  t('порядок 1-5 без дірок', EXPRESS_TRACKS.map((x) => x.order).join() === '1,2,3,4,5');
   t('перший — Книга', EXPRESS_TRACKS[0].id === 'book' && EXPRESS_TRACKS[0].order === 1);
-  t('решта — курс, інструкція, гра',
-    EXPRESS_TRACKS.slice(1).map((x) => x.id).join() === 'course,instruction,game');
-  t('ідентифікатори унікальні', new Set(EXPRESS_TRACKS.map((x) => x.id)).size === 4);
+  t('решта — курс, інструкція, гра, технічна інструкція',
+    EXPRESS_TRACKS.slice(1).map((x) => x.id).join() === 'course,instruction,game,technical_instruction');
+  t('ідентифікатори унікальні', new Set(EXPRESS_TRACKS.map((x) => x.id)).size === 5);
   t('назви не порожні', EXPRESS_TRACKS.every((x) => x.title.trim().length > 0));
 }
 
 console.log('\nСтатуси:');
 {
   const ready = EXPRESS_TRACKS.filter((x) => x.status === 'ready');
-  t('готові три гілки з чотирьох', ready.length === 3);
-  t('готові саме книга, курс та інструкція',
-    ready.map((x) => x.id).sort().join() === 'book,course,instruction');
+  t('готові чотири гілки з п’яти', ready.length === 4);
+  t('готові книга, курс, інструкція й технічний сценарій',
+    ready.map((x) => x.id).sort().join() === 'book,course,instruction,technical_instruction');
   t('лишається planned лише «гра»',
     EXPRESS_TRACKS.filter((x) => x.status === 'planned').map((x) => x.id).join() === 'game');
   t('кожна гілка має описані кроки', EXPRESS_TRACKS.every((x) => x.steps.length >= 3));
@@ -57,6 +57,7 @@ console.log('\nЧи можна вести людину в майстер:');
   t('книга — можна', isTrackRunnable('book') === true);
   t('курс — можна', isTrackRunnable('course') === true);
   t('інструкція — можна (запис #198)', isTrackRunnable('instruction') === true);
+  t('технічна інструкція — можна', isTrackRunnable('technical_instruction') === true);
   t('гра — ні (ще planned)', isTrackRunnable('game') === false);
   t('невідомий рядок — ні', isTrackRunnable('книжка') === false);
   t('null не кидає', isTrackRunnable(null) === false);

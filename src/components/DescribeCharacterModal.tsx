@@ -79,6 +79,7 @@ export const DescribeCharacterModal: React.FC<DescribeCharacterModalProps> = ({
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [title, setTitle] = useState(photo.title || '');
   const [text, setText] = useState('');
+  const [textOrigin, setTextOrigin] = useState<'author'|'ai'>('author');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [target, setTarget] = useState<DescriptionTarget>('book');
@@ -160,7 +161,7 @@ export const DescribeCharacterModal: React.FC<DescribeCharacterModalProps> = ({
         return;
       }
       const written = String(data?.text || '').trim();
-      setText(written);
+      setText(written); setTextOrigin('ai');
       if (!title.trim()) setTitle(photo.title || t('describeCharacter.transferBookTitle'));
     } catch {
       setError(t('describeCharacter.serverUnavailableError'));
@@ -212,7 +213,7 @@ export const DescribeCharacterModal: React.FC<DescribeCharacterModalProps> = ({
     try {
       const ok = await onTransfer(target, {
         title: title.trim() || t('describeCharacter.transferBookTitle'),
-        text: clean,
+        text: clean, origin: textOrigin,
         photo: withPhoto ? { url: photo.url, title: photo.title } : null,
         // Порожній id — «хай вирішує книга»: у новій книзі глав може ще не
         // бути, і тоді вставка створить першу сама.

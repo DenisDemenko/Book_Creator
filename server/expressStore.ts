@@ -1,3 +1,5 @@
+import type { StoryWorld, WizardStepKey } from '../shared/storyWorld';
+import { wizardStepKey } from '../shared/storyWorld';
 /**
  * Сховище чернеток експрес-майстра (Wisart Book Crealiry.md §3.4).
  *
@@ -7,6 +9,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import type { WizardScenarioState } from '../shared/wizardScenarios';
+import { validateWizardPatch } from './wizardValidation';
 import { getDb, unavailableMessage } from './db';
 
 /** Доба — досить, щоб повернутись наступного дня, і мало, щоб не накопичувати. */
@@ -42,9 +46,18 @@ export interface ExpressCastMember {
   poltiPatternId?: number;
   poltiRoleName?: string;
   hook?: string;
+  appearance?: string;
+  goal?: string;
+  flaw?: string;
+  approved?: boolean;
 }
 
-export interface ExpressPayload {
+export interface ExpressPayload extends WizardScenarioState {
+  storyWorld?: StoryWorld;
+  navigationVersion?: 2;
+  stepKey?: WizardStepKey;
+  useAi?: boolean;
+  technical?: Record<string, unknown>;
   /**
    * Напрям із розвилки перед майстром (Завдання 4): book | course |
    * instruction | game. Зберігається в чернетці, а не лише в браузері,
@@ -80,6 +93,7 @@ export interface ExpressDraft {
   id: string;
   userId: string | null;
   step: number;
+  revision: number;
   payload: ExpressPayload;
   createdAt: string;
   updatedAt: string;
@@ -90,6 +104,7 @@ interface Row {
   id: string;
   user_id: string | null;
   step: number;
+  revision: number;
   payload: string;
   created_at: string;
   updated_at: string;
@@ -100,17 +115,15 @@ function castName(member: ExpressCastMember): string {
   return `${member.firstName ?? ''}\u0000${member.lastName ?? ''}`.trim().toLocaleLowerCase();
 }
 
-/**
- * Додає stable id новим героям і максимально зберігає id при редагуванні.
- * Поточний wizard редагує cast за індексом, тому індекс має пріоритет над
- * name matching: перейменування героя не повинно створювати нову сутність.
- * Name matching лишається запасним шляхом для майбутнього reorder UI.
+/** Ідентичність визначає id; для старих клієнтів дозволено лише збіг імені.
+ * Індекс не є ідентичністю: видалення або reorder не передають id іншому герою.
  */
 export function withStableCastIds(
   incoming: ExpressCastMember[],
   existing: ExpressCastMember[] = []
 ): ExpressCastMember[] {
   const used = new Set<string>();
+  const explicitIds = new Set(incoming.map((m) => m.id?.trim()).filter(Boolean));
   const existingByName = new Map<string, ExpressCastMember[]>();
   for (const member of existing) {
     const key = castName(member);
@@ -119,18 +132,13 @@ export function withStableCastIds(
     existingByName.set(key, bucket);
   }
 
-  return incoming.map((member, index) => {
+  return incoming.map((member) => {
     let id = member.id?.trim() || '';
     if (id && used.has(id)) id = '';
 
     if (!id) {
-      const sameSlot = existing[index]?.id?.trim();
-      if (sameSlot && !used.has(sameSlot)) id = sameSlot;
-    }
-
-    if (!id) {
       const candidates = existingByName.get(castName(member)) ?? [];
-      const match = candidates.find((candidate) => candidate.id && !used.has(candidate.id));
+      const match = candidates.find((candidate) => candidate.id && !used.has(candidate.id) && !explicitIds.has(candidate.id));
       if (match?.id) id = match.id;
     }
 
@@ -149,11 +157,11 @@ function toDraft(row: Row): ExpressDraft {
     // пятисотка на кроці, куди людина щойно повернулась.
     payload = {};
   }
-  if (payload.cast?.length) payload.cast = withStableCastIds(payload.cast);
   return {
     id: row.id,
     userId: row.user_id,
     step: row.step,
+    revision: row.revision,
     payload,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -164,6 +172,7 @@ function toDraft(row: Row): ExpressDraft {
 export function createDraft(userId: string | null, payload: ExpressPayload = {}): ExpressDraft {
   const db = requireDb();
   const now = new Date();
+  try { validateWizardPatch(payload); } catch (error) { throw new DraftValidationError((error as Error).message); }
   const normalizedPayload = payload.cast
     ? { ...payload, cast: withStableCastIds(payload.cast) }
     : payload;
@@ -171,6 +180,7 @@ export function createDraft(userId: string | null, payload: ExpressPayload = {})
     id: randomUUID(),
     userId,
     step: 1,
+    revision: 1,
     payload: normalizedPayload,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
@@ -200,7 +210,30 @@ export function getDraft(id: string): ExpressDraft | undefined {
   if (!row) return undefined;
   const draft = toDraft(row);
   if (new Date(draft.expiresAt).getTime() < Date.now()) return undefined;
+  // Старі чернетки могли мати cast без id. Нормалізацію зберігаємо один раз,
+  // а не генеруємо іншу ідентичність на кожному GET.
+  if (draft.payload.cast?.some((c) => !c.id) ||
+      new Set(draft.payload.cast?.map((c) => c.id)).size !== (draft.payload.cast?.length ?? 0)) {
+    return updateDraft(id, { cast: draft.payload.cast }, draft.revision);
+  }
   return draft;
+}
+
+export class DraftConflictError extends Error {
+  constructor(public readonly current: ExpressDraft) {
+    super('Чернетку змінено в іншій вкладці. Ваші правки збережено локально; порівняйте їх із серверною версією.');
+  }
+}
+
+export class DraftValidationError extends Error {
+  constructor(message: string, public readonly status = 400) { super(message); }
+}
+
+export function assertDraftRevision(draft: ExpressDraft, expected: unknown): asserts expected is number {
+  if (!Number.isSafeInteger(expected) || (expected as number) < 1) {
+    throw new DraftValidationError('Оновіть сторінку: для збереження потрібна ревізія чернетки.', 428);
+  }
+  if (expected !== draft.revision) throw new DraftConflictError(draft);
 }
 
 /**
@@ -211,44 +244,61 @@ export function getDraft(id: string): ExpressDraft | undefined {
 export function updateDraft(
   id: string,
   patch: ExpressPayload,
+  expectedRevision: number,
   step?: number
 ): ExpressDraft | undefined {
-  const current = getDraft(id);
-  if (!current) return undefined;
-
   const db = requireDb();
+  const row = db.prepare('SELECT * FROM express_drafts WHERE id = ?').get(id) as Row | undefined;
+  if (!row || new Date(row.expires_at).getTime() < Date.now()) return undefined;
+  const current = toDraft(row);
+  assertDraftRevision(current, expectedRevision);
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+    throw new DraftValidationError('Некоректні дані чернетки.');
+  }
+  if (step !== undefined && (!Number.isInteger(step) || step < 1 || step > (patch.navigationVersion === 2 || current.payload.navigationVersion === 2 ? 6 : 5))) {
+    throw new DraftValidationError('Некоректний крок майстра.');
+  }
+  if (patch.cast !== undefined && (!Array.isArray(patch.cast) || patch.cast.some((c) =>
+    !c || typeof c.firstName !== 'string' || typeof c.lastName !== 'string' ||
+    (c.id !== undefined && typeof c.id !== 'string')))) {
+    throw new DraftValidationError('Некоректний склад героїв.');
+  }
+  try { validateWizardPatch(patch); } catch (error) { throw new DraftValidationError((error as Error).message); }
   const normalizedPatch = patch.cast
     ? { ...patch, cast: withStableCastIds(patch.cast, current.payload.cast ?? []) }
     : patch;
   const payload = { ...current.payload, ...normalizedPatch };
+  if (payload.navigationVersion === 2) payload.stepKey = wizardStepKey(step ?? current.step);
   const updatedAt = new Date().toISOString();
   const nextStep = step ?? current.step;
-
-  db.prepare('UPDATE express_drafts SET payload = ?, step = ?, updated_at = ? WHERE id = ?').run(
-    JSON.stringify(payload),
-    nextStep,
-    updatedAt,
-    id
-  );
-
-  return { ...current, payload, step: nextStep, updatedAt };
+  const result = db.prepare(
+    'UPDATE express_drafts SET payload = ?, step = ?, updated_at = ?, revision = revision + 1 WHERE id = ? AND revision = ?'
+  ).run(JSON.stringify(payload), nextStep, updatedAt, id, expectedRevision) as { changes: number };
+  if (!result.changes) {
+    const latest = getDraft(id);
+    if (latest) throw new DraftConflictError(latest);
+    return undefined;
+  }
+  return { ...current, payload, step: nextStep, updatedAt, revision: expectedRevision + 1 };
 }
 
-/** Привʼязка анонімної чернетки до акаунта після реєстрації (§3.4.5). */
-export function claimDraft(id: string, userId: string): ExpressDraft | undefined {
+/** Привʼязка не змінює payload, але також бере участь у CAS. */
+export function claimDraft(id: string, userId: string, expectedRevision: number): ExpressDraft | undefined {
   const current = getDraft(id);
-  if (!current) return undefined;
-  if (current.userId && current.userId !== userId) return undefined;
-
+  if (!current || (current.userId && current.userId !== userId)) return undefined;
+  assertDraftRevision(current, expectedRevision);
+  if (current.userId === userId) return current;
   const db = requireDb();
   const updatedAt = new Date().toISOString();
-  db.prepare('UPDATE express_drafts SET user_id = ?, updated_at = ? WHERE id = ?').run(
-    userId,
-    updatedAt,
-    id
-  );
-
-  return { ...current, userId, updatedAt };
+  const result = db.prepare(
+    'UPDATE express_drafts SET user_id = ?, updated_at = ?, revision = revision + 1 WHERE id = ? AND revision = ?'
+  ).run(userId, updatedAt, id, expectedRevision) as { changes: number };
+  if (!result.changes) {
+    const latest = getDraft(id);
+    if (latest) throw new DraftConflictError(latest);
+    return undefined;
+  }
+  return { ...current, userId, updatedAt, revision: expectedRevision + 1 };
 }
 
 export function deleteDraft(id: string): boolean {

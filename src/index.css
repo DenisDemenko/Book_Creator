@@ -2259,3 +2259,8 @@ html[data-header-collapsed='true'] {
 [data-creative-brief] [hidden] {
   display: none !important;
 }
+
+/* Editorial provenance never participates in print geometry. */
+.nova-ai-accepted { border-color: #14b8a644; background: transparent; }
+.nova-ai-accepted .nova-ai-draft-label { color: #0d9488; }
+@media print { .nova-ai-draft-label { display: none !important; } .nova-ai-draft { border: 0 !important; padding: 0 !important; margin: 0 !important; background: none !important; } }

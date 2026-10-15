@@ -1,3 +1,4 @@
+import type { StoryWorld, StoryLocation, SceneSetting } from '../../shared/storyWorld';
 /**
  * Синхронізація книги з ядром — `core_sync` (Т0.6, ТЗ-11 13.4).
  *
@@ -39,6 +40,7 @@ export const CORE_SYNC_KIND = 'core_sync';
 // ── Що синхронізація читає з книги (підмножина `Book` зі `src/types.ts`) ──
 
 export interface SyncSection {
+  setting?: SceneSetting;
   id: string;
   title?: string;
   order?: number;
@@ -69,6 +71,8 @@ export interface SyncIllustration {
   sectionId?: string;
 }
 export interface SyncBook {
+  storyWorld?: StoryWorld;
+  storyLocations?: StoryLocation[];
   id: string;
   title?: string;
   chapters?: SyncChapter[];
@@ -250,6 +254,36 @@ export async function syncBookToCore(
       wrote();
     }
     aliasCache.set(`character\u0000${display.toLocaleLowerCase('uk')}`, entity.id);
+  }
+
+  // World, location and scene cards use the existing entity registry and aliases.
+  const worldCards = [
+    ...(book.storyWorld?.approved ? [{type:'world',card:book.storyWorld}] : []),
+    ...(book.storyLocations ?? []).filter(c=>c.approved).map(card=>({type:'location',card})),
+    ...(book.chapters ?? []).flatMap(ch=>(ch.sections??[]).filter(s=>s.setting?.approved).map(s=>({type:'scene',card:s.setting!}))),
+  ];
+  for (const {type,card} of worldCards) {
+    if (!card.id || !card.name?.trim()) continue;
+    const ref = 'studio:'+type+':'+card.id;
+    const canonical = Object.fromEntries(Object.entries(card).filter(([key])=>key!=='notes'));
+    let entity = await repo.findEntityByExternalRef(projectId,type,ref);
+    if (!entity) {
+      const alias = await repo.resolveAlias(projectId,type,card.name);
+      const candidate = alias ? await repo.getEntity(projectId,alias) : null;
+      if (candidate && !candidate.externalRef) {
+        entity = await repo.updateEntity(projectId,candidate.id,{externalRef:ref,name:card.name,canonical},CORE_SYNC_ACTOR,'Картка світу книги');
+        result.entities.updated++;
+      } else {
+        entity = await repo.createEntity({projectId,type,name:card.name,externalRef:ref,canonical,createdBy:CORE_SYNC_ACTOR});
+        result.entities.created++;
+      }
+      wrote();
+    } else if (entity.name!==card.name || JSON.stringify(entity.canonical)!==JSON.stringify(canonical)) {
+      entity = await repo.updateEntity(projectId,entity.id,{name:card.name,canonical},CORE_SYNC_ACTOR,'Оновлено картку світу книги');
+      result.entities.updated++;wrote();
+    }
+    if (!(await repo.resolveAlias(projectId,type,card.name))) { await repo.addAlias(projectId,entity.id,card.name,'name');wrote(); }
+    aliasCache.set(type+'\u0000'+card.name.toLocaleLowerCase('uk'),entity.id);
   }
 
   // 3. Документи ----------------------------------------------------------------

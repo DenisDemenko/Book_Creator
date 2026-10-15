@@ -1,3 +1,4 @@
+import { aiOriginOpen, parseAiOriginOpen, AI_ORIGIN_CLOSE } from '../../shared/aiTextOrigin';
 /**
  * Двосторонній перетворювач між текстом розділу книги (простий рядок з
  * bracket-маркерами: `**жирний**`, `*курсив*`, `[FONT="Назва"]…[/FONT]`,
@@ -195,27 +196,26 @@ function tableNodeToMarkerBlock(node: JSONContent): TableMarkerBlock {
 
 /** Перетворює текст розділу (рядок з маркерами) у документ TipTap (JSON). */
 export function markerStringToTiptapDoc(text: string): JSONContent {
-  const paragraphs = (text || '').replace(/\r\n/g, '\n').split(/\n{2,}/);
+  const paragraphs = (text || '').replace(/\r\n/g, '\n').replace(/\[(?:\/?AI-DRAFT|AI-GENERATED:[^\]\r\n]*|\/AI-GENERATED)\]/g, '\n\n$&\n\n').split(/\n{2,}/);
   const content: JSONContent[] = [];
   // Не null, поки читання перебуває всередині [AI-DRAFT]…[/AI-DRAFT] —
   // тоді наступні абзаци збираються сюди замість content напряму.
-  let draftBuffer: JSONContent[] | null = null;
-  const pushBlock = (node: JSONContent) => (draftBuffer ? draftBuffer.push(node) : content.push(node));
+  const frames: Array<{content:JSONContent[];origin:ReturnType<typeof parseAiOriginOpen>}> = [];
+  const pushBlock = (node:JSONContent) => {
+    const parent=frames.at(-1); (parent?parent.content:content).push(node);
+  };
 
   paragraphs.forEach((raw) => {
     const para = raw; // не тримаємо .trim() тут — trim ламав би навмисні відступи всередині абзацу
     if (!para) return;
     const trimmed = para.trim();
 
-    if (trimmed === AI_DRAFT_OPEN) {
-      draftBuffer = [];
-      return;
+    if (trimmed === AI_DRAFT_OPEN || parseAiOriginOpen(trimmed)) {
+      frames.push({content:[],origin:parseAiOriginOpen(trimmed)});return;
     }
-    if (trimmed === AI_DRAFT_CLOSE) {
-      if (draftBuffer) {
-        content.push({ type: 'aiDraft', content: draftBuffer.length ? draftBuffer : [{ type: 'paragraph', content: [] }] });
-      }
-      draftBuffer = null;
+    if (trimmed === AI_DRAFT_CLOSE || trimmed === AI_ORIGIN_CLOSE) {
+      const frame=frames.pop();
+      if(frame?.content.length)pushBlock({type:'aiDraft',attrs:{provenance:frame.origin},content:frame.content});
       return;
     }
 
@@ -271,7 +271,7 @@ export function markerStringToTiptapDoc(text: string): JSONContent {
 
   // Незакритий [AI-DRAFT] (пошкоджені/обрізані дані) — не губимо текст,
   // просто не групуємо його в контейнер.
-  if (draftBuffer) content.push(...draftBuffer);
+  while (frames.length) { const frame=frames.pop()!; for(const child of frame.content)pushBlock(child); }
 
   if (content.length === 0) content.push({ type: 'paragraph', content: [] });
   return { type: 'doc', content };
@@ -391,8 +391,10 @@ export function tiptapDocToMarkerBlocks(doc: JSONContent): string[] {
         .join('\n');
     }
     if (node.type === 'aiDraft') {
-      const inner = (node.content || []).map((p) => serializeInline(p.content || [])).join('\n\n');
-      return [AI_DRAFT_OPEN, inner, AI_DRAFT_CLOSE].join('\n\n');
+      const inner = tiptapDocToMarkerBlocks({ type: 'doc', content: node.content || [] }).join('\n\n');
+      if (!inner.trim()) return '';
+      const origin = node.attrs?.provenance;
+      return [origin ? aiOriginOpen(origin) : AI_DRAFT_OPEN, inner, origin ? AI_ORIGIN_CLOSE : AI_DRAFT_CLOSE].join('\n\n');
     }
     if (node.type === 'paragraph') {
       return serializeInline(node.content || []);
@@ -528,11 +530,8 @@ export function markerOffsetToDocPos(doc: PMNode, targetOffset: number): number 
     return stop;
   };
 
-  let isFirstBlock = true;
-  doc.forEach((block, blockOffset) => {
+  const walkBlock = (block:PMNode, blockOffset:number) => {
     if (found !== null) return;
-    if (!isFirstBlock) acc += 2; // "\n\n" між абзацами
-    isFirstBlock = false;
     prev = { bold: false, italic: false, fontStack: [], sizeStack: [], colorStack: [], hlStack: [], linkStack: [] };
 
     if (block.type.name === 'wrappedImage') {
@@ -558,7 +557,7 @@ export function markerOffsetToDocPos(doc: PMNode, targetOffset: number): number 
     if (block.type.name === 'heading') {
       const level = Math.min(3, Math.max(1, block.attrs?.level || 1));
       acc += level + 1; // "#".repeat(level) + " "
-      walkInline(block, blockOffset + level + 1);
+      walkInline(block, blockOffset + 1);
       return;
     }
 
@@ -570,22 +569,26 @@ export function markerOffsetToDocPos(doc: PMNode, targetOffset: number): number 
     }
 
     if (block.type.name === 'aiDraft') {
-      acc += AI_DRAFT_OPEN.length + 2; // "[AI-DRAFT]" + "\n\n"
+      acc += (block.attrs.provenance ? aiOriginOpen(block.attrs.provenance) : AI_DRAFT_OPEN).length + 2; // "[AI-DRAFT]" + "\n\n"
       let isFirstInner = true;
       block.forEach((child, childOffset) => {
         if (found !== null) return;
         if (!isFirstInner) acc += 2; // "\n\n" між абзацами всередині блоку
         isFirstInner = false;
         prev = { bold: false, italic: false, fontStack: [], sizeStack: [], colorStack: [], hlStack: [], linkStack: [] };
-        walkInline(child, blockOffset + 2 + childOffset);
+        walkBlock(child, blockOffset + 1 + childOffset);
       });
-      acc += 2 + AI_DRAFT_CLOSE.length; // "\n\n" + "[/AI-DRAFT]"
+      acc += 2 + (block.attrs.provenance ? AI_ORIGIN_CLOSE : AI_DRAFT_CLOSE).length; // "\n\n" + "[/AI-DRAFT]"
       return;
     }
 
     if (block.type.name === 'paragraph') {
       walkInline(block, blockOffset + 1);
     }
+  };
+  let isFirstBlock=true;
+  doc.forEach((block,offset)=>{
+    if(!isFirstBlock)acc+=2;isFirstBlock=false;walkBlock(block,offset);
   });
 
   return found;

@@ -1,0 +1,221 @@
+{
+  "date": "2026-10-15T13:35:44.155648+00:00",
+  "head": "63f01189e190ac2dd678850fc79cf7e5eee9b32a",
+  "branch": "work",
+  "committed": false,
+  "published": false,
+  "preExistingUncommittedWorkPreserved": true,
+  "productionAcceptance": false,
+  "implementationSha256": {
+    "shared/aiTextOrigin.ts": "0386c4fbbff16b0a39fddd72b5b9537595ce8a147ae33e9a8059275863d9e782",
+    "shared/storyWorld.ts": "0838124ca7a6886c103b1e1c026cd8327c77c470d9dfe187544ae83c248c9eca",
+    "server/worldPhoto.ts": "4d1e84ee69d785f5e2ad17af9a8f877b854c42fb3f6c5bfad8f9f837d790f1c6",
+    "server/expressPrompt.ts": "2af67fe419058c2ef483dcda957b5493447b0326799d0acb03bce7ad425b04d7",
+    "server/expressStore.ts": "96239846977dbe37f880903d1a2d2a195b0e2cce29aeaef8e56353946008dad5",
+    "server/expressRoutes.ts": "4b52815a89c899180f88ff157122bd50e6fc9bed407d4bf0da89038d81837593",
+    "server/wizardValidation.ts": "081578efc08e74f3608f51b08f46267cd532cb3b89a4c97f6f89272d879b3cc6",
+    "server/core/sync.ts": "5e4b4951c638375992ef2a804f46663813863994e513feff69064ca40701fcef",
+    "server/core/collaboration/sourceRoutes.ts": "9f55c7f0e27d1755771397d0ab20c72c35470fdcce41175fe88c6175ce0bf150",
+    "server/core/labyrinth/story.ts": "9de41688d6f88aafec1c56c4f385646f98f7bf2529de0abf38f433721638baf1",
+    "server/core/labyrinth/edition.ts": "75b1f1d905ed2f027f9d203a8a386a8cfe3fc88b14c477d359ce8eb541e72c8a",
+    "src/types.ts": "5d54f3538bfe18e507eaf64da9ec7b20f6d971581df50e5f1fcc64620299d137",
+    "src/App.tsx": "bc8e61696a1d954d7215e9b5c801e49492ab20b6dba5bc8549114f7040cfc539",
+    "src/index.css": "175601974f8729f338e35aea94cdb5eb361f3eeca562d836da944b27f7e6c141",
+    "src/components/WorldFields.tsx": "fc13c430b26fdb3b6b11fd391ace4f27ea765ac8be29c7d65c35315c598c340b",
+    "src/components/WorldSettingPanel.tsx": "0a81e33c192073a583dd1c42ffedd1ec03633a171fa8c1599aebe885458ae33f",
+    "src/components/WorldPhotoAnalysis.tsx": "0c5b74b60112c5546d655fca22bbd985d80fdf35b722c41ee516b300260fdb84",
+    "src/components/ManuscriptTagPanel.tsx": "50b26030aae6c0f8cc91c701f702da23d34eca199ce8b21f4f81a43c1508b734",
+    "src/components/ExpressWizardView.tsx": "3d70ff3e3e6506323b2dff4c30a4648c844b08e2e46271cf76d4676572420f67",
+    "src/components/EditorView.tsx": "4f4fdd54c296ba9365a59b6cef11014fc720a09e361c1934e305ad3b8d92d3ce",
+    "src/components/MediaLibraryView.tsx": "4b3270f5d28f754d5b0ad7fc74641d86d9250d736de30640543a85f02b8600c9",
+    "src/components/DescribeCharacterModal.tsx": "e54b278d02f8db70cc70c33e9163682fa280bcc8a8a688b78ca67479d7c144f9",
+    "src/components/BookSearchModal.tsx": "02c174a7034702b18ecf87f6b80e73f2ed4f837575570e4fc9bea0ce7a11e7ca",
+    "src/components/mastery/SkillDetailModal.tsx": "e15d1a4cce0e107fe7847bde8f5d96218081f26a10a866491b1ed6673beaf330",
+    "src/components/manuscriptEditor/AiDraftBlockNode.tsx": "fb9088a708b6c1a893e49a31cd571252389fe9dc1c874390fe57a6917de9be96",
+    "src/components/manuscriptEditor/extensions.ts": "bd2f4c54593f2d0e1fb4ebe76d64bd61982d733fd187453a3c69269fd37c402a",
+    "src/utils/manuscriptDoc.ts": "ceb52ecf3ea348fda12377564ed4b1740d7b18dfe43d79254a8d88a976c9cb8a",
+    "src/utils/manuscriptTagIndex.ts": "dba588a64196a4e16964587b3e72a597e357a86147adb181f2d7891622bd8ac2",
+    "src/utils/storyWorld.ts": "f54567b5e38088db3520b7768f7c1ba3136bacbd51a6030336e722429758ce67",
+    "src/utils/coreEntities.ts": "260544d3be831ac1480c1e35b813e2792ebea1c807d35dab489f53f15458c9f5",
+    "src/utils/helpers.ts": "85d869bd483d2ebe3863562ae02b9b90a8d48e2de46e4044339dd28bd08aff4c",
+    "src/utils/searchScope.ts": "d1ea43d9081f1aae2d835bba6be30fdc47dd1ad12922eb7b2c6a258caf2cddd1",
+    "src/utils/expressBookPlan.ts": "2f524d5224eb5ca11b5cad2913ca36a62f12e451e2bb8f05d749e80781354ffe",
+    "src/utils/describeCharacterTransfer.ts": "ade951e574fa6704b4aabf59ebd02b1dad7297a3ded33983a575a1a48c0b7b11",
+    "src/utils/designSuggestion.ts": "f1f50b6acde7e737c5fe518ac2947d32de6a798b99da86ee99eb165a32a6f43e",
+    "src/utils/instructionBookDraft.ts": "019daf448e95968bccf5cd8ff3f05ddfb21181212417eae4ca5513c39842aeaa",
+    "package.json": "780438e1c58882421c716ba4517ca539cd4412b70896ebc78be45da5c7640485",
+    "scripts/test-worldAndOrigin.mts": "c79800d0df7a42177b930e58c8cac0e1f1b4b2016445eb7a819e0f6112872101",
+    "scripts/test-worldPhotoRoutes.mts": "cf10a221d809fd4b9dc4f4c64c0125420779e5adb2c4e68c74d9fa12bea18f22",
+    "scripts/live-worldAndOrigin.mts": "e713aedb9d07c933f5760d77f9b33626de05205be295596ca31186a2dc27fc4f",
+    "scripts/scan-manuscript-tags.mts": "a4e8717eb046bb2dbfb78c5a8093520ae283f78d0f8ff9a10f6640669127df16",
+    "scripts/lib/originBrowser.ts": "762715bbe695ed6792acd77cf9cc6b262cd0d329d8e05240bc6bf8ab458b44f3",
+    "scripts/lib/wizardHarness.mts": "ea174b0d3937674838e6056c469cb5a79fc562e7f1a9617ec1c2d09cde070166",
+    "scripts/live-wizardScenarios.mts": "dcd35c376474f0a3f3311d8e149f1e72c94a9bbd08d40919fa9fd59eaa542f0b"
+  },
+  "validation": [
+    {
+      "command": "npm test",
+      "exitCode": 0,
+      "scope": "Full suite before final focused compatibility/index refinements; affected suites rerun below",
+      "log": "/tmp/world-origin-full-test.log",
+      "logSha256": "62026c6744a9a9c04bafc582cf1b28334074924f5f079344d4175426556c13f9"
+    },
+    {
+      "command": "npm run test:world-origin",
+      "exitCode": 0,
+      "behaviorChecks": 25,
+      "apiChecks": 20,
+      "log": "/tmp/world-origin-final-targeted.log",
+      "logSha256": "f709295ddeec6402aecb101413b4061af223bb02764a69cb8d8ec0599a1da26a"
+    },
+    {
+      "command": "npm run live:world-origin",
+      "exitCode": 0,
+      "checks": 23,
+      "screenshots": 3,
+      "scope": "Full App/CSS, TipTap transactions, real SQLite/API/media; identity and AI fixtures",
+      "log": "/tmp/world-origin-browser.log",
+      "logSha256": "c971cbf48f8d62505993051da18e7c9e48848ccc1ea4c4a7065c5b5ae74a7367"
+    },
+    {
+      "command": "npm run live:wizard-scenarios",
+      "exitCode": 0,
+      "checks": 15,
+      "screenshots": 4,
+      "scope": "Existing wizard flow after optional world step; before final narrow parser/index refinements",
+      "log": "/tmp/world-origin-wizard-browser.log",
+      "logSha256": "9afa59c8d6a4dbcbc0e69a3f407412d36d1fd6ebdf698faa51b7838bd4b35bfe"
+    },
+    {
+      "command": "npm run test:tag-corpus",
+      "exitCode": 0,
+      "checks": 72
+    },
+    {
+      "command": "npm run test:book-search",
+      "exitCode": 0,
+      "checks": 16
+    },
+    {
+      "command": "npm run test:instruction-book-draft",
+      "exitCode": 0,
+      "checks": 26
+    },
+    {
+      "command": "npm run test:labyrinth-story",
+      "exitCode": 0,
+      "checks": 12
+    },
+    {
+      "command": "npm run test:paragraph-ids",
+      "exitCode": 0,
+      "checks": 22
+    },
+    {
+      "command": "npm run build",
+      "exitCode": 0,
+      "warnings": [
+        "Large bundle warning; dependency PURE annotation comments"
+      ],
+      "log": "/tmp/world-origin-build.log",
+      "logSha256": "f7eacebd8b3788c37a0b90cb4123112c294fa4a9bc7a638565eaeaba847a257b"
+    },
+    {
+      "command": "npx tsc --noEmit --pretty false",
+      "exitCode": 0,
+      "log": "/tmp/world-origin-types.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "command": "npm run test:journal",
+      "exitCode": 0,
+      "checks": 80
+    },
+    {
+      "command": "npm run journal:check",
+      "exitCode": 0,
+      "records": 441,
+      "links": 430
+    },
+    {
+      "command": "git diff --check",
+      "exitCode": 0
+    }
+  ],
+  "ui": {
+    "mode": "Real App/CSS + SQLite/media/routes; identity and AI provider fixtures",
+    "productionAcceptance": false,
+    "checks": [
+      "accept selection succeeds",
+      "partial acceptance keeps a separate unaccepted remainder",
+      "typing retains accepted origin",
+      "undo restores original draft without accepted metadata",
+      "redo restores same fragment ID",
+      "copying accepted block gives unique ID and preserves provenance",
+      "clipboard HTML roundtrip retains AI origins",
+      "deleting accepted contents removes empty origin wrapper",
+      "reload retains origin and draft separately",
+      "tag navigation maps exact source position to editor text",
+      "real editor accept displays permanent editorial badge",
+      "accepted origin survives actual IndexedDB save and page reload",
+      "world notes and canon are not silently inserted into manuscript",
+      "explicit insertion targets current section",
+      "location and scene overrides do not overwrite global world canon",
+      "choosing a photo and model does not automatically call AI",
+      "photo proposal separates visible facts and creative additions",
+      "reject leaves the current world description unchanged",
+      "photo description transfers to canon and manuscript with accepted AI provenance",
+      "editorial tag index can find accepted AI fragments",
+      "wizard world stage can be skipped and later resumed without renumbering model/cast",
+      "world persists in wizard with stable navigation key",
+      "browser has no JavaScript errors"
+    ],
+    "shots": [
+      {
+        "name": "editor-world-desktop-dark",
+        "width": 1440,
+        "scroll": 1440,
+        "shell": true,
+        "header": true,
+        "backdrop": true
+      },
+      {
+        "name": "wizard-world-mobile-light",
+        "width": 390,
+        "scroll": 390,
+        "shell": true,
+        "header": true,
+        "backdrop": true
+      },
+      {
+        "name": "editor-world-desktop-light",
+        "width": 1440,
+        "scroll": 1440,
+        "shell": true,
+        "header": true,
+        "backdrop": true
+      }
+    ],
+    "errors": []
+  },
+  "screenshots": [
+    {
+      "path": "/tmp/world-origin-ui/editor-world-desktop-dark.png",
+      "sha256": "51f4aff398a13cbd9afecfa5811ec383acb890fa170547a9382be585aeeddfab"
+    },
+    {
+      "path": "/tmp/world-origin-ui/wizard-world-mobile-light.png",
+      "sha256": "bc502610d2097cabf1da7a03142746ed1d3ba6aef7fc8d771906847e264584fe"
+    },
+    {
+      "path": "/tmp/world-origin-ui/editor-world-desktop-light.png",
+      "sha256": "08d82ffe03085af366c295db4eeb670c0b39e9f1cfe9609cda980e5169ef037c"
+    }
+  ],
+  "limits": [
+    "Real paid vision/Jev quality not verified",
+    "Source book photo analysis currently owner-only",
+    "Production manual acceptance 0/24",
+    "All four PDF adapters checked; all four production renderers not executed"
+  ]
+}

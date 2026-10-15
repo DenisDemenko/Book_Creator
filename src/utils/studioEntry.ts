@@ -16,6 +16,7 @@
  * сторінок (`appRoutes.ts`) під час тесту, а не очима.
  */
 
+import { isTrackRunnable, type ExpressTrackId } from '../data/expressTracks';
 import type { NavigationTab } from '../types';
 
 export interface StudioEntrySection {
@@ -52,6 +53,7 @@ export const STUDIO_ENTRY_SECTIONS: readonly StudioEntrySection[] = [
 export const ENTRY_IDEA_MAX = 400;
 
 export interface StudioEntryIntent {
+  track?: ExpressTrackId;
   tab: NavigationTab;
   /**
    * Задум книги з маркетплейсу — лише для експрес-майстра: у нього поле
@@ -61,7 +63,7 @@ export interface StudioEntryIntent {
 }
 
 /** Параметри наміру: після розбору їх прибирають з адреси (як `invite`). */
-export const STUDIO_ENTRY_PARAMS: readonly string[] = ['open', 'idea', 'create', 'project', 'order'];
+export const STUDIO_ENTRY_PARAMS: readonly string[] = ['open', 'idea', 'create', 'project', 'order', 'wizard'];
 
 /**
  * Т6.3 (Role Onboarding §14): «Відкрити у Студії» конкретний проєкт — книгу
@@ -127,5 +129,7 @@ export function parseStudioEntry(search: string): StudioEntryIntent | null {
 
   // Задум приймає лише майстер: решті розділів він нікуди подітися не може,
   // а тягнути його в стан — це обіцянка, якої ніхто не виконає.
-  return section.tab === 'express' && idea ? { tab: section.tab, idea } : { tab: section.tab };
+  const wizard = params.get('wizard');
+  return { tab: section.tab, ...(section.tab === 'express' && idea ? { idea } : {}),
+    ...(section.tab === 'express' && isTrackRunnable(wizard) ? { track: wizard as ExpressTrackId } : {}) };
 }

@@ -1,0 +1,101 @@
+/** Full App/CSS + real SQLite/media/routes. Identity and external AI are declared fixtures. */
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import {wizardHarness} from './lib/wizardHarness.mts';
+import {buildStarterBook} from '../src/utils/starterBook';
+import type {Page} from 'puppeteer-core';
+const h=await wizardHarness(),art='/tmp/world-origin-ui';await fs.mkdir(art,{recursive:true});
+const users=await import('../server/store'),books=await import('../server/bookStore');
+await users.saveUser({id:'writer',email:'writer@example.test',name:'Автор тесту',role:'writer',createdAt:new Date().toISOString()});
+const {registerSourceRoutes}=await import('../server/core/collaboration/sourceRoutes');
+registerSourceRoutes(h.app,{access:{getBookOwnerId:async id=>(await books.getBook(id))?.ownerId,getCollabOwnerId:async()=>undefined,listAcceptedInvites:async()=>[]}});
+const base=buildStarterBook({bookId:'world-ui-book',role:'writer',title:'Кам’яна вежа',author:'Автор тесту',now:0});
+const book={...base,chapters:[{...base.chapters[0],sections:[{...base.chapters[0].sections[0],content:'Ручний початок.\n\n[AI-DRAFT]\n\nСвітло впало на камінь.\n\n[/AI-DRAFT]'}]}]};
+await books.saveBook({ownerId:'writer',book:book as any});
+h.app.put('/api/books/:id',async(q,r)=>{try{const current=await books.getBook(q.params.id);const out=await books.saveBook({ownerId:'writer',book:q.body.book,expectedRevision:q.body.expectedRevision??current?.revision});r.json({revision:out.revision});}catch(e:any){r.status(409).json({error:e.message,current:e.current});}});
+h.app.get('/api/auth/me',(_q,r)=>r.json({user:{id:'writer',email:'writer@example.test',name:'Автор тесту',role:'writer',disabled:false,isGuest:false},permissions:{canPublish:true,canEditContent:true,canUseAi:true},firebaseEnabled:false}));
+h.app.get('/api/core/onboarding/gate',(_q,r)=>r.json({enabled:false,required:false,sharedCourses:[]}));
+h.app.get('/api/core/projects/:id/my-role',(q,r)=>r.json({projectId:q.params.id,projectType:'book',isOwner:true,isAdmin:false,selfAssign:false,participant:null,roles:[],workspaces:[],activeWorkspace:null,aiAssistance:[],roleDetails:{},pending:{role:null,access:null}}));
+h.app.use('/api',(_q,r)=>r.status(404).json({error:'Outside isolated world/origin probe'}));
+process.env.DISABLE_HMR='true';const {createServer}=await import('vite');
+const vite=await createServer({base:'/studio/',server:{middlewareMode:{server:h.server},hmr:{server:h.server}},define:{'import.meta.env.VITE_FIREBASE_API_KEY':JSON.stringify('visual-test-public-configuration'),'import.meta.env.VITE_FIREBASE_AUTH_DOMAIN':JSON.stringify('localhost'),'import.meta.env.VITE_FIREBASE_PROJECT_ID':JSON.stringify('visual-fixture')}});
+h.app.use(vite.middlewares);
+const {launch}=await import('puppeteer-core');
+const browser=await launch({executablePath:'/usr/bin/chromium',headless:true,protocolTimeout:90000,args:['--no-sandbox','--disable-dev-shm-usage']});
+const checks:string[]=[],errors:string[]=[],shots:any[]=[];
+const check=(name:string,ok:unknown)=>{assert.ok(ok,name);checks.push(name);console.log('✓ '+name);};
+async function make(width:number,theme='dark',wizard=false){
+ const ctx=await browser.createBrowserContext(),p=await ctx.newPage();await p.setViewport({width,height:1100});await p.setExtraHTTPHeaders({'x-test-user':'writer'});
+ p.on('pageerror',e=>errors.push(String(e)));await p.setRequestInterception(true);
+ p.on('request',r=>{const u=new URL(r.url());if(u.origin===h.origin||['data:','blob:'].includes(u.protocol))void r.continue();else void r.abort();});
+ await p.evaluateOnNewDocument((b,t)=>{localStorage.setItem('nova_glass_book',JSON.stringify(b));localStorage.setItem('nova_glass_user_role','writer');localStorage.setItem('nova_theme',t);localStorage.setItem('nova_guest_dismissed_login','1');localStorage.setItem('nova_tour_disabled_writer','1');localStorage.setItem('nova_tour_disabled_anon','1');localStorage.setItem('nova_editor_showRightPanel','true');localStorage.setItem('nova_editor_rightPanelTab',JSON.stringify('scene'));},book,theme);
+ await p.goto(h.origin+'/studio/?open='+(wizard?'express&wizard=book':'editor'),{waitUntil:'domcontentloaded'});
+ await p.waitForSelector(wizard?'[data-book-wizard]':'[data-world-setting-panel]',{timeout:90000});return p;
+}
+async function fill(p:Page,s:string,t:string){await p.waitForSelector(s);await p.focus(s);await p.keyboard.down('Control');await p.keyboard.press('A');await p.keyboard.up('Control');await p.type(s,t);}
+async function button(p:Page,t:string){await p.waitForFunction(t=>Array.from(document.querySelectorAll('button')).some(e=>e.textContent?.trim()===t&&!e.disabled),{},t);for(const b of await p.$$('button'))if(await b.evaluate(e=>e.textContent?.trim())===t&&!await b.evaluate(e=>e.disabled)){await b.click();return;}throw new Error(t);}
+async function save(p:Page){await button(p,'Зберегти');await p.waitForFunction(async()=>{const m=await import(location.origin+'/studio/src/utils/storage.ts');return !!(await m.loadBook());});}
+async function shot(p:Page,name:string){await p.evaluate(()=>{window.scrollTo(0,0);document.querySelectorAll('.nova-char-panel *').forEach(e=>{if(e instanceof HTMLElement)e.scrollTop=0;});});const facts=await p.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth,shell:!!document.querySelector('.app-shell-root'),header:!!document.querySelector('.app-shell-root header'),backdrop:!!document.querySelector('.studio-backdrop')}));assert.ok(facts.shell&&facts.header&&facts.backdrop);assert.ok(facts.scroll<=facts.width+1,JSON.stringify(facts));await p.screenshot({path:path.join(art,name+'.png'),fullPage:true});shots.push({name,...facts});}
+try{
+ const p=await make(1440);
+ const deep=await p.evaluate(async()=>{const m=await import(location.origin+'/studio/scripts/lib/originBrowser.ts');return m.originEditorProbe();});deep.forEach(c=>check(c,true));
+ await p.click('[data-ai-draft-accept]');await p.waitForSelector('[data-ai-generated]');
+ check('real editor accept displays permanent editorial badge',await p.$eval('[data-ai-generated]',e=>e.textContent?.includes('прийнято автором')));
+ await save(p);await p.reload({waitUntil:'domcontentloaded'});await p.waitForSelector('[data-ai-generated]',{timeout:45000});
+ check('accepted origin survives actual IndexedDB save and page reload',!!await p.$('[data-ai-generated]'));
+ await p.click('[data-world-setting-panel] > summary');
+ await fill(p,'[data-world-setting-panel] [name=world-name]','Острів');
+ await fill(p,'[data-world-setting-panel] [name=world-description]','Кам’яна вежа на зеленому схилі.');
+ await fill(p,'[data-world-setting-panel] [name=world-rules]','Час не повертається.');
+ await p.click('[data-world-confirm]');await save(p);
+ const contentBefore=await p.$eval('.nova-manuscript-editor',e=>e.textContent);
+ check('world notes and canon are not silently inserted into manuscript',!contentBefore?.includes('Час не повертається.'));
+ await p.click('[data-world-insert]');await p.waitForFunction(()=>document.querySelector('.nova-manuscript-editor')?.textContent?.includes('Кам’яна вежа'));
+ check('explicit insertion targets current section',true);
+ await p.click('[data-world-tab=location]');
+ await button(p,'+ Локація');await fill(p,'[data-world-setting-panel] [name=world-name]','Вежа');
+ await fill(p,'[data-world-setting-panel] [name=world-description]','Кругла зала з вікном.');
+ await p.click('[data-world-confirm]');
+ await p.click('[data-world-tab=setting]');
+ await fill(p,'[data-world-setting-panel] [name=world-name]','Нічна варта');
+ await p.select('[aria-label="Scene location"]',await p.$eval('[aria-label="Scene location"]',e=>(e as HTMLSelectElement).options[1].value));
+ await fill(p,'[data-world-setting-panel] [name=world-weather]','Дощ');
+ await p.click('[data-world-confirm]');await save(p);
+ await shot(p,'editor-world-desktop-dark');
+ check('location and scene overrides do not overwrite global world canon',await p.$eval('[data-world-setting-panel]',e=>e.textContent?.includes('Кругла зала')));
+ await p.click('[data-world-tab=world]');
+ await p.click('[data-world-photo] > summary');
+ const image=path.join(h.dir,'tower.png');await fs.writeFile(image,Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1kAAAAASUVORK5CYII=','base64'));
+ await(await p.$('[data-world-photo] input[type=file]'))!.uploadFile(image);
+ await p.waitForFunction(()=>!!document.querySelector('[data-world-photo] input[type=checkbox]:checked'));
+ await p.select('[aria-label="World vision model"]','fixture-vision');
+ check('choosing a photo and model does not automatically call AI',h.state.worldDescriptions===0);
+ await p.click('[data-world-analyze]');await p.waitForSelector('[data-world-proposal]',{timeout:30000});
+ check('photo proposal separates visible facts and creative additions',await p.$eval('[data-world-proposal]',e=>e.textContent?.includes('Вигадка')));
+ await p.click('[data-world-photo-reject]');
+ check('reject leaves the current world description unchanged',await p.$eval('[name=world-description]',e=>(e as HTMLTextAreaElement).value.includes('зеленому схилі')));
+ await p.click('[data-world-analyze]');await p.waitForSelector('[data-world-proposal]');
+ await p.click('[data-world-photo-accept]');await p.click('[data-world-confirm]');await p.click('[data-world-insert]');
+ await p.waitForFunction(()=>Array.from(document.querySelectorAll('[data-ai-generated]')).some(e=>e.textContent?.includes('Кам’яна вежа')));
+ check('photo description transfers to canon and manuscript with accepted AI provenance',true);
+ await p.click('[data-manuscript-tag-panel] > summary');await p.select('[aria-label="AI origin status"]','accepted');
+ check('editorial tag index can find accepted AI fragments',await p.$$eval('[data-manuscript-tag-panel] button',es=>es.length>0));
+ await p.close();
+ const mobile=await make(390,'light',true);await fill(mobile,'[name=wizard-seed]','Історія про кам’яну вежу та її незмінний час.');await button(mobile,'Продовжити без ШІ');
+ await mobile.waitForSelector('[data-wizard-world]');
+ await fill(mobile,'[data-wizard-world] [name=world-name]','Вежа майбутнього');await fill(mobile,'[data-wizard-world] [name=world-rules]','Час іде вперед.');
+ await mobile.click('[data-world-confirm]');await shot(mobile,'wizard-world-mobile-light');
+ await button(mobile,'Далі');await mobile.waitForFunction(()=>!!document.querySelector('[data-book-wizard]')?.textContent?.includes('Модель розповіді'));
+ await mobile.waitForFunction(()=>Array.from(document.querySelectorAll('[data-book-wizard] [role=status]')).some(e=>e.textContent?.trim()==='Чернетку збережено')&&!document.querySelector('[data-book-wizard] fieldset:disabled'));
+ await mobile.reload({waitUntil:'domcontentloaded'});await mobile.waitForSelector('[data-book-wizard]',{timeout:45000});
+ check('wizard world stage can be skipped and later resumed without renumbering model/cast',!await mobile.$('[data-wizard-world]'));
+ const draftId=await mobile.evaluate(()=>localStorage.getItem('nova_express_draft_id'));
+ const saved=h.store.getDraft(draftId!);check('world persists in wizard with stable navigation key',saved?.payload.storyWorld?.rules==='Час іде вперед.'&&saved.payload.stepKey==='model');
+ await mobile.close();
+ const light=await make(1440,'light');await light.click('[data-world-setting-panel] > summary');await shot(light,'editor-world-desktop-light');await light.close();
+ check('browser has no JavaScript errors',errors.length===0);
+ await fs.writeFile(path.join(art,'report.json'),JSON.stringify({mode:'Real App/CSS + SQLite/media/routes; identity and AI provider fixtures',productionAcceptance:false,checks,shots,errors},null,2));
+ console.log('Підсумок: '+checks.length+' перевірок, '+shots.length+' екрани.');
+}catch(e){for(const p of await browser.pages()){try{await p.screenshot({path:path.join(art,'failure.png'),fullPage:true});console.error((await p.evaluate(()=>document.body.innerText)).slice(-6500));}catch{}}console.error(errors);throw e;
+}finally{await browser.close();await vite.close();await h.close();}

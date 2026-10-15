@@ -1,3 +1,4 @@
+import { manuscriptTagIndex, filterTagIndex } from '../../../src/utils/manuscriptTagIndex';
 import {getDb} from '../../db';
 import {contributionIdentity} from './contributionRoutes';
 import {contributionDb,newContribution,recordContribution} from './contributionStore';
@@ -40,6 +41,12 @@ export function registerSourceRoutes(app: Express, deps: SourceRoutesDeps): void
   const filtered = async (book: Record<string, unknown>, access: ProjectAccess) => { const repo=deps.repo?.(); return restrictBook(book,access.effective,repo?await visibleCharacterRefs(repo,access.effective):new Set()); };
   const revision = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 
+  app.get(base + '/tags', handle(async (req, res, access, stored) => {
+    const book = await filtered(stored.book, access);
+    const tags = typeof req.query.tags === 'string' ? req.query.tags.slice(0,2000).split(',').map(t=>t.trim()).filter(Boolean) : [];
+    const fragments = filterTagIndex(manuscriptTagIndex(book as any), { tags, status: typeof req.query.status==='string'?req.query.status:undefined, chapterId: typeof req.query.chapterId==='string'?req.query.chapterId:undefined });
+    res.json({revision:stored.revision,fragments});
+  }));
   app.get(base, handle(async (_req, res, access, stored) => {
     res.json({ revision: stored.revision, book: await filtered(stored.book, access), canWrite: access.effective.canWriteAny });
   }));

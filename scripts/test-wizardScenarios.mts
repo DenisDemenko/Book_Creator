@@ -1,0 +1,85 @@
+import assert from 'node:assert/strict';
+import {BOOK_SCENARIOS,STORY_MODELS,scenarioErrors} from '../shared/wizardScenarios';
+import {wizardContext,castPrompt,partPrompt} from '../server/expressPrompt';
+import {parseTechnicalProposal,technicalInstructionPrompt} from '../server/technicalInstruction';
+import {isPublicAddress,technicalUrl,technicalHtmlText,importTechnicalUrl,searchTechnicalResources} from '../server/technicalSources';
+import {technicalProposalToInstruction} from '../src/utils/technicalInstructionDraft';
+import {expressPlanToBook} from '../src/utils/expressBookPlan';
+import {buildStarterBook} from '../src/utils/starterBook';
+import {buildInstructionBookSections} from '../src/utils/instructionBookDraft';
+import {findInstructionType} from '../src/data/instructionTypes';
+import {parseStudioEntry} from '../src/utils/studioEntry';
+import type {ExpressWizardPayload} from '../src/components/ExpressWizardView';
+let passed=0;
+function check(name:string,ok:unknown){assert.ok(ok,name);passed++;console.log('✓ '+name);}
+check('12 unique book entry scenarios',BOOK_SCENARIOS.length===12&&new Set(BOOK_SCENARIOS.map(s=>s.id)).size===12);
+for(const scenario of BOOK_SCENARIOS){
+ const inputs=Object.fromEntries(scenario.fields.map(f=>[f.key,'AUTHOR_'+scenario.id+'_'+f.key]));
+ const value={entryMode:scenario.id,scenarioInputs:inputs,sourcesPermission:true,sourceMaterials:[{id:'allowed',kind:'note' as const,title:'Approved source',text:'APPROVED_TEXT',approved:true},{id:'private',kind:'note' as const,title:'Unreviewed',text:'PRIVATE_NOT_APPROVED',approved:false}]};
+ check(scenario.id+' validates its own required inputs',scenarioErrors(value).length===0);
+ const context=wizardContext({...value,framework:'psychotypes',seed:'Контрольний задум',cast:[]});
+ check(scenario.id+' prompt carries rules and approved data',context.includes(scenario.rule)&&context.includes('APPROVED_TEXT')&&!context.includes('PRIVATE_NOT_APPROVED'));
+ if(scenario.fields.some(f=>f.required))check(scenario.id+' rejects missing mandatory inputs',scenarioErrors({entryMode:scenario.id}).length>0);
+}
+for(const model of STORY_MODELS){
+ const context=wizardContext({framework:model.id});
+ check(model.id+' uses every configured beat',model.beats.every(beat=>context.includes(beat)));
+}
+check('changing scenario excludes stale inputs from another mode',!wizardContext({entryMode:'idea',scenarioInputs:{truth:'PRIVATE_OLD_MYSTERY'}}).includes('PRIVATE_OLD_MYSTERY'));
+const cast=castPrompt({targetCastSize:2,archetypes36:false,natureConnection:false});
+check('cast size is author controlled',cast.prompt.includes('Запропонуй 2 героїв'));
+check('Polti and cultural roles are optional',!cast.prompt.includes('АТМА')&&!cast.prompt.includes('комплементарні')&&cast.prompt.includes('poltiPatternId не додавай'));
+const continuation=partPrompt({compositionPlan:'APPROVED_PLAN',parts:[{partTitle:'PREVIOUS_PART'}],heroArc:{answers:{crisis:'AUTHOR_ARC'}}},2,3);
+check('part sees approved plan, previous part and author arc',continuation.prompt.includes('APPROVED_PLAN')&&continuation.prompt.includes('PREVIOUS_PART')&&continuation.prompt.includes('AUTHOR_ARC'));
+const source={id:'s1',kind:'file' as const,title:'T-42 manual',text:'Fit panel A into bracket B. Verify both clips are engaged.',approved:true};
+const settings={mode:'assembly' as const,title:'T-42',modelCode:'T-42 rev.1',goal:'Зібрати панель'};
+const proposal={title:'Складання T-42',modelCode:'T-42 rev.1',description:'Панель і кронштейн',materials:[{code:'A',name:'Панель',qty:'1'}],tools:[],warnings:['Не навантажувати до перевірки фіксаторів'],steps:[{title:'Вставити панель',description:'З’єднайте A і B згідно з джерелом.',components:'A, B',toolsResources:'Ручне з’єднання',warning:'',successCriterion:'Обидва фіксатори задіяні',sourceIds:['s1'],needsVerification:true}],finalChecks:['Перевірити фіксатори'],questions:['Уточнити допустиме навантаження']};
+const parsed=parseTechnicalProposal(JSON.stringify(proposal),[source]);
+check('fenced JSON proposal is accepted',parseTechnicalProposal(String.fromCharCode(96).repeat(3)+'json\n'+JSON.stringify(proposal)+'\n'+String.fromCharCode(96).repeat(3),[source]).steps.length===1);
+check('technical proposal preserves source ids and unknowns',parsed.steps[0].sourceIds[0]==='s1'&&parsed.steps[0].needsVerification);
+assert.throws(()=>parseTechnicalProposal(JSON.stringify({...proposal,steps:[{...proposal.steps[0],sourceIds:['invented']}]}),[source]));
+check('invented technical citations are rejected',true);
+assert.throws(()=>parseTechnicalProposal(JSON.stringify({...proposal,steps:[{...proposal.steps[0],sourceIds:[]}]}),[source]));
+check('uncited technical steps are rejected',true);
+assert.throws(()=>parseTechnicalProposal(JSON.stringify(proposal),[{...source,approved:false}]));
+check('unapproved source cannot support technical step',true);
+check('assembly prompt forbids invented numerical specs',technicalInstructionPrompt(settings,[source]).system.includes('Не вигадуй розмірів'));
+check('operation has its own prompt',technicalInstructionPrompt({...settings,mode:'operation'},[source]).prompt.includes('покрокове використання'));
+const doc=technicalProposalToInstruction(parsed,settings,[source]);
+check('proposal reuses instruction type and keeps provenance',doc.docType==='assembly'&&doc.sourceBased&&doc.steps[0].needsVerification&&doc.knowledgeBase[0].id==='s1');
+check('AI cannot approve its own technical step',technicalProposalToInstruction({...parsed,steps:parsed.steps.map(s=>({...s,needsVerification:false}))},settings,[source]).steps[0].needsVerification);
+const sections=buildInstructionBookSections(doc,findInstructionType(doc.docType));
+const content=sections.map(s=>s.content).join('\n');
+check('instruction handoff retains AI origin and citations',content.includes('[AI-DRAFT]')&&content.includes('Джерела: T-42 manual'));
+check('instruction handoff does not copy raw private source',!content.includes(source.text));
+for(const address of ['127.0.0.1','10.2.3.4','169.254.169.254','192.168.1.1','::1','::ffff:127.0.0.1','fc00::1','fe80::1'])check('blocked nonpublic address '+address,!isPublicAddress(address));
+check('public addresses allowed',isPublicAddress('8.8.8.8')&&isPublicAddress('2606:4700:4700::1111'));
+for(const address of ['http://docs.example/a','https://localhost/a','https://127.0.0.1/a','https://[::1]/a','https://user:pass@docs.example/a','https://docs.example:444/a']){
+ assert.throws(()=>technicalUrl(address));check('unsafe URL rejected '+address,true);
+}
+const html=technicalHtmlText('<html><title>T-42</title><script>PRIVATE_SCRIPT</script><main><h1>Steps</h1><p>Fit A &amp; B.</p></main></html>');
+check('technical HTML gives plain text without scripts',html.title==='T-42'&&html.text.includes('Fit A & B.')&&!html.text.includes('PRIVATE_SCRIPT'));
+const imported=await importTechnicalUrl('https://docs.example/manual',async url=>({url,mimeType:'text/html',bytes:Buffer.from('<title>Manual</title><main><p>Verified instructions</p></main>')}));
+check('fetched source needs review and records final URL',!!imported.source&&!imported.source.approved&&imported.source.url==='https://docs.example/manual');
+const pdf=await importTechnicalUrl('https://docs.example/manual.pdf',async url=>({url,mimeType:'application/pdf',bytes:Buffer.from('%PDF-test')}));
+check('PDF follows existing client extraction path',pdf.file?.type==='application/pdf'&&!!pdf.file.dataBase64);
+let searched='';
+const results=await searchTechnicalResources('T-42','manufacturer.example',async url=>{searched=url;return {url,mimeType:'application/rss+xml',bytes:Buffer.from('<rss><channel><item><title>T-42 manual</title><link>https://manufacturer.example/t42</link><description>Documentation</description></item><item><title>Unsafe</title><link>http://127.0.0.1/private</link></item></channel></rss>')};});
+check('search applies technical terms and domain scope',decodeURIComponent(searched).includes('manual documentation datasheet site:manufacturer.example'));
+check('search results discard unsafe links',results.length===1&&results[0].url==='https://manufacturer.example/t42');
+const book=buildStarterBook({bookId:'draft-book',role:'writer',title:'Книга',author:'Автор',now:0});
+const beforeBook=JSON.stringify(book);
+const plan:ExpressWizardPayload={entryMode:'characters_photos',framework:'psychotypes',cast:[{id:'stable-hero',firstName:'Марта',lastName:'Лісова',appearance:'Зелений плащ',goal:'Зберегти майстерню',flaw:'Надмірний контроль',approved:true}],sourceMaterials:[{id:'photo-source',kind:'photo',assetId:'private-photo',title:'Референс',text:'PRIVATE_REFERENCE_TEXT',approved:true}],parts:[{partTitle:'Початок',chapters:[{chapterTitle:'Вибір',summary:'[/chapter:Вибір]\n\nГероїня робить вибір.',involvedCharacterIds:['stable-hero'],choices:[{label:'Ліворуч',destination:'Майстерня',consequence:'Зустріч із союзником'}]}]}]};
+const updated=expressPlanToBook(book,plan,42);
+check('book handoff preserves character id and appearance',updated.characters[0].id==='stable-hero'&&updated.characters[0].appearance.distinguishingMarks==='Зелений плащ');
+check('book handoff preserves goals and conflict',updated.characters[0].personality.goals[0]==='Зберегти майстерню'&&updated.characters[0].personality.internalConflict==='Надмірний контроль');
+const text=updated.chapters[0].sections[0].content;
+check('all deterministic tags precede AI draft',text.indexOf('[/character:Марта Лісова]')<text.indexOf('[AI-DRAFT]')&&text.includes('[/outline:Вибір]'));
+check('labyrinth choices survive into manuscript',text.includes('Ліворуч')&&text.includes('Майстерня'));
+check('private source text and photo URL are not copied into book',!JSON.stringify(updated).includes('PRIVATE_REFERENCE_TEXT')&&!JSON.stringify(updated).includes('private-photo'));
+const manual=expressPlanToBook(book,{cast:[],targetCastSize:0,parts:[{chapters:[{chapterTitle:'Авторська глава',summary:'Авторський текст',source:'author'}]}]},43);
+check('manual book has no forced cast or AI attribution',manual.characters.length===0&&!manual.chapters[0].sections[0].content.includes('[AI-DRAFT]'));
+check('handoff does not mutate original book',JSON.stringify(book)===beforeBook);
+check('technical wizard has a validated direct entry',parseStudioEntry('?open=express&wizard=technical_instruction')?.track==='technical_instruction');
+check('unknown wizard parameter is ignored',!parseStudioEntry('?open=express&wizard=unknown')?.track);
+console.log('Підсумок: '+passed+' пройшло.');

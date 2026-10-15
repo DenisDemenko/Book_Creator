@@ -1,4 +1,5 @@
-﻿import React, { useState, useEffect, useRef } from "react";
+import { aiDraftText, acceptedAiText } from '../../../shared/aiTextOrigin';
+import React, { useState, useEffect, useRef } from "react";
 import { SkillItem, UserSkillProgress, MicroExercise } from "../../types/mastery";
 import { useWriterBook } from "../../context/WriterBookContext";
 import { BookContextBanner } from "./BookContextBanner";
@@ -79,7 +80,7 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
     const text: string = aiFeedback.rewrittenExample || aiFeedback.summary || "";
     if (!text.trim()) return;
     const chapter = book.chapters.find((c) => c.id === insertChapterId);
-    const result = appendTextToChapterEnd(book.chapters, insertChapterId, text);
+    const result = appendTextToChapterEnd(book.chapters, insertChapterId, aiDraftText(text));
     if (!chapter || !result) return;
     onUpdateBook(
       { ...book, chapters: result.chapters, updatedAt: new Date().toISOString() },
@@ -366,7 +367,7 @@ export const SkillDetailModal: React.FC<SkillDetailModalProps> = ({
    */
   const handleAcceptBookCorrection = () => {
     if (!book || !onUpdateBook || !draftSource || !aiFeedback?.correctedFullText) return;
-    const correctedText: string = aiFeedback.correctedFullText;
+    const correctedText: string = acceptedAiText(aiFeedback.correctedFullText);
 
     let result = replaceTextInSection(book.chapters, draftSource.chapterId, draftSource.sectionId, lastAnalyzedText, correctedText);
     if (!result && draftSource.mode === "whole") {

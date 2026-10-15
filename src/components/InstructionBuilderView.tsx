@@ -312,6 +312,7 @@ const StringListEditor: React.FC<{
 
 export const InstructionBuilderView: React.FC<{
   onChangeTrack?: () => void;
+  initialInstruction?: Instruction;
   /**
    * Завжди створює НОВУ книгу (пряма відповідь власника на уточнення,
    * журнал #199) — ніколи не дописує в уже відкриту. Компонент лише формує
@@ -320,10 +321,10 @@ export const InstructionBuilderView: React.FC<{
    * за тим самим шаблоном, що й onCourseCreated.
    */
   onInstructionBookCreated?: (payload: InstructionBookCreationPayload) => void;
-}> = ({ onChangeTrack, onInstructionBookCreated }) => {
-  const [doc, setDoc] = useState<Instruction>(() => loadInstructionDraft() ?? createEmptyInstruction('assembly'));
+}> = ({ onChangeTrack, onInstructionBookCreated, initialInstruction }) => {
+  const [doc, setDoc] = useState<Instruction>(() => initialInstruction ?? loadInstructionDraft() ?? createEmptyInstruction('assembly'));
   const [section, setSection] = useState<InstructionSectionKey>('overview');
-  const [showTypeDialog, setShowTypeDialog] = useState<boolean>(() => !loadInstructionDraft());
+  const [showTypeDialog, setShowTypeDialog] = useState<boolean>(() => !initialInstruction && !loadInstructionDraft());
   const [showPreview, setShowPreview] = useState(true);
   const [kbQuery, setKbQuery] = useState('');
   const [kbDraft, setKbDraft] = useState({ title: '', link: '', excerpt: '' });
@@ -344,7 +345,15 @@ export const InstructionBuilderView: React.FC<{
   const type = useMemo(() => findInstructionType(doc.docType), [doc.docType]);
   const readiness = useMemo(() => instructionCompleteness(doc), [doc]);
 
-  const patch = (partial: Partial<Instruction>) => setDoc((d) => ({ ...d, ...partial, updatedAt: new Date().toISOString() }));
+  const patch = (partial: Partial<Instruction>) => setDoc((d) => {
+    const steps = partial.steps?.map(step => {
+      if (!d.sourceBased) return step;
+      const previous = d.steps.find(old => old.id === step.id);
+      const changed = !previous || (['title','description','components','toolsResources','warning','successCriterion'] as const).some(key => step[key] !== previous[key]);
+      return changed ? { ...step, needsVerification: true } : step;
+    });
+    return { ...d, ...partial, ...(steps ? { steps } : {}), updatedAt: new Date().toISOString() };
+  });
 
   const pickType = (id: InstructionDocType, resetDocument: boolean) => {
     setShowTypeDialog(false);
@@ -415,10 +424,14 @@ export const InstructionBuilderView: React.FC<{
    */
   const createBook = async () => {
     setCreateBookError(null);
+    if (doc.sourceBased && doc.steps.some(s => s.needsVerification)) {
+      setCreateBookError('Уточніть і підтвердьте всі позначені кроки перед створенням книги.');
+      return;
+    }
     setIsCreatingBook(true);
     const steps = meaningfulInstructionSteps(doc);
     let elaborations: string[] | undefined;
-    if (steps.length > 0) {
+    if (steps.length > 0 && !doc.sourceBased) {
       try {
         const res = await fetch('/api/ai/elaborate-instruction-steps', {
           method: 'POST',
@@ -483,7 +496,7 @@ export const InstructionBuilderView: React.FC<{
           <button
             type="button"
             onClick={createBook}
-            disabled={isCreatingBook}
+            disabled={isCreatingBook || (doc.sourceBased && doc.steps.some(s => s.needsVerification))}
             title="Перенести документ у нову книгу «Книга & Текст»; ШІ поглибить кожен крок (позначиться як AI-чернетка)."
             className="inline-flex items-center gap-1.5 rounded-xl bg-violet-500 hover:bg-violet-400 disabled:opacity-60 disabled:cursor-wait px-3 py-2 text-xs font-bold text-white transition-colors"
           >
@@ -520,7 +533,7 @@ export const InstructionBuilderView: React.FC<{
           <nav className="space-y-1">
             {INSTRUCTION_SECTION_ORDER.map((key, i) => (
               <button
-                key={key}
+                data-instruction-section={key} key={key}
                 type="button"
                 onClick={() => setSection(key)}
                 className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold transition-colors ${
@@ -647,6 +660,7 @@ export const InstructionBuilderView: React.FC<{
             <StringListEditor items={doc.warnings} placeholder={type.warningPlaceholder} addLabel="Додати пункт" onChange={(warnings) => patch({ warnings })} />
           )}
 
+          {doc.sourceBased && <p className="rounded-lg border border-cyan-600/40 p-3 text-xs text-cyan-200">Інструкція створена за джерелами. Під кожним кроком збережено його походження; непідтверджені параметри потрібно уточнити. Додаткове ШІ-поглиблення під час перенесення вимкнене.</p>}
           {section === 'steps' && (
             <div className="space-y-3">
               {doc.steps.map((s, i) => (
@@ -679,6 +693,9 @@ export const InstructionBuilderView: React.FC<{
                   {labeled('Застереження або обмеження', (
                     <input value={s.warning} onChange={(e) => patch({ steps: doc.steps.map((x) => (x.id === s.id ? { ...x, warning: e.target.value } : x)) })} className={inputCls} />
                   ))}
+                  {s.sourceIds?.length > 0 && <p className="text-xs text-cyan-200">Джерела: {s.sourceIds.map(id=>doc.knowledgeBase.find(k=>k.id===id)?.title??id).join(', ')}</p>}
+                  {doc.sourceBased && <label className="flex items-center gap-2 text-xs text-amber-200"><input type="checkbox" checked={!s.needsVerification}
+                    onChange={e=>patch({steps:doc.steps.map(x=>x.id===s.id?{...x,needsVerification:!e.target.checked}:x)})}/> Параметри й послідовність цього кроку перевірено за джерелами</label>}
                   {labeled('Критерій правильного виконання', (
                     <input value={s.successCriterion} onChange={(e) => patch({ steps: doc.steps.map((x) => (x.id === s.id ? { ...x, successCriterion: e.target.value } : x)) })} placeholder="Вкажіть ознаку правильного виконання." className={inputCls} />
                   ))}

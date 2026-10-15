@@ -1,3 +1,7 @@
+import { aiDraftText } from '../shared/aiTextOrigin';
+import { expressPlanToBook } from './utils/expressBookPlan';
+import type { ExpressWizardPayload } from './components/ExpressWizardView';
+import { guardedNavigation } from './utils/navigationGuard';
 import { CreativeBible } from './components/CreativeBible';
 import { CreativeWorkspace } from './components/CreativeWorkspace';
 import { CreativeBriefPanel } from './components/CreativeBriefPanel';
@@ -241,7 +245,10 @@ export default function App() {
   const [roleChoice, setRoleChoice] = useState<{ bookId: string; bookTitle: string; invitedRole: UserRole } | null>(null);
 
   const [labyrinthDirty, setLabyrinthDirty] = useState(false);
-  const [currentTab, setCurrentTab] = useState<NavigationTab>('dashboard');
+  const [currentTab, setCurrentTabState] = useState<NavigationTab>('dashboard');
+  const setCurrentTab: React.Dispatch<React.SetStateAction<NavigationTab>> = useCallback(
+    (next) => guardedNavigation(() => setCurrentTabState(next)), []
+  );
   /**
    * Адреса, з якою відкрили Студію (Т0.8, К3): /projects/<книга>/<сторінка>.
    * Читається один раз — далі адресу веде стан (вкладка й книга), а «назад»
@@ -479,7 +486,7 @@ export default function App() {
     // 5 хвилин» і «Створити план книги»), тож розвилку «що створюємо?»
     // проходимо за людину: вона вже сказала, що саме. Гілку все одно можна
     // змінити в майстрі — для цього в нього є «назад до вибору напряму».
-    setEntryTrack(pendingEntry.tab === 'express' ? 'book' : null);
+    setEntryTrack(pendingEntry.tab === 'express' ? pendingEntry.track ?? 'book' : null);
     setPendingEntry(null);
   }, [pendingEntry, auth.loading, auth.user?.role, currentRole]);
 
@@ -1139,99 +1146,27 @@ export default function App() {
    * структуру, і змішування її з попереднім чернетковим вмістом дало б
    * книгу, де половина глав з одного задуму, а половина з іншого.
    */
-  const applyExpressPlan = (plan: {
-    seed?: string;
-    genre?: string;
-    synopsis?: string;
-    cast?: Array<{
-      firstName: string;
-      lastName: string;
-      psychotype?: string;
-      poltiRoleName?: string;
-      hook?: string;
-    }>;
-    heroArc?: HeroArcState;
-    parts?: Array<{
-      partTitle?: string;
-      chapters?: Array<{
-        chapterTitle?: string;
-        summary?: string;
-        turningPoint?: string;
-        environmentalContext?: string | null;
-      }>;
-    }>;
-  }) => {
-    const stamp = Date.now();
-    const now = new Date().toISOString();
-
-    const characters = (plan.cast ?? []).map((c, i) => ({
-      id: `char-express-${stamp}-${i}`,
-      bookId: book.id,
-      name: c.firstName,
-      surname: c.lastName,
-      // Перший у касті — протагоніст, другий — антагоніст: майстер віддає їх
-      // у порядку ваги. Точні ролі письменник виставить на вкладці
-      // «Персонажі», де для цього є повний набір.
-      role: (i === 0 ? 'protagonist' : i === 1 ? 'antagonist' : 'ally') as
-        | 'protagonist'
-        | 'antagonist'
-        | 'ally',
-      description: [
-        c.psychotype,
-        c.poltiRoleName ? `Амплуа: ${c.poltiRoleName}` : '',
-        c.hook,
-      ]
-        .filter(Boolean)
-        .join('. '),
-    }));
-
-    // Частина майстра стає главою книги, а глава майстра — розділом
-    // усередині неї: окремого рівня «частина» в Nova немає, і так
-    // зберігаються обидві назви замість того, щоб втратити одну.
-    const chapters = (plan.parts ?? []).map((part, pi) => ({
-      id: `chap-express-${stamp}-${pi}`,
-      bookId: book.id,
-      title: part.partTitle || `Частина ${pi + 1}`,
-      order: pi + 1,
-      sections: (part.chapters ?? []).map((ch, ci) => ({
-        id: `sec-express-${stamp}-${pi}-${ci}`,
-        chapterId: `chap-express-${stamp}-${pi}`,
-        title: ch.chapterTitle || `Глава ${ci + 1}`,
-        order: ci + 1,
-        // Синопсис сцени лягає в текст відправною точкою: порожня сторінка
-        // тут звела б нанівець сенс майстра.
-        //
-        // Загорнуто в [AI-DRAFT]…[/AI-DRAFT] (utils/manuscriptDoc.ts): у
-        // редакторі цей текст показується іншим шрифтом і з позначкою
-        // «AI-чернетка», доки письменник не перепише його своїми словами
-        // й не зніме позначку через контекстне меню блоку.
-        content: [
-          '[AI-DRAFT]\n\n',
-          ch.summary ?? '',
-          ch.turningPoint ? `\n\nПоворот: ${ch.turningPoint}` : '',
-          ch.environmentalContext ? `\n\nСтихія: ${ch.environmentalContext}` : '',
-          '\n\n[/AI-DRAFT]',
-        ].join(''),
-        wordCount: (ch.summary ?? '').trim().split(/\s+/).filter(Boolean).length,
-        lastModified: now,
-      })),
-    }));
-
-    handleUpdateBook(
-      {
-        ...book,
-        genre: plan.genre || book.genre,
-        logline: plan.seed || book.logline,
-        synopsis: plan.synopsis || book.synopsis,
-        characters: characters.length
-          ? (characters as unknown as Book['characters'])
-          : book.characters,
-        chapters: chapters.length ? (chapters as unknown as Book['chapters']) : book.chapters,
-        heroArc: plan.heroArc || book.heroArc,
-      },
-      'Експрес-майстер',
-      `План перенесено в книгу: ${chapters.length} частин, ${characters.length} героїв`
-    );
+  const applyExpressPlan = async (plan: ExpressWizardPayload) => {
+    let target = book;
+    if (plan.entryMode === 'series') {
+      if (!(await persistBook(book))) throw new Error('Не вдалося зберегти вихідну книгу. Продовження поки не створено.');
+      const id = 'BK-' + crypto.randomUUID();
+      const title = 'Продовження: ' + book.title;
+      target = withoutDemoContent({ ...initialBookData, id, title, author: auth.user?.name || book.author,
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), versionHistory: [],
+        visualBible: { ...initialBookData.visualBible, id: 'vb-' + id, bookId: id },
+      }, { title, author: auth.user?.name || book.author });
+      target.characters = book.characters;
+    }
+    const updated = expressPlanToBook(target, plan);
+    if (plan.entryMode === 'series') {
+      if (!(await persistBook(updated))) throw new Error('Не вдалося зберегти продовження; вихідна книга збережена.');
+      setBook(updated);
+      setActiveChapterId(updated.chapters[0]?.id || '');
+      setActiveSectionId(updated.chapters[0]?.sections[0]?.id || '');
+    } else {
+      handleUpdateBook(updated, 'Експрес-майстер', 'План і канон перенесено в книгу.');
+    }
   };
 
   const handleUpdateBook = (incomingBook: Book, logAction?: string, logDetails?: string) => {
@@ -1828,7 +1763,7 @@ export default function App() {
    */
   const handleSendChatTextToChapter = (chapterId: string, text: string, sectionId?: string) => {
     const chapter = book.chapters.find((c) => c.id === chapterId);
-    const result = appendTextToChapterEnd(book.chapters, chapterId, text, sectionId);
+    const result = appendTextToChapterEnd(book.chapters, chapterId, aiDraftText(text), sectionId);
     if (!chapter || !result) return;
 
     const section = chapter.sections.find((sc) => sc.id === result.sectionId);
@@ -2334,10 +2269,10 @@ export default function App() {
         {currentTab === 'express' && (
           <div className="flex-1 overflow-y-auto">
             <ExpressStartView
-              onFinish={(payload) => {
+              onFinish={async (payload) => {
                 // Готовий план переносимо в книгу й ведемо в редактор —
                 // саме це «перенесення заготовки до студії» з постановки.
-                applyExpressPlan(payload);
+                await applyExpressPlan(payload);
                 handleSelectTab('editor');
               }}
               onCourseCreated={() => handleSelectTab('course-studio')}
@@ -2346,6 +2281,7 @@ export default function App() {
               // вводити ідею вдруге й обирати «книгу» на розвилці — зайві кола.
               initialSeed={entryIdea ?? undefined}
               startTrack={entryTrack}
+              currentBook={book}
             />
           </div>
         )}

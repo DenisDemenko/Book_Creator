@@ -4,7 +4,8 @@ import { EXPRESS_TRACKS, findExpressTrack, isTrackRunnable, type ExpressTrack, t
 import { ExpressWizardView, type ExpressWizardPayload } from './ExpressWizardView';
 import { CourseWizardView } from './CourseWizardView';
 import { InstructionBuilderView, type InstructionBookCreationPayload } from './InstructionBuilderView';
-import type { CourseV2 } from '../types';
+import { TechnicalInstructionWizard } from './TechnicalInstructionWizard';
+import type { Book, CourseV2 } from '../types';
 import { prependExpressSemanticTags } from '../utils/expressSemanticHandoff';
 
 /**
@@ -22,6 +23,7 @@ const ICONS: Record<ExpressTrackId, React.ComponentType<{ className?: string }>>
   book: BookOpen,
   course: GraduationCap,
   instruction: ListChecks,
+  technical_instruction: ListChecks,
   game: Gamepad2,
 };
 
@@ -165,7 +167,8 @@ export const ExpressStartView: React.FC<{
   onInstructionBookCreated?: (payload: InstructionBookCreationPayload) => void;
   initialSeed?: string;
   startTrack?: ExpressTrackId | null;
-}> = ({ onFinish, onCourseCreated, onInstructionBookCreated, initialSeed, startTrack }) => {
+  currentBook?: Book;
+}> = ({ onFinish, onCourseCreated, onInstructionBookCreated, initialSeed, startTrack, currentBook }) => {
   const [track, setTrack] = useState<ExpressTrackId | null>(() =>
     isTrackRunnable(startTrack) ? startTrack! : readSavedTrack()
   );
@@ -204,12 +207,17 @@ export const ExpressStartView: React.FC<{
         trackTitle={active?.title}
         onChangeTrack={backToChoice}
         initialSeed={initialSeed}
+        currentBook={currentBook}
       />
     );
   }
 
   if (track === 'course') {
     return <CourseWizardView onChangeTrack={backToChoice} onCourseCreated={onCourseCreated} />;
+  }
+
+  if (track === 'technical_instruction') {
+    return <TechnicalInstructionWizard onChangeTrack={backToChoice} onInstructionBookCreated={onInstructionBookCreated} />;
   }
 
   if (track === 'instruction') {

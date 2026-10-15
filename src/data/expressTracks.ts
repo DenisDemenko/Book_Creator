@@ -21,7 +21,7 @@
  * що лишається `planned`.
  */
 
-export type ExpressTrackId = 'book' | 'course' | 'instruction' | 'game';
+export type ExpressTrackId = 'book' | 'course' | 'instruction' | 'game' | 'technical_instruction';
 
 /** `ready` — гілка проходиться до кінця. `planned` — каркас без реалізації. */
 export type ExpressTrackStatus = 'ready' | 'planned';
@@ -88,6 +88,13 @@ export const EXPRESS_TRACKS: ExpressTrack[] = [
     outcome: 'Граф сцен із варіантами вибору й наслідками, готовий до наповнення текстом.',
     status: 'planned',
     steps: ['Задум і світ', 'Персонажі й ролі', 'Сцени', 'Вибори й наслідки', 'Фінали'],
+  },
+  {
+    id: 'technical_instruction', order: 5, title: 'Інструкція з фото й техдокументації',
+    tagline: 'Сфотографуйте виріб, додайте файли й документацію виробника.',
+    outcome: 'Підтверджені джерела → кроки складання або використання → перевірка → редактор інструкції → книга.',
+    status: 'ready',
+    steps: ['Виріб і мета', 'Фото й документація', 'Перевірка джерел', 'Пропозиція кроків', 'Редактор і книга'],
   },
 ];
 

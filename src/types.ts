@@ -1,3 +1,4 @@
+import type { StoryWorld, StoryLocation, SceneSetting } from '../shared/storyWorld';
 export type NavigationTab =
   | 'my-space'     // Т6.4: «Мій простір» — простір ролі в проєкті, процес ШІ, «Моя роль у проєкті»
   | 'express'      // Експрес-майстер: книга за 5 хвилин (Wisart Book Crealiry.md §3.4)
@@ -222,6 +223,7 @@ export interface Scene {
 }
 
 export interface Section {
+  setting?: SceneSetting;
   id: string;
   chapterId: string;
   title: string;
@@ -573,6 +575,9 @@ export interface InstructionMaterialRow {
 
 /** Один крок послідовності дій — розділ «Кроки складання» та еквіваленти. */
 export interface InstructionStep {
+  sourceIds?: string[];
+  needsVerification?: boolean;
+  aiGenerated?: boolean;
   id: string;
   title: string;
   description: string;
@@ -605,6 +610,7 @@ export interface InstructionWarranty {
 }
 
 export interface Instruction {
+  sourceBased?: boolean;
   docType: InstructionDocType;
   title: string;
   modelCode: string;
@@ -823,6 +829,10 @@ export interface HeroArcState {
 }
 
 export interface Book {
+  storyWorld?: StoryWorld;
+  storyLocations?: StoryLocation[];
+  wizardContext?: { entryMode: string; framework: string; canonicalSourceBookId?: string;
+    sourceReferences: { id: string; title: string; kind: string; url?: string }[] };
   id: string;
   /**
    * Власний словник книги: вигадані імена, топоніми й терміни («Сварог»,

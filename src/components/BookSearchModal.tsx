@@ -3,7 +3,7 @@ import { Search, X, ArrowRight, Replace, ChevronRight } from 'lucide-react';
 import type { Book } from '../types';
 import { calculateWordCount } from '../utils/helpers';
 import { useLanguage } from '../i18n/LanguageContext';
-import { entityTagSpans } from '../utils/coreEntities';
+import { editorialTagSpans as entityTagSpans } from '../utils/manuscriptTagIndex';
 import { filterRangesByScope, isInTag, replaceRanges, type SearchScope } from '../utils/searchScope';
 
 interface BookSearchModalProps {

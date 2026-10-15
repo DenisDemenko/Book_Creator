@@ -1,3 +1,4 @@
+import { aiDraftText } from '../../shared/aiTextOrigin';
 /**
  * Перетворення готового документа інструкції на вміст майбутньої книги —
  * розділ «Кроки виконання» дописується поглибленнями ШІ як [AI-DRAFT]
@@ -85,16 +86,18 @@ export function buildInstructionBookSections(
   if (steps.length) {
     const blocks = steps.map((s, i) => {
       const parts: string[] = [`### ${i + 1}. ${s.title.trim() || `${type.stepPrefix} ${i + 1}`}`];
-      if (s.description.trim()) parts.push(s.description.trim());
+      if (s.description.trim()) parts.push(s.aiGenerated ? '[AI-DRAFT]\n\n' + s.description.trim() + '\n\n[/AI-DRAFT]' : s.description.trim());
       const extra: string[] = [];
       if (s.components.trim()) extra.push(`Компоненти/матеріали кроку: ${s.components.trim()}`);
       if (s.toolsResources.trim()) extra.push(`Інструменти/ресурси: ${s.toolsResources.trim()}`);
       if (s.warning.trim()) extra.push(`⚠ ${s.warning.trim()}`);
       if (s.successCriterion.trim()) extra.push(`Критерій виконання: ${s.successCriterion.trim()}`);
+      if (s.sourceIds?.length) extra.push('Джерела: ' + s.sourceIds.map(id => doc.knowledgeBase.find(k => k.id === id)?.title || id).join('; '));
+      if (s.needsVerification) extra.push('Потребує перевірки перед використанням.');
       if (extra.length) parts.push(extra.join('\n'));
       const elaboration = elaborations?.[i]?.trim();
       if (elaboration) parts.push(`[AI-DRAFT]\n\n${elaboration}\n\n[/AI-DRAFT]`);
-      return parts.join('\n\n');
+      return s.aiGenerated ? aiDraftText(parts.join('\n\n')) : parts.join('\n\n');
     });
     sections.push({ title: type.sections.steps.heading, content: blocks.join('\n\n') });
   }

@@ -7,7 +7,7 @@ import { stripEntityTags } from './coreEntities';
 
 export function calculateWordCount(text: string): number {
   if (!text) return 0;
-  const words = text.trim().split(/\s+/).filter(w => w.length > 0);
+  const words = stripEntityTags(text).trim().split(/\s+/).filter(w => w.length > 0);
   return words.length;
 }
 
@@ -715,7 +715,7 @@ export function renderSectionBlocksHtml(
   const AI_DRAFT_OPEN = '[AI-DRAFT]';
   const AI_DRAFT_CLOSE = '[/AI-DRAFT]';
 
-  const paragraphs = (content || '')
+  const paragraphs = stripEntityTags(content || '')
     .replace(/\r\n/g, '\n')
     .split(/\n{2,}/)
     .map((p) => p.trim())
@@ -1084,7 +1084,7 @@ function renderEditorialParagraphs(
   applyDropCapToFirst: boolean,
   book: Book
 ): string {
-  const paragraphs = (content || '')
+  const paragraphs = stripEntityTags(content || '')
     .replace(/\r\n/g, '\n')
     .split(/\n{2,}/)
     .map((p) => p.trim())

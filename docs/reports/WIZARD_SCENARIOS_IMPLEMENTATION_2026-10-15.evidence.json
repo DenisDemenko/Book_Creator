@@ -1,0 +1,124 @@
+{
+  "date": "2026-10-15",
+  "baseCommit": "63f01189e190ac2dd678850fc79cf7e5eee9b32a",
+  "state": "uncommitted working tree; no push or deployment",
+  "sourceSHA256": {
+    ".github/workflows/gate-b-designcraft.yml": "03f51b742467a4b34d7efde6744888e5a7316535b5c07d6a878c95e79024b7d6",
+    "package.json": "6d073e5e25c4ff458a24644d6d4395517bd0946d11ade7a31dda5aad2c77fc32",
+    "scripts/lib/wizardHarness.mts": "a0f895df82b3519b6f606c1c775f385913005ee310a6c972dd4e3ea463d6a743",
+    "scripts/live-wizardScenarios.mts": "97431dbe0ad0d68e81a6b47c85af3efe71d0f56e65516c8b180c61a6f1c9b118",
+    "scripts/test-expressDraftSession.mts": "ef1f5cac633b8d3b7af0c067fddd3e895bcadb054ad847bf2f6d227349dc3345",
+    "scripts/test-expressTracks.mts": "1f82b03f735fd4ff40110f8290673e9b180a62d6fbaa11c5c377e7f8c0a55302",
+    "scripts/test-expressWizardIntegrity.mts": "fc38bb042666f37274e8897285d1926bb9e2696fbcec2d1b7ca99b42c62ae2f9",
+    "scripts/test-wizardScenarioRoutes.mts": "5a381baa82e6b1124732addf655fc2adf97e575e66a8005e81981d3a09c9c50d",
+    "scripts/test-wizardScenarios.mts": "b0cfec0ac02c0683994864b11352e7931473260b6a0c59283b14955236d71aa5",
+    "server/db.ts": "279cda351aa60ae5c8e7e2cb28694068d1ca93e0932e4b06783e06eda269c77b",
+    "server/expressPrompt.ts": "53ed151ebb00cd109c2723206ff7b71b6a3e2f9ae6494781b32a4465fbb18ea9",
+    "server/expressRoutes.ts": "fbab4252d1c46c585e0be540f9343404c29b033000f38f5d90f5348a3aa637f9",
+    "server/expressStore.ts": "4d600bfa145e455d8b40603e2c1385f7dad9dd422b567d229c73e0b4f447d956",
+    "server/technicalInstruction.ts": "f813dfe86829c6eca8a798be790133ef7cf143a209088dd883868293b31953ca",
+    "server/technicalSources.ts": "799623485c4269915e74d496e8d92a9169e398303d5f15c910a31b9454170b49",
+    "server/wizardSourceRoutes.ts": "86308a268e4f7299a554fa3f6db2340f0b6a98736ebb427879cb2d081569aba7",
+    "server/wizardValidation.ts": "1ec09ddf4263fdb17d6a7d85c9bc03d7f21ee54c680d0cc7b5960bf11a6c9bfa",
+    "shared/technicalInstruction.ts": "fc3e14c6d9689d70ce4c2cd18c8d4dfcf7eb04cd51f025892fbb096e27f72194",
+    "shared/wizardScenarios.ts": "05a35448b6c69a8eb9013dbdd7c4c06075c99056aea47faeb02a1a4c77ee36a8",
+    "src/App.tsx": "e7f137e77505ac193173fa0b69b78032279cda3182bcb4ce1059aa90b4e991e6",
+    "src/components/ExpressStartView.tsx": "21fffdecb82ac1b270d3ea276b779525446e783465c5011459ade5123c1edab7",
+    "src/components/ExpressWizardView.tsx": "b18f7a0f1c695b9846d0b47b209dbc498520ac0261e11924e347ddfee1552777",
+    "src/components/InstructionBuilderView.tsx": "ec0a4da6127fa1fd56cc26c72e30d6d3b8b79c0efba6afb3cf40000c09a0e793",
+    "src/components/TechnicalInstructionWizard.tsx": "ad4ae87da28e94c20f1cb571591e978e8002d2069a39e97f25f3dace55be7985",
+    "src/components/WizardScenarioFields.tsx": "977a5f42d118a91713309ebb41fde3e60c1561ab6d7b7a0aba2cca0291d561cd",
+    "src/components/WizardSourcesPanel.tsx": "4da990b2d9bdc61437bd6c31ea184538a5641cba273b98024e774f37fd58936f",
+    "src/data/expressTracks.ts": "859af21b54385458c19f38d4ebc7cecbae29de3ba0744d5c305332a375fb58c8",
+    "src/types.ts": "dbb55ea35851902b18cce20c949374119cbb36acdf5b3a93a580488d95239738",
+    "src/utils/expressBookPlan.ts": "09e55145402569a6344bf13a82161328c342bddfdfead454e0866e02e0e95f3a",
+    "src/utils/expressDraftSession.ts": "964e1a99e25ac90f1cd3b9788aecea1150edf2836a25ff9ab70a1ab76011af68",
+    "src/utils/instructionBookDraft.ts": "ecf57015b9ec54a4b7070c072a7bc4df4582207a3f34e824889ebe3349cd528a",
+    "src/utils/navigationGuard.ts": "eb4f4919ba3714f40aa715c41ce10537fe7193bce9190898e424829ede52bf0b",
+    "src/utils/studioEntry.ts": "df8c8c625eedcf08dc96082576737fad90e7ac869993bfdd80383c671ac5f92d",
+    "src/utils/technicalInstructionDraft.ts": "5b546e0018a01af2737c4cbf7ffcb2ec3f5eddeccd1296fc2afeacad621128a5",
+    "src/utils/useWizardDraft.ts": "fbd28f04f7978f56047e5ae2e179dd19b15b8ca8c0d8d3fd57ce4db2c9bc23b0",
+    "src/utils/wizardFiles.ts": "9fcfa0f3eaaefd8f08401e94e12c07968eb47fbae92b2283149d2886ee136345"
+  },
+  "validation": {
+    "draftBehavior": {
+      "passed": 27,
+      "failed": 0
+    },
+    "scenarioContracts": {
+      "passed": 83,
+      "failed": 0
+    },
+    "scenarioRoutes": {
+      "passed": 61,
+      "failed": 0
+    },
+    "typecheck": "exit 0",
+    "build": "exit 0; existing chunk size warning",
+    "fullNpmTest": "exit 0 before final guest-claim/keepalive/reapproval refinements; all affected suites, browser, types and build rerun afterwards",
+    "fullNpmTestLog": "/tmp/wizard-full-npm-test.log",
+    "githubActions": "workflow updated; not run on GitHub for these uncommitted changes"
+  },
+  "browser": {
+    "mode": "Real App + CSS + SQLite/routes/media; identity, provider and public web fixtures",
+    "productionAcceptance": false,
+    "checks": [
+      "TXT, PDF and DOCX text extracted without AI",
+      "unapproved sources disable generation",
+      "technical web search and import need separate approval",
+      "source above 64 KiB reaches real SQLite intact",
+      "technical proposal retains unresolved questions and citation",
+      "unverified instruction blocks book creation",
+      "editing a verified step requires renewed review",
+      "reviewed technical step enables book creation",
+      "instruction to book skips extra AI",
+      "photo upload does not trigger hidden AI",
+      "photo analysis is explicit and unapproved",
+      "book handoff preserves reviewed name and photo description",
+      "editing an AI chapter keeps its origin",
+      "book handoff contains deterministic semantic tags",
+      "browser has no JavaScript errors"
+    ],
+    "shots": [
+      {
+        "name": "technical-mobile-dark",
+        "width": 390,
+        "scroll": 390,
+        "shell": true,
+        "header": true,
+        "backdrop": true
+      },
+      {
+        "name": "characters-photo-desktop-dark",
+        "width": 1440,
+        "scroll": 1440,
+        "shell": true,
+        "header": true,
+        "backdrop": true
+      },
+      {
+        "name": "book-structure-desktop-dark",
+        "width": 1440,
+        "scroll": 1440,
+        "shell": true,
+        "header": true,
+        "backdrop": true
+      },
+      {
+        "name": "technical-desktop-light",
+        "width": 1440,
+        "scroll": 1440,
+        "shell": true,
+        "header": true,
+        "backdrop": true
+      }
+    ],
+    "errors": []
+  },
+  "browserArtifacts": "/tmp/wizard-scenarios-ui",
+  "externalWebProbe": {
+    "officialManual": "getaddrinfo EAI_AGAIN docs.arduino.cc",
+    "technicalSearch": "DNS timeout; production connectivity not verified"
+  },
+  "productionAcceptance": false
+}

@@ -1,3 +1,6 @@
+import { aiDraftText } from '../../shared/aiTextOrigin';
+import { WorldSettingPanel } from './WorldSettingPanel';
+import { ManuscriptTagPanel } from './ManuscriptTagPanel';
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { useEditor, useEditorState, EditorContent, type Editor } from '@tiptap/react';
 import type { Node as PMNode } from '@tiptap/pm/model';
@@ -361,6 +364,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
   promptGenerateTick = 0,
 }) => {
   const { t, lang: uiLang } = useLanguage();
+  const aiReviewerRef = useRef(authUserId); aiReviewerRef.current = authUserId;
   // Акцент «Сонечка»: кольоровий текст тулбарів і панелей слідує за
   // вибраним кольором сонця (той самий механізм, що й у HeaderNav).
   const sunVars = useSunAccentVars();
@@ -895,6 +899,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
       {
         onRequestAiText: onRequestAiTextUa,
         isGeneratingAiText,
+        reviewer: () => aiReviewerRef.current || 'local-author',
+        acceptedLabel: uiLang === 'en' ? 'AI generated · accepted by author' : 'Згенеровано ШІ · прийнято автором',
         aiDraftLabel: t('editor.aiDraftLabel'),
         aiDraftReviewLabel: t('editor.aiDraftReviewLabel'),
         aiDraftRejectLabel: t('editor.aiDraftRejectLabel'),
@@ -922,6 +928,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
       {
         onRequestAiText: onRequestAiTextEn,
         isGeneratingAiText,
+        reviewer: () => aiReviewerRef.current || 'local-author',
+        acceptedLabel: 'AI generated · accepted by author',
         aiDraftLabel: 'AI draft',
         aiDraftReviewLabel: '✓ Mark as reviewed',
         aiDraftRejectLabel: 'Reject AI addition',
@@ -1908,7 +1916,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
       if (!editor) return 'error';
       const text = String(data.text || '').trim();
       if (!text) return 'error';
-      const snippet = `[AI-DRAFT]\n\n${text}\n\n[/AI-DRAFT]`;
+      const snippet = aiDraftText(text);
       editor.chain().focus().insertContentAt(getPos() + 1, markerSnippetToNodes(snippet)).run();
       return 'ok';
     } catch {
@@ -2575,7 +2583,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
       // навпіл замість того, щоб лягти окремим блоком під виділеним місцем.
       const $to = source.editor.state.doc.resolve(source.to);
       const insertAt = $to.depth > 0 ? $to.after(1) : source.to;
-      const snippet = `[AI-DRAFT]\n\n${text}\n\n[/AI-DRAFT]`;
+      const snippet = aiDraftText(text);
       source.editor.chain().focus().insertContentAt(insertAt, markerSnippetToNodes(snippet)).run();
     } catch {
       setAiEngineToast(t('editor.selectionAiFailed'));
@@ -2625,7 +2633,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
     const pos = Math.min(src?.to ?? editor.state.doc.content.size, editor.state.doc.content.size);
     const $to = editor.state.doc.resolve(pos);
     const insertAt = $to.depth > 0 ? $to.after(1) : pos;
-    const snippet = `[AI-DRAFT]\n\n${text}\n\n[/AI-DRAFT]`;
+    const snippet = aiDraftText(text);
     editor.chain().focus().insertContentAt(insertAt, markerSnippetToNodes(snippet)).run();
   };
 
@@ -5981,6 +5989,13 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 {/* Хто в сцені (Т2.3 В2): герої розділу з портретами з бібліотеки
                     ілюстрацій і ілюстрації сцени — з ядра; без ядра не показується. */}
                 <SceneVisualsPanel bookId={book.id} sectionId={activeSection?.id} refreshKey={rightPanelTab} />
+                <WorldSettingPanel book={book} onUpdateBook={onUpdateBook} chapterId={activeChapter?.id} sectionId={activeSection?.id}
+                  actor={authUserId || undefined} readOnly={isReader}
+                  onDiscuss={onDiscussInChat}
+                  onInsertAtCursor={text=>{if(!isReader) uaEditor?.chain().focus().insertContent(markerSnippetToNodes(text)).run();}}/>
+                <ManuscriptTagPanel book={book} onDiscuss={onDiscussInChat}
+                  onNavigate={handleNavigateToSearchMatch}/>
+
 
                 {/* Scene Participants Section */}
                 {renderChapterCast()}
