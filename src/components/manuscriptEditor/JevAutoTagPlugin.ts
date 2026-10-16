@@ -12,6 +12,12 @@ import {
 
 export interface JevAutoTagOptions {
   getCharacters: () => CharacterMentionEntry[];
+  /**
+   * Current book identity supplied directly by the manuscript host.
+   * Character.bookId remains a compatibility fallback, but a book with zero
+   * characters must still be able to load its whole-book entity registry.
+   */
+  getBookId: () => string | null | undefined;
   getCoreEntities: () => CoreEntity[];
   threshold: number;
   isEnglishUi: () => boolean;
@@ -64,7 +70,15 @@ function collectLocalCandidates(docText: string, characters: CharacterMentionEnt
   return Array.from(out.values());
 }
 
-function resolveBookId(characters: CharacterMentionEntry[]): string | null {
+function resolveBookId(
+  explicitBookId: string | null | undefined,
+  characters: CharacterMentionEntry[],
+): string | null {
+  const explicit = clean(explicitBookId || '');
+  if (explicit) return explicit;
+
+  // Compatibility fallback for older extension hosts that do not yet pass
+  // getBookId explicitly. It must never override the current book id.
   for (const character of characters as BookAwareCharacterMentionEntry[]) {
     const id = clean(character.bookId || '');
     if (id) return id;
@@ -104,6 +118,7 @@ export const JevAutoTagPlugin = Extension.create<JevAutoTagOptions>({
   addOptions() {
     return {
       getCharacters: () => [],
+      getBookId: () => null,
       getCoreEntities: () => [],
       threshold: 0.65,
       isEnglishUi: () => false,
@@ -178,7 +193,7 @@ export const JevAutoTagPlugin = Extension.create<JevAutoTagOptions>({
                   const wholeDocText = view.state.doc.textBetween(0, view.state.doc.content.size, '\n', '\n');
                   const characters = options.getCharacters();
                   const localCandidates = collectLocalCandidates(wholeDocText, characters);
-                  const bookId = resolveBookId(characters);
+                  const bookId = resolveBookId(options.getBookId(), characters);
 
                   let serverCandidates: JevEntityCandidate[] = [];
                   let registrySource: 'whole-book' | 'local-fallback' = 'local-fallback';
