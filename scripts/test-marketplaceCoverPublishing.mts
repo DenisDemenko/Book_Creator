@@ -44,18 +44,20 @@ assert.match(bookRoutes, /Cache-Control/);
 assert.match(bookRoutes, /public, max-age=86400/);
 assert.match(bookRoutes, /app\.post\('\/api\/books\/:id\/artifact\/cover'/);
 
-// Publication cannot silently create a blank storefront card.
-assert.match(pdfRoutes, /readArtifact\(bookId, 'cover', format\)/);
-assert.match(pdfRoutes, /readArtifact\(bookId, 'cover', 'digital'\)/);
-assert.match(pdfRoutes, /coverUrl/);
-assert.match(pdfRoutes, /\/api\/public\/books\/\$\{encodeURIComponent\(bookId\)\}\/cover/);
+// Stored publication cannot silently create a blank storefront card.
+assert.match(pdfRoutes, /readArtifact\(stored\.id, 'cover', format\)/);
+assert.match(pdfRoutes, /readArtifact\(stored\.id, 'cover', 'digital'\)/);
+assert.match(pdfRoutes, /const coverUrl =/);
+assert.match(pdfRoutes, /\/api\/public\/books\/\$\{encodeURIComponent\(stored\.id\)\}\/cover/);
 assert.match(pdfRoutes, /publishBookToMarketplace/);
-assert.match(pdfRoutes, /uploadMarketplaceBookCover/);
-assert.match(pdfRoutes, /bytes:\s*coverArtifact\.bytes/);
+assert.match(pdfRoutes, /attachBookFileToMarketplace/);
+assert.match(pdfRoutes, /bytes:\s*cover\.bytes/);
+assert.match(pdfRoutes, /kind:\s*'cover'/);
 
 // Marketplace bridge receives both a URL fallback and binary cover upload.
 assert.match(bridge, /coverUrl:\s*input\.coverUrl/);
-assert.match(bridge, /export async function uploadMarketplaceBookCover/);
-assert.match(bridge, /image\/png/);
+assert.match(bridge, /export async function attachBookFileToMarketplace/);
+assert.match(bridge, /export type BridgeFileKind = 'attachment' \| 'cover' \| 'sample'/);
+assert.match(bridge, /form\.append\('kind', input\.kind \|\| 'attachment'\)/);
 
 console.log('Marketplace Cover Designer publishing contract: OK');
