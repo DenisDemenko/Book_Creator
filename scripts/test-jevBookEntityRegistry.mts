@@ -142,5 +142,21 @@ assert.match(pluginSource, /loadJevBookEntityCandidates/);
 assert.match(pluginSource, /mergeJevEntityCandidates\(serverCandidates, localCandidates\)/);
 assert.match(pluginSource, /registrySource: 'whole-book' \| 'local-fallback'/);
 assert.match(pluginSource, /proposedNewEntities \[\]/, 'plugin documentation must preserve no-invention invariant');
+assert.match(pluginSource, /getBookId: \(\) => string \| null \| undefined/);
+assert.match(pluginSource, /resolveBookId\(options\.getBookId\(\), characters\)/);
+assert.match(pluginSource, /if \(explicit\) return explicit;/, 'explicit manuscript book id must win over character fallback');
 
-console.log(`JEV whole-book entity registry contract: OK (${candidates.length} candidates)`);
+const extensionsSource = await fs.readFile(new URL('../src/components/manuscriptEditor/extensions.ts', import.meta.url), 'utf8');
+assert.match(extensionsSource, /getBookId\?: \(\) => string \| null \| undefined/);
+assert.match(extensionsSource, /getBookId: getBookId \|\| \(\(\) => null\)/);
+
+const editorSource = await fs.readFile(new URL('../src/components/EditorView.tsx', import.meta.url), 'utf8');
+const explicitBookIdCallbacks = editorSource.match(/\(\) => bookRef\.current\.id/g) || [];
+assert.equal(explicitBookIdCallbacks.length, 2, 'UA and EN manuscript editors must both pass the current book id explicitly');
+assert.match(
+  editorSource,
+  /\(\) => entityTagsVisibleRef\.current,\s*\(\) => langRef\.current,\s*\(\) => bookRef\.current\.id\s*\)/,
+  'book id must be the final manuscript extension callback after UI language',
+);
+
+console.log(`JEV whole-book entity registry contract: OK (${candidates.length} candidates; explicit charless-book id wired)`);
