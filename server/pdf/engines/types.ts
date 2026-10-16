@@ -44,12 +44,23 @@ export interface PdfRenderRequest {
   theme?: string;
 }
 
+/** KDP-specific facts that routes/UI used to read by bypassing the registry. */
+export interface PdfPrintInfo {
+  trimId: string;
+  gutterMm: number;
+  passes: number;
+  designerNoteUk?: string;
+  warningsUk: string[];
+}
+
 /** Native engine result. `pageMap` may be omitted and is normalized by registry.ts. */
 export interface PdfRenderResult {
   bytes: Uint8Array;
   pageCount: number;
   engineId: PdfEngineId;
   pageMap?: CanonicalPageMap;
+  /** Present for a print render that has production-specific metadata. */
+  printInfo?: PdfPrintInfo;
   /** false означає, що макет Studio виконано лише частково. */
   honoredSpec: boolean;
   /** Що саме рушій зробив інакше. */
