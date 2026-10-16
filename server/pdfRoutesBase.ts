@@ -28,6 +28,7 @@ import { bookToPdfInput, specFromBook } from './pdf/pdfFromBook';
 import { normalizeDesignResult, parseBookPdfDesignResponse } from './pdf/pdfDesignPrompt';
 import { clampSamplePages, extractSamplePages } from './pdf/pdfSample';
 import { resolveBookPdfEngineId } from './pdf/enginePreference';
+import { readPdfRenderManifest } from './pdf/renderManifest';
 import { publicOriginFrom } from './publicOrigin';
 import {
   getBook as getStoredBook,
@@ -281,20 +282,6 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
         return res.status(400).json({ error: 'Не вказано жодної редакції.', kind: 'bad_input' });
       }
 
-      /*
-        ОБКЛАДИНКА — УМОВА ПУБЛІКАЦІЇ, А НЕ ПРИКРАСА.
-        Картка без зображення — це білий прямокутник у каталозі поруч із
-        чужими оформленими товарами; вона не продає, а знецінює. Тому
-        перевірка стоїть ДО створення лістинга: без обкладинки у вітрині не
-        зʼявляється нічого, замість того щоб зʼявитись і чекати на другу
-        кнопку, яку хтось забуде натиснути.
-
-        Малює її браузер (серверу нічим растеризувати PDF), тож приходить
-        вона готовим зображенням. Межа розміру — той самий захист від
-        «успішного» порожнього полотна, що й на клієнті: суцільна заливка
-        стискається майже в нуль, і білий аркуш інакше доїхав би сюди як
-        валідна картинка.
-      */
       const coverRaw = String(req.body?.coverBase64 || '');
       const coverMatch = /^data:(image\/[a-z+]+);base64,(.+)$/i.exec(coverRaw);
       const coverMime = coverMatch ? coverMatch[1] : 'image/png';
@@ -315,11 +302,6 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
         });
       }
 
-      /*
-        Безкоштовний уривок: перші сторінки книги, відкриті всім.
-        Вимикається явно (`sample: false`) — за замовчуванням увімкнений,
-        бо саме текст, а не опис, вирішує покупку.
-      */
       const sampleEnabled = req.body?.sample !== false;
       const samplePages = clampSamplePages(req.body?.samplePages);
 
@@ -328,14 +310,6 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
       const publishOwnerId = (req.principal?.id as string) || null;
       const results = [];
 
-      /*
-        Макет вирішується ОДИН раз на всю публікацію, а не в циклі редакцій.
-        Раніше `buildSpec` стояв усередині циклу — для варіанта «дизайн» це
-        означало два платні виклики моделі на одну книгу і, що гірше, два
-        РІЗНІ макети: цифрова й друкована редакції тієї самої книги могли
-        вийти з різним кеглем і полями. Друкована й далі накладає норми KDP
-        поверх цього макета — але поверх одного й того самого.
-      */
       const variant: LayoutVariant = editions.some((e) => e.variant === 'design') ? 'design' : 'code';
       const { spec, modelId } = await buildSpec(
         book,
@@ -363,9 +337,6 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           ? engines.find((e) => e.id === engineId)?.label || engineId
           : undefined;
 
-        // Nova, DesignCraft, Chromium і Pandoc тепер проходять через одну
-        // межу. Registry сам відхиляє print для рушія без supportsPrint, тож
-        // окремої прихованої KDP-гілки тут більше немає.
         const rendered = await renderWithEngine(engineId, {
           book: normalizedBook,
           kind: 'book',
@@ -433,10 +404,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           await unpublishBookFromMarketplace(
             { bookId: String(book.id), format, engineId: bridgeEngineId },
             { settings }
-          ).catch(() => {
-            // Відкіт теж міг не вдатися — але справжня причина в
-            // coverErr, і підміняти її помилкою прибирання не можна.
-          });
+          ).catch(() => undefined);
           throw new MarketplaceBridgeError(
             `Обкладинку не вдалося прикріпити (${(coverErr as Error)?.message || 'невідома причина'}). ` +
               `Редакцію «${format}» знято з вітрини, щоб там не лишилась картка без зображення.`,
@@ -515,12 +483,6 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
   // =========================================================================
   // Робота з СЕРВЕРНОЮ копією книги
   // =========================================================================
-  //
-  // Та сама послідовність, що й у маршрутах вище (макет → PDF → уривок), але
-  // книга береться зі сховища, а не з тіла запиту. Саме тому ці кроки можуть
-  // виконуватись без відкритої вкладки: серверу більше нічого не потрібно від
-  // браузера, крім обкладинки — її він намалювати не вміє, тож вона теж
-  // лежить у сховищі як артефакт.
 
   /** Зібрати й зберегти файли книги. Нічого не публікує. */
   async function buildArtifacts(params: {
@@ -651,8 +613,35 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
         );
       }
 
-      // Обкладинка так само обовʼязкова, як і при публікації з браузера — але
-      // тепер вона береться зі сховища, а не з тіла запиту.
+      // Provenance належить конкретному PDF, а не поточному налаштуванню
+      // книги. Якщо manifest є, він має збігатися з артефактом; змішувати
+      // карту/engineId від іншого render заборонено. Старі артефакти без
+      // manifest історично збирались лише Nova, тому для них є явний legacy
+      // fallback на DEFAULT_PDF_ENGINE, але не на поточний preference книги.
+      const renderManifest = await readPdfRenderManifest(stored.id, format);
+      if (renderManifest) {
+        const matchesPdf =
+          renderManifest.bookRevision === pdf.record.bookRevision &&
+          renderManifest.filename === pdf.record.filename &&
+          renderManifest.sizeBytes === pdf.record.sizeBytes &&
+          renderManifest.pageCount === pdf.record.pageCount &&
+          renderManifest.builtAt === pdf.record.builtAt;
+        if (!matchesPdf) {
+          throw new MarketplaceBridgeError(
+            `Render manifest для редакції «${format}» не відповідає збереженому PDF. Перезберіть PDF перед публікацією.`,
+            'rejected',
+            409
+          );
+        }
+      }
+      const engineId = renderManifest?.engineId || DEFAULT_PDF_ENGINE;
+      const bridgeEngineId = engineId === DEFAULT_PDF_ENGINE ? undefined : engineId;
+      const preferredEngineId = resolveBookPdfEngineId(book);
+      const engineStaleUk =
+        engineId !== preferredEngineId
+          ? `PDF зібраний рушієм «${engineId}», а для книги зараз обрано «${preferredEngineId}». Публікується саме вже зібраний PDF; перезберіть його, якщо потрібен новий рушій.`
+          : undefined;
+
       const cover = (await readArtifact(stored.id, 'cover', format)) || (await readArtifact(stored.id, 'cover', 'digital'));
       if (!cover) {
         throw new MarketplaceBridgeError(
@@ -663,28 +652,11 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
         );
       }
 
-      // Застарілий файл — не привід відмовити, але про це треба сказати:
-      // автор міг правити книгу після складання.
       const staleUk =
         pdf.record.bookRevision !== stored.revision
           ? `Увага: PDF зібраний з ревізії ${pdf.record.bookRevision}, а книга вже ${stored.revision}. Складіть файли заново, якщо правки мають потрапити покупцеві.`
           : undefined;
 
-      /*
-        ОБКЛАДИНКА ЇДЕ ПОСИЛАННЯМ У САМОМУ СТВОРЕННІ КАРТКИ, а не тільки
-        окремим файлом після нього.
-
-        Причина знайдена живим прогоном: у задеплоєного приймача просто
-        НЕМАЄ маршруту `/bridge/books/:id/file` — він зʼявився в мості
-        пізніше, ніж востаннє деплоївся маркетплейс. Тобто поки той не
-        оновлять, жоден файл туди не потрапить у принципі. А `coverUrl`
-        приймач розуміє з самого початку й кладе просто в картку — отже
-        зображення можна дати вітрині вже зараз, не чекаючи ні на що.
-
-        `?v=` — не забаганка: маркетплейс зберігає САМЕ РЯДОК посилання, і
-        без мітки версії нова обкладинка тієї самої книги приїхала б за
-        тією ж адресою, а браузер покупця показував би стару з кешу.
-      */
       const publicBase = publicOriginFrom(params.req);
       const coverStamp = Date.parse(cover.record.builtAt || '') || 0;
       const coverUrl =
@@ -702,23 +674,11 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           priceMinor: Math.round(priceMinor),
           coverUrl,
           sellerSlug: params.sellerSlug,
+          engineId: bridgeEngineId,
         },
         { settings }
       );
 
-      /*
-        ФАЙЛ КНИГИ БІЛЬШЕ НЕ ЗРИВАЄ ПУБЛІКАЦІЮ.
-
-        Було: виняток на цьому кроці валив усю публікацію, і автор бачив
-        помилку там, де насправді картка вже стояла у вітрині — а заразом
-        не виконувались наступні кроки, зокрема обкладинка. Тепер невдача
-        файла лишається невдачею файла: картка з обкладинкою й ціною
-        живе, а причина сказана окремим полем.
-
-        Це НЕ тихий відкіт: ми нічого не підміняємо іншим і не вдаємо
-        успіх — `attached: false` і текст причини йдуть у відповідь, і
-        панель має їх показати.
-      */
       let attached: Awaited<ReturnType<typeof attachBookFileToMarketplace>> | null = null;
       let fileErrorUk: string | undefined;
       try {
@@ -729,6 +689,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
             filename: pdf.record.filename,
             mimeType: pdf.record.mimeType,
             bytes: pdf.bytes,
+            engineId: bridgeEngineId,
           },
           { settings }
         );
@@ -738,13 +699,6 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           `${(fileErr as Error)?.message || 'невідома причина'}`;
       }
 
-      /*
-        Обкладинку окремим файлом однаково пробуємо: коли приймач оновлять,
-        зображення в його власному сховищі краще за посилання на нас —
-        воно переживе і зміну домену Студії, і її недоступність. Але тепер
-        це не привід знімати картку з вітрини: `coverUrl` вище вже дав їй
-        зображення.
-      */
       let coverAttached: Awaited<ReturnType<typeof attachBookFileToMarketplace>> | null = null;
       let coverErrorUk: string | undefined;
       try {
@@ -756,6 +710,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
             mimeType: cover.record.mimeType,
             bytes: cover.bytes,
             kind: 'cover',
+            engineId: bridgeEngineId,
           },
           { settings }
         );
@@ -779,6 +734,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
               mimeType: sample.record.mimeType,
               bytes: sample.bytes,
               kind: 'sample',
+              engineId: bridgeEngineId,
             },
             { settings }
           );
@@ -790,6 +746,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
 
       results.push({
         format,
+        engineId,
         published,
         attached,
         fileErrorUk,
@@ -799,8 +756,14 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
         sample: sample
           ? { pages: sample.record.pageCount, attached: sampleAttached, errorUk: sampleErrorUk }
           : null,
-        pdf: { pageCount: pdf.record.pageCount, sizeBytes: pdf.record.sizeBytes },
+        pdf: {
+          pageCount: pdf.record.pageCount,
+          sizeBytes: pdf.record.sizeBytes,
+          pageMap: renderManifest?.pageMap || null,
+          provenance: renderManifest ? 'render-manifest' : 'legacy-nova',
+        },
         staleUk,
+        engineStaleUk,
       });
     }
 
