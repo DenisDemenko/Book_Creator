@@ -45,6 +45,9 @@ jobs:
       - name: Cover production consistency contract
         run: npx tsx scripts/test-coverProductionConsistency.mts
 
+      - name: DesignCraft KDP print contract
+        run: npx tsx scripts/test-designcraftKdpEngine.mts
+
       - name: Writer export RBAC contract
         run: npx tsx scripts/test-writerExportRbac.mts
 
