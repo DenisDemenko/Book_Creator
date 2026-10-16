@@ -28,6 +28,79 @@ const ENGINES: Partial<Record<PdfEngineId, PdfEngine>> = {
   // gamma: свідомо НЕ зареєстрована. Код підсистеми лишається на місці.
 };
 
+interface WriterEngineProfile {
+  badgeUk: string;
+  summaryUk: string;
+  sourceUk: string;
+  bestForUk: string[];
+  featuresUk: string[];
+  recommendationUk: string;
+}
+
+/**
+ * Людський каталог можливостей. Він живе поруч із registry, а не у React:
+ * API, Studio, publish і майбутні клієнти бачать однакове пояснення того,
+ * навіщо існує кожен renderer. Тут описується лише те, що реально є в коді.
+ */
+const WRITER_ENGINE_PROFILES: Partial<Record<PdfEngineId, WriterEngineProfile>> = {
+  nova: {
+    badgeUk: 'Друк / KDP',
+    summaryUk: 'Власний детермінований PDF-рушій Fusion Lab для надійної книжкової верстки та друку.',
+    sourceUk: 'Власний renderer Nova на pdf-lib',
+    bestForUk: ['романи й проза', 'друковані книги', 'Amazon KDP', 'фінальний production PDF'],
+    featuresUk: [
+      'дзеркальні внутрішні/зовнішні поля',
+      'корінець за фактичною кількістю сторінок',
+      'trim і bleed для KDP',
+      'точне виконання PdfLayoutSpec',
+      'не залежить від зовнішнього CLI',
+    ],
+    recommendationUk: 'Обирайте для фінального друку, KDP і випадків, де важливі повторюваність та фізичні поля книги.',
+  },
+  designcraft: {
+    badgeUk: 'Дизайн книги',
+    summaryUk: 'DTP-рушій для художньої композиції сторінки, тем, семантичних блоків та складнішої роботи з ілюстраціями.',
+    sourceUk: 'DesignCraft CLI / native threaded layout',
+    bestForUk: ['артбуки', 'дитячі книги', 'навчальні видання', 'брендовані та ілюстровані книги'],
+    featuresUk: [
+      '15 дизайн-систем Studio і custom themes',
+      'потокові текстові фрейми без overset',
+      'семантичні стилі та декоративні блоки',
+      'розміщення ілюстрацій у DTP-макеті',
+      'native TOC і точний PageMap',
+    ],
+    recommendationUk: 'Обирайте, коли художній характер і композиція сторінки важливіші за KDP-специфічну production-геометрію.',
+  },
+  chromium: {
+    badgeUk: 'HTML / CSS',
+    summaryUk: 'Сучасний браузерний renderer: книга верстається HTML/CSS так само гнучко, як складна веб-сторінка.',
+    sourceUk: 'Headless Chromium / CSS print layout',
+    bestForUk: ['цифрові PDF', 'таблиці', 'нестандартні CSS-стилі', 'змішаний текст + графіка'],
+    featuresUk: [
+      'HTML/CSS типографіка',
+      'реальні GFM-таблиці',
+      'фони, рамки та складні заголовки',
+      'CSS wrapping і сучасна веб-розмітка',
+      'точні landmarks із фінального PDF',
+    ],
+    recommendationUk: 'Обирайте для гнучкого цифрового PDF та макетів, які природніше описувати HTML/CSS, а не друкарськими примітивами.',
+  },
+  pandoc: {
+    badgeUk: 'Наука / формули',
+    summaryUk: 'Pandoc + XeLaTeX/Eisvogel для академічної типографіки, STEM-текстів і математичної Markdown-розмітки.',
+    sourceUk: 'Pandoc + XeLaTeX + Eisvogel',
+    bestForUk: ['наукові книги', 'математика й фізика', 'підручники STEM', 'технічні та академічні видання'],
+    featuresUk: [
+      'математичні формули з Pandoc Markdown',
+      'словникові переноси',
+      'лігатури й мікротипографіка',
+      'академічний зміст до рівня секцій',
+      'безпечний markdown-raw_tex: авторський raw TeX не виконується',
+    ],
+    recommendationUk: 'Обирайте для формул, наукового тексту та видань, де якість набору важливіша за швидкість рендера.',
+  },
+};
+
 /** Дозволяє під'єднати рушій із його файлу, не редагуючи цей словник вручну. */
 export function registerPdfEngine(engine: PdfEngine): void {
   ENGINES[engine.id] = engine;
@@ -47,6 +120,12 @@ export interface PdfEngineDescription {
   reasonUk?: string;
   fixUk?: string;
   isDefault: boolean;
+  badgeUk?: string;
+  summaryUk?: string;
+  sourceUk?: string;
+  bestForUk?: string[];
+  featuresUk?: string[];
+  recommendationUk?: string;
 }
 
 /** Перелік для інтерфейсу. Перевірки доступності виконуються паралельно. */
@@ -79,6 +158,7 @@ export async function listPdfEngines(
     reasonUk: state.ok ? undefined : state.reasonUk,
     fixUk: state.ok ? undefined : state.fixUk,
     isDefault: engine.id === DEFAULT_PDF_ENGINE,
+    ...(WRITER_ENGINE_PROFILES[engine.id] || {}),
   }));
 }
 
