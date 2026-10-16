@@ -49,7 +49,9 @@ jobs:
         run: |
           set -euo pipefail
           git diff --check
-          test "$(git diff --numstat -- src/components/EditorView.tsx | awk '{print $1":"$2}')" = "2:0"
+          # Each host changes the existing lang callback to add a comma
+          # (+1/-1) and inserts the explicit book-id callback (+1).
+          test "$(git diff --numstat -- src/components/EditorView.tsx | awk '{print $1":"$2}')" = "4:2"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/components/EditorView.tsx
