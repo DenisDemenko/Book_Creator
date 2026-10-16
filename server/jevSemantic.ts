@@ -1,5 +1,14 @@
 import type { Express } from 'express';
 import { requireAuth, requirePermission } from './auth';
+import {
+  HttpJevAdapter,
+  JEV_MODEL,
+  jevKeyFromEnv,
+  jevModelFromEnv,
+  noulProbability,
+  type JevAdapter,
+} from './ai/adapters/jev/index';
+import type { JevQuestion } from './ai/contracts';
 
 export interface JevEntityCandidate {
   id: string;
@@ -20,18 +29,6 @@ export interface JevSemanticResult {
   model: string;
 }
 
-type JevQuestion = {
-  type: 'noul';
-  instructions: string;
-};
-
-type JevResponse = {
-  model?: string;
-  answers?: Record<string, unknown>;
-};
-
-const DEFAULT_BASE_URL = 'https://api.typesafe.ai';
-const DEFAULT_MODEL = 'jev-latest';
 const BATCH_SIZE = 48;
 const DEFAULT_THRESHOLD = 0.65;
 
@@ -62,23 +59,16 @@ export function buildJevEntityBatches(candidates: JevEntityCandidate[]): JevEnti
   return batches;
 }
 
-export function readNoulProbability(answer: unknown): number | null {
-  if (typeof answer === 'number' && Number.isFinite(answer)) return clamp01(answer);
-  if (!answer || typeof answer !== 'object') return null;
-  const record = answer as Record<string, unknown>;
-  for (const key of ['noul', 'probability', 'confidence', 'value']) {
-    const value = record[key];
-    if (typeof value === 'number' && Number.isFinite(value)) return clamp01(value);
-  }
-  return null;
-}
+/** Backward-compatible export used by the regression contract. */
+export const readNoulProbability = noulProbability;
 
-function questionFor(candidate: JevEntityCandidate): JevQuestion {
-  const context = candidate.description ? ` Context: ${candidate.description}` : '';
+function questionFor(candidate: JevEntityCandidate, index: number): JevQuestion {
+  const context = candidate.description ? ` Контекст: ${candidate.description}` : '';
   return {
-    type: 'noul',
+    id: `entity_${index}`,
+    kind: 'noul',
     instructions: safeInstruction(
-      `Is the existing book entity “${candidate.name}” (${candidate.slug}) materially present, referenced, or semantically active in this exact text? Answer yes only when the text supports this entity; do not infer unrelated entities.${context}`,
+      `Чи є наявна сутність книги «${candidate.name}» (${candidate.slug}) явно присутньою, згаданою або семантично активною саме в цьому тексті? Відповідай «так» лише коли текст підтримує цю сутність; не домислюй інші сутності.${context}`,
     ),
   };
 }
@@ -88,55 +78,46 @@ export interface ClassifyWithJevOptions {
   candidates: JevEntityCandidate[];
   threshold?: number;
   apiKey?: string;
-  baseUrl?: string;
   model?: string;
+  adapter?: JevAdapter;
   fetchImpl?: typeof fetch;
 }
 
 /**
- * Classifies only entities already known to the book. JEV is a typed decision
- * model, not a generator, so this function deliberately never invents names.
- * Unknown/new entities stay an explicit future author-approved workflow.
+ * Класифікує лише сутності, які вже існують у книзі.
+ *
+ * Transport не дублюється: тут використовується той самий `HttpJevAdapter`,
+ * що Character Decision Engine (`server/core/jevLevels.ts`). Отже pinned
+ * model, Noul parsing, timeout та TypeSafe REST contract єдині для героя,
+ * workflow-вузлів і semantic tagging.
  */
 export async function classifyExistingEntitiesWithJev(
   options: ClassifyWithJevOptions,
 ): Promise<JevSemanticResult> {
   const text = options.text.trim();
-  if (!text) return { matches: [], proposedNewEntities: [], provider: 'jev', model: options.model || DEFAULT_MODEL };
+  const model = options.model ?? jevModelFromEnv();
+  if (!text) return { matches: [], proposedNewEntities: [], provider: 'jev', model };
 
-  const apiKey = options.apiKey ?? process.env.JEV_AI_API_KEY ?? process.env.JEV_API_KEY ?? '';
-  if (!apiKey) throw new Error('JEV_NOT_CONFIGURED');
+  const apiKey = options.apiKey ?? jevKeyFromEnv() ?? '';
+  const adapter = options.adapter ?? (
+    apiKey ? new HttpJevAdapter(apiKey, { model, fetchImpl: options.fetchImpl }) : null
+  );
+  if (!adapter?.askState) throw new Error('JEV_NOT_CONFIGURED');
 
-  const model = options.model ?? process.env.JEV_MODEL ?? DEFAULT_MODEL;
-  const baseUrl = (options.baseUrl ?? process.env.JEV_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/$/, '');
   const threshold = clamp01(options.threshold ?? DEFAULT_THRESHOLD);
-  const fetchImpl = options.fetchImpl ?? fetch;
   const matches: JevEntityMatch[] = [];
+  let returnedModel = model || JEV_MODEL;
 
   for (const batch of buildJevEntityBatches(options.candidates)) {
-    const questions: Record<string, JevQuestion> = {};
+    const questions = batch.map(questionFor);
+    const raw = await adapter.askState(
+      { text, task: 'existing_book_entity_presence', constraint: 'never_invent_entities' },
+      questions,
+    );
+    returnedModel = raw.model || returnedModel;
+
     batch.forEach((candidate, index) => {
-      questions[`entity_${index}`] = questionFor(candidate);
-    });
-
-    const response = await fetchImpl(`${baseUrl}/v1/systemone`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ state: text, model, questions }),
-    });
-
-    if (!response.ok) {
-      const detail = (await response.text()).slice(0, 500);
-      throw new Error(`JEV_REQUEST_FAILED:${response.status}:${detail}`);
-    }
-
-    const payload = (await response.json()) as JevResponse;
-    const answers = payload.answers ?? {};
-    batch.forEach((candidate, index) => {
-      const confidence = readNoulProbability(answers[`entity_${index}`]);
+      const confidence = noulProbability(raw.answers[`entity_${index}`]);
       if (confidence != null && confidence >= threshold) {
         matches.push({ ...candidate, confidence, source: 'jev' });
       }
@@ -144,7 +125,7 @@ export async function classifyExistingEntitiesWithJev(
   }
 
   matches.sort((a, b) => b.confidence - a.confidence);
-  return { matches, proposedNewEntities: [], provider: 'jev', model };
+  return { matches, proposedNewEntities: [], provider: 'jev', model: returnedModel };
 }
 
 function parseCandidates(value: unknown): JevEntityCandidate[] {
@@ -189,7 +170,7 @@ export function registerJevSemanticRoutes(app: Express): void {
         const message = String((error as Error).message || error);
         if (message === 'JEV_NOT_CONFIGURED') {
           res.status(503).json({
-            error: 'JEV не налаштований на сервері. Потрібен JEV_AI_API_KEY або JEV_API_KEY.',
+            error: 'JEV не налаштований на сервері. Потрібен JEV_API_KEY або TYPESAFE_API_KEY.',
             kind: 'jev_not_configured',
           });
           return;
