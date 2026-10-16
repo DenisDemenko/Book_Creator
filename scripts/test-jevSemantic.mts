@@ -23,18 +23,23 @@ assert.equal(buildJevEntityBatches([
 ]).flat().length, 1);
 console.log('  ✓ malformed and duplicate candidate IDs are filtered');
 
-assert.equal(readNoulProbability(0.82), 0.82);
 assert.equal(readNoulProbability({ noul: 0.91 }), 0.91);
 assert.equal(readNoulProbability({ probability: 1.4 }), 1);
 assert.equal(readNoulProbability({ nope: 1 }), null);
-console.log('  ✓ typed probability parsing is bounded');
+console.log('  ✓ typed probability parsing uses the shared core JEV adapter');
 
 let calls = 0;
 const fetchImpl: typeof fetch = async (_input, init) => {
   calls++;
-  const body = JSON.parse(String(init?.body || '{}')) as { model?: string; state?: string; questions?: Record<string, unknown> };
+  const body = JSON.parse(String(init?.body || '{}')) as {
+    model?: string;
+    state?: { text?: string; task?: string; constraint?: string };
+    questions?: Record<string, unknown>;
+  };
   assert.equal(body.model, 'jev-latest');
-  assert.equal(body.state, 'Марина увійшла до старої бібліотеки.');
+  assert.equal(body.state?.text, 'Марина увійшла до старої бібліотеки.');
+  assert.equal(body.state?.task, 'existing_book_entity_presence');
+  assert.equal(body.state?.constraint, 'never_invent_entities');
   assert.equal(Object.keys(body.questions ?? {}).length, 2);
   return new Response(JSON.stringify({
     model: 'jev-latest',
@@ -49,7 +54,6 @@ const result = await classifyExistingEntitiesWithJev({
     { id: 'loc-park', slug: 'location', name: 'Міський парк' },
   ],
   apiKey: 'test-key',
-  baseUrl: 'https://example.invalid',
   model: 'jev-latest',
   threshold: 0.65,
   fetchImpl,
@@ -82,9 +86,11 @@ const handoff = await readFile(new URL('../src/utils/expressSemanticHandoff.ts',
 assert.match(routes, /registerJevSemanticRoutes\(app\)/);
 assert.match(jev, /\/api\/semantic\/jev\/entities/);
 assert.match(jev, /requirePermission\('canUseAi'\)/);
-assert.match(jev, /JEV_AI_API_KEY/);
+assert.match(jev, /HttpJevAdapter/);
+assert.match(jev, /jevKeyFromEnv/);
+assert.match(jev, /noulProbability/);
 assert.doesNotMatch(jev, /generateText\(/);
-console.log('  ✓ authenticated JEV endpoint is registered and has no generative fallback');
+console.log('  ✓ semantic tagging reuses the authenticated core TypeSafe adapter and has no generative fallback');
 
 assert.match(extensions, /JevAutoTagPlugin\.configure/);
 assert.match(autoTag, /Проставити теги автоматично/);
