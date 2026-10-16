@@ -45,6 +45,9 @@ jobs:
       - name: Canonical PDF pagination contract
         run: npx tsx scripts/test-canonicalPageMap.mts
 
+      - name: PDF engine preference contract
+        run: npx tsx scripts/test-pdfEnginePreference.mts
+
       - name: Chromium final PDF pagination contract
         run: npx tsx scripts/test-chromiumPageMap.mts
 
