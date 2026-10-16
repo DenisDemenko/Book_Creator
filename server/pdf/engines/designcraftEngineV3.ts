@@ -23,6 +23,7 @@ import {
 } from '../designcraft/rtf';
 import { serializeDesigncraftParagraphStyles } from '../designcraft/styleCommands';
 import { extensionForMime, loadImageBytes } from '../../media/imageBytes';
+import { buildDesigncraftCanonicalPageMap } from './designcraftPageMap';
 import {
   PdfEngineError,
   type PdfEngine,
@@ -392,10 +393,11 @@ export const designcraftEngineV3: PdfEngine = {
       const finalDoc = path.join(workDir, 'final.designcraft');
       const frontPages = Array.from({ length: bodyPage - 1 }, (_, i) => i);
       const tocStyles = spec.frontMatter.contentsSections ? ['Heading 1', 'Heading 2'] : ['Heading 1'];
+      const bodyStartNumber = Math.max(1, Math.round(spec.pageNumber.startAt || 1));
       await fs.writeFile(
         finalScript,
         [
-          command('layout.section', { page: bodyPage, startNumber: Math.max(1, Math.round(spec.pageNumber.startAt || 1)), style: 'arabic' }),
+          command('layout.section', { page: bodyPage, startNumber: bodyStartNumber, style: 'arabic' }),
           ...(frontPages.length && (spec.runningHead.show || spec.pageNumber.skipFrontMatter)
             ? [command('layout.pages.applyParent', { pages: frontPages, parent: null })]
             : []),
@@ -405,7 +407,8 @@ export const designcraftEngineV3: PdfEngine = {
           command('toc.update'),
           command('story.get', { story }),
           command('anchored.list', { story }),
-          command('toc.entries', { styles: tocStyles }),
+          // CanonicalPageMap always needs sections even when the visible TOC hides them.
+          command('toc.entries', { styles: ['Heading 1', 'Heading 2'] }),
           command('toc.entries', { styles: ['Heading 1'] }),
         ].join('\n') + '\n',
         'utf8'
@@ -445,12 +448,24 @@ export const designcraftEngineV3: PdfEngine = {
       const pageCount = pdf.getPageCount();
       if (pageCount !== minimized.pageCount) throw new PdfEngineError('designcraft', 'engine', `Кількість сторінок не збігається: PDF=${pageCount}, reflow=${minimized.pageCount}.`);
 
+      const pageMap = buildDesigncraftCanonicalPageMap({
+        book: request.book,
+        toc: Array.isArray(toc) ? toc : [],
+        chapterToc: chapterEntries,
+        pageCount,
+        bodyPage,
+        bodyStartNumber,
+      });
+      if (!pageMap) {
+        notesUk.push('DesignCraft повернув фінальну кількість сторінок, але TOC не вдалося безпечно зіставити зі стабільними id книги; registry залишить лише page-count map.');
+      }
+
       const semanticNames = manuscript.semanticStylesUsed.filter((name) => !['Body', 'Heading 1', 'Heading 2'].includes(name));
       if (semanticNames.length) notesUk.unshift(`Тема DesignCraft застосувала семантичні стилі: ${semanticNames.join(', ')}.`);
       notesUk.unshift(
         `DesignCraft: ${pageCount} стор. (первинно виділено ${allocatedPages}, зайвий хвіст прибрано бінарною перевіркою), без overset, зміст синхронізовано (${chapterEntries.length}/${chapterCount} глав), ${loadedImages} ілюстрацій перевірено.`
       );
-      return { bytes, pageCount, engineId: 'designcraft', honoredSpec: true, notesUk };
+      return { bytes, pageCount, engineId: 'designcraft', pageMap: pageMap || undefined, honoredSpec: true, notesUk };
     } catch (err) {
       if (err instanceof PdfEngineError) throw err;
       throw new PdfEngineError('designcraft', 'engine', `DesignCraft: ${(err as Error).message}`);
