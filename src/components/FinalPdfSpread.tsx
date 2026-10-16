@@ -55,7 +55,7 @@ const PdfPageCanvas: React.FC<PdfPageCanvasProps> = ({ document, pageNumber, zoo
         const page = await document.getPage(pageNumber);
         if (cancelled || !canvasRef.current) return;
 
-        // Render at a useful raster density; CSS/outer zoom controls visual size.
+        // Render at a useful raster density; CSS zoom controls visual size.
         const viewport = page.getViewport({ scale: Math.max(1.25, 1.6 * zoom) });
         const canvas = canvasRef.current;
         const context = canvas.getContext('2d', { alpha: false });
@@ -65,7 +65,7 @@ const PdfPageCanvas: React.FC<PdfPageCanvasProps> = ({ document, pageNumber, zoo
         canvas.height = Math.ceil(viewport.height);
         canvas.style.aspectRatio = `${viewport.width} / ${viewport.height}`;
 
-        renderTask = page.render({ canvas, canvasContext: context, viewport });
+        renderTask = page.render({ canvasContext: context, viewport });
         await renderTask.promise;
         if (!cancelled) setRenderError(null);
       } catch (err) {
@@ -208,7 +208,7 @@ export const FinalPdfSpread: React.FC<FinalPdfSpreadProps> = ({
         )}
       </div>
 
-      <div className="relative grid grid-cols-1 gap-0 rounded-2xl border-4 border-slate-800 bg-[#e2ded6] p-2 shadow-2xl md:grid-cols-2 sm:p-3">
+      <div style={{ zoom }} className="relative grid grid-cols-1 gap-0 rounded-2xl border-4 border-slate-800 bg-[#e2ded6] p-2 shadow-2xl md:grid-cols-2 sm:p-3">
         <div className="pointer-events-none absolute bottom-0 left-1/2 top-0 z-10 hidden w-8 -translate-x-1/2 bg-gradient-to-r from-black/20 via-black/40 to-black/20 md:block" />
         <PdfPageCanvas document={document} pageNumber={leftPageNumber} zoom={zoom} side="left" />
         {rightPageNumber ? (
