@@ -38,6 +38,11 @@ export function calculatePaperSpineThicknessMm(
   return Number((safePages * bulk).toFixed(2));
 }
 
+function roundMm(value: number, decimals = 1): number {
+  const factor = 10 ** decimals;
+  return Math.round((value + Number.EPSILON) * factor) / factor;
+}
+
 export function calculateCoverGeometry(input: {
   pageWidthMm: number;
   pageHeightMm: number;
@@ -55,15 +60,15 @@ export function calculateCoverGeometry(input: {
   const hardcoverAllowance = input.coverType === 'hardcover' ? 2 : 0;
   const spineWidthMm = input.coverType === 'ebook'
     ? 0
-    : Number((paperSpineMm + hardcoverAllowance).toFixed(1));
+    : roundMm(paperSpineMm + hardcoverAllowance);
 
   return {
     pageWidthMm,
     pageHeightMm,
     bleedMm,
     spineWidthMm,
-    fullWrapWidthMm: Number((pageWidthMm * 2 + spineWidthMm + bleedMm * 2).toFixed(1)),
-    fullWrapHeightMm: Number((pageHeightMm + bleedMm * 2).toFixed(1)),
+    fullWrapWidthMm: roundMm(pageWidthMm * 2 + spineWidthMm + bleedMm * 2),
+    fullWrapHeightMm: roundMm(pageHeightMm + bleedMm * 2),
     pageCount,
   };
 }
