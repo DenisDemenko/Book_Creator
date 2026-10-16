@@ -1,11 +1,22 @@
 import React from 'react';
 import type { Book, CoverConfig } from '../../types';
 
+export interface CoverPhysicalFields {
+  backArtUrl?: string;
+  spineArtUrl?: string;
+  wrapArtUrl?: string;
+  useWrapArtwork?: boolean;
+  coverMaterial?: 'coated-paper' | 'hard-board' | 'fabric' | 'textured-paper';
+  lamination?: 'none' | 'matte' | 'gloss' | 'soft-touch';
+}
+
+export type CoverConfigWithPhysical = CoverConfig & CoverPhysicalFields;
+
 interface CoverPhysicalSpecProps {
   book: Book;
-  cover: CoverConfig;
+  cover: CoverConfigWithPhysical;
   spineWidthMm: number;
-  onChange: (patch: Partial<CoverConfig>) => void;
+  onChange: (patch: Partial<CoverConfigWithPhysical>) => void;
 }
 
 export const CoverPhysicalSpec: React.FC<CoverPhysicalSpecProps> = ({
@@ -45,7 +56,7 @@ export const CoverPhysicalSpec: React.FC<CoverPhysicalSpecProps> = ({
           <span className="mb-1 block">Матеріал обкладинки</span>
           <select
             value={cover.coverMaterial ?? 'coated-paper'}
-            onChange={(event) => onChange({ coverMaterial: event.target.value as CoverConfig['coverMaterial'] })}
+            onChange={(event) => onChange({ coverMaterial: event.target.value as CoverPhysicalFields['coverMaterial'] })}
             className="w-full rounded-lg border border-slate-800 bg-slate-900 p-2 text-xs text-slate-200"
           >
             <option value="coated-paper">Крейдований папір</option>
@@ -59,7 +70,7 @@ export const CoverPhysicalSpec: React.FC<CoverPhysicalSpecProps> = ({
           <span className="mb-1 block">Фініш / ламінація</span>
           <select
             value={cover.lamination ?? 'none'}
-            onChange={(event) => onChange({ lamination: event.target.value as CoverConfig['lamination'] })}
+            onChange={(event) => onChange({ lamination: event.target.value as CoverPhysicalFields['lamination'] })}
             className="w-full rounded-lg border border-slate-800 bg-slate-900 p-2 text-xs text-slate-200"
           >
             <option value="none">Без ламінації</option>
