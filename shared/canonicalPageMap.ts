@@ -1,4 +1,11 @@
-export type CanonicalPageMapSource = 'nova-pdf' | 'browser-measured' | 'external-pdf';
+export type CanonicalPageMapSource =
+  | 'nova-pdf'
+  | 'designcraft-toc'
+  | 'chromium-pdf'
+  | 'pandoc-toc'
+  | 'external-pdf';
+
+export type CanonicalPageMapPrecision = 'exact' | 'page-count-only';
 
 export interface CanonicalPageLandmark {
   kind: 'chapter' | 'section';
@@ -15,20 +22,25 @@ export interface CanonicalPageLandmark {
 }
 
 /**
- * Exact pagination contract shared by PDF, TOC, spread preview and navigation.
+ * One normalized pagination contract for every PDF renderer.
  *
- * `pageCount` and all landmark coordinates refer to the FINAL file after
- * front matter / generated TOC pages have been inserted. Consumers must not
- * recompute page numbers from character counts once this map is available.
+ * The selected engine is authoritative for pagination. Different engines are
+ * allowed to paginate the same manuscript differently; consumers must use the
+ * map returned by the SAME render as the PDF they show/export and must never
+ * merge landmarks from different engines.
  */
 export interface CanonicalPageMap {
   version: 1;
   source: CanonicalPageMapSource;
   engineId: string;
+  /** Exact when the engine exposed final chapter/section coordinates. */
+  precision: CanonicalPageMapPrecision;
   pageCount: number;
-  /** Zero-based index of the first body page in the final file. */
-  bodyStartPageIndex: number;
+  /** Zero-based first body page when known. Null for engines that only expose total pages. */
+  bodyStartPageIndex: number | null;
   landmarks: CanonicalPageLandmark[];
+  /** Human-readable reason why exact landmarks are unavailable. */
+  noteUk?: string;
 }
 
 export interface PdfPaginationTraceSection {
@@ -59,6 +71,7 @@ export interface BuildCanonicalPdfPageMapInput {
     skipFrontMatter: boolean;
   };
   engineId?: string;
+  source?: CanonicalPageMapSource;
 }
 
 function safePageIndex(value: number, pageCount: number): number {
@@ -78,9 +91,9 @@ function printedPageNumber(
 }
 
 /**
- * Convert the renderer's pre-TOC pagination trace into FINAL PDF coordinates.
- * The renderer lays out the body first and inserts generated TOC pages before
- * it afterwards, so every body landmark must be shifted by insertedTocPages.
+ * Convert an engine's pre-TOC pagination trace into FINAL PDF coordinates.
+ * Nova lays out the body first and inserts generated TOC pages before it
+ * afterwards, so every body landmark is shifted by insertedTocPages.
  */
 export function buildCanonicalPdfPageMap(input: BuildCanonicalPdfPageMapInput): CanonicalPageMap {
   const pageCount = Math.max(0, Math.round(Number(input.pageCount) || 0));
@@ -117,10 +130,30 @@ export function buildCanonicalPdfPageMap(input: BuildCanonicalPdfPageMapInput): 
 
   return {
     version: 1,
-    source: 'nova-pdf',
+    source: input.source || 'nova-pdf',
     engineId: input.engineId || 'nova',
+    precision: 'exact',
     pageCount,
     bodyStartPageIndex,
     landmarks,
+  };
+}
+
+/** Honest fallback for engines that currently expose only final pageCount. */
+export function pageCountOnlyMap(
+  engineId: string,
+  source: CanonicalPageMapSource,
+  pageCount: number,
+  noteUk: string,
+): CanonicalPageMap {
+  return {
+    version: 1,
+    source,
+    engineId,
+    precision: 'page-count-only',
+    pageCount: Math.max(0, Math.round(Number(pageCount) || 0)),
+    bodyStartPageIndex: null,
+    landmarks: [],
+    noteUk,
   };
 }
