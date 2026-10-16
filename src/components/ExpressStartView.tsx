@@ -13,6 +13,7 @@ import {
   prependMissingJevTags,
   type JevEntityCandidate,
 } from '../utils/jevSemanticClient';
+import { assessHeroArcWithJev, buildHeroArcAssessmentContext } from '../utils/heroArcJevClient';
 
 /**
  * Розвилка перед експрес-майстром (Завдання 4).
@@ -63,10 +64,7 @@ function withDeterministicSemanticHandoff(payload: ExpressWizardPayload): Expres
   };
 }
 
-function collectWizardJevCandidates(
-  payload: ExpressWizardPayload,
-  currentBook?: Book,
-): JevEntityCandidate[] {
+function collectWizardJevCandidates(payload: ExpressWizardPayload, currentBook?: Book): JevEntityCandidate[] {
   const out = new Map<string, JevEntityCandidate>();
 
   for (const candidate of currentBook ? collectJevBookEntityCandidates(currentBook) : []) {
@@ -91,47 +89,86 @@ function collectWizardJevCandidates(
 /**
  * Другий semantic layer після deterministic handoff.
  *
- * Важлива поведінка: JEV failure НІКОЛИ не скасовує готову книгу. Якщо ключ
- * не налаштований або провайдер тимчасово недоступний, у App передається
- * детерміновано розмічений payload; enrichment можна повторити вже в редакторі
- * через «Проставити теги автоматично».
+ * JEV failure ніколи не скасовує готову книгу. Semantic tagging і Hero Arc
+ * також ізольовані один від одного: якщо крива не порахувалась, уже додані
+ * сутності не втрачаються; якщо semantic tagging недоступний — Hero Arc все
+ * одно може порахуватись із синопсису/структури.
  */
 async function withJevSemanticEnrichment(
   payload: ExpressWizardPayload,
   currentBook?: Book,
 ): Promise<ExpressWizardPayload> {
+  let enriched: ExpressWizardPayload = payload;
   const candidates = collectWizardJevCandidates(payload, currentBook);
-  if (!candidates.length) return payload;
 
-  try {
-    const parts = [] as NonNullable<ExpressWizardPayload['parts']>;
-    for (const part of payload.parts ?? []) {
-      const chapters = [] as NonNullable<(typeof part)['chapters']>;
-      for (const chapter of part.chapters ?? []) {
-        const summary = chapter.summary ?? '';
-        if (!summary.trim()) {
-          chapters.push(chapter);
-          continue;
+  if (candidates.length) {
+    try {
+      const parts = [] as NonNullable<ExpressWizardPayload['parts']>;
+      for (const part of payload.parts ?? []) {
+        const chapters = [] as NonNullable<(typeof part)['chapters']>;
+        for (const chapter of part.chapters ?? []) {
+          const summary = chapter.summary ?? '';
+          if (!summary.trim()) {
+            chapters.push(chapter);
+            continue;
+          }
+          const result = await classifyBookEntitiesWithJev(summary, candidates, 0.65);
+          chapters.push({ ...chapter, summary: prependMissingJevTags(summary, result.matches) });
         }
-        const result = await classifyBookEntitiesWithJev(summary, candidates, 0.65);
-        chapters.push({
-          ...chapter,
-          summary: prependMissingJevTags(summary, result.matches),
-        });
+        parts.push({ ...part, chapters });
       }
-      parts.push({ ...part, chapters });
+      enriched = { ...enriched, parts };
+      window.dispatchEvent(new CustomEvent('nova:jev-wizard-enrichment', { detail: { status: 'ok' } }));
+    } catch (error) {
+      window.dispatchEvent(
+        new CustomEvent('nova:jev-wizard-enrichment', {
+          detail: { status: 'skipped', error: String((error as Error)?.message || error) },
+        }),
+      );
     }
-
-    window.dispatchEvent(new CustomEvent('nova:jev-wizard-enrichment', { detail: { status: 'ok' } }));
-    return { ...payload, parts };
-  } catch (error) {
-    window.dispatchEvent(
-      new CustomEvent('nova:jev-wizard-enrichment', {
-        detail: { status: 'skipped', error: String((error as Error)?.message || error) },
-      }),
-    );
-    return payload;
   }
+
+  if (enriched.framework === 'hero_journey' && (enriched.cast?.length ?? 0) > 0) {
+    try {
+      const hero = enriched.cast![0];
+      const heroName = `${hero.firstName || ''} ${hero.lastName || ''}`.replace(/\s+/g, ' ').trim();
+      const context = buildHeroArcAssessmentContext({
+        seed: enriched.seed,
+        genre: enriched.genre,
+        synopsis: enriched.synopsis,
+        compositionPlan: enriched.compositionPlan,
+        cast: enriched.cast,
+        parts: enriched.parts,
+      });
+      if (context.trim()) {
+        const assessment = await assessHeroArcWithJev({
+          heroName,
+          context,
+          constructorAnswers: enriched.heroArc?.answers ?? {},
+        });
+        enriched = {
+          ...enriched,
+          heroArc: {
+            answers: { ...(enriched.heroArc?.answers ?? {}) },
+            intensities: assessment.intensities,
+          },
+        };
+        window.dispatchEvent(
+          new CustomEvent('nova:jev-hero-arc', {
+            detail: { status: 'ok', model: assessment.model, confidences: assessment.confidences },
+          }),
+        );
+      }
+    } catch (error) {
+      window.dispatchEvent(
+        new CustomEvent('nova:jev-hero-arc', {
+          detail: { status: 'skipped', error: String((error as Error)?.message || error) },
+        }),
+      );
+    }
+  }
+
+  return enriched;
 }
 
 const TrackCard: React.FC<{ track: ExpressTrack; onPick: (t: ExpressTrack) => void }> = ({ track, onPick }) => {
