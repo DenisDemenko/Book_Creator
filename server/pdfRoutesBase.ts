@@ -24,10 +24,8 @@ import {
 } from './marketplaceBridge';
 import { resolveCoreTemplate, renderCoreTemplate, type CorePromptTemplateBundle } from './coreAiRegistry';
 import { resolveModuleModelId } from './coreModuleModels';
-import { renderBookPdf } from './pdf/pdfRenderer';
 import { bookToPdfInput, specFromBook } from './pdf/pdfFromBook';
 import { normalizeDesignResult, parseBookPdfDesignResponse } from './pdf/pdfDesignPrompt';
-import { renderKdpInterior, type KdpRenderResult } from './pdf/pdfKdp';
 import { clampSamplePages, extractSamplePages } from './pdf/pdfSample';
 import { publicOriginFrom } from './publicOrigin';
 import {
@@ -90,6 +88,7 @@ export interface StoredBookOps {
     variant: 'code' | 'design';
     formats: Array<'digital' | 'print'>;
     trimId?: string;
+    hasBleed?: boolean;
     samplePages?: number;
     withSample: boolean;
     req: Request;
@@ -211,58 +210,41 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
       }
       const variant: LayoutVariant = req.body?.variant === 'design' ? 'design' : 'code';
       const { spec } = await buildSpec(book, variant, req.body?.modelId, req);
-
-      // Друкований макет дивляться тим самим переглядом: інакше автор
-      // побачив би верстку KDP уперше вже після публікації.
       const isPrint = req.body?.format === 'print';
-
-      // Інший рушій — окрема гілка, а не параметр наявної. Гілка nova нижче
-      // робить те, чого не робить жоден інший: три проходи KDP, примітка
-      // дизайнера, попередження про поля. Зводити їх до спільного
-      // знаменника означало б втратити саме те, заради чого nova лишається
-      // рушієм за замовчуванням.
       const engineId = String(req.body?.engineId || DEFAULT_PDF_ENGINE);
-      if (engineId !== DEFAULT_PDF_ENGINE) {
-        const principal = req.principal;
-        const out = await renderWithEngine(engineId, {
-          book,
-          kind: req.body?.kind === 'course' ? 'course' : 'book',
-          spec,
-          print: isPrint,
-          ownerId: (principal?.id as string) || null,
-          ownerRole: (principal?.role as string) || null,
-          theme: typeof req.body?.theme === 'string' ? req.body.theme : undefined,
-        });
+      const principal = req.principal;
+      const kind = req.body?.kind === 'course' ? 'course' : 'book';
+      const renderInput = kind === 'book' ? bookToPdfInput(book) : (book as never);
 
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `inline; filename="preview-${engineId}.pdf"`);
-        res.setHeader('X-Pdf-Pages', String(out.pageCount));
-        res.setHeader('X-Pdf-Engine', out.engineId);
-        // Чи виконано макет книги — окремим заголовком, бо це не примітка,
-        // а відповідь на питання «чому виглядає не так, як у налаштуваннях».
-        res.setHeader('X-Pdf-Honored-Spec', out.honoredSpec ? '1' : '0');
-        res.setHeader('X-Pdf-Note', encodeURIComponent(out.notesUk.join(' ')));
-        return res.send(Buffer.from(out.bytes));
-      }
-      const previewOwnerId = (req.principal?.id as string) || null;
-      const out = isPrint
-        ? await renderKdpInterior(bookToPdfInput(book), {
-            base: spec,
-            trimId: req.body?.trimId,
-            hasBleed: Boolean(req.body?.hasBleed),
-            ownerId: previewOwnerId,
-          })
-        : await renderBookPdf(bookToPdfInput(book), spec, { ownerId: previewOwnerId });
-      const noteUk = isPrint ? (out as KdpRenderResult).spec.designerNoteUk : spec.designerNoteUk;
-      const warnings = isPrint ? (out as KdpRenderResult).warningsUk : [];
+      // ЄДИНА точка входу для Nova, DesignCraft, Chromium і Pandoc.
+      // Саме renderWithEngine гарантує, що разом із PDF повертається карта
+      // пагінації того самого фінального render, а не повторний підрахунок.
+      const out = await renderWithEngine(engineId, {
+        book: renderInput,
+        kind,
+        spec,
+        print: isPrint,
+        trimId: typeof req.body?.trimId === 'string' ? req.body.trimId : undefined,
+        hasBleed: Boolean(req.body?.hasBleed),
+        ownerId: (principal?.id as string) || null,
+        ownerRole: (principal?.role as string) || null,
+        theme: typeof req.body?.theme === 'string' ? req.body.theme : undefined,
+      });
 
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `inline; filename="${isPrint ? 'preview-kdp' : 'preview'}.pdf"`);
+      res.setHeader('Content-Disposition', `inline; filename="preview-${engineId}.pdf"`);
       res.setHeader('X-Pdf-Pages', String(out.pageCount));
-      // Пояснення макета — заголовком, бо тіло вже зайняте файлом.
+      res.setHeader('X-Pdf-Engine', out.engineId);
+      res.setHeader('X-Pdf-Honored-Spec', out.honoredSpec ? '1' : '0');
+      res.setHeader('X-Pdf-PageMap-Precision', out.pageMap.precision);
+      res.setHeader('X-Pdf-PageMap-Source', out.pageMap.source);
       res.setHeader(
         'X-Pdf-Note',
-        encodeURIComponent([noteUk || '', ...warnings, ...out.notesUk].filter(Boolean).join(' '))
+        encodeURIComponent(
+          [out.printInfo?.designerNoteUk || spec.designerNoteUk || '', ...out.notesUk]
+            .filter(Boolean)
+            .join(' ')
+        )
       );
       res.send(Buffer.from(out.bytes));
     } catch (err) {
@@ -360,12 +342,11 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
         req
       );
 
-      // Лише для назв рушіїв у назві тестового видання — не впливає на те,
-      // який рушій обраний, а лише на те, як він підписаний авторові.
       const engines = await listPdfEngines({
         ownerId: publishOwnerId,
         ownerRole: (req.principal?.role as string) || null,
       });
+      const normalizedBook = bookToPdfInput(book);
 
       for (const edition of editions) {
         const format = edition.format === 'print' ? 'print' : 'digital';
@@ -374,56 +355,25 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           return res.status(400).json({ error: `Некоректна ціна для редакції «${format}».`, kind: 'bad_input' });
         }
 
-        /*
-          Рушій за редакцію. За замовчуванням — nova, і тоді нічого з
-          поведінки нижче не змінюється: `bridgeEngineId` лишається
-          `undefined`, а `bridgeExternalId` — тим самим `bookId:format`, що й
-          завжди, тож наявні лістинги оновлюються на місці, як і раніше.
-
-          Непорожній рушій — це ЗАВЖДИ окреме тестове видання (порівняння
-          nova/chromium/pandoc, log.md #109): externalId, назва й імʼя файлу
-          отримують позначку рушія, інакше другий виклик перезаписав би
-          лістинг першого замість створити сусідній.
-        */
         const engineId = String(edition.engineId || DEFAULT_PDF_ENGINE);
         const bridgeEngineId = engineId === DEFAULT_PDF_ENGINE ? undefined : engineId;
         const engineLabel = bridgeEngineId
           ? engines.find((e) => e.id === engineId)?.label || engineId
           : undefined;
 
-        // Друкована редакція йде через KDP-верстку: базову типографіку бере
-        // з обраного макета, а формат, поля й корінець — з норм KDP. Друк
-        // під KDP уміє лише nova (`supportsPrint`) — інший рушій тут кине
-        // `PdfEngineError('unavailable', …)`, і `fail()` поверне 400 з
-        // поясненням, а не мовчки зверстає чимось не тим.
-        const rendered =
-          engineId === DEFAULT_PDF_ENGINE
-            ? format === 'print'
-              ? await renderKdpInterior(bookToPdfInput(book), {
-                  base: spec,
-                  trimId: edition.trimId as string,
-                  hasBleed: Boolean(edition.hasBleed),
-                  ownerId: publishOwnerId,
-                })
-              : await renderBookPdf(bookToPdfInput(book), spec, { ownerId: publishOwnerId })
-            : await (async () => {
-                if (format === 'print') {
-                  throw new PdfEngineError(
-                    engineId as never,
-                    'unavailable',
-                    `Друковану редакцію під KDP уміє лише рушій «Nova» — «${engineLabel}» цього не робить.`
-                  );
-                }
-                const out = await renderWithEngine(engineId, {
-                  book: book as never,
-                  kind: 'book',
-                  spec,
-                  print: false,
-                  ownerId: publishOwnerId,
-                  ownerRole: (req.principal?.role as string) || null,
-                });
-                return { bytes: out.bytes, pageCount: out.pageCount, numberedPages: out.pageCount, notesUk: out.notesUk };
-              })();
+        // Nova, DesignCraft, Chromium і Pandoc тепер проходять через одну
+        // межу. Registry сам відхиляє print для рушія без supportsPrint, тож
+        // окремої прихованої KDP-гілки тут більше немає.
+        const rendered = await renderWithEngine(engineId, {
+          book: normalizedBook,
+          kind: 'book',
+          spec,
+          print: format === 'print',
+          trimId: typeof edition.trimId === 'string' ? edition.trimId : undefined,
+          hasBleed: Boolean(edition.hasBleed),
+          ownerId: publishOwnerId,
+          ownerRole: (req.principal?.role as string) || null,
+        });
 
         const editionTitle = [
           String(book.title),
@@ -448,8 +398,6 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           { settings }
         );
 
-        // Файл шлемо ПІСЛЯ публікації: приймач прикріплює його до наявного
-        // лістинга, і в зворотному порядку отримав би 404.
         const attached = await attachBookFileToMarketplace(
           {
             bookId: String(book.id),
@@ -465,14 +413,6 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           { settings }
         );
 
-        /*
-          ОБКЛАДИНКА, І ВІДКІТ ЯКЩО ВОНА НЕ СІЛА.
-          Лістинг уже створений — обкладинку можна прикріпити лише до
-          наявного. Але якщо саме вона не пройшла, у вітрині лишилась би
-          рівно та порожня картка, заради відсутності якої ця перевірка й
-          робилась. Тому лістинг знімається назад в архів, і автор бачить
-          причину, а не «опубліковано» з білим прямокутником.
-        */
         let coverAttached;
         try {
           coverAttached = await attachBookFileToMarketplace(
@@ -503,15 +443,6 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           );
         }
 
-        /*
-          Уривок — окремий публічний файл лістинга. Ріжеться з ТОГО САМОГО
-          PDF, який щойно пішов покупцеві: «перші десять сторінок» — наслідок
-          верстки, а не властивість тексту, тож зверстаний окремо уривок
-          обірвався б не там, де обривається десята сторінка книги.
-
-          Його збій, на відміну від обкладинки, публікацію НЕ скасовує:
-          книга без уривка продається, книга без обкладинки — ні.
-        */
         let sample: { pages: number; totalPages: number; attached: boolean; errorUk?: string } | null = null;
         if (sampleEnabled) {
           try {
@@ -548,9 +479,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           }
         }
 
-        // Звужуємо тип явно: renderKdpInterior повертає більше полів, ніж
-        // звичайний рендер, і саме вони цікаві авторові друкованої редакції.
-        const kdp: KdpRenderResult | null = format === 'print' ? (rendered as KdpRenderResult) : null;
+        const kdp = rendered.printInfo || null;
         results.push({
           format,
           engineId,
@@ -558,17 +487,19 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           attached,
           cover: coverAttached,
           sample,
-          pdf: { pageCount: rendered.pageCount, sizeBytes: rendered.bytes.length },
+          pdf: {
+            pageCount: rendered.pageCount,
+            sizeBytes: rendered.bytes.length,
+            pageMap: rendered.pageMap,
+          },
           layout: {
             variant,
             modelId,
-            noteUk: kdp ? kdp.spec.designerNoteUk : spec.designerNoteUk,
+            noteUk: kdp?.designerNoteUk || spec.designerNoteUk,
             trimId: kdp?.trimId,
             gutterMm: kdp?.gutterMm,
             passes: kdp?.passes,
           },
-          // Попередження KDP і причини пропущених ілюстрацій разом: автор
-          // читає їх в одному місці, до того як покупець побачить файл.
           warningsUk: [...(kdp?.warningsUk || []), ...rendered.notesUk],
         });
       }
@@ -595,6 +526,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
     variant: 'code' | 'design';
     formats: Array<'digital' | 'print'>;
     trimId?: string;
+    hasBleed?: boolean;
     samplePages?: number;
     withSample: boolean;
     req: Request;
@@ -610,22 +542,22 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
 
     const book = stored.book as Record<string, unknown>;
     const safeTitle = String(book.title || 'book').replace(/[^\p{L}\p{N}]+/gu, '_').slice(0, 60) || 'book';
-
-    // Макет один на всі формати — з тієї самої причини, що й у публікації з
-    // браузера: інакше «дизайн» дав би різну типографіку цифровій і друкованій.
     const { spec, modelId } = await buildSpec(book, params.variant, undefined, params.req);
 
     const artifactsOwnerId = (params.req.principal?.id as string) || null;
     const built = [];
+    const normalizedBook = bookToPdfInput(book as never);
     for (const format of params.formats) {
-      const rendered =
-        format === 'print'
-          ? await renderKdpInterior(bookToPdfInput(book as never), {
-              base: spec,
-              trimId: params.trimId,
-              ownerId: artifactsOwnerId,
-            })
-          : await renderBookPdf(bookToPdfInput(book as never), spec, { ownerId: artifactsOwnerId });
+      const rendered = await renderWithEngine(DEFAULT_PDF_ENGINE, {
+        book: normalizedBook,
+        kind: 'book',
+        spec,
+        print: format === 'print',
+        trimId: params.trimId,
+        hasBleed: params.hasBleed,
+        ownerId: artifactsOwnerId,
+        ownerRole: (params.req.principal?.role as string) || null,
+      });
 
       const pdfRecord = await saveArtifact({
         bookId: stored.id,
@@ -660,18 +592,20 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
         }
       }
 
-      const kdp: KdpRenderResult | null = format === 'print' ? (rendered as KdpRenderResult) : null;
+      const kdp = rendered.printInfo || null;
       built.push({
         format,
         pdf: pdfRecord,
+        pageMap: rendered.pageMap,
         sample: sampleRecord,
         sampleNoteUk,
         layout: {
           variant: params.variant,
           modelId,
-          noteUk: kdp ? kdp.spec.designerNoteUk : spec.designerNoteUk,
+          noteUk: kdp?.designerNoteUk || spec.designerNoteUk,
           trimId: kdp?.trimId,
           gutterMm: kdp?.gutterMm,
+          passes: kdp?.passes,
         },
         warningsUk: [...(kdp?.warningsUk || []), ...rendered.notesUk],
       });
