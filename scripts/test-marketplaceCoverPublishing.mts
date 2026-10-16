@@ -32,8 +32,9 @@ assert.match(publishingHub, /coverBase64/);
 assert.match(publishingHub, /\/api\/admin\/pdf\/publish/);
 
 // Stored book JSON remains lossless for cover production fields (no whitelist projection).
-assert.match(store, /JSON\.stringify\(record/);
-assert.match(store, /JSON\.parse/);
+assert.match(store, /book:\s*JSON\.parse\(JSON\.stringify\(params\.book \|\| \{\}\)\)/);
+assert.match(store, /const payload = JSON\.stringify\(book\)/);
+assert.match(store, /JSON\.parse\(String\(row\.payload\)\)/);
 
 // Public cover route is intentionally unauthenticated and versionable for marketplace cards.
 assert.match(bookRoutes, /app\.get\('\/api\/public\/books\/:id\/cover'/);
