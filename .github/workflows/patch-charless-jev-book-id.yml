@@ -1,0 +1,53 @@
+name: One-time charless JEV book-id patch
+
+on:
+  push:
+    branches:
+      - feat/jev-semantic-enrichment-v2
+    paths:
+      - .github/workflows/patch-charless-jev-book-id.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-editor:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/jev-semantic-enrichment-v2
+          fetch-depth: 0
+
+      - name: Patch both manuscript extension hosts
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('src/components/EditorView.tsx')
+          text = path.read_text(encoding='utf-8')
+          old = """      () => entityTagsVisibleRef.current,
+                () => langRef.current
+              ),"""
+          new = """      () => entityTagsVisibleRef.current,
+                () => langRef.current,
+                () => bookRef.current.id
+              ),"""
+
+          count = text.count(old)
+          if count != 2:
+              raise SystemExit(f'Expected exactly 2 manuscript extension hosts, found {count}')
+
+          text = text.replace(old, new)
+          path.write_text(text, encoding='utf-8')
+
+      - name: Commit patch
+        run: |
+          set -euo pipefail
+          git diff --check
+          test "$(git diff --numstat -- src/components/EditorView.tsx | awk '{print $1":"$2}')" = "2:0"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/EditorView.tsx
+          git commit -m "fix: pass explicit book id from manuscript editor"
+          git push origin HEAD:feat/jev-semantic-enrichment-v2
