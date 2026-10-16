@@ -51,6 +51,9 @@ jobs:
       - name: PDF render manifest contract
         run: npx tsx scripts/test-pdfRenderManifest.mts
 
+      - name: Canonical PDF export route/UI contract
+        run: npx tsx scripts/test-pdfExportRoute.mts
+
       - name: Final PDF spread source-of-truth contract
         run: npx tsx scripts/test-finalPdfSpread.mts && npx tsx scripts/test-bookPreviewFinalPdf.mts
 
