@@ -20,11 +20,23 @@ export interface CoverGeometry {
 }
 
 const PAPER_BULK_MM: Record<CoverPaperStock, number> = {
-  white: 0.052,
-  cream: 0.055,
+  // KDP page-thickness factors used by the production validator.
+  // Keeping them here makes Cover Studio, KDP checks and export share one source of truth.
+  white: 0.0572,
+  cream: 0.0635,
+  // Generic production estimates for coated stocks; these are not KDP paper presets.
   'coated-matte': 0.06,
   'coated-gloss': 0.062,
 };
+
+export function calculatePaperSpineThicknessMm(
+  pageCount: number,
+  paperStock: CoverPaperStock = 'white',
+): number {
+  const safePages = Math.max(1, Math.round(Number(pageCount) || 1));
+  const bulk = PAPER_BULK_MM[paperStock] ?? PAPER_BULK_MM.white;
+  return Number((safePages * bulk).toFixed(2));
+}
 
 export function calculateCoverGeometry(input: {
   pageWidthMm: number;
@@ -39,11 +51,11 @@ export function calculateCoverGeometry(input: {
   const bleedMm = Math.max(0, Number(input.bleedMm) || 0);
   const pageCount = Math.max(1, Math.round(Number(input.pageCount) || 1));
   const paperStock = input.paperStock ?? 'white';
-  const bulk = PAPER_BULK_MM[paperStock] ?? PAPER_BULK_MM.white;
+  const paperSpineMm = calculatePaperSpineThicknessMm(pageCount, paperStock);
   const hardcoverAllowance = input.coverType === 'hardcover' ? 2 : 0;
   const spineWidthMm = input.coverType === 'ebook'
     ? 0
-    : Number((pageCount * bulk + hardcoverAllowance).toFixed(1));
+    : Number((paperSpineMm + hardcoverAllowance).toFixed(1));
 
   return {
     pageWidthMm,
