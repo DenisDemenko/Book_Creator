@@ -42,6 +42,9 @@ jobs:
       - name: TypeScript
         run: npm run lint
 
+      - name: Writer export RBAC contract
+        run: npx tsx scripts/test-writerExportRbac.mts
+
       - name: Canonical PDF pagination contract
         run: npx tsx scripts/test-canonicalPageMap.mts
 
