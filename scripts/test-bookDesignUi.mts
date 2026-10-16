@@ -8,6 +8,7 @@ const designer = await readFile(new URL('../src/components/DesignerThemeStudio.t
 const quickSetup = await readFile(new URL('../src/components/BookDesignAuthorQuickSetup.tsx', import.meta.url), 'utf8');
 const semanticEditor = await readFile(new URL('../src/components/BookDesignSemanticBlockEditor.tsx', import.meta.url), 'utf8');
 const designSuggestion = await readFile(new URL('../src/components/DesignSuggestionPanel.tsx', import.meta.url), 'utf8');
+const engineRegistry = await readFile(new URL('../server/pdf/engines/registry.ts', import.meta.url), 'utf8');
 
 console.log('\nBook Design Studio UI regression contract:');
 
@@ -82,5 +83,34 @@ assert.match(designSuggestion, /\? \{ book, engineId: DESIGNCRAFT_ENGINE_ID, the
 assert.match(designSuggestion, /: \{ book, variant: 'code', format: 'digital', engineId: pdfEngineId \}/);
 assert.ok(!designSuggestion.includes("/api/admin/pdf/preview', requireAuth"), 'Client must not redefine the legacy route.');
 console.log('  ✓ built-in DesignCraft preview remains separate from generic legacy PDF preview');
+
+for (const profile of [
+  ['nova', 'Друк / KDP'],
+  ['designcraft', 'Дизайн книги'],
+  ['chromium', 'HTML / CSS'],
+  ['pandoc', 'Наука / формули'],
+] as const) {
+  assert.ok(engineRegistry.includes(`${profile[0]}:`), `Missing renderer profile: ${profile[0]}`);
+  assert.ok(engineRegistry.includes(`badgeUk: '${profile[1]}'`), `Missing writer badge for ${profile[0]}`);
+}
+assert.match(engineRegistry, /математичні формули з Pandoc Markdown/);
+assert.match(engineRegistry, /15 дизайн-систем Studio і custom themes/);
+assert.match(engineRegistry, /дзеркальні внутрішні\/зовнішні поля/);
+assert.match(engineRegistry, /реальні GFM-таблиці/);
+console.log('  ✓ all four PDF engines keep distinct writer-facing specialties');
+
+assert.match(designSuggestion, /data-pdf-engine-picker/);
+assert.match(designSuggestion, /Джерело PDF-рендерингу/);
+assert.match(designSuggestion, /Найкраще для/);
+assert.match(designSuggestion, /Коли обирати:/);
+assert.match(designSuggestion, /engine\.bestForUk\.map/);
+assert.match(designSuggestion, /engine\.featuresUk\.map/);
+console.log('  ✓ renderer choice is presented as writer-facing cards, not a technical-only selector');
+
+assert.match(designSuggestion, /X-Pdf-PageMap-Source/);
+assert.match(designSuggestion, /X-Pdf-PageMap-Precision/);
+assert.match(designSuggestion, /Фактичний render:/);
+assert.match(designSuggestion, /джерело пагінації:/);
+console.log('  ✓ preview exposes the actual final renderer and CanonicalPageMap source');
 
 console.log('\nBook Design Studio UI regression contract passed.');
