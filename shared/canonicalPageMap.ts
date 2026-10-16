@@ -2,7 +2,7 @@ export type CanonicalPageMapSource =
   | 'nova-pdf'
   | 'designcraft-toc'
   | 'chromium-pdf'
-  | 'pandoc-toc'
+  | 'pandoc-pdf'
   | 'external-pdf';
 
 export type CanonicalPageMapPrecision = 'exact' | 'page-count-only';
