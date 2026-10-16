@@ -7,6 +7,7 @@ import { novaEngine } from './novaEngine';
 import { chromiumEngine } from './chromiumEngine';
 import { pandocEngine } from './pandocEngine';
 import { designcraftEngineV3 } from './designcraftEngineV3';
+import { pageCountOnlyMap, type CanonicalPageMapSource } from '../../../shared/canonicalPageMap';
 import {
   DEFAULT_PDF_ENGINE,
   PDF_ENGINE_IDS,
@@ -15,7 +16,7 @@ import {
   type PdfEngineContext,
   type PdfEngineId,
   type PdfRenderRequest,
-  type PdfRenderResult,
+  type NormalizedPdfRenderResult,
 } from './types';
 
 /** Рушії в порядку показу автору. */
@@ -81,13 +82,34 @@ export async function listPdfEngines(
   }));
 }
 
+function fallbackPageMap(engineId: PdfEngineId, pageCount: number) {
+  const sourceByEngine: Record<PdfEngineId, CanonicalPageMapSource> = {
+    nova: 'nova-pdf',
+    designcraft: 'designcraft-toc',
+    chromium: 'chromium-pdf',
+    pandoc: 'pandoc-toc',
+    gamma: 'external-pdf',
+  };
+  return pageCountOnlyMap(
+    engineId,
+    sourceByEngine[engineId],
+    pageCount,
+    'Рушій повернув точну загальну кількість сторінок, але ще не експортував координати глав і секцій у CanonicalPageMap.'
+  );
+}
+
 /**
  * Зверстати обраним рушієм. Тихого відкоту на інший рушій немає.
+ *
+ * ВАЖЛИВО: це єдина публічна межа нормалізації пагінації. Кожен renderer
+ * може мати свій внутрішній механізм (pdf-lib, DesignCraft, Chromium, TeX),
+ * але назовні завжди повертається один CanonicalPageMap. UI не має права
+ * повторно рахувати сторінки з рукопису.
  */
 export async function renderWithEngine(
   engineId: string | undefined,
   request: PdfRenderRequest
-): Promise<PdfRenderResult> {
+): Promise<NormalizedPdfRenderResult> {
   const id = (engineId || DEFAULT_PDF_ENGINE) as PdfEngineId;
   const engine = getPdfEngine(id);
   if (!engine) {
@@ -125,18 +147,6 @@ export async function renderWithEngine(
     );
   }
 
-  /*
-   * Book Design Studio theme is a DesignCraft concern, not a generic PDF
-   * engine setting. Keep the public request backward-compatible (`theme`) and
-   * bridge it into the renderer's layout spec only for DesignCraft. This means
-   * Nova/Chromium/Pandoc continue to receive exactly the same request shape and
-   * behavior as before.
-   *
-   * `themeId` is intentionally an extension of PdfLayoutSpec during this
-   * migration slice. `buildDesigncraftRtf` reads it without requiring a schema
-   * migration for every stored book. Once the writer-facing picker lands, the
-   * field can become first-class in PdfLayoutSpec without changing stored ids.
-   */
   const effectiveRequest: PdfRenderRequest =
     engine.id === 'designcraft' && request.theme
       ? {
@@ -148,5 +158,9 @@ export async function renderWithEngine(
         }
       : request;
 
-  return engine.render(effectiveRequest);
+  const result = await engine.render(effectiveRequest);
+  return {
+    ...result,
+    pageMap: result.pageMap || fallbackPageMap(engine.id, result.pageCount),
+  };
 }
