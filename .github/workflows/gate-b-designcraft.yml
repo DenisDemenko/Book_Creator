@@ -45,6 +45,9 @@ jobs:
       - name: Cover production consistency contract
         run: npx tsx scripts/test-coverProductionConsistency.mts
 
+      - name: Marketplace cover publishing contract
+        run: npx tsx scripts/test-marketplaceCoverPublishing.mts
+
       - name: DesignCraft KDP print contract
         run: npx tsx scripts/test-designcraftKdpEngine.mts
 
