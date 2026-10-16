@@ -19,9 +19,11 @@ export interface DesigncraftPageMapInput {
   bodyStartNumber: number;
 }
 
+/** Must mirror bookToMarkdown.headingText + the TOC diagnostic normalization. */
 function normalizedHeading(value: unknown): string {
   return String(value ?? '')
     .replace(/\s+/g, ' ')
+    .replace(/[#*_`\[\]]/g, '')
     .trim()
     .toLocaleLowerCase('uk-UA');
 }
@@ -82,20 +84,21 @@ function exactLandmark(
  *
  *   bodyFileIndex + (printedPage - bodyStartNumber)
  *
- * We still reject the map unless every source chapter can be matched to the
- * final Heading 1 list and every TOC page name is a numeric page in that body
- * section. A partial/guessed map is worse than an honest page-count-only map.
+ * The manuscript converter sorts chapters and sections by `order`; this helper
+ * mirrors that exact order before assigning stable source ids. We reject the
+ * map rather than guess when a heading or printed page cannot be matched.
  */
 export function buildDesigncraftCanonicalPageMap(input: DesigncraftPageMapInput): CanonicalPageMap | null {
   const pageCount = Math.max(0, Math.round(Number(input.pageCount) || 0));
   const bodyStartPageIndex = Math.max(0, Math.round(input.bodyPage) - 1);
-  const chapters = input.book.chapters || [];
+  const chapters = (input.book.chapters || [])
+    .slice()
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
   if (!pageCount || bodyStartPageIndex >= pageCount) return null;
   if (input.chapterToc.length !== chapters.length) return null;
 
   const landmarks: CanonicalPageLandmark[] = [];
-  const chapterIdByHeading = new Map<string, string[]>();
 
   for (let i = 0; i < chapters.length; i += 1) {
     const chapter = chapters[i];
@@ -106,15 +109,10 @@ export function buildDesigncraftCanonicalPageMap(input: DesigncraftPageMapInput)
     const landmark = exactLandmark('chapter', chapterId, title, chapterId, entry, input);
     if (!landmark) return null;
     landmarks.push(landmark);
-    const key = normalizedHeading(title);
-    chapterIdByHeading.set(key, [...(chapterIdByHeading.get(key) || []), chapterId]);
   }
 
-  // Heading 2 entries are consumed in book order inside their current Heading 1.
-  // This avoids assigning a same-named section from another chapter to the wrong id.
   let chapterIndex = -1;
-  const nextSectionIndex = new Map<number, number>();
-  const consumedChapterHeadings = new Map<string, number>();
+  let sectionIndex = 0;
 
   for (const entry of input.toc) {
     const level = Number(entry.level);
@@ -122,36 +120,32 @@ export function buildDesigncraftCanonicalPageMap(input: DesigncraftPageMapInput)
     if (!text) continue;
 
     if (level === 1) {
-      const key = normalizedHeading(text);
-      const ids = chapterIdByHeading.get(key) || [];
-      const occurrence = consumedChapterHeadings.get(key) || 0;
-      const chapterId = ids[occurrence];
-      consumedChapterHeadings.set(key, occurrence + 1);
-      chapterIndex = chapters.findIndex((chapter) => String(chapter.id || '') === chapterId);
-      if (chapterIndex < 0) {
-        // Fallback for source chapters without explicit ids.
-        chapterIndex = chapters.findIndex((chapter) => normalizedHeading(chapter.title) === key);
-      }
+      chapterIndex += 1;
+      sectionIndex = 0;
+      const chapter = chapters[chapterIndex];
+      if (!chapter || normalizedHeading(chapter.title) !== normalizedHeading(text)) return null;
       continue;
     }
 
     if (level !== 2 || chapterIndex < 0) continue;
     const chapter = chapters[chapterIndex];
-    const sections = chapter.sections || [];
-    let sectionIndex = nextSectionIndex.get(chapterIndex) || 0;
+    const sections = (chapter.sections || [])
+      .slice()
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
-    while (sectionIndex < sections.length) {
-      const candidate = sections[sectionIndex];
+    // Untitled sections do not create Heading 2 in bookToMarkdown, so skip them.
+    while (sectionIndex < sections.length && !normalizedHeading(sections[sectionIndex].title)) {
       sectionIndex += 1;
-      if (normalizedHeading(candidate.title) !== normalizedHeading(text)) continue;
-      nextSectionIndex.set(chapterIndex, sectionIndex);
-      const chapterId = String(chapter.id || `chapter-${chapterIndex + 1}`);
-      const sectionId = String(candidate.id || `section-${chapterIndex + 1}-${sectionIndex}`);
-      const landmark = exactLandmark('section', sectionId, String(candidate.title || text), chapterId, entry, input);
-      if (!landmark) return null;
-      landmarks.push(landmark);
-      break;
     }
+    const section = sections[sectionIndex];
+    if (!section || normalizedHeading(section.title) !== normalizedHeading(text)) return null;
+    sectionIndex += 1;
+
+    const chapterId = String(chapter.id || `chapter-${chapterIndex + 1}`);
+    const sectionId = String(section.id || `section-${chapterIndex + 1}-${sectionIndex}`);
+    const landmark = exactLandmark('section', sectionId, String(section.title || text), chapterId, entry, input);
+    if (!landmark) return null;
+    landmarks.push(landmark);
   }
 
   return {
