@@ -1,5 +1,5 @@
 import type { Book } from '../types';
-import { entityBySlug } from './coreEntities';
+import { CORE_ENTITY_DEFINITIONS } from './coreEntities';
 
 export interface JevEntityCandidate {
   id: string;
@@ -8,30 +8,36 @@ export interface JevEntityCandidate {
   description?: string;
 }
 
-export interface JevEntityMatch extends JevEntityCandidate {
+export interface JevSemanticMatch {
+  slug: string;
+  entityId: string;
+  name: string;
   confidence: number;
-  source: 'jev';
+  evidence?: string;
 }
 
-export interface JevSemanticResult {
-  matches: JevEntityMatch[];
-  proposedNewEntities: [];
-  provider: 'jev';
-  model: string;
+export interface JevSemanticResponse {
+  matches: JevSemanticMatch[];
+  model?: string;
 }
 
-const TAG_RE = /\[\/([a-z0-9\u0400-\u04FF-]+):([^\]\n]+)\]/giu;
+const TAG_RE = /\[(?:\/)?([a-z][a-z0-9_-]*):([^\]\n]+)\]/gi;
 
 function cleanValue(value: string): string {
-  return value.replace(/[\[\]\r\n]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500);
+  return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
 function candidateId(slug: string, value: string): string {
-  return `${slug}:${value.toLocaleLowerCase()}`;
+  const normalized = value.toLocaleLowerCase('uk-UA').replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '');
+  return `${slug}:${normalized || 'entity'}`;
+}
+
+function entityBySlug(slug: string) {
+  return CORE_ENTITY_DEFINITIONS.find((item) => item.slug === slug);
 }
 
 /**
- * Canonical candidates that are already part of this book.
+ * Build the ONLY candidates JEV is allowed to classify against.
  *
  * Two sources are deliberately allowed:
  * 1. stable book characters (including wizard-created heroes);
@@ -48,11 +54,14 @@ export function collectJevBookEntityCandidates(book: Book): JevEntityCandidate[]
     const name = cleanValue(`${character.name || ''} ${character.surname || ''}`);
     if (!name) continue;
     const id = String(character.id || candidateId('character', name));
+    const description = cleanValue(
+      [character.alias, character.profession, character.role].filter(Boolean).join(' · ')
+    );
     out.set(`character:${id}`, {
       id,
       slug: 'character',
       name,
-      description: cleanValue(String(character.description || character.role || '')) || undefined,
+      description: description || undefined,
     });
   }
 
@@ -75,7 +84,6 @@ export function collectJevBookEntityCandidates(book: Book): JevEntityCandidate[]
               id,
               slug: entity.slug,
               name: value,
-              description: `${entity.nameUk} · ${chapter.title} · ${section.title}`,
             });
           }
         }
@@ -83,53 +91,29 @@ export function collectJevBookEntityCandidates(book: Book): JevEntityCandidate[]
     }
   }
 
-  return Array.from(out.values());
+  return [...out.values()];
 }
 
-export async function classifyBookEntitiesWithJev(
+export async function classifyExistingEntitiesWithJev(
   text: string,
-  entities: JevEntityCandidate[],
-  threshold = 0.65,
+  candidates: JevEntityCandidate[],
   signal?: AbortSignal,
-): Promise<JevSemanticResult> {
+): Promise<JevSemanticResponse> {
   const response = await fetch('/api/semantic/jev/entities', {
     method: 'POST',
     credentials: 'include',
-    signal,
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, entities, threshold }),
+    body: JSON.stringify({ text, candidates }),
+    signal,
   });
+
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(String(payload?.error || 'JEV semantic analysis failed'));
-  }
-  return payload as JevSemanticResult;
-}
-
-export function canonicalTag(match: Pick<JevEntityCandidate, 'slug' | 'name'>): string {
-  return `[/${match.slug}:${cleanValue(match.name)}]`;
-}
-
-/** Prefixes only missing canonical tags. The selected/generated prose is never rewritten. */
-export function prependMissingJevTags(text: string, matches: JevEntityMatch[]): string {
-  const source = text || '';
-  const existing = new Set<string>();
-  TAG_RE.lastIndex = 0;
-  let found: RegExpExecArray | null;
-  while ((found = TAG_RE.exec(source))) {
-    existing.add(`${found[1].toLowerCase()}:${cleanValue(found[2]).toLocaleLowerCase()}`);
+    throw new Error(String(payload?.error || `JEV semantic request failed (${response.status})`));
   }
 
-  const tags: string[] = [];
-  const added = new Set<string>();
-  for (const match of matches) {
-    if (!entityBySlug(match.slug)) continue;
-    const value = cleanValue(match.name);
-    if (!value) continue;
-    const key = `${match.slug.toLowerCase()}:${value.toLocaleLowerCase()}`;
-    if (existing.has(key) || added.has(key)) continue;
-    added.add(key);
-    tags.push(canonicalTag({ slug: match.slug, name: value }));
-  }
-  return tags.length ? `${tags.join(' ')}\n${source}` : source;
+  return {
+    matches: Array.isArray(payload?.matches) ? payload.matches : [],
+    model: typeof payload?.model === 'string' ? payload.model : undefined,
+  };
 }
