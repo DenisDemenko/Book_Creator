@@ -89,7 +89,7 @@ console.log('  ✓ built-in DesignCraft preview remains separate from generic le
 
 for (const profile of [
   ['nova', 'Друк / KDP'],
-  ['designcraft', 'Дизайн книги'],
+  ['designcraft', 'Дизайн + KDP'],
   ['chromium', 'HTML / CSS'],
   ['pandoc', 'Наука / формули'],
 ] as const) {
