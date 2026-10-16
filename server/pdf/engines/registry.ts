@@ -87,7 +87,7 @@ function fallbackPageMap(engineId: PdfEngineId, pageCount: number) {
     nova: 'nova-pdf',
     designcraft: 'designcraft-toc',
     chromium: 'chromium-pdf',
-    pandoc: 'pandoc-toc',
+    pandoc: 'pandoc-pdf',
     gamma: 'external-pdf',
   };
   return pageCountOnlyMap(
