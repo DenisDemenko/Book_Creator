@@ -1,5 +1,6 @@
 import { Book, BookLayoutConfig, CoverConfig } from '../types';
 import { estimatePageCount } from './helpers';
+import { calculateCoverGeometry, calculatePaperSpineThicknessMm } from './coverProduction';
 
 export interface KdpTrimSize {
   id: string;
@@ -121,13 +122,11 @@ export function getKdpMinimumOutsideMarginsMm(hasBleed: boolean): { minInches: n
 }
 
 /**
- * Amazon KDP Spine Thickness calculation
- * White paper: Page count * 0.002252" (0.0572 mm)
- * Cream paper: Page count * 0.0025" (0.0635 mm)
+ * Amazon KDP Spine Thickness calculation.
+ * Kept as a compatibility wrapper; the canonical factors now live in coverProduction.ts.
  */
 export function calculateKdpSpineThicknessMm(pageCount: number, paperType: 'white' | 'cream' = 'cream'): number {
-  const multiplier = paperType === 'white' ? 0.0572 : 0.0635;
-  return Number((pageCount * multiplier).toFixed(2));
+  return calculatePaperSpineThicknessMm(pageCount, paperType);
 }
 
 export interface KdpComplianceIssue {
@@ -172,7 +171,15 @@ export function validateKdpCompliance(book: Book, totalWords: number): KdpValida
   const gutterSpec = getKdpMinimumGutterMm(estimatedPages);
   const hasBleed = (margins.bleedMm || 0) > 0;
   const outsideSpec = getKdpMinimumOutsideMarginsMm(hasBleed);
-  const calculatedSpineMm = calculateKdpSpineThicknessMm(estimatedPages, 'cream');
+  const coverGeometry = calculateCoverGeometry({
+    pageWidthMm: layout.pageWidthMm,
+    pageHeightMm: layout.pageHeightMm,
+    bleedMm: margins.bleedMm,
+    pageCount: estimatedPages,
+    coverType: cover.coverType,
+    paperStock: cover.paperStock,
+  });
+  const calculatedSpineMm = coverGeometry.spineWidthMm;
   const canHaveSpineText = estimatedPages >= 79;
 
   const issues: KdpComplianceIssue[] = [];
@@ -470,7 +477,14 @@ export function applyKdpOptimization(
     },
   };
 
-  const calculatedSpineMm = calculateKdpSpineThicknessMm(estimatedPages, 'cream');
+  const calculatedSpineMm = calculateCoverGeometry({
+    pageWidthMm: chosenTrim.widthMm,
+    pageHeightMm: chosenTrim.heightMm,
+    bleedMm: 0,
+    pageCount: estimatedPages,
+    coverType: 'paperback',
+    paperStock: book.coverConfig.paperStock,
+  }).spineWidthMm;
 
   const updatedCover: CoverConfig = {
     ...book.coverConfig,
@@ -518,7 +532,10 @@ Compliance Score: ${report.overallScore}%
 
 2. COVER & SPINE SPECIFICATIONS:
 ---------------------------------------------------------------
-- Paper Type: White/Cream 50lb - 55lb
+- Paper Stock: ${cover.paperStock || 'white'}
+- Cover Material: ${cover.coverMaterial || 'matte-card'}
+- Finish: ${cover.finish || 'none'}
+- Back Cover Art: ${cover.backArtUrl?.trim() ? 'YES' : 'NO'}
 - Calculated Spine Width: ${report.calculatedSpineMm} mm (${(report.calculatedSpineMm / 25.4).toFixed(3)} inches)
 - Spine Text Allowed: ${report.canHaveSpineText ? 'YES (>= 79 pages)' : 'NO (< 79 pages)'}
 - Cover Safety Margin: 3.2 mm (0.125") from all trim edges
