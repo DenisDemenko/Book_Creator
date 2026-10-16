@@ -52,7 +52,7 @@ jobs:
         run: npx tsx scripts/test-pdfRenderManifest.mts
 
       - name: Final PDF spread source-of-truth contract
-        run: npx tsx scripts/test-finalPdfSpread.mts
+        run: npx tsx scripts/test-finalPdfSpread.mts && npx tsx scripts/test-bookPreviewFinalPdf.mts
 
       - name: Chromium final PDF pagination contract
         run: npx tsx scripts/test-chromiumPageMap.mts
