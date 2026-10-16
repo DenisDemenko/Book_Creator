@@ -107,6 +107,13 @@ assert.match(designSuggestion, /engine\.bestForUk\.map/);
 assert.match(designSuggestion, /engine\.featuresUk\.map/);
 console.log('  ✓ renderer choice is presented as writer-facing cards, not a technical-only selector');
 
+assert.match(designSuggestion, /preferredPdfEngineId\?: string/);
+assert.match(designSuggestion, /preferredPdfEngineId: engineId/);
+assert.match(designSuggestion, /const persistedPdfEngineId = .*preferredPdfEngineId/);
+assert.match(designSuggestion, /const preferred = .*preferredPdfEngineId/);
+assert.match(designSuggestion, /'Зміна PDF-рушія книги'/);
+console.log('  ✓ selected PDF engine is persisted in the book and restored when the book reopens');
+
 assert.match(designSuggestion, /X-Pdf-PageMap-Source/);
 assert.match(designSuggestion, /X-Pdf-PageMap-Precision/);
 assert.match(designSuggestion, /Фактичний render:/);
