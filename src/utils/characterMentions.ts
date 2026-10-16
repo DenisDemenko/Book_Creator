@@ -6,7 +6,7 @@ import type { Book } from '../types';
  * `CharacterMentionPlugin.ts` (ProseMirror-декорація в тексті розділу):
  * мінімум 3 символи на варіант, найдовші варіанти першими в альтернації
  * регулярки («Оксана Петренко» ловиться раніше за просто «Оксана» в
- * тому самому місці), межі слова через `\p{L}\p{N}_` (юнікод-клас, бо
+ * тому самому місці), межі слова через `\p{L}\p{N}_` (юнікод-клас — бо
  * звичайний `\w` не охоплює кирилицю).
  *
  * Раніше ця логіка жила лише всередині `CharacterMentionPlugin.ts` і
@@ -22,6 +22,12 @@ import type { Book } from '../types';
 
 export interface CharacterMentionEntry {
   id: string;
+  /**
+   * Не потрібен самому пошуку згадувань, але живий `book.characters`
+   * передається тим самим callback у редакторські semantic-плагіни. Там
+   * bookId дозволяє без евристики завантажити whole-book Entity Registry.
+   */
+  bookId?: string;
   name: string;
   surname?: string;
   alias?: string;
@@ -78,113 +84,67 @@ export function findMentionsInText(text: string, entries: { text: string; id: st
   const idByText = new Map(entries.map((e) => [e.text, e.id]));
   const out: TextMentionRange[] = [];
   let m: RegExpExecArray | null;
-  regex.lastIndex = 0;
   while ((m = regex.exec(text))) {
-    const id = idByText.get(m[0]);
-    if (id) out.push({ start: m.index, end: m.index + m[0].length, id, matchedText: m[0] });
-    // Захист від зациклення на нульовій довжині збігу — теоретично
-    // неможливо з нашим патерном (мінімум 3 символи), але дешева страховка.
-    if (m[0].length === 0) regex.lastIndex += 1;
+    const matchedText = m[0];
+    const id = idByText.get(matchedText) || entries.find((e) => e.text.toLocaleLowerCase() === matchedText.toLocaleLowerCase())?.id;
+    if (!id) continue;
+    out.push({ start: m.index, end: m.index + matchedText.length, id, matchedText });
   }
   return out;
 }
 
-export interface CollectedCharacterMention {
+/**
+ * Усі місця згадки персонажа в книзі — використовується «Хранителем
+ * цілісності персонажа». Повертає вже контекстні уривки; серверу не треба
+ * отримувати цілу книгу, щоб перевірити одного героя.
+ */
+export function collectCharacterMentions(book: Book, characterId: string, contextRadius = 360): {
   chapterId: string;
   chapterTitle: string;
   sectionId: string;
   sectionTitle: string;
-  field: 'content' | 'contentEn';
-  start: number;
-  end: number;
-  quote: string;
-  before: string;
-  after: string;
-}
-
-const DEFAULT_CONTEXT_CHARS = 120;
-const DEFAULT_MAX_MENTIONS = 60;
-
-/**
- * Рівномірно розсіює вибірку по всій довжині списку замість того, щоб
- * узяти просто "перші N" — інакше на книзі з десятками згадувань стеля
- * майже завжди відрізала б усе, крім ранніх розділів, тобто саме там,
- * де НАЙМЕНШЕ шансів побачити суперечність із тим, що написано пізніше.
- */
-function sampleEvenly<T>(items: T[], count: number): T[] {
-  if (items.length <= count) return items;
-  const step = items.length / count;
-  const out: T[] = [];
-  for (let i = 0; i < count; i += 1) {
-    out.push(items[Math.floor(i * step)]);
-  }
-  return out;
-}
-
-/**
- * Проходить `book.chapters[].sections[]` цілком (обидва мовних поля) і
- * повертає кожну згадку ЦЬОГО персонажа з контекстом навколо. Стеля
- * `maxMentions` рахується ПІСЛЯ повного проходу (щоб `totalFound` і
- * `truncated` були чесними), а не як рання зупинка проходу.
- */
-export function collectCharacterMentions(
-  book: Book,
-  character: CharacterMentionEntry,
-  opts?: { contextChars?: number; maxMentions?: number }
-): { mentions: CollectedCharacterMention[]; totalFound: number; truncated: boolean } {
+  language: 'uk' | 'en';
+  matchedText: string;
+  context: string;
+}[] {
+  const character = book.characters.find((item) => item.id === characterId);
+  if (!character) return [];
   const entries = buildNameEntries([character]);
-  const contextChars = opts?.contextChars ?? DEFAULT_CONTEXT_CHARS;
-  const maxMentions = opts?.maxMentions ?? DEFAULT_MAX_MENTIONS;
+  if (!entries.length) return [];
 
-  const all: CollectedCharacterMention[] = [];
-  if (entries.length > 0) {
-    for (const chapter of book.chapters) {
-      for (const section of chapter.sections) {
-        const fields: Array<['content' | 'contentEn', string]> = [
-          ['content', section.content || ''],
-          ['contentEn', section.contentEn || ''],
-        ];
-        for (const [field, text] of fields) {
-          if (!text) continue;
-          for (const range of findMentionsInText(text, entries)) {
-            const beforeStart = Math.max(0, range.start - contextChars);
-            const afterEnd = Math.min(text.length, range.end + contextChars);
-            all.push({
-              chapterId: chapter.id,
-              chapterTitle: chapter.title,
-              sectionId: section.id,
-              sectionTitle: section.title,
-              field,
-              start: range.start,
-              end: range.end,
-              quote: text.slice(range.start, range.end),
-              before: (beforeStart > 0 ? '…' : '') + text.slice(beforeStart, range.start),
-              after: text.slice(range.end, afterEnd) + (afterEnd < text.length ? '…' : ''),
-            });
-          }
+  const out: {
+    chapterId: string;
+    chapterTitle: string;
+    sectionId: string;
+    sectionTitle: string;
+    language: 'uk' | 'en';
+    matchedText: string;
+    context: string;
+  }[] = [];
+
+  for (const chapter of book.chapters) {
+    for (const section of chapter.sections) {
+      const sources: Array<{ language: 'uk' | 'en'; text: string }> = [
+        { language: 'uk', text: section.content || '' },
+        { language: 'en', text: section.contentEn || '' },
+      ];
+      for (const source of sources) {
+        if (!source.text) continue;
+        for (const mention of findMentionsInText(source.text, entries)) {
+          const start = Math.max(0, mention.start - contextRadius);
+          const end = Math.min(source.text.length, mention.end + contextRadius);
+          out.push({
+            chapterId: chapter.id,
+            chapterTitle: chapter.title,
+            sectionId: section.id,
+            sectionTitle: section.title,
+            language: source.language,
+            matchedText: mention.matchedText,
+            context: source.text.slice(start, end).trim(),
+          });
         }
       }
     }
   }
-
-  const truncated = all.length > maxMentions;
-  const mentions = truncated ? sampleEvenly(all, maxMentions) : all;
-  return { mentions, totalFound: all.length, truncated };
-}
-
-/**
- * Форматує зібрані згадування в один текстовий блок для AI-промту —
- * з позначкою розділу перед кожним фрагментом, щоб модель могла
- * посилатись на конкретне місце в книзі. Жорсткий `maxChars` — останній
- * рубіж захисту (сама вибірка вже обмежена `maxMentions`, тож на практиці
- * рідко спрацьовує), а не основний механізм обрізання.
- */
-export function formatMentionsForPrompt(mentions: CollectedCharacterMention[], maxChars = 40_000): string {
-  if (mentions.length === 0) return '(персонаж ще не згадується в тексті книги)';
-  const parts = mentions.map((m) => {
-    const langTag = m.field === 'contentEn' ? ', EN' : '';
-    return `[${m.chapterTitle} → ${m.sectionTitle}${langTag}]\n…${m.before}${m.quote}${m.after}…`;
-  });
-  const joined = parts.join('\n\n');
-  return joined.length > maxChars ? `${joined.slice(0, maxChars)}\n…(обрізано — забагато згадувань)` : joined;
+  return out;
 }
