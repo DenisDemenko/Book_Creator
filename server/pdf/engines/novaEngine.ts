@@ -68,7 +68,9 @@ export const novaEngine: PdfEngine = {
             warningsUk: kdp.warningsUk,
           },
           honoredSpec: true,
-          notesUk: [kdp.spec.designerNoteUk || '', ...kdp.warningsUk, ...kdp.notesUk].filter(Boolean),
+          // Production metadata lives in printInfo; notesUk is reserved for
+          // renderer notes (for example an illustration that could not load).
+          notesUk: kdp.notesUk,
         };
       }
 
