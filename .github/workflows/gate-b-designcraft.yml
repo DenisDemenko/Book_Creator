@@ -51,6 +51,9 @@ jobs:
       - name: PDF render manifest contract
         run: npx tsx scripts/test-pdfRenderManifest.mts
 
+      - name: Final PDF spread source-of-truth contract
+        run: npx tsx scripts/test-finalPdfSpread.mts
+
       - name: Chromium final PDF pagination contract
         run: npx tsx scripts/test-chromiumPageMap.mts
 
