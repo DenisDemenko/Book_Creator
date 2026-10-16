@@ -30,6 +30,11 @@ import { bookToMarkdown, unresolvedMarkersNoteUk } from '../bookToMarkdown';
 import { extensionForMime, loadImageBytes } from '../../media/imageBytes';
 import { PAGE_SIZES } from '../pdfTypes';
 import {
+  buildPandocCanonicalPageMap,
+  injectPandocLandmarkLinks,
+  preparePandocLandmarks,
+} from './pandocPageMap';
+import {
   PdfEngineError,
   type PdfEngine,
   type PdfEngineAvailability,
@@ -37,15 +42,6 @@ import {
   type PdfRenderResult,
 } from './types';
 
-/**
- * Де лежить шаблон.
- *
- * Двічі, бо розкладка різна. У вихідному коді цей файл — у
- * `server/pdf/engines/`, і шаблон поруч, на рівень вище. У зібраному
- * застосунку весь сервер — один `dist/server.mjs`, і `..` веде вже за межі
- * `dist`. Жорсткий шлях працював би рівно в одному з двох випадків, причому
- * зламався б у тому, який на продакшені.
- */
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 function firstExistingDir(candidates: string[]): string {
@@ -62,18 +58,16 @@ function firstExistingDir(candidates: string[]): string {
 export const LATEX_DIR =
   process.env.LATEX_TEMPLATE_DIR ||
   firstExistingDir([
-    path.join(MODULE_DIR, '..', 'latex'), // вихідний код: server/pdf/latex
-    path.join(MODULE_DIR, 'latex'), // збірка: dist/latex
+    path.join(MODULE_DIR, '..', 'latex'),
+    path.join(MODULE_DIR, 'latex'),
   ]);
 export const EISVOGEL_TEMPLATE = path.join(LATEX_DIR, 'eisvogel.latex');
 
 export const PANDOC_PATH = process.env.PANDOC_PATH || 'pandoc';
 export const XELATEX_PATH = process.env.XELATEX_PATH || 'xelatex';
 
-/** LaTeX на книзі в 300 сторінок іде хвилини, а не секунди. */
 const PANDOC_TIMEOUT_MS = Number(process.env.PANDOC_TIMEOUT_MS) || 300_000;
 
-/** Шрифт із кирилицею, який ставиться в образ разом із TeX. */
 const MAIN_FONT = process.env.PANDOC_MAIN_FONT || 'DejaVu Serif';
 const SANS_FONT = process.env.PANDOC_SANS_FONT || 'DejaVu Sans';
 const MONO_FONT = process.env.PANDOC_MONO_FONT || 'DejaVu Sans Mono';
@@ -85,13 +79,6 @@ export interface RunResult {
   timedOut: boolean;
 }
 
-/**
- * Запуск зовнішньої програми з таймаутом.
- *
- * Таймаут добиває процес, а не просто перестає його чекати: зависла збірка
- * LaTeX інакше лишалась би в памʼяті контейнера до перезапуску, і десяток
- * таких зависань зʼїв би сервер тихо, без жодного повідомлення.
- */
 export function run(
   command: string,
   args: string[],
@@ -109,7 +96,6 @@ export function run(
     }, opts.timeoutMs ?? PANDOC_TIMEOUT_MS);
 
     child.stdout?.on('data', (d) => {
-      // Обрізаємо: помилка LaTeX буває на мегабайт, і в лог їй не місце.
       if (stdout.length < 20_000) stdout += String(d);
     });
     child.stderr?.on('data', (d) => {
@@ -131,13 +117,6 @@ async function binaryWorks(command: string): Promise<boolean> {
   return result.code === 0;
 }
 
-/**
- * Останній рядок помилки LaTeX, придатний для показу.
- *
- * Повний вивід — це сотні рядків службового шуму, у якому справжня причина
- * («Undefined control sequence») губиться. Показати авторові все — те саме,
- * що не показати нічого.
- */
 export function latexErrorSummary(stderr: string, stdout: string): string {
   const text = `${stdout}\n${stderr}`;
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -150,7 +129,6 @@ export function latexErrorSummary(stderr: string, stdout: string): string {
   return lines.slice(-3).join(' · ') || 'LaTeX завершився помилкою без пояснення.';
 }
 
-/** Формат сторінки в мові LaTeX. Eisvogel приймає `papersize`. */
 function paperFor(sizeName: string | undefined): string {
   switch (sizeName) {
     case 'A4':
@@ -213,13 +191,12 @@ export const pandocEngine: PdfEngine = {
     const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'nova-pandoc-'));
 
     try {
-      const doc = bookToMarkdown(request.book as never, { frontmatter: true });
+      const prepared = preparePandocLandmarks(request.book);
+      const doc = bookToMarkdown(prepared.book as never, { frontmatter: true });
       const markerNote = unresolvedMarkersNoteUk(doc.unresolvedMarkers);
       if (markerNote) notesUk.push(markerNote);
 
-      // Ілюстрації — файлами поруч із рукописом: pandoc читає їх з диска,
-      // а `data:`-URL у Markdown він не розуміє взагалі.
-      let markdown = doc.markdown;
+      let markdown = injectPandocLandmarkLinks(doc.markdown, prepared.expected);
       for (const image of doc.images) {
         try {
           const { mimeType, bytes } = await loadImageBytes(image.url, request.ownerId);
@@ -249,8 +226,6 @@ export const pandocEngine: PdfEngine = {
         EISVOGEL_TEMPLATE,
         '--pdf-engine',
         XELATEX_PATH,
-        // Ось той самий запобіжник, про який ідеться в шапці файлу: текст
-        // автора не може стати командою TeX.
         '--from',
         'markdown-raw_tex',
         '--resource-path',
@@ -273,14 +248,6 @@ export const pandocEngine: PdfEngine = {
         'titlepage=true',
         '-V',
         'toc-own-page=true',
-        /*
-          Кожна ілюстрація вписується у смугу набору й висоту сторінки.
-          Без цього LaTeX ставить `\\includegraphics` у НАТУРАЛЬНОМУ розмірі
-          зображення: широка картинка на 1600 px вилазила за правий край і
-          налізала на колонтитул — перевірено живим прогоном.
-          `keepaspectratio` лишає пропорції, тож картинка не спотворюється,
-          а мала й не збільшується — `width` тут стеля, а не вимога.
-        */
         '-V',
         'header-includes=\\setkeys{Gin}{width=\\linewidth,height=0.8\\textheight,keepaspectratio}',
       ];
@@ -305,19 +272,34 @@ export const pandocEngine: PdfEngine = {
 
       const bytes = new Uint8Array(await fs.readFile(outputPath));
       const pageCount = (await PDFDocument.load(bytes)).getPageCount();
+      const pageMap = await buildPandocCanonicalPageMap({
+        bytes,
+        pageCount,
+        expected: prepared.expected,
+      });
 
       notesUk.push(
         'Верстку виконано LaTeX за шаблоном Eisvogel: формат сторінки й кегль ' +
           'узято з налаштувань книги, решта типографіки — від шаблону.'
       );
+      if (!pageMap && prepared.expected.length > 0) {
+        notesUk.push(
+          'Pandoc не зберіг усі технічні PDF-посилання глав/секцій; координати не вгадуються, реєстр поверне лише точну кількість сторінок.'
+        );
+      }
 
-      return { bytes, pageCount, engineId: 'pandoc', honoredSpec: false, notesUk };
+      return {
+        bytes,
+        pageCount,
+        engineId: 'pandoc',
+        pageMap: pageMap || undefined,
+        honoredSpec: false,
+        notesUk,
+      };
     } catch (err) {
       if (err instanceof PdfEngineError) throw err;
       throw new PdfEngineError('pandoc', 'engine', (err as Error).message);
     } finally {
-      // Тимчасова тека прибирається завжди: у ній лежать ілюстрації автора,
-      // і лишати їх у /tmp контейнера — це і місце, і чужі файли поруч.
       await fs.rm(workDir, { recursive: true, force: true }).catch(() => undefined);
     }
   },
