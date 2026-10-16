@@ -12,20 +12,12 @@ import {
 } from '../data/heroArc';
 import { assessHeroArcWithJev } from '../utils/heroArcJevClient';
 
-/**
- * «Крива головного героя» — конструктор шляху героя + JEV-оцінка емоційної
- * траєкторії. JEV формує базові 14 точок із фактичного контексту книги;
- * повзунки лишаються ручною корекцією автора поверх цієї оцінки.
- */
 export interface HeroArcPanelProps {
   value: HeroArcState | undefined;
   onChange: (next: HeroArcState) => void;
   heroName?: string;
   compact?: boolean;
-  /**
-   * Контекст, з якого JEV має оцінити криву: задум, герой, синопсис,
-   * структура, текст. Якщо порожній, кнопка оцінки не показується.
-   */
+  /** Повний контекст книги, якщо батьківський екран уже має синопсис/структуру. */
   assessmentContext?: string;
 }
 
@@ -37,6 +29,13 @@ export const HeroArcPanel: React.FC<HeroArcPanelProps> = ({ value, onChange, her
   const [assessmentMeta, setAssessmentMeta] = useState<{ model: string; confidences: Array<number | null> } | null>(null);
   const state = normalizeHeroArcState(value);
   const progress = heroArcProgress(state);
+  const constructorContext = Object.entries(state.answers)
+    .filter(([, answer]) => answer?.trim())
+    .map(([id, answer]) => `${id}: ${answer.trim()}`)
+    .join('\n');
+  const jevContext = assessmentContext?.trim() || [heroName ? `Головний герой: ${heroName}` : '', constructorContext]
+    .filter(Boolean)
+    .join('\n');
 
   const setAnswer = (stepId: string, text: string) => {
     onChange({ ...state, answers: { ...state.answers, [stepId]: text } });
@@ -48,16 +47,11 @@ export const HeroArcPanel: React.FC<HeroArcPanelProps> = ({ value, onChange, her
   };
 
   const runJevAssessment = async () => {
-    const context = assessmentContext?.trim();
-    if (!context || assessing) return;
+    if (!jevContext || assessing) return;
     setAssessing(true);
     setAssessmentError(null);
     try {
-      const result = await assessHeroArcWithJev({
-        heroName,
-        context,
-        constructorAnswers: state.answers,
-      });
+      const result = await assessHeroArcWithJev({ heroName, context: jevContext, constructorAnswers: state.answers });
       onChange({ ...state, intensities: result.intensities });
       setAssessmentMeta({ model: result.model, confidences: result.confidences });
       setTab('curve');
@@ -83,12 +77,9 @@ export const HeroArcPanel: React.FC<HeroArcPanelProps> = ({ value, onChange, her
   const fillD = `${pathD} L${xFor(HERO_ARC_BEATS.length - 1).toFixed(1)},${zeroY.toFixed(1)} L${xFor(0).toFixed(1)},${zeroY.toFixed(1)} Z`;
   const bandStarts = [0, 5, 11, 14];
   const bandFills = ['rgba(52,211,153,0.06)', 'rgba(244,63,94,0.05)', 'rgba(96,165,250,0.06)'];
-
-  const confidenceLabel = assessmentMeta?.confidences.some((x) => x != null)
-    ? Math.round(
-        (assessmentMeta.confidences.filter((x): x is number => typeof x === 'number').reduce((a, b) => a + b, 0) /
-          Math.max(1, assessmentMeta.confidences.filter((x): x is number => typeof x === 'number').length)) * 100,
-      )
+  const knownConfidence = assessmentMeta?.confidences.filter((x): x is number => typeof x === 'number') ?? [];
+  const confidenceLabel = knownConfidence.length
+    ? Math.round((knownConfidence.reduce((a, b) => a + b, 0) / knownConfidence.length) * 100)
     : null;
 
   return (
@@ -105,12 +96,12 @@ export const HeroArcPanel: React.FC<HeroArcPanelProps> = ({ value, onChange, her
             </span>
           )}
         </div>
-        {assessmentContext?.trim() && (
+        {jevContext && (
           <button
             type="button"
             onClick={() => void runJevAssessment()}
             disabled={assessing}
-            title="JEV прочитає контекст книги та оцінить 14 точок. Повзунки після цього лишаються ручною корекцією автора."
+            title="JEV оцінить 14 точок за наявним контекстом. Повзунки після цього лишаються ручною корекцією автора."
             className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-[10px] font-bold text-emerald-300 hover:bg-emerald-500/15 disabled:opacity-50"
           >
             {assessing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
@@ -178,20 +169,13 @@ export const HeroArcPanel: React.FC<HeroArcPanelProps> = ({ value, onChange, her
             className="w-full resize-y rounded-xl bg-slate-950 border border-slate-800 px-2.5 py-2 text-xs text-slate-200 leading-relaxed outline-none focus:border-amber-400"
           />
           <div className="flex items-center justify-between pt-1">
-            <button
-              type="button"
-              disabled={activeStep === 0}
-              onClick={() => setActiveStep((s) => Math.max(0, s - 1))}
-              className="text-[11px] font-semibold text-slate-400 hover:text-slate-200 disabled:opacity-30 disabled:cursor-default"
-            >
+            <button type="button" disabled={activeStep === 0} onClick={() => setActiveStep((s) => Math.max(0, s - 1))}
+              className="text-[11px] font-semibold text-slate-400 hover:text-slate-200 disabled:opacity-30 disabled:cursor-default">
               ← Попередній
             </button>
-            <button
-              type="button"
-              disabled={activeStep === HERO_ARC_STEPS.length - 1}
+            <button type="button" disabled={activeStep === HERO_ARC_STEPS.length - 1}
               onClick={() => setActiveStep((s) => Math.min(HERO_ARC_STEPS.length - 1, s + 1))}
-              className="text-[11px] font-semibold text-amber-300 hover:text-amber-200 disabled:opacity-30 disabled:cursor-default"
-            >
+              className="text-[11px] font-semibold text-amber-300 hover:text-amber-200 disabled:opacity-30 disabled:cursor-default">
               Наступний крок →
             </button>
           </div>
@@ -208,16 +192,7 @@ export const HeroArcPanel: React.FC<HeroArcPanelProps> = ({ value, onChange, her
               const x1 = xFor(start) - (ph === 0 ? padX - 4 : 10);
               const x2Raw = xFor(bandStarts[ph + 1] - 1) + 10;
               const x2 = ph === 2 ? W - padX + (padX - 4) : x2Raw;
-              return (
-                <rect
-                  key={ph}
-                  x={x1}
-                  y={padTop}
-                  width={Math.max(0, x2 - x1)}
-                  height={H - padTop - padBottom}
-                  fill={bandFills[ph]}
-                />
-              );
+              return <rect key={ph} x={x1} y={padTop} width={Math.max(0, x2 - x1)} height={H - padTop - padBottom} fill={bandFills[ph]} />;
             })}
             <line x1={padX} y1={zeroY} x2={W - padX} y2={zeroY} stroke="#334155" strokeDasharray="2,4" />
             <path d={fillD} fill="#f59e0b" opacity={0.12} />
@@ -227,9 +202,7 @@ export const HeroArcPanel: React.FC<HeroArcPanelProps> = ({ value, onChange, her
             ))}
           </svg>
           <div className="flex text-[9px] font-mono text-slate-500 -mt-1 px-1">
-            {HERO_ARC_PHASE_LABELS.map((label) => (
-              <span key={label} className="flex-1 text-center uppercase tracking-wide">{label}</span>
-            ))}
+            {HERO_ARC_PHASE_LABELS.map((label) => <span key={label} className="flex-1 text-center uppercase tracking-wide">{label}</span>)}
           </div>
 
           <div className="mt-3 grid gap-1.5 sm:grid-cols-2">
@@ -239,16 +212,9 @@ export const HeroArcPanel: React.FC<HeroArcPanelProps> = ({ value, onChange, her
                   <span className="text-slate-300 truncate">{i + 1}. {b.title}</span>
                   <span className="font-mono text-slate-500 shrink-0">{state.intensities[i]}</span>
                 </div>
-                <input
-                  type="range"
-                  min={-10}
-                  max={10}
-                  step={1}
-                  value={state.intensities[i]}
+                <input type="range" min={-10} max={10} step={1} value={state.intensities[i]}
                   onChange={(e) => setIntensity(i, Number(e.target.value))}
-                  title="Ручна корекція оцінки автора"
-                  className="w-full accent-amber-400"
-                />
+                  title="Ручна корекція оцінки автора" className="w-full accent-amber-400" />
               </div>
             ))}
           </div>
