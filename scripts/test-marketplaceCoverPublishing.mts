@@ -10,7 +10,7 @@ const bridge = await fs.readFile(new URL('../server/marketplaceBridge.ts', impor
 const store = await fs.readFile(new URL('../server/bookStore.ts', import.meta.url), 'utf8');
 
 // Cover Studio keeps all production fields on the canonical book object.
-assert.match(coverDesigner, /coverConfig:\s*\{\s*\.\.\.cover,\s*\.\.\.patch\s*\}/s);
+assert.match(coverDesigner, /coverConfig:\s*\{\s*\.\.\.cover,\s*\.\.\.updated,?\s*\}/s);
 assert.match(coverDesigner, /frontArtUrl/);
 assert.match(coverDesigner, /backArtUrl/);
 assert.match(coverDesigner, /paperStock/);
