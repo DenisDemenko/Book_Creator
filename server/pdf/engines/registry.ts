@@ -6,7 +6,7 @@
 import { novaEngine } from './novaEngine';
 import { chromiumEngine } from './chromiumEngine';
 import { pandocEngine } from './pandocEngine';
-import { designcraftEngineV3 } from './designcraftEngineV3';
+import { designcraftKdpEngine } from './designcraftKdpEngine';
 import { pageCountOnlyMap, type CanonicalPageMapSource } from '../../../shared/canonicalPageMap';
 import {
   DEFAULT_PDF_ENGINE,
@@ -22,7 +22,7 @@ import {
 /** Рушії в порядку показу автору. */
 const ENGINES: Partial<Record<PdfEngineId, PdfEngine>> = {
   nova: novaEngine,
-  designcraft: designcraftEngineV3,
+  designcraft: designcraftKdpEngine,
   chromium: chromiumEngine,
   pandoc: pandocEngine,
   // gamma: свідомо НЕ зареєстрована. Код підсистеми лишається на місці.
@@ -58,18 +58,19 @@ const WRITER_ENGINE_PROFILES: Partial<Record<PdfEngineId, WriterEngineProfile>> 
     recommendationUk: 'Обирайте для фінального друку, KDP і випадків, де важливі повторюваність та фізичні поля книги.',
   },
   designcraft: {
-    badgeUk: 'Дизайн книги',
-    summaryUk: 'DTP-рушій для художньої композиції сторінки, тем, семантичних блоків та складнішої роботи з ілюстраціями.',
-    sourceUk: 'DesignCraft CLI / native threaded layout',
-    bestForUk: ['артбуки', 'дитячі книги', 'навчальні видання', 'брендовані та ілюстровані книги'],
+    badgeUk: 'Дизайн + KDP',
+    summaryUk: 'DTP-рушій для художньої композиції сторінки, тем, семантичних блоків, ілюстрацій та KDP print PDF.',
+    sourceUk: 'DesignCraft CLI / native threaded layout + KDP print adapter',
+    bestForUk: ['артбуки', 'дитячі книги', 'навчальні видання', 'брендовані та ілюстровані книги', 'Amazon KDP'],
     featuresUk: [
       '15 дизайн-систем Studio і custom themes',
       'потокові текстові фрейми без overset',
       'семантичні стилі та декоративні блоки',
       'розміщення ілюстрацій у DTP-макеті',
       'native TOC і точний PageMap',
+      'окремий print/KDP режим зі дзеркальним inside/outside та bleed',
     ],
-    recommendationUk: 'Обирайте, коли художній характер і композиція сторінки важливіші за KDP-специфічну production-геометрію.',
+    recommendationUk: 'Обирайте для KDP, коли важливо зберегти складний художній DesignCraft-макет, ілюстрації та тему книги.',
   },
   chromium: {
     badgeUk: 'HTML / CSS',
@@ -204,8 +205,7 @@ export async function renderWithEngine(
     throw new PdfEngineError(
       engine.id,
       'bad_input',
-      `Рушій «${engine.label}» не робить друковану редакцію під KDP: ` +
-        'дзеркальні поля й корінець за обсягом уміє лише власна верстка Nova.'
+      `Рушій «${engine.label}» не підтримує друкований PDF/KDP. Оберіть Nova або DesignCraft.`
     );
   }
 
