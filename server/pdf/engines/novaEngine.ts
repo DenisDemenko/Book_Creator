@@ -60,6 +60,13 @@ export const novaEngine: PdfEngine = {
           pageCount: kdp.pageCount,
           engineId: 'nova',
           pageMap: kdp.pageMap,
+          printInfo: {
+            trimId: kdp.trimId,
+            gutterMm: kdp.gutterMm,
+            passes: kdp.passes,
+            designerNoteUk: kdp.spec.designerNoteUk,
+            warningsUk: kdp.warningsUk,
+          },
           honoredSpec: true,
           notesUk: [kdp.spec.designerNoteUk || '', ...kdp.warningsUk, ...kdp.notesUk].filter(Boolean),
         };
