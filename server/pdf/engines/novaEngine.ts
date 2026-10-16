@@ -52,6 +52,8 @@ export const novaEngine: PdfEngine = {
       if (request.print) {
         const kdp = await renderKdpInterior(request.book, {
           base: request.spec as never,
+          trimId: request.trimId,
+          hasBleed: request.hasBleed,
           ownerId: request.ownerId,
         });
         return {
