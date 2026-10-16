@@ -107,7 +107,7 @@ export async function classifyBookEntitiesWithJev(
 }
 
 export function canonicalTag(match: Pick<JevEntityCandidate, 'slug' | 'name'>): string {
-  return `[/﻿${match.slug}:${cleanValue(match.name)}]`.replace('/﻿', '/');
+  return `[/${match.slug}:${cleanValue(match.name)}]`;
 }
 
 /** Prefixes only missing canonical tags. The selected/generated prose is never rewritten. */
@@ -129,7 +129,7 @@ export function prependMissingJevTags(text: string, matches: JevEntityMatch[]): 
     const key = `${match.slug.toLowerCase()}:${value.toLocaleLowerCase()}`;
     if (existing.has(key) || added.has(key)) continue;
     added.add(key);
-    tags.push(`[/${match.slug}:${value}]`);
+    tags.push(canonicalTag({ slug: match.slug, name: value }));
   }
   return tags.length ? `${tags.join(' ')}\n${source}` : source;
 }
