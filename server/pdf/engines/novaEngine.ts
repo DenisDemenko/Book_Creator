@@ -11,7 +11,6 @@
 
 import { renderBookPdf, fontsAvailable, FONT_DIR } from '../pdfRenderer';
 import { renderKdpInterior } from '../pdfKdp';
-import { pageCountOnlyMap } from '../../../shared/canonicalPageMap';
 import {
   PdfEngineError,
   type PdfEngine,
@@ -60,12 +59,7 @@ export const novaEngine: PdfEngine = {
           bytes: kdp.bytes,
           pageCount: kdp.pageCount,
           engineId: 'nova',
-          pageMap: pageCountOnlyMap(
-            'nova',
-            'nova-pdf',
-            kdp.pageCount,
-            'Nova вже знає точні координати глав усередині pdfRenderer; їх буде піднято в цей контракт без повторної пагінації.'
-          ),
+          pageMap: kdp.pageMap,
           honoredSpec: true,
           notesUk: [kdp.spec.designerNoteUk || '', ...kdp.warningsUk, ...kdp.notesUk].filter(Boolean),
         };
@@ -76,12 +70,7 @@ export const novaEngine: PdfEngine = {
         bytes: result.bytes,
         pageCount: result.pageCount,
         engineId: 'nova',
-        pageMap: pageCountOnlyMap(
-          'nova',
-          'nova-pdf',
-          result.pageCount,
-          'Nova вже знає точні координати глав усередині pdfRenderer; їх буде піднято в цей контракт без повторної пагінації.'
-        ),
+        pageMap: result.pageMap,
         honoredSpec: true,
         notesUk: result.notesUk,
       };
