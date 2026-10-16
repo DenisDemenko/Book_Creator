@@ -6,7 +6,7 @@
 import { novaEngine } from './novaEngine';
 import { chromiumEngine } from './chromiumEngine';
 import { pandocEngine } from './pandocEngine';
-import { designcraftKdpEngine } from './designcraftKdpEngine';
+import { designcraftEngineV3 } from './designcraftEngineV3';
 import { pageCountOnlyMap, type CanonicalPageMapSource } from '../../../shared/canonicalPageMap';
 import {
   DEFAULT_PDF_ENGINE,
@@ -22,7 +22,7 @@ import {
 /** Рушії в порядку показу автору. */
 const ENGINES: Partial<Record<PdfEngineId, PdfEngine>> = {
   nova: novaEngine,
-  designcraft: designcraftKdpEngine,
+  designcraft: designcraftEngineV3,
   chromium: chromiumEngine,
   pandoc: pandocEngine,
   // gamma: свідомо НЕ зареєстрована. Код підсистеми лишається на місці.
@@ -60,7 +60,7 @@ const WRITER_ENGINE_PROFILES: Partial<Record<PdfEngineId, WriterEngineProfile>> 
   designcraft: {
     badgeUk: 'Дизайн + KDP',
     summaryUk: 'DTP-рушій для художньої композиції сторінки, тем, семантичних блоків, ілюстрацій та KDP print PDF.',
-    sourceUk: 'DesignCraft CLI / native threaded layout + KDP print adapter',
+    sourceUk: 'DesignCraft CLI / native threaded layout / PDF-X4',
     bestForUk: ['артбуки', 'дитячі книги', 'навчальні видання', 'брендовані та ілюстровані книги', 'Amazon KDP'],
     featuresUk: [
       '15 дизайн-систем Studio і custom themes',
@@ -68,7 +68,7 @@ const WRITER_ENGINE_PROFILES: Partial<Record<PdfEngineId, WriterEngineProfile>> 
       'семантичні стилі та декоративні блоки',
       'розміщення ілюстрацій у DTP-макеті',
       'native TOC і точний PageMap',
-      'окремий print/KDP режим зі дзеркальним inside/outside та bleed',
+      'native facing pages, inside/outside поля, bleed та PDF/X-4 для KDP',
     ],
     recommendationUk: 'Обирайте для KDP, коли важливо зберегти складний художній DesignCraft-макет, ілюстрації та тему книги.',
   },
