@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
+  assessHeroArcWithJev,
   buildJevEntityBatches,
   classifyExistingEntitiesWithJev,
   readNoulProbability,
@@ -76,21 +77,66 @@ await assert.rejects(
 );
 console.log('  ✓ missing server-side JEV key fails explicitly');
 
+let heroCalls = 0;
+const heroFetch: typeof fetch = async (_input, init) => {
+  heroCalls++;
+  const body = JSON.parse(String(init?.body || '{}')) as {
+    model?: string;
+    state?: { task?: string; hero?: string; context?: string; constraint?: string };
+    questions?: Record<string, { type?: string; criteria?: string[] }>;
+  };
+  assert.equal(body.state?.task, 'hero_arc_emotional_valence');
+  assert.equal(body.state?.hero, 'Марина');
+  assert.match(String(body.state?.context), /лист/);
+  assert.equal(body.state?.constraint, 'use_only_provided_story_evidence');
+  assert.equal(Object.keys(body.questions ?? {}).length, 14);
+  for (const question of Object.values(body.questions ?? {})) {
+    assert.equal(question.type, 'score');
+    assert.equal(question.criteria?.length, 9);
+  }
+  const answers = Object.fromEntries(Array.from({ length: 14 }, (_, i) => [
+    `beat_${i}`,
+    { type: 'score', score: i % 9, confidence: 0.8 },
+  ]));
+  return new Response(JSON.stringify({ model: 'jev-latest', answers }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+const arc = await assessHeroArcWithJev({
+  heroName: 'Марина',
+  context: 'Марина отримує лист і вирушає в дорогу.',
+  constructorAnswers: { s3: 'Лист змушує її залишити дім.' },
+  apiKey: 'test-key',
+  model: 'jev-latest',
+  fetchImpl: heroFetch,
+});
+assert.equal(heroCalls, 1);
+assert.equal(arc.intensities.length, 14);
+assert.equal(arc.confidences.length, 14);
+assert.equal(arc.intensities[0], -10);
+assert.equal(arc.intensities[8], 10);
+assert.equal(arc.confidences[0], 0.8);
+console.log('  ✓ Hero Arc is evaluated as 14 JEV score questions and mapped to -10…10');
+
 const routes = await readFile(new URL('../server/worldPhoto.ts', import.meta.url), 'utf8');
 const jev = await readFile(new URL('../server/jevSemantic.ts', import.meta.url), 'utf8');
 const extensions = await readFile(new URL('../src/components/manuscriptEditor/extensions.ts', import.meta.url), 'utf8');
 const autoTag = await readFile(new URL('../src/components/manuscriptEditor/JevAutoTagPlugin.ts', import.meta.url), 'utf8');
 const wizard = await readFile(new URL('../src/components/ExpressStartView.tsx', import.meta.url), 'utf8');
+const heroPanel = await readFile(new URL('../src/components/HeroArcPanel.tsx', import.meta.url), 'utf8');
+const heroClient = await readFile(new URL('../src/utils/heroArcJevClient.ts', import.meta.url), 'utf8');
 const handoff = await readFile(new URL('../src/utils/expressSemanticHandoff.ts', import.meta.url), 'utf8');
 
 assert.match(routes, /registerJevSemanticRoutes\(app\)/);
 assert.match(jev, /\/api\/semantic\/jev\/entities/);
+assert.match(jev, /\/api\/semantic\/jev\/hero-arc/);
 assert.match(jev, /requirePermission\('canUseAi'\)/);
 assert.match(jev, /HttpJevAdapter/);
 assert.match(jev, /jevKeyFromEnv/);
 assert.match(jev, /noulProbability/);
 assert.doesNotMatch(jev, /generateText\(/);
-console.log('  ✓ semantic tagging reuses the authenticated core TypeSafe adapter and has no generative fallback');
+console.log('  ✓ semantic and Hero Arc routes reuse the authenticated core TypeSafe adapter');
 
 assert.match(extensions, /JevAutoTagPlugin\.configure/);
 assert.match(autoTag, /Проставити теги автоматично/);
@@ -105,7 +151,12 @@ assert.match(handoff, /\[\/character:/);
 assert.match(wizard, /withDeterministicSemanticHandoff/);
 assert.match(wizard, /withJevSemanticEnrichment/);
 assert.match(wizard, /prependMissingJevTags/);
-assert.match(wizard, /status: 'skipped'/);
-console.log('  ✓ wizard keeps deterministic tags first, then applies non-destructive JEV enrichment');
+assert.match(wizard, /buildHeroArcAssessmentContext/);
+assert.match(wizard, /assessHeroArcWithJev/);
+assert.match(wizard, /nova:jev-hero-arc/);
+assert.match(heroPanel, /Оцінити JEV/);
+assert.match(heroPanel, /Ручна корекція оцінки автора/);
+assert.match(heroClient, /\/api\/semantic\/jev\/hero-arc/);
+console.log('  ✓ wizard recalculates Hero Arc from final story context while sliders remain manual override');
 
 console.log('\nJEV semantic entity classifier regression contract passed.');
