@@ -42,6 +42,12 @@ jobs:
       - name: TypeScript
         run: npm run lint
 
+      - name: Canonical PDF pagination contract
+        run: npx tsx scripts/test-canonicalPageMap.mts
+
+      - name: Preview chapter navigation contract
+        run: npx tsx scripts/test-previewPageMap.mts
+
       - name: Express wizard integrity contract
         run: npx tsx scripts/test-expressWizardIntegrity.mts
 
