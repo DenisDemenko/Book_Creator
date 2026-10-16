@@ -48,6 +48,9 @@ jobs:
       - name: PDF engine preference contract
         run: npx tsx scripts/test-pdfEnginePreference.mts
 
+      - name: PDF render manifest contract
+        run: npx tsx scripts/test-pdfRenderManifest.mts
+
       - name: Chromium final PDF pagination contract
         run: npx tsx scripts/test-chromiumPageMap.mts
 
