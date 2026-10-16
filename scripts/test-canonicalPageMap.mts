@@ -1,4 +1,5 @@
-import { buildCanonicalPdfPageMap } from '../shared/canonicalPageMap';
+import { buildCanonicalPdfPageMap, pageCountOnlyMap } from '../shared/canonicalPageMap';
+import { buildDesigncraftCanonicalPageMap } from '../server/pdf/engines/designcraftPageMap';
 
 let pass = 0;
 let fail = 0;
@@ -15,18 +16,10 @@ console.log('CanonicalPageMap: final PDF coordinates after generated TOC inserti
         id: 'ch-1',
         title: 'Початок',
         pageIndex: 2,
-        sections: [
-          { id: 'sec-1', title: 'Сцена 1', pageIndex: 3 },
-        ],
+        sections: [{ id: 'sec-1', title: 'Сцена 1', pageIndex: 3 }],
       },
-      {
-        id: 'ch-2',
-        title: 'Повернення',
-        pageIndex: 10,
-        sections: [],
-      },
+      { id: 'ch-2', title: 'Повернення', pageIndex: 10, sections: [] },
     ],
-    // title + copyright = 2 pages before body, then 2 TOC pages inserted.
     bodyStartPageIndex: 4,
     insertedTocPages: 2,
     pageCount: 18,
@@ -70,6 +63,81 @@ console.log('\nCanonicalPageMap: page numbering modes');
     pageNumber: { show: true, startAt: 17, skipFrontMatter: true },
   });
   t('custom visible numbering starts at requested value', custom.landmarks[0].displayPageNumber === 17);
+}
+
+console.log('\nCanonicalPageMap: DesignCraft printed page names → physical PDF coordinates');
+{
+  const book: any = {
+    title: 'Книга',
+    chapters: [
+      {
+        id: 'c1',
+        title: 'Початок',
+        sections: [
+          { id: 's0', title: '', content: 'Без заголовка' },
+          { id: 's1', title: 'Ранок', content: 'Текст' },
+        ],
+      },
+      { id: 'c2', title: 'Фінал', sections: [{ id: 's2', title: 'Ніч', content: 'Текст' }] },
+    ],
+  };
+
+  const map = buildDesigncraftCanonicalPageMap({
+    book,
+    pageCount: 12,
+    bodyPage: 3,
+    bodyStartNumber: 1,
+    chapterToc: [
+      { level: 1, text: 'Початок', page: '1' },
+      { level: 1, text: 'Фінал', page: '6' },
+    ],
+    toc: [
+      { level: 1, text: 'Початок', page: '1' },
+      { level: 2, text: 'Ранок', page: '2' },
+      { level: 1, text: 'Фінал', page: '6' },
+      { level: 2, text: 'Ніч', page: '7' },
+    ],
+  });
+
+  t('DesignCraft map built', !!map);
+  t('DesignCraft map exact', map?.precision === 'exact');
+  t('printed page 1 at body page 3 is physical index 2', map?.landmarks[0]?.filePageIndex === 2, String(map?.landmarks[0]?.filePageIndex));
+  t('untitled source section does not steal next heading id', map?.landmarks[1]?.id === 's1', String(map?.landmarks[1]?.id));
+  t('printed and physical page numbers stay distinct', map?.landmarks[2]?.displayPageNumber === 6 && map?.landmarks[2]?.filePageNumber === 8);
+
+  const badHeading = buildDesigncraftCanonicalPageMap({
+    book,
+    pageCount: 12,
+    bodyPage: 3,
+    bodyStartNumber: 1,
+    chapterToc: [
+      { level: 1, text: 'Інша глава', page: '1' },
+      { level: 1, text: 'Фінал', page: '6' },
+    ],
+    toc: [],
+  });
+  t('heading mismatch is rejected instead of guessed', badHeading === null);
+
+  const romanPage = buildDesigncraftCanonicalPageMap({
+    book,
+    pageCount: 12,
+    bodyPage: 3,
+    bodyStartNumber: 1,
+    chapterToc: [
+      { level: 1, text: 'Початок', page: 'iv' },
+      { level: 1, text: 'Фінал', page: '6' },
+    ],
+    toc: [],
+  });
+  t('non-Arabic page name is rejected for exact mapping', romanPage === null);
+}
+
+console.log('\nCanonicalPageMap: honest fallback');
+{
+  const map = pageCountOnlyMap('chromium', 'chromium-pdf', 27, 'No landmarks');
+  t('fallback declares page-count-only precision', map.precision === 'page-count-only');
+  t('fallback preserves final page count', map.pageCount === 27);
+  t('fallback invents no landmarks', map.landmarks.length === 0 && map.bodyStartPageIndex === null);
 }
 
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);
