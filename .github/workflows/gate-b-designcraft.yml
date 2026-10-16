@@ -48,6 +48,9 @@ jobs:
       - name: Chromium final PDF pagination contract
         run: npx tsx scripts/test-chromiumPageMap.mts
 
+      - name: Pandoc final PDF pagination contract
+        run: npx tsx scripts/test-pandocPageMap.mts
+
       - name: Preview chapter navigation contract
         run: npx tsx scripts/test-previewPageMap.mts
 
