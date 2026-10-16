@@ -25,7 +25,6 @@ assert.match(exportViewSource, /preferredPdfEngineId/);
 assert.match(exportViewSource, /handleExportServerPdf\('digital'\)/);
 assert.match(exportViewSource, /<KdpEngineExport/);
 assert.doesNotMatch(exportViewSource, /handleExportServerPdf\('print', 'nova'\)/, 'KDP must not hard-code Nova');
-assert.doesNotMatch(exportViewSource, /Print PDF · явно через Nova/, 'KDP must expose an explicit engine choice');
 assert.match(exportViewSource, /Legacy \/ Browser Print/);
 assert.match(exportViewSource, /const handleLegacyBrowserPrint = \(\) =>/);
 assert.match(exportViewSource, /printWindow\.print\(\)/);
@@ -34,6 +33,7 @@ assert.match(kdpEngineExportSource, /supportsPrint/);
 assert.match(kdpEngineExportSource, /engineId/);
 assert.match(kdpEngineExportSource, /format:\s*'print'/);
 assert.match(kdpEngineExportSource, /fetch\('\/api\/pdf\/export'/);
+assert.doesNotMatch(kdpEngineExportSource, /engineId:\s*['"]nova['"]/, 'KDP selector must send the writer-selected engine');
 
 assert.match(
   exportViewSource,
