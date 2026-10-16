@@ -45,6 +45,9 @@ jobs:
       - name: Canonical PDF pagination contract
         run: npx tsx scripts/test-canonicalPageMap.mts
 
+      - name: Chromium final PDF pagination contract
+        run: npx tsx scripts/test-chromiumPageMap.mts
+
       - name: Preview chapter navigation contract
         run: npx tsx scripts/test-previewPageMap.mts
 
