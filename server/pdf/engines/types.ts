@@ -32,6 +32,10 @@ export interface PdfRenderRequest {
   spec?: Partial<PdfLayoutSpec>;
   /** Друкована редакція під KDP. Підтримує лише рушій `nova`. */
   print?: boolean;
+  /** Розмір обрізу KDP. Має сенс лише для print + nova. */
+  trimId?: string;
+  /** Чи враховувати виліт під обріз у полях KDP. */
+  hasBleed?: boolean;
   /** Хто друкує — для рушіїв, які працюють під ключем автора. */
   ownerId?: string | null;
   /** Роль того, хто друкує. */
