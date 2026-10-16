@@ -1,5 +1,6 @@
 import { buildCanonicalPdfPageMap, pageCountOnlyMap } from '../shared/canonicalPageMap';
 import { buildDesigncraftCanonicalPageMap } from '../server/pdf/engines/designcraftPageMap';
+import { registerPdfEngine, renderWithEngine } from '../server/pdf/engines/registry';
 
 let pass = 0;
 let fail = 0;
@@ -138,6 +139,38 @@ console.log('\nCanonicalPageMap: honest fallback');
   t('fallback declares page-count-only precision', map.precision === 'page-count-only');
   t('fallback preserves final page count', map.pageCount === 27);
   t('fallback invents no landmarks', map.landmarks.length === 0 && map.bodyStartPageIndex === null);
+}
+
+console.log('\nCanonicalPageMap: registry normalization boundary');
+{
+  registerPdfEngine({
+    id: 'gamma',
+    label: 'Test page-count engine',
+    strengthUk: 'test',
+    limitUk: 'test',
+    supportsPrint: false,
+    async available() {
+      return { ok: true };
+    },
+    async render() {
+      return {
+        bytes: new Uint8Array([37, 80, 68, 70]),
+        pageCount: 7,
+        engineId: 'gamma',
+        honoredSpec: true,
+        notesUk: [],
+      };
+    },
+  });
+
+  const out = await renderWithEngine('gamma', {
+    book: { title: 'Test', chapters: [] },
+    kind: 'book',
+  });
+  t('registry always returns a page map', !!out.pageMap);
+  t('missing native landmarks become page-count-only', out.pageMap.precision === 'page-count-only');
+  t('registry fallback preserves engine id', out.pageMap.engineId === 'gamma');
+  t('registry fallback preserves final page count', out.pageMap.pageCount === 7);
 }
 
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);
