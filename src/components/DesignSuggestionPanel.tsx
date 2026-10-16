@@ -10,7 +10,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
-import type { Book, BookLayoutConfig } from '../types';
+import type { Book } from '../types';
 import {
   applyDesignPatch,
   availableFontFamilies,
@@ -70,13 +70,6 @@ interface PdfEngineOption {
   recommendationUk?: string;
 }
 
-type BookDesignLayoutConfig = BookLayoutConfig & {
-  /** Book Design Studio v1. Legacy `designTheme` remains untouched. */
-  bookDesignThemeId?: BookDesignThemeId;
-  /** PDF renderer chosen by the author for this concrete book. */
-  preferredPdfEngineId?: string;
-};
-
 const DEFAULT_PDF_ENGINE_ID = 'nova';
 const DESIGNCRAFT_ENGINE_ID = 'designcraft';
 
@@ -95,7 +88,7 @@ export const DesignSuggestionPanel: React.FC<Props> = ({ book, onUpdateBook }) =
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DesignResponse | null>(null);
 
-  const persistedPdfEngineId = (book.layoutConfig as BookDesignLayoutConfig).preferredPdfEngineId || DEFAULT_PDF_ENGINE_ID;
+  const persistedPdfEngineId = book.layoutConfig.preferredPdfEngineId || DEFAULT_PDF_ENGINE_ID;
   const [pdfEngines, setPdfEngines] = useState<PdfEngineOption[]>([]);
   const [pdfEngineId, setPdfEngineId] = useState(persistedPdfEngineId);
   const [pdfEnginesLoading, setPdfEnginesLoading] = useState(true);
@@ -106,7 +99,7 @@ export const DesignSuggestionPanel: React.FC<Props> = ({ book, onUpdateBook }) =
   const fonts = useMemo(() => availableFontFamilies(book), [book]);
   const sample = useMemo(() => designSampleText(book), [book]);
   const enoughText = sample.length >= SAMPLE_MIN;
-  const selectedBookDesignTheme = (book.layoutConfig as BookDesignLayoutConfig).bookDesignThemeId || null;
+  const selectedBookDesignTheme = book.layoutConfig.bookDesignThemeId || null;
 
   const changes = useMemo(
     () => (result ? describeDesignChanges(book.layoutConfig, result.patch) : []),
@@ -133,7 +126,7 @@ export const DesignSuggestionPanel: React.FC<Props> = ({ book, onUpdateBook }) =
         const engines = Array.isArray(body?.engines) ? (body.engines as PdfEngineOption[]) : [];
         setPdfEngines(engines);
         const requestedDefault = String(body?.defaultEngineId || DEFAULT_PDF_ENGINE_ID);
-        const preferred = (book.layoutConfig as BookDesignLayoutConfig).preferredPdfEngineId;
+        const preferred = book.layoutConfig.preferredPdfEngineId;
         setPdfEngineId((current) => {
           const preferredItem = preferred ? engines.find((item) => item.id === preferred && item.available) : undefined;
           if (preferredItem) return preferredItem.id;
@@ -195,7 +188,7 @@ export const DesignSuggestionPanel: React.FC<Props> = ({ book, onUpdateBook }) =
         layoutConfig: {
           ...book.layoutConfig,
           bookDesignThemeId: themeId,
-        } as BookDesignLayoutConfig,
+        },
       },
       'Book Design Studio: вибір теми',
       `Обрано дизайн-систему «${themeId}». Ручні параметри верстки та старий designTheme збережені.`
@@ -214,7 +207,7 @@ export const DesignSuggestionPanel: React.FC<Props> = ({ book, onUpdateBook }) =
         layoutConfig: {
           ...book.layoutConfig,
           preferredPdfEngineId: engineId,
-        } as BookDesignLayoutConfig,
+        },
       },
       'Зміна PDF-рушія книги',
       `Основний PDF-рушій книги: ${engine.label}`
