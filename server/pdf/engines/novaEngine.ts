@@ -7,21 +7,11 @@
  * виконує макет точно — дзеркальні поля й корінець, порахований від
  * фактичної кількості сторінок у три проходи. Ні браузер, ні LaTeX цього не
  * дадуть без окремої роботи, а KDP відхиляє файл саме за поля.
- *
- * Він же єдиний, який нічого не потребує: ані бінарника в образі, ані ключа,
- * ані мережі. Тому `available()` тут перевіряє рівно одне — шрифти.
- *
- * ІЛЮСТРАЦІЇ (запис #109, довершено). Раніше `renderBookPdf` не бачив
- * зображень книги взагалі — рушій лише чесно повідомляв про їх кількість.
- * Тепер `pdfRenderer.ts` вставляє їх сам: PNG і JPEG вбудовуються, підпис
- * лягає під картинкою. Формат, якого `pdf-lib` не вміє (webp, gif, svg), і
- * файл, якого не прочитати, — не привід тихо пропустити ілюстрацію: рушій
- * лишає підпис текстом і повертає причину в `notesUk`, той самий принцип
- * чесності, що діяв і раніше.
  */
 
 import { renderBookPdf, fontsAvailable, FONT_DIR } from '../pdfRenderer';
 import { renderKdpInterior } from '../pdfKdp';
+import { pageCountOnlyMap } from '../../../shared/canonicalPageMap';
 import {
   PdfEngineError,
   type PdfEngine,
@@ -68,10 +58,13 @@ export const novaEngine: PdfEngine = {
           bytes: kdp.bytes,
           pageCount: kdp.pageCount,
           engineId: 'nova',
+          pageMap: pageCountOnlyMap(
+            'nova',
+            'nova-pdf',
+            kdp.pageCount,
+            'Nova вже знає точні координати глав усередині pdfRenderer; їх буде піднято в цей контракт без повторної пагінації.'
+          ),
           honoredSpec: true,
-          // Попередження KDP і причини пропущених ілюстрацій — не «нотатки
-          // рушія», а те, що автор мусить побачити до завантаження файлу;
-          // сюди вони й переходять.
           notesUk: [...kdp.warningsUk, ...kdp.notesUk],
         };
       }
@@ -81,6 +74,12 @@ export const novaEngine: PdfEngine = {
         bytes: result.bytes,
         pageCount: result.pageCount,
         engineId: 'nova',
+        pageMap: pageCountOnlyMap(
+          'nova',
+          'nova-pdf',
+          result.pageCount,
+          'Nova вже знає точні координати глав усередині pdfRenderer; їх буде піднято в цей контракт без повторної пагінації.'
+        ),
         honoredSpec: true,
         notesUk: result.notesUk,
       };
