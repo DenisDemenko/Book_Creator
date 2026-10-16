@@ -27,6 +27,7 @@ import { resolveModuleModelId } from './coreModuleModels';
 import { bookToPdfInput, specFromBook } from './pdf/pdfFromBook';
 import { normalizeDesignResult, parseBookPdfDesignResponse } from './pdf/pdfDesignPrompt';
 import { clampSamplePages, extractSamplePages } from './pdf/pdfSample';
+import { resolveBookPdfEngineId } from './pdf/enginePreference';
 import { publicOriginFrom } from './publicOrigin';
 import {
   getBook as getStoredBook,
@@ -87,6 +88,7 @@ export interface StoredBookOps {
     bookId: string;
     variant: 'code' | 'design';
     formats: Array<'digital' | 'print'>;
+    engineId?: string;
     trimId?: string;
     hasBleed?: boolean;
     samplePages?: number;
@@ -211,7 +213,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
       const variant: LayoutVariant = req.body?.variant === 'design' ? 'design' : 'code';
       const { spec } = await buildSpec(book, variant, req.body?.modelId, req);
       const isPrint = req.body?.format === 'print';
-      const engineId = String(req.body?.engineId || DEFAULT_PDF_ENGINE);
+      const engineId = resolveBookPdfEngineId(book, req.body?.engineId);
       const principal = req.principal;
       const kind = req.body?.kind === 'course' ? 'course' : 'book';
       const renderInput = kind === 'book' ? bookToPdfInput(book) : (book as never);
@@ -355,7 +357,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           return res.status(400).json({ error: `Некоректна ціна для редакції «${format}».`, kind: 'bad_input' });
         }
 
-        const engineId = String(edition.engineId || DEFAULT_PDF_ENGINE);
+        const engineId = resolveBookPdfEngineId(book, edition.engineId);
         const bridgeEngineId = engineId === DEFAULT_PDF_ENGINE ? undefined : engineId;
         const engineLabel = bridgeEngineId
           ? engines.find((e) => e.id === engineId)?.label || engineId
@@ -525,6 +527,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
     bookId: string;
     variant: 'code' | 'design';
     formats: Array<'digital' | 'print'>;
+    engineId?: string;
     trimId?: string;
     hasBleed?: boolean;
     samplePages?: number;
@@ -547,8 +550,9 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
     const artifactsOwnerId = (params.req.principal?.id as string) || null;
     const built = [];
     const normalizedBook = bookToPdfInput(book as never);
+    const engineId = resolveBookPdfEngineId(book, params.engineId);
     for (const format of params.formats) {
-      const rendered = await renderWithEngine(DEFAULT_PDF_ENGINE, {
+      const rendered = await renderWithEngine(engineId, {
         book: normalizedBook,
         kind: 'book',
         spec,
@@ -595,6 +599,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
       const kdp = rendered.printInfo || null;
       built.push({
         format,
+        engineId,
         pdf: pdfRecord,
         pageMap: rendered.pageMap,
         sample: sampleRecord,
@@ -611,7 +616,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
       });
     }
 
-    return { bookId: stored.id, revision: stored.revision, built };
+    return { bookId: stored.id, revision: stored.revision, engineId, built };
   }
 
   /** Опублікувати у вітрину те, що вже зібрано на сервері. */
