@@ -8,6 +8,9 @@ const designer = await readFile(new URL('../src/components/DesignerThemeStudio.t
 const quickSetup = await readFile(new URL('../src/components/BookDesignAuthorQuickSetup.tsx', import.meta.url), 'utf8');
 const semanticEditor = await readFile(new URL('../src/components/BookDesignSemanticBlockEditor.tsx', import.meta.url), 'utf8');
 const designSuggestion = await readFile(new URL('../src/components/DesignSuggestionPanel.tsx', import.meta.url), 'utf8');
+const exportView = await readFile(new URL('../src/components/ExportView.tsx', import.meta.url), 'utf8');
+const coverDesigner = await readFile(new URL('../src/components/CoverDesignerView.tsx', import.meta.url), 'utf8');
+const productionTypes = await readFile(new URL('../src/types.production.d.ts', import.meta.url), 'utf8');
 const engineRegistry = await readFile(new URL('../server/pdf/engines/registry.ts', import.meta.url), 'utf8');
 
 console.log('\nBook Design Studio UI regression contract:');
@@ -107,12 +110,22 @@ assert.match(designSuggestion, /engine\.bestForUk\.map/);
 assert.match(designSuggestion, /engine\.featuresUk\.map/);
 console.log('  ✓ renderer choice is presented as writer-facing cards, not a technical-only selector');
 
-assert.match(designSuggestion, /preferredPdfEngineId\?: string/);
+assert.match(productionTypes, /bookDesignThemeId\?: BookDesignThemeId/);
+assert.match(productionTypes, /preferredPdfEngineId\?: string/);
+assert.match(productionTypes, /backArtUrl\?: string/);
+assert.match(productionTypes, /paperStock\?: CoverPaperStock/);
+assert.match(productionTypes, /coverMaterial\?: CoverMaterial/);
+assert.match(productionTypes, /finish\?: CoverFinish/);
+assert.doesNotMatch(designSuggestion, /type BookDesignLayoutConfig\s*=/);
+assert.doesNotMatch(exportView, /type ExportLayoutConfig\s*=/);
+assert.doesNotMatch(coverDesigner, /type ProductionCoverConfig\s*=/);
 assert.match(designSuggestion, /preferredPdfEngineId: engineId/);
-assert.match(designSuggestion, /const persistedPdfEngineId = .*preferredPdfEngineId/);
-assert.match(designSuggestion, /const preferred = .*preferredPdfEngineId/);
+assert.match(designSuggestion, /const persistedPdfEngineId = book\.layoutConfig\.preferredPdfEngineId/);
+assert.match(designSuggestion, /const preferred = book\.layoutConfig\.preferredPdfEngineId/);
+assert.match(exportView, /const preferredPdfEngineId = book\.layoutConfig\.preferredPdfEngineId/);
+assert.match(coverDesigner, /const cover = book\.coverConfig/);
 assert.match(designSuggestion, /'Зміна PDF-рушія книги'/);
-console.log('  ✓ selected PDF engine is persisted in the book and restored when the book reopens');
+console.log('  ✓ production design fields are canonical and consumers use them without local intersection casts');
 
 assert.match(designSuggestion, /X-Pdf-PageMap-Source/);
 assert.match(designSuggestion, /X-Pdf-PageMap-Precision/);
