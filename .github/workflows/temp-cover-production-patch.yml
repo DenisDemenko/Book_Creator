@@ -1,0 +1,280 @@
+name: Temporary cover production patch
+
+on:
+  push:
+    branches:
+      - temp-cover-prod-check
+    paths:
+      - .github/workflows/temp-cover-production-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: temp-cover-prod-check
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Apply guarded production-cover patch
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected exactly one match, got {count}: {old[:90]!r}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          cover = Path('src/utils/coverProduction.ts')
+          text = cover.read_text(encoding='utf-8')
+          old = """const PAPER_BULK_MM: Record<CoverPaperStock, number> = {
+  white: 0.052,
+  cream: 0.055,
+  'coated-matte': 0.06,
+  'coated-gloss': 0.062,
+};
+"""
+          new = """const PAPER_BULK_MM: Record<CoverPaperStock, number> = {
+  white: 0.052,
+  cream: 0.055,
+  'coated-matte': 0.06,
+  'coated-gloss': 0.062,
+};
+
+export const COVER_PAPER_LABELS: Record<CoverPaperStock, string> = {
+  white: 'White',
+  cream: 'Cream',
+  'coated-matte': 'Coated matte',
+  'coated-gloss': 'Coated gloss',
+};
+
+export const COVER_MATERIAL_LABELS: Record<CoverMaterial, string> = {
+  'matte-card': 'Matte card',
+  'gloss-card': 'Gloss card',
+  'soft-touch-card': 'Soft-touch card',
+  cloth: 'Cloth',
+  'case-laminate': 'Case laminate',
+};
+
+export const COVER_FINISH_LABELS: Record<CoverFinish, string> = {
+  none: 'None',
+  matte: 'Matte lamination',
+  gloss: 'Gloss lamination',
+  'soft-touch': 'Soft touch',
+};
+
+export function calculateCoverSpineWidthMm(input: {
+  pageCount: number;
+  coverType?: 'paperback' | 'hardcover' | 'ebook';
+  paperStock?: CoverPaperStock;
+}): number {
+  const pageCount = Math.max(1, Math.round(Number(input.pageCount) || 1));
+  const paperStock = input.paperStock ?? 'white';
+  const bulk = PAPER_BULK_MM[paperStock] ?? PAPER_BULK_MM.white;
+  const hardcoverAllowance = input.coverType === 'hardcover' ? 2 : 0;
+  if (input.coverType === 'ebook') return 0;
+  return Number((pageCount * bulk + hardcoverAllowance).toFixed(2));
+}
+"""
+          if text.count(old) != 1:
+              raise SystemExit('coverProduction.ts: PAPER_BULK_MM guard failed')
+          text = text.replace(old, new, 1)
+          old_geom = """  const paperStock = input.paperStock ?? 'white';
+  const bulk = PAPER_BULK_MM[paperStock] ?? PAPER_BULK_MM.white;
+  const hardcoverAllowance = input.coverType === 'hardcover' ? 2 : 0;
+  const spineWidthMm = input.coverType === 'ebook'
+    ? 0
+    : Number((pageCount * bulk + hardcoverAllowance).toFixed(1));
+"""
+          new_geom = """  const spineWidthMm = Number(calculateCoverSpineWidthMm({
+    pageCount,
+    coverType: input.coverType,
+    paperStock: input.paperStock,
+  }).toFixed(1));
+"""
+          if text.count(old_geom) != 1:
+              raise SystemExit('coverProduction.ts: geometry guard failed')
+          cover.write_text(text.replace(old_geom, new_geom, 1), encoding='utf-8')
+
+          replace_once(
+              'src/utils/kdpHelpers.ts',
+              "import { estimatePageCount } from './helpers';\n",
+              "import { estimatePageCount } from './helpers';\nimport {\n  calculateCoverGeometry,\n  calculateCoverSpineWidthMm,\n  COVER_FINISH_LABELS,\n  COVER_MATERIAL_LABELS,\n  COVER_PAPER_LABELS,\n} from './coverProduction';\n",
+          )
+          replace_once(
+              'src/utils/kdpHelpers.ts',
+              """export function calculateKdpSpineThicknessMm(pageCount: number, paperType: 'white' | 'cream' = 'cream'): number {
+  const multiplier = paperType === 'white' ? 0.0572 : 0.0635;
+  return Number((pageCount * multiplier).toFixed(2));
+}
+""",
+              """/** @deprecated Use calculateCoverSpineWidthMm from coverProduction. */
+export function calculateKdpSpineThicknessMm(pageCount: number, paperType: 'white' | 'cream' = 'cream'): number {
+  return calculateCoverSpineWidthMm({ pageCount, coverType: 'paperback', paperStock: paperType });
+}
+""",
+          )
+          replace_once(
+              'src/utils/kdpHelpers.ts',
+              "  const calculatedSpineMm = calculateKdpSpineThicknessMm(estimatedPages, 'cream');\n  const canHaveSpineText = estimatedPages >= 79;\n",
+              """  const coverGeometry = calculateCoverGeometry({
+    pageWidthMm: layout.pageWidthMm,
+    pageHeightMm: layout.pageHeightMm,
+    bleedMm: margins.bleedMm,
+    pageCount: estimatedPages,
+    coverType: cover.coverType,
+    paperStock: cover.paperStock,
+  });
+  const calculatedSpineMm = coverGeometry.spineWidthMm;
+  const canHaveSpineText = estimatedPages >= 79;
+""",
+          )
+          replace_once(
+              'src/utils/kdpHelpers.ts',
+              "  const calculatedSpineMm = calculateKdpSpineThicknessMm(estimatedPages, 'cream');\n\n  const updatedCover: CoverConfig = {\n",
+              """  const calculatedSpineMm = calculateCoverGeometry({
+    pageWidthMm: updatedLayout.pageWidthMm,
+    pageHeightMm: updatedLayout.pageHeightMm,
+    bleedMm: updatedLayout.margins.bleedMm,
+    pageCount: estimatedPages,
+    coverType: 'paperback',
+    paperStock: book.coverConfig.paperStock,
+  }).spineWidthMm;
+
+  const updatedCover: CoverConfig = {
+""",
+          )
+          replace_once(
+              'src/utils/kdpHelpers.ts',
+              """- Paper Type: White/Cream 50lb - 55lb
+- Calculated Spine Width: ${report.calculatedSpineMm} mm (${(report.calculatedSpineMm / 25.4).toFixed(3)} inches)
+""",
+              """- Paper Stock: ${COVER_PAPER_LABELS[cover.paperStock ?? 'white']}
+- Cover Material: ${COVER_MATERIAL_LABELS[cover.coverMaterial ?? 'matte-card']}
+- Surface Finish: ${COVER_FINISH_LABELS[cover.finish ?? 'none']}
+- Back Cover Art: ${cover.backArtUrl?.trim() ? 'YES' : 'NO'}
+- Calculated Spine Width: ${report.calculatedSpineMm} mm (${(report.calculatedSpineMm / 25.4).toFixed(3)} inches)
+""",
+          )
+
+          replace_once(
+              'src/components/ExportView.tsx',
+              "import { KdpPublishingModal } from './KdpPublishingModal';\n",
+              "import { KdpPublishingModal } from './KdpPublishingModal';\nimport { calculateCoverGeometry } from '../utils/coverProduction';\n",
+          )
+          replace_once(
+              'src/components/ExportView.tsx',
+              """  const kdpReport = validateKdpCompliance(book, totalWords);
+  const gutterSpec = getKdpMinimumGutterMm(totalPages);
+""",
+              """  const kdpReport = validateKdpCompliance(book, totalWords);
+  const gutterSpec = getKdpMinimumGutterMm(totalPages);
+  const coverGeometry = useMemo(
+    () => calculateCoverGeometry({
+      pageWidthMm: book.layoutConfig.pageWidthMm,
+      pageHeightMm: book.layoutConfig.pageHeightMm,
+      bleedMm: book.layoutConfig.margins.bleedMm,
+      pageCount: totalPages,
+      coverType: book.coverConfig.coverType,
+      paperStock: book.coverConfig.paperStock,
+    }),
+    [
+      book.layoutConfig.pageWidthMm,
+      book.layoutConfig.pageHeightMm,
+      book.layoutConfig.margins.bleedMm,
+      totalPages,
+      book.coverConfig.coverType,
+      book.coverConfig.paperStock,
+    ]
+  );
+""",
+          )
+          replace_once(
+              'src/components/ExportView.tsx',
+              "    spine: (totalPages * 0.055).toFixed(1),\n",
+              "    spine: coverGeometry.spineWidthMm.toFixed(1),\n",
+          )
+
+          test = Path('scripts/test-coverProductionExport.mts')
+          if test.exists():
+              raise SystemExit('test-coverProductionExport.mts already exists')
+          test.write_text("""import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { calculateCoverGeometry, calculateCoverSpineWidthMm } from '../src/utils/coverProduction';
+
+const white = calculateCoverSpineWidthMm({ pageCount: 200, coverType: 'paperback', paperStock: 'white' });
+const cream = calculateCoverSpineWidthMm({ pageCount: 200, coverType: 'paperback', paperStock: 'cream' });
+const hardcover = calculateCoverSpineWidthMm({ pageCount: 200, coverType: 'hardcover', paperStock: 'white' });
+const ebook = calculateCoverSpineWidthMm({ pageCount: 200, coverType: 'ebook', paperStock: 'white' });
+assert.equal(white, 10.4);
+assert.equal(cream, 11);
+assert.equal(hardcover, 12.4);
+assert.equal(ebook, 0);
+
+const geometry = calculateCoverGeometry({
+  pageWidthMm: 152.4,
+  pageHeightMm: 228.6,
+  bleedMm: 3.2,
+  pageCount: 200,
+  coverType: 'paperback',
+  paperStock: 'cream',
+});
+assert.equal(geometry.spineWidthMm, 11);
+assert.equal(geometry.fullWrapWidthMm, 322.2);
+assert.equal(geometry.fullWrapHeightMm, 235);
+
+const kdp = fs.readFileSync('src/utils/kdpHelpers.ts', 'utf8');
+assert.ok(kdp.includes("calculateCoverGeometry({"));
+assert.ok(kdp.includes("paperStock: cover.paperStock"));
+assert.ok(kdp.includes("COVER_PAPER_LABELS[cover.paperStock ?? 'white']"));
+assert.ok(kdp.includes("COVER_MATERIAL_LABELS[cover.coverMaterial ?? 'matte-card']"));
+assert.ok(kdp.includes("COVER_FINISH_LABELS[cover.finish ?? 'none']"));
+assert.ok(kdp.includes("cover.backArtUrl?.trim() ? 'YES' : 'NO'"));
+assert.ok(!kdp.includes("calculateKdpSpineThicknessMm(estimatedPages, 'cream')"));
+assert.ok(!kdp.includes('Paper Type: White/Cream 50lb - 55lb'));
+
+const exportView = fs.readFileSync('src/components/ExportView.tsx', 'utf8');
+assert.ok(exportView.includes("import { calculateCoverGeometry } from '../utils/coverProduction';"));
+assert.ok(exportView.includes('spine: coverGeometry.spineWidthMm.toFixed(1)'));
+assert.ok(!exportView.includes('totalPages * 0.055'));
+
+console.log('Cover production/export consistency: OK');
+""", encoding='utf-8')
+
+      - name: Check expected diff only
+        run: |
+          git diff --check
+          git status --short
+          test "$(git status --short | wc -l)" -eq 4
+          git status --short | grep -q 'src/utils/coverProduction.ts'
+          git status --short | grep -q 'src/utils/kdpHelpers.ts'
+          git status --short | grep -q 'src/components/ExportView.tsx'
+          git status --short | grep -q 'scripts/test-coverProductionExport.mts'
+
+      - name: Regression test
+        run: npx tsx scripts/test-coverProductionExport.mts
+
+      - name: TypeScript
+        run: npx tsc --noEmit
+
+      - name: Commit guarded patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/utils/coverProduction.ts src/utils/kdpHelpers.ts src/components/ExportView.tsx scripts/test-coverProductionExport.mts
+          git commit -m "fix: unify cover production geometry across export"
+          git push origin HEAD:temp-cover-prod-check
