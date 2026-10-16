@@ -100,11 +100,15 @@ console.log('\nCanonicalPageMap: DesignCraft printed page names → physical PDF
     ],
   });
 
+  const c1 = map?.landmarks.find((x) => x.id === 'c1');
+  const c2 = map?.landmarks.find((x) => x.id === 'c2');
+  const s1 = map?.landmarks.find((x) => x.id === 's1');
+
   t('DesignCraft map built', !!map);
   t('DesignCraft map exact', map?.precision === 'exact');
-  t('printed page 1 at body page 3 is physical index 2', map?.landmarks[0]?.filePageIndex === 2, String(map?.landmarks[0]?.filePageIndex));
-  t('untitled source section does not steal next heading id', map?.landmarks[1]?.id === 's1', String(map?.landmarks[1]?.id));
-  t('printed and physical page numbers stay distinct', map?.landmarks[2]?.displayPageNumber === 6 && map?.landmarks[2]?.filePageNumber === 8);
+  t('printed page 1 at body page 3 is physical index 2', c1?.filePageIndex === 2, String(c1?.filePageIndex));
+  t('untitled source section does not steal next heading id', s1?.id === 's1', String(s1?.id));
+  t('printed and physical page numbers stay distinct', c2?.displayPageNumber === 6 && c2?.filePageNumber === 8);
 
   const badHeading = buildDesigncraftCanonicalPageMap({
     book,
