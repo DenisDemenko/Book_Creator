@@ -3,6 +3,7 @@
  * відповіді моделі й — головне — приведення її чисел до друкарських меж.
  * Запуск: npm run test:design-layout
  */
+import { readFile } from 'node:fs/promises';
 import {
   factoryDesignLayoutTemplate,
   renderDesignLayoutTemplate,
@@ -58,7 +59,6 @@ console.log('\nСхема захищена від правок адміна:');
   const split = splitAtSchemaMarker(factory.system);
   t('схема відділяється маркером', split.schema.includes('"typography"'));
 
-  // Адмін «переписав» системну інструкцію без схеми — вона має повернутись.
   const resolved = resolveCoreTemplate('designLayout', {
     designLayout: { system: 'Ти — суворий типограф.', user: 'Оформи {НАЗВА_КНИГИ}.' },
   });
@@ -129,10 +129,17 @@ console.log('\nРендер через реєстр ядра:');
   const rendered = renderCoreTemplate('designLayout', template, {
     bookTitle: 'Тіні Нео-Києва',
     availableFonts: FONTS.join(', '),
-    // Форма конструктора шле фрагмент під ключем `selection` — модуль має його прийняти.
     selection: SAMPLE,
   });
   t('фрагмент із поля конструктора дійшов у промпт', rendered.user.includes('Скляні куполи'));
+}
+
+console.log('\nМасштаб превʼю верстки:');
+{
+  const source = await readFile(new URL('../src/components/LayoutView.tsx', import.meta.url), 'utf8');
+  t('dropdown містить рівно 10–150% із кроком 10%', source.includes('const ZOOM_PRESETS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150]'));
+  t('режим довільного масштабу прибрано', !source.includes("value=\"custom\"") && !source.includes('setCustomZoom'));
+  t('масштаб не виходить за 150%', !source.includes('max={200}') && !source.includes('parsed <= 200'));
 }
 
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);
