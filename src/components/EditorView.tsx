@@ -910,7 +910,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
       () => readabilityHighlightModeRef.current,
       () => CORE_ENTITIES,
       () => entityTagsVisibleRef.current,
-      () => langRef.current
+      () => langRef.current,
+      () => bookRef.current.id
     ),
     PaginationPlugin.configure({
       getPageContentHeightMm,
@@ -939,7 +940,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
       () => readabilityHighlightModeRef.current,
       () => CORE_ENTITIES,
       () => entityTagsVisibleRef.current,
-      () => langRef.current
+      () => langRef.current,
+      () => bookRef.current.id
     ),
     PaginationPlugin.configure({ getPageContentHeightMm, getVerticalMarginsMm, onMeasured: onEnMeasured }),
   ]).current;
