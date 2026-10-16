@@ -11,12 +11,9 @@ import {
   type CoverFinish,
   type CoverMaterial,
   type CoverPaperStock,
-  type CoverProductionSettings,
 } from '../utils/coverProduction';
 
 export type CoverEngine = 'nano-banana-2-lite' | 'nano-banana-2' | 'nano-banana-pro' | 'seedream';
-
-type ProductionCoverConfig = CoverConfig & CoverProductionSettings;
 
 interface CoverDesignerViewProps {
   book: Book;
@@ -48,7 +45,7 @@ const FINISH_OPTIONS: Array<{ id: CoverFinish; label: string }> = [
 
 export const CoverDesignerView: React.FC<CoverDesignerViewProps> = ({ book, onUpdateBook, totalWords }) => {
   const { t } = useLanguage();
-  const cover = book.coverConfig as ProductionCoverConfig;
+  const cover = book.coverConfig;
   const layout = book.layoutConfig;
 
   const totalPages = estimatePageCount(
@@ -82,13 +79,13 @@ export const CoverDesignerView: React.FC<CoverDesignerViewProps> = ({ book, onUp
     { id: 'seedream', name: t('coverDesignerView.engineSeedreamName'), tag: t('coverDesignerView.engineSeedreamTag') },
   ];
 
-  const handleUpdateCover = (updated: Partial<ProductionCoverConfig>) => {
+  const handleUpdateCover = (updated: Partial<CoverConfig>) => {
     onUpdateBook({
       ...book,
       coverConfig: {
         ...cover,
         ...updated,
-      } as CoverConfig,
+      },
     });
   };
 
