@@ -74,11 +74,32 @@ console.log('  ✓ missing server-side JEV key fails explicitly');
 
 const routes = await readFile(new URL('../server/worldPhoto.ts', import.meta.url), 'utf8');
 const jev = await readFile(new URL('../server/jevSemantic.ts', import.meta.url), 'utf8');
+const extensions = await readFile(new URL('../src/components/manuscriptEditor/extensions.ts', import.meta.url), 'utf8');
+const autoTag = await readFile(new URL('../src/components/manuscriptEditor/JevAutoTagPlugin.ts', import.meta.url), 'utf8');
+const wizard = await readFile(new URL('../src/components/ExpressStartView.tsx', import.meta.url), 'utf8');
+const handoff = await readFile(new URL('../src/utils/expressSemanticHandoff.ts', import.meta.url), 'utf8');
+
 assert.match(routes, /registerJevSemanticRoutes\(app\)/);
 assert.match(jev, /\/api\/semantic\/jev\/entities/);
 assert.match(jev, /requirePermission\('canUseAi'\)/);
 assert.match(jev, /JEV_AI_API_KEY/);
 assert.doesNotMatch(jev, /generateText\(/);
 console.log('  ✓ authenticated JEV endpoint is registered and has no generative fallback');
+
+assert.match(extensions, /JevAutoTagPlugin\.configure/);
+assert.match(autoTag, /Проставити теги автоматично/);
+assert.match(autoTag, /classifyBookEntitiesWithJev/);
+assert.match(autoTag, /empty \|\| from === to/);
+assert.doesNotMatch(autoTag, /proposedNewEntities\s*=/);
+console.log('  ✓ right-click auto-tagging exists only for selected text and uses JEV classifier');
+
+assert.match(handoff, /\[\/chapter:/);
+assert.match(handoff, /\[\/outline:/);
+assert.match(handoff, /\[\/character:/);
+assert.match(wizard, /withDeterministicSemanticHandoff/);
+assert.match(wizard, /withJevSemanticEnrichment/);
+assert.match(wizard, /prependMissingJevTags/);
+assert.match(wizard, /status: 'skipped'/);
+console.log('  ✓ wizard keeps deterministic tags first, then applies non-destructive JEV enrichment');
 
 console.log('\nJEV semantic entity classifier regression contract passed.');
