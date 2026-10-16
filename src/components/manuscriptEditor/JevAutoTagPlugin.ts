@@ -2,7 +2,13 @@ import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import type { CharacterMentionEntry } from './CharacterMentionPlugin';
 import { entityBySlug, parseAnyEntityTags, type CoreEntity } from '../../utils/coreEntities';
-import { classifyBookEntitiesWithJev, canonicalTag, type JevEntityCandidate } from '../../utils/jevSemanticClient';
+import {
+  classifyBookEntitiesWithJev,
+  canonicalTag,
+  loadJevBookEntityCandidates,
+  mergeJevEntityCandidates,
+  type JevEntityCandidate,
+} from '../../utils/jevSemanticClient';
 
 export interface JevAutoTagOptions {
   getCharacters: () => CharacterMentionEntry[];
@@ -13,13 +19,19 @@ export interface JevAutoTagOptions {
 
 export const jevAutoTagKey = new PluginKey('novaJevAutoTag');
 
+type BookAwareCharacterMentionEntry = CharacterMentionEntry & { bookId?: string };
+
 function clean(value: string): string {
   return value.replace(/[\[\]\r\n]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500);
 }
 
-function collectCandidates(docText: string, characters: CharacterMentionEntry[]): JevEntityCandidate[] {
+function collectLocalCandidates(docText: string, characters: CharacterMentionEntry[]): JevEntityCandidate[] {
   const out = new Map<string, JevEntityCandidate>();
 
+  // These are the live Character objects supplied by EditorView, so this
+  // layer includes character changes that have not reached the server copy
+  // yet. The type is intentionally narrower than Character because the
+  // mention decoration needs only identity/name fields.
   for (const character of characters) {
     const name = clean(`${character.name || ''} ${character.surname || ''}`);
     if (!character.id || !name) continue;
@@ -31,15 +43,17 @@ function collectCandidates(docText: string, characters: CharacterMentionEntry[])
     });
   }
 
+  // Current TipTap document may contain canonical tags that are newer than
+  // the server autosave. Keep them in the whitelist as an immediate local
+  // overlay, but only for slugs that already exist in Core Entity Registry.
   for (const tag of parseAnyEntityTags(docText)) {
     const entity = entityBySlug(tag.entity?.slug ?? tag.slug);
     const name = clean(tag.value || '');
     if (!entity || !name) continue;
-    const id = `${entity.slug}:${name.toLocaleLowerCase()}`;
     const key = `${entity.slug}:${name.toLocaleLowerCase()}`;
     if (!out.has(key)) {
       out.set(key, {
-        id,
+        id: key,
         slug: entity.slug,
         name,
         description: entity.nameUk,
@@ -48,6 +62,14 @@ function collectCandidates(docText: string, characters: CharacterMentionEntry[])
   }
 
   return Array.from(out.values());
+}
+
+function resolveBookId(characters: CharacterMentionEntry[]): string | null {
+  for (const character of characters as BookAwareCharacterMentionEntry[]) {
+    const id = clean(character.bookId || '');
+    if (id) return id;
+  }
+  return null;
 }
 
 function closeExistingMenu(): void {
@@ -66,11 +88,15 @@ function placeMenu(menu: HTMLElement, x: number, y: number): void {
 /**
  * Context-menu bridge for semantic tagging.
  *
- * The plugin is intentionally conservative: it never asks JEV to invent an
- * entity. Candidates are limited to stable book characters passed by the
- * editor plus canonical entity instances already persisted in this section.
- * A whole-book candidate callback can extend this later without changing the
- * insertion contract.
+ * JEV gets a whitelist assembled from two layers:
+ * 1) the authenticated server copy of the WHOLE book (characters, approved
+ *    world/locations, chapters, sections, scenes, theme/motifs, images,
+ *    knowledge sources and canonical manuscript tags);
+ * 2) live local characters/current-document tags, so unsaved edits are not
+ *    lost between autosaves.
+ *
+ * No layer may invent an entity: every candidate slug must already exist in
+ * Core Entity Registry, and the server contract keeps proposedNewEntities [].
  */
 export const JevAutoTagPlugin = Extension.create<JevAutoTagOptions>({
   name: 'novaJevAutoTag',
@@ -131,8 +157,8 @@ export const JevAutoTagPlugin = Extension.create<JevAutoTagOptions>({
 
               const note = document.createElement('div');
               note.textContent = english
-                ? 'JEV checks only existing book entities.'
-                : 'JEV перевіряє лише наявні сутності книги.';
+                ? 'JEV checks only existing whole-book entities.'
+                : 'JEV перевіряє лише наявні сутності всієї книги.';
               note.style.padding = '4px 12px 7px';
               note.style.fontSize = '10px';
               note.style.color = '#64748b';
@@ -150,7 +176,25 @@ export const JevAutoTagPlugin = Extension.create<JevAutoTagOptions>({
 
                 try {
                   const wholeDocText = view.state.doc.textBetween(0, view.state.doc.content.size, '\n', '\n');
-                  const candidates = collectCandidates(wholeDocText, options.getCharacters());
+                  const characters = options.getCharacters();
+                  const localCandidates = collectLocalCandidates(wholeDocText, characters);
+                  const bookId = resolveBookId(characters);
+
+                  let serverCandidates: JevEntityCandidate[] = [];
+                  let registrySource: 'whole-book' | 'local-fallback' = 'local-fallback';
+                  if (bookId) {
+                    try {
+                      serverCandidates = await loadJevBookEntityCandidates(bookId);
+                      registrySource = 'whole-book';
+                    } catch (registryError) {
+                      // Autosave/server copy being temporarily unavailable must
+                      // not break the editor. We continue with the conservative
+                      // local whitelist and expose the source in the result event.
+                      console.warn('[jev-autotag] whole-book registry unavailable:', registryError);
+                    }
+                  }
+
+                  const candidates = mergeJevEntityCandidates(serverCandidates, localCandidates);
                   if (!candidates.length) {
                     throw new Error(
                       english
@@ -184,6 +228,8 @@ export const JevAutoTagPlugin = Extension.create<JevAutoTagOptions>({
                         matches: result.matches,
                         provider: result.provider,
                         model: result.model,
+                        candidateCount: candidates.length,
+                        registrySource,
                       },
                     }),
                   );
