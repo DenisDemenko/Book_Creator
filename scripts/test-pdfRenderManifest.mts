@@ -80,6 +80,15 @@ try {
   assert.match(routesSource, /engineId: req\.body\?\.engineId/);
   assert.match(routesSource, /hasBleed: Boolean\(req\.body\?\.hasBleed\)/);
 
+  const pdfRoutesSource = await fs.readFile(new URL('../server/pdfRoutesBase.ts', import.meta.url), 'utf8');
+  assert.match(pdfRoutesSource, /readPdfRenderManifest\(stored\.id, format\)/);
+  assert.match(pdfRoutesSource, /renderManifest\.builtAt === pdf\.record\.builtAt/);
+  assert.match(pdfRoutesSource, /const engineId = renderManifest\?\.engineId \|\| DEFAULT_PDF_ENGINE/);
+  assert.match(pdfRoutesSource, /const bridgeEngineId = engineId === DEFAULT_PDF_ENGINE \? undefined : engineId/);
+  assert.match(pdfRoutesSource, /engineId: bridgeEngineId/);
+  assert.match(pdfRoutesSource, /provenance: renderManifest \? 'render-manifest' : 'legacy-nova'/);
+  assert.match(pdfRoutesSource, /engineStaleUk/);
+
   console.log('PDF render manifest contract: OK');
 } finally {
   await fs.rm(dataDir, { recursive: true, force: true });
