@@ -28,11 +28,15 @@ assert.match(exportViewSource, /Legacy \/ Browser Print/);
 assert.match(exportViewSource, /const handleLegacyBrowserPrint = \(\) =>/);
 assert.match(exportViewSource, /printWindow\.print\(\)/);
 
-const mainPdfBlock = exportViewSource.slice(
-  exportViewSource.indexOf('PDF — фінальний файл'),
-  exportViewSource.indexOf('Microsoft Word DOCX') === -1 ? exportViewSource.length : exportViewSource.indexOf('Microsoft Word DOCX'),
+assert.match(
+  exportViewSource,
+  /onClick=\{\(\) => handleExportServerPdf\('digital'\)\}[\s\S]{0,400}data-tour="export__2"/,
+  'primary PDF tour action must call the canonical server renderer',
 );
-assert.match(mainPdfBlock, /handleExportServerPdf\('digital'\)/, 'canonical PDF button must call server renderer');
-assert.doesNotMatch(mainPdfBlock, /onClick=\{handleLegacyBrowserPrint\}[\s\S]*data-tour="export__2"/, 'legacy print must not own the primary PDF tour action');
+assert.doesNotMatch(
+  exportViewSource,
+  /onClick=\{handleLegacyBrowserPrint\}[\s\S]{0,300}data-tour="export__2"/,
+  'legacy browser print must not own the primary PDF action',
+);
 
 console.log('Canonical PDF export route/UI contract: OK');
