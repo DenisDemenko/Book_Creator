@@ -28,7 +28,7 @@ t('остання точка має нормалізовану позицію', 
 t('назва глави зберігається', markers[1]?.title === 'Перелом');
 
 console.log('\nPreview page map: current chapter');
-t('до першої глави повертається найближча перша мітка', nearestPreviewChapter(markers, 0)?.chapterId === 'c1');
+t('до першої глави активної глави ще немає', nearestPreviewChapter(markers, 0) === null);
 t('в середині першої глави активна c1', nearestPreviewChapter(markers, 4)?.chapterId === 'c1');
 t('після title c2 активна c2', nearestPreviewChapter(markers, 6)?.chapterId === 'c2');
 t('на фіналі активна c3', nearestPreviewChapter(markers, 7)?.chapterId === 'c3');
