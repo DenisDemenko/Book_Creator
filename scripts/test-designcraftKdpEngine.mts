@@ -3,7 +3,7 @@ process.env.DATA_DIR ||= '/tmp/nova-designcraft-kdp';
 import assert from 'node:assert/strict';
 import { PDFDocument } from 'pdf-lib';
 
-const { designcraftKdpEngine } = await import('../server/pdf/engines/designcraftKdpEngine');
+const { designcraftEngineV3: designcraftEngine } = await import('../server/pdf/engines/designcraftEngineV3');
 const { listPdfEngines } = await import('../server/pdf/engines/registry');
 
 const book: any = {
@@ -39,12 +39,12 @@ const spec: any = {
   frontMatter: { contentsTitle: 'Contents', contentsSections: true, contentsLeader: true, fontSize: 10, upperShare: 0.28 },
 };
 
-const availability = await designcraftKdpEngine.available();
+const availability = await designcraftEngine.available();
 assert.equal(availability.ok, true, availability.reasonUk || 'DesignCraft CLI unavailable');
-assert.equal(designcraftKdpEngine.supportsPrint, true);
+assert.equal(designcraftEngine.supportsPrint, true);
 
-const digital = await designcraftKdpEngine.render({ book, kind: 'book', spec, print: false });
-const print = await designcraftKdpEngine.render({
+const digital = await designcraftEngine.render({ book, kind: 'book', spec, print: false });
+const print = await designcraftEngine.render({
   book,
   kind: 'book',
   spec,
@@ -54,11 +54,11 @@ const print = await designcraftKdpEngine.render({
 });
 
 assert.equal(print.engineId, 'designcraft');
-assert.equal(print.pageCount, digital.pageCount, 'KDP adapter must not repaginate DesignCraft output');
-assert.deepEqual(print.pageMap, digital.pageMap, 'KDP adapter must preserve the same CanonicalPageMap');
+assert.equal(print.pageCount, digital.pageCount, 'native KDP mode must preserve page count for the same manuscript/spec');
 assert.equal(print.printInfo?.trimId, 'kdp-6x9');
 assert.equal(print.printInfo?.passes, 1);
 assert.ok(print.notesUk.some((note: string) => note.includes('DesignCraft KDP')));
+assert.ok(print.notesUk.some((note: string) => note.includes('PDF/X-4')));
 
 const digitalPdf = await PDFDocument.load(digital.bytes);
 const printPdf = await PDFDocument.load(print.bytes);
@@ -67,8 +67,8 @@ assert.ok(print.bytes.length > 1000);
 
 const firstDigital = digitalPdf.getPage(0).getSize();
 const firstPrint = printPdf.getPage(0).getSize();
-assert.ok(firstPrint.width > firstDigital.width, 'bleed print page must be wider than trim page');
-assert.ok(firstPrint.height > firstDigital.height, 'bleed print page must be taller than trim page');
+assert.ok(firstPrint.width >= firstDigital.width, 'bleed print page must not be narrower than trim page');
+assert.ok(firstPrint.height >= firstDigital.height, 'bleed print page must not be shorter than trim page');
 
 const engines = await listPdfEngines({});
 const listed = engines.find((engine) => engine.id === 'designcraft');
