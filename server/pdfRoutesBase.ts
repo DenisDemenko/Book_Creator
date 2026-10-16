@@ -24,11 +24,11 @@ import {
 } from './marketplaceBridge';
 import { resolveCoreTemplate, renderCoreTemplate, type CorePromptTemplateBundle } from './coreAiRegistry';
 import { resolveModuleModelId } from './coreModuleModels';
-import { renderBookPdf } from './pdf/pdfRenderer';
 import { bookToPdfInput, specFromBook } from './pdf/pdfFromBook';
 import { normalizeDesignResult, parseBookPdfDesignResponse } from './pdf/pdfDesignPrompt';
-import { renderKdpInterior, type KdpRenderResult } from './pdf/pdfKdp';
 import { clampSamplePages, extractSamplePages } from './pdf/pdfSample';
+import { resolveBookPdfEngineId } from './pdf/enginePreference';
+import { readPdfRenderManifest } from './pdf/renderManifest';
 import { publicOriginFrom } from './publicOrigin';
 import {
   getBook as getStoredBook,
@@ -89,7 +89,9 @@ export interface StoredBookOps {
     bookId: string;
     variant: 'code' | 'design';
     formats: Array<'digital' | 'print'>;
+    engineId?: string;
     trimId?: string;
+    hasBleed?: boolean;
     samplePages?: number;
     withSample: boolean;
     req: Request;
@@ -211,58 +213,41 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
       }
       const variant: LayoutVariant = req.body?.variant === 'design' ? 'design' : 'code';
       const { spec } = await buildSpec(book, variant, req.body?.modelId, req);
-
-      // Друкований макет дивляться тим самим переглядом: інакше автор
-      // побачив би верстку KDP уперше вже після публікації.
       const isPrint = req.body?.format === 'print';
+      const engineId = resolveBookPdfEngineId(book, req.body?.engineId);
+      const principal = req.principal;
+      const kind = req.body?.kind === 'course' ? 'course' : 'book';
+      const renderInput = kind === 'book' ? bookToPdfInput(book) : (book as never);
 
-      // Інший рушій — окрема гілка, а не параметр наявної. Гілка nova нижче
-      // робить те, чого не робить жоден інший: три проходи KDP, примітка
-      // дизайнера, попередження про поля. Зводити їх до спільного
-      // знаменника означало б втратити саме те, заради чого nova лишається
-      // рушієм за замовчуванням.
-      const engineId = String(req.body?.engineId || DEFAULT_PDF_ENGINE);
-      if (engineId !== DEFAULT_PDF_ENGINE) {
-        const principal = req.principal;
-        const out = await renderWithEngine(engineId, {
-          book,
-          kind: req.body?.kind === 'course' ? 'course' : 'book',
-          spec,
-          print: isPrint,
-          ownerId: (principal?.id as string) || null,
-          ownerRole: (principal?.role as string) || null,
-          theme: typeof req.body?.theme === 'string' ? req.body.theme : undefined,
-        });
-
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `inline; filename="preview-${engineId}.pdf"`);
-        res.setHeader('X-Pdf-Pages', String(out.pageCount));
-        res.setHeader('X-Pdf-Engine', out.engineId);
-        // Чи виконано макет книги — окремим заголовком, бо це не примітка,
-        // а відповідь на питання «чому виглядає не так, як у налаштуваннях».
-        res.setHeader('X-Pdf-Honored-Spec', out.honoredSpec ? '1' : '0');
-        res.setHeader('X-Pdf-Note', encodeURIComponent(out.notesUk.join(' ')));
-        return res.send(Buffer.from(out.bytes));
-      }
-      const previewOwnerId = (req.principal?.id as string) || null;
-      const out = isPrint
-        ? await renderKdpInterior(bookToPdfInput(book), {
-            base: spec,
-            trimId: req.body?.trimId,
-            hasBleed: Boolean(req.body?.hasBleed),
-            ownerId: previewOwnerId,
-          })
-        : await renderBookPdf(bookToPdfInput(book), spec, { ownerId: previewOwnerId });
-      const noteUk = isPrint ? (out as KdpRenderResult).spec.designerNoteUk : spec.designerNoteUk;
-      const warnings = isPrint ? (out as KdpRenderResult).warningsUk : [];
+      // ЄДИНА точка входу для Nova, DesignCraft, Chromium і Pandoc.
+      // Саме renderWithEngine гарантує, що разом із PDF повертається карта
+      // пагінації того самого фінального render, а не повторний підрахунок.
+      const out = await renderWithEngine(engineId, {
+        book: renderInput,
+        kind,
+        spec,
+        print: isPrint,
+        trimId: typeof req.body?.trimId === 'string' ? req.body.trimId : undefined,
+        hasBleed: Boolean(req.body?.hasBleed),
+        ownerId: (principal?.id as string) || null,
+        ownerRole: (principal?.role as string) || null,
+        theme: typeof req.body?.theme === 'string' ? req.body.theme : undefined,
+      });
 
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `inline; filename="${isPrint ? 'preview-kdp' : 'preview'}.pdf"`);
+      res.setHeader('Content-Disposition', `inline; filename="preview-${engineId}.pdf"`);
       res.setHeader('X-Pdf-Pages', String(out.pageCount));
-      // Пояснення макета — заголовком, бо тіло вже зайняте файлом.
+      res.setHeader('X-Pdf-Engine', out.engineId);
+      res.setHeader('X-Pdf-Honored-Spec', out.honoredSpec ? '1' : '0');
+      res.setHeader('X-Pdf-PageMap-Precision', out.pageMap.precision);
+      res.setHeader('X-Pdf-PageMap-Source', out.pageMap.source);
       res.setHeader(
         'X-Pdf-Note',
-        encodeURIComponent([noteUk || '', ...warnings, ...out.notesUk].filter(Boolean).join(' '))
+        encodeURIComponent(
+          [out.printInfo?.designerNoteUk || spec.designerNoteUk || '', ...out.notesUk]
+            .filter(Boolean)
+            .join(' ')
+        )
       );
       res.send(Buffer.from(out.bytes));
     } catch (err) {
@@ -297,20 +282,6 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
         return res.status(400).json({ error: 'Не вказано жодної редакції.', kind: 'bad_input' });
       }
 
-      /*
-        ОБКЛАДИНКА — УМОВА ПУБЛІКАЦІЇ, А НЕ ПРИКРАСА.
-        Картка без зображення — це білий прямокутник у каталозі поруч із
-        чужими оформленими товарами; вона не продає, а знецінює. Тому
-        перевірка стоїть ДО створення лістинга: без обкладинки у вітрині не
-        зʼявляється нічого, замість того щоб зʼявитись і чекати на другу
-        кнопку, яку хтось забуде натиснути.
-
-        Малює її браузер (серверу нічим растеризувати PDF), тож приходить
-        вона готовим зображенням. Межа розміру — той самий захист від
-        «успішного» порожнього полотна, що й на клієнті: суцільна заливка
-        стискається майже в нуль, і білий аркуш інакше доїхав би сюди як
-        валідна картинка.
-      */
       const coverRaw = String(req.body?.coverBase64 || '');
       const coverMatch = /^data:(image\/[a-z+]+);base64,(.+)$/i.exec(coverRaw);
       const coverMime = coverMatch ? coverMatch[1] : 'image/png';
@@ -331,11 +302,6 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
         });
       }
 
-      /*
-        Безкоштовний уривок: перші сторінки книги, відкриті всім.
-        Вимикається явно (`sample: false`) — за замовчуванням увімкнений,
-        бо саме текст, а не опис, вирішує покупку.
-      */
       const sampleEnabled = req.body?.sample !== false;
       const samplePages = clampSamplePages(req.body?.samplePages);
 
@@ -344,14 +310,6 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
       const publishOwnerId = (req.principal?.id as string) || null;
       const results = [];
 
-      /*
-        Макет вирішується ОДИН раз на всю публікацію, а не в циклі редакцій.
-        Раніше `buildSpec` стояв усередині циклу — для варіанта «дизайн» це
-        означало два платні виклики моделі на одну книгу і, що гірше, два
-        РІЗНІ макети: цифрова й друкована редакції тієї самої книги могли
-        вийти з різним кеглем і полями. Друкована й далі накладає норми KDP
-        поверх цього макета — але поверх одного й того самого.
-      */
       const variant: LayoutVariant = editions.some((e) => e.variant === 'design') ? 'design' : 'code';
       const { spec, modelId } = await buildSpec(
         book,
@@ -360,12 +318,11 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
         req
       );
 
-      // Лише для назв рушіїв у назві тестового видання — не впливає на те,
-      // який рушій обраний, а лише на те, як він підписаний авторові.
       const engines = await listPdfEngines({
         ownerId: publishOwnerId,
         ownerRole: (req.principal?.role as string) || null,
       });
+      const normalizedBook = bookToPdfInput(book);
 
       for (const edition of editions) {
         const format = edition.format === 'print' ? 'print' : 'digital';
@@ -374,56 +331,22 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           return res.status(400).json({ error: `Некоректна ціна для редакції «${format}».`, kind: 'bad_input' });
         }
 
-        /*
-          Рушій за редакцію. За замовчуванням — nova, і тоді нічого з
-          поведінки нижче не змінюється: `bridgeEngineId` лишається
-          `undefined`, а `bridgeExternalId` — тим самим `bookId:format`, що й
-          завжди, тож наявні лістинги оновлюються на місці, як і раніше.
-
-          Непорожній рушій — це ЗАВЖДИ окреме тестове видання (порівняння
-          nova/chromium/pandoc, log.md #109): externalId, назва й імʼя файлу
-          отримують позначку рушія, інакше другий виклик перезаписав би
-          лістинг першого замість створити сусідній.
-        */
-        const engineId = String(edition.engineId || DEFAULT_PDF_ENGINE);
+        const engineId = resolveBookPdfEngineId(book, edition.engineId);
         const bridgeEngineId = engineId === DEFAULT_PDF_ENGINE ? undefined : engineId;
         const engineLabel = bridgeEngineId
           ? engines.find((e) => e.id === engineId)?.label || engineId
           : undefined;
 
-        // Друкована редакція йде через KDP-верстку: базову типографіку бере
-        // з обраного макета, а формат, поля й корінець — з норм KDP. Друк
-        // під KDP уміє лише nova (`supportsPrint`) — інший рушій тут кине
-        // `PdfEngineError('unavailable', …)`, і `fail()` поверне 400 з
-        // поясненням, а не мовчки зверстає чимось не тим.
-        const rendered =
-          engineId === DEFAULT_PDF_ENGINE
-            ? format === 'print'
-              ? await renderKdpInterior(bookToPdfInput(book), {
-                  base: spec,
-                  trimId: edition.trimId as string,
-                  hasBleed: Boolean(edition.hasBleed),
-                  ownerId: publishOwnerId,
-                })
-              : await renderBookPdf(bookToPdfInput(book), spec, { ownerId: publishOwnerId })
-            : await (async () => {
-                if (format === 'print') {
-                  throw new PdfEngineError(
-                    engineId as never,
-                    'unavailable',
-                    `Друковану редакцію під KDP уміє лише рушій «Nova» — «${engineLabel}» цього не робить.`
-                  );
-                }
-                const out = await renderWithEngine(engineId, {
-                  book: book as never,
-                  kind: 'book',
-                  spec,
-                  print: false,
-                  ownerId: publishOwnerId,
-                  ownerRole: (req.principal?.role as string) || null,
-                });
-                return { bytes: out.bytes, pageCount: out.pageCount, numberedPages: out.pageCount, notesUk: out.notesUk };
-              })();
+        const rendered = await renderWithEngine(engineId, {
+          book: normalizedBook,
+          kind: 'book',
+          spec,
+          print: format === 'print',
+          trimId: typeof edition.trimId === 'string' ? edition.trimId : undefined,
+          hasBleed: Boolean(edition.hasBleed),
+          ownerId: publishOwnerId,
+          ownerRole: (req.principal?.role as string) || null,
+        });
 
         const editionTitle = [
           String(book.title),
@@ -448,8 +371,6 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           { settings }
         );
 
-        // Файл шлемо ПІСЛЯ публікації: приймач прикріплює його до наявного
-        // лістинга, і в зворотному порядку отримав би 404.
         const attached = await attachBookFileToMarketplace(
           {
             bookId: String(book.id),
@@ -465,14 +386,6 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           { settings }
         );
 
-        /*
-          ОБКЛАДИНКА, І ВІДКІТ ЯКЩО ВОНА НЕ СІЛА.
-          Лістинг уже створений — обкладинку можна прикріпити лише до
-          наявного. Але якщо саме вона не пройшла, у вітрині лишилась би
-          рівно та порожня картка, заради відсутності якої ця перевірка й
-          робилась. Тому лістинг знімається назад в архів, і автор бачить
-          причину, а не «опубліковано» з білим прямокутником.
-        */
         let coverAttached;
         try {
           coverAttached = await attachBookFileToMarketplace(
@@ -491,10 +404,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           await unpublishBookFromMarketplace(
             { bookId: String(book.id), format, engineId: bridgeEngineId },
             { settings }
-          ).catch(() => {
-            // Відкіт теж міг не вдатися — але справжня причина в
-            // coverErr, і підміняти її помилкою прибирання не можна.
-          });
+          ).catch(() => undefined);
           throw new MarketplaceBridgeError(
             `Обкладинку не вдалося прикріпити (${(coverErr as Error)?.message || 'невідома причина'}). ` +
               `Редакцію «${format}» знято з вітрини, щоб там не лишилась картка без зображення.`,
@@ -503,15 +413,6 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           );
         }
 
-        /*
-          Уривок — окремий публічний файл лістинга. Ріжеться з ТОГО САМОГО
-          PDF, який щойно пішов покупцеві: «перші десять сторінок» — наслідок
-          верстки, а не властивість тексту, тож зверстаний окремо уривок
-          обірвався б не там, де обривається десята сторінка книги.
-
-          Його збій, на відміну від обкладинки, публікацію НЕ скасовує:
-          книга без уривка продається, книга без обкладинки — ні.
-        */
         let sample: { pages: number; totalPages: number; attached: boolean; errorUk?: string } | null = null;
         if (sampleEnabled) {
           try {
@@ -548,9 +449,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           }
         }
 
-        // Звужуємо тип явно: renderKdpInterior повертає більше полів, ніж
-        // звичайний рендер, і саме вони цікаві авторові друкованої редакції.
-        const kdp: KdpRenderResult | null = format === 'print' ? (rendered as KdpRenderResult) : null;
+        const kdp = rendered.printInfo || null;
         results.push({
           format,
           engineId,
@@ -558,17 +457,19 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           attached,
           cover: coverAttached,
           sample,
-          pdf: { pageCount: rendered.pageCount, sizeBytes: rendered.bytes.length },
+          pdf: {
+            pageCount: rendered.pageCount,
+            sizeBytes: rendered.bytes.length,
+            pageMap: rendered.pageMap,
+          },
           layout: {
             variant,
             modelId,
-            noteUk: kdp ? kdp.spec.designerNoteUk : spec.designerNoteUk,
+            noteUk: kdp?.designerNoteUk || spec.designerNoteUk,
             trimId: kdp?.trimId,
             gutterMm: kdp?.gutterMm,
             passes: kdp?.passes,
           },
-          // Попередження KDP і причини пропущених ілюстрацій разом: автор
-          // читає їх в одному місці, до того як покупець побачить файл.
           warningsUk: [...(kdp?.warningsUk || []), ...rendered.notesUk],
         });
       }
@@ -582,19 +483,15 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
   // =========================================================================
   // Робота з СЕРВЕРНОЮ копією книги
   // =========================================================================
-  //
-  // Та сама послідовність, що й у маршрутах вище (макет → PDF → уривок), але
-  // книга береться зі сховища, а не з тіла запиту. Саме тому ці кроки можуть
-  // виконуватись без відкритої вкладки: серверу більше нічого не потрібно від
-  // браузера, крім обкладинки — її він намалювати не вміє, тож вона теж
-  // лежить у сховищі як артефакт.
 
   /** Зібрати й зберегти файли книги. Нічого не публікує. */
   async function buildArtifacts(params: {
     bookId: string;
     variant: 'code' | 'design';
     formats: Array<'digital' | 'print'>;
+    engineId?: string;
     trimId?: string;
+    hasBleed?: boolean;
     samplePages?: number;
     withSample: boolean;
     req: Request;
@@ -610,22 +507,23 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
 
     const book = stored.book as Record<string, unknown>;
     const safeTitle = String(book.title || 'book').replace(/[^\p{L}\p{N}]+/gu, '_').slice(0, 60) || 'book';
-
-    // Макет один на всі формати — з тієї самої причини, що й у публікації з
-    // браузера: інакше «дизайн» дав би різну типографіку цифровій і друкованій.
     const { spec, modelId } = await buildSpec(book, params.variant, undefined, params.req);
 
     const artifactsOwnerId = (params.req.principal?.id as string) || null;
     const built = [];
+    const normalizedBook = bookToPdfInput(book as never);
+    const engineId = resolveBookPdfEngineId(book, params.engineId);
     for (const format of params.formats) {
-      const rendered =
-        format === 'print'
-          ? await renderKdpInterior(bookToPdfInput(book as never), {
-              base: spec,
-              trimId: params.trimId,
-              ownerId: artifactsOwnerId,
-            })
-          : await renderBookPdf(bookToPdfInput(book as never), spec, { ownerId: artifactsOwnerId });
+      const rendered = await renderWithEngine(engineId, {
+        book: normalizedBook,
+        kind: 'book',
+        spec,
+        print: format === 'print',
+        trimId: params.trimId,
+        hasBleed: params.hasBleed,
+        ownerId: artifactsOwnerId,
+        ownerRole: (params.req.principal?.role as string) || null,
+      });
 
       const pdfRecord = await saveArtifact({
         bookId: stored.id,
@@ -660,24 +558,27 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
         }
       }
 
-      const kdp: KdpRenderResult | null = format === 'print' ? (rendered as KdpRenderResult) : null;
+      const kdp = rendered.printInfo || null;
       built.push({
         format,
+        engineId,
         pdf: pdfRecord,
+        pageMap: rendered.pageMap,
         sample: sampleRecord,
         sampleNoteUk,
         layout: {
           variant: params.variant,
           modelId,
-          noteUk: kdp ? kdp.spec.designerNoteUk : spec.designerNoteUk,
+          noteUk: kdp?.designerNoteUk || spec.designerNoteUk,
           trimId: kdp?.trimId,
           gutterMm: kdp?.gutterMm,
+          passes: kdp?.passes,
         },
         warningsUk: [...(kdp?.warningsUk || []), ...rendered.notesUk],
       });
     }
 
-    return { bookId: stored.id, revision: stored.revision, built };
+    return { bookId: stored.id, revision: stored.revision, engineId, built };
   }
 
   /** Опублікувати у вітрину те, що вже зібрано на сервері. */
@@ -712,8 +613,35 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
         );
       }
 
-      // Обкладинка так само обовʼязкова, як і при публікації з браузера — але
-      // тепер вона береться зі сховища, а не з тіла запиту.
+      // Provenance належить конкретному PDF, а не поточному налаштуванню
+      // книги. Якщо manifest є, він має збігатися з артефактом; змішувати
+      // карту/engineId від іншого render заборонено. Старі артефакти без
+      // manifest історично збирались лише Nova, тому для них є явний legacy
+      // fallback на DEFAULT_PDF_ENGINE, але не на поточний preference книги.
+      const renderManifest = await readPdfRenderManifest(stored.id, format);
+      if (renderManifest) {
+        const matchesPdf =
+          renderManifest.bookRevision === pdf.record.bookRevision &&
+          renderManifest.filename === pdf.record.filename &&
+          renderManifest.sizeBytes === pdf.record.sizeBytes &&
+          renderManifest.pageCount === pdf.record.pageCount &&
+          renderManifest.builtAt === pdf.record.builtAt;
+        if (!matchesPdf) {
+          throw new MarketplaceBridgeError(
+            `Render manifest для редакції «${format}» не відповідає збереженому PDF. Перезберіть PDF перед публікацією.`,
+            'rejected',
+            409
+          );
+        }
+      }
+      const engineId = renderManifest?.engineId || DEFAULT_PDF_ENGINE;
+      const bridgeEngineId = engineId === DEFAULT_PDF_ENGINE ? undefined : engineId;
+      const preferredEngineId = resolveBookPdfEngineId(book);
+      const engineStaleUk =
+        engineId !== preferredEngineId
+          ? `PDF зібраний рушієм «${engineId}», а для книги зараз обрано «${preferredEngineId}». Публікується саме вже зібраний PDF; перезберіть його, якщо потрібен новий рушій.`
+          : undefined;
+
       const cover = (await readArtifact(stored.id, 'cover', format)) || (await readArtifact(stored.id, 'cover', 'digital'));
       if (!cover) {
         throw new MarketplaceBridgeError(
@@ -724,28 +652,11 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
         );
       }
 
-      // Застарілий файл — не привід відмовити, але про це треба сказати:
-      // автор міг правити книгу після складання.
       const staleUk =
         pdf.record.bookRevision !== stored.revision
           ? `Увага: PDF зібраний з ревізії ${pdf.record.bookRevision}, а книга вже ${stored.revision}. Складіть файли заново, якщо правки мають потрапити покупцеві.`
           : undefined;
 
-      /*
-        ОБКЛАДИНКА ЇДЕ ПОСИЛАННЯМ У САМОМУ СТВОРЕННІ КАРТКИ, а не тільки
-        окремим файлом після нього.
-
-        Причина знайдена живим прогоном: у задеплоєного приймача просто
-        НЕМАЄ маршруту `/bridge/books/:id/file` — він зʼявився в мості
-        пізніше, ніж востаннє деплоївся маркетплейс. Тобто поки той не
-        оновлять, жоден файл туди не потрапить у принципі. А `coverUrl`
-        приймач розуміє з самого початку й кладе просто в картку — отже
-        зображення можна дати вітрині вже зараз, не чекаючи ні на що.
-
-        `?v=` — не забаганка: маркетплейс зберігає САМЕ РЯДОК посилання, і
-        без мітки версії нова обкладинка тієї самої книги приїхала б за
-        тією ж адресою, а браузер покупця показував би стару з кешу.
-      */
       const publicBase = publicOriginFrom(params.req);
       const coverStamp = Date.parse(cover.record.builtAt || '') || 0;
       const coverUrl =
@@ -763,23 +674,11 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           priceMinor: Math.round(priceMinor),
           coverUrl,
           sellerSlug: params.sellerSlug,
+          engineId: bridgeEngineId,
         },
         { settings }
       );
 
-      /*
-        ФАЙЛ КНИГИ БІЛЬШЕ НЕ ЗРИВАЄ ПУБЛІКАЦІЮ.
-
-        Було: виняток на цьому кроці валив усю публікацію, і автор бачив
-        помилку там, де насправді картка вже стояла у вітрині — а заразом
-        не виконувались наступні кроки, зокрема обкладинка. Тепер невдача
-        файла лишається невдачею файла: картка з обкладинкою й ціною
-        живе, а причина сказана окремим полем.
-
-        Це НЕ тихий відкіт: ми нічого не підміняємо іншим і не вдаємо
-        успіх — `attached: false` і текст причини йдуть у відповідь, і
-        панель має їх показати.
-      */
       let attached: Awaited<ReturnType<typeof attachBookFileToMarketplace>> | null = null;
       let fileErrorUk: string | undefined;
       try {
@@ -790,6 +689,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
             filename: pdf.record.filename,
             mimeType: pdf.record.mimeType,
             bytes: pdf.bytes,
+            engineId: bridgeEngineId,
           },
           { settings }
         );
@@ -799,13 +699,6 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           `${(fileErr as Error)?.message || 'невідома причина'}`;
       }
 
-      /*
-        Обкладинку окремим файлом однаково пробуємо: коли приймач оновлять,
-        зображення в його власному сховищі краще за посилання на нас —
-        воно переживе і зміну домену Студії, і її недоступність. Але тепер
-        це не привід знімати картку з вітрини: `coverUrl` вище вже дав їй
-        зображення.
-      */
       let coverAttached: Awaited<ReturnType<typeof attachBookFileToMarketplace>> | null = null;
       let coverErrorUk: string | undefined;
       try {
@@ -817,6 +710,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
             mimeType: cover.record.mimeType,
             bytes: cover.bytes,
             kind: 'cover',
+            engineId: bridgeEngineId,
           },
           { settings }
         );
@@ -840,6 +734,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
               mimeType: sample.record.mimeType,
               bytes: sample.bytes,
               kind: 'sample',
+              engineId: bridgeEngineId,
             },
             { settings }
           );
@@ -851,6 +746,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
 
       results.push({
         format,
+        engineId,
         published,
         attached,
         fileErrorUk,
@@ -860,8 +756,14 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
         sample: sample
           ? { pages: sample.record.pageCount, attached: sampleAttached, errorUk: sampleErrorUk }
           : null,
-        pdf: { pageCount: pdf.record.pageCount, sizeBytes: pdf.record.sizeBytes },
+        pdf: {
+          pageCount: pdf.record.pageCount,
+          sizeBytes: pdf.record.sizeBytes,
+          pageMap: renderManifest?.pageMap || null,
+          provenance: renderManifest ? 'render-manifest' : 'legacy-nova',
+        },
         staleUk,
+        engineStaleUk,
       });
     }
 

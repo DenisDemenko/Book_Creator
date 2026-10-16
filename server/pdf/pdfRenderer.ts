@@ -30,6 +30,10 @@ import { loadImageBytes } from '../media/imageBytes';
 import { collectImageMarkerIds, splitImageMarkers } from '../../src/utils/imageMarkers';
 import { hasTableMarkers, replaceTableBlocks } from '../../src/utils/tableMarkers';
 import { entityTagRegexp, removeFormattedEntityTags } from '../../src/utils/coreEntities';
+import {
+  buildCanonicalPdfPageMap,
+  type CanonicalPageMap,
+} from '../../shared/canonicalPageMap';
 
 export const FONT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fonts');
 
@@ -43,22 +47,6 @@ export function fontsAvailable(): boolean {
   return Object.values(FONT_FILES).every((f) => fs.existsSync(path.join(FONT_DIR, f)));
 }
 
-/**
- * Текст розділу приходить як «rich text or markdown» (types.ts). Рендерер
- * не претендує на повний markdown: він знімає розмітку, яка інакше
- * надрукувалась би як символи, і ділить на абзаци. Свідомо просто —
- * напівпідтримка markdown гірша за її відсутність, бо виглядає як помилка
- * верстки, а не як межа можливостей.
- */
-/**
- * `[TABLE]…[/TABLE]` (tableMarkers.ts) → читабельний текст, рядок таблиці —
- * рядок тексту, клітинки розділені « | ». Цей рушій (jsdoc над
- * `toParagraphs`) не малює справжню сітку — лише абзаци одне під одним —
- * тож питання не «як зверстати таблицю», а «що надрукувати замість неї».
- * Голий маркер `[TABLE]\n[ROW]…` текстом — той самий клас дефекту, що й
- * незгорнутий `[IMG: …]` у записі #169: мовчазна відмова гірша за
- * спрощений, але читабельний результат.
- */
 function flattenTableMarkersToPlainText(content: string): string {
   if (!hasTableMarkers(content)) return content;
   return replaceTableBlocks(content, (table) => {
@@ -71,10 +59,6 @@ function flattenTableMarkersToPlainText(content: string): string {
 
 export function toParagraphs(content: string): string[] {
   const plain = flattenTableMarkersToPlainText(removeFormattedEntityTags(String(content ?? '')))
-    // Теги сутностей ядра — службова розмітка, а не текст автора: у
-    // надрукованій книзі вони не мають лишитись (постановка власника, п. 6).
-    // Знімаються ДО розбору HTML і таблиць, бо `[/character:…]` міг стояти
-    // всередині клітинки й інакше потрапив би у рядок таблиці як текст.
     .replace(entityTagRegexp(), '')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/p>/gi, '\n\n')
@@ -98,11 +82,6 @@ interface Measurable {
   widthOfTextAtSize(text: string, size: number): number;
 }
 
-/**
- * Перенос по словах. Слово, довше за рядок (посилання, довгий термін),
- * ріжеться посимвольно — інакше воно вилізло б за поле і мовчки обрізалось
- * при друці.
- */
 export function wrapText(
   text: string,
   font: Measurable,
@@ -146,27 +125,15 @@ export function wrapText(
 export interface RenderResult {
   bytes: Uint8Array;
   pageCount: number;
+  /** Exact coordinates from the same final PDF render. */
+  pageMap: CanonicalPageMap;
   /** Скільки сторінок пронумеровано — для звіту в інтерфейсі. */
   numberedPages: number;
-  /**
-   * Що рушій зробив інакше, ніж просив автор — конкретно ілюстрація, яку не
-   * вдалося вставити (формат, який `pdf-lib` не вміє, або файл, якого не
-   * знайшлося). Порожньо — значить, усе вставлено як є. Той самий принцип
-   * чесності, що й у `notesUk` зовнішніх рушіїв (#101, #109): мовчазний
-   * відкіт заборонений, автор бачить причину до того, як відкриє готовий PDF.
-   */
   notesUk: string[];
 }
 
 export interface RenderContext {
-  /** Власник книги — потрібен лише для посилань на медіатеку (#100). */
   ownerId?: string | null;
-  /**
-   * Кеш байтів зображення за посиланням. Друкована редакція (`pdfKdp.ts`)
-   * верстає книгу до трьох разів поспіль, шукаючи корінець під фактичний
-   * обсяг, — без кешу той самий файл читався б (а посилання `http(s)` —
-   * запитувалося мережею) стільки ж разів.
-   */
   imageCache?: Map<string, { mimeType: string; bytes: Buffer }>;
 }
 
@@ -227,10 +194,6 @@ export async function renderBookPdf(
   const ownerId = context?.ownerId ?? null;
   const notesUk: string[] = [];
 
-  /**
-   * Ліве поле поточної сторінки. При дзеркальних полях перша сторінка —
-   * права (recto), корінець у неї зліва; на звороті все навпаки.
-   */
   const leftOfPage = (index: number) =>
     spec.mirrorMargins && index % 2 === 1 ? spec.margins.right : spec.margins.left;
 
@@ -240,30 +203,14 @@ export async function renderBookPdf(
   let y = size.height - spec.margins.top;
   let bodyStarted = false;
   let currentChapter = '';
-
-  /**
-   * Індекс сторінки, з якої починається тіло книги. Усе до неї — титул і
-   * передмова — нумерації не отримує.
-   *
-   * Рахується як позиція сторінки в момент початку першої глави, а НЕ
-   * лічильником у newPage(): лічильник помилявся рівно на одиницю, бо
-   * сторінка, створена ПІСЛЯ титулу, — це вже перша сторінка тіла, а не
-   * друга сторінка передмови. Через це в книзі з титулом нумерація
-   * починалася з другої сторінки тіла, і номер «1» не з'являвся ніде.
-   */
   let bodyStartPage = spec.titlePage.show ? 1 : 0;
+  let insertedTocPages = 0;
 
-  /**
-   * Де починається кожна глава (і, за потреби, її розділи) — у ФАЙЛІ, за
-   * індексом сторінки. Потрібно змісту: рядок змісту — це назва плюс номер
-   * сторінки, а номер відомий лише коли тіло вже зверстано. Тому зміст
-   * малюється ПІСЛЯ тіла, а його сторінки вставляються на початок тіла
-   * (`doc.insertPage`).
-   */
   const chapterStarts: Array<{
+    id?: string;
     title: string;
     pageIndex: number;
-    sections: Array<{ title: string; pageIndex: number }>;
+    sections: Array<{ id?: string; title: string; pageIndex: number }>;
   }> = [];
 
   const newPage = () => {
@@ -284,17 +231,12 @@ export async function renderBookPdf(
     align: Align,
     color = black,
     justifyWidth?: number,
-    /** Ліва межа рядка. Задається явно: при дзеркальних полях і при
-     *  червоному рядку вона відрізняється від поля сторінки. */
     x0 = curLeft,
     boxWidth = contentWidth
   ) => {
     const width = font.widthOfTextAtSize(text, fontSize);
     let x = x0;
     if (align === 'center') x = x0 + (boxWidth - width) / 2;
-
-    // Вирівнювання по ширині: розсуваємо міжслівні проміжки, а не літери —
-    // розрідження літер у книжковому наборі читається як дефект.
     if (align === 'justify' && justifyWidth && justifyWidth > width) {
       const words = text.split(' ');
       if (words.length > 1) {
@@ -315,11 +257,8 @@ export async function renderBookPdf(
     const step = spec.baseFontSize * spec.lineHeight;
     const indent = indentFirst ? spec.paragraphIndent : 0;
     const firstWidth = contentWidth - indent;
-
     const firstLines = wrapText(text, font, spec.baseFontSize, firstWidth);
     if (firstLines.length === 0) return;
-
-    // Перший рядок із червоним рядком міряється вужчим, решта — на повну.
     const rest = firstLines.slice(1).join(' ');
     const restLines = rest ? wrapText(rest, font, spec.baseFontSize, contentWidth) : [];
     const lines = [firstLines[0], ...restLines];
@@ -327,8 +266,6 @@ export async function renderBookPdf(
     lines.forEach((line, i) => {
       ensure(step);
       const isLast = i === lines.length - 1;
-      // Червоний рядок зсуває ЛИШЕ перший рядок абзацу; решта йде від поля
-      // сторінки, яке при дзеркальних полях залежить від її парності.
       const x = i === 0 ? curLeft + indent : curLeft;
       const width = i === 0 ? firstWidth : contentWidth;
       const align: Align = spec.bodyAlign === 'justify' && !isLast ? 'justify' : 'left';
@@ -338,47 +275,24 @@ export async function renderBookPdf(
     y -= spec.paragraphSpacing;
   };
 
-  /**
-   * Ілюстрація книги: зображення, вписане в смугу набору за шириною й у
-   * висоту сторінки — не розтягнуте понад оригінал (та сама межа, що й
-   * `img { max-width: 100% }` у `bookHtml.ts`), — і підпис під ним.
-   *
-   * `pdf-lib` уміє вбудувати лише PNG і JPEG: інший формат чи файл, якого
-   * не прочитати (медіатека іншого власника, видалений запис, недоступна
-   * мережа), — не привід тихо пропустити ілюстрацію. Причина йде одразу в
-   * двох місцях: підписом просто в тексті книги (автор бачить її й без
-   * інтерфейсу) і рядком у `notesUk` (автор бачить її ДО завантаження файлу).
-   */
   const drawIllustration = async (ill: { url: string; caption?: string }) => {
     const captionText = String(ill.caption || '').trim();
     const label = captionText || ill.url;
     let embedded: Awaited<ReturnType<typeof doc.embedPng>> | null = null;
     let failureUk = '';
-    /**
-     * Перші байти файлу — короткий підпис, за яким видно, ЩО саме не
-     * вбудувалось. Додано після живого прогону #169: причина «SOI not found
-     * in JPEG» на книзі, де всі 42 картинки — справжні JPEG і PNG, залишала
-     * відкритим питання, який саме файл дійшов до верстальника. Без підпису
-     * це неможливо з'ясувати ні з PDF, ні зі звіту.
-     */
     let headBytes = '';
 
     try {
       const { mimeType, bytes } = await loadImageCached(ill.url, ownerId, context?.imageCache);
       headBytes = [...bytes.subarray(0, 4)].map((b) => b.toString(16).padStart(2, '0')).join(' ');
-      if (/png/i.test(mimeType)) {
-        embedded = await doc.embedPng(bytes);
-      } else if (/jpe?g/i.test(mimeType)) {
-        embedded = await doc.embedJpg(bytes);
-      } else {
+      if (/png/i.test(mimeType)) embedded = await doc.embedPng(bytes);
+      else if (/jpe?g/i.test(mimeType)) embedded = await doc.embedJpg(bytes);
+      else {
         failureUk =
           `формат ${mimeType} не підтримується власною версткою (лише PNG і JPEG) — ` +
           'зверстайте книгу рушієм «Chromium» або «pandoc + Eisvogel»';
       }
     } catch (err) {
-      // `pdf-lib` кидає на биті PNG-байти не `Error`, а РЯДОК (перевірено
-      // живим прогоном) — `(err as Error).message` на ньому мовчки дало б
-      // `undefined`, і автор побачив би причину без причини.
       failureUk = err instanceof Error ? err.message : String(err);
     }
 
@@ -387,8 +301,6 @@ export async function renderBookPdf(
         `Ілюстрація «${label}» не вставлена: ${failureUk}.` +
           (headBytes ? ` Початок файлу: ${headBytes}.` : '')
       );
-      // Підпис лишається текстом — читач бачить, що тут малась бути
-      // ілюстрація, а не порожнє місце без пояснення.
       if (captionText) {
         ensure(spec.baseFontSize * spec.lineHeight + spec.paragraphSpacing);
         drawLine(`Ілюстрація: ${captionText}`, serif, spec.baseFontSize, 'center', grey);
@@ -398,14 +310,10 @@ export async function renderBookPdf(
     }
 
     const dims = embedded.size();
-    // Висота обмежена часткою смуги набору (як `0.8\textheight` у
-    // pandocEngine.ts) — на всю висоту сторінки ілюстрація налізла б на
-    // колонтитул і номер; маленька картинка не розтягується понад оригінал.
     const maxHeight = contentHeight * 0.6;
     const scale = Math.min(contentWidth / dims.width, maxHeight / dims.height, 1);
     const w = dims.width * scale;
     const h = dims.height * scale;
-
     const captionSize = Math.max(7, Math.round(spec.baseFontSize * 0.85));
     const captionLines = captionText ? wrapText(captionText, serif, captionSize, contentWidth) : [];
     const captionStep = captionSize * 1.3;
@@ -423,20 +331,6 @@ export async function renderBookPdf(
     y -= spec.paragraphSpacing;
   };
 
-  /**
-   * Картинка, на яку вказав маркер `[IMG: id …]` у тексті.
-   *
-   * ДО #169 ТУТ КАРТИНОК НЕ БУЛО ВЗАГАЛІ. Маркер лишався звичайним текстом
-   * і друкувався як `[IMG: docx-img-3 "Санскрит7" wrap=left]`, а всі
-   * зображення глави скидались у її кінці — на книзі з .docx це дало 39
-   * сторінок із голим маркером замість малюнка і 42 картинки купою після
-   * вступу. Тепер картинка стоїть там, де її поставив автор.
-   *
-   * Невідомий id (ілюстрацію прибрали з галереї, а маркер лишився) — не
-   * привід мовчати: причина йде в `notesUk`, який автор бачить у звіті
-   * публікації ДО того, як відкриє файл. Сам маркер у книзі не друкується:
-   * `[IMG: …]` — наша службова конвенція, а не текст автора.
-   */
   const drawMarkerImage = async (marker: { id: string; caption: string }): Promise<void> => {
     const target = book.markerImages?.[marker.id];
     if (!target) {
@@ -449,49 +343,28 @@ export async function renderBookPdf(
     await drawIllustration({ url: target.url, caption: marker.caption || target.caption || '' });
   };
 
-  /**
-   * Абзац, у якому може стояти маркер. Маркер зазвичай займає абзац цілком
-   * (так його пише і редактор, і конвертер .docx), але буває й усередині
-   * рядка — тому текст до і після нього малюється як окремі абзаци, а не
-   * викидається.
-   */
   const drawParagraphWithImages = async (paragraph: string, indentFirst: boolean): Promise<void> => {
     const segments = splitImageMarkers(paragraph);
     let first = indentFirst;
     for (const segment of segments) {
-      if (segment.kind === 'text') {
-        drawParagraph(segment.text.replace(/\s+/g, ' ').trim(), first);
-      } else {
-        await drawMarkerImage(segment.marker);
-      }
-      // Червоний рядок належить початку абзацу, а після картинки це вже не
-      // початок — навіть якщо текст перед нею був порожній.
+      if (segment.kind === 'text') drawParagraph(segment.text.replace(/\s+/g, ' ').trim(), first);
+      else await drawMarkerImage(segment.marker);
       first = false;
     }
   };
 
-  /**
-   * Скільки рядків тексту мусить лишитись під заголовком на тій самій
-   * сторінці. Два — мінімум, за яким заголовок перестає бути «висячим»:
-   * заголовок в останньому рядку сторінки, а текст під ним — на наступній,
-   * це класичний дефект набору, і жодне число сторінок його не викриє.
-   */
   const WIDOW_LINES = 2;
   const drawHeading = (text: string, style: HeadingStyle) => {
     const font = pick(style.font, true);
     const label = style.uppercase ? text.toUpperCase() : text;
     const step = style.fontSize * 1.25;
     const lines = wrapText(label, font, style.fontSize, contentWidth);
-
-    // Місце рахуємо ЗАЗДАЛЕГІДЬ на весь заголовок разом із хвостом тексту
-    // під ним — і переносимо на нову сторінку цілком, а не рядок за рядком.
     const needed =
       style.spaceBefore +
       lines.length * step +
       style.spaceAfter +
       WIDOW_LINES * spec.baseFontSize * spec.lineHeight;
     if (y - needed < spec.margins.bottom) newPage();
-
     y -= style.spaceBefore;
     for (const line of lines) {
       ensure(step);
@@ -501,7 +374,6 @@ export async function renderBookPdf(
     y -= style.spaceAfter;
   };
 
-  // --- титул -------------------------------------------------------------
   if (spec.titlePage.show) {
     const titleFont = pick('serif', true);
     const centerY = size.height * 0.62;
@@ -524,28 +396,12 @@ export async function renderBookPdf(
     newPage();
   }
 
-  /*
-    --- передмова: копірайт, присвята, епіграф -----------------------------
-
-    Склад і порядок — ті самі, що автор бачить у «Верстка PDF» і що вже
-    малює HTML-шлях (`src/utils/helpers.ts`): правова сторінка, присвята,
-    епіграф, а зміст — четвертим і не тут: номери сторінок глав відомі лише
-    після тіла.
-
-    КОЖЕН БЛОК — на своїй сторінці, і кожен наступний зсуває тіло ще на
-    одну: саме тому `bodyStartPage` рахується як «сторінка в момент початку
-    першої глави», а не числом. Це вже було правильно (див. коментар вище),
-    а тепер це ще й важливо — передмова зробила кількість сторінок до тіла
-    змінною.
-  */
   const frontMatter = book.frontMatter;
   const showFront = frontMatter?.show ?? {};
-
   const drawFrontBlock = (
     lines: string[],
     align: 'left' | 'center',
     startY: number,
-    /** Ширина набору: присвята й епіграф стоять у вужчій колонці, ніж текст. */
     width = contentWidth
   ) => {
     y = startY;
@@ -558,8 +414,6 @@ export async function renderBookPdf(
   };
 
   if (showFront.copyright && frontMatter?.copyrightText?.trim()) {
-    // Правова сторінка стоїть УНИЗУ сторінки — так її шукає око й так її
-    // очікує видавництво.
     drawFrontBlock(
       wrapText(frontMatter.copyrightText.trim(), serif, spec.frontMatter.fontSize, contentWidth),
       'left',
@@ -569,12 +423,7 @@ export async function renderBookPdf(
   }
   if (showFront.dedication && frontMatter?.dedicationText?.trim()) {
     drawFrontBlock(
-      wrapText(
-        frontMatter.dedicationText.trim(),
-        serif,
-        spec.frontMatter.fontSize,
-        contentWidth * 0.72
-      ),
+      wrapText(frontMatter.dedicationText.trim(), serif, spec.frontMatter.fontSize, contentWidth * 0.72),
       'center',
       size.height - spec.margins.top - contentHeight * spec.frontMatter.upperShare,
       contentWidth * 0.72
@@ -598,12 +447,6 @@ export async function renderBookPdf(
     newPage();
   }
 
-  // --- тіло --------------------------------------------------------------
-  /*
-    Картинки, на які в тексті книги Є маркер. Вони вже стоять на своєму
-    місці — другим разом малювати їх не можна, інакше та сама ілюстрація
-    зʼявилась би в книзі двічі: у тексті й у кінці глави.
-  */
   const markerIds = new Set<string>();
   for (const chapter of book.chapters) {
     for (const section of chapter.sections) {
@@ -619,17 +462,13 @@ export async function renderBookPdf(
     bodyStarted = true;
     currentChapter = chapter.title;
     drawHeading(chapter.title, spec.chapterTitle);
-    // Межі тіла ставимо ПІСЛЯ заголовка, а не до: заголовок глави може
-    // перейти на нову сторінку (довга назва + захисна вимога не лишати
-    // «сирітських» рядків), і тоді тіло починається саме з тієї сторінки.
-    // Від цього числа залежать і нумерація, і номери в змісті.
     if (firstChapter) bodyStartPage = pageIndex;
-    chapterStarts.push({ title: chapter.title, pageIndex, sections: [] });
+    chapterStarts.push({ id: chapter.id, title: chapter.title, pageIndex, sections: [] });
 
     for (const section of chapter.sections) {
       if (section.title) {
         drawHeading(section.title, spec.sectionTitle);
-        chapterStarts[chapterStarts.length - 1].sections.push({ title: section.title, pageIndex });
+        chapterStarts[chapterStarts.length - 1].sections.push({ id: section.id, title: section.title, pageIndex });
       }
       const paragraphs = toParagraphs(section.content);
       for (let index = 0; index < paragraphs.length; index += 1) {
@@ -637,10 +476,6 @@ export async function renderBookPdf(
       }
     }
 
-    // Ілюстрації глави — у кінці, після всіх розділів. Це СУМІСНИЙ шлях:
-    // так поводяться книги, написані до появи маркерів `[IMG: …]`, де
-    // точного місця картинки в рукописі справді немає. Ті, у яких місце є,
-    // уже надруковані в тексті (`drawMarkerImage`) і сюди не потрапляють.
     for (const ill of book.illustrations || []) {
       if (!chapter.id || ill.chapterId !== chapter.id) continue;
       if (ill.id && markerIds.has(ill.id)) continue;
@@ -648,19 +483,6 @@ export async function renderBookPdf(
     }
   }
 
-  // --- зміст --------------------------------------------------------------
-  /*
-    Зміст стоїть у книзі ПЕРЕД тілом, а малюється ПІСЛЯ нього: рядок змісту —
-    це назва плюс НОМЕР СТОРІНКИ, а номер стає відомий лише коли тіло вже
-    зверстано. Тому сторінки змісту вставляються на місце початку тіла
-    (`doc.insertPage`), і після цього всі сторінки тіла зсуваються на їхню
-    кількість — про це треба пам'ятати в нумерації нижче.
-
-    Номери для змісту рахуються ДО вставки й тією самою формулою, що й
-    друковані номери: інакше зміст обіцяв би не ті сторінки, які читач
-    знайде. `first` — перша сторінка тіла (передмова не нумерується, якщо
-    автор обрав режим «після змісту»).
-  */
   if (showFront.contents && chapterStarts.length) {
     const labelOf = (index: number) => {
       if (!spec.pageNumber.show) return '';
@@ -671,7 +493,6 @@ export async function renderBookPdf(
     const rowStep = spec.frontMatter.fontSize * 1.7;
     const tocTitleBlock = spec.sectionTitle.fontSize * 2.4;
     const capacity = Math.max(1, Math.floor((contentHeight - tocTitleBlock) / rowStep));
-
     type TocLine = { text: string; number: string; indent: number; bold: boolean; leader: boolean };
     const tocLines: TocLine[] = [];
     const pushRow = (title: string, pageIndexOf: number, indent: number, bold: boolean) => {
@@ -687,13 +508,9 @@ export async function renderBookPdf(
       wrapped.forEach((text, i) =>
         tocLines.push({
           text,
-          // Номер — на останньому рядку назви: багаторядкова назва без нього
-          // читалася б як обірвана.
           number: i === wrapped.length - 1 ? number : '',
           indent,
           bold,
-          // Провідник малюємо лише там, де між назвою й номером справді є
-          // проміжок: у перенесеній назві його немає.
           leader: wrapped.length === 1,
         })
       );
@@ -706,21 +523,17 @@ export async function renderBookPdf(
     }
 
     const tocPageCount = Math.max(1, Math.ceil(tocLines.length / capacity));
+    insertedTocPages = tocPageCount;
     const tocPages = [];
     for (let i = 0; i < tocPageCount; i += 1) {
       tocPages.push(doc.insertPage(bodyStartPage, [size.width, size.height]));
     }
 
     tocPages.forEach((tocPage, pageNo) => {
-      // Індекси вставлених сторінок — від bodyStartPage: тіло зсунеться, а
-      // самі сторінки змісту вже стоять на своїх місцях.
       const left = leftOfPage(bodyStartPage + pageNo);
       let ty = size.height - spec.margins.top;
       const headingFont = pick(spec.sectionTitle.font, true);
-      const heading =
-        pageNo === 0
-          ? spec.frontMatter.contentsTitle
-          : `${spec.frontMatter.contentsTitle} ${pageNo + 1}`;
+      const heading = pageNo === 0 ? spec.frontMatter.contentsTitle : `${spec.frontMatter.contentsTitle} ${pageNo + 1}`;
       tocPage.drawText(spec.sectionTitle.uppercase ? heading.toUpperCase() : heading, {
         x: left,
         y: ty,
@@ -733,13 +546,7 @@ export async function renderBookPdf(
       for (const line of tocLines.slice(pageNo * capacity, (pageNo + 1) * capacity)) {
         const font = line.bold ? pick(spec.chapterTitle.font, true) : serif;
         const x = left + line.indent;
-        tocPage.drawText(line.text, {
-          x,
-          y: ty,
-          size: spec.frontMatter.fontSize,
-          font,
-          color: black,
-        });
+        tocPage.drawText(line.text, { x, y: ty, size: spec.frontMatter.fontSize, font, color: black });
         if (line.number) {
           const numberWidth = serif.widthOfTextAtSize(line.number, spec.frontMatter.fontSize);
           tocPage.drawText(line.number, {
@@ -768,12 +575,9 @@ export async function renderBookPdf(
       }
     });
 
-    // Тіло зсунулося на кількість сторінок змісту: нумерація нижче мусить
-    // знати нові межі, інакше номери «поїдуть» рівно на цю кількість.
     bodyStartPage += tocPageCount;
   }
 
-  // --- колонтитули й нумерація -------------------------------------------
   const pages = doc.getPages();
   let numbered = 0;
   pages.forEach((p, index) => {
@@ -799,8 +603,6 @@ export async function renderBookPdf(
     const label = String(spec.pageNumber.startAt + numbered - 1);
     const w = serif.widthOfTextAtSize(label, spec.pageNumber.fontSize);
     const pos = spec.pageNumber.position;
-    // Номер теж мусить рахуватися від поля ЦІЄЇ сторінки, інакше на
-    // дзеркальному розвороті він з'їжджає до згину.
     const pageLeft = leftOfPage(index);
     const pageRight = spec.margins.left + spec.margins.right - pageLeft;
     const x = pos.endsWith('left')
@@ -814,5 +616,25 @@ export async function renderBookPdf(
     p.drawText(label, { x, y: yy, size: spec.pageNumber.fontSize, font: serif, color: grey });
   });
 
-  return { bytes: await doc.save(), pageCount: pages.length, numberedPages: numbered, notesUk };
+  const pageMap = buildCanonicalPdfPageMap({
+    chapters: chapterStarts,
+    pageCount: pages.length,
+    bodyStartPageIndex: bodyStartPage,
+    insertedTocPages,
+    pageNumber: {
+      show: spec.pageNumber.show,
+      startAt: spec.pageNumber.startAt,
+      skipFrontMatter: spec.pageNumber.skipFrontMatter,
+    },
+    engineId: 'nova',
+    source: 'nova-pdf',
+  });
+
+  return {
+    bytes: await doc.save(),
+    pageCount: pages.length,
+    pageMap,
+    numberedPages: numbered,
+    notesUk,
+  };
 }

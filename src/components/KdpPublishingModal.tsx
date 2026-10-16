@@ -41,6 +41,7 @@ import { exportBookToEpub, exportBookToDocx } from '../utils/fileExporters';
 import { exportBookToBackupZip } from '../utils/bookBackup';
 import { buildChaptersFromClaudeFormat } from '../utils/manuscriptImport';
 import type { FormattedChapter } from '../utils/manuscriptExportHtml';
+import { KdpEngineExport } from './KdpEngineExport';
 import { useLanguage } from '../i18n/LanguageContext';
 
 interface KdpPublishingModalProps {
@@ -81,6 +82,7 @@ export const KdpPublishingModal: React.FC<KdpPublishingModalProps> = ({
   const [activeTab, setActiveTab] = useState<'claude' | 'audit' | 'autoprep' | 'rules' | 'export'>('autoprep');
   const [selectedPreset, setSelectedPreset] = useState<'kdp-6x9' | 'kdp-5.5x8.5' | 'kdp-5x8' | 'kdp-7x10' | 'kdp-ebook'>('kdp-6x9');
   const [appliedSuccessMsg, setAppliedSuccessMsg] = useState<string | null>(null);
+  const [kdpExportError, setKdpExportError] = useState<string | null>(null);
   const [isExportingEpub, setIsExportingEpub] = useState(false);
   const { t } = useLanguage();
 
@@ -219,8 +221,8 @@ ${book.synopsisEn || 'English synopsis...'}
     downloadTextFile(`${book.title.replace(/\s+/g, '_')}_Amazon_KDP_Metadata.txt`, metadataText, 'text/plain');
   };
 
-  // Export KDP Print-Ready PDF
-  const handleExportKdpPrintPdf = () => {
+  // Legacy browser print is intentionally kept only as an explicit fallback.
+  const handleLegacyKdpBrowserPrint = () => {
     const htmlContent = generateBookExportHtml(book);
     const printWindow = window.open('', '_blank');
     if (printWindow) {
@@ -231,7 +233,7 @@ ${book.synopsisEn || 'English synopsis...'}
         printWindow.print();
       }, 500);
     } else {
-      downloadTextFile(`${book.title.replace(/\s+/g, '_')}_KDP_Print_6x9.html`, htmlContent, 'text/html');
+      downloadTextFile(`${book.title.replace(/\s+/g, '_')}_KDP_Legacy_Print.html`, htmlContent, 'text/html');
     }
   };
 
@@ -874,7 +876,7 @@ ${book.synopsisEn || 'English synopsis...'}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 
                 {/* Print PDF Card */}
-                <div className="p-5 rounded-2xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between space-y-4">
+                <div className="p-5 rounded-2xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between space-y-4 md:col-span-2">
                   <div className="space-y-2">
                     <div className="p-3 rounded-xl bg-rose-500/20 text-rose-300 border border-rose-500/30 w-fit">
                       <Printer className="w-5 h-5" />
@@ -887,12 +889,28 @@ ${book.synopsisEn || 'English synopsis...'}
                     </p>
                   </div>
 
+                  <KdpEngineExport
+                    book={book}
+                    compact
+                    onSuccess={(message) => {
+                      setKdpExportError(null);
+                      setAppliedSuccessMsg(message);
+                      setTimeout(() => setAppliedSuccessMsg(null), 5000);
+                    }}
+                    onError={(message) => setKdpExportError(message || null)}
+                  />
+                  {kdpExportError && (
+                    <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-[11px] text-rose-200">
+                      {kdpExportError}
+                    </div>
+                  )}
                   <button
-                    onClick={handleExportKdpPrintPdf}
-                    className="w-full py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-md transition-all active:scale-95 flex items-center justify-center gap-2"
+                    onClick={handleLegacyKdpBrowserPrint}
+                    className="w-full py-2 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 font-bold text-[11px] transition-all flex items-center justify-center gap-2"
+                    title="Старий browser-print шлях. Не є канонічним KDP PDF renderer Studio."
                   >
-                    <FileDown className="w-4 h-4" />
-                    <span>{t('kdpPublishingModal.downloadPrintPdfBtn')}</span>
+                    <FileDown className="w-3.5 h-3.5" />
+                    <span>Legacy / Browser Print</span>
                   </button>
                 </div>
 
@@ -921,7 +939,7 @@ ${book.synopsisEn || 'English synopsis...'}
                 </div>
 
                 {/* KDP Metadata Sheet Card */}
-                <div className="p-5 rounded-2xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between space-y-4">
+                <div className="p-5 rounded-2xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between space-y-4 md:col-start-3">
                   <div className="space-y-2">
                     <div className="p-3 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 w-fit">
                       <Sliders className="w-5 h-5" />

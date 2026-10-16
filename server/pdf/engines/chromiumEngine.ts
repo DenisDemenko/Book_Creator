@@ -21,6 +21,11 @@ import { bookToMarkdown, unresolvedMarkersNoteUk } from '../bookToMarkdown';
 import { loadImageBytes } from '../../media/imageBytes';
 import { PAGE_SIZES } from '../pdfTypes';
 import {
+  buildChromiumCanonicalPageMap,
+  injectChromiumLandmarkLinks,
+  prepareChromiumLandmarks,
+} from './chromiumPageMap';
+import {
   PdfEngineError,
   type PdfEngine,
   type PdfEngineAvailability,
@@ -198,7 +203,8 @@ export const chromiumEngine: PdfEngine = {
     }
 
     const notesUk: string[] = [];
-    const doc = bookToMarkdown(request.book as never, { frontmatter: false });
+    const prepared = prepareChromiumLandmarks(request.book);
+    const doc = bookToMarkdown(prepared.book as never, { frontmatter: false });
     const markerNote = unresolvedMarkersNoteUk(doc.unresolvedMarkers);
     if (markerNote) notesUk.push(markerNote);
     const markdown = await embedImages(doc.markdown, doc.images, request.ownerId, notesUk);
@@ -210,17 +216,20 @@ export const chromiumEngine: PdfEngine = {
     // пунктах). Якщо макета немає, `undefined` лишає в таблиці стилів
     // класичний «червоний рядок» 1.2em, тобто поведінка старих викликів
     // не змінюється.
-    const html = buildBookHtml(markdown, {
-      title: doc.meta.title,
-      subtitle: doc.meta.subtitle,
-      author: doc.meta.author,
-      lang: doc.meta.lang,
-      theme: (request.theme as BookHtmlTheme) || 'book',
-      fontSizePt: (spec as { fontSizePt?: number }).fontSizePt,
-      lineHeight: (spec as { lineHeight?: number }).lineHeight,
-      firstLineIndentPt: (spec as { paragraphIndent?: number }).paragraphIndent,
-      paragraphSpacingPt: (spec as { paragraphSpacing?: number }).paragraphSpacing,
-    });
+    const html = injectChromiumLandmarkLinks(
+      buildBookHtml(markdown, {
+        title: doc.meta.title,
+        subtitle: doc.meta.subtitle,
+        author: doc.meta.author,
+        lang: doc.meta.lang,
+        theme: (request.theme as BookHtmlTheme) || 'book',
+        fontSizePt: (spec as { fontSizePt?: number }).fontSizePt,
+        lineHeight: (spec as { lineHeight?: number }).lineHeight,
+        firstLineIndentPt: (spec as { paragraphIndent?: number }).paragraphIndent,
+        paragraphSpacingPt: (spec as { paragraphSpacing?: number }).paragraphSpacing,
+      }),
+      prepared.expected,
+    );
 
     let browser: Awaited<ReturnType<BrowserLauncher>> | null = null;
     try {
@@ -239,17 +248,29 @@ export const chromiumEngine: PdfEngine = {
         timeout: RENDER_TIMEOUT_MS,
       });
 
-      const pageCount = (await PDFDocument.load(bytes)).getPageCount();
+      const finalBytes = new Uint8Array(bytes);
+      const pageCount = (await PDFDocument.load(finalBytes)).getPageCount();
+      const pageMap = await buildChromiumCanonicalPageMap({
+        bytes: finalBytes,
+        pageCount,
+        expected: prepared.expected,
+      });
 
       notesUk.push(
         'Макет виконано браузером: формат сторінки й кегль узято з налаштувань, ' +
           'решта — з таблиці стилів рушія.'
       );
+      if (!pageMap && prepared.expected.length > 0) {
+        notesUk.push(
+          'Chromium не зберіг усі структурні PDF-якорі; точні координати глав не заявляються.'
+        );
+      }
 
       return {
-        bytes: new Uint8Array(bytes),
+        bytes: finalBytes,
         pageCount,
         engineId: 'chromium',
+        pageMap: pageMap || undefined,
         // Макет книги виконано ЧАСТКОВО, і це сказано прямо: поля, позиція
         // номера й початок нумерації в цьому рушії задає CSS, а не «Верстка PDF».
         honoredSpec: false,

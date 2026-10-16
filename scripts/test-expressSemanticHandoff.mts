@@ -54,7 +54,14 @@ console.log('  ✓ repeated handoff does not duplicate an existing semantic pref
 const startView = await readFile(new URL('../src/components/ExpressStartView.tsx', import.meta.url), 'utf8');
 assert.match(startView, /prependExpressSemanticTags/);
 assert.match(startView, /summary:\s*prependExpressSemanticTags\(chapter\.summary \?\? '', chapter, cast\)/);
-assert.match(startView, /onFinish=\{\(payload\) => onFinish\?\.\(withDeterministicSemanticHandoff\(payload\)\)\}/);
-console.log('  ✓ ExpressStartView applies semantic tags before handing the wizard payload to App');
+assert.match(
+  startView,
+  /const deterministic = withDeterministicSemanticHandoff\(payload\);\s*void withJevSemanticEnrichment\(deterministic, currentBook\)\.then\(\(enriched\) => onFinish\?\.\(enriched\)\);/s,
+);
+console.log('  ✓ ExpressStartView applies deterministic tags first, then JEV enrichment, then hands payload to App');
+
+assert.match(startView, /JEV failure ніколи не скасовує готову книгу/);
+assert.match(startView, /catch \(error\)[\s\S]*nova:jev-wizard-enrichment[\s\S]*status: 'skipped'/);
+console.log('  ✓ JEV enrichment is best-effort and cannot cancel the deterministic handoff');
 
 console.log('\nExpress semantic handoff regression contract passed.');

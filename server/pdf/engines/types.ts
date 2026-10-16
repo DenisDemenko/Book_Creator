@@ -6,6 +6,7 @@
  */
 
 import type { PdfBookInput, PdfLayoutSpec } from '../pdfTypes';
+import type { CanonicalPageMap } from '../../../shared/canonicalPageMap';
 
 export type PdfEngineId = 'nova' | 'chromium' | 'pandoc' | 'designcraft' | 'gamma';
 
@@ -31,6 +32,10 @@ export interface PdfRenderRequest {
   spec?: Partial<PdfLayoutSpec>;
   /** Друкована редакція під KDP. Підтримує лише рушій `nova`. */
   print?: boolean;
+  /** Розмір обрізу KDP. Має сенс лише для print + nova. */
+  trimId?: string;
+  /** Чи враховувати виліт під обріз у полях KDP. */
+  hasBleed?: boolean;
   /** Хто друкує — для рушіїв, які працюють під ключем автора. */
   ownerId?: string | null;
   /** Роль того, хто друкує. */
@@ -39,15 +44,33 @@ export interface PdfRenderRequest {
   theme?: string;
 }
 
+/** KDP-specific facts that routes/UI used to read by bypassing the registry. */
+export interface PdfPrintInfo {
+  trimId: string;
+  gutterMm: number;
+  passes: number;
+  designerNoteUk?: string;
+  warningsUk: string[];
+}
+
+/** Native engine result. `pageMap` may be omitted and is normalized by registry.ts. */
 export interface PdfRenderResult {
   bytes: Uint8Array;
   pageCount: number;
   engineId: PdfEngineId;
+  pageMap?: CanonicalPageMap;
+  /** Present for a print render that has production-specific metadata. */
+  printInfo?: PdfPrintInfo;
   /** false означає, що макет Studio виконано лише частково. */
   honoredSpec: boolean;
   /** Що саме рушій зробив інакше. */
   notesUk: string[];
 }
+
+/** Public result: every caller receives one canonical pagination contract. */
+export type NormalizedPdfRenderResult = Omit<PdfRenderResult, 'pageMap'> & {
+  pageMap: CanonicalPageMap;
+};
 
 export interface PdfEngineAvailability {
   ok: boolean;

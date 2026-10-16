@@ -14,7 +14,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { PDFDocument } from 'pdf-lib';
-import { DEFAULT_LAYOUT_SPEC, PAGE_SIZES, type PdfLayoutSpec } from '../pdfTypes';
+import { DEFAULT_LAYOUT_SPEC, MM_TO_PT, PAGE_SIZES, type PdfLayoutSpec } from '../pdfTypes';
 import {
   buildDesigncraftRtf,
   IMAGE_BEGIN,
@@ -23,6 +23,7 @@ import {
 } from '../designcraft/rtf';
 import { serializeDesigncraftParagraphStyles } from '../designcraft/styleCommands';
 import { extensionForMime, loadImageBytes } from '../../media/imageBytes';
+import { buildDesigncraftCanonicalPageMap } from './designcraftPageMap';
 import {
   PdfEngineError,
   type PdfEngine,
@@ -35,6 +36,7 @@ export const DESIGNCRAFT_PROD_PATH = process.env.DESIGNCRAFT_PATH || 'designcraf
 const TIMEOUT_MS = Number(process.env.DESIGNCRAFT_TIMEOUT_MS) || 240_000;
 const MAX_OUTPUT = Number(process.env.DESIGNCRAFT_MAX_OUTPUT_CHARS) || 30_000_000;
 const PAGE_NUMBER_MARKER = '\uE000';
+const KDP_BLEED_PT = 0.125 * 72;
 
 type SpreadRef = number | { kind: 'parent'; index: number };
 interface CliResult { code: number | null; stdout: string; stderr: string; timedOut: boolean }
@@ -305,9 +307,9 @@ async function minimizePages(
 export const designcraftEngineV3: PdfEngine = {
   id: 'designcraft',
   label: 'DesignCraft',
-  strengthUk: 'Професійна книжкова верстка з нативним reflow, автоматичним змістом, ілюстраціями, колонтитулами та нумерацією.',
-  limitUk: 'Друкований KDP-макет із розрахунком корінця поки лишається за Nova; DesignCraft використовується для цифрового PDF.',
-  supportsPrint: false,
+  strengthUk: 'Професійна книжкова верстка з нативним reflow, автоматичним змістом, ілюстраціями, колонтитулами, нумерацією та KDP print-режимом.',
+  limitUk: 'Для складної кольорокорекції та окремого preflight друкарні може знадобитися зовнішня перевірка PDF/X-4.',
+  supportsPrint: true,
 
   async available(): Promise<PdfEngineAvailability> {
     const out = await runCli(['--version']);
@@ -337,8 +339,9 @@ export const designcraftEngineV3: PdfEngine = {
           command('file.new', {
             ...pageSize(spec),
             pages: bodyPage,
-            facingPages: false,
+            facingPages: request.print === true,
             margins: { top: spec.margins.top, bottom: spec.margins.bottom, inside: spec.margins.left, outside: spec.margins.right },
+            bleed: request.print && request.hasBleed ? KDP_BLEED_PT : 0,
             title: request.book.title || 'Fusion Lab book',
           }),
           ...serializeDesigncraftParagraphStyles(spec, manuscript.semanticStylesUsed),
@@ -392,10 +395,23 @@ export const designcraftEngineV3: PdfEngine = {
       const finalDoc = path.join(workDir, 'final.designcraft');
       const frontPages = Array.from({ length: bodyPage - 1 }, (_, i) => i);
       const tocStyles = spec.frontMatter.contentsSections ? ['Heading 1', 'Heading 2'] : ['Heading 1'];
+      const bodyStartNumber = Math.max(1, Math.round(spec.pageNumber.startAt || 1));
+      const printExport = request.print
+        ? [command('file.exportPdf', {
+            path: pdfPath,
+            bleed: Boolean(request.hasBleed),
+            marks: false,
+            standard: 'x4',
+            compressImages: true,
+            tagged: true,
+            title: request.book.title || 'Fusion Lab book',
+            author: request.book.author || '',
+          })]
+        : [];
       await fs.writeFile(
         finalScript,
         [
-          command('layout.section', { page: bodyPage, startNumber: Math.max(1, Math.round(spec.pageNumber.startAt || 1)), style: 'arabic' }),
+          command('layout.section', { page: bodyPage, startNumber: bodyStartNumber, style: 'arabic' }),
           ...(frontPages.length && (spec.runningHead.show || spec.pageNumber.skipFrontMatter)
             ? [command('layout.pages.applyParent', { pages: frontPages, parent: null })]
             : []),
@@ -405,17 +421,23 @@ export const designcraftEngineV3: PdfEngine = {
           command('toc.update'),
           command('story.get', { story }),
           command('anchored.list', { story }),
-          command('toc.entries', { styles: tocStyles }),
+          // CanonicalPageMap always needs sections even when the visible TOC hides them.
+          command('toc.entries', { styles: ['Heading 1', 'Heading 2'] }),
           command('toc.entries', { styles: ['Heading 1'] }),
+          ...printExport,
         ].join('\n') + '\n',
         'utf8'
       );
-      const final = await runScript(finalScript, ['--in', contentDoc, '--save', finalDoc, '--export', pdfPath], workDir, 'DesignCraft не завершив фінальний PDF вчасно.');
+      const finalArgs = request.print
+        ? ['--in', contentDoc, '--save', finalDoc]
+        : ['--in', contentDoc, '--save', finalDoc, '--export', pdfPath];
+      const final = await runScript(finalScript, finalArgs, workDir, 'DesignCraft не завершив фінальний PDF вчасно.');
       const r = Array.isArray(final.results) ? final.results : [];
-      const finalState = r.at(-4);
-      const anchored = r.at(-3);
-      const toc = r.at(-2);
-      const chapterToc = r.at(-1);
+      const exportOffset = request.print ? 1 : 0;
+      const finalState = r.at(-4 - exportOffset);
+      const anchored = r.at(-3 - exportOffset);
+      const toc = r.at(-2 - exportOffset);
+      const chapterToc = r.at(-1 - exportOffset);
       if (overset(finalState)) throw new PdfEngineError('designcraft', 'engine', 'Фінальна перевірка знайшла overset.');
       if (!Array.isArray(anchored) || anchored.length !== loadedImages) {
         throw new PdfEngineError('designcraft', 'engine', `Ілюстрації: очікувалось ${loadedImages}, знайдено ${Array.isArray(anchored) ? anchored.length : 0}.`);
@@ -445,12 +467,45 @@ export const designcraftEngineV3: PdfEngine = {
       const pageCount = pdf.getPageCount();
       if (pageCount !== minimized.pageCount) throw new PdfEngineError('designcraft', 'engine', `Кількість сторінок не збігається: PDF=${pageCount}, reflow=${minimized.pageCount}.`);
 
+      const pageMap = buildDesigncraftCanonicalPageMap({
+        book: request.book,
+        toc: Array.isArray(toc) ? toc : [],
+        chapterToc: chapterEntries,
+        pageCount,
+        bodyPage,
+        bodyStartNumber,
+      });
+      if (!pageMap) {
+        notesUk.push('DesignCraft повернув фінальну кількість сторінок, але TOC не вдалося безпечно зіставити зі стабільними id книги; registry залишить лише page-count map.');
+      }
+
       const semanticNames = manuscript.semanticStylesUsed.filter((name) => !['Body', 'Heading 1', 'Heading 2'].includes(name));
       if (semanticNames.length) notesUk.unshift(`Тема DesignCraft застосувала семантичні стилі: ${semanticNames.join(', ')}.`);
+      if (request.print) {
+        notesUk.unshift(
+          `DesignCraft KDP: facing pages, inside/outside поля, PDF/X-4${request.hasBleed ? ', bleed 0.125″' : ', без bleed'}, без crop marks.`
+        );
+      }
       notesUk.unshift(
         `DesignCraft: ${pageCount} стор. (первинно виділено ${allocatedPages}, зайвий хвіст прибрано бінарною перевіркою), без overset, зміст синхронізовано (${chapterEntries.length}/${chapterCount} глав), ${loadedImages} ілюстрацій перевірено.`
       );
-      return { bytes, pageCount, engineId: 'designcraft', honoredSpec: true, notesUk };
+      return {
+        bytes,
+        pageCount,
+        engineId: 'designcraft',
+        pageMap: pageMap || undefined,
+        printInfo: request.print
+          ? {
+              trimId: request.trimId || 'custom',
+              gutterMm: Number((spec.margins.left / MM_TO_PT).toFixed(1)),
+              passes: 1,
+              designerNoteUk: 'KDP PDF створено нативним DesignCraft facing-page layout і експортовано як PDF/X-4.',
+              warningsUk: [],
+            }
+          : undefined,
+        honoredSpec: true,
+        notesUk,
+      };
     } catch (err) {
       if (err instanceof PdfEngineError) throw err;
       throw new PdfEngineError('designcraft', 'engine', `DesignCraft: ${(err as Error).message}`);

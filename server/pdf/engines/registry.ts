@@ -7,6 +7,7 @@ import { novaEngine } from './novaEngine';
 import { chromiumEngine } from './chromiumEngine';
 import { pandocEngine } from './pandocEngine';
 import { designcraftEngineV3 } from './designcraftEngineV3';
+import { pageCountOnlyMap, type CanonicalPageMapSource } from '../../../shared/canonicalPageMap';
 import {
   DEFAULT_PDF_ENGINE,
   PDF_ENGINE_IDS,
@@ -15,7 +16,7 @@ import {
   type PdfEngineContext,
   type PdfEngineId,
   type PdfRenderRequest,
-  type PdfRenderResult,
+  type NormalizedPdfRenderResult,
 } from './types';
 
 /** Рушії в порядку показу автору. */
@@ -25,6 +26,80 @@ const ENGINES: Partial<Record<PdfEngineId, PdfEngine>> = {
   chromium: chromiumEngine,
   pandoc: pandocEngine,
   // gamma: свідомо НЕ зареєстрована. Код підсистеми лишається на місці.
+};
+
+interface WriterEngineProfile {
+  badgeUk: string;
+  summaryUk: string;
+  sourceUk: string;
+  bestForUk: string[];
+  featuresUk: string[];
+  recommendationUk: string;
+}
+
+/**
+ * Людський каталог можливостей. Він живе поруч із registry, а не у React:
+ * API, Studio, publish і майбутні клієнти бачать однакове пояснення того,
+ * навіщо існує кожен renderer. Тут описується лише те, що реально є в коді.
+ */
+const WRITER_ENGINE_PROFILES: Partial<Record<PdfEngineId, WriterEngineProfile>> = {
+  nova: {
+    badgeUk: 'Друк / KDP',
+    summaryUk: 'Власний детермінований PDF-рушій Fusion Lab для надійної книжкової верстки та друку.',
+    sourceUk: 'Власний renderer Nova на pdf-lib',
+    bestForUk: ['романи й проза', 'друковані книги', 'Amazon KDP', 'фінальний production PDF'],
+    featuresUk: [
+      'дзеркальні внутрішні/зовнішні поля',
+      'корінець за фактичною кількістю сторінок',
+      'trim і bleed для KDP',
+      'точне виконання PdfLayoutSpec',
+      'не залежить від зовнішнього CLI',
+    ],
+    recommendationUk: 'Обирайте для фінального друку, KDP і випадків, де важливі повторюваність та фізичні поля книги.',
+  },
+  designcraft: {
+    badgeUk: 'Дизайн + KDP',
+    summaryUk: 'DTP-рушій для художньої композиції сторінки, тем, семантичних блоків, ілюстрацій та KDP print PDF.',
+    sourceUk: 'DesignCraft CLI / native threaded layout / PDF-X4',
+    bestForUk: ['артбуки', 'дитячі книги', 'навчальні видання', 'брендовані та ілюстровані книги', 'Amazon KDP'],
+    featuresUk: [
+      '15 дизайн-систем Studio і custom themes',
+      'потокові текстові фрейми без overset',
+      'семантичні стилі та декоративні блоки',
+      'розміщення ілюстрацій у DTP-макеті',
+      'native TOC і точний PageMap',
+      'native facing pages, inside/outside поля, bleed та PDF/X-4 для KDP',
+    ],
+    recommendationUk: 'Обирайте для KDP, коли важливо зберегти складний художній DesignCraft-макет, ілюстрації та тему книги.',
+  },
+  chromium: {
+    badgeUk: 'HTML / CSS',
+    summaryUk: 'Сучасний браузерний renderer: книга верстається HTML/CSS так само гнучко, як складна веб-сторінка.',
+    sourceUk: 'Headless Chromium / CSS print layout',
+    bestForUk: ['цифрові PDF', 'таблиці', 'нестандартні CSS-стилі', 'змішаний текст + графіка'],
+    featuresUk: [
+      'HTML/CSS типографіка',
+      'реальні GFM-таблиці',
+      'фони, рамки та складні заголовки',
+      'CSS wrapping і сучасна веб-розмітка',
+      'точні landmarks із фінального PDF',
+    ],
+    recommendationUk: 'Обирайте для гнучкого цифрового PDF та макетів, які природніше описувати HTML/CSS, а не друкарськими примітивами.',
+  },
+  pandoc: {
+    badgeUk: 'Наука / формули',
+    summaryUk: 'Pandoc + XeLaTeX/Eisvogel для академічної типографіки, STEM-текстів і математичної Markdown-розмітки.',
+    sourceUk: 'Pandoc + XeLaTeX + Eisvogel',
+    bestForUk: ['наукові книги', 'математика й фізика', 'підручники STEM', 'технічні та академічні видання'],
+    featuresUk: [
+      'математичні формули з Pandoc Markdown',
+      'словникові переноси',
+      'лігатури й мікротипографіка',
+      'академічний зміст до рівня секцій',
+      'безпечний markdown-raw_tex: авторський raw TeX не виконується',
+    ],
+    recommendationUk: 'Обирайте для формул, наукового тексту та видань, де якість набору важливіша за швидкість рендера.',
+  },
 };
 
 /** Дозволяє під'єднати рушій із його файлу, не редагуючи цей словник вручну. */
@@ -46,6 +121,12 @@ export interface PdfEngineDescription {
   reasonUk?: string;
   fixUk?: string;
   isDefault: boolean;
+  badgeUk?: string;
+  summaryUk?: string;
+  sourceUk?: string;
+  bestForUk?: string[];
+  featuresUk?: string[];
+  recommendationUk?: string;
 }
 
 /** Перелік для інтерфейсу. Перевірки доступності виконуються паралельно. */
@@ -78,16 +159,38 @@ export async function listPdfEngines(
     reasonUk: state.ok ? undefined : state.reasonUk,
     fixUk: state.ok ? undefined : state.fixUk,
     isDefault: engine.id === DEFAULT_PDF_ENGINE,
+    ...(WRITER_ENGINE_PROFILES[engine.id] || {}),
   }));
+}
+
+function fallbackPageMap(engineId: PdfEngineId, pageCount: number) {
+  const sourceByEngine: Record<PdfEngineId, CanonicalPageMapSource> = {
+    nova: 'nova-pdf',
+    designcraft: 'designcraft-toc',
+    chromium: 'chromium-pdf',
+    pandoc: 'pandoc-pdf',
+    gamma: 'external-pdf',
+  };
+  return pageCountOnlyMap(
+    engineId,
+    sourceByEngine[engineId],
+    pageCount,
+    'Рушій повернув точну загальну кількість сторінок, але ще не експортував координати глав і секцій у CanonicalPageMap.'
+  );
 }
 
 /**
  * Зверстати обраним рушієм. Тихого відкоту на інший рушій немає.
+ *
+ * ВАЖЛИВО: це єдина публічна межа нормалізації пагінації. Кожен renderer
+ * може мати свій внутрішній механізм (pdf-lib, DesignCraft, Chromium, TeX),
+ * але назовні завжди повертається один CanonicalPageMap. UI не має права
+ * повторно рахувати сторінки з рукопису.
  */
 export async function renderWithEngine(
   engineId: string | undefined,
   request: PdfRenderRequest
-): Promise<PdfRenderResult> {
+): Promise<NormalizedPdfRenderResult> {
   const id = (engineId || DEFAULT_PDF_ENGINE) as PdfEngineId;
   const engine = getPdfEngine(id);
   if (!engine) {
@@ -102,8 +205,7 @@ export async function renderWithEngine(
     throw new PdfEngineError(
       engine.id,
       'bad_input',
-      `Рушій «${engine.label}» не робить друковану редакцію під KDP: ` +
-        'дзеркальні поля й корінець за обсягом уміє лише власна верстка Nova.'
+      `Рушій «${engine.label}» не підтримує друкований PDF/KDP. Оберіть Nova або DesignCraft.`
     );
   }
 
@@ -125,18 +227,6 @@ export async function renderWithEngine(
     );
   }
 
-  /*
-   * Book Design Studio theme is a DesignCraft concern, not a generic PDF
-   * engine setting. Keep the public request backward-compatible (`theme`) and
-   * bridge it into the renderer's layout spec only for DesignCraft. This means
-   * Nova/Chromium/Pandoc continue to receive exactly the same request shape and
-   * behavior as before.
-   *
-   * `themeId` is intentionally an extension of PdfLayoutSpec during this
-   * migration slice. `buildDesigncraftRtf` reads it without requiring a schema
-   * migration for every stored book. Once the writer-facing picker lands, the
-   * field can become first-class in PdfLayoutSpec without changing stored ids.
-   */
   const effectiveRequest: PdfRenderRequest =
     engine.id === 'designcraft' && request.theme
       ? {
@@ -148,5 +238,9 @@ export async function renderWithEngine(
         }
       : request;
 
-  return engine.render(effectiveRequest);
+  const result = await engine.render(effectiveRequest);
+  return {
+    ...result,
+    pageMap: result.pageMap || fallbackPageMap(engine.id, result.pageCount),
+  };
 }

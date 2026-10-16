@@ -1,11 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import { 
-  ChevronLeft, 
-  ChevronRight, 
-  BookOpen, 
-  Maximize2, 
-  Minimize2, 
-  Layers, 
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  BookOpen,
+  Maximize2,
+  Minimize2,
+  Layers,
   Sparkles,
   Search,
   Bookmark,
@@ -20,6 +20,9 @@ import { assetUrl } from '../utils/assetUrl';
 import { PX_PER_MM } from '../utils/mmUnits';
 import { bodyFontStack, resolveParagraphGeometry } from '../utils/typography';
 import { useLanguage } from '../i18n/LanguageContext';
+import { PreviewChapterNavigator } from './PreviewChapterNavigator';
+import { CanonicalPageNavigator } from './CanonicalPageNavigator';
+import { FinalPdfSpread, type FinalPdfSpreadState } from './FinalPdfSpread';
 
 interface BookPreviewViewProps {
   book: Book;
@@ -32,9 +35,27 @@ export const BookPreviewView: React.FC<BookPreviewViewProps> = ({ book, totalWor
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   /** Масштаб розвороту для зручності читання (0.5–2.0). */
   const [zoom, setZoom] = useState<number>(1);
+  const [finalPdfState, setFinalPdfState] = useState<FinalPdfSpreadState | null>(null);
+  const [finalPdfUnavailable, setFinalPdfUnavailable] = useState(false);
 
   const zoomBy = (delta: number) =>
     setZoom((z) => Math.min(2, Math.max(0.5, Math.round((z + delta) * 10) / 10)));
+
+  const handleFinalPdfReady = useCallback((state: FinalPdfSpreadState) => {
+    setFinalPdfState(state);
+    setFinalPdfUnavailable(false);
+  }, []);
+
+  const handleFinalPdfUnavailable = useCallback(() => {
+    setFinalPdfState(null);
+    setFinalPdfUnavailable(true);
+  }, []);
+
+  useEffect(() => {
+    // Нова книга або інша ревізія може вже мати свіжий зібраний PDF.
+    setFinalPdfUnavailable(false);
+    setFinalPdfState(null);
+  }, [book.id, book.updatedAt, book.revisionNumber]);
 
   const layout = book.layoutConfig;
 
@@ -72,16 +93,16 @@ export const BookPreviewView: React.FC<BookPreviewViewProps> = ({ book, totalWor
 
   const computedTocItems = computeTableOfContents(book);
 
-  // Реальна пагінація: вимірює справжню відрендерену висоту насиченого
-  // тексту (жирний/курсив/шрифт/кегль/картинки) проти реального формату
-  // сторінки — не та сама евристика, що в «Змісті»/«Верстці PDF» (там усе
-  // ще швидка оцінка на символах, свідомо не змінена цим заходом).
+  // Legacy fallback. Він лишається потрібним, доки автор ще не зібрав PDF.
+  // Як тільки FinalPdfSpread отримав manifest, навігація більше НЕ використовує
+  // ці browser-measured pages: джерелом правди стає фінальний PDF + PageMap.
   const { pages, measuring, pendingImages, failedImages } = useBookPreviewMeasurement(book);
 
-  const totalBookPages = pages.length;
+  const usingFinalPdf = Boolean(finalPdfState && !finalPdfUnavailable);
+  const totalBookPages = finalPdfState?.pageCount ?? pages.length;
   useEffect(() => {
-    setCurrentPageIndex(index => Math.min(index, Math.max(0, Math.floor((pages.length - 1) / 2) * 2)));
-  }, [pages.length]);
+    setCurrentPageIndex(index => Math.min(index, Math.max(0, Math.floor((totalBookPages - 1) / 2) * 2)));
+  }, [totalBookPages]);
   const leftPageIndex = currentPageIndex;
   const rightPageIndex = currentPageIndex + 1 < totalBookPages ? currentPageIndex + 1 : null;
 
@@ -288,7 +309,7 @@ export const BookPreviewView: React.FC<BookPreviewViewProps> = ({ book, totalWor
 
   return (
     <div data-book-preview className="flex-1 min-w-0 p-4 lg:p-6 overflow-y-auto bg-slate-900 text-slate-100 flex flex-col space-y-6">
-      
+
       {/* Top Controls Bar */}
       <div className="nova-glass-dark rounded-2xl p-4 border border-slate-800 flex flex-wrap items-center justify-between gap-4">
         <div>
@@ -313,7 +334,7 @@ export const BookPreviewView: React.FC<BookPreviewViewProps> = ({ book, totalWor
           </button>
 
           <span className="text-xs font-mono bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 text-cyan-300">
-            {t('bookPreviewView.pageRangeLabel', { a: String(leftPageIndex + 1), b: String(rightPageIndex ? rightPageIndex + 1 : leftPageIndex + 1), c: String(totalBookPages) })}
+            {t('bookPreviewView.pageRangeLabel', { a: String(leftPageIndex + 1), b: String(rightPageIndex !== null ? rightPageIndex + 1 : leftPageIndex + 1), c: String(totalBookPages) })}
           </span>
 
           <button
@@ -354,60 +375,81 @@ export const BookPreviewView: React.FC<BookPreviewViewProps> = ({ book, totalWor
       </div>
 
       <p role="status" data-preview-status className="text-xs text-slate-300">
-        {measuring ? 'Розраховуємо сторінки та завантажуємо зображення…'
-          : pendingImages ? 'Деякі зображення ще завантажуються; сторінки буде перераховано.'
-          : 'Орієнтовна браузерна пагінація. Точні сторінки визначає обраний PDF-рушій.'}
-        {failedImages > 0 && ' Не завантажено зображень: ' + failedImages + '.'}
+        {usingFinalPdf && finalPdfState
+          ? `Фінальний PDF · ${finalPdfState.manifest.engineId} · ${finalPdfState.manifest.pageMap.precision === 'exact' ? 'точна CanonicalPageMap' : 'карта лише за кількістю сторінок'}.`
+          : measuring
+            ? 'Розраховуємо резервну браузерну пагінацію та завантажуємо зображення…'
+            : pendingImages
+              ? 'Фінальний PDF ще не доступний. Деякі зображення резервного перегляду ще завантажуються.'
+              : 'Фінальний PDF ще не зібрано або його manifest недоступний. Показано резервну браузерну пагінацію.'}
+        {!usingFinalPdf && failedImages > 0 && ' Не завантажено зображень: ' + failedImages + '.'}
       </p>
 
-      {/* Book Spread Realistic Canvas */}
+      {/* Book Spread: primary = the SAME final PDF; legacy HTML stays as fallback. */}
       <div className="flex-1 overflow-auto p-2 sm:p-6 bg-slate-950 rounded-3xl border border-slate-800 shadow-2xl min-h-[560px]">
-
-        {/* Масштабований розворот (zoom 50–200%) */}
-        <div style={{ zoom }} className="mx-auto w-full max-w-5xl">
-
-        {/* Book Container with 3D spine shadow */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-0 bg-[#e2ded6] rounded-2xl p-2 sm:p-3 shadow-2xl border-4 border-slate-800 relative" data-tour="preview__1">
-          
-          {/* Central Gutter / Spine Shadow */}
-          <div className="hidden md:block absolute left-1/2 top-0 bottom-0 w-8 -translate-x-1/2 z-10 bg-gradient-to-r from-black/20 via-black/40 to-black/20 pointer-events-none" />
-
-          {/* Left Page */}
-          <div className="aspect-[1/1.45] bg-[#fffefc] rounded-l-xl shadow-md overflow-hidden border-r border-slate-200">
-            {renderPageContent(pages[leftPageIndex], getDisplayPageNumber(book, leftPageIndex), false)}
+        {!finalPdfUnavailable ? (
+          <div className="mx-auto w-full max-w-5xl" data-tour="preview__1">
+            <FinalPdfSpread
+              bookId={book.id}
+              format="digital"
+              currentPageIndex={currentPageIndex}
+              zoom={zoom}
+              onReady={handleFinalPdfReady}
+              onUnavailable={handleFinalPdfUnavailable}
+            />
           </div>
+        ) : (
+          <div style={{ zoom }} className="mx-auto w-full max-w-5xl">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-0 bg-[#e2ded6] rounded-2xl p-2 sm:p-3 shadow-2xl border-4 border-slate-800 relative" data-tour="preview__1">
+              <div className="hidden md:block absolute left-1/2 top-0 bottom-0 w-8 -translate-x-1/2 z-10 bg-gradient-to-r from-black/20 via-black/40 to-black/20 pointer-events-none" />
 
-          {/* Right Page */}
-          <div className="aspect-[1/1.45] bg-[#fffefc] rounded-r-xl shadow-md overflow-hidden border-l border-slate-200">
-            {rightPageIndex !== null ? (
-              renderPageContent(pages[rightPageIndex], getDisplayPageNumber(book, rightPageIndex), true)
-            ) : (
-              <div className="w-full h-full bg-[#faf9f5] flex items-center justify-center text-slate-300 text-xs italic">
-                {t('bookPreviewView.blankPage')}
+              <div className="aspect-[1/1.45] bg-[#fffefc] rounded-l-xl shadow-md overflow-hidden border-r border-slate-200">
+                {renderPageContent(pages[leftPageIndex], getDisplayPageNumber(book, leftPageIndex), false)}
               </div>
-            )}
+
+              <div className="aspect-[1/1.45] bg-[#fffefc] rounded-r-xl shadow-md overflow-hidden border-l border-slate-200">
+                {rightPageIndex !== null ? (
+                  renderPageContent(pages[rightPageIndex], getDisplayPageNumber(book, rightPageIndex), true)
+                ) : (
+                  <div className="w-full h-full bg-[#faf9f5] flex items-center justify-center text-slate-300 text-xs italic">
+                    {t('bookPreviewView.blankPage')}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
-
-        </div>
-
-        </div>
-
+        )}
       </div>
 
-      {/* Quick Jump Pagination Slider */}
-      <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 flex items-center justify-between gap-4 text-xs">
-        <span className="text-slate-400 font-mono">1</span>
-        <input
-          type="range"
-          min="0"
-          max={Math.max(0, totalBookPages - 2)}
-          step="2"
-          value={currentPageIndex}
-          onChange={(e) => setCurrentPageIndex(parseInt(e.target.value))}
-          className="flex-1 accent-cyan-400 cursor-pointer"
-          data-tour="preview__4"
-        />
-        <span className="text-slate-400 font-mono">{totalBookPages}</span>
+      {/* Quick Jump Pagination Slider + chapter landmarks */}
+      <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-3 text-xs">
+        {usingFinalPdf && finalPdfState ? (
+          <CanonicalPageNavigator
+            pageMap={finalPdfState.manifest.pageMap}
+            currentPageIndex={currentPageIndex}
+            onJump={setCurrentPageIndex}
+          />
+        ) : (
+          <PreviewChapterNavigator
+            pages={pages}
+            currentPageIndex={currentPageIndex}
+            onJump={setCurrentPageIndex}
+          />
+        )}
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-slate-400 font-mono">1</span>
+          <input
+            type="range"
+            min="0"
+            max={Math.max(0, totalBookPages - 2)}
+            step="2"
+            value={currentPageIndex}
+            onChange={(e) => setCurrentPageIndex(parseInt(e.target.value))}
+            className="flex-1 accent-cyan-400 cursor-pointer"
+            data-tour="preview__4"
+          />
+          <span className="text-slate-400 font-mono">{totalBookPages}</span>
+        </div>
       </div>
 
     </div>

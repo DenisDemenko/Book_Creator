@@ -16,6 +16,7 @@ import { ParagraphIdExtension } from './ParagraphIdExtension';
 import { CharacterMentionPlugin, type CharacterMentionEntry } from './CharacterMentionPlugin';
 import { ReadabilityHighlightPlugin } from './ReadabilityHighlightPlugin';
 import { EntityTagPlugin } from './EntityTagPlugin';
+import { JevAutoTagPlugin } from './JevAutoTagPlugin';
 import { TagPlugin } from './TagPlugin';
 import type { CoreEntity } from '../../utils/coreEntities';
 
@@ -62,7 +63,13 @@ export function buildManuscriptExtensions(
   /** Необов'язково: чи показувати сутності в канві (кнопка приховування, п. 5). */
   isEntityTagsVisible?: () => boolean,
   /** Необов'язково: мова підказок про сутності (п. 4 постановки 23.09.2026). */
-  isEnglishUi?: () => boolean
+  isEnglishUi?: () => boolean,
+  /**
+   * Необов'язково для сумісності зі старими hosts: явний id поточної книги.
+   * Потрібен JEV whole-book registry навіть коли в книзі ще немає жодного
+   * персонажа, тому identity не можна виводити лише з Character.bookId.
+   */
+  getBookId?: () => string | null | undefined,
 ) {
   return [
     StarterKit.configure({
@@ -132,6 +139,15 @@ export function buildManuscriptExtensions(
       isVisible: isEntityTagsVisible || (() => true),
       chipClass: 'nova-entity-chip',
       hiddenClass: 'nova-entity-tag-hidden',
+      isEnglishUi: isEnglishUi || (() => false),
+    }),
+    // Правий клік по виділеному тексту → JEV semantic enrichment.
+    // Кандидати обмежені вже наявними сутностями/персонажами — без генерації нових.
+    JevAutoTagPlugin.configure({
+      getCharacters: getCharacters || (() => []),
+      getBookId: getBookId || (() => null),
+      getCoreEntities: getCoreEntities || (() => []),
+      threshold: 0.65,
       isEnglishUi: isEnglishUi || (() => false),
     }),
     TagPlugin,

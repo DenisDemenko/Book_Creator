@@ -109,7 +109,7 @@ const engines = await listPdfEngines({});
 const listed = engines.find((e) => e.id === 'designcraft');
 t('DesignCraft є у переліку рушіїв', !!listed);
 t('DesignCraft у переліку доступний', listed?.available === true, listed?.reasonUk || '');
-t('DesignCraft не видає себе за KDP-рушій', listed?.supportsPrint === false);
+t('DesignCraft заявляє KDP print support', listed?.supportsPrint === true);
 
 console.log(`\nDesignCraft Gate B: ${pass} passed, ${fail} failed.`);
 if (fail) process.exit(1);

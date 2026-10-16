@@ -22,6 +22,12 @@ import type { Book } from '../types';
 
 export interface CharacterMentionEntry {
   id: string;
+  /**
+   * Не потрібен самому пошуку згадувань, але живий `book.characters`
+   * передається тим самим callback у semantic-плагіни редактора. Там
+   * `bookId` дозволяє без евристики завантажити whole-book Entity Registry.
+   */
+  bookId?: string;
   name: string;
   surname?: string;
   alias?: string;

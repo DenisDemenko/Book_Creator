@@ -7,6 +7,13 @@ import { InstructionBuilderView, type InstructionBookCreationPayload } from './I
 import { TechnicalInstructionWizard } from './TechnicalInstructionWizard';
 import type { Book, CourseV2 } from '../types';
 import { prependExpressSemanticTags } from '../utils/expressSemanticHandoff';
+import {
+  classifyBookEntitiesWithJev,
+  collectJevBookEntityCandidates,
+  prependMissingJevTags,
+  type JevEntityCandidate,
+} from '../utils/jevSemanticClient';
+import { assessHeroArcWithJev, buildHeroArcAssessmentContext } from '../utils/heroArcJevClient';
 
 /**
  * Розвилка перед експрес-майстром (Завдання 4).
@@ -40,9 +47,8 @@ function readSavedTrack(): ExpressTrackId | null {
  * Перед передачею плану в App додаємо тільки ті semantic tags, які wizard
  * знає напевно: chapter, outline та involved characters.
  *
- * JEV-enrichment навмисно не робимо тут: цей крок детермінований і не має
- * залежати від доступності зовнішньої моделі. JEV буде другим шаром поверх
- * уже коректного semantic handoff.
+ * Це перший, детермінований шар. JEV нижче працює вже ПОВЕРХ нього і не має
+ * права замінювати або повторно вигадувати ці значення.
  */
 function withDeterministicSemanticHandoff(payload: ExpressWizardPayload): ExpressWizardPayload {
   const cast = payload.cast ?? [];
@@ -56,6 +62,113 @@ function withDeterministicSemanticHandoff(payload: ExpressWizardPayload): Expres
       })),
     })),
   };
+}
+
+function collectWizardJevCandidates(payload: ExpressWizardPayload, currentBook?: Book): JevEntityCandidate[] {
+  const out = new Map<string, JevEntityCandidate>();
+
+  for (const candidate of currentBook ? collectJevBookEntityCandidates(currentBook) : []) {
+    out.set(`${candidate.slug}:${candidate.id}`, candidate);
+  }
+
+  for (const member of payload.cast ?? []) {
+    const name = `${member.firstName || ''} ${member.lastName || ''}`.replace(/\s+/g, ' ').trim();
+    const id = String(member.id || '').trim();
+    if (!id || !name) continue;
+    out.set(`character:${id}`, {
+      id,
+      slug: 'character',
+      name,
+      description: [member.psychotype, member.vedicRole, member.goal, member.hook].filter(Boolean).join(' · ') || undefined,
+    });
+  }
+
+  return Array.from(out.values());
+}
+
+/**
+ * Другий semantic layer після deterministic handoff.
+ *
+ * JEV failure ніколи не скасовує готову книгу. Semantic tagging і Hero Arc
+ * також ізольовані один від одного: якщо крива не порахувалась, уже додані
+ * сутності не втрачаються; якщо semantic tagging недоступний — Hero Arc все
+ * одно може порахуватись із синопсису/структури.
+ */
+async function withJevSemanticEnrichment(
+  payload: ExpressWizardPayload,
+  currentBook?: Book,
+): Promise<ExpressWizardPayload> {
+  let enriched: ExpressWizardPayload = payload;
+  const candidates = collectWizardJevCandidates(payload, currentBook);
+
+  if (candidates.length) {
+    try {
+      const parts = [] as NonNullable<ExpressWizardPayload['parts']>;
+      for (const part of payload.parts ?? []) {
+        const chapters = [] as NonNullable<(typeof part)['chapters']>;
+        for (const chapter of part.chapters ?? []) {
+          const summary = chapter.summary ?? '';
+          if (!summary.trim()) {
+            chapters.push(chapter);
+            continue;
+          }
+          const result = await classifyBookEntitiesWithJev(summary, candidates, 0.65);
+          chapters.push({ ...chapter, summary: prependMissingJevTags(summary, result.matches) });
+        }
+        parts.push({ ...part, chapters });
+      }
+      enriched = { ...enriched, parts };
+      window.dispatchEvent(new CustomEvent('nova:jev-wizard-enrichment', { detail: { status: 'ok' } }));
+    } catch (error) {
+      window.dispatchEvent(
+        new CustomEvent('nova:jev-wizard-enrichment', {
+          detail: { status: 'skipped', error: String((error as Error)?.message || error) },
+        }),
+      );
+    }
+  }
+
+  if (enriched.framework === 'hero_journey' && (enriched.cast?.length ?? 0) > 0) {
+    try {
+      const hero = enriched.cast![0];
+      const heroName = `${hero.firstName || ''} ${hero.lastName || ''}`.replace(/\s+/g, ' ').trim();
+      const context = buildHeroArcAssessmentContext({
+        seed: enriched.seed,
+        genre: enriched.genre,
+        synopsis: enriched.synopsis,
+        compositionPlan: enriched.compositionPlan,
+        cast: enriched.cast,
+        parts: enriched.parts,
+      });
+      if (context.trim()) {
+        const assessment = await assessHeroArcWithJev({
+          heroName,
+          context,
+          constructorAnswers: enriched.heroArc?.answers ?? {},
+        });
+        enriched = {
+          ...enriched,
+          heroArc: {
+            answers: { ...(enriched.heroArc?.answers ?? {}) },
+            intensities: assessment.intensities,
+          },
+        };
+        window.dispatchEvent(
+          new CustomEvent('nova:jev-hero-arc', {
+            detail: { status: 'ok', model: assessment.model, confidences: assessment.confidences },
+          }),
+        );
+      }
+    } catch (error) {
+      window.dispatchEvent(
+        new CustomEvent('nova:jev-hero-arc', {
+          detail: { status: 'skipped', error: String((error as Error)?.message || error) },
+        }),
+      );
+    }
+  }
+
+  return enriched;
 }
 
 const TrackCard: React.FC<{ track: ExpressTrack; onPick: (t: ExpressTrack) => void }> = ({ track, onPick }) => {
@@ -202,7 +315,10 @@ export const ExpressStartView: React.FC<{
     const active = findExpressTrack(track);
     return (
       <ExpressWizardView
-        onFinish={(payload) => onFinish?.(withDeterministicSemanticHandoff(payload))}
+        onFinish={(payload) => {
+          const deterministic = withDeterministicSemanticHandoff(payload);
+          void withJevSemanticEnrichment(deterministic, currentBook).then((enriched) => onFinish?.(enriched));
+        }}
         track={track}
         trackTitle={active?.title}
         onChangeTrack={backToChoice}
