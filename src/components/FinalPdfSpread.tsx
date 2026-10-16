@@ -65,7 +65,10 @@ const PdfPageCanvas: React.FC<PdfPageCanvasProps> = ({ document, pageNumber, zoo
         canvas.height = Math.ceil(viewport.height);
         canvas.style.aspectRatio = `${viewport.width} / ${viewport.height}`;
 
-        renderTask = page.render({ canvasContext: context, viewport });
+        // pdfjs-dist 6 requires the concrete canvas in RenderParameters in
+        // addition to its 2D context. Keeping both also makes ownership of
+        // the render target explicit for cancellation/re-rendering.
+        renderTask = page.render({ canvas, canvasContext: context, viewport });
         await renderTask.promise;
         if (!cancelled) setRenderError(null);
       } catch (err) {
@@ -118,7 +121,7 @@ export const FinalPdfSpread: React.FC<FinalPdfSpreadProps> = ({
 
   useEffect(() => {
     let cancelled = false;
-    let loadedDocument: PDFDocumentProxy | null = null;
+    let loadingTask: ReturnType<typeof getDocument> | null = null;
 
     const load = async () => {
       setLoading(true);
@@ -144,14 +147,15 @@ export const FinalPdfSpread: React.FC<FinalPdfSpreadProps> = ({
           throw new Error('PDF змінився після завантаження manifest. Оновіть розворот.');
         }
 
-        loadedDocument = await getDocument({ data: bytes }).promise;
+        loadingTask = getDocument({ data: bytes });
+        const loadedDocument = await loadingTask.promise;
         if (loadedDocument.numPages !== nextManifest.pageCount) {
           throw new Error(
             `PDF має ${loadedDocument.numPages} стор., а render manifest — ${nextManifest.pageCount}. Оновіть розворот.`,
           );
         }
         if (cancelled) {
-          await loadedDocument.destroy();
+          await loadingTask.destroy();
           return;
         }
 
@@ -171,7 +175,7 @@ export const FinalPdfSpread: React.FC<FinalPdfSpreadProps> = ({
     void load();
     return () => {
       cancelled = true;
-      if (loadedDocument) void loadedDocument.destroy();
+      if (loadingTask) void loadingTask.destroy();
     };
   }, [bookId, format, onReady, onUnavailable]);
 
