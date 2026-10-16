@@ -6,6 +6,7 @@
  */
 
 import type { PdfBookInput, PdfLayoutSpec } from '../pdfTypes';
+import type { CanonicalPageMap } from '../../../shared/canonicalPageMap';
 
 export type PdfEngineId = 'nova' | 'chromium' | 'pandoc' | 'designcraft' | 'gamma';
 
@@ -43,6 +44,11 @@ export interface PdfRenderResult {
   bytes: Uint8Array;
   pageCount: number;
   engineId: PdfEngineId;
+  /**
+   * Єдине джерело правди про пагінацію саме ЦЬОГО PDF-рендера.
+   * UI/TOC/Spread не повинні повторно рахувати сторінки з тексту книги.
+   */
+  pageMap: CanonicalPageMap;
   /** false означає, що макет Studio виконано лише частково. */
   honoredSpec: boolean;
   /** Що саме рушій зробив інакше. */
