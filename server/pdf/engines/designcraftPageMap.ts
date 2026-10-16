@@ -84,16 +84,15 @@ function exactLandmark(
  *
  *   bodyFileIndex + (printedPage - bodyStartNumber)
  *
- * The manuscript converter sorts chapters and sections by `order`; this helper
- * mirrors that exact order before assigning stable source ids. We reject the
- * map rather than guess when a heading or printed page cannot be matched.
+ * `PdfBookInput` is already normalized by `bookToPdfInput`: chapters and
+ * sections are sorted by source `order` before the renderer receives them.
+ * Keeping that array order here is therefore safer than reintroducing an
+ * `order` field that the renderer contract intentionally does not carry.
  */
 export function buildDesigncraftCanonicalPageMap(input: DesigncraftPageMapInput): CanonicalPageMap | null {
   const pageCount = Math.max(0, Math.round(Number(input.pageCount) || 0));
   const bodyStartPageIndex = Math.max(0, Math.round(input.bodyPage) - 1);
-  const chapters = (input.book.chapters || [])
-    .slice()
-    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const chapters = input.book.chapters || [];
 
   if (!pageCount || bodyStartPageIndex >= pageCount) return null;
   if (input.chapterToc.length !== chapters.length) return null;
@@ -129,9 +128,7 @@ export function buildDesigncraftCanonicalPageMap(input: DesigncraftPageMapInput)
 
     if (level !== 2 || chapterIndex < 0) continue;
     const chapter = chapters[chapterIndex];
-    const sections = (chapter.sections || [])
-      .slice()
-      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const sections = chapter.sections || [];
 
     // Untitled sections do not create Heading 2 in bookToMarkdown, so skip them.
     while (sectionIndex < sections.length && !normalizedHeading(sections[sectionIndex].title)) {
