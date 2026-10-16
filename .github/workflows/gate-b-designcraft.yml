@@ -72,6 +72,9 @@ jobs:
       - name: Express semantic handoff contract
         run: npx tsx scripts/test-expressSemanticHandoff.mts
 
+      - name: Whole-book JEV entity registry contract
+        run: npx tsx scripts/test-jevBookEntityRegistry.mts
+
       - name: Book Design UI regression contract
         run: npx tsx scripts/test-bookDesignUi.mts
 
