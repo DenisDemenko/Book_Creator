@@ -73,6 +73,8 @@ interface PdfEngineOption {
 type BookDesignLayoutConfig = BookLayoutConfig & {
   /** Book Design Studio v1. Legacy `designTheme` remains untouched. */
   bookDesignThemeId?: BookDesignThemeId;
+  /** PDF renderer chosen by the author for this concrete book. */
+  preferredPdfEngineId?: string;
 };
 
 const DEFAULT_PDF_ENGINE_ID = 'nova';
@@ -93,8 +95,9 @@ export const DesignSuggestionPanel: React.FC<Props> = ({ book, onUpdateBook }) =
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DesignResponse | null>(null);
 
+  const persistedPdfEngineId = (book.layoutConfig as BookDesignLayoutConfig).preferredPdfEngineId || DEFAULT_PDF_ENGINE_ID;
   const [pdfEngines, setPdfEngines] = useState<PdfEngineOption[]>([]);
-  const [pdfEngineId, setPdfEngineId] = useState(DEFAULT_PDF_ENGINE_ID);
+  const [pdfEngineId, setPdfEngineId] = useState(persistedPdfEngineId);
   const [pdfEnginesLoading, setPdfEnginesLoading] = useState(true);
   const [pdfPreviewLoading, setPdfPreviewLoading] = useState(false);
   const [pdfPreviewError, setPdfPreviewError] = useState<string | null>(null);
@@ -130,7 +133,10 @@ export const DesignSuggestionPanel: React.FC<Props> = ({ book, onUpdateBook }) =
         const engines = Array.isArray(body?.engines) ? (body.engines as PdfEngineOption[]) : [];
         setPdfEngines(engines);
         const requestedDefault = String(body?.defaultEngineId || DEFAULT_PDF_ENGINE_ID);
+        const preferred = (book.layoutConfig as BookDesignLayoutConfig).preferredPdfEngineId;
         setPdfEngineId((current) => {
+          const preferredItem = preferred ? engines.find((item) => item.id === preferred && item.available) : undefined;
+          if (preferredItem) return preferredItem.id;
           const currentItem = engines.find((item) => item.id === current);
           if (currentItem?.available) return current;
           const serverDefault = engines.find((item) => item.id === requestedDefault && item.available);
@@ -150,7 +156,7 @@ export const DesignSuggestionPanel: React.FC<Props> = ({ book, onUpdateBook }) =
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [book.id]);
 
   async function ask() {
     setBusy(true);
@@ -202,6 +208,17 @@ export const DesignSuggestionPanel: React.FC<Props> = ({ book, onUpdateBook }) =
     const engine = pdfEngines.find((item) => item.id === engineId);
     if (!engine?.available || pdfPreviewLoading) return;
     setPdfEngineId(engineId);
+    onUpdateBook(
+      {
+        ...book,
+        layoutConfig: {
+          ...book.layoutConfig,
+          preferredPdfEngineId: engineId,
+        } as BookDesignLayoutConfig,
+      },
+      'Зміна PDF-рушія книги',
+      `Основний PDF-рушій книги: ${engine.label}`
+    );
     setPdfPreviewError(null);
     setPdfPreviewInfo(null);
   }
