@@ -48,6 +48,9 @@ jobs:
       - name: DesignCraft KDP print contract
         run: npx tsx scripts/test-designcraftKdpEngine.mts
 
+      - name: KDP engine choice UI contract
+        run: npx tsx scripts/test-kdpEngineChoice.mts
+
       - name: Writer export RBAC contract
         run: npx tsx scripts/test-writerExportRbac.mts
 
