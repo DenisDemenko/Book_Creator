@@ -16,6 +16,7 @@ import { ParagraphIdExtension } from './ParagraphIdExtension';
 import { CharacterMentionPlugin, type CharacterMentionEntry } from './CharacterMentionPlugin';
 import { ReadabilityHighlightPlugin } from './ReadabilityHighlightPlugin';
 import { EntityTagPlugin } from './EntityTagPlugin';
+import { JevAutoTagPlugin } from './JevAutoTagPlugin';
 import { TagPlugin } from './TagPlugin';
 import type { CoreEntity } from '../../utils/coreEntities';
 
@@ -132,6 +133,14 @@ export function buildManuscriptExtensions(
       isVisible: isEntityTagsVisible || (() => true),
       chipClass: 'nova-entity-chip',
       hiddenClass: 'nova-entity-tag-hidden',
+      isEnglishUi: isEnglishUi || (() => false),
+    }),
+    // Правий клік по виділеному тексту → JEV semantic enrichment.
+    // Кандидати обмежені вже наявними сутностями/персонажами — без генерації нових.
+    JevAutoTagPlugin.configure({
+      getCharacters: getCharacters || (() => []),
+      getCoreEntities: getCoreEntities || (() => []),
+      threshold: 0.65,
       isEnglishUi: isEnglishUi || (() => false),
     }),
     TagPlugin,
