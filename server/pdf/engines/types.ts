@@ -40,20 +40,22 @@ export interface PdfRenderRequest {
   theme?: string;
 }
 
+/** Native engine result. `pageMap` may be omitted and is normalized by registry.ts. */
 export interface PdfRenderResult {
   bytes: Uint8Array;
   pageCount: number;
   engineId: PdfEngineId;
-  /**
-   * Єдине джерело правди про пагінацію саме ЦЬОГО PDF-рендера.
-   * UI/TOC/Spread не повинні повторно рахувати сторінки з тексту книги.
-   */
-  pageMap: CanonicalPageMap;
+  pageMap?: CanonicalPageMap;
   /** false означає, що макет Studio виконано лише частково. */
   honoredSpec: boolean;
   /** Що саме рушій зробив інакше. */
   notesUk: string[];
 }
+
+/** Public result: every caller receives one canonical pagination contract. */
+export type NormalizedPdfRenderResult = Omit<PdfRenderResult, 'pageMap'> & {
+  pageMap: CanonicalPageMap;
+};
 
 export interface PdfEngineAvailability {
   ok: boolean;
