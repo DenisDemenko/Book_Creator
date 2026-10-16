@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 const routeSource = await fs.readFile(new URL('../server/pdfExportRoutes.ts', import.meta.url), 'utf8');
 const routerSource = await fs.readFile(new URL('../server/pdfRoutes.ts', import.meta.url), 'utf8');
 const exportViewSource = await fs.readFile(new URL('../src/components/ExportView.tsx', import.meta.url), 'utf8');
+const kdpEngineExportSource = await fs.readFile(new URL('../src/components/KdpEngineExport.tsx', import.meta.url), 'utf8');
 
 assert.match(routeSource, /app\.post\('\/api\/pdf\/export', requireAuth/);
 assert.match(routeSource, /resolveBookPdfEngineId\(book, req\.body\?\.engineId\)/);
@@ -22,16 +23,22 @@ assert.match(routerSource, /registerPdfExportRoutes\(app\)/);
 assert.match(exportViewSource, /fetch\('\/api\/pdf\/export'/);
 assert.match(exportViewSource, /preferredPdfEngineId/);
 assert.match(exportViewSource, /handleExportServerPdf\('digital'\)/);
-assert.match(exportViewSource, /handleExportServerPdf\('print', 'nova'\)/);
-assert.match(exportViewSource, /Print PDF · явно через Nova/);
+assert.match(exportViewSource, /<KdpEngineExport/);
+assert.doesNotMatch(exportViewSource, /handleExportServerPdf\('print', 'nova'\)/, 'KDP must not hard-code Nova');
+assert.doesNotMatch(exportViewSource, /Print PDF · явно через Nova/, 'KDP must expose an explicit engine choice');
 assert.match(exportViewSource, /Legacy \/ Browser Print/);
 assert.match(exportViewSource, /const handleLegacyBrowserPrint = \(\) =>/);
 assert.match(exportViewSource, /printWindow\.print\(\)/);
 
+assert.match(kdpEngineExportSource, /supportsPrint/);
+assert.match(kdpEngineExportSource, /engineId/);
+assert.match(kdpEngineExportSource, /format:\s*'print'/);
+assert.match(kdpEngineExportSource, /fetch\('\/api\/pdf\/export'/);
+
 assert.match(
   exportViewSource,
   /onClick=\{\(\) => handleExportServerPdf\('digital'\)\}[\s\S]{0,400}data-tour="export__2"/,
-  'primary PDF tour action must call the canonical server renderer',
+  'primary digital PDF tour action must call the canonical server renderer',
 );
 assert.doesNotMatch(
   exportViewSource,
