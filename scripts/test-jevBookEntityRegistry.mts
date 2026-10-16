@@ -97,7 +97,7 @@ const book = {
         {
           id: 'section-2',
           title: 'Наслідки',
-          content: '[/organization:Рада Семи] приховує правду. [/artifact:Ключ Оріону] зникає.',
+          content: '[/group:Рада Семи] приховує правду. [/object:Ключ Оріону] зникає.',
           contentEn: '[/location:Old Harbor] is mentioned in another language.',
         },
       ],
@@ -120,8 +120,8 @@ assert(keys.has('source:research-reactor.md'), 'Knowledge Base file must be avai
 assert(keys.has('chapter:Пробудження'), 'chapter must be available');
 assert(keys.has('section:Сигнал'), 'section must be available');
 assert(keys.has('scene:Перше проникнення'), 'persisted scene must be available');
-assert(keys.has('organization:Рада Семи'), 'canonical tag in another section must be visible whole-book');
-assert(keys.has('artifact:Ключ Оріону'), 'canonical artifact tag must stay in whitelist');
+assert(keys.has('group:Рада Семи'), 'canonical group tag in another section must be visible whole-book');
+assert(keys.has('object:Ключ Оріону'), 'canonical object tag must stay in whitelist');
 assert(keys.has('location:Old Harbor'), 'canonical tag from EN manuscript must be visible');
 assert(!Array.from(keys).some((key) => key.includes('секретний меч')), 'free-form StoryLocation.objects must not be split into invented entities');
 
