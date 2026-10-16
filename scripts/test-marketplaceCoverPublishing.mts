@@ -38,7 +38,8 @@ assert.match(store, /JSON\.parse\(String\(row\.payload\)\)/);
 
 // Public cover route is intentionally unauthenticated and versionable for marketplace cards.
 assert.match(bookRoutes, /app\.get\('\/api\/public\/books\/:id\/cover'/);
-assert.match(bookRoutes, /readArtifact\(id, 'cover'/);
+assert.match(bookRoutes, /readArtifact\(req\.params\.id, 'cover', format\)/);
+assert.match(bookRoutes, /readArtifact\(req\.params\.id, 'cover', 'digital'\)/);
 assert.match(bookRoutes, /Cache-Control/);
 assert.match(bookRoutes, /public, max-age=86400/);
 assert.match(bookRoutes, /app\.post\('\/api\/books\/:id\/artifact\/cover'/);
