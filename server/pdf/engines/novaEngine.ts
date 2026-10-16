@@ -67,7 +67,7 @@ export const novaEngine: PdfEngine = {
             'Nova вже знає точні координати глав усередині pdfRenderer; їх буде піднято в цей контракт без повторної пагінації.'
           ),
           honoredSpec: true,
-          notesUk: [...kdp.warningsUk, ...kdp.notesUk],
+          notesUk: [kdp.spec.designerNoteUk || '', ...kdp.warningsUk, ...kdp.notesUk].filter(Boolean),
         };
       }
 
