@@ -25,21 +25,25 @@ jobs:
           from pathlib import Path
 
           path = Path('src/components/EditorView.tsx')
-          text = path.read_text(encoding='utf-8')
-          old = """      () => entityTagsVisibleRef.current,
-                () => langRef.current
-              ),"""
-          new = """      () => entityTagsVisibleRef.current,
-                () => langRef.current,
-                () => bookRef.current.id
-              ),"""
+          data = path.read_bytes()
+          newline = b'\r\n' if b'\r\n' in data else b'\n'
+          old = newline.join([
+              b'      () => entityTagsVisibleRef.current,',
+              b'      () => langRef.current',
+              b'    ),',
+          ])
+          new = newline.join([
+              b'      () => entityTagsVisibleRef.current,',
+              b'      () => langRef.current,',
+              b'      () => bookRef.current.id',
+              b'    ),',
+          ])
 
-          count = text.count(old)
+          count = data.count(old)
           if count != 2:
               raise SystemExit(f'Expected exactly 2 manuscript extension hosts, found {count}')
 
-          text = text.replace(old, new)
-          path.write_text(text, encoding='utf-8')
+          path.write_bytes(data.replace(old, new))
 
       - name: Commit patch
         run: |
