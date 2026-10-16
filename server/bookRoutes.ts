@@ -32,6 +32,12 @@ import {
   saveBook,
   type ArtifactFormat,
 } from './bookStore';
+import {
+  readPdfRenderManifest,
+  removePdfRenderManifest,
+  savePdfRenderManifest,
+} from './pdf/renderManifest';
+import type { CanonicalPageMap } from '../shared/canonicalPageMap';
 
 /**
  * Нижня межа розміру обкладинки — той самий захист від «успішного» порожнього
@@ -39,13 +45,35 @@ import {
  */
 const MIN_COVER_BYTES = 3000;
 
+interface BuiltPdfForManifest {
+  format: ArtifactFormat;
+  engineId: string;
+  pdf: {
+    filename: string;
+    sizeBytes: number;
+    pageCount: number | null;
+    bookRevision: number;
+    builtAt: string;
+  };
+  pageMap: CanonicalPageMap;
+}
+
+interface BuildArtifactsResult {
+  bookId: string;
+  revision: number;
+  engineId: string;
+  built: BuiltPdfForManifest[];
+}
+
 export interface BookRoutesDeps {
   /** Збирає й зберігає зверстані файли книги. Повертає опис зробленого. */
   buildArtifacts: (params: {
     bookId: string;
     variant: 'code' | 'design';
     formats: ArtifactFormat[];
+    engineId?: string;
     trimId?: string;
+    hasBleed?: boolean;
     samplePages?: number;
     withSample: boolean;
     req: Request;
@@ -201,6 +229,49 @@ export function registerBookRoutes(app: Express, deps: BookRoutesDeps): void {
     }
   });
 
+  /**
+   * Паспорт конкретного фінального PDF. Він віддається окремо від байтів,
+   * щоб «Розворот книги» міг отримати легку CanonicalPageMap, а потім
+   * завантажити САМЕ той PDF, до якого ця карта належить.
+   */
+  app.get('/api/books/:id/artifact/pdf/manifest', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const stored = await getBook(req.params.id);
+      if (!stored || (stored.ownerId && stored.ownerId !== req.principal?.id && req.principal?.role !== 'admin')) {
+        return res.status(404).json({ error: 'Книгу не знайдено.' });
+      }
+      const format: ArtifactFormat = req.query.format === 'print' ? 'print' : 'digital';
+      const pdf = await readArtifact(stored.id, 'pdf', format);
+      const manifest = await readPdfRenderManifest(stored.id, format);
+      if (!pdf || !manifest) {
+        return res.status(404).json({
+          error: 'Для цього PDF ще немає узгодженого render manifest. Перезберіть PDF.',
+          kind: 'manifest_missing',
+        });
+      }
+
+      const matchesPdf =
+        manifest.bookRevision === pdf.record.bookRevision &&
+        manifest.filename === pdf.record.filename &&
+        manifest.sizeBytes === pdf.record.sizeBytes &&
+        manifest.pageCount === pdf.record.pageCount;
+      if (!matchesPdf) {
+        return res.status(409).json({
+          error: 'Render manifest не відповідає поточному PDF. Перезберіть PDF.',
+          kind: 'manifest_mismatch',
+        });
+      }
+
+      res.json({
+        ...manifest,
+        stale: manifest.bookRevision !== stored.revision,
+        pdfUrl: `/api/books/${encodeURIComponent(stored.id)}/artifact/pdf?format=${format}`,
+      });
+    } catch (err) {
+      fail(res, err, 'Не вдалося прочитати render manifest.');
+    }
+  });
+
   /** Завантажити зверстаний файл із сервера. */
   app.get('/api/books/:id/artifact/:kind', requireAuth, async (req: Request, res: Response) => {
     try {
@@ -220,6 +291,20 @@ export function registerBookRoutes(app: Express, deps: BookRoutesDeps): void {
       res.setHeader('Content-Type', found.record.mimeType);
       res.setHeader('Content-Length', String(found.bytes.length));
       res.setHeader('X-Book-Revision', String(found.record.bookRevision));
+      if (kind === 'pdf') {
+        const manifest = await readPdfRenderManifest(stored.id, format);
+        if (
+          manifest &&
+          manifest.bookRevision === found.record.bookRevision &&
+          manifest.filename === found.record.filename &&
+          manifest.sizeBytes === found.record.sizeBytes &&
+          manifest.pageCount === found.record.pageCount
+        ) {
+          res.setHeader('X-Pdf-Engine', manifest.engineId);
+          res.setHeader('X-Pdf-PageMap-Precision', manifest.pageMap.precision);
+          res.setHeader('X-Pdf-PageMap-Source', manifest.pageMap.source);
+        }
+      }
       res.send(Buffer.from(found.bytes));
     } catch (err) {
       fail(res, err, 'Не вдалося віддати файл книги.');
@@ -284,11 +369,38 @@ export function registerBookRoutes(app: Express, deps: BookRoutesDeps): void {
         bookId: req.params.id,
         variant: req.body?.variant === 'design' ? 'design' : 'code',
         formats: formats.length ? formats : ['digital'],
+        engineId: req.body?.engineId ? String(req.body.engineId) : undefined,
         trimId: req.body?.trimId ? String(req.body.trimId) : undefined,
+        hasBleed: Boolean(req.body?.hasBleed),
         samplePages: req.body?.samplePages,
         withSample: req.body?.sample !== false,
         req,
       });
+
+      const builtResult = out as BuildArtifactsResult;
+      for (const item of builtResult.built || []) {
+        if (!item?.pdf || !item?.pageMap || item.pdf.pageCount === null) continue;
+        try {
+          await savePdfRenderManifest({
+            version: 1,
+            bookId: builtResult.bookId,
+            format: item.format,
+            bookRevision: item.pdf.bookRevision,
+            engineId: item.engineId,
+            filename: item.pdf.filename,
+            sizeBytes: item.pdf.sizeBytes,
+            pageCount: item.pdf.pageCount,
+            pageMap: item.pageMap,
+            builtAt: item.pdf.builtAt,
+          });
+        } catch (manifestErr) {
+          // PDF уже перезаписаний. Старий manifest у цей момент небезпечніший
+          // за відсутній, бо виглядав би валідною картою нового файла.
+          await removePdfRenderManifest(builtResult.bookId, item.format).catch(() => undefined);
+          throw manifestErr;
+        }
+      }
+
       res.json(out);
     } catch (err) {
       fail(res, err, 'Не вдалося зібрати файли книги.');
