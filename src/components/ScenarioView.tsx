@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { BrainCircuit, Clapperboard, Drama, Gamepad2, Sparkles } from 'lucide-react';
 import type { Book, NavigationTab } from '../types';
 import { buildAppPath } from '../utils/appRoutes';
@@ -9,6 +9,9 @@ import {
   IntegratedLeelaView,
   IntegratedMafiaView,
   IntegratedScreenplayView,
+  type ScreenplaySelectedSceneContext,
+  type StoryExperienceJevEvaluator,
+  type StoryExperienceJevRequest,
 } from './storyExperience';
 
 type StoryWorkspace = 'screenplay' | 'mafia' | 'constellation' | 'leela' | 'analysis';
@@ -18,6 +21,7 @@ interface ScenarioViewProps {
   onUpdateBook: (updatedBook: Book, logAction?: string, logDetails?: string) => void;
   onNavigateToSection: (chapterId: string, sectionId: string) => void;
   onNavigateToTab?: (tab: NavigationTab) => void;
+  onEvaluateWithJev?: StoryExperienceJevEvaluator;
   onSaveBook?: () => void;
 }
 
@@ -35,19 +39,21 @@ const workspaces: Array<{
 ];
 
 /**
- * Реальний маршрут `scenario` тепер є входом у Story & Experience Engine.
+ * Реальний маршрут `scenario` — вхід у Story & Experience Engine.
  * Старий сценарний модуль не видалено: він доступний у вкладці «Аналіз».
- * Нові workspaces використовують живий каталог AI моделей Studio та готові
- * приймати результат існуючого Jev decision layer без дублювання backend.
+ * Jev підключається через один callback `onEvaluateWithJev`, без знання API URL
+ * або дублювання adapter/key/fallback logic у фронтенді.
  */
 export const ScenarioView: React.FC<ScenarioViewProps> = ({
   book,
   onUpdateBook,
   onNavigateToSection,
   onNavigateToTab,
+  onEvaluateWithJev,
   onSaveBook,
 }) => {
   const [workspace, setWorkspace] = useState<StoryWorkspace>('screenplay');
+  const [selectedScene, setSelectedScene] = useState<ScreenplaySelectedSceneContext | null>(null);
 
   const navigateToTab = (tab: NavigationTab) => {
     if (onNavigateToTab) {
@@ -57,6 +63,56 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     const path = buildAppPath({ projectId: book.id, tab }, API_BASE);
     if (path) window.location.assign(path);
   };
+
+  const screenplayJevRequest = useMemo<StoryExperienceJevRequest | undefined>(() => {
+    if (!selectedScene) return undefined;
+    return {
+      profile: 'screenplay_story_state',
+      projectId: book.id,
+      contextId: selectedScene.sceneId,
+      state: {
+        sceneId: selectedScene.sceneId,
+        chapterId: selectedScene.chapterId,
+        sectionId: selectedScene.sectionId,
+        title: selectedScene.title,
+        summary: selectedScene.summary,
+        conflict: selectedScene.conflict,
+        location: selectedScene.location,
+        intensityScore: selectedScene.intensityScore,
+        content: selectedScene.content,
+      },
+    };
+  }, [book.id, selectedScene]);
+
+  const mafiaJevRequest = useMemo<StoryExperienceJevRequest>(() => ({
+    profile: 'mafia_gm_event',
+    projectId: book.id,
+    state: {
+      projectTitle: book.title,
+      mode: 'gm_dashboard',
+      note: 'UI shell state only. TECH layer may enrich from authoritative session state.',
+    },
+  }), [book.id, book.title]);
+
+  const constellationJevRequest = useMemo<StoryExperienceJevRequest>(() => ({
+    profile: 'constellation_session_status',
+    projectId: book.id,
+    state: {
+      projectTitle: book.title,
+      mode: 'constellation_session',
+      allowedScope: 'process_status_only',
+    },
+  }), [book.id, book.title]);
+
+  const leelaJevRequest = useMemo<StoryExperienceJevRequest>(() => ({
+    profile: 'leela_route_status',
+    projectId: book.id,
+    state: {
+      projectTitle: book.title,
+      mode: 'leela_session',
+      allowedScope: 'route_and_session_status_only',
+    },
+  }), [book.id, book.title]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-slate-950 text-slate-100" data-story-experience-hub>
@@ -96,6 +152,9 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
           <IntegratedScreenplayView
             book={book}
             preferredModelId={book.preferredAiModelId}
+            jevRequest={screenplayJevRequest}
+            onEvaluateWithJev={onEvaluateWithJev}
+            onSelectedSceneChange={setSelectedScene}
             onNavigateToSection={onNavigateToSection}
             onOpenCharacters={() => navigateToTab('characters')}
             onOpenRelationships={() => navigateToTab('core-story-graph')}
@@ -107,6 +166,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
           <IntegratedMafiaView
             projectTitle={book.title}
             preferredModelId={book.preferredAiModelId}
+            jevRequest={mafiaJevRequest}
+            onEvaluateWithJev={onEvaluateWithJev}
           />
         )}
 
@@ -114,6 +175,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
           <IntegratedConstellationView
             title={book.title}
             preferredModelId={book.preferredAiModelId}
+            jevRequest={constellationJevRequest}
+            onEvaluateWithJev={onEvaluateWithJev}
           />
         )}
 
@@ -121,6 +184,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
           <IntegratedLeelaView
             title={`${book.title} · Leela`}
             preferredModelId={book.preferredAiModelId}
+            jevRequest={leelaJevRequest}
+            onEvaluateWithJev={onEvaluateWithJev}
           />
         )}
 
