@@ -13,26 +13,37 @@ function normalizedHeading(value: unknown): string {
     .trim() || 'Розділ';
 }
 
-function pageNameIndex(inspect: DocumentInspect): Map<string, number> {
-  const out = new Map<string, number>();
+function pageNameIndexes(inspect: DocumentInspect): Map<string, number[]> {
+  const out = new Map<string, number[]>();
   for (const spread of inspect.spreads || []) {
     for (const page of spread.pages || []) {
       const index = Number(page.index);
       const name = String(page.name ?? '');
       if (!Number.isInteger(index) || index < 0 || !name) continue;
-      if (out.has(name)) {
-        throw new Error(`DesignCraft page name «${name}» is not unique; absolute semantic mapping would be ambiguous.`);
-      }
-      out.set(name, index);
+      const indexes = out.get(name) || [];
+      indexes.push(index);
+      indexes.sort((a, b) => a - b);
+      out.set(name, indexes);
     }
   }
   return out;
 }
 
+function resolvePageIndex(
+  byName: Map<string, number[]>,
+  pageName: string,
+  minIndex: number,
+  afterOrEqual: number
+): number | undefined {
+  const candidates = byName.get(pageName) || [];
+  return candidates.find((index) => index >= minIndex && index >= afterOrEqual);
+}
+
 /**
  * Convert DesignCraft's visible TOC page names into physical zero-based page
  * indices using document.inspect. This is deliberately not Number(page)-1:
- * DesignCraft page names may be roman numerals, prefixed, or section-based.
+ * DesignCraft page names may be roman numerals, prefixed, restarted, or
+ * repeated across sections/front matter.
  */
 export function buildDesigncraftSemanticPagination(input: {
   book: PdfBookInput;
@@ -41,9 +52,12 @@ export function buildDesigncraftSemanticPagination(input: {
   inspect: DocumentInspect;
   titlePageShown?: boolean;
   tocPageIndex?: number | null;
+  /** First physical page that may contain manuscript headings. */
+  contentStartPageIndex?: number;
 }): PaginationResult {
   const totalPages = Math.max(0, Math.floor(Number(input.inspect.pageCount) || 0));
-  const byName = pageNameIndex(input.inspect);
+  const byName = pageNameIndexes(input.inspect);
+  const contentStart = Math.max(0, Math.floor(Number(input.contentStartPageIndex) || 0));
   const pageMap = Array.from({ length: totalPages }, (_, pageIndex) => ({
     pageNumber: pageIndex + 1,
     pageIndex,
@@ -67,8 +81,8 @@ export function buildDesigncraftSemanticPagination(input: {
     throw new Error(`DesignCraft chapter mapping mismatch: book=${chapters.length}, toc=${input.chapterEntries.length}.`);
   }
 
-  // Pair chapter entries by final document order, but validate title equality so
-  // an unexpected TOC reorder can never silently attach the wrong stable ID.
+  const chapterPageIndexes: number[] = [];
+  let chapterFloor = contentStart;
   input.chapterEntries.forEach((entry, chapterIndex) => {
     const chapter = chapters[chapterIndex];
     if (normalizedHeading(entry.text) !== normalizedHeading(chapter.title)) {
@@ -78,8 +92,10 @@ export function buildDesigncraftSemanticPagination(input: {
       );
     }
     const pageName = String(entry.page ?? '');
-    const pageIndex = byName.get(pageName);
-    if (pageIndex == null) throw new Error(`DesignCraft chapter «${chapter.title}» points to unknown page name «${pageName}».`);
+    const pageIndex = resolvePageIndex(byName, pageName, contentStart, chapterFloor);
+    if (pageIndex == null) throw new Error(`DesignCraft chapter «${chapter.title}» points to unresolved page name «${pageName}».`);
+    chapterPageIndexes.push(pageIndex);
+    chapterFloor = pageIndex;
     mark(pageIndex, {
       pageType: 'chapter-start',
       ...(chapter.id ? { chapterId: chapter.id } : {}),
@@ -89,16 +105,17 @@ export function buildDesigncraftSemanticPagination(input: {
     });
   });
 
-  // General TOC preserves Heading 1/Heading 2 order. We walk it with the book
-  // structure, using level 1 to advance chapters and level 2 to advance that
-  // chapter's titled sections. Untitled sections do not appear in TOC.
   let chapterCursor = -1;
   let sectionCursor = 0;
+  let semanticFloor = contentStart;
   for (const entry of input.tocEntries) {
     const level = Number(entry.level);
     if (level === 1) {
       chapterCursor += 1;
       sectionCursor = 0;
+      if (chapterCursor >= 0 && chapterCursor < chapterPageIndexes.length) {
+        semanticFloor = chapterPageIndexes[chapterCursor];
+      }
       continue;
     }
     if (level !== 2 || chapterCursor < 0 || chapterCursor >= chapters.length) continue;
@@ -116,10 +133,11 @@ export function buildDesigncraftSemanticPagination(input: {
       );
     }
     const pageName = String(entry.page ?? '');
-    const pageIndex = byName.get(pageName);
+    const pageIndex = resolvePageIndex(byName, pageName, contentStart, semanticFloor);
     if (pageIndex == null) {
-      throw new Error(`DesignCraft section «${String(section.title || '')}» points to unknown page name «${pageName}».`);
+      throw new Error(`DesignCraft section «${String(section.title || '')}» points to unresolved page name «${pageName}».`);
     }
+    semanticFloor = pageIndex;
     const current = pageMap[pageIndex];
     mark(pageIndex, {
       ...(chapter.id ? { chapterId: chapter.id } : {}),
