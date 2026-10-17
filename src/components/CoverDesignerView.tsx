@@ -6,6 +6,7 @@ import {
   CoverPhysicalSpec,
   type CoverConfigWithPhysical,
 } from './cover/CoverPhysicalSpec';
+import { CoverPhysicalPreview } from './cover/CoverPhysicalPreview';
 
 export type { CoverEngine } from './CoverDesignerViewBase';
 
@@ -17,7 +18,9 @@ interface CoverDesignerViewProps {
 
 /**
  * Обгортка додає фізичні параметри друкованої обкладинки до чинного
- * дизайнера, не змінюючи його AI-генерацію та 3D-превʼю.
+ * дизайнера, не змінюючи його AI-генерацію та поля редагування.
+ * Старий декоративний dark/transparent mockup прихований лише CSS-обгорткою:
+ * його код збережено в CoverDesignerViewBase для backward compatibility.
  */
 export const CoverDesignerView: React.FC<CoverDesignerViewProps> = ({
   book,
@@ -47,8 +50,19 @@ export const CoverDesignerView: React.FC<CoverDesignerViewProps> = ({
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-slate-900">
-      <div className="shrink-0 px-4 pt-4 lg:px-6">
+    <div className="cover-designer-physical flex min-h-0 flex-1 flex-col bg-slate-900">
+      <style>{`
+        .cover-designer-physical .cover-designer-legacy [data-tour="cover__5"] { display: none !important; }
+        .cover-designer-physical .cover-designer-legacy [data-tour="cover__2"],
+        .cover-designer-physical .cover-designer-legacy [data-tour="cover__2"] + button { display: none !important; }
+      `}</style>
+
+      <div className="shrink-0 space-y-4 px-4 pt-4 lg:px-6">
+        <CoverPhysicalPreview
+          book={book}
+          cover={cover}
+          spineWidthMm={calculatedSpineMm}
+        />
         <CoverPhysicalSpec
           book={book}
           cover={cover}
@@ -56,11 +70,14 @@ export const CoverDesignerView: React.FC<CoverDesignerViewProps> = ({
           onChange={updatePhysicalCover}
         />
       </div>
-      <CoverDesignerViewBase
-        book={book}
-        onUpdateBook={onUpdateBook}
-        totalWords={totalWords}
-      />
+
+      <div className="cover-designer-legacy min-h-0 flex-1">
+        <CoverDesignerViewBase
+          book={book}
+          onUpdateBook={onUpdateBook}
+          totalWords={totalWords}
+        />
+      </div>
     </div>
   );
 };
