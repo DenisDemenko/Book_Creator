@@ -6,19 +6,83 @@ Jev is already implemented in the Studio backend. Do **not** create a second Jev
 
 The current repository already contains:
 
-- `server/ai/adapters/jev/index.ts` — real TypeSafe/System One adapter, environment/platform key resolution support, typed `choice / score / noul`, normalization and cost calculation;
-- `server/core/workflows/engine/jev.ts` — normalized `JevOutcome`, fallback to AI-2 LLM, confidence thresholds, routing, evaluator and decision-bundle behavior;
+- `server/ai/adapters/jev/index.ts` — real TypeSafe/System One adapter, typed `choice / score / noul`, normalization and cost calculation;
+- centralized `typesafeJev()` factory in `server.ts` — platform TypeSafe key first, then env key;
+- `server/core/workflows/engine/jev.ts` — normalized `JevOutcome`, confidence thresholds, routing, evaluator and decision-bundle behavior;
+- `LlmFallbackJevAdapter` — same typed questions through the existing AI-2 fallback path;
 - Graph Studio Jev workflow nodes: `JEV_CHOICE`, `JEV_SCORE`, `JEV_NOUL`, `JEV_GATE`, `JEV_ROUTER`, `JEV_EVALUATOR`, `JEV_DECISION_BUNDLE`;
 - human-review branches and model-consensus/routing rules;
 - Jev usage/cost accounting;
-- real/live verification and dedicated tests (`test:jev-nodes`, `test:jev-routes`, live Jev runs);
-- adaptive Jev director usage in the labyrinth runtime.
+- adaptive Jev usage in existing product workflows;
+- protected user-facing route pattern in `/api/maze-final/kitten` (guard/recheck/timeout/idempotency/budget/normalization).
 
-The current canonical adapter constants in the repository are server-side and must remain the source of truth. Browser code must not hold Jev API keys or call the provider directly.
+Browser code must never hold Jev API keys or call the provider directly.
+
+## Exact UX bridge added by Story & Experience
+
+The UX branch exports one transport-agnostic callback contract:
+
+```ts
+type StoryExperienceJevProfile =
+  | 'screenplay_story_state'
+  | 'mafia_gm_event'
+  | 'constellation_session_status'
+  | 'leela_route_status';
+
+interface StoryExperienceJevRequest {
+  profile: StoryExperienceJevProfile;
+  projectId: string;
+  contextId?: string;
+  state: Record<string, unknown>;
+}
+
+interface StoryExperienceJevResponse {
+  outcome: JevWorkflowOutcome;
+  review?: JevReviewState;
+}
+
+type StoryExperienceJevEvaluator = (
+  request: StoryExperienceJevRequest,
+) => Promise<StoryExperienceJevResponse>;
+```
+
+`ScenarioView` now accepts:
+
+```ts
+onEvaluateWithJev?: StoryExperienceJevEvaluator
+```
+
+The UI does not know or care whether the technical implementation uses a dedicated Story & Experience facade, an existing workflow binding, or another approved server route. It only invokes the callback and renders loading/error/result states.
+
+## TECH AGENT TASK
+
+Provide a server/client binding that supplies `onEvaluateWithJev(request)` to `ScenarioView`.
+
+Requirements:
+
+1. Reuse the existing `typesafeJev()` factory and existing normalized Jev/fallback infrastructure.
+2. Do not call `/api/core/workflow-runs` from ordinary author UX; that route is protected by workflow-control permissions.
+3. Do not allow arbitrary client-defined Jev questions. The server chooses the fixed question set from `request.profile`.
+4. Recheck the signed-in user's access to `request.projectId` and AI permission before evaluation.
+5. Apply existing timeout/retry/fallback/usage/cost rules rather than introducing parallel ones.
+6. Return the normalized `JevWorkflowOutcome` shape below plus optional `review` state.
+7. For Screenplay, treat `contextId` as the selected scene id. Current UI state includes scene title, summary, conflict, location, intensity and content.
+8. Mafia authoritative event/session data should be enriched server-side or from the existing session layer; do not trust UI placeholders as authoritative game state.
+9. Constellation profile may evaluate only neutral session/process status. No medical, psychological, therapeutic or diagnostic conclusions.
+10. Leela profile may evaluate only route/session workflow status. No objective spiritual or psychological interpretation.
+11. Jev output must never mutate canon automatically; human confirmation/product rules remain authoritative.
+
+Suggested facade shape if a dedicated route is needed:
+
+```txt
+POST /api/story-experience/jev/evaluate
+body: StoryExperienceJevRequest
+response: StoryExperienceJevResponse
+```
+
+The route name is not part of the UX contract; the callback is. If an existing approved route can satisfy the same contract safely, use it instead.
 
 ## Real normalized outcome used by UX
-
-Story & Experience UX should consume the existing normalized shape rather than inventing a parallel API:
 
 ```ts
 interface JevWorkflowAnswer {
@@ -44,7 +108,19 @@ interface JevWorkflowOutcome {
 }
 ```
 
-The UX branch now provides `JevDecisionPanel` for this real outcome shape.
+## Current UX behavior
+
+`StoryExperienceJevAction` provides the complete visual lifecycle:
+
+- disabled “Оцінити Jev” state when no technical callback is connected;
+- loading state;
+- error state;
+- result state;
+- retry/re-evaluate;
+- optional human-review action;
+- Aurora attention for fresh/review/fallback/low-confidence results.
+
+Screenplay sends the **currently selected scene** through the callback. Mafia, Constellation and Leela currently send safe workspace-level state; their authoritative session state must be enriched by the technical/session layer as those live backends are connected.
 
 ## Story & Experience placements
 
@@ -68,8 +144,6 @@ Correct flow:
 
 `Jev outcome → existing workflow/product rules → review / attention state → Aurora`
 
-`JevDecisionPanel` activates attention styling for fresh results, fallback states, low confidence, or an explicit human-review state supplied by the product/workflow layer.
-
 The backend must never depend on whether an animation is visible or acknowledged.
 
 ## Existing AI model selection
@@ -77,18 +151,6 @@ The backend must never depend on whether an animation is visible or acknowledged
 The primary generative/chat model is already provided by the Studio multi-provider layer through `/api/chat/models` and `book.preferredAiModelId`. Story & Experience UI must use that live catalog rather than a hardcoded provider list.
 
 Jev remains a separate evaluator/decision layer and is not represented as an ordinary chat model.
-
-## UX components in this branch
-
-- `AIProviderSelector` — live `/api/chat/models` catalog;
-- `AIWorkspaceToolbar` — model selection by task using real `modelId` values;
-- `StoryExperienceAiShell` — shared AI workspace wrapper;
-- `JevDecisionPanel` — real normalized Jev workflow outcome;
-- `AttentionAurora` — attention animation/state;
-- `IntegratedScreenplayView`;
-- `IntegratedMafiaView`;
-- `IntegratedConstellationView`;
-- `IntegratedLeelaView`.
 
 ## Do not duplicate
 
