@@ -12,6 +12,13 @@ export { AIProviderSelector } from './AIProviderSelector';
 export { AIWorkspaceToolbar, defaultAIWorkspaceAssignments } from './AIWorkspaceToolbar';
 export { StoryExperienceAiShell } from './StoryExperienceAiShell';
 export { JevEvaluationResultCard } from './JevEvaluationResultCard';
+export { JevDecisionPanel } from './JevDecisionPanel';
+export {
+  IntegratedScreenplayView,
+  IntegratedMafiaView,
+  IntegratedConstellationView,
+  IntegratedLeelaView,
+} from './StoryExperienceIntegratedViews';
 export type { AttentionEventKind } from './AttentionEventCard';
 export type { SessionConnectionState, SessionStatus } from './SessionHeader';
 export type { VisibilityMode } from './VisibilityControl';
@@ -20,3 +27,10 @@ export type { RelationshipNode, RelationshipEdge, RelationshipNodeKind, Relation
 export type { AIProviderId, AITaskKind, AIProviderSelection, CoreAiModelOption } from './AIProviderSelector';
 export type { AIWorkspaceAssignments } from './AIWorkspaceToolbar';
 export type { JevQuestionType, JevEvaluationResult } from './JevEvaluationResultCard';
+export type { JevDecisionSource, JevWorkflowAnswer, JevWorkflowOutcome, JevReviewState } from './JevDecisionPanel';
+export type {
+  IntegratedScreenplayViewProps,
+  IntegratedMafiaViewProps,
+  IntegratedConstellationViewProps,
+  IntegratedLeelaViewProps,
+} from './StoryExperienceIntegratedViews';
