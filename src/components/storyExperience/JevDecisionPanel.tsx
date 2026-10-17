@@ -30,6 +30,7 @@ export interface JevReviewState {
   required: boolean;
   reason?: string;
   threshold?: number;
+  needsAttention?: boolean;
 }
 
 interface JevDecisionPanelProps {
@@ -37,6 +38,7 @@ interface JevDecisionPanelProps {
   title?: string;
   fresh?: boolean;
   review?: JevReviewState;
+  needsAttention?: boolean;
   onAcknowledge?: () => void;
   onOpenWorkflow?: () => void;
   onRequestReview?: () => void;
@@ -56,6 +58,7 @@ export const JevDecisionPanel: React.FC<JevDecisionPanelProps> = ({
   title = 'Оцінка стану',
   fresh = false,
   review = { required: false },
+  needsAttention,
   onAcknowledge,
   onOpenWorkflow,
   onRequestReview,
@@ -70,17 +73,14 @@ export const JevDecisionPanel: React.FC<JevDecisionPanelProps> = ({
     return values.length ? Math.min(...values) : null;
   }, [outcome]);
 
-  const needsAttention = Boolean(
-    review.required ||
-    fresh ||
-    outcome?.fallbackReason ||
-    (minConfidence != null && minConfidence < 0.6),
+  const attentionActive = Boolean(
+    needsAttention ?? review.needsAttention ?? review.required ?? fresh,
   );
 
   if (!outcome) return null;
 
   return (
-    <AttentionAurora active={needsAttention} intensity={review.required ? 'strong' : 'soft'}>
+    <AttentionAurora active={attentionActive} intensity={review.required ? 'strong' : 'soft'}>
       <section className="rounded-2xl border border-violet-500/25 bg-slate-950 p-4 text-slate-100" data-story-experience="jev-decision-panel" data-jev-source={outcome.source}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex min-w-0 items-start gap-3">
