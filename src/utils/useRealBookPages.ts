@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Book } from '../types';
 import { buildBookPages, renderSectionBlocksHtml, type BookPage } from './helpers';
+import { normalizeHtmlImageSources } from './assetUrl';
 import { measureBookPreview, type PreviewMeasurement } from './previewPagination';
 
 /** Debounced, media-aware browser pagination. Each snapshot has its own DOM
@@ -9,7 +10,9 @@ export function useBookPreviewMeasurement(book: Book): PreviewMeasurement & { me
   const [result, setResult] = useState<PreviewMeasurement & { measuring: boolean }>(() => ({
     pages: buildBookPages(book, (section, chapter, chapterIndex) => section.content.trim() ? [{
       type: 'body-page', title: section.title, chapterId: chapter.id, sectionId: section.id, chapterIndex,
-      content: renderSectionBlocksHtml(section.content, book, (book.footnotes || []).filter(f => f.sectionId === section.id), book.footnotes || []),
+      content: normalizeHtmlImageSources(
+        renderSectionBlocksHtml(section.content, book, (book.footnotes || []).filter(f => f.sectionId === section.id), book.footnotes || [])
+      ),
     }] : []), pendingImages: 0, failedImages: 0, measuring: true,
   }));
   useEffect(() => {
