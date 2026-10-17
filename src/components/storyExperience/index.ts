@@ -4,6 +4,7 @@ export { ConstellationSessionView } from './ConstellationSessionView';
 export { LeelaSessionView } from './LeelaSessionView';
 export { SessionHeader } from './SessionHeader';
 export { SessionRecoveryNotice } from './SessionRecoveryNotice';
+export { SessionLobbyView } from './SessionLobbyView';
 export { AttentionAurora } from './AttentionAurora';
 export { AttentionEventCard } from './AttentionEventCard';
 export { VisibilityControl } from './VisibilityControl';
@@ -24,6 +25,7 @@ export {
 } from './StoryExperienceIntegratedViews';
 export type { AttentionEventKind } from './AttentionEventCard';
 export type { SessionConnectionState, SessionStatus } from './SessionHeader';
+export type { LobbyParticipantStatus, LobbyParticipant, SessionLobbyViewProps } from './SessionLobbyView';
 export type { VisibilityMode } from './VisibilityControl';
 export type { PreviewRole } from './PreviewAsRole';
 export type { ParticipantSessionKind, ParticipantSessionPreviewProps } from './ParticipantSessionPreview';
