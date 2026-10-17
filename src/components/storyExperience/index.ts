@@ -13,6 +13,7 @@ export { AIWorkspaceToolbar, defaultAIWorkspaceAssignments } from './AIWorkspace
 export { StoryExperienceAiShell } from './StoryExperienceAiShell';
 export { JevEvaluationResultCard } from './JevEvaluationResultCard';
 export { JevDecisionPanel } from './JevDecisionPanel';
+export { StoryExperienceJevAction } from './StoryExperienceJevAction';
 export {
   IntegratedScreenplayView,
   IntegratedMafiaView,
@@ -28,6 +29,13 @@ export type { AIProviderId, AITaskKind, AIProviderSelection, CoreAiModelOption }
 export type { AIWorkspaceAssignments } from './AIWorkspaceToolbar';
 export type { JevQuestionType, JevEvaluationResult } from './JevEvaluationResultCard';
 export type { JevDecisionSource, JevWorkflowAnswer, JevWorkflowOutcome, JevReviewState } from './JevDecisionPanel';
+export type { ScreenplaySelectedSceneContext } from './ScreenplayWorkspaceView';
+export type {
+  StoryExperienceJevProfile,
+  StoryExperienceJevRequest,
+  StoryExperienceJevResponse,
+  StoryExperienceJevEvaluator,
+} from './StoryExperienceJevAction';
 export type {
   IntegratedScreenplayViewProps,
   IntegratedMafiaViewProps,
