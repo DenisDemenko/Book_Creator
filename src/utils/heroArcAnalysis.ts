@@ -20,6 +20,8 @@ export interface HeroArcAnalysis {
 }
 
 export type HeroArcStateWithAnalysis = HeroArcState & {
+  /** Stable CharacterID selected by the author. Never inferred from cast order. */
+  selectedHeroId?: string;
   analysis?: HeroArcAnalysis;
 };
 
