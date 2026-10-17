@@ -5,13 +5,20 @@ import { MafiaGameMasterView } from './MafiaGameMasterView';
 import { ConstellationSessionView } from './ConstellationSessionView';
 import { LeelaSessionView } from './LeelaSessionView';
 import { StoryExperienceAiShell } from './StoryExperienceAiShell';
-import { JevDecisionPanel, type JevReviewState, type JevWorkflowOutcome } from './JevDecisionPanel';
+import type { JevReviewState, JevWorkflowOutcome } from './JevDecisionPanel';
+import {
+  StoryExperienceJevAction,
+  type StoryExperienceJevEvaluator,
+  type StoryExperienceJevRequest,
+} from './StoryExperienceJevAction';
 import type { AIWorkspaceAssignments } from './AIWorkspaceToolbar';
 
 interface SharedIntegratedProps {
   preferredModelId?: string;
   aiAssignments?: AIWorkspaceAssignments;
   onAiAssignmentsChange?: (next: AIWorkspaceAssignments) => void;
+  jevRequest?: StoryExperienceJevRequest;
+  onEvaluateWithJev?: StoryExperienceJevEvaluator;
   jevOutcome?: JevWorkflowOutcome | null;
   jevFresh?: boolean;
   jevReview?: JevReviewState;
@@ -20,30 +27,31 @@ interface SharedIntegratedProps {
   onRequestJevReview?: () => void;
 }
 
-const JevSlot: React.FC<SharedIntegratedProps & { title: string }> = ({
+const JevSlot: React.FC<SharedIntegratedProps & { title: string; hint: string }> = ({
   title,
+  hint,
+  jevRequest,
+  onEvaluateWithJev,
   jevOutcome,
   jevFresh,
   jevReview,
   onJevAcknowledge,
   onOpenJevWorkflow,
   onRequestJevReview,
-}) => {
-  if (!jevOutcome) return null;
-  return (
-    <div className="border-b border-slate-800 bg-slate-950 px-4 py-3 lg:px-6">
-      <JevDecisionPanel
-        outcome={jevOutcome}
-        title={title}
-        fresh={jevFresh}
-        review={jevReview}
-        onAcknowledge={onJevAcknowledge}
-        onOpenWorkflow={onOpenJevWorkflow}
-        onRequestReview={onRequestJevReview}
-      />
-    </div>
-  );
-};
+}) => (
+  <StoryExperienceJevAction
+    title={title}
+    hint={hint}
+    request={jevRequest}
+    onEvaluate={onEvaluateWithJev}
+    outcome={jevOutcome}
+    fresh={jevFresh}
+    review={jevReview}
+    onAcknowledge={onJevAcknowledge}
+    onOpenWorkflow={onOpenJevWorkflow}
+    onRequestReview={onRequestJevReview}
+  />
+);
 
 export interface IntegratedScreenplayViewProps extends SharedIntegratedProps {
   book: Book;
@@ -51,6 +59,17 @@ export interface IntegratedScreenplayViewProps extends SharedIntegratedProps {
   onOpenCharacters?: () => void;
   onOpenRelationships?: () => void;
   onOpenDiagnostics?: () => void;
+  onSelectedSceneChange?: (scene: {
+    sceneId: string;
+    chapterId: string;
+    sectionId: string;
+    title: string;
+    summary: string;
+    conflict: string;
+    location: string;
+    intensityScore: number;
+    content: string;
+  } | null) => void;
   className?: string;
 }
 
@@ -60,6 +79,8 @@ export const IntegratedScreenplayView: React.FC<IntegratedScreenplayViewProps> =
   preferredModelId = book.preferredAiModelId,
   aiAssignments,
   onAiAssignmentsChange,
+  jevRequest,
+  onEvaluateWithJev,
   jevOutcome,
   jevFresh,
   jevReview,
@@ -76,6 +97,9 @@ export const IntegratedScreenplayView: React.FC<IntegratedScreenplayViewProps> =
   >
     <JevSlot
       title="Jev · оцінка сцени та драматургічного стану"
+      hint="Оцінюється поточна сцена. Jev не змінює текст і не записує результат у канон без дії автора."
+      jevRequest={jevRequest}
+      onEvaluateWithJev={onEvaluateWithJev}
       jevOutcome={jevOutcome}
       jevFresh={jevFresh}
       jevReview={jevReview}
@@ -97,6 +121,8 @@ export const IntegratedMafiaView: React.FC<IntegratedMafiaViewProps> = ({
   preferredModelId,
   aiAssignments,
   onAiAssignmentsChange,
+  jevRequest,
+  onEvaluateWithJev,
   jevOutcome,
   jevFresh,
   jevReview,
@@ -112,6 +138,9 @@ export const IntegratedMafiaView: React.FC<IntegratedMafiaViewProps> = ({
   >
     <JevSlot
       title="Jev · пріоритет події та увага ведучого"
+      hint="Jev оцінює лише статус і пріоритет події для GM. Остаточне рішення залишається за ведучим."
+      jevRequest={jevRequest}
+      onEvaluateWithJev={onEvaluateWithJev}
       jevOutcome={jevOutcome}
       jevFresh={jevFresh}
       jevReview={jevReview}
@@ -136,6 +165,8 @@ export const IntegratedConstellationView: React.FC<IntegratedConstellationViewPr
   preferredModelId,
   aiAssignments,
   onAiAssignmentsChange,
+  jevRequest,
+  onEvaluateWithJev,
   jevOutcome,
   jevFresh,
   jevReview,
@@ -151,6 +182,9 @@ export const IntegratedConstellationView: React.FC<IntegratedConstellationViewPr
   >
     <JevSlot
       title="Jev · процесний статус сесії"
+      hint="Лише нейтральні процесні сигнали: етап, пауза, завершення, потреба уваги. Без психологічної чи медичної діагностики."
+      jevRequest={jevRequest}
+      onEvaluateWithJev={onEvaluateWithJev}
       jevOutcome={jevOutcome}
       jevFresh={jevFresh}
       jevReview={jevReview}
@@ -174,6 +208,8 @@ export const IntegratedLeelaView: React.FC<IntegratedLeelaViewProps> = ({
   preferredModelId,
   aiAssignments,
   onAiAssignmentsChange,
+  jevRequest,
+  onEvaluateWithJev,
   jevOutcome,
   jevFresh,
   jevReview,
@@ -189,6 +225,9 @@ export const IntegratedLeelaView: React.FC<IntegratedLeelaViewProps> = ({
   >
     <JevSlot
       title="Jev · процесний статус маршруту"
+      hint="Оцінюється лише стан маршруту/сесії. Jev не дає об’єктивних духовних чи психологічних трактувань."
+      jevRequest={jevRequest}
+      onEvaluateWithJev={onEvaluateWithJev}
       jevOutcome={jevOutcome}
       jevFresh={jevFresh}
       jevReview={jevReview}
