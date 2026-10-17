@@ -3,6 +3,7 @@ export { MafiaGameMasterView } from './MafiaGameMasterView';
 export { ConstellationSessionView } from './ConstellationSessionView';
 export { LeelaSessionView } from './LeelaSessionView';
 export { SessionHeader } from './SessionHeader';
+export { SessionRecoveryNotice } from './SessionRecoveryNotice';
 export { AttentionAurora } from './AttentionAurora';
 export { AttentionEventCard } from './AttentionEventCard';
 export { VisibilityControl } from './VisibilityControl';
