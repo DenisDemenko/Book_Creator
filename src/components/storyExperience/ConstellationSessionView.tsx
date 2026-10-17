@@ -53,20 +53,42 @@ export const ConstellationSessionView: React.FC<{ title?: string }> = ({ title =
         </div>
       </header>
 
-      <div className="mb-4 flex gap-2 overflow-x-auto pb-1">
+      <nav className="mb-4 flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Етапи сесії">
         {stages.map((item, index) => (
-          <button key={item} type="button" onClick={() => setStage(index)} className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-[11px] font-semibold ${stage === index ? 'border-cyan-400/60 bg-cyan-500/15 text-cyan-100' : 'border-slate-800 bg-slate-900 text-slate-500'}`}>{index + 1}. {item}</button>
+          <button
+            key={item}
+            type="button"
+            role="tab"
+            aria-selected={stage === index}
+            onClick={() => setStage(index)}
+            className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-[11px] font-semibold ${stage === index ? 'border-cyan-400/60 bg-cyan-500/15 text-cyan-100' : 'border-slate-800 bg-slate-900 text-slate-500'}`}
+          >
+            {index + 1}. {item}
+          </button>
         ))}
-      </div>
+      </nav>
+
+      {stage === 6 && (
+        <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 sm:flex-row sm:items-center sm:justify-between" role="status">
+          <div className="flex items-start gap-3">
+            <UsersRound className="mt-0.5 h-5 w-5 shrink-0 text-amber-200" />
+            <div>
+              <div className="text-sm font-bold text-amber-50">Вихід з ролей</div>
+              <p className="mt-1 text-xs leading-5 text-amber-100/75">Перед завершенням сесії кожен учасник має явно вийти зі своєї ролі. Цей крок не ховається в меню і не пропускається автоматично.</p>
+            </div>
+          </div>
+          <button type="button" onClick={() => setStage(7)} className="shrink-0 rounded-xl bg-amber-100 px-4 py-2 text-xs font-bold text-slate-950">Завершити вихід з ролей</button>
+        </div>
+      )}
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
         <div>
-          <div className="relative h-[640px] overflow-hidden rounded-2xl border border-slate-800 bg-slate-900" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(71,85,105,.38) 1px, transparent 0)', backgroundSize: '24px 24px' }}>
+          <div className="relative h-[62vh] min-h-[460px] max-h-[680px] overflow-hidden rounded-2xl border border-slate-800 bg-slate-900" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(71,85,105,.38) 1px, transparent 0)', backgroundSize: '24px 24px' }}>
             <div className="absolute left-3 top-3 z-10 flex gap-1 rounded-xl border border-slate-800 bg-slate-950/90 p-1 shadow-xl">
-              <button type="button" className="rounded-lg px-2 py-1.5 text-xs text-slate-400 hover:bg-slate-800">−</button>
-              <button type="button" className="rounded-lg px-2 py-1.5 text-[11px] font-semibold text-slate-300">100%</button>
-              <button type="button" className="rounded-lg px-2 py-1.5 text-xs text-slate-400 hover:bg-slate-800">＋</button>
-              <button type="button" className="rounded-lg px-2 py-1.5 text-slate-400 hover:bg-slate-800" title="Вмістити поле"><Maximize2 className="h-3.5 w-3.5" /></button>
+              <button type="button" aria-label="Зменшити масштаб" className="rounded-lg px-2 py-1.5 text-xs text-slate-400 hover:bg-slate-800">−</button>
+              <button type="button" aria-label="Поточний масштаб 100 відсотків" className="rounded-lg px-2 py-1.5 text-[11px] font-semibold text-slate-300">100%</button>
+              <button type="button" aria-label="Збільшити масштаб" className="rounded-lg px-2 py-1.5 text-xs text-slate-400 hover:bg-slate-800">＋</button>
+              <button type="button" aria-label="Вмістити все поле" className="rounded-lg px-2 py-1.5 text-slate-400 hover:bg-slate-800" title="Вмістити поле"><Maximize2 className="h-3.5 w-3.5" /></button>
             </div>
 
             {figures.map((figure) => (
@@ -74,15 +96,17 @@ export const ConstellationSessionView: React.FC<{ title?: string }> = ({ title =
                 type="button"
                 key={figure.id}
                 onClick={() => setSelectedId(figure.id)}
-                className={`absolute grid h-20 w-20 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border text-center text-[10px] font-bold shadow-2xl transition ${selectedId === figure.id ? 'border-cyan-300 bg-cyan-500/15 text-cyan-50 ring-4 ring-cyan-500/10' : 'border-slate-600 bg-slate-800 text-slate-200 hover:border-slate-500'}`}
+                aria-pressed={selectedId === figure.id}
+                aria-label={`${figure.label}, ${figure.state}, напрям ${figure.rotation} градусів`}
+                className={`absolute grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border text-center text-[10px] font-bold shadow-2xl transition sm:h-20 sm:w-20 ${selectedId === figure.id ? 'border-cyan-300 bg-cyan-500/15 text-cyan-50 ring-4 ring-cyan-500/10' : 'border-slate-600 bg-slate-800 text-slate-200 hover:border-slate-500'}`}
                 style={{ left: `${figure.x}%`, top: `${figure.y}%` }}
               >
-                <span className="absolute -top-5 text-cyan-300" style={{ transform: `rotate(${figure.rotation}deg)` }}>▲</span>
+                <span className="absolute -top-5 text-cyan-300" style={{ transform: `rotate(${figure.rotation}deg)` }} aria-hidden="true">▲</span>
                 <span>{figure.label}</span>
               </button>
             ))}
 
-            <div className="absolute bottom-3 right-3 h-24 w-36 rounded-xl border border-slate-700 bg-slate-950/90 p-2 shadow-xl">
+            <div className="absolute bottom-3 right-3 hidden h-24 w-36 rounded-xl border border-slate-700 bg-slate-950/90 p-2 shadow-xl sm:block" aria-hidden="true">
               <div className="text-[9px] font-bold uppercase tracking-wide text-slate-600">Мінікарта</div>
               <div className="relative mt-2 h-14 rounded-md bg-slate-900">
                 {figures.map((figure) => <span key={figure.id} className="absolute h-2 w-2 rounded-full bg-slate-500" style={{ left: `${figure.x}%`, top: `${figure.y}%` }} />)}
@@ -90,7 +114,7 @@ export const ConstellationSessionView: React.FC<{ title?: string }> = ({ title =
             </div>
           </div>
 
-          <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+          <div className="mt-3 flex gap-2 overflow-x-auto pb-1" aria-label="Snapshots сесії">
             {snapshots.map((time, index) => (
               <button key={`${time}-${index}`} type="button" className={`min-w-28 rounded-xl border p-3 text-left ${index === snapshots.length - 1 ? 'border-cyan-500/50 bg-cyan-500/10' : 'border-slate-800 bg-slate-900'}`}><div className="text-[10px] font-bold text-slate-300">Snapshot {String(index + 1).padStart(2, '0')}</div><div className="mt-1 text-[10px] text-slate-500">{time}</div></button>
             ))}
