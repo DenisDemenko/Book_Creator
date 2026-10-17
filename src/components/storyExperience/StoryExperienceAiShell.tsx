@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AIWorkspaceToolbar, type AIWorkspaceAssignments, defaultAIWorkspaceAssignments } from './AIWorkspaceToolbar';
 
 interface StoryExperienceAiShellProps {
@@ -9,6 +9,14 @@ interface StoryExperienceAiShellProps {
   value?: AIWorkspaceAssignments;
   onChange?: (next: AIWorkspaceAssignments) => void;
 }
+
+const assignmentsForPreferred = (preferredModelId?: string): AIWorkspaceAssignments => ({
+  ...defaultAIWorkspaceAssignments,
+  chat: { primary: preferredModelId || '', evaluator: null },
+  generate: { primary: preferredModelId || '', evaluator: null },
+  analyze: { primary: preferredModelId || '', evaluator: 'jev' },
+  evaluate: { primary: preferredModelId || '', evaluator: 'jev' },
+});
 
 /**
  * Спільна UX-обгортка для Screenplay / Mafia / Constellation / Leela.
@@ -26,13 +34,31 @@ export const StoryExperienceAiShell: React.FC<StoryExperienceAiShellProps> = ({
   value,
   onChange,
 }) => {
-  const [localValue, setLocalValue] = useState<AIWorkspaceAssignments>(() => ({
-    ...defaultAIWorkspaceAssignments,
-    chat: { primary: preferredModelId || '', evaluator: null },
-    generate: { primary: preferredModelId || '', evaluator: null },
-    analyze: { primary: preferredModelId || '', evaluator: 'jev' },
-    evaluate: { primary: preferredModelId || '', evaluator: 'jev' },
-  }));
+  const [localValue, setLocalValue] = useState<AIWorkspaceAssignments>(() => assignmentsForPreferred(preferredModelId));
+  const previousPreferredRef = useRef(preferredModelId || '');
+
+  useEffect(() => {
+    const nextPreferred = preferredModelId || '';
+    const previousPreferred = previousPreferredRef.current;
+
+    if (!value && nextPreferred !== previousPreferred) {
+      setLocalValue((current) => {
+        const syncPrimary = (selection: AIWorkspaceAssignments[keyof AIWorkspaceAssignments]) =>
+          selection.primary === '' || selection.primary === previousPreferred
+            ? { ...selection, primary: nextPreferred }
+            : selection;
+
+        return {
+          chat: syncPrimary(current.chat),
+          generate: syncPrimary(current.generate),
+          analyze: syncPrimary(current.analyze),
+          evaluate: syncPrimary(current.evaluate),
+        };
+      });
+    }
+
+    previousPreferredRef.current = nextPreferred;
+  }, [preferredModelId, value]);
 
   const assignments = value || localValue;
 
