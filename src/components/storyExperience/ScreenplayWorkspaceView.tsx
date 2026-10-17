@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlignLeft,
   ArrowRight,
@@ -29,12 +29,25 @@ interface SceneItem {
   content: string;
 }
 
+export interface ScreenplaySelectedSceneContext {
+  sceneId: string;
+  chapterId: string;
+  sectionId: string;
+  title: string;
+  summary: string;
+  conflict: string;
+  location: string;
+  intensityScore: number;
+  content: string;
+}
+
 interface ScreenplayWorkspaceViewProps {
   book: Book;
   onNavigateToSection?: (chapterId: string, sectionId: string) => void;
   onOpenCharacters?: () => void;
   onOpenRelationships?: () => void;
   onOpenDiagnostics?: () => void;
+  onSelectedSceneChange?: (scene: ScreenplaySelectedSceneContext | null) => void;
   className?: string;
 }
 
@@ -52,6 +65,7 @@ export const ScreenplayWorkspaceView: React.FC<ScreenplayWorkspaceViewProps> = (
   onOpenCharacters,
   onOpenRelationships,
   onOpenDiagnostics,
+  onSelectedSceneChange,
   className = '',
 }) => {
   const [mode, setMode] = useState<WorkspaceMode>('text');
@@ -85,6 +99,26 @@ export const ScreenplayWorkspaceView: React.FC<ScreenplayWorkspaceViewProps> = (
   }, [query, scenes]);
 
   const selected = scenes.find((item) => item.scene.id === selectedSceneId) || filteredScenes[0] || scenes[0] || null;
+
+  useEffect(() => {
+    if (!onSelectedSceneChange) return;
+    if (!selected) {
+      onSelectedSceneChange(null);
+      return;
+    }
+    onSelectedSceneChange({
+      sceneId: selected.scene.id,
+      chapterId: selected.chapterId,
+      sectionId: selected.sectionId,
+      title: selected.scene.title || selected.sectionTitle,
+      summary: selected.scene.summary || '',
+      conflict: selected.scene.conflict || '',
+      location: selected.scene.location || '',
+      intensityScore: selected.scene.intensityScore ?? 0,
+      content: selected.content || '',
+    });
+  }, [onSelectedSceneChange, selected?.scene.id, selected?.scene.title, selected?.scene.summary, selected?.scene.conflict, selected?.scene.location, selected?.scene.intensityScore, selected?.content, selected?.chapterId, selected?.sectionId, selected?.sectionTitle]);
+
   const selectScene = (item: SceneItem) => setSelectedSceneId(item.scene.id);
   const openInText = (item: SceneItem) => {
     setSelectedSceneId(item.scene.id);
