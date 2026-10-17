@@ -116,7 +116,10 @@ export const AuthoritativePdfPreview: React.FC<AuthoritativePdfPreviewProps> = (
       if (currentUrl.current) URL.revokeObjectURL(currentUrl.current);
       currentUrl.current = nextUrl;
       setPdfUrl(nextUrl);
-      setPageCount(Number(response.headers.get('X-Pdf-Pages') || 0) || null);
+
+      const pdfPageCount = Number(response.headers.get('X-Pdf-Pages') || 0) || null;
+      const pdfEngineId = response.headers.get('X-Pdf-Engine') || engineId;
+      setPageCount(pdfPageCount);
       setMappingLevel(response.headers.get('X-Pdf-Mapping-Level') || 'physical-only');
       setAuthoritative(response.headers.get('X-Pdf-Authoritative') === '1');
       setRenderedSignature(targetSignature);
@@ -137,12 +140,31 @@ export const AuthoritativePdfPreview: React.FC<AuthoritativePdfPreviewProps> = (
         if (!nextPagination || !Array.isArray(nextPagination.pageMap)) {
           throw new Error('сервер не повернув PaginationResult');
         }
+
+        // PDF bytes and pagination metadata are rendered by two requests today.
+        // Never attach semantic milestones to the visible PDF unless the two
+        // independent renders at least agree on engine and physical page count.
+        if (nextPagination.engineId !== pdfEngineId) {
+          throw new Error(
+            `metadata належить рушію ${nextPagination.engineId}, а PDF створив ${pdfEngineId}`
+          );
+        }
+        if (pdfPageCount != null && nextPagination.totalPages !== pdfPageCount) {
+          throw new Error(
+            `metadata має ${nextPagination.totalPages} стор., а PDF має ${pdfPageCount}`
+          );
+        }
+
         setPagination(nextPagination);
         setPageCount(nextPagination.totalPages || Number(metadata?.pageCount || 0) || null);
         setMappingLevel(nextPagination.mappingLevel || 'physical-only');
         setAuthoritative(nextPagination.exportAuthoritative === true);
       } catch (metadataError) {
         setPagination(null);
+        // Physical PDF is still valid, but semantic metadata must not be shown
+        // as authoritative when the second render drifted or failed.
+        setMappingLevel('physical-only');
+        setAuthoritative(response.headers.get('X-Pdf-Authoritative') === '1');
         setPaginationWarning(
           `PDF створено, але карту сторінок не отримано: ${metadataError instanceof Error ? metadataError.message : 'невідома помилка'}.`
         );
