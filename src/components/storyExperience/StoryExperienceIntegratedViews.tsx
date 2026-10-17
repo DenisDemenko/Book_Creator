@@ -8,6 +8,7 @@ import { StoryExperienceAiShell } from './StoryExperienceAiShell';
 import { ParticipantSessionPreview, type ParticipantSessionKind } from './ParticipantSessionPreview';
 import { SessionHeader, type SessionConnectionState, type SessionStatus } from './SessionHeader';
 import { SessionLobbyView, type LobbyParticipant } from './SessionLobbyView';
+import { SessionCompletionView } from './SessionCompletionView';
 import type { VisibilityMode } from './VisibilityControl';
 import type { JevReviewState, JevWorkflowOutcome } from './JevDecisionPanel';
 import {
@@ -177,12 +178,14 @@ export const IntegratedMafiaView: React.FC<IntegratedMafiaViewProps> = (props) =
   return (
     <StoryExperienceAiShell preferredModelId={props.preferredModelId} value={props.aiAssignments} onChange={props.onAiAssignmentsChange} contextLabel="AI · Mafia Story Studio">
       <JevSlot title="Jev · пріоритет події та увага ведучого" hint="Jev оцінює лише статус і пріоритет події для GM. Остаточне рішення залишається за ведучим." {...props} />
-      <SessionModeratorBar title={title} phase={status === 'lobby' ? 'Lobby' : 'Investigation'} status={status} connection={connection} participants={8} onStatusChange={setStatus} />
+      <SessionModeratorBar title={title} phase={status === 'lobby' ? 'Lobby' : status === 'completed' ? 'Завершено' : 'Investigation'} status={status} connection={connection} participants={8} onStatusChange={setStatus} />
       <PreviewToggle active={preview} label="Переглянути як гравець" connection={connection} onConnectionChange={setConnection} onClick={() => setPreview((value) => !value)} />
       {preview ? (
-        <SessionPreviewFlow kind="mafia" title={title} phase={status === 'lobby' ? 'Lobby' : 'Investigation'} roleLabel="Архівіст" visibility="ROLE_BASED" primaryTitle="Зникло світло у східному крилі" primaryText="Світло згасло. Ви можете перевірити архівну кімнату або залишитися з групою." secondaryText="Доказ E-04 ще не відкритий для вашої ролі." actionLabel="Перевірити доступну дію" status={status} connection={connection} onStatusChange={setStatus} onConnectionChange={setConnection} />
+        <SessionPreviewFlow kind="mafia" title={title} phase={status === 'lobby' ? 'Lobby' : status === 'completed' ? 'Завершено' : 'Investigation'} roleLabel="Архівіст" visibility="ROLE_BASED" primaryTitle="Зникло світло у східному крилі" primaryText="Світло згасло. Ви можете перевірити архівну кімнату або залишитися з групою." secondaryText="Доказ E-04 ще не відкритий для вашої ролі." actionLabel="Перевірити доступну дію" status={status} connection={connection} onStatusChange={setStatus} onConnectionChange={setConnection} />
       ) : status === 'lobby' ? (
         <SessionLobbyView title={title} participants={mafiaLobbyParticipants} minReady={3} visibility="ROLE_BASED" joinCode="MAF-4821" onStart={() => setStatus('live')} />
+      ) : status === 'completed' ? (
+        <SessionCompletionView title={title} kindLabel="Mafia Story Session" participantCount={8} summaryItems={['Події та голосування завершено', 'Фінальний стан ролей зафіксовано', 'Participant view переведено у read-only completed state']} onReturnToProject={() => setStatus('live')} onCreateNextSession={() => { setPreview(false); setConnection('online'); setStatus('lobby'); }} />
       ) : <MafiaGameMasterView projectTitle={props.projectTitle} />}
     </StoryExperienceAiShell>
   );
@@ -197,12 +200,14 @@ export const IntegratedConstellationView: React.FC<IntegratedConstellationViewPr
   return (
     <StoryExperienceAiShell preferredModelId={props.preferredModelId} value={props.aiAssignments} onChange={props.onAiAssignmentsChange} contextLabel="AI · Constellation Studio">
       <JevSlot title="Jev · процесний статус сесії" hint="Лише нейтральні процесні сигнали: етап, пауза, завершення, потреба уваги. Без психологічної чи медичної діагностики." {...props} />
-      <SessionModeratorBar title={title} phase={status === 'lobby' ? 'Lobby' : 'Розстановка'} status={status} connection={connection} participants={4} onStatusChange={setStatus} />
+      <SessionModeratorBar title={title} phase={status === 'lobby' ? 'Lobby' : status === 'completed' ? 'Завершено' : 'Розстановка'} status={status} connection={connection} participants={4} onStatusChange={setStatus} />
       <PreviewToggle active={preview} label="Переглянути як учасник" connection={connection} onConnectionChange={setConnection} onClick={() => setPreview((value) => !value)} />
       {preview ? (
-        <SessionPreviewFlow kind="constellation" title={title} phase={status === 'lobby' ? 'Lobby' : 'Розстановка'} roleLabel="Представник" visibility="ROLE_BASED" primaryTitle="Залишайтеся у своїй позиції" primaryText="Спостерігайте за напрямком і дистанцією. Якщо потрібно, ви можете поставити сесію на паузу." secondaryText="Нотатки фасилітатора та дані інших учасників не показуються." exitLabel="Вийти з ролі" status={status} connection={connection} onStatusChange={setStatus} onConnectionChange={setConnection} />
+        <SessionPreviewFlow kind="constellation" title={title} phase={status === 'lobby' ? 'Lobby' : status === 'completed' ? 'Завершено' : 'Розстановка'} roleLabel="Представник" visibility="ROLE_BASED" primaryTitle="Залишайтеся у своїй позиції" primaryText="Спостерігайте за напрямком і дистанцією. Якщо потрібно, ви можете поставити сесію на паузу." secondaryText="Нотатки фасилітатора та дані інших учасників не показуються." exitLabel="Вийти з ролі" status={status} connection={connection} onStatusChange={setStatus} onConnectionChange={setConnection} />
       ) : status === 'lobby' ? (
         <SessionLobbyView title={title} participants={constellationLobbyParticipants} minReady={3} visibility="ROLE_BASED" joinCode="CON-7314" onStart={() => setStatus('live')} />
+      ) : status === 'completed' ? (
+        <SessionCompletionView title={title} kindLabel="Constellation Session" participantCount={4} participantExitLabel="Після етапу «Вихід з ролей» учасники бачать лише завершення сесії та безпечну дію виходу." summaryItems={['Етап «Вихід з ролей» завершено', 'Розстановка та snapshots готові до архівації', 'Participant payload закритий для подальших змін']} onReturnToProject={() => setStatus('live')} onCreateNextSession={() => { setPreview(false); setConnection('online'); setStatus('lobby'); }} />
       ) : <ConstellationSessionView title={props.title} />}
     </StoryExperienceAiShell>
   );
@@ -217,12 +222,14 @@ export const IntegratedLeelaView: React.FC<IntegratedLeelaViewProps> = (props) =
   return (
     <StoryExperienceAiShell preferredModelId={props.preferredModelId} value={props.aiAssignments} onChange={props.onAiAssignmentsChange} contextLabel="AI · Leela Studio">
       <JevSlot title="Jev · процесний статус маршруту" hint="Оцінюється лише стан маршруту/сесії. Jev не дає об’єктивних духовних чи психологічних трактувань." {...props} />
-      <SessionModeratorBar title={title} phase={status === 'lobby' ? 'Lobby' : 'Хід 7'} status={status} connection={connection} participants={1} onStatusChange={setStatus} />
+      <SessionModeratorBar title={title} phase={status === 'lobby' ? 'Lobby' : status === 'completed' ? 'Завершено' : 'Хід 7'} status={status} connection={connection} participants={1} onStatusChange={setStatus} />
       <PreviewToggle active={preview} label="Переглянути як учасник" connection={connection} onConnectionChange={setConnection} onClick={() => setPreview((value) => !value)} />
       {preview ? (
-        <SessionPreviewFlow kind="leela" title={title} phase={status === 'lobby' ? 'Lobby' : 'Хід 7'} roleLabel="Учасник" visibility="PRIVATE" primaryTitle="Клітина 21 · Усвідомлення" primaryText="Що я продовжую робити за інерцією, хоча вже знаю інший шлях?" secondaryText="Ваша відповідь приватна. Ведучий бачить її лише якщо це дозволено правилами сесії." actionLabel="Записати рефлексію" status={status} connection={connection} onStatusChange={setStatus} onConnectionChange={setConnection} />
+        <SessionPreviewFlow kind="leela" title={title} phase={status === 'lobby' ? 'Lobby' : status === 'completed' ? 'Завершено' : 'Хід 7'} roleLabel="Учасник" visibility="PRIVATE" primaryTitle="Клітина 21 · Усвідомлення" primaryText="Що я продовжую робити за інерцією, хоча вже знаю інший шлях?" secondaryText="Ваша відповідь приватна. Ведучий бачить її лише якщо це дозволено правилами сесії." actionLabel="Записати рефлексію" status={status} connection={connection} onStatusChange={setStatus} onConnectionChange={setConnection} />
       ) : status === 'lobby' ? (
         <SessionLobbyView title={title} participants={leelaLobbyParticipants} minReady={2} visibility="PRIVATE" joinCode="LEELA-21" onStart={() => setStatus('live')} />
+      ) : status === 'completed' ? (
+        <SessionCompletionView title={title} kindLabel="Leela Journey Session" participantCount={1} summaryItems={['Маршрут завершено на поточній клітині', 'Приватні рефлексії залишаються у визначеній visibility policy', 'Історія ходів готова до snapshot/archive']} onReturnToProject={() => setStatus('live')} onCreateNextSession={() => { setPreview(false); setConnection('online'); setStatus('lobby'); }} />
       ) : <LeelaSessionView title={props.title} cellCount={props.cellCount} />}
     </StoryExperienceAiShell>
   );
