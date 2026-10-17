@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { BrainCircuit, Clapperboard, Drama, Gamepad2, Sparkles } from 'lucide-react';
 import type { Book, NavigationTab } from '../types';
+import { buildAppPath } from '../utils/appRoutes';
+import { API_BASE } from '../utils/basePath';
 import { ScenarioLegacyView } from './ScenarioLegacyView';
 import {
   IntegratedConstellationView,
@@ -47,6 +49,15 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
 }) => {
   const [workspace, setWorkspace] = useState<StoryWorkspace>('screenplay');
 
+  const navigateToTab = (tab: NavigationTab) => {
+    if (onNavigateToTab) {
+      onNavigateToTab(tab);
+      return;
+    }
+    const path = buildAppPath({ projectId: book.id, tab }, API_BASE);
+    if (path) window.location.assign(path);
+  };
+
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-slate-950 text-slate-100" data-story-experience-hub>
       <header className="shrink-0 border-b border-slate-800 bg-slate-950/95 px-4 py-3 backdrop-blur lg:px-5">
@@ -86,9 +97,9 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
             book={book}
             preferredModelId={book.preferredAiModelId}
             onNavigateToSection={onNavigateToSection}
-            onOpenCharacters={() => onNavigateToTab?.('characters')}
-            onOpenRelationships={() => onNavigateToTab?.('core-story-graph')}
-            onOpenDiagnostics={() => onNavigateToTab?.('diagn')}
+            onOpenCharacters={() => navigateToTab('characters')}
+            onOpenRelationships={() => navigateToTab('core-story-graph')}
+            onOpenDiagnostics={() => navigateToTab('diagn')}
           />
         )}
 
