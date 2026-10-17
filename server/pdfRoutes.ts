@@ -4,16 +4,18 @@ import {
   type PdfRoutesDeps,
   type StoredBookOps,
 } from './pdfRoutesBase';
+import { registerAuthorPdfPreviewRoutes } from './pdf/authorPreviewRoute';
 import { registerDesigncraftThemePreviewRoutes } from './pdf/designcraft/themePreviewRoute';
 
 /**
  * Thin extension layer for Book Design Studio.
  *
  * The pre-existing PDF route implementation is kept byte-for-byte in
- * `pdfRoutesBase.ts`. We register the new author-facing DesignCraft preview
- * first, then hand control to the old route set unchanged.
+ * `pdfRoutesBase.ts`. We register author-facing preview extensions first,
+ * then hand control to the old route set unchanged.
  */
 export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBookOps {
+  registerAuthorPdfPreviewRoutes(app);
   registerDesigncraftThemePreviewRoutes(app);
   return registerPdfRoutesBase(app, deps);
 }
