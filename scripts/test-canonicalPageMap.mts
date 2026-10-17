@@ -3,6 +3,7 @@ import type { Book } from '../src/types';
 import type { BookPage } from '../src/utils/helpers';
 import {
   buildCanonicalPageMap,
+  buildPhysicalPaginationResult,
   chapterMilestones,
   spreadStartIndexForPage,
 } from '../src/utils/canonicalPageMap';
@@ -44,6 +45,7 @@ assert.equal(result.pageMap[1].pageNumber, 2);
 assert.equal(result.pageMap[1].pageType, 'chapter-start');
 assert.equal(result.pageMap[2].sectionTitle, 'Ранок');
 assert.equal(result.exportAuthoritative, false);
+assert.equal(result.mappingLevel, 'semantic');
 console.log('  ✓ map preserves actual page order and chapter/section identity');
 
 const milestones = chapterMilestones(result);
@@ -59,5 +61,19 @@ assert.equal(spreadStartIndexForPage(4, 6), 4);
 assert.equal(spreadStartIndexForPage(5, 6), 4);
 assert.equal(spreadStartIndexForPage(99, 6), 4);
 console.log('  ✓ page navigation always lands on the correct spread');
+
+const physical = buildPhysicalPaginationResult(100, {
+  id: 'nova',
+  label: 'Nova',
+  exportAuthoritative: true,
+});
+assert.equal(physical.totalPages, 100);
+assert.equal(physical.pageMap.length, 100);
+assert.equal(physical.pageMap[72].pageIndex, 72);
+assert.equal(physical.pageMap[72].pageNumber, 73);
+assert.equal(physical.pageMap[72].chapterId, undefined);
+assert.equal(physical.mappingLevel, 'physical-only');
+assert.equal(physical.exportAuthoritative, true);
+console.log('  ✓ exported physical page 73 stays page 73 without invented chapter semantics');
 
 console.log('\nCanonical page map contract passed.');
