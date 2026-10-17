@@ -19,6 +19,49 @@ export interface DraftView<P> {
   draft: WizardDraft<P> | null; payload: P; step: number; dirty: boolean;
   pending: boolean; error: string | null; conflict: WizardDraft<P> | null;
 }
+
+interface RuntimeHeroArc {
+  selectedHeroId?: string;
+  answers?: Record<string, string>;
+  intensities?: number[];
+  analysis?: { status?: string; heroId?: string; [key: string]: unknown };
+  [key: string]: unknown;
+}
+interface RuntimeWizardPayload {
+  heroArc?: RuntimeHeroArc;
+  cast?: Array<{ id?: string; firstName?: string; lastName?: string }>;
+  seed?: string;
+  genre?: string;
+  framework?: string;
+  synopsis?: string;
+  compositionPlan?: string;
+  parts?: unknown[];
+  storyWorld?: unknown;
+  reviewConfirmed?: boolean;
+  structureConfirmed?: boolean;
+  [key: string]: unknown;
+}
+
+export const EXPRESS_DRAFT_VIEW_EVENT = 'nova:express-draft-view';
+export interface ExpressDraftViewEventDetail {
+  draftId?: string;
+  revision?: number;
+  userId?: string | null;
+  cast: Array<{ id: string; firstName: string; lastName: string }>;
+}
+
+const HERO_ARC_CANON_KEYS = [
+  'cast', 'seed', 'genre', 'framework', 'synopsis', 'compositionPlan', 'parts', 'storyWorld',
+] as const;
+
+function runtimePayload(value: unknown): RuntimeWizardPayload {
+  return (value && typeof value === 'object' ? value : {}) as RuntimeWizardPayload;
+}
+
+function hasOwn(value: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
 export class WizardDraftSession<P extends object> {
   view: DraftView<P>;
   private tail: Promise<unknown> = Promise.resolve();
@@ -28,9 +71,30 @@ export class WizardDraftSession<P extends object> {
     this.view = { draft: null, payload: initial, step: 1, dirty: false, pending: false, error: null, conflict: null };
   }
   subscribe(listener: () => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
+  private emitHeroArcView() {
+    if (typeof window === 'undefined' || typeof CustomEvent === 'undefined') return;
+    const payload = runtimePayload(this.view.payload);
+    const cast = Array.isArray(payload.cast)
+      ? payload.cast
+          .filter((member) => typeof member?.id === 'string' && member.id.trim())
+          .map((member) => ({
+            id: member.id!.trim(),
+            firstName: typeof member.firstName === 'string' ? member.firstName : '',
+            lastName: typeof member.lastName === 'string' ? member.lastName : '',
+          }))
+      : [];
+    const detail: ExpressDraftViewEventDetail = {
+      draftId: this.view.draft?.id,
+      revision: this.view.draft?.revision,
+      userId: this.view.draft?.userId,
+      cast,
+    };
+    window.dispatchEvent(new CustomEvent<ExpressDraftViewEventDetail>(EXPRESS_DRAFT_VIEW_EVENT, { detail }));
+  }
   private publish(patch: Partial<DraftView<P>>) {
     this.view = { ...this.view, ...patch };
     for (const listener of this.listeners) listener();
+    this.emitHeroArcView();
   }
   private key(id: string) { return 'nova_express_backup:' + id; }
   private backup() {
@@ -63,7 +127,28 @@ export class WizardDraftSession<P extends object> {
   }
   edit(patch: Partial<P>) {
     this.version++;
-    this.publish({ payload: { ...this.view.payload, ...patch }, dirty: true, error: this.view.conflict ? this.view.error : null });
+    const current = runtimePayload(this.view.payload);
+    const incoming = runtimePayload(patch);
+    let payload = { ...this.view.payload, ...patch } as P;
+
+    // Any change to confirmed story canon invalidates the previous semantic curve.
+    // HeroArcPanel handles its own answer/override changes, so an explicit heroArc
+    // patch is left intact here.
+    if (!hasOwn(incoming, 'heroArc') && current.heroArc?.analysis && HERO_ARC_CANON_KEYS.some((key) => hasOwn(incoming, key))) {
+      let heroArc: RuntimeHeroArc = {
+        ...current.heroArc,
+        analysis: { ...current.heroArc.analysis, status: 'stale' },
+      };
+      if (hasOwn(incoming, 'cast') && heroArc.selectedHeroId) {
+        const nextCast = Array.isArray(incoming.cast) ? incoming.cast : [];
+        if (!nextCast.some((member) => member?.id === heroArc.selectedHeroId)) {
+          heroArc = { ...heroArc, selectedHeroId: undefined };
+        }
+      }
+      payload = { ...(payload as object), heroArc } as P;
+    }
+
+    this.publish({ payload, dirty: true, error: this.view.conflict ? this.view.error : null });
     this.backup();
   }
   /** Explicit UI choice; never merge an old tab over the current server revision. */
@@ -107,10 +192,46 @@ export class WizardDraftSession<P extends object> {
     return saved;
   }
   flush(step?: number) { return this.enqueue(() => this.saveLatest(step)); }
+  private async maybeAnalyzeHeroArc(saved: WizardDraft<P>): Promise<WizardDraft<P>> {
+    const payload = runtimePayload(saved.payload);
+    const heroArc = payload.heroArc;
+    const heroId = heroArc?.selectedHeroId?.trim();
+    const ready = Boolean(
+      saved.userId &&
+      payload.framework === 'hero_journey' &&
+      heroId &&
+      typeof payload.synopsis === 'string' && payload.synopsis.trim() &&
+      Array.isArray(payload.parts) && payload.parts.length >= 3 &&
+      payload.reviewConfirmed === true &&
+      payload.structureConfirmed === true
+    );
+    if (!ready || !heroId) return saved;
+    if (heroArc?.analysis?.status === 'fresh' && heroArc.analysis.heroId === heroId) return saved;
+
+    const version = this.version;
+    try {
+      const result = await this.api<{ draft: WizardDraft<P> }>('/api/express/hero-arc/analyze', {
+        method: 'POST',
+        body: JSON.stringify({ draftId: saved.id, expectedRevision: saved.revision, heroId }),
+      });
+      this.publish({ draft: result.draft });
+      if (version === this.version) {
+        this.publish({ payload: result.draft.payload, step: result.draft.step, dirty: false });
+      }
+      this.backup();
+      return result.draft;
+    } catch (error) {
+      // Saving the author's canon succeeded. JEV is an enhancement and must not
+      // turn a valid save into a failed wizard step when its provider is unavailable.
+      console.warn('[hero-arc] automatic JEV analysis failed:', error);
+      return saved;
+    }
+  }
   private async saveLatest(step?: number): Promise<WizardDraft<P> | null> {
     let result = await this.save(step);
     for (let attempt = 0; this.view.dirty && attempt < 8; attempt++) result = await this.save(step);
     if (this.view.dirty) throw new Error('Дочекайтеся завершення редагування і повторіть збереження.');
+    if (result) result = await this.maybeAnalyzeHeroArc(result);
     return result;
   }
   /** Both flush and AI request occupy the same queue, so autosave cannot race them. */
