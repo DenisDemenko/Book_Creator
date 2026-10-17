@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Check, TrendingUp, ListChecks, RotateCcw } from 'lucide-react';
 import {
   HERO_ARC_STEPS,
@@ -16,11 +16,25 @@ import {
   markHeroArcAnalysisStale,
   type HeroArcStateWithAnalysis,
 } from '../utils/heroArcAnalysis';
+import {
+  EXPRESS_DRAFT_VIEW_EVENT,
+  wizardApi,
+  type ExpressDraftViewEventDetail,
+} from '../utils/expressDraftSession';
+
+interface WizardCastMember {
+  id: string;
+  firstName: string;
+  lastName: string;
+}
 
 /**
  * «Крива головного героя» — конструктор шляху героя + емоційна крива.
  * JEV-аналіз є базовою семантичною оцінкою, а ручний рух повзунка —
  * явним authorOverride. Старі книги без analysis продовжують працювати.
+ *
+ * У Express Wizard протагоніст завжди обирається автором за stable CharacterID.
+ * Порядок cast ніколи не використовується як неявне визначення головного героя.
  */
 export interface HeroArcPanelProps {
   value: HeroArcStateWithAnalysis | undefined;
@@ -30,17 +44,66 @@ export interface HeroArcPanelProps {
 }
 
 export const HeroArcPanel: React.FC<HeroArcPanelProps> = ({ value, onChange, heroName, compact }) => {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const sawLiveWizardEvent = useRef(false);
   const [tab, setTab] = useState<'constructor' | 'curve'>('constructor');
   const [activeStep, setActiveStep] = useState(0);
+  const [inWizard, setInWizard] = useState(false);
+  const [wizardCast, setWizardCast] = useState<WizardCastMember[] | null>(null);
+
   const normalized = normalizeHeroArcState(value);
+  const extended = value as HeroArcStateWithAnalysis | undefined;
   const state: HeroArcStateWithAnalysis = {
     ...normalized,
-    ...((value as HeroArcStateWithAnalysis | undefined)?.analysis
-      ? { analysis: (value as HeroArcStateWithAnalysis).analysis }
-      : {}),
+    ...(extended?.selectedHeroId ? { selectedHeroId: extended.selectedHeroId } : {}),
+    ...(extended?.analysis ? { analysis: extended.analysis } : {}),
   };
   const displayIntensities = displayHeroArcIntensities(state);
   const progress = heroArcProgress(state);
+
+  useEffect(() => {
+    const insideWizard = Boolean(rootRef.current?.closest('[data-book-wizard]'));
+    setInWizard(insideWizard);
+    if (!insideWizard || typeof window === 'undefined') return;
+
+    const applyCast = (cast: unknown) => {
+      if (!Array.isArray(cast)) return;
+      const normalizedCast = cast
+        .filter((member): member is Record<string, unknown> => Boolean(member && typeof member === 'object'))
+        .filter((member) => typeof member.id === 'string' && member.id.trim().length > 0)
+        .map((member) => ({
+          id: String(member.id).trim(),
+          firstName: typeof member.firstName === 'string' ? member.firstName : '',
+          lastName: typeof member.lastName === 'string' ? member.lastName : '',
+        }));
+      setWizardCast(normalizedCast);
+    };
+
+    const onWizardView = (event: Event) => {
+      sawLiveWizardEvent.current = true;
+      const detail = (event as CustomEvent<ExpressDraftViewEventDetail>).detail;
+      applyCast(detail?.cast);
+    };
+    window.addEventListener(EXPRESS_DRAFT_VIEW_EVENT, onWizardView as EventListener);
+
+    // Fallback for the first render: the session may have emitted its latest
+    // snapshot before this panel mounted. Any later live event wins over GET.
+    let active = true;
+    let draftId = '';
+    try { draftId = localStorage.getItem('nova_express_draft_id') ?? ''; } catch { /* optional storage */ }
+    if (draftId) {
+      void wizardApi<{ payload?: { cast?: unknown } }>(`/api/express/draft/${encodeURIComponent(draftId)}`)
+        .then((draft) => {
+          if (active && !sawLiveWizardEvent.current) applyCast(draft.payload?.cast);
+        })
+        .catch(() => undefined);
+    }
+
+    return () => {
+      active = false;
+      window.removeEventListener(EXPRESS_DRAFT_VIEW_EVENT, onWizardView as EventListener);
+    };
+  }, []);
 
   const setAnswer = (stepId: string, text: string) => {
     const next: HeroArcStateWithAnalysis = {
@@ -57,6 +120,25 @@ export const HeroArcPanel: React.FC<HeroArcPanelProps> = ({ value, onChange, her
   const resetIntensity = (i: number) => {
     onChange(clearHeroArcOverride(state, i));
   };
+
+  const selectHero = (selectedHeroId: string) => {
+    const id = selectedHeroId.trim() || undefined;
+    const analysis = state.analysis && state.analysis.heroId !== id
+      ? { ...state.analysis, status: 'stale' as const }
+      : state.analysis;
+    onChange({
+      ...state,
+      selectedHeroId: id,
+      ...(analysis ? { analysis } : {}),
+    });
+  };
+
+  const selectedHero = wizardCast?.find((member) => member.id === state.selectedHeroId);
+  const displayedHeroName = inWizard
+    ? selectedHero
+      ? `${selectedHero.firstName} ${selectedHero.lastName}`.trim()
+      : ''
+    : heroName ?? '';
 
   const step = HERO_ARC_STEPS[activeStep];
   const W = 460;
@@ -85,11 +167,11 @@ export const HeroArcPanel: React.FC<HeroArcPanelProps> = ({ value, onChange, her
           : 'JEV: помилка аналізу';
 
   return (
-    <div className="rounded-2xl bg-slate-900/90 border border-slate-800 shadow-md overflow-hidden">
+    <div ref={rootRef} className="rounded-2xl bg-slate-900/90 border border-slate-800 shadow-md overflow-hidden">
       <div className="flex items-center justify-between gap-2 px-3.5 pt-3">
         <div className="min-w-0">
           <span className="font-bold text-slate-100 text-sm block truncate">
-            Крива головного героя{heroName ? `: ${heroName}` : ''}
+            Крива головного героя{displayedHeroName ? `: ${displayedHeroName}` : ''}
           </span>
           <span className="text-[10px] text-slate-500">Шлях героя — {progress}/{HERO_ARC_STEPS.length} кроків заповнено</span>
         </div>
@@ -103,6 +185,30 @@ export const HeroArcPanel: React.FC<HeroArcPanelProps> = ({ value, onChange, her
           {analysisLabel}
         </span>
       </div>
+
+      {inWizard && wizardCast && wizardCast.length > 0 && (
+        <div className="mx-3.5 mt-3 rounded-xl border border-cyan-500/25 bg-cyan-500/[0.06] p-3">
+          <label className="block text-[11px] font-semibold text-cyan-200">
+            Головний герой
+            <select
+              value={state.selectedHeroId ?? ''}
+              onChange={(event) => selectHero(event.target.value)}
+              className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-slate-100 outline-none focus:border-cyan-500"
+            >
+              <option value="">— оберіть протагоніста —</option>
+              {wizardCast.map((member, index) => {
+                const name = `${member.firstName} ${member.lastName}`.trim() || `Герой ${index + 1}`;
+                return <option key={member.id} value={member.id}>{name}</option>;
+              })}
+            </select>
+          </label>
+          <p className="mt-1.5 text-[10px] leading-relaxed text-slate-500">
+            {state.selectedHeroId
+              ? 'JEV автоматично перерахує емоційну криву після підтвердження синопсису та повної структури.'
+              : 'Протагоніст не визначається за порядком персонажів: його обирає автор.'}
+          </p>
+        </div>
+      )}
 
       <div className="flex items-center gap-1 px-3.5 mt-2 border-b border-slate-800">
         <button
