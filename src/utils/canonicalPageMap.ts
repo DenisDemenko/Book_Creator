@@ -31,8 +31,14 @@ export interface PaginationResult {
   totalPages: number;
   pageMap: CanonicalPageMapEntry[];
   generatedAt: string;
-  /** true only when this engine is also the source of final export pagination. */
+  /** true only when this exact engine also produced the exported PDF. */
   exportAuthoritative: boolean;
+  /**
+   * `semantic` means chapter/section positions come from the same compositor.
+   * `physical-only` means only physical page count/indexes are authoritative;
+   * callers MUST NOT pretend browser content was mapped to those pages.
+   */
+  mappingLevel?: 'semantic' | 'physical-only';
 }
 
 function canonicalPageType(page: BookPage): CanonicalPageType {
@@ -100,6 +106,37 @@ export function buildCanonicalPageMap(
     pageMap,
     generatedAt: new Date().toISOString(),
     exportAuthoritative: engine.exportAuthoritative === true,
+    mappingLevel: 'semantic',
+  };
+}
+
+/**
+ * Build an honest map from the page count of an already rendered PDF.
+ * Physical page N is exact, but no chapter/section position is invented.
+ */
+export function buildPhysicalPaginationResult(
+  totalPages: number,
+  engine: {
+    id: string;
+    label: string;
+    version?: string;
+    exportAuthoritative: boolean;
+  }
+): PaginationResult {
+  const safeTotal = Math.max(0, Math.floor(Number(totalPages) || 0));
+  return {
+    engineId: engine.id,
+    engineLabel: engine.label,
+    ...(engine.version ? { engineVersion: engine.version } : {}),
+    totalPages: safeTotal,
+    pageMap: Array.from({ length: safeTotal }, (_, pageIndex) => ({
+      pageNumber: pageIndex + 1,
+      pageIndex,
+      pageType: 'other' as const,
+    })),
+    generatedAt: new Date().toISOString(),
+    exportAuthoritative: engine.exportAuthoritative,
+    mappingLevel: 'physical-only',
   };
 }
 
