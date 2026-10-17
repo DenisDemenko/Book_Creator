@@ -15,6 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { PDFDocument } from 'pdf-lib';
 import { DEFAULT_LAYOUT_SPEC, PAGE_SIZES, type PdfLayoutSpec } from '../pdfTypes';
+import { buildDesigncraftSemanticPagination } from '../designcraftSemanticPagination';
 import {
   buildDesigncraftRtf,
   IMAGE_BEGIN,
@@ -353,7 +354,7 @@ export const designcraftEngineV3: PdfEngine = {
       if (!Number.isFinite(story)) throw new PdfEngineError('designcraft', 'engine', 'DesignCraft не повернув story після імпорту рукопису.');
       if (placed?.overset) throw new PdfEngineError('designcraft', 'engine', 'Первинне DesignCraft autoflow завершилось із overset.');
       const allocatedPages = bodyPage + pagesAdded;
-      let minimized = await minimizePages(workDir, initialDoc, story, bodyPage, allocatedPages, 'text');
+      const minimized = await minimizePages(workDir, initialDoc, story, bodyPage, allocatedPages, 'text');
 
       const beforeImages = await getStory(workDir, minimized.doc, story, 'locate-images.dcs');
       const placements = locateImages(String(beforeImages?.text || ''), manuscript);
@@ -407,15 +408,17 @@ export const designcraftEngineV3: PdfEngine = {
           command('anchored.list', { story }),
           command('toc.entries', { styles: tocStyles }),
           command('toc.entries', { styles: ['Heading 1'] }),
+          command('document.inspect'),
         ].join('\n') + '\n',
         'utf8'
       );
       const final = await runScript(finalScript, ['--in', contentDoc, '--save', finalDoc, '--export', pdfPath], workDir, 'DesignCraft не завершив фінальний PDF вчасно.');
       const r = Array.isArray(final.results) ? final.results : [];
-      const finalState = r.at(-4);
-      const anchored = r.at(-3);
-      const toc = r.at(-2);
-      const chapterToc = r.at(-1);
+      const finalState = r.at(-5);
+      const anchored = r.at(-4);
+      const toc = r.at(-3);
+      const chapterToc = r.at(-2);
+      const inspect = r.at(-1);
       if (overset(finalState)) throw new PdfEngineError('designcraft', 'engine', 'Фінальна перевірка знайшла overset.');
       if (!Array.isArray(anchored) || anchored.length !== loadedImages) {
         throw new PdfEngineError('designcraft', 'engine', `Ілюстрації: очікувалось ${loadedImages}, знайдено ${Array.isArray(anchored) ? anchored.length : 0}.`);
@@ -444,13 +447,26 @@ export const designcraftEngineV3: PdfEngine = {
       const pdf = await PDFDocument.load(bytes);
       const pageCount = pdf.getPageCount();
       if (pageCount !== minimized.pageCount) throw new PdfEngineError('designcraft', 'engine', `Кількість сторінок не збігається: PDF=${pageCount}, reflow=${minimized.pageCount}.`);
+      if (Number(inspect?.pageCount) !== pageCount) {
+        throw new PdfEngineError('designcraft', 'engine', `document.inspect не збігається з PDF: inspect=${String(inspect?.pageCount)}, PDF=${pageCount}.`);
+      }
+
+      const pagination = buildDesigncraftSemanticPagination({
+        book: request.book,
+        tocEntries: toc,
+        chapterEntries,
+        inspect,
+        titlePageShown: spec.titlePage.show,
+        tocPageIndex: tocPage - 1,
+        contentStartPageIndex: bodyPage - 1,
+      });
 
       const semanticNames = manuscript.semanticStylesUsed.filter((name) => !['Body', 'Heading 1', 'Heading 2'].includes(name));
       if (semanticNames.length) notesUk.unshift(`Тема DesignCraft застосувала семантичні стилі: ${semanticNames.join(', ')}.`);
       notesUk.unshift(
         `DesignCraft: ${pageCount} стор. (первинно виділено ${allocatedPages}, зайвий хвіст прибрано бінарною перевіркою), без overset, зміст синхронізовано (${chapterEntries.length}/${chapterCount} глав), ${loadedImages} ілюстрацій перевірено.`
       );
-      return { bytes, pageCount, engineId: 'designcraft', honoredSpec: true, notesUk };
+      return { bytes, pageCount, engineId: 'designcraft', honoredSpec: true, notesUk, pagination };
     } catch (err) {
       if (err instanceof PdfEngineError) throw err;
       throw new PdfEngineError('designcraft', 'engine', `DesignCraft: ${(err as Error).message}`);
