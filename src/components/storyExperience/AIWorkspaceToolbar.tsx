@@ -1,8 +1,7 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Activity, Bot, MessageCircle, Sparkles, WandSparkles } from 'lucide-react';
 import {
   AIProviderSelector,
-  type AIProviderId,
   type AIProviderSelection,
   type AITaskKind,
 } from './AIProviderSelector';
@@ -19,14 +18,16 @@ interface AIWorkspaceToolbarProps {
   onChange?: (next: AIWorkspaceAssignments) => void;
   compact?: boolean;
   contextLabel?: string;
+  /** Реальний modelId книги з book.preferredAiModelId. */
+  preferredModelId?: string;
 }
 
-const defaultAssignments: AIWorkspaceAssignments = {
-  chat: { primary: 'openai', evaluator: null },
-  generate: { primary: 'openai', evaluator: null },
-  analyze: { primary: 'anthropic', evaluator: 'jev' },
-  evaluate: { primary: 'jev', evaluator: 'jev' },
-};
+/**
+ * Порожній primary означає «Автоматично / модель книги / адмінська прив’язка».
+ * Ми більше не зберігаємо вигадані provider-id на кшталт `openai` чи `anthropic`:
+ * реальна Studio працює конкретними modelId з `/api/chat/models`.
+ */
+const emptySelection = (): AIProviderSelection => ({ primary: '', evaluator: null });
 
 const taskMeta: Array<{ id: keyof AIWorkspaceAssignments; task: AITaskKind; label: string; icon: React.ReactNode }> = [
   { id: 'chat', task: 'chat', label: 'Діалог', icon: <MessageCircle className="h-3.5 w-3.5" /> },
@@ -40,8 +41,16 @@ export const AIWorkspaceToolbar: React.FC<AIWorkspaceToolbarProps> = ({
   onChange,
   compact = false,
   contextLabel = 'AI для цього простору',
+  preferredModelId,
 }) => {
-  const [localValue, setLocalValue] = useState<AIWorkspaceAssignments>(value || defaultAssignments);
+  const initial = useMemo<AIWorkspaceAssignments>(() => ({
+    chat: { primary: preferredModelId || '', evaluator: null },
+    generate: { primary: preferredModelId || '', evaluator: null },
+    analyze: { primary: preferredModelId || '', evaluator: 'jev' },
+    evaluate: { primary: preferredModelId || '', evaluator: 'jev' },
+  }), [preferredModelId]);
+
+  const [localValue, setLocalValue] = useState<AIWorkspaceAssignments>(value || initial);
   const [activeTask, setActiveTask] = useState<keyof AIWorkspaceAssignments>('chat');
 
   const assignments = value || localValue;
@@ -63,13 +72,13 @@ export const AIWorkspaceToolbar: React.FC<AIWorkspaceToolbarProps> = ({
           </div>
           <div className="min-w-0">
             <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">{contextLabel}</div>
-            <div className="mt-0.5 truncate text-xs text-slate-300">Окремий AI для кожного типу роботи</div>
+            <div className="mt-0.5 truncate text-xs text-slate-300">Моделі беруться з реального каталогу Studio</div>
           </div>
         </div>
 
         <div className="flex gap-1 overflow-x-auto rounded-xl border border-slate-800 bg-slate-900 p-1">
           {taskMeta.map((item) => {
-            const provider = assignments[item.id].primary;
+            const modelId = assignments[item.id].primary;
             return (
               <button
                 key={item.id}
@@ -78,7 +87,7 @@ export const AIWorkspaceToolbar: React.FC<AIWorkspaceToolbarProps> = ({
                 className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-[11px] font-semibold transition ${
                   activeTask === item.id ? 'bg-slate-100 text-slate-950' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
                 }`}
-                title={`Поточний AI: ${provider}`}
+                title={`Поточна модель: ${modelId || 'Автоматично'}`}
               >
                 {item.icon}{item.label}
               </button>
@@ -94,29 +103,30 @@ export const AIWorkspaceToolbar: React.FC<AIWorkspaceToolbarProps> = ({
           onChange={(selection) => update(activeTask, selection)}
           compact
           showEvaluator={activeTask === 'analyze' || activeTask === 'evaluate'}
+          preferredModelId={preferredModelId}
         />
       </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-slate-600">
-        <span>Діалог: <ProviderName id={assignments.chat.primary} /></span>
-        <span>Генерація: <ProviderName id={assignments.generate.primary} /></span>
-        <span>Аналіз: <ProviderName id={assignments.analyze.primary} /></span>
-        <span>Оцінка: <ProviderName id={assignments.evaluate.primary} /></span>
+        <span>Діалог: <ModelName id={assignments.chat.primary} preferredModelId={preferredModelId} /></span>
+        <span>Генерація: <ModelName id={assignments.generate.primary} preferredModelId={preferredModelId} /></span>
+        <span>Аналіз: <ModelName id={assignments.analyze.primary} preferredModelId={preferredModelId} /></span>
+        <span>Оцінка: <ModelName id={assignments.evaluate.primary} preferredModelId={preferredModelId} /></span>
         {assignments.analyze.evaluator === 'jev' && <span className="text-violet-400">Jev перевіряє аналітичний результат</span>}
       </div>
     </section>
   );
 };
 
-const providerNames: Record<AIProviderId, string> = {
-  auto: 'Автовибір',
-  openai: 'OpenAI',
-  anthropic: 'Claude',
-  gemini: 'Gemini',
-  deepseek: 'DeepSeek',
-  jev: 'Jev AI',
+const ModelName: React.FC<{ id: string; preferredModelId?: string }> = ({ id, preferredModelId }) => (
+  <strong className="font-semibold text-slate-400">
+    {id || (preferredModelId ? `Модель книги · ${preferredModelId}` : 'Автоматично')}
+  </strong>
+);
+
+export const defaultAIWorkspaceAssignments: AIWorkspaceAssignments = {
+  chat: emptySelection(),
+  generate: emptySelection(),
+  analyze: { primary: '', evaluator: 'jev' },
+  evaluate: { primary: '', evaluator: 'jev' },
 };
-
-const ProviderName: React.FC<{ id: AIProviderId }> = ({ id }) => <strong className="font-semibold text-slate-400">{providerNames[id]}</strong>;
-
-export const defaultAIWorkspaceAssignments = defaultAssignments;
