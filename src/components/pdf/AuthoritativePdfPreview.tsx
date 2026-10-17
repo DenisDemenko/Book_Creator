@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FileCheck2, RefreshCw, TriangleAlert } from 'lucide-react';
 import type { Book } from '../../types';
+import type { PaginationResult } from '../../utils/canonicalPageMap';
 
 interface EngineOption {
   id: string;
@@ -30,6 +31,8 @@ export const AuthoritativePdfPreview: React.FC<AuthoritativePdfPreviewProps> = (
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [mappingLevel, setMappingLevel] = useState<string>('physical-only');
   const [authoritative, setAuthoritative] = useState(false);
+  const [pagination, setPagination] = useState<PaginationResult | null>(null);
+  const [paginationWarning, setPaginationWarning] = useState('');
   const [rendering, setRendering] = useState(false);
   const [error, setError] = useState<string>('');
   const [renderedSignature, setRenderedSignature] = useState('');
@@ -80,16 +83,19 @@ export const AuthoritativePdfPreview: React.FC<AuthoritativePdfPreviewProps> = (
 
   const selected = engines.find((engine) => engine.id === engineId);
   const unsupportedPrint = format === 'print' && selected?.supportsPrint === false;
+  const chapterMilestones = (pagination?.pageMap || []).filter((entry) => entry.isChapterStart);
 
   const renderPdf = async () => {
     setRendering(true);
     setError('');
+    setPaginationWarning('');
     try {
+      const requestBody = { book, engineId, format, kind: 'book' };
       const response = await fetch('/api/pdf/author-preview', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ book, engineId, format, kind: 'book' }),
+        body: JSON.stringify(requestBody),
       });
       if (!response.ok) {
         let message = `PDF preview: HTTP ${response.status}`;
@@ -114,6 +120,33 @@ export const AuthoritativePdfPreview: React.FC<AuthoritativePdfPreviewProps> = (
       setMappingLevel(response.headers.get('X-Pdf-Mapping-Level') || 'physical-only');
       setAuthoritative(response.headers.get('X-Pdf-Authoritative') === '1');
       setRenderedSignature(targetSignature);
+
+      // Metadata is deliberately a second JSON request instead of a response
+      // header: semantic page maps can be large. Failure to obtain metadata
+      // must not hide a perfectly valid PDF preview.
+      try {
+        const metadataResponse = await fetch('/api/pdf/author-preview/pagination', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        });
+        if (!metadataResponse.ok) throw new Error(`HTTP ${metadataResponse.status}`);
+        const metadata = await metadataResponse.json();
+        const nextPagination = metadata?.pagination as PaginationResult | undefined;
+        if (!nextPagination || !Array.isArray(nextPagination.pageMap)) {
+          throw new Error('сервер не повернув PaginationResult');
+        }
+        setPagination(nextPagination);
+        setPageCount(nextPagination.totalPages || Number(metadata?.pageCount || 0) || null);
+        setMappingLevel(nextPagination.mappingLevel || 'physical-only');
+        setAuthoritative(nextPagination.exportAuthoritative === true);
+      } catch (metadataError) {
+        setPagination(null);
+        setPaginationWarning(
+          `PDF створено, але карту сторінок не отримано: ${metadataError instanceof Error ? metadataError.message : 'невідома помилка'}.`
+        );
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не вдалося створити точний PDF preview.');
     } finally {
@@ -187,6 +220,12 @@ export const AuthoritativePdfPreview: React.FC<AuthoritativePdfPreviewProps> = (
           <span>{error}</span>
         </div>
       )}
+      {paginationWarning && (
+        <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{paginationWarning}</span>
+        </div>
+      )}
 
       {pdfUrl && (
         <div className="mt-4 overflow-hidden rounded-xl border border-slate-800 bg-slate-900">
@@ -200,6 +239,16 @@ export const AuthoritativePdfPreview: React.FC<AuthoritativePdfPreviewProps> = (
             </span>
             {stale && <span className="font-bold text-amber-300">Книга/формат/рушій змінені — preview треба оновити</span>}
           </div>
+          {chapterMilestones.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 border-b border-slate-800 px-3 py-2 text-[10px]">
+              <span className="mr-1 text-slate-500">Фактичні початки глав:</span>
+              {chapterMilestones.map((entry) => (
+                <span key={`${entry.chapterId || entry.chapterTitle}-${entry.pageNumber}`} className="rounded-full border border-slate-700 bg-slate-950 px-2 py-1 text-slate-300">
+                  {entry.chapterTitle || `Глава ${entry.chapterIndex || ''}`} · стор. {entry.pageNumber}
+                </span>
+              ))}
+            </div>
+          )}
           <object data={pdfUrl} type="application/pdf" className="h-[72vh] min-h-[560px] w-full bg-white">
             <iframe title="Точний PDF preview" src={pdfUrl} className="h-[72vh] min-h-[560px] w-full bg-white" />
           </object>
