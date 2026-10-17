@@ -104,12 +104,18 @@ export const RelationshipMapView: React.FC<RelationshipMapViewProps> = ({
           </svg>
 
           {filtered.map((node) => (
-            <AttentionAurora key={node.id} active={!!node.attention} intensity="soft" className="absolute" ariaLabel={node.attention ? `Нова зміна: ${node.label}` : undefined}>
+            <AttentionAurora
+              key={node.id}
+              active={!!node.attention}
+              intensity="soft"
+              className="absolute"
+              style={{ left: `${node.x}%`, top: `${node.y}%`, transform: `translate(-50%, -50%) scale(${zoom / 100})`, transformOrigin: 'center' }}
+              ariaLabel={node.attention ? `Нова зміна: ${node.label}` : undefined}
+            >
               <button
                 type="button"
                 onClick={() => chooseNode(node)}
-                className={`min-w-32 -translate-x-1/2 -translate-y-1/2 rounded-xl border bg-slate-950 px-3 py-2 text-left shadow-xl transition ${selectedId === node.id ? 'border-cyan-400/70 ring-2 ring-cyan-500/10' : 'border-slate-700 hover:border-slate-500'}`}
-                style={{ position: 'absolute', left: `${node.x}%`, top: `${node.y}%`, transform: `translate(-50%, -50%) scale(${zoom / 100})`, transformOrigin: 'center' }}
+                className={`min-w-32 rounded-xl border bg-slate-950 px-3 py-2 text-left shadow-xl transition ${selectedId === node.id ? 'border-cyan-400/70 ring-2 ring-cyan-500/10' : 'border-slate-700 hover:border-slate-500'}`}
               >
                 <div className="text-xs font-bold text-white">{node.label}</div>
                 {node.subtitle && <div className="mt-0.5 text-[10px] text-slate-500">{node.subtitle}</div>}
