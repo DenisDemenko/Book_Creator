@@ -71,6 +71,7 @@ Requirements:
 9. Constellation profile may evaluate only neutral session/process status. No medical, psychological, therapeutic or diagnostic conclusions.
 10. Leela profile may evaluate only route/session workflow status. No objective spiritual or psychological interpretation.
 11. Jev output must never mutate canon automatically; human confirmation/product rules remain authoritative.
+12. Product/workflow rules own every confidence threshold. If a result needs visual attention, return that state explicitly through `review.required` or `review.needsAttention`; do not make the UI infer a threshold from `answer.confidence`.
 
 Suggested facade shape if a dedicated route is needed:
 
@@ -118,7 +119,9 @@ interface JevWorkflowOutcome {
 - result state;
 - retry/re-evaluate;
 - optional human-review action;
-- Aurora attention for fresh/review/fallback/low-confidence results.
+- Aurora attention for fresh results or explicit product/workflow attention/review state.
+
+Confidence remains visible to the author as information, but the UI does **not** contain its own confidence threshold. Fallback is also displayed as a warning, while attention escalation remains a product/workflow decision.
 
 Screenplay sends the **currently selected scene** through the callback. Mafia, Constellation and Leela currently send safe workspace-level state; their authoritative session state must be enriched by the technical/session layer as those live backends are connected.
 
@@ -143,6 +146,8 @@ Aurora is a presentation state, not a model decision.
 Correct flow:
 
 `Jev outcome → existing workflow/product rules → review / attention state → Aurora`
+
+`answer.confidence` is display data only in the Story & Experience UI. The UI must not introduce a numeric attention threshold.
 
 The backend must never depend on whether an animation is visible or acknowledged.
 
