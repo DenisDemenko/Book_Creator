@@ -21,6 +21,11 @@ const players: MockPlayer[] = [
 ];
 
 const phases: Phase[] = ['Lobby', 'Intro', 'Investigation', 'Event', 'Vote', 'Finale'];
+const statusLabel: Record<MockPlayer['status'], string> = {
+  online: 'онлайн',
+  attention: 'потребує уваги',
+  offline: 'офлайн',
+};
 
 export const MafiaGameMasterView: React.FC<{ projectTitle?: string }> = ({ projectTitle = 'Ніч у старій обсерваторії' }) => {
   const [phase, setPhase] = useState<Phase>('Investigation');
@@ -43,9 +48,9 @@ export const MafiaGameMasterView: React.FC<{ projectTitle?: string }> = ({ proje
         </div>
       </header>
 
-      <nav className="mb-4 flex gap-2 overflow-x-auto pb-1">
+      <nav className="mb-4 flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Фази гри">
         {phases.map((item) => (
-          <button key={item} type="button" onClick={() => setPhase(item)} className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-semibold ${phase === item ? 'border-violet-400/60 bg-violet-500/15 text-violet-100' : 'border-slate-800 bg-slate-900 text-slate-500 hover:text-slate-300'}`}>{item}</button>
+          <button key={item} type="button" role="tab" aria-selected={phase === item} onClick={() => setPhase(item)} className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-semibold ${phase === item ? 'border-violet-400/60 bg-violet-500/15 text-violet-100' : 'border-slate-800 bg-slate-900 text-slate-500 hover:text-slate-300'}`}>{item}</button>
         ))}
       </nav>
 
@@ -60,12 +65,12 @@ export const MafiaGameMasterView: React.FC<{ projectTitle?: string }> = ({ proje
               <div className="inline-flex items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-300"><Clock3 className="h-4 w-4 text-slate-500" /> 18:42</div>
             </div>
 
-            <div className={`rounded-xl border p-4 ${eventStarted ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-amber-500/30 bg-amber-500/10'}`}>
+            <div className={`rounded-xl border p-4 ${eventStarted ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-amber-500/30 bg-amber-500/10'}`} aria-live="polite">
               <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.12em] text-amber-200"><AlertTriangle className="h-3.5 w-3.5" /> Активна подія</div>
               <h3 className="text-base font-bold text-white">Зникло світло у східному крилі</h3>
               <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-300">Відкрити доказ E-04 для трьох ролей після двадцятої хвилини. Інші гравці бачать лише факт відключення.</p>
               <div className="mt-4 flex flex-wrap gap-2">
-                <button type="button" onClick={() => setEventStarted(true)} className="inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-950 hover:bg-white"><Play className="h-3.5 w-3.5" /> {eventStarted ? 'Подію запущено' : 'Запустити подію'}</button>
+                <button type="button" onClick={() => setEventStarted(true)} disabled={eventStarted} className="inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-950 hover:bg-white disabled:cursor-default disabled:bg-emerald-100"><Play className="h-3.5 w-3.5" /> {eventStarted ? 'Подію запущено' : 'Запустити подію'}</button>
                 <button type="button" className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-300 hover:text-white">Відкласти</button>
               </div>
             </div>
@@ -73,7 +78,7 @@ export const MafiaGameMasterView: React.FC<{ projectTitle?: string }> = ({ proje
 
           <div className="grid gap-3 md:grid-cols-3">
             <StatusCard icon={<Shield className="h-4 w-4" />} label="Тригери" title="3 готові" detail="1 очікує умови" />
-            <StatusCard icon={<Vote className="h-4 w-4" />} label="Голосування" title={voteOpen ? 'Відкрите' : 'Не відкрито'} detail={voteOpen ? '5 із 6 голосів' : 'Фаза Vote попереду'} action={() => setVoteOpen((value) => !value)} />
+            <StatusCard icon={<Vote className="h-4 w-4" />} label="Голосування" title={voteOpen ? 'Відкрите' : 'Не відкрито'} detail={voteOpen ? '5 із 6 голосів' : 'Фаза Vote попереду'} action={() => setVoteOpen((value) => !value)} pressed={voteOpen} />
             <StatusCard icon={<CheckCircle2 className="h-4 w-4" />} label="Фінал" title="3 гілки" detail="2 доступні зараз" />
           </div>
 
@@ -92,8 +97,8 @@ export const MafiaGameMasterView: React.FC<{ projectTitle?: string }> = ({ proje
           <div className="space-y-2">
             {players.map((player) => (
               <div key={player.id} className="rounded-xl border border-slate-800 bg-slate-950 p-3">
-                <div className="flex items-center justify-between gap-3"><div><div className="text-xs font-bold text-white">{player.name}</div><div className="mt-0.5 text-[10px] text-slate-500">{player.role}</div></div><span className={`h-2.5 w-2.5 rounded-full ${player.status === 'online' ? 'bg-emerald-400' : player.status === 'attention' ? 'bg-amber-400' : 'bg-slate-700'}`} /></div>
-                <div className="mt-2 flex items-center justify-between text-[10px] text-slate-500"><span>{player.secretCount} секрети</span><button type="button" className="font-semibold text-violet-300 hover:text-violet-200">Відкрити</button></div>
+                <div className="flex items-center justify-between gap-3"><div><div className="text-xs font-bold text-white">{player.name}</div><div className="mt-0.5 text-[10px] text-slate-500">{player.role}</div></div><span className={`h-2.5 w-2.5 rounded-full ${player.status === 'online' ? 'bg-emerald-400' : player.status === 'attention' ? 'bg-amber-400' : 'bg-slate-700'}`} role="img" aria-label={statusLabel[player.status]} title={statusLabel[player.status]} /></div>
+                <div className="mt-2 flex items-center justify-between text-[10px] text-slate-500"><span>{player.secretCount} секрети</span><button type="button" className="font-semibold text-violet-300 hover:text-violet-200" aria-label={`Відкрити дані гравця ${player.name}`}>Відкрити</button></div>
               </div>
             ))}
           </div>
@@ -103,8 +108,8 @@ export const MafiaGameMasterView: React.FC<{ projectTitle?: string }> = ({ proje
   );
 };
 
-const StatusCard: React.FC<{ icon: React.ReactNode; label: string; title: string; detail: string; action?: () => void }> = ({ icon, label, title, detail, action }) => (
-  <button type="button" onClick={action} className="rounded-2xl border border-slate-800 bg-slate-900 p-4 text-left transition hover:border-slate-700">
+const StatusCard: React.FC<{ icon: React.ReactNode; label: string; title: string; detail: string; action?: () => void; pressed?: boolean }> = ({ icon, label, title, detail, action, pressed }) => (
+  <button type="button" onClick={action} aria-pressed={action ? pressed : undefined} className="rounded-2xl border border-slate-800 bg-slate-900 p-4 text-left transition hover:border-slate-700">
     <div className="mb-3 flex items-center justify-between text-slate-500"><span className="text-[10px] font-bold uppercase tracking-[0.12em]">{label}</span>{icon}</div>
     <div className="text-sm font-bold text-white">{title}</div><div className="mt-1 text-[10px] text-slate-500">{detail}</div>
   </button>
