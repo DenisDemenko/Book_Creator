@@ -1,4 +1,5 @@
 import React from 'react';
+import './attentionAurora.css';
 
 interface AttentionAuroraProps {
   active?: boolean;
