@@ -1,5 +1,6 @@
 import React from 'react';
 import { CirclePause, CirclePlay, Radio, Users, Wifi, WifiOff, XCircle } from 'lucide-react';
+import { AttentionAurora } from './AttentionAurora';
 
 export type SessionConnectionState = 'online' | 'unstable' | 'reconnecting' | 'offline' | 'restored';
 export type SessionStatus = 'draft' | 'live' | 'paused' | 'completed';
@@ -37,6 +38,7 @@ export const SessionHeader: React.FC<SessionHeaderProps> = ({
 }) => {
   const meta = connectionMeta[connection];
   const isPaused = status === 'paused';
+  const needsAttention = connection === 'unstable' || connection === 'reconnecting' || connection === 'restored';
 
   return (
     <header className="flex flex-col gap-3 border-b border-slate-800 bg-slate-950/95 px-4 py-3 text-slate-100 backdrop-blur lg:flex-row lg:items-center lg:justify-between" data-story-experience="session-header">
@@ -48,9 +50,11 @@ export const SessionHeader: React.FC<SessionHeaderProps> = ({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold ${meta.className}`}>
-          {connection === 'offline' ? <WifiOff className="h-3 w-3" /> : <Wifi className="h-3 w-3" />}{meta.label}
-        </span>
+        <AttentionAurora active={needsAttention} intensity="soft" ariaLabel={needsAttention ? `Зміна стану з'єднання: ${meta.label}` : undefined}>
+          <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold ${meta.className}`}>
+            {connection === 'offline' ? <WifiOff className="h-3 w-3" /> : <Wifi className="h-3 w-3" />}{meta.label}
+          </span>
+        </AttentionAurora>
         <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-800 bg-slate-900 px-2.5 py-1 text-[10px] text-slate-400"><Users className="h-3 w-3" /> {participants}</span>
         <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-800 bg-slate-900 px-2.5 py-1 font-mono text-[10px] text-slate-300"><Radio className="h-3 w-3" /> {elapsed}</span>
         {status !== 'completed' && (
