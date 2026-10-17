@@ -1,4 +1,7 @@
-import type { PaginationResult } from '../../src/utils/canonicalPageMap';
+import type {
+  CanonicalPageMapEntry,
+  PaginationResult,
+} from '../../src/utils/canonicalPageMap';
 import type { PdfBookInput } from './pdfTypes';
 
 type TocEntry = { level?: number; text?: string; page?: string | number };
@@ -58,17 +61,20 @@ export function buildDesigncraftSemanticPagination(input: {
   const totalPages = Math.max(0, Math.floor(Number(input.inspect.pageCount) || 0));
   const byName = pageNameIndexes(input.inspect);
   const contentStart = Math.max(0, Math.floor(Number(input.contentStartPageIndex) || 0));
-  const pageMap = Array.from({ length: totalPages }, (_, pageIndex) => ({
-    pageNumber: pageIndex + 1,
-    pageIndex,
-    pageType: 'content' as const,
-  }));
+  const pageMap: CanonicalPageMapEntry[] = Array.from(
+    { length: totalPages },
+    (_, pageIndex) => ({
+      pageNumber: pageIndex + 1,
+      pageIndex,
+      pageType: 'content',
+    })
+  );
 
-  const mark = (pageIndex: number, patch: Record<string, unknown>) => {
+  const mark = (pageIndex: number, patch: Partial<CanonicalPageMapEntry>) => {
     if (pageIndex < 0 || pageIndex >= pageMap.length) {
       throw new Error(`DesignCraft semantic entry resolved outside PDF: pageIndex=${pageIndex}, totalPages=${totalPages}.`);
     }
-    pageMap[pageIndex] = { ...pageMap[pageIndex], ...patch } as (typeof pageMap)[number];
+    pageMap[pageIndex] = { ...pageMap[pageIndex], ...patch };
   };
 
   if (input.titlePageShown && totalPages > 0) mark(0, { pageType: 'title' });
