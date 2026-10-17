@@ -55,7 +55,7 @@ let serverDraft: WizardDraft<Payload> = {
 };
 const calls: string[] = [];
 
-const fakeApi = async <T>(path: string, init?: RequestInit): Promise<T> => {
+const fakeApi = async <T,>(path: string, init?: RequestInit): Promise<T> => {
   calls.push(path);
   if (path === '/api/express/draft/draft-1') {
     const body = JSON.parse(String(init?.body ?? '{}')) as { payload: Payload; step?: number };
