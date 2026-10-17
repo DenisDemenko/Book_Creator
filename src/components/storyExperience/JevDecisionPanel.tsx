@@ -58,7 +58,7 @@ export const JevDecisionPanel: React.FC<JevDecisionPanelProps> = ({
   title = 'Оцінка стану',
   fresh = false,
   review = { required: false },
-  needsAttention,
+  needsAttention = false,
   onAcknowledge,
   onOpenWorkflow,
   onRequestReview,
@@ -73,9 +73,9 @@ export const JevDecisionPanel: React.FC<JevDecisionPanelProps> = ({
     return values.length ? Math.min(...values) : null;
   }, [outcome]);
 
-  const attentionActive = Boolean(
-    needsAttention ?? review.needsAttention ?? review.required ?? fresh,
-  );
+  // Confidence is display-only here. Product/workflow rules own thresholds and
+  // communicate attention/review explicitly through `needsAttention`/review.
+  const attentionActive = Boolean(needsAttention || review.needsAttention || review.required || fresh);
 
   if (!outcome) return null;
 
