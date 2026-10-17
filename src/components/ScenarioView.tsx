@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { BrainCircuit, Clapperboard, Drama, Gamepad2, Sparkles } from 'lucide-react';
-import type { Book } from '../types';
+import type { Book, NavigationTab } from '../types';
 import { ScenarioLegacyView } from './ScenarioLegacyView';
 import {
   IntegratedConstellationView,
@@ -15,6 +15,7 @@ interface ScenarioViewProps {
   book: Book;
   onUpdateBook: (updatedBook: Book, logAction?: string, logDetails?: string) => void;
   onNavigateToSection: (chapterId: string, sectionId: string) => void;
+  onNavigateToTab?: (tab: NavigationTab) => void;
   onSaveBook?: () => void;
 }
 
@@ -41,6 +42,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   book,
   onUpdateBook,
   onNavigateToSection,
+  onNavigateToTab,
   onSaveBook,
 }) => {
   const [workspace, setWorkspace] = useState<StoryWorkspace>('screenplay');
@@ -84,6 +86,9 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
             book={book}
             preferredModelId={book.preferredAiModelId}
             onNavigateToSection={onNavigateToSection}
+            onOpenCharacters={() => onNavigateToTab?.('characters')}
+            onOpenRelationships={() => onNavigateToTab?.('core-story-graph')}
+            onOpenDiagnostics={() => onNavigateToTab?.('diagn')}
           />
         )}
 
