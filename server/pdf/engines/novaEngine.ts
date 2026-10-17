@@ -69,6 +69,7 @@ export const novaEngine: PdfEngine = {
           pageCount: kdp.pageCount,
           engineId: 'nova',
           honoredSpec: true,
+          pagination: kdp.pagination,
           // Попередження KDP і причини пропущених ілюстрацій — не «нотатки
           // рушія», а те, що автор мусить побачити до завантаження файлу;
           // сюди вони й переходять.
@@ -82,6 +83,7 @@ export const novaEngine: PdfEngine = {
         pageCount: result.pageCount,
         engineId: 'nova',
         honoredSpec: true,
+        pagination: result.pagination,
         notesUk: result.notesUk,
       };
     } catch (err) {
