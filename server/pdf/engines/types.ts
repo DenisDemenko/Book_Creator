@@ -5,6 +5,7 @@
  * чесно повідомляти про свою доступність до запуску публікації.
  */
 
+import type { PaginationResult } from '../../../src/utils/canonicalPageMap';
 import type { PdfBookInput, PdfLayoutSpec } from '../pdfTypes';
 
 export type PdfEngineId = 'nova' | 'chromium' | 'pandoc' | 'designcraft' | 'gamma';
@@ -47,6 +48,12 @@ export interface PdfRenderResult {
   honoredSpec: boolean;
   /** Що саме рушій зробив інакше. */
   notesUk: string[];
+  /**
+   * Карта ФАКТИЧНО створеного PDF. Вона ніколи не походить з браузерної
+   * евристики. Рушій може дати semantic map; registry гарантовано додає
+   * physical-only map, якщо рушій поки знає лише точну кількість сторінок.
+   */
+  pagination?: PaginationResult;
 }
 
 export interface PdfEngineAvailability {

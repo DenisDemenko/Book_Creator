@@ -42,6 +42,16 @@ jobs:
       - name: TypeScript
         run: npm run lint
 
+      - name: Book Studio integrity contracts
+        run: |
+          npx tsx scripts/test-canonicalPageMap.mts
+          npx tsx scripts/test-novaSemanticPagination.mts
+          npx tsx scripts/test-designcraftSemanticPagination.mts
+          npx tsx scripts/test-previewImageSources.mts
+          npx tsx scripts/test-heroArcAnalysis.mts
+          npx tsx scripts/test-expressHeroArcJev.mts
+          npx tsx scripts/test-expressHeroArcSession.mts
+
       - name: Express wizard integrity contract
         run: npx tsx scripts/test-expressWizardIntegrity.mts
 

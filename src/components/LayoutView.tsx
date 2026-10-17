@@ -8,7 +8,6 @@ import {
   FileSpreadsheet, 
   Check, 
   Maximize2, 
-  ZoomIn,
   Layers, 
   Sparkles,
   Info,
@@ -30,6 +29,7 @@ import {
 } from '../utils/kdpHelpers';
 import { KdpPublishingModal } from './KdpPublishingModal';
 import { DesignSuggestionPanel } from './DesignSuggestionPanel';
+import { LayoutZoomControl } from './layout/LayoutZoomControl';
 import { useLanguage } from '../i18n/LanguageContext';
 
 interface LayoutViewProps {
@@ -38,17 +38,15 @@ interface LayoutViewProps {
   totalWords: number;
 }
 
-// Розмір превʼю-аркуша (колишні Tailwind-класи w-64 h-96) та дозволені масштаби.
+// Розмір превʼю-аркуша (колишні Tailwind-класи w-64 h-96).
 const SHEET_W = 256;
 const SHEET_H = 384;
-const ZOOM_PRESETS = [20, 50, 70, 80, 90, 100, 110, 120, 150];
 
 export const LayoutView: React.FC<LayoutViewProps> = ({ book, onUpdateBook, totalWords }) => {
   const { t } = useLanguage();
   const layout = book.layoutConfig;
   const [showKdpModal, setShowKdpModal] = useState<boolean>(false);
   const [sheetZoom, setSheetZoom] = useState<number>(100);
-  const [customZoom, setCustomZoom] = useState<string>('');
 
   // Calculate estimated total pages dynamically
   const estimatedPages = estimatePageCount(
@@ -636,56 +634,11 @@ export const LayoutView: React.FC<LayoutViewProps> = ({ book, onUpdateBook, tota
               </span>
             </div>
 
-            {/* Масштаб аркуша: вибір зі списку або власний відсоток */}
-            <div className="flex items-center justify-center gap-2 w-full text-xs">
-              <ZoomIn className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-              <span className="text-slate-400">{t('layoutView.sheetZoomLabel')}</span>
-              <select
-                value={ZOOM_PRESETS.includes(sheetZoom) ? String(sheetZoom) : 'custom'}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  if (value === 'custom') {
-                    setCustomZoom(String(sheetZoom));
-                  } else {
-                    setSheetZoom(Number(value));
-                  }
-                }}
-                className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-200"
-              >
-                {ZOOM_PRESETS.map((zoom) => (
-                  <option key={zoom} value={zoom}>
-                    {zoom}%
-                  </option>
-                ))}
-                <option value="custom">{t('layoutView.sheetZoomCustomOpt')}</option>
-              </select>
-              {!ZOOM_PRESETS.includes(sheetZoom) && (
-                <input
-                  type="number"
-                  min={10}
-                  max={200}
-                  value={customZoom}
-                  placeholder="%"
-                  onChange={(e) => setCustomZoom(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      const parsed = Number(customZoom);
-                      if (Number.isFinite(parsed) && parsed >= 10 && parsed <= 200) {
-                        setSheetZoom(Math.round(parsed));
-                      }
-                    }
-                  }}
-                  onBlur={() => {
-                    const parsed = Number(customZoom);
-                    if (Number.isFinite(parsed) && parsed >= 10 && parsed <= 200) {
-                      setSheetZoom(Math.round(parsed));
-                    }
-                  }}
-                  className="w-20 p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-cyan-300 font-mono text-center"
-                  title={t('layoutView.sheetZoomCustomHint')}
-                />
-              )}
-            </div>
+            <LayoutZoomControl
+              value={sheetZoom}
+              onChange={setSheetZoom}
+              label={t('layoutView.sheetZoomLabel')}
+            />
 
             {/* Simulated Paper Sheet — масштабується transform-ом разом із
                 вмістом; обгортка резервує розмір, щоб кнопка нижче не

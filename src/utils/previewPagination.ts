@@ -1,7 +1,7 @@
 import type { Book, Chapter, Section } from '../types';
 import { buildBookPages, renderSectionBlocksHtml, type BookPage } from './helpers';
 import { collectImageMarkerIds } from './imageMarkers';
-import { assetUrl, htmlAttribute } from './assetUrl';
+import { assetUrl, htmlAttribute, normalizeHtmlImageSources } from './assetUrl';
 import { computeBreaksFromBounds } from './pageBreaker';
 import { PX_PER_MM } from './mmUnits';
 import { resolvePageGeometry } from './pageGeometry';
@@ -42,7 +42,10 @@ export async function measureBookPreview(book: Book, host: HTMLElement, options:
     el.style.fontSize = typography.fontSizePx + 'px';
     el.style.lineHeight = String(typography.lineHeight);
     Object.entries(paragraphCssVars(typography)).forEach(([k, v]) => el.style.setProperty(k, v));
-    el.innerHTML = renderSectionBlocksHtml(section.content, book, footnotes.filter(f => f.sectionId === section.id), footnotes)
+    const sectionHtml = normalizeHtmlImageSources(
+      renderSectionBlocksHtml(section.content, book, footnotes.filter(f => f.sectionId === section.id), footnotes)
+    );
+    el.innerHTML = sectionHtml
       + (book.illustrations || []).filter(i => i.sectionId === section.id && !marked.has(i.id)).map(i =>
         '<figure style="margin:1em 0;break-inside:avoid"><img src="' + htmlAttribute(assetUrl(i.url))
         + '" alt="' + htmlAttribute(i.caption || '') + '" style="display:block;max-width:100%;height:auto">'

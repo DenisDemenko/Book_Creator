@@ -3,6 +3,7 @@
  * обирається на ім'я.
  */
 
+import { buildPhysicalPaginationResult } from '../../../src/utils/canonicalPageMap';
 import { novaEngine } from './novaEngine';
 import { chromiumEngine } from './chromiumEngine';
 import { pandocEngine } from './pandocEngine';
@@ -148,5 +149,19 @@ export async function renderWithEngine(
         }
       : request;
 
-  return engine.render(effectiveRequest);
+  const rendered = await engine.render(effectiveRequest);
+
+  // Physical page parity is available for EVERY engine because pageCount is
+  // read from the PDF that was actually produced. Never substitute browser
+  // pagination here. Engines that know semantic positions may return a richer
+  // map themselves; otherwise we attach an exact, honest physical-only map.
+  if (rendered.pagination) return rendered;
+  return {
+    ...rendered,
+    pagination: buildPhysicalPaginationResult(rendered.pageCount, {
+      id: rendered.engineId,
+      label: engine.label,
+      exportAuthoritative: true,
+    }),
+  };
 }

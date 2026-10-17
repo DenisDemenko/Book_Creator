@@ -20,6 +20,8 @@ import { assetUrl } from '../utils/assetUrl';
 import { PX_PER_MM } from '../utils/mmUnits';
 import { bodyFontStack, resolveParagraphGeometry } from '../utils/typography';
 import { useLanguage } from '../i18n/LanguageContext';
+import { buildCanonicalPageMap, chapterMilestones, spreadStartIndexForPage } from '../utils/canonicalPageMap';
+import { SpreadMilestones } from './bookPreview/SpreadMilestones';
 
 interface BookPreviewViewProps {
   book: Book;
@@ -79,11 +81,22 @@ export const BookPreviewView: React.FC<BookPreviewViewProps> = ({ book, totalWor
   const { pages, measuring, pendingImages, failedImages } = useBookPreviewMeasurement(book);
 
   const totalBookPages = pages.length;
+  const pagination = buildCanonicalPageMap(book, pages, {
+    id: 'browser-preview',
+    label: 'Browser Preview',
+    exportAuthoritative: false,
+  });
+  const milestones = chapterMilestones(pagination);
+
   useEffect(() => {
     setCurrentPageIndex(index => Math.min(index, Math.max(0, Math.floor((pages.length - 1) / 2) * 2)));
   }, [pages.length]);
   const leftPageIndex = currentPageIndex;
   const rightPageIndex = currentPageIndex + 1 < totalBookPages ? currentPageIndex + 1 : null;
+
+  const goToPageIndex = (pageIndex: number) => {
+    setCurrentPageIndex(spreadStartIndexForPage(pageIndex, totalBookPages));
+  };
 
   const handleNextSpread = () => {
     if (currentPageIndex + 2 < totalBookPages) {
@@ -394,20 +407,14 @@ export const BookPreviewView: React.FC<BookPreviewViewProps> = ({ book, totalWor
 
       </div>
 
-      {/* Quick Jump Pagination Slider */}
-      <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 flex items-center justify-between gap-4 text-xs">
-        <span className="text-slate-400 font-mono">1</span>
-        <input
-          type="range"
-          min="0"
-          max={Math.max(0, totalBookPages - 2)}
-          step="2"
-          value={currentPageIndex}
-          onChange={(e) => setCurrentPageIndex(parseInt(e.target.value))}
-          className="flex-1 accent-cyan-400 cursor-pointer"
-          data-tour="preview__4"
+      {/* Quick Jump Pagination Slider + semantic chapter milestones */}
+      <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 text-xs" data-tour="preview__4">
+        <SpreadMilestones
+          totalPages={totalBookPages}
+          currentPageIndex={currentPageIndex}
+          milestones={milestones}
+          onGoToPageIndex={goToPageIndex}
         />
-        <span className="text-slate-400 font-mono">{totalBookPages}</span>
       </div>
 
     </div>
