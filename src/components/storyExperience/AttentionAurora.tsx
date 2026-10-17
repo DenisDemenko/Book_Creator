@@ -5,6 +5,7 @@ interface AttentionAuroraProps {
   active?: boolean;
   children: React.ReactNode;
   className?: string;
+  style?: React.CSSProperties;
   intensity?: 'soft' | 'normal' | 'strong';
   ariaLabel?: string;
 }
@@ -20,12 +21,14 @@ export const AttentionAurora: React.FC<AttentionAuroraProps> = ({
   active = false,
   children,
   className = '',
+  style,
   intensity = 'normal',
   ariaLabel,
 }) => {
   return (
     <div
       className={`story-attention-aurora story-attention-aurora--${intensity} ${active ? 'is-active' : ''} ${className}`}
+      style={style}
       aria-label={ariaLabel}
       data-attention={active ? 'active' : 'idle'}
     >
