@@ -1,8 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { BrainCircuit, Clapperboard, Drama, Gamepad2, Sparkles } from 'lucide-react';
 import type { Book, NavigationTab } from '../types';
-import { buildAppPath } from '../utils/appRoutes';
-import { API_BASE } from '../utils/basePath';
 import { ScenarioLegacyView } from './ScenarioLegacyView';
 import {
   IntegratedConstellationView,
@@ -60,8 +58,11 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       onNavigateToTab(tab);
       return;
     }
-    const path = buildAppPath({ projectId: book.id, tab }, API_BASE);
-    if (path) window.location.assign(path);
+
+    // App already listens to this event and routes through its real
+    // handleSelectTab/navigation guard. This keeps the author inside the SPA,
+    // preserving unsaved UI state instead of forcing a full page reload.
+    window.dispatchEvent(new CustomEvent('nova:open-tab', { detail: { tab } }));
   };
 
   const screenplayJevRequest = useMemo<StoryExperienceJevRequest | undefined>(() => {
@@ -126,11 +127,13 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
             </div>
           </div>
 
-          <nav className="flex max-w-full gap-1 overflow-x-auto rounded-xl border border-slate-800 bg-slate-900 p-1" aria-label="Story & Experience workspace">
+          <nav className="flex max-w-full gap-1 overflow-x-auto rounded-xl border border-slate-800 bg-slate-900 p-1" aria-label="Story & Experience workspace" role="tablist">
             {workspaces.map((item) => (
               <button
                 key={item.id}
                 type="button"
+                role="tab"
+                aria-selected={workspace === item.id}
                 onClick={() => setWorkspace(item.id)}
                 className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${
                   workspace === item.id
