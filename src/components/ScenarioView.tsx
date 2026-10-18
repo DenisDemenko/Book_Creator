@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
+import { createSessionJournal, appendNeutralSessionEvent, type JournalSession } from './storyExperience/sessionJournalClient';
 import { BrainCircuit, Clapperboard, Drama, Gamepad2, Sparkles } from 'lucide-react';
 import type { Book, NavigationTab } from '../types';
 import { generateSessionCharacterPortrait, attachSessionPortraits, type SessionPortraitAsset } from './storyExperience/sessionPortraitService';
@@ -59,6 +60,19 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   reviewedSessionMaterials,
 }) => {
   const [workspace, setWorkspace] = useState<StoryWorkspace>('screenplay');
+  const journals = useRef<Partial<Record<'leela'|'constellation', Promise<JournalSession>>>>({});
+  const [journalError, setJournalError] = useState('');
+  const recordNeutralEvent = async (kind: 'leela'|'constellation', event: {kind:'snapshot'|'leela-move';label:string;description:string}) => {
+    try {
+      if (!journals.current[kind]) journals.current[kind] = createSessionJournal(book.id,kind);
+      const session = await journals.current[kind]!;
+      await appendNeutralSessionEvent(session,{...event,eventId:'event-'+crypto.randomUUID()});
+      setJournalError('');
+    } catch (error) {
+      journals.current[kind] = undefined;
+      setJournalError(error instanceof Error ? error.message : 'Подію не записано');
+    }
+  };
   const [sessionPortraits, setSessionPortraits] = useState<SessionPortraitAsset[]>([]);
   const [selectedScene, setSelectedScene] = useState<ScreenplaySelectedSceneContext | null>(null);
 
@@ -203,6 +217,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
 
         {workspace === 'constellation' && (
           <IntegratedConstellationView
+            onConstellationSnapshot={snapshot => { void recordNeutralEvent('constellation',{kind:'snapshot',label:'Snapshot '+snapshot.index,description:'Збережено snapshot поля №'+snapshot.index}); }}
             onRequestSessionPortrait={requestPortrait}
             portraitAssets={sessionPortraits}
             existingCharacters={book.characters.map((character) => ({ id: character.id, name: character.name }))}
@@ -217,6 +232,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
 
         {workspace === 'leela' && (
           <IntegratedLeelaView
+            onLeelaStep={step => { void recordNeutralEvent('leela',{kind:'leela-move',label:'Хід '+step.turn,description:'Перехід з клітини '+step.from+' до '+step.to+', кубик '+step.dice}); }}
             onRequestSessionPortrait={requestPortrait}
             portraitAssets={sessionPortraits}
             existingCharacters={book.characters.map((character) => ({ id: character.id, name: character.name }))}
@@ -229,6 +245,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
           />
         )}
 
+        {journalError && <p role="alert" className="mx-4 rounded-lg border border-rose-700 p-3 text-xs text-rose-200">Журнал подій: {journalError}</p>}
         {workspace === 'history' && <SessionHistoryView bookId={book.id} existingCharacters={book.characters.map(character => ({ id: character.id, name: character.name }))} onCommitBookExport={onCommitSessionBook} onRequestPortrait={requestPortrait} portraitAssets={sessionPortraits} />}
         {workspace === 'analysis' && (
           <ScenarioLegacyView
