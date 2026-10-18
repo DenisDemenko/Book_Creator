@@ -6,7 +6,7 @@ import { requireAuth } from './auth';
 import { DATA_DIR } from './db';
 import { getBook } from './bookStore';
 import type { ExperienceEventKind, ExperienceEventRecord } from './storyExperienceEvents';
-import { inspectApprovedExperience } from './storyExperiencePrivacy';
+import { inspectApprovedExperience, proposeExperienceRedactions } from './storyExperiencePrivacy';
 import { consentMaterial, safeCompletedSessionSummary, type CompletedExperienceRecord, type ExperienceKind } from './storyExperienceRegistry';
 
 const registryPath = path.join(DATA_DIR, 'story-experience-completed.json');
@@ -161,6 +161,24 @@ export function registerStoryExperienceRoutes(app: Express): void {
       await enqueue(async () => { const items = await load(); await fs.mkdir(DATA_DIR,{recursive:true}); const tmp = registryPath + '.' + randomUUID() + '.tmp'; await fs.writeFile(tmp,JSON.stringify([...items,record]),{mode:0o600}); await fs.rename(tmp,registryPath); });
       res.status(201).json({sessionId:record.id});
     } catch { res.status(500).json({error:'Не вдалося зберегти сесію'}); }
+  });
+  // Preview only; does not mutate archived sessions or certify anonymization.
+  app.post('/api/story-experience/privacy/preview', requireAuth, async (req: Request,res: Response) => {
+    const userId=req.principal?.id;
+    const {bookId,title,events}=req.body||{};
+    if(!userId){res.status(401).json({error:'Потрібна авторизація'});return;}
+    if(typeof bookId!=='string'||typeof title!=='string'||title.length>200||
+      !Array.isArray(events)||events.length>200||events.some((event:any)=>!event||
+      typeof event.label!=='string'||typeof event.description!=='string'||
+      event.label.length>200||event.description.length>10000)){
+      res.status(400).json({error:'Недійсний матеріал для перевірки'});return;
+    }
+    try{
+      const book=await getBook(bookId);
+      if(!book||book.ownerId!==userId){res.status(404).json({error:'Книгу не знайдено'});return;}
+      res.setHeader('Cache-Control','no-store');
+      res.json(proposeExperienceRedactions(events,title));
+    }catch{res.status(500).json({error:'Перевірка приватності недоступна'});}
   });
   app.get('/api/story-experience/my-consents', requireAuth, async (req: Request, res: Response) => {
     const participantId = req.principal?.id;
