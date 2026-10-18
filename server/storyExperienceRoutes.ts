@@ -122,8 +122,8 @@ export function registerStoryExperienceRoutes(app: Express): void {
     if (!userId) { res.status(401).json({error:'Потрібна авторизація'}); return; }
     try {
       const records = (await load()).filter(r => r.ownerId === userId && (!req.query.bookId || r.bookId === req.query.bookId));
-      // Never return approved text or private data in list responses.
-      res.json({ sessions: records.map(({events, canonicalEvents, publicParticipantLabels, ...r}) => ({ ...r, eventCount: canonicalEvents?.length ?? events.length, participantCount: publicParticipantLabels.length })) });
+      // Only owner-facing archive metadata. Never expose private participant identifiers or consent audit.
+      res.json({ sessions: records.map(({events, canonicalEvents, publicParticipantLabels, consentRequiredParticipantIds, consentDecisions, ...r}) => ({ ...r, eventCount: canonicalEvents?.length ?? events.length, participantCount: publicParticipantLabels.length })) });
     } catch { res.status(500).json({error:'Неможливо прочитати архів'}); }
   });
   app.post('/api/story-experience/completed', requireAuth, async (req: Request, res: Response) => {
@@ -133,9 +133,8 @@ export function registerStoryExperienceRoutes(app: Express): void {
     if (typeof body.bookId !== 'string' || !body.bookId.trim() || typeof body.title !== 'string' || !body.title.trim()
       || !safeKinds.has(body.kind) || body.confirmedForBook !== true
       || !Array.isArray(body.events) || body.events.length === 0 || body.events.length > 200
-      || (body.consentRequiredParticipantIds !== undefined &&
-        (!Array.isArray(body.consentRequiredParticipantIds) || body.consentRequiredParticipantIds.length > 100 ||
-        body.consentRequiredParticipantIds.some((id: unknown) => typeof id !== 'string' || !id.trim() || id.length > 128)))
+      || !Array.isArray(body.consentRequiredParticipantIds) || body.consentRequiredParticipantIds.length === 0 || body.consentRequiredParticipantIds.length > 100
+      || body.consentRequiredParticipantIds.some((id: unknown) => typeof id !== 'string' || !id.trim() || id.length > 128)
       || body.events.some((e: any) => !e || typeof e.label !== 'string' || typeof e.description !== 'string'
         || e.approvedForBook !== true || e.visibility !== 'approved'
         || e.label.length > 200 || e.description.length > 10000)) {
