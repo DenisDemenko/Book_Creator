@@ -32,12 +32,27 @@ export const CompletedSessionArchiveReview: React.FC<CompletedSessionArchiveRevi
     return () => {disposed=true;};
   },[journal]);
   const [confirmed, setConfirmed] = useState(false);
+  const [privacyPreview, setPrivacyPreview] = useState<{title:string;events:Array<{label:string;description:string}>;issues:Array<{field:string;category:string}>}|null>(null);
+  const [previewBusy,setPreviewBusy]=useState(false);
+  const [previewError,setPreviewError]=useState('');
+  const draftFingerprint=JSON.stringify({title,events:events.map(e=>({label:e.label,description:e.description}))});
+  const [reviewedFingerprint,setReviewedFingerprint]=useState('');
+  const requestPrivacyPreview=async()=>{
+    setPreviewBusy(true);setPreviewError('');setPrivacyPreview(null);
+    try {
+      const response=await fetch('/api/story-experience/privacy/preview',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({bookId,title,events:events.map(({label,description})=>({label,description}))})});
+      const result=await response.json().catch(()=>({}));
+      if(!response.ok||!Array.isArray(result.events))throw new Error(result.error||'Помилка перевірки приватності');
+      setPrivacyPreview(result);setReviewedFingerprint(draftFingerprint);
+    }catch(error){setPreviewError(error instanceof Error?error.message:'Помилка перевірки');}
+    finally{setPreviewBusy(false);}
+  };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState('');
   const valid = events.length > 0 && events.every(e => e.label.trim().length > 0 && e.description.trim().length > 0);
   const save = async () => {
-    if (!valid || !confirmed || busy) return;
+    if (!valid || !confirmed || busy || reviewedFingerprint!==draftFingerprint || (privacyPreview?.issues.length??0)>0) return;
     setBusy(true); setError('');
     try {
       const response = await fetch('/api/story-experience/completed', {
@@ -75,10 +90,24 @@ export const CompletedSessionArchiveReview: React.FC<CompletedSessionArchiveRevi
           <button type="button" disabled={events.length===1} onClick={() => { setConfirmed(false); setEvents(old=>old.filter(x=>x.id!==event.id)); }} className="text-xs text-rose-200 disabled:opacity-40">Прибрати подію</button>
         </div>)}
         <button type="button" disabled={events.length>=200} onClick={() => { setConfirmed(false); setEvents(old=>[...old,{id:Math.max(...old.map(x=>x.id))+1,label:'',description:''}]); }} className="rounded-lg border border-slate-700 px-3 py-2 text-xs">Додати подію</button>
+        <div className="space-y-3 rounded-xl border border-cyan-800 p-4">
+          <h2 className="font-semibold">Перевірка приватності</h2>
+          <button type="button" disabled={!valid||previewBusy} onClick={()=>void requestPrivacyPreview()} className="rounded-lg border border-cyan-600 px-3 py-2 text-xs disabled:opacity-40">{previewBusy?'Перевірка…':'Перевірити та порівняти'}</button>
+          {previewError&&<p role="alert" className="text-sm text-rose-300">{previewError}</p>}
+          {privacyPreview&&reviewedFingerprint===draftFingerprint&&<div className="space-y-3">
+            <p className="text-xs">Знайдено потенційних прямих ідентифікаторів: {privacyPreview.issues.length}. Автоматичні заміни — лише пропозиція для ручного перегляду.</p>
+            {privacyPreview.events.map((proposed,i)=><div key={i} className="grid gap-2 md:grid-cols-2">
+              <div className="whitespace-pre-wrap rounded-lg border border-slate-700 p-2 text-xs"><strong>Початковий текст</strong><p>{events[i]?.label}</p><p>{events[i]?.description}</p></div>
+              <div className="whitespace-pre-wrap rounded-lg border border-cyan-800 p-2 text-xs"><strong>Пропоноване очищення</strong><p>{proposed.label}</p><p>{proposed.description}</p></div>
+            </div>)}
+            {privacyPreview.issues.length>0&&<button type="button" onClick={()=>{setConfirmed(false);setEvents(old=>old.map((e,i)=>({...e,label:privacyPreview.events[i]?.label??e.label,description:privacyPreview.events[i]?.description??e.description})));setPrivacyPreview(null);setReviewedFingerprint('');}} className="rounded-lg border border-cyan-500 px-3 py-2 text-xs">Перенести пропозиції в редактор для ручної перевірки</button>}
+          </div>}
+          {reviewedFingerprint!==draftFingerprint&&<p className="text-xs text-amber-200">Після кожної зміни тексту виконайте перевірку повторно.</p>}
+        </div>
         <div role="note" className="rounded-xl border border-amber-600/50 p-3 text-xs text-amber-100">Система не може гарантувати анонімність: навіть без імен людину можуть упізнати за змістом. Для використання чужого досвіду потрібні належні дозволи.</div>
         <label className="flex gap-2 text-sm"><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/><span>Я перевірив кожну подію, прибрав персональні деталі та маю дозвіл використовувати матеріал.</span></label>
         {error && <p role="alert" className="text-sm text-rose-300">{error}</p>}
-        <div className="flex gap-3"><button type="button" onClick={onClose} className="rounded-lg border border-slate-700 px-4 py-2 text-sm">Назад</button><button type="button" disabled={!valid||!confirmed||busy} onClick={()=>void save()} className="rounded-lg bg-slate-100 px-4 py-2 text-sm text-slate-950 disabled:opacity-40">{busy?'Збереження…':'Зберегти погоджені події'}</button></div>
+        <div className="flex gap-3"><button type="button" onClick={onClose} className="rounded-lg border border-slate-700 px-4 py-2 text-sm">Назад</button><button type="button" disabled={!valid||!confirmed||busy||reviewedFingerprint!==draftFingerprint||(privacyPreview?.issues.length??0)>0} onClick={()=>void save()} className="rounded-lg bg-slate-100 px-4 py-2 text-sm text-slate-950 disabled:opacity-40">{busy?'Збереження…':'Зберегти погоджені події'}</button></div>
       </>}
     </div>
   </section>;
