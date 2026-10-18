@@ -106,6 +106,7 @@ import { createTokenBucket } from './server/etsy/rateLimiter';
 import { registerPdfRoutes } from './server/pdfRoutes';
 import { registerBookRoutes } from './server/bookRoutes';
 import { registerStoryExperienceRoutes } from './server/storyExperienceRoutes';
+import { registerConstellationEventRoutes } from './server/constellationEventRoutes';
 import { registerGammaRoutes } from './server/gammaRoutes';
 import { configureGammaEngine } from './server/pdf/engines/gammaEngine';
 import { readGammaConfig, GAMMA_RATE_LIMIT_PER_SECOND } from './server/gamma/gammaConfig';
@@ -755,6 +756,7 @@ registerGitCommandRoutes(app);
   });
   registerBookRoutes(app, storedBookOps);
 registerStoryExperienceRoutes(app);
+  registerConstellationEventRoutes(app);
   // API сторінок семантичного ядра (Т0.8): /api/projects/:id/* — лише з правом
   // на книгу (власник, прийняте запрошення, адміністратор).
   // Якість живих персонажів (Т2.8 В3): прогони набору на справжніх моделях — лише адміністратор.
