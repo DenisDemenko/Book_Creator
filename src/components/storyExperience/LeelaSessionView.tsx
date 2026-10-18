@@ -33,7 +33,7 @@ export const LeelaSessionView: React.FC<{ title?: string; cellCount?: number; on
   };
 
   return (
-    <section className="min-h-0 flex-1 overflow-y-auto bg-[#F4ECE1] p-4 text-[#2C1A12] lg:p-6" data-story-experience="leela">
+    <section className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-[#F4ECE1] p-4 text-[#2C1A12] lg:p-6" data-story-experience="leela">
       <header className="mb-4 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
           <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[#91643D]">Leela Studio</div>
@@ -46,7 +46,7 @@ export const LeelaSessionView: React.FC<{ title?: string; cellCount?: number; on
         </div>
       </header>
 
-      <div className="grid gap-4 xl:grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="rounded-2xl border border-[#E0D4C7] bg-[#FFFCF8] p-3 sm:p-4">
           <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#796D62]">Board Pack</div><h2 className="mt-1 text-sm font-bold text-white">Класичний маршрут · {cellCount} клітини</h2></div><button type="button" className="inline-flex self-start items-center gap-1 rounded-xl border border-[#E0D4C7] bg-[#F7F0E7] px-2.5 py-1.5 text-[10px] text-[#71645A]"><RotateCcw className="h-3 w-3" /> Fit</button></div>
           <div className="grid gap-1.5" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(44px, 1fr))' }} role="grid" aria-label={`Поле Leela, ${cellCount} клітин`}>
