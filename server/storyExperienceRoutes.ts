@@ -318,15 +318,23 @@ export function registerStoryExperienceRoutes(app: Express): void {
         const records = await load();
         const record = records.find(r => r.id === req.params.sessionId && r.bookId === bookId);
         if (!record || !record.consentRequiredParticipantIds?.includes(participantId)) return 'missing' as const;
-        const digest=consentMaterial(record).hash;
-        if(decision==='granted' && (typeof materialHash!=='string'||materialHash!==digest)) return 'stale' as const;
+        // Revocation is always permitted for the named participant, even if the
+        // approved material was modified or subsequently fails the privacy check.
+        // Only a new grant needs the current canonical material hash.
+        let digest: string | undefined;
+        if (decision === 'granted') {
+          try { digest = consentMaterial(record).hash; }
+          catch { return 'privacy' as const; }
+          if (typeof materialHash !== 'string' || materialHash !== digest) return 'stale' as const;
+        }
         record.consentDecisions ??= [];
-        record.consentDecisions.push({participantId, scope:'book-adaptation', status:decision, materialHash:digest, decidedAt:new Date().toISOString()});
+        record.consentDecisions.push({participantId, scope:'book-adaptation', status:decision, ...(digest ? { materialHash:digest } : {}), decidedAt:new Date().toISOString()});
         const temp = registryPath + '.' + randomUUID() + '.tmp';
         await fs.writeFile(temp,JSON.stringify(records),{mode:0o600});
         await fs.rename(temp,registryPath);
         return 'saved' as const;
       });
+      if (result === 'privacy') { res.status(409).json({error:'Матеріал потребує очищення персональних даних перед погодженням.'}); return; }
       if (result === 'stale') { res.status(409).json({error:'Матеріал змінився. Перегляньте його перед новим погодженням.'}); return; }
       if (result === 'missing') { res.status(404).json({error:'Для цього облікового запису згоди не запитували'}); return; }
       res.json({status:decision, scope:'book-adaptation'});
