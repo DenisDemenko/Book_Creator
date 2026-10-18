@@ -227,7 +227,7 @@ export const IntegratedConstellationView: React.FC<IntegratedConstellationViewPr
   const [showEventPlanner, setShowEventPlanner] = useState(false);
   return (
     <StoryExperienceAiShell preferredModelId={props.preferredModelId} value={props.aiAssignments} onChange={props.onAiAssignmentsChange} contextLabel="AI · Constellation Studio">
-      <div className="px-4 py-3"><button type="button" onClick={() => setShowEventPlanner(value => !value)} className="rounded-xl border border-[#D9CABC] bg-[#FFFCF8] px-4 py-2 text-sm font-semibold text-[#2C1A12]">{showEventPlanner ? 'Приховати організацію події' : 'Організація події та заявки'}</button>{showEventPlanner && <div className="mt-3"><ConstellationEventPlanner /></div>}</div>
+      <div className="px-4 py-3"><button type="button" onClick={() => setShowEventPlanner(value => !value)} className="rounded-xl border border-[#D9CABC] bg-[#FFFCF8] px-4 py-2 text-sm font-semibold text-[#2C1A12]">{showEventPlanner ? 'Приховати організацію події' : 'Організація події та заявки'}</button>{showEventPlanner && <div className="mt-3"><ConstellationEventPlanner bookId={props.bookId} /></div>}</div>
       <JevSlot title="Jev · процесний статус сесії" hint="Лише нейтральні процесні сигнали: етап, пауза, завершення, потреба уваги. Без психологічної чи медичної діагностики." {...props} />
       <SessionModeratorBar title={title} phase={status === 'lobby' ? 'Lobby' : status === 'completed' ? 'Завершено' : 'Розстановка'} status={status} connection={connection} participants={4} onStatusChange={setStatus} />
       <PreviewToggle active={preview} label="Переглянути як учасник" connection={connection} onConnectionChange={setConnection} onClick={() => setPreview((value) => !value)} />
