@@ -65,7 +65,22 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   onSaveBook,
   reviewedSessionMaterials,
 }) => {
-  const [workspace, setWorkspace] = useState<StoryWorkspace>('screenplay');
+  const readWorkspace = (): StoryWorkspace => {
+    const candidate = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('story') : null;
+    return workspaces.some(item => item.id === candidate) ? candidate as StoryWorkspace : 'screenplay';
+  };
+  const [workspace, setWorkspace] = useState<StoryWorkspace>(readWorkspace);
+  const selectWorkspace = (value: StoryWorkspace) => {
+    setWorkspace(value);
+    const url = new URL(window.location.href);
+    url.searchParams.set('story', value);
+    window.history.replaceState(window.history.state, '', url.toString());
+  };
+  useEffect(() => {
+    const onHistory = () => setWorkspace(readWorkspace());
+    window.addEventListener('popstate', onHistory);
+    return () => window.removeEventListener('popstate', onHistory);
+  }, []);
   const journals = useRef<Partial<Record<'leela'|'constellation'|'mafia', DurableNeutralJournal>>>({});
   const [journalError, setJournalError] = useState('');
   const [completedJournals, setCompletedJournals] = useState<Partial<Record<'leela'|'constellation'|'mafia', JournalSession>>>({});
@@ -195,7 +210,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
                 type="button"
                 role="tab"
                 aria-selected={workspace === item.id}
-                onClick={() => setWorkspace(item.id)}
+                onClick={() => selectWorkspace(item.id)}
                 className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${
                   workspace === item.id
                     ? 'bg-[#2E1B12] text-[#FFF9F1] shadow-sm'
