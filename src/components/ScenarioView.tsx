@@ -5,6 +5,7 @@ import { generateSessionCharacterPortrait, attachSessionPortraits, type SessionP
 import type { CharacterDraft } from './storyExperience/CharacterDraftEditor';
 import { commitSessionToBook, type ReviewedSessionBookMaterial } from './storyExperience/sessionBookCommit';
 import type { SessionBookExportRequest } from './storyExperience/SessionExportToBookView';
+import { SessionHistoryView } from './storyExperience/SessionHistoryView';
 import { ScenarioLegacyView } from './ScenarioLegacyView';
 import {
   IntegratedConstellationView,
@@ -16,7 +17,7 @@ import {
   type StoryExperienceJevRequest,
 } from './storyExperience';
 
-type StoryWorkspace = 'screenplay' | 'mafia' | 'constellation' | 'leela' | 'analysis';
+type StoryWorkspace = 'screenplay' | 'mafia' | 'constellation' | 'leela' | 'history' | 'analysis';
 
 interface ScenarioViewProps {
   book: Book;
@@ -38,6 +39,7 @@ const workspaces: Array<{
   { id: 'mafia', label: 'Mafia', hint: 'GM, події, тригери, голосування', icon: <Gamepad2 className="h-4 w-4" /> },
   { id: 'constellation', label: 'Constellation', hint: 'Поле, фігури, snapshots', icon: <Drama className="h-4 w-4" /> },
   { id: 'leela', label: 'Leela', hint: 'Board Pack, маршрут, журнал', icon: <Sparkles className="h-4 w-4" /> },
+  { id: 'history', label: 'Історія сесій', hint: 'Завершені сесії → книга', icon: <Drama className="h-4 w-4" /> },
   { id: 'analysis', label: 'Аналіз', hint: 'Попередній сценарний модуль', icon: <BrainCircuit className="h-4 w-4" /> },
 ];
 
@@ -226,6 +228,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
           />
         )}
 
+        {workspace === 'history' && <SessionHistoryView bookId={book.id} existingCharacters={book.characters.map(character => ({ id: character.id, name: character.name }))} onCommitBookExport={onCommitSessionBook} onRequestPortrait={requestPortrait} portraitAssets={sessionPortraits} />}
         {workspace === 'analysis' && (
           <ScenarioLegacyView
             book={book}
