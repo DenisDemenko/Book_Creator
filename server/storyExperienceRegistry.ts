@@ -14,7 +14,15 @@ export interface ApprovedExperienceEvent {
   approvedForBook: boolean;
   visibility: 'public' | 'approved';
 }
+export interface SessionConsentDecision {
+  participantId: string;
+  status: 'granted' | 'revoked';
+  decidedAt: string;
+  scope: 'book-adaptation';
+}
 export interface CompletedExperienceRecord {
+  consentRequiredParticipantIds?: string[];
+  consentDecisions?: SessionConsentDecision[];
   id: string;
   bookId: string;
   ownerId: string;
