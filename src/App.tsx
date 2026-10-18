@@ -769,6 +769,7 @@ export default function App() {
           }
         }
         if (initialRouteRef.current) setCurrentTab(initialRouteRef.current.tab);
+        else if (new URLSearchParams(window.location.search).has('story')) setCurrentTab('scenario');
 
         if (storedBook) {
           setBook(storedBook);
