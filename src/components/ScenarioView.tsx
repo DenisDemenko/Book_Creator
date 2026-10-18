@@ -70,6 +70,15 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     return workspaces.some(item => item.id === candidate) ? candidate as StoryWorkspace : 'screenplay';
   };
   const [workspace, setWorkspace] = useState<StoryWorkspace>(readWorkspace);
+  const workspaceNavRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const active = workspaceNavRef.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!active || !workspaceNavRef.current) return;
+    const nav = workspaceNavRef.current;
+    const offset = active.offsetLeft - nav.offsetLeft - (nav.clientWidth - active.offsetWidth) / 2;
+    nav.scrollTo({ left: Math.max(0, offset), behavior: 'auto' });
+  }, [workspace]);
+
   const [linkMessage, setLinkMessage] = useState('');
   const selectWorkspace = (value: StoryWorkspace) => {
     setWorkspace(value);
@@ -215,7 +224,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
             </div>
           </div>
 
-          <nav className="flex max-w-full gap-1 overflow-x-auto rounded-2xl border border-[#E0D4C7] bg-[#F4ECE1] p-1" aria-label="Story & Experience workspace" role="tablist">
+          <nav ref={workspaceNavRef} className="flex max-w-full gap-1 overflow-x-auto rounded-2xl border border-[#E0D4C7] bg-[#F4ECE1] p-1" aria-label="Story & Experience workspace" role="tablist">
             {workspaces.map((item) => (
               <button
                 key={item.id}
