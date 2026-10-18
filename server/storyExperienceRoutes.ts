@@ -41,7 +41,8 @@ export function registerStoryExperienceRoutes(app: Express): void {
         || e.label.length > 200 || e.description.length > 10000)) {
       res.status(400).json({error:'Потрібен погоджений набір дозволених подій'}); return;
     }
-    const sourceBook = await getBook(body.bookId);
+    let sourceBook;
+    try { sourceBook = await getBook(body.bookId); } catch { res.status(500).json({error:'Не вдалося перевірити книгу'}); return; }
     if (!sourceBook || sourceBook.ownerId !== userId) { res.status(404).json({error:'Книгу не знайдено'}); return; }
     const record: CompletedExperienceRecord = {
       id: randomUUID(), ownerId: userId, bookId: body.bookId, title: body.title.slice(0,200), kind: body.kind,
