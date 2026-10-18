@@ -40,10 +40,23 @@ export const CompletedSessionArchiveReview: React.FC<CompletedSessionArchiveRevi
       const result=await response.json().catch(()=>({}));
       if(!response.ok)throw new Error(result.error||'Помилка запрошення');
       setInviteMessage('Запрошення надіслано до облікового запису. Участь потребує підтвердження.');
-      setInviteEmail('');
+      setInviteEmail('');void loadRoster();
     }catch(error){setInviteMessage(error instanceof Error?error.message:'Помилка');}
   };
   const [participantIds,setParticipantIds]=useState('');
+  const [rosterError,setRosterError]=useState('');
+  const [pendingCount,setPendingCount]=useState(0);
+  const loadRoster=async()=>{
+    if(!journal)return;
+    try{
+      const response=await fetch('/api/story-experience/journals/'+encodeURIComponent(journal.sessionId)+'/participants?bookId='+encodeURIComponent(bookId),{credentials:'same-origin',cache:'no-store'});
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(data.error||'Не вдалося перевірити учасників');
+      setParticipantIds((Array.isArray(data.participantIds)?data.participantIds:[]).join('\n'));
+      setPendingCount(Number(data.pendingCount)||0);setRosterError('');setConfirmed(false);
+    }catch(error){setRosterError(error instanceof Error?error.message:'Помилка');}
+  };
+  useEffect(()=>{void loadRoster();},[journal?.sessionId,bookId]);
   const consentRoster=participantIds.split(/[\s,;]+/).map(x=>x.trim()).filter(Boolean);
   const rosterValid=consentRoster.length>0 && consentRoster.length<=100 && consentRoster.every(id=>id.length<=128) && new Set(consentRoster).size===consentRoster.length;
   const [confirmed, setConfirmed] = useState(false);
@@ -121,8 +134,11 @@ export const CompletedSessionArchiveReview: React.FC<CompletedSessionArchiveRevi
         </div>
         {journal&&<div className="rounded-xl border border-slate-700 p-3 text-sm"><label className="block">Запросити зареєстрованого учасника за email<input type="email" value={inviteEmail} onChange={e=>setInviteEmail(e.target.value)} className="mt-2 w-full rounded-lg border border-slate-600 bg-slate-900 p-2" placeholder="Електронна адреса облікового запису"/></label><button type="button" onClick={()=>void invite()} disabled={!inviteEmail.trim()} className="mt-2 rounded-lg border border-cyan-500 px-3 py-2 text-xs">Надіслати запрошення</button>{inviteMessage&&<p role="status" className="mt-2 text-xs">{inviteMessage}</p>}</div>}
         {!journal && <p role="alert" className="text-xs text-amber-200">Для архівації необхідний завершений журнал із підтвердженою участю. Збереження тимчасово недоступне.</p>}
+        <button type="button" disabled={!journal} onClick={()=>void loadRoster()} className="rounded-lg border border-cyan-500 px-3 py-2 text-xs disabled:opacity-40">Оновити підтверджених учасників</button>
+        {rosterError&&<p role="alert" className="text-rose-300 text-xs">{rosterError}</p>}
+        {pendingCount>0&&<p className="text-xs text-amber-200">Очікують підтвердження: {pendingCount}</p>}
         <label className="block rounded-xl border border-slate-700 p-3 text-sm">Ідентифікатори учасників, згода яких обов'язкова (облікові записи, через кому або новий рядок)
-          <textarea rows={3} value={participantIds} onChange={e=>{setParticipantIds(e.target.value);setConfirmed(false);}} className="mt-2 w-full rounded-lg border border-slate-600 bg-slate-900 p-2" placeholder="ID авторизованих учасників — не їхні імена" />
+          <textarea rows={3} value={participantIds} readOnly className="mt-2 w-full rounded-lg border border-slate-600 bg-slate-900 p-2" placeholder="ID авторизованих учасників — не їхні імена" />
           <span className="mt-1 block text-xs text-amber-200">Не включайте сторонніх осіб і не використовуйте вигадані ID. Усі зазначені учасники повинні особисто погодити матеріал. Список не можна вважати підтвердженим автоматично.</span>
         </label>
         <div role="note" className="rounded-xl border border-amber-600/50 p-3 text-xs text-amber-100">Система не може гарантувати анонімність: навіть без імен людину можуть упізнати за змістом. Для використання чужого досвіду потрібні належні дозволи.</div>
