@@ -188,6 +188,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
 
         {workspace === 'mafia' && (
           <IntegratedMafiaView
+            bookId={book.id}
             onRequestSessionPortrait={requestPortrait}
             portraitAssets={sessionPortraits}
             existingCharacters={book.characters.map((character) => ({ id: character.id, name: character.name }))}
