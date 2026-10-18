@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 /**
  * Server-side canonical registry for completed Story & Experience sessions.
  * No actual participant identities, raw transcripts or private/GM notes enter this shape.
@@ -19,6 +20,7 @@ export interface SessionConsentDecision {
   status: 'granted' | 'revoked';
   decidedAt: string;
   scope: 'book-adaptation';
+  materialHash?: string;
 }
 export interface CompletedExperienceRecord {
   consentRequiredParticipantIds?: string[];
@@ -39,6 +41,11 @@ export interface ExperienceExportMaterial {
   exportAllowed: true;
   approvedText: string;
 }
+export function consentMaterial(record: CompletedExperienceRecord): { text:string; hash:string } {
+  const approved = record.canonicalEvents ? projectEventsForBook(record.canonicalEvents) : record.events.filter(e=>e.approvedForBook && e.visibility==='approved');
+  const text = approved.map(e=>e.label.trim()+': '+e.description.trim()).filter(Boolean).join('\n\n').trim();
+  return {text,hash:createHash('sha256').update(text,'utf8').digest('hex')};
+}
 const validKinds = new Set<ExperienceKind>(['mafia', 'constellation', 'leela']);
 export function safeCompletedSessionSummary(
   record: CompletedExperienceRecord,
@@ -48,15 +55,13 @@ export function safeCompletedSessionSummary(
     throw new Error('Сесію не знайдено.');
   }
   if (record.status !== 'completed' || !validKinds.has(record.kind)) throw new Error('Сесія не завершена.');
+  const material = consentMaterial(record);
   const required = record.consentRequiredParticipantIds ?? [];
   if (required.length && required.some(id => {
     const matching = (record.consentDecisions ?? []).filter(d => d.participantId === id && d.scope === 'book-adaptation');
-    return matching.length === 0 || matching[matching.length - 1].status !== 'granted';
+    return matching.length === 0 || matching[matching.length - 1].status !== 'granted' || matching[matching.length - 1].materialHash !== material.hash;
   })) throw new Error('Згода учасників відсутня або відкликана.');
-  const approved = record.canonicalEvents ? projectEventsForBook(record.canonicalEvents) : record.events.filter(e => e.approvedForBook && e.visibility === 'approved');
-  if (approved.length === 0) throw new Error('Немає дозволених подій для експорту.');
-  const paragraphs = approved.map(e => e.label.trim() + ': ' + e.description.trim()).filter(Boolean);
-  const text = paragraphs.join('\n\n').trim();
+  const text = material.text;
   if (!text) throw new Error('Дозволені події не містять тексту.');
   return { sessionId: record.id, exportAllowed: true, approvedText: text };
 }
