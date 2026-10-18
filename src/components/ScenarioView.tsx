@@ -62,6 +62,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   const [workspace, setWorkspace] = useState<StoryWorkspace>('screenplay');
   const journals = useRef<Partial<Record<'leela'|'constellation', Promise<JournalSession>>>>({});
   const [journalError, setJournalError] = useState('');
+  const [completedJournals, setCompletedJournals] = useState<Partial<Record<'leela' | 'constellation', JournalSession>>>({});
   const recordNeutralEvent = async (kind: 'leela'|'constellation', event: {kind:'snapshot'|'leela-move';label:string;description:string}) => {
     try {
       if (!journals.current[kind]) journals.current[kind] = createSessionJournal(book.id,kind);
@@ -71,6 +72,17 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     } catch (error) {
       journals.current[kind] = undefined;
       setJournalError(error instanceof Error ? error.message : 'Подію не записано');
+    }
+  };
+  const prepareJournal = async (kind: 'leela' | 'constellation') => {
+    const pending = journals.current[kind];
+    if (!pending) return;
+    try {
+      const journal = await pending;
+      setCompletedJournals(previous => ({ ...previous, [kind]: journal }));
+    } catch (error) {
+      setJournalError(error instanceof Error ? error.message : 'Журнал недоступний');
+      throw error;
     }
   };
   const [sessionPortraits, setSessionPortraits] = useState<SessionPortraitAsset[]>([]);
@@ -217,6 +229,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
 
         {workspace === 'constellation' && (
           <IntegratedConstellationView
+            journal={completedJournals.constellation}
+            onPrepareJournal={() => prepareJournal('constellation')}
             onConstellationSnapshot={snapshot => { void recordNeutralEvent('constellation',{kind:'snapshot',label:'Snapshot '+snapshot.index,description:'Збережено snapshot поля №'+snapshot.index}); }}
             onRequestSessionPortrait={requestPortrait}
             portraitAssets={sessionPortraits}
@@ -232,6 +246,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
 
         {workspace === 'leela' && (
           <IntegratedLeelaView
+            journal={completedJournals.leela}
+            onPrepareJournal={() => prepareJournal('leela')}
             onLeelaStep={step => { void recordNeutralEvent('leela',{kind:'leela-move',label:'Хід '+step.turn,description:'Перехід з клітини '+step.from+' до '+step.to+', кубик '+step.dice}); }}
             onRequestSessionPortrait={requestPortrait}
             portraitAssets={sessionPortraits}
