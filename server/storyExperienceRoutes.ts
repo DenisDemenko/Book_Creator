@@ -123,7 +123,7 @@ export function registerStoryExperienceRoutes(app: Express): void {
     try {
       const records = (await load()).filter(r => r.ownerId === userId && (!req.query.bookId || r.bookId === req.query.bookId));
       // Never return approved text or private data in list responses.
-      res.json({ sessions: records.map(({events, publicParticipantLabels, ...r}) => ({ ...r, eventCount: events.length, participantCount: publicParticipantLabels.length })) });
+      res.json({ sessions: records.map(({events, canonicalEvents, publicParticipantLabels, ...r}) => ({ ...r, eventCount: canonicalEvents?.length ?? events.length, participantCount: publicParticipantLabels.length })) });
     } catch { res.status(500).json({error:'Неможливо прочитати архів'}); }
   });
   app.post('/api/story-experience/completed', requireAuth, async (req: Request, res: Response) => {
