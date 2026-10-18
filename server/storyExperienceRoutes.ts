@@ -5,6 +5,7 @@ import path from 'node:path';
 import { requireAuth } from './auth';
 import { DATA_DIR } from './db';
 import { getBook } from './bookStore';
+import { inspectApprovedExperience } from './storyExperiencePrivacy';
 import { safeCompletedSessionSummary, type CompletedExperienceRecord, type ExperienceKind } from './storyExperienceRegistry';
 
 const registryPath = path.join(DATA_DIR, 'story-experience-completed.json');
@@ -41,6 +42,8 @@ export function registerStoryExperienceRoutes(app: Express): void {
         || e.label.length > 200 || e.description.length > 10000)) {
       res.status(400).json({error:'Потрібен погоджений набір дозволених подій'}); return;
     }
+    const privacyIssues = inspectApprovedExperience(body.events, body.title);
+    if (privacyIssues.length) { res.status(422).json({ error: 'У матеріалі виявлено можливі персональні ідентифікатори. Приберіть їх перед збереженням.', issues: privacyIssues }); return; }
     let sourceBook;
     try { sourceBook = await getBook(body.bookId); } catch { res.status(500).json({error:'Не вдалося перевірити книгу'}); return; }
     if (!sourceBook || sourceBook.ownerId !== userId) { res.status(404).json({error:'Книгу не знайдено'}); return; }
