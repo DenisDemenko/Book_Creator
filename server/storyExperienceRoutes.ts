@@ -81,6 +81,40 @@ export function registerStoryExperienceRoutes(app: Express): void {
       res.status(201).json({eventId:result.id,sequence:result.sequence});
     } catch {res.status(500).json({error:'Не вдалося записати подію'});}
   });
+  app.get('/api/story-experience/journals/:sessionId/review', requireAuth, async (req: Request, res: Response) => {
+    const userId=req.principal?.id, bookId=req.query.bookId;
+    if(!userId){res.status(401).json({error:'Авторизація потрібна'});return;}
+    if(typeof bookId!=='string'){res.status(400).json({error:'Потрібен bookId'});return;}
+    try {
+      const book=await getBook(bookId);
+      if(!book || book.ownerId!==userId){res.status(404).json({error:'Книгу не знайдено'});return;}
+      const journal=(await loadJournals()).find(j=>j.sessionId===req.params.sessionId && j.bookId===bookId && j.ownerId===userId);
+      if(!journal){res.status(404).json({error:'Журнал не знайдено'});return;}
+      // The owner can review event payloads; no automatic approval or publication.
+      res.json({sessionId:journal.sessionId,kind:journal.kind,status:journal.status,
+        events:journal.events.map(e=>({id:e.id,kind:e.kind,label:e.label,description:e.description,visibility:e.visibility,approvedForBook:false}))});
+    } catch {res.status(500).json({error:'Не вдалося прочитати журнал'});}
+  });
+  app.post('/api/story-experience/journals/:sessionId/complete', requireAuth, async (req: Request,res: Response) => {
+    const ownerId=req.principal?.id, bookId=req.body?.bookId;
+    if(!ownerId){res.status(401).json({error:'Авторизація потрібна'});return;}
+    if(typeof bookId!=='string'){res.status(400).json({error:'Потрібен bookId'});return;}
+    try {
+      const book=await getBook(bookId);
+      if(!book || book.ownerId!==ownerId){res.status(404).json({error:'Книгу не знайдено'});return;}
+      const result=await enqueue(async()=>{
+        const items=await loadJournals();
+        const journal=items.find(j=>j.sessionId===req.params.sessionId && j.bookId===bookId && j.ownerId===ownerId);
+        if(!journal)return 'missing' as const;
+        if(journal.status==='completed')return 'already' as const;
+        journal.status='completed';
+        await storeJournals(items);
+        return 'ok' as const;
+      });
+      if(result==='missing'){res.status(404).json({error:'Журнал не знайдено'});return;}
+      res.json({sessionId:req.params.sessionId,status:'completed',alreadyCompleted:result==='already'});
+    } catch {res.status(500).json({error:'Не вдалося завершити журнал'});}
+  });
   app.get('/api/story-experience/completed', requireAuth, async (req: Request, res: Response) => {
     const userId = req.principal?.id;
     if (!userId) { res.status(401).json({error:'Потрібна авторизація'}); return; }
