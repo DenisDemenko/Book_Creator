@@ -25,6 +25,17 @@ describe('session event privacy boundary', () => {
     const records = appendEvent(appendEvent([],first),second);
     assert.deepEqual(records.map(event => event.id),['event-1','event-2']);
   });
+  it('rejects direct identifiers before presenting consent content', () => {
+    const record: CompletedExperienceRecord = {
+      id:'session-1',bookId:'book-1',ownerId:'owner-1',kind:'mafia',title:'Session',
+      status:'completed',completedAt:'2026-10-18T00:00:00Z',
+      publicParticipantLabels:[],events:[],
+      canonicalEvents:[{...make(1,'approved'),description:'Contact: user@example.com'}],
+      consentRequiredParticipantIds:['participant-1'],
+    };
+    assert.throws(() => consentMaterial(record));
+    assert.throws(() => safeCompletedSessionSummary(record,{ownerId:'owner-1',bookId:'book-1',sessionId:'session-1'}));
+  });
   it('blocks export when required consent is missing or revoked', () => {
     const record: CompletedExperienceRecord = {
       id:'session-1',bookId:'book-1',ownerId:'owner-1',kind:'mafia',title:'Session',
