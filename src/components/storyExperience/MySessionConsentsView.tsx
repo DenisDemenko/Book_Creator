@@ -1,0 +1,46 @@
+import React,{useCallback,useEffect,useState} from 'react';
+
+interface ConsentRequest {sessionId:string;bookId:string;kind:string;title:string;completedAt:string;status:'pending'|'granted'|'revoked';decidedAt:string|null;}
+export const MySessionConsentsView:React.FC=()=>{
+  const [requests,setRequests]=useState<ConsentRequest[]>([]);
+  const [error,setError]=useState('');
+  const [busy,setBusy]=useState<string|null>(null);
+  const [loading,setLoading]=useState(true);
+  const refresh=useCallback(async()=>{
+    setLoading(true);setError('');
+    try{
+      const response=await fetch('/api/story-experience/my-consents',{credentials:'same-origin',cache:'no-store'});
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(data.error||'Не вдалося завантажити запити');
+      setRequests(Array.isArray(data.requests)?data.requests:[]);
+    }catch(e){setError(e instanceof Error?e.message:'Помилка завантаження');}
+    finally{setLoading(false);}
+  },[]);
+  useEffect(()=>{void refresh();},[refresh]);
+  const decide=async(request:ConsentRequest,decision:'granted'|'revoked')=>{
+    setBusy(request.sessionId);setError('');
+    try{
+      const response=await fetch('/api/story-experience/completed/'+encodeURIComponent(request.sessionId)+'/consent',{
+        method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({bookId:request.bookId,decision}),
+      });
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(data.error||'Не вдалося змінити дозвіл');
+      await refresh();
+    }catch(e){setError(e instanceof Error?e.message:'Помилка запису дозволу');}
+    finally{setBusy(null);}
+  };
+  return <section className="min-h-0 flex-1 overflow-y-auto bg-slate-950 p-4 text-slate-100 lg:p-6" aria-label="Мої дозволи на використання сесій">
+    <header><h1 className="text-2xl font-semibold">Мої дозволи</h1><p className="mt-2 max-w-2xl text-sm text-slate-400">Ви вирішуєте, чи дозволяти художню адаптацію матеріалу сесії. Відкликання блокує нові експорти, але не видаляє вже створені або опубліковані копії автоматично.</p></header>
+    <button type="button" onClick={()=>void refresh()} disabled={loading} className="my-4 rounded-lg border border-slate-700 px-3 py-2 text-sm disabled:opacity-40">Оновити</button>
+    {error&&<p role="alert" className="mb-3 text-sm text-rose-300">{error}</p>}
+    {loading?<p role="status">Завантаження…</p>:requests.length===0?<p className="rounded-xl border border-slate-700 p-4 text-sm">Наразі запитів на вашу згоду немає.</p>:
+      <div className="grid gap-3 lg:grid-cols-2">{requests.map(item=><article key={item.sessionId} className="rounded-xl border border-slate-700 bg-slate-900 p-4">
+        <p className="text-xs uppercase text-cyan-300">{item.kind}</p><h2 className="mt-1 text-lg font-semibold">{item.title}</h2>
+        <p className="mt-2 text-xs text-slate-400">Статус: {item.status==='pending'?'Очікує рішення':item.status==='granted'?'Дозволено':'Відкликано'}</p>
+        <p className="mt-2 text-xs text-slate-400">Рішення стосується лише використання для книги. Перед погодженням переконайтеся, що знаєте, який матеріал буде використано.</p>
+        <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={()=>void decide(item,'granted')} disabled={busy===item.sessionId||item.status==='granted'} className="rounded-lg border border-cyan-500 px-3 py-2 text-sm disabled:opacity-40">Надати дозвіл</button>
+          <button type="button" onClick={()=>void decide(item,'revoked')} disabled={busy===item.sessionId||item.status==='revoked'} className="rounded-lg border border-slate-600 px-3 py-2 text-sm disabled:opacity-40">Відкликати дозвіл</button></div>
+      </article>)}</div>}
+  </section>;
+};
