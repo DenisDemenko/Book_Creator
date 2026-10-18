@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
  * Persistence is deliberately NOT implemented in this module; the authenticated
  * storage layer must own records and enforce book ownership on every operation.
  */
+import { inspectApprovedExperience } from './storyExperiencePrivacy';
 import { projectEventsForBook, type ExperienceEventRecord } from './storyExperienceEvents';
 
 export type ExperienceKind = 'mafia' | 'constellation' | 'leela';
