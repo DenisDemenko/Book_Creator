@@ -162,6 +162,31 @@ export function registerStoryExperienceRoutes(app: Express): void {
         .map(j=>({sessionId:j.sessionId,bookId:j.bookId,kind:j.kind,joined:!!j.participantIds?.includes(id)}))});
     }catch{res.status(500).json({error:'Запрошення недоступні'});}
   });
+  app.get('/api/story-experience/journals/:sessionId/participants',requireAuth,async(req:Request,res:Response)=>{
+    const id=req.principal?.id,bookId=req.query.bookId;
+    if(!id||typeof bookId!=='string'){res.status(400).json({error:'Недійсний запит'});return;}
+    try{
+      const journal=(await loadJournals()).find(j=>j.sessionId===req.params.sessionId&&j.bookId===bookId&&j.ownerId===id);
+      if(!journal){res.status(404).json({error:'Журнал недоступний'});return;}
+      res.setHeader('Cache-Control','no-store');
+      res.json({participantIds:journal.participantIds??[],pendingCount:(journal.invitedParticipantIds??[]).filter(user=>!journal.participantIds?.includes(user)).length});
+    }catch{res.status(500).json({error:'Помилка списку учасників'});}
+  });
+  app.post('/api/story-experience/journals/:sessionId/decline',requireAuth,async(req:Request,res:Response)=>{
+    const id=req.principal?.id,bookId=req.body?.bookId;
+    if(!id||typeof bookId!=='string'){res.status(400).json({error:'Недійсний запит'});return;}
+    try{
+      const result=await enqueue(async()=>{
+        const items=await loadJournals();
+        const journal=items.find(j=>j.sessionId===req.params.sessionId&&j.bookId===bookId&&j.status==='draft'&&j.invitedParticipantIds?.includes(id));
+        if(!journal||journal.participantIds?.includes(id))return false;
+        journal.invitedParticipantIds=journal.invitedParticipantIds?.filter(x=>x!==id);
+        await storeJournals(items);return true;
+      });
+      if(!result){res.status(404).json({error:'Запрошення недоступне'});return;}
+      res.json({declined:true});
+    }catch{res.status(500).json({error:'Не вдалося відхилити запрошення'});}
+  });
   app.post('/api/story-experience/journals/:sessionId/join', requireAuth, async (req: Request,res: Response) => {
     const userId=req.principal?.id;
     const {bookId}=req.body||{};
