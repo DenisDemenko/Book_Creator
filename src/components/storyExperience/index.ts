@@ -6,6 +6,8 @@ export { SessionHeader } from './SessionHeader';
 export { SessionRecoveryNotice } from './SessionRecoveryNotice';
 export { SessionLobbyView } from './SessionLobbyView';
 export { SessionCompletionView } from './SessionCompletionView';
+export { CharacterDraftEditor, createCharacterDrafts } from './CharacterDraftEditor';
+export type { CharacterDraft, PortraitStyle, CharacterDraftEditorProps } from './CharacterDraftEditor';
 export { SessionExportToBookView, SessionAnonymizationPanel, ParticipantToCharacterMapper } from './SessionExportToBookView';
 export type { SessionExportKind, AnonymizationMode, CharacterMappingAction, ExportParticipant, ExportCharacterMapping, SessionBookExportRequest, SessionExportToBookViewProps } from './SessionExportToBookView';
 export { AttentionAurora } from './AttentionAurora';
