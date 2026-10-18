@@ -11,7 +11,7 @@ import { consentMaterial, safeCompletedSessionSummary, type CompletedExperienceR
 
 const registryPath = path.join(DATA_DIR, 'story-experience-completed.json');
 const journalPath = path.join(DATA_DIR, 'story-experience-journal.json');
-interface DraftJournal { sessionId: string; bookId: string; ownerId: string; kind: ExperienceKind; status: 'draft' | 'completed'; events: ExperienceEventRecord[]; }
+interface DraftJournal { participantIds?: string[]; sessionId: string; bookId: string; ownerId: string; kind: ExperienceKind; status: 'draft' | 'completed'; events: ExperienceEventRecord[]; }
 async function loadJournals(): Promise<DraftJournal[]> {
   try { const data = JSON.parse(await fs.readFile(journalPath, 'utf8')); return Array.isArray(data) ? data : []; }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }
@@ -126,6 +126,29 @@ export function registerStoryExperienceRoutes(app: Express): void {
       res.json({ sessions: records.map(({events, canonicalEvents, publicParticipantLabels, consentRequiredParticipantIds, consentDecisions, ...r}) => ({ ...r, eventCount: canonicalEvents?.length ?? events.length, participantCount: publicParticipantLabels.length })) });
     } catch { res.status(500).json({error:'Неможливо прочитати архів'}); }
   });
+  // The owner is a verified participant only when explicitly recorded against this journal.
+  // Other participant enrollment must be authenticated; it is not inferred from names.
+  app.post('/api/story-experience/journals/:sessionId/join', requireAuth, async (req: Request,res: Response) => {
+    const userId=req.principal?.id;
+    const {bookId}=req.body||{};
+    if(!userId){res.status(401).json({error:'Авторизація потрібна'});return;}
+    if(typeof bookId!=='string'||!bookId){res.status(400).json({error:'Укажіть книгу'});return;}
+    try {
+      const status=await enqueue(async()=>{
+        const records=await loadJournals();
+        const journal=records.find(r=>r.sessionId===req.params.sessionId&&r.bookId===bookId&&r.status==='draft');
+        if(!journal)return 'missing' as const;
+        // Joining another owner's session requires an invitation workflow; never trust arbitrary IDs.
+        if(journal.ownerId!==userId)return 'forbidden' as const;
+        journal.participantIds ??=[];
+        if(!journal.participantIds.includes(userId))journal.participantIds.push(userId);
+        await storeJournals(records);
+        return 'joined' as const;
+      });
+      if(status!=='joined'){res.status(404).json({error:'Журнал недоступний'});return;}
+      res.json({joined:true});
+    }catch{res.status(500).json({error:'Не вдалося підтвердити участь'});}
+  });
   app.post('/api/story-experience/completed', requireAuth, async (req: Request, res: Response) => {
     const userId = req.principal?.id;
     if (!userId) { res.status(401).json({error:'Потрібна авторизація'}); return; }
@@ -139,6 +162,15 @@ export function registerStoryExperienceRoutes(app: Express): void {
         || e.approvedForBook !== true || e.visibility !== 'approved'
         || e.label.length > 200 || e.description.length > 10000)) {
       res.status(400).json({error:'Потрібен погоджений набір дозволених подій'}); return;
+    }
+    if(typeof body.sourceJournalId!=='string'||!body.sourceJournalId.trim()){
+      res.status(400).json({error:'Архівація потребує підтвердженого журналу-джерела та складу учасників'});return;
+    }
+    const journal=(await loadJournals()).find(item=>item.sessionId===body.sourceJournalId&&item.bookId===body.bookId&&item.ownerId===userId&&item.kind===body.kind&&item.status==='completed');
+    const members=journal?.participantIds??[];
+    if(!members.length || members.length!==body.consentRequiredParticipantIds.length ||
+      !members.every(id=>body.consentRequiredParticipantIds.includes(id))){
+      res.status(422).json({error:'Список учасників не відповідає підтвердженим учасникам журналу'});return;
     }
     const privacyIssues = inspectApprovedExperience(body.events, body.title);
     if (privacyIssues.length) { res.status(422).json({ error: 'У матеріалі виявлено можливі персональні ідентифікатори. Приберіть їх перед збереженням.', issues: privacyIssues }); return; }
