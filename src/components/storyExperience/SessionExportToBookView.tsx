@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { CharacterDraftEditor, createCharacterDrafts, type CharacterDraft } from './CharacterDraftEditor';
 
 export type SessionExportKind = 'mafia' | 'constellation' | 'leela';
 export type AnonymizationMode = 'fiction' | 'moderate' | 'names' | 'none';
@@ -13,6 +14,7 @@ export interface SessionBookExportRequest {
   privacy: AnonymizationMode;
   mappings: ExportCharacterMapping[];
   originalAppearance: false;
+  characterDrafts: CharacterDraft[];
 }
 export interface SessionExportToBookViewProps {
   kind: SessionExportKind;
@@ -21,6 +23,8 @@ export interface SessionExportToBookViewProps {
   existingCharacters?: { id: string; name: string }[];
   onClose: () => void;
   onSubmit?: (request: SessionBookExportRequest) => Promise<void> | void;
+  onRequestPortrait?: (draft: CharacterDraft) => void;
+  onChooseFromLibrary?: (draft: CharacterDraft) => void;
 }
 const formats = [
   ['chapter', 'Глава'], ['scene', 'Сцена'], ['scenes', 'Серія сцен'],
@@ -93,7 +97,7 @@ export const ParticipantToCharacterMapper: React.FC<{
 };
 
 export const SessionExportToBookView: React.FC<SessionExportToBookViewProps> = ({
-  kind, sessionTitle, participants, existingCharacters = [], onClose, onSubmit,
+  kind, sessionTitle, participants, existingCharacters = [], onClose, onSubmit, onRequestPortrait, onChooseFromLibrary,
 }) => {
   const [step, setStep] = useState(0);
   const [source, setSource] = useState<SessionBookExportRequest['source']>('summary');
@@ -102,15 +106,17 @@ export const SessionExportToBookView: React.FC<SessionExportToBookViewProps> = (
   const [mappings, setMappings] = useState<ExportCharacterMapping[]>(() => participants.map((p, i) => ({
     participantId: p.id, action: 'new', fictionalName: p.fictionalName || aliases[i % aliases.length],
   })));
+  const [drafts, setDrafts] = useState<CharacterDraft[]>(() => createCharacterDrafts(participants, participants.map((p, i) => ({ participantId: p.id, action: 'new', fictionalName: p.fictionalName || aliases[i % aliases.length] }))));
   const [confirmed, setConfirmed] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const invalidMapping = mappings.some((m) => m.action !== 'skip' && (!m.fictionalName.trim() || (m.action === 'existing' && !m.existingCharacterId)));
   const canNext = (step !== 1 || selectedFormats.length > 0) && (step !== 3 || !invalidMapping);
+  const synchronizedDrafts = useMemo(() => mappings.filter((m) => m.action !== 'skip').map((mapping) => ({ ...(drafts.find((d) => d.participantId === mapping.participantId) || createCharacterDrafts(participants, [mapping])[0]), fictionalName: mapping.fictionalName })), [drafts, mappings, participants]);
   const request = useMemo<SessionBookExportRequest>(() => ({
-    sessionKind: kind, sessionTitle, source, formats: selectedFormats, privacy, mappings: mappings.filter((m) => m.action !== 'skip'), originalAppearance: false,
-  }), [kind, sessionTitle, source, selectedFormats, privacy, mappings]);
+    sessionKind: kind, sessionTitle, source, formats: selectedFormats, privacy, mappings: mappings.filter((m) => m.action !== 'skip'), originalAppearance: false, characterDrafts: synchronizedDrafts,
+  }), [kind, sessionTitle, source, selectedFormats, privacy, mappings, synchronizedDrafts]);
   const submit = async () => {
     if (!onSubmit || saving || !confirmed || invalidMapping) return;
     setError(''); setSaving(true);
@@ -141,11 +147,7 @@ export const SessionExportToBookView: React.FC<SessionExportToBookViewProps> = (
           </label>)}</div></fieldset>}
         {step === 2 && <SessionAnonymizationPanel value={privacy} onChange={(value) => { setPrivacy(value); setConfirmed(false); }} />}
         {step === 3 && <ParticipantToCharacterMapper participants={participants} mappings={mappings} onChange={setMappings} existingCharacters={existingCharacters} privacy={privacy} />}
-        {step === 4 && <div className="space-y-3"><h2 className="text-lg font-semibold">Герої та образи</h2>
-          <p className="text-sm text-slate-300">Для кожного героя передбачені картка, генерація портрета й вибір з Медіатеки. На цьому етапі зображення не генеруються.</p>
-          <div className="rounded-xl border border-slate-700 p-4 text-sm text-slate-300">Створювати художні образи без використання зовнішності реального учасника — увімкнено і не змінюється.</div>
-          <p className="text-xs text-slate-400">Генерацію та збереження зображень підключатиме технічний агент; текстовий експорт від них не залежить.</p>
-        </div>}
+        {step === 4 && <CharacterDraftEditor drafts={synchronizedDrafts} privacy={privacy} onChange={setDrafts} onRequestPortrait={onRequestPortrait} onChooseFromLibrary={onChooseFromLibrary} />}
         {step === 5 && <div className="space-y-3"><h2 className="text-lg font-semibold">Перевірка перед створенням</h2>
           <dl className="grid gap-2 text-sm text-slate-300 sm:grid-cols-2"><div>Джерело: {source}</div><div>Приватність: {modeLabels[privacy]}</div>
           <div>Форматів: {selectedFormats.length}</div><div>Героїв: {mappings.filter((m) => m.action !== 'skip').length}</div></dl>
