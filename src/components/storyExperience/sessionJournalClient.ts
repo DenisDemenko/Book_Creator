@@ -19,3 +19,14 @@ export async function appendNeutralSessionEvent(session: JournalSession, event: 
     body:JSON.stringify({...event,bookId:session.bookId}),
   }));
 }
+
+export interface JournalReviewEvent {id:string;kind:string;label:string;description:string;visibility:string;approvedForBook:false;}
+export async function loadJournalReview(session:JournalSession):Promise<JournalReviewEvent[]> {
+  const data=await json(await fetch('/api/story-experience/journals/'+encodeURIComponent(session.sessionId)+'/review?bookId='+encodeURIComponent(session.bookId),{credentials:'same-origin'}));
+  return Array.isArray(data.events)?data.events:[];
+}
+export async function completeSessionJournal(session:JournalSession):Promise<void> {
+  await json(await fetch('/api/story-experience/journals/'+encodeURIComponent(session.sessionId)+'/complete',{
+    method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({bookId:session.bookId}),
+  }));
+}
