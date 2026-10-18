@@ -56,3 +56,6 @@ export type {
 
 export { commitSessionToBook } from './sessionBookCommit';
 export type { ReviewedSessionBookMaterial, SessionBookCommitResult } from './sessionBookCommit';
+
+export { generateSessionCharacterPortrait, attachSessionPortraits } from './sessionPortraitService';
+export type { SessionPortraitAsset } from './sessionPortraitService';
