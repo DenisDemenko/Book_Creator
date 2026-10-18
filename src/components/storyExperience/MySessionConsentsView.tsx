@@ -63,23 +63,23 @@ export const MySessionConsentsView:React.FC=()=>{
     }catch(e){setError(e instanceof Error?e.message:'Помилка запису дозволу');}
     finally{setBusy(null);}
   };
-  return <section className="min-h-0 flex-1 overflow-y-auto bg-slate-950 p-4 text-slate-100 lg:p-6" aria-label="Мої дозволи на використання сесій">
-    <header><h1 className="text-2xl font-semibold">Мої дозволи</h1><p className="mt-2 max-w-2xl text-sm text-slate-400">Ви вирішуєте, чи дозволяти художню адаптацію матеріалу сесії. Відкликання блокує нові експорти, але не видаляє вже створені або опубліковані копії автоматично.</p></header>
+  return <section className="min-h-0 flex-1 overflow-y-auto bg-[#F4ECE1] p-4 text-[#2C1A12] lg:p-6" aria-label="Мої дозволи на використання сесій">
+    <header><h1 className="text-2xl font-semibold">Мої дозволи</h1><p className="mt-2 max-w-2xl text-sm text-[#71645A]">Ви вирішуєте, чи дозволяти художню адаптацію матеріалу сесії. Відкликання блокує нові експорти, але не видаляє вже створені або опубліковані копії автоматично.</p></header>
     <div className="mt-4 space-y-2"><h2 className="text-lg font-semibold">Запрошення до сесій</h2>
-      {inviteError&&<p role="alert" className="text-rose-300">{inviteError}</p>}
-      {invitations.map(item=><div key={item.sessionId} className="flex items-center justify-between gap-3 rounded-lg border border-slate-700 p-3 text-sm"><span>{item.kind} · {item.sessionId.slice(0,8)}</span>{item.joined?<span className="flex items-center gap-2">Участь підтверджено <button type="button" onClick={()=>void leaveSession(item)} className="rounded-lg border border-rose-700 px-3 py-2">Вийти з сесії</button></span>:<span className="flex gap-2"><button type="button" onClick={()=>void acceptInvitation(item)} className="rounded-lg border border-cyan-500 px-3 py-2">Підтвердити участь</button><button type="button" onClick={()=>void declineInvitation(item)} className="rounded-lg border border-slate-600 px-3 py-2">Відхилити</button></span>}</div>)}
+      {inviteError&&<p role="alert" className="text-[#A63A2B]">{inviteError}</p>}
+      {invitations.map(item=><div key={item.sessionId} className="flex items-center justify-between gap-3 rounded-xl border border-[#E0D4C7] p-3 text-sm"><span>{item.kind} · {item.sessionId.slice(0,8)}</span>{item.joined?<span className="flex items-center gap-2">Участь підтверджено <button type="button" onClick={()=>void leaveSession(item)} className="rounded-xl border border-[#D49A8B] px-3 py-2">Вийти з сесії</button></span>:<span className="flex gap-2"><button type="button" onClick={()=>void acceptInvitation(item)} className="rounded-xl border border-[#8B5937] px-3 py-2">Підтвердити участь</button><button type="button" onClick={()=>void declineInvitation(item)} className="rounded-xl border border-[#CDBBAA] px-3 py-2">Відхилити</button></span>}</div>)}
     </div>
-    <button type="button" onClick={()=>{void refresh();void refreshInvitations();}} disabled={loading} className="my-4 rounded-lg border border-slate-700 px-3 py-2 text-sm disabled:opacity-40">Оновити</button>
-    {error&&<p role="alert" className="mb-3 text-sm text-rose-300">{error}</p>}
-    {loading?<p role="status">Завантаження…</p>:requests.length===0?<p className="rounded-xl border border-slate-700 p-4 text-sm">Наразі запитів на вашу згоду немає.</p>:
-      <div className="grid gap-3 lg:grid-cols-2">{requests.map(item=><article key={item.sessionId} className="rounded-xl border border-slate-700 bg-slate-900 p-4">
-        <p className="text-xs uppercase text-cyan-300">{item.kind}</p><h2 className="mt-1 text-lg font-semibold">{item.title}</h2>
-        <p className="mt-2 text-xs text-slate-400">Статус: {item.status==='pending'?'Очікує рішення':item.status==='granted'?'Дозволено':'Відкликано'}</p>
-        <p className="mt-2 text-xs text-slate-400">Рішення стосується лише використання для книги. Перед погодженням переконайтеся, що знаєте, який матеріал буде використано.</p>
-        <div className="mt-3 max-h-60 overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-700 bg-slate-950 p-3 text-sm" aria-label="Матеріал, на використання якого запитується згода">{item.materialText}</div>
-        {item.privacyReviewRequired && <p role="alert" className="mt-3 text-sm text-amber-200">Матеріал потребує додаткової перевірки приватності. Погодження тимчасово недоступне.</p>}
-        <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={()=>void decide(item,'granted')} disabled={busy===item.sessionId||item.status==='granted'||item.privacyReviewRequired||!item.materialHash} className="rounded-lg border border-cyan-500 px-3 py-2 text-sm disabled:opacity-40">Надати дозвіл</button>
-          <button type="button" onClick={()=>void decide(item,'revoked')} disabled={busy===item.sessionId||item.status==='revoked'} className="rounded-lg border border-slate-600 px-3 py-2 text-sm disabled:opacity-40">Відкликати дозвіл</button></div>
+    <button type="button" onClick={()=>{void refresh();void refreshInvitations();}} disabled={loading} className="my-4 rounded-xl border border-[#E0D4C7] px-3 py-2 text-sm disabled:opacity-40">Оновити</button>
+    {error&&<p role="alert" className="mb-3 text-sm text-[#A63A2B]">{error}</p>}
+    {loading?<p role="status">Завантаження…</p>:requests.length===0?<p className="rounded-2xl border border-[#E0D4C7] p-4 text-sm">Наразі запитів на вашу згоду немає.</p>:
+      <div className="grid gap-3 lg:grid-cols-2">{requests.map(item=><article key={item.sessionId} className="rounded-2xl border border-[#E0D4C7] bg-[#FFFCF8] p-4">
+        <p className="text-xs uppercase text-[#92633C]">{item.kind}</p><h2 className="mt-1 text-lg font-semibold">{item.title}</h2>
+        <p className="mt-2 text-xs text-[#71645A]">Статус: {item.status==='pending'?'Очікує рішення':item.status==='granted'?'Дозволено':'Відкликано'}</p>
+        <p className="mt-2 text-xs text-[#71645A]">Рішення стосується лише використання для книги. Перед погодженням переконайтеся, що знаєте, який матеріал буде використано.</p>
+        <div className="mt-3 max-h-60 overflow-y-auto whitespace-pre-wrap rounded-xl border border-[#E0D4C7] bg-[#F4ECE1] p-3 text-sm" aria-label="Матеріал, на використання якого запитується згода">{item.materialText}</div>
+        {item.privacyReviewRequired && <p role="alert" className="mt-3 text-sm text-[#825A20]">Матеріал потребує додаткової перевірки приватності. Погодження тимчасово недоступне.</p>}
+        <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={()=>void decide(item,'granted')} disabled={busy===item.sessionId||item.status==='granted'||item.privacyReviewRequired||!item.materialHash} className="rounded-xl border border-[#8B5937] px-3 py-2 text-sm disabled:opacity-40">Надати дозвіл</button>
+          <button type="button" onClick={()=>void decide(item,'revoked')} disabled={busy===item.sessionId||item.status==='revoked'} className="rounded-xl border border-[#CDBBAA] px-3 py-2 text-sm disabled:opacity-40">Відкликати дозвіл</button></div>
       </article>)}</div>}
   </section>;
 };
