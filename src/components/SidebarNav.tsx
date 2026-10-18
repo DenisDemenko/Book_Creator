@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   LayoutDashboard,
   Rocket,
@@ -445,11 +446,10 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
     </button>
   );
 
-  return (
-    <>
+  const sidebar = (
     <aside
       style={sunVars}
-      className={`sticky top-[var(--app-header-h)] shrink-0 flex flex-col h-[var(--app-sidebar-h)] bg-slate-950/75 border-r border-white/[0.06] backdrop-blur-2xl transition-[width,transform] duration-200 ease-out ${isMobile ? `fixed left-0 z-[80] max-w-[85vw] ${mobileOpen ? 'translate-x-0' : '-translate-x-full pointer-events-none'}` : ''} ${
+      className={`sticky top-[var(--app-header-h)] shrink-0 flex flex-col h-[var(--app-sidebar-h)] bg-slate-950/95 border-r border-white/[0.06] backdrop-blur-2xl transition-[width,transform] duration-200 ease-out ${isMobile ? `!fixed !top-0 !left-0 !h-[100dvh] z-[9998] max-w-[85vw] ${mobileOpen ? 'translate-x-0' : '-translate-x-full pointer-events-none'}` : ''} ${
         displayCollapsed ? 'w-16' : 'w-64'
       }`}
     >
@@ -591,24 +591,28 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
         </button>
       </div>
     </aside>
-    {isMobile && !mobileOpen && (
+  );
+  return (
+    <>
+    {isMobile ? createPortal(sidebar, document.body) : sidebar}
+    {isMobile && !mobileOpen && createPortal(
       <button type="button" onClick={() => {
         if (mobileCloseTimer.current) clearTimeout(mobileCloseTimer.current);
         setMobileOpen(true);
       }} aria-label="Розгорнути меню розділів" title="Розгорнути меню розділів"
-        className="fixed left-2 top-[calc(var(--app-header-h)+12px)] z-[81] flex h-11 w-11 items-center justify-center rounded-xl border border-[#D9CABC] bg-[#FFFCF8] text-[#2C1A12] shadow-lg">
+        className="fixed !left-3 !top-auto !bottom-[max(96px,env(safe-area-inset-bottom)+88px)] z-[9999] flex h-12 w-12 items-center justify-center rounded-2xl border-2 border-[#8B5937] bg-[#FFFCF8] text-[#2C1A12] shadow-2xl">
         <ChevronsRight className="h-5 w-5" />
       </button>
-    )}
-    {isMobile && mobileOpen && (
+    , document.body)}
+    {isMobile && mobileOpen && createPortal(
       <button type="button" onClick={() => {
         if (mobileCloseTimer.current) clearTimeout(mobileCloseTimer.current);
         setMobileOpen(false);
       }} aria-label="Згорнути меню розділів"
-        className="fixed left-[min(85vw,256px)] top-[calc(var(--app-header-h)+12px)] z-[81] flex h-11 w-10 items-center justify-center rounded-r-xl bg-[#2E1B12] text-white shadow-lg">
+        className="fixed !left-[min(85vw,256px)] !top-[12px] z-[9999] flex h-12 w-11 items-center justify-center rounded-r-xl bg-[#2E1B12] text-white shadow-lg">
         <ChevronsLeft className="h-5 w-5" />
       </button>
-    )}
+    , document.body)}
     </>
   );
 };
