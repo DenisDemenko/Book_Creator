@@ -9,7 +9,7 @@ const defaultSteps: JourneyStep[] = [
   { turn: 7, from: 15, to: 21, dice: 6, type: 'normal' },
 ];
 
-export const LeelaSessionView: React.FC<{ title?: string; cellCount?: number }> = ({ title = 'Подорож · сесія 04', cellCount = 72 }) => {
+export const LeelaSessionView: React.FC<{ title?: string; cellCount?: number; onJourneyStep?: (step: {turn:number;from:number;to:number;dice:number}) => void }> = ({ title = 'Подорож · сесія 04', cellCount = 72, onJourneyStep }) => {
   const [currentCell, setCurrentCell] = useState(21);
   const [steps, setSteps] = useState<JourneyStep[]>(defaultSteps);
   const [reflection, setReflection] = useState('');
@@ -27,7 +27,9 @@ export const LeelaSessionView: React.FC<{ title?: string; cellCount?: number }> 
     const to = Math.min(cellCount, currentCell + dice);
     setLastDice(dice);
     setCurrentCell(to);
-    setSteps((items) => [...items, { turn: items.length + 1, from, to, dice, type: 'normal' }]);
+    const turn = steps.length + 1;
+    setSteps((items) => [...items, { turn, from, to, dice, type: 'normal' }]);
+    onJourneyStep?.({turn,from,to,dice});
   };
 
   return (
