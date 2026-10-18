@@ -243,8 +243,13 @@ export function registerStoryExperienceRoutes(app: Express): void {
     }
     const journal=(await loadJournals()).find(item=>item.sessionId===body.sourceJournalId&&item.bookId===body.bookId&&item.ownerId===userId&&item.kind===body.kind&&item.status==='completed');
     const members=journal?.participantIds??[];
-    if(!members.length || members.length!==body.consentRequiredParticipantIds.length ||
-      !members.every(id=>body.consentRequiredParticipantIds.includes(id))){
+    // Reject duplicate or forged roster entries. Equality of array lengths alone
+    // is not sufficient when client-supplied IDs can repeat.
+    const submittedIds: string[] = body.consentRequiredParticipantIds;
+    if (!members.length || new Set(members).size !== members.length ||
+      new Set(submittedIds).size !== submittedIds.length ||
+      members.length !== submittedIds.length ||
+      !members.every(id => submittedIds.includes(id))) {
       res.status(422).json({error:'Список учасників не відповідає підтвердженим учасникам журналу'});return;
     }
     const privacyIssues = inspectApprovedExperience(body.events, body.title);
