@@ -1,0 +1,39 @@
+name: Story Experience API integration
+
+on:
+  push:
+    branches:
+      - ux/story-experience-engine-v1
+    paths:
+      - 'server/storyExperience*.ts'
+      - 'server/storyExperience*.test.ts'
+      - 'scripts/test-storyExperienceApi.mts'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/story-experience-api.yml'
+  pull_request:
+    paths:
+      - 'server/storyExperience*.ts'
+      - 'scripts/test-storyExperienceApi.mts'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/story-experience-api.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Isolated two-participant HTTP integration test
+        run: npm run test:story-experience-api
+      - name: Static type check
+        run: npm run lint
