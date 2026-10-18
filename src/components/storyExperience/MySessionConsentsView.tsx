@@ -14,6 +14,13 @@ export const MySessionConsentsView:React.FC=()=>{
     }catch(error){setInviteError(error instanceof Error?error.message:'Помилка');}
   },[]);
   useEffect(()=>{void refreshInvitations();},[refreshInvitations]);
+  const leaveSession=async(invite:Invitation)=>{
+    try{
+      const response=await fetch('/api/story-experience/journals/'+encodeURIComponent(invite.sessionId)+'/leave',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({bookId:invite.bookId})});
+      if(!response.ok)throw new Error('Не вдалося вийти з сесії');
+      await refreshInvitations();
+    }catch(error){setInviteError(error instanceof Error?error.message:'Помилка');}
+  };
   const declineInvitation=async(invite:Invitation)=>{
     try{
       const response=await fetch('/api/story-experience/journals/'+encodeURIComponent(invite.sessionId)+'/decline',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({bookId:invite.bookId})});
@@ -60,7 +67,7 @@ export const MySessionConsentsView:React.FC=()=>{
     <header><h1 className="text-2xl font-semibold">Мої дозволи</h1><p className="mt-2 max-w-2xl text-sm text-slate-400">Ви вирішуєте, чи дозволяти художню адаптацію матеріалу сесії. Відкликання блокує нові експорти, але не видаляє вже створені або опубліковані копії автоматично.</p></header>
     <div className="mt-4 space-y-2"><h2 className="text-lg font-semibold">Запрошення до сесій</h2>
       {inviteError&&<p role="alert" className="text-rose-300">{inviteError}</p>}
-      {invitations.map(item=><div key={item.sessionId} className="flex items-center justify-between gap-3 rounded-lg border border-slate-700 p-3 text-sm"><span>{item.kind} · {item.sessionId.slice(0,8)}</span>{item.joined?<span>Участь підтверджено</span>:<span className="flex gap-2"><button type="button" onClick={()=>void acceptInvitation(item)} className="rounded-lg border border-cyan-500 px-3 py-2">Підтвердити участь</button><button type="button" onClick={()=>void declineInvitation(item)} className="rounded-lg border border-slate-600 px-3 py-2">Відхилити</button></span>}</div>)}
+      {invitations.map(item=><div key={item.sessionId} className="flex items-center justify-between gap-3 rounded-lg border border-slate-700 p-3 text-sm"><span>{item.kind} · {item.sessionId.slice(0,8)}</span>{item.joined?<span className="flex items-center gap-2">Участь підтверджено <button type="button" onClick={()=>void leaveSession(item)} className="rounded-lg border border-rose-700 px-3 py-2">Вийти з сесії</button></span>:<span className="flex gap-2"><button type="button" onClick={()=>void acceptInvitation(item)} className="rounded-lg border border-cyan-500 px-3 py-2">Підтвердити участь</button><button type="button" onClick={()=>void declineInvitation(item)} className="rounded-lg border border-slate-600 px-3 py-2">Відхилити</button></span>}</div>)}
     </div>
     <button type="button" onClick={()=>{void refresh();void refreshInvitations();}} disabled={loading} className="my-4 rounded-lg border border-slate-700 px-3 py-2 text-sm disabled:opacity-40">Оновити</button>
     {error&&<p role="alert" className="mb-3 text-sm text-rose-300">{error}</p>}
