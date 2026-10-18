@@ -247,6 +247,30 @@ async function saveBookSerial(params: {
     }
   }
 
+  // Reject duplicated session imports inside the serialized book write queue.
+  // Existing chapter associations are immutable across regular saves.
+  const chapters = Array.isArray((book as any).chapters) ? (book as any).chapters as Array<Record<string, unknown>> : [];
+  const seenSessions = new Map<string, string>();
+  for (const chapter of chapters) {
+    const sourceSessionId = chapter.sourceSessionId;
+    if (typeof sourceSessionId !== 'string' || !sourceSessionId.trim()) continue;
+    const chapterId = String(chapter.id || '');
+    if (!chapterId) throw new Error('Глава з джерелом сесії повинна мати id.');
+    const previous = seenSessions.get(sourceSessionId);
+    if (previous && previous !== chapterId) throw new Error('Сесію вже імпортовано в іншу главу.');
+    seenSessions.set(sourceSessionId, chapterId);
+  }
+  const oldChapters = existing && Array.isArray((existing.book as any).chapters)
+    ? (existing.book as any).chapters as Array<Record<string, unknown>> : [];
+  for (const old of oldChapters) {
+    const sourceSessionId = old.sourceSessionId;
+    if (typeof sourceSessionId !== 'string' || !sourceSessionId.trim()) continue;
+    const current = chapters.find(chapter => chapter.id === old.id);
+    if (current && current.sourceSessionId !== sourceSessionId) throw new Error('Не можна змінювати джерело імпортованої глави.');
+    const reassigned = chapters.find(chapter => chapter.sourceSessionId === sourceSessionId && chapter.id !== old.id);
+    if (reassigned) throw new Error('Сесію вже привʼязано до іншої глави.');
+  }
+
   const next: StoredBook = {
     id,
     // Власника не перезаписуємо чужим значенням: книга належить тому, хто її
