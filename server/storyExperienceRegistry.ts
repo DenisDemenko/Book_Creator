@@ -40,6 +40,11 @@ export function safeCompletedSessionSummary(
     throw new Error('Сесію не знайдено.');
   }
   if (record.status !== 'completed' || !validKinds.has(record.kind)) throw new Error('Сесія не завершена.');
+  const required = record.consentRequiredParticipantIds ?? [];
+  if (required.length && required.some(id => {
+    const matching = (record.consentDecisions ?? []).filter(d => d.participantId === id && d.scope === 'book-adaptation');
+    return matching.length === 0 || matching[matching.length - 1].status !== 'granted';
+  })) throw new Error('Згода учасників відсутня або відкликана.');
   const approved = record.canonicalEvents ? projectEventsForBook(record.canonicalEvents) : record.events.filter(e => e.approvedForBook && e.visibility === 'approved');
   if (approved.length === 0) throw new Error('Немає дозволених подій для експорту.');
   const paragraphs = approved.map(e => e.label.trim() + ': ' + e.description.trim()).filter(Boolean);
