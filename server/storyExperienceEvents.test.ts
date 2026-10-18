@@ -19,6 +19,12 @@ describe('session event privacy boundary', () => {
     assert.throws(() => appendEvent([first],make(3,'approved')));
     assert.throws(() => appendEvent([first],{...make(2,'approved'),sessionId:'other'}));
   });
+  it('retains distinct IDs for sequential events', () => {
+    const first = make(1,'approved');
+    const second = make(2,'approved');
+    const records = appendEvent(appendEvent([],first),second);
+    assert.deepEqual(records.map(event => event.id),['event-1','event-2']);
+  });
   it('does not leak private text through book export', () => {
     const session: CompletedExperienceRecord = {
       id:'session-1',bookId:'book-1',ownerId:'owner-1',kind:'mafia',title:'Session',status:'completed',
