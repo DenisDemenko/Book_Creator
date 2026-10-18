@@ -23,6 +23,9 @@ export function commitSessionToBook(book: Book, request: SessionBookExportReques
   if (!material.sessionId.trim() || !material.exportAllowed || !material.approvedText.trim()) {
     throw new Error('Немає підтвердженого матеріалу сесії, дозволеного для експорту.');
   }
+  if (book.chapters.some(chapter => (chapter as typeof chapter & { sourceSessionId?: string }).sourceSessionId === material.sessionId)) {
+    throw new Error('Цю сесію вже імпортовано в книгу. Відкрийте створену главу замість повторного імпорту.');
+  }
   if (!request.formats.length) throw new Error('Оберіть формат.');
   if (request.privacy === 'none') throw new Error('Для досвіду реальних учасників потрібна анонімізація.');
   if (request.mappings.some((mapping) => !mapping.fictionalName.trim())) throw new Error('У кожного героя має бути вигадане ім’я.');
@@ -57,7 +60,7 @@ export function commitSessionToBook(book: Book, request: SessionBookExportReques
   const sectionId = newId();
   const now = new Date().toISOString();
   const chapter = {
-    id: chapterId, bookId: book.id,
+    id: chapterId, bookId: book.id, sourceSessionId: material.sessionId,
     title: 'Чернетка з досвіду: ' + request.sessionTitle,
     order: book.chapters.length + 1,
     sections: [{
