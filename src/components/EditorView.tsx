@@ -5250,7 +5250,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
   const editorSurface = (
     <div
       ref={focusRootRef}
-      className={`editor-shell-glass flex flex-col lg:flex-row overflow-hidden bg-slate-900 text-slate-100 relative ${
+      className={`editor-shell-glass min-w-0 flex flex-col lg:flex-row overflow-hidden bg-slate-900 text-slate-100 relative ${
         tagsHidden ? 'nova-hide-tags ' : ''
       }${isFocusWindow ? 'nova-fullscreen-editor w-full h-full min-h-0' : 'flex-1 min-h-0'}`}
       style={isFocusWindow ? { ...sunVars } : { ...sunVars, height: EDITOR_SURFACE_HEIGHT, maxHeight: EDITOR_SURFACE_HEIGHT }}
@@ -5376,7 +5376,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
       {/* LEFT DRAWER: Book Structure Tree (Can be collapsed or opened) */}
       {showLeftTree && (
-        <aside style={sunVars} className="w-full lg:w-72 bg-slate-950/95 backdrop-blur-xl border-r border-slate-800 shadow-2xl shadow-black/60 flex flex-col shrink-0 absolute z-40 h-full max-h-full lg:relative lg:z-auto">
+        <aside style={sunVars} className="hidden lg:flex w-full lg:w-72 bg-slate-950/95 backdrop-blur-xl border-r border-slate-800 shadow-2xl shadow-black/60 flex flex-col shrink-0 absolute z-40 h-full max-h-full lg:relative lg:z-auto">
           <div className="p-3.5 border-b border-slate-800 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <BookMarked className="w-4 h-4 [color:var(--sun-acc)]" />
@@ -5486,7 +5486,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
       {/* LEFT / CENTER: MAIN WRITING AREA ("велике поле для тексту книги зліва") */}
       <main
         ref={mainAreaRef}
-        className="flex-1 min-h-0 flex flex-col h-full bg-slate-950 overflow-hidden border-r border-slate-800"
+        className="flex-1 min-w-0 min-h-0 flex flex-col h-full bg-slate-950 overflow-hidden border-r border-slate-800"
         style={{
           paddingTop: toolReserve.top,
           paddingBottom: toolReserve.bottom,
@@ -5760,7 +5760,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
       {showRightPanel && (
         <aside
           style={{ '--panel-w': `${rightPanelWidth}px`, ...sunVars } as React.CSSProperties}
-          className="nova-char-panel w-full bg-slate-950/95 backdrop-blur-xl border-l border-slate-800 flex flex-col shrink-0 absolute lg:relative right-0 z-30 lg:z-auto h-full max-h-full"
+          className="nova-char-panel hidden lg:flex w-full bg-slate-950/95 backdrop-blur-xl border-l border-slate-800 flex flex-col shrink-0 absolute lg:relative right-0 z-30 lg:z-auto h-full max-h-full"
         >
           {/* Ручка зміни ширини панелі (тягнути вправо-вліво) */}
           <div
