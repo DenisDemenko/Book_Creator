@@ -31,6 +31,18 @@ export const CompletedSessionArchiveReview: React.FC<CompletedSessionArchiveRevi
     })();
     return () => {disposed=true;};
   },[journal]);
+  const [inviteEmail,setInviteEmail]=useState('');
+  const [inviteMessage,setInviteMessage]=useState('');
+  const invite=async()=>{
+    if(!journal||!inviteEmail.trim())return;
+    try{
+      const response=await fetch('/api/story-experience/journals/'+encodeURIComponent(journal.sessionId)+'/invite',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({bookId,email:inviteEmail.trim()})});
+      const result=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(result.error||'Помилка запрошення');
+      setInviteMessage('Запрошення надіслано до облікового запису. Участь потребує підтвердження.');
+      setInviteEmail('');
+    }catch(error){setInviteMessage(error instanceof Error?error.message:'Помилка');}
+  };
   const [participantIds,setParticipantIds]=useState('');
   const consentRoster=participantIds.split(/[\s,;]+/).map(x=>x.trim()).filter(Boolean);
   const rosterValid=consentRoster.length>0 && consentRoster.length<=100 && consentRoster.every(id=>id.length<=128) && new Set(consentRoster).size===consentRoster.length;
@@ -107,6 +119,7 @@ export const CompletedSessionArchiveReview: React.FC<CompletedSessionArchiveRevi
           </div>}
           {reviewedFingerprint!==draftFingerprint&&<p className="text-xs text-amber-200">Після кожної зміни тексту виконайте перевірку повторно.</p>}
         </div>
+        {journal&&<div className="rounded-xl border border-slate-700 p-3 text-sm"><label className="block">Запросити зареєстрованого учасника за email<input type="email" value={inviteEmail} onChange={e=>setInviteEmail(e.target.value)} className="mt-2 w-full rounded-lg border border-slate-600 bg-slate-900 p-2" placeholder="Електронна адреса облікового запису"/></label><button type="button" onClick={()=>void invite()} disabled={!inviteEmail.trim()} className="mt-2 rounded-lg border border-cyan-500 px-3 py-2 text-xs">Надіслати запрошення</button>{inviteMessage&&<p role="status" className="mt-2 text-xs">{inviteMessage}</p>}</div>}
         {!journal && <p role="alert" className="text-xs text-amber-200">Для архівації необхідний завершений журнал із підтвердженою участю. Збереження тимчасово недоступне.</p>}
         <label className="block rounded-xl border border-slate-700 p-3 text-sm">Ідентифікатори учасників, згода яких обов'язкова (облікові записи, через кому або новий рядок)
           <textarea rows={3} value={participantIds} onChange={e=>{setParticipantIds(e.target.value);setConfirmed(false);}} className="mt-2 w-full rounded-lg border border-slate-600 bg-slate-900 p-2" placeholder="ID авторизованих учасників — не їхні імена" />
