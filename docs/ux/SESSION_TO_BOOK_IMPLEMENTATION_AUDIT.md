@@ -41,3 +41,10 @@ P1 — source provenance, linked media picker, multi-format export і chapter/he
 P2 — AI адаптація, advanced merge/split, інтелектуальні портрети, review diff та polish.
 
 Примітка: успішний TypeScript CI — це перевірка збірки, а не підтвердження безпечного production workflow.
+
+## Оновлення 2026-10-18 — канонічна подієва схема (ітерація)
+- Додано `server/storyExperienceEvents.ts`: типізована структура подій, видимість, часові мітки, порядковий номер, перевірка дублювання й міжсесійного змішування.
+- `safeCompletedSessionSummary` використовує server-side projection подій із `visibility=approved` та `approvedForBook=true`, якщо є canonicalEvents.
+- Нові погоджені архівні записи зберігають `canonicalEvents` поруч із legacy `events` для сумісності.
+- Додано unit-тести фільтрації приватного вмісту, порядку і власника сесії.
+- **Не виконано:** автоматичний ingest подій із живих Mafia/Constellation/Leela, окрема захищена база для всіх категорій подій, per-participant consent, retention, ревізії та гарантії PII-очищення. Інтерфейс архівації наразі зберігає лише вручну підтверджені події; функціональність не можна вважати повним production event sourcing.
