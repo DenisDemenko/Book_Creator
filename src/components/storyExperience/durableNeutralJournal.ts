@@ -1,10 +1,10 @@
 import { createSessionJournal, appendNeutralSessionEvent, type JournalSession } from './sessionJournalClient';
 
-export type NeutralEvent = {kind:'snapshot'|'leela-move';label:string;description:string;eventId:string};
+export type NeutralEvent = {kind:'snapshot'|'leela-move'|'game-action';label:string;description:string;eventId:string};
 type StoredQueue = {version:1;session?:JournalSession; events:NeutralEvent[]};
 const prefix='story-experience-neutral-queue-v1:';
-function storageKey(ownerId:string,bookId:string,kind:'leela'|'constellation') {return prefix+encodeURIComponent(ownerId)+':'+encodeURIComponent(bookId)+':'+kind;}
-function read(ownerId:string,bookId:string,kind:'leela'|'constellation'):StoredQueue {
+function storageKey(ownerId:string,bookId:string,kind:'leela'|'constellation'|'mafia') {return prefix+encodeURIComponent(ownerId)+':'+encodeURIComponent(bookId)+':'+kind;}
+function read(ownerId:string,bookId:string,kind:'leela'|'constellation'|'mafia'):StoredQueue {
   try {
     const raw=localStorage.getItem(storageKey(ownerId,bookId,kind));
     if(!raw)return {version:1,events:[]};
@@ -14,7 +14,7 @@ function read(ownerId:string,bookId:string,kind:'leela'|'constellation'):StoredQ
     return data;
   } catch {return {version:1,events:[]};}
 }
-function persist(ownerId:string,bookId:string,kind:'leela'|'constellation',data:StoredQueue) {
+function persist(ownerId:string,bookId:string,kind:'leela'|'constellation'|'mafia',data:StoredQueue) {
   // Neutral event metadata only: never store real names, private reflections or raw snapshots.
   localStorage.setItem(storageKey(ownerId,bookId,kind),JSON.stringify(data));
 }
@@ -22,7 +22,7 @@ export class DurableNeutralJournal {
   private queue:StoredQueue;
   private inFlight:Promise<void>=Promise.resolve();
   private error:unknown=null;
-  constructor(private readonly ownerId:string,private readonly bookId:string,private readonly kind:'leela'|'constellation') {
+  constructor(private readonly ownerId:string,private readonly bookId:string,private readonly kind:'leela'|'constellation'|'mafia') {
     if (!ownerId.trim()) throw new Error('Для журналу потрібен авторизований користувач.');
     this.queue=read(ownerId,bookId,kind);
   }
