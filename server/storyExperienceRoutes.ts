@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { requireAuth } from './auth';
-import { findUserById } from './store';
+import { findUserById, findUserByEmail } from './store';
 import { DATA_DIR } from './db';
 import { getBook } from './bookStore';
 import type { ExperienceEventKind, ExperienceEventRecord } from './storyExperienceEvents';
@@ -132,20 +132,20 @@ export function registerStoryExperienceRoutes(app: Express): void {
   // Invitations target existing, enabled site accounts and never enroll anyone automatically.
   app.post('/api/story-experience/journals/:sessionId/invite', requireAuth, async (req: Request,res: Response)=>{
     const ownerId=req.principal?.id;
-    const {bookId,participantId}=req.body||{};
+    const {bookId,participantId,email}=req.body||{};
     if(!ownerId){res.status(401).json({error:'Авторизація потрібна'});return;}
-    if(typeof bookId!=='string'||typeof participantId!=='string'||!participantId.trim()){
+    if(typeof bookId!=='string'||!(typeof participantId==='string'&&participantId.trim() || typeof email==='string'&&email.trim())){
       res.status(400).json({error:'Укажіть книгу та зареєстрованого користувача'});return;
     }
     try {
-      const user=await findUserById(participantId);
+      const user=typeof email==='string'&&email.trim() ? await findUserByEmail(email.trim().toLowerCase()) : await findUserById(participantId);
       if(!user||user.disabled){res.status(404).json({error:'Зареєстрованого користувача не знайдено'});return;}
       const outcome=await enqueue(async()=>{
         const all=await loadJournals();
         const journal=all.find(j=>j.sessionId===req.params.sessionId&&j.bookId===bookId&&j.ownerId===ownerId&&j.status==='draft');
         if(!journal)return 'missing' as const;
         journal.invitedParticipantIds??=[];
-        if(!journal.invitedParticipantIds.includes(participantId))journal.invitedParticipantIds.push(participantId);
+        if(!journal.invitedParticipantIds.includes(user.id))journal.invitedParticipantIds.push(user.id);
         await storeJournals(all);return 'invited' as const;
       });
       if(outcome==='missing'){res.status(404).json({error:'Журнал недоступний'});return;}
