@@ -2632,7 +2632,7 @@ export default function App() {
       {/* Довідковий тур: спливаючі підказки біля ключових кнопок кожної
           вкладки для нових користувачів. Сам відстежує зміну currentTab
           і показує 3-5 підказок при першому відвідуванні вкладки. */}
-      <OnboardingTour currentTab={currentTab} authUser={auth.user} />
+      {typeof window !== 'undefined' && window.innerWidth >= 640 && <OnboardingTour currentTab={currentTab} authUser={auth.user} />}
 
       {/* Сторінка довідки (кнопка в футері вище). Поверх студії, а не
           вкладкою: автор читає її, не втрачаючи місця, де працював. */}
