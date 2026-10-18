@@ -187,6 +187,23 @@ export function registerStoryExperienceRoutes(app: Express): void {
       res.json({declined:true});
     }catch{res.status(500).json({error:'Не вдалося відхилити запрошення'});}
   });
+  app.post('/api/story-experience/journals/:sessionId/leave',requireAuth,async(req:Request,res:Response)=>{
+    const userId=req.principal?.id,bookId=req.body?.bookId;
+    if(!userId||typeof bookId!=='string'){res.status(400).json({error:'Недійсний запит'});return;}
+    try{
+      const outcome=await enqueue(async()=>{
+        const all=await loadJournals();
+        const journal=all.find(j=>j.sessionId===req.params.sessionId&&j.bookId===bookId&&j.status==='draft'&&j.participantIds?.includes(userId));
+        if(!journal)return 'missing' as const;
+        journal.participantIds=journal.participantIds?.filter(id=>id!==userId);
+        journal.invitedParticipantIds=journal.invitedParticipantIds?.filter(id=>id!==userId);
+        await storeJournals(all);
+        return 'left' as const;
+      });
+      if(outcome==='missing'){res.status(404).json({error:'Участь недоступна для скасування'});return;}
+      res.json({left:true});
+    }catch{res.status(500).json({error:'Не вдалося вийти з сесії'});}
+  });
   app.post('/api/story-experience/journals/:sessionId/join', requireAuth, async (req: Request,res: Response) => {
     const userId=req.principal?.id;
     const {bookId}=req.body||{};
