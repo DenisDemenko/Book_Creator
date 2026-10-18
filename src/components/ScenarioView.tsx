@@ -63,20 +63,20 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   reviewedSessionMaterials,
 }) => {
   const [workspace, setWorkspace] = useState<StoryWorkspace>('screenplay');
-  const journals = useRef<Partial<Record<'leela'|'constellation', DurableNeutralJournal>>>({});
+  const journals = useRef<Partial<Record<'leela'|'constellation'|'mafia', DurableNeutralJournal>>>({});
   const [journalError, setJournalError] = useState('');
-  const [completedJournals, setCompletedJournals] = useState<Partial<Record<'leela'|'constellation', JournalSession>>>({});
-  const getJournal = (kind: 'leela'|'constellation') => {
+  const [completedJournals, setCompletedJournals] = useState<Partial<Record<'leela'|'constellation'|'mafia', JournalSession>>>({});
+  const getJournal = (kind: 'leela'|'constellation'|'mafia') => {
     if (!ownerId) throw new Error('Увійдіть, щоб записувати журнал сесії.');
     if (!journals.current[kind]) journals.current[kind] = new DurableNeutralJournal(ownerId,book.id,kind);
     return journals.current[kind]!;
   };
-  const recordNeutralEvent = (kind: 'leela'|'constellation', event: {kind:'snapshot'|'leela-move';label:string;description:string}) => {
+  const recordNeutralEvent = (kind: 'leela'|'constellation'|'mafia', event: {kind:'snapshot'|'leela-move'|'game-action';label:string;description:string}) => {
     void getJournal(kind).append(event).then(() => setJournalError(''),error => {
       setJournalError(error instanceof Error ? error.message : 'Подію поставлено у чергу, але не записано');
     });
   };
-  const prepareJournal = async (kind: 'leela'|'constellation') => {
+  const prepareJournal = async (kind: 'leela'|'constellation'|'mafia') => {
     try {
       const journal = await getJournal(kind).prepare();
       if (journal) setCompletedJournals(previous=>({...previous,[kind]:journal}));
@@ -89,7 +89,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     // Replay only existing neutral queues; never fabricate an event or start a session on mount.
     if (!ownerId) return;
     journals.current = {};
-    for (const kind of ['leela','constellation'] as const) {
+    for (const kind of ['leela','constellation','mafia'] as const) {
       const journal = getJournal(kind);
       if (journal.pendingCount) void journal.flush().catch(error => {
         setJournalError(error instanceof Error ? error.message : 'Не вдалося відновити запис');
@@ -225,6 +225,9 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
 
         {workspace === 'mafia' && (
           <IntegratedMafiaView
+            journal={completedJournals.mafia}
+            onPrepareJournal={() => prepareJournal('mafia')}
+            onMafiaNeutralEvent={event => { void recordNeutralEvent('mafia',{kind:'game-action',label:'Mafia: '+event.action,description:event.phase ? 'Фаза: '+event.phase : 'Нейтральний стан гри'}); }}
             bookId={book.id}
             onRequestSessionPortrait={requestPortrait}
             portraitAssets={sessionPortraits}
