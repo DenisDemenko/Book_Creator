@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 
 type Registration = { id: string; name: string; contact: string; role: 'participant'|'representative'|'observer'; status: 'pending'|'confirmed'|'waitlist'; };
-type SavedEvent = {id:string;theme:string;date:string;time:string;venue:string;address:string;price:string;announcement:string;registrations:Registration[]};
+type SavedEvent = {publicToken?:string;id:string;theme:string;date:string;time:string;venue:string;address:string;price:string;announcement:string;registrations:Registration[]};
 const sample = `✨ ГРУПОВІ РОЗСТАНОВКИ ✨
 ТЕМА: «ПРОЯВЛЕНІСТЬ»
 Четвер, 22 жовтня
@@ -32,6 +32,7 @@ export const ConstellationEventPlanner: React.FC<{bookId?:string}> = ({bookId}) 
   const [busy, setBusy] = useState(false);
   const [events, setEvents] = useState<SavedEvent[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
+  const [publicToken, setPublicToken] = useState<string | null>(null);
   const loadEvents = async () => {
     if (!bookId) return;
     setLoadingEvents(true);
@@ -47,6 +48,7 @@ export const ConstellationEventPlanner: React.FC<{bookId?:string}> = ({bookId}) 
   useEffect(() => { void loadEvents(); }, [bookId]);
   const openEvent = (item: SavedEvent) => {
     setSavedEventId(item.id);
+    setPublicToken(item.publicToken ?? null);
     setForm({theme:item.theme,date:item.date,time:item.time,venue:item.venue,address:item.address,price:item.price});
     setAnnouncement(item.announcement);
     setRegistrations(item.registrations);
@@ -63,6 +65,7 @@ export const ConstellationEventPlanner: React.FC<{bookId?:string}> = ({bookId}) 
       const data = await result.json();
       if (!result.ok) throw new Error(data.error || 'Сервер відхилив збереження');
       setSavedEventId(data.event.id);
+      setPublicToken(data.event.publicToken ?? null);
       setRegistrations(data.event.registrations ?? []);
       await loadEvents();
       setMessage('Подію збережено на сервері.');
@@ -95,7 +98,7 @@ export const ConstellationEventPlanner: React.FC<{bookId?:string}> = ({bookId}) 
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">Мої збережені події</h3><button type="button" onClick={() => void loadEvents()} disabled={loadingEvents} className="rounded-lg border border-[#D9CABC] bg-white px-3 py-1 text-xs">Оновити</button></div>
       {events.length===0 ? <p className="text-sm text-[#71645A]">Збережених подій поки немає або потрібна авторизація.</p> :
         <div className="grid gap-2 sm:grid-cols-2">{events.map(item=><button key={item.id} type="button" onClick={()=>openEvent(item)} className={`rounded-xl border p-3 text-left text-sm ${savedEventId===item.id?'border-[#8B5937] bg-white':'border-[#E0D4C7] bg-[#FFFCF8]'}`}><strong className="block">{item.theme}</strong><span className="text-xs text-[#71645A]">{item.date} {item.time} · заявок: {item.registrations.length}</span></button>)}</div>}
-      {savedEventId && <button type="button" className="mt-3 rounded-lg border border-[#D9CABC] bg-white px-3 py-2 text-xs" onClick={()=>{setSavedEventId(null);setRegistrations([]);setMessage('Нова подія: заповніть поля й збережіть.');}}>＋ Нова подія</button>}
+      {savedEventId && <button type="button" className="mt-3 rounded-lg border border-[#D9CABC] bg-white px-3 py-2 text-xs" onClick={()=>{setSavedEventId(null);setPublicToken(null);setRegistrations([]);setMessage('Нова подія: заповніть поля й збережіть.');}}>＋ Нова подія</button>}
     </div>
     <div className="grid gap-4 lg:grid-cols-2">
       <div className="space-y-2">
@@ -112,6 +115,11 @@ export const ConstellationEventPlanner: React.FC<{bookId?:string}> = ({bookId}) 
       <button type="button" disabled={busy || !bookId} onClick={() => void saveEvent()} className="rounded-xl bg-[#2E1B12] px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{savedEventId ? 'Зберегти зміни' : 'Створити подію'}</button>
       {!savedEventId && <span className="text-xs text-[#71645A]">Реєстрація відкриється після збереження події авторизованим власником книги.</span>}
     </div>
+    {publicToken && <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#E0D4C7] bg-[#F4ECE1] p-3">
+      <span className="text-sm font-semibold">Посилання для запису учасників</span>
+      <button type="button" onClick={async()=>{const url=new URL('/constellation-registration.html',window.location.origin);url.searchParams.set('token',publicToken);try{await navigator.clipboard.writeText(url.toString());setMessage('Посилання скопійовано');}catch{setMessage('Не вдалося скопіювати посилання');}}} className="rounded-xl bg-[#2E1B12] px-3 py-2 text-xs font-semibold text-white">Копіювати посилання</button>
+      <a href={'/constellation-registration.html?token='+encodeURIComponent(publicToken)} target="_blank" rel="noopener noreferrer" className="text-sm underline">Переглянути сторінку</a>
+    </div>}
     <div className="border-t border-[#E0D4C7] pt-4">
       <h3 className="mb-2 font-bold">Заявки на участь <span className="text-sm font-normal text-[#71645A]">({registrations.length})</span></h3>
       <form onSubmit={addRegistration} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto_auto]">
