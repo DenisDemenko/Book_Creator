@@ -14,10 +14,28 @@ export async function createSessionJournal(bookId: string, kind: SafeJournalKind
   return {sessionId:body.sessionId,bookId,kind};
 }
 export async function appendNeutralSessionEvent(session: JournalSession, event: {kind:'snapshot'|'leela-move'|'game-action'; label:string; description:string; eventId:string}): Promise<void> {
-  await json(await fetch('/api/story-experience/journals/'+encodeURIComponent(session.sessionId)+'/events',{
-    method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({...event,bookId:session.bookId}),
-  }));
+  const url='/api/story-experience/journals/'+encodeURIComponent(session.sessionId)+'/events';
+  // Preserve the eventId through retries: a lost 201 response must not create two events.
+  for (let attempt=0; attempt<3; attempt++) {
+    let response: Response;
+    try {
+      response=await fetch(url,{
+        method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({...event,bookId:session.bookId}),
+      });
+    } catch (error) {
+      if (attempt===2) throw error;
+      continue;
+    }
+    // The API uses 409 for an already stored eventId; this is successful idempotent replay.
+    if(response.status===409) return;
+    if(response.ok){await json(response);return;}
+    if(response.status===429 || response.status>=500){
+      if(attempt<2)continue;
+    }
+    await json(response);
+    return;
+  }
 }
 
 export interface JournalReviewEvent {id:string;kind:string;label:string;description:string;visibility:string;approvedForBook:false;}
