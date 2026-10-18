@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { eligibleEventPreviews, type SessionEventCandidate } from './eligibleSessionEvents';
 import type { SessionExportKind } from './SessionExportToBookView';
 
 interface ApprovedEventDraft { id: number; label: string; description: string; }
@@ -6,12 +7,13 @@ export interface CompletedSessionArchiveReviewProps {
   bookId: string;
   kind: SessionExportKind;
   title: string;
+  sourceEvents?: SessionEventCandidate[];
   onClose: () => void;
   onSaved?: (id: string) => void;
 }
 /** Manual review is intentional: demo summaries, private notes and participant identities must never be auto-exported. */
-export const CompletedSessionArchiveReview: React.FC<CompletedSessionArchiveReviewProps> = ({ bookId, kind, title, onClose, onSaved }) => {
-  const [events, setEvents] = useState<ApprovedEventDraft[]>([{ id: 1, label: '', description: '' }]);
+export const CompletedSessionArchiveReview: React.FC<CompletedSessionArchiveReviewProps> = ({ bookId, kind, title, sourceEvents = [], onClose, onSaved }) => {
+  const [events, setEvents] = useState<ApprovedEventDraft[]>(() => { const eligible = eligibleEventPreviews(sourceEvents); return eligible.length ? eligible.map((e, i) => ({id:i+1,label:e.label,description:e.description})) : [{id:1,label:'',description:''}]; });
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -37,14 +39,14 @@ export const CompletedSessionArchiveReview: React.FC<CompletedSessionArchiveRevi
   };
   return <section className="min-h-0 flex-1 overflow-y-auto bg-slate-950 p-4 text-slate-100 lg:p-6">
     <div className="mx-auto max-w-3xl space-y-4">
-      <header><h1 className="text-xl font-semibold">Перевірка матеріалу перед архівацією</h1><p className="mt-2 text-sm text-slate-400">Введіть лише ті події, на які є дозвіл. Справжні імена, приватні висловлювання та нотатки фасилітатора не копіюються сюди автоматично.</p></header>
+      <header><h1 className="text-xl font-semibold">Перевірка матеріалу перед архівацією</h1><p className="mt-2 text-sm text-slate-400">{sourceEvents.length ? `Із ${sourceEvents.length} подій доступні для перегляду ${eligibleEventPreviews(sourceEvents).length}. Приховані й непогоджені події не передаються до форми.` : 'Джерело подій не підключено: введіть лише дозволені нейтральні події вручну.'} Справжні імена, приватні висловлювання та нотатки фасилітатора не копіюються сюди автоматично.</p></header>
       {saved ? <div role="status" className="rounded-xl border border-emerald-700 p-4 text-sm">Сесію збережено в архіві. ID: {saved}<button type="button" onClick={onClose} className="mt-3 block rounded-lg bg-slate-100 px-3 py-2 text-slate-950">Повернутися</button></div> : <>
         {events.map((event, index) => <div key={event.id} className="space-y-2 rounded-xl border border-slate-700 bg-slate-900 p-4">
-          <label className="block text-xs">Дозволена подія {index + 1}<input value={event.label} maxLength={200} onChange={e => setEvents(old => old.map(x => x.id === event.id ? {...x,label:e.target.value}:x))} placeholder="Нейтральна назва" className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 p-2 text-sm"/></label>
-          <label className="block text-xs">Перевірений опис<textarea rows={4} maxLength={10000} value={event.description} onChange={e => setEvents(old => old.map(x => x.id === event.id ? {...x,description:e.target.value}:x))} placeholder="Без персональних та чутливих деталей" className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 p-2 text-sm"/></label>
-          <button type="button" disabled={events.length===1} onClick={() => setEvents(old=>old.filter(x=>x.id!==event.id))} className="text-xs text-rose-200 disabled:opacity-40">Прибрати подію</button>
+          <label className="block text-xs">Дозволена подія {index + 1}<input value={event.label} maxLength={200} onChange={e => { setConfirmed(false); setEvents(old => old.map(x => x.id === event.id ? {...x,label:e.target.value}:x)); }} placeholder="Нейтральна назва" className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 p-2 text-sm"/></label>
+          <label className="block text-xs">Перевірений опис<textarea rows={4} maxLength={10000} value={event.description} onChange={e => { setConfirmed(false); setEvents(old => old.map(x => x.id === event.id ? {...x,description:e.target.value}:x)); }} placeholder="Без персональних та чутливих деталей" className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 p-2 text-sm"/></label>
+          <button type="button" disabled={events.length===1} onClick={() => { setConfirmed(false); setEvents(old=>old.filter(x=>x.id!==event.id)); }} className="text-xs text-rose-200 disabled:opacity-40">Прибрати подію</button>
         </div>)}
-        <button type="button" disabled={events.length>=200} onClick={() => setEvents(old=>[...old,{id:Math.max(...old.map(x=>x.id))+1,label:'',description:''}])} className="rounded-lg border border-slate-700 px-3 py-2 text-xs">Додати подію</button>
+        <button type="button" disabled={events.length>=200} onClick={() => { setConfirmed(false); setEvents(old=>[...old,{id:Math.max(...old.map(x=>x.id))+1,label:'',description:''}]); }} className="rounded-lg border border-slate-700 px-3 py-2 text-xs">Додати подію</button>
         <div role="note" className="rounded-xl border border-amber-600/50 p-3 text-xs text-amber-100">Система не може гарантувати анонімність: навіть без імен людину можуть упізнати за змістом. Для використання чужого досвіду потрібні належні дозволи.</div>
         <label className="flex gap-2 text-sm"><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/><span>Я перевірив кожну подію, прибрав персональні деталі та маю дозвіл використовувати матеріал.</span></label>
         {error && <p role="alert" className="text-sm text-rose-300">{error}</p>}
