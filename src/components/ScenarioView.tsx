@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { BrainCircuit, Clapperboard, Drama, Gamepad2, Sparkles } from 'lucide-react';
 import type { Book, NavigationTab } from '../types';
+import { commitSessionToBook, type ReviewedSessionBookMaterial } from './storyExperience/sessionBookCommit';
+import type { SessionBookExportRequest } from './storyExperience/SessionExportToBookView';
 import { ScenarioLegacyView } from './ScenarioLegacyView';
 import {
   IntegratedConstellationView,
@@ -21,6 +23,7 @@ interface ScenarioViewProps {
   onNavigateToTab?: (tab: NavigationTab) => void;
   onEvaluateWithJev?: StoryExperienceJevEvaluator;
   onSaveBook?: () => void;
+  reviewedSessionMaterials?: Partial<Record<'mafia' | 'constellation' | 'leela', ReviewedSessionBookMaterial>>;
 }
 
 const workspaces: Array<{
@@ -49,10 +52,16 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   onNavigateToTab,
   onEvaluateWithJev,
   onSaveBook,
+  reviewedSessionMaterials,
 }) => {
   const [workspace, setWorkspace] = useState<StoryWorkspace>('screenplay');
   const [selectedScene, setSelectedScene] = useState<ScreenplaySelectedSceneContext | null>(null);
 
+  const onCommitSessionBook = (request: SessionBookExportRequest, material: ReviewedSessionBookMaterial) => {
+    const result = commitSessionToBook(book, request, material);
+    onUpdateBook(result.book, 'Імпорт художнього матеріалу із сесії', 'Додано главу та героїв за погодженим матеріалом сесії');
+    onNavigateToSection(result.chapterId, result.sectionId);
+  };
   const navigateToTab = (tab: NavigationTab) => {
     if (onNavigateToTab) {
       onNavigateToTab(tab);
@@ -167,6 +176,9 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
 
         {workspace === 'mafia' && (
           <IntegratedMafiaView
+            existingCharacters={book.characters.map((character) => ({ id: character.id, name: character.name }))}
+            reviewedMaterial={reviewedSessionMaterials?.mafia}
+            onCommitBookExport={onCommitSessionBook}
             projectTitle={book.title}
             preferredModelId={book.preferredAiModelId}
             jevRequest={mafiaJevRequest}
@@ -176,6 +188,9 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
 
         {workspace === 'constellation' && (
           <IntegratedConstellationView
+            existingCharacters={book.characters.map((character) => ({ id: character.id, name: character.name }))}
+            reviewedMaterial={reviewedSessionMaterials?.constellation}
+            onCommitBookExport={onCommitSessionBook}
             title={book.title}
             preferredModelId={book.preferredAiModelId}
             jevRequest={constellationJevRequest}
@@ -185,6 +200,9 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
 
         {workspace === 'leela' && (
           <IntegratedLeelaView
+            existingCharacters={book.characters.map((character) => ({ id: character.id, name: character.name }))}
+            reviewedMaterial={reviewedSessionMaterials?.leela}
+            onCommitBookExport={onCommitSessionBook}
             title={`${book.title} · Leela`}
             preferredModelId={book.preferredAiModelId}
             jevRequest={leelaJevRequest}
