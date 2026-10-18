@@ -12,6 +12,7 @@ export interface SessionCompletionViewProps {
   onCreateNextSession?: () => void;
   onArchive?: () => void;
   onSaveNotes?: (notes: string) => void;
+  onExportToBook?: () => void;
 }
 
 export const SessionCompletionView: React.FC<SessionCompletionViewProps> = ({
@@ -25,6 +26,7 @@ export const SessionCompletionView: React.FC<SessionCompletionViewProps> = ({
   onCreateNextSession,
   onArchive,
   onSaveNotes,
+  onExportToBook,
 }) => {
   const [notes, setNotes] = useState('');
   const [archived, setArchived] = useState(false);
@@ -69,6 +71,7 @@ export const SessionCompletionView: React.FC<SessionCompletionViewProps> = ({
           </div>
 
           <aside className="space-y-4">
+            {onExportToBook && <article className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-4"><h2 className="text-sm font-bold text-white">Перетворити досвід на книгу</h2><p className="mt-2 text-xs leading-5 text-cyan-100/75">Підготуйте історію та вигаданих героїв із захистом конфіденційності.</p><button type="button" onClick={onExportToBook} className="mt-3 w-full rounded-xl bg-slate-100 px-3 py-2.5 text-xs font-bold text-slate-950">Відкрити майстер експорту</button></article>}
             <article className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
               <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">Вихід учасників</div>
               <p className="mt-2 text-xs leading-5 text-slate-300">{participantExitLabel}</p>
