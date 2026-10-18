@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { BrainCircuit, Clapperboard, Drama, Gamepad2, Sparkles } from 'lucide-react';
 import type { Book, NavigationTab } from '../types';
+import { generateSessionCharacterPortrait, attachSessionPortraits, type SessionPortraitAsset } from './storyExperience/sessionPortraitService';
+import type { CharacterDraft } from './storyExperience/CharacterDraftEditor';
 import { commitSessionToBook, type ReviewedSessionBookMaterial } from './storyExperience/sessionBookCommit';
 import type { SessionBookExportRequest } from './storyExperience/SessionExportToBookView';
 import { ScenarioLegacyView } from './ScenarioLegacyView';
@@ -55,12 +57,20 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   reviewedSessionMaterials,
 }) => {
   const [workspace, setWorkspace] = useState<StoryWorkspace>('screenplay');
+  const [sessionPortraits, setSessionPortraits] = useState<SessionPortraitAsset[]>([]);
   const [selectedScene, setSelectedScene] = useState<ScreenplaySelectedSceneContext | null>(null);
 
   const onCommitSessionBook = (request: SessionBookExportRequest, material: ReviewedSessionBookMaterial) => {
     const result = commitSessionToBook(book, request, material);
+    const ids = Object.fromEntries(request.mappings.filter(m => m.action === 'new').map((m, i) => [m.participantId, result.createdCharacterIds[i]]));
+    result.book = attachSessionPortraits(result.book, ids, sessionPortraits);
     onUpdateBook(result.book, 'Імпорт художнього матеріалу із сесії', 'Додано главу та героїв за погодженим матеріалом сесії');
     onNavigateToSection(result.chapterId, result.sectionId);
+  };
+  const requestPortrait = async (draft: CharacterDraft) => {
+    const asset = await generateSessionCharacterPortrait(book, draft);
+    setSessionPortraits(previous => [...previous.filter(p => p.participantId !== asset.participantId), asset]);
+    return asset;
   };
   const navigateToTab = (tab: NavigationTab) => {
     if (onNavigateToTab) {
@@ -176,6 +186,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
 
         {workspace === 'mafia' && (
           <IntegratedMafiaView
+            onRequestSessionPortrait={requestPortrait}
+            portraitAssets={sessionPortraits}
             existingCharacters={book.characters.map((character) => ({ id: character.id, name: character.name }))}
             reviewedMaterial={reviewedSessionMaterials?.mafia}
             onCommitBookExport={onCommitSessionBook}
@@ -188,6 +200,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
 
         {workspace === 'constellation' && (
           <IntegratedConstellationView
+            onRequestSessionPortrait={requestPortrait}
+            portraitAssets={sessionPortraits}
             existingCharacters={book.characters.map((character) => ({ id: character.id, name: character.name }))}
             reviewedMaterial={reviewedSessionMaterials?.constellation}
             onCommitBookExport={onCommitSessionBook}
@@ -200,6 +214,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
 
         {workspace === 'leela' && (
           <IntegratedLeelaView
+            onRequestSessionPortrait={requestPortrait}
+            portraitAssets={sessionPortraits}
             existingCharacters={book.characters.map((character) => ({ id: character.id, name: character.name }))}
             reviewedMaterial={reviewedSessionMaterials?.leela}
             onCommitBookExport={onCommitSessionBook}
