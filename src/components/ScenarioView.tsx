@@ -7,6 +7,7 @@ import { generateSessionCharacterPortrait, attachSessionPortraits, type SessionP
 import type { CharacterDraft } from './storyExperience/CharacterDraftEditor';
 import { commitSessionToBook, type ReviewedSessionBookMaterial } from './storyExperience/sessionBookCommit';
 import type { SessionBookExportRequest } from './storyExperience/SessionExportToBookView';
+import { MySessionConsentsView } from './storyExperience/MySessionConsentsView';
 import { SessionHistoryView } from './storyExperience/SessionHistoryView';
 import { ScenarioLegacyView } from './ScenarioLegacyView';
 import {
@@ -19,7 +20,7 @@ import {
   type StoryExperienceJevRequest,
 } from './storyExperience';
 
-type StoryWorkspace = 'screenplay' | 'mafia' | 'constellation' | 'leela' | 'history' | 'analysis';
+type StoryWorkspace = 'screenplay' | 'mafia' | 'constellation' | 'leela' | 'history' | 'consents' | 'analysis';
 
 interface ScenarioViewProps {
   book: Book;
@@ -43,6 +44,7 @@ const workspaces: Array<{
   { id: 'constellation', label: 'Constellation', hint: 'Поле, фігури, snapshots', icon: <Drama className="h-4 w-4" /> },
   { id: 'leela', label: 'Leela', hint: 'Board Pack, маршрут, журнал', icon: <Sparkles className="h-4 w-4" /> },
   { id: 'history', label: 'Історія сесій', hint: 'Завершені сесії → книга', icon: <Drama className="h-4 w-4" /> },
+  { id: 'consents', label: 'Мої дозволи', hint: 'Згода на використання сесій', icon: <Drama className="h-4 w-4" /> },
   { id: 'analysis', label: 'Аналіз', hint: 'Попередній сценарний модуль', icon: <BrainCircuit className="h-4 w-4" /> },
 ];
 
@@ -276,6 +278,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
         )}
 
         {journalError && <p role="alert" className="mx-4 rounded-lg border border-rose-700 p-3 text-xs text-rose-200">Журнал подій: {journalError}</p>}
+        {workspace === 'consents' && <MySessionConsentsView />}
         {workspace === 'history' && <SessionHistoryView bookId={book.id} existingCharacters={book.characters.map(character => ({ id: character.id, name: character.name }))} onCommitBookExport={onCommitSessionBook} onRequestPortrait={requestPortrait} portraitAssets={sessionPortraits} />}
         {workspace === 'analysis' && (
           <ScenarioLegacyView
