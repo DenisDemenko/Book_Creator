@@ -281,6 +281,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
 
         {workspace === 'constellation' && (
           <IntegratedConstellationView
+            bookId={book.id}
             journal={completedJournals.constellation}
             onPrepareJournal={() => prepareJournal('constellation')}
             onConstellationSnapshot={snapshot => { void recordNeutralEvent('constellation',{kind:'snapshot',label:'Snapshot '+snapshot.index,description:'Збережено snapshot поля №'+snapshot.index}); }}
