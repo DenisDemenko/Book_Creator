@@ -66,7 +66,8 @@ export function registerStoryExperienceRoutes(app: Express): void {
         const items=await loadJournals();
         const journal=items.find(item=>item.sessionId===req.params.sessionId && item.bookId===bookId && item.ownerId===ownerId && item.status==='draft');
         if (!journal) return 'missing' as const;
-        if (journal.events.some(event=>event.id===eventId)) return 'duplicate' as const;
+        const previous = journal.events.find(event=>event.id===eventId);
+        if (previous) return previous.kind===kind && previous.label===label.trim() && previous.description===description.trim() ? 'duplicate' as const : 'conflict' as const;
         if (journal.events.length>=10000) return 'limit' as const;
         // Treat incoming strings as untrusted: journal events are NEVER approved for book export.
         const event: ExperienceEventRecord = {id:eventId,sessionId:journal.sessionId,sequence:journal.events.length+1,
@@ -76,7 +77,8 @@ export function registerStoryExperienceRoutes(app: Express): void {
         return event;
       });
       if(result==='missing'){res.status(404).json({error:'Журнал не знайдено'});return;}
-      if(result==='duplicate'){res.status(409).json({error:'Подія вже існує'});return;}
+      if(result==='duplicate'){res.status(200).json({eventId,alreadyRecorded:true});return;}
+      if(result==='conflict'){res.status(409).json({error:'eventId зайнято іншою подією'});return;}
       if(result==='limit'){res.status(413).json({error:'Ліміт подій'});return;}
       res.status(201).json({eventId:result.id,sequence:result.sequence});
     } catch {res.status(500).json({error:'Не вдалося записати подію'});}
