@@ -1,6 +1,6 @@
 import React,{useCallback,useEffect,useState} from 'react';
 
-interface ConsentRequest {sessionId:string;bookId:string;kind:string;title:string;completedAt:string;status:'pending'|'granted'|'revoked';decidedAt:string|null;materialText:string;materialHash:string;}
+interface ConsentRequest {sessionId:string;bookId:string;kind:string;title:string;completedAt:string;status:'pending'|'granted'|'revoked';decidedAt:string|null;materialText:string;materialHash:string;privacyReviewRequired?:boolean;}
 export const MySessionConsentsView:React.FC=()=>{
   const [requests,setRequests]=useState<ConsentRequest[]>([]);
   const [error,setError]=useState('');
@@ -40,7 +40,8 @@ export const MySessionConsentsView:React.FC=()=>{
         <p className="mt-2 text-xs text-slate-400">Статус: {item.status==='pending'?'Очікує рішення':item.status==='granted'?'Дозволено':'Відкликано'}</p>
         <p className="mt-2 text-xs text-slate-400">Рішення стосується лише використання для книги. Перед погодженням переконайтеся, що знаєте, який матеріал буде використано.</p>
         <div className="mt-3 max-h-60 overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-700 bg-slate-950 p-3 text-sm" aria-label="Матеріал, на використання якого запитується згода">{item.materialText}</div>
-        <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={()=>void decide(item,'granted')} disabled={busy===item.sessionId||item.status==='granted'} className="rounded-lg border border-cyan-500 px-3 py-2 text-sm disabled:opacity-40">Надати дозвіл</button>
+        {item.privacyReviewRequired && <p role="alert" className="mt-3 text-sm text-amber-200">Матеріал потребує додаткової перевірки приватності. Погодження тимчасово недоступне.</p>}
+        <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={()=>void decide(item,'granted')} disabled={busy===item.sessionId||item.status==='granted'||item.privacyReviewRequired||!item.materialHash} className="rounded-lg border border-cyan-500 px-3 py-2 text-sm disabled:opacity-40">Надати дозвіл</button>
           <button type="button" onClick={()=>void decide(item,'revoked')} disabled={busy===item.sessionId||item.status==='revoked'} className="rounded-lg border border-slate-600 px-3 py-2 text-sm disabled:opacity-40">Відкликати дозвіл</button></div>
       </article>)}</div>}
   </section>;
