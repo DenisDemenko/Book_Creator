@@ -1,7 +1,26 @@
 import React,{useCallback,useEffect,useState} from 'react';
 
 interface ConsentRequest {sessionId:string;bookId:string;kind:string;title:string;completedAt:string;status:'pending'|'granted'|'revoked';decidedAt:string|null;materialText:string;materialHash:string;privacyReviewRequired?:boolean;}
+interface Invitation {sessionId:string;bookId:string;kind:string;joined:boolean;}
 export const MySessionConsentsView:React.FC=()=>{
+  const [invitations,setInvitations]=useState<Invitation[]>([]);
+  const [inviteError,setInviteError]=useState('');
+  const refreshInvitations=useCallback(async()=>{
+    try{
+      const response=await fetch('/api/story-experience/my-invitations',{credentials:'same-origin',cache:'no-store'});
+      if(!response.ok)throw new Error('Не вдалося отримати запрошення');
+      const data=await response.json();
+      setInvitations(Array.isArray(data.invitations)?data.invitations:[]);
+    }catch(error){setInviteError(error instanceof Error?error.message:'Помилка');}
+  },[]);
+  useEffect(()=>{void refreshInvitations();},[refreshInvitations]);
+  const acceptInvitation=async(invite:Invitation)=>{
+    try{
+      const response=await fetch('/api/story-experience/journals/'+encodeURIComponent(invite.sessionId)+'/join',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({bookId:invite.bookId})});
+      if(!response.ok)throw new Error('Не вдалося підтвердити участь');
+      await refreshInvitations();
+    }catch(error){setInviteError(error instanceof Error?error.message:'Помилка');}
+  };
   const [requests,setRequests]=useState<ConsentRequest[]>([]);
   const [error,setError]=useState('');
   const [busy,setBusy]=useState<string|null>(null);
@@ -32,7 +51,11 @@ export const MySessionConsentsView:React.FC=()=>{
   };
   return <section className="min-h-0 flex-1 overflow-y-auto bg-slate-950 p-4 text-slate-100 lg:p-6" aria-label="Мої дозволи на використання сесій">
     <header><h1 className="text-2xl font-semibold">Мої дозволи</h1><p className="mt-2 max-w-2xl text-sm text-slate-400">Ви вирішуєте, чи дозволяти художню адаптацію матеріалу сесії. Відкликання блокує нові експорти, але не видаляє вже створені або опубліковані копії автоматично.</p></header>
-    <button type="button" onClick={()=>void refresh()} disabled={loading} className="my-4 rounded-lg border border-slate-700 px-3 py-2 text-sm disabled:opacity-40">Оновити</button>
+    <div className="mt-4 space-y-2"><h2 className="text-lg font-semibold">Запрошення до сесій</h2>
+      {inviteError&&<p role="alert" className="text-rose-300">{inviteError}</p>}
+      {invitations.map(item=><div key={item.sessionId} className="flex items-center justify-between gap-3 rounded-lg border border-slate-700 p-3 text-sm"><span>{item.kind} · {item.sessionId.slice(0,8)}</span>{item.joined?<span>Участь підтверджено</span>:<button type="button" onClick={()=>void acceptInvitation(item)} className="rounded-lg border border-cyan-500 px-3 py-2">Підтвердити участь</button>}</div>)}
+    </div>
+    <button type="button" onClick={()=>{void refresh();void refreshInvitations();}} disabled={loading} className="my-4 rounded-lg border border-slate-700 px-3 py-2 text-sm disabled:opacity-40">Оновити</button>
     {error&&<p role="alert" className="mb-3 text-sm text-rose-300">{error}</p>}
     {loading?<p role="status">Завантаження…</p>:requests.length===0?<p className="rounded-xl border border-slate-700 p-4 text-sm">Наразі запитів на вашу згоду немає.</p>:
       <div className="grid gap-3 lg:grid-cols-2">{requests.map(item=><article key={item.sessionId} className="rounded-xl border border-slate-700 bg-slate-900 p-4">
