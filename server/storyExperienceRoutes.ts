@@ -162,6 +162,21 @@ export function registerStoryExperienceRoutes(app: Express): void {
       res.status(201).json({sessionId:record.id});
     } catch { res.status(500).json({error:'Не вдалося зберегти сесію'}); }
   });
+  app.get('/api/story-experience/my-consents', requireAuth, async (req: Request, res: Response) => {
+    const participantId = req.principal?.id;
+    if (!participantId) { res.status(401).json({error:'Потрібна авторизація'}); return; }
+    try {
+      const records = (await load()).filter(record => record.consentRequiredParticipantIds?.includes(participantId));
+      res.setHeader('Cache-Control','no-store');
+      res.json({requests: records.map(record => {
+        const decisions = (record.consentDecisions ?? []).filter(item => item.participantId === participantId && item.scope === 'book-adaptation');
+        const latest = decisions[decisions.length - 1];
+        // Never return event bodies, participants or other users' consent decisions.
+        return {sessionId:record.id,bookId:record.bookId,kind:record.kind,
+          title:record.title,completedAt:record.completedAt,status:latest?.status ?? 'pending',decidedAt:latest?.decidedAt ?? null};
+      })});
+    } catch {res.status(500).json({error:'Не вдалося завантажити запити'});}
+  });
   // Consent can only be granted or revoked by the authenticated participant.
   // Owner may designate required user IDs when archiving, but cannot sign for them.
   app.post('/api/story-experience/completed/:sessionId/consent', requireAuth, async (req: Request, res: Response) => {
