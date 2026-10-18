@@ -172,10 +172,11 @@ export function registerStoryExperienceRoutes(app: Express): void {
         const decisions = (record.consentDecisions ?? []).filter(item => item.participantId === participantId && item.scope === 'book-adaptation');
         const latest = decisions[decisions.length - 1];
         // Never return event bodies, participants or other users' consent decisions.
-        const material = consentMaterial(record);
+        let material: {text:string;hash:string} | null = null;
+        try { material = consentMaterial(record); } catch { /* Suppress content until privacy review. */ }
         return {sessionId:record.id,bookId:record.bookId,kind:record.kind,
-          title:record.title,completedAt:record.completedAt,materialText:material.text,materialHash:material.hash,
-          status:latest?.status==='granted' && latest.materialHash!==material.hash ? 'pending' : latest?.status ?? 'pending',decidedAt:latest?.decidedAt ?? null};
+          title:record.title,completedAt:record.completedAt,materialText:material?.text ?? '',materialHash:material?.hash ?? '',privacyReviewRequired:!material,
+          status:latest?.status==='granted' && (!material || latest.materialHash!==material.hash) ? 'pending' : latest?.status ?? 'pending',decidedAt:latest?.decidedAt ?? null};
       })});
     } catch {res.status(500).json({error:'Не вдалося завантажити запити'});}
   });
