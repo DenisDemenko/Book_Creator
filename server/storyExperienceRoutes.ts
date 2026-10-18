@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { requireAuth } from './auth';
 import { DATA_DIR } from './db';
+import { getBook } from './bookStore';
 import { safeCompletedSessionSummary, type CompletedExperienceRecord, type ExperienceKind } from './storyExperienceRegistry';
 
 const registryPath = path.join(DATA_DIR, 'story-experience-completed.json');
@@ -40,6 +41,8 @@ export function registerStoryExperienceRoutes(app: Express): void {
         || e.label.length > 200 || e.description.length > 10000)) {
       res.status(400).json({error:'Потрібен погоджений набір дозволених подій'}); return;
     }
+    const sourceBook = await getBook(body.bookId);
+    if (!sourceBook || sourceBook.ownerId !== userId) { res.status(404).json({error:'Книгу не знайдено'}); return; }
     const record: CompletedExperienceRecord = {
       id: randomUUID(), ownerId: userId, bookId: body.bookId, title: body.title.slice(0,200), kind: body.kind,
       status:'completed', completedAt:new Date().toISOString(), publicParticipantLabels:[],
@@ -55,6 +58,8 @@ export function registerStoryExperienceRoutes(app: Express): void {
     if (!userId) { res.status(401).json({error:'Потрібна авторизація'}); return; }
     if (typeof bookId !== 'string') { res.status(400).json({error:'Укажіть bookId'}); return; }
     try {
+      const sourceBook = await getBook(bookId);
+      if (!sourceBook || sourceBook.ownerId !== userId) { res.status(404).json({error:'Книгу не знайдено'}); return; }
       const record = (await load()).find(r => r.id === req.params.sessionId && r.ownerId === userId && r.bookId === bookId);
       if (!record) { res.status(404).json({error:'Сесію не знайдено'}); return; }
       res.json(safeCompletedSessionSummary(record,{ownerId:userId,bookId,sessionId:req.params.sessionId}));
