@@ -62,3 +62,6 @@ export type { SessionPortraitAsset } from './sessionPortraitService';
 
 export { SessionHistoryView } from './SessionHistoryView';
 export type { SessionHistoryViewProps } from './SessionHistoryView';
+
+export { CompletedSessionArchiveReview } from './CompletedSessionArchiveReview';
+export type { CompletedSessionArchiveReviewProps } from './CompletedSessionArchiveReview';
