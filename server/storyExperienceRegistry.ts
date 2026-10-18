@@ -56,8 +56,9 @@ export function safeCompletedSessionSummary(
   }
   if (record.status !== 'completed' || !validKinds.has(record.kind)) throw new Error('Сесія не завершена.');
   const material = consentMaterial(record);
-  const required = record.consentRequiredParticipantIds ?? [];
-  if (required.length && required.some(id => {
+  const required = record.consentRequiredParticipantIds;
+  if (!required || required.length === 0) throw new Error('Список учасників для підтвердження згоди не визначено.');
+  if (required.some(id => {
     const matching = (record.consentDecisions ?? []).filter(d => d.participantId === id && d.scope === 'book-adaptation');
     return matching.length === 0 || matching[matching.length - 1].status !== 'granted' || matching[matching.length - 1].materialHash !== material.hash;
   })) throw new Error('Згода учасників відсутня або відкликана.');
