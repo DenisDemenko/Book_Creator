@@ -7,7 +7,7 @@ import { DATA_DIR } from './db';
 import { getBook } from './bookStore';
 import type { ExperienceEventKind, ExperienceEventRecord } from './storyExperienceEvents';
 import { inspectApprovedExperience } from './storyExperiencePrivacy';
-import { safeCompletedSessionSummary, type CompletedExperienceRecord, type ExperienceKind } from './storyExperienceRegistry';
+import { consentMaterial, safeCompletedSessionSummary, type CompletedExperienceRecord, type ExperienceKind } from './storyExperienceRegistry';
 
 const registryPath = path.join(DATA_DIR, 'story-experience-completed.json');
 const journalPath = path.join(DATA_DIR, 'story-experience-journal.json');
@@ -172,8 +172,10 @@ export function registerStoryExperienceRoutes(app: Express): void {
         const decisions = (record.consentDecisions ?? []).filter(item => item.participantId === participantId && item.scope === 'book-adaptation');
         const latest = decisions[decisions.length - 1];
         // Never return event bodies, participants or other users' consent decisions.
+        const material = consentMaterial(record);
         return {sessionId:record.id,bookId:record.bookId,kind:record.kind,
-          title:record.title,completedAt:record.completedAt,status:latest?.status ?? 'pending',decidedAt:latest?.decidedAt ?? null};
+          title:record.title,completedAt:record.completedAt,materialText:material.text,materialHash:material.hash,
+          status:latest?.status==='granted' && latest.materialHash!==material.hash ? 'pending' : latest?.status ?? 'pending',decidedAt:latest?.decidedAt ?? null};
       })});
     } catch {res.status(500).json({error:'Не вдалося завантажити запити'});}
   });
@@ -181,7 +183,7 @@ export function registerStoryExperienceRoutes(app: Express): void {
   // Owner may designate required user IDs when archiving, but cannot sign for them.
   app.post('/api/story-experience/completed/:sessionId/consent', requireAuth, async (req: Request, res: Response) => {
     const participantId = req.principal?.id;
-    const { bookId, decision } = req.body || {};
+    const { bookId, decision, materialHash } = req.body || {};
     if (!participantId) { res.status(401).json({error:'Потрібна авторизація'}); return; }
     if (typeof bookId !== 'string' || !bookId || (decision !== 'granted' && decision !== 'revoked')) {
       res.status(400).json({error:'Недійсне рішення про згоду'}); return;
@@ -191,13 +193,16 @@ export function registerStoryExperienceRoutes(app: Express): void {
         const records = await load();
         const record = records.find(r => r.id === req.params.sessionId && r.bookId === bookId);
         if (!record || !record.consentRequiredParticipantIds?.includes(participantId)) return 'missing' as const;
+        const digest=consentMaterial(record).hash;
+        if(decision==='granted' && (typeof materialHash!=='string'||materialHash!==digest)) return 'stale' as const;
         record.consentDecisions ??= [];
-        record.consentDecisions.push({participantId, scope:'book-adaptation', status:decision, decidedAt:new Date().toISOString()});
+        record.consentDecisions.push({participantId, scope:'book-adaptation', status:decision, materialHash:digest, decidedAt:new Date().toISOString()});
         const temp = registryPath + '.' + randomUUID() + '.tmp';
         await fs.writeFile(temp,JSON.stringify(records),{mode:0o600});
         await fs.rename(temp,registryPath);
         return 'saved' as const;
       });
+      if (result === 'stale') { res.status(409).json({error:'Матеріал змінився. Перегляньте його перед новим погодженням.'}); return; }
       if (result === 'missing') { res.status(404).json({error:'Для цього облікового запису згоди не запитували'}); return; }
       res.json({status:decision, scope:'book-adaptation'});
     } catch { res.status(500).json({error:'Не вдалося записати рішення'}); }
