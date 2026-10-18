@@ -22,7 +22,7 @@ const initialFigures: FigureItem[] = [
 
 const stages = ['Підготовка', 'Запит', 'Представники', 'Розстановка', 'Рух', 'Рішення', 'Вихід з ролей', 'Завершення'];
 
-export const ConstellationSessionView: React.FC<{ title?: string }> = ({ title = 'Діалог поколінь' }) => {
+export const ConstellationSessionView: React.FC<{ title?: string; onSnapshot?: (snapshot: { index:number; timestamp:string }) => void }> = ({ title = 'Діалог поколінь', onSnapshot }) => {
   const [figures, setFigures] = useState<FigureItem[]>(initialFigures);
   const [selectedId, setSelectedId] = useState('self');
   const [stage, setStage] = useState(3);
@@ -36,7 +36,9 @@ export const ConstellationSessionView: React.FC<{ title?: string }> = ({ title =
 
   const saveSnapshot = () => {
     const now = new Date();
-    setSnapshots((items) => [...items, `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`]);
+    const timestamp = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    setSnapshots((items) => [...items, timestamp]);
+    onSnapshot?.({ index: snapshots.length + 1, timestamp });
   };
 
   return (
