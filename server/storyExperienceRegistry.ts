@@ -4,6 +4,8 @@
  * Persistence is deliberately NOT implemented in this module; the authenticated
  * storage layer must own records and enforce book ownership on every operation.
  */
+import { projectEventsForBook, type ExperienceEventRecord } from './storyExperienceEvents';
+
 export type ExperienceKind = 'mafia' | 'constellation' | 'leela';
 export interface ApprovedExperienceEvent {
   id: string;
@@ -22,6 +24,7 @@ export interface CompletedExperienceRecord {
   completedAt: string;
   publicParticipantLabels: string[];
   events: ApprovedExperienceEvent[];
+  canonicalEvents?: ExperienceEventRecord[];
 }
 export interface ExperienceExportMaterial {
   sessionId: string;
@@ -37,7 +40,7 @@ export function safeCompletedSessionSummary(
     throw new Error('Сесію не знайдено.');
   }
   if (record.status !== 'completed' || !validKinds.has(record.kind)) throw new Error('Сесія не завершена.');
-  const approved = record.events.filter(e => e.approvedForBook && e.visibility === 'approved');
+  const approved = record.canonicalEvents ? projectEventsForBook(record.canonicalEvents) : record.events.filter(e => e.approvedForBook && e.visibility === 'approved');
   if (approved.length === 0) throw new Error('Немає дозволених подій для експорту.');
   const paragraphs = approved.map(e => e.label.trim() + ': ' + e.description.trim()).filter(Boolean);
   const text = paragraphs.join('\n\n').trim();
