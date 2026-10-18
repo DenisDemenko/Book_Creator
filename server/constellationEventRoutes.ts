@@ -7,8 +7,9 @@ import { getBook } from './bookStore';
 import { DATA_DIR } from './db';
 
 type Entry = {id:string; name:string; contact:string; role:'participant'|'representative'|'observer';status:'pending'|'confirmed'|'waitlist';createdAt:string};
-type Event = {id:string;bookId:string;ownerId:string;theme:string;date:string;time:string;venue:string;address:string;price:string;announcement:string;createdAt:string;registrations:Entry[]};
+type Event = {publicToken?:string;id:string;bookId:string;ownerId:string;theme:string;date:string;time:string;venue:string;address:string;price:string;announcement:string;createdAt:string;registrations:Entry[]};
 const file=path.join(DATA_DIR,'constellation-events.json');
+const publicAttempts = new Map<string,{count:number;until:number}>();
 let chain:Promise<unknown>=Promise.resolve();
 function exclusive<T>(f:()=>Promise<T>):Promise<T>{const next=chain.then(f,f);chain=next.then(()=>undefined,()=>undefined);return next;}
 async function read():Promise<Event[]>{try{const value=JSON.parse(await fs.readFile(file,'utf8'));return Array.isArray(value)?value:[];}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return [];throw e;}}
@@ -32,10 +33,48 @@ export function registerConstellationEventRoutes(app:Express):void{
   app.post('/api/constellation/events',requireAuth,async(req,res)=>{
     try{const ownerId=await check(req,res,req.body?.bookId);if(!ownerId)return;
       const theme=clean(req.body?.theme);if(!theme){res.status(400).json({error:'Вкажіть тему події'});return;}
-      const record:Event={id:randomUUID(),ownerId,bookId:req.body.bookId,theme,date:clean(req.body.date,80),time:clean(req.body.time,40),venue:clean(req.body.venue),address:clean(req.body.address),price:clean(req.body.price,40),announcement:clean(req.body.announcement,12000),createdAt:new Date().toISOString(),registrations:[]};
+      const record:Event={id:randomUUID(),publicToken:randomUUID().replace(/-/g,''),ownerId,bookId:req.body.bookId,theme,date:clean(req.body.date,80),time:clean(req.body.time,40),venue:clean(req.body.venue),address:clean(req.body.address),price:clean(req.body.price,40),announcement:clean(req.body.announcement,12000),createdAt:new Date().toISOString(),registrations:[]};
       await exclusive(async()=>{const items=await read();items.push(record);await write(items);});
       res.status(201).json({event:record});
     }catch{res.status(500).json({error:'Не вдалося створити подію'});}
+  });
+  // Public endpoints deliberately return no owner, book or participant records.
+  app.get('/api/constellation/public/:token',async(req,res)=>{
+    try {
+      const event=(await read()).find(e=>e.publicToken===req.params.token);
+      if(!event){res.status(404).json({error:'Подію не знайдено'});return;}
+      res.setHeader('Cache-Control','no-store');
+      res.json({event:{theme:event.theme,date:event.date,time:event.time,venue:event.venue,address:event.address,price:event.price}});
+    }catch{res.status(500).json({error:'Помилка завантаження'});}
+  });
+  app.post('/api/constellation/public/:token/register',async(req,res)=>{
+    const ip=String(req.ip||req.socket.remoteAddress||'unknown');
+    const throttleKey=req.params.token+':'+ip;
+    const now=Date.now();
+    if(publicAttempts.size>5000)for(const [key,item] of publicAttempts){if(item.until<now)publicAttempts.delete(key);}
+    const previous=publicAttempts.get(throttleKey);
+    if(previous&&previous.until>now&&previous.count>=5){res.status(429).json({error:'Забагато заявок. Спробуйте пізніше.'});return;}
+    publicAttempts.set(throttleKey,{count:previous&&previous.until>now?previous.count+1:1,until:now+3600000});
+    if(req.body?.website){res.status(202).json({ok:true});return;}
+    const name=clean(req.body?.name,120),contact=clean(req.body?.contact,200);
+    const role=req.body?.role;
+    if(!req.body?.privacyAccepted||!name||!contact||name.length<2||contact.length<5||
+       !['participant','representative','observer'].includes(role)){
+      res.status(400).json({error:'Перевірте заявку та підтвердьте згоду на обробку контактів'});return;
+    }
+    try{
+      const outcome=await exclusive(async()=>{
+        const events=await read();
+        const event=events.find(e=>e.publicToken===req.params.token);
+        if(!event)return 'missing';
+        if(event.registrations.some(e=>e.contact.trim().toLowerCase()===contact.toLowerCase()))return 'duplicate';
+        event.registrations.push({id:randomUUID(),name,contact,role,status:'pending',createdAt:new Date().toISOString()});
+        await write(events);return 'ok';
+      });
+      if(outcome==='missing'){res.status(404).json({error:'Подію не знайдено'});return;}
+      // Do not reveal whether this contact already exists.
+      res.status(202).json({ok:true,message:'Якщо заявку прийнято, організатор зможе її розглянути.'});
+    }catch{res.status(500).json({error:'Не вдалося прийняти заявку'});}
   });
   app.patch('/api/constellation/events/:id',requireAuth,async(req,res)=>{
     try {
