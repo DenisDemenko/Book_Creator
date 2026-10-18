@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { JournalSession } from './storyExperience/sessionJournalClient';
 import { DurableNeutralJournal } from './storyExperience/durableNeutralJournal';
 import { BrainCircuit, Clapperboard, Drama, Gamepad2, Sparkles } from 'lucide-react';
@@ -82,6 +82,15 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       throw error;
     }
   };
+  useEffect(() => {
+    // Replay only existing neutral queues; never fabricate an event or start a session on mount.
+    for (const kind of ['leela','constellation'] as const) {
+      const journal = getJournal(kind);
+      if (journal.pendingCount) void journal.flush().catch(error => {
+        setJournalError(error instanceof Error ? error.message : 'Не вдалося відновити запис');
+      });
+    }
+  }, [book.id]);
   const [sessionPortraits, setSessionPortraits] = useState<SessionPortraitAsset[]>([]);
   const [selectedScene, setSelectedScene] = useState<ScreenplaySelectedSceneContext | null>(null);
 
