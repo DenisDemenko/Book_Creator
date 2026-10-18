@@ -2,7 +2,7 @@ import './storyExperience/fusionMarketplace.css';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { JournalSession } from './storyExperience/sessionJournalClient';
 import { DurableNeutralJournal } from './storyExperience/durableNeutralJournal';
-import { BrainCircuit, Clapperboard, Drama, Gamepad2, Sparkles } from 'lucide-react';
+import { BrainCircuit, Clapperboard, Copy, Drama, Gamepad2, Sparkles } from 'lucide-react';
 import type { Book, NavigationTab } from '../types';
 import { generateSessionCharacterPortrait, attachSessionPortraits, type SessionPortraitAsset } from './storyExperience/sessionPortraitService';
 import type { CharacterDraft } from './storyExperience/CharacterDraftEditor';
@@ -70,11 +70,23 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     return workspaces.some(item => item.id === candidate) ? candidate as StoryWorkspace : 'screenplay';
   };
   const [workspace, setWorkspace] = useState<StoryWorkspace>(readWorkspace);
+  const [linkMessage, setLinkMessage] = useState('');
   const selectWorkspace = (value: StoryWorkspace) => {
     setWorkspace(value);
     const url = new URL(window.location.href);
     url.searchParams.set('story', value);
-    window.history.replaceState(window.history.state, '', url.toString());
+    window.history.pushState(window.history.state, '', url.toString());
+    setLinkMessage('');
+  };
+  const copyWorkspaceLink = async () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('story', workspace);
+    try {
+      await navigator.clipboard.writeText(url.toString());
+      setLinkMessage('Посилання скопійовано');
+    } catch {
+      setLinkMessage('Скопіюйте адресу з рядка браузера');
+    }
   };
   useEffect(() => {
     const onHistory = () => setWorkspace(readWorkspace());
@@ -223,6 +235,14 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
               </button>
             ))}
           </nav>
+          <div className="flex shrink-0 items-center gap-2">
+            <button type="button" onClick={() => void copyWorkspaceLink()}
+              className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[#D9CABC] bg-[#FFFCF8] px-3 py-2 text-xs font-semibold text-[#2C1A12] hover:bg-[#F4ECE1]"
+              aria-label="Скопіювати посилання на поточний розділ">
+              <Copy className="h-4 w-4" /> Посилання
+            </button>
+            {linkMessage && <span role="status" className="text-xs text-[#71645A]">{linkMessage}</span>}
+          </div>
         </div>
       </header>
 
