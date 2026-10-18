@@ -53,3 +53,6 @@ export type {
   IntegratedConstellationViewProps,
   IntegratedLeelaViewProps,
 } from './StoryExperienceIntegratedViews';
+
+export { commitSessionToBook } from './sessionBookCommit';
+export type { ReviewedSessionBookMaterial, SessionBookCommitResult } from './sessionBookCommit';
