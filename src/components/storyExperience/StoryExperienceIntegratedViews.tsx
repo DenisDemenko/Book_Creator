@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import type { SessionEventCandidate } from './eligibleSessionEvents';
 import type { CharacterDraft } from './CharacterDraftEditor';
 import type { SessionPortraitAsset } from './sessionPortraitService';
 import type { SessionBookExportRequest } from './SessionExportToBookView';
@@ -25,6 +26,7 @@ import {
 import type { AIWorkspaceAssignments } from './AIWorkspaceToolbar';
 
 interface SharedIntegratedProps {
+  approvedSessionEvents?: SessionEventCandidate[];
   bookId?: string;
   onRequestSessionPortrait?: (draft: CharacterDraft) => Promise<SessionPortraitAsset>;
   portraitAssets?: SessionPortraitAsset[];
@@ -194,7 +196,7 @@ export const IntegratedMafiaView: React.FC<IntegratedMafiaViewProps> = (props) =
       <JevSlot title="Jev · пріоритет події та увага ведучого" hint="Jev оцінює лише статус і пріоритет події для GM. Остаточне рішення залишається за ведучим." {...props} />
       <SessionModeratorBar title={title} phase={status === 'lobby' ? 'Lobby' : status === 'completed' ? 'Завершено' : 'Investigation'} status={status} connection={connection} participants={8} onStatusChange={setStatus} />
       <PreviewToggle active={preview} label="Переглянути як гравець" connection={connection} onConnectionChange={setConnection} onClick={() => setPreview((value) => !value)} />
-      {archiveReviewOpen && props.bookId ? <CompletedSessionArchiveReview bookId={props.bookId} kind="mafia" title={title} onClose={() => setArchiveReviewOpen(false)} /> : exportOpen ? (
+      {archiveReviewOpen && props.bookId ? <CompletedSessionArchiveReview sourceEvents={props.approvedSessionEvents} bookId={props.bookId} kind="mafia" title={title} onClose={() => setArchiveReviewOpen(false)} /> : exportOpen ? (
         <SessionExportToBookView kind="mafia" sessionTitle={title} existingCharacters={props.existingCharacters} onRequestPortrait={props.onRequestSessionPortrait} portraitAssets={props.portraitAssets} onSubmit={props.reviewedMaterial && props.onCommitBookExport ? (request) => props.onCommitBookExport!(request, props.reviewedMaterial!) : undefined} participants={mafiaLobbyParticipants.filter((p) => p.role !== 'Game Master' && p.role !== 'Facilitator' && p.role !== 'Host').map((p, i) => ({ id: p.id, label: `Учасник ${i + 1}`, sessionRole: p.role }))} onClose={() => setExportOpen(false)} />
       ) : preview ? (
         <SessionPreviewFlow kind="mafia" title={title} phase={status === 'lobby' ? 'Lobby' : status === 'completed' ? 'Завершено' : 'Investigation'} roleLabel="Архівіст" visibility="ROLE_BASED" primaryTitle="Зникло світло у східному крилі" primaryText="Світло згасло. Ви можете перевірити архівну кімнату або залишитися з групою." secondaryText="Доказ E-04 ще не відкритий для вашої ролі." actionLabel="Перевірити доступну дію" status={status} connection={connection} onStatusChange={setStatus} onConnectionChange={setConnection} />
