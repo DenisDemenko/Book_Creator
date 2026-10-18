@@ -27,8 +27,7 @@ export async function appendNeutralSessionEvent(session: JournalSession, event: 
       if (attempt===2) throw error;
       continue;
     }
-    // The API uses 409 for an already stored eventId; this is successful idempotent replay.
-    if(response.status===409) return;
+    // A matching replay returns 200. HTTP 409 means same eventId with different content and must fail.
     if(response.ok){await json(response);return;}
     if(response.status===429 || response.status>=500){
       if(attempt<2)continue;
