@@ -52,6 +52,11 @@ export function registerStoryExperienceRoutes(app: Express): void {
       status:'completed', completedAt:new Date().toISOString(), publicParticipantLabels:[],
       events: body.events.map((e: any) => ({id:randomUUID(),label:e.label,description:e.description,approvedForBook:true,visibility:'approved' as const})),
     };
+    record.canonicalEvents = record.events.map((e, i) => ({
+      id: e.id, sessionId: record.id, sequence: i + 1, kind: 'note' as const,
+      visibility: 'approved' as const, approvedForBook: true,
+      label: e.label, description: e.description, occurredAt: record.completedAt,
+    }));
     try {
       await enqueue(async () => { const items = await load(); await fs.mkdir(DATA_DIR,{recursive:true}); const tmp = registryPath + '.' + randomUUID() + '.tmp'; await fs.writeFile(tmp,JSON.stringify([...items,record]),{mode:0o600}); await fs.rename(tmp,registryPath); });
       res.status(201).json({sessionId:record.id});
