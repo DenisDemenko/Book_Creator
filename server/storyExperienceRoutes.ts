@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { requireAuth } from './auth';
+import { findUserById } from './store';
 import { DATA_DIR } from './db';
 import { getBook } from './bookStore';
 import type { ExperienceEventKind, ExperienceEventRecord } from './storyExperienceEvents';
@@ -11,7 +12,7 @@ import { consentMaterial, safeCompletedSessionSummary, type CompletedExperienceR
 
 const registryPath = path.join(DATA_DIR, 'story-experience-completed.json');
 const journalPath = path.join(DATA_DIR, 'story-experience-journal.json');
-interface DraftJournal { participantIds?: string[]; sessionId: string; bookId: string; ownerId: string; kind: ExperienceKind; status: 'draft' | 'completed'; events: ExperienceEventRecord[]; }
+interface DraftJournal { invitedParticipantIds?: string[]; participantIds?: string[]; sessionId: string; bookId: string; ownerId: string; kind: ExperienceKind; status: 'draft' | 'completed'; events: ExperienceEventRecord[]; }
 async function loadJournals(): Promise<DraftJournal[]> {
   try { const data = JSON.parse(await fs.readFile(journalPath, 'utf8')); return Array.isArray(data) ? data : []; }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }
@@ -128,6 +129,39 @@ export function registerStoryExperienceRoutes(app: Express): void {
   });
   // The owner is a verified participant only when explicitly recorded against this journal.
   // Other participant enrollment must be authenticated; it is not inferred from names.
+  // Invitations target existing, enabled site accounts and never enroll anyone automatically.
+  app.post('/api/story-experience/journals/:sessionId/invite', requireAuth, async (req: Request,res: Response)=>{
+    const ownerId=req.principal?.id;
+    const {bookId,participantId}=req.body||{};
+    if(!ownerId){res.status(401).json({error:'Авторизація потрібна'});return;}
+    if(typeof bookId!=='string'||typeof participantId!=='string'||!participantId.trim()){
+      res.status(400).json({error:'Укажіть книгу та зареєстрованого користувача'});return;
+    }
+    try {
+      const user=await findUserById(participantId);
+      if(!user||user.disabled){res.status(404).json({error:'Зареєстрованого користувача не знайдено'});return;}
+      const outcome=await enqueue(async()=>{
+        const all=await loadJournals();
+        const journal=all.find(j=>j.sessionId===req.params.sessionId&&j.bookId===bookId&&j.ownerId===ownerId&&j.status==='draft');
+        if(!journal)return 'missing' as const;
+        journal.invitedParticipantIds??=[];
+        if(!journal.invitedParticipantIds.includes(participantId))journal.invitedParticipantIds.push(participantId);
+        await storeJournals(all);return 'invited' as const;
+      });
+      if(outcome==='missing'){res.status(404).json({error:'Журнал недоступний'});return;}
+      res.status(201).json({invited:true});
+    }catch{res.status(500).json({error:'Не вдалося запросити учасника'});}
+  });
+  app.get('/api/story-experience/my-invitations',requireAuth,async(req:Request,res:Response)=>{
+    const id=req.principal?.id;
+    if(!id){res.status(401).json({error:'Авторизація потрібна'});return;}
+    try{
+      const all=await loadJournals();
+      res.setHeader('Cache-Control','no-store');
+      res.json({invitations:all.filter(j=>j.status==='draft'&&j.invitedParticipantIds?.includes(id))
+        .map(j=>({sessionId:j.sessionId,bookId:j.bookId,kind:j.kind,joined:!!j.participantIds?.includes(id)}))});
+    }catch{res.status(500).json({error:'Запрошення недоступні'});}
+  });
   app.post('/api/story-experience/journals/:sessionId/join', requireAuth, async (req: Request,res: Response) => {
     const userId=req.principal?.id;
     const {bookId}=req.body||{};
@@ -138,8 +172,7 @@ export function registerStoryExperienceRoutes(app: Express): void {
         const records=await loadJournals();
         const journal=records.find(r=>r.sessionId===req.params.sessionId&&r.bookId===bookId&&r.status==='draft');
         if(!journal)return 'missing' as const;
-        // Joining another owner's session requires an invitation workflow; never trust arbitrary IDs.
-        if(journal.ownerId!==userId)return 'forbidden' as const;
+        if(journal.ownerId!==userId && !journal.invitedParticipantIds?.includes(userId))return 'forbidden' as const;
         journal.participantIds ??=[];
         if(!journal.participantIds.includes(userId))journal.participantIds.push(userId);
         await storeJournals(records);
