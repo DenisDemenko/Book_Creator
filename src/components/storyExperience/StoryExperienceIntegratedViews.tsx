@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import type { JournalSession } from './sessionJournalClient';
 import type { SessionEventCandidate } from './eligibleSessionEvents';
 import type { CharacterDraft } from './CharacterDraftEditor';
 import type { SessionPortraitAsset } from './sessionPortraitService';
@@ -26,6 +27,8 @@ import {
 import type { AIWorkspaceAssignments } from './AIWorkspaceToolbar';
 
 interface SharedIntegratedProps {
+  journal?: JournalSession;
+  onPrepareJournal?: () => Promise<void>;
   approvedSessionEvents?: SessionEventCandidate[];
   onConstellationSnapshot?: (event: { index: number; timestamp: string }) => void;
   onLeelaStep?: (event: { turn: number; from: number; to: number; dice: number }) => void;
@@ -224,14 +227,14 @@ export const IntegratedConstellationView: React.FC<IntegratedConstellationViewPr
       <JevSlot title="Jev · процесний статус сесії" hint="Лише нейтральні процесні сигнали: етап, пауза, завершення, потреба уваги. Без психологічної чи медичної діагностики." {...props} />
       <SessionModeratorBar title={title} phase={status === 'lobby' ? 'Lobby' : status === 'completed' ? 'Завершено' : 'Розстановка'} status={status} connection={connection} participants={4} onStatusChange={setStatus} />
       <PreviewToggle active={preview} label="Переглянути як учасник" connection={connection} onConnectionChange={setConnection} onClick={() => setPreview((value) => !value)} />
-      {archiveReviewOpen && props.bookId ? <CompletedSessionArchiveReview bookId={props.bookId} kind="constellation" title={title} onClose={() => setArchiveReviewOpen(false)} /> : exportOpen ? (
+      {archiveReviewOpen && props.bookId ? <CompletedSessionArchiveReview journal={props.journal} bookId={props.bookId} kind="constellation" title={title} onClose={() => setArchiveReviewOpen(false)} /> : exportOpen ? (
         <SessionExportToBookView kind="constellation" sessionTitle={title} participants={constellationLobbyParticipants.filter((p) => p.role !== 'Game Master' && p.role !== 'Facilitator' && p.role !== 'Host').map((p, i) => ({ id: p.id, label: `Учасник ${i + 1}`, sessionRole: p.role }))} onClose={() => setExportOpen(false)} />
       ) : preview ? (
         <SessionPreviewFlow kind="constellation" title={title} phase={status === 'lobby' ? 'Lobby' : status === 'completed' ? 'Завершено' : 'Розстановка'} roleLabel="Представник" visibility="ROLE_BASED" primaryTitle="Залишайтеся у своїй позиції" primaryText="Спостерігайте за напрямком і дистанцією. Якщо потрібно, ви можете поставити сесію на паузу." secondaryText="Нотатки фасилітатора та дані інших учасників не показуються." exitLabel="Вийти з ролі" status={status} connection={connection} onStatusChange={setStatus} onConnectionChange={setConnection} />
       ) : status === 'lobby' ? (
         <SessionLobbyView title={title} participants={constellationLobbyParticipants} minReady={3} visibility="ROLE_BASED" joinCode="CON-7314" onStart={() => setStatus('live')} />
       ) : status === 'completed' ? (
-        <SessionCompletionView onExportToBook={() => setExportOpen(true)} onArchive={props.bookId ? () => setArchiveReviewOpen(true) : undefined} title={title} kindLabel="Constellation Session" participantCount={4} participantExitLabel="Після етапу «Вихід з ролей» учасники бачать лише завершення сесії та безпечну дію виходу." summaryItems={['Етап «Вихід з ролей» завершено', 'Розстановка та snapshots готові до архівації', 'Participant payload закритий для подальших змін']} onReturnToProject={() => setStatus('lobby')} onCreateNextSession={() => { setPreview(false); setConnection('online'); setStatus('lobby'); }} />
+        <SessionCompletionView onExportToBook={() => setExportOpen(true)} onArchive={props.bookId ? () => { void Promise.resolve(props.onPrepareJournal?.()).then(() => setArchiveReviewOpen(true)).catch(() => setArchiveReviewOpen(false)); } : undefined} title={title} kindLabel="Constellation Session" participantCount={4} participantExitLabel="Після етапу «Вихід з ролей» учасники бачать лише завершення сесії та безпечну дію виходу." summaryItems={['Етап «Вихід з ролей» завершено', 'Розстановка та snapshots готові до архівації', 'Participant payload закритий для подальших змін']} onReturnToProject={() => setStatus('lobby')} onCreateNextSession={() => { setPreview(false); setConnection('online'); setStatus('lobby'); }} />
       ) : <ConstellationSessionView title={props.title} onSnapshot={props.onConstellationSnapshot} />}
     </StoryExperienceAiShell>
   );
@@ -250,14 +253,14 @@ export const IntegratedLeelaView: React.FC<IntegratedLeelaViewProps> = (props) =
       <JevSlot title="Jev · процесний статус маршруту" hint="Оцінюється лише стан маршруту/сесії. Jev не дає об’єктивних духовних чи психологічних трактувань." {...props} />
       <SessionModeratorBar title={title} phase={status === 'lobby' ? 'Lobby' : status === 'completed' ? 'Завершено' : 'Хід 7'} status={status} connection={connection} participants={1} onStatusChange={setStatus} />
       <PreviewToggle active={preview} label="Переглянути як учасник" connection={connection} onConnectionChange={setConnection} onClick={() => setPreview((value) => !value)} />
-      {archiveReviewOpen && props.bookId ? <CompletedSessionArchiveReview bookId={props.bookId} kind="leela" title={title} onClose={() => setArchiveReviewOpen(false)} /> : exportOpen ? (
+      {archiveReviewOpen && props.bookId ? <CompletedSessionArchiveReview journal={props.journal} bookId={props.bookId} kind="leela" title={title} onClose={() => setArchiveReviewOpen(false)} /> : exportOpen ? (
         <SessionExportToBookView kind="leela" sessionTitle={title} participants={leelaLobbyParticipants.filter((p) => p.role !== 'Game Master' && p.role !== 'Facilitator' && p.role !== 'Host').map((p, i) => ({ id: p.id, label: `Учасник ${i + 1}`, sessionRole: p.role }))} onClose={() => setExportOpen(false)} />
       ) : preview ? (
         <SessionPreviewFlow kind="leela" title={title} phase={status === 'lobby' ? 'Lobby' : status === 'completed' ? 'Завершено' : 'Хід 7'} roleLabel="Учасник" visibility="PRIVATE" primaryTitle="Клітина 21 · Усвідомлення" primaryText="Що я продовжую робити за інерцією, хоча вже знаю інший шлях?" secondaryText="Ваша відповідь приватна. Ведучий бачить її лише якщо це дозволено правилами сесії." actionLabel="Записати рефлексію" status={status} connection={connection} onStatusChange={setStatus} onConnectionChange={setConnection} />
       ) : status === 'lobby' ? (
         <SessionLobbyView title={title} participants={leelaLobbyParticipants} minReady={2} visibility="PRIVATE" joinCode="LEELA-21" onStart={() => setStatus('live')} />
       ) : status === 'completed' ? (
-        <SessionCompletionView onExportToBook={() => setExportOpen(true)} onArchive={props.bookId ? () => setArchiveReviewOpen(true) : undefined} title={title} kindLabel="Leela Journey Session" participantCount={1} summaryItems={['Маршрут завершено на поточній клітині', 'Приватні рефлексії залишаються у визначеній visibility policy', 'Історія ходів готова до snapshot/archive']} onReturnToProject={() => setStatus('lobby')} onCreateNextSession={() => { setPreview(false); setConnection('online'); setStatus('lobby'); }} />
+        <SessionCompletionView onExportToBook={() => setExportOpen(true)} onArchive={props.bookId ? () => { void Promise.resolve(props.onPrepareJournal?.()).then(() => setArchiveReviewOpen(true)).catch(() => setArchiveReviewOpen(false)); } : undefined} title={title} kindLabel="Leela Journey Session" participantCount={1} summaryItems={['Маршрут завершено на поточній клітині', 'Приватні рефлексії залишаються у визначеній visibility policy', 'Історія ходів готова до snapshot/archive']} onReturnToProject={() => setStatus('lobby')} onCreateNextSession={() => { setPreview(false); setConnection('online'); setStatus('lobby'); }} />
       ) : <LeelaSessionView title={props.title} cellCount={props.cellCount} onJourneyStep={props.onLeelaStep} />}
     </StoryExperienceAiShell>
   );
