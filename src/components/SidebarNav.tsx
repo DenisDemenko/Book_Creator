@@ -596,13 +596,16 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
     <>
     {isMobile ? createPortal(sidebar, document.body) : sidebar}
     {isMobile && !mobileOpen && createPortal(
+      <div className="fixed !left-3 !top-auto !bottom-[max(96px,env(safe-area-inset-bottom)+88px)] z-[9999] flex flex-col items-center gap-1.5">
+        <span className="whitespace-nowrap rounded-lg border border-[#D9CABC] bg-[#FFFCF8] px-2 py-1 text-[11px] font-semibold text-[#2C1A12] shadow-md">Розгорнути меню</span>
       <button type="button" onClick={() => {
         if (mobileCloseTimer.current) clearTimeout(mobileCloseTimer.current);
         setMobileOpen(true);
       }} aria-label="Розгорнути меню розділів" title="Розгорнути меню розділів"
-        className="fixed !left-3 !top-auto !bottom-[max(96px,env(safe-area-inset-bottom)+88px)] z-[9999] flex h-12 w-12 items-center justify-center rounded-2xl border-2 border-[#8B5937] bg-[#FFFCF8] text-[#2C1A12] shadow-2xl">
+        className="flex h-12 w-12 items-center justify-center rounded-2xl border-2 border-[#8B5937] bg-[#FFFCF8] text-[#2C1A12] shadow-2xl">
         <ChevronsRight className="h-5 w-5" />
       </button>
+      </div>
     , document.body)}
     {isMobile && mobileOpen && createPortal(
       <button type="button" onClick={() => {
