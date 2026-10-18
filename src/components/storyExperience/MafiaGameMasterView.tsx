@@ -49,7 +49,7 @@ export const MafiaGameMasterView: React.FC<{ projectTitle?: string; onNeutralEve
         </div>
       </header>
 
-      <nav className="mb-4 flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Фази гри">
+      <nav className="mb-4 flex max-w-full gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Фази гри">
         {phases.map((item) => (
           <button key={item} type="button" role="tab" aria-selected={phase === item} onClick={() => { setPhase(item); onNeutralEvent?.({action:'phase-change',phase:item}); }} className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-semibold ${phase === item ? 'border-violet-400/60 bg-violet-500/15 text-[#4E3021]' : 'border-[#E0D4C7] bg-[#FFFCF8] text-[#796D62] hover:text-[#594C42]'}`}>{item}</button>
         ))}
@@ -117,5 +117,5 @@ const StatusCard: React.FC<{ icon: React.ReactNode; label: string; title: string
 );
 
 const TimelineItem: React.FC<{ time: string; title: string; detail: string }> = ({ time, title, detail }) => (
-  <div className="grid grid-cols-[52px_1fr] gap-3 rounded-xl px-2 py-2 hover:bg-[#F7F0E7]"><div className="font-mono text-[10px] text-[#796D62]">{time}</div><div><div className="text-xs text-[#594C42]">{title}</div><div className="mt-0.5 text-[10px] text-[#796D62]">{detail}</div></div></div>
+  <div className="grid grid-cols-[44px_minmax(0,1fr)] gap-3 rounded-xl px-2 py-2 hover:bg-[#F7F0E7]"><div className="font-mono text-[10px] text-[#796D62]">{time}</div><div><div className="text-xs text-[#594C42]">{title}</div><div className="mt-0.5 text-[10px] text-[#796D62]">{detail}</div></div></div>
 );
