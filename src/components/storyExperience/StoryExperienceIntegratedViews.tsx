@@ -27,6 +27,8 @@ import type { AIWorkspaceAssignments } from './AIWorkspaceToolbar';
 
 interface SharedIntegratedProps {
   approvedSessionEvents?: SessionEventCandidate[];
+  onConstellationSnapshot?: (event: { index: number; timestamp: string }) => void;
+  onLeelaStep?: (event: { turn: number; from: number; to: number; dice: number }) => void;
   bookId?: string;
   onRequestSessionPortrait?: (draft: CharacterDraft) => Promise<SessionPortraitAsset>;
   portraitAssets?: SessionPortraitAsset[];
@@ -230,7 +232,7 @@ export const IntegratedConstellationView: React.FC<IntegratedConstellationViewPr
         <SessionLobbyView title={title} participants={constellationLobbyParticipants} minReady={3} visibility="ROLE_BASED" joinCode="CON-7314" onStart={() => setStatus('live')} />
       ) : status === 'completed' ? (
         <SessionCompletionView onExportToBook={() => setExportOpen(true)} onArchive={props.bookId ? () => setArchiveReviewOpen(true) : undefined} title={title} kindLabel="Constellation Session" participantCount={4} participantExitLabel="Після етапу «Вихід з ролей» учасники бачать лише завершення сесії та безпечну дію виходу." summaryItems={['Етап «Вихід з ролей» завершено', 'Розстановка та snapshots готові до архівації', 'Participant payload закритий для подальших змін']} onReturnToProject={() => setStatus('lobby')} onCreateNextSession={() => { setPreview(false); setConnection('online'); setStatus('lobby'); }} />
-      ) : <ConstellationSessionView title={props.title} />}
+      ) : <ConstellationSessionView title={props.title} onSnapshot={props.onConstellationSnapshot} />}
     </StoryExperienceAiShell>
   );
 };
@@ -256,7 +258,7 @@ export const IntegratedLeelaView: React.FC<IntegratedLeelaViewProps> = (props) =
         <SessionLobbyView title={title} participants={leelaLobbyParticipants} minReady={2} visibility="PRIVATE" joinCode="LEELA-21" onStart={() => setStatus('live')} />
       ) : status === 'completed' ? (
         <SessionCompletionView onExportToBook={() => setExportOpen(true)} onArchive={props.bookId ? () => setArchiveReviewOpen(true) : undefined} title={title} kindLabel="Leela Journey Session" participantCount={1} summaryItems={['Маршрут завершено на поточній клітині', 'Приватні рефлексії залишаються у визначеній visibility policy', 'Історія ходів готова до snapshot/archive']} onReturnToProject={() => setStatus('lobby')} onCreateNextSession={() => { setPreview(false); setConnection('online'); setStatus('lobby'); }} />
-      ) : <LeelaSessionView title={props.title} cellCount={props.cellCount} />}
+      ) : <LeelaSessionView title={props.title} cellCount={props.cellCount} onJourneyStep={props.onLeelaStep} />}
     </StoryExperienceAiShell>
   );
 };
