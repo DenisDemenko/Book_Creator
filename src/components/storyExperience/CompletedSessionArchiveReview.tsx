@@ -100,7 +100,7 @@ export const CompletedSessionArchiveReview: React.FC<CompletedSessionArchiveRevi
   return <section className="min-h-0 flex-1 overflow-y-auto bg-[#F4ECE1] p-4 text-[#2C1A12] lg:p-6">
     <div className="mx-auto max-w-3xl space-y-4">
       <header><h1 className="text-xl font-semibold">Перевірка матеріалу перед архівацією</h1><p className="mt-2 text-sm text-[#71645A]">{sourceEvents.length ? `Із ${sourceEvents.length} подій доступні для перегляду ${eligibleEventPreviews(sourceEvents).length}. Приховані й непогоджені події не передаються до форми.` : 'Джерело подій не підключено: введіть лише дозволені нейтральні події вручну.'} Справжні імена, приватні висловлювання та нотатки фасилітатора не копіюються сюди автоматично.</p></header>
-      {journal && <article className="rounded-2xl border border-[#E0D4C7] bg-[#FFFCF8] p-4">
+      {journal && <article className="fl-card p-4">
         <h2 className="text-sm font-semibold">Події завершеного журналу</h2>
         <p className="mt-2 text-xs text-[#71645A]">Приватні записи видно власнику для перевірки, але вони не переносяться в книгу без явного вибору, редагування та повторного підтвердження.</p>
         {journalError && <p role="alert" className="mt-2 text-xs text-[#A63A2B]">{journalError}</p>}
@@ -109,10 +109,10 @@ export const CompletedSessionArchiveReview: React.FC<CompletedSessionArchiveRevi
           <input type="checkbox" checked={entry.selected} onChange={e => {setConfirmed(false);setJournalEvents(prev=>prev.map(x=>x.id===entry.id?{...x,selected:e.target.checked}:x));}} />
           <span><strong>{entry.label}</strong><span className="mt-1 block text-[#71645A]">{entry.description}</span></span>
         </label>)}
-        <button type="button" disabled={!journalEvents.some(e=>e.selected)} onClick={() => {setConfirmed(false);setEvents(previous => [...previous.filter(e=>e.label.trim()||e.description.trim()),...journalEvents.filter(e=>e.selected).map((e,i)=>({id:Date.now()+i,label:e.label,description:e.description}))]);setJournalEvents(previous=>previous.map(e=>({...e,selected:false})));}} className="mt-3 rounded-xl border border-[#CDBBAA] px-3 py-2 text-xs disabled:opacity-40">Додати обрані події до чернетки нижче</button>
+        <button type="button" disabled={!journalEvents.some(e=>e.selected)} onClick={() => {setConfirmed(false);setEvents(previous => [...previous.filter(e=>e.label.trim()||e.description.trim()),...journalEvents.filter(e=>e.selected).map((e,i)=>({id:Date.now()+i,label:e.label,description:e.description}))]);setJournalEvents(previous=>previous.map(e=>({...e,selected:false})));}} className="mt-3 fl-button-secondary text-xs disabled:opacity-40">Додати обрані події до чернетки нижче</button>
       </article>}
       {saved ? <div role="status" className="rounded-2xl border border-[#A5C1A4] p-4 text-sm">Сесію збережено в архіві. ID: {saved}<button type="button" onClick={onClose} className="mt-3 block rounded-lg bg-[#2E1B12] px-3 py-2 text-[#FFF9F1]">Повернутися</button></div> : <>
-        {events.map((event, index) => <div key={event.id} className="space-y-2 rounded-2xl border border-[#E0D4C7] bg-[#FFFCF8] p-4">
+        {events.map((event, index) => <div key={event.id} className="space-y-2 fl-card p-4">
           <label className="block text-xs">Дозволена подія {index + 1}<input value={event.label} maxLength={200} onChange={e => { setConfirmed(false); setEvents(old => old.map(x => x.id === event.id ? {...x,label:e.target.value}:x)); }} placeholder="Нейтральна назва" className="mt-1 w-full rounded-xl border border-[#E0D4C7] bg-[#F4ECE1] p-2 text-sm"/></label>
           <label className="block text-xs">Перевірений опис<textarea rows={4} maxLength={10000} value={event.description} onChange={e => { setConfirmed(false); setEvents(old => old.map(x => x.id === event.id ? {...x,description:e.target.value}:x)); }} placeholder="Без персональних та чутливих деталей" className="mt-1 w-full rounded-xl border border-[#E0D4C7] bg-[#F4ECE1] p-2 text-sm"/></label>
           <button type="button" disabled={events.length===1} onClick={() => { setConfirmed(false); setEvents(old=>old.filter(x=>x.id!==event.id)); }} className="text-xs text-[#A63A2B] disabled:opacity-40">Прибрати подію</button>
@@ -120,7 +120,7 @@ export const CompletedSessionArchiveReview: React.FC<CompletedSessionArchiveRevi
         <button type="button" disabled={events.length>=200} onClick={() => { setConfirmed(false); setEvents(old=>[...old,{id:Math.max(...old.map(x=>x.id))+1,label:'',description:''}]); }} className="rounded-xl border border-[#E0D4C7] px-3 py-2 text-xs">Додати подію</button>
         <div className="space-y-3 rounded-2xl border border-[#DBC6AE] p-4">
           <h2 className="font-semibold">Перевірка приватності</h2>
-          <button type="button" disabled={!valid||previewBusy} onClick={()=>void requestPrivacyPreview()} className="rounded-xl border border-[#8B5937] px-3 py-2 text-xs disabled:opacity-40">{previewBusy?'Перевірка…':'Перевірити та порівняти'}</button>
+          <button type="button" disabled={!valid||previewBusy} onClick={()=>void requestPrivacyPreview()} className="fl-button-secondary text-xs disabled:opacity-40">{previewBusy?'Перевірка…':'Перевірити та порівняти'}</button>
           {previewError&&<p role="alert" className="text-sm text-[#A63A2B]">{previewError}</p>}
           {privacyPreview&&reviewedFingerprint===draftFingerprint&&<div className="space-y-3">
             <p className="text-xs">Знайдено потенційних прямих ідентифікаторів: {privacyPreview.issues.length}. Автоматичні заміни — лише пропозиція для ручного перегляду.</p>
@@ -128,13 +128,13 @@ export const CompletedSessionArchiveReview: React.FC<CompletedSessionArchiveRevi
               <div className="whitespace-pre-wrap rounded-xl border border-[#E0D4C7] p-2 text-xs"><strong>Початковий текст</strong><p>{events[i]?.label}</p><p>{events[i]?.description}</p></div>
               <div className="whitespace-pre-wrap rounded-xl border border-[#DBC6AE] p-2 text-xs"><strong>Пропоноване очищення</strong><p>{proposed.label}</p><p>{proposed.description}</p></div>
             </div>)}
-            {privacyPreview.issues.length>0&&<button type="button" onClick={()=>{setConfirmed(false);setEvents(old=>old.map((e,i)=>({...e,label:privacyPreview.events[i]?.label??e.label,description:privacyPreview.events[i]?.description??e.description})));setPrivacyPreview(null);setReviewedFingerprint('');}} className="rounded-xl border border-[#8B5937] px-3 py-2 text-xs">Перенести пропозиції в редактор для ручної перевірки</button>}
+            {privacyPreview.issues.length>0&&<button type="button" onClick={()=>{setConfirmed(false);setEvents(old=>old.map((e,i)=>({...e,label:privacyPreview.events[i]?.label??e.label,description:privacyPreview.events[i]?.description??e.description})));setPrivacyPreview(null);setReviewedFingerprint('');}} className="fl-button-secondary text-xs">Перенести пропозиції в редактор для ручної перевірки</button>}
           </div>}
           {reviewedFingerprint!==draftFingerprint&&<p className="text-xs text-[#825A20]">Після кожної зміни тексту виконайте перевірку повторно.</p>}
         </div>
-        {journal&&<div className="rounded-2xl border border-[#E0D4C7] p-3 text-sm"><label className="block">Запросити зареєстрованого учасника за email<input type="email" value={inviteEmail} onChange={e=>setInviteEmail(e.target.value)} className="mt-2 w-full rounded-xl border border-[#CDBBAA] bg-[#FFFCF8] p-2" placeholder="Електронна адреса облікового запису"/></label><button type="button" onClick={()=>void invite()} disabled={!inviteEmail.trim()} className="mt-2 rounded-xl border border-[#8B5937] px-3 py-2 text-xs">Надіслати запрошення</button>{inviteMessage&&<p role="status" className="mt-2 text-xs">{inviteMessage}</p>}</div>}
+        {journal&&<div className="rounded-2xl border border-[#E0D4C7] p-3 text-sm"><label className="block">Запросити зареєстрованого учасника за email<input type="email" value={inviteEmail} onChange={e=>setInviteEmail(e.target.value)} className="mt-2 w-full rounded-xl border border-[#CDBBAA] bg-[#FFFCF8] p-2" placeholder="Електронна адреса облікового запису"/></label><button type="button" onClick={()=>void invite()} disabled={!inviteEmail.trim()} className="mt-2 fl-button-secondary text-xs">Надіслати запрошення</button>{inviteMessage&&<p role="status" className="mt-2 text-xs">{inviteMessage}</p>}</div>}
         {!journal && <p role="alert" className="text-xs text-[#825A20]">Для архівації необхідний завершений журнал із підтвердженою участю. Збереження тимчасово недоступне.</p>}
-        <button type="button" disabled={!journal} onClick={()=>void loadRoster()} className="rounded-xl border border-[#8B5937] px-3 py-2 text-xs disabled:opacity-40">Оновити підтверджених учасників</button>
+        <button type="button" disabled={!journal} onClick={()=>void loadRoster()} className="fl-button-secondary text-xs disabled:opacity-40">Оновити підтверджених учасників</button>
         {rosterError&&<p role="alert" className="text-[#A63A2B] text-xs">{rosterError}</p>}
         {pendingCount>0&&<p className="text-xs text-[#825A20]">Очікують підтвердження: {pendingCount}</p>}
         <label className="block rounded-2xl border border-[#E0D4C7] p-3 text-sm">Ідентифікатори учасників, згода яких обов'язкова (облікові записи, через кому або новий рядок)
@@ -144,7 +144,7 @@ export const CompletedSessionArchiveReview: React.FC<CompletedSessionArchiveRevi
         <div role="note" className="rounded-2xl border border-[#E2C38D] p-3 text-xs text-[#825A20]">Система не може гарантувати анонімність: навіть без імен людину можуть упізнати за змістом. Для використання чужого досвіду потрібні належні дозволи.</div>
         <label className="flex gap-2 text-sm"><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/><span>Я перевірив кожну подію, прибрав персональні деталі та маю дозвіл використовувати матеріал.</span></label>
         {error && <p role="alert" className="text-sm text-[#A63A2B]">{error}</p>}
-        <div className="flex gap-3"><button type="button" onClick={onClose} className="rounded-xl border border-[#E0D4C7] px-4 py-2 text-sm">Назад</button><button type="button" disabled={!valid||!confirmed||!rosterValid||!journal||busy||reviewedFingerprint!==draftFingerprint||(privacyPreview?.issues.length??0)>0} onClick={()=>void save()} className="rounded-lg bg-[#2E1B12] px-4 py-2 text-sm text-[#FFF9F1] disabled:opacity-40">{busy?'Збереження…':'Зберегти погоджені події'}</button></div>
+        <div className="flex gap-3"><button type="button" onClick={onClose} className="fl-button-secondary text-sm">Назад</button><button type="button" disabled={!valid||!confirmed||!rosterValid||!journal||busy||reviewedFingerprint!==draftFingerprint||(privacyPreview?.issues.length??0)>0} onClick={()=>void save()} className="rounded-lg bg-[#2E1B12] px-4 py-2 text-sm text-[#FFF9F1] disabled:opacity-40">{busy?'Збереження…':'Зберегти погоджені події'}</button></div>
       </>}
     </div>
   </section>;
