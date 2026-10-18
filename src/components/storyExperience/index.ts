@@ -65,3 +65,6 @@ export type { SessionHistoryViewProps } from './SessionHistoryView';
 
 export { CompletedSessionArchiveReview } from './CompletedSessionArchiveReview';
 export type { CompletedSessionArchiveReviewProps } from './CompletedSessionArchiveReview';
+
+export { eligibleEventPreviews } from './eligibleSessionEvents';
+export type { SessionEventCandidate, SafeEventPreview } from './eligibleSessionEvents';
