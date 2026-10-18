@@ -5,10 +5,23 @@ import path from 'node:path';
 import { requireAuth } from './auth';
 import { DATA_DIR } from './db';
 import { getBook } from './bookStore';
+import type { ExperienceEventKind, ExperienceEventRecord } from './storyExperienceEvents';
 import { inspectApprovedExperience } from './storyExperiencePrivacy';
 import { safeCompletedSessionSummary, type CompletedExperienceRecord, type ExperienceKind } from './storyExperienceRegistry';
 
 const registryPath = path.join(DATA_DIR, 'story-experience-completed.json');
+const journalPath = path.join(DATA_DIR, 'story-experience-journal.json');
+interface DraftJournal { sessionId: string; bookId: string; ownerId: string; kind: ExperienceKind; status: 'draft' | 'completed'; events: ExperienceEventRecord[]; }
+async function loadJournals(): Promise<DraftJournal[]> {
+  try { const data = JSON.parse(await fs.readFile(journalPath, 'utf8')); return Array.isArray(data) ? data : []; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }
+}
+async function storeJournals(items: DraftJournal[]): Promise<void> {
+  await fs.mkdir(DATA_DIR, {recursive:true});
+  const temp = journalPath + '.' + randomUUID() + '.tmp';
+  await fs.writeFile(temp, JSON.stringify(items), {mode:0o600});
+  await fs.rename(temp,journalPath);
+}
 async function load(): Promise<CompletedExperienceRecord[]> {
   try { const data = JSON.parse(await fs.readFile(registryPath, 'utf8')); return Array.isArray(data) ? data : []; }
   catch (err) { if ((err as NodeJS.ErrnoException).code === 'ENOENT') return []; throw err; }
@@ -21,6 +34,53 @@ function enqueue<T>(action: () => Promise<T>): Promise<T> {
 }
 const safeKinds = new Set<ExperienceKind>(['mafia','constellation','leela']);
 export function registerStoryExperienceRoutes(app: Express): void {
+  // Draft event journal is owner-scoped and never automatically approved for book use.
+  app.post('/api/story-experience/journals', requireAuth, async (req: Request, res: Response) => {
+    const ownerId = req.principal?.id;
+    const {bookId,kind} = req.body || {};
+    if (!ownerId) {res.status(401).json({error:'Авторизація потрібна'});return;}
+    if (typeof bookId !== 'string' || !bookId || !safeKinds.has(kind)) {res.status(400).json({error:'Недійсні дані сесії'});return;}
+    try {
+      const book = await getBook(bookId);
+      if (!book || book.ownerId !== ownerId) {res.status(404).json({error:'Книгу не знайдено'});return;}
+      const record: DraftJournal = {sessionId:randomUUID(),bookId,ownerId,kind,status:'draft',events:[]};
+      await enqueue(async()=>{ const items=await loadJournals();await storeJournals([...items,record]); });
+      res.status(201).json({sessionId:record.sessionId});
+    } catch {res.status(500).json({error:'Не вдалося створити журнал'});}
+  });
+  app.post('/api/story-experience/journals/:sessionId/events', requireAuth, async (req: Request, res: Response) => {
+    const ownerId=req.principal?.id;
+    if (!ownerId) {res.status(401).json({error:'Авторизація потрібна'});return;}
+    const {bookId,kind,label,description,eventId} = req.body || {};
+    const allowedKinds: ExperienceEventKind[] = ['game-action','vote','figure-move','snapshot','leela-move'];
+    if (typeof bookId !== 'string' || !bookId || !allowedKinds.includes(kind) ||
+      typeof label !== 'string' || typeof description !== 'string' ||
+      !label.trim() || label.length>200 || description.length>2000 ||
+      typeof eventId !== 'string' || !/^[a-zA-Z0-9_-]{8,128}$/.test(eventId)) {
+      res.status(400).json({error:'Недійсні дані події'});return;
+    }
+    try {
+      const book=await getBook(bookId);
+      if (!book || book.ownerId !== ownerId) {res.status(404).json({error:'Книгу не знайдено'});return;}
+      const result=await enqueue(async()=>{
+        const items=await loadJournals();
+        const journal=items.find(item=>item.sessionId===req.params.sessionId && item.bookId===bookId && item.ownerId===ownerId && item.status==='draft');
+        if (!journal) return 'missing' as const;
+        if (journal.events.some(event=>event.id===eventId)) return 'duplicate' as const;
+        if (journal.events.length>=10000) return 'limit' as const;
+        // Treat incoming strings as untrusted: journal events are NEVER approved for book export.
+        const event: ExperienceEventRecord = {id:eventId,sessionId:journal.sessionId,sequence:journal.events.length+1,
+          kind,visibility:'private',approvedForBook:false,label:label.trim(),description:description.trim(),occurredAt:new Date().toISOString()};
+        journal.events.push(event);
+        await storeJournals(items);
+        return event;
+      });
+      if(result==='missing'){res.status(404).json({error:'Журнал не знайдено'});return;}
+      if(result==='duplicate'){res.status(409).json({error:'Подія вже існує'});return;}
+      if(result==='limit'){res.status(413).json({error:'Ліміт подій'});return;}
+      res.status(201).json({eventId:result.id,sequence:result.sequence});
+    } catch {res.status(500).json({error:'Не вдалося записати подію'});}
+  });
   app.get('/api/story-experience/completed', requireAuth, async (req: Request, res: Response) => {
     const userId = req.principal?.id;
     if (!userId) { res.status(401).json({error:'Потрібна авторизація'}); return; }
