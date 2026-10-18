@@ -7,7 +7,7 @@ import type { SessionBookExportRequest } from './SessionExportToBookView';
 import type { ReviewedSessionBookMaterial } from './sessionBookCommit';
 import type { Book } from '../../types';
 import { ScreenplayWorkspaceView } from './ScreenplayWorkspaceView';
-import { MafiaGameMasterView } from './MafiaGameMasterView';
+import { MafiaGameMasterView, type MafiaNeutralEvent } from './MafiaGameMasterView';
 import { ConstellationSessionView } from './ConstellationSessionView';
 import { LeelaSessionView } from './LeelaSessionView';
 import { StoryExperienceAiShell } from './StoryExperienceAiShell';
@@ -27,6 +27,7 @@ import {
 import type { AIWorkspaceAssignments } from './AIWorkspaceToolbar';
 
 interface SharedIntegratedProps {
+  onMafiaNeutralEvent?: (event: MafiaNeutralEvent) => void;
   journal?: JournalSession;
   onPrepareJournal?: () => Promise<void>;
   approvedSessionEvents?: SessionEventCandidate[];
@@ -201,15 +202,15 @@ export const IntegratedMafiaView: React.FC<IntegratedMafiaViewProps> = (props) =
       <JevSlot title="Jev · пріоритет події та увага ведучого" hint="Jev оцінює лише статус і пріоритет події для GM. Остаточне рішення залишається за ведучим." {...props} />
       <SessionModeratorBar title={title} phase={status === 'lobby' ? 'Lobby' : status === 'completed' ? 'Завершено' : 'Investigation'} status={status} connection={connection} participants={8} onStatusChange={setStatus} />
       <PreviewToggle active={preview} label="Переглянути як гравець" connection={connection} onConnectionChange={setConnection} onClick={() => setPreview((value) => !value)} />
-      {archiveReviewOpen && props.bookId ? <CompletedSessionArchiveReview sourceEvents={props.approvedSessionEvents} bookId={props.bookId} kind="mafia" title={title} onClose={() => setArchiveReviewOpen(false)} /> : exportOpen ? (
+      {archiveReviewOpen && props.bookId ? <CompletedSessionArchiveReview journal={props.journal} sourceEvents={props.approvedSessionEvents} bookId={props.bookId} kind="mafia" title={title} onClose={() => setArchiveReviewOpen(false)} /> : exportOpen ? (
         <SessionExportToBookView kind="mafia" sessionTitle={title} existingCharacters={props.existingCharacters} onRequestPortrait={props.onRequestSessionPortrait} portraitAssets={props.portraitAssets} onSubmit={props.reviewedMaterial && props.onCommitBookExport ? (request) => props.onCommitBookExport!(request, props.reviewedMaterial!) : undefined} participants={mafiaLobbyParticipants.filter((p) => p.role !== 'Game Master' && p.role !== 'Facilitator' && p.role !== 'Host').map((p, i) => ({ id: p.id, label: `Учасник ${i + 1}`, sessionRole: p.role }))} onClose={() => setExportOpen(false)} />
       ) : preview ? (
         <SessionPreviewFlow kind="mafia" title={title} phase={status === 'lobby' ? 'Lobby' : status === 'completed' ? 'Завершено' : 'Investigation'} roleLabel="Архівіст" visibility="ROLE_BASED" primaryTitle="Зникло світло у східному крилі" primaryText="Світло згасло. Ви можете перевірити архівну кімнату або залишитися з групою." secondaryText="Доказ E-04 ще не відкритий для вашої ролі." actionLabel="Перевірити доступну дію" status={status} connection={connection} onStatusChange={setStatus} onConnectionChange={setConnection} />
       ) : status === 'lobby' ? (
         <SessionLobbyView title={title} participants={mafiaLobbyParticipants} minReady={3} visibility="ROLE_BASED" joinCode="MAF-4821" onStart={() => setStatus('live')} />
       ) : status === 'completed' ? (
-        <SessionCompletionView onExportToBook={() => setExportOpen(true)} onArchive={props.bookId ? () => setArchiveReviewOpen(true) : undefined} title={title} kindLabel="Mafia Story Session" participantCount={8} summaryItems={['Події та голосування завершено', 'Фінальний стан ролей зафіксовано', 'Participant view переведено у read-only completed state']} onReturnToProject={() => setStatus('lobby')} onCreateNextSession={() => { setPreview(false); setConnection('online'); setStatus('lobby'); }} />
-      ) : <MafiaGameMasterView projectTitle={props.projectTitle} />}
+        <SessionCompletionView onExportToBook={() => setExportOpen(true)} onArchive={props.bookId ? () => { void Promise.resolve(props.onPrepareJournal?.()).then(() => setArchiveReviewOpen(true)).catch(() => setArchiveReviewOpen(false)); } : undefined} title={title} kindLabel="Mafia Story Session" participantCount={8} summaryItems={['Події та голосування завершено', 'Фінальний стан ролей зафіксовано', 'Participant view переведено у read-only completed state']} onReturnToProject={() => setStatus('lobby')} onCreateNextSession={() => { setPreview(false); setConnection('online'); setStatus('lobby'); }} />
+      ) : <MafiaGameMasterView projectTitle={props.projectTitle} onNeutralEvent={props.onMafiaNeutralEvent} />}
     </StoryExperienceAiShell>
   );
 };
