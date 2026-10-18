@@ -55,7 +55,7 @@ export const ConstellationSessionView: React.FC<{ title?: string; onSnapshot?: (
         </div>
       </header>
 
-      <nav className="mb-4 flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Етапи сесії">
+      <nav className="mb-4 flex max-w-full gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Етапи сесії">
         {stages.map((item, index) => (
           <button
             key={item}
@@ -116,7 +116,7 @@ export const ConstellationSessionView: React.FC<{ title?: string; onSnapshot?: (
             </div>
           </div>
 
-          <div className="mt-3 flex gap-2 overflow-x-auto pb-1" aria-label="Snapshots сесії">
+          <div className="mt-3 flex max-w-full gap-2 overflow-x-auto pb-1" aria-label="Snapshots сесії">
             {snapshots.map((time, index) => (
               <button key={`${time}-${index}`} type="button" className={`min-w-28 rounded-xl border p-3 text-left ${index === snapshots.length - 1 ? 'border-cyan-500/50 bg-cyan-500/10' : 'border-[#E0D4C7] bg-[#FFFCF8]'}`}><div className="text-[10px] font-bold text-[#594C42]">Snapshot {String(index + 1).padStart(2, '0')}</div><div className="mt-1 text-[10px] text-[#796D62]">{time}</div></button>
             ))}
@@ -131,7 +131,7 @@ export const ConstellationSessionView: React.FC<{ title?: string; onSnapshot?: (
               <Field label="Тип"><select value={selected.kind} onChange={(event) => updateSelected({ kind: event.target.value as FigureKind })} className="input"><option value="person">Людина</option><option value="object">Об’єкт</option><option value="abstract">Абстракція</option><option value="empty">Порожнє місце</option></select></Field>
               <Field label="Напрям"><input type="range" min="0" max="359" value={selected.rotation} onChange={(event) => updateSelected({ rotation: Number(event.target.value) })} className="w-full" /><div className="mt-1 text-[10px] text-[#796D62]">{selected.rotation}°</div></Field>
               <Field label="Стан"><input value={selected.state} onChange={(event) => updateSelected({ state: event.target.value })} className="input" /></Field>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <button type="button" onClick={() => updateSelected({ x: Math.max(5, selected.x - 5) })} className="inline-flex items-center justify-center gap-1 rounded-xl border border-[#E0D4C7] bg-[#F7F0E7] px-3 py-2 text-xs text-[#594C42]"><ChevronLeft className="h-3.5 w-3.5" /> Лівіше</button>
                 <button type="button" onClick={() => updateSelected({ x: Math.min(95, selected.x + 5) })} className="inline-flex items-center justify-center gap-1 rounded-xl border border-[#E0D4C7] bg-[#F7F0E7] px-3 py-2 text-xs text-[#594C42]">Правіше <ChevronRight className="h-3.5 w-3.5" /></button>
               </div>
