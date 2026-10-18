@@ -17,3 +17,17 @@ export function inspectApprovedExperience(events: Array<{label:string; descripti
   for (const item of fields) for (const [category,pattern] of tests) if (pattern.test(item.value)) issues.push({field:item.field,category});
   return issues;
 }
+
+/** Draft redaction for human review only: never a certificate of anonymity. */
+export function proposeExperienceRedactions(events: Array<{label:string;description:string}>, title:string) {
+  const redact=(value:string)=>{
+    let result=value;
+    for(const [category,pattern] of tests) {
+      const global=new RegExp(pattern.source, pattern.flags.includes('g')?pattern.flags:pattern.flags+'g');
+      result=result.replace(global,'[приховано: '+category+']');
+    }
+    return result;
+  };
+  return {title:redact(title),events:events.map(event=>({label:redact(event.label),description:redact(event.description)})),
+    issues:inspectApprovedExperience(events,title), requiresHumanReview:true as const};
+}
