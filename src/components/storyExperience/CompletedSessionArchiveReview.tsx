@@ -55,13 +55,13 @@ export const CompletedSessionArchiveReview: React.FC<CompletedSessionArchiveRevi
   const [saved, setSaved] = useState('');
   const valid = events.length > 0 && events.every(e => e.label.trim().length > 0 && e.description.trim().length > 0);
   const save = async () => {
-    if (!valid || !confirmed || !rosterValid || busy || reviewedFingerprint!==draftFingerprint || (privacyPreview?.issues.length??0)>0) return;
+    if (!valid || !confirmed || !rosterValid || !journal || busy || reviewedFingerprint!==draftFingerprint || (privacyPreview?.issues.length??0)>0) return;
     setBusy(true); setError('');
     try {
       const response = await fetch('/api/story-experience/completed', {
         method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          bookId, kind, title, confirmedForBook: true, consentRequiredParticipantIds:consentRoster,
+          bookId, kind, title, sourceJournalId:journal?.sessionId, confirmedForBook: true, consentRequiredParticipantIds:consentRoster,
           events: events.map(e => ({ label: e.label.trim(), description: e.description.trim(), approvedForBook: true, visibility: 'approved' })),
         }),
       });
@@ -107,6 +107,7 @@ export const CompletedSessionArchiveReview: React.FC<CompletedSessionArchiveRevi
           </div>}
           {reviewedFingerprint!==draftFingerprint&&<p className="text-xs text-amber-200">Після кожної зміни тексту виконайте перевірку повторно.</p>}
         </div>
+        {!journal && <p role="alert" className="text-xs text-amber-200">Для архівації необхідний завершений журнал із підтвердженою участю. Збереження тимчасово недоступне.</p>}
         <label className="block rounded-xl border border-slate-700 p-3 text-sm">Ідентифікатори учасників, згода яких обов'язкова (облікові записи, через кому або новий рядок)
           <textarea rows={3} value={participantIds} onChange={e=>{setParticipantIds(e.target.value);setConfirmed(false);}} className="mt-2 w-full rounded-lg border border-slate-600 bg-slate-900 p-2" placeholder="ID авторизованих учасників — не їхні імена" />
           <span className="mt-1 block text-xs text-amber-200">Не включайте сторонніх осіб і не використовуйте вигадані ID. Усі зазначені учасники повинні особисто погодити матеріал. Список не можна вважати підтвердженим автоматично.</span>
@@ -114,7 +115,7 @@ export const CompletedSessionArchiveReview: React.FC<CompletedSessionArchiveRevi
         <div role="note" className="rounded-xl border border-amber-600/50 p-3 text-xs text-amber-100">Система не може гарантувати анонімність: навіть без імен людину можуть упізнати за змістом. Для використання чужого досвіду потрібні належні дозволи.</div>
         <label className="flex gap-2 text-sm"><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/><span>Я перевірив кожну подію, прибрав персональні деталі та маю дозвіл використовувати матеріал.</span></label>
         {error && <p role="alert" className="text-sm text-rose-300">{error}</p>}
-        <div className="flex gap-3"><button type="button" onClick={onClose} className="rounded-lg border border-slate-700 px-4 py-2 text-sm">Назад</button><button type="button" disabled={!valid||!confirmed||!rosterValid||busy||reviewedFingerprint!==draftFingerprint||(privacyPreview?.issues.length??0)>0} onClick={()=>void save()} className="rounded-lg bg-slate-100 px-4 py-2 text-sm text-slate-950 disabled:opacity-40">{busy?'Збереження…':'Зберегти погоджені події'}</button></div>
+        <div className="flex gap-3"><button type="button" onClick={onClose} className="rounded-lg border border-slate-700 px-4 py-2 text-sm">Назад</button><button type="button" disabled={!valid||!confirmed||!rosterValid||!journal||busy||reviewedFingerprint!==draftFingerprint||(privacyPreview?.issues.length??0)>0} onClick={()=>void save()} className="rounded-lg bg-slate-100 px-4 py-2 text-sm text-slate-950 disabled:opacity-40">{busy?'Збереження…':'Зберегти погоджені події'}</button></div>
       </>}
     </div>
   </section>;
