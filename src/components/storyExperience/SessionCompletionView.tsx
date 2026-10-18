@@ -29,11 +29,11 @@ export const SessionCompletionView: React.FC<SessionCompletionViewProps> = ({
   onExportToBook,
 }) => {
   const [notes, setNotes] = useState('');
-  const [archived, setArchived] = useState(false);
+  const archived = false;
 
   const archive = () => {
-    setArchived(true);
-    onArchive?.();
+    if (!onArchive) return;
+    onArchive();
   };
 
   return (
@@ -80,7 +80,7 @@ export const SessionCompletionView: React.FC<SessionCompletionViewProps> = ({
 
             <article className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
               <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">Snapshot / archive</div>
-              <button type="button" onClick={archive} aria-pressed={archived} className={`mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold ${archived ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200' : 'border-slate-800 bg-slate-950 text-slate-300'}`}><Archive className="h-3.5 w-3.5" /> {archived ? 'Позначено для архівації' : 'Створити snapshot / archive'}</button>
+              <button type="button" onClick={archive} disabled={!onArchive} aria-pressed={archived} className={`mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold ${archived ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200' : 'border-slate-800 bg-slate-950 text-slate-300'}`}><Archive className="h-3.5 w-3.5" /> {onArchive ? 'Перевірити події для архіву' : 'Архівація потребує підключення'}</button>
               <p className="mt-2 text-[10px] leading-4 text-slate-600">Фактичне створення snapshot, version id і archive record виконує Session Engine.</p>
             </article>
 
