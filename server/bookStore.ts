@@ -260,6 +260,13 @@ async function saveBookSerial(params: {
     if (previous && previous !== chapterId) throw new Error('Сесію вже імпортовано в іншу главу.');
     seenSessions.set(sourceSessionId, chapterId);
   }
+  // A session source may appear only once, even when a malformed client repeats the same chapter.
+  const sourceOccurrences = new Set<string>();
+  for (const chapter of chapters) {
+    if (typeof chapter.sourceSessionId !== 'string' || !chapter.sourceSessionId.trim()) continue;
+    if (sourceOccurrences.has(chapter.sourceSessionId)) throw new Error('Дублікат імпорту сесії.');
+    sourceOccurrences.add(chapter.sourceSessionId);
+  }
   const oldChapters = existing && Array.isArray((existing.book as any).chapters)
     ? (existing.book as any).chapters as Array<Record<string, unknown>> : [];
   for (const old of oldChapters) {
