@@ -2388,6 +2388,7 @@ export default function App() {
         {currentTab === 'scenario' && (
           <ScenarioView
             book={book}
+            ownerId={auth.user?.id ?? null}
             onUpdateBook={handleUpdateBook}
             onNavigateToSection={handleNavigateToSection}
             onSaveBook={handleManualSave}
