@@ -44,6 +44,8 @@ export interface ExperienceExportMaterial {
 export function consentMaterial(record: CompletedExperienceRecord): { text:string; hash:string } {
   const approved = record.canonicalEvents ? projectEventsForBook(record.canonicalEvents) : record.events.filter(e=>e.approvedForBook && e.visibility==='approved');
   const text = approved.map(e=>e.label.trim()+': '+e.description.trim()).filter(Boolean).join('\n\n').trim();
+  const issues = inspectApprovedExperience(approved.map(e=>({label:e.label,description:e.description})),record.title);
+  if (issues.length) throw new Error('Матеріал потребує очищення персональних ідентифікаторів перед погодженням.');
   return {text,hash:createHash('sha256').update(text,'utf8').digest('hex')};
 }
 const validKinds = new Set<ExperienceKind>(['mafia', 'constellation', 'leela']);
