@@ -59,3 +59,6 @@ export type { ReviewedSessionBookMaterial, SessionBookCommitResult } from './ses
 
 export { generateSessionCharacterPortrait, attachSessionPortraits } from './sessionPortraitService';
 export type { SessionPortraitAsset } from './sessionPortraitService';
+
+export { SessionHistoryView } from './SessionHistoryView';
+export type { SessionHistoryViewProps } from './SessionHistoryView';
