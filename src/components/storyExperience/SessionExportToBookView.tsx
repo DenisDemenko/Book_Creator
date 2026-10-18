@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import type { SessionPortraitAsset } from './sessionPortraitService';
 import { CharacterDraftEditor, createCharacterDrafts, type CharacterDraft } from './CharacterDraftEditor';
 
 export type SessionExportKind = 'mafia' | 'constellation' | 'leela';
@@ -23,7 +24,8 @@ export interface SessionExportToBookViewProps {
   existingCharacters?: { id: string; name: string }[];
   onClose: () => void;
   onSubmit?: (request: SessionBookExportRequest) => Promise<void> | void;
-  onRequestPortrait?: (draft: CharacterDraft) => void;
+  onRequestPortrait?: (draft: CharacterDraft) => Promise<SessionPortraitAsset>;
+  portraitAssets?: SessionPortraitAsset[];
   onChooseFromLibrary?: (draft: CharacterDraft) => void;
 }
 const formats = [
@@ -97,7 +99,7 @@ export const ParticipantToCharacterMapper: React.FC<{
 };
 
 export const SessionExportToBookView: React.FC<SessionExportToBookViewProps> = ({
-  kind, sessionTitle, participants, existingCharacters = [], onClose, onSubmit, onRequestPortrait, onChooseFromLibrary,
+  kind, sessionTitle, participants, existingCharacters = [], onClose, onSubmit, onRequestPortrait, portraitAssets = [], onChooseFromLibrary,
 }) => {
   const [step, setStep] = useState(0);
   const [source, setSource] = useState<SessionBookExportRequest['source']>('summary');
@@ -111,6 +113,8 @@ export const SessionExportToBookView: React.FC<SessionExportToBookViewProps> = (
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [portraitError, setPortraitError] = useState('');
+  const [portraitBusy, setPortraitBusy] = useState(false);
   const invalidMapping = mappings.some((m) => m.action !== 'skip' && (!m.fictionalName.trim() || (m.action === 'existing' && !m.existingCharacterId)));
   const canNext = (step !== 1 || selectedFormats.length > 0) && (step !== 3 || !invalidMapping);
   const synchronizedDrafts = useMemo(() => mappings.filter((m) => m.action !== 'skip').map((mapping) => ({ ...(drafts.find((d) => d.participantId === mapping.participantId) || createCharacterDrafts(participants, [mapping])[0]), fictionalName: mapping.fictionalName })), [drafts, mappings, participants]);
@@ -147,7 +151,8 @@ export const SessionExportToBookView: React.FC<SessionExportToBookViewProps> = (
           </label>)}</div></fieldset>}
         {step === 2 && <SessionAnonymizationPanel value={privacy} onChange={(value) => { setPrivacy(value); setConfirmed(false); }} />}
         {step === 3 && <ParticipantToCharacterMapper participants={participants} mappings={mappings} onChange={setMappings} existingCharacters={existingCharacters} privacy={privacy} />}
-        {step === 4 && <CharacterDraftEditor drafts={synchronizedDrafts} privacy={privacy} onChange={setDrafts} onRequestPortrait={onRequestPortrait} onChooseFromLibrary={onChooseFromLibrary} />}
+        {step === 4 && <CharacterDraftEditor drafts={synchronizedDrafts} privacy={privacy} onChange={setDrafts} onRequestPortrait={onRequestPortrait ? async draft => { setPortraitError(''); setPortraitBusy(true); try { await onRequestPortrait(draft); } catch (error) { setPortraitError(error instanceof Error ? error.message : 'Не вдалося створити портрет'); } finally { setPortraitBusy(false); } } : undefined} onChooseFromLibrary={onChooseFromLibrary} />}
+        {step === 4 && <div role="status" className="text-xs text-slate-400">{portraitBusy ? 'Генерація портрета…' : 'Згенеровано портретів: ' + portraitAssets.length}{portraitError && <p role="alert" className="text-rose-300">{portraitError}</p>}{portraitAssets.map(asset => <img key={asset.participantId} className="mr-2 mt-2 inline-block h-20 w-20 rounded-lg object-cover" src={asset.imageUrl} alt="Згенерований художній портрет" />)}</div>}
         {step === 5 && <div className="space-y-3"><h2 className="text-lg font-semibold">Перевірка перед створенням</h2>
           <dl className="grid gap-2 text-sm text-slate-300 sm:grid-cols-2"><div>Джерело: {source}</div><div>Приватність: {modeLabels[privacy]}</div>
           <div>Форматів: {selectedFormats.length}</div><div>Героїв: {mappings.filter((m) => m.action !== 'skip').length}</div></dl>
