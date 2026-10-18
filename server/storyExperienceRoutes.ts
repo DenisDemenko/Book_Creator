@@ -133,6 +133,9 @@ export function registerStoryExperienceRoutes(app: Express): void {
     if (typeof body.bookId !== 'string' || !body.bookId.trim() || typeof body.title !== 'string' || !body.title.trim()
       || !safeKinds.has(body.kind) || body.confirmedForBook !== true
       || !Array.isArray(body.events) || body.events.length === 0 || body.events.length > 200
+      || (body.consentRequiredParticipantIds !== undefined &&
+        (!Array.isArray(body.consentRequiredParticipantIds) || body.consentRequiredParticipantIds.length > 100 ||
+        body.consentRequiredParticipantIds.some((id: unknown) => typeof id !== 'string' || !id.trim() || id.length > 128)))
       || body.events.some((e: any) => !e || typeof e.label !== 'string' || typeof e.description !== 'string'
         || e.approvedForBook !== true || e.visibility !== 'approved'
         || e.label.length > 200 || e.description.length > 10000)) {
@@ -146,6 +149,7 @@ export function registerStoryExperienceRoutes(app: Express): void {
     const record: CompletedExperienceRecord = {
       id: randomUUID(), ownerId: userId, bookId: body.bookId, title: body.title.slice(0,200), kind: body.kind,
       status:'completed', completedAt:new Date().toISOString(), publicParticipantLabels:[],
+      consentRequiredParticipantIds: [...new Set<string>(body.consentRequiredParticipantIds || [])], consentDecisions:[],
       events: body.events.map((e: any) => ({id:randomUUID(),label:e.label,description:e.description,approvedForBook:true,visibility:'approved' as const})),
     };
     record.canonicalEvents = record.events.map((e, i) => ({
@@ -157,6 +161,31 @@ export function registerStoryExperienceRoutes(app: Express): void {
       await enqueue(async () => { const items = await load(); await fs.mkdir(DATA_DIR,{recursive:true}); const tmp = registryPath + '.' + randomUUID() + '.tmp'; await fs.writeFile(tmp,JSON.stringify([...items,record]),{mode:0o600}); await fs.rename(tmp,registryPath); });
       res.status(201).json({sessionId:record.id});
     } catch { res.status(500).json({error:'Не вдалося зберегти сесію'}); }
+  });
+  // Consent can only be granted or revoked by the authenticated participant.
+  // Owner may designate required user IDs when archiving, but cannot sign for them.
+  app.post('/api/story-experience/completed/:sessionId/consent', requireAuth, async (req: Request, res: Response) => {
+    const participantId = req.principal?.id;
+    const { bookId, decision } = req.body || {};
+    if (!participantId) { res.status(401).json({error:'Потрібна авторизація'}); return; }
+    if (typeof bookId !== 'string' || !bookId || (decision !== 'granted' && decision !== 'revoked')) {
+      res.status(400).json({error:'Недійсне рішення про згоду'}); return;
+    }
+    try {
+      const result = await enqueue(async () => {
+        const records = await load();
+        const record = records.find(r => r.id === req.params.sessionId && r.bookId === bookId);
+        if (!record || !record.consentRequiredParticipantIds?.includes(participantId)) return 'missing' as const;
+        record.consentDecisions ??= [];
+        record.consentDecisions.push({participantId, scope:'book-adaptation', status:decision, decidedAt:new Date().toISOString()});
+        const temp = registryPath + '.' + randomUUID() + '.tmp';
+        await fs.writeFile(temp,JSON.stringify(records),{mode:0o600});
+        await fs.rename(temp,registryPath);
+        return 'saved' as const;
+      });
+      if (result === 'missing') { res.status(404).json({error:'Для цього облікового запису згоди не запитували'}); return; }
+      res.json({status:decision, scope:'book-adaptation'});
+    } catch { res.status(500).json({error:'Не вдалося записати рішення'}); }
   });
   app.get('/api/story-experience/completed/:sessionId/book-material', requireAuth, async (req: Request,res: Response) => {
     const userId = req.principal?.id, bookId = req.query.bookId;
