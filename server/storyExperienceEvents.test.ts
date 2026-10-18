@@ -25,6 +25,20 @@ describe('session event privacy boundary', () => {
     const records = appendEvent(appendEvent([],first),second);
     assert.deepEqual(records.map(event => event.id),['event-1','event-2']);
   });
+  it('blocks export when required consent is missing or revoked', () => {
+    const record: CompletedExperienceRecord = {
+      id:'session-1',bookId:'book-1',ownerId:'owner-1',kind:'mafia',title:'Session',
+      status:'completed',completedAt:'2026-10-18T00:00:00Z',
+      publicParticipantLabels:[],events:[],canonicalEvents:[make(1,'approved')],
+      consentRequiredParticipantIds:['participant-1'],
+    };
+    const request={ownerId:'owner-1',bookId:'book-1',sessionId:'session-1'};
+    assert.throws(()=>safeCompletedSessionSummary(record,request));
+    record.consentDecisions=[{participantId:'participant-1',status:'granted',decidedAt:'2026-10-18T00:00:00Z',scope:'book-adaptation'}];
+    assert.match(safeCompletedSessionSummary(record,request).approvedText,/Description 1/);
+    record.consentDecisions.push({participantId:'participant-1',status:'revoked',decidedAt:'2026-10-18T00:01:00Z',scope:'book-adaptation'});
+    assert.throws(()=>safeCompletedSessionSummary(record,request));
+  });
   it('does not leak private text through book export', () => {
     const session: CompletedExperienceRecord = {
       id:'session-1',bookId:'book-1',ownerId:'owner-1',kind:'mafia',title:'Session',status:'completed',
