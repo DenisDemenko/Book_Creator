@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 type Registration = { id: string; name: string; contact: string; role: 'participant'|'representative'|'observer'; status: 'pending'|'confirmed'|'waitlist'; };
+type SavedEvent = {id:string;theme:string;date:string;time:string;venue:string;address:string;price:string;announcement:string;registrations:Registration[]};
 const sample = `✨ ГРУПОВІ РОЗСТАНОВКИ ✨
 ТЕМА: «ПРОЯВЛЕНІСТЬ»
 Четвер, 22 жовтня
@@ -29,18 +30,42 @@ export const ConstellationEventPlanner: React.FC<{bookId?:string}> = ({bookId}) 
   const [message, setMessage] = useState('');
   const [savedEventId, setSavedEventId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [events, setEvents] = useState<SavedEvent[]>([]);
+  const [loadingEvents, setLoadingEvents] = useState(false);
+  const loadEvents = async () => {
+    if (!bookId) return;
+    setLoadingEvents(true);
+    try {
+      const result = await fetch('/api/constellation/events?bookId='+encodeURIComponent(bookId),{credentials:'same-origin'});
+      const data = await result.json();
+      if (!result.ok) throw new Error(data.error || 'Не вдалося завантажити події');
+      setEvents(data.events ?? []);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Не вдалося завантажити події');
+    } finally {setLoadingEvents(false);}
+  };
+  useEffect(() => { void loadEvents(); }, [bookId]);
+  const openEvent = (item: SavedEvent) => {
+    setSavedEventId(item.id);
+    setForm({theme:item.theme,date:item.date,time:item.time,venue:item.venue,address:item.address,price:item.price});
+    setAnnouncement(item.announcement);
+    setRegistrations(item.registrations);
+    setMessage('Відкрито подію для редагування.');
+  };
   const saveEvent = async () => {
     if (!bookId || !form.theme.trim()) { setMessage('Вкажіть тему та відкрийте власну книгу.'); return; }
     setBusy(true);
     try {
-      const result = await fetch('/api/constellation/events', {
-        method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
+      const result = await fetch(savedEventId ? '/api/constellation/events/'+encodeURIComponent(savedEventId) : '/api/constellation/events', {
+        method:savedEventId ? 'PATCH' : 'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({...form,announcement,bookId})
       });
       const data = await result.json();
       if (!result.ok) throw new Error(data.error || 'Сервер відхилив збереження');
       setSavedEventId(data.event.id);
-      setMessage('Подію збережено на сервері. Заявки тепер можна реєструвати.');
+      setRegistrations(data.event.registrations ?? []);
+      await loadEvents();
+      setMessage('Подію збережено на сервері.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Не вдалося зберегти подію');
     } finally { setBusy(false); }
@@ -66,6 +91,12 @@ export const ConstellationEventPlanner: React.FC<{bookId?:string}> = ({bookId}) 
   };
   return <section className="space-y-4 rounded-2xl border border-[#E0D4C7] bg-[#FFFCF8] p-4 text-[#2C1A12]" aria-label="Організація групової події">
     <header><h2 className="text-lg font-bold">Організація групової зустрічі</h2><p className="text-sm text-[#71645A]">Перший етап Constellation Studio 1.1 — чернетка події та локальний список заявок.</p></header>
+    <div className="rounded-xl border border-[#E0D4C7] bg-[#F4ECE1] p-3">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">Мої збережені події</h3><button type="button" onClick={() => void loadEvents()} disabled={loadingEvents} className="rounded-lg border border-[#D9CABC] bg-white px-3 py-1 text-xs">Оновити</button></div>
+      {events.length===0 ? <p className="text-sm text-[#71645A]">Збережених подій поки немає або потрібна авторизація.</p> :
+        <div className="grid gap-2 sm:grid-cols-2">{events.map(item=><button key={item.id} type="button" onClick={()=>openEvent(item)} className={`rounded-xl border p-3 text-left text-sm ${savedEventId===item.id?'border-[#8B5937] bg-white':'border-[#E0D4C7] bg-[#FFFCF8]'}`}><strong className="block">{item.theme}</strong><span className="text-xs text-[#71645A]">{item.date} {item.time} · заявок: {item.registrations.length}</span></button>)}</div>}
+      {savedEventId && <button type="button" className="mt-3 rounded-lg border border-[#D9CABC] bg-white px-3 py-2 text-xs" onClick={()=>{setSavedEventId(null);setRegistrations([]);setMessage('Нова подія: заповніть поля й збережіть.');}}>＋ Нова подія</button>}
+    </div>
     <div className="grid gap-4 lg:grid-cols-2">
       <div className="space-y-2">
         <label htmlFor="event-announcement" className="text-sm font-semibold">Текст анонсу</label>
@@ -78,7 +109,7 @@ export const ConstellationEventPlanner: React.FC<{bookId?:string}> = ({bookId}) 
       </div>
     </div>
     <div className="flex flex-wrap items-center gap-3">
-      <button type="button" disabled={busy || !bookId} onClick={() => void saveEvent()} className="rounded-xl bg-[#2E1B12] px-4 py-2 text-sm font-bold text-white disabled:opacity-50">Зберегти подію</button>
+      <button type="button" disabled={busy || !bookId} onClick={() => void saveEvent()} className="rounded-xl bg-[#2E1B12] px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{savedEventId ? 'Зберегти зміни' : 'Створити подію'}</button>
       {!savedEventId && <span className="text-xs text-[#71645A]">Реєстрація відкриється після збереження події авторизованим власником книги.</span>}
     </div>
     <div className="border-t border-[#E0D4C7] pt-4">
