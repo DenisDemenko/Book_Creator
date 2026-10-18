@@ -44,18 +44,18 @@ export const MafiaGameMasterView: React.FC<{ projectTitle?: string; onNeutralEve
           <p className="mt-1 max-w-2xl text-sm text-[#71645A]">Ведучий бачить стан гри, гравців, події, тригери й голосування. Секрети відкриваються лише в дозволеному контексті.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-200"><Radio className="h-3.5 w-3.5" /> {onlineCount} онлайн</span>
+          <span className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-[#3C5F41]"><Radio className="h-3.5 w-3.5" /> {onlineCount} онлайн</span>
           <button type="button" className="inline-flex items-center gap-1.5 rounded-xl border border-[#E0D4C7] bg-[#FFFCF8] px-3 py-2 text-xs font-semibold text-[#594C42] hover:border-[#D9CABC] hover:text-white"><Eye className="h-3.5 w-3.5" /> Як гравець</button>
         </div>
       </header>
 
       <nav className="mb-4 flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Фази гри">
         {phases.map((item) => (
-          <button key={item} type="button" role="tab" aria-selected={phase === item} onClick={() => { setPhase(item); onNeutralEvent?.({action:'phase-change',phase:item}); }} className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-semibold ${phase === item ? 'border-violet-400/60 bg-violet-500/15 text-violet-100' : 'border-[#E0D4C7] bg-[#FFFCF8] text-[#796D62] hover:text-[#594C42]'}`}>{item}</button>
+          <button key={item} type="button" role="tab" aria-selected={phase === item} onClick={() => { setPhase(item); onNeutralEvent?.({action:'phase-change',phase:item}); }} className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-semibold ${phase === item ? 'border-violet-400/60 bg-violet-500/15 text-[#4E3021]' : 'border-[#E0D4C7] bg-[#FFFCF8] text-[#796D62] hover:text-[#594C42]'}`}>{item}</button>
         ))}
       </nav>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(300px,.65fr)]">
+      <div className="grid gap-4 xl:grid-cols-1 xl:grid-cols-[minmax(0,1.35fr)_minmax(300px,.65fr)]">
         <div className="space-y-4">
           <article className="rounded-2xl border border-[#E0D4C7] bg-[#FFFCF8] p-4 lg:p-5">
             <div className="mb-4 flex items-start justify-between gap-4">
@@ -63,16 +63,16 @@ export const MafiaGameMasterView: React.FC<{ projectTitle?: string; onNeutralEve
                 <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#796D62]">Поточна фаза</div>
                 <h2 className="mt-1 text-lg font-bold text-white">{phase}</h2>
               </div>
-              <div className="inline-flex items-center gap-1.5 rounded-xl border border-[#E0D4C7] bg-slate-950 px-3 py-2 font-mono text-sm text-[#594C42]"><Clock3 className="h-4 w-4 text-[#796D62]" /> 18:42</div>
+              <div className="inline-flex items-center gap-1.5 rounded-xl border border-[#E0D4C7] bg-[#F7F0E7] px-3 py-2 font-mono text-sm text-[#594C42]"><Clock3 className="h-4 w-4 text-[#796D62]" /> 18:42</div>
             </div>
 
             <div className={`rounded-xl border p-4 ${eventStarted ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-amber-500/30 bg-amber-500/10'}`} aria-live="polite">
-              <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.12em] text-amber-200"><AlertTriangle className="h-3.5 w-3.5" /> Активна подія</div>
+              <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[#825A20]"><AlertTriangle className="h-3.5 w-3.5" /> Активна подія</div>
               <h3 className="text-base font-bold text-white">Зникло світло у східному крилі</h3>
               <p className="mt-1 max-w-2xl text-xs leading-5 text-[#594C42]">Відкрити доказ E-04 для трьох ролей після двадцятої хвилини. Інші гравці бачать лише факт відключення.</p>
               <div className="mt-4 flex flex-wrap gap-2">
                 <button type="button" onClick={() => {setEventStarted(true);onNeutralEvent?.({action:'event-started'});}} disabled={eventStarted} className="inline-flex items-center gap-1.5 rounded-xl bg-[#2E1B12] px-3 py-2 text-xs font-bold text-[#FFF9F1] hover:bg-white disabled:cursor-default disabled:bg-emerald-100"><Play className="h-3.5 w-3.5" /> {eventStarted ? 'Подію запущено' : 'Запустити подію'}</button>
-                <button type="button" className="rounded-xl border border-[#D9CABC] bg-slate-950 px-3 py-2 text-xs font-semibold text-[#594C42] hover:text-white">Відкласти</button>
+                <button type="button" className="rounded-xl border border-[#D9CABC] bg-[#F7F0E7] px-3 py-2 text-xs font-semibold text-[#594C42] hover:text-white">Відкласти</button>
               </div>
             </div>
           </article>
@@ -97,8 +97,8 @@ export const MafiaGameMasterView: React.FC<{ projectTitle?: string; onNeutralEve
           <div className="mb-4 flex items-center justify-between"><div><div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#796D62]">Учасники</div><h2 className="mt-1 text-sm font-bold text-white">Гравці</h2></div><Users className="h-4 w-4 text-[#796D62]" /></div>
           <div className="space-y-2">
             {players.map((player) => (
-              <div key={player.id} className="rounded-xl border border-[#E0D4C7] bg-slate-950 p-3">
-                <div className="flex items-center justify-between gap-3"><div><div className="text-xs font-bold text-white">{player.name}</div><div className="mt-0.5 text-[10px] text-[#796D62]">{player.role}</div></div><span className={`h-2.5 w-2.5 rounded-full ${player.status === 'online' ? 'bg-emerald-400' : player.status === 'attention' ? 'bg-amber-400' : 'bg-slate-700'}`} role="img" aria-label={statusLabel[player.status]} title={statusLabel[player.status]} /></div>
+              <div key={player.id} className="rounded-xl border border-[#E0D4C7] bg-[#F7F0E7] p-3">
+                <div className="flex items-center justify-between gap-3"><div><div className="text-xs font-bold text-white">{player.name}</div><div className="mt-0.5 text-[10px] text-[#796D62]">{player.role}</div></div><span className={`h-2.5 w-2.5 rounded-full ${player.status === 'online' ? 'bg-emerald-400' : player.status === 'attention' ? 'bg-amber-400' : 'bg-[#DDCBBB]'}`} role="img" aria-label={statusLabel[player.status]} title={statusLabel[player.status]} /></div>
                 <div className="mt-2 flex items-center justify-between text-[10px] text-[#796D62]"><span>{player.secretCount} секрети</span><button type="button" className="font-semibold text-[#91643D] hover:text-violet-200" aria-label={`Відкрити дані гравця ${player.name}`}>Відкрити</button></div>
               </div>
             ))}
@@ -117,5 +117,5 @@ const StatusCard: React.FC<{ icon: React.ReactNode; label: string; title: string
 );
 
 const TimelineItem: React.FC<{ time: string; title: string; detail: string }> = ({ time, title, detail }) => (
-  <div className="grid grid-cols-[52px_1fr] gap-3 rounded-xl px-2 py-2 hover:bg-slate-950"><div className="font-mono text-[10px] text-[#796D62]">{time}</div><div><div className="text-xs text-[#594C42]">{title}</div><div className="mt-0.5 text-[10px] text-[#796D62]">{detail}</div></div></div>
+  <div className="grid grid-cols-[52px_1fr] gap-3 rounded-xl px-2 py-2 hover:bg-[#F7F0E7]"><div className="font-mono text-[10px] text-[#796D62]">{time}</div><div><div className="text-xs text-[#594C42]">{title}</div><div className="mt-0.5 text-[10px] text-[#796D62]">{detail}</div></div></div>
 );
