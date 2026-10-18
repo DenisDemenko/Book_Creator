@@ -37,6 +37,24 @@ export function registerConstellationEventRoutes(app:Express):void{
       res.status(201).json({event:record});
     }catch{res.status(500).json({error:'Не вдалося створити подію'});}
   });
+  app.patch('/api/constellation/events/:id',requireAuth,async(req,res)=>{
+    try {
+      const ownerId=await check(req,res,req.body?.bookId);if(!ownerId)return;
+      const keys=['theme','date','time','venue','address','price','announcement'] as const;
+      const theme=clean(req.body?.theme);
+      if(!theme){res.status(400).json({error:'Вкажіть тему події'});return;}
+      const updated=await exclusive(async()=>{
+        const events=await read();
+        const event=events.find(item=>item.id===req.params.id&&item.ownerId===ownerId&&item.bookId===req.body.bookId);
+        if(!event)return null;
+        for(const key of keys) event[key]=clean(req.body?.[key],key==='announcement'?12000:200);
+        await write(events);
+        return event;
+      });
+      if(!updated){res.status(404).json({error:'Подію не знайдено'});return;}
+      res.json({event:updated});
+    }catch{res.status(500).json({error:'Не вдалося оновити подію'});}
+  });
   app.post('/api/constellation/events/:id/registrations',requireAuth,async(req,res)=>{
     try{const ownerId=await check(req,res,req.body?.bookId);if(!ownerId)return;
       const name=clean(req.body?.name,120),contact=clean(req.body?.contact,200);
