@@ -23,6 +23,7 @@ type StoryWorkspace = 'screenplay' | 'mafia' | 'constellation' | 'leela' | 'hist
 
 interface ScenarioViewProps {
   book: Book;
+  ownerId?: string | null;
   onUpdateBook: (updatedBook: Book, logAction?: string, logDetails?: string) => void;
   onNavigateToSection: (chapterId: string, sectionId: string) => void;
   onNavigateToTab?: (tab: NavigationTab) => void;
@@ -53,6 +54,7 @@ const workspaces: Array<{
  */
 export const ScenarioView: React.FC<ScenarioViewProps> = ({
   book,
+  ownerId,
   onUpdateBook,
   onNavigateToSection,
   onNavigateToTab,
@@ -65,7 +67,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   const [journalError, setJournalError] = useState('');
   const [completedJournals, setCompletedJournals] = useState<Partial<Record<'leela'|'constellation', JournalSession>>>({});
   const getJournal = (kind: 'leela'|'constellation') => {
-    if (!journals.current[kind]) journals.current[kind] = new DurableNeutralJournal(book.id,kind);
+    if (!ownerId) throw new Error('Увійдіть, щоб записувати журнал сесії.');
+    if (!journals.current[kind]) journals.current[kind] = new DurableNeutralJournal(ownerId,book.id,kind);
     return journals.current[kind]!;
   };
   const recordNeutralEvent = (kind: 'leela'|'constellation', event: {kind:'snapshot'|'leela-move';label:string;description:string}) => {
@@ -84,13 +87,15 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   };
   useEffect(() => {
     // Replay only existing neutral queues; never fabricate an event or start a session on mount.
+    if (!ownerId) return;
+    journals.current = {};
     for (const kind of ['leela','constellation'] as const) {
       const journal = getJournal(kind);
       if (journal.pendingCount) void journal.flush().catch(error => {
         setJournalError(error instanceof Error ? error.message : 'Не вдалося відновити запис');
       });
     }
-  }, [book.id]);
+  }, [book.id, ownerId]);
   const [sessionPortraits, setSessionPortraits] = useState<SessionPortraitAsset[]>([]);
   const [selectedScene, setSelectedScene] = useState<ScreenplaySelectedSceneContext | null>(null);
 
