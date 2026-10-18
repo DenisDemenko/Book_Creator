@@ -42,7 +42,7 @@ export const ConstellationSessionView: React.FC<{ title?: string; onSnapshot?: (
   };
 
   return (
-    <section className="min-h-0 flex-1 overflow-y-auto bg-[#F4ECE1] p-4 text-[#2C1A12] lg:p-6" data-story-experience="constellation">
+    <section className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-[#F4ECE1] p-4 text-[#2C1A12] lg:p-6" data-story-experience="constellation">
       <header className="mb-4 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
           <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[#91643D]">Constellation Studio</div>
@@ -83,7 +83,7 @@ export const ConstellationSessionView: React.FC<{ title?: string; onSnapshot?: (
         </div>
       )}
 
-      <div className="grid gap-4 xl:grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
         <div>
           <div className="relative h-[62vh] min-h-[460px] max-h-[680px] overflow-hidden rounded-2xl border border-[#E0D4C7] bg-[#FFFCF8]" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(71,85,105,.38) 1px, transparent 0)', backgroundSize: '24px 24px' }}>
             <div className="absolute left-3 top-3 z-10 flex gap-1 rounded-xl border border-[#E0D4C7] bg-[#F7F0E7]/90 p-1 shadow-xl">
