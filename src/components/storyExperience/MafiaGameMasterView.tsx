@@ -36,7 +36,7 @@ export const MafiaGameMasterView: React.FC<{ projectTitle?: string; onNeutralEve
   const onlineCount = useMemo(() => players.filter((player) => player.status !== 'offline').length, []);
 
   return (
-    <section className="min-h-0 flex-1 overflow-y-auto bg-[#F4ECE1] p-4 text-[#2C1A12] lg:p-6" data-story-experience="mafia-gm">
+    <section className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-[#F4ECE1] p-4 text-[#2C1A12] lg:p-6" data-story-experience="mafia-gm">
       <header className="mb-5 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
           <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[#91643D]">Mafia Story Studio · Game Master</div>
@@ -55,7 +55,7 @@ export const MafiaGameMasterView: React.FC<{ projectTitle?: string; onNeutralEve
         ))}
       </nav>
 
-      <div className="grid gap-4 xl:grid-cols-1 xl:grid-cols-[minmax(0,1.35fr)_minmax(300px,.65fr)]">
+      <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(300px,.65fr)]">
         <div className="space-y-4">
           <article className="rounded-2xl border border-[#E0D4C7] bg-[#FFFCF8] p-4 lg:p-5">
             <div className="mb-4 flex items-start justify-between gap-4">
