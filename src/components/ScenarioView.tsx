@@ -63,27 +63,26 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   const journals = useRef<Partial<Record<'leela'|'constellation', Promise<JournalSession>>>>({});
   const [journalError, setJournalError] = useState('');
   const [completedJournals, setCompletedJournals] = useState<Partial<Record<'leela' | 'constellation', JournalSession>>>({});
-  const recordNeutralEvent = async (kind: 'leela'|'constellation', event: {kind:'snapshot'|'leela-move';label:string;description:string}) => {
-    try {
+  const pendingWrites = useRef<Partial<Record<'leela' | 'constellation', Promise<void>>>>({});
+  const recordNeutralEvent = (kind: 'leela'|'constellation', event: {kind:'snapshot'|'leela-move';label:string;description:string}) => {
+    const previous = pendingWrites.current[kind] ?? Promise.resolve();
+    const write = previous.then(async () => {
       if (!journals.current[kind]) journals.current[kind] = createSessionJournal(book.id,kind);
       const session = await journals.current[kind]!;
       await appendNeutralSessionEvent(session,{...event,eventId:'event-'+crypto.randomUUID()});
-      setJournalError('');
-    } catch (error) {
-      journals.current[kind] = undefined;
-      setJournalError(error instanceof Error ? error.message : 'Подію не записано');
-    }
+    });
+    pendingWrites.current[kind] = write;
+    void write.then(() => setJournalError(''), error => {
+      setJournalError(error instanceof Error ? error.message : 'Подію не записано; закриття журналу заблоковано');
+    });
   };
   const prepareJournal = async (kind: 'leela' | 'constellation') => {
-    const pending = journals.current[kind];
-    if (!pending) return;
-    try {
-      const journal = await pending;
-      setCompletedJournals(previous => ({ ...previous, [kind]: journal }));
-    } catch (error) {
-      setJournalError(error instanceof Error ? error.message : 'Журнал недоступний');
-      throw error;
-    }
+    const pending = pendingWrites.current[kind];
+    if (pending) await pending;
+    const journalPromise = journals.current[kind];
+    if (!journalPromise) return;
+    const journal = await journalPromise;
+    setCompletedJournals(previous => ({ ...previous, [kind]: journal }));
   };
   const [sessionPortraits, setSessionPortraits] = useState<SessionPortraitAsset[]>([]);
   const [selectedScene, setSelectedScene] = useState<ScreenplaySelectedSceneContext | null>(null);
