@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { completeSessionJournal, loadJournalReview, type JournalSession } from './sessionJournalClient';
 import { eligibleEventPreviews, type SessionEventCandidate } from './eligibleSessionEvents';
 import type { SessionExportKind } from './SessionExportToBookView';
 
@@ -8,12 +9,28 @@ export interface CompletedSessionArchiveReviewProps {
   kind: SessionExportKind;
   title: string;
   sourceEvents?: SessionEventCandidate[];
+  journal?: JournalSession;
   onClose: () => void;
   onSaved?: (id: string) => void;
 }
 /** Manual review is intentional: demo summaries, private notes and participant identities must never be auto-exported. */
-export const CompletedSessionArchiveReview: React.FC<CompletedSessionArchiveReviewProps> = ({ bookId, kind, title, sourceEvents = [], onClose, onSaved }) => {
+export const CompletedSessionArchiveReview: React.FC<CompletedSessionArchiveReviewProps> = ({ bookId, kind, title, sourceEvents = [], journal, onClose, onSaved }) => {
   const [events, setEvents] = useState<ApprovedEventDraft[]>(() => { const eligible = eligibleEventPreviews(sourceEvents); return eligible.length ? eligible.map((e, i) => ({id:i+1,label:e.label,description:e.description})) : [{id:1,label:'',description:''}]; });
+  const [journalEvents, setJournalEvents] = useState<Array<{id:string;label:string;description:string;selected:boolean}>>([]);
+  const [journalError, setJournalError] = useState('');
+  const [journalReady, setJournalReady] = useState(false);
+  useEffect(() => {
+    if (!journal) return;
+    let disposed = false;
+    (async () => {
+      try {
+        await completeSessionJournal(journal);
+        const available = await loadJournalReview(journal);
+        if (!disposed) {setJournalEvents(available.map(e=>({id:e.id,label:e.label,description:e.description,selected:false})));setJournalReady(true);}
+      } catch(error){if(!disposed)setJournalError(error instanceof Error?error.message:'Не вдалося прочитати журнал');}
+    })();
+    return () => {disposed=true;};
+  },[journal]);
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -40,6 +57,17 @@ export const CompletedSessionArchiveReview: React.FC<CompletedSessionArchiveRevi
   return <section className="min-h-0 flex-1 overflow-y-auto bg-slate-950 p-4 text-slate-100 lg:p-6">
     <div className="mx-auto max-w-3xl space-y-4">
       <header><h1 className="text-xl font-semibold">Перевірка матеріалу перед архівацією</h1><p className="mt-2 text-sm text-slate-400">{sourceEvents.length ? `Із ${sourceEvents.length} подій доступні для перегляду ${eligibleEventPreviews(sourceEvents).length}. Приховані й непогоджені події не передаються до форми.` : 'Джерело подій не підключено: введіть лише дозволені нейтральні події вручну.'} Справжні імена, приватні висловлювання та нотатки фасилітатора не копіюються сюди автоматично.</p></header>
+      {journal && <article className="rounded-xl border border-slate-700 bg-slate-900 p-4">
+        <h2 className="text-sm font-semibold">Події завершеного журналу</h2>
+        <p className="mt-2 text-xs text-slate-400">Приватні записи видно власнику для перевірки, але вони не переносяться в книгу без явного вибору, редагування та повторного підтвердження.</p>
+        {journalError && <p role="alert" className="mt-2 text-xs text-rose-300">{journalError}</p>}
+        {!journalReady && !journalError && <p role="status" className="mt-2 text-xs">Завершення та читання журналу…</p>}
+        {journalEvents.map(entry => <label key={entry.id} className="mt-2 flex items-start gap-2 rounded-lg border border-slate-700 p-2 text-xs">
+          <input type="checkbox" checked={entry.selected} onChange={e => {setConfirmed(false);setJournalEvents(prev=>prev.map(x=>x.id===entry.id?{...x,selected:e.target.checked}:x));}} />
+          <span><strong>{entry.label}</strong><span className="mt-1 block text-slate-400">{entry.description}</span></span>
+        </label>)}
+        <button type="button" disabled={!journalEvents.some(e=>e.selected)} onClick={() => {setConfirmed(false);setEvents(previous => [...previous.filter(e=>e.label.trim()||e.description.trim()),...journalEvents.filter(e=>e.selected).map((e,i)=>({id:Date.now()+i,label:e.label,description:e.description}))]);setJournalEvents(previous=>previous.map(e=>({...e,selected:false})));}} className="mt-3 rounded-lg border border-slate-600 px-3 py-2 text-xs disabled:opacity-40">Додати обрані події до чернетки нижче</button>
+      </article>}
       {saved ? <div role="status" className="rounded-xl border border-emerald-700 p-4 text-sm">Сесію збережено в архіві. ID: {saved}<button type="button" onClick={onClose} className="mt-3 block rounded-lg bg-slate-100 px-3 py-2 text-slate-950">Повернутися</button></div> : <>
         {events.map((event, index) => <div key={event.id} className="space-y-2 rounded-xl border border-slate-700 bg-slate-900 p-4">
           <label className="block text-xs">Дозволена подія {index + 1}<input value={event.label} maxLength={200} onChange={e => { setConfirmed(false); setEvents(old => old.map(x => x.id === event.id ? {...x,label:e.target.value}:x)); }} placeholder="Нейтральна назва" className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 p-2 text-sm"/></label>
