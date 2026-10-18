@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { createSessionJournal, appendNeutralSessionEvent, type JournalSession } from './storyExperience/sessionJournalClient';
+import type { JournalSession } from './storyExperience/sessionJournalClient';
+import { DurableNeutralJournal } from './storyExperience/durableNeutralJournal';
 import { BrainCircuit, Clapperboard, Drama, Gamepad2, Sparkles } from 'lucide-react';
 import type { Book, NavigationTab } from '../types';
 import { generateSessionCharacterPortrait, attachSessionPortraits, type SessionPortraitAsset } from './storyExperience/sessionPortraitService';
@@ -60,29 +61,26 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   reviewedSessionMaterials,
 }) => {
   const [workspace, setWorkspace] = useState<StoryWorkspace>('screenplay');
-  const journals = useRef<Partial<Record<'leela'|'constellation', Promise<JournalSession>>>>({});
+  const journals = useRef<Partial<Record<'leela'|'constellation', DurableNeutralJournal>>>({});
   const [journalError, setJournalError] = useState('');
-  const [completedJournals, setCompletedJournals] = useState<Partial<Record<'leela' | 'constellation', JournalSession>>>({});
-  const pendingWrites = useRef<Partial<Record<'leela' | 'constellation', Promise<void>>>>({});
+  const [completedJournals, setCompletedJournals] = useState<Partial<Record<'leela'|'constellation', JournalSession>>>({});
+  const getJournal = (kind: 'leela'|'constellation') => {
+    if (!journals.current[kind]) journals.current[kind] = new DurableNeutralJournal(book.id,kind);
+    return journals.current[kind]!;
+  };
   const recordNeutralEvent = (kind: 'leela'|'constellation', event: {kind:'snapshot'|'leela-move';label:string;description:string}) => {
-    const previous = pendingWrites.current[kind] ?? Promise.resolve();
-    const write = previous.then(async () => {
-      if (!journals.current[kind]) journals.current[kind] = createSessionJournal(book.id,kind);
-      const session = await journals.current[kind]!;
-      await appendNeutralSessionEvent(session,{...event,eventId:'event-'+crypto.randomUUID()});
-    });
-    pendingWrites.current[kind] = write;
-    void write.then(() => setJournalError(''), error => {
-      setJournalError(error instanceof Error ? error.message : 'Подію не записано; закриття журналу заблоковано');
+    void getJournal(kind).append(event).then(() => setJournalError(''),error => {
+      setJournalError(error instanceof Error ? error.message : 'Подію поставлено у чергу, але не записано');
     });
   };
-  const prepareJournal = async (kind: 'leela' | 'constellation') => {
-    const pending = pendingWrites.current[kind];
-    if (pending) await pending;
-    const journalPromise = journals.current[kind];
-    if (!journalPromise) return;
-    const journal = await journalPromise;
-    setCompletedJournals(previous => ({ ...previous, [kind]: journal }));
+  const prepareJournal = async (kind: 'leela'|'constellation') => {
+    try {
+      const journal = await getJournal(kind).prepare();
+      if (journal) setCompletedJournals(previous=>({...previous,[kind]:journal}));
+    } catch(error) {
+      setJournalError(error instanceof Error ? error.message : 'Є незавершені записи журналу');
+      throw error;
+    }
   };
   const [sessionPortraits, setSessionPortraits] = useState<SessionPortraitAsset[]>([]);
   const [selectedScene, setSelectedScene] = useState<ScreenplaySelectedSceneContext | null>(null);
