@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import type { SessionBookExportRequest } from './SessionExportToBookView';
+import type { ReviewedSessionBookMaterial } from './sessionBookCommit';
 import type { Book } from '../../types';
 import { ScreenplayWorkspaceView } from './ScreenplayWorkspaceView';
 import { MafiaGameMasterView } from './MafiaGameMasterView';
@@ -20,6 +22,9 @@ import {
 import type { AIWorkspaceAssignments } from './AIWorkspaceToolbar';
 
 interface SharedIntegratedProps {
+  existingCharacters?: { id: string; name: string }[];
+  reviewedMaterial?: ReviewedSessionBookMaterial;
+  onCommitBookExport?: (request: SessionBookExportRequest, material: ReviewedSessionBookMaterial) => void;
   preferredModelId?: string;
   aiAssignments?: AIWorkspaceAssignments;
   onAiAssignmentsChange?: (next: AIWorkspaceAssignments) => void;
@@ -183,7 +188,7 @@ export const IntegratedMafiaView: React.FC<IntegratedMafiaViewProps> = (props) =
       <SessionModeratorBar title={title} phase={status === 'lobby' ? 'Lobby' : status === 'completed' ? 'Завершено' : 'Investigation'} status={status} connection={connection} participants={8} onStatusChange={setStatus} />
       <PreviewToggle active={preview} label="Переглянути як гравець" connection={connection} onConnectionChange={setConnection} onClick={() => setPreview((value) => !value)} />
       {exportOpen ? (
-        <SessionExportToBookView kind="mafia" sessionTitle={title} participants={mafiaLobbyParticipants.filter((p) => p.role !== 'Game Master' && p.role !== 'Facilitator' && p.role !== 'Host').map((p, i) => ({ id: p.id, label: `Учасник ${i + 1}`, sessionRole: p.role }))} onClose={() => setExportOpen(false)} />
+        <SessionExportToBookView kind="mafia" sessionTitle={title} existingCharacters={props.existingCharacters} onSubmit={props.reviewedMaterial && props.onCommitBookExport ? (request) => props.onCommitBookExport!(request, props.reviewedMaterial!) : undefined} participants={mafiaLobbyParticipants.filter((p) => p.role !== 'Game Master' && p.role !== 'Facilitator' && p.role !== 'Host').map((p, i) => ({ id: p.id, label: `Учасник ${i + 1}`, sessionRole: p.role }))} onClose={() => setExportOpen(false)} />
       ) : preview ? (
         <SessionPreviewFlow kind="mafia" title={title} phase={status === 'lobby' ? 'Lobby' : status === 'completed' ? 'Завершено' : 'Investigation'} roleLabel="Архівіст" visibility="ROLE_BASED" primaryTitle="Зникло світло у східному крилі" primaryText="Світло згасло. Ви можете перевірити архівну кімнату або залишитися з групою." secondaryText="Доказ E-04 ще не відкритий для вашої ролі." actionLabel="Перевірити доступну дію" status={status} connection={connection} onStatusChange={setStatus} onConnectionChange={setConnection} />
       ) : status === 'lobby' ? (
