@@ -27,6 +27,7 @@ export interface StoryHandoffRequest {
   target: StoryHandoffTarget;
   tags: StoryHandoffTag[];
   expectedRevision: number;
+  expectedUpdatedAt: string;
 }
 export interface StoryHandoffResult {
   book: Book;
@@ -55,7 +56,7 @@ export function buildStoryHandoffBook(book: Book, request: StoryHandoffRequest):
   if (request.source.kind !== 'screenplay') {
     throw new Error('Для ігрових сесій потрібні серверне підтвердження дозволів та згод усіх учасників.');
   }
-  if (request.expectedRevision !== book.revisionNumber) {
+  if (request.expectedUpdatedAt !== book.updatedAt || request.expectedRevision !== book.revisionNumber) {
     throw new Error('Книгу змінено. Перевірте актуальний розділ та повторіть перенесення.');
   }
   const text = cleanText(request.text);
