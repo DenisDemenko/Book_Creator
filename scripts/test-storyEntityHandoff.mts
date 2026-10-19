@@ -50,4 +50,10 @@ const existing = buildStoryHandoffBook(original, {
 });
 assert.ok(existing.book.chapters[0].sections[0].content.includes('Унікальне доповнення'));
 assert.ok(original.chapters[0].sections[0].content.includes('Скляні куполи'));
+const escaped = buildStoryHandoffBook(original, {
+  ...make(), text: '<img src=x onerror=alert(1)>',
+});
+assert.ok(!escaped.book.chapters[0].sections.at(-1)?.content.includes('<img'));
+assert.ok(escaped.book.chapters[0].sections.at(-1)?.content.includes('&lt;img'));
+
 console.log('story entity handoff OK: review → new section/chapter, tags, provenance, duplicates, staleness, privacy gates');
