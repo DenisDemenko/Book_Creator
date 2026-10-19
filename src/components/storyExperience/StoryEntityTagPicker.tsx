@@ -51,7 +51,7 @@ export const StoryEntityTagPicker: React.FC<StoryEntityTagPickerProps> = ({
   };
   return <section aria-label="Семантичні сутності книги" className="space-y-3">
     <div className="flex items-center justify-between gap-3">
-      <div><h3 className="font-semibold">Сутності та зв’язки</h3><p className="text-xs text-[#71645A]">Підтверджуйте тільки теги, що справді описують цей текст.</p></div>
+      <div><h3 className="font-semibold">Сутності та теги</h3><p className="text-xs text-[#71645A]">Підтверджуйте тільки теги, що справді описують цей текст.</p></div>
       <span className="shrink-0 text-xs text-[#71645A]">{value.length}/{MAX_ENTITIES_PER_PARAGRAPH}</span>
     </div>
     {suggestions.length > 0 && <div className="rounded-xl border border-[#DFCDBA] bg-[#FFF8EF] p-3">
