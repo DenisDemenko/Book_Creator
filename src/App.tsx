@@ -306,6 +306,8 @@ export default function App() {
   const autosaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   // Прапорець гідратації: перший запис книги в стан не має вмикати автозбереження.
   const hydratedRef = useRef<boolean>(false);
+  // A double click or slow IndexedDB write must never import the same fragment twice.
+  const storyHandoffInFlightRef = useRef(false);
 
   // Append entry to changelog
   const addLogEntry = useCallback((
@@ -1771,32 +1773,40 @@ export default function App() {
     if (!auth.user || auth.isGuest || book.accessRestricted || !hasPermission(currentRole, 'canEditContent')) {
       throw new Error('Для додавання тексту потрібен авторизований доступ із правом редагування книги.');
     }
-    const result = buildStoryHandoffBook(book, request);
-    const updatedBook = stampBookRevision(result.book);
-    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-    setSaveState('saving');
-    try {
-      await saveBook(updatedBook);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Не вдалося зберегти фрагмент у сховище книги.';
-      setSaveState('error');
-      setStorageError(message);
-      throw new Error(message);
+    if (storyHandoffInFlightRef.current) {
+      throw new Error('Збереження вже виконується. Дочекайтеся завершення.');
     }
-    setBook(updatedBook);
-    setHasUnsavedChanges(false);
-    setLastSavedAt(new Date().toISOString());
-    setStorageError(null);
-    setSaveState('saved');
-    const logEntry = addLogEntry(
-      'Story & Experience → Книга & Текст',
-      'Підтверджено новий авторський текст і ' + request.tags.length + ' тегів сутностей у книзі «' + updatedBook.title + '».',
-      'text'
-    );
-    broadcastBookUpdate(updatedBook, logEntry);
-    setSaveToast('Фрагмент і теги збережено. Відкривається цільовий розділ.');
-    setTimeout(() => setSaveToast(null), 3500);
-    handleNavigateToSection(result.chapterId, result.sectionId);
+    storyHandoffInFlightRef.current = true;
+    try {
+      const result = buildStoryHandoffBook(book, request);
+      const updatedBook = stampBookRevision(result.book);
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+      setSaveState('saving');
+      try {
+        await saveBook(updatedBook);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Не вдалося зберегти фрагмент у сховище книги.';
+        setSaveState('error');
+        setStorageError(message);
+        throw new Error(message);
+      }
+      setBook(updatedBook);
+      setHasUnsavedChanges(false);
+      setLastSavedAt(new Date().toISOString());
+      setStorageError(null);
+      setSaveState('saved');
+      const logEntry = addLogEntry(
+        'Story & Experience → Книга & Текст',
+        'Підтверджено новий авторський текст і ' + request.tags.length + ' тегів сутностей у книзі «' + updatedBook.title + '».',
+        'text'
+      );
+      broadcastBookUpdate(updatedBook, logEntry);
+      setSaveToast('Фрагмент і теги збережено локально. Синхронізація з сервером може тривати.');
+      setTimeout(() => setSaveToast(null), 4500);
+      handleNavigateToSection(result.chapterId, result.sectionId);
+    } finally {
+      storyHandoffInFlightRef.current = false;
+    }
   };
 
   /**
