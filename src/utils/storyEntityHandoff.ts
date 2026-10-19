@@ -41,16 +41,16 @@ const newId = (): string => typeof crypto !== 'undefined' && 'randomUUID' in cry
 
 const cleanText = (text: string): string => stripEntityTags(text).trim();
 const normalized = (text: string): string => text.replace(/\s+/g, ' ').trim().toLocaleLowerCase('uk-UA');
-const hasHtml = (text: string): boolean => /<\/?(?:p|div|h[1-6]|ul|ol|li|strong|em|span|br)\b/i.test(text);
-const htmlEscape = (text: string): string => text.replace(/&/g, '&amp;').replace(/</g, '&lt;')
-  .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+// The canonical manuscript is a marker string (manuscriptDoc.ts), NOT HTML.
+// HTML would be displayed as literal markup by the Tiptap importer and could
+// be interpreted as active markup by the publication/preview renderers.
+const containsHtmlMarkup = (text: string): boolean => /<\/?[a-z][^>]*>|<![^>]*>/i.test(text);
 
 const formattedText = (text: string, tags: StoryHandoffTag[]): string => {
   const prefix = tags.map(tag => buildEntityTag(tag.slug, tag.value)).join(' ');
-  // Escape author-entered markup even for previously plain-text sections:
-  // Screenplay's preview renders Section.content as HTML.
-  const paragraphs = text.split(/\n\s*\n/).map(p => '<p>' + htmlEscape(p.trim()).replace(/\n/g, '<br>') + '</p>');
-  return (prefix ? '<p>' + htmlEscape(prefix) + '</p>' : '') + paragraphs.join('');
+  // Keep tags IN the first paragraph so the semantic index can bind them
+  // to the narrative paragraph rather than to a tag-only empty paragraph.
+  return prefix ? prefix + ' ' + text : text;
 };
 
 export function buildStoryHandoffBook(book: Book, request: StoryHandoffRequest): StoryHandoffResult {
@@ -62,6 +62,9 @@ export function buildStoryHandoffBook(book: Book, request: StoryHandoffRequest):
   }
   const text = cleanText(request.text);
   if (!text) throw new Error('Додайте текст, який потрібно перенести.');
+  if (containsHtmlMarkup(text)) {
+    throw new Error('HTML-розмітку не можна вставити в рукопис. Вставте звичайний текст без HTML-тегів.');
+  }
   if (text.length > 100000) throw new Error('Перенесіть фрагмент не довший за 100 000 символів.');
   if (!request.source.sourceId.trim()) throw new Error('Немає підтвердженого джерела фрагмента.');
   if (request.tags.length > MAX_ENTITIES_PER_PARAGRAPH) {
@@ -79,6 +82,15 @@ export function buildStoryHandoffBook(book: Book, request: StoryHandoffRequest):
     seen.add(key);
     tags.push({ slug: entity.slug, value });
   }
+  // Idempotency is BOOK-wide, not just section-wide. Creating a new chapter
+  // must not bypass duplicate detection for the same source fragment.
+  const importedAlready = book.chapters.some(chapter => chapter.sections.some(section =>
+    (section.storyHandoffs || []).some(entry => entry.kind === request.source.kind
+      && entry.sourceId === request.source.sourceId && normalized(entry.text) === normalized(text))));
+  if (importedAlready) {
+    throw new Error('Цей матеріал із цього джерела вже перенесено до книги.');
+  }
+
   const target = request.target;
   const now = new Date().toISOString();
   let chapter: Chapter | undefined;
@@ -97,11 +109,6 @@ export function buildStoryHandoffBook(book: Book, request: StoryHandoffRequest):
   if (section && normalized(stripEntityTags(destinationContent)).includes(normalized(text))) {
     throw new Error('Цей фрагмент уже є у вибраному розділі. Оберіть інше місце або змініть текст.');
   }
-  if (section?.storyHandoffs?.some(item => item.kind === request.source.kind
-    && item.sourceId === request.source.sourceId && item.text === text)) {
-    throw new Error('Такий матеріал із цього джерела вже перенесено в розділ.');
-  }
-  const richText = hasHtml(destinationContent);
   const fragment = formattedText(text, tags);
   const chapterId = chapter?.id || newId();
   const sectionId = section?.id || newId();
@@ -111,7 +118,7 @@ export function buildStoryHandoffBook(book: Book, request: StoryHandoffRequest):
     tags: tags.map(tag => ({ ...tag })),
   };
   const content = destinationContent
-    ? destinationContent + (richText ? '' : '\n\n') + fragment
+    ? destinationContent + '\n\n' + fragment
     : fragment;
   const nextSection: Section = section
     ? { ...section, content, wordCount: cleanText(content).split(/\s+/).filter(Boolean).length,
