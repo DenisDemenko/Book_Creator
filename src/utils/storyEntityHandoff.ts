@@ -45,9 +45,10 @@ const hasHtml = (text: string): boolean => /<\/?(?:p|div|h[1-6]|ul|ol|li|strong|
 const htmlEscape = (text: string): string => text.replace(/&/g, '&amp;').replace(/</g, '&lt;')
   .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
-const formattedText = (text: string, tags: StoryHandoffTag[], richText: boolean): string => {
+const formattedText = (text: string, tags: StoryHandoffTag[]): string => {
   const prefix = tags.map(tag => buildEntityTag(tag.slug, tag.value)).join(' ');
-  if (!richText) return (prefix ? prefix + '\n\n' : '') + text;
+  // Escape author-entered markup even for previously plain-text sections:
+  // Screenplay's preview renders Section.content as HTML.
   const paragraphs = text.split(/\n\s*\n/).map(p => '<p>' + htmlEscape(p.trim()).replace(/\n/g, '<br>') + '</p>');
   return (prefix ? '<p>' + htmlEscape(prefix) + '</p>' : '') + paragraphs.join('');
 };
@@ -101,7 +102,7 @@ export function buildStoryHandoffBook(book: Book, request: StoryHandoffRequest):
     throw new Error('Такий матеріал із цього джерела вже перенесено в розділ.');
   }
   const richText = hasHtml(destinationContent);
-  const fragment = formattedText(text, tags, richText);
+  const fragment = formattedText(text, tags);
   const chapterId = chapter?.id || newId();
   const sectionId = section?.id || newId();
   const provenance = {
