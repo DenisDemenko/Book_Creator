@@ -244,6 +244,15 @@ export interface Section {
   footnotes?: Footnote[];
   scene?: Scene;
   lastModified: string;
+  /** Provenance of confirmed Story & Experience text imports. */
+  storyHandoffs?: Array<{
+    kind: 'screenplay' | 'mafia' | 'constellation' | 'leela';
+    sourceId: string;
+    sourceTitle: string;
+    text: string;
+    addedAt: string;
+    tags: Array<{ slug: string; value: string }>;
+  }>;
 }
 
 export interface Chapter {
