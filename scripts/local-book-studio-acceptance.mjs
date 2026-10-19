@@ -145,17 +145,36 @@ try {
   stage('dashboard-capture');
   await screenshot('00-dashboard-initial');
 
-  const onBook = page.url().includes(`/projects/${bookId}/`);
+  const loginFormVisible = async () => {
+    const passwordInputs = await page.locator('input[type="password"]').count();
+    const loginButtons = await page.getByRole('button', { name: /Увійти|Продовжити з Google|Sign in|Log in/i }).count();
+    return passwordInputs > 0 || loginButtons > 0;
+  };
+  const onBook = page.url().includes(`/projects/${bookId}/`) && !(await loginFormVisible());
+  stage('auth-check', { url: page.url(), loginFormVisible: await loginFormVisible(), onBook });
   if (!onBook) {
     const rl = readline.createInterface({ input, output });
     console.log(`\nБраузер відкрито на: ${page.url()}`);
-    console.log('Якщо потрібен вхід — увійдіть у відкритому вікні, потім поверніться сюди.');
-    await rl.question('Після входу натисніть Enter... ');
+    console.log('Зараз відкрита сторінка авторизації. Авторизуйтеся в тестовому браузері вручну.');
+    console.log('Не вводьте пароль у PowerShell і не надсилайте його разом зі звітом.');
+    await rl.question('Коли побачите сторінку самої книги (а не форму входу), натисніть Enter... ');
     rl.close();
-    await navigate(targetUrl);
-    await page.waitForTimeout(2500);
+    if (await loginFormVisible()) {
+      stage('auth-still-required');
+      addCheck('authenticated-book-dashboard', false, { reason: 'Сторінка входу все ще відкрита.' });
+      throw new Error('AUTH_REQUIRED: тест зупинено до перевірок Studio; повторіть після успішного входу.');
+    }
+    if (!page.url().includes(`/projects/${bookId}/`)) {
+      await navigate(targetUrl);
+      await page.waitForTimeout(2500);
+    }
+    if (await loginFormVisible()) {
+      addCheck('authenticated-book-dashboard', false, { reason: 'Перехід до книги повернув на авторизацію.' });
+      throw new Error('AUTH_REQUIRED: перехід до книги повернув на форму входу.');
+    }
   }
   addCheck('project-route', page.url().includes(`/projects/${bookId}/`), { finalUrl: page.url() });
+  addCheck('authenticated-book-dashboard', !(await loginFormVisible()), { url: page.url() });
 
   // PDF layout + authoritative export preview.
   stage('pdf-layout-start');
