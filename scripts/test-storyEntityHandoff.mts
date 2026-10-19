@@ -39,7 +39,7 @@ assert.throws(() => buildStoryHandoffBook(committed.book, {
   ...make(),
   expectedUpdatedAt: committed.book.updatedAt,
   target: { placement: 'new-chapter', title: 'Не створювати дубль' },
-}), /уже перенесено/,
+}), /вже перенесено|уже перенесено/,
   'Moving duplicate text to a new chapter must not bypass book-wide idempotency.');
 
 assert.throws(() => buildStoryHandoffBook(original, { ...make(), expectedUpdatedAt: 'outdated' }), /Книгу змінено/);
