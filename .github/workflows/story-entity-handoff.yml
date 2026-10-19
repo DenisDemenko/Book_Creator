@@ -38,5 +38,9 @@ jobs:
       - run: npm ci
       - name: TypeScript and lint
         run: npm run lint
+      - name: Existing entity tag corpus
+        run: npm run test:tag-corpus
       - name: Semantic handoff regression
         run: npx tsx scripts/test-storyEntityHandoff.mts
+      - name: Production build
+        run: npm run build
