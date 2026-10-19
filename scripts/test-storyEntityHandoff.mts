@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { initialBookData } from '../src/data/initialBook';
 import { buildStoryHandoffBook, type StoryHandoffRequest } from '../src/utils/storyEntityHandoff';
 import { parseEntityTags, stripEntityTags, MAX_ENTITIES_PER_PARAGRAPH } from '../src/utils/coreEntities';
+import { markerStringToTiptapDoc, tiptapDocToMarkerString } from '../src/utils/manuscriptDoc';
 
 const original = structuredClone(initialBookData);
 const sample = 'Нова сцена: герой вирішує вирушити до лісу.';
@@ -28,6 +29,14 @@ assert.ok(!section.content.includes('<p>'), 'The manuscript must not contain raw
 assert.ok(stripEntityTags(section.content).includes(sample));
 assert.ok(!stripEntityTags(section.content).includes('[/character:'),
   'The printed/exported text must hide entity markers.');
+// The actual EditorView loader uses this Tiptap document converter.
+const editorDocument = markerStringToTiptapDoc(section.content);
+assert.equal(editorDocument.content?.length, 1, 'Tags should decorate the same literary paragraph.');
+const editorRoundTrip = tiptapDocToMarkerString(editorDocument);
+assert.deepEqual(parseEntityTags(editorRoundTrip).map(tag => tag.slug), ['character', 'character-arc', 'plot'],
+  'Opening and saving Tiptap must preserve canonical entity tags.');
+assert.ok(stripEntityTags(editorRoundTrip).includes(sample),
+  'The literary content must remain readable after an editor round-trip.');
 assert.equal(section.storyHandoffs?.[0].sourceId, 'scene-1');
 assert.equal(original.chapters[0].sections.at(-1)?.storyHandoffs, undefined);
 assert.throws(() => buildStoryHandoffBook(committed.book, {
