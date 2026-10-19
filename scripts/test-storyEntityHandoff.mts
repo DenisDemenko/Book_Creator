@@ -22,7 +22,12 @@ assert.equal(original.chapters[0].sections.length + 1, committed.book.chapters[0
 assert.equal(committed.book.chapters[0].sections.at(-1)?.id, committed.sectionId);
 const section = committed.book.chapters[0].sections.at(-1)!;
 assert.deepEqual(parseEntityTags(section.content).map(tag => tag.slug), ['character', 'character-arc', 'plot']);
+assert.match(section.content, /^\[\/character:Олена\] \[\/character-arc:/,
+  'Tags must be in the same paragraph as literary text for semantic mentions.');
+assert.ok(!section.content.includes('<p>'), 'The manuscript must not contain raw HTML blocks.');
 assert.ok(stripEntityTags(section.content).includes(sample));
+assert.ok(!stripEntityTags(section.content).includes('[/character:'),
+  'The printed/exported text must hide entity markers.');
 assert.equal(section.storyHandoffs?.[0].sourceId, 'scene-1');
 assert.equal(original.chapters[0].sections.at(-1)?.storyHandoffs, undefined);
 assert.throws(() => buildStoryHandoffBook(committed.book, {
@@ -30,6 +35,12 @@ assert.throws(() => buildStoryHandoffBook(committed.book, {
   expectedUpdatedAt: committed.book.updatedAt,
   target: { placement: 'existing', chapterId: committed.chapterId, sectionId: committed.sectionId },
 }), /уже перенесено|уже є/);
+assert.throws(() => buildStoryHandoffBook(committed.book, {
+  ...make(),
+  expectedUpdatedAt: committed.book.updatedAt,
+  target: { placement: 'new-chapter', title: 'Не створювати дубль' },
+}), /уже перенесено/,
+  'Moving duplicate text to a new chapter must not bypass book-wide idempotency.');
 
 assert.throws(() => buildStoryHandoffBook(original, { ...make(), expectedUpdatedAt: 'outdated' }), /Книгу змінено/);
 assert.throws(() => buildStoryHandoffBook(original, { ...make(), tags: [{ slug: 'not-an-entity', value: 'X' }] }), /Невідомий/);
@@ -50,10 +61,17 @@ const existing = buildStoryHandoffBook(original, {
 });
 assert.ok(existing.book.chapters[0].sections[0].content.includes('Унікальне доповнення'));
 assert.ok(original.chapters[0].sections[0].content.includes('Скляні куполи'));
-const escaped = buildStoryHandoffBook(original, {
+assert.throws(() => buildStoryHandoffBook(original, {
   ...make(), text: '<img src=x onerror=alert(1)>',
+}), /HTML-розмітку/,
+  'Raw HTML is not valid marker-string manuscript input and must be rejected.');
+assert.throws(() => buildStoryHandoffBook(original, {
+  ...make(), text: '<script>alert(1)</script>',
+}), /HTML-розмітку/);
+const literalMath = buildStoryHandoffBook(original, {
+  ...make(), text: 'Рівень був < 3, та героїня продовжила шлях.',
 });
-assert.ok(!escaped.book.chapters[0].sections.at(-1)?.content.includes('<img'));
-assert.ok(escaped.book.chapters[0].sections.at(-1)?.content.includes('&lt;img'));
+assert.ok(literalMath.book.chapters[0].sections.at(-1)?.content.includes('< 3'),
+  'Ordinary mathematical comparison is allowed.');
 
-console.log('story entity handoff OK: review → new section/chapter, tags, provenance, duplicates, staleness, privacy gates');
+console.log('story entity handoff OK: marker-based manuscript, tag parsing/print, provenance, book-wide duplicate prevention, revision/privacy guards');
