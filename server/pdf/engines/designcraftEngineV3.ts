@@ -23,6 +23,11 @@ import {
   type DesigncraftManuscript,
 } from '../designcraft/rtf';
 import { serializeDesigncraftParagraphStyles } from '../designcraft/styleCommands';
+import {
+  findUnsupportedScriptSteps,
+  readDesigncraftCapabilities,
+  type DesigncraftCapabilities,
+} from '../designcraft/capabilities';
 import { extensionForMime, loadImageBytes } from '../../media/imageBytes';
 import {
   PdfEngineError,
@@ -106,7 +111,40 @@ function parseReport(stdout: string): any {
   }
 }
 
+/**
+ * Звірити згенерований скрипт із ВСТАНОВЛЕНИМ бінарником перед запуском.
+ *
+ * Раніше цю роль грав awk у `scripts/designcraft-cli-compat.sh`: він
+ * переписував два відомі шаблони прямо в тексті скрипта. Так розбіжність
+ * версій ставала невидимою, а регресія виробника скрипта — тихо виправленою.
+ * Тепер розбіжність — це дані (`designcraft-cli commands`), а невідповідність
+ * зупиняє рендер із назвою кроку й команди. Докладніше — у шапці
+ * `../designcraft/capabilities.ts`.
+ */
+async function assertScriptSupported(scriptPath: string): Promise<void> {
+  const text = await fs.readFile(scriptPath, 'utf8');
+  let caps: DesigncraftCapabilities;
+  try {
+    caps = await readDesigncraftCapabilities(DESIGNCRAFT_PROD_PATH, (args) => runCli(args));
+  } catch (err) {
+    throw new PdfEngineError(
+      'designcraft',
+      'unavailable',
+      `Не вдалося прочитати перелік команд DesignCraft (${DESIGNCRAFT_PROD_PATH}): ${(err as Error).message}`
+    );
+  }
+  const problems = findUnsupportedScriptSteps(text, caps);
+  if (problems.length) {
+    throw new PdfEngineError(
+      'designcraft',
+      'bad_input',
+      ['DesignCraft не виконає згенерований скрипт.', ...problems].join(' ')
+    );
+  }
+}
+
 async function runScript(script: string, args: string[], cwd: string, timeoutUk: string): Promise<any> {
+  await assertScriptSupported(script);
   const out = await runCli(['script', script, ...args], cwd);
   if (out.timedOut) throw new PdfEngineError('designcraft', 'timeout', timeoutUk);
   let report: any = null;

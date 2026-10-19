@@ -11,6 +11,14 @@
 # виставлено true — файли на диску лишаються з CRLF, як їх любить Windows).
 * text=auto
 
+# Shell-скрипти — ЗАВЖДИ LF, і в репозиторії, і на диску.
+# Причина: `scripts/designcraft-cli-compat.sh` потрапляє в production-образ
+# (Dockerfile) і запускається як `/bin/sh`. З CRLF Linux читає інтерпретатор
+# як `/bin/sh\r` і відповідає `bad interpreter`. На Railway збірка йде з
+# Linux-чекауту й LF там зберігається, але образ, зібраний із Windows-копії
+# репозиторію (де core.autocrlf=true), зламався б саме так.
+*.sh text eol=lf
+
 # Бінарні — не чіпати взагалі.
 *.docx binary
 *.pdf  binary
