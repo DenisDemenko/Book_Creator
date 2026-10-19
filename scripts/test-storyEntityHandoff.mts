@@ -34,7 +34,7 @@ assert.throws(() => buildStoryHandoffBook(committed.book, {
   ...make(),
   expectedUpdatedAt: committed.book.updatedAt,
   target: { placement: 'existing', chapterId: committed.chapterId, sectionId: committed.sectionId },
-}), /уже перенесено|уже є/);
+}), /вже перенесено|уже перенесено|уже є/);
 assert.throws(() => buildStoryHandoffBook(committed.book, {
   ...make(),
   expectedUpdatedAt: committed.book.updatedAt,
