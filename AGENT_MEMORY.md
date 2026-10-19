@@ -2,7 +2,7 @@
 
 > **Призначення:** коротка точка входу для будь-якого агента чи розробника (Claude, GPT, Gemini, Codex тощо). Читати на початку сесії, **потім обов'язково читати `AGENTS.md`, чинні плани й код**. Після сесії звірити розділи 7 «Статус» і 8 «Журнал сесій» та оновити їх у своїй робочій гілці. Цей файл **не замінює** обов'язковий нумерований журнал `log.md`.
 >
-> **Звірено з GitHub:** 19.10.2026, гілка `feat/session-to-book-semantic-handoff`. Стан production, тестів, локальних remote і незбережених змін не встановлюється самим читанням репозиторію.
+> **Звірено з GitHub:** 19.10.2026, гілка `feat/session-to-book-semantic-handoff`. TypeScript, tag corpus, handoff unit/round-trip і production build перевірені через GitHub Actions на коміті `4fc4aa87f8b748b5ca81cc0cebb6c308fc51deb2` (run 39229881492). Стан живого production, ручного UI, локальних remote і незбережених файлів цим не підтверджено.
 >
 > **Достовірність:** **[Факт — код]** — прочитано в поточному GitHub; **[Факт — журнал]** — зафіксовано раніше, не обов'язково актуально сьогодні; **[Гіпотеза]** — причина потребує відтворення; **[Не перевірено]** — доказів недостатньо. Не переносити історичні твердження до категорії «поточний факт» без перевірки.
 
@@ -81,9 +81,9 @@
 - **Онтологія:** `src/utils/coreEntities.ts` — фабричні **118 типів сутностей / 39 типів зв'язків**, canonical тег `[/slug:значення]`, українські назви у UI, до 12 тегів на абзац; головний першодокумент реєстру — `Fusion_Lab_Studio_Entity_Registry_with_Literary_Critic_UA_EN.pdf`. Не створювати ще одного списку типів.
 - **Існуючий Screenplay:** читає `section.content`, кнопка «Відкрити у Книга & Текст» лише **навігує до глави/секції**, не переносить текст повторно.
 - **Гілка `feat/session-to-book-semantic-handoff`:** присутні `docs/ux/SESSION_TO_BOOK_ENTITY_TAG_HANDOFF_TZ.md`, `src/components/storyExperience/StoryEntityHandoffPanel.tsx`, `StoryEntityTagPicker.tsx`, `src/utils/storyEntityHandoff.ts`, `scripts/test-storyEntityHandoff.mts` і wiring у `src/components/ScenarioView.tsx` / `src/App.tsx`. **[Факт — код]**
-- **Screenplay, поточний обсяг:** ручний ввід нового авторського тексту (або опису сцени як чернетки), вибір наявної секції / нової секції / нової глави, підбір тегів із активного реєстру, підтвердження й preview, запис у `Book` через `buildStoryHandoffBook`, збереження викликом `saveBook` перед навігацією, простий provenance `Section.storyHandoffs`. Реалізовано перевірки на порожній текст, невідомі типи, понад 12 тегів, повторну вставку й змінену ревізію. **Це перевірено читанням коду, не живим end-to-end.**
+- **Screenplay, поточний обсяг:** ручний ввід нового авторського тексту (або опису сцени як чернетки), вибір наявної секції / нової секції / нової глави, підбір тегів із активного реєстру, підтвердження й preview, запис у `Book` через `buildStoryHandoffBook`, збереження викликом `saveBook` перед навігацією, простий provenance `Section.storyHandoffs`. Реалізовано перевірки на порожній текст, невідомі типи, понад 12 тегів, повторну вставку в будь-яку главу й змінену ревізію. Додатково прибрано помилкову HTML-обгортку (канонічний формат — marker string з тегами **в тому самому абзаці**) та заблоковано вставлення HTML-розмітки. Запис захищено від подвійного натискання; успіх означає **локальне** збереження, синхронізація з сервером відбувається асинхронно. **[Факт — код, підтверджено unit/round-trip CI; браузерне E2E не виконано]**
 - **Mafia/Constellation/Leela:** спільна кнопка видима, але пряме збереження через цю панель **заблоковано**, поки не буде серверного дозволу, підтвердження згод, source snapshots і privacy-фільтрації. Наявний `SessionExportToBookView` має окремий частково реалізований маршрут. **Не називати ці три режими «готовими».**
-- **Залишилося:** надійне зв'язування з реальними UUID сутностей та графом 39 відношень, повний diff, прив'язка до окремого абзацу, session-to-book policy-backed commit, idempotency між сеансами, коректне нормалізування rich HTML/лічильників тексту, серверна транзакційність, медіа/паспорти, E2E та мобільні тести. Наявність тестового скрипта **не означає, що він запущений і пройшов**.
+- **Залишилося:** надійне зв'язування з реальними UUID сутностей та графом 39 відношень, повний diff, вибір позиції всередині абзацу, session-to-book policy-backed commit, server-side idempotency між клієнтами, серверна транзакційність та підтвердження синхронізації, media passport, E2E і мобільні тести. **Тест на локальному прикладі вже PASS; ручне приймання ще не виконане.**
 - Попередній аудит: `docs/ux/SESSION_TO_BOOK_IMPLEMENTATION_AUDIT.md` (18.10); ТЗ експорту `docs/ux/SESSION_TO_BOOK_EXPORT_UX_SPEC.md`. Доповнення не замінює цей аудит, поки немає повторної перевірки.
 
 ## 4. План виправлень із початкового завдання (базова дата 14.10)
@@ -103,7 +103,7 @@
 
 ## 5. Тестування й приймання
 
-- Базові команди з `package.json`: `npm run lint` (TypeScript), `npm test` (великий набір), `npm run journal:check`. Із появою нового модуля доступний файл `scripts/test-storyEntityHandoff.mts`; його окремий запуск: `npx tsx scripts/test-storyEntityHandoff.mts`. **Запуску цього тесту в поточній сесії не підтверджено.**
+- Базові команди з `package.json`: `npm run lint` (TypeScript), `npm test` (великий набір), `npm run journal:check`. Із появою нового модуля доступний файл `scripts/test-storyEntityHandoff.mts`; його окремий запуск: `npx tsx scripts/test-storyEntityHandoff.mts`. **[Факт — CI PASS]** Виконано на SHA `4fc4aa87f8b748b5ca81cc0cebb6c308fc51deb2` через [Story Entity Handoff run #24](https://github.com/DenisDemenko/Book_Creator/actions/runs/39229881492): `npm ci`, `npm run lint`, `npm run test:tag-corpus`, `npx tsx scripts/test-storyEntityHandoff.mts` (включно з TipTap round-trip), `npm run build` — усе успішно.
 - Story & Experience: перевірити реальну авторизовану книгу, нову секцію й главу, вставку в існуючу, типи `character` / `character-arc` / `plot`, 12-тегову межу, дублікат, `updatedAt`, збереження після перезавантаження, PDF без тегів, відмову гостеві / учасникові без прав, захист чужих сесій.
 - Express: unit та ручна перевірка швидкого додавання cast, переходів, CAS conflict і генерації; JEV — Mock/fallback, повторне оцінювання, ручне значення.
 - Preview/design: тест під реальним base path `/studio`, HTML із `/api/media/file/...`; перевірка `kdpSpec` й двох варіантів PDF, `test:bridge`, `test:pdf`, `test:pdf-routes`, `test:pdf-cover`.
@@ -125,12 +125,12 @@
 **Станом на 19.10.2026, джерело — GitHub `feat/session-to-book-semantic-handoff`:**
 
 - **[Факт — код]** У робочій гілці вже є реалізація UX та local-book handoff із Screenplay, picker тегів, валідація, preview і виклик збереження; існує unit-style тестовий скрипт. Це **зміна коду**, а не лише план.
-- **[Не перевірено]** Повний TypeScript build, успішність `test-storyEntityHandoff.mts` на цьому SHA, ручний прогін на iPhone/desktop, запис і повторне відкриття після restart, синхронізація із серверним семантичним ядром.
+- **[Факт — CI PASS]** На SHA `4fc4aa87f8b748b5ca81cc0cebb6c308fc51deb2` успішні TypeScript/lint, tag corpus, semantic handoff regression із відкриттям і повторною серіалізацією TipTap, production build. Джерело: [Actions run #24](https://github.com/DenisDemenko/Book_Creator/actions/runs/39229881492). **[Не перевірено]** Ручний прогін iPhone/desktop, реальний запис із браузера і повторне відкриття після restart, синхронізація з серверним ядром.
 - **[Факт — код]** Три режимні сесії Mafia/Constellation/Leela **не проходять новий прямий handoff**; потрібні backend consent, eligibility та безпечний транзакційний commit.
 - **[Факт — код]** Дизайнерський zoom 10–150 % не внесено в `DesignerThemeStudio`, slider назв глав не має. Для фото в розвороті є правдоподібна, але невідтворена гіпотеза.
 - **[Факт — код]** У Express наявні ревізія й CAS; невідомо, чи це повністю усунуло симптом зникнення cast.
 - **[Не перевірено]** Поточний локальний `git remote -v`, сесійний lock, зміни, яких немає на GitHub, готовність production та точний спосіб інтеграції Rust DesignCraft.
-- **Що робити наступному агенту:** ① перевірити останній SHA і можливі паралельні зміни; ② запустити lint + вузькі тести handoff; ③ усунути виявлені регресії без змін основного текстового редактора; ④ здійснити ручний контроль Screenplay → new/existing chapter → reload → тег/print; ⑤ лише після цього розширювати privacy-backed session export; ⑥ записати результати й блокери за процедурою `AGENTS.md`.
+- **Що робити наступному агенту:** ① перевірити останній SHA і можливі паралельні зміни; ② зберегти зелений CI та додати browser E2E; ③ перевірити реальну синхронізацію книги без фальшивого статусу «сервер збережено»; ④ здійснити ручний контроль Screenplay → new/existing chapter → reload → тег/print; ⑤ лише після цього розширювати privacy-backed session export; ⑥ записати результати й блокери за процедурою `AGENTS.md`.
 
 ## 8. Журнал сесій (оновлювати)
 
@@ -140,6 +140,7 @@
 | 18.10.2026 | UX аудит Story & Experience | `docs/ux/SESSION_TO_BOOK_IMPLEMENTATION_AUDIT.md` описує частковий session-to-book workflow, канонічні події й блокери **[Факт — файл]** | Canonical event ingest, consent, server privacy, повноцінний export |
 | 19.10.2026 | GitHub перевірка Story & Experience | У гілці `feat/session-to-book-semantic-handoff` виявлено документи, панель, picker 118 типів, helper, інтеграцію в `ScenarioView` / `App.tsx`, тестовий скрипт **[Факт — код]** | Тест не запускався тут; потрібні build, ручний UX, серверне тегування та зв'язки |
 | 19.10.2026 | Актуалізація AGENT_MEMORY | Перевірено GitHub обох репозиторіїв, уточнено working branch, приватність Marketplace, Express CAS, зображення/пагінацію, стан zoom та handoff; створено цей файл **[Факт — код/документ]** | Підтвердити тести на конкретному SHA; оновити основний нумерований журнал локально за правилами `AGENTS.md`; не змінювати `master` |
+| 19.10.2026 | Семантичне перенесення: bugfix + CI | Прибрано HTML із книжкового marker string, теги перенесено в перший літературний абзац, додано book-wide duplicate guard, відсікання HTML і захист подвійного save. GitHub Actions [run #24](https://github.com/DenisDemenko/Book_Creator/actions/runs/39229881492) **PASS** на SHA `4fc4aa87f8b748b5ca81cc0cebb6c308fc51deb2`: lint, tag corpus, unit + TipTap round-trip, build | **Не зроблено й чому:** ручний browser/iPhone E2E та реальна server sync не перевірені в цьому середовищі; права й згода ігрових сесій ще не підключені. `master` не змінювати до приймання |
 
 ---
 
