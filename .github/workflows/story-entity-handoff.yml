@@ -1,0 +1,46 @@
+name: Story Entity Handoff
+
+on:
+  push:
+    branches:
+      - feat/session-to-book-semantic-handoff
+    paths:
+      - 'src/components/storyExperience/StoryEntity*.tsx'
+      - 'src/utils/storyEntityHandoff.ts'
+      - 'src/components/ScenarioView.tsx'
+      - 'src/App.tsx'
+      - 'src/types.ts'
+      - 'scripts/test-storyEntityHandoff.mts'
+      - '.github/workflows/story-entity-handoff.yml'
+  pull_request:
+    paths:
+      - 'src/components/storyExperience/StoryEntity*.tsx'
+      - 'src/utils/storyEntityHandoff.ts'
+      - 'src/components/ScenarioView.tsx'
+      - 'src/App.tsx'
+      - 'src/types.ts'
+      - 'scripts/test-storyEntityHandoff.mts'
+      - '.github/workflows/story-entity-handoff.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  semantic-handoff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: TypeScript and lint
+        run: npm run lint
+      - name: Existing entity tag corpus
+        run: npm run test:tag-corpus
+      - name: Semantic handoff regression
+        run: npx tsx scripts/test-storyEntityHandoff.mts
+      - name: Production build
+        run: npm run build

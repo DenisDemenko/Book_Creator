@@ -37,6 +37,7 @@ import { MarketIntelligenceWindow } from './components/MarketIntelligenceWindow'
 import { TableOfContentsView } from './components/TableOfContentsView';
 import { QRFootnotesView } from './components/QRFootnotesView';
 import { ScenarioView } from './components/ScenarioView';
+import { buildStoryHandoffBook, type StoryHandoffRequest } from './utils/storyEntityHandoff';
 import { CharactersView } from './components/CharactersView';
 import { MindBoardView } from './components/MindBoardView';
 import { AIStudioView } from './components/AIStudioView';
@@ -79,7 +80,7 @@ import { useTheme } from './hooks/useTheme';
 import { useRealtimeSync } from './hooks/useRealtimeSync';
 import { estimatePageCount, calculateWordCount } from './utils/helpers';
 import { appendTextToChapterEnd } from './utils/bookText';
-import { canAccessTab, canOpenAdminPanel, getDefaultTabForRole, getRoleInfo } from './utils/rbac';
+import { canAccessTab, canOpenAdminPanel, getDefaultTabForRole, getRoleInfo, hasPermission } from './utils/rbac';
 import { diffSectionChange, applySectionPatch, type SectionPatch } from './utils/bookDiff';
 import { exportBookToBackupZip, BookBackupManifest } from './utils/bookBackup';
 import {
@@ -305,6 +306,8 @@ export default function App() {
   const autosaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   // Прапорець гідратації: перший запис книги в стан не має вмикати автозбереження.
   const hydratedRef = useRef<boolean>(false);
+  // A double click or slow IndexedDB write must never import the same fragment twice.
+  const storyHandoffInFlightRef = useRef(false);
 
   // Append entry to changelog
   const addLogEntry = useCallback((
@@ -1762,6 +1765,51 @@ export default function App() {
   };
 
   /**
+   * Explicit Story & Experience manuscript insertion, not the existing
+   * Screenplay "open in editor" navigation. Save the stamped book BEFORE
+   * showing success or navigating away, preserving unsaved local edits.
+   */
+  const handleCommitStoryHandoff = async (request: StoryHandoffRequest): Promise<void> => {
+    if (!auth.user || auth.isGuest || book.accessRestricted || !hasPermission(currentRole, 'canEditContent')) {
+      throw new Error('Для додавання тексту потрібен авторизований доступ із правом редагування книги.');
+    }
+    if (storyHandoffInFlightRef.current) {
+      throw new Error('Збереження вже виконується. Дочекайтеся завершення.');
+    }
+    storyHandoffInFlightRef.current = true;
+    try {
+      const result = buildStoryHandoffBook(book, request);
+      const updatedBook = stampBookRevision(result.book);
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+      setSaveState('saving');
+      try {
+        await saveBook(updatedBook);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Не вдалося зберегти фрагмент у сховище книги.';
+        setSaveState('error');
+        setStorageError(message);
+        throw new Error(message);
+      }
+      setBook(updatedBook);
+      setHasUnsavedChanges(false);
+      setLastSavedAt(new Date().toISOString());
+      setStorageError(null);
+      setSaveState('saved');
+      const logEntry = addLogEntry(
+        'Story & Experience → Книга & Текст',
+        'Підтверджено новий авторський текст і ' + request.tags.length + ' тегів сутностей у книзі «' + updatedBook.title + '».',
+        'text'
+      );
+      broadcastBookUpdate(updatedBook, logEntry);
+      setSaveToast('Фрагмент і теги збережено локально. Синхронізація з сервером може тривати.');
+      setTimeout(() => setSaveToast(null), 4500);
+      handleNavigateToSection(result.chapterId, result.sectionId);
+    } finally {
+      storyHandoffInFlightRef.current = false;
+    }
+  };
+
+  /**
    * «Передати текст у книгу» з AI-чату (QuickAiModal.tsx): дописує текст у
    * кінець ОСТАННЬОЇ секції обраного розділу, одразу відкриває редактор на
    * цій секції (handleNavigateToSection) і виділяє щойно вставлений
@@ -2399,6 +2447,7 @@ export default function App() {
             onUpdateBook={handleUpdateBook}
             onNavigateToSection={handleNavigateToSection}
             onSaveBook={handleManualSave}
+            onCommitStoryHandoff={handleCommitStoryHandoff}
           />
         )}
 

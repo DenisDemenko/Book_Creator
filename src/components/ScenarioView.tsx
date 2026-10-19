@@ -4,6 +4,8 @@ import type { JournalSession } from './storyExperience/sessionJournalClient';
 import { DurableNeutralJournal } from './storyExperience/durableNeutralJournal';
 import { BrainCircuit, Clapperboard, Copy, Drama, Gamepad2, Sparkles } from 'lucide-react';
 import type { Book, NavigationTab } from '../types';
+import { StoryEntityHandoffPanel } from './storyExperience/StoryEntityHandoffPanel';
+import type { StoryHandoffRequest, StoryHandoffKind } from '../utils/storyEntityHandoff';
 import { generateSessionCharacterPortrait, attachSessionPortraits, type SessionPortraitAsset } from './storyExperience/sessionPortraitService';
 import type { CharacterDraft } from './storyExperience/CharacterDraftEditor';
 import { commitSessionToBook, type ReviewedSessionBookMaterial } from './storyExperience/sessionBookCommit';
@@ -31,6 +33,7 @@ interface ScenarioViewProps {
   onNavigateToTab?: (tab: NavigationTab) => void;
   onEvaluateWithJev?: StoryExperienceJevEvaluator;
   onSaveBook?: () => void;
+  onCommitStoryHandoff?: (request: StoryHandoffRequest) => Promise<void>;
   reviewedSessionMaterials?: Partial<Record<'mafia' | 'constellation' | 'leela', ReviewedSessionBookMaterial>>;
 }
 
@@ -63,6 +66,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   onNavigateToTab,
   onEvaluateWithJev,
   onSaveBook,
+  onCommitStoryHandoff,
   reviewedSessionMaterials,
 }) => {
   const readWorkspace = (): StoryWorkspace => {
@@ -137,6 +141,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   }, [book.id, ownerId]);
   const [sessionPortraits, setSessionPortraits] = useState<SessionPortraitAsset[]>([]);
   const [selectedScene, setSelectedScene] = useState<ScreenplaySelectedSceneContext | null>(null);
+  const [handoffOpen, setHandoffOpen] = useState(false);
 
   const onCommitSessionBook = (request: SessionBookExportRequest, material: ReviewedSessionBookMaterial) => {
     const result = commitSessionToBook(book, request, material);
@@ -245,6 +250,12 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
             ))}
           </nav>
           <div className="flex shrink-0 items-center gap-2">
+            {(['screenplay', 'mafia', 'constellation', 'leela'] as StoryHandoffKind[]).includes(workspace as StoryHandoffKind) && (
+              <button type="button" onClick={() => setHandoffOpen(true)}
+                className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-[#2E1B12] px-3 py-2 text-xs font-semibold text-[#FFF9F1] hover:bg-[#573A29]">
+                Додати до книги
+              </button>
+            )}
             <button type="button" onClick={() => void copyWorkspaceLink()}
               className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[#D9CABC] bg-[#FFFCF8] px-3 py-2 text-xs font-semibold text-[#2C1A12] hover:bg-[#F4ECE1]"
               aria-label="Скопіювати посилання на поточний розділ">
@@ -335,6 +346,19 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
           />
         )}
       </div>
+      {handoffOpen && (['screenplay', 'mafia', 'constellation', 'leela'] as StoryHandoffKind[]).includes(workspace as StoryHandoffKind) && (
+        <StoryEntityHandoffPanel
+          book={book}
+          mode={workspace as StoryHandoffKind}
+          scene={workspace === 'screenplay' ? selectedScene : null}
+          onClose={() => setHandoffOpen(false)}
+          onSave={async request => {
+            if (!onCommitStoryHandoff) throw new Error('Збереження в книгу для цього режиму не підключене.');
+            await onCommitStoryHandoff(request);
+            setHandoffOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 };
