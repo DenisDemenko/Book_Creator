@@ -61,6 +61,7 @@ export const StoryEntityHandoffPanel: React.FC<StoryEntityHandoffPanelProps> = (
         source: { kind: mode, sourceId: scene!.sceneId, title: scene!.title },
         text: stripEntityTags(text).trim(), target: target(), tags,
         expectedRevision: book.revisionNumber,
+        expectedUpdatedAt: book.updatedAt,
       });
       setSuccess(true);
     } catch (problem) {
