@@ -5,7 +5,7 @@ import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { chromium } from 'playwright-core';
 
-const baseUrl = process.env.BOOK_ACCEPTANCE_BASE_URL || 'http://localhost:3000';
+const baseUrl = process.env.BOOK_ACCEPTANCE_BASE_URL || 'http://127.0.0.1:3000';
 const bookId = process.env.BOOK_ACCEPTANCE_BOOK_ID || 'BK-2084-CYBER';
 const targetUrl = `${baseUrl}/projects/${encodeURIComponent(bookId)}/dashboard`;
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -49,9 +49,31 @@ const report = {
   pageErrors: [],
   failedRequests: [],
   api: {},
+  stages: [],
 };
 
 const addCheck = (name, ok, details = {}) => report.checks.push({ name, ok, ...details });
+const stage = (name, details = {}) => {
+  const entry = { at: new Date().toISOString(), name, ...details };
+  report.stages.push(entry);
+  console.log('[acceptance]', name, JSON.stringify(details));
+};
+async function navigate(url) {
+  stage('navigate-start', { url });
+  try {
+    const response = await page.goto(url, { waitUntil: 'commit', timeout: 20_000 });
+    stage('navigate-committed', { status: response?.status(), url: page.url() });
+  } catch (error) {
+    stage('navigate-failed', { message: String(error), url: page.url() });
+    const response = await page.request.get(url, { timeout: 15_000 }).catch(() => null);
+    stage('http-probe', { status: response?.status() ?? null });
+    if (!page.url().startsWith(baseUrl)) throw error;
+  }
+  await page.waitForLoadState('domcontentloaded', { timeout: 25_000 }).catch((error) => {
+    stage('domcontentloaded-timeout', { message: String(error), url: page.url() });
+  });
+  stage('navigate-ready', { url: page.url() });
+}
 page.on('console', (msg) => {
   if (msg.type() === 'error') report.consoleErrors.push(msg.text());
 });
@@ -118,8 +140,9 @@ async function brokenImages() {
 }
 
 try {
-  await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await navigate(targetUrl);
   await page.waitForTimeout(2500);
+  stage('dashboard-capture');
   await screenshot('00-dashboard-initial');
 
   const onBook = page.url().includes(`/projects/${bookId}/`);
@@ -129,12 +152,13 @@ try {
     console.log('Якщо потрібен вхід — увійдіть у відкритому вікні, потім поверніться сюди.');
     await rl.question('Після входу натисніть Enter... ');
     rl.close();
-    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await navigate(targetUrl);
     await page.waitForTimeout(2500);
   }
   addCheck('project-route', page.url().includes(`/projects/${bookId}/`), { finalUrl: page.url() });
 
   // PDF layout + authoritative export preview.
+  stage('pdf-layout-start');
   const pdfNav = await clickSection(['Верстка PDF', 'PDF']);
   addCheck('navigate-pdf-layout', pdfNav.ok, pdfNav);
   await screenshot('10-pdf-layout');
@@ -181,6 +205,7 @@ try {
   await screenshot('11-pdf-authoritative-preview');
 
   // Book spread.
+  stage('spread-start');
   const spreadNav = await clickSection(['Розворот книги', 'Розворот']);
   addCheck('navigate-book-spread', spreadNav.ok, spreadNav);
   await page.waitForTimeout(1200);
@@ -192,6 +217,7 @@ try {
   await screenshot('20-book-spread');
 
   // Cover.
+  stage('cover-start');
   const coverNav = await clickSection(['Обкладинка']);
   addCheck('navigate-cover', coverNav.ok, coverNav);
   await page.waitForTimeout(1000);
@@ -204,6 +230,7 @@ try {
   await screenshot('30-cover');
 
   // Main text area, to ensure integration did not destroy authoring surface.
+  stage('book-text-start');
   const textNav = await clickSection(['Книга та текст', 'Текст']);
   addCheck('navigate-book-text', textNav.ok, textNav);
   await page.waitForTimeout(800);
@@ -212,6 +239,7 @@ try {
   await screenshot('40-book-text');
 
 } catch (error) {
+  stage('fatal', { message: String(error) });
   report.fatalError = String(error?.stack || error);
   await screenshot('99-fatal');
 } finally {
