@@ -13,6 +13,7 @@
  * причину, а не зникає без слова.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { AdminAgentHandoffView } from './AdminAgentHandoffView';
 import { GitCommandPanel } from './GitCommandPanel';
 import {
   GitCommit, RefreshCw, Loader2, AlertTriangle, FileDiff, BookOpen,
@@ -105,6 +106,17 @@ function readableEntry(raw: string): string {
 }
 
 export const AdminGitHistoryView: React.FC = () => {
+  const [page, setPage] = useState<'commits' | 'handoff'>('commits');
+  return <div className="space-y-4">
+    <nav aria-label="Історія розробки" className="flex flex-wrap gap-2">
+      <button type="button" aria-pressed={page === 'commits'} className="rounded-lg border border-slate-500/40 px-3 py-2 text-sm" onClick={() => setPage('commits')}>Історія комітів</button>
+      <button type="button" aria-pressed={page === 'handoff'} className="rounded-lg border border-slate-500/40 px-3 py-2 text-sm" onClick={() => setPage('handoff')}>Прийом і передача</button>
+    </nav>
+    {page === 'commits' ? <AdminCommitHistoryContent /> : <AdminAgentHandoffView />}
+  </div>;
+};
+
+const AdminCommitHistoryContent: React.FC = () => {
   const [commits, setCommits] = useState<Commit[]>([]);
   const [total, setTotal] = useState(0);
   const [branch, setBranch] = useState('');
