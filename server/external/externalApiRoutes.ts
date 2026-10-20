@@ -28,6 +28,7 @@ import type { Express, NextFunction, Request, Response } from 'express';
 import { requireAuth, requirePermission } from '../auth';
 import { findUserById } from '../store';
 import { getBook, listBooks } from '../bookStore';
+import { bookToMarkdown } from '../pdf/bookToMarkdown';
 import { readAsset, saveAsset } from '../media/mediaLibraryStore';
 import {
   countScansSince,
@@ -357,6 +358,68 @@ export function registerExternalApiRoutes(app: Express, deps: ExternalApiDeps): 
     } catch (err) {
       console.error('[externalApi] chapters:', err);
       fail(res, 500, 'server_error', 'Не вдалося прочитати глави.');
+    }
+  });
+
+  /**
+   * ТЕКСТ КНИГИ — для читання, не для редагування.
+   *
+   * ЧОМУ ЦЬОГО ДОСІ НЕ БУЛО. Перший споживач зовнішнього API — WriterScan —
+   * книгу тільки ПОПОВНЮЄ, тож читати її не потребував: йому досить переліку
+   * глав, щоб автор обрав, куди покласти скан. Але агентові (MCP-сервер
+   * Студії, п. 6 PLAN_DESIGNCRAFT_BRIDGE.md) потрібне саме читання, і
+   * жодного маршруту для цього не існувало.
+   *
+   * ЧОМУ MARKDOWN, А НЕ HTML. Секції книги зберігаються як HTML. Віддавати
+   * розмітку означало б змусити кожного споживача її розбирати — і зробити
+   * це по-своєму. `bookToMarkdown` — той самий конвертер, яким користуються
+   * рушії PDF, тож текст тут і текст у книзі не розійдуться.
+   *
+   * ЧОМУ ВІДПОВІДЬ ЧЕСНО КАЖЕ «ДЗЕРКАЛО». Книга живе в IndexedDB браузера, а
+   * серверна копія лише дзеркало (див. шапку модуля). Агент, який прочитає
+   * звідси, може бачити текст, старший за те, що в автора на екрані, —
+   * і мусить це знати, а не здогадуватись. Тому `revision` і `updatedAt`
+   * віддаються разом із текстом.
+   */
+  app.get('/api/external/v1/books/:bookId/text', externalAuth, async (req, res) => {
+    try {
+      const stored = await ownBook(String(req.params.bookId), req.principal!.id as string);
+      if (!stored) return fail(res, 404, 'book_not_found', 'Книгу не знайдено.');
+
+      const book = stored.book as any;
+      const all = Array.isArray(book?.chapters) ? (book.chapters as any[]) : [];
+      const chapterId = typeof req.query.chapterId === 'string' ? req.query.chapterId.trim() : '';
+      if (chapterId && !all.some((c) => String(c?.id || '') === chapterId)) {
+        return fail(res, 404, 'chapter_not_found', 'Главу не знайдено в цій книзі.');
+      }
+
+      // Одна глава — той самий конвертер, лише звужена книга: інакше текст
+      // однієї глави відрізнявся б від неї ж у повному експорті.
+      const source = chapterId
+        ? { ...book, chapters: all.filter((c) => String(c?.id || '') === chapterId) }
+        : book;
+      const doc = bookToMarkdown(source as never, { withImages: false });
+
+      res.json({
+        book: {
+          id: stored.id,
+          title: String(book?.title || stored.title || ''),
+          author: book?.author ? String(book.author) : null,
+          revision: stored.revision,
+          updatedAt: stored.updatedAt,
+          chapterCount: all.length,
+        },
+        chapterId: chapterId || null,
+        markdown: doc.markdown,
+        chars: doc.markdown.length,
+        mirrorNoteUk:
+          'Це серверне дзеркало книги. Автор редагує її в браузері, тож текст ' +
+          'тут може бути старшим за те, що в нього на екрані; звіряйтеся з ' +
+          '`revision` і `updatedAt`. Писати в книгу через цей API не можна.',
+      });
+    } catch (err) {
+      console.error('[externalApi] text:', err);
+      fail(res, 500, 'server_error', 'Не вдалося прочитати текст книги.');
     }
   });
 
