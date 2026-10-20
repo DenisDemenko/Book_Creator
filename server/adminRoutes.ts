@@ -49,7 +49,8 @@ import { IMAGE_ENGINES, seedreamConfig } from './imageGeneration';
 import { SEEDREAM_FAL_MODEL } from './pricing';
 import { geminiClient } from './aiCore';
 import { mailConfig } from './mail';
-import { PLANS, PLAN_ORDER, priceFor, resolveSubscription, type PlanId } from './subscriptions';
+import { PLANS, PLAN_ORDER, priceFor, resolveSubscription, getActiveTaxRegime, setTaxRegime, type PlanId } from './subscriptions';
+import { TAX_REGIMES, TAX_REGIME_IDS, TARGET_MARGIN, PRICING_FX_UAH_PER_USD, isTaxRegimeId, priceBreakdown, monthlyPriceUah } from './taxPricing';
 import { isPaidPlan, planLabel, sellerGateRefusal } from './sellerGate';
 import { platformKeyFor } from './platformKeys';
 import { paypalConfig } from './payments/paypal';
@@ -131,8 +132,10 @@ function dayKey(iso: string): string {
  */
 function revenueUahForPayment(p: StoredPayment): number {
   const def = PLANS[p.plan as PlanId];
-  if (def) return priceFor(p.plan as PlanId, p.billingCycle);
+  // Платіж у грн — рахуємо за фактично сплаченою сумою: ціни тарифів тепер
+  // залежать від податкового режиму й змінюються, а вже отримані гроші — ні.
   if (p.currency === 'UAH') return p.amount;
+  if (def) return priceFor(p.plan as PlanId, p.billingCycle);
   return p.amount / paypalConfig.uahToUsdRate;
 }
 
@@ -413,6 +416,42 @@ export function registerAdminRoutes(app: Express): void {
       console.error('[admin] crm users:', err);
       res.status(500).json({ error: 'Не вдалося завантажити CRM.' });
     }
+  });
+
+  // ---------------------------------------------------------------------
+  // Податковий режим і ціни підписок
+  // ---------------------------------------------------------------------
+
+  function taxPricingPayload() {
+    const active = getActiveTaxRegime();
+    return {
+      active: active.id,
+      targetMarginPercent: TARGET_MARGIN * 100,
+      fxUahPerUsd: PRICING_FX_UAH_PER_USD,
+      regimes: TAX_REGIME_IDS.map((id) => {
+        const regime = TAX_REGIMES[id];
+        return {
+          ...regime,
+          prices: PLAN_ORDER.filter((p) => p !== 'free').map((planId) => {
+            const gross = monthlyPriceUah(regime, planId);
+            return { plan: planId, nameUk: PLANS[planId].nameUk, credits: PLANS[planId].aiCredits, ...priceBreakdown(regime, planId, gross) };
+          }),
+        };
+      }),
+    };
+  }
+
+  app.get('/api/admin/tax-regime', requireAdmin, (_req, res) => {
+    res.json(taxPricingPayload());
+  });
+
+  app.put('/api/admin/tax-regime', requireAdmin, async (req, res) => {
+    const { regime } = req.body || {};
+    if (!isTaxRegimeId(regime)) {
+      return res.status(400).json({ error: 'Невідомий податковий режим.' });
+    }
+    await setTaxRegime(regime);
+    res.json(taxPricingPayload());
   });
 
   // ---------------------------------------------------------------------

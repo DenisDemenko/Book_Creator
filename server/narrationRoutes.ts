@@ -1,7 +1,7 @@
 /**
  * Озвучення книги/курсу — POST /api/narration/synthesize.
  *
- * Гейт — requirePlanAtLeast(['pro', 'ultra']) (server/subscriptions.ts):
+ * Гейт — requirePlanAtLeast(['pro', 'ultra', 'team']) (server/subscriptions.ts):
  * та сама функція, що вже захищає «Форматування під KDP», адмін завжди
  * проходить без тарифної перевірки. Ключ провайдера — платформний
  * (server/platformKeys.ts): лише адміністратор вставляє його в «Ключі
@@ -39,7 +39,7 @@ export function registerNarrationRoutes(app: Express): void {
     '/api/narration/synthesize',
     requireAuth,
     requirePermission('canUseAi'),
-    requirePlanAtLeast(['pro', 'ultra']),
+    requirePlanAtLeast(['pro', 'ultra', 'team']),
     async (req, res) => {
       try {
         const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
@@ -144,7 +144,7 @@ export function registerNarrationRoutes(app: Express): void {
   );
 
   /** Уже готове озвучення розділу (для індикатора «готово» у плеєрі книги, без витрат на перевірку). */
-  app.get('/api/narration/section/:sectionId', requireAuth, requirePlanAtLeast(['pro', 'ultra']), (req, res) => {
+  app.get('/api/narration/section/:sectionId', requireAuth, requirePlanAtLeast(['pro', 'ultra', 'team']), (req, res) => {
     const lang = req.query.lang;
     if (!isNarrationLang(lang)) {
       return res.status(400).json({ error: 'Мова озвучення має бути "uk" або "en".' });

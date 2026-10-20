@@ -1,8 +1,12 @@
 /**
  * Тарифні плани NOVA STUDIO.
  *
- * Ціни задані користувачем (UAH, місячний рахунок): Start 260, Pro 800,
- * Ultra 2600, і безкоштовний план з лімітом 10 генерацій зображень.
+ * Місячні ціни платних планів НЕ задані вручну: їх рахує server/taxPricing.ts
+ * за активним податковим режимом (ПДВ 20% / ФОП III 5% / 3%+ПДВ / без ПДВ) із
+ * цільовою валовою маржею 30%, вирівняні вгору до кратного 10 (до 1000 грн)
+ * або 100 грн. Значення в PLANS нижче — початкові; applyTaxRegime()
+ * перезаписує їх при старті сервера й при перемиканні режиму в адмін-панелі.
+ * Безкоштовний план — з лімітом 10 генерацій зображень.
  *
  * Річна ціна користувачем не уточнювалась — застосовано типову для SaaS
  * знижку «2 місяці в подарунок» (річна = 10 місячних ціни), що дає ~17%
@@ -16,9 +20,18 @@
  */
 
 import type { Request, Response, NextFunction } from 'express';
-import { getSubscription, upsertSubscription, listUsageSince, type StoredSubscription } from './store';
+import { getSubscription, upsertSubscription, listUsageSince, getAppSetting, setAppSetting, type StoredSubscription } from './store';
+import {
+  DEFAULT_TAX_REGIME,
+  PLAN_CREDITS,
+  TAX_REGIMES,
+  isTaxRegimeId,
+  monthlyPriceUah,
+  type TaxRegime,
+  type TaxRegimeId,
+} from './taxPricing';
 
-export type PlanId = 'free' | 'start' | 'pro' | 'ultra';
+export type PlanId = 'free' | 'start' | 'pro' | 'ultra' | 'team';
 export type BillingCycle = 'monthly' | 'annual';
 
 export interface PlanDefinition {
@@ -33,6 +46,12 @@ export interface PlanDefinition {
   /** null = без обмеження. Для Free — ліміт за весь час, для інших — на період підписки. */
   imageQuota: number | null;
   imageQuotaPeriod: 'lifetime' | 'period';
+  /**
+   * AI-бали (ТЗ v0.5): Free — 300 одноразово, платні — щомісяця. Поки це дані
+   * тарифу для показу й розрахунку цін; списання з гаманця (quote → reserve →
+   * charge) ще не підключене, тож реально діє imageQuota.
+   */
+  aiCredits: number;
   /**
    * Місячний ліміт витрат на чат-сесії AI-асистента, доларів США.
    * null = без ліміту. Ліміт по $, а не по кількості повідомлень, бо
@@ -69,6 +88,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     priceAnnualUah: 0,
     imageQuota: 10,
     imageQuotaPeriod: 'lifetime',
+    aiCredits: PLAN_CREDITS.free,
     chatQuotaUsd: null,
     storageQuotaMb: 100,
     engines: ['nano-banana-2-lite', 'nano-banana-2'],
@@ -99,6 +119,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     priceAnnualUah: 2600,
     imageQuota: 100,
     imageQuotaPeriod: 'period',
+    aiCredits: PLAN_CREDITS.start,
     chatQuotaUsd: null,
     storageQuotaMb: 200,
     engines: 'all',
@@ -127,6 +148,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     priceAnnualUah: 8000,
     imageQuota: 400,
     imageQuotaPeriod: 'period',
+    aiCredits: PLAN_CREDITS.pro,
     chatQuotaUsd: 5,
     storageQuotaMb: 500,
     engines: 'all',
@@ -158,6 +180,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     priceAnnualUah: 26000,
     imageQuota: 2000,
     imageQuotaPeriod: 'period',
+    aiCredits: PLAN_CREDITS.ultra,
     chatQuotaUsd: 20,
     storageQuotaMb: 2000,
     engines: 'all',
@@ -176,9 +199,71 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
       '2 GB photo album storage for your own uploads (jpg/png/svg), shared across all books',
     ],
   },
+  team: {
+    id: 'team',
+    nameUk: 'Team',
+    nameEn: 'Team',
+    taglineUk: 'Для видавництв з великим обсягом ілюстрацій',
+    taglineEn: 'For publishers with a large illustration volume',
+    priceMonthlyUah: 0,
+    priceAnnualUah: 0,
+    imageQuota: 4000,
+    imageQuotaPeriod: 'period',
+    aiCredits: PLAN_CREDITS.team,
+    chatQuotaUsd: 40,
+    storageQuotaMb: 5000,
+    engines: 'all',
+    featuresUk: [
+      '50 000 AI-балів на місяць і 4000 генерацій зображень',
+      'Найвищий пріоритет обробки запитів у черзі генерації',
+      'Пріоритетна підтримка команди NOVA STUDIO',
+      'Усе з плану Ultra',
+      '5 ГБ фотоальбому для власних завантажень (jpg/png/svg), загалом на всі книги',
+    ],
+    featuresEn: [
+      '50,000 AI credits per month and 4000 image generations',
+      'Highest processing priority in the generation queue',
+      'Priority support from the NOVA STUDIO team',
+      'Everything in the Ultra plan',
+      '5 GB photo album storage for your own uploads (jpg/png/svg), shared across all books',
+    ],
+  },
 };
 
-export const PLAN_ORDER: PlanId[] = ['free', 'start', 'pro', 'ultra'];
+export const PLAN_ORDER: PlanId[] = ['free', 'start', 'pro', 'ultra', 'team'];
+
+export const TAX_REGIME_SETTING_KEY = 'subscriptions.taxRegime';
+let activeTaxRegime: TaxRegimeId = DEFAULT_TAX_REGIME;
+
+export function getActiveTaxRegime(): TaxRegime {
+  return TAX_REGIMES[activeTaxRegime];
+}
+
+/** Перераховує ціни платних планів за режимом (річна = 10 місячних). */
+export function applyTaxRegime(id: TaxRegimeId): void {
+  activeTaxRegime = id;
+  const regime = TAX_REGIMES[id];
+  for (const planId of PLAN_ORDER) {
+    if (planId === 'free') continue;
+    const monthly = monthlyPriceUah(regime, planId);
+    PLANS[planId].priceMonthlyUah = monthly;
+    PLANS[planId].priceAnnualUah = monthly * 10;
+  }
+}
+
+/** Читає збережений режим зі сховища (старт сервера). Невідоме значення → типовий. */
+export async function loadTaxRegime(): Promise<TaxRegimeId> {
+  const stored = await getAppSetting(TAX_REGIME_SETTING_KEY);
+  applyTaxRegime(isTaxRegimeId(stored) ? stored : DEFAULT_TAX_REGIME);
+  return activeTaxRegime;
+}
+
+export async function setTaxRegime(id: TaxRegimeId): Promise<void> {
+  await setAppSetting(TAX_REGIME_SETTING_KEY, id);
+  applyTaxRegime(id);
+}
+
+applyTaxRegime(DEFAULT_TAX_REGIME);
 
 /** Довжина періоду підписки в добах. Річний — календарний рік, а не 12×30. */
 function periodDays(cycle: BillingCycle): number {
@@ -195,6 +280,11 @@ export function plansSnapshot() {
   return {
     plans: PLAN_ORDER.map((id) => PLANS[id]),
     currency: 'UAH',
+    tax: {
+      regime: activeTaxRegime,
+      vatIncluded: TAX_REGIMES[activeTaxRegime].vatIncluded,
+      vatPercent: TAX_REGIMES[activeTaxRegime].vatPercent,
+    },
     annualDiscountNote:
       'Річна оплата = 10 місячних цін («2 місяці в подарунок»). Безкоштовний план — без оплати.',
     annualDiscountNoteEn:

@@ -37,7 +37,7 @@ interface Track {
  */
 export const NarrationView: React.FC<NarrationViewProps> = ({ book, authUser, onGoToSubscription }) => {
   const { t, lang: uiLang } = useLanguage();
-  const access = usePlanAccess(authUser, ['pro', 'ultra']);
+  const access = usePlanAccess(authUser, ['pro', 'ultra', 'team']);
 
   const [lang, setLang] = useState<NarrationLang>(uiLang === 'en' ? 'en' : 'uk');
   const [trackIndex, setTrackIndex] = useState(0);

@@ -55,9 +55,10 @@ async function main() {
   });
 
   console.log('\nЦіни:');
-  await test('Start місяць = 260', () => assert.equal(priceFor('start', 'monthly'), 260));
-  await test('Pro рік = 8000 (10x)', () => assert.equal(priceFor('pro', 'annual'), 8000));
-  await test('Ultra місяць = 2600', () => assert.equal(priceFor('ultra', 'monthly'), 2600));
+  await test('Start місяць = 220 (ПДВ-платник, маржа 30%)', () => assert.equal(priceFor('start', 'monthly'), 220));
+  await test('Pro рік = 5400 (10x)', () => assert.equal(priceFor('pro', 'annual'), 5400));
+  await test('Ultra місяць = 2500', () => assert.equal(priceFor('ultra', 'monthly'), 2500));
+  await test('Team місяць = 4400', () => assert.equal(priceFor('team', 'monthly'), 4400));
   await test('Free завжди 0', () => assert.equal(priceFor('free', 'annual'), 0));
 
   console.log('\nБезкоштовний план — ліміт 10 за весь час:');

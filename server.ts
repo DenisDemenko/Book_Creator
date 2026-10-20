@@ -111,7 +111,7 @@ import { readGammaConfig, GAMMA_RATE_LIMIT_PER_SECOND } from './server/gamma/gam
 import { createGammaClient } from './server/gamma/gammaClient';
 import { registerNarrationRoutes } from './server/narrationRoutes';
 import { registerPublishingRoutes } from './server/publishingRoutes';
-import { checkImageQuota, requireImageQuota, requirePlanAtLeast, checkChatQuota, resolveSubscription } from './server/subscriptions';
+import { checkImageQuota, requireImageQuota, requirePlanAtLeast, checkChatQuota, resolveSubscription, loadTaxRegime } from './server/subscriptions';
 import {
   resolveEngine as resolveChatEngine,
   engineConfigured,
@@ -544,6 +544,7 @@ async function startServer() {
   app.use(aiRouteMiddleware(aiRouter));
 
   const storeInfo = await initStore();
+  await loadTaxRegime();
   console.log(
     storeInfo.backend === 'sqlite'
       ? `[db] Сховище: SQLite (${storeInfo.path})`

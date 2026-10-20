@@ -144,7 +144,7 @@ export function registerMarketRoutes(app: Express, deps: MarketRoutesDeps): void
   const now = deps.now || (() => new Date());
 
   /** Спільний ґейт усіх маршрутів модуля — один масив, щоб не розійшовся по копіях. */
-  const gate = [requireAuth, requirePermission('canMarketIntel'), requirePlanAtLeast(['pro', 'ultra'])] as const;
+  const gate = [requireAuth, requirePermission('canMarketIntel'), requirePlanAtLeast(['pro', 'ultra', 'team'])] as const;
 
   /**
    * Яким джерелом збирати наступний звіт.

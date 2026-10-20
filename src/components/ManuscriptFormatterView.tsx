@@ -30,7 +30,7 @@ interface SubscriptionMeInfo {
   plan: { id: string; nameUk: string; nameEn: string };
 }
 
-const ALLOWED_PLANS = new Set(['pro', 'ultra']);
+const ALLOWED_PLANS = new Set(['pro', 'ultra', 'team']);
 
 /** Читає .txt як звичайний текст, .docx — через mammoth (виключно в браузері, динамічний імпорт). */
 async function extractTextFromFile(file: File, unsupportedMsg: string): Promise<string> {
