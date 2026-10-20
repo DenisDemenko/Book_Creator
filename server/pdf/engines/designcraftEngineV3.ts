@@ -63,6 +63,7 @@ function specOf(input?: Partial<PdfLayoutSpec>): PdfLayoutSpec {
     frontMatter: { ...DEFAULT_LAYOUT_SPEC.frontMatter, ...(input?.frontMatter || {}) },
     pageNumber: { ...DEFAULT_LAYOUT_SPEC.pageNumber, ...(input?.pageNumber || {}) },
     runningHead: { ...DEFAULT_LAYOUT_SPEC.runningHead, ...(input?.runningHead || {}) },
+    pdfExport: { ...DEFAULT_LAYOUT_SPEC.pdfExport, ...(input?.pdfExport || {}) },
   };
 }
 
@@ -79,6 +80,67 @@ function pageSize(spec: PdfLayoutSpec): { width: number; height: number } {
  * шапку `../designcraft/commands.ts`.
  */
 const command = cmd;
+
+/**
+ * Параметри `file.exportPdf` з макетного spec. Один білдер на обидва
+ * транспорти: інакше файловий і сесійний шляхи експортували б по-різному, і
+ * побайтовий збіг, яким вимірювач доводить їх тотожність, перестав би щось
+ * означати.
+ *
+ * `standard: 'none'` не передається зовсім — рушій і так не застосовує
+ * стандарту, а зайвий параметр у скрипті лише заважав би читати його очима.
+ */
+export function exportParams(spec: PdfLayoutSpec, pdfPath: string): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    path: pdfPath,
+    tagged: spec.pdfExport.tagged,
+    compressImages: spec.pdfExport.compressImages,
+  };
+  if (spec.pdfExport.standard !== 'none') out.standard = spec.pdfExport.standard;
+  return out;
+}
+
+/**
+ * Брама відповідності. `designcraft-cli validate-pdf` перевіряє **лише**
+ * PDF/X-4: на звичайному PDF він скаржиться на речі, яких від нього ніхто й
+ * не вимагав («the PDF version must be 1.6 or lower»), а на PDF/A-2b — на
+ * чужий стандарт. Тому брама вмикається рівно для `x4`, інакше вона
+ * повідомляла б про неіснуючі проблеми.
+ */
+async function validateIfRequested(spec: PdfLayoutSpec, pdfPath: string, notesUk: string[]): Promise<void> {
+  if (spec.pdfExport.standard !== 'x4') return;
+  const out = await runCli(['validate-pdf', pdfPath]);
+  if (out.timedOut) {
+    notesUk.push('Перевірку PDF/X-4 не завершено вчасно; файл залишено як є.');
+    return;
+  }
+  let issues: unknown = null;
+  try {
+    issues = JSON.parse(out.stdout.trim())?.issues;
+  } catch {
+    notesUk.push(`Перевірка PDF/X-4 повернула нерозбірний звіт: ${out.stdout.trim().slice(0, 200)}`);
+    return;
+  }
+  if (Array.isArray(issues) && issues.length) {
+    throw new PdfEngineError(
+      'designcraft',
+      'engine',
+      `PDF/X-4: файл не відповідає стандарту (${issues.length}): ${issues.map((x) => String(x)).join('; ')}.`
+    );
+  }
+  notesUk.push('PDF/X-4: вбудована перевірка відповідності пройдена без зауважень.');
+}
+
+/** Що саме експортер зробив і про що попередив — авторові, а не в /dev/null. */
+function exportNotes(spec: PdfLayoutSpec, exported: any, notesUk: string[]): void {
+  const warnings = Array.isArray(exported?.warnings) ? exported.warnings.map((w: unknown) => String(w)) : [];
+  for (const warning of warnings) notesUk.push(`DesignCraft під час експорту: ${warning}`);
+  const parts: string[] = [];
+  parts.push(spec.pdfExport.tagged ? 'структурне дерево вкладено' : 'без структурного дерева');
+  if (spec.pdfExport.standard !== 'none') parts.push(`стандарт ${spec.pdfExport.standard.toUpperCase()}`);
+  if (spec.pdfExport.compressImages) parts.push('зображення стиснуто');
+  notesUk.push(`Експорт PDF: ${parts.join(', ')}.`);
+}
 
 /**
  * Єдине місце, де кроки стають текстом `.dcs`. Підпис приймає лише
@@ -593,7 +655,7 @@ async function renderInSession(request: PdfRenderRequest, spec: PdfLayoutSpec): 
       throw new PdfEngineError('designcraft', 'engine', 'Зміст: загальний TOC повернув менше записів, ніж окремий список глав.');
     }
 
-    const exported = await session.execute('file.exportPdf', { path: pdfPath });
+    const exported = await session.execute('file.exportPdf', exportParams(spec, pdfPath));
     const bytes = new Uint8Array(await fs.readFile(pdfPath));
     if (bytes.length < 1000) throw new PdfEngineError('designcraft', 'engine', 'DesignCraft створив підозріло малий PDF.');
     const pdf = await PDFDocument.load(bytes);
@@ -609,6 +671,8 @@ async function renderInSession(request: PdfRenderRequest, spec: PdfLayoutSpec): 
     if (Number(exported?.pages) !== pageCount) {
       throw new PdfEngineError('designcraft', 'engine', `file.exportPdf звітує ${String(exported?.pages)} стор., у PDF ${pageCount}.`);
     }
+    exportNotes(spec, exported, notesUk);
+    await validateIfRequested(spec, pdfPath, notesUk);
 
     const pagination = buildDesigncraftSemanticPagination({
       book: request.book,
@@ -751,6 +815,12 @@ export const designcraftEngineV3: PdfEngine = {
           ...titleFrames(request, spec),
           command('toc.generate', { styles: tocStyles, title: spec.frontMatter.contentsTitle || 'Зміст', pageNumbers: true, page: tocPage }),
           command('toc.update'),
+          // Експорт стоїть ПЕРЕД п'ятіркою запитів, а не після: запити
+          // документа не змінюють, тож порядок байт у PDF той самий, зате
+          // негативні індекси нижче лишаються прив'язані до тих самих п'яти
+          // результатів. Раніше експорт робив прапорець `--export`, і опції
+          // експортера були недосяжні.
+          command('file.exportPdf', exportParams(spec, pdfPath)),
           command('story.get', { story }),
           command('anchored.list', { story }),
           command('toc.entries', { styles: tocStyles }),
@@ -758,8 +828,9 @@ export const designcraftEngineV3: PdfEngine = {
           command('document.inspect'),
         ]
       );
-      const final = await runScript(finalScript, ['--in', contentDoc, '--save', finalDoc, '--export', pdfPath], workDir, 'DesignCraft не завершив фінальний PDF вчасно.');
+      const final = await runScript(finalScript, ['--in', contentDoc, '--save', finalDoc], workDir, 'DesignCraft не завершив фінальний PDF вчасно.');
       const r = Array.isArray(final.results) ? final.results : [];
+      const exported = r.at(-6) as any;
       const finalState = r.at(-5);
       const anchored = r.at(-4);
       const toc = r.at(-3);
@@ -796,6 +867,13 @@ export const designcraftEngineV3: PdfEngine = {
       if (Number(inspect?.pageCount) !== pageCount) {
         throw new PdfEngineError('designcraft', 'engine', `document.inspect не збігається з PDF: inspect=${String(inspect?.pageCount)}, PDF=${pageCount}.`);
       }
+      // Третє джерело кількості сторінок: сам експортер. Доступне відтоді,
+      // як експорт робить команда, а не прапорець `--export`.
+      if (Number(exported?.pages) !== pageCount) {
+        throw new PdfEngineError('designcraft', 'engine', `file.exportPdf звітує ${String(exported?.pages)} стор., у PDF ${pageCount}.`);
+      }
+      exportNotes(spec, exported, notesUk);
+      await validateIfRequested(spec, pdfPath, notesUk);
 
       const pagination = buildDesigncraftSemanticPagination({
         book: request.book,
