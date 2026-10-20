@@ -114,10 +114,22 @@ if (chapters.length === 0 || contentChars < 200) {
   throw new Error('Кандидат схожий на порожню/службову книгу; автоматичну публікацію зупинено.');
 }
 
+/*
+ * Супутні формати — на запит, бо кожен додає прохід експортера, а головна
+ * робота цього прогону інша: довести, що рушій узагалі працює на бінарнику з
+ * образу. `GATE_B_COMPANIONS=epub,html` вмикає їх, коли треба подивитися на
+ * версткові EPUB/HTML зі справжньої книги (у Студії є й власний браузерний
+ * EPUB, зібраний із моделі книги, — це різні продукти).
+ */
+const COMPANIONS = String(process.env.GATE_B_COMPANIONS || '')
+  .split(',')
+  .map((s) => s.trim().toLowerCase())
+  .filter((s): s is 'epub' | 'html' => s === 'epub' || s === 'html');
+
 const rendered = await designcraftEngineV3.render({
   book,
   kind: 'book',
-  spec,
+  spec: COMPANIONS.length ? ({ ...spec, pdfExport: { ...spec.pdfExport, companions: COMPANIONS } } as never) : spec,
   print: false,
   ownerId: stored.ownerId,
   ownerRole: 'admin',
@@ -141,6 +153,20 @@ const pdfRecord = await saveArtifact({
   variant: `test:${ENGINE_ID}`,
   bookRevision: stored.revision,
 });
+
+for (const extra of rendered.companions || []) {
+  const record = await saveArtifact({
+    bookId: stored.id,
+    kind: extra.kind,
+    format: 'digital',
+    filename: `${safeTitle(book.title)}_${ENGINE_ID}_TEST.${extra.extension}`,
+    mimeType: extra.mimeType,
+    bytes: extra.bytes,
+    variant: `test:${ENGINE_ID}`,
+    bookRevision: stored.revision,
+  });
+  console.log('[gate-b-arhat] companion=', { kind: extra.kind, id: record.id, bytes: extra.bytes.length });
+}
 
 const sample = await extractSamplePages(rendered.bytes, clampSamplePages(5));
 if (sample) {

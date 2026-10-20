@@ -54,6 +54,30 @@ export interface PdfRenderResult {
    * physical-only map, якщо рушій поки знає лише точну кількість сторінок.
    */
   pagination?: PaginationResult;
+  /**
+   * Супутні формати, зроблені з ТОГО САМОГО макета, що й PDF.
+   *
+   * Чому це тут, а не окремим рушієм: сенс саме в тому, що EPUB походить із
+   * вже зверстаного документа — ті самі стилі, той самий порядок читання, ті
+   * самі ілюстрації. Окремий виклик будував би його заново й міг би розійтися
+   * з PDF.
+   *
+   * Заповнює лише DesignCraft і лише на запит (`spec.pdfExport.companions`).
+   * Студія має й власний EPUB (`src/utils/fileExporters.ts`), зібраний у
+   * браузері з моделі книги; він нічого не знає про верстку й тему, тож це
+   * два різні продукти, а не заміна одного одним.
+   */
+  companions?: PdfCompanion[];
+}
+
+export type PdfCompanionKind = 'epub' | 'html';
+
+export interface PdfCompanion {
+  kind: PdfCompanionKind;
+  bytes: Uint8Array;
+  mimeType: string;
+  /** Розширення для імені файла артефакту. */
+  extension: string;
 }
 
 export interface PdfEngineAvailability {

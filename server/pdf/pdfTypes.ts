@@ -163,6 +163,15 @@ export interface PdfLayoutSpec {
      */
     standard: 'none' | 'x4' | 'a2b';
     compressImages: boolean;
+    /**
+     * Супутні формати з того самого макета: `epub` (reflowable, перша
+     * сторінка як обкладинка) і `html` (одна самодостатня сторінка).
+     *
+     * Типово порожньо — кожен формат додає прохід експортера, а Студія вже
+     * має власний браузерний EPUB. Це другий, **верстковий**, і вибір між
+     * ними — рішення автора, не замовчування.
+     */
+    companions: Array<'epub' | 'html'>;
   };
 
   /**
@@ -234,6 +243,7 @@ export const DEFAULT_LAYOUT_SPEC: PdfLayoutSpec = {
      */
     standard: 'none',
     compressImages: false,
+    companions: [],
   },
 };
 

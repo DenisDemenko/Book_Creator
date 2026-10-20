@@ -122,6 +122,37 @@ console.log('\nЖивий бінарник: що експортер справд
     t('нотатка називає стандарт', x4.notesUk.some((n) => /стандарт X4/.test(n)));
     t('X-4 справді важчий за звичайний (ICC-профіль)', x4.bytes.length > plain.bytes.length, `${x4.bytes.length} проти ${plain.bytes.length}`);
 
+    // --- супутні формати з того самого макета ---
+    t('типово супутників немає', !tagged.companions, JSON.stringify(tagged.companions?.map((c) => c.kind)));
+
+    const withEpub = await render({ companions: ['epub'] });
+    const epub = withEpub.companions?.find((c) => c.kind === 'epub');
+    t('EPUB зроблено', !!epub, `${epub?.bytes.length} Б`);
+    t('mime EPUB правильний', epub?.mimeType === 'application/epub+zip', epub?.mimeType);
+    t('розширення EPUB', epub?.extension === 'epub');
+    if (epub) {
+      const head = Buffer.from(epub.bytes.slice(0, 80)).toString('latin1');
+      t('EPUB — це zip (підпис PK)', head.startsWith('PK'), JSON.stringify(head.slice(0, 4)));
+      // EPUB вимагає, щоб `mimetype` був ПЕРШИМ записом і без стиснення:
+      // саме тому його видно в перших байтах архіву.
+      t('mimetype — перший запис архіву', head.includes('mimetypeapplication/epub+zip'), head.slice(0, 60));
+    }
+    t('нотатка каже про EPUB', withEpub.notesUk.some((n) => /Супутній EPUB зроблено/.test(n)), withEpub.notesUk.filter((n) => /EPUB/.test(n)).join(' | '));
+    t('PDF при цьому той самий за кількістю сторінок', withEpub.pageCount === tagged.pageCount, `${withEpub.pageCount} проти ${tagged.pageCount}`);
+
+    const withHtml = await render({ companions: ['html'] });
+    const html = withHtml.companions?.find((c) => c.kind === 'html');
+    t('HTML зроблено', !!html, `${html?.bytes.length} Б`);
+    t('mime HTML правильний', html?.mimeType === 'text/html; charset=utf-8', html?.mimeType);
+    if (html) {
+      const text = Buffer.from(html.bytes).toString('utf8');
+      t('HTML містить розмітку сторінки', /<html/i.test(text), text.slice(0, 60));
+      t('HTML містить текст книги', text.includes('Розділ перший'), String(/Розділ перший/.test(text)));
+    }
+
+    const both = await render({ companions: ['epub', 'html'] });
+    t('обидва формати разом', both.companions?.length === 2, JSON.stringify(both.companions?.map((c) => c.kind)));
+
     const a2b = await render({ standard: 'a2b' });
     t(
       'попередження експортера доходить до автора',
