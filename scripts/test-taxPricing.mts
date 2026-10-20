@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   TAX_REGIMES,
   TAX_REGIME_IDS,
-  TARGET_MARGIN,
+  targetMargin,
   monthlyPriceUah,
   priceBreakdown,
   roundUpPrice,
@@ -36,11 +36,11 @@ for (const id of TAX_REGIME_IDS) {
       const regime = TAX_REGIMES[id];
       const price = monthlyPriceUah(regime, plan);
       const b = priceBreakdown(regime, plan, price);
-      assert.ok(b.marginShare >= TARGET_MARGIN - 1e-9, `маржа ${b.marginShare}`);
+      assert.ok(b.marginShare >= targetMargin() - 1e-9, `маржа ${b.marginShare}`);
       assert.equal(price % (price < 1000 ? 10 : 100), 0);
       // ціна без запасу в один крок округлення маржу не тримала б
       const lower = priceBreakdown(regime, plan, price - (price < 1000 ? 10 : 100));
-      assert.ok(lower.marginShare < TARGET_MARGIN, 'ціна завищена більш ніж на крок');
+      assert.ok(lower.marginShare < targetMargin(), 'ціна завищена більш ніж на крок');
     });
   }
 }

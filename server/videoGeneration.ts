@@ -331,6 +331,25 @@ export function engineModelId(engine: VideoEngineInfo): string {
   return engine.apiVersion === 'v1' ? engine.leonardoModel : engine.modelSlug;
 }
 
+/**
+ * Параметри, з якими запит реально піде до провайдера (двигун, модель,
+ * роздільність, тривалість) — ті самі нормалізатори, що й у generateVideoRaw,
+ * тож ціна й баланс рахуються за фактичним викликом, а не за сирим запитом.
+ */
+export function resolveVideoParams(
+  engineId?: string,
+  resolution?: string,
+  durationSec?: number
+): { engine: VideoEngineInfo; modelId: string; resolution: VideoResolutionTier; durationSec: number | null } {
+  const engine = resolveVideoEngine(engineId);
+  return {
+    engine,
+    modelId: engineModelId(engine),
+    resolution: normalizeResolution(engine, resolution),
+    durationSec: engine.apiVersion === 'v1' ? normalizeV1Duration(engine, durationSec) : normalizeV2Duration(engine, durationSec),
+  };
+}
+
 function normalizeResolution(engine: VideoEngineInfo, requested?: string): VideoResolutionTier {
   if (requested && (engine.resolutions as readonly string[]).includes(requested)) {
     return requested as VideoResolutionTier;

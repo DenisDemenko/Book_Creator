@@ -30,7 +30,7 @@ import { AdminExpenseBoardView } from './AdminExpenseBoardView';
 import { AdminCrmView } from './AdminCrmView';
 import { AdminGitHistoryView } from './AdminGitHistoryView';
 import { AdminModerationView } from './AdminModerationView';
-import { AdminTaxPricingPanel } from './AdminTaxPricingPanel';
+import { AdminCreditsPanel } from './AdminCreditsPanel';
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -1088,7 +1088,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ tab: controlledT
 
       {tab === 'business' && revenue && (
         <div className="space-y-6">
-          <AdminTaxPricingPanel />
+          <AdminCreditsPanel />
           <div className="flex items-center gap-2">
             <span className="text-xs text-slate-400">Період:</span>
             {[7, 30, 90, 365].map((d) => (

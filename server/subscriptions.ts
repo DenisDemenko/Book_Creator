@@ -23,13 +23,23 @@ import type { Request, Response, NextFunction } from 'express';
 import { getSubscription, upsertSubscription, listUsageSince, getAppSetting, setAppSetting, type StoredSubscription } from './store';
 import {
   DEFAULT_TAX_REGIME,
-  PLAN_CREDITS,
   TAX_REGIMES,
+  getPricingConfig,
   isTaxRegimeId,
+  mergePricingConfig,
+  planCreditsFor,
+  setPricingConfig,
+  textBudgetUah,
   monthlyPriceUah,
   type TaxRegime,
   type TaxRegimeId,
 } from './taxPricing';
+
+/** Ліміт текстових AI-витрат на період підписки, $ (бюджет у ₴ за курсом цін; змінюється з адмінки). */
+export function textBudgetUsd(): number {
+  const c = getPricingConfig();
+  return c.textBudgetUah / c.fxUahPerUsd;
+}
 
 export type PlanId = 'free' | 'start' | 'pro' | 'ultra' | 'team';
 export type BillingCycle = 'monthly' | 'annual';
@@ -88,12 +98,12 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     priceAnnualUah: 0,
     imageQuota: 10,
     imageQuotaPeriod: 'lifetime',
-    aiCredits: PLAN_CREDITS.free,
+    aiCredits: planCreditsFor('free'),
     chatQuotaUsd: null,
     storageQuotaMb: 100,
     engines: ['nano-banana-2-lite', 'nano-banana-2'],
     featuresUk: [
-      '10 генерацій ілюстрацій ШІ за весь час (Nano Banana Lite / Standard)',
+      '300 пробних AI-балів одноразово (≈ 6 зображень Nano Banana Lite)',
       'Необмежене редагування тексту та AI-редактор (правки, граматика, стиль)',
       'Персонажі, сценарій, зміст, сноски та QR-теги — без обмежень',
       'Попередній перегляд книги та базовий експорт PDF',
@@ -101,7 +111,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
       '100 МБ фотоальбому для власних завантажень (jpg/png/svg), загалом на всі книги',
     ],
     featuresEn: [
-      '10 lifetime AI illustration generations (Nano Banana Lite / Standard)',
+      '300 trial AI credits, one-time (≈ 6 Nano Banana Lite images)',
       'Unlimited text editing and AI editor (edits, grammar, style)',
       'Characters, scenario, table of contents, footnotes and QR tags — unlimited',
       'Book preview and basic PDF export',
@@ -119,19 +129,19 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     priceAnnualUah: 2600,
     imageQuota: 100,
     imageQuotaPeriod: 'period',
-    aiCredits: PLAN_CREDITS.start,
-    chatQuotaUsd: null,
+    aiCredits: planCreditsFor('start'),
+    chatQuotaUsd: textBudgetUsd(),
     storageQuotaMb: 200,
     engines: 'all',
     featuresUk: [
-      '100 генерацій зображень на місяць, усі рушії Nano Banana (Lite / 2 / Pro)',
+      '2 000 AI-балів на місяць (≈ 41 зображення Lite або ≈ 20 Nano Banana 2), усі рушії; залишок згоряє',
       'Повний експорт: PDF, DOCX, EPUB під видавничі стандарти',
       'Історія версій книги з відновленням будь-якого зліпка',
       'Усе з плану «Безкоштовний»',
       '200 МБ фотоальбому для власних завантажень (jpg/png/svg), загалом на всі книги',
     ],
     featuresEn: [
-      '100 image generations per month, all Nano Banana engines (Lite / 2 / Pro)',
+      '2,000 AI credits per month (≈ 41 Lite or ≈ 20 Nano Banana 2 images), all engines; unused credits expire',
       'Full export: PDF, DOCX, EPUB to publishing standards',
       'Book version history with restore from any snapshot',
       'Everything in the Free plan',
@@ -148,20 +158,20 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     priceAnnualUah: 8000,
     imageQuota: 400,
     imageQuotaPeriod: 'period',
-    aiCredits: PLAN_CREDITS.pro,
-    chatQuotaUsd: 5,
+    aiCredits: planCreditsFor('pro'),
+    chatQuotaUsd: textBudgetUsd(),
     storageQuotaMb: 500,
     engines: 'all',
     featuresUk: [
-      '400 генерацій зображень на місяць, пріоритет якості Nano Banana Pro (4K)',
-      'ШІ-текст за мотивами зображення без обмежень (GPT та Gemini на вибір)',
+      '5 000 AI-балів на місяць (≈ 104 зображення Lite або ≈ 52 Nano Banana 2), у т.ч. Nano Banana Pro',
+      'ШІ-текст (GPT та Gemini на вибір) у межах 200 грн текстових витрат на період',
       'Пріоритетна черга генерації в години пікового навантаження',
       'Усе з плану Start',
       '500 МБ фотоальбому для власних завантажень (jpg/png/svg), загалом на всі книги',
     ],
     featuresEn: [
-      '400 image generations per month, priority Nano Banana Pro quality (4K)',
-      'Unlimited AI text from images (choice of GPT or Gemini)',
+      '5,000 AI credits per month (≈ 104 Lite or ≈ 52 Nano Banana 2 images), incl. Nano Banana Pro',
+      'AI text (choice of GPT or Gemini) within a 200 UAH text-spend limit per period',
       'Priority generation queue during peak hours',
       'Everything in the Start plan',
       '500 MB photo album storage for your own uploads (jpg/png/svg), shared across all books',
@@ -180,19 +190,19 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     priceAnnualUah: 26000,
     imageQuota: 2000,
     imageQuotaPeriod: 'period',
-    aiCredits: PLAN_CREDITS.ultra,
-    chatQuotaUsd: 20,
+    aiCredits: planCreditsFor('ultra'),
+    chatQuotaUsd: textBudgetUsd(),
     storageQuotaMb: 2000,
     engines: 'all',
     featuresUk: [
-      '2000 генерацій зображень на місяць — практично без обмежень',
+      '25 000 AI-балів на місяць (≈ 520 зображень Lite або ≈ 260 Nano Banana 2)',
       'Найвищий пріоритет обробки запитів у черзі генерації',
       'Пріоритетна підтримка команди NOVA STUDIO',
       'Усе з плану Pro',
       '2 ГБ фотоальбому для власних завантажень (jpg/png/svg), загалом на всі книги',
     ],
     featuresEn: [
-      '2000 image generations per month — practically unlimited',
+      '25,000 AI credits per month (≈ 520 Lite or ≈ 260 Nano Banana 2 images)',
       'Highest processing priority in the generation queue',
       'Priority support from the NOVA STUDIO team',
       'Everything in the Pro plan',
@@ -209,19 +219,19 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     priceAnnualUah: 0,
     imageQuota: 4000,
     imageQuotaPeriod: 'period',
-    aiCredits: PLAN_CREDITS.team,
-    chatQuotaUsd: 40,
+    aiCredits: planCreditsFor('team'),
+    chatQuotaUsd: textBudgetUsd(),
     storageQuotaMb: 5000,
     engines: 'all',
     featuresUk: [
-      '50 000 AI-балів на місяць і 4000 генерацій зображень',
+      '50 000 AI-балів на місяць (≈ 1 041 зображення Lite або ≈ 520 Nano Banana 2)',
       'Найвищий пріоритет обробки запитів у черзі генерації',
       'Пріоритетна підтримка команди NOVA STUDIO',
       'Усе з плану Ultra',
       '5 ГБ фотоальбому для власних завантажень (jpg/png/svg), загалом на всі книги',
     ],
     featuresEn: [
-      '50,000 AI credits per month and 4000 image generations',
+      '50,000 AI credits per month (≈ 1,041 Lite or ≈ 520 Nano Banana 2 images)',
       'Highest processing priority in the generation queue',
       'Priority support from the NOVA STUDIO team',
       'Everything in the Ultra plan',
@@ -233,26 +243,53 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
 export const PLAN_ORDER: PlanId[] = ['free', 'start', 'pro', 'ultra', 'team'];
 
 export const TAX_REGIME_SETTING_KEY = 'subscriptions.taxRegime';
+export const PRICING_CONFIG_SETTING_KEY = 'subscriptions.pricingConfig';
 let activeTaxRegime: TaxRegimeId = DEFAULT_TAX_REGIME;
 
 export function getActiveTaxRegime(): TaxRegime {
   return TAX_REGIMES[activeTaxRegime];
 }
 
-/** Перераховує ціни платних планів за режимом (річна = 10 місячних). */
-export function applyTaxRegime(id: TaxRegimeId): void {
-  activeTaxRegime = id;
-  const regime = TAX_REGIMES[id];
+/**
+ * Єдина точка, де коригування адміна переходять у підписки: за активним
+ * режимом і поточним PricingConfig перераховує ціни планів (річна = 10
+ * місячних), пакети балів і ліміт тексту. Формула списання балів читає той
+ * самий конфіг (server/creditPricing.ts), тож розходження неможливе.
+ */
+export function applyPricing(): void {
+  const regime = TAX_REGIMES[activeTaxRegime];
   for (const planId of PLAN_ORDER) {
+    PLANS[planId].aiCredits = planCreditsFor(planId);
     if (planId === 'free') continue;
     const monthly = monthlyPriceUah(regime, planId);
     PLANS[planId].priceMonthlyUah = monthly;
     PLANS[planId].priceAnnualUah = monthly * 10;
+    PLANS[planId].chatQuotaUsd = textBudgetUsd();
   }
+}
+
+export function applyTaxRegime(id: TaxRegimeId): void {
+  activeTaxRegime = id;
+  applyPricing();
+}
+
+/** Зберігає й застосовує нові параметри цін/балів. Кидає Error, якщо значення некоректні. */
+export async function updatePricingConfig(patch: unknown) {
+  const next = mergePricingConfig(getPricingConfig(), patch); // валідація до запису
+  await setAppSetting(PRICING_CONFIG_SETTING_KEY, JSON.stringify(next));
+  setPricingConfig(next);
+  applyPricing();
+  return getPricingConfig();
 }
 
 /** Читає збережений режим зі сховища (старт сервера). Невідоме значення → типовий. */
 export async function loadTaxRegime(): Promise<TaxRegimeId> {
+  try {
+    const raw = await getAppSetting(PRICING_CONFIG_SETTING_KEY);
+    if (raw) setPricingConfig(JSON.parse(raw));
+  } catch (err) {
+    console.warn('[subscriptions] Збережені параметри цін пошкоджені, беремо типові:', err);
+  }
   const stored = await getAppSetting(TAX_REGIME_SETTING_KEY);
   applyTaxRegime(isTaxRegimeId(stored) ? stored : DEFAULT_TAX_REGIME);
   return activeTaxRegime;
@@ -315,7 +352,7 @@ export async function activateSubscription(
   userId: string,
   plan: PlanId,
   cycle: BillingCycle,
-  provider: 'liqpay' | 'paypal',
+  provider: 'liqpay' | 'paypal' | 'admin',
   providerRef?: string
 ): Promise<StoredSubscription> {
   const now = new Date();
@@ -345,44 +382,39 @@ export interface QuotaCheckResult {
 }
 
 /**
- * Перевіряє, чи користувач ще не вичерпав ліміт генерацій зображень
- * свого плану. admin/designer тощо не звільняються тут — обмеження суто
- * по тарифу, роль вирішує лише саму можливість (BASE_SERVER_PERMISSIONS).
+ * Чи може користувач запускати генерацію зображення: перевіряє баланс AI-балів
+ * (server/creditGate.ts). Старі ліміти за КІЛЬКІСТЮ зображень прибрано за
+ * рішенням власника 20.10.2026. Поля used/quota/remaining тепер у балах.
+ * Адмін працює без лімітів; без SQLite чи за AI_CREDITS_DISABLED=1 — теж.
  */
 export async function checkImageQuota(userId: string, role: string): Promise<QuotaCheckResult> {
-  // Адміністратор працює без лімітів тарифу — так само, як і раніше.
-  if (role === 'admin') {
-    return { allowed: true, plan: 'ultra', used: 0, quota: null, remaining: null };
-  }
-
   const sub = await resolveSubscription(userId);
   const plan = (PLANS[sub.plan as PlanId] ? sub.plan : 'free') as PlanId;
-  const def = PLANS[plan];
+  const unlimited: QuotaCheckResult = { allowed: true, plan: role === 'admin' ? 'ultra' : plan, used: 0, quota: null, remaining: null };
+  if (role === 'admin') return unlimited;
 
-  if (def.imageQuota === null) {
-    return { allowed: true, plan, used: 0, quota: null, remaining: null };
-  }
+  const { creditStatus } = await import('./creditGate');
+  const { unlimited: off, balance } = await creditStatus(userId, role);
+  if (off || !balance) return unlimited;
 
-  const since = def.imageQuotaPeriod === 'lifetime' ? '1970-01-01T00:00:00.000Z' : sub.currentPeriodStart;
-  const records = await listUsageSince(since);
-  const used = records.filter((r) => r.userId === userId && r.kind === 'image' && r.success).length;
-  const remaining = Math.max(0, def.imageQuota - used);
-
-  if (used >= def.imageQuota) {
+  const quota = PLANS[plan].aiCredits;
+  const remaining = balance.available;
+  // Найдешевше зображення коштує 18 балів — менше за це вже нічого не згенерувати.
+  if (remaining < 18) {
+    const renewal = new Date(sub.currentPeriodEnd).toLocaleDateString('uk-UA');
     return {
       allowed: false,
       plan,
-      used,
-      quota: def.imageQuota,
-      remaining: 0,
+      used: Math.max(0, quota - remaining),
+      quota,
+      remaining,
       reasonUk:
         plan === 'free'
-          ? `Вичерпано безкоштовний ліміт (${def.imageQuota} зображень). Оберіть платний план на сторінці «Підписка».`
-          : `Вичерпано місячний ліміт плану ${def.nameUk} (${def.imageQuota} зображень). Ліміт оновиться ${new Date(sub.currentPeriodEnd).toLocaleDateString('uk-UA')} або оберіть вищий план.`,
+          ? 'Пробні AI-бали вичерпано. Оберіть платний план на сторінці «Підписка».'
+          : `Бали плану ${PLANS[plan].nameUk} на цей місяць вичерпано. Нові нарахуються ${renewal} або оберіть вищий план.`,
     };
   }
-
-  return { allowed: true, plan, used, quota: def.imageQuota, remaining };
+  return { allowed: true, plan, used: Math.max(0, quota - remaining), quota, remaining };
 }
 
 /**
@@ -400,7 +432,7 @@ export async function checkImageQuota(userId: string, role: string): Promise<Quo
 export async function checkChatQuota(
   userId: string,
   role: string,
-  usageContext = 'AI-асистент (чат-сесія)'
+  _usageContext = 'AI-асистент (чат-сесія)'
 ): Promise<QuotaCheckResult> {
   if (role === 'admin') {
     return { allowed: true, plan: 'ultra', used: 0, quota: null, remaining: null };
@@ -416,7 +448,7 @@ export async function checkChatQuota(
 
   const records = await listUsageSince(sub.currentPeriodStart);
   const usedUsd = records
-    .filter((r) => r.userId === userId && r.kind === 'text' && r.success && r.context === usageContext)
+    .filter((r) => r.userId === userId && r.kind === 'text' && r.success)
     .reduce((sum, r) => sum + (r.costUsd || 0), 0);
   const remaining = Math.max(0, def.chatQuotaUsd - usedUsd);
 
@@ -428,7 +460,7 @@ export async function checkChatQuota(
       quota: def.chatQuotaUsd,
       remaining: 0,
       reasonUk:
-        `Вичерпано місячний ліміт чат-витрат плану ${def.nameUk} ($${def.chatQuotaUsd}). ` +
+        `Вичерпано ліміт текстових AI-витрат плану ${def.nameUk} (${textBudgetUah()} грн на період). ` +
         `Ліміт оновиться ${new Date(sub.currentPeriodEnd).toLocaleDateString('uk-UA')} або оберіть вищий план.`,
     };
   }

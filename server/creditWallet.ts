@@ -143,6 +143,35 @@ export class CreditWallet {
     });
   }
 
+  /**
+   * Нарахування нового періоду: НЕЗАЛИШЕНІ бали попереднього періоду згорають
+   * (рішення власника, A-08), потім нараховується пакет. Одна транзакція,
+   * ідемпотентно за ключем періоду. Повертає true, якщо період нараховано.
+   */
+  grantPeriod(userId: string, amount: number, idempotencyKey: string, reason: string): boolean {
+    requireAmount(amount);
+    return this.tx(() => {
+      const dup = this.db.prepare('SELECT 1 AS x FROM credit_ledger WHERE idempotency_key = ?').get(idempotencyKey);
+      if (dup) return false;
+      const left = this.getBalance(userId).available;
+      if (left > 0) this.move(userId, 'expire', -left, 0, { reason: 'згоряння залишку періоду' });
+      this.move(userId, 'grant', amount, 0, { idempotencyKey, reason });
+      return true;
+    });
+  }
+
+  /** Урізає доступний баланс до cap (підписка закінчилась). Ідемпотентно за ключем. Повертає, скільки згоріло. */
+  capAvailable(userId: string, cap: number, idempotencyKey: string, reason: string): number {
+    return this.tx(() => {
+      const dup = this.db.prepare('SELECT 1 AS x FROM credit_ledger WHERE idempotency_key = ?').get(idempotencyKey);
+      if (dup) return 0;
+      const excess = Math.max(0, this.getBalance(userId).available - cap);
+      // Рядок пишемо й за нульового згоряння — він і є маркером ідемпотентності.
+      this.move(userId, 'expire', -excess, 0, { idempotencyKey, reason });
+      return excess;
+    });
+  }
+
   /** Резерв під генерацію. Повтор із тим самим jobKey повертає наявний резерв без повторного списання. */
   reserve(userId: string, jobKey: string, amount: number): CreditBalance {
     requireAmount(amount);
@@ -215,6 +244,12 @@ export class CreditWallet {
       this.move(userId, 'adjustment', delta, 0, { reason, operator });
       return this.getBalance(userId);
     });
+  }
+
+  /** Усі рахунки (для адмін-панелі). */
+  listAccounts(): CreditBalance[] {
+    const rows = this.db.prepare('SELECT user_id, available, reserved FROM credit_accounts').all() as any[];
+    return rows.map((r) => ({ userId: r.user_id, available: r.available, reserved: r.reserved }));
   }
 
   listLedger(userId: string, limit = 100): LedgerRow[] {

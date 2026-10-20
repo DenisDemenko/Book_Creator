@@ -21,7 +21,9 @@ fs.rmSync(DIR, { recursive: true, force: true });
 fs.mkdirSync(DIR, { recursive: true });
 
 import assert from 'node:assert/strict';
-const { initStore, saveUser, recordUsage, __resetCacheForTests } = await import('../server/store.ts');
+const { initStore, saveUser, __resetCacheForTests } = await import('../server/store.ts');
+const { CreditWallet } = await import('../server/creditWallet.ts');
+const { getDb } = await import('../server/db.ts');
 const { checkImageQuota, activateSubscription, resolveSubscription, priceFor, PLANS } = await import('../server/subscriptions.ts');
 const { __dropDatabaseForTests } = await import('../server/db.ts');
 
@@ -54,72 +56,45 @@ async function main() {
     createdAt: new Date().toISOString(),
   });
 
-  console.log('\nЦіни:');
-  await test('Start місяць = 220 (ПДВ-платник, маржа 30%)', () => assert.equal(priceFor('start', 'monthly'), 220));
-  await test('Pro рік = 5400 (10x)', () => assert.equal(priceFor('pro', 'annual'), 5400));
-  await test('Ultra місяць = 2500', () => assert.equal(priceFor('ultra', 'monthly'), 2500));
-  await test('Team місяць = 4400', () => assert.equal(priceFor('team', 'monthly'), 4400));
+  console.log('\nЦіни (платник ПДВ, маржа 30%, текст 200 грн):');
+  await test('Start місяць = 540', () => assert.equal(priceFor('start', 'monthly'), 540));
+  await test('Pro рік = 7400 (10x)', () => assert.equal(priceFor('pro', 'annual'), 7400));
+  await test('Ultra місяць = 2100', () => assert.equal(priceFor('ultra', 'monthly'), 2100));
+  await test('Team місяць = 3800', () => assert.equal(priceFor('team', 'monthly'), 3800));
   await test('Free завжди 0', () => assert.equal(priceFor('free', 'annual'), 0));
 
-  console.log('\nБезкоштовний план — ліміт 10 за весь час:');
-  await test('новий користувач: план free, ліміт 10, використано 0', async () => {
+  console.log('\nЗареєстрований без підписки («гість») — 300 пробних балів одноразово:');
+  await test('новий користувач: план free, 300 балів, використано 0', async () => {
     const check = await checkImageQuota(userId, 'writer');
     assert.equal(check.plan, 'free');
-    assert.equal(check.quota, 10);
-    assert.equal(check.used, 0);
+    assert.equal(check.quota, 300);
+    assert.equal(check.remaining, 300);
     assert.equal(check.allowed, true);
   });
 
-  // These lifetime records precede activation; equal millisecond timestamps belong to the new period.
-  const historicalUsageAt = new Date(Date.now() - 1000).toISOString();
-  // Симулюємо 10 успішних генерацій.
-  for (let i = 0; i < 10; i++) {
-    await recordUsage({
-      id: `use-test-${i}`,
-      timestamp: historicalUsageAt,
-      userId,
-      userEmail: 'sub-test@example.com',
-      role: 'writer',
-      kind: 'image',
-      engineId: 'nano-banana-2',
-      modelId: 'gemini-3.1-flash-image',
-      imageSize: '2K',
-      costUsd: 0.101,
-      success: true,
-    });
-  }
+  await test('повторна перевірка не нараховує пробні бали вдруге', async () => {
+    await checkImageQuota(userId, 'writer');
+    const check = await checkImageQuota(userId, 'writer');
+    assert.equal(check.remaining, 300);
+  });
 
-  await test('після 10 генерацій — квоту вичерпано', async () => {
+  const wallet = new CreditWallet(getDb() as any);
+  await test('після витрати 290 балів лишається 10 < 18 — генерацію заблоковано', async () => {
+    wallet.reserve(userId, 'trial-job', 290);
+    wallet.settle('trial-job', 290);
     const check = await checkImageQuota(userId, 'writer');
     assert.equal(check.allowed, false);
-    assert.equal(check.used, 10);
-    assert.ok(check.reasonUk && check.reasonUk.includes('безкоштовний'));
+    assert.equal(check.remaining, 10);
+    assert.ok(check.reasonUk && check.reasonUk.includes('Пробні'));
   });
 
-  await test('невдалі спроби не рахуються в квоту', async () => {
-    await recordUsage({
-      id: 'use-test-failed',
-      timestamp: historicalUsageAt,
-      userId,
-      userEmail: 'sub-test@example.com',
-      role: 'writer',
-      kind: 'image',
-      engineId: 'nano-banana-2',
-      modelId: 'gemini-3.1-flash-image',
-      costUsd: 0,
-      success: false,
-    });
-    const check = await checkImageQuota(userId, 'writer');
-    assert.equal(check.used, 10); // не 11
-  });
-
-  console.log('\nАктивація платної підписки знімає ліміт free:');
-  await test('після activateSubscription(pro) квота = 400, used скидається (новий period_start)', async () => {
+  console.log('\nАктивація платної підписки нараховує місячний пакет:');
+  await test('після activateSubscription(pro) пакет = 5000, залишок пробних згорів', async () => {
     await activateSubscription(userId, 'pro', 'monthly', 'liqpay', 'test-payment-1');
     const check = await checkImageQuota(userId, 'writer');
     assert.equal(check.plan, 'pro');
-    assert.equal(check.quota, 400);
-    assert.equal(check.used, 0); // period-based, попередні lifetime-записи були до currentPeriodStart
+    assert.equal(check.quota, 5000);
+    assert.equal(check.remaining, 5000);
     assert.equal(check.allowed, true);
   });
 

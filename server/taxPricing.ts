@@ -73,47 +73,112 @@ export function isTaxRegimeId(v: unknown): v is TaxRegimeId {
   return typeof v === 'string' && Object.prototype.hasOwnProperty.call(TAX_REGIMES, v);
 }
 
-/** Цільова валова маржа (частка від доходу без ПДВ) — рішення власника: 30%, а не націнка. */
-export const TARGET_MARGIN = 0.3;
-/** 3% платіжний оператор + 5% інфраструктура — від ціни, яку платить клієнт. */
-export const OVERHEAD_SHARE = 0.08;
-/** 1 бал = $0.001 роздрібної вартості; собівартість бала при марже 30% = $0.0007. */
-export const USD_PER_CREDIT = 0.001;
-export const COST_USD_PER_CREDIT = USD_PER_CREDIT * (1 - TARGET_MARGIN);
-/** Курс для розрахунку цін: НБУ 20.10.2026 = 45.0013, у цінах — стрес-курс 48 як буфер. */
-export const PRICING_FX_UAH_PER_USD = 48;
-
-/** Бюджет на текст/JEV/інші змінні AI-витрати, грн/міс, на повністю використаний пакет. */
-export const OTHER_AI_BUDGET_UAH: Record<string, number> = {
-  start: 40,
-  pro: 100,
-  ultra: 400,
-  team: 500,
-};
-
-/** Бали за місяць (free — одноразова пробна квота). */
-export const PLAN_CREDITS: Record<string, number> = {
-  free: 300,
-  start: 2_000,
-  pro: 5_000,
-  ultra: 25_000,
-  team: 50_000,
-};
-
-/** Частка ціни (gross), яка лишається на змінні витрати після податків, накладних і 30% маржі. */
-export function budgetShare(regime: TaxRegime): number {
-  const net = 1 / (1 + regime.vatPercent / 100);
-  return net * (1 - TARGET_MARGIN - regime.turnoverTaxShare) - OVERHEAD_SHARE;
+/**
+ * Параметри розрахунку цін і балів. Значення за замовчуванням — рішення
+ * власника (ТЗ v0.5, 20.10.2026); адмін змінює їх у панелі, і зміна ОДРАЗУ
+ * переноситься в ціни підписок, пакети балів, ліміт тексту й формулу
+ * списання (server/subscriptions.ts applyPricing, server/creditPricing.ts).
+ */
+export interface PricingConfig {
+  /** Цільова валова маржа, % від виручки без ПДВ (30 — маржа, а не націнка). */
+  targetMarginPercent: number;
+  /** Накладні (платіжний оператор 3% + інфраструктура 5%), % від ціни для клієнта. */
+  overheadPercent: number;
+  /** Роздрібна вартість 1 бала, USD. Собівартість бала = ця вартість × (1 − маржа). */
+  usdPerCredit: number;
+  /** Курс для розрахунку цін і ліміту тексту, ₴ за $ (стрес-курс 48 як буфер до НБУ 45.0013). */
+  fxUahPerUsd: number;
+  /** Ліміт витрат на текст/JEV, ₴ на період платної підписки (A-14). Закладений у ціну. */
+  textBudgetUah: number;
+  /** Пробні бали зареєстрованого користувача без підписки, одноразово. */
+  freeCredits: number;
+  /** Бали на місяць за планом. */
+  planCredits: { start: number; pro: number; ultra: number; team: number };
 }
 
-/** Мінімальна ціна (gross), що тримає 30% маржі, до округлення. */
-export function minPriceUah(
-  regime: TaxRegime,
-  credits: number,
-  otherAiUah: number,
-  fx = PRICING_FX_UAH_PER_USD
-): number {
-  const imageCost = credits * COST_USD_PER_CREDIT * fx;
+export const DEFAULT_PRICING_CONFIG: PricingConfig = {
+  targetMarginPercent: 30,
+  overheadPercent: 8,
+  usdPerCredit: 0.001,
+  fxUahPerUsd: 48,
+  textBudgetUah: 200,
+  freeCredits: 300,
+  planCredits: { start: 2_000, pro: 5_000, ultra: 25_000, team: 50_000 },
+};
+
+let pricingConfig: PricingConfig = structuredClone(DEFAULT_PRICING_CONFIG);
+
+export function getPricingConfig(): PricingConfig {
+  return structuredClone(pricingConfig);
+}
+
+/** Перевіряє й зливає часткове оновлення. Кидає Error з поясненням, якщо значення поза межами. */
+export function mergePricingConfig(base: PricingConfig, patch: unknown): PricingConfig {
+  const p = (patch && typeof patch === 'object' ? patch : {}) as Record<string, any>;
+  const next: PricingConfig = structuredClone(base);
+  const num = (key: keyof PricingConfig, min: number, max: number, integer = false) => {
+    if (p[key] === undefined) return;
+    const v = Number(p[key]);
+    if (!Number.isFinite(v) || v < min || v > max || (integer && !Number.isInteger(v))) {
+      throw new Error(`Поле ${String(key)} має бути ${integer ? 'цілим ' : ''}числом від ${min} до ${max}.`);
+    }
+    (next as any)[key] = v;
+  };
+  num('targetMarginPercent', 0, 90);
+  num('overheadPercent', 0, 40);
+  num('usdPerCredit', 0.00001, 1);
+  num('fxUahPerUsd', 1, 500);
+  num('textBudgetUah', 0, 100_000);
+  num('freeCredits', 0, 1_000_000, true);
+  if (p.planCredits !== undefined) {
+    for (const plan of ['start', 'pro', 'ultra', 'team'] as const) {
+      if (p.planCredits?.[plan] === undefined) continue;
+      const v = Number(p.planCredits[plan]);
+      if (!Number.isInteger(v) || v < 1 || v > 10_000_000) {
+        throw new Error(`Бали плану ${plan} мають бути цілим числом від 1 до 10 000 000.`);
+      }
+      next.planCredits[plan] = v;
+    }
+  }
+  if (next.targetMarginPercent + next.overheadPercent >= 95) {
+    throw new Error('Маржа й накладні разом мають бути менші за 95%.');
+  }
+  return next;
+}
+
+export function setPricingConfig(patch: unknown): PricingConfig {
+  pricingConfig = mergePricingConfig(pricingConfig, patch);
+  return getPricingConfig();
+}
+
+/** Цільова валова маржа як частка (0.30). */
+export function targetMargin(): number {
+  return pricingConfig.targetMarginPercent / 100;
+}
+export function overheadShare(): number {
+  return pricingConfig.overheadPercent / 100;
+}
+/** Собівартість одного бала, USD (за замовчуванням $0.0007 = $0.001 × (1 − 0.30)). */
+export function costUsdPerCredit(): number {
+  return pricingConfig.usdPerCredit * (1 - targetMargin());
+}
+export function textBudgetUah(): number {
+  return pricingConfig.textBudgetUah;
+}
+export function planCreditsFor(planId: string): number {
+  if (planId === 'free') return pricingConfig.freeCredits;
+  return (pricingConfig.planCredits as Record<string, number>)[planId] ?? 0;
+}
+
+/** Частка ціни (gross), яка лишається на змінні витрати після податків, накладних і цільової маржі. */
+export function budgetShare(regime: TaxRegime): number {
+  const net = 1 / (1 + regime.vatPercent / 100);
+  return net * (1 - targetMargin() - regime.turnoverTaxShare) - overheadShare();
+}
+
+/** Мінімальна ціна (gross), що тримає цільову маржу, до округлення. */
+export function minPriceUah(regime: TaxRegime, credits: number, otherAiUah: number, fx = pricingConfig.fxUahPerUsd): number {
+  const imageCost = credits * costUsdPerCredit() * fx;
   return (imageCost + otherAiUah) / budgetShare(regime);
 }
 
@@ -124,10 +189,10 @@ export function roundUpPrice(price: number): number {
   return Math.ceil(price / step - 1e-9) * step;
 }
 
-export function monthlyPriceUah(regime: TaxRegime, planId: string, fx = PRICING_FX_UAH_PER_USD): number {
-  const credits = PLAN_CREDITS[planId];
+export function monthlyPriceUah(regime: TaxRegime, planId: string, fx = pricingConfig.fxUahPerUsd): number {
+  const credits = planCreditsFor(planId);
   if (!credits || planId === 'free') return 0;
-  return roundUpPrice(minPriceUah(regime, credits, OTHER_AI_BUDGET_UAH[planId] ?? 0, fx));
+  return roundUpPrice(minPriceUah(regime, credits, pricingConfig.textBudgetUah, fx));
 }
 
 export interface PriceBreakdown {
@@ -148,13 +213,13 @@ export function priceBreakdown(
   regime: TaxRegime,
   planId: string,
   grossUah: number,
-  fx = PRICING_FX_UAH_PER_USD
+  fx = pricingConfig.fxUahPerUsd
 ): PriceBreakdown {
   const net = grossUah / (1 + regime.vatPercent / 100);
-  const imageCostUah = (PLAN_CREDITS[planId] ?? 0) * COST_USD_PER_CREDIT * fx;
-  const otherAiUah = OTHER_AI_BUDGET_UAH[planId] ?? 0;
+  const imageCostUah = planCreditsFor(planId) * costUsdPerCredit() * fx;
+  const otherAiUah = planId === 'free' ? 0 : pricingConfig.textBudgetUah;
   const turnoverTaxUah = net * regime.turnoverTaxShare;
-  const overheadUah = grossUah * OVERHEAD_SHARE;
+  const overheadUah = grossUah * overheadShare();
   const contributionUah = net - turnoverTaxUah - overheadUah - imageCostUah - otherAiUah;
   const r2 = (n: number) => Math.round(n * 100) / 100;
   return {

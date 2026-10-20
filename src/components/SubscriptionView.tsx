@@ -303,7 +303,7 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({ authUser }) 
               <span className="text-slate-300">
                 {myInfo.quota.quota === null
                   ? t('subscription.unlimitedImages')
-                  : t('subscription.usedOfImages', { used: myInfo.quota.used, quota: myInfo.quota.quota })}
+                  : t('subscription.usedOfImages', { remaining: myInfo.quota.remaining ?? 0, quota: myInfo.quota.quota })}
               </span>
             </div>
             {myInfo.storage && (
