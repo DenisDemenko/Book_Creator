@@ -107,7 +107,9 @@ if (MODE === 'audit') {
   console.log('[gate-b-arhat] RESULT=audit_ok');
   process.exit(0);
 }
-if (MODE !== 'publish') throw new Error(`Невідомий GATE_B_ARHAT_MODE=${MODE}; дозволено audit|publish.`);
+if (MODE !== 'publish' && MODE !== 'render') {
+  throw new Error(`Невідомий GATE_B_ARHAT_MODE=${MODE}; дозволено audit|render|publish.`);
+}
 if (chapters.length === 0 || contentChars < 200) {
   throw new Error('Кандидат схожий на порожню/службову книгу; автоматичну публікацію зупинено.');
 }
@@ -153,6 +155,28 @@ if (sample) {
     variant: `test:${ENGINE_ID}`,
     bookRevision: stored.revision,
   });
+}
+
+/*
+ * Режим `render` зупиняється саме тут: рукопис уже пройшов справжній рушій
+ * DesignCraft на цій машині (у production — на published-tarball і через
+ * шим), PDF і уривок збережені як артефакти, і НІЧОГО не поїхало на вітрину.
+ *
+ * Чому це окремий режим. `audit` виходить ДО рендера, тож рушія не торкається
+ * взагалі, а `publish` рендерить і одразу публікує тестове видання в каталог.
+ * Перевірити конвеєр у production, не чіпаючи вітрину, досі було нічим — а
+ * саме це й потрібно після деплою: чи працює рушій на бінарнику з образу (у
+ * ньому, на відміну від збірки з джерел, немає `text.selectStory`), чи шим
+ * досі обрізає звіт і чи проходить справжня книга без `bad_input` від
+ * перевірки можливостей. Запис журналу #446 і PLAN_DESIGNCRAFT_BRIDGE.md.
+ */
+if (MODE === 'render') {
+  console.log('[gate-b-arhat] artifacts=', {
+    pdf: { id: pdfRecord.id, filename: pdfRecord.filename, pages: rendered.pageCount },
+    sample: sample ? { pages: sample.pageCount } : null,
+  });
+  console.log('[gate-b-arhat] RESULT=render_ok');
+  process.exit(0);
 }
 
 let cover = existingCover;
