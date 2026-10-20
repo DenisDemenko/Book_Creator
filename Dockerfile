@@ -76,6 +76,19 @@ ENV DESIGNCRAFT_REAL_PATH=/usr/local/lib/designcraft/designcraft-cli \
     DESIGNCRAFT_PATH=/usr/local/bin/designcraft-cli-compat \
     CHROMIUM_PATH=/usr/bin/chromium
 
+# NOVA_BASE_PATH потрібен і в РАНТАЙМІ, не лише у build.
+#
+# Збірка Vite прибиває префікс у HTML (`/studio/assets/...`), а зрізає його
+# або rewrite Next.js перед Nova, або — коли Nova відкривають напряму —
+# middleware у server.ts. Той middleware читає саме цю змінну, і без неї
+# `basePath` стає порожнім, зрізання вимикається, і на прямій адресі Railway
+# бандл Студії віддає 404, хоча ті самі файли без префікса доступні
+# (перевірено 20.10.2026: `/studio/assets/index-….js` → 404,
+# `/assets/index-….js` → 200). Публічний вхід через Vercel від цього не
+# страждає, бо там префікса вже немає; ламався лише прямий вхід — той, яким
+# дивляться production при діагностиці. Запис журналу #450.
+ENV NOVA_BASE_PATH=/studio/
+
 # NODE_ENV=production вмикає роздачу готового dist/.
 COPY --from=build /app/node_modules node_modules
 COPY --from=build /app/dist dist

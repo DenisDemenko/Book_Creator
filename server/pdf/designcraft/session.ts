@@ -43,6 +43,13 @@ export interface DesigncraftSessionOptions {
   timeoutMs: number;
   /** Межа на одну відповідь: story.get на справжній книзі дає сотні КБ. */
   maxResponseChars: number;
+  /**
+   * Аргументи запуску; типові — `['mcp']`. Існують заради тестів: підставний
+   * сервер протоколу запускається як `node fake-server.mjs`, і без цього
+   * поля транспорт можна було б перевірити лише разом зі справжнім
+   * бінарником DesignCraft, тобто ніколи в CI.
+   */
+  args?: readonly string[];
 }
 
 /**
@@ -93,7 +100,7 @@ export class DesigncraftSession {
 
   /** Запустити сесію й пройти рукостискання MCP. */
   static async start(options: DesigncraftSessionOptions): Promise<DesigncraftSession> {
-    const child = spawn(options.cliPath, ['mcp'], {
+    const child = spawn(options.cliPath, [...(options.args || ['mcp'])], {
       env: { ...process.env },
       stdio: ['pipe', 'pipe', 'pipe'],
     }) as ChildProcessWithoutNullStreams;
