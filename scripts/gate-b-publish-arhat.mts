@@ -11,7 +11,22 @@ import {
   readBridgeSettings,
 } from '../server/marketplaceBridge';
 
-const MODE = String(process.env.GATE_B_ARHAT_MODE || 'audit').toLowerCase();
+/*
+ * Режим можна задати АРГУМЕНТОМ, а не лише змінною оточення.
+ *
+ * Чому. `GATE_B_ARHAT_MODE=render node …` — синтаксис bash. У PowerShell, із
+ * якого власник і запускає, він не працює взагалі (`Имя "…=render" не
+ * распознано`), а правильна форма там інша (`$env:GATE_B_ARHAT_MODE='render'`).
+ * Команда, яку неможливо скопіювати в свою консоль, не виконується — отже
+ * приймається аргумент: `node dist/gate-b-publish-arhat.mjs render` працює
+ * однаково в bash, PowerShell і cmd.
+ *
+ * Змінна лишається робочою: нею вже послуговуються записи журналу й
+ * «Що не запушено».
+ */
+const MODE = String(process.argv[2] || process.env.GATE_B_ARHAT_MODE || 'audit')
+  .trim()
+  .toLowerCase();
 const ENGINE_ID = 'designcraft';
 const TITLE_RE = /(архат|путь\s+дому|шлях\s+додому)/iu;
 const markerPath = path.join(DATA_DIR, 'gate-b-arhat-designcraft.json');
@@ -121,7 +136,7 @@ if (chapters.length === 0 || contentChars < 200) {
  * версткові EPUB/HTML зі справжньої книги (у Студії є й власний браузерний
  * EPUB, зібраний із моделі книги, — це різні продукти).
  */
-const COMPANIONS = String(process.env.GATE_B_COMPANIONS || '')
+const COMPANIONS = String(process.argv[3] || process.env.GATE_B_COMPANIONS || '')
   .split(',')
   .map((s) => s.trim().toLowerCase())
   .filter((s): s is 'epub' | 'html' => s === 'epub' || s === 'html');
