@@ -15,6 +15,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { PDFDocument } from 'pdf-lib';
 import { DEFAULT_LAYOUT_SPEC, PAGE_SIZES, type PdfLayoutSpec } from '../pdfTypes';
+// Правила KDP беруться там, де вони вже є: один рушій не має права мати
+// власну думку про припустиме корінцеве поле.
+import { kdpSpec } from '../pdfKdp';
+import { getKdpMinimumGutterMm } from '../../../src/utils/kdpHelpers';
 import { buildDesigncraftSemanticPagination } from '../designcraftSemanticPagination';
 import {
   buildDesigncraftRtf,
@@ -92,13 +96,23 @@ const command = cmd;
  * `standard: 'none'` не передається зовсім — рушій і так не застосовує
  * стандарту, а зайвий параметр у скрипті лише заважав би читати його очима.
  */
-export function exportParams(spec: PdfLayoutSpec, pdfPath: string): Record<string, unknown> {
+export function exportParams(
+  spec: PdfLayoutSpec,
+  pdfPath: string,
+  print?: { bleed?: boolean }
+): Record<string, unknown> {
   const out: Record<string, unknown> = {
     path: pdfPath,
     tagged: spec.pdfExport.tagged,
     compressImages: spec.pdfExport.compressImages,
   };
   if (spec.pdfExport.standard !== 'none') out.standard = spec.pdfExport.standard;
+  if (print) {
+    // Друкарні потрібні мітки обрізу; виліт — лише якщо книга його має, бо
+    // без зображень «під зріз» він лише з'їдає поле.
+    out.marks = true;
+    if (print.bleed) out.bleed = true;
+  }
   return out;
 }
 
@@ -592,7 +606,96 @@ async function minimizePagesInSession(
   return { pageCount: high, state: exactState };
 }
 
-async function renderInSession(request: PdfRenderRequest, spec: PdfLayoutSpec): Promise<PdfRenderResult> {
+/**
+ * Узгодження корінця з обсягом — те, через що друкований макет і лишався за
+ * Nova.
+ *
+ * КУРКА З ЯЙЦЕМ. Мінімальне корінцеве поле KDP залежить від кількості
+ * сторінок, а кількість сторінок — від ширини текстового блоку, тобто від
+ * поля. Nova розв'язує це трьома ПОВНИМИ перезверстками
+ * (`renderKdpInterior`). У живій сесії документ лишається в пам'яті, тож
+ * досить змінити поля (`layout.marginsAndColumns` з `adjustLayout`) і
+ * перезібрати нитку — повторної верстки з нуля не потрібно.
+ *
+ * Правила KDP НЕ дублюються: `kdpSpec` і `getKdpMinimumGutterMm` — ті самі,
+ * якими користується Nova. Інакше два рушії з часом розійшлися б у тому, що
+ * вважають припустимим полем, і автор не знав би, кому вірити.
+ *
+ * Корінець тільки РОСТЕ, як і в Nova: вузьке поле KDP відхилить, ширше — ні.
+ */
+async function agreeKdpGutter(
+  session: DesigncraftSession,
+  request: PdfRenderRequest,
+  baseSpec: PdfLayoutSpec,
+  story: number,
+  state: { pageCount: number; spec: PdfLayoutSpec; gutterMm: number },
+  notesUk: string[]
+): Promise<void> {
+  for (let pass = 0; pass < 3; pass += 1) {
+    const needed = getKdpMinimumGutterMm(state.pageCount).minMm;
+    if (needed <= state.gutterMm) {
+      notesUk.push(
+        `KDP: корінцеве поле ${state.gutterMm} мм при мінімумі ${needed} мм для ${state.pageCount} стор. — узгоджено за ${pass} ${pass === 1 ? 'прохід' : 'проходів'}.`
+      );
+      return;
+    }
+    const next = kdpSpec({
+      base: baseSpec,
+      trimId: request.trimId,
+      hasBleed: request.hasBleed,
+      pageCountEstimate: state.pageCount,
+    });
+    const merged = specOf(next.spec);
+    const report = await session.batch([
+      command('layout.marginsAndColumns', {
+        margins: {
+          top: merged.margins.top,
+          bottom: merged.margins.bottom,
+          inside: merged.margins.left,
+          outside: merged.margins.right,
+        },
+        adjustLayout: true,
+      }),
+      command('story.get', { story }),
+    ]);
+    assertReportOk(report, 'Узгодження корінця KDP');
+    state.spec = merged;
+    state.gutterMm = next.gutterMm;
+
+    // Ширший корінець звужує текст, тож нитка могла піти в overset: добираємо
+    // сторінки, доки вона не вміститься, і фіксуємо новий обсяг.
+    let current = (report.results || []).at(-1);
+    let pages = state.pageCount;
+    let guard = 0;
+    while (overset(current) && guard < 64) {
+      pages += Math.max(1, Math.ceil(pages * 0.02));
+      const grow = await session.batch([
+        command('layout.documentSetup', { pages }),
+        command('story.get', { story }),
+      ]);
+      assertReportOk(grow, 'Добір сторінок після зміни корінця');
+      current = (grow.results || []).at(-1);
+      guard += 1;
+    }
+    if (overset(current)) {
+      throw new PdfEngineError('designcraft', 'engine', 'Після зміни корінця нитка не вмістилася навіть із запасом сторінок.');
+    }
+    const minimized = await minimizePagesInSession(session, story, 1, pages);
+    state.pageCount = minimized.pageCount;
+    notesUk.push(`KDP: корінець ${next.gutterMm} мм → обсяг ${minimized.pageCount} стор.`);
+  }
+  const needed = getKdpMinimumGutterMm(state.pageCount).minMm;
+  if (needed > state.gutterMm) {
+    throw new PdfEngineError(
+      'designcraft',
+      'engine',
+      `KDP: корінець не узгодився за три проходи (треба ${needed} мм, маємо ${state.gutterMm} мм при ${state.pageCount} стор.).`
+    );
+  }
+}
+
+async function renderInSession(request: PdfRenderRequest, specIn: PdfLayoutSpec): Promise<PdfRenderResult> {
+  let spec = specIn;
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'nova-designcraft-session-'));
   const manuscriptPath = path.join(workDir, 'manuscript.txt');
   const checkpoint = path.join(workDir, 'checkpoint.designcraft');
@@ -601,6 +704,19 @@ async function renderInSession(request: PdfRenderRequest, spec: PdfLayoutSpec): 
   processLaunches += 1;
   const session = await DesigncraftSession.start(sessionOptions());
   try {
+    /*
+     * Друкована редакція починається з макета KDP, а не з екранного: обріз,
+     * дзеркальні поля й початковий корінець задає `kdpSpec`. Далі корінець
+     * узгоджується з фактичним обсягом (`agreeKdpGutter`).
+     */
+    const kdp = request.print
+      ? kdpSpec({ base: spec, trimId: request.trimId, hasBleed: request.hasBleed, pageCountEstimate: 24 })
+      : null;
+    if (kdp) spec = specOf(kdp.spec);
+    // Нотатки друку збираються окремо, бо `notesUk` з'являється лише після
+    // підготовки ілюстрацій, а корінець узгоджується раніше.
+    const notesPrint: string[] = [];
+
     const manuscript = buildDesigncraftRtf(request.book, spec);
     await fs.writeFile(manuscriptPath, manuscript.rtf, 'utf8');
     const tocPage = spec.titlePage.show ? 2 : 1;
@@ -610,7 +726,9 @@ async function renderInSession(request: PdfRenderRequest, spec: PdfLayoutSpec): 
       command('file.new', {
         ...pageSize(spec),
         pages: bodyPage,
-        facingPages: false,
+        // Дзеркальні поля мають сенс лише на розкладках: саме вони роблять
+        // внутрішнє поле внутрішнім. Для екранного PDF це зайве.
+        facingPages: !!request.print,
         margins: { top: spec.margins.top, bottom: spec.margins.bottom, inside: spec.margins.left, outside: spec.margins.right },
         title: request.book.title || 'Fusion Lab book',
       }),
@@ -631,6 +749,13 @@ async function renderInSession(request: PdfRenderRequest, spec: PdfLayoutSpec): 
     }
     const allocatedPages = bodyPage + pagesAdded;
     const minimized = await minimizePagesInSession(session, story, bodyPage, allocatedPages);
+
+    if (kdp) {
+      const agreed = { pageCount: minimized.pageCount, spec, gutterMm: kdp.gutterMm };
+      await agreeKdpGutter(session, request, specIn, story, agreed, notesPrint);
+      spec = agreed.spec;
+      minimized.pageCount = agreed.pageCount;
+    }
 
     const beforeImages = await session.execute('story.get', { story });
     const placements = locateImages(String(beforeImages?.text || ''), manuscript);
@@ -723,7 +848,10 @@ async function renderInSession(request: PdfRenderRequest, spec: PdfLayoutSpec): 
       throw new PdfEngineError('designcraft', 'engine', 'Зміст: загальний TOC повернув менше записів, ніж окремий список глав.');
     }
 
-    const exported = await session.execute('file.exportPdf', exportParams(spec, pdfPath));
+    const exported = await session.execute(
+      'file.exportPdf',
+      exportParams(spec, pdfPath, kdp ? { bleed: request.hasBleed } : undefined)
+    );
     const bytes = new Uint8Array(await fs.readFile(pdfPath));
     if (bytes.length < 1000) throw new PdfEngineError('designcraft', 'engine', 'DesignCraft створив підозріло малий PDF.');
     const pdf = await PDFDocument.load(bytes);
@@ -753,6 +881,7 @@ async function renderInSession(request: PdfRenderRequest, spec: PdfLayoutSpec): 
       contentStartPageIndex: bodyPage - 1,
     });
 
+    if (notesPrint.length) notesUk.unshift(...notesPrint);
     const semanticNames = manuscript.semanticStylesUsed.filter((name) => !['Body', 'Heading 1', 'Heading 2'].includes(name));
     if (semanticNames.length) notesUk.unshift(`Тема DesignCraft застосувала семантичні стилі: ${semanticNames.join(', ')}.`);
     notesUk.unshift(
@@ -793,7 +922,10 @@ export const designcraftEngineV3: PdfEngine = {
   label: 'DesignCraft',
   strengthUk: 'Професійна книжкова верстка з нативним reflow, автоматичним змістом, ілюстраціями, колонтитулами та нумерацією.',
   limitUk: 'Друкований KDP-макет із розрахунком корінця поки лишається за Nova; DesignCraft використовується для цифрового PDF.',
-  supportsPrint: false,
+  // Чесно: друкований макет існує ЛИШЕ в сесійному транспорті (там живий
+  // документ, без якого корінець не узгодити). У файловому його немає, і
+  // обіцяти його там означало б показати авторові кнопку, що не працює.
+  supportsPrint: DESIGNCRAFT_SESSION_MODE,
   supportsCompanions: true,
 
   async available(): Promise<PdfEngineAvailability> {

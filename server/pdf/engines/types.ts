@@ -30,8 +30,12 @@ export interface PdfRenderRequest {
   kind: PdfDocumentKind;
   /** Налаштування макета від Studio. */
   spec?: Partial<PdfLayoutSpec>;
-  /** Друкована редакція під KDP. Підтримує лише рушій `nova`. */
+  /** Друкована редакція під KDP. */
   print?: boolean;
+  /** Обріз KDP (`KDP_TRIM_SIZES`), коли `print`. Типово 6x9. */
+  trimId?: string;
+  /** Виліт під обріз — для книг із зображеннями «під зріз». */
+  hasBleed?: boolean;
   /** Хто друкує — для рушіїв, які працюють під ключем автора. */
   ownerId?: string | null;
   /** Роль того, хто друкує. */
