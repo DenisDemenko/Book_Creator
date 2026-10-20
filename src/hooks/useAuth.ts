@@ -71,10 +71,32 @@ function firebaseErrorMessage(err: unknown): string {
       return 'Невірна пошта або пароль.';
     case 'auth/popup-closed-by-user':
       return 'Вікно входу закрито до завершення.';
+    case 'auth/popup-blocked':
+      return 'Браузер заблокував вікно входу Google. Відкрийте сайт безпосередньо у Safari або Chrome та дозвольте спливаючі вікна.';
+    case 'auth/operation-not-supported-in-this-environment':
+      return 'Google-вхід не підтримується в цьому вбудованому браузері. Відкрийте сайт безпосередньо у Safari або Chrome.';
+    case 'auth/unauthorized-domain':
+      return `Цей домен не дозволено у Firebase Authentication. Адміністратору потрібно додати ${window.location.hostname} до Authorized domains.`;
+    case 'auth/operation-not-allowed':
+      return 'Цей спосіб входу вимкнено у Firebase Authentication. Адміністратору потрібно увімкнути відповідний Sign-in provider.';
+    case 'auth/configuration-not-found':
+      return 'Для Firebase-проєкту не налаштовано Authentication. Перевірте налаштування Firebase Console.';
+    case 'auth/invalid-api-key':
+      return 'Помилка Firebase API key у конфігурації збірки. Перевірте VITE_FIREBASE_API_KEY у Railway.';
     case 'auth/network-request-failed':
       return 'Немає звʼязку з сервером автентифікації. Перевірте інтернет.';
+    case 'auth/too-many-requests':
+      return 'Забагато спроб входу. Зачекайте та повторіть пізніше.';
+    case 'auth/user-disabled':
+      return 'Цей обліковий запис вимкнено у Firebase.';
+    case 'auth/account-exists-with-different-credential':
+      return 'Ця пошта вже використовується з іншим способом входу. Увійдіть попереднім способом.';
     default:
-      return 'Не вдалося увійти. Спробуйте ще раз.';
+      // Show only a bounded SDK code; the former generic message hid
+      // all production configuration failures. Never reveal credentials.
+      return code.startsWith('auth/') && /^[a-z0-9-]{1,60}$/.test(code.slice(5))
+        ? `Помилка входу Firebase (${code}). Повідомте цей код адміністратору.`
+        : 'Не вдалося увійти. Спробуйте ще раз.';
   }
 }
 
