@@ -22,7 +22,13 @@ import {
   IMAGE_END,
   type DesigncraftManuscript,
 } from '../designcraft/rtf';
-import { serializeDesigncraftParagraphStyles } from '../designcraft/styleCommands';
+import { buildDesigncraftStyleCommands } from '../designcraft/styleCommands';
+import { cmd, serializeScript, type DesigncraftCommand } from '../designcraft/commands';
+import {
+  DesigncraftSession,
+  DesigncraftSessionError,
+  type DesigncraftReport,
+} from '../designcraft/session';
 import {
   findUnsupportedScriptSteps,
   readDesigncraftCapabilities,
@@ -67,11 +73,39 @@ function pageSize(spec: PdfLayoutSpec): { width: number; height: number } {
   return PAGE_SIZES[spec.pageSize] || PAGE_SIZES.A5;
 }
 
-function command(id: string, params: Record<string, unknown> = {}): string {
-  return `${id} ${JSON.stringify(params)}`;
+/**
+ * Крок конвеєра — дані, а не рядок. Рядок `.dcs` потрібен лише файловому
+ * транспорту; жива сесія віддає ті самі об'єкти інструменту `batch`. Див.
+ * шапку `../designcraft/commands.ts`.
+ */
+const command = cmd;
+
+/**
+ * Єдине місце, де кроки стають текстом `.dcs`. Підпис приймає лише
+ * `DesigncraftCommand[]`, тож випадкова конкатенація кроку з рядком (яку
+ * TypeScript пропускає, бо `object + string` законне) тут неможлива.
+ */
+async function writeScript(file: string, steps: readonly DesigncraftCommand[]): Promise<void> {
+  await fs.writeFile(file, serializeScript(steps), 'utf8');
+}
+
+/**
+ * Скільки разів запускався процес DesignCraft. Існує для вимірювача
+ * (`scripts/bench-designcraftSession.mts`): різниця між транспортами — саме в
+ * цьому числі, і читати його з логів було б менш надійно, ніж рахувати тут.
+ */
+let processLaunches = 0;
+
+export function __designcraftProcessLaunches(): number {
+  return processLaunches;
+}
+
+export function __resetDesigncraftProcessLaunches(): void {
+  processLaunches = 0;
 }
 
 function runCli(args: string[], cwd?: string): Promise<CliResult> {
+  processLaunches += 1;
   return new Promise((resolve) => {
     const child = spawn(DESIGNCRAFT_PROD_PATH, args, {
       cwd,
@@ -196,7 +230,7 @@ function frame(
   text: string,
   size: number,
   a: 'left' | 'center' | 'right' = 'center'
-): string[] {
+): DesigncraftCommand[] {
   if (!text.trim()) return [];
   return [
     command('frame.create', { spread, rect, content: 'text', text }),
@@ -205,7 +239,7 @@ function frame(
   ];
 }
 
-function titleFrames(request: PdfRenderRequest, spec: PdfLayoutSpec): string[] {
+function titleFrames(request: PdfRenderRequest, spec: PdfLayoutSpec): DesigncraftCommand[] {
   if (!spec.titlePage.show) return [];
   const { width, height } = pageSize(spec);
   const left = spec.margins.left;
@@ -218,10 +252,10 @@ function titleFrames(request: PdfRenderRequest, spec: PdfLayoutSpec): string[] {
   ];
 }
 
-function parentFrames(request: PdfRenderRequest, spec: PdfLayoutSpec): string[] {
+function parentFrames(request: PdfRenderRequest, spec: PdfLayoutSpec): DesigncraftCommand[] {
   const { width, height } = pageSize(spec);
   const parent: SpreadRef = { kind: 'parent', index: 0 };
-  const out: string[] = [];
+  const out: DesigncraftCommand[] = [];
   if (spec.runningHead.show) {
     const y = Math.max(10, spec.margins.top * 0.25);
     const rect: [number, number, number, number] = [spec.margins.left, y, width - spec.margins.right, y + 18];
@@ -289,7 +323,7 @@ async function prepareImages(workDir: string, manuscript: DesigncraftManuscript,
 
 async function getStory(workDir: string, doc: string, story: number, name: string): Promise<any> {
   const script = path.join(workDir, name);
-  await fs.writeFile(script, command('story.get', { story }) + '\n', 'utf8');
+  await writeScript(script, [command('story.get', { story })]);
   const report = await runScript(script, ['--in', doc], workDir, 'DesignCraft не відповів під час перевірки story.');
   return report.results?.[0];
 }
@@ -318,7 +352,7 @@ async function minimizePages(
     const mid = Math.floor((low + high) / 2);
     const script = path.join(workDir, `${label}-probe-${probe}.dcs`);
     const candidate = path.join(workDir, `${label}-probe-${probe}.designcraft`);
-    await fs.writeFile(script, [command('layout.documentSetup', { pages: mid }), command('story.get', { story })].join('\n') + '\n', 'utf8');
+    await writeScript(script, [command('layout.documentSetup', { pages: mid }), command('story.get', { story })]);
     const report = await runScript(script, ['--in', sourceDoc, '--save', candidate], workDir, 'DesignCraft не завершив пошук мінімальної кількості сторінок.');
     const state = report.results?.at(-1);
     if (overset(state)) {
@@ -334,11 +368,283 @@ async function minimizePages(
   if (high === maxPages) return { doc: sourceDoc, pageCount: maxPages, state: bestState };
   const exact = path.join(workDir, `${label}-exact.designcraft`);
   const exactScript = path.join(workDir, `${label}-exact.dcs`);
-  await fs.writeFile(exactScript, [command('layout.documentSetup', { pages: high }), command('story.get', { story })].join('\n') + '\n', 'utf8');
+  await writeScript(exactScript, [command('layout.documentSetup', { pages: high }), command('story.get', { story })]);
   const exactReport = await runScript(exactScript, ['--in', sourceDoc, '--save', exact], workDir, 'DesignCraft не завершив фінальне обрізання сторінок.');
   const exactState = exactReport.results?.at(-1);
   if (overset(exactState)) throw new PdfEngineError('designcraft', 'engine', `Внутрішня перевірка reflow: ${high} стор. знову дали overset.`);
   return { doc: exact, pageCount: high, state: exactState };
+}
+
+// ---------------------------------------------------------------------------
+// Другий транспорт: той самий конвеєр в ОДНІЙ живій сесії.
+//
+// Увімкнення — `DESIGNCRAFT_SESSION=1`. Типовим шляхом лишається файловий:
+// це спайк, і порівнювати треба з чимось живим. Команди обидва шляхи беруть
+// з тих самих білдерів (`command()`, `buildDesigncraftStyleCommands`,
+// `parentFrames`, `titleFrames`), тож верстка однакова за побудовою.
+//
+// Відкат невдалої спроби — єдине, чим шляхи РІЗНЯТЬСЯ по суті, і саме це
+// порівнюється. Файловий щоразу стартує з того самого збереженого документа.
+// Сесійний має живий документ, тож:
+//   - проба кількості сторінок — один undoable крок, відкат через `edit.undo`
+//     (перевірено: `pages=10` на книзі в 109 стор. дало overset=30489, після
+//     undo — overset=null і 109 стор.);
+//   - спроба з ілюстраціями — це багато кроків, і рахувати undo було б
+//     крихко, тому перед циклом ставиться контрольна точка `file.save`, а
+//     невдала спроба відкочується `file.open`. Два записи файлу в найгіршому
+//     разі замість повторного прогону всього конвеєра.
+// ---------------------------------------------------------------------------
+
+export const DESIGNCRAFT_SESSION_MODE =
+  process.env.DESIGNCRAFT_SESSION === '1' || process.env.DESIGNCRAFT_SESSION === 'true';
+
+function sessionOptions() {
+  return { cliPath: DESIGNCRAFT_PROD_PATH, timeoutMs: TIMEOUT_MS, maxResponseChars: MAX_OUTPUT };
+}
+
+/** Звіт `batch` має ту саму форму, що й звіт `script`: перевірка теж спільна. */
+function assertReportOk(report: DesigncraftReport, whatUk: string): void {
+  if (report?.failedIndex !== undefined && report?.failedIndex !== null) {
+    const id = report.failedCommand ? ` (${report.failedCommand})` : '';
+    throw new PdfEngineError(
+      'designcraft',
+      'engine',
+      `${whatUk}: крок ${report.failedIndex}${id}: ${String(report.error || 'невідома помилка')}`
+    );
+  }
+}
+
+/**
+ * Найменша кількість сторінок, за якої нитка не overset — у живій сесії.
+ * Кожна невдала проба відкочується одним `edit.undo`, тож наступна проба
+ * починає з того самого стану, що й у файловому шляху.
+ */
+async function minimizePagesInSession(
+  session: DesigncraftSession,
+  story: number,
+  minPages: number,
+  maxPages: number
+): Promise<{ pageCount: number; state: any }> {
+  let low = minPages;
+  let high = Math.max(minPages, maxPages);
+  let bestState = await session.execute('story.get', { story });
+  if (overset(bestState)) {
+    throw new PdfEngineError('designcraft', 'engine', 'DesignCraft autoflow завершився з overset.');
+  }
+
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    const report = await session.batch([
+      command('layout.documentSetup', { pages: mid }),
+      command('story.get', { story }),
+    ]);
+    assertReportOk(report, 'Пошук мінімальної кількості сторінок');
+    const state = (report.results || []).at(-1);
+    if (overset(state)) {
+      // Крок був один undoable — повертаємо документ як було.
+      await session.execute('edit.undo', {});
+      low = mid + 1;
+    } else {
+      high = mid;
+      bestState = state;
+      await session.execute('edit.undo', {});
+    }
+  }
+
+  if (high === maxPages) return { pageCount: maxPages, state: bestState };
+
+  const exact = await session.batch([
+    command('layout.documentSetup', { pages: high }),
+    command('story.get', { story }),
+  ]);
+  assertReportOk(exact, 'Фінальне обрізання сторінок');
+  const exactState = (exact.results || []).at(-1);
+  if (overset(exactState)) {
+    throw new PdfEngineError(
+      'designcraft',
+      'engine',
+      `Внутрішня перевірка reflow: ${high} стор. знову дали overset.`
+    );
+  }
+  return { pageCount: high, state: exactState };
+}
+
+async function renderInSession(request: PdfRenderRequest, spec: PdfLayoutSpec): Promise<PdfRenderResult> {
+  const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'nova-designcraft-session-'));
+  const manuscriptPath = path.join(workDir, 'manuscript.txt');
+  const checkpoint = path.join(workDir, 'checkpoint.designcraft');
+  const pdfPath = path.join(workDir, 'book.pdf');
+
+  processLaunches += 1;
+  const session = await DesigncraftSession.start(sessionOptions());
+  try {
+    const manuscript = buildDesigncraftRtf(request.book, spec);
+    await fs.writeFile(manuscriptPath, manuscript.rtf, 'utf8');
+    const tocPage = spec.titlePage.show ? 2 : 1;
+    const bodyPage = tocPage + 1;
+
+    const initial = await session.batch([
+      command('file.new', {
+        ...pageSize(spec),
+        pages: bodyPage,
+        facingPages: false,
+        margins: { top: spec.margins.top, bottom: spec.margins.bottom, inside: spec.margins.left, outside: spec.margins.right },
+        title: request.book.title || 'Fusion Lab book',
+      }),
+      ...buildDesigncraftStyleCommands(spec, manuscript.semanticStylesUsed),
+      command('file.place', { path: manuscriptPath, page: bodyPage, autoflow: true, styleConflicts: 'useExisting' }),
+    ]);
+    assertReportOk(initial, 'Первинне autoflow');
+    const placed = (initial.results || []).find(
+      (v: any) => v && typeof v === 'object' && 'pagesAdded' in v && 'story' in v
+    ) as any;
+    const story = Number(placed?.story);
+    const pagesAdded = Number(placed?.pagesAdded || 0);
+    if (!Number.isFinite(story)) {
+      throw new PdfEngineError('designcraft', 'engine', 'DesignCraft не повернув story після імпорту рукопису.');
+    }
+    if (placed?.overset) {
+      throw new PdfEngineError('designcraft', 'engine', 'Первинне DesignCraft autoflow завершилось із overset.');
+    }
+    const allocatedPages = bodyPage + pagesAdded;
+    const minimized = await minimizePagesInSession(session, story, bodyPage, allocatedPages);
+
+    const beforeImages = await session.execute('story.get', { story });
+    const placements = locateImages(String(beforeImages?.text || ''), manuscript);
+    const notesUk = await prepareImages(workDir, manuscript, placements, request.ownerId);
+    if (manuscript.unresolvedMarkers.length) {
+      notesUk.push(`Не знайдено ілюстрацій для маркерів: ${manuscript.unresolvedMarkers.join(', ')}.`);
+    }
+    const loadedImages = placements.filter((p) => p.path).length;
+
+    if (placements.length) {
+      const textWidth = pageSize(spec).width - spec.margins.left - spec.margins.right;
+      // Контрольна точка: невдалу спробу з ілюстраціями відкотити одним відкриттям.
+      await session.execute('file.save', { path: checkpoint });
+      let accepted = false;
+      for (const factor of [0.56, 0.46, 0.36]) {
+        const commands: DesigncraftCommand[] = [];
+        for (const image of placements) {
+          commands.push(command('story.replaceRange', { story, start: image.start, end: image.end, text: '' }));
+          if (image.path) {
+            commands.push(command('file.place', { path: image.path, spread: 0, x: 0, y: 0, width: Math.min(260, textWidth * factor) }));
+            commands.push(command('anchored.insert', { ids: ['$last.id'], story, pos: image.start, position: 'aboveLine', align: 'center', spaceBefore: 8, spaceAfter: 10 }));
+          }
+        }
+        commands.push(command('story.get', { story }));
+        const report = await session.batch(commands);
+        assertReportOk(report, 'Вставлення ілюстрацій');
+        if (!overset((report.results || []).at(-1))) {
+          accepted = true;
+          break;
+        }
+        await session.execute('file.open', { path: checkpoint });
+      }
+      if (!accepted) {
+        throw new PdfEngineError('designcraft', 'engine', 'Ілюстрації спричинили overset навіть після автоматичного зменшення.');
+      }
+    }
+
+    const frontPages = Array.from({ length: bodyPage - 1 }, (_, i) => i);
+    const tocStyles = spec.frontMatter.contentsSections ? ['Heading 1', 'Heading 2'] : ['Heading 1'];
+    const final = await session.batch([
+      command('layout.section', { page: bodyPage, startNumber: Math.max(1, Math.round(spec.pageNumber.startAt || 1)), style: 'arabic' }),
+      ...(frontPages.length && (spec.runningHead.show || spec.pageNumber.skipFrontMatter)
+        ? [command('layout.pages.applyParent', { pages: frontPages, parent: null })]
+        : []),
+      ...parentFrames(request, spec),
+      ...titleFrames(request, spec),
+      command('toc.generate', { styles: tocStyles, title: spec.frontMatter.contentsTitle || 'Зміст', pageNumbers: true, page: tocPage }),
+      command('toc.update'),
+      command('story.get', { story }),
+      command('anchored.list', { story }),
+      command('toc.entries', { styles: tocStyles }),
+      command('toc.entries', { styles: ['Heading 1'] }),
+      command('document.inspect'),
+    ]);
+    assertReportOk(final, 'Фінальний прохід');
+    const r = Array.isArray(final.results) ? final.results : [];
+    const finalState = r.at(-5) as any;
+    const anchored = r.at(-4);
+    const toc = r.at(-3);
+    const chapterToc = r.at(-2);
+    const inspect = r.at(-1) as any;
+
+    if (overset(finalState)) throw new PdfEngineError('designcraft', 'engine', 'Фінальна перевірка знайшла overset.');
+    if (!Array.isArray(anchored) || anchored.length !== loadedImages) {
+      throw new PdfEngineError('designcraft', 'engine', `Ілюстрації: очікувалось ${loadedImages}, знайдено ${Array.isArray(anchored) ? anchored.length : 0}.`);
+    }
+    const chapterCount = request.book.chapters?.length || 0;
+    const chapterEntries = Array.isArray(chapterToc) ? chapterToc : [];
+    if (chapterCount && chapterEntries.length !== chapterCount) {
+      const missing = missingChapterTitles(request, chapterEntries);
+      const returned = chapterEntries.map((e: any) => normalizedHeading(e?.text));
+      throw new PdfEngineError(
+        'designcraft',
+        'engine',
+        [
+          `Зміст: глав ${chapterCount}, Heading 1 на сторінках ${chapterEntries.length}.`,
+          missing.length ? `Не потрапили до змісту: ${missing.map((x) => `«${x}»`).join(', ')}.` : '',
+          `DesignCraft повернув: ${returned.map((x) => `«${x}»`).join(', ')}.`,
+        ].filter(Boolean).join(' ')
+      );
+    }
+    if (!Array.isArray(toc) || toc.length < chapterEntries.length) {
+      throw new PdfEngineError('designcraft', 'engine', 'Зміст: загальний TOC повернув менше записів, ніж окремий список глав.');
+    }
+
+    const exported = await session.execute('file.exportPdf', { path: pdfPath });
+    const bytes = new Uint8Array(await fs.readFile(pdfPath));
+    if (bytes.length < 1000) throw new PdfEngineError('designcraft', 'engine', 'DesignCraft створив підозріло малий PDF.');
+    const pdf = await PDFDocument.load(bytes);
+    const pageCount = pdf.getPageCount();
+    if (pageCount !== minimized.pageCount) {
+      throw new PdfEngineError('designcraft', 'engine', `Кількість сторінок не збігається: PDF=${pageCount}, reflow=${minimized.pageCount}.`);
+    }
+    if (Number(inspect?.pageCount) !== pageCount) {
+      throw new PdfEngineError('designcraft', 'engine', `document.inspect не збігається з PDF: inspect=${String(inspect?.pageCount)}, PDF=${pageCount}.`);
+    }
+    // Третє незалежне джерело кількості сторінок, якого файловий шлях не мав:
+    // `file.exportPdf` сам звітує, скільки сторінок записав.
+    if (Number(exported?.pages) !== pageCount) {
+      throw new PdfEngineError('designcraft', 'engine', `file.exportPdf звітує ${String(exported?.pages)} стор., у PDF ${pageCount}.`);
+    }
+
+    const pagination = buildDesigncraftSemanticPagination({
+      book: request.book,
+      tocEntries: toc,
+      chapterEntries,
+      inspect,
+      titlePageShown: spec.titlePage.show,
+      tocPageIndex: tocPage - 1,
+      contentStartPageIndex: bodyPage - 1,
+    });
+
+    const semanticNames = manuscript.semanticStylesUsed.filter((name) => !['Body', 'Heading 1', 'Heading 2'].includes(name));
+    if (semanticNames.length) notesUk.unshift(`Тема DesignCraft застосувала семантичні стилі: ${semanticNames.join(', ')}.`);
+    notesUk.unshift(
+      `DesignCraft (жива сесія): ${pageCount} стор. (первинно виділено ${allocatedPages}, зайвий хвіст прибрано бінарною перевіркою), без overset, зміст синхронізовано (${chapterEntries.length}/${chapterCount} глав), ${loadedImages} ілюстрацій перевірено.`
+    );
+    return { bytes, pageCount, engineId: 'designcraft', honoredSpec: true, notesUk, pagination };
+  } catch (err) {
+    if (err instanceof PdfEngineError) throw err;
+    if (err instanceof DesigncraftSessionError) {
+      throw new PdfEngineError('designcraft', err.kind === 'timeout' ? 'timeout' : 'engine', `DesignCraft: ${err.message}`);
+    }
+    throw new PdfEngineError('designcraft', 'engine', `DesignCraft: ${(err as Error).message}`);
+  } finally {
+    session.close();
+    await fs.rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+/**
+ * Лише для вимірювача: сесійний шлях, викликаний напряму, щоб обидва
+ * транспорти можна було зміряти в ОДНОМУ процесі Node — інакше різниця
+ * включала б прогрів V8 і кеш файлової системи, а не транспорт.
+ */
+export async function __renderWithSession(request: PdfRenderRequest): Promise<PdfRenderResult> {
+  return await renderInSession(request, specOf(request.spec));
 }
 
 export const designcraftEngineV3: PdfEngine = {
@@ -359,6 +665,10 @@ export const designcraftEngineV3: PdfEngine = {
     if (!availability.ok) throw new PdfEngineError('designcraft', 'unavailable', availability.reasonUk || 'DesignCraft недоступний.');
 
     const spec = specOf(request.spec);
+    // Спайк: той самий конвеєр в одній живій сесії. Типовим лишається
+    // файловий шлях нижче — див. блок перед цим об'єктом.
+    if (DESIGNCRAFT_SESSION_MODE) return await renderInSession(request, spec);
+
     const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'nova-designcraft-v3-'));
     const manuscriptPath = path.join(workDir, 'manuscript.txt');
     const initialScript = path.join(workDir, 'initial.dcs');
@@ -370,7 +680,7 @@ export const designcraftEngineV3: PdfEngine = {
       await fs.writeFile(manuscriptPath, manuscript.rtf, 'utf8');
       const tocPage = spec.titlePage.show ? 2 : 1;
       const bodyPage = tocPage + 1;
-      await fs.writeFile(
+      await writeScript(
         initialScript,
         [
           command('file.new', {
@@ -380,10 +690,9 @@ export const designcraftEngineV3: PdfEngine = {
             margins: { top: spec.margins.top, bottom: spec.margins.bottom, inside: spec.margins.left, outside: spec.margins.right },
             title: request.book.title || 'Fusion Lab book',
           }),
-          ...serializeDesigncraftParagraphStyles(spec, manuscript.semanticStylesUsed),
+          ...buildDesigncraftStyleCommands(spec, manuscript.semanticStylesUsed),
           command('file.place', { path: manuscriptPath, page: bodyPage, autoflow: true, styleConflicts: 'useExisting' }),
-        ].join('\n') + '\n',
-        'utf8'
+        ]
       );
       const initial = await runScript(initialScript, ['--save', initialDoc], workDir, 'DesignCraft не завершив первинне autoflow вчасно.');
       const placed = (initial.results || []).find((v: any) => v && typeof v === 'object' && 'pagesAdded' in v && 'story' in v);
@@ -407,7 +716,7 @@ export const designcraftEngineV3: PdfEngine = {
         for (const factor of [0.56, 0.46, 0.36]) {
           const script = path.join(workDir, `images-${factor}.dcs`);
           const outDoc = path.join(workDir, `images-${factor}.designcraft`);
-          const commands: string[] = [];
+          const commands: DesigncraftCommand[] = [];
           for (const image of placements) {
             commands.push(command('story.replaceRange', { story, start: image.start, end: image.end, text: '' }));
             if (image.path) {
@@ -416,7 +725,7 @@ export const designcraftEngineV3: PdfEngine = {
             }
           }
           commands.push(command('story.get', { story }));
-          await fs.writeFile(script, commands.join('\n') + '\n', 'utf8');
+          await writeScript(script, commands);
           const report = await runScript(script, ['--in', minimized.doc, '--save', outDoc], workDir, 'DesignCraft не завершив вставлення ілюстрацій.');
           if (!overset(report.results?.at(-1))) {
             contentDoc = outDoc;
@@ -431,7 +740,7 @@ export const designcraftEngineV3: PdfEngine = {
       const finalDoc = path.join(workDir, 'final.designcraft');
       const frontPages = Array.from({ length: bodyPage - 1 }, (_, i) => i);
       const tocStyles = spec.frontMatter.contentsSections ? ['Heading 1', 'Heading 2'] : ['Heading 1'];
-      await fs.writeFile(
+      await writeScript(
         finalScript,
         [
           command('layout.section', { page: bodyPage, startNumber: Math.max(1, Math.round(spec.pageNumber.startAt || 1)), style: 'arabic' }),
@@ -447,8 +756,7 @@ export const designcraftEngineV3: PdfEngine = {
           command('toc.entries', { styles: tocStyles }),
           command('toc.entries', { styles: ['Heading 1'] }),
           command('document.inspect'),
-        ].join('\n') + '\n',
-        'utf8'
+        ]
       );
       const final = await runScript(finalScript, ['--in', contentDoc, '--save', finalDoc, '--export', pdfPath], workDir, 'DesignCraft не завершив фінальний PDF вчасно.');
       const r = Array.isArray(final.results) ? final.results : [];

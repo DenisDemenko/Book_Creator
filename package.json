@@ -171,6 +171,7 @@
     "test:invite-mail": "tsx scripts/test-invite-mail.mts",
     "test:pdf-engines": "tsx scripts/test-pdfEngines.mts",
     "test:designcraft-capabilities": "tsx scripts/test-designcraftCapabilities.mts",
+    "bench:designcraft-session": "tsx scripts/bench-designcraftSession.mts",
     "test:pdf-sample": "tsx scripts/test-pdfSample.mts",
     "test:pdf-cover": "tsx scripts/test-pdfCover.mts",
     "test:pdf": "tsx scripts/test-pdfRenderer.mts",
