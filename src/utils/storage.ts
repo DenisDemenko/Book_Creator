@@ -341,6 +341,31 @@ async function mirrorBookToServer(book: Book): Promise<void> {
   }
 }
 
+/**
+ * Кешує підтверджену серверну книгу на новому пристрої БЕЗ повторного PUT.
+ * Потрібно для списку «Мої книги» на дашборді: звичайний saveBook()
+ * одночасно дзеркалює дані на сервер і міг створити конфлікт ревізії.
+ * Тут ревізія сервера запам'ятовується перед першим редагуванням.
+ */
+export async function cacheBookFromServer(book: Book, revision: number): Promise<void> {
+  if (!book?.id || !Number.isInteger(revision) || revision < 1) {
+    throw new Error('Некоректні дані книги або ревізії сервера.');
+  }
+  await ensureBackend();
+  const lean = stripSnapshotPayloads(book);
+  if (usingFallback) {
+    lsSet(`nova_book_${book.id}`, lean);
+  } else {
+    await idbPut(STORE_BOOKS, {
+      id: book.id,
+      data: lean,
+      updatedAt: new Date().toISOString(),
+    } as BookRecord);
+  }
+  serverRevisions.set(book.id, revision);
+  await saveMeta(META_ACTIVE_BOOK, book.id);
+}
+
 /** Завантажує книгу за id; без id — останню активну. */
 export async function loadBook(bookId?: string): Promise<Book | undefined> {
   await ensureBackend();
