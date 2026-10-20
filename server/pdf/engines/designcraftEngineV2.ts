@@ -422,6 +422,7 @@ export const designcraftEngineV2: PdfEngine = {
   strengthUk: 'Професійна книжкова верстка з контрольованим reflow, змістом, ілюстраціями, колонтитулами та нумерацією.',
   limitUk: 'Друкований KDP-макет із розрахунком корінця поки лишається за Nova; DesignCraft використовується для цифрового PDF.',
   supportsPrint: false,
+  supportsCompanions: false,
 
   async available(): Promise<PdfEngineAvailability> {
     const out = await runCli(['--version'], { timeoutMs: 12_000 });

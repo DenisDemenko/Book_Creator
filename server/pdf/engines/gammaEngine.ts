@@ -66,6 +66,7 @@ export const gammaEngine: PdfEngine = {
     'Переписує текст, а не верстає його; списує кредити ВАШОЇ підписки Gamma; ' +
     'працює хвилини й залежить від чужого сервера.',
   supportsPrint: false,
+  supportsCompanions: false,
 
   async available(context: PdfEngineContext = {}): Promise<PdfEngineAvailability> {
     if (!makeClient) {

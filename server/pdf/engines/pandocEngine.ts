@@ -174,6 +174,7 @@ export const pandocEngine: PdfEngine = {
     'Найповільніший і найважчий; помилку в розмітці показує мовою LaTeX, ' +
     'а не мовою книги. Полів під KDP не гарантує.',
   supportsPrint: false,
+  supportsCompanions: false,
 
   async available(): Promise<PdfEngineAvailability> {
     try {

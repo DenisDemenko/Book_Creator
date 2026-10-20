@@ -102,6 +102,14 @@ export interface PdfEngine {
   limitUk: string;
   /** Чи підтримує друковану редакцію під KDP. */
   supportsPrint: boolean;
+  /**
+   * Чи вміє супутні формати з того самого макета (`companions`).
+   *
+   * Окрема ознака, а не припущення: інтерфейс мусить або показати авторові
+   * кнопку, яка працює, або не показати її зовсім. Вимкнена кнопка без
+   * причини — гірше за відсутню.
+   */
+  supportsCompanions: boolean;
   available(context?: PdfEngineContext): Promise<PdfEngineAvailability>;
   render(request: PdfRenderRequest): Promise<PdfRenderResult>;
 }

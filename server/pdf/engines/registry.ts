@@ -43,6 +43,7 @@ export interface PdfEngineDescription {
   strengthUk: string;
   limitUk: string;
   supportsPrint: boolean;
+  supportsCompanions: boolean;
   available: boolean;
   reasonUk?: string;
   fixUk?: string;
@@ -75,6 +76,7 @@ export async function listPdfEngines(
     strengthUk: engine.strengthUk,
     limitUk: engine.limitUk,
     supportsPrint: engine.supportsPrint,
+    supportsCompanions: engine.supportsCompanions,
     available: state.ok,
     reasonUk: state.ok ? undefined : state.reasonUk,
     fixUk: state.ok ? undefined : state.fixUk,
@@ -96,6 +98,19 @@ export async function renderWithEngine(
       DEFAULT_PDF_ENGINE,
       'bad_input',
       `Невідомий рушій PDF: «${id}». Доступні: ${Object.keys(ENGINES).join(', ')}.`
+    );
+  }
+
+  // Супутні формати — як друкована редакція: якщо рушій цього не вміє,
+  // автор мусить почути це словами, а не отримати PDF без того, що просив.
+  const wantedCompanions = (request.spec as { pdfExport?: { companions?: unknown[] } } | undefined)?.pdfExport
+    ?.companions;
+  if (Array.isArray(wantedCompanions) && wantedCompanions.length && !engine.supportsCompanions) {
+    throw new PdfEngineError(
+      engine.id,
+      'bad_input',
+      `Рушій «${engine.label}» не робить супутніх форматів (${wantedCompanions.join(', ')}): ` +
+        'EPUB і HTML із того самого макета вміє лише DesignCraft.'
     );
   }
 

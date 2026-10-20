@@ -40,6 +40,7 @@ export const novaEngine: PdfEngine = {
     'Виглядом керує наш код, а не таблиця стилів: складні макети, обтікання ' +
     'та типографські переноси йому недоступні.',
   supportsPrint: true,
+  supportsCompanions: false,
 
   async available(): Promise<PdfEngineAvailability> {
     if (!fontsAvailable()) {

@@ -271,6 +271,86 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
   });
 
   /**
+   * Супутній формат із того самого макета: EPUB або HTML.
+   *
+   * ЧОМУ ОКРЕМИЙ МАРШРУТ, А НЕ ПАРАМЕТР ПЕРЕГЛЯДУ. `/preview` віддає тіло
+   * PDF, і другий файл у ту саму відповідь не влазить. Віддавати обидва
+   * JSON-ом із base64 означало б возити книгу двічі в кодуванні, яке важить
+   * на третину більше.
+   *
+   * ЧОМУ ЦЕ НЕ АРТЕФАКТ. Складання артефактів (`/api/books/:id/render`) іде
+   * лише рушієм Nova й не має жодного інтерфейсу, а браузерний EPUB Студії
+   * теж просто завантажується. Тож поведінка тут та сама, що автор уже знає:
+   * натиснув — отримав файл. Сховище для супутників готове
+   * (`ArtifactKind` має `epub`/`html`), і коли складання артефактів дістане
+   * вибір рушія, цей маршрут стане зайвим.
+   */
+  app.post('/api/admin/pdf/companion', requireAdmin, async (req, res) => {
+    try {
+      const book = req.body?.book;
+      if (!book?.title) {
+        return res.status(400).json({ error: 'Потрібен обʼєкт книги з назвою.', kind: 'bad_input' });
+      }
+      const kind = req.body?.kind === 'html' ? 'html' : req.body?.kind === 'epub' ? 'epub' : null;
+      if (!kind) {
+        return res.status(400).json({ error: 'Потрібен формат: epub або html.', kind: 'bad_input' });
+      }
+      const engineId = String(req.body?.engineId || '');
+      if (!engineId) {
+        return res.status(400).json({ error: 'Потрібен рушій верстки.', kind: 'bad_input' });
+      }
+
+      const variant: LayoutVariant = req.body?.variant === 'design' ? 'design' : 'code';
+      const { spec } = await buildSpec(book, variant, req.body?.modelId, req);
+      const principal = req.principal;
+      const out = await renderWithEngine(engineId, {
+        book,
+        kind: req.body?.kind === 'course' ? 'course' : 'book',
+        spec: { ...spec, pdfExport: { ...spec.pdfExport, companions: [kind] } },
+        print: false,
+        ownerId: (principal?.id as string) || null,
+        ownerRole: (principal?.role as string) || null,
+        theme: typeof req.body?.theme === 'string' ? req.body.theme : undefined,
+      });
+
+      const companion = out.companions?.find((c) => c.kind === kind);
+      if (!companion) {
+        // Рушій зробив PDF, але супутника не дав: причина вже в notesUk, і
+        // підсунути авторові PDF під виглядом EPUB було б гірше за помилку.
+        return res.status(502).json({
+          error: `Рушій не повернув ${kind.toUpperCase()}.`,
+          kind: 'engine',
+          notesUk: out.notesUk,
+        });
+      }
+
+      const safe = String(book.title || 'book').replace(/[^\p{L}\p{N}]+/gu, '_').slice(0, 60) || 'book';
+      const name = `${safe}.${companion.extension}`;
+      /*
+       * Назва українською не влазить у заголовок як є: HTTP дозволяє в
+       * значеннях лише Latin-1, і Node відмовляє з «Invalid character in
+       * header content». Тому RFC 6266: ASCII-варіант у `filename` як запас
+       * і справжня назва у `filename*`. Сусідній `/preview` цього не
+       * потребував лише тому, що віддає файл із прибитою назвою
+       * `preview-<рушій>.pdf`.
+       */
+      const asciiName = name.replace(/[^\x20-\x7E]/g, '_');
+      res.setHeader('Content-Type', companion.mimeType);
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(name)}`
+      );
+      res.setHeader('Content-Length', String(companion.bytes.length));
+      res.setHeader('X-Pdf-Engine', out.engineId);
+      res.setHeader('X-Pdf-Pages', String(out.pageCount));
+      res.setHeader('X-Pdf-Note', encodeURIComponent(out.notesUk.join(' ')));
+      return res.send(Buffer.from(companion.bytes));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  /**
    * Увесь конвеєр однією дією: макет → PDF → лістинг → файл у лістингу.
    *
    * Редакцій може бути кілька. Електронна (`digital`) і друкована (`print`)
