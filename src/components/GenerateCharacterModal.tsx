@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   X, 
   Sparkles, 
@@ -61,7 +62,6 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
   preferredAiModelId,
 }) => {
   const { t } = useLanguage();
-  if (!isOpen) return null;
 
   // Selected target character or "new character" mode
   const [mode, setMode] = useState<'existing' | 'new'>(characterToEnhance ? 'existing' : 'new');
@@ -371,14 +371,31 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
     { id: 'dark-noir', label: t('generateCharacterModal.styleDarkNoir'), icon: '🌑' },
   ];
 
-  return (
+  // Body-level portal avoids the app's transformed/backdrop-filter stacking contexts:
+  // previously the Studio toolbar and cross-device warning rendered OVER this modal.
+  useEffect(() => {
+    if (!isOpen) return;
+    const oldOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = oldOverflow; };
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  return createPortal(
     <div
+      role="presentation"
+      data-testid="generate-character-overlay"
       onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
+      className="fixed inset-0 z-[20000] bg-black/90 backdrop-blur-sm flex items-stretch sm:items-center justify-center overflow-hidden sm:p-6"
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('generateCharacterModal.heading')}
+        data-testid="generate-character-dialog"
         onClick={(e) => e.stopPropagation()}
-        className="token-module-scope rounded-2xl max-w-3xl w-full flex flex-col max-h-[92vh] shadow-2xl overflow-hidden"
+        className="token-module-scope relative w-full max-w-3xl h-[100dvh] max-h-[100dvh] min-h-0 sm:h-auto sm:max-h-[92dvh] flex flex-col rounded-none sm:rounded-2xl shadow-2xl overflow-hidden"
       >
         {/* Header — та сама неоморфна тема Modul_token (token-module-scope,
             nm- класи, src/styles/tokenModuleTheme.css), що й AI-коуч
@@ -391,7 +408,7 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
             світлій темі перефарбовувалась глобальними правилами в index.css
             й виглядала світлою — не так, як чат. Логіка/хендлери нижче не
             змінені, лише класи. */}
-        <div className="shrink-0 p-4 nm-outset-sm flex items-center justify-between gap-3">
+        <div className="shrink-0 px-4 pb-4 pt-[calc(1rem+env(safe-area-inset-top))] sm:pt-4 nm-outset-sm flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-9 h-9 rounded-lg nm-outset flex items-center justify-center text-[var(--primary)] shrink-0">
               <Sparkles className="w-4.5 h-4.5" />
@@ -452,7 +469,7 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
         </div>
 
         {/* Body Content */}
-        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 pt-4 space-y-5 text-xs text-[var(--on-surface-variant)] nm-flat">
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain p-4 sm:p-6 pt-4 space-y-5 text-xs text-[var(--on-surface-variant)] nm-flat">
           
           {/* 1. TARGET CHARACTER SELECTION (If mode === 'existing') */}
           {mode === 'existing' && (
@@ -613,19 +630,19 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
               <span>{t('generateCharacterModal.artStyleLabel')}</span>
             </label>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 min-[440px]:grid-cols-2 sm:grid-cols-3 gap-2">
               {styleOptions.map((st) => (
                 <button
                   key={st.id}
                   onClick={() => setStylePreset(st.id)}
-                  className={`p-2.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
+                  className={`w-full min-w-0 p-2.5 rounded-xl text-xs font-semibold flex items-start text-left gap-2 leading-snug transition-all ${
                     stylePreset === st.id
                       ? 'nm-inset text-cyan-300 border-l-2 border-cyan-400/70'
                       : 'nm-btn text-[var(--outline)] hover:text-[var(--on-surface)]'
                   }`}
                 >
                   <span>{st.icon}</span>
-                  <span>{st.label}</span>
+                  <span className="min-w-0 break-words">{st.label}</span>
                 </button>
               ))}
             </div>
@@ -765,7 +782,7 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="shrink-0 border-t border-[var(--border-subtle)] nm-outset-sm p-5 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="shrink-0 border-t border-[var(--border-subtle)] nm-outset-sm px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:p-5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-3">
           <div className="text-[11px] text-[var(--outline)] flex items-center gap-2">
             <Bot className="w-4 h-4 text-[var(--primary)]" />
             <span>
@@ -773,10 +790,10 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
             </span>
           </div>
 
-          <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+          <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto justify-stretch sm:justify-end">
             <button
               onClick={onClose}
-              className="nm-btn px-4 py-2.5 rounded-xl text-[var(--on-surface-variant)] font-semibold text-xs"
+              className="nm-btn shrink-0 px-3 sm:px-4 py-2.5 rounded-xl text-[var(--on-surface-variant)] font-semibold text-xs"
             >
               {t('generateCharacterModal.closeBtn')}
             </button>
@@ -785,7 +802,7 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
               <button
                 onClick={handleExecuteGeneration}
                 disabled={isGenerating}
-                className="nm-btn-primary flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl font-bold text-xs disabled:opacity-50"
+                className="nm-btn-primary flex-1 sm:flex-none min-w-0 flex items-center justify-center gap-2 px-3 sm:px-6 py-3 sm:py-2.5 rounded-xl font-bold text-xs disabled:opacity-50"
               >
                 {isGenerating ? (
                   <>
@@ -802,7 +819,7 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
             ) : (
               <button
                 onClick={handleApplyResult}
-                className="nm-btn flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-emerald-300 font-bold text-xs"
+                className="nm-btn flex-1 sm:flex-none min-w-0 flex items-center justify-center gap-2 px-3 sm:px-6 py-3 sm:py-2.5 rounded-xl text-emerald-300 font-bold text-xs"
               >
                 <Check className="w-4 h-4 stroke-[3]" />
                 <span>{t('generateCharacterModal.applyAndSaveBtn')}</span>
@@ -811,6 +828,7 @@ export const GenerateCharacterModal: React.FC<GenerateCharacterModalProps> = ({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
