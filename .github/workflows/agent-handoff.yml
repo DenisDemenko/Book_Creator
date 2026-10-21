@@ -5,6 +5,12 @@ on:
   pull_request:
     paths:
       - 'server/agent*'
+      - 'server/*History*'
+      - 'server/githubHistory.ts'
+      - 'src/components/AdminGitHistoryView.tsx'
+      - 'src/components/adminOs/*'
+      - 'scripts/test-githubHistory.mts'
+      - 'Dockerfile'
       - 'src/components/*Handoff*'
       - 'src/types/agentHandoff.ts'
       - 'scripts/*agent*'
@@ -38,6 +44,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx tsx scripts/test-agentHandoff.mts
+      - run: npx tsx scripts/test-githubHistory.mts
+      - run: npx tsx scripts/test-adminOs.mts
       - run: npm run lint
       - run: npm run journal:check
       - run: npm run build

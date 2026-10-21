@@ -81,8 +81,7 @@ const B = 'font-[\'Barlow\',system-ui,sans-serif]';
  *
  * Рамка «електрична»: конічний градієнт обертається всередині рамки, а
  * яскравість циклічно наростає (класи `os-pill*` в `adminOs.css`). Червоний
- * варіант дістається вузлу з `tone: 'danger'` — це «Історія комітів», яка
- * працює лише при локальному запуску.
+ * варіант дістається вузлам із `tone: 'danger'`.
  */
 const NodePill: React.FC<{
   node: AdminNode;
@@ -275,8 +274,8 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser, onOpenPage }
         ];
       case 'git':
         return [
-          { label: 'Джерело', value: 'живий git log' },
-          { label: 'Працює', value: 'лише локально' },
+          { label: 'Джерело', value: 'GitHub / локальний Git' },
+          { label: 'Працює', value: 'на сервері та локально' },
         ];
       default:
         return [];

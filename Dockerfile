@@ -94,6 +94,10 @@ COPY --from=build /app/node_modules node_modules
 COPY --from=build /app/dist dist
 COPY --from=build /app/package.json package.json
 
+# Read-only project journal for admin commit links; Git objects stay excluded.
+COPY --from=build /app/log.md log.md
+COPY --from=build /app/log log
+
 # Ресурси, які сервер шукає в рантаймі.
 COPY --from=build /app/server/pdf/fonts dist/fonts
 COPY --from=build /app/server/pdf/latex dist/latex

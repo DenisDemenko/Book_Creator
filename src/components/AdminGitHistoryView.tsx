@@ -7,10 +7,7 @@
  * більше. Значуща структура тут інша — час, автор, обсяг зміни і зв'язок
  * із записом журналу `log.md`, на який посилається дві третини комітів.
  *
- * Дані читає `GET /api/admin/git/commits` (server/gitHistoryRoutes.ts) з
- * живого `git log`, тому розділ працює лише при локальному запуску — так
- * задачу й поставлено. У проді вкладка лишається на місці й чесно пояснює
- * причину, а не зникає без слова.
+ * Дані: локальний git log або серверний GitHub REST у Docker.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AdminAgentHandoffView } from './AdminAgentHandoffView';
@@ -27,9 +24,9 @@ interface Commit {
   commitDate: string;
   author: string;
   subject: string;
-  filesChanged: number;
-  insertions: number;
-  deletions: number;
+  filesChanged: number | null;
+  insertions: number | null;
+  deletions: number | null;
   journalEntry: number | null;
   isMerge: boolean;
   pushedTo: string[];
@@ -119,6 +116,11 @@ export const AdminGitHistoryView: React.FC = () => {
 const AdminCommitHistoryContent: React.FC = () => {
   const [commits, setCommits] = useState<Commit[]>([]);
   const [total, setTotal] = useState(0);
+  const [source, setSource] = useState('local');
+  const [hasMore, setHasMore] = useState(false);
+  const [totalKnown, setTotalKnown] = useState(true);
+  const [checkedAt, setCheckedAt] = useState('');
+  const [requestedLimit, setRequestedLimit] = useState<number | null>(null);
   const [branch, setBranch] = useState('');
   const [available, setAvailable] = useState(true);
   const [reason, setReason] = useState('');
@@ -143,13 +145,18 @@ const AdminCommitHistoryContent: React.FC = () => {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/git/commits', { credentials: 'same-origin' });
+      const res = await fetch('/api/admin/git/commits' + (requestedLimit ? '?limit=' + requestedLimit : ''), { credentials: 'same-origin' });
       const data = await res.json().catch(() => ({}));
+      if (!res.ok && !data.reason) throw new Error(data.error || 'Не вдалося отримати історію.');
       setAvailable(!!data.available);
       setReason(data.reason || '');
       setCommits(Array.isArray(data.commits) ? data.commits : []);
       setTotal(Number(data.total) || 0);
       setBranch(data.branch || '');
+      setSource(data.source || 'local');
+      setHasMore(!!data.hasMore);
+      setTotalKnown(data.totalKnown !== false);
+      setCheckedAt(data.checkedAt || '');
       setJournal(data.journal || {});
       setRemotes(Array.isArray(data.remotes) ? data.remotes : []);
     } catch (err: any) {
@@ -158,7 +165,7 @@ const AdminCommitHistoryContent: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [requestedLimit]);
 
   useEffect(() => {
     load();
@@ -227,9 +234,9 @@ const AdminCommitHistoryContent: React.FC = () => {
     () =>
       visible.reduce(
         (acc, c) => ({
-          insertions: acc.insertions + c.insertions,
-          deletions: acc.deletions + c.deletions,
-          files: acc.files + c.filesChanged,
+          insertions: acc.insertions + (c.insertions ?? 0),
+          deletions: acc.deletions + (c.deletions ?? 0),
+          files: acc.files + (c.filesChanged ?? 0),
         }),
         { insertions: 0, deletions: 0, files: 0 }
       ),
@@ -238,7 +245,7 @@ const AdminCommitHistoryContent: React.FC = () => {
 
   /** Найбільший коміт у вибірці — щоб смужка обсягу мала масштаб. */
   const peak = useMemo(
-    () => visible.reduce((m, c) => Math.max(m, c.insertions + c.deletions), 1),
+    () => visible.reduce((m, c) => Math.max(m, (c.insertions ?? 0) + (c.deletions ?? 0)), 1),
     [visible]
   );
 
@@ -258,39 +265,44 @@ const AdminCommitHistoryContent: React.FC = () => {
           Історія комітів тут недоступна
         </div>
         <p className="text-xs text-amber-100/80 leading-relaxed">{reason}</p>
-        <p className="text-[11px] text-amber-100/60 leading-relaxed">
-          Розділ задуманий як локальний інструмент: щоб побачити схему, запустіть студію з теки
-          репозиторію (<span className="font-mono">npm run dev</span>) і відкрийте цю вкладку там.
-        </p>
+        <button type="button" onClick={() => void load()} className="text-xs underline">Спробувати ще раз</button>
       </div>
     );
   }
 
   return (
     <div className="space-y-5">
+      <p className="text-xs text-slate-400" role="status">
+        Джерело: {source === 'github' ? 'GitHub · DenisDemenko/Book_Creator' : 'локальний Git'} · {branch}
+        {checkedAt && <> · Отримано {new Date(checkedAt).toLocaleString(LOCALE)} (кеш до 5 хв)</>}
+      </p>
+      {source === 'github' && <p className="text-xs text-slate-400">
+        Показано опубліковані коміти цієї гілки. Незапушені локальні зміни та стан деплою тут не перевіряються.
+        Статистика файлів і рядків у списку GitHub недоступна.
+      </p>}
       {/* Зведення */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="px-3 py-2 rounded-xl bg-slate-900 border border-white/[0.06] text-xs">
           <span className="text-slate-500">Комітів: </span>
-          <span className="font-bold text-slate-100">{total}</span>
+          <span className="font-bold text-slate-100">{total}{!totalKnown ? "+" : ""}</span>
           {commits.length < total && <span className="text-slate-500"> (показано {commits.length})</span>}
         </div>
         <div className="px-3 py-2 rounded-xl bg-slate-900 border border-white/[0.06] text-xs">
           <span className="text-slate-500">Днів: </span>
           <span className="font-bold text-slate-100">{days.length}</span>
         </div>
-        <div className="px-3 py-2 rounded-xl bg-slate-900 border border-white/[0.06] text-xs font-mono">
+        {source === 'local' && <div className="px-3 py-2 rounded-xl bg-slate-900 border border-white/[0.06] text-xs font-mono">
           <span className="text-emerald-400">+{totals.insertions.toLocaleString()}</span>
           <span className="text-slate-600"> / </span>
           <span className="text-rose-400">−{totals.deletions.toLocaleString()}</span>
-        </div>
+        </div>}
         {branch && (
           <div className="px-3 py-2 rounded-xl bg-slate-900 border border-white/[0.06] text-xs font-mono text-slate-400">
             {branch}
           </div>
         )}
-        {/* Головне питання власника: що ще не на GitHub. */}
-        <button
+        {/* Локальна перевірка не робить висновків із серверного списку. */}
+        {source === 'local' && <button
           onClick={() => setOnlyUnpushed((v) => !v)}
           className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 ${
             onlyUnpushed
@@ -303,8 +315,8 @@ const AdminCommitHistoryContent: React.FC = () => {
         >
           {unpushedCount > 0 ? <CloudOff className="w-3.5 h-3.5" /> : <CloudUpload className="w-3.5 h-3.5" />}
           {unpushedCount > 0 ? `Не запушено: ${unpushedCount}` : 'Усе запушено'}
-        </button>
-        <button
+        </button>}
+        {source === 'local' && <button
           onClick={runVerify}
           disabled={verify.busy}
           className="px-3 py-2 rounded-xl bg-slate-900 border border-white/[0.06] text-xs text-slate-300 hover:text-white flex items-center gap-1.5 disabled:opacity-50"
@@ -312,9 +324,9 @@ const AdminCommitHistoryContent: React.FC = () => {
         >
           {verify.busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Radio className="w-3.5 h-3.5" />}
           Звірити з GitHub
-        </button>
+        </button>}
         <button
-          onClick={load}
+          onClick={() => void load()}
           className="ml-auto px-3 py-2 rounded-xl bg-slate-900 border border-white/[0.06] text-xs text-slate-300 hover:text-white flex items-center gap-1.5"
         >
           <RefreshCw className="w-3.5 h-3.5" /> Оновити
@@ -382,14 +394,14 @@ const AdminCommitHistoryContent: React.FC = () => {
 
       {/* Команди над комітом — на прохання власника: кнопками, з вибором
           коміта зі списку або вручну, і поясненням при наведенні. */}
-      <div className="mb-4">
+      {source === 'local' && <div className="mb-4">
         <GitCommandPanel
           commits={commits}
           presetHash={pickedHash}
           presetNonce={pickNonce}
           onChanged={load}
         />
-      </div>
+      </div>}
 
       {/* Стрічка часу */}
       <div className="relative pl-5">
@@ -413,7 +425,7 @@ const AdminCommitHistoryContent: React.FC = () => {
 
             <div className="space-y-1.5">
               {dayCommits.map((c) => {
-                const volume = c.insertions + c.deletions;
+                const volume = (c.insertions ?? 0) + (c.deletions ?? 0);
                 // Дата застосування помітно пізніша за авторство = коміт
                 // приїхав патчем. Показуємо, бо інакше порядок у стрічці
                 // виглядав би як помилка.
@@ -434,7 +446,12 @@ const AdminCommitHistoryContent: React.FC = () => {
                           {/* Клік підставляє хеш у панель команд: 40 символів
                               руками — це помилка в одному символі й потім
                               «коміта немає» без зрозумілої причини. */}
-                          <button
+                          {source === 'github' ? <a
+                            href={'https://github.com/DenisDemenko/Book_Creator/commit/' + c.hash}
+                            target="_blank" rel="noopener noreferrer"
+                            className="font-mono text-cyan-400 hover:underline"
+                            aria-label={'Відкрити коміт ' + c.shortHash + ' на GitHub'}
+                          >{c.shortHash}</a> : <button
                             type="button"
                             data-pick-hash={c.hash}
                             title="Підставити цей коміт у панель команд"
@@ -446,7 +463,7 @@ const AdminCommitHistoryContent: React.FC = () => {
                             }`}
                           >
                             {c.shortHash}
-                          </button>
+                          </button>}
                           <span className="text-slate-600">{fmtTime(c.date)}</span>
                           <span
                             className={`px-1.5 py-px rounded border font-semibold ${
@@ -489,7 +506,7 @@ const AdminCommitHistoryContent: React.FC = () => {
                               не запушено
                             </span>
                           )}
-                          {!c.isMerge && (
+                          {!c.isMerge && c.filesChanged !== null && (
                             <span className="flex items-center gap-1 font-mono text-slate-500">
                               <FileDiff className="w-2.5 h-2.5" />
                               {c.filesChanged}
@@ -562,6 +579,12 @@ const AdminCommitHistoryContent: React.FC = () => {
           </section>
         ))}
       </div>
+
+      {hasMore && <button type="button" disabled={commits.length >= 2000}
+        onClick={() => setRequestedLimit(Math.min(commits.length + 100, 2000))}
+        className="rounded-xl border border-slate-500/40 px-3 py-2 text-xs disabled:opacity-50">
+        {commits.length >= 2000 ? 'Показано граничні 2000 комітів' : 'Завантажити старіші коміти'}
+      </button>}
 
       {visible.length === 0 && (
         <p className="text-xs text-slate-500 py-8 text-center">Для цього фільтра комітів немає.</p>

@@ -1,26 +1,10 @@
-/**
- * Історія комітів для адмінки — «схема всіх комітів від самого першого»
- * (прохання власника, запис #150).
- *
- * Джерело даних — живий `git log` у теці, з якої запущений сервер. Тому
- * розділ працює ЛИШЕ при локальному запуску: у проді застосунок їде
- * Docker-образом, куди тека `.git` не копіюється зовсім (та й не повинна —
- * це кілька десятків мегабайт історії в кожному образі). Це не обмеження,
- * яке колись «доробимо»: власник саме так і поставив задачу — «поки що
- * локально». Замість порожнього екрана на проді маршрут чесно повертає
- * `available: false` і причину, а вкладка показує пояснення.
- *
- * Безпека. `git` викликається через `execFile` зі списком аргументів, а не
- * через оболонку: жоден рядок звідси не склеюється в команду. Єдине, що
- * приходить з запиту — числовий `limit`, і він проходить через
- * `Number.isFinite` та затиск у межі. Маршрут під `requireAdmin`.
- */
-
+/** Admin commit history: local Git when available, GitHub REST in Docker. */
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Express } from 'express';
 import { requireAdmin } from './auth';
+import { createGithubHistoryReader } from './githubHistory';
 import {
   parseJournal,
   extractEntryText,
@@ -69,9 +53,9 @@ export interface GitCommit {
   commitDate: string;
   author: string;
   subject: string;
-  filesChanged: number;
-  insertions: number;
-  deletions: number;
+  filesChanged: number | null;
+  insertions: number | null;
+  deletions: number | null;
   /**
    * Номер запису журналу (`log.md`), якщо коміт на нього посилається.
    * Саме цей зв'язок робить схему кориснішою за `git log`: 67 із 209
@@ -199,15 +183,34 @@ async function pushedSets(): Promise<Map<string, Set<string>>> {
   return out;
 }
 
-export function registerGitHistoryRoutes(app: Express): void {
+export function registerGitHistoryRoutes(app: Express, options: {
+  localAvailable?: () => boolean;
+  readGithub?: ReturnType<typeof createGithubHistoryReader>;
+} = {}): void {
+  const localAvailable = options.localAvailable ?? (() => !!gitDir());
+  const readGithub = options.readGithub ?? createGithubHistoryReader();
   app.get('/api/admin/git/commits', requireAdmin, async (req, res) => {
-    if (!gitDir()) {
-      return res.json({
-        available: false,
-        reason:
-          'Історія комітів доступна лише при локальному запуску: у продакшн-образі теки .git немає — вона не копіюється в Docker навмисно.',
-        commits: [],
-      });
+    res.setHeader('Cache-Control', 'no-store');
+    if (!localAvailable()) {
+      const asked = Number(req.query.limit);
+      const limit = Number.isFinite(asked) ? Math.min(Math.max(Math.trunc(asked), 1), MAX_LIMIT) : 100;
+      try {
+        const history = await readGithub(limit);
+        const md = readJournalSource();
+        const parsed = md ? parseJournal(md) : new Map<number, JournalEntry>();
+        const journal: Record<number, JournalEntry> = {};
+        for (const commit of history.commits) {
+          const n = commit.journalEntry;
+          if (n !== null && parsed.has(n)) journal[n] = parsed.get(n)!;
+        }
+        return res.json({ ...history, available: true, source: 'github', statsAvailable: false,
+          total: history.commits.length, totalKnown: !history.hasMore, journal,
+          journalAvailable: !!md, remotes: ['GitHub'] });
+      } catch (error) {
+        return res.status(503).json({ available: false, source: 'github', commits: [],
+          reason: error instanceof Error && (error.message.startsWith('GitHub') || error.message.startsWith('Не вдалося отримати'))
+            ? error.message : 'Не вдалося з’єднатися з GitHub. Спробуйте ще раз пізніше.' });
+      }
     }
 
     const askedRaw = Number(req.query.limit);
@@ -252,6 +255,7 @@ export function registerGitHistoryRoutes(app: Express): void {
 
       res.json({
         available: true,
+        source: 'local', statsAvailable: true, totalKnown: true, hasMore: commits.length < total,
         commits,
         journal,
         journalAvailable: !!md,
@@ -294,7 +298,7 @@ export function registerGitHistoryRoutes(app: Express): void {
    * очікувано, для `production` (публічного) звірка проходить.
    */
   app.post('/api/admin/git/verify-remotes', requireAdmin, async (_req, res) => {
-    if (!gitDir()) return res.status(400).json({ error: 'Немає теки .git — звіряти нічого.' });
+    if (!localAvailable()) return res.status(400).json({ error: 'Історію отримано безпосередньо з GitHub. Локальний HEAD недоступний для порівняння.' });
     try {
       const names = (await runGit(['remote']))
         .split('\n')
