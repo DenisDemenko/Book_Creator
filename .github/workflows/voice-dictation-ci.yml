@@ -3,6 +3,7 @@ name: Voice Dictation CI
 on:
   pull_request:
     paths:
+      - 'scripts/**'
       - 'src/components/EditorView.tsx'
       - 'src/components/VoiceDictationButton.tsx'
       - 'src/utils/voiceDictation.ts'
