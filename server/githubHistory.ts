@@ -21,16 +21,17 @@ export function createGithubHistoryReader(options: {
   const ref = options.ref || process.env.GIT_HISTORY_GITHUB_REF || 'master';
   const token = options.token ?? process.env.GIT_HISTORY_GITHUB_TOKEN;
   const now = options.now ?? Date.now;
-  const cache = new Map<number, { expires: number; value: GithubHistory }>();
-  const pending = new Map<number, Promise<GithubHistory>>();
-  async function read(limit: number): Promise<GithubHistory> {
-    const cached = cache.get(limit);
+  const cache = new Map<string, { expires: number; value: GithubHistory }>();
+  const pending = new Map<string, Promise<GithubHistory>>();
+  async function read(limit: number, selectedRef = ref): Promise<GithubHistory> {
+    const key = JSON.stringify([selectedRef, limit]);
+    const cached = cache.get(key);
     if (cached && cached.expires > now()) return cached.value;
-    const running = pending.get(limit);
+    const running = pending.get(key);
     if (running) return running;
     const operation = (async () => {
       const commits: GitCommit[] = [];
-      let cursor = ref, hasMore = false;
+      let cursor = selectedRef, hasMore = false;
       const deadline = AbortSignal.timeout(25000);
       for (let page = 1; commits.length < limit; page++) {
         const url = new URL(`https://api.github.com/repos/${REPOSITORY}/commits`);
@@ -64,7 +65,7 @@ export function createGithubHistoryReader(options: {
             author: row.commit.author.name || row.author?.login || '—', subject,
             // List commits has no file/line statistics; never invent zero changes.
             filesChanged: null, insertions: null, deletions: null,
-            journalEntry: parseJournalEntry(subject), pushedTo: ['GitHub'],
+            journalEntry: /^Merge (?:PR|pull request) #/i.test(subject) ? null : parseJournalEntry(subject), pushedTo: ['GitHub'],
             isMerge: Array.isArray(row.parents) && row.parents.length > 1 });
         }
         // A full page may have a next page; the next request resolves that.
@@ -72,13 +73,13 @@ export function createGithubHistoryReader(options: {
         if (rows.length < 100) break;
       }
       const value = { commits: commits.sort((a, b) => Date.parse(b.date) - Date.parse(a.date)),
-        branch: ref, hasMore, repository: REPOSITORY, checkedAt: new Date(now()).toISOString() };
-      if (cache.size >= 8 && !cache.has(limit)) cache.delete(cache.keys().next().value!);
-      cache.set(limit, { expires: now() + 300000, value });
+        branch: selectedRef, hasMore, repository: REPOSITORY, checkedAt: new Date(now()).toISOString() };
+      if (cache.size >= 8 && !cache.has(key)) cache.delete(cache.keys().next().value!);
+      cache.set(key, { expires: now() + 300000, value });
       return value;
     })();
-    pending.set(limit, operation);
-    try { return await operation; } finally { pending.delete(limit); }
+    pending.set(key, operation);
+    try { return await operation; } finally { pending.delete(key); }
   }
   return read;
 }
