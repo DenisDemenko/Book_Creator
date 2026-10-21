@@ -1,4 +1,5 @@
 import { aiDraftText } from '../../shared/aiTextOrigin';
+import { VoiceDictationButton } from './VoiceDictationButton';
 import { WorldSettingPanel } from './WorldSettingPanel';
 import { ManuscriptTagPanel } from './ManuscriptTagPanel';
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
@@ -5637,6 +5638,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                         ) : null
                       }
                     >
+                      <VoiceDictationButton editor={uaEditor} language="uk-UA" />
                       <EditorContent
                         editor={uaEditor}
                         style={manuscriptTextStyle}
