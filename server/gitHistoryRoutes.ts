@@ -5,6 +5,7 @@ import path from 'node:path';
 import type { Express } from 'express';
 import { requireAdmin } from './auth';
 import { createGithubHistoryReader } from './githubHistory';
+import { createGithubWorkspaceReader } from './githubWorkspace';
 import {
   parseJournal,
   extractEntryText,
@@ -186,16 +187,47 @@ async function pushedSets(): Promise<Map<string, Set<string>>> {
 export function registerGitHistoryRoutes(app: Express, options: {
   localAvailable?: () => boolean;
   readGithub?: ReturnType<typeof createGithubHistoryReader>;
+  workspace?: ReturnType<typeof createGithubWorkspaceReader>;
 } = {}): void {
   const localAvailable = options.localAvailable ?? (() => !!gitDir());
   const readGithub = options.readGithub ?? createGithubHistoryReader();
+  const workspace = options.workspace ?? createGithubWorkspaceReader();
+  app.get('/api/admin/git/workspace', requireAdmin, async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try { res.json(await workspace.catalog()); }
+    catch { res.status(503).json({ error: 'Не вдалося отримати гілки та PR із GitHub. Повторіть пізніше.' }); }
+  });
   app.get('/api/admin/git/commits', requireAdmin, async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    if (!localAvailable()) {
+    if (req.query.branch !== undefined && (typeof req.query.branch !== 'string' ||
+      !req.query.branch.trim() || req.query.branch.length > 250 || /[\x00-\x1f]/.test(req.query.branch)))
+      return res.status(400).json({ available: false, reason: 'Некоректна назва гілки.', commits: [] });
+    const requestedBranch = req.query.branch as string | undefined;
+    if (requestedBranch || !localAvailable()) {
       const asked = Number(req.query.limit);
       const limit = Number.isFinite(asked) ? Math.min(Math.max(Math.trunc(asked), 1), MAX_LIMIT) : 100;
       try {
-        const history = await readGithub(limit);
+        let selected: { name: string; head: string } | undefined;
+        let masterHead: string | undefined;
+        if (requestedBranch) {
+          const catalog = await workspace.catalog();
+          selected = catalog.branches.find(branch => branch.name === requestedBranch);
+          if (!selected) return res.status(404).json({ available: false, commits: [], reason: 'Гілку не знайдено на GitHub. Оновіть список гілок.' });
+          masterHead = catalog.branches.find(branch => branch.name === 'master')?.head;
+        }
+        const history = await readGithub(limit, selected?.head);
+        const branch = selected?.name ?? history.branch;
+        let comparison = null;
+        let comparisonWarning = '';
+        if (selected && branch !== 'master' && masterHead) {
+          try { comparison = await workspace.compare(masterHead, selected.head); }
+          catch { comparisonWarning = 'Порівняння з master недоступне. Статус входження комітів не підтверджено.'; }
+          if (comparison && !comparison.complete) comparisonWarning = 'Порівняння обмежено 2000 комітами. Для решти входження в master не підтверджено.';
+        }
+        const unpublished = new Set<string>(comparison?.unpublished ?? []);
+        const commits = history.commits.map(commit => ({ ...commit,
+          masterStatus: branch === 'master' ? 'master' : unpublished.has(commit.hash) ? 'branch'
+            : comparison?.complete ? 'master' : 'unknown' }));
         const md = readJournalSource();
         const parsed = md ? parseJournal(md) : new Map<number, JournalEntry>();
         const journal: Record<number, JournalEntry> = {};
@@ -203,7 +235,7 @@ export function registerGitHistoryRoutes(app: Express, options: {
           const n = commit.journalEntry;
           if (n !== null && parsed.has(n)) journal[n] = parsed.get(n)!;
         }
-        return res.json({ ...history, available: true, source: 'github', statsAvailable: false,
+        return res.json({ ...history, branch, commits, comparison, comparisonWarning, available: true, source: 'github', statsAvailable: false,
           total: history.commits.length, totalKnown: !history.hasMore, journal,
           journalAvailable: !!md, remotes: ['GitHub'] });
       } catch (error) {
