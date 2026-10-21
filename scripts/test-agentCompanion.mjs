@@ -80,6 +80,10 @@ test('real Git: selected-file staging, index guard, commit, stale state and no s
     fs.writeFileSync(path.join(dir,'file.txt'), 'base');
     await git(dir, ['add','file.txt']); await git(dir, ['commit','-m','base']);
     const before = await snapshot(dir);
+    fs.mkdirSync(path.join(dir, 'nested'));
+    await assert.rejects(snapshot(path.join(dir, 'nested')), /repository root/);
+    fs.rmdirSync(path.join(dir, 'nested'));
+    if (process.platform === 'win32') assert.equal((await snapshot(dir.toUpperCase())).head, before.head);
     fs.writeFileSync(path.join(dir,'file.txt'), 'next');
     fs.writeFileSync(path.join(dir,'other.txt'), 'leave untracked');
     const p = { expectedHead:before.head, expectedBranch:before.branch };

@@ -31,8 +31,12 @@ export function git(root, args, timeout = 15000) {
 }
 export async function snapshot(root) {
   const directory = fs.realpathSync((await git(root, ['rev-parse','--show-toplevel'])).trim());
-  // Git and Node may preserve different drive/directory casing on Windows.
-  if (path.relative(fs.realpathSync(root), directory) !== '') throw new Error('RepositoryPath must be the repository root.');
+  // Windows may expose one directory through long/8.3 names or junctions.
+  // Compare filesystem identities, rather than two differently spelled paths.
+  const requested = fs.statSync(root, { bigint: true });
+  const actual = fs.statSync(directory, { bigint: true });
+  if (requested.dev !== actual.dev || requested.ino !== actual.ino || !requested.isDirectory())
+    throw new Error('RepositoryPath must be the repository root: requested=' + root + '; Git=' + directory);
   const branch = (await git(root, ['symbolic-ref','--quiet','--short','HEAD'])).trim();
   await git(root, ['check-ref-format','--branch',branch]);
   const head = (await git(root, ['rev-parse','HEAD'])).trim();
