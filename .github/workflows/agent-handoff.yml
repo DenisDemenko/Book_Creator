@@ -7,6 +7,9 @@ on:
       - 'server/agent*'
       - 'server/*History*'
       - 'server/githubHistory.ts'
+      - 'server/githubWorkspace.ts'
+      - 'src/components/GithubWorkspacePanel.tsx'
+      - 'scripts/test-githubWorkspace.mts'
       - 'src/components/AdminGitHistoryView.tsx'
       - 'src/components/adminOs/*'
       - 'scripts/test-githubHistory.mts'
@@ -45,6 +48,7 @@ jobs:
       - run: npm ci
       - run: npx tsx scripts/test-agentHandoff.mts
       - run: npx tsx scripts/test-githubHistory.mts
+      - run: npx tsx scripts/test-githubWorkspace.mts
       - run: npx tsx scripts/test-adminOs.mts
       - run: npm run lint
       - run: npm run journal:check

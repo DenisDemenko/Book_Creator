@@ -12,6 +12,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AdminAgentHandoffView } from './AdminAgentHandoffView';
 import { GitCommandPanel } from './GitCommandPanel';
+import { GithubWorkspacePanel } from './GithubWorkspacePanel';
 import {
   GitCommit, RefreshCw, Loader2, AlertTriangle, FileDiff, BookOpen,
   CloudUpload, CloudOff, ChevronDown, Radio,
@@ -30,6 +31,7 @@ interface Commit {
   journalEntry: number | null;
   isMerge: boolean;
   pushedTo: string[];
+  masterStatus?: 'master' | 'branch' | 'unknown';
 }
 
 interface JournalEntry {
@@ -104,16 +106,20 @@ function readableEntry(raw: string): string {
 
 export const AdminGitHistoryView: React.FC = () => {
   const [page, setPage] = useState<'commits' | 'handoff'>('commits');
+  const [selectedBranch, setSelectedBranch] = useState('');
   return <div className="space-y-4">
     <nav aria-label="Історія розробки" className="flex flex-wrap gap-2">
       <button type="button" aria-pressed={page === 'commits'} className="rounded-lg border border-slate-500/40 px-3 py-2 text-sm" onClick={() => setPage('commits')}>Історія комітів</button>
       <button type="button" aria-pressed={page === 'handoff'} className="rounded-lg border border-slate-500/40 px-3 py-2 text-sm" onClick={() => setPage('handoff')}>Прийом і передача</button>
     </nav>
-    {page === 'commits' ? <AdminCommitHistoryContent /> : <AdminAgentHandoffView />}
+    {page === 'commits' ? <>
+      <GithubWorkspacePanel selected={selectedBranch} onSelect={setSelectedBranch} />
+      <AdminCommitHistoryContent key={selectedBranch} selectedBranch={selectedBranch} />
+    </> : <AdminAgentHandoffView />}
   </div>;
 };
 
-const AdminCommitHistoryContent: React.FC = () => {
+const AdminCommitHistoryContent: React.FC<{ selectedBranch: string }> = ({ selectedBranch }) => {
   const [commits, setCommits] = useState<Commit[]>([]);
   const [total, setTotal] = useState(0);
   const [source, setSource] = useState('local');
@@ -122,6 +128,8 @@ const AdminCommitHistoryContent: React.FC = () => {
   const [checkedAt, setCheckedAt] = useState('');
   const [requestedLimit, setRequestedLimit] = useState<number | null>(null);
   const [branch, setBranch] = useState('');
+  const [comparisonWarning, setComparisonWarning] = useState('');
+  const [comparison, setComparison] = useState<{ ahead: number; behind: number } | null>(null);
   const [available, setAvailable] = useState(true);
   const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(true);
@@ -145,7 +153,10 @@ const AdminCommitHistoryContent: React.FC = () => {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/git/commits' + (requestedLimit ? '?limit=' + requestedLimit : ''), { credentials: 'same-origin' });
+      const params = new URLSearchParams();
+      if (requestedLimit) params.set('limit', String(requestedLimit));
+      if (selectedBranch) params.set('branch', selectedBranch);
+      const res = await fetch('/api/admin/git/commits?' + params, { credentials: 'same-origin' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok && !data.reason) throw new Error(data.error || 'Не вдалося отримати історію.');
       setAvailable(!!data.available);
@@ -153,6 +164,8 @@ const AdminCommitHistoryContent: React.FC = () => {
       setCommits(Array.isArray(data.commits) ? data.commits : []);
       setTotal(Number(data.total) || 0);
       setBranch(data.branch || '');
+      setComparisonWarning(data.comparisonWarning || '');
+      setComparison(data.comparison || null);
       setSource(data.source || 'local');
       setHasMore(!!data.hasMore);
       setTotalKnown(data.totalKnown !== false);
@@ -165,7 +178,7 @@ const AdminCommitHistoryContent: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [requestedLimit]);
+  }, [requestedLimit, selectedBranch]);
 
   useEffect(() => {
     load();
@@ -272,6 +285,8 @@ const AdminCommitHistoryContent: React.FC = () => {
 
   return (
     <div className="space-y-5">
+      {comparisonWarning ? <p role="status" className="text-xs text-amber-300">{comparisonWarning}</p> : null}
+      {comparison ? <p className="text-xs text-slate-400">Порівняно з master: нових комітів — {comparison.ahead}, відставання — {comparison.behind}.</p> : null}
       <p className="text-xs text-slate-400" role="status">
         Джерело: {source === 'github' ? 'GitHub · DenisDemenko/Book_Creator' : 'локальний Git'} · {branch}
         {checkedAt && <> · Отримано {new Date(checkedAt).toLocaleString(LOCALE)} (кеш до 5 хв)</>}
@@ -465,6 +480,9 @@ const AdminCommitHistoryContent: React.FC = () => {
                             {c.shortHash}
                           </button>}
                           <span className="text-slate-600">{fmtTime(c.date)}</span>
+                          {c.masterStatus ? <span className={`rounded border px-1.5 py-px ${c.masterStatus === 'master' ? 'border-emerald-500/30 text-emerald-300' : 'border-amber-500/30 text-amber-300'}`}>
+                            {c.masterStatus === 'master' ? 'У master' : c.masterStatus === 'branch' ? 'Опубліковано в гілці · ще не в master' : 'Входження в master не перевірено'}
+                          </span> : null}
                           <span
                             className={`px-1.5 py-px rounded border font-semibold ${
                               AUTHOR_TONE[normalizeAuthor(c.author)] ||
