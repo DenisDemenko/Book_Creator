@@ -31,7 +31,8 @@ export function git(root, args, timeout = 15000) {
 }
 export async function snapshot(root) {
   const directory = fs.realpathSync((await git(root, ['rev-parse','--show-toplevel'])).trim());
-  if (directory !== fs.realpathSync(root)) throw new Error('RepositoryPath must be the repository root.');
+  // Git and Node may preserve different drive/directory casing on Windows.
+  if (path.relative(fs.realpathSync(root), directory) !== '') throw new Error('RepositoryPath must be the repository root.');
   const branch = (await git(root, ['symbolic-ref','--quiet','--short','HEAD'])).trim();
   await git(root, ['check-ref-format','--branch',branch]);
   const head = (await git(root, ['rev-parse','HEAD'])).trim();
@@ -59,7 +60,9 @@ async function assertWritable(root) {
     if (fs.existsSync(path.resolve(root, file))) throw new Error('Unfinished Git operation: ' + name);
   }
 }
-export async function execute(root, job) {
+// The optional transport lets tests use an isolated bare repository for network
+// operations. It is never taken from a queued job or server configuration.
+export async function execute(root, job, transport = git) {
   const p = job.payload || {};
   const state = await snapshot(root);
   const writable = !['status','staged-diff'].includes(job.action);
@@ -90,14 +93,14 @@ export async function execute(root, job) {
       if (p.expectedIndexHash !== state.stagedHash) throw new Error('Staged files changed. Review the staged diff again.');
       output = await git(root, ['commit','-m',p.message], 120000); break;
     case 'push':
-      output = await git(root, ['-c','push.followTags=false','push','--porcelain','--',state.pushUrl,state.head + ':refs/heads/' + state.branch], 120000);
-      remoteHead = (await git(root, ['ls-remote','--heads',state.pushUrl,'refs/heads/' + state.branch],30000)).trim().split(/\s+/)[0] || '';
+      output = await transport(root, ['-c','push.followTags=false','push','--porcelain','--',state.pushUrl,state.head + ':refs/heads/' + state.branch], 120000);
+      remoteHead = (await transport(root, ['ls-remote','--heads',state.pushUrl,'refs/heads/' + state.branch],30000)).trim().split(/\s+/)[0] || '';
       verifiedPush = remoteHead === state.head;
       if (!verifiedPush) throw new Error('Push finished, but the remote SHA differs. Inspect the branch before another push.');
       break;
     case 'receive': {
       if (state.status.trim()) throw new Error('Save or commit local changes before receiving.');
-      await git(root, ['fetch','--no-tags','--', state.pushUrl,'refs/heads/' + state.branch],60000);
+      await transport(root, ['fetch','--no-tags','--', state.pushUrl,'refs/heads/' + state.branch],60000);
       const fetched = (await git(root, ['rev-parse','--verify','FETCH_HEAD^{commit}'])).trim();
       const again = await snapshot(root);
       if (again.head !== state.head || again.branch !== state.branch || again.status.trim()) throw new Error('Local state changed during fetch. Nothing merged.');
