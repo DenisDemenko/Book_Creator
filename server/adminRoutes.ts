@@ -3,6 +3,7 @@
  * Усі маршрути закриті requireAdmin.
  */
 
+import { registerAgentHandoffRoutes } from './agentHandoffRoutes';
 import type { Express } from 'express';
 import net from 'node:net';
 import { promises as dnsPromises } from 'node:dns';
@@ -182,6 +183,7 @@ function tcpProbe(host: string, port: number, timeoutMs = 5_000): Promise<{ ok: 
 }
 
 export function registerAdminRoutes(app: Express): void {
+  registerAgentHandoffRoutes(app);
   // ---------------------------------------------------------------------
   // Користувачі
   // ---------------------------------------------------------------------
