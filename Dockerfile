@@ -48,7 +48,13 @@ RUN npx esbuild scripts/gate-b-publish-arhat.mts \
 
 FROM node:22-bookworm-slim AS runtime
 WORKDIR /app
-ENV NODE_ENV=production
+# Vite embeds NOVA_BASE_PATH into browser asset/API URLs at build time.
+# The Express prefix-strip middleware also needs the SAME value at runtime:
+# without it, /studio/assets/*.js and *.css return 404 on the direct Railway host.
+# Re-declare ARG in this Docker stage so build-arg overrides stay synchronized.
+ARG NOVA_BASE_PATH=/studio/
+ENV NODE_ENV=production \
+    NOVA_BASE_PATH=${NOVA_BASE_PATH}
 
 # Системні PDF-рушії. Debian потрібен для Chromium/TeX і сумісний з
 # офіційним DesignCraft build (glibc).
