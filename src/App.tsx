@@ -770,6 +770,7 @@ export default function App() {
           }
         }
         if (initialRouteRef.current) setCurrentTab(initialRouteRef.current.tab);
+        else if (new URLSearchParams(window.location.search).has('story')) setCurrentTab('scenario');
 
         if (storedBook) {
           setBook(storedBook);
@@ -831,7 +832,11 @@ export default function App() {
     }
     const serverRole = auth.user.role as UserRole;
     setCurrentRole((prev) => (prev === serverRole ? prev : serverRole));
-    if (!canAccessTab(serverRole, currentTab) && !extraTabs.includes(currentTab)) {
+    const previewStoryAccess = typeof window !== 'undefined' &&
+      window.location.hostname === 'writer-studio-preview-production.up.railway.app' &&
+      new URLSearchParams(window.location.search).has('story') &&
+      currentTab === 'scenario';
+    if (!previewStoryAccess && !canAccessTab(serverRole, currentTab) && !extraTabs.includes(currentTab)) {
       // Намір із маркетплейсу тут сильніший за «типову вкладку ролі».
       // Інакше дві вимоги штовхаються в одному коміті: гість приходить із
       // початковою вкладкою дашборда (гостю вона недоступна), роль вимагає
@@ -856,6 +861,8 @@ export default function App() {
       API_BASE
     );
     if (!path) return;
+    // A preview deep link may start without a local book route. Preserve its
+    // destination during initial hydration, rather than reverting to Start.
     if (window.location.pathname !== path) {
       const url = `${path}${window.location.search}${window.location.hash}`;
       if (routeSyncedRef.current) window.history.pushState({ tab: currentTab }, '', url);
@@ -2412,6 +2419,7 @@ export default function App() {
         {currentTab === 'scenario' && (
           <ScenarioView
             book={book}
+            ownerId={auth.user?.id ?? null}
             onUpdateBook={handleUpdateBook}
             onNavigateToSection={handleNavigateToSection}
             onSaveBook={handleManualSave}
@@ -2655,7 +2663,7 @@ export default function App() {
       {/* Довідковий тур: спливаючі підказки біля ключових кнопок кожної
           вкладки для нових користувачів. Сам відстежує зміну currentTab
           і показує 3-5 підказок при першому відвідуванні вкладки. */}
-      <OnboardingTour currentTab={currentTab} authUser={auth.user} />
+      {typeof window !== 'undefined' && window.innerWidth >= 640 && <OnboardingTour currentTab={currentTab} authUser={auth.user} />}
 
       {/* Сторінка довідки (кнопка в футері вище). Поверх студії, а не
           вкладкою: автор читає її, не втрачаючи місця, де працював. */}
