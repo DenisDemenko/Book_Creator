@@ -178,8 +178,11 @@ DesignCraft); сесія #02, бо #01 за 24.10 належить Codex.
 Перевірки: tsc, build, test:journal, sync 11+13, onboarding 3, кредити/ПДВ,
 studio-mcp, designcraft-capabilities — зелені на b5eb1e0 локально.
 
-НЕ підтверджено: окремий ls-remote, GitHub CI SHA b5eb1e0, Railway-деплой,
-ручне приймання масштабу й обкладинки, будь-який живий прогін синхронізації
+Підтверджено власником: GitHub CI b5eb1e0 (validate, run 40123958031) і Railway-деплой
+SUCCESS/Active (19:08 UTC, ams); HTTP 200 сторінки обкладинки нового UI не доводить.
+Нова форма обкладинки на проді підтверджена власником після Ctrl+F5 (без нього —
+старий кеш браузера).
+НЕ підтверджено: окремий ls-remote, ручне приймання масштабу й обкладинки, будь-який живий прогін синхронізації
 (на проді немає `BOOK_SYNC_*`). Червоні й до цих змін: test:express-tracks,
 test:invite-mail, лабіринтні :browser/:studio (шлях Chromium на Windows).
 Поза межами за рішенням власника: редактор DesignCraft у Студії.
