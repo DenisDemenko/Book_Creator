@@ -153,7 +153,11 @@ commit/push/деплой; результат публікації фіксуєт
 Власник прямо дозволив commit/push/деплой. Код #477 опубліковано як
 4d2fb6e5981f93835dbf174b7777dcea9e12344a у Book_Creator/master; ls-remote
 підтвердив SHA. Перший GitHub CI 40115251227 відхилив наявний YAML-дубль
-with до запуску тестів. Виправляється дубль і додається push/master-тригер.
+with до запуску тестів. Дубль і push/master-тригер виправлено комітом
+9ddf3228c94cd922fc1b2ae9a16f7192b4476b55, SHA підтверджено ls-remote.
+GitHub CI цієї кодової версії — SUCCESS:
+https://github.com/DenisDemenko/Book_Creator/actions/runs/40115446369 .
+Поточне уточнення передачі — лише документація, його SHA звіряти за HEAD.
 GitHub API і production health відхилені HTTP-політикою (403), потрібні
 домени збережені в чернетці середовища, runtime їх поки не застосував.
 Railway-деплой не підтверджений; push не є доказом деплою.
