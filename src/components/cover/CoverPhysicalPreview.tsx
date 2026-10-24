@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Book } from '../../types';
 import { assetUrl } from '../../utils/assetUrl';
+import { coverSpreadDimensions } from '../../utils/coverPhysical';
 import type { CoverConfigWithPhysical } from './CoverPhysicalSpec';
 
 interface CoverPhysicalPreviewProps {
@@ -33,14 +34,14 @@ export const CoverPhysicalPreview: React.FC<CoverPhysicalPreviewProps> = ({
 }) => {
   const { pageWidthMm, pageHeightMm, margins } = book.layoutConfig;
   const bleedMm = margins.bleedMm || 0;
-  const spreadWidthMm = pageWidthMm * 2 + spineWidthMm + bleedMm * 2;
-  const spreadHeightMm = pageHeightMm + bleedMm * 2;
+  const dims = coverSpreadDimensions({ pageWidthMm, pageHeightMm, bleedMm }, spineWidthMm);
+  const spreadWidthMm = dims.fullWidthMm;
+  const spreadHeightMm = dims.fullHeightMm;
   const backArt = cover.backArtUrl;
   const frontArt = cover.frontArtUrl || cover.coverImageUrl;
   const spineArt = cover.spineArtUrl;
   const wrapArt = cover.useWrapArtwork ? cover.wrapArtUrl : undefined;
-  const spinePercent = Math.max(0.8, (spineWidthMm / Math.max(spreadWidthMm, 1)) * 100);
-  const pagePercent = (pageWidthMm / Math.max(spreadWidthMm, 1)) * 100;
+  const { spinePercent, pagePercent } = dims;
 
   return (
     <section className="rounded-2xl border border-slate-800 bg-slate-950/90 p-4 lg:p-5">

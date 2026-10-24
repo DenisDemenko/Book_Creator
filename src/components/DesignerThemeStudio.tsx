@@ -28,6 +28,7 @@ import {
   type DesignerThemeEntity,
 } from '../data/customBookDesignTheme';
 import { defaultPlacementFor, defaultRepeatFor, placementOf } from '../data/bookDesignPlacement';
+import { ZOOM_PRESETS, parseZoomValue, zoomLabel, zoomScaleOf, type ZoomValue } from '../utils/zoomPresets';
 import { BookDesignBackgroundEditor } from './BookDesignBackgroundEditor';
 import { BookDesignBackgroundLayers } from './BookDesignBackgroundLayers';
 import { BookDesignBoxModelEditor } from './BookDesignBoxModelEditor';
@@ -47,7 +48,7 @@ interface PreviewPage {
 }
 
 type PreviewMode = 'page' | 'spread';
-type ZoomMode = 75 | 100 | 'fit';
+type ZoomMode = ZoomValue;
 type MobilePanel = 'preview' | 'structure' | 'properties' | 'blocks';
 
 function storageKey(bookId: string): string {
@@ -501,7 +502,7 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId, onDirt
 
   const currentPage = pages[Math.min(pageIndex, pages.length - 1)];
   const nextPage = pages[Math.min(pageIndex + 1, pages.length - 1)];
-  const zoomScale = zoom === 'fit' ? 0.82 : zoom / 100;
+  const zoomScale = zoomScaleOf(zoom);
 
   return (
     <section className="rounded-2xl border border-violet-500/25 bg-violet-950/10 p-3 sm:p-4" data-designer-theme-studio>
@@ -587,10 +588,10 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId, onDirt
             <main className={`${mobilePanel === 'preview' ? 'flex' : 'hidden'} min-w-0 flex-col rounded-xl border border-slate-800 bg-slate-900/55 xl:flex`}>
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-3 py-2.5">
                 <div className="inline-flex rounded-lg border border-slate-700 bg-slate-950 p-1"><button type="button" onClick={() => setPreviewMode('page')} className={`rounded-md px-2.5 py-1.5 text-[11px] ${previewMode === 'page' ? 'bg-slate-700 text-white' : 'text-slate-400'}`}>Одна сторінка</button><button type="button" onClick={() => setPreviewMode('spread')} className={`hidden rounded-md px-2.5 py-1.5 text-[11px] sm:block ${previewMode === 'spread' ? 'bg-slate-700 text-white' : 'text-slate-400'}`}>Розворот</button></div>
-                <div className="flex items-center gap-1">{([75, 100, 'fit'] as const).map((value) => <button key={String(value)} type="button" onClick={() => setZoom(value)} className={`rounded-md px-2 py-1 text-[10px] ${zoom === value ? 'bg-cyan-500/15 text-cyan-200' : 'text-slate-500'}`}>{value === 'fit' ? 'Fit' : `${value}%`}</button>)}</div>
+                <label className="flex items-center gap-1.5 text-[10px] text-slate-400" data-zoom-select><span>Масштаб</span><select value={String(zoom)} onChange={(event) => setZoom(parseZoomValue(event.target.value))} aria-label="Масштаб перегляду" className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-cyan-200">{ZOOM_PRESETS.map((value) => <option key={value} value={String(value)}>{zoomLabel(value)}</option>)}<option value="fit">{zoomLabel('fit')}</option></select></label>
               </div>
-              <div className="flex flex-1 items-start justify-center overflow-auto bg-slate-950/40 p-3 sm:p-6">
-                <div className="flex origin-top items-start justify-center gap-5 transition-transform" style={{ transform: `scale(${zoomScale})` }}>
+              <div className="flex flex-1 overflow-auto bg-slate-950/40 p-3 sm:p-6">
+                <div className="m-auto flex items-start justify-center gap-5" style={{ zoom: zoomScale }} data-zoom-scale={zoomScale}>
                   <PreviewPageCard theme={active} page={currentPage} entity={entity} />
                   {previewMode === 'spread' && <PreviewPageCard theme={active} page={nextPage} entity={entity} />}
                 </div>
