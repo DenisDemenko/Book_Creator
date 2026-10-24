@@ -36,6 +36,15 @@ function skip(name: string, why: string): void {
   console.log(`  — ${name} — пропущено: ${why}`);
 }
 
+// Бінарник шукається ДО імпорту рушія: той читає DESIGNCRAFT_PATH на рівні
+// модуля, тож присвоєння після import він уже не побачить. Без цього тест не
+// пропускав живу частину, а падав із «CLI не знайдено» — і ловиться це лише
+// тоді, коли змінну не задано зовні, тобто саме в чужому `npm test`.
+const cli = [process.env.DESIGNCRAFT_PATH, 'D:/Rama/designcraft/target/release/designcraft-cli.exe']
+  .filter((v): v is string => !!v)
+  .find((v) => v === 'designcraft-cli' || fs.existsSync(v));
+if (cli) process.env.DESIGNCRAFT_PATH = cli;
+
 const { exportParams, designcraftEngineV3 } = await import('../server/pdf/engines/designcraftEngineV3');
 const { DEFAULT_LAYOUT_SPEC } = await import('../server/pdf/pdfTypes');
 
@@ -76,16 +85,12 @@ console.log('\nexportParams: один білдер на два транспор�
 // ---------------------------------------------------------------------------
 console.log('\nЖивий бінарник: що експортер справді робить');
 {
-  const cli = [process.env.DESIGNCRAFT_PATH, 'D:/Rama/designcraft/target/release/designcraft-cli.exe']
-    .filter((v): v is string => !!v)
-    .find((v) => v === 'designcraft-cli' || fs.existsSync(v));
 
   if (!cli) {
     skip('структурне дерево справді вкладається', 'бінарника немає (задайте DESIGNCRAFT_PATH)');
     skip('брама PDF/X-4 проходить', 'бінарника немає');
     skip('попередження PDF/A доходить до автора', 'бінарника немає');
   } else {
-    process.env.DESIGNCRAFT_PATH = cli;
     const book: any = {
       id: 'EXPORT-TEST',
       title: 'Перевірка експорту',

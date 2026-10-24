@@ -241,14 +241,26 @@ export function __resetDesigncraftProcessLaunches(): void {
   processLaunches = 0;
 }
 
-function runCli(args: string[], cwd?: string): Promise<CliResult> {
+function runCli(args: string[], cwd?: string, cliPath: string = DESIGNCRAFT_PROD_PATH): Promise<CliResult> {
   processLaunches += 1;
   return new Promise((resolve) => {
-    const child = spawn(DESIGNCRAFT_PROD_PATH, args, {
+    const child = spawn(cliPath, args, {
       cwd,
       env: { ...process.env },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    // Потоки ОБОВ'ЯЗКОВО в utf8, інакше кожен Buffer декодується окремо.
+    // Чанк рветься на довільному байті, і двобайтова кирилиця на межі стає
+    // двома U+FFFD по 3 байти: текст лишається читним, але байтові зсуви з
+    // `byteOffset` розповзаються на +4 байти за кожен розрив. А
+    // `story.replaceRange` бере межі В БАЙТАХ, тож вирізання маркера
+    // ілюстрації прихоплювало абзацний розрив після нього; де далі стояв
+    // заголовок глави, той злипався з абзацом ілюстрації, втрачав
+    // `Heading 1` і зникав зі змісту. Так книга Архата губила 5 глав із 16,
+    // а сесійний клієнт (`../designcraft/session.ts`), який setEncoding
+    // робить від початку, був неуразливий — звідси й різниця між шляхами.
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
     let stdout = '';
     let stderr = '';
     let timedOut = false;
@@ -272,6 +284,15 @@ function runCli(args: string[], cwd?: string): Promise<CliResult> {
       resolve({ code, stdout, stderr, timedOut });
     });
   });
+}
+
+/**
+ * Тестовий доступ до файлового транспорту з підставним бінарником.
+ * Потрібен, щоб перевіряти РОЗБІР виводу без справжнього designcraft-cli:
+ * `scripts/test-designcraftCliDecoding.mts`.
+ */
+export function __runCliForTest(cliPath: string, args: string[], cwd?: string): Promise<CliResult> {
+  return runCli(args, cwd, cliPath);
 }
 
 function parseReport(stdout: string): any {
