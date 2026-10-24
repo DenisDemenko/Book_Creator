@@ -1,7 +1,9 @@
 import React from 'react';
 import { ZoomIn } from 'lucide-react';
+import { ZOOM_PRESETS } from '../../utils/zoomPresets';
 
-export const LAYOUT_ZOOM_PRESETS = Array.from({ length: 15 }, (_, index) => (index + 1) * 10);
+/** Один список 10–150 % на всю Студію (див. utils/zoomPresets.ts): конструктор шаблону й верстка не розходяться. */
+export const LAYOUT_ZOOM_PRESETS: readonly number[] = ZOOM_PRESETS;
 
 interface LayoutZoomControlProps {
   value: number;
