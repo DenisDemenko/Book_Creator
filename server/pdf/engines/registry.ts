@@ -43,6 +43,7 @@ export interface PdfEngineDescription {
   strengthUk: string;
   limitUk: string;
   supportsPrint: boolean;
+  supportsCompanions: boolean;
   available: boolean;
   reasonUk?: string;
   fixUk?: string;
@@ -75,6 +76,7 @@ export async function listPdfEngines(
     strengthUk: engine.strengthUk,
     limitUk: engine.limitUk,
     supportsPrint: engine.supportsPrint,
+    supportsCompanions: engine.supportsCompanions,
     available: state.ok,
     reasonUk: state.ok ? undefined : state.reasonUk,
     fixUk: state.ok ? undefined : state.fixUk,
@@ -99,12 +101,27 @@ export async function renderWithEngine(
     );
   }
 
+  // Супутні формати — як друкована редакція: якщо рушій цього не вміє,
+  // автор мусить почути це словами, а не отримати PDF без того, що просив.
+  const wantedCompanions = (request.spec as { pdfExport?: { companions?: unknown[] } } | undefined)?.pdfExport
+    ?.companions;
+  if (Array.isArray(wantedCompanions) && wantedCompanions.length && !engine.supportsCompanions) {
+    throw new PdfEngineError(
+      engine.id,
+      'bad_input',
+      `Рушій «${engine.label}» не робить супутніх форматів (${wantedCompanions.join(', ')}): ` +
+        'EPUB і HTML із того самого макета вміє лише DesignCraft.'
+    );
+  }
+
   if (request.print && !engine.supportsPrint) {
     throw new PdfEngineError(
       engine.id,
       'bad_input',
       `Рушій «${engine.label}» не робить друковану редакцію під KDP: ` +
-        'дзеркальні поля й корінець за обсягом уміє лише власна верстка Nova.'
+        'дзеркальні поля й корінець за обсягом потребують живого документа. ' +
+        'Завжди вміє власна верстка Nova; DesignCraft — лише в сесійному ' +
+        'транспорті (DESIGNCRAFT_SESSION).'
     );
   }
 

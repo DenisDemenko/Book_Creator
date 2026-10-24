@@ -528,7 +528,7 @@ console.log('\n$-квота чату (checkChatQuota, server/subscriptions.ts):'
     currentPeriodStart: now, currentPeriodEnd: periodEnd, createdAt: now, updatedAt: now,
   });
   const under = await subs.checkChatQuota('u-pro-check', 'writer');
-  t('pro: початково дозволено, ліміт $5', under.allowed && under.quota === 5, String(under.quota));
+  t('pro: початково дозволено, ліміт = 200 грн у доларах', under.allowed && Math.abs((under.quota ?? 0) - subs.textBudgetUsd()) < 1e-9, String(under.quota));
 
   for (let i = 0; i < 6; i++) {
     await store.recordUsage({
@@ -538,9 +538,9 @@ console.log('\n$-квота чату (checkChatQuota, server/subscriptions.ts):'
     });
   }
   const over = await subs.checkChatQuota('u-pro-check', 'writer');
-  t('pro: після $6 чат-витрат — заборонено', !over.allowed && over.remaining === 0, JSON.stringify(over));
+  t('pro: після $6 текст-витрат (ліміт 200 грн ≈ $4.17) — заборонено', !over.allowed && over.remaining === 0, JSON.stringify(over));
 
-  // Витрати поза контекстом чату не рахуються в квоту.
+  // Ліміт тепер рахує ВЕСЬ текст, не лише чат (рішення власника 20.10.2026, A-14).
   await store.upsertSubscription({
     userId: 'u-pro2-check', plan: 'pro', billingCycle: 'monthly', status: 'active',
     currentPeriodStart: now, currentPeriodEnd: periodEnd, createdAt: now, updatedAt: now,
@@ -551,7 +551,7 @@ console.log('\n$-квота чату (checkChatQuota, server/subscriptions.ts):'
     modelId: 'gemini-3.7-flash', costUsd: 100, context: 'Редагування', success: true,
   });
   const otherOnly = await subs.checkChatQuota('u-pro2-check', 'writer');
-  t('лише витрати чату рахуються в квоту', otherOnly.allowed, JSON.stringify(otherOnly));
+  t('витрати поза чатом теж рахуються в ліміт тексту', !otherOnly.allowed, JSON.stringify(otherOnly));
 }
 
 // ---------------------------------------------------------------------------

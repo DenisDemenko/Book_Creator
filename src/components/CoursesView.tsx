@@ -79,7 +79,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({ book, onUpdateBook, on
   // «Озвучити фрагмент» у редакторі (EditorView.tsx) і плейлист «Слухати
   // книгу» (NarrationView.tsx): один платформний ключ ElevenLabs, той
   // самий гейт Pro/Ultra, той самий кеш за хешем тексту на сервері.
-  const narrationAccess = usePlanAccess(authUser, ['pro', 'ultra']);
+  const narrationAccess = usePlanAccess(authUser, ['pro', 'ultra', 'team']);
   const [narrationBusyTagId, setNarrationBusyTagId] = useState<string | null>(null);
   const [narrationPlayer, setNarrationPlayer] = useState<{ audioUrl: string; label: string } | null>(null);
 

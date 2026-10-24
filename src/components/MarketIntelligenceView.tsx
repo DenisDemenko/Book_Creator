@@ -481,7 +481,7 @@ export const MarketIntelligenceView: React.FC<MarketIntelligenceViewProps> = ({
   /** Щільність відступів. Один рядок на всі чотири гілки рендера нижче. */
   const padClass = embedded ? 'p-4' : 'p-6 lg:p-8';
   const { t, lang: uiLang } = useLanguage();
-  const access = usePlanAccess(authUser, ['pro', 'ultra']);
+  const access = usePlanAccess(authUser, ['pro', 'ultra', 'team']);
 
   /**
    * Вкладки сторінки. Скринінг лишається першим і за замовчуванням: це

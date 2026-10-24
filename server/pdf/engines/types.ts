@@ -30,8 +30,12 @@ export interface PdfRenderRequest {
   kind: PdfDocumentKind;
   /** Налаштування макета від Studio. */
   spec?: Partial<PdfLayoutSpec>;
-  /** Друкована редакція під KDP. Підтримує лише рушій `nova`. */
+  /** Друкована редакція під KDP. */
   print?: boolean;
+  /** Обріз KDP (`KDP_TRIM_SIZES`), коли `print`. Типово 6x9. */
+  trimId?: string;
+  /** Виліт під обріз — для книг із зображеннями «під зріз». */
+  hasBleed?: boolean;
   /** Хто друкує — для рушіїв, які працюють під ключем автора. */
   ownerId?: string | null;
   /** Роль того, хто друкує. */
@@ -54,6 +58,30 @@ export interface PdfRenderResult {
    * physical-only map, якщо рушій поки знає лише точну кількість сторінок.
    */
   pagination?: PaginationResult;
+  /**
+   * Супутні формати, зроблені з ТОГО САМОГО макета, що й PDF.
+   *
+   * Чому це тут, а не окремим рушієм: сенс саме в тому, що EPUB походить із
+   * вже зверстаного документа — ті самі стилі, той самий порядок читання, ті
+   * самі ілюстрації. Окремий виклик будував би його заново й міг би розійтися
+   * з PDF.
+   *
+   * Заповнює лише DesignCraft і лише на запит (`spec.pdfExport.companions`).
+   * Студія має й власний EPUB (`src/utils/fileExporters.ts`), зібраний у
+   * браузері з моделі книги; він нічого не знає про верстку й тему, тож це
+   * два різні продукти, а не заміна одного одним.
+   */
+  companions?: PdfCompanion[];
+}
+
+export type PdfCompanionKind = 'epub' | 'html';
+
+export interface PdfCompanion {
+  kind: PdfCompanionKind;
+  bytes: Uint8Array;
+  mimeType: string;
+  /** Розширення для імені файла артефакту. */
+  extension: string;
 }
 
 export interface PdfEngineAvailability {
@@ -78,6 +106,14 @@ export interface PdfEngine {
   limitUk: string;
   /** Чи підтримує друковану редакцію під KDP. */
   supportsPrint: boolean;
+  /**
+   * Чи вміє супутні формати з того самого макета (`companions`).
+   *
+   * Окрема ознака, а не припущення: інтерфейс мусить або показати авторові
+   * кнопку, яка працює, або не показати її зовсім. Вимкнена кнопка без
+   * причини — гірше за відсутню.
+   */
+  supportsCompanions: boolean;
   available(context?: PdfEngineContext): Promise<PdfEngineAvailability>;
   render(request: PdfRenderRequest): Promise<PdfRenderResult>;
 }

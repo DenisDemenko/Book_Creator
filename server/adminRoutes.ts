@@ -3,6 +3,7 @@
  * Усі маршрути закриті requireAdmin.
  */
 
+import { registerAgentHandoffRoutes } from './agentHandoffRoutes';
 import type { Express } from 'express';
 import net from 'node:net';
 import { promises as dnsPromises } from 'node:dns';
@@ -49,7 +50,14 @@ import { IMAGE_ENGINES, seedreamConfig } from './imageGeneration';
 import { SEEDREAM_FAL_MODEL } from './pricing';
 import { geminiClient } from './aiCore';
 import { mailConfig } from './mail';
-import { PLANS, PLAN_ORDER, priceFor, resolveSubscription, type PlanId } from './subscriptions';
+import { PLANS, PLAN_ORDER, priceFor, resolveSubscription, getActiveTaxRegime, setTaxRegime, updatePricingConfig, activateSubscription, type PlanId } from './subscriptions';
+import { upsertSubscription } from './store';
+import { getDb, isAvailable } from './db';
+import { CreditWallet, WalletError } from './creditWallet';
+import { syncCredits } from './creditGate';
+import { imageCostTable, videoCostTable } from './creditCatalog';
+import { DEFAULT_PRICING_CONFIG } from './taxPricing';
+import { TAX_REGIMES, TAX_REGIME_IDS, getPricingConfig, isTaxRegimeId, priceBreakdown, monthlyPriceUah } from './taxPricing';
 import { isPaidPlan, planLabel, sellerGateRefusal } from './sellerGate';
 import { platformKeyFor } from './platformKeys';
 import { paypalConfig } from './payments/paypal';
@@ -131,8 +139,10 @@ function dayKey(iso: string): string {
  */
 function revenueUahForPayment(p: StoredPayment): number {
   const def = PLANS[p.plan as PlanId];
-  if (def) return priceFor(p.plan as PlanId, p.billingCycle);
+  // Платіж у грн — рахуємо за фактично сплаченою сумою: ціни тарифів тепер
+  // залежать від податкового режиму й змінюються, а вже отримані гроші — ні.
   if (p.currency === 'UAH') return p.amount;
+  if (def) return priceFor(p.plan as PlanId, p.billingCycle);
   return p.amount / paypalConfig.uahToUsdRate;
 }
 
@@ -173,6 +183,7 @@ function tcpProbe(host: string, port: number, timeoutMs = 5_000): Promise<{ ok: 
 }
 
 export function registerAdminRoutes(app: Express): void {
+  registerAgentHandoffRoutes(app);
   // ---------------------------------------------------------------------
   // Користувачі
   // ---------------------------------------------------------------------
@@ -413,6 +424,148 @@ export function registerAdminRoutes(app: Express): void {
       console.error('[admin] crm users:', err);
       res.status(500).json({ error: 'Не вдалося завантажити CRM.' });
     }
+  });
+
+  // ---------------------------------------------------------------------
+  // Податковий режим і ціни підписок
+  // ---------------------------------------------------------------------
+
+  function taxPricingPayload() {
+    const active = getActiveTaxRegime();
+    return {
+      active: active.id,
+      targetMarginPercent: getPricingConfig().targetMarginPercent,
+      fxUahPerUsd: getPricingConfig().fxUahPerUsd,
+      regimes: TAX_REGIME_IDS.map((id) => {
+        const regime = TAX_REGIMES[id];
+        return {
+          ...regime,
+          prices: PLAN_ORDER.filter((p) => p !== 'free').map((planId) => {
+            const gross = monthlyPriceUah(regime, planId);
+            return { plan: planId, nameUk: PLANS[planId].nameUk, credits: PLANS[planId].aiCredits, ...priceBreakdown(regime, planId, gross) };
+          }),
+        };
+      }),
+    };
+  }
+
+  function creditsOverview() {
+    const images = imageCostTable();
+    const videos = videoCostTable();
+    const photo = images.find((r) => r.key.includes('nano-banana-2') && r.size === '1K') || images[0];
+    const video = videos.find((r) => r.engineId === 'leonardo-kling2-5') || videos[0];
+    return {
+      config: getPricingConfig(),
+      defaults: DEFAULT_PRICING_CONFIG,
+      taxPricing: taxPricingPayload(),
+      plans: PLAN_ORDER.map((id) => ({
+        id,
+        nameUk: PLANS[id].nameUk,
+        credits: PLANS[id].aiCredits,
+        priceMonthlyUah: PLANS[id].priceMonthlyUah,
+        priceAnnualUah: PLANS[id].priceAnnualUah,
+        textBudgetUah: id === 'free' ? null : getPricingConfig().textBudgetUah,
+      })),
+      images,
+      videos,
+      examples: { photo: photo || null, video: video || null },
+      walletAvailable: isAvailable(),
+    };
+  }
+
+  const adminWallet = () => (isAvailable() ? new CreditWallet(getDb() as any) : null);
+
+  app.get('/api/admin/credits/overview', requireAdmin, (_req, res) => {
+    res.json(creditsOverview());
+  });
+
+  /** Зміна параметрів: ціни підписок, пакети балів, ліміт тексту й формула списання оновлюються разом. */
+  app.put('/api/admin/credits/config', requireAdmin, async (req, res) => {
+    try {
+      await updatePricingConfig(req.body || {});
+      res.json(creditsOverview());
+    } catch (err: any) {
+      res.status(400).json({ error: err?.message || 'Некоректні параметри.' });
+    }
+  });
+
+  app.get('/api/admin/credits/users', requireAdmin, async (_req, res) => {
+    const wallet = adminWallet();
+    const balances = new Map((wallet?.listAccounts() || []).map((b) => [b.userId, b]));
+    const users = await listUsers();
+    const rows = await Promise.all(
+      users.map(async (u) => {
+        const sub = await resolveSubscription(u.id);
+        const b = balances.get(u.id);
+        return {
+          id: u.id,
+          email: u.email,
+          name: u.name,
+          role: u.role,
+          plan: sub.plan,
+          cycle: sub.billingCycle,
+          periodEnd: sub.currentPeriodEnd,
+          available: b?.available ?? null,
+          reserved: b?.reserved ?? null,
+        };
+      })
+    );
+    res.json({ users: rows, walletAvailable: !!wallet });
+  });
+
+  app.get('/api/admin/credits/users/:id/ledger', requireAdmin, (req, res) => {
+    const wallet = adminWallet();
+    if (!wallet) return res.status(503).json({ error: 'Гаманець недоступний (потрібне SQLite-сховище).' });
+    res.json({ ledger: wallet.listLedger(String(req.params.id), 200) });
+  });
+
+  app.post('/api/admin/credits/users/:id/adjust', requireAdmin, async (req, res) => {
+    const wallet = adminWallet();
+    if (!wallet) return res.status(503).json({ error: 'Гаманець недоступний (потрібне SQLite-сховище).' });
+    const userId = String(req.params.id);
+    try {
+      await syncCredits(userId); // щоб коригування лягло поверх нарахованого пакета
+      const balance = wallet.adjust(userId, Number(req.body?.delta), String(req.body?.reason || ''), String(req.principal?.email || 'admin'));
+      res.json({ balance });
+    } catch (err: any) {
+      res.status(err instanceof WalletError ? 400 : 500).json({ error: err?.message || 'Не вдалося змінити баланс.', code: err?.code });
+    }
+  });
+
+  /** Призначення тарифу вручну; бали нараховуються за тією ж логікою, що й після оплати. */
+  app.post('/api/admin/credits/users/:id/plan', requireAdmin, async (req, res) => {
+    const userId = String(req.params.id);
+    const { plan, cycle } = req.body || {};
+    if (!(PLAN_ORDER as string[]).includes(plan)) return res.status(400).json({ error: 'Невідомий тариф.' });
+    const billing = cycle === 'annual' ? 'annual' : 'monthly';
+    try {
+      if (plan === 'free') {
+        const now = new Date().toISOString();
+        await upsertSubscription({
+          userId, plan: 'free', billingCycle: 'monthly', status: 'active',
+          currentPeriodStart: now, currentPeriodEnd: now, createdAt: now, updatedAt: now,
+        });
+      } else {
+        await activateSubscription(userId, plan as PlanId, billing, 'admin', `admin:${req.principal?.email || 'admin'}`);
+      }
+      const balance = isAvailable() ? await syncCredits(userId) : null;
+      res.json({ ok: true, balance });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Не вдалося призначити тариф.' });
+    }
+  });
+
+  app.get('/api/admin/tax-regime', requireAdmin, (_req, res) => {
+    res.json(taxPricingPayload());
+  });
+
+  app.put('/api/admin/tax-regime', requireAdmin, async (req, res) => {
+    const { regime } = req.body || {};
+    if (!isTaxRegimeId(regime)) {
+      return res.status(400).json({ error: 'Невідомий податковий режим.' });
+    }
+    await setTaxRegime(regime);
+    res.json(taxPricingPayload());
   });
 
   // ---------------------------------------------------------------------

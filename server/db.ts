@@ -16,6 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { CREDIT_SCHEMA } from './creditSchema';
 import { CORE_ENTITIES, CORE_ENTITY_RELATIONS } from '../src/utils/coreEntities';
 
 export const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), 'data');
@@ -1016,6 +1017,7 @@ CREATE INDEX IF NOT EXISTS idx_chat_message_entities_message ON chat_message_ent
 CREATE INDEX IF NOT EXISTS idx_chat_message_entities_session ON chat_message_entities(session_id);
 CREATE INDEX IF NOT EXISTS idx_chat_message_entities_slug ON chat_message_entities(user_id, slug);
 
+${CREDIT_SCHEMA}
 `;
 
 /**

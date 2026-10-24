@@ -25,7 +25,7 @@ import {
 import type { AuthUser, Book, NavigationTab, WriterMasteryState, SkillCategory } from '../types';
 import { SKILL_CATEGORIES, SKILL_TASKS, INITIAL_MASTERY_STATE } from '../data/skillsData';
 import { useLanguage } from '../i18n/LanguageContext';
-import { listBooks, saveMeta, META_ACTIVE_BOOK, type BookSummary } from '../utils/storage';
+import { listBooks, loadBook, saveMeta, META_ACTIVE_BOOK, type BookSummary } from '../utils/storage';
 
 interface DashboardViewProps {
   book: Book;
@@ -36,8 +36,17 @@ interface DashboardViewProps {
   onOpenCreateWizard: () => void;
   /** Створити порожню книгу «з нульової планки» й одразу відкрити редактор. */
   onCreateBlankBook: () => void;
+  /** Відкрити книгу, знайдену локально або отриману з сервера без перезапису. */
+  onOpenExistingBook: (book: Book, serverRevision?: number) => Promise<void>;
   /** Видалити книгу за id (власник обробляє перемикання активної книги). */
   onDeleteBook: (id: string) => void;
+}
+
+interface ServerBookSummary {
+  id: string;
+  title: string;
+  updatedAt: string;
+  revision: number;
 }
 
 interface StyleStatus {
@@ -66,6 +75,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onNavigateToTab,
   onOpenCreateWizard,
   onCreateBlankBook,
+  onOpenExistingBook,
   onDeleteBook,
 }) => {
   const { t } = useLanguage();
@@ -144,6 +154,79 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     window.location.reload();
   };
 
+  // Серверні книги належать лише поточному акаунту (GET /api/books).
+  // Локальний listBooks читає IndexedDB цього пристрою і НЕ є повним переліком.
+  const [serverBooks, setServerBooks] = useState<ServerBookSummary[]>([]);
+  const [serverBooksLoading, setServerBooksLoading] = useState(false);
+  const [serverBooksError, setServerBooksError] = useState<string | null>(null);
+  const [openingBookId, setOpeningBookId] = useState<string | null>(null);
+  const [openBookError, setOpenBookError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!authUser?.id) {
+      setServerBooks([]);
+      setServerBooksError(null);
+      setServerBooksLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setServerBooksLoading(true);
+    setServerBooksError(null);
+    fetch('/api/books', { credentials: 'same-origin' })
+      .then(async (res) => {
+        if (!res.ok) throw new Error('Сервер не повернув перелік ваших книг.');
+        const data = await res.json();
+        return (Array.isArray(data?.books) ? data.books : [])
+          .filter((entry: unknown): entry is ServerBookSummary =>
+            !!entry && typeof entry === 'object' &&
+            typeof (entry as ServerBookSummary).id === 'string' &&
+            typeof (entry as ServerBookSummary).revision === 'number');
+      })
+      .then((books) => { if (!cancelled) setServerBooks(books); })
+      .catch((error: unknown) => {
+        if (!cancelled) setServerBooksError(error instanceof Error ? error.message : 'Не вдалося отримати список книг.');
+      })
+      .finally(() => { if (!cancelled) setServerBooksLoading(false); });
+    return () => { cancelled = true; };
+  }, [authUser?.id, book.id]);
+
+  const handleOpenCloudBook = async (bookId: string) => {
+    if (!authUser?.id || openingBookId) return;
+    setOpeningBookId(bookId);
+    setOpenBookError(null);
+    try {
+      // Якщо на пристрої вже є своя копія — ніколи не замінюємо її мовчки.
+      const local = await loadBook(bookId);
+      if (local && !window.confirm(
+        'На цьому пристрої вже збережена копія цієї книги. Завантажити серверну версію замість локальної? Якщо маєте незбережені локальні правки, натисніть «Скасувати».'
+      )) return;
+
+      const response = await fetch(`/api/books/${encodeURIComponent(bookId)}`, {
+        credentials: 'same-origin',
+      });
+      if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error('Книгу не знайдено в доступному серверному сховищі. Перевірте, чи увійшли тим самим обліковим записом, під яким її зберігали.');
+        }
+        if (response.status === 401 || response.status === 403) {
+          throw new Error('Немає доступу до цієї книги. Увійдіть у свій акаунт.');
+        }
+        throw new Error(`Сервер не зміг відкрити книгу (HTTP ${response.status}).`);
+      }
+      const stored = await response.json();
+      const restored = stored?.book as Book | undefined;
+      if (!restored || restored.id !== bookId || !Array.isArray(restored.chapters) ||
+          !Number.isInteger(stored.revision) || stored.revision < 1) {
+        throw new Error('Сервер повернув неповні дані книги. Відкриття скасовано.');
+      }
+      await onOpenExistingBook(restored, stored.revision);
+    } catch (error) {
+      setOpenBookError(error instanceof Error ? error.message : 'Не вдалося відкрити книгу.');
+    } finally {
+      setOpeningBookId(null);
+    }
+  };
+
   // Модалка вибору способу створення (візард / з нульової планки) і
   // підтвердження видалення книги.
   const [createChooserOpen, setCreateChooserOpen] = useState(false);
@@ -215,6 +298,57 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <p className="text-sm text-slate-400">{t('dashboard.subtitle', { name: authUser?.name || t('dashboard.guestName') })}</p>
         </div>
       </div>
+
+      {/* Швидке повернення до книги з іншого пристрою. Чужі книги сервер не віддає. */}
+      <section data-testid="existing-book-entry" className="nova-glass-dark rounded-2xl p-5 border border-cyan-500/30">
+        <div className="flex items-center gap-2 mb-2">
+          <BookOpen className="w-5 h-5 text-cyan-300" />
+          <h2 className="text-base font-bold text-slate-100">{t('dashboard.openExistingHeading')}</h2>
+        </div>
+        <p className="text-xs text-slate-400 mb-4">{t('dashboard.openExistingDesc')}</p>
+        <div className="rounded-xl bg-slate-950/50 border border-cyan-500/20 p-3 flex flex-col sm:flex-row sm:items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-bold text-white truncate">
+              {serverBooks.find((entry) => entry.id === 'BK-2084-CYBER')?.title || 'BK-2084-CYBER'}
+            </div>
+            <div className="text-xs text-slate-400 font-mono">BK-2084-CYBER</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleOpenCloudBook('BK-2084-CYBER')}
+            disabled={!authUser?.id || openingBookId !== null}
+            className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-sm"
+          >
+            {openingBookId === 'BK-2084-CYBER' ? <Loader2 className="w-4 h-4 animate-spin" /> : <BookOpen className="w-4 h-4" />}
+            {t('dashboard.openCyberBook')}
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+        {serverBooksLoading && (
+          <p className="mt-3 text-xs text-slate-400 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" />{t('dashboard.loadingCloudBooks')}</p>
+        )}
+        {serverBooks.filter((entry) => entry.id !== 'BK-2084-CYBER').length > 0 && (
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {serverBooks.filter((entry) => entry.id !== 'BK-2084-CYBER').slice(0, 6).map((entry) => (
+              <button
+                type="button"
+                key={entry.id}
+                onClick={() => void handleOpenCloudBook(entry.id)}
+                disabled={openingBookId !== null}
+                className="flex items-center justify-between text-left gap-2 rounded-lg border border-slate-700/70 p-3 bg-slate-900/50 hover:bg-slate-800 disabled:opacity-50"
+              >
+                <span className="min-w-0">
+                  <span className="block font-semibold text-sm text-slate-100 truncate">{entry.title || entry.id}</span>
+                  <span className="block text-xs text-slate-500 truncate">{entry.id}</span>
+                </span>
+                {openingBookId === entry.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4 shrink-0 text-cyan-300" />}
+              </button>
+            ))}
+          </div>
+        )}
+        {serverBooksError && <p role="alert" className="mt-3 text-xs text-amber-300">{serverBooksError}</p>}
+        {openBookError && <p role="alert" className="mt-3 text-xs text-rose-300">{openBookError}</p>}
+      </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* 1. Профіль + XP + Рівень */}

@@ -250,6 +250,8 @@ interface PdfEngineOption {
   strengthUk: string;
   limitUk: string;
   supportsPrint: boolean;
+  /** Чи вміє EPUB/HTML із того самого макета. */
+  supportsCompanions: boolean;
   available: boolean;
   reasonUk?: string;
   fixUk?: string;
@@ -339,7 +341,7 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
       return 'fusion-lab';
     }
   });
-  const [busy, setBusy] = useState<'' | 'preview' | 'publish' | 'cover'>('');
+  const [busy, setBusy] = useState<'' | 'preview' | 'publish' | 'cover' | 'companion-epub' | 'companion-html'>('');
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<EditionResult[] | null>(null);
   /*
@@ -461,6 +463,49 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
       window.open(URL.createObjectURL(blob), '_blank');
     } catch (err: any) {
       setError(err?.message || 'Помилка перегляду.');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  /**
+   * Супутній формат із того самого макета: EPUB або HTML.
+   *
+   * ЧОМУ ЦЕ НЕ ТЕ САМЕ, ЩО «Завантажити EPUB» у меню книги. Той EPUB Студія
+   * збирає в браузері з моделі книги й нічого не знає про верстку: ні про
+   * тему, ні про семантичні стилі, ні про те, де стоять ілюстрації. Цей
+   * походить із уже зверстаного документа, тому успадковує все перелічене.
+   * Два різні файли, і автор обирає свідомо.
+   */
+  const downloadCompanion = async (kind: 'epub' | 'html') => {
+    setBusy(`companion-${kind}`);
+    setError(null);
+    setNote(null);
+    try {
+      const res = await fetch('/api/admin/pdf/companion', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ book, variant, engineId, theme, kind }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const notes = Array.isArray(data?.notesUk) ? ` ${data.notesUk.join(' ')}` : '';
+        throw new Error((data?.error || `Не вдалося зібрати ${kind.toUpperCase()} (HTTP ${res.status}).`) + notes);
+      }
+      setNote(decodeURIComponent(res.headers.get('x-pdf-note') || ''));
+      const blob = await res.blob();
+      // Завантаженням, а не новою вкладкою: EPUB браузер усе одно не покаже.
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${String(book?.title || 'book').replace(/[^\p{L}\p{N}]+/gu, '_').slice(0, 60) || 'book'}.${kind}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setError(err?.message || `Помилка складання ${kind.toUpperCase()}.`);
     } finally {
       setBusy('');
     }
@@ -755,6 +800,36 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
               {chosenEngine.strengthUk}{' '}
               <span className="text-amber-300/80">Не вміє: {chosenEngine.limitUk}</span>
             </p>
+          )}
+
+          {/* Супутні формати — лише в того рушія, який їх справді вміє.
+              Вимкнена кнопка без причини гірша за відсутню, а ознаку
+              `supportsCompanions` дає сам сервер, не вгадує інтерфейс. */}
+          {chosenEngine && chosenEngine.available && chosenEngine.supportsCompanions && (
+            <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+              <p className="text-[11px] leading-relaxed text-slate-400">
+                <span className="text-slate-300">Супутні формати з цієї ж верстки.</span> Вони
+                походять із уже зверстаного документа, тож успадковують тему, семантичні стилі й
+                місця ілюстрацій. Це не те саме, що «Завантажити EPUB» у меню книги: той
+                збирається в браузері з тексту й про верстку не знає.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  onClick={() => void downloadCompanion('epub')}
+                  disabled={!!busy}
+                  className="px-3 py-2 rounded-xl text-xs border border-slate-800 bg-slate-950 text-slate-300 transition hover:border-slate-600 disabled:cursor-not-allowed disabled:text-slate-600"
+                >
+                  {busy === 'companion-epub' ? 'Складаю EPUB…' : 'Завантажити EPUB'}
+                </button>
+                <button
+                  onClick={() => void downloadCompanion('html')}
+                  disabled={!!busy}
+                  className="px-3 py-2 rounded-xl text-xs border border-slate-800 bg-slate-950 text-slate-300 transition hover:border-slate-600 disabled:cursor-not-allowed disabled:text-slate-600"
+                >
+                  {busy === 'companion-html' ? 'Складаю HTML…' : 'Завантажити HTML'}
+                </button>
+              </div>
+            </div>
           )}
 
           {/* Теми — лише в того рушія, у якого вони є. Показувати вибір,

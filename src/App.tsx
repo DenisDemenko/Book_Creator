@@ -92,6 +92,7 @@ import { migrateImageWrapDefaults } from './utils/wrapMigration';
 import {
   loadBook,
   saveBook,
+  cacheBookFromServer,
   loadMeta,
   saveMeta,
   saveSnapshotData,
@@ -1699,6 +1700,28 @@ export default function App() {
     setCurrentTab('editor');
   };
 
+  // Відкриття вже збереженої книги з дашборда, зокрема з Railway.
+  // Спочатку зберігаємо поточні правки, потім перемикаємо книгу.
+  // Серверний знімок кешуємо без PUT: відкриття не повинно перезаписувати джерело.
+  const handleOpenExistingBook = async (nextBook: Book, serverRevision?: number): Promise<void> => {
+    if (hasUnsavedChanges && !(await persistBook(book))) {
+      throw new Error('Поточна книга має незбережені зміни. Спочатку збережіть її.');
+    }
+    if (!nextBook.id || !Array.isArray(nextBook.chapters)) {
+      throw new Error('Некоректний вміст збереженої книги.');
+    }
+    if (serverRevision !== undefined) {
+      await cacheBookFromServer(nextBook, serverRevision);
+    } else {
+      await saveMeta(META_ACTIVE_BOOK, nextBook.id);
+    }
+    setBook(nextBook);
+    setActiveChapterId(nextBook.chapters[0]?.id || '');
+    setActiveSectionId(nextBook.chapters[0]?.sections[0]?.id || '');
+    setHasUnsavedChanges(false);
+    setCurrentTab('editor');
+  };
+
   // Manual save trigger
   const handleManualSave = async () => {
     // Скасовуємо заплановане автозбереження — зараз збережемо примусово.
@@ -2355,6 +2378,7 @@ export default function App() {
             onNavigateToTab={handleSelectTab}
             onOpenCreateWizard={() => setIsCreateBookModalOpen(true)}
             onCreateBlankBook={handleCreateBlankBook}
+            onOpenExistingBook={handleOpenExistingBook}
             onDeleteBook={handleDeleteBook}
           />
         )}

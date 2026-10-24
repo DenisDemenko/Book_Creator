@@ -191,7 +191,7 @@ export interface StoredSubscription {
   status: 'active' | 'cancelled' | 'pending';
   currentPeriodStart: string;
   currentPeriodEnd: string;
-  provider?: 'liqpay' | 'paypal';
+  provider?: 'liqpay' | 'paypal' | 'admin';
   providerRef?: string;
   createdAt: string;
   updatedAt: string;

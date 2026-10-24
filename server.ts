@@ -111,7 +111,8 @@ import { readGammaConfig, GAMMA_RATE_LIMIT_PER_SECOND } from './server/gamma/gam
 import { createGammaClient } from './server/gamma/gammaClient';
 import { registerNarrationRoutes } from './server/narrationRoutes';
 import { registerPublishingRoutes } from './server/publishingRoutes';
-import { checkImageQuota, requireImageQuota, requirePlanAtLeast, checkChatQuota, resolveSubscription } from './server/subscriptions';
+import { assertVideoAffordable } from './server/creditGate';
+import { checkImageQuota, requireImageQuota, requirePlanAtLeast, checkChatQuota, resolveSubscription, loadTaxRegime } from './server/subscriptions';
 import {
   resolveEngine as resolveChatEngine,
   engineConfigured,
@@ -544,6 +545,7 @@ async function startServer() {
   app.use(aiRouteMiddleware(aiRouter));
 
   const storeInfo = await initStore();
+  await loadTaxRegime();
   console.log(
     storeInfo.backend === 'sqlite'
       ? `[db] Сховище: SQLite (${storeInfo.path})`
@@ -2182,7 +2184,7 @@ Translate into refined English JSON.`;
         timestamp: new Date().toISOString()
       });
     } catch (err: any) {
-      const status = err?.kind === 'no_key' ? 503 : err?.kind === 'quota' ? 429 : 500;
+      const status = err?.kind === 'no_key' ? 503 : err?.kind === 'quota' ? 429 : err?.kind === 'credits' ? 402 : 500;
       if (err?.cause) console.error('  причина:', (err.cause as Error)?.message || err.cause);
       console.error('Error in /api/ai/generate-character-art:', err?.message || err);
       res.status(status).json({
@@ -2775,7 +2777,7 @@ Big Five персонажа (openness/conscientiousness/extraversion/agreeablene
         timestamp: new Date().toISOString()
       });
     } catch (err: any) {
-      const status = err?.kind === 'no_key' ? 503 : err?.kind === 'quota' ? 429 : 500;
+      const status = err?.kind === 'no_key' ? 503 : err?.kind === 'quota' ? 429 : err?.kind === 'credits' ? 402 : 500;
       if (err?.cause) console.error('  причина:', (err.cause as Error)?.message || err.cause);
       console.error('Error in /api/ai/generate-illustration-art:', err?.message || err);
       res.status(status).json({
@@ -4759,7 +4761,7 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
         timestamp: new Date().toISOString()
       });
     } catch (err: any) {
-      const status = err?.kind === 'no_key' ? 503 : err?.kind === 'quota' ? 429 : 500;
+      const status = err?.kind === 'no_key' ? 503 : err?.kind === 'quota' ? 429 : err?.kind === 'credits' ? 402 : 500;
       if (err?.cause) console.error('  причина:', (err.cause as Error)?.message || err.cause);
       console.error('Error in /api/ai/generate-cover-art:', err?.message || err);
       res.status(status).json({
@@ -4877,7 +4879,7 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
         });
       })
       .catch((err: any) => {
-        const status = err?.kind === 'no_key' ? 503 : err?.kind === 'quota' ? 429 : 500;
+        const status = err?.kind === 'no_key' ? 503 : err?.kind === 'quota' ? 429 : err?.kind === 'credits' ? 402 : 500;
         if (err?.cause) console.error('  причина:', (err.cause as Error)?.message || err.cause);
         console.error('Error in media-art job (фонова задача):', err?.message || err);
         mediaArtJobs.set(jobId, {
@@ -4994,7 +4996,7 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
     } catch (err: any) {
       // Синхронна частина (валідація тіла запиту, референси) — сюди
       // потрапляють лише збої ДО створення задачі, як і в /generate-video.
-      const status = err?.kind === 'no_key' ? 503 : err?.kind === 'quota' ? 429 : 500;
+      const status = err?.kind === 'no_key' ? 503 : err?.kind === 'quota' ? 429 : err?.kind === 'credits' ? 402 : 500;
       console.error('Error in /api/ai/generate-media-art (синхронна частина):', err?.message || err);
       res.status(status).json({
         error: err?.message || 'Помилка генерації зображення',
@@ -5137,6 +5139,9 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
         return res.status(400).json({ error: err?.message || 'Некоректний референс кадру.', kind: 'empty' });
       }
 
+      // Швидка відмова: немає балів — 402 одразу, без створення фонового завдання.
+      await assertVideoAffordable(req, engine, resolution, typeof durationSec === 'number' ? durationSec : undefined);
+
       const jobId = `vidjob_${randomUUID()}`;
       videoJobs.set(jobId, { status: 'pending', createdAt: Date.now() });
 
@@ -5174,7 +5179,7 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
           });
         })
         .catch((err: any) => {
-          const status = err?.kind === 'no_key' ? 503 : err?.kind === 'quota' ? 429 : 500;
+          const status = err?.kind === 'no_key' ? 503 : err?.kind === 'quota' ? 429 : err?.kind === 'credits' ? 402 : 500;
           if (err?.cause) console.error('  причина:', (err.cause as Error)?.message || err.cause);
           console.error('Error in /api/ai/generate-video (фонова задача):', err?.message || err);
           videoJobs.set(jobId, {
@@ -5188,7 +5193,7 @@ Visual Bible: ${JSON.stringify(visualBible || {})}
     } catch (err: any) {
       // Синхронна частина (валідація тіла запиту, референси кадрів) — сюди
       // потрапляють лише збої ДО створення задачі, як і раніше.
-      const status = err?.kind === 'no_key' ? 503 : err?.kind === 'quota' ? 429 : 500;
+      const status = err?.kind === 'no_key' ? 503 : err?.kind === 'quota' ? 429 : err?.kind === 'credits' ? 402 : 500;
       console.error('Error in /api/ai/generate-video (синхронна частина):', err?.message || err);
       res.status(status).json({
         error: err?.message || 'Помилка генерації відео',

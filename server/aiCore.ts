@@ -57,6 +57,8 @@ import {
 } from './media/mediaLibraryStore';
 import { recordUsage } from './store';
 import { platformKeyFor } from './platformKeys';
+import { beginImage, beginVideo, type ImageCreditJob } from './creditGate';
+import { checkChatQuota } from './subscriptions';
 import { priceForImage, priceForTextEngine, priceForVideo } from './pricing';
 
 export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.7-flash';
@@ -406,6 +408,14 @@ export async function generateText(
 ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
   const modelId = p.modelId || (p.engine === 'gemini' ? GEMINI_MODEL : '');
   const ctx: UsageLogCtx = { req: p.req, label: p.label, bookId: p.bookId };
+  // Грошовий ліміт тексту/JEV на платну підписку (рішення власника 20.10.2026):
+  // вичерпано — відмова ДО виклику провайдера. Без користувача (внутрішні
+  // виклики) і для адміна перевірка пропускається всередині checkChatQuota.
+  const budgetPrincipal = p.req?.principal;
+  if (budgetPrincipal?.id && !budgetPrincipal.isGuest) {
+    const budget = await checkChatQuota(String(budgetPrincipal.id), budgetPrincipal.role || 'writer');
+    if (!budget.allowed) throw new ChatProviderError(402, budget.reasonUk || 'Вичерпано ліміт текстових AI-витрат.');
+  }
   // Т6.4: процес ШІ за роллю (маршрутизатор §21, server/core/collaboration/aiRoute.ts)
   // — інструкція процесу дописується до системного промту модуля. Права не змінює.
   const systemInstruction = withWorkflowInstruction(p.systemInstruction, p.req?.aiRoute);
@@ -570,6 +580,11 @@ export async function generateImage(p: GenerateImageParams): Promise<{
   aspectRatio: string;
 }> {
   const ctx: UsageLogCtx = { req: p.req, label: p.label, bookId: p.bookId };
+  // Гаманець AI-балів: резерв ДО виклику провайдера. Немає балів чи ціни —
+  // ImageCreditsError (402) одразу, без очікування генерації й без списання.
+  const planned = resolveImageEngine(p.engine);
+  const plannedSize = planned.maxSize === '1K' ? '1K' : p.imageSize === '1K' || p.imageSize === '4K' ? p.imageSize : '2K';
+  const creditJob: ImageCreditJob | null = await beginImage(p.req, planned.id, planned.modelId, plannedSize);
   try {
     // Ключ платформи, а не того, хто викликає: коди провайдерів вводить
     // лише адміністратор, і Nova обслуговує ним усіх авторів. Помилка
@@ -610,6 +625,7 @@ export async function generateImage(p: GenerateImageParams): Promise<{
     const sizeLabel =
       generated.engine.maxSize === '1K' ? '1K' : p.imageSize === '1K' || p.imageSize === '4K' ? p.imageSize : '2K';
     await logImageUsage(ctx, generated.engine.id, generated.modelId, sizeLabel, true);
+    creditJob?.settle(generated.engine.id, generated.modelId, sizeLabel);
     return {
       url: saved.url,
       filename: saved.filename,
@@ -623,6 +639,7 @@ export async function generateImage(p: GenerateImageParams): Promise<{
   } catch (err: any) {
     // Той самий формат мітки, який раніше писався вручну на кожному з 3
     // місць виклику: "Невдала спроба (<kind>)".
+    creditJob?.release(`збій генерації: ${err?.kind || 'unknown'}`);
     const failedEngine = resolveImageEngine(p.engine);
     const sizeLabel =
       failedEngine.maxSize === '1K' ? '1K' : p.imageSize === '1K' || p.imageSize === '4K' ? p.imageSize : '2K';
@@ -710,6 +727,8 @@ export async function generateVideo(p: GenerateVideoParams): Promise<{
   durationSec: number | null;
 }> {
   const ctx: UsageLogCtx = { req: p.req, label: p.label, bookId: p.bookId };
+  // Гаманець балів: резерв ДО виклику Leonardo (відео дорожче за фото в десятки разів).
+  const creditJob = await beginVideo(p.req, p.engine, p.resolution, p.durationSec);
   try {
     const apiKeyOverride = await platformKeyFor('leonardo');
 
@@ -725,6 +744,7 @@ export async function generateVideo(p: GenerateVideoParams): Promise<{
     });
     const saved = await saveVideoForOwner(p, generated.buffer, generated.mimeType, generated);
     await logVideoUsage(ctx, generated.engine.id, generated.modelId, generated.resolution, generated.durationSec, true);
+    creditJob?.settleVideo(generated.engine.id, generated.modelId, generated.resolution, generated.durationSec);
     return {
       url: saved.url,
       filename: saved.filename,
@@ -737,6 +757,7 @@ export async function generateVideo(p: GenerateVideoParams): Promise<{
       durationSec: generated.durationSec,
     };
   } catch (err: any) {
+    creditJob?.release(`збій генерації відео: ${err?.kind || 'unknown'}`);
     const failedEngine = resolveVideoEngine(p.engine);
     await logVideoUsage(
       { req: p.req, label: `Невдала спроба (${err?.kind || 'unknown'})`, bookId: p.bookId },

@@ -5,6 +5,7 @@ import type {
   DesignerThemeEntity,
 } from '../../../src/data/customBookDesignTheme';
 import type { PdfLayoutSpec } from '../pdfTypes';
+import { cmd, serializeCommands, type DesigncraftCommand } from './commands';
 import {
   getBookDesignTheme,
   type BookDesignTheme,
@@ -337,7 +338,10 @@ export function buildDesigncraftParagraphStyles(
   return definitions;
 }
 
-function colorCommands(spec: PdfLayoutSpec, styles: readonly DesigncraftParagraphStyleDefinition[]): string[] {
+function colorCommands(
+  spec: PdfLayoutSpec,
+  styles: readonly DesigncraftParagraphStyleDefinition[]
+): DesigncraftCommand[] {
   const colors = new Set<string>();
   const visuals = customVisualsOf(spec);
   const candidates = [
@@ -359,16 +363,30 @@ function colorCommands(spec: PdfLayoutSpec, styles: readonly DesigncraftParagrap
       if (fill?.startsWith('BookDesign ')) colors.add(`#${fill.slice('BookDesign '.length)}`);
     }
   }
-  return [...colors].map((hex) => `swatch.create ${JSON.stringify({ name: colorSwatchName(hex), color: hex })}`);
+  return [...colors].map((hex) => cmd('swatch.create', { name: colorSwatchName(hex), color: hex }));
+}
+
+/**
+ * Команди стилів як дані. Обидва транспорти (файл скрипта й жива сесія)
+ * беруть їх звідси, тож верстка в них однакова за побудовою, а не за
+ * збігом — див. шапку `./commands.ts`.
+ */
+export function buildDesigncraftStyleCommands(
+  spec: PdfLayoutSpec,
+  used: readonly SemanticParagraphStyle[]
+): DesigncraftCommand[] {
+  const styles = buildDesigncraftParagraphStyles(spec, used);
+  return [
+    ...colorCommands(spec, styles),
+    ...styles.map((style) =>
+      cmd('style.paragraph.create', { name: style.name, para: style.para, chars: style.chars })
+    ),
+  ];
 }
 
 export function serializeDesigncraftParagraphStyles(
   spec: PdfLayoutSpec,
   used: readonly SemanticParagraphStyle[]
 ): string[] {
-  const styles = buildDesigncraftParagraphStyles(spec, used);
-  return [
-    ...colorCommands(spec, styles),
-    ...styles.map((style) => `style.paragraph.create ${JSON.stringify({ name: style.name, para: style.para, chars: style.chars })}`),
-  ];
+  return serializeCommands(buildDesigncraftStyleCommands(spec, used));
 }

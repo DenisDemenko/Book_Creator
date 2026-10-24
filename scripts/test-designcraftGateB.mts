@@ -109,7 +109,21 @@ const engines = await listPdfEngines({});
 const listed = engines.find((e) => e.id === 'designcraft');
 t('DesignCraft є у переліку рушіїв', !!listed);
 t('DesignCraft у переліку доступний', listed?.available === true, listed?.reasonUk || '');
-t('DesignCraft не видає себе за KDP-рушій', listed?.supportsPrint === false);
+/*
+ * Раніше тут стояло «DesignCraft не видає себе за KDP-рушій» із жорстким
+ * `supportsPrint === false`. Відтоді друкований макет у DesignCraft
+ * з'явився — але ЛИШЕ в сесійному транспорті, де є живий документ, без якого
+ * корінець не узгодити (запис #461). Отже інваріант тепер інший і суворіший:
+ * ознака мусить ЗБІГАТИСЯ з транспортом, а не бути завжди false. Інакше
+ * інтерфейс показав би авторові кнопку друку там, де вона не працює.
+ */
+const sessionTransport = process.env.DESIGNCRAFT_SESSION === '1' || process.env.DESIGNCRAFT_SESSION === 'true';
+t(
+  'ознака друку збігається з транспортом',
+  listed?.supportsPrint === sessionTransport,
+  `supportsPrint=${listed?.supportsPrint}, сесійний=${sessionTransport}`
+);
+t('супутні формати оголошено', listed?.supportsCompanions === true);
 
 console.log(`\nDesignCraft Gate B: ${pass} passed, ${fail} failed.`);
 if (fail) process.exit(1);

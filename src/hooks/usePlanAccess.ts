@@ -13,7 +13,7 @@
 import { useEffect, useState } from 'react';
 import type { AuthUser } from '../types';
 
-export type PlanId = 'free' | 'start' | 'pro' | 'ultra';
+export type PlanId = 'free' | 'start' | 'pro' | 'ultra' | 'team';
 
 export interface PlanAccessState {
   loading: boolean;

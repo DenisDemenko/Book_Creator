@@ -186,6 +186,7 @@ export const chromiumEngine: PdfEngine = {
     'Полів під KDP не гарантує: браузер верстає стрічкою, без дзеркальних ' +
     'відступів і корінця за обсягом.',
   supportsPrint: false,
+  supportsCompanions: false,
 
   async available(): Promise<PdfEngineAvailability> {
     return chromiumAvailableAt(CHROMIUM_PATH);

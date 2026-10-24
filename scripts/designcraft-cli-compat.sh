@@ -1,38 +1,39 @@
 #!/bin/sh
+# Обгортка над DesignCraft CLI у production-образі.
+#
+# ЩО ТУТ БУЛО І ЧОГО БІЛЬШЕ НЕМА. Донедавна цей шим awk-ом ПЕРЕПИСУВАВ уже
+# згенерований `.dcs`-скрипт перед запуском: `text.selectStory` →
+# `text.select` із великим focus, і `"align":"justify"` →
+# `"align":"leftJustified"`. Обидва шаблони виявились мертвими — їх не
+# емітує жоден виробник скриптів у цьому репозиторії, а `leftJustified` є
+# єдиним правильним написанням, яке приймає рушій (не пережитком старої
+# версії). Правка мови команд регуляркою маскувала б регресію виробника й
+# нічого не знала про те, що вміє прибитий бінарник, тож її прибрано.
+# Натомість рушій звіряє скрипт із самим бінарником ПЕРЕД запуском:
+# `server/pdf/designcraft/capabilities.ts` (`designcraft-cli commands` →
+# перелік id команд) і `assertScriptSupported` у
+# `server/pdf/engines/designcraftEngineV3.ts`.
+#
+# ЩО ЛИШИЛОСЬ. Тільки обрізання звіту: спільний запускач процесів у Node
+# обмежує stdout, а `document.inspect` і `story.get` на справжній книзі
+# дають сотні КБ. Це інша хвороба, і її правильне лікування — сесійний
+# транспорт замість процесу на крок (див. PLAN_DESIGNCRAFT_BRIDGE.md).
+# Коли транспорт зміниться, цей файл зникне разом із
+# DESIGNCRAFT_REAL_PATH.
 set -eu
 
 REAL="${DESIGNCRAFT_REAL_PATH:-/usr/local/lib/designcraft/designcraft-cli}"
 
-if [ "${1:-}" != "script" ] || [ "${2:-}" = "" ] || [ "${2:-}" = "-" ]; then
+# Усе, крім `script`, іде в бінарник без змін: обрізати нічого.
+if [ "${1:-}" != "script" ]; then
   exec "$REAL" "$@"
 fi
 
-SOURCE="$2"
-shift 2
-TMP="$(mktemp "${TMPDIR:-/tmp}/designcraft-script.XXXXXX")"
 OUT="$(mktemp "${TMPDIR:-/tmp}/designcraft-output.XXXXXX")"
-trap 'rm -f "$TMP" "$OUT"' EXIT INT TERM
+trap 'rm -f "$OUT"' EXIT INT TERM
 
-# Compatibility for the stable v0.7.1 binary. Current DesignCraft source has
-# text.selectStory, but the published binary does not; text.select with an
-# intentionally large focus is equivalent for our freshly-created stories.
-awk '
-  /^text\.selectStory / {
-    print "text.select {\"story\":\"$last.story\",\"anchor\":0,\"focus\":1000000000}"
-    next
-  }
-  {
-    gsub(/"align":"justify"/, "\"align\":\"leftJustified\"")
-    print
-  }
-' "$SOURCE" > "$TMP"
-
-# Capture the complete CLI report before returning it to Node. The shared
-# process runner deliberately caps stdout at 20 KB, while document.inspect and
-# story.get can be hundreds of KB for a real book. Reduce only fields the
-# adapter does not need for the current command.
 set +e
-"$REAL" script "$TMP" "$@" >"$OUT"
+"$REAL" "$@" >"$OUT"
 CODE=$?
 set -e
 

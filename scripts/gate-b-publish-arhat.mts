@@ -11,7 +11,22 @@ import {
   readBridgeSettings,
 } from '../server/marketplaceBridge';
 
-const MODE = String(process.env.GATE_B_ARHAT_MODE || 'audit').toLowerCase();
+/*
+ * Режим можна задати АРГУМЕНТОМ, а не лише змінною оточення.
+ *
+ * Чому. `GATE_B_ARHAT_MODE=render node …` — синтаксис bash. У PowerShell, із
+ * якого власник і запускає, він не працює взагалі (`Имя "…=render" не
+ * распознано`), а правильна форма там інша (`$env:GATE_B_ARHAT_MODE='render'`).
+ * Команда, яку неможливо скопіювати в свою консоль, не виконується — отже
+ * приймається аргумент: `node dist/gate-b-publish-arhat.mjs render` працює
+ * однаково в bash, PowerShell і cmd.
+ *
+ * Змінна лишається робочою: нею вже послуговуються записи журналу й
+ * «Що не запушено».
+ */
+const MODE = String(process.argv[2] || process.env.GATE_B_ARHAT_MODE || 'audit')
+  .trim()
+  .toLowerCase();
 const ENGINE_ID = 'designcraft';
 const TITLE_RE = /(архат|путь\s+дому|шлях\s+додому)/iu;
 const markerPath = path.join(DATA_DIR, 'gate-b-arhat-designcraft.json');
@@ -107,15 +122,29 @@ if (MODE === 'audit') {
   console.log('[gate-b-arhat] RESULT=audit_ok');
   process.exit(0);
 }
-if (MODE !== 'publish') throw new Error(`Невідомий GATE_B_ARHAT_MODE=${MODE}; дозволено audit|publish.`);
+if (MODE !== 'publish' && MODE !== 'render') {
+  throw new Error(`Невідомий GATE_B_ARHAT_MODE=${MODE}; дозволено audit|render|publish.`);
+}
 if (chapters.length === 0 || contentChars < 200) {
   throw new Error('Кандидат схожий на порожню/службову книгу; автоматичну публікацію зупинено.');
 }
 
+/*
+ * Супутні формати — на запит, бо кожен додає прохід експортера, а головна
+ * робота цього прогону інша: довести, що рушій узагалі працює на бінарнику з
+ * образу. `GATE_B_COMPANIONS=epub,html` вмикає їх, коли треба подивитися на
+ * версткові EPUB/HTML зі справжньої книги (у Студії є й власний браузерний
+ * EPUB, зібраний із моделі книги, — це різні продукти).
+ */
+const COMPANIONS = String(process.argv[3] || process.env.GATE_B_COMPANIONS || '')
+  .split(',')
+  .map((s) => s.trim().toLowerCase())
+  .filter((s): s is 'epub' | 'html' => s === 'epub' || s === 'html');
+
 const rendered = await designcraftEngineV3.render({
   book,
   kind: 'book',
-  spec,
+  spec: COMPANIONS.length ? ({ ...spec, pdfExport: { ...spec.pdfExport, companions: COMPANIONS } } as never) : spec,
   print: false,
   ownerId: stored.ownerId,
   ownerRole: 'admin',
@@ -140,6 +169,20 @@ const pdfRecord = await saveArtifact({
   bookRevision: stored.revision,
 });
 
+for (const extra of rendered.companions || []) {
+  const record = await saveArtifact({
+    bookId: stored.id,
+    kind: extra.kind,
+    format: 'digital',
+    filename: `${safeTitle(book.title)}_${ENGINE_ID}_TEST.${extra.extension}`,
+    mimeType: extra.mimeType,
+    bytes: extra.bytes,
+    variant: `test:${ENGINE_ID}`,
+    bookRevision: stored.revision,
+  });
+  console.log('[gate-b-arhat] companion=', { kind: extra.kind, id: record.id, bytes: extra.bytes.length });
+}
+
 const sample = await extractSamplePages(rendered.bytes, clampSamplePages(5));
 if (sample) {
   await saveArtifact({
@@ -153,6 +196,28 @@ if (sample) {
     variant: `test:${ENGINE_ID}`,
     bookRevision: stored.revision,
   });
+}
+
+/*
+ * Режим `render` зупиняється саме тут: рукопис уже пройшов справжній рушій
+ * DesignCraft на цій машині (у production — на published-tarball і через
+ * шим), PDF і уривок збережені як артефакти, і НІЧОГО не поїхало на вітрину.
+ *
+ * Чому це окремий режим. `audit` виходить ДО рендера, тож рушія не торкається
+ * взагалі, а `publish` рендерить і одразу публікує тестове видання в каталог.
+ * Перевірити конвеєр у production, не чіпаючи вітрину, досі було нічим — а
+ * саме це й потрібно після деплою: чи працює рушій на бінарнику з образу (у
+ * ньому, на відміну від збірки з джерел, немає `text.selectStory`), чи шим
+ * досі обрізає звіт і чи проходить справжня книга без `bad_input` від
+ * перевірки можливостей. Запис журналу #446 і PLAN_DESIGNCRAFT_BRIDGE.md.
+ */
+if (MODE === 'render') {
+  console.log('[gate-b-arhat] artifacts=', {
+    pdf: { id: pdfRecord.id, filename: pdfRecord.filename, pages: rendered.pageCount },
+    sample: sample ? { pages: sample.pageCount } : null,
+  });
+  console.log('[gate-b-arhat] RESULT=render_ok');
+  process.exit(0);
 }
 
 let cover = existingCover;

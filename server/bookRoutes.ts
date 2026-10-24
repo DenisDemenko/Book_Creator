@@ -32,6 +32,7 @@ import {
   saveArtifact,
   saveBook,
   type ArtifactFormat,
+  type ArtifactKind,
 } from './bookStore';
 
 /**
@@ -212,7 +213,7 @@ export function registerBookRoutes(app: Express, deps: BookRoutesDeps): void {
       if (!stored || (stored.ownerId && stored.ownerId !== req.principal?.id && req.principal?.role !== 'admin')) {
         return res.status(404).json({ error: 'Книгу не знайдено.' });
       }
-      const kind = req.params.kind as 'pdf' | 'sample' | 'cover';
+      const kind = req.params.kind as ArtifactKind;
       const format: ArtifactFormat = req.query.format === 'print' ? 'print' : 'digital';
       const found = await readArtifact(req.params.id, kind, format);
       if (!found) {

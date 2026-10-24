@@ -1,4 +1,5 @@
 import { aiDraftText } from '../../shared/aiTextOrigin';
+import { VoiceDictationButton } from './VoiceDictationButton';
 import { WorldSettingPanel } from './WorldSettingPanel';
 import { ManuscriptTagPanel } from './ManuscriptTagPanel';
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
@@ -2109,7 +2110,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
   // «Озвучити фрагмент» — Pro/Ultra (server/subscriptions.ts requirePlanAtLeast),
   // адмін завжди проходить (usePlanAccess сама це враховує).
-  const narrationAccess = usePlanAccess(authUser, ['pro', 'ultra']);
+  const narrationAccess = usePlanAccess(authUser, ['pro', 'ultra', 'team']);
   const [showNarrationSubmenu, setShowNarrationSubmenu] = useState(false);
   const [narrationBusy, setNarrationBusy] = useState<NarrationLang | null>(null);
   const [narrationPlayer, setNarrationPlayer] = useState<{ audioUrl: string; label: string } | null>(null);
@@ -5637,6 +5638,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
                         ) : null
                       }
                     >
+                      <VoiceDictationButton editor={uaEditor} language="uk-UA" />
                       <EditorContent
                         editor={uaEditor}
                         style={manuscriptTextStyle}

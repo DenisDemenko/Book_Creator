@@ -404,6 +404,7 @@ export const designcraftEngine: PdfEngine = {
   limitUk:
     'Друкований KDP-макет із розрахунком корінця поки лишається за Nova; DesignCraft використовується для цифрового PDF.',
   supportsPrint: false,
+  supportsCompanions: false,
 
   async available(): Promise<PdfEngineAvailability> {
     const result = await run(DESIGNCRAFT_PATH, ['--version'], { timeoutMs: 12_000 });

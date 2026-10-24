@@ -28,7 +28,13 @@ import { getDb, isAvailable, DATA_DIR } from './db';
 export const BOOK_FILES_ROOT = path.join(DATA_DIR, 'books');
 
 /** Що саме зберігаємо поруч із книгою. */
-export type ArtifactKind = 'pdf' | 'sample' | 'cover';
+/**
+ * `epub` і `html` — супутні формати з того самого макета DesignCraft
+ * (`PdfRenderResult.companions`). Міграції не потребують: `kind` у
+ * `book_artifacts` — звичайний TEXT без CHECK, а id артефакту вже має вигляд
+ * `<book_id>:<kind>:<format>`.
+ */
+export type ArtifactKind = 'pdf' | 'sample' | 'cover' | 'epub' | 'html';
 export type ArtifactFormat = 'digital' | 'print';
 
 export interface StoredBook {

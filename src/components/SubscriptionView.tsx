@@ -12,6 +12,7 @@ import {
   Building2,
   Gift,
   HardDrive,
+  Users,
 } from 'lucide-react';
 import type { AuthUser } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
@@ -19,7 +20,7 @@ import { useLanguage } from '../i18n/LanguageContext';
 const MB = 1024 * 1024;
 
 interface PlanDefinition {
-  id: 'free' | 'start' | 'pro' | 'ultra';
+  id: 'free' | 'start' | 'pro' | 'ultra' | 'team';
   nameUk: string;
   nameEn: string;
   taglineUk: string;
@@ -28,6 +29,7 @@ interface PlanDefinition {
   priceAnnualUah: number;
   imageQuota: number | null;
   imageQuotaPeriod: 'lifetime' | 'period';
+  aiCredits?: number;
   storageQuotaMb: number;
   engines: string[] | 'all';
   featuresUk: string[];
@@ -40,6 +42,7 @@ interface PlanDefinition {
 interface PlansResponse {
   plans: PlanDefinition[];
   currency: string;
+  tax?: { regime: string; vatIncluded: boolean; vatPercent: number };
   annualDiscountNote: string;
   annualDiscountNoteEn: string;
   paymentProviders: {
@@ -64,6 +67,7 @@ const PLAN_ICONS: Record<string, React.ComponentType<{ className?: string }>> = 
   start: Zap,
   pro: Crown,
   ultra: Building2,
+  team: Users,
 };
 
 export const SubscriptionView: React.FC<SubscriptionViewProps> = ({ authUser }) => {
@@ -299,7 +303,7 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({ authUser }) 
               <span className="text-slate-300">
                 {myInfo.quota.quota === null
                   ? t('subscription.unlimitedImages')
-                  : t('subscription.usedOfImages', { used: myInfo.quota.used, quota: myInfo.quota.quota })}
+                  : t('subscription.usedOfImages', { remaining: myInfo.quota.remaining ?? 0, quota: myInfo.quota.quota })}
               </span>
             </div>
             {myInfo.storage && (
@@ -335,7 +339,7 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({ authUser }) 
       </div>
 
       {/* Plan cards */}
-      <div data-tour="subscription__2" className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5 max-w-6xl mx-auto">
+      <div data-tour="subscription__2" className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4 max-w-7xl mx-auto">
         {data.plans.map((plan) => {
           const Icon = PLAN_ICONS[plan.id] || Gift;
           const price = cycle === 'annual' ? plan.priceAnnualUah : plan.priceMonthlyUah;
@@ -381,6 +385,18 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({ authUser }) 
                     <span className="text-xs text-slate-400">/ {cycle === 'annual' ? t('subscription.perYear') : t('subscription.perMonth')}</span>
                   )}
                 </div>
+                {!isFree && data.tax?.vatIncluded && (
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                    {lang === 'en' ? `incl. ${data.tax.vatPercent}% VAT` : `у т.ч. ПДВ ${data.tax.vatPercent}%`}
+                  </div>
+                )}
+                {plan.aiCredits ? (
+                  <div className="text-[11px] text-amber-300/90 mt-0.5">
+                    {lang === 'en'
+                      ? `${plan.aiCredits.toLocaleString(locale)} AI credits ${isFree ? 'one-time' : 'per month'}`
+                      : `${plan.aiCredits.toLocaleString(locale)} AI-балів ${isFree ? 'одноразово' : 'на місяць'}`}
+                  </div>
+                ) : null}
                 {!isFree && cycle === 'annual' && (
                   <div className="text-[11px] text-emerald-400 mt-0.5">
                     {t('subscription.insteadOfPerYear', { price: fmtUah(plan.priceMonthlyUah * 12) })}
