@@ -3,8 +3,8 @@
 Агент: Claude Sonnet 5.5. Змінені файли записано в робочу копію; **нічого не закомічено й не запушено** (за AGENTS.md комітить власник).
 
 ## Зроблено
-- Пункт 1 плану: перемикач масштабу 10–150 % з кроком 10 % + «Підігнати» у конструкторі шаблону верстки (`src/utils/zoomPresets.ts`, `DesignerThemeStudio.tsx`).
-- Пункт 3 плану: спільний розрахунок розгортки (`src/utils/coverPhysical.ts`), у `CoverPhysicalSpec.tsx` — розмір книги, корінець, bleed, розгортка; вибір зображень передньої/задньої/корінця/повної розгортки з медіатеки; матеріал і ламінація; «формат не вказано», якщо розміру немає.
+- Пункт 1 плану: на сторінці «Верстка» масштаб 10–150 % уже був (`LayoutZoomControl`, коміти `23deefb`, `a4c0cfc`). Додано той самий список у конструктор власного шаблону (`DesignerThemeStudio.tsx`, там лишалися 75/100/Fit) і єдине джерело `src/utils/zoomPresets.ts`; `LayoutZoomControl` бере список звідти.
+- Пункт 3 плану: `CoverPhysicalSpec/Preview` уже створила попередня сесія (`0a9ddca`, `4ae1b79`, `3b1406f`); доповнено: спільний розрахунок розгортки (`src/utils/coverPhysical.ts`), у `CoverPhysicalSpec.tsx` — розмір книги, корінець, bleed, розгортка; вибір зображень передньої/задньої/корінця/повної розгортки з медіатеки; матеріал і ламінація; «формат не вказано», якщо розміру немає.
 - Тести: `scripts/test-zoomPresets.mts` (8), `scripts/test-coverPhysical.mts` (6); скрипти `test:zoom-presets`, `test:cover-physical` додано в `package.json` і в ланцюжок `test`.
 - Звірено без змін коду: повзунок розворотів уже має клікабельні мітки глав і підпис про орієнтовну пагінацію; у хмарі пройшли `test-canonicalPageMap`, `test-heroArcAnalysis`, `test-expressHeroArcSession`, `test-previewImageSources`, `test-novaSemanticPagination`, `test-designcraftSemanticPagination`.
 
