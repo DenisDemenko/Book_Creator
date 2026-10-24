@@ -22,6 +22,7 @@ import { requireAdmin, requireAuth } from './auth';
 import { LabyrinthError } from './core/labyrinth/model';
 import { getCoreJobQueue, getCoreRepository } from './core';
 import { scheduleCoreSync } from './core/sync';
+import { registerBookSyncRoutes } from './bookSyncRoutes';
 import {
   BookRevisionConflict,
   getBook,
@@ -73,6 +74,9 @@ function fail(res: Response, err: unknown, fallback: string): void {
 }
 
 export function registerBookRoutes(app: Express, deps: BookRoutesDeps): void {
+  // Синхронізація версій книги з іншим сервером (локальна Студія ↔ прод). Без BOOK_SYNC_* вимкнена.
+  registerBookSyncRoutes(app);
+
   /** Перелік своїх книг — без вмісту: у списку він не потрібен, а важить багато. */
   app.get('/api/books', requireAuth, async (req: Request, res: Response) => {
     try {

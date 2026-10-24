@@ -147,17 +147,29 @@ export async function startOnboarding(repo: CoreRepository, deps: OnboardingDeps
     }
   }
   if (input.orderId) answers.entryIntent = answers.entryIntent ?? 'fulfill_freelance_order';
-  const session = await repo.addOnboardingSession({
-    userId: who.userId,
-    projectId,
-    projectType,
-    entryIntent: answers.entryIntent ?? null,
-    source,
-    sourceOrderId: input.orderId ?? null,
-    sourceRef,
-    currentStep,
-    answers: answers as Record<string, unknown>,
-  });
+  let session: OnboardingSessionRow;
+  try {
+    session = await repo.addOnboardingSession({
+      userId: who.userId,
+      projectId,
+      projectType,
+      entryIntent: answers.entryIntent ?? null,
+      source,
+      sourceOrderId: input.orderId ?? null,
+      sourceRef,
+      currentStep,
+      answers: answers as Record<string, unknown>,
+    });
+  } catch (err) {
+    // Два одночасні запити «почати» (подвійний монтаж React у dev, дві вкладки):
+    // другий впирається в унікальну чернетку першого. Це не помилка — повертаємо
+    // ту саму чернетку, як і при звичайному продовженні.
+    if (err instanceof CoreRuleError && err.code === 'conflict') {
+      const existing = await repo.findOnboardingDraft(who.userId, projectId);
+      if (existing) return { session: existing, resumed: true };
+    }
+    throw err;
+  }
   await event(repo, session, 'onboarding_started', { source, orderId: input.orderId ?? null, skipped: currentStep === 8 });
   return { session, resumed: false };
 }

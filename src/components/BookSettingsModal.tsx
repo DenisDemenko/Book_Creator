@@ -3,6 +3,7 @@ import { Layers, X, Save, Check, Timer } from 'lucide-react';
 import { Book } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
 import { useSunLighting } from '../context/SunLightingContext';
+import { BookSyncPanel } from './BookSyncPanel';
 
 interface BookSettingsModalProps {
   isOpen: boolean;
@@ -155,6 +156,8 @@ export const BookSettingsModal: React.FC<BookSettingsModalProps> = ({
             </div>
           </div>
         </div>
+
+        <BookSyncPanel bookId={book.id} />
 
         <div className="pt-2 flex justify-end">
           <button
