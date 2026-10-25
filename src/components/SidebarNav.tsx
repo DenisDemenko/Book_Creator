@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   LayoutDashboard,
   Rocket,
@@ -278,6 +279,26 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
   // кольором сонця (той самий механізм, що й у HeaderNav).
   const sunVars = useSunAccentVars();
   const [collapsed, setCollapsed] = useState<boolean>(readInitialCollapsed);
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 640);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const mobileCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 640);
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      if (mobileCloseTimer.current) clearTimeout(mobileCloseTimer.current);
+    };
+  }, []);
+  const selectTab = useCallback((tab: NavigationTab) => {
+    onSelectTab(tab);
+    if (mobileCloseTimer.current) clearTimeout(mobileCloseTimer.current);
+    if (window.innerWidth < 640) {
+      mobileCloseTimer.current = setTimeout(() => setMobileOpen(false), 3000);
+    }
+  }, [onSelectTab]);
+  const displayCollapsed = isMobile ? false : collapsed;
+
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(readInitialGroups);
   const focusTabs = focus?.tabs ?? [];
   // «Інше» за замовчуванням згорнуте (на відміну від груп): простір ролі — головне.
@@ -353,7 +374,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
       <button
         key={tab}
         id={`nav-tab-${tab}`}
-        onClick={() => onSelectTab(tab)}
+        onClick={() => selectTab(tab)}
         title={t(`header.nav.${tab}`)}
         className={`w-full flex items-center gap-2.5 py-2 text-xs font-medium rounded-lg whitespace-nowrap transition-all px-3 ${
           isActive
@@ -383,7 +404,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
       <button
         key={tab}
         id={`nav-tab-${tab}`}
-        onClick={() => onSelectTab(tab)}
+        onClick={() => selectTab(tab)}
         title={t(`header.nav.${tab}`)}
         className={`w-full flex items-center justify-center py-2 rounded-lg transition-all ${
           isActive
@@ -425,25 +446,25 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
     </button>
   );
 
-  return (
+  const sidebar = (
     <aside
       style={sunVars}
-      className={`sticky top-[var(--app-header-h)] shrink-0 flex flex-col h-[var(--app-sidebar-h)] bg-slate-950/75 border-r border-white/[0.06] backdrop-blur-2xl transition-[width] duration-200 ease-out ${
-        collapsed ? 'w-16' : 'w-64'
+      className={`sticky top-[var(--app-header-h)] shrink-0 flex flex-col h-[var(--app-sidebar-h)] bg-slate-950/95 border-r border-white/[0.06] backdrop-blur-2xl transition-[width,transform] duration-200 ease-out ${isMobile ? `!fixed !top-0 !left-0 !h-[100dvh] z-[9998] max-w-[85vw] ${mobileOpen ? 'translate-x-0' : '-translate-x-full pointer-events-none'}` : ''} ${
+        displayCollapsed ? 'w-16' : 'w-64'
       }`}
     >
       <nav className="flex-1 overflow-y-auto no-scrollbar py-2 px-2 space-y-1">
         {/* Т6.4: «Мій простір» — завжди першим; розділи простору ролі — під ним. */}
         {canAccessTab(currentRole, 'my-space') && (
           <div className="space-y-0.5 pb-1 mb-1 border-b border-white/[0.06]" data-nav-focus={focusTabs.length ? 'on' : 'off'}>
-            {collapsed ? renderTabCollapsed('my-space', { id: 'my-space', icon: Compass }) : renderTab('my-space', { id: 'my-space', icon: Compass })}
-            {focusTabs.length > 0 && !collapsed && (
+            {displayCollapsed ? renderTabCollapsed('my-space', { id: 'my-space', icon: Compass }) : renderTab('my-space', { id: 'my-space', icon: Compass })}
+            {focusTabs.length > 0 && !displayCollapsed && (
               <p className="px-3 pt-1 text-[10px] font-bold uppercase tracking-wider text-violet-300/80 truncate" title={focus?.title}>{focus?.title}</p>
             )}
             {focusTabs.map((tab) => (
               <React.Fragment key={tab}>
-                {collapsed ? renderTabCollapsed(tab, toNavItem(tab)) : renderTab(tab, toNavItem(tab))}
-                {tab === 'editor' && currentRole !== 'reader' && (collapsed ? renderQuickAiCollapsed() : renderQuickAi())}
+                {displayCollapsed ? renderTabCollapsed(tab, toNavItem(tab)) : renderTab(tab, toNavItem(tab))}
+                {tab === 'editor' && currentRole !== 'reader' && (displayCollapsed ? renderQuickAiCollapsed() : renderQuickAi())}
               </React.Fragment>
             ))}
           </div>
@@ -452,12 +473,12 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
           <button
             onClick={() => toggleGroup(OTHERS_KEY)}
             title={t('header.group.other')}
-            className={`w-full flex items-center gap-1.5 rounded-lg transition-all ${collapsed ? 'justify-center py-1.5' : 'px-2 py-1.5 hover:bg-white/[0.04]'}`}
+            className={`w-full flex items-center gap-1.5 rounded-lg transition-all ${displayCollapsed ? 'justify-center py-1.5' : 'px-2 py-1.5 hover:bg-white/[0.04]'}`}
             data-nav-others={othersOpen(openGroups) ? 'open' : 'closed'}
           >
-            {!collapsed && <ChevronDown className={`w-3 h-3 text-slate-500 transition-transform ${othersOpen(openGroups) ? '' : '-rotate-90'}`} />}
+            {!displayCollapsed && <ChevronDown className={`w-3 h-3 text-slate-500 transition-transform ${othersOpen(openGroups) ? '' : '-rotate-90'}`} />}
             <span className="text-[11px] font-extrabold [color:var(--sun-acc)] leading-none">⋯</span>
-            {!collapsed && <span className="text-[11px] font-bold uppercase tracking-wider [color:var(--sun-soft)] truncate">{t('header.group.other')}</span>}
+            {!displayCollapsed && <span className="text-[11px] font-bold uppercase tracking-wider [color:var(--sun-soft)] truncate">{t('header.group.other')}</span>}
           </button>
         )}
         {(focusTabs.length === 0 || othersOpen(openGroups)) && NAV_GROUPS.map((group) => {
@@ -472,10 +493,10 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
                 onClick={() => toggleGroup(group.id)}
                 title={t(`header.group.${group.id}`)}
                 className={`w-full flex items-center gap-1.5 rounded-lg transition-all ${
-                  collapsed ? 'justify-center py-1.5' : 'px-2 py-1.5 hover:bg-white/[0.04]'
+                  displayCollapsed ? 'justify-center py-1.5' : 'px-2 py-1.5 hover:bg-white/[0.04]'
                 }`}
               >
-                {!collapsed && (
+                {!displayCollapsed && (
                   <ChevronDown
                     className={`w-3 h-3 text-slate-500 transition-transform ${isOpen ? '' : '-rotate-90'}`}
                   />
@@ -490,7 +511,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
                   номер, щоб пара читалась одним написом, а не двома.
                 */}
                 <span className="text-[11px] font-extrabold font-mono [color:var(--sun-acc)] leading-none">{group.numeral}</span>
-                {!collapsed && (
+                {!displayCollapsed && (
                   <span className="text-[11px] font-bold uppercase tracking-wider [color:var(--sun-soft)] truncate">
                     {t(`header.group.${group.id}`)}
                   </span>
@@ -500,9 +521,9 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
               {isOpen &&
                 allowed.map((tab) => (
                   <React.Fragment key={tab}>
-                    {collapsed ? renderTabCollapsed(tab, toNavItem(tab)) : renderTab(tab, toNavItem(tab))}
+                    {displayCollapsed ? renderTabCollapsed(tab, toNavItem(tab)) : renderTab(tab, toNavItem(tab))}
                     {group.id === 'start' && tab === 'editor' && currentRole !== 'reader' && (
-                      collapsed ? renderQuickAiCollapsed() : renderQuickAi()
+                      displayCollapsed ? renderQuickAiCollapsed() : renderQuickAi()
                     )}
                   </React.Fragment>
                 ))}
@@ -514,7 +535,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
         {OTHER_TABS.some((tab) => canAccessTab(currentRole, tab)) && (
           <div className="pt-1 mt-1 border-t border-white/[0.06] space-y-0.5">
             {OTHER_TABS.filter((tab) => canAccessTab(currentRole, tab)).map((tab) =>
-              collapsed ? renderTabCollapsed(tab, toNavItem(tab)) : renderTab(tab, toNavItem(tab))
+              displayCollapsed ? renderTabCollapsed(tab, toNavItem(tab)) : renderTab(tab, toNavItem(tab))
             )}
           </div>
         )}
@@ -527,7 +548,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
           ширині, і доступне з будь-якої вкладки.
           У згорнутому стані (64px) ховаємо цілком — три повзунки в таку
           ширину не поміщаються, а обрізані виглядали б поламаними. */}
-      {!collapsed && (
+      {!displayCollapsed && (
         <div className="border-t border-white/[0.06] px-2 pt-2">
           <GlowIntensityControl />
         </div>
@@ -544,13 +565,13 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
           id="sidebar-help-btn"
           onClick={onOpenHelp}
           className={`w-full flex items-center gap-2 py-2 rounded-lg text-slate-400 hover:text-cyan-200 hover:bg-white/[0.04] text-xs font-semibold transition-all ${
-            collapsed ? 'justify-center px-0' : 'px-3'
+            displayCollapsed ? 'justify-center px-0' : 'px-3'
           }`}
           title={t('helpGuide.title')}
           aria-label={t('helpGuide.footerTitle')}
         >
           <BookOpen className="w-4 h-4 shrink-0 text-cyan-400" />
-          {!collapsed && <span className="flex-1 min-w-0 text-left truncate">{t('helpGuide.footerTitle')}</span>}
+          {!displayCollapsed && <span className="flex-1 min-w-0 text-left truncate">{t('helpGuide.footerTitle')}</span>}
         </button>
       </div>
 
@@ -560,15 +581,41 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
           id="sidebar-collapse-toggle"
           onClick={toggleCollapsed}
           className={`w-full flex items-center gap-2 py-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-white/[0.04] text-xs font-semibold transition-all ${
-            collapsed ? 'justify-center px-0' : 'px-3'
+            displayCollapsed ? 'justify-center px-0' : 'px-3'
           }`}
-          title={collapsed ? t('header.sidebarExpand') : t('header.sidebarCollapse')}
-          aria-label={collapsed ? t('header.sidebarExpand') : t('header.sidebarCollapse')}
+          title={displayCollapsed ? t('header.sidebarExpand') : t('header.sidebarCollapse')}
+          aria-label={displayCollapsed ? t('header.sidebarExpand') : t('header.sidebarCollapse')}
         >
-          {collapsed ? <ChevronsRight className="w-4 h-4" /> : <ChevronsLeft className="w-4 h-4" />}
-          {!collapsed && <span>{t('header.sidebarCollapse')}</span>}
+          {displayCollapsed ? <ChevronsRight className="w-4 h-4" /> : <ChevronsLeft className="w-4 h-4" />}
+          {!displayCollapsed && <span>{t('header.sidebarCollapse')}</span>}
         </button>
       </div>
     </aside>
+  );
+  return (
+    <>
+    {isMobile ? createPortal(sidebar, document.body) : sidebar}
+    {isMobile && !mobileOpen && createPortal(
+      <div className="fixed !left-3 !top-auto !bottom-[max(96px,env(safe-area-inset-bottom)+88px)] z-[9999] flex flex-col items-center gap-1.5">
+        <span className="whitespace-nowrap rounded-lg border border-[#D9CABC] bg-[#FFFCF8] px-2 py-1 text-[11px] font-semibold text-[#2C1A12] shadow-md">Розгорнути меню</span>
+      <button type="button" onClick={() => {
+        if (mobileCloseTimer.current) clearTimeout(mobileCloseTimer.current);
+        setMobileOpen(true);
+      }} aria-label="Розгорнути меню розділів" title="Розгорнути меню розділів"
+        className="flex h-12 w-12 items-center justify-center rounded-2xl border-2 border-[#8B5937] bg-[#FFFCF8] text-[#2C1A12] shadow-2xl">
+        <ChevronsRight className="h-5 w-5" />
+      </button>
+      </div>
+    , document.body)}
+    {isMobile && mobileOpen && createPortal(
+      <button type="button" onClick={() => {
+        if (mobileCloseTimer.current) clearTimeout(mobileCloseTimer.current);
+        setMobileOpen(false);
+      }} aria-label="Згорнути меню розділів"
+        className="fixed !left-[min(85vw,256px)] !top-[12px] z-[9999] flex h-12 w-11 items-center justify-center rounded-r-xl bg-[#2E1B12] text-white shadow-lg">
+        <ChevronsLeft className="h-5 w-5" />
+      </button>
+    , document.body)}
+    </>
   );
 };

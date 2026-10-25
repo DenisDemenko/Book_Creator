@@ -1,545 +1,340 @@
-import React, { useState } from 'react';
-import { 
-  Clapperboard, 
-  Flame, 
-  MapPin, 
-  Clock, 
-  Users, 
-  Sparkles, 
-  Plus, 
-  Trash2, 
-  Activity, 
-  Check, 
-  Edit3, 
-  ChevronRight,
-  TrendingUp,
-  Sliders,
-  HelpCircle,
-  Save
-} from 'lucide-react';
-import { Book, Scene, CharacterInScene } from '../types';
-import { useLanguage } from '../i18n/LanguageContext';
+import './storyExperience/fusionMarketplace.css';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import type { JournalSession } from './storyExperience/sessionJournalClient';
+import { DurableNeutralJournal } from './storyExperience/durableNeutralJournal';
+import { BrainCircuit, Clapperboard, Copy, Drama, Gamepad2, Sparkles } from 'lucide-react';
+import type { Book, NavigationTab } from '../types';
+import { generateSessionCharacterPortrait, attachSessionPortraits, type SessionPortraitAsset } from './storyExperience/sessionPortraitService';
+import type { CharacterDraft } from './storyExperience/CharacterDraftEditor';
+import { commitSessionToBook, type ReviewedSessionBookMaterial } from './storyExperience/sessionBookCommit';
+import type { SessionBookExportRequest } from './storyExperience/SessionExportToBookView';
+import { MySessionConsentsView } from './storyExperience/MySessionConsentsView';
+import { SessionHistoryView } from './storyExperience/SessionHistoryView';
+import { ScenarioLegacyView } from './ScenarioLegacyView';
+import {
+  IntegratedConstellationView,
+  IntegratedLeelaView,
+  IntegratedMafiaView,
+  IntegratedScreenplayView,
+  type ScreenplaySelectedSceneContext,
+  type StoryExperienceJevEvaluator,
+  type StoryExperienceJevRequest,
+} from './storyExperience';
+
+type StoryWorkspace = 'screenplay' | 'mafia' | 'constellation' | 'leela' | 'history' | 'consents' | 'analysis';
 
 interface ScenarioViewProps {
   book: Book;
+  ownerId?: string | null;
   onUpdateBook: (updatedBook: Book, logAction?: string, logDetails?: string) => void;
   onNavigateToSection: (chapterId: string, sectionId: string) => void;
+  onNavigateToTab?: (tab: NavigationTab) => void;
+  onEvaluateWithJev?: StoryExperienceJevEvaluator;
   onSaveBook?: () => void;
+  reviewedSessionMaterials?: Partial<Record<'mafia' | 'constellation' | 'leela', ReviewedSessionBookMaterial>>;
 }
 
+const workspaces: Array<{
+  id: StoryWorkspace;
+  label: string;
+  hint: string;
+  icon: React.ReactNode;
+}> = [
+  { id: 'screenplay', label: 'Screenplay', hint: 'Сцени, картки, сюжетні лінії', icon: <Clapperboard className="h-4 w-4" /> },
+  { id: 'mafia', label: 'Mafia', hint: 'GM, події, тригери, голосування', icon: <Gamepad2 className="h-4 w-4" /> },
+  { id: 'constellation', label: 'Constellation', hint: 'Поле, фігури, snapshots', icon: <Drama className="h-4 w-4" /> },
+  { id: 'leela', label: 'Leela', hint: 'Board Pack, маршрут, журнал', icon: <Sparkles className="h-4 w-4" /> },
+  { id: 'history', label: 'Історія сесій', hint: 'Завершені сесії → книга', icon: <Drama className="h-4 w-4" /> },
+  { id: 'consents', label: 'Мої дозволи', hint: 'Згода на використання сесій', icon: <Drama className="h-4 w-4" /> },
+  { id: 'analysis', label: 'Аналіз', hint: 'Попередній сценарний модуль', icon: <BrainCircuit className="h-4 w-4" /> },
+];
+
+/**
+ * Реальний маршрут `scenario` — вхід у Story & Experience Engine.
+ * Старий сценарний модуль не видалено: він доступний у вкладці «Аналіз».
+ * Jev підключається через один callback `onEvaluateWithJev`, без знання API URL
+ * або дублювання adapter/key/fallback logic у фронтенді.
+ */
 export const ScenarioView: React.FC<ScenarioViewProps> = ({
   book,
+  ownerId,
   onUpdateBook,
   onNavigateToSection,
+  onNavigateToTab,
+  onEvaluateWithJev,
   onSaveBook,
+  reviewedSessionMaterials,
 }) => {
-  const { t } = useLanguage();
-  const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
-  const [isEditingSynopsis, setIsEditingSynopsis] = useState(false);
-  const [isAnalyzingDrama, setIsAnalyzingDrama] = useState(false);
-
-  // Extract all scenes from all chapters/sections
-  const allScenes: { scene: Scene; chapterId: string; chapterTitle: string; sectionId: string; sectionTitle: string }[] = [];
-  book.chapters.forEach((chap) => {
-    chap.sections.forEach((sec) => {
-      if (sec.scene) {
-        allScenes.push({
-          scene: sec.scene,
-          chapterId: chap.id,
-          chapterTitle: chap.title,
-          sectionId: sec.id,
-          sectionTitle: sec.title,
-        });
-      }
-    });
-  });
-
-  const selectedItem = allScenes.find((s) => s.scene.id === selectedSceneId) || allScenes[0];
-
-  // Update scene details
-  const handleUpdateScene = (updatedScene: Scene) => {
-    const updatedChapters = book.chapters.map((chap) => ({
-      ...chap,
-      sections: chap.sections.map((sec) => {
-        if (sec.scene?.id === updatedScene.id) {
-          return { ...sec, scene: updatedScene };
-        }
-        return sec;
-      }),
-    }));
-    onUpdateBook({ ...book, chapters: updatedChapters });
+  const readWorkspace = (): StoryWorkspace => {
+    const candidate = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('story') : null;
+    return workspaces.some(item => item.id === candidate) ? candidate as StoryWorkspace : 'screenplay';
   };
+  const [workspace, setWorkspace] = useState<StoryWorkspace>(readWorkspace);
+  const workspaceNavRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const active = workspaceNavRef.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!active || !workspaceNavRef.current) return;
+    const nav = workspaceNavRef.current;
+    const offset = active.offsetLeft - nav.offsetLeft - (nav.clientWidth - active.offsetWidth) / 2;
+    nav.scrollTo({ left: Math.max(0, offset), behavior: 'auto' });
+  }, [workspace]);
 
-  // Add character to scene
-  const handleAddCharacterToScene = (characterId: string) => {
-    if (!selectedItem) return;
-    const existing = selectedItem.scene.characters.find((c) => c.characterId === characterId);
-    if (existing) return;
-
-    const newCharInScene: CharacterInScene = {
-      characterId,
-      goal: 'Досягти мети у цій сцені...',
-      emotionalState: 'Напружений',
-      action: 'Бере участь у діалозі',
-      conflict: 'Зіткнення інтересів',
-    };
-
-    const updatedScene: Scene = {
-      ...selectedItem.scene,
-      characters: [...selectedItem.scene.characters, newCharInScene],
-    };
-    handleUpdateScene(updatedScene);
+  const [linkMessage, setLinkMessage] = useState('');
+  const selectWorkspace = (value: StoryWorkspace) => {
+    setWorkspace(value);
+    const url = new URL(window.location.href);
+    url.searchParams.set('story', value);
+    window.history.pushState(window.history.state, '', url.toString());
+    setLinkMessage('');
   };
-
-  // Remove character from scene
-  const handleRemoveCharacterFromScene = (characterId: string) => {
-    if (!selectedItem) return;
-    const updatedScene: Scene = {
-      ...selectedItem.scene,
-      characters: selectedItem.scene.characters.filter((c) => c.characterId !== characterId),
-    };
-    handleUpdateScene(updatedScene);
-  };
-
-  // Run AI Drama Analysis
-  const handleAnalyzeDramaturgy = async () => {
-    if (!selectedItem) return;
-    setIsAnalyzingDrama(true);
+  const copyWorkspaceLink = async () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('story', workspace);
     try {
-      const sec = book.chapters
-        .flatMap((c) => c.sections)
-        .find((s) => s.id === selectedItem.sectionId);
-
-      const res = await fetch('/api/ai/analyze-scene', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sceneTitle: selectedItem.scene.title,
-          sceneContent: sec?.content || '',
-          characters: selectedItem.scene.characters,
-          location: selectedItem.scene.location,
-          conflict: selectedItem.scene.conflict,
-        }),
-      });
-
-      const data = await res.json();
-      if (data.dramaturgyAnalysis) {
-        handleUpdateScene({
-          ...selectedItem.scene,
-          intensityScore: data.intensityScore || selectedItem.scene.intensityScore,
-          aiDramaturgyNotes: data.dramaturgyAnalysis + `\n\n${t('scenario.aiTipsPrefix')}\n` + (data.keyRecommendations || []).map((r: string) => `• ${r}`).join('\n'),
-        });
-      }
-    } catch (err) {
-      console.error('Error analyzing drama:', err);
-    } finally {
-      setIsAnalyzingDrama(false);
+      await navigator.clipboard.writeText(url.toString());
+      setLinkMessage('Посилання скопійовано');
+    } catch {
+      setLinkMessage('Скопіюйте адресу з рядка браузера');
     }
   };
+  useEffect(() => {
+    const onHistory = () => setWorkspace(readWorkspace());
+    window.addEventListener('popstate', onHistory);
+    return () => window.removeEventListener('popstate', onHistory);
+  }, []);
+  const journals = useRef<Partial<Record<'leela'|'constellation'|'mafia', DurableNeutralJournal>>>({});
+  const [journalError, setJournalError] = useState('');
+  const [completedJournals, setCompletedJournals] = useState<Partial<Record<'leela'|'constellation'|'mafia', JournalSession>>>({});
+  const getJournal = (kind: 'leela'|'constellation'|'mafia') => {
+    if (!ownerId) throw new Error('Увійдіть, щоб записувати журнал сесії.');
+    if (!journals.current[kind]) journals.current[kind] = new DurableNeutralJournal(ownerId,book.id,kind);
+    return journals.current[kind]!;
+  };
+  const recordNeutralEvent = (kind: 'leela'|'constellation'|'mafia', event: {kind:'snapshot'|'leela-move'|'game-action';label:string;description:string}) => {
+    void getJournal(kind).append(event).then(() => setJournalError(''),error => {
+      setJournalError(error instanceof Error ? error.message : 'Подію поставлено у чергу, але не записано');
+    });
+  };
+  const prepareJournal = async (kind: 'leela'|'constellation'|'mafia') => {
+    try {
+      const journal = await getJournal(kind).prepare();
+      if (journal) setCompletedJournals(previous=>({...previous,[kind]:journal}));
+    } catch(error) {
+      setJournalError(error instanceof Error ? error.message : 'Є незавершені записи журналу');
+      throw error;
+    }
+  };
+  useEffect(() => {
+    // Replay only existing neutral queues; never fabricate an event or start a session on mount.
+    if (!ownerId) return;
+    journals.current = {};
+    for (const kind of ['leela','constellation','mafia'] as const) {
+      const journal = getJournal(kind);
+      if (journal.pendingCount) void journal.flush().catch(error => {
+        setJournalError(error instanceof Error ? error.message : 'Не вдалося відновити запис');
+      });
+    }
+  }, [book.id, ownerId]);
+  const [sessionPortraits, setSessionPortraits] = useState<SessionPortraitAsset[]>([]);
+  const [selectedScene, setSelectedScene] = useState<ScreenplaySelectedSceneContext | null>(null);
+
+  const onCommitSessionBook = (request: SessionBookExportRequest, material: ReviewedSessionBookMaterial) => {
+    const result = commitSessionToBook(book, request, material);
+    const ids = Object.fromEntries(request.mappings.filter(m => m.action === 'new').map((m, i) => [m.participantId, result.createdCharacterIds[i]]));
+    result.book = attachSessionPortraits(result.book, ids, sessionPortraits);
+    onUpdateBook(result.book, 'Імпорт художнього матеріалу із сесії', 'Додано главу та героїв за погодженим матеріалом сесії');
+    onNavigateToSection(result.chapterId, result.sectionId);
+  };
+  const requestPortrait = async (draft: CharacterDraft) => {
+    const asset = await generateSessionCharacterPortrait(book, draft);
+    setSessionPortraits(previous => [...previous.filter(p => p.participantId !== asset.participantId), asset]);
+    return asset;
+  };
+  const navigateToTab = (tab: NavigationTab) => {
+    if (onNavigateToTab) {
+      onNavigateToTab(tab);
+      return;
+    }
+
+    // App already listens to this event and routes through its real
+    // handleSelectTab/navigation guard. This keeps the author inside the SPA,
+    // preserving unsaved UI state instead of forcing a full page reload.
+    window.dispatchEvent(new CustomEvent('nova:open-tab', { detail: { tab } }));
+  };
+
+  const screenplayJevRequest = useMemo<StoryExperienceJevRequest | undefined>(() => {
+    if (!selectedScene) return undefined;
+    return {
+      profile: 'screenplay_story_state',
+      projectId: book.id,
+      contextId: selectedScene.sceneId,
+      state: {
+        sceneId: selectedScene.sceneId,
+        chapterId: selectedScene.chapterId,
+        sectionId: selectedScene.sectionId,
+        title: selectedScene.title,
+        summary: selectedScene.summary,
+        conflict: selectedScene.conflict,
+        location: selectedScene.location,
+        intensityScore: selectedScene.intensityScore,
+        content: selectedScene.content,
+      },
+    };
+  }, [book.id, selectedScene]);
+
+  const mafiaJevRequest = useMemo<StoryExperienceJevRequest>(() => ({
+    profile: 'mafia_gm_event',
+    projectId: book.id,
+    state: {
+      projectTitle: book.title,
+      mode: 'gm_dashboard',
+      note: 'UI shell state only. TECH layer may enrich from authoritative session state.',
+    },
+  }), [book.id, book.title]);
+
+  const constellationJevRequest = useMemo<StoryExperienceJevRequest>(() => ({
+    profile: 'constellation_session_status',
+    projectId: book.id,
+    state: {
+      projectTitle: book.title,
+      mode: 'constellation_session',
+      allowedScope: 'process_status_only',
+    },
+  }), [book.id, book.title]);
+
+  const leelaJevRequest = useMemo<StoryExperienceJevRequest>(() => ({
+    profile: 'leela_route_status',
+    projectId: book.id,
+    state: {
+      projectTitle: book.title,
+      mode: 'leela_session',
+      allowedScope: 'route_and_session_status_only',
+    },
+  }), [book.id, book.title]);
 
   return (
-    <div className="flex-1 p-4 lg:p-6 overflow-y-auto bg-slate-900 text-slate-100 space-y-6">
-      
-      {/* Header Bento Box */}
-      <div className="nova-glass-dark rounded-2xl p-6 border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-              {t('scenario.headerBadge')}
-            </span>
-            <span className="text-xs text-slate-400">
-              {t('scenario.headerSubBadge')}
-            </span>
-          </div>
-          <h1 className="text-xl font-bold text-white font-heading">
-            {t('scenario.headerTitle', { title: book.title })}
-          </h1>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {onSaveBook && (
-            <button
-              onClick={onSaveBook}
-              data-tour="scenario__1"
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs shadow-md transition-all active:scale-95"
-              title={t('scenario.saveTooltip')}
-            >
-              <Save className="w-3.5 h-3.5" />
-              <span>{t('scenario.saveBtn')}</span>
-            </button>
-          )}
-
-          <button
-            onClick={() => setIsEditingSynopsis(!isEditingSynopsis)}
-            data-tour="scenario__2"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 border border-slate-700"
-          >
-            <Edit3 className="w-3.5 h-3.5" />
-            <span>{isEditingSynopsis ? t('scenario.collapseSynopsisBtn') : t('scenario.editSynopsisBtn')}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Synopsis & Logline Panel */}
-      {isEditingSynopsis ? (
-        <div className="p-5 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-4">
-          <div>
-            <label className="text-xs font-bold uppercase text-slate-400 block mb-1">{t('scenario.loglineLabel')}</label>
-            <input
-              type="text"
-              value={book.logline}
-              onChange={(e) => onUpdateBook({ ...book, logline: e.target.value })}
-              className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:border-cyan-400 focus:outline-hidden"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-bold uppercase text-slate-400 block mb-1">{t('scenario.synopsisLabel')}</label>
-            <textarea
-              rows={4}
-              value={book.synopsis}
-              onChange={(e) => onUpdateBook({ ...book, synopsis: e.target.value })}
-              className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:border-cyan-400 focus:outline-hidden"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-bold uppercase text-slate-400 block mb-1">{t('scenario.themeLabel')}</label>
-            <input
-              type="text"
-              value={book.theme}
-              onChange={(e) => onUpdateBook({ ...book, theme: e.target.value })}
-              className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:border-cyan-400 focus:outline-hidden"
-            />
-          </div>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1">
-            <span className="text-[11px] font-bold text-cyan-400 uppercase">{t('scenario.loglineLabel')}</span>
-            <p className="text-xs text-slate-300 italic">{book.logline}</p>
-          </div>
-          <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1">
-            <span className="text-[11px] font-bold text-indigo-400 uppercase">{t('mastery.targetBtnTheme')}</span>
-            <p className="text-xs text-slate-300">{book.theme}</p>
-          </div>
-          <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1">
-            <span className="text-[11px] font-bold text-purple-400 uppercase">{t('scenario.genreAudienceLabel')}</span>
-            <p className="text-xs text-slate-300">{book.genre} • {book.targetAudience}</p>
-          </div>
-        </div>
-      )}
-
-      {/* EMOTIONAL ARC & PLOT TENSION VISUALIZER */}
-      <div className="p-6 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-4" data-tour="scenario__3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <TrendingUp className="w-4 h-4 text-cyan-400" />
-            <h2 className="text-sm font-bold text-white uppercase tracking-wider font-heading">
-              {t('scenario.emotionalArcHeading')}
-            </h2>
-          </div>
-          <span className="text-xs text-slate-400">
-            {t('scenario.clickPointHint')}
-          </span>
-        </div>
-
-        {/* Interactive SVG Emotional Curve */}
-        <div className="w-full h-48 bg-slate-900/60 rounded-xl p-4 relative flex items-end border border-slate-800/80">
-          <svg className="w-full h-full overflow-visible">
-            {/* Grid Lines */}
-            <line x1="0" y1="20%" x2="100%" y2="20%" stroke="#334155" strokeDasharray="4" strokeWidth="1" />
-            <line x1="0" y1="50%" x2="100%" y2="50%" stroke="#334155" strokeDasharray="4" strokeWidth="1" />
-            <line x1="0" y1="80%" x2="100%" y2="80%" stroke="#334155" strokeDasharray="4" strokeWidth="1" />
-
-            {/* Tension Path */}
-            {allScenes.length > 1 && (
-              <polyline
-                fill="none"
-                stroke="url(#tensionGradient)"
-                strokeWidth="3"
-                points={allScenes
-                  .map((item, index) => {
-                    const x = (index / (allScenes.length - 1)) * 94 + 3; // percentage
-                    const y = 100 - (item.scene.intensityScore / 10) * 80 - 10; // percentage
-                    return `${x}%,${y}%`;
-                  })
-                  .join(' ')}
-              />
-            )}
-
-            {/* Gradient definition */}
-            <defs>
-              <linearGradient id="tensionGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stopColor="#06b6d4" />
-                <stop offset="50%" stopColor="#6366f1" />
-                <stop offset="100%" stopColor="#f43f5e" />
-              </linearGradient>
-            </defs>
-
-            {/* Nodes on curve */}
-            {allScenes.map((item, index) => {
-              const xPercent = (index / Math.max(1, allScenes.length - 1)) * 94 + 3;
-              const yPercent = 100 - (item.scene.intensityScore / 10) * 80 - 10;
-              const isSelected = item.scene.id === selectedItem?.scene.id;
-
-              return (
-                <g
-                  key={item.scene.id}
-                  onClick={() => setSelectedSceneId(item.scene.id)}
-                  className="cursor-pointer group"
-                >
-                  <circle
-                    cx={`${xPercent}%`}
-                    cy={`${yPercent}%`}
-                    r={isSelected ? '8' : '5'}
-                    fill={isSelected ? '#f43f5e' : '#06b6d4'}
-                    stroke="#ffffff"
-                    strokeWidth={isSelected ? '3' : '1.5'}
-                    className="transition-all hover:scale-125"
-                  />
-                  <text
-                    x={`${xPercent}%`}
-                    y={`${yPercent - 12}%`}
-                    textAnchor="middle"
-                    fill={isSelected ? '#38bdf8' : '#94a3b8'}
-                    fontSize="10"
-                    fontWeight="bold"
-                  >
-                    {item.scene.intensityScore}/10
-                  </text>
-                </g>
-              );
-            })}
-          </svg>
-        </div>
-      </div>
-
-      {/* 3-ACT SCENARIO BREAKDOWN & SCENE DETAIL */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* SCENES LIST COLUMN */}
-        <div className="space-y-3" data-tour="scenario__4">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-            {t('scenario.allScenesHeading', { n: String(allScenes.length) })}
-          </h3>
-          <div className="space-y-2">
-            {allScenes.map((item) => {
-              const isSel = item.scene.id === selectedItem?.scene.id;
-              return (
-                <div
-                  key={item.scene.id}
-                  onClick={() => setSelectedSceneId(item.scene.id)}
-                  className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
-                    isSel
-                      ? 'bg-slate-950 border-cyan-500 shadow-md ring-1 ring-cyan-500/30'
-                      : 'bg-slate-950/50 border-slate-800 hover:border-slate-700'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[10px] font-bold uppercase text-cyan-400">
-                      {t('scenario.actLabel', { n: String(item.scene.act), chapter: item.chapterTitle })}
-                    </span>
-                    <span className="text-[11px] font-bold text-amber-400 flex items-center gap-1">
-                      <Flame className="w-3 h-3" /> {item.scene.intensityScore}/10
-                    </span>
-                  </div>
-                  <h4 className="text-xs font-bold text-slate-200">{item.scene.title}</h4>
-                  <p className="text-[11px] text-slate-400 line-clamp-2 mt-1">
-                    {item.scene.summary}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* ACTIVE SCENE DOSSIER */}
-        {selectedItem ? (
-          <div className="lg:col-span-2 space-y-4">
-            <div className="p-5 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-4">
-              
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-bold text-cyan-400 uppercase tracking-wider">
-                    {t('scenario.actLabel', { n: String(selectedItem.scene.act), chapter: selectedItem.chapterTitle })}
-                  </span>
-                  <h3 className="text-base font-bold text-white">
-                    {selectedItem.scene.title}
-                  </h3>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => onNavigateToSection(selectedItem.chapterId, selectedItem.sectionId)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold text-xs shadow-xs"
-                  >
-                    <span>{t('scenario.openInEditorBtn')}</span>
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Form parameters */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                <div>
-                  <label className="text-slate-400 block mb-1">{t('scenario.sceneTitleLabel')}</label>
-                  <input
-                    type="text"
-                    value={selectedItem.scene.title}
-                    onChange={(e) => handleUpdateScene({ ...selectedItem.scene, title: e.target.value })}
-                    className="w-full p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-200"
-                  />
-                </div>
-                <div>
-                  <label className="text-slate-400 block mb-1">{t('scenario.locationLabel')}</label>
-                  <input
-                    type="text"
-                    value={selectedItem.scene.location}
-                    onChange={(e) => handleUpdateScene({ ...selectedItem.scene, location: e.target.value })}
-                    className="w-full p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-200"
-                  />
-                </div>
-                <div>
-                  <label className="text-slate-400 block mb-1">{t('scenario.intensityLabel')}</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={10}
-                    value={selectedItem.scene.intensityScore}
-                    onChange={(e) => handleUpdateScene({ ...selectedItem.scene, intensityScore: Number(e.target.value) })}
-                    className="w-full p-2 rounded-lg bg-slate-900 border border-slate-800 text-amber-300 font-bold"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-400 block mb-1">{t('scenario.summaryLabel')}</label>
-                <textarea
-                  rows={2}
-                  value={selectedItem.scene.summary}
-                  onChange={(e) => handleUpdateScene({ ...selectedItem.scene, summary: e.target.value })}
-                  className="w-full p-2.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-400 block mb-1">{t('scenario.conflictLabel')}</label>
-                <textarea
-                  rows={2}
-                  value={selectedItem.scene.conflict}
-                  onChange={(e) => handleUpdateScene({ ...selectedItem.scene, conflict: e.target.value })}
-                  className="w-full p-2.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200"
-                />
-              </div>
-
-              {/* Characters inside this Scene */}
-              <div className="space-y-3 pt-2 border-t border-slate-800">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                    <Users className="w-3.5 h-3.5 text-cyan-400" />
-                    {t('scenario.sceneCharactersLabel', { n: String(selectedItem.scene.characters.length) })}
-                  </span>
-
-                  {/* Add Character Dropdown */}
-                  <select
-                    onChange={(e) => {
-                      if (e.target.value) {
-                        handleAddCharacterToScene(e.target.value);
-                        e.target.value = '';
-                      }
-                    }}
-                    className="text-xs bg-slate-900 border border-slate-700 text-slate-200 rounded-lg px-2 py-1"
-                    defaultValue=""
-                  >
-                    <option value="" disabled>{t('scenario.addCharacterOption')}</option>
-                    {book.characters.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} {c.surname || ''} ({c.role})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {selectedItem.scene.characters.map((scChar) => {
-                    const char = book.characters.find((c) => c.id === scChar.characterId);
-                    return (
-                      <div
-                        key={scChar.characterId}
-                        className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2 text-xs"
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-slate-200">
-                            {char?.name} {char?.surname || ''}
-                          </span>
-                          <button
-                            onClick={() => handleRemoveCharacterFromScene(scChar.characterId)}
-                            className="text-slate-500 hover:text-rose-400"
-                            title={t('scenario.removeFromSceneTooltip')}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                        <div>
-                          <span className="text-[10px] text-slate-500">{t('scenario.characterGoalLabel')}</span>
-                          <input
-                            type="text"
-                            value={scChar.goal}
-                            onChange={(e) => {
-                              const updatedChars = selectedItem.scene.characters.map((c) =>
-                                c.characterId === scChar.characterId ? { ...c, goal: e.target.value } : c
-                              );
-                              handleUpdateScene({ ...selectedItem.scene, characters: updatedChars });
-                            }}
-                            className="w-full p-1.5 rounded bg-slate-950 border border-slate-800 text-slate-300"
-                          />
-                        </div>
-                        <div>
-                          <span className="text-[10px] text-slate-500">{t('scenario.emotionalStateLabel')}</span>
-                          <input
-                            type="text"
-                            value={scChar.emotionalState}
-                            onChange={(e) => {
-                              const updatedChars = selectedItem.scene.characters.map((c) =>
-                                c.characterId === scChar.characterId ? { ...c, emotionalState: e.target.value } : c
-                              );
-                              handleUpdateScene({ ...selectedItem.scene, characters: updatedChars });
-                            }}
-                            className="w-full p-1.5 rounded bg-slate-950 border border-slate-800 text-slate-300"
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* AI Dramaturgy Notes Box */}
-              <div className="p-4 rounded-xl bg-indigo-950/40 border border-indigo-500/30 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4 text-indigo-400" />
-                    {t('scenario.aiAnalysisHeading')}
-                  </span>
-                  <button
-                    onClick={handleAnalyzeDramaturgy}
-                    disabled={isAnalyzingDrama}
-                    data-tour="scenario__5"
-                    className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-xs"
-                  >
-                    {isAnalyzingDrama ? t('scenario.analyzing') : t('scenario.runAnalysisBtn')}
-                  </button>
-                </div>
-                <p className="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed">
-                  {selectedItem.scene.aiDramaturgyNotes ||
-                    t('scenario.aiNotesPlaceholder')}
-                </p>
-              </div>
-
+    <div className="flex min-h-0 flex-1 flex-col bg-[#F4ECE1] text-[#2C1A12]" data-story-experience-hub>
+      <header className="shrink-0 border-b border-[#E0D4C7] bg-[#FFFCF8]/95 px-4 py-3 backdrop-blur lg:px-5">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="min-w-0">
+            <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#92633C]">Story & Experience Engine</div>
+            <div className="mt-1 flex items-center gap-2">
+              <h1 className="truncate text-base font-bold text-[#2C1A12]">{book.title}</h1>
+              <span className="hidden text-[10px] text-[#71645A] sm:inline">· один сюжет, різні режими роботи</span>
             </div>
           </div>
-        ) : null}
-      </div>
 
+          <nav ref={workspaceNavRef} className="flex max-w-full gap-1 overflow-x-auto rounded-2xl border border-[#E0D4C7] bg-[#F4ECE1] p-1" aria-label="Story & Experience workspace" role="tablist">
+            {workspaces.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                role="tab"
+                aria-selected={workspace === item.id}
+                onClick={() => selectWorkspace(item.id)}
+                className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                  workspace === item.id
+                    ? 'bg-[#2E1B12] text-[#FFF9F1] shadow-sm'
+                    : 'text-[#71645A] hover:bg-[#EADFD2] hover:text-[#2C1A12]'
+                }`}
+                title={item.hint}
+              >
+                {item.icon}
+                <span>{item.label}</span>
+              </button>
+            ))}
+          </nav>
+          <div className="flex shrink-0 items-center gap-2">
+            <button type="button" onClick={() => void copyWorkspaceLink()}
+              className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[#D9CABC] bg-[#FFFCF8] px-3 py-2 text-xs font-semibold text-[#2C1A12] hover:bg-[#F4ECE1]"
+              aria-label="Скопіювати посилання на поточний розділ">
+              <Copy className="h-4 w-4" /> Посилання
+            </button>
+            {linkMessage && <span role="status" className="text-xs text-[#71645A]">{linkMessage}</span>}
+          </div>
+        </div>
+      </header>
+
+      <div className="flex min-h-0 flex-1 flex-col">
+        {workspace === 'screenplay' && (
+          <IntegratedScreenplayView
+            book={book}
+            preferredModelId={book.preferredAiModelId}
+            jevRequest={screenplayJevRequest}
+            onEvaluateWithJev={onEvaluateWithJev}
+            onSelectedSceneChange={setSelectedScene}
+            onNavigateToSection={onNavigateToSection}
+            onOpenCharacters={() => navigateToTab('characters')}
+            onOpenRelationships={() => navigateToTab('core-story-graph')}
+            onOpenDiagnostics={() => navigateToTab('diagn')}
+          />
+        )}
+
+        {workspace === 'mafia' && (
+          <IntegratedMafiaView
+            journal={completedJournals.mafia}
+            onPrepareJournal={() => prepareJournal('mafia')}
+            onMafiaNeutralEvent={event => { void recordNeutralEvent('mafia',{kind:'game-action',label:'Mafia: '+event.action,description:event.phase ? 'Фаза: '+event.phase : 'Нейтральний стан гри'}); }}
+            bookId={book.id}
+            onRequestSessionPortrait={requestPortrait}
+            portraitAssets={sessionPortraits}
+            existingCharacters={book.characters.map((character) => ({ id: character.id, name: character.name }))}
+            reviewedMaterial={reviewedSessionMaterials?.mafia}
+            onCommitBookExport={onCommitSessionBook}
+            projectTitle={book.title}
+            preferredModelId={book.preferredAiModelId}
+            jevRequest={mafiaJevRequest}
+            onEvaluateWithJev={onEvaluateWithJev}
+          />
+        )}
+
+        {workspace === 'constellation' && (
+          <IntegratedConstellationView
+            bookId={book.id}
+            journal={completedJournals.constellation}
+            onPrepareJournal={() => prepareJournal('constellation')}
+            onConstellationSnapshot={snapshot => { void recordNeutralEvent('constellation',{kind:'snapshot',label:'Snapshot '+snapshot.index,description:'Збережено snapshot поля №'+snapshot.index}); }}
+            onRequestSessionPortrait={requestPortrait}
+            portraitAssets={sessionPortraits}
+            existingCharacters={book.characters.map((character) => ({ id: character.id, name: character.name }))}
+            reviewedMaterial={reviewedSessionMaterials?.constellation}
+            onCommitBookExport={onCommitSessionBook}
+            title={book.title}
+            preferredModelId={book.preferredAiModelId}
+            jevRequest={constellationJevRequest}
+            onEvaluateWithJev={onEvaluateWithJev}
+          />
+        )}
+
+        {workspace === 'leela' && (
+          <IntegratedLeelaView
+            journal={completedJournals.leela}
+            onPrepareJournal={() => prepareJournal('leela')}
+            onLeelaStep={step => { void recordNeutralEvent('leela',{kind:'leela-move',label:'Хід '+step.turn,description:'Перехід з клітини '+step.from+' до '+step.to+', кубик '+step.dice}); }}
+            onRequestSessionPortrait={requestPortrait}
+            portraitAssets={sessionPortraits}
+            existingCharacters={book.characters.map((character) => ({ id: character.id, name: character.name }))}
+            reviewedMaterial={reviewedSessionMaterials?.leela}
+            onCommitBookExport={onCommitSessionBook}
+            title={`${book.title} · Leela`}
+            preferredModelId={book.preferredAiModelId}
+            jevRequest={leelaJevRequest}
+            onEvaluateWithJev={onEvaluateWithJev}
+          />
+        )}
+
+        {journalError && <p role="alert" className="mx-4 rounded-lg border border-rose-700 p-3 text-xs text-rose-200">Журнал подій: {journalError}</p>}
+        {workspace === 'consents' && <MySessionConsentsView />}
+        {workspace === 'history' && <SessionHistoryView bookId={book.id} existingCharacters={book.characters.map(character => ({ id: character.id, name: character.name }))} onCommitBookExport={onCommitSessionBook} onRequestPortrait={requestPortrait} portraitAssets={sessionPortraits} />}
+        {workspace === 'analysis' && (
+          <ScenarioLegacyView
+            book={book}
+            onUpdateBook={onUpdateBook}
+            onNavigateToSection={onNavigateToSection}
+            onSaveBook={onSaveBook}
+          />
+        )}
+      </div>
     </div>
   );
 };

@@ -20,6 +20,31 @@
         }
       })();
     </script>
+    <script>
+      // Only the isolated Railway preview shows client boot errors visibly.
+      (function () {
+        if (location.hostname !== 'writer-studio-preview-production.up.railway.app') return;
+        function show(message) {
+          if (document.getElementById('preview-boot-error')) return;
+          var box = document.createElement('div');
+          box.id = 'preview-boot-error';
+          box.setAttribute('role', 'alert');
+          box.style.cssText = 'position:fixed;z-index:2147483647;inset:16px 12px auto;padding:20px;border-radius:16px;background:#fff8f0;color:#2c1a12;font:15px/1.5 system-ui;box-shadow:0 4px 28px #0006;overflow-wrap:anywhere';
+          var title = document.createElement('strong');
+          title.textContent = 'Помилка запуску тестової Studio';
+          var detail = document.createElement('p');
+          detail.textContent = String(message || 'Невідома помилка').slice(0, 700);
+          box.append(title, detail);
+          (document.body || document.documentElement).appendChild(box);
+        }
+        window.addEventListener('error', function (event) {
+          if (event.error || event.message) show(event.message || String(event.error));
+        });
+        window.addEventListener('unhandledrejection', function (event) {
+          show(event.reason && event.reason.message || String(event.reason));
+        });
+      })();
+    </script>
   </head>
   <body class="h-full bg-slate-950 text-slate-100 antialiased selection:bg-cyan-500/20 selection:text-cyan-200">
     <div id="root" class="h-full"></div>

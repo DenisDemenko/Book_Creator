@@ -75,13 +75,20 @@ interface FloatingToolDockProps {
 const toRect = (r: DOMRect): Rect => ({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
 
 function readState(key: string): ToolDockState {
+  // On phone-sized viewports the expanded dock can cover the entire writing
+  // canvas. Start with a compact header even when desktop state was saved.
+  // Writers can expand it explicitly; this does not affect desktop layouts.
+  const isPhone = typeof window !== 'undefined' && window.innerWidth < 640;
   try {
     const raw = localStorage.getItem(key);
-    if (raw) return normalizeToolDockState(JSON.parse(raw), { width: window.innerWidth, height: window.innerHeight });
+    if (raw) {
+      const saved = normalizeToolDockState(JSON.parse(raw), { width: window.innerWidth, height: window.innerHeight });
+      return isPhone ? { ...saved, dock: 'top', minimized: true } : saved;
+    }
   } catch {
-    /* сховище недоступне або запис зіпсований — типове розташування */
+    /* unavailable or corrupt storage — use a safe default */
   }
-  return { ...DEFAULT_TOOL_DOCK };
+  return isPhone ? { ...DEFAULT_TOOL_DOCK, dock: 'top', minimized: true } : { ...DEFAULT_TOOL_DOCK };
 }
 
 type DragMode = null | 'move' | 'resize-left' | 'resize-right';

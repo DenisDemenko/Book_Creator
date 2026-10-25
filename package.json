@@ -244,6 +244,7 @@
     "test:workflow-lifecycle": "tsx scripts/test-workflowLifecycle.mts",
     "test:story-proposals": "tsx scripts/test-storyProposals.mts",
     "test:story-core-api": "tsx scripts/test-storyCoreApi.mts",
+    "test:story-experience-api": "tsx scripts/test-storyExperienceApi.mts",
     "test:role-onboarding": "tsx scripts/test-roleOnboarding.mts",
     "test:my-role": "tsx scripts/test-myRole.mts",
     "test:my-role-routes": "tsx scripts/test-myRoleRoutes.mts",
