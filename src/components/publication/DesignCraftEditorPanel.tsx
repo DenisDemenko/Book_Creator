@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Bot, Check, Copy, Download, ExternalLink, KeyRound, Loader2, MonitorUp, TerminalSquare } from 'lucide-react';
 import type { Book } from '../../types';
 import { API_BASE, apiPath } from '../../utils/basePath';
@@ -51,8 +51,13 @@ export function designcraftLaunchUrl(bookId: string, root: string): string {
 /** Та сама дія командою — запасний шлях, якщо посилання ще не встановлене. */
 export function designcraftLaunchCommand(bookId: string, root: string): string {
   const local = isLocalStudio(root);
-  return `.\\scripts\\start-designcraft-studio.cmd -BookId ${bookId} -StudioUrl ${root}${local ? ' -KeepRunning' : ''}`;
+  // Локальна Студія — скрипти з репозиторію; хмарна — те, що поклав інсталятор, завантажений зі Студії.
+  const script = local ? '.\\scripts\\start-designcraft-studio.cmd' : '& "$env:LOCALAPPDATA\\DesignCraftStudio\\start-designcraft-studio.cmd"';
+  return `${script} -BookId ${bookId} -StudioUrl ${root}${local ? ' -KeepRunning' : ''}`;
 }
+
+/** Інсталятор запуску, який віддає сама Студія (ZIP зі скриптами). */
+export const LAUNCHER_DOWNLOAD_PATH = '/api/designcraft/launcher.zip';
 
 /**
  * Блок локального графічного редактора DesignCraft на сторінці «Верстка для публікації».
@@ -78,7 +83,9 @@ export const DesignCraftEditorPanel: React.FC<Props> = ({ book }) => {
   const [copied, setCopied] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [launched, setLaunched] = useState(false);
+  // 'idle' | 'sent' (браузер щось зробив: вікно втратило фокус) | 'silent' (за 3 с нічого не сталося)
+  const [launch, setLaunch] = useState<'idle' | 'sent' | 'silent'>('idle');
+  const launchTimer = useRef<number | null>(null);
   const [artifacts, setArtifacts] = useState<{ revision: number; items: ArtifactInfo[] } | null>(null);
   const [artifactsError, setArtifactsError] = useState<string | null>(null);
 
@@ -105,6 +112,30 @@ export const DesignCraftEditorPanel: React.FC<Props> = ({ book }) => {
     void loadArtifacts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [book.id]);
+
+  /**
+   * Браузер не повідомляє, чи є обробник посилання designcraft-studio://. Якщо він є, сторінка зазвичай
+   * втрачає фокус (запит дозволу чи нове вікно); якщо ні — не відбувається нічого. Тому по натисканню
+   * чекаємо 3 с: без втрати фокусу показуємо підказку «посилання не встановлене» з завантаженням інсталятора.
+   */
+  const onLaunchClick = () => {
+    setLaunch('idle');
+    if (launchTimer.current) window.clearTimeout(launchTimer.current);
+    let reacted = false;
+    const react = () => {
+      reacted = true;
+    };
+    window.addEventListener('blur', react, { once: true });
+    document.addEventListener('visibilitychange', react, { once: true });
+    launchTimer.current = window.setTimeout(() => {
+      window.removeEventListener('blur', react);
+      document.removeEventListener('visibilitychange', react);
+      setLaunch(reacted ? 'sent' : 'silent');
+    }, 3000);
+  };
+  useEffect(() => () => {
+    if (launchTimer.current) window.clearTimeout(launchTimer.current);
+  }, []);
 
   const prepareDraft = async () => {
     setBusy('draft');
@@ -227,16 +258,21 @@ export const DesignCraftEditorPanel: React.FC<Props> = ({ book }) => {
         <div className="flex flex-col items-end gap-1.5">
           <a
             href={launchUrl}
-            onClick={() => setLaunched(true)}
+            onClick={onLaunchClick}
             data-open-designcraft
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold shadow-md"
           >
             <ExternalLink className="w-4 h-4" /> Відкрити графічний редактор DesignCraft
           </a>
-          {launched && (
-            <span className="text-[10px] text-slate-400 max-w-xs text-right">
-              Якщо браузер нічого не запитав і вікно не відкрилось — посилання ще не встановлене (крок 1 нижче) або
-              скористайтесь командою запуску.
+          {launch === 'sent' && (
+            <span className="text-[10px] text-slate-400 max-w-xs text-right" data-launch-sent>
+              Запит надіслано. Якщо браузер питає дозвіл відкрити програму — погодьтесь; далі працює вікно скрипта на вашому комп'ютері.
+            </span>
+          )}
+          {launch === 'silent' && (
+            <span className="text-[10px] text-amber-300 max-w-xs text-right" data-launch-silent>
+              Нічого не відбулося — найімовірніше, посилання ще не встановлене на цьому комп'ютері.
+              Виконайте крок 1 нижче (завантажити й запустити інсталятор), потім натисніть кнопку ще раз.
             </span>
           )}
         </div>
@@ -245,7 +281,7 @@ export const DesignCraftEditorPanel: React.FC<Props> = ({ book }) => {
       <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 text-[11px] text-slate-300 space-y-2">
         <p>
           <b className="text-white">Як це працює.</b> Кнопка відкриває посилання <code className="text-cyan-200">designcraft-studio://</code>,
-          яке на вашому комп'ютері запускає скрипт <code className="text-cyan-200">scripts\start-designcraft-studio.ps1</code>. Скрипт
+          яке на вашому комп'ютері запускає скрипт <code className="text-cyan-200">{local ? 'scripts\\start-designcraft-studio.ps1' : '%LOCALAPPDATA%\\DesignCraftStudio\\start-designcraft-studio.ps1'}</code>. Скрипт
           {local ? (
             <> працює з вашим <b>локальним сервером Студії</b> (він уже запущений — скрипт його не перезапускає),</>
           ) : (
@@ -255,8 +291,10 @@ export const DesignCraftEditorPanel: React.FC<Props> = ({ book }) => {
           Claude Code, якому одразу передано цю книгу.
         </p>
         <p className="text-slate-400">
-          Потрібно: Windows, зібраний DesignCraft (<code>designcraft.exe</code> і <code>designcraft-cli.exe</code>), встановлений
-          Claude Code з входом в акаунт Claude. Браузер перед запуском спитає дозвіл відкрити програму — це нормально.
+          Потрібно: Windows; DesignCraft (<code>designcraft.exe</code> і <code>designcraft-cli.exe</code>) —{' '}
+          <a href="https://github.com/storytold/designcraft/releases" target="_blank" rel="noreferrer" className="text-cyan-300 underline">збірки проєкту</a>;
+          скрипт один раз спитає папку, де він лежить; встановлений Claude Code з входом в акаунт Claude. Браузер перед
+          запуском спитає дозвіл відкрити програму — це нормально.
         </p>
       </div>
 
@@ -264,16 +302,32 @@ export const DesignCraftEditorPanel: React.FC<Props> = ({ book }) => {
         <li className="flex gap-3">
           <span className="shrink-0 w-5 h-5 rounded-full bg-slate-800 text-[10px] font-bold flex items-center justify-center">1</span>
           <div className="flex-1 min-w-0">
-            <b className="text-white">Один раз: встановити посилання.</b> У PowerShell у папці проєкту Студії виконайте:
-            <div className="mt-1.5 flex items-center gap-2">
-              <code className="flex-1 min-w-0 truncate px-2 py-1 rounded bg-slate-950 border border-slate-800 text-cyan-200">
-                .\scripts\install-designcraft-link.cmd
-              </code>
-              <button type="button" onClick={() => copy('install', '.\\scripts\\install-designcraft-link.cmd')} className="p-1.5 rounded border border-slate-800 text-slate-300" title="Скопіювати">
-                {copied === 'install' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-              </button>
+            <b className="text-white">Один раз: встановити посилання на цьому комп'ютері.</b> Без цього кнопка вгорі нічого не робить.
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <a
+                href={apiPath(LAUNCHER_DOWNLOAD_PATH)}
+                download
+                data-download-launcher
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/20 border border-cyan-500/50 text-cyan-100 font-bold"
+              >
+                <Download className="w-3 h-3" /> Завантажити інсталятор (designcraft-studio-launcher.zip)
+              </a>
             </div>
-            <span className="text-slate-500">Без прав адміністратора, лише для вашого користувача Windows. Прибрати: той самий скрипт з <code>-Remove</code>.</span>
+            <ol className="mt-1.5 list-decimal pl-4 space-y-0.5 text-slate-400">
+              <li>Розпакуйте архів (правою кнопкою → «Видобути все») — не запускайте файли прямо з архіву.</li>
+              <li>Двічі клацніть <code>install-designcraft-studio.cmd</code>. Якщо Windows питає «Запустити?» — це звичайні текстові скрипти, їх можна відкрити Блокнотом.</li>
+              <li>Має з'явитися «Посилання designcraft-studio:// встановлено». Вікно можна закрити, архів — видалити.</li>
+            </ol>
+            <span className="text-slate-500">Без прав адміністратора, лише для вашого користувача Windows; нічого не завантажує з інтернету. Прибрати: <code>install-designcraft-studio.cmd -Remove</code>.</span>
+            {local && (
+              <div className="mt-1.5 text-slate-500">
+                Розробник Студії (є папка проєкту) може замість цього виконати{' '}
+                <code className="text-cyan-200">.\scripts\install-designcraft-link.cmd</code>{' '}
+                <button type="button" onClick={() => copy('install', '.\\scripts\\install-designcraft-link.cmd')} className="align-middle p-1 rounded border border-slate-800 text-slate-300" title="Скопіювати">
+                  {copied === 'install' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                </button>
+              </div>
+            )}
           </div>
         </li>
         <li className="flex gap-3">
@@ -327,7 +381,7 @@ export const DesignCraftEditorPanel: React.FC<Props> = ({ book }) => {
         </div>
         <ul className="list-disc pl-4 space-y-1 text-slate-400">
           <li>Агент читає книгу зі Студії <b className="text-slate-200">лише для читання</b>: текст у Студію він не пише. Виправлення тексту робіть тут, у Студії, і збережіть — агент переналиє його у верстку.</li>
-          <li>Агент працює лише у вкладці цієї книги; інші документи у вікні DesignCraft не чіпає. Файли верстки (.designcraft, PDF) лягають у папку <code>designcraft-work</code>.</li>
+          <li>Агент працює лише у вкладці цієї книги; інші документи у вікні DesignCraft не чіпає. Файли верстки (.designcraft, PDF) лягають у папку <code>{local ? 'designcraft-work' : 'Документи\\DesignCraft-Studio'}</code>.</li>
           <li>Скрипт питає акаунт і модель Claude Code: для книг зазвичай достатньо Sonnet; Opus помітно дорожчий. Оплата — за вашим акаунтом Claude, не Студії.</li>
           <li>Підтвердження агент питає лише для дій, що руйнують наявну верстку (перебудова з нуля, видалення сторінок).</li>
         </ul>

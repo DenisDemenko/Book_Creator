@@ -27,9 +27,16 @@ if ($Remove) {
 
 $script = Join-Path $PSScriptRoot 'start-designcraft-studio.ps1'
 if (-not (Test-Path $script)) { Write-Host "Не знайдено $script" -ForegroundColor Red; exit 1 }
-$powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$sysRoot = if ($env:SystemRoot) { $env:SystemRoot } else { 'C:\Windows' }   # лише для сухого прогону поза Windows
+$powershell = "$sysRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
 # -File + "%1": посилання передається одним аргументом, символи & у ньому не ламають командний рядок.
 $command = "`"$powershell`" -NoProfile -ExecutionPolicy Bypass -File `"$script`" -Url `"%1`""
+
+# Сухий прогін (для автотестів): показує, що було б записано, і нічого не чіпає в реєстрі.
+if ($env:DESIGNCRAFT_LINK_DRY_RUN) {
+  Write-Host "[сухий прогін] Обробник: $command"
+  exit 0
+}
 
 New-Item -Path $key -Force | Out-Null
 Set-ItemProperty -Path $key -Name '(default)' -Value 'URL:DesignCraft Studio'

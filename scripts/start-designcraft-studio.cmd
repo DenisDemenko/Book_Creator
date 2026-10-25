@@ -3,5 +3,5 @@ rem Запуск DesignCraft зі Студією без зміни політи�
 chcp 65001 >nul
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0start-designcraft-studio.ps1" %*
 echo.
-echo Код завершення: %ERRORLEVEL%. Журнал: designcraft-work\last-run.log
+echo Код завершення: %ERRORLEVEL%. Журнал: last-run.log (у теці з файлами верстки)
 pause

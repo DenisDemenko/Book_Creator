@@ -30,8 +30,8 @@
 [CmdletBinding()]
 param(
   [string]$StudioUrl = 'http://localhost:3000',
-  [string]$DesignCraftPath = 'D:\Rama\designcraft\target\release\designcraft-cli.exe',
-  [string]$DesignCraftAppPath = 'D:\Rama\designcraft\target\release\designcraft.exe',   # вікно (GUI) DesignCraft
+  [string]$DesignCraftPath = '',       # designcraft-cli.exe; порожньо = знайти (config.json, типові місця) або спитати один раз
+  [string]$DesignCraftAppPath = '',    # designcraft.exe (вікно); порожньо = поряд із designcraft-cli.exe
   [int]$ControlPort = 7979,        # порт керування вікном DesignCraft (designcraft --control)
   [switch]$Headless,               # без вікна: невидима сесія в пам'яті (як було раніше)
   [string]$BookId = '',
@@ -50,8 +50,19 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
-$RepoRoot = Split-Path -Parent $PSScriptRoot
-$LogDir = Join-Path $RepoRoot 'designcraft-work'
+# Два способи жити. З репозиторію Студії (scripts\ поряд із package.json) — як було. Окремо, коли
+# інсталятор, завантажений зі Студії, поклав скрипти в %LOCALAPPDATA%\DesignCraftStudio: поряд лежить
+# studio-mcp.mjs, а файли верстки йдуть у «Документи\DesignCraft-Studio».
+$Portable = Test-Path (Join-Path $PSScriptRoot 'studio-mcp.mjs')
+if ($Portable) {
+  $RepoRoot = $PSScriptRoot
+  $docs = [Environment]::GetFolderPath('MyDocuments')
+  if (-not $docs) { $docs = Join-Path $HOME 'Documents' }
+  $LogDir = Join-Path $docs 'DesignCraft-Studio'
+} else {
+  $RepoRoot = Split-Path -Parent $PSScriptRoot
+  $LogDir = Join-Path $RepoRoot 'designcraft-work'
+}
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $LogFile = Join-Path $LogDir 'last-run.log'
 # Журнал останнього запуску: токен у нього не потрапляє (лише початок «nst_xxx...» при вставці з буфера).
@@ -136,13 +147,86 @@ function Get-Json([string]$Path, [string]$Token) {
   return ($text | ConvertFrom-Json)
 }
 
+# --- DesignCraft: де лежить -------------------------------------------------------------------
+# Порядок: параметри -> збережене (config.json) -> типові місця -> спитати один раз і запам'ятати.
+$ConfigDir = Join-Path $env:LOCALAPPDATA 'DesignCraftStudio'
+$ConfigFile = Join-Path $ConfigDir 'config.json'
+$DesignCraftReleases = 'https://github.com/storytold/designcraft/releases'
+
+function Find-DesignCraftIn([string]$Dir) {
+  if (-not $Dir -or -not (Test-Path -LiteralPath $Dir -PathType Container)) { return $null }
+  foreach ($d in @($Dir, (Join-Path $Dir 'bin'), (Join-Path $Dir 'target\release'))) {
+    $cli = Join-Path $d 'designcraft-cli.exe'
+    $app = Join-Path $d 'designcraft.exe'
+    if ((Test-Path -LiteralPath $cli) -or (Test-Path -LiteralPath $app)) { return @{ cli = $cli; app = $app } }
+  }
+  return $null
+}
+
+function Save-DesignCraftDir([string]$Dir) {
+  try {
+    New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null
+    @{ designcraftDir = $Dir } | ConvertTo-Json | Set-Content -Path $ConfigFile -Encoding UTF8
+  } catch { }
+}
+
+function Resolve-DesignCraft {
+  if ($DesignCraftPath) {
+    if (-not $DesignCraftAppPath) { $script:DesignCraftAppPath = Join-Path (Split-Path -Parent $DesignCraftPath) 'designcraft.exe' }
+    return
+  }
+  $found = $null
+  $fromConfig = $false
+  if (Test-Path $ConfigFile) {
+    try {
+      $cfg = Get-Content $ConfigFile -Raw | ConvertFrom-Json
+      if ($cfg.designcraftDir) { $found = Find-DesignCraftIn "$($cfg.designcraftDir)"; $fromConfig = [bool]$found }
+    } catch { }
+  }
+  if (-not $found) {
+    # DESIGNCRAFT_HOME завжди враховується; DESIGNCRAFT_NO_AUTODETECT=1 вимикає пошук у PATH і типових папках.
+    $candidates = @($env:DESIGNCRAFT_HOME)
+    if (-not $env:DESIGNCRAFT_NO_AUTODETECT) {
+      $candidates += 'D:\Rama\designcraft'
+      foreach ($pair in @(@($env:LOCALAPPDATA, 'Programs\DesignCraft'), @($env:ProgramFiles, 'DesignCraft'), @($env:USERPROFILE, 'DesignCraft'))) {
+        if ($pair[0]) { $candidates += (Join-Path $pair[0] $pair[1]) }
+      }
+      $onPath = Get-Command designcraft-cli -ErrorAction SilentlyContinue
+      if ($onPath) { $candidates = @((Split-Path -Parent $onPath.Source)) + $candidates }
+    }
+    foreach ($c in $candidates) { $found = Find-DesignCraftIn "$c"; if ($found) { break } }
+    if ($found) { Save-DesignCraftDir (Split-Path -Parent $found.cli) }
+  }
+  if (-not $found) {
+    if ([Console]::IsInputRedirected) {
+      Fail "Не знайдено DesignCraft. Вкажіть -DesignCraftPath <шлях до designcraft-cli.exe> або встановіть змінну DESIGNCRAFT_HOME. Збірки: $DesignCraftReleases"
+    }
+    Write-Host ''
+    Write-Host 'Не знайдено DesignCraft (designcraft.exe і designcraft-cli.exe).' -ForegroundColor Yellow
+    Write-Host "Якщо його ще немає — збірки проєкту: $DesignCraftReleases"
+    for ($try = 1; $try -le 3 -and -not $found; $try++) {
+      $answer = (Read-Host 'Вкажіть папку з DesignCraft (можна перетягнути папку або designcraft.exe сюди)').Trim().Trim('"')
+      if (-not $answer) { continue }
+      if (Test-Path -LiteralPath $answer -PathType Leaf) { $answer = Split-Path -Parent $answer }
+      $found = Find-DesignCraftIn $answer
+      if (-not $found) { Write-Host "У «$answer» немає designcraft-cli.exe чи designcraft.exe." -ForegroundColor Red }
+    }
+    if (-not $found) { Fail 'DesignCraft не знайдено. Збережіть його у зручну папку й запустіть скрипт ще раз.' }
+    Save-DesignCraftDir (Split-Path -Parent $found.cli)
+    Write-Host 'Запам''ятано — наступного разу питати не буду.' -ForegroundColor Green
+  }
+  $script:DesignCraftPath = $found.cli
+  $script:DesignCraftAppPath = $found.app
+}
+
 # --- 0. Попередні перевірки ---------------------------------------------------------------------
 if ($ForgetToken) {
   if (Test-Path $TokenFile) { Remove-Item $TokenFile -Force; Write-Host 'Збережений токен видалено.' }
   else { Write-Host 'Збереженого токена немає.' }
   exit 0
 }
-if (-not (Test-Path (Join-Path $RepoRoot 'package.json'))) { Fail "Не знайдено проєкт Студії в $RepoRoot." }
+if (-not $Portable -and -not (Test-Path (Join-Path $RepoRoot 'package.json'))) { Fail "Не знайдено проєкт Студії в $RepoRoot." }
+Resolve-DesignCraft
 if (-not (Test-Path $DesignCraftPath)) { Fail "Не знайдено DesignCraft: $DesignCraftPath (параметр -DesignCraftPath)." }
 if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { Fail 'Не знайдено команду claude (Claude Code).' }
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Fail 'Не знайдено node.' }
@@ -171,7 +255,7 @@ function Get-ListenerPids([int[]]$Ports) {
     Select-Object -ExpandProperty OwningProcess -Unique)
 }
 
-if ($isLocal -and -not $NoStudio) {
+if ($isLocal -and -not $NoStudio -and -not $Portable) {
   # Порти: сервер Студії і канал гарячого оновлення Vite (24678 — з ним був конфлікт раніше).
   $ports = @($uri.Port, 24678)
   $pids = Get-ListenerPids $ports
@@ -363,7 +447,7 @@ if ($Headless) {
   Write-Host 'Режим -Headless: DesignCraft без вікна (невидима сесія).' -ForegroundColor Yellow
 } else {
   if (-not (Test-Path $DesignCraftAppPath)) {
-    Fail "Не знайдено вікно DesignCraft: $DesignCraftAppPath. Збудуйте його: cargo build --release -p designcraft (у D:\Rama\designcraft) або вкажіть -DesignCraftAppPath."
+    Fail "Не знайдено вікно DesignCraft: $DesignCraftAppPath. Потрібен designcraft.exe поряд із designcraft-cli.exe (збірки: $DesignCraftReleases) або вкажіть -DesignCraftAppPath."
   }
   if (Test-ControlPortListening) {
     Write-Host "Вікно DesignCraft уже відкрите (порт керування $ControlPort) — підключаюсь до нього." -ForegroundColor Green
@@ -426,7 +510,7 @@ if ($BookId) {
 Write-Host ("Обрано: {0} [{1}]" -f $chosen.title, $chosen.id) -ForegroundColor Green
 
 # --- 4б. Чернетка верстки зі Студії (той самий конвеєр DesignCraft, що й точний PDF) ---------------
-$workDir = Join-Path $RepoRoot 'designcraft-work'
+$workDir = $LogDir
 New-Item -ItemType Directory -Force -Path $workDir | Out-Null
 $draftPath = Join-Path $workDir "$($chosen.id).designcraft"
 $resultPdfPath = Join-Path $workDir "$($chosen.id).pdf"
@@ -615,15 +699,16 @@ if (-not $NoLoginCheck) {
 }
 
 # --- 6. Конфіг MCP (тимчасовий файл з токеном; видаляється наприкінці) ---------------------------
-$workDir = Join-Path $RepoRoot 'designcraft-work'
+$workDir = $LogDir
 New-Item -ItemType Directory -Force -Path $workDir | Out-Null
 
 $studioMcpScript = Join-Path $RepoRoot 'scripts\studio-mcp.mts'
+$studioMcpArgs = if ($Portable) { @((Join-Path $PSScriptRoot 'studio-mcp.mjs')) } else { @('--import', 'tsx', $studioMcpScript) }
 $config = @{
   mcpServers = @{
     'nova-studio' = @{
       command = 'node'
-      args    = @('--import', 'tsx', $studioMcpScript)
+      args    = $studioMcpArgs
       env     = @{ NOVA_STUDIO_TOKEN = $token; NOVA_STUDIO_URL = $StudioUrl }
     }
     'designcraft' = @{
@@ -662,7 +747,7 @@ $prompt = @"
 try {
   Write-Host ''
   Write-Host 'Запускаю Claude Code з MCP nova-studio + designcraft...' -ForegroundColor Cyan
-  Set-Location $RepoRoot
+  Set-Location $(if ($Portable) { $workDir } else { $RepoRoot })
   try { Stop-Transcript | Out-Null } catch { }   # інтерактивний claude у журнал не пишемо
   # --mcp-config приймає кілька значень, тому початкове завдання йде ПЕРЕД опціями.
   & claude $prompt @modelArgs --mcp-config $cfgPath --strict-mcp-config

@@ -7,6 +7,7 @@ import {
 import { registerAuthorPdfPreviewRoutes } from './pdf/authorPreviewRoute';
 import { registerDesigncraftThemePreviewRoutes } from './pdf/designcraft/themePreviewRoute';
 import { registerDesigncraftDraftRoutes } from './pdf/designcraftDraftRoutes';
+import { registerDesigncraftLauncherRoutes } from './designcraftLauncher';
 
 /**
  * Thin extension layer for Book Design Studio.
@@ -19,6 +20,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
   registerAuthorPdfPreviewRoutes(app);
   registerDesigncraftThemePreviewRoutes(app);
   registerDesigncraftDraftRoutes(app);
+  registerDesigncraftLauncherRoutes(app);
   return registerPdfRoutesBase(app, deps);
 }
 
