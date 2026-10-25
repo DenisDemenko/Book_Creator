@@ -20,7 +20,7 @@ import {
   type DesignPatch,
 } from '../utils/designSuggestion';
 import { BookDesignThemeGallery } from './BookDesignThemeGallery';
-import type { BookDesignThemeId } from '../data/bookDesignThemeCatalog';
+import { applyBookDesignTheme, type BookDesignThemeId } from '../data/bookDesignThemeCatalog';
 
 /**
  * Панель скіла /design (Завдання 3в) — на вкладці «Верстка».
@@ -179,10 +179,7 @@ export const DesignSuggestionPanel: React.FC<Props> = ({ book, onUpdateBook }) =
     onUpdateBook(
       {
         ...book,
-        layoutConfig: {
-          ...book.layoutConfig,
-          bookDesignThemeId: themeId,
-        } as BookDesignLayoutConfig,
+        layoutConfig: applyBookDesignTheme(book.layoutConfig, themeId) as BookDesignLayoutConfig,
       },
       'Book Design Studio: вибір теми',
       `Обрано дизайн-систему «${themeId}». Ручні параметри верстки та старий designTheme збережені.`

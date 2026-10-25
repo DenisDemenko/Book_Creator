@@ -45,6 +45,7 @@ import {
   type ExternalScan,
 } from './externalApiStore';
 import { cleanOcrText } from './scanOcrPrompt';
+import { PairingCodeStore, PAIRING_TTL_MS } from './pairingCodes';
 
 /** Межі — однакові для застосунку й тестів, тому експортовані. */
 export const EXTERNAL_LIMITS = {
@@ -69,6 +70,8 @@ export interface RecognizeParams {
 }
 
 export interface ExternalApiDeps {
+  /** Сховище одноразових кодів підключення; тести підставляють своє з керованим часом. */
+  pairing?: PairingCodeStore;
   /** Розпізнавання тексту на фото. У продукті — модель зору ядра AI (scanRecognizer.ts). */
   recognize: (p: RecognizeParams) => Promise<{ text: string; modelId: string }>;
   /** Перевірка й облік ліміту сховища (у продукті — mediaStorage.checkAndRecordStorageUpload). */
@@ -229,6 +232,7 @@ export function registerExternalApiRoutes(app: Express, deps: ExternalApiDeps): 
       void task();
     });
   const externalAuth = requireExternalToken(now);
+  const pairing = deps.pairing || new PairingCodeStore();
 
   /** Розпізнавання у фоні: результат або причина відмови лягають у сам скан. */
   const runRecognition = (scan: ExternalScan, mimeType: string, base64: string, req: Request) => {
@@ -285,6 +289,59 @@ export function registerExternalApiRoutes(app: Express, deps: ExternalApiDeps): 
     } catch (err) {
       console.error('[externalApi] revoke token:', err);
       fail(res, 500, 'server_error', 'Не вдалося відкликати токен.');
+    }
+  });
+
+  // ── Студія: одноразовий код підключення локального застосунку ───────────
+  /*
+   * Кнопка «Отримати код підключення» на сторінці «Верстка для публікації».
+   * Скрипт запуску DesignCraft обмінює код на токен (`/api/external/v1/pair`),
+   * тож автору не треба копіювати довгий токен. Ліміт чинних токенів той самий.
+   */
+  app.post('/api/external-tokens/pairing-code', requireAuth, requirePermission('canEditContent'), async (req, res) => {
+    try {
+      const userId = req.principal!.id as string;
+      const active = (await listTokens(userId)).filter((t) => !t.revokedAt);
+      if (active.length >= EXTERNAL_LIMITS.maxActiveTokens) {
+        return fail(
+          res,
+          409,
+          'too_many_tokens',
+          `Уже є ${active.length} чинних токенів — відкличте непотрібний (Медіатека → Скани з телефону), щоб підключити ще один застосунок.`
+        );
+      }
+      const issued = pairing.issue(userId, String(req.body?.name || 'DesignCraft (локально)'));
+      res.status(201).json({ code: issued.display, expiresAt: issued.expiresAt, ttlSec: Math.round(PAIRING_TTL_MS / 1000) });
+    } catch (err) {
+      console.error('[externalApi] pairing code:', err);
+      fail(res, 500, 'server_error', 'Не вдалося створити код підключення.');
+    }
+  });
+
+  /*
+   * Обмін коду на токен. Без входу — саме код і є доказом: його бачив лише автор у Студії.
+   * Код одноразовий і живе 5 хвилин; невдалі спроби з однієї адреси обмежені (429).
+   */
+  app.post('/api/external/v1/pair', async (req, res) => {
+    try {
+      // За проксі маркетплейсу всі запити приходять з однієї адреси, тому ліміт рахуємо за
+      // першою адресою з X-Forwarded-For (її можна підробити — від цього захищає загальна стеля).
+      const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+      const result = pairing.redeem(req.body?.code, forwarded || String(req.ip || req.socket?.remoteAddress || ''));
+      if (result.ok !== true) {
+        const reason = (result as { reason: string }).reason;
+        if (reason === 'locked') return fail(res, 429, 'too_many_attempts', 'Забагато невдалих спроб. Зачекайте 10 хвилин і отримайте новий код у Студії.');
+        if (reason === 'expired') return fail(res, 410, 'code_expired', 'Код підключення прострочений. Отримайте новий у Студії.');
+        return fail(res, 404, 'invalid_code', 'Код підключення невірний або вже використаний.');
+      }
+      const ok = result as { userId: string; name: string };
+      const user = await findUserById(ok.userId);
+      if (!user || user.disabled) return fail(res, 404, 'invalid_code', 'Код підключення невірний або вже використаний.');
+      const { record, token } = await createToken({ userId: ok.userId, name: ok.name, now });
+      res.status(201).json({ token, record: publicToken(record), user: { name: user.name, email: user.email } });
+    } catch (err) {
+      console.error('[externalApi] pair:', err);
+      fail(res, 500, 'server_error', 'Не вдалося підключити застосунок.');
     }
   });
 

@@ -25,7 +25,7 @@ import {
 import { resolveCoreTemplate, renderCoreTemplate, type CorePromptTemplateBundle } from './coreAiRegistry';
 import { resolveModuleModelId } from './coreModuleModels';
 import { renderBookPdf } from './pdf/pdfRenderer';
-import { bookToPdfInput, specFromBook } from './pdf/pdfFromBook';
+import { bookToPdfInput, designThemeFromBook, specFromBook } from './pdf/pdfFromBook';
 import { normalizeDesignResult, parseBookPdfDesignResponse } from './pdf/pdfDesignPrompt';
 import { renderKdpInterior, type KdpRenderResult } from './pdf/pdfKdp';
 import { clampSamplePages, extractSamplePages } from './pdf/pdfSample';
@@ -231,7 +231,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           print: isPrint,
           ownerId: (principal?.id as string) || null,
           ownerRole: (principal?.role as string) || null,
-          theme: typeof req.body?.theme === 'string' ? req.body.theme : undefined,
+          theme: typeof req.body?.theme === 'string' ? req.body.theme : designThemeFromBook(req.body?.book),
         });
 
         res.setHeader('Content-Type', 'application/pdf');
@@ -285,7 +285,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
    * (`ArtifactKind` має `epub`/`html`), і коли складання артефактів дістане
    * вибір рушія, цей маршрут стане зайвим.
    */
-  app.post('/api/admin/pdf/companion', requireAdmin, async (req, res) => {
+  const companionHandler = async (req: Request, res: Response) => {
     try {
       const book = req.body?.book;
       if (!book?.title) {
@@ -310,7 +310,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
         print: false,
         ownerId: (principal?.id as string) || null,
         ownerRole: (principal?.role as string) || null,
-        theme: typeof req.body?.theme === 'string' ? req.body.theme : undefined,
+        theme: typeof req.body?.theme === 'string' ? req.body.theme : designThemeFromBook(req.body?.book),
       });
 
       const companion = out.companions?.find((c) => c.kind === kind);
@@ -348,7 +348,15 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
     } catch (err) {
       fail(res, err);
     }
-  });
+  };
+  app.post('/api/admin/pdf/companion', requireAdmin, companionHandler);
+  /*
+   * Той самий супутній формат для письменника (рішення власника 25.10.2026):
+   * сторінка «Верстка для публікації» дає EPUB/HTML не лише адміну. Книга
+   * приходить у тілі запиту від самого автора, як і в `/api/pdf/author-preview`,
+   * тож прав доступу тут не більше, ніж у точного PDF. Публікація лишається адміну.
+   */
+  app.post('/api/pdf/companion', requireAuth, companionHandler);
 
   /**
    * Увесь конвеєр однією дією: макет → PDF → лістинг → файл у лістингу.

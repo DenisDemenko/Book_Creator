@@ -34,7 +34,12 @@ export const BOOK_FILES_ROOT = path.join(DATA_DIR, 'books');
  * `book_artifacts` — звичайний TEXT без CHECK, а id артефакту вже має вигляд
  * `<book_id>:<kind>:<format>`.
  */
-export type ArtifactKind = 'pdf' | 'sample' | 'cover' | 'epub' | 'html';
+/**
+ * `designcraft` — чернетка верстки для графічного редактора DesignCraft (той самий конвеєр,
+ * що й точний PDF); `designcraft-pdf` — PDF, який автор зробив у вікні DesignCraft і повернув
+ * у Студію. Окремий вид, щоб НЕ перезаписати офіційний `pdf`, з якого йде публікація.
+ */
+export type ArtifactKind = 'pdf' | 'sample' | 'cover' | 'epub' | 'html' | 'designcraft' | 'designcraft-pdf';
 export type ArtifactFormat = 'digital' | 'print';
 
 export interface StoredBook {

@@ -264,10 +264,10 @@ export const PdfEditorView: React.FC<PdfEditorViewProps> = ({ book, onUpdateBook
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-              {t('pdfEditorView.headerBadge')}
+              {t('pdfEditorView.manualBadge')}
             </span>
           </div>
-          <h1 className="text-xl font-bold text-white font-heading">{t('pdfEditorView.pageTitle')}</h1>
+          <h1 className="text-xl font-bold text-white font-heading">{t('pdfEditorView.manualTitle')}</h1>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">

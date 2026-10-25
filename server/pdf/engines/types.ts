@@ -42,6 +42,13 @@ export interface PdfRenderRequest {
   ownerRole?: string | null;
   /** Тема оформлення для рушіїв, які мають кілька виглядів. */
   theme?: string;
+  /**
+   * Повернути й сам зверстаний документ (`.designcraft`), а не лише PDF.
+   * Це чернетка для графічного редактора DesignCraft на комп'ютері автора:
+   * той самий конвеєр, що й точний PDF, тож вікно відкриває ТУ САМУ верстку.
+   * Розуміє лише DesignCraft; інші рушії поле ігнорують.
+   */
+  keepDocument?: boolean;
 }
 
 export interface PdfRenderResult {
@@ -72,6 +79,8 @@ export interface PdfRenderResult {
    * два різні продукти, а не заміна одного одним.
    */
   companions?: PdfCompanion[];
+  /** Зверстаний документ DesignCraft (`keepDocument`). */
+  document?: { bytes: Uint8Array; extension: 'designcraft' };
 }
 
 export type PdfCompanionKind = 'epub' | 'html';

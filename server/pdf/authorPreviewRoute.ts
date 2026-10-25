@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from 'express';
 import { requireAuth } from '../auth';
-import { bookToPdfInput, specFromBook } from './pdfFromBook';
+import { bookToPdfInput, designThemeFromBook, specFromBook } from './pdfFromBook';
 import { renderWithEngine } from './engines/registry';
 import { DEFAULT_PDF_ENGINE, PdfEngineError } from './engines/types';
 
@@ -34,7 +34,7 @@ function requestFromAuthorPreview(req: Request) {
       print: isPrint,
       ownerId: (principal?.id as string) || null,
       ownerRole: (principal?.role as string) || null,
-      theme: typeof req.body?.theme === 'string' ? req.body.theme : undefined,
+      theme: typeof req.body?.theme === 'string' ? req.body.theme : designThemeFromBook(book),
     },
   };
 }

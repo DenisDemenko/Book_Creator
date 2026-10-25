@@ -112,7 +112,7 @@ console.log('Перегляд:');
   const r = await call('/api/admin/pdf/preview', { book, variant: 'code' });
   t('віддає PDF, а не JSON', r.buffer !== null && r.buffer.subarray(0, 5).toString() === '%PDF-', String(r.status));
   t('кількість сторінок у заголовку', Number(r.headers.get('x-pdf-pages')) > 0, r.headers.get('x-pdf-pages') || '');
-  t('пояснення макета передано', decodeURIComponent(r.headers.get('x-pdf-note') || '').includes('Верстка PDF'));
+  t('пояснення макета передано', decodeURIComponent(r.headers.get('x-pdf-note') || '').includes('Верстка для публікації'));
 
   const kdpPreview = await call('/api/admin/pdf/preview', { book, variant: 'code', format: 'print', trimId: '6x9' });
   t('перегляд друкованого макета віддає PDF', kdpPreview.buffer?.subarray(0, 5).toString() === '%PDF-');
@@ -318,7 +318,7 @@ console.log('\nВибір рушія в перегляді:');
   const explicitNova = await call('/api/admin/pdf/preview', { book, variant: 'code', engineId: 'nova' });
   t('явний nova віддає PDF', explicitNova.buffer?.subarray(0, 5).toString() === '%PDF-', String(explicitNova.status));
   t('явний nova йде рідним шляхом (примітка верстки на місці)',
-    decodeURIComponent(explicitNova.headers.get('x-pdf-note') || '').includes('Верстка PDF'));
+    decodeURIComponent(explicitNova.headers.get('x-pdf-note') || '').includes('Верстка для публікації'));
 }
 
 server.close();

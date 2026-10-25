@@ -178,11 +178,8 @@ DesignCraft); сесія #02, бо #01 за 24.10 належить Codex.
 Перевірки: tsc, build, test:journal, sync 11+13, onboarding 3, кредити/ПДВ,
 studio-mcp, designcraft-capabilities — зелені на b5eb1e0 локально.
 
-Підтверджено власником: GitHub CI b5eb1e0 (validate, run 40123958031) і Railway-деплой
-SUCCESS/Active (19:08 UTC, ams); HTTP 200 сторінки обкладинки нового UI не доводить.
-Нова форма обкладинки на проді підтверджена власником після Ctrl+F5 (без нього —
-старий кеш браузера).
-НЕ підтверджено: окремий ls-remote, ручне приймання масштабу й обкладинки, будь-який живий прогін синхронізації
+НЕ підтверджено: окремий ls-remote, GitHub CI SHA b5eb1e0, Railway-деплой,
+ручне приймання масштабу й обкладинки, будь-який живий прогін синхронізації
 (на проді немає `BOOK_SYNC_*`). Червоні й до цих змін: test:express-tracks,
 test:invite-mail, лабіринтні :browser/:studio (шлях Chromium на Windows).
 Поза межами за рішенням власника: редактор DesignCraft у Студії.
@@ -190,3 +187,22 @@ test:invite-mail, лабіринтні :browser/:studio (шлях Chromium на 
 прогін синхронізації на тестовій книзі; ручні сценарії масштабу й обкладинки.
 Приймання наступним агентом: НЕ підтверджено.
 
+## Верстка для публікації + DesignCraft — Claude, 25.10.2026 #01 (запис #480)
+
+Стан: усе в робочій копії, **не закомічено і не запушено** (38 файлів). Пуш лише за
+прямою вказівкою власника; master у Book_Creator деплоїться Railway автоматично.
+
+Що є: сторінка «Верстка для публікації» (шаблони, формат, рушії, панель DesignCraft),
+`designcraft-studio://` + `scripts/start-designcraft-studio.ps1`, код підключення
+(`/api/external-tokens/pairing-code`, `/api/external/v1/pair`), конвеєр чернетки
+(`server/pdf/designcraftDraftRoutes.ts`), `POST /api/pdf/companion` для письменників,
+шаблони Studio Classic / Studio Editorial, виправлення `designThemeFromBook`.
+Докладно: `docs/acceptance/PUBLICATION_LAYOUT_DESIGNCRAFT.md`.
+
+Перевірено: автотести в хмарі (DesignCraft 0.7.1 linux) і на Windows; на Windows
+`test:publication-conveyor` без `pdffonts` пропускає перевірку шрифтів (було хибне падіння).
+НЕ перевірено: справжнє вікно DesignCraft на Windows, обробник посилання в реєстрі,
+11 ручних кроків приймання, PUT великих файлів через Rewrite маркетплейсу на проді,
+хмарна Студія після деплою. Приймання наступним агентом: НЕ підтверджено.
+Наступний крок: власник проходить кроки приймання на тестовій книзі (не BK-2084-CYBER),
+потім коміт і — за окремою вказівкою — пуш.

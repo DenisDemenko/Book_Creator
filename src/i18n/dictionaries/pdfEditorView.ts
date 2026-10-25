@@ -1,7 +1,10 @@
 export const pdfEditorView = {
   uk: {
-    headerBadge: 'Верстка PDF',
-    pageTitle: 'WYSIWYG-верстка перед публікацією',
+    headerBadge: 'Верстка для публікації',
+    pageTitle: 'Верстка для публікації',
+    pageSubtitle: 'Шаблон → рушій і точний PDF → графічний редактор DesignCraft → ручна верстка рамок і ілюстрацій.',
+    manualBadge: 'Ручна верстка',
+    manualTitle: 'Рамки тексту та обтікання ілюстрацій',
     saveBtn: 'Зберегти',
     noChaptersYet: 'У книзі ще немає жодної глави для верстки.',
     scopeNote: 'Перетягуйте блакитні маркери, щоб змінити межі текстової рамки. Об\'єкти з обтіканням «жодне» переміщуються вільно в будь-яку точку сторінки. Об\'єкти з обтіканням «зліва/справа/зверху-знизу» вставляються на початок текстового потоку глави як справжні CSS-обтікання (реальне живе обтікання тексту) — їх порядок серед інших таких об\'єктів змінюється кнопками «вище/нижче».',
@@ -45,8 +48,11 @@ export const pdfEditorView = {
     margin_outsideMm: 'Зовнішній відступ, мм',
   },
   en: {
-    headerBadge: 'PDF Layout',
-    pageTitle: 'WYSIWYG layout before publishing',
+    headerBadge: 'Publication layout',
+    pageTitle: 'Publication layout',
+    pageSubtitle: 'Template → engine and exact PDF → DesignCraft graphic editor → manual frames and illustrations.',
+    manualBadge: 'Manual layout',
+    manualTitle: 'Text frames and illustration wrap',
     saveBtn: 'Save',
     noChaptersYet: 'This book has no chapters to lay out yet.',
     scopeNote: 'Drag the cyan handles to change the text frame boundaries. Objects with "none" wrap move freely to any point on the page. Objects with "left/right/top-bottom" wrap are inserted at the start of the chapter\'s text flow as real CSS wraps (genuine live text wrap) — their order relative to each other is changed with the up/down buttons.',

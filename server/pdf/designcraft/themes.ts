@@ -13,7 +13,9 @@ export type BookDesignThemeId =
   | 'business-premium'
   | 'children'
   | 'graphic-story'
-  | 'experimental-art';
+  | 'experimental-art'
+  | 'studio-classic'
+  | 'studio-editorial';
 
 export type SemanticParagraphStyle =
   | 'Body'
@@ -351,6 +353,29 @@ export const BOOK_DESIGN_THEMES: Record<BookDesignThemeId, BookDesignTheme> = {
     }),
     variants: VARIANTS,
   },
+  // Два шаблони Студії, згенеровані з колишніх тем «Класичний» і «Редакційний» розділу
+  // «Верстка & Поля». Раніше ці назви збігалися з темою Classic і варіантом Editorial каталогу
+  // DesignCraft, хоча це були різні речі. Тепер це окремі шаблони з унікальними назвами, які
+  // однаково розуміють браузерний експорт Студії («Експорт видання», legacy designTheme) і DesignCraft.
+  // Серверний рушій Студії (Nova) для точного PDF тем не має — це видно й у «Верстці для публікації».
+  'studio-classic': {
+    id: 'studio-classic', labelUk: 'Studio Classic', category: 'fiction',
+    descriptionUk: 'Просте книжкове оформлення Студії: рівний набір, заголовок глави по центру, без прикрас — однаково в браузерному експорті Студії й у DesignCraft.',
+    recommendedFor: ['будь-яка проза', 'перша верстка', 'чернетка для редактора'],
+    bodyFont: 'DejaVu Serif', headingFont: 'DejaVu Serif', monoFont: 'DejaVu Sans Mono',
+    bodyAlign: 'justify', chapterAlign: 'center', bodySizeDelta: 0, chapterSizeDelta: 0, sectionSizeDelta: 0,
+    paragraphIndentMultiplier: 1, paragraphSpacingMultiplier: 1, sceneBreak: '* * *', chapterNumberStyle: 'quiet',
+    chapterOpening: opening(), semanticStyles: semantic(), variants: VARIANTS,
+  },
+  'studio-editorial': {
+    id: 'studio-editorial', labelUk: 'Studio Editorial', category: 'fiction',
+    descriptionUk: 'Редакційний стиль Студії: у браузерному експорті Студії — нумеровані розділи «— РОЗДІЛ 01» і буквиці; у DesignCraft — великі серифні заголовки ліворуч і видавничий ритм.',
+    recommendedFor: ['видавничий макет', 'роман з розділами', 'есеїстика'],
+    bodyFont: 'DejaVu Serif', headingFont: 'DejaVu Serif', monoFont: 'DejaVu Sans Mono',
+    bodyAlign: 'justify', chapterAlign: 'left', bodySizeDelta: 0, chapterSizeDelta: 4, sectionSizeDelta: 1,
+    paragraphIndentMultiplier: 1, paragraphSpacingMultiplier: 1.1, sceneBreak: '— ⁂ —', chapterNumberStyle: 'display',
+    chapterOpening: opening(), semanticStyles: semantic(), variants: VARIANTS,
+  },
 };
 
 export const BOOK_DESIGN_THEME_ORDER: readonly BookDesignThemeId[] = [
@@ -369,6 +394,8 @@ export const BOOK_DESIGN_THEME_ORDER: readonly BookDesignThemeId[] = [
   'children',
   'graphic-story',
   'experimental-art',
+  'studio-classic',
+  'studio-editorial',
 ];
 
 export function isBookDesignThemeId(value: unknown): value is BookDesignThemeId {

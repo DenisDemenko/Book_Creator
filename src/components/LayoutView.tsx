@@ -31,6 +31,8 @@ import { KdpPublishingModal } from './KdpPublishingModal';
 import { DesignSuggestionPanel } from './DesignSuggestionPanel';
 import { LayoutZoomControl } from './layout/LayoutZoomControl';
 import { useLanguage } from '../i18n/LanguageContext';
+import { applyBookDesignTheme, studioThemeForLegacy } from '../data/bookDesignThemeCatalog';
+import { PAGE_FORMAT_PRESETS, applyPageFormatPreset } from '../utils/pageFormatPresets';
 
 interface LayoutViewProps {
   book: Book;
@@ -61,14 +63,14 @@ export const LayoutView: React.FC<LayoutViewProps> = ({ book, onUpdateBook, tota
   const gutterSpec = getKdpMinimumGutterMm(estimatedPages);
   const isGutterCompliant = layout.margins.insideMm >= gutterSpec.minMm;
 
-  const formatPresets: { id: PageFormatPreset; label: string; widthMm: number; heightMm: number; desc: string; kdpTag?: string }[] = [
-    { id: '6x9', label: t('layoutView.preset6x9Label'), widthMm: 152.4, heightMm: 228.6, desc: t('layoutView.preset6x9Desc'), kdpTag: 'Amazon #1' },
-    { id: '5.5x8.5', label: t('layoutView.preset55x85Label'), widthMm: 139.7, heightMm: 215.9, desc: t('layoutView.preset55x85Desc'), kdpTag: 'Amazon KDP' },
-    { id: '5x8', label: t('layoutView.preset5x8Label'), widthMm: 127, heightMm: 203.2, desc: t('layoutView.preset5x8Desc'), kdpTag: 'Amazon KDP' },
-    { id: '7x10', label: t('layoutView.preset7x10Label'), widthMm: 177.8, heightMm: 254, desc: t('layoutView.preset7x10Desc'), kdpTag: 'Amazon KDP' },
-    { id: 'A5', label: t('layoutView.presetA5Label'), widthMm: 148, heightMm: 210, desc: t('layoutView.presetA5Desc') },
-    { id: 'A4', label: t('layoutView.presetA4Label'), widthMm: 210, heightMm: 297, desc: t('layoutView.presetA4Desc') },
-  ];
+  const formatPresets = PAGE_FORMAT_PRESETS.map((p) => ({
+    id: p.id,
+    label: t(p.labelKey),
+    widthMm: p.widthMm,
+    heightMm: p.heightMm,
+    desc: t(p.descKey),
+    kdpTag: p.kdpTag,
+  }));
 
   const handleSelectPreset = (preset: PageFormatPreset) => {
     const found = formatPresets.find((p) => p.id === preset);
@@ -77,12 +79,7 @@ export const LayoutView: React.FC<LayoutViewProps> = ({ book, onUpdateBook, tota
     onUpdateBook(
       {
         ...book,
-        layoutConfig: {
-          ...layout,
-          formatPreset: preset,
-          pageWidthMm: found.widthMm,
-          pageHeightMm: found.heightMm,
-        },
+        layoutConfig: applyPageFormatPreset(layout, preset),
       },
       'Зміна формату верстки',
       `Встановлено книжковий формат: ${found.label}`
@@ -536,7 +533,13 @@ export const LayoutView: React.FC<LayoutViewProps> = ({ book, onUpdateBook, tota
                 return (
                   <div
                     key={theme.id}
-                    onClick={() => handleUpdateLayout({ designTheme: theme.id })}
+                    onClick={() =>
+                      onUpdateBook(
+                        { ...book, layoutConfig: applyBookDesignTheme(layout, studioThemeForLegacy(theme.id)) },
+                        'Шаблон верстки',
+                        `Обрано шаблон ${theme.label}`
+                      )
+                    }
                     className={`p-4 rounded-2xl border cursor-pointer transition-all ${
                       isSel
                         ? 'bg-rose-500/10 border-rose-500/80 shadow-lg ring-1 ring-rose-500/50'

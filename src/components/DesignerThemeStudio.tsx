@@ -1,3 +1,4 @@
+import { BOOK_DESIGN_THEME_CARDS } from '../data/bookDesignThemeCatalog';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
@@ -570,7 +571,7 @@ export const DesignerThemeStudio: React.FC<Props> = ({ book, baseThemeId, onDirt
                 <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Тема</div>
                 <input value={active.name} onChange={(e) => updateActive({ ...active, name: e.target.value, updatedAt: new Date().toISOString() })} className={`${inputClass()} mt-2`} />
                 <select value={active.basedOn || 'classic'} onChange={(e) => updateActive({ ...active, basedOn: e.target.value as CustomBookDesignTheme['basedOn'], updatedAt: new Date().toISOString() })} className={`${inputClass()} mt-2`}>
-                  <option value="classic">Classic</option><option value="modern-fiction">Modern Fiction</option><option value="sci-fi">Sci‑Fi</option><option value="fantasy">Fantasy</option><option value="dark-fantasy">Dark Fantasy</option><option value="thriller">Thriller</option><option value="noir-detective">Noir / Detective</option><option value="romance">Romance</option><option value="poetry-literary">Poetry / Literary</option><option value="non-fiction">Non‑Fiction</option><option value="academic-research">Academic / Research</option><option value="business-premium">Business Premium</option><option value="children">Children</option><option value="graphic-story">Graphic Story</option><option value="experimental-art">Experimental / Art</option>
+                  {BOOK_DESIGN_THEME_CARDS.map((card) => <option key={card.id} value={card.id}>{card.label}</option>)}
                 </select>
               </div>
 

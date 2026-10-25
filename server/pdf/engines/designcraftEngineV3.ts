@@ -908,6 +908,12 @@ async function renderInSession(request: PdfRenderRequest, specIn: PdfLayoutSpec)
     notesUk.unshift(
       `DesignCraft (жива сесія): ${pageCount} стор. (первинно виділено ${allocatedPages}, зайвий хвіст прибрано бінарною перевіркою), без overset, зміст синхронізовано (${chapterEntries.length}/${chapterCount} глав), ${loadedImages} ілюстрацій перевірено.`
     );
+    let document: PdfRenderResult['document'];
+    if (request.keepDocument) {
+      const draftPath = path.join(workDir, 'draft.designcraft');
+      await session.execute('file.save', { path: draftPath });
+      document = { bytes: new Uint8Array(await fs.readFile(draftPath)), extension: 'designcraft' };
+    }
     return {
       bytes,
       pageCount,
@@ -916,6 +922,7 @@ async function renderInSession(request: PdfRenderRequest, specIn: PdfLayoutSpec)
       notesUk,
       pagination,
       ...(companions.length ? { companions } : {}),
+      ...(document ? { document } : {}),
     };
   } catch (err) {
     if (err instanceof PdfEngineError) throw err;
@@ -1127,6 +1134,10 @@ export const designcraftEngineV3: PdfEngine = {
       notesUk.unshift(
         `DesignCraft: ${pageCount} стор. (первинно виділено ${allocatedPages}, зайвий хвіст прибрано бінарною перевіркою), без overset, зміст синхронізовано (${chapterEntries.length}/${chapterCount} глав), ${loadedImages} ілюстрацій перевірено.`
       );
+      // finalDoc уже збережено прапорцем `--save` фінального скрипта — це і є чернетка.
+      const document: PdfRenderResult['document'] = request.keepDocument
+        ? { bytes: new Uint8Array(await fs.readFile(finalDoc)), extension: 'designcraft' }
+        : undefined;
       return {
         bytes,
         pageCount,
@@ -1135,6 +1146,7 @@ export const designcraftEngineV3: PdfEngine = {
         notesUk,
         pagination,
         ...(companions.length ? { companions } : {}),
+        ...(document ? { document } : {}),
       };
     } catch (err) {
       if (err instanceof PdfEngineError) throw err;

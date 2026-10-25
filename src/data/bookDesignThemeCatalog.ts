@@ -15,7 +15,9 @@ export type BookDesignThemeId =
   | 'business-premium'
   | 'children'
   | 'graphic-story'
-  | 'experimental-art';
+  | 'experimental-art'
+  | 'studio-classic'
+  | 'studio-editorial';
 
 export type BookDesignThemeCategory =
   | 'fiction'
@@ -38,6 +40,12 @@ export interface BookDesignThemeCard {
     accent: 'serif' | 'sans' | 'mono';
     sceneBreak: string;
   };
+  /**
+   * Якщо задано — шаблон також перемикає оформлення браузерного експорту Студії («Експорт видання»:
+   * HTML/друк/EPUB, legacy `designTheme`). Лише для двох шаблонів Студії; решта тем — тільки DesignCraft.
+   * Серверний рушій Студії (Nova) для точного PDF тем не має.
+   */
+  novaDesignTheme?: 'classic' | 'editorial';
 }
 
 export interface BookDesignRecommendation {
@@ -67,6 +75,8 @@ export const BOOK_DESIGN_THEME_CARDS: readonly BookDesignThemeCard[] = [
   { id: 'children', label: 'Children', taglineUk: 'Великий дружній набір, короткі рядки та більше місця для ілюстрацій.', category: 'children', recommendedFor: ['дитяча книга', 'раннє читання', 'освітня історія'], preview: { chapterNumber: 'display', align: 'center', accent: 'sans', sceneBreak: '✦' } },
   { id: 'graphic-story', label: 'Graphic Story', taglineUk: 'Великі зображення, scene cards, captions і візуальний темп.', category: 'visual', recommendedFor: ['графічна історія', 'артбук', 'візуальний роман'], preview: { chapterNumber: 'display', align: 'left', accent: 'sans', sceneBreak: '▰' } },
   { id: 'experimental-art', label: 'Experimental / Art Book', taglineUk: 'Нестандартні розвороти, великі цитати й мінливий ритм сторінки.', category: 'visual', recommendedFor: ['артбук', 'фото-книга', 'експериментальна проза'], preview: { chapterNumber: 'display', align: 'left', accent: 'sans', sceneBreak: '○' } },
+  { id: 'studio-classic', label: 'Studio Classic', taglineUk: 'Просте книжкове оформлення без прикрас; однаково в експорті Студії й у DesignCraft.', category: 'fiction', recommendedFor: ['будь-яка проза', 'перша верстка'], preview: { chapterNumber: 'quiet', align: 'center', accent: 'serif', sceneBreak: '* * *' }, novaDesignTheme: 'classic' },
+  { id: 'studio-editorial', label: 'Studio Editorial', taglineUk: 'Редакційний стиль: в експорті Студії «— РОЗДІЛ 01» і буквиці, у DesignCraft — великі заголовки ліворуч.', category: 'fiction', recommendedFor: ['видавничий макет', 'роман з розділами'], preview: { chapterNumber: 'display', align: 'left', accent: 'serif', sceneBreak: '— ⁂ —' }, novaDesignTheme: 'editorial' },
 ] as const;
 
 const WORD_RULES: ReadonlyArray<{
@@ -158,4 +168,26 @@ export function recommendBookDesignThemes(book: Book, limit = 3): BookDesignReco
 
 export function getBookDesignThemeCard(id: BookDesignThemeId): BookDesignThemeCard {
   return BOOK_DESIGN_THEME_CARDS.find((theme) => theme.id === id) || BOOK_DESIGN_THEME_CARDS[0];
+}
+
+/** Шаблон Студії, що відповідає legacy `designTheme` рушія Студії. */
+export function studioThemeForLegacy(designTheme: 'classic' | 'editorial' | undefined): BookDesignThemeId {
+  return designTheme === 'editorial' ? 'studio-editorial' : 'studio-classic';
+}
+
+/**
+ * Єдиний спосіб застосувати шаблон до книги — ним користуються «Верстка & Поля»,
+ * галерея тем і «Верстка для публікації», щоб усі писали одні й ті самі поля.
+ * Шаблон Студії перемикає й оформлення браузерного експорту Студії; тема DesignCraft його не чіпає.
+ */
+export function applyBookDesignTheme<T extends { designTheme?: 'classic' | 'editorial' }>(
+  layoutConfig: T,
+  themeId: BookDesignThemeId
+): T & { bookDesignThemeId: BookDesignThemeId } {
+  const card = getBookDesignThemeCard(themeId);
+  return {
+    ...layoutConfig,
+    bookDesignThemeId: themeId,
+    ...(card?.novaDesignTheme ? { designTheme: card.novaDesignTheme } : {}),
+  };
 }

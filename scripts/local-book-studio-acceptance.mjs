@@ -178,7 +178,7 @@ try {
 
   // PDF layout + authoritative export preview.
   stage('pdf-layout-start');
-  const pdfNav = await clickSection(['Верстка PDF', 'PDF']);
+  const pdfNav = await clickSection(['Верстка для публікації', 'Верстка PDF', 'PDF']);
   addCheck('navigate-pdf-layout', pdfNav.ok, pdfNav);
   await screenshot('10-pdf-layout');
 

@@ -10,6 +10,7 @@
  */
 
 import type { Book } from '../../src/types';
+import { isBookDesignThemeId } from './designcraft/themes';
 import { buildMarkerImageMap } from '../../src/utils/imageMarkers';
 import {
   DEFAULT_LAYOUT_SPEC,
@@ -134,7 +135,7 @@ export function specFromBook(book: Book): PdfLayoutSpec {
   const left = Number(margins.insideMm) >= 0 ? mm(Number(margins.insideMm)) : DEFAULT_LAYOUT_SPEC.margins.left;
   const right = Number(margins.outsideMm) >= 0 ? mm(Number(margins.outsideMm)) : DEFAULT_LAYOUT_SPEC.margins.right;
 
-  const notes: string[] = ['Макет узято з налаштувань книги («Верстка PDF»).'];
+  const notes: string[] = ['Макет узято з налаштувань книги («Верстка для публікації»).'];
   if (margins.mirrored) {
     notes.push('Дзеркальні поля не застосовані: PDF для вітрини верстається стрічкою, без розворотів.');
   }
@@ -203,4 +204,19 @@ export function specFromBook(book: Book): PdfLayoutSpec {
     },
     designerNoteUk: notes.join(' '),
   };
+}
+
+/**
+ * Шаблон верстки, обраний у книзі, для DesignCraft. Раніше точний PDF і супутні формати
+ * не передавали тему взагалі, тож вибір шаблону в «Верстка & Поля» на DesignCraft не впливав.
+ * Явне `theme` у запиті має пріоритет (перегляд конкретної теми).
+ * Legacy-книги з «Редакційним» стилем Студії отримують його відповідник Studio Editorial;
+ * книги без вибору лишаються без теми — їхній вигляд не змінюється.
+ */
+export function designThemeFromBook(book: unknown): string | undefined {
+  const layout = (book as { layoutConfig?: { bookDesignThemeId?: unknown; designTheme?: unknown } } | null)?.layoutConfig;
+  if (!layout) return undefined;
+  if (isBookDesignThemeId(layout.bookDesignThemeId)) return layout.bookDesignThemeId;
+  if (layout.designTheme === 'editorial') return 'studio-editorial';
+  return undefined;
 }

@@ -342,6 +342,19 @@ async function mirrorBookToServer(book: Book): Promise<void> {
 }
 
 /**
+ * Дочекатися, поки серверна копія книги наздожене те, що бачить автор.
+ *
+ * Потрібно перед діями, які сервер робить зі СВОЄЇ копії (чернетка DesignCraft): звичайне
+ * збереження дзеркалює книгу на сервер у фоні, і чернетка могла б зібратися з попередньої
+ * ревізії — без щойно обраного шаблону. Повертає ревізію сервера або null (гість/збій).
+ */
+export async function syncBookToServerNow(book: Book): Promise<number | null> {
+  const lean = stripSnapshotPayloads(book);
+  await mirrorBookToServer(lean);
+  return serverRevisions.get(book.id) ?? null;
+}
+
+/**
  * Кешує підтверджену серверну книгу на новому пристрої БЕЗ повторного PUT.
  * Потрібно для списку «Мої книги» на дашборді: звичайний saveBook()
  * одночасно дзеркалює дані на сервер і міг створити конфлікт ревізії.
