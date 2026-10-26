@@ -1387,3 +1387,32 @@ input[type="range"] {
     display: none;
   }
 }
+
+.resin-texture-controls {
+  margin: 16px 0 20px;
+}
+.resin-texture-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.resin-texture-preview img {
+  width: 60px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+.resin-texture-preview span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  flex: 1;
+  font-size: 12px;
+}
+.resin-texture-preview button {
+  flex-shrink: 0;
+}
