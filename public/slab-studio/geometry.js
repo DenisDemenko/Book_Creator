@@ -218,22 +218,62 @@
     return simplify(largest, 1.4);
   }
   function validPolygon(p) {
-    if (p.length < 3 || area(p) < 0.00001) return false;
+    if (
+      !Array.isArray(p) ||
+      p.length < 3 ||
+      p.some(
+        (q) =>
+          !Array.isArray(q) ||
+          q.length !== 2 ||
+          q.some((v) => !Number.isFinite(v)),
+      )
+    )
+      return false;
+    const xs = p.map((q) => q[0]),
+      ys = p.map((q) => q[1]);
+    const span = Math.max(
+      1,
+      Math.max(...xs) - Math.min(...xs),
+      Math.max(...ys) - Math.min(...ys),
+    );
+    const linear = span * 1e-9,
+      epsilon = span * span * 1e-9;
+    if (area(p) <= epsilon) return false;
     const cross = (a, b, c) =>
       (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-    for (let i = 0; i < p.length; i++)
+    const on = (a, b, c) =>
+      Math.abs(cross(a, b, c)) <= epsilon &&
+      c[0] >= Math.min(a[0], b[0]) - linear &&
+      c[0] <= Math.max(a[0], b[0]) + linear &&
+      c[1] >= Math.min(a[1], b[1]) - linear &&
+      c[1] <= Math.max(a[1], b[1]) + linear;
+    const sign = (v) => (Math.abs(v) <= epsilon ? 0 : Math.sign(v));
+    for (let i = 0; i < p.length; i++) {
+      const a = p[i],
+        b = p[(i + 1) % p.length],
+        prev = p[(i + p.length - 1) % p.length];
+      if (Math.hypot(a[0] - b[0], a[1] - b[1]) <= linear) return false;
+      if (
+        Math.abs(cross(prev, a, b)) <= epsilon &&
+        (a[0] - prev[0]) * (b[0] - a[0]) + (a[1] - prev[1]) * (b[1] - a[1]) <
+          -linear * linear
+      )
+        return false;
       for (let j = i + 2; j < p.length; j++) {
         if (i === 0 && j === p.length - 1) continue;
-        let a = p[i],
-          b = p[(i + 1) % p.length],
-          c = p[j],
+        const c = p[j],
           d = p[(j + 1) % p.length];
         if (
-          cross(a, b, c) * cross(a, b, d) < 0 &&
-          cross(c, d, a) * cross(c, d, b) < 0
+          (sign(cross(a, b, c)) * sign(cross(a, b, d)) < 0 &&
+            sign(cross(c, d, a)) * sign(cross(c, d, b)) < 0) ||
+          on(a, b, c) ||
+          on(a, b, d) ||
+          on(c, d, a) ||
+          on(c, d, b)
         )
           return false;
       }
+    }
     return true;
   }
   const api = {

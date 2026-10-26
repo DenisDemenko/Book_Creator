@@ -425,6 +425,37 @@
                 >PNG, JPG, WEBP · до 12 МБ · однотонний контрастний фон</small
               ></label
             >
+            <section
+              class="calibration-panel"
+              aria-label="Реальний розмір і масштаб"
+            >
+              <h3>1. Реальний розмір і масштаб</h3>
+              <label
+                >Відстань між двома точками, см<input
+                  id="knownDistance"
+                  type="number"
+                  min="0.1"
+                  max="1000"
+                  step="0.1"
+                  value="50"
+                  required
+              /></label>
+              <p class="hint">
+                Введіть реальну довжину слеба або відрізка лінійки. Позначте
+                його кінці на фото. Всі розміри дерева й стільниці
+                використовують один масштаб.
+              </p>
+              <div class="toolbar">
+                <button type="button" class="secondary" id="calibrate">
+                  Позначити дві точки</button
+                ><button type="button" class="secondary" id="editRuler">
+                  Пересунути лінійку
+                </button>
+              </div>
+              <div id="scaleInfo" class="notice" role="status">
+                Масштаб не задано
+              </div>
+            </section>
             <div class="photo-stage">
               <canvas
                 id="photoCanvas"
@@ -432,24 +463,84 @@
                 height="480"
                 aria-label="Фото слеба та його контур"
               ></canvas>
-              <p id="photoHint">
-                Фото зверху, без перспективи. Покладіть поряд лінійку.
-              </p>
+            </div>
+            <p id="photoHint" class="hint" role="status">
+              Фото строго зверху. Рівномірний масштаб не усуває перспективу.
+            </p>
+            <div class="photo-view-controls">
+              <label
+                >Збільшення фото<input
+                  id="photoZoom"
+                  type="range"
+                  min="1"
+                  max="8"
+                  step="0.1"
+                  value="1"
+              /></label>
+              <button type="button" id="panPhoto" class="secondary">
+                Пересунути фото
+              </button>
+              <button type="button" id="resetPhotoView" class="secondary">
+                Фото повністю
+              </button>
+            </div>
+            <h3>2. Обведіть справжній край дерева</h3>
+            <div
+              class="toolbar contour-tools"
+              role="group"
+              aria-label="Спосіб обведення"
+            >
+              <button type="button" class="secondary" id="manual">
+                Малювати лінією
+              </button>
+              <button type="button" class="secondary" id="pointContour">
+                Ставити точки
+              </button>
+              <button type="button" class="secondary" id="editContour">
+                Редагувати вершини
+              </button>
+              <button type="button" class="secondary" id="trace">
+                Обвести автоматично
+              </button>
             </div>
             <div class="toolbar">
-              <button type="button" class="secondary" id="calibrate">
-                1. Задати масштаб</button
-              ><button type="button" class="secondary" id="trace">
-                2. Обвести автоматично</button
-              ><button type="button" class="text-btn" id="manual">
-                Намалювати вручну
+              <button type="button" class="secondary" id="closeContour">
+                Замкнути контур
+              </button>
+              <button type="button" class="secondary" id="undoContour">
+                Прибрати останню точку
+              </button>
+              <button type="button" class="text-btn danger" id="clearContour">
+                Очистити контур
               </button>
             </div>
             <p class="hint">
-              Контур: тягніть вершини для виправлення. Shift + клік на ребрі —
-              додати вершину. Alt + клік на вершині — видалити. У ручному режимі
-              клацайте по контуру, потім «Завершити».
+              Лінія: ведіть мишкою або стилусом до початкової точки. Точки:
+              клацайте по краю й замкніть контур. Для точного обведення
+              збільшуйте фото; пересування фото не змінює фізичних розмірів.
+              Shift + клік додає вершину, Alt + клік видаляє.
             </p>
+            <div id="contourInfo" class="notice" role="status">
+              Контур не створено
+            </div>
+            <div class="toolbar">
+              <button
+                type="button"
+                class="secondary"
+                id="exportContourSVG"
+                disabled
+              >
+                SVG · 1:1 · мм ↓
+              </button>
+              <button
+                type="button"
+                class="secondary"
+                id="exportContourDXF"
+                disabled
+              >
+                DXF 2000 · 1:1 · мм ↓
+              </button>
+            </div>
           </div>
           <div class="upload-fields">
             <label
@@ -472,14 +563,6 @@
                 <option>Каповий тополь</option>
                 <option>Бук</option>
               </datalist></label
-            ><label
-              >Відстань між точками, см<input
-                id="knownDistance"
-                type="number"
-                min="0.1"
-                max="1000"
-                step="0.1"
-                value="50" /></label
             ><label
               >Допуск фону: <output id="toleranceOut">55</output
               ><input
@@ -506,9 +589,12 @@
                 max="1000000"
                 value="8500"
             /></label>
-            <div id="scaleInfo" class="notice">Масштаб не задано</div>
-            <div id="contourInfo" class="hint">Контур не створено</div>
-            <button class="primary full" type="submit">
+            <label class="contour-confirmation"
+              ><input type="checkbox" id="contourVerified" /> Підтверджую, що
+              замкнутий контур відповідає краю справжнього слеба, а масштаб
+              задано за виміряною відстанню.</label
+            >
+            <button id="saveSlab" class="primary full" type="submit" disabled>
               Зберегти на склад →
             </button>
           </div>
@@ -520,6 +606,7 @@
     <script src="bridge.js"></script>
     <script src="resin-texture.js"></script>
     <script src="wood-species.js"></script>
+    <script src="slab-contour.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
