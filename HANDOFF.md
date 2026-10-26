@@ -366,3 +366,49 @@ Marketplace live SHA досі fdcec27, Studio live SHA досі 62e3a14.
 для test TokenVerifier/NestJS/PostgreSQL; не видавати за production.
 Наступне: отримати дозвіл на merge #6/#23 і production, виконати та звірити.
 Журнал/HANDOFF доставляються тільки feature-гілкою, окремо від коду.
+
+
+### Реліз #485 підтверджено після відповіді власника
+
+Власник відповів «Додав підтвердження.» Marketplace #6 уже злитий о 16:40 UTC;
+Studio #23 успішно злитий після підтвердження. Попереднє блокування зняте.
+Marketplace PR #6: 956a3422d81fbc6643c5a4a57934b1c6952b946d; Vercel dpl_EEjzxx8gRVXAvm8Uyob5bsPavqVc READY; API Railway 2bb88df4-a1c1-478d-be81-d4faa571abf2 SUCCESS. Studio PR #23: d49f02cf7abc72aa16d4c64da5595919404bfcdd; Railway 61010e6e-abca-4eb2-86b0-43094ff8e968 SUCCESS.
+Міграція 20261026120000_resin_texture_presets підтверджена runtime logs.
+Живий Chromium public buyer: 5 порід, правильні кількості, preset через
+серверний міст → вибір → quote 201, desktop/mobile; 0 JS errors/payment requests.
+Тимчасовий демо-preset видалено. Постійні реальні текстури додає адміністратор.
+4 static assets Студії звірені побайтово; authenticated production admin UI
+не тестували. Marketplace merge CI 40361357265 success; Studio merge CI
+40361571211 ще виконується, звірити фінальний статус перед завершенням.
+Артефакти /workspace/artifacts/wood-presets-production/, verification.json.
+Код завершений; службова документація тільки у feature-гілку після релізу.
+Локальні історії й remote різні через GitHub Git Data API, не force-push.
+
+
+## Приймання та реалізація — 26.10.2026, Codex #03, #486
+
+Прочитано AGENTS/HANDOFF і #485; origin Book_Creator та вільний lock звірені.
+Поточне завдання — контур фото мишкою/стилусом, closure, SVG/DXF і масштаб.
+Код Marketplace PR #8 head 42d00aba64a8dadc5a49c4ec09052ccc47fd7bee,
+Studio PR #24 head 82d69bd5746ec8123b4ba00a1e6c0cc35802cc76.
+Обидві гілки feat/manual-slab-contours. Локальні 2642bb2/a5d9a3f інші,
+Git Data API tree blob SHA 17 файлів звірені; не force-push.
+26 цільових e2e, локальний Chromium/real API/PostgreSQL, SVG/DXF parsers,
+ezdxf audit 0/0, API build/Next webpack/web tests/bridge passed.
+DXF AC1015/AutoCAD2000 mm, closed 2D LWPOLYLINE; стаття Fusion не містить
+матрицю мін/макс версій. Native Autodesk Fusion не встановлено/не тестовано.
+Один зовнішній контур; ручне фото-підтвердження і знімок реального crop.
+Сервер без міграції: calibration v2 closed+verified, геометрія і розміри
+взаємно перевіряються; старі записи лишаються, capability fallback 128.
+Реліз підтверджений: Marketplace8bcc1f1 і Studio73cafab, VercelREADY/API та
+StudioRailwaySUCCESS. Живий admin tropazemli: pen close/scale/save201,
+SVG/DXF download; buyer анонімний: photo40×140см у3формах і quote201.
+DEMO архівовано; JS/payment0. ezdxf audit0/0, AC1015/mm/closed400×1400.
+Артефакти /workspace/artifacts/manual-slab-contours.zip. Studio5assets200
+і blob match; власний Studioadminlogin/nativeFusion не перевірено.
+CI Marketplace196/197: старий passport auth mock; залишено окремою задачею.
+Studiojournal79/1 через base індекс>120KiB; історію10КБ тут перенесено
+без втрати до state-history-2026-10.md. Gate B має старий збій тем17vs15.
+Журнал відправити тільки feature-гілкою, без production rebuild для docs;
+остаточний remote SHA читати з HEAD. Наступне: перевірити реальне фото
+власника зверху і вимір у Fusion на його комп'ютері. Оплату не запускати.
