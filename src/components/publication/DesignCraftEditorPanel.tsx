@@ -3,6 +3,7 @@ import { Bot, Check, Copy, Download, ExternalLink, KeyRound, Loader2, MonitorUp,
 import type { Book } from '../../types';
 import { API_BASE, apiPath } from '../../utils/basePath';
 import { syncBookToServerNow } from '../../utils/storage';
+import { OpenDesignCraftOnlyButton } from './OpenDesignCraftOnlyButton';
 
 interface Props {
   book: Book;
@@ -44,15 +45,17 @@ export function isLocalStudio(root: string): boolean {
 }
 
 /** Посилання, яке реєструє `scripts/install-designcraft-link.ps1`; скрипт сам перевіряє адресу Студії. */
-export function designcraftLaunchUrl(bookId: string, root: string): string {
-  return `designcraft-studio://open?book=${encodeURIComponent(bookId)}&studio=${encodeURIComponent(root)}`;
+export function designcraftLaunchUrl(bookId: string, root: string, pairCode = ''): string {
+  const base = `designcraft-studio://open?book=${encodeURIComponent(bookId)}&studio=${encodeURIComponent(root)}`;
+  // Одноразовий код підключення (5 хв): скрипт обміняє його на токен лише якщо на цьому комп'ютері ще немає збереженого.
+  return pairCode ? `${base}&code=${encodeURIComponent(pairCode)}` : base;
 }
 
 /** Та сама дія командою — запасний шлях, якщо посилання ще не встановлене. */
 export function designcraftLaunchCommand(bookId: string, root: string): string {
   const local = isLocalStudio(root);
   // Локальна Студія — скрипти з репозиторію; хмарна — те, що поклав інсталятор, завантажений зі Студії.
-  const script = local ? '.\\scripts\\start-designcraft-studio.cmd' : '& "$env:LOCALAPPDATA\\DesignCraftStudio\\start-designcraft-studio.cmd"';
+  const script = local ? '.\\scripts\\start-designcraft-studio.cmd' : 'powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\\DesignCraftStudio\\start-designcraft-studio.ps1"';
   return `${script} -BookId ${bookId} -StudioUrl ${root}${local ? ' -KeepRunning' : ''}`;
 }
 
@@ -118,9 +121,12 @@ export const DesignCraftEditorPanel: React.FC<Props> = ({ book }) => {
    * втрачає фокус (запит дозволу чи нове вікно); якщо ні — не відбувається нічого. Тому по натисканню
    * чекаємо 3 с: без втрати фокусу показуємо підказку «посилання не встановлене» з завантаженням інсталятора.
    */
-  const onLaunchClick = () => {
+  const onLaunchClick = async (e: React.MouseEvent<HTMLAnchorElement>) => {
+    // Код підключення створюємо тут же, одним натисканням: автору не треба нічого копіювати й вводити.
+    e.preventDefault();
     setLaunch('idle');
     if (launchTimer.current) window.clearTimeout(launchTimer.current);
+    const pair = await getCode(); // порожній, якщо не вдалося (напр. уже максимум підключень) — тоді пробуємо без коду
     let reacted = false;
     const react = () => {
       reacted = true;
@@ -132,6 +138,7 @@ export const DesignCraftEditorPanel: React.FC<Props> = ({ book }) => {
       document.removeEventListener('visibilitychange', react);
       setLaunch(reacted ? 'sent' : 'silent');
     }, 3000);
+    window.location.href = designcraftLaunchUrl(book.id, root, pair);
   };
   useEffect(() => () => {
     if (launchTimer.current) window.clearTimeout(launchTimer.current);
@@ -191,7 +198,7 @@ export const DesignCraftEditorPanel: React.FC<Props> = ({ book }) => {
     }
   };
 
-  const getCode = async () => {
+  const getCode = async (): Promise<string> => {
     setCodeBusy(true);
     setCodeError(null);
     try {
@@ -204,8 +211,10 @@ export const DesignCraftEditorPanel: React.FC<Props> = ({ book }) => {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || `Не вдалося отримати код (HTTP ${res.status}).`);
       setCode({ code: data.code, expiresAt: data.expiresAt });
+      return String(data.code || '');
     } catch (err) {
       setCodeError((err as Error).message);
+      return '';
     } finally {
       setCodeBusy(false);
     }
@@ -252,7 +261,8 @@ export const DesignCraftEditorPanel: React.FC<Props> = ({ book }) => {
           </h2>
           <p className="mt-1 text-[11px] text-slate-400">
             Книга відкривається у вікні DesignCraft на вашому комп'ютері, а агент Claude Code верстає її в цьому ж вікні —
-            ви бачите кожну зміну наживо.
+            ви бачите кожну зміну наживо. Потрібен лише сам редактор (наприклад, правити шаблон вручну) — кнопка «Відкрити лише
+            DesignCraft» відкриває його без Claude Code, без входу й без витрат.
           </p>
         </div>
         <div className="flex flex-col items-end gap-1.5">
@@ -264,6 +274,12 @@ export const DesignCraftEditorPanel: React.FC<Props> = ({ book }) => {
           >
             <ExternalLink className="w-4 h-4" /> Відкрити графічний редактор DesignCraft
           </a>
+          <OpenDesignCraftOnlyButton />
+          {codeError && launch !== 'idle' && (
+            <span className="text-[10px] text-amber-300 max-w-xs text-right" data-launch-code-error>
+              Код підключення не створено: {codeError} Якщо цей комп'ютер уже підключений — це не заважає.
+            </span>
+          )}
           {launch === 'sent' && (
             <span className="text-[10px] text-slate-400 max-w-xs text-right" data-launch-sent>
               Запит надіслано. Якщо браузер питає дозвіл відкрити програму — погодьтесь; далі працює вікно скрипта на вашому комп'ютері.
@@ -291,10 +307,12 @@ export const DesignCraftEditorPanel: React.FC<Props> = ({ book }) => {
           Claude Code, якому одразу передано цю книгу.
         </p>
         <p className="text-slate-400">
-          Потрібно: Windows; DesignCraft (<code>designcraft.exe</code> і <code>designcraft-cli.exe</code>) —{' '}
-          <a href="https://github.com/storytold/designcraft/releases" target="_blank" rel="noreferrer" className="text-cyan-300 underline">збірки проєкту</a>;
-          скрипт один раз спитає папку, де він лежить; встановлений Claude Code з входом в акаунт Claude. Браузер перед
-          запуском спитає дозвіл відкрити програму — це нормально.
+          Потрібно: Windows і встановлений Claude Code з входом в акаунт Claude. DesignCraft (<code>designcraft.exe</code> і{' '}
+          <code>designcraft-cli.exe</code>) ставити вручну не треба: якщо скрипт його не знайде, він <b>запропонує завантажити</b> portable-архів
+          з офіційних{' '}
+          <a href="https://github.com/storytold/designcraft/releases" target="_blank" rel="noreferrer" className="text-cyan-300 underline">релізів проєкту на GitHub</a>{' '}
+          (близько 100 МБ; розмір скрипт покаже й спитає згоду, перевірить контрольну суму й розпакує у <code>%LOCALAPPDATA%\DesignCraftStudio</code>); нічого не качається без вашої згоди.
+          Уже маєте DesignCraft — скрипт знайде його сам або спитає папку. Шаблони Студії верстають шрифтами DejaVu: якщо їх немає у Windows, скрипт спитає згоду й поставить їх лише вам (без прав адміністратора), щоб DesignCraft не пропонував «замінити шрифти». Браузер перед запуском спитає дозвіл відкрити програму — це нормально.
         </p>
       </div>
 
@@ -333,18 +351,20 @@ export const DesignCraftEditorPanel: React.FC<Props> = ({ book }) => {
         <li className="flex gap-3">
           <span className="shrink-0 w-5 h-5 rounded-full bg-slate-800 text-[10px] font-bold flex items-center justify-center">2</span>
           <div className="flex-1 min-w-0">
-            <b className="text-white">Код підключення до акаунта.</b> Скрипт попросить його лише першого разу (далі пам'ятає токен,
-            зашифрований для вашого облікового запису Windows). Код живе 5 хвилин і працює один раз; сам токен ніде не
-            показується. Відкликати підключення: Медіатека → Скани з телефону → Підключення застосунку.
+            <b className="text-white">Підключення до акаунта — автоматично.</b> Кнопка «Відкрити графічний редактор DesignCraft» сама створює
+            одноразовий код (живе 5 хвилин) і передає його скрипту: вводити й копіювати нічого не треба. Перший раз скрипт обміняє
+            код на токен і запам'ятає його зашифрованим для вашого облікового запису Windows; далі код не використовується.
+            Токен ніде не показується. Відкликати підключення: Медіатека → Скани з телефону → Підключення застосунку.
+            <span className="block mt-1 text-slate-500">Код вручну потрібен лише якщо запускаєте скрипт командою нижче:</span>
             <div className="mt-1.5 flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={getCode}
+                onClick={() => void getCode()}
                 disabled={codeBusy}
                 data-pairing-code-btn
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/50 text-amber-200 font-bold disabled:opacity-50"
               >
-                {codeBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <KeyRound className="w-3 h-3" />} Отримати код підключення
+                {codeBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <KeyRound className="w-3 h-3" />} Отримати код вручну
               </button>
               {code && secondsLeft > 0 && (
                 <>

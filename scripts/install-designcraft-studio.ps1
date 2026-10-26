@@ -31,6 +31,13 @@ try {
 
   New-Item -ItemType Directory -Force -Path $dest | Out-Null
   foreach ($f in $files) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot $f) -Destination (Join-Path $dest $f) -Force }
+  # Шрифти DejaVu (для шаблонів) — необов'язкові: без них скрипт запуску просто не запропонує їх установити.
+  $fontsSrc = Join-Path $PSScriptRoot 'fonts'
+  if (Test-Path -LiteralPath $fontsSrc) {
+    $fontsDest = Join-Path $dest 'fonts'
+    New-Item -ItemType Directory -Force -Path $fontsDest | Out-Null
+    Copy-Item -Path (Join-Path $fontsSrc '*') -Destination $fontsDest -Force
+  }
   Write-Host "Файли скопійовано в $dest" -ForegroundColor Green
 
   & (Join-Path $dest 'install-designcraft-link.ps1')

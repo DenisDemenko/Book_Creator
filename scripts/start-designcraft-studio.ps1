@@ -33,6 +33,11 @@ param(
   [string]$DesignCraftPath = '',       # designcraft-cli.exe; порожньо = знайти (config.json, типові місця) або спитати один раз
   [string]$DesignCraftAppPath = '',    # designcraft.exe (вікно); порожньо = поряд із designcraft-cli.exe
   [int]$ControlPort = 7979,        # порт керування вікном DesignCraft (designcraft --control)
+  [string]$DesignCraftVersion = '',    # версія для автозавантаження DesignCraft (напр. 0.7.1); порожньо = остання
+  [switch]$InstallFonts,               # встановити шрифти DejaVu без питань, якщо їх немає
+  [switch]$SkipFonts,                  # не перевіряти й не встановлювати шрифти DejaVu
+  [switch]$InstallDesignCraft,         # завантажити DesignCraft зі сторінки релізів без питань, якщо його не знайдено
+  [Alias('NoClaude')][switch]$DesignCraftOnly,   # лише відкрити вікно DesignCraft: без Студії, входу, MCP і Claude Code
   [switch]$Headless,               # без вікна: невидима сесія в пам'яті (як було раніше)
   [string]$BookId = '',
   [switch]$NoStudio,
@@ -42,6 +47,8 @@ param(
   [switch]$NoLoginCheck,   # не перевіряти вхід у Claude Code перед запуском
   [switch]$NoBrowser,     # не відкривати Студію в браузері для входу
   [switch]$ForgetToken,
+  [switch]$ForgetApiKey,           # видалити збережений API-ключ Claude Code (-ForgetToken стосується токена Студії)
+  [string]$PairCode = '',          # код підключення (його додає кнопка в Студії; живе 5 хв, діє один раз)
   [string]$Url = '',               # designcraft-studio://open?book=...&studio=... (з кнопки в Студії)
   [string[]]$AllowedStudio = @()   # додаткові дозволені адреси Студії для посилання
 )
@@ -70,7 +77,7 @@ try { Start-Transcript -Path $LogFile -Force | Out-Null } catch { }
 $FromLink = [bool]$Url
 function Wait-BeforeClose {
   # Вікно, відкрите посиланням із браузера, інакше закрилося б разом із текстом.
-  if ($FromLink) { try { Read-Host 'Натисніть Enter, щоб закрити вікно' | Out-Null } catch { } }
+  if ($FromLink -or ($Portable -and -not [Console]::IsInputRedirected)) { try { Read-Host 'Натисніть Enter, щоб закрити вікно' | Out-Null } catch { } }
 }
 
 # Адреси Студії, яким можна довірити токен, коли запуск іде з посилання.
@@ -101,18 +108,42 @@ if ($FromLink) {
   }
   $linkStudio = "$($query['studio'])".TrimEnd('/')
   $linkBook = "$($query['book'])"
-  if (-not (Test-AllowedStudio $linkStudio)) {
+  # mode=designcraft — кнопка «Відкрити DesignCraft» (без Claude Code): токен нікуди не йде, адреса Студії не потрібна.
+  if ("$($query['mode'])" -eq 'designcraft') { $DesignCraftOnly = $true }
+  if (-not $DesignCraftOnly -and -not (Test-AllowedStudio $linkStudio)) {
     Write-Host "Помилка: адреса Студії «$linkStudio» не в списку дозволених. Якщо це справді ваша Студія, запустіть скрипт з -AllowedStudio $linkStudio або додайте її в змінну DESIGNCRAFT_ALLOWED_STUDIOS." -ForegroundColor Red
     Wait-BeforeClose; exit 1
   }
   if ($linkBook -and $linkBook -notmatch '^[A-Za-z0-9_.\-]{1,100}$') {
     Write-Host "Помилка: недопустимий ідентифікатор книги в посиланні." -ForegroundColor Red; Wait-BeforeClose; exit 1
   }
-  $StudioUrl = $linkStudio
+  if ($linkStudio -and (Test-AllowedStudio $linkStudio)) { $StudioUrl = $linkStudio }
   if ($linkBook) { $BookId = $linkBook }
+  if ("$($query['code'])" -match '^[A-Za-z0-9]{4}-?[A-Za-z0-9]{4}$') { $PairCode = "$($query['code'])" }
   # Кнопку натиснули в самій Студії — отже, сервер працює; не перезапускаємо його під сторінкою.
   $KeepRunning = $true
-  Write-Host "Запуск із Студії: $StudioUrl, книга $BookId" -ForegroundColor Cyan
+  if ($DesignCraftOnly) { Write-Host 'Запуск із Студії: лише вікно DesignCraft (без Claude Code).' -ForegroundColor Cyan }
+  else { Write-Host "Запуск із Студії: $StudioUrl, книга $BookId" -ForegroundColor Cyan }
+}
+
+# Скрипт відкрито напряму (не кнопкою зі Студії), без адреси Студії: типове http://localhost:3000 тут не годиться —
+# у користувача хмарної Студії такого сервера немає. Беремо адресу, з якої запускали минулого разу, або питаємо.
+if ($Portable -and -not $FromLink -and -not $DesignCraftOnly -and -not $PSBoundParameters.ContainsKey('StudioUrl')) {
+  $lastStudio = ''
+  try {
+    $cfgFile = Join-Path (Join-Path $env:LOCALAPPDATA 'DesignCraftStudio') 'config.json'
+    if (Test-Path -LiteralPath $cfgFile) { $lastStudio = "$((Get-Content -LiteralPath $cfgFile -Raw | ConvertFrom-Json).lastStudio)" }
+  } catch { }
+  if (-not (Test-AllowedStudio ($(if ($lastStudio) { $lastStudio } else { 'x' })))) { $lastStudio = '' }
+  $defStudio = if ($lastStudio) { $lastStudio } else { $DefaultAllowedStudios[0] }
+  Write-Host 'Скрипт запущено напряму. Зазвичай його запускає кнопка «Відкрити графічний редактор DesignCraft» у Студії — вона сама передає адресу Студії, книгу й код підключення.' -ForegroundColor Yellow
+  $typed = ''
+  if (-not [Console]::IsInputRedirected) { $typed = (Read-Host "Адреса вашої Студії (Enter = $defStudio)").Trim().TrimEnd('/') }
+  $StudioUrl = if ($typed) { $typed } else { $defStudio }
+  if (-not (Test-AllowedStudio $StudioUrl)) {
+    Write-Host "Помилка: адреса Студії «$StudioUrl» не в списку дозволених. Якщо це справді ваша Студія, запустіть скрипт з -AllowedStudio $StudioUrl." -ForegroundColor Red
+    Wait-BeforeClose; exit 1
+  }
 }
 
 $StudioUrl = $StudioUrl.TrimEnd('/')
@@ -147,6 +178,99 @@ function Get-Json([string]$Path, [string]$Token) {
   return ($text | ConvertFrom-Json)
 }
 
+# --- Шрифти шаблонів ---------------------------------------------------------------------------------
+# Усі шаблони Студії верстають шрифтами DejaVu Serif / DejaVu Sans / DejaVu Sans Mono (вони є на сервері Студії).
+# У Windows їх немає, і DesignCraft, відкриваючи чернетку, пропонує «замінити відсутні шрифти» — а це ламає шаблон.
+# Тому скрипт один раз (за згодою) ставить DejaVu для вашого користувача Windows: копіює файли в
+# %LOCALAPPDATA%\Microsoft\Windows\Fonts і реєструє їх у HKCU (права адміністратора не потрібні). Ліцензія DejaVu вільна.
+$DejaVuFonts = [ordered]@{
+  'DejaVuSans.ttf'                = 'DejaVu Sans (TrueType)'
+  'DejaVuSans-Bold.ttf'           = 'DejaVu Sans Bold (TrueType)'
+  'DejaVuSans-Oblique.ttf'        = 'DejaVu Sans Oblique (TrueType)'
+  'DejaVuSans-BoldOblique.ttf'    = 'DejaVu Sans Bold Oblique (TrueType)'
+  'DejaVuSerif.ttf'               = 'DejaVu Serif (TrueType)'
+  'DejaVuSerif-Bold.ttf'          = 'DejaVu Serif Bold (TrueType)'
+  'DejaVuSerif-Italic.ttf'        = 'DejaVu Serif Italic (TrueType)'
+  'DejaVuSerif-BoldItalic.ttf'    = 'DejaVu Serif Bold Italic (TrueType)'
+  'DejaVuSansMono.ttf'            = 'DejaVu Sans Mono (TrueType)'
+  'DejaVuSansMono-Bold.ttf'       = 'DejaVu Sans Mono Bold (TrueType)'
+  'DejaVuSansMono-Oblique.ttf'    = 'DejaVu Sans Mono Oblique (TrueType)'
+  'DejaVuSansMono-BoldOblique.ttf' = 'DejaVu Sans Mono Bold Oblique (TrueType)'
+}
+
+# Звідки брати файли шрифтів: поруч зі скриптом (архів зі Студії) або з репозиторію.
+function Get-FontsSourceDir {
+  $a = Join-Path $PSScriptRoot 'fonts'
+  if (Test-Path -LiteralPath $a) { return $a }
+  return (Join-Path $PSScriptRoot 'designcraft-fonts')
+}
+
+# Які з шрифтів DejaVu є в джерелі, але відсутні в системних і користувацьких теках шрифтів.
+function Get-MissingDejaVuFonts([string]$SourceDir, [string[]]$SearchDirs) {
+  $missing = @()
+  foreach ($file in $DejaVuFonts.Keys) {
+    if (-not (Test-Path -LiteralPath (Join-Path $SourceDir $file))) { continue }
+    $present = $false
+    foreach ($d in @($SearchDirs | Where-Object { $_ })) { if (Test-Path -LiteralPath (Join-Path $d $file)) { $present = $true; break } }
+    if (-not $present) { $missing += $file }
+  }
+  return @($missing)
+}
+
+# Копіює файли в теку шрифтів користувача й реєструє їх у HKCU (-NoRegister — лише копіювання, для тестів).
+function Install-DejaVuFonts([string]$SourceDir, [string]$TargetDir, [string[]]$Files, [switch]$NoRegister) {
+  New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
+  $regPath = 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts'
+  foreach ($file in $Files) {
+    $dest = Join-Path $TargetDir $file
+    Copy-Item -LiteralPath (Join-Path $SourceDir $file) -Destination $dest -Force
+    if (-not $NoRegister) {
+      New-ItemProperty -Path $regPath -Name $DejaVuFonts[$file] -Value $dest -PropertyType String -Force | Out-Null
+    }
+  }
+}
+
+# Перевіряє шрифти й за згодою ставить. Викликається до відкриття вікна DesignCraft.
+function Confirm-TemplateFonts {
+  if ($SkipFonts) { return }
+  $src = Get-FontsSourceDir
+  if (-not (Test-Path -LiteralPath $src)) { return }
+  $userFonts = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Fonts'
+  $missing = Get-MissingDejaVuFonts $src @((Join-Path $env:WINDIR 'Fonts'), $userFonts)
+  if ($missing.Count -eq 0) { return }
+  $cfg = Read-LauncherConfig
+  if ($cfg.fontsDeclined -and -not $InstallFonts) {
+    Write-Host 'Шрифти DejaVu не встановлено (ви відмовились раніше): DesignCraft може запропонувати замінити шрифти шаблонів. Дозволити: -InstallFonts.' -ForegroundColor Yellow
+    return
+  }
+  if (-not $InstallFonts) {
+    if ([Console]::IsInputRedirected) { return }
+    Write-Host ''
+    Write-Host "Шаблони Студії верстають шрифтами DejaVu (Serif, Sans, Sans Mono; вільна ліцензія). Їх немає на цьому комп'ютері —" -ForegroundColor Yellow
+    Write-Host 'без них DesignCraft пропонує замінити шрифти, і шаблон книги спотворюється.'
+    $ans = Read-Host "Встановити $($missing.Count) файлів шрифтів (~5 МБ) для вашого користувача Windows? Права адміністратора не потрібні. (Y/n)"
+    if ($ans -match '^[nNнН]') {
+      $cfg.fontsDeclined = $true; Write-LauncherConfig $cfg
+      Write-Host 'Гаразд. Якщо DesignCraft запропонує замінити шрифти — відмовтесь від заміни або запустіть скрипт з -InstallFonts.'
+      return
+    }
+  }
+  try {
+    Install-DejaVuFonts $src $userFonts $missing
+    $cfg.Remove('fontsDeclined'); Write-LauncherConfig $cfg
+    Write-Host "Шрифти DejaVu встановлено ($($missing.Count) файлів): $userFonts" -ForegroundColor Green
+    if (Test-ControlPortListening) { Write-Host 'Вікно DesignCraft уже відкрите — закрийте його й запустіть скрипт знову, щоб воно побачило нові шрифти.' -ForegroundColor Yellow }
+  } catch {
+    Write-Host "Не вдалося встановити шрифти: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "Встановіть вручну: відкрийте файли з $src і натисніть «Встановити для всіх/для мене»."
+  }
+}
+
+# Чи відкрите вікно DesignCraft із портом керування (використовується й шрифтами, і запуском вікна).
+function Test-ControlPortListening {
+  [bool](Get-NetTCPConnection -LocalPort $ControlPort -State Listen -ErrorAction SilentlyContinue)
+}
+
 # --- DesignCraft: де лежить -------------------------------------------------------------------
 # Порядок: параметри -> збережене (config.json) -> типові місця -> спитати один раз і запам'ятати.
 $ConfigDir = Join-Path $env:LOCALAPPDATA 'DesignCraftStudio'
@@ -155,7 +279,7 @@ $DesignCraftReleases = 'https://github.com/storytold/designcraft/releases'
 
 function Find-DesignCraftIn([string]$Dir) {
   if (-not $Dir -or -not (Test-Path -LiteralPath $Dir -PathType Container)) { return $null }
-  foreach ($d in @($Dir, (Join-Path $Dir 'bin'), (Join-Path $Dir 'target\release'))) {
+  foreach ($d in @($Dir, (Join-Path $Dir 'bin'), (Join-Path $Dir 'target/release'))) {
     $cli = Join-Path $d 'designcraft-cli.exe'
     $app = Join-Path $d 'designcraft.exe'
     if ((Test-Path -LiteralPath $cli) -or (Test-Path -LiteralPath $app)) { return @{ cli = $cli; app = $app } }
@@ -163,16 +287,180 @@ function Find-DesignCraftIn([string]$Dir) {
   return $null
 }
 
-function Save-DesignCraftDir([string]$Dir) {
+# --- Автозавантаження DesignCraft зі сторінки релізів проєкту --------------------------------------
+# Користувач Студії не має клону репозиторію (D:\Rama\designcraft — це збірка розробника). Тому, коли DesignCraft
+# не знайдено, скрипт ПРОПОНУЄ завантажити portable-архів для Windows з офіційних релізів (згода — у вікні, нічого
+# не качається мовчки), перевіряє контрольну суму, якщо GitHub її віддає, і розпаковує в %LOCALAPPDATA%\DesignCraftStudio.
+$DesignCraftRepo = 'storytold/designcraft'
+$DesignCraftDownloadPrefix = "https://github.com/$DesignCraftRepo/releases/download/"
+
+# Обирає з переліку релізів (відповідь GitHub API) архів Windows. Чиста функція: мережі не торкається.
+function Select-DesignCraftAsset($Releases, [string]$Version = '') {
+  foreach ($r in @($Releases)) {
+    if (-not $r -or $r.draft) { continue }
+    if ($Version) {
+      $want = $Version.TrimStart('v')
+      if ("$($r.tag_name)".TrimStart('v') -ne $want) { continue }
+    } elseif ($r.prerelease) { continue }
+    foreach ($a in @($r.assets)) {
+      if ("$($a.name)" -match 'windows-x64-portable\.zip$' -and "$($a.browser_download_url)".StartsWith($DesignCraftDownloadPrefix)) {
+        return @{ tag = "$($r.tag_name)"; name = "$($a.name)"; url = "$($a.browser_download_url)"; digest = "$($a.digest)"; size = [long]$a.size }
+      }
+    }
+  }
+  return $null
+}
+
+# Перевіряє суму (якщо відома), розпаковує архів і знаходить designcraft-cli.exe та designcraft.exe.
+# Повертає @{ cli; app } (app може бути $null) або кидає виняток із зрозумілим текстом.
+function Expand-DesignCraftZip([string]$ZipPath, [string]$Digest, [string]$DestDir) {
+  $hash = (Get-FileHash -LiteralPath $ZipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+  if ($Digest -match '^sha256:([0-9a-fA-F]{64})$') {
+    if ($Matches[1].ToLowerInvariant() -ne $hash) { throw "Контрольна сума архіву не збігається (очікувалась $($Matches[1]), отримано $hash). Файл не розпаковано." }
+    Write-Host "Контрольну суму SHA-256 перевірено ($($hash.Substring(0, 12))…)." -ForegroundColor Green
+  } else {
+    Write-Host "GitHub не віддав контрольну суму цього файла. SHA-256: $hash (порівняйте зі сторінкою релізу, якщо вона її публікує)." -ForegroundColor Yellow
+  }
+  if (Test-Path -LiteralPath $DestDir) { Remove-Item -LiteralPath $DestDir -Recurse -Force }
+  New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
+  Expand-Archive -LiteralPath $ZipPath -DestinationPath $DestDir -Force
+  $cli = Get-ChildItem -LiteralPath $DestDir -Recurse -Filter 'designcraft-cli.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+  $app = Get-ChildItem -LiteralPath $DestDir -Recurse -Filter 'designcraft.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+  if (-not $cli) { throw 'В архіві немає designcraft-cli.exe — це не той файл, що очікувався.' }
+  return @{ cli = $cli.FullName; app = $(if ($app) { $app.FullName } else { $null }) }
+}
+
+# Завантажує й розпаковує DesignCraft. Повертає @{ cli; app } або $null (з поясненням у вікні).
+function Install-DesignCraftFromGitHub {
+  # Без вікна, де можна відповісти, і без -InstallDesignCraft нічого не качаємо.
+  if ([Console]::IsInputRedirected -and -not $InstallDesignCraft) { return $null }
+  try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    Write-Host "Шукаю релізи DesignCraft ($DesignCraftRepo)..." -ForegroundColor Cyan
+    $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$DesignCraftRepo/releases?per_page=20" -Headers @{ 'User-Agent' = 'designcraft-studio-launcher'; Accept = 'application/vnd.github+json' } -TimeoutSec 30
+    $asset = Select-DesignCraftAsset $releases $DesignCraftVersion
+    if (-not $asset) {
+      Write-Host "У релізах немає архіву windows-x64-portable.zip$(if ($DesignCraftVersion) { " для версії $DesignCraftVersion" }). Збірки: $DesignCraftReleases" -ForegroundColor Red
+      return $null
+    }
+    $mb = [math]::Round($asset.size / 1MB, 1)
+    Write-Host "Знайдено: $($asset.name) ($($asset.tag), $mb МБ)" -ForegroundColor Cyan
+    if (-not $InstallDesignCraft) {
+      $ans = Read-Host "Завантажити з офіційних релізів GitHub ($DesignCraftRepo) і розпакувати в $ConfigDir? Без установки, нічого більше не змінюється. (Y/n)"
+      if ($ans -match '^[nNнН]') { return $null }
+    }
+    $zip = Join-Path ([IO.Path]::GetTempPath()) $asset.name
+    Write-Host 'Завантажую...'
+    # Invoke-WebRequest у Windows PowerShell 5.1 малює індикатор і від того качає в рази повільніше — тому потік вручну.
+    $req = [Net.HttpWebRequest]::Create($asset.url)
+    $req.UserAgent = 'designcraft-studio-launcher'
+    $resp = $req.GetResponse()
+    $inStream = $resp.GetResponseStream()
+    $outStream = [IO.File]::Create($zip)
+    try {
+      $buf = New-Object byte[] (1MB)
+      $total = [long]$resp.ContentLength; $done = 0L; $nextPct = 10
+      while (($n = $inStream.Read($buf, 0, $buf.Length)) -gt 0) {
+        $outStream.Write($buf, 0, $n); $done += $n
+        if ($total -gt 0) {
+          $pct = [int](100 * $done / $total)
+          if ($pct -ge $nextPct) { Write-Host "  $pct %"; $nextPct = $pct + 10 }
+        }
+      }
+    } finally { $outStream.Dispose(); $inStream.Dispose(); $resp.Close() }
+    $dest = Join-Path $ConfigDir ("designcraft-" + ($asset.tag.TrimStart('v')))
+    $pair = Expand-DesignCraftZip $zip $asset.digest $dest
+    Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
+    Write-Host "DesignCraft розпаковано: $dest" -ForegroundColor Green
+    return $pair
+  } catch {
+    Write-Host "Не вдалося завантажити DesignCraft: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "Завантажте архів вручну: $DesignCraftReleases (windows-x64-portable.zip), розпакуйте й вкажіть папку."
+    return $null
+  }
+}
+
+# designcraft.exe (вікно) може лежати не поряд із designcraft-cli.exe: `cargo install` кладе в .cargo\bin лише CLI.
+function Find-DesignCraftAppIn([string]$Dir) {
+  if (-not $Dir -or -not (Test-Path -LiteralPath $Dir -PathType Container)) { return $null }
+  foreach ($d in @($Dir, (Join-Path $Dir 'bin'), (Join-Path $Dir 'target/release'))) {
+    $app = Join-Path $d 'designcraft.exe'
+    if (Test-Path -LiteralPath $app) { return $app }
+  }
+  return $null
+}
+
+function Get-DesignCraftSearchDirs {
+  $dirs = @($env:DESIGNCRAFT_HOME)
+  if (-not $env:DESIGNCRAFT_NO_AUTODETECT) {
+    $dirs += (Split-Path -Parent $DesignCraftPath)
+    $dirs += 'D:\Rama\designcraft'
+    foreach ($pair in @(@($env:LOCALAPPDATA, 'Programs\DesignCraft'), @($env:ProgramFiles, 'DesignCraft'), @($env:USERPROFILE, 'DesignCraft'), @($env:USERPROFILE, '.cargo\bin'))) {
+      if ($pair[0]) { $dirs += (Join-Path $pair[0] $pair[1]) }
+    }
+    $onPath = Get-Command designcraft -ErrorAction SilentlyContinue
+    if ($onPath) { $dirs = @($dirs[0], (Split-Path -Parent $onPath.Source)) + @($dirs | Select-Object -Skip 1) }
+  }
+  return @($dirs | Where-Object { $_ })
+}
+
+# Знаходить designcraft.exe; не знайшов — питає папку (Enter = працювати без вікна). Повертає шлях або $null.
+function Resolve-DesignCraftApp {
+  if ($DesignCraftAppPath -and (Test-Path -LiteralPath $DesignCraftAppPath)) { return $DesignCraftAppPath }
+  $cfgApp = $null
+  if (Test-Path $ConfigFile) {
+    try { $cfg = Get-Content $ConfigFile -Raw | ConvertFrom-Json; if ($cfg.designcraftAppDir) { $cfgApp = Find-DesignCraftAppIn "$($cfg.designcraftAppDir)" } } catch { }
+  }
+  if ($cfgApp) { return $cfgApp }
+  foreach ($d in (Get-DesignCraftSearchDirs)) {
+    $app = Find-DesignCraftAppIn "$d"
+    if ($app) { Save-DesignCraftDir (Split-Path -Parent $DesignCraftPath) (Split-Path -Parent $app); return $app }
+  }
+  if ([Console]::IsInputRedirected -and -not $InstallDesignCraft) { return $null }
+  Write-Host ''
+  Write-Host "Не знайдено вікно DesignCraft (designcraft.exe). Знайдено лише консольну частину: $DesignCraftPath" -ForegroundColor Yellow
+  $pair = Install-DesignCraftFromGitHub
+  if ($pair -and $pair.app) {
+    Save-DesignCraftDir (Split-Path -Parent $pair.cli) (Split-Path -Parent $pair.app)
+    $script:DesignCraftPath = $pair.cli
+    return $pair.app
+  }
+  Write-Host "Збірки проєкту: $DesignCraftReleases"
+  for ($try = 1; $try -le 3; $try++) {
+    $answer = (Read-Host 'Папка з designcraft.exe (перетягніть сюди; Enter — працювати без вікна)').Trim().Trim('"')
+    if (-not $answer) { return $null }
+    if (Test-Path -LiteralPath $answer -PathType Leaf) { $answer = Split-Path -Parent $answer }
+    $app = Find-DesignCraftAppIn $answer
+    if ($app) { Save-DesignCraftDir (Split-Path -Parent $DesignCraftPath) (Split-Path -Parent $app); return $app }
+    Write-Host "У «$answer» немає designcraft.exe." -ForegroundColor Red
+  }
+  return $null
+}
+
+function Read-LauncherConfig {
+  $cfg = @{}
+  if (Test-Path $ConfigFile) {
+    try { (Get-Content $ConfigFile -Raw | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $cfg[$_.Name] = $_.Value } } catch { }
+  }
+  return $cfg
+}
+
+function Write-LauncherConfig([hashtable]$Cfg) {
   try {
     New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null
-    @{ designcraftDir = $Dir } | ConvertTo-Json | Set-Content -Path $ConfigFile -Encoding UTF8
+    $Cfg | ConvertTo-Json | Set-Content -Path $ConfigFile -Encoding UTF8
   } catch { }
+}
+
+function Save-DesignCraftDir([string]$Dir, [string]$AppDir = '') {
+  $cfg = Read-LauncherConfig
+  $cfg.designcraftDir = $Dir
+  if ($AppDir) { $cfg.designcraftAppDir = $AppDir }
+  Write-LauncherConfig $cfg
 }
 
 function Resolve-DesignCraft {
   if ($DesignCraftPath) {
-    if (-not $DesignCraftAppPath) { $script:DesignCraftAppPath = Join-Path (Split-Path -Parent $DesignCraftPath) 'designcraft.exe' }
     return
   }
   $found = $null
@@ -192,18 +480,26 @@ function Resolve-DesignCraft {
         if ($pair[0]) { $candidates += (Join-Path $pair[0] $pair[1]) }
       }
       $onPath = Get-Command designcraft-cli -ErrorAction SilentlyContinue
-      if ($onPath) { $candidates = @((Split-Path -Parent $onPath.Source)) + $candidates }
+      # PATH — після явного DESIGNCRAFT_HOME (він першим у списку), але перед типовими папками.
+      if ($onPath) { $candidates = @($candidates[0], (Split-Path -Parent $onPath.Source)) + @($candidates | Select-Object -Skip 1) }
     }
     foreach ($c in $candidates) { $found = Find-DesignCraftIn "$c"; if ($found) { break } }
     if ($found) { Save-DesignCraftDir (Split-Path -Parent $found.cli) }
   }
   if (-not $found) {
-    if ([Console]::IsInputRedirected) {
-      Fail "Не знайдено DesignCraft. Вкажіть -DesignCraftPath <шлях до designcraft-cli.exe> або встановіть змінну DESIGNCRAFT_HOME. Збірки: $DesignCraftReleases"
+    if ([Console]::IsInputRedirected -and -not $InstallDesignCraft) {
+      Fail "Не знайдено DesignCraft. Запустіть скрипт у вікні (він запропонує завантажити DesignCraft), або вкажіть -DesignCraftPath <шлях до designcraft-cli.exe>, або -InstallDesignCraft, або змінну DESIGNCRAFT_HOME. Збірки: $DesignCraftReleases"
     }
     Write-Host ''
     Write-Host 'Не знайдено DesignCraft (designcraft.exe і designcraft-cli.exe).' -ForegroundColor Yellow
-    Write-Host "Якщо його ще немає — збірки проєкту: $DesignCraftReleases"
+    $pair = Install-DesignCraftFromGitHub
+    if ($pair) {
+      Save-DesignCraftDir (Split-Path -Parent $pair.cli) $(if ($pair.app) { Split-Path -Parent $pair.app } else { '' })
+      $script:DesignCraftPath = $pair.cli
+      if ($pair.app) { $script:DesignCraftAppPath = $pair.app }
+      return
+    }
+    Write-Host "Або вкажіть папку, де DesignCraft уже є. Збірки проєкту: $DesignCraftReleases"
     for ($try = 1; $try -le 3 -and -not $found; $try++) {
       $answer = (Read-Host 'Вкажіть папку з DesignCraft (можна перетягнути папку або designcraft.exe сюди)').Trim().Trim('"')
       if (-not $answer) { continue }
@@ -216,7 +512,7 @@ function Resolve-DesignCraft {
     Write-Host 'Запам''ятано — наступного разу питати не буду.' -ForegroundColor Green
   }
   $script:DesignCraftPath = $found.cli
-  $script:DesignCraftAppPath = $found.app
+  # Вікно шукається окремо (Resolve-DesignCraftApp), коли воно справді потрібне.
 }
 
 # --- 0. Попередні перевірки ---------------------------------------------------------------------
@@ -225,9 +521,28 @@ if ($ForgetToken) {
   else { Write-Host 'Збереженого токена немає.' }
   exit 0
 }
-if (-not $Portable -and -not (Test-Path (Join-Path $RepoRoot 'package.json'))) { Fail "Не знайдено проєкт Студії в $RepoRoot." }
+if (-not $Portable -and -not (Test-Path (Join-Path $RepoRoot 'package.json'))) { Fail "Не знайдено проєкт Студії в $RepoRoot, а поряд зі скриптом немає studio-mcp.mjs — схоже, установка неповна. Розпакуйте архів інсталятора зі Студії (кнопка «Завантажити інсталятор») і запустіть install-designcraft-studio.cmd із розпакованої папки." }
 Resolve-DesignCraft
 if (-not (Test-Path $DesignCraftPath)) { Fail "Не знайдено DesignCraft: $DesignCraftPath (параметр -DesignCraftPath)." }
+
+# --- Режим «лише DesignCraft» --------------------------------------------------------------------
+# Для правки шаблонів і ручної верстки: відкрити вікно DesignCraft і вийти. Без Студії, токена, MCP і Claude Code,
+# тож жодного входу чи кредитів не потрібно.
+if ($DesignCraftOnly) {
+  Confirm-TemplateFonts
+  $dcExe = Resolve-DesignCraftApp
+  if (-not $dcExe) { Fail "Не знайдено вікно DesignCraft (designcraft.exe). Збірки: $DesignCraftReleases" }
+  $running = @(Get-Process -Name 'designcraft' -ErrorAction SilentlyContinue)
+  if ($running.Count -gt 0) {
+    Write-Host 'Вікно DesignCraft уже відкрите — перемкніться на нього.' -ForegroundColor Green
+  } else {
+    Write-Host 'Відкриваю DesignCraft...' -ForegroundColor Cyan
+    Start-Process -FilePath $dcExe -WorkingDirectory (Split-Path -Parent $dcExe) | Out-Null
+    Write-Host 'DesignCraft запущено. Claude Code не запускався.' -ForegroundColor Green
+  }
+  try { Stop-Transcript | Out-Null } catch { }
+  exit 0
+}
 if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { Fail 'Не знайдено команду claude (Claude Code).' }
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Fail 'Не знайдено node.' }
 
@@ -373,7 +688,16 @@ if (-not $token -and (Test-Path $TokenFile)) {
 
 $user = $null
 $entered = $false
+$autoSave = $false
 for ($attempt = 1; $attempt -le 3 -and -not $user; $attempt++) {
+  if (-not $token -and $PairCode) {
+    # Код підключення прийшов із кнопки в Студії — вводити нічого не треба.
+    $codeNow = $PairCode; $PairCode = ''
+    $script:secureToken = $null
+    $token = Invoke-PairCode $codeNow
+    $entered = [bool]$token; $autoSave = $entered
+    if (-not $token) { continue }
+  }
   if (-not $token) { $token = Request-TokenFromUser; $entered = [bool]$token; if (-not $token) { continue } }
   if ($token -notmatch '^nst_') { Write-Host 'Токен має починатися з nst_ — це особистий токен Студії, а не пароль.' -ForegroundColor Yellow; $token = ''; continue }
   $me = Get-Json '/api/external/v1/me' $token
@@ -387,9 +711,14 @@ for ($attempt = 1; $attempt -le 3 -and -not $user; $attempt++) {
 }
 if (-not $user) { Fail 'Не вдалося увійти в Студію: токен не прийнято за 3 спроби.' }
 Write-Host ("Ви ввійшли як: {0} ({1})" -f $user.name, $user.email) -ForegroundColor Cyan
+if ($Portable) {
+  # Наступного разу прямий запуск скрипта не питатиме адресу Студії.
+  try { $c = Read-LauncherConfig; $c.lastStudio = $StudioUrl; Write-LauncherConfig $c } catch { }
+}
 
 if ($entered) {
-  $save = Read-Host 'Зберегти токен зашифрованим для вашого Windows-облікового запису? (y/N)'
+  # Підключення за кодом зі Студії запам'ятовуємо без питань (шифрується для вашого Windows; відкликати можна в Студії).
+  $save = if ($autoSave) { 'y' } else { Read-Host 'Зберегти токен зашифрованим для вашого Windows-облікового запису? (y/N)' }
   if ($save -match '^[yYтТ]') {
     if (-not $script:secureToken) { $script:secureToken = ConvertTo-SecureString $token -AsPlainText -Force }
     New-Item -ItemType Directory -Force -Path (Split-Path $TokenFile) | Out-Null
@@ -402,34 +731,25 @@ if ($entered) {
 # Режим вікна: designcraft.exe --control ПОРТ показує книгу наживо, а `designcraft-cli mcp --connect ПОРТ`
 # дає Claude Code керувати САМЕ ЦИМ вікном: усе, що робить агент, письменник бачить в інтерфейсі.
 # Режим -Headless: `designcraft-cli mcp` — процес на stdio без вікна (його запускає Claude Code).
-function Test-ControlPortListening {
-  [bool](Get-NetTCPConnection -LocalPort $ControlPort -State Listen -ErrorAction SilentlyContinue)
-}
-
 function Test-DesignCraftServer([string[]]$McpArgs) {
-  $psi = New-Object System.Diagnostics.ProcessStartInfo
-  $psi.FileName = $DesignCraftPath
-  $psi.Arguments = ($McpArgs -join ' ')
-  $psi.UseShellExecute = $false
-  $psi.RedirectStandardInput = $true
-  $psi.RedirectStandardOutput = $true
-  $psi.RedirectStandardError = $true
-  $psi.CreateNoWindow = $true
-  $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
-  $p = [System.Diagnostics.Process]::Start($psi)
+  # Запит іде ФАЙЛОМ через -RedirectStandardInput, а не через потік процесу: .NET у PowerShell 5.1 пише в stdin
+  # через StreamWriter із кодуванням консолі (UTF-8 → BOM на початку), і DesignCraft 0.13 відповідає
+  # «parse error: expected value at line 1 column 1». Файл — це точні байти без BOM; EOF після рядка закриває сервер.
+  $tmp = Join-Path ([IO.Path]::GetTempPath()) ("dc-probe-{0}" -f ([guid]::NewGuid().ToString('N')))
+  $inFile = "$tmp.in"; $outFile = "$tmp.out"; $errFile = "$tmp.err"
   try {
     $req = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"start-designcraft-studio","version":"1"}}}'
-    # Пишемо БАЙТИ напряму: StreamWriter у PowerShell 5.1 (chcp 65001) ставить на початок BOM,
-    # і Rust-сервер читає його як сміття («parse error: expected value at line 1 column 1»).
-    $bytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes($req + "`n")
-    $p.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
-    $p.StandardInput.BaseStream.Flush()
-    $task = $p.StandardOutput.ReadLineAsync()
-    if (-not $task.Wait(15000)) { return @{ ok = $false; error = 'DesignCraft не відповів за 15 с.' } }
-    $line = $task.Result
+    [IO.File]::WriteAllBytes($inFile, (New-Object System.Text.UTF8Encoding($false)).GetBytes($req + "`n"))
+    $p = Start-Process -FilePath $DesignCraftPath -ArgumentList $McpArgs -RedirectStandardInput $inFile `
+      -RedirectStandardOutput $outFile -RedirectStandardError $errFile -NoNewWindow -PassThru
+    $exited = $p.WaitForExit(15000)
+    if (-not $exited) { try { $p.Kill() } catch { } }
+    $line = ''
+    if (Test-Path $outFile) { $line = ((Get-Content -LiteralPath $outFile -Encoding UTF8 -TotalCount 1) -join '').Trim() }
     if (-not $line) {
       $err = ''
-      if ($p.HasExited) { $err = $p.StandardError.ReadToEnd() }
+      if (Test-Path $errFile) { $err = ((Get-Content -LiteralPath $errFile -Encoding UTF8) -join ' ').Trim() }
+      if (-not $exited) { return @{ ok = $false; error = 'DesignCraft не відповів за 15 с.' } }
       return @{ ok = $false; error = "DesignCraft завершився без відповіді. $err".Trim() }
     }
     $resp = $line | ConvertFrom-Json
@@ -437,18 +757,27 @@ function Test-DesignCraftServer([string[]]$McpArgs) {
     $info = $resp.result.serverInfo
     return @{ ok = $true; name = "$($info.name)"; version = "$($info.version)" }
   } finally {
-    try { $p.StandardInput.Close() } catch { }
-    try { if (-not $p.WaitForExit(3000)) { $p.Kill() } } catch { }
+    foreach ($f in @($inFile, $outFile, $errFile)) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }
   }
 }
+
+Confirm-TemplateFonts
 
 $designcraftArgs = @('mcp')
 if ($Headless) {
   Write-Host 'Режим -Headless: DesignCraft без вікна (невидима сесія).' -ForegroundColor Yellow
 } else {
-  if (-not (Test-Path $DesignCraftAppPath)) {
-    Fail "Не знайдено вікно DesignCraft: $DesignCraftAppPath. Потрібен designcraft.exe поряд із designcraft-cli.exe (збірки: $DesignCraftReleases) або вкажіть -DesignCraftAppPath."
+  $foundApp = Resolve-DesignCraftApp
+  if ($foundApp) {
+    $DesignCraftAppPath = $foundApp
+  } else {
+    # Без вікна агент усе одно верстає, але автор не бачить змін наживо.
+    Write-Host 'Вікно DesignCraft не знайдено — працюю без вікна (невидима сесія, як з -Headless).' -ForegroundColor Yellow
+    Write-Host "Щоб бачити верстку наживо, поставте designcraft.exe ($DesignCraftReleases) або вкажіть -DesignCraftAppPath."
+    $Headless = $true
   }
+}
+if (-not $Headless) {
   if (Test-ControlPortListening) {
     Write-Host "Вікно DesignCraft уже відкрите (порт керування $ControlPort) — підключаюсь до нього." -ForegroundColor Green
   } else {
@@ -634,6 +963,59 @@ Write-Host ("Акаунт: {0}; модель: {1}" -f $Account, $Model) -Foregro
 # `claude auth status` показує, чи є вхід у ПОТОЧНОМУ профілі (з урахуванням CLAUDE_CONFIG_DIR вище);
 # `claude auth login` відкриває браузер для входу. Якщо цих команд у вашій версії немає, скрипт нічого
 # не ламає: Claude Code сам запропонує вхід при запуску.
+# --- API-ключ Claude Code (кредити Anthropic Console) -----------------------------------------------
+# Вхід через Console вимагає скопіювати код з браузера й часто падає (400 / «Invalid code»). Для оплати
+# з кредитів надійніше API-ключ: вводиться один раз у приховане поле, зберігається зашифрованим для
+# вашого користувача Windows (DPAPI, як токен Студії), підставляється ЛИШЕ в процес claude на час запуску.
+$ApiKeyFile = Join-Path $ConfigDir 'anthropic-api-key.dat'
+$script:UsingApiKey = $false
+
+function Test-ApiKeyShape([string]$Key) {
+  return [bool]($Key -and $Key.Trim() -match '^sk-ant-[A-Za-z0-9_\-]{20,}$')
+}
+
+function ConvertTo-PlainText([System.Security.SecureString]$Secure) {
+  $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Secure)
+  try { return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
+  finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+}
+
+function Get-SavedApiKey {
+  if (-not (Test-Path -LiteralPath $ApiKeyFile)) { return $null }
+  try {
+    $plain = ConvertTo-PlainText ((Get-Content -LiteralPath $ApiKeyFile -Raw).Trim() | ConvertTo-SecureString)
+    if (Test-ApiKeyShape $plain) { return $plain.Trim() }
+  } catch { }
+  return $null
+}
+
+# Питає ключ у прихованому полі (не показується на екрані, не потрапляє в журнал), зберігає зашифрованим.
+function Read-ApiKeyFromUser {
+  Write-Host ''
+  Write-Host 'Вставте API-ключ з Anthropic Console (console.anthropic.com → API Keys). Він починається з sk-ant-.' -ForegroundColor Cyan
+  Write-Host 'Під час введення на екрані нічого не показується — це нормально. Ключ зберігається зашифрованим лише для вашого користувача Windows.'
+  for ($i = 0; $i -lt 3; $i++) {
+    $plain = (ConvertTo-PlainText (Read-Host 'API-ключ' -AsSecureString)).Trim()
+    if (Test-ApiKeyShape $plain) {
+      try {
+        New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null
+        ($plain | ConvertTo-SecureString -AsPlainText -Force | ConvertFrom-SecureString) | Set-Content -Path $ApiKeyFile -Encoding ASCII
+        Write-Host "Ключ збережено зашифрованим ($ApiKeyFile). Видалити: -ForgetApiKey." -ForegroundColor Green
+      } catch {
+        Write-Host 'Не вдалося зберегти ключ; він діятиме лише в цьому запуску.' -ForegroundColor Yellow
+      }
+      return $plain
+    }
+    Write-Host 'Це не схоже на ключ Anthropic (очікується sk-ant-… без пробілів). Спробуйте ще раз.' -ForegroundColor Yellow
+  }
+  Fail 'API-ключ не введено.'
+}
+
+if ($ForgetApiKey) {
+  if (Test-Path -LiteralPath $ApiKeyFile) { Remove-Item -LiteralPath $ApiKeyFile -Force; Write-Host 'Збережений API-ключ видалено.' -ForegroundColor Green }
+  else { Write-Host 'Збереженого API-ключа немає.' }
+}
+
 function Get-ClaudeLoginState {
   try {
     $out = (& claude auth status 2>&1 | Out-String).Trim()
@@ -655,13 +1037,36 @@ function Invoke-ClaudeLogin {
   Write-Host ''
   Write-Host 'Як увійти в Claude Code?' -ForegroundColor Cyan
   Write-Host '  1. Акаунт Claude (підписка Pro/Max) — без API-кредитів'
-  Write-Host '  2. Anthropic Console (API, оплата з кредитів організації)'
-  $kind = Read-Host 'Номер (Enter = 1)'
+  Write-Host '  2. Anthropic Console (API, кредити) — через браузер: треба скопіювати код з браузера в це вікно'
+  Write-Host '  3. API-ключ Console (кредити) — без браузера: вставляється один раз, далі запам''ятовується (рекомендовано)'
+  $kind = Read-Host 'Номер (Enter = 3)'
+  if (-not $kind) { $kind = '3' }
+  if ($kind -eq '3') {
+    $env:ANTHROPIC_API_KEY = Read-ApiKeyFromUser
+    $script:UsingApiKey = $true
+    return
+  }
   Write-Host 'Відкриваю браузер для входу в Claude Code. Увійдіть у потрібний акаунт і поверніться сюди...' -ForegroundColor Cyan
   if ($kind -eq '2') { & claude auth login --console } else { & claude auth login }
 }
 
-if (-not $NoLoginCheck) {
+# Збережений (або заданий змінною середовища) API-ключ: входити через браузер не потрібно.
+if ($Account -ne 'subscription') {
+  if ($env:ANTHROPIC_API_KEY) {
+    $script:UsingApiKey = $true
+    Write-Host 'Claude Code: використовується ANTHROPIC_API_KEY зі змінних середовища (кредити Console), браузер не потрібен.' -ForegroundColor Green
+  } else {
+    $savedKey = Get-SavedApiKey
+    if ($savedKey) {
+      $env:ANTHROPIC_API_KEY = $savedKey
+      $savedKey = $null
+      $script:UsingApiKey = $true
+      Write-Host 'Claude Code: використовується збережений API-ключ (кредити Console), браузер не потрібен.' -ForegroundColor Green
+    }
+  }
+}
+
+if (-not $NoLoginCheck -and -not $script:UsingApiKey) {
   # Профіль CLI `ant` разом із входом через /login дає конфлікт: «Both profile and /login managed key set».
   $antProfiles = Join-Path $env:USERPROFILE '.config\anthropic\configs'
   if ((Test-Path $antProfiles) -and (Get-ChildItem $antProfiles -ErrorAction SilentlyContinue)) {
@@ -686,13 +1091,13 @@ if (-not $NoLoginCheck) {
     if ($again -eq '2') {
       & claude auth logout
       Invoke-ClaudeLogin
-      $st = Get-ClaudeLoginState
+      $st = if ($script:UsingApiKey) { @{ known = $false } } else { Get-ClaudeLoginState }
       if ($st.known -and -not $st.loggedIn) { Fail 'Вхід у Claude Code не виконано. Запустіть скрипт ще раз.' }
     }
   } else {
     Write-Host 'Claude Code: ви не ввійшли.' -ForegroundColor Yellow
     Invoke-ClaudeLogin
-    $st = Get-ClaudeLoginState
+    $st = if ($script:UsingApiKey) { @{ known = $false } } else { Get-ClaudeLoginState }
     if ($st.known -and -not $st.loggedIn) { Fail 'Вхід у Claude Code не виконано. Запустіть скрипт ще раз.' }
     Write-Host 'Вхід у Claude Code виконано.' -ForegroundColor Green
   }
