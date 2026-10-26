@@ -24,6 +24,7 @@
       new Intl.NumberFormat("uk-UA", { maximumFractionDigits: d }).format(n),
     clone = (x) => JSON.parse(JSON.stringify(x));
   let remote = await bridge.request("GET", "/tables/state");
+  $("resinTextureControls").hidden = !remote.capabilities?.resinTextures;
   if (remote.theme) {
     for (const [key, value] of Object.entries(remote.theme.tokens || {}))
       document.documentElement.style.setProperty(key, value);
