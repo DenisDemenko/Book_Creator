@@ -89,7 +89,7 @@ const app = new Proxy(
   },
 ) as Express;
 registerSlabTableRoutes(app);
-assert.equal(routes.length, 7);
+assert.equal(routes.length, 9);
 for (const r of routes) assert.equal(r.handlers[0], requireAdmin, r.path);
 for (const principal of [
   undefined,
@@ -113,5 +113,5 @@ for (const principal of [
   assert.equal(next, false);
 }
 console.log(
-  "All seven Studio routes requireAdmin; guests, readers and site managers denied.",
+  "All nine Studio routes requireAdmin; guests, readers and site managers denied.",
 );

@@ -14,7 +14,7 @@ export async function tableBridge(
   body?: unknown,
   deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {},
 ) {
-  if (!/^\/(state|slabs|costs|production)(\/[a-zA-Z0-9-]+)?$/.test(path))
+  if (!/^\/(state|slabs|costs|production|resin-textures)(\/[a-zA-Z0-9-]+)?$/.test(path))
     throw new Error("Некоректний маршрут конструктора.");
   const settings = deps.settings ?? (await readBridgeSettings());
   const response = await (deps.fetch ?? fetch)(
@@ -134,6 +134,16 @@ export function registerSlabTableRoutes(app: Express) {
     "/api/admin/slab-tables/costs",
     requireAdmin,
     proxy("PUT", () => "/costs"),
+  );
+  app.post(
+    "/api/admin/slab-tables/resin-textures",
+    requireAdmin,
+    proxy("POST", () => "/resin-textures"),
+  );
+  app.delete(
+    "/api/admin/slab-tables/resin-textures/:id",
+    requireAdmin,
+    proxy("DELETE", (r) => "/resin-textures/" + r.params.id),
   );
   app.get(
     "/api/admin/slab-tables/production",

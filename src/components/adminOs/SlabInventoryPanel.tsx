@@ -20,7 +20,7 @@ export function SlabInventoryPanel() {
             ? "/state"
             : String(m.path).replace(/^\/tables\/admin/, "");
         const allowed =
-          /^(GET \/(state|production)|POST \/slabs|PUT \/costs|DELETE \/slabs\/[a-zA-Z0-9-]+|PATCH \/production\/[a-zA-Z0-9-]+)$/.test(
+          /^(GET \/(state|production)|POST \/(slabs|resin-textures)|PUT \/costs|DELETE \/(slabs|resin-textures)\/[a-zA-Z0-9-]+|PATCH \/production\/[a-zA-Z0-9-]+)$/.test(
             `${m.method} ${suffix}`,
           );
         if (!allowed)

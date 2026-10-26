@@ -305,3 +305,64 @@ production-admin браузер не перевірялися; оплата за
 завантаження текстури. Git HTTPS у shell не має чинних credentials;
 підключений GitHub-конектор доступний, публікація ним у межах попереднього
 прямого дозволу власника. tmp/session.lock створено цією сесією.
+
+### Реліз текстур підтверджено — 26.10.2026, #484
+
+Marketplace PR #5 злито: fdcec27e3640eeaf819c98355e39084844add651.
+Vercel dpl_f3tTAhufQudG36tdzXCHamsNnBBT — READY;
+API Railway 82ef4a5f-eccb-41b3-9235-f309035e8fbd — SUCCESS.
+Studio PR #22 злито: 62e3a146bd36e52bf6b3393bea37e5bce9a2f3e1.
+Railway 6ee26210-6162-4bfc-84ad-e07566ced355 — SUCCESS після повтору:
+перший запуск зірвався через недоступний BuildKit daemon, не через код.
+GitHub CI marketplace 40344755372 та Studio 40344773604 — success.
+Живий Chromium: окремий buyer завантажив текстуру, отримав серверну ціну,
+погодив дизайн, додав у кошик, перезавантажив сторінку; image/name збережені,
+мініатюра видима. JavaScript-помилок 0, payment-запитів 0. Тестове неоплачене
+передзамовлення скасоване, тимчасовий Firebase-акаунт видалений.
+Артефакти — /workspace/artifacts/resin-texture-production/; це не файли
+репозиторію, передавати власнику разом із підсумком. Production-вхід до
+адмінки Студії не перевіряли; її assets звіряються з опублікованими файлами.
+
+Публікацію виконано GitHub Contents API: локальні кодові SHA e152cea/4fe15f2
+та 288fbdf/a72d408 відрізняються від remote-історії. Не force-push локальні
+гілки поверх віддалених; після відновлення Git HTTPS робити fetch і звірку.
+Це уточнення журналу передається тільки feature-гілкою після релізу,
+щоб не перебудовувати production через службову документацію.
+
+
+## Приймання і реалізація — 26.10.2026, Codex #02, #485
+
+Прийнято передачу #484 через файли, звірено origin DenisDemenko/Book_Creator,
+master 62e3a14 та marketplace master fdcec27 через GitHub. Серверний запис
+приймання не створювався. Вільний tmp/session.lock створений цією сесією.
+Нова робота: 5 порід + каталог текстур адміністратора. Обидві feature-гілки
+feat/wood-filters-resin-presets опубліковано: Marketplace 3785cba (PR #6),
+Studio 4e2f78a (PR #23); локальні SHA 343d309/9e7adf3 інші, не force-push.
+Blob SHA всіх файлів Git Data tree звірені з локальними перед commit/ref update.
+Міграція API 20261026120000_resin_texture_presets обов'язкова. UI має capability
+check для публікації пресетів; старий API не отримує нових mutation-запитів.
+Цільові API/bridge/browser перевірки пройшли; Next webpack build з CI
+placeholders і API build успішні. Studio tsc локально зупинено через
+навантаження; перевірити CI. Production-вхід до Студії й оплата не тестувались.
+Наступний крок: CI обох PR → merge/deploy у межах чинного дозволу власника,
+звірити deployment SHA, public builder та міст без оплати, додати результат.
+
+### Стан публікації #485 — обмеження автоматичного review
+
+Кодові PR #6 Marketplace і #23 Studio відкриті, не злиті.
+Основні CI 40356964147 та 40356982445 — success; додатковий handoff CI success.
+Vercel preview dpl_GPGHXu9xU7DqkHFUbUjdLFAcd9eo — READY (3785cba).
+Gate B 40356982677: незмінений scripts/test-bookDesignUi.mts очікує 15 тем,
+каталог містить 17. Локально повторено, blob SHA тесту й каталогу master збігаються.
+Auto-review відхилив merge PR #6 двічі: вимагає явного нового підтвердження
+конкретного default-branch merge/production після повідомлення про цей крок.
+Після першої відмови перевірено production branch master у Vercel/Railway
+і наведено попередній прямий дозвіл власника «розгортай ...»; review знову
+відхилив. Не обходити через CLI/ref update/деплой іншої гілки.
+Marketplace live SHA досі fdcec27, Studio live SHA досі 62e3a14.
+Живу міграцію нової таблиці й production QA нового коду НЕ запускали.
+/tmp/verify-wood-presets-production.cjs підготовлений для неплатіжного QA;
+тимчасовий preset має бути видалений у finally. Локальні скриншоти справжні
+для test TokenVerifier/NestJS/PostgreSQL; не видавати за production.
+Наступне: отримати дозвіл на merge #6/#23 і production, виконати та звірити.
+Журнал/HANDOFF доставляються тільки feature-гілкою, окремо від коду.
