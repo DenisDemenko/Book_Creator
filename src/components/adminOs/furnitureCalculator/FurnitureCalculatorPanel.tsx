@@ -310,6 +310,13 @@ export const FurnitureCalculatorPanel: React.FC = () => {
         onOpenCurrencySettings={() => setIsCurrencyModalOpen(true)}
       />
 
+      <div className="mx-auto max-w-7xl px-4 py-4">
+        <p className="mb-3 text-xs text-slate-300">Тарифи конструктора: смола з ціни за літр (густина 1,1 кг/л), фініш і решта витрат на м² базового виробу; металеве підстілля за комплект. Породи й ціна слебів задаються на складі; дерев’яні ніжки — окремою ставкою. Податки та маржа включаються в націнку. Публікація замінить ставки для нових розрахунків.</p>
+        <button type="button" className="rounded-xl border border-cyan-400/40 px-4 py-3 text-sm text-cyan-300" onClick={async()=>{
+          if(!window.confirm('Опублікувати ставки поточного калькулятора для нових розрахунків столів у маркетплейсі?'))return;
+          try{const res=await fetch('/api/admin/slab-tables/publish-costs',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({input,rates})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Помилка публікації');showNotification(`Ставки опубліковано. Базова площа: ${data.referenceAreaM2.toFixed(3)} м².`);}catch(e){showNotification(e instanceof Error?e.message:'Не вдалося опублікувати тарифи.');}
+        }}>Опублікувати тарифи конструктора столів</button>
+      </div>
       {/* Toast Notification */}
       {notification && (
         <div className="fixed bottom-6 right-6 z-50 bg-slate-900/90 text-cyan-300 px-4 py-2.5 rounded-2xl neo-card border border-cyan-400/40 text-xs font-mono shadow-[0_10px_30px_rgba(0,0,0,0.8)]">
