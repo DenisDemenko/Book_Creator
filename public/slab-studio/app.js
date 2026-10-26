@@ -33,11 +33,18 @@
     document.head.append(fonts);
   }
 
-  let db = { slabs: remote.slabs, costs: remote.costs, cart: [], orders: [] };
+  let db = {
+    slabs: remote.slabs,
+    costs: remote.costs,
+    resinTextures: remote.resinTextures || [],
+    cart: [],
+    orders: [],
+  };
   async function reloadRemote() {
     remote = await bridge.request("GET", "/tables/state");
     db.slabs = remote.slabs;
     db.costs = remote.costs;
+    db.resinTextures = remote.resinTextures || [];
     if (admin)
       db.orders = await bridge.request("GET", "/tables/admin/production");
   }
@@ -67,6 +74,7 @@
   const names = {
     builder: ["Магазин", "Конструктор столу"],
     inventory: ["Майстерня", "Бібліотека слебів"],
+    textures: ["Майстерня", "Текстури смоли"],
     costs: ["Майстерня", "Калькулятор витрат"],
     cart: ["Магазин", "Кошик"],
     orders: ["Майстерня", "Виробництво"],
@@ -79,7 +87,7 @@
       name = "inventory";
     if (
       !names[name] ||
-      (!admin && ["inventory", "costs", "orders"].includes(name))
+      (!admin && ["inventory", "costs", "orders", "textures"].includes(name))
     )
       name = "builder";
     if (name === "cart") {
@@ -95,6 +103,7 @@
     location.hash = name;
     if (name === "inventory") renderInventory();
     if (name === "costs") renderCosts();
+    if (name === "textures") renderPresetAdmin();
     if (name === "cart" || name === "orders") renderOrders();
     window.scrollTo(0, 0);
   }
@@ -176,21 +185,52 @@
       '<p class="muted">Композицію змінено. Розрахуйте актуальну вартість.</p>';
     $("designWarning").textContent = "";
   }
+  let librarySpecies = "",
+    inventorySpecies = "";
+  function speciesButtons(id, value, slabs, choose) {
+    const options = [
+      { value: "", label: "Усі породи" },
+      ...WoodSpecies.options(db.slabs),
+    ];
+    $(id).innerHTML = options
+      .map((o) => {
+        const count = slabs.filter(
+          (s) => !o.value || WoodSpecies.key(s.species) === o.value,
+        ).length;
+        return `<button type="button" data-species="${esc(o.value)}" aria-pressed="${value === o.value}">${esc(o.label)} <span>${count}</span></button>`;
+      })
+      .join("");
+    $(id)
+      .querySelectorAll("button")
+      .forEach((b) => (b.onclick = () => choose(b.dataset.species)));
+  }
   function speciesOptions() {
-    const select = $("speciesFilter"),
-      value = select.value;
-    select.innerHTML =
-      '<option value="">Усі породи</option>' +
-      [...new Set(db.slabs.map((s) => s.species))]
-        .map((s) => `<option>${esc(s)}</option>`)
-        .join("");
-    select.value = value;
+    speciesButtons(
+      "speciesFilter",
+      librarySpecies,
+      db.slabs.filter((s) => available(s.id)),
+      (value) => {
+        librarySpecies = value;
+        speciesOptions();
+        renderLibrary();
+      },
+    );
+    speciesButtons(
+      "inventorySpeciesFilter",
+      inventorySpecies,
+      db.slabs,
+      (value) => {
+        inventorySpecies = value;
+        speciesOptions();
+        renderInventory();
+      },
+    );
   }
   function renderLibrary() {
     const items = db.slabs.filter(
       (s) =>
         available(s.id) &&
-        (!$("speciesFilter").value || s.species === $("speciesFilter").value) &&
+        (!librarySpecies || WoodSpecies.key(s.species) === librarySpecies) &&
         s.h >= Number($("minLength").value) &&
         s.w >= Number($("minWidth").value),
     );
@@ -231,7 +271,7 @@
     renderLibrary();
     toast("Слеб додано. Перемістіть його на полотні.");
   }
-  ["speciesFilter", "minLength", "minWidth"].forEach((id) =>
+  ["minLength", "minWidth"].forEach((id) =>
     $(id).addEventListener("input", renderLibrary),
   );
   function readDimensions() {
@@ -302,6 +342,19 @@
   let textureRevision = 0;
   function syncResinTexture() {
     const texture = design.resinTexture;
+    $$("[data-preset-texture]").forEach((b) =>
+      b.setAttribute(
+        "aria-pressed",
+        String(
+          db.resinTextures.some(
+            (t) =>
+              t.id === b.dataset.presetTexture &&
+              t.image === texture?.image &&
+              t.name === texture?.name,
+          ),
+        ),
+      ),
+    );
     $("resinTexturePreview").hidden = !texture;
     if (texture) {
       $("resinTextureThumbnail").src = texture.image;
@@ -360,6 +413,129 @@
     clearResinTexture();
     invalidate();
     renderDesign();
+  };
+  function renderPresetChoices() {
+    const textures = db.resinTextures;
+    $("presetTextureSection").hidden = !textures.length;
+    $("presetTextureChoices").innerHTML = textures
+      .map(
+        (t) =>
+          `<button type="button" data-preset-texture="${t.id}" aria-pressed="false"><img src="${esc(t.image)}" alt="" /><span>${esc(t.name)}</span></button>`,
+      )
+      .join("");
+    $$("[data-preset-texture]").forEach(
+      (b) =>
+        (b.onclick = () => {
+          const t = textures.find((t) => t.id === b.dataset.presetTexture);
+          clearResinTexture();
+          design.resinTexture = { image: t.image, name: t.name };
+          syncResinTexture();
+          invalidate();
+          renderDesign();
+          $("resinTextureStatus").textContent =
+            "Застосовано текстуру майстерні.";
+        }),
+    );
+  }
+  let presetDraft = null,
+    presetDraftRevision = 0,
+    presetSaving = false;
+  function renderPresetAdmin() {
+    const supported = !!remote.capabilities?.resinTexturePresets;
+    $("presetTextureForm").hidden = !supported;
+    $("presetTextureList").innerHTML = db.resinTextures.length
+      ? db.resinTextures
+          .map(
+            (t) =>
+              `<article class="slab-card"><img class="preset-catalog-image" src="${esc(t.image)}" alt="${esc(t.name)}" /><div class="slab-content"><h3>${esc(t.name)}</h3><button type="button" class="text-btn danger" data-delete-texture="${t.id}">Видалити з каталогу</button></div></article>`,
+          )
+          .join("")
+      : '<p class="hint">Ще немає готових текстур. Завантажте перше зображення.</p>';
+    $$("[data-delete-texture]").forEach(
+      (b) =>
+        (b.onclick = async () => {
+          if (
+            !confirm(
+              "Видалити текстуру з каталогу? Збережені замовлення залишаться з цією текстурою.",
+            )
+          )
+            return;
+          b.disabled = true;
+          try {
+            await bridge.request(
+              "DELETE",
+              "/tables/admin/resin-textures/" + b.dataset.deleteTexture,
+            );
+            await reloadRemote();
+            renderPresetAdmin();
+            renderPresetChoices();
+            syncResinTexture();
+            toast("Текстуру видалено з каталогу.");
+          } catch (error) {
+            toast(error.message);
+            b.disabled = false;
+          }
+        }),
+    );
+  }
+  $("choosePresetTexture").onclick = () => $("presetTextureFile").click();
+  $("presetTextureFile").onchange = async (event) => {
+    const file = event.target.files[0];
+    if (!file || presetSaving) return;
+    const revision = ++presetDraftRevision;
+    $("savePresetTexture").disabled = true;
+    $("presetTextureStatus").textContent = "Підготовка зображення…";
+    try {
+      const texture = await ResinTexture.read(file);
+      if (revision !== presetDraftRevision) return;
+      presetDraft = texture;
+      $("presetTextureDraft").src = texture.image;
+      $("presetTextureDraft").hidden = false;
+      if (!$("presetTextureTitle").value.trim())
+        $("presetTextureTitle").value = texture.name.replace(/\.[^.]+$/, "");
+      $("presetTextureStatus").textContent =
+        "Зображення готове. Опублікуйте його для покупців.";
+    } catch (error) {
+      if (revision !== presetDraftRevision) return;
+      $("presetTextureStatus").textContent = error.message;
+    } finally {
+      if (revision === presetDraftRevision) {
+        $("savePresetTexture").disabled = !presetDraft;
+        event.target.value = "";
+      }
+    }
+  };
+  $("presetTextureForm").onsubmit = async (event) => {
+    event.preventDefault();
+    const name = $("presetTextureTitle").value.trim();
+    if (!admin || !presetDraft || !name || presetSaving) return;
+    presetSaving = true;
+    $("savePresetTexture").disabled = true;
+    $("choosePresetTexture").disabled = true;
+    $("presetTextureTitle").disabled = true;
+    try {
+      await bridge.request("POST", "/tables/admin/resin-textures", {
+        name,
+        image: presetDraft.image,
+      });
+      presetDraft = null;
+      $("presetTextureTitle").value = "";
+      $("presetTextureDraft").hidden = true;
+      $("presetTextureDraft").removeAttribute("src");
+      $("presetTextureStatus").textContent =
+        "Текстура опублікована для покупців.";
+      await reloadRemote();
+      renderPresetAdmin();
+      renderPresetChoices();
+      syncResinTexture();
+    } catch (error) {
+      $("presetTextureStatus").textContent = error.message;
+    } finally {
+      presetSaving = false;
+      $("savePresetTexture").disabled = !presetDraft;
+      $("choosePresetTexture").disabled = false;
+      $("presetTextureTitle").disabled = false;
+    }
   };
   $("legs").onchange = () => {
     design.legs = $("legs").value;
@@ -530,12 +706,18 @@
     }
   };
   function renderInventory() {
-    $("inventoryList").innerHTML = db.slabs
-      .map(
-        (s, i) =>
-          `<article class="slab-card"><div class="slab-preview"><span class="slab-number">${esc(s.number)}</span>${slabSvg(s, "inv" + i)}</div><div class="slab-content"><h3>${esc(s.species)} · ${esc(s.number)}</h3><p>${num(s.h)} × ${num(s.w)} × ${num(s.t)} см · ${s.points.length} вершин<br>Площа ${num((Geo.area(s.points) * s.w * s.h) / 10000, 3)} м²<br>${money(s.rate)} / м² ${s.demo ? "· демо" : ""}</p><div class="slab-card-bottom"><span class="badge">${available(s.id) ? "На складі" : "Зарезервовано"}</span><button data-delete="${s.id}" aria-label="Видалити ${esc(s.number)}" ${available(s.id) ? "" : "disabled"}>×</button></div><button class="text-btn" data-vector="${s.id}">Завантажити SVG ↓</button></div></article>`,
-      )
-      .join("");
+    const items = db.slabs.filter(
+      (s) =>
+        !inventorySpecies || WoodSpecies.key(s.species) === inventorySpecies,
+    );
+    $("inventoryList").innerHTML = items.length
+      ? items
+          .map(
+            (s, i) =>
+              `<article class="slab-card"><div class="slab-preview"><span class="slab-number">${esc(s.number)}</span>${slabSvg(s, "inv" + i)}</div><div class="slab-content"><h3>${esc(s.species)} · ${esc(s.number)}</h3><p>${num(s.h)} × ${num(s.w)} × ${num(s.t)} см · ${s.points.length} вершин<br>Площа ${num((Geo.area(s.points) * s.w * s.h) / 10000, 3)} м²<br>${money(s.rate)} / м² ${s.demo ? "· демо" : ""}</p><div class="slab-card-bottom"><span class="badge">${available(s.id) ? "На складі" : "Зарезервовано"}</span><button data-delete="${s.id}" aria-label="Видалити ${esc(s.number)}" ${available(s.id) ? "" : "disabled"}>×</button></div><button class="text-btn" data-vector="${s.id}">Завантажити SVG ↓</button></div></article>`,
+          )
+          .join("")
+      : '<p class="hint">Немає слебів цієї породи.</p>';
     $$("[data-delete]").forEach(
       (b) =>
         (b.onclick = async () => {
@@ -1052,12 +1234,11 @@
       (e) => (e.hidden = true),
     );
   if (!admin) {
-    $$(
-      '[data-view="inventory"],[data-view="costs"],[data-view="orders"],.admin-label',
-    ).forEach((e) => (e.hidden = true));
+    $$('[data-view="inventory"],[data-view="costs"],[data-view="orders"],[data-view="textures"],.admin-label').forEach((e) => (e.hidden = true));
   }
   $("exportData").hidden = !admin;
   speciesOptions();
+  renderPresetChoices();
   syncDimensions();
   renderLibrary();
   renderDesign();

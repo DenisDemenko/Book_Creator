@@ -26,6 +26,7 @@
       <div class="side-label admin-label">ПРОСТІР МАЙСТЕРНІ</div>
       <nav>
         <button data-view="inventory">▤ <span>Бібліотека слебів</span></button
+        ><button data-view="textures">◉ <span>Текстури смоли</span></button
         ><button data-view="costs">⚙ <span>Калькулятор витрат</span></button
         ><button data-view="orders">↗ <span>Виробництво</span></button>
       </nav>
@@ -98,12 +99,7 @@
                 <h2>Оберіть свої слеби <span id="stockCount"></span></h2>
               </div>
               <div class="filters">
-                <select id="speciesFilter" aria-label="Порода дерева">
-                  <option value="">Усі породи</option>
-                  <option>Горіх</option>
-                  <option>Дуб</option>
-                  <option>Ясен</option></select
-                ><label
+                <label
                   >Довжина від, см<input
                     id="minLength"
                     type="number"
@@ -117,6 +113,15 @@
                     placeholder="0"
                 /></label>
               </div>
+            </div>
+            <div class="species-block">
+              <h3>Порода дерева</h3>
+              <div
+                id="speciesFilter"
+                class="species-buttons"
+                role="group"
+                aria-label="Фільтр слебів за породою"
+              ></div>
             </div>
             <div class="slab-grid" id="slabLibrary"></div>
           </div>
@@ -189,7 +194,20 @@
               ></button
               ><span id="colorName">Глибокий океан</span>
             </div>
-            <div class="resin-texture-controls" id="resinTextureControls" hidden>
+            <div
+              class="resin-texture-controls"
+              id="resinTextureControls"
+              hidden
+            >
+              <div id="presetTextureSection" hidden>
+                <h3>Текстури від майстерні</h3>
+                <div
+                  id="presetTextureChoices"
+                  class="preset-texture-choices"
+                  role="group"
+                  aria-label="Готові текстури смоли"
+                ></div>
+              </div>
               <button
                 type="button"
                 class="secondary full"
@@ -281,7 +299,59 @@
           Фото зверху, масштаб за відомим відрізком і перевірений векторний
           контур — основа точного розрахунку.
         </div>
+        <div class="species-block">
+          <h2>Порода дерева</h2>
+          <div
+            id="inventorySpeciesFilter"
+            class="species-buttons"
+            role="group"
+            aria-label="Фільтр складу за породою"
+          ></div>
+        </div>
         <div class="inventory-grid" id="inventoryList"></div>
+      </section>
+      <section id="textures" class="view" hidden>
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">АДМІНПАНЕЛЬ · МАТЕРІАЛИ</p>
+            <h1>Текстури смоли<span>.</span></h1>
+            <p class="muted">
+              Завантажте готові текстури, які покупці зможуть вибрати у
+              конструкторі.
+            </p>
+          </div>
+        </div>
+        <form id="presetTextureForm" class="panel texture-upload-form">
+          <label
+            >Назва текстури<input
+              id="presetTextureTitle"
+              required
+              maxlength="120"
+              placeholder="Наприклад, Бірюзовий мармур"
+          /></label>
+          <button type="button" class="secondary" id="choosePresetTexture">
+            ↑ Завантажити зображення
+          </button>
+          <input
+            type="file"
+            id="presetTextureFile"
+            accept="image/png,image/jpeg,image/webp"
+            hidden
+            aria-label="Готова текстура смоли"
+          />
+          <img
+            id="presetTextureDraft"
+            alt="Попередній вигляд нової текстури"
+            hidden
+          />
+          <p class="hint" id="presetTextureStatus" role="status">
+            PNG, JPG або WEBP · до 12 МБ
+          </p>
+          <button class="primary" type="submit" id="savePresetTexture" disabled>
+            Опублікувати для покупців
+          </button>
+        </form>
+        <div class="inventory-grid" id="presetTextureList"></div>
       </section>
       <section id="costs" class="view" hidden>
         <div class="page-heading">
@@ -399,6 +469,8 @@
                 <option>Горіх</option>
                 <option>Дуб</option>
                 <option>Ясен</option>
+                <option>Каповий тополь</option>
+                <option>Бук</option>
               </datalist></label
             ><label
               >Відстань між точками, см<input
@@ -447,6 +519,7 @@
     <script src="geometry.js"></script>
     <script src="bridge.js"></script>
     <script src="resin-texture.js"></script>
+    <script src="wood-species.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
