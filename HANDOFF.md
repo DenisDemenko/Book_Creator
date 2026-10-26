@@ -366,3 +366,20 @@ Marketplace live SHA досі fdcec27, Studio live SHA досі 62e3a14.
 для test TokenVerifier/NestJS/PostgreSQL; не видавати за production.
 Наступне: отримати дозвіл на merge #6/#23 і production, виконати та звірити.
 Журнал/HANDOFF доставляються тільки feature-гілкою, окремо від коду.
+
+
+### Реліз #485 підтверджено після відповіді власника
+
+Власник відповів «Додав підтвердження.» Marketplace #6 уже злитий о 16:40 UTC;
+Studio #23 успішно злитий після підтвердження. Попереднє блокування зняте.
+Marketplace PR #6: 956a3422d81fbc6643c5a4a57934b1c6952b946d; Vercel dpl_EEjzxx8gRVXAvm8Uyob5bsPavqVc READY; API Railway 2bb88df4-a1c1-478d-be81-d4faa571abf2 SUCCESS. Studio PR #23: d49f02cf7abc72aa16d4c64da5595919404bfcdd; Railway 61010e6e-abca-4eb2-86b0-43094ff8e968 SUCCESS.
+Міграція 20261026120000_resin_texture_presets підтверджена runtime logs.
+Живий Chromium public buyer: 5 порід, правильні кількості, preset через
+серверний міст → вибір → quote 201, desktop/mobile; 0 JS errors/payment requests.
+Тимчасовий демо-preset видалено. Постійні реальні текстури додає адміністратор.
+4 static assets Студії звірені побайтово; authenticated production admin UI
+не тестували. Marketplace merge CI 40361357265 success; Studio merge CI
+40361571211 ще виконується, звірити фінальний статус перед завершенням.
+Артефакти /workspace/artifacts/wood-presets-production/, verification.json.
+Код завершений; службова документація тільки у feature-гілку після релізу.
+Локальні історії й remote різні через GitHub Git Data API, не force-push.
