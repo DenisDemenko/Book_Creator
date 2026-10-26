@@ -1,3 +1,4 @@
+import { SlabInventoryPanel } from './SlabInventoryPanel';
 /**
  * «Адмін панель» — окрема сторінка керування платформою.
  *
@@ -314,6 +315,7 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser, onOpenPage }
     if (view === 'api-keys') return <ApiKeysView authUser={authUser} />;
     if (view === 'moderation') return <AdminModerationView />;
     if (view === 'products') return <AdminProductsView />;
+    if (view === 'slab-tables') return <SlabInventoryPanel />;
     if (view === 'price-management') return <FurnitureCalculatorPanel />;
     if (view === 'procurement') return <AdminProcurementView />;
     if (view === 'quality') return <AdminQualityView />;

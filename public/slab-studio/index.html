@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Fusion Lab — Конструктор столів</title>
+    <meta
+      name="description"
+      content="Бібліотека дерев’яних слебів та конструктор столів з епоксидною смолою"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <a class="brand" href="#builder"
+        >slab<span>®</span><small>СТУДІЯ ПРИРОДНИХ ФОРМ</small></a
+      >
+      <div class="side-label">ВАШ МАЙБУТНІЙ СТІЛ</div>
+      <nav>
+        <button data-view="builder" class="active">
+          ◈ <span>Конструктор</span><b>01</b></button
+        ><button data-view="cart">
+          ▢ <span>Кошик</span><b id="cartCount">0</b>
+        </button>
+      </nav>
+      <div class="side-label admin-label">ПРОСТІР МАЙСТЕРНІ</div>
+      <nav>
+        <button data-view="inventory">▤ <span>Бібліотека слебів</span></button
+        ><button data-view="textures">◉ <span>Текстури смоли</span></button
+        ><button data-view="costs">⚙ <span>Калькулятор витрат</span></button
+        ><button data-view="orders">↗ <span>Виробництво</span></button>
+      </nav>
+      <div class="sidebar-bottom">
+        <span class="dot"></span> Модуль Fusion Lab<small
+          >Склад і розрахунки зберігаються<br />на сервері маркетплейсу.</small
+        ><button class="text-btn" id="exportData">Експортувати дані ↗</button>
+      </div>
+    </aside>
+    <main>
+      <header>
+        <div>
+          <span id="crumb">Магазин</span> <span class="muted">/</span>
+          <strong id="pageName">Конструктор столу</strong>
+        </div>
+        <span class="header-mark">WOOD · RESIN · YOUR VISION</span>
+      </header>
+      <section id="builder" class="view">
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">СТВОРЕНО ПРИРОДОЮ. СПРОЄКТОВАНО ВАМИ.</p>
+            <h1>Стіл із вашим характером<span>.</span></h1>
+            <p class="muted">
+              Оберіть дерево. Знайдіть форму. Створіть єдину композицію.
+            </p>
+          </div>
+          <button class="secondary" id="resetDesign">↺ Почати заново</button>
+        </div>
+        <div class="builder-grid">
+          <div class="studio">
+            <div class="studio-bar">
+              <span><i class="dot"></i> Вигляд зверху · 2D</span
+              ><span id="scaleLabel">Усі розміри в сантиметрах</span>
+            </div>
+            <div
+              id="workArea"
+              tabindex="0"
+              aria-label="Полотно конструктора столу. Виберіть слеб і рухайте стрілками."
+            >
+              <svg
+                id="design"
+                viewBox="0 0 260 200"
+                role="img"
+                aria-label="Композиція столу"
+              ></svg>
+              <div class="canvas-empty" id="canvasEmpty">
+                Додайте слеби з бібліотеки нижче
+              </div>
+            </div>
+            <div class="studio-footer">
+              <span>↔ Перетягуйте слеби, щоб задати проміжок</span
+              ><span id="selectionLabel">Оберіть слеб для редагування</span>
+            </div>
+            <div class="selected-tools" id="selectedTools" hidden>
+              <strong id="selectedName"></strong
+              ><label>X, см<input id="pieceX" type="number" step="0.5" /></label
+              ><label>Y, см<input id="pieceY" type="number" step="0.5" /></label
+              ><label
+                >Поворот, °<input
+                  id="pieceAngle"
+                  type="number"
+                  step="1" /></label
+              ><button id="removePiece" class="text-btn danger">
+                Видалити
+              </button>
+            </div>
+            <div class="library-head">
+              <div>
+                <p class="eyebrow">МАТЕРІАЛИ З ІСТОРІЄЮ</p>
+                <h2>Оберіть свої слеби <span id="stockCount"></span></h2>
+              </div>
+              <div class="filters">
+                <label
+                  >Довжина від, см<input
+                    id="minLength"
+                    type="number"
+                    min="0"
+                    placeholder="0" /></label
+                ><label
+                  >Ширина від, см<input
+                    id="minWidth"
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                /></label>
+              </div>
+            </div>
+            <div class="species-block">
+              <h3>Порода дерева</h3>
+              <div
+                id="speciesFilter"
+                class="species-buttons"
+                role="group"
+                aria-label="Фільтр слебів за породою"
+              ></div>
+            </div>
+            <div class="slab-grid" id="slabLibrary"></div>
+          </div>
+          <aside class="config">
+            <div class="config-title">
+              <span>01</span>
+              <h2>Параметри столу</h2>
+            </div>
+            <label class="field-title">Форма стільниці</label>
+            <div class="shape-options">
+              <button data-shape="square">
+                <i class="square-icon"></i>Квадрат</button
+              ><button data-shape="round"><i class="round-icon"></i>Коло</button
+              ><button data-shape="oval" class="active">
+                <i class="oval-icon"></i>Овал
+              </button>
+            </div>
+            <div class="field-row">
+              <label
+                >Довжина, см<input
+                  id="tableL"
+                  type="number"
+                  min="40"
+                  max="350"
+                  value="180" /></label
+              ><label
+                >Ширина, см<input
+                  id="tableW"
+                  type="number"
+                  min="40"
+                  max="180"
+                  value="90"
+              /></label>
+            </div>
+            <label class="block-label"
+              >Товщина стільниці, см<input
+                id="tableT"
+                type="number"
+                min="1"
+                max="15"
+                step="0.1"
+                value="4"
+            /></label>
+            <p class="hint">
+              Товщина слебів має відповідати стільниці. Виступи за межами форми
+              будуть обрізані.
+            </p>
+            <label class="field-title">Колір епоксидної смоли</label>
+            <div id="resinColors" class="color-options">
+              <button
+                data-color="#24474b"
+                class="active"
+                style="--color: #24474b"
+                aria-label="Глибокий океан"
+              ></button
+              ><button
+                data-color="#242726"
+                style="--color: #242726"
+                aria-label="Графіт"
+              ></button
+              ><button
+                data-color="#b5c4b9"
+                style="--color: #b5c4b9"
+                aria-label="Прозорий шавлієвий"
+              ></button
+              ><button
+                data-color="#d0ae79"
+                style="--color: #d0ae79"
+                aria-label="Бурштин"
+              ></button
+              ><span id="colorName">Глибокий океан</span>
+            </div>
+            <div
+              class="resin-texture-controls"
+              id="resinTextureControls"
+              hidden
+            >
+              <div id="presetTextureSection" hidden>
+                <h3>Текстури від майстерні</h3>
+                <div
+                  id="presetTextureChoices"
+                  class="preset-texture-choices"
+                  role="group"
+                  aria-label="Готові текстури смоли"
+                ></div>
+              </div>
+              <button
+                type="button"
+                class="secondary full"
+                id="uploadResinTexture"
+              >
+                ↑ Завантажити текстуру смоли
+              </button>
+              <input
+                id="resinTextureFile"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                aria-label="Зображення текстури епоксидної смоли"
+                hidden
+              />
+              <p class="hint" id="resinTextureStatus" role="status">
+                PNG, JPG або WEBP · до 12 МБ
+              </p>
+              <div
+                id="resinTexturePreview"
+                class="resin-texture-preview"
+                hidden
+              >
+                <img
+                  id="resinTextureThumbnail"
+                  alt="Попередній вигляд текстури смоли"
+                />
+                <span id="resinTextureName"></span>
+                <button
+                  type="button"
+                  id="removeResinTexture"
+                  class="text-btn danger"
+                  aria-label="Видалити текстуру смоли"
+                >
+                  Видалити
+                </button>
+              </div>
+              <p class="hint">
+                Зображення покриває заливку між слебами. Щоб повернути суцільний
+                колір, видаліть текстуру або оберіть колір вище.
+              </p>
+            </div>
+            <label class="block-label"
+              >Ніжки<select id="legs">
+                <option value="metal">Металеві · трапеція</option>
+                <option value="wood">Дерев’яні · дуб</option>
+                <option value="none">Без ніжок</option>
+              </select></label
+            >
+            <div class="price-panel">
+              <div class="price-caption">ВАША КОМПОЗИЦІЯ</div>
+              <div id="estimate">
+                <p class="muted">
+                  Додайте слеби й розрахуйте вартість готового столу.
+                </p>
+              </div>
+              <p id="designWarning" class="warning" role="status"></p>
+              <button class="primary full" id="calculate">
+                Розрахувати вартість <span>↗</span></button
+              ><label id="approveLabel" class="check" hidden
+                ><input type="checkbox" id="approvePrice" />Погоджую
+                конфігурацію та вартість</label
+              ><button class="primary full" id="addCart" hidden>
+                У передзамовлення →</button
+              ><small>Передоплата 50% · решта після виготовлення</small>
+            </div>
+            <div class="craft-note">
+              ✳
+              <p>
+                Жодних однакових столів.<br /><span
+                  >Кожен слеб має власний природний контур.</span
+                >
+              </p>
+            </div>
+          </aside>
+        </div>
+      </section>
+      <section id="inventory" class="view" hidden>
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">АДМІНПАНЕЛЬ · СКЛАД</p>
+            <h1>Бібліотека слебів<span>.</span></h1>
+            <p class="muted">
+              Фото, векторний контур та фізичний масштаб кожної заготовки.
+            </p>
+          </div>
+          <button class="primary" id="newSlab">+ Додати слеб</button>
+        </div>
+        <div class="notice">
+          Фото зверху, масштаб за відомим відрізком і перевірений векторний
+          контур — основа точного розрахунку.
+        </div>
+        <div class="species-block">
+          <h2>Порода дерева</h2>
+          <div
+            id="inventorySpeciesFilter"
+            class="species-buttons"
+            role="group"
+            aria-label="Фільтр складу за породою"
+          ></div>
+        </div>
+        <div class="inventory-grid" id="inventoryList"></div>
+      </section>
+      <section id="textures" class="view" hidden>
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">АДМІНПАНЕЛЬ · МАТЕРІАЛИ</p>
+            <h1>Текстури смоли<span>.</span></h1>
+            <p class="muted">
+              Завантажте готові текстури, які покупці зможуть вибрати у
+              конструкторі.
+            </p>
+          </div>
+        </div>
+        <form id="presetTextureForm" class="panel texture-upload-form">
+          <label
+            >Назва текстури<input
+              id="presetTextureTitle"
+              required
+              maxlength="120"
+              placeholder="Наприклад, Бірюзовий мармур"
+          /></label>
+          <button type="button" class="secondary" id="choosePresetTexture">
+            ↑ Завантажити зображення
+          </button>
+          <input
+            type="file"
+            id="presetTextureFile"
+            accept="image/png,image/jpeg,image/webp"
+            hidden
+            aria-label="Готова текстура смоли"
+          />
+          <img
+            id="presetTextureDraft"
+            alt="Попередній вигляд нової текстури"
+            hidden
+          />
+          <p class="hint" id="presetTextureStatus" role="status">
+            PNG, JPG або WEBP · до 12 МБ
+          </p>
+          <button class="primary" type="submit" id="savePresetTexture" disabled>
+            Опублікувати для покупців
+          </button>
+        </form>
+        <div class="inventory-grid" id="presetTextureList"></div>
+      </section>
+      <section id="costs" class="view" hidden>
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">АДМІНПАНЕЛЬ · ЦІНОУТВОРЕННЯ</p>
+            <h1>Калькулятор витрат<span>.</span></h1>
+            <p class="muted">
+              Ці значення використовуються у нових розрахунках конструктора.
+            </p>
+          </div>
+        </div>
+        <form id="costForm" class="panel cost-form"></form>
+      </section>
+      <section id="cart" class="view" hidden>
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">МАГАЗИН · ПЕРЕДЗАМОВЛЕННЯ</p>
+            <h1>Ваш майбутній стіл<span>.</span></h1>
+            <p class="muted">
+              Конфігурація та розрахунок фіксуються на момент додавання.
+            </p>
+          </div>
+        </div>
+        <div class="notice">
+          Тестовий сценарій: кнопка демонстрації оплати не списує гроші. Реальна
+          оплата й резервування потребують підключення маркетплейсу.
+        </div>
+        <div id="cartList"></div>
+      </section>
+      <section id="orders" class="view" hidden>
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">АДМІНПАНЕЛЬ · ВИРОБНИЦТВО</p>
+            <h1>Від задуму до столу<span>.</span></h1>
+            <p class="muted">
+              Передзамовлення з демонстраційною передоплатою 50%.
+            </p>
+          </div>
+        </div>
+        <div id="ordersList"></div>
+      </section>
+      <footer>
+        <span>FUSION LAB</span><span>Природні форми. Точні рішення.</span
+        ><span>Fusion Lab · UAH</span>
+      </footer>
+    </main>
+    <dialog id="slabDialog">
+      <form id="slabForm">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">ОЦИФРУВАННЯ ЗАГОТОВКИ</p>
+            <h2>Новий слеб</h2>
+          </div>
+          <button
+            type="button"
+            id="closeSlab"
+            class="icon-btn"
+            aria-label="Закрити"
+          >
+            ×
+          </button>
+        </div>
+        <div class="upload-layout">
+          <div>
+            <label class="upload-zone"
+              >↑ Завантажити фото<input
+                id="slabPhoto"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+              /><small
+                >PNG, JPG, WEBP · до 12 МБ · однотонний контрастний фон</small
+              ></label
+            >
+            <section
+              class="calibration-panel"
+              aria-label="Реальний розмір і масштаб"
+            >
+              <h3>1. Реальний розмір і масштаб</h3>
+              <label
+                >Відстань між двома точками, см<input
+                  id="knownDistance"
+                  type="number"
+                  min="0.1"
+                  max="1000"
+                  step="0.1"
+                  value="50"
+                  required
+              /></label>
+              <p class="hint">
+                Введіть реальну довжину слеба або відрізка лінійки. Позначте
+                його кінці на фото. Всі розміри дерева й стільниці
+                використовують один масштаб.
+              </p>
+              <div class="toolbar">
+                <button type="button" class="secondary" id="calibrate">
+                  Позначити дві точки</button
+                ><button type="button" class="secondary" id="editRuler">
+                  Пересунути лінійку
+                </button>
+              </div>
+              <div id="scaleInfo" class="notice" role="status">
+                Масштаб не задано
+              </div>
+            </section>
+            <div class="photo-stage">
+              <canvas
+                id="photoCanvas"
+                width="720"
+                height="480"
+                aria-label="Фото слеба та його контур"
+              ></canvas>
+            </div>
+            <p id="photoHint" class="hint" role="status">
+              Фото строго зверху. Рівномірний масштаб не усуває перспективу.
+            </p>
+            <div class="photo-view-controls">
+              <label
+                >Збільшення фото<input
+                  id="photoZoom"
+                  type="range"
+                  min="1"
+                  max="8"
+                  step="0.1"
+                  value="1"
+              /></label>
+              <button type="button" id="panPhoto" class="secondary">
+                Пересунути фото
+              </button>
+              <button type="button" id="resetPhotoView" class="secondary">
+                Фото повністю
+              </button>
+            </div>
+            <h3>2. Обведіть справжній край дерева</h3>
+            <div
+              class="toolbar contour-tools"
+              role="group"
+              aria-label="Спосіб обведення"
+            >
+              <button type="button" class="secondary" id="manual">
+                Малювати лінією
+              </button>
+              <button type="button" class="secondary" id="pointContour">
+                Ставити точки
+              </button>
+              <button type="button" class="secondary" id="editContour">
+                Редагувати вершини
+              </button>
+              <button type="button" class="secondary" id="trace">
+                Обвести автоматично
+              </button>
+            </div>
+            <div class="toolbar">
+              <button type="button" class="secondary" id="closeContour">
+                Замкнути контур
+              </button>
+              <button type="button" class="secondary" id="undoContour">
+                Прибрати останню точку
+              </button>
+              <button type="button" class="text-btn danger" id="clearContour">
+                Очистити контур
+              </button>
+            </div>
+            <p class="hint">
+              Лінія: ведіть мишкою або стилусом до початкової точки. Точки:
+              клацайте по краю й замкніть контур. Для точного обведення
+              збільшуйте фото; пересування фото не змінює фізичних розмірів.
+              Shift + клік додає вершину, Alt + клік видаляє.
+            </p>
+            <div id="contourInfo" class="notice" role="status">
+              Контур не створено
+            </div>
+            <div class="toolbar">
+              <button
+                type="button"
+                class="secondary"
+                id="exportContourSVG"
+                disabled
+              >
+                SVG · 1:1 · мм ↓
+              </button>
+              <button
+                type="button"
+                class="secondary"
+                id="exportContourDXF"
+                disabled
+              >
+                DXF 2000 · 1:1 · мм ↓
+              </button>
+            </div>
+          </div>
+          <div class="upload-fields">
+            <label
+              >Номер слеба<input
+                id="slabNumber"
+                required
+                maxlength="40"
+                placeholder="SL-005" /></label
+            ><label
+              >Порода дерева<input
+                id="slabSpecies"
+                required
+                maxlength="40"
+                list="speciesList"
+                value="Горіх"
+              /><datalist id="speciesList">
+                <option>Горіх</option>
+                <option>Дуб</option>
+                <option>Ясен</option>
+                <option>Каповий тополь</option>
+                <option>Бук</option>
+              </datalist></label
+            ><label
+              >Допуск фону: <output id="toleranceOut">55</output
+              ><input
+                id="tolerance"
+                type="range"
+                min="10"
+                max="180"
+                value="55" /></label
+            ><label
+              >Товщина, см<input
+                id="slabThickness"
+                required
+                type="number"
+                min="1"
+                max="15"
+                step="0.1"
+                value="4" /></label
+            ><label
+              >Ціна дерева, грн/м²<input
+                id="slabRate"
+                required
+                type="number"
+                min="0"
+                max="1000000"
+                value="8500"
+            /></label>
+            <label class="contour-confirmation"
+              ><input type="checkbox" id="contourVerified" /> Підтверджую, що
+              замкнутий контур відповідає краю справжнього слеба, а масштаб
+              задано за виміряною відстанню.</label
+            >
+            <button id="saveSlab" class="primary full" type="submit" disabled>
+              Зберегти на склад →
+            </button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+    <div id="toast" role="status"></div>
+    <script src="geometry.js"></script>
+    <script src="bridge.js"></script>
+    <script src="resin-texture.js"></script>
+    <script src="wood-species.js"></script>
+    <script src="slab-contour.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
