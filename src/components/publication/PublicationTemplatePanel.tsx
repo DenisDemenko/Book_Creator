@@ -11,6 +11,7 @@ import {
 } from '../../data/bookDesignThemeCatalog';
 import { PAGE_FORMAT_PRESETS, applyPageFormatPreset } from '../../utils/pageFormatPresets';
 import { useLanguage } from '../../i18n/LanguageContext';
+import { TemplateWorkshop } from './TemplateWorkshop';
 
 interface Props {
   book: Book;
@@ -91,7 +92,7 @@ export const PublicationTemplatePanel: React.FC<Props> = ({ book, onUpdateBook }
           </p>
         </div>
         <div className="text-[11px] text-slate-300 rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-2">
-          Зараз: <b className="text-amber-200">{active.label}</b>
+          Зараз: <b className="text-amber-200">{layout.customDesignTheme ? `${layout.customDesignTheme.name} (на основі ${getBookDesignThemeCard(layout.customDesignTheme.basedOn || activeThemeId).label})` : active.label}</b>
           {!explicit && <span className="text-slate-500"> (за оформленням Студії)</span>}
           <span className="text-slate-500"> · {t(PAGE_FORMAT_PRESETS.find((p) => p.id === layout.formatPreset)?.labelKey || 'layoutView.preset6x9Label')}</span>
         </div>
@@ -131,6 +132,8 @@ export const PublicationTemplatePanel: React.FC<Props> = ({ book, onUpdateBook }
           Щоб побачити тему, оберіть нижче рушій DesignCraft і створіть точний PDF.
         </p>
       </div>
+
+      <TemplateWorkshop book={book} activeThemeId={activeThemeId} onUpdateBook={onUpdateBook} />
     </section>
   );
 };

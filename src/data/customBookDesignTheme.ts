@@ -167,11 +167,60 @@ export interface DesignerEntityStyle {
     sides?: Array<'top' | 'right' | 'bottom' | 'left'>;
   };
   paddingMm?: { top: number; right: number; bottom: number; left: number };
+  /** Відступи абзацу в пунктах (читаються зі стилів DesignCraft при імпорті шаблону). */
+  spaceBeforePt?: number;
+  spaceAfterPt?: number;
+  firstLineIndentPt?: number;
   marginMm?: { top: number; right: number; bottom: number; left: number };
   radiusMm?: number;
   before?: string;
   after?: string;
 }
+
+/**
+ * Фон смислового блоку «за опцією» — діє поверх БУДЬ-ЯКОГО шаблону (вбудованого чи власного).
+ * `color: null` — явно без фону. Ключі — назви смислових стилів (Quote, Letter, ChatMessage…).
+ */
+export type BlockBackgroundStyleId =
+  | 'Quote' | 'Epigraph' | 'Letter' | 'InnerThought' | 'ChatMessage' | 'Caption' | 'LocationTime'
+  | 'SystemMessage' | 'Evidence' | 'Lore' | 'CaseStudy' | 'KeyIdea' | 'Footnote';
+
+export interface BlockBackground {
+  color: string | null;
+  /** 0..1, насиченість фону. */
+  opacity?: number;
+}
+
+export type BlockBackgrounds = Partial<Record<BlockBackgroundStyleId, BlockBackground>>;
+
+/** Блоки, яким можна задати фон, і їхні підписи в інтерфейсі. */
+export const BLOCK_BACKGROUND_TARGETS: ReadonlyArray<{ id: BlockBackgroundStyleId; labelUk: string }> = [
+  { id: 'Quote', labelUk: 'Цитата' },
+  { id: 'Epigraph', labelUk: 'Епіграф' },
+  { id: 'Letter', labelUk: 'Лист' },
+  { id: 'InnerThought', labelUk: 'Внутрішня думка' },
+  { id: 'ChatMessage', labelUk: 'Повідомлення / чат' },
+  { id: 'SystemMessage', labelUk: 'Системне повідомлення' },
+  { id: 'LocationTime', labelUk: 'Локація / час' },
+  { id: 'Evidence', labelUk: 'Доказ / досьє' },
+  { id: 'Lore', labelUk: 'Lore / легенда світу' },
+  { id: 'CaseStudy', labelUk: 'Case Study' },
+  { id: 'KeyIdea', labelUk: 'Ключова ідея' },
+  { id: 'Caption', labelUk: 'Підпис ілюстрації' },
+  { id: 'Footnote', labelUk: 'Виноска' },
+] as const;
+
+/** Готова палітра м'яких фонів (світлі, щоб темний текст лишався читабельним). */
+export const BLOCK_BACKGROUND_PALETTE: ReadonlyArray<{ id: string; labelUk: string; color: string }> = [
+  { id: 'paper', labelUk: 'Папір', color: '#F5EFE0' },
+  { id: 'sand', labelUk: 'Пісок', color: '#EFE4CF' },
+  { id: 'rose', labelUk: 'Рожевий', color: '#F8E3E6' },
+  { id: 'peach', labelUk: 'Персик', color: '#FBE6D4' },
+  { id: 'mint', labelUk: "М'ята", color: '#DFF1E6' },
+  { id: 'sky', labelUk: 'Небо', color: '#DDEBF7' },
+  { id: 'lavender', labelUk: 'Лаванда', color: '#E7E0F5' },
+  { id: 'grey', labelUk: 'Сірий', color: '#E7E9EC' },
+] as const;
 
 export interface DesignerCustomBlock {
   id: string;

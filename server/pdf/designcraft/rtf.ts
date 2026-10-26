@@ -1,5 +1,7 @@
 import { bookToMarkdown, type MarkdownImage } from '../bookToMarkdown';
 import type { PdfBookInput, PdfLayoutSpec } from '../pdfTypes';
+import { clamp, customEntityStyle, customFontFamily, customFontStyle, semanticEntity } from './styleCommands';
+import type { DesignerEntityStyle, DesignerThemeEntity } from '../../../src/data/customBookDesignTheme';
 import {
   getBookDesignTheme,
   type BookDesignTheme,
@@ -196,11 +198,21 @@ export function buildDesigncraftRtf(
   const bodyPtBase = Number(spec.baseFontSize) > 0 ? Number(spec.baseFontSize) : 11;
   const h1PtBase = Number(spec.chapterTitle?.fontSize) > 0 ? Number(spec.chapterTitle?.fontSize) : Math.max(18, bodyPtBase * 1.8);
   const h2PtBase = Number(spec.sectionTitle?.fontSize) > 0 ? Number(spec.sectionTitle?.fontSize) : Math.max(13, bodyPtBase * 1.18);
-  const bodyPt = Math.max(8, bodyPtBase + (theme?.bodySizeDelta || 0));
-  const h1Pt = Math.max(12, h1PtBase + (theme?.chapterSizeDelta || 0));
-  const h2Pt = Math.max(10, h2PtBase + (theme?.sectionSizeDelta || 0));
-  const bodyFont = theme?.bodyFont || 'DejaVu Serif';
-  const headingFont = theme?.headingFont || 'DejaVu Serif';
+  // Власний шаблон (імпортований з DesignCraft) і копія шаблону для правки.
+  // Копія (`templateSpecimen`): абзаци БЕЗ локальних шрифту й розміру, інакше правка стилю у вікні DesignCraft
+  // не змінила б текст — локальне форматування сильніше за стиль.
+  const specimen = (spec as { templateSpecimen?: unknown }).templateSpecimen === true;
+  const customOf = (entity: DesignerThemeEntity | null): DesignerEntityStyle | null =>
+    entity ? customEntityStyle(spec as PdfLayoutSpec, entity) : null;
+  const bodyCustom = customOf('body');
+  const h1Custom = customOf('heading-1');
+  const h2Custom = customOf('heading-2');
+  const bodyPt = clamp(bodyCustom?.fontSizePt, 8, 24, Math.max(8, bodyPtBase + (theme?.bodySizeDelta || 0)));
+  const h1Pt = clamp(h1Custom?.fontSizePt, 12, 56, Math.max(12, h1PtBase + (theme?.chapterSizeDelta || 0)));
+  const h2Pt = clamp(h2Custom?.fontSizePt, 9, 36, Math.max(10, h2PtBase + (theme?.sectionSizeDelta || 0)));
+  const bodyFont = customFontFamily(spec as PdfLayoutSpec, bodyCustom?.fontSlot) || theme?.bodyFont || 'DejaVu Serif';
+  const h1Font = customFontFamily(spec as PdfLayoutSpec, h1Custom?.fontSlot) || theme?.headingFont || 'DejaVu Serif';
+  const h2Font = customFontFamily(spec as PdfLayoutSpec, h2Custom?.fontSlot) || theme?.headingFont || 'DejaVu Serif';
   const semanticStylesUsed = new Set<SemanticParagraphStyle>();
 
   const lines: string[] = ['<ASCII-WIN>', '<Version:7>'];
@@ -222,11 +234,12 @@ export function buildDesigncraftRtf(
       }
       chapterSeen = true;
       semanticStylesUsed.add('Heading 1');
+      const h1Face = customFontStyle(h1Custom, 'Bold') || 'Bold';
       lines.push(
         paragraph(
           'Heading 1',
-          taggedInline(block.slice(2), headingFont, 'Bold'),
-          `<cFont:${headingFont}><cTypeface:Bold><cSize:${h1Pt}>`,
+          taggedInline(block.slice(2), specimen ? '' : h1Font, specimen ? '' : h1Face),
+          specimen ? '' : `<cFont:${h1Font}><cTypeface:${h1Face}><cSize:${h1Pt}>`,
           true
         )
       );
@@ -235,11 +248,12 @@ export function buildDesigncraftRtf(
 
     if (block.startsWith('## ')) {
       semanticStylesUsed.add('Heading 2');
+      const h2Face = customFontStyle(h2Custom, 'Bold') || 'Bold';
       lines.push(
         paragraph(
           'Heading 2',
-          taggedInline(block.slice(3), headingFont, 'Bold'),
-          `<cFont:${headingFont}><cTypeface:Bold><cSize:${h2Pt}>`,
+          taggedInline(block.slice(3), specimen ? '' : h2Font, specimen ? '' : h2Face),
+          specimen ? '' : `<cFont:${h2Font}><cTypeface:${h2Face}><cSize:${h2Pt}>`,
           true
         )
       );
@@ -248,18 +262,28 @@ export function buildDesigncraftRtf(
 
     for (const sourceLine of block.split('\n').map((v) => v.trim()).filter(Boolean)) {
       const semantic = semanticOfLine(sourceLine, theme);
-      const rule = semanticRule(theme, semantic.style);
+      const entity = semantic.style === 'Body' ? 'body' : semanticEntity(semantic.style);
+      const custom = customOf(entity);
+      // Власний шаблон може вмикати блоки, яких вбудований шаблон не використовує.
+      const rule = semanticRule(theme, semantic.style) ?? (custom?.enabled && semantic.style !== 'Body' ? ({ enabled: true } as SemanticStyleRule) : null);
       // A theme may not expose a specialist style. The text must still render,
       // so fall back to Body while preserving every character of the manuscript.
       const style: SemanticParagraphStyle = semantic.style === 'Body' || rule ? semantic.style : 'Body';
-      const displayText = rule?.uppercase ? semantic.text.toLocaleUpperCase('uk-UA') : semantic.text;
-      const local = semanticLocal(theme, style, bodyPt, bodyFont);
+      const displayText = (custom?.uppercase ?? rule?.uppercase) ? semantic.text.toLocaleUpperCase('uk-UA') : semantic.text;
+      const base = semanticLocal(theme, style, bodyPt, bodyFont);
+      // Локальне форматування абзацу береться з власного шаблону, коли він є, а в копії шаблону його немає зовсім.
+      const customFont = customFontFamily(spec as PdfLayoutSpec, custom?.fontSlot);
+      const customFace = custom ? customFontStyle(custom, undefined) : undefined;
+      const font = customFont || base.font;
+      const typeface = customFace ?? base.typeface;
+      const size = custom?.fontSizePt ? clamp(custom.fontSizePt, 7, 36, bodyPt) : style === 'Caption' || style === 'Footnote' ? Math.max(7.5, bodyPt - 1.5) : bodyPt;
+      const localTags = specimen ? '' : `<cFont:${font}>${typeface ? `<cTypeface:${typeface}>` : ''}<cSize:${size}>`;
       semanticStylesUsed.add(style);
       lines.push(
         paragraph(
           style,
-          taggedInline(displayText, local.font, local.typeface),
-          local.local,
+          taggedInline(displayText, specimen ? '' : font, specimen ? '' : typeface),
+          localTags,
           true
         )
       );

@@ -759,6 +759,13 @@ export interface BookLayoutConfig {
    * свідомо, нічого не змінює автоматично.
    */
   designTheme?: 'classic' | 'editorial';
+  /**
+   * Власний шаблон верстки (стилі абзаців, імпортовані з DesignCraft). Спирається на вбудований
+   * `bookDesignThemeId`; читає лише рушій DesignCraft. Вибір вбудованого шаблону його прибирає.
+   */
+  customDesignTheme?: import('./data/customBookDesignTheme').CustomBookDesignTheme;
+  /** Фони смислових блоків (Quote, Letter…) «за опціями» — діють поверх будь-якого шаблону. */
+  blockBackgrounds?: import('./data/customBookDesignTheme').BlockBackgrounds;
   frontMatter: {
     showTitlePage: boolean;
     showCopyright: boolean;

@@ -6,6 +6,7 @@ import {
 } from './pdfRoutesBase';
 import { registerAuthorPdfPreviewRoutes } from './pdf/authorPreviewRoute';
 import { registerDesigncraftThemePreviewRoutes } from './pdf/designcraft/themePreviewRoute';
+import { registerDesigncraftTemplateRoundTripRoutes } from './pdf/designcraft/templateRoundTrip';
 import { registerDesigncraftDraftRoutes } from './pdf/designcraftDraftRoutes';
 import { registerDesigncraftLauncherRoutes } from './designcraftLauncher';
 
@@ -19,6 +20,7 @@ import { registerDesigncraftLauncherRoutes } from './designcraftLauncher';
 export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBookOps {
   registerAuthorPdfPreviewRoutes(app);
   registerDesigncraftThemePreviewRoutes(app);
+  registerDesigncraftTemplateRoundTripRoutes(app);
   registerDesigncraftDraftRoutes(app);
   registerDesigncraftLauncherRoutes(app);
   return registerPdfRoutesBase(app, deps);

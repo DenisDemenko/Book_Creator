@@ -185,9 +185,13 @@ export function applyBookDesignTheme<T extends { designTheme?: 'classic' | 'edit
   themeId: BookDesignThemeId
 ): T & { bookDesignThemeId: BookDesignThemeId } {
   const card = getBookDesignThemeCard(themeId);
-  return {
+  const next = {
     ...layoutConfig,
     bookDesignThemeId: themeId,
     ...(card?.novaDesignTheme ? { designTheme: card.novaDesignTheme } : {}),
   };
+  // Вибір вбудованого шаблону скасовує власний (імпортований з DesignCraft). Фони блоків лишаються:
+  // вони діють поверх будь-якого шаблону.
+  delete (next as { customDesignTheme?: unknown }).customDesignTheme;
+  return next;
 }

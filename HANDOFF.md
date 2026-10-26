@@ -187,6 +187,13 @@ test:invite-mail, лабіринтні :browser/:studio (шлях Chromium на 
 прогін синхронізації на тестовій книзі; ручні сценарії масштабу й обкладинки.
 Приймання наступним агентом: НЕ підтверджено.
 
+## Власні шаблони верстки через DesignCraft + фон блоків — Claude, 26.10.2026 #01 (запис #482)
+
+- Потік: «Верстка для публікації» → «Шаблон верстки» → `TemplateWorkshop.tsx`: `POST /api/pdf/designcraft/template-copy` (копія шаблону, `keepDocument`) → автор правит стилі в DesignCraft → `POST /api/pdf/designcraft/template-import` (читає `styles.paragraph` і `swatches` з `document.json`) → «Застосувати» пише `layoutConfig.customDesignTheme`.
+- Справжня верстка: `specFromBook` (`server/pdf/pdfFromBook.ts`) додає `customThemeVisuals` і `blockBackgrounds` у спеку лише коли вони є в книзі; `styleCommands.ts` читає їх. Очищення — `server/pdf/designcraft/customThemeSanitize.ts`. Вибір вбудованого шаблону (`applyBookDesignTheme`) прибирає власний; фони блоків лишаються.
+- Тести: `npm run test:designcraft-templates` (у ланцюзі `npm test`); живий UI-прогін — `npx tsx scripts/live-templateWorkshop.mts` (потрібен Chromium, поза `npm test`).
+- Не перевірено: справжній файл `.designcraft` (формат `shadingTint`, збереження назв стилів, сумісність 0.7.1 → 0.13.0). Не підключено: `customBlocks` у справжню верстку; шрифти поза DejaVu.
+
 ## Верстка для публікації + DesignCraft — Claude, 25.10.2026 #01 (запис #480)
 
 Стан: усе в робочій копії, **не закомічено і не запушено** (38 файлів). Пуш лише за

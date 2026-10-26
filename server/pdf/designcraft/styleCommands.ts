@@ -1,4 +1,5 @@
 import type {
+  BlockBackgrounds,
   CustomBookDesignTheme,
   DesignerEntityStyle,
   DesignerFontSlot,
@@ -52,7 +53,7 @@ export interface DesigncraftParagraphStyleDefinition {
 }
 
 type CustomVisuals = Pick<CustomBookDesignTheme, 'fonts' | 'entities' | 'page'>;
-type ThemeSpec = PdfLayoutSpec & { themeId?: unknown; customThemeVisuals?: CustomVisuals };
+type ThemeSpec = PdfLayoutSpec & { themeId?: unknown; customThemeVisuals?: CustomVisuals; blockBackgrounds?: BlockBackgrounds };
 
 const SAFE_CUSTOM_FONTS = new Set(['DejaVu Serif', 'DejaVu Sans', 'DejaVu Sans Mono']);
 const MM_TO_PT = 72 / 25.4;
@@ -62,7 +63,7 @@ function dcAlign(value: string | undefined): 'left' | 'center' | 'right' | 'left
   return 'leftJustified';
 }
 
-function clamp(value: unknown, min: number, max: number, fallback: number): number {
+export function clamp(value: unknown, min: number, max: number, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
 }
@@ -75,11 +76,40 @@ function customVisualsOf(spec: PdfLayoutSpec): CustomVisuals | null {
   return (spec as ThemeSpec).customThemeVisuals || null;
 }
 
-function customEntityStyle(spec: PdfLayoutSpec, entity: DesignerThemeEntity): DesignerEntityStyle | null {
+export function customEntityStyle(spec: PdfLayoutSpec, entity: DesignerThemeEntity): DesignerEntityStyle | null {
   return customVisualsOf(spec)?.entities?.[entity] || null;
 }
 
-function customFontFamily(spec: PdfLayoutSpec, slot: DesignerFontSlot | undefined): string | null {
+/** Відступ абзацу з власного шаблону (пункти) або типове значення. */
+function ptOr(value: number | undefined, fallback: number): number {
+  return Number.isFinite(Number(value)) && value !== undefined ? clamp(value, 0, 144, fallback) : fallback;
+}
+
+const DEFAULT_BLOCK_PADDING_PT: [number, number, number, number] = [4, 6, 4, 6];
+
+/**
+ * Фон блоку «за опцією» (`layoutConfig.blockBackgrounds`): діє поверх будь-якого шаблону.
+ * `color: null` — явно прибрати фон, який дав шаблон.
+ */
+function blockBackgroundFor(
+  spec: PdfLayoutSpec,
+  name: SemanticParagraphStyle,
+  custom: DesignerEntityStyle | null
+): Partial<DesigncraftParagraphStyleDefinition['para']> | 'none' | null {
+  const option = (spec as ThemeSpec).blockBackgrounds?.[name as keyof BlockBackgrounds];
+  if (!option) return null;
+  if (option.color === null) return 'none';
+  const hex = safeHex(option.color);
+  if (!hex) return null;
+  return {
+    shadingOn: true,
+    shadingColor: colorSwatchName(hex),
+    shadingTint: clamp(option.opacity, 0.05, 1, 1),
+    shadingOffsets: mmOffsets(custom) || DEFAULT_BLOCK_PADDING_PT,
+  };
+}
+
+export function customFontFamily(spec: PdfLayoutSpec, slot: DesignerFontSlot | undefined): string | null {
   if (!slot) return null;
   const family = String(customVisualsOf(spec)?.fonts?.find((item) => item.slot === slot)?.family || '').trim();
   return SAFE_CUSTOM_FONTS.has(family) ? family : null;
@@ -150,7 +180,7 @@ function decorationFor(style: DesignerEntityStyle | null): Partial<DesigncraftPa
   return out;
 }
 
-function semanticEntity(name: SemanticParagraphStyle): DesignerThemeEntity | null {
+export function semanticEntity(name: SemanticParagraphStyle): DesignerThemeEntity | null {
   switch (name) {
     case 'Quote': return 'quote';
     case 'Epigraph': return 'epigraph';
@@ -184,7 +214,7 @@ function fontStyle(rule: SemanticStyleRule | undefined): 'Bold' | 'Italic' | 'Bo
   return undefined;
 }
 
-function customFontStyle(
+export function customFontStyle(
   custom: DesignerEntityStyle | null,
   fallback: 'Bold' | 'Italic' | 'Bold Italic' | undefined
 ): 'Bold' | 'Italic' | 'Bold Italic' | undefined {
@@ -237,14 +267,24 @@ function semanticDefinition(
   const fallbackStyle = fontStyle(rule);
   const fill = entity ? fillForEntity(spec, entity, defaultTextColor(spec)) : undefined;
 
+  const decoration = decorationFor(custom);
+  const optionBackground = blockBackgroundFor(spec, name, custom);
+  if (optionBackground === 'none') {
+    delete decoration.shadingOn;
+    delete decoration.shadingColor;
+    delete decoration.shadingTint;
+    delete decoration.shadingOffsets;
+  }
+
   return {
     name,
     para: {
       align: dcAlign(custom?.align || rule?.align || theme.bodyAlign),
-      firstLineIndent,
-      spaceBefore: before,
-      spaceAfter: after,
-      ...decorationFor(custom),
+      firstLineIndent: ptOr(custom?.firstLineIndentPt, firstLineIndent),
+      spaceBefore: ptOr(custom?.spaceBeforePt, before),
+      spaceAfter: ptOr(custom?.spaceAfterPt, after),
+      ...decoration,
+      ...(optionBackground && optionBackground !== 'none' ? optionBackground : {}),
     },
     chars: {
       size: clamp(custom?.fontSizePt, 7, 36, size),
@@ -280,8 +320,9 @@ export function buildDesigncraftParagraphStyles(
       name: 'Body',
       para: {
         align: dcAlign(bodyAlign),
-        firstLineIndent: spec.paragraphIndent * (theme?.paragraphIndentMultiplier ?? 1),
-        spaceAfter: spec.paragraphSpacing * (theme?.paragraphSpacingMultiplier ?? 1),
+        firstLineIndent: ptOr(bodyCustom?.firstLineIndentPt, spec.paragraphIndent * (theme?.paragraphIndentMultiplier ?? 1)),
+        spaceBefore: ptOr(bodyCustom?.spaceBeforePt, 0),
+        spaceAfter: ptOr(bodyCustom?.spaceAfterPt, spec.paragraphSpacing * (theme?.paragraphSpacingMultiplier ?? 1)),
         ...decorationFor(bodyCustom),
       },
       chars: {
@@ -295,8 +336,8 @@ export function buildDesigncraftParagraphStyles(
       name: 'Heading 1',
       para: {
         align: dcAlign(chapterAlign),
-        spaceBefore: spec.chapterTitle.spaceBefore,
-        spaceAfter: spec.chapterTitle.spaceAfter,
+        spaceBefore: ptOr(h1Custom?.spaceBeforePt, spec.chapterTitle.spaceBefore),
+        spaceAfter: ptOr(h1Custom?.spaceAfterPt, spec.chapterTitle.spaceAfter),
         ...decorationFor(h1Custom),
       },
       chars: {
@@ -310,8 +351,8 @@ export function buildDesigncraftParagraphStyles(
       name: 'Heading 2',
       para: {
         align: dcAlign(h2Custom?.align || spec.sectionTitle.align),
-        spaceBefore: spec.sectionTitle.spaceBefore,
-        spaceAfter: spec.sectionTitle.spaceAfter,
+        spaceBefore: ptOr(h2Custom?.spaceBeforePt, spec.sectionTitle.spaceBefore),
+        spaceAfter: ptOr(h2Custom?.spaceAfterPt, spec.sectionTitle.spaceAfter),
         ...decorationFor(h2Custom),
       },
       chars: {

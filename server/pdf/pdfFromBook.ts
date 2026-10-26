@@ -9,6 +9,7 @@
  * стилістична розбіжність, а втрата його роботи.
  */
 
+import { sanitizeBlockBackgrounds, sanitizeCustomDesignTheme } from './designcraft/customThemeSanitize';
 import type { Book } from '../../src/types';
 import { isBookDesignThemeId } from './designcraft/themes';
 import { buildMarkerImageMap } from '../../src/utils/imageMarkers';
@@ -110,6 +111,27 @@ export function bookToPdfInput(book: Book): PdfBookInput {
 }
 
 export function specFromBook(book: Book): PdfLayoutSpec {
+  return withDesignChoices(baseSpecFromBook(book), book);
+}
+
+/**
+ * Власний шаблон і фони блоків книги (`layoutConfig.customDesignTheme`, `layoutConfig.blockBackgrounds`).
+ * Без них спека лишається без змін. Читає лише DesignCraft (styleCommands); інші рушії ігнорують ці ключі.
+ */
+function withDesignChoices(spec: PdfLayoutSpec, book: Book): PdfLayoutSpec {
+  const layout = (book?.layoutConfig || null) as { customDesignTheme?: unknown; blockBackgrounds?: unknown } | null;
+  if (!layout) return spec;
+  const custom = sanitizeCustomDesignTheme(layout.customDesignTheme);
+  const backgrounds = sanitizeBlockBackgrounds(layout.blockBackgrounds);
+  if (!custom && !backgrounds) return spec;
+  return {
+    ...spec,
+    ...(custom ? { customThemeVisuals: custom.visuals } : {}),
+    ...(backgrounds ? { blockBackgrounds: backgrounds } : {}),
+  } as PdfLayoutSpec;
+}
+
+function baseSpecFromBook(book: Book): PdfLayoutSpec {
   const layout = book.layoutConfig;
   if (!layout) {
     return { ...DEFAULT_LAYOUT_SPEC, designerNoteUk: 'Книга без налаштувань верстки — узято заводський макет.' };
@@ -214,8 +236,11 @@ export function specFromBook(book: Book): PdfLayoutSpec {
  * книги без вибору лишаються без теми — їхній вигляд не змінюється.
  */
 export function designThemeFromBook(book: unknown): string | undefined {
-  const layout = (book as { layoutConfig?: { bookDesignThemeId?: unknown; designTheme?: unknown } } | null)?.layoutConfig;
+  const layout = (book as { layoutConfig?: { bookDesignThemeId?: unknown; designTheme?: unknown; customDesignTheme?: unknown } } | null)?.layoutConfig;
   if (!layout) return undefined;
+  // Власний шаблон спирається на вбудований: саме його рушій бере за основу (шрифти, правила блоків).
+  const custom = sanitizeCustomDesignTheme(layout.customDesignTheme);
+  if (custom) return custom.basedOn;
   if (isBookDesignThemeId(layout.bookDesignThemeId)) return layout.bookDesignThemeId;
   if (layout.designTheme === 'editorial') return 'studio-editorial';
   return undefined;
