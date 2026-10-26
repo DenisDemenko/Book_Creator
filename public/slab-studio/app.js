@@ -137,7 +137,7 @@
         `<clipPath id="c-${k}"><polygon points="${polygon(s)}"/></clipPath>`;
       pieces += `<g ${interactive ? `class="piece ${selected === p.uid ? "selected" : ""}" data-piece="${p.uid}"` : ""} transform="translate(${p.x} ${p.y}) rotate(${p.angle})"><g clip-path="url(#c-${k})"><polygon points="${polygon(s)}" fill="url(#${k})"/>${s.photo ? `<image href="${s.photo}" x="${-s.w / 2}" y="${-s.h / 2}" width="${s.w}" height="${s.h}" preserveAspectRatio="none"/>` : ""}</g><polygon points="${polygon(s)}" fill="transparent" stroke="#382c1c" stroke-width=".25"/></g>`;
     }
-    return `<defs><clipPath id="table-${key}">${tableShape(d)}</clipPath>${defs}<filter id="shadow-${key}" x="-50%" y="-60%" width="200%" height="240%"><feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#33402c" flood-opacity=".18"/></filter></defs>${tableShape(d, `fill="${d.color}" filter="url(#shadow-${key})"`)}<g clip-path="url(#table-${key})">${pieces}</g>${tableShape(d, 'fill="none" stroke="#ffffff88" stroke-width=".5" pointer-events="none"')}`;
+    return `<defs><clipPath id="table-${key}">${tableShape(d)}</clipPath>${defs}<filter id="shadow-${key}" x="-50%" y="-60%" width="200%" height="240%"><feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#33402c" flood-opacity=".18"/></filter></defs>${tableShape(d, `fill="${d.color}" filter="url(#shadow-${key})"`)}<g clip-path="url(#table-${key})">${ResinTexture.layer(d)}${pieces}</g>${tableShape(d, 'fill="none" stroke="#ffffff88" stroke-width=".5" pointer-events="none"')}`;
   }
   function renderDesign() {
     const svg = $("design"),
@@ -288,6 +288,7 @@
   $$("[data-color]").forEach(
     (b) =>
       (b.onclick = () => {
+        clearResinTexture();
         design.color = b.dataset.color;
         $$("[data-color]").forEach((x) =>
           x.classList.toggle("active", x === b),
@@ -297,6 +298,68 @@
         renderDesign();
       }),
   );
+  let textureRevision = 0;
+  function syncResinTexture() {
+    const texture = design.resinTexture;
+    $("resinTexturePreview").hidden = !texture;
+    if (texture) {
+      $("resinTextureThumbnail").src = texture.image;
+      $("resinTextureName").textContent = texture.name;
+      $("colorName").textContent = "Завантажена текстура";
+    } else {
+      $("resinTextureThumbnail").removeAttribute("src");
+      $("resinTextureName").textContent = "";
+      $("colorName").textContent =
+        $$("[data-color]")
+          .find((b) => b.dataset.color === design.color)
+          ?.getAttribute("aria-label") || "Колір смоли";
+    }
+    $$("[data-color]").forEach((b) =>
+      b.classList.toggle(
+        "active",
+        !texture && b.dataset.color === design.color,
+      ),
+    );
+  }
+  function clearResinTexture() {
+    textureRevision++;
+    delete design.resinTexture;
+    $("resinTextureFile").value = "";
+    $("uploadResinTexture").disabled = false;
+    $("resinTextureStatus").textContent = "PNG, JPG або WEBP · до 12 МБ";
+    syncResinTexture();
+  }
+  $("uploadResinTexture").onclick = () => $("resinTextureFile").click();
+  $("resinTextureFile").onchange = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    const revision = ++textureRevision;
+    $("uploadResinTexture").disabled = true;
+    $("resinTextureStatus").textContent = "Завантаження текстури…";
+    try {
+      const texture = await ResinTexture.read(file);
+      if (revision !== textureRevision) return;
+      design.resinTexture = texture;
+      syncResinTexture();
+      invalidate();
+      renderDesign();
+      $("resinTextureStatus").textContent = "Текстура застосована до заливки.";
+    } catch (error) {
+      if (revision !== textureRevision) return;
+      $("resinTextureStatus").textContent = error.message;
+      toast(error.message);
+    } finally {
+      if (revision === textureRevision) {
+        $("uploadResinTexture").disabled = false;
+        event.target.value = "";
+      }
+    }
+  };
+  $("removeResinTexture").onclick = () => {
+    clearResinTexture();
+    invalidate();
+    renderDesign();
+  };
   $("legs").onchange = () => {
     design.legs = $("legs").value;
     invalidate();
@@ -389,6 +452,7 @@
       pieces: [],
     };
     selected = null;
+    clearResinTexture();
     syncDimensions();
     $("legs").value = "metal";
     $$("[data-shape]").forEach((b) =>
