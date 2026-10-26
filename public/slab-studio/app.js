@@ -714,7 +714,7 @@
       ? items
           .map(
             (s, i) =>
-              `<article class="slab-card"><div class="slab-preview"><span class="slab-number">${esc(s.number)}</span>${slabSvg(s, "inv" + i)}</div><div class="slab-content"><h3>${esc(s.species)} · ${esc(s.number)}</h3><p>${num(s.h)} × ${num(s.w)} × ${num(s.t)} см · ${s.points.length} вершин<br>Площа ${num((Geo.area(s.points) * s.w * s.h) / 10000, 3)} м²<br>${money(s.rate)} / м² ${s.demo ? "· демо" : ""}</p><div class="slab-card-bottom"><span class="badge">${available(s.id) ? "На складі" : "Зарезервовано"}</span><button data-delete="${s.id}" aria-label="Видалити ${esc(s.number)}" ${available(s.id) ? "" : "disabled"}>×</button></div><button class="text-btn" data-vector="${s.id}">Завантажити SVG ↓</button></div></article>`,
+              `<article class="slab-card"><div class="slab-preview"><span class="slab-number">${esc(s.number)}</span>${slabSvg(s, "inv" + i)}</div><div class="slab-content"><h3>${esc(s.species)} · ${esc(s.number)}</h3><p>${num(s.h)} × ${num(s.w)} × ${num(s.t)} см · ${s.points.length} вершин<br>Площа ${num((Geo.area(s.points) * s.w * s.h) / 10000, 3)} м²<br>${money(s.rate)} / м² ${s.demo ? "· демо" : ""}</p><div class="slab-card-bottom"><span class="badge">${available(s.id) ? "На складі" : "Зарезервовано"}</span><button data-delete="${s.id}" aria-label="Видалити ${esc(s.number)}" ${available(s.id) ? "" : "disabled"}>×</button></div><button class="text-btn" data-vector="${s.id}">SVG · 1:1 · мм ↓</button><button class="text-btn" data-dxf="${s.id}">DXF 2000 · 1:1 · мм ↓</button></div></article>`,
           )
           .join("")
       : '<p class="hint">Немає слебів цієї породи.</p>';
@@ -738,12 +738,31 @@
     $$("[data-vector]").forEach(
       (b) =>
         (b.onclick = () => {
-          let s = db.slabs.find((s) => s.id === b.dataset.vector);
-          download(
-            s.number + ".svg",
-            `<svg xmlns="http://www.w3.org/2000/svg" width="${s.w * 10}mm" height="${s.h * 10}mm" viewBox="0 0 ${s.w} ${s.h}"><polygon points="${s.points.map(([x, y]) => `${x * s.w},${y * s.h}`).join(" ")}" fill="none" stroke="black" stroke-width="0.05"/></svg>`,
-            "image/svg+xml",
-          );
+          const slab = db.slabs.find((s) => s.id === b.dataset.vector);
+          try {
+            download(
+              slab.number + ".svg",
+              SlabContour.svg(slab),
+              "image/svg+xml",
+            );
+          } catch (error) {
+            toast(error.message);
+          }
+        }),
+    );
+    $$("[data-dxf]").forEach(
+      (b) =>
+        (b.onclick = () => {
+          const slab = db.slabs.find((s) => s.id === b.dataset.dxf);
+          try {
+            download(
+              slab.number + ".dxf",
+              SlabContour.dxf(slab),
+              "application/dxf",
+            );
+          } catch (error) {
+            toast(error.message);
+          }
         }),
     );
   }
@@ -846,315 +865,28 @@
       JSON.stringify(db, null, 2),
       "application/json",
     );
-  /* Photo coordinates remain in the resampled source pixel system until save. */
-  let photo = null,
-    points = [],
-    calPoints = [],
-    pxPerCm = 0,
-    photoMode = "edit",
-    activeVertex = -1,
-    photoMap = { s: 1, x: 0, y: 0 };
-  const pc = $("photoCanvas"),
-    ctx = pc.getContext("2d");
-  function resetPhoto() {
-    photo = null;
-    points = [];
-    calPoints = [];
-    pxPerCm = 0;
-    photoMode = "edit";
-    activeVertex = -1;
-    $("manual").textContent = "Намалювати вручну";
-    $("slabPhoto").value = "";
-    $("scaleInfo").textContent = "Масштаб не задано";
-    $("contourInfo").textContent = "Контур не створено";
-    $("photoHint").textContent =
-      "Фото зверху, без перспективи. Покладіть поряд лінійку.";
-    drawPhoto();
-  }
+  const contourEditor = new SlabContour.Editor({
+    toast,
+    maxPoints: remote.capabilities?.slabContourMaxPoints || 128,
+  });
   $("newSlab").onclick = () => {
-    resetPhoto();
+    contourEditor.reset();
     $("slabNumber").value =
       "SL-" + String(db.slabs.length + 1).padStart(3, "0");
     $("slabDialog").showModal();
+    contourEditor.draw();
   };
-  $("closeSlab").onclick = () => $("slabDialog").close();
-  $("slabPhoto").onchange = async (e) => {
-    const f = e.target.files[0];
-    if (!f) return;
-    if (f.size > 12 * 1024 * 1024) {
-      toast("Фото має бути до 12 МБ.");
-      return;
-    }
-    if (!["image/png", "image/jpeg", "image/webp"].includes(f.type)) {
-      toast("Оберіть PNG, JPG або WEBP.");
-      return;
-    }
-    try {
-      const image = await createImageBitmap(f),
-        ratio = Math.min(1, 1200 / Math.max(image.width, image.height)),
-        c = document.createElement("canvas");
-      c.width = Math.round(image.width * ratio);
-      c.height = Math.round(image.height * ratio);
-      c.getContext("2d").drawImage(image, 0, 0, c.width, c.height);
-      image.close();
-      photo = c;
-      points = [];
-      calPoints = [];
-      pxPerCm = 0;
-      photoMode = "edit";
-      $("manual").textContent = "Намалювати вручну";
-      $("scaleInfo").textContent = "Масштаб не задано";
-      $("contourInfo").textContent = "Контур не створено";
-      $("photoHint").textContent =
-        "Натисніть «Задати масштаб» та позначте два кінці відомої відстані.";
-      drawPhoto();
-    } catch {
-      toast("Не вдалося прочитати зображення. Спробуйте інше фото.");
-    }
+  $("closeSlab").onclick = () => {
+    contourEditor.reset();
+    $("slabDialog").close();
   };
-  function drawPhoto() {
-    ctx.clearRect(0, 0, pc.width, pc.height);
-    if (!photo) return;
-    const s = Math.min(
-        (pc.width - 30) / photo.width,
-        (pc.height - 35) / photo.height,
-      ),
-      x = (pc.width - photo.width * s) / 2,
-      y = (pc.height - photo.height * s) / 2;
-    photoMap = { s, x, y };
-    ctx.drawImage(photo, x, y, photo.width * s, photo.height * s);
-    if (points.length) {
-      ctx.beginPath();
-      points.forEach(([a, b], i) =>
-        i ? ctx.lineTo(x + a * s, y + b * s) : ctx.moveTo(x + a * s, y + b * s),
-      );
-      if (photoMode !== "manual") ctx.closePath();
-      ctx.fillStyle = "#a5d17333";
-      ctx.fill();
-      ctx.strokeStyle = "#cef382";
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      for (const [a, b] of points) {
-        ctx.beginPath();
-        ctx.arc(x + a * s, y + b * s, 3, 0, Math.PI * 2);
-        ctx.fillStyle = "#fff";
-        ctx.fill();
-        ctx.strokeStyle = "#547d27";
-        ctx.lineWidth = 1;
-        ctx.stroke();
-      }
-    }
-    if (calPoints.length) {
-      ctx.strokeStyle = "#ec815a";
-      ctx.fillStyle = "#ec815a";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      calPoints.forEach(([a, b], i) => {
-        if (i) ctx.lineTo(x + a * s, y + b * s);
-        else ctx.moveTo(x + a * s, y + b * s);
-      });
-      ctx.stroke();
-      for (const [a, b] of calPoints) {
-        ctx.beginPath();
-        ctx.arc(x + a * s, y + b * s, 5, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-  }
-  function photoPoint(e) {
-    const r = pc.getBoundingClientRect();
-    return [
-      Math.max(
-        0,
-        Math.min(
-          photo.width,
-          (((e.clientX - r.left) * pc.width) / r.width - photoMap.x) /
-            photoMap.s,
-        ),
-      ),
-      Math.max(
-        0,
-        Math.min(
-          photo.height,
-          (((e.clientY - r.top) * pc.height) / r.height - photoMap.y) /
-            photoMap.s,
-        ),
-      ),
-    ];
-  }
-  function setCalibration() {
-    let n = Number($("knownDistance").value);
-    if (calPoints.length !== 2 || n <= 0 || !Number.isFinite(n)) return;
-    let distance = Math.hypot(
-      calPoints[1][0] - calPoints[0][0],
-      calPoints[1][1] - calPoints[0][1],
-    );
-    if (distance < 5) {
-      pxPerCm = 0;
-      $("scaleInfo").textContent =
-        "Точки надто близько. Повторіть калібрування.";
-      return;
-    }
-    pxPerCm = distance / n;
-    $("scaleInfo").textContent =
-      `Масштаб: ${num(pxPerCm, 3)} пікселів/см · відрізок ${num(n)} см`;
-    updateContourInfo();
-  }
-  $("knownDistance").oninput = setCalibration;
-  $("calibrate").onclick = () => {
-    if (!photo) {
-      toast("Спершу завантажте фото.");
-      return;
-    }
-    calPoints = [];
-    pxPerCm = 0;
-    photoMode = "calibrate";
-    $("scaleInfo").textContent = "Очікується вибір двох точок";
-    $("photoHint").textContent =
-      "Клацніть на двох кінцях відрізка відомої довжини.";
-    drawPhoto();
-  };
-  $("tolerance").oninput = () =>
-    ($("toleranceOut").value = $("tolerance").value);
-  $("trace").onclick = () => {
-    if (!photo) {
-      toast("Спершу завантажте фото.");
-      return;
-    }
-    try {
-      const s = Math.min(1, 500 / Math.max(photo.width, photo.height)),
-        c = document.createElement("canvas");
-      c.width = Math.round(photo.width * s);
-      c.height = Math.round(photo.height * s);
-      const cx = c.getContext("2d");
-      cx.drawImage(photo, 0, 0, c.width, c.height);
-      points = Geo.trace(
-        cx.getImageData(0, 0, c.width, c.height).data,
-        c.width,
-        c.height,
-        Number($("tolerance").value),
-      ).map(([x, y]) => [
-        (x * photo.width) / c.width,
-        (y * photo.height) / c.height,
-      ]);
-      photoMode = "edit";
-      $("manual").textContent = "Намалювати вручну";
-      $("photoHint").textContent =
-        "Перевірте контур і за потреби перетягніть вершини. Після зміни допуску натисніть обведення ще раз.";
-      drawPhoto();
-      updateContourInfo();
-    } catch (e) {
-      toast(e.message);
-    }
-  };
-  $("manual").onclick = () => {
-    if (!photo) {
-      toast("Спершу завантажте фото.");
-      return;
-    }
-    if (photoMode === "manual") {
-      if (points.length < 3) {
-        toast("Позначте принаймні три вершини.");
-        return;
-      }
-      photoMode = "edit";
-      $("manual").textContent = "Намалювати вручну";
-      $("photoHint").textContent =
-        "Контур замкнено. Вершини можна перетягувати.";
-      updateContourInfo();
-    } else {
-      points = [];
-      photoMode = "manual";
-      $("manual").textContent = "Завершити контур";
-      $("photoHint").textContent =
-        "Клацайте по краю слеба за порядком, потім натисніть «Завершити контур».";
-    }
-    drawPhoto();
-  };
-  function updateContourInfo() {
-    if (!points.length) return;
-    $("contourInfo").textContent =
-      `Контур: ${points.length} вершин` +
-      (pxPerCm
-        ? ` · ${num((Math.max(...points.map((p) => p[0])) - Math.min(...points.map((p) => p[0]))) / pxPerCm)} × ${num((Math.max(...points.map((p) => p[1])) - Math.min(...points.map((p) => p[1]))) / pxPerCm)} см · площа ${num(Geo.area(points) / pxPerCm ** 2 / 10000, 3)} м²`
-        : " · задайте масштаб");
-  }
-  pc.onpointerdown = (e) => {
-    if (!photo) return;
-    e.preventDefault();
-    const p = photoPoint(e);
-    if (photoMode === "calibrate") {
-      calPoints.push(p);
-      if (calPoints.length === 2) {
-        setCalibration();
-        photoMode = "edit";
-        $("photoHint").textContent =
-          "Масштаб задано. Обведіть контур автоматично або вручну.";
-      }
-      drawPhoto();
-      return;
-    }
-    if (photoMode === "manual") {
-      points.push(p);
-      drawPhoto();
-      return;
-    }
-    let idx = points.findIndex(
-      (q) => Math.hypot(p[0] - q[0], p[1] - q[1]) * photoMap.s < 12,
-    );
-    if (e.altKey && idx >= 0 && points.length > 3) {
-      points.splice(idx, 1);
-      drawPhoto();
-      updateContourInfo();
-      return;
-    }
-    if (e.shiftKey && points.length > 2) {
-      let best = Infinity,
-        at = 0;
-      for (let i = 0; i < points.length; i++) {
-        let a = points[i],
-          b = points[(i + 1) % points.length],
-          dx = b[0] - a[0],
-          dy = b[1] - a[1],
-          t = Math.max(
-            0,
-            Math.min(
-              1,
-              ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) /
-                (dx * dx + dy * dy || 1),
-            ),
-          ),
-          dist = Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
-        if (dist < best) {
-          best = dist;
-          at = i + 1;
-        }
-      }
-      points.splice(at, 0, p);
-      drawPhoto();
-      updateContourInfo();
-      return;
-    }
-    if (idx >= 0) {
-      activeVertex = idx;
-      pc.setPointerCapture(e.pointerId);
-    }
-  };
-  pc.onpointermove = (e) => {
-    if (activeVertex < 0 || !photo) return;
-    points[activeVertex] = photoPoint(e);
-    drawPhoto();
-    updateContourInfo();
-  };
-  pc.onpointerup = pc.onpointercancel = () => (activeVertex = -1);
   $("slabForm").onsubmit = async (e) => {
     e.preventDefault();
-    if (!photo || !pxPerCm || calPoints.length !== 2) {
-      toast("Завантажте фото та задайте масштаб за двома точками.");
-      return;
-    }
-    if (photoMode === "manual" || !Geo.validPolygon(points)) {
-      toast("Завершіть контур без самоперетинів (мінімум 3 вершини).");
+    let data;
+    try {
+      data = contourEditor.value();
+    } catch (error) {
+      toast(error.message);
       return;
     }
     const number = $("slabNumber").value.trim(),
@@ -1167,63 +899,26 @@
       toast("Слеб із таким номером уже є у бібліотеці.");
       return;
     }
-    const xs = points.map((p) => p[0]),
-      ys = points.map((p) => p[1]),
-      x = Math.floor(Math.min(...xs)),
-      y = Math.floor(Math.min(...ys)),
-      w = Math.ceil(Math.max(...xs)) - x,
-      h = Math.ceil(Math.max(...ys)) - y;
-    if (w < 2 || h < 2) {
-      toast("Контур надто малий.");
-      return;
+    $("saveSlab").disabled = true;
+    try {
+      await bridge.request("POST", "/tables/admin/slabs", {
+        ...data,
+        number,
+        species,
+        t: Number($("slabThickness").value),
+        rate: Number($("slabRate").value),
+      });
+      await reloadRemote();
+      $("slabDialog").close();
+      contourEditor.reset();
+      renderInventory();
+      speciesOptions();
+      renderLibrary();
+      toast("Фото, перевірений контур та реальний масштаб збережено.");
+    } catch (error) {
+      toast(error.message);
+      contourEditor.status();
     }
-    const wcm = w / pxPerCm,
-      hcm = h / pxPerCm;
-    if (wcm > 1000 || hcm > 1000 || wcm < 1 || hcm < 1) {
-      toast("Перевірте масштаб: габарити слеба мають бути в межах 1–1000 см.");
-      return;
-    }
-    const crop = document.createElement("canvas"),
-      ratio = Math.min(1, 900 / Math.max(w, h));
-    crop.width = Math.round(w * ratio);
-    crop.height = Math.round(h * ratio);
-    crop
-      .getContext("2d")
-      .drawImage(photo, x, y, w, h, 0, 0, crop.width, crop.height);
-    let photoData = crop.toDataURL("image/jpeg", 0.82);
-    if (photoData.length > 480000)
-      photoData = crop.toDataURL("image/jpeg", 0.55);
-    if (photoData.length > 500000) {
-      toast("Фото завелике. Зменште його роздільність.");
-      return;
-    }
-    if (points.length > 128) {
-      toast("Контур має понад 128 вершин. Спростіть його вручну.");
-      return;
-    }
-    await bridge.request("POST", "/tables/admin/slabs", {
-      number,
-      species,
-      w: wcm,
-      h: hcm,
-      t: Number($("slabThickness").value),
-      rate: Number($("slabRate").value),
-      points: points.map(([a, b]) => [(a - x) / w, (b - y) / h]),
-      photo: photoData,
-      calibration: {
-        distanceCm: Number($("knownDistance").value),
-        pixelsPerCm: pxPerCm,
-        points: calPoints,
-        sourceWidth: photo.width,
-        sourceHeight: photo.height,
-      },
-    });
-    await reloadRemote();
-    $("slabDialog").close();
-    renderInventory();
-    speciesOptions();
-    renderLibrary();
-    toast("Слеб із масштабом та контуром збережено на сервері.");
   };
   window.addEventListener("unhandledrejection", (e) => {
     e.preventDefault();
@@ -1234,7 +929,7 @@
       (e) => (e.hidden = true),
     );
   if (!admin) {
-    $$('[data-view="inventory"],[data-view="costs"],[data-view="orders"],[data-view="textures"],.admin-label').forEach((e) => (e.hidden = true));
+    $$('[data-view="inventory"],[data-view="costs"],[data-view="orders"],[data-view="textures"],.admin-label').forEach(e => e.hidden = true);
   }
   $("exportData").hidden = !admin;
   speciesOptions();
