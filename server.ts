@@ -1,3 +1,4 @@
+import { registerSlabTableRoutes } from './server/slabTableBridge';
 import { subscribeGroupUpdates } from "./server/core/labyrinth/groupRealtime";
 import { registerTeamRoleRoutes } from './server/core/collaboration/teamRoles';
 import { fetchTeamRoleSnapshot } from './server/marketplaceBridge';
@@ -613,6 +614,7 @@ registerCourseWizardRoutes(app);
 registerModerationRoutes(app);
 registerFurnitureProductRoutes(app);
 registerFurnitureCalculatorRoutes(app);
+registerSlabTableRoutes(app);
 registerExpenseBoardRoutes(app);
 registerProcurementRoutes(app);
 registerThresholdRoutes(app);
