@@ -189,6 +189,48 @@
               ></button
               ><span id="colorName">Глибокий океан</span>
             </div>
+            <div class="resin-texture-controls">
+              <button
+                type="button"
+                class="secondary full"
+                id="uploadResinTexture"
+              >
+                ↑ Завантажити текстуру смоли
+              </button>
+              <input
+                id="resinTextureFile"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                aria-label="Зображення текстури епоксидної смоли"
+                hidden
+              />
+              <p class="hint" id="resinTextureStatus" role="status">
+                PNG, JPG або WEBP · до 12 МБ
+              </p>
+              <div
+                id="resinTexturePreview"
+                class="resin-texture-preview"
+                hidden
+              >
+                <img
+                  id="resinTextureThumbnail"
+                  alt="Попередній вигляд текстури смоли"
+                />
+                <span id="resinTextureName"></span>
+                <button
+                  type="button"
+                  id="removeResinTexture"
+                  class="text-btn danger"
+                  aria-label="Видалити текстуру смоли"
+                >
+                  Видалити
+                </button>
+              </div>
+              <p class="hint">
+                Зображення покриває заливку між слебами. Щоб повернути суцільний
+                колір, видаліть текстуру або оберіть колір вище.
+              </p>
+            </div>
             <label class="block-label"
               >Ніжки<select id="legs">
                 <option value="metal">Металеві · трапеція</option>
@@ -404,6 +446,7 @@
     <div id="toast" role="status"></div>
     <script src="geometry.js"></script>
     <script src="bridge.js"></script>
+    <script src="resin-texture.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
