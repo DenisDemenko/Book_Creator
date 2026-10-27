@@ -373,3 +373,18 @@ Marketplace live SHA досі fdcec27, Studio live SHA досі 62e3a14.
 для test TokenVerifier/NestJS/PostgreSQL; не видавати за production.
 Наступне: отримати дозвіл на merge #6/#23 і production, виконати та звірити.
 Журнал/HANDOFF доставляються тільки feature-гілкою, окремо від коду.
+
+
+## Приймання та реліз — Codex, 26.10.2026 #04 / 27.10, #487
+
+Прийнято попередню файлову передачу, звірено origin, tmp/session.lock і джерела marketplace/Studio. Owner upstream 84079d0 (журнал #486) збережено; source/журнал розділено. Новий серверний запис приймання не створювався.
+
+Виконано 5 запитів власника: adminOS тема слебів у Студії, живі розміри покупця, спільний furniture_designer в обох адмінках,35 MiB текстури/стискання/прогрес, блок головної UA/EN під товарами. Дизайнер бачить лише склад; bridge перевіряє canonical роль і UID, admin не понижується. Міграцій немає.
+
+Гілка fix/slab-builder-admin-integration. Marketplace PR #9 feature cf6b273 → master 7de47ceafc5ddabc36b169ce486a2649ae9ec5da; Railway API 3f680b95 SUCCESS, Vercel Azws5ZDU READY (production aliases підтверджено). Потім Studio PR #25 feature 9c8ea4e → master d46a298c1382cf84d3842681da9307c7f2840b9d; Railway 00c4c53e SUCCESS. Локальні 6ce05de/d8b3507 мають іншу історію: не force-push. Sourceblob SHA всіх 16+21 файлів звірені. Службовий журнал/HANDOFF ідуть лише feature, не перебудовувати production заради них.
+
+Перевірено: API/Postgres 36; Studio HTTP 22; admin OS 58 і bridge; types/build; buyer Chromium 10; реальний локальний Studio UI5 (rolegrant/revoke,17 МБ publish/delete, mobile зі згорнутим меню); production Chromium7 і 9 скриншотів. JS errors 0, платіжних запитів 0. Обидві пошти marketplace admin; tropazemli відкриває обидві адмінки. Книжкові ролі інших власницьких профілів не змінювалися.
+
+Межі: платежі/checkout/callback не тестувати за дорученням власника; production роль дизайнера не перемикали (реальні grant/revoke доведено в ізоляції); чужі книги не змінювали. Старі CI лишилися червоними: marketplacepassportrefreshProfile mock; DesignCraft launcher 5, Gate B 17/15. Звірені з master до релізу; нові tests пройшли окремо. Остаточне візуальне приймання — за власником.
+
+Артефакти /workspace/artifacts/slab-ui-fixes; proofJSON і PNG окремо local/production, вихідні 17/35 МБ fixtures не пакувати. Railway CLI /workspace/.slab-tools/railway 5.23.3; MCP auth loop — CLI fallback. Не читати й не друкувати credentials; productionQA входить нормально Firebase custom session, токени лише в пам'яті. Наступне: приймання власником або окремі старі CI; робота слебів доставлена. Власний session.lock прибрати після завершення, зупинити лише тестовий API/container цієї сесії.
