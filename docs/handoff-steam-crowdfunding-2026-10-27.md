@@ -64,3 +64,12 @@ The previous functions.store cache was lost when the tool runtime restarted. Use
 ## Real launch remains blocked by actual operator configuration
 
 The operator must provide actual legal/payment terms, an eligible collection service and verified recipients before enabling contributions. Automatic bank transfers are outside the agreed manual-bank MVP. Do not invent campaigns, contracts, bank identities or real financial activity. Customer and team data remain private according to the existing permissions.
+
+
+## Continuation attempt — execution still unavailable
+
+The owner said to continue. The managed environment still reports connectivity offline and exec returns No usable execution environment is available. A temporary Vercel sandbox sbx_KYL2CxVi1YTzUi3Mno2tDewQ34Gu was created under the existing Fusion Lab Vercel project to investigate a fallback. Its private Git clone could not authenticate. A proposal to copy repository source through connected GitHub tools was rejected by automatic approval review: the user had not specifically authorized exporting this private source payload to that sandbox destination.
+
+Do not bypass or retry that rejected transfer without explicit user authorization or a successful safe authorization review. No source archive upload completed. The temporary nonpersistent sandbox was stopped and its resources released. It contained only setup packages and a source-file metadata manifest; production secrets, customer data and payment keys were not provided.
+
+A question is pending with two paths: reconnect the original workspace (preferred), or explicitly authorize copying repository source/build files into a temporary Vercel sandbox. .env files, keys and customer data must be excluded. If the original environment reconnects, continue its already-authorized work without asking again. Code additions for unused balances, outbox and English UI remain unpublished. The normal published module and production versions above are unchanged.
