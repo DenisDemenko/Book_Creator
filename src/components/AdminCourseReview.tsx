@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, Ban, CheckCircle2, CornerUpLeft, ExternalLink, Loader2 } from 'lucide-react';
-import { videoProvider } from '../utils/coursePublishRules';
+import { GRADUATE_SELLING_LABELS, normalizeGraduateSelling, videoProvider } from '../utils/coursePublishRules';
 
 /**
  * Повна картка курсу в черзі модерації.
@@ -35,6 +35,7 @@ interface ReviewModule {
 }
 interface ReviewCourse {
   id: string;
+  graduateSelling?: string;
   title: string;
   subtitle?: string;
   summary?: string;
@@ -200,6 +201,8 @@ export const CourseReviewCard: React.FC<{
             <dd className={c.free ? 'text-emerald-300 font-semibold' : 'text-slate-200 font-semibold'}>{priceText(c)}</dd>
             <dt className="text-slate-500">Категорія</dt>
             <dd className="text-slate-300">{detail.category ? detail.category.name : 'без категорії'}</dd>
+            <dt className="text-slate-500">Роботи студентів</dt>
+            <dd className="text-slate-300">{GRADUATE_SELLING_LABELS[normalizeGraduateSelling(c.graduateSelling)]}</dd>
             <dt className="text-slate-500">Обсяг</dt>
             <dd className="text-slate-300">
               {c.modules.length} модулів · {lessonCount} уроків{minutes > 0 ? ` · ${minutes} хв` : ''}

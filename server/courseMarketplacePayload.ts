@@ -17,7 +17,7 @@ import type {
   PublishCourseInput,
   PublishCourseModule,
 } from './marketplaceBridge';
-import { COURSE_CURRENCY } from '../src/utils/coursePublishRules';
+import { COURSE_CURRENCY, normalizeGraduateSelling } from '../src/utils/coursePublishRules';
 
 /** Мінімум полів курсу, потрібних збирачу (сумісний і з `Course`, і з `CourseV2`). */
 interface CourseLike {
@@ -34,6 +34,7 @@ interface CourseLike {
   categorySlug?: string;
   priceMinor?: number;
   free?: boolean;
+  graduateSelling?: string;
   skills: Array<{ name: string; level: 'base' | 'confident' | 'pro'; whyItMatters?: string }>;
   modules: Array<{
     id: string;
@@ -147,6 +148,7 @@ export function buildCoursePublishInput(
     categorySlug: course.categorySlug,
     category: course.categorySlug === undefined ? course.category : undefined,
     instructorName: options.instructorName?.trim() || undefined,
+    graduateSelling: normalizeGraduateSelling(course.graduateSelling),
     audience: filled(course.audience),
     outcomes: filled(course.outcomes),
     skills: course.skills.map((s) => ({ name: s.name, level: s.level, whyItMatters: s.whyItMatters })),

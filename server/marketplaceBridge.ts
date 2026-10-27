@@ -1522,6 +1522,8 @@ export interface PublishCourseInput {
   categorySlug?: string;
   /** Ім'я автора курсу: продавець лишається платформою, викладач показується на картці. */
   instructorName?: string;
+  /** Коли студенти курсу можуть продавати власні роботи (рішення автора курсу). */
+  graduateSelling?: 'off' | 'after_completion' | 'anytime';
   /** Кому підходить курс — рядки «Аудиторія» зі студії. */
   audience?: string[];
   /** Що покупець уміє після курсу — рядки «Результати навчання». */
@@ -1568,6 +1570,7 @@ export async function publishCourseToMarketplace(
     category: input.category,
     categorySlug: input.categorySlug,
     instructorName: input.instructorName,
+    graduateSelling: input.graduateSelling,
     audience: input.audience,
     outcomes: input.outcomes,
     skills: input.skills,

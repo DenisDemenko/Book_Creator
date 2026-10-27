@@ -15,6 +15,7 @@ import type { Express } from 'express';
 import { can, requireAuth, requirePermission } from './auth';
 import { latestModerationFor, submitForModeration } from './moderationStore';
 import { listBridgeCategories } from './marketplaceBridge';
+import { GRADUATE_SELLING_MODES, type GraduateSelling } from '../src/utils/coursePublishRules';
 import { courseSubmitProblems } from '../src/utils/coursePublishRules';
 import {
   createCourse,
@@ -52,6 +53,10 @@ export interface CourseRoutesDeps {
 function authorPatch(body: unknown): Partial<Course> {
   const { status: _s, publishedAt: _p, ownerId: _o, id: _i, createdAt: _c, updatedAt: _u, currency: _cur, ...rest } =
     (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+  // Невідоме значення «Продаж робіт студентів» не має мовчки скидати вибір автора.
+  if ('graduateSelling' in rest && !GRADUATE_SELLING_MODES.includes(rest.graduateSelling as GraduateSelling)) {
+    delete rest.graduateSelling;
+  }
   return rest as Partial<Course>;
 }
 

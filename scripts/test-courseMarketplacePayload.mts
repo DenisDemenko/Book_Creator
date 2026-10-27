@@ -96,6 +96,7 @@ t('підсумкове завдання й обкладинка модуля', 
 t('навички — лише назва/рівень/навіщо (без «як розвивати»)', JSON.stringify(rich.skills) === JSON.stringify([{ name: 'Безпека', level: 'base', whyItMatters: 'x' }]));
 t('порожні рядки аудиторії відсіяно', rich.audience!.length === 1);
 t('ціна й UAH', rich.priceMinor === 150000 && rich.currency === 'UAH');
+t('дозвіл студентам іде у вітрину; невідоме → «після завершення»', buildCoursePublishInput({ ...base, graduateSelling: 'anytime' }, 'fusion-lab').graduateSelling === 'anytime' && buildCoursePublishInput({ ...base, graduateSelling: 'off' }, 'fusion-lab').graduateSelling === 'off' && buildCoursePublishInput(base, 'fusion-lab').graduateSelling === 'after_completion');
 t('ім\'я викладача з опцій, обрізане; порожнє → не йде', buildCoursePublishInput(base, 'fusion-lab', { instructorName: '  Олена Коваль ' }).instructorName === 'Олена Коваль' && buildCoursePublishInput(base, 'fusion-lab', { instructorName: '  ' }).instructorName === undefined && rich.instructorName === undefined);
 
 const safe = buildCoursePublishInput(base, 'fusion-lab');
@@ -202,6 +203,7 @@ try {
   });
   const s4 = sentCourse();
   t('адмін-роут → 200 і публікує курс', forged.status === 200 && forged.body.contentMode === 'full', JSON.stringify(forged.body).slice(0, 160));
+  t('адмінська публікація передає дозвіл студентам', s4?.graduateSelling === 'after_completion', String(s4?.graduateSelling));
   t('адмінська публікація теж передає викладача', s4?.instructorName === 'Олена Коваль');
   t('тіло запиту не підміняє ціну/назву/програму/навички', s4?.priceMinor === 150000 && s4.title === 'Курс з основ ЧПУ' && s4.modules[0].title === 'Модуль 1' && s4.skills[0].name === 'Безпека');
   t('адмінська публікація теж ставить «Опубліковано»', getCourse(c4.id)?.status === 'published');

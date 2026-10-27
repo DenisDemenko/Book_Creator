@@ -24,7 +24,14 @@ import {
   CourseStatusV2,
   CourseV2,
 } from '../types';
-import { courseSubmitProblems, lessonDurationProblem, videoUrlProblem } from '../utils/coursePublishRules';
+import {
+  GRADUATE_SELLING_LABELS,
+  GRADUATE_SELLING_MODES,
+  courseSubmitProblems,
+  lessonDurationProblem,
+  normalizeGraduateSelling,
+  videoUrlProblem,
+} from '../utils/coursePublishRules';
 import { parsePriceMinor } from './adminOs/priceInput';
 
 /** Останнє рішення модерації щодо курсу — з `GET /api/courses/:id`. */
@@ -890,6 +897,21 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
                     Перелік категорій вітрини недоступний — поки він не з'явиться, категорія не вимагається.
                   </span>
                 )}
+              </label>
+              <label className="block sm:col-span-2">
+                <span className="text-[11px] text-slate-400 font-semibold">Продаж робіт студентів</span>
+                <select
+                  value={normalizeGraduateSelling(course.graduateSelling)}
+                  onChange={(e) => patch((c) => ({ ...c, graduateSelling: e.target.value as CourseV2['graduateSelling'] }))}
+                  className={`${inputCls} mt-1`}
+                >
+                  {GRADUATE_SELLING_MODES.map((mode) => (
+                    <option key={mode} value={mode}>{GRADUATE_SELLING_LABELS[mode]}</option>
+                  ))}
+                </select>
+                <span className="block text-[10px] text-slate-500 mt-0.5">
+                  Чи можуть студенти цього курсу виставити на продаж у маркетплейсі власну роботу, зроблену під час навчання, і з якого моменту.
+                </span>
               </label>
               <label className="block">
                 <span className="text-[11px] text-slate-400 font-semibold">Ціна, грн</span>

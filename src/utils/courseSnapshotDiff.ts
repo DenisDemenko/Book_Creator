@@ -9,6 +9,7 @@
  * Чиста функція без залежностей: ті самі рядки показує і сервер (у відповіді
  * деталей запису), і тест.
  */
+import { GRADUATE_SELLING_LABELS, normalizeGraduateSelling } from './coursePublishRules';
 
 export interface DiffCourse {
   title?: string;
@@ -23,6 +24,7 @@ export interface DiffCourse {
   category?: string;
   priceMinor?: number;
   free?: boolean;
+  graduateSelling?: string;
   skills?: Array<{ name?: string }>;
   modules?: Array<{
     title?: string;
@@ -54,6 +56,9 @@ export function courseSnapshotChanges(snapshot: DiffCourse, current: DiffCourse)
 
   if (snapshot.priceMinor !== current.priceMinor || (snapshot.free === true) !== (current.free === true)) {
     out.push(`Ціна: ${uah(snapshot.priceMinor, snapshot.free)} → ${uah(current.priceMinor, current.free)}.`);
+  }
+  if (normalizeGraduateSelling(snapshot.graduateSelling) !== normalizeGraduateSelling(current.graduateSelling)) {
+    out.push(`Продаж робіт студентів: «${GRADUATE_SELLING_LABELS[normalizeGraduateSelling(snapshot.graduateSelling)]}» → «${GRADUATE_SELLING_LABELS[normalizeGraduateSelling(current.graduateSelling)]}».`);
   }
   if ((snapshot.categorySlug ?? '') !== (current.categorySlug ?? '')) {
     out.push(`Категорія вітрини: «${snapshot.categorySlug || 'без категорії'}» → «${current.categorySlug || 'без категорії'}».`);

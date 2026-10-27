@@ -32,6 +32,25 @@ export interface CourseRulesInput {
   }>;
 }
 
+/**
+ * Коли студенти курсу можуть виставити на продаж власну роботу, зроблену під
+ * час курсу: ніколи / після завершення / з будь-якого моменту. Рішення автора
+ * курсу; за замовчуванням — після завершення. Вітрина читає це з публікації.
+ */
+export type GraduateSelling = 'off' | 'after_completion' | 'anytime';
+export const GRADUATE_SELLING_MODES: readonly GraduateSelling[] = ['off', 'after_completion', 'anytime'];
+export const DEFAULT_GRADUATE_SELLING: GraduateSelling = 'after_completion';
+export const GRADUATE_SELLING_LABELS: Record<GraduateSelling, string> = {
+  off: 'Не дозволяти',
+  after_completion: 'Після завершення курсу',
+  anytime: 'З будь-якого моменту',
+};
+
+/** Невідоме чи відсутнє значення читаємо як типове: старі курси ніколи його не задавали. */
+export function normalizeGraduateSelling(value: unknown): GraduateSelling {
+  return GRADUATE_SELLING_MODES.includes(value as GraduateSelling) ? (value as GraduateSelling) : DEFAULT_GRADUATE_SELLING;
+}
+
 /** Єдина валюта вітрини: кошик і LiqPay рахують лише в гривнях. */
 export const COURSE_CURRENCY = 'UAH';
 

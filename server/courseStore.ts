@@ -14,7 +14,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { getDb, unavailableMessage } from './db';
-import { COURSE_CURRENCY } from '../src/utils/coursePublishRules';
+import { COURSE_CURRENCY, normalizeGraduateSelling, type GraduateSelling } from '../src/utils/coursePublishRules';
 
 function requireDb() {
   const db = getDb();
@@ -90,6 +90,8 @@ export interface Course {
   free?: boolean;
   /** Завжди UAH: вітрина приймає оплату лише в гривнях. */
   currency?: string;
+  /** Коли студенти можуть продавати власні роботи, зроблені під час курсу. Не задано = після завершення. */
+  graduateSelling?: GraduateSelling;
   skills: CourseSkill[];
   modules: CourseModuleV2[];
   createdAt: string;
@@ -136,6 +138,7 @@ function toCourse(row: Row): Course {
     // Старі курси могли мати «USD» чи «грн» з вільного поля — читаємо як UAH,
     // бо інакше вітрина й не продасть.
     currency: COURSE_CURRENCY,
+    graduateSelling: normalizeGraduateSelling(data.graduateSelling),
     skills: data.skills ?? [],
     modules: data.modules ?? [],
     createdAt: row.created_at,
@@ -167,6 +170,7 @@ export function createCourse(
     priceMinor: input.priceMinor,
     free: input.free === true ? true : undefined,
     currency: COURSE_CURRENCY,
+    graduateSelling: normalizeGraduateSelling(input.graduateSelling),
     skills: input.skills ?? [],
     modules: input.modules ?? [],
     createdAt: now,
@@ -244,6 +248,7 @@ export function updateCourse(id: string, patch: Partial<Course>): Course | undef
   }
   // Валюта не вибирається: кошик і LiqPay рахують лише гривні.
   next.currency = COURSE_CURRENCY;
+  next.graduateSelling = normalizeGraduateSelling(next.graduateSelling);
   next.free = next.free === true ? true : undefined;
   // Редактор шле стерту ціну як null (undefined випав би з JSON і стара ціна
   // лишилась би): null — «ціну не задано».

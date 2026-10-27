@@ -548,6 +548,8 @@ export interface CourseV2 {
   free?: boolean;
   /** Завжди UAH (сервер виставляє сам). */
   currency?: string;
+  /** Коли студенти можуть продавати власні роботи, зроблені під час курсу. */
+  graduateSelling?: 'off' | 'after_completion' | 'anytime';
   skills: CourseSkillV2[];
   modules: CourseModuleV2[];
   createdAt: string;

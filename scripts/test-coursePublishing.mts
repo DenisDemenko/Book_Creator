@@ -98,6 +98,17 @@ t('повний курс — без зауважень', rules.courseSubmitProbl
   t('тривалість 45 і порожня — норма', rules.lessonDurationProblem(45) === null && rules.lessonDurationProblem(undefined) === null);
 }
 
+console.log('\nПродаж робіт студентів (правила):');
+{
+  t('невідоме й порожнє значення читаються як «після завершення»', rules.normalizeGraduateSelling(undefined) === 'after_completion' && rules.normalizeGraduateSelling('щось') === 'after_completion' && rules.normalizeGraduateSelling(null) === 'after_completion');
+  t('три допустимі значення зберігаються', ['off', 'after_completion', 'anytime'].every((m) => rules.normalizeGraduateSelling(m) === m));
+  t('кожне значення має підпис для редактора', rules.GRADUATE_SELLING_MODES.every((m) => !!rules.GRADUATE_SELLING_LABELS[m]));
+  const a: any = { ...full(), graduateSelling: 'off' };
+  const b: any = { ...full(), graduateSelling: 'anytime' };
+  t('різниця версій помічає зміну дозволу', courseSnapshotChanges(a, b).some((x) => /Продаж робіт студентів: «Не дозволяти» → «З будь-якого моменту»/.test(x)), courseSnapshotChanges(a, b).join('|'));
+  t('відсутнє поле = типове — без хибної різниці', courseSnapshotChanges({ ...full() } as any, { ...full(), graduateSelling: 'after_completion' } as any).length === 0);
+}
+
 console.log('\nКатегорія в правилах:');
 {
   const noCat = { ...full(), categorySlug: undefined };
@@ -283,6 +294,19 @@ try {
   const freeOk = await call('POST', `/api/admin/moderation/${entry3}/approve`, 'u-admin');
   const freeSent = bridgeCalls.find((c) => c.url.endsWith('/bridge/courses'))?.body ?? {};
   t('явно безкоштовний курс погоджується з ціною 0', freeOk.status === 200 && freeSent.priceMinor === 0, `${freeOk.status} ${freeSent.priceMinor}`);
+
+  console.log('\nПродаж робіт студентів (автор):');
+  const cg = (await call('POST', '/api/courses', 'u-teacher', { title: 'Курс із дозволом' })).body.course;
+  t('новий курс: за замовчуванням «після завершення»', cg.graduateSelling === 'after_completion', String(cg.graduateSelling));
+  const setAny = await call('PUT', `/api/courses/${cg.id}`, 'u-teacher', { graduateSelling: 'anytime' });
+  t('автор вмикає «з будь-якого моменту»', setAny.body.course?.graduateSelling === 'anytime');
+  const bad = await call('PUT', `/api/courses/${cg.id}`, 'u-teacher', { graduateSelling: 'завжди', title: 'Курс із дозволом' });
+  t('невідоме значення не скидає вибір автора', bad.body.course?.graduateSelling === 'anytime', String(bad.body.course?.graduateSelling));
+  const setOff = await call('PUT', `/api/courses/${cg.id}`, 'u-teacher', { graduateSelling: 'off' });
+  t('автор вимикає продаж', setOff.body.course?.graduateSelling === 'off');
+  t('значення переживає читання зі сховища', getCourse(cg.id)?.graduateSelling === 'off');
+  const viaCreate = await call('POST', '/api/courses', 'u-teacher', { title: 'Створено з вибором', graduateSelling: 'anytime' });
+  t('вибір можна задати вже при створенні', viaCreate.body.course?.graduateSelling === 'anytime');
 
   console.log('\nКатегорія при поданні:');
   const c5 = (await call('POST', '/api/courses', 'u-teacher', { title: 'Курс без категорії' })).body.course;
