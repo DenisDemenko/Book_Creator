@@ -32,6 +32,7 @@ import {
   getRoleOverrides,
 } from './store';
 import { firebaseAuthConfigured, verifyFirebaseIdToken, type VerifiedFirebaseToken } from './firebaseAdmin';
+import { refreshFurnitureRole } from './furnitureAccess';
 
 export const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'tropazemli@gmail.com').toLowerCase();
 export const SESSION_COOKIE = 'nova_session';
@@ -199,6 +200,7 @@ export function requireSupportAgent(req: Request, res: Response, next: NextFunct
 // ---------------------------------------------------------------------------
 
 type ServerPermissions = {
+  canManageSlabs: boolean;
   canGenerateImages: boolean;
   canUseAi: boolean;
   canEditContent: boolean;
@@ -232,22 +234,23 @@ type ServerPermissions = {
  * ще й за requirePlanAtLeast(['pro','ultra']) у маршрутах.
  */
 export const BASE_SERVER_PERMISSIONS: Record<StoredRole, ServerPermissions> = {
-  admin:      { canGenerateImages: true,  canUseAi: true,  canEditContent: true,  canPublish: true,  canPublishExternal: true,  canManageApiKeys: true,  canMarketIntel: true,  canAuthorCourses: true, canPublishSchema: true },
+  admin:      { canManageSlabs: true,  canGenerateImages: true,  canUseAi: true,  canEditContent: true,  canPublish: true,  canPublishExternal: true,  canManageApiKeys: true,  canMarketIntel: true,  canAuthorCourses: true, canPublishSchema: true },
   // Лише чат підтримки (requireSupportAgent нижче) — жодних платних чи контентних прав.
-  site_manager: { canGenerateImages: false, canUseAi: false, canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false, canPublishSchema: false },
-  writer:     { canGenerateImages: true,  canUseAi: true,  canEditContent: true,  canPublish: true,  canPublishExternal: true,  canManageApiKeys: false, canMarketIntel: true,  canAuthorCourses: false, canPublishSchema: false },
-  designer:   { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false, canPublishSchema: false },
-  translator: { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false, canPublishSchema: false },
-  publisher:  { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: true,  canPublishExternal: true,  canManageApiKeys: false, canMarketIntel: true,  canAuthorCourses: false, canPublishSchema: false },
+  site_manager: { canManageSlabs: false,  canGenerateImages: false, canUseAi: false, canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false, canPublishSchema: false },
+  writer:     { canManageSlabs: false,  canGenerateImages: true,  canUseAi: true,  canEditContent: true,  canPublish: true,  canPublishExternal: true,  canManageApiKeys: false, canMarketIntel: true,  canAuthorCourses: false, canPublishSchema: false },
+  designer:   { canManageSlabs: false,  canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false, canPublishSchema: false },
+  translator: { canManageSlabs: false,  canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false, canPublishSchema: false },
+  publisher:  { canManageSlabs: false,  canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: true,  canPublishExternal: true,  canManageApiKeys: false, canMarketIntel: true,  canAuthorCourses: false, canPublishSchema: false },
   // Продавець: рівно те, що власник просив для цієї ролі — зображення
   // в медіатеці та тексти ШІ. Рукопис, публікація, гроші й ключі — закриті.
-  seller:     { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false, canPublishSchema: false },
+  seller:     { canManageSlabs: false,  canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false, canPublishSchema: false },
   // Експерт і викладач: автори самостійних курсів (docs/tech-spec-course-wizard-2026.md §6.1).
   // Генерації зображень і ШІ дозволені (медіа курсу), решта письменницько-видавничого — ні.
-  expert:     { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: true, canPublishSchema: false },
-  teacher:    { canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: true, canPublishSchema: false },
-  reader:     { canGenerateImages: false, canUseAi: false, canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false, canPublishSchema: false },
-  guest:      { canGenerateImages: false, canUseAi: false, canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false, canPublishSchema: false },
+  expert:     { canManageSlabs: false,  canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: true, canPublishSchema: false },
+  teacher:    { canManageSlabs: false,  canGenerateImages: true,  canUseAi: true,  canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: true, canPublishSchema: false },
+  reader:     { canManageSlabs: false,  canGenerateImages: false, canUseAi: false, canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false, canPublishSchema: false },
+  guest:      { canManageSlabs: false,  canGenerateImages: false, canUseAi: false, canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false, canPublishSchema: false },
+  furniture_designer: { canManageSlabs: true, canGenerateImages: false, canUseAi: false, canEditContent: false, canPublish: false, canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false, canAuthorCourses: false, canPublishSchema: false },
 };
 
 export async function effectivePermissions(role: StoredRole) {
@@ -314,6 +317,7 @@ export function publicUser(user: StoredUser) {
  * від специфікації, а не діра в безпеці.
  */
 export const MARKETPLACE_ROLE_TO_NOVA: Record<string, StoredRole> = {
+  furniture_designer: 'furniture_designer',
   admin: 'admin',
   writer: 'writer',
   instruction_engineer: 'writer',
@@ -448,7 +452,16 @@ export async function findOrCreateFromFirebase(
 export function registerAuthRoutes(app: Express): void {
   /** Хто я зараз. Гість теж отримує відповідь — просто з роллю guest. */
   app.get('/api/auth/me', async (req, res) => {
-    const principal = req.principal || GUEST_PRINCIPAL;
+    let principal = req.principal || GUEST_PRINCIPAL;
+    if (!principal.isGuest) {
+      try {
+        principal = { ...await refreshFurnitureRole(principal as StoredUser), isGuest: false };
+        req.principal = principal;
+      } catch {
+        // Keep the book session usable during marketplace downtime.
+        // Slab requests independently verify the canonical access and fail closed.
+      }
+    }
     const permissions = await effectivePermissions(principal.role);
     res.json({
       user: principal.isGuest
@@ -486,8 +499,10 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(409).json({ error: result.error });
       }
 
-      await issueSession(res, result.user);
-      res.json({ user: publicUser(result.user), permissions: await effectivePermissions(result.user.role) });
+      let user = result.user;
+      try { user = await refreshFurnitureRole(user); } catch { /* Slab guard fails closed. */ }
+      await issueSession(res, user);
+      res.json({ user: publicUser(user), permissions: await effectivePermissions(user.role) });
     } catch (err) {
       console.error('[auth] firebase-session:', err);
       res.status(500).json({ error: 'Не вдалося увійти.' });

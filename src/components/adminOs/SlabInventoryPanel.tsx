@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { API_BASE } from "../../utils/basePath";
 
-export function SlabInventoryPanel() {
+export function SlabInventoryPanel({ inventoryOnly = false }: { inventoryOnly?: boolean }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [ready, setReady] = useState(false);
   useEffect(() => {
@@ -20,9 +20,11 @@ export function SlabInventoryPanel() {
             ? "/state"
             : String(m.path).replace(/^\/tables\/admin/, "");
         const allowed =
-          /^(GET \/(state|production)|POST \/(slabs|resin-textures)|PUT \/costs|DELETE \/(slabs|resin-textures)\/[a-zA-Z0-9-]+|PATCH \/production\/[a-zA-Z0-9-]+)$/.test(
+          /^(GET \/state|POST \/slabs|DELETE \/slabs\/[a-zA-Z0-9-]+)$/.test(
             `${m.method} ${suffix}`,
-          );
+          ) || (!inventoryOnly && /^(GET \/production|POST \/resin-textures|PUT \/costs|DELETE \/resin-textures\/[a-zA-Z0-9-]+|PATCH \/production\/[a-zA-Z0-9-]+)$/.test(
+            `${m.method} ${suffix}`,
+          ));
         if (!allowed)
           throw new Error(
             "У Студії доступні склад, витрати та виробництво. Конструктор покупця відкривається у маркетплейсі.",
@@ -56,25 +58,20 @@ export function SlabInventoryPanel() {
     window.addEventListener("message", receive);
     setReady(true);
     return () => window.removeEventListener("message", receive);
-  }, []);
+  }, [inventoryOnly]);
   return (
-    <section>
-      <p className="mb-3 text-sm text-slate-400">
-        Склад слебів та оплачені передзамовлення Fusion Lab. Ціни публікуються з
-        «Управління цінами». Ключ мосту залишається на сервері.
+    <section className="os-slab-inventory">
+      <p className="mb-3 text-sm text-[rgba(181,217,253,.75)]">
+        {inventoryOnly
+          ? "Спільний склад слебів: фото, реальні розміри та перевірені векторні контури."
+          : "Склад слебів, текстури смоли та виробництво столів. Тарифи публікуються з «Управління цінами»."}
       </p>
       {ready ? (
         <iframe
           ref={frame}
           title="Слеби та виробництво столів"
-          src={`${API_BASE}/slab-studio/index.html?mode=admin&host=studio`}
-          style={{
-            width: "100%",
-            height: "85vh",
-            minHeight: 700,
-            border: 0,
-            borderRadius: 16,
-          }}
+          src={`${API_BASE}/slab-studio/index.html?mode=${inventoryOnly ? 'inventory' : 'admin'}&host=studio`}
+          className="os-slab-inventory-frame"
         />
       ) : (
         <p>Завантаження…</p>

@@ -21,6 +21,7 @@ import * as jsonStore from './storeJson';
 export { DATA_DIR, DB_PATH };
 
 export type StoredRole =
+  | 'furniture_designer'
   | 'admin'
   | 'site_manager'
   | 'writer'

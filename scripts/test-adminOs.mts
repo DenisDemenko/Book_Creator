@@ -54,7 +54,7 @@ console.log('Реєстр вузлів:');
   t('«Управління товарами» є окремим вузлом', ids.includes('products'));
   t('«Управління товарами» веде на власну сторінку',
     (findNode('products')?.action as { kind: string; view?: string })?.view === 'products');
-  t('склад слебів має робочу панель', ADMIN_OS.includes('<SlabInventoryPanel />') && (findNode('slab-tables')?.action as {view?:string})?.view === 'slab-tables');
+  t('склад слебів має робочу панель', ADMIN_OS.includes('<SlabInventoryPanel inventoryOnly=') && (findNode('slab-tables')?.action as {view?:string})?.view === 'slab-tables');
   t('findNode знаходить вузол за id', findNode('crm')?.title === 'CRM');
   t('findNode на невідомий id віддає undefined', findNode('нема-такого') === undefined);
 }

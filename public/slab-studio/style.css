@@ -1577,3 +1577,8 @@ input[type="range"] {
     font-size: 12px;
   }
 }
+
+.texture-processing { margin: 10px 0; }
+.texture-processing progress { display: block; width: 100%; height: 9px; accent-color: var(--accent); }
+.texture-processing .hint { margin: 0 0 6px; }
+input[aria-invalid="true"] { border-color: #b83b36; outline: 1px solid #b83b36; }
