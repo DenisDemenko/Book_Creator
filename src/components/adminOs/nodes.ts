@@ -29,7 +29,7 @@ import type { AdminTab } from '../AdminPanelView';
  */
 export type NodeAction = { kind: 'panel'; tab: AdminTab } | { kind: 'view'; view: AdminView } | { kind: 'page'; page: 'graph-studio' };
 
-export type AdminView = 'api-keys' | 'core-ai' | 'moderation' | 'products' | 'price-management' | 'procurement' | 'quality' | 'slab-tables';
+export type AdminView = 'api-keys' | 'core-ai' | 'moderation' | 'products' | 'price-management' | 'procurement' | 'quality' | 'slab-tables' | 'crowdfunding';
 
 export interface AdminNode {
   id: string;
@@ -65,6 +65,7 @@ export interface AdminNode {
  * довжина масиву нижче.
  */
 export const ADMIN_NODES: AdminNode[] = [
+  { id: 'crowdfunding', title: 'Краудфандинг STEAM', hint: 'збори · транші · звіти', description: 'Повна ціль збору, 3% платформі, 97% команді. Перевірка паспорта, банківських зарахувань і виплат за етапами.', action: { kind: 'view', view: 'crowdfunding' }, group: 'operations', slot: 'right' },
   { id: 'slab-tables', title: 'Слеби та столи', hint: 'склад і виробництво', description: 'Фото, фізичний масштаб, векторні контури та замовлення столів із передоплатою 50%.', action: { kind: 'view', view: 'slab-tables' }, group: 'operations', slot: 'right' },
   {
     id: 'providers',
