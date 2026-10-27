@@ -17,6 +17,9 @@ import { requireAdmin } from './auth';
 import { LabyrinthError } from './core/labyrinth/model';
 import {
   MarketplaceBridgeError,
+  assertFreePriceConfirmed,
+  cleanCategorySlug,
+  cleanHighlights,
   attachBookFileToMarketplace,
   publishBookToMarketplace,
   readBridgeSettings,
@@ -98,6 +101,8 @@ export interface StoredBookOps {
     bookId: string;
     editions: Array<Record<string, unknown>>;
     sellerSlug?: string;
+    categorySlug?: string;
+    highlights?: string[];
     req: Request;
   }) => Promise<unknown>;
 }
@@ -385,6 +390,23 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
         return res.status(400).json({ error: 'Не вказано жодної редакції.', kind: 'bad_input' });
       }
 
+      // Ціна 0 тільки з явним «Безкоштовна»: порожнє поле чи кома в ціні
+      // не повинні тихо стати безкоштовною роздачею книги. Перевіряємо ДО
+      // верстки й першого виклику мосту. Стара форма (одна ціна) несе
+      // прапорець на верхньому рівні.
+      for (const edition of editions) {
+        const p = Number(edition.priceMinor);
+        if (Number.isFinite(p) && p >= 0) {
+          assertFreePriceConfirmed(
+            Math.round(p),
+            edition.free ?? (Array.isArray(req.body?.editions) ? undefined : req.body?.free),
+            `Редакція «${edition.format === 'print' ? 'print' : 'digital'}»`
+          );
+        }
+      }
+      const bridgeCategorySlug = cleanCategorySlug(req.body?.categorySlug);
+      const bridgeHighlights = cleanHighlights(req.body?.highlights);
+
       /*
         ОБКЛАДИНКА — УМОВА ПУБЛІКАЦІЇ, А НЕ ПРИКРАСА.
         Картка без зображення — це білий прямокутник у каталозі поруч із
@@ -424,6 +446,8 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
         Вимикається явно (`sample: false`) — за замовчуванням увімкнений,
         бо саме текст, а не опис, вирішує покупку.
       */
+      // Для безкоштовної редакції уривок зайвий — книгу й так забирають
+      // цілою, тож його не додаємо за жодних налаштувань.
       const sampleEnabled = req.body?.sample !== false;
       const samplePages = clampSamplePages(req.body?.samplePages);
 
@@ -474,10 +498,19 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           лістинг першого замість створити сусідній.
         */
         const engineId = String(edition.engineId || DEFAULT_PDF_ENGINE);
-        const bridgeEngineId = engineId === DEFAULT_PDF_ENGINE ? undefined : engineId;
+        // `clean: true` — обраний рушій верстає звичайну книгу: externalId,
+        // назва й імʼя файлу без позначки рушія, тож оновлюється та сама
+        // картка `bookId:format`, а не створюється сусідня «тест». Без прапорця
+        // поведінка тестового видання лишається як була.
+        const cleanEngine = edition.clean === true;
+        const bridgeEngineId = engineId === DEFAULT_PDF_ENGINE || cleanEngine ? undefined : engineId;
         const engineLabel = bridgeEngineId
           ? engines.find((e) => e.id === engineId)?.label || engineId
           : undefined;
+        const renderLabel = engines.find((e) => e.id === engineId)?.label || engineId;
+        if (format === 'print' && priceMinor === 0) {
+          return res.status(400).json({ error: 'Друкована редакція не може бути безкоштовною.', kind: 'bad_input' });
+        }
 
         // Друкована редакція йде через KDP-верстку: базову типографіку бере
         // з обраного макета, а формат, поля й корінець — з норм KDP. Друк
@@ -499,7 +532,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
                   throw new PdfEngineError(
                     engineId as never,
                     'unavailable',
-                    `Друковану редакцію під KDP уміє лише рушій «Nova» — «${engineLabel}» цього не робить.`
+                    `Друковану редакцію під KDP уміє лише рушій «Nova» — «${renderLabel}» цього не робить.`
                   );
                 }
                 const out = await renderWithEngine(engineId, {
@@ -531,6 +564,8 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
             description: book.synopsis ? String(book.synopsis) : undefined,
             priceMinor: Math.round(priceMinor),
             sellerSlug: req.body?.sellerSlug ? String(req.body.sellerSlug) : undefined,
+            categorySlug: bridgeCategorySlug,
+            highlights: bridgeHighlights,
             engineId: bridgeEngineId,
           },
           { settings }
@@ -601,7 +636,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           книга без уривка продається, книга без обкладинки — ні.
         */
         let sample: { pages: number; totalPages: number; attached: boolean; errorUk?: string } | null = null;
-        if (sampleEnabled) {
+        if (sampleEnabled && priceMinor > 0) {
           try {
             const cut = await extractSamplePages(rendered.bytes, samplePages);
             if (!cut) {
@@ -773,6 +808,8 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
     bookId: string;
     editions: Array<Record<string, unknown>>;
     sellerSlug?: string;
+    categorySlug?: string;
+    highlights?: string[];
     req: Request;
   }): Promise<unknown> {
     const stored = await getStoredBook(params.bookId);
@@ -781,6 +818,16 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
     }
     const book = stored.book as Record<string, unknown>;
     await deps.assertBookPublication?.(params.req, stored.id, book, params.editions.some(e => Number(e.priceMinor)>0));
+    for (const edition of params.editions) {
+      const p = Number(edition.priceMinor);
+      if (Number.isFinite(p) && p >= 0) {
+        assertFreePriceConfirmed(
+          Math.round(p),
+          edition.free,
+          `Редакція «${edition.format === 'print' ? 'print' : 'digital'}»`
+        );
+      }
+    }
     const settings = await readBridgeSettings();
     const results = [];
 
@@ -789,6 +836,9 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
       const priceMinor = Number(edition.priceMinor);
       if (!Number.isFinite(priceMinor) || priceMinor < 0) {
         throw new MarketplaceBridgeError(`Некоректна ціна для редакції «${format}».`, 'rejected', 400);
+      }
+      if (format === 'print' && priceMinor === 0) {
+        throw new MarketplaceBridgeError('Друкована редакція не може бути безкоштовною.', 'rejected', 400);
       }
 
       const pdf = await readArtifact(stored.id, 'pdf', format);
@@ -851,6 +901,8 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           priceMinor: Math.round(priceMinor),
           coverUrl,
           sellerSlug: params.sellerSlug,
+          categorySlug: params.categorySlug,
+          highlights: params.highlights,
         },
         { settings }
       );

@@ -18,6 +18,7 @@ import {
   attachProductMediaToMarketplace,
   clearProductMedia,
   publishProductToMarketplace,
+  cleanCategorySlug,
   type BridgeSettings,
   type PublishProductAttributes,
 } from './marketplaceBridge';
@@ -412,6 +413,7 @@ export function registerFurnitureProductRoutes(app: Express): void {
         attributes: toBridgeAttributes(product),
         variants: toBridgeVariants(product.variants),
         sellerSlug,
+        categorySlug: cleanCategorySlug(product.marketplaceCategory),
       });
       setPublishProgress(id, {
         done: 1,

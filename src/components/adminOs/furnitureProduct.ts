@@ -188,6 +188,12 @@ export interface FurnitureProduct {
   name: string;
   category: string;
   subcategory: string;
+  /**
+   * Slug категорії ВІТРИНИ (з `/api/admin/marketplace-bridge/categories`).
+   * Не плутати з `category`/`subcategory` вище — то атрибути картки. Порожньо
+   * — виріб публікується без категорії вітрини (або зберігає поточну).
+   */
+  marketplaceCategory?: string;
   /** Поточна ціна, гривень цілими (копійки множимо на 100 під час публікації). */
   priceUah: number;
   /** Базова ціна / до знижки. */

@@ -19,6 +19,7 @@
 
 import type { Express, Request, Response } from 'express';
 import { requireAdmin, requireAuth } from './auth';
+import { cleanCategorySlug, cleanHighlights } from './marketplaceBridge';
 import { LabyrinthError } from './core/labyrinth/model';
 import { getCoreJobQueue, getCoreRepository } from './core';
 import { scheduleCoreSync } from './core/sync';
@@ -57,6 +58,8 @@ export interface BookRoutesDeps {
     bookId: string;
     editions: Array<Record<string, unknown>>;
     sellerSlug?: string;
+    categorySlug?: string;
+    highlights?: string[];
     req: Request;
   }) => Promise<unknown>;
 }
@@ -311,6 +314,8 @@ export function registerBookRoutes(app: Express, deps: BookRoutesDeps): void {
         bookId: req.params.id,
         editions,
         sellerSlug: req.body?.sellerSlug ? String(req.body.sellerSlug) : undefined,
+        categorySlug: cleanCategorySlug(req.body?.categorySlug),
+        highlights: cleanHighlights(req.body?.highlights),
         req,
       });
       res.json(out);

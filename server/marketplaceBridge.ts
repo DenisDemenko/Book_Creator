@@ -203,6 +203,11 @@ export interface PublishBookInput {
   coverUrl?: string;
   highlights?: string[];
   sellerSlug?: string;
+  /**
+   * Slug категорії маркетплейсу з `listBridgeCategories()`. undefined — не
+   * чіпати поточну; '' — зняти категорію; невідомий slug приймач відхиляє.
+   */
+  categorySlug?: string;
   /** Непорожнє — лише для тестового видання нестандартним рушієм PDF. */
   engineId?: string;
 }
@@ -400,6 +405,55 @@ export interface BridgeBookRow {
   publishedAt: string | null;
   hasFile: boolean;
   fileName: string | null;
+  /** Категорія лістингу у вітрині (старий приймач цих полів не віддає). */
+  categorySlug?: string | null;
+  categoryName?: string | null;
+}
+
+/**
+ * Ціна 0 — це не «забули вписати», а окреме рішення: книгу роздають, і
+ * кожен її забере безкоштовно. Порожнє поле, NaN чи кома в ціні на клієнті
+ * дають 0 так само легко, тож сервер вимагає явного прапорця `free: true`,
+ * а не виводить намір із нуля.
+ */
+export function assertFreePriceConfirmed(priceMinor: number, freeConfirmed: unknown, what: string): void {
+  if (priceMinor === 0 && freeConfirmed !== true) {
+    throw new MarketplaceBridgeError(
+      `${what}: ціна 0 — це безкоштовна роздача. Якщо так і задумано, позначте «Безкоштовна»; інакше вкажіть ціну.`,
+      'rejected',
+      400
+    );
+  }
+  if (priceMinor > 0 && freeConfirmed === true) {
+    throw new MarketplaceBridgeError(
+      `${what}: позначено «Безкоштовна», але ціна ${(priceMinor / 100).toFixed(2)} — приберіть прапорець або обнуліть ціну.`,
+      'rejected',
+      400
+    );
+  }
+}
+
+/** Slug категорії з тіла запиту: undefined — не чіпати, '' — зняти, інакше обрізаний рядок. */
+export function cleanCategorySlug(raw: unknown): string | undefined {
+  return typeof raw === 'string' ? raw.trim().slice(0, 80) : undefined;
+}
+
+/** Переваги з тіла запиту: лише непорожні рядки, не більше десяти по 200 символів. */
+export function cleanHighlights(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out = raw
+    .filter((x): x is string => typeof x === 'string')
+    .map((x) => x.trim().slice(0, 200))
+    .filter(Boolean)
+    .slice(0, 10);
+  return out.length ? out : undefined;
+}
+
+/** Категорія вітрини, яку можна обрати при публікації. */
+export interface BridgeCategoryRow {
+  slug: string;
+  name: string;
+  listingCount: number;
 }
 
 /**
@@ -845,6 +899,61 @@ export async function listBridgeBooks(
 }
 
 /**
+ * Категорії, які насправді існують у вітрині. Студія показує саме їх у
+ * списку вибору: вільний текст категорії приймач не розпізнає, а похідну
+ * «Безкоштовні товари» (за ціною 0) не віддає взагалі.
+ */
+export async function listBridgeCategories(
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<BridgeCategoryRow[]> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+
+  let response: Response;
+  try {
+    response = await doFetch(`${settings.url}/bridge/categories`, {
+      headers: { 'x-bridge-key': settings.key },
+      signal: AbortSignal.timeout(20000),
+    });
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  }
+
+  const text = await response.text().catch(() => '');
+  if (response.status === 401 || response.status === 403) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401
+    );
+  }
+  // Старий приймач без /bridge/categories: порожній список, не помилка —
+  // публікація без категорії лишається можливою.
+  if (response.status === 404) return [];
+  if (!response.ok) {
+    throw new MarketplaceBridgeError(
+      `Маркетплейс не віддав категорії: ${describeRejection(response.status, text)}`,
+      'rejected',
+      502
+    );
+  }
+
+  try {
+    const body = JSON.parse(text) as { categories?: BridgeCategoryRow[] };
+    return Array.isArray(body?.categories)
+      ? body.categories.filter((c) => c && typeof c.slug === 'string' && typeof c.name === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Зняти лістинг за його `externalId` — тим, який показав перелік.
  *
  * Окремо від `unpublishBookFromMarketplace`, що збирає id з bookId і формату:
@@ -1226,6 +1335,7 @@ export async function publishBookToMarketplace(
     coverUrl: input.coverUrl,
     highlights: input.highlights,
     sellerSlug: input.sellerSlug,
+    categorySlug: input.categorySlug,
   };
 
   const controller = new AbortController();
@@ -1350,8 +1460,10 @@ export interface PublishCourseInput {
   sellerSlug?: string;
   moduleCount?: number;
   lessonCount?: number;
-  /** Категорія курсу для фільтрів/навігації вітрини. */
+  /** Категорія курсу для фільтрів/навігації вітрини (вільний текст — лише для старих приймачів). */
   category?: string;
+  /** Slug категорії з `listBridgeCategories()` — має перевагу над `category`. */
+  categorySlug?: string;
   /** Кому підходить курс — рядки «Аудиторія» зі студії. */
   audience?: string[];
   /** Що покупець уміє після курсу — рядки «Результати навчання». */
@@ -1396,6 +1508,7 @@ export async function publishCourseToMarketplace(
     moduleCount: input.moduleCount,
     lessonCount: input.lessonCount,
     category: input.category,
+    categorySlug: input.categorySlug,
     audience: input.audience,
     outcomes: input.outcomes,
     skills: input.skills,
@@ -1550,6 +1663,8 @@ export interface PublishProductInput {
    */
   variants?: PublishProductVariant[];
   sellerSlug?: string;
+  /** Slug категорії з `listBridgeCategories()`. */
+  categorySlug?: string;
 }
 
 export interface PublishProductResult {
@@ -1595,6 +1710,7 @@ export async function publishProductToMarketplace(
     // запиту (задача #225).
     variants: input.variants?.length ? input.variants : undefined,
     sellerSlug: input.sellerSlug,
+    categorySlug: input.categorySlug,
   };
 
   const controller = new AbortController();

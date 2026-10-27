@@ -67,6 +67,10 @@ import {
   readBridgeSettings,
   testBridgeConnection,
   listBridgeBooks,
+  listBridgeCategories,
+  assertFreePriceConfirmed,
+  cleanCategorySlug,
+  cleanHighlights,
   listBridgePayouts,
   listBridgeSellerApplications,
   decideBridgeSellerApplication,
@@ -1200,6 +1204,16 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
+  /** Категорії вітрини для списку вибору при публікації. */
+  app.get('/api/admin/marketplace-bridge/categories', requireAdmin, async (_req, res) => {
+    try {
+      res.json({ categories: await listBridgeCategories() });
+    } catch (err: any) {
+      const status = err instanceof MarketplaceBridgeError ? err.status : 502;
+      res.status(status).json({ error: err?.message || 'Не вдалося прочитати категорії.', kind: err?.kind });
+    }
+  });
+
   /**
    * Леджер виплат із маркетплейсу — читання в тому напрямі, якого міст досі
    * не мав: Студія вміла лише відправляти (книги, курси, вироби). Показуємо
@@ -1417,7 +1431,9 @@ export function registerAdminRoutes(app: Express): void {
   });
 
   app.post('/api/admin/marketplace-bridge/publish', requireAdmin, async (req, res) => {
-    const { bookId, title, subtitle, summary, description, coverUrl, highlights, sellerSlug, formats } = req.body || {};
+    const { bookId, title, subtitle, summary, description, coverUrl, sellerSlug, formats } = req.body || {};
+    const highlights = cleanHighlights(req.body?.highlights);
+    const categorySlug = cleanCategorySlug(req.body?.categorySlug);
     if (!bookId || !title) {
       return res.status(400).json({ error: 'Потрібні bookId і title.', kind: 'bad_input' });
     }
@@ -1441,9 +1457,10 @@ export function registerAdminRoutes(app: Express): void {
         if (!Number.isFinite(priceMinor) || priceMinor < 0) {
           return res.status(400).json({ error: `Некоректна ціна для формату «${format}».`, kind: 'bad_input' });
         }
+        assertFreePriceConfirmed(Math.round(priceMinor), entry?.free, `Формат «${format}»`);
         results.push(
           await publishBookToMarketplace(
-            { bookId, format, title, subtitle, summary, description, priceMinor, coverUrl, highlights, sellerSlug },
+            { bookId, format, title, subtitle, summary, description, priceMinor, coverUrl, highlights, sellerSlug, categorySlug },
             { settings }
           )
         );
@@ -1486,7 +1503,9 @@ export function registerAdminRoutes(app: Express): void {
       outcomes,
       skills,
       modules,
+      free,
     } = req.body || {};
+    const courseCategorySlug = cleanCategorySlug(req.body?.categorySlug);
     if (!bookId || !title) {
       return res.status(400).json({ error: 'Потрібні bookId і title.', kind: 'bad_input' });
     }
@@ -1496,6 +1515,7 @@ export function registerAdminRoutes(app: Express): void {
     }
 
     try {
+      assertFreePriceConfirmed(Math.round(price), free, `Курс «${title}»`);
       const settings = await readBridgeSettings();
       assertStorefrontCover(coverUrl, `Курс «${title}»`);
       const result = await publishCourseToMarketplace(
@@ -1513,6 +1533,7 @@ export function registerAdminRoutes(app: Express): void {
           moduleCount,
           lessonCount,
           category,
+          categorySlug: courseCategorySlug,
           audience,
           outcomes,
           skills,

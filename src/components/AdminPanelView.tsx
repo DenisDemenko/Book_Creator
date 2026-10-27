@@ -50,6 +50,7 @@ import {
 import type { AdminUserRow, UserRole } from '../types';
 import { getRoleInfo } from '../utils/rbac';
 import { renderPdfFirstPageToPng } from '../utils/pdfCover';
+import { parseExternalId } from './adminOs/externalId';
 
 export type AdminTab = 'users' | 'roles' | 'costs' | 'business' | 'ai' | 'expenses' | 'bridge' | 'crm' | 'git' | 'payouts' | 'moderation';
 
@@ -416,17 +417,16 @@ const MarketplaceBridgePanel: React.FC = () => {
   };
 
   /**
-   * `externalId` мосту — це `${bookId}:${format}` (див. bridgeExternalId у
-   * server/marketplaceBridge.ts). Розбираємо з КІНЦЯ: формат завжди одне
-   * слово без двокрапки, а от ідентифікатор книги колись може її містити.
+   * Обкладинку з файлу приймає лише звичайна книга (`bookId:digital|print`).
+   * Тестове видання рушієм, курс і виріб мають інші externalId — раніше їх
+   * розбирало «з кінця по двокрапці» й шило обкладинку не туди.
    */
-  const parseExternalId = (externalId: string): { bookId: string; format: 'digital' | 'print' } => {
-    const at = externalId.lastIndexOf(':');
-    const format = at >= 0 ? externalId.slice(at + 1) : 'digital';
-    return {
-      bookId: at >= 0 ? externalId.slice(0, at) : externalId,
-      format: format === 'print' ? 'print' : 'digital',
-    };
+  const parseBookRow = (externalId: string): { bookId: string; format: 'digital' | 'print' } => {
+    const parsed = parseExternalId(externalId);
+    if ((parsed.kind !== 'digital' && parsed.kind !== 'print') || parsed.engineId) {
+      throw new Error('Обкладинку з файлу можна надіслати лише для звичайної книги, не для курсу, виробу чи тестового видання.');
+    }
+    return { bookId: parsed.id, format: parsed.kind };
   };
 
   /**
@@ -442,7 +442,7 @@ const MarketplaceBridgePanel: React.FC = () => {
     setBusy(true);
     setMessage(null);
     try {
-      const { bookId, format } = parseExternalId(row.externalId);
+      const { bookId, format } = parseBookRow(row.externalId);
       const imageBase64 = await renderPdfFirstPageToPng(file);
       const res = await fetch('/api/admin/marketplace-bridge/cover', {
         method: 'POST',

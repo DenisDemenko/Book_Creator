@@ -42,6 +42,7 @@ import type { AuthUser, Book, NavigationTab } from '../types';
 import { calculateWordCount, estimatePageCount } from '../utils/helpers';
 import { renderPdfFirstPageToPng } from '../utils/pdfCover';
 import { useLanguage } from '../i18n/LanguageContext';
+import { resolvePrice } from './adminOs/priceInput';
 
 interface PublishingHubViewProps {
   book: Book;
@@ -332,6 +333,14 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
   const [trimId, setTrimId] = useState('6x9');
   const [priceDigital, setPriceDigital] = useState('150');
   const [pricePrint, setPricePrint] = useState('390');
+  // Ціна 0 — окреме рішення, а не наслідок порожнього поля: без прапорця
+  // «Безкоштовна» нульова чи некоректна ціна публікацію не пропускає.
+  const [freeDigital, setFreeDigital] = useState(false);
+  // Категорії вітрини: тягнемо справжній перелік, а не вигадуємо назви.
+  const [categories, setCategories] = useState<Array<{ slug: string; name: string }>>([]);
+  const [categorySlug, setCategorySlug] = useState('');
+  // Опублікувати обраним рушієм як звичайну книгу (без позначки «тест»).
+  const [publishWithEngine, setPublishWithEngine] = useState(false);
   // Той самий памʼятливий продавець, що й у панелі мосту: значення одне на
   // інсталяцію, а не на екран.
   const [sellerSlug, setSellerSlug] = useState(() => {
@@ -548,7 +557,33 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
     });
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/admin/marketplace-bridge/categories', { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (alive && Array.isArray(data?.categories)) setCategories(data.categories);
+      })
+      .catch(() => {
+        // Без переліку публікація можлива — просто без категорії.
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const publish = async () => {
+    const digitalPrice = resolvePrice(priceDigital, freeDigital, 'електронної редакції');
+    // Друкована книга безкоштовною не буває: її ніхто не «забере» з кабінету,
+    // а відправити поштою за 0 вітрина не дасть — тож для друку нуль заборонений.
+    const printPrice = withPrint ? resolvePrice(pricePrint, false, 'друкованої редакції') : null;
+    if (digitalPrice.ok === false) return setError(digitalPrice.error);
+    if (printPrice && printPrice.ok === false) return setError(printPrice.error);
+    if (publishWithEngine && engineId !== 'nova' && withPrint) {
+      return setError(
+        `Друковану редакцію під KDP верстає лише Nova. Вимкніть друковану або зніміть «Опублікувати рушієм ${chosenEngine?.label || engineId}».`
+      );
+    }
     setBusy('publish');
     setError(null);
     setResult(null);
@@ -586,12 +621,20 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
       setStep('cover', 'done');
 
       const editions: Record<string, unknown>[] = [
-        { format: 'digital', priceMinor: Math.round(Number(priceDigital) * 100), variant },
+        {
+          format: 'digital',
+          priceMinor: digitalPrice.minor,
+          free: digitalPrice.free,
+          variant,
+          // Обраний рушій + clean: та сама картка bookId:digital, без «тесту».
+          ...(publishWithEngine && engineId !== 'nova' ? { engineId, clean: true } : {}),
+        },
       ];
-      if (withPrint) {
+      if (withPrint && printPrice && printPrice.ok) {
         editions.push({
           format: 'print',
-          priceMinor: Math.round(Number(pricePrint) * 100),
+          priceMinor: printPrice.minor,
+          free: printPrice.free,
           variant,
           trimId,
         });
@@ -610,6 +653,8 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
         body: JSON.stringify({
           book,
           sellerSlug: sellerSlug.trim() || undefined,
+          // '' — «без категорії»: на повторній публікації це знімає стару.
+          categorySlug,
           editions,
           coverBase64,
           sample: withSample,
@@ -860,10 +905,21 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
               ДО перегляду, інакше автор подивиться красиву верстку, натисне
               «Опублікувати» й отримає у вітрині іншу книгу. */}
           {engineId !== 'nova' && (
-            <p className="mt-2 text-[11px] leading-relaxed text-amber-300/80">
-              Це перегляд. У вітрину публікується власна верстка Nova: тільки
-              вона тримає поля під KDP і зводить корінець за обсягом.
-            </p>
+            <>
+              <p className="mt-2 text-[11px] leading-relaxed text-amber-300/80">
+                Це перегляд. Типово у вітрину йде власна верстка Nova: тільки
+                вона тримає поля під KDP і зводить корінець за обсягом.
+              </p>
+              <label className="mt-1 flex items-center gap-2 text-[11px] text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={publishWithEngine}
+                  onChange={(e) => setPublishWithEngine(e.target.checked)}
+                />
+                Опублікувати електронну редакцію рушієм «{chosenEngine?.label || engineId}» як звичайну
+                книгу (оновить картку цієї книги, без позначки «тест»). Друк лишається за Nova.
+              </label>
+            </>
           )}
         </div>
 
@@ -871,10 +927,28 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
           <label className="block">
             <span className="block text-[11px] font-semibold text-slate-300 mb-1">Ціна електронної, грн</span>
             <input
-              value={priceDigital}
+              value={freeDigital ? '0' : priceDigital}
               onChange={(e) => setPriceDigital(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none sun-accent-focus font-mono"
+              disabled={freeDigital}
+              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none sun-accent-focus font-mono disabled:opacity-50"
             />
+            <span className="mt-1 flex items-center gap-2 text-[11px] text-slate-300">
+              <input type="checkbox" checked={freeDigital} onChange={(e) => setFreeDigital(e.target.checked)} />
+              Безкоштовна (кожен забере її у кабінеті без оплати)
+            </span>
+          </label>
+          <label className="block">
+            <span className="block text-[11px] font-semibold text-slate-300 mb-1">Категорія вітрини</span>
+            <select
+              value={categorySlug}
+              onChange={(e) => setCategorySlug(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 outline-none sun-accent-focus"
+            >
+              <option value="">Без категорії</option>
+              {categories.map((c) => (
+                <option key={c.slug} value={c.slug}>{c.name}</option>
+              ))}
+            </select>
           </label>
           <label className="block">
             <span className="block text-[11px] font-semibold text-slate-300 mb-1">Продавець (slug)</span>

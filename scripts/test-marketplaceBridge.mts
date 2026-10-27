@@ -670,5 +670,108 @@ console.log('\nМодерація STEAM-проєктів (команди й па
   t('несподіване тіло → порожня черга', garbage.count === 0 && garbage.teams.length === 0);
 }
 
+console.log('\nКатегорії вітрини:');
+{
+  const capture = (status: number, body: unknown) => {
+    const calls: Array<{ url: string; body?: any }> = [];
+    return {
+      calls,
+      fetch: (async (url: string, init: any = {}) => {
+        calls.push({ url: String(url), body: init.body ? JSON.parse(init.body) : undefined });
+        return { status, ok: status < 400, text: async () => JSON.stringify(body) };
+      }) as never,
+    };
+  };
+
+  const cats = capture(200, { categories: [
+    { slug: 'knyhy', name: 'Книги', listingCount: 2 },
+    { slug: 5, name: 'зламана' },
+  ] });
+  const list = await bridge.listBridgeCategories({ fetch: cats.fetch, settings });
+  t('перелік категорій читається, зламані рядки відкинуто', list.length === 1 && list[0].slug === 'knyhy');
+  t('запит іде на /bridge/categories', cats.calls[0].url.endsWith('/bridge/categories'));
+
+  const old = capture(404, { message: 'Cannot GET' });
+  const none = await bridge.listBridgeCategories({ fetch: old.fetch, settings });
+  t('старий приймач без /bridge/categories → порожній список, не помилка', Array.isArray(none) && none.length === 0);
+
+  const denied = capture(401, {});
+  let e401: any = null;
+  try { await bridge.listBridgeCategories({ fetch: denied.fetch, settings }); } catch (e) { e401 = e; }
+  t('401 → «unauthorized»', e401?.kind === 'unauthorized');
+
+  const book = capture(201, { created: true, listing: { slug: 'x' } });
+  await bridge.publishBookToMarketplace(
+    { bookId: 'b1', format: 'digital', title: 'T', priceMinor: 100, categorySlug: 'knyhy' },
+    { fetch: book.fetch, settings });
+  t('categorySlug їде в тілі книги', book.calls[0].body.categorySlug === 'knyhy');
+
+  const course = capture(201, { created: true, listing: { slug: 'c' } });
+  await bridge.publishCourseToMarketplace(
+    { bookId: 'b1', title: 'C', priceMinor: 100, categorySlug: 'chpu', category: 'ЧПУ' },
+    { fetch: course.fetch, settings });
+  t('categorySlug їде в тілі курсу', course.calls[0].body.categorySlug === 'chpu');
+
+  const product = capture(201, { created: true, listing: { slug: 'p' } });
+  await bridge.publishProductToMarketplace(
+    { sku: 'S-1', title: 'P', priceMinor: 100, categorySlug: 'chpu' },
+    { fetch: product.fetch, settings });
+  t('categorySlug їде в тілі виробу', product.calls[0].body.categorySlug === 'chpu');
+
+  t('cleanCategorySlug: undefined лишається undefined, порожній — порожнім',
+    bridge.cleanCategorySlug(undefined) === undefined && bridge.cleanCategorySlug('  ') === '' && bridge.cleanCategorySlug(' chpu ') === 'chpu');
+  const hl = bridge.cleanHighlights(['  a ', '', 5, 'b'.repeat(300)]) || [];
+  t('cleanHighlights: лише непорожні рядки, ≤200 символів', hl.length === 2 && hl[0] === 'a' && hl[1].length === 200);
+  t('cleanHighlights: не масив → undefined', bridge.cleanHighlights('x') === undefined && bridge.cleanHighlights([]) === undefined);
+}
+
+console.log('\nБезкоштовна книга — лише з явним прапорцем:');
+{
+  const run = (price: number, free: unknown) => {
+    try { bridge.assertFreePriceConfirmed(price, free, 'Тест'); return null; } catch (e: any) { return e; }
+  };
+  const silent = run(0, undefined);
+  t('ціна 0 без прапорця → відмова 400', silent?.status === 400 && /Безкоштовна/.test(silent.message));
+  t('ціна 0 з прапорцем → дозволено', run(0, true) === null);
+  t('ціна 0 з free:"true" (не булеве) → відмова', run(0, 'true')?.status === 400);
+  t('платна ціна без прапорця → дозволено', run(15000, undefined) === null);
+  t('платна ціна з прапорцем → відмова (суперечність)', run(15000, true)?.status === 400);
+}
+
+console.log('\nЦіна з поля вводу:');
+{
+  const price = await import('../src/components/adminOs/priceInput');
+  t('150 → 15000 коп.', price.parsePriceMinor('150') === 15000);
+  t('«99,50» з комою → 9950', price.parsePriceMinor('99,50') === 9950);
+  t('«1 250» із пробілом → 125000', price.parsePriceMinor('1 250') === 125000);
+  t('порожнє поле → null, а не 0', price.parsePriceMinor('') === null);
+  t('«abc» → null', price.parsePriceMinor('abc') === null);
+  t('«1,5,0» → null', price.parsePriceMinor('1,5,0') === null);
+  t('від’ємне → null', price.parsePriceMinor('-5') === null);
+  const zero = price.resolvePrice('0', false, 'книги');
+  t('нуль без «Безкоштовна» → помилка', zero.ok === false && /Безкоштовна/.test((zero as any).error));
+  const free = price.resolvePrice('', true, 'книги');
+  t('«Безкоштовна» → 0 із free:true, навіть при порожньому полі', free.ok === true && (free as any).minor === 0 && (free as any).free === true);
+  const bad = price.resolvePrice('abc', false, 'книги');
+  t('сміття без прапорця → помилка, не 0', bad.ok === false);
+}
+
+console.log('\nРозбір externalId лістингів:');
+{
+  const { parseExternalId } = await import('../src/components/adminOs/externalId');
+  const a = parseExternalId('BK-1:digital');
+  t('книга digital', a.kind === 'digital' && a.id === 'BK-1' && !a.engineId);
+  const b = parseExternalId('BK-1:print');
+  t('книга print', b.kind === 'print' && b.id === 'BK-1');
+  const c = parseExternalId('BK-1:digital:chromium');
+  t('тест рушієм: формат digital, рушій chromium, id без хвоста', c.kind === 'digital' && c.id === 'BK-1' && c.engineId === 'chromium');
+  const d = parseExternalId('BK-1:course');
+  t('курс', d.kind === 'course' && d.id === 'BK-1');
+  const e = parseExternalId('product:BK-ORG-LED-2084');
+  t('виріб: kind product, id = SKU', e.kind === 'product' && e.id === 'BK-ORG-LED-2084');
+  const f = parseExternalId('a:b:digital');
+  t('bookId із двокрапкою не ламається', f.kind === 'digital' && f.id === 'a:b');
+}
+
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);
 if (fail > 0) process.exit(1);

@@ -377,6 +377,22 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
     setProduct(initial ? { ...blankFurnitureProduct(), ...initial } : blankFurnitureProduct());
   }, [initial]);
 
+  // Категорії вітрини — справжній перелік із маркетплейсу; без нього
+  // (міст не налаштований) поле просто порожнє, публікація лишається можливою.
+  const [storefrontCategories, setStorefrontCategories] = useState<Array<{ slug: string; name: string }>>([]);
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/admin/marketplace-bridge/categories', { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (alive && Array.isArray(data?.categories)) setStorefrontCategories(data.categories);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const saveDraft = useCallback(async () => {
     setBusy(true);
     setMessage(null);
@@ -807,6 +823,15 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
                     <select className={`w-full rounded-xl px-3 py-2.5 text-xs outline-none ${t.select}`} value={product.subcategory} onChange={(e) => patch({ subcategory: e.target.value })}>
                       {(['Авторський крафт (Дерево + Смола)', 'Офісні аксесуари', 'Подарункові комплекти'] as const).map((c) => (
                         <option key={c}>{c}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <Label>Категорія у вітрині</Label>
+                    <select className={`w-full rounded-xl px-3 py-2.5 text-xs outline-none ${t.select}`} value={product.marketplaceCategory || ''} onChange={(e) => patch({ marketplaceCategory: e.target.value })}>
+                      <option value="">Без категорії</option>
+                      {storefrontCategories.map((c) => (
+                        <option key={c.slug} value={c.slug}>{c.name}</option>
                       ))}
                     </select>
                   </div>
