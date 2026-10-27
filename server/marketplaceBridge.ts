@@ -621,6 +621,184 @@ export async function decideBridgeSellerApplication(
   }
 }
 
+// ─── Модерація STEAM-проєктів (команди й паспорти) ───────────────────────────
+//
+// Та сама схема, що й у заявок продавців: черга живе в базі маркетплейсу,
+// рішення власник ухвалює в панелі Студії. Правил тут немає — схвалення,
+// відмова й «повернути із зауваженнями» виконує маркетплейс (статус +
+// сповіщення заявнику), Студія лише передає намір і показує повну картку.
+
+export type BridgeTeamStatus = 'pending' | 'changes_requested' | 'published' | 'rejected';
+
+export interface BridgeTeamSummary {
+  id: string;
+  name: string;
+  direction: string | null;
+  description: string;
+  status: BridgeTeamStatus;
+  /** Остання примітка модератора (для «з зауваженнями» і «відхилено»). */
+  note: string | null;
+  memberCount: number;
+  /** Скільки разів заявник надсилав команду знову після зауважень. */
+  resubmissions: number;
+  createdAt: string;
+  submittedAt: string;
+  ownerName: string;
+  ownerEmail: string;
+  /** Шлях до фото відносно API маркетплейсу; Студія додає адресу мосту. */
+  photoPath: string | null;
+  hasPassport: boolean;
+}
+
+export interface BridgeTeamModelVersion {
+  id: string;
+  modelId: string;
+  version: number;
+  title: string;
+  filename: string;
+  format: string;
+  sizeBytes: number;
+  units: string;
+  notes: string[];
+  createdAt: string;
+  previewable: boolean;
+}
+
+export interface BridgeTeamPassport {
+  title: string;
+  description: string;
+  details: string;
+  status: string;
+  revision: number;
+  updatedAt: string;
+  versions: BridgeTeamModelVersion[];
+}
+
+export interface BridgeTeamDetail extends BridgeTeamSummary {
+  details: string | null;
+  members: { id: string; role: string; status: string; displayName: string; email: string }[];
+  media: { id: string; kind: string; filename: string; mimeType: string; sizeBytes: number; path: string }[];
+  passport: BridgeTeamPassport | null;
+}
+
+export type BridgeTeamDecision = 'approve' | 'reject' | 'request-changes';
+
+type BridgeDeps = { fetch?: typeof fetch; settings?: BridgeSettings };
+
+/** Спільний виклик для команд: ключ, таймаут і однакові повідомлення про відмову. */
+async function bridgeTeamsCall(
+  path: string,
+  init: { method?: 'GET' | 'POST'; body?: unknown },
+  what: string,
+  deps: BridgeDeps
+): Promise<string> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+
+  let response: Response;
+  try {
+    response = await doFetch(`${settings.url}${path}`, {
+      method: init.method ?? 'GET',
+      headers: {
+        'x-bridge-key': settings.key,
+        ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      },
+      ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  }
+
+  const text = await response.text().catch(() => '');
+  if (response.status === 401 || response.status === 403) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401
+    );
+  }
+  if (!response.ok) {
+    // 404/409/400 від маркетплейсу — це змістовна відмова («вже опубліковано»,
+    // «напишіть зауваження»): віддаємо її авторові рішення з тим самим статусом.
+    const status = response.status >= 400 && response.status < 500 ? response.status : 502;
+    throw new MarketplaceBridgeError(`${what}: ${describeRejection(response.status, text)}`, 'rejected', status);
+  }
+  return text;
+}
+
+const TEAM_STATUSES: readonly string[] = ['pending', 'changes_requested', 'published', 'rejected'];
+
+export async function listBridgeTeams(
+  status: BridgeTeamStatus | '' = '',
+  deps: BridgeDeps = {}
+): Promise<{ count: number; teams: BridgeTeamSummary[] }> {
+  const query = TEAM_STATUSES.includes(status) ? `?status=${status}` : '';
+  const text = await bridgeTeamsCall(`/bridge/teams${query}`, {}, 'Маркетплейс не віддав команди', deps);
+  try {
+    const body = JSON.parse(text) as { teams?: BridgeTeamSummary[] };
+    const teams = Array.isArray(body?.teams) ? body.teams : [];
+    return { count: teams.length, teams };
+  } catch {
+    return { count: 0, teams: [] };
+  }
+}
+
+export async function getBridgeTeam(id: string, deps: BridgeDeps = {}): Promise<BridgeTeamDetail> {
+  const text = await bridgeTeamsCall(
+    `/bridge/teams/${encodeURIComponent(id)}`,
+    {},
+    'Маркетплейс не віддав команду',
+    deps
+  );
+  try {
+    return JSON.parse(text) as BridgeTeamDetail;
+  } catch {
+    throw new MarketplaceBridgeError('Маркетплейс повернув нечитабельну картку команди.', 'rejected', 502);
+  }
+}
+
+/** Рішення про команду. Для `reject` і `request-changes` потрібен текст — перевіряємо до виклику. */
+export async function decideBridgeTeam(
+  id: string,
+  decision: BridgeTeamDecision,
+  text?: string,
+  deps: BridgeDeps = {}
+): Promise<{ id: string; status: string }> {
+  const note = (text ?? '').trim();
+  if (decision === 'request-changes' && !note) {
+    throw new MarketplaceBridgeError(
+      'Напишіть зауваження: без них заявник не знатиме, що виправляти.',
+      'rejected',
+      400
+    );
+  }
+  if (decision === 'reject' && !note) {
+    throw new MarketplaceBridgeError('Потрібна причина відхилення.', 'rejected', 400);
+  }
+  const body =
+    decision === 'approve' ? {} : decision === 'reject' ? { reason: note } : { note };
+  const raw = await bridgeTeamsCall(
+    `/bridge/teams/${encodeURIComponent(id)}/${decision}`,
+    { method: 'POST', body },
+    'Маркетплейс відхилив рішення',
+    deps
+  );
+  const fallback =
+    decision === 'approve' ? 'published' : decision === 'reject' ? 'rejected' : 'changes_requested';
+  try {
+    const parsed = JSON.parse(raw) as { id?: string; status?: string };
+    return { id: parsed?.id ?? id, status: parsed?.status ?? fallback };
+  } catch {
+    return { id, status: fallback };
+  }
+}
+
 export async function listBridgeBooks(
   deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
 ): Promise<BridgeBookRow[]> {

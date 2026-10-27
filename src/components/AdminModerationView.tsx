@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Ban, CheckCircle2, RefreshCw } from 'lucide-react';
 import { AdminSellerApplications } from './AdminSellerApplications';
+import { AdminTeamModeration } from './AdminTeamModeration';
 
 /**
  * «Модерація» — окремий розділ адмінпанелі.
@@ -17,6 +18,10 @@ import { AdminSellerApplications } from './AdminSellerApplications';
  * З 28.09.2026 тут же — черга заявок продавця з маркетплейсу: власник просив,
  * щоб ПОГОДЖЕННЯ були в Студії, а не на сторінці адміна маркетплейсу. Це інший
  * предмет (люди, а не публікації), тому окремий блок і окремий компонент.
+ *
+ * З 27.10.2026 тут же — «Модерація STEAM проектів» (команди й паспорти з
+ * маркетплейсу), AdminTeamModeration: повна картка перед рішенням і повернення
+ * із зауваженнями.
  */
 
 type ModerationRow = {
@@ -91,6 +96,7 @@ export const AdminModerationView: React.FC = () => {
   return (
     <div className="space-y-4">
     <AdminSellerApplications />
+    <AdminTeamModeration />
     <div className="rounded-2xl bg-slate-900/60 border border-white/[0.06] p-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>

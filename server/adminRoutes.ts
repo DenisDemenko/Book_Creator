@@ -70,6 +70,9 @@ import {
   listBridgePayouts,
   listBridgeSellerApplications,
   decideBridgeSellerApplication,
+  listBridgeTeams,
+  getBridgeTeam,
+  decideBridgeTeam,
   unpublishByExternalId,
   bridgeTestBook,
   bridgeTestBookContent,
@@ -1273,6 +1276,65 @@ export function registerAdminRoutes(app: Express): void {
     } catch (err: any) {
       const status = err instanceof MarketplaceBridgeError ? err.status : 502;
       res.status(status).json({ error: err?.message || 'Маркетплейс не прийняв рішення.', kind: err?.kind });
+    }
+  });
+
+  /**
+   * Модерація STEAM-проєктів: команди з паспортами. Черга й рішення живуть у
+   * маркетплейсі (там статус і сповіщення заявнику), панель Студії — єдине
+   * місце, де власник їх розбирає. Повна картка віддається окремим запитом,
+   * щоб черга не тягла десятки кілобайтів описів і паспортів.
+   */
+  const teamError = (res: any, err: any, fallback: string) => {
+    const status = err instanceof MarketplaceBridgeError ? err.status : 502;
+    res.status(status).json({ error: err?.message || fallback, kind: err?.kind });
+  };
+
+  app.get('/api/admin/marketplace-bridge/teams', requireAdmin, async (req, res) => {
+    try {
+      const status = String(req.query.status || '') as any;
+      const queue = await listBridgeTeams(status);
+      const base = (await readBridgeSettingsView()).url;
+      res.json({
+        ...queue,
+        teams: queue.teams.map((team) => ({
+          ...team,
+          photoUrl: team.photoPath && base ? `${base}${team.photoPath}` : null,
+        })),
+      });
+    } catch (err: any) {
+      teamError(res, err, 'Не вдалося прочитати команди.');
+    }
+  });
+
+  app.get('/api/admin/marketplace-bridge/teams/:id', requireAdmin, async (req, res) => {
+    try {
+      const team = await getBridgeTeam(String(req.params.id || '').trim());
+      const base = (await readBridgeSettingsView()).url;
+      res.json({
+        ...team,
+        photoUrl: team.photoPath && base ? `${base}${team.photoPath}` : null,
+        media: (team.media || []).map((asset) => ({ ...asset, url: base ? `${base}${asset.path}` : null })),
+      });
+    } catch (err: any) {
+      teamError(res, err, 'Не вдалося прочитати команду.');
+    }
+  });
+
+  app.post('/api/admin/marketplace-bridge/teams/:id/:decision', requireAdmin, async (req, res) => {
+    const id = String(req.params.id || '').trim();
+    const decision = String(req.params.decision || '').trim();
+    if (!id) return res.status(400).json({ error: 'Не вказано команду.', kind: 'bad_input' });
+    if (decision !== 'approve' && decision !== 'reject' && decision !== 'request-changes') {
+      return res
+        .status(400)
+        .json({ error: 'Рішення буває approve, reject або request-changes.', kind: 'bad_input' });
+    }
+    try {
+      const text = String(decision === 'request-changes' ? req.body?.note : req.body?.reason || '').trim();
+      res.json(await decideBridgeTeam(id, decision, text));
+    } catch (err: any) {
+      teamError(res, err, 'Маркетплейс не прийняв рішення.');
     }
   });
 

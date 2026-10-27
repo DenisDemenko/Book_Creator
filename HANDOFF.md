@@ -187,6 +187,12 @@ test:invite-mail, лабіринтні :browser/:studio (шлях Chromium на 
 прогін синхронізації на тестовій книзі; ручні сценарії масштабу й обкладинки.
 Приймання наступним агентом: НЕ підтверджено.
 
+## Модерація STEAM-проєктів у Студії — Claude, 27.10.2026 #01 (запис #487)
+
+- Де: «Адмін-панель → Модерація» → блок «Модерація STEAM проектів» (`src/components/AdminTeamModeration.tsx`, під «Заявками продавців»). Рядок черги розкривається в повну картку (описи, склад, паспорт з версіями моделей) і лише там є рішення: «Опублікувати», «Відхилити із зауваженнями» (текст обов'язковий), «Відхилити остаточно».
+- Дані й рішення — у маркетплейсі через міст: `/api/admin/marketplace-bridge/teams[/:id[/:decision]]` → `server/marketplaceBridge.ts` (`listBridgeTeams`, `getBridgeTeam`, `decideBridgeTeam`) → `GET/POST /bridge/teams…` маркетплейсу. Статус `changes_requested`, `PATCH /teams/:id`, `POST /teams/:id/resubmit` — у гілці маркетплейсу `feat/team-project-details`; без її деплою в `master` блок показує помилку мосту.
+- Тести: `npm run test:bridge` (123); e2e маркетплейсу `teams`, `bridge-teams`. Живий прогін на справжніх сервісах не робився.
+
 ## Власні шаблони верстки через DesignCraft + фон блоків — Claude, 26.10.2026 #03 (запис #486)
 
 - Потік: «Верстка для публікації» → «Шаблон верстки» → `TemplateWorkshop.tsx`: `POST /api/pdf/designcraft/template-copy` (копія шаблону, `keepDocument`) → автор правит стилі в DesignCraft → `POST /api/pdf/designcraft/template-import` (читає `styles.paragraph` і `swatches` з `document.json`) → «Застосувати» пише `layoutConfig.customDesignTheme`.

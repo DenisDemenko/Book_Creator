@@ -584,5 +584,91 @@ console.log('\nЗаявки продавця (погодження перене�
   t('відповідь без тіла → рішення все одно повертається', bare.status === 'approved', bare.status);
 }
 
+console.log('\nМодерація STEAM-проєктів (команди й паспорти):');
+{
+  const seen: { url: string; method?: string; key?: string; body?: string }[] = [];
+  const mkJson = (status: number, body: unknown) => (async (url: string, init: any = {}) => {
+    seen.push({ url: String(url), method: init.method, key: init.headers?.['x-bridge-key'], body: init.body });
+    return { status, ok: status >= 200 && status < 300, text: async () => JSON.stringify(body) };
+  }) as never;
+
+  const queue = await bridge.listBridgeTeams('pending', {
+    fetch: mkJson(200, { count: 1, teams: [{ id: 't1', name: 'Лабіринт', status: 'pending', ownerEmail: 'o@x.ua' }] }),
+    settings,
+  });
+  t('GET /bridge/teams?status=pending із ключем',
+    seen[0]?.url === 'https://api.fusionlab.in.ua/bridge/teams?status=pending' && seen[0]?.key === 'secret-key',
+    String(seen[0]?.url));
+  t('черга команд прочитана', queue.count === 1 && queue.teams[0]?.name === 'Лабіринт');
+
+  await bridge.listBridgeTeams('' as any, { fetch: mkJson(200, { teams: [] }), settings });
+  t('порожній фільтр → без параметра', seen[1]?.url === 'https://api.fusionlab.in.ua/bridge/teams', String(seen[1]?.url));
+  await bridge.listBridgeTeams('bogus' as any, { fetch: mkJson(200, { teams: [] }), settings });
+  t('невідомий статус не потрапляє в адресу', seen[2]?.url === 'https://api.fusionlab.in.ua/bridge/teams', String(seen[2]?.url));
+
+  const detail = await bridge.getBridgeTeam('t 1', {
+    fetch: mkJson(200, { id: 't1', name: 'Лабіринт', details: 'Опис', passport: { title: 'П', versions: [] }, members: [], media: [] }),
+    settings,
+  });
+  t('картка команди читається за екранованим id',
+    seen[3]?.url === 'https://api.fusionlab.in.ua/bridge/teams/t%201' && detail.passport?.title === 'П', String(seen[3]?.url));
+
+  const approved = await bridge.decideBridgeTeam('t1', 'approve', undefined, {
+    fetch: mkJson(201, { id: 't1', status: 'published' }),
+    settings,
+  });
+  t('схвалення — POST /approve', seen[4]?.url.endsWith('/bridge/teams/t1/approve') && seen[4]?.method === 'POST');
+  t('статус схвалення', approved.status === 'published', approved.status);
+
+  await bridge.decideBridgeTeam('t1', 'request-changes', '  Додайте схему  ', {
+    fetch: mkJson(201, { id: 't1', status: 'changes_requested' }),
+    settings,
+  });
+  t('«із зауваженнями» везе note без зайвих пробілів',
+    seen[5]?.url.endsWith('/bridge/teams/t1/request-changes') && JSON.parse(String(seen[5]?.body)).note === 'Додайте схему',
+    String(seen[5]?.body));
+
+  await bridge.decideBridgeTeam('t1', 'reject', 'Не за темою', {
+    fetch: mkJson(201, { id: 't1', status: 'rejected' }),
+    settings,
+  });
+  t('відхилення везе reason', JSON.parse(String(seen[6]?.body)).reason === 'Не за темою', String(seen[6]?.body));
+
+  const before = seen.length;
+  let noNote: any = null;
+  try { await bridge.decideBridgeTeam('t1', 'request-changes', '   ', { fetch: mkJson(201, {}), settings }); }
+  catch (e) { noNote = e; }
+  t('без тексту зауважень запит навіть не йде в мережу',
+    noNote?.status === 400 && seen.length === before, String(noNote?.message));
+  let noReason: any = null;
+  try { await bridge.decideBridgeTeam('t1', 'reject', '', { fetch: mkJson(201, {}), settings }); }
+  catch (e) { noReason = e; }
+  t('без причини відхилення теж зупиняється', noReason?.status === 400 && seen.length === before);
+
+  let unauthorized: any = null;
+  try { await bridge.listBridgeTeams('pending', { fetch: mkJson(401, { message: 'Невірний ключ' }), settings }); }
+  catch (e) { unauthorized = e; }
+  t('401 → помилка про ключ', unauthorized?.kind === 'unauthorized');
+
+  let conflict: any = null;
+  try {
+    await bridge.decideBridgeTeam('t1', 'request-changes', 'x', {
+      fetch: mkJson(409, { message: 'Повернути із зауваженнями можна лише команду, що чекає на модерацію' }),
+      settings,
+    });
+  } catch (e) { conflict = e; }
+  t('409 від маркетплейсу → змістовна відмова зі статусом 409, а не «успіх»',
+    conflict?.kind === 'rejected' && conflict?.status === 409 && String(conflict?.message).includes('чекає на модерацію'),
+    String(conflict?.message));
+
+  let gone: any = null;
+  try { await bridge.getBridgeTeam('nope', { fetch: mkJson(404, { message: 'Команду не знайдено' }), settings }); }
+  catch (e) { gone = e; }
+  t('404 → «Команду не знайдено»', gone?.status === 404 && String(gone?.message).includes('Команду не знайдено'));
+
+  const garbage = await bridge.listBridgeTeams('pending', { fetch: mkJson(200, { unexpected: 1 }), settings });
+  t('несподіване тіло → порожня черга', garbage.count === 0 && garbage.teams.length === 0);
+}
+
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);
 if (fail > 0) process.exit(1);
