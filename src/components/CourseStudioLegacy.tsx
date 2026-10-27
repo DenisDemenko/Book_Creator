@@ -24,6 +24,16 @@ import {
   CourseStatusV2,
   CourseV2,
 } from '../types';
+import { courseSubmitProblems, lessonDurationProblem, videoUrlProblem } from '../utils/coursePublishRules';
+import { parsePriceMinor } from './adminOs/priceInput';
+
+/** Останнє рішення модерації щодо курсу — з `GET /api/courses/:id`. */
+interface CourseModerationInfo {
+  status: 'pending' | 'approved' | 'rejected';
+  reason?: string;
+  createdAt: string;
+  decidedAt?: string;
+}
 
 // ---------------------------------------------------------------------------
 // Дрібні допоміжні функції
@@ -83,8 +93,48 @@ function emptyCourse(): CourseV2 {
 
 const STATUS_LABELS: Record<CourseStatusV2, string> = {
   draft: 'Чернетка',
-  ready: 'Готовий',
+  // «Готовий» тепер означає «подано й чекає на модерацію»: статус виводиться
+  // з черги, автор його не обирає.
+  ready: 'На модерації',
   published: 'Опубліковано',
+};
+
+/**
+ * Ціна в ГРИВНЯХ, а зберігається в копійках. Раніше поле було «Ціна (мінори)»:
+ * автор писав 1500, маючи на увазі гривні, і курс коштував 15 грн.
+ * Некоректний ввід (порожньо, «abc», «1,5,0») дає «ціну не задано», а не 0.
+ */
+const PriceUahInput: React.FC<{
+  priceMinor?: number;
+  disabled?: boolean;
+  className: string;
+  onChange: (priceMinor: number | undefined) => void;
+}> = ({ priceMinor, disabled, className, onChange }) => {
+  const shown = (m?: number) => (m && m > 0 ? String(m / 100) : '');
+  const [raw, setRaw] = useState(shown(priceMinor));
+  useEffect(() => {
+    // Синхронізація лише коли ціна змінилась ззовні (інший курс), а не з
+    // нашого ж вводу — інакше «99,» стерлося б посеред набору.
+    setRaw((current) => (parsePriceMinor(current) === (priceMinor ?? null) ? current : shown(priceMinor)));
+  }, [priceMinor]);
+  const invalid = raw.trim() !== '' && parsePriceMinor(raw) === null;
+  return (
+    <span className="block">
+      <input
+        value={disabled ? '0' : raw}
+        disabled={disabled}
+        onChange={(e) => {
+          setRaw(e.target.value);
+          const minor = parsePriceMinor(e.target.value);
+          onChange(minor === null ? undefined : minor);
+        }}
+        placeholder="Ціна, грн"
+        inputMode="decimal"
+        className={`${className} disabled:opacity-50`}
+      />
+      {invalid && <span className="block text-[10px] text-rose-300 mt-0.5">Потрібне число гривень, напр. 1500 або 99,50.</span>}
+    </span>
+  );
 };
 
 // ---------------------------------------------------------------------------
@@ -181,22 +231,19 @@ const AssignmentEditor: React.FC<{
 // Готовність до публікації
 // ---------------------------------------------------------------------------
 
-function collectReadiness(course: CourseV2): string[] {
+/**
+ * Готовність у двох частинах: `blocking` — ті самі правила, що перевіряє
+ * сервер при поданні й погодженні (coursePublishRules), `polish` — те, що
+ * редактор радить доробити, але подання не зупиняє.
+ */
+function collectReadiness(course: CourseV2): { blocking: string[]; polish: string[] } {
+  const blocking = courseSubmitProblems(course);
   const missing: string[] = [];
-  if (!course.title.trim() || course.title === 'Новий курс') missing.push('Курс без назви.');
-  if (!course.subtitle?.trim()) missing.push('Немає підзаголовка.');
-  if (course.audience.filter(Boolean).length === 0) missing.push('Не описана аудиторія.');
-  if (course.outcomes.filter(Boolean).length === 0) missing.push('Немає результатів навчання.');
-  if (course.highlights.filter(Boolean).length < 3) missing.push('Менше трьох вигод на картку курсу.');
-  if (course.skills.length === 0) missing.push('Немає навичок курсу.');
-  if (course.modules.length === 0) missing.push('Немає жодного модуля.');
 
   course.modules.forEach((m, mi) => {
     const n = mi + 1;
-    if (!m.title.trim()) missing.push(`Модуль ${n}: без назви.`);
     if (!m.summary?.trim()) missing.push(`Модуль ${n}: без опису.`);
     if (!m.coverPhotoUrl?.trim()) missing.push(`Модуль ${n}: немає фото.`);
-    if (m.lessons.length === 0) missing.push(`Модуль ${n}: жодного уроку.`);
     if (!m.finalAssignment || m.finalAssignment.acceptanceCriteria.filter(Boolean).length === 0) {
       missing.push(`Модуль ${n}: немає підсумкового завдання з критеріями.`);
     }
@@ -211,7 +258,7 @@ function collectReadiness(course: CourseV2): string[] {
     });
   });
 
-  return missing;
+  return { blocking, polish: missing };
 }
 
 // ---------------------------------------------------------------------------
@@ -233,6 +280,21 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [moderation, setModeration] = useState<CourseModerationInfo | null>(null);
+  // Категорії вітрини — справжній перелік маркетплейсу, а не вільний текст.
+  const [storefrontCategories, setStorefrontCategories] = useState<Array<{ slug: string; name: string }>>([]);
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/courses/storefront-categories', { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (alive && Array.isArray(data?.categories)) setStorefrontCategories(data.categories);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [selection, setSelection] = useState<{ type: 'course' | 'skill' | 'module' | 'lesson'; skillId?: string; moduleId?: string; lessonId?: string }>({ type: 'course' });
 
@@ -257,8 +319,10 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
     async (id: string) => {
       setError(null);
       try {
-        const data = await api<{ course: CourseV2; access?: 'manage' | 'edit' | 'view' }>(`/api/courses/${id}`);
+        const data = await api<{ course: CourseV2; access?: 'manage' | 'edit' | 'view'; moderation?: CourseModerationInfo | null }>(`/api/courses/${id}`);
         setCourse(data.course);
+        setModeration(data.moderation ?? null);
+        setSubmitted(false);
         setAccess(data.access ?? 'manage');
         setActiveId(id);
         setDirty(false);
@@ -292,6 +356,7 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
         body: JSON.stringify({ title: 'Новий курс' }),
       });
       setCourse(data.course);
+      setModeration(null);
       setAccess('manage');
       setActiveId(data.course.id);
       setDirty(false);
@@ -343,7 +408,7 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
         body: JSON.stringify({}),
       });
       const text = await res.text();
-      let body: { submitted?: boolean; error?: string; problems?: string[] } = {};
+      let body: { submitted?: boolean; error?: string; problems?: string[]; course?: CourseV2; moderation?: CourseModerationInfo } = {};
       try {
         body = JSON.parse(text) as typeof body;
       } catch {
@@ -357,6 +422,8 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
             : body.error || `Помилка ${res.status}`
         );
       }
+      if (body.course) setCourse(body.course);
+      if (body.moderation) setModeration(body.moderation);
       setSubmitted(true);
     } catch (e) {
       setError((e as Error).message);
@@ -385,7 +452,7 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
     setDirty(false);
   }, []);
 
-  const readiness = useMemo(() => (course ? collectReadiness(course) : []), [course]);
+  const readiness = useMemo(() => (course ? collectReadiness(course) : { blocking: [], polish: [] }), [course]);
 
   // -------- модифікатори структури --------
   const addModule = () => patch((c) => ({ ...c, modules: [...c.modules, emptyModule()] }));
@@ -574,15 +641,19 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
           onChange={(e) => patch((c) => ({ ...c, title: e.target.value }))}
           className="flex-1 min-w-[180px] max-w-sm px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-sm font-bold text-slate-100 focus:outline-hidden focus:border-amber-400"
         />
-        <select
-          value={course.status}
-          onChange={(e) => patch((c) => ({ ...c, status: e.target.value as CourseStatusV2 }))}
-          className="px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-200 focus:outline-hidden"
+        {/* Статус не обирається: його виставляє модерація. */}
+        <span
+          data-course-status={course.status}
+          className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold border ${
+            course.status === 'published'
+              ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+              : course.status === 'ready'
+                ? 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+                : 'bg-slate-800 text-slate-400 border-slate-700'
+          }`}
         >
-          <option value="draft">Чернетка</option>
-          <option value="ready">Готовий</option>
-          <option value="published">Опубліковано</option>
-        </select>
+          {STATUS_LABELS[course.status]}
+        </span>
         {access !== 'manage' && (
           <span className="px-2 py-1 rounded-full text-[10px] font-bold border border-sky-500/40 bg-sky-500/10 text-sky-200" data-course-access={access}>
             {access === 'edit' ? L('Співавтор · редагування', 'Co-author · edit') : L('Лише перегляд', 'View only')}
@@ -612,7 +683,11 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
           title="Надіслати курс на модерацію — адміністратор погодить публікацію у вітрину"
         >
           {publishing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Store className="w-3.5 h-3.5" />}
-          {publishing ? 'Публікація…' : 'Опублікувати'}
+          {publishing
+            ? 'Надсилаю…'
+            : course.status === 'published'
+              ? 'Надіслати оновлення на модерацію'
+              : 'Надіслати на модерацію'}
         </button>
         <button
           onClick={() => void deleteCourse()}
@@ -628,13 +703,27 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
         <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/40 text-rose-200 text-xs">{error}</div>
       )}
 
-      {submitted && (
-        <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/40 text-amber-200 text-xs">
+      {moderation?.status === 'pending' && (
+        <div data-course-moderation="pending" className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/40 text-amber-200 text-xs">
           <AlertTriangle className="w-4 h-4 shrink-0" />
           <span>
-            Курс надіслано на модерацію. Адміністратор має погодити публікацію у вітрину —
-            після цього курс зʼявиться в каталозі.
+            {submitted ? 'Курс надіслано на модерацію. ' : `На модерації з ${new Date(moderation.createdAt).toLocaleDateString('uk-UA')}. `}
+            Адміністратор має погодити публікацію у вітрину — після цього курс зʼявиться в каталозі.
           </span>
+        </div>
+      )}
+      {moderation?.status === 'rejected' && (
+        <div data-course-moderation="rejected" className="flex items-start gap-2 p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/40 text-rose-200 text-xs">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <span>
+            Модерацію не пройдено{moderation.decidedAt ? ` (${new Date(moderation.decidedAt).toLocaleDateString('uk-UA')})` : ''}.
+            {moderation.reason ? <> Причина: <b>{moderation.reason}</b>.</> : null} Виправте курс і надішліть ще раз.
+          </span>
+        </div>
+      )}
+      {course.status === 'published' && moderation?.status !== 'pending' && (
+        <div data-course-moderation="published" className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 text-xs">
+          Курс у вітрині. Правки потраплять туди лише після повторного надсилання на модерацію.
         </div>
       )}
 
@@ -767,17 +856,53 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
                 Без обкладинки публікація не піде: у каталозі картка буде порожнім прямокутником.
                 Дайте посилання на зображення (напр. ту саму картинку, що й для KDP).
               </p>
-              <div className="grid grid-cols-2 gap-2">
-                <input value={course.category ?? ''} onChange={(e) => patch((c) => ({ ...c, category: e.target.value }))} placeholder="Категорія" className={inputCls} />
-                <input
-                  type="number"
-                  value={course.priceMinor ?? ''}
-                  onChange={(e) => patch((c) => ({ ...c, priceMinor: e.target.value ? Number(e.target.value) : undefined }))}
-                  placeholder="Ціна (мінори)"
-                  className={inputCls}
-                />
-              </div>
-              <input value={course.currency ?? ''} onChange={(e) => patch((c) => ({ ...c, currency: e.target.value }))} placeholder="Валюта (UAH)" className={inputCls} />
+              <label className="block">
+                <span className="text-[11px] text-slate-400 font-semibold">Категорія у вітрині</span>
+                <select
+                  value={course.categorySlug ?? ''}
+                  onChange={(e) => patch((c) => ({ ...c, categorySlug: e.target.value }))}
+                  className={`${inputCls} mt-1`}
+                >
+                  <option value="">Без категорії</option>
+                  {storefrontCategories.map((cat) => (
+                    <option key={cat.slug} value={cat.slug}>{cat.name}</option>
+                  ))}
+                </select>
+                {course.category && course.categorySlug === undefined && (
+                  <span className="block text-[10px] text-amber-300 mt-0.5">
+                    Стара категорія «{course.category}» — оберіть відповідну зі списку вітрини.
+                  </span>
+                )}
+                {storefrontCategories.length === 0 && (
+                  <span className="block text-[10px] text-slate-500 mt-0.5">
+                    Перелік категорій вітрини недоступний — курс можна подати без категорії.
+                  </span>
+                )}
+              </label>
+              <label className="block">
+                <span className="text-[11px] text-slate-400 font-semibold">Ціна, грн</span>
+                <span className="mt-1 block">
+                  <PriceUahInput
+                    priceMinor={course.priceMinor}
+                    disabled={course.free === true}
+                    className={inputCls}
+                    // null, а не undefined: курс зберігається цілим JSON-ом, і
+                    // undefined просто випав би з тіла — стерта ціна лишилась би на сервері.
+                    onChange={(priceMinor) => patch((c) => ({ ...c, priceMinor: priceMinor ?? null }))}
+                  />
+                </span>
+                <span className="mt-1 flex items-center gap-2 text-[11px] text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={course.free === true}
+                    onChange={(e) =>
+                      patch((c) => ({ ...c, free: e.target.checked, priceMinor: e.target.checked ? 0 : null }))
+                    }
+                  />
+                  Безкоштовний (кожен забере курс у кабінеті без оплати)
+                </span>
+                <span className="block text-[10px] text-slate-500 mt-0.5">Оплата у вітрині — лише в гривнях.</span>
+              </label>
             </>
           )}
 
@@ -823,6 +948,9 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
               <textarea value={selectedModule.summary ?? ''} onChange={(e) => patchModule(selectedModule.id, { summary: e.target.value })} placeholder="Опис модуля" rows={3} className={inputCls} />
               <input value={selectedModule.coverPhotoUrl ?? ''} onChange={(e) => patchModule(selectedModule.id, { coverPhotoUrl: e.target.value })} placeholder="Фото модуля (URL)" className={inputCls} />
               <input value={selectedModule.introVideoUrl ?? ''} onChange={(e) => patchModule(selectedModule.id, { introVideoUrl: e.target.value })} placeholder="Оглядове відео (YouTube/Vimeo URL)" className={inputCls} />
+              {videoUrlProblem(selectedModule.introVideoUrl) && (
+                <span className="block text-[10px] text-rose-300 -mt-1">Відео: {videoUrlProblem(selectedModule.introVideoUrl)}.</span>
+              )}
               <div>
                 <span className="text-[11px] text-slate-400 font-semibold">Які навички розвиває модуль</span>
                 <div className="mt-1 flex flex-wrap gap-1.5">
@@ -863,14 +991,22 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
               <textarea value={selectedLesson.description ?? ''} onChange={(e) => patchLesson(selectedModule.id, selectedLesson.id, { description: e.target.value })} placeholder="Опис уроку" rows={3} className={inputCls} />
               <LinesEditor label="Зміст уроку" lines={selectedLesson.topics} onChange={(topics) => patchLesson(selectedModule.id, selectedLesson.id, { topics })} />
               <input value={selectedLesson.videoUrl ?? ''} onChange={(e) => patchLesson(selectedModule.id, selectedLesson.id, { videoUrl: e.target.value })} placeholder="Відео уроку (YouTube/Vimeo URL)" className={inputCls} />
+              {videoUrlProblem(selectedLesson.videoUrl) && (
+                <span className="block text-[10px] text-rose-300 -mt-1">Відео: {videoUrlProblem(selectedLesson.videoUrl)}.</span>
+              )}
               <LinesEditor label="Фото уроку (URL, по одному на рядок)" lines={selectedLesson.photoUrls} onChange={(photoUrls) => patchLesson(selectedModule.id, selectedLesson.id, { photoUrls })} />
               <input
                 type="number"
                 value={selectedLesson.durationMin ?? ''}
                 onChange={(e) => patchLesson(selectedModule.id, selectedLesson.id, { durationMin: e.target.value ? Number(e.target.value) : undefined })}
                 placeholder="Тривалість, хв"
+                min={1}
+                step={1}
                 className={inputCls}
               />
+              {lessonDurationProblem(selectedLesson.durationMin) && (
+                <span className="block text-[10px] text-rose-300 -mt-1">Тривалість: {lessonDurationProblem(selectedLesson.durationMin)}.</span>
+              )}
               <AssignmentEditor
                 label="Завдання уроку"
                 assignment={selectedLesson.assignment}
@@ -888,24 +1024,43 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Готовність</span>
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto p-3">
-            {readiness.length === 0 ? (
+            {readiness.blocking.length === 0 && readiness.polish.length === 0 ? (
               <div className="flex items-start gap-2 p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs">
                 <Check className="w-4 h-4 shrink-0 mt-0.5" />
-                Курс повний — можна позначати «Готовий».
+                Курс повний — можна надсилати на модерацію.
               </div>
             ) : (
               <>
-                <div className="flex items-center gap-2 text-xs text-amber-300 mb-2">
-                  <AlertTriangle className="w-4 h-4" />
-                  Бракує: {readiness.length}
-                </div>
-                <ul className="space-y-1.5">
-                  {readiness.map((item, i) => (
-                    <li key={i} className="text-[11px] text-slate-400 leading-relaxed border-l-2 border-amber-500/40 pl-2">
-                      {item}
-                    </li>
-                  ))}
-                </ul>
+                {readiness.blocking.length > 0 && (
+                  <div className="mb-3" data-readiness="blocking">
+                    <div className="flex items-center gap-2 text-xs text-rose-300 mb-2">
+                      <AlertTriangle className="w-4 h-4" />
+                      Без цього не подати: {readiness.blocking.length}
+                    </div>
+                    <ul className="space-y-1.5">
+                      {readiness.blocking.map((item, i) => (
+                        <li key={i} className="text-[11px] text-slate-300 leading-relaxed border-l-2 border-rose-500/50 pl-2">
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {readiness.polish.length > 0 && (
+                  <div data-readiness="polish">
+                    <div className="flex items-center gap-2 text-xs text-amber-300 mb-2">
+                      <AlertTriangle className="w-4 h-4" />
+                      Варто доробити: {readiness.polish.length}
+                    </div>
+                    <ul className="space-y-1.5">
+                      {readiness.polish.map((item, i) => (
+                        <li key={i} className="text-[11px] text-slate-400 leading-relaxed border-l-2 border-amber-500/40 pl-2">
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </>
             )}
           </div>

@@ -13,7 +13,9 @@
 
 import type { Express } from 'express';
 import { can, requireAuth, requirePermission } from './auth';
-import { submitForModeration } from './moderationStore';
+import { latestModerationFor, submitForModeration } from './moderationStore';
+import { listBridgeCategories } from './marketplaceBridge';
+import { courseSubmitProblems } from '../src/utils/coursePublishRules';
 import {
   createCourse,
   deleteCourse,
@@ -38,6 +40,19 @@ export interface CourseRoutesDeps {
   sharedCourseIds?: (userId: string) => Promise<string[]>;
   /** Курс створено чи змінено — оновити проєкт ядра. */
   onCourseChanged?: (course: Course) => void;
+  /** Категорії вітрини для вибору в редакторі (типово — через міст). */
+  listCategories?: () => Promise<Array<{ slug: string; name: string }>>;
+}
+
+/**
+ * Службові поля, яких автор не задає: статус курсу виводиться з модерації
+ * (раніше автор міг сам поставити «Опубліковано» в обхід черги), валюта —
+ * завжди гривня.
+ */
+function authorPatch(body: unknown): Partial<Course> {
+  const { status: _s, publishedAt: _p, ownerId: _o, id: _i, createdAt: _c, updatedAt: _u, currency: _cur, ...rest } =
+    (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+  return rest as Partial<Course>;
 }
 
 async function accessTo(deps: CourseRoutesDeps, principal: { id: string | null; role: string }, course: Course): Promise<'none' | 'view' | 'edit' | 'manage'> {
@@ -46,24 +61,11 @@ async function accessTo(deps: CourseRoutesDeps, principal: { id: string | null; 
   return deps.courseAccess(principal, course).catch(() => 'none' as const);
 }
 
-// Server-side gate before a course reaches the storefront. A subset of the
-// editor's readiness checklist: the essentials a catalog card needs, without
-// the per-lesson polish checks the UI still guides the author on.
+// Server-side gate before a course reaches the storefront: the shared rules
+// (src/utils/coursePublishRules.ts) — the editor shows the same list plus its
+// own polish checks, so the two can no longer drift apart.
 function publishProblems(course: Course): string[] {
-  const problems: string[] = [];
-  if (!course.title.trim() || course.title === 'Новий курс') problems.push('Курс без назви.');
-  if (!course.subtitle?.trim()) problems.push('Немає підзаголовка.');
-  if (course.audience.filter(Boolean).length === 0) problems.push('Не описана аудиторія.');
-  if (course.outcomes.filter(Boolean).length === 0) problems.push('Немає результатів навчання.');
-  if (course.highlights.filter(Boolean).length < 3) problems.push('Менше трьох вигод на картку.');
-  if (course.skills.length === 0) problems.push('Немає навичок курсу.');
-  if (course.modules.length === 0) problems.push('Немає жодного модуля.');
-  course.modules.forEach((m, i) => {
-    const n = i + 1;
-    if (!m.title.trim()) problems.push(`Модуль ${n}: без назви.`);
-    if (m.lessons.length === 0) problems.push(`Модуль ${n}: жодного уроку.`);
-  });
-  return problems;
+  return courseSubmitProblems(course);
 }
 
 export function registerCourseRoutes(app: Express, deps: CourseRoutesDeps = {}): void {
@@ -84,11 +86,25 @@ export function registerCourseRoutes(app: Express, deps: CourseRoutesDeps = {}):
     }
   });
 
+  /**
+   * Категорії вітрини для редактора курсу. Не адмінський маршрут моста:
+   * курси пишуть експерти й викладачі, а не лише адміністратор. Порожній
+   * перелік (міст не налаштовано чи старий маркетплейс) — не помилка.
+   */
+  app.get('/api/courses/storefront-categories', requireAuth, requirePermission('canAuthorCourses'), async (_req, res) => {
+    try {
+      const list = await (deps.listCategories ?? listBridgeCategories)();
+      res.json({ categories: list.map((c) => ({ slug: c.slug, name: c.name })) });
+    } catch (err) {
+      res.json({ categories: [], warning: String((err as Error).message) });
+    }
+  });
+
   /** Створення чернетки курсу. */
   app.post('/api/courses', requireAuth, requirePermission('canAuthorCourses'), async (req, res) => {
     try {
       const principal = req.principal!;
-      const course = createCourse(principal.id as string, req.body || {});
+      const course = createCourse(principal.id as string, authorPatch(req.body));
       deps.onCourseChanged?.(course);
       res.status(201).json({ course });
     } catch (err) {
@@ -103,7 +119,13 @@ export function registerCourseRoutes(app: Express, deps: CourseRoutesDeps = {}):
       if (!course || level === 'none') {
         return res.status(404).json({ error: OWNER_ERROR });
       }
-      res.json({ course, access: level });
+      let moderation = null;
+      try {
+        moderation = latestModerationFor('course', course.id) ?? null;
+      } catch {
+        // без SQLite модерації нема — курс однаково віддаємо
+      }
+      res.json({ course, access: level, moderation });
     } catch (err) {
       res.status(503).json({ error: String((err as Error).message) });
     }
@@ -120,7 +142,7 @@ export function registerCourseRoutes(app: Express, deps: CourseRoutesDeps = {}):
       if (level === 'view') {
         return res.status(403).json({ error: 'У вас доступ лише на перегляд цього курсу.', kind: 'forbidden' });
       }
-      const course = updateCourse(req.params.id, req.body || {});
+      const course = updateCourse(req.params.id, authorPatch(req.body));
       if (!course) return res.status(404).json({ error: OWNER_ERROR });
       deps.onCourseChanged?.(course);
       res.json({ course, access: level });
@@ -152,8 +174,12 @@ export function registerCourseRoutes(app: Express, deps: CourseRoutesDeps = {}):
         title: course.title,
         authorId: course.ownerId,
       });
+      // «Готовий» тепер означає «на модерації»; опублікованим курс робить
+      // лише погодження адміністратора. Повторне подання опублікованого курсу
+      // (оновлення у вітрині) статус не знижує.
+      const updated = course.status === 'published' ? course : updateCourse(course.id, { status: 'ready' }) ?? course;
 
-      res.json({ submitted: true, moderation });
+      res.json({ submitted: true, moderation, course: updated });
     } catch (err) {
       res.status(503).json({ error: String((err as Error).message) });
     }

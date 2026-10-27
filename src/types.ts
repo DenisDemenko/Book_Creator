@@ -538,8 +538,15 @@ export interface CourseV2 {
   outcomes: string[];
   highlights: string[];
   coverUrl?: string;
+  /** Застарілий вільний текст; новий вибір — `categorySlug`. */
   category?: string;
+  /** Slug категорії вітрини; '' — свідомо без категорії. */
+  categorySlug?: string;
+  /** Ціна в копійках; редактор вводить її в гривнях. */
   priceMinor?: number;
+  /** Явне «Безкоштовний» — лише з ним ціна 0 допустима. */
+  free?: boolean;
+  /** Завжди UAH (сервер виставляє сам). */
   currency?: string;
   skills: CourseSkillV2[];
   modules: CourseModuleV2[];

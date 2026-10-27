@@ -8,7 +8,13 @@
 
 import type { Express } from 'express';
 import { requireAdmin } from './auth';
-import { publishCourseToMarketplace, assertStorefrontCover, MarketplaceBridgeError } from './marketplaceBridge';
+import {
+  publishCourseToMarketplace,
+  assertStorefrontCover,
+  assertFreePriceConfirmed,
+  MarketplaceBridgeError,
+} from './marketplaceBridge';
+import { COURSE_CURRENCY, courseSubmitProblems } from '../src/utils/coursePublishRules';
 import { getCourse, updateCourse } from './courseStore';
 import {
   decideModeration,
@@ -43,23 +49,42 @@ export function registerModerationRoutes(app: Express): void {
           return res.status(404).json({ error: 'Курс не знайдено — можливо, його видалили.' });
         }
         const sellerSlug = process.env.BRIDGE_SELLER_SLUG || 'fusion-lab';
+        /*
+          Перевірка ще раз У МОМЕНТ ПОГОДЖЕННЯ, тими самими правилами, що й
+          при поданні: курс міг змінитись після подання, а старі записи черги
+          подавались ще без перевірки ціни й обкладинки. Головне — ціна: досі
+          тут стояло `priceMinor ?? 0`, і курс без ціни ставав безкоштовним.
+        */
+        const problems = courseSubmitProblems(course);
+        if (problems.length > 0) {
+          return res.status(400).json({
+            error: `Курс не можна погодити: ${problems.join(' ')}`,
+            problems,
+            kind: 'not_ready',
+          });
+        }
         // Курс без обкладинки дав би в каталозі порожню картку — відмовляємо
         // з причиною замість того, щоб публікувати непоказний товар.
         assertStorefrontCover(course.coverUrl, `Курс «${course.title}»`);
+        const priceMinor = course.free === true ? 0 : Math.round(Number(course.priceMinor));
+        assertFreePriceConfirmed(priceMinor, course.free === true, `Курс «${course.title}»`);
         const result = await publishCourseToMarketplace({
           bookId: course.id,
           title: course.title,
           subtitle: course.subtitle,
           summary: course.summary,
           description: course.description,
-          priceMinor: course.priceMinor ?? 0,
-          currency: course.currency,
+          priceMinor,
+          currency: COURSE_CURRENCY,
           coverUrl: course.coverUrl,
           highlights: course.highlights.filter(Boolean),
           sellerSlug,
           moduleCount: course.modules.length,
           lessonCount: course.modules.reduce((n, m) => n + m.lessons.length, 0),
-          category: course.category,
+          // Slug категорії вітрини має перевагу; старий вільний текст іде
+          // лише тоді, коли slug ще не обрано (маркетплейс зіставить його м'яко).
+          categorySlug: course.categorySlug,
+          category: course.categorySlug === undefined ? course.category : undefined,
           audience: course.audience.filter(Boolean),
           outcomes: course.outcomes.filter(Boolean),
           // Картка-вітрина: лише назва/рівень/«навіщо» — без «як розвивати» й вправ (платний контент).
@@ -96,8 +121,18 @@ export function registerModerationRoutes(app: Express): void {
 
     const entry = getModeration(req.params.id);
     if (!entry) return res.status(404).json({ error: 'Запис модерації не знайдено.' });
+    // Як і погодження: вирішене вдруге не вирішується. Інакше вже
+    // опублікований курс дістав би статус «відхилено» при живому лістингу.
+    if (entry.status !== 'pending') {
+      return res.status(409).json({ error: `Запис уже вирішено (статус: ${entry.status}).` });
+    }
 
     const decided = decideModeration(entry.id, 'rejected', reason);
+    if (entry.itemType === 'course') {
+      const course = getCourse(entry.itemId);
+      // Відхилений курс повертається в чернетку (якщо він ще не у вітрині).
+      if (course && course.status === 'ready') updateCourse(course.id, { status: 'draft' });
+    }
     res.json({ moderation: decided });
   });
 }

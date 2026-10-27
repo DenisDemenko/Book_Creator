@@ -38,7 +38,7 @@ console.log('  ✓ course authoring editor stays mounted while design workspace 
 assert.match(legacy, /Створити курс/);
 assert.match(legacy, /Дерево курсу/);
 assert.match(legacy, /Готовність/);
-assert.match(legacy, /Опублікувати/);
+assert.match(legacy, /Надіслати на модерацію/);  // з 27.10.2026 кнопка названа чесно: курс іде на модерацію, а не одразу у вітрину
 console.log('  ✓ legacy authoring/publishing workspace remains intact');
 
 for (const label of ['Методичка', 'Інструкція', 'Вправи / домашнє']) {

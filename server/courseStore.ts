@@ -13,6 +13,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { getDb, unavailableMessage } from './db';
+import { COURSE_CURRENCY } from '../src/utils/coursePublishRules';
 
 function requireDb() {
   const db = getDb();
@@ -78,8 +79,15 @@ export interface Course {
   outcomes: string[];
   highlights: string[];
   coverUrl?: string;
+  /** Застарілий вільний текст категорії — лишається запасним шляхом для старих курсів. */
   category?: string;
+  /** Slug категорії вітрини (`GET /bridge/categories`) — має перевагу над `category`. */
+  categorySlug?: string;
+  /** Ціна в копійках. Не задана — курс не подати (див. coursePublishRules). */
   priceMinor?: number;
+  /** Явне «Безкоштовний»: лише з ним ціна 0 допустима. */
+  free?: boolean;
+  /** Завжди UAH: вітрина приймає оплату лише в гривнях. */
   currency?: string;
   skills: CourseSkill[];
   modules: CourseModuleV2[];
@@ -121,8 +129,12 @@ function toCourse(row: Row): Course {
     highlights: data.highlights ?? [],
     coverUrl: data.coverUrl,
     category: data.category,
+    categorySlug: data.categorySlug,
     priceMinor: data.priceMinor,
-    currency: data.currency,
+    free: data.free === true ? true : undefined,
+    // Старі курси могли мати «USD» чи «грн» з вільного поля — читаємо як UAH,
+    // бо інакше вітрина й не продасть.
+    currency: COURSE_CURRENCY,
     skills: data.skills ?? [],
     modules: data.modules ?? [],
     createdAt: row.created_at,
@@ -150,8 +162,10 @@ export function createCourse(
     highlights: input.highlights ?? [],
     coverUrl: input.coverUrl,
     category: input.category,
+    categorySlug: input.categorySlug,
     priceMinor: input.priceMinor,
-    currency: input.currency,
+    free: input.free === true ? true : undefined,
+    currency: COURSE_CURRENCY,
     skills: input.skills ?? [],
     modules: input.modules ?? [],
     createdAt: now,
@@ -226,6 +240,14 @@ export function updateCourse(id: string, patch: Partial<Course>): Course | undef
   }
   if (patch.status !== undefined) {
     next.status = STATUSES.includes(patch.status) ? patch.status : current.status;
+  }
+  // Валюта не вибирається: кошик і LiqPay рахують лише гривні.
+  next.currency = COURSE_CURRENCY;
+  next.free = next.free === true ? true : undefined;
+  // Редактор шле стерту ціну як null (undefined випав би з JSON і стара ціна
+  // лишилась би): null — «ціну не задано».
+  if (next.priceMinor === null || (next.priceMinor !== undefined && !Number.isFinite(Number(next.priceMinor)))) {
+    next.priceMinor = undefined;
   }
 
   db.prepare(

@@ -99,6 +99,18 @@ export function listModeration(status?: ModerationStatus): ModerationEntry[] {
   return rows.map(toEntry);
 }
 
+/**
+ * Останнє рішення (чи очікування) щодо твору — для редактора автора: досі
+ * автор не бачив ні того, що курс чекає на модерацію, ні причини відмови.
+ */
+export function latestModerationFor(itemType: ModerationItemType, itemId: string): ModerationEntry | undefined {
+  const db = requireDb();
+  const row = db
+    .prepare('SELECT * FROM moderation WHERE item_type = ? AND item_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1')
+    .get(itemType, itemId) as Row | undefined;
+  return row ? toEntry(row) : undefined;
+}
+
 export function getModeration(id: string): ModerationEntry | undefined {
   const db = requireDb();
   const row = db.prepare('SELECT * FROM moderation WHERE id = ?').get(id) as Row | undefined;
