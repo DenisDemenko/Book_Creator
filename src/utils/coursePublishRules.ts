@@ -22,6 +22,8 @@ export interface CourseRulesInput {
   priceMinor?: number;
   free?: boolean;
   currency?: string;
+  /** Slug категорії вітрини ('' — свідомо без категорії). */
+  categorySlug?: string;
   skills: unknown[];
   modules: Array<{
     title: string;
@@ -91,7 +93,10 @@ export function coursePriceProblem(course: Pick<CourseRulesInput, 'priceMinor' |
 }
 
 /** Те, без чого курс не подати й не погодити. Порожній масив — можна. */
-export function courseSubmitProblems(course: CourseRulesInput): string[] {
+export function courseSubmitProblems(
+  course: CourseRulesInput,
+  options: { categoryRequired?: boolean } = {}
+): string[] {
   const problems: string[] = [];
   if (!course.title?.trim() || course.title === 'Новий курс') problems.push('Курс без назви.');
   if (!course.subtitle?.trim()) problems.push('Немає підзаголовка.');
@@ -104,6 +109,13 @@ export function courseSubmitProblems(course: CourseRulesInput): string[] {
     problems.push('Немає обкладинки: без неї картка в каталозі — порожній прямокутник.');
   } else if (!/^https?:\/\//i.test(String(course.coverUrl).trim())) {
     problems.push('Обкладинка має бути посиланням http(s) на зображення.');
+  }
+
+  // Категорія обов'язкова лише коли вітрина віддала перелік (старий маркетплейс
+  // без /bridge/categories не повинен блокувати подання). «Свідомо без категорії»
+  // (порожній slug) більше не допускається: курс без розділу не знайти в каталозі.
+  if (options.categoryRequired && !String(course.categorySlug ?? '').trim()) {
+    problems.push('Не обрано категорію вітрини: без неї курс не знайти в каталозі.');
   }
 
   const price = coursePriceProblem(course);

@@ -1515,7 +1515,10 @@ export function registerAdminRoutes(app: Express): void {
       const settings = await readBridgeSettings();
       const richContent = await bridgeSupportsCourseContent({ settings });
       const result = await publishCourseToMarketplace(
-        buildCoursePublishInput(course, process.env.BRIDGE_SELLER_SLUG || 'fusion-lab', { richContent }),
+        buildCoursePublishInput(course, process.env.BRIDGE_SELLER_SLUG || 'fusion-lab', {
+          richContent,
+          instructorName: (await findUserById(course.ownerId))?.name,
+        }),
         { settings }
       );
       updateCourse(course.id, { status: 'published' });

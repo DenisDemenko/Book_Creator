@@ -28,6 +28,7 @@ const { registerModerationRoutes } = await import('../server/moderationRoutes.ts
 const { registerAdminRoutes } = await import('../server/adminRoutes.ts');
 const { submitForModeration } = await import('../server/moderationStore.ts');
 const { createCourse, getCourse, updateCourse } = await import('../server/courseStore.ts');
+const { saveUser } = await import('../server/store.ts');
 
 let pass = 0;
 let fail = 0;
@@ -95,6 +96,7 @@ t('підсумкове завдання й обкладинка модуля', 
 t('навички — лише назва/рівень/навіщо (без «як розвивати»)', JSON.stringify(rich.skills) === JSON.stringify([{ name: 'Безпека', level: 'base', whyItMatters: 'x' }]));
 t('порожні рядки аудиторії відсіяно', rich.audience!.length === 1);
 t('ціна й UAH', rich.priceMinor === 150000 && rich.currency === 'UAH');
+t('ім\'я викладача з опцій, обрізане; порожнє → не йде', buildCoursePublishInput(base, 'fusion-lab', { instructorName: '  Олена Коваль ' }).instructorName === 'Олена Коваль' && buildCoursePublishInput(base, 'fusion-lab', { instructorName: '  ' }).instructorName === undefined && rich.instructorName === undefined);
 
 const safe = buildCoursePublishInput(base, 'fusion-lab');
 const sl = safe.modules![0].lessons[0] as any;
@@ -150,6 +152,8 @@ const call = async (method: string, p: string, who: string, body?: unknown) => {
 const sentCourse = () => bridgeCalls.filter((c) => c.url.endsWith('/bridge/courses')).pop()?.body;
 
 try {
+  await saveUser({ id: 'u-teacher', email: 'teacher@test.dev', name: 'Олена Коваль', role: 'writer', createdAt: new Date().toISOString() } as any);
+
   // Погодження, приймач із v2.
   capabilities = ['course-content-v2'];
   const c1 = createCourse('u-teacher', courseInput() as any);
@@ -159,6 +163,7 @@ try {
   const ok1 = await call('POST', `/api/admin/moderation/${(e1 as any).id}/approve`, 'u-admin');
   const s1 = sentCourse();
   t('погодження (приймач v2) → 200, contentMode=full', ok1.status === 200 && ok1.body.published?.contentMode === 'full', JSON.stringify(ok1.body).slice(0, 160));
+  t('продавець — платформа, а ім\'я автора курсу йде як викладач', s1?.sellerSlug === 'fusion-lab' && s1?.instructorName === 'Олена Коваль', `${s1?.sellerSlug}/${s1?.instructorName}`);
   t('у мост ішов повний зміст з id', s1?.modules?.[0]?.lessons?.[0]?.id === 'l1' && !!s1.modules[0].lessons[0].assignment);
 
   // Погодження, старий приймач.
@@ -197,6 +202,7 @@ try {
   });
   const s4 = sentCourse();
   t('адмін-роут → 200 і публікує курс', forged.status === 200 && forged.body.contentMode === 'full', JSON.stringify(forged.body).slice(0, 160));
+  t('адмінська публікація теж передає викладача', s4?.instructorName === 'Олена Коваль');
   t('тіло запиту не підміняє ціну/назву/програму/навички', s4?.priceMinor === 150000 && s4.title === 'Курс з основ ЧПУ' && s4.modules[0].title === 'Модуль 1' && s4.skills[0].name === 'Безпека');
   t('адмінська публікація теж ставить «Опубліковано»', getCourse(c4.id)?.status === 'published');
 } finally {

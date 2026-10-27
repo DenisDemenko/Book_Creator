@@ -893,6 +893,21 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ tab: controlledT
     return data;
   }, []);
 
+  // Скільки записів чекає рішення модерації — для бейджа на вкладці.
+  const [pendingModeration, setPendingModeration] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/admin/moderation/summary', { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (alive && typeof data?.pending === 'number') setPendingModeration(data.pending);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [tab]);
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -1048,6 +1063,15 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ tab: controlledT
             >
               <Icon className="w-3.5 h-3.5" />
               {label}
+              {id === 'moderation' && pendingModeration > 0 && (
+                <span
+                  className="min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center"
+                  title={`Чекає рішення: ${pendingModeration}`}
+                  aria-label={`Чекає рішення: ${pendingModeration}`}
+                >
+                  {pendingModeration}
+                </span>
+              )}
             </button>
           ))}
         </div>

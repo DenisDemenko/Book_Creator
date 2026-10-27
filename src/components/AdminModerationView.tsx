@@ -50,6 +50,8 @@ export const AdminModerationView: React.FC = () => {
   /** Курс, чию повну картку відкрито: курси погоджують лише після перегляду. */
   const [reviewId, setReviewId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  /** Скільки записів у кожному статусі — число біля кнопки фільтра. */
+  const [counts, setCounts] = useState<Record<string, number>>({});
   const [message, setMessage] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
 
   const load = useCallback(async () => {
@@ -70,6 +72,19 @@ export const AdminModerationView: React.FC = () => {
     void load();
   }, [load]);
 
+  const loadCounts = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/moderation/summary', { credentials: 'same-origin' });
+      if (res.ok) setCounts((await res.json()).counts ?? {});
+    } catch {
+      // лічильник — підказка; без нього черга працює
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCounts();
+  }, [loadCounts, rows]);
+
   const decide = async (id: string, decision: 'approve' | 'reject') => {
     setBusyId(id);
     setMessage(null);
@@ -87,7 +102,10 @@ export const AdminModerationView: React.FC = () => {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || `Не вдалося (HTTP ${res.status}).`);
-      setMessage({ tone: 'ok', text: decision === 'approve' ? 'Погоджено — лістинг опубліковано.' : 'Відхилено.' });
+      const mailed = data?.notification?.sent
+        ? ' Автору надіслано лист.'
+        : data?.notification ? ` Лист автору не надіслано (${data.notification.reason || 'невідомо'}) — повідомте його самі.` : '';
+      setMessage({ tone: 'ok', text: (decision === 'approve' ? 'Погоджено — лістинг опубліковано.' : 'Відхилено.') + mailed });
       void load();
     } catch (err: any) {
       setMessage({ tone: 'err', text: err?.message || 'Помилка.' });
@@ -118,6 +136,10 @@ export const AdminModerationView: React.FC = () => {
               }`}
             >
               {s === 'pending' ? 'Очікує' : s === 'changes_requested' ? 'З зауваженнями' : s === 'approved' ? 'Погоджено' : s === 'rejected' ? 'Відхилено' : 'Усі'}
+              {(() => {
+                const n = s ? counts[s] : Object.values(counts).reduce((a, b) => a + b, 0);
+                return n ? <span className={`ml-1 ${s === 'pending' && status !== s ? 'text-amber-300' : 'opacity-70'}`}>({n})</span> : null;
+              })()}
             </button>
           ))}
           <button onClick={() => void load()} className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400" title="Оновити">

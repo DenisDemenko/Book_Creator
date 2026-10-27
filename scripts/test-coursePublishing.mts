@@ -33,6 +33,8 @@ const { registerModerationRoutes } = await import('../server/moderationRoutes.ts
 const { submitForModeration } = await import('../server/moderationStore.ts');
 const { courseSnapshotChanges } = await import('../src/utils/courseSnapshotDiff.ts');
 const { getCourse, updateCourse } = await import('../server/courseStore.ts');
+const { setModerationMailer } = await import('../server/moderationNotify.ts');
+const { saveUser } = await import('../server/store.ts');
 
 let pass = 0;
 let fail = 0;
@@ -94,6 +96,15 @@ t('повний курс — без зауважень', rules.courseSubmitProbl
   t('погане відео уроку блокує подання з номером уроку', rules.courseSubmitProblems(withBadVideo).some((x) => /Урок 1\.1, відео/.test(x)));
   t('тривалість 0, 1.5 і 601 — помилка', [0, 1.5, 601].every((v) => rules.lessonDurationProblem(v) !== null));
   t('тривалість 45 і порожня — норма', rules.lessonDurationProblem(45) === null && rules.lessonDurationProblem(undefined) === null);
+}
+
+console.log('\nКатегорія в правилах:');
+{
+  const noCat = { ...full(), categorySlug: undefined };
+  t('без вимоги категорії курс без категорії проходить', rules.courseSubmitProblems(noCat).length === 0);
+  t('з вимогою — без категорії блокує', rules.courseSubmitProblems(noCat, { categoryRequired: true }).some((x) => /категорію/.test(x)));
+  t('з вимогою — порожній slug («без категорії») теж блокує', rules.courseSubmitProblems({ ...full(), categorySlug: '' }, { categoryRequired: true }).some((x) => /категорію/.test(x)));
+  t('з вимогою й категорією — можна', rules.courseSubmitProblems({ ...full(), categorySlug: 'chpu' }, { categoryRequired: true }).length === 0);
 }
 
 // ── Маршрути ─────────────────────────────────────────────────────────────
@@ -272,6 +283,60 @@ try {
   const freeOk = await call('POST', `/api/admin/moderation/${entry3}/approve`, 'u-admin');
   const freeSent = bridgeCalls.find((c) => c.url.endsWith('/bridge/courses'))?.body ?? {};
   t('явно безкоштовний курс погоджується з ціною 0', freeOk.status === 200 && freeSent.priceMinor === 0, `${freeOk.status} ${freeSent.priceMinor}`);
+
+  console.log('\nКатегорія при поданні:');
+  const c5 = (await call('POST', '/api/courses', 'u-teacher', { title: 'Курс без категорії' })).body.course;
+  await call('PUT', `/api/courses/${c5.id}`, 'u-teacher', { ...put1.body.course, id: undefined, title: 'Курс без категорії', priceMinor: 8000, categorySlug: '' });
+  const noCatSub = await call('POST', `/api/courses/${c5.id}/publish`, 'u-teacher');
+  t('вітрина віддала перелік → без категорії подати не можна', noCatSub.status === 400 && (noCatSub.body.problems || []).some((x: string) => /категорію/.test(x)), JSON.stringify(noCatSub.body.problems));
+  await call('PUT', `/api/courses/${c5.id}`, 'u-teacher', { categorySlug: 'зниклий-розділ' });
+  const staleSub = await call('POST', `/api/courses/${c5.id}/publish`, 'u-teacher');
+  t('категорія, якої вже нема на вітрині → 400', staleSub.status === 400 && (staleSub.body.problems || []).some((x: string) => /більше не існує/.test(x)), JSON.stringify(staleSub.body.problems));
+  await call('PUT', `/api/courses/${c5.id}`, 'u-teacher', { categorySlug: 'chpu' });
+  const okSub = await call('POST', `/api/courses/${c5.id}/publish`, 'u-teacher');
+  t('з існуючою категорією — подано', okSub.status === 200, JSON.stringify(okSub.body).slice(0, 120));
+
+  for (const name of ['Курс для листа 2', 'Курс для листа 3']) {
+    const cx = (await call('POST', '/api/courses', 'u-teacher', { title: name })).body.course;
+    await call('PUT', `/api/courses/${cx.id}`, 'u-teacher', { ...put1.body.course, id: undefined, title: name, priceMinor: 8000, categorySlug: 'chpu' });
+    await call('POST', `/api/courses/${cx.id}/publish`, 'u-teacher');
+  }
+
+  console.log('\nЛічильник черги:');
+  const sum = await call('GET', '/api/admin/moderation/summary', 'u-admin');
+  const pendingReal = (await call('GET', '/api/admin/moderation?status=pending', 'u-admin')).body.moderation.length;
+  t('підсумок: pending збігається з довжиною черги', sum.status === 200 && sum.body.pending === pendingReal && sum.body.counts.pending === pendingReal, JSON.stringify(sum.body));
+  t('підсумок: курси пораховано окремо', sum.body.pendingByType?.course === pendingReal, JSON.stringify(sum.body.pendingByType));
+  t('підсумок: є й інші статуси', typeof sum.body.counts.approved === 'number' && sum.body.counts.rejected >= 1);
+  const guestSum = await call('GET', '/api/admin/moderation/summary', 'u-teacher');
+  t('підсумок — лише адміну', guestSum.status === 403 || guestSum.status === 401, String(guestSum.status));
+
+  console.log('\nЛист автору про рішення:');
+  await saveUser({ id: 'u-teacher', email: 'teacher@test.dev', name: 'Олена Коваль', role: 'writer', createdAt: new Date().toISOString() } as any);
+  const mails: any[] = [];
+  let mailOk = true;
+  setModerationMailer(async (input) => {
+    mails.push(input);
+    return mailOk ? { ok: true } : { ok: false, error: 'SMTP не налаштовано' };
+  });
+  const queueNow = (await call('GET', '/api/admin/moderation?status=pending', 'u-admin')).body.moderation as any[];
+  const [mA, mB, mC] = queueNow;
+  const mApprove = await call('POST', `/api/admin/moderation/${mA.id}/approve`, 'u-admin');
+  t('погодження → лист автору', mApprove.status === 200 && mApprove.body.notification?.sent === true && mails.at(-1)?.to === 'teacher@test.dev' && /Погоджено/.test(mails.at(-1)?.subject), JSON.stringify(mApprove.body.notification));
+  const mChanges = await call('POST', `/api/admin/moderation/${mB.id}/request-changes`, 'u-admin', { note: 'Додайте <b>фото</b> & приклади' });
+  t('зауваження → лист із текстом зауважень', mChanges.body.notification?.sent === true && /Додайте/.test(mails.at(-1)?.text) && /зауваженн/.test(mails.at(-1)?.subject));
+  t('текст у HTML-листі екранований', /&lt;b&gt;фото&lt;\/b&gt; &amp; приклади/.test(mails.at(-1)?.html) && !/<b>/.test(mails.at(-1)?.html), mails.at(-1)?.html);
+  mailOk = false;
+  const mReject = await call('POST', `/api/admin/moderation/${mC.id}/reject`, 'u-admin', { reason: 'Не підходить' });
+  t('збій листа не скасовує рішення', mReject.status === 200 && mReject.body.moderation?.status === 'rejected' && mReject.body.notification?.sent === false && /SMTP/.test(mReject.body.notification?.reason), JSON.stringify(mReject.body.notification));
+  const mailsBefore = mails.length;
+  await saveUser({ id: 'u-nomail', email: '', name: 'Без пошти', role: 'writer', createdAt: new Date().toISOString() } as any);
+  const orphan = { id: 'x', itemType: 'course', itemId: 'x', title: 'T', authorId: 'u-nomail', status: 'pending', createdAt: '' } as any;
+  const { notifyAuthorOfDecision } = await import('../server/moderationNotify.ts');
+  const noMail = await notifyAuthorOfDecision(orphan, 'approved');
+  const noUser = await notifyAuthorOfDecision({ ...orphan, authorId: 'нема-такого' }, 'approved');
+  t('автор без пошти / без акаунта: не надіслано з причиною, без винятку', !noMail.sent && !!noMail.reason && !noUser.sent && !!noUser.reason && mails.length === mailsBefore, `${noMail.reason} / ${noUser.reason}`);
+  setModerationMailer(null);
 } finally {
   server.close();
   globalThis.fetch = realFetch;

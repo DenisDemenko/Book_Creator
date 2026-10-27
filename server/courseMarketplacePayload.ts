@@ -126,7 +126,7 @@ export function buildCoursePublishInput(
   course: CourseLike,
   sellerSlug: string,
   /** true — приймач заявив `course-content-v2` (див. `bridgeSupportsCourseContent`); за замовчуванням безпечний обсяг. */
-  options: { richContent?: boolean } = {}
+  options: { richContent?: boolean; instructorName?: string } = {}
 ): PublishCourseInput {
   const priceMinor = course.free === true ? 0 : Math.round(Number(course.priceMinor));
   return {
@@ -146,6 +146,7 @@ export function buildCoursePublishInput(
     // тоді, коли slug ще не обрано (маркетплейс зіставить його м'яко).
     categorySlug: course.categorySlug,
     category: course.categorySlug === undefined ? course.category : undefined,
+    instructorName: options.instructorName?.trim() || undefined,
     audience: filled(course.audience),
     outcomes: filled(course.outcomes),
     skills: course.skills.map((s) => ({ name: s.name, level: s.level, whyItMatters: s.whyItMatters })),

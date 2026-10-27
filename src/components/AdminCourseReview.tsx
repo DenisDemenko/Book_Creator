@@ -118,7 +118,15 @@ export const AdminCourseReview: React.FC<{
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data?.error || `Не вдалося (HTTP ${res.status}).`);
-        onDecided(okText);
+        const mail = data?.notification;
+        onDecided(
+          okText +
+            (mail?.sent
+              ? ' Автору надіслано лист.'
+              : mail
+                ? ` Лист автору не надіслано (${mail.reason || 'невідомо'}) — повідомте його самі.`
+                : '')
+        );
       } catch (e: any) {
         setError(e?.message || 'Помилка.');
       } finally {

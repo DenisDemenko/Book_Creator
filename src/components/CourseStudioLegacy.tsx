@@ -236,8 +236,8 @@ const AssignmentEditor: React.FC<{
  * сервер при поданні й погодженні (coursePublishRules), `polish` — те, що
  * редактор радить доробити, але подання не зупиняє.
  */
-function collectReadiness(course: CourseV2): { blocking: string[]; polish: string[] } {
-  const blocking = courseSubmitProblems(course);
+function collectReadiness(course: CourseV2, categoryRequired = false): { blocking: string[]; polish: string[] } {
+  const blocking = courseSubmitProblems(course, { categoryRequired });
   const missing: string[] = [];
 
   course.modules.forEach((m, mi) => {
@@ -452,7 +452,10 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
     setDirty(false);
   }, []);
 
-  const readiness = useMemo(() => (course ? collectReadiness(course) : { blocking: [], polish: [] }), [course]);
+  const readiness = useMemo(
+    () => (course ? collectReadiness(course, storefrontCategories.length > 0) : { blocking: [], polish: [] }),
+    [course, storefrontCategories.length]
+  );
 
   // -------- модифікатори структури --------
   const addModule = () => patch((c) => ({ ...c, modules: [...c.modules, emptyModule()] }));
@@ -872,7 +875,7 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
                   onChange={(e) => patch((c) => ({ ...c, categorySlug: e.target.value }))}
                   className={`${inputCls} mt-1`}
                 >
-                  <option value="">Без категорії</option>
+                  <option value="">{storefrontCategories.length > 0 ? 'Оберіть категорію…' : 'Без категорії'}</option>
                   {storefrontCategories.map((cat) => (
                     <option key={cat.slug} value={cat.slug}>{cat.name}</option>
                   ))}
@@ -884,7 +887,7 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
                 )}
                 {storefrontCategories.length === 0 && (
                   <span className="block text-[10px] text-slate-500 mt-0.5">
-                    Перелік категорій вітрини недоступний — курс можна подати без категорії.
+                    Перелік категорій вітрини недоступний — поки він не з'явиться, категорія не вимагається.
                   </span>
                 )}
               </label>

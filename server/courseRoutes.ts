@@ -64,8 +64,16 @@ async function accessTo(deps: CourseRoutesDeps, principal: { id: string | null; 
 // Server-side gate before a course reaches the storefront: the shared rules
 // (src/utils/coursePublishRules.ts) — the editor shows the same list plus its
 // own polish checks, so the two can no longer drift apart.
-function publishProblems(course: Course): string[] {
-  return courseSubmitProblems(course);
+function publishProblems(course: Course, categories: Array<{ slug: string }>): string[] {
+  // Категорія обов'язкова, коли вітрина віддала непорожній перелік; невідомий
+  // slug (розділ прибрали на вітрині) вона відхилила б при публікації — краще
+  // сказати це вже при поданні.
+  const problems = courseSubmitProblems(course, { categoryRequired: categories.length > 0 });
+  const slug = String(course.categorySlug ?? '').trim();
+  if (categories.length > 0 && slug && !categories.some((c) => c.slug === slug)) {
+    problems.push('Обрана категорія більше не існує на вітрині — оберіть іншу.');
+  }
+  return problems;
 }
 
 export function registerCourseRoutes(app: Express, deps: CourseRoutesDeps = {}): void {
@@ -163,7 +171,9 @@ export function registerCourseRoutes(app: Express, deps: CourseRoutesDeps = {}):
         return res.status(404).json({ error: OWNER_ERROR });
       }
 
-      const problems = publishProblems(course);
+      // Збій моста не блокує подання: без переліку категорія просто не вимагається.
+      const categories = await (deps.listCategories ?? listBridgeCategories)().catch(() => []);
+      const problems = publishProblems(course, categories);
       if (problems.length > 0) {
         return res.status(400).json({ error: 'Курс не готовий до публікації', problems });
       }

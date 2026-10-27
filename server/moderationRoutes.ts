@@ -22,6 +22,8 @@ import {
   bridgeSupportsCourseContent,
 } from './marketplaceBridge';
 import { buildCoursePublishInput } from './courseMarketplacePayload';
+import { findUserById } from './store';
+import { notifyAuthorOfDecision } from './moderationNotify';
 import { courseSnapshotChanges } from '../src/utils/courseSnapshotDiff';
 import { courseSubmitProblems } from '../src/utils/coursePublishRules';
 import { getCourse, updateCourse, type Course } from './courseStore';
@@ -56,6 +58,20 @@ export function registerModerationRoutes(app: Express): void {
       ? listModeration(status as ModerationStatus)
       : listModeration();
     res.json({ moderation: entries });
+  });
+
+  /**
+   * Скільки чого чекає рішення: для лічильника на вкладці «Модерація» й у
+   * фільтрах черги. Адмін бачить «є що вирішувати» ще до відкриття розділу.
+   */
+  app.get('/api/admin/moderation/summary', requireAdmin, (_req, res) => {
+    const counts: Record<string, number> = { pending: 0, changes_requested: 0, approved: 0, rejected: 0 };
+    const pendingByType: Record<string, number> = {};
+    for (const entry of listModeration()) {
+      counts[entry.status] = (counts[entry.status] ?? 0) + 1;
+      if (entry.status === 'pending') pendingByType[entry.itemType] = (pendingByType[entry.itemType] ?? 0) + 1;
+    }
+    res.json({ counts, pendingByType, pending: counts.pending });
   });
 
   /**
@@ -137,7 +153,10 @@ export function registerModerationRoutes(app: Express): void {
         // публічних полів; інакше безпечний обсяг (див. bridgeSupportsCourseContent).
         const richContent = await bridgeSupportsCourseContent();
         const result = await publishCourseToMarketplace(
-          buildCoursePublishInput(course, sellerSlug, { richContent })
+          buildCoursePublishInput(course, sellerSlug, {
+            richContent,
+            instructorName: (await findUserById(course.ownerId))?.name,
+          })
         );
         updateCourse(course.id, { status: 'published' });
         published = { ...result, contentMode: richContent ? 'full' : 'programme' };
@@ -145,7 +164,8 @@ export function registerModerationRoutes(app: Express): void {
       // book | instruction | game: авто-публікація ще не підключена — поки що лише погодження.
 
       const decided = decideModeration(entry.id, 'approved');
-      res.json({ moderation: decided, published });
+      const notification = await notifyAuthorOfDecision(entry, 'approved');
+      res.json({ moderation: decided, published, notification });
     } catch (err) {
       if (err instanceof MarketplaceBridgeError) {
         return res.status(err.status).json({ error: err.message, kind: err.kind, details: err.details });
@@ -175,7 +195,8 @@ export function registerModerationRoutes(app: Express): void {
         const course = getCourse(entry.itemId);
         if (course && course.status === 'ready') updateCourse(course.id, { status: 'draft' });
       }
-      res.json({ moderation: decided });
+      const notification = await notifyAuthorOfDecision(entry, 'changes_requested', note);
+      res.json({ moderation: decided, notification });
     } catch (err) {
       res.status(503).json({ error: String((err as Error).message) });
     }
@@ -199,6 +220,7 @@ export function registerModerationRoutes(app: Express): void {
       // Відхилений курс повертається в чернетку (якщо він ще не у вітрині).
       if (course && course.status === 'ready') updateCourse(course.id, { status: 'draft' });
     }
-    res.json({ moderation: decided });
+    const notification = await notifyAuthorOfDecision(entry, 'rejected', reason);
+    res.json({ moderation: decided, notification });
   });
 }
