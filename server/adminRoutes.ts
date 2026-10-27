@@ -34,7 +34,9 @@ import {
   StoredPayment,
 } from './store';
 import { listBooks } from './bookStore';
-import { listAllCourses } from './courseStore';
+import { listAllCourses, getCourse, updateCourse } from './courseStore';
+import { courseSubmitProblems } from '../src/utils/coursePublishRules';
+import { buildCoursePublishInput } from './courseMarketplacePayload';
 import { CHAT_USAGE_CONTEXT } from './chatRoutes';
 import { CHAT_MODELS, ENGINE_LABELS, engineConfigured, normalizeModelId } from './chatProviders';
 import {
@@ -84,6 +86,7 @@ import {
   unpublishBookFromMarketplace,
   publishBookToMarketplace,
   publishCourseToMarketplace,
+  bridgeSupportsCourseContent,
   assertStorefrontCover,
   MarketplaceBridgeError,
 } from './marketplaceBridge';
@@ -1477,71 +1480,46 @@ export function registerAdminRoutes(app: Express): void {
   });
 
   /**
-   * Публікація КУРСУ у вітрину — ручний адмінський дублікат реального
-   * шляху модерації (moderationRoutes.ts), для паритету з книжковим
-   * `/publish` вище. Приймач `/bridge/courses` на боці Fusion Lab
-   * підтверджений і реалізований (log.md #137–#138); поля `skills`/
-   * `modules` тут приходять сирими з тіла запиту й ідуть далі без
-   * перетворень, включно з `videoUrl`/`introVideoUrl`, якщо їх передали.
+   * Адмінська публікація КУРСУ у вітрину без черги модерації.
+   *
+   * Раніше тут були сирі `skills`/`modules` з тіла запиту, що йшли у вітрину
+   * без перетворень: це був другий, непомітний вихід платного змісту (відео,
+   * завдань) повз правила погодження. Тепер маршрут бере курс ЗІ СХОВИЩА за
+   * `courseId` і проходить рівно ті самі перевірки та збирач, що й погодження
+   * модерації: `courseSubmitProblems`, обкладинка, підтверджена безкоштовність,
+   * `buildCoursePublishInput`. Тіло запиту не може підмінити ні ціну, ні
+   * програму, ні перелік навичок.
    */
   app.post('/api/admin/marketplace-bridge/publish-course', requireAdmin, async (req, res) => {
-    const {
-      bookId,
-      title,
-      subtitle,
-      summary,
-      description,
-      currency,
-      coverUrl,
-      highlights,
-      sellerSlug,
-      priceMinor,
-      moduleCount,
-      lessonCount,
-      category,
-      audience,
-      outcomes,
-      skills,
-      modules,
-      free,
-    } = req.body || {};
-    const courseCategorySlug = cleanCategorySlug(req.body?.categorySlug);
-    if (!bookId || !title) {
-      return res.status(400).json({ error: 'Потрібні bookId і title.', kind: 'bad_input' });
+    const courseId = String(req.body?.courseId ?? req.body?.bookId ?? '').trim();
+    if (!courseId) {
+      return res.status(400).json({ error: 'Потрібен courseId — id курсу в Студії.', kind: 'bad_input' });
     }
-    const price = Number(priceMinor);
-    if (!Number.isFinite(price) || price < 0) {
-      return res.status(400).json({ error: 'Некоректна ціна курсу.', kind: 'bad_input' });
+    const course = getCourse(courseId);
+    if (!course) {
+      return res.status(404).json({ error: 'Курс не знайдено.', kind: 'not_found' });
     }
 
     try {
-      assertFreePriceConfirmed(Math.round(price), free, `Курс «${title}»`);
+      const problems = courseSubmitProblems(course);
+      if (problems.length > 0) {
+        return res.status(400).json({
+          error: `Курс не можна опублікувати: ${problems.join(' ')}`,
+          problems,
+          kind: 'not_ready',
+        });
+      }
+      const priceMinor = course.free === true ? 0 : Math.round(Number(course.priceMinor));
+      assertFreePriceConfirmed(priceMinor, course.free === true, `Курс «${course.title}»`);
+      assertStorefrontCover(course.coverUrl, `Курс «${course.title}»`);
       const settings = await readBridgeSettings();
-      assertStorefrontCover(coverUrl, `Курс «${title}»`);
+      const richContent = await bridgeSupportsCourseContent({ settings });
       const result = await publishCourseToMarketplace(
-        {
-          bookId,
-          title,
-          subtitle,
-          summary,
-          description,
-          priceMinor: price,
-          currency,
-          coverUrl,
-          highlights,
-          sellerSlug,
-          moduleCount,
-          lessonCount,
-          category,
-          categorySlug: courseCategorySlug,
-          audience,
-          outcomes,
-          skills,
-          modules,
-        },
+        buildCoursePublishInput(course, process.env.BRIDGE_SELLER_SLUG || 'fusion-lab', { richContent }),
         { settings }
       );
-      res.json({ published: result });
+      updateCourse(course.id, { status: 'published' });
+      res.json({ published: result, contentMode: richContent ? 'full' : 'programme' });
     } catch (err: any) {
       const status = err instanceof MarketplaceBridgeError ? err.status : 500;
       res.status(status).json({

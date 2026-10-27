@@ -19,9 +19,11 @@ import {
   assertFreePriceConfirmed,
   MarketplaceBridgeError,
   listBridgeCategories,
+  bridgeSupportsCourseContent,
 } from './marketplaceBridge';
+import { buildCoursePublishInput } from './courseMarketplacePayload';
 import { courseSnapshotChanges } from '../src/utils/courseSnapshotDiff';
-import { COURSE_CURRENCY, courseSubmitProblems } from '../src/utils/coursePublishRules';
+import { courseSubmitProblems } from '../src/utils/coursePublishRules';
 import { getCourse, updateCourse, type Course } from './courseStore';
 import {
   decideModeration,
@@ -131,40 +133,14 @@ export function registerModerationRoutes(app: Express): void {
         assertStorefrontCover(course.coverUrl, `Курс «${course.title}»`);
         const priceMinor = course.free === true ? 0 : Math.round(Number(course.priceMinor));
         assertFreePriceConfirmed(priceMinor, course.free === true, `Курс «${course.title}»`);
-        const result = await publishCourseToMarketplace({
-          bookId: course.id,
-          title: course.title,
-          subtitle: course.subtitle,
-          summary: course.summary,
-          description: course.description,
-          priceMinor,
-          currency: COURSE_CURRENCY,
-          coverUrl: course.coverUrl,
-          highlights: course.highlights.filter(Boolean),
-          sellerSlug,
-          moduleCount: course.modules.length,
-          lessonCount: course.modules.reduce((n, m) => n + m.lessons.length, 0),
-          // Slug категорії вітрини має перевагу; старий вільний текст іде
-          // лише тоді, коли slug ще не обрано (маркетплейс зіставить його м'яко).
-          categorySlug: course.categorySlug,
-          category: course.categorySlug === undefined ? course.category : undefined,
-          audience: course.audience.filter(Boolean),
-          outcomes: course.outcomes.filter(Boolean),
-          // Картка-вітрина: лише назва/рівень/«навіщо» — без «як розвивати» й вправ (платний контент).
-          skills: course.skills.map((s) => ({ name: s.name, level: s.level, whyItMatters: s.whyItMatters })),
-          // Скелет програми (назви модулів і уроків із тривалістю) плюс
-          // посилання на відео (YouTube/Vimeo — на вибір автора, тут не
-          // розрізняється) — решта платного матеріалу (опис/фото/завдання)
-          // досі не передається, лишається за карткою (log.md #138).
-          modules: course.modules.map((m) => ({
-            title: m.title,
-            summary: m.summary,
-            introVideoUrl: m.introVideoUrl,
-            lessons: m.lessons.map((l) => ({ title: l.title, durationMin: l.durationMin, videoUrl: l.videoUrl })),
-          })),
-        });
+        // Повний платний зміст — лише приймачу, що сам заявив білий список
+        // публічних полів; інакше безпечний обсяг (див. bridgeSupportsCourseContent).
+        const richContent = await bridgeSupportsCourseContent();
+        const result = await publishCourseToMarketplace(
+          buildCoursePublishInput(course, sellerSlug, { richContent })
+        );
         updateCourse(course.id, { status: 'published' });
-        published = result;
+        published = { ...result, contentMode: richContent ? 'full' : 'programme' };
       }
       // book | instruction | game: авто-публікація ще не підключена — поки що лише погодження.
 

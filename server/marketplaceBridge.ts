@@ -953,6 +953,37 @@ export async function listBridgeCategories(
   }
 }
 
+/** Можливість приймача, що відкриває повний платний зміст курсу (див. `GET /bridge/categories`). */
+export const COURSE_CONTENT_V2 = 'course-content-v2';
+
+/**
+ * Чи вміє вітрина ховати платний зміст курсу за білим списком.
+ *
+ * Старий приймач зберігав `modules` як є й прибирав з публічної відповіді лише
+ * посилання на відео: опис уроку, фото й завдання з критеріями потрапили б у
+ * відкритий каталог. Тому Студія шле повний зміст лише тоді, коли приймач сам
+ * заявив `course-content-v2`; у решті випадків — у т.ч. коли запит не вдався —
+ * лишається безпечний обсяг (програма + відео). Помилка тут не зупиняє
+ * публікацію, а лише звужує її.
+ */
+export async function bridgeSupportsCourseContent(
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<boolean> {
+  try {
+    const settings = deps.settings ?? (await readBridgeSettings());
+    const doFetch = deps.fetch ?? fetch;
+    const response = await doFetch(`${settings.url}/bridge/categories`, {
+      headers: { 'x-bridge-key': settings.key },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) return false;
+    const body = JSON.parse(await response.text()) as { capabilities?: unknown };
+    return Array.isArray(body?.capabilities) && body.capabilities.includes(COURSE_CONTENT_V2);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Зняти лістинг за його `externalId` — тим, який показав перелік.
  *
@@ -1409,11 +1440,15 @@ export async function publishBookToMarketplace(
  * `introVideoUrl`) — Nova не перевіряє й не розрізняє провайдера
  * (YouTube чи Vimeo — вибір автора курсу, просто рядок URL), а вітрина
  * ховає його з публічної відповіді каталогу й показує лише покупцю
- * (`stripPaidCourseContent` + `Entitlement`, те саме, що вже захищає
- * платні файли). Досі свідомо НЕ передається решта платного матеріалу —
- * опис/мета уроку, тексти завдань і критерії прийняття: цей контент,
- * як і файли книг, лишається за окремим кроком (за взірцем
- * `attachBookFileToMarketplace`), не за карткою.
+ * (білий список `toPublicCurriculum` + `Entitlement`, те саме, що вже захищає
+ * платні файли).
+ *
+ * Етап 3 аудиту курсів: тепер передається і решта змісту — опис уроку, фото,
+ * завдання з критеріями, обкладинка й підсумкове завдання модуля — разом зі
+ * стабільними id модулів і уроків. Безпечно це робить вітрина: публічний
+ * каталог будується за БІЛИМ списком полів, а платне є лише у вигляді
+ * бібліотеки покупця. Збирає payload `buildCoursePublishInput`
+ * (courseMarketplacePayload.ts) — єдиний для погодження й адмінського шляху.
  */
 export interface PublishCourseSkill {
   name: string;
@@ -1422,24 +1457,45 @@ export interface PublishCourseSkill {
   whyItMatters?: string;
 }
 
-export interface PublishCourseModuleLesson {
+/** Практичне завдання уроку чи підсумкове завдання модуля — платний зміст. */
+export interface PublishCourseAssignment {
   title: string;
+  brief?: string;
+  steps?: string[];
+  deliverable?: string;
+  acceptanceCriteria?: string[];
+  estimateMin?: number;
+}
+
+export interface PublishCourseModuleLesson {
+  /** Стабільний id уроку в Студії: за ним вітрина тримає прогрес покупця, тож він переживає зміну порядку уроків. */
+  id?: string;
+  title: string;
+  /** Публічне: мета й теми уроку — частина програми, яку покупець читає до оплати. */
+  goal?: string;
+  topics?: string[];
   durationMin?: number;
   /**
-   * Посилання на відео уроку — YouTube чи Vimeo, на вибір автора курсу;
-   * Nova не парсить і не валідує провайдера, просто передає рядок далі.
-   * Платний контент: вітрина ховає його з публічного каталогу й показує
-   * лише покупцю з активним `Entitlement` (`stripPaidCourseContent`
-   * у Fusion Lab).
+   * Далі — платний зміст. Вітрина показує його лише покупцю з активним
+   * `Entitlement`: публічний каталог будується за білим списком
+   * (`toPublicCurriculum` у Fusion Lab), тож нове поле тут не потрапить на
+   * публічну сторінку, навіть якщо про нього забути.
    */
+  description?: string;
+  /** Посилання на відео — YouTube чи Vimeo, на вибір автора; Nova провайдера не розрізняє. */
   videoUrl?: string;
+  photoUrls?: string[];
+  assignment?: PublishCourseAssignment;
 }
 
 export interface PublishCourseModule {
+  id?: string;
   title: string;
   summary?: string;
-  /** Оглядове відео модуля — той самий провайдер-агностичний рядок, що й `PublishCourseModuleLesson.videoUrl`. */
+  /** Платне: обкладинка модуля, оглядове відео й підсумкове завдання. */
+  coverPhotoUrl?: string;
   introVideoUrl?: string;
+  finalAssignment?: PublishCourseAssignment;
   lessons: PublishCourseModuleLesson[];
 }
 
@@ -1470,7 +1526,7 @@ export interface PublishCourseInput {
   outcomes?: string[];
   /** Навички курсу — лише назва/рівень/«навіщо», без «як розвивати» й вправ. */
   skills?: PublishCourseSkill[];
-  /** Скелет програми: назви модулів і уроків із тривалістю — без опису/відео/завдань уроку. */
+  /** Програма курсу: публічна частина (назви, мета, теми, тривалість) і платна (відео, текст, фото, завдання) — розділяє вітрина. */
   modules?: PublishCourseModule[];
 }
 
