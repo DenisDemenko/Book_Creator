@@ -33,6 +33,7 @@ import {
   videoUrlProblem,
 } from '../utils/coursePublishRules';
 import { parsePriceMinor } from './adminOs/priceInput';
+import CourseGraduateStats from './CourseGraduateStats';
 
 /** Останнє рішення модерації щодо курсу — з `GET /api/courses/:id`. */
 interface CourseModerationInfo {
@@ -745,6 +746,7 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
           Курс у вітрині. Правки потраплять туди лише після повторного надсилання на модерацію.
         </div>
       )}
+      {course.status === 'published' && <CourseGraduateStats courseId={course.id} />}
 
       <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[280px_1fr_260px] gap-3">
         {/* ---------- Дерево курсу ---------- */}

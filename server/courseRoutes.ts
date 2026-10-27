@@ -14,7 +14,7 @@
 import type { Express } from 'express';
 import { can, requireAuth, requirePermission } from './auth';
 import { latestModerationFor, submitForModeration } from './moderationStore';
-import { listBridgeCategories } from './marketplaceBridge';
+import { fetchGraduateStats, listBridgeCategories, MarketplaceBridgeError } from './marketplaceBridge';
 import { GRADUATE_SELLING_MODES, type GraduateSelling } from '../src/utils/coursePublishRules';
 import { courseSubmitProblems } from '../src/utils/coursePublishRules';
 import {
@@ -43,6 +43,8 @@ export interface CourseRoutesDeps {
   onCourseChanged?: (course: Course) => void;
   /** Категорії вітрини для вибору в редакторі (типово — через міст). */
   listCategories?: () => Promise<Array<{ slug: string; name: string }>>;
+  /** Показники продажу робіт випускників курсу (типово — через міст). */
+  graduateStats?: (courseId: string) => Promise<unknown | null>;
 }
 
 /**
@@ -140,6 +142,27 @@ export function registerCourseRoutes(app: Express, deps: CourseRoutesDeps = {}):
       }
       res.json({ course, access: level, moderation });
     } catch (err) {
+      res.status(503).json({ error: String((err as Error).message) });
+    }
+  });
+
+  /**
+   * Показники продажу робіт випускників курсу — для автора (і співавтора з
+   * доступом). Читання з маркетплейсу; `stats: null` — курсу ще немає на вітрині.
+   */
+  app.get('/api/courses/:id/graduate-stats', requireAuth, async (req, res) => {
+    try {
+      const course = getCourse(req.params.id);
+      const level = course ? await accessTo(deps, req.principal!, course) : 'none';
+      if (!course || level === 'none') {
+        return res.status(404).json({ error: OWNER_ERROR });
+      }
+      const stats = await (deps.graduateStats ?? fetchGraduateStats)(course.id);
+      res.json({ stats });
+    } catch (err) {
+      if (err instanceof MarketplaceBridgeError) {
+        return res.status(err.status === 401 ? 502 : err.status).json({ error: err.message });
+      }
       res.status(503).json({ error: String((err as Error).message) });
     }
   });

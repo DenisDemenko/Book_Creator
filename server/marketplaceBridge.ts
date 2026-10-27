@@ -984,6 +984,109 @@ export async function bridgeSupportsCourseContent(
   }
 }
 
+/** Показники курсу з погляду автора (`GET /bridge/courses/:externalId/graduate-stats`). */
+export interface GraduateCourseStatsView {
+  course: { slug: string; title: string; graduateSelling: string };
+  /** Скільки учнів купили курс і скільки пройшли його повністю. */
+  students: number;
+  completed: number;
+  /** Скільки випускників уже створили роботи. */
+  sellers: number;
+  works: { total: number; draft: number; pending: number; published: number };
+  sales: { units: number; revenueMinor: number; commissionMinor: number };
+  /** Бонус автору — частка комісії магазину; виплачує адмін вручну. */
+  bonus: {
+    sharePercent: number;
+    accruedMinor: number;
+    pendingMinor: number;
+    paidMinor: number;
+    dueMinor: number;
+  };
+}
+
+const num = (value: unknown): number => (Number.isFinite(Number(value)) ? Number(value) : 0);
+
+/**
+ * Показники продажу робіт випускників курсу — для автора курсу в Студії.
+ *
+ * `null` — курсу на вітрині ще немає (404): це звичайний стан до першої
+ * публікації, а не збій. Усе інше — помилка мосту, як у решті викликів.
+ * Читання тільки з маркетплейсу: Студія нічого не нараховує й не виплачує.
+ */
+export async function fetchGraduateStats(
+  courseId: string,
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<GraduateCourseStatsView | null> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+
+  let response: Response;
+  try {
+    response = await doFetch(
+      `${settings.url}/bridge/courses/${encodeURIComponent(courseExternalId(courseId))}/graduate-stats`,
+      { headers: { 'x-bridge-key': settings.key }, signal: AbortSignal.timeout(15000) }
+    );
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  }
+
+  const text = await response.text().catch(() => '');
+  if (response.status === 404) return null;
+  if (response.status === 401 || response.status === 403) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401
+    );
+  }
+  if (!response.ok) {
+    throw new MarketplaceBridgeError(
+      `Маркетплейс не віддав показники курсу: ${describeRejection(response.status, text)}`,
+      'rejected',
+      502
+    );
+  }
+
+  try {
+    const body = JSON.parse(text) as any;
+    return {
+      course: {
+        slug: String(body?.course?.slug ?? ''),
+        title: String(body?.course?.title ?? ''),
+        graduateSelling: String(body?.course?.graduateSelling ?? 'off'),
+      },
+      students: num(body?.students),
+      completed: num(body?.completed),
+      sellers: num(body?.sellers),
+      works: {
+        total: num(body?.works?.total),
+        draft: num(body?.works?.draft),
+        pending: num(body?.works?.pending),
+        published: num(body?.works?.published),
+      },
+      sales: {
+        units: num(body?.sales?.units),
+        revenueMinor: num(body?.sales?.revenueMinor),
+        commissionMinor: num(body?.sales?.commissionMinor),
+      },
+      bonus: {
+        sharePercent: num(body?.bonus?.sharePercent),
+        accruedMinor: num(body?.bonus?.accruedMinor),
+        pendingMinor: num(body?.bonus?.pendingMinor),
+        paidMinor: num(body?.bonus?.paidMinor),
+        dueMinor: num(body?.bonus?.dueMinor),
+      },
+    };
+  } catch {
+    throw new MarketplaceBridgeError('Маркетплейс віддав показники в незрозумілому вигляді.', 'rejected', 502);
+  }
+}
+
 /**
  * Зняти лістинг за його `externalId` — тим, який показав перелік.
  *

@@ -137,8 +137,10 @@ app.use((req, _res, next) => {
   (req as any).principal = id ? { id, role: ROLES[id] ?? 'writer', isGuest: false } : { id: null, role: 'guest', isGuest: true };
   next();
 });
+let statsStub: (courseId: string) => Promise<unknown | null> = async () => null;
 registerCourseRoutes(app, {
   listCategories: async () => [{ slug: 'chpu', name: 'ЧПУ та верстати' }],
+  graduateStats: (courseId) => statsStub(courseId),
 });
 registerModerationRoutes(app);
 const server = app.listen(0);
@@ -161,6 +163,31 @@ try {
   const id = created.body.course?.id as string;
   t('створення: статус з тіла ігнорується — чернетка', created.status === 201 && created.body.course.status === 'draft', created.body.course?.status);
   t('створення: валюта завжди UAH', created.body.course?.currency === 'UAH', created.body.course?.currency);
+
+  console.log('\nПоказники робіт випускників для автора:');
+  const asked: string[] = [];
+  statsStub = async (courseId) => { asked.push(courseId); return { students: 4, bonus: { dueMinor: 1500 } }; };
+  const gs = await call('GET', `/api/courses/${id}/graduate-stats`, 'u-teacher');
+  t('автор бачить показники свого курсу; запит іде за id курсу', gs.status === 200 && gs.body.stats?.students === 4 && asked[0] === id, JSON.stringify(gs.body));
+  const gsAdmin = await call('GET', `/api/courses/${id}/graduate-stats`, 'u-admin');
+  t('адміністратор теж бачить', gsAdmin.status === 200 && gsAdmin.body.stats?.bonus?.dueMinor === 1500);
+  const gsStranger = await call('GET', `/api/courses/${id}/graduate-stats`, 'u-stranger');
+  t('чужий користувач — 404, і маркетплейс не опитано', gsStranger.status === 404 && asked.length === 2, String(gsStranger.status));
+  const gsGuest = await call('GET', `/api/courses/${id}/graduate-stats`, '');
+  t('гість без входу — 401', gsGuest.status === 401, String(gsGuest.status));
+  const gsMissing = await call('GET', '/api/courses/нема-такого/graduate-stats', 'u-teacher');
+  t('неіснуючий курс — 404', gsMissing.status === 404, String(gsMissing.status));
+  statsStub = async () => null;
+  const gsNone = await call('GET', `/api/courses/${id}/graduate-stats`, 'u-teacher');
+  t('курсу ще немає на вітрині → stats: null (не помилка)', gsNone.status === 200 && gsNone.body.stats === null, JSON.stringify(gsNone.body));
+  const { MarketplaceBridgeError } = await import('../server/marketplaceBridge.ts');
+  statsStub = async () => { throw new MarketplaceBridgeError('Маркетплейс не відповідає', 'unreachable', 502); };
+  const gsDown = await call('GET', `/api/courses/${id}/graduate-stats`, 'u-teacher');
+  t('міст недоступний → 502 з поясненням', gsDown.status === 502 && /не відповідає/.test(gsDown.body.error), JSON.stringify(gsDown.body));
+  statsStub = async () => { throw new MarketplaceBridgeError('ключ', 'unauthorized', 401); };
+  const gsKey = await call('GET', `/api/courses/${id}/graduate-stats`, 'u-teacher');
+  t('хибний ключ мосту автору не віддається як 401 (це не його вхід)', gsKey.status === 502, String(gsKey.status));
+  statsStub = async () => null;
 
   const { title: _t, ...rest } = full();
   const put1 = await call('PUT', `/api/courses/${id}`, 'u-teacher', {

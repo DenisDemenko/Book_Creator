@@ -756,6 +756,52 @@ console.log('\nЦіна з поля вводу:');
   t('сміття без прапорця → помилка, не 0', bad.ok === false);
 }
 
+console.log('\nПоказники продажу робіт випускників для автора курсу:');
+{
+  const seen: { url: string; key?: string }[] = [];
+  const mkJson = (status: number, body: unknown) => (async (url: string, init: any = {}) => {
+    seen.push({ url: String(url), key: init.headers?.['x-bridge-key'] });
+    return { status, ok: status >= 200 && status < 300, text: async () => JSON.stringify(body) };
+  }) as never;
+  const settings = { url: 'https://market.test', key: 'k' } as never;
+
+  const full = await bridge.fetchGraduateStats('BK-7', {
+    fetch: mkJson(200, {
+      course: { slug: 'epoxy', title: 'Епоксидна смола', graduateSelling: 'anytime' },
+      students: 12, completed: 5, sellers: 3,
+      works: { total: 4, draft: 1, pending: 1, published: 2 },
+      sales: { units: 6, revenueMinor: 60000, commissionMinor: 12000 },
+      bonus: { sharePercent: 25, accruedMinor: 2000, pendingMinor: 1000, paidMinor: 500, dueMinor: 1500 },
+    }),
+    settings,
+  });
+  t('запит іде за externalId курсу (BK-7:course) з ключем мосту',
+    seen[0]?.url === 'https://market.test/bridge/courses/BK-7%3Acourse/graduate-stats' && seen[0]?.key === 'k', seen[0]?.url);
+  t('учні, пройшли, продавці прочитано', full?.students === 12 && full?.completed === 5 && full?.sellers === 3);
+  t('роботи й продажі прочитано', full?.works.published === 2 && full?.sales.units === 6 && full?.sales.revenueMinor === 60000);
+  t('бонус: нараховано, очікує, виплачено, до виплати', full?.bonus.accruedMinor === 2000 && full?.bonus.pendingMinor === 1000 && full?.bonus.paidMinor === 500 && full?.bonus.dueMinor === 1500);
+
+  const partial = await bridge.fetchGraduateStats('BK-7', { fetch: mkJson(200, { students: 'abc' }), settings });
+  t('сміття в числах стає нулем, а не NaN', partial?.students === 0 && partial?.bonus.dueMinor === 0);
+
+  const none = await bridge.fetchGraduateStats('BK-7', { fetch: mkJson(404, { message: 'no' }), settings });
+  t('404 — курсу ще немає на вітрині: null, не помилка', none === null);
+
+  let unauthorized = '';
+  try { await bridge.fetchGraduateStats('BK-7', { fetch: mkJson(401, {}), settings }); } catch (e: any) { unauthorized = e.kind; }
+  t('401 — помилка «unauthorized»', unauthorized === 'unauthorized', unauthorized);
+
+  let rejected = '';
+  try { await bridge.fetchGraduateStats('BK-7', { fetch: mkJson(500, { message: 'boom' }), settings }); } catch (e: any) { rejected = e.kind; }
+  t('500 — помилка «rejected»', rejected === 'rejected', rejected);
+
+  let unreachable = '';
+  try {
+    await bridge.fetchGraduateStats('BK-7', { fetch: (async () => { throw new Error('down'); }) as never, settings });
+  } catch (e: any) { unreachable = e.kind; }
+  t('мережа лежить — «unreachable»', unreachable === 'unreachable', unreachable);
+}
+
 console.log('\nРозбір externalId лістингів:');
 {
   const { parseExternalId } = await import('../src/components/adminOs/externalId');
