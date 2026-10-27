@@ -12,7 +12,11 @@ window.SlabBridge = (() => {
     if (!p) return;
     clearTimeout(p.timer);
     pending.delete(e.data.id);
-    if (e.data.error) p.reject(Error(e.data.error));
+    if (e.data.error) {
+      const error = Error(e.data.error);
+      error.status = e.data.status;
+      p.reject(error);
+    }
     else p.resolve(e.data.result);
   });
   return {

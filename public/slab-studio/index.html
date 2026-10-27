@@ -292,8 +292,9 @@
                 ><input type="checkbox" id="approvePrice" />Погоджую
                 конфігурацію та вартість</label
               ><button class="primary full" id="addCart" hidden>
-                У передзамовлення →</button
-              ><small>Передоплата 50% · решта після виготовлення</small>
+                Додати стіл у кошик →</button
+              ><p id="cartError" class="warning" role="alert" hidden></p>
+              <small>Після погодження додайте стіл у кошик. Передоплата 50% · решта після виготовлення.</small>
             </div>
             <div class="craft-note">
               ✳
@@ -411,12 +412,15 @@
         <div class="page-heading">
           <div>
             <p class="eyebrow">АДМІНПАНЕЛЬ · ВИРОБНИЦТВО</p>
-            <h1>Від задуму до столу<span>.</span></h1>
+            <h1>Замовлення стільниць<span>.</span></h1>
             <p class="muted">
-              Передзамовлення з демонстраційною передоплатою 50%.
+              Замовлення з кошиків покупців. Приймайте стільницю в роботу після підтвердженої передоплати 50%.
             </p>
           </div>
+          <button type="button" class="secondary" id="refreshOrders">Оновити замовлення</button>
         </div>
+        <div class="species-buttons" id="orderFilters" role="group" aria-label="Статус замовлень"></div>
+        <p id="ordersError" class="warning" role="alert" hidden></p>
         <div id="ordersList"></div>
       </section>
       <footer>

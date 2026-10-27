@@ -50,8 +50,6 @@
     if (admin)
       db.orders = await bridge.request("GET", "/tables/admin/production");
   }
-  if (admin)
-    db.orders = await bridge.request("GET", "/tables/admin/production");
   let design = {
       shape: "oval",
       l: 180,
@@ -64,9 +62,36 @@
     selected = null,
     estimate = null,
     quotePending = false,
+    cartPending = false,
     texturePending = false,
     designRevision = 0,
     toastTimer;
+  const draftKey = "fusionlab:table-builder:draft:v1";
+  if (!inventory) {
+    try {
+      const draft = JSON.parse(sessionStorage.getItem(draftKey) || "null");
+      const d = draft?.design;
+      const between = (n, min, max) => Number.isFinite(n) && n >= min && n <= max;
+      if (d && Date.now() - draft.savedAt < 86400000 &&
+          ["square", "round", "oval"].includes(d.shape) &&
+          between(d.l, 40, 350) && between(d.w, 40, 180) && between(d.t, 1, 15) &&
+          (d.shape === "oval" || d.l === d.w) && /^#[0-9a-f]{6}$/i.test(d.color) &&
+          ["metal", "wood", "none"].includes(d.legs) && Array.isArray(d.pieces) &&
+          d.pieces.length <= 6 && d.pieces.every(p =>
+            typeof p.uid === "string" && available(p.id) &&
+            between(p.x, -1000, 1000) && between(p.y, -1000, 1000) && between(p.angle, -360, 360)) &&
+          (!d.resinTexture || (typeof d.resinTexture.name === "string" &&
+            d.resinTexture.name.length <= 120 && typeof d.resinTexture.image === "string" &&
+            d.resinTexture.image.length <= 400000 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(d.resinTexture.image)))) {
+        design = d;
+      } else sessionStorage.removeItem(draftKey);
+    } catch { /* Storage may be unavailable in private browsing. */ }
+  }
+  function saveDraft() {
+    if (inventory) return;
+    try { sessionStorage.setItem(draftKey, JSON.stringify({ design, savedAt: Date.now() })); }
+    catch { /* The current composition remains usable when storage is full. */ }
+  }
   function toast(s) {
     $("toast").textContent = s;
     $("toast").classList.add("show");
@@ -110,7 +135,7 @@
     if (name === "inventory") renderInventory();
     if (name === "costs") renderCosts();
     if (name === "textures") renderPresetAdmin();
-    if (name === "cart" || name === "orders") renderOrders();
+    if (name === "orders") void refreshOrders();
     window.scrollTo(0, 0);
   }
   $$("[data-view]").forEach((b) => (b.onclick = () => view(b.dataset.view)));
@@ -191,6 +216,8 @@
     $("estimate").innerHTML =
       '<p class="muted">Композицію змінено. Розрахуйте актуальну вартість.</p>';
     $("designWarning").textContent = "";
+    $("cartError").hidden = true;
+    saveDraft();
   }
   let librarySpecies = "",
     inventorySpecies = "";
@@ -305,6 +332,7 @@
       w = design.shape === "oval" ? $("tableW").valueAsNumber : l,
       t = $("tableT").valueAsNumber;
     Object.assign(design, { l, w, t });
+    saveDraft();
     if (design.shape !== "oval") $("tableW").value = w;
     renderDesign();
     return true;
@@ -758,16 +786,35 @@
   $("approvePrice").onchange = () =>
     ($("addCart").disabled = !$("approvePrice").checked);
   $("addCart").onclick = async () => {
-    if (!estimate || !$("approvePrice").checked) return;
+    if (cartPending || !estimate || !$("approvePrice").checked) return;
+    cartPending = true;
+    saveDraft();
     $("addCart").disabled = true;
+    $("addCart").textContent = "Додаємо стіл у кошик…";
+    $("cartError").hidden = true;
+    $("builder").inert = true;
+    $("builder").setAttribute("aria-busy", "true");
     try {
       await bridge.request("POST", "/tables/preorders", {
         quoteId: estimate.quoteId,
         approved: true,
       });
+      try { sessionStorage.removeItem(draftKey); } catch { /* Optional storage. */ }
       bridge.navigate("/cart");
+    } catch (error) {
+      if (error.status === 401) {
+        bridge.navigate("/login");
+        return;
+      }
+      if (error.status === 409) invalidate();
+      $("cartError").textContent = error.message || "Не вдалося додати стіл у кошик. Спробуйте ще раз.";
+      $("cartError").hidden = false;
     } finally {
-      $("addCart").disabled = false;
+      cartPending = false;
+      $("builder").inert = false;
+      $("builder").removeAttribute("aria-busy");
+      $("addCart").disabled = !$("approvePrice").checked;
+      $("addCart").textContent = "Додати стіл у кошик →";
     }
   };
   function renderInventory() {
@@ -876,30 +923,69 @@
       oval: "Овальний",
     },
     statusNames = {
+      cart: "У кошику · очікує передоплати",
+      pending: "Очікує передоплати 50%",
       queued: "Очікує виробництва",
-      making: "У виробництві",
+      making: "Прийнято в роботу",
       ready: "Готовий",
+      payment_review: "Потрібна перевірка платежу",
     };
+  let orderFilter = "all", ordersLoading = false;
+  async function refreshOrders() {
+    if (!admin || ordersLoading) return;
+    ordersLoading = true;
+    $("refreshOrders").disabled = true;
+    $("refreshOrders").textContent = "Оновлюємо…";
+    $("ordersError").hidden = true;
+    try {
+      db.orders = await bridge.request("GET", "/tables/admin/production");
+      renderOrders();
+    } catch (error) {
+      $("ordersError").textContent = error.message || "Не вдалося завантажити замовлення.";
+      $("ordersError").hidden = false;
+    } finally {
+      ordersLoading = false;
+      $("refreshOrders").disabled = false;
+      $("refreshOrders").textContent = "Оновити замовлення";
+    }
+  }
+  $("refreshOrders").onclick = () => void refreshOrders();
+  const orderMatches = (o, f) => f === "all" ||
+    (f === "unpaid" ? ["cart", "pending"].includes(o.status) : o.status === f);
   function renderOrders() {
-    $("ordersList").innerHTML = db.orders.length
-      ? db.orders
+    const filters = [["all", "Усі"], ["unpaid", "Очікують оплати"], ["queued", "До прийняття"], ["making", "У роботі"], ["ready", "Готові"], ["payment_review", "Перевірка платежу"]];
+    $("orderFilters").innerHTML = filters.map(([key, label]) =>
+      `<button type="button" class="${orderFilter === key ? "active" : ""}" data-order-filter="${key}" aria-pressed="${orderFilter === key}">${label} · ${db.orders.filter(o => orderMatches(o, key)).length}</button>`).join("");
+    $$("[data-order-filter]").forEach(b => b.onclick = () => {
+      orderFilter = b.dataset.orderFilter;
+      renderOrders();
+    });
+    const orders = db.orders.filter(o => orderMatches(o, orderFilter));
+    $("ordersList").innerHTML = orders.length
+      ? orders
           .map(
             (o) =>
-              `<article class="order-card"><div class="order-image">${orderImage(o)}</div><div class="order-details"><span class="badge">${esc(statusNames[o.status] || "Потрібна перевірка платежу")}</span><h2 style="margin-top:12px">${shapeNames[o.shape]} стіл ${num(o.l)} × ${num(o.w)}</h2><p>#${esc(o.number)}<br>Слеби: ${o.slabs.map((s) => esc(s.number)).join(", ")}<br>Товщина ${num(o.t)} см · смола ${num(o.quote.kg, 2)} кг<br>Передоплата: ${money(o.depositMinor / 100)} · ${o.paymentMode === "demo" ? "ДЕМО" : o.paymentMode === "sandbox" ? "ТЕСТ LIQPAY" : "підтверджено банком"}</p><div class="order-actions">${o.status === "queued" || o.status === "making" ? `<button class="primary" data-next="${o.id}" data-status="${o.status === "queued" ? "making" : "ready"}">${o.status === "queued" ? "Почати виробництво" : "Позначити готовим"}</button>` : ""}<button class="text-btn" data-spec="${o.id}">Специфікація ↓</button></div></div><div class="order-price">${money(o.totalMinor / 100)}</div></article>`,
+              `<article class="order-card" data-order-id="${esc(o.id)}"><div class="order-image">${orderImage(o)}</div><div class="order-details"><span class="badge">${esc(statusNames[o.status] || o.status)}</span><h2 style="margin-top:12px">${shapeNames[o.shape]} стіл ${num(o.l)} × ${num(o.w)}</h2><p>#${esc(o.number)}<br>${o.buyer ? `Покупець: ${esc(o.buyer.displayName || "Без імені")} · ${esc(o.buyer.email)}<br>` : ""}Слеби: ${o.slabs.map((s) => esc(s.number)).join(", ")}<br>Товщина ${num(o.t)} см · смола ${num(o.quote.kg, 2)} кг<br>Передоплата 50%: ${money(o.depositMinor / 100)} · ${o.paidAt ? o.paymentMode === "demo" ? "ДЕМО · реальні кошти не зараховано" : o.paymentMode === "sandbox" ? "ТЕСТ LIQPAY · реальні кошти не зараховано" : "підтверджено банком" : "не підтверджена"}</p>${["cart", "pending"].includes(o.status) ? '<p class="hint">Прийняття в роботу стане доступним після передоплати 50%.</p>' : ""}<div class="order-actions">${o.paidAt && ["queued", "making"].includes(o.status) ? `<button class="primary" data-next="${o.id}" data-status="${o.status === "queued" ? "making" : "ready"}">${o.status === "queued" ? "Прийняти в роботу" : "Позначити готовим"}</button>` : ""}<button class="text-btn" data-spec="${o.id}">Специфікація ↓</button></div></div><div class="order-price">${money(o.totalMinor / 100)}</div></article>`,
           )
           .join("")
-      : '<div class="empty-panel"><h2>Виробництво очікує замовлення</h2><p>Стіл потрапить сюди після підтвердження передоплати 50%.</p></div>';
+      : '<div class="empty-panel"><h2>Замовлень поки немає</h2><p>Стіл з’явиться тут після додавання покупцем у кошик. Для початку виробництва потрібна передоплата 50%.</p></div>';
     $$("[data-next]").forEach(
       (b) =>
         (b.onclick = async () => {
-          await bridge.request(
-            "PATCH",
-            "/tables/admin/production/" + b.dataset.next,
-            { status: b.dataset.status },
-          );
-          await reloadRemote();
-          renderOrders();
-          toast("Статус оновлено.");
+          b.disabled = true;
+          $("ordersError").hidden = true;
+          try {
+            await bridge.request(
+              "PATCH",
+              "/tables/admin/production/" + b.dataset.next,
+              { status: b.dataset.status },
+            );
+            await refreshOrders();
+            toast(b.dataset.status === "making" ? "Стільницю прийнято в роботу." : "Стільниця готова.");
+          } catch (error) {
+            $("ordersError").textContent = error.message || "Не вдалося змінити статус.";
+            $("ordersError").hidden = false;
+          } finally { b.disabled = false; }
         }),
     );
     $$("[data-spec]").forEach(
@@ -1004,6 +1090,12 @@
   $("exportData").hidden = !admin;
   speciesOptions();
   renderPresetChoices();
+  $("legs").value = design.legs;
+  $$("[data-shape]").forEach(b => b.classList.toggle("active", b.dataset.shape === design.shape));
+  $$("[data-color]").forEach(b => b.classList.toggle("active", !design.resinTexture && b.dataset.color === design.color));
+  const chosenColor = $$('[data-color]').find(b => b.dataset.color === design.color);
+  if (chosenColor) $("colorName").textContent = chosenColor.getAttribute("aria-label");
+  syncResinTexture();
   syncDimensions();
   renderLibrary();
   renderDesign();
