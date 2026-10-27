@@ -1,0 +1,255 @@
+.funding {
+  --fund-bg: var(--card, #fff);
+  --fund-fg: var(--foreground, #272722);
+  --fund-line: var(--line, #dedbd3);
+  --fund-muted: var(--muted, #64675e);
+  --fund-accent: var(--accent-tech, #287463);
+  color: var(--fund-fg);
+  max-width: 1180px;
+  margin: auto;
+  padding: 32px 20px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.funding * {
+  box-sizing: border-box;
+}
+.funding h1 {
+  font-size: clamp(30px, 5vw, 54px);
+  line-height: 1.1;
+  letter-spacing: -0.035em;
+  margin: 12px 0 20px;
+  font-weight: 750;
+}
+.funding h2 {
+  font-size: 24px;
+  font-weight: 700;
+  margin: 0 0 12px;
+}
+.funding h3 {
+  font-size: 18px;
+  font-weight: 650;
+  margin: 8px 0;
+}
+.funding p {
+  margin: 8px 0;
+}
+.funding .fund-eyebrow {
+  color: var(--fund-accent);
+  font: 600 12px monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.funding .fund-lead {
+  max-width: 760px;
+  color: var(--fund-muted);
+  font-size: 18px;
+}
+.funding .fund-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 0;
+  align-items: center;
+}
+.funding button,
+.funding .fund-button {
+  border: 1px solid var(--fund-line);
+  border-radius: 12px;
+  padding: 10px 16px;
+  background: var(--fund-accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+}
+.funding button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.funding .fund-secondary {
+  background: transparent;
+  color: var(--fund-fg);
+}
+.funding a {
+  color: var(--fund-accent);
+}
+.funding .fund-button {
+  color: #fff;
+}
+.funding input,
+.funding textarea,
+.funding select {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--fund-line);
+  border-radius: 10px;
+  background: var(--fund-bg);
+  color: var(--fund-fg);
+  font: inherit;
+  min-width: 0;
+}
+.funding textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+.funding label {
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+  margin-bottom: 14px;
+}
+.funding label:has(input[type="checkbox"]) {
+  display: flex;
+  align-items: flex-start;
+}
+.funding input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin-top: 4px;
+}
+.funding :focus-visible {
+  outline: 3px solid var(--fund-accent);
+  outline-offset: 3px;
+}
+.funding .fund-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr));
+  gap: 20px;
+  margin: 24px 0;
+}
+.funding .fund-card {
+  background: var(--fund-bg);
+  border: 1px solid var(--fund-line);
+  border-radius: 20px;
+  padding: 24px;
+  min-width: 0;
+}
+.funding .fund-cover {
+  width: 100%;
+  aspect-ratio: 16/9;
+  object-fit: cover;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--fund-accent) 12%, transparent);
+}
+.funding .fund-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 16px;
+  margin: 24px 0;
+}
+.funding dt,
+.funding .fund-muted {
+  font-size: 13px;
+  color: var(--fund-muted);
+}
+.funding dd {
+  font-size: 22px;
+  font-weight: 650;
+  margin: 3px 0;
+}
+.funding progress {
+  width: 100%;
+  height: 10px;
+  accent-color: var(--fund-accent);
+}
+.funding .fund-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border: 1px solid var(--fund-line);
+  border-radius: 30px;
+  font-size: 12px;
+}
+.funding .fund-notice {
+  background: color-mix(in srgb, var(--fund-accent) 9%, var(--fund-bg));
+  border: 1px solid var(--fund-line);
+  padding: 16px;
+  border-radius: 12px;
+  margin: 16px 0;
+}
+.funding .fund-error {
+  border-color: #b94538;
+  color: #b94538;
+}
+.funding .fund-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
+  gap: 14px;
+  align-items: start;
+}
+.funding details {
+  border-top: 1px solid var(--fund-line);
+  padding: 16px 0;
+}
+.funding summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.funding table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+.funding th,
+.funding td {
+  padding: 9px;
+  text-align: left;
+  border-bottom: 1px solid var(--fund-line);
+}
+.funding .fund-scroll {
+  overflow: auto;
+}
+.funding .fund-pre {
+  white-space: pre-wrap;
+  font-size: 14px;
+}
+.funding .fund-check {
+  font-size: 13px;
+  color: var(--fund-muted);
+}
+.funding .fund-section {
+  margin-top: 32px;
+}
+.funding .fund-empty {
+  padding: 45px 24px;
+  text-align: center;
+  border: 1px dashed var(--fund-line);
+  border-radius: 20px;
+}
+.funding[data-theme="studio"] {
+  --fund-bg: #101e2c;
+  --fund-fg: #d5e6ee;
+  --fund-line: #276073;
+  --fund-muted: #95adb9;
+  --fund-accent: #087b91;
+  padding: 20px;
+  background: #081522e8;
+  border-radius: 16px;
+  max-width: none;
+}
+.funding[data-theme="studio"] h1 {
+  font-size: 30px;
+  letter-spacing: 0.04em;
+}
+.funding[data-theme="studio"] .fund-card {
+  border-radius: 12px;
+}
+.funding[data-theme="studio"] button {
+  border-radius: 8px;
+}
+.funding[data-theme="studio"] a {
+  color: #48c8df;
+}
+@media (max-width: 600px) {
+  .funding {
+    padding: 24px 14px;
+  }
+  .funding .fund-card {
+    padding: 18px;
+  }
+  .funding dd {
+    font-size: 19px;
+  }
+}

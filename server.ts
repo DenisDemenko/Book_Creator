@@ -1,3 +1,4 @@
+import { registerFundingRoutes } from './server/fundingBridge';
 import { registerSlabTableRoutes } from './server/slabTableBridge';
 import { subscribeGroupUpdates } from "./server/core/labyrinth/groupRealtime";
 import { registerTeamRoleRoutes } from './server/core/collaboration/teamRoles';
@@ -615,6 +616,7 @@ registerModerationRoutes(app);
 registerFurnitureProductRoutes(app);
 registerFurnitureCalculatorRoutes(app);
 registerSlabTableRoutes(app);
+registerFundingRoutes(app);
 registerExpenseBoardRoutes(app);
 registerProcurementRoutes(app);
 registerThresholdRoutes(app);
