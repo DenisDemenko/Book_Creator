@@ -1,7 +1,9 @@
 "use strict";
 (async () => {
   const bridge = window.SlabBridge;
-  const admin = new URLSearchParams(location.search).get("mode") === "admin";
+  const mode = new URLSearchParams(location.search).get("mode");
+  const admin = mode === "admin";
+  const inventory = admin || mode === "inventory";
   const $ = (id) => document.getElementById(id),
     $$ = (s) => [...document.querySelectorAll(s)],
     esc = (s) =>
@@ -61,6 +63,9 @@
     },
     selected = null,
     estimate = null,
+    quotePending = false,
+    texturePending = false,
+    designRevision = 0,
     toastTimer;
   function toast(s) {
     $("toast").textContent = s;
@@ -87,9 +92,10 @@
       name = "inventory";
     if (
       !names[name] ||
-      (!admin && ["inventory", "costs", "orders", "textures"].includes(name))
+      (!inventory && name === "inventory") ||
+      (!admin && ["costs", "orders", "textures"].includes(name))
     )
-      name = "builder";
+      name = inventory ? "inventory" : "builder";
     if (name === "cart") {
       bridge.navigate("/cart");
       return;
@@ -176,6 +182,7 @@
     return Math.round(n * 10) / 10;
   }
   function invalidate() {
+    designRevision++;
     estimate = null;
     $("approvePrice").checked = false;
     $("approveLabel").hidden = true;
@@ -264,6 +271,7 @@
       };
     if (!count) design.t = s.t;
     $("tableT").value = design.t;
+    dimensionsValid();
     design.pieces.push(p);
     selected = p.uid;
     invalidate();
@@ -274,42 +282,60 @@
   ["minLength", "minWidth"].forEach((id) =>
     $(id).addEventListener("input", renderLibrary),
   );
-  function readDimensions() {
-    let l = Number($("tableL").value),
-      w = Number($("tableW").value),
-      t = Number($("tableT").value);
-    if (
-      !Number.isFinite(l + w + t) ||
-      l < 40 ||
-      l > 350 ||
-      w < 40 ||
-      w > 180 ||
-      t < 1 ||
-      t > 15
-    ) {
-      toast("Розміри: довжина 40–350 см, ширина 40–180 см, товщина 1–15 см.");
-      syncDimensions();
-      return;
+  function dimensionsValid(showError = false) {
+    const fields = [$("tableL"), $("tableW"), $("tableT")];
+    const valid = fields.every(
+      (field) => field.disabled || field.validity.valid,
+    );
+    for (const field of fields) {
+      if (!field.disabled && !field.validity.valid && showError)
+        field.setAttribute("aria-invalid", "true");
+      else field.removeAttribute("aria-invalid");
     }
-    if (design.shape !== "oval") {
-      l = Math.min(l, 180);
-      w = l;
-    }
-    Object.assign(design, { l, w, t });
-    syncDimensions();
+    $("dimensionError").hidden = valid || !showError;
+    $("calculate").disabled = !valid || quotePending || texturePending;
+    return valid;
+  }
+  function readDimensions(event) {
+    // Incomplete keyboard input stays in the field. Never restore an old value
+    // while the customer is clearing or typing a replacement dimension.
     invalidate();
+    if (!dimensionsValid(event?.type !== "input")) return false;
+    const l = $("tableL").valueAsNumber,
+      w = design.shape === "oval" ? $("tableW").valueAsNumber : l,
+      t = $("tableT").valueAsNumber;
+    Object.assign(design, { l, w, t });
+    if (design.shape !== "oval") $("tableW").value = w;
     renderDesign();
+    return true;
   }
   function syncDimensions() {
     ["L", "W", "T"].forEach(
       (k) => ($("table" + k).value = design[k.toLowerCase()]),
     );
     $("tableW").disabled = design.shape !== "oval";
+    $("tableWidthField").hidden = design.shape !== "oval";
+    $("tableDimensions").style.gridTemplateColumns =
+      design.shape === "oval" ? "1fr 1fr" : "1fr";
     $("tableL").max = design.shape === "oval" ? 350 : 180;
+    $("tableLengthLabel").textContent =
+      design.shape === "round"
+        ? "Діаметр, см"
+        : design.shape === "square"
+          ? "Сторона, см"
+          : "Довжина, см";
+    $("dimensionHint").textContent =
+      (design.shape === "oval"
+        ? "Довжина 40–350 см · ширина 40–180 см."
+        : design.shape === "round"
+          ? "Діаметр кола 40–180 см."
+          : "Сторона квадрата 40–180 см.") + " Товщина 1–15 см.";
+    dimensionsValid();
   }
-  ["tableL", "tableW", "tableT"].forEach(
-    (id) => ($(id).onchange = readDimensions),
-  );
+  ["tableL", "tableW", "tableT"].forEach((id) => {
+    $(id).oninput = readDimensions;
+    $(id).onchange = readDimensions;
+  });
   $$("[data-shape]").forEach(
     (b) =>
       (b.onclick = () => {
@@ -375,12 +401,32 @@
       ),
     );
   }
+  function textureProgress(scope, progress) {
+    $(scope + "Processing").hidden = false;
+    $(scope + "Progress").value = progress.percent;
+    $(scope + "Progress").setAttribute(
+      "aria-valuetext",
+      progress.stage + ": " + progress.percent + "%",
+    );
+    $(scope + "ProgressText").textContent =
+      progress.stage + " · " + progress.percent + "%";
+  }
+  function textureSummary(texture) {
+    const s = texture.stats;
+    return s
+      ? `${s.width} × ${s.height} пкс · ${Math.ceil(s.bytes / 1024)} КіБ (вхідний файл ${num(s.sourceBytes / 1024 / 1024, 1)} МБ).`
+      : "";
+  }
   function clearResinTexture() {
     textureRevision++;
+    texturePending = false;
+    dimensionsValid();
     delete design.resinTexture;
     $("resinTextureFile").value = "";
     $("uploadResinTexture").disabled = false;
-    $("resinTextureStatus").textContent = "PNG, JPG або WEBP · до 12 МБ";
+    $("resinTextureStatus").textContent =
+      "PNG, JPG або WEBP · до 35 МБ · автоматичне стиснення";
+    $("resinTextureProcessing").hidden = true;
     syncResinTexture();
   }
   $("uploadResinTexture").onclick = () => $("resinTextureFile").click();
@@ -388,22 +434,31 @@
     const file = event.target.files[0];
     if (!file) return;
     const revision = ++textureRevision;
+    texturePending = true;
+    invalidate();
+    dimensionsValid();
     $("uploadResinTexture").disabled = true;
     $("resinTextureStatus").textContent = "Завантаження текстури…";
     try {
-      const texture = await ResinTexture.read(file);
+      const texture = await ResinTexture.read(file, (p) => {
+        if (revision === textureRevision) textureProgress("resinTexture", p);
+      });
       if (revision !== textureRevision) return;
-      design.resinTexture = texture;
+      design.resinTexture = { image: texture.image, name: texture.name };
       syncResinTexture();
       invalidate();
       renderDesign();
-      $("resinTextureStatus").textContent = "Текстура застосована до заливки.";
+      $("resinTextureStatus").textContent =
+        "Текстура застосована. " + textureSummary(texture);
     } catch (error) {
       if (revision !== textureRevision) return;
+      $("resinTextureProcessing").hidden = true;
       $("resinTextureStatus").textContent = error.message;
       toast(error.message);
     } finally {
       if (revision === textureRevision) {
+        texturePending = false;
+        dimensionsValid();
         $("uploadResinTexture").disabled = false;
         event.target.value = "";
       }
@@ -486,7 +541,10 @@
     $("savePresetTexture").disabled = true;
     $("presetTextureStatus").textContent = "Підготовка зображення…";
     try {
-      const texture = await ResinTexture.read(file);
+      const texture = await ResinTexture.read(file, (p) => {
+        if (revision === presetDraftRevision)
+          textureProgress("presetTexture", p);
+      });
       if (revision !== presetDraftRevision) return;
       presetDraft = texture;
       $("presetTextureDraft").src = texture.image;
@@ -494,9 +552,12 @@
       if (!$("presetTextureTitle").value.trim())
         $("presetTextureTitle").value = texture.name.replace(/\.[^.]+$/, "");
       $("presetTextureStatus").textContent =
-        "Зображення готове. Опублікуйте його для покупців.";
+        "Зображення готове. " +
+        textureSummary(texture) +
+        " Опублікуйте його для покупців.";
     } catch (error) {
       if (revision !== presetDraftRevision) return;
+      $("presetTextureProcessing").hidden = true;
       $("presetTextureStatus").textContent = error.message;
     } finally {
       if (revision === presetDraftRevision) {
@@ -663,19 +724,23 @@
     return "";
   }
   $("calculate").onclick = async () => {
+    if (!readDimensions()) return;
     if (!design.pieces.length) {
       toast("Додайте хоча б один слеб з бібліотеки.");
       return;
     }
     const key = JSON.stringify(design);
+    const revision = designRevision;
+    quotePending = true;
     $("calculate").disabled = true;
     let q;
     try {
       q = await bridge.request("POST", "/tables/quote", design);
     } finally {
-      $("calculate").disabled = false;
+      quotePending = false;
+      dimensionsValid();
     }
-    if (key !== JSON.stringify(design)) {
+    if (revision !== designRevision || key !== JSON.stringify(design)) {
       toast("Композиція змінилася. Повторіть розрахунок.");
       return;
     }
@@ -928,9 +993,14 @@
     $$('[data-view="builder"],[data-view="cart"]').forEach(
       (e) => (e.hidden = true),
     );
-  if (!admin) {
-    $$('[data-view="inventory"],[data-view="costs"],[data-view="orders"],[data-view="textures"],.admin-label').forEach(e => e.hidden = true);
-  }
+  if (!inventory)
+    $$('[data-view="inventory"],.admin-label').forEach(
+      (e) => (e.hidden = true),
+    );
+  if (!admin)
+    $$(
+      '[data-view="costs"],[data-view="orders"],[data-view="textures"]',
+    ).forEach((e) => (e.hidden = true));
   $("exportData").hidden = !admin;
   speciesOptions();
   renderPresetChoices();
@@ -938,7 +1008,7 @@
   renderLibrary();
   renderDesign();
   renderOrders();
-  view(location.hash.slice(1) || (admin ? "inventory" : "builder"));
+  view(location.hash.slice(1) || (inventory ? "inventory" : "builder"));
 })().catch((e) => {
   document.querySelector("main").innerHTML =
     '<div class="panel" style="margin:40px"><h1>Сервіс тимчасово недоступний</h1><p id="bootError"></p><button onclick="location.reload()">Повторити</button></div>';

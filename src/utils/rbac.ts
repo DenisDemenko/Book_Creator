@@ -2,6 +2,30 @@ import { UserRole, RoleInfo, RolePermission, NavigationTab, UserProfile } from '
 
 export const ALL_ROLES: RoleInfo[] = [
   {
+    id: 'furniture_designer',
+    nameUk: 'Дизайнер меблів',
+    nameEn: 'Furniture Designer',
+    badgeEmoji: '🪵',
+    badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40',
+    bgGradient: 'from-cyan-500/20 to-blue-500/10 border-cyan-500/50',
+    descriptionUk: 'Фотографії, калібрування, векторні контури й спільний склад дерев’яних слебів.',
+    descriptionEn: 'Slab photography, physical calibration, vector contours and shared inventory.',
+    responsibilitiesUk: ['Додавання фото та перевірка масштабу', 'Формування замкнутих контурів', 'Збереження слебів та експорт SVG/DXF'],
+    responsibilitiesEn: ['Upload and calibrate slab photos', 'Create closed contours', 'Manage slabs and export SVG/DXF'],
+    permissions: {
+      canEditContent: false, canEditTranslation: false, canEditVisuals: false,
+      canEditLayout: false, canExport: false, canImportBook: false,
+      canManageCharacters: false, canManagePlot: false, canUseAi: false,
+      canManageSettings: false, canViewAuditLog: false, canManageRoles: false,
+      canAuthorCourses: false, canGenerateImages: false, canPublish: false,
+      canPublishExternal: false, canManageApiKeys: false, canMarketIntel: false,
+      canPublishSchema: false, canManageSlabs: true, isReadOnly: false,
+      allowedTabs: ['admin'],
+    },
+    defaultPersona: { name: 'Дизайнер меблів', email: 'furniture-designer@example.com', avatar: '🪵' },
+  },
+
+  {
     id: 'admin',
     nameUk: 'Адміністратор сайту',
     nameEn: 'Site Administrator',
@@ -44,6 +68,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canManageApiKeys: true,
       canMarketIntel: true,
       canPublishSchema: true,
+      canManageSlabs: true,
       isReadOnly: false,
       allowedTabs: [
 'express',
@@ -124,6 +149,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canManageApiKeys: false,
       canMarketIntel: false,
       canPublishSchema: false,
+      canManageSlabs: false,
       isReadOnly: true,
       allowedTabs: [
         'admin'
@@ -183,6 +209,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canManageApiKeys: false,
       canMarketIntel: true,
       canPublishSchema: false,
+      canManageSlabs: false,
       isReadOnly: false,
       allowedTabs: [
 'express',
@@ -264,6 +291,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canManageApiKeys: false,
       canMarketIntel: false,
       canPublishSchema: false,
+      canManageSlabs: false,
       isReadOnly: false,
       allowedTabs: [
         'subscription',
@@ -327,6 +355,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canManageApiKeys: false,
       canMarketIntel: false,
       canPublishSchema: false,
+      canManageSlabs: false,
       isReadOnly: false,
       allowedTabs: [
         'subscription',
@@ -387,6 +416,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canManageApiKeys: false,
       canMarketIntel: true,
       canPublishSchema: false,
+      canManageSlabs: false,
       isReadOnly: false,
       allowedTabs: [
         'subscription',
@@ -449,6 +479,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canManageApiKeys: false,
       canMarketIntel: false,
       canPublishSchema: false,
+      canManageSlabs: false,
       isReadOnly: false,
       allowedTabs: [
         'editor',
@@ -503,6 +534,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canManageApiKeys: false,
       canMarketIntel: false,
       canPublishSchema: false,
+      canManageSlabs: false,
       isReadOnly: false,
       allowedTabs: [
         'start',
@@ -561,6 +593,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canManageApiKeys: false,
       canMarketIntel: false,
       canPublishSchema: false,
+      canManageSlabs: false,
       isReadOnly: false,
       allowedTabs: [
         'start',
@@ -620,6 +653,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canManageApiKeys: false,
       canMarketIntel: false,
       canPublishSchema: false,
+      canManageSlabs: false,
       canAuthorCourses: false,
       isReadOnly: true,
       allowedTabs: [
@@ -676,6 +710,7 @@ export const ALL_ROLES: RoleInfo[] = [
       canManageApiKeys: false,
       canMarketIntel: false,
       canPublishSchema: false,
+      canManageSlabs: false,
       canAuthorCourses: false,
       isReadOnly: true,
       allowedTabs: [
@@ -740,13 +775,14 @@ export function canAccessTab(role: UserRole | string | undefined | null, tab: Na
  * CRM (фільтрація — у AdminOsView, за тим самим principal.role із сервера).
  */
 export function canOpenAdminPanel(role: UserRole | string | undefined | null): boolean {
-  return role === 'admin' || role === 'site_manager';
+  return role === 'admin' || role === 'site_manager' || role === 'furniture_designer';
 }
 
 export function getDefaultTabForRole(role?: UserRole | string | null): NavigationTab {
   switch (role) {
     case 'admin':
       return 'dashboard';
+    case 'furniture_designer':
     case 'site_manager':
       return 'admin';
     case 'writer':

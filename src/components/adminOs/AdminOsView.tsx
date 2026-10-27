@@ -131,9 +131,14 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser, onOpenPage }
    * усе одно перевіряє роль на кожному маршруті (requireSupportAgent) —
    * це лише інтерфейс, не межа безпеки.
    */
-  const restrictedToNodeId = authUser?.role === 'site_manager' ? 'crm' : null;
+  const restrictedToNodeId = authUser?.role === 'site_manager'
+    ? 'crm'
+    : authUser?.role === 'furniture_designer' ? 'slab-tables' : null;
 
   const [activeId, setActiveId] = useState<string | null>(restrictedToNodeId);
+  useEffect(() => {
+    if (restrictedToNodeId) setActiveId(restrictedToNodeId);
+  }, [restrictedToNodeId]);
   const [stats, setStats] = useState<OsStats>({});
   const [loading, setLoading] = useState(false);
   /**
@@ -315,7 +320,7 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser, onOpenPage }
     if (view === 'api-keys') return <ApiKeysView authUser={authUser} />;
     if (view === 'moderation') return <AdminModerationView />;
     if (view === 'products') return <AdminProductsView />;
-    if (view === 'slab-tables') return <SlabInventoryPanel />;
+    if (view === 'slab-tables') return <SlabInventoryPanel inventoryOnly={authUser?.role !== 'admin'} />;
     if (view === 'price-management') return <FurnitureCalculatorPanel />;
     if (view === 'procurement') return <AdminProcurementView />;
     if (view === 'quality') return <AdminQualityView />;

@@ -1,3 +1,4 @@
+import { refreshFurnitureRoster, setSharedFurnitureRole } from './furnitureAccess';
 /**
  * API панелі адміністратора: користувачі, матриця прав і облік витрат.
  * Усі маршрути закриті requireAdmin.
@@ -82,6 +83,7 @@ import {
 } from './marketplaceBridge';
 
 const ALL_ROLES: StoredRole[] = [
+  'furniture_designer',
   'admin',
   'site_manager',
   'writer',
@@ -222,7 +224,10 @@ export function registerAdminRoutes(app: Express): void {
   });
 
   app.get('/api/admin/users', requireAdmin, async (_req, res) => {
-    const users = await listUsers();
+    let users = await listUsers();
+    let furnitureSyncError: string | null = null;
+    try { users = await refreshFurnitureRoster(users); }
+    catch { furnitureSyncError = 'Не вдалося синхронізувати ролі дизайнерів меблів із маркетплейсом. Показано останні збережені ролі.'; }
     // Витрати рахує база агрегатом — не тягнемо весь журнал у памʼять.
     const spend = await spendByUser();
 
@@ -236,6 +241,7 @@ export function registerAdminRoutes(app: Express): void {
         }))
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
       roles: ALL_ROLES,
+      furnitureSyncError,
     });
   });
 
@@ -271,6 +277,10 @@ export function registerAdminRoutes(app: Express): void {
 
       if (typeof name === 'string' && name.trim()) patch.name = name.trim();
 
+      if (patch.role !== user.role && (patch.role === 'furniture_designer' || user.role === 'furniture_designer')) {
+        // Canonical grant/revocation must succeed before persisting the local role.
+        await setSharedFurnitureRole(user, patch.role === 'furniture_designer');
+      }
       await saveUser(patch);
       // Зміна ролі чи блокування має діяти негайно, а не після
       // закінчення сесії — тож виганяємо користувача з усіх пристроїв.

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import type { Express } from "express";
 import { requireAdmin } from "../server/auth";
-import { registerSlabTableRoutes } from "../server/slabTableBridge";
+import { registerSlabTableRoutes, requireSlabInventory } from "../server/slabTableBridge";
 import { deriveTableTariffs, tableBridge } from "../server/slabTableBridge";
 import {
   calculateWoodAndEpoxyCost,
@@ -90,7 +90,10 @@ const app = new Proxy(
 ) as Express;
 registerSlabTableRoutes(app);
 assert.equal(routes.length, 9);
-for (const r of routes) assert.equal(r.handlers[0], requireAdmin, r.path);
+for (const r of routes) {
+  const inventory = /\/(state|slabs)(\/|$)/.test(r.path);
+  assert.equal(r.handlers[0], inventory ? requireSlabInventory : requireAdmin, r.path);
+}
 for (const principal of [
   undefined,
   { role: "reader", isGuest: false },
@@ -113,5 +116,5 @@ for (const principal of [
   assert.equal(next, false);
 }
 console.log(
-  "All nine Studio routes requireAdmin; guests, readers and site managers denied.",
+  "All nine Studio routes guarded; inventory has shared designer access, costs/production/textures remain admin-only.",
 );

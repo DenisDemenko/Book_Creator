@@ -933,6 +933,7 @@ export interface DocumentVersion {
 }
 
 export type UserRole = 
+  | 'furniture_designer' // Склад дерев'яних слебів, без інших адміністративних прав
   | 'admin'       // Адміністратор сайту: повний доступ, налаштування, матриця прав
   | 'site_manager'// Менеджер сайту: лише чат підтримки в адмінпанелі — ні грошей, ні ролей, ні git
   | 'writer'      // Письменник / Автор: створення тексту, сюжет, персонажі, сцени, AI помічник
@@ -946,6 +947,7 @@ export type UserRole =
   | 'guest';      // Гість: відкритий вхід без реєстрації, лише перегляд і заглушки замість AI
 
 export interface RolePermission {
+  canManageSlabs: boolean;
   canEditContent: boolean;
   canEditTranslation: boolean;
   canEditVisuals: boolean;

@@ -48,7 +48,7 @@ import {
   Legend,
 } from 'recharts';
 import type { AdminUserRow, UserRole } from '../types';
-import { getRoleInfo } from '../utils/rbac';
+import { ALL_ROLES, getRoleInfo } from '../utils/rbac';
 import { renderPdfFirstPageToPng } from '../utils/pdfCover';
 
 export type AdminTab = 'users' | 'roles' | 'costs' | 'business' | 'ai' | 'expenses' | 'bridge' | 'crm' | 'git' | 'payouts' | 'moderation';
@@ -139,6 +139,7 @@ const PIE_COLORS = [CHART_COLORS.imageCost, CHART_COLORS.textCost];
 const uah = (n: number) => `${n.toLocaleString('uk-UA', { maximumFractionDigits: 0 })} ₴`;
 
 const PERMISSION_LABELS: Record<string, string> = {
+  canManageSlabs: 'Додавання та архівація слебів на спільному складі',
   canGenerateImages: 'Генерація зображень (платно)',
   canUseAi: 'Текстові функції ШІ',
   canEditContent: 'Редагування тексту книги',
@@ -873,6 +874,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ tab: controlledT
   const tab = controlledTab ?? innerTab;
   const setTab = setInnerTab;
   const [users, setUsers] = useState<AdminUserRow[]>([]);
+  const [furnitureSyncError, setFurnitureSyncError] = useState<string | null>(null);
   const [roles, setRoles] = useState<RoleRow[]>([]);
   const [usage, setUsage] = useState<UsageResponse | null>(null);
   const [revenue, setRevenue] = useState<RevenueResponse | null>(null);
@@ -904,6 +906,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ tab: controlledT
         request(`/api/admin/revenue?days=${periodDays}`),
       ]);
       setUsers(u.users || []);
+      setFurnitureSyncError(u.furnitureSyncError || null);
       setRoles(r.roles || []);
       setUsage(us);
       setRevenue(rev);
@@ -1479,6 +1482,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ tab: controlledT
       {/* ----------------------------- КОРИСТУВАЧІ ----------------------------- */}
       {tab === 'users' && (
         <div data-tour="admin__3" className="p-6 rounded-2xl glass-panel space-y-4">
+          {furnitureSyncError && <p role="status" className="text-xs text-amber-300">{furnitureSyncError}</p>}
           <div className="flex items-center justify-between border-b border-white/[0.06] pb-3">
             <h2 className="text-sm font-bold flex items-center gap-2">
               <Users className="w-4 h-4 text-cyan-400" />
@@ -1526,8 +1530,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ tab: controlledT
                           onChange={(e) => patchUser(u.id!, { role: e.target.value })}
                           className="field-glow p-1.5 rounded-lg bg-slate-950/60 border border-white/[0.08] text-slate-200 text-[11px] disabled:opacity-60"
                         >
-                          {(['admin', 'writer', 'designer', 'translator', 'publisher', 'reader', 'guest'] as UserRole[]).map((r) => (
-                            <option key={r} value={r}>{getRoleInfo(r).badgeEmoji} {getRoleInfo(r).nameUk}</option>
+                          {ALL_ROLES.map((r) => (
+                            <option key={r.id} value={r.id}>{r.badgeEmoji} {r.nameUk}</option>
                           ))}
                         </select>
                       </td>
