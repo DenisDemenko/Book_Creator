@@ -721,10 +721,11 @@ CREATE TABLE IF NOT EXISTS moderation (
   item_id      TEXT NOT NULL,                   -- id у Студії (book.id / course.id)
   title        TEXT NOT NULL,
   author_id    TEXT NOT NULL,
-  status       TEXT NOT NULL DEFAULT 'pending', -- pending | approved | rejected
+  status       TEXT NOT NULL DEFAULT 'pending', -- pending | approved | rejected | changes_requested
   reason       TEXT,
   created_at   TEXT NOT NULL,
-  decided_at   TEXT
+  decided_at   TEXT,
+  snapshot     TEXT                             -- JSON твору на момент подання (що саме погоджується)
 );
 CREATE INDEX IF NOT EXISTS idx_moderation_status ON moderation(status, created_at);
 
@@ -1095,6 +1096,22 @@ function migrateMediaAssetColumns(instance: Database): void {
 }
 
 /**
+ * Знімок твору в черзі модерації з'явився пізніше за саму таблицю: адмін
+ * погоджує те, що автор подав, а не живий стан, який той міг змінити далі.
+ * Старі записи лишаються без знімка (NULL) — для них діє живий стан.
+ */
+function migrateModerationSnapshot(instance: Database): void {
+  try {
+    const cols = instance.prepare('PRAGMA table_info(moderation)').all() as { name: string }[];
+    if (!cols.some((c) => c.name === 'snapshot')) {
+      instance.exec('ALTER TABLE moderation ADD COLUMN snapshot TEXT');
+    }
+  } catch (err) {
+    console.warn('[db] Не вдалося перевірити/додати колонку moderation.snapshot:', err);
+  }
+}
+
+/**
  * Вкладення в чаті підтримки з'явилися пізніше за саму таблицю, тож у
  * базах, створених до них, колонки ще немає — `CREATE TABLE IF NOT
  * EXISTS` її не дописує. Значення за замовчуванням «[]» робить старі
@@ -1292,6 +1309,7 @@ export async function initDb(): Promise<boolean> {
     migrateUsageLogColumns(instance);
     migrateUsersColumns(instance);
     migrateSupportMessageColumns(instance);
+    migrateModerationSnapshot(instance);
     migrateMediaAssetColumns(instance);
     seedEmotionDictionary(instance);
     seedCoreEntityRegistry(instance);

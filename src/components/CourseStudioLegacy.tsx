@@ -29,7 +29,7 @@ import { parsePriceMinor } from './adminOs/priceInput';
 
 /** Останнє рішення модерації щодо курсу — з `GET /api/courses/:id`. */
 interface CourseModerationInfo {
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'rejected' | 'changes_requested';
   reason?: string;
   createdAt: string;
   decidedAt?: string;
@@ -708,7 +708,16 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
           <AlertTriangle className="w-4 h-4 shrink-0" />
           <span>
             {submitted ? 'Курс надіслано на модерацію. ' : `На модерації з ${new Date(moderation.createdAt).toLocaleDateString('uk-UA')}. `}
-            Адміністратор має погодити публікацію у вітрину — після цього курс зʼявиться в каталозі.
+            Адміністратор погоджує версію, яку ви подали. Якщо щось виправите до рішення — надішліть курс ще раз, і розглядатиметься свіжа версія.
+          </span>
+        </div>
+      )}
+      {moderation?.status === 'changes_requested' && (
+        <div data-course-moderation="changes_requested" className="flex items-start gap-2 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/40 text-amber-200 text-xs">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <span>
+            Модератор повернув курс із зауваженнями{moderation.decidedAt ? ` (${new Date(moderation.decidedAt).toLocaleDateString('uk-UA')})` : ''}:
+            {' '}<b>{moderation.reason || '—'}</b> Виправте курс і надішліть на модерацію ще раз — це той самий курс, нового створювати не треба.
           </span>
         </div>
       )}

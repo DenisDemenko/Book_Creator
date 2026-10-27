@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Ban, CheckCircle2, RefreshCw } from 'lucide-react';
 import { AdminSellerApplications } from './AdminSellerApplications';
 import { AdminTeamModeration } from './AdminTeamModeration';
+import { AdminCourseReview } from './AdminCourseReview';
 
 /**
  * «Модерація» — окремий розділ адмінпанелі.
@@ -30,7 +31,7 @@ type ModerationRow = {
   itemId: string;
   title: string;
   authorId: string;
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'rejected' | 'changes_requested';
   reason?: string;
   createdAt: string;
   decidedAt?: string;
@@ -45,7 +46,9 @@ const ITEM_TYPE_LABELS: Record<string, string> = {
 
 export const AdminModerationView: React.FC = () => {
   const [rows, setRows] = useState<ModerationRow[] | null>(null);
-  const [status, setStatus] = useState<'pending' | 'approved' | 'rejected' | ''>('pending');
+  const [status, setStatus] = useState<'pending' | 'approved' | 'rejected' | 'changes_requested' | ''>('pending');
+  /** Курс, чию повну картку відкрито: курси погоджують лише після перегляду. */
+  const [reviewId, setReviewId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
 
@@ -106,7 +109,7 @@ export const AdminModerationView: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-1.5">
-          {(['pending', 'approved', 'rejected', ''] as const).map((s) => (
+          {(['pending', 'changes_requested', 'approved', 'rejected', ''] as const).map((s) => (
             <button
               key={s || 'all'}
               onClick={() => setStatus(s)}
@@ -114,7 +117,7 @@ export const AdminModerationView: React.FC = () => {
                 status === s ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400 hover:text-slate-200'
               }`}
             >
-              {s === 'pending' ? 'Очікує' : s === 'approved' ? 'Погоджено' : s === 'rejected' ? 'Відхилено' : 'Усі'}
+              {s === 'pending' ? 'Очікує' : s === 'changes_requested' ? 'З зауваженнями' : s === 'approved' ? 'Погоджено' : s === 'rejected' ? 'Відхилено' : 'Усі'}
             </button>
           ))}
           <button onClick={() => void load()} className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400" title="Оновити">
@@ -136,7 +139,8 @@ export const AdminModerationView: React.FC = () => {
           <p className="text-xs text-slate-500">Черга порожня.</p>
         ) : (
           rows.map((row) => (
-            <div key={row.id} className="flex items-center gap-3 rounded-xl bg-slate-950/50 border border-slate-800 p-3">
+            <div key={row.id}>
+            <div className="flex items-center gap-3 rounded-xl bg-slate-950/50 border border-slate-800 p-3">
               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 bg-slate-800 text-slate-300 border-slate-700">
                 {ITEM_TYPE_LABELS[row.itemType] ?? row.itemType}
               </span>
@@ -147,7 +151,18 @@ export const AdminModerationView: React.FC = () => {
               {row.status === 'rejected' && row.reason && (
                 <p className="text-[10px] text-rose-300 max-w-[180px] truncate" title={row.reason}>Причина: {row.reason}</p>
               )}
-              {row.status === 'pending' && (
+              {row.status === 'changes_requested' && row.reason && (
+                <p className="text-[10px] text-amber-300 max-w-[180px] truncate" title={row.reason}>Зауваження: {row.reason}</p>
+              )}
+              {row.status === 'pending' && row.itemType === 'course' && (
+                <button
+                  onClick={() => setReviewId(reviewId === row.id ? null : row.id)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-[11px] font-semibold shrink-0"
+                >
+                  {reviewId === row.id ? 'Згорнути' : 'Переглянути й вирішити'}
+                </button>
+              )}
+              {row.status === 'pending' && row.itemType !== 'course' && (
                 <div className="flex items-center gap-1.5 shrink-0">
                   <button
                     onClick={() => void decide(row.id, 'approve')}
@@ -165,6 +180,18 @@ export const AdminModerationView: React.FC = () => {
                   </button>
                 </div>
               )}
+            </div>
+            {reviewId === row.id && (
+              <AdminCourseReview
+                entryId={row.id}
+                onClose={() => setReviewId(null)}
+                onDecided={(text) => {
+                  setReviewId(null);
+                  setMessage({ tone: 'ok', text });
+                  void load();
+                }}
+              />
+            )}
             </div>
           ))
         )}

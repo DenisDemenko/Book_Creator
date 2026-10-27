@@ -173,6 +173,8 @@ export function registerCourseRoutes(app: Express, deps: CourseRoutesDeps = {}):
         itemId: course.id,
         title: course.title,
         authorId: course.ownerId,
+        // Знімок на момент подання: адмін погоджує саме його.
+        snapshot: JSON.stringify(course),
       });
       // «Готовий» тепер означає «на модерації»; опублікованим курс робить
       // лише погодження адміністратора. Повторне подання опублікованого курсу

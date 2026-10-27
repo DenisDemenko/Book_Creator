@@ -30,7 +30,9 @@ const { initStore } = await import('../server/store.ts');
 const bridge = await import('../server/marketplaceBridge.ts');
 const { registerCourseRoutes } = await import('../server/courseRoutes.ts');
 const { registerModerationRoutes } = await import('../server/moderationRoutes.ts');
-const { getCourse } = await import('../server/courseStore.ts');
+const { submitForModeration } = await import('../server/moderationStore.ts');
+const { courseSnapshotChanges } = await import('../src/utils/courseSnapshotDiff.ts');
+const { getCourse, updateCourse } = await import('../server/courseStore.ts');
 
 let pass = 0;
 let fail = 0;
@@ -182,15 +184,84 @@ try {
   const cleared = await call('PUT', `/api/courses/${c2.id}`, 'u-teacher', { priceMinor: null, free: false });
   t('стерта в редакторі ціна справді стирається на сервері', cleared.body.course?.priceMinor === undefined && cleared.body.course?.free === undefined, JSON.stringify({ p: cleared.body.course?.priceMinor, f: cleared.body.course?.free }));
   const entry2 = (await call('GET', '/api/admin/moderation?status=pending', 'u-admin')).body.moderation.find((m: any) => m.itemId === c2.id).id;
-  bridgeCalls.length = 0;
-  const notReady = await call('POST', `/api/admin/moderation/${entry2}/approve`, 'u-admin');
-  t('погодження без ціни → 400, а не безкоштовний курс', notReady.status === 400 && notReady.body.kind === 'not_ready', JSON.stringify(notReady.body).slice(0, 200));
-  t('міст не викликано', bridgeCalls.length === 0, String(bridgeCalls.length));
 
-  const rejected = await call('POST', `/api/admin/moderation/${entry2}/reject`, 'u-admin', { reason: 'Немає ціни' });
-  t('відхилення того, що чекає → 200', rejected.status === 200);
-  t('відхилений курс повернувся в чернетку', getCourse(c2.id)?.status === 'draft', getCourse(c2.id)?.status);
-  const seen = await call('GET', `/api/courses/${c2.id}`, 'u-teacher');
+  console.log('\nЗнімок на момент подання (етап 2):');
+  const detail = await call('GET', `/api/admin/moderation/${entry2}`, 'u-admin');
+  t('картка запису віддає повний курс із знімка', detail.status === 200 && detail.body.source === 'snapshot' && detail.body.course?.modules?.length === 1 && detail.body.course?.priceMinor === 9900, JSON.stringify(detail.body).slice(0, 160));
+  t('картка: категорія вітрини названа', detail.body.category === null || typeof detail.body.category?.name === 'string');
+  t('картка: знімок правилам відповідає — зауважень немає', (detail.body.problems || []).length === 0, JSON.stringify(detail.body.problems));
+  t('картка: ціна стерта вже після подання видна як зміна', (detail.body.changes || []).some((x: string) => /Ціна: 99 грн → не вказано/.test(x)), JSON.stringify(detail.body.changes));
+  const guestDetail = await call('GET', `/api/admin/moderation/${entry2}`, 'u-teacher');
+  t('картка запису — лише адміну', guestDetail.status === 403 || guestDetail.status === 401, String(guestDetail.status));
+
+  // Автор виправляє дрібницю й подає знову, поки запис чекає: знімок оновлюється, нового запису нема.
+  await call('PUT', `/api/courses/${c2.id}`, 'u-teacher', { priceMinor: 12000, title: 'Другий курс (виправлено)' });
+  const resub = await call('POST', `/api/courses/${c2.id}/publish`, 'u-teacher');
+  const pendingNow = (await call('GET', '/api/admin/moderation?status=pending', 'u-admin')).body.moderation.filter((m: any) => m.itemId === c2.id);
+  t('повторне подання, поки чекає, не плодить записи', resub.status === 200 && pendingNow.length === 1 && pendingNow[0].id === entry2, String(pendingNow.length));
+  const detail2 = await call('GET', `/api/admin/moderation/${entry2}`, 'u-admin');
+  t('знімок оновився до нової версії', detail2.body.course?.priceMinor === 12000 && detail2.body.course?.title === 'Другий курс (виправлено)');
+  t('після оновлення знімка змін нема', (detail2.body.changes || []).length === 0, JSON.stringify(detail2.body.changes));
+
+  // Автор править ще раз ПІСЛЯ подання — до вітрини піде те, що розглядав адмін.
+  await call('PUT', `/api/courses/${c2.id}`, 'u-teacher', { priceMinor: 99900, title: 'Третя назва' });
+  bridgeCalls.length = 0;
+  const approvedSnap = await call('POST', `/api/admin/moderation/${entry2}/approve`, 'u-admin');
+  const snapSent = bridgeCalls.find((c) => c.url.endsWith('/bridge/courses'))?.body ?? {};
+  t('погодження публікує ПОДАНУ версію, а не живу', approvedSnap.status === 200 && snapSent.priceMinor === 12000 && snapSent.title === 'Другий курс (виправлено)', `${approvedSnap.status} ${snapSent.priceMinor} ${snapSent.title}`);
+  t('правки автора лишилися в чернетці, а не пішли у вітрину', getCourse(c2.id)?.priceMinor === 99900 && getCourse(c2.id)?.status === 'published');
+
+  console.log('\nСтарий запис без знімка (до етапу 2):');
+  const c3 = (await call('POST', '/api/courses', 'u-teacher', { title: 'Старий курс' })).body.course;
+  await call('PUT', `/api/courses/${c3.id}`, 'u-teacher', { ...put1.body.course, id: undefined, title: 'Старий курс', priceMinor: 5000 });
+  updateCourse(c3.id, { status: 'ready' });
+  const legacy = submitForModeration({ itemType: 'course', itemId: c3.id, title: 'Старий курс', authorId: 'u-teacher' });
+  const legacyDetail = await call('GET', `/api/admin/moderation/${legacy.id}`, 'u-admin');
+  t('без знімка показується живий стан і це сказано', legacyDetail.body.source === 'live' && legacyDetail.body.course?.priceMinor === 5000);
+  updateCourse(c3.id, { priceMinor: undefined });
+  bridgeCalls.length = 0;
+  const legacyApprove = await call('POST', `/api/admin/moderation/${legacy.id}/approve`, 'u-admin');
+  t('старий запис без ціни → 400, а не безкоштовний курс', legacyApprove.status === 400 && legacyApprove.body.kind === 'not_ready' && bridgeCalls.length === 0, JSON.stringify(legacyApprove.body).slice(0, 160));
+
+  console.log('\nПовернути із зауваженнями:');
+  const noNote = await call('POST', `/api/admin/moderation/${legacy.id}/request-changes`, 'u-admin', { note: '  ' });
+  t('без тексту зауважень → 400', noNote.status === 400);
+  const back = await call('POST', `/api/admin/moderation/${legacy.id}/request-changes`, 'u-admin', { note: 'Додайте ціну' });
+  t('повернення із зауваженнями → 200', back.status === 200 && back.body.moderation?.status === 'changes_requested');
+  t('курс повернувся в чернетку', getCourse(c3.id)?.status === 'draft', getCourse(c3.id)?.status);
+  const authorSees = await call('GET', `/api/courses/${c3.id}`, 'u-teacher');
+  t('автор бачить зауваження', authorSees.body.moderation?.status === 'changes_requested' && authorSees.body.moderation?.reason === 'Додайте ціну');
+  const twice = await call('POST', `/api/admin/moderation/${legacy.id}/request-changes`, 'u-admin', { note: 'ще раз' });
+  t('повернути вдруге те саме — 409', twice.status === 409);
+  const approveAfter = await call('POST', `/api/admin/moderation/${legacy.id}/approve`, 'u-admin');
+  t('погодити повернуте — 409', approveAfter.status === 409);
+  const listed = await call('GET', '/api/admin/moderation?status=changes_requested', 'u-admin');
+  t('фільтр «З зауваженнями»', listed.body.moderation?.some((m: any) => m.id === legacy.id));
+  // Виправив і подав знову — той самий курс, новий запис черги.
+  await call('PUT', `/api/courses/${c3.id}`, 'u-teacher', { priceMinor: 5000 });
+  const again2 = await call('POST', `/api/courses/${c3.id}/publish`, 'u-teacher');
+  t('після зауважень курс подається знову (той самий курс)', again2.status === 200 && again2.body.moderation?.id !== legacy.id && again2.body.moderation?.status === 'pending');
+  const seen2 = await call('GET', `/api/courses/${c3.id}`, 'u-teacher');
+  t('автор бачить: знову на модерації', seen2.body.moderation?.status === 'pending');
+
+  console.log('\nПорівняння версій:');
+  const same = courseSnapshotChanges(full() as any, full() as any);
+  t('однакові версії — без змін', same.length === 0, same.join('|'));
+  const other: any = full();
+  other.modules[0].lessons.push({ title: 'Новий урок', durationMin: 5 });
+  other.coverUrl = 'https://example.test/other.png';
+  const diff = courseSnapshotChanges(full() as any, other);
+  t('нові уроки й обкладинка видно в різниці', diff.some((x) => /Обкладинка/.test(x)) && diff.some((x) => /уроків 1 → 2.*Новий урок/.test(x)), diff.join(' | '));
+
+  const rejected_ = await call('POST', `/api/admin/moderation/${entry2}/reject`, 'u-admin', { reason: 'Немає ціни' });
+  t('вже погоджений запис не відхиляється', rejected_.status === 409);
+  const c2b = (await call('POST', '/api/courses', 'u-teacher', { title: 'Курс для відхилення' })).body.course;
+  await call('PUT', `/api/courses/${c2b.id}`, 'u-teacher', { ...put1.body.course, id: undefined, title: 'Курс для відхилення', priceMinor: 7000 });
+  const subB = await call('POST', `/api/courses/${c2b.id}/publish`, 'u-teacher');
+  const rejectedB = await call('POST', `/api/admin/moderation/${subB.body.moderation.id}/reject`, 'u-admin', { reason: 'Немає ціни' });
+  t('відхилення того, що чекає → 200', rejectedB.status === 200);
+  t('відхилений курс повернувся в чернетку', getCourse(c2b.id)?.status === 'draft', getCourse(c2b.id)?.status);
+  const seen = await call('GET', `/api/courses/${c2b.id}`, 'u-teacher');
   t('автор бачить причину відмови', seen.body.moderation?.status === 'rejected' && seen.body.moderation?.reason === 'Немає ціни');
 
   console.log('\nБезкоштовний курс:');

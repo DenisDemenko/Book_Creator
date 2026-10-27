@@ -3,7 +3,12 @@
  *
  * Автор подає твір через наявні маршрути (курс — POST /api/courses/:id/publish,
  * який кладе запис у чергу). Тут — адміністраторська половина: перегляд
- * черги, погодження (і для курсу — власне публікація у вітрину) та відхилення.
+ * черги, повна картка запису, погодження (і для курсу — власне публікація у
+ * вітрину), повернення автору із зауваженнями та остаточне відхилення.
+ *
+ * Адмін погоджує ЗНІМОК курсу на момент подання, а не живий стан: правки, які
+ * автор вніс після подання, у вітрину не потраплять, доки він не надішле курс
+ * ще раз (див. moderationStore.submitForModeration).
  */
 
 import type { Express } from 'express';
@@ -13,17 +18,34 @@ import {
   assertStorefrontCover,
   assertFreePriceConfirmed,
   MarketplaceBridgeError,
+  listBridgeCategories,
 } from './marketplaceBridge';
+import { courseSnapshotChanges } from '../src/utils/courseSnapshotDiff';
 import { COURSE_CURRENCY, courseSubmitProblems } from '../src/utils/coursePublishRules';
-import { getCourse, updateCourse } from './courseStore';
+import { getCourse, updateCourse, type Course } from './courseStore';
 import {
   decideModeration,
   getModeration,
+  getModerationSnapshot,
   listModeration,
   type ModerationStatus,
 } from './moderationStore';
 
-const STATUSES: ModerationStatus[] = ['pending', 'approved', 'rejected'];
+const STATUSES: ModerationStatus[] = ['pending', 'approved', 'rejected', 'changes_requested'];
+
+/** Курс, який розглядає адмін: знімок подання; для старих записів без знімка — живий стан. */
+function courseUnderReview(entryId: string, itemId: string): { course: Course; source: 'snapshot' | 'live' } | null {
+  const raw = getModerationSnapshot(entryId);
+  if (raw) {
+    try {
+      return { course: JSON.parse(raw) as Course, source: 'snapshot' };
+    } catch {
+      // зіпсований знімок не повинен блокувати модерацію — береться живий стан
+    }
+  }
+  const live = getCourse(itemId);
+  return live ? { course: live, source: 'live' } : null;
+}
 
 export function registerModerationRoutes(app: Express): void {
   app.get('/api/admin/moderation', requireAdmin, async (req, res) => {
@@ -32,6 +54,44 @@ export function registerModerationRoutes(app: Express): void {
       ? listModeration(status as ModerationStatus)
       : listModeration();
     res.json({ moderation: entries });
+  });
+
+  /**
+   * Повна картка запису. Для курсу — усе, що вирішує питання «публікувати
+   * чи ні»: ціна, обкладинка, категорія, аудиторія, навички, програма з
+   * відео й тривалістю, а ще — що не так за правилами подання і що автор
+   * змінив ПІСЛЯ подання. Раніше в черзі були лише назва та id.
+   */
+  app.get('/api/admin/moderation/:id', requireAdmin, async (req, res) => {
+    try {
+      const entry = getModeration(req.params.id);
+      if (!entry) return res.status(404).json({ error: 'Запис модерації не знайдено.' });
+      if (entry.itemType !== 'course') return res.json({ entry });
+
+      const reviewed = courseUnderReview(entry.id, entry.itemId);
+      if (!reviewed) return res.json({ entry, courseDeleted: true });
+
+      const live = getCourse(entry.itemId);
+      const changes = reviewed.source === 'snapshot' && live ? courseSnapshotChanges(reviewed.course, live) : [];
+
+      let category: { slug: string; name: string } | null = null;
+      if (reviewed.course.categorySlug) {
+        const list = await listBridgeCategories().catch(() => []);
+        category = list.find((c) => c.slug === reviewed.course.categorySlug) ?? { slug: reviewed.course.categorySlug, name: reviewed.course.categorySlug };
+      }
+
+      res.json({
+        entry,
+        course: reviewed.course,
+        source: reviewed.source,
+        category,
+        problems: courseSubmitProblems(reviewed.course),
+        changes,
+        courseDeleted: !live,
+      });
+    } catch (err) {
+      res.status(503).json({ error: String((err as Error).message) });
+    }
   });
 
   app.post('/api/admin/moderation/:id/approve', requireAdmin, async (req, res) => {
@@ -44,10 +104,13 @@ export function registerModerationRoutes(app: Express): void {
 
       let published: unknown;
       if (entry.itemType === 'course') {
-        const course = getCourse(entry.itemId);
-        if (!course) {
+        const live = getCourse(entry.itemId);
+        const reviewed = live ? courseUnderReview(entry.id, entry.itemId) : null;
+        if (!live || !reviewed) {
           return res.status(404).json({ error: 'Курс не знайдено — можливо, його видалили.' });
         }
+        // Публікується те, що розглядав адмін (знімок), а не живий стан.
+        const course = reviewed.course;
         const sellerSlug = process.env.BRIDGE_SELLER_SLUG || 'fusion-lab';
         /*
           Перевірка ще раз У МОМЕНТ ПОГОДЖЕННЯ, тими самими правилами, що й
@@ -111,6 +174,33 @@ export function registerModerationRoutes(app: Express): void {
       if (err instanceof MarketplaceBridgeError) {
         return res.status(err.status).json({ error: err.message, kind: err.kind, details: err.details });
       }
+      res.status(503).json({ error: String((err as Error).message) });
+    }
+  });
+
+  /**
+   * Повернути автору із зауваженнями. На відміну від «Відхилити остаточно»
+   * це не вирок: курс повертається в чернетку, автор бачить зауваження в
+   * редакторі, виправляє й надсилає ще раз — новим записом черги.
+   */
+  app.post('/api/admin/moderation/:id/request-changes', requireAdmin, async (req, res) => {
+    const note = typeof req.body?.note === 'string' ? req.body.note.trim() : '';
+    if (!note) {
+      return res.status(400).json({ error: 'Напишіть зауваження: без них автор не знатиме, що виправляти.' });
+    }
+    try {
+      const entry = getModeration(req.params.id);
+      if (!entry) return res.status(404).json({ error: 'Запис модерації не знайдено.' });
+      if (entry.status !== 'pending') {
+        return res.status(409).json({ error: `Запис уже вирішено (статус: ${entry.status}).` });
+      }
+      const decided = decideModeration(entry.id, 'changes_requested', note);
+      if (entry.itemType === 'course') {
+        const course = getCourse(entry.itemId);
+        if (course && course.status === 'ready') updateCourse(course.id, { status: 'draft' });
+      }
+      res.json({ moderation: decided });
+    } catch (err) {
       res.status(503).json({ error: String((err as Error).message) });
     }
   });
