@@ -89,6 +89,7 @@ export interface StoredBookOps {
     bookId: string;
     variant: 'code' | 'design';
     formats: Array<'digital' | 'print'>;
+    engineId?: string;
     trimId?: string;
     samplePages?: number;
     withSample: boolean;
@@ -503,12 +504,13 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
                   );
                 }
                 const out = await renderWithEngine(engineId, {
-                  book: book as never,
+                  book: bookToPdfInput(book as never),
                   kind: 'book',
                   spec,
                   print: false,
                   ownerId: publishOwnerId,
                   ownerRole: (req.principal?.role as string) || null,
+                  theme: designThemeFromBook(book),
                 });
                 return { bytes: out.bytes, pageCount: out.pageCount, numberedPages: out.pageCount, notesUk: out.notesUk };
               })();
@@ -682,6 +684,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
     bookId: string;
     variant: 'code' | 'design';
     formats: Array<'digital' | 'print'>;
+    engineId?: string;
     trimId?: string;
     samplePages?: number;
     withSample: boolean;
@@ -704,6 +707,11 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
     const { spec, modelId } = await buildSpec(book, params.variant, undefined, params.req);
 
     const artifactsOwnerId = (params.req.principal?.id as string) || null;
+    const engineId = params.engineId || DEFAULT_PDF_ENGINE;
+    // Validate every requested format before saving any artifact.
+    if (engineId !== DEFAULT_PDF_ENGINE && params.formats.includes('print')) {
+      throw new PdfEngineError(engineId as never, 'bad_input', 'Для цього рушія оберіть цифрове PDF-видання.');
+    }
     const built = [];
     for (const format of params.formats) {
       const rendered =
@@ -713,7 +721,15 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
               trimId: params.trimId,
               ownerId: artifactsOwnerId,
             })
-          : await renderBookPdf(bookToPdfInput(book as never), spec, { ownerId: artifactsOwnerId });
+          : engineId === DEFAULT_PDF_ENGINE
+            ? await renderBookPdf(bookToPdfInput(book as never), spec, { ownerId: artifactsOwnerId })
+            : await renderWithEngine(engineId, {
+                book: bookToPdfInput(book as never),
+                kind: 'book', spec, print: false,
+                ownerId: artifactsOwnerId,
+                ownerRole: (params.req.principal?.role as string) || null,
+                theme: designThemeFromBook(book),
+              });
 
       const pdfRecord = await saveArtifact({
         bookId: stored.id,
@@ -723,7 +739,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
         mimeType: 'application/pdf',
         bytes: rendered.bytes,
         pageCount: rendered.pageCount,
-        variant: params.variant,
+        variant: engineId === DEFAULT_PDF_ENGINE ? params.variant : engineId,
         bookRevision: stored.revision,
       });
 
