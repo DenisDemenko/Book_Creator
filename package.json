@@ -328,7 +328,8 @@
     "test:designcraft-templates": "tsx scripts/test-designcraftTemplates.mts",
     "test:start-script-conveyor": "tsx scripts/test-startScriptConveyor.mts",
     "live:preview-media": "tsx scripts/live-previewMedia.mts",
-    "test:shared-furniture-access": "tsx scripts/test-shared-furniture-access.mts"
+    "test:shared-furniture-access": "tsx scripts/test-shared-furniture-access.mts",
+    "test:stored-designcraft-publication": "tsx scripts/test-storedDesigncraftPublication.mts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
