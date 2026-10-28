@@ -20,8 +20,10 @@ import {
   MarketplaceBridgeError,
   listBridgeCategories,
   bridgeSupportsCourseContent,
+  bridgeSupportsCourseMedia,
 } from './marketplaceBridge';
 import { buildCoursePublishInput } from './courseMarketplacePayload';
+import { syncCourseMedia } from './courseMediaSync';
 import { findUserById } from './store';
 import { notifyAuthorOfDecision } from './moderationNotify';
 import { courseSnapshotChanges } from '../src/utils/courseSnapshotDiff';
@@ -152,14 +154,21 @@ export function registerModerationRoutes(app: Express): void {
         // Повний платний зміст — лише приймачу, що сам заявив білий список
         // публічних полів; інакше безпечний обсяг (див. bridgeSupportsCourseContent).
         const richContent = await bridgeSupportsCourseContent();
+        // Фото з медіатеки їдуть файлами лише до приймача, що це вміє
+        // (`course-media-v1`); інакше вони, як і раніше, відсіюються.
+        const photoUpload = richContent && (await bridgeSupportsCourseMedia());
         const result = await publishCourseToMarketplace(
           buildCoursePublishInput(course, sellerSlug, {
             richContent,
+            photoUpload,
             instructorName: (await findUserById(course.ownerId))?.name,
           })
         );
+        // Фото — після лістингу, до зміни статусів: збій тут зупиняє погодження,
+        // і адмін повторює його (синхронізація ідемпотентна).
+        const media = await syncCourseMedia(course, { photoUpload });
         updateCourse(course.id, { status: 'published' });
-        published = { ...result, contentMode: richContent ? 'full' : 'programme' };
+        published = { ...result, contentMode: richContent ? 'full' : 'programme', media };
       }
       // book | instruction | game: авто-публікація ще не підключена — поки що лише погодження.
 

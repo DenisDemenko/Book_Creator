@@ -38,6 +38,7 @@ import { listBooks } from './bookStore';
 import { listAllCourses, getCourse, updateCourse } from './courseStore';
 import { courseSubmitProblems } from '../src/utils/coursePublishRules';
 import { buildCoursePublishInput } from './courseMarketplacePayload';
+import { syncCourseMedia } from './courseMediaSync';
 import { CHAT_USAGE_CONTEXT } from './chatRoutes';
 import { CHAT_MODELS, ENGINE_LABELS, engineConfigured, normalizeModelId } from './chatProviders';
 import {
@@ -88,6 +89,7 @@ import {
   publishBookToMarketplace,
   publishCourseToMarketplace,
   bridgeSupportsCourseContent,
+  bridgeSupportsCourseMedia,
   assertStorefrontCover,
   MarketplaceBridgeError,
 } from './marketplaceBridge';
@@ -1524,15 +1526,18 @@ export function registerAdminRoutes(app: Express): void {
       assertStorefrontCover(course.coverUrl, `Курс «${course.title}»`);
       const settings = await readBridgeSettings();
       const richContent = await bridgeSupportsCourseContent({ settings });
+      const photoUpload = richContent && (await bridgeSupportsCourseMedia({ settings }));
       const result = await publishCourseToMarketplace(
         buildCoursePublishInput(course, process.env.BRIDGE_SELLER_SLUG || 'fusion-lab', {
           richContent,
+          photoUpload,
           instructorName: (await findUserById(course.ownerId))?.name,
         }),
         { settings }
       );
+      const media = await syncCourseMedia(course, { photoUpload, settings });
       updateCourse(course.id, { status: 'published' });
-      res.json({ published: result, contentMode: richContent ? 'full' : 'programme' });
+      res.json({ published: result, contentMode: richContent ? 'full' : 'programme', media });
     } catch (err: any) {
       const status = err instanceof MarketplaceBridgeError ? err.status : 500;
       res.status(status).json({

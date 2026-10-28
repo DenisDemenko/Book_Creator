@@ -18,6 +18,7 @@ import type {
   PublishCourseModule,
 } from './marketplaceBridge';
 import { COURSE_CURRENCY, normalizeGraduateSelling } from '../src/utils/coursePublishRules';
+import { libraryAssetId, mediaToken } from '../src/utils/libraryMediaUrl';
 
 /** Мінімум полів курсу, потрібних збирачу (сумісний і з `Course`, і з `CourseV2`). */
 interface CourseLike {
@@ -75,6 +76,21 @@ const webUrl = (value: string | undefined): string | undefined => {
   return /^https?:\/\//i.test(url) ? url : undefined;
 };
 
+/**
+ * Фото курсу для вітрини. Абсолютне http(s)-посилання йде як є. Фото з медіатеки
+ * Студії (`/api/media/file/<id>`) не відкриється покупцю за адресою Студії, тож
+ * воно їде файлом (див. `courseMediaSync`), а в зміст кладеться ознака
+ * `media:<id>` — вітрина підставляє справжній файл, коли покупець відкриває урок.
+ * Без `upload` (приймач не вміє приймати фото) такі фото відкидаються, як і раніше.
+ */
+const photoRef = (value: string | undefined, upload: boolean): string | undefined => {
+  const url = webUrl(value);
+  if (url) return url;
+  if (!upload) return undefined;
+  const id = libraryAssetId(value);
+  return id ? mediaToken(id) : undefined;
+};
+
 function assignment(value: AssignmentLike | undefined): PublishCourseAssignment | undefined {
   if (!value || !String(value.title ?? '').trim()) return undefined;
   return {
@@ -100,13 +116,13 @@ function buildLegacyModules(course: CourseLike): PublishCourseModule[] {
   }));
 }
 
-export function buildCourseModules(course: CourseLike, rich = true): PublishCourseModule[] {
+export function buildCourseModules(course: CourseLike, rich = true, photoUpload = false): PublishCourseModule[] {
   if (!rich) return buildLegacyModules(course);
   return course.modules.map((m) => ({
     id: m.id,
     title: m.title,
     summary: m.summary,
-    coverPhotoUrl: webUrl(m.coverPhotoUrl),
+    coverPhotoUrl: photoRef(m.coverPhotoUrl, photoUpload),
     introVideoUrl: m.introVideoUrl,
     finalAssignment: assignment(m.finalAssignment),
     lessons: m.lessons.map((l) => ({
@@ -117,7 +133,9 @@ export function buildCourseModules(course: CourseLike, rich = true): PublishCour
       durationMin: l.durationMin,
       description: l.description,
       videoUrl: l.videoUrl,
-      photoUrls: filled(l.photoUrls).map(webUrl).filter((u): u is string => u !== undefined),
+      photoUrls: filled(l.photoUrls)
+        .map((u) => photoRef(u, photoUpload))
+        .filter((u): u is string => u !== undefined),
       assignment: assignment(l.assignment),
     })),
   }));
@@ -127,7 +145,12 @@ export function buildCoursePublishInput(
   course: CourseLike,
   sellerSlug: string,
   /** true — приймач заявив `course-content-v2` (див. `bridgeSupportsCourseContent`); за замовчуванням безпечний обсяг. */
-  options: { richContent?: boolean; instructorName?: string } = {}
+  options: {
+    richContent?: boolean;
+    instructorName?: string;
+    /** true — приймач заявив `course-media-v1`: фото медіатеки їдуть файлами, у змісті — `media:<id>`. Має сенс лише з `richContent`. */
+    photoUpload?: boolean;
+  } = {}
 ): PublishCourseInput {
   const priceMinor = course.free === true ? 0 : Math.round(Number(course.priceMinor));
   return {
@@ -138,7 +161,8 @@ export function buildCoursePublishInput(
     description: course.description,
     priceMinor,
     currency: COURSE_CURRENCY,
-    coverUrl: course.coverUrl,
+    // Лише абсолютне посилання: обкладинка з медіатеки їде файлом (`courseMediaSync`).
+    coverUrl: webUrl(course.coverUrl),
     highlights: filled(course.highlights),
     sellerSlug,
     moduleCount: course.modules.length,
@@ -152,6 +176,6 @@ export function buildCoursePublishInput(
     audience: filled(course.audience),
     outcomes: filled(course.outcomes),
     skills: course.skills.map((s) => ({ name: s.name, level: s.level, whyItMatters: s.whyItMatters })),
-    modules: buildCourseModules(course, options.richContent === true),
+    modules: buildCourseModules(course, options.richContent === true, options.richContent === true && options.photoUpload === true),
   };
 }

@@ -969,6 +969,16 @@ export const COURSE_CONTENT_V2 = 'course-content-v2';
 export async function bridgeSupportsCourseContent(
   deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
 ): Promise<boolean> {
+  return (await bridgeCapabilities(deps)).includes(COURSE_CONTENT_V2);
+}
+
+/**
+ * Що приймач заявив про себе в `GET /bridge/categories`. Будь-яка помилка —
+ * порожній перелік: Студія тоді просто користується безпечним мінімумом.
+ */
+export async function bridgeCapabilities(
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<string[]> {
   try {
     const settings = deps.settings ?? (await readBridgeSettings());
     const doFetch = deps.fetch ?? fetch;
@@ -976,12 +986,179 @@ export async function bridgeSupportsCourseContent(
       headers: { 'x-bridge-key': settings.key },
       signal: AbortSignal.timeout(10000),
     });
-    if (!response.ok) return false;
+    if (!response.ok) return [];
     const body = JSON.parse(await response.text()) as { capabilities?: unknown };
-    return Array.isArray(body?.capabilities) && body.capabilities.includes(COURSE_CONTENT_V2);
+    return Array.isArray(body?.capabilities)
+      ? body.capabilities.filter((item): item is string => typeof item === 'string')
+      : [];
   } catch {
-    return false;
+    return [];
   }
+}
+
+/** Приймач уміє `POST /bridge/courses/:id/media` і розкриває `media:<id>` у змісті. */
+export const COURSE_MEDIA_V1 = 'course-media-v1';
+
+export async function bridgeSupportsCourseMedia(
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<boolean> {
+  return (await bridgeCapabilities(deps)).includes(COURSE_MEDIA_V1);
+}
+
+/** Роль фото курсу у вітрині: публічна обкладинка чи платне фото уроку. */
+export type CourseMediaRole = 'cover' | 'lesson_photo';
+
+/**
+ * Надіслати вітрині одне фото курсу (multipart, як фото виробу).
+ *
+ * `lesson_photo` обовʼязково з `sourceKey` (id активу медіатеки): повторне
+ * надсилання того самого ключа ЗАМІНЮЄ файл на місці, тож повторна публікація
+ * не множить фото. Фото уроку вітрина віддає лише покупцю.
+ */
+export async function attachCourseMediaToMarketplace(
+  input: {
+    bookId: string;
+    role: CourseMediaRole;
+    sourceKey?: string;
+    filename: string;
+    mimeType: string;
+    bytes: Uint8Array;
+    /** Порядковий номер у курсі (для обкладинки — 0). */
+    position?: number;
+  },
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<{ attached: boolean; role: CourseMediaRole; replaced: number; media?: unknown; externalId: string }> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+  const externalId = courseExternalId(input.bookId);
+
+  const form = new FormData();
+  form.append(
+    'file',
+    new Blob([input.bytes as unknown as BlobPart], { type: input.mimeType }),
+    input.filename
+  );
+  form.append('role', input.role);
+  if (input.sourceKey) form.append('sourceKey', input.sourceKey);
+  form.append('position', String(Math.max(0, Math.trunc(input.position ?? 0))));
+
+  let response: Response;
+  try {
+    response = await doFetch(`${settings.url}/bridge/courses/${encodeURIComponent(externalId)}/media`, {
+      method: 'POST',
+      headers: { 'x-bridge-key': settings.key },
+      body: form,
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  }
+
+  const text = await response.text().catch(() => '');
+  if (response.status === 401 || response.status === 403) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401
+    );
+  }
+  if (response.status === 404) {
+    const routeMissing = /Cannot\s+(POST|PUT|PATCH|GET)/i.test(text);
+    throw new MarketplaceBridgeError(
+      routeMissing
+        ? 'Маркетплейс не має маршруту для фото курсу: його API старіший за міст. Потрібен деплой приймача.'
+        : 'Курсу немає в каталозі — спершу опублікуйте його, потім надсилайте фото.',
+      'rejected',
+      404,
+      text.slice(0, 400)
+    );
+  }
+  if (!response.ok) {
+    throw new MarketplaceBridgeError(
+      `Маркетплейс відхилив фото курсу: ${describeRejection(response.status, text)}`,
+      'rejected',
+      502,
+      text.slice(0, 400)
+    );
+  }
+
+  let body: any = undefined;
+  try {
+    body = text ? JSON.parse(text) : undefined;
+  } catch {
+    body = undefined;
+  }
+  return {
+    attached: Boolean(body?.attached ?? true),
+    role: (body?.role as CourseMediaRole) || input.role,
+    replaced: Number(body?.replaced ?? 0),
+    media: body?.media,
+    externalId,
+  };
+}
+
+/**
+ * Лишити у вітрині тільки ті фото уроків, що ще є у змісті (`keep` — їхні
+ * `sourceKey`); решта видаляється. Порожній `keep` прибирає всі. Обкладинку не
+ * чіпає.
+ */
+export async function pruneCourseMediaOnMarketplace(
+  bookId: string,
+  keep: string[],
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<{ pruned: number }> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+  const externalId = courseExternalId(bookId);
+
+  let response: Response;
+  try {
+    response = await doFetch(
+      `${settings.url}/bridge/courses/${encodeURIComponent(externalId)}/media/prune`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-bridge-key': settings.key },
+        body: JSON.stringify({ keep }),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      }
+    );
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  }
+
+  const text = await response.text().catch(() => '');
+  if (response.status === 401 || response.status === 403) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401
+    );
+  }
+  if (!response.ok) {
+    throw new MarketplaceBridgeError(
+      `Маркетплейс не прибрав застарілі фото курсу: ${describeRejection(response.status, text)}`,
+      'rejected',
+      502,
+      text.slice(0, 400)
+    );
+  }
+  let body: any = undefined;
+  try {
+    body = text ? JSON.parse(text) : undefined;
+  } catch {
+    body = undefined;
+  }
+  return { pruned: Number(body?.pruned ?? 0) };
 }
 
 /** Показники курсу з погляду автора (`GET /bridge/courses/:externalId/graduate-stats`). */

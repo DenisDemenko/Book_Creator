@@ -12,6 +12,8 @@
  */
 
 /** Структурний тип: підходить і серверний `Course`, і клієнтський `CourseV2`. */
+import { libraryAssetId } from './libraryMediaUrl';
+
 export interface CourseRulesInput {
   title: string;
   subtitle?: string;
@@ -126,8 +128,10 @@ export function courseSubmitProblems(
 
   if (!String(course.coverUrl ?? '').trim()) {
     problems.push('Немає обкладинки: без неї картка в каталозі — порожній прямокутник.');
-  } else if (!/^https?:\/\//i.test(String(course.coverUrl).trim())) {
-    problems.push('Обкладинка має бути посиланням http(s) на зображення.');
+  } else if (!/^https?:\/\//i.test(String(course.coverUrl).trim()) && !libraryAssetId(course.coverUrl)) {
+    // Підходить посилання http(s) або зображення з медіатеки Студії — його
+    // міст завантажує у вітрину файлом (`courseMediaSync`).
+    problems.push('Обкладинка має бути посиланням http(s) на зображення або фото з медіатеки.');
   }
 
   // Категорія обов'язкова лише коли вітрина віддала перелік (старий маркетплейс

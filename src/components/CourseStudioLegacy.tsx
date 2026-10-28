@@ -34,6 +34,7 @@ import {
 } from '../utils/coursePublishRules';
 import { parsePriceMinor } from './adminOs/priceInput';
 import CourseGraduateStats from './CourseGraduateStats';
+import { PickFromMediaLibraryModal } from './PickFromMediaLibraryModal';
 
 /** Останнє рішення модерації щодо курсу — з `GET /api/courses/:id`. */
 interface CourseModerationInfo {
@@ -305,6 +306,8 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
   }, []);
   const [error, setError] = useState<string | null>(null);
   const [selection, setSelection] = useState<{ type: 'course' | 'skill' | 'module' | 'lesson'; skillId?: string; moduleId?: string; lessonId?: string }>({ type: 'course' });
+  // Вікно вибору фото з медіатеки: що саме робити з обраним посиланням, знає місце виклику.
+  const [picker, setPicker] = useState<{ onPick: (url: string) => void } | null>(null);
 
   const loadCourses = useCallback(async () => {
     setError(null);
@@ -530,6 +533,21 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
   const selectedSkill = course?.skills.find((s) => s.id === selection.skillId) ?? null;
 
   const inputCls = 'w-full px-2.5 py-1.5 rounded-lg bg-slate-950/70 border border-slate-700 text-xs text-slate-200 placeholder-slate-600 focus:outline-hidden focus:border-amber-400';
+
+  /**
+   * Кнопка «З медіатеки». Фото з медіатеки Студії при публікації їдуть у вітрину
+   * файлами (`courseMediaSync`): обкладинка — публічна, фото модуля й уроку —
+   * лише для покупців. Посилання http(s) працюють, як і раніше.
+   */
+  const libraryButton = (onPick: (url: string) => void, label = 'З медіатеки') => (
+    <button
+      type="button"
+      onClick={() => setPicker({ onPick })}
+      className="shrink-0 px-2.5 py-1.5 rounded-lg border border-slate-700 text-[11px] font-semibold text-amber-300 hover:border-amber-400"
+    >
+      {label}
+    </button>
+  );
 
   // ============================ Рендер ============================
 
@@ -866,7 +884,10 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
               <LinesEditor label="Аудиторія (по одному на рядок)" lines={course.audience} onChange={(audience) => patch((c) => ({ ...c, audience }))} min={1} />
               <LinesEditor label="Результати навчання" lines={course.outcomes} onChange={(outcomes) => patch((c) => ({ ...c, outcomes }))} min={1} />
               <LinesEditor label="Три вигоди на картку" lines={course.highlights} onChange={(highlights) => patch((c) => ({ ...c, highlights }))} min={3} />
-              <input value={course.coverUrl ?? ''} onChange={(e) => patch((c) => ({ ...c, coverUrl: e.target.value }))} placeholder="Обкладинка (URL)" className={inputCls} />
+              <div className="flex gap-2">
+                <input value={course.coverUrl ?? ''} onChange={(e) => patch((c) => ({ ...c, coverUrl: e.target.value }))} placeholder="Обкладинка (URL або з медіатеки)" className={inputCls} />
+                {libraryButton((url) => patch((c) => ({ ...c, coverUrl: url })))}
+              </div>
               {/*
                 Картка без обкладинки у каталозі — порожній прямокутник, і
                 саме це власник назвав «книга на вітрині без фотографій»
@@ -875,7 +896,7 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
               */}
               <p className="text-[11px] text-slate-500 -mt-1">
                 Без обкладинки публікація не піде: у каталозі картка буде порожнім прямокутником.
-                Дайте посилання на зображення (напр. ту саму картинку, що й для KDP).
+                Дайте посилання на зображення або оберіть фото з медіатеки (JPEG, PNG, WebP або AVIF — інші формати вітрина не прийме).
               </p>
               <label className="block">
                 <span className="text-[11px] text-slate-400 font-semibold">Категорія у вітрині</span>
@@ -982,7 +1003,10 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Модуль</h3>
               <input value={selectedModule.title} onChange={(e) => patchModule(selectedModule.id, { title: e.target.value })} placeholder="Назва модуля" className={inputCls} />
               <textarea value={selectedModule.summary ?? ''} onChange={(e) => patchModule(selectedModule.id, { summary: e.target.value })} placeholder="Опис модуля" rows={3} className={inputCls} />
-              <input value={selectedModule.coverPhotoUrl ?? ''} onChange={(e) => patchModule(selectedModule.id, { coverPhotoUrl: e.target.value })} placeholder="Фото модуля (URL)" className={inputCls} />
+              <div className="flex gap-2">
+                <input value={selectedModule.coverPhotoUrl ?? ''} onChange={(e) => patchModule(selectedModule.id, { coverPhotoUrl: e.target.value })} placeholder="Фото модуля (URL або з медіатеки)" className={inputCls} />
+                {libraryButton((url) => patchModule(selectedModule.id, { coverPhotoUrl: url }))}
+              </div>
               <input value={selectedModule.introVideoUrl ?? ''} onChange={(e) => patchModule(selectedModule.id, { introVideoUrl: e.target.value })} placeholder="Оглядове відео (YouTube/Vimeo URL)" className={inputCls} />
               {videoUrlProblem(selectedModule.introVideoUrl) && (
                 <span className="block text-[10px] text-rose-300 -mt-1">Відео: {videoUrlProblem(selectedModule.introVideoUrl)}.</span>
@@ -1031,6 +1055,13 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
                 <span className="block text-[10px] text-rose-300 -mt-1">Відео: {videoUrlProblem(selectedLesson.videoUrl)}.</span>
               )}
               <LinesEditor label="Фото уроку (URL, по одному на рядок)" lines={selectedLesson.photoUrls} onChange={(photoUrls) => patchLesson(selectedModule.id, selectedLesson.id, { photoUrls })} />
+              <div className="flex items-center gap-2 -mt-1">
+                {libraryButton(
+                  (url) => patchLesson(selectedModule.id, selectedLesson.id, { photoUrls: [...selectedLesson.photoUrls.filter(Boolean), url] }),
+                  'Додати фото з медіатеки'
+                )}
+                <span className="text-[10px] text-slate-500 leading-snug">Фото з медіатеки покупець бачить у уроці лише після оплати.</span>
+              </div>
               <input
                 type="number"
                 value={selectedLesson.durationMin ?? ''}
@@ -1102,6 +1133,14 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
           </div>
         </div>
       </div>
+      {picker && (
+        <PickFromMediaLibraryModal
+          onPick={(url) => picker.onPick(url)}
+          onClose={() => setPicker(null)}
+          title="Фото для курсу"
+        />
+      )}
     </div>
   );
 };
+
