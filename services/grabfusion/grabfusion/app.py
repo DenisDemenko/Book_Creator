@@ -1,15 +1,32 @@
-"""Каркас сервісу GrabFusion: перевірка живості й конфігурація (без секретів). Далі — екрани B1+."""
+"""Сервіс GrabFusion: веб-API для сторінки викладача + сама сторінка (grabfusion/static)."""
 from __future__ import annotations
 
-from fastapi import FastAPI
+from pathlib import Path
+
+import httpx
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from . import __version__, contract
+from .errors import StudioError
+from .sessions import SessionStore
 from .settings import Settings
+from .web import Deps, build_router, error_response
+
+STATIC_DIR = Path(__file__).parent / "static"
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, store: SessionStore | None = None,
+               studio_transport: httpx.BaseTransport | None = None) -> FastAPI:
     cfg = settings or Settings.from_env()
     app = FastAPI(title="GrabFusion", version=__version__)
+    deps = Deps(cfg, store or SessionStore(cfg.session_db), studio_transport)
+    app.state.deps = deps
+
+    @app.exception_handler(StudioError)
+    async def _studio_error(_req: Request, e: StudioError):  # noqa: ANN202
+        return error_response(e)
 
     @app.get("/healthz")
     def healthz() -> dict[str, object]:
@@ -17,11 +34,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/config")
     def config() -> dict[str, object]:
-        # Токен Studio сюди не потрапляє — він живе лише на сервері.
+        # Токена тут немає й не буде: він живе лише в сесіях на сервері.
         return {"studioUrl": cfg.studio_url, "marketUrl": cfg.market_url,
-                "hasStudioToken": bool(cfg.studio_token),
                 "contractVersion": contract.contract_version()}
 
+    app.include_router(build_router(deps))
+
+    @app.get("/")
+    def index() -> FileResponse:
+        return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return app
 
 

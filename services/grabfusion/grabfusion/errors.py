@@ -30,6 +30,14 @@ KIND_STATUS: dict[str, int] = {
 }
 
 
+# Помилки обміну коду підключення (`POST /pair`) — поза схемою photo-drafts, але в тому ж форматі {error, kind}
+PAIR_KIND_STATUS: dict[str, int] = {
+    "invalid_code": 404,
+    "code_expired": 410,
+    "too_many_attempts": 429,
+}
+
+
 class StudioError(Exception):
     """Помилка API Studio. Розгалужуватись слід лише за `kind`; `message` — текст для викладача."""
 
@@ -38,7 +46,7 @@ class StudioError(Exception):
         super().__init__(message)
         self.kind = kind
         self.message = message
-        self.status = status if status is not None else KIND_STATUS.get(kind, 500)
+        self.status = status if status is not None else {**KIND_STATUS, **PAIR_KIND_STATUS}.get(kind, 500)
         self.blockers = blockers or []
 
     @classmethod

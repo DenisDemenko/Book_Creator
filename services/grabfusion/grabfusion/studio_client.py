@@ -20,7 +20,8 @@ class StudioClient:
     def __init__(self, base_url: str, token: str, *, timeout: float = 30.0,
                  transport: httpx.BaseTransport | None = None,
                  retries: int = 3, backoff: float = 0.5,
-                 sleep: Callable[[float], None] = time.sleep):
+                 sleep: Callable[[float], None] = time.sleep,
+                 limits: Limits | None = None):
         self.base_url = base_url.rstrip("/")
         self._http = httpx.Client(
             base_url=self.base_url, timeout=timeout, transport=transport,
@@ -29,7 +30,7 @@ class StudioClient:
         self._retries = retries
         self._backoff = backoff
         self._sleep = sleep
-        self._limits: Limits | None = None
+        self._limits: Limits | None = limits
 
     def close(self) -> None:
         self._http.close()
@@ -54,6 +55,10 @@ class StudioClient:
         if resp.status_code >= 400:
             raise StudioError.from_response(resp.status_code, body)
         return body
+
+    def raw(self, method: str, path: str, *, json: Any = None) -> Any:
+        """Сире тіло відповіді (для проксі: не губить поля, яких ще не знає модель)."""
+        return self._request(method, path, json=json)
 
     # --- межі -----------------------------------------------------------
     def limits(self, *, refresh: bool = False) -> Limits:
@@ -167,3 +172,22 @@ class StudioClient:
             if time.monotonic() >= deadline:
                 raise TimeoutError(f"Чернетка {draft_id} усе ще зайнята після {timeout} с")
             self._sleep(step)
+
+
+def pair_with_code(base_url: str, code: str, *, timeout: float = 20.0,
+                   transport: httpx.BaseTransport | None = None) -> dict[str, Any]:
+    """Обмін одноразового коду підключення на токен: `POST /pair` → `{token, record, user}`.
+
+    Помилки: `invalid_code` 404, `code_expired` 410, `too_many_attempts` 429.
+    """
+    with httpx.Client(base_url=base_url.rstrip("/"), timeout=timeout, transport=transport) as http:
+        resp = http.post("/pair", json={"code": code})
+        try:
+            body = resp.json()
+        except ValueError:
+            body = None
+    if resp.status_code >= 400:
+        raise StudioError.from_response(resp.status_code, body)
+    if not isinstance(body, dict) or not isinstance(body.get("token"), str):
+        raise StudioError("server_error", "Studio повернула неочікувану відповідь на підключення.")
+    return body

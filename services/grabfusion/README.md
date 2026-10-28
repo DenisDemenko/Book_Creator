@@ -6,7 +6,9 @@ Python-сервіс для швидкого створення курсів, і�
 віддає API `/api/external/v1/photo-drafts*`; контракт — **1.3.0**
 (`grabfusion/contract_data/photo-drafts-api.md`, `schema.json`, `fixtures/`).
 
-Стан: **B0** — каркас, клієнти, мок-сервер на фікстурах, тести. Екрани й черга без звʼязку — наступні кроки.
+Стан: **B0** (каркас, клієнти, мок на фікстурах) і **B1 = етап 2 «Застосунок, MVP»**: підключення кодом, зйомка,
+стиснення й прибирання EXIF, черга без звʼязку, картки кадрів, поле опису до 500 символів, порядок кадрів.
+Далі — етап 3 (розкласти на уроки, написати курс, перевірка, відправка) і режими 5–6.
 
 ## Правила
 
@@ -20,9 +22,9 @@ Python-сервіс для швидкого створення курсів, і�
 ```bash
 python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
-pytest                                                # 72 тести
+pytest                                                # 96 тестів (e2e в Chromium — якщо є Playwright)
 grabfusion-mock                                       # мок Studio на :8765 (/api/external/v1)
-grabfusion                                            # сервіс на :8000 (/healthz, /api/config)
+GRABFUSION_STUDIO_URL=http://127.0.0.1:8765/api/external/v1 grabfusion   # сторінка на http://127.0.0.1:8000
 ```
 
 Конфігурація — `.env.example` (змінні `GRABFUSION_*`).
@@ -57,3 +59,17 @@ pytest
 ```
 
 Тест `test_all_non_error_fixtures_are_served_by_the_mock` покаже нову фікстуру, якої мок ще не віддає.
+
+## Сторінка викладача (B1)
+
+Одна сторінка без збірки (`grabfusion/static`): підключення → чернетки → кадри. Токен Studio сервіс отримує
+обміном коду (`POST /pair`) і тримає в SQLite-сесії (`GRABFUSION_SESSION_DB`); у браузер іде лише cookie
+`gf_session` (httpOnly, SameSite=Strict). Проксі `/api/*` пропускає відповіді Studio як є, помилки — у форматі `{error, kind}`.
+
+- **Фото:** браузер стискає canvas-ом до `recommendedMaxSidePx`, сервер ще раз перекодовує Pillow — без EXIF/GPS,
+  з поворотом за Orientation, JPEG ≤ `maxImageBytes`.
+- **Черга без звʼязку:** кадри лежать в IndexedDB із постійним `clientId`; надсилаються самі, коли зʼявиться
+  звʼязок (повтор безпечний — Studio ідемпотентна за `clientId`). Помилка 4xx лишає кадр у черзі зі статусом «не надіслано».
+- **Порядок:** кнопки ↑/↓ і перетягування (`PATCH photoOrder` з `ifRevision`; при конфлікті сторінка оновлюється).
+- **Поки не вміє:** сама сторінка без звʼязку не відкриється (немає service worker); режими «Книга/Рукопис»,
+  проходи 2–3 і відправка — етапи 3, 5, 6.

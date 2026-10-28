@@ -36,9 +36,9 @@ def test_settings_from_env_strips_slash():
     assert s.studio_url == "https://s/api/external/v1" and s.port == 9000
 
 
-def test_app_health_and_config_do_not_leak_token():
-    app = create_app(Settings(studio_token="nst_secret"))
-    c = TestClient(app)
+def test_app_health_and_config_have_no_token_fields():
+    from grabfusion.sessions import SessionStore
+    c = TestClient(create_app(Settings(), store=SessionStore(":memory:")))
     assert c.get("/healthz").json()["contractVersion"] == "1.3.0"
-    cfg = c.get("/api/config")
-    assert cfg.json()["hasStudioToken"] is True and "nst_secret" not in cfg.text
+    cfg = c.get("/api/config").json()
+    assert set(cfg) == {"studioUrl", "marketUrl", "contractVersion"}

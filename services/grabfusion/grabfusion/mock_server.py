@@ -110,6 +110,25 @@ def _check_photo_body(body: Any, limits: dict[str, int]) -> JSONResponse | None:
     return None
 
 
+async def _pair(request: Request) -> Response:
+    """Обмін коду на токен. Коди для тестів: BAD → 404, EXPIRED → 410, LOCKED → 429; інші — успіх."""
+    try:
+        body = json.loads(await request.body() or b"{}")
+    except ValueError:
+        body = {}
+    code = body.get("code") if isinstance(body, dict) else None
+    if code == "BAD" or not isinstance(code, str) or not code:
+        return JSONResponse({"error": "Код підключення невірний або вже використаний.", "kind": "invalid_code"}, 404)
+    if code == "EXPIRED":
+        return JSONResponse({"error": "Код підключення прострочений. Отримайте новий у Студії.",
+                             "kind": "code_expired"}, 410)
+    if code == "LOCKED":
+        return JSONResponse({"error": "Забагато невдалих спроб. Зачекайте 10 хвилин.",
+                             "kind": "too_many_attempts"}, 429)
+    return JSONResponse({"token": "nst_mock_token", "record": {"id": "tok_mock", "scope": "photo-drafts"},
+                         "user": {"name": "Тестова Викладачка", "email": "teacher@example.com"}}, 201)
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="GrabFusion mock of Studio photo-drafts API", docs_url=None, redoc_url=None)
     limits = contract.default_limits()
@@ -121,6 +140,8 @@ def create_app() -> FastAPI:
     async def handle(rest: str, request: Request) -> Response:
         path = "/" + rest
         method = request.method
+        if method == "POST" and path == "/pair":
+            return await _pair(request)
         route = params = None
         for r in ROUTES:
             if r.method != method:
