@@ -49,6 +49,19 @@ def stack():
 
 
 @pytest.fixture(scope="module")
+def stack3():
+    """Стаціонарний мок із швидким опитуванням: чернетка справді проходить усі етапи."""
+    mock = create_mock(stateful=True, poll_interval_ms=300)
+    msrv, mt, murl = _serve(mock)
+    app = create_app(Settings(studio_url=murl + PREFIX), store=SessionStore(":memory:"))
+    asrv, at, aurl = _serve(app)
+    yield aurl, murl
+    for srv, t in ((asrv, at), (msrv, mt)):
+        srv.should_exit = True
+        t.join(timeout=5)
+
+
+@pytest.fixture(scope="module")
 def browser_page():
     with pw.sync_playwright() as p:
         try:
@@ -153,4 +166,70 @@ def test_full_flow(stack, browser_page, tmp_path):
     # 7. вихід
     page.click("#btn-logout")
     page.wait_for_selector("#code")
+    assert not errors, errors
+
+
+def test_stage3_structure_write_validate_submit(stack3, browser_page, tmp_path):
+    url, studio_url = stack3
+    ctx, page = browser_page
+    ctx.clear_cookies()
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(url)
+    page.wait_for_selector("#code")
+    page.fill("#code", "GF-OK")
+    page.click("button[type=submit]")
+    page.wait_for_selector("#btn-new")
+    page.click("#btn-new")
+    page.fill("#f-title", "Ложка з вишні")
+    page.click("button[type=submit]")
+    page.wait_for_selector("#lbl-cam")
+
+    # без кадрів кнопка «Розкласти» неактивна
+    assert page.locator("#btn-structure").is_disabled()
+    page.set_input_files("#file-gal", [_jpeg(tmp_path / "1.jpg"), _jpeg(tmp_path / "2.jpg", (1200, 900))])
+    page.wait_for_function("document.querySelectorAll('[data-photo]').length === 2 && document.querySelectorAll('[data-queued]').length === 0", timeout=15000)
+    page.wait_for_function("!document.querySelector('#btn-structure').disabled", timeout=15000)
+    _shot(page, "s3-1-before-structure")
+
+    # прохід 2
+    page.click("#btn-structure")
+    page.wait_for_selector("#job-banner")
+    page.wait_for_selector("#structure", timeout=15000)
+    assert page.locator("[data-module]").count() == 2
+    assert page.locator("[data-lesson]").count() == 3
+    assert page.locator("[data-assumption]").count() == 1
+    _shot(page, "s3-2-structure")
+
+    # передчасна відправка неможлива — але кнопки «Відправити» ще й немає; пишемо курс
+    assert page.locator("#btn-submit").count() == 0
+    page.click("#btn-write")
+    page.wait_for_function("document.querySelectorAll('[data-module] .badge.described').length === 2", timeout=20000)
+    page.wait_for_selector("#btn-submit:not([disabled])", timeout=10000)
+    _shot(page, "s3-3-written")
+
+    # блокер: відкрите припущення
+    page.click("#btn-submit")
+    page.wait_for_selector("#blockers")
+    assert page.locator("[data-blocker='open_assumptions']").count() == 1
+    _shot(page, "s3-4-blocked")
+
+    # правка уроку знімає позначку «ШІ» з поля
+    title = page.locator("[data-lesson] input[data-field=title]").first
+    assert page.locator("[data-lesson]").first.locator(".badge.ai").count() >= 1
+    title.fill("Моя назва уроку")
+    title.blur()
+    page.wait_for_function("document.querySelector('[data-lesson] input[data-field=title]').value === 'Моя назва уроку'")
+    page.wait_for_function("[...document.querySelectorAll('[data-lesson]')][0].querySelectorAll('label .badge.ai').length === 2")
+    first = page.locator("[data-lesson]").first
+    assert first.locator("label:has(+ input[data-field=title]) .badge.ai").count() == 0
+
+    # підтверджуємо припущення й відправляємо
+    page.click("[data-assumption] [data-act=confirm]")
+    page.wait_for_function("document.querySelector('[data-assumption] .badge.described')")
+    page.click("#btn-submit")
+    page.wait_for_selector("#submitted")
+    href = page.get_attribute("#open-studio", "href")
+    assert "/courses/crs_sim" in href and href.startswith("http")
+    _shot(page, "s3-5-submitted")
     assert not errors, errors

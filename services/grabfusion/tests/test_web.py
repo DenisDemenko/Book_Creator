@@ -182,3 +182,25 @@ def test_session_store_persists_in_file(tmp_path):
     sess = s1.create("nst_x", "Ім'я")
     s1.close()
     assert SessionStore(p).get(sess.sid).token == "nst_x"
+
+
+def test_stage3_proxy_structure_generate_submit_against_sim(sim_url):
+    app = create_app(Settings(studio_url=sim_url + PREFIX), store=SessionStore(":memory:"))
+    c = TestClient(app)
+    c.post("/api/pair", json={"code": "ok"})
+    d = c.post("/api/drafts", json={"kind": "course", "title": "Т"}).json()["draft"]
+    did = d["draftId"]
+    c.post(f"/api/drafts/{did}/photos", data={"clientId": "a"}, files={"file": ("p.jpg", jpeg(), "image/jpeg")})
+    c.get(f"/api/drafts/{did}")  # опит: кадр описано
+    r = c.post(f"/api/drafts/{did}/structure")  # без тіла
+    assert r.status_code == 202 and r.json()["draft"]["job"]["status"] == "running"
+    assert c.post(f"/api/drafts/{did}/structure", json={"replace": True}).json()["kind"] == "job_running"
+    for _ in range(4):
+        d = c.get(f"/api/drafts/{did}").json()["draft"]
+    assert d["status"] == "structured"
+    blocked = c.post(f"/api/drafts/{did}/submit")
+    assert blocked.status_code == 400 and blocked.json()["kind"] == "submit_blocked"
+    assert any(b["kind"] == "module_not_written" for b in blocked.json()["blockers"])
+    mid = d["structure"]["modules"][0]["moduleId"]
+    assert c.post(f"/api/drafts/{did}/modules/{mid}/generate").status_code == 202
+    assert c.post(f"/api/drafts/{did}/modules/zzz/generate").json()["kind"] in {"job_running", "module_not_found"}

@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse, Response
 
 from . import contract
 from .errors import KIND_STATUS
+from .mock_sim import Sim
 
 PREFIX = "/api/external/v1"
 FIXTURE_HEADER = "X-Mock-Fixture"
@@ -129,12 +130,14 @@ async def _pair(request: Request) -> Response:
                          "user": {"name": "Тестова Викладачка", "email": "teacher@example.com"}}, 201)
 
 
-def create_app() -> FastAPI:
+def create_app(*, stateful: bool = False, poll_interval_ms: int | None = None) -> FastAPI:
     app = FastAPI(title="GrabFusion mock of Studio photo-drafts API", docs_url=None, redoc_url=None)
     limits = contract.default_limits()
     seen_clients: dict[tuple[str, str], bool] = {}
     kinds: dict[str, str] = {}
     app.state.calls = []  # (METHOD path, fixture) — для тестів
+    sim = Sim() if stateful else None
+    app.state.sim = sim
 
     @app.api_route(PREFIX + "/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     async def handle(rest: str, request: Request) -> Response:
@@ -182,8 +185,23 @@ def create_app() -> FastAPI:
                 return JSONResponse(fx, status_code=KIND_STATUS[fx["kind"]])
             return JSONResponse(fx, status_code=route.status)
 
+        if sim is not None and route.name != "GET /photo-drafts/limits":
+            if route.name == "POST /photo-drafts/:draftId/photos":
+                bad = _check_photo_body(body, limits)
+                if bad:
+                    return bad
+            res = sim.handle(route.name, params, body)
+            if res is not None:
+                app.state.calls.append((route.name, "sim"))
+                return JSONResponse(res[1], status_code=res[0])
+
         fixture = route.fixture
         extra: dict[str, Any] = {}
+        if route.name == "GET /photo-drafts/limits" and poll_interval_ms:
+            fx = contract.load_fixture("limits")
+            fx["limits"]["pollIntervalMs"] = poll_interval_ms  # лише для швидких тестів
+            app.state.calls.append((route.name, "limits"))
+            return JSONResponse(fx)
 
         if route.name == "POST /photo-drafts":
             if not isinstance(body, dict) or body.get("kind") not in {"course", "instruction", "book", "manuscript"}:
@@ -230,10 +248,12 @@ app = create_app()
 
 def main() -> None:  # pragma: no cover
     import os
+    import sys
 
     import uvicorn
 
-    uvicorn.run(app, host=os.environ.get("GRABFUSION_HOST", "127.0.0.1"),
+    stateful = "--stateful" in sys.argv or os.environ.get("GRABFUSION_MOCK_STATEFUL") == "1"
+    uvicorn.run(create_app(stateful=stateful) if stateful else app, host=os.environ.get("GRABFUSION_HOST", "127.0.0.1"),
                 port=int(os.environ.get("GRABFUSION_MOCK_PORT", "8765")))
 
 

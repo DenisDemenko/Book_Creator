@@ -40,3 +40,20 @@ def client(mock_url):
     c = StudioClient(mock_url + PREFIX, "nst_test", sleep=lambda _s: None)
     yield c
     c.close()
+
+
+@pytest.fixture(scope="session")
+def sim_url():
+    """Мок у стаціонарному режимі: чернетки проходять collecting → … → submitted."""
+    app = create_app(stateful=True)
+    port = _free_port()
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    t = threading.Thread(target=server.run, daemon=True)
+    t.start()
+    for _ in range(100):
+        if server.started:
+            break
+        time.sleep(0.05)
+    yield f"http://127.0.0.1:{port}"
+    server.should_exit = True
+    t.join(timeout=5)

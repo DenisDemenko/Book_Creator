@@ -155,6 +155,19 @@ def build_router(deps: Deps) -> APIRouter:
                                             note=note or None))
         return {"photo": asdict(res.photo), "revision": res.revision, "duplicate": res.duplicate}
 
+    @router.post("/drafts/{draft_id}/structure", status_code=202)
+    async def structure(draft_id: str, request: Request, s: Session = Depends(current)) -> Any:
+        body = await _json_body(request, optional=True)
+        return call(s, lambda c: c.raw("POST", f"/photo-drafts/{draft_id}/structure", json=body or None))
+
+    @router.post("/drafts/{draft_id}/modules/{module_id}/generate", status_code=202)
+    def generate(draft_id: str, module_id: str, s: Session = Depends(current)) -> Any:
+        return call(s, lambda c: c.raw("POST", f"/photo-drafts/{draft_id}/modules/{module_id}/generate"))
+
+    @router.post("/drafts/{draft_id}/submit", status_code=201)
+    def submit(draft_id: str, s: Session = Depends(current)) -> Any:
+        return call(s, lambda c: c.raw("POST", f"/photo-drafts/{draft_id}/submit"))
+
     @router.get("/drafts/{draft_id}/photos/{photo_id}/image")
     def photo_image(draft_id: str, photo_id: str, s: Session = Depends(current)) -> Response:
         img = call(s, lambda c: c.photo_image(draft_id, photo_id))
@@ -183,7 +196,10 @@ def build_router(deps: Deps) -> APIRouter:
     return router
 
 
-async def _json_body(request: Request) -> dict[str, Any]:
+async def _json_body(request: Request, *, optional: bool = False) -> dict[str, Any]:
+    raw = await request.body()
+    if optional and not raw:
+        return {}
     try:
         body = await request.json()
     except ValueError:

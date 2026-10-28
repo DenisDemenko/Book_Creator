@@ -38,3 +38,9 @@ label{display:block;font-size:.85rem;color:var(--muted);margin:12px 0 4px}
 input[type=file]{display:none}
 .net{white-space:nowrap}
 textarea{field-sizing:content;min-height:3.4em;resize:vertical}
+.badge.ai{color:var(--warn);border-color:var(--warn)}
+.lesson{border-top:1px solid var(--line);margin-top:12px;padding-top:4px}
+.thumbs{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 0}
+.thumbs img{width:48px;height:48px;object-fit:cover;border-radius:8px;background:var(--line)}
+details>summary{cursor:pointer;font-weight:600;margin:12px 0}
+h3{margin:20px 0 8px}

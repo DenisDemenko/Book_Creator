@@ -7,6 +7,7 @@ const titleEl = document.getElementById('title');
 const state = {
   view: 'boot', limits: null, drafts: [], draft: null, queue: [], user: null,
   online: navigator.onLine, urls: new Map(), editing: false, needsRender: false,
+  studioOrigin: '', writing: false, blockers: null, target: null, photosOpen: true,
 };
 let pollTimer = null, flushing = false, flushTimer = null;
 
@@ -191,12 +192,18 @@ async function reloadDraft() {
   if (!state.draft) return;
   try { state.draft = (await api('GET', '/drafts/' + state.draft.draftId)).draft; if (state.view === 'draft') render(); } catch (e) { /* без звʼязку — лишаємо як є */ }
 }
-function busy() { return state.draft && state.draft.photos.some((p) => p.status === 'processing'); }
+function busy() { const d = state.draft; return !!d && (d.photos.some((p) => p.status === 'processing') || !!(d.job && d.job.status === 'running')); }
 function schedulePoll() {
   clearTimeout(pollTimer);
   if (state.view !== 'draft') return;
   const every = state.limits ? state.limits.pollIntervalMs : 2000;
   pollTimer = setTimeout(async () => { if (busy() && state.online) await reloadDraft(); schedulePoll(); }, every);
+}
+
+/* Завершення редагування: відкладене перемальовування, щоб Tab у наступне поле не губився. */
+function endEditing() {
+  state.editing = false;
+  setTimeout(() => { if (!state.editing && state.needsRender) render(); }, 150);
 }
 
 function noteFor(photoId) { return (state.draft.notes || []).find((n) => n.photoIds.length === 1 && n.photoIds[0] === photoId); }
@@ -210,7 +217,7 @@ function noteBox(initial, onSave, id) {
   upd(); let t;
   ta.addEventListener('focus', () => { state.editing = true; });
   ta.addEventListener('input', () => { if (upd() <= maxNote()) { clearTimeout(t); t = setTimeout(() => onSave(ta.value), 700); } });
-  ta.addEventListener('blur', () => { clearTimeout(t); if (upd() <= maxNote()) onSave(ta.value); state.editing = false; if (state.needsRender) render(); });
+  ta.addEventListener('blur', () => { clearTimeout(t); if (upd() <= maxNote()) onSave(ta.value); endEditing(); });
   return h('div', null, ta, cnt);
 }
 
@@ -276,18 +283,198 @@ function viewDraft() {
   const mine = state.queue.filter((q) => q.draftId === d.draftId);
   const meta = [KIND[d.kind], STATUS[d.status], d.craft, d.audience].filter(Boolean).join(' · ');
   box.append(h('p', { class: 'muted', text: meta + ` · кадрів: ${d.photos.length}` + (mine.length ? ` (+${mine.length} у черзі)` : '') }));
+  if (d.status === 'submitted') { box.append(viewSubmitted(d)); box.append(photosSection(d, mine, true)); return box; }
   const onFiles = (e) => { addFiles([...e.target.files]); e.target.value = ''; };
   box.append(h('div', { class: 'shoot' },
     h('label', { class: 'btn primary', for: 'file-cam', id: 'lbl-cam', text: '📷 Зняти' }),
     h('label', { class: 'btn', for: 'file-gal', id: 'lbl-gal', text: 'З галереї' }),
     h('input', { type: 'file', id: 'file-cam', accept: 'image/*', capture: 'environment', onchange: onFiles }),
     h('input', { type: 'file', id: 'file-gal', accept: 'image/*', multiple: true, onchange: onFiles })));
+  if (d.kind === 'course' || d.kind === 'instruction') box.append(viewActions(d, mine));
+  if (d.structure) box.append(viewStructure(d));
+  box.append(photosSection(d, mine, false));
+  return box;
+}
+
+function photosSection(d, mine, readOnly) {
   const photos = d.photos.slice().sort((a, b) => a.order - b.order);
   const list = h('div', { class: 'frames', id: 'frames' });
   photos.forEach((p, i) => list.append(photoCard(p, i, photos.length)));
   mine.forEach((q) => list.append(queuedCard(q)));
   if (!photos.length && !mine.length) list.append(h('p', { class: 'muted', text: 'Знімайте кроки по порядку. Кожен кадр опишеться автоматично; свій опис можна дописати.' }));
-  box.append(list);
+  if (!d.structure) return h('div', null, h('h3', { text: 'Кадри' }), list);
+  const det = h('details', { id: 'photos-section' }, h('summary', { text: `Кадри (${photos.length})` }), list);
+  if (state.photosOpen) det.setAttribute('open', '');
+  det.addEventListener('toggle', () => { state.photosOpen = det.open; });
+  return det;
+}
+
+/* ---------- етап 3: структура, текст, перевірка, відправка ---------- */
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const pollMs = () => (state.limits ? state.limits.pollIntervalMs : 2000);
+const JOB_TEXT = { structure: 'ШІ розкладає кадри на модулі й уроки…', generate: 'ШІ пише текст модуля…' };
+
+function confirmBtn(label, confirmLabel, fn, props) {
+  const b = h('button', Object.assign({ text: label }, props || {}));
+  let armed = false, t;
+  b.addEventListener('click', () => {
+    if (!armed) { armed = true; b.textContent = confirmLabel; b.classList.add('danger'); t = setTimeout(() => { armed = false; b.textContent = label; b.classList.remove('danger'); }, 4000); return; }
+    clearTimeout(t); armed = false; fn();
+  });
+  return b;
+}
+
+function viewActions(d, mine) {
+  const box = h('div', { class: 'card', id: 'actions' });
+  const job = d.job;
+  const running = !!(job && job.status === 'running');
+  const photosBusy = d.photos.some((p) => p.status === 'processing');
+  const unsent = mine.length > 0;
+  const lock = running || state.writing || photosBusy || unsent || !d.photos.length;
+  if (running) box.append(h('p', { class: 'row', id: 'job-banner' }, h('span', { class: 'badge processing', text: 'працює' }), h('span', { text: (JOB_TEXT[job.kind] || 'ШІ працює…') + (job.moduleId ? ' ' + moduleTitle(d, job.moduleId) : '') })));
+  if (job && job.status === 'failed') box.append(h('p', { class: 'err', id: 'job-error', text: job.error || 'Фонова робота не вдалася. Спробуйте ще раз.' }));
+  if (!d.photos.length) box.append(h('p', { class: 'muted', text: 'Спершу додайте кадри.' }));
+  else if (photosBusy || unsent) box.append(h('p', { class: 'muted', text: unsent ? 'Дочекайтесь, поки всі кадри надішлються.' : 'Кадри ще описуються…' }));
+  const row = h('div', { class: 'row' });
+  const mods = d.structure ? d.structure.modules : [];
+  const left = mods.filter((m) => !m.written);
+  if (!d.structure) row.append(h('button', { class: 'primary', id: 'btn-structure', text: 'Розкласти на уроки', disabled: lock, onclick: () => doStructure(false) }));
+  else if (d.status === 'collecting') {
+    box.append(h('p', { class: 'muted', id: 'stale-note', text: 'Після розкладання додано чи змінено кадри — розкладіть уроки заново.' }));
+    row.append(confirmBtn('Розкласти заново', 'Так, правки в структурі зникнуть', () => doStructure(true), { disabled: lock, id: 'btn-restructure', class: 'primary' }));
+  } else {
+    if (d.status !== 'written') row.append(h('button', { class: 'primary', id: 'btn-write', text: left.length === mods.length ? 'Написати курс' : 'Дописати курс', disabled: lock || !left.length, onclick: () => writeModules(left.map((m) => m.moduleId)) }));
+    if (left.length === 0 || d.status === 'written') row.append(h('button', { class: 'primary', id: 'btn-submit', text: d.kind === 'course' ? 'Відправити курс у Studio' : 'Відправити в Studio', disabled: lock, onclick: doSubmit }));
+    const again = confirmBtn('Розкласти заново', 'Так, правки в структурі зникнуть', () => doStructure(true), { disabled: lock, id: 'btn-restructure' });
+    row.append(again);
+  }
+  if (state.writing) row.append(h('span', { class: 'muted', text: 'Пишемо… можна лишитись на сторінці' }));
+  box.append(row);
+  if (state.blockers) {
+    box.append(h('div', { class: 'err', id: 'blockers' }, h('strong', { text: 'Ще не готово до відправки:' }),
+      h('ul', null, state.blockers.map((b) => h('li', { 'data-blocker': b.kind, text: b.message })))));
+  }
+  return box;
+}
+function moduleTitle(d, id) { const m = d.structure && d.structure.modules.find((x) => x.moduleId === id); return m ? `«${m.title}»` : ''; }
+
+async function waitJobDone() {
+  for (;;) {
+    await sleep(pollMs());
+    await reloadDraft();
+    const j = state.draft && state.draft.job;
+    if (!j || j.status !== 'running') return;
+  }
+}
+async function runJob(startFn) {
+  state.blockers = null;
+  try { const r = await startFn(); state.draft = r.draft; render(); }
+  catch (e) { if (e.kind !== 'job_running') { toast(e.message); return false; } }
+  await waitJobDone();
+  const j = state.draft.job;
+  if (j && j.status === 'failed') { toast(j.error || 'Фонова робота не вдалася.'); return false; }
+  return true;
+}
+async function doStructure(replace) {
+  const id = state.draft.draftId;
+  state.writing = true; render();
+  try { await runJob(() => api('POST', `/drafts/${id}/structure`, replace ? { replace: true } : undefined)); }
+  finally { state.writing = false; render(); }
+}
+async function writeModules(ids) {
+  if (state.writing) return;
+  state.writing = true; render();
+  try {
+    for (const mid of ids) {
+      const id = state.draft.draftId;
+      if (!(await runJob(() => api('POST', `/drafts/${id}/modules/${mid}/generate`)))) break;
+    }
+  } finally { state.writing = false; render(); }
+}
+async function doSubmit() {
+  state.blockers = null;
+  try {
+    const r = await api('POST', `/drafts/${state.draft.draftId}/submit`);
+    state.draft = r.draft; state.target = r.target; toast('Відправлено в Studio.');
+  } catch (e) {
+    if (e.kind === 'submit_blocked') state.blockers = e.blockers || [{ kind: 'x', message: e.message }];
+    else if (e.kind === 'wrong_status') await reloadDraft();
+    else toast(e.message);
+  }
+  render();
+}
+
+function viewSubmitted(d) {
+  const t = d.submitted || state.target;
+  const href = t ? state.studioOrigin + t.studioUrl : '#';
+  return h('div', { class: 'card', id: 'submitted' },
+    h('h2', { text: 'Відправлено в Studio' }),
+    h('p', { text: t && t.kind === 'course' ? 'Чернетку курсу створено — ціну, категорію й відео додасте в Studio.' : t && t.kind === 'express' ? 'Експрес-чернетку створено. Відкрийте її в Studio протягом 24 годин — потім вона зникне.' : 'Готово.' }),
+    h('p', null, h('a', { class: 'btn primary', id: 'open-studio', href, target: '_blank', rel: 'noopener', text: 'Відкрити в Studio' })));
+}
+
+function lessonField(d, les, field, label, multiline) {
+  const maxLen = field === 'body' && state.limits ? state.limits.maxLessonBodyChars : 0;
+  const el = multiline ? h('textarea', { rows: field === 'body' ? 8 : 2, 'data-field': field }) : h('input', { 'data-field': field });
+  el.value = les[field] || '';
+  const cnt = maxLen ? h('div', { class: 'counter' }) : null;
+  const upd = () => { if (cnt) { const n = chars(el.value); cnt.textContent = `${n} / ${maxLen}`; cnt.className = 'counter' + (n > maxLen ? ' over' : ''); } };
+  upd();
+  el.addEventListener('focus', () => { state.editing = true; });
+  el.addEventListener('input', upd);
+  el.addEventListener('blur', async () => {
+    const v = el.value;
+    if (v !== (les[field] || '') && (!maxLen || chars(v) <= maxLen)) {
+      await saveLesson(les.lessonId, { [field]: v });
+      if (ai && !aiStill()) ai.remove(); // поле тепер викладача — без повного перемальовування (не збити Tab)
+    }
+    endEditing();
+  });
+  const aiStill = () => { const m = state.draft.structure.modules.flatMap((x) => x.lessons).find((x) => x.lessonId === les.lessonId); return !!m && m.aiFields.includes(field); };
+  const ai = (les.aiFields || []).includes(field) && h('span', { class: 'badge ai', text: 'ШІ — перевірте' });
+  return h('div', null, h('label', null, label, ' ', ai || ''), el, cnt);
+}
+async function saveLesson(lessonId, fields) {
+  try {
+    const r = await api('PATCH', '/drafts/' + state.draft.draftId, { ifRevision: state.draft.revision, lessons: [{ lessonId, ...fields }] });
+    state.draft = r.draft; state.blockers = null;
+  } catch (e) { toast(e.kind === 'revision_conflict' ? 'Чернетку змінено з іншого пристрою — оновлюю.' : e.message); await reloadDraft(); }
+}
+async function setAssumption(id, status) {
+  try { state.draft = (await api('PATCH', '/drafts/' + state.draft.draftId, { ifRevision: state.draft.revision, assumptions: [{ assumptionId: id, status }] })).draft; state.blockers = null; }
+  catch (e) { toast(e.message); await reloadDraft(); }
+  render();
+}
+
+function viewStructure(d) {
+  const box = h('div', { id: 'structure' });
+  box.append(h('h3', { text: 'Структура курсу' }));
+  const open = d.assumptions.filter((a) => a.status === 'open');
+  if (d.assumptions.length) {
+    box.append(h('div', { class: 'card', id: 'assumptions' }, h('strong', { text: 'ШІ припустив — підтвердьте або відхиліть' }),
+      d.assumptions.map((a) => h('div', { class: 'row', 'data-assumption': a.assumptionId, style: 'margin-top:8px' },
+        h('span', { class: 'grow', text: a.text }),
+        h('span', { class: 'badge ' + (a.status === 'open' ? 'processing' : a.status === 'confirmed' ? 'described' : 'failed'), text: { open: 'очікує', confirmed: 'підтверджено', rejected: 'відхилено' }[a.status] }),
+        a.status !== 'confirmed' && h('button', { class: 'small', 'data-act': 'confirm', text: 'Підтвердити', onclick: () => setAssumption(a.assumptionId, 'confirmed') }),
+        a.status !== 'rejected' && h('button', { class: 'small', 'data-act': 'reject', text: 'Відхилити', onclick: () => setAssumption(a.assumptionId, 'rejected') })))));
+  }
+  const byId = new Map(d.photos.map((p) => [p.photoId, p]));
+  d.structure.modules.forEach((m, mi) => {
+    const running = d.job && d.job.status === 'running' && d.job.moduleId === m.moduleId;
+    const card = h('div', { class: 'card', 'data-module': m.moduleId },
+      h('div', { class: 'row' }, h('strong', { class: 'grow', text: `${mi + 1}. ${m.title}` }),
+        h('span', { class: 'badge ' + (m.written ? 'described' : running ? 'processing' : ''), text: m.written ? 'текст є' : running ? 'пишеться…' : 'без тексту' }),
+        h('button', { class: 'small', text: m.written ? 'Переписати' : 'Написати', disabled: state.writing || !!(d.job && d.job.status === 'running'), onclick: () => writeModules([m.moduleId]) })),
+      m.summary && h('p', { class: 'muted', text: m.summary }));
+    m.lessons.forEach((les) => {
+      card.append(h('div', { class: 'lesson', 'data-lesson': les.lessonId },
+        h('div', { class: 'thumbs' }, les.photoIds.map((id) => byId.has(id) && h('img', { src: `/api/drafts/${d.draftId}/photos/${id}/image`, alt: '', loading: 'lazy' }))),
+        lessonField(d, les, 'title', 'Назва уроку', false),
+        lessonField(d, les, 'goal', 'Мета', true),
+        lessonField(d, les, 'body', 'Текст уроку', true)));
+    });
+    box.append(card);
+  });
   return box;
 }
 
@@ -341,6 +528,7 @@ async function flushQueue() {
 /* ---------- старт ---------- */
 async function start() {
   try { state.limits = (await api('GET', '/limits')).limits; } catch (e) { /* дефолти */ }
+  try { state.studioOrigin = new URL((await api('GET', '/config')).studioUrl).origin; } catch (e) { /* без посилання */ }
   state.queue = await qAll();
   document.getElementById('btn-logout').hidden = false;
   await openList();
