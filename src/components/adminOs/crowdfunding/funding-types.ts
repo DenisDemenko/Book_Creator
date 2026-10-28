@@ -54,6 +54,7 @@ export interface Stage extends StagePlan {
   disbursements?: Payout[];
 }
 export interface Terms {
+  unusedPolicy?: string;
   operatorName: string;
   terms: string;
   refundPolicy: string;
@@ -73,6 +74,7 @@ export interface Campaign {
   allocatedMinor: string;
   feeMinor: string;
   paidOutMinor: string;
+  returnedMinor: string;
   reservedMinor: string;
   spentMinor: string;
   refundedMinor: string;
@@ -161,6 +163,8 @@ export function status(value: string) {
         failed: "Ціль не досягнуто · повернення",
         rejected: "Відхилено",
         completed: "Проєкт завершено",
+        payout_failed: "Переказ не проведено",
+        completed_refunding: "Проєкт виконано · повернення залишку",
         pending: "Очікує внеску",
         paid: "Внесок отримано",
         planned: "Заплановано",
