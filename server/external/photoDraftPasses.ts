@@ -23,6 +23,7 @@ import {
   type DraftModule,
   type DraftNote,
   type DraftStructure,
+  type PhotoDraftInstructionMode,
   type PhotoDraftKind,
   type SubmitBlocker,
 } from '../../shared/photoDraftContract';
@@ -31,6 +32,11 @@ import {
 export const MAX_MODULES = 20;
 export const MAX_LESSONS_PER_MODULE = 30;
 export const MAX_ASSUMPTIONS = 20;
+/**
+ * Кроків в інструкції не більше: кожен крок стоїть на власному джерелі, а майстер
+ * інструкцій Studio приймає не більше 20 джерел.
+ */
+export const INSTRUCTION_MAX_STEPS = 20;
 /** Фонова робота, що «біжить» довше, вважається перерваною (перезапуск сервера). */
 export const JOB_STALE_MS = 10 * 60 * 1000;
 
@@ -52,6 +58,8 @@ export interface PassDraft {
   craft: string | null;
   audience: string | null;
   level: 'beginner' | 'intermediate' | 'advanced' | null;
+  instructionMode?: PhotoDraftInstructionMode | null;
+  modelCode?: string | null;
   bookId: string | null;
   photos: PassPhoto[];
   notes: DraftNote[];
@@ -140,9 +148,16 @@ const SAFETY_RULES = [
 // Прохід 2: структура
 // ---------------------------------------------------------------------------
 
-export function structureSystemInstruction(kind: PhotoDraftKind): string {
+const MODE_UK: Record<PhotoDraftInstructionMode, string> = {
+  assembly: 'складання виробу з деталей',
+  operation: 'користування готовим виробом',
+};
+
+export function structureSystemInstruction(kind: PhotoDraftKind, mode?: PhotoDraftInstructionMode | null): string {
   const w = KIND_WORDS[kind];
   return [
+    ...(kind === 'instruction' && mode ? [`Інструкція описує ${MODE_UK[mode]}.`] : []),
+    ...(kind === 'instruction' ? [`Усього не більше ${INSTRUCTION_MAX_STEPS} кроків; один крок — одна дія й один-два кадри.`] : []),
     `Ти — редактор, що з кадрів, зроблених майстром на телефон, складає ${w.whole}.`,
     `Розклади кадри на: ${w.module} → ${w.lesson}. Порядок — як їх знято (за номерами кадрів); кожен кадр має стояти рівно в одному нижчому рівні.`,
     ...SAFETY_RULES,
@@ -210,7 +225,7 @@ export function placePhotos(modules: DraftModule[], photos: { photoId: string; o
  * лишаємо в першому уроці, а кадри без уроку кладемо до уроку найближчого
  * попереднього за порядком кадру (першого — до першого уроку).
  */
-export function parseStructureResult(raw: string, photos: { photoId: string; order: number }[]): ParsedStructure {
+export function parseStructureResult(raw: string, photos: { photoId: string; order: number }[], options: { maxLessons?: number } = {}): ParsedStructure {
   const parsed = extractJsonObject(raw);
   if (!Array.isArray(parsed.modules) || parsed.modules.length === 0) {
     throw new Error('Модель не запропонувала жодного модуля. Спробуйте ще раз.');
@@ -219,12 +234,14 @@ export function parseStructureResult(raw: string, photos: { photoId: string; ord
   const used = new Set<string>();
   let moduleNo = 0;
   let lessonNo = 0;
+  const maxLessons = options.maxLessons ?? Infinity;
   const modules: DraftModule[] = [];
   for (const rawModule of (parsed.modules as any[]).slice(0, MAX_MODULES)) {
     if (!rawModule || typeof rawModule !== 'object') continue;
     const lessons: DraftLesson[] = [];
     for (const rawLesson of (Array.isArray(rawModule.lessons) ? rawModule.lessons : []).slice(0, MAX_LESSONS_PER_MODULE)) {
       if (!rawLesson || typeof rawLesson !== 'object') continue;
+      if (lessonNo >= maxLessons) break;
       const ids = stringList(rawLesson.photoIds, 400, 128).filter((id) => known.has(id) && !used.has(id));
       ids.forEach((id) => used.add(id));
       const title = textOr(rawLesson.title, PHOTO_DRAFT_LIMITS.maxTitleChars);
@@ -279,9 +296,20 @@ export function parseStructureResult(raw: string, photos: { photoId: string; ord
 // Прохід 3: текст модуля
 // ---------------------------------------------------------------------------
 
-export function generateSystemInstruction(kind: PhotoDraftKind): string {
+/** Підписи рядків у тексті кроку інструкції: за ними Studio розбирає крок на поля майстра інструкцій. */
+export const STEP_LABELS = ['Деталі', 'Інструменти', 'Увага', 'Результат кроку'] as const;
+
+export function generateSystemInstruction(kind: PhotoDraftKind, mode?: PhotoDraftInstructionMode | null): string {
   const w = KIND_WORDS[kind];
   return [
+    ...(kind === 'instruction'
+      ? [
+          `Інструкція описує ${MODE_UK[mode ?? 'assembly']}.`,
+          'Текст кроку: 1–3 речення про те, що робимо; далі, на окремих рядках і ЛИШЕ якщо це відомо з кадрів чи слів майстра: ' +
+            STEP_LABELS.map((l) => `«**${l}:** …»`).join(', ') +
+            '. Невідоме — рядок не пиши, не вигадуй.',
+        ]
+      : []),
     `Ти — автор, що пише ${w.whole} за кадрами й словами майстра. Зараз пишеш один ${w.module}.`,
     w.style,
     'Текст кожного уроку — Markdown, починається із заголовка «## » і назви уроку; далі короткі абзаци або нумеровані кроки.',

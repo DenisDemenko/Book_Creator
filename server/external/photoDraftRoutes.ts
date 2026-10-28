@@ -46,6 +46,7 @@ import {
 import {
   ASSUMPTION_STATUSES,
   PHOTO_DRAFT_CONTRACT_VERSION,
+  PHOTO_DRAFT_INSTRUCTION_MODES,
   PHOTO_DRAFT_KINDS,
   PHOTO_DRAFT_LEVELS,
   PHOTO_DRAFT_LIMITS,
@@ -55,6 +56,7 @@ import {
   type DraftPhoto,
   type DraftStructure,
   type PhotoDraft,
+  type PhotoDraftInstructionMode,
   type PhotoDraftKind,
   type PhotoDraftLevel,
   type PhotoDraftSummary,
@@ -67,6 +69,7 @@ import {
   buildStructurePrompt,
   computeSubmitBlockers,
   generateSystemInstruction,
+  INSTRUCTION_MAX_STEPS,
   jobIsStale,
   mergeAssumptions,
   parseGenerateResult,
@@ -181,6 +184,8 @@ export function publicDraft(d: StoredDraft): PhotoDraft {
     audience: d.audience,
     level: d.level,
     bookId: d.bookId,
+    instructionMode: d.kind === 'instruction' ? (d.instructionMode ?? 'assembly') : null,
+    modelCode: d.modelCode ?? null,
     photos: [...d.photos].sort((a, b) => a.order - b.order).map((p) => publicPhoto(d.id, p)),
     notes: d.notes,
     structure: d.structure,
@@ -218,6 +223,18 @@ function levelField(value: unknown): PhotoDraftLevel | null | undefined {
     throw new DraftChangeError(400, 'bad_input', `Рівень має бути одним із: ${PHOTO_DRAFT_LEVELS.join(', ')}.`);
   }
   return value as PhotoDraftLevel;
+}
+
+/** Режим інструкції: `undefined` — не передано, `null` — не задано. Лише для `kind: instruction`. */
+function instructionModeField(value: unknown, kind: PhotoDraftKind): PhotoDraftInstructionMode | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (kind !== 'instruction') {
+    throw new DraftChangeError(400, 'bad_input', 'Режим (складання чи користування) є лише в чернеток-інструкцій.');
+  }
+  if (!(PHOTO_DRAFT_INSTRUCTION_MODES as readonly unknown[]).includes(value)) {
+    throw new DraftChangeError(400, 'bad_input', `Режим інструкції має бути одним із: ${PHOTO_DRAFT_INSTRUCTION_MODES.join(', ')}.`);
+  }
+  return value as PhotoDraftInstructionMode;
 }
 
 function isEditable(d: StoredDraft): boolean {
@@ -366,6 +383,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       if (!current) return;
       const context: DescribeContext = {
         kind: current.kind,
+        instructionMode: current.kind === 'instruction' ? (current.instructionMode ?? 'assembly') : null,
         title: current.title,
         craft: current.craft,
         audience: current.audience,
@@ -417,6 +435,14 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       const craft = shortField(body.craft, PHOTO_DRAFT_LIMITS.maxShortFieldChars, 'Ремесло') ?? null;
       const audience = shortField(body.audience, PHOTO_DRAFT_LIMITS.maxShortFieldChars, 'Аудиторія') ?? null;
       const level = levelField(body.level) ?? null;
+      let instructionMode: PhotoDraftInstructionMode | null = null;
+      let modelCode: string | null = null;
+      try {
+        instructionMode = instructionModeField(body.instructionMode, kind) ?? (kind === 'instruction' ? 'assembly' : null);
+        modelCode = shortField(body.modelCode, PHOTO_DRAFT_LIMITS.maxShortFieldChars, 'Код виробу') ?? null;
+      } catch (err) {
+        return sendChangeError(res, err, 'create');
+      }
       let bookId: string | null = null;
       if (kind === 'book') {
         const wanted = typeof body.bookId === 'string' ? body.bookId.trim() : '';
@@ -443,6 +469,8 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
         craft,
         audience,
         level,
+        instructionMode,
+        modelCode,
         bookId,
         photos: [],
         notes: [],
@@ -496,6 +524,10 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
           if (craft !== undefined) d.craft = craft;
           if (audience !== undefined) d.audience = audience;
           if (level !== undefined) d.level = level;
+          const mode = instructionModeField(body.instructionMode, d.kind);
+          if (mode !== undefined) d.instructionMode = mode;
+          const modelCode = shortField(body.modelCode, PHOTO_DRAFT_LIMITS.maxShortFieldChars, 'Код виробу');
+          if (modelCode !== undefined) d.modelCode = modelCode;
 
           if (body.photoOrder !== undefined) {
             const order = strings(body.photoOrder, 'photoOrder', 128);
@@ -926,13 +958,13 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
         const out = await deps.writeText!({
           ownerId,
           draftId,
-          system: structureSystemInstruction(snapshot.kind),
+          system: structureSystemInstruction(snapshot.kind, snapshot.instructionMode),
           prompt: buildStructurePrompt(snapshot),
           maxTokens: 8192,
           label: 'Структура за фото (GrabFusion)',
           req,
         });
-        const parsed = parseStructureResult(out.text, snapshot.photos);
+        const parsed = parseStructureResult(out.text, snapshot.photos, { maxLessons: snapshot.kind === 'instruction' ? INSTRUCTION_MAX_STEPS : undefined });
         return (d) => {
           const modules = parsed.modules;
           placePhotos(modules, d.photos);
@@ -965,7 +997,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
         const out = await deps.writeText!({
           ownerId,
           draftId,
-          system: generateSystemInstruction(snapshot.kind),
+          system: generateSystemInstruction(snapshot.kind, snapshot.instructionMode),
           prompt: buildGeneratePrompt(snapshot, module),
           maxTokens: 8192,
           label: 'Текст модуля за фото (GrabFusion)',

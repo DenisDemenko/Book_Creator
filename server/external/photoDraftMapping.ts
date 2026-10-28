@@ -5,9 +5,11 @@
  *
  *   course      → чернетка курсу (`status: draft`): модулі, уроки, фото уроків із
  *                 медіатеки автора. Ціну, категорію й відео автор додає в Studio.
- *   instruction → експрес-чернетка з напрямом «instruction»: кожен модуль — одне
- *                 підтверджене джерело-нотатка. Експрес-чернетки живуть 24 години
- *                 (expressStore.TTL_MS) — застосунок має про це сказати автору.
+ *   instruction → експрес-чернетка майстра «Інструкція з фото й техдокументації»
+ *                 (track technical_instruction): кожен крок — підтверджене джерело з
+ *                 кадром, готова пропозиція кроків чекає лише перевірки автора.
+ *                 Експрес-чернетки живуть 24 години (expressStore.TTL_MS) — застосунок
+ *                 має сказати про це автору.
  *   book        → «Вхідні» книги: по одному запису на урок із текстом уроку,
  *                 назвою модуля як главою й назвою уроку як розділом.
  */
@@ -15,6 +17,7 @@
 import { LIBRARY_MEDIA_PREFIX } from '../../src/utils/libraryMediaUrl';
 import { ORIGIN_LESSON_FIELDS, type CourseOrigin, type OriginLessonField } from '../courseOrigin';
 import type { DraftLesson, DraftModule } from '../../shared/photoDraftContract';
+import { technicalInputHash } from '../technicalInstruction';
 import type { StoredDraft } from './photoDraftStore';
 
 export const libraryUrl = (assetId: string): string => `${LIBRARY_MEDIA_PREFIX}/${assetId}`;
@@ -106,36 +109,134 @@ export function toCourseInput(draft: StoredDraft, opts: { at: string; ai?: { cal
 }
 
 // ---------------------------------------------------------------------------
-// Експрес-інструкція
+// Експрес-інструкція (майстер «Інструкція з фото й техдокументації»)
 // ---------------------------------------------------------------------------
 
-function moduleText(m: DraftModule): string {
-  const parts: string[] = [];
-  if (m.summary) parts.push(m.summary);
-  for (const l of m.lessons) parts.push(l.body ? l.body.trim() : `## ${l.title}`);
-  return parts.join('\n\n');
+/** Скільки джерел і кроків приймає майстер інструкцій Studio (wizardValidation, technicalInstruction). */
+export const TECHNICAL_MAX_SOURCES = 20;
+export const TECHNICAL_MAX_STEPS = 60;
+
+const STEP_LINE = /^\s*\*\*(Деталі|Інструменти|Увага|Результат кроку):\*\*\s*(.*)$/;
+
+export interface ParsedStepBody {
+  description: string;
+  components: string;
+  toolsResources: string;
+  warning: string;
+  successCriterion: string;
 }
 
-export function toExpressPayload(draft: StoredDraft): Record<string, unknown> {
-  const modules = draft.structure?.modules ?? [];
-  const sources = modules.map((m) => ({
-    id: m.moduleId,
-    kind: 'note' as const,
-    title: m.title.slice(0, 300),
-    text: moduleText(m).slice(0, 100_000),
-    approved: true,
-  }));
+/**
+ * Текст кроку (Markdown з проходу 3) → поля кроку майстра інструкцій. Рядки
+ * «**Деталі:** …», «**Інструменти:** …», «**Увага:** …», «**Результат кроку:** …»
+ * стають окремими полями, решта — описом. Заголовок «## назва» на початку
+ * відкидається: назва кроку є в самому кроці. Нерозпізнане не губиться: без
+ * підписаних рядків увесь текст лишається описом.
+ */
+export function parseStepBody(body: string | null, title: string): ParsedStepBody {
+  const fields: Record<string, string[]> = { Деталі: [], Інструменти: [], Увага: [], 'Результат кроку': [] };
+  const rest: string[] = [];
+  let first = true;
+  for (const line of String(body ?? '').replace(/\r\n/g, '\n').split('\n')) {
+    if (first && /^\s*#{1,6}\s/.test(line)) {
+      first = false;
+      continue;
+    }
+    if (line.trim()) first = false;
+    const m = STEP_LINE.exec(line);
+    if (m) {
+      if (m[2].trim()) fields[m[1]].push(m[2].trim());
+    } else rest.push(line);
+  }
+  const description = rest.join('\n').replace(/\n{3,}/g, '\n\n').trim();
   return {
-    track: 'instruction',
+    description: description || title,
+    components: fields['Деталі'].join('; '),
+    toolsResources: fields['Інструменти'].join('; '),
+    warning: fields['Увага'].join('; '),
+    successCriterion: fields['Результат кроку'].join('; '),
+  };
+}
+
+const unique = (items: string[], max: number): string[] => [...new Set(items.map((i) => i.trim()).filter(Boolean))].slice(0, max);
+
+export function toExpressPayload(draft: StoredDraft): Record<string, unknown> {
+  const mode = draft.instructionMode ?? 'assembly';
+  const byPhoto = new Map(draft.photos.map((p) => [p.photoId, p]));
+  const lessons = (draft.structure?.modules ?? []).flatMap((m) => m.lessons.map((l) => ({ module: m, lesson: l })));
+
+  // Одне джерело на крок (не більше 20): текст кроку + описи його кадрів; кадр — перший із кроку.
+  const sources: Array<{ id: string; kind: 'photo' | 'note'; title: string; text: string; approved: true; assetId?: string }> = [];
+  const sourceOf: string[] = [];
+  lessons.forEach(({ lesson }, i) => {
+    const frames = lesson.photoIds.map((id) => byPhoto.get(id)).filter((p): p is NonNullable<typeof p> => !!p);
+    const text = [
+      lesson.body?.trim() || lesson.title,
+      ...frames.map((p) => `Кадр №${p.order}: ${p.description ?? '(без опису)'}`),
+    ].join('\n\n');
+    if (i < TECHNICAL_MAX_SOURCES) {
+      const lead = frames[0];
+      sources.push({
+        id: `src-${i + 1}`,
+        kind: lead ? 'photo' : 'note',
+        title: lesson.title.slice(0, 300),
+        text: text.slice(0, 100_000),
+        approved: true,
+        ...(lead ? { assetId: lead.assetId } : {}),
+      });
+      sourceOf.push(`src-${i + 1}`);
+    } else {
+      // Понад межу — крок лишається, а його джерелом стає останнє, куди й дописуємо текст.
+      const last = sources[sources.length - 1];
+      last.text = `${last.text}\n\n${lesson.title}\n${text}`.slice(0, 100_000);
+      sourceOf.push(last.id);
+    }
+  });
+
+  const parsed = lessons.map(({ lesson }) => ({ lesson, ...parseStepBody(lesson.body, lesson.title) }));
+  const fallbackCriterion = 'Крок виконано, як показано на кадрах.';
+  let steps = parsed.map((p, i) => ({
+    title: p.lesson.title || `Крок ${i + 1}`,
+    description: p.description,
+    components: p.components,
+    toolsResources: p.toolsResources,
+    warning: p.warning,
+    successCriterion: p.successCriterion || p.lesson.goal || fallbackCriterion,
+    sourceIds: [sourceOf[i]],
+    needsVerification: p.lesson.aiFields.includes('body'),
+  }));
+  if (steps.length > TECHNICAL_MAX_STEPS) {
+    // Майстер приймає до 60 кроків: зайві дописуються до останнього, а не губляться.
+    const keep = steps.slice(0, TECHNICAL_MAX_STEPS);
+    const tail = steps.slice(TECHNICAL_MAX_STEPS);
+    keep[keep.length - 1].description += '\n\n' + tail.map((s) => `${s.title}: ${s.description}`).join('\n\n');
+    steps = keep;
+  }
+
+  const goal = (draft.structure?.modules ?? []).map((m) => m.summary).filter(Boolean).join(' ').slice(0, 10_000) || `Кроки за кадрами майстра${draft.craft ? `: ${draft.craft}` : ''}.`;
+  const title = (draft.title || '').trim().slice(0, 500);
+  const modelCode = (draft.modelCode || '').slice(0, 500);
+  const settings = { mode, title, modelCode, goal };
+  const proposal = {
+    title,
+    modelCode,
+    description: goal,
+    materials: [] as { code: string; name: string; qty: string }[],
+    tools: unique(parsed.flatMap((p) => (p.toolsResources ? p.toolsResources.split(';') : [])), 100),
+    warnings: unique(parsed.flatMap((p) => (p.warning ? [p.warning] : [])), 100),
+    steps,
+    finalChecks: [] as string[],
+    questions: [] as string[],
+    inputHash: technicalInputHash(settings, sources as any),
+  };
+  return {
+    track: 'technical_instruction',
     useAi: true,
-    entryMode: 'existing_materials',
-    seed: (draft.title || '').slice(0, 4000),
     ...(draft.audience ? { audience: draft.audience.slice(0, 500) } : {}),
-    scenarioInputs: {
-      preserve: 'Кроки, послідовність і попередження зберегти як у джерелах: їх написано за кадрами майстра.',
-      ...(draft.craft ? { missing: `Ремесло: ${draft.craft}`.slice(0, 16000) } : {}),
-    },
+    // Кадри — власні фото викладача, які він сам відправив: дозвіл на використання є.
+    sourcesPermission: true,
     sourceMaterials: sources,
+    technical: { ...settings, proposal },
   };
 }
 

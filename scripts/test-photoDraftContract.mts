@@ -47,6 +47,7 @@ const enums: [string, readonly string[]][] = [
   ['DraftStatus', c.PHOTO_DRAFT_STATUSES],
   ['PhotoStatus', c.PHOTO_STATUSES],
   ['Level', c.PHOTO_DRAFT_LEVELS],
+  ['InstructionMode', c.PHOTO_DRAFT_INSTRUCTION_MODES],
   ['JobKind', c.PHOTO_DRAFT_JOB_KINDS],
   ['JobStatus', c.PHOTO_DRAFT_JOB_STATUSES],
   ['AssumptionStatus', c.ASSUMPTION_STATUSES],

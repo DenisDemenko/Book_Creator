@@ -20,7 +20,7 @@
  */
 
 /** Версія контракту. Мінорна — додавання; мажорна — ламка зміна. */
-export const PHOTO_DRAFT_CONTRACT_VERSION = '1.1.0';
+export const PHOTO_DRAFT_CONTRACT_VERSION = '1.2.0';
 
 /** Префікс маршрутів. Автентифікація — `Authorization: Bearer nst_…`. */
 export const PHOTO_DRAFT_API_BASE = '/api/external/v1';
@@ -99,6 +99,13 @@ export type PhotoStatus = (typeof PHOTO_STATUSES)[number];
 
 export const PHOTO_DRAFT_LEVELS = ['beginner', 'intermediate', 'advanced'] as const;
 export type PhotoDraftLevel = (typeof PHOTO_DRAFT_LEVELS)[number];
+
+/**
+ * Режим технічної інструкції (лише для `kind: instruction`, з 1.2.0):
+ * `assembly` — складання виробу, `operation` — користування ним.
+ */
+export const PHOTO_DRAFT_INSTRUCTION_MODES = ['assembly', 'operation'] as const;
+export type PhotoDraftInstructionMode = (typeof PHOTO_DRAFT_INSTRUCTION_MODES)[number];
 
 /** Довгі проходи (2 і 3) — у фоні; стан видно в `draft.job`. */
 export const PHOTO_DRAFT_JOB_KINDS = ['structure', 'generate'] as const;
@@ -282,6 +289,10 @@ export interface PhotoDraft {
   level: PhotoDraftLevel | null;
   /** Лише для `kind: book` — книга, у «Вхідні» якої ляже глава. */
   bookId: string | null;
+  /** Лише для `kind: instruction` (з 1.2.0): складання чи користування; для інших видів `null`. Новим інструкціям — `assembly`. */
+  instructionMode?: PhotoDraftInstructionMode | null;
+  /** Код або модель виробу для інструкції (з 1.2.0). */
+  modelCode?: string | null;
   photos: DraftPhoto[];
   notes: DraftNote[];
   structure: DraftStructure | null;
@@ -341,6 +352,9 @@ export interface CreatePhotoDraftRequest {
   level?: PhotoDraftLevel;
   /** Обовʼязковий для `kind: book`. */
   bookId?: string;
+  /** Лише для `kind: instruction`; без нього — `assembly`. */
+  instructionMode?: PhotoDraftInstructionMode;
+  modelCode?: string;
 }
 
 export interface AddPhotoRequest {
@@ -377,6 +391,9 @@ export interface PatchPhotoDraftRequest {
   craft?: string | null;
   audience?: string | null;
   level?: PhotoDraftLevel | null;
+  /** Лише для `kind: instruction`. */
+  instructionMode?: PhotoDraftInstructionMode;
+  modelCode?: string | null;
   /** Усі photoId чернетки в новому порядку. */
   photoOrder?: string[];
   /** Повна структура замість наявної (перенесення кадрів між уроками, назви). */

@@ -23,6 +23,7 @@ import type {
   DraftPhoto,
   DraftStructure,
   PhotoDraftKind,
+  PhotoDraftInstructionMode,
   PhotoDraftLevel,
   PhotoDraftStatus,
   SubmitTarget,
@@ -45,6 +46,9 @@ export interface StoredDraft {
   craft: string | null;
   audience: string | null;
   level: PhotoDraftLevel | null;
+  /** Лише для `instruction`; у чернеток, створених до 1.2.0, поля немає. */
+  instructionMode?: PhotoDraftInstructionMode | null;
+  modelCode?: string | null;
   bookId: string | null;
   photos: StoredPhoto[];
   notes: DraftNote[];

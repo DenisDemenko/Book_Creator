@@ -481,9 +481,9 @@ t('два submit одночасно: 201 і 409, не два результат�
 const insOk = both.find((r) => r.status === 201)!;
 t('target: express за схемою', ok(insOk, 'SubmitResponse') && insOk.data.target.kind === 'express' && insOk.data.target.studioUrl === `/express/${insOk.data.target.id}`);
 const express0 = expressStore.getDraft(insOk.data.target.id)!;
-t('експрес-чернетка — напрям «instruction», власник — викладач', !!express0 && express0.userId === 'u-a' && (express0.payload as any).track === 'instruction' && (express0.payload as any).seed === 'Складання полиці');
+t('експрес-чернетка — технічна інструкція, власник — викладач', !!express0 && express0.userId === 'u-a' && (express0.payload as any).track === 'technical_instruction' && (express0.payload as any).technical?.title === 'Складання полиці');
 const srcs = (express0.payload as any).sourceMaterials as any[];
-t('кожен модуль — підтверджене джерело з текстом уроків', srcs.length === 2 && srcs.every((s) => s.approved === true && s.kind === 'note' && s.text.includes('## ')));
+t('кожен крок — підтверджене джерело з кадром і текстом', srcs.length === 2 && srcs.every((s) => s.approved === true && s.kind === 'photo' && !!s.assetId && s.text.includes('Крок за кроком')));
 
 console.log('\nВідправка: глава у «Вхідні» книги');
 const bk = await makeReady('book', { bookId: 'book-a', title: 'Глава про ложки' });

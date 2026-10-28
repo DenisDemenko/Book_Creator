@@ -7,7 +7,7 @@
  * «ігноруй попереднє» в описі не має змінювати поведінку.
  */
 
-import type { PhotoDraftKind } from '../../shared/photoDraftContract';
+import type { PhotoDraftInstructionMode, PhotoDraftKind } from '../../shared/photoDraftContract';
 
 export const DESCRIPTION_MAX_CHARS = 1000;
 export const TAGS_MAX = 8;
@@ -21,6 +21,8 @@ const KIND_FOCUS: Record<PhotoDraftKind, string> = {
 
 export interface DescribeContext {
   kind: PhotoDraftKind;
+  /** Лише для `instruction`: що саме показують кадри — складання чи користування. */
+  instructionMode?: PhotoDraftInstructionMode | null;
   title?: string | null;
   craft?: string | null;
   audience?: string | null;
@@ -38,8 +40,16 @@ export function describeSystemInstruction(): string {
   ].join('\n');
 }
 
+const INSTRUCTION_FOCUS: Record<PhotoDraftInstructionMode, string> = {
+  assembly:
+    'кадр етапу складання виробу: які деталі й кріплення видно, яка дія виконується, яким інструментом, що має вийти; порядок і напрям називай лише якщо вони видні на фото',
+  operation:
+    'кадр користування виробом: яка частина чи орган керування, яку дію робить користувач, що має статися; чи видно індикацію, обмеження або застереження',
+};
+
 export function buildDescribePrompt(ctx: DescribeContext): string {
-  const lines = [`Що на фото: ${KIND_FOCUS[ctx.kind]}.`];
+  const focus = ctx.kind === 'instruction' && ctx.instructionMode ? INSTRUCTION_FOCUS[ctx.instructionMode] : KIND_FOCUS[ctx.kind];
+  const lines = [`Що на фото: ${focus}.`];
   if (ctx.title) lines.push(`Назва: ${ctx.title}`);
   if (ctx.craft) lines.push(`Ремесло: ${ctx.craft}`);
   if (ctx.audience) lines.push(`Для кого: ${ctx.audience}`);

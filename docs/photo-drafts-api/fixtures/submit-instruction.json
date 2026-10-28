@@ -9,6 +9,8 @@
     "audience": "дорослі початківці",
     "level": "beginner",
     "bookId": null,
+    "instructionMode": "assembly",
+    "modelCode": "ПОЛ-120",
     "photos": [
       {
         "photoId": "ph_01a1",
