@@ -38,7 +38,7 @@ export async function describePhotoWithCoreVision(
     apiKeyOverride: userKey,
     images: [{ mimeType: p.mimeType, dataBase64: p.base64 }],
     req: p.req,
-    label: 'Опис кадру (GrabFusion)',
+    label: `Опис кадру (GrabFusion) ${p.draftId}`,
   });
   return { ...parseDescribeResult(result.text), modelId };
 }

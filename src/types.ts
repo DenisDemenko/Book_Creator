@@ -526,6 +526,18 @@ export interface CourseModuleV2 {
   skillIds: string[];
 }
 
+/** Звідки курс узявся: чернетка за фото (GrabFusion). Виставляє лише сервер. */
+export interface CourseOriginV2 {
+  kind: 'photo-draft';
+  draftId: string;
+  createdAt: string;
+  photoCount: number;
+  /** lessonId → поля, які написав ШІ й автор ще не правив (`description` — текст уроку). */
+  aiFields: Record<string, Array<'title' | 'goal' | 'description' | 'topics'>>;
+  /** Витрати ШІ на чернетку, $ з журналу витрат. */
+  ai?: { calls: number; costUsd: number };
+}
+
 export interface CourseV2 {
   id: string;
   ownerId: string;
@@ -550,6 +562,8 @@ export interface CourseV2 {
   currency?: string;
   /** Коли студенти можуть продавати власні роботи, зроблені під час курсу. */
   graduateSelling?: 'off' | 'after_completion' | 'anytime';
+  /** Створено за фото: показується позначкою в редакторі; змінити з клієнта не можна. */
+  origin?: CourseOriginV2;
   skills: CourseSkillV2[];
   modules: CourseModuleV2[];
   createdAt: string;

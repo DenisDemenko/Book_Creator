@@ -215,7 +215,7 @@ const ai = { mode: 'ok' as 'ok' | 'fail' | 'junk', calls: [] as any[], budget: t
 
 /** Підставна модель: з промпту читає id кадрів (прохід 2) або id уроків (прохід 3). */
 const fakeWrite = async (p: any) => {
-  ai.calls.push({ ownerId: p.ownerId, system: p.system, prompt: p.prompt, label: p.label, principal: p.req?.principal?.id });
+  ai.calls.push({ ownerId: p.ownerId, draftId: p.draftId, system: p.system, prompt: p.prompt, label: p.label, principal: p.req?.principal?.id });
   if (ai.mode === 'fail') throw new Error('Модель перевантажена');
   if (ai.mode === 'junk') return { text: 'вибачте, не можу', modelId: 'test-text' };
   if (/Кадри \(за порядком зйомки\)/.test(p.prompt)) {
@@ -254,6 +254,10 @@ routes.registerPhotoDraftRoutes(app, {
   describe: async () => ({ description: 'Заготовка з вишні на верстаку.', tags: ['вишня'], modelId: 'test-vision' }),
   checkAiBudget: async () => (ai.budget ? { allowed: true } : { allowed: false, reasonUk: 'Вичерпано ліміт ШІ' }),
   writeText: fakeWrite,
+  aiUsage: async ({ draftId }) => {
+    const n = ai.calls.filter((c) => c.draftId === draftId).length;
+    return { calls: n, costUsd: n * 0.01 };
+  },
   sinks: { createCourse: sinks.createCourseDraft, createExpress: sinks.createExpressInstruction, createInboxScans: sinks.createInboxScans },
   schedule: (task) => {
     tasks.push(task);
@@ -457,6 +461,10 @@ t('курс створено для викладача, у статусі draft'
 t('модулі й уроки з чернетки, текст — в описі уроку', course.modules.length === 2 && course.modules[0].lessons[0].description?.startsWith('## ') === true && course.modules[0].lessons[0].goal !== undefined);
 const urls = course.modules.flatMap((m) => m.lessons.flatMap((l) => l.photoUrls));
 t('усі 5 кадрів — фото уроків із медіатеки автора', urls.length === 5 && urls.every((u) => u.startsWith('/api/media/file/')), urls.join());
+const origin0 = course.origin!;
+t('курс запам\'ятав походження: чернетка, кількість кадрів', origin0?.kind === 'photo-draft' && origin0.draftId === cd && origin0.photoCount === 5);
+t('кожен урок має позначку «написано ШІ» (текст, назва)', Object.keys(origin0.aiFields).length === 2 && Object.values(origin0.aiFields).every((f) => f.includes('description') && f.includes('title')), JSON.stringify(origin0.aiFields));
+t('витрати ШІ на чернетку — з журналу', (origin0.ai?.calls ?? 0) >= 4 && origin0.ai?.costUsd === Math.round((origin0.ai?.calls ?? 0) * 0.01 * 10000) / 10000, JSON.stringify(origin0.ai));
 t('обкладинка — перший кадр, ціни ще немає (її ставить автор)', course.coverUrl === urls[0] && course.priceMinor === undefined && course.audience.join() === 'початківці');
 t('повторний submit — 409 wrong_status, другого курсу немає', isError(await call('POST', `${PD}/${cd}/submit`, { token: grab }), 409, 'wrong_status') && courses.listCoursesForOwner('u-a').length === 1);
 t('відправлену не правлять і не відкидають', isError(await call('DELETE', `${PD}/${cd}`, { token: grab }), 409, 'wrong_status'));

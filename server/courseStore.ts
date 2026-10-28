@@ -15,6 +15,7 @@
 import { randomUUID } from 'node:crypto';
 import { getDb, unavailableMessage } from './db';
 import { COURSE_CURRENCY, normalizeGraduateSelling, type GraduateSelling } from '../src/utils/coursePublishRules';
+import { normalizeOrigin, reconcileOrigin, type CourseOrigin } from './courseOrigin';
 
 function requireDb() {
   const db = getDb();
@@ -92,6 +93,8 @@ export interface Course {
   currency?: string;
   /** Коли студенти можуть продавати власні роботи, зроблені під час курсу. Не задано = після завершення. */
   graduateSelling?: GraduateSelling;
+  /** Звідки курс узявся (чернетка за фото) і що в ньому ще не правив автор. Виставляє лише сервер. */
+  origin?: CourseOrigin;
   skills: CourseSkill[];
   modules: CourseModuleV2[];
   createdAt: string;
@@ -139,6 +142,7 @@ function toCourse(row: Row): Course {
     // бо інакше вітрина й не продасть.
     currency: COURSE_CURRENCY,
     graduateSelling: normalizeGraduateSelling(data.graduateSelling),
+    origin: normalizeOrigin(data.origin),
     skills: data.skills ?? [],
     modules: data.modules ?? [],
     createdAt: row.created_at,
@@ -171,6 +175,7 @@ export function createCourse(
     free: input.free === true ? true : undefined,
     currency: COURSE_CURRENCY,
     graduateSelling: normalizeGraduateSelling(input.graduateSelling),
+    origin: normalizeOrigin(input.origin),
     skills: input.skills ?? [],
     modules: input.modules ?? [],
     createdAt: now,
@@ -250,6 +255,9 @@ export function updateCourse(id: string, patch: Partial<Course>): Course | undef
   next.currency = COURSE_CURRENCY;
   next.graduateSelling = normalizeGraduateSelling(next.graduateSelling);
   next.free = next.free === true ? true : undefined;
+  // Походження не приймається від клієнта: береться збережене, а поля, які автор
+  // змінив цією правкою, перестають бути «написаними ШІ».
+  next.origin = reconcileOrigin(current.origin, current.modules, next.modules);
   // Редактор шле стерту ціну як null (undefined випав би з JSON і стара ціна
   // лишилась би): null — «ціну не задано».
   if (next.priceMinor === null || (next.priceMinor !== undefined && !Number.isFinite(Number(next.priceMinor)))) {

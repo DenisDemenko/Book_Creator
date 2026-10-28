@@ -10,6 +10,7 @@ import { resolveEngineKey } from '../platformKeys';
 import { resolveModuleModelId } from '../coreModuleModels';
 import { createCourse } from '../courseStore';
 import { createDraft as createExpressDraft } from '../expressStore';
+import { listUsageSince } from '../store';
 import { createScan, updateScan } from './externalApiStore';
 import type { CourseInput, InboxItem } from './photoDraftMapping';
 import type { WriteTextParams } from './photoDraftRoutes';
@@ -35,6 +36,21 @@ export async function writeWithCoreText(p: WriteTextParams): Promise<{ text: str
     label: p.label,
   });
   return { text: result.text, modelId };
+}
+
+/**
+ * Скільки ШІ коштувала чернетка: записи журналу витрат викладача, у підписі яких
+ * є id чернетки (описи кадрів і проходи 2–3). Не вдалося прочитати — `null`:
+ * відправку це не блокує.
+ */
+export async function aiUsageForDraft(p: { ownerId: string; draftId: string; since: string }): Promise<{ calls: number; costUsd: number } | null> {
+  try {
+    const rows = (await listUsageSince(p.since)).filter((r) => r.userId === p.ownerId && typeof r.context === 'string' && r.context.includes(p.draftId));
+    const costUsd = Math.round(rows.reduce((sum, r) => sum + (Number(r.costUsd) || 0), 0) * 10_000) / 10_000;
+    return { calls: rows.length, costUsd };
+  } catch {
+    return null;
+  }
 }
 
 export async function createCourseDraft(ownerId: string, input: CourseInput): Promise<string> {

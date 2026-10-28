@@ -640,6 +640,13 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
                     {STATUS_LABELS[c.status]}
                   </span>
                 </div>
+                {c.origin && (
+                  <div className="mt-1.5">
+                    <span data-course-origin="photo-draft" className="px-2 py-0.5 rounded-full text-[10px] font-bold border border-violet-500/40 bg-violet-500/10 text-violet-200">
+                      Створено за фото
+                    </span>
+                  </div>
+                )}
                 <div className="mt-1.5 text-[11px] text-slate-500">
                   {c.modules.length} модулів · {c.modules.reduce((n, m) => n + m.lessons.length, 0)} уроків
                 </div>
@@ -683,6 +690,15 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
         >
           {STATUS_LABELS[course.status]}
         </span>
+        {course.origin && (
+          <span
+            data-course-origin="photo-draft"
+            title={`Курс створено з ${course.origin.photoCount} кадрів у GrabFusion.${course.origin.ai ? ` Витрати ШІ: $${course.origin.ai.costUsd.toFixed(2)} (${course.origin.ai.calls} звернень).` : ''}`}
+            className="px-2.5 py-1.5 rounded-xl text-[11px] font-bold border border-violet-500/40 bg-violet-500/10 text-violet-200"
+          >
+            Створено за фото{course.origin.ai ? ` · ШІ $${course.origin.ai.costUsd.toFixed(2)}` : ''}
+          </span>
+        )}
         {access !== 'manage' && (
           <span className="px-2 py-1 rounded-full text-[10px] font-bold border border-sky-500/40 bg-sky-500/10 text-sky-200" data-course-access={access}>
             {access === 'edit' ? L('Співавтор · редагування', 'Co-author · edit') : L('Лише перегляд', 'View only')}
@@ -1048,6 +1064,11 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Урок</h3>
               <input value={selectedLesson.title} onChange={(e) => patchLesson(selectedModule.id, selectedLesson.id, { title: e.target.value })} placeholder="Назва уроку" className={inputCls} />
               <input value={selectedLesson.goal ?? ''} onChange={(e) => patchLesson(selectedModule.id, selectedLesson.id, { goal: e.target.value })} placeholder="Мета одним реченням" className={inputCls} />
+              {course.origin?.aiFields[selectedLesson.id]?.includes('description') && (
+                <div data-ai-written="description" className="px-3 py-2 rounded-xl border border-violet-500/40 bg-violet-500/10 text-[11px] text-violet-200">
+                  Текст цього уроку написав ШІ за кадрами майстра. Перевірте факти й відредагуйте — позначка зникне після вашої правки.
+                </div>
+              )}
               <textarea value={selectedLesson.description ?? ''} onChange={(e) => patchLesson(selectedModule.id, selectedLesson.id, { description: e.target.value })} placeholder="Опис уроку" rows={3} className={inputCls} />
               <LinesEditor label="Зміст уроку" lines={selectedLesson.topics} onChange={(topics) => patchLesson(selectedModule.id, selectedLesson.id, { topics })} />
               <input value={selectedLesson.videoUrl ?? ''} onChange={(e) => patchLesson(selectedModule.id, selectedLesson.id, { videoUrl: e.target.value })} placeholder="Відео уроку (YouTube/Vimeo URL)" className={inputCls} />

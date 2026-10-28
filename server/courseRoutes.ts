@@ -52,8 +52,9 @@ export interface CourseRoutesDeps {
  * (раніше автор міг сам поставити «Опубліковано» в обхід черги), валюта —
  * завжди гривня.
  */
-function authorPatch(body: unknown): Partial<Course> {
-  const { status: _s, publishedAt: _p, ownerId: _o, id: _i, createdAt: _c, updatedAt: _u, currency: _cur, ...rest } =
+export function authorPatch(body: unknown): Partial<Course> {
+  // `origin` виставляє лише сервер (відправка чернетки за фото): редактор шле весь курс, і прийняти його назад значило б дозволити підробку.
+  const { status: _s, publishedAt: _p, ownerId: _o, id: _i, createdAt: _c, updatedAt: _u, currency: _cur, origin: _or, ...rest } =
     (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
   // Невідоме значення «Продаж робіт студентів» не має мовчки скидати вибір автора.
   if ('graduateSelling' in rest && !GRADUATE_SELLING_MODES.includes(rest.graduateSelling as GraduateSelling)) {

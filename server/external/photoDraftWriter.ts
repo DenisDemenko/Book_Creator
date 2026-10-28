@@ -32,7 +32,7 @@ export async function writeWithCoreText(p: WriteTextParams): Promise<{ text: str
     json: true,
     generation: { temperature: 0.4, maxTokens: p.maxTokens, timeoutMs: 170_000 },
     req: p.req,
-    label: p.label,
+    label: `${p.label} ${p.draftId}`,
   });
   return { text: result.text, modelId };
 }

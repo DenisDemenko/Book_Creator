@@ -81,6 +81,8 @@ const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
 export interface DescribePhotoParams {
   ownerId: string;
+  /** Для підпису витрат у журналі: з нього видно, скільки ШІ коштувала чернетка. */
+  draftId: string;
   mimeType: string;
   base64: string;
   context: DescribeContext;
@@ -90,6 +92,7 @@ export interface DescribePhotoParams {
 /** Текстовий прохід (2 або 3): у продукті — photoDraftSinks.writeWithCoreText. */
 export interface WriteTextParams {
   ownerId: string;
+  draftId: string;
   system: string;
   prompt: string;
   maxTokens: number;
@@ -123,6 +126,8 @@ export interface PhotoDraftDeps {
   writeText?: (p: WriteTextParams) => Promise<{ text: string; modelId: string }>;
   /** Відправка. Немає — submit відповідає 503. */
   sinks?: PhotoDraftSinks;
+  /** Витрати ШІ на чернетку з журналу витрат (у продукті — photoDraftSinks.aiUsageForDraft). */
+  aiUsage?: (p: { ownerId: string; draftId: string; since: string }) => Promise<{ calls: number; costUsd: number } | null>;
   schedule?: (task: () => Promise<void>) => void;
   now?: () => Date;
 }
@@ -368,7 +373,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       };
       let patch: Partial<StoredPhoto>;
       try {
-        const result = await deps.describe({ ownerId, mimeType, base64, context, req });
+        const result = await deps.describe({ ownerId, draftId, mimeType, base64, context, req });
         patch = { status: 'described', description: result.description, tags: result.tags, modelId: result.modelId || null, error: null };
       } catch (err) {
         console.warn('[photoDrafts] опис кадру:', String((err as Error)?.message || err).slice(0, 300));
@@ -920,6 +925,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       finishJob(ownerId, draftId, startedAt, 'structure', async () => {
         const out = await deps.writeText!({
           ownerId,
+          draftId,
           system: structureSystemInstruction(snapshot.kind),
           prompt: buildStructurePrompt(snapshot),
           maxTokens: 8192,
@@ -958,6 +964,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       finishJob(ownerId, draftId, startedAt, 'generate', async () => {
         const out = await deps.writeText!({
           ownerId,
+          draftId,
           system: generateSystemInstruction(snapshot.kind),
           prompt: buildGeneratePrompt(snapshot, module),
           maxTokens: 8192,
@@ -1012,7 +1019,9 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
           }
           let target: SubmitTarget;
           if (d.kind === 'course') {
-            const id = await sinks.createCourse(ownerId, toCourseInput(d));
+            const at = now().toISOString();
+            const ai = deps.aiUsage ? await deps.aiUsage({ ownerId, draftId, since: d.createdAt }).catch(() => null) : null;
+            const id = await sinks.createCourse(ownerId, toCourseInput(d, { at, ai }));
             target = { kind: 'course', id, studioUrl: `/courses/${id}` };
           } else if (d.kind === 'instruction') {
             const id = await sinks.createExpress(ownerId, toExpressPayload(d));

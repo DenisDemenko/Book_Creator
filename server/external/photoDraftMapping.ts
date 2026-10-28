@@ -13,6 +13,7 @@
  */
 
 import { LIBRARY_MEDIA_PREFIX } from '../../src/utils/libraryMediaUrl';
+import { ORIGIN_LESSON_FIELDS, type CourseOrigin, type OriginLessonField } from '../courseOrigin';
 import type { DraftLesson, DraftModule } from '../../shared/photoDraftContract';
 import type { StoredDraft } from './photoDraftStore';
 
@@ -48,10 +49,25 @@ export interface CourseInput {
   summary?: string;
   audience: string[];
   coverUrl?: string;
+  /** Позначка «створено за фото» і поля, що написав ШІ (дивись server/courseOrigin.ts). */
+  origin: CourseOrigin;
   modules: CourseInputModule[];
 }
 
-export function toCourseInput(draft: StoredDraft): CourseInput {
+/** Поля уроку, написані ШІ й не правлені викладачем у чернетці; `body` у чернетці — це `description` курсу. */
+function aiFieldsOf(lesson: DraftLesson): OriginLessonField[] {
+  const fields = lesson.aiFields.map((f) => (f === 'body' ? 'description' : f)).filter((f): f is OriginLessonField => (ORIGIN_LESSON_FIELDS as readonly string[]).includes(f));
+  return fields.filter((f) => (f === 'description' ? !!lesson.body : f === 'goal' ? !!lesson.goal : f === 'topics' ? lesson.topics.length > 0 : !!lesson.title));
+}
+
+export function toCourseInput(draft: StoredDraft, opts: { at: string; ai?: { calls: number; costUsd: number } | null }): CourseInput {
+  const aiFields: Record<string, OriginLessonField[]> = {};
+  for (const m of draft.structure?.modules ?? []) {
+    for (const l of m.lessons) {
+      const fields = aiFieldsOf(l);
+      if (fields.length) aiFields[l.lessonId] = fields;
+    }
+  }
   const modules = (draft.structure?.modules ?? []).map(
     (m): CourseInputModule => ({
       id: m.moduleId,
@@ -77,6 +93,14 @@ export function toCourseInput(draft: StoredDraft): CourseInput {
     ...(summary ? { summary } : {}),
     audience: draft.audience ? [draft.audience] : [],
     ...(firstPhoto ? { coverUrl: libraryUrl(firstPhoto.assetId) } : {}),
+    origin: {
+      kind: 'photo-draft',
+      draftId: draft.id,
+      createdAt: opts.at,
+      photoCount: draft.photos.length,
+      aiFields,
+      ...(opts.ai ? { ai: opts.ai } : {}),
+    },
     modules,
   };
 }
