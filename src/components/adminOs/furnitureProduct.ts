@@ -10,6 +10,8 @@
  * (коли дійде до мосту) читали ОДНУ форму, а не три копії з розбіжностями.
  */
 
+import type { KitSpec } from './kitSpec';
+
 export type FurnitureProductStatus = 'draft' | 'published' | 'archived';
 
 /** Вид медіа-файла картки: фото (типово) чи коротке відео виробу. */
@@ -261,6 +263,11 @@ export interface FurnitureProduct {
    * або слаг не повернувся (старий запис до цього поля).
    */
   slug?: string | null;
+  /**
+   * Специфікація дитячого набору (K1): виріб із цим полем і `kit.enabled` — набір.
+   * Поле необовʼязкове: старі картки його не мають. Нормалізується на сервері (`normalizeKit`).
+   */
+  kit?: KitSpec;
   updatedAt: string;
 }
 

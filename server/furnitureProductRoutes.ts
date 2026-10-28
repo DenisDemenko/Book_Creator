@@ -42,6 +42,8 @@ import {
   type FurnitureVariant,
 } from '../src/components/adminOs/furnitureProduct';
 
+import { kitCost, kitIssues, normalizeKit } from '../src/components/adminOs/kitSpec';
+
 const DRAFTS_KEY = 'furniture_product_drafts';
 
 /**
@@ -355,10 +357,24 @@ export function registerFurnitureProductRoutes(app: Express): void {
     const drafts = await readDrafts();
     const idx = drafts.findIndex((d) => d.id === product.id);
     const clean: FurnitureProduct = { ...product, updatedAt: new Date().toISOString() };
+    // Специфікацію набору (K1) приймаємо лише в нормалізованому вигляді: межі, унікальні id рядків.
+    if (product.kit !== undefined) {
+      const kit = normalizeKit(product.kit);
+      if (kit) clean.kit = kit;
+      else delete clean.kit;
+    }
     if (idx >= 0) drafts[idx] = clean;
     else drafts.unshift(clean);
     await writeDrafts(drafts);
     res.json({ product: clean });
+  });
+
+  /** Собівартість набору за збереженою специфікацією (K1): ті самі цифри, що в редакторі; джерело для K3 і K5. */
+  app.get('/api/admin/furniture-products/:id/kit-cost', requireAdmin, async (req, res) => {
+    const product = (await readDrafts()).find((d) => d.id === req.params.id);
+    if (!product) return res.status(404).json({ error: 'Чорнетку виробу не знайдено.' });
+    if (!product.kit?.enabled) return res.status(404).json({ error: 'Цей виріб не є набором.' });
+    res.json({ kit: product.kit, cost: kitCost(product.kit), issues: kitIssues(product.kit) });
   });
 
   app.delete('/api/admin/furniture-products/:id', requireAdmin, async (req, res) => {

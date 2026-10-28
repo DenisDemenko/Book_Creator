@@ -68,6 +68,8 @@ import {
   type FurnitureVariant,
   type FurnitureWoodTone,
 } from './furnitureProduct';
+import { KitSpecEditor } from './KitSpecEditor';
+import { kitCost } from './kitSpec';
 
 // ---------------------------------------------------------------------------
 // Дві теми — та сама структура, різні класи Tailwind.
@@ -1055,6 +1057,32 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
                   ))}
                 </datalist>
               </div>
+            </Section>
+
+            {/*
+              Набір (K1): специфікація й собівартість дитячого конструктора. Поле `kit`
+              лежить у тій самій картці; вимкнений набір нічого не змінює для звичайних виробів.
+            */}
+            <Section
+              t={t}
+              icon={<Package className="w-4 h-4" />}
+              title="Набір-конструктор: специфікація й собівартість"
+              sub="Деталі з кількістю, пакування, робота й рекомендована ціна — одне джерело для інструкції та коробки"
+              right={
+                product.kit?.enabled ? (
+                  <span className={`text-[10px] font-mono px-2.5 py-1 rounded border ${t.badgeOk}`}>
+                    {kitCost(product.kit).totalUah.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} грн
+                  </span>
+                ) : undefined
+              }
+            >
+              <KitSpecEditor
+                kit={product.kit}
+                onChange={(kit) => patch({ kit })}
+                priceUah={product.priceUah}
+                onApplyPrice={(price) => patch(price)}
+                t={t}
+              />
             </Section>
 
             <Section t={t} icon={<Sparkles className="w-4 h-4" />} title="Опис товару та контент" sub="Маркетинговий текст, концепція виробу та слоти" right={<span className={`text-[10px] font-mono px-2.5 py-1 rounded border ${t.badge}`}>WYSIWYG / Markdown</span>}>
