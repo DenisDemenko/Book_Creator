@@ -836,6 +836,7 @@ export interface HeroArcState {
 }
 
 export interface Book {
+  fundingPromotion?: { documentId: string; campaignId: string; kind: 'letter' | 'book' };
   storyWorld?: StoryWorld;
   storyLocations?: StoryLocation[];
   wizardContext?: { entryMode: string; framework: string; canonicalSourceBookId?: string;
