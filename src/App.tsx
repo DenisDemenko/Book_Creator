@@ -79,6 +79,7 @@ import { useTheme } from './hooks/useTheme';
 import { useRealtimeSync } from './hooks/useRealtimeSync';
 import { estimatePageCount, calculateWordCount } from './utils/helpers';
 import { appendTextToChapterEnd } from './utils/bookText';
+import { FundingPromotionWorkspace, pendingFundingPromotion } from './components/FundingPromotionWorkspace';
 import { canAccessTab, canOpenAdminPanel, getDefaultTabForRole, getRoleInfo } from './utils/rbac';
 import { diffSectionChange, applySectionPatch, type SectionPatch } from './utils/bookDiff';
 import { exportBookToBackupZip, BookBackupManifest } from './utils/bookBackup';
@@ -445,6 +446,7 @@ export default function App() {
   // маркетплейсу, найчастіше ще не увійшла, і за екраном входу перехід
   // просто згорів би, а параметр із адреси вже зник.
   const [pendingEntry, setPendingEntry] = useState<StudioEntryIntent | null>(null);
+  const [pendingPromotion, setPendingPromotion] = useState<string | null>(pendingFundingPromotion);
   /** Задум книги з маркетплейсу — стане полем «Зерно» в експрес-майстрі. */
   const [entryIdea, setEntryIdea] = useState<string | null>(null);
   /** Гілка майстра, обрана за людину на вході з маркетплейсу (див. нижче). */
@@ -2212,6 +2214,22 @@ export default function App() {
           </button>
         </div>
       )}
+
+      <FundingPromotionWorkspace
+        book={book}
+        userId={auth.user?.id}
+        loading={auth.loading || isHydrating}
+        pendingId={pendingPromotion}
+        onEntryHandled={() => setPendingPromotion(null)}
+        onOpen={handleOpenExistingBook}
+        onUpdate={(updated) => handleUpdateBook(updated)}
+        onSave={async () => {
+          if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+          const ok = await persistBook(book);
+          if (ok) setHasUnsavedChanges(false);
+          return ok;
+        }}
+      />
 
       {/* Save Success Notification Toast */}
       {saveToast && (
