@@ -1,14 +1,16 @@
 <!doctype html>
-<html lang="uk">
+<html lang="uk" data-surface="studio-admin">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Fusion Lab — Конструктор столів</title>
+    <title>Fusion Lab Studio — Слеби та столи</title>
     <meta
       name="description"
       content="Бібліотека дерев’яних слебів та конструктор столів з епоксидною смолою"
     />
     <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&display=swap" />
+    <link rel="stylesheet" href="studio-admin.css" />
   </head>
   <body>
     <aside class="sidebar">
@@ -139,30 +141,46 @@
                 <i class="oval-icon"></i>Овал
               </button>
             </div>
-            <div class="field-row">
+            <div class="field-row" id="tableDimensions">
               <label
-                >Довжина, см<input
+                ><span id="tableLengthLabel">Довжина, см</span><input
                   id="tableL"
+                  required
                   type="number"
                   min="40"
                   max="350"
+                  step="0.1"
+                  inputmode="decimal"
+                  aria-describedby="dimensionHint dimensionError"
                   value="180" /></label
-              ><label
+              ><label id="tableWidthField"
                 >Ширина, см<input
                   id="tableW"
+                  required
                   type="number"
                   min="40"
                   max="180"
+                  step="0.1"
+                  inputmode="decimal"
+                  aria-describedby="dimensionHint dimensionError"
                   value="90"
               /></label>
             </div>
+            <p id="dimensionHint" class="hint"></p>
+            <p id="dimensionError" class="warning" role="status" hidden>
+              Введіть розміри в указаних межах. Розрахунок буде доступний після
+              виправлення значення.
+            </p>
             <label class="block-label"
               >Товщина стільниці, см<input
                 id="tableT"
+                required
                 type="number"
                 min="1"
                 max="15"
                 step="0.1"
+                inputmode="decimal"
+                aria-describedby="dimensionHint dimensionError"
                 value="4"
             /></label>
             <p class="hint">
@@ -223,8 +241,12 @@
                 hidden
               />
               <p class="hint" id="resinTextureStatus" role="status">
-                PNG, JPG або WEBP · до 12 МБ
+                PNG, JPG або WEBP · до 35 МБ · автоматичне стиснення
               </p>
+              <div id="resinTextureProcessing" class="texture-processing" hidden>
+                <p id="resinTextureProgressText" class="hint" aria-live="polite">Підготовка · 0%</p>
+                <progress id="resinTextureProgress" max="100" value="0" aria-labelledby="resinTextureProgressText"></progress>
+              </div>
               <div
                 id="resinTexturePreview"
                 class="resin-texture-preview"
@@ -270,8 +292,9 @@
                 ><input type="checkbox" id="approvePrice" />Погоджую
                 конфігурацію та вартість</label
               ><button class="primary full" id="addCart" hidden>
-                У передзамовлення →</button
-              ><small>Передоплата 50% · решта після виготовлення</small>
+                Додати стіл у кошик →</button
+              ><p id="cartError" class="warning" role="alert" hidden></p>
+              <small>Після погодження додайте стіл у кошик. Передоплата 50% · решта після виготовлення.</small>
             </div>
             <div class="craft-note">
               ✳
@@ -345,8 +368,12 @@
             hidden
           />
           <p class="hint" id="presetTextureStatus" role="status">
-            PNG, JPG або WEBP · до 12 МБ
+            PNG, JPG або WEBP · до 35 МБ · автоматичне стиснення
           </p>
+              <div id="presetTextureProcessing" class="texture-processing" hidden>
+                <p id="presetTextureProgressText" class="hint" aria-live="polite">Підготовка · 0%</p>
+                <progress id="presetTextureProgress" max="100" value="0" aria-labelledby="presetTextureProgressText"></progress>
+              </div>
           <button class="primary" type="submit" id="savePresetTexture" disabled>
             Опублікувати для покупців
           </button>
@@ -385,12 +412,15 @@
         <div class="page-heading">
           <div>
             <p class="eyebrow">АДМІНПАНЕЛЬ · ВИРОБНИЦТВО</p>
-            <h1>Від задуму до столу<span>.</span></h1>
+            <h1>Замовлення стільниць<span>.</span></h1>
             <p class="muted">
-              Передзамовлення з демонстраційною передоплатою 50%.
+              Замовлення з кошиків покупців. Приймайте стільницю в роботу після підтвердженої передоплати 50%.
             </p>
           </div>
+          <button type="button" class="secondary" id="refreshOrders">Оновити замовлення</button>
         </div>
+        <div class="species-buttons" id="orderFilters" role="group" aria-label="Статус замовлень"></div>
+        <p id="ordersError" class="warning" role="alert" hidden></p>
         <div id="ordersList"></div>
       </section>
       <footer>

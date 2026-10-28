@@ -76,11 +76,13 @@ export function rtfText(value: string): string {
  * DesignCraft Tagged Text instead of flattening it. Unknown constructs stay
  * readable as text; links keep their label and images keep their alt text.
  */
-function taggedInline(markdown: string, fontFamily: string, baseTypeface = ''): string {
-  const input = String(markdown || '')
+function taggedInline(markdown: string, fontFamily: string, baseTypeface = '', heading = false): string {
+  const source = String(markdown || '')
     .replace(/^>\s?/gm, '')
-    .replace(/^[-*+]\s+/gm, '• ')
-    .replace(/^\d+[.)]\s+/gm, '');
+    .replace(/^[-*+]\s+/gm, '• ');
+  // A numbered chapter title is not a list item. Removing its prefix also
+  // makes DesignCraft's TOC disagree with the source and aborts publication.
+  const input = heading ? source : source.replace(/^\d+[.)]\s+/gm, '');
   const token = /!\[([^\]]*)\]\([^)]*\)|\[([^\]]+)\]\([^)]*\)|\*\*([^*]+)\*\*|__([^_]+)__|(?<!\*)\*([^*]+)\*(?!\*)|(?<!_)_([^_]+)_(?!_)|`([^`]+)`|\\([\\`*_[\]{}()#+\-.!])/g;
   const restore = `<cTypeface:${baseTypeface}>`;
   let out = '';
@@ -238,7 +240,7 @@ export function buildDesigncraftRtf(
       lines.push(
         paragraph(
           'Heading 1',
-          taggedInline(block.slice(2), specimen ? '' : h1Font, specimen ? '' : h1Face),
+          taggedInline(block.slice(2), specimen ? '' : h1Font, specimen ? '' : h1Face, true),
           specimen ? '' : `<cFont:${h1Font}><cTypeface:${h1Face}><cSize:${h1Pt}>`,
           true
         )
@@ -252,7 +254,7 @@ export function buildDesigncraftRtf(
       lines.push(
         paragraph(
           'Heading 2',
-          taggedInline(block.slice(3), specimen ? '' : h2Font, specimen ? '' : h2Face),
+          taggedInline(block.slice(3), specimen ? '' : h2Font, specimen ? '' : h2Face, true),
           specimen ? '' : `<cFont:${h2Font}><cTypeface:${h2Face}><cSize:${h2Pt}>`,
           true
         )

@@ -19,7 +19,12 @@
 
 import type { Express, Request, Response } from 'express';
 import { requireAdmin, requireAuth } from './auth';
-import { cleanCategorySlug, cleanHighlights } from './marketplaceBridge';
+import { PdfEngineError } from './pdf/engines/types';
+import {
+  cleanCategorySlug,
+  cleanHighlights,
+  MarketplaceBridgeError,
+} from './marketplaceBridge';
 import { LabyrinthError } from './core/labyrinth/model';
 import { getCoreJobQueue, getCoreRepository } from './core';
 import { scheduleCoreSync } from './core/sync';
@@ -48,6 +53,7 @@ export interface BookRoutesDeps {
     bookId: string;
     variant: 'code' | 'design';
     formats: ArtifactFormat[];
+    engineId?: string;
     trimId?: string;
     samplePages?: number;
     withSample: boolean;
@@ -65,6 +71,15 @@ export interface BookRoutesDeps {
 }
 
 function fail(res: Response, err: unknown, fallback: string): void {
+  if (err instanceof MarketplaceBridgeError) {
+    res.status(err.status).json({ error: err.message, kind: err.kind });
+    return;
+  }
+  if (err instanceof PdfEngineError) {
+    const status = err.kind === 'timeout' ? 504 : err.kind === 'engine' ? 502 : err.kind === 'bad_input' ? 400 : 503;
+    res.status(status).json({ error: err.message, kind: err.kind, engineId: err.engineId });
+    return;
+  }
   if (err instanceof BookRevisionConflict) {
     // 409, а не 400: клієнт зробив усе правильно, просто світ змінився.
     // Разом із помилкою віддаємо ПОТОЧНУ ревізію, щоб інтерфейс міг
@@ -292,6 +307,7 @@ export function registerBookRoutes(app: Express, deps: BookRoutesDeps): void {
         bookId: req.params.id,
         variant: req.body?.variant === 'design' ? 'design' : 'code',
         formats: formats.length ? formats : ['digital'],
+        engineId: typeof req.body?.engineId === 'string' ? req.body.engineId : undefined,
         trimId: req.body?.trimId ? String(req.body.trimId) : undefined,
         samplePages: req.body?.samplePages,
         withSample: req.body?.sample !== false,

@@ -1,7 +1,9 @@
 "use strict";
 (async () => {
   const bridge = window.SlabBridge;
-  const admin = new URLSearchParams(location.search).get("mode") === "admin";
+  const mode = new URLSearchParams(location.search).get("mode");
+  const admin = mode === "admin";
+  const inventory = admin || mode === "inventory";
   const $ = (id) => document.getElementById(id),
     $$ = (s) => [...document.querySelectorAll(s)],
     esc = (s) =>
@@ -48,8 +50,6 @@
     if (admin)
       db.orders = await bridge.request("GET", "/tables/admin/production");
   }
-  if (admin)
-    db.orders = await bridge.request("GET", "/tables/admin/production");
   let design = {
       shape: "oval",
       l: 180,
@@ -61,7 +61,37 @@
     },
     selected = null,
     estimate = null,
+    quotePending = false,
+    cartPending = false,
+    texturePending = false,
+    designRevision = 0,
     toastTimer;
+  const draftKey = "fusionlab:table-builder:draft:v1";
+  if (!inventory) {
+    try {
+      const draft = JSON.parse(sessionStorage.getItem(draftKey) || "null");
+      const d = draft?.design;
+      const between = (n, min, max) => Number.isFinite(n) && n >= min && n <= max;
+      if (d && Date.now() - draft.savedAt < 86400000 &&
+          ["square", "round", "oval"].includes(d.shape) &&
+          between(d.l, 40, 350) && between(d.w, 40, 180) && between(d.t, 1, 15) &&
+          (d.shape === "oval" || d.l === d.w) && /^#[0-9a-f]{6}$/i.test(d.color) &&
+          ["metal", "wood", "none"].includes(d.legs) && Array.isArray(d.pieces) &&
+          d.pieces.length <= 6 && d.pieces.every(p =>
+            typeof p.uid === "string" && available(p.id) &&
+            between(p.x, -1000, 1000) && between(p.y, -1000, 1000) && between(p.angle, -360, 360)) &&
+          (!d.resinTexture || (typeof d.resinTexture.name === "string" &&
+            d.resinTexture.name.length <= 120 && typeof d.resinTexture.image === "string" &&
+            d.resinTexture.image.length <= 400000 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(d.resinTexture.image)))) {
+        design = d;
+      } else sessionStorage.removeItem(draftKey);
+    } catch { /* Storage may be unavailable in private browsing. */ }
+  }
+  function saveDraft() {
+    if (inventory) return;
+    try { sessionStorage.setItem(draftKey, JSON.stringify({ design, savedAt: Date.now() })); }
+    catch { /* The current composition remains usable when storage is full. */ }
+  }
   function toast(s) {
     $("toast").textContent = s;
     $("toast").classList.add("show");
@@ -87,9 +117,10 @@
       name = "inventory";
     if (
       !names[name] ||
-      (!admin && ["inventory", "costs", "orders", "textures"].includes(name))
+      (!inventory && name === "inventory") ||
+      (!admin && ["costs", "orders", "textures"].includes(name))
     )
-      name = "builder";
+      name = inventory ? "inventory" : "builder";
     if (name === "cart") {
       bridge.navigate("/cart");
       return;
@@ -104,7 +135,7 @@
     if (name === "inventory") renderInventory();
     if (name === "costs") renderCosts();
     if (name === "textures") renderPresetAdmin();
-    if (name === "cart" || name === "orders") renderOrders();
+    if (name === "orders") void refreshOrders();
     window.scrollTo(0, 0);
   }
   $$("[data-view]").forEach((b) => (b.onclick = () => view(b.dataset.view)));
@@ -176,6 +207,7 @@
     return Math.round(n * 10) / 10;
   }
   function invalidate() {
+    designRevision++;
     estimate = null;
     $("approvePrice").checked = false;
     $("approveLabel").hidden = true;
@@ -184,6 +216,8 @@
     $("estimate").innerHTML =
       '<p class="muted">Композицію змінено. Розрахуйте актуальну вартість.</p>';
     $("designWarning").textContent = "";
+    $("cartError").hidden = true;
+    saveDraft();
   }
   let librarySpecies = "",
     inventorySpecies = "";
@@ -264,6 +298,7 @@
       };
     if (!count) design.t = s.t;
     $("tableT").value = design.t;
+    dimensionsValid();
     design.pieces.push(p);
     selected = p.uid;
     invalidate();
@@ -274,42 +309,61 @@
   ["minLength", "minWidth"].forEach((id) =>
     $(id).addEventListener("input", renderLibrary),
   );
-  function readDimensions() {
-    let l = Number($("tableL").value),
-      w = Number($("tableW").value),
-      t = Number($("tableT").value);
-    if (
-      !Number.isFinite(l + w + t) ||
-      l < 40 ||
-      l > 350 ||
-      w < 40 ||
-      w > 180 ||
-      t < 1 ||
-      t > 15
-    ) {
-      toast("Розміри: довжина 40–350 см, ширина 40–180 см, товщина 1–15 см.");
-      syncDimensions();
-      return;
+  function dimensionsValid(showError = false) {
+    const fields = [$("tableL"), $("tableW"), $("tableT")];
+    const valid = fields.every(
+      (field) => field.disabled || field.validity.valid,
+    );
+    for (const field of fields) {
+      if (!field.disabled && !field.validity.valid && showError)
+        field.setAttribute("aria-invalid", "true");
+      else field.removeAttribute("aria-invalid");
     }
-    if (design.shape !== "oval") {
-      l = Math.min(l, 180);
-      w = l;
-    }
-    Object.assign(design, { l, w, t });
-    syncDimensions();
+    $("dimensionError").hidden = valid || !showError;
+    $("calculate").disabled = !valid || quotePending || texturePending;
+    return valid;
+  }
+  function readDimensions(event) {
+    // Incomplete keyboard input stays in the field. Never restore an old value
+    // while the customer is clearing or typing a replacement dimension.
     invalidate();
+    if (!dimensionsValid(event?.type !== "input")) return false;
+    const l = $("tableL").valueAsNumber,
+      w = design.shape === "oval" ? $("tableW").valueAsNumber : l,
+      t = $("tableT").valueAsNumber;
+    Object.assign(design, { l, w, t });
+    saveDraft();
+    if (design.shape !== "oval") $("tableW").value = w;
     renderDesign();
+    return true;
   }
   function syncDimensions() {
     ["L", "W", "T"].forEach(
       (k) => ($("table" + k).value = design[k.toLowerCase()]),
     );
     $("tableW").disabled = design.shape !== "oval";
+    $("tableWidthField").hidden = design.shape !== "oval";
+    $("tableDimensions").style.gridTemplateColumns =
+      design.shape === "oval" ? "1fr 1fr" : "1fr";
     $("tableL").max = design.shape === "oval" ? 350 : 180;
+    $("tableLengthLabel").textContent =
+      design.shape === "round"
+        ? "Діаметр, см"
+        : design.shape === "square"
+          ? "Сторона, см"
+          : "Довжина, см";
+    $("dimensionHint").textContent =
+      (design.shape === "oval"
+        ? "Довжина 40–350 см · ширина 40–180 см."
+        : design.shape === "round"
+          ? "Діаметр кола 40–180 см."
+          : "Сторона квадрата 40–180 см.") + " Товщина 1–15 см.";
+    dimensionsValid();
   }
-  ["tableL", "tableW", "tableT"].forEach(
-    (id) => ($(id).onchange = readDimensions),
-  );
+  ["tableL", "tableW", "tableT"].forEach((id) => {
+    $(id).oninput = readDimensions;
+    $(id).onchange = readDimensions;
+  });
   $$("[data-shape]").forEach(
     (b) =>
       (b.onclick = () => {
@@ -375,12 +429,32 @@
       ),
     );
   }
+  function textureProgress(scope, progress) {
+    $(scope + "Processing").hidden = false;
+    $(scope + "Progress").value = progress.percent;
+    $(scope + "Progress").setAttribute(
+      "aria-valuetext",
+      progress.stage + ": " + progress.percent + "%",
+    );
+    $(scope + "ProgressText").textContent =
+      progress.stage + " · " + progress.percent + "%";
+  }
+  function textureSummary(texture) {
+    const s = texture.stats;
+    return s
+      ? `${s.width} × ${s.height} пкс · ${Math.ceil(s.bytes / 1024)} КіБ (вхідний файл ${num(s.sourceBytes / 1024 / 1024, 1)} МБ).`
+      : "";
+  }
   function clearResinTexture() {
     textureRevision++;
+    texturePending = false;
+    dimensionsValid();
     delete design.resinTexture;
     $("resinTextureFile").value = "";
     $("uploadResinTexture").disabled = false;
-    $("resinTextureStatus").textContent = "PNG, JPG або WEBP · до 12 МБ";
+    $("resinTextureStatus").textContent =
+      "PNG, JPG або WEBP · до 35 МБ · автоматичне стиснення";
+    $("resinTextureProcessing").hidden = true;
     syncResinTexture();
   }
   $("uploadResinTexture").onclick = () => $("resinTextureFile").click();
@@ -388,22 +462,31 @@
     const file = event.target.files[0];
     if (!file) return;
     const revision = ++textureRevision;
+    texturePending = true;
+    invalidate();
+    dimensionsValid();
     $("uploadResinTexture").disabled = true;
     $("resinTextureStatus").textContent = "Завантаження текстури…";
     try {
-      const texture = await ResinTexture.read(file);
+      const texture = await ResinTexture.read(file, (p) => {
+        if (revision === textureRevision) textureProgress("resinTexture", p);
+      });
       if (revision !== textureRevision) return;
-      design.resinTexture = texture;
+      design.resinTexture = { image: texture.image, name: texture.name };
       syncResinTexture();
       invalidate();
       renderDesign();
-      $("resinTextureStatus").textContent = "Текстура застосована до заливки.";
+      $("resinTextureStatus").textContent =
+        "Текстура застосована. " + textureSummary(texture);
     } catch (error) {
       if (revision !== textureRevision) return;
+      $("resinTextureProcessing").hidden = true;
       $("resinTextureStatus").textContent = error.message;
       toast(error.message);
     } finally {
       if (revision === textureRevision) {
+        texturePending = false;
+        dimensionsValid();
         $("uploadResinTexture").disabled = false;
         event.target.value = "";
       }
@@ -486,7 +569,10 @@
     $("savePresetTexture").disabled = true;
     $("presetTextureStatus").textContent = "Підготовка зображення…";
     try {
-      const texture = await ResinTexture.read(file);
+      const texture = await ResinTexture.read(file, (p) => {
+        if (revision === presetDraftRevision)
+          textureProgress("presetTexture", p);
+      });
       if (revision !== presetDraftRevision) return;
       presetDraft = texture;
       $("presetTextureDraft").src = texture.image;
@@ -494,9 +580,12 @@
       if (!$("presetTextureTitle").value.trim())
         $("presetTextureTitle").value = texture.name.replace(/\.[^.]+$/, "");
       $("presetTextureStatus").textContent =
-        "Зображення готове. Опублікуйте його для покупців.";
+        "Зображення готове. " +
+        textureSummary(texture) +
+        " Опублікуйте його для покупців.";
     } catch (error) {
       if (revision !== presetDraftRevision) return;
+      $("presetTextureProcessing").hidden = true;
       $("presetTextureStatus").textContent = error.message;
     } finally {
       if (revision === presetDraftRevision) {
@@ -663,19 +752,23 @@
     return "";
   }
   $("calculate").onclick = async () => {
+    if (!readDimensions()) return;
     if (!design.pieces.length) {
       toast("Додайте хоча б один слеб з бібліотеки.");
       return;
     }
     const key = JSON.stringify(design);
+    const revision = designRevision;
+    quotePending = true;
     $("calculate").disabled = true;
     let q;
     try {
       q = await bridge.request("POST", "/tables/quote", design);
     } finally {
-      $("calculate").disabled = false;
+      quotePending = false;
+      dimensionsValid();
     }
-    if (key !== JSON.stringify(design)) {
+    if (revision !== designRevision || key !== JSON.stringify(design)) {
       toast("Композиція змінилася. Повторіть розрахунок.");
       return;
     }
@@ -693,16 +786,35 @@
   $("approvePrice").onchange = () =>
     ($("addCart").disabled = !$("approvePrice").checked);
   $("addCart").onclick = async () => {
-    if (!estimate || !$("approvePrice").checked) return;
+    if (cartPending || !estimate || !$("approvePrice").checked) return;
+    cartPending = true;
+    saveDraft();
     $("addCart").disabled = true;
+    $("addCart").textContent = "Додаємо стіл у кошик…";
+    $("cartError").hidden = true;
+    $("builder").inert = true;
+    $("builder").setAttribute("aria-busy", "true");
     try {
       await bridge.request("POST", "/tables/preorders", {
         quoteId: estimate.quoteId,
         approved: true,
       });
+      try { sessionStorage.removeItem(draftKey); } catch { /* Optional storage. */ }
       bridge.navigate("/cart");
+    } catch (error) {
+      if (error.status === 401) {
+        bridge.navigate("/login");
+        return;
+      }
+      if (error.status === 409) invalidate();
+      $("cartError").textContent = error.message || "Не вдалося додати стіл у кошик. Спробуйте ще раз.";
+      $("cartError").hidden = false;
     } finally {
-      $("addCart").disabled = false;
+      cartPending = false;
+      $("builder").inert = false;
+      $("builder").removeAttribute("aria-busy");
+      $("addCart").disabled = !$("approvePrice").checked;
+      $("addCart").textContent = "Додати стіл у кошик →";
     }
   };
   function renderInventory() {
@@ -811,30 +923,69 @@
       oval: "Овальний",
     },
     statusNames = {
+      cart: "У кошику · очікує передоплати",
+      pending: "Очікує передоплати 50%",
       queued: "Очікує виробництва",
-      making: "У виробництві",
+      making: "Прийнято в роботу",
       ready: "Готовий",
+      payment_review: "Потрібна перевірка платежу",
     };
+  let orderFilter = "all", ordersLoading = false;
+  async function refreshOrders() {
+    if (!admin || ordersLoading) return;
+    ordersLoading = true;
+    $("refreshOrders").disabled = true;
+    $("refreshOrders").textContent = "Оновлюємо…";
+    $("ordersError").hidden = true;
+    try {
+      db.orders = await bridge.request("GET", "/tables/admin/production");
+      renderOrders();
+    } catch (error) {
+      $("ordersError").textContent = error.message || "Не вдалося завантажити замовлення.";
+      $("ordersError").hidden = false;
+    } finally {
+      ordersLoading = false;
+      $("refreshOrders").disabled = false;
+      $("refreshOrders").textContent = "Оновити замовлення";
+    }
+  }
+  $("refreshOrders").onclick = () => void refreshOrders();
+  const orderMatches = (o, f) => f === "all" ||
+    (f === "unpaid" ? ["cart", "pending"].includes(o.status) : o.status === f);
   function renderOrders() {
-    $("ordersList").innerHTML = db.orders.length
-      ? db.orders
+    const filters = [["all", "Усі"], ["unpaid", "Очікують оплати"], ["queued", "До прийняття"], ["making", "У роботі"], ["ready", "Готові"], ["payment_review", "Перевірка платежу"]];
+    $("orderFilters").innerHTML = filters.map(([key, label]) =>
+      `<button type="button" class="${orderFilter === key ? "active" : ""}" data-order-filter="${key}" aria-pressed="${orderFilter === key}">${label} · ${db.orders.filter(o => orderMatches(o, key)).length}</button>`).join("");
+    $$("[data-order-filter]").forEach(b => b.onclick = () => {
+      orderFilter = b.dataset.orderFilter;
+      renderOrders();
+    });
+    const orders = db.orders.filter(o => orderMatches(o, orderFilter));
+    $("ordersList").innerHTML = orders.length
+      ? orders
           .map(
             (o) =>
-              `<article class="order-card"><div class="order-image">${orderImage(o)}</div><div class="order-details"><span class="badge">${esc(statusNames[o.status] || "Потрібна перевірка платежу")}</span><h2 style="margin-top:12px">${shapeNames[o.shape]} стіл ${num(o.l)} × ${num(o.w)}</h2><p>#${esc(o.number)}<br>Слеби: ${o.slabs.map((s) => esc(s.number)).join(", ")}<br>Товщина ${num(o.t)} см · смола ${num(o.quote.kg, 2)} кг<br>Передоплата: ${money(o.depositMinor / 100)} · ${o.paymentMode === "demo" ? "ДЕМО" : o.paymentMode === "sandbox" ? "ТЕСТ LIQPAY" : "підтверджено банком"}</p><div class="order-actions">${o.status === "queued" || o.status === "making" ? `<button class="primary" data-next="${o.id}" data-status="${o.status === "queued" ? "making" : "ready"}">${o.status === "queued" ? "Почати виробництво" : "Позначити готовим"}</button>` : ""}<button class="text-btn" data-spec="${o.id}">Специфікація ↓</button></div></div><div class="order-price">${money(o.totalMinor / 100)}</div></article>`,
+              `<article class="order-card" data-order-id="${esc(o.id)}"><div class="order-image">${orderImage(o)}</div><div class="order-details"><span class="badge">${esc(statusNames[o.status] || o.status)}</span><h2 style="margin-top:12px">${shapeNames[o.shape]} стіл ${num(o.l)} × ${num(o.w)}</h2><p>#${esc(o.number)}<br>${o.buyer ? `Покупець: ${esc(o.buyer.displayName || "Без імені")} · ${esc(o.buyer.email)}<br>` : ""}Слеби: ${o.slabs.map((s) => esc(s.number)).join(", ")}<br>Товщина ${num(o.t)} см · смола ${num(o.quote.kg, 2)} кг<br>Передоплата 50%: ${money(o.depositMinor / 100)} · ${o.paidAt ? o.paymentMode === "demo" ? "ДЕМО · реальні кошти не зараховано" : o.paymentMode === "sandbox" ? "ТЕСТ LIQPAY · реальні кошти не зараховано" : "підтверджено банком" : "не підтверджена"}</p>${["cart", "pending"].includes(o.status) ? '<p class="hint">Прийняття в роботу стане доступним після передоплати 50%.</p>' : ""}<div class="order-actions">${o.paidAt && ["queued", "making"].includes(o.status) ? `<button class="primary" data-next="${o.id}" data-status="${o.status === "queued" ? "making" : "ready"}">${o.status === "queued" ? "Прийняти в роботу" : "Позначити готовим"}</button>` : ""}<button class="text-btn" data-spec="${o.id}">Специфікація ↓</button></div></div><div class="order-price">${money(o.totalMinor / 100)}</div></article>`,
           )
           .join("")
-      : '<div class="empty-panel"><h2>Виробництво очікує замовлення</h2><p>Стіл потрапить сюди після підтвердження передоплати 50%.</p></div>';
+      : '<div class="empty-panel"><h2>Замовлень поки немає</h2><p>Стіл з’явиться тут після додавання покупцем у кошик. Для початку виробництва потрібна передоплата 50%.</p></div>';
     $$("[data-next]").forEach(
       (b) =>
         (b.onclick = async () => {
-          await bridge.request(
-            "PATCH",
-            "/tables/admin/production/" + b.dataset.next,
-            { status: b.dataset.status },
-          );
-          await reloadRemote();
-          renderOrders();
-          toast("Статус оновлено.");
+          b.disabled = true;
+          $("ordersError").hidden = true;
+          try {
+            await bridge.request(
+              "PATCH",
+              "/tables/admin/production/" + b.dataset.next,
+              { status: b.dataset.status },
+            );
+            await refreshOrders();
+            toast(b.dataset.status === "making" ? "Стільницю прийнято в роботу." : "Стільниця готова.");
+          } catch (error) {
+            $("ordersError").textContent = error.message || "Не вдалося змінити статус.";
+            $("ordersError").hidden = false;
+          } finally { b.disabled = false; }
         }),
     );
     $$("[data-spec]").forEach(
@@ -928,17 +1079,28 @@
     $$('[data-view="builder"],[data-view="cart"]').forEach(
       (e) => (e.hidden = true),
     );
-  if (!admin) {
-    $$('[data-view="inventory"],[data-view="costs"],[data-view="orders"],[data-view="textures"],.admin-label').forEach(e => e.hidden = true);
-  }
+  if (!inventory)
+    $$('[data-view="inventory"],.admin-label').forEach(
+      (e) => (e.hidden = true),
+    );
+  if (!admin)
+    $$(
+      '[data-view="costs"],[data-view="orders"],[data-view="textures"]',
+    ).forEach((e) => (e.hidden = true));
   $("exportData").hidden = !admin;
   speciesOptions();
   renderPresetChoices();
+  $("legs").value = design.legs;
+  $$("[data-shape]").forEach(b => b.classList.toggle("active", b.dataset.shape === design.shape));
+  $$("[data-color]").forEach(b => b.classList.toggle("active", !design.resinTexture && b.dataset.color === design.color));
+  const chosenColor = $$('[data-color]').find(b => b.dataset.color === design.color);
+  if (chosenColor) $("colorName").textContent = chosenColor.getAttribute("aria-label");
+  syncResinTexture();
   syncDimensions();
   renderLibrary();
   renderDesign();
   renderOrders();
-  view(location.hash.slice(1) || (admin ? "inventory" : "builder"));
+  view(location.hash.slice(1) || (inventory ? "inventory" : "builder"));
 })().catch((e) => {
   document.querySelector("main").innerHTML =
     '<div class="panel" style="margin:40px"><h1>Сервіс тимчасово недоступний</h1><p id="bootError"></p><button onclick="location.reload()">Повторити</button></div>';

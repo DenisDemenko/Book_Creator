@@ -1,5 +1,6 @@
-import type { Express } from "express";
-import { requireAdmin } from "./auth";
+import type { Express, Request, Response, NextFunction } from "express";
+import { can, requireAdmin } from "./auth";
+import { readFurnitureAccess } from "./furnitureAccess";
 import { readBridgeSettings, type BridgeSettings } from "./marketplaceBridge";
 import { calculateWoodAndEpoxyCost } from "../src/components/adminOs/furnitureCalculator/utils/calculator";
 import type {
@@ -7,12 +8,42 @@ import type {
   CurrencyRates,
 } from "../src/components/adminOs/furnitureCalculator/types";
 
+declare global {
+  namespace Express {
+    interface Request { slabActorUid?: string; }
+  }
+}
+
+export async function requireSlabInventory(req: Request, res: Response, next: NextFunction) {
+  const user = req.principal;
+  if (!user || user.isGuest) {
+    res.status(403).json({ error: 'Потрібен вхід із доступом до складу слебів.' });
+    return;
+  }
+  if (user.role === 'admin') return next();
+  if (!await can(user.role, 'canManageSlabs')) {
+    res.status(403).json({ error: 'Ваша роль не має доступу до складу слебів.' });
+    return;
+  }
+  try {
+    const access = await readFurnitureAccess(user);
+    if (!access.allowed || !access.firebaseUid) {
+      res.status(403).json({ error: 'Доступ до складу відкликано або не надано.' });
+      return;
+    }
+    req.slabActorUid = access.firebaseUid;
+    next();
+  } catch (error) {
+    res.status(503).json({ error: error instanceof Error ? error.message : 'Не вдалося перевірити доступ.' });
+  }
+}
+
 // No arbitrary proxy target, redirect or browser-visible bridge secret.
 export async function tableBridge(
   method: string,
   path: string,
   body?: unknown,
-  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {},
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings; actorUid?: string } = {},
 ) {
   if (!/^\/(state|slabs|costs|production|resin-textures)(\/[a-zA-Z0-9-]+)?$/.test(path))
     throw new Error("Некоректний маршрут конструктора.");
@@ -26,6 +57,7 @@ export async function tableBridge(
       headers: {
         "x-bridge-key": settings.key,
         "Content-Type": "application/json",
+        ...(deps.actorUid ? { "x-slab-actor-uid": deps.actorUid } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     },
@@ -105,6 +137,7 @@ export function registerSlabTableRoutes(app: Express) {
             method,
             path(req),
             ["GET", "DELETE"].includes(method) ? undefined : req.body,
+            { actorUid: req.slabActorUid },
           ),
         );
       } catch (e: any) {
@@ -117,17 +150,17 @@ export function registerSlabTableRoutes(app: Express) {
     };
   app.get(
     "/api/admin/slab-tables/state",
-    requireAdmin,
+    requireSlabInventory,
     proxy("GET", () => "/state"),
   );
   app.post(
     "/api/admin/slab-tables/slabs",
-    requireAdmin,
+    requireSlabInventory,
     proxy("POST", () => "/slabs"),
   );
   app.delete(
     "/api/admin/slab-tables/slabs/:id",
-    requireAdmin,
+    requireSlabInventory,
     proxy("DELETE", (r) => "/slabs/" + r.params.id),
   );
   app.put(
