@@ -11,7 +11,10 @@
  * стоїть черга застосунку без звʼязку), описи викладача до 500 символів,
  * правки з `ifRevision` і прохід 1 — опис кадру моделлю зору у фоні (202 +
  * опитування; той самий урок, що й скани: проксі обриває довгі запити).
- * Проходи 2–3 і відправка — етап 3; їхні маршрути тут ще не зареєстровані.
+ * ЕТАП 3 (A2). Прохід 2 «structure» (кадри → модулі й уроки + припущення), прохід 3
+ * «generate» (текст одного модуля) і `submit` (перевірка якості → чернетка курсу /
+ * експрес-інструкція / запис у «Вхідні» книги). Проходи — як і прохід 1: 202 +
+ * опитування, текст оплачується з тарифу викладача.
  *
  * ФОТО — У МЕДІАТЕЦІ АВТОРА. Кожен кадр зберігається звичайним активом
  * медіатеки (з обліком сховища тарифу), а чернетка тримає лише його id. Тож
@@ -55,8 +58,23 @@ import {
   type PhotoDraftKind,
   type PhotoDraftLevel,
   type PhotoDraftSummary,
+  type SubmitTarget,
 } from '../../shared/photoDraftContract';
 import type { DescribeContext } from './photoDraftPrompts';
+import {
+  applyGenerated,
+  buildGeneratePrompt,
+  buildStructurePrompt,
+  computeSubmitBlockers,
+  generateSystemInstruction,
+  jobIsStale,
+  mergeAssumptions,
+  parseGenerateResult,
+  parseStructureResult,
+  placePhotos,
+  structureSystemInstruction,
+} from './photoDraftPasses';
+import { toCourseInput, toExpressPayload, toInboxItems, type CourseInput, type InboxItem } from './photoDraftMapping';
 
 const BASE = '/api/external/v1/photo-drafts';
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
@@ -67,6 +85,24 @@ export interface DescribePhotoParams {
   base64: string;
   context: DescribeContext;
   req: Request;
+}
+
+/** Текстовий прохід (2 або 3): у продукті — photoDraftSinks.writeWithCoreText. */
+export interface WriteTextParams {
+  ownerId: string;
+  system: string;
+  prompt: string;
+  maxTokens: number;
+  label: string;
+  req: Request;
+}
+
+/** Куди лягає відправлена чернетка (у продукті — photoDraftSinks.ts). */
+export interface PhotoDraftSinks {
+  createCourse: (ownerId: string, input: CourseInput) => Promise<string>;
+  createExpress: (ownerId: string, payload: Record<string, unknown>) => Promise<string>;
+  /** Повертає id першого запису у «Вхідних». */
+  createInboxScans: (p: { ownerId: string; bookId: string; items: InboxItem[]; tokenId?: string | null }) => Promise<string>;
 }
 
 export interface PhotoDraftDeps {
@@ -83,6 +119,10 @@ export interface PhotoDraftDeps {
   }) => Promise<{ allowed: boolean; reasonUk?: string }>;
   /** Ліміт ШІ-витрат тарифу викладача (у продукті — checkChatQuota). */
   checkAiBudget?: (p: { userId: string; role: string }) => Promise<{ allowed: boolean; reasonUk?: string }>;
+  /** Проходи 2–3. Немає — маршрути structure/generate відповідають 503. */
+  writeText?: (p: WriteTextParams) => Promise<{ text: string; modelId: string }>;
+  /** Відправка. Немає — submit відповідає 503. */
+  sinks?: PhotoDraftSinks;
   schedule?: (task: () => Promise<void>) => void;
   now?: () => Date;
 }
@@ -111,6 +151,19 @@ export function publicPhoto(draftId: string, p: StoredPhoto): DraftPhoto {
   };
 }
 
+let clockNow: () => Date = () => new Date();
+
+/**
+ * Робота ШІ, що «біжить» понад JOB_STALE_MS, назовні видна як невдала: процес
+ * міг перезапуститись, і застосунок опитував би її вічно.
+ */
+function visibleJob(d: StoredDraft): PhotoDraft['job'] {
+  if (d.job && jobIsStale(d.job, clockNow().getTime())) {
+    return { ...d.job, status: 'failed', error: 'Роботу перервано (сервер перезапускався). Запустіть її ще раз.' };
+  }
+  return d.job;
+}
+
 /** Що бачить застосунок. Власник, токен і місце фото в медіатеці назовні не йдуть. */
 export function publicDraft(d: StoredDraft): PhotoDraft {
   return {
@@ -127,7 +180,7 @@ export function publicDraft(d: StoredDraft): PhotoDraft {
     notes: d.notes,
     structure: d.structure,
     assumptions: d.assumptions,
-    job: d.job,
+    job: visibleJob(d),
     submitted: d.submitted,
     createdAt: d.createdAt,
     updatedAt: d.updatedAt,
@@ -271,7 +324,10 @@ export function humanizeDescribeError(err: unknown): string {
 }
 
 function sendChangeError(res: Response, err: unknown, where: string): void {
-  if (err instanceof DraftChangeError) return fail(res, err.status, err.kind, err.message);
+  if (err instanceof DraftChangeError) {
+    res.status(err.status).json({ error: err.message, kind: err.kind, ...(err.extra ?? {}) });
+    return;
+  }
   console.error(`[photoDrafts] ${where}:`, err);
   fail(res, 500, 'server_error', 'Не вдалося виконати дію з чернеткою. Спробуйте ще раз.');
 }
@@ -282,6 +338,7 @@ function sendChangeError(res: Response, err: unknown, where: string): void {
 
 export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): void {
   const now = deps.now || (() => new Date());
+  clockNow = now;
   const schedule =
     deps.schedule ||
     ((task: () => Promise<void>) => {
@@ -476,6 +533,9 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
                 drop('topics');
               }
             }
+            // Урок без тексту знімає з модуля позначку «написано».
+            for (const m of d.structure?.modules ?? []) m.written = m.written && m.lessons.every((l) => !!l.body);
+            if (d.structure && d.status !== 'collecting') d.status = statusAfterStructure(d.structure);
           }
           if (body.assumptions !== undefined) {
             if (!Array.isArray(body.assumptions)) throw new DraftChangeError(400, 'bad_input', 'assumptions — масив рішень.');
@@ -769,6 +829,209 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       res.json({ draft: publicDraft(changed.draft) });
     } catch (err) {
       sendChangeError(res, err, 'delete note');
+    }
+  });
+
+  // ── Проходи 2–3 і відправка (етап 3, A2) ────────────────────────────────
+
+  /** Дві фонові роботи ШІ мають спільні перевірки: власник, стан, одна робота за раз, бюджет. */
+  const startJob = async (
+    req: Request,
+    res: Response,
+    kind: 'structure' | 'generate',
+    moduleId: string | null,
+    check: (d: StoredDraft) => void
+  ) => {
+    if (!deps.writeText) return fail(res, 503, 'server_error', 'Прохід ШІ не налаштовано на сервері.');
+    const ownerId = owner(req);
+    const draftId = String(req.params.draftId);
+    if (!(await getDraft(draftId, ownerId))) return fail(res, 404, 'draft_not_found', 'Чернетку не знайдено.');
+    const budget = await budgetBlock(req);
+    if (budget) return fail(res, 402, 'ai_budget_exceeded', budget);
+    const startedAt = now().toISOString();
+    const started = await mutateDraft(
+      draftId,
+      ownerId,
+      (d) => {
+        assertEditable(d);
+        if (d.job?.status === 'running' && !jobIsStale(d.job, now().getTime())) {
+          throw new DraftChangeError(409, 'job_running', 'Зачекайте: ШІ ще працює над цією чернеткою.');
+        }
+        check(d);
+        d.job = { kind, status: 'running', moduleId, error: null, startedAt };
+        return JSON.parse(JSON.stringify(d)) as StoredDraft;
+      },
+      { byTeacher: true, now }
+    );
+    if (!started) return fail(res, 404, 'draft_not_found', 'Чернетку не знайдено.');
+    return { ownerId, draftId, startedAt, snapshot: started.result, draft: started.draft };
+  };
+
+  /** Фоновий кінець роботи: застосувати результат, якщо робота ще «та сама»; ревізію не змінює. */
+  const finishJob = (
+    ownerId: string,
+    draftId: string,
+    startedAt: string,
+    kind: 'structure' | 'generate',
+    run: () => Promise<(d: StoredDraft) => void>
+  ) => {
+    schedule(async () => {
+      let apply: (d: StoredDraft) => void;
+      try {
+        apply = await run();
+      } catch (err) {
+        console.warn(`[photoDrafts] прохід ${kind}:`, String((err as Error)?.message || err).slice(0, 300));
+        const error = humanizeDescribeError(err);
+        apply = (d) => {
+          d.job = { ...d.job!, status: 'failed', error };
+        };
+      }
+      await mutateDraft(
+        draftId,
+        ownerId,
+        (d) => {
+          // Чернетку відкинули або запустили заново — цей результат уже нічий.
+          if (!d.job || d.job.kind !== kind || d.job.startedAt !== startedAt || d.job.status !== 'running') return;
+          apply(d);
+        },
+        { byTeacher: false, now }
+      ).catch((err) => console.error(`[photoDrafts] запис проходу ${kind}:`, err));
+    });
+  };
+
+  app.post(`${BASE}/:draftId/structure`, auth, requirePermission('canUseAi'), async (req, res) => {
+    try {
+      const replace = req.body?.replace === true;
+      const begun = await startJob(req, res, 'structure', null, (d) => {
+        if (d.photos.length === 0) throw new DraftChangeError(409, 'wrong_status', 'У чернетці ще немає кадрів.');
+        if (d.photos.some((p) => p.status === 'processing')) {
+          throw new DraftChangeError(409, 'wrong_status', 'Кадри ще описуються — зачекайте, поки опис закінчиться.');
+        }
+        if (d.structure && !replace) {
+          throw new DraftChangeError(
+            409,
+            'wrong_status',
+            'Структура вже є. Щоб розкласти заново, передайте { "replace": true } — правки викладача в ній буде втрачено.'
+          );
+        }
+      });
+      if (!begun) return;
+      const { ownerId, draftId, startedAt, snapshot, draft } = begun;
+      finishJob(ownerId, draftId, startedAt, 'structure', async () => {
+        const out = await deps.writeText!({
+          ownerId,
+          system: structureSystemInstruction(snapshot.kind),
+          prompt: buildStructurePrompt(snapshot),
+          maxTokens: 8192,
+          label: 'Структура за фото (GrabFusion)',
+          req,
+        });
+        const parsed = parseStructureResult(out.text, snapshot.photos);
+        return (d) => {
+          const modules = parsed.modules;
+          placePhotos(modules, d.photos);
+          d.structure = { modules };
+          d.assumptions = parsed.assumptions.map((a) => (a.photoId && !d.photos.some((p) => p.photoId === a.photoId) ? { ...a, photoId: null } : a));
+          if (!d.title && parsed.title) d.title = parsed.title;
+          d.status = 'structured';
+          d.job = null;
+        };
+      });
+      res.status(202).json({ draft: publicDraft(draft) });
+    } catch (err) {
+      sendChangeError(res, err, 'structure');
+    }
+  });
+
+  app.post(`${BASE}/:draftId/modules/:moduleId/generate`, auth, requirePermission('canUseAi'), async (req, res) => {
+    try {
+      const moduleId = String(req.params.moduleId);
+      const begun = await startJob(req, res, 'generate', moduleId, (d) => {
+        if (!d.structure) throw new DraftChangeError(409, 'wrong_status', 'Спершу розкладіть кадри на модулі й уроки.');
+        if (!d.structure.modules.some((m) => m.moduleId === moduleId)) {
+          throw new DraftChangeError(404, 'module_not_found', 'Модуля немає в структурі.');
+        }
+      });
+      if (!begun) return;
+      const { ownerId, draftId, startedAt, snapshot, draft } = begun;
+      const module = snapshot.structure!.modules.find((m) => m.moduleId === moduleId)!;
+      finishJob(ownerId, draftId, startedAt, 'generate', async () => {
+        const out = await deps.writeText!({
+          ownerId,
+          system: generateSystemInstruction(snapshot.kind),
+          prompt: buildGeneratePrompt(snapshot, module),
+          maxTokens: 8192,
+          label: 'Текст модуля за фото (GrabFusion)',
+          req,
+        });
+        const parsed = parseGenerateResult(out.text, module);
+        return (d) => {
+          const target = d.structure?.modules.find((m) => m.moduleId === moduleId);
+          if (!target) {
+            d.job = { ...d.job!, status: 'failed', error: 'Модуль зник зі структури, поки писався текст.' };
+            return;
+          }
+          applyGenerated(target, parsed);
+          d.assumptions = mergeAssumptions(d.assumptions, parsed.assumptions, target);
+          if (d.status !== 'collecting') d.status = statusAfterStructure(d.structure!);
+          d.job = null;
+        };
+      });
+      res.status(202).json({ draft: publicDraft(draft) });
+    } catch (err) {
+      sendChangeError(res, err, 'generate');
+    }
+  });
+
+  const RESULT_WORD: Record<PhotoDraftKind, string> = { course: 'Курс', instruction: 'Інструкція', book: 'Глава' };
+
+  app.post(`${BASE}/:draftId/submit`, auth, async (req, res) => {
+    try {
+      if (!deps.sinks) return fail(res, 503, 'server_error', 'Відправка в Studio не налаштована на сервері.');
+      const sinks = deps.sinks;
+      const ownerId = owner(req);
+      const draftId = String(req.params.draftId);
+      const before = await getDraft(draftId, ownerId);
+      if (!before) return fail(res, 404, 'draft_not_found', 'Чернетку не знайдено.');
+      let bookOk = false;
+      if (before.kind === 'book' && before.bookId) {
+        const book = await getBook(before.bookId).catch(() => null);
+        bookOk = !!book && book.ownerId === ownerId;
+      }
+      const changed = await mutateDraft(
+        draftId,
+        ownerId,
+        async (d) => {
+          assertEditable(d);
+          if (d.job?.status === 'running' && !jobIsStale(d.job, now().getTime())) {
+            throw new DraftChangeError(409, 'job_running', 'Зачекайте: ШІ ще працює над цією чернеткою.');
+          }
+          const blockers = computeSubmitBlockers(d, { bookOk, status: d.status });
+          if (blockers.length > 0) {
+            throw new DraftChangeError(400, 'submit_blocked', `${RESULT_WORD[d.kind]} ще не готов${d.kind === 'book' ? 'а' : d.kind === 'course' ? 'ий' : 'а'} до відправки.`, { blockers });
+          }
+          let target: SubmitTarget;
+          if (d.kind === 'course') {
+            const id = await sinks.createCourse(ownerId, toCourseInput(d));
+            target = { kind: 'course', id, studioUrl: `/courses/${id}` };
+          } else if (d.kind === 'instruction') {
+            const id = await sinks.createExpress(ownerId, toExpressPayload(d));
+            target = { kind: 'express', id, studioUrl: `/express/${id}` };
+          } else {
+            const id = await sinks.createInboxScans({ ownerId, bookId: d.bookId!, items: toInboxItems(d), tokenId: d.tokenId });
+            target = { kind: 'inbox', id, studioUrl: `/media?tab=inbox&bookId=${encodeURIComponent(d.bookId!)}` };
+          }
+          d.status = 'submitted';
+          d.submitted = target;
+          d.job = null;
+          return target;
+        },
+        { byTeacher: true, now }
+      );
+      if (!changed) return fail(res, 404, 'draft_not_found', 'Чернетку не знайдено.');
+      res.status(201).json({ draft: publicDraft(changed.draft), target: changed.result });
+    } catch (err) {
+      sendChangeError(res, err, 'submit');
     }
   });
 }

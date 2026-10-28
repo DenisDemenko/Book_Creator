@@ -98,6 +98,8 @@ import { registerExternalApiRoutes } from './server/external/externalApiRoutes';
 import { recognizeScanWithCoreVision } from './server/external/scanRecognizer';
 import { registerPhotoDraftRoutes } from './server/external/photoDraftRoutes';
 import { describePhotoWithCoreVision } from './server/external/photoDraftDescriber';
+import { createCourseDraft, createExpressInstruction, createInboxScans } from './server/external/photoDraftSinks';
+import { writeWithCoreText } from './server/external/photoDraftWriter';
 import { checkAndRecordStorageUpload } from './server/mediaStorage';
 import { registerGitHistoryRoutes } from './server/gitHistoryRoutes';
 import { registerGitCommandRoutes } from './server/gitCommandRoutes';
@@ -594,6 +596,8 @@ async function startServer() {
     checkStorage: ({ userId, email, role, bytes, bookId, filename }) =>
       checkAndRecordStorageUpload(userId, email, role, bytes, bookId ?? undefined, filename),
     checkAiBudget: ({ userId, role }) => checkChatQuota(userId, role, 'GrabFusion (опис кадрів)'),
+    writeText: writeWithCoreText,
+    sinks: { createCourse: createCourseDraft, createExpress: createExpressInstruction, createInboxScans },
   });
   registerKnowledgeRoutes(app);
   registerYoutubeTranscriptRoutes(app, realtimeAccessDeps);

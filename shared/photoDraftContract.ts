@@ -20,7 +20,7 @@
  */
 
 /** Версія контракту. Мінорна — додавання; мажорна — ламка зміна. */
-export const PHOTO_DRAFT_CONTRACT_VERSION = '1.0.0';
+export const PHOTO_DRAFT_CONTRACT_VERSION = '1.1.0';
 
 /** Префікс маршрутів. Автентифікація — `Authorization: Bearer nst_…`. */
 export const PHOTO_DRAFT_API_BASE = '/api/external/v1';
@@ -354,6 +354,12 @@ export interface AddPhotoRequest {
 export interface PutNoteRequest {
   photoIds: string[];
   text: string;
+}
+
+/** Тіло `POST …/structure` необовʼязкове (з 1.1.0). */
+export interface StructureRequest {
+  /** true — розкласти заново, коли структура вже є; правки викладача в ній буде втрачено. */
+  replace?: boolean;
 }
 
 export interface PatchLesson {

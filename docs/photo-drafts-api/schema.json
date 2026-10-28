@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://fusionlab.in.ua/schemas/photo-drafts/1.0.0.json",
-  "title": "Studio photo-drafts API (GrabFusion contract) 1.0.0",
+  "$id": "https://fusionlab.in.ua/schemas/photo-drafts/1.1.0.json",
+  "title": "Studio photo-drafts API (GrabFusion contract) 1.1.0",
   "description": "JSON Schema (draft-07) for responses of /api/external/v1/photo-drafts*. Source of truth together with shared/photoDraftContract.ts; checked by scripts/test-photoDraftContract.mts.",
   "definitions": {
     "Kind": {

@@ -218,7 +218,9 @@ export class DraftChangeError extends Error {
   constructor(
     public status: number,
     public kind: string,
-    message: string
+    message: string,
+    /** Додаткові поля тіла помилки (наприклад, `blockers` для `submit_blocked`). */
+    public extra?: Record<string, unknown>
   ) {
     super(message);
     this.name = 'DraftChangeError';
