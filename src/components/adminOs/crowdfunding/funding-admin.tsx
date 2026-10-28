@@ -5,6 +5,7 @@ import {
   Campaign,
   FundingRequest,
   FundingSettings,
+  Stage,
   money,
   status,
   toMinor,
@@ -151,6 +152,7 @@ export function FundingAdmin({
                           ["Отримано внесків", c.raisedMinor],
                           ["Комісія платформи", c.feeMinor],
                           ["Передано команді", c.paidOutMinor],
+                          ["Повернула команда", c.returnedMinor],
                           ["Зарезервовано", c.reservedMinor],
                           ["Вільний бюджет команди", c.availableTeamMinor],
                           ["Доступно за банком", c.availableCashMinor],
@@ -247,6 +249,7 @@ export function FundingAdmin({
                     </div>
                     {canPayout && (
                       <BankForm
+                        stages={c.milestones}
                         busy={busy}
                         save={(body) =>
                           act(
@@ -322,7 +325,12 @@ export function FundingAdmin({
                                 {p.kind === "advance"
                                   ? "Аванс"
                                   : "Остаточний транш"}{" "}
-                                · {status(p.status)}
+                                ·{" "}
+                                {status(
+                                  p.status === "failed"
+                                    ? "payout_failed"
+                                    : p.status,
+                                )}
                               </strong>
                               <p>{p.purpose}</p>
                               {p.bankReference && (
@@ -383,7 +391,9 @@ export function FundingAdmin({
                         <p key={b.id}>
                           {b.kind === "settlement"
                             ? "Зарахування внесків"
-                            : "Кошти платформи"}{" "}
+                            : b.kind === "team_return"
+                              ? "Повернення команди"
+                              : "Кошти платформи"}{" "}
                           · {money(b.amountMinor)} · Банківські витрати{" "}
                           {money(b.providerCostMinor)} · {b.bankReference}
                         </p>
@@ -486,6 +496,11 @@ function SettingsForm({
           Перед відкриттям внесків оператор перевіряє договірні умови зборів і
           повернень.
         </p>
+        <p className="fund-muted">
+          Умови мають передбачати пропорційне повернення невикористаного залишку
+          учасникам. Частка платформи з повернених коштів також повертається;
+          інше призначення коштів потребує окремого погодження.
+        </p>
         <label>
           Назва оператора
           <input
@@ -576,9 +591,13 @@ function ReviewForm({
             ? [
                 ["pause", "Призупинити виконання"],
                 ["finish", "Завершити проєкт"],
+                ["settle_unused", "Завершити з поверненням залишку"],
               ]
             : c.status === "execution_paused"
-              ? [["resume", "Відновити виконання"]]
+              ? [
+                  ["resume", "Відновити виконання"],
+                  ["settle_unused", "Завершити з поверненням залишку"],
+                ]
               : [];
   return actions.length ? (
     <form
@@ -623,12 +642,15 @@ function ReviewForm({
   ) : null;
 }
 function BankForm({
+  stages,
   busy,
   save,
 }: {
+  stages: Stage[];
   busy: boolean;
   save: (b: unknown) => Promise<void>;
 }) {
+  const [milestoneId, setMilestoneId] = useState(stages[0]?.id || "");
   const [kind, setKind] = useState("settlement"),
     [amount, setAmount] = useState(""),
     [cost, setCost] = useState("0");
@@ -642,6 +664,7 @@ function BankForm({
           save({
             ...b,
             kind,
+            ...(kind === "team_return" ? { milestoneId } : {}),
             amountMinor: toMinor(amount),
             providerCostMinor: toMinor(cost),
           })
@@ -658,6 +681,9 @@ function BankForm({
               }}
             >
               <option value="settlement">Зарахування внесків</option>
+              <option value="team_return">
+                Повернення невикористаних коштів командою
+              </option>
               <option value="platform_topup">
                 Поповнення власними коштами платформи
               </option>
@@ -681,12 +707,32 @@ function BankForm({
               type="number"
               min="0"
               step="0.01"
-              disabled={kind === "platform_topup"}
+              disabled={kind !== "settlement"}
               value={cost}
               onChange={(e) => setCost(e.target.value)}
             />
           </label>
         </div>
+        {kind === "team_return" && (
+          <label>
+            Етап із прийнятим звітом
+            <select
+              required
+              value={milestoneId}
+              onChange={(e) => setMilestoneId(e.target.value)}
+            >
+              {stages.map((m) => (
+                <option
+                  key={m.id}
+                  value={m.id}
+                  disabled={m.state !== "accepted"}
+                >
+                  {m.title}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <p className="fund-muted">
           Банківські витрати не зменшують бюджет команди. Якщо доступних коштів
           бракує, платформа поповнює рахунок власним коштом.
