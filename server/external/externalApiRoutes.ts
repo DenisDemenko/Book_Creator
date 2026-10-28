@@ -68,6 +68,10 @@ export interface RecognizeParams {
   ownerId: string;
   bookId: string;
   req: Request;
+  /** Підказка викладача до сторінки (імена, мова, почерк) — ДАНІ для моделі, не інструкція. З A5 (рукописи GrabFusion). */
+  note?: string | null;
+  /** Чернетка за фото, до якої належить сторінка — потрапляє в мітку журналу витрат. */
+  draftId?: string | null;
 }
 
 export interface ExternalApiDeps {
@@ -160,6 +164,10 @@ export function publicScan(scan: ExternalScan) {
     modelId: scan.modelId,
     error: scan.error,
     imageUrl: scan.imageUrl,
+    /** Пакет сторінок рукопису (GrabFusion): однакове `batchId` — одна глава; `batchOrder` — порядок. */
+    batchId: scan.batchId,
+    batchOrder: scan.batchOrder,
+    batchBookTitle: scan.batchBookTitle,
     createdAt: scan.createdAt,
     updatedAt: scan.updatedAt,
   };

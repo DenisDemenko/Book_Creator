@@ -61,11 +61,30 @@ export async function createExpressInstruction(ownerId: string, payload: Record<
   return createExpressDraft(ownerId, payload as any).id;
 }
 
-/** По одному запису у «Вхідних» на урок; повертає id першого (на нього веде посилання). */
-export async function createInboxScans(p: { ownerId: string; bookId: string; items: InboxItem[]; tokenId?: string | null }): Promise<string> {
+/**
+ * По одному запису у «Вхідних» на урок (або на сторінку рукопису); повертає id першого
+ * (на нього веде посилання). З `batch` записи складають пакет: порядок = порядок `items`,
+ * `bookId` може бути порожнім (нова книга без запису на сервері).
+ */
+export async function createInboxScans(p: {
+  ownerId: string;
+  bookId: string;
+  items: InboxItem[];
+  tokenId?: string | null;
+  batch?: { id: string; bookTitle?: string | null };
+}): Promise<string> {
   let first = '';
+  let order = 0;
   for (const item of p.items) {
-    const scan = await createScan({ ownerId: p.ownerId, bookId: p.bookId, assetId: item.assetId, imageUrl: item.imageUrl, tokenId: p.tokenId ?? null });
+    order += 1;
+    const scan = await createScan({
+      ownerId: p.ownerId,
+      bookId: p.bookId,
+      assetId: item.assetId,
+      imageUrl: item.imageUrl,
+      tokenId: p.tokenId ?? null,
+      ...(p.batch ? { batch: { id: p.batch.id, order, bookTitle: p.batch.bookTitle ?? null } } : {}),
+    });
     await updateScan(scan.id, p.ownerId, {
       status: 'submitted',
       recognizedText: item.text,

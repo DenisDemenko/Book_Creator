@@ -50,6 +50,8 @@ export interface PassPhoto {
   status: 'processing' | 'described' | 'failed';
   description: string | null;
   tags: string[];
+  /** Лише рукопис: текст сторінки. */
+  text?: string | null;
 }
 
 export interface PassDraft {
@@ -61,6 +63,8 @@ export interface PassDraft {
   instructionMode?: PhotoDraftInstructionMode | null;
   modelCode?: string | null;
   bookId: string | null;
+  /** Лише рукопис: назва нової книги. */
+  newBookTitle?: string | null;
   photos: PassPhoto[];
   notes: DraftNote[];
   structure: DraftStructure | null;
@@ -88,6 +92,13 @@ const KIND_WORDS: Record<PhotoDraftKind, { whole: string; module: string; lesson
     module: 'розділ',
     lesson: 'підрозділ',
     style: 'Тон — авторський, звʼязний текст; не перетворюй його на список кроків без потреби.',
+  },
+  // Рукопис проходів 2–3 не має (сторінки лише розпізнаються); запис потрібен для повноти типу.
+  manuscript: {
+    whole: 'сторінки рукопису',
+    module: 'глава',
+    lesson: 'сторінка',
+    style: 'Текст сторінок не переписується.',
   },
 };
 
@@ -460,6 +471,24 @@ export function computeSubmitBlockers(draft: PassDraft, options: { bookOk?: bool
         photoId: p.photoId,
       });
     }
+  }
+  if (draft.kind === 'manuscript') {
+    if (!draft.title || !draft.title.trim()) {
+      blockers.push({ kind: 'title_missing', message: 'Дайте назву глави — під нею сторінки ляжуть у «Вхідні».' });
+    }
+    if (!options.bookOk) {
+      blockers.push({ kind: 'book_missing', message: 'Оберіть книгу автора або вкажіть назву нової книги.' });
+    }
+    for (const p of draft.photos) {
+      if (p.status === 'described' && !(p.text ?? '').trim()) {
+        blockers.push({
+          kind: 'empty_page',
+          message: `На сторінці №${p.order} немає тексту — введіть його вручну або приберіть сторінку.`,
+          photoId: p.photoId,
+        });
+      }
+    }
+    return blockers;
   }
   if (!draft.title || !draft.title.trim()) {
     blockers.push({ kind: 'title_missing', message: 'Дайте назву — вона стане назвою результату в Studio.' });

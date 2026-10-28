@@ -593,6 +593,7 @@ async function startServer() {
   // застосунку, прохід 1 — модель зору ядра AI за рахунок тарифу викладача.
   registerPhotoDraftRoutes(app, {
     describe: describePhotoWithCoreVision,
+    recognize: recognizeScanWithCoreVision,
     checkStorage: ({ userId, email, role, bytes, bookId, filename }) =>
       checkAndRecordStorageUpload(userId, email, role, bytes, bookId ?? undefined, filename),
     checkAiBudget: ({ userId, role }) => checkChatQuota(userId, role, 'GrabFusion (опис кадрів)'),

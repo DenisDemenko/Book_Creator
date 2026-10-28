@@ -694,7 +694,10 @@ CREATE TABLE IF NOT EXISTS external_scans (
   error            TEXT,
   token_id         TEXT,
   created_at       TEXT NOT NULL,
-  updated_at       TEXT NOT NULL
+  updated_at       TEXT NOT NULL,
+  batch_id         TEXT,                -- пакет сторінок рукопису (GrabFusion, kind manuscript): id чернетки
+  batch_order      INTEGER,             -- номер сторінки в пакеті, з 1
+  batch_book_title TEXT                 -- назва нової книги, коли пакет без book_id
 );
 CREATE INDEX IF NOT EXISTS idx_external_scans_owner ON external_scans(owner_id, status, created_at DESC);
 
@@ -1062,6 +1065,18 @@ function migrateExternalTokenScope(instance: Database): void {
   }
 }
 
+/** Пакети сторінок рукопису (GrabFusion, A5): старі бази не мають колонок `batch_*`. */
+function migrateExternalScanBatch(instance: Database): void {
+  try {
+    const cols = new Set((instance.prepare('PRAGMA table_info(external_scans)').all() as { name: string }[]).map((c) => c.name));
+    for (const [name, type] of [['batch_id', 'TEXT'], ['batch_order', 'INTEGER'], ['batch_book_title', 'TEXT']] as const) {
+      if (!cols.has(name)) instance.exec(`ALTER TABLE external_scans ADD COLUMN ${name} ${type}`);
+    }
+  } catch (err) {
+    console.warn('[db] Не вдалося перевірити/додати колонки external_scans.batch_*:', err);
+  }
+}
+
 function migrateUsageLogColumns(instance: Database): void {
   try {
     const cols = instance.prepare('PRAGMA table_info(usage_log)').all() as { name: string }[];
@@ -1341,6 +1356,7 @@ export async function initDb(): Promise<boolean> {
     migrateModerationSnapshot(instance);
     migrateMediaAssetColumns(instance);
     migrateExternalTokenScope(instance);
+    migrateExternalScanBatch(instance);
     seedEmotionDictionary(instance);
     seedCoreEntityRegistry(instance);
     db = instance;

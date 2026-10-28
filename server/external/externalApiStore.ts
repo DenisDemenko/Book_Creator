@@ -77,6 +77,12 @@ export interface ExternalScan {
   modelId: string | null;
   error: string | null;
   tokenId: string | null;
+  /** Пакет сторінок рукопису з GrabFusion (id чернетки); у звичайного скану `null`. */
+  batchId: string | null;
+  /** Номер сторінки в пакеті, з 1. */
+  batchOrder: number | null;
+  /** Назва нової книги, коли пакет надіслано без існуючої книги (тоді `bookId` порожній). */
+  batchBookTitle: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -121,7 +127,9 @@ async function loadJson(): Promise<JsonShape> {
     const parsed = JSON.parse(raw) as Partial<JsonShape>;
     jsonCache = {
       tokens: Array.isArray(parsed.tokens) ? parsed.tokens.map((t) => ({ ...t, scope: t.scope ?? null })) : [],
-      scans: Array.isArray(parsed.scans) ? parsed.scans : [],
+      scans: Array.isArray(parsed.scans)
+        ? parsed.scans.map((s) => ({ ...s, batchId: s.batchId ?? null, batchOrder: s.batchOrder ?? null, batchBookTitle: s.batchBookTitle ?? null }))
+        : [],
     };
   } catch {
     jsonCache = { tokens: [], scans: [] };
@@ -304,6 +312,9 @@ function rowToScan(row: any): ExternalScan {
     modelId: row.model_id ? String(row.model_id) : null,
     error: row.error ? String(row.error) : null,
     tokenId: row.token_id ? String(row.token_id) : null,
+    batchId: row.batch_id ? String(row.batch_id) : null,
+    batchOrder: Number.isFinite(Number(row.batch_order)) && row.batch_order !== null ? Number(row.batch_order) : null,
+    batchBookTitle: row.batch_book_title ? String(row.batch_book_title) : null,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };
@@ -315,6 +326,7 @@ export async function createScan(params: {
   assetId: string;
   imageUrl: string;
   tokenId?: string | null;
+  batch?: { id: string; order: number; bookTitle?: string | null };
   now?: () => Date;
 }): Promise<ExternalScan> {
   const at = (params.now?.() ?? new Date()).toISOString();
@@ -333,6 +345,9 @@ export async function createScan(params: {
     modelId: null,
     error: null,
     tokenId: params.tokenId ? String(params.tokenId) : null,
+    batchId: params.batch?.id ?? null,
+    batchOrder: params.batch ? params.batch.order : null,
+    batchBookTitle: params.batch?.bookTitle ? String(params.batch.bookTitle) : null,
     createdAt: at,
     updatedAt: at,
   };
@@ -346,10 +361,11 @@ export async function createScan(params: {
     .prepare(
       `INSERT INTO external_scans
          (id, owner_id, book_id, asset_id, image_url, status, recognized_text, text,
-          chapter_id, chapter_title, section_title, model_id, error, token_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, '', '', NULL, NULL, NULL, NULL, NULL, ?, ?, ?)`
+          chapter_id, chapter_title, section_title, model_id, error, token_id, created_at, updated_at,
+          batch_id, batch_order, batch_book_title)
+       VALUES (?, ?, ?, ?, ?, ?, '', '', NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?)`
     )
-    .run(scan.id, scan.ownerId, scan.bookId, scan.assetId, scan.imageUrl, scan.status, scan.tokenId, at, at);
+    .run(scan.id, scan.ownerId, scan.bookId, scan.assetId, scan.imageUrl, scan.status, scan.tokenId, at, at, scan.batchId, scan.batchOrder, scan.batchBookTitle);
   return scan;
 }
 

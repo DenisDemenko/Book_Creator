@@ -5,6 +5,8 @@ import { useLanguage } from '../i18n/LanguageContext';
 import { insertDescriptionIntoBook } from '../utils/describeCharacterTransfer';
 import type { DescribeRevealTarget } from './MediaLibraryView';
 import { apiPath } from '../utils/basePath';
+import { groupScanBatches } from '../utils/manuscriptBatch';
+import { ScanBatchCard } from './ScanBatchCard';
 
 /**
  * «Скани з телефону» — Студійна половина зовнішнього API (WriterScan).
@@ -30,6 +32,10 @@ interface ScanItem {
   chapterTitle: string | null;
   sectionTitle: string | null;
   imageUrl: string;
+  /** Пакет сторінок рукопису з GrabFusion (A5): однаковий batchId — одна глава. */
+  batchId?: string | null;
+  batchOrder?: number | null;
+  batchBookTitle?: string | null;
   createdAt: string;
 }
 
@@ -139,8 +145,10 @@ export const ScanInboxPanel: React.FC<ScanInboxPanelProps> = ({ book, onUpdateBo
     if (connectOpen) loadTokens();
   }, [connectOpen, loadTokens]);
 
-  const bookScans = scans.filter((s) => s.bookId === book.id);
+  // Пакет рукопису без книги (нова книга з телефона) показуємо в будь-якій книзі: автор сам обирає, куди вставити.
+  const bookScans = scans.filter((s) => s.bookId === book.id || (s.batchId && !s.bookId));
   const otherCount = scans.length - bookScans.length;
+  const { batches, singles } = useMemo(() => groupScanBatches(bookScans), [bookScans]);
 
   // Щойно зʼявились вхідні для цієї книги — розгортаємо панель сама, один раз:
   // автор відкрив медіатеку саме тому, що надіслав щось із телефону.
@@ -323,7 +331,19 @@ export const ScanInboxPanel: React.FC<ScanInboxPanelProps> = ({ book, onUpdateBo
           {otherCount > 0 && <p className="text-[11px] text-amber-300/80">{t('scanInbox.otherBooks', { n: otherCount })}</p>}
 
           <div className="space-y-3">
-            {bookScans.map((scan) => {
+            {batches.map((batch) => (
+              <ScanBatchCard
+                key={batch.batchId}
+                batch={batch}
+                book={book}
+                onUpdateBook={onUpdateBook}
+                onRevealChapterText={onRevealChapterText}
+                showToast={showToast}
+                resolve={resolve}
+                onResolved={(ids) => setScans((prev) => prev.filter((s) => !ids.includes(s.scanId)))}
+              />
+            ))}
+            {singles.map((scan) => {
               const d = drafts[scan.scanId];
               if (!d) return null;
               const chapterTitle = chapters.find((c) => c.id === d.chapterId)?.title || chapters[chapters.length - 1]?.title || '';

@@ -277,7 +277,7 @@ t('у ній готова пропозиція: 3 кроки з полями й 
 t('джерел 3, усі з кадром і підтверджені', exp.sourceMaterials.length === 3 && exp.sourceMaterials.every((s: any) => s.kind === 'photo' && s.approved && !!s.assetId));
 t('збережена пропозиція проходить перевірку майстра', throws(() => technical.parseTechnicalProposal(JSON.stringify(exp.technical.proposal), exp.sourceMaterials)) === '');
 t('усі відповіді сервера відповідають схемі контракту', errs.length === 0, errs.slice(0, 4).join(' | '));
-t('версія контракту 1.2.0', contract.PHOTO_DRAFT_CONTRACT_VERSION === '1.2.0');
+t('версія контракту 1.x', /^1\.\d+\.\d+$/.test(contract.PHOTO_DRAFT_CONTRACT_VERSION));
 
 server.close();
 console.log(`\n${pass} пройдено, ${fail} не пройдено`);

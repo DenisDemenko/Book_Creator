@@ -1,12 +1,12 @@
-# API «чернеток за фото» (Studio ↔ GrabFusion), контракт 1.2.0
+# API «чернеток за фото» (Studio ↔ GrabFusion), контракт 1.3.0
 
 Крок A0 плану `docs/proposals/GRABFUSION_PHOTO_COURSE_APP_2026-10-28.md`. Цей опис, типи
 `shared/photoDraftContract.ts`, схема `docs/photo-drafts-api/schema.json` (JSON Schema draft-07) і
 фікстури `docs/photo-drafts-api/fixtures/*.json` — **єдине джерело стику** частин A (сервер Studio) і
 B (Python-сервіс GrabFusion). Їхню узгодженість перевіряє `npm run test:photo-draft-contract`.
 
-Стан: **усі маршрути реалізовано** — етап 1 (A1) і етап 3 (A2: `structure`, `generate`, `submit`),
-28.10.2026, `server/external/photoDraftRoutes.ts`. Справжні відповіді сервера перевіряються цією ж
+Стан: **усі маршрути реалізовано** — етап 1 (A1), етап 3 (A2: `structure`, `generate`, `submit`) і
+етап 6 (A5: рукопис, `PUT …/text`), 28.10.2026, `server/external/photoDraftRoutes.ts`. Справжні відповіді сервера перевіряються цією ж
 схемою в `npm run test:photo-drafts` і `npm run test:photo-drafts-a2`.
 
 ## 1. Загальне
@@ -43,6 +43,9 @@ B (Python-сервіс GrabFusion). Їхню узгодженість перев
 | `maxTitleChars` / `maxShortFieldChars` | 160 / 200 | Назва; ремесло й аудиторія |
 | `maxLessonBodyChars` | 20 000 | Текст уроку |
 | `pollIntervalMs` | 2000 | Як часто опитувати під час фонових робіт |
+| `maxManuscriptPages` | 120 | Сторінок в одній чернетці-рукописі (окремо від `maxPhotosPerDraft`; з 1.3.0) |
+| `manuscriptPagesPerHour` | 200 | Нових сторінок рукопису на годину на автора (окремо від `photosPerHour`; з 1.3.0) |
+| `maxPageTextChars` | 20 000 | Текст однієї сторінки рукопису |
 
 **Як рахувати символи.** Кодові точки Unicode: у TypeScript `[...text].length`
 (`countNoteChars` у контракті), у Python — `len(text)`. «👍» — один символ. Лічильник у застосунку й
@@ -53,7 +56,8 @@ B (Python-сервіс GrabFusion). Їхню узгодженість перев
 Обʼєкт `draft` (`definitions/Draft` у схемі) повертають майже всі маршрути. Головне:
 
 - `kind`: `course` → курс у статусі draft; `instruction` → експрес-чернетка інструкції;
-  `book` → глава у «Вхідних» книги (потрібен `bookId`).
+  `book` → глава у «Вхідних» книги (потрібен `bookId`); `manuscript` (з 1.3.0) → набір сторінок
+  рукопису у «Вхідних» одним пакетом (див. нижче).
 - `status`: `collecting` → `structured` → `written` → `submitted`; будь-який, крім `submitted`,
   може стати `discarded`. Повернення назад дозволене: нові фото в `structured` повертають
   чернетку в `collecting`; нова структура в `written` — у `structured`.
@@ -61,7 +65,8 @@ B (Python-сервіс GrabFusion). Їхню узгодженість перев
   `ifRevision`. Фонові результати ШІ (опис кадру, завершення проходу) ревізію **не** змінюють, тож
   правка під час опису кадрів не конфліктує.
 - `photos[]` — кадри з `status` `processing` → `described` | `failed`, порядком `order` (з 1),
-  описом проходу 1 `description` і мітками `tags`.
+  описом проходу 1 `description` і мітками `tags`. У рукописі (`kind: manuscript`) кадр — це сторінка:
+  замість опису в ній `text` (дослівно розпізнаний текст, `null` до розпізнавання) і `textEdited`.
 - `notes[]` — описи викладача: `{ noteId, photoIds, text }`; один кадр або серія.
 - `structure` — модулі й уроки після проходу 2 (`null` до того); у уроках — `body` після проходу 3.
   `aiFields` перелічує поля, які написав ШІ й викладач ще не правив.
@@ -79,7 +84,7 @@ B (Python-сервіс GrabFusion). Їхню узгодженість перев
 | `GET /photo-drafts/limits` | 1 | 200 | `limits` |
 | `GET /photo-drafts` | 1 | 200 | `list-drafts` |
 | `POST /photo-drafts` | 1 | 201 | `create-draft` |
-| `GET /photo-drafts/:draftId` | 1 | 200 | `get-draft-collecting`, `get-draft-structured`, `get-draft-written`, `get-draft-job-failed` |
+| `GET /photo-drafts/:draftId` | 1 | 200 | `get-draft-collecting`, `get-draft-structured`, `get-draft-written`, `get-draft-job-failed`, `get-draft-manuscript` |
 | `PATCH /photo-drafts/:draftId` | 1 | 200 | `patch-draft` |
 | `DELETE /photo-drafts/:draftId` | 1 | 200 | `discard-draft` |
 | `POST /photo-drafts/:draftId/photos` | 1 | 202 | `add-photo` |
@@ -88,27 +93,33 @@ B (Python-сервіс GrabFusion). Їхню узгодженість перев
 | `DELETE /photo-drafts/:draftId/photos/:photoId` | 1 | 200 | `delete-photo` |
 | `PUT /photo-drafts/:draftId/notes/:noteId` | 1 | 200 | `put-note` |
 | `DELETE /photo-drafts/:draftId/notes/:noteId` | 1 | 200 | `delete-note` |
+| `PUT /photo-drafts/:draftId/photos/:photoId/text` | 5 | 200 | `put-photo-text` |
 | `POST /photo-drafts/:draftId/structure` | 3 | 202 | `structure-running` |
 | `POST /photo-drafts/:draftId/modules/:moduleId/generate` | 3 | 202 | `generate-running` |
-| `POST /photo-drafts/:draftId/submit` | 3 | 201 | `submit-course`, `submit-instruction`, `submit-book` |
+| `POST /photo-drafts/:draftId/submit` | 3 | 201 | `submit-course`, `submit-instruction`, `submit-book`, `submit-manuscript` |
 
 Подробиці:
 
-- **`POST /photo-drafts`** — тіло `{ kind, title?, craft?, audience?, level?, bookId?, instructionMode?, modelCode? }`.
+- **`POST /photo-drafts`** — тіло `{ kind, title?, craft?, audience?, level?, bookId?, newBookTitle?, instructionMode?, modelCode? }`.
   `instructionMode` (`assembly` — складання, `operation` — користування; без нього `assembly`) і `modelCode`
   (код або модель виробу) — для `kind: instruction`; режим у курсу чи книги → `400 bad_input`.
-  `bookId` обовʼязковий для `book` і має бути книгою автора (`404 book_not_found`). Понад
+  `bookId` обовʼязковий для `book` і має бути книгою автора (`404 book_not_found`). Для `manuscript`
+  `bookId` необовʼязковий, а замість нього можна дати `newBookTitle` (нова книга; обидва разом →
+  `400 bad_input`); `newBookTitle` в інших видів → `400 bad_input`. Понад
   `maxOpenDrafts` → `409 too_many_drafts`.
 - **`GET /photo-drafts`** — перелік власних чернеток (`drafts[]`, коротко), новіші перші; відкинуті
   (`discarded`) не показуються.
 - **`PATCH /photo-drafts/:draftId`** — тіло `{ ifRevision, title?, craft?, audience?, level?,
-  instructionMode?, modelCode?, photoOrder?, structure?, lessons?, assumptions? }`. `photoOrder` — усі `photoId` у новому порядку
+  instructionMode?, modelCode?, bookId?, newBookTitle?, photoOrder?, structure?, lessons?, assumptions? }`
+  (`bookId` і `newBookTitle` — лише в рукописі; `structure`/`lessons`/`assumptions` у рукописі → `409 wrong_status`). `photoOrder` — усі `photoId` у новому порядку
   (інший набір → `400 bad_input`). `structure` замінює структуру повністю; `lessons` правлять окремі
   уроки (`{ lessonId, title?, goal?, body?, topics? }`); поле, яке викладач змінив, зникає з
   `aiFields`. `assumptions` — `[{ assumptionId, status }]`. Ревізія на сервері інша →
   `409 revision_conflict`: застосунок перечитує чернетку й показує викладачу, що змінилось.
 - **`DELETE /photo-drafts/:draftId`** — відкинути (`status: discarded`); відправлену — `409 wrong_status`.
-- **`POST /photo-drafts/:draftId/photos`** — тіло `{ clientId, image, mimeType?, takenAt? }`;
+- **`POST /photo-drafts/:draftId/photos`** — тіло `{ clientId, image, mimeType?, takenAt?, note? }`;
+  `note` (з 1.3.0, ≤ `maxNoteChars`, інакше `400 note_too_long`) — підказка до цього кадру: лягає нотаткою
+  `n-<photoId>` ще до фонового проходу 1, тож окремий `PUT …/notes/…` не потрібен;
   `image` — `data:image/jpeg;base64,…` або голий base64 разом із `mimeType`; JPEG, PNG, WEBP
   (інакше `400 bad_image`; понад межу — `413 image_too_large`). **Ідемпотентно за `clientId`**:
   повтор після обриву звʼязку повертає те саме фото з `duplicate: true` і не створює дубля — саме на
@@ -119,6 +130,10 @@ B (Python-сервіс GrabFusion). Їхню узгодженість перев
   `402 ai_budget_exceeded` (перевіряється ДО збереження фото). Роль без дозволу на ШІ → `403 forbidden`.
 - **`GET …/photos/:photoId/image`** — байти фото з тим самим токеном (у застосунку немає cookie).
 - **`POST …/photos/:photoId/retry`** — повторити опис після `failed` (інший стан → `409 wrong_status`).
+- **`PUT …/photos/:photoId/text`** (з 1.3.0, лише `manuscript`) — тіло `{ text }`: викладач виправив або ввів
+  вручну текст сторінки (порожній рядок — «тексту немає»). Відповідь `{ photo, revision, duplicate: false }`,
+  `textEdited: true`; сторінка, що ще розпізнається, → `409 wrong_status`; понад `maxPageTextChars` або не
+  рядок → `400 bad_input`; не рукопис → `409 wrong_status`; невдала сторінка після правки стає `described`.
 - **`DELETE …/photos/:photoId`** — прибрати кадр; він зникає також з описів і уроків.
 - **`PUT …/notes/:noteId`** — тіло `{ photoIds, text }`. `noteId` задає застосунок, тож повтор
   безпечний. Текст понад 500 символів → `400 note_too_long`; невідомий кадр → `404 photo_not_found`.
@@ -141,7 +156,7 @@ B (Python-сервіс GrabFusion). Їхню узгодженість перев
 - **`POST …/submit`** — перевірка якості, потім створення результату. Відповідь
   `201 { draft, target }`. Якщо щось заважає — `400 submit_blocked` з переліком `blockers[]`
   (`no_photos`, `photos_processing`, `photos_failed`, `no_structure`, `module_not_written`,
-  `open_assumptions`, `empty_lesson`, `title_missing`, `book_missing`), кожен із `message` і, де
+  `open_assumptions`, `empty_lesson`, `title_missing`, `book_missing`, `empty_page`), кожен із `message` і, де
   доречно, `moduleId` / `lessonId` / `photoId` / `assumptionId`. Нові кадри після структури
   (`status: collecting`) — теж `no_structure`: розкладіть заново. Повторний submit відправленої
   чернетки → `409 wrong_status`; два одночасні submit створюють один результат. Що виходить:
@@ -155,8 +170,25 @@ B (Python-сервіс GrabFusion). Їхню узгодженість перев
     «**Увага:** …», «**Результат кроку:** …» стають полями кроку; крок, текст якого написав ШІ й
     викладач не правив, у майстрі позначено «потребує перевірки». Експрес-чернетки живуть 24 години —
     застосунок має сказати викладачу відкрити її в Studio протягом доби.
+  - `manuscript` → «Вхідні» книги одним пакетом (див. «Рукопис» нижче); `target.id` — перша сторінка пакета.
   - `book` → «Вхідні» книги (`/media?tab=inbox&bookId=<id>`): по запису на урок (текст уроку, назва
     модуля як глава, назва уроку як розділ); `target.id` — перший із записів.
+
+**Рукопис (`kind: manuscript`, з 1.3.0, «Набір книги»).** Для швидкого набору книги з фото сторінок: ШІ
+**не структурує й не переписує** — прохід 1 це дослівне розпізнавання (OCR) сторінки, а не опис сцени.
+Підказка викладача (`note` при додаванні фото) іде в розпізнавання як дані: імена героїв, мова, почерк.
+Прохідів 2–3 немає: `structure` / `generate` / PATCH структури → `409 wrong_status`, статус лишається
+`collecting` до `submit`. Сторінки (`photos[]`, порядок `photoOrder`) мають `text`; викладач правитиме їх
+через `PUT …/text`. Ліміти окремі: `maxManuscriptPages`, `manuscriptPagesPerHour` (сторінки не рахуються в
+`photosPerHour`). `submit` потребує: хоч однієї сторінки, усі розпізнані (`photos_processing` /
+`photos_failed`), у кожної є текст (`empty_page` — введіть вручну або приберіть сторінку), назву глави
+(`title_missing`) і книгу або назву нової (`book_missing`). Результат — по запису у «Вхідних» на сторінку, з
+однаковим `batchId` (= `draftId`) і `batchOrder` (з 1, за порядком сторінок); `chapterTitle` — назва чернетки,
+підпис — «Сторінка N». З `bookId` запис належить книзі (`studioUrl` = `/media?tab=inbox&bookId=…`); з
+`newBookTitle` книги на сервері немає (вона живе в браузері автора), тож записи йдуть без книги з
+`batchBookTitle`, а автор у Studio створює книгу й вставляє главу кнопкою «Вставити главу» (текст приїздить
+AI-чернеткою). Скани у «Вхідних» (`GET /api/scans/inbox`, лише сесія Studio) мають нові необовʼязкові поля
+`batchId`, `batchOrder`, `batchBookTitle`.
 
 **Опитування.** Поки є фото в `processing` або `job.status = running`, застосунок раз на
 `pollIntervalMs` читає `GET /photo-drafts/:draftId`. Довгі роботи навмисно не тримають запит:
@@ -213,6 +245,7 @@ B просить A коментарем у документі плану.
 
 | Версія | Дата | Зміна |
 |---|---|---|
+| 1.3.0 | 2026-10-28 | A5: `kind: manuscript` («Набір книги»): сторінки розпізнаються дослівно (`photo.text`, `textEdited`), нові `newBookTitle`, `PUT …/photos/:photoId/text`, `note` у тілі додавання фото, `bookId` у PATCH рукопису, межі `maxManuscriptPages` / `manuscriptPagesPerHour` / `maxPageTextChars`, блокер `empty_page`; відправка — пакетом у «Вхідні» (`batchId` / `batchOrder` / `batchBookTitle`). Лише додавання |
 | 1.2.0 | 2026-10-28 | A4: для `kind: instruction` — `instructionMode` (`assembly` / `operation`) і `modelCode` у чернетці, при створенні й у PATCH; відправка інструкції дає готову пропозицію кроків у майстрі технічних інструкцій. Лише додавання |
 | 1.1.0 | 2026-10-28 | A2: `POST …/structure` приймає необовʼязкове `{ replace }`; описано поведінку проходів 2–3, відправки (курс / експрес-чернетка / «Вхідні»), завислих робіт. Лише додавання |
 | 1.0.0 | 2026-10-28 | Перша версія (A0): чернетки, фото, описи, проходи 2–3, відправка, межі, коди помилок; до G1 додано `forbidden`, `ai_budget_exceeded` і правило ревізії для фонових результатів |

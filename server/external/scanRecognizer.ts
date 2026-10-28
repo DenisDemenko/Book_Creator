@@ -34,13 +34,13 @@ export async function recognizeScanWithCoreVision(p: RecognizeParams): Promise<{
   const result = await generateText({
     engine,
     modelId,
-    prompt: buildScanOcrPrompt({ languageHint: 'uk' }),
+    prompt: buildScanOcrPrompt({ languageHint: 'uk', note: p.note }),
     systemInstruction: scanOcrSystemInstruction(),
     apiKeyOverride: userKey,
     images: [{ mimeType: p.mimeType, dataBase64: p.base64 }],
     req: p.req,
-    label: 'Скан сторінки з телефону (WriterScan)',
-    bookId: p.bookId,
+    label: p.draftId ? `Сторінка рукопису (GrabFusion) ${p.draftId}` : 'Скан сторінки з телефону (WriterScan)',
+    bookId: p.bookId || undefined,
   });
   return { text: result.text, modelId };
 }

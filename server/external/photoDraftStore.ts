@@ -50,6 +50,8 @@ export interface StoredDraft {
   instructionMode?: PhotoDraftInstructionMode | null;
   modelCode?: string | null;
   bookId: string | null;
+  /** Лише `manuscript`: назва нової книги, коли `bookId` немає. */
+  newBookTitle?: string | null;
   photos: StoredPhoto[];
   notes: DraftNote[];
   structure: DraftStructure | null;
@@ -153,8 +155,12 @@ export async function countOpenDrafts(ownerId: string): Promise<number> {
   return (await listDrafts(ownerId)).filter((d) => d.status !== 'submitted' && d.status !== 'discarded').length;
 }
 
-/** Скільки фото автор додав з моменту `sinceIso` — для ліміту на годину. */
-export async function countPhotosSince(ownerId: string, sinceIso: string): Promise<number> {
+/**
+ * Скільки фото автор додав з моменту `sinceIso` — для ліміту на годину.
+ * `scope`: 'manuscript' — лише сторінки рукописів (окремий ліміт, A5), 'other' — решта видів,
+ * без нього — усе разом.
+ */
+export async function countPhotosSince(ownerId: string, sinceIso: string, scope?: 'manuscript' | 'other'): Promise<number> {
   let drafts: StoredDraft[];
   if (useJson()) {
     drafts = (await loadJson()).drafts.filter((d) => d.ownerId === ownerId && d.updatedAt >= sinceIso);
@@ -163,6 +169,7 @@ export async function countPhotosSince(ownerId: string, sinceIso: string): Promi
       .prepare('SELECT * FROM photo_drafts WHERE owner_id = ? AND updated_at >= ?')
       .all(ownerId, sinceIso) as any[]).map(fromRow);
   }
+  if (scope) drafts = drafts.filter((d) => (d.kind === 'manuscript') === (scope === 'manuscript'));
   return drafts.reduce((sum, d) => sum + d.photos.filter((p) => p.createdAt >= sinceIso).length, 0);
 }
 

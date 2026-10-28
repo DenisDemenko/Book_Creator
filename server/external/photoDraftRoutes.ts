@@ -29,7 +29,8 @@ import type { Express, Request, Response } from 'express';
 import { requirePermission } from '../auth';
 import { getBook } from '../bookStore';
 import { readAsset, saveAsset } from '../media/mediaLibraryStore';
-import { decodeScanImage, requireExternalToken } from './externalApiRoutes';
+import { decodeScanImage, requireExternalToken, type RecognizeParams } from './externalApiRoutes';
+import { cleanOcrText } from './scanOcrPrompt';
 import {
   DraftChangeError,
   countOpenDrafts,
@@ -77,7 +78,7 @@ import {
   placePhotos,
   structureSystemInstruction,
 } from './photoDraftPasses';
-import { toCourseInput, toExpressPayload, toInboxItems, type CourseInput, type InboxItem } from './photoDraftMapping';
+import { toCourseInput, toExpressPayload, toInboxItems, toManuscriptItems, type CourseInput, type InboxItem } from './photoDraftMapping';
 
 const BASE = '/api/external/v1/photo-drafts';
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
@@ -108,12 +109,21 @@ export interface PhotoDraftSinks {
   createCourse: (ownerId: string, input: CourseInput) => Promise<string>;
   createExpress: (ownerId: string, payload: Record<string, unknown>) => Promise<string>;
   /** Повертає id першого запису у «Вхідних». */
-  createInboxScans: (p: { ownerId: string; bookId: string; items: InboxItem[]; tokenId?: string | null }) => Promise<string>;
+  createInboxScans: (p: {
+    ownerId: string;
+    bookId: string;
+    items: InboxItem[];
+    tokenId?: string | null;
+    /** Лише рукопис (A5): записи складають пакет; `bookId` може бути порожнім. */
+    batch?: { id: string; bookTitle?: string | null };
+  }) => Promise<string>;
 }
 
 export interface PhotoDraftDeps {
   /** Прохід 1. У продукті — модель зору ядра AI (photoDraftDescriber.ts). */
   describe: (p: DescribePhotoParams) => Promise<{ description: string; tags: string[]; modelId: string }>;
+  /** Прохід 1 для `kind: manuscript` (A5): дослівне розпізнавання сторінки. У продукті — scanRecognizer.recognizeScanWithCoreVision. */
+  recognize?: (p: RecognizeParams) => Promise<{ text: string; modelId: string }>;
   /** Облік і перевірка сховища тарифу (у продукті — mediaStorage.checkAndRecordStorageUpload). */
   checkStorage?: (p: {
     userId: string;
@@ -154,6 +164,8 @@ export function publicPhoto(draftId: string, p: StoredPhoto): DraftPhoto {
     description: p.description,
     tags: p.tags,
     error: p.error,
+    // Лише рукопис (1.3.0): в інших видів поля немає зовсім.
+    ...(p.text !== undefined ? { text: p.text, textEdited: !!p.textEdited } : {}),
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
   };
@@ -184,6 +196,7 @@ export function publicDraft(d: StoredDraft): PhotoDraft {
     audience: d.audience,
     level: d.level,
     bookId: d.bookId,
+    ...(d.kind === 'manuscript' ? { newBookTitle: d.newBookTitle ?? null } : {}),
     instructionMode: d.kind === 'instruction' ? (d.instructionMode ?? 'assembly') : null,
     modelCode: d.modelCode ?? null,
     photos: [...d.photos].sort((a, b) => a.order - b.order).map((p) => publicPhoto(d.id, p)),
@@ -391,8 +404,25 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       };
       let patch: Partial<StoredPhoto>;
       try {
-        const result = await deps.describe({ ownerId, draftId, mimeType, base64, context, req });
-        patch = { status: 'described', description: result.description, tags: result.tags, modelId: result.modelId || null, error: null };
+        if (current.kind === 'manuscript') {
+          // Рукопис: не опис сцени, а дослівний текст сторінки; нотатка — підказка до розбору почерку.
+          if (!deps.recognize) throw new Error('Розпізнавання сторінок не налаштовано на сервері.');
+          const hint = (context.notes ?? []).map((n) => n.trim()).filter(Boolean).join('\n');
+          const result = await deps.recognize({
+            mimeType,
+            base64,
+            ownerId,
+            bookId: current.bookId ?? '',
+            note: hint || null,
+            draftId,
+            req,
+          });
+          const text = [...cleanOcrText(result.text)].slice(0, PHOTO_DRAFT_LIMITS.maxPageTextChars).join('');
+          patch = { status: 'described', description: null, tags: [], text, modelId: result.modelId || null, error: null };
+        } else {
+          const result = await deps.describe({ ownerId, draftId, mimeType, base64, context, req });
+          patch = { status: 'described', description: result.description, tags: result.tags, modelId: result.modelId || null, error: null };
+        }
       } catch (err) {
         console.warn('[photoDrafts] опис кадру:', String((err as Error)?.message || err).slice(0, 300));
         patch = { status: 'failed', error: humanizeDescribeError(err) };
@@ -444,11 +474,24 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
         return sendChangeError(res, err, 'create');
       }
       let bookId: string | null = null;
-      if (kind === 'book') {
+      let newBookTitle: string | null = null;
+      if (kind === 'book' || kind === 'manuscript') {
         const wanted = typeof body.bookId === 'string' ? body.bookId.trim() : '';
-        const stored = wanted ? await getBook(wanted) : null;
-        if (!stored || stored.ownerId !== ownerId) return fail(res, 404, 'book_not_found', 'Книгу не знайдено.');
-        bookId = wanted;
+        if (kind === 'manuscript') {
+          try {
+            newBookTitle = shortField(body.newBookTitle, PHOTO_DRAFT_LIMITS.maxTitleChars, 'Назва нової книги') ?? null;
+          } catch (err) {
+            return sendChangeError(res, err, 'create');
+          }
+          if (wanted && newBookTitle) return fail(res, 400, 'bad_input', 'Передайте або bookId (існуюча книга), або newBookTitle (нова), але не обидва.');
+        }
+        if (kind === 'book' || wanted) {
+          const stored = wanted ? await getBook(wanted) : null;
+          if (!stored || stored.ownerId !== ownerId) return fail(res, 404, 'book_not_found', 'Книгу не знайдено.');
+          bookId = wanted;
+        }
+      } else if (body.newBookTitle !== undefined && body.newBookTitle !== null) {
+        return fail(res, 400, 'bad_input', 'Назва нової книги є лише в чернеток-рукописів.');
       }
       if ((await countOpenDrafts(ownerId)) >= PHOTO_DRAFT_LIMITS.maxOpenDrafts) {
         return fail(
@@ -472,6 +515,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
         instructionMode,
         modelCode,
         bookId,
+        ...(kind === 'manuscript' ? { newBookTitle } : {}),
         photos: [],
         notes: [],
         structure: null,
@@ -504,6 +548,17 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       if (!Number.isInteger(body.ifRevision)) {
         return fail(res, 400, 'bad_input', 'Передайте ifRevision — ревізію чернетки, яку бачить застосунок.');
       }
+      // Книга лише для рукопису; перевіряємо власника до черги змін (читання книги асинхронне).
+      let bookIdPatch: string | null | undefined;
+      if (body.bookId !== undefined) {
+        if (body.bookId === null) bookIdPatch = null;
+        else {
+          const wanted = typeof body.bookId === 'string' ? body.bookId.trim() : '';
+          const stored = wanted ? await getBook(wanted) : null;
+          if (!stored || stored.ownerId !== owner(req)) return fail(res, 404, 'book_not_found', 'Книгу не знайдено.');
+          bookIdPatch = wanted;
+        }
+      }
       const changed = await mutateDraft(
         String(req.params.draftId),
         owner(req),
@@ -528,6 +583,20 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
           if (mode !== undefined) d.instructionMode = mode;
           const modelCode = shortField(body.modelCode, PHOTO_DRAFT_LIMITS.maxShortFieldChars, 'Код виробу');
           if (modelCode !== undefined) d.modelCode = modelCode;
+          if (bookIdPatch !== undefined || body.newBookTitle !== undefined) {
+            if (d.kind !== 'manuscript') {
+              throw new DraftChangeError(400, 'bad_input', 'Книгу чи назву нової книги можна міняти лише в чернетці-рукописі.');
+            }
+            if (bookIdPatch !== undefined) d.bookId = bookIdPatch;
+            const nb = shortField(body.newBookTitle, PHOTO_DRAFT_LIMITS.maxTitleChars, 'Назва нової книги');
+            if (nb !== undefined) d.newBookTitle = nb;
+            if (d.bookId && d.newBookTitle) {
+              throw new DraftChangeError(400, 'bad_input', 'Або існуюча книга (bookId), або нова (newBookTitle), але не обидві.');
+            }
+          }
+          if (d.kind === 'manuscript' && (body.structure !== undefined || body.lessons !== undefined || body.assumptions !== undefined)) {
+            throw new DraftChangeError(409, 'wrong_status', 'У рукописі немає структури, уроків і припущень — сторінки лише розпізнаються дослівно.');
+          }
 
           if (body.photoOrder !== undefined) {
             const order = strings(body.photoOrder, 'photoOrder', 128);
@@ -644,17 +713,29 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       if (decoded.bytes.length > PHOTO_DRAFT_LIMITS.maxImageBytes) {
         return fail(res, 413, 'image_too_large', 'Фото завелике (максимум 10 МБ). Застосунок має стиснути його до 2048 px.');
       }
-      if (draft.photos.length >= PHOTO_DRAFT_LIMITS.maxPhotosPerDraft) {
-        return fail(res, 409, 'too_many_photos', `У чернетці вже ${PHOTO_DRAFT_LIMITS.maxPhotosPerDraft} кадрів — це межа.`);
+      const isManuscript = draft.kind === 'manuscript';
+      const photoCap = isManuscript ? PHOTO_DRAFT_LIMITS.maxManuscriptPages : PHOTO_DRAFT_LIMITS.maxPhotosPerDraft;
+      if (draft.photos.length >= photoCap) {
+        return fail(res, 409, 'too_many_photos', `У чернетці вже ${photoCap} ${isManuscript ? 'сторінок' : 'кадрів'} — це межа.`);
       }
       const hourAgo = new Date(now().getTime() - 3600_000).toISOString();
-      if ((await countPhotosSince(ownerId, hourAgo)) >= PHOTO_DRAFT_LIMITS.photosPerHour) {
+      const hourCap = isManuscript ? PHOTO_DRAFT_LIMITS.manuscriptPagesPerHour : PHOTO_DRAFT_LIMITS.photosPerHour;
+      if ((await countPhotosSince(ownerId, hourAgo, isManuscript ? 'manuscript' : 'other')) >= hourCap) {
         return fail(
           res,
           429,
           'rate_limited',
-          `Не більше ${PHOTO_DRAFT_LIMITS.photosPerHour} фото на годину. Черга продовжить надсилання трохи пізніше.`
+          `Не більше ${hourCap} ${isManuscript ? 'сторінок рукопису' : 'фото'} на годину. Черга продовжить надсилання трохи пізніше.`
         );
+      }
+      // Підказка до кадру одразу з фото (A5): прохід 1 стартує в цій же відповіді, тож окремий PUT нотатки не встиг би.
+      let inlineNote = '';
+      if (req.body?.note !== undefined && req.body?.note !== null) {
+        if (typeof req.body.note !== 'string') return fail(res, 400, 'bad_input', 'Поле note має бути текстом.');
+        inlineNote = req.body.note.trim();
+        if (countNoteChars(inlineNote) > PHOTO_DRAFT_LIMITS.maxNoteChars) {
+          return fail(res, 400, 'note_too_long', `Опис задовгий (максимум ${PHOTO_DRAFT_LIMITS.maxNoteChars} символів).`);
+        }
       }
       const budget = await budgetBlock(req);
       if (budget) return fail(res, 402, 'ai_budget_exceeded', budget);
@@ -693,8 +774,8 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
           // Між читанням і записом цей самий clientId міг прийти паралельним запитом.
           const twin = d.photos.find((p) => p.clientId === clientId);
           if (twin) return { photo: twin, duplicate: true };
-          if (d.photos.length >= PHOTO_DRAFT_LIMITS.maxPhotosPerDraft) {
-            throw new DraftChangeError(409, 'too_many_photos', `У чернетці вже ${PHOTO_DRAFT_LIMITS.maxPhotosPerDraft} кадрів — це межа.`);
+          if (d.photos.length >= photoCap) {
+            throw new DraftChangeError(409, 'too_many_photos', `У чернетці вже ${photoCap} ${isManuscript ? 'сторінок' : 'кадрів'} — це межа.`);
           }
           const photo: StoredPhoto = {
             photoId: newPhotoId(),
@@ -710,8 +791,10 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
             assetId: asset.id,
             mimeType: decoded.mimeType,
             modelId: null,
+            ...(isManuscript ? { text: null, textEdited: false } : {}),
           };
           d.photos.push(photo);
+          if (inlineNote) d.notes.push({ noteId: `n-${photo.photoId}`, photoIds: [photo.photoId], text: inlineNote, updatedAt: at });
           backToCollecting(d);
           return { photo, duplicate: false };
         },
@@ -776,6 +859,37 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       res.status(202).json({ photo: publicPhoto(draftId, changed.result), revision: changed.draft.revision, duplicate: false });
     } catch (err) {
       sendChangeError(res, err, 'retry');
+    }
+  });
+
+  /** Рукопис: викладач виправив (або ввів вручну) текст сторінки. */
+  app.put(`${BASE}/:draftId/photos/:photoId/text`, auth, async (req, res) => {
+    try {
+      const photoId = String(req.params.photoId);
+      const raw = req.body?.text;
+      if (typeof raw !== 'string') return fail(res, 400, 'bad_input', 'Передайте text — текст сторінки (порожній рядок означає «тексту немає»).');
+      const text = raw.replace(/\r\n/g, '\n').trim();
+      if (countNoteChars(text) > PHOTO_DRAFT_LIMITS.maxPageTextChars) {
+        return fail(res, 400, 'bad_input', `Текст сторінки задовгий (максимум ${PHOTO_DRAFT_LIMITS.maxPageTextChars} символів).`);
+      }
+      const changed = await mutateDraft(
+        String(req.params.draftId),
+        owner(req),
+        (d) => {
+          assertEditable(d);
+          if (d.kind !== 'manuscript') throw new DraftChangeError(409, 'wrong_status', 'Текст сторінки є лише в чернетки-рукопису.');
+          const photo = d.photos.find((p) => p.photoId === photoId);
+          if (!photo) throw new DraftChangeError(404, 'photo_not_found', 'Сторінки немає в цій чернетці.');
+          if (photo.status === 'processing') throw new DraftChangeError(409, 'wrong_status', 'Сторінка ще розпізнається — зачекайте.');
+          Object.assign(photo, { status: 'described', text, textEdited: true, error: null, updatedAt: now().toISOString() });
+          return photo;
+        },
+        { byTeacher: true, now }
+      );
+      if (!changed) return fail(res, 404, 'draft_not_found', 'Чернетку не знайдено.');
+      res.json({ photo: publicPhoto(String(req.params.draftId), changed.result), revision: changed.draft.revision, duplicate: false });
+    } catch (err) {
+      sendChangeError(res, err, 'photo text');
     }
   });
 
@@ -891,6 +1005,9 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       ownerId,
       (d) => {
         assertEditable(d);
+        if (d.kind === 'manuscript') {
+          throw new DraftChangeError(409, 'wrong_status', 'У рукописі немає проходів «Розкласти» й «Написати»: сторінки лише розпізнаються дослівно.');
+        }
         if (d.job?.status === 'running' && !jobIsStale(d.job, now().getTime())) {
           throw new DraftChangeError(409, 'job_running', 'Зачекайте: ШІ ще працює над цією чернеткою.');
         }
@@ -1022,7 +1139,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
     }
   });
 
-  const RESULT_WORD: Record<PhotoDraftKind, string> = { course: 'Курс', instruction: 'Інструкція', book: 'Глава' };
+  const RESULT_WORD: Record<PhotoDraftKind, string> = { course: 'Курс', instruction: 'Інструкція', book: 'Глава', manuscript: 'Рукопис' };
 
   app.post(`${BASE}/:draftId/submit`, auth, async (req, res) => {
     try {
@@ -1033,9 +1150,11 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       const before = await getDraft(draftId, ownerId);
       if (!before) return fail(res, 404, 'draft_not_found', 'Чернетку не знайдено.');
       let bookOk = false;
-      if (before.kind === 'book' && before.bookId) {
+      if ((before.kind === 'book' || before.kind === 'manuscript') && before.bookId) {
         const book = await getBook(before.bookId).catch(() => null);
         bookOk = !!book && book.ownerId === ownerId;
+      } else if (before.kind === 'manuscript' && before.newBookTitle?.trim()) {
+        bookOk = true; // нова книга: її створить автор у Studio
       }
       const changed = await mutateDraft(
         draftId,
@@ -1047,7 +1166,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
           }
           const blockers = computeSubmitBlockers(d, { bookOk, status: d.status });
           if (blockers.length > 0) {
-            throw new DraftChangeError(400, 'submit_blocked', `${RESULT_WORD[d.kind]} ще не готов${d.kind === 'book' ? 'а' : d.kind === 'course' ? 'ий' : 'а'} до відправки.`, { blockers });
+            throw new DraftChangeError(400, 'submit_blocked', `${RESULT_WORD[d.kind]} ще не готов${d.kind === 'course' || d.kind === 'manuscript' ? 'ий' : 'а'} до відправки.`, { blockers });
           }
           let target: SubmitTarget;
           if (d.kind === 'course') {
@@ -1058,6 +1177,15 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
           } else if (d.kind === 'instruction') {
             const id = await sinks.createExpress(ownerId, toExpressPayload(d));
             target = { kind: 'express', id, studioUrl: `/express/${id}` };
+          } else if (d.kind === 'manuscript') {
+            const id = await sinks.createInboxScans({
+              ownerId,
+              bookId: d.bookId ?? '',
+              items: toManuscriptItems(d),
+              tokenId: d.tokenId,
+              batch: { id: d.id, bookTitle: d.bookId ? null : d.newBookTitle ?? null },
+            });
+            target = { kind: 'inbox', id, studioUrl: d.bookId ? `/media?tab=inbox&bookId=${encodeURIComponent(d.bookId)}` : '/media?tab=inbox' };
           } else {
             const id = await sinks.createInboxScans({ ownerId, bookId: d.bookId!, items: toInboxItems(d), tokenId: d.tokenId });
             target = { kind: 'inbox', id, studioUrl: `/media?tab=inbox&bookId=${encodeURIComponent(d.bookId!)}` };

@@ -1,14 +1,15 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://fusionlab.in.ua/schemas/photo-drafts/1.2.0.json",
-  "title": "Studio photo-drafts API (GrabFusion contract) 1.2.0",
+  "$id": "https://fusionlab.in.ua/schemas/photo-drafts/1.3.0.json",
+  "title": "Studio photo-drafts API (GrabFusion contract) 1.3.0",
   "description": "JSON Schema (draft-07) for responses of /api/external/v1/photo-drafts*. Source of truth together with shared/photoDraftContract.ts; checked by scripts/test-photoDraftContract.mts.",
   "definitions": {
     "Kind": {
       "enum": [
         "course",
         "instruction",
-        "book"
+        "book",
+        "manuscript"
       ]
     },
     "DraftStatus": {
@@ -103,7 +104,8 @@
         "open_assumptions",
         "empty_lesson",
         "title_missing",
-        "book_missing"
+        "book_missing",
+        "empty_page"
       ]
     },
     "Limits": {
@@ -118,7 +120,10 @@
         "maxTitleChars",
         "maxShortFieldChars",
         "maxLessonBodyChars",
-        "pollIntervalMs"
+        "pollIntervalMs",
+        "maxManuscriptPages",
+        "manuscriptPagesPerHour",
+        "maxPageTextChars"
       ],
       "properties": {
         "maxNoteChars": {
@@ -158,6 +163,18 @@
           "minimum": 1
         },
         "pollIntervalMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxManuscriptPages": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "manuscriptPagesPerHour": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxPageTextChars": {
           "type": "integer",
           "minimum": 1
         }
@@ -233,6 +250,16 @@
         "updatedAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "manuscript only (1.3.0): verbatim page text"
+        },
+        "textEdited": {
+          "type": "boolean"
         }
       },
       "additionalProperties": true
@@ -623,6 +650,12 @@
           ]
         },
         "modelCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "newBookTitle": {
           "type": [
             "string",
             "null"

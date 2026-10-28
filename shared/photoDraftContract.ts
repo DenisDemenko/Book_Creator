@@ -20,7 +20,7 @@
  */
 
 /** Версія контракту. Мінорна — додавання; мажорна — ламка зміна. */
-export const PHOTO_DRAFT_CONTRACT_VERSION = '1.2.0';
+export const PHOTO_DRAFT_CONTRACT_VERSION = '1.3.0';
 
 /** Префікс маршрутів. Автентифікація — `Authorization: Bearer nst_…`. */
 export const PHOTO_DRAFT_API_BASE = '/api/external/v1';
@@ -56,6 +56,12 @@ export const PHOTO_DRAFT_LIMITS = {
   maxLessonBodyChars: 20_000,
   /** Рекомендований інтервал опитування під час фонових проходів. */
   pollIntervalMs: 2000,
+  /** Сторінок в одній чернетці-рукописі (`kind: manuscript`, з 1.3.0). Окремо від `maxPhotosPerDraft`. */
+  maxManuscriptPages: 120,
+  /** Нових сторінок рукопису на годину на одного автора — окремо від `photosPerHour`. */
+  manuscriptPagesPerHour: 200,
+  /** Текст однієї сторінки рукопису після розпізнавання або правки, у символах Unicode. */
+  maxPageTextChars: 20_000,
 } as const;
 
 export type PhotoDraftLimits = typeof PHOTO_DRAFT_LIMITS;
@@ -79,8 +85,12 @@ export function noteFits(text: string): boolean {
 // Перелічення
 // ---------------------------------------------------------------------------
 
-/** Що вийде після відправки: курс draft, експрес-інструкція або глава у «Вхідних» книги. */
-export const PHOTO_DRAFT_KINDS = ['course', 'instruction', 'book'] as const;
+/**
+ * Що вийде після відправки: курс draft, експрес-інструкція, глава у «Вхідних»
+ * книги (`book`, ШІ структурує й пише) або набір сторінок рукопису (`manuscript`,
+ * з 1.3.0: сторінки лише розпізнаються дослівно, без структури й переписування).
+ */
+export const PHOTO_DRAFT_KINDS = ['course', 'instruction', 'book', 'manuscript'] as const;
 export type PhotoDraftKind = (typeof PHOTO_DRAFT_KINDS)[number];
 
 /**
@@ -165,6 +175,7 @@ export const SUBMIT_BLOCKER_KINDS = [
   'empty_lesson',
   'title_missing',
   'book_missing',
+  'empty_page',
 ] as const;
 export type SubmitBlockerKind = (typeof SUBMIT_BLOCKER_KINDS)[number];
 
@@ -208,6 +219,14 @@ export interface DraftPhoto {
   /** Короткі мітки з проходу 1: інструменти, матеріали, дії. */
   tags: string[];
   error: string | null;
+  /**
+   * Лише для `kind: manuscript` (з 1.3.0): текст сторінки, розпізнаний дослівно
+   * (прохід 1) або виправлений викладачем через `PUT …/photos/:photoId/text`.
+   * `null` — ще не розпізнано або розпізнати не вдалося. Для інших видів поля немає.
+   */
+  text?: string | null;
+  /** Лише `manuscript`: true, якщо текст правив викладач (тоді повторне розпізнавання його не затре). */
+  textEdited?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -289,6 +308,12 @@ export interface PhotoDraft {
   level: PhotoDraftLevel | null;
   /** Лише для `kind: book` — книга, у «Вхідні» якої ляже глава. */
   bookId: string | null;
+  /**
+   * Лише для `kind: manuscript` (з 1.3.0): назва НОВОЇ книги, коли `bookId` немає.
+   * Книга живе в браузері автора, тож сервер її не створює: пакет сторінок лягає
+   * у «Вхідні» без книги, а автор у Studio створює книгу й вставляє главу.
+   */
+  newBookTitle?: string | null;
   /** Лише для `kind: instruction` (з 1.2.0): складання чи користування; для інших видів `null`. Новим інструкціям — `assembly`. */
   instructionMode?: PhotoDraftInstructionMode | null;
   /** Код або модель виробу для інструкції (з 1.2.0). */
@@ -350,8 +375,10 @@ export interface CreatePhotoDraftRequest {
   craft?: string;
   audience?: string;
   level?: PhotoDraftLevel;
-  /** Обовʼязковий для `kind: book`. */
+  /** Обовʼязковий для `kind: book`; для `manuscript` — або він, або `newBookTitle`. */
   bookId?: string;
+  /** Лише для `kind: manuscript` (з 1.3.0): назва нової книги. */
+  newBookTitle?: string;
   /** Лише для `kind: instruction`; без нього — `assembly`. */
   instructionMode?: PhotoDraftInstructionMode;
   modelCode?: string;
@@ -363,6 +390,17 @@ export interface AddPhotoRequest {
   image: string;
   mimeType?: 'image/jpeg' | 'image/png' | 'image/webp';
   takenAt?: string;
+  /**
+   * Необовʼязкова підказка до цього кадру (з 1.3.0), ≤ `maxNoteChars`: кладеться як опис
+   * кадру (нотатка `n-<photoId>`) ще ДО фонового проходу 1 — окремий `PUT …/notes/…` приходить
+   * надто пізно. Для рукопису це підказка розпізнаванню (імена, мова), для решти — опис кадру.
+   */
+  note?: string;
+}
+
+/** Тіло `PUT …/photos/:photoId/text` (з 1.3.0, лише `manuscript`): викладач виправив розпізнаний текст сторінки. */
+export interface PutPhotoTextRequest {
+  text: string;
 }
 
 export interface PutNoteRequest {
@@ -394,6 +432,10 @@ export interface PatchPhotoDraftRequest {
   /** Лише для `kind: instruction`. */
   instructionMode?: PhotoDraftInstructionMode;
   modelCode?: string | null;
+  /** Лише для `kind: manuscript`: назва нової книги (`null` — прибрати). */
+  newBookTitle?: string | null;
+  /** Лише для `kind: manuscript`: існуюча книга автора (`null` — прибрати). Разом із `newBookTitle` — `400 bad_input`. */
+  bookId?: string | null;
   /** Усі photoId чернетки в новому порядку. */
   photoOrder?: string[];
   /** Повна структура замість наявної (перенесення кадрів між уроками, назви). */
@@ -418,7 +460,7 @@ export interface PhotoDraftRoute {
   /** Визначення у схемі (`definitions`), якому відповідає успішна відповідь; null — байти. */
   response: string | null;
   /** Етап плану, на якому маршрут зʼявляється на сервері. */
-  stage: 1 | 3;
+  stage: 1 | 3 | 5;
 }
 
 /**
@@ -438,6 +480,7 @@ export const PHOTO_DRAFT_ROUTES: readonly PhotoDraftRoute[] = [
   { method: 'DELETE', path: '/photo-drafts/:draftId/photos/:photoId', status: 200, fixture: 'delete-photo', response: 'DraftResponse', stage: 1 },
   { method: 'PUT', path: '/photo-drafts/:draftId/notes/:noteId', status: 200, fixture: 'put-note', response: 'NoteResponse', stage: 1 },
   { method: 'DELETE', path: '/photo-drafts/:draftId/notes/:noteId', status: 200, fixture: 'delete-note', response: 'DraftResponse', stage: 1 },
+  { method: 'PUT', path: '/photo-drafts/:draftId/photos/:photoId/text', status: 200, fixture: 'put-photo-text', response: 'PhotoResponse', stage: 5 },
   { method: 'POST', path: '/photo-drafts/:draftId/structure', status: 202, fixture: 'structure-running', response: 'DraftResponse', stage: 3 },
   { method: 'POST', path: '/photo-drafts/:draftId/modules/:moduleId/generate', status: 202, fixture: 'generate-running', response: 'DraftResponse', stage: 3 },
   { method: 'POST', path: '/photo-drafts/:draftId/submit', status: 201, fixture: 'submit-course', response: 'SubmitResponse', stage: 3 },
@@ -453,6 +496,8 @@ export const PHOTO_DRAFT_EXTRA_FIXTURES: Readonly<Record<string, string>> = {
   'get-draft-job-failed': 'DraftResponse',
   'submit-instruction': 'SubmitResponse',
   'submit-book': 'SubmitResponse',
+  'submit-manuscript': 'SubmitResponse',
+  'get-draft-manuscript': 'DraftResponse',
   'error-note-too-long': 'Error',
   'error-revision-conflict': 'Error',
   'error-scope-denied': 'Error',

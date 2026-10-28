@@ -252,6 +252,19 @@ export interface InboxItem {
   sectionTitle: string;
 }
 
+/** Сторінки рукопису у порядку сторінок: по одному запису «Вхідних» на сторінку, текст — дослівно. */
+export function toManuscriptItems(draft: StoredDraft): InboxItem[] {
+  return [...draft.photos]
+    .sort((a, b) => a.order - b.order)
+    .map((p) => ({
+      assetId: p.assetId,
+      imageUrl: libraryUrl(p.assetId),
+      text: (p.text ?? '').trim(),
+      chapterTitle: (draft.title ?? '').trim(),
+      sectionTitle: `Сторінка ${p.order}`,
+    }));
+}
+
 export function toInboxItems(draft: StoredDraft): InboxItem[] {
   const fallback = [...draft.photos].sort((a, b) => a.order - b.order)[0]?.assetId ?? null;
   const items: InboxItem[] = [];
