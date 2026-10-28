@@ -7,7 +7,7 @@ const titleEl = document.getElementById('title');
 const state = {
   view: 'boot', limits: null, drafts: [], draft: null, queue: [], user: null,
   online: navigator.onLine, urls: new Map(), editing: false, needsRender: false,
-  studioOrigin: '', writing: false, blockers: null, target: null, photosOpen: true,
+  studioOrigin: '', hint: '', writing: false, blockers: null, target: null, photosOpen: true,
 };
 let pollTimer = null, flushing = false, flushTimer = null;
 
@@ -103,7 +103,8 @@ function go(view) {
   document.getElementById('btn-logout').hidden = !state.user;
   render();
 }
-function render() {
+function render(force) {
+  if (force) state.editing = false; // дія користувача (напр. нові фото) важливіша за відкладення; зайнятий елемент зникне разом із перемальовкою
   if (state.editing && state.view === 'draft') { state.needsRender = true; return; }
   state.needsRender = false;
   app.replaceChildren();
@@ -159,7 +160,7 @@ function viewList() {
 
 function viewCreate() {
   const f = {
-    kind: h('select', { id: 'f-kind' }, h('option', { value: 'course', text: 'Курс' }), h('option', { value: 'instruction', text: 'Інструкція' })),
+    kind: h('select', { id: 'f-kind' }, h('option', { value: 'course', text: 'Курс' }), h('option', { value: 'instruction', text: 'Інструкція' }), h('option', { value: 'manuscript', text: 'Набір книги (сторінки рукопису)' })),
     title: h('input', { id: 'f-title', maxlength: 160, placeholder: 'Наприклад: Ложка з вишні за один вечір' }),
     craft: h('input', { id: 'f-craft', maxlength: 200, placeholder: 'Ремесло (необовʼязково)' }),
     audience: h('input', { id: 'f-audience', maxlength: 200, placeholder: 'Для кого (необовʼязково)' }),
@@ -167,17 +168,27 @@ function viewCreate() {
     model: h('input', { id: 'f-model', maxlength: 200, placeholder: 'Код або модель виробу' }),
   };
   const extra = h('div', { hidden: true }, h('label', { text: 'Режим інструкції' }), f.mode, h('label', { text: 'Код або модель виробу' }), f.model);
-  f.kind.addEventListener('change', () => { extra.hidden = f.kind.value !== 'instruction'; });
+  f.booktype = h('select', { id: 'f-booktype' }, h('option', { value: 'new', text: 'Нова книга' }), h('option', { value: 'existing', text: 'Існуюча книга (за ID)' }));
+  f.newbook = h('input', { id: 'f-newbook', maxlength: 160, placeholder: 'Назва нової книги' });
+  f.bookid = h('input', { id: 'f-bookid', placeholder: 'ID книги в Studio', hidden: true });
+  f.booktype.addEventListener('change', () => { f.newbook.hidden = f.booktype.value !== 'new'; f.bookid.hidden = f.booktype.value !== 'existing'; });
+  const msExtra = h('div', { hidden: true }, h('label', { text: 'Книга' }), f.booktype, f.newbook, f.bookid,
+    h('p', { class: 'muted', text: 'Сторінки розпізнаються дослівно, без переписування. Назва вище — це назва глави.' }));
+  f.kind.addEventListener('change', () => { extra.hidden = f.kind.value !== 'instruction'; msExtra.hidden = f.kind.value !== 'manuscript'; });
   const err = h('p', { class: 'err' });
   return h('form', { class: 'card', onsubmit: async (e) => {
     e.preventDefault(); err.textContent = '';
     const body = { kind: f.kind.value };
     for (const k of ['title', 'craft', 'audience']) if (f[k].value.trim()) body[k] = f[k].value.trim();
+    if (body.kind === 'manuscript') {
+      if (f.booktype.value === 'new' && f.newbook.value.trim()) body.newBookTitle = f.newbook.value.trim();
+      if (f.booktype.value === 'existing' && f.bookid.value.trim()) body.bookId = f.bookid.value.trim();
+    }
     if (body.kind === 'instruction') { body.instructionMode = f.mode.value; if (f.model.value.trim()) body.modelCode = f.model.value.trim(); }
     try { const r = await api('POST', '/drafts', body); await openDraft(r.draft.draftId); } catch (e2) { err.textContent = e2.message; }
   } },
     h('h2', { text: 'Нова чернетка' }),
-    h('label', { text: 'Що робимо' }), f.kind, extra,
+    h('label', { text: 'Що робимо' }), f.kind, extra, msExtra,
     h('label', { text: 'Назва' }), f.title, h('label', { text: 'Ремесло' }), f.craft, h('label', { text: 'Аудиторія' }), f.audience, err,
     h('p', { class: 'row' }, h('button', { class: 'primary', type: 'submit', text: 'Створити' }), h('button', { type: 'button', text: 'Скасувати', onclick: () => go('list') })));
 }
@@ -211,7 +222,8 @@ const maxNote = () => (state.limits ? state.limits.maxNoteChars : 500);
 
 function noteBox(initial, onSave, id) {
   const tech = state.draft && state.draft.kind === 'instruction';
-  const ta = h('textarea', { rows: 2, placeholder: (tech ? 'Деталь, інструмент, момент складання… (до ' : 'Що на кадрі? (до ') + maxNote() + ' символів)', id });
+  const hint = state.draft && state.draft.kind === 'manuscript';
+  const ta = h('textarea', { rows: 2, placeholder: (hint ? 'Підказка для розпізнавання: імена, мова, почерк… (до ' : tech ? 'Деталь, інструмент, момент складання… (до ' : 'Що на кадрі? (до ') + maxNote() + ' символів)', id });
   ta.value = initial || '';
   const cnt = h('div', { class: 'counter' });
   const upd = () => { const n = chars(ta.value); cnt.textContent = `${n} / ${maxNote()}`; cnt.className = 'counter' + (n > maxNote() ? ' over' : ''); return n; };
@@ -282,15 +294,18 @@ function viewDraft() {
   const d = state.draft;
   const box = h('div');
   const mine = state.queue.filter((q) => q.draftId === d.draftId);
-  const meta = [KIND[d.kind], STATUS[d.status], d.craft, d.audience].filter(Boolean).join(' · ');
-  box.append(h('p', { class: 'muted', text: meta + ` · кадрів: ${d.photos.length}` + (mine.length ? ` (+${mine.length} у черзі)` : '') }));
-  if (d.status === 'submitted') { box.append(viewSubmitted(d)); box.append(photosSection(d, mine, true)); return box; }
+  const meta = [KIND[d.kind], d.kind === 'manuscript' && d.status === 'collecting' ? 'збір сторінок' : STATUS[d.status], d.craft, d.audience].filter(Boolean).join(' · ');
+  const unit = d.kind === 'manuscript' ? 'сторінок' : 'кадрів';
+  const cap = d.kind === 'manuscript' && state.limits ? ` / ${state.limits.maxManuscriptPages}` : '';
+  box.append(h('p', { class: 'muted', text: meta + ` · ${unit}: ${d.photos.length}${cap}` + (mine.length ? ` (+${mine.length} у черзі)` : '') }));
+  if (d.status === 'submitted') { box.append(viewSubmitted(d)); box.append(d.kind === 'manuscript' ? pagesSection(d, mine, true) : photosSection(d, mine, true)); return box; }
   const onFiles = (e) => { addFiles([...e.target.files]); e.target.value = ''; };
   box.append(h('div', { class: 'shoot' },
     h('label', { class: 'btn primary', for: 'file-cam', id: 'lbl-cam', text: '📷 Зняти' }),
     h('label', { class: 'btn', for: 'file-gal', id: 'lbl-gal', text: 'З галереї' }),
     h('input', { type: 'file', id: 'file-cam', accept: 'image/*', capture: 'environment', onchange: onFiles }),
     h('input', { type: 'file', id: 'file-gal', accept: 'image/*', multiple: true, onchange: onFiles })));
+  if (d.kind === 'manuscript') { box.append(viewMsMeta(d), viewMsActions(d, mine), pagesSection(d, mine, false)); return box; }
   if (d.kind === 'instruction') box.append(viewInstructionMeta(d));
   if (d.kind === 'course' || d.kind === 'instruction') box.append(viewActions(d, mine));
   if (d.structure) box.append(viewStructure(d));
@@ -414,7 +429,7 @@ function viewSubmitted(d) {
   const href = t ? state.studioOrigin + t.studioUrl : '#';
   return h('div', { class: 'card', id: 'submitted' },
     h('h2', { text: 'Відправлено в Studio' }),
-    h('p', { text: t && t.kind === 'course' ? 'Чернетку курсу створено — ціну, категорію й відео додасте в Studio.' : t && t.kind === 'express' ? 'Експрес-чернетку створено. Відкрийте її в Studio протягом 24 годин — потім вона зникне.' : 'Готово.' }),
+    h('p', { text: t && t.kind === 'course' ? 'Чернетку курсу створено — ціну, категорію й відео додасте в Studio.' : t && t.kind === 'express' ? 'Експрес-чернетку створено. Відкрийте її в Studio протягом 24 годин — потім вона зникне.' : t && t.kind === 'inbox' ? (d.bookId ? 'Сторінки лежать у «Вхідних» книги одним пакетом — вставте главу звідти.' : 'Сторінки лежать у «Вхідних» одним пакетом. Створіть книгу в Studio й натисніть «Вставити главу» — текст приїде чернеткою ШІ.') : 'Готово.' }),
     h('p', null, h('a', { class: 'btn primary', id: 'open-studio', href, target: '_blank', rel: 'noopener', text: 'Відкрити в Studio' })));
 }
 
@@ -522,6 +537,102 @@ function stepLineChips(ta, body) {
   return row;
 }
 
+/* ---------- етап 6: «Набір книги» (рукопис із фото сторінок) ---------- */
+function viewMsMeta(d) {
+  const title = h('input', { id: 'ms-title', maxlength: 160, placeholder: 'Назва глави, напр. «Розділ 1. Млин»', value: d.title || '' });
+  const existing = !!d.bookId;
+  const type = h('select', { id: 'ms-booktype' }, h('option', { value: 'new', text: 'Нова книга' }), h('option', { value: 'existing', text: 'Існуюча книга (за ID)' }));
+  type.value = existing ? 'existing' : 'new';
+  const book = h('input', { id: 'ms-book', placeholder: existing ? 'ID книги в Studio' : 'Назва нової книги', value: existing ? d.bookId : (d.newBookTitle || '') });
+  type.addEventListener('change', () => { book.placeholder = type.value === 'existing' ? 'ID книги в Studio' : 'Назва нової книги'; book.value = ''; book.focus(); });
+  const hint = h('input', { id: 'ms-hint', maxlength: 500, placeholder: 'Імена героїв, мова, почерк — для всіх наступних сторінок', value: state.hint });
+  const save = (fields) => serial(async () => {
+    try { state.draft = (await api('PATCH', '/drafts/' + state.draft.draftId, { ifRevision: state.draft.revision, ...fields })).draft; state.blockers = null; }
+    catch (e) { toast(e.kind === 'revision_conflict' ? 'Чернетку змінено з іншого пристрою — оновлюю.' : e.message); await reloadDraft(); }
+  });
+  for (const el of [title, book, hint]) { el.addEventListener('focus', () => { state.editing = true; }); }
+  title.addEventListener('blur', async () => { const v = title.value.trim(); if (v !== (state.draft.title || '')) await save({ title: v }); endEditing(); });
+  book.addEventListener('blur', async () => {
+    const v = book.value.trim();
+    const cur = state.draft.bookId || state.draft.newBookTitle || '';
+    if (v !== cur || (type.value === 'existing') !== !!state.draft.bookId) await save(type.value === 'existing' ? { bookId: v || null, newBookTitle: null } : { newBookTitle: v || null, bookId: null });
+    endEditing();
+  });
+  hint.addEventListener('input', () => { state.hint = hint.value; });
+  hint.addEventListener('blur', endEditing);
+  return h('div', { class: 'card', id: 'ms-meta' },
+    h('label', { text: 'Глава' }), title,
+    h('label', { text: 'Куди' }), h('div', { class: 'row' }, h('div', { style: 'flex:0 0 11em' }, type), h('div', { class: 'grow' }, book)),
+    h('label', { text: 'Підказка розпізнаванню' }), hint,
+    h('p', { class: 'muted', text: 'Знімайте сторінки по порядку. Текст розпізнається дослівно — його можна виправити нижче.' }));
+}
+
+function viewMsActions(d, mine) {
+  const processing = d.photos.some((p) => p.status === 'processing');
+  const lock = processing || mine.length > 0 || !d.photos.length || state.writing;
+  const box = h('div', { class: 'card', id: 'actions' });
+  if (!d.photos.length) box.append(h('p', { class: 'muted', text: 'Спершу зніміть хоч одну сторінку.' }));
+  else if (mine.length) box.append(h('p', { class: 'muted', text: 'Дочекайтесь, поки всі сторінки надішлються.' }));
+  else if (processing) box.append(h('p', { class: 'muted', id: 'ocr-banner', text: 'Сторінки розпізнаються…' }));
+  box.append(h('div', { class: 'row' }, h('button', { class: 'primary', id: 'btn-submit', text: 'Відправити главу у Studio', disabled: lock, onclick: doSubmit })));
+  if (state.blockers) box.append(h('div', { class: 'err', id: 'blockers' }, h('strong', { text: 'Ще не готово до відправки:' }),
+    h('ul', null, state.blockers.map((b) => h('li', { 'data-blocker': b.kind, text: b.message })))));
+  return box;
+}
+
+function saveText(photoId, text) {
+  return serial(async () => {
+    try {
+      const r = await api('PUT', `/drafts/${state.draft.draftId}/photos/${photoId}/text`, { text });
+      const i = state.draft.photos.findIndex((p) => p.photoId === photoId);
+      if (i >= 0) state.draft.photos[i] = r.photo;
+      state.draft.revision = r.revision; state.blockers = null;
+    } catch (e) { toast(e.message); await reloadDraft(); }
+  });
+}
+
+function pageCard(p, i, total, readOnly) {
+  const maxText = state.limits ? state.limits.maxPageTextChars : 20000;
+  const processing = p.status === 'processing';
+  const ta = h('textarea', { rows: 6, 'data-field': 'text', readonly: readOnly || processing, placeholder: processing ? 'Розпізнається…' : 'Тексту немає — введіть вручну або приберіть сторінку' });
+  ta.value = p.text || '';
+  const cnt = h('div', { class: 'counter' });
+  const upd = () => { const n = chars(ta.value); cnt.textContent = `${n} / ${maxText}`; cnt.className = 'counter' + (n > maxText ? ' over' : ''); };
+  upd();
+  ta.addEventListener('focus', () => { state.editing = true; });
+  ta.addEventListener('input', upd);
+  ta.addEventListener('blur', async () => {
+    if (!readOnly && ta.value !== (p.text || '') && chars(ta.value) <= maxText) { await saveText(p.photoId, ta.value); state.needsRender = true; }
+    endEditing();
+  });
+  const empty = p.status === 'described' && !(p.text || '').trim();
+  const hintNote = (state.draft.notes || []).find((n) => n.photoIds.includes(p.photoId));
+  return h('div', { class: 'card frame', 'data-page': p.photoId },
+    h('img', { src: `/api/drafts/${state.draft.draftId}/photos/${p.photoId}/image`, alt: 'Сторінка ' + p.order, loading: 'lazy' }),
+    h('div', null,
+      h('div', { class: 'row' }, h('strong', { text: 'Сторінка ' + p.order }),
+        h('span', { class: 'badge ' + p.status, text: { processing: 'розпізнається…', described: 'розпізнано', failed: 'не вдалося' }[p.status] || p.status }),
+        p.textEdited && h('span', { class: 'badge', text: 'правлено' }),
+        empty && h('span', { class: 'badge failed', text: 'немає тексту' })),
+      p.status === 'failed' && h('p', { class: 'err', text: p.error || 'Не вдалося розпізнати сторінку.' }),
+      hintNote && h('p', { class: 'muted', text: 'Підказка: ' + hintNote.text }),
+      ta, cnt,
+      !readOnly && h('div', { class: 'row', style: 'margin-top:8px' },
+        h('button', { class: 'small', text: '↑', title: 'Вище', disabled: i === 0, onclick: () => movePhoto(p.photoId, -1) }),
+        h('button', { class: 'small', text: '↓', title: 'Нижче', disabled: i === total - 1, onclick: () => movePhoto(p.photoId, 1) }),
+        p.status === 'failed' && h('button', { class: 'small', text: 'Повторити', onclick: async () => { try { await api('POST', `/drafts/${state.draft.draftId}/photos/${p.photoId}/retry`); await reloadDraft(); } catch (e) { toast(e.message); } } }),
+        h('button', { class: 'small danger', text: 'Видалити', onclick: async () => { try { state.draft = (await api('DELETE', `/drafts/${state.draft.draftId}/photos/${p.photoId}`)).draft; render(); } catch (e) { toast(e.message); } } }))));
+}
+
+function pagesSection(d, mine, readOnly) {
+  const pages = d.photos.slice().sort((a, b) => a.order - b.order);
+  const list = h('div', { class: 'frames', id: 'pages' });
+  pages.forEach((p, i) => list.append(pageCard(p, i, pages.length, readOnly)));
+  if (!readOnly) mine.forEach((q) => list.append(queuedCard(q)));
+  if (!pages.length && !mine.length) list.append(h('p', { class: 'muted', text: 'Сторінок ще немає.' }));
+  return h('div', null, h('h3', { text: 'Сторінки' }), list);
+}
+
 function viewStructure(d) {
   const box = h('div', { id: 'structure' });
   const T = termsFor(d);
@@ -565,12 +676,12 @@ async function addFiles(files) {
     const blob = await downscale(f, side);
     const it = {
       clientId: 'c-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
-      draftId: state.draft.draftId, blob, note: '', state: 'queued', error: '',
+      draftId: state.draft.draftId, blob, note: state.draft.kind === 'manuscript' ? (state.hint || '') : '', state: 'queued', error: '',
       takenAt: f.lastModified ? new Date(f.lastModified).toISOString() : null, order: Date.now() + Math.random(),
     };
     await qPut(it); state.queue.push(it);
   }
-  render(); flushQueue();
+  render(true); flushQueue();
 }
 
 async function flushQueue() {

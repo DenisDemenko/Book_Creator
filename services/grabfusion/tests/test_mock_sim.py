@@ -182,3 +182,64 @@ def test_structure_replace_moves_frame_and_keeps_untouched_ai_fields(api):
     bad = {"modules": [{**new["modules"][0], "lessons": [{**new["modules"][0]["lessons"][0], "photoIds": ["ph_nope"]}]}]}
     assert api.call("PATCH", f"/photo-drafts/{did}", {"ifRevision": d2["revision"], "structure": bad},
                     expect=404)["kind"] == "photo_not_found"
+
+
+def _ms(api, **fields):
+    return api.call("POST", "/photo-drafts", {"kind": "manuscript", **fields}, expect=201, schema="DraftResponse")["draft"]
+
+
+def test_manuscript_create_rules(api):
+    assert api.call("POST", "/photo-drafts", {"kind": "manuscript", "bookId": "b1", "newBookTitle": "X"}, expect=400)["kind"] == "bad_input"
+    assert api.call("POST", "/photo-drafts", {"kind": "course", "newBookTitle": "X"}, expect=400)["kind"] == "bad_input"
+    assert api.call("POST", "/photo-drafts", {"kind": "manuscript", "bookId": "bk_missing_1"}, expect=404)["kind"] == "book_not_found"
+    assert api.call("POST", "/photo-drafts", {"kind": "book"}, expect=400)["kind"] == "bad_input"
+    d = _ms(api, title="Розділ 1", newBookTitle="Долина тиші")
+    assert d["newBookTitle"] == "Долина тиші" and d["bookId"] is None
+
+
+def test_manuscript_ocr_text_edit_and_submit_to_inbox(api):
+    d = _ms(api, title="Розділ 1", newBookTitle="Долина")
+    did = d["draftId"]
+    r = api.call("POST", f"/photo-drafts/{did}/photos", {"clientId": "p1", "image": IMG, "note": "герой — Іван"},
+                 expect=202, schema="PhotoResponse")
+    pid = r["photo"]["photoId"]
+    assert r["photo"]["status"] == "processing" and r["photo"]["text"] is None
+    assert api.call("PUT", f"/photo-drafts/{did}/photos/{pid}/text", {"text": "x"}, expect=409)["kind"] == "wrong_status"
+    assert {b["kind"] for b in api.call("POST", f"/photo-drafts/{did}/submit", expect=400)["blockers"]} == {"photos_processing"}
+    p = api.draft(did)["photos"][0]
+    assert p["status"] == "described" and "Іван" in p["text"] and p["textEdited"] is False and p["description"] is None
+    api.call("POST", f"/photo-drafts/{did}/photos", {"clientId": "p2", "image": IMG, "note": "порожня"}, expect=202)
+    d = api.draft(did)
+    empty = [x for x in d["photos"] if not x["text"]]
+    assert len(empty) == 1
+    kinds = {b["kind"] for b in api.call("POST", f"/photo-drafts/{did}/submit", expect=400)["blockers"]}
+    assert kinds == {"empty_page"}
+    r = api.call("PUT", f"/photo-drafts/{did}/photos/{empty[0]['photoId']}/text", {"text": "Введено вручну"},
+                 expect=200, schema="PhotoResponse")
+    assert r["photo"]["textEdited"] is True
+    assert api.call("PUT", f"/photo-drafts/{did}/photos/{pid}/text", {"text": "я" * 20001}, expect=400)["kind"] == "bad_input"
+    assert api.call("PUT", f"/photo-drafts/{did}/photos/{pid}/text", {"text": 5}, expect=400)["kind"] == "bad_input"
+    assert api.call("POST", f"/photo-drafts/{did}/structure", expect=409)["kind"] == "wrong_status"
+    res = api.call("POST", f"/photo-drafts/{did}/submit", expect=201, schema="SubmitResponse")
+    assert res["target"]["kind"] == "inbox" and res["target"]["studioUrl"] == "/media?tab=inbox"
+
+
+def test_manuscript_book_and_title_blockers_and_patch(api):
+    d = _ms(api)
+    did = d["draftId"]
+    api.call("POST", f"/photo-drafts/{did}/photos", {"clientId": "a", "image": IMG}, expect=202)
+    api.draft(did)
+    kinds = {b["kind"] for b in api.call("POST", f"/photo-drafts/{did}/submit", expect=400)["blockers"]}
+    assert kinds == {"title_missing", "book_missing"}
+    d = api.draft(did)
+    d = api.call("PATCH", f"/photo-drafts/{did}", {"ifRevision": d["revision"], "title": "Гл. 2", "bookId": "b_ok"},
+                 expect=200, schema="DraftResponse")["draft"]
+    assert api.call("PATCH", f"/photo-drafts/{did}", {"ifRevision": d["revision"], "newBookTitle": "Нова"},
+                    expect=400)["kind"] == "bad_input"  # і bookId, і newBookTitle
+    d = api.call("PATCH", f"/photo-drafts/{did}", {"ifRevision": d["revision"], "bookId": None, "newBookTitle": "Нова"},
+                 expect=200)["draft"]
+    assert d["bookId"] is None and d["newBookTitle"] == "Нова"
+    assert api.call("PATCH", f"/photo-drafts/{did}", {"ifRevision": d["revision"], "lessons": []}, expect=409)["kind"] == "wrong_status"
+    d = api.call("PATCH", f"/photo-drafts/{did}", {"ifRevision": d["revision"], "newBookTitle": None, "bookId": "b_ok"}, expect=200)["draft"]
+    res = api.call("POST", f"/photo-drafts/{did}/submit", expect=201, schema="SubmitResponse")
+    assert res["target"]["studioUrl"] == "/media?tab=inbox&bookId=b_ok"

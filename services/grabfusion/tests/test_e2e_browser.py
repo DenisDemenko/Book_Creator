@@ -307,3 +307,61 @@ def test_stage5_instruction_mode(stack3, browser_page, tmp_path):
     assert "24 годин" in page.inner_text("#submitted")
     assert "/express/exp_sim" in page.get_attribute("#open-studio", "href")
     assert not errors, errors
+
+
+def test_stage6_manuscript_pages(stack3, browser_page, tmp_path):
+    url, _ = stack3
+    ctx, page = browser_page
+    ctx.clear_cookies()
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(url)
+    page.wait_for_selector("#code")
+    page.fill("#code", "GF-OK")
+    page.click("button[type=submit]")
+    page.wait_for_selector("#btn-new")
+    page.click("#btn-new")
+    page.select_option("#f-kind", "manuscript")
+    page.fill("#f-newbook", "Долина тиші")
+    page.fill("#f-title", "Розділ 1. Млин")
+    page.click("button[type=submit]")
+    page.wait_for_selector("#ms-meta")
+    assert page.input_value("#ms-title") == "Розділ 1. Млин"
+    assert page.input_value("#ms-booktype") == "new" and page.input_value("#ms-book") == "Долина тиші"
+    assert page.locator("#btn-submit").is_disabled()
+
+    # дві сторінки з підказкою → дослівний текст (мок підставляє підказку в текст)
+    page.fill("#ms-hint", "герой — Іван")
+    page.set_input_files("#file-gal", [_jpeg(tmp_path / "p1.jpg", (1400, 1000)), _jpeg(tmp_path / "p2.jpg", (1400, 1000))])
+    page.wait_for_function("document.querySelectorAll('[data-page]').length === 2 && document.querySelectorAll('[data-queued]').length === 0", timeout=15000)
+    page.wait_for_function("[...document.querySelectorAll('[data-page] textarea')].every(t => t.value.includes('Іван'))", timeout=15000)
+    assert page.locator("[data-page] .badge.described").count() == 2
+    _shot(page, "s6-1-pages")
+
+    # третя сторінка без тексту → блокер empty_page, потім правка вручну
+    page.fill("#ms-hint", "порожня")
+    page.set_input_files("#file-gal", _jpeg(tmp_path / "p3.jpg", (1400, 1000)))
+    page.wait_for_function("document.querySelectorAll('[data-page]').length === 3 && document.querySelectorAll('[data-queued]').length === 0", timeout=15000)
+    page.wait_for_function("document.querySelectorAll('[data-page] .badge.failed').length === 1", timeout=15000)
+    page.wait_for_selector("#btn-submit:not([disabled])")
+    page.click("#btn-submit")
+    page.wait_for_selector("#blockers")
+    assert page.locator("[data-blocker='empty_page']").count() == 1
+    _shot(page, "s6-2-blocked")
+    third = page.locator("[data-page]").nth(2).locator("textarea")
+    third.fill("Введено вручну: «Тиша».")
+    third.blur()
+    page.wait_for_function("[...document.querySelectorAll('[data-page]')][2].innerText.includes('правлено')", timeout=10000)
+    assert page.locator("[data-page] .badge.failed").count() == 0
+
+    # порядок сторінок
+    page.locator("[data-page]").first.locator("button[title='Нижче']").click()
+    page.wait_for_function("document.querySelector('[data-page] textarea').value.includes('Сторінка 2:')", timeout=10000)
+
+    # відправка: пакет у «Вхідних», книга нова → підказка про «Вставити главу»
+    page.click("#btn-submit")
+    page.wait_for_selector("#submitted")
+    assert "Вставити главу" in page.inner_text("#submitted")
+    assert page.get_attribute("#open-studio", "href").endswith("/media?tab=inbox")
+    _shot(page, "s6-3-submitted")
+    assert not errors, errors

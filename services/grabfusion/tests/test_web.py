@@ -204,3 +204,18 @@ def test_stage3_proxy_structure_generate_submit_against_sim(sim_url):
     mid = d["structure"]["modules"][0]["moduleId"]
     assert c.post(f"/api/drafts/{did}/modules/{mid}/generate").status_code == 202
     assert c.post(f"/api/drafts/{did}/modules/zzz/generate").json()["kind"] in {"job_running", "module_not_found"}
+
+
+def test_page_text_proxy_against_sim(sim_url):
+    c = TestClient(create_app(Settings(studio_url=sim_url + PREFIX), store=SessionStore(":memory:")))
+    c.post("/api/pair", json={"code": "ok"})
+    d = c.post("/api/drafts", json={"kind": "manuscript", "title": "Гл", "newBookTitle": "К"}).json()["draft"]
+    did = d["draftId"]
+    p = c.post(f"/api/drafts/{did}/photos", data={"clientId": "a", "note": "Іван"},
+               files={"file": ("p.jpg", jpeg(), "image/jpeg")}).json()["photo"]
+    c.get(f"/api/drafts/{did}")
+    r = c.put(f"/api/drafts/{did}/photos/{p['photoId']}/text", json={"text": "Виправлено"})
+    assert r.status_code == 200 and r.json()["photo"]["textEdited"] is True
+    long_ = c.put(f"/api/drafts/{did}/photos/{p['photoId']}/text", json={"text": "я" * 20001})
+    assert long_.status_code == 400 and long_.json()["kind"] == "bad_input"
+    assert c.put(f"/api/drafts/{did}/photos/{p['photoId']}/text", content=b"nope").json()["kind"] == "bad_input"

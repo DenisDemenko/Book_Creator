@@ -177,6 +177,14 @@ def build_router(deps: Deps) -> APIRouter:
     def retry_photo(draft_id: str, photo_id: str, s: Session = Depends(current)) -> Any:
         return call(s, lambda c: c.raw("POST", f"/photo-drafts/{draft_id}/photos/{photo_id}/retry"))
 
+    @router.put("/drafts/{draft_id}/photos/{photo_id}/text")
+    async def put_photo_text(draft_id: str, photo_id: str, request: Request, s: Session = Depends(current)) -> Any:
+        body = await _json_body(request)
+        text = body.get("text")
+        if isinstance(text, str) and len(text) > deps.limits_cached().maxPageTextChars:
+            raise StudioError("bad_input", f"Текст сторінки понад {deps.limits_cached().maxPageTextChars} символів.")
+        return call(s, lambda c: c.raw("PUT", f"/photo-drafts/{draft_id}/photos/{photo_id}/text", json=body))
+
     @router.delete("/drafts/{draft_id}/photos/{photo_id}")
     def delete_photo(draft_id: str, photo_id: str, s: Session = Depends(current)) -> Any:
         return call(s, lambda c: c.raw("DELETE", f"/photo-drafts/{draft_id}/photos/{photo_id}"))

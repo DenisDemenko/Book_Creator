@@ -52,8 +52,13 @@ class Sim:
         for p in d["photos"]:
             if p["status"] == "processing":
                 p["status"] = "described"
-                p["description"] = f"Кадр {p['order']}: мок-опис того, що видно на фото."
-                p["tags"] = ["мок", "кадр"]
+                if d["kind"] == "manuscript":
+                    hint = next((n["text"] for n in d["notes"] if p["photoId"] in n["photoIds"]), "")
+                    p["text"] = "" if "порожня" in hint else f"Сторінка {p['order']}: розпізнаний текст (мок). {hint}".strip()
+                    p["textEdited"] = False
+                else:
+                    p["description"] = f"Кадр {p['order']}: мок-опис того, що видно на фото."
+                    p["tags"] = ["мок", "кадр"]
         job = d["job"]
         if job and job["status"] == "running":
             left = self.ticks.get(d["draftId"], 0) - 1
@@ -117,7 +122,6 @@ class Sim:
         if method == "GET" and name == "/:draftId":
             self._tick(d)
             return 200, {"draft": copy.deepcopy(d)}
-        self._tick(d)
         if method == "PATCH" and name == "/:draftId":
             return self._patch(d, body)
         if method == "DELETE" and name == "/:draftId":
@@ -158,7 +162,7 @@ class Sim:
             self._bump(d)
             return 200, {"draft": copy.deepcopy(d)}
         if method == "PUT" and name.endswith("/text"):
-            return _err(409, "wrong_status", "Текст сторінки — лише для рукопису.")
+            return self._put_text(d, params["photoId"], body)
         if method == "POST" and name.endswith("/structure"):
             return self._structure(d, body)
         if method == "POST" and name.endswith("/generate"):
@@ -177,7 +181,7 @@ class Sim:
         open_n = sum(1 for d in self.drafts.values() if d["status"] not in {"submitted", "discarded"})
         if open_n >= self.limits["maxOpenDrafts"]:
             return _err(409, "too_many_drafts", "Забагато відкритих чернеток.")
-        bad = self._check_instruction_fields(body["kind"], body)
+        bad = self._check_instruction_fields(body["kind"], body) or self._check_book_fields(body["kind"], body)
         if bad:
             return bad
         base = contract.load_fixture("create-draft")["draft"]
@@ -191,6 +195,23 @@ class Sim:
             d["instructionMode"] = body.get("instructionMode") or "assembly"
         self.drafts[did] = d
         return 201, {"draft": copy.deepcopy(d)}
+
+    @staticmethod
+    def _check_book_fields(kind: str, body: dict[str, Any], current: dict[str, Any] | None = None) -> Result | None:
+        """bookId обовʼязковий для book; для manuscript — bookId АБО newBookTitle; newBookTitle лише в рукописі."""
+        if body.get("newBookTitle") is not None and kind != "manuscript":
+            return _err(400, "bad_input", "newBookTitle — лише для рукопису.")
+        if body.get("bookId") is not None and kind not in {"book", "manuscript"}:
+            return _err(400, "bad_input", "bookId — лише для книги чи рукопису.")
+        book = body.get("bookId") if "bookId" in body else (current or {}).get("bookId")
+        new = body.get("newBookTitle") if "newBookTitle" in body else (current or {}).get("newBookTitle")
+        if kind == "manuscript" and book and new:
+            return _err(400, "bad_input", "Оберіть або існуючу книгу, або нову — не обидві.")
+        if kind == "book" and current is None and not body.get("bookId"):
+            return _err(400, "bad_input", "Для глави потрібен bookId.")
+        if book and str(book).startswith("bk_missing"):
+            return _err(404, "book_not_found", "Книги немає або вона чужа.")
+        return None
 
     @staticmethod
     def _check_instruction_fields(kind: str, body: dict[str, Any]) -> Result | None:
@@ -241,10 +262,10 @@ class Sim:
             return _err(409, "revision_conflict",
                         f"Чернетку змінено з іншого пристрою (ревізія {d['revision']}, у вас {body['ifRevision']}). "
                         "Оновіть і повторіть правку.")
-        bad = self._check_instruction_fields(d["kind"], body)
+        bad = self._check_instruction_fields(d["kind"], body) or self._check_book_fields(d["kind"], body, d)
         if bad:
             return bad
-        for f in ("title", "craft", "audience", "level", "instructionMode", "modelCode"):
+        for f in ("title", "craft", "audience", "level", "instructionMode", "modelCode", "bookId", "newBookTitle"):
             if f in body:
                 d[f] = body[f]
         if "photoOrder" in body:
@@ -286,13 +307,16 @@ class Sim:
             p = self._photo(d, self.clients[key])
             if p:
                 return 202, {"photo": copy.deepcopy(p), "revision": d["revision"], "duplicate": True}
-        if len(d["photos"]) >= self.limits["maxPhotosPerDraft"]:
+        cap = self.limits["maxManuscriptPages"] if d["kind"] == "manuscript" else self.limits["maxPhotosPerDraft"]
+        if len(d["photos"]) >= cap:
             return _err(409, "too_many_photos", "Забагато кадрів.")
         pid = self._next("ph")
         order = len(d["photos"]) + 1
         p = {"photoId": pid, "clientId": body["clientId"], "status": "processing", "order": order,
              "takenAt": body.get("takenAt"), "imageUrl": self._image_url(d["draftId"], pid), "description": None,
              "tags": [], "error": None, "createdAt": _now(), "updatedAt": _now()}
+        if d["kind"] == "manuscript":
+            p["text"], p["textEdited"] = None, False
         d["photos"].append(p)
         self.clients[key] = pid
         if body.get("note"):
@@ -301,6 +325,21 @@ class Sim:
             d["status"] = "collecting"
         self._bump(d)
         return 202, {"photo": copy.deepcopy(p), "revision": d["revision"], "duplicate": False}
+
+    def _put_text(self, d: dict[str, Any], photo_id: str, body: Any) -> Result:
+        if d["kind"] != "manuscript":
+            return _err(409, "wrong_status", "Текст сторінки — лише для рукопису.")
+        p = self._photo(d, photo_id)
+        if p is None:
+            return _err(404, "photo_not_found", "Кадру немає в цій чернетці.")
+        if p["status"] == "processing":
+            return _err(409, "wrong_status", "Сторінка ще розпізнається.")
+        if not isinstance(body, dict) or not isinstance(body.get("text"), str) \
+                or len(body["text"]) > self.limits["maxPageTextChars"]:
+            return _err(400, "bad_input", "Потрібен text (рядок у межах maxPageTextChars).")
+        p.update(text=body["text"], textEdited=True, status="described", error=None, updatedAt=_now())
+        self._bump(d)
+        return 200, {"photo": copy.deepcopy(p), "revision": d["revision"], "duplicate": False}
 
     def _put_note(self, d: dict[str, Any], note_id: str, body: Any) -> Result:
         if not isinstance(body, dict) or not isinstance(body.get("text"), str) or not isinstance(body.get("photoIds"), list):
@@ -353,6 +392,16 @@ class Sim:
         for p in d["photos"]:
             if p["status"] == "failed":
                 out.append({"kind": "photos_failed", "message": f"Кадр {p['order']} не описано.", "photoId": p["photoId"]})
+        if d["kind"] == "manuscript":
+            for p in d["photos"]:
+                if p["status"] == "described" and not (p.get("text") or "").strip():
+                    out.append({"kind": "empty_page", "photoId": p["photoId"],
+                                "message": f"На сторінці {p['order']} немає тексту — введіть вручну або приберіть сторінку."})
+            if not (d["title"] or "").strip():
+                out.append({"kind": "title_missing", "message": "Дайте главі назву."})
+            if not d["bookId"] and not d["newBookTitle"]:
+                out.append({"kind": "book_missing", "message": "Оберіть книгу або вкажіть назву нової."})
+            return out
         if not d["structure"] or d["status"] == "collecting":
             out.append({"kind": "no_structure", "message": "Спершу натисніть «Розкласти на уроки»."})
             return out
@@ -379,7 +428,14 @@ class Sim:
             return _err(409, "job_running", "Уже виконується фонова робота.")
         bl = self.blockers(d)
         if bl:
-            return _err(400, "submit_blocked", "Курс ще не готовий до відправки.", blockers=bl)
+            return _err(400, "submit_blocked", "Чернетка ще не готова до відправки.", blockers=bl)
+        if d["kind"] == "manuscript":
+            tid = self._next("scn")
+            url = "/media?tab=inbox" + (f"&bookId={d['bookId']}" if d["bookId"] else "")
+            target = {"kind": "inbox", "id": tid, "studioUrl": url}
+            d["status"], d["submitted"] = "submitted", target
+            self._bump(d)
+            return 201, {"draft": copy.deepcopy(d), "target": target}
         fx = {"course": "submit-course", "instruction": "submit-instruction"}.get(d["kind"], "submit-course")
         target = contract.load_fixture(fx)["target"]
         target = {**target, "id": self._next("crs" if target["kind"] == "course" else "exp")}
