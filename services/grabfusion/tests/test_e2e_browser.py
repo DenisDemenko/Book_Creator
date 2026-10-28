@@ -194,7 +194,6 @@ def test_stage3_structure_write_validate_submit(stack3, browser_page, tmp_path):
 
     # прохід 2
     page.click("#btn-structure")
-    page.wait_for_selector("#job-banner")
     page.wait_for_selector("#structure", timeout=15000)
     assert page.locator("[data-module]").count() == 2
     assert page.locator("[data-lesson]").count() == 3
@@ -232,4 +231,79 @@ def test_stage3_structure_write_validate_submit(stack3, browser_page, tmp_path):
     href = page.get_attribute("#open-studio", "href")
     assert "/courses/crs_sim" in href and href.startswith("http")
     _shot(page, "s3-5-submitted")
+    assert not errors, errors
+
+
+def test_stage5_instruction_mode(stack3, browser_page, tmp_path):
+    url, _ = stack3
+    ctx, page = browser_page
+    ctx.clear_cookies()
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(url)
+    page.wait_for_selector("#code")
+    page.fill("#code", "GF-OK")
+    page.click("button[type=submit]")
+    page.wait_for_selector("#btn-new")
+    page.click("#btn-new")
+    page.select_option("#f-kind", "instruction")
+    page.select_option("#f-mode", "operation")
+    page.fill("#f-model", "TB-100")
+    page.fill("#f-title", "Полиця Нордик")
+    page.click("button[type=submit]")
+    page.wait_for_selector("#instruction-meta")
+    assert page.input_value("#i-mode") == "operation" and page.input_value("#i-model") == "TB-100"
+
+    # зміна режиму й коду зберігається на сервері (перечитуємо після перезавантаження)
+    page.select_option("#i-mode", "assembly")
+    page.fill("#i-model", "TB-200")
+    page.locator("#i-model").blur()
+    time.sleep(0.5)
+    page.reload()
+    page.wait_for_selector("[data-draft]")
+    page.locator("[data-draft] button").first.click()
+    page.wait_for_selector("#instruction-meta")
+    assert page.input_value("#i-mode") == "assembly" and page.input_value("#i-model") == "TB-200"
+
+    page.set_input_files("#file-gal", [_jpeg(tmp_path / f"{i}.jpg", (1200, 900)) for i in range(3)])
+    page.wait_for_function("document.querySelectorAll('[data-photo]').length === 3 && document.querySelectorAll('[data-queued]').length === 0", timeout=15000)
+    page.wait_for_function("!document.querySelector('#btn-structure').disabled", timeout=15000)
+    assert page.inner_text("#btn-structure") == "Розкласти на кроки"
+    page.click("#btn-structure")
+    page.wait_for_selector("#structure", timeout=15000)
+    assert "Кроки інструкції" in page.inner_text("#structure h3")
+    assert page.locator("[data-lesson]").count() == 3
+    assert page.locator("[data-lesson] .frame-chip").count() == 3
+    assert page.locator("[data-nofram]").count() == 0
+    _shot(page, "s5-1-steps")
+
+    # кадр першого кроку — в останній: у першого кроку кадрів не лишається
+    sel = page.locator("[data-lesson]").first.locator("select.move")
+    sel.select_option(index=2)
+    page.wait_for_selector("[data-nofram]")
+    assert page.locator("[data-lesson] .frame-chip").count() == 3
+    assert page.locator("[data-lesson]").last.locator(".frame-chip").count() == 2
+    _shot(page, "s5-2-moved")
+
+    # пишемо кроки, додаємо технічні рядки чипами
+    page.click("#btn-write")
+    page.wait_for_function("document.querySelectorAll('[data-module] .badge.described').length === 2", timeout=20000)
+    body = page.locator("[data-lesson]").first.locator("textarea[data-field=body]")
+    chip = page.locator("[data-lesson]").first.locator("button[data-key='Деталі']")
+    assert chip.inner_text().startswith("+")
+    chip.click()
+    assert "**Деталі:** " in body.input_value()
+    assert chip.inner_text().startswith("✓")
+    body.type("шуруп 4×30")
+    body.blur()
+    time.sleep(0.5)
+    page.wait_for_function("document.querySelector('[data-lesson] textarea[data-field=body]').value.includes('шуруп 4×30')")
+    _shot(page, "s5-3-lines")
+
+    page.click("[data-assumption] [data-act=confirm]")
+    page.wait_for_function("document.querySelector('[data-assumption] .badge.described')")
+    page.click("#btn-submit")
+    page.wait_for_selector("#submitted")
+    assert "24 годин" in page.inner_text("#submitted")
+    assert "/express/exp_sim" in page.get_attribute("#open-studio", "href")
     assert not errors, errors

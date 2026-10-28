@@ -146,3 +146,39 @@ def test_unknown_draft_and_list_and_discard(api):
     assert api.call("GET", "/photo-drafts", expect=200, schema="DraftListResponse")["drafts"][0]["draftId"] == did
     api.call("DELETE", f"/photo-drafts/{did}", expect=200)
     assert api.call("GET", "/photo-drafts", expect=200)["drafts"] == []
+
+
+def test_instruction_fields_only_for_instruction_and_valid_mode(api):
+    assert api.call("POST", "/photo-drafts", {"kind": "course", "instructionMode": "assembly"}, expect=400)["kind"] == "bad_input"
+    assert api.call("POST", "/photo-drafts", {"kind": "instruction", "instructionMode": "zzz"}, expect=400)["kind"] == "bad_input"
+    d = api.call("POST", "/photo-drafts", {"kind": "instruction", "modelCode": "TB-100"}, expect=201,
+                 schema="DraftResponse")["draft"]
+    assert d["instructionMode"] == "assembly" and d["modelCode"] == "TB-100"
+    d = api.call("PATCH", f"/photo-drafts/{d['draftId']}", {"ifRevision": d["revision"], "instructionMode": "operation",
+                                                              "modelCode": "TB-200"}, expect=200, schema="DraftResponse")["draft"]
+    assert (d["instructionMode"], d["modelCode"]) == ("operation", "TB-200")
+    c = api.call("POST", "/photo-drafts", {"kind": "course"}, expect=201)["draft"]
+    assert api.call("PATCH", f"/photo-drafts/{c['draftId']}", {"ifRevision": c["revision"], "modelCode": "x"},
+                    expect=400)["kind"] == "bad_input"
+
+
+def test_structure_replace_moves_frame_and_keeps_untouched_ai_fields(api):
+    did = _new(api, "instruction", photos=3, title="Полиця")
+    api.call("POST", f"/photo-drafts/{did}/structure", expect=202)
+    api.draft(did); api.draft(did)
+    d = api.draft(did)
+    lessons = [les for m in d["structure"]["modules"] for les in m["lessons"]]
+    src = next(les for les in lessons if len(les["photoIds"]) >= 1)
+    dst = next(les for les in lessons if les["lessonId"] != src["lessonId"])
+    moved = src["photoIds"][0]
+    new = {"modules": [{**m, "lessons": [
+        {**les, "photoIds": ([x for x in les["photoIds"] if x != moved] + ([moved] if les["lessonId"] == dst["lessonId"] else []))}
+        for les in m["lessons"]]} for m in d["structure"]["modules"]]}
+    d2 = api.call("PATCH", f"/photo-drafts/{did}", {"ifRevision": d["revision"], "structure": new},
+                  expect=200, schema="DraftResponse")["draft"]
+    lessons2 = {les["lessonId"]: les for m in d2["structure"]["modules"] for les in m["lessons"]}
+    assert moved in lessons2[dst["lessonId"]]["photoIds"] and moved not in lessons2[src["lessonId"]]["photoIds"]
+    assert lessons2[dst["lessonId"]]["aiFields"] == dst["aiFields"]  # заголовок і т. ін. не чіпали
+    bad = {"modules": [{**new["modules"][0], "lessons": [{**new["modules"][0]["lessons"][0], "photoIds": ["ph_nope"]}]}]}
+    assert api.call("PATCH", f"/photo-drafts/{did}", {"ifRevision": d2["revision"], "structure": bad},
+                    expect=404)["kind"] == "photo_not_found"

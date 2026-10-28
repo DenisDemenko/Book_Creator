@@ -44,3 +44,9 @@ textarea{field-sizing:content;min-height:3.4em;resize:vertical}
 .thumbs img{width:48px;height:48px;object-fit:cover;border-radius:8px;background:var(--line)}
 details>summary{cursor:pointer;font-weight:600;margin:12px 0}
 h3{margin:20px 0 8px}
+.thumbs.big{gap:10px}
+.frame-chip{display:flex;flex-direction:column;gap:4px;width:96px}
+.frame-chip img{width:96px;height:96px;object-fit:cover;border-radius:10px;background:var(--line)}
+select.move{padding:4px 6px;font-size:.8rem;min-height:32px}
+.chips{gap:6px;margin-top:6px}
+.chip.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}

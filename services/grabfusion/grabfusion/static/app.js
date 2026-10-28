@@ -210,7 +210,8 @@ function noteFor(photoId) { return (state.draft.notes || []).find((n) => n.photo
 const maxNote = () => (state.limits ? state.limits.maxNoteChars : 500);
 
 function noteBox(initial, onSave, id) {
-  const ta = h('textarea', { rows: 2, placeholder: 'Що на кадрі? (до ' + maxNote() + ' символів)', id });
+  const tech = state.draft && state.draft.kind === 'instruction';
+  const ta = h('textarea', { rows: 2, placeholder: (tech ? 'Деталь, інструмент, момент складання… (до ' : 'Що на кадрі? (до ') + maxNote() + ' символів)', id });
   ta.value = initial || '';
   const cnt = h('div', { class: 'counter' });
   const upd = () => { const n = chars(ta.value); cnt.textContent = `${n} / ${maxNote()}`; cnt.className = 'counter' + (n > maxNote() ? ' over' : ''); return n; };
@@ -221,7 +222,7 @@ function noteBox(initial, onSave, id) {
   return h('div', null, ta, cnt);
 }
 
-async function saveNote(photoId, text) {
+function saveNote(photoId, text) { return serial(async () => {
   const cur = noteFor(photoId);
   if ((cur ? cur.text : '') === text) return;
   try {
@@ -230,9 +231,9 @@ async function saveNote(photoId, text) {
     const rest = (state.draft.notes || []).filter((n) => n.noteId !== r.note.noteId);
     state.draft.notes = [...rest, r.note]; state.draft.revision = r.revision;
   } catch (e) { toast(e.message); }
-}
+}); }
 
-async function movePhoto(photoId, delta, toIndex) {
+function movePhoto(photoId, delta, toIndex) { return serial(async () => {
   const ids = state.draft.photos.slice().sort((a, b) => a.order - b.order).map((p) => p.photoId);
   const from = ids.indexOf(photoId); const to = toIndex != null ? toIndex : from + delta;
   if (from < 0 || to < 0 || to >= ids.length || to === from) return;
@@ -240,7 +241,7 @@ async function movePhoto(photoId, delta, toIndex) {
   try { state.draft = (await api('PATCH', '/drafts/' + state.draft.draftId, { ifRevision: state.draft.revision, photoOrder: ids })).draft; }
   catch (e) { toast(e.kind === 'revision_conflict' ? 'Чернетку змінено з іншого пристрою — оновлюю.' : e.message); await reloadDraft(); }
   render();
-}
+}); }
 
 function photoCard(p, i, total) {
   const card = h('div', { class: 'card frame', draggable: 'true', 'data-photo': p.photoId },
@@ -290,6 +291,7 @@ function viewDraft() {
     h('label', { class: 'btn', for: 'file-gal', id: 'lbl-gal', text: 'З галереї' }),
     h('input', { type: 'file', id: 'file-cam', accept: 'image/*', capture: 'environment', onchange: onFiles }),
     h('input', { type: 'file', id: 'file-gal', accept: 'image/*', multiple: true, onchange: onFiles })));
+  if (d.kind === 'instruction') box.append(viewInstructionMeta(d));
   if (d.kind === 'course' || d.kind === 'instruction') box.append(viewActions(d, mine));
   if (d.structure) box.append(viewStructure(d));
   box.append(photosSection(d, mine, false));
@@ -311,8 +313,11 @@ function photosSection(d, mine, readOnly) {
 
 /* ---------- етап 3: структура, текст, перевірка, відправка ---------- */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/* Правки чернетки йдуть по черзі: кожна бере свіжу ревізію, тож швидкі дії підряд не б'ються об revision_conflict. */
+let saveChain = Promise.resolve();
+const serial = (fn) => { const run = saveChain.then(fn, fn); saveChain = run.catch(() => {}); return run; };
 const pollMs = () => (state.limits ? state.limits.pollIntervalMs : 2000);
-const JOB_TEXT = { structure: 'ШІ розкладає кадри на модулі й уроки…', generate: 'ШІ пише текст модуля…' };
+const JOB_TEXT = { structure: 'ШІ розкладає кадри на кроки…', generate: 'ШІ пише текст…' };
 
 function confirmBtn(label, confirmLabel, fn, props) {
   const b = h('button', Object.assign({ text: label }, props || {}));
@@ -338,12 +343,12 @@ function viewActions(d, mine) {
   const row = h('div', { class: 'row' });
   const mods = d.structure ? d.structure.modules : [];
   const left = mods.filter((m) => !m.written);
-  if (!d.structure) row.append(h('button', { class: 'primary', id: 'btn-structure', text: 'Розкласти на уроки', disabled: lock, onclick: () => doStructure(false) }));
+  if (!d.structure) row.append(h('button', { class: 'primary', id: 'btn-structure', text: d.kind === 'instruction' ? 'Розкласти на кроки' : 'Розкласти на уроки', disabled: lock, onclick: () => doStructure(false) }));
   else if (d.status === 'collecting') {
     box.append(h('p', { class: 'muted', id: 'stale-note', text: 'Після розкладання додано чи змінено кадри — розкладіть уроки заново.' }));
     row.append(confirmBtn('Розкласти заново', 'Так, правки в структурі зникнуть', () => doStructure(true), { disabled: lock, id: 'btn-restructure', class: 'primary' }));
   } else {
-    if (d.status !== 'written') row.append(h('button', { class: 'primary', id: 'btn-write', text: left.length === mods.length ? 'Написати курс' : 'Дописати курс', disabled: lock || !left.length, onclick: () => writeModules(left.map((m) => m.moduleId)) }));
+    if (d.status !== 'written') row.append(h('button', { class: 'primary', id: 'btn-write', text: (d.kind === 'instruction' ? left.length === mods.length ? 'Написати кроки' : 'Дописати кроки' : left.length === mods.length ? 'Написати курс' : 'Дописати курс'), disabled: lock || !left.length, onclick: () => writeModules(left.map((m) => m.moduleId)) }));
     if (left.length === 0 || d.status === 'written') row.append(h('button', { class: 'primary', id: 'btn-submit', text: d.kind === 'course' ? 'Відправити курс у Studio' : 'Відправити в Studio', disabled: lock, onclick: doSubmit }));
     const again = confirmBtn('Розкласти заново', 'Так, правки в структурі зникнуть', () => doStructure(true), { disabled: lock, id: 'btn-restructure' });
     row.append(again);
@@ -432,23 +437,97 @@ function lessonField(d, les, field, label, multiline) {
   });
   const aiStill = () => { const m = state.draft.structure.modules.flatMap((x) => x.lessons).find((x) => x.lessonId === les.lessonId); return !!m && m.aiFields.includes(field); };
   const ai = (les.aiFields || []).includes(field) && h('span', { class: 'badge ai', text: 'ШІ — перевірте' });
-  return h('div', null, h('label', null, label, ' ', ai || ''), el, cnt);
+  const chips = d.kind === 'instruction' && field === 'body' ? stepLineChips(el, les.body) : null;
+  return h('div', null, h('label', null, label, ' ', ai || ''), el, chips, cnt);
 }
-async function saveLesson(lessonId, fields) {
+function saveLesson(lessonId, fields) { return serial(async () => {
   try {
     const r = await api('PATCH', '/drafts/' + state.draft.draftId, { ifRevision: state.draft.revision, lessons: [{ lessonId, ...fields }] });
     state.draft = r.draft; state.blockers = null;
   } catch (e) { toast(e.kind === 'revision_conflict' ? 'Чернетку змінено з іншого пристрою — оновлюю.' : e.message); await reloadDraft(); }
-}
-async function setAssumption(id, status) {
+}); }
+function setAssumption(id, status) { return serial(async () => {
   try { state.draft = (await api('PATCH', '/drafts/' + state.draft.draftId, { ifRevision: state.draft.revision, assumptions: [{ assumptionId: id, status }] })).draft; state.blockers = null; }
   catch (e) { toast(e.message); await reloadDraft(); }
   render();
+}); }
+
+const TERMS = {
+  course: { structure: 'Структура курсу', lesson: 'Урок', title: 'Назва уроку', goal: 'Мета', body: 'Текст уроку' },
+  instruction: { structure: 'Кроки інструкції', lesson: 'Крок', title: 'Назва кроку', goal: 'Мета кроку', body: 'Опис кроку' },
+};
+const termsFor = (d) => TERMS[d.kind] || TERMS.course;
+const STEP_LINES = ['Деталі', 'Інструменти', 'Увага', 'Результат кроку'];
+const MAX_SOURCE_STEPS = 20; // Studio робить кроки-джерела з перших 20; решта дописується до останнього
+const hasLine = (text, key) => new RegExp('^\\*\\*' + key + ':\\*\\*', 'm').test(text || '');
+
+/* Інструкція: режим і код виробу (PATCH instructionMode / modelCode) */
+function viewInstructionMeta(d) {
+  const mode = h('select', { id: 'i-mode' }, h('option', { value: 'assembly', text: 'Складання' }), h('option', { value: 'operation', text: 'Користування' }));
+  mode.value = d.instructionMode || 'assembly';
+  const model = h('input', { id: 'i-model', maxlength: 200, placeholder: 'Код або модель виробу', value: d.modelCode || '' });
+  const save = (fields) => serial(async () => {
+    try { state.draft = (await api('PATCH', '/drafts/' + state.draft.draftId, { ifRevision: state.draft.revision, ...fields })).draft; state.blockers = null; }
+    catch (e) { toast(e.kind === 'revision_conflict' ? 'Чернетку змінено з іншого пристрою — оновлюю.' : e.message); await reloadDraft(); }
+  });
+  mode.addEventListener('change', () => save({ instructionMode: mode.value }));
+  model.addEventListener('focus', () => { state.editing = true; });
+  model.addEventListener('blur', async () => { const v = model.value.trim(); if (v !== (state.draft.modelCode || '')) await save({ modelCode: v }); endEditing(); });
+  return h('div', { class: 'card', id: 'instruction-meta' },
+    h('div', { class: 'row' }, h('div', { class: 'grow' }, h('label', { text: 'Що описуємо' }), mode), h('div', { class: 'grow' }, h('label', { text: 'Код або модель виробу' }), model)),
+    h('p', { class: 'muted', text: 'Кожен крок спирається на свої кадри. Деталі, інструменти, застереження й результат пишіть окремими рядками — Studio розкладе їх по полях кроку.' }));
+}
+
+/* Перенесення кадра в інший крок: PATCH structure (замінює структуру повністю, незмінені поля лишаються «від ШІ») */
+function moveFrame(photoId, toLessonId) { return serial(async () => {
+  const order = new Map(state.draft.photos.map((p) => [p.photoId, p.order]));
+  const mods = JSON.parse(JSON.stringify(state.draft.structure.modules));
+  for (const m of mods) for (const l of m.lessons) l.photoIds = l.photoIds.filter((x) => x !== photoId);
+  const target = mods.flatMap((m) => m.lessons).find((l) => l.lessonId === toLessonId);
+  if (!target) return;
+  target.photoIds.push(photoId); target.photoIds.sort((x, y) => order.get(x) - order.get(y));
+  const structure = { modules: mods.map((m) => ({ moduleId: m.moduleId, title: m.title, summary: m.summary, lessons: m.lessons.map((l) => ({ lessonId: l.lessonId, title: l.title, goal: l.goal, photoIds: l.photoIds, body: l.body, topics: l.topics })) })) };
+  try { state.draft = (await api('PATCH', '/drafts/' + state.draft.draftId, { ifRevision: state.draft.revision, structure })).draft; state.blockers = null; }
+  catch (e) { toast(e.kind === 'revision_conflict' ? 'Чернетку змінено з іншого пристрою — оновлюю.' : e.message); await reloadDraft(); }
+  render();
+}); }
+
+function stepFrames(d, les) {
+  const byId = new Map(d.photos.map((p) => [p.photoId, p]));
+  const steps = d.structure.modules.flatMap((m) => m.lessons);
+  const wrap = h('div', { class: 'thumbs big' });
+  les.photoIds.forEach((id) => {
+    const p = byId.get(id); if (!p) return;
+    const sel = h('select', { class: 'move', 'data-move': id, title: 'Перенести кадр в інший крок' }, h('option', { value: '', text: `Кадр ${p.order} →` }),
+      steps.filter((x) => x.lessonId !== les.lessonId).map((x) => h('option', { value: x.lessonId, text: 'в «' + (x.title || x.lessonId).slice(0, 30) + '»' })));
+    sel.addEventListener('change', () => { if (sel.value) moveFrame(id, sel.value); });
+    wrap.append(h('div', { class: 'frame-chip' }, h('img', { src: `/api/drafts/${d.draftId}/photos/${id}/image`, alt: 'Кадр ' + p.order, loading: 'lazy' }), sel));
+  });
+  if (!les.photoIds.length) wrap.append(h('p', { class: 'err', 'data-nofram': les.lessonId, text: 'У кроку немає кадру — перенесіть сюди кадр з іншого кроку.' }));
+  return wrap;
+}
+
+function stepLineChips(ta, body) {
+  const row = h('div', { class: 'row chips', 'data-chips': '' });
+  const refresh = () => row.querySelectorAll('button').forEach((b) => b.classList.toggle('on', hasLine(ta.value, b.dataset.key)));
+  STEP_LINES.forEach((k) => {
+    const b = h('button', { type: 'button', class: 'small chip', 'data-key': k, text: (hasLine(body, k) ? '✓ ' : '+ ') + k, onclick: () => {
+      if (!hasLine(ta.value, k)) { ta.value = (ta.value && !ta.value.endsWith('\n') ? ta.value + '\n' : ta.value) + `**${k}:** `; ta.dispatchEvent(new Event('input')); }
+      ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+    } });
+    row.append(b);
+  });
+  const mark = () => row.querySelectorAll('button').forEach((b) => { const on = hasLine(ta.value, b.dataset.key); b.textContent = (on ? '✓ ' : '+ ') + b.dataset.key; b.classList.toggle('on', on); });
+  ta.addEventListener('input', mark); mark();
+  return row;
 }
 
 function viewStructure(d) {
   const box = h('div', { id: 'structure' });
-  box.append(h('h3', { text: 'Структура курсу' }));
+  const T = termsFor(d);
+  box.append(h('h3', { text: T.structure }));
+  const stepCount = d.structure.modules.reduce((n, m) => n + m.lessons.length, 0);
+  if (d.kind === 'instruction' && stepCount > MAX_SOURCE_STEPS) box.append(h('p', { class: 'muted', id: 'steps-over', text: `Кроків ${stepCount}: Studio зробить джерелами перші ${MAX_SOURCE_STEPS}, решту допише до останнього.` }));
   const open = d.assumptions.filter((a) => a.status === 'open');
   if (d.assumptions.length) {
     box.append(h('div', { class: 'card', id: 'assumptions' }, h('strong', { text: 'ШІ припустив — підтвердьте або відхиліть' }),
@@ -468,10 +547,10 @@ function viewStructure(d) {
       m.summary && h('p', { class: 'muted', text: m.summary }));
     m.lessons.forEach((les) => {
       card.append(h('div', { class: 'lesson', 'data-lesson': les.lessonId },
-        h('div', { class: 'thumbs' }, les.photoIds.map((id) => byId.has(id) && h('img', { src: `/api/drafts/${d.draftId}/photos/${id}/image`, alt: '', loading: 'lazy' }))),
-        lessonField(d, les, 'title', 'Назва уроку', false),
-        lessonField(d, les, 'goal', 'Мета', true),
-        lessonField(d, les, 'body', 'Текст уроку', true)));
+        d.kind === 'instruction' ? stepFrames(d, les) : h('div', { class: 'thumbs' }, les.photoIds.map((id) => byId.has(id) && h('img', { src: `/api/drafts/${d.draftId}/photos/${id}/image`, alt: '', loading: 'lazy' }))),
+        lessonField(d, les, 'title', T.title, false),
+        lessonField(d, les, 'goal', T.goal, true),
+        lessonField(d, les, 'body', T.body, true)));
     });
     box.append(card);
   });

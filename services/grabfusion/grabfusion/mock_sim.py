@@ -177,6 +177,9 @@ class Sim:
         open_n = sum(1 for d in self.drafts.values() if d["status"] not in {"submitted", "discarded"})
         if open_n >= self.limits["maxOpenDrafts"]:
             return _err(409, "too_many_drafts", "Забагато відкритих чернеток.")
+        bad = self._check_instruction_fields(body["kind"], body)
+        if bad:
+            return bad
         base = contract.load_fixture("create-draft")["draft"]
         did = self._next("pd")
         d = copy.deepcopy(base)
@@ -189,6 +192,48 @@ class Sim:
         self.drafts[did] = d
         return 201, {"draft": copy.deepcopy(d)}
 
+    @staticmethod
+    def _check_instruction_fields(kind: str, body: dict[str, Any]) -> Result | None:
+        """instructionMode / modelCode — лише для kind: instruction (контракт: інакше 400 bad_input)."""
+        if kind != "instruction" and (body.get("instructionMode") is not None or body.get("modelCode") is not None):
+            return _err(400, "bad_input", "Режим і код виробу — лише для інструкції.")
+        if body.get("instructionMode") is not None and body["instructionMode"] not in {"assembly", "operation"}:
+            return _err(400, "bad_input", "instructionMode: assembly або operation.")
+        return None
+
+    def _replace_structure(self, d: dict[str, Any], new: Any) -> Result | None:
+        mods = new.get("modules") if isinstance(new, dict) else None
+        if not isinstance(mods, list):
+            return _err(400, "bad_input", "structure.modules — масив модулів.")
+        known = {p["photoId"] for p in d["photos"]}
+        old = {les["lessonId"]: les for m in (d["structure"] or {"modules": []})["modules"] for les in m["lessons"]}
+        seen: set[str] = set()
+        out = []
+        for m in mods:
+            if not isinstance(m, dict) or not isinstance(m.get("moduleId"), str) or m["moduleId"] in seen:
+                return _err(400, "bad_input", "Кожен модуль має унікальний moduleId.")
+            seen.add(m["moduleId"])
+            lessons = []
+            for les in m.get("lessons") or []:
+                if not isinstance(les, dict) or not isinstance(les.get("lessonId"), str) or les["lessonId"] in seen:
+                    return _err(400, "bad_input", "Кожен урок має унікальний lessonId.")
+                seen.add(les["lessonId"])
+                ids = les.get("photoIds") or []
+                miss = next((i for i in ids if i not in known), None)
+                if miss:
+                    return _err(404, "photo_not_found", f"Кадру {miss} немає в цій чернетці.")
+                new_les = {"lessonId": les["lessonId"], "title": les.get("title") or "", "goal": les.get("goal"),
+                           "photoIds": list(ids), "body": les.get("body"), "topics": list(les.get("topics") or []),
+                           "aiFields": []}
+                prev = old.get(les["lessonId"])
+                if prev:
+                    new_les["aiFields"] = [f for f in prev["aiFields"] if prev.get(f) == new_les.get(f)]
+                lessons.append(new_les)
+            out.append({"moduleId": m["moduleId"], "title": m.get("title") or "", "summary": m.get("summary"),
+                        "lessons": lessons, "written": bool(lessons) and all(x["body"] for x in lessons)})
+        d["structure"] = {"modules": out}
+        return None
+
     def _patch(self, d: dict[str, Any], body: Any) -> Result:
         if not isinstance(body, dict) or not isinstance(body.get("ifRevision"), int):
             return _err(400, "bad_input", "Потрібен ifRevision.")
@@ -196,6 +241,9 @@ class Sim:
             return _err(409, "revision_conflict",
                         f"Чернетку змінено з іншого пристрою (ревізія {d['revision']}, у вас {body['ifRevision']}). "
                         "Оновіть і повторіть правку.")
+        bad = self._check_instruction_fields(d["kind"], body)
+        if bad:
+            return bad
         for f in ("title", "craft", "audience", "level", "instructionMode", "modelCode"):
             if f in body:
                 d[f] = body[f]
@@ -208,6 +256,10 @@ class Sim:
         if "lessons" in body or "assumptions" in body or "structure" in body:
             if d["kind"] == "manuscript":
                 return _err(409, "wrong_status", "У рукописі структури немає.")
+        if "structure" in body:
+            bad = self._replace_structure(d, body["structure"])
+            if bad:
+                return bad
         for patch in body.get("lessons", []) or []:
             les = next((x for m in (d["structure"] or {"modules": []})["modules"] for x in m["lessons"]
                         if x["lessonId"] == patch.get("lessonId")), None)
