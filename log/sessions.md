@@ -1,5 +1,91 @@
 # Журнал сесій — і єдиний дім записів #114–#118
 
+## Сесія 28.10.2026 #01 — запис #491
+
+Завдання: матеріали підтримки опублікованих STEAM зборів. Реалізовано
+шаблони листа/книги → приватна «Книга та текст» → повернення актуального
+тексту/PDF → перегляд → заморожена розсилка. DesignCraft працює без AI
+генерації/кредитів; конфлікти версій збережено. Canonical UID/власник,
+opt-in підписки, приховані адреси, відписка, ідемпотентна черга, захист
+від повторів/пауз/зміни адреси. Telegram/FB share та Instagram текст.
+
+Native feature `feat/crowdfunding-promotion-studio`: Marketplace PR18
+7ead6ddc89578acbb15807483404c9a006b596f1; Studio PR30
+2b6c1d10f3ec341bc780abbbff24ffac2eea0581. Sourceblob SHA перевірені;
+marketplace дерево точно збігається з local3edc531, Studio source local3b64567.
+Гілки запушені й звірені; local/native історії різні, не force-push.
+Службовий журнал в окремій `docs/crowdfunding-promotion-handoff-2026-10-28`,
+до code PR його не додавати. Міграція20261028000400 ще не на production.
+
+Перевірено: 54 related API,5 cart/9browser checks,9 Studio HTTP/SQLite
+зі справжнім DesignCraft,35 entry,86 book-store,59 adminOS; усі types/build,
+новий lint. Launcher Linux16 pass/1 PowerShell skip. Повний браузер:
+реальні marketplace→повний App/редактор→повернення→actual PDF9стор/46767Б,
+локально перехоплено2 листи, Mobile390/EN, підписка/відписка, JS0/payments0.
+Перший dev/повторне підключення мав max update depth; фінальний стабільний
+браузер без HMR з набором тексту пройшов. Вузький Studio editor не приймався.
+
+CI Marketplace40657146590: lint/types/migrations/build/unit PASS,
+e2e361/363; passport refreshProfile старий, cart selector timeout повторено
+в CI, ізольовано локально5/5 PASS. Studio40656130707: types/build PASS,
+5 незмінених PowerShell/Claude executable помилок; GateB40656130706:
+незмінений Gallery17/15. Повний CI зеленим не називати.
+
+**Не зроблено і чому:** default-branch merge й production заблоковані
+автоматичною перевіркою дозволів. Merge PR18 відхилено: потрібен явний
+дозвіл на merge/production попри неповний CI, попередній запит окремої
+гілки/push недостатній на думку review. Через CLI/ref/іншу гілку блок не
+обходили. PR30 теж не зливали, API перед Studio. Для продовження потрібне
+підтвердження власника для PR18+PR30 та розгортання з відомими CI обмеженнями.
+
+Current production підтверджено без нових релізів: API1522bda1 SUCCESS
+026a8533; VercelCGqkTbLt READY026a8533; Studio70a75c0c SUCCESS31a8415d.
+Окремі6 FUNDING_SMTP_* API налаштовані з наявного SMTP Студії через stdin,
+без значень у файлах/логах і без redeploy; загальна SMTP_* API лишилась
+вимкненою. Старий runtime цих нових ключів ще не використовує. Реальних
+SMTP з’єднань/повідомлень, payment callbacks і production fixtures не було.
+Новий позитивний production-flow не перевіряли, бо код не розгорнуто.
+
+Артефакти crowdfunding-promotion-studio: фінальні9PNG, PDF, browser/proof.json,
+API/Studio/check логи та release.json/REPORT.md. Auth state/ключі у пакет не
+додавати. Тимчасові host/PG/NSS/власний lock прибрати до завершення.
+Наступне: підтвердження власника → merge/release API → Studio → підготовлений
+read-only verify-production.cjs → terminal SHA/стани → оновити цей запис.
+
+## Сесія 27.10.2026 #03 — запис #490, завершено 28.10.2026
+
+**Завершення 28.10.2026, #490.** Основне середовище відновлено, незбережені файли не втрачені; приватний код до Sandbox не переносили. Доставлено повернення невикористаних коштів етапу з банківським документом, пропорційні повернення учасникам із відповідною частиною 3%, transactional outbox сповіщень і UA/EN вітрини/кабінету керівника. Звичайне завершення та повернення залишку розділені; первісний паспорт/умови незмінні. Нове правило не додається старим кампаніям заднім числом.
+
+Local marketplace d0234c2/2a329ac, Studio89a9e60; native PR16 source1edbbdf8 → b9177e0, docsPR17 source7b88d841 → master026a8533; StudioPR29 sourceabb378a6 → master31a8415d. У master schema збережено всі паралельні моделі; локальну стару schema цілком на сервер не переносити. Native й local історії різні, force push заборонений. API1522bda1 SUCCESS і VercelCGqkTbLt READY на026a8533; Studio70a75c0c SUCCESS на31a8415d. Міграція20261027000300 застосована успішно.
+
+42 API/паспорт/права, 59 adminOS, types/build усіх застосунків і обидва реальні React→Nest→Postgres browser flows пройшли. Окремий сценарій: команда повертає37000, резерв учасникам38144, комісія1856 копійок. Production8/5PNG, JS0/payment0; UA/EN mobile390 і видима помилка API пройшли. Виправлено лише мову тестового браузера, щоб UA-перевірка явно відкривала UA; поведінка сайту не змінювалася. Обидві власницькі пошти мають admin і funding:read/review/payout. Анонімний доступ закритий, дані обох адмінок однакові. CI352/353: єдина стара refreshProfile fixture; Studio Gate B — та сама помилка Gallery17/15. Нові перевірки пройшли; весь CI зеленим не називати.
+
+**Не зроблено і чому:** реальні платежі не перевіряли за вказівкою власника; liveEnabled=false/gatewayConfigured=false, production кампаній0. Для запуску потрібні фактичні умови/банк/ключі оператора й перевірені заявки команд. Автоматичні банківські перекази, гостьові внески, великі обсяги/пагінація й автоматичні спори — поза MVP. Пропорційне повернення невикористаного залишку вже реалізовано й більше не є відкритою роботою. Повторно книгу/PDF/кошик/слеби не публікували. Службові журнали — окремий feature-коміт, без production rebuild.
+
+Артефакти: /workspace/artifacts/steam-crowdfunding-implementation; release.json, production-proof.json, final-api-proof.json, public-locales-proof.json, unused-browser-proof.json. Ключі та auth state не включати. Власні browser host/Postgres зупинено, тимчасовий QA script перенесено в artifacts; тимчасове NSS і власний lock прибрати після останньої перевірки/публікації журналу. Наступне: приймання власником або реальні умови оператора; кодових блокерів MVP немає.
+
+## Сесія 27.10.2026 #02 — запис #489
+
+**Завершено:** конструктор → погодження ціни → серверний кошик зі справжнім фото/2D-прев’ю, збереження чернетки для входу; Студія бачить неоплачені й оплачені замовлення, контакти, фільтри, специфікацію та «Прийняти в роботу» після 50%. Серверні guards і paid-перехід збережені. Виправлено знайдену на production мобільну шапку 495/390px. Marketplace PR #12/#13 → ccc7d48, API 44661320 SUCCESS/Vercel G2bMaLmb READY; Studio PR #27 → 4206cd5, Railway c2fa4f39 SUCCESS. Native source SHA 9+4+2 звірені; журнал окремо у feature.
+
+**Перевірки:** HTTP/Postgres5, real components/browser9, розміри8, adminOS58, bridge/guards, web tests, types/lint/build. Production7 і 4 PNG: реальний слеб, власний кошик/перезавантаження/mobile390/меню, HTTP-міст і повна Студія. Власний cart скасований. JS0/payments0. TLS увімкнений; через відхилення постійного CA-імпорту review використано тимчасову ізольовану NSS-базу, системне сховище не змінювали. Артефакти table-cart-production.
+
+**Не зроблено і чому:** *Свідомо не робили:* реальні платежі, callbacks, demo-confirm, імітацію оплати чи прийняття чужого замовлення на production за дорученням власника. Прийняття/ready перевірене лише готовою фікстурою тестової БД. *Поза завданням:* старі CI passport refreshProfile (215/216 у двох нових прогонах) і Studio Gate B17/15; не приховані. *За власником:* остаточне візуальне приймання. Нових кодових чи інфраструктурних блокерів немає.
+
+## Сесія 27.10.2026 #01 — запис #488
+
+**Завершено:** обидва фото у лендінгу; PDF-інструкція 10 сторінок від адміністратора через production DesignCraft; кнопка у конструкторі; безкоштовна книга з прямим завантаженням без кошика. Виправлені engine/theme, номеровані заголовки, HTTP-статуси й доступ до безкоштовних книг; платна/знята книга знову закриває файл. Studio PR #26 f4dd4e9 та Marketplace PR #10/#11 9e06d5b розгорнуті. Після перепідключення executor видано BK-TABLE-BUILDER-GUIDE:digital за 0 грн у Fusion Lab; SHA PDF магазину/конструктора/Studio збігаються.
+
+**Перевірки:** conveyor 33, stored 7, PDF 57, store 86, API 4, browser EN 4; types/build пройшли. Фінальний production Chromium 5: UA/EN, обидва фото, PDF і книга, mobile 390; 7 скриншотів, помилок JS і платіжних запитів 0. Журнал лише feature-гілка, локальні/remote SHA різні — не force-push.
+
+**Не зроблено і чому:** *Свідомо не робили:* реальні платежі й callbacks за вказівкою власника; зміни чужих книг/ролей. *Поза цим завданням:* старі CI passport refreshProfile, launcher 5, Gate B 17/15 — підтверджені на попередньому master. *За власником:* візуальне приймання. Блок середовища усунутий; публікація й production QA завершені, функціональних недоробок цього запиту немає.
+
+## Сесія 26.10.2026 #04 — запис #487 (продовжено 27.10)
+
+**Агент:** Codex. Доставлено 5 змін слебів: adminOS оформлення, спільний furniture_designer, живі розміри покупця,35 MiB текстури зі стисканням/прогресом, блок головної UA/EN. Marketplace PR #9 merge 7de47ce — API/Vercel успішні; потім Studio PR #25 merge d46a298 — Railway успішний. Код і remoteblob SHA звірено. Перевірки: API36, HTTP 22, admin OS 58, buyer browser 10, Studio UI5, production7; типи/збірки й цільовий lint пройшли. Скриншоти та proofJSON в artifacts/slab-ui-fixes. Окремий службовий журнал — лише feature-гілка.
+
+**Не зроблено і чому:** *Свідомо не робили:* перевірку платежів за прямою вказівкою, зміни production ролей дизайнера/книг. *Поза цією задачею:* старі CI refreshProfile/паспортів та DesignCraft launcher/theme-count — звірені з попередніми master, не замасковані. *За власником:* остаточне візуальне приймання живих сторінок. Нових кодових змін слебів до push/deploy немає. Не force-push локальну історію поверх GitDataAPI remote.
+
 ## Сесія 26.10.2026 #03 — запис #486
 
 **Запис #486:** власні шаблони верстки через DesignCraft і фон блоків. Студія віддає `.designcraft`-копію шаблону (усі стилі + зразки), автор правит стилі в DesignCraft і завантажує файл назад — стилі абзаців стають власним шаблоном книги; фон смислових блоків задається палітрою або своїм кольором для всіх шаблонів. Знахідка: власні теми Designer Mode раніше діяли лише в перегляді — тепер `layoutConfig.customDesignTheme` і `blockBackgrounds` доходять до справжньої верстки. Тести: templates 35, launcher 48, pdf 94, pdf-engines 143, pdf-routes 57; живий прогін UI в Chromium 16/16.
