@@ -37,6 +37,8 @@ interface TokenItem {
   id: string;
   name: string;
   prefix: string;
+  /** null — повний доступ; 'photo-drafts' — токен GrabFusion. */
+  scope?: string | null;
   createdAt: string;
   lastUsedAt: string | null;
   revokedAt: string | null;
@@ -75,6 +77,9 @@ export const ScanInboxPanel: React.FC<ScanInboxPanelProps> = ({ book, onUpdateBo
   const [tokenBusy, setTokenBusy] = useState(false);
   const [revokeConfirmId, setRevokeConfirmId] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  // GrabFusion: одноразовий код замість токена — застосунок сам обміняє його на токен з областю photo-drafts.
+  const [grabCode, setGrabCode] = useState<{ code: string; expiresAt: string } | null>(null);
+  const [grabBusy, setGrabBusy] = useState(false);
 
   const chapters = useMemo(() => [...(book.chapters || [])].sort((a, b) => a.order - b.order), [book.chapters]);
   const lastChapterId = chapters.length ? chapters[chapters.length - 1].id : '';
@@ -236,6 +241,28 @@ export const ScanInboxPanel: React.FC<ScanInboxPanelProps> = ({ book, onUpdateBo
       loadTokens();
     } finally {
       setTokenBusy(false);
+    }
+  };
+
+  const handleGrabCode = async () => {
+    setGrabBusy(true);
+    setGrabCode(null);
+    try {
+      const res = await fetch('/api/external-tokens/pairing-code', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'GrabFusion', scope: 'photo-drafts' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.code) {
+        showToast(String(data?.error || t('scanInbox.grabFailed')));
+        return;
+      }
+      setGrabCode({ code: String(data.code), expiresAt: String(data.expiresAt) });
+      loadTokens();
+    } finally {
+      setGrabBusy(false);
     }
   };
 
@@ -458,6 +485,35 @@ export const ScanInboxPanel: React.FC<ScanInboxPanelProps> = ({ book, onUpdateBo
                   </button>
                 </div>
 
+                <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-2.5 space-y-1.5" data-grabfusion-connect>
+                  <p className="text-[11px] font-bold text-cyan-100">{t('scanInbox.grabTitle')}</p>
+                  <p className="text-[11px] text-slate-400 leading-snug">{t('scanInbox.grabHint')}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleGrabCode}
+                      disabled={grabBusy}
+                      data-grabfusion-code-btn
+                      className="px-3 py-1.5 rounded-lg bg-cyan-500/20 border border-cyan-500/50 text-cyan-100 text-[11px] font-bold flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      {grabBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <KeyRound className="w-3 h-3" />}
+                      {t('scanInbox.grabGetCode')}
+                    </button>
+                    {grabCode && (
+                      <>
+                        <code className="px-3 py-1 rounded bg-slate-950 border border-cyan-500/40 text-cyan-100 text-sm tracking-[0.2em]" data-grabfusion-code>
+                          {grabCode.code}
+                        </code>
+                        <span className="text-[11px] text-slate-500">
+                          {t('scanInbox.grabCodeValid', {
+                            time: new Date(grabCode.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                          })}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
                 {tokens.length === 0 ? (
                   <p className="text-[11px] text-slate-500">{t('scanInbox.tokensEmpty')}</p>
                 ) : (
@@ -466,6 +522,11 @@ export const ScanInboxPanel: React.FC<ScanInboxPanelProps> = ({ book, onUpdateBo
                       <li key={tk.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] rounded-lg border border-slate-800 px-2.5 py-1.5">
                         <span className={`font-bold ${tk.revokedAt ? 'text-slate-500 line-through' : 'text-slate-200'}`}>{tk.name}</span>
                         <code className="text-slate-500">{tk.prefix}…</code>
+                        {tk.scope === 'photo-drafts' && (
+                          <span className="px-1.5 py-0.5 rounded bg-cyan-500/10 border border-cyan-500/30 text-cyan-200">
+                            {t('scanInbox.tokenScopePhotoDrafts')}
+                          </span>
+                        )}
                         <span className="text-slate-500">{t('scanInbox.tokenCreatedAt', { date: formatDate(tk.createdAt) })}</span>
                         <span className="text-slate-500">
                           {tk.revokedAt

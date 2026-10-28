@@ -669,7 +669,8 @@ CREATE TABLE IF NOT EXISTS external_api_tokens (
   prefix        TEXT NOT NULL,
   created_at    TEXT NOT NULL,
   last_used_at  TEXT,
-  revoked_at    TEXT
+  revoked_at    TEXT,
+  scope         TEXT                  -- NULL = повний доступ; 'photo-drafts' = лише чернетки за фото (GrabFusion)
 );
 CREATE INDEX IF NOT EXISTS idx_external_api_tokens_user ON external_api_tokens(user_id, created_at DESC);
 
@@ -696,6 +697,22 @@ CREATE TABLE IF NOT EXISTS external_scans (
   updated_at       TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_external_scans_owner ON external_scans(owner_id, status, created_at DESC);
+
+-- Чернетки за фото (GrabFusion, docs/photo-drafts-api.md). Уся чернетка —
+-- один JSON у payload: кадри, описи, структура, припущення змінюються разом
+-- і завжди читаються цілком, тож розкладати їх по таблицях немає сенсу.
+-- status/revision винесено в колонки для переліку й лічильників.
+CREATE TABLE IF NOT EXISTS photo_drafts (
+  id          TEXT PRIMARY KEY,
+  owner_id    TEXT NOT NULL,
+  kind        TEXT NOT NULL,           -- course | instruction | book
+  status      TEXT NOT NULL,           -- collecting | structured | written | submitted | discarded
+  revision    INTEGER NOT NULL DEFAULT 1,
+  payload     TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_photo_drafts_owner ON photo_drafts(owner_id, updated_at DESC);
 
 -- РЎР°РјРѕСЃС‚С–Р№РЅС– РЅР°РІС‡Р°Р»СЊРЅС– РєСѓСЂСЃРё (docs/tech-spec-course-wizard-2026.md).
 -- РљСѓСЂСЃ РЅРµ РїСЂРёРІРјСЏР·Р°РЅРёР№ РґРѕ РєРЅРёРіРё: СЂРµРјС–СЃРЅРёС‡С– РєСѓСЂСЃРё Р±СѓРІР°СЋС‚СЊ Р±РµР· СЂСѓРєРѕРїРёСЃСѓ.
@@ -1033,6 +1050,18 @@ function migrateExpressDraftRevision(instance: Database): void {
   }
 }
 
+/** Область дії токена (GrabFusion, #501): старі бази не мають колонки `scope`. NULL = повний доступ, як і раніше. */
+function migrateExternalTokenScope(instance: Database): void {
+  try {
+    const cols = instance.prepare('PRAGMA table_info(external_api_tokens)').all() as { name: string }[];
+    if (!cols.some((c) => c.name === 'scope')) {
+      instance.exec('ALTER TABLE external_api_tokens ADD COLUMN scope TEXT');
+    }
+  } catch (err) {
+    console.warn('[db] Не вдалося перевірити/додати колонку external_api_tokens.scope:', err);
+  }
+}
+
 function migrateUsageLogColumns(instance: Database): void {
   try {
     const cols = instance.prepare('PRAGMA table_info(usage_log)').all() as { name: string }[];
@@ -1311,6 +1340,7 @@ export async function initDb(): Promise<boolean> {
     migrateSupportMessageColumns(instance);
     migrateModerationSnapshot(instance);
     migrateMediaAssetColumns(instance);
+    migrateExternalTokenScope(instance);
     seedEmotionDictionary(instance);
     seedCoreEntityRegistry(instance);
     db = instance;

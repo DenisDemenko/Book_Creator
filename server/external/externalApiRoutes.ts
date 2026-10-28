@@ -40,6 +40,7 @@ import {
   listTokens,
   publicToken,
   revokeToken,
+  parseTokenScope,
   touchToken,
   updateScan,
   type ExternalScan,
@@ -96,6 +97,8 @@ declare global {
   namespace Express {
     interface Request {
       externalTokenId?: string;
+      /** Область токена: null — повний доступ, 'photo-drafts' — лише чернетки за фото. */
+      externalTokenScope?: string | null;
     }
   }
 }
@@ -182,6 +185,20 @@ async function ownBook(bookId: string, userId: string) {
   return stored;
 }
 
+/**
+ * Чи пускає область токена на цей шлях. Повний токен (без області) — скрізь.
+ * Токен GrabFusion (`photo-drafts`) — лише чернетки за фото й `GET /me`: витік
+ * токена з сервісу застосунку не має відкривати книги автора. Будь-яка інша
+ * (невідома) область — лише `/me`.
+ */
+export function scopeAllowsPath(scope: string | null | undefined, urlPath: string): boolean {
+  if (!scope) return true;
+  const p = urlPath.split('?')[0].replace(/\/+$/, '');
+  if (p === '/api/external/v1/me') return true;
+  if (scope === 'photo-drafts') return p === '/api/external/v1/photo-drafts' || p.startsWith('/api/external/v1/photo-drafts/');
+  return false;
+}
+
 /** Не частіше ніж раз на 5 хвилин — інакше кожен запит застосунку писав би в базу. */
 const TOUCH_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -206,8 +223,17 @@ export function requireExternalToken(now: () => Date = () => new Date()) {
       if (!user || user.disabled) {
         return fail(res, 401, 'invalid_token', 'Обліковий запис, якому належить токен, недоступний.');
       }
+      if (!scopeAllowsPath(token.scope, String(req.originalUrl || req.url || ''))) {
+        return fail(
+          res,
+          403,
+          'scope_denied',
+          'Цей токен має обмежений доступ і не відкриває цей розділ. Для інших дій потрібен окремий токен зі Студії.'
+        );
+      }
       req.principal = { ...user, isGuest: false };
       req.externalTokenId = token.id;
+      req.externalTokenScope = token.scope ?? null;
       const last = token.lastUsedAt ? Date.parse(token.lastUsedAt) : 0;
       if (!last || now().getTime() - last > TOUCH_INTERVAL_MS) {
         await touchToken(token.id, now).catch(() => undefined);
@@ -310,7 +336,10 @@ export function registerExternalApiRoutes(app: Express, deps: ExternalApiDeps): 
           `Уже є ${active.length} чинних токенів — відкличте непотрібний (Медіатека → Скани з телефону), щоб підключити ще один застосунок.`
         );
       }
-      const issued = pairing.issue(userId, String(req.body?.name || 'DesignCraft (локально)'));
+      // Область майбутнього токена: GrabFusion просить лише чернетки за фото.
+      const scope = parseTokenScope(req.body?.scope);
+      const defaultName = scope === 'photo-drafts' ? 'GrabFusion' : 'DesignCraft (локально)';
+      const issued = pairing.issue(userId, String(req.body?.name || defaultName), scope);
       res.status(201).json({ code: issued.display, expiresAt: issued.expiresAt, ttlSec: Math.round(PAIRING_TTL_MS / 1000) });
     } catch (err) {
       console.error('[externalApi] pairing code:', err);
@@ -334,10 +363,10 @@ export function registerExternalApiRoutes(app: Express, deps: ExternalApiDeps): 
         if (reason === 'expired') return fail(res, 410, 'code_expired', 'Код підключення прострочений. Отримайте новий у Студії.');
         return fail(res, 404, 'invalid_code', 'Код підключення невірний або вже використаний.');
       }
-      const ok = result as { userId: string; name: string };
+      const ok = result as { userId: string; name: string; scope: string | null };
       const user = await findUserById(ok.userId);
       if (!user || user.disabled) return fail(res, 404, 'invalid_code', 'Код підключення невірний або вже використаний.');
-      const { record, token } = await createToken({ userId: ok.userId, name: ok.name, now });
+      const { record, token } = await createToken({ userId: ok.userId, name: ok.name, scope: parseTokenScope(ok.scope), now });
       res.status(201).json({ token, record: publicToken(record), user: { name: user.name, email: user.email } });
     } catch (err) {
       console.error('[externalApi] pair:', err);
@@ -383,7 +412,10 @@ export function registerExternalApiRoutes(app: Express, deps: ExternalApiDeps): 
 
   app.get('/api/external/v1/me', externalAuth, (req, res) => {
     const p = req.principal as any;
-    res.json({ user: { id: p.id, name: p.name, email: p.email, role: p.role } });
+    res.json({
+      user: { id: p.id, name: p.name, email: p.email, role: p.role },
+      scopes: req.externalTokenScope ? [req.externalTokenScope] : [],
+    });
   });
 
   app.get('/api/external/v1/books', externalAuth, async (req, res) => {

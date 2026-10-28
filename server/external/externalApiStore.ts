@@ -34,6 +34,20 @@ export interface ExternalApiToken {
   createdAt: string;
   lastUsedAt: string | null;
   revokedAt: string | null;
+  /**
+   * Область дії. `null` — повний доступ зовнішнього API (WriterScan, DesignCraft,
+   * агент). `photo-drafts` — лише чернетки за фото й `GET /me` (GrabFusion):
+   * витік такого токена не відкриває книги автора.
+   */
+  scope: ExternalTokenScope | null;
+}
+
+/** Відомі області токена. Невідома область у базі трактується як «нічого не дозволено». */
+export const EXTERNAL_TOKEN_SCOPES = ['photo-drafts'] as const;
+export type ExternalTokenScope = (typeof EXTERNAL_TOKEN_SCOPES)[number];
+
+export function parseTokenScope(value: unknown): ExternalTokenScope | null {
+  return (EXTERNAL_TOKEN_SCOPES as readonly string[]).includes(String(value)) ? (value as ExternalTokenScope) : null;
 }
 
 /**
@@ -106,7 +120,7 @@ async function loadJson(): Promise<JsonShape> {
     const raw = await fs.readFile(path.join(DATA_DIR, JSON_FILE), 'utf8');
     const parsed = JSON.parse(raw) as Partial<JsonShape>;
     jsonCache = {
-      tokens: Array.isArray(parsed.tokens) ? parsed.tokens : [],
+      tokens: Array.isArray(parsed.tokens) ? parsed.tokens.map((t) => ({ ...t, scope: t.scope ?? null })) : [],
       scans: Array.isArray(parsed.scans) ? parsed.scans : [],
     };
   } catch {
@@ -151,6 +165,7 @@ function rowToToken(row: any): ExternalApiToken {
     createdAt: String(row.created_at),
     lastUsedAt: row.last_used_at ? String(row.last_used_at) : null,
     revokedAt: row.revoked_at ? String(row.revoked_at) : null,
+    scope: row.scope ? ((parseTokenScope(row.scope) ?? row.scope) as ExternalTokenScope) : null,
   };
 }
 
@@ -161,6 +176,7 @@ function rowToToken(row: any): ExternalApiToken {
 export async function createToken(params: {
   userId: string;
   name: string;
+  scope?: ExternalTokenScope | null;
   now?: () => Date;
 }): Promise<{ record: ExternalApiToken; token: string }> {
   const userId = String(params.userId || '').trim();
@@ -175,6 +191,7 @@ export async function createToken(params: {
     createdAt: (params.now?.() ?? new Date()).toISOString(),
     lastUsedAt: null,
     revokedAt: null,
+    scope: params.scope ?? null,
   };
 
   if (useJson()) {
@@ -185,10 +202,10 @@ export async function createToken(params: {
   }
   getDb()!
     .prepare(
-      `INSERT INTO external_api_tokens (id, user_id, name, token_hash, prefix, created_at, last_used_at, revoked_at)
-       VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)`
+      `INSERT INTO external_api_tokens (id, user_id, name, token_hash, prefix, created_at, last_used_at, revoked_at, scope)
+       VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?)`
     )
-    .run(record.id, record.userId, record.name, record.tokenHash, record.prefix, record.createdAt);
+    .run(record.id, record.userId, record.name, record.tokenHash, record.prefix, record.createdAt, record.scope);
   return { record, token };
 }
 
@@ -263,6 +280,7 @@ export function publicToken(t: ExternalApiToken) {
     createdAt: t.createdAt,
     lastUsedAt: t.lastUsedAt,
     revokedAt: t.revokedAt,
+    scope: t.scope ?? null,
   };
 }
 

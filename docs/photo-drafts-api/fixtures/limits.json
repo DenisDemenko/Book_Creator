@@ -1,0 +1,15 @@
+{
+  "contractVersion": "1.0.0",
+  "limits": {
+    "maxNoteChars": 500,
+    "maxImageBytes": 10485760,
+    "recommendedMaxSidePx": 2048,
+    "maxPhotosPerDraft": 300,
+    "photosPerHour": 120,
+    "maxOpenDrafts": 20,
+    "maxTitleChars": 160,
+    "maxShortFieldChars": 200,
+    "maxLessonBodyChars": 20000,
+    "pollIntervalMs": 2000
+  }
+}

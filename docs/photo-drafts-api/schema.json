@@ -1,0 +1,821 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://fusionlab.in.ua/schemas/photo-drafts/1.0.0.json",
+  "title": "Studio photo-drafts API (GrabFusion contract) 1.0.0",
+  "description": "JSON Schema (draft-07) for responses of /api/external/v1/photo-drafts*. Source of truth together with shared/photoDraftContract.ts; checked by scripts/test-photoDraftContract.mts.",
+  "definitions": {
+    "Kind": {
+      "enum": [
+        "course",
+        "instruction",
+        "book"
+      ]
+    },
+    "DraftStatus": {
+      "enum": [
+        "collecting",
+        "structured",
+        "written",
+        "submitted",
+        "discarded"
+      ]
+    },
+    "PhotoStatus": {
+      "enum": [
+        "processing",
+        "described",
+        "failed"
+      ]
+    },
+    "Level": {
+      "enum": [
+        "beginner",
+        "intermediate",
+        "advanced"
+      ]
+    },
+    "JobKind": {
+      "enum": [
+        "structure",
+        "generate"
+      ]
+    },
+    "JobStatus": {
+      "enum": [
+        "running",
+        "failed"
+      ]
+    },
+    "AssumptionStatus": {
+      "enum": [
+        "open",
+        "confirmed",
+        "rejected"
+      ]
+    },
+    "TargetKind": {
+      "enum": [
+        "course",
+        "express",
+        "inbox"
+      ]
+    },
+    "ErrorKind": {
+      "enum": [
+        "unauthenticated",
+        "invalid_token",
+        "scope_denied",
+        "forbidden",
+        "bad_input",
+        "bad_image",
+        "image_too_large",
+        "note_too_long",
+        "too_many_photos",
+        "too_many_drafts",
+        "rate_limited",
+        "quota_exceeded",
+        "ai_budget_exceeded",
+        "draft_not_found",
+        "photo_not_found",
+        "note_not_found",
+        "module_not_found",
+        "book_not_found",
+        "wrong_status",
+        "job_running",
+        "revision_conflict",
+        "submit_blocked",
+        "server_error"
+      ]
+    },
+    "BlockerKind": {
+      "enum": [
+        "no_photos",
+        "photos_processing",
+        "photos_failed",
+        "no_structure",
+        "module_not_written",
+        "open_assumptions",
+        "empty_lesson",
+        "title_missing",
+        "book_missing"
+      ]
+    },
+    "Limits": {
+      "type": "object",
+      "required": [
+        "maxNoteChars",
+        "maxImageBytes",
+        "recommendedMaxSidePx",
+        "maxPhotosPerDraft",
+        "photosPerHour",
+        "maxOpenDrafts",
+        "maxTitleChars",
+        "maxShortFieldChars",
+        "maxLessonBodyChars",
+        "pollIntervalMs"
+      ],
+      "properties": {
+        "maxNoteChars": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxImageBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "recommendedMaxSidePx": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxPhotosPerDraft": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "photosPerHour": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxOpenDrafts": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxTitleChars": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxShortFieldChars": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxLessonBodyChars": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "pollIntervalMs": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "Photo": {
+      "type": "object",
+      "required": [
+        "photoId",
+        "clientId",
+        "status",
+        "order",
+        "takenAt",
+        "imageUrl",
+        "description",
+        "tags",
+        "error",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "photoId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "clientId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "status": {
+          "$ref": "#/definitions/PhotoStatus"
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "takenAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "imageUrl": {
+          "type": "string",
+          "pattern": "^/api/external/v1/photo-drafts/[^/]+/photos/[^/]+/image$"
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Note": {
+      "type": "object",
+      "required": [
+        "noteId",
+        "photoIds",
+        "text",
+        "updatedAt"
+      ],
+      "properties": {
+        "noteId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "photoIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "minItems": 1
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Lesson": {
+      "type": "object",
+      "required": [
+        "lessonId",
+        "title",
+        "goal",
+        "photoIds",
+        "body",
+        "topics",
+        "aiFields"
+      ],
+      "properties": {
+        "lessonId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "title": {
+          "type": "string"
+        },
+        "goal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "photoIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "body": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "topics": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "aiFields": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "title",
+              "goal",
+              "body",
+              "topics"
+            ]
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "Module": {
+      "type": "object",
+      "required": [
+        "moduleId",
+        "title",
+        "summary",
+        "lessons",
+        "written"
+      ],
+      "properties": {
+        "moduleId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "title": {
+          "type": "string"
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lessons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Lesson"
+          }
+        },
+        "written": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Structure": {
+      "type": "object",
+      "required": [
+        "modules"
+      ],
+      "properties": {
+        "modules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Module"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "Assumption": {
+      "type": "object",
+      "required": [
+        "assumptionId",
+        "text",
+        "status",
+        "moduleId",
+        "lessonId",
+        "photoId"
+      ],
+      "properties": {
+        "assumptionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "$ref": "#/definitions/AssumptionStatus"
+        },
+        "moduleId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lessonId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "photoId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "Job": {
+      "type": "object",
+      "required": [
+        "kind",
+        "status",
+        "moduleId",
+        "error",
+        "startedAt"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/JobKind"
+        },
+        "status": {
+          "$ref": "#/definitions/JobStatus"
+        },
+        "moduleId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Target": {
+      "type": "object",
+      "required": [
+        "kind",
+        "id",
+        "studioUrl"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/TargetKind"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "studioUrl": {
+          "type": "string",
+          "pattern": "^/"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Draft": {
+      "type": "object",
+      "required": [
+        "draftId",
+        "kind",
+        "status",
+        "revision",
+        "title",
+        "craft",
+        "audience",
+        "level",
+        "bookId",
+        "photos",
+        "notes",
+        "structure",
+        "assumptions",
+        "job",
+        "submitted",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "draftId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "kind": {
+          "$ref": "#/definitions/Kind"
+        },
+        "status": {
+          "$ref": "#/definitions/DraftStatus"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 160
+        },
+        "craft": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "audience": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "level": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/Level"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bookId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "photos": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Photo"
+          }
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Note"
+          }
+        },
+        "structure": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/Structure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "assumptions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Assumption"
+          }
+        },
+        "job": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/Job"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "submitted": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/Target"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": true
+    },
+    "DraftSummary": {
+      "type": "object",
+      "required": [
+        "draftId",
+        "kind",
+        "status",
+        "title",
+        "photoCount",
+        "updatedAt"
+      ],
+      "properties": {
+        "draftId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "kind": {
+          "$ref": "#/definitions/Kind"
+        },
+        "status": {
+          "$ref": "#/definitions/DraftStatus"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "photoCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": true
+    },
+    "LimitsResponse": {
+      "type": "object",
+      "required": [
+        "contractVersion",
+        "limits"
+      ],
+      "properties": {
+        "contractVersion": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$"
+        },
+        "limits": {
+          "$ref": "#/definitions/Limits"
+        }
+      },
+      "additionalProperties": true
+    },
+    "DraftListResponse": {
+      "type": "object",
+      "required": [
+        "drafts"
+      ],
+      "properties": {
+        "drafts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DraftSummary"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "DraftResponse": {
+      "type": "object",
+      "required": [
+        "draft"
+      ],
+      "properties": {
+        "draft": {
+          "$ref": "#/definitions/Draft"
+        }
+      },
+      "additionalProperties": true
+    },
+    "PhotoResponse": {
+      "type": "object",
+      "required": [
+        "photo",
+        "revision",
+        "duplicate"
+      ],
+      "properties": {
+        "photo": {
+          "$ref": "#/definitions/Photo"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "duplicate": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "NoteResponse": {
+      "type": "object",
+      "required": [
+        "note",
+        "revision"
+      ],
+      "properties": {
+        "note": {
+          "$ref": "#/definitions/Note"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "SubmitResponse": {
+      "type": "object",
+      "required": [
+        "draft",
+        "target"
+      ],
+      "properties": {
+        "draft": {
+          "$ref": "#/definitions/Draft"
+        },
+        "target": {
+          "$ref": "#/definitions/Target"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Error": {
+      "type": "object",
+      "required": [
+        "error",
+        "kind"
+      ],
+      "properties": {
+        "error": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "$ref": "#/definitions/ErrorKind"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Blocker": {
+      "type": "object",
+      "required": [
+        "kind",
+        "message"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/BlockerKind"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "moduleId": {
+          "type": "string"
+        },
+        "lessonId": {
+          "type": "string"
+        },
+        "photoId": {
+          "type": "string"
+        },
+        "assumptionId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "SubmitBlockedError": {
+      "type": "object",
+      "required": [
+        "error",
+        "kind",
+        "blockers"
+      ],
+      "properties": {
+        "error": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "submit_blocked"
+        },
+        "blockers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Blocker"
+          },
+          "minItems": 1
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

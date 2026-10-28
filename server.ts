@@ -96,6 +96,8 @@ import { registerChatRoutes, CHAT_USAGE_CONTEXT } from './server/chatRoutes';
 import { registerApiKeysRoutes } from './server/apiKeysRoutes';
 import { registerExternalApiRoutes } from './server/external/externalApiRoutes';
 import { recognizeScanWithCoreVision } from './server/external/scanRecognizer';
+import { registerPhotoDraftRoutes } from './server/external/photoDraftRoutes';
+import { describePhotoWithCoreVision } from './server/external/photoDraftDescriber';
 import { checkAndRecordStorageUpload } from './server/mediaStorage';
 import { registerGitHistoryRoutes } from './server/gitHistoryRoutes';
 import { registerGitCommandRoutes } from './server/gitCommandRoutes';
@@ -584,6 +586,14 @@ async function startServer() {
     recognize: recognizeScanWithCoreVision,
     checkStorage: ({ userId, email, role, bytes, bookId, filename }) =>
       checkAndRecordStorageUpload(userId, email, role, bytes, bookId, filename),
+  });
+  // Чернетки за фото (GrabFusion, docs/photo-drafts-api.md): той самий токен
+  // застосунку, прохід 1 — модель зору ядра AI за рахунок тарифу викладача.
+  registerPhotoDraftRoutes(app, {
+    describe: describePhotoWithCoreVision,
+    checkStorage: ({ userId, email, role, bytes, bookId, filename }) =>
+      checkAndRecordStorageUpload(userId, email, role, bytes, bookId ?? undefined, filename),
+    checkAiBudget: ({ userId, role }) => checkChatQuota(userId, role, 'GrabFusion (опис кадрів)'),
   });
   registerKnowledgeRoutes(app);
   registerYoutubeTranscriptRoutes(app, realtimeAccessDeps);
