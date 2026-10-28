@@ -511,3 +511,22 @@ docker run -d --name nova-core-test -p 5433:5432 \
 новий маршрут `GET /api/admin/marketplace-bridge/payouts` без адміна віддає
 **403** (до підміни контейнера той самий шлях віддавав SPA-заглушку 200), тобто
 збірка з новим підрозділом на Railway уже працює.
+
+
+## Архів станів #480, #481 та #485 — перенесено 27.10.2026
+
+**26.10.2026, Codex #02, #485:** кодові гілки feat/wood-filters-resin-presets опубліковані GitHub Git Data API: Marketplace 3785cba (PR #6), Studio 4e2f78a (PR #23). Локальні SHA 343d309 та 9e7adf3 відрізняються від remote; не force-push. Поточні журнал і HANDOFF — окремий службовий коміт, публікувати після релізу в feature-гілку. Основні CI обох PR success; Vercel preview READY. Production НЕ змінений: auto-review двічі відхилив default-branch merge і вимагає окремого дозволу користувача. Після дозволу злити PR #6/#23, звірити деплої/міграцію та живий UI. Gate B має незмінений збій тем книг (17 замість 15). Оплату не перевіряти.
+
+25.10 #481: інсталятор запуску DesignCraft зі Студії (`/api/designcraft/launcher.zip`, `scripts/install-designcraft-studio.*`, режим скрипта без репозиторію, підказка біля кнопки) — **змінено в робочій копії, НЕ закомічено і НЕ запушено**. #480 опубліковано: `64fa5d4` у Book_Creator/master (відповідь GitHub `40f1402..64fa5d4`, `ls-remote` збігся); CI і Railway-деплой цього SHA власником **не підтверджені**. Перше приймання власника виявило, що на хмарній Студії інструкція кроку 1 непридатна (немає папки проєкту) і кнопка мовчить — це виправляє #481. **Лишається перевірити:** завантаження й розпакування архіву в Windows, `install-designcraft-studio.cmd`, кнопка після встановлення, вікно DesignCraft, Rewrite маркетплейсу для `/studio/api/designcraft/launcher.zip`.
+
+25.10 #480: «Верстка для публікації» (шаблони, панель редактора DesignCraft, код підключення, чернетка й повернення результату, Studio Classic/Editorial) — **змінено в робочій копії, НЕ закомічено і НЕ запушено** (38 файлів; пуш лише за прямою вказівкою власника). Автотести зелені в хмарі й на Windows; на Windows `test:publication-conveyor` мав хибне падіння без `pdffonts` — виправлено, перезапуск за власником. **Лишається перевірити вручну:** 11 кроків із `docs/acceptance/PUBLICATION_LAYOUT_DESIGNCRAFT.md` (встановлення посилання `designcraft-studio://`, кнопка, код підключення, вікно DesignCraft, чернетка, агент, повернення результату, позначка «застаріло», поведінка хмарної Студії після деплою); PUT великих файлів через Rewrite маркетплейсу на проді.
+
+
+## Стан перед #490 — 27.10.2026
+
+**27.10.2026, Codex #02, #489 — завершено:** Marketplace PR #12/#13 → ccc7d48 (API 44661320 SUCCESS, Vercel G2bMaLmb READY); Studio PR #27 → 4206cd5 (Railway c2fa4f39 SUCCESS). Кошик, прев’ю, замовлення у Студії й прийняття після 50%. Production7/0, local5/9, платіжних запитів0; тестовий cart скасований. Кодових змін до публікації немає; журнал лише feature fix/table-cart-production. Локальні/remote SHA різні — не force-push. Старі CI окремо, далі — приймання власником.
+
+
+## Стан після #490 — 28.10.2026
+
+STEAM crowdfunding MVP доставлений: marketplace026a8533 (код b9177e0), Studio31a8415d; API1522bda1 SUCCESS, VercelCGqkTbLt READY, Studio70a75c0c SUCCESS. Повна ціль/3%/етапи, незмінний паспорт, спільні права, повернення залишку, outbox, UA/EN. 42 API/59 adminOS, builds/types, browser і production8/0 payment пройшли. Реальні внески вимкнено до умов оператора; відомі старі CI refreshProfile/Gallery17-15 не виправляли. Журнал окремо у feature; див. актуальний HANDOFF та docs/handoff-steam-crowdfunding-2026-10-27.md.
