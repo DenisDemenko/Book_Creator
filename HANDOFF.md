@@ -373,3 +373,12 @@ Marketplace live SHA досі fdcec27, Studio live SHA досі 62e3a14.
 для test TokenVerifier/NestJS/PostgreSQL; не видавати за production.
 Наступне: отримати дозвіл на merge #6/#23 і production, виконати та звірити.
 Журнал/HANDOFF доставляються тільки feature-гілкою, окремо від коду.
+
+
+## Fusion GeoHome — 29.10.2026, Codex, geohome-cloud-pro-ultra
+- Прийнято контекст через AGENTS.md, HANDOFF.md і журнал; origin DenisDemenko/Book_Creator, базовий SHA 31a8415, блокування tmp/session.lock не було.
+- Завдання: cloud save/restore/version history для активних Pro/Ultra, такі самі права для KumCAD, ширший мобільний/desktop 3D-перегляд.
+- Studio: нові server/geohome/{store,routes,step}.ts, реєстрація в server.ts, тест scripts/test-geohome.mts, npm test:geohome і docs/fusion-geohome.md. Таблиці додаються до чинного SQLite, без скидання даних.
+- Перевірено локально: 38 HTTP/SQLite checks; реальний Chromium/Three.js/SQLite end-to-end через Marketplace; STEP OpenCASCADE 75 faces і правильні mm bounds; TypeScript і Marketplace build. Журнал #487.
+- Власник дозволив commit/push 29.10.2026; код закомічено a4188b5, публікація feature-гілки виконується. Не зроблено: production/deploy/live Firebase/native KumCAD GUI — не перевірені. Серверного journal-ack не було, файли не видаються за серверний запис.
+- Наступне: feature push/PR Studio → його CI → узгоджений rollout Studio перед Marketplace. Зберегти volume /data/nova-studio.db. Код Marketplace — feat/fusion-geohome, нові перевірки й screenshots у docs/acceptance/fusion-geohome-cloud.
