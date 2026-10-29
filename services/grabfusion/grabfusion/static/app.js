@@ -122,7 +122,7 @@ document.getElementById('btn-logout').addEventListener('click', async () => { aw
 function viewPair() {
   const err = h('p', { class: 'err', id: 'pair-err' });
   const input = h('input', { id: 'code', placeholder: 'Код підключення', autocomplete: 'off', autocapitalize: 'characters' });
-  const form = h('form', { class: 'card', onsubmit: async (e) => {
+  const form = h('form', { class: 'card hero', onsubmit: async (e) => {
     e.preventDefault(); err.textContent = '';
     try {
       const r = await api('POST', '/pair', { code: input.value.trim() });
@@ -298,6 +298,9 @@ function viewDraft() {
   const unit = d.kind === 'manuscript' ? 'сторінок' : 'кадрів';
   const cap = d.kind === 'manuscript' && state.limits ? ` / ${state.limits.maxManuscriptPages}` : '';
   box.append(h('p', { class: 'muted', text: meta + ` · ${unit}: ${d.photos.length}${cap}` + (mine.length ? ` (+${mine.length} у черзі)` : '') }));
+  if (d.status !== 'submitted') box.append(h('div', { class: 'row', id: 'save-row' },
+    h('button', { class: 'small', id: 'btn-save', text: '💾 Зберегти чернетку', onclick: saveDraft }),
+    h('span', { class: 'muted', text: 'Зміни зберігаються й самі; кнопка — щоб відкласти роботу на потім.' })));
   if (d.status === 'submitted') { box.append(viewSubmitted(d)); box.append(d.kind === 'manuscript' ? pagesSection(d, mine, true) : photosSection(d, mine, true)); return box; }
   const onFiles = (e) => { addFiles([...e.target.files]); e.target.value = ''; };
   box.append(h('div', { class: 'shoot' },
@@ -311,6 +314,22 @@ function viewDraft() {
   if (d.structure) box.append(viewStructure(d));
   box.append(photosSection(d, mine, false));
   return box;
+}
+
+/* «Зберегти чернетку»: дописує все, що ще не пішло (поле у фокусі, черга фото), і повертає до списку. */
+async function saveDraft() {
+  const id = state.draft.draftId;
+  const ae = document.activeElement;
+  if (ae && ae !== document.body && ae.blur) ae.blur(); // blur запускає відкладене збереження поля
+  await sleep(80);
+  await saveChain.catch(() => {});
+  await flushQueue();
+  await saveChain.catch(() => {});
+  const left = state.queue.filter((q) => q.draftId === id && q.state === 'queued').length;
+  const failed = state.queue.filter((q) => q.draftId === id && q.state === 'failed').length;
+  toast(left ? `Чернетку збережено. Фото в черзі (${left}) надішлються, коли зʼявиться звʼязок.`
+    : failed ? `Чернетку збережено, але ${failed} фото не надіслано — відкрийте її й перегляньте.` : 'Чернетку збережено. Її можна відкрити пізніше зі списку.');
+  await openList();
 }
 
 function photosSection(d, mine, readOnly) {

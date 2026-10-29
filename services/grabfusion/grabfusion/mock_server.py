@@ -70,6 +70,10 @@ SUBMIT_BY_KIND = {"course": "submit-course", "instruction": "submit-instruction"
                   "book": "submit-book", "manuscript": "submit-manuscript"}
 
 
+def fixture_is_image(route: Route) -> bool:
+    return route.fixture is None
+
+
 def fixtures_served_by_routes() -> set[str]:
     """Усі фікстури, які мок може віддати за таблицею (без ручного вибору заголовком)."""
     names = {r.fixture for r in ROUTES if r.fixture}
@@ -185,6 +189,10 @@ def create_app(*, stateful: bool = False, poll_interval_ms: int | None = None) -
                 return JSONResponse(fx, status_code=KIND_STATUS[fx["kind"]])
             return JSONResponse(fx, status_code=route.status)
 
+        if sim is not None and fixture_is_image(route):
+            data = sim.image(params["draftId"], params["photoId"])
+            if data:
+                return Response(data, media_type="image/jpeg")
         if sim is not None and route.name != "GET /photo-drafts/limits":
             if route.name == "POST /photo-drafts/:draftId/photos":
                 bad = _check_photo_body(body, limits)

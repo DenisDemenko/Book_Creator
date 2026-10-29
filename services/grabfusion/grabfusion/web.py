@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import base64
 import time
 from dataclasses import asdict
@@ -169,9 +170,15 @@ def build_router(deps: Deps) -> APIRouter:
         return call(s, lambda c: c.raw("POST", f"/photo-drafts/{draft_id}/submit"))
 
     @router.get("/drafts/{draft_id}/photos/{photo_id}/image")
-    def photo_image(draft_id: str, photo_id: str, s: Session = Depends(current)) -> Response:
+    def photo_image(draft_id: str, photo_id: str, request: Request, s: Session = Depends(current)) -> Response:
         img = call(s, lambda c: c.photo_image(draft_id, photo_id))
-        return Response(img, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
+        # no-cache + ETag: браузер щоразу перевіряє, що це та сама картинка (id можуть повторитись
+        # між перезапусками моку/Studio), а не показує застарілу з кешу
+        etag = '"' + hashlib.sha1(img).hexdigest() + '"'
+        headers = {"Cache-Control": "private, no-cache", "ETag": etag}
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers=headers)
+        return Response(img, media_type="image/jpeg", headers=headers)
 
     @router.post("/drafts/{draft_id}/photos/{photo_id}/retry", status_code=202)
     def retry_photo(draft_id: str, photo_id: str, s: Session = Depends(current)) -> Any:

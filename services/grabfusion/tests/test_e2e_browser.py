@@ -163,7 +163,13 @@ def test_full_flow(stack, browser_page, tmp_path):
     page.locator("[data-photo] button[title='Нижче']").first.click()
     _wait(lambda: any(c[0] == "PATCH /photo-drafts/:draftId" for c in mock.state.calls))
 
-    # 7. вихід
+    # 7. «Зберегти чернетку» повертає до списку з повідомленням
+    page.locator("[data-photo] textarea").first.fill("останній штрих")
+    page.click("#btn-save")
+    page.wait_for_selector("#btn-new")
+    assert "збережено" in page.inner_text("#toast").lower()
+
+    # 8. вихід
     page.click("#btn-logout")
     page.wait_for_selector("#code")
     assert not errors, errors
@@ -190,6 +196,12 @@ def test_stage3_structure_write_validate_submit(stack3, browser_page, tmp_path):
     page.set_input_files("#file-gal", [_jpeg(tmp_path / "1.jpg"), _jpeg(tmp_path / "2.jpg", (1200, 900))])
     page.wait_for_function("document.querySelectorAll('[data-photo]').length === 2 && document.querySelectorAll('[data-queued]').length === 0", timeout=15000)
     page.wait_for_function("!document.querySelector('#btn-structure').disabled", timeout=15000)
+    # кадри з сервера (через проксі) мають реально завантажитись, а не лишитись сірими
+    page.wait_for_function(
+        "[...document.querySelectorAll('[data-photo] img')].length >= 2 && "
+        "[...document.querySelectorAll('[data-photo] img')].every(i => i.complete && i.naturalWidth > 0)",
+        timeout=15000,
+    )
     _shot(page, "s3-1-before-structure")
 
     # прохід 2

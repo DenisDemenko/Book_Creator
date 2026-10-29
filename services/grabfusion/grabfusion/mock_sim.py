@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import copy
 from datetime import datetime, timezone
 from typing import Any
@@ -31,6 +33,7 @@ class Sim:
         self.ticks: dict[str, int] = {}
         self.pending: dict[str, Any] = {}
         self.clients: dict[tuple[str, str], str] = {}
+        self.images: dict[tuple[str, str], bytes] = {}  # завантажені фото: мок віддає їх назад, як справжня Studio
         self.counter = 0
         self.limits = contract.default_limits()
 
@@ -99,6 +102,9 @@ class Sim:
 
     def _image_url(self, draft_id: str, photo_id: str) -> str:
         return f"/api/external/v1/photo-drafts/{draft_id}/photos/{photo_id}/image"
+
+    def image(self, draft_id: str, photo_id: str) -> bytes | None:
+        return self.images.get((draft_id, photo_id))
 
     # --- маршрути -------------------------------------------------------
     def handle(self, route: str, params: dict[str, str], body: Any) -> Result | None:
@@ -319,6 +325,11 @@ class Sim:
             p["text"], p["textEdited"] = None, False
         d["photos"].append(p)
         self.clients[key] = pid
+        img = body.get("image", "")
+        try:
+            self.images[(d["draftId"], pid)] = base64.b64decode(img.split(",", 1)[1] if img.startswith("data:") else img)
+        except (ValueError, binascii.Error):  # pragma: no cover  (форму вже перевірив мок)
+            pass
         if body.get("note"):
             d["notes"].append({"noteId": f"n-{pid}", "photoIds": [pid], "text": body["note"], "updatedAt": _now()})
         if d["status"] in {"structured", "written"}:

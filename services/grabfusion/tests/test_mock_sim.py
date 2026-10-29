@@ -17,6 +17,8 @@ def api():
     c = TestClient(create_app(stateful=True))
 
     class A:
+        client = c
+
         def call(self, method, path, body=None, expect=None, schema=None):
             r = c.request(method, PREFIX + path, json=body, headers=H)
             if expect is not None:
@@ -243,3 +245,16 @@ def test_manuscript_book_and_title_blockers_and_patch(api):
     d = api.call("PATCH", f"/photo-drafts/{did}", {"ifRevision": d["revision"], "newBookTitle": None, "bookId": "b_ok"}, expect=200)["draft"]
     res = api.call("POST", f"/photo-drafts/{did}/submit", expect=201, schema="SubmitResponse")
     assert res["target"]["studioUrl"] == "/media?tab=inbox&bookId=b_ok"
+
+
+def test_stateful_mock_serves_back_the_uploaded_image(api):
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (64, 48), (200, 30, 30)).save(buf, "JPEG")
+    big = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+    did = _new(api, photos=0)
+    r = api.call("POST", f"/photo-drafts/{did}/photos", {"clientId": "img1", "image": big}, expect=202)
+    pid = r["photo"]["photoId"]
+    resp = api.client.get(PREFIX + f"/photo-drafts/{did}/photos/{pid}/image", headers=H)
+    assert resp.status_code == 200 and Image.open(io.BytesIO(resp.content)).size == (64, 48)

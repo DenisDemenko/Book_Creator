@@ -1,52 +1,93 @@
-:root{--bg:#f6f4ef;--card:#fff;--ink:#1f1d1a;--muted:#6b665e;--line:#ddd7cb;--accent:#1f6f5c;--accent-ink:#fff;--warn:#b4541a;--bad:#b3261e;--ok:#2e7d32}
-@media (prefers-color-scheme:dark){:root{--bg:#161512;--card:#201e1a;--ink:#f1ede4;--muted:#a39d90;--line:#37332b;--accent:#4fb89d;--accent-ink:#0b1f19;--warn:#e08a52;--bad:#f2867f;--ok:#7cc57f}}
+/* GrabFusion — стиль маркетплейсу Fusion Lab (токени зі сторінки fusionlab.in.ua):
+   теплий крем, коричневий текст, акцент «крафт»; Golos Text для тексту, Unbounded для заголовків. */
+:root{
+  color-scheme:light;
+  --background:#f4ece1;--surface:#fff;--panel:#e7d9c6;--neutral-bg:#efe6d8;
+  --foreground:#2b1a10;--muted:#6b5b4e;--line:rgba(43,26,16,.14);--field-line:#e0d6c8;
+  --accent-craft:#c97f4f;--accent-craft-dk:#8c4a26;--accent-craft-soft:#f6e3d4;
+  --accent-tech:#59637e;--accent-tech-dk:#333b52;--accent-tech-soft:#e3e5ec;
+  --accent:var(--accent-craft);--accent-dk:var(--accent-craft-dk);--accent-soft:var(--accent-craft-soft);
+  --success:#3f6b4a;--success-soft:#e3ede5;--warning:#b9822b;--warning-soft:#f6ecd9;--danger:#a33a28;--danger-soft:#f7e2dd;
+  --font-body:"Golos Text",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --font-display:"Unbounded","Golos Text",system-ui,sans-serif;
+}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-.top{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:5}
-.top h1{font-size:1.1rem;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.top-actions{display:flex;gap:8px;align-items:center}
-main{max-width:760px;margin:0 auto;padding:16px}
-button,.btn{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;padding:10px 14px;cursor:pointer;min-height:44px}
-button.primary,.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
-button.link{border:0;background:none;color:var(--accent);padding:6px;min-height:0}
-button.danger{color:var(--bad)}
-button:disabled{opacity:.5;cursor:default}
-input,select,textarea{font:inherit;width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink)}
-label{display:block;font-size:.85rem;color:var(--muted);margin:12px 0 4px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--background);color:var(--foreground);font:400 16px/1.5 var(--font-body)}
+
+/* Шапка: прозорий білий, як у маркетплейсі */
+.top{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;background:rgba(255,255,255,.9);backdrop-filter:blur(8px)}
+.brand{display:flex;align-items:center;gap:8px;text-decoration:none;color:var(--accent-dk);font-weight:600;white-space:nowrap}
+.brand .mark{display:grid;place-items:center;width:28px;height:28px;border-radius:8px;background:var(--accent);color:#fff;font:700 .7rem var(--font-display);letter-spacing:-.02em}
+.top h1{flex:1;min-width:0;margin:0;font:600 .85rem/1.2 var(--font-display);letter-spacing:-.01em;color:var(--foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.top-actions{display:flex;gap:4px;align-items:center}
+.pill{font-size:.75rem;font-weight:500;color:var(--accent-dk);background:var(--accent-soft);border-radius:999px;padding:2px 10px}
+main{max-width:760px;margin:0 auto;padding:20px 16px 48px}
+
+/* Кнопки: btn-ghost за замовчуванням, .primary — «крафт», радіус 12 */
+button,.btn{font:500 14px/1.2 var(--font-body);border:1px solid var(--line);background:var(--surface);color:var(--foreground);border-radius:12px;padding:10px 16px;cursor:pointer;min-height:44px;transition:background .15s,border-color .15s}
+button:hover,.btn:hover{background:var(--neutral-bg)}
+button.primary,.btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+button.primary:hover,.btn.primary:hover{background:var(--accent-dk);border-color:var(--accent-dk)}
+button.link{border:0;background:none;color:var(--muted);padding:8px 10px;min-height:0;border-radius:12px}
+button.link:hover{background:var(--neutral-bg);color:var(--foreground)}
+button.danger{color:var(--danger)}
+button.danger:hover{background:var(--danger-soft)}
+button:disabled{opacity:.45;cursor:default}
+button:focus-visible,.btn:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* Поля */
+input,select,textarea{font:400 14px/1.4 var(--font-body);width:100%;padding:10px 12px;border:1px solid var(--field-line);border-radius:12px;background:var(--surface);color:var(--foreground)}
+input::placeholder,textarea::placeholder{color:#9a8b7c}
+label{display:block;font-size:.8rem;font-weight:500;color:var(--muted);margin:14px 0 4px}
+textarea{field-sizing:content;min-height:3.4em;resize:vertical}
+
+/* Картки: 16 px, біла поверхня, тонка межа */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:12px}
+.card.hero{border-radius:24px;padding:24px}
+h2,h3{font-family:var(--font-display);font-weight:600;letter-spacing:-.02em;line-height:1.25;color:var(--foreground)}
+h2{font-size:1.25rem;margin:0 0 8px}
+h3{font-size:1rem;margin:24px 0 8px}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .grow{flex:1}
-.muted{color:var(--muted);font-size:.9rem}
-.badge{display:inline-block;font-size:.75rem;padding:2px 8px;border-radius:99px;border:1px solid var(--line);color:var(--muted)}
-.badge.processing,.badge.queued{color:var(--warn);border-color:var(--warn)}
-.badge.described{color:var(--ok);border-color:var(--ok)}
-.badge.failed{color:var(--bad);border-color:var(--bad)}
+.muted{color:var(--muted);font-size:.875rem}
+strong{font-weight:600}
+
+/* Значки статусів */
+.badge{display:inline-block;font-size:.72rem;font-weight:500;padding:2px 9px;border-radius:999px;border:1px solid var(--line);color:var(--muted);background:var(--surface)}
+.badge.processing,.badge.queued{color:var(--warning);background:var(--warning-soft);border-color:transparent}
+.badge.described{color:var(--success);background:var(--success-soft);border-color:transparent}
+.badge.failed{color:var(--danger);background:var(--danger-soft);border-color:transparent}
+.badge.ai{color:var(--accent-dk);background:var(--accent-soft);border-color:transparent}
+
 .frames{display:grid;gap:12px}
-.frame{display:grid;grid-template-columns:96px 1fr;gap:12px}
-.frame img{width:96px;height:96px;object-fit:cover;border-radius:10px;background:var(--line)}
+.frame{display:grid;grid-template-columns:96px 1fr;gap:14px}
+.frame img{width:96px;height:96px;object-fit:cover;border-radius:12px;background:var(--neutral-bg)}
 .frame.dragover{outline:2px dashed var(--accent)}
 .tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
-.tags span{font-size:.75rem;background:var(--bg);border:1px solid var(--line);border-radius:99px;padding:1px 8px}
-.counter{font-size:.78rem;color:var(--muted);text-align:right}
-.counter.over{color:var(--bad);font-weight:600}
-.err{color:var(--bad);font-size:.9rem}
-.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:12px;z-index:10;max-width:90vw}
-.net{font-size:.78rem;color:var(--warn);border:1px solid var(--warn);border-radius:99px;padding:2px 8px}
-.shoot{position:sticky;bottom:12px;display:flex;gap:8px;justify-content:center;margin:12px 0}
-.shoot .btn{flex:1;text-align:center;max-width:320px}
-.small{min-height:36px;padding:6px 10px;font-size:.9rem}
+.tags span{font-size:.72rem;background:var(--neutral-bg);border-radius:999px;padding:1px 9px;color:var(--muted)}
+.counter{font-size:.75rem;color:var(--muted);text-align:right}
+.counter.over{color:var(--danger);font-weight:600}
+.err{color:var(--danger);font-size:.875rem}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;background:var(--foreground);color:#fff;padding:10px 18px;border-radius:12px;z-index:10;max-width:90vw;font-size:.875rem;box-shadow:0 8px 24px rgba(43,26,16,.25)}
+.net{font-size:.75rem;color:var(--warning);background:var(--warning-soft);border-radius:999px;padding:2px 10px;white-space:nowrap}
+.shoot{position:sticky;bottom:12px;display:flex;gap:8px;justify-content:center;margin:12px 0;z-index:4}
+.shoot .btn{flex:1;text-align:center;max-width:320px;display:grid;place-items:center;box-shadow:0 6px 18px rgba(43,26,16,.15)}
+.small{min-height:36px;padding:6px 12px;font-size:.85rem}
 input[type=file]{display:none}
-.net{white-space:nowrap}
-textarea{field-sizing:content;min-height:3.4em;resize:vertical}
-.badge.ai{color:var(--warn);border-color:var(--warn)}
+
+/* Структура, уроки, чипи */
 .lesson{border-top:1px solid var(--line);margin-top:12px;padding-top:4px}
 .thumbs{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 0}
-.thumbs img{width:48px;height:48px;object-fit:cover;border-radius:8px;background:var(--line)}
-details>summary{cursor:pointer;font-weight:600;margin:12px 0}
-h3{margin:20px 0 8px}
+.thumbs img{width:48px;height:48px;object-fit:cover;border-radius:8px;background:var(--neutral-bg)}
 .thumbs.big{gap:10px}
 .frame-chip{display:flex;flex-direction:column;gap:4px;width:96px}
-.frame-chip img{width:96px;height:96px;object-fit:cover;border-radius:10px;background:var(--line)}
-select.move{padding:4px 6px;font-size:.8rem;min-height:32px}
+.frame-chip img{width:96px;height:96px;object-fit:cover;border-radius:12px;background:var(--neutral-bg)}
+select.move{padding:4px 6px;font-size:.8rem;min-height:32px;border-radius:8px}
 .chips{gap:6px;margin-top:6px}
-.chip.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.chip.on{background:var(--accent-soft);color:var(--accent-dk);border-color:transparent}
+details>summary{cursor:pointer;font:600 .95rem var(--font-display);letter-spacing:-.02em;margin:16px 0 12px}
+#blockers{background:var(--danger-soft);border-radius:12px;padding:10px 14px;margin-top:12px}
+#blockers ul{margin:6px 0 0;padding-left:18px}
+@media (min-width:640px){main{padding-top:28px}.top{padding:12px 24px}}
+@media (max-width:440px){.brand-text{display:none}}

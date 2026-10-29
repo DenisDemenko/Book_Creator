@@ -146,6 +146,16 @@ def test_photo_image_proxy_and_notes_and_retry_delete(paired):
     assert paired.delete("/api/drafts/pd_x/photos/ph_01a1").status_code == 200
 
 
+def test_photo_image_is_revalidated_not_blindly_cached(paired):
+    """id можуть повторитись після перезапуску моку/Studio → кеш на годину показував би чужу картинку."""
+    r = paired.get("/api/drafts/pd_x/photos/ph_01a1/image")
+    assert "max-age" not in r.headers["cache-control"] and "no-cache" in r.headers["cache-control"]
+    etag = r.headers["etag"]
+    again = paired.get("/api/drafts/pd_x/photos/ph_01a1/image", headers={"If-None-Match": etag})
+    assert again.status_code == 304 and again.content == b""
+    assert paired.get("/api/drafts/pd_x/photos/ph_01a1/image", headers={"If-None-Match": '"other"'}).status_code == 200
+
+
 def test_invalid_token_from_studio_closes_session(mock_url):
     app = create_app(Settings(studio_url=mock_url + PREFIX), store=SessionStore(":memory:"),
                      studio_transport=httpx.MockTransport(lambda r: httpx.Response(
