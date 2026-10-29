@@ -19,6 +19,8 @@
  * власник у картці.
  */
 
+import { blankSafety, normalizeSafety, safetyIssues, type KitSafety } from './kitSafety';
+
 /** Підказки одиниць виміру; поле вільне, це лише datalist. */
 export const KIT_UNITS = ['шт', 'компл.', 'м', 'см', 'г', 'кг', 'мл', 'л', 'арк.'] as const;
 
@@ -61,6 +63,8 @@ export interface KitSteamTeam {
 export interface KitSpec {
   /** Чи є виріб набором. Вимкнений набір зберігає дані, але ніде не враховується. */
   enabled: boolean;
+  /** Вік і безпека (K2): без них набір не публікується. Старі набори без поля читаються як порожні. */
+  safety: KitSafety;
   parts: KitLine[];
   packaging: KitLine[];
   /** Робота майстерні на ОДИН набір, хвилин. */
@@ -99,6 +103,7 @@ export function blankKitLine(): KitLine {
 export function blankKit(): KitSpec {
   return {
     enabled: false,
+    safety: blankSafety(),
     parts: [],
     packaging: [],
     laborMinutes: 0,
@@ -160,6 +165,7 @@ export function normalizeKit(value: unknown): KitSpec | undefined {
   const teamId = team ? clampText(team.id, 80) : '';
   return {
     enabled: v.enabled === true,
+    safety: normalizeSafety(v.safety),
     parts: normalizeLines(v.parts, MAX_KIT_PARTS, seen),
     packaging: normalizeLines(v.packaging, MAX_KIT_PACKAGING, seen),
     laborMinutes: clampNum(v.laborMinutes, 0, KIT_LABOR_MINUTES_MAX, 0),
@@ -232,7 +238,7 @@ export function kitPricePatch(kit: KitSpec | null | undefined): { priceUah: numb
 // ---------------------------------------------------------------------------
 
 export interface KitIssues {
-  /** Без цього специфікація не вважається готовою (K2 зробить це умовою публікації). */
+  /** Без цього специфікація не вважається готовою і набір не публікується (K2: сюди ж іде вік і безпека). */
   errors: string[];
   /** Не блокує, але вказує на прогалини, які спотворять собівартість. */
   warnings: string[];
@@ -265,5 +271,8 @@ export function kitIssues(kit: KitSpec | null | undefined): KitIssues {
   if (!(kit.laborMinutes > 0)) issues.warnings.push('Не вказано час роботи майстерні — собівартість без роботи.');
   else if (!(kit.laborRateUahPerHour > 0)) issues.warnings.push('Вказано час роботи, але не ставку за годину — робота коштує 0.');
   if (!kit.steamTeam) issues.warnings.push('Не обрано STEAM-команду, що створила конструктор.');
+  const safety = safetyIssues(kit);
+  issues.errors.push(...safety.errors);
+  issues.warnings.push(...safety.warnings);
   return issues;
 }

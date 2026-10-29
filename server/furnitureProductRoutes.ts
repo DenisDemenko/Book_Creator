@@ -43,6 +43,7 @@ import {
 } from '../src/components/adminOs/furnitureProduct';
 
 import { kitCost, kitIssues, normalizeKit } from '../src/components/adminOs/kitSpec';
+import { kitSafetyLines, kitSafetyPublic } from '../src/components/adminOs/kitSafety';
 
 const DRAFTS_KEY = 'furniture_product_drafts';
 
@@ -179,11 +180,13 @@ function serverPublishIssues(p: FurnitureProduct): string[] {
   // перевірки, що й у редакторі. Дубль SKU, який пройшов би тут, означав
   // би дві позиції замовлення з однаковим артикулом і різними цінами.
   issues.push(...variantIssues(p));
+  // Набір (K1/K2): той самий бар'єр, що й у редакторі, — сервер не довіряє клієнтові.
+  if (p.kit?.enabled) issues.push(...kitIssues(normalizeKit(p.kit) ?? p.kit).errors.map((m) => `Набір: ${m}`));
   return issues;
 }
 
 /** Картка виробу → контракт мосту. Обкладинку (фото) передає частина Г. */
-function toBridgeAttributes(p: FurnitureProduct): PublishProductAttributes {
+export function toBridgeAttributes(p: FurnitureProduct): PublishProductAttributes {
   return {
     category: p.category,
     subcategory: p.subcategory,
@@ -209,6 +212,8 @@ function toBridgeAttributes(p: FurnitureProduct): PublishProductAttributes {
     phoneFit: p.phoneFit,
     // Вітрина пише «від N» лише тоді, коли ціни видимих варіантів різні.
     variantPriceRange: hasVariantPriceRange(p) || undefined,
+    // Вік, попередження й матеріали набору (K2). Документи відповідності — приватні, не їдуть.
+    safety: kitSafetyPublic(p.kit),
   };
 }
 
@@ -374,7 +379,14 @@ export function registerFurnitureProductRoutes(app: Express): void {
     const product = (await readDrafts()).find((d) => d.id === req.params.id);
     if (!product) return res.status(404).json({ error: 'Чорнетку виробу не знайдено.' });
     if (!product.kit?.enabled) return res.status(404).json({ error: 'Цей виріб не є набором.' });
-    res.json({ kit: product.kit, cost: kitCost(product.kit), issues: kitIssues(product.kit) });
+    res.json({
+      kit: product.kit,
+      cost: kitCost(product.kit),
+      issues: kitIssues(product.kit),
+      // Для вітрини й для розділу «Безпека» інструкції (K3/K5): одне джерело з публікацією.
+      safety: kitSafetyPublic(product.kit) ?? null,
+      safetyLines: kitSafetyLines(product.kit),
+    });
   });
 
   app.delete('/api/admin/furniture-products/:id', requireAdmin, async (req, res) => {

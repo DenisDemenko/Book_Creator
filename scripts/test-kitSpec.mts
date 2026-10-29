@@ -33,6 +33,8 @@ const line = (over: Partial<import('../src/components/adminOs/kitSpec').KitLine>
 const sample = () => ({
   ...kit.blankKit(),
   enabled: true,
+  // Вік і безпека (K2) заповнені, щоб K1-перевірки лишились про специфікацію, а не про безпеку.
+  safety: { ageMinYears: 8, smallParts: false, warnings: ['Збирати разом із дорослим.'], noWarningsConfirmed: false, materialsNote: '', documents: [{ id: 'd1', title: 'Декларація відповідності', number: '1', issuedBy: 'Лабораторія', validUntil: '', note: '' }] },
   parts: [line({ id: 'p1', name: 'Бокова панель', qty: 2, unitPriceUah: 12.5, material: 'береза 6 мм' }), line({ id: 'p2', name: 'Шканта', qty: 10, unit: 'шт', unitPriceUah: 0.3 })],
   packaging: [line({ id: 'k1', name: 'Коробка', qty: 1, unitPriceUah: 18 })],
   laborMinutes: 30,
@@ -100,7 +102,7 @@ const ok = kit.kitIssues({ ...sample(), steamTeam: { id: 't', name: 'T' } });
 t('повна специфікація без помилок і попереджень', ok.errors.length === 0 && ok.warnings.length === 1 && /матеріал/.test(ok.warnings[0]), JSON.stringify(ok));
 t('вимкнений набір не перевіряється', kit.kitIssues({ ...kit.blankKit() }).errors.length === 0);
 t('без деталей — помилка', kit.kitIssues({ ...kit.blankKit(), enabled: true }).errors.some((e) => /жодної деталі/.test(e)));
-const bad = kit.kitIssues({ ...sample(), parts: [line({ id: 'a', name: '', qty: 0 }), line({ id: 'b', name: 'Шканта' }), line({ id: 'c', name: 'шканта' })] });
+const bad = kit.kitIssues({ ...sample(), parts: [line({ id: 'a', name: '', qty: 0 }), line({ id: 'b', name: 'Шканта', material: 'бук' }), line({ id: 'c', name: 'шканта' })] });
 t('деталь без назви й з нульовою кількістю — помилки', bad.errors.length === 2);
 t('нульова ціна, повтор назви — попередження', bad.warnings.some((w) => /ціну не вказано/.test(w)) && bad.warnings.some((w) => /повторюється 2 рази/.test(w)));
 t('час без ставки й відсутня команда — попередження', (() => {

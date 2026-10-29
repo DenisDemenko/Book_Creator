@@ -10,7 +10,7 @@
  * (коли дійде до мосту) читали ОДНУ форму, а не три копії з розбіжностями.
  */
 
-import type { KitSpec } from './kitSpec';
+import { kitIssues, type KitSpec } from './kitSpec';
 
 export type FurnitureProductStatus = 'draft' | 'published' | 'archived';
 
@@ -615,5 +615,7 @@ export function furniturePublishIssues(p: FurnitureProduct): string[] {
   // Варіанти (#225): кожен — окремий артикул, і відмова тут означає, що
   // вітрина не знає, що саме продає.
   issues.push(...variantIssues(p));
+  // Набір (K1/K2): без деталей, віку й попереджень він не публікується.
+  if (p.kit?.enabled) issues.push(...kitIssues(p.kit).errors.map((m) => `Набір: ${m}`));
   return issues;
 }

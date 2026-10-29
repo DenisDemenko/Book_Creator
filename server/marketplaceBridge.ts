@@ -1959,6 +1959,19 @@ export interface PublishProductAttributes {
    * варіантів і які з них видимі.
    */
   variantPriceRange?: boolean;
+  /**
+   * Вік і безпека набору (K2): вікова група, попередження для покупця, матеріали.
+   * Є лише в наборів; документи відповідності сюди не потрапляють. Приймач на боці
+   * вітрини мусить зберігати поле в `attributes` лістингу (перевірити при G2).
+   */
+  safety?: {
+    ageMinYears: number;
+    ageLabel: string;
+    smallParts: boolean;
+    warnings: string[];
+    materials: string[];
+    materialsNote: string;
+  };
 }
 
 /**

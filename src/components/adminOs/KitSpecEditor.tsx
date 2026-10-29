@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { AlertTriangle, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { KitSafetyEditor } from './KitSafetyEditor';
 import {
   KIT_MATERIAL_MAX,
   KIT_NAME_MAX,
@@ -281,6 +282,8 @@ export const KitSpecEditor: React.FC<Props> = ({ kit: kitProp, onChange, priceUa
               </select>
             )}
           </div>
+
+          <KitSafetyEditor kit={kit} onChange={(safety) => set({ safety })} t={t} />
 
           {(issues.errors.length > 0 || issues.warnings.length > 0) && (
             <div className="space-y-1" data-kit-issues>
