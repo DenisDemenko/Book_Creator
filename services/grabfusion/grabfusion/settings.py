@@ -23,7 +23,8 @@ class Settings:
             studio_url=e.get("GRABFUSION_STUDIO_URL", d.studio_url).rstrip("/"),
             market_url=e.get("GRABFUSION_MARKET_URL", d.market_url).rstrip("/"),
             host=e.get("GRABFUSION_HOST", d.host),
-            port=int(e.get("GRABFUSION_PORT", d.port)),
+            # Railway/Render/Heroku віддають порт у PORT; явний GRABFUSION_PORT має пріоритет.
+            port=int(e.get("GRABFUSION_PORT") or e.get("PORT") or d.port),
             session_db=e.get("GRABFUSION_SESSION_DB", d.session_db),
             cookie_secure=e.get("GRABFUSION_COOKIE_SECURE", "").lower() in {"1", "true", "yes"},
             base_path=normalize_base_path(e.get("GRABFUSION_BASE_PATH", d.base_path)),

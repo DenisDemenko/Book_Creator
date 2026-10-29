@@ -22,6 +22,19 @@
 Запуск: `pip install .` → `grabfusion`.
 Перевірка життя: `GET /healthz`.
 
+## 1а. Railway (той самий проєкт, що й Studio)
+
+1. У проєкті `production` → **New** → **GitHub Repo** → репозиторій Studio (Book_Creator) → назвіть сервіс `grabfusion`.
+2. Settings → **Root Directory**: `services/grabfusion` (збірка піде за `Dockerfile`).
+3. **Variables:** `GRABFUSION_BASE_PATH=/grabfisionstidio`, `GRABFUSION_COOKIE_SECURE=1`,
+   `GRABFUSION_MARKET_URL=https://fusionlab.in.ua`, `GRABFUSION_SESSION_DB=/data/sessions.sqlite3`,
+   `GRABFUSION_STUDIO_URL=https://<публічний-домен-Studio>/api/external/v1`
+   (порт Railway передає сам через `PORT`, хост у Dockerfile вже `0.0.0.0`).
+4. **Volume**: додайте том до сервісу, Mount path `/data` — інакше після кожного деплою сесії викладачів зникнуть.
+5. Settings → Networking → **Generate Domain**. Цю адресу (`https://….up.railway.app`) вставте у Vercel як `GRABFUSION_ORIGIN`
+   (проєкт маркетплейсу) і зробіть redeploy.
+6. Перевірка: `https://<домен-railway>/healthz` → ok; потім `https://fusionlab.in.ua/grabfisionstidio`.
+
 ## 2. Проксі з маркетплейсу
 
 Правило: усе, що починається з `/grabfisionstidio`, іде на сервіс GrabFusion **без зміни cookie й
