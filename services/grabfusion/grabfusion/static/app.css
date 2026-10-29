@@ -91,3 +91,8 @@ details>summary{cursor:pointer;font:600 .95rem var(--font-display);letter-spacin
 #blockers ul{margin:6px 0 0;padding-left:18px}
 @media (min-width:640px){main{padding-top:28px}.top{padding:12px 24px}}
 @media (max-width:440px){.brand-text{display:none}}
+
+.hint { display: flex; align-items: center; gap: 8px; margin: 8px 12px 0; padding: 10px 12px; border-radius: 12px; background: var(--accent-craft-soft); border: 1px solid var(--line); font-size: 13px; }
+.hint[hidden] { display: none; }
+.hint span { flex: 1; }
+@media (display-mode: standalone) { .top { padding-top: max(0px, env(safe-area-inset-top)); } }

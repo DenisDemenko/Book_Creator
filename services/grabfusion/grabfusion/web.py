@@ -103,13 +103,13 @@ def build_router(deps: Deps) -> APIRouter:
         deps.store.delete(old)
         s = deps.store.create(res["token"], str(user.get("name") or user.get("email") or ""))
         response.set_cookie(COOKIE, s.sid, httponly=True, samesite="strict", secure=deps.settings.cookie_secure,
-                            max_age=60 * 60 * 24 * 90, path="/")
+                            max_age=60 * 60 * 24 * 90, path=deps.settings.base_path or "/")
         return {"paired": True, "user": {"name": s.user_name}}
 
     @router.post("/logout")
     def logout(request: Request, response: Response) -> dict[str, bool]:
         deps.store.delete(request.cookies.get(COOKIE))
-        response.delete_cookie(COOKIE, path="/")
+        response.delete_cookie(COOKIE, path=deps.settings.base_path or "/")
         return {"paired": False}
 
     @router.get("/limits")

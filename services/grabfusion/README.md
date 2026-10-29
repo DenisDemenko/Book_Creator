@@ -95,3 +95,7 @@ pytest
 `grabfusion-mock --stateful` (або `GRABFUSION_MOCK_STATEFUL=1`): чернетки живуть у памʼяті й проходять
 collecting → structured → written → submitted; прохід ШІ «триває» кілька опитувань; `submit` перевіряє блокери.
 Відповіді валідуються схемою контракту в `tests/test_mock_sim.py`.
+
+## Розгортання й встановлення на телефон (PWA)
+
+Сторінка — PWA: встановлюється на Android і iPhone, оболонка відкривається без звʼязку. Адреса `fusionlab.in.ua/grabfisionstidio`, змінні оточення, проксі й перевірка після розгортання — у [DEPLOY.md](DEPLOY.md).

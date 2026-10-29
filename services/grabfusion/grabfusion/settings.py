@@ -12,6 +12,8 @@ class Settings:
     port: int = 8000
     session_db: str = "grabfusion.sqlite3"
     cookie_secure: bool = False
+    # Публічний шлях, під яким сторінка живе на домені (напр. "/grabfisionstidio"); "" — корінь.
+    base_path: str = ""
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -24,4 +26,11 @@ class Settings:
             port=int(e.get("GRABFUSION_PORT", d.port)),
             session_db=e.get("GRABFUSION_SESSION_DB", d.session_db),
             cookie_secure=e.get("GRABFUSION_COOKIE_SECURE", "").lower() in {"1", "true", "yes"},
+            base_path=normalize_base_path(e.get("GRABFUSION_BASE_PATH", d.base_path)),
         )
+
+
+def normalize_base_path(value: str | None) -> str:
+    """"/x/", "x", " /x " → "/x"; "", "/" → "" (корінь)."""
+    parts = [p for p in (value or "").strip().split("/") if p]
+    return "/" + "/".join(parts) if parts else ""

@@ -38,7 +38,7 @@ function toast(msg) {
 async function api(method, path, body, isForm) {
   let resp;
   try {
-    resp = await fetch('/api' + path, {
+    resp = await fetch('api' + path, {
       method, credentials: 'same-origin',
       headers: body && !isForm ? { 'Content-Type': 'application/json' } : undefined,
       body: body ? (isForm ? body : JSON.stringify(body)) : undefined,
@@ -257,7 +257,7 @@ function movePhoto(photoId, delta, toIndex) { return serial(async () => {
 
 function photoCard(p, i, total) {
   const card = h('div', { class: 'card frame', draggable: 'true', 'data-photo': p.photoId },
-    h('img', { src: `/api/drafts/${state.draft.draftId}/photos/${p.photoId}/image`, alt: 'Кадр ' + p.order, loading: 'lazy' }),
+    h('img', { src: `api/drafts/${state.draft.draftId}/photos/${p.photoId}/image`, alt: 'Кадр ' + p.order, loading: 'lazy' }),
     h('div', null,
       h('div', { class: 'row' }, h('strong', { text: '#' + p.order }), h('span', { class: 'badge ' + p.status, text: { processing: 'описується…', described: 'описано', failed: 'не вдалося' }[p.status] || p.status })),
       p.description && h('p', { text: p.description }),
@@ -535,7 +535,7 @@ function stepFrames(d, les) {
     const sel = h('select', { class: 'move', 'data-move': id, title: 'Перенести кадр в інший крок' }, h('option', { value: '', text: `Кадр ${p.order} →` }),
       steps.filter((x) => x.lessonId !== les.lessonId).map((x) => h('option', { value: x.lessonId, text: 'в «' + (x.title || x.lessonId).slice(0, 30) + '»' })));
     sel.addEventListener('change', () => { if (sel.value) moveFrame(id, sel.value); });
-    wrap.append(h('div', { class: 'frame-chip' }, h('img', { src: `/api/drafts/${d.draftId}/photos/${id}/image`, alt: 'Кадр ' + p.order, loading: 'lazy' }), sel));
+    wrap.append(h('div', { class: 'frame-chip' }, h('img', { src: `api/drafts/${d.draftId}/photos/${id}/image`, alt: 'Кадр ' + p.order, loading: 'lazy' }), sel));
   });
   if (!les.photoIds.length) wrap.append(h('p', { class: 'err', 'data-nofram': les.lessonId, text: 'У кроку немає кадру — перенесіть сюди кадр з іншого кроку.' }));
   return wrap;
@@ -627,7 +627,7 @@ function pageCard(p, i, total, readOnly) {
   const empty = p.status === 'described' && !(p.text || '').trim();
   const hintNote = (state.draft.notes || []).find((n) => n.photoIds.includes(p.photoId));
   return h('div', { class: 'card frame', 'data-page': p.photoId },
-    h('img', { src: `/api/drafts/${state.draft.draftId}/photos/${p.photoId}/image`, alt: 'Сторінка ' + p.order, loading: 'lazy' }),
+    h('img', { src: `api/drafts/${state.draft.draftId}/photos/${p.photoId}/image`, alt: 'Сторінка ' + p.order, loading: 'lazy' }),
     h('div', null,
       h('div', { class: 'row' }, h('strong', { text: 'Сторінка ' + p.order }),
         h('span', { class: 'badge ' + p.status, text: { processing: 'розпізнається…', described: 'розпізнано', failed: 'не вдалося' }[p.status] || p.status }),
@@ -677,7 +677,7 @@ function viewStructure(d) {
       m.summary && h('p', { class: 'muted', text: m.summary }));
     m.lessons.forEach((les) => {
       card.append(h('div', { class: 'lesson', 'data-lesson': les.lessonId },
-        d.kind === 'instruction' ? stepFrames(d, les) : h('div', { class: 'thumbs' }, les.photoIds.map((id) => byId.has(id) && h('img', { src: `/api/drafts/${d.draftId}/photos/${id}/image`, alt: '', loading: 'lazy' }))),
+        d.kind === 'instruction' ? stepFrames(d, les) : h('div', { class: 'thumbs' }, les.photoIds.map((id) => byId.has(id) && h('img', { src: `api/drafts/${d.draftId}/photos/${id}/image`, alt: '', loading: 'lazy' }))),
         lessonField(d, les, 'title', T.title, false),
         lessonField(d, les, 'goal', T.goal, true),
         lessonField(d, les, 'body', T.body, true)));
@@ -757,3 +757,35 @@ async function start() {
       h('button', { class: 'primary', text: 'Спробувати знову', onclick: () => location.reload() })));
   }
 })();
+
+/* ---------- PWA: service worker, встановлення, повернення в застосунок ---------- */
+if ('serviceWorker' in navigator) {
+  // SW працює лише в безпечному контексті (https або localhost); без нього сторінка просто не офлайн.
+  navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {});
+}
+let installPrompt = null;
+const installBtn = document.getElementById('btn-install');
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; if (!isStandalone()) installBtn.hidden = false; });
+addEventListener('appinstalled', () => { installPrompt = null; installBtn.hidden = true; });
+installBtn.addEventListener('click', async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  try { await installPrompt.userChoice; } catch (e) { /* не критично */ }
+  installPrompt = null; installBtn.hidden = true;
+});
+(function iosHint() {
+  // Safari на iPhone/iPad не показує запит на встановлення — підказуємо шлях вручну (раз).
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  let seen = false;
+  try { seen = localStorage.getItem('gf_ios_hint') === '1'; } catch (e) { /* без сховища */ }
+  const box = document.getElementById('install-hint');
+  if (!ios || isStandalone() || seen) return;
+  box.hidden = false;
+  document.getElementById('install-hint-close').addEventListener('click', () => {
+    box.hidden = true;
+    try { localStorage.setItem('gf_ios_hint', '1'); } catch (e) { /* не критично */ }
+  });
+})();
+// Повернулись у застосунок із фону — надсилаємо те, що назбиралось без звʼязку.
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && navigator.onLine && state.queue && state.queue.length) flushQueue(); });

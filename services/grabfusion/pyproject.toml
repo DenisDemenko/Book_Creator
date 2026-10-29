@@ -23,7 +23,7 @@ grabfusion-mock = "grabfusion.mock_server:main"
 include = ["grabfusion*"]
 
 [tool.setuptools.package-data]
-grabfusion = ["contract_data/*", "contract_data/fixtures/*", "static/*"]
+grabfusion = ["contract_data/*", "contract_data/fixtures/*", "static/*", "static/icons/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
