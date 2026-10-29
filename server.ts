@@ -1,3 +1,4 @@
+import { registerGeoHomeRoutes } from './server/geohome/routes';
 import { registerFundingRoutes } from './server/fundingBridge';
 import { registerSlabTableRoutes } from './server/slabTableBridge';
 import { subscribeGroupUpdates } from "./server/core/labyrinth/groupRealtime";
@@ -568,6 +569,7 @@ async function startServer() {
   registerAdminRoutes(app);
   registerUsageRoutes(app);
   registerSubscriptionRoutes(app);
+  registerGeoHomeRoutes(app);
   // Т6.2: файл книги — учасникам із доступом до її медіатеки.
   registerMediaRoutes(app, {
     canViewBookAsset: async (req, record) => {
