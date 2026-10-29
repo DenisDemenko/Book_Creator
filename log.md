@@ -122,7 +122,7 @@ remote перевірити можна, запушити — ні**.
 # Що не запушено (для наступної сесії)
 
 ### 29.10.2026 · GeoHome (запис #487)
-Власник прямо дозволив commit/push 29.10.2026. Код: a4188b5 у feat/geohome-cloud-pro-ultra. Для пуша: `git push -u origin feat/geohome-cloud-pro-ultra`; далі Draft PR і CI; Studio розгорнути раніше Marketplace; перевірити Pro/Ultra cloud save/restore та KumCAD, не торкатися наявних оплат/даних.
+Код a4188b5 запушено; PR #31. Власник дозволив production 29.10.2026. Деталі: запис #487.
 
 
 26.10 #486: власні шаблони верстки: копія шаблону для DesignCraft → правка стилів абзаців → «Завантажити користувацький шаблон»; фон блоків (палітра + свій колір) для всіх шаблонів; власний шаблон і фони тепер доходять до справжньої верстки (раніше власні теми діяли лише в перегляді) — **запушено в production/master (злиття 58aac18, `ls-remote` збігся); CI/Railway не підтверджені**; не перевірено на справжньому `.designcraft` (див. запис #486). Разом із ним у робочій копії не запушено й решту змін #481 (шрифти DejaVu, API-ключ Claude Code, підключення в один клік, прямий запуск скрипта).
@@ -726,7 +726,6 @@ YouTube #420: `1a13ff6` запушено; реальна розшифровка 
 Історичні дописки про пуш В3–В5: [деплой](log/deploy-notes.md).
 
 
-## Журнал сесій · 29.10.2026 #01 · Fusion GeoHome (Codex)
-- Запис #487: хмарні версії Pro/Ultra, KumCAD STEP/JSON, інтеграція Marketplace та 3D viewport.
-- Перевірки: HTTP/SQLite, Chromium end-to-end, OpenCASCADE STEP, TypeScript/build.
-- Не зроблено і чому: Studio commit/push/deploy чекають дозволу за AGENTS.md; live SSO, production, native KumCAD GUI не перевірені. Книжковий міст — поза поточним завданням.
+## Журнал сесій · 29.10.2026 #01 · GeoHome
+- Запис #487: Pro/Ultra cloud, KumCAD, 3D. 38 API checks та browser flow пройшли.
+- Не зроблено: live Firebase/native GUI; production у процесі після дозволу власника.
