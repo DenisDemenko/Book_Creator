@@ -13,6 +13,10 @@
 
 import type { Express } from 'express';
 import { requireAdmin } from './auth';
+import { DATA_DIR } from './db';
+import { createKitFileStore } from './kitFiles';
+import { registerKitFileRoutes, serialKitFiles } from './kitFileRoutes';
+import path from 'node:path';
 import {
   MarketplaceBridgeError,
   attachProductMediaToMarketplace,
@@ -348,7 +352,11 @@ export async function uploadProductMedia(
   return { uploaded, failed };
 }
 
+const kitFileStore = createKitFileStore(process.env.KIT_FILES_DIR || path.join(DATA_DIR, 'kit-files'));
+
 export function registerFurnitureProductRoutes(app: Express): void {
+  registerKitFileRoutes(app, { auth: requireAdmin, readDrafts, writeDrafts, store: kitFileStore });
+
   app.get('/api/admin/furniture-products', requireAdmin, async (_req, res) => {
     const drafts = await readDrafts();
     res.json({ products: drafts });
@@ -359,18 +367,23 @@ export function registerFurnitureProductRoutes(app: Express): void {
     if (!product || typeof product !== 'object' || !product.id) {
       return res.status(400).json({ error: 'Некоректна картка виробу.' });
     }
-    const drafts = await readDrafts();
-    const idx = drafts.findIndex((d) => d.id === product.id);
-    const clean: FurnitureProduct = { ...product, updatedAt: new Date().toISOString() };
-    // Специфікацію набору (K1) приймаємо лише в нормалізованому вигляді: межі, унікальні id рядків.
-    if (product.kit !== undefined) {
-      const kit = normalizeKit(product.kit);
-      if (kit) clean.kit = kit;
-      else delete clean.kit;
-    }
-    if (idx >= 0) drafts[idx] = clean;
-    else drafts.unshift(clean);
-    await writeDrafts(drafts);
+    const clean = await serialKitFiles(product.id, async () => {
+      const drafts = await readDrafts();
+      const idx = drafts.findIndex((d) => d.id === product.id);
+      const clean: FurnitureProduct = { ...product, updatedAt: new Date().toISOString() };
+      // Специфікацію набору (K1) приймаємо лише в нормалізованому вигляді: межі, унікальні id рядків.
+      if (product.kit !== undefined) {
+        // Список файлів (K4) — лише зі сховища: тіло запиту не може додати «файл», якого немає на диску.
+        const storedFiles = idx >= 0 ? drafts[idx].kit?.files ?? [] : [];
+        const kit = normalizeKit(product.kit && typeof product.kit === 'object' ? { ...product.kit, files: storedFiles } : product.kit);
+        if (kit) clean.kit = kit;
+        else delete clean.kit;
+      }
+      if (idx >= 0) drafts[idx] = clean;
+      else drafts.unshift(clean);
+      await writeDrafts(drafts);
+      return clean;
+    });
     res.json({ product: clean });
   });
 
@@ -396,6 +409,8 @@ export function registerFurnitureProductRoutes(app: Express): void {
       return res.status(404).json({ error: 'Чорнетку виробу не знайдено.' });
     }
     await writeDrafts(next);
+    // Файли виготовлення (K4) прибираємо разом із карткою; збій диска не має ламати видалення.
+    await kitFileStore.removeProduct(req.params.id).catch((e) => console.error('[kit-files] cleanup', e));
     res.json({ ok: true });
   });
 

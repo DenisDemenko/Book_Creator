@@ -20,6 +20,7 @@
  */
 
 import { blankSafety, normalizeSafety, safetyIssues, type KitSafety } from './kitSafety';
+import { kitFileIssues, normalizeKitFiles, SAFE_ID, type KitFile } from './kitFiles';
 import type { Instruction } from '../../types';
 import { normalizeKitInstruction, syncInstructionWithKit } from '../../utils/kitInstruction';
 
@@ -54,6 +55,8 @@ export interface KitLine {
   /** Ціна за одиницю, грн. 0 — «ціну ще не вказано». */
   unitPriceUah: number;
   note: string;
+  /** K4: файл (`KitSpec.files[].id`), за яким цю деталь виготовляють. Порожньо — не вказано. */
+  fileId: string;
 }
 
 /** Схвалена STEAM-команда, що створила конструктор (вибір із команд маркетплейсу). */
@@ -83,6 +86,11 @@ export interface KitSpec {
    * оновлюються при кожному збереженні картки (`normalizeKit`); решта — ручна.
    */
   instruction?: Instruction;
+  /**
+   * Файли для виготовлення (K4): лише ОПИС (версії, розмір, хеш); байти — на сервері.
+   * Список веде сервер (`server/kitFileRoutes.ts`), а не тіло запиту збереження.
+   */
+  files: KitFile[];
 }
 
 export interface KitCost {
@@ -104,13 +112,14 @@ export function kitUid(): string {
 }
 
 export function blankKitLine(): KitLine {
-  return { id: kitUid(), name: '', qty: 1, unit: 'шт', material: '', supplier: '', unitPriceUah: 0, note: '' };
+  return { id: kitUid(), name: '', qty: 1, unit: 'шт', material: '', supplier: '', unitPriceUah: 0, note: '', fileId: '' };
 }
 
 export function blankKit(): KitSpec {
   return {
     enabled: false,
     safety: blankSafety(),
+    files: [],
     parts: [],
     packaging: [],
     laborMinutes: 0,
@@ -154,6 +163,7 @@ function normalizeLines(value: unknown, limit: number, seen: Set<string>): KitLi
       supplier: clampText(r.supplier, KIT_SUPPLIER_MAX),
       unitPriceUah: Math.round(clampNum(r.unitPriceUah, 0, KIT_PRICE_MAX, 0) * 100) / 100,
       note: clampText(r.note, KIT_NOTE_MAX),
+      fileId: typeof r.fileId === 'string' && SAFE_ID.test(r.fileId) ? r.fileId : '',
     });
   }
   return out;
@@ -173,6 +183,7 @@ export function normalizeKit(value: unknown): KitSpec | undefined {
   const kit: KitSpec = {
     enabled: v.enabled === true,
     safety: normalizeSafety(v.safety),
+    files: normalizeKitFiles(v.files),
     parts: normalizeLines(v.parts, MAX_KIT_PARTS, seen),
     packaging: normalizeLines(v.packaging, MAX_KIT_PACKAGING, seen),
     laborMinutes: clampNum(v.laborMinutes, 0, KIT_LABOR_MINUTES_MAX, 0),
@@ -181,6 +192,10 @@ export function normalizeKit(value: unknown): KitSpec | undefined {
     roundToUah: Math.max(1, Math.round(clampNum(v.roundToUah, 1, 1000, DEFAULT_KIT_ROUND_TO_UAH))),
     steamTeam: teamId ? { id: teamId, name: clampText(team!.name, KIT_NAME_MAX) } : null,
   };
+  // Привʼязка деталі до файлу діє лише на файл, що справді є в списку; пакування файлів не має.
+  const fileIds = new Set(kit.files.map((f) => f.id));
+  kit.parts = kit.parts.map((p) => (p.fileId && fileIds.has(p.fileId) ? p : { ...p, fileId: '' }));
+  kit.packaging = kit.packaging.map((p) => (p.fileId ? { ...p, fileId: '' } : p));
   // Інструкція набору: сміття відкидається, а комплектація й безпека доганяють специфікацію.
   const instruction = normalizeKitInstruction(v.instruction);
   if (instruction) kit.instruction = syncInstructionWithKit(instruction, kit).doc;
@@ -285,5 +300,6 @@ export function kitIssues(kit: KitSpec | null | undefined): KitIssues {
   const safety = safetyIssues(kit);
   issues.errors.push(...safety.errors);
   issues.warnings.push(...safety.warnings);
+  issues.warnings.push(...kitFileIssues(kit));
   return issues;
 }

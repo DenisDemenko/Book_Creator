@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { AlertTriangle, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { KitFilesPanel } from './KitFilesPanel';
 import { KitInstructionPanel } from './KitInstructionPanel';
 import { KitSafetyEditor } from './KitSafetyEditor';
 import {
@@ -51,6 +52,8 @@ interface Props {
   /** Назва й артикул виробу — для нової інструкції набору (K3). */
   productName?: string;
   productSku?: string;
+  /** Ідентифікатор виробу — для файлів виготовлення (K4). */
+  productId?: string;
   t: KitThemeTokens;
 }
 
@@ -61,7 +64,7 @@ interface TeamOption {
   name: string;
 }
 
-export const KitSpecEditor: React.FC<Props> = ({ kit: kitProp, onChange, priceUah, onApplyPrice, productName = '', productSku = '', t }) => {
+export const KitSpecEditor: React.FC<Props> = ({ kit: kitProp, onChange, priceUah, onApplyPrice, productName = '', productSku = '', productId = '', t }) => {
   const kit = kitProp ?? blankKit();
   const cost = useMemo(() => kitCost(kit), [kit]);
   const issues = useMemo(() => kitIssues(kit), [kit]);
@@ -158,6 +161,25 @@ export const KitSpecEditor: React.FC<Props> = ({ kit: kitProp, onChange, priceUa
           <button type="button" onClick={() => removeLine(group, line.id)} className={`col-span-2 md:col-span-1 p-1.5 rounded-lg ${t.dangerBtn}`} title="Прибрати рядок">
             <Trash2 className="w-3.5 h-3.5" />
           </button>
+          {group === 'parts' && (
+            <label className={`col-span-12 flex items-center gap-2 text-[11px] ${t.sub}`}>
+              Файл виготовлення
+              <select
+                className={`px-2 py-1 rounded-lg text-[12px] min-w-[12rem] ${t.select}`}
+                value={line.fileId}
+                disabled={!kit.files.length}
+                onChange={(e) => setLine(group, line.id, { fileId: e.target.value })}
+                data-kit-line-file
+              >
+                <option value="">{kit.files.length ? '— не вказано —' : 'Спершу додайте файли нижче'}</option>
+                {kit.files.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name} (v{f.versions[f.versions.length - 1].version})
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
       ))}
       <button
@@ -288,6 +310,8 @@ export const KitSpecEditor: React.FC<Props> = ({ kit: kitProp, onChange, priceUa
           </div>
 
           <KitSafetyEditor kit={kit} onChange={(safety) => set({ safety })} t={t} />
+
+          <KitFilesPanel kit={kit} productId={productId} onChange={onChange} t={t} />
 
           <KitInstructionPanel kit={kit} productName={productName} productSku={productSku} onChange={onChange} t={t} />
 

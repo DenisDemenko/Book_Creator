@@ -1082,6 +1082,7 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
                 priceUah={product.priceUah}
                 productName={product.name}
                 productSku={product.sku}
+                productId={product.id}
                 onApplyPrice={(price) => patch(price)}
                 t={t}
               />

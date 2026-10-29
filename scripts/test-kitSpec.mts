@@ -35,7 +35,9 @@ const sample = () => ({
   enabled: true,
   // Вік і безпека (K2) заповнені, щоб K1-перевірки лишились про специфікацію, а не про безпеку.
   safety: { ageMinYears: 8, smallParts: false, warnings: ['Збирати разом із дорослим.'], noWarningsConfirmed: false, materialsNote: '', documents: [{ id: 'd1', title: 'Декларація відповідності', number: '1', issuedBy: 'Лабораторія', validUntil: '', note: '' }] },
-  parts: [line({ id: 'p1', name: 'Бокова панель', qty: 2, unitPriceUah: 12.5, material: 'береза 6 мм' }), line({ id: 'p2', name: 'Шканта', qty: 10, unit: 'шт', unitPriceUah: 0.3 })],
+  // Файли виготовлення (K4) привʼязані, щоб K1-перевірки лишились про специфікацію, а не про файли.
+  files: [{ id: 'f1', name: 'Різання', kind: 'dxf' as const, versions: [{ id: 'v1', version: 1, fileName: 'cut.dxf', bytes: 10, sha256: 'a'.repeat(64), uploadedAt: '2026-10-29T10:00:00.000Z', note: '' }] }],
+  parts: [line({ id: 'p1', name: 'Бокова панель', qty: 2, unitPriceUah: 12.5, material: 'береза 6 мм', fileId: 'f1' }), line({ id: 'p2', name: 'Шканта', qty: 10, unit: 'шт', unitPriceUah: 0.3, fileId: 'f1' })],
   packaging: [line({ id: 'k1', name: 'Коробка', qty: 1, unitPriceUah: 18 })],
   laborMinutes: 30,
   laborRateUahPerHour: 200,
