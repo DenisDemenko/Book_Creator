@@ -20,6 +20,8 @@
  */
 
 import { blankSafety, normalizeSafety, safetyIssues, type KitSafety } from './kitSafety';
+import type { Instruction } from '../../types';
+import { normalizeKitInstruction, syncInstructionWithKit } from '../../utils/kitInstruction';
 
 /** Підказки одиниць виміру; поле вільне, це лише datalist. */
 export const KIT_UNITS = ['шт', 'компл.', 'м', 'см', 'г', 'кг', 'мл', 'л', 'арк.'] as const;
@@ -76,6 +78,11 @@ export interface KitSpec {
   /** Рекомендована ціна округлюється ВГОРУ до кратного цьому, грн (≥ 1). */
   roundToUah: number;
   steamTeam: KitSteamTeam | null;
+  /**
+   * Інструкція набору (K3): «Комплектація» і «Безпека» в ній беруться зі специфікації й
+   * оновлюються при кожному збереженні картки (`normalizeKit`); решта — ручна.
+   */
+  instruction?: Instruction;
 }
 
 export interface KitCost {
@@ -163,7 +170,7 @@ export function normalizeKit(value: unknown): KitSpec | undefined {
   const seen = new Set<string>();
   const team = v.steamTeam && typeof v.steamTeam === 'object' ? (v.steamTeam as Record<string, unknown>) : null;
   const teamId = team ? clampText(team.id, 80) : '';
-  return {
+  const kit: KitSpec = {
     enabled: v.enabled === true,
     safety: normalizeSafety(v.safety),
     parts: normalizeLines(v.parts, MAX_KIT_PARTS, seen),
@@ -174,6 +181,10 @@ export function normalizeKit(value: unknown): KitSpec | undefined {
     roundToUah: Math.max(1, Math.round(clampNum(v.roundToUah, 1, 1000, DEFAULT_KIT_ROUND_TO_UAH))),
     steamTeam: teamId ? { id: teamId, name: clampText(team!.name, KIT_NAME_MAX) } : null,
   };
+  // Інструкція набору: сміття відкидається, а комплектація й безпека доганяють специфікацію.
+  const instruction = normalizeKitInstruction(v.instruction);
+  if (instruction) kit.instruction = syncInstructionWithKit(instruction, kit).doc;
+  return kit;
 }
 
 // ---------------------------------------------------------------------------

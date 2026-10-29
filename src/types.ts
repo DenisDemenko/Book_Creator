@@ -594,6 +594,8 @@ export interface InstructionMaterialRow {
   code: string;
   name: string;
   qty: string;
+  /** K3: рядок узято зі специфікації набору (id деталі). Оновлюється з неї; ручні рядки поля не мають. */
+  specLineId?: string;
 }
 
 /** Один крок послідовності дій — розділ «Кроки складання» та еквіваленти. */
@@ -633,6 +635,11 @@ export interface InstructionWarranty {
 }
 
 export interface Instruction {
+  /**
+   * K3: інструкція набору. `specWarnings` — рядки розділу «Безпека», узяті зі специфікації
+   * (вік, попередження); вони оновлюються з неї, решта рядків — ручні й не чіпаються.
+   */
+  kitSource?: { specWarnings: string[]; syncedAt: string };
   sourceBased?: boolean;
   docType: InstructionDocType;
   title: string;

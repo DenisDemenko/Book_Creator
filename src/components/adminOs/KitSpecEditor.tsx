@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { AlertTriangle, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { KitInstructionPanel } from './KitInstructionPanel';
 import { KitSafetyEditor } from './KitSafetyEditor';
 import {
   KIT_MATERIAL_MAX,
@@ -47,6 +48,9 @@ interface Props {
   priceUah: number;
   /** Застосувати рекомендовану ціну до картки (`priceUah` і `basePriceUah`). */
   onApplyPrice: (patch: { priceUah: number; basePriceUah: number }) => void;
+  /** Назва й артикул виробу — для нової інструкції набору (K3). */
+  productName?: string;
+  productSku?: string;
   t: KitThemeTokens;
 }
 
@@ -57,7 +61,7 @@ interface TeamOption {
   name: string;
 }
 
-export const KitSpecEditor: React.FC<Props> = ({ kit: kitProp, onChange, priceUah, onApplyPrice, t }) => {
+export const KitSpecEditor: React.FC<Props> = ({ kit: kitProp, onChange, priceUah, onApplyPrice, productName = '', productSku = '', t }) => {
   const kit = kitProp ?? blankKit();
   const cost = useMemo(() => kitCost(kit), [kit]);
   const issues = useMemo(() => kitIssues(kit), [kit]);
@@ -284,6 +288,8 @@ export const KitSpecEditor: React.FC<Props> = ({ kit: kitProp, onChange, priceUa
           </div>
 
           <KitSafetyEditor kit={kit} onChange={(safety) => set({ safety })} t={t} />
+
+          <KitInstructionPanel kit={kit} productName={productName} productSku={productSku} onChange={onChange} t={t} />
 
           {(issues.errors.length > 0 || issues.warnings.length > 0) && (
             <div className="space-y-1" data-kit-issues>
