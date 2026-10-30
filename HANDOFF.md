@@ -382,3 +382,16 @@ Marketplace live SHA досі fdcec27, Studio live SHA досі 62e3a14.
 - Перевірено локально: 38 HTTP/SQLite checks; реальний Chromium/Three.js/SQLite end-to-end через Marketplace; STEP OpenCASCADE 75 faces і правильні mm bounds; TypeScript і Marketplace build. Журнал #487.
 - Власник дозволив commit/push 29.10.2026; код закомічено a4188b5, публікація feature-гілки виконується. Не зроблено: production/deploy/live Firebase/native KumCAD GUI — не перевірені. Серверного journal-ack не було, файли не видаються за серверний запис.
 - Наступне: feature push/PR Studio → його CI → узгоджений rollout Studio перед Marketplace. Зберегти volume /data/nova-studio.db. Код Marketplace — feat/fusion-geohome, нові перевірки й screenshots у docs/acceptance/fusion-geohome-cloud.
+
+
+## GeoHome: сучасний контракт дверей — 30.10.2026, Codex #01
+- Прийнято передачу #487 через файли. Звірено origin DenisDemenko/Book_Creator і master-базу `31fe194`; робота тільки в ізольованій гілці `feat/geohome-single-door-contract` (/workspace/studio-geohome-doors). Серверне приймання в адмінці не виконувалося.
+- `server/geohome/store.ts` більше не вимагає застарілих root-полів дверей; optional root/nested поля перевіряються, коли присутні. Сучасний пакет OP зберігається без старих полів, історичні версії не переписуються. 8 MiB, Pro/Ultra, ownership, checksum і CAD-відповідність збережені.
+- Перевірено: 55 локальних HTTP/SQLite перевірок. `tsc --noEmit` пройшов. Див. журнал #488.
+- Не зроблено: commit/push передані батьківському агенту; master merge, CI, Railway rollout, production/Firebase не заявляються виконаними. Повний npm test не запускався для вузького контрактного патча.
+- Наступне: батьківському агенту перевірити diff, закомітити/запушити тільки цю feature-гілку, оновити «Що не запушено» після коміту, відкрити Draft PR; перед майбутнім production змінити Studio перед Marketplace та звірити save/read/CAD без старих полів. Чинний SQLite volume не скидати.
+
+### Уточнення батьківської сесії — 30.10.2026
+- Цільові 55 HTTP/SQLite перевірок та `tsc --noEmit` успішні. Код закомічено `3a8068b`; журнал/передача додаються окремо, після чого публікується лише feature-гілка і Draft PR. Master/production не змінюються. Marketplace має тимчасовий transport-only адаптер із порожніми старими полями, тому preview сумісний із чинним сервером до майбутнього rollout.
+
+- Push підтверджено: `04bd76a` в origin/feat/geohome-single-door-contract, Draft PR #32 https://github.com/DenisDemenko/Book_Creator/pull/32. Останнє уточнення журналу додається наступним комітом до тієї самої feature-гілки; production не змінено.
