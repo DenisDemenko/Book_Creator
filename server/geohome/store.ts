@@ -21,10 +21,18 @@ export function validatePackage(value: unknown): asserts value is DomePackage {
   const params = value.settings.params;
   if (!Number.isFinite(params.diameter) || params.diameter <= 0 || !Number.isFinite(params.height) || params.height <= 0 || !Number.isInteger(params.frequency) || params.frequency < 1 || params.frequency > 8)
     throw new GeoHomeError(400, 'Некоректні параметри купола.');
-  for (const key of ['beamProfile','connectorParams','sheathingParams','windowParams','doorParams','solarParams','innerSheathingParams','displayLayers'])
+  for (const key of ['beamProfile','connectorParams','sheathingParams','windowParams','solarParams','innerSheathingParams','displayLayers'])
     if (!object(value.settings[key])) throw new GeoHomeError(400, `Відсутні налаштування: ${key}.`);
-  for (const key of ['windowFaceIds','doorFaceIds','solarFaceIds','fabricStripFaceIds'])
+  for (const key of ['windowFaceIds','solarFaceIds','fabricStripFaceIds'])
     if (!Array.isArray(value.settings[key]) || value.settings[key].some((id: unknown) => !Number.isInteger(id))) throw new GeoHomeError(400, `Некоректні дані: ${key}.`);
+  // Retired door inputs remain readable in immutable historical versions, but
+  // canonical params.openings projects no longer need inert legacy fields.
+  for (const settings of [value.settings, params]) {
+    if (Object.hasOwn(settings, 'doorParams') && !object(settings.doorParams))
+      throw new GeoHomeError(400, 'Некоректні дані: doorParams.');
+    if (Object.hasOwn(settings, 'doorFaceIds') && (!Array.isArray(settings.doorFaceIds) || settings.doorFaceIds.some((id: unknown) => !Number.isInteger(id))))
+      throw new GeoHomeError(400, 'Некоректні дані: doorFaceIds.');
+  }
   if (!Array.isArray(value.model.nodes) || !value.model.nodes.length || !Array.isArray(value.model.edges) || !Array.isArray(value.model.faces))
     throw new GeoHomeError(400, 'Відсутня геометрія купола.');
   const ids = new Set<number>();

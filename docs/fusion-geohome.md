@@ -19,6 +19,8 @@ The existing persistent SQLite database stores `geohome_projects` and `geohome_v
 
 Packages have schema `fusion.geohome.project`, version 1 and millimetre units. They include geometry, beam/connector/material/opening/solar parameters, display layers, and panel settings for costs, foundations, loads, packaging, insulation and nesting. Maximum compact JSON size is 8 MiB. CAD vertices/struts/panels are checked against the model; this is data-integrity validation, not professional structural approval.
 
+Canonical opening inputs live in `settings.params.openings`. The retired `doorParams` object and `doorFaceIds` array are optional, including their historical nested `params` variants. When supplied, their types are still validated. The server stores both modern and historical packages unchanged; it does not run either door geometry engine or rewrite archived snapshots.
+
 Restoring a historical snapshot returns the current project head separately so an edited/restored design can become a new version while keeping intervening history. Concurrent writes still require the latest head. The UI also offers Save a copy.
 
 ## KumCAD
