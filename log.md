@@ -122,8 +122,7 @@ remote перевірити можна, запушити — ні**.
 # Що не запушено (для наступної сесії)
 
 ### 30.10.2026 · GeoHome single-door contract (запис #488)
-У гілці `feat/geohome-single-door-contract` на базі `31fe194` код закомічено `3a8068b`; журнал додається окремим комітом. Push гілки виконується в межах чинного дозволу власника; результат звірити з remote перед позначенням опублікованою. Після майбутнього rollout перевірити сучасний save/read/CAD ZIP, старі версії та зберегти чинний SQLite volume. Production не змінено.
-
+Код `3a8068b` і журнал опубліковані в `origin/feat/geohome-single-door-contract`; Draft PR #32: https://github.com/DenisDemenko/Book_Creator/pull/32. Незапушеного коду цієї сесії немає; це уточнення журналу доставляється тією самою feature-гілкою. Master/production не змінено. Перед майбутнім rollout зберегти чинний SQLite volume; після rollout перевірити modern save/read/CAD ZIP та старі версії. Marketplace preview сумісний із чинним валідатором завдяки порожнім transport-only полям.
 
 ### 29.10.2026 · GeoHome (запис #487)
 Код a4188b5 запушено; PR #31. Власник дозволив production 29.10.2026. Деталі: запис #487.

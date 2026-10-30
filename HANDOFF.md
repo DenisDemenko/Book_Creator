@@ -393,3 +393,5 @@ Marketplace live SHA досі fdcec27, Studio live SHA досі 62e3a14.
 
 ### Уточнення батьківської сесії — 30.10.2026
 - Цільові 55 HTTP/SQLite перевірок та `tsc --noEmit` успішні. Код закомічено `3a8068b`; журнал/передача додаються окремо, після чого публікується лише feature-гілка і Draft PR. Master/production не змінюються. Marketplace має тимчасовий transport-only адаптер із порожніми старими полями, тому preview сумісний із чинним сервером до майбутнього rollout.
+
+- Push підтверджено: `04bd76a` в origin/feat/geohome-single-door-contract, Draft PR #32 https://github.com/DenisDemenko/Book_Creator/pull/32. Останнє уточнення журналу додається наступним комітом до тієї самої feature-гілки; production не змінено.
