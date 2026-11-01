@@ -121,6 +121,9 @@ remote перевірити можна, запушити — ні**.
 
 # Що не запушено (для наступної сесії)
 
+01.11.2026 #489: master локально містить merge `4dba717` із PR #32 (`3a8068b`, `04bd76a`, `1686313`). Злиття прямо запитане власником. Код злиття **запушено**: `git ls-remote origin refs/heads/master` підтвердив `4dba7177b90b9c3161e384b1d8c2d9279b77d879`. Службові записи цієї сесії зберігаються наступним комітом; наявність непереданих комітів звіряти через `git log origin/master..HEAD`. Production/Railway цим не підтверджуються. Після деплою перевірити modern openings save/read/CAD ZIP на існуючому persistent volume. Історичні записи нижче збережені як свідчення попередніх сесій.
+
+
 ### 30.10.2026 · GeoHome single-door contract (запис #488)
 Код `3a8068b` і журнал опубліковані в `origin/feat/geohome-single-door-contract`; Draft PR #32: https://github.com/DenisDemenko/Book_Creator/pull/32. Незапушеного коду цієї сесії немає; це уточнення журналу доставляється тією самою feature-гілкою. Master/production не змінено. Перед майбутнім rollout зберегти чинний SQLite volume; після rollout перевірити modern save/read/CAD ZIP та старі версії. Marketplace preview сумісний із чинним валідатором завдяки порожнім transport-only полям.
 
@@ -223,7 +226,7 @@ YouTube #420: `1a13ff6` запушено; реальна розшифровка 
 
 ---
 
-# Покажчик записів (488 записів, #1–#488)
+# Покажчик записів (489 записів, #1–#489)
 
 > Повні тексти записів лежать у теці `log/`, розбиті на частини — журнал
 > одним файлом доріс до 840 КБ, а його читає кожна нова сесія. Цей
@@ -238,6 +241,7 @@ YouTube #420: `1a13ff6` запушено; реальна розшифровка 
 
 | # | Назва | Статус | Файл |
 |---:|---|---|---|
+| 489 | GeoHome canonical contract merged for KumCAD handoff | 🚧 У роботі | [301-350.md](log/301-350.md) |
 | 488 | GeoHome: сучасний контракт дверей та читання історичних версій | ✅ Код і HTTP-перевірки готові | [301-350.md](log/301-350.md) |
 | 487 | Fusion GeoHome: хмарні версії Pro/Ultra та STEP-пакет KumCAD | 🚧 У роботі | [301-350.md](log/301-350.md) |
 | 486 | Власні шаблони верстки через DesignCraft і фон блоків | 🚧 У роботі | [301-350.md](log/301-350.md) |
@@ -737,3 +741,7 @@ YouTube #420: `1a13ff6` запушено; реальна розшифровка 
 ## Журнал сесій · 30.10.2026 #01 · GeoHome single-door contract
 - Запис #488: optional історичні поля дверей, 55 HTTP/SQLite перевірок; повний контекст у [log/sessions.md](log/sessions.md).
 - Не зроблено: master merge / production/Firebase/Railway — поза цим завданням; код `3a8068b`, push feature-гілки та Draft PR виконує батьківська сесія.
+
+## Журнал сесій · 01.11.2026 #01 · GeoHome / KumCAD
+- Запис #489: локальне злиття PR #32 в master, 55 HTTP/SQLite, Chromium та STEP/OpenCASCADE пройшли.
+- Не зроблено і чому: native KumCAD на комп'ютері власника не підключено; production, live Firebase та платежі не перевірені. Повний контекст у [log/sessions.md](log/sessions.md).

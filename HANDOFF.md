@@ -395,3 +395,10 @@ Marketplace live SHA досі fdcec27, Studio live SHA досі 62e3a14.
 - Цільові 55 HTTP/SQLite перевірок та `tsc --noEmit` успішні. Код закомічено `3a8068b`; журнал/передача додаються окремо, після чого публікується лише feature-гілка і Draft PR. Master/production не змінюються. Marketplace має тимчасовий transport-only адаптер із порожніми старими полями, тому preview сумісний із чинним сервером до майбутнього rollout.
 
 - Push підтверджено: `04bd76a` в origin/feat/geohome-single-door-contract, Draft PR #32 https://github.com/DenisDemenko/Book_Creator/pull/32. Останнє уточнення журналу додається наступним комітом до тієї самої feature-гілки; production не змінено.
+
+## GeoHome / KumCAD — Codex, 01.11.2026
+- Прийнято попередній контракт PR #32, звірено master `31fe194` та чистий checkout; PR не був злитий. Локальна master тепер містить merge `4dba717`.
+- 55 HTTP/SQLite перевірок пройшли. Marketplace Chromium із дверима/вікном і другим поверхом: save/restore/history, ZIP, Pro/Free, мобільний 3D/Escape без JS-помилок. OpenCASCADE прочитав 75 STEP-граней; 46 вузлів, 120 балок та габарити відповідають вихідному проекту. Повні додаткові дані — у JSON, не в усіх STEP-тілах.
+- Файли поточного приймання: `/workspace/cad-handoff` в цій машині, не в Git. Власний KumCAD користувача не підключено.
+- Remote master перевірено після push: `4dba7177b90b9c3161e384b1d8c2d9279b77d879`. Наступне: production та імпорт на комп'ютері власника потребують окремого підтвердження. Не стверджувати деплой за фактом push.
+- Журнал: #489, сесія 01.11.2026 #01. Зміни Marketplace ведуться окремо; у цьому checkout немає сторонніх незакомічених змін.
