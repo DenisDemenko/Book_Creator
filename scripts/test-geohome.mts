@@ -57,7 +57,44 @@ try{
  check('CAD export checks saved revision',manifest.projectVersion===1);
  check('KumCAD receives native STEP',(await archive.file('dome.step')!.async('string')).startsWith('ISO-10303-21;'));
  check('KumCAD receives complete settings',JSON.stringify(JSON.parse(await archive.file('project.json')!.async('string')))===JSON.stringify(pkg));
+ const modern: any=structuredClone(pkg);
+ delete modern.settings.doorParams;
+ delete modern.settings.doorFaceIds;
+ modern.settings.params.openings=[{id:'OP-1',kind:'door',enabled:true,support:'foundation',azimuthDeg:0,widthMm:900,heightMm:2050,sillMm:0,frameWidthMm:50,frameDepthMm:150}];
+ modern.settings.retiredDoorArchive={version:1,entries:[{fields:{doorFaceIds:[1],doorParams:{widthMm:900,heightMm:2050}},outcome:'canonical-kept',openingId:'OP-1',message:'Архів попередніх даних'}]};
+ const modernBody={...body,id:randomUUID(),requestId:randomUUID(),package:modern};
+ const modernResponse=await request('pro','/projects',modernBody);
+ check('canonical openings save without retired door fields',modernResponse.status===200);
+ const modernSaved=await modernResponse.json();
+ check('canonical package checksum unchanged',modernSaved.sha256===createHash('sha256').update(JSON.stringify(modern)).digest('hex'));
+ const modernRead=await (await request('pro','/projects/'+modernBody.id)).json();
+ check('canonical openings and archive read unchanged',JSON.stringify(modernRead.package)===JSON.stringify(modern));
+ check('canonical package does not gain retired fields',!Object.hasOwn(modernRead.package.settings,'doorParams')&&!Object.hasOwn(modernRead.package.settings,'doorFaceIds'));
+ check('canonical package remains private',(await request('other','/projects/'+modernBody.id)).status===404);
+ check('Free cannot save canonical openings',(await request('free','/projects',{...modernBody,id:randomUUID(),requestId:randomUUID()})).status===403);
+ const modernCad=await request('pro','/projects/'+modernBody.id+'/cad',{version:1});
+ check('canonical package CAD export allowed',modernCad.status===200);
+ const modernArchive=await JSZip.loadAsync(await modernCad.arrayBuffer());
+ check('canonical CAD archive keeps full project',JSON.stringify(JSON.parse(await modernArchive.file('project.json')!.async('string')))===JSON.stringify(modern));
+ const legacyAgain=await (await request('pro','/projects/'+body.id+'?version=1')).json();
+ check('historical door package remains byte-compatible',JSON.stringify(legacyAgain.package)===JSON.stringify(pkg));
+ for(const [label,container,key,value] of [
+  ['legacy door params object','settings','doorParams',[]],
+  ['legacy door face ids array','settings','doorFaceIds',{}],
+  ['legacy door face ids integers','settings','doorFaceIds',[1.5]],
+  ['nested legacy door params object','params','doorParams',null],
+  ['nested legacy door face ids array','params','doorFaceIds','invalid'],
+  ['nested legacy door face ids integers','params','doorFaceIds',[null]],
+ ] as const){
+  const invalid=structuredClone(modern);
+  const target=container==='params'?invalid.settings.params:invalid.settings;
+  target[key]=value;
+  check(label+' is validated when present',(await request('pro','/projects',{...modernBody,id:randomUUID(),requestId:randomUUID(),package:invalid})).status===400);
+ }
+ const tooLarge=structuredClone(modern);tooLarge.settings.padding='x'.repeat(8*1024*1024);
+ check('canonical package still obeys 8 MiB bound',(await request('pro','/projects',{...modernBody,id:randomUUID(),requestId:randomUUID(),package:tooLarge})).status===413);
  check('Ultra can save',(await request('ultra','/projects',{...body,id:randomUUID(),requestId:randomUUID()})).status===200);
+ check('Ultra can save canonical openings',(await request('ultra','/projects',{...modernBody,id:randomUUID(),requestId:randomUUID()})).status===200);
  check('malformed model rejected',(await request('pro','/projects',{...body,id:randomUUID(),package:{...pkg,model:{...pkg.model,nodes:[]}}})).status===400);
  check('CAD tampering rejected',(await request('pro','/projects',{...body,id:randomUUID(),package:{...pkg,cad:{...pkg.cad,vertices:pkg.cad.vertices.map(v=>({...v,position:{x:999,y:0,z:0}}))}}})).status===400);
  const stored=getDb()!.prepare('SELECT package_json FROM geohome_versions WHERE project_id=? AND version=2').get(body.id) as any;
