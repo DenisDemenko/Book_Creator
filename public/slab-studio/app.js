@@ -189,6 +189,7 @@
       composition(design, db.slabs, "live", true) +
       `<g stroke="#929e83" stroke-width=".3" fill="none"><path d="M ${-design.l / 2} ${design.w / 2 + 12} v 5 m 0 -2.5 h ${design.l} m 0 -2.5 v 5"/><path d="M ${-design.l / 2 - 12} ${-design.w / 2} h -5 m 2.5 0 v ${design.w} m -2.5 0 h 5"/></g><g fill="#79896c" font-family="Arial" font-size="4" text-anchor="middle"><text x="0" y="${design.w / 2 + 23}">${num(design.l)} см</text><text transform="translate(${-design.l / 2 - 22} 0) rotate(-90)">${num(design.w)} см</text></g>`;
     $("canvasEmpty").hidden = design.pieces.length > 0;
+    updateResin();
     const p = design.pieces.find((p) => p.uid === selected);
     $("selectedTools").hidden = !p;
     $("selectionLabel").textContent = p
@@ -203,9 +204,52 @@
       );
     }
   }
+  // Epoxy the table takes: the part of the top not covered by a slab, times the
+  // thickness, times the density plus the waste allowance — the same formula as
+  // the server's quote, so the figure on screen is the one that is ordered.
+  // It follows every move of a slab: a coarse grid while dragging (cheap
+  // enough for each frame), the full grid a moment after the last change.
+  let resinCoarse, resinFine;
+  function resinFigures(resolution) {
+    const here = { ...design, pieces: design.pieces.filter((p) => db.slabs.some((s) => s.id === p.id)) };
+    const m = Geo.measure(here, db.slabs, resolution);
+    const litres = m.resin * design.t * 10;
+    const costs = db.costs || {};
+    const density = costs.density || 1.1,
+      waste = costs.waste ?? 10;
+    return { litres, kg: litres * density * (1 + waste / 100), area: m.resin, density, waste };
+  }
+  function updateResin() {
+    clearTimeout(resinCoarse);
+    clearTimeout(resinFine);
+    if (!design.pieces.length) {
+      $("resinLiveText").textContent =
+        "Додайте слеб — кількість епоксидки порахується автоматично";
+      return;
+    }
+    const show = (resolution) => {
+      const r = resinFigures(resolution);
+      $("resinLiveText").innerHTML =
+        `Епоксидка: <b>${num(r.litres, 2)} л</b> · <b>${num(r.kg, 2)} кг</b>` +
+        `<span class="resin-detail"> з запасом ${num(r.waste, 0)}% · щільність ${num(r.density, 2)} · товщина ${num(design.t)} см · вільна площа ${num(r.area, 3)} м²</span>`;
+    };
+    resinCoarse = setTimeout(() => show(160), 20);
+    resinFine = setTimeout(() => show(650), 300);
+  }
   function numInput(n) {
     return Math.round(n * 10) / 10;
   }
+  // The price sits in the bar above the preview, which stays on screen on a
+  // phone: otherwise "Calculate" is at the very bottom of the controls, far
+  // from the shape and sizes it prices.
+  function syncBarPrice() {
+    $("barPriceText").textContent = estimate
+      ? money(estimate.total)
+      : "Ціну не розраховано";
+    $("barCalc").hidden = !!estimate;
+    $("barCalc").disabled = $("calculate").disabled;
+  }
+  $("barCalc").onclick = () => $("calculate").click();
   function invalidate() {
     designRevision++;
     estimate = null;
@@ -217,6 +261,7 @@
       '<p class="muted">Композицію змінено. Розрахуйте актуальну вартість.</p>';
     $("designWarning").textContent = "";
     $("cartError").hidden = true;
+    syncBarPrice();
     saveDraft();
   }
   let librarySpecies = "",
@@ -321,7 +366,21 @@
     }
     $("dimensionError").hidden = valid || !showError;
     $("calculate").disabled = !valid || quotePending || texturePending;
+    $("barCalc").disabled = $("calculate").disabled;
     return valid;
+  }
+  // The slabs are placed in table coordinates. When the table changes shape or
+  // size they keep their old coordinates, so on a smaller or different table
+  // they ended up outside the clip and vanished while still counted as added.
+  // Follow the table: scale the positions with it and keep each slab's centre
+  // on the table.
+  function refitPieces(oldL, oldW) {
+    const kx = design.l / oldL,
+      ky = design.w / oldW;
+    for (const p of design.pieces) {
+      p.x = numInput(Math.max(-design.l / 2, Math.min(design.l / 2, p.x * kx)));
+      p.y = numInput(Math.max(-design.w / 2, Math.min(design.w / 2, p.y * ky)));
+    }
   }
   function readDimensions(event) {
     // Incomplete keyboard input stays in the field. Never restore an old value
@@ -331,7 +390,9 @@
     const l = $("tableL").valueAsNumber,
       w = design.shape === "oval" ? $("tableW").valueAsNumber : l,
       t = $("tableT").valueAsNumber;
+    const [oldL, oldW] = [design.l, design.w];
     Object.assign(design, { l, w, t });
+    refitPieces(oldL, oldW);
     saveDraft();
     if (design.shape !== "oval") $("tableW").value = w;
     renderDesign();
@@ -367,11 +428,13 @@
   $$("[data-shape]").forEach(
     (b) =>
       (b.onclick = () => {
+        const [oldL, oldW] = [design.l, design.w];
         design.shape = b.dataset.shape;
         if (design.shape !== "oval") {
           design.l = Math.min(design.l, 180);
           design.w = design.l;
         }
+        refitPieces(oldL, oldW);
         $$("[data-shape]").forEach((x) =>
           x.classList.toggle("active", x === b),
         );
@@ -380,6 +443,13 @@
         renderDesign();
       }),
   );
+  // The 24 named colours of the Fusion Lab palette. They are plain
+  // [data-color] buttons, so they share the handler (and the saved `color`)
+  // with the four classic ones.
+  $("paletteColors").innerHTML = ResinCatalog.COLORS.map(
+    (c) =>
+      `<button type="button" data-color="${c.hex}" style="--color: ${c.hex}" aria-label="${esc(c.name)}" title="${esc(c.name)}"></button>`,
+  ).join("");
   $$("[data-color]").forEach(
     (b) =>
       (b.onclick = () => {
@@ -413,7 +483,7 @@
     if (texture) {
       $("resinTextureThumbnail").src = texture.image;
       $("resinTextureName").textContent = texture.name;
-      $("colorName").textContent = "Завантажена текстура";
+      $("colorName").textContent = "текстура · " + texture.name;
     } else {
       $("resinTextureThumbnail").removeAttribute("src");
       $("resinTextureName").textContent = "";
@@ -428,6 +498,7 @@
         !texture && b.dataset.color === design.color,
       ),
     );
+    markBuiltinTextures();
   }
   function textureProgress(scope, progress) {
     $(scope + "Processing").hidden = false;
@@ -461,6 +532,13 @@
   $("resinTextureFile").onchange = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
+    await applyTextureFile(file);
+    event.target.value = "";
+  };
+  // One path for an uploaded file and for the built-in samples: both are
+  // compressed and validated by ResinTexture.read() before they are saved.
+  // `color` (a hex) is set under the texture for the built-in ones.
+  async function applyTextureFile(file, color) {
     const revision = ++textureRevision;
     texturePending = true;
     invalidate();
@@ -473,6 +551,7 @@
       });
       if (revision !== textureRevision) return;
       design.resinTexture = { image: texture.image, name: texture.name };
+      if (color) design.color = color;
       syncResinTexture();
       invalidate();
       renderDesign();
@@ -488,10 +567,9 @@
         texturePending = false;
         dimensionsValid();
         $("uploadResinTexture").disabled = false;
-        event.target.value = "";
       }
     }
-  };
+  }
   $("removeResinTexture").onclick = () => {
     clearResinTexture();
     invalidate();
@@ -530,10 +608,68 @@
       ? db.resinTextures
           .map(
             (t) =>
-              `<article class="slab-card"><img class="preset-catalog-image" src="${esc(t.image)}" alt="${esc(t.name)}" /><div class="slab-content"><h3>${esc(t.name)}</h3><button type="button" class="text-btn danger" data-delete-texture="${t.id}">Видалити з каталогу</button></div></article>`,
+              `<article class="slab-card" data-texture-card="${t.id}"><img class="preset-catalog-image" src="${esc(t.image)}" alt="${esc(t.name)}" /><div class="slab-content"><label class="texture-name"><span>Назва</span><input data-texture-name="${t.id}" value="${esc(t.name)}" maxlength="120" /></label><div class="texture-actions"><button type="button" class="secondary" data-rename-texture="${t.id}">Зберегти назву</button><button type="button" class="secondary" data-replace-texture="${t.id}">Замінити зображення</button><input type="file" accept="image/png,image/jpeg,image/webp" hidden data-replace-file="${t.id}" aria-label="Нове зображення для «${esc(t.name)}»" /></div><button type="button" class="text-btn danger" data-delete-texture="${t.id}">Видалити з каталогу</button></div></article>`,
           )
           .join("")
       : '<p class="hint">Ще немає готових текстур. Завантажте перше зображення.</p>';
+    // Editing a catalogue texture never touches orders: each order keeps its
+    // own copy of the picture and the name it was placed with.
+    const patchTexture = async (id, body, done) => {
+      try {
+        await bridge.request("PATCH", "/tables/admin/resin-textures/" + id, body);
+        await reloadRemote();
+        renderPresetAdmin();
+        renderPresetChoices();
+        renderBuiltinTextures();
+        syncResinTexture();
+        toast(done);
+      } catch (error) {
+        toast(error.message);
+      }
+    };
+    $$("[data-rename-texture]").forEach(
+      (b) =>
+        (b.onclick = async () => {
+          const input = $$("[data-texture-name]").find(
+            (i) => i.dataset.textureName === b.dataset.renameTexture,
+          );
+          const name = input.value.trim();
+          if (!name) {
+            toast("Вкажіть назву текстури.");
+            return;
+          }
+          b.disabled = true;
+          await patchTexture(b.dataset.renameTexture, { name }, "Назву збережено.");
+          b.disabled = false;
+        }),
+    );
+    $$("[data-replace-texture]").forEach(
+      (b) =>
+        (b.onclick = () =>
+          $$("[data-replace-file]")
+            .find((i) => i.dataset.replaceFile === b.dataset.replaceTexture)
+            .click()),
+    );
+    $$("[data-replace-file]").forEach(
+      (input) =>
+        (input.onchange = async () => {
+          const file = input.files[0];
+          if (!file) return;
+          try {
+            const texture = await ResinTexture.read(file);
+            await patchTexture(
+              input.dataset.replaceFile,
+              { image: texture.image },
+              "Зображення замінено.",
+            );
+          } catch (error) {
+            toast(error.message);
+          } finally {
+            input.value = "";
+          }
+        }),
+    );
+    renderBuiltinImport(supported);
     $$("[data-delete-texture]").forEach(
       (b) =>
         (b.onclick = async () => {
@@ -561,6 +697,56 @@
         }),
     );
   }
+  // The built-in samples (resin-catalog.js) can be moved into the catalogue,
+  // after which they are ordinary, editable presets.
+  function missingSamples() {
+    return ResinCatalog.SAMPLES.filter(
+      (s) => !db.resinTextures.some((t) => t.name === s.name),
+    );
+  }
+  function renderBuiltinImport(supported) {
+    const missing = missingSamples();
+    $("builtinImport").hidden = !supported || !missing.length;
+    $("builtinImportList").innerHTML = missing
+      .map(
+        (s) =>
+          `<article class="slab-card"><img class="preset-catalog-image" src="${esc(s.url)}" alt="${esc(s.name)}" loading="lazy" /><div class="slab-content"><h3>${esc(s.name)}</h3><button type="button" class="secondary" data-import-sample="${s.id}">Додати до каталогу</button></div></article>`,
+      )
+      .join("");
+    $$("[data-import-sample]").forEach(
+      (b) =>
+        (b.onclick = async () => {
+          b.disabled = true;
+          await importSamples([b.dataset.importSample]);
+        }),
+    );
+    $("importAllSamples").disabled = false;
+  }
+  async function importSamples(ids) {
+    let added = 0;
+    try {
+      for (const id of ids) {
+        const sample = ResinCatalog.SAMPLES.find((s) => s.id === id);
+        const texture = await ResinTexture.read(await ResinCatalog.sampleFile(sample));
+        await bridge.request("POST", "/tables/admin/resin-textures", {
+          name: sample.name,
+          image: texture.image,
+        });
+        added++;
+      }
+    } catch (error) {
+      toast(error.message);
+    }
+    await reloadRemote();
+    renderPresetAdmin();
+    renderPresetChoices();
+    renderBuiltinTextures();
+    if (added) toast(added === 1 ? "Зразок додано до каталогу." : `Додано зразків: ${added}.`);
+  }
+  $("importAllSamples").onclick = async () => {
+    $("importAllSamples").disabled = true;
+    await importSamples(missingSamples().map((s) => s.id));
+  };
   $("choosePresetTexture").onclick = () => $("presetTextureFile").click();
   $("presetTextureFile").onchange = async (event) => {
     const file = event.target.files[0];
@@ -782,6 +968,7 @@
     $("approveLabel").hidden = false;
     $("addCart").hidden = false;
     $("addCart").disabled = true;
+    syncBarPrice();
   };
   $("approvePrice").onchange = () =>
     ($("addCart").disabled = !$("approvePrice").checked);
@@ -950,22 +1137,51 @@
     }
   }
   $("refreshOrders").onclick = () => void refreshOrders();
+  // Where an order is in the payment of its two halves. The API says so
+  // (paymentStage); the fallback reads the same fields for an older API.
+  const stageOf = (o) =>
+    o.paymentStage ||
+    (o.balancePaidAt
+      ? "paid_full"
+      : o.paidAt
+        ? "deposit_paid"
+        : ["cart", "pending"].includes(o.status)
+          ? "in_cart"
+          : "closed");
+  const stageTabs = [
+    ["all", "Усі замовлення"],
+    ["in_cart", "У кошику клієнта"],
+    ["deposit_paid", "Передоплата 50% отримана"],
+    ["paid_full", "Оплачено 100%"],
+  ];
+  let orderStage = "all";
   const orderMatches = (o, f) => f === "all" ||
     (f === "unpaid" ? ["cart", "pending"].includes(o.status) : o.status === f);
   function renderOrders() {
+    $("orderStages").innerHTML = stageTabs
+      .map(
+        ([key, label]) =>
+          `<button type="button" role="tab" class="${orderStage === key ? "active" : ""}" data-order-stage="${key}" aria-selected="${orderStage === key}">${label} · ${db.orders.filter((o) => key === "all" || stageOf(o) === key).length}</button>`,
+      )
+      .join("");
+    $$("[data-order-stage]").forEach((b) => (b.onclick = () => {
+      orderStage = b.dataset.orderStage;
+      renderOrders();
+    }));
     const filters = [["all", "Усі"], ["unpaid", "Очікують оплати"], ["queued", "До прийняття"], ["making", "У роботі"], ["ready", "Готові"], ["payment_review", "Перевірка платежу"]];
+    const inStage = db.orders.filter((o) => orderStage === "all" || stageOf(o) === orderStage);
     $("orderFilters").innerHTML = filters.map(([key, label]) =>
-      `<button type="button" class="${orderFilter === key ? "active" : ""}" data-order-filter="${key}" aria-pressed="${orderFilter === key}">${label} · ${db.orders.filter(o => orderMatches(o, key)).length}</button>`).join("");
+      `<button type="button" class="${orderFilter === key ? "active" : ""}" data-order-filter="${key}" aria-pressed="${orderFilter === key}">${label} · ${inStage.filter(o => orderMatches(o, key)).length}</button>`).join("");
     $$("[data-order-filter]").forEach(b => b.onclick = () => {
       orderFilter = b.dataset.orderFilter;
       renderOrders();
     });
-    const orders = db.orders.filter(o => orderMatches(o, orderFilter));
+    const orders = inStage.filter(o => orderMatches(o, orderFilter));
     $("ordersList").innerHTML = orders.length
       ? orders
           .map(
             (o) =>
-              `<article class="order-card" data-order-id="${esc(o.id)}"><div class="order-image">${orderImage(o)}</div><div class="order-details"><span class="badge">${esc(statusNames[o.status] || o.status)}</span><h2 style="margin-top:12px">${shapeNames[o.shape]} стіл ${num(o.l)} × ${num(o.w)}</h2><p>#${esc(o.number)}<br>${o.buyer ? `Покупець: ${esc(o.buyer.displayName || "Без імені")} · ${esc(o.buyer.email)}<br>` : ""}Слеби: ${o.slabs.map((s) => esc(s.number)).join(", ")}<br>Товщина ${num(o.t)} см · смола ${num(o.quote.kg, 2)} кг<br>Передоплата 50%: ${money(o.depositMinor / 100)} · ${o.paidAt ? o.paymentMode === "demo" ? "ДЕМО · реальні кошти не зараховано" : o.paymentMode === "sandbox" ? "ТЕСТ LIQPAY · реальні кошти не зараховано" : "підтверджено банком" : "не підтверджена"}</p>${["cart", "pending"].includes(o.status) ? '<p class="hint">Прийняття в роботу стане доступним після передоплати 50%.</p>' : ""}<div class="order-actions">${o.paidAt && ["queued", "making"].includes(o.status) ? `<button class="primary" data-next="${o.id}" data-status="${o.status === "queued" ? "making" : "ready"}">${o.status === "queued" ? "Прийняти в роботу" : "Позначити готовим"}</button>` : ""}<button class="text-btn" data-spec="${o.id}">Специфікація ↓</button></div></div><div class="order-price">${money(o.totalMinor / 100)}</div></article>`,
+              `<article class="order-card" data-order-id="${esc(o.id)}"><div class="order-image">${orderImage(o)}</div><div class="order-details"><span class="badge">${esc(statusNames[o.status] || o.status)}</span><h2 style="margin-top:12px">${shapeNames[o.shape]} стіл ${num(o.l)} × ${num(o.w)}</h2><p>#${esc(o.number)}<br>${o.buyer ? `Покупець: ${esc(o.buyer.displayName || "Без імені")} · ${esc(o.buyer.email)}<br>` : ""}Слеби: ${o.slabs.map((s) => esc(s.number)).join(", ")}<br>Товщина ${num(o.t)} см · епоксидка ${num(o.quote.litres, 2)} л · ${num(o.quote.kg, 2)} кг (щільність ${num(o.costs?.density ?? 0, 2)}, запас ${num(o.costs?.waste ?? 0, 0)}%, вільна площа ${num(o.quote.resin, 3)} м²)<br>1. Передоплата 50%: ${money(o.depositMinor / 100)} · ${o.paidAt ? o.paymentMode === "demo" ? "ДЕМО · реальні кошти не зараховано" : o.paymentMode === "sandbox" ? "ТЕСТ LIQPAY · реальні кошти не зараховано" : "підтверджено банком" : "не підтверджена"}<br>2. Залишок 50%: ${money((o.balanceMinor ?? o.totalMinor - o.depositMinor) / 100)} · ${o.balancePaidAt ? o.balancePaymentMode === "demo" ? "ДЕМО · реальні кошти не зараховано" : o.balancePaymentMode === "sandbox" ? "ТЕСТ LIQPAY · реальні кошти не зараховано" : "підтверджено банком" : o.status === "ready" ? "очікуємо від покупця" : "сплачується після виготовлення"}</p>${stageOf(o) === "paid_full" ? `<p class="hint">Оплачено 100%${o.status === "ready" ? " — стіл можна відправляти." : "."}</p>` : o.status === "ready" && o.paidAt ? '<p class="hint">Стіл готовий. Відправляйте після оплати залишку покупцем.</p>' : ""}${["cart", "pending"].includes(o.status) ? '<p class="hint">Прийняття в роботу стане доступним після передоплати 50%.</p>' : ""}<div class="order-actions">${o.paidAt && ["queued", "making"].includes(o.status) ? `<button class="primary" data-next="${o.id}" data-status="${o.status === "queued" ? "making" : "ready"}">${o.status === "queued" ? "Прийняти в роботу" : "Позначити готовим"}</button>` : ""}<button class="text-btn" data-spec="${o.id}">Специфікація ↓</button></div></div><div class="order-price">${money(o.totalMinor / 100)}</div></article>`,
           )
           .join("")
       : '<div class="empty-panel"><h2>Замовлень поки немає</h2><p>Стіл з’явиться тут після додавання покупцем у кошик. Для початку виробництва потрібна передоплата 50%.</p></div>';
@@ -1071,6 +1287,112 @@
       contourEditor.status();
     }
   };
+  // ---- Built-in resin textures (resin-catalog.js) -------------------------
+  // A style ("Хвилі", "Перламутр") is a grey base painted in the colour the
+  // buyer picks; a sample is a photograph of a poured piece as it is. Both end
+  // up as design.resinTexture through applyTextureFile().
+  const builtin = {
+    style: "waves",
+    colors: Object.fromEntries(
+      ResinCatalog.STYLES.map((s) => [s.id, s.defaultColor]),
+    ),
+  };
+  const textureLabel = (style, colorName) => `${style.name} · ${colorName}`;
+  // Reopening a saved draft: show the choice that produced its texture.
+  for (const style of ResinCatalog.STYLES) {
+    for (const color of ResinCatalog.COLORS) {
+      if (design.resinTexture?.name === textureLabel(style, color.name)) {
+        builtin.style = style.id;
+        builtin.colors[style.id] = color.name;
+      }
+    }
+  }
+  function currentStyle() {
+    return ResinCatalog.STYLES.find((s) => s.id === builtin.style);
+  }
+  function renderBuiltinTextures() {
+    const style = currentStyle(),
+      colorName = builtin.colors[style.id];
+    $("styleHeading").textContent = style.name;
+    $("styleColorName").textContent = colorName;
+    $("textureStyles").innerHTML = ResinCatalog.STYLES.map(
+      (s) =>
+        `<button type="button" data-texture-style="${s.id}" aria-pressed="${s.id === style.id}">${esc(s.name)}</button>`,
+    ).join("");
+    $("styleColors").innerHTML = ResinCatalog.COLORS.map(
+      (c) =>
+        `<button type="button" data-style-color="${esc(c.name)}" style="--color: ${c.hex}" aria-label="${esc(c.name)}" title="${esc(c.name)}"></button>`,
+    ).join("");
+    // A sample the workshop has added to the catalogue is shown there, under
+    // "Текстури від майстерні", with whatever name and picture it now has.
+    $("sampleTextures").innerHTML = ResinCatalog.SAMPLES.filter(
+      (s) => !db.resinTextures.some((t) => t.name === s.name),
+    ).map(
+      (s) =>
+        `<button type="button" data-sample-texture="${s.id}" aria-pressed="false"><img src="${esc(s.url)}" alt="" loading="lazy" /><span>${esc(s.name)}</span></button>`,
+    ).join("");
+    $$("[data-texture-style]").forEach(
+      (b) =>
+        (b.onclick = () => {
+          builtin.style = b.dataset.textureStyle;
+          renderBuiltinTextures();
+          applyStyle();
+        }),
+    );
+    $$("[data-style-color]").forEach(
+      (b) =>
+        (b.onclick = () => {
+          builtin.colors[builtin.style] = b.dataset.styleColor;
+          renderBuiltinTextures();
+          applyStyle();
+        }),
+    );
+    $$("[data-sample-texture]").forEach(
+      (b) =>
+        (b.onclick = async () => {
+          const sample = ResinCatalog.SAMPLES.find(
+            (s) => s.id === b.dataset.sampleTexture,
+          );
+          try {
+            await applyTextureFile(await ResinCatalog.sampleFile(sample));
+          } catch (error) {
+            toast(error.message);
+          }
+        }),
+    );
+    markBuiltinTextures();
+  }
+  async function applyStyle() {
+    const style = currentStyle(),
+      color = ResinCatalog.COLORS.find(
+        (c) => c.name === builtin.colors[style.id],
+      );
+    try {
+      await applyTextureFile(await ResinCatalog.styleFile(style, color), color.hex);
+    } catch (error) {
+      toast(error.message);
+    }
+  }
+  // Which built-in choice is the one currently on the table.
+  function markBuiltinTextures() {
+    const applied = design.resinTexture?.name;
+    const style = currentStyle();
+    $$("[data-style-color]").forEach((b) =>
+      b.setAttribute(
+        "aria-pressed",
+        String(
+          applied === textureLabel(style, b.dataset.styleColor),
+        ),
+      ),
+    );
+    $$("[data-sample-texture]").forEach((b) => {
+      const sample = ResinCatalog.SAMPLES.find(
+        (s) => s.id === b.dataset.sampleTexture,
+      );
+      b.setAttribute("aria-pressed", String(applied === sample.name));
+    });
+  }
+
   window.addEventListener("unhandledrejection", (e) => {
     e.preventDefault();
     toast(e.reason?.message || "Не вдалося виконати дію.");
@@ -1090,6 +1412,7 @@
   $("exportData").hidden = !admin;
   speciesOptions();
   renderPresetChoices();
+  renderBuiltinTextures();
   $("legs").value = design.legs;
   $$("[data-shape]").forEach(b => b.classList.toggle("active", b.dataset.shape === design.shape));
   $$("[data-color]").forEach(b => b.classList.toggle("active", !design.resinTexture && b.dataset.color === design.color));

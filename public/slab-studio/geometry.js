@@ -35,14 +35,23 @@
       ? Math.abs(x) <= d.l / 2 && Math.abs(y) <= d.w / 2
       : (x / (d.l / 2)) ** 2 + (y / (d.w / 2)) ** 2 <= 1;
   }
-  function measure(d, slabs) {
+  // `resolution` is the number of cells along the longer side: 650 is what the
+  // server uses for the price; a coarser grid is enough for a live figure
+  // while a slab is being dragged.
+  function measure(d, slabs, resolution = 650) {
     const ps = d.pieces.map((p) =>
       worldPoints(
         slabs.find((s) => s.id === p.id),
         p,
       ),
     );
-    const step = Math.max(d.l, d.w) / 650;
+    const bounds = ps.map((p) => ({
+      x0: Math.min(...p.map((v) => v[0])),
+      x1: Math.max(...p.map((v) => v[0])),
+      y0: Math.min(...p.map((v) => v[1])),
+      y1: Math.max(...p.map((v) => v[1])),
+    }));
+    const step = Math.max(d.l, d.w) / resolution;
     let wood = 0,
       overlap = 0;
     const used = ps.map(() => 0);
@@ -50,7 +59,8 @@
       for (let x = -d.l / 2 + step / 2; x < d.l / 2; x += step) {
         let hits = 0;
         ps.forEach((p, i) => {
-          if (inside(p, x, y)) {
+          const b = bounds[i];
+          if (x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1 && inside(p, x, y)) {
             hits++;
             if (inTable(d, x, y)) used[i] += step * step;
           }

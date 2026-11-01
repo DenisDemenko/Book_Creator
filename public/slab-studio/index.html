@@ -59,9 +59,14 @@
         </div>
         <div class="builder-grid">
           <div class="studio">
+            <div class="studio-canvas">
             <div class="studio-bar">
               <span><i class="dot"></i> Вигляд зверху · 2D</span
-              ><span id="scaleLabel">Усі розміри в сантиметрах</span>
+              ><span id="scaleLabel">Усі розміри в сантиметрах</span
+              ><span class="bar-price"
+                ><b id="barPriceText">Ціну не розраховано</b
+                ><button type="button" id="barCalc">Розрахувати</button></span
+              >
             </div>
             <div
               id="workArea"
@@ -78,9 +83,13 @@
                 Додайте слеби з бібліотеки нижче
               </div>
             </div>
+            <div class="studio-resin" id="resinLive" aria-live="polite">
+              <span id="resinLiveText">Додайте слеб — кількість епоксидки порахується автоматично</span>
+            </div>
             <div class="studio-footer">
               <span>↔ Перетягуйте слеби, щоб задати проміжок</span
               ><span id="selectionLabel">Оберіть слеб для редагування</span>
+            </div>
             </div>
             <div class="selected-tools" id="selectedTools" hidden>
               <strong id="selectedName"></strong
@@ -95,43 +104,7 @@
                 Видалити
               </button>
             </div>
-            <div class="library-head">
-              <div>
-                <p class="eyebrow">МАТЕРІАЛИ З ІСТОРІЄЮ</p>
-                <h2>Оберіть свої слеби <span id="stockCount"></span></h2>
-              </div>
-              <div class="filters">
-                <label
-                  >Довжина від, см<input
-                    id="minLength"
-                    type="number"
-                    min="0"
-                    placeholder="0" /></label
-                ><label
-                  >Ширина від, см<input
-                    id="minWidth"
-                    type="number"
-                    min="0"
-                    placeholder="0"
-                /></label>
-              </div>
-            </div>
-            <div class="species-block">
-              <h3>Порода дерева</h3>
-              <div
-                id="speciesFilter"
-                class="species-buttons"
-                role="group"
-                aria-label="Фільтр слебів за породою"
-              ></div>
-            </div>
-            <div class="slab-grid" id="slabLibrary"></div>
-          </div>
-          <aside class="config">
-            <div class="config-title">
-              <span>01</span>
-              <h2>Параметри столу</h2>
-            </div>
+            <div class="studio-size" id="studioSize">
             <label class="field-title">Форма стільниці</label>
             <div class="shape-options">
               <button data-shape="square">
@@ -187,7 +160,54 @@
               Товщина слебів має відповідати стільниці. Виступи за межами форми
               будуть обрізані.
             </p>
+            </div>
+            <div class="studio-library">
+            <div class="library-head">
+              <div>
+                <p class="eyebrow">МАТЕРІАЛИ З ІСТОРІЄЮ</p>
+                <h2>Оберіть свої слеби <span id="stockCount"></span></h2>
+                <p class="hint">Поля праворуч лише відбирають слеби за розміром. Розміри стільниці задаються вище, під ескізом.</p>
+              </div>
+              <div class="filters">
+                <label
+                  >Слеб завдовжки від, см<input
+                    id="minLength"
+                    type="number"
+                    min="0"
+                    placeholder="0" /></label
+                ><label
+                  >Слеб завширшки від, см<input
+                    id="minWidth"
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                /></label>
+              </div>
+            </div>
+            <div class="species-block">
+              <h3>Порода дерева</h3>
+              <div
+                id="speciesFilter"
+                class="species-buttons"
+                role="group"
+                aria-label="Фільтр слебів за породою"
+              ></div>
+            </div>
+            <div class="slab-grid" id="slabLibrary"></div>
+            </div>
+          </div>
+          <aside class="config">
+            <div class="config-title">
+              <span>01</span>
+              <h2>Параметри столу</h2>
+            </div>
             <label class="field-title">Колір епоксидної смоли</label>
+            <p class="color-warning" role="note">
+              <b>Увага!</b> Усі кольори є зразками та можуть відрізнятися від
+              одного пристрою до іншого. Якщо ви бажаєте точного збігу з будь-яким
+              інтер’єрним елементом, надішліть його частину або весь виріб на наш
+              завод — художник зніме точну кольорову гаму вашого елемента.
+            </p>
             <div id="resinColors" class="color-options">
               <button
                 data-color="#24474b"
@@ -209,14 +229,46 @@
                 data-color="#d0ae79"
                 style="--color: #d0ae79"
                 aria-label="Бурштин"
-              ></button
-              ><span id="colorName">Глибокий океан</span>
+              ></button>
             </div>
+            <p class="palette-title">Палітра Fusion Lab · 24 кольори</p>
+            <div
+              id="paletteColors"
+              class="color-options palette-grid"
+              role="group"
+              aria-label="Палітра кольорів епоксидної смоли"
+            ></div>
+            <p class="color-name">Колір: <b id="colorName">Глибокий океан</b></p>
             <div
               class="resin-texture-controls"
               id="resinTextureControls"
               hidden
             >
+              <div id="builtinTextures" class="builtin-textures">
+                <h3 id="styleHeading">Хвилі</h3>
+                <div
+                  id="textureStyles"
+                  class="style-chips"
+                  role="group"
+                  aria-label="Стиль текстури"
+                ></div>
+                <p class="hint">
+                  Оберіть колір текстури: <b id="styleColorName">Морська хвиля</b>
+                </p>
+                <div
+                  id="styleColors"
+                  class="color-options palette-grid"
+                  role="group"
+                  aria-label="Колір текстури"
+                ></div>
+                <h3>Готові зразки</h3>
+                <div
+                  id="sampleTextures"
+                  class="preset-texture-choices"
+                  role="group"
+                  aria-label="Готові зразки текстур"
+                ></div>
+              </div>
               <div id="presetTextureSection" hidden>
                 <h3>Текстури від майстерні</h3>
                 <div
@@ -379,6 +431,19 @@
           </button>
         </form>
         <div class="inventory-grid" id="presetTextureList"></div>
+        <div class="panel builtin-import" id="builtinImport" hidden>
+          <h2>Зразки Fusion Lab</h2>
+          <p class="hint">
+            Готові фото перламутру й хвиль. Додайте їх до каталогу, щоб
+            перейменовувати, замінювати зображення або видаляти так само, як
+            власні текстури. Поки зразок не доданий, покупці бачать його у
+            розділі «Хвилі та перламутр».
+          </p>
+          <button type="button" class="secondary" id="importAllSamples">
+            Додати всі зразки до каталогу
+          </button>
+          <div class="inventory-grid" id="builtinImportList"></div>
+        </div>
       </section>
       <section id="costs" class="view" hidden>
         <div class="page-heading">
@@ -414,11 +479,12 @@
             <p class="eyebrow">АДМІНПАНЕЛЬ · ВИРОБНИЦТВО</p>
             <h1>Замовлення стільниць<span>.</span></h1>
             <p class="muted">
-              Замовлення з кошиків покупців. Приймайте стільницю в роботу після підтвердженої передоплати 50%.
+              Замовлення з кошиків покупців. Приймайте стільницю в роботу після підтвердженої передоплати 50%. Залишок 50% покупець сплачує, коли стіл виготовлено, до відправлення.
             </p>
           </div>
           <button type="button" class="secondary" id="refreshOrders">Оновити замовлення</button>
         </div>
+        <div class="order-stages" id="orderStages" role="tablist" aria-label="Етап оплати замовлень"></div>
         <div class="species-buttons" id="orderFilters" role="group" aria-label="Статус замовлень"></div>
         <p id="ordersError" class="warning" role="alert" hidden></p>
         <div id="ordersList"></div>
@@ -635,6 +701,7 @@
     <script src="geometry.js"></script>
     <script src="bridge.js"></script>
     <script src="resin-texture.js"></script>
+    <script src="resin-catalog.js"></script>
     <script src="wood-species.js"></script>
     <script src="slab-contour.js"></script>
     <script src="app.js"></script>

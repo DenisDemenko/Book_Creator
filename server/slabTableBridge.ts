@@ -173,6 +173,11 @@ export function registerSlabTableRoutes(app: Express) {
     requireAdmin,
     proxy("POST", () => "/resin-textures"),
   );
+  app.patch(
+    "/api/admin/slab-tables/resin-textures/:id",
+    requireAdmin,
+    proxy("PATCH", (r) => "/resin-textures/" + r.params.id),
+  );
   app.delete(
     "/api/admin/slab-tables/resin-textures/:id",
     requireAdmin,

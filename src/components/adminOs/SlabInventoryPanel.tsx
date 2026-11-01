@@ -22,7 +22,7 @@ export function SlabInventoryPanel({ inventoryOnly = false }: { inventoryOnly?: 
         const allowed =
           /^(GET \/state|POST \/slabs|DELETE \/slabs\/[a-zA-Z0-9-]+)$/.test(
             `${m.method} ${suffix}`,
-          ) || (!inventoryOnly && /^(GET \/production|POST \/resin-textures|PUT \/costs|DELETE \/resin-textures\/[a-zA-Z0-9-]+|PATCH \/production\/[a-zA-Z0-9-]+)$/.test(
+          ) || (!inventoryOnly && /^(GET \/production|POST \/resin-textures|PUT \/costs|PATCH \/resin-textures\/[a-zA-Z0-9-]+|DELETE \/resin-textures\/[a-zA-Z0-9-]+|PATCH \/production\/[a-zA-Z0-9-]+)$/.test(
             `${m.method} ${suffix}`,
           ));
         if (!allowed)
@@ -64,7 +64,7 @@ export function SlabInventoryPanel({ inventoryOnly = false }: { inventoryOnly?: 
       <p className="mb-3 text-sm text-[rgba(181,217,253,.75)]">
         {inventoryOnly
           ? "Спільний склад слебів: фото, реальні розміри та перевірені векторні контури."
-          : "Склад слебів і текстури смоли. У вкладці «Виробництво» — замовлення покупців: перевірте композицію та після передоплати 50% натисніть «Прийняти в роботу». Тарифи публікуються з «Управління цінами»."}
+          : "Склад слебів і текстури смоли (можна завантажувати, перейменовувати та замінювати зображення). У вкладці «Виробництво» — замовлення покупців за етапами оплати: у кошику, передоплата 50% отримана, оплачено 100%. Після передоплати 50% натисніть «Прийняти в роботу»; залишок 50% покупець сплачує, коли стіл виготовлено, до відправлення. Тарифи публікуються з «Управління цінами»."}
       </p>
       {ready ? (
         <iframe
