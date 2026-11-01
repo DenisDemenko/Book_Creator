@@ -28,6 +28,7 @@
       <div class="side-label admin-label">ПРОСТІР МАЙСТЕРНІ</div>
       <nav>
         <button data-view="inventory">▤ <span>Бібліотека слебів</span></button
+        ><button data-view="legcatalog">▥ <span>Ніжки та кріплення</span></button
         ><button data-view="textures">◉ <span>Текстури смоли</span></button
         ><button data-view="costs">⚙ <span>Калькулятор витрат</span></button
         ><button data-view="orders">↗ <span>Виробництво</span></button>
@@ -160,6 +161,51 @@
               Товщина слебів має відповідати стільниці. Виступи за межами форми
               будуть обрізані.
             </p>
+            </div>
+            <div class="studio-legs" id="studioLegs" hidden>
+              <div class="library-head">
+                <div>
+                  <p class="eyebrow">ОСНОВА СТОЛУ</p>
+                  <h2>Ніжки з дерева</h2>
+                </div>
+                <button type="button" class="text-btn" id="legClear" hidden>Прибрати дерев’яні ніжки</button>
+              </div>
+              <p class="hint">
+                Десять схем розміщення ніжок. До стільниці вони кріпляться
+                дерев’яними пластинами з чотирма отворами. Креслення показують стіл
+                спереду й збоку з товщиною стільниці, нижче — 3D-вигляд.
+              </p>
+              <p class="warning" id="legsNotReady" hidden>
+                Адміністратор ще не налаштував матеріали та ціни ніжок. Схеми стануть
+                доступними після налаштування.
+              </p>
+              <div class="leg-schemes" id="legSchemes" role="radiogroup" aria-label="Схема ніжок"></div>
+              <p class="hint" id="legPrompt">Оберіть схему, щоб побачити креслення та 3D-вигляд.</p>
+              <div class="leg-controls" id="legControls" hidden>
+                <label>Висота столу, см <small id="legHeightHint"></small>
+                  <span class="leg-pair"><input id="legHeightRange" type="range" step="0.5" /><input id="legHeight" type="number" step="0.5" inputmode="decimal" /></span>
+                </label>
+                <label>Товщина ніжок, см <small id="legThicknessHint"></small>
+                  <span class="leg-pair"><input id="legThicknessRange" type="range" step="0.5" /><input id="legThickness" type="number" step="0.5" inputmode="decimal" /></span>
+                </label>
+                <label>Дерево ніжок<select id="legMaterial"></select></label>
+                <label id="legPlateField">Пластина кріплення<select id="legPlate"></select></label>
+              </div>
+              <div class="leg-drawings" id="legDrawings" hidden>
+                <figure><figcaption>Вигляд спереду</figcaption><div id="legFront"></div></figure>
+                <figure><figcaption>Вигляд збоку</figcaption><div id="legSide"></div></figure>
+              </div>
+              <p class="leg-summary" id="legSummary" hidden></p>
+              <details class="leg-plate" id="legPlateBox">
+                <summary>Пластина кріплення та її чотири отвори</summary>
+                <div id="legPlateDetail"></div>
+              </details>
+              <div class="leg-3d" id="leg3dWrap" hidden>
+                <h3>3D-вигляд столу з вибраними ніжками</h3>
+                <canvas id="leg3d" aria-label="3D-вигляд столу"></canvas>
+                <p class="hint">Тягніть, щоб повернути стіл; коліщатко або щипок — наблизити.</p>
+                <p class="warning" id="leg3dFallback" hidden>3D-вигляд недоступний у цьому браузері; дивіться креслення вище.</p>
+              </div>
             </div>
             <div class="studio-library">
             <div class="library-head">
@@ -384,6 +430,75 @@
           ></div>
         </div>
         <div class="inventory-grid" id="inventoryList"></div>
+      </section>
+      <section id="legcatalog" class="view" hidden>
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">АДМІНПАНЕЛЬ · МАТЕРІАЛИ</p>
+            <h1>Ніжки та кріплення<span>.</span></h1>
+            <p class="muted">
+              Дерев’яні ніжки кріпляться до зворотного боку стільниці пластинами з
+              чотирма отворами. Пластини та SVG-ніжки додають адміністратор і
+              дизайнер меблів; матеріали, ціни й товщину пластин задає лише
+              адміністратор.
+            </p>
+          </div>
+        </div>
+        <p class="warning" id="legCatalogOff" hidden>
+          Каталог ніжок недоступний: на сервері ще не застосовано оновлення бази.
+        </p>
+        <form id="legSettingsForm" class="panel" hidden>
+          <h2>Матеріали, ціни й товщина пластин</h2>
+          <div id="legMaterialRows"></div>
+          <button type="button" class="secondary" id="legAddMaterial">+ Додати матеріал</button>
+          <div class="leg-fields">
+            <label>Товщина дерев’яної пластини, см<input id="legPlateThickness" type="number" step="0.1" min="0.5" max="6" required /></label>
+            <label>Ціна дерева пластин, грн / м³<input id="legPlatePrice" type="number" step="100" min="0" required /></label>
+            <label>Робота за одну точку кріплення, грн<input id="legWork" type="number" step="10" min="0" required /></label>
+          </div>
+          <p class="hint" id="legSettingsStatus" role="status"></p>
+          <button class="primary" type="submit">Зберегти налаштування ніжок</button>
+        </form>
+
+        <h2 class="sub-title">Пластини кріплення</h2>
+        <form id="legPlateForm" class="panel">
+          <div class="leg-fields">
+            <label>Назва<input data-p="name" required maxlength="80" placeholder="Наприклад, 12 × 12 під шуруп 6 мм" /></label>
+            <label>Ширина, см<input data-p="widthCm" type="number" step="0.5" min="4" max="80" value="10" required /></label>
+            <label>Глибина, см<input data-p="depthCm" type="number" step="0.5" min="4" max="80" value="10" required /></label>
+            <label>Діаметр отвору, мм<input data-p="holeDiameterMm" type="number" step="0.5" min="2" max="25" value="6" required /></label>
+            <label>Відступ отвору від краю, мм<input data-p="holeInsetMm" type="number" step="1" min="5" max="100" value="15" required /></label>
+          </div>
+          <label class="check"><input data-p="countersink" type="checkbox" /> Зенківка під шуруп</label>
+          <label class="check"><input data-p="isDefault" type="checkbox" /> Основна пластина</label>
+          <p class="hint">Кожна пластина має чотири отвори в кутах. Пластина ніколи не буває меншою за основу ніжки, яку вона тримає.</p>
+          <button class="primary" type="submit">Додати пластину</button>
+        </form>
+        <div class="inventory-grid" id="legPlateList"></div>
+
+        <h2 class="sub-title">Ніжки з SVG</h2>
+        <form id="legSvgForm" class="panel">
+          <p class="hint">
+            SVG — силует ніжки спереду (для опор по торцях — збоку). Габарит файлу
+            (<code>viewBox</code>) = габарит ніжки; висота й товщина підлаштовуються під
+            вибір покупця. Скрипти, стилі та вбудовані картинки в SVG заборонені.
+          </p>
+          <div class="leg-fields">
+            <label>Назва<input id="legSvgName" required maxlength="80" /></label>
+            <label>Розміщення<select id="legSvgPlacement"><option value="corners">4 ніжки по кутах</option><option value="ends">2 опори по торцях</option><option value="center">1 центральна</option></select></label>
+            <label>Висота столу від, см<input id="legSvgMinH" type="number" value="40" /></label>
+            <label>Висота столу до, см<input id="legSvgMaxH" type="number" value="100" /></label>
+            <label>Товщина від, см<input id="legSvgMinT" type="number" step="0.5" value="3" /></label>
+            <label>Товщина до, см<input id="legSvgMaxT" type="number" step="0.5" value="10" /></label>
+            <label>Типова товщина, см<input id="legSvgDefT" type="number" step="0.5" value="5" /></label>
+          </div>
+          <button type="button" class="secondary" id="legSvgChoose">↑ Завантажити SVG</button>
+          <input type="file" id="legSvgFile" accept=".svg,image/svg+xml" hidden aria-label="SVG ніжки" />
+          <img id="legSvgPreview" class="leg-svg-preview" alt="Попередній вигляд ніжки" hidden />
+          <p class="hint" id="legSvgStatus" role="status">SVG до 80 КБ.</p>
+          <button class="primary" type="submit" id="legSvgSave" disabled>Додати ніжку</button>
+        </form>
+        <div class="inventory-grid" id="legDesignList"></div>
       </section>
       <section id="textures" class="view" hidden>
         <div class="page-heading">
@@ -702,6 +817,10 @@
     <script src="bridge.js"></script>
     <script src="resin-texture.js"></script>
     <script src="resin-catalog.js"></script>
+    <script src="table-legs.js"></script>
+    <script src="legs-ui.js"></script>
+    <script src="legs-admin.js"></script>
+    <script type="module" src="table-3d.js"></script>
     <script src="wood-species.js"></script>
     <script src="slab-contour.js"></script>
     <script src="app.js"></script>

@@ -65,7 +65,9 @@
     cartPending = false,
     texturePending = false,
     designRevision = 0,
-    toastTimer;
+    toastTimer,
+    legsUi,
+    legsAdmin;
   const draftKey = "fusionlab:table-builder:draft:v1";
   if (!inventory) {
     try {
@@ -80,6 +82,9 @@
           d.pieces.length <= 6 && d.pieces.every(p =>
             typeof p.uid === "string" && available(p.id) &&
             between(p.x, -1000, 1000) && between(p.y, -1000, 1000) && between(p.angle, -360, 360)) &&
+          (d.legSet === undefined || (d.legSet && typeof d.legSet.scheme === "string" &&
+            between(d.legSet.height, 20, 150) && between(d.legSet.thickness, 1, 30) &&
+            typeof d.legSet.material === "string")) &&
           (!d.resinTexture || (typeof d.resinTexture.name === "string" &&
             d.resinTexture.name.length <= 120 && typeof d.resinTexture.image === "string" &&
             d.resinTexture.image.length <= 400000 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(d.resinTexture.image)))) {
@@ -104,6 +109,7 @@
   const names = {
     builder: ["Магазин", "Конструктор столу"],
     inventory: ["Майстерня", "Бібліотека слебів"],
+    legcatalog: ["Майстерня", "Ніжки та кріплення"],
     textures: ["Майстерня", "Текстури смоли"],
     costs: ["Майстерня", "Калькулятор витрат"],
     cart: ["Магазин", "Кошик"],
@@ -117,7 +123,7 @@
       name = "inventory";
     if (
       !names[name] ||
-      (!inventory && name === "inventory") ||
+      (!inventory && ["inventory", "legcatalog"].includes(name)) ||
       (!admin && ["costs", "orders", "textures"].includes(name))
     )
       name = inventory ? "inventory" : "builder";
@@ -135,6 +141,7 @@
     if (name === "inventory") renderInventory();
     if (name === "costs") renderCosts();
     if (name === "textures") renderPresetAdmin();
+    if (name === "legcatalog") legsAdmin.render();
     if (name === "orders") void refreshOrders();
     window.scrollTo(0, 0);
   }
@@ -190,6 +197,7 @@
       `<g stroke="#929e83" stroke-width=".3" fill="none"><path d="M ${-design.l / 2} ${design.w / 2 + 12} v 5 m 0 -2.5 h ${design.l} m 0 -2.5 v 5"/><path d="M ${-design.l / 2 - 12} ${-design.w / 2} h -5 m 2.5 0 v ${design.w} m -2.5 0 h 5"/></g><g fill="#79896c" font-family="Arial" font-size="4" text-anchor="middle"><text x="0" y="${design.w / 2 + 23}">${num(design.l)} см</text><text transform="translate(${-design.l / 2 - 22} 0) rotate(-90)">${num(design.w)} см</text></g>`;
     $("canvasEmpty").hidden = design.pieces.length > 0;
     updateResin();
+    legsUi?.schedule();
     const p = design.pieces.find((p) => p.uid === selected);
     $("selectedTools").hidden = !p;
     $("selectionLabel").textContent = p
@@ -814,7 +822,10 @@
   };
   $("legs").onchange = () => {
     design.legs = $("legs").value;
+    // The flat tariffs and a drawn wooden base are alternatives.
+    if (design.legs !== "wood" && design.legSet) delete design.legSet;
     invalidate();
+    legsUi.render();
   };
   let dragging = null;
   function svgPoint(e) {
@@ -906,6 +917,7 @@
     selected = null;
     clearResinTexture();
     syncDimensions();
+    legsUi.render();
     $("legs").value = "metal";
     $$("[data-shape]").forEach((b) =>
       b.classList.toggle("active", b.dataset.shape === "oval"),
@@ -919,7 +931,7 @@
     renderLibrary();
   };
   function breakdown(q) {
-    return `<div class="breakdown"><div><span>Дерево · повні слеби</span><b>${money(q.woodCost)}</b></div><div><span>Смола · ${num(q.kg, 2)} кг</span><b>${money(q.resinCost)}</b></div><div><span>Виготовлення та інші витрати</span><b>${money(q.workCost)}</b></div><div><span>Фінішне покриття</span><b>${money(q.finishCost)}</b></div><div><span>Ніжки</span><b>${money(q.legsCost)}</b></div><div><span>Націнка</span><b>${money(q.markupCost)}</b></div></div>`;
+    return `<div class="breakdown"><div><span>Дерево · повні слеби</span><b>${money(q.woodCost)}</b></div><div><span>Смола · ${num(q.kg, 2)} кг</span><b>${money(q.resinCost)}</b></div><div><span>Виготовлення та інші витрати</span><b>${money(q.workCost)}</b></div><div><span>Фінішне покриття</span><b>${money(q.finishCost)}</b></div><div><span>Ніжки${q.legs ? " · " + esc(q.legs.schemeName) + ", " + esc(q.legs.material.name) : ""}</span><b>${money(q.legsCost)}</b></div><div><span>Націнка</span><b>${money(q.markupCost)}</b></div></div>`;
   }
   function validation(d, q) {
     if (!d.pieces.length) return "Додайте хоча б один слеб.";
@@ -1181,7 +1193,7 @@
       ? orders
           .map(
             (o) =>
-              `<article class="order-card" data-order-id="${esc(o.id)}"><div class="order-image">${orderImage(o)}</div><div class="order-details"><span class="badge">${esc(statusNames[o.status] || o.status)}</span><h2 style="margin-top:12px">${shapeNames[o.shape]} стіл ${num(o.l)} × ${num(o.w)}</h2><p>#${esc(o.number)}<br>${o.buyer ? `Покупець: ${esc(o.buyer.displayName || "Без імені")} · ${esc(o.buyer.email)}<br>` : ""}Слеби: ${o.slabs.map((s) => esc(s.number)).join(", ")}<br>Товщина ${num(o.t)} см · епоксидка ${num(o.quote.litres, 2)} л · ${num(o.quote.kg, 2)} кг (щільність ${num(o.costs?.density ?? 0, 2)}, запас ${num(o.costs?.waste ?? 0, 0)}%, вільна площа ${num(o.quote.resin, 3)} м²)<br>1. Передоплата 50%: ${money(o.depositMinor / 100)} · ${o.paidAt ? o.paymentMode === "demo" ? "ДЕМО · реальні кошти не зараховано" : o.paymentMode === "sandbox" ? "ТЕСТ LIQPAY · реальні кошти не зараховано" : "підтверджено банком" : "не підтверджена"}<br>2. Залишок 50%: ${money((o.balanceMinor ?? o.totalMinor - o.depositMinor) / 100)} · ${o.balancePaidAt ? o.balancePaymentMode === "demo" ? "ДЕМО · реальні кошти не зараховано" : o.balancePaymentMode === "sandbox" ? "ТЕСТ LIQPAY · реальні кошти не зараховано" : "підтверджено банком" : o.status === "ready" ? "очікуємо від покупця" : "сплачується після виготовлення"}</p>${stageOf(o) === "paid_full" ? `<p class="hint">Оплачено 100%${o.status === "ready" ? " — стіл можна відправляти." : "."}</p>` : o.status === "ready" && o.paidAt ? '<p class="hint">Стіл готовий. Відправляйте після оплати залишку покупцем.</p>' : ""}${["cart", "pending"].includes(o.status) ? '<p class="hint">Прийняття в роботу стане доступним після передоплати 50%.</p>' : ""}<div class="order-actions">${o.paidAt && ["queued", "making"].includes(o.status) ? `<button class="primary" data-next="${o.id}" data-status="${o.status === "queued" ? "making" : "ready"}">${o.status === "queued" ? "Прийняти в роботу" : "Позначити готовим"}</button>` : ""}<button class="text-btn" data-spec="${o.id}">Специфікація ↓</button></div></div><div class="order-price">${money(o.totalMinor / 100)}</div></article>`,
+              `<article class="order-card" data-order-id="${esc(o.id)}"><div class="order-image">${orderImage(o)}</div><div class="order-details"><span class="badge">${esc(statusNames[o.status] || o.status)}</span><h2 style="margin-top:12px">${shapeNames[o.shape]} стіл ${num(o.l)} × ${num(o.w)}</h2><p>#${esc(o.number)}<br>${o.buyer ? `Покупець: ${esc(o.buyer.displayName || "Без імені")} · ${esc(o.buyer.email)}<br>` : ""}Слеби: ${o.slabs.map((s) => esc(s.number)).join(", ")}<br>Товщина ${num(o.t)} см · епоксидка ${num(o.quote.litres, 2)} л · ${num(o.quote.kg, 2)} кг (щільність ${num(o.costs?.density ?? 0, 2)}, запас ${num(o.costs?.waste ?? 0, 0)}%, вільна площа ${num(o.quote.resin, 3)} м²)<br>${o.quote.legs ? `Ніжки: ${esc(o.quote.legs.schemeName)} · ${esc(o.quote.legs.material.name)} · стіл ${num(o.quote.legs.height, 1)} см, ніжки ${num(o.quote.legs.thickness, 1)} см (довжина ${num(o.quote.legs.legLength, 1)} см)<br>Кріплення: ${o.quote.legs.mounts.length} × пластина «${esc(o.quote.legs.plate.name)}» ${num(o.quote.legs.mounts[0].w, 1)} × ${num(o.quote.legs.mounts[0].d, 1)} × ${num(o.quote.legs.plateThicknessCm, 1)} см, по 4 отвори Ø${num(o.quote.legs.plate.holeDiameterMm, 1)} мм<br>` : ""}1. Передоплата 50%: ${money(o.depositMinor / 100)} · ${o.paidAt ? o.paymentMode === "demo" ? "ДЕМО · реальні кошти не зараховано" : o.paymentMode === "sandbox" ? "ТЕСТ LIQPAY · реальні кошти не зараховано" : "підтверджено банком" : "не підтверджена"}<br>2. Залишок 50%: ${money((o.balanceMinor ?? o.totalMinor - o.depositMinor) / 100)} · ${o.balancePaidAt ? o.balancePaymentMode === "demo" ? "ДЕМО · реальні кошти не зараховано" : o.balancePaymentMode === "sandbox" ? "ТЕСТ LIQPAY · реальні кошти не зараховано" : "підтверджено банком" : o.status === "ready" ? "очікуємо від покупця" : "сплачується після виготовлення"}</p>${stageOf(o) === "paid_full" ? `<p class="hint">Оплачено 100%${o.status === "ready" ? " — стіл можна відправляти." : "."}</p>` : o.status === "ready" && o.paidAt ? '<p class="hint">Стіл готовий. Відправляйте після оплати залишку покупцем.</p>' : ""}${["cart", "pending"].includes(o.status) ? '<p class="hint">Прийняття в роботу стане доступним після передоплати 50%.</p>' : ""}<div class="order-actions">${o.paidAt && ["queued", "making"].includes(o.status) ? `<button class="primary" data-next="${o.id}" data-status="${o.status === "queued" ? "making" : "ready"}">${o.status === "queued" ? "Прийняти в роботу" : "Позначити готовим"}</button>` : ""}<button class="text-btn" data-spec="${o.id}">Специфікація ↓</button></div></div><div class="order-price">${money(o.totalMinor / 100)}</div></article>`,
           )
           .join("")
       : '<div class="empty-panel"><h2>Замовлень поки немає</h2><p>Стіл з’явиться тут після додавання покупцем у кошик. Для початку виробництва потрібна передоплата 50%.</p></div>';
@@ -1287,6 +1299,34 @@
       contourEditor.status();
     }
   };
+  // ---- Wooden legs (table-legs.js, legs-ui.js, table-3d.js) ----------------
+  // The picture of the top as the buyer composed it, for the 3D view.
+  function topTexture() {
+    const d = { ...design, pieces: design.pieces.filter((p) => db.slabs.some((s) => s.id === p.id)) };
+    const width = 1024,
+      height = Math.max(256, Math.round((width * d.w) / d.l));
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-d.l / 2} ${-d.w / 2} ${d.l} ${d.w}" width="${width}" height="${height}">${composition(d, db.slabs, "t3d")}</svg>`;
+    return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+  }
+  legsUi = LegsUi.create({
+    $, esc, num, money,
+    design: () => design,
+    catalog: () => remote.legs,
+    changed: () => invalidate(),
+    syncLegsSelect: (value) => ($("legs").value = value),
+    topTexture,
+  });
+
+  legsAdmin = LegsAdmin.create({
+    $, esc, num, bridge, toast, admin,
+    legs: () => remote.legs,
+    reload: async () => {
+      await reloadRemote();
+      legsAdmin.render();
+      legsUi.render();
+    },
+  });
+
   // ---- Built-in resin textures (resin-catalog.js) -------------------------
   // A style ("Хвилі", "Перламутр") is a grey base painted in the colour the
   // buyer picks; a sample is a photograph of a poured piece as it is. Both end
@@ -1402,7 +1442,7 @@
       (e) => (e.hidden = true),
     );
   if (!inventory)
-    $$('[data-view="inventory"],.admin-label').forEach(
+    $$('[data-view="inventory"],[data-view="legcatalog"],.admin-label').forEach(
       (e) => (e.hidden = true),
     );
   if (!admin)
@@ -1414,6 +1454,7 @@
   renderPresetChoices();
   renderBuiltinTextures();
   $("legs").value = design.legs;
+  legsUi.render();
   $$("[data-shape]").forEach(b => b.classList.toggle("active", b.dataset.shape === design.shape));
   $$("[data-color]").forEach(b => b.classList.toggle("active", !design.resinTexture && b.dataset.color === design.color));
   const chosenColor = $$('[data-color]').find(b => b.dataset.color === design.color);

@@ -20,9 +20,9 @@ export function SlabInventoryPanel({ inventoryOnly = false }: { inventoryOnly?: 
             ? "/state"
             : String(m.path).replace(/^\/tables\/admin/, "");
         const allowed =
-          /^(GET \/state|POST \/slabs|DELETE \/slabs\/[a-zA-Z0-9-]+)$/.test(
+          /^(GET \/state|POST \/(slabs|leg-designs|leg-plates)|DELETE \/(slabs|leg-designs|leg-plates)\/[a-zA-Z0-9-]+|PATCH \/(leg-designs|leg-plates)\/[a-zA-Z0-9-]+)$/.test(
             `${m.method} ${suffix}`,
-          ) || (!inventoryOnly && /^(GET \/production|POST \/resin-textures|PUT \/costs|PATCH \/resin-textures\/[a-zA-Z0-9-]+|DELETE \/resin-textures\/[a-zA-Z0-9-]+|PATCH \/production\/[a-zA-Z0-9-]+)$/.test(
+          ) || (!inventoryOnly && /^(GET \/production|POST \/resin-textures|PUT \/(costs|leg-settings)|PATCH \/resin-textures\/[a-zA-Z0-9-]+|DELETE \/resin-textures\/[a-zA-Z0-9-]+|PATCH \/production\/[a-zA-Z0-9-]+)$/.test(
             `${m.method} ${suffix}`,
           ));
         if (!allowed)

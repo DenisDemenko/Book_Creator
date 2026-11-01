@@ -45,7 +45,7 @@ export async function tableBridge(
   body?: unknown,
   deps: { fetch?: typeof fetch; settings?: BridgeSettings; actorUid?: string } = {},
 ) {
-  if (!/^\/(state|slabs|costs|production|resin-textures)(\/[a-zA-Z0-9-]+)?$/.test(path))
+  if (!/^\/(state|slabs|costs|production|resin-textures|leg-settings|leg-designs|leg-plates)(\/[a-zA-Z0-9-]+)?$/.test(path))
     throw new Error("Некоректний маршрут конструктора.");
   const settings = deps.settings ?? (await readBridgeSettings());
   const response = await (deps.fetch ?? fetch)(
@@ -163,6 +163,31 @@ export function registerSlabTableRoutes(app: Express) {
     requireSlabInventory,
     proxy("DELETE", (r) => "/slabs/" + r.params.id),
   );
+  // Wooden bases. Drawing legs and defining plates (with their four holes) is
+  // open to the furniture designer as well, like the slab stock; the materials,
+  // prices and the plate thickness are the administrator's.
+  app.put(
+    "/api/admin/slab-tables/leg-settings",
+    requireAdmin,
+    proxy("PUT", () => "/leg-settings"),
+  );
+  for (const kind of ["leg-designs", "leg-plates"]) {
+    app.post(
+      `/api/admin/slab-tables/${kind}`,
+      requireSlabInventory,
+      proxy("POST", () => `/${kind}`),
+    );
+    app.patch(
+      `/api/admin/slab-tables/${kind}/:id`,
+      requireSlabInventory,
+      proxy("PATCH", (r) => `/${kind}/` + r.params.id),
+    );
+    app.delete(
+      `/api/admin/slab-tables/${kind}/:id`,
+      requireSlabInventory,
+      proxy("DELETE", (r) => `/${kind}/` + r.params.id),
+    );
+  }
   app.put(
     "/api/admin/slab-tables/costs",
     requireAdmin,

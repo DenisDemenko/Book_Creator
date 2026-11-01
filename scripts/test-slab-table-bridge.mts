@@ -89,10 +89,10 @@ const app = new Proxy(
   },
 ) as Express;
 registerSlabTableRoutes(app);
-assert.equal(routes.length, 10);
+assert.equal(routes.length, 17);
 assert.ok(routes.some((r) => r.path === "/api/admin/slab-tables/resin-textures/:id" && r.handlers[0] === requireAdmin), "texture edit route is admin-only");
 for (const r of routes) {
-  const inventory = /\/(state|slabs)(\/|$)/.test(r.path);
+  const inventory = /\/(state|slabs|leg-designs|leg-plates)(\/|$)/.test(r.path);
   assert.equal(r.handlers[0], inventory ? requireSlabInventory : requireAdmin, r.path);
 }
 for (const principal of [
@@ -117,5 +117,5 @@ for (const principal of [
   assert.equal(next, false);
 }
 console.log(
-  "All ten Studio routes guarded; inventory has shared designer access, costs/production/textures remain admin-only.",
+  "All seventeen Studio routes guarded; inventory has shared designer access, costs/production/textures remain admin-only.",
 );
