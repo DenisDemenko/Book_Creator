@@ -27,3 +27,10 @@
 Вихідні кімнатні фото не записуються в draft/БД/Storage і не стають окремими слайдами; архівується тільки готовий результат, у design metadata — стиль і кількість референсів. Перевірено 23 Marketplace service/UI + 13 moderation/slideshow + 5 interior UI + 24 Studio/SQLite/provider-input checks = 65; JS syntax/diff check пройшли. Реальний OpenAI, якість фізичного розміщення, full build/typecheck/Firebase/PostgreSQL не перевірено через частковий checkout без залежностей/live setup.
 
 Код опубліковано лише в погоджених feature-гілках PR #26 Marketplace і #33 Studio; master/merge/deploy/живі баланси/ключі не змінено. Наступне: CI/повна збірка та staging, Studio перед Marketplace, JSON body size також на reverse proxy (≥4mb), чинні том Storage/міграції модерації зберегти. Інструкції: docs/table-ai.md / docs/table-ai-billing.md.
+
+
+### CI-виправлення — 02.11.2026, продовження #490
+
+Voice Dictation CI падав у test-journal: запис 490 був у log/table-ai-2026-11.md, але не мав табличного рядка в log.md. Покажчик доповнено й кількість оновлено; перевірку повноти не послаблено. Gate B падав у test-bookDesignUi: каталог уже містить Studio Classic/Editorial, а тест вимагав 15 тем. Тест тепер перевіряє точний набір усіх 17 ID, унікальність та обидва novaDesignTheme mapping. Каталог і production UI не змінювалися.
+
+Обидві помилки відтворено локально на snapshot PR #33. Після виправлення оригінальний test-journal має 80/80, весь test-bookDesignUi проходить, Node 24 native TypeScript. Marketplace CI на поточному 0b6959c успішний (run 41467822235); скриншот показував попередній запуск. Після push Studio перевірити нові Voice Dictation CI та Gate B. Повний npm test/build локально не запускався через відсутні залежності; це перевіряє GitHub CI. Merge/deploy та production не виконуються.
