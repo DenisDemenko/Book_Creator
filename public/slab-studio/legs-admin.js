@@ -46,7 +46,7 @@
       $("legWork").value = l.settings.workPerMount;
       $("legSettingsStatus").textContent = l.configured
         ? `Збережено (версія ${l.version}).`
-        : "Ще не збережено: покупці не бачать схем ніжок, доки ви не збережете налаштування.";
+        : "Показано демо-значення: орієнтовні ціни сухих пиломатеріалів в Україні (листопад 2026). Покупці вже можуть вибирати ніжки за цими цінами. Виправте на свої й натисніть «Зберегти» — тоді це будуть ваші ціни.";
       $$all("[data-m]").forEach((input) => {
         input.oninput = () => {
           const row = Number(input.closest("[data-material-row]").dataset.materialRow);

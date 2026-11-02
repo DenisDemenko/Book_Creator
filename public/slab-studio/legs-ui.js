@@ -202,8 +202,8 @@
       if (panel.hidden) return;
       const d = design();
       const set = d.legSet;
-      const ready = c.configured;
-      $("legsNotReady").hidden = ready;
+      const ready = c.available;
+      $("legsNotReady").hidden = !c.demo;
       renderCards(ready ? set : undefined);
       $$all("[data-leg-scheme]").forEach((b) => (b.disabled = !ready));
       for (const id of ["legControls", "legDrawings", "leg3dWrap", "legSummary"]) $(id).hidden = !set || !ready;
@@ -243,7 +243,7 @@
     function draw() {
       const c = catalog(),
         set = design().legSet;
-      if (!c?.available || !set || !c.configured) return;
+      if (!c?.available || !set) return;
       const { input, base, plates, priced } = layoutOf(set);
       $("legFront").innerHTML = drawing(set, "front");
       $("legSide").innerHTML = drawing(set, "side");
@@ -263,7 +263,7 @@
     async function update3d() {
       const d = design(),
         set = d.legSet;
-      if (!set || !catalog()?.configured || $("leg3dWrap").hidden) return;
+      if (!set || !catalog()?.available || $("leg3dWrap").hidden) return;
       const Table3D = root.Table3D;
       if (!Table3D) {
         root.addEventListener("table3d-ready", schedule3d, { once: true });
@@ -293,7 +293,7 @@
     function choose(id) {
       const d = design();
       const meta = metaOf(id);
-      if (!meta || !catalog().configured) return;
+      if (!meta || !catalog().available) return;
       const prev = d.legSet;
       d.legSet = {
         scheme: id,
