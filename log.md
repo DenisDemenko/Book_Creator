@@ -121,6 +121,8 @@ remote перевірити можна, запушити — ні**.
 
 # Що не запушено (для наступної сесії)
 
+CI #490: також виправлено educational PDF contract (47760f1): точні 17 тем, унікальність, відокремлені 9 навчальних шаблонів; локально contract + 7 наступних перевірок pass. Останні docs commits цієї гілки описують перевірку; результати GitHub CI звірити окремо.
+
 02.11.2026, CI #490: виправлено табличний покажчик 490 та тест 17 тем (включно Studio Classic/Editorial). Локально: journal 80/80, Book Design UI pass. Публікація тільки у feat/table-builder-shared-ai-credits; після push перевірити CI. Marketplace 0b6959c: CI 41467822235 success. Merge/deploy не виконано.
 
 02.11.2026, #02/#490: інтер’єри та 10 фото-референсів **опубліковано тільки у feature-гілках**. Studio commits c86c11a, 614a047, 2d52504, 290f1a0, Marketplace PR #26 HEAD 0b6959c. Подальші docs commits — передача/журнал цієї ж гілки. 65 цільових перевірок пройшли; full build/live не прийнято. Потрібні Studio → Marketplace, reverse proxy body ≥4mb; живі ключі/баланси/production не змінено. Деталі в записі #490 і docs/table-ai-billing.md.
