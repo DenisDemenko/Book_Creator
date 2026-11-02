@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test:slab-tables": "tsx scripts/test-slab-table-bridge.mts",
+    "test:slab-tables": "tsx scripts/test-slab-table-bridge.mts && tsx scripts/test-tableDrawingsPdf.mts",
     "test:diff": "tsx scripts/test-bookDiff.mts",
     "test:images": "tsx scripts/test-imageGeneration.mts",
     "test:video": "tsx scripts/test-videoGeneration.mts",

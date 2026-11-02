@@ -151,7 +151,7 @@
     const { TE } = deps();
     const ring = topRing(o);
     const pcs = placed(o);
-    const prims = [...header(o, "стільниця зверху, мм, 1:1")];
+    const prims = [...header(o, "стільниця зверху, мм")];
     prims.push({ kind: "rings", layer: "RESIN", rings: [ring, ...pcs.map((p) => p.ring)], fill: true });
     prims.push(poly("TABLE_OUTLINE", ring));
     for (const p of pcs) {
@@ -177,7 +177,7 @@
     const half = (o.l / 2) * MM;
     const rt = Math.min(Math.max(Number(o.edgeTopMm) || 0, 0), o.t * MM),
       rb = Math.min(Math.max(Number(o.edgeBottomMm) || 0, 0), o.t * MM - rt);
-    const prims = [...header(o, "розріз стільниці, мм, 1:1")];
+    const prims = [...header(o, "розріз стільниці, мм")];
     prims.push({ kind: "path", layer: "TOP_SECTION", d: TE.sectionPath(-half, half, 0, o.t * MM, rt, rb, o.edgeTopStyle, o.edgeBottomStyle), pts: [[-half, 0], [half, o.t * MM]] });
     prims.push(...dimV(0, o.t * MM, half + 60, `${fmt(o.t * MM)} мм`));
     prims.push(...dimH(-half, half, o.t * MM + 70, `${fmt(o.l * MM)} мм`));
@@ -189,7 +189,7 @@
   // ---- 03 plates and legs in plan
   function sheetLegsPlan(o, lg) {
     const { TL } = deps();
-    const prims = [...header(o, "ніжки й пластини зверху, мм, 1:1")];
+    const prims = [...header(o, "ніжки й пластини зверху, мм")];
     prims.push(poly("TABLE_OUTLINE", topRing(o)));
     const fp = TL.footprint(lg.base, lg.plates);
     for (const p of fp.parts) prims.push(poly("LEGS", p.poly.map(([x, y]) => [x * MM, y * MM])));
@@ -206,7 +206,7 @@
   function sheetPlate(o, lg) {
     const p = lg.plates[0];
     const w = p.w * MM, d = p.d * MM;
-    const prims = [...header(o, "пластина, мм, 1:1")];
+    const prims = [...header(o, "пластина, мм")];
     prims.push(poly("PLATES", [[-w / 2, -d / 2], [w / 2, -d / 2], [w / 2, d / 2], [-w / 2, d / 2]]));
     for (const h of p.holes) prims.push(circle("PLATE_HOLES", [(h.x - p.x) * MM, (h.y - p.y) * MM], h.diameterMm / 2));
     const hx = Math.abs(p.holes[0].x - p.x) * MM, hy = Math.abs(p.holes[0].y - p.y) * MM;
@@ -224,7 +224,7 @@
     const y = (z) => H - z * MM;
     const across = view === "front" ? o.l : o.w;
     const half = (across / 2) * MM;
-    const prims = [...header(o, `вигляд ${view === "front" ? "спереду" : "збоку"}, мм, 1:1`)];
+    const prims = [...header(o, `вигляд ${view === "front" ? "спереду" : "збоку"}, мм`)];
     const rt = Math.min(Math.max(Number(o.edgeTopMm) || 0, 0), o.t * MM),
       rb = Math.min(Math.max(Number(o.edgeBottomMm) || 0, 0), o.t * MM - rt);
     prims.push({ kind: "path", layer: "TOP_SECTION", d: TE.sectionPath(-half, half, 0, o.t * MM, rt, rb, o.edgeTopStyle, o.edgeBottomStyle), pts: [[-half, 0], [half, o.t * MM]] });
@@ -260,7 +260,7 @@
   }
   function sheetParts(o, lg) {
     const groups = partGroups(lg.base);
-    const prims = [...header(o, "деталі ніжок, мм, 1:1")];
+    const prims = [...header(o, "деталі ніжок, мм")];
     let x = 0, rowTop = 0, rowH = 0;
     for (const g of groups) {
       const p = g.part;
@@ -297,14 +297,33 @@
   }
 
   // ------------------------------------------------------------------ SVG
-  const attrs = (style) => {
+  const attrs = (style, k = 1, floor = 0) => {
     if (!style) return "";
     const f = style.fill && style.fill !== "none" ? style.fill : "none";
-    return ` fill="${f}" stroke="${style.stroke || "none"}" stroke-width="${style.width || 0}"${style.dash ? ` stroke-dasharray="${style.dash}"` : ""} stroke-linejoin="round"`;
+    return ` fill="${f}" stroke="${style.stroke || "none"}" stroke-width="${style.width ? Math.max(style.width * k, floor) : 0}"${style.dash ? ` stroke-dasharray="${style.dash}"` : ""} stroke-linejoin="round"`;
   };
-  function svg(s, o) {
+  // A path of M, L, A and Z commands (what sectionPath writes) with every length multiplied by k.
+  const scalePath = (d, k) =>
+    d.replace(/([MLAZ])([^MLAZ]*)/g, (_, c, rest) => {
+      const v = rest.trim().split(/[ ,]+/).filter(Boolean).map(Number);
+      if (c === "Z") return "Z";
+      if (c === "A") return "A " + [v[0] * k, v[1] * k, v[2], v[3], v[4], v[5] * k, v[6] * k].map(n).join(" ");
+      return c + " " + v.map((x) => n(x * k)).join(" ");
+    });
+  // The coordinates of every primitive multiplied by k: a reduced sheet is drawn small, not stretched by the viewer.
+  const reduce = (p, k) =>
+    p.kind === "poly" ? { ...p, pts: p.pts.map(([x, y]) => [x * k, y * k]) }
+      : p.kind === "rings" ? { ...p, rings: p.rings.map((r) => r.map(([x, y]) => [x * k, y * k])) }
+      : p.kind === "path" ? { ...p, d: scalePath(p.d, k), tx: (p.tx || 0) * k, ty: (p.ty || 0) * k }
+      : p.kind === "circle" ? { ...p, c: [p.c[0] * k, p.c[1] * k], r: p.r * k }
+      : { ...p, p: [p.p[0] * k, p.p[1] * k], h: p.h * k };
+  // opts.scale (1/N): the sheet reduced to 1:N for paper; a line is never thinner than a fifth of a millimetre there.
+  function svg(s, o, opts = {}) {
+    const k = opts.scale > 0 && opts.scale < 1 ? opts.scale : 1;
+    // opts.mmText: for a reader that takes the position and size of a text as CSS pixels whatever the scale of the drawing (DesignCraft)
+    const px = opts.mmText ? 96 / 25.4 : 1;
     const byLayer = new Map();
-    for (const p of s.prims) {
+    for (const p of s.prims.map((q) => (k === 1 ? q : reduce(q, k)))) {
       const list = byLayer.get(p.layer) || [];
       list.push(p);
       byLayer.set(p.layer, list);
@@ -318,15 +337,16 @@
           if (p.kind === "rings") return `<path fill-rule="evenodd" d="${p.rings.map((r) => "M" + r.map(([x, y]) => n(x) + " " + n(y)).join(" L") + " Z").join(" ")}"/>`;
           if (p.kind === "path") return `<path d="${p.d}" transform="translate(${n(p.tx || 0)} ${n(p.ty || 0)})"/>`;
           if (p.kind === "circle") return `<circle cx="${n(p.c[0])}" cy="${n(p.c[1])}" r="${n(p.r)}"/>`;
-          return `<text x="${n(p.p[0])}" y="${n(p.p[1])}" font-size="${n(p.h)}" text-anchor="${p.anchor}">${esc(p.s)}</text>`;
+          return `<text x="${n(p.p[0] * px)}" y="${n(p.p[1] * px)}" font-size="${n(p.h * px)}" text-anchor="${p.anchor}">${esc(p.s)}</text>`;
         })
         .join("");
       const isText = layer === "TEXT";
-      const style = isText ? ' fill="#111" stroke="none" font-family="DejaVu Sans, Arial, sans-serif"' : attrs(st);
+      const style = isText ? ' fill="#111" stroke="none" font-family="DejaVu Sans, Arial, sans-serif"' : attrs(st, k, k === 1 ? 0 : 0.2);
       parts.push(`<g id="${layer}"${style}><title>${esc(st.note || layer)}</title>${body}</g>`);
     }
-    const meta = `Стіл №${o.number}: ${s.title}. Одиниці: міліметри, масштаб 1:1.`;
-    return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${n(s.w)}mm" height="${n(s.h)}mm" viewBox="0 0 ${n(s.w)} ${n(s.h)}"><title>${esc(meta)}</title><desc>Fusion Lab · виробничий аркуш ${esc(s.id)}</desc>${parts.join("")}</svg>\n`;
+    const meta = `Стіл №${o.number}: ${s.title}. Одиниці: міліметри, масштаб 1:${n(1 / k)}.`;
+    const body = parts.join("");
+    return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${n(s.w * k)}mm" height="${n(s.h * k)}mm" viewBox="0 0 ${n(s.w * k)} ${n(s.h * k)}"><title>${esc(meta)}</title><desc>Fusion Lab · виробничий аркуш ${esc(s.id)}</desc>${body}</svg>\n`;
   }
 
   // ------------------------------------------------------------------ DXF (AutoCAD 2000, mm)

@@ -18,6 +18,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
     && /opt/designcraft/bin/designcraft-cli --version \
     && rm -rf /var/lib/apt/lists/* /tmp/designcraft.tar.gz
 
+# Другий pinned-бінарник лише для PDF-креслень столів: вони вставляють SVG командою edit.pasteSvg, якої в 0.7.1 немає
+# (з'явилась у 0.9.0). Книги лишаються на 0.7.1 із шимом, тож їхня верстка не змінюється.
+FROM debian:bookworm-slim AS designcraft-drawings
+ARG DESIGNCRAFT_DRAWINGS_VERSION=0.9.0
+ARG DESIGNCRAFT_DRAWINGS_SHA256=9c57880889d6b5c399c450b5321ba6c37c9e54e58ac08161d7857a1115d89755
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+    && curl -fsSL \
+      -o /tmp/designcraft.tar.gz \
+      "https://github.com/storytold/designcraft/releases/download/v${DESIGNCRAFT_DRAWINGS_VERSION}/designcraft-${DESIGNCRAFT_DRAWINGS_VERSION}-linux-x86_64.tar.gz" \
+    && echo "${DESIGNCRAFT_DRAWINGS_SHA256}  /tmp/designcraft.tar.gz" | sha256sum -c - \
+    && mkdir -p /opt/designcraft-drawings \
+    && tar -xzf /tmp/designcraft.tar.gz --strip-components=1 -C /opt/designcraft-drawings \
+    && /opt/designcraft-drawings/bin/designcraft-cli --version \
+    && rm -rf /var/lib/apt/lists/* /tmp/designcraft.tar.gz
+
 FROM node:22-bookworm-slim AS build
 WORKDIR /app
 
@@ -72,6 +87,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=designcraft /opt/designcraft/bin/designcraft-cli /usr/local/lib/designcraft/designcraft-cli
 COPY --from=build /app/scripts/designcraft-cli-compat.sh /usr/local/bin/designcraft-cli-compat
 RUN chmod +x /usr/local/bin/designcraft-cli-compat /usr/local/lib/designcraft/designcraft-cli
+COPY --from=designcraft-drawings /opt/designcraft-drawings/bin/designcraft-cli /usr/local/lib/designcraft-drawings/designcraft-cli
+RUN chmod +x /usr/local/lib/designcraft-drawings/designcraft-cli
+ENV DESIGNCRAFT_DRAWINGS_PATH=/usr/local/lib/designcraft-drawings/designcraft-cli
 ENV DESIGNCRAFT_REAL_PATH=/usr/local/lib/designcraft/designcraft-cli \
     DESIGNCRAFT_PATH=/usr/local/bin/designcraft-cli-compat \
     CHROMIUM_PATH=/usr/bin/chromium

@@ -2,6 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { can, requireAdmin } from "./auth";
 import { readFurnitureAccess } from "./furnitureAccess";
 import { readBridgeSettings, type BridgeSettings } from "./marketplaceBridge";
+import { DrawingsError, drawingsFileName, renderDrawingsPdf } from "./tableDrawingsPdf";
 import { calculateWoodAndEpoxyCost } from "../src/components/adminOs/furnitureCalculator/utils/calculator";
 import type {
   CalculationInput,
@@ -213,6 +214,26 @@ export function registerSlabTableRoutes(app: Express) {
     requireAdmin,
     proxy("GET", () => "/production"),
   );
+  // PDF drawings of one order, made by DesignCraft: the customer, the chosen configuration with the resin, and every
+  // sheet of the production files. Not a product of the marketplace: only an administrator can fetch it.
+  app.get("/api/admin/slab-tables/drawings/:id", requireAdmin, async (req, res) => {
+    try {
+      if (!/^[a-zA-Z0-9-]{1,64}$/.test(req.params.id)) throw new DrawingsError("Некоректний номер замовлення.", 400);
+      const orders = (await tableBridge("GET", "/production")) as { id: string; number: string }[];
+      const order = orders.find((o) => o.id === req.params.id);
+      if (!order) throw new DrawingsError("Замовлення не знайдено.", 404);
+      const pdf = await renderDrawingsPdf(order as never);
+      res
+        .status(200)
+        .type("application/pdf")
+        .set("Content-Disposition", `attachment; filename="${drawingsFileName(order as never)}"`)
+        .set("Cache-Control", "no-store")
+        .send(pdf);
+    } catch (error) {
+      const status = error instanceof DrawingsError ? error.status : (error as { status?: number }).status || 500;
+      res.status(status).json({ error: error instanceof Error ? error.message : "Не вдалося скласти креслення." });
+    }
+  });
   app.patch(
     "/api/admin/slab-tables/production/:id",
     requireAdmin,

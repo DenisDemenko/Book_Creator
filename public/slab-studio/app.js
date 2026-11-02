@@ -1357,6 +1357,10 @@
         (b.onclick = () => {
           const o = db.orders.find((x) => x.id === b.dataset.prod);
           try {
+            if (b.dataset.kind === "pdf") return void downloadDrawings(o, b).catch((error) => {
+              $("ordersError").textContent = error.message;
+              $("ordersError").hidden = false;
+            });
             downloadProduction(o, b.dataset.kind);
           } catch (error) {
             $("ordersError").textContent = "Не вдалося скласти файли: " + (error.message || error);
@@ -1381,8 +1385,22 @@
   // The production files of an order, made on this page from the same geometry the buyer saw: after the deposit.
   const productionButtons = (o) =>
     `<span class="order-files" role="group" aria-label="Файли для виробництва"><button class="text-btn" data-prod="${esc(o.id)}" data-kind="all">Файли виробництва (zip) ↓</button>` +
-    [["svg", "SVG"], ["dxf", "DXF"], ["obj", "OBJ"]].map(([k, t]) => `<button class="text-btn" data-prod="${esc(o.id)}" data-kind="${k}">${t} ↓</button>`).join("") +
+    [["pdf", "PDF"], ["svg", "SVG"], ["dxf", "DXF"], ["obj", "OBJ"]].map(([k, t]) => `<button class="text-btn" data-prod="${esc(o.id)}" data-kind="${k}">${t} ↓</button>`).join("") +
     "</span>";
+  // The PDF drawings are made by DesignCraft on the Studio server (not in this page).
+  async function downloadDrawings(o, button) {
+    button.disabled = true;
+    const label = button.textContent;
+    button.textContent = "Складаємо PDF…";
+    try {
+      const r = await fetch("/api/admin/slab-tables/drawings/" + encodeURIComponent(o.id), { credentials: "same-origin" });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Не вдалося скласти креслення.");
+      download(`${o.number}-kreslennya.pdf`, await r.blob(), "application/pdf");
+    } finally {
+      button.disabled = false;
+      button.textContent = label;
+    }
+  }
   function downloadProduction(o, kind) {
     const all = window.TableProduction.files(o);
     const pick = kind === "all" ? all : all.filter((f) => f.name.startsWith(kind + "/"));

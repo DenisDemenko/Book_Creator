@@ -89,7 +89,8 @@ const app = new Proxy(
   },
 ) as Express;
 registerSlabTableRoutes(app);
-assert.equal(routes.length, 17);
+assert.equal(routes.length, 18);
+assert.ok(routes.some((r) => r.path === "/api/admin/slab-tables/drawings/:id" && r.handlers[0] === requireAdmin), "the PDF drawings are for the administrator only");
 assert.ok(routes.some((r) => r.path === "/api/admin/slab-tables/resin-textures/:id" && r.handlers[0] === requireAdmin), "texture edit route is admin-only");
 for (const r of routes) {
   const inventory = /\/(state|slabs|leg-designs|leg-plates)(\/|$)/.test(r.path);
@@ -117,5 +118,5 @@ for (const principal of [
   assert.equal(next, false);
 }
 console.log(
-  "All seventeen Studio routes guarded; inventory has shared designer access, costs/production/textures remain admin-only.",
+  "All eighteen Studio routes guarded; inventory has shared designer access, costs/production/textures remain admin-only.",
 );
