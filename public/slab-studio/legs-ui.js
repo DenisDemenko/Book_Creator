@@ -69,6 +69,14 @@
           c.foot = r(c.foot, TL.COLUMN_MAX_CM);
         }
       }
+      if (set.slats) {
+        const s = set.slats;
+        if (!Number.isFinite(s.thick) || !Number.isFinite(s.radius) || set.scheme !== "pedestal" || !set.columnDims || meta.custom) delete set.slats;
+        else {
+          s.thick = Math.round(Math.min(TL.SLAT_MAX_CM, Math.max(TL.SLAT_MIN_CM, s.thick)) * 10) / 10;
+          s.radius = Math.round(Math.max(TL.SLAT_R_MIN_CM, Math.min(TL.SLAT_R_MAX_CM, s.thick / 2, s.radius)) * 10) / 10;
+        }
+      }
       const inset = Number.isFinite(set.inset) ? set.inset : TL.DEFAULT_INSET_CM;
       set.inset = Math.round(Math.min(TL.MAX_INSET_CM, Math.max(0, inset)) * 10) / 10;
       return true;
@@ -84,6 +92,7 @@
         inset: set.inset,
         legDims: set.legDims,
         columnDims: set.columnDims,
+        slats: set.slats,
         plateCm: Math.max(TL.plateSide(plateOf(set).widthCm), TL.plateSide(plateOf(set).depthCm)),
       };
       const base = TL.layout(input, meta?.custom);
@@ -164,7 +173,11 @@
       g += arrowV(left + fs * 6.5, y(H), y(H) + t, `стільниця ${num(t, 1)} см`, fs, true);
       g += arrowV(left + fs * 6.5, y(H) + t, y(H) + t + pt, `пластина ${num(pt, 1)} см`, fs * 0.85, true);
       const foot = base.parts.find((p) => p.role !== "rail" && p.bottom[2] < 0.01) || base.parts[0];
-      const outline = TL.outline(foot, view);
+      // a post of slats: the foot is every slat of the same post
+      const post = (id) => id.replace(/[.]s[0-9]+$/, "");
+      const outline = base.parts
+        .filter((p) => p.role !== "rail" && p.bottom[2] < 0.01 && post(p.id) === post(foot.id))
+        .flatMap((p) => TL.outline(p, view));
       const fx0 = Math.min(...outline.map((v) => v[0])),
         fx1 = Math.max(...outline.map((v) => v[0]));
       g += arrowH(H + fs * 1.6, fx0, fx1, `${num(fx1 - fx0, 1)} см`, fs);
@@ -275,6 +288,16 @@
         if (document.activeElement !== $("colTop")) $("colTop").value = Math.round(set.columnDims.top * 10);
         if (document.activeElement !== $("colFoot")) $("colFoot").value = Math.round(set.columnDims.foot * 10);
       }
+      // A post assembled from vertical slats.
+      const slatApply = colManual;
+      $("slatBox").hidden = !slatApply;
+      $("slatOn").checked = slatApply && !!set.slats;
+      $("slatFields").hidden = !(slatApply && set.slats);
+      if (slatApply && set.slats) {
+        if (document.activeElement !== $("slatThick")) $("slatThick").value = Math.round(set.slats.thick * 10);
+        if (document.activeElement !== $("slatRadius")) $("slatRadius").value = Math.round(set.slats.radius * 10);
+        $("slatRadius").max = Math.round(Math.min(TL.SLAT_R_MAX_CM, set.slats.thick / 2) * 10);
+      }
       $("legThicknessField").hidden = manual || colManual;
       if (manual)
         for (const [id, key] of [["legTopW", "topW"], ["legTopD", "topD"], ["legFootW", "footW"], ["legFootD", "footD"]])
@@ -304,15 +327,21 @@
         set = design().legSet;
       if (!c?.available || !set) return;
       const { input, base, plates, priced } = layoutOf(set);
+      const slatN = set.slats ? TL.slatCount(base) : 0;
       $("legFront").innerHTML = drawing(set, "front");
       $("legSide").innerHTML = drawing(set, "side");
       const plate = plateOf(set);
       $("legSummary").innerHTML =
         `<b>${esc(metaOf(set.scheme).name)}</b> · довжина ніжки ${num(base.legLength, 1)} см (стіл ${num(set.height, 1)} см = ніжка + пластина ${num(input.plateT, 1)} см + стільниця ${num(design().t, 1)} см) · ${esc(materialOf(set).name)}` +
+        (set.slats && slatN ? `<br>Рейки: ${num(set.slats.thick * 10)} мм, скруглення ${num(set.slats.radius * 10)} мм, ${slatN} на колоні` : "") +
         (set.columnDims ? `<br>Колона: верхнє коло Ø${num(set.columnDims.top * 10)} мм → нижнє Ø${num(set.columnDims.foot * 10)} мм` : "") +
         (set.legDims ? `<br>Ніжка: верх ${num(set.legDims.topW * 10)} × ${num(set.legDims.topD * 10)} мм → низ ${num(set.legDims.footW * 10)} × ${num(set.legDims.footD * 10)} мм` : "") +
-        `<br>Кріплення: ${plates.length} × пластина «${esc(plate.name)}» ${num(plates[0].w, 1)} × ${num(plates[0].d, 1)} × ${num(input.plateT, 1)} см, по 4 отвори Ø${num(plate.holeDiameterMm, 1)} мм (відступ ${num(plate.holeInsetMm / 10, 1)} см від краю). Пластини стоять на ${num(set.inset, 1)} см від краю стільниці` +
+        `<br>Кріплення: ${plates.length} × пластина «${esc(plate.name)}» ${num(plates[0].w, 1)} × ${num(plates[0].d, 1)} × ${num(input.plateT, 1)} см, по 4 отвори Ø${num(plate.holeDiameterMm, 1)} мм (відступ ${num(plates[0].holeInsetMm)} мм від краю, автоматично). Пластини стоять на ${num(set.inset, 1)} см від краю стільниці` +
         `<br>Орієнтовна вартість ніжок: <b>${money(priced.total)}</b> (дерево ${money(priced.wood)} · пластини ${money(priced.plate)} · робота ${money(priced.work)}). Остаточна — після розрахунку.`;
+      if (set.slats)
+        $("slatInfo").textContent = slatN
+          ? `Рейок на колоні: ${slatN} (автоматично), усередині колона порожня.`
+          : "Колона тонша за дві рейки з запасом 10 мм — вона лишається суцільною. Збільште її діаметр або зменште рейку.";
       $("legPlateDetail").innerHTML = plateSvg(plates[0]);
       schedule3d();
       env.paint?.();
@@ -367,6 +396,7 @@
         inset: prev?.inset ?? TL.DEFAULT_INSET_CM,
         ...(prev?.legDims && TL.DIMS_SCHEMES.includes(id) ? { legDims: { ...prev.legDims } } : {}),
         ...(prev?.columnDims && id === "pedestal" ? { columnDims: { ...prev.columnDims } } : {}),
+        ...(prev?.slats && id === "pedestal" && prev.columnDims ? { slats: { ...prev.slats } } : {}),
         material: prev?.material || catalog().settings.materials[0].id,
         ...(prev?.plate ? { plate: prev.plate } : {}),
       };
@@ -402,12 +432,36 @@
           };
         $(id).onchange = () => render();
       }
+      $("slatOn").onchange = (e) => {
+        const s = set();
+        if (!s) return;
+        if (e.target.checked) s.slats = { thick: 2, radius: 0.8 };
+        else delete s.slats;
+        env.changed();
+        render();
+      };
+      for (const [id, key] of [["slatThick", "thick"], ["slatRadius", "radius"]]) {
+        $(id).oninput = (e) => {
+          const s = set();
+          const v = num2(e.target.value) / 10;
+          if (!s || !s.slats || !Number.isFinite(v)) return;
+          s.slats[key] = key === "thick" ? Math.min(TL.SLAT_MAX_CM, Math.max(TL.SLAT_MIN_CM, v)) : Math.min(TL.SLAT_R_MAX_CM, Math.max(TL.SLAT_R_MIN_CM, v));
+          s.slats.radius = Math.max(TL.SLAT_R_MIN_CM, Math.min(s.slats.radius, s.slats.thick / 2));
+          env.changed();
+          clearTimeout(drawTimer);
+          drawTimer = setTimeout(draw, 80);
+        };
+        $(id).onchange = () => render();
+      }
       $("colDimsOn").onchange = (e) => {
         const s = set();
         if (!s) return;
         const d = design();
         if (e.target.checked) s.columnDims = TL.defaultColumn(s.thickness, d.l, d.w);
-        else delete s.columnDims;
+        else {
+          delete s.columnDims;
+          delete s.slats;
+        }
         env.changed();
         render();
       };

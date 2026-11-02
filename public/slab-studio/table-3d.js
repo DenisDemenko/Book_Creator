@@ -219,7 +219,7 @@ function create(canvas) {
       const { parts, plates, plateT, legLength, color } = model.legs;
       const wood = new THREE.MeshStandardMaterial({ color: color || WOOD, roughness: 0.62, side: THREE.DoubleSide });
       for (const part of parts) {
-        const n = part.type === "round" ? 24 : 4;
+        const n = window.TableLegs.ringSize(part);
         if (part.svg && svgTexture) {
           // A leg cut from a drawing: stacked thin cut-outs give it a body.
           const w = part.svg === "front" ? part.bs[0] : part.bs[1];

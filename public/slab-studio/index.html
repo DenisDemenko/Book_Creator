@@ -298,6 +298,17 @@
                       <button type="button" data-col-shape="down">Звужена донизу</button>
                       <button type="button" data-col-shape="up">Розширена донизу</button>
                     </span>
+                    <div id="slatBox" hidden>
+                      <label class="check"><input type="checkbox" id="slatOn" /> Зібрати колону з вертикальних рейок</label>
+                      <div id="slatFields" hidden>
+                        <p class="hint">Рейки — трапеції, що повторюють звуження колони. Товщина 10–40 мм, скруглення країв 5–10 мм (не більше половини товщини). Кількість рейок рахується автоматично за периметром колони.</p>
+                        <div class="leg-dim-grid">
+                          <label>Товщина рейки, мм<input id="slatThick" type="number" min="10" max="40" step="1" inputmode="decimal" /></label>
+                          <label>Скруглення, мм<input id="slatRadius" type="number" min="5" max="10" step="1" inputmode="decimal" /></label>
+                        </div>
+                        <p class="hint" id="slatInfo"></p>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <label>Відступ від краю стільниці, см <small id="legInsetHint"></small>
@@ -581,11 +592,10 @@
             <label>Ширина, мм<input data-p="widthCm" data-mm type="number" step="5" min="50" max="300" value="150" required /></label>
             <label>Глибина, мм<input data-p="depthCm" data-mm type="number" step="5" min="50" max="300" value="150" required /></label>
             <label>Діаметр отвору, мм<input data-p="holeDiameterMm" type="number" step="0.5" min="2" max="25" value="6" required /></label>
-            <label>Відступ отвору від краю, мм<input data-p="holeInsetMm" type="number" step="1" min="5" max="100" value="15" required /></label>
           </div>
           <label class="check"><input data-p="countersink" type="checkbox" /> Зенківка під шуруп</label>
           <label class="check"><input data-p="isDefault" type="checkbox" /> Основна пластина</label>
-          <p class="hint">Розмір пластини — від 50 до 300 мм (за замовчуванням 150 × 150 мм). Кожна пластина має чотири отвори в кутах. Пластина ніколи не буває меншою за основу ніжки, яку вона тримає, і не виходить за краї стільниці.</p>
+          <p class="hint">Розмір пластини — від 50 до 300 мм (за замовчуванням 150 × 150 мм). Кожна пластина має чотири отвори під болти в кутах; відступ від краю — автоматично, 10–20 мм. Пластина ніколи не буває меншою за основу ніжки, яку вона тримає, і не виходить за краї стільниці.</p>
           <button class="primary" type="submit">Додати пластину</button>
         </form>
         <div class="inventory-grid" id="legPlateList"></div>

@@ -155,7 +155,7 @@
           <label>Ширина, мм<input data-p="widthCm" data-mm type="number" step="5" min="50" max="300" value="${esc(Math.round(p.widthCm * 10))}" ${builtin ? "disabled" : ""} /></label>
           <label>Глибина, мм<input data-p="depthCm" data-mm type="number" step="5" min="50" max="300" value="${esc(Math.round(p.depthCm * 10))}" ${builtin ? "disabled" : ""} /></label>
           <label>Отвір Ø, мм<input data-p="holeDiameterMm" type="number" step="0.5" min="2" max="25" value="${esc(p.holeDiameterMm)}" ${builtin ? "disabled" : ""} /></label>
-          <label>Відступ від краю, мм<input data-p="holeInsetMm" type="number" step="1" min="5" max="100" value="${esc(p.holeInsetMm)}" ${builtin ? "disabled" : ""} /></label>
+          <p class="hint">Чотири отвори в кутах: ${plate.holeInsetMm} мм від краю — автоматично (10–20 мм).</p>
         </div>
         <label class="check"><input data-p="countersink" type="checkbox" ${p.countersink ? "checked" : ""} ${builtin ? "disabled" : ""}/> Зенківка під шуруп</label>
         <label class="check"><input data-p="isDefault" type="checkbox" ${p.isDefault ? "checked" : ""} ${builtin ? "disabled" : ""}/> Основна пластина</label>

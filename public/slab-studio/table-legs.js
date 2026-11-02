@@ -75,6 +75,66 @@
     const r = (v, hi) => Math.min(hi, Math.max(COLUMN_MIN_CM, Math.round(v * 10) / 10));
     return { top: r(D, columnTopMax({ l, w })), foot: r(Math.max(D, Math.min(0.3 * Math.min(l, w), 40)), COLUMN_MAX_CM) };
   }
+  // The central column set by hand (a trapezoid) can be assembled from vertical slats (cm): each slat is a trapezoid
+  // in the elevation (it follows the taper of the column), 10-40 mm thick with its edges rounded 5-10 mm, no more than
+  // half of the thickness. The count is automatic: one slat per 2.5 thicknesses (at least 25 mm) round the column, with
+  // a 3 mm seam between them. slats = { thick, radius }. The column is hollow inside the slats; a column thinner than
+  // two slats and 10 mm stays solid. Every other leg is whole.
+  const SLAT_MIN_CM = 1,
+    SLAT_MAX_CM = 4,
+    SLAT_R_MIN_CM = 0.5,
+    SLAT_R_MAX_CM = 1,
+    SLAT_GAP_CM = 0.3,
+    ARC_STEPS = 3;
+  const slatsOf = (p) => {
+    const d = p.slats;
+    if (!d || !Number.isFinite(d.thick) || !Number.isFinite(d.radius)) return null;
+    if (d.thick < SLAT_MIN_CM || d.thick > SLAT_MAX_CM || d.radius < SLAT_R_MIN_CM || d.radius > SLAT_R_MAX_CM) return null;
+    return d.radius * 2 <= d.thick + 1e-9 ? d : null;
+  };
+  // The staves of the column, in place of it.
+  function slatsOfColumn(col, sl) {
+    const t = sl.thick,
+      pitch = Math.max(2.5, 2.5 * t);
+    const D0 = col.bs[0],
+      D1 = col.ts[0];
+    if (Math.min(D0, D1) < 2 * t + 1) return null;
+    const n = Math.max(6, Math.round((Math.PI * (D0 + D1)) / 2 / pitch));
+    // the outer face of a stave is a chord: its corners stand on the circle of the column
+    const w = (D) => D * Math.sin(Math.PI / n) - SLAT_GAP_CM;
+    const r0 = (D0 / 2) * Math.cos(Math.PI / n) - t / 2,
+      r1 = (D1 / 2) * Math.cos(Math.PI / n) - t / 2;
+    const out = [];
+    for (let k = 0; k < n; k++) {
+      const th = (k / n) * Math.PI * 2,
+        c = Math.cos(th),
+        s = Math.sin(th);
+      out.push(
+        part(
+          col.id + ".s" + k, "leg", "rect",
+          [col.bottom[0] + r0 * c, col.bottom[1] + r0 * s, col.bottom[2]],
+          [col.top[0] + r1 * c, col.top[1] + r1 * s, col.top[2]],
+          [w(D0), t], [w(D1), t], (th * 180) / Math.PI + 90,
+          { rr: Math.min(sl.radius, t / 2, w(D0) / 2, w(D1) / 2) },
+        ),
+      );
+    }
+    return out;
+  }
+  // The column of a base put together from slats (a column drawn as an SVG and every other leg stay whole).
+  function slatify(id, p, base) {
+    const sl = id === "pedestal" && columnOf(p) ? slatsOf(p) : null;
+    if (!sl) return base;
+    const parts = [];
+    for (const x of base.parts) {
+      const post = x.id === "column" && x.type === "round" && !x.svg ? slatsOfColumn(x, sl) : null;
+      if (post) parts.push(...post);
+      else parts.push(x);
+    }
+    return { ...base, parts };
+  }
+  // How many slats the column has.
+  const slatCount = (base) => base.parts.filter((x) => /^column[.]s[0-9]+$/.test(x.id)).length;
   const DIMS_SCHEMES = ["straight", "tapered", "splayed", "turned", "trestle", "xframe", "sled", "tripod"];
   const dimsOf = (p) => {
     const d = p.legDims;
@@ -341,7 +401,7 @@
       default:
         throw new Error("Невідома схема ніжок: " + id);
     }
-    return applyDims(id, p, { parts, mounts, legLength: Lg });
+    return slatify(id, p, applyDims(id, p, { parts, mounts, legLength: Lg }));
   }
   const x0 = (sx, px) => sx * px;
 
@@ -384,6 +444,11 @@
     PLATE_MAX_CM = 30,
     PLATE_DEFAULT_CM = 15;
   const plateSide = (v) => (v >= PLATE_MIN_CM && v <= PLATE_MAX_CM ? v : PLATE_DEFAULT_CM);
+  // The four bolt holes sit in the corners of a plate. Their distance from the edge is automatic: a tenth of the
+  // shorter side of the plate, 10 to 20 mm.
+  const HOLE_INSET_MIN_MM = 10,
+    HOLE_INSET_MAX_MM = 20;
+  const holeInsetMm = (wCm, dCm) => Math.min(HOLE_INSET_MAX_MM, Math.max(HOLE_INSET_MIN_MM, Math.round(Math.min(wCm, dCm))));
   function plates(mounts, spec, plateT, z, bounds) {
     return mounts.map((m, i) => {
       let w = plateSide(spec.widthCm),
@@ -394,7 +459,7 @@
       }
       w = Math.max(w, m.a + 4);
       d = Math.max(d, m.b + 4);
-      const inset = Math.min(spec.holeInsetMm / 10, w / 2 - 0.5, d / 2 - 0.5);
+      const inset = Math.min(holeInsetMm(w, d) / 10, w / 2 - 0.5, d / 2 - 0.5);
       const r = spec.holeDiameterMm / 20;
       const hx = w / 2 - inset,
         hy = d / 2 - inset;
@@ -404,13 +469,15 @@
         diameterMm: spec.holeDiameterMm,
       }));
       const volume = Math.max(0, w * d * plateT - 4 * Math.PI * r * r * plateT);
-      return { id: "plate" + i, x: m.x, y: m.y, z, w, d, t: plateT, holes, volume, countersink: !!spec.countersink };
+      return { id: "plate" + i, x: m.x, y: m.y, z, w, d, t: plateT, holes, holeInsetMm: Math.round(inset * 100) / 10, volume, countersink: !!spec.countersink };
     });
   }
 
+  // Points in one ring of a part's section: 24 round, 4 square, a rounded square has an arc in each corner.
+  const ringSize = (pt) => (pt.type === "round" ? 24 : pt.rr > 0 ? 4 * (ARC_STEPS + 1) : 4);
   function vertices(pt) {
     const out = [],
-      n = pt.type === "round" ? 24 : 4;
+      n = ringSize(pt);
     const cos = Math.cos(pt.yaw * DEG),
       sin = Math.sin(pt.yaw * DEG);
     for (const [c, s] of [[pt.bottom, pt.bs], [pt.top, pt.ts]]) {
@@ -420,6 +487,13 @@
           const a = (k / n) * Math.PI * 2;
           u = (Math.cos(a) * s[0]) / 2;
           v = (Math.sin(a) * s[1]) / 2;
+        } else if (pt.rr > 0) {
+          const q = Math.floor(k / (ARC_STEPS + 1)),
+            j = k % (ARC_STEPS + 1);
+          const a = ((q + j / ARC_STEPS) * Math.PI) / 2,
+            r = Math.min(pt.rr, s[0] / 2, s[1] / 2);
+          u = [1, -1, -1, 1][q] * (s[0] / 2 - r) + r * Math.cos(a);
+          v = [1, 1, -1, -1][q] * (s[1] / 2 - r) + r * Math.sin(a);
         } else {
           u = (k === 0 || k === 3 ? -1 : 1) * (s[0] / 2);
           v = (k < 2 ? -1 : 1) * (s[1] / 2);
@@ -484,7 +558,9 @@
       db = b2 - b1;
     const mean = a1 * b1 + (a1 * db + b1 * da) / 2 + (da * db) / 3;
     const k = pt.type === "round" ? Math.PI / 4 : 1;
-    return h * mean * k * (pt.fill ?? 1);
+    // rounded edges take (4 - pi) r2 off every section
+    const cut = pt.rr > 0 ? (4 - Math.PI) * Math.min(pt.rr, a1 / 2, b1 / 2, a2 / 2, b2 / 2) ** 2 : 0;
+    return h * (mean * k - cut) * (pt.fill ?? 1);
   }
 
   /**
@@ -505,5 +581,5 @@
     return known ? build(p.scheme, p) : buildFromSvg(design, p);
   }
 
-  root.TableLegs = { SCHEMES, build, buildFromSvg, layout, plates, vertices, outline, volume, cost, legLength, hull, PLATE_MIN_CM, PLATE_MAX_CM, plateSide, DEFAULT_INSET_CM, MAX_INSET_CM, DIMS_SCHEMES, LEG_MIN_CM, LEG_MAX_CM, defaultDims, COLUMN_MIN_CM, COLUMN_MAX_CM, columnTopMax, defaultColumn, footprint };
+  root.TableLegs = { SCHEMES, build, buildFromSvg, layout, plates, vertices, outline, volume, cost, legLength, hull, PLATE_MIN_CM, PLATE_MAX_CM, plateSide, DEFAULT_INSET_CM, MAX_INSET_CM, DIMS_SCHEMES, LEG_MIN_CM, LEG_MAX_CM, defaultDims, ringSize, slatsOf, slatCount, SLAT_MIN_CM, SLAT_MAX_CM, SLAT_R_MIN_CM, SLAT_R_MAX_CM, holeInsetMm, HOLE_INSET_MIN_MM, HOLE_INSET_MAX_MM, COLUMN_MIN_CM, COLUMN_MAX_CM, columnTopMax, defaultColumn, footprint };
 })(typeof window !== "undefined" ? window : globalThis);
