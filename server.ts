@@ -1,3 +1,4 @@
+import { registerTableAiBillingRoutes } from './server/tableAiBilling';
 import { registerGeoHomeRoutes } from './server/geohome/routes';
 import { registerFundingRoutes } from './server/fundingBridge';
 import { registerSlabTableRoutes } from './server/slabTableBridge';
@@ -566,6 +567,7 @@ async function startServer() {
   );
 
   registerAuthRoutes(app);
+  registerTableAiBillingRoutes(app);
   registerAdminRoutes(app);
   registerUsageRoutes(app);
   registerSubscriptionRoutes(app);

@@ -40,7 +40,15 @@ for (const type of ['methodic', 'instruction', 'worksheet'] as const) {
 }
 
 const bookThemeIds = new Set<BookDesignThemeId>(BOOK_DESIGN_THEME_CARDS.map((theme) => theme.id));
-assert.equal(bookThemeIds.size, 15, 'educational templates must not mutate the 15 built-in book themes');
+const expectedBookThemeIds = [
+  'classic', 'modern-fiction', 'sci-fi', 'fantasy', 'dark-fantasy',
+  'thriller', 'noir-detective', 'romance', 'poetry-literary', 'non-fiction',
+  'academic-research', 'business-premium', 'children', 'graphic-story',
+  'experimental-art', 'studio-classic', 'studio-editorial',
+];
+assert.deepEqual([...bookThemeIds].sort(), [...expectedBookThemeIds].sort(), 'educational templates must preserve all 17 built-in book themes');
+assert.equal(bookThemeIds.size, BOOK_DESIGN_THEME_CARDS.length, 'book theme ids must remain unique');
+assert(EDUCATIONAL_PDF_TEMPLATES.every((template) => !bookThemeIds.has(template.id as BookDesignThemeId)), 'educational template ids must remain separate from book theme ids');
 
 for (const template of EDUCATIONAL_PDF_TEMPLATES) {
   assert(bookThemeIds.has(template.rendererBaseTheme), `${template.id} must resolve to an existing book renderer base`);
@@ -57,3 +65,4 @@ assert.equal(resolveEducationalRendererTheme('not-a-template'), null);
 assert.equal(findEducationalPdfTemplate('not-a-template'), null);
 
 console.log('Educational PDF templates: OK');
+

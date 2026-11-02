@@ -11,9 +11,18 @@ const designSuggestion = await readFile(new URL('../src/components/DesignSuggest
 
 console.log('\nBook Design Studio UI regression contract:');
 
-assert.equal(BOOK_DESIGN_THEME_CARDS.length, 15, 'Gallery must keep all 15 built-in themes.');
-assert.equal(new Set(BOOK_DESIGN_THEME_CARDS.map((theme) => theme.id)).size, 15, 'Built-in theme ids must remain unique.');
-console.log('  ✓ 15 built-in theme cards stay available');
+const expectedThemeIds = [
+  'classic', 'modern-fiction', 'sci-fi', 'fantasy', 'dark-fantasy',
+  'thriller', 'noir-detective', 'romance', 'poetry-literary', 'non-fiction',
+  'academic-research', 'business-premium', 'children', 'graphic-story',
+  'experimental-art', 'studio-classic', 'studio-editorial',
+];
+const actualThemeIds = BOOK_DESIGN_THEME_CARDS.map((theme) => theme.id);
+assert.deepEqual([...actualThemeIds].sort(), [...expectedThemeIds].sort(), 'Gallery must keep the complete built-in theme catalog.');
+assert.equal(new Set(actualThemeIds).size, actualThemeIds.length, 'Built-in theme ids must remain unique.');
+assert.equal(BOOK_DESIGN_THEME_CARDS.find((theme) => theme.id === 'studio-classic')?.novaDesignTheme, 'classic');
+assert.equal(BOOK_DESIGN_THEME_CARDS.find((theme) => theme.id === 'studio-editorial')?.novaDesignTheme, 'editorial');
+console.log('  ✓ all 17 built-in themes stay available, including both Studio export mappings');
 
 assert.match(gallery, /type StudioMode = 'author' \| 'designer'/);
 assert.match(gallery, />Автор<\/button>/);
@@ -84,3 +93,4 @@ assert.ok(!designSuggestion.includes("/api/admin/pdf/preview', requireAuth"), 'C
 console.log('  ✓ built-in DesignCraft preview remains separate from generic legacy PDF preview');
 
 console.log('\nBook Design Studio UI regression contract passed.');
+
