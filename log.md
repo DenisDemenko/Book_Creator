@@ -121,6 +121,8 @@ remote перевірити можна, запушити — ні**.
 
 # Що не запушено (для наступної сесії)
 
+02.11.2026, #02/#490: інтер’єри та 10 фото-референсів **опубліковано тільки у feature-гілках**. Studio commits c86c11a, 614a047, 2d52504, 290f1a0, Marketplace PR #26 HEAD 0b6959c. Подальші docs commits — передача/журнал цієї ж гілки. 65 цільових перевірок пройшли; full build/live не прийнято. Потрібні Studio → Marketplace, reverse proxy body ≥4mb; живі ключі/баланси/production не змінено. Деталі в записі #490 і docs/table-ai-billing.md.
+
 02.11.2026, Codex #02, уточнення #490: **ключ OpenAI тільки через адмінпанель Студії**. Studio code commits ae3fb67, e127aee, 621d7ac, 0483789; Marketplace PR #26 HEAD 154e48a. Всі ці зміни опубліковані тільки в feature-гілках; нові записи HANDOFF/сесії — окремі docs commits. З Marketplace прибрано введення/збереження provider key, сам OpenAI-запит виконує Студія. 19+22 перевірки успішні; build/typecheck/live відкладені. Master/production не змінено. Актуальний порядок установлення та вимоги — docs/table-ai-billing.md; попередні згадки про поле ключа в адмінпанелі Marketplace вважати скасованими.
 
 02.11.2026, Codex #02: код AI-білінгу **опубліковано тільки у feat/table-builder-shared-ai-credits**, code commits cb7d607, cecb2d4, bf3613b, 974b9a8. Суміжний Marketplace — feat/table-builder-openai-preview, PR #26, HEAD 7edf518. Журнал/HANDOFF — окремими документаційними комітами цієї feature-гілки. Master/production не змінено. Після майбутнього rollout: Studio → Marketplace, STUDIO_API_URL/BRIDGE_API_KEY, міграція TableAiBillingJob, Firebase free/paid/expiry, реальні staging-бали. [Запис #490](log/table-ai-2026-11.md), [сесія](log/sessions.md).
