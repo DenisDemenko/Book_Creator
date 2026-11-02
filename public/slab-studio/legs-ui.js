@@ -70,6 +70,7 @@
       const input = {
         shape: d.shape, l: d.l, w: d.w, t: d.t,
         scheme: set.scheme, height: set.height, thickness: set.thickness,
+        corner: (Number(d.cornerMm) || 0) / 10,
         plateT: catalog().settings.plateThicknessCm,
         inset: set.inset,
         legDims: set.legDims,
@@ -315,6 +316,7 @@
       await viewer.update({
         height: set.height,
         top: { shape: d.shape, l: d.l, w: d.w, t: d.t, color: d.color, texture: env.topTexture(), transparent: (Number(d.resinTransparency) || 0) > 0,
+          corner: (Number(d.cornerMm) || 0) / 10,
           edgeTop: (Number(d.edgeTopMm) || 0) / 10, edgeBottom: (Number(d.edgeBottomMm) || 0) / 10,
           edgeTopStyle: d.edgeTopStyle, edgeBottomStyle: d.edgeBottomStyle },
         legs: {

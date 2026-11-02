@@ -2235,3 +2235,34 @@ input[aria-invalid="true"] { border-color: #b83b36; outline: 1px solid #b83b36; 
     grid-template-columns: 1fr;
   }
 }
+
+/* A rectangular top and the corners of a square or rectangular one. */
+.shape-options {
+  grid-template-columns: repeat(4, 1fr);
+}
+.shape-options .rect-icon {
+  width: 29px;
+  height: 17px;
+  border-radius: 2px;
+}
+.corner-box {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+.corner-field {
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+}
+.corner-field .leg-pair {
+  display: grid;
+  grid-template-columns: 1fr 84px;
+  gap: 8px;
+  align-items: center;
+}
+@media (max-width: 650px) {
+  .shape-options {
+    grid-template-columns: 1fr 1fr;
+  }
+}

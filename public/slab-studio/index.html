@@ -115,6 +115,8 @@
             <div class="shape-options">
               <button data-shape="square">
                 <i class="square-icon"></i>Квадрат</button
+              ><button data-shape="rect">
+                <i class="rect-icon"></i>Прямокутник</button
               ><button data-shape="round"><i class="round-icon"></i>Коло</button
               ><button data-shape="oval" class="active">
                 <i class="oval-icon"></i>Овал
@@ -166,6 +168,17 @@
               Товщина слебів має відповідати стільниці. Виступи за межами форми
               будуть обрізані.
             </p>
+            <div class="corner-box" id="cornerBox" hidden>
+              <label class="field-title">Кути стільниці (вид зверху)</label>
+              <p class="hint" id="cornerHint">
+                Кути квадратної чи прямокутної стільниці можна скруглити: радіус від 10 мм до половини
+                меншої сторони (на межі стільниця стає «стадіоном», а квадрат колом).
+              </p>
+              <div class="edge-presets" id="cornerPresets" role="group" aria-label="Готові радіуси кутів"></div>
+              <label class="corner-field">Радіус кутів, мм <small id="cornerRangeHint"></small>
+                <span class="leg-pair"><input id="cornerRange" type="range" min="0" step="1" aria-label="Радіус кутів, мм" /><input id="cornerMm" type="number" min="0" step="1" inputmode="numeric" /></span>
+              </label>
+            </div>
             <div class="edge-box" id="edgeBox">
               <label class="field-title">Краї стільниці</label>
               <p class="hint" id="edgeHint">

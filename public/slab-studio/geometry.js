@@ -30,11 +30,24 @@
       return [p.x + x * c - y * n, p.y + x * n + y * c];
     });
   }
+  // A square or rectangular top (shape "square" or "rect") may have rounded corners seen from above: cornerMm,
+  // 0 (sharp) or 10 mm up to half of the shorter side.
+  const boxy = (d) => d.shape === "square" || d.shape === "rect";
+  const cornerOf = (d) => (boxy(d) ? Math.min(Math.max(Number(d.cornerMm) || 0, 0) / 10, d.l / 2, d.w / 2) : 0);
   function inTable(d, x, y) {
-    return d.shape === "square"
-      ? Math.abs(x) <= d.l / 2 && Math.abs(y) <= d.w / 2
-      : (x / (d.l / 2)) ** 2 + (y / (d.w / 2)) ** 2 <= 1;
+    if (boxy(d)) {
+      const a = d.l / 2,
+        b = d.w / 2,
+        ax = Math.abs(x),
+        ay = Math.abs(y);
+      if (ax > a || ay > b) return false;
+      const r = cornerOf(d);
+      return !(r > 0 && ax > a - r && ay > b - r) || Math.hypot(ax - (a - r), ay - (b - r)) <= r;
+    }
+    return (x / (d.l / 2)) ** 2 + (y / (d.w / 2)) ** 2 <= 1;
   }
+  // The area of the top in cm2: a rectangle less what the rounded corners take, (4 - pi) r2.
+  const tableArea = (d) => (boxy(d) ? d.l * d.w - (4 - Math.PI) * cornerOf(d) ** 2 : (Math.PI * d.l * d.w) / 4);
   // `resolution` is the number of cells along the longer side: 650 is what the
   // server uses for the price; a coarser grid is enough for a live figure
   // while a slab is being dragged.
@@ -68,7 +81,7 @@
         if (hits > 1) overlap += step * step;
         if (inTable(d, x, y) && hits) wood += step * step;
       }
-    const total = d.shape === "square" ? d.l * d.w : (Math.PI * d.l * d.w) / 4;
+    const total = tableArea(d);
     wood = Math.min(wood, total);
     return {
       area: total / 10000,

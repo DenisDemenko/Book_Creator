@@ -72,6 +72,16 @@
   // Half the plate under one leg: plates() never makes it smaller than the foot plus 4 cm.
   // (End panels have their own shape: the ends set by hand do not count there.)
   const plateHalf = (p, T, byHand = true) => Math.max(p.plateCm || 0, (byHand ? topExtent(p, T) : T) + 4) / 2;
+  const cornerCm = (p) => (p.shape === "square" || p.shape === "rect" ? Math.min(Math.max(p.corner || 0, 0), p.l / 2, p.w / 2) : 0);
+  // Is a plate whose outer corner is (px, py) at least `ins` inside a rectangular top with rounded corners?
+  function plateCornerFits(p, px, py, ins) {
+    const a = p.l / 2,
+      b = p.w / 2,
+      r = cornerCm(p);
+    if (px > a - ins + 1e-9 || py > b - ins + 1e-9) return false;
+    if (r > 0 && px > a - r && py > b - r) return Math.hypot(px - (a - r), py - (b - r)) <= r - ins + 1e-9;
+    return true;
+  }
   // Where the four legs stand: the outer edge of every plate is `inset` from the edge of the top. On a
   // round or oval top the corner is pulled along its diagonal until the outer corner of the plate is
   // `inset` inside the curve (a quadratic in the scale k, solved exactly).
@@ -80,7 +90,7 @@
       ext = plateHalf(p, T);
     let hx = Math.max(p.l / 2 - ins - ext, 0),
       hy = Math.max(p.w / 2 - ins - ext, 0);
-    if (p.shape !== "square") {
+    if (p.shape === "round" || p.shape === "oval") {
       const a = p.l / 2,
         b = p.w / 2;
       const R = Math.max(0.2, 1 - ins / Math.min(a, b));
@@ -94,6 +104,17 @@
       const k = qa > 0 ? Math.min(1, Math.max(0, (-qb + Math.sqrt(Math.max(0, qb * qb - qa * qc))) / qa)) : 0;
       hx *= k;
       hy *= k;
+    } else if (cornerCm(p) > 0 && !plateCornerFits(p, hx + ext, hy + ext, ins)) {
+      // rounded corners of a rectangle: the corner is pulled along its diagonal until the plate is inside the curve
+      let lo = 0,
+        hi = 1;
+      for (let i = 0; i < 40; i++) {
+        const mid = (lo + hi) / 2;
+        if (plateCornerFits(p, mid * hx + ext, mid * hy + ext, ins)) lo = mid;
+        else hi = mid;
+      }
+      hx *= lo;
+      hy *= lo;
     }
     hx = Math.max(hx, T / 2 + 1);
     hy = Math.max(hy, T / 2 + 1);
@@ -104,13 +125,25 @@
     const ins = insetOf(p),
       ext = plateHalf(p, T, false);
     let x = p.l / 2 - ins - ext;
-    if (p.shape !== "square") {
+    if (p.shape === "round" || p.shape === "oval") {
       const a = p.l / 2,
         b = p.w / 2;
       const R = Math.max(0.2, 1 - ins / Math.min(a, b));
       const hy = Math.max(p.plateCm || 0, wid + 4) / 2;
       const room = R * R - (hy / b) * (hy / b);
       x = room > 0 ? Math.min(x, a * Math.sqrt(room) - ext) : T;
+    } else if (cornerCm(p) > 0) {
+      const hyP = Math.max(p.plateCm || 0, wid + 4) / 2;
+      if (x > T && !plateCornerFits(p, x + ext, hyP, ins)) {
+        let lo = T,
+          hi = x;
+        for (let i = 0; i < 40; i++) {
+          const mid = (lo + hi) / 2;
+          if (plateCornerFits(p, mid + ext, hyP, ins)) lo = mid;
+          else hi = mid;
+        }
+        x = lo;
+      }
     }
     return Math.max(x, T);
   }

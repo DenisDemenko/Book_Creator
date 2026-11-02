@@ -71,10 +71,36 @@
   // ---------------------------------------------------------------- geometry
   // The outline of the top, drawn in from its edge by `inset` cm: as the edges of a rectangle (each with its
   // own normal, so the corners stay sharp) or as one closed curve for a round or oval top.
+  const boxy = (top) => top.shape === "square" || top.shape === "rect";
+  const CORNER_STEPS = 12;
   function outline(top, inset) {
     const a = top.l / 2,
       b = top.w / 2;
-    if (top.shape === "square") {
+    const r0 = boxy(top) ? Math.min(Math.max(Number(top.corner) || 0, 0), a, b) : 0;
+    if (boxy(top) && r0 > 0) {
+      // A rectangle with rounded corners, seen from above: one closed curve, a quarter circle at each corner and a
+      // straight line between them (the points of the circles are all there is; the lines join their ends).
+      const x = Math.max(a - inset, 0.01),
+        y = Math.max(b - inset, 0.01);
+      const r = Math.min(Math.max(r0 - inset, 0), x, y);
+      const pts = [],
+        ns = [];
+      for (const [cx, cy, from] of [
+        [x - r, -(y - r), -Math.PI / 2],
+        [x - r, y - r, 0],
+        [-(x - r), y - r, Math.PI / 2],
+        [-(x - r), -(y - r), Math.PI],
+      ])
+        for (let k = 0; k <= CORNER_STEPS; k++) {
+          const th = from + (k / CORNER_STEPS) * (Math.PI / 2);
+          pts.push([cx + r * Math.cos(th), cy + r * Math.sin(th)]);
+          ns.push([Math.cos(th), Math.sin(th)]);
+        }
+      pts.push(pts[0].slice());
+      ns.push(ns[0].slice());
+      return [{ pts, ns, closed: true }];
+    }
+    if (boxy(top)) {
       const x = Math.max(a - inset, 0.01),
         y = Math.max(b - inset, 0.01);
       return [
@@ -180,7 +206,8 @@
     // The flat faces: a fan from the centre (the top is convex).
     const face = (inset, y, normal) => {
       const ring = [];
-      for (const edge of outline(top, inset)) for (let j = 0; j < edge.pts.length - (top.shape === "square" ? 1 : 0); j++) ring.push(edge.pts[j]);
+      // the first point of every edge (a rectangle), or all of a closed curve but its repeated last point
+      for (const edge of outline(top, inset)) for (let j = 0; j < edge.pts.length - 1; j++) ring.push(edge.pts[j]);
       const centre = vertex(0, y, 0, normal);
       const ids = ring.map(([x, z]) => vertex(x, y, z, normal));
       for (let k = 0; k < ids.length; k++) triangle(cap, centre, ids[k], ids[(k + 1) % ids.length]);

@@ -75,9 +75,9 @@
       const d = draft?.design;
       const between = (n, min, max) => Number.isFinite(n) && n >= min && n <= max;
       if (d && Date.now() - draft.savedAt < 86400000 &&
-          ["square", "round", "oval"].includes(d.shape) &&
+          ["square", "rect", "round", "oval"].includes(d.shape) &&
           between(d.l, 40, 350) && between(d.w, 40, 180) && between(d.t, 1, 15) &&
-          (d.shape === "oval" || d.l === d.w) && /^#[0-9a-f]{6}$/i.test(d.color) &&
+          (["oval", "rect"].includes(d.shape) || d.l === d.w) && /^#[0-9a-f]{6}$/i.test(d.color) &&
           ["metal", "wood", "none"].includes(d.legs) && Array.isArray(d.pieces) &&
           d.pieces.length <= 6 && d.pieces.every(p =>
             typeof p.uid === "string" && available(p.id) &&
@@ -86,6 +86,7 @@
             between(d.legSet.height, 20, 150) && between(d.legSet.thickness, 1, 30) &&
             typeof d.legSet.material === "string")) &&
           (d.resinTransparency === undefined || between(d.resinTransparency, 0, 100)) &&
+          (d.cornerMm === undefined || between(d.cornerMm, 0, 900)) &&
           (d.edgeTopMm === undefined || between(d.edgeTopMm, 0, 150)) &&
           (d.edgeBottomMm === undefined || between(d.edgeBottomMm, 0, 150)) &&
           [undefined, "round", "chamfer"].includes(d.edgeTopStyle) && [undefined, "round", "chamfer"].includes(d.edgeBottomStyle) &&
@@ -172,9 +173,14 @@
   function slabSvg(s, key) {
     return `<svg viewBox="${-s.w / 2 - 3} ${-s.h / 2 - 3} ${s.w + 6} ${s.h + 6}" aria-label="${esc(s.number)}"><defs>${woodDefs(s, key)}<clipPath id="clip-${key}"><polygon points="${polygon(s)}"/></clipPath></defs><g clip-path="url(#clip-${key})"><polygon points="${polygon(s)}" fill="url(#${key})"/>${s.photo ? `<image href="${s.photo}" x="${-s.w / 2}" y="${-s.h / 2}" width="${s.w}" height="${s.h}" preserveAspectRatio="none"/>` : ""}</g></svg>`;
   }
+  // Which tops have corners (a square or a rectangle) and which have a width of their own (an oval or a rectangle).
+  const isBoxy = (shape) => shape === "square" || shape === "rect";
+  const isWide = (shape) => shape === "oval" || shape === "rect";
+  // The radius of the corners seen from above, cm.
+  const cornerRadius = (d) => (isBoxy(d.shape) ? Math.min(Math.max(Number(d.cornerMm) || 0, 0) / 10, d.l / 2, d.w / 2) : 0);
   function tableShape(d, extra = "") {
-    return d.shape === "square"
-      ? `<rect x="${-d.l / 2}" y="${-d.w / 2}" width="${d.l}" height="${d.w}" ${extra}/>`
+    return isBoxy(d.shape)
+      ? `<rect x="${-d.l / 2}" y="${-d.w / 2}" width="${d.l}" height="${d.w}" rx="${cornerRadius(d)}" ${extra}/>`
       : `<ellipse rx="${d.l / 2}" ry="${d.w / 2}" ${extra}/>`;
   }
   // The top view of what is under the tabletop: legs and plates with their holes. Where the resin is clear it is
@@ -198,8 +204,8 @@
   }
   // The outline of the top drawn in from its edge by `inset` cm.
   function insetShape(d, inset, extra = "") {
-    return d.shape === "square"
-      ? `<rect x="${-d.l / 2 + inset}" y="${-d.w / 2 + inset}" width="${Math.max(d.l - 2 * inset, 0.1)}" height="${Math.max(d.w - 2 * inset, 0.1)}" ${extra}/>`
+    return isBoxy(d.shape)
+      ? `<rect x="${-d.l / 2 + inset}" y="${-d.w / 2 + inset}" width="${Math.max(d.l - 2 * inset, 0.1)}" height="${Math.max(d.w - 2 * inset, 0.1)}" rx="${Math.max(cornerRadius(d) - inset, 0)}" ${extra}/>`
       : `<ellipse rx="${Math.max(d.l / 2 - inset, 0.1)}" ry="${Math.max(d.w / 2 - inset, 0.1)}" ${extra}/>`;
   }
   function composition(d, slabs, key, interactive = false, legsFootprint = null) {
@@ -245,6 +251,7 @@
       `<g stroke="#929e83" stroke-width=".3" fill="none"><path d="M ${-design.l / 2} ${design.w / 2 + 12} v 5 m 0 -2.5 h ${design.l} m 0 -2.5 v 5"/><path d="M ${-design.l / 2 - 12} ${-design.w / 2} h -5 m 2.5 0 v ${design.w} m -2.5 0 h 5"/></g><g fill="#79896c" font-family="Arial" font-size="4" text-anchor="middle"><text x="0" y="${design.w / 2 + 23}">${num(design.l)} см</text><text transform="translate(${-design.l / 2 - 22} 0) rotate(-90)">${num(design.w)} см</text></g>`;
   }
   function renderDesign() {
+    syncCorner();
     paintDesign();
     $("canvasEmpty").hidden = design.pieces.length > 0;
     syncClarity();
@@ -470,13 +477,13 @@
     invalidate();
     if (!dimensionsValid(event?.type !== "input")) return false;
     const l = $("tableL").valueAsNumber,
-      w = design.shape === "oval" ? $("tableW").valueAsNumber : l,
+      w = isWide(design.shape) ? $("tableW").valueAsNumber : l,
       t = $("tableT").valueAsNumber;
     const [oldL, oldW] = [design.l, design.w];
     Object.assign(design, { l, w, t });
     refitPieces(oldL, oldW);
     saveDraft();
-    if (design.shape !== "oval") $("tableW").value = w;
+    if (!isWide(design.shape)) $("tableW").value = w;
     renderDesign();
     return true;
   }
@@ -484,11 +491,11 @@
     ["L", "W", "T"].forEach(
       (k) => ($("table" + k).value = design[k.toLowerCase()]),
     );
-    $("tableW").disabled = design.shape !== "oval";
-    $("tableWidthField").hidden = design.shape !== "oval";
-    $("tableDimensions").style.gridTemplateColumns =
-      design.shape === "oval" ? "1fr 1fr" : "1fr";
-    $("tableL").max = design.shape === "oval" ? 350 : 180;
+    const wide = isWide(design.shape);
+    $("tableW").disabled = !wide;
+    $("tableWidthField").hidden = !wide;
+    $("tableDimensions").style.gridTemplateColumns = wide ? "1fr 1fr" : "1fr";
+    $("tableL").max = wide ? 350 : 180;
     $("tableLengthLabel").textContent =
       design.shape === "round"
         ? "Діаметр, см"
@@ -496,7 +503,7 @@
           ? "Сторона, см"
           : "Довжина, см";
     $("dimensionHint").textContent =
-      (design.shape === "oval"
+      (wide
         ? "Довжина 40–350 см · ширина 40–180 см."
         : design.shape === "round"
           ? "Діаметр кола 40–180 см."
@@ -512,7 +519,7 @@
       (b.onclick = () => {
         const [oldL, oldW] = [design.l, design.w];
         design.shape = b.dataset.shape;
-        if (design.shape !== "oval") {
+        if (!isWide(design.shape)) {
           design.l = Math.min(design.l, 180);
           design.w = design.l;
         }
@@ -1563,6 +1570,48 @@
       b.setAttribute("aria-pressed", String(applied === sample.name));
     });
   }
+
+  // ---- Corners of a square or rectangular top, seen from above: 0 (sharp), or from 10 mm up to half of the shorter side.
+  const cornerMax = () => Math.floor((Math.min(design.l, design.w) * 10) / 2);
+  const cornerFit = (value) => {
+    const n = Math.round(Number(value) || 0);
+    return n < 1 ? 0 : Math.min(Math.max(n, 10), cornerMax());
+  };
+  function setCorner(value) {
+    const n = cornerFit(value);
+    if (n) design.cornerMm = n;
+    else delete design.cornerMm;
+    invalidate();
+    renderDesign();
+  }
+  function syncCorner() {
+    const boxy = isBoxy(design.shape);
+    $("cornerBox").hidden = !boxy;
+    if (!boxy) {
+      delete design.cornerMm;
+      return;
+    }
+    // A smaller top takes smaller corners: bring the saved radius within half of the shorter side.
+    const max = cornerMax(),
+      now = cornerFit(design.cornerMm);
+    if (now) design.cornerMm = now;
+    else delete design.cornerMm;
+    $("cornerRange").max = max;
+    $("cornerMm").max = max;
+    $("cornerRange").value = now;
+    if (document.activeElement !== $("cornerMm")) $("cornerMm").value = now;
+    $("cornerRangeHint").textContent = `0 (прямі) або 10–${max} мм`;
+    const stops = [0, 10, 30, 50, 100, 200].filter((v) => v < max).concat(max);
+    $("cornerPresets").innerHTML = stops
+      .map((v) => `<button type="button" data-corner="${v}" aria-pressed="${v === now}">${v === 0 ? "Прямі кути" : v === max ? `Півкруг · ${v} мм` : `${v} мм`}</button>`)
+      .join("");
+  }
+  $("cornerRange").oninput = (e) => setCorner(e.target.value);
+  $("cornerMm").onchange = (e) => setCorner(e.target.value);
+  $("cornerPresets").onclick = (e) => {
+    const b = e.target.closest("[data-corner]");
+    if (b) setCorner(b.dataset.corner);
+  };
 
   // ---- Edges of the top: rounded or cut at 45 degrees, 1 mm to the thickness, the two sides within it (table-edges.js).
   let edgeNote = "";

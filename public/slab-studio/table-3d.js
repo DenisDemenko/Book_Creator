@@ -36,7 +36,22 @@ function loft(vertices, n) {
 
 function topShape(top) {
   const shape = new THREE.Shape();
-  if (top.shape === "square") {
+  const corner = Math.min(Math.max(Number(top.corner) || 0, 0), top.l / 2, top.w / 2);
+  if ((top.shape === "square" || top.shape === "rect") && corner > 0) {
+    // A rectangle with rounded corners seen from above.
+    const a = top.l / 2,
+      b = top.w / 2,
+      r = corner;
+    shape.moveTo(-(a - r), -b);
+    shape.lineTo(a - r, -b);
+    shape.absarc(a - r, -(b - r), r, -Math.PI / 2, 0, false);
+    shape.lineTo(a, b - r);
+    shape.absarc(a - r, b - r, r, 0, Math.PI / 2, false);
+    shape.lineTo(-(a - r), b);
+    shape.absarc(-(a - r), b - r, r, Math.PI / 2, Math.PI, false);
+    shape.lineTo(-a, -(b - r));
+    shape.absarc(-(a - r), -(b - r), r, Math.PI, Math.PI * 1.5, false);
+  } else if (top.shape === "square" || top.shape === "rect") {
     shape.moveTo(-top.l / 2, -top.w / 2);
     shape.lineTo(top.l / 2, -top.w / 2);
     shape.lineTo(top.l / 2, top.w / 2);
