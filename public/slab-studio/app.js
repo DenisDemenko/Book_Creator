@@ -1567,6 +1567,23 @@
   $("clarityRange").oninput = (e) => setClarity(e.target.value);
   $("clarity").onchange = (e) => setClarity(e.target.value);
 
+  // On a phone the builder scrolls inside its frame: tell the page, so that it brings the frame to the top
+  // and the header and the guide above it are out of the way (the pinned 2D sketch is all that stays).
+  if (parent !== window) {
+    let reported = 0;
+    window.addEventListener(
+      "scroll",
+      () => {
+        if (!matchMedia("(max-width: 650px)").matches || window.scrollY < 6) return;
+        const now = Date.now();
+        if (now - reported < 500) return;
+        reported = now;
+        parent.postMessage({ type: "slab:inner-scroll" }, location.origin);
+      },
+      { passive: true },
+    );
+  }
+
   window.addEventListener("unhandledrejection", (e) => {
     e.preventDefault();
     toast(e.reason?.message || "Не вдалося виконати дію.");
