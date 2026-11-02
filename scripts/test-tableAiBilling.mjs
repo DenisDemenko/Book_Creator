@@ -19,7 +19,7 @@ function fixture({ paid = true, expires = '2099-01-01', status = 'active', avail
   wallet.grant('studio-user', 200, 'initial', 'test balance');
   let cost = 49, model = 'gpt-image-1.5', handler;
   const register = load('../server/tableAiBilling.ts', 'registerTableAiBillingRoutes', {
-    timingSafeEqual, CreditWallet, WalletError,
+    timingSafeEqual, CreditWallet, WalletError, TableImageError: class extends Error {}, generateTableImage: async () => ({ image: 'data:image/png;base64,aW1hZ2U=' }),
     readBridgeSettings: async () => ({ key: 'secret' }),
     findUserByFirebaseUid: async uid => uid === 'firebase-user' ? { id: 'studio-user' } : undefined,
     resolveSubscription: async () => ({ plan: paid ? 'pro' : 'free', status, currentPeriodEnd: expires }),
@@ -29,10 +29,10 @@ function fixture({ paid = true, expires = '2099-01-01', status = 'active', avail
     IMAGE_PRICING: { 'gpt-image': { get modelId() { return model; } } },
   });
   register({ post: (_path, fn) => { handler = fn; } });
-  async function request(action, { key = 'secret', firebaseUid = 'firebase-user', jobKey = `table:${randomUUID()}` } = {}) {
+  async function request(action, { key = 'secret', firebaseUid = 'firebase-user', model = 'gpt-image-1.5', jobKey = `table:${randomUUID()}` } = {}) {
     let code = 200, body;
     const res = { status: value => { code = value; return res; }, json: value => { body = value; return res; } };
-    await handler({ get: () => key, params: { action }, body: { firebaseUid, jobKey } }, res);
+    await handler({ get: () => key, params: { action }, body: { firebaseUid, jobKey, model } }, res);
     return { code, body, jobKey };
   }
   return { request, wallet, db, setCost: value => { cost = value; }, setModel: value => { model = value; } };
@@ -88,4 +88,70 @@ test('access price and model follow the Studio admin catalog dynamically', async
   const f = fixture(); f.setCost(73); f.setModel('gpt-image-2.5-sunburst');
   const result = await f.request('access');
   assert.equal(result.body.credits, 73); assert.equal(result.body.model, 'gpt-image-2.5-sunburst'); f.db.close();
+});
+
+test('generation requires reserved subscriber credits and rejects browser bridge impersonation', async () => {
+  const f = fixture();
+  assert.equal((await f.request('generate')).code, 402);
+  const start = await f.request('reserve');
+  assert.equal((await f.request('generate', { jobKey: start.jobKey, key: 'wrong' })).code, 403);
+  assert.equal((await f.request('generate', { jobKey: start.jobKey })).code, 200);
+  f.db.close();
+});
+test('model change between reservation and generation cannot silently change the billed model', async () => {
+  const f = fixture(); const start = await f.request('reserve'); f.setModel('gpt-image-2.5-sunburst');
+  assert.equal((await f.request('generate', { jobKey: start.jobKey })).code, 409); f.db.close();
+});
+
+function imageFixture({ key = 'admin-panel-only', status = 200, payload = { data: [{ b64_json: 'aW1hZ2U=' }] } } = {}) {
+  let captured, calls = 0, requestedEngine;
+  const generate = load('../server/tableAiGeneration.ts', 'generateTableImage', {
+    FormData, Blob, Uint8Array, AbortSignal,
+    process: { env: { OPENAI_API_KEY: 'must-never-use-env' } },
+    platformKeyFor: async engine => { requestedEngine = engine; return key; },
+    fetch: async (url, options) => { calls++; captured = { url, ...options }; return { ok: status === 200, status, json: async () => payload }; },
+  });
+  const input = { model: 'gpt-image-1.5', prompt: 'table preview', referenceImage: 'data:image/png;base64,iVBORw0KGgo=', apiKey: 'must-never-use-caller-key' };
+  return { generate, input, inspect: () => ({ calls, captured, requestedEngine }) };
+}
+test('OpenAI request uses only Studio admin GPT key; no key is returned', async () => {
+  const f = imageFixture(); const result = await f.generate(f.input);
+  assert.equal(f.inspect().requestedEngine, 'gpt');
+  assert.equal(f.inspect().captured.headers.Authorization, 'Bearer admin-panel-only');
+  assert.deepEqual(Object.keys(result), ['image']);
+  assert.doesNotMatch(JSON.stringify(result), /admin-panel-only|must-never-use/);
+});
+test('missing admin-panel key refuses generation despite env or caller keys', async () => {
+  const empty = imageFixture({ key: '' });
+  await assert.rejects(empty.generate(empty.input), /Ключі API/);
+  assert.equal(empty.inspect().calls, 0);
+});
+for (const status of [401, 403, 429, 500]) test(`OpenAI ${status} errors expose no key`, async () => {
+  const f = imageFixture({ status });
+  await assert.rejects(f.generate(f.input), error => !/admin-panel-only|must-never-use/.test(error.message));
+});
+test('malformed provider image is rejected inside Studio', async () => {
+  const f = imageFixture({ payload: { data: [] } }); await assert.rejects(f.generate(f.input), /некоректне/);
+});
+
+test('platform key resolver reads keys only from enabled administrators', async () => {
+  const read = [];
+  const resolver = load('../server/platformKeys.ts', 'platformKeyFor', {
+    isApiKeyCryptoConfigured: () => true,
+    listUsers: async () => [{ id: 'author', role: 'author' }, { id: 'disabled-admin', role: 'admin', disabled: true }, { id: 'active-admin', role: 'admin' }],
+    getUserApiKey: async (id, engine) => { read.push([id, engine]); return { encryptedKey: 'ciphertext' }; },
+    decryptApiKey: () => ' admin-key ',
+  });
+  assert.equal(await resolver('gpt'), 'admin-key');
+  assert.deepEqual(read, [['active-admin', 'gpt']]);
+});
+test('a user-owned key cannot substitute for a missing administrator key', async () => {
+  let reads = 0;
+  const resolver = load('../server/platformKeys.ts', 'platformKeyFor', {
+    isApiKeyCryptoConfigured: () => true,
+    listUsers: async () => [{ id: 'author', role: 'author' }],
+    getUserApiKey: async () => { reads++; return { encryptedKey: 'user-key' }; },
+    decryptApiKey: () => 'user-key',
+  });
+  assert.equal(await resolver('gpt'), undefined); assert.equal(reads, 0);
 });
