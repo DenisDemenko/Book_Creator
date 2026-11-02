@@ -90,7 +90,7 @@ sheets.forEach((s, i) => {
   const m = /width="([0-9.]+)mm" height="([0-9.]+)mm" viewBox="0 0 ([0-9.]+) ([0-9.]+)"/.exec(svg)!;
   assert.ok(m, s.id);
   const wPt = (Number(m[1]) * 72) / 25.4, hPt = (Number(m[2]) * 72) / 25.4;
-  assert.ok(wPt <= areaW + 1e-6 && hPt <= areaH + 1e-6, `${s.id}: вміщується на A3 (${wPt.toFixed(0)}×${hPt.toFixed(0)} пт)`);
+  assert.ok(wPt <= areaW + 1e-6 && hPt <= areaH + 1e-6, `${s.id}: вміщується на A4 (${wPt.toFixed(0)}×${hPt.toFixed(0)} пт)`);
   assert.ok(Math.abs(Number(m[3]) * scales[i] - s.w) < 0.01 && Math.abs(Number(m[1]) * scales[i] - s.w) < 0.01, `${s.id}: аркуш зменшений рівно в ${scales[i]} разів`);
   assert.equal(pastes[i + 1].params.spread, i + 1);
 });
@@ -123,7 +123,7 @@ if (cli) {
   const doc = await PDFDocument.load(pdf);
   assert.equal(doc.getPageCount(), pages, 'у PDF стільки сторінок, скільки аркушів + специфікація');
   const { width, height } = doc.getPage(0).getSize();
-  assert.ok(Math.abs(width - PAGE.w) < 1 && Math.abs(height - PAGE.h) < 1, 'A3 альбомна');
+  assert.ok(Math.abs(width - 595.28) < 1 && Math.abs(height - 841.89) < 1 && width < height, 'A4 книжна: вужча, ніж висока');
   if (process.env.KEEP_DRAWINGS_PDF) fs.writeFileSync(process.env.KEEP_DRAWINGS_PDF, pdf);
   console.log(`✓ креслення: PDF ${pdf.length} Б, ${pages} сторінок, зібрано справжнім DesignCraft`);
 } else {

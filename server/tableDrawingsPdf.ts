@@ -8,7 +8,7 @@
  * ЯК. Ті самі векторні аркуші, що в SVG для виробництва (`public/slab-studio/table-production.js`, 1:1 в мм), вставляються
  * у документ DesignCraft командою `edit.pasteSvg` — контури лишаються векторними, текст стає контурами. Перша сторінка —
  * специфікація: замовник і всі параметри обраної конфігурації разом із епоксидною смолою; далі по сторінці на аркуш,
- * зменшений до формату A3 з написаним масштабом. Експортує `file.exportPdf`.
+ * зменшений до формату A4 (книжного) з написаним масштабом. Експортує `file.exportPdf`.
  *
  * ЧОМУ ОКРЕМИЙ БІНАРНИК. `edit.pasteSvg` з'явився у DesignCraft 0.9.0, а книги досі рендеряться на 0.7.1 із шимом
  * (`DESIGNCRAFT_PATH`). Креслення йдуть через `DESIGNCRAFT_DRAWINGS_PATH`, тож версію книг ніхто не зачіпає.
@@ -21,8 +21,8 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { cmd, serializeScript, type DesigncraftCommand } from './pdf/designcraft/commands';
 
-/** A3, альбомна, пункти. */
-export const PAGE = { w: 1190.55, h: 841.89, margin: 36, footer: 56 } as const;
+/** A4, книжна, пункти. */
+export const PAGE = { w: 595.28, h: 841.89, margin: 28, footer: 54 } as const;
 const PT_PER_MM = 72 / 25.4;
 /** Масштаби, якими користується креслення: найближчий, що вміщує аркуш. */
 const NICE = [1, 2, 2.5, 5, 10, 20, 25, 50, 100];
@@ -141,7 +141,7 @@ export function buildDrawingsScript(order: DrawingsOrder, production: Production
   const footer = (page: number, label: string) =>
     cmd('frame.create', {
       spread: page,
-      rect: [PAGE.margin, PAGE.h - PAGE.margin - 30, PAGE.w - PAGE.margin, PAGE.h - PAGE.margin],
+      rect: [PAGE.margin, PAGE.h - PAGE.margin - 40, PAGE.w - PAGE.margin, PAGE.h - PAGE.margin],
       content: 'text',
       text: `Fusion Lab · стіл №${order.number} · замовник: ${c.name} · ${label} · лист ${page + 1} з ${pages}`,
     });
@@ -150,13 +150,13 @@ export function buildDrawingsScript(order: DrawingsOrder, production: Production
   steps.push(
     cmd('frame.create', {
       spread: 0,
-      rect: [PAGE.margin, PAGE.margin, PAGE.w * 0.62, PAGE.h - PAGE.margin - PAGE.footer],
+      rect: [PAGE.margin, PAGE.margin + 70, PAGE.w - PAGE.margin, PAGE.h - PAGE.margin - PAGE.footer],
       content: 'text',
       text: specLines(order).join('\n'),
     }),
     cmd('edit.pasteSvg', {
       spread: 0,
-      at: [PAGE.w * 0.8, PAGE.margin + 90],
+      at: [PAGE.w - PAGE.margin - 85, PAGE.margin + 30],
       svg: `<svg xmlns="http://www.w3.org/2000/svg" width="60mm" height="30mm" viewBox="0 0 60 30"><rect width="60" height="30" fill="${/^#[0-9a-fA-F]{6}$/.test(order.color) ? order.color : '#24474b'}" stroke="#222" stroke-width="0.3"/></svg>`,
     }),
     footer(0, 'специфікація'),

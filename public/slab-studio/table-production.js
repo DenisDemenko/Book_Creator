@@ -42,14 +42,37 @@
   }
   const scaleRing = (ring) => ring.map(([x, y]) => [x * MM, y * MM]);
 
-  // The pieces on the top: the slab and where it lies, cm in the plan.
+  // A polygon cut by a convex one (Sutherland-Hodgman): the part of a slab that lies on the top.
+  function clipTo(subject, clip) {
+    const turn = clip.reduce((a, q, i) => a + (q[0] * clip[(i + 1) % clip.length][1] - clip[(i + 1) % clip.length][0] * q[1]), 0);
+    const c = turn < 0 ? clip.slice().reverse() : clip;
+    let out = subject;
+    for (let i = 0; i < c.length && out.length; i++) {
+      const a = c[i], b = c[(i + 1) % c.length];
+      const side = (p) => (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
+      const cross = (p, q) => {
+        const sp = side(p), sq = side(q), t = sp / (sp - sq);
+        return [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
+      };
+      const next = [];
+      out.forEach((p, k) => {
+        const q = out[(k + out.length - 1) % out.length];
+        if (side(p) >= 0) { if (side(q) < 0) next.push(cross(q, p)); next.push(p); }
+        else if (side(q) >= 0) next.push(cross(q, p));
+      });
+      out = next;
+    }
+    return out;
+  }
+  // The pieces on the top: the slab and where it lies, mm in the plan, cut by the edge of the top.
   function placed(o) {
     const { Geo } = deps();
     const out = [];
     for (const p of o.pieces || []) {
       const slab = (o.slabs || []).find((s) => s.id === p.id);
       if (!slab) throw Error("У замовленні немає слеба " + p.id + ".");
-      out.push({ slab, piece: p, ring: scaleRing(Geo.worldPoints(slab, p)) });
+      const ring = clipTo(scaleRing(Geo.worldPoints(slab, p)), topRing(o));
+      if (ring.length >= 3) out.push({ slab, piece: p, ring });
     }
     return out;
   }
@@ -81,7 +104,7 @@
   // text: { layer, p, h, s, anchor? } · line: { layer, a, b }
   const LAYERS = {
     TABLE_OUTLINE: { color: 7, stroke: "#222", width: 1.2, note: "контур стільниці: різ" },
-    SLABS: { color: 3, stroke: "#6b4a2b", width: 0.8, note: "контури слебів" },
+    SLABS: { color: 3, stroke: "#6b4a2b", width: 0.8, fill: "#c9a36b", note: "слеби: контури й дерево" },
     RESIN: { color: 4, stroke: "none", width: 0, fill: "#2f6f78", note: "залив епоксидної смоли" },
     EDGE_LINE: { color: 8, stroke: "#777", width: 0.6, dash: "8 5", note: "де закінчується лицьова обробка краю" },
     PLATES: { color: 1, stroke: "#8a5a2b", width: 0.9, fill: "#d6b98a", note: "пластини" },
@@ -316,7 +339,7 @@
       : p.kind === "rings" ? { ...p, rings: p.rings.map((r) => r.map(([x, y]) => [x * k, y * k])) }
       : p.kind === "path" ? { ...p, d: scalePath(p.d, k), tx: (p.tx || 0) * k, ty: (p.ty || 0) * k }
       : p.kind === "circle" ? { ...p, c: [p.c[0] * k, p.c[1] * k], r: p.r * k }
-      : { ...p, p: [p.p[0] * k, p.p[1] * k], h: p.h * k };
+      : { ...p, p: [p.p[0] * k, p.p[1] * k], h: Math.max(p.h * k, 2.4) }; // a figure never under 2.4 mm high on the paper
   // opts.scale (1/N): the sheet reduced to 1:N for paper; a line is never thinner than a fifth of a millimetre there.
   function svg(s, o, opts = {}) {
     const k = opts.scale > 0 && opts.scale < 1 ? opts.scale : 1;
@@ -334,7 +357,8 @@
       const body = prims
         .map((p) => {
           if (p.kind === "poly") return `<${p.closed ? "polygon" : "polyline"} points="${p.pts.map(([x, y]) => n(x) + "," + n(y)).join(" ")}"${p.closed ? "" : ' fill="none"'}/>`;
-          if (p.kind === "rings") return `<path fill-rule="evenodd" d="${p.rings.map((r) => "M" + r.map(([x, y]) => n(x) + " " + n(y)).join(" L") + " Z").join(" ")}"/>`;
+          // in the picture the resin is the whole top and the slabs lie over it; a CAD file keeps every ring
+          if (p.kind === "rings") return `<polygon points="${p.rings[0].map(([x, y]) => n(x) + "," + n(y)).join(" ")}"/>`;
           if (p.kind === "path") return `<path d="${p.d}" transform="translate(${n(p.tx || 0)} ${n(p.ty || 0)})"/>`;
           if (p.kind === "circle") return `<circle cx="${n(p.c[0])}" cy="${n(p.c[1])}" r="${n(p.r)}"/>`;
           return `<text x="${n(p.p[0] * px)}" y="${n(p.p[1] * px)}" font-size="${n(p.h * px)}" text-anchor="${p.anchor}">${esc(p.s)}</text>`;
