@@ -162,6 +162,40 @@
               будуть обрізані.
             </p>
             </div>
+            <div class="studio-library">
+            <div class="library-head">
+              <div>
+                <p class="eyebrow">МАТЕРІАЛИ З ІСТОРІЄЮ</p>
+                <h2>Оберіть свої слеби <span id="stockCount"></span></h2>
+                <p class="hint">Поля праворуч лише відбирають слеби за розміром. Розміри стільниці задаються вище, під ескізом.</p>
+              </div>
+              <div class="filters">
+                <label
+                  >Слеб завдовжки від, см<input
+                    id="minLength"
+                    type="number"
+                    min="0"
+                    placeholder="0" /></label
+                ><label
+                  >Слеб завширшки від, см<input
+                    id="minWidth"
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                /></label>
+              </div>
+            </div>
+            <div class="species-block">
+              <h3>Порода дерева</h3>
+              <div
+                id="speciesFilter"
+                class="species-buttons"
+                role="group"
+                aria-label="Фільтр слебів за породою"
+              ></div>
+            </div>
+            <div class="slab-grid" id="slabLibrary"></div>
+            </div>
             <div class="studio-legs" id="studioLegs" hidden>
               <div class="library-head">
                 <div>
@@ -205,40 +239,6 @@
                 <p class="hint">Тягніть, щоб повернути стіл; коліщатко або щипок — наблизити.</p>
                 <p class="warning" id="leg3dFallback" hidden>3D-вигляд недоступний у цьому браузері; дивіться креслення вище.</p>
               </div>
-            </div>
-            <div class="studio-library">
-            <div class="library-head">
-              <div>
-                <p class="eyebrow">МАТЕРІАЛИ З ІСТОРІЄЮ</p>
-                <h2>Оберіть свої слеби <span id="stockCount"></span></h2>
-                <p class="hint">Поля праворуч лише відбирають слеби за розміром. Розміри стільниці задаються вище, під ескізом.</p>
-              </div>
-              <div class="filters">
-                <label
-                  >Слеб завдовжки від, см<input
-                    id="minLength"
-                    type="number"
-                    min="0"
-                    placeholder="0" /></label
-                ><label
-                  >Слеб завширшки від, см<input
-                    id="minWidth"
-                    type="number"
-                    min="0"
-                    placeholder="0"
-                /></label>
-              </div>
-            </div>
-            <div class="species-block">
-              <h3>Порода дерева</h3>
-              <div
-                id="speciesFilter"
-                class="species-buttons"
-                role="group"
-                aria-label="Фільтр слебів за породою"
-              ></div>
-            </div>
-            <div class="slab-grid" id="slabLibrary"></div>
             </div>
           </div>
           <aside class="config">

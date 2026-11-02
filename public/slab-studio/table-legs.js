@@ -226,14 +226,17 @@
   // The mounting plate under every leg: wooden, as thick as the administrator
   // says, with four holes whose size and distance from the edge belong to the
   // plate type. It is never smaller than the foot of the leg it carries.
-  // A plate is 50-300 mm a side. An older, bigger one is cut back to that, and to what fits under the
-  // tabletop (bounds = its length and width); it is never smaller than the foot of its leg.
+  // A plate is 50-300 mm a side. A record outside that (an old 80 x 80 cm one) is not a size anyone chose
+  // on purpose, so it falls back to the 150 mm default; the size is also cut to what fits under the
+  // tabletop (bounds = its length and width) and is never smaller than the foot of its leg.
   const PLATE_MIN_CM = 5,
-    PLATE_MAX_CM = 30;
+    PLATE_MAX_CM = 30,
+    PLATE_DEFAULT_CM = 15;
+  const plateSide = (v) => (v >= PLATE_MIN_CM && v <= PLATE_MAX_CM ? v : PLATE_DEFAULT_CM);
   function plates(mounts, spec, plateT, z, bounds) {
     return mounts.map((m, i) => {
-      let w = Math.min(Math.max(spec.widthCm, PLATE_MIN_CM), PLATE_MAX_CM),
-        d = Math.min(Math.max(spec.depthCm, PLATE_MIN_CM), PLATE_MAX_CM);
+      let w = plateSide(spec.widthCm),
+        d = plateSide(spec.depthCm);
       if (bounds) {
         w = Math.min(w, bounds.l - 2 * Math.abs(m.x));
         d = Math.min(d, bounds.w - 2 * Math.abs(m.y));

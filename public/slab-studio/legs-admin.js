@@ -149,7 +149,7 @@
       const builtin = p.id === "standard" && !legs().plates.some((x) => x.id !== "standard");
       const outOfRange = [p.widthCm, p.depthCm].some((v) => v < TL.PLATE_MIN_CM || v > TL.PLATE_MAX_CM);
       return `<article class="slab-card" data-plate="${esc(p.id)}"><div class="leg-plate-preview">${preview}</div><div class="slab-content">
-        ${outOfRange ? '<p class="warning">Розмір поза межами 50–300 мм: у розрахунку й на кресленні він обмежується. Виправте й збережіть.</p>' : ""}
+        ${outOfRange ? '<p class="warning">Розмір поза межами 50–300 мм: у розрахунку й на кресленні замість нього береться 150 мм. Виправте й збережіть.</p>' : ""}
         <label class="texture-name"><span>Назва</span><input data-p="name" value="${esc(p.name)}" maxlength="80" ${builtin ? "disabled" : ""} /></label>
         <div class="leg-fields">
           <label>Ширина, мм<input data-p="widthCm" data-mm type="number" step="5" min="50" max="300" value="${esc(Math.round(p.widthCm * 10))}" ${builtin ? "disabled" : ""} /></label>
