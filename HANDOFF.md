@@ -443,3 +443,12 @@ Voice Dictation CI падав у test-journal: запис 490 був у log/tabl
 
 
 CI, продовження #490: після першого виправлення Gate B дійшов до test-educationalPdfTemplates і виявив друге застаріле очікування 15 тем. Воно замінене точним набором 17; додано перевірку унікальності й відокремлення 9 навчальних шаблонів від book theme IDs. Код/каталог продукту не змінено, перевірки не пропускаються. Локально пройшов educational PDF contract та 7 наступних детермінованих Gate B контрактів (Node 24 із тимчасовим resolver для extensionless TS-імпортів, оригінальні файли тестів). Платний/живий renderer локально не запускався. Code fix 47760f1; фінальний статус GitHub CI звірити після цих документаційних комітів. Merge/deploy не виконано.
+
+
+## 491. AI workspace / уточнення — 02.11.2026 #04
+
+Прийнято 3d81f7c Book_Creator та 716faf5 Marketplace у власних чистих checkout. Старі #490 нотатки «не деплоїли» історичні: PR #26/#33 вже злиті, production перевірено у попередньому етапі. Власник дозволив усі сім нових доповнень і раніше дозволив commit/push/publication.
+
+Studio feat/table-ai-refinements: refinementImage PNG за мостом, після стільниці/10 кімнат; ключ лише admin platformKeyFor('gpt'), билінг незмінний. Marketplace feat/table-ai-creative-workspace: картки, керування refs/деталями, placement, camera/light, 1/2/4 серії, refinement lock, private history/favorites/compare. Owner scope перевіряється сервером, і iframe перевідкривається при зміні акаунта; файли кімнати не зберігаються. Тариф/підписку звіряє сервер до провайдера, серія зупиняється при помилці.
+
+Перевірено 72 цільові checks і Chromium desktop/mobile; Studio build/tsc, Marketplace API build/lint та web typecheck. Нова міграція Marketplace додає favorite та owner index. PostgreSQL e2e й повний набір — у CI, локальний Docker socket недоступний. Реальний OpenAI/Firebase не запускався, точність позиції приблизна. CI/merge/deploy нової ітерації на момент коміту ще не підтверджені; фінальні результати — у PR. Встановлення: Studio перед Marketplace. Журнал #491.
