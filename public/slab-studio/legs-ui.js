@@ -60,6 +60,15 @@
         if (!ok || !TL.DIMS_SCHEMES.includes(set.scheme) || meta.custom) delete set.legDims;
         else for (const k of ["topW", "topD", "footW", "footD"]) set.legDims[k] = Math.round(Math.min(TL.LEG_MAX_CM, Math.max(TL.LEG_MIN_CM, set.legDims[k])) * 10) / 10;
       }
+      if (set.columnDims) {
+        const c = set.columnDims;
+        if (!Number.isFinite(c.top) || !Number.isFinite(c.foot) || set.scheme !== "pedestal" || meta.custom) delete set.columnDims;
+        else {
+          const r = (v, hi) => Math.round(Math.min(hi, Math.max(TL.COLUMN_MIN_CM, v)) * 10) / 10;
+          c.top = r(c.top, TL.columnTopMax(d));
+          c.foot = r(c.foot, TL.COLUMN_MAX_CM);
+        }
+      }
       const inset = Number.isFinite(set.inset) ? set.inset : TL.DEFAULT_INSET_CM;
       set.inset = Math.round(Math.min(TL.MAX_INSET_CM, Math.max(0, inset)) * 10) / 10;
       return true;
@@ -74,6 +83,7 @@
         plateT: catalog().settings.plateThicknessCm,
         inset: set.inset,
         legDims: set.legDims,
+        columnDims: set.columnDims,
         plateCm: Math.max(TL.plateSide(plateOf(set).widthCm), TL.plateSide(plateOf(set).depthCm)),
       };
       const base = TL.layout(input, meta?.custom);
@@ -252,7 +262,20 @@
       $("legDimsBox").hidden = !dimsApply;
       $("legDimsOn").checked = manual;
       $("legDimsFields").hidden = !manual;
-      $("legThicknessField").hidden = manual;
+      // The central column: its two circles by hand (a trapezoid in the drawing).
+      const colApply = !meta.custom && set.scheme === "pedestal";
+      const colManual = colApply && !!set.columnDims;
+      $("colDimsBox").hidden = !colApply;
+      $("colDimsOn").checked = colManual;
+      $("colDimsFields").hidden = !colManual;
+      if (colManual) {
+        const topMax = TL.columnTopMax(design());
+        $("colTop").max = Math.round(topMax * 10);
+        $("colDimsHint").textContent = `Діаметри кіл у міліметрах: нижнє 100–1000, верхнє 100–${num(topMax * 10)} (пластина 4 см має вміститись у стільницю). Верхнє коло — під стільницею, нижнє — на підлозі.`;
+        if (document.activeElement !== $("colTop")) $("colTop").value = Math.round(set.columnDims.top * 10);
+        if (document.activeElement !== $("colFoot")) $("colFoot").value = Math.round(set.columnDims.foot * 10);
+      }
+      $("legThicknessField").hidden = manual || colManual;
       if (manual)
         for (const [id, key] of [["legTopW", "topW"], ["legTopD", "topD"], ["legFootW", "footW"], ["legFootD", "footD"]])
           if (document.activeElement !== $(id)) $(id).value = Math.round(set.legDims[key] * 10);
@@ -286,6 +309,7 @@
       const plate = plateOf(set);
       $("legSummary").innerHTML =
         `<b>${esc(metaOf(set.scheme).name)}</b> · довжина ніжки ${num(base.legLength, 1)} см (стіл ${num(set.height, 1)} см = ніжка + пластина ${num(input.plateT, 1)} см + стільниця ${num(design().t, 1)} см) · ${esc(materialOf(set).name)}` +
+        (set.columnDims ? `<br>Колона: верхнє коло Ø${num(set.columnDims.top * 10)} мм → нижнє Ø${num(set.columnDims.foot * 10)} мм` : "") +
         (set.legDims ? `<br>Ніжка: верх ${num(set.legDims.topW * 10)} × ${num(set.legDims.topD * 10)} мм → низ ${num(set.legDims.footW * 10)} × ${num(set.legDims.footD * 10)} мм` : "") +
         `<br>Кріплення: ${plates.length} × пластина «${esc(plate.name)}» ${num(plates[0].w, 1)} × ${num(plates[0].d, 1)} × ${num(input.plateT, 1)} см, по 4 отвори Ø${num(plate.holeDiameterMm, 1)} мм (відступ ${num(plate.holeInsetMm / 10, 1)} см від краю). Пластини стоять на ${num(set.inset, 1)} см від краю стільниці` +
         `<br>Орієнтовна вартість ніжок: <b>${money(priced.total)}</b> (дерево ${money(priced.wood)} · пластини ${money(priced.plate)} · робота ${money(priced.work)}). Остаточна — після розрахунку.`;
@@ -342,6 +366,7 @@
         thickness: meta.defaultThickness,
         inset: prev?.inset ?? TL.DEFAULT_INSET_CM,
         ...(prev?.legDims && TL.DIMS_SCHEMES.includes(id) ? { legDims: { ...prev.legDims } } : {}),
+        ...(prev?.columnDims && id === "pedestal" ? { columnDims: { ...prev.columnDims } } : {}),
         material: prev?.material || catalog().settings.materials[0].id,
         ...(prev?.plate ? { plate: prev.plate } : {}),
       };
@@ -377,6 +402,41 @@
           };
         $(id).onchange = () => render();
       }
+      $("colDimsOn").onchange = (e) => {
+        const s = set();
+        if (!s) return;
+        const d = design();
+        if (e.target.checked) s.columnDims = TL.defaultColumn(s.thickness, d.l, d.w);
+        else delete s.columnDims;
+        env.changed();
+        render();
+      };
+      for (const [id, key] of [["colTop", "top"], ["colFoot", "foot"]]) {
+        $(id).oninput = (e) => {
+          const s = set();
+          const v = num2(e.target.value) / 10;
+          if (!s || !s.columnDims || !Number.isFinite(v)) return;
+          s.columnDims[key] = Math.min(key === "top" ? TL.columnTopMax(design()) : TL.COLUMN_MAX_CM, Math.max(TL.COLUMN_MIN_CM, v));
+          env.changed();
+          clearTimeout(drawTimer);
+          drawTimer = setTimeout(draw, 80);
+        };
+        $(id).onchange = () => render();
+      }
+      // Quick shapes from the biggest circle typed: a cylinder, narrowing to the floor, widening.
+      $$all("[data-col-shape]").forEach(
+        (b) =>
+          (b.onclick = () => {
+            const s = set();
+            if (!s || !s.columnDims) return;
+            const big = Math.min(Math.max(s.columnDims.top, s.columnDims.foot), TL.columnTopMax(design()));
+            const small = Math.max(TL.COLUMN_MIN_CM, Math.round((big / 2) * 10) / 10);
+            const [top, foot] = { straight: [big, big], down: [big, small], up: [small, big] }[b.dataset.colShape];
+            s.columnDims = { top, foot };
+            env.changed();
+            render();
+          }),
+      );
       $("legDimsOn").onchange = (e) => {
         const s = set();
         if (!s) return;

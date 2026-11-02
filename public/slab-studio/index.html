@@ -285,6 +285,21 @@
                     </span>
                   </div>
                 </div>
+                <div class="leg-dims" id="colDimsBox" hidden>
+                  <label class="check"><input type="checkbox" id="colDimsOn" /> Задати розміри колони вручну (трапеція)</label>
+                  <div id="colDimsFields" hidden>
+                    <p class="hint" id="colDimsHint">Діаметри кіл у міліметрах, 100–1000. Верхнє коло — під стільницею, нижнє — на підлозі.</p>
+                    <div class="leg-dim-grid">
+                      <label>Верхнє коло, мм<input id="colTop" type="number" min="100" max="1000" step="10" inputmode="decimal" /></label>
+                      <label>Нижнє коло, мм<input id="colFoot" type="number" min="100" max="1000" step="10" inputmode="decimal" /></label>
+                    </div>
+                    <span class="rot-buttons" role="group" aria-label="Швидкі форми колони">
+                      <button type="button" data-col-shape="straight">Циліндр</button>
+                      <button type="button" data-col-shape="down">Звужена донизу</button>
+                      <button type="button" data-col-shape="up">Розширена донизу</button>
+                    </span>
+                  </div>
+                </div>
                 <label>Відступ від краю стільниці, см <small id="legInsetHint"></small>
                   <span class="leg-pair"><input id="legInsetRange" type="range" step="0.5" /><input id="legInset" type="number" step="0.5" inputmode="decimal" /></span>
                 </label>

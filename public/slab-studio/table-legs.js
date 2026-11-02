@@ -58,6 +58,23 @@
   // pedestal and a leg drawn as SVG have their own shape.
   const LEG_MIN_CM = 2,
     LEG_MAX_CM = 30;
+  // The central column is a round frustum: the circle under the tabletop and the circle on the floor, each
+  // 100-1000 mm (cm here). Its top has to leave 4 cm for the mounting plate within the top: columnDims = { top, foot }.
+  const COLUMN_MIN_CM = 10,
+    COLUMN_MAX_CM = 100;
+  const columnTopMax = (p) => Math.max(COLUMN_MIN_CM, Math.min(COLUMN_MAX_CM, Math.floor((Math.min(p.l, p.w) - 4) * 10) / 10));
+  const columnOf = (p) => {
+    const d = p.columnDims;
+    if (!d || !Number.isFinite(d.top) || !Number.isFinite(d.foot)) return null;
+    if (d.top < COLUMN_MIN_CM || d.top > COLUMN_MAX_CM || d.foot < COLUMN_MIN_CM || d.foot > COLUMN_MAX_CM) return null;
+    return d.top <= columnTopMax(p) ? d : null;
+  };
+  // The circles a column has before the buyer changes them (what the "by hand" fields start from), cm.
+  function defaultColumn(T, l, w) {
+    const D = Math.max(T * 2.4, 12);
+    const r = (v, hi) => Math.min(hi, Math.max(COLUMN_MIN_CM, Math.round(v * 10) / 10));
+    return { top: r(D, columnTopMax({ l, w })), foot: r(Math.max(D, Math.min(0.3 * Math.min(l, w), 40)), COLUMN_MAX_CM) };
+  }
   const DIMS_SCHEMES = ["straight", "tapered", "splayed", "turned", "trestle", "xframe", "sled", "tripod"];
   const dimsOf = (p) => {
     const d = p.legDims;
@@ -295,6 +312,12 @@
         break;
       }
       case "pedestal": {
+        const col = columnOf(p);
+        if (col) {
+          parts.push(part("column", "leg", "round", [0, 0, 0], [0, 0, Lg], [col.foot, col.foot], [col.top, col.top]));
+          mount(0, 0, col.top, col.top, 0, "column");
+          break;
+        }
         const D = Math.max(T * 2.4, 12);
         const foot = Math.min(0.55 * Math.min(p.l, p.w), 60);
         const fh = Math.max(3, Lg * 0.06);
@@ -482,5 +505,5 @@
     return known ? build(p.scheme, p) : buildFromSvg(design, p);
   }
 
-  root.TableLegs = { SCHEMES, build, buildFromSvg, layout, plates, vertices, outline, volume, cost, legLength, hull, PLATE_MIN_CM, PLATE_MAX_CM, plateSide, DEFAULT_INSET_CM, MAX_INSET_CM, DIMS_SCHEMES, LEG_MIN_CM, LEG_MAX_CM, defaultDims, footprint };
+  root.TableLegs = { SCHEMES, build, buildFromSvg, layout, plates, vertices, outline, volume, cost, legLength, hull, PLATE_MIN_CM, PLATE_MAX_CM, plateSide, DEFAULT_INSET_CM, MAX_INSET_CM, DIMS_SCHEMES, LEG_MIN_CM, LEG_MAX_CM, defaultDims, COLUMN_MIN_CM, COLUMN_MAX_CM, columnTopMax, defaultColumn, footprint };
 })(typeof window !== "undefined" ? window : globalThis);
