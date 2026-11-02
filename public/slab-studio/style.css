@@ -2273,3 +2273,13 @@ input[aria-invalid="true"] { border-color: #b83b36; outline: 1px solid #b83b36; 
   flex-wrap: wrap;
   gap: 4px 12px;
 }
+.order-template {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+.order-template select {
+  max-width: 220px;
+  font-size: 11px;
+}

@@ -14,6 +14,9 @@ import {
   slabStudioDir,
   specLines,
   DrawingsError,
+  DEFAULT_DRAWINGS_TEMPLATE,
+  listDrawingsTemplates,
+  resolveDrawingsTemplate,
   type DrawingsOrder,
 } from '../server/tableDrawingsPdf';
 
@@ -109,6 +112,44 @@ assert.ok(/масштаб 1:10/.test(reduced));
 assert.ok(production.svg(sheets[0], o).includes('масштаб 1:1.'));
 assert.equal(drawingsFileName(o), 'stil-T-100-kreslennya.pdf');
 
+// ---- шаблони дизайну: ті самі теми, що й у книг Студії
+const templates = listDrawingsTemplates();
+assert.equal(templates.length, 17, 'усі дизайн-теми книг');
+assert.ok(templates.every((t) => t.id && t.label && t.description), 'кожен шаблон має назву й опис');
+assert.equal(templates.filter((t) => t.default).length, 1);
+assert.equal(templates.find((t) => t.default)!.id, DEFAULT_DRAWINGS_TEMPLATE);
+assert.equal(resolveDrawingsTemplate('sci-fi'), 'sci-fi');
+assert.equal(resolveDrawingsTemplate('nonsense'), DEFAULT_DRAWINGS_TEMPLATE, 'невідомий шаблон — типовий, а не помилка');
+assert.equal(resolveDrawingsTemplate(undefined), DEFAULT_DRAWINGS_TEMPLATE);
+assert.equal(resolveDrawingsTemplate(['sci-fi']), DEFAULT_DRAWINGS_TEMPLATE, 'масив із запиту не пропускається');
+const styled = (template?: string) => buildDrawingsScript(o, undefined, { template });
+for (const id of ['academic-research', 'modern-fiction', 'sci-fi', 'children']) {
+  const { steps: ss, template } = styled(id);
+  assert.equal(template, id);
+  const created = ss.filter((x) => x.command === 'style.paragraph.create');
+  assert.deepEqual(created.map((x) => x.params.name).slice(0, 3), ['Body', 'Heading 1', 'Heading 2'], id + ': стилі абзаців теми');
+  // шрифти беруться з теми, тож різні теми дають різні стилі
+  assert.ok(created.every((x) => (x.params.chars as any).fontFamily), id + ': у стилях є шрифт');
+}
+const a1 = JSON.stringify(styled('academic-research').steps.filter((x) => x.command === 'style.paragraph.create'));
+const a2 = JSON.stringify(styled('modern-fiction').steps.filter((x) => x.command === 'style.paragraph.create'));
+assert.notEqual(a1, a2, 'різні теми — різний вигляд');
+{
+  const { steps: ss } = styled('sci-fi');
+  const at = ss.findIndex((x) => x.command === 'frame.create' && String(x.params.text).startsWith('Креслення столу'));
+  assert.ok(at > 0);
+  const after = ss.slice(at + 1, at + 40);
+  const selects = after.filter((x) => x.command === 'text.select');
+  assert.ok(selects.every((x) => x.params.story === '$' + at + '.story'), 'абзаци адресуються до рамки специфікації');
+  const applies = after.filter((x) => x.command === 'style.paragraph.apply').map((x) => x.params.name);
+  assert.equal(applies[0], 'Body');
+  assert.equal(applies[1], 'Heading 1', 'перший рядок — заголовок');
+  assert.equal(applies.filter((n) => n === 'Heading 2').length, 5, 'п’ять розділів: замовник, стільниця, смола, слеби, ніжки');
+  // межі абзаців у байтах UTF-8: рядок «Креслення столу №T-100» — перший
+  const first = specLines(o)[0];
+  assert.deepEqual([selects[1].params.anchor, selects[1].params.focus], [0, Buffer.byteLength(first, 'utf8')]);
+}
+
 // ---- без бінарника — зрозуміла помилка, а не падіння
 const keep = process.env.DESIGNCRAFT_DRAWINGS_PATH;
 delete process.env.DESIGNCRAFT_DRAWINGS_PATH;
@@ -125,6 +166,11 @@ if (cli) {
   const { width, height } = doc.getPage(0).getSize();
   assert.ok(Math.abs(width - 595.28) < 1 && Math.abs(height - 841.89) < 1 && width < height, 'A4 книжна: вужча, ніж висока');
   if (process.env.KEEP_DRAWINGS_PDF) fs.writeFileSync(process.env.KEEP_DRAWINGS_PDF, pdf);
+  for (const id of ['sci-fi', 'children']) {
+    const other = await renderDrawingsPdf(o, { cli, template: id });
+    assert.equal((await PDFDocument.load(other)).getPageCount(), pages, id + ': шаблон не змінює кількість сторінок');
+    assert.notDeepEqual(new Uint8Array(other), new Uint8Array(pdf), id + ': інший шаблон — інший файл');
+  }
   console.log(`✓ креслення: PDF ${pdf.length} Б, ${pages} сторінок, зібрано справжнім DesignCraft`);
 } else {
   console.log('✓ креслення: специфікація, замовник, скрипт DesignCraft (справжній запуск пропущено: немає DESIGNCRAFT_DRAWINGS_PATH)');

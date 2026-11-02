@@ -2,7 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { can, requireAdmin } from "./auth";
 import { readFurnitureAccess } from "./furnitureAccess";
 import { readBridgeSettings, type BridgeSettings } from "./marketplaceBridge";
-import { DrawingsError, drawingsFileName, renderDrawingsPdf } from "./tableDrawingsPdf";
+import { DrawingsError, drawingsFileName, listDrawingsTemplates, renderDrawingsPdf } from "./tableDrawingsPdf";
 import { calculateWoodAndEpoxyCost } from "../src/components/adminOs/furnitureCalculator/utils/calculator";
 import type {
   CalculationInput,
@@ -214,6 +214,10 @@ export function registerSlabTableRoutes(app: Express) {
     requireAdmin,
     proxy("GET", () => "/production"),
   );
+  // The design templates to choose from before the export: the same design themes as the books.
+  app.get("/api/admin/slab-tables/drawings-templates", requireAdmin, (_req, res) => {
+    res.json({ templates: listDrawingsTemplates() });
+  });
   // PDF drawings of one order, made by DesignCraft: the customer, the chosen configuration with the resin, and every
   // sheet of the production files. Not a product of the marketplace: only an administrator can fetch it.
   app.get("/api/admin/slab-tables/drawings/:id", requireAdmin, async (req, res) => {
@@ -223,7 +227,7 @@ export function registerSlabTableRoutes(app: Express) {
       // by the id of the card or by the number the buyer sees in the cart (TBL-…)
       const order = orders.find((o) => o.id === req.params.id || o.number === req.params.id);
       if (!order) throw new DrawingsError("Замовлення не знайдено.", 404);
-      const pdf = await renderDrawingsPdf(order as never);
+      const pdf = await renderDrawingsPdf(order as never, { template: req.query.template });
       res
         .status(200)
         .type("application/pdf")

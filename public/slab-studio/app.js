@@ -1352,6 +1352,13 @@
           } finally { b.disabled = false; }
         }),
     );
+    $$("[data-template]").forEach((sel) => {
+      sel.onchange = () => {
+        try { localStorage.setItem(TEMPLATE_KEY, sel.value); } catch { /* a convenience only */ }
+        $$("[data-template]").forEach((other) => (other.value = sel.value));
+      };
+    });
+    void loadTemplates();
     $$("[data-prod]").forEach(
       (b) =>
         (b.onclick = () => {
@@ -1386,12 +1393,37 @@
   // The PDF drawings are there as soon as the table is in the buyer's cart; the files for production wait for the deposit.
   const productionButtons = (o) =>
     `<span class="order-files" role="group" aria-label="Креслення і файли для виробництва">` +
+    `<label class="order-template">Шаблон дизайну PDF <select data-template aria-label="Шаблон дизайну креслень PDF">${templateOptions()}</select></label>` +
     `<button class="text-btn" data-prod="${esc(o.id)}" data-kind="pdf">Креслення PDF ↓</button>` +
     (o.paidAt
       ? `<button class="text-btn" data-prod="${esc(o.id)}" data-kind="all">Файли виробництва (zip) ↓</button>` +
         [["svg", "SVG"], ["dxf", "DXF"], ["obj", "OBJ"]].map(([k, t]) => `<button class="text-btn" data-prod="${esc(o.id)}" data-kind="${k}">${t} ↓</button>`).join("")
       : "") +
     "</span>";
+  // The design templates of the PDF drawings: the design themes of the books, fetched once from the Studio server.
+  let templates = [],
+    templatesTried = false;
+  const TEMPLATE_KEY = "slab-drawings-template";
+  const savedTemplate = () => {
+    try { return localStorage.getItem(TEMPLATE_KEY) || ""; } catch { return ""; }
+  };
+  const chosenTemplate = () => document.querySelector("[data-template]")?.value || savedTemplate();
+  function templateOptions() {
+    const chosen = savedTemplate();
+    return templates
+      .map((t) => `<option value="${esc(t.id)}" ${(chosen ? chosen === t.id : t.default) ? "selected" : ""} title="${esc(t.description)}">${esc(t.label)} · ${esc((t.recommendedFor || []).slice(0, 2).join(", "))}</option>`)
+      .join("");
+  }
+  async function loadTemplates() {
+    if (templates.length || templatesTried) return;
+    templatesTried = true;
+    try {
+      const root = location.pathname.replace(/\/slab-studio\/[^/]*$/, "");
+      const r = await fetch(root + "/api/admin/slab-tables/drawings-templates", { credentials: "same-origin" });
+      templates = (await r.json()).templates || [];
+      if (templates.length) renderOrders();
+    } catch { /* the PDF still works with the default template */ }
+  }
   // The PDF drawings are made by DesignCraft on the Studio server (not in this page).
   async function downloadDrawings(o, button) {
     button.disabled = true;
@@ -1401,7 +1433,8 @@
       // This page is served under the Studio prefix (/studio on the main domain): the Studio's own fetch patch does not
       // reach into a frame, so the prefix is taken from the address of the page itself.
       const root = location.pathname.replace(/\/slab-studio\/[^/]*$/, "");
-      const r = await fetch(root + "/api/admin/slab-tables/drawings/" + encodeURIComponent(o.id), { credentials: "same-origin" });
+      const template = chosenTemplate();
+      const r = await fetch(root + "/api/admin/slab-tables/drawings/" + encodeURIComponent(o.id) + (template ? "?template=" + encodeURIComponent(template) : ""), { credentials: "same-origin" });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Не вдалося скласти креслення.");
       download(`${o.number}-kreslennya.pdf`, await r.blob(), "application/pdf");
     } finally {

@@ -20,6 +20,9 @@ import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
 import { cmd, serializeScript, type DesigncraftCommand } from './pdf/designcraft/commands';
+import { buildDesigncraftStyleCommands } from './pdf/designcraft/styleCommands';
+import { getBookDesignTheme, isBookDesignThemeId, listBookDesignThemes, type BookDesignThemeId } from './pdf/designcraft/themes';
+import { DEFAULT_LAYOUT_SPEC, type PdfLayoutSpec } from './pdf/pdfTypes';
 
 /** A4, книжна, пункти. */
 export const PAGE = { w: 595.28, h: 841.89, margin: 28, footer: 54 } as const;
@@ -27,6 +30,38 @@ const PT_PER_MM = 72 / 25.4;
 /** Масштаби, якими користується креслення: найближчий, що вміщує аркуш. */
 const NICE = [1, 2, 2.5, 5, 10, 20, 25, 50, 100];
 const TIMEOUT_MS = Number(process.env.DESIGNCRAFT_TIMEOUT_MS) || 240_000;
+
+/**
+ * Шаблон дизайну креслень — одна з дизайн-тем книг Студії (ті самі шрифти, вирівнювання, розміри й відступи, що в
+ * верстці книг). Тема визначає, як виглядає сторінка специфікації: заголовок, назви розділів і текст.
+ */
+export const DEFAULT_DRAWINGS_TEMPLATE: BookDesignThemeId = 'academic-research';
+export function listDrawingsTemplates() {
+  return listBookDesignThemes().map((t) => ({
+    id: t.id,
+    label: t.labelUk,
+    description: t.descriptionUk,
+    category: t.category,
+    recommendedFor: t.recommendedFor,
+    default: t.id === DEFAULT_DRAWINGS_TEMPLATE,
+  }));
+}
+export const resolveDrawingsTemplate = (value: unknown): BookDesignThemeId => (isBookDesignThemeId(value) ? value : DEFAULT_DRAWINGS_TEMPLATE);
+/** Налаштування верстки для сторінки специфікації: A4, дрібніший текст, заголовки в межах сторінки. */
+function templateSpec(id: BookDesignThemeId): PdfLayoutSpec {
+  return {
+    ...DEFAULT_LAYOUT_SPEC,
+    themeId: id,
+    baseFontSize: 10,
+    bodyAlign: 'left',
+    paragraphIndent: 0,
+    paragraphSpacing: 1,
+    chapterTitle: { ...DEFAULT_LAYOUT_SPEC.chapterTitle, fontSize: 18, spaceBefore: 0, spaceAfter: 10, align: 'left' },
+    sectionTitle: { ...DEFAULT_LAYOUT_SPEC.sectionTitle, fontSize: 11, spaceBefore: 10, spaceAfter: 2, align: 'left' },
+  } as PdfLayoutSpec;
+}
+/** Назви розділів специфікації: вони отримують стиль «Heading 2». */
+const SECTION_TITLES = new Set(['ЗАМОВНИК', 'СТІЛЬНИЦЯ', 'ЕПОКСИДНА СМОЛА', 'СЛЕБИ', 'НІЖКИ']);
 
 export const DRAWINGS_CLI_PATH = () => process.env.DESIGNCRAFT_DRAWINGS_PATH || '';
 
@@ -129,12 +164,19 @@ const clampScale = (sheet: Sheet, areaW: number, areaH: number) => {
   const denominator = NICE.find((n) => n >= need) ?? Math.ceil(need);
   return denominator;
 };
-export function buildDrawingsScript(order: DrawingsOrder, production: ProductionApi = loadProduction()): { steps: DesigncraftCommand[]; pages: number; scales: number[] } {
+export function buildDrawingsScript(
+  order: DrawingsOrder,
+  production: ProductionApi = loadProduction(),
+  opts: { template?: unknown } = {},
+): { steps: DesigncraftCommand[]; pages: number; scales: number[]; template: BookDesignThemeId } {
+  const template = resolveDrawingsTemplate(opts.template);
   const sheets = production.sheets(order);
   const pages = sheets.length + 1;
   const c = customerOf(order);
   const steps: DesigncraftCommand[] = [
     cmd('file.new', { width: PAGE.w, height: PAGE.h, pages, margins: 0, facingPages: false, title: `Стіл №${order.number} — креслення`, intent: 'print' }),
+    // стилі абзаців шаблону: Body, Heading 1, Heading 2 — із тієї самої теми, що й книги
+    ...buildDesigncraftStyleCommands(templateSpec(template), []),
   ];
   const areaW = PAGE.w - 2 * PAGE.margin,
     areaH = PAGE.h - 2 * PAGE.margin - PAGE.footer;
@@ -147,13 +189,16 @@ export function buildDrawingsScript(order: DrawingsOrder, production: Production
     });
 
   // Перша сторінка: специфікація і зразок кольору смоли.
+  const lines = specLines(order);
+  const specAt = steps.length; // номер кроку, на який посилаються наступні (`$N.story`)
   steps.push(
     cmd('frame.create', {
       spread: 0,
       rect: [PAGE.margin, PAGE.margin + 70, PAGE.w - PAGE.margin, PAGE.h - PAGE.margin - PAGE.footer],
       content: 'text',
-      text: specLines(order).join('\n'),
+      text: lines.join('\n'),
     }),
+    ...styleParagraphs(specAt, lines),
     cmd('edit.pasteSvg', {
       spread: 0,
       at: [PAGE.w - PAGE.margin - 85, PAGE.margin + 30],
@@ -177,7 +222,25 @@ export function buildDrawingsScript(order: DrawingsOrder, production: Production
     );
   });
   steps.push(cmd('file.exportPdf', { path: '__OUT__', title: `Стіл №${order.number} — креслення`, author: 'Fusion Lab', tagged: true }));
-  return { steps, pages, scales };
+  return { steps, pages, scales, template };
+}
+
+/** Стилі абзаців специфікації: уся розмітка — Body, перший рядок — Heading 1, назви розділів — Heading 2. */
+function styleParagraphs(frameStep: number, lines: string[]): DesigncraftCommand[] {
+  const story = `$${frameStep}.story`;
+  const total = Buffer.byteLength(lines.join('\n'), 'utf8');
+  const steps: DesigncraftCommand[] = [
+    cmd('text.select', { story, anchor: 0, focus: total }),
+    cmd('style.paragraph.apply', { name: 'Body' }),
+  ];
+  let at = 0;
+  lines.forEach((line, i) => {
+    const bytes = Buffer.byteLength(line, 'utf8');
+    const name = i === 0 ? 'Heading 1' : SECTION_TITLES.has(line) ? 'Heading 2' : null;
+    if (name && bytes > 0) steps.push(cmd('text.select', { story, anchor: at, focus: at + bytes }), cmd('style.paragraph.apply', { name }));
+    at += bytes + 1;
+  });
+  return steps;
 }
 
 // ---------------------------------------------------------------------------- запуск
@@ -206,7 +269,7 @@ export async function drawingsCliSupportsSvg(cli: string): Promise<boolean> {
   return r.code === 0 && r.stdout.includes('"edit.pasteSvg"');
 }
 
-export async function renderDrawingsPdf(order: DrawingsOrder, opts: { cli?: string } = {}): Promise<Buffer> {
+export async function renderDrawingsPdf(order: DrawingsOrder, opts: { cli?: string; template?: unknown } = {}): Promise<Buffer> {
   const cli = opts.cli || DRAWINGS_CLI_PATH();
   if (!cli) throw new DrawingsError('PDF-креслення вимкнені: не задано DESIGNCRAFT_DRAWINGS_PATH (DesignCraft 0.9.0 або новіший).', 503);
   if (!(await drawingsCliSupportsSvg(cli)))
@@ -214,7 +277,7 @@ export async function renderDrawingsPdf(order: DrawingsOrder, opts: { cli?: stri
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'table-drawings-'));
   try {
     const out = path.join(dir, 'drawings.pdf');
-    const { steps } = buildDrawingsScript(order);
+    const { steps } = buildDrawingsScript(order, undefined, { template: opts.template });
     const script = serializeScript(steps.map((s) => (s.command === 'file.exportPdf' ? { ...s, params: { ...s.params, path: out.replace(/\\/g, '/') } } : s)));
     const file = path.join(dir, 'drawings.dcs');
     await fs.writeFile(file, script, 'utf8');
