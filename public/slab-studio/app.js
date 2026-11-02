@@ -174,7 +174,26 @@
       ? `<rect x="${-d.l / 2}" y="${-d.w / 2}" width="${d.l}" height="${d.w}" ${extra}/>`
       : `<ellipse rx="${d.l / 2}" ry="${d.w / 2}" ${extra}/>`;
   }
-  function composition(d, slabs, key, interactive = false) {
+  // The top view of what is under the tabletop: legs and plates with their holes. Where the resin is clear it is
+  // seen through it, so it is drawn solid and beneath; where it is not, as hidden lines (dashed) on top.
+  function legsLayer(fp, key, dashed) {
+    // Hidden lines are light and dark dashes in turn, so they read on a resin of any colour.
+    const lines = (tag, geometry, solid) =>
+      dashed
+        ? `<${tag} ${geometry} fill="none" stroke="#ffffff" stroke-width=".5" stroke-dasharray="1.6 1.6"/><${tag} ${geometry} fill="none" stroke="#2b1a10" stroke-width=".5" stroke-dasharray="1.6 1.6" stroke-dashoffset="1.6"/>`
+        : `<${tag} ${geometry} ${solid}/>`;
+    const poly = (q) => q.poly.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join(" ");
+    const parts = fp.parts.map((q) => lines("polygon", `points="${poly(q)}"`, `fill="${fp.color}" stroke="#4a3320" stroke-width=".3"`)).join("");
+    const plates = fp.plates
+      .map(
+        (p) =>
+          lines("rect", `x="${p.x - p.w / 2}" y="${p.y - p.d / 2}" width="${p.w}" height="${p.d}"`, 'fill="#d6b98a" stroke="#6b5238" stroke-width=".3"') +
+          p.holes.map((h) => lines("circle", `cx="${h.x}" cy="${h.y}" r="${h.r}"`, 'fill="#efe6d8" stroke="#6b5238" stroke-width=".2"')).join(""),
+      )
+      .join("");
+    return `<g clip-path="url(#table-${key})" pointer-events="none" class="legs-layer ${dashed ? "is-hidden" : "is-seen"}">${parts}${plates}</g>`;
+  }
+  function composition(d, slabs, key, interactive = false, legsFootprint = null) {
     let defs = "",
       pieces = "";
     for (const [i, p] of d.pieces.entries()) {
@@ -194,16 +213,27 @@
     const base = tableShape(d, `fill="${d.color}"${clear ? ` fill-opacity="${(1 - clear / 100).toFixed(2)}"` : ""} filter="url(#shadow-${key})"`);
     const sheen = clear ? tableShape(d, `fill="url(#glass-${key})" pointer-events="none"`) : "";
     const edge = clear ? 'fill="none" stroke="#8fb6c2" stroke-width=".6" pointer-events="none"' : 'fill="none" stroke="#ffffff88" stroke-width=".5" pointer-events="none"';
-    return `<defs><clipPath id="table-${key}">${tableShape(d)}</clipPath>${defs}${glass}<filter id="shadow-${key}" x="-50%" y="-60%" width="200%" height="240%"><feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#33402c" flood-opacity=".18"/></filter></defs>${base}<g clip-path="url(#table-${key})">${ResinTexture.layer(d)}${sheen}${pieces}</g>${tableShape(d, edge)}`;
+    const under = legsFootprint && clear ? legsLayer(legsFootprint, key, false) : "";
+    const over = legsFootprint && !clear ? legsLayer(legsFootprint, key, true) : "";
+    return `<defs><clipPath id="table-${key}">${tableShape(d)}</clipPath>${defs}${glass}<filter id="shadow-${key}" x="-50%" y="-60%" width="200%" height="240%"><feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#33402c" flood-opacity=".18"/></filter></defs>${under}${base}<g clip-path="url(#table-${key})">${ResinTexture.layer(d)}${sheen}${pieces}</g>${over}${tableShape(d, edge)}`;
   }
-  function renderDesign() {
+  // The 2D sketch alone. The legs UI calls it when the base changes; it does not schedule anything, so there is no loop.
+  function paintDesign() {
     const svg = $("design"),
       vw = Math.max(design.l + 65, 150),
       vh = Math.max(design.w + 70, (vw * 200) / 260);
     svg.setAttribute("viewBox", `${-vw / 2} ${-vh / 2} ${vw} ${vh}`);
+    const base = legsUi?.footprint?.() ?? null;
+    const clear = Math.round(Number(design.resinTransparency) || 0) > 0;
     svg.innerHTML =
-      composition(design, db.slabs, "live", true) +
+      composition(design, db.slabs, "live", true, base) +
+      (base
+        ? `<text x="0" y="${design.w / 2 + 30}" font-size="3.2" fill="#8a7a66" text-anchor="middle" font-family="Arial">${clear ? "ніжки й пластини видно крізь смолу" : "пунктир: ніжки й пластини під смолою"}</text>`
+        : "") +
       `<g stroke="#929e83" stroke-width=".3" fill="none"><path d="M ${-design.l / 2} ${design.w / 2 + 12} v 5 m 0 -2.5 h ${design.l} m 0 -2.5 v 5"/><path d="M ${-design.l / 2 - 12} ${-design.w / 2} h -5 m 2.5 0 v ${design.w} m -2.5 0 h 5"/></g><g fill="#79896c" font-family="Arial" font-size="4" text-anchor="middle"><text x="0" y="${design.w / 2 + 23}">${num(design.l)} см</text><text transform="translate(${-design.l / 2 - 22} 0) rotate(-90)">${num(design.w)} см</text></g>`;
+  }
+  function renderDesign() {
+    paintDesign();
     $("canvasEmpty").hidden = design.pieces.length > 0;
     syncClarity();
     updateResin();
@@ -1401,6 +1431,7 @@
     changed: () => invalidate(),
     syncLegsSelect: (value) => ($("legs").value = value),
     topTexture,
+    paint: paintDesign,
   });
 
   legsAdmin = LegsAdmin.create({

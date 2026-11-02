@@ -213,6 +213,7 @@
       const d = design();
       const set = d.legSet;
       const ready = c.available;
+      env.paint?.();
       $("legsNotReady").hidden = !c.demo;
       renderCards(ready ? set : undefined);
       $$all("[data-leg-scheme]").forEach((b) => (b.disabled = !ready));
@@ -262,6 +263,15 @@
       draw();
     }
 
+    // What the 2D sketch of the tabletop draws under it: legs and plates in plan (null when there are none).
+    function footprint() {
+      const c = catalog(),
+        set = design().legSet;
+      if (!c?.available || !set || !metaOf(set.scheme)) return null;
+      const { base, plates } = layoutOf(set);
+      return { ...TL.footprint(base, plates), color: materialOf(set).color || "#b88a56" };
+    }
+
     function draw() {
       const c = catalog(),
         set = design().legSet;
@@ -277,6 +287,7 @@
         `<br>Орієнтовна вартість ніжок: <b>${money(priced.total)}</b> (дерево ${money(priced.wood)} · пластини ${money(priced.plate)} · робота ${money(priced.work)}). Остаточна — після розрахунку.`;
       $("legPlateDetail").innerHTML = plateSvg(plates[0]);
       schedule3d();
+      env.paint?.();
     }
 
     function schedule3d() {
@@ -413,6 +424,7 @@
 
     return {
       render,
+      footprint,
       mini: miniCard,
       // The table changed shape, size or composition: redraw soon, not per pixel.
       schedule() {

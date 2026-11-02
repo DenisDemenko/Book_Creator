@@ -392,6 +392,27 @@
     return lower.slice(0, -1).concat(upper.slice(0, -1));
   }
 
+  /** The top view of what stands under the tabletop, for the 2D sketch: the outline of every part and every
+   *  plate with its holes (cm, table centre = 0,0). Parts that stand on the same outline are listed once. */
+  function footprint(base, plateList) {
+    const seen = new Set(),
+      parts = [];
+    for (const part of base.parts) {
+      const poly = hull(vertices(part).map((v) => [v[0], v[1]]));
+      const key = poly.map((v) => v[0].toFixed(1) + "," + v[1].toFixed(1)).join(" ");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      parts.push({ role: part.role, round: part.type === "round", poly });
+    }
+    return {
+      parts,
+      plates: plateList.map((p) => ({
+        x: p.x, y: p.y, w: p.w, d: p.d,
+        holes: p.holes.map((h) => ({ x: h.x, y: h.y, r: h.diameterMm / 20 })),
+      })),
+    };
+  }
+
   /** Outline of one part seen from the front ("front": x,z) or the side ("side": y,z). */
   function outline(pt, view) {
     const i = view === "front" ? 0 : 1;
@@ -428,5 +449,5 @@
     return known ? build(p.scheme, p) : buildFromSvg(design, p);
   }
 
-  root.TableLegs = { SCHEMES, build, buildFromSvg, layout, plates, vertices, outline, volume, cost, legLength, hull, PLATE_MIN_CM, PLATE_MAX_CM, plateSide, DEFAULT_INSET_CM, MAX_INSET_CM, DIMS_SCHEMES, LEG_MIN_CM, LEG_MAX_CM, defaultDims };
+  root.TableLegs = { SCHEMES, build, buildFromSvg, layout, plates, vertices, outline, volume, cost, legLength, hull, PLATE_MIN_CM, PLATE_MAX_CM, plateSide, DEFAULT_INSET_CM, MAX_INSET_CM, DIMS_SCHEMES, LEG_MIN_CM, LEG_MAX_CM, defaultDims, footprint };
 })(typeof window !== "undefined" ? window : globalThis);
