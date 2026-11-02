@@ -7,7 +7,7 @@ export class TableImageError extends Error {
 /** Only the Studio administrator's encrypted GPT key is accepted.
  * Never fall back to a caller key, environment variable or marketplace setting.
  */
-export async function generateTableImage(input: { prompt?: unknown; referenceImage?: unknown; model?: unknown }) {
+export async function generateTableImage(input: { prompt?: unknown; referenceImage?: unknown; model?: unknown; interiorImages?: unknown }) {
   const { prompt, referenceImage, model } = input;
   if (typeof prompt !== 'string' || !prompt.length || prompt.length > 32000 ||
       typeof referenceImage !== 'string' || referenceImage.length > 500000 ||
@@ -17,12 +17,24 @@ export async function generateTableImage(input: { prompt?: unknown; referenceIma
   const image = Buffer.from(referenceImage.split(',')[1], 'base64');
   if (!image.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex')))
     throw new TableImageError('Некоректний PNG-ескіз.', 400);
+  const roomImages = input.interiorImages ?? [];
+  if (!Array.isArray(roomImages) || roomImages.length > 10)
+    throw new TableImageError('Можна завантажити не більше 10 фото інтер’єру.', 400);
+  const rooms: Uint8Array[] = roomImages.map(value => {
+    if (typeof value !== 'string' || value.length > 250000 || !/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(value))
+      throw new TableImageError('Некоректне фото інтер’єру.', 400);
+    const bytes = Buffer.from(value.split(',')[1], 'base64');
+    if (bytes.length < 3 || bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff)
+      throw new TableImageError('Некоректний JPEG інтер’єру.', 400);
+    return new Uint8Array(bytes);
+  });
   const apiKey = await platformKeyFor('gpt');
   if (!apiKey) throw new TableImageError('Адміністратор має додати ключ OpenAI (GPT) у розділі «Ключі API» Студії книг.');
   const form = new FormData();
   form.set('model', model);
   form.set('prompt', prompt);
   form.set('image[]', new Blob([new Uint8Array(image)], { type: 'image/png' }), 'tabletop.png');
+  rooms.forEach((room, index) => form.append('image[]', new Blob([room], { type: 'image/jpeg' }), `room-${index + 1}.jpg`));
   form.set('size', '1024x1024');
   form.set('quality', 'medium');
   form.set('n', '1');
