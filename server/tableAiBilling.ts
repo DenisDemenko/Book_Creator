@@ -54,7 +54,7 @@ export function registerTableAiBillingRoutes(app: Express) {
             return res.status(402).json({ error: 'Спочатку зарезервуйте AI-бали.' });
         }
         // The provider key stays inside Studio; the marketplace receives only the image.
-        return res.json(await generateTableImage({ prompt: req.body.prompt, referenceImage: req.body.referenceImage, model }));
+        return res.json(await generateTableImage({ prompt: req.body.prompt, referenceImage: req.body.referenceImage, model, interiorImages: req.body.interiorImages }));
       }
       if (!paid || !user) return res.json({ mode: 'free', model });
       if (!creditsEnabled()) return res.status(503).json({ error: 'Списання AI-балів у Студії вимкнено.' });
