@@ -31,8 +31,15 @@
       defaultThickness: d.defaultThicknessCm,
       custom: d,
     });
-    const allSchemes = () => [...TL.SCHEMES, ...(catalog()?.designs || []).map(customMeta)];
-    const metaOf = (id) => allSchemes().find((s) => s.id === id);
+    const hiddenSchemes = () => catalog()?.settings?.hiddenSchemes || [];
+    const allSchemes = () => [
+      ...TL.SCHEMES.filter((s) => !hiddenSchemes().includes(s.id)),
+      ...(catalog()?.designs || []).map(customMeta),
+    ];
+    // A layout switched off since the buyer picked it still resolves, so the
+    // drawing does not break; the server refuses it at the quote.
+    const metaOf = (id) =>
+      allSchemes().find((s) => s.id === id) || TL.SCHEMES.find((s) => s.id === id);
     const materialOf = (set) =>
       catalog().settings.materials.find((m) => m.id === set.material) || catalog().settings.materials[0];
     const plateOf = (set) =>
@@ -347,6 +354,7 @@
 
     return {
       render,
+      mini: miniCard,
       // The table changed shape, size or composition: redraw soon, not per pixel.
       schedule() {
         if (!design().legSet || !catalog()?.available) return;

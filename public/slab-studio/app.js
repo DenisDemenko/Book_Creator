@@ -1320,6 +1320,7 @@
   legsAdmin = LegsAdmin.create({
     $, esc, num, bridge, toast, admin,
     legs: () => remote.legs,
+    mini: (meta) => legsUi.mini(meta),
     reload: async () => {
       await reloadRemote();
       legsAdmin.render();

@@ -90,12 +90,47 @@
               plateThicknessCm: Number($("legPlateThickness").value),
               plateWoodPerM3: Number($("legPlatePrice").value),
               workPerMount: Number($("legWork").value),
+              hiddenSchemes: legs().settings.hiddenSchemes || [],
             },
           });
           delete $("legSettingsForm").dataset.touched;
           materials = [];
           await env.reload();
           toast("Налаштування ніжок збережено.");
+        } catch (error) {
+          toast(error.message);
+        }
+      };
+    }
+
+    // ------------------------------------------- the built-in layouts
+    function schemeCard(m, hidden) {
+      const range = (a, b, unit) => `${num(a, 0)}–${num(b, 0)} ${unit}`;
+      return `<article class="slab-card" data-builtin="${esc(m.id)}"><div class="leg-plate-preview">${env.mini(m)}</div><div class="slab-content">
+        <b>${esc(m.name)}</b>
+        <p class="hint">${esc(m.note)}. Висота столу ${range(m.minHeight, m.maxHeight, "см")}, товщина ніжок ${range(m.minThickness, m.maxThickness, "см")}.</p>
+        <label class="check"><input type="checkbox" data-scheme-on ${hidden ? "" : "checked"} ${env.admin ? "" : "disabled"} /> Показувати покупцям</label>
+      </div></article>`;
+    }
+    function renderSchemes() {
+      const hidden = legs().settings.hiddenSchemes || [];
+      $("legBuiltinList").innerHTML = TL.SCHEMES.map((m) => schemeCard(m, hidden.includes(m.id))).join("");
+      $("legBuiltinSave").hidden = !env.admin;
+    }
+    function bindSchemes() {
+      $("legBuiltinSave").onclick = async () => {
+        if (!legs().configured) return toast("Спершу збережіть матеріали й ціни ніжок.");
+        const off = $$all("[data-builtin]")
+          .filter((card) => !card.querySelector("[data-scheme-on]").checked)
+          .map((card) => card.dataset.builtin);
+        const { materials, plateThicknessCm, plateWoodPerM3, workPerMount } = legs().settings;
+        try {
+          await bridge.request("PUT", "/tables/admin/leg-settings", {
+            expectedVersion: legs().version,
+            data: { materials, plateThicknessCm, plateWoodPerM3, workPerMount, hiddenSchemes: off },
+          });
+          await env.reload();
+          toast(off.length ? `Покупці не бачать схем: ${off.length}.` : "Усі схеми показано покупцям.");
         } catch (error) {
           toast(error.message);
         }
@@ -327,6 +362,7 @@
     }
 
     bindSettings();
+    bindSchemes();
     bindPlateForm();
     bindUpload();
     return {
@@ -337,6 +373,7 @@
         }
         $("legCatalogOff").hidden = true;
         renderSettings();
+        renderSchemes();
         renderPlates();
         renderLegs();
       },
