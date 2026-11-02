@@ -121,7 +121,7 @@ remote перевірити можна, запушити — ні**.
 
 # Що не запушено (для наступної сесії)
 
-#491: feat/table-ai-refinements — уточнення зображень, тести й передача; гілка готується до дозволеного push у Book_Creator. Спочатку Studio, потім Marketplace feat/table-ai-creative-workspace. CI/деплой перевіряти за PR; живий OpenAI не запускався. Старі нотатки #490 нижче — історичні, PR #26/#33 вже опубліковані.
+#491: код 70a6223 + HEAD (службовий запис стану); feat/table-ai-refinements готова до дозволеного push у Book_Creator. Команда: git push origin feat/table-ai-refinements. Спочатку Studio, потім Marketplace feat/table-ai-creative-workspace. CI/деплой перевіряти за PR; живий OpenAI не запускався. Старі нотатки #490 нижче — історичні, PR #26/#33 вже опубліковані.
 
 CI #490: також виправлено educational PDF contract (47760f1): точні 17 тем, унікальність, відокремлені 9 навчальних шаблонів; локально contract + 7 наступних перевірок pass. Останні docs commits цієї гілки описують перевірку; результати GitHub CI звірити окремо.
 
