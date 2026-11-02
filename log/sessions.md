@@ -3500,3 +3500,10 @@ Marketplace Т8.2 ff6808f запушено в origin/master; SHA звірено.
 [Запис #490](table-ai-2026-11.md). Підключено серверний білінг Студії до конструктора: канонічна модель/ціна, спільний гаманець, резерв/списання/повернення. Marketplace — 5 lifetime безкоштовних успішних зображень і outbox. 11 SQLite/Studio + 22 Marketplace checks пройшли. Власник дозволив лише feature-гілки/PR.
 
 **Не зроблено і чому:** full build/typecheck/npm test, реальна PostgreSQL/Firebase/OpenAI — немає повного checkout/залежностей і live setup. Merge/deploy/живі баланси не змінено — дозволено тільки публікацію feature-гілок. Наступне — CI/staging і Studio перед Marketplace після окремого rollout.
+
+
+### Уточнення власника: ключ лише з адмінпанелі Студії — 02.11.2026, та сама сесія #02
+
+Ключ OpenAI для конструктора вводиться виключно через наявний розділ «Ключі API» → GPT/OpenAI у Студії книг. Додано server/tableAiGeneration.ts: тільки platformKeyFor('gpt'), без fallback до env або ключа користувача; OpenAI викликає сервер Студії. Ключ не відправляється мостом і не повертається у відповідях. У Marketplace видалено поле/форми/маршрути ai-settings, TableAiSettingsDto та сховище ключа з Prisma/ще незлитої міграції. BRIDGE_API_KEY лишається окремим службовим секретом авторизації мосту. Квота 5 lifetime та спільний гаманець збережені.
+
+Перевірено 19 Marketplace + 22 Studio перевірки (реальний SQLite/CreditWallet, справжня функція platformKeyFor з підставленим сховищем), JS syntax і diff whitespace. Окремо перевірено відмову env/user fallback, вибір лише активного admin, незмінність ціни/моделі та відсутність ключа в результатах. Повні build/typecheck, PostgreSQL/Firebase/OpenAI та production не перевірені з попередніх причин. Кодові коміти опубліковані тільки в погоджених feature-гілках; merge/deploy не виконано. Marketplace PR #26, Studio PR #33. Перед rollout встановлювати Studio першою; після застосування попередньої тестової міграції потрібна додаткова, не переписана жива історія.
