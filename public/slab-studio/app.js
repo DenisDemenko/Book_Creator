@@ -199,18 +199,39 @@
     updateResin();
     legsUi?.schedule();
     const p = design.pieces.find((p) => p.uid === selected);
-    $("selectedTools").hidden = !p;
+    $("selectedTools").hidden = !design.pieces.length;
+    $("pieceControls").hidden = !p;
+    renderOnTable();
     $("selectionLabel").textContent = p
-      ? "Стрілки: 1 см · Shift: 5 см · Delete: видалити"
+      ? "Стрілки: 1 см · Shift: 5 см · [ ]: поворот · Delete: видалити"
       : "Оберіть слеб для редагування";
     if (p) {
       $("selectedName").textContent = db.slabs.find(
         (s) => s.id === p.id,
       ).number;
-      ["X", "Y", "Angle"].forEach(
+      ["X", "Y"].forEach(
         (k) => ($("piece" + k).value = numInput(p[k.toLowerCase()])),
       );
+      const angle = normAngle(p.angle);
+      if (document.activeElement !== $("pieceAngle")) $("pieceAngle").value = numInput(angle);
+      $("pieceAngleRange").value = angle;
     }
+  }
+  // An angle in degrees, always 0-360: a slab or the resin texture can be turned all the way round.
+  function normAngle(a) {
+    const n = Number(a);
+    return Number.isFinite(n) ? ((n % 360) + 360) % 360 : 0;
+  }
+  // Every slab on the table as a chip: click to select it, x to take it off the table.
+  function renderOnTable() {
+    $("onTable").innerHTML = design.pieces
+      .map((p) => {
+        const s = db.slabs.find((s) => s.id === p.id);
+        if (!s) return "";
+        const on = p.uid === selected;
+        return `<span class="chip ${on ? "is-on" : ""}"><button type="button" data-chip="${esc(p.uid)}" aria-pressed="${on}">${esc(s.number)}${s.species ? " · " + esc(s.species) : ""}</button><button type="button" class="chip-x" data-chip-remove="${esc(p.uid)}" aria-label="Прибрати слеб ${esc(s.number)} зі столу">×</button></span>`;
+      })
+      .join("");
   }
   // Epoxy the table takes: the part of the top not covered by a slab, times the
   // thickness, times the density plus the waste allowance — the same formula as
@@ -488,6 +509,12 @@
       ),
     );
     $("resinTexturePreview").hidden = !texture;
+    $("resinAngleBox").hidden = !texture;
+    {
+      const a = normAngle(design.resinAngle);
+      if (document.activeElement !== $("resinAngle")) $("resinAngle").value = numInput(a);
+      $("resinAngleRange").value = a;
+    }
     if (texture) {
       $("resinTextureThumbnail").src = texture.image;
       $("resinTextureName").textContent = texture.name;
@@ -529,6 +556,7 @@
     texturePending = false;
     dimensionsValid();
     delete design.resinTexture;
+    delete design.resinAngle;
     $("resinTextureFile").value = "";
     $("uploadResinTexture").disabled = false;
     $("resinTextureStatus").textContent =
@@ -536,6 +564,22 @@
     $("resinTextureProcessing").hidden = true;
     syncResinTexture();
   }
+  // Turn the resin texture all the way round, independent of the slabs.
+  function setResinAngle(value) {
+    if (!design.resinTexture || !Number.isFinite(value)) return;
+    const a = normAngle(value);
+    if (a) design.resinAngle = a;
+    else delete design.resinAngle;
+    invalidate();
+    renderDesign();
+    syncResinTexture();
+  }
+  $("resinAngleRange").oninput = (e) => setResinAngle(Number(e.target.value));
+  $("resinAngle").onchange = (e) => setResinAngle(Number(e.target.value));
+  $("resinAngleReset").onclick = () => setResinAngle(0);
+  $$("[data-resin-rot]").forEach(
+    (b) => (b.onclick = () => setResinAngle(normAngle(design.resinAngle) + Number(b.dataset.resinRot))),
+  );
   $("uploadResinTexture").onclick = () => $("resinTextureFile").click();
   $("resinTextureFile").onchange = async (event) => {
     const file = event.target.files[0];
@@ -862,7 +906,7 @@
   $("design").onpointerup = $("design").onpointercancel = () => {
     dragging = null;
   };
-  ["X", "Y", "Angle"].forEach(
+  ["X", "Y"].forEach(
     (k) =>
       ($("piece" + k).onchange = () => {
         const p = design.pieces.find((p) => p.uid === selected),
@@ -874,20 +918,52 @@
         }
       }),
   );
-  function removePiece() {
-    design.pieces = design.pieces.filter((p) => p.uid !== selected);
-    selected = null;
+  // Turn the selected slab: any angle, 0-360.
+  function setPieceAngle(value) {
+    const p = design.pieces.find((p) => p.uid === selected);
+    if (!p || !Number.isFinite(value)) return;
+    p.angle = normAngle(value);
+    invalidate();
+    renderDesign();
+  }
+  $("pieceAngleRange").oninput = (e) => setPieceAngle(Number(e.target.value));
+  $("pieceAngle").onchange = (e) => setPieceAngle(Number(e.target.value));
+  $$("[data-rot]").forEach(
+    (b) =>
+      (b.onclick = () => {
+        const p = design.pieces.find((p) => p.uid === selected);
+        if (p) setPieceAngle(normAngle(p.angle) + Number(b.dataset.rot));
+      }),
+  );
+  function removePiece(uid = selected) {
+    design.pieces = design.pieces.filter((p) => p.uid !== uid);
+    if (selected === uid) selected = null;
     invalidate();
     renderDesign();
     renderLibrary();
+    toast("Слеб прибрано зі столу. Він знову доступний у бібліотеці.");
   }
-  $("removePiece").onclick = removePiece;
+  $("removePiece").onclick = () => removePiece();
+  $("onTable").onclick = (e) => {
+    const remove = e.target.closest("[data-chip-remove]");
+    if (remove) return removePiece(remove.dataset.chipRemove);
+    const chip = e.target.closest("[data-chip]");
+    if (!chip) return;
+    selected = chip.dataset.chip;
+    renderDesign();
+  };
   $("workArea").onkeydown = (e) => {
     const p = design.pieces.find((p) => p.uid === selected);
     if (!p || e.target.tagName === "INPUT") return;
     const n = e.shiftKey ? 5 : 1;
-    if (e.key === "Delete") {
+    if (e.key === "Delete" || e.key === "Backspace") {
+      e.preventDefault();
       removePiece();
+      return;
+    }
+    if (e.key === "[" || e.key === "]") {
+      e.preventDefault();
+      setPieceAngle(normAngle(p.angle) + (e.key === "]" ? 1 : -1) * (e.shiftKey ? 1 : 15));
       return;
     }
     const delta = {

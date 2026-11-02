@@ -47,19 +47,54 @@
     id, role, type, bottom, top, bs, ts, yaw, ...extra,
   });
 
-  // Where the four legs stand. They keep a margin from the edge, and on a
-  // round or oval top they are pulled in so that they stay under the top.
+  // The buyer sets how far the mounting plate stays from the edge of the top (cm). The plates sit
+  // under the legs, so the legs move with them: input.inset, and input.plateCm = the plate type side.
+  const DEFAULT_INSET_CM = 5,
+    MAX_INSET_CM = 40;
+  const insetOf = (p) => (Number.isFinite(p.inset) ? Math.min(Math.max(p.inset, 0), MAX_INSET_CM) : DEFAULT_INSET_CM);
+  // Half the plate under one leg: plates() never makes it smaller than the foot plus 4 cm.
+  const plateHalf = (p, T) => Math.max(p.plateCm || 0, T + 4) / 2;
+  // Where the four legs stand: the outer edge of every plate is `inset` from the edge of the top. On a
+  // round or oval top the corner is pulled along its diagonal until the outer corner of the plate is
+  // `inset` inside the curve (a quadratic in the scale k, solved exactly).
   function corners(p, T) {
-    const edge = 4 + T / 2;
-    let hx = p.l / 2 - edge,
-      hy = p.w / 2 - edge;
+    const ins = insetOf(p),
+      ext = plateHalf(p, T);
+    let hx = Math.max(p.l / 2 - ins - ext, 0),
+      hy = Math.max(p.w / 2 - ins - ext, 0);
     if (p.shape !== "square") {
-      hx *= 0.72;
-      hy *= 0.72;
+      const a = p.l / 2,
+        b = p.w / 2;
+      const R = Math.max(0.2, 1 - ins / Math.min(a, b));
+      const A = hx / a,
+        B = hy / b,
+        c1 = ext / a,
+        c2 = ext / b;
+      const qa = A * A + B * B,
+        qb = A * c1 + B * c2,
+        qc = c1 * c1 + c2 * c2 - R * R;
+      const k = qa > 0 ? Math.min(1, Math.max(0, (-qb + Math.sqrt(Math.max(0, qb * qb - qa * qc))) / qa)) : 0;
+      hx *= k;
+      hy *= k;
     }
     hx = Math.max(hx, T / 2 + 1);
     hy = Math.max(hy, T / 2 + 1);
     return { hx, hy, list: [[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy]] };
+  }
+  // The x of an end panel centre (panels carry a plate as wide as themselves).
+  function panelX(p, T, wid) {
+    const ins = insetOf(p),
+      ext = plateHalf(p, T);
+    let x = p.l / 2 - ins - ext;
+    if (p.shape !== "square") {
+      const a = p.l / 2,
+        b = p.w / 2;
+      const R = Math.max(0.2, 1 - ins / Math.min(a, b));
+      const hy = Math.max(p.plateCm || 0, wid + 4) / 2;
+      const room = R * R - (hy / b) * (hy / b);
+      x = room > 0 ? Math.min(x, a * Math.sqrt(room) - ext) : T;
+    }
+    return Math.max(x, T);
   }
 
   // Leg length: what is left of the overall height under the plate and the top.
@@ -133,10 +168,8 @@
         break;
       }
       case "slab": {
-        const x = Math.max(p.l / 2 - 4 - T / 2, T);
-        const k = p.shape === "square" ? 1 : 0.72;
-        const px = x * k;
         const wid = Math.max(10, Math.min(p.w * 0.72, p.w - 10));
+        const px = panelX(p, T, wid);
         [-1, 1].forEach((sx, i) => {
           parts.push(part("panel" + i, "panel", "rect", [sx * px, 0, 0], [sx * px, 0, Lg], [T, wid], [T, wid]));
           mount(sx * px, 0, T, wid, 0, "panel");
@@ -205,7 +238,7 @@
     const c = corners(p, T);
     if (design.placement === "ends") {
       const wid = Math.max(10, Math.min(p.w * 0.72, p.w - 10));
-      const px = Math.max(p.l / 2 - 4 - T / 2, T) * (p.shape === "square" ? 1 : 0.72);
+      const px = panelX(p, T, wid);
       [-1, 1].forEach((sx, i) => {
         parts.push(part("panel" + i, "panel", "rect", [sx * px, 0, 0], [sx * px, 0, Lg], [T, wid], [T, wid], 0, { svg: "side", fill: design.fill }));
         mounts.push({ x: sx * px, y: 0, a: T, b: wid, yaw: 0, kind: "panel" });
@@ -333,5 +366,5 @@
     return known ? build(p.scheme, p) : buildFromSvg(design, p);
   }
 
-  root.TableLegs = { SCHEMES, build, buildFromSvg, layout, plates, vertices, outline, volume, cost, legLength, hull, PLATE_MIN_CM, PLATE_MAX_CM };
+  root.TableLegs = { SCHEMES, build, buildFromSvg, layout, plates, vertices, outline, volume, cost, legLength, hull, PLATE_MIN_CM, PLATE_MAX_CM, plateSide, DEFAULT_INSET_CM, MAX_INSET_CM };
 })(typeof window !== "undefined" ? window : globalThis);

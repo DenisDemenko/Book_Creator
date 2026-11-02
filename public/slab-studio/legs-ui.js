@@ -55,6 +55,8 @@
       const floor = Math.max(meta.minHeight, d.t + catalog().settings.plateThicknessCm + 15);
       set.height = Math.round(Math.min(meta.maxHeight, Math.max(floor, set.height)) * 10) / 10;
       set.thickness = Math.round(Math.min(meta.maxThickness, Math.max(meta.minThickness, set.thickness)) * 10) / 10;
+      const inset = Number.isFinite(set.inset) ? set.inset : TL.DEFAULT_INSET_CM;
+      set.inset = Math.round(Math.min(TL.MAX_INSET_CM, Math.max(0, inset)) * 10) / 10;
       return true;
     }
     function layoutOf(set) {
@@ -64,6 +66,8 @@
         shape: d.shape, l: d.l, w: d.w, t: d.t,
         scheme: set.scheme, height: set.height, thickness: set.thickness,
         plateT: catalog().settings.plateThicknessCm,
+        inset: set.inset,
+        plateCm: Math.max(TL.plateSide(plateOf(set).widthCm), TL.plateSide(plateOf(set).depthCm)),
       };
       const base = TL.layout(input, meta?.custom);
       const plates = TL.plates(base.mounts, plateOf(set), input.plateT, base.legLength, { l: input.l, w: input.w });
@@ -220,6 +224,7 @@
       for (const [id, v, lo, hi] of [
         ["legHeight", set.height, floor, meta.maxHeight],
         ["legThickness", set.thickness, meta.minThickness, meta.maxThickness],
+        ["legInset", set.inset, 0, TL.MAX_INSET_CM],
       ]) {
         for (const suffix of ["", "Range"]) {
           const el = $(id + suffix);
@@ -230,6 +235,7 @@
       }
       $("legHeightHint").textContent = `${num(floor)}–${num(meta.maxHeight)} см`;
       $("legThicknessHint").textContent = `${num(meta.minThickness)}–${num(meta.maxThickness)} см`;
+      $("legInsetHint").textContent = `0–${num(TL.MAX_INSET_CM)} см`;
       $("legMaterial").innerHTML = c.settings.materials
         .map((m) => `<option value="${esc(m.id)}" ${m.id === set.material ? "selected" : ""}>${esc(m.name)}</option>`)
         .join("");
@@ -250,7 +256,7 @@
       const plate = plateOf(set);
       $("legSummary").innerHTML =
         `<b>${esc(metaOf(set.scheme).name)}</b> · довжина ніжки ${num(base.legLength, 1)} см (стіл ${num(set.height, 1)} см = ніжка + пластина ${num(input.plateT, 1)} см + стільниця ${num(design().t, 1)} см) · ${esc(materialOf(set).name)}` +
-        `<br>Кріплення: ${plates.length} × пластина «${esc(plate.name)}» ${num(plates[0].w, 1)} × ${num(plates[0].d, 1)} × ${num(input.plateT, 1)} см, по 4 отвори Ø${num(plate.holeDiameterMm, 1)} мм (відступ ${num(plate.holeInsetMm / 10, 1)} см від краю)` +
+        `<br>Кріплення: ${plates.length} × пластина «${esc(plate.name)}» ${num(plates[0].w, 1)} × ${num(plates[0].d, 1)} × ${num(input.plateT, 1)} см, по 4 отвори Ø${num(plate.holeDiameterMm, 1)} мм (відступ ${num(plate.holeInsetMm / 10, 1)} см від краю). Пластини стоять на ${num(set.inset, 1)} см від краю стільниці` +
         `<br>Орієнтовна вартість ніжок: <b>${money(priced.total)}</b> (дерево ${money(priced.wood)} · пластини ${money(priced.plate)} · робота ${money(priced.work)}). Остаточна — після розрахунку.`;
       $("legPlateDetail").innerHTML = plateSvg(plates[0]);
       schedule3d();
@@ -299,6 +305,7 @@
         scheme: id,
         height: prev?.height ?? meta.defaultHeight,
         thickness: meta.defaultThickness,
+        inset: prev?.inset ?? TL.DEFAULT_INSET_CM,
         material: prev?.material || catalog().settings.materials[0].id,
         ...(prev?.plate ? { plate: prev.plate } : {}),
       };
@@ -318,7 +325,7 @@
     function bindInputs() {
       const set = () => design().legSet;
       const num2 = (v) => (Number.isFinite(Number(v)) ? Number(v) : NaN);
-      for (const [id, key] of [["legHeight", "height"], ["legThickness", "thickness"]]) {
+      for (const [id, key] of [["legHeight", "height"], ["legThickness", "thickness"], ["legInset", "inset"]]) {
         for (const suffix of ["", "Range"])
           $(id + suffix).oninput = (e) => {
             const s = set();

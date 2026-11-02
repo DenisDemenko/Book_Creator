@@ -9,7 +9,16 @@
   function layer(design) {
     const image = design.resinTexture?.image;
     if (!validImage(image)) return "";
-    return `<image class="resin-texture-layer" href="${image}" x="${-design.l / 2}" y="${-design.w / 2}" width="${design.l}" height="${design.w}" preserveAspectRatio="xMidYMid slice" pointer-events="none" aria-label="Текстура епоксидної смоли"/>`;
+    const tag = `<image class="resin-texture-layer" href="${image}" x="${-design.l / 2}" y="${-design.w / 2}" width="${design.l}" height="${design.w}" preserveAspectRatio="xMidYMid slice" pointer-events="none" aria-label="Текстура епоксидної смоли"/>`;
+    const angle = ((Number(design.resinAngle) || 0) % 360 + 360) % 360;
+    if (!angle) return tag;
+    // Turned about the centre of the top and enlarged just enough that its corners still cover it.
+    const c = Math.abs(Math.cos((angle * Math.PI) / 180)),
+      s = Math.abs(Math.sin((angle * Math.PI) / 180));
+    const scale = Math.max((c * design.l + s * design.w) / design.l, (s * design.l + c * design.w) / design.w);
+    // Rounded up, never down: a hair too small would leave a bare edge.
+    const cover = Math.ceil(scale * 10000 - 1e-6) / 10000;
+    return `<g transform="rotate(${angle}) scale(${cover.toFixed(4)})">${tag}</g>`;
   }
 
   const MAX_INPUT_BYTES = 35 * 1024 * 1024;

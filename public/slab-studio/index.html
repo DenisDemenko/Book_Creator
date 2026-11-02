@@ -93,17 +93,22 @@
             </div>
             </div>
             <div class="selected-tools" id="selectedTools" hidden>
-              <strong id="selectedName"></strong
-              ><label>X, см<input id="pieceX" type="number" step="0.5" /></label
-              ><label>Y, см<input id="pieceY" type="number" step="0.5" /></label
-              ><label
-                >Поворот, °<input
-                  id="pieceAngle"
-                  type="number"
-                  step="1" /></label
-              ><button id="removePiece" class="text-btn danger">
-                Видалити
-              </button>
+              <div class="on-table" id="onTable" role="group" aria-label="Слеби на столі"></div>
+              <div class="piece-controls" id="pieceControls" hidden>
+                <strong id="selectedName"></strong>
+                <label>X, см<input id="pieceX" type="number" step="0.5" /></label>
+                <label>Y, см<input id="pieceY" type="number" step="0.5" /></label>
+                <label class="rot">Поворот слеба, °
+                  <span class="leg-pair"><input id="pieceAngleRange" type="range" min="0" max="360" step="1" aria-label="Поворот слеба, градуси" /><input id="pieceAngle" type="number" min="0" max="360" step="1" inputmode="decimal" /></span>
+                </label>
+                <span class="rot-buttons" role="group" aria-label="Швидкий поворот слеба">
+                  <button type="button" data-rot="-15">↺ 15°</button>
+                  <button type="button" data-rot="15">↻ 15°</button>
+                  <button type="button" data-rot="90">+ 90°</button>
+                  <button type="button" data-rot="180">180°</button>
+                </span>
+                <button type="button" id="removePiece" class="remove-btn">Видалити зі столу</button>
+              </div>
             </div>
             <div class="studio-size" id="studioSize">
             <label class="field-title">Форма стільниці</label>
@@ -220,6 +225,9 @@
                 </label>
                 <label>Товщина ніжок, см <small id="legThicknessHint"></small>
                   <span class="leg-pair"><input id="legThicknessRange" type="range" step="0.5" /><input id="legThickness" type="number" step="0.5" inputmode="decimal" /></span>
+                </label>
+                <label>Відступ від краю стільниці, см <small id="legInsetHint"></small>
+                  <span class="leg-pair"><input id="legInsetRange" type="range" step="0.5" /><input id="legInset" type="number" step="0.5" inputmode="decimal" /></span>
                 </label>
                 <label>Дерево ніжок<select id="legMaterial"></select></label>
                 <label id="legPlateField">Пластина кріплення<select id="legPlate"></select></label>
@@ -343,6 +351,17 @@
               <div id="resinTextureProcessing" class="texture-processing" hidden>
                 <p id="resinTextureProgressText" class="hint" aria-live="polite">Підготовка · 0%</p>
                 <progress id="resinTextureProgress" max="100" value="0" aria-labelledby="resinTextureProgressText"></progress>
+              </div>
+              <div id="resinAngleBox" class="resin-angle" hidden>
+                <label>Поворот текстури смоли, °
+                  <span class="leg-pair"><input id="resinAngleRange" type="range" min="0" max="360" step="1" aria-label="Поворот текстури смоли, градуси" /><input id="resinAngle" type="number" min="0" max="360" step="1" inputmode="decimal" /></span>
+                </label>
+                <span class="rot-buttons" role="group" aria-label="Швидкий поворот текстури">
+                  <button type="button" data-resin-rot="-15">↺ 15°</button>
+                  <button type="button" data-resin-rot="15">↻ 15°</button>
+                  <button type="button" data-resin-rot="90">+ 90°</button>
+                  <button type="button" id="resinAngleReset">Скинути</button>
+                </span>
               </div>
               <div
                 id="resinTexturePreview"
