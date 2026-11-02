@@ -295,19 +295,29 @@ $r = Test-DesignCraftServer @('mcp', '--connect', '7979')
     const fakeCli = path.join(bin5, process.platform === 'win32' ? 'designcraft-cli.exe' : 'designcraft-cli');
     fs.writeFileSync(fakeCli, '#!/bin/sh\nexit 0\n');
     fs.chmodSync(fakeCli, 0o755);
-    const withCode = await runPs(['-File', SCRIPT, '-DesignCraftPath', fakeCli, '-NoBrowser', '-Url', `designcraft-studio://open?book=B1&studio=${encodeURIComponent('http://localhost:' + port)}&code=ABCD-EFGH`], { LOCALAPPDATA: la5, HOME: home, USERPROFILE: home, DESIGNCRAFT_NO_AUTODETECT: '1' });
+    // After the pairing the script goes on to start Claude Code. A CI machine has none, so a stand-in
+    // that reports "logged in" and exits (Windows keeps whatever is installed there).
+    const claudeBin = path.join(TMP, 'bin-claude');
+    fs.mkdirSync(claudeBin, { recursive: true });
+    if (process.platform !== 'win32') {
+      const fakeClaude = path.join(claudeBin, 'claude');
+      fs.writeFileSync(fakeClaude, `#!/bin/sh\nif [ "$1" = "auth" ]; then echo '{"loggedIn":true}'; fi\nexit 0\n`);
+      fs.chmodSync(fakeClaude, 0o755);
+    }
+    const withClaude: Record<string, string> = process.platform === 'win32' ? {} : { PATH: claudeBin + path.delimiter + (process.env.PATH ?? '') };
+    const withCode = await runPs(['-File', SCRIPT, '-DesignCraftPath', fakeCli, '-NoBrowser', '-Url', `designcraft-studio://open?book=B1&studio=${encodeURIComponent('http://localhost:' + port)}&code=ABCD-EFGH`], { LOCALAPPDATA: la5, HOME: home, USERPROFILE: home, DESIGNCRAFT_NO_AUTODETECT: '1', ...withClaude });
     t('код з посилання обміняно на токен без жодного запитання', /Код прийнято/.test(withCode) && /Ви ввійшли як: Test/.test(withCode) && seen.includes('POST /api/external/v1/pair'), withCode.trim().split('\n').slice(0, 3).join(' | '));
     t('токен збережено автоматично (без «y/N»)', /Збережено для цієї Студії/.test(withCode) && !/Зберегти токен/.test(withCode));
     const cfg5 = path.join(la5, 'DesignCraftStudio', 'config.json');
-    t('адресу Студії запам\'ятано для прямого запуску', fs.existsSync(cfg5) && JSON.parse(fs.readFileSync(cfg5, 'utf8')).lastStudio === `http://localhost:${port}`);
+    t('адресу Студії запам\'ятано для прямого запуску', fs.existsSync(cfg5) && JSON.parse(fs.readFileSync(cfg5, 'utf8').replace(/^\uFEFF/, '')).lastStudio === `http://localhost:${port}`);
     seen.length = 0;
-    const again = await runPs(['-File', SCRIPT, '-DesignCraftPath', fakeCli, '-NoBrowser', '-Url', `designcraft-studio://open?book=B1&studio=${encodeURIComponent('http://localhost:' + port)}&code=ZZZZ-ZZZZ`], { LOCALAPPDATA: la5, HOME: home, USERPROFILE: home, DESIGNCRAFT_NO_AUTODETECT: '1' });
+    const again = await runPs(['-File', SCRIPT, '-DesignCraftPath', fakeCli, '-NoBrowser', '-Url', `designcraft-studio://open?book=B1&studio=${encodeURIComponent('http://localhost:' + port)}&code=ZZZZ-ZZZZ`], { LOCALAPPDATA: la5, HOME: home, USERPROFILE: home, DESIGNCRAFT_NO_AUTODETECT: '1', ...withClaude });
     t('є збережений токен — код з посилання не витрачається', /Ви ввійшли як: Test/.test(again) && !seen.includes('POST /api/external/v1/pair'));
     // Адресу «з минулого разу» кладемо в config.json: тест не ходить у справжню хмарну Студію.
     const la6 = path.join(TMP, 'la6');
     fs.mkdirSync(path.join(la6, 'DesignCraftStudio'), { recursive: true });
     fs.writeFileSync(path.join(la6, 'DesignCraftStudio', 'config.json'), JSON.stringify({ lastStudio: `http://localhost:${port}` }));
-    const direct = await runPs(['-File', SCRIPT, '-DesignCraftPath', fakeCli, '-NoBrowser'], { LOCALAPPDATA: la6, HOME: home, USERPROFILE: home, DESIGNCRAFT_NO_AUTODETECT: '1' });
+    const direct = await runPs(['-File', SCRIPT, '-DesignCraftPath', fakeCli, '-NoBrowser'], { LOCALAPPDATA: la6, HOME: home, USERPROFILE: home, DESIGNCRAFT_NO_AUTODETECT: '1', ...withClaude });
     t('прямий запуск без адреси: пояснення, адреса береться з минулого разу, а не «localhost:3000»', /запущено напряму/.test(direct) && !/localhost:3000/.test(direct) && seen.includes('GET /'), direct.trim().split('\n')[0].slice(0, 80));
     // Режим «лише DesignCraft»: вікно відкривається, Студія/токен/Claude Code не потрібні й не чіпаються.
     const appDir = path.join(TMP, 'dc-only');
