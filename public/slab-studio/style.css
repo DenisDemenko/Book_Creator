@@ -2174,3 +2174,64 @@ input[aria-invalid="true"] { border-color: #b83b36; outline: 1px solid #b83b36; 
 .leg-dims .hint {
   margin: 0;
 }
+
+/* Edges of the top: rounded or cut at 45 degrees. */
+.edge-box {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+.edge-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.edge-presets button {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 11px;
+}
+.edge-presets button:hover {
+  border-color: var(--accent, #c97f4f);
+}
+.edge-presets button[aria-pressed="true"] {
+  border-color: var(--accent, #c97f4f);
+  background: #f6e3d4;
+  font-weight: 700;
+}
+.edge-sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.edge-side {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.edge-side legend {
+  padding: 0 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.edge-side label {
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+}
+.edge-side .leg-pair {
+  display: grid;
+  grid-template-columns: 1fr 74px;
+  gap: 8px;
+  align-items: center;
+}
+@media (max-width: 650px) {
+  .edge-sides {
+    grid-template-columns: 1fr;
+  }
+}

@@ -86,6 +86,9 @@
             between(d.legSet.height, 20, 150) && between(d.legSet.thickness, 1, 30) &&
             typeof d.legSet.material === "string")) &&
           (d.resinTransparency === undefined || between(d.resinTransparency, 0, 100)) &&
+          (d.edgeTopMm === undefined || between(d.edgeTopMm, 0, 150)) &&
+          (d.edgeBottomMm === undefined || between(d.edgeBottomMm, 0, 150)) &&
+          [undefined, "round", "chamfer"].includes(d.edgeTopStyle) && [undefined, "round", "chamfer"].includes(d.edgeBottomStyle) &&
           (!d.resinTexture || (typeof d.resinTexture.name === "string" &&
             d.resinTexture.name.length <= 120 && typeof d.resinTexture.image === "string" &&
             d.resinTexture.image.length <= 400000 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(d.resinTexture.image)))) {
@@ -193,6 +196,12 @@
       .join("");
     return `<g clip-path="url(#table-${key})" pointer-events="none" class="legs-layer ${dashed ? "is-hidden" : "is-seen"}">${parts}${plates}</g>`;
   }
+  // The outline of the top drawn in from its edge by `inset` cm.
+  function insetShape(d, inset, extra = "") {
+    return d.shape === "square"
+      ? `<rect x="${-d.l / 2 + inset}" y="${-d.w / 2 + inset}" width="${Math.max(d.l - 2 * inset, 0.1)}" height="${Math.max(d.w - 2 * inset, 0.1)}" ${extra}/>`
+      : `<ellipse rx="${Math.max(d.l / 2 - inset, 0.1)}" ry="${Math.max(d.w / 2 - inset, 0.1)}" ${extra}/>`;
+  }
   function composition(d, slabs, key, interactive = false, legsFootprint = null) {
     let defs = "",
       pieces = "";
@@ -215,7 +224,10 @@
     const edge = clear ? 'fill="none" stroke="#8fb6c2" stroke-width=".6" pointer-events="none"' : 'fill="none" stroke="#ffffff88" stroke-width=".5" pointer-events="none"';
     const under = legsFootprint && clear ? legsLayer(legsFootprint, key, false) : "";
     const over = legsFootprint && !clear ? legsLayer(legsFootprint, key, true) : "";
-    return `<defs><clipPath id="table-${key}">${tableShape(d)}</clipPath>${defs}${glass}<filter id="shadow-${key}" x="-50%" y="-60%" width="200%" height="240%"><feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#33402c" flood-opacity=".18"/></filter></defs>${under}${base}<g clip-path="url(#table-${key})">${ResinTexture.layer(d)}${sheen}${pieces}</g>${over}${tableShape(d, edge)}`;
+    // Where the face stops and the worked edge begins (only on the live sketch, not on the 3D texture).
+    const worked = (Number(d.edgeTopMm) || 0) / 10;
+    const rim = interactive && worked > 0 ? insetShape(d, worked, 'fill="none" stroke="#ffffff" stroke-opacity=".55" stroke-width=".3" pointer-events="none"') : "";
+    return `<defs><clipPath id="table-${key}">${tableShape(d)}</clipPath>${defs}${glass}<filter id="shadow-${key}" x="-50%" y="-60%" width="200%" height="240%"><feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#33402c" flood-opacity=".18"/></filter></defs>${under}${base}<g clip-path="url(#table-${key})">${ResinTexture.layer(d)}${sheen}${pieces}</g>${over}${tableShape(d, edge)}${rim}`;
   }
   // The 2D sketch alone. The legs UI calls it when the base changes; it does not schedule anything, so there is no loop.
   function paintDesign() {
@@ -236,6 +248,7 @@
     paintDesign();
     $("canvasEmpty").hidden = design.pieces.length > 0;
     syncClarity();
+    syncEdges();
     updateResin();
     legsUi?.schedule();
     const p = design.pieces.find((p) => p.uid === selected);
@@ -1549,6 +1562,82 @@
       );
       b.setAttribute("aria-pressed", String(applied === sample.name));
     });
+  }
+
+  // ---- Edges of the top: rounded or cut at 45 degrees, 1 mm to the thickness, the two sides within it (table-edges.js).
+  let edgeNote = "";
+  const edgeSize = (key) => Math.round(Number(design[key]) || 0);
+  const edgeStyle = (key) => TableEdges.styleOf(design[key]);
+  function storeEdges(top, bottom, topStyle, bottomStyle) {
+    if (top) design.edgeTopMm = top;
+    else delete design.edgeTopMm;
+    if (bottom) design.edgeBottomMm = bottom;
+    else delete design.edgeBottomMm;
+    if (topStyle === "chamfer") design.edgeTopStyle = "chamfer";
+    else delete design.edgeTopStyle;
+    if (bottomStyle === "chamfer") design.edgeBottomStyle = "chamfer";
+    else delete design.edgeBottomStyle;
+  }
+  // `prefer` is the side the buyer is changing: the other one gives way when the two do not fit.
+  function setEdges(top, bottom, prefer, styles = {}) {
+    const T = Math.round(design.t * 10);
+    const f = TableEdges.fit(top, bottom, T, prefer);
+    // The two sides did not fit within the thickness: say which one gave way.
+    const wantedTop = TableEdges.fit(top, 0, T).top,
+      wantedBottom = TableEdges.fit(0, bottom, T).bottom;
+    edgeNote =
+      wantedTop + wantedBottom > T
+        ? `Зверху й знизу разом не більше товщини стільниці (${T} мм): ${prefer === "bottom" ? "верх" : "низ"} змінено до ${prefer === "bottom" ? f.top : f.bottom} мм.`
+        : "";
+    storeEdges(f.top, f.bottom, styles.top ?? edgeStyle("edgeTopStyle"), styles.bottom ?? edgeStyle("edgeBottomStyle"));
+    invalidate();
+    renderDesign();
+  }
+  function syncEdges() {
+    const T = Math.round(design.t * 10);
+    // A thinner top takes smaller edges: bring the saved sizes within it.
+    const f = TableEdges.fit(edgeSize("edgeTopMm"), edgeSize("edgeBottomMm"), T, "top");
+    if (f.top !== edgeSize("edgeTopMm") || f.bottom !== edgeSize("edgeBottomMm")) {
+      if (edgeSize("edgeTopMm") || edgeSize("edgeBottomMm")) edgeNote = `Товщина стільниці ${num(T, 0)} мм: краї зменшено до ${f.top} мм зверху і ${f.bottom} мм знизу.`;
+      storeEdges(f.top, f.bottom, edgeStyle("edgeTopStyle"), edgeStyle("edgeBottomStyle"));
+    }
+    for (const [name, size, style] of [["Top", f.top, edgeStyle("edgeTopStyle")], ["Bottom", f.bottom, edgeStyle("edgeBottomStyle")]]) {
+      $("edge" + name + "Range").max = T;
+      $("edge" + name).max = T;
+      $("edge" + name + "Range").value = size;
+      if (document.activeElement !== $("edge" + name)) $("edge" + name).value = size;
+      $("edge" + name + "Style").value = style;
+      $("edge" + name + "Hint").textContent = `0–${T} мм`;
+    }
+    const list = TableEdges.presets(T);
+    const mark = (p) =>
+      p.top === f.top && p.bottom === f.bottom && (!p.top || p.topStyle === edgeStyle("edgeTopStyle")) && (!p.bottom || p.bottomStyle === edgeStyle("edgeBottomStyle"));
+    $("edgePresets").innerHTML = list
+      .map((p) => `<button type="button" data-edge-preset="${p.id}" aria-pressed="${mark(p)}" title="Зверху ${p.top} мм, знизу ${p.bottom} мм">${esc(p.name)}${p.top || p.bottom ? ` · ${p.top}/${p.bottom} мм` : ""}</button>`)
+      .join("");
+    $("edgeNote").textContent = edgeNote;
+  }
+  $("edgePresets").onclick = (e) => {
+    const b = e.target.closest("[data-edge-preset]");
+    if (!b) return;
+    const p = TableEdges.presets(design.t * 10).find((x) => x.id === b.dataset.edgePreset);
+    if (!p) return;
+    edgeNote = "";
+    setEdges(p.top, p.bottom, "top", { top: p.topStyle, bottom: p.bottomStyle });
+  };
+  for (const [name, prefer] of [["Top", "top"], ["Bottom", "bottom"]]) {
+    const read = (e) => {
+      const v = Math.round(Number(e.target.value));
+      if (!Number.isFinite(v)) return;
+      edgeNote = "";
+      setEdges(prefer === "top" ? v : edgeSize("edgeTopMm"), prefer === "bottom" ? v : edgeSize("edgeBottomMm"), prefer);
+    };
+    $("edge" + name + "Range").oninput = read;
+    $("edge" + name).onchange = read;
+    $("edge" + name + "Style").onchange = (e) => {
+      edgeNote = "";
+      setEdges(edgeSize("edgeTopMm"), edgeSize("edgeBottomMm"), prefer, { [prefer]: e.target.value });
+    };
   }
 
   // ---- Resin by transparency: 0 = opaque, 100 = clear. The slabs on the table stay opaque.

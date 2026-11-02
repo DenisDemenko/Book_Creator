@@ -121,7 +121,10 @@
         right = half + fs * 9;
       let g = `<line x1="${left}" y1="${H}" x2="${right}" y2="${H}" stroke="#7f8a72" stroke-width=".5"/>`;
       // the top
-      g += `<rect x="${-half}" y="${y(H)}" width="${half * 2}" height="${t}" fill="${esc(d.color)}" stroke="#2b1a10" stroke-width=".4"/>`;
+      // (the section of the top shows its worked edges)
+      const rt = Math.min((Number(d.edgeTopMm) || 0) / 10, t),
+        rb = Math.min((Number(d.edgeBottomMm) || 0) / 10, t - rt);
+      g += `<path d="${root.TableEdges.sectionPath(-half, half, y(H), y(H) + t, rt, rb, d.edgeTopStyle, d.edgeBottomStyle)}" fill="${esc(d.color)}" stroke="#2b1a10" stroke-width=".4" stroke-linejoin="round"/>`;
       const hatch = view === "front" ? "" : "";
       g += hatch;
       // plates
@@ -311,7 +314,9 @@
       const { base, plates, input, meta } = layoutOf(set);
       await viewer.update({
         height: set.height,
-        top: { shape: d.shape, l: d.l, w: d.w, t: d.t, color: d.color, texture: env.topTexture(), transparent: (Number(d.resinTransparency) || 0) > 0 },
+        top: { shape: d.shape, l: d.l, w: d.w, t: d.t, color: d.color, texture: env.topTexture(), transparent: (Number(d.resinTransparency) || 0) > 0,
+          edgeTop: (Number(d.edgeTopMm) || 0) / 10, edgeBottom: (Number(d.edgeBottomMm) || 0) / 10,
+          edgeTopStyle: d.edgeTopStyle, edgeBottomStyle: d.edgeBottomStyle },
         legs: {
           parts: base.parts,
           plates,

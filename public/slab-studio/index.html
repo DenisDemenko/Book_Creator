@@ -166,6 +166,35 @@
               Товщина слебів має відповідати стільниці. Виступи за межами форми
               будуть обрізані.
             </p>
+            <div class="edge-box" id="edgeBox">
+              <label class="field-title">Краї стільниці</label>
+              <p class="hint" id="edgeHint">
+                Скруглення або прямий зріз 45° зверху (лицьова сторона) і знизу. Розмір від 1 мм
+                до товщини стільниці; зверху й знизу разом — не більше товщини.
+              </p>
+              <div class="edge-presets" id="edgePresets" role="group" aria-label="Готові варіанти країв"></div>
+              <div class="edge-sides">
+                <fieldset class="edge-side">
+                  <legend>Зверху (лицьова сторона)</legend>
+                  <label>Обробка
+                    <select id="edgeTopStyle"><option value="round">Скруглення</option><option value="chamfer">Прямий зріз 45°</option></select>
+                  </label>
+                  <label>Розмір, мм <small id="edgeTopHint"></small>
+                    <span class="leg-pair"><input id="edgeTopRange" type="range" min="0" step="1" aria-label="Верх: розмір, мм" /><input id="edgeTop" type="number" min="0" step="1" inputmode="numeric" /></span>
+                  </label>
+                </fieldset>
+                <fieldset class="edge-side">
+                  <legend>Знизу</legend>
+                  <label>Обробка
+                    <select id="edgeBottomStyle"><option value="round">Скруглення</option><option value="chamfer">Прямий зріз 45°</option></select>
+                  </label>
+                  <label>Розмір, мм <small id="edgeBottomHint"></small>
+                    <span class="leg-pair"><input id="edgeBottomRange" type="range" min="0" step="1" aria-label="Низ: розмір, мм" /><input id="edgeBottom" type="number" min="0" step="1" inputmode="numeric" /></span>
+                  </label>
+                </fieldset>
+              </div>
+              <p class="hint" id="edgeNote" role="status"></p>
+            </div>
             </div>
             <div class="studio-library">
             <div class="library-head">
@@ -874,6 +903,7 @@
     <script src="bridge.js"></script>
     <script src="resin-texture.js"></script>
     <script src="resin-catalog.js"></script>
+    <script src="table-edges.js"></script>
     <script src="table-legs.js"></script>
     <script src="legs-ui.js"></script>
     <script src="legs-admin.js"></script>

@@ -167,12 +167,29 @@ function create(canvas) {
     const { top, height } = model;
 
     // The top. Caps carry the picture of the composition, the sides a plain wood.
-    const geometry = new THREE.ExtrudeGeometry(topShape(top), { depth: top.t, bevelEnabled: false, curveSegments: 64 });
-    const uv = geometry.attributes.uv, position = geometry.attributes.position;
-    for (let i = 0; i < uv.count; i++)
-      uv.setXY(i, position.getX(i) / top.l + 0.5, 1 - (position.getY(i) / top.w + 0.5));
-    geometry.rotateX(Math.PI / 2); // shape y -> world z, the near cap faces up
-    geometry.translate(0, height, 0);
+    const rt = Number(top.edgeTop) || 0,
+      rb = Number(top.edgeBottom) || 0;
+    let geometry;
+    if ((rt > 0 || rb > 0) && window.TableEdges) {
+      // The edges are worked (rounded or cut at 45 degrees): the mesh comes from table-edges.js. The faces and the
+      // worked edges carry the picture, the plain side stays wood.
+      const g = window.TableEdges.geometry(top, rt, rb, top.edgeTopStyle, top.edgeBottomStyle);
+      geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.Float32BufferAttribute(g.positions, 3));
+      geometry.setAttribute("normal", new THREE.Float32BufferAttribute(g.normals, 3));
+      geometry.setAttribute("uv", new THREE.Float32BufferAttribute(g.uvs, 2));
+      geometry.setIndex([...g.cap, ...g.wall]);
+      geometry.addGroup(0, g.cap.length, 0);
+      geometry.addGroup(g.cap.length, g.wall.length, 1);
+      geometry.translate(0, height - top.t, 0);
+    } else {
+      geometry = new THREE.ExtrudeGeometry(topShape(top), { depth: top.t, bevelEnabled: false, curveSegments: 64 });
+      const uv = geometry.attributes.uv, position = geometry.attributes.position;
+      for (let i = 0; i < uv.count; i++)
+        uv.setXY(i, position.getX(i) / top.l + 0.5, 1 - (position.getY(i) / top.w + 0.5));
+      geometry.rotateX(Math.PI / 2); // shape y -> world z, the near cap faces up
+      geometry.translate(0, height, 0);
+    }
     const cap = new THREE.MeshStandardMaterial({
       color: texture ? 0xffffff : new THREE.Color(top.color || "#24474b"),
       map: texture,
