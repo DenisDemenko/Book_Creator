@@ -2266,3 +2266,10 @@ input[aria-invalid="true"] { border-color: #b83b36; outline: 1px solid #b83b36; 
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* Production files of an order. */
+.order-files {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
