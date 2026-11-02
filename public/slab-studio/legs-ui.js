@@ -66,7 +66,7 @@
         plateT: catalog().settings.plateThicknessCm,
       };
       const base = TL.layout(input, meta?.custom);
-      const plates = TL.plates(base.mounts, plateOf(set), input.plateT, base.legLength);
+      const plates = TL.plates(base.mounts, plateOf(set), input.plateT, base.legLength, { l: input.l, w: input.w });
       const priced = TL.cost(base, plates, materialOf(set), catalog().settings);
       return { input, base, plates, priced, meta };
     }

@@ -226,10 +226,20 @@
   // The mounting plate under every leg: wooden, as thick as the administrator
   // says, with four holes whose size and distance from the edge belong to the
   // plate type. It is never smaller than the foot of the leg it carries.
-  function plates(mounts, spec, plateT, z) {
+  // A plate is 50-300 mm a side. An older, bigger one is cut back to that, and to what fits under the
+  // tabletop (bounds = its length and width); it is never smaller than the foot of its leg.
+  const PLATE_MIN_CM = 5,
+    PLATE_MAX_CM = 30;
+  function plates(mounts, spec, plateT, z, bounds) {
     return mounts.map((m, i) => {
-      const w = Math.max(spec.widthCm, m.a + 4),
-        d = Math.max(spec.depthCm, m.b + 4);
+      let w = Math.min(Math.max(spec.widthCm, PLATE_MIN_CM), PLATE_MAX_CM),
+        d = Math.min(Math.max(spec.depthCm, PLATE_MIN_CM), PLATE_MAX_CM);
+      if (bounds) {
+        w = Math.min(w, bounds.l - 2 * Math.abs(m.x));
+        d = Math.min(d, bounds.w - 2 * Math.abs(m.y));
+      }
+      w = Math.max(w, m.a + 4);
+      d = Math.max(d, m.b + 4);
       const inset = Math.min(spec.holeInsetMm / 10, w / 2 - 0.5, d / 2 - 0.5);
       const r = spec.holeDiameterMm / 20;
       const hx = w / 2 - inset,
@@ -320,5 +330,5 @@
     return known ? build(p.scheme, p) : buildFromSvg(design, p);
   }
 
-  root.TableLegs = { SCHEMES, build, buildFromSvg, layout, plates, vertices, outline, volume, cost, legLength, hull };
+  root.TableLegs = { SCHEMES, build, buildFromSvg, layout, plates, vertices, outline, volume, cost, legLength, hull, PLATE_MIN_CM, PLATE_MAX_CM };
 })(typeof window !== "undefined" ? window : globalThis);

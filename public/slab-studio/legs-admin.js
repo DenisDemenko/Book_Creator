@@ -147,11 +147,13 @@
         .join("");
       const preview = `<svg viewBox="${-plate.w / 2 - fs} ${-plate.d / 2 - fs} ${plate.w + fs * 2} ${plate.d + fs * 2}" aria-hidden="true"><rect x="${-plate.w / 2}" y="${-plate.d / 2}" width="${plate.w}" height="${plate.d}" fill="#d6b98a" stroke="#6b5238" stroke-width=".3"/>${holes}</svg>`;
       const builtin = p.id === "standard" && !legs().plates.some((x) => x.id !== "standard");
+      const outOfRange = [p.widthCm, p.depthCm].some((v) => v < TL.PLATE_MIN_CM || v > TL.PLATE_MAX_CM);
       return `<article class="slab-card" data-plate="${esc(p.id)}"><div class="leg-plate-preview">${preview}</div><div class="slab-content">
+        ${outOfRange ? '<p class="warning">Розмір поза межами 50–300 мм: у розрахунку й на кресленні він обмежується. Виправте й збережіть.</p>' : ""}
         <label class="texture-name"><span>Назва</span><input data-p="name" value="${esc(p.name)}" maxlength="80" ${builtin ? "disabled" : ""} /></label>
         <div class="leg-fields">
-          <label>Ширина, см<input data-p="widthCm" type="number" step="0.5" min="4" max="80" value="${esc(p.widthCm)}" ${builtin ? "disabled" : ""} /></label>
-          <label>Глибина, см<input data-p="depthCm" type="number" step="0.5" min="4" max="80" value="${esc(p.depthCm)}" ${builtin ? "disabled" : ""} /></label>
+          <label>Ширина, мм<input data-p="widthCm" data-mm type="number" step="5" min="50" max="300" value="${esc(Math.round(p.widthCm * 10))}" ${builtin ? "disabled" : ""} /></label>
+          <label>Глибина, мм<input data-p="depthCm" data-mm type="number" step="5" min="50" max="300" value="${esc(Math.round(p.depthCm * 10))}" ${builtin ? "disabled" : ""} /></label>
           <label>Отвір Ø, мм<input data-p="holeDiameterMm" type="number" step="0.5" min="2" max="25" value="${esc(p.holeDiameterMm)}" ${builtin ? "disabled" : ""} /></label>
           <label>Відступ від краю, мм<input data-p="holeInsetMm" type="number" step="1" min="5" max="100" value="${esc(p.holeInsetMm)}" ${builtin ? "disabled" : ""} /></label>
         </div>
@@ -163,7 +165,8 @@
     function readFields(scope) {
       const out = {};
       scope.querySelectorAll("[data-p]").forEach((el) => {
-        out[el.dataset.p] = el.type === "checkbox" ? el.checked : el.type === "number" ? Number(el.value) : el.value.trim();
+        // Sizes are typed in millimetres and stored in centimetres.
+        out[el.dataset.p] = el.type === "checkbox" ? el.checked : el.type === "number" ? (el.dataset.mm ? Number(el.value) / 10 : Number(el.value)) : el.value.trim();
       });
       return out;
     }

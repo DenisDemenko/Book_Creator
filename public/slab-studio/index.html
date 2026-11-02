@@ -471,15 +471,15 @@
         <h2 class="sub-title">Пластини кріплення</h2>
         <form id="legPlateForm" class="panel">
           <div class="leg-fields">
-            <label>Назва<input data-p="name" required maxlength="80" placeholder="Наприклад, 12 × 12 під шуруп 6 мм" /></label>
-            <label>Ширина, см<input data-p="widthCm" type="number" step="0.5" min="4" max="80" value="10" required /></label>
-            <label>Глибина, см<input data-p="depthCm" type="number" step="0.5" min="4" max="80" value="10" required /></label>
+            <label>Назва<input data-p="name" required maxlength="80" placeholder="Наприклад, 150 × 150 під шуруп 6 мм" /></label>
+            <label>Ширина, мм<input data-p="widthCm" data-mm type="number" step="5" min="50" max="300" value="150" required /></label>
+            <label>Глибина, мм<input data-p="depthCm" data-mm type="number" step="5" min="50" max="300" value="150" required /></label>
             <label>Діаметр отвору, мм<input data-p="holeDiameterMm" type="number" step="0.5" min="2" max="25" value="6" required /></label>
             <label>Відступ отвору від краю, мм<input data-p="holeInsetMm" type="number" step="1" min="5" max="100" value="15" required /></label>
           </div>
           <label class="check"><input data-p="countersink" type="checkbox" /> Зенківка під шуруп</label>
           <label class="check"><input data-p="isDefault" type="checkbox" /> Основна пластина</label>
-          <p class="hint">Кожна пластина має чотири отвори в кутах. Пластина ніколи не буває меншою за основу ніжки, яку вона тримає.</p>
+          <p class="hint">Розмір пластини — від 50 до 300 мм (за замовчуванням 150 × 150 мм). Кожна пластина має чотири отвори в кутах. Пластина ніколи не буває меншою за основу ніжки, яку вона тримає, і не виходить за краї стільниці.</p>
           <button class="primary" type="submit">Додати пластину</button>
         </form>
         <div class="inventory-grid" id="legPlateList"></div>
