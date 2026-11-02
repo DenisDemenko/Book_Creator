@@ -55,6 +55,11 @@
       const floor = Math.max(meta.minHeight, d.t + catalog().settings.plateThicknessCm + 15);
       set.height = Math.round(Math.min(meta.maxHeight, Math.max(floor, set.height)) * 10) / 10;
       set.thickness = Math.round(Math.min(meta.maxThickness, Math.max(meta.minThickness, set.thickness)) * 10) / 10;
+      if (set.legDims) {
+        const ok = ["topW", "topD", "footW", "footD"].every((k) => Number.isFinite(set.legDims[k]));
+        if (!ok || !TL.DIMS_SCHEMES.includes(set.scheme) || meta.custom) delete set.legDims;
+        else for (const k of ["topW", "topD", "footW", "footD"]) set.legDims[k] = Math.round(Math.min(TL.LEG_MAX_CM, Math.max(TL.LEG_MIN_CM, set.legDims[k])) * 10) / 10;
+      }
       const inset = Number.isFinite(set.inset) ? set.inset : TL.DEFAULT_INSET_CM;
       set.inset = Math.round(Math.min(TL.MAX_INSET_CM, Math.max(0, inset)) * 10) / 10;
       return true;
@@ -67,6 +72,7 @@
         scheme: set.scheme, height: set.height, thickness: set.thickness,
         plateT: catalog().settings.plateThicknessCm,
         inset: set.inset,
+        legDims: set.legDims,
         plateCm: Math.max(TL.plateSide(plateOf(set).widthCm), TL.plateSide(plateOf(set).depthCm)),
       };
       const base = TL.layout(input, meta?.custom);
@@ -235,6 +241,16 @@
       }
       $("legHeightHint").textContent = `${num(floor)}–${num(meta.maxHeight)} см`;
       $("legThicknessHint").textContent = `${num(meta.minThickness)}–${num(meta.maxThickness)} см`;
+      // Both ends of the leg by hand (a trapezoid), for the layouts where one leg is copied.
+      const dimsApply = !meta.custom && TL.DIMS_SCHEMES.includes(set.scheme);
+      const manual = dimsApply && !!set.legDims;
+      $("legDimsBox").hidden = !dimsApply;
+      $("legDimsOn").checked = manual;
+      $("legDimsFields").hidden = !manual;
+      $("legThicknessField").hidden = manual;
+      if (manual)
+        for (const [id, key] of [["legTopW", "topW"], ["legTopD", "topD"], ["legFootW", "footW"], ["legFootD", "footD"]])
+          if (document.activeElement !== $(id)) $(id).value = Math.round(set.legDims[key] * 10);
       $("legInsetHint").textContent = `0–${num(TL.MAX_INSET_CM)} см`;
       $("legMaterial").innerHTML = c.settings.materials
         .map((m) => `<option value="${esc(m.id)}" ${m.id === set.material ? "selected" : ""}>${esc(m.name)}</option>`)
@@ -256,6 +272,7 @@
       const plate = plateOf(set);
       $("legSummary").innerHTML =
         `<b>${esc(metaOf(set.scheme).name)}</b> · довжина ніжки ${num(base.legLength, 1)} см (стіл ${num(set.height, 1)} см = ніжка + пластина ${num(input.plateT, 1)} см + стільниця ${num(design().t, 1)} см) · ${esc(materialOf(set).name)}` +
+        (set.legDims ? `<br>Ніжка: верх ${num(set.legDims.topW * 10)} × ${num(set.legDims.topD * 10)} мм → низ ${num(set.legDims.footW * 10)} × ${num(set.legDims.footD * 10)} мм` : "") +
         `<br>Кріплення: ${plates.length} × пластина «${esc(plate.name)}» ${num(plates[0].w, 1)} × ${num(plates[0].d, 1)} × ${num(input.plateT, 1)} см, по 4 отвори Ø${num(plate.holeDiameterMm, 1)} мм (відступ ${num(plate.holeInsetMm / 10, 1)} см від краю). Пластини стоять на ${num(set.inset, 1)} см від краю стільниці` +
         `<br>Орієнтовна вартість ніжок: <b>${money(priced.total)}</b> (дерево ${money(priced.wood)} · пластини ${money(priced.plate)} · робота ${money(priced.work)}). Остаточна — після розрахунку.`;
       $("legPlateDetail").innerHTML = plateSvg(plates[0]);
@@ -306,6 +323,7 @@
         height: prev?.height ?? meta.defaultHeight,
         thickness: meta.defaultThickness,
         inset: prev?.inset ?? TL.DEFAULT_INSET_CM,
+        ...(prev?.legDims && TL.DIMS_SCHEMES.includes(id) ? { legDims: { ...prev.legDims } } : {}),
         material: prev?.material || catalog().settings.materials[0].id,
         ...(prev?.plate ? { plate: prev.plate } : {}),
       };
@@ -341,6 +359,40 @@
           };
         $(id).onchange = () => render();
       }
+      $("legDimsOn").onchange = (e) => {
+        const s = set();
+        if (!s) return;
+        if (e.target.checked) s.legDims = TL.defaultDims(s.scheme, s.thickness);
+        else delete s.legDims;
+        env.changed();
+        render();
+      };
+      for (const [id, key] of [["legTopW", "topW"], ["legTopD", "topD"], ["legFootW", "footW"], ["legFootD", "footD"]]) {
+        $(id).oninput = (e) => {
+          const s = set();
+          const v = num2(e.target.value) / 10;
+          if (!s || !s.legDims || !Number.isFinite(v)) return;
+          s.legDims[key] = Math.min(TL.LEG_MAX_CM, Math.max(TL.LEG_MIN_CM, v));
+          env.changed();
+          clearTimeout(drawTimer);
+          drawTimer = setTimeout(draw, 80);
+        };
+        $(id).onchange = () => render();
+      }
+      // Quick shapes, made from the biggest end the buyer has typed: straight, narrowing to the floor, widening.
+      $$all("[data-leg-shape]").forEach(
+        (b) =>
+          (b.onclick = () => {
+            const s = set();
+            if (!s || !s.legDims) return;
+            const big = Math.max(s.legDims.topW, s.legDims.topD, s.legDims.footW, s.legDims.footD);
+            const small = Math.max(TL.LEG_MIN_CM, Math.round((big / 2) * 10) / 10);
+            const [top, foot] = { straight: [big, big], down: [big, small], up: [small, big] }[b.dataset.legShape];
+            s.legDims = { topW: top, topD: top, footW: foot, footD: foot };
+            env.changed();
+            render();
+          }),
+      );
       $("legMaterial").onchange = (e) => {
         const s = set();
         if (!s) return;

@@ -223,9 +223,26 @@
                 <label>Висота столу, см <small id="legHeightHint"></small>
                   <span class="leg-pair"><input id="legHeightRange" type="range" step="0.5" /><input id="legHeight" type="number" step="0.5" inputmode="decimal" /></span>
                 </label>
-                <label>Товщина ніжок, см <small id="legThicknessHint"></small>
+                <label id="legThicknessField">Товщина ніжок, см <small id="legThicknessHint"></small>
                   <span class="leg-pair"><input id="legThicknessRange" type="range" step="0.5" /><input id="legThickness" type="number" step="0.5" inputmode="decimal" /></span>
                 </label>
+                <div class="leg-dims" id="legDimsBox">
+                  <label class="check"><input type="checkbox" id="legDimsOn" /> Задати розміри ніжки вручну (трапеція)</label>
+                  <div id="legDimsFields" hidden>
+                    <p class="hint">Розміри в міліметрах, 20–300. Верх — кінець біля стільниці, низ — кінець на підлозі. Квадрат або прямокутник (ширина × глибина).</p>
+                    <div class="leg-dim-grid">
+                      <label>Верх: ширина, мм<input id="legTopW" type="number" min="20" max="300" step="5" inputmode="decimal" /></label>
+                      <label>Верх: глибина, мм<input id="legTopD" type="number" min="20" max="300" step="5" inputmode="decimal" /></label>
+                      <label>Низ: ширина, мм<input id="legFootW" type="number" min="20" max="300" step="5" inputmode="decimal" /></label>
+                      <label>Низ: глибина, мм<input id="legFootD" type="number" min="20" max="300" step="5" inputmode="decimal" /></label>
+                    </div>
+                    <span class="rot-buttons" role="group" aria-label="Швидкі форми ніжки">
+                      <button type="button" data-leg-shape="straight">Прямі</button>
+                      <button type="button" data-leg-shape="down">Звужені донизу</button>
+                      <button type="button" data-leg-shape="up">Розширені донизу</button>
+                    </span>
+                  </div>
+                </div>
                 <label>Відступ від краю стільниці, см <small id="legInsetHint"></small>
                   <span class="leg-pair"><input id="legInsetRange" type="range" step="0.5" /><input id="legInset" type="number" step="0.5" inputmode="decimal" /></span>
                 </label>

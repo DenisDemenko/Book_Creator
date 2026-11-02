@@ -52,8 +52,26 @@
   const DEFAULT_INSET_CM = 5,
     MAX_INSET_CM = 40;
   const insetOf = (p) => (Number.isFinite(p.inset) ? Math.min(Math.max(p.inset, 0), MAX_INSET_CM) : DEFAULT_INSET_CM);
+  // The buyer can set both ends of the legs by hand (cm): top = the end under the tabletop, foot = the end
+  // on the floor, each width x depth, so a leg can be a trapezoid. legDims = { topW, topD, footW, footD }.
+  // It applies where one leg is copied to the corners (or posts, bars, a tripod); the end panels, the
+  // pedestal and a leg drawn as SVG have their own shape.
+  const LEG_MIN_CM = 2,
+    LEG_MAX_CM = 30;
+  const DIMS_SCHEMES = ["straight", "tapered", "splayed", "turned", "trestle", "xframe", "sled", "tripod"];
+  const dimsOf = (p) => {
+    const d = p.legDims;
+    if (!d) return null;
+    return ["topW", "topD", "footW", "footD"].every((k) => Number.isFinite(d[k]) && d[k] >= LEG_MIN_CM && d[k] <= LEG_MAX_CM) ? d : null;
+  };
+  // The widest the top of a leg is: what the plate has to carry.
+  const topExtent = (p, T) => {
+    const d = dimsOf(p);
+    return d ? Math.max(d.topW, d.topD) : T;
+  };
   // Half the plate under one leg: plates() never makes it smaller than the foot plus 4 cm.
-  const plateHalf = (p, T) => Math.max(p.plateCm || 0, T + 4) / 2;
+  // (End panels have their own shape: the ends set by hand do not count there.)
+  const plateHalf = (p, T, byHand = true) => Math.max(p.plateCm || 0, (byHand ? topExtent(p, T) : T) + 4) / 2;
   // Where the four legs stand: the outer edge of every plate is `inset` from the edge of the top. On a
   // round or oval top the corner is pulled along its diagonal until the outer corner of the plate is
   // `inset` inside the curve (a quadratic in the scale k, solved exactly).
@@ -84,7 +102,7 @@
   // The x of an end panel centre (panels carry a plate as wide as themselves).
   function panelX(p, T, wid) {
     const ins = insetOf(p),
-      ext = plateHalf(p, T);
+      ext = plateHalf(p, T, false);
     let x = p.l / 2 - ins - ext;
     if (p.shape !== "square") {
       const a = p.l / 2,
@@ -95,6 +113,50 @@
       x = room > 0 ? Math.min(x, a * Math.sqrt(room) - ext) : T;
     }
     return Math.max(x, T);
+  }
+
+  // The ends a leg of this layout has before the buyer changes them, in cm (what the "by hand" fields start from).
+  function defaultDims(id, T) {
+    const ends = {
+      tapered: [[T, T], [T * 0.5, T * 0.5]],
+      splayed: [[T, T], [T * 0.8, T * 0.8]],
+      turned: [[T, T], [T * 0.55, T * 0.55]],
+      sled: [[T, T * 0.9], [T, T * 0.9]],
+      trestle: [[T * 0.8, T], [T * 0.8, T]],
+      xframe: [[T * 0.7, T], [T * 0.7, T]],
+      tripod: [[T * 1.1, T * 1.1], [T * 0.75, T * 0.75]],
+    }[id] || [[T, T], [T, T]];
+    const r = (v) => Math.min(LEG_MAX_CM, Math.max(LEG_MIN_CM, Math.round(v * 10) / 10));
+    return { topW: r(ends[0][0]), topD: r(ends[0][1]), footW: r(ends[1][0]), footD: r(ends[1][1]) };
+  }
+  // The legs after the buyer's own ends are put in place of the layout's.
+  function applyDims(id, p, base) {
+    const d = DIMS_SCHEMES.includes(id) ? dimsOf(p) : null;
+    if (!d) return base;
+    const T = p.thickness;
+    const topAvg = (d.topW + d.topD) / 2,
+      footAvg = (d.footW + d.footD) / 2;
+    const scale = Math.max(topAvg, footAvg) / T;
+    for (const x of base.parts) {
+      if (x.role !== "leg") continue;
+      if (x.type === "rect") {
+        x.bs = x.id.endsWith(".block") ? [d.topW, d.topD] : [d.footW, d.footD];
+        x.ts = [d.topW, d.topD];
+      } else if (id === "turned") {
+        x.bs = x.bs.map((v) => v * scale);
+        x.ts = x.ts.map((v) => v * scale);
+        if (x.id.endsWith(".0")) x.bs = [footAvg, footAvg];
+      } else {
+        x.bs = [footAvg, footAvg];
+        x.ts = [topAvg, topAvg];
+      }
+    }
+    for (const m of base.mounts)
+      if (m.kind === "leg") {
+        m.a = d.topW;
+        m.b = d.topD;
+      }
+    return base;
   }
 
   // Leg length: what is left of the overall height under the plate and the top.
@@ -223,7 +285,7 @@
       default:
         throw new Error("Невідома схема ніжок: " + id);
     }
-    return { parts, mounts, legLength: Lg };
+    return applyDims(id, p, { parts, mounts, legLength: Lg });
   }
   const x0 = (sx, px) => sx * px;
 
@@ -366,5 +428,5 @@
     return known ? build(p.scheme, p) : buildFromSvg(design, p);
   }
 
-  root.TableLegs = { SCHEMES, build, buildFromSvg, layout, plates, vertices, outline, volume, cost, legLength, hull, PLATE_MIN_CM, PLATE_MAX_CM, plateSide, DEFAULT_INSET_CM, MAX_INSET_CM };
+  root.TableLegs = { SCHEMES, build, buildFromSvg, layout, plates, vertices, outline, volume, cost, legLength, hull, PLATE_MIN_CM, PLATE_MAX_CM, plateSide, DEFAULT_INSET_CM, MAX_INSET_CM, DIMS_SCHEMES, LEG_MIN_CM, LEG_MAX_CM, defaultDims };
 })(typeof window !== "undefined" ? window : globalThis);

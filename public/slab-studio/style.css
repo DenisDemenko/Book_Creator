@@ -2139,3 +2139,38 @@ input[aria-invalid="true"] { border-color: #b83b36; outline: 1px solid #b83b36; 
   gap: 8px;
   align-items: center;
 }
+
+/* Legs set by hand: the ends of the leg as a trapezoid. */
+.leg-dims {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+}
+.leg-dim-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 8px 0;
+}
+.leg-dim-grid label {
+  display: grid;
+  gap: 4px;
+  font-size: 9px;
+}
+.leg-controls .leg-dims label.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.leg-dims input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+.leg-dim-grid input {
+  padding: 7px 9px;
+  font-size: 13px;
+}
+.leg-dims .hint {
+  margin: 0;
+}
