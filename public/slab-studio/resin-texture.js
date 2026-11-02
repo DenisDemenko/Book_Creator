@@ -9,7 +9,10 @@
   function layer(design) {
     const image = design.resinTexture?.image;
     if (!validImage(image)) return "";
-    const tag = `<image class="resin-texture-layer" href="${image}" x="${-design.l / 2}" y="${-design.w / 2}" width="${design.l}" height="${design.w}" preserveAspectRatio="xMidYMid slice" pointer-events="none" aria-label="Текстура епоксидної смоли"/>`;
+    // resinTransparency: 0 = opaque resin, 100 = clear; the texture is as see-through as the resin.
+    const clear = Math.min(100, Math.max(0, Math.round(Number(design.resinTransparency) || 0)));
+    const opacity = clear ? ` opacity="${(1 - clear / 100).toFixed(2)}"` : "";
+    const tag = `<image class="resin-texture-layer" href="${image}" x="${-design.l / 2}" y="${-design.w / 2}" width="${design.l}" height="${design.w}"${opacity} preserveAspectRatio="xMidYMid slice" pointer-events="none" aria-label="Текстура епоксидної смоли"/>`;
     const angle = ((Number(design.resinAngle) || 0) % 360 + 360) % 360;
     if (!angle) return tag;
     // Turned about the centre of the top and enlarged just enough that its corners still cover it.

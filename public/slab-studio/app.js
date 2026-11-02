@@ -85,6 +85,7 @@
           (d.legSet === undefined || (d.legSet && typeof d.legSet.scheme === "string" &&
             between(d.legSet.height, 20, 150) && between(d.legSet.thickness, 1, 30) &&
             typeof d.legSet.material === "string")) &&
+          (d.resinTransparency === undefined || between(d.resinTransparency, 0, 100)) &&
           (!d.resinTexture || (typeof d.resinTexture.name === "string" &&
             d.resinTexture.name.length <= 120 && typeof d.resinTexture.image === "string" &&
             d.resinTexture.image.length <= 400000 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(d.resinTexture.image)))) {
@@ -185,7 +186,15 @@
         `<clipPath id="c-${k}"><polygon points="${polygon(s)}"/></clipPath>`;
       pieces += `<g ${interactive ? `class="piece ${selected === p.uid ? "selected" : ""}" data-piece="${p.uid}"` : ""} transform="translate(${p.x} ${p.y}) rotate(${p.angle})"><g clip-path="url(#c-${k})"><polygon points="${polygon(s)}" fill="url(#${k})"/>${s.photo ? `<image href="${s.photo}" x="${-s.w / 2}" y="${-s.h / 2}" width="${s.w}" height="${s.h}" preserveAspectRatio="none"/>` : ""}</g><polygon points="${polygon(s)}" fill="transparent" stroke="#382c1c" stroke-width=".25"/></g>`;
     }
-    return `<defs><clipPath id="table-${key}">${tableShape(d)}</clipPath>${defs}<filter id="shadow-${key}" x="-50%" y="-60%" width="200%" height="240%"><feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#33402c" flood-opacity=".18"/></filter></defs>${tableShape(d, `fill="${d.color}" filter="url(#shadow-${key})"`)}<g clip-path="url(#table-${key})">${ResinTexture.layer(d)}${pieces}</g>${tableShape(d, 'fill="none" stroke="#ffffff88" stroke-width=".5" pointer-events="none"')}`;
+    // Clear resin: how much of the resin colour is let through (0 = none, 100 = all); the slabs stay opaque.
+    const clear = Math.min(100, Math.max(0, Math.round(Number(d.resinTransparency) || 0)));
+    const glass = clear
+      ? `<linearGradient id="glass-${key}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity=".5"/><stop offset=".45" stop-color="#cfe6ee" stop-opacity=".12"/><stop offset="1" stop-color="#ffffff" stop-opacity=".34"/></linearGradient>`
+      : "";
+    const base = tableShape(d, `fill="${d.color}"${clear ? ` fill-opacity="${(1 - clear / 100).toFixed(2)}"` : ""} filter="url(#shadow-${key})"`);
+    const sheen = clear ? tableShape(d, `fill="url(#glass-${key})" pointer-events="none"`) : "";
+    const edge = clear ? 'fill="none" stroke="#8fb6c2" stroke-width=".6" pointer-events="none"' : 'fill="none" stroke="#ffffff88" stroke-width=".5" pointer-events="none"';
+    return `<defs><clipPath id="table-${key}">${tableShape(d)}</clipPath>${defs}${glass}<filter id="shadow-${key}" x="-50%" y="-60%" width="200%" height="240%"><feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#33402c" flood-opacity=".18"/></filter></defs>${base}<g clip-path="url(#table-${key})">${ResinTexture.layer(d)}${sheen}${pieces}</g>${tableShape(d, edge)}`;
   }
   function renderDesign() {
     const svg = $("design"),
@@ -196,6 +205,7 @@
       composition(design, db.slabs, "live", true) +
       `<g stroke="#929e83" stroke-width=".3" fill="none"><path d="M ${-design.l / 2} ${design.w / 2 + 12} v 5 m 0 -2.5 h ${design.l} m 0 -2.5 v 5"/><path d="M ${-design.l / 2 - 12} ${-design.w / 2} h -5 m 2.5 0 v ${design.w} m -2.5 0 h 5"/></g><g fill="#79896c" font-family="Arial" font-size="4" text-anchor="middle"><text x="0" y="${design.w / 2 + 23}">${num(design.l)} см</text><text transform="translate(${-design.l / 2 - 22} 0) rotate(-90)">${num(design.w)} см</text></g>`;
     $("canvasEmpty").hidden = design.pieces.length > 0;
+    syncClarity();
     updateResin();
     legsUi?.schedule();
     const p = design.pieces.find((p) => p.uid === selected);
@@ -1509,6 +1519,53 @@
       b.setAttribute("aria-pressed", String(applied === sample.name));
     });
   }
+
+  // ---- Resin by transparency: 0 = opaque, 100 = clear. The slabs on the table stay opaque.
+  function clarityOf() {
+    const n = Math.round(Number(design.resinTransparency));
+    return Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 0;
+  }
+  function setClarity(value) {
+    const n = Math.round(Number(value));
+    if (!Number.isFinite(n)) return;
+    const t = Math.min(100, Math.max(0, n));
+    if (t) design.resinTransparency = t;
+    else delete design.resinTransparency;
+    invalidate();
+    renderDesign();
+  }
+  function syncClarity() {
+    const t = clarityOf(),
+      textured = !!design.resinTexture,
+      waves = !!design.resinTexture?.name?.startsWith("Хвилі");
+    const mode = !t ? "plain" : t >= 100 && !textured ? "clear" : t === 50 && waves ? "half-waves" : t === 50 && !textured ? "half" : "";
+    $$("[data-clarity]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.clarity === mode)));
+    if (document.activeElement !== $("clarity")) $("clarity").value = t;
+    $("clarityRange").value = t;
+    $("clarityHint").textContent = !t
+      ? ""
+      : t >= 100
+        ? "Повністю прозора смола: видно те, що під столом. Слеби лишаються непрозорими."
+        : `Смола прозора на ${t}%: колір і текстура напівпрозорі, слеби лишаються непрозорими.`;
+  }
+  $$("[data-clarity]").forEach(
+    (b) =>
+      (b.onclick = async () => {
+        const mode = b.dataset.clarity;
+        if (mode === "plain") return setClarity(0);
+        if (mode === "clear" || mode === "half") {
+          clearResinTexture();
+          return setClarity(mode === "clear" ? 100 : 50);
+        }
+        // 50% with the waves: the "Хвилі" style in the colour chosen for it.
+        builtin.style = "waves";
+        renderBuiltinTextures();
+        setClarity(50);
+        await applyStyle();
+      }),
+  );
+  $("clarityRange").oninput = (e) => setClarity(e.target.value);
+  $("clarity").onchange = (e) => setClarity(e.target.value);
 
   window.addEventListener("unhandledrejection", (e) => {
     e.preventDefault();

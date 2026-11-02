@@ -292,6 +292,19 @@
               aria-label="Палітра кольорів епоксидної смоли"
             ></div>
             <p class="color-name">Колір: <b id="colorName">Глибокий океан</b></p>
+            <div class="resin-clarity" id="resinClarity">
+              <label class="field-title">Прозорість смоли</label>
+              <div class="clarity-options" role="group" aria-label="Тип смоли за прозорістю">
+                <button type="button" data-clarity="plain" aria-pressed="true">Непрозора</button>
+                <button type="button" data-clarity="clear" aria-pressed="false">Прозора, без текстури</button>
+                <button type="button" data-clarity="half" aria-pressed="false">Прозорість 50%</button>
+                <button type="button" data-clarity="half-waves" aria-pressed="false">50% з текстурою хвиль</button>
+              </div>
+              <label class="clarity-slider">Прозорість, %
+                <span class="leg-pair"><input id="clarityRange" type="range" min="0" max="100" step="5" aria-label="Прозорість смоли, відсотки" /><input id="clarity" type="number" min="0" max="100" step="5" inputmode="decimal" /></span>
+              </label>
+              <p class="hint" id="clarityHint"></p>
+            </div>
             <div
               class="resin-texture-controls"
               id="resinTextureControls"

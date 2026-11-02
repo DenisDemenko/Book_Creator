@@ -176,6 +176,7 @@ function create(canvas) {
     const cap = new THREE.MeshStandardMaterial({
       color: texture ? 0xffffff : new THREE.Color(top.color || "#24474b"),
       map: texture,
+      transparent: !!top.transparent,
       roughness: 0.28,
       metalness: 0.05,
     });

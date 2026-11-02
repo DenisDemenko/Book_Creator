@@ -2099,3 +2099,43 @@ input[aria-invalid="true"] { border-color: #b83b36; outline: 1px solid #b83b36; 
   gap: 8px;
   margin: 10px 0;
 }
+
+/* Resin by transparency: four choices and a slider. */
+.resin-clarity {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0;
+}
+.clarity-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.clarity-options button {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 8px;
+  padding: 9px 8px;
+  font-size: 11px;
+  line-height: 1.25;
+  text-align: center;
+}
+.clarity-options button:hover {
+  border-color: var(--accent, #c97f4f);
+}
+.clarity-options button[aria-pressed="true"] {
+  border-color: var(--accent, #c97f4f);
+  background: #f6e3d4;
+  font-weight: 700;
+}
+.clarity-slider {
+  display: grid;
+  gap: 4px;
+  font-size: 9px;
+}
+.clarity-slider .leg-pair {
+  display: grid;
+  grid-template-columns: 1fr 74px;
+  gap: 8px;
+  align-items: center;
+}

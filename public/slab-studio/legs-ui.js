@@ -283,7 +283,7 @@
       const { base, plates, input, meta } = layoutOf(set);
       await viewer.update({
         height: set.height,
-        top: { shape: d.shape, l: d.l, w: d.w, t: d.t, color: d.color, texture: env.topTexture() },
+        top: { shape: d.shape, l: d.l, w: d.w, t: d.t, color: d.color, texture: env.topTexture(), transparent: (Number(d.resinTransparency) || 0) > 0 },
         legs: {
           parts: base.parts,
           plates,
