@@ -155,3 +155,16 @@ test('a user-owned key cannot substitute for a missing administrator key', async
   });
   assert.equal(await resolver('gpt'), undefined); assert.equal(reads, 0);
 });
+
+test('OpenAI receives the tabletop first and all ten room references afterwards', async () => {
+  const f = imageFixture(); await f.generate({ ...f.input, interiorImages: Array(10).fill('data:image/jpeg;base64,/9j/') });
+  const files = f.inspect().captured.body.getAll('image[]');
+  assert.equal(files.length, 11); assert.equal(files[0].type, 'image/png');
+  assert.ok(files.slice(1).every(file => file.type === 'image/jpeg'));
+});
+test('Studio rejects eleven references, fake JPEG and oversize images before provider call', async () => {
+  for (const interiorImages of [Array(11).fill('data:image/jpeg;base64,/9j/'), ['data:image/jpeg;base64,YmFk'], ['data:image/jpeg;base64,' + 'A'.repeat(250001)]]) {
+    const f = imageFixture(); await assert.rejects(f.generate({ ...f.input, interiorImages }), e => e.status === 400);
+    assert.equal(f.inspect().calls, 0);
+  }
+});
