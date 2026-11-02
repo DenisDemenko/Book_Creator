@@ -1398,7 +1398,10 @@
     const label = button.textContent;
     button.textContent = "Складаємо PDF…";
     try {
-      const r = await fetch("/api/admin/slab-tables/drawings/" + encodeURIComponent(o.id), { credentials: "same-origin" });
+      // This page is served under the Studio prefix (/studio on the main domain): the Studio's own fetch patch does not
+      // reach into a frame, so the prefix is taken from the address of the page itself.
+      const root = location.pathname.replace(/\/slab-studio\/[^/]*$/, "");
+      const r = await fetch(root + "/api/admin/slab-tables/drawings/" + encodeURIComponent(o.id), { credentials: "same-origin" });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Не вдалося скласти креслення.");
       download(`${o.number}-kreslennya.pdf`, await r.blob(), "application/pdf");
     } finally {

@@ -220,7 +220,8 @@ export function registerSlabTableRoutes(app: Express) {
     try {
       if (!/^[a-zA-Z0-9-]{1,64}$/.test(req.params.id)) throw new DrawingsError("Некоректний номер замовлення.", 400);
       const orders = (await tableBridge("GET", "/production")) as { id: string; number: string }[];
-      const order = orders.find((o) => o.id === req.params.id);
+      // by the id of the card or by the number the buyer sees in the cart (TBL-…)
+      const order = orders.find((o) => o.id === req.params.id || o.number === req.params.id);
       if (!order) throw new DrawingsError("Замовлення не знайдено.", 404);
       const pdf = await renderDrawingsPdf(order as never);
       res
