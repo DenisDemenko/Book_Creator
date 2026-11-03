@@ -23,7 +23,7 @@ import type { JobQueue } from './jobs/queue';
 import { AI_MENTIONS_JOB_KIND, MENTION_SUGGESTION, RELATION_SUGGESTION, publicSuggestion } from './ai/mentions';
 import { JEV_TAG_THRESHOLD, runJevTagging, type JevTagParagraph } from './ai/jevTags';
 import { TAG_SEARCH_DEFAULT_LIMIT, buildTagHits } from './tagSearch';
-import { entityBySlug } from '../../src/utils/coreEntities';
+import { entityBySlug, parseEntityTagsInSource } from '../../src/utils/coreEntities';
 import { paragraphExcerpt } from './search/text';
 import { hybridSearch, type SearchDeps, type SearchRequest } from './search/service';
 import { buildStoryGraph, evidenceRefs } from './storyGraph';
@@ -648,35 +648,78 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
    * кожен пошук означало б щоразу трохи інший список на тому самому тексті.
    */
   app.get('/api/projects/:id/tags/:slug/paragraphs', withRepo(async (repo, req, res) => {
-    const slug = String(req.params.slug || '').replace(/^\/+/, '').toLowerCase();
-    const entityType = entityBySlug(slug);
-    if (!entityType) {
-      res.status(404).json({ error: `Тегу /${slug} немає в реєстрі сутностей.`, kind: 'unknown_tag' });
+    // Основний тег — у шляху; `?tags=` додає решту, щоб адреса одного тега
+    // лишалась читною, а пошук кількома не потребував іншого маршруту.
+    const raw = [req.params.slug, ...String(req.query.tags ?? '').split(',')]
+      .map((x) => String(x || '').replace(/^\/+/, '').trim().toLowerCase())
+      .filter(Boolean);
+    const slugs = [...new Set(raw)];
+    const types = slugs.map((slug) => ({ slug, entity: entityBySlug(slug) }));
+    const unknown = types.filter((t) => !t.entity).map((t) => t.slug);
+    if (unknown.length) {
+      res.status(404).json({ error: `Тегів немає в реєстрі сутностей: ${unknown.map((u) => '/' + u).join(', ')}.`, kind: 'unknown_tag', unknown });
       return;
     }
+    const mode = req.query.mode === 'all' ? 'all' : 'any';
+    const value = typeof req.query.value === 'string' ? req.query.value : '';
     if (req.projectAccess!.effective.restricted) {
       // Та сама межа, що й у картці сутності: в уривках — текст чужих сцен.
-      res.json({ tag: entityType.tag, nameUk: entityType.nameUk, hits: [], total: 0, entitiesFound: 0, restricted: true });
+      res.json({ tags: slugs.map((s2) => '/' + s2), hits: [], total: 0, entitiesFound: 0, offset: 0, restricted: true });
       return;
     }
-    const limitRaw = Number(req.query.limit);
-    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(1000, Math.floor(limitRaw)) : TAG_SEARCH_DEFAULT_LIMIT;
+    const num = (raw2: unknown, fallback: number, max: number) => {
+      const n = Number(raw2);
+      return Number.isFinite(n) && n >= 0 ? Math.min(max, Math.floor(n)) : fallback;
+    };
+    const limit = num(req.query.limit, TAG_SEARCH_DEFAULT_LIMIT, 1000) || TAG_SEARCH_DEFAULT_LIMIT;
+    const offset = num(req.query.offset, 0, 1_000_000);
 
-    const entities = await repo.listEntities(req.params.id, slug);
+    const entityLists = await Promise.all(slugs.map((slug) => repo.listEntities(req.params.id, slug)));
+    const entities = entityLists.flat();
     const mentionLists = await Promise.all(entities.map((e) => repo.listMentionsByEntity(req.params.id, e.id)));
     const [paragraphs, documents] = await Promise.all([
       repo.listAllParagraphs(req.params.id),
       repo.listDocuments(req.params.id),
     ]);
     const result = buildTagHits({
-      entities: entities.map((e) => ({ id: e.id, name: e.name, status: e.status })),
-      mentions: mentionLists.flat(),
+      entities: entities.map((e) => ({ id: e.id, name: e.name, status: e.status, type: e.type })),
+      // Значення тега синк кладе у `fields.value` — саме його і шукають,
+      // коли питання не «де емоції», а «де страх».
+      mentions: mentionLists.flat().map((m) => ({
+        entityId: m.entityId,
+        paragraphId: m.paragraphId,
+        status: m.status,
+        value: typeof (m.fields as Record<string, unknown> | undefined)?.value === 'string'
+          ? String((m.fields as Record<string, unknown>).value)
+          : '',
+      })),
+      // Друге джерело — текст самих абзаців: там стоїть і тег із порожнім
+      // значенням, якого ядро не бачить (див. шапку `tagSearch.ts`).
+      textTags: paragraphs
+        .filter((p) => !p.deletedAt)
+        .flatMap((p) =>
+          parseEntityTagsInSource(p.text)
+            .filter((tag) => tag.entity && slugs.includes(tag.slug))
+            .map((tag) => ({ paragraphId: p.id, type: tag.slug, value: tag.value }))
+        ),
+      slugs,
+      mode,
+      value,
       paragraphs,
       documents,
       excerpt: (text) => paragraphExcerpt(text, 220),
       limit,
+      offset,
     });
-    res.json({ tag: entityType.tag, nameUk: entityType.nameUk, color: entityType.color, limit, ...result });
+    res.json({
+      tags: types.map((t) => t.entity!.tag),
+      names: types.map((t) => t.entity!.nameUk),
+      colors: types.map((t) => t.entity!.color),
+      mode,
+      value,
+      limit,
+      ...result,
+    });
   }));
 
   const loadSuggestion = async (repo: CoreRepository, req: Request, res: Response): Promise<FindingRow | null> => {

@@ -37,8 +37,9 @@ const paras = [
 ];
 
 const entities = [
-  { id: 'e1', name: 'Страх', status: 'confirmed' },
-  { id: 'e2', name: 'Надія', status: 'suggested' },
+  { id: 'e1', name: 'Страх', status: 'confirmed', type: 'emotion' },
+  { id: 'e2', name: 'Надія', status: 'suggested', type: 'emotion' },
+  { id: 'e3', name: 'Олена', status: 'confirmed', type: 'character' },
 ];
 
 const base = (mentions: TagSearchInputs['mentions']): TagSearchInputs => ({
@@ -128,6 +129,150 @@ console.log('\nОбмеження видачі:');
   t('віддано лише два', r.hits.length === 2, String(r.hits.length));
   t('total рахує всі, а не віддані', r.total === 4, String(r.total));
   t('обмеження типово 200', TAG_SEARCH_DEFAULT_LIMIT === 200, String(TAG_SEARCH_DEFAULT_LIMIT));
+}
+
+
+console.log('\nКілька тегів одразу:');
+{
+  const mentions = [
+    { entityId: 'e1', paragraphId: 'p-s1-0', status: 'confirmed' },
+    { entityId: 'e3', paragraphId: 'p-s1-0', status: 'confirmed' },
+    { entityId: 'e1', paragraphId: 'p-s2-0', status: 'confirmed' },
+    { entityId: 'e3', paragraphId: 'p-s3-0', status: 'confirmed' },
+  ];
+  const any = buildTagHits({ ...base(mentions), slugs: ['emotion', 'character'] });
+  t('режим «будь-який» бере всі три абзаци', any.total === 3, String(any.total));
+  const all = buildTagHits({ ...base(mentions), slugs: ['emotion', 'character'], mode: 'all' });
+  t('режим «усі» лишає тільки абзац з обома', all.total === 1, String(all.total));
+  t('це саме той абзац', all.hits[0]?.paragraphId === 'p-s1-0', String(all.hits[0]?.paragraphId));
+  t('типи влучення перелічені', all.hits[0]?.types.slice().sort().join(',') === 'character,emotion', String(all.hits[0]?.types));
+  const one = buildTagHits({ ...base(mentions), slugs: ['character'] });
+  t('вибірка за одним типом відсікає чужі', one.total === 2, String(one.total));
+}
+
+console.log('\nПошук за значенням після двокрапки:');
+{
+  const mentions = [
+    { entityId: 'e1', paragraphId: 'p-s1-0', status: 'confirmed', value: 'страх висоти' },
+    { entityId: 'e1', paragraphId: 'p-s1-1', status: 'confirmed', value: 'страх темряви' },
+    { entityId: 'e2', paragraphId: 'p-s2-0', status: 'confirmed', value: 'надія на лист' },
+  ];
+  const r = buildTagHits({ ...base(mentions), slugs: ['emotion'], value: 'темряв' });
+  t('знайдено за підрядком значення', r.total === 1, String(r.total));
+  t('це потрібний абзац', r.hits[0]?.paragraphId === 'p-s1-1', String(r.hits[0]?.paragraphId));
+  t('значення видно у відповіді', r.hits[0]?.entities[0].value === 'страх темряви', String(r.hits[0]?.entities[0].value));
+  const byName = buildTagHits({ ...base(mentions), slugs: ['emotion'], value: 'надія' });
+  t('шукає і за назвою сутності', byName.total === 1, String(byName.total));
+  const none = buildTagHits({ ...base(mentions), slugs: ['emotion'], value: 'якого немає' });
+  t('нічого не знайдено — це порожньо, не помилка', none.total === 0);
+}
+
+console.log('\nТа сама сутність із різними значеннями:');
+{
+  const r = buildTagHits(
+    base([
+      { entityId: 'e1', paragraphId: 'p-s1-0', status: 'confirmed', value: 'страх висоти' },
+      { entityId: 'e1', paragraphId: 'p-s1-0', status: 'confirmed', value: 'страх темряви' },
+      { entityId: 'e1', paragraphId: 'p-s1-0', status: 'confirmed', value: 'страх висоти' },
+    ])
+  );
+  t('два різні значення — два записи', r.hits[0].entities.length === 2, String(r.hits[0].entities.length));
+  t('повтор того самого значення — один', r.hits[0].entities.filter((e) => e.value === 'страх висоти').length === 1);
+}
+
+console.log('\nПосторінкова видача:');
+{
+  const mentions = ['p-s1-0', 'p-s1-1', 'p-s2-0', 'p-s3-0'].map((paragraphId) => ({
+    entityId: 'e1',
+    paragraphId,
+    status: 'confirmed',
+  }));
+  const page1 = buildTagHits({ ...base(mentions), limit: 2 });
+  const page2 = buildTagHits({ ...base(mentions), limit: 2, offset: 2 });
+  t('перша сторінка', page1.hits.map((h) => h.paragraphId).join(',') === 'p-s1-0,p-s1-1', page1.hits.map((h) => h.paragraphId).join(','));
+  t('друга сторінка', page2.hits.map((h) => h.paragraphId).join(',') === 'p-s2-0,p-s3-0', page2.hits.map((h) => h.paragraphId).join(','));
+  t('сторінки не перетинаються', !page1.hits.some((a) => page2.hits.some((b) => a.paragraphId === b.paragraphId)));
+  t('total однаковий на обох', page1.total === 4 && page2.total === 4);
+  t('зсув повернено', page2.offset === 2, String(page2.offset));
+  t('за межею — порожньо', buildTagHits({ ...base(mentions), offset: 99 }).hits.length === 0);
+}
+
+
+console.log('\nТеги з тексту абзаців (друге джерело):');
+{
+  // Ядро цього тега не знає: значення порожнє, синк його пропускає.
+  const r = buildTagHits({
+    ...base([]),
+    slugs: ['emotion'],
+    textTags: [{ paragraphId: 'p-s1-0', type: 'emotion', value: '' }],
+  });
+  t('тег із порожнім значенням знайдено', r.total === 1, String(r.total));
+  t('це потрібний абзац', r.hits[0]?.paragraphId === 'p-s1-0');
+  t('його позначено як «у тексті», не як сутність ядра', r.hits[0]?.entities[0].status === 'in_text', String(r.hits[0]?.entities[0].status));
+  t('порожній тег не рахується різною сутністю', r.entitiesFound === 0, String(r.entitiesFound));
+}
+
+{
+  const r = buildTagHits({
+    ...base([{ entityId: 'e1', paragraphId: 'p-s1-0', status: 'confirmed', value: 'страх' }]),
+    slugs: ['emotion'],
+    textTags: [{ paragraphId: 'p-s1-0', type: 'emotion', value: 'страх' }],
+  });
+  t('той самий тег із ядра й з тексту — один запис', r.hits[0].entities.length === 1, String(r.hits[0].entities.length));
+}
+
+{
+  const r = buildTagHits({
+    ...base([{ entityId: 'e1', paragraphId: 'p-s1-0', status: 'confirmed', value: 'страх' }]),
+    slugs: ['emotion'],
+    textTags: [
+      { paragraphId: 'p-s1-0', type: 'emotion', value: 'страх @Олена' },
+      { paragraphId: 'p-s1-0', type: 'emotion', value: '' },
+    ],
+  });
+  t('«страх @Олена» — той самий, що «Страх» із ядра', r.hits[0].entities.filter((e) => e.value !== '').length === 1, String(r.hits[0].entities.length));
+  t('порожній тег лишається окремим записом', r.hits[0].entities.some((e) => e.value === ''));
+}
+
+{
+  const r = buildTagHits({
+    ...base([]),
+    slugs: ['emotion'],
+    value: 'темряв',
+    textTags: [
+      { paragraphId: 'p-s1-0', type: 'emotion', value: '' },
+      { paragraphId: 'p-s1-1', type: 'emotion', value: 'страх темряви' },
+    ],
+  });
+  t('пошук за значенням не тягне порожні теги', r.total === 1 && r.hits[0].paragraphId === 'p-s1-1', String(r.total));
+}
+
+{
+  const r = buildTagHits({
+    ...base([]),
+    slugs: ['emotion', 'character'],
+    mode: 'all',
+    textTags: [
+      { paragraphId: 'p-s1-0', type: 'emotion', value: '' },
+      { paragraphId: 'p-s1-0', type: 'character', value: 'Олена' },
+      { paragraphId: 'p-s1-1', type: 'emotion', value: '' },
+    ],
+  });
+  t('режим «усі» працює і по тегах із тексту', r.total === 1 && r.hits[0].paragraphId === 'p-s1-0', String(r.total));
+}
+
+{
+  const r = buildTagHits({
+    ...base([]),
+    slugs: ['emotion'],
+    textTags: [
+      { paragraphId: 'p-dead', type: 'emotion', value: 'x' },
+      { paragraphId: 'p-in-dead-section', type: 'emotion', value: 'y' },
+      { paragraphId: 'p-missing', type: 'emotion', value: 'z' },
+      { paragraphId: 'p-s1-0', type: 'location', value: 'чужий тип' },
+    ],
+  });
+  t('видалені абзаци й чужі типи з тексту не потрапляють', r.total === 0, String(r.total));
 }
 
 console.log(`\nПідсумок: ${pass} пройшло, ${fail} впало`);
