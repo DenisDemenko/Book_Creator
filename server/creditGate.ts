@@ -20,6 +20,7 @@ import { priceForImage, priceForVideo } from './pricing';
 import { resolveVideoParams } from './videoGeneration';
 import { PLANS, resolveSubscription, type PlanId } from './subscriptions';
 import { getPricingConfig } from './taxPricing';
+import { JEV_RESERVE_BUFFER, JevCreditsError, jevCreditsForTokens, type JevBilling, type JevBillingJob, type JevTariff } from './core/ai/jevBilling';
 const DAY_MS = 86_400_000;
 
 export type CreditErrorCode = 'IMAGE_CREDITS_LOW' | 'IMAGE_PRICE_UNKNOWN';
@@ -200,3 +201,89 @@ export async function creditStatus(
   if (role === 'admin' || !creditsEnabled()) return { unlimited: true, balance: null };
   return { unlimited: false, balance: await syncCredits(userId) };
 }
+
+// ---------------------------------------------------------------------------
+// Jev: кнопка «Проставити теги автоматично» (03.11.2026)
+// ---------------------------------------------------------------------------
+
+/** Тариф у балах за 1 млн токенів Jev — з адмінського конфігу цін. */
+export function jevCreditsPerMillionTokens(): number {
+  return getPricingConfig().jevCreditsPerMillionTokens;
+}
+
+/**
+ * Резервує бали під прогін Jev. Токени Jev відомі лише після відповіді, тож резерв —
+ * оцінка із запасом, а списується фактичне (не більше резерву). `null` — гейт не
+ * застосовується: адмін, гість, вимкнені бали, нульовий тариф або недоступний гаманець.
+ * Балів не вистачає — `JevCreditsError` (402), і до Jev не звертаються.
+ */
+export async function beginJev(req: any, estimatedTokens: number): Promise<JevBillingJob | null> {
+  const userId = gatedUserId(req);
+  const rate = jevCreditsPerMillionTokens();
+  if (!userId || !(rate > 0) || !(estimatedTokens > 0)) return null;
+  const reserve = jevCreditsForTokens(Math.ceil(estimatedTokens * JEV_RESERVE_BUFFER), rate);
+
+  const w = wallet();
+  const jobKey = `jev:${userId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+  try {
+    await syncCredits(userId);
+    w.reserve(userId, jobKey, reserve);
+  } catch (err) {
+    if (err instanceof WalletError && err.code === 'IMAGE_CREDITS_LOW') {
+      const have = w.getBalance(userId).available;
+      throw new JevCreditsError(
+        reserve,
+        have,
+        `Недостатньо AI-балів для цього прогону Jev: потрібно ≈ ${reserve} (з запасом), на балансі ${have}. ` +
+          `Тариф Jev — ${rate} балів за 1 млн токенів. Поповніть підпискою або оберіть менший розділ.`
+      );
+    }
+    console.warn('[creditGate] гаманець недоступний, прогін Jev пропускаємо без списання:', err);
+    return null;
+  }
+
+  return {
+    reservedCredits: reserve,
+    settleTokens(actualTokens: number) {
+      const wanted = jevCreditsForTokens(actualTokens, rate);
+      try {
+        if (wanted <= 0) {
+          w.release(jobKey, 'Jev не витратив токенів');
+          return { credits: 0, capped: false };
+        }
+        const credits = Math.min(reserve, wanted);
+        w.settle(jobKey, credits);
+        return { credits, capped: wanted > reserve };
+      } catch (err) {
+        console.error('[creditGate] не вдалося списати за Jev:', jobKey, err);
+        return { credits: 0, capped: false };
+      }
+    },
+    release(reason: string) {
+      try {
+        w.release(jobKey, reason);
+      } catch (err) {
+        console.error('[creditGate] не вдалося повернути резерв Jev:', jobKey, err);
+      }
+    },
+  };
+}
+
+/** Тариф і баланс для панелі: скільки коштує Jev і чи вистачить балів. */
+export async function jevTariff(req: any): Promise<JevTariff> {
+  const rate = jevCreditsPerMillionTokens();
+  const userId = gatedUserId(req);
+  if (!userId) return { creditsPerMillionTokens: rate, unlimited: true, balance: null };
+  try {
+    return { creditsPerMillionTokens: rate, unlimited: false, balance: (await syncCredits(userId)).available };
+  } catch {
+    return { creditsPerMillionTokens: rate, unlimited: true, balance: null };
+  }
+}
+
+/** Підключення для маршрутів ядра (`registerProjectRoutes`). */
+export const jevBilling: JevBilling = {
+  creditsPerMillionTokens: jevCreditsPerMillionTokens,
+  begin: beginJev,
+  tariff: jevTariff,
+};

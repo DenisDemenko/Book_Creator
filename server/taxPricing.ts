@@ -92,6 +92,11 @@ export interface PricingConfig {
   textBudgetUah: number;
   /** Пробні бали зареєстрованого користувача без підписки, одноразово. */
   freeCredits: number;
+  /**
+   * Скільки балів списується за 1 млн вхідних токенів Jev (кнопка «Проставити теги
+   * автоматично»). Постановка власника 03.11.2026: 4000. 0 — Jev безкоштовний.
+   */
+  jevCreditsPerMillionTokens: number;
   /** Бали на місяць за планом. */
   planCredits: { start: number; pro: number; ultra: number; team: number };
 }
@@ -103,6 +108,7 @@ export const DEFAULT_PRICING_CONFIG: PricingConfig = {
   fxUahPerUsd: 48,
   textBudgetUah: 200,
   freeCredits: 300,
+  jevCreditsPerMillionTokens: 4000,
   planCredits: { start: 2_000, pro: 5_000, ultra: 25_000, team: 50_000 },
 };
 
@@ -130,6 +136,7 @@ export function mergePricingConfig(base: PricingConfig, patch: unknown): Pricing
   num('fxUahPerUsd', 1, 500);
   num('textBudgetUah', 0, 100_000);
   num('freeCredits', 0, 1_000_000, true);
+  num('jevCreditsPerMillionTokens', 0, 10_000_000, true);
   if (p.planCredits !== undefined) {
     for (const plan of ['start', 'pro', 'ultra', 'team'] as const) {
       if (p.planCredits?.[plan] === undefined) continue;

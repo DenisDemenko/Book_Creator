@@ -8,6 +8,7 @@ interface PricingConfig {
   fxUahPerUsd: number;
   textBudgetUah: number;
   freeCredits: number;
+  jevCreditsPerMillionTokens: number;
   planCredits: { start: number; pro: number; ultra: number; team: number };
 }
 
@@ -144,6 +145,7 @@ export const AdminCreditsPanel: React.FC = () => {
             {field('Курс, ₴ за $', 'fxUahPerUsd', 'для цін і ліміту тексту', 0.1)}
             {field('Ліміт тексту, ₴/період', 'textBudgetUah', 'на кожну платну підписку')}
             {field('Пробні бали', 'freeCredits', 'зареєстрований без підписки, одноразово')}
+            {field('Jev: балів за 1 млн токенів', 'jevCreditsPerMillionTokens', 'кнопка «Проставити теги автоматично»; 0 — безкоштовно')}
             {(['start', 'pro', 'ultra', 'team'] as const).map((p) => (
               <label key={p} className="flex flex-col gap-1 text-[11px] text-slate-400">
                 <span>Бали {p}/міс</span>

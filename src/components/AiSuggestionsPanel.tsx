@@ -11,7 +11,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, Loader2, Sparkles, X, Link2, Wand2 } from 'lucide-react';
-import { JEV_TOLERANCE_DEFAULT, JEV_TOLERANCE_MAX, JEV_TOLERANCE_MIN, addableAt, clampTolerance, decidedFromResponse, jevTariffNote, suggestRetryTolerance, type JevRunSummary } from '../utils/jevTolerance';
+import { JEV_TOLERANCE_DEFAULT, JEV_TOLERANCE_MAX, JEV_TOLERANCE_MIN, addableAt, clampTolerance, decidedFromResponse, jevRateLine, jevTariffNote, suggestRetryTolerance, type JevRunSummary, type JevTariff } from '../utils/jevTolerance';
 
 export interface AiSuggestion {
   id: string;
@@ -64,6 +64,7 @@ export const AiSuggestionsPanel: React.FC<Props> = ({ bookId, sectionId, canInse
   const [jevBusy, setJevBusy] = useState(false);
   const [tolerance, setToleranceState] = useState<number>(readStoredTolerance);
   const [lastRun, setLastRun] = useState<JevRunSummary | null>(null);
+  const [tariff, setTariff] = useState<JevTariff | null>(null);
   const [retryTolerance, setRetryTolerance] = useState<number>(JEV_TOLERANCE_MIN);
   const setTolerance = (n: number) => {
     const v = clampTolerance(n);
@@ -88,6 +89,15 @@ export const AiSuggestionsPanel: React.FC<Props> = ({ bookId, sectionId, canInse
       setMessage('Семантичне ядро зараз недоступне.');
     }
   }, [base, sectionId]);
+
+  const loadTariff = useCallback(async () => {
+    const res = await api(`${base}/ai/jev-tags/tariff`).catch(() => null);
+    if (res?.ok) setTariff(await res.json().catch(() => null));
+  }, [base]);
+
+  useEffect(() => {
+    void loadTariff();
+  }, [loadTariff]);
 
   useEffect(() => {
     setItems([]);
@@ -188,6 +198,7 @@ export const AiSuggestionsPanel: React.FC<Props> = ({ bookId, sectionId, canInse
       const body = res ? await res.json().catch(() => ({})) : {};
       if (!res || !res.ok) {
         setMessage(body.error || 'Не вдалося звернутися до Jev.');
+        if (res?.status === 402) void loadTariff();
         return;
       }
       const decided = decidedFromResponse(body);
@@ -230,6 +241,7 @@ export const AiSuggestionsPanel: React.FC<Props> = ({ bookId, sectionId, canInse
       ].filter(Boolean);
       setMessage(parts.join('; ') + '.');
       await load();
+      void loadTariff();
     } finally {
       setJevBusy(false);
     }
@@ -289,6 +301,11 @@ export const AiSuggestionsPanel: React.FC<Props> = ({ bookId, sectionId, canInse
           Тег ставиться, коли Jev упевнений не менше ніж на {tolerance}%; не більше 12 тегів на абзац. Чим нижче поріг, тим
           більше тегів — і тим частіше загальних (стиль, голос оповіді).
         </p>
+        {tariff && (
+          <p className="text-[10px] leading-snug text-amber-200/80" data-jev-rate>
+            {jevRateLine(tariff)}
+          </p>
+        )}
       </div>
       {message && <p className="text-[11px] text-slate-400" data-ai-suggestions-message>{message}</p>}
       {lastRun && lastRun.below.length > 0 && (

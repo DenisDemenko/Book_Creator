@@ -14,6 +14,7 @@ import { registerProjectRoutes } from '../server/core/projectRoutes.ts';
 import { MemoryCoreRepository } from '../server/core/memoryRepository.ts';
 import { MENTION_SUGGESTION } from '../server/core/ai/mentions.ts';
 import { sharedJevAnswerCache } from '../server/core/ai/jevTags.ts';
+import { JevCreditsError, estimateJevTokens, jevCreditsForTokens } from '../server/core/ai/jevBilling.ts';
 import { decidedFromResponse } from '../src/utils/jevTolerance.ts';
 import type { JevAdapter, JevRawAnswer } from '../server/ai/adapters/jev/index.ts';
 
@@ -45,11 +46,13 @@ for (const name of Object.keys(PROBS)) {
 }
 
 const calls: string[][] = [];
+let adapterFails = false;
 const adapter: JevAdapter = {
   name: 'mock',
   evaluate: async () => { throw new Error('не потрібне'); },
   askState: async (_state, questions): Promise<JevRawAnswer> => {
     calls.push(questions.map((q) => q.id));
+    if (adapterFails) throw new Error('429 Too Many Requests');
     return {
       answers: Object.fromEntries(questions.map((q) => {
         const name = String(q.instructions).match(/«([^»]+)»/)?.[1] ?? '';
@@ -75,7 +78,27 @@ const app = express();
 app.use(express.json());
 app.use((req, _res, next) => { (req as any).principal = PRINCIPALS[String(req.headers['x-test-user'] || 'owner')]; next(); });
 let jevOn = true;
+// Підставний гаманець: журнал викликів і режим «балів не вистачає».
+const billingLog = { begin: [] as number[], settled: [] as number[], released: [] as string[] };
+let billingMode: 'ok' | 'low' = 'ok';
+const billing = {
+  creditsPerMillionTokens: () => 4000,
+  begin: async (_req: unknown, tokens: number) => {
+    billingLog.begin.push(tokens);
+    if (billingMode === 'low') throw new JevCreditsError(50, 3, 'Недостатньо AI-балів для цього прогону Jev: потрібно ≈ 50, на балансі 3.');
+    return {
+      reservedCredits: 99,
+      settleTokens: (n: number) => {
+        billingLog.settled.push(n);
+        return { credits: jevCreditsForTokens(n, 4000), capped: false };
+      },
+      release: (reason: string) => { billingLog.released.push(reason); },
+    };
+  },
+  tariff: async () => ({ creditsPerMillionTokens: 4000, unlimited: false, balance: 1234 }),
+};
 registerProjectRoutes(app, {
+  jevBilling: billing,
   access,
   repo: () => repo,
   coreState: () => 'ready',
@@ -103,6 +126,36 @@ sharedJevAnswerCache.clear();
   jevOn = true;
 }
 
+console.log('\nСписання балів за Jev (4000 за 1 млн токенів):');
+{
+  sharedJevAnswerCache.clear();
+  const tariff = await fetch(`${base}/api/projects/B1/ai/jev-tags/tariff`, { headers: { 'x-test-user': 'owner' } }).then((r) => r.json());
+  t('тариф і баланс до прогону', tariff.creditsPerMillionTokens === 4000 && tariff.balance === 1234 && tariff.unlimited === false, JSON.stringify(tariff));
+
+  billingMode = 'low';
+  const callsBefore = calls.length;
+  const low = await jev({ sectionId: 's1' });
+  t('балів не вистачає → 402 kind=credits з потрібною сумою й балансом', low.status === 402 && low.body.kind === 'credits' && low.body.needed === 50 && low.body.available === 3, JSON.stringify(low.body).slice(0, 160));
+  t('до Jev при цьому НЕ зверталися і нічого не списано', calls.length === callsBefore && billingLog.settled.length === 0);
+  t('в 402 є оцінка токенів, за якою резервували', low.body.estimatedTokens > 0, String(low.body.estimatedTokens));
+  billingMode = 'ok';
+
+  // Збій Jev на всіх абзацах: токенів нема → списується нуль (шлюз повертає резерв).
+  adapterFails = true;
+  billingLog.begin.length = 0;
+  const failed = await jev({ sectionId: 's1' });
+  adapterFails = false;
+  t('усі питання впали → 200 з failures, а не 500', failed.status === 200 && failed.body.failures.length === 1);
+  t('резерв брався, а списано за 0 токенів (повертається)', billingLog.begin.length === 1 && billingLog.settled[billingLog.settled.length - 1] === 0 && failed.body.usage.credits === 0 && failed.body.usage.charged === false);
+
+  const est = estimateJevTokens([{ paragraphId: 'p1', editorPid: 'pid1', text: 'x'.repeat(250), candidates: [1, 2, 3].map((n) => ({ findingId: `f${n}`, paragraphId: 'p1', editorPid: 'pid1', entitySlug: 'emotion', entityName: `Сутність ${n}`, tag: '[/emotion:x]' })) }]);
+  t('оцінка: службові + текст/2,5 + 115 на питання', est.tokens === 100 + 100 + 115 * 3 && est.freshQuestions === 3 && est.cachedQuestions === 0, JSON.stringify(est));
+  t('1 млн токенів = 4000 балів; 2000 токенів = 8; будь-яка витрата ≥ 1', jevCreditsForTokens(1_000_000, 4000) === 4000 && jevCreditsForTokens(2000, 4000) === 8 && jevCreditsForTokens(1, 4000) === 1 && jevCreditsForTokens(0, 4000) === 0 && jevCreditsForTokens(500, 0) === 0);
+  sharedJevAnswerCache.clear();
+  billingLog.begin.length = 0;
+  billingLog.settled.length = 0;
+}
+
 console.log('\nПрогін за 95% і повтор за нижчим порогом:');
 {
   const first = await jev({ sectionId: 's1' });
@@ -111,9 +164,11 @@ console.log('\nПрогін за 95% і повтор за нижчим поро�
   const below = first.body.skipped.filter((x: any) => x.reason === 'below_threshold');
   t('решта три — below_threshold і з ймовірностями (для повтору в панелі)', below.length === 3 && below.every((x: any) => typeof x.probability === 'number'));
   t('4 питання до Jev, 0 з пам’яті', first.body.asked === 4 && first.body.fromCache === 0);
-  t('вартість у відповіді: токени, $ за ставкою 0,042, бали-еквівалент, не списано',
+  t('вартість у відповіді: токени, $ за ставкою 0,042, тариф 4000, списано 8 балів',
     first.body.usage.inputTokens === 2000 && first.body.usage.usdPerMTok === 0.042 && Math.abs(first.body.usage.usd - 0.000084) < 1e-9 &&
-    first.body.usage.creditsEquivalent === 1 && first.body.usage.charged === false, JSON.stringify(first.body.usage));
+    first.body.usage.creditsPerMTok === 4000 && first.body.usage.credits === 8 && first.body.usage.creditsAtRate === 8 && first.body.usage.charged === true && first.body.usage.capped === false,
+    JSON.stringify(first.body.usage));
+  t('резерв брався один раз і списано за ФАКТИЧНІ токени (2000), а не за оцінку', billingLog.begin.length === 1 && billingLog.settled.length === 1 && billingLog.settled[0] === 2000, JSON.stringify(billingLog));
 
   // Панель читає відповідь тією самою функцією: з #493 вона шукала `d.id`, якого немає, і не підтверджувала нічого.
   const decided = decidedFromResponse(first.body);
@@ -127,7 +182,7 @@ console.log('\nПрогін за 95% і повтор за нижчим поро�
   const callsBefore = calls.length;
   const retry = await jev({ sectionId: 's1', threshold: 0.8 });
   t('повтор за 80%: у розгляді лише непроставлені (3), а Страх уже не питається', retry.body.paragraphs === 1 && retry.body.fromCache === 3 && retry.body.asked === 0, `${retry.body.asked}/${retry.body.fromCache}`);
-  t('повтор не звертався до Jev і не рахує токенів', calls.length === callsBefore && retry.body.inputTokens === 0 && retry.body.usage.usd === 0 && retry.body.usage.creditsEquivalent === 0);
+  t('повтор не звертався до Jev, не рахує токенів і НЕ резервує балів', calls.length === callsBefore && retry.body.inputTokens === 0 && retry.body.usage.usd === 0 && retry.body.usage.credits === 0 && retry.body.usage.charged === false && billingLog.begin.length === 1, JSON.stringify(billingLog));
   t('за 80% додався «Радість» (0,88); «Гнів» 0,74 і «Сумнів» 0,6 лишились', retry.body.tags.length === 1 && retry.body.tags[0].entityName === 'Радість');
 
   const conf2 = await post(`/api/projects/B1/suggestions/${retry.body.tags[0].findingId}/confirm`, {});

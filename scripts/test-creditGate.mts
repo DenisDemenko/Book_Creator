@@ -12,7 +12,8 @@ fs.mkdirSync(DIR, { recursive: true });
 
 import assert from 'node:assert/strict';
 const { initStore, saveUser, recordUsage, upsertSubscription, __resetCacheForTests } = await import('../server/store.ts');
-const { beginImage, beginVideo, assertVideoAffordable, syncCredits, ImageCreditsError } = await import('../server/creditGate.ts');
+const { beginImage, beginVideo, assertVideoAffordable, syncCredits, ImageCreditsError, beginJev, jevTariff, jevCreditsPerMillionTokens } = await import('../server/creditGate.ts');
+const { JevCreditsError } = await import('../server/core/ai/jevBilling.ts');
 const { imageCostTable, videoCostTable } = await import('../server/creditCatalog.ts');
 const { updatePricingConfig, PLANS, priceFor } = await import('../server/subscriptions.ts');
 const { creditsForCostUsd } = await import('../server/creditPricing.ts');
@@ -51,7 +52,7 @@ async function main() {
   __resetCacheForTests();
   await initStore();
   const w = () => new CreditWallet(getDb() as any);
-  for (const id of ['u-vid', 'u-trial', 'u-fail', 'u-low', 'u-pay', 'u-lapse', 'u-text', 'u-free-text']) {
+  for (const id of ['u-vid', 'u-trial', 'u-fail', 'u-low', 'u-pay', 'u-lapse', 'u-text', 'u-free-text', 'u-jev', 'u-jev2', 'u-jev3', 'u-jev4', 'u-jev5']) {
     await saveUser({ id, email: `${id}@example.com`, name: id, role: 'writer', createdAt: new Date().toISOString() });
   }
 
@@ -231,6 +232,80 @@ async function main() {
     await usage('t3', 'u-free-text', 99, 'Редактор');
     assert.equal((await checkChatQuota('u-free-text', 'writer')).allowed, true);
     assert.equal((await checkChatQuota('any-admin', 'admin')).allowed, true);
+  });
+
+  console.log('\nJev: 4000 балів за 1 млн токенів (03.11.2026):');
+  await test('тариф за замовчуванням — 4000 балів за 1 млн токенів, редагується в конфігу', async () => {
+    assert.equal(jevCreditsPerMillionTokens(), 4000);
+    assert.equal(DEFAULT_PRICING_CONFIG.jevCreditsPerMillionTokens, 4000);
+    await updatePricingConfig({ jevCreditsPerMillionTokens: 5000 });
+    assert.equal(jevCreditsPerMillionTokens(), 5000);
+    await updatePricingConfig({ jevCreditsPerMillionTokens: 4000 });
+  });
+  await test('некоректний тариф відхиляється: від’ємний, дробовий, завеликий', async () => {
+    for (const bad of [-1, 1.5, 10_000_001, 'abc']) {
+      await assert.rejects(updatePricingConfig({ jevCreditsPerMillionTokens: bad }), /jevCreditsPerMillionTokens/);
+    }
+    assert.equal(jevCreditsPerMillionTokens(), 4000);
+  });
+  await test('резерв з запасом 25%: оцінка 20 000 токенів → резерв 100 балів; списано за фактичні 15 000 = 60', async () => {
+    const job = await beginJev(req('u-jev'), 20_000);
+    assert.ok(job);
+    assert.equal(job!.reservedCredits, 100); // 20 000 × 1,25 = 25 000 токенів × 4000 / 1e6
+    assert.equal(w().getBalance('u-jev').reserved, 100);
+    const settled = job!.settleTokens(15_000);
+    assert.deepEqual(settled, { credits: 60, capped: false });
+    assert.deepEqual(w().getBalance('u-jev'), { userId: 'u-jev', available: 240, reserved: 0 });
+  });
+  await test('витрата понад резерв: списано лише резерв і це названо (capped)', async () => {
+    const job = await beginJev(req('u-jev2'), 20_000);
+    const settled = job!.settleTokens(100_000); // хотіли б 400, резерв 100
+    assert.deepEqual(settled, { credits: 100, capped: true });
+    assert.equal(w().getBalance('u-jev2').available, 200);
+  });
+  await test('нуль токенів: весь резерв повертається', async () => {
+    const job = await beginJev(req('u-jev3'), 20_000);
+    assert.deepEqual(job!.settleTokens(0), { credits: 0, capped: false });
+    assert.deepEqual(w().getBalance('u-jev3'), { userId: 'u-jev3', available: 300, reserved: 0 });
+  });
+  await test('збій Jev: release повертає резерв', async () => {
+    const job = await beginJev(req('u-jev4'), 20_000);
+    job!.release('429');
+    assert.deepEqual(w().getBalance('u-jev4'), { userId: 'u-jev4', available: 300, reserved: 0 });
+  });
+  await test('балів не вистачає: JevCreditsError (402) ДО Jev, баланс не змінено, у тексті тариф', async () => {
+    // 100 000 токенів × 1,25 × 4000 / 1e6 = 500 балів, а на рахунку 300 пробних.
+    let err: unknown;
+    try {
+      await beginJev(req('u-jev5'), 100_000);
+    } catch (e) {
+      err = e;
+    }
+    assert.ok(err instanceof JevCreditsError);
+    const e = err as InstanceType<typeof JevCreditsError>;
+    assert.equal(e.status, 402);
+    assert.equal(e.kind, 'credits');
+    assert.equal(e.code, 'JEV_CREDITS_LOW');
+    assert.equal(e.needed, 500);
+    assert.equal(e.available, 300);
+    assert.ok(e.message.includes('4000 балів за 1 млн токенів'));
+    assert.deepEqual(w().getBalance('u-jev5'), { userId: 'u-jev5', available: 300, reserved: 0 });
+  });
+  await test('адмін, гість і нульова оцінка гейтом не обмежені', async () => {
+    assert.equal(await beginJev(req('any-admin', 'admin'), 1_000_000), null);
+    assert.equal(await beginJev({ principal: { id: null, role: 'guest', isGuest: true } }, 1_000_000), null);
+    assert.equal(await beginJev(req('u-jev'), 0), null);
+  });
+  await test('нульовий тариф: Jev безкоштовний, гейт не втручається', async () => {
+    await updatePricingConfig({ jevCreditsPerMillionTokens: 0 });
+    assert.equal(await beginJev(req('u-jev'), 1_000_000), null);
+    await updatePricingConfig({ jevCreditsPerMillionTokens: 4000 });
+  });
+  await test('тариф і баланс для панелі: користувач — з балансом, адмін — без обмежень', async () => {
+    const user = await jevTariff(req('u-jev'));
+    assert.deepEqual(user, { creditsPerMillionTokens: 4000, unlimited: false, balance: 240 });
+    const admin = await jevTariff(req('any-admin', 'admin'));
+    assert.deepEqual(admin, { creditsPerMillionTokens: 4000, unlimited: true, balance: null });
   });
   void now;
 

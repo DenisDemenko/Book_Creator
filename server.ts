@@ -116,7 +116,7 @@ import { readGammaConfig, GAMMA_RATE_LIMIT_PER_SECOND } from './server/gamma/gam
 import { createGammaClient } from './server/gamma/gammaClient';
 import { registerNarrationRoutes } from './server/narrationRoutes';
 import { registerPublishingRoutes } from './server/publishingRoutes';
-import { assertVideoAffordable } from './server/creditGate';
+import { assertVideoAffordable, jevBilling } from './server/creditGate';
 import { checkImageQuota, requireImageQuota, requirePlanAtLeast, checkChatQuota, resolveSubscription, loadTaxRegime } from './server/subscriptions';
 import {
   resolveEngine as resolveChatEngine,
@@ -1192,6 +1192,8 @@ registerGitCommandRoutes(app);
     access: realtimeAccessDeps,
     repo: getCoreRepository,
     coreState: () => getCoreStatus().state,
+    // Кнопка Jev «Проставити теги автоматично» списує бали за токени (тариф — у конфігу цін адмінки).
+    jevBilling,
     // Т6.2: медіатека книги за наданим доступом (файли власника й учасників із робочим доступом).
     media: { listAssets: (ownerId, opts) => listMediaAssets(ownerId, opts) as any, readAsset: (id) => readMediaAsset(id) as any },
     queue: getCoreJobQueue,

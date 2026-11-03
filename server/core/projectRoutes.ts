@@ -23,6 +23,7 @@ import type { JobQueue } from './jobs/queue';
 import { AI_MENTIONS_JOB_KIND, MENTION_SUGGESTION, RELATION_SUGGESTION, publicSuggestion } from './ai/mentions';
 import { JEV_TAG_MAX_THRESHOLD, JEV_TAG_MIN_THRESHOLD, parseJevThreshold, runJevTagging, sharedJevAnswerCache, type JevTagParagraph } from './ai/jevTags';
 import { JEV_USD_PER_MTOK, jevCostUsd } from '../ai/adapters/jev';
+import { JevCreditsError, estimateJevTokens, jevCreditsForTokens, type JevBilling } from './ai/jevBilling';
 import { TAG_SEARCH_DEFAULT_LIMIT, buildTagHits } from './tagSearch';
 import { entityBySlug, parseEntityTagsInSource } from '../../src/utils/coreEntities';
 import { paragraphExcerpt } from './search/text';
@@ -131,6 +132,8 @@ export interface ProjectRoutesDeps {
   studio?: (projectId: string, entity: EntityRow) => Promise<{ character: StudioCharacterLike | null; all: StudioCharacterLike[] }>;
   /** Прототип FLC етапу 0 (Т1.6): адаптер Jev (null — ключа немає) і LLM. */
   flc?: { jev: () => Promise<JevAdapter | null>; llm: (projectId: string, actor: string) => LlmJson };
+  /** Списання балів за кнопку Jev «Проставити теги автоматично»; без нього маршрут нічого не списує. */
+  jevBilling?: JevBilling;
   /** Т2.7 В3: голос героя на допиті — модуль «Ядра AI» `coreCharacterVoice` (шаблон адміна — за бажанням). */
   interview?: { voice: (projectId: string, actor: string) => VoiceGenerate; loadTemplate?: () => Promise<{ system: string; user: string } | undefined>; workflows?: () => import('./workflows/engine/runner').EngineDeps | null };
   /** Порядок сцен у часі світу зі Студії (`Scene.timelineOrder`), Т2.1. */
@@ -631,33 +634,67 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       });
     }
 
-    // Повтор із нижчою толерантністю бере вже відомі відповіді з пам'яті й питає Jev лише про нове.
-    const run = await runJevTagging([...byParagraph.values()], jev, { threshold, cache: sharedJevAnswerCache, scope: req.params.id });
-    // Скільки це коштує. Бали за Jev із гаманця автора не знімаються (бали — лише за зображення,
-    // `server/creditGate.ts`); Jev оплачує платформа з текстового бюджету. Еквівалент у балах —
-    // довідка за тим самим курсом, що й для зображень, а не списання.
-    const usd = jevCostUsd(run.inputTokens);
-    let creditsEquivalent: number | null = null;
-    if (usd > 0) {
+    const batch = [...byParagraph.values()];
+    // Резерв балів ДО звернення до Jev: оцінка лише за питаннями, яких немає в пам'яті відповідей,
+    // тож повтор із нижчим порогом нічого не резервує й нічого не коштує.
+    const estimate = estimateJevTokens(batch, { cache: sharedJevAnswerCache, scope: req.params.id });
+    let job: Awaited<ReturnType<JevBilling['begin']>> = null;
+    if (deps.jevBilling && estimate.tokens > 0) {
       try {
-        creditsEquivalent = (await import('../creditPricing')).creditsForCostUsd(usd);
-      } catch {
-        creditsEquivalent = null;
+        job = await deps.jevBilling.begin(req, estimate.tokens);
+      } catch (err) {
+        if (err instanceof JevCreditsError) {
+          res.status(402).json({ error: err.message, kind: 'credits', needed: err.needed, available: err.available, estimatedTokens: estimate.tokens });
+          return;
+        }
+        throw err;
       }
-    } else {
-      creditsEquivalent = 0;
     }
+    // Повтор із нижчою толерантністю бере вже відомі відповіді з пам'яті й питає Jev лише про нове.
+    let run;
+    try {
+      run = await runJevTagging(batch, jev, { threshold, cache: sharedJevAnswerCache, scope: req.params.id });
+    } catch (err) {
+      job?.release('збій прогону Jev');
+      throw err;
+    }
+    // Списання за фактичними токенами (не більше за резерв); нуль токенів повертає резерв.
+    const settled = job ? job.settleTokens(run.inputTokens) : null;
+    const rate = deps.jevBilling?.creditsPerMillionTokens() ?? 0;
+    const usd = jevCostUsd(run.inputTokens);
     res.json({
       threshold,
       paragraphs: byParagraph.size,
       asked: run.asked,
       fromCache: run.fromCache,
       inputTokens: run.inputTokens,
-      usage: { inputTokens: run.inputTokens, usd, usdPerMTok: JEV_USD_PER_MTOK, creditsEquivalent, charged: false },
+      usage: {
+        inputTokens: run.inputTokens,
+        usd,
+        usdPerMTok: JEV_USD_PER_MTOK,
+        creditsPerMTok: rate,
+        // Скільки це коштувало б за тарифом, і скільки справді списано (0 для адміна й без гаманця).
+        creditsAtRate: jevCreditsForTokens(run.inputTokens, rate),
+        credits: settled?.credits ?? 0,
+        charged: !!settled && settled.credits > 0,
+        capped: settled?.capped ?? false,
+      },
       failures: run.failures,
       tags: run.decisions.filter((d) => d.accepted),
       skipped: run.decisions.filter((d) => !d.accepted),
     });
+  }));
+
+  /**
+   * Тариф кнопки Jev і баланс автора — щоб панель ПЕРЕД прогоном сказала, скільки це коштує
+   * (постановка власника 03.11.2026: 4000 балів за 1 млн токенів). Нічого не резервує.
+   */
+  app.get('/api/projects/:id/ai/jev-tags/tariff', withRepo(async (_repo, req, res) => {
+    if (!deps.jevBilling) {
+      res.json({ creditsPerMillionTokens: 0, unlimited: true, balance: null });
+      return;
+    }
+    res.json(await deps.jevBilling.tariff(req));
   }));
 
   /**

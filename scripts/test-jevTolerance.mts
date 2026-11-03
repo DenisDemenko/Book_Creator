@@ -14,6 +14,7 @@ import {
   JEV_TOLERANCE_MIN,
   addableAt,
   clampTolerance,
+  jevRateLine,
   jevTariffNote,
   suggestRetryTolerance,
 } from '../src/utils/jevTolerance.ts';
@@ -55,29 +56,45 @@ console.log('\nЗ якого відсотка почати повтор:');
   t('без даних — на 5 нижче', suggestRetryTolerance([], 90) === 85);
 }
 
-console.log('\nТекст про вартість:');
+console.log('\nТариф до прогону:');
 {
-  const usage = { inputTokens: 24000, usd: 0.001008, usdPerMTok: 0.042, creditsEquivalent: 2, charged: false };
+  const line = nbsp(jevRateLine({ creditsPerMillionTokens: 4000, unlimited: false, balance: 2000 }));
+  t('називає тариф 4 000 балів за 1 млн токенів', line.includes('4 000 балів за 1 млн токенів'), line);
+  t('типовий абзац: ≈ 2 600 токенів ≈ 11 балів (ceil 10,4)', line.includes('до ≈ 2 600 токенів ≈ 11 балів'));
+  t('показує баланс', line.includes('На балансі: 2 000 балів'));
+  t('повтор для тих самих абзаців безкоштовний — сказано', line.includes('Повтор для тих самих абзаців балів не коштує'));
+  const adm = nbsp(jevRateLine({ creditsPerMillionTokens: 4000, unlimited: true, balance: null }));
+  t('для адміністратора — «без списання», без балансу', adm.includes('Для вас без списання') && !adm.includes('На балансі'));
+  t('нульовий тариф — прямо сказано', jevRateLine({ creditsPerMillionTokens: 0, unlimited: false, balance: 10 }).includes('без списання балів'));
+  t('тарифу ще нема (не завантажено) — порожньо', jevRateLine(null) === '');
+  const bal = (n: number) => nbsp(jevRateLine({ creditsPerMillionTokens: 4000, unlimited: false, balance: n }));
+  t('1 і 21 — «бал», 11 — «балів»', bal(1).includes('1 бал.') && bal(21).includes('21 бал.') && bal(11).includes('11 балів.'));
+  t('2–4 і 22–24 — «бали», 12–14 і 25 — «балів»', bal(2).includes('2 бали.') && bal(23).includes('23 бали.') && bal(12).includes('12 балів.') && bal(14).includes('14 балів.') && bal(25).includes('25 балів.'));
+}
+
+console.log('\nТекст після прогону:');
+{
+  const usage = { inputTokens: 24000, usd: 0.001008, usdPerMTok: 0.042, creditsPerMTok: 4000, creditsAtRate: 96, credits: 96, charged: true, capped: false };
   const note = nbsp(jevTariffNote(usage, 30, 0));
-  t('називає ставку 0,042 $ за 1 млн токенів', note.includes('$0,042 за 1 млн вхідних токенів'), note.slice(0, 120));
-  t('називає «мінімальною ставкою»', note.includes('мінімальною ставкою'));
-  t('показує токени й суму в доларах', note.includes('24 000 токенів') && note.includes('$0,0010'));
-  t('бали — лише еквівалент, і сказано, що з гаманця не знімаються', note.includes('≈ 2 бал. в еквіваленті') && note.includes('З вашого гаманця бали за Jev не знімаються'));
-  t('сказано, що бали діють лише для зображень', note.includes('лише для зображень'));
-  t('питання до Jev названо', note.includes('30 питань до Jev'));
-  t('без відповідей із пам’яті — не вигадуємо їх', !note.includes('із пам'));
+  t('називає тариф і собівартість', note.includes('Тариф Jev: 4 000 балів за 1 млн токенів') && note.includes('собівартість $0,042'), note.slice(0, 140));
+  t('токени й гроші: 24 000 ≈ $0,0010', note.includes('24 000 токенів') && note.includes('$0,0010'));
+  t('списано 96 балів', note.includes('Списано 96 балів з вашого гаманця'));
+  t('питання до Jev названо, пам’яті нема', note.includes('30 питань до Jev') && !note.includes('із пам'));
+  t('повтор не коштує балів — сказано', note.includes('не коштує балів'));
+  t('не обіцяє «100 балів за книгу»', !note.includes('100 бал'));
 
-  const cached = nbsp(jevTariffNote({ ...usage, inputTokens: 0, usd: 0, creditsEquivalent: 0 }, 0, 12));
-  t('повтор: 0 нових питань і 12 із пам’яті', cached.includes("0 нових питань до Jev і 12 відповідей із пам'яті"));
+  const cached = nbsp(jevTariffNote({ ...usage, inputTokens: 0, usd: 0, creditsAtRate: 0, credits: 0, charged: false }, 0, 12));
+  t("повтор: 0 нових питань і 12 з пам'яті", cached.includes("0 нових питань до Jev і 12 відповідей із пам'яті"));
+  t('повтор: балів не списано, бо звернень не було', cached.includes('Балів не списано: нових звернень до Jev не було'));
   t('повтор: витрачено 0 токенів', cached.includes('витрачено 0 токенів'));
-  t('пояснення, що повтор для тих самих абзаців нових звернень не потребує', cached.includes('нових звернень не потребує'));
 
-  const noCredits = nbsp(jevTariffNote({ ...usage, creditsEquivalent: null }, 5, 0));
-  t('без курсу балів еквівалент не вигадується', !noCredits.includes('бал. в еквіваленті'));
-  const charged = nbsp(jevTariffNote({ ...usage, charged: true }, 5, 0));
-  t('якщо колись списуватимуть — фраза «не знімаються» зникає', !charged.includes('не знімаються'));
-  t('без даних про використання — лише ставка', jevTariffNote(null, 0, 0).startsWith('Jev тарифікується за мінімальною ставкою') && !jevTariffNote(null, 0, 0).includes('токенів ≈'));
-  t('жодного обіцяного «100 балів за книгу»', !note.includes('100 бал'));
+  const admin = nbsp(jevTariffNote({ ...usage, credits: 0, charged: false }, 5, 0));
+  t('адміністратор: без списання, а за тарифом було б 96', admin.includes('Для вас без списання') && admin.includes('за тарифом це було б 96 балів'));
+  const capped = nbsp(jevTariffNote({ ...usage, capped: true }, 5, 0));
+  t('витрата понад резерв названа', capped.includes('перевищила резерв'));
+  const free = nbsp(jevTariffNote({ ...usage, creditsPerMTok: 0, creditsAtRate: 0, credits: 0, charged: false }, 5, 0));
+  t('нульовий тариф: «без списання балів», без рядків про списання', free.startsWith('Jev зараз без списання балів') && !free.includes('Списано') && !free.includes('за тарифом'));
+  t('без даних про використання — лише тариф', jevTariffNote(null, 0, 0).startsWith('Тариф Jev:') && !jevTariffNote(null, 0, 0).includes('токенів ≈'));
 }
 
 console.log(`\nПідсумок: ${pass} пройшло, ${fail} впало`);
