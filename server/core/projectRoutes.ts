@@ -21,6 +21,7 @@ import type { CoreRepository, FindingRow } from './types';
 import { JobRejectedError } from './jobs/types';
 import type { JobQueue } from './jobs/queue';
 import { AI_MENTIONS_JOB_KIND, MENTION_SUGGESTION, RELATION_SUGGESTION, publicSuggestion } from './ai/mentions';
+import { JEV_TAG_THRESHOLD, runJevTagging, type JevTagParagraph } from './ai/jevTags';
 import { hybridSearch, type SearchDeps, type SearchRequest } from './search/service';
 import { buildStoryGraph, evidenceRefs } from './storyGraph';
 import { AI_PROFILE_JOB_KIND, PROFILE_FACT, buildCharacterProfile, studioAppearanceText, studioCanon, type StudioCharacterLike } from './characterProfile';
@@ -548,6 +549,87 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       out.push(publicSuggestion(f, paragraph ?? undefined));
     }
     res.json({ suggestions: out });
+  }));
+
+  /**
+   * «Проставити теги автоматично за допомогою Jev» (постановка власника
+   * 03.11.2026): у кожному абзаці розділу поставити теги тих сутностей, щодо
+   * яких Jev дає ймовірність не менше 95 відсотків, і не більше дванадцяти
+   * тегів на абзац.
+   *
+   * ЩО ЦЕЙ МАРШРУТ РОБИТЬ І ЧОГО НЕ РОБИТЬ. Він ВИРІШУЄ і віддає список
+   * тегів з абзацами, але рукопису не чіпає: текст книги живе в браузері
+   * (К2), і ставить теги редактор — тим самим шляхом, що й при ручному
+   * «Підтвердити» (П3). Сервер, який писав би в рукопис сам, розійшовся б із
+   * канвою автора при першому ж незбереженому абзаці.
+   *
+   * ЧОМУ НЕ ЗАКРИВАЄ ПРОПОЗИЦІЇ НИЖЧЕ ПОРОГУ. «Jev не певен на 95%» — не те
+   * саме, що «цього в тексті немає». Такі пропозиції лишаються на розгляд
+   * авторові; закривати їх автоматично означало б мовчки звужувати те, що він
+   * побачить.
+   */
+  app.post('/api/projects/:id/ai/jev-tags', withRepo(async (repo, req, res) => {
+    if (!requireWrite(req, res)) return;
+    const jev = deps.flc ? await deps.flc.jev() : null;
+    if (!jev) {
+      res.status(503).json({
+        error: 'Модель Jev не підключена: немає ключа TypeSafe. Додайте його в адмінпанелі Студії.',
+        kind: 'jev_unavailable',
+      });
+      return;
+    }
+    const sectionId = typeof req.body?.sectionId === 'string' && req.body.sectionId ? req.body.sectionId : undefined;
+    if (!sectionId) {
+      res.status(400).json({ error: 'Потрібен sectionId — розділ, у якому проставляти теги.', kind: 'bad_request' });
+      return;
+    }
+
+    const findings = (await repo.listFindings(req.params.id, { status: 'suggested' }))
+      .filter((f) => f.kind === MENTION_SUGGESTION)
+      .filter(visibleTo(req.projectAccess!));
+
+    // Абзац — одиниця рішення й одиниця запиту: усі кандидати на нього йдуть
+    // одним питанням-пакетом, тож групуємо до звернення до Jev.
+    const byParagraph = new Map<string, JevTagParagraph>();
+    for (const f of findings) {
+      const paragraphId = f.sourceParagraphIds[0];
+      if (!paragraphId) continue;
+      const payload = f.payload as Record<string, unknown>;
+      const tag = typeof payload.tag === 'string' ? payload.tag : '';
+      const entitySlug = typeof payload.entityType === 'string' ? payload.entityType : '';
+      if (!tag || !entitySlug) continue;
+      let group = byParagraph.get(paragraphId);
+      if (!group) {
+        const paragraph = await repo.getParagraph(req.params.id, paragraphId);
+        if (!paragraph || paragraph.deletedAt || paragraph.documentId !== sectionId) continue;
+        group = {
+          paragraphId,
+          editorPid: paragraph.editorPid ?? paragraphId,
+          text: paragraph.text,
+          candidates: [],
+        };
+        byParagraph.set(paragraphId, group);
+      }
+      group.candidates.push({
+        findingId: f.id,
+        paragraphId,
+        editorPid: group.editorPid,
+        entitySlug,
+        entityName: typeof payload.entityName === 'string' ? payload.entityName : entitySlug,
+        tag,
+      });
+    }
+
+    const run = await runJevTagging([...byParagraph.values()], jev);
+    res.json({
+      threshold: JEV_TAG_THRESHOLD,
+      paragraphs: byParagraph.size,
+      asked: run.asked,
+      inputTokens: run.inputTokens,
+      failures: run.failures,
+      tags: run.decisions.filter((d) => d.accepted),
+      skipped: run.decisions.filter((d) => !d.accepted),
+    });
   }));
 
   const loadSuggestion = async (repo: CoreRepository, req: Request, res: Response): Promise<FindingRow | null> => {
