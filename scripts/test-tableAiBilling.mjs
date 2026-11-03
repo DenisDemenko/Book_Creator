@@ -168,3 +168,18 @@ test('Studio rejects eleven references, fake JPEG and oversize images before pro
     assert.equal(f.inspect().calls, 0);
   }
 });
+
+test('refinement uses previous PNG last, after tabletop and all ten room photos', async () => {
+  const f = imageFixture();
+  await f.generate({ ...f.input, interiorImages: Array(10).fill('data:image/jpeg;base64,/9j/'), refinementImage: 'data:image/png;base64,iVBORw0KGgo=' });
+  const files = f.inspect().captured.body.getAll('image[]');
+  assert.equal(files.length, 12); assert.equal(files[0].name, 'tabletop.png');
+  assert.equal(files[11].name, 'previous-result.png'); assert.equal(files[11].type, 'image/png');
+  assert.equal(f.inspect().calls, 1);
+});
+test('fake or oversized refinement PNG fails before invoking OpenAI', async () => {
+  for (const refinementImage of ['data:image/png;base64,YmFk', 'data:image/png;base64,' + 'A'.repeat(20000023), 'https://private.test/image.png']) {
+    const f = imageFixture(); await assert.rejects(f.generate({ ...f.input, refinementImage }), e => e.status === 400);
+    assert.equal(f.inspect().calls, 0);
+  }
+});

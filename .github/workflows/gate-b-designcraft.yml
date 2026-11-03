@@ -39,6 +39,9 @@ jobs:
           "$DESIGNCRAFT_REAL_PATH" --version
           "$DESIGNCRAFT_PATH" --version
 
+      - name: Table AI bridge, wallet and provider input contracts
+        run: node scripts/test-tableAiBilling.mjs
+
       - name: TypeScript
         run: npm run lint
 

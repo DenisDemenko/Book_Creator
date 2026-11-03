@@ -7,7 +7,7 @@ export class TableImageError extends Error {
 /** Only the Studio administrator's encrypted GPT key is accepted.
  * Never fall back to a caller key, environment variable or marketplace setting.
  */
-export async function generateTableImage(input: { prompt?: unknown; referenceImage?: unknown; model?: unknown; interiorImages?: unknown }) {
+export async function generateTableImage(input: { prompt?: unknown; referenceImage?: unknown; model?: unknown; interiorImages?: unknown; refinementImage?: unknown }) {
   const { prompt, referenceImage, model } = input;
   if (typeof prompt !== 'string' || !prompt.length || prompt.length > 32000 ||
       typeof referenceImage !== 'string' || referenceImage.length > 500000 ||
@@ -28,6 +28,16 @@ export async function generateTableImage(input: { prompt?: unknown; referenceIma
       throw new TableImageError('Некоректний JPEG інтер’єру.', 400);
     return new Uint8Array(bytes);
   });
+  let refinement: Uint8Array | undefined;
+  if (input.refinementImage !== undefined) {
+    const value = input.refinementImage;
+    if (typeof value !== 'string' || value.length > 20000022 || !/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(value))
+      throw new TableImageError('Некоректний попередній результат.', 400);
+    const bytes = Buffer.from(value.split(',')[1], 'base64');
+    if (!bytes.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex')))
+      throw new TableImageError('Некоректний PNG попереднього результату.', 400);
+    refinement = new Uint8Array(bytes);
+  }
   const apiKey = await platformKeyFor('gpt');
   if (!apiKey) throw new TableImageError('Адміністратор має додати ключ OpenAI (GPT) у розділі «Ключі API» Студії книг.');
   const form = new FormData();
@@ -35,6 +45,7 @@ export async function generateTableImage(input: { prompt?: unknown; referenceIma
   form.set('prompt', prompt);
   form.set('image[]', new Blob([new Uint8Array(image)], { type: 'image/png' }), 'tabletop.png');
   rooms.forEach((room, index) => form.append('image[]', new Blob([room], { type: 'image/jpeg' }), `room-${index + 1}.jpg`));
+  if (refinement) form.append('image[]', new Blob([refinement], { type: 'image/png' }), 'previous-result.png');
   form.set('size', '1024x1024');
   form.set('quality', 'medium');
   form.set('n', '1');
