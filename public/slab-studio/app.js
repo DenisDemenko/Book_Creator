@@ -1254,6 +1254,7 @@
   }
   const shapeNames = {
       square: "Квадратний",
+      rect: "Прямокутний",
       round: "Круглий",
       oval: "Овальний",
     },
@@ -1393,7 +1394,7 @@
   // The PDF drawings are there as soon as the table is in the buyer's cart; the files for production wait for the deposit.
   const productionButtons = (o) =>
     `<span class="order-files" role="group" aria-label="Креслення і файли для виробництва">` +
-    `<label class="order-template">Шаблон дизайну PDF <select data-template aria-label="Шаблон дизайну креслень PDF">${templateOptions()}</select></label>` +
+    `<label class="order-template">Шаблон дизайну PDF <select data-template aria-label="Шаблон дизайну креслень PDF" title="${esc(templatesError)}">${templateOptions()}</select>${templatesError ? `<small class="order-template-note">${esc(templatesError)}</small>` : ""}</label>` +
     `<button class="text-btn" data-prod="${esc(o.id)}" data-kind="pdf">Креслення PDF ↓</button>` +
     (o.paidAt
       ? `<button class="text-btn" data-prod="${esc(o.id)}" data-kind="all">Файли виробництва (zip) ↓</button>` +
@@ -1401,8 +1402,13 @@
       : "") +
     "</span>";
   // The design templates of the PDF drawings: the design themes of the books, fetched once from the Studio server.
+  // The ids the server knows (the design themes of the books): the picker works from them even when the list from the
+  // server cannot be read, and says why.
+  const FALLBACK_TEMPLATES = ["academic-research", "non-fiction", "business-premium", "classic", "modern-fiction", "sci-fi", "fantasy", "dark-fantasy", "thriller", "noir-detective", "romance", "poetry-literary", "children", "graphic-story", "experimental-art", "studio-classic", "studio-editorial"]
+    .map((id) => ({ id, label: id, description: "", recommendedFor: [], default: id === "academic-research" }));
   let templates = [],
-    templatesTried = false;
+    templatesTried = false,
+    templatesError = "";
   const TEMPLATE_KEY = "slab-drawings-template";
   const savedTemplate = () => {
     try { return localStorage.getItem(TEMPLATE_KEY) || ""; } catch { return ""; }
@@ -1410,7 +1416,7 @@
   const chosenTemplate = () => document.querySelector("[data-template]")?.value || savedTemplate();
   function templateOptions() {
     const chosen = savedTemplate();
-    return templates
+    return (templates.length ? templates : FALLBACK_TEMPLATES)
       .map((t) => `<option value="${esc(t.id)}" ${(chosen ? chosen === t.id : t.default) ? "selected" : ""} title="${esc(t.description)}">${esc(t.label)} · ${esc((t.recommendedFor || []).slice(0, 2).join(", "))}</option>`)
       .join("");
   }
@@ -1420,9 +1426,16 @@
     try {
       const root = location.pathname.replace(/\/slab-studio\/[^/]*$/, "");
       const r = await fetch(root + "/api/admin/slab-tables/drawings-templates", { credentials: "same-origin" });
-      templates = (await r.json()).templates || [];
-      if (templates.length) renderOrders();
-    } catch { /* the PDF still works with the default template */ }
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok || !Array.isArray(body.templates) || !body.templates.length) throw new Error(body.error || "відповідь " + r.status);
+      templates = body.templates;
+      templatesError = "";
+      renderOrders();
+    } catch (error) {
+      // the PDF works with the default template either way; the reason stays visible next to the picker
+      templatesError = "Список шаблонів з сервера не прочитано (" + (error.message || error) + "): показано основні шаблони.";
+      renderOrders();
+    }
   }
   // The PDF drawings are made by DesignCraft on the Studio server (not in this page).
   async function downloadDrawings(o, button) {
