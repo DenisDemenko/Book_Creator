@@ -53,6 +53,8 @@ export const quickAi = {
     batchDefaultQuestion: 'Огляньте ці абзаци по одному: чи слушно кожен позначено цим тегом і що в ньому варто виправити? Відповідайте за номером абзацу.',
     batchAttachedNote: 'Абзаци за тегом — у доданому нижче файлі; кожен підписано номером.',
     batchFileName: 'абзаци-за-тегом.txt',
+    batchTokens: '≈ {input} ток. у повідомленні · відповідь по кожному ≈ {reply} із {cap}',
+    batchTooMany: 'Відповідь на стільки абзаців не вміститься (зазвичай до ~{max} за раз): звужте пошук або залиште частину кнопкою «лише цей»',
     cancel: 'Скасувати',
     chatTab: 'Чат',
     promptConstructor: {
@@ -161,6 +163,8 @@ export const quickAi = {
     batchDefaultQuestion: 'Go through these paragraphs one by one: is each correctly marked with this tag, and what should be fixed in it? Answer by paragraph number.',
     batchAttachedNote: 'The paragraphs found by the tag are in the file attached below; each is labelled with its number.',
     batchFileName: 'paragraphs-by-tag.txt',
+    batchTokens: '≈ {input} tokens in the message · a reply per paragraph ≈ {reply} of {cap}',
+    batchTooMany: 'The reply will not fit this many paragraphs (usually up to ~{max} at once): narrow the search or keep some with "only this"',
     cancel: 'Cancel',
     chatTab: 'Chat',
     promptConstructor: {

@@ -30,6 +30,12 @@ export interface GenerateResult {
   text: string;
   inputTokens: number;
   outputTokens: number;
+  /**
+   * Провайдер зупинив відповідь на ліміті довжини (`finish_reason: length`,
+   * `stop_reason: max_tokens`, `MAX_TOKENS`), а не тому, що модель закінчила.
+   * Лише коли це так — поле відсутнє в нормальній відповіді.
+   */
+  truncated?: boolean;
 }
 
 /** Одне прикріплене зображення — base64 без префіксу `data:...;base64,`. */
@@ -412,6 +418,7 @@ async function openAiCompatible(
     text: content,
     inputTokens: usage.prompt_tokens ?? 0,
     outputTokens: usage.completion_tokens ?? 0,
+    ...(data.choices?.[0]?.finish_reason === 'length' ? { truncated: true } : {}),
   };
 }
 
@@ -458,6 +465,7 @@ async function generateGemini(
     text,
     inputTokens: usage.promptTokenCount ?? 0,
     outputTokens: usage.candidatesTokenCount ?? 0,
+    ...(data.candidates?.[0]?.finishReason === 'MAX_TOKENS' ? { truncated: true } : {}),
   };
 }
 
@@ -568,6 +576,7 @@ async function generateClaude(
     text: prefilled ? `{${text}` : text,
     inputTokens: data.usage?.input_tokens ?? 0,
     outputTokens: data.usage?.output_tokens ?? 0,
+    ...(data.stop_reason === 'max_tokens' ? { truncated: true } : {}),
   };
 }
 

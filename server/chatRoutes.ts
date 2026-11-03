@@ -84,7 +84,13 @@ export interface ChatAiResult {
   text: string;
   inputTokens: number;
   outputTokens: number;
+  /** Модель упёрлась у ліміт довжини відповіді — до тексту додається чесна позначка. */
+  truncated?: boolean;
 }
+
+/** Рядок, який бачить автор, коли відповідь обірвалась на ліміті. Без нього обрив виглядає як закінчена думка. */
+export const TRUNCATED_NOTICE =
+  '⚠ Відповідь обірвалась: вичерпано ліміт довжини відповіді моделі. Напишіть «продовжуй» або обговорюйте менше абзаців за раз.';
 
 /**
  * Генератор відповіді. Впроваджується ззовні — див. пункт 1 у шапці файлу.
@@ -485,7 +491,7 @@ export function registerChatRoutes(app: Express, deps: ChatRoutesDeps): void {
         id: newId('msg'),
         sessionId: session.id,
         role: 'assistant',
-        content: aiResult.text,
+        content: aiResult.truncated ? `${aiResult.text.trimEnd()}\n\n${TRUNCATED_NOTICE}` : aiResult.text,
         inputTokens: aiResult.inputTokens,
         outputTokens: aiResult.outputTokens,
         costUsd,

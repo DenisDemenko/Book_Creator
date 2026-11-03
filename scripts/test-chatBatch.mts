@@ -11,6 +11,7 @@
 
 import os from 'node:os';
 import path from 'node:path';
+import { DEEPSEEK_OUTPUT_CAP, DEFAULT_OUTPUT_CAP, REPLY_TOKENS_PER_PARAGRAPH, batchTokenReport, chatOutputCap } from '../src/utils/chatLimits.ts';
 import { CHAT_BATCH_CHAR_LIMIT, batchItemLabel, composeChatSend, formatBatchForChat, type ChatBatch, type ChatBatchItem } from '../src/utils/chatBatch.ts';
 
 // Сервер зареєстрованого автора — тим самим кодом, що й у продукті; база йде в тимчасову теку.
@@ -128,6 +129,22 @@ console.log('\nСкладання повідомлення для сервера
   const plain = composeChatSend({ batch: null, fragment: null, closing, plain: 'Просте питання', note });
   t('без карток іде лише питання автора', plain.display === 'Просте питання' && plain.serverContent === 'Просте питання' && plain.batchFile === null);
   t('вкладень сервер приймає на одне більше, ніж скріпка дозволяє автору', chatRoutes.MAX_ATTACHED_TEXT_FILES >= 4 + 1);
+}
+
+console.log('\nСтеля відповіді й підрахунок токенів у картці:');
+{
+  t('DeepSeek дістає стелю 16000', chatOutputCap('deepseek-flash') === 16000 && chatOutputCap('deepseek-v4-pro') === DEEPSEEK_OUTPUT_CAP);
+  t('старий id deepseek-chat теж', chatOutputCap('deepseek-chat') === 16000);
+  t('інші рушії лишаються з типовим значенням (undefined)', chatOutputCap('gpt-5') === undefined && chatOutputCap('claude-sonnet-5') === undefined && chatOutputCap('llama-4-scout') === undefined && chatOutputCap(undefined) === undefined);
+  const small = batchTokenReport(5000, 14, 'deepseek-flash');
+  t('14 абзаців у DeepSeek вміщаються', small.fits && small.cap === 16000 && small.expectedReplyTokens === 14 * REPLY_TOKENS_PER_PARAGRAPH, JSON.stringify(small));
+  const many = batchTokenReport(10456, 56, 'deepseek-flash');
+  t('56 абзаців у DeepSeek (16000) вміщаються — тоді як у 4096 було 44', many.fits);
+  const old = batchTokenReport(10456, 56, 'gpt-5');
+  t('той самий обсяг в рушії з типовими 4096 — НЕ вміщається, з порадою', !old.fits && old.cap === DEFAULT_OUTPUT_CAP && old.maxParagraphs === 43, JSON.stringify(old));
+  const huge = batchTokenReport(40000, 300, 'deepseek-flash');
+  t('300 абзаців не вміщаються навіть у 16000; порада ≈ 168', !huge.fits && huge.maxParagraphs === 168, String(huge.maxParagraphs));
+  t('порада ніколи не менша за 1', batchTokenReport(1, 1, undefined).maxParagraphs >= 1);
 }
 
 console.log(`\nПідсумок: ${pass} пройшло, ${fail} впало`);

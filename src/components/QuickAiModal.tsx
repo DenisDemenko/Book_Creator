@@ -6,6 +6,7 @@ import { useLanguage } from '../i18n/LanguageContext';
 import { extractChatFileText, fileToBase64 } from '../utils/extractChatFileText';
 import { formatFragmentForChat } from '../utils/bookText';
 import { batchItemLabel, composeChatSend, formatBatchForChat, type ChatBatch } from '../utils/chatBatch';
+import { batchTokenReport } from '../utils/chatLimits';
 import {
   CORE_ENTITIES,
   MAX_ENTITIES_PER_PARAGRAPH,
@@ -2740,11 +2741,27 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
                     </div>
                     {(() => {
                       const f = formatBatchForChat(batchCard);
-                      return f.omitted > 0 ? (
-                        <div className="text-[10px] text-amber-400" data-chat-batch-omitted>
-                          {t('quickAi.batchOmitted', { included: f.included, omitted: f.omitted })}
-                        </div>
-                      ) : null;
+                      const report = batchTokenReport(estimateTokens(f.message), f.included, selectedModel || undefined);
+                      return (
+                        <>
+                          {f.omitted > 0 && (
+                            <div className="text-[10px] text-amber-400" data-chat-batch-omitted>
+                              {t('quickAi.batchOmitted', { included: f.included, omitted: f.omitted })}
+                            </div>
+                          )}
+                          <div
+                            className={`text-[10px] ${report.fits ? 'text-[var(--outline)]' : 'text-amber-400'}`}
+                            data-chat-batch-tokens
+                          >
+                            {t('quickAi.batchTokens', { input: report.inputTokens, reply: report.expectedReplyTokens, cap: report.cap })}
+                          </div>
+                          {!report.fits && (
+                            <div className="text-[10px] text-amber-400" data-chat-batch-too-many>
+                              {t('quickAi.batchTooMany', { max: report.maxParagraphs })}
+                            </div>
+                          )}
+                        </>
+                      );
                     })()}
                   </div>
                   <button

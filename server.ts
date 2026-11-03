@@ -1,3 +1,4 @@
+import { chatOutputCap } from './src/utils/chatLimits';
 import { registerTableAiBillingRoutes } from './server/tableAiBilling';
 import { registerGeoHomeRoutes } from './server/geohome/routes';
 import { registerFundingRoutes } from './server/fundingBridge';
@@ -682,7 +683,10 @@ registerGitCommandRoutes(app);
     // лишається тут, у chatRoutes.ts (onUsage) — воно вже надійно покрите
     // 71 тестом (npm run test:chat), тож викликати generateText() (яка теж
     // логує) і створювати подвійний запис у usage_log нема сенсу.
-    return dispatchAiText(engine, resolvedModel, prompt, systemInstruction, userKey, images);
+    // Стеля відповіді — лише для моделей, де вона відома й безпечна (DeepSeek); решта лишається
+    // з типовим значенням рушія. Див. src/utils/chatLimits.ts.
+    const maxTokens = chatOutputCap(resolvedModel);
+    return dispatchAiText(engine, resolvedModel, prompt, systemInstruction, userKey, images, undefined, maxTokens ? { maxTokens } : undefined);
   }
 
   registerChatRoutes(app, {

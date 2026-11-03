@@ -174,6 +174,35 @@ console.log('\nЗображення доїжджає до провайдера �
   t('claude: у запит пішла САМЕ обрана модель', claudeCalls[0]?.model === 'claude-sonnet-5');
 }
 
+console.log('\nОбрив відповіді на ліміті довжини (03.11.2026):');
+{
+  const cut = { choices: [{ message: { content: 'початок' }, finish_reason: 'length' }], usage: { prompt_tokens: 1, completion_tokens: 4096 } };
+  stub(() => ({ status: 200, body: cut }));
+  const a: any = await providers.PROVIDERS.deepseek('питання', 'система', 'deepseek-flash', 'test-key');
+  t('DeepSeek: finish_reason=length → truncated', a.truncated === true);
+  stub(() => ({ status: 200, body: { choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 2 } } }));
+  const b: any = await providers.PROVIDERS.deepseek('питання', 'система', 'deepseek-flash', 'test-key');
+  t('DeepSeek: finish_reason=stop → поля truncated нема', !('truncated' in b));
+  const calls = stub(() => ({ status: 200, body: okOpenAiBody('ok') }));
+  await providers.PROVIDERS.deepseek('питання', 'система', 'deepseek-flash', 'test-key', undefined, undefined, { maxTokens: 16000 });
+  t('стеля 16000 доходить до запиту як max_tokens', calls[0]?.body?.max_tokens === 16000, String(calls[0]?.body?.max_tokens));
+  const dflt = stub(() => ({ status: 200, body: okOpenAiBody('ok') }));
+  await providers.PROVIDERS.deepseek('питання', 'система', 'deepseek-flash', 'test-key');
+  t('без стелі лишається типове 4096', dflt[0]?.body?.max_tokens === 4096, String(dflt[0]?.body?.max_tokens));
+
+  stub(() => ({ status: 200, body: { content: [{ type: 'text', text: 'x' }], stop_reason: 'max_tokens', usage: { input_tokens: 1, output_tokens: 4096 } } }));
+  const c: any = await providers.PROVIDERS.claude('питання', 'система', 'claude-sonnet-5', 'test-key');
+  t('Claude: stop_reason=max_tokens → truncated', c.truncated === true);
+  stub(() => ({ status: 200, body: okBody('x') }));
+  const d: any = await providers.PROVIDERS.claude('питання', 'система', 'claude-sonnet-5', 'test-key');
+  t('Claude: звичайна зупинка → поля truncated нема', !('truncated' in d));
+
+  process.env.GEMINI_API_KEY = 'test-key';
+  stub(() => ({ status: 200, body: { candidates: [{ content: { parts: [{ text: 'x' }] }, finishReason: 'MAX_TOKENS' }], usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 8192 } } }));
+  const e: any = await providers.PROVIDERS.gemini('питання', 'система', 'gemini-3.7-flash');
+  t('Gemini: MAX_TOKENS → truncated', e.truncated === true);
+}
+
 globalThis.fetch = realFetch;
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);
 if (fail > 0) process.exit(1);

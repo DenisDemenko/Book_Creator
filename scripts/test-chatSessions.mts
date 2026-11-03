@@ -340,6 +340,29 @@ console.log('\nHTTP-роути (підставний генератор, без 
   t('демо-відповідь не додає вигаданих токенів', noAiData?.assistantMessage?.inputTokens === 0);
   serverNoAi.close();
 
+  // Модель упёрлась у ліміт довжини відповіді → у тексті чесна позначка, а не «закінчена думка».
+  const appCut = express();
+  appCut.use(express.json());
+  appCut.use((req: any, _res, next) => { req.principal = { id: 'u-http', role: 'writer', isGuest: false }; next(); });
+  let cutMode = true;
+  chat.registerChatRoutes(appCut, {
+    generate: async () => ({ text: 'Розбір обірвався на слові навми', inputTokens: 10, outputTokens: 4096, ...(cutMode ? { truncated: true } : {}) }),
+    defaultModelId: 'deepseek-flash',
+  });
+  const serverCut = appCut.listen(0);
+  await new Promise((r) => serverCut.once('listening', r));
+  const portCut = (serverCut.address() as any).port;
+  const askCut = async () => (await (await fetch(`http://127.0.0.1:${portCut}/api/chat/sessions/${sessionId}/messages`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: 'розбери' }),
+  })).json()) as any;
+  const cutData = await askCut();
+  t('обірвана відповідь → у кінці позначка про обрив', (cutData?.assistantMessage?.content || '').endsWith(chat.TRUNCATED_NOTICE), (cutData?.assistantMessage?.content || '').slice(-60));
+  t('текст моделі перед позначкою збережено', (cutData?.assistantMessage?.content || '').startsWith('Розбір обірвався на слові навми'));
+  cutMode = false;
+  const fullData = await askCut();
+  t('нормальна відповідь позначки не отримує', !(fullData?.assistantMessage?.content || '').includes('Відповідь обірвалась'));
+  serverCut.close();
+
   // GET /api/chat/models: модель має бути доступною (не задизейбленою), якщо
   // автор задав ВЛАСНИЙ ключ (розділ «Ключі API»), навіть без серверного env-ключа.
   const appOwnKey = express();
