@@ -18,6 +18,7 @@ import {
   type PdfRenderRequest,
   type PdfRenderResult,
 } from './types';
+import { attachTagCarrier } from '../tagCarrierPdf';
 
 /** Рушії в порядку показу автору. */
 const ENGINES: Partial<Record<PdfEngineId, PdfEngine>> = {
@@ -84,9 +85,6 @@ export async function listPdfEngines(
   }));
 }
 
-/**
- * Зверстати обраним рушієм. Тихого відкоту на інший рушій немає.
- */
 export async function renderWithEngine(
   engineId: string | undefined,
   request: PdfRenderRequest
@@ -166,7 +164,7 @@ export async function renderWithEngine(
         }
       : request;
 
-  const rendered = await engine.render(effectiveRequest);
+  const rendered = await attachTagCarrier(await engine.render(effectiveRequest), effectiveRequest);
 
   // Physical page parity is available for EVERY engine because pageCount is
   // read from the PDF that was actually produced. Never substitute browser

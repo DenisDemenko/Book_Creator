@@ -516,6 +516,27 @@ export const LayoutView: React.FC<LayoutViewProps> = ({ book, onUpdateBook, tota
             </div>
           </div>
 
+          {/* Експорт: теги в PDF (див. src/utils/tagCarrier.ts) */}
+          <div className="p-6 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-4" data-layout-export>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-sky-400 flex items-center gap-1.5">
+              <Info className="w-3.5 h-3.5" />
+              {t('layoutView.exportSectionHeading')}
+            </h3>
+            <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between gap-3">
+              <div>
+                <span className="font-bold text-slate-200 block">{t('layoutView.embedTagsLabel')}</span>
+                <span className="text-[11px] text-slate-400">{t('layoutView.embedTagsDesc')}</span>
+              </div>
+              <input
+                type="checkbox"
+                checked={layout.embedTags === true}
+                onChange={(e) => handleUpdateLayout({ embedTags: e.target.checked })}
+                data-layout-embed-tags
+                className="w-4 h-4 shrink-0 rounded text-cyan-500 focus:ring-0"
+              />
+            </div>
+          </div>
+
           {/* Design Theme (Classic / Editorial) */}
           <div className="p-6 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-4">
             <h3 className="text-xs font-bold uppercase tracking-wider text-rose-400 flex items-center gap-1.5">

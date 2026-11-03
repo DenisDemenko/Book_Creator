@@ -207,6 +207,7 @@ function baseSpecFromBook(book: Book): PdfLayoutSpec {
       startAt: startMode === 'custom' && Number.isFinite(startNumber) && startNumber > 0 ? startNumber : 1,
       skipFrontMatter: startMode !== 'title',
     },
+    pdfExport: { ...DEFAULT_LAYOUT_SPEC.pdfExport, embedTags: layout.embedTags === true },
     runningHead: {
       ...DEFAULT_LAYOUT_SPEC.runningHead,
       show: Boolean(typography.showHeaders),
