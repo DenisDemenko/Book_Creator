@@ -21,7 +21,8 @@ import type { CoreRepository, FindingRow } from './types';
 import { JobRejectedError } from './jobs/types';
 import type { JobQueue } from './jobs/queue';
 import { AI_MENTIONS_JOB_KIND, MENTION_SUGGESTION, RELATION_SUGGESTION, publicSuggestion } from './ai/mentions';
-import { JEV_TAG_THRESHOLD, runJevTagging, type JevTagParagraph } from './ai/jevTags';
+import { JEV_TAG_MAX_THRESHOLD, JEV_TAG_MIN_THRESHOLD, parseJevThreshold, runJevTagging, sharedJevAnswerCache, type JevTagParagraph } from './ai/jevTags';
+import { JEV_USD_PER_MTOK, jevCostUsd } from '../ai/adapters/jev';
 import { TAG_SEARCH_DEFAULT_LIMIT, buildTagHits } from './tagSearch';
 import { entityBySlug, parseEntityTagsInSource } from '../../src/utils/coreEntities';
 import { paragraphExcerpt } from './search/text';
@@ -586,6 +587,13 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       res.status(400).json({ error: 'Потрібен sectionId — розділ, у якому проставляти теги.', kind: 'bad_request' });
       return;
     }
+    // Толерантність обирає автор (70–100%); без неї — 95%, як і було.
+    const parsed = parseJevThreshold(req.body?.threshold);
+    if ('error' in parsed) {
+      res.status(400).json({ error: parsed.error, kind: 'bad_threshold', min: JEV_TAG_MIN_THRESHOLD, max: JEV_TAG_MAX_THRESHOLD });
+      return;
+    }
+    const threshold = parsed.value;
 
     const findings = (await repo.listFindings(req.params.id, { status: 'suggested' }))
       .filter((f) => f.kind === MENTION_SUGGESTION)
@@ -623,12 +631,29 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       });
     }
 
-    const run = await runJevTagging([...byParagraph.values()], jev);
+    // Повтор із нижчою толерантністю бере вже відомі відповіді з пам'яті й питає Jev лише про нове.
+    const run = await runJevTagging([...byParagraph.values()], jev, { threshold, cache: sharedJevAnswerCache, scope: req.params.id });
+    // Скільки це коштує. Бали за Jev із гаманця автора не знімаються (бали — лише за зображення,
+    // `server/creditGate.ts`); Jev оплачує платформа з текстового бюджету. Еквівалент у балах —
+    // довідка за тим самим курсом, що й для зображень, а не списання.
+    const usd = jevCostUsd(run.inputTokens);
+    let creditsEquivalent: number | null = null;
+    if (usd > 0) {
+      try {
+        creditsEquivalent = (await import('../creditPricing')).creditsForCostUsd(usd);
+      } catch {
+        creditsEquivalent = null;
+      }
+    } else {
+      creditsEquivalent = 0;
+    }
     res.json({
-      threshold: JEV_TAG_THRESHOLD,
+      threshold,
       paragraphs: byParagraph.size,
       asked: run.asked,
+      fromCache: run.fromCache,
       inputTokens: run.inputTokens,
+      usage: { inputTokens: run.inputTokens, usd, usdPerMTok: JEV_USD_PER_MTOK, creditsEquivalent, charged: false },
       failures: run.failures,
       tags: run.decisions.filter((d) => d.accepted),
       skipped: run.decisions.filter((d) => !d.accepted),

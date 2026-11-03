@@ -23,11 +23,38 @@
  * раніше, ніж автор побачив би тринадцятий тег.
  */
 
+import { createHash } from 'node:crypto';
 import { noulProbability, type JevAdapter, type JevQuestion } from '../../ai/adapters/jev';
 import { MAX_ENTITIES_PER_PARAGRAPH, parseAnyEntityTags } from '../../../src/utils/coreEntities';
 
 /** Поріг із постановки власника: 95 відсотків, не менше. */
 export const JEV_TAG_THRESHOLD = 0.95;
+
+/**
+ * Межі порогу, який автор обирає сам (постановка власника 03.11.2026: «від 70 до
+ * 100%»). Нижче 70% відповідь Jev — це вже здогад, а не ознака сутності; вище 100%
+ * не буває. Межі живуть тут, а не в панелі, щоб сервер не повірив значенню з
+ * запиту, якого панель ніколи б не надіслала.
+ */
+export const JEV_TAG_MIN_THRESHOLD = 0.7;
+export const JEV_TAG_MAX_THRESHOLD = 1;
+
+/**
+ * Поріг із тіла запиту. Відсутній — типові 95%. Число поза 0,70–1,00 — відмова з
+ * поясненням, а не тихе підтискання: автор, який ввів 40%, має дізнатись, що це
+ * не прийнято, а не отримати теги за 70%.
+ */
+export function parseJevThreshold(raw: unknown): { ok: true; value: number } | { ok: false; error: string } {
+  if (raw === undefined || raw === null || raw === '') return { ok: true, value: JEV_TAG_THRESHOLD };
+  const n = typeof raw === 'number' ? raw : Number.NaN;
+  if (!Number.isFinite(n) || n < JEV_TAG_MIN_THRESHOLD - 1e-9 || n > JEV_TAG_MAX_THRESHOLD + 1e-9) {
+    return {
+      ok: false,
+      error: `Толерантність має бути числом від ${Math.round(JEV_TAG_MIN_THRESHOLD * 100)}% до ${Math.round(JEV_TAG_MAX_THRESHOLD * 100)}% (передавайте частку від 0,70 до 1).`,
+    };
+  }
+  return { ok: true, value: Math.round(n * 1000) / 1000 };
+}
 
 /**
  * Скільки кандидатів щонайбільше йде в один запит. Не ліміт тегів (той — 12),
@@ -90,14 +117,18 @@ export function questionId(index: number): string {
  * стосується абзац сутності». Друге дало б «так» майже на все, що згадано в
  * розділі, і поріг 95% перестав би щось відсівати.
  */
-export function tagQuestions(candidates: readonly JevTagCandidate[]): JevQuestion[] {
-  return candidates.slice(0, JEV_MAX_QUESTIONS_PER_PARAGRAPH).map((c, i) => ({
-    id: questionId(i),
+export function tagQuestion(c: JevTagCandidate, index: number): JevQuestion {
+  return {
+    id: questionId(index),
     kind: 'noul' as const,
     instructions:
       `Чи є в цьому абзаці ознаки сутності «${c.entityName}» (тип «${c.entitySlug}»)? ` +
       'Відповідай лише про наведений абзац, не про розділ і не про книгу загалом.',
-  }));
+  };
+}
+
+export function tagQuestions(candidates: readonly JevTagCandidate[]): JevQuestion[] {
+  return candidates.slice(0, JEV_MAX_QUESTIONS_PER_PARAGRAPH).map((c, i) => tagQuestion(c, i));
 }
 
 /** Стан для Jev: сам абзац і нічого зайвого — ліміт 32k саме на стан. */
@@ -190,11 +221,57 @@ export function decideParagraph(
   return out;
 }
 
+/**
+ * Пам'ять відповідей Jev: ймовірність «сутність є в абзаці» за ключем
+ * «проєкт · абзац · відбиток тексту · сутність».
+ *
+ * НАВІЩО. Автор знижує толерантність і повторює прогін для тих, кого не проставлено.
+ * Jev на те саме питання про той самий текст відповів би тим самим числом, тож
+ * платити за друге звернення нема за що: повтор лише перерішує вже відомі
+ * ймовірності за новим порогом. Відбиток тексту в ключі — щоб правка абзацу не
+ * віддала стару відповідь на новий текст.
+ *
+ * Пам'ять у процесі, не в базі: перезапуск сервера її обнуляє, і тоді повтор
+ * просто спитає Jev ще раз. Це дешевше за окрему таблицю, а помилитись тут
+ * неможливо — лише заплатити копійки.
+ */
+export class JevAnswerCache {
+  private map = new Map<string, number>();
+  constructor(private readonly max = 50_000) {}
+  get(key: string): number | undefined {
+    return this.map.get(key);
+  }
+  set(key: string, probability: number): void {
+    if (this.map.size >= this.max && !this.map.has(key)) {
+      const oldest = this.map.keys().next().value;
+      if (oldest !== undefined) this.map.delete(oldest);
+    }
+    this.map.set(key, probability);
+  }
+  get size(): number {
+    return this.map.size;
+  }
+  clear(): void {
+    this.map.clear();
+  }
+}
+
+/** Одна пам'ять на процес сервера — її ділять усі прогони кнопки Jev. */
+export const sharedJevAnswerCache = new JevAnswerCache();
+
+export function jevAnswerKey(scope: string, paragraph: JevTagParagraph, candidate: JevTagCandidate): string {
+  const hash = createHash('sha1').update(paragraph.text).digest('hex').slice(0, 16);
+  return `${scope}|${paragraph.paragraphId}|${hash}|${candidate.entitySlug}|${candidate.entityName}`;
+}
+
 export interface JevTagRunResult {
   decisions: JevTagDecision[];
   /** Абзаци, на яких Jev відмовив; прогін через це не зупиняється. */
   failures: Array<{ paragraphId: string; error: string }>;
+  /** Скільки питань справді пішло до Jev (за них платить платформа). */
   asked: number;
+  /** Скільки відповідей узято з пам'яті без звернення до Jev. */
+  fromCache: number;
   inputTokens: number;
 }
 
@@ -209,7 +286,15 @@ export interface JevTagRunResult {
 export async function runJevTagging(
   paragraphs: readonly JevTagParagraph[],
   adapter: JevAdapter,
-  opts: { threshold?: number; maxPerParagraph?: number; signal?: AbortSignal } = {}
+  opts: {
+    threshold?: number;
+    maxPerParagraph?: number;
+    signal?: AbortSignal;
+    /** Пам'ять відповідей: що в ній є, до Jev не питається. */
+    cache?: JevAnswerCache;
+    /** Область ключів пам'яті — id проєкту. */
+    scope?: string;
+  } = {}
 ): Promise<JevTagRunResult> {
   if (!adapter.askState) {
     throw new Error('Адаптер Jev не вміє askState — автоматичні теги потребують питань над станом.');
@@ -217,19 +302,42 @@ export async function runJevTagging(
   const decisions: JevTagDecision[] = [];
   const failures: JevTagRunResult['failures'] = [];
   let asked = 0;
+  let fromCache = 0;
   let inputTokens = 0;
+  const scope = opts.scope ?? '';
 
   for (const paragraph of paragraphs) {
     if (!paragraph.candidates.length) continue;
-    const questions = tagQuestions(paragraph.candidates);
-    try {
-      const raw = await adapter.askState(tagState(paragraph), questions, { signal: opts.signal });
-      asked += questions.length;
-      inputTokens += raw.usage?.input_tokens ?? 0;
-      decisions.push(...decideParagraph(paragraph, raw.answers || {}, opts));
-    } catch (err) {
-      failures.push({ paragraphId: paragraph.paragraphId, error: (err as Error).message });
+    const candidates = paragraph.candidates.slice(0, JEV_MAX_QUESTIONS_PER_PARAGRAPH);
+    const answers: Record<string, unknown> = {};
+    const fresh: number[] = [];
+    candidates.forEach((c, i) => {
+      const hit = opts.cache?.get(jevAnswerKey(scope, paragraph, c));
+      if (hit === undefined) fresh.push(i);
+      else {
+        answers[questionId(i)] = { type: 'noul', noul: hit };
+        fromCache += 1;
+      }
+    });
+    if (fresh.length) {
+      try {
+        // Ідентифікатори питань лишаються позиційними (`tag_<індекс у повному списку>`),
+        // тож відповіді з пам'яті й свіжі лягають в одну таблицю без перенумерації.
+        const raw = await adapter.askState(tagState(paragraph), fresh.map((i) => tagQuestion(candidates[i], i)), { signal: opts.signal });
+        asked += fresh.length;
+        inputTokens += raw.usage?.input_tokens ?? 0;
+        for (const i of fresh) {
+          const a = (raw.answers || {})[questionId(i)];
+          answers[questionId(i)] = a;
+          const p = noulProbability(a);
+          if (p !== null) opts.cache?.set(jevAnswerKey(scope, paragraph, candidates[i]), p);
+        }
+      } catch (err) {
+        failures.push({ paragraphId: paragraph.paragraphId, error: (err as Error).message });
+        continue;
+      }
     }
+    decisions.push(...decideParagraph(paragraph, answers, opts));
   }
-  return { decisions, failures, asked, inputTokens };
+  return { decisions, failures, asked, fromCache, inputTokens };
 }

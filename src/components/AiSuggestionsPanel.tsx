@@ -11,6 +11,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, Loader2, Sparkles, X, Link2, Wand2 } from 'lucide-react';
+import { JEV_TOLERANCE_DEFAULT, JEV_TOLERANCE_MAX, JEV_TOLERANCE_MIN, addableAt, clampTolerance, decidedFromResponse, jevTariffNote, suggestRetryTolerance, type JevRunSummary } from '../utils/jevTolerance';
 
 export interface AiSuggestion {
   id: string;
@@ -41,6 +42,17 @@ interface Props {
   onInsertTag: (editorPid: string, tag: string) => boolean;
 }
 
+const TOLERANCE_KEY = 'nova_jev_tolerance';
+
+function readStoredTolerance(): number {
+  try {
+    const raw = Number(window.localStorage.getItem(TOLERANCE_KEY));
+    return Number.isFinite(raw) && raw > 0 ? clampTolerance(raw) : JEV_TOLERANCE_DEFAULT;
+  } catch {
+    return JEV_TOLERANCE_DEFAULT;
+  }
+}
+
 const api = (url: string, init?: RequestInit) =>
   fetch(url, { credentials: 'same-origin', ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) } });
 
@@ -50,6 +62,18 @@ export const AiSuggestionsPanel: React.FC<Props> = ({ bookId, sectionId, canInse
   const [message, setMessage] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [jevBusy, setJevBusy] = useState(false);
+  const [tolerance, setToleranceState] = useState<number>(readStoredTolerance);
+  const [lastRun, setLastRun] = useState<JevRunSummary | null>(null);
+  const [retryTolerance, setRetryTolerance] = useState<number>(JEV_TOLERANCE_MIN);
+  const setTolerance = (n: number) => {
+    const v = clampTolerance(n);
+    setToleranceState(v);
+    try {
+      window.localStorage.setItem(TOLERANCE_KEY, String(v));
+    } catch {
+      /* без сховища толерантність просто не запам'ятається */
+    }
+  };
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const base = `/api/projects/${encodeURIComponent(bookId)}`;
 
@@ -143,7 +167,8 @@ export const AiSuggestionsPanel: React.FC<Props> = ({ bookId, sectionId, canInse
 
   /**
    * «Проставити теги автоматично за допомогою Jev» (постановка власника
-   * 03.11.2026): поріг 95 відсотків, не більше дванадцяти тегів на абзац.
+   * 03.11.2026): поріг обирає автор (70–100%, типово 95), не більше дванадцяти
+   * тегів на абзац. Повтор для непроставлених — той самий виклик із нижчим порогом.
    *
    * Рішення ухвалює сервер (`/ai/jev-tags`), а ставить тег той самий шлях, що
    * й ручне «Підтвердити»: перевірка `canInsertTag`, підтвердження висновку в
@@ -154,18 +179,18 @@ export const AiSuggestionsPanel: React.FC<Props> = ({ bookId, sectionId, canInse
    * Пропозиції НИЖЧЕ порогу лишаються в списку: «Jev не певен» — не
    * «цього немає», і вирішує тут автор.
    */
-  const runJev = async () => {
+  const runJev = async (pct: number = tolerance) => {
     if (!sectionId) return;
     setMessage(null);
     setJevBusy(true);
     try {
-      const res = await api(`${base}/ai/jev-tags`, { method: 'POST', body: JSON.stringify({ sectionId }) }).catch(() => null);
+      const res = await api(`${base}/ai/jev-tags`, { method: 'POST', body: JSON.stringify({ sectionId, threshold: pct / 100 }) }).catch(() => null);
       const body = res ? await res.json().catch(() => ({})) : {};
       if (!res || !res.ok) {
         setMessage(body.error || 'Не вдалося звернутися до Jev.');
         return;
       }
-      const decided: Array<{ id: string; tag: string; editorPid: string | null }> = body.tags || [];
+      const decided = decidedFromResponse(body);
       let placed = 0;
       const blocked: string[] = [];
       for (const d of decided) {
@@ -180,10 +205,26 @@ export const AiSuggestionsPanel: React.FC<Props> = ({ bookId, sectionId, canInse
         if (onInsertTag(confBody.editorPid, confBody.tag)) placed += 1;
         setItems((prev) => prev.filter((x) => x.id !== d.id));
       }
-      const below = (body.skipped || []).filter((x: { reason?: string }) => x.reason === 'below_threshold').length;
+      const skipped: Array<{ reason?: string; probability?: number | null; paragraphId?: string }> = body.skipped || [];
+      const belowRows = skipped.filter((x) => x.reason === 'below_threshold' && typeof x.probability === 'number');
+      const below = belowRows.length;
+      const ran = Math.round((body.threshold ?? pct / 100) * 100);
+      const belowProbs = belowRows.map((x) => x.probability as number);
+      const blockedOther = skipped.filter((x) => x.reason === 'paragraph_full' || x.reason === 'duplicate').length;
+      setLastRun({
+        threshold: ran,
+        placed,
+        below: belowProbs,
+        belowParagraphs: new Set(belowRows.map((x) => x.paragraphId)).size,
+        usage: body.usage ?? null,
+        asked: body.asked ?? 0,
+        fromCache: body.fromCache ?? 0,
+      });
+      if (below) setRetryTolerance(suggestRetryTolerance(belowProbs, ran));
       const parts = [
         `Jev поставив тегів: ${placed}`,
-        below ? `нижче порогу ${Math.round((body.threshold ?? 0.95) * 100)}% — ${below}, лишились на розгляд` : '',
+        below ? `нижче порогу ${ran}% — ${below}, лишились на розгляд` : '',
+        blockedOther ? `ще ${blockedOther} не поставлено через ліміт 12 тегів або повтор — нижчий поріг тут не допоможе` : '',
         (body.failures || []).length ? `абзаців без відповіді: ${body.failures.length}` : '',
         blocked.length ? blocked[0] : '',
       ].filter(Boolean);
@@ -213,17 +254,100 @@ export const AiSuggestionsPanel: React.FC<Props> = ({ bookId, sectionId, canInse
         </button>
         <button
           type="button"
-          onClick={runJev}
+          onClick={() => runJev(tolerance)}
           disabled={!sectionId || running || jevBusy}
           data-jev-auto-tags
           className="flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-[11px] font-bold text-amber-200 hover:bg-amber-500/20 disabled:opacity-50"
-          title="Jev перевірить кожну пропозицію й сам поставить теги тих сутностей, щодо яких упевнений не менше ніж на 95%. Не більше 12 тегів на абзац; менш певні лишаться вам на розгляд."
+          title={`Jev перевірить кожну пропозицію й сам поставить теги тих сутностей, щодо яких упевнений не менше ніж на ${tolerance}%. Не більше 12 тегів на абзац; менш певні лишаться вам на розгляд.`}
         >
           {jevBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
           {jevBusy ? 'Jev думає…' : 'Проставити теги автоматично за допомогою Jev'}
         </button>
       </div>
+      <div className="space-y-1" data-jev-tolerance>
+        <div className="flex items-center gap-2">
+          <label htmlFor="jev-tolerance" className="text-[10px] font-bold text-amber-200">
+            Толерантність Jev
+          </label>
+          <input
+            id="jev-tolerance"
+            type="range"
+            min={JEV_TOLERANCE_MIN}
+            max={JEV_TOLERANCE_MAX}
+            step={1}
+            value={tolerance}
+            disabled={jevBusy}
+            onChange={(e) => setTolerance(Number(e.target.value))}
+            data-jev-tolerance-input
+            className="min-w-0 flex-1 accent-amber-400"
+          />
+          <span className="w-10 text-right text-[11px] font-bold text-amber-200" data-jev-tolerance-value>
+            {tolerance}%
+          </span>
+        </div>
+        <p className="text-[10px] leading-snug text-slate-500">
+          Тег ставиться, коли Jev упевнений не менше ніж на {tolerance}%; не більше 12 тегів на абзац. Чим нижче поріг, тим
+          більше тегів — і тим частіше загальних (стиль, голос оповіді).
+        </p>
+      </div>
       {message && <p className="text-[11px] text-slate-400" data-ai-suggestions-message>{message}</p>}
+      {lastRun && lastRun.below.length > 0 && (
+        <div className="space-y-1.5 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5" data-jev-retry>
+          <p className="text-[11px] text-amber-100" data-jev-retry-summary>
+            Не проставлено через поріг {lastRun.threshold}%: {lastRun.below.length} пропозицій у {lastRun.belowParagraphs} абзацах —
+            Jev там менш упевнений.
+          </p>
+          {lastRun.threshold > JEV_TOLERANCE_MIN && addableAt(lastRun.below, JEV_TOLERANCE_MIN) > 0 ? (
+            <>
+              <div className="flex items-center gap-2">
+                <label htmlFor="jev-retry-tolerance" className="text-[10px] font-bold text-amber-200">
+                  Повторити за
+                </label>
+                <input
+                  id="jev-retry-tolerance"
+                  type="range"
+                  min={JEV_TOLERANCE_MIN}
+                  max={lastRun.threshold - 1}
+                  step={1}
+                  value={Math.min(retryTolerance, lastRun.threshold - 1)}
+                  disabled={jevBusy}
+                  onChange={(e) => setRetryTolerance(clampTolerance(Number(e.target.value)))}
+                  data-jev-retry-input
+                  className="min-w-0 flex-1 accent-amber-400"
+                />
+                <span className="w-10 text-right text-[11px] font-bold text-amber-200" data-jev-retry-value>
+                  {Math.min(retryTolerance, lastRun.threshold - 1)}%
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-400" data-jev-retry-estimate>
+                За {Math.min(retryTolerance, lastRun.threshold - 1)}% додасться до {addableAt(lastRun.below, Math.min(retryTolerance, lastRun.threshold - 1))} тегів
+                (менше, якщо абзац уже має 12).
+              </p>
+              <button
+                type="button"
+                disabled={jevBusy || !sectionId}
+                onClick={() => runJev(Math.min(retryTolerance, lastRun.threshold - 1))}
+                data-jev-retry-run
+                className="flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-[11px] font-bold text-amber-200 hover:bg-amber-500/20 disabled:opacity-50"
+              >
+                {jevBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
+                Повторити для непроставлених за {Math.min(retryTolerance, lastRun.threshold - 1)}%
+              </button>
+            </>
+          ) : (
+            <p className="text-[10px] text-slate-400" data-jev-retry-floor>
+              {lastRun.threshold <= JEV_TOLERANCE_MIN
+                ? `${JEV_TOLERANCE_MIN}% — найнижча допустима толерантність: нижче відповідь Jev — уже здогад. Решту розгляньте вручну в списку нижче.`
+                : `Решта — ті, у кого Jev упевнений менш ніж на ${JEV_TOLERANCE_MIN}% (найнижча допустима толерантність): повтор їх не додасть. Розгляньте їх вручну в списку нижче.`}
+            </p>
+          )}
+        </div>
+      )}
+      {lastRun && (
+        <p className="text-[10px] leading-snug text-slate-500" data-jev-tariff>
+          {jevTariffNote(lastRun.usage, lastRun.asked, lastRun.fromCache)}
+        </p>
+      )}
       {items.length === 0 && !running && !message && (
         <p className="text-[11px] text-slate-500">Пропозицій для цього розділу немає.</p>
       )}

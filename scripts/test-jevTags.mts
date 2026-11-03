@@ -11,7 +11,12 @@
  */
 
 import {
+  JEV_TAG_MAX_THRESHOLD,
+  JEV_TAG_MIN_THRESHOLD,
   JEV_TAG_THRESHOLD,
+  JevAnswerCache,
+  jevAnswerKey,
+  parseJevThreshold,
   JEV_MAX_QUESTIONS_PER_PARAGRAPH,
   decideParagraph,
   questionId,
@@ -178,6 +183,92 @@ console.log('\nПрогін по абзацах:');
   // що відбулися, а не за ті, які мали відбутися.
   t('полічено лише питання, на які відповіли', r.asked === 2, String(r.asked));
   t('токени — лише за успішний запит', r.inputTokens === 100, String(r.inputTokens));
+}
+
+console.log('\nТолерантність 70–100% (постановка власника 03.11.2026):');
+{
+  t('межі: 0,70 і 1,00', JEV_TAG_MIN_THRESHOLD === 0.7 && JEV_TAG_MAX_THRESHOLD === 1);
+  const ok = (v: unknown) => { const r = parseJevThreshold(v); return 'value' in r ? r.value : null; };
+  t('без значення — типові 95%', ok(undefined) === 0.95 && ok(null) === 0.95);
+  t('0,70 і 1,00 приймаються', ok(0.7) === 0.7 && ok(1) === 1);
+  t('0,90 приймається як є', ok(0.9) === 0.9);
+  t('0,69 відхиляється, а не підтискається до 0,70', ok(0.69) === null);
+  t('1,01 відхиляється', ok(1.01) === null);
+  t('рядок і NaN відхиляються', ok('0.9') === null && ok(Number.NaN) === null);
+  const bad = parseJevThreshold(0.4);
+  t('відмова називає межі', 'error' in bad && bad.error.includes('70%') && bad.error.includes('100%'));
+
+  const probs = [0.99, 0.9, 0.82, 0.71, 0.69];
+  const cs = probs.map((_, i) => cand(i + 1, `tp${i + 1}`));
+  const at = (th: number) => decideParagraph(para(cs), answers(probs), { threshold: th }).filter((x) => x.accepted).length;
+  t('за 95% — один тег', at(0.95) === 1);
+  t('за 90% — два (0,90 «не менше»)', at(0.9) === 2);
+  t('за 80% — три', at(0.8) === 3);
+  t('за 70% — чотири; 0,69 лишається за порогом', at(0.7) === 4);
+  const d70 = decideParagraph(para(cs), answers(probs), { threshold: 0.7 });
+  t('0,69 при 70% — below_threshold', d70.find((x) => x.findingId === 'f5')?.reason === 'below_threshold');
+
+  // Ліміт 12 діє на будь-якому порозі: нижчий поріг не відкриває тринадцятий тег.
+  const many = Array.from({ length: 15 }, (_, i) => cand(i + 1, `lim${i + 1}`));
+  const low = decideParagraph(para(many), answers(many.map((_, i) => 0.99 - i * 0.01)), { threshold: 0.7 });
+  t('за 70% усе одно не більше 12 тегів на абзац', low.filter((x) => x.accepted).length === MAX_ENTITIES_PER_PARAGRAPH);
+  t('вище за межу — paragraph_full', low.filter((x) => x.reason === 'paragraph_full').length === 3);
+}
+
+console.log('\nПам’ять відповідей: повтор із нижчим порогом без нових звернень:');
+{
+  const calls: Array<{ ids: string[] }> = [];
+  const probsByEntity: Record<string, number> = { 'Сутність 1': 0.97, 'Сутність 2': 0.88, 'Сутність 3': 0.74 };
+  const adapter: JevAdapter = {
+    name: 'mock',
+    evaluate: async () => { throw new Error('не потрібне'); },
+    askState: async (state, questions): Promise<JevRawAnswer> => {
+      calls.push({ ids: questions.map((q) => q.id) });
+      return {
+        answers: Object.fromEntries(questions.map((q) => {
+          const name = String(q.instructions).match(/«([^»]+)»/)?.[1] ?? '';
+          return [q.id, { type: 'noul', noul: probsByEntity[name] ?? 0.1 }];
+        })),
+        model: 'jev-1.13.0',
+        usage: { input_tokens: 500, output_tokens: 0 },
+        latency_ms: 1,
+      };
+    },
+  };
+  const ps = [para([cand(1), cand(2), cand(3)])];
+  const cache = new JevAnswerCache();
+  const first = await runJevTagging(ps, adapter, { threshold: 0.95, cache, scope: 'B1' });
+  t('перший прогін: 3 питання до Jev, 1 тег', first.asked === 3 && first.fromCache === 0 && first.decisions.filter((x) => x.accepted).length === 1, `${first.asked}/${first.fromCache}`);
+  const callsAfterFirst = calls.length;
+  const second = await runJevTagging(ps, adapter, { threshold: 0.8, cache, scope: 'B1' });
+  t('повтор за 80%: жодного нового звернення до Jev', calls.length === callsAfterFirst && second.asked === 0 && second.inputTokens === 0, String(calls.length));
+  t('усі 3 відповіді з пам’яті', second.fromCache === 3);
+  t('за нижчого порогу тегів стало більше (2)', second.decisions.filter((x) => x.accepted).length === 2);
+  const third = await runJevTagging(ps, adapter, { threshold: 0.7, cache, scope: 'B1' });
+  t('повтор за 70%: три теги, знову без звернень', third.decisions.filter((x) => x.accepted).length === 3 && calls.length === callsAfterFirst);
+
+  // Новий кандидат у тому ж абзаці — питається лише він, а позиційні id лишаються.
+  const withNew = [para([cand(1), cand(2), cand(3), cand(4)])];
+  const fourth = await runJevTagging(withNew, adapter, { threshold: 0.7, cache, scope: 'B1' });
+  const last = calls[calls.length - 1];
+  t('новий кандидат: до Jev іде одне питання', fourth.asked === 1 && last.ids.length === 1 && last.ids[0] === questionId(3), JSON.stringify(last.ids));
+  t('решта три — з пам’яті', fourth.fromCache === 3);
+
+  // Правка тексту абзацу обнуляє пам’ять: стара відповідь не лягає на новий текст.
+  const edited = [para([cand(1), cand(2), cand(3)], 'Абзац переписано.')];
+  const afterEdit = await runJevTagging(edited, adapter, { threshold: 0.7, cache, scope: 'B1' });
+  t('змінений текст — знову питаємо Jev', afterEdit.asked === 3 && afterEdit.fromCache === 0);
+  t('інший проєкт — інша пам’ять', (await runJevTagging(ps, adapter, { threshold: 0.7, cache, scope: 'B2' })).asked === 3);
+  t('ключ залежить від тексту', jevAnswerKey('B1', ps[0], cand(1)) !== jevAnswerKey('B1', edited[0], cand(1)));
+
+  // Збій не кладе нічого в пам’ять.
+  const failing: JevAdapter = { name: 'mock', evaluate: async () => ({}) as never, askState: async () => { throw new Error('429'); } };
+  const c2 = new JevAnswerCache();
+  const failed = await runJevTagging(ps, failing, { cache: c2, scope: 'B1' });
+  t('збій: у пам’ять нічого не потрапило', failed.failures.length === 1 && c2.size === 0);
+  const small = new JevAnswerCache(2);
+  small.set('a', 0.9); small.set('b', 0.9); small.set('c', 0.9);
+  t('пам’ять обмежена: найстаріше витісняється', small.size === 2 && small.get('a') === undefined && small.get('c') === 0.9);
 }
 
 console.log('\nАдаптер без askState:');
