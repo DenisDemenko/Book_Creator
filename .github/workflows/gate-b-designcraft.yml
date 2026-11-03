@@ -45,6 +45,14 @@ jobs:
       - name: TypeScript
         run: npm run lint
 
+      - name: Cabinet facade inventory and photo calibration
+        env:
+          CHROMIUM_PATH: /usr/bin/google-chrome
+        run: |
+          npx tsx scripts/test-adminOs.mts
+          npx tsx scripts/test-slab-table-bridge.mts
+          node scripts/test-cabinetFacades-browser.mjs
+
       - name: Book Studio integrity contracts
         run: |
           npx tsx scripts/test-canonicalPageMap.mts
