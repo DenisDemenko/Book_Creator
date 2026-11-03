@@ -1213,6 +1213,13 @@ export interface EntityValueParts {
   text: string;
   /** Ім'я героя з приписки `@Ім'я` в кінці значення (П1), якщо вона є. */
   subject?: string;
+  /**
+   * Номер екземпляра з хвоста `#N` (`страх #17`, а в тега рівня типу —
+   * просто `#17`). Це НЕ частина назви: у `text` його вже немає, тож ядро не
+   * створює сутність «#17». Є лише в тегів, яким номер поставив автор чи
+   * автоматика; решти теги розбираються як і раніше.
+   */
+  instance?: number;
   /** Частини значення через « — » (або « – »); щонайменше одна. */
   parts: string[];
   /**
@@ -1231,11 +1238,29 @@ export interface EntityValueParts {
 const SUBJECT_SUFFIX = /(?:^|\s)@([^@\s][^@]*?)\s*$/;
 /** Роздільник полів: тире з пробілами з обох боків (довге чи середнє). */
 const FIELD_SEPARATOR = /\s+[—–]\s+/;
+/**
+ * Номер екземпляра: `#` і цифри в самому кінці значення, на початку або після
+ * пропуску. Стоїть ПІСЛЯ приписки `@Ім'я` (`страх @Олена #17`), тому знімається
+ * першим.
+ *
+ * ЩО ЦЕ ЗМІНЮЄ ДЛЯ ІСНУЮЧИХ ТЕГІВ. Значення, яке вже закінчувалось на ` #N`
+ * («Будинок #5»), тепер читається як назва «Будинок» і екземпляр 5. Таких
+ * тегів у книгах мало — звична форма номера в українському тексті «№5» — але
+ * вони є можливі, і це свідома ціна: інакше номер екземпляра довелося б
+ * класти в окреме поле, якого розбір значення не має.
+ */
+const INSTANCE_SUFFIX = /(?:^|\s)#(\d{1,7})\s*$/;
 
 export function parseEntityValue(slugOrEntity: string | CoreEntity | undefined, value: string): EntityValueParts {
   const entity = typeof slugOrEntity === 'string' ? entityBySlug(slugOrEntity) : slugOrEntity;
   let text = String(value ?? '').trim();
   let subject: string | undefined;
+  let instance: number | undefined;
+  const mi = INSTANCE_SUFFIX.exec(text);
+  if (mi) {
+    instance = Number(mi[1]);
+    text = text.slice(0, mi.index).trim();
+  }
   const m = SUBJECT_SUFFIX.exec(text);
   if (m) {
     subject = m[1].trim();
@@ -1246,13 +1271,20 @@ export function parseEntityValue(slugOrEntity: string | CoreEntity | undefined, 
   const fields = parts
     .map((part, i) => ({ name: names[i] ?? `поле ${i + 1}`, value: part }))
     .filter((f) => f.value !== '');
-  return subject ? { text, subject, parts, fields } : { text, parts, fields };
+  return {
+    text,
+    ...(subject ? { subject } : {}),
+    ...(instance !== undefined ? { instance } : {}),
+    parts,
+    fields,
+  };
 }
 
 /** Рядки підказки про значення тега: чиє і які поля (для чипа в канві). */
 export function entityValueTooltip(entity: CoreEntity, value: string, lang: 'uk' | 'en' = 'uk'): string {
   const parsed = parseEntityValue(entity, value);
   const lines: string[] = [];
+  if (parsed.instance !== undefined) lines.push(`${lang === 'en' ? 'Instance' : 'Екземпляр'}: #${parsed.instance}`);
   if (parsed.subject) lines.push(`${lang === 'en' ? 'Whose' : 'Чиє'}: ${parsed.subject}`);
   if (parsed.fields.length > 1) lines.push(parsed.fields.map((f) => `${f.name}: ${f.value}`).join(' · '));
   return lines.join('\n');

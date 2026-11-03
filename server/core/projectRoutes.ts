@@ -662,6 +662,11 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
     }
     const mode = req.query.mode === 'all' ? 'all' : 'any';
     const value = typeof req.query.value === 'string' ? req.query.value : '';
+    // `?n=17` — лише теги з номером екземпляра 17 (`[/emotion:#17]`).
+    const instanceRaw = typeof req.query.n === 'string' && req.query.n.trim() !== '' ? Number(req.query.n) : NaN;
+    const instance = Number.isInteger(instanceRaw) && instanceRaw >= 0 ? instanceRaw : undefined;
+    // `?full=1` — з повним текстом абзаців (для передачі в чат), без тегів.
+    const includeText = req.query.full === '1';
     if (req.projectAccess!.effective.restricted) {
       // Та сама межа, що й у картці сутності: в уривках — текст чужих сцен.
       res.json({ tags: slugs.map((s2) => '/' + s2), hits: [], total: 0, entitiesFound: 0, offset: 0, restricted: true });
@@ -705,6 +710,8 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       slugs,
       mode,
       value,
+      instance,
+      includeText,
       paragraphs,
       documents,
       excerpt: (text) => paragraphExcerpt(text, 220),

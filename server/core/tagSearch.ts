@@ -27,6 +27,10 @@
  */
 
 /** Сутність у влученні: яка саме з цього типу згадана в абзаці. */
+
+import { parseEntityValue, parseEntityTagsInSource, stripEntityTags } from '../../src/utils/coreEntities';
+import { PARAGRAPH_TAG_SLUG } from '../../src/utils/paragraphNumbers';
+
 export interface TagSearchEntity {
   id: string;
   name: string;
@@ -35,6 +39,12 @@ export interface TagSearchEntity {
   type: string;
   /** Значення після двокрапки, як його записав синк. */
   value: string;
+  /**
+   * Номер екземпляра з `#N` (`[/emotion:#17]`). Є лише в тегів, прочитаних
+   * з тексту: тег рівня типу з номером у ядро не потрапляє — синк пропускає
+   * його як тег без імені.
+   */
+  instance?: number;
 }
 
 /** Один абзац із тегом — разом з адресою в книзі й у редакторі. */
@@ -50,6 +60,10 @@ export interface TagSearchHit {
   entities: TagSearchEntity[];
   /** Які з шуканих типів справді є в цьому абзаці. */
   types: string[];
+  /** Номер абзацу з його власного тега `[/paragraph:#N]`; немає, якщо абзац не пронумеровано. */
+  paragraphNumber?: number;
+  /** Повний текст абзацу БЕЗ тегів — лише коли попросили (`includeText`), бо для списку досить уривка. */
+  text?: string;
 }
 
 export interface TagSearchInputs {
@@ -76,6 +90,14 @@ export interface TagSearchInputs {
    * значення й шукають, коли питання не «де емоції», а «де страх».
    */
   value?: string;
+  /**
+   * Номер екземпляра: лишає лише теги `#N` з цим номером. З типом
+   * (`emotion` + 17) це й є «швидко знайти сімнадцятий тег емоції»; з типом
+   * `paragraph` — абзац №N.
+   */
+  instance?: number;
+  /** Додати до кожного влучення повний текст абзацу (для передачі в чат). */
+  includeText?: boolean;
   paragraphs: ReadonlyArray<{
     id: string;
     documentId: string;
@@ -116,6 +138,16 @@ export const TAG_SEARCH_DEFAULT_LIMIT = 200;
  * пошуку означало б повертати те, що він уже прибрав.
  */
 const counts = (status: string): boolean => status !== 'rejected';
+
+/** Номер абзацу з його власного тега `[/paragraph:#N]`; `undefined`, якщо абзац не пронумеровано. */
+function paragraphNumberOf(text: string): number | undefined {
+  for (const tag of parseEntityTagsInSource(text)) {
+    if (!tag.entity || tag.slug !== PARAGRAPH_TAG_SLUG) continue;
+    const parsed = parseEntityValue(PARAGRAPH_TAG_SLUG, tag.value);
+    if (parsed.text === '' && parsed.instance !== undefined) return parsed.instance;
+  }
+  return undefined;
+}
 
 export function buildTagHits(input: TagSearchInputs): TagSearchResult {
   const limit = input.limit ?? TAG_SEARCH_DEFAULT_LIMIT;
@@ -181,9 +213,30 @@ export function buildTagHits(input: TagSearchInputs): TagSearchResult {
       return value ? ev === value || (en !== '' && value.includes(en)) : ev === '' && en === '';
     });
     if (duplicate) continue;
-    list.push({ id: `text:${type}:${value}`, name: '', status: 'in_text', type, value: tag.value.trim() });
+    list.push({
+      id: `text:${type}:${value}`,
+      name: '',
+      status: 'in_text',
+      type,
+      value: tag.value.trim(),
+      instance: parseEntityValue(type, tag.value).instance,
+    });
     // Порожній тег — це ще не сутність: у «різних сутностей» його не рахуємо.
     if (value) seenEntities.add(`text:${type}:${value}`);
+  }
+
+  /*
+   * Номер екземпляра: лишаємо лише записи з таким номером, а абзаци, де після
+   * цього нічого не лишилось, відпадають. Записи з ядра номера не мають
+   * (тег рівня типу з номером синк пропускає), тож при фільтрі за номером їх
+   * немає в видачі — і це правильно: вони не `#17`.
+   */
+  if (input.instance !== undefined) {
+    for (const [paragraphId, entities] of byParagraph) {
+      const kept = entities.filter((e) => e.instance === input.instance);
+      if (kept.length) byParagraph.set(paragraphId, kept);
+      else byParagraph.delete(paragraphId);
+    }
   }
 
   const rows = [];
@@ -206,6 +259,8 @@ export function buildTagHits(input: TagSearchInputs): TagSearchResult {
         excerpt: input.excerpt(paragraph.text),
         entities,
         types,
+        paragraphNumber: paragraphNumberOf(paragraph.text),
+        ...(input.includeText ? { text: stripEntityTags(paragraph.text).trim() } : {}),
       } satisfies TagSearchHit,
     });
   }

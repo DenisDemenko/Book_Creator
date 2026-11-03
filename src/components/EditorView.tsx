@@ -18,6 +18,8 @@ import { CoreEntityPanel } from './CoreEntityPanel';
 import { AiSuggestionsPanel } from './AiSuggestionsPanel';
 import { TagSearchPanel } from './TagSearchPanel';
 import { TagCarrierPanel } from './TagCarrierPanel';
+import { createOtherNumbersIndex } from '../utils/paragraphNumbers';
+import type { ChatBatch } from '../utils/chatBatch';
 import { EntitySlashMenu } from './EntitySlashMenu';
 import { CharacterDialogueModal } from './CharacterDialogueModal';
 import {
@@ -263,6 +265,12 @@ interface EditorViewProps {
    */
   onDiscussInChat?: (text: string, where: string) => void;
   /**
+   * «У чат ШІ» з пошуку за тегом: усі знайдені абзаци разом із номерами, місцем
+   * у книзі й тегами. Як і `onDiscussInChat`, редактор чат сам не відкриває —
+   * власником чату й книги є App.tsx.
+   */
+  onDiscussBatchInChat?: (batch: ChatBatch) => void;
+  /**
    * Лічильник, який App збільшує після «Зберегти й згенерувати» в
    * конструкторі. Редактор пам'ятає, за яким фото його викликали, і
    * запускає генерацію одразу — інакше автор мусив би закрити вікно й
@@ -364,6 +372,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
   onHighlightApplied,
   onOpenPromptConstructor,
   onDiscussInChat,
+  onDiscussBatchInChat,
   promptGenerateTick = 0,
 }) => {
   const { t, lang: uiLang } = useLanguage();
@@ -673,6 +682,13 @@ export const EditorView: React.FC<EditorViewProps> = ({
   // бачили б значення book/activeSection з першого рендеру назавжди).
   const bookRef = useRef(book);
   bookRef.current = book;
+  /**
+   * Індекс номерів абзаців в ІНШИХ розділах для плагіна нумерації. Поточний
+   * розділ (`activeSectionIdRef`, оголошений нижче) у підрахунок не входить:
+   * його номери плагін читає з ЖИВОГО документа, а збережена в `book` копія
+   * відстає на кожне натискання клавіші.
+   */
+  const otherParagraphNumbers = useRef(createOtherNumbersIndex()).current;
   const handleContentChangeRef = useRef<(v: string, pids?: ParagraphIdState) => void>(() => {});
   const handleContentEnChangeRef = useRef<(v: string) => void>(() => {});
 
@@ -913,7 +929,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
       () => readabilityHighlightModeRef.current,
       () => CORE_ENTITIES,
       () => entityTagsVisibleRef.current,
-      () => langRef.current
+      () => langRef.current,
+      {
+        // Нумерація абзаців — налаштування книги, типово вимкнене.
+        isEnabled: () => bookRef.current.layoutConfig?.autoParagraphNumbers === true,
+        getOtherNumbers: () => otherParagraphNumbers(bookRef.current, activeSectionIdRef.current),
+      }
     ),
     PaginationPlugin.configure({
       getPageContentHeightMm,
@@ -5919,7 +5940,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
               />
             )}
             {rightPanelTab === 'entities' && (
-              <TagSearchPanel bookId={book.id} onOpenParagraph={handleOpenTaggedParagraph} />
+              <TagSearchPanel bookId={book.id} onOpenParagraph={handleOpenTaggedParagraph} onSendToChat={onDiscussBatchInChat} />
             )}
             {rightPanelTab === 'entities' && (
               <TagCarrierPanel book={book} readOnly={isReader} onApply={onUpdateBook} />

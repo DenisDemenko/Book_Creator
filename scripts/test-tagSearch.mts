@@ -275,5 +275,79 @@ console.log('\nТеги з тексту абзаців (друге джерел�
   t('видалені абзаци й чужі типи з тексту не потрапляють', r.total === 0, String(r.total));
 }
 
+
+console.log('\nПошук за номером екземпляра:');
+{
+  const textTags = [
+    { paragraphId: 'p-s1-0', type: 'emotion', value: '#1' },
+    { paragraphId: 'p-s1-1', type: 'emotion', value: '#2' },
+    { paragraphId: 'p-s2-0', type: 'emotion', value: '#17' },
+    { paragraphId: 'p-s3-0', type: 'location', value: '#17' },
+    { paragraphId: 'p-s1-0', type: 'emotion', value: 'страх #17' },
+  ];
+  const all = buildTagHits({ ...base([]), slugs: ['emotion'], textTags });
+  t('без номера — усі абзаци з емоціями', all.total === 3, String(all.total));
+  const one = buildTagHits({ ...base([]), slugs: ['emotion'], textTags, instance: 17 });
+  t('емоція №17 — два записи на різних абзацах', one.total === 2, String(one.total));
+  t('це p-s1-0 («страх #17») і p-s2-0 («#17»)', one.hits.map((h) => h.paragraphId).join() === 'p-s1-0,p-s2-0', one.hits.map((h) => h.paragraphId).join());
+  t('номер екземпляра розібрано з значення', one.hits[1].entities[0].instance === 17, String(one.hits[1].entities[0].instance));
+  const other = buildTagHits({ ...base([]), slugs: ['location'], textTags, instance: 17 });
+  t('той самий номер іншого типу — окремо', other.total === 1 && other.hits[0].paragraphId === 'p-s3-0');
+  const none = buildTagHits({ ...base([]), slugs: ['emotion'], textTags, instance: 99 });
+  t('номера немає — порожньо, не помилка', none.total === 0);
+  const zero = buildTagHits({ ...base([]), slugs: ['emotion'], textTags, instance: 0 });
+  t('номер 0 теж фільтрує (а не вважається «без фільтра»)', zero.total === 0);
+  const mention = buildTagHits({ ...base([{ entityId: 'e1', paragraphId: 'p-s1-0', status: 'confirmed', value: 'страх' }]), slugs: ['emotion'], instance: 17 });
+  t('запис із ядра номера не має — при фільтрі за номером його немає', mention.total === 0);
+}
+
+console.log('\nНомер абзацу з його власного тега:');
+{
+  const withNumbers = {
+    ...base([]),
+    paragraphs: [
+      { id: 'p-s1-0', documentId: 's1', order: 0, text: '[/emotion:#3] [/paragraph:#412] Абзац.', editorPid: 'pid-a', deletedAt: null },
+      { id: 'p-s1-1', documentId: 's1', order: 1, text: '[/emotion:#4] Без номера абзацу.', editorPid: null, deletedAt: null },
+      { id: 'p-s2-0', documentId: 's2', order: 0, text: '[/emotion:#5] [/paragraph:Вступ] Іменований, не номер.', editorPid: null, deletedAt: null },
+    ],
+  };
+  const r = buildTagHits({
+    ...withNumbers,
+    slugs: ['emotion'],
+    textTags: [
+      { paragraphId: 'p-s1-0', type: 'emotion', value: '#3' },
+      { paragraphId: 'p-s1-1', type: 'emotion', value: '#4' },
+      { paragraphId: 'p-s2-0', type: 'emotion', value: '#5' },
+    ],
+  });
+  t('номер абзацу взято з тега paragraph', r.hits[0].paragraphNumber === 412, String(r.hits[0].paragraphNumber));
+  t('абзац без тега номера — undefined', r.hits[1].paragraphNumber === undefined);
+  t('іменований [/paragraph:Вступ] номером не вважається', r.hits[2].paragraphNumber === undefined);
+
+  const byParagraph = buildTagHits({ ...withNumbers, slugs: ['paragraph'], textTags: [{ paragraphId: 'p-s1-0', type: 'paragraph', value: '#412' }], instance: 412 });
+  t('шукаємо абзац за його номером: тип paragraph + 412', byParagraph.total === 1 && byParagraph.hits[0].paragraphId === 'p-s1-0');
+}
+
+console.log('\nПовний текст для чату:');
+{
+  const full = {
+    ...base([]),
+    paragraphs: [
+      { id: 'p-s1-0', documentId: 's1', order: 0, text: '[/emotion:#3] [/paragraph:#12] Олена  злякалась на мосту.', editorPid: 'pid-a', deletedAt: null },
+      { id: 'p-s1-1', documentId: 's1', order: 1, text: '[/emotion:#4] ' + 'д'.repeat(400), editorPid: null, deletedAt: null },
+    ],
+  };
+  const tags = [
+    { paragraphId: 'p-s1-0', type: 'emotion', value: '#3' },
+    { paragraphId: 'p-s1-1', type: 'emotion', value: '#4' },
+  ];
+  const without = buildTagHits({ ...full, slugs: ['emotion'], textTags: tags });
+  t('без прапора тексту у влученні його немає', without.hits[0].text === undefined);
+  const withText = buildTagHits({ ...full, slugs: ['emotion'], textTags: tags, includeText: true });
+  t('з прапором — текст без тегів', withText.hits[0].text === 'Олена злякалась на мосту.', JSON.stringify(withText.hits[0].text));
+  t('довгий абзац — ПОВНІСТЮ, не уривок', withText.hits[1].text === 'д'.repeat(400) && withText.hits[1].excerpt.length < 400, String(withText.hits[1].text?.length));
+  t('уривок і далі короткий', withText.hits[0].excerpt.length <= 50);
+}
+
 console.log(`\nПідсумок: ${pass} пройшло, ${fail} впало`);
 process.exit(fail ? 1 : 0);

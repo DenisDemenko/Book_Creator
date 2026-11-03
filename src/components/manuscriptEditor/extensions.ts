@@ -13,6 +13,7 @@ import { TableRow } from '@tiptap/extension-table-row';
 import { TableCellAlign, TableHeaderAlign } from './TableAlignCell';
 import { FocusParagraphPlugin } from './FocusParagraphPlugin';
 import { ParagraphIdExtension } from './ParagraphIdExtension';
+import { ParagraphNumberPlugin, type ParagraphNumberOptions } from './ParagraphNumberPlugin';
 import { CharacterMentionPlugin, type CharacterMentionEntry } from './CharacterMentionPlugin';
 import { ReadabilityHighlightPlugin } from './ReadabilityHighlightPlugin';
 import { EntityTagPlugin } from './EntityTagPlugin';
@@ -62,7 +63,13 @@ export function buildManuscriptExtensions(
   /** Необов'язково: чи показувати сутності в канві (кнопка приховування, п. 5). */
   isEntityTagsVisible?: () => boolean,
   /** Необов'язково: мова підказок про сутності (п. 4 постановки 23.09.2026). */
-  isEnglishUi?: () => boolean
+  isEnglishUi?: () => boolean,
+  /**
+   * Необов'язково: нумерація абзаців тегом `/paragraph` (див. `ParagraphNumberPlugin`).
+   * Дається ЛИШЕ українському редактору: переклад має власні абзаци, і номери
+   * в ньому розійшлися б з оригіналом.
+   */
+  paragraphNumbers?: ParagraphNumberOptions
 ) {
   return [
     StarterKit.configure({
@@ -138,5 +145,7 @@ export function buildManuscriptExtensions(
     // Постійні номери абзаців (Т0.5, журнал #246) — лише атрибут вузла, у текст
     // розділу не пишеться.
     ParagraphIdExtension,
+    // Тег номера абзацу веде сам редактор — лише коли книга цього просить.
+    ...(paragraphNumbers ? [ParagraphNumberPlugin.configure(paragraphNumbers)] : []),
   ];
 }

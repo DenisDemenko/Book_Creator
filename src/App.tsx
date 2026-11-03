@@ -49,6 +49,7 @@ import { ExportView } from './components/ExportView';
 import { MediaLibraryView } from './components/MediaLibraryView';
 import { BookSettingsModal } from './components/BookSettingsModal';
 import { QuickAiModal } from './components/QuickAiModal';
+import type { ChatBatch } from './utils/chatBatch';
 import { RoleManagementModal } from './components/RoleManagementModal';
 import { VersionSnapshotModal } from './components/VersionSnapshotModal';
 import { NotesImportModal } from './components/plugins/NotesImportModal';
@@ -280,6 +281,8 @@ export default function App() {
    * чату, тож саме тут живе передача між ними.
    */
   const [chatDiscussFragment, setChatDiscussFragment] = useState<{ text: string; where: string } | null>(null);
+  /** Пачка абзаців із пошуку за тегом, що чекає, поки чат її прийме карткою. */
+  const [chatDiscussBatch, setChatDiscussBatch] = useState<ChatBatch | null>(null);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
@@ -2367,6 +2370,10 @@ export default function App() {
               setChatDiscussFragment({ text, where });
               setIsQuickAiOpen(true);
             }}
+            onDiscussBatchInChat={(batch) => {
+              setChatDiscussBatch(batch);
+              setIsQuickAiOpen(true);
+            }}
           />
         )}
 
@@ -2776,6 +2783,8 @@ export default function App() {
         onSendTextToChapter={handleSendChatTextToChapter}
         discussFragment={chatDiscussFragment}
         onDiscussFragmentConsumed={() => setChatDiscussFragment(null)}
+        discussBatch={chatDiscussBatch}
+        onDiscussBatchConsumed={() => setChatDiscussBatch(null)}
         pendingAttachmentFile={pendingSunScreenshot}
         onAttachmentConsumed={() => setPendingSunScreenshot(null)}
         onUpdateBook={handleUpdateBook}

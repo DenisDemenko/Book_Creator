@@ -5,6 +5,7 @@ import { Book, Chapter, AuthUser } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
 import { extractChatFileText, fileToBase64 } from '../utils/extractChatFileText';
 import { formatFragmentForChat } from '../utils/bookText';
+import { batchItemLabel, formatBatchForChat, type ChatBatch } from '../utils/chatBatch';
 import {
   CORE_ENTITIES,
   MAX_ENTITIES_PER_PARAGRAPH,
@@ -47,6 +48,15 @@ interface QuickAiModalProps {
   discussFragment?: { text: string; where: string } | null;
   /** Викликається після того, як фрагмент прийнято карткою — щоб власник обнулив свій стан. */
   onDiscussFragmentConsumed?: () => void;
+  /**
+   * Пачка абзаців із пошуку за тегом («У чат ШІ»): усе знайдене разом із
+   * номером абзацу, місцем у книзі й тегами. Як і фрагмент, лягає карткою над
+   * полем вводу й сама не надсилається — питання формулює автор. В картці кожен
+   * абзац можна прибрати або лишити «лише цей», щоб обговорити його окремо.
+   */
+  discussBatch?: ChatBatch | null;
+  /** Викликається після того, як пачку прийнято карткою — щоб власник обнулив свій стан. */
+  onDiscussBatchConsumed?: () => void;
   /**
    * Знімок "сонечка" (DraggableSun → кнопка «Скріншот для AI»), який чекає
    * прикріплення в чат — власник (App.tsx) відкриває модалку й передає файл
@@ -1740,6 +1750,8 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
   onSendTextToChapter,
   discussFragment,
   onDiscussFragmentConsumed,
+  discussBatch,
+  onDiscussBatchConsumed,
   pendingAttachmentFile,
   onAttachmentConsumed,
   onUpdateBook,
@@ -1833,6 +1845,9 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
   const [showEntityTags, setShowEntityTags] = usePersistentState<boolean>('nova_chat_entityTags', true);
   /** Фрагмент книги, який чекає на питання автора (з редактора). */
   const [fragmentCard, setFragmentCard] = useState<{ text: string; where: string } | null>(null);
+  /** Пачка абзаців із пошуку за тегом, прикріплена до наступного повідомлення. */
+  const [batchCard, setBatchCard] = useState<ChatBatch | null>(null);
+  const [batchExpanded, setBatchExpanded] = useState(false);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -2008,6 +2023,20 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
     onDiscussFragmentConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, discussFragment]);
+
+  /**
+   * Пачка абзаців із пошуку за тегом. Одразу «споживається» — з тієї ж причини,
+   * що й фрагмент: інакше повторне відкриття чату причепило б ті самі абзаци
+   * вдруге.
+   */
+  useEffect(() => {
+    if (!isOpen || !discussBatch?.items?.length) return;
+    setBatchCard(discussBatch);
+    setBatchExpanded(false);
+    setActivePanel('chat');
+    onDiscussBatchConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, discussBatch]);
 
   if (!isOpen) return null;
 
@@ -2232,19 +2261,24 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
     const hasPendingAttachment = attachedFiles.some((a) => a.status === 'reading');
     // Прикріплений фрагмент книги — теж привід дозволити надсилання:
     // «що скажеш про це?» без жодного слова в полі — нормальний запит.
-    if ((!inputText.trim() && readyAttachments.length === 0 && !fragmentCard) || isLoading || hasPendingAttachment) return;
+    if ((!inputText.trim() && readyAttachments.length === 0 && !fragmentCard && !batchCard) || isLoading || hasPendingAttachment) return;
     const question = inputText.trim();
     // Фрагмент іде ПЕРЕД питанням: модель читає уривок, потім те, що про
     // нього питають. Зворотний порядок змушує її тримати питання в голові
     // упродовж усього уривка — і вона регулярно відповідає на початок.
-    const userMsg = fragmentCard
+    // Пачка абзаців і фрагмент можуть бути одночасно: спершу вони, потім питання.
+    const attached: string[] = [];
+    if (batchCard) attached.push(formatBatchForChat(batchCard).message);
+    if (fragmentCard) attached.push(formatFragmentForChat(fragmentCard.text, fragmentCard.where));
+    const userMsg = attached.length
       ? [
-          formatFragmentForChat(fragmentCard.text, fragmentCard.where),
-          question || t('quickAi.fragmentDefaultQuestion'),
+          ...attached,
+          question || (batchCard ? t('quickAi.batchDefaultQuestion') : t('quickAi.fragmentDefaultQuestion')),
         ].join('\n\n')
       : question || t('quickAi.analyzeAttachmentsDefault');
     setInputText('');
     setFragmentCard(null);
+    setBatchCard(null);
     setAttachedFiles([]);
     setAttachmentError(null);
     setIsLoading(true);
@@ -2686,6 +2720,75 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
               вкидаємо в поле вводу: довгий уривок у однорядковому інпуті
               неможливо прочитати, а питання автор має писати сам.
             */}
+            {batchCard && (
+              <div className="rounded-xl nm-inset px-3 py-2 space-y-1.5" data-chat-batch>
+                <div className="flex items-start gap-2">
+                  <Quote className="w-3.5 h-3.5 text-[var(--primary)] shrink-0 mt-0.5" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[11px] font-bold text-[var(--on-surface)]" data-chat-batch-title>
+                      {t('quickAi.batchHeader', { count: batchCard.items.length, tag: batchCard.title })}
+                    </div>
+                    {(() => {
+                      const f = formatBatchForChat(batchCard);
+                      return f.omitted > 0 ? (
+                        <div className="text-[10px] text-amber-400" data-chat-batch-omitted>
+                          {t('quickAi.batchOmitted', { included: f.included, omitted: f.omitted })}
+                        </div>
+                      ) : null;
+                    })()}
+                  </div>
+                  <button
+                    onClick={() => setBatchExpanded((v) => !v)}
+                    data-chat-batch-toggle
+                    className="text-[10px] font-bold text-[var(--primary)] shrink-0"
+                  >
+                    {batchExpanded ? t('quickAi.batchCollapse') : t('quickAi.batchExpand')}
+                  </button>
+                  <button
+                    onClick={() => setBatchCard(null)}
+                    title={t('quickAi.batchDetach')}
+                    data-chat-batch-detach
+                    className="text-[var(--outline)] hover:text-rose-400 shrink-0"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+                {batchExpanded && (
+                  <ul className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                    {batchCard.items.map((item) => (
+                      <li key={item.id} className="rounded-lg bg-black/10 px-2 py-1.5" data-chat-batch-item={item.id}>
+                        <div className="flex items-start gap-1.5">
+                          <div className="min-w-0 flex-1">
+                            <div className="text-[10px] font-bold text-[var(--primary)] truncate">{batchItemLabel(item)}</div>
+                            <div className="text-[11px] leading-snug text-[var(--on-surface)] line-clamp-2">{item.text}</div>
+                          </div>
+                          <button
+                            onClick={() => setBatchCard({ ...batchCard, items: [item] })}
+                            title={t('quickAi.batchOnlyThis')}
+                            data-chat-batch-only
+                            className="text-[10px] font-bold text-[var(--primary)] shrink-0"
+                          >
+                            {t('quickAi.batchOnlyThisShort')}
+                          </button>
+                          <button
+                            onClick={() => {
+                              const rest = batchCard.items.filter((x) => x.id !== item.id);
+                              setBatchCard(rest.length ? { ...batchCard, items: rest } : null);
+                            }}
+                            title={t('quickAi.batchRemove')}
+                            data-chat-batch-remove
+                            className="text-[var(--outline)] hover:text-rose-400 shrink-0"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
             {fragmentCard && (
               <div className="flex items-start gap-2 px-3 py-2 rounded-xl nm-inset">
                 <Quote className="w-3.5 h-3.5 text-[var(--primary)] shrink-0 mt-0.5" />
@@ -2766,12 +2869,12 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={handleChatInputKeyDown}
-                placeholder={fragmentCard ? t('quickAi.fragmentQuestionPlaceholder') : t('quickAi.inputPlaceholder')}
+                placeholder={batchCard ? t('quickAi.batchQuestionPlaceholder') : fragmentCard ? t('quickAi.fragmentQuestionPlaceholder') : t('quickAi.inputPlaceholder')}
                 className="flex-1 nm-inset rounded-xl p-2.5 text-xs text-[var(--on-surface)] placeholder:text-[var(--outline)] outline-none bg-transparent"
               />
               <button
                 onClick={handleSendMessage}
-                disabled={isLoading || (!inputText.trim() && !fragmentCard && attachedFiles.every((a) => a.status !== 'ready')) || attachedFiles.some((a) => a.status === 'reading')}
+                disabled={isLoading || (!inputText.trim() && !fragmentCard && !batchCard && attachedFiles.every((a) => a.status !== 'ready')) || attachedFiles.some((a) => a.status === 'reading')}
                 className="nm-btn-primary p-2.5 rounded-xl disabled:opacity-40 transition-all shrink-0"
               >
                 <Send className="w-4 h-4" />

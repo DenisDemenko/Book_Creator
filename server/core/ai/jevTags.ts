@@ -115,11 +115,15 @@ export function tagState(paragraph: JevTagParagraph): Record<string, unknown> {
 export function decideParagraph(
   paragraph: JevTagParagraph,
   answers: Record<string, unknown>,
-  opts: { threshold?: number; maxPerParagraph?: number } = {}
+  opts: { threshold?: number; maxPerParagraph?: number; maxQuestions?: number } = {}
 ): JevTagDecision[] {
   const threshold = opts.threshold ?? JEV_TAG_THRESHOLD;
   const limit = opts.maxPerParagraph ?? MAX_ENTITIES_PER_PARAGRAPH;
-  const asked = paragraph.candidates.slice(0, JEV_MAX_QUESTIONS_PER_PARAGRAPH);
+  // Скільки кандидатів реально спитано. Типово 24 — один запит; повне
+  // сканування за всіма типами шле кілька запитів і передає тут своє число,
+  // інакше все, що понад 24, мовчки вважалось би «не спитаним».
+  const maxQuestions = opts.maxQuestions ?? JEV_MAX_QUESTIONS_PER_PARAGRAPH;
+  const asked = paragraph.candidates.slice(0, maxQuestions);
 
   // Теги, які вже стоять у цьому абзаці, займають місця з тих самих 12 —
   // інакше автоматика додала б дванадцять поверх наявних.
@@ -170,7 +174,7 @@ export function decideParagraph(
   });
 
   // Кандидати, які не влізли в один запит, чесно позначаються, а не зникають.
-  for (const c of paragraph.candidates.slice(JEV_MAX_QUESTIONS_PER_PARAGRAPH)) {
+  for (const c of paragraph.candidates.slice(maxQuestions)) {
     out.push({
       findingId: c.findingId,
       paragraphId: c.paragraphId,

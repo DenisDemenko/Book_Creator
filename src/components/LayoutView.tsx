@@ -1,5 +1,5 @@
 import { AiWorkflowHint } from './roleStudio/AiWorkflowHint';
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { 
   LayoutTemplate, 
   BookOpen, 
@@ -32,6 +32,8 @@ import { DesignSuggestionPanel } from './DesignSuggestionPanel';
 import { LayoutZoomControl } from './layout/LayoutZoomControl';
 import { useLanguage } from '../i18n/LanguageContext';
 import { applyBookDesignTheme, studioThemeForLegacy } from '../data/bookDesignThemeCatalog';
+import { applyAutoTags, listBookParagraphs } from '../utils/autoTags';
+import { analyzeParagraph } from '../utils/paragraphNumbers';
 import { PAGE_FORMAT_PRESETS, applyPageFormatPreset } from '../utils/pageFormatPresets';
 
 interface LayoutViewProps {
@@ -83,6 +85,25 @@ export const LayoutView: React.FC<LayoutViewProps> = ({ book, onUpdateBook, tota
       },
       'Зміна формату верстки',
       `Встановлено книжковий формат: ${found.label}`
+    );
+  };
+
+  /**
+   * Абзаци, що ще без тега номера. Рахується лише для кнопки нижче, тож
+   * перераховується, тільки коли змінився текст книги (`book.chapters`).
+   */
+  const unnumberedParagraphs = useMemo(
+    () => listBookParagraphs(book).filter((p) => analyzeParagraph(p.text).tags.length === 0).length,
+    [book.chapters]
+  );
+
+  /** Пронумерувати всі наявні звичайні абзаци й увімкнути нумерацію в редакторі. */
+  const handleNumberExistingParagraphs = () => {
+    const result = applyAutoTags(book, [], { numberParagraphs: true });
+    onUpdateBook(
+      { ...result.book, layoutConfig: { ...layout, autoParagraphNumbers: true } },
+      'Нумерація абзаців',
+      `Теги номера поставлено на ${result.paragraphsNumbered} абзаців; редактор тепер веде їх сам.`
     );
   };
 
@@ -534,6 +555,30 @@ export const LayoutView: React.FC<LayoutViewProps> = ({ book, onUpdateBook, tota
                 data-layout-embed-tags
                 className="w-4 h-4 shrink-0 rounded text-cyan-500 focus:ring-0"
               />
+            </div>
+            <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <span className="font-bold text-slate-200 block">{t('layoutView.autoParagraphNumbersLabel')}</span>
+                  <span className="text-[11px] text-slate-400">{t('layoutView.autoParagraphNumbersDesc')}</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={layout.autoParagraphNumbers === true}
+                  onChange={(e) => handleUpdateLayout({ autoParagraphNumbers: e.target.checked })}
+                  data-layout-auto-paragraph-numbers
+                  className="w-4 h-4 shrink-0 rounded text-cyan-500 focus:ring-0"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleNumberExistingParagraphs}
+                disabled={unnumberedParagraphs === 0 && layout.autoParagraphNumbers === true}
+                data-layout-number-existing
+                className="rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-1.5 text-[11px] font-bold text-sky-200 hover:bg-sky-500/20 disabled:opacity-50"
+              >
+                {t('layoutView.numberExistingParagraphs', { count: unnumberedParagraphs })}
+              </button>
             </div>
           </div>
 
