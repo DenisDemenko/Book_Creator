@@ -51,6 +51,8 @@ export const quickAi = {
     batchOnlyThisShort: 'лише цей',
     batchQuestionPlaceholder: 'Що зробити з цими абзацами?',
     batchDefaultQuestion: 'Огляньте ці абзаци по одному: чи слушно кожен позначено цим тегом і що в ньому варто виправити? Відповідайте за номером абзацу.',
+    batchAttachedNote: 'Абзаци за тегом — у доданому нижче файлі; кожен підписано номером.',
+    batchFileName: 'абзаци-за-тегом.txt',
     cancel: 'Скасувати',
     chatTab: 'Чат',
     promptConstructor: {
@@ -157,6 +159,8 @@ export const quickAi = {
     batchOnlyThisShort: 'only this',
     batchQuestionPlaceholder: 'What should be done with these paragraphs?',
     batchDefaultQuestion: 'Go through these paragraphs one by one: is each correctly marked with this tag, and what should be fixed in it? Answer by paragraph number.',
+    batchAttachedNote: 'The paragraphs found by the tag are in the file attached below; each is labelled with its number.',
+    batchFileName: 'paragraphs-by-tag.txt',
     cancel: 'Cancel',
     chatTab: 'Chat',
     promptConstructor: {

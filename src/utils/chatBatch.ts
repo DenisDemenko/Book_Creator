@@ -99,3 +99,43 @@ export function formatBatchForChat(
     '. Кожен позначено номером абзацу, місцем у книзі й тегами; посилайся на цей номер, коли відповідаєш про окремий абзац.';
   return { message: [header, ...blocks].join('\n\n'), included, omitted };
 }
+
+export interface ChatSendInput {
+  /** Текст пачки з `formatBatchForChat`, якщо до повідомлення прикріплено картку абзаців. */
+  batch: string | null;
+  /** Текст прикріпленого фрагмента (`formatFragmentForChat`). */
+  fragment: string | null;
+  /** Питання автора або типове питання до картки. */
+  closing: string;
+  /** Що йде, коли жодної картки нема: питання автора або типове «проаналізуй вкладення». */
+  plain: string;
+  /** Одне речення «абзаци — у доданому файлі», яке стає останнім рядком `content`. */
+  note: string;
+}
+
+export interface ChatSend {
+  /** Те, що автор бачить у вікні й що стає історією розмови: пачка, фрагмент, питання. */
+  display: string;
+  /** Те, що йде на сервер у `content`. Сервер відхиляє репліку довшу за 8000 символів. */
+  serverContent: string;
+  /** Пачка текстовим вкладенням (сервер приймає файл до 50 000 символів) або null. */
+  batchFile: string | null;
+}
+
+/**
+ * Складає повідомлення так, щоб воно пройшло сервер зареєстрованого автора.
+ *
+ * ЧОМУ ТУТ, А НЕ В КОМПОНЕНТІ. 03.11.2026 живий прогін з DeepSeek показав, що
+ * картка з 56 абзаців (29 тис. символів), надіслана одним `content`, відхиляється
+ * відповіддю 400 «задовге (максимум 8000)». Гостьовий шлях цього ліміту не має, тому
+ * ламалось лише в тих, хто може обрати модель. Пачка тому їде вкладенням, а в
+ * `content` лишається питання; повний текст усе одно лягає у `display`, щоб
+ * наступні репліки («візьми лише абзац #262») бачили абзаци в історії розмови.
+ */
+export function composeChatSend(i: ChatSendInput): ChatSend {
+  const attached = [i.batch, i.fragment].filter((x): x is string => !!x);
+  const display = attached.length ? [...attached, i.closing].join('\n\n') : i.plain;
+  if (!i.batch) return { display, serverContent: display, batchFile: null };
+  const serverContent = [...(i.fragment ? [i.fragment] : []), i.closing, i.note].join('\n\n');
+  return { display, serverContent, batchFile: i.batch };
+}

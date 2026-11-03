@@ -5,7 +5,7 @@ import { Book, Chapter, AuthUser } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
 import { extractChatFileText, fileToBase64 } from '../utils/extractChatFileText';
 import { formatFragmentForChat } from '../utils/bookText';
-import { batchItemLabel, formatBatchForChat, type ChatBatch } from '../utils/chatBatch';
+import { batchItemLabel, composeChatSend, formatBatchForChat, type ChatBatch } from '../utils/chatBatch';
 import {
   CORE_ENTITIES,
   MAX_ENTITIES_PER_PARAGRAPH,
@@ -2267,15 +2267,22 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
     // нього питають. Зворотний порядок змушує її тримати питання в голові
     // упродовж усього уривка — і вона регулярно відповідає на початок.
     // Пачка абзаців і фрагмент можуть бути одночасно: спершу вони, потім питання.
-    const attached: string[] = [];
-    if (batchCard) attached.push(formatBatchForChat(batchCard).message);
-    if (fragmentCard) attached.push(formatFragmentForChat(fragmentCard.text, fragmentCard.where));
-    const userMsg = attached.length
-      ? [
-          ...attached,
-          question || (batchCard ? t('quickAi.batchDefaultQuestion') : t('quickAi.fragmentDefaultQuestion')),
-        ].join('\n\n')
-      : question || t('quickAi.analyzeAttachmentsDefault');
+    const batchMessage = batchCard ? formatBatchForChat(batchCard).message : null;
+    const fragmentMessage = fragmentCard ? formatFragmentForChat(fragmentCard.text, fragmentCard.where) : null;
+    const closing = question || (batchCard ? t('quickAi.batchDefaultQuestion') : t('quickAi.fragmentDefaultQuestion'));
+    // `display` — що бачить автор і що стає історією; `serverContent` — що йде в `content`
+    // (пачка їде вкладенням, бо сервер відхиляє репліку довшу за 8000 символів).
+    const {
+      display: userMsg,
+      serverContent,
+      batchFile,
+    } = composeChatSend({
+      batch: batchMessage,
+      fragment: fragmentMessage,
+      closing,
+      plain: question || t('quickAi.analyzeAttachmentsDefault'),
+      note: t('quickAi.batchAttachedNote'),
+    });
     setInputText('');
     setFragmentCard(null);
     setBatchCard(null);
@@ -2326,7 +2333,7 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
         body: JSON.stringify({
-          content: userMsg,
+          content: serverContent,
           modelId: selectedModel || undefined,
           // Повний потік розмови — та сама логіка, що в Modul_token: модель
           // отримує саме той контекст, який користувач бачить у вікні чату.
@@ -2340,14 +2347,17 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
            * може міняти його хоч посеред розмови.
            */
           entityTagging: showEntityTags,
-          attachments: readyAttachments.length > 0
+          attachments: readyAttachments.length > 0 || batchFile
             ? {
                 images: readyAttachments
                   .filter((a) => a.kind === 'image')
                   .map((a) => ({ name: a.name, mimeType: a.mimeType, dataBase64: a.base64 })),
-                textFiles: readyAttachments
-                  .filter((a) => a.kind === 'text')
-                  .map((a) => ({ name: a.name, content: a.textContent })),
+                textFiles: [
+                  ...(batchFile ? [{ name: t('quickAi.batchFileName'), content: batchFile }] : []),
+                  ...readyAttachments
+                    .filter((a) => a.kind === 'text')
+                    .map((a) => ({ name: a.name, content: a.textContent })),
+                ],
               }
             : undefined,
         }),

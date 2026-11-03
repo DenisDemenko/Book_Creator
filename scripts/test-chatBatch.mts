@@ -9,7 +9,14 @@
  * модель бачила всі сто абзаців, а бачила сорок.
  */
 
-import { CHAT_BATCH_CHAR_LIMIT, batchItemLabel, formatBatchForChat, type ChatBatch, type ChatBatchItem } from '../src/utils/chatBatch.ts';
+import os from 'node:os';
+import path from 'node:path';
+import { CHAT_BATCH_CHAR_LIMIT, batchItemLabel, composeChatSend, formatBatchForChat, type ChatBatch, type ChatBatchItem } from '../src/utils/chatBatch.ts';
+
+// Сервер зареєстрованого автора — тим самим кодом, що й у продукті; база йде в тимчасову теку.
+process.env.DATA_DIR = path.join(os.tmpdir(), 'nova-chat-batch-test');
+process.env.DATABASE_PATH = path.join(process.env.DATA_DIR, 'nova-studio.db');
+const chatRoutes = await import('../server/chatRoutes.ts');
 
 let pass = 0;
 let fail = 0;
@@ -95,6 +102,32 @@ console.log('\nОдночасно з фрагментом і питанням:')
   const f = formatBatchForChat(batch([item(412, 'Олена злякалась.')], '/emotion #17'));
   t('абзац №412 іде з адресою, за якою відповідь можна зіставити з книгою', f.message.includes('▸ [абзац #412 · Глава 3 «Фотограф» · Розділ «Початок» · теги: emotion #412]'));
   t('між заголовком і абзацом — порожній рядок', f.message.split(String.fromCharCode(10, 10)).length === 2);
+}
+
+console.log('\nСкладання повідомлення для сервера (регресія 03.11.2026):');
+{
+  const long = (n: number) => item(n, 'я'.repeat(2500));
+  const big = formatBatchForChat(batch(Array.from({ length: 30 }, (_, i) => long(i + 1)))).message;
+  const closing = 'Огляньте ці абзаци по одному.';
+  const note = 'Абзаци — у доданому файлі.';
+  const sent = composeChatSend({ batch: big, fragment: null, closing, plain: 'x', note });
+  t('пачка понад 8000 символів — тому й потрібне вкладення', big.length > chatRoutes.MAX_MESSAGE_CHARS, String(big.length));
+  t('СТАРА композиція (усе в content) відхиляється сервером', chatRoutes.validateMessage(sent.display) !== null);
+  t('НОВА: content проходить validateMessage сервера', chatRoutes.validateMessage(sent.serverContent) === null, String(sent.serverContent.length));
+  t('пачка їде вкладенням цілою', sent.batchFile === big);
+  t('вкладення не перевищує ліміту сервера для файлу', sent.batchFile!.length <= chatRoutes.MAX_TEXT_ATTACHMENT_CHARS, String(sent.batchFile!.length));
+  t('у content є питання і вказівка на файл', sent.serverContent.includes(closing) && sent.serverContent.endsWith(note));
+  t('історія розмови бачить повний текст: абзаци, потім питання', sent.display.startsWith(big) && sent.display.endsWith(closing));
+  t('у content немає тексту абзаців', !sent.serverContent.includes('я'.repeat(50)));
+
+  const withFragment = composeChatSend({ batch: big, fragment: 'Фрагмент «Тест».', closing, plain: 'x', note });
+  t('фрагмент разом із пачкою лишається в content перед питанням', withFragment.serverContent.startsWith('Фрагмент «Тест».') && withFragment.serverContent.includes(closing));
+
+  const only = composeChatSend({ batch: null, fragment: 'Фрагмент «Тест».', closing, plain: 'x', note });
+  t('без пачки нічого не змінилось: content = те, що бачить автор', only.serverContent === only.display && only.batchFile === null && only.display === 'Фрагмент «Тест».' + String.fromCharCode(10, 10) + closing);
+  const plain = composeChatSend({ batch: null, fragment: null, closing, plain: 'Просте питання', note });
+  t('без карток іде лише питання автора', plain.display === 'Просте питання' && plain.serverContent === 'Просте питання' && plain.batchFile === null);
+  t('вкладень сервер приймає на одне більше, ніж скріпка дозволяє автору', chatRoutes.MAX_ATTACHED_TEXT_FILES >= 4 + 1);
 }
 
 console.log(`\nПідсумок: ${pass} пройшло, ${fail} впало`);

@@ -52,7 +52,12 @@ export interface ChatTextAttachment {
 
 /** Обмеження на прикріплення до одного повідомлення — захист від роздування запиту/рахунку. */
 export const MAX_ATTACHED_IMAGES = 4;
-export const MAX_ATTACHED_TEXT_FILES = 4;
+/**
+ * Чотири файли автора (стільки дозволяє кнопка-скріпка в чаті) і ще один — пачка
+ * абзаців із пошуку за тегом, яку чат додає сам: без п'ятого місця п'ятий файл
+ * мовчки відрізався б.
+ */
+export const MAX_ATTACHED_TEXT_FILES = 5;
 export const MAX_TEXT_ATTACHMENT_CHARS = 50_000;
 
 /**
