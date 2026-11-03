@@ -17,6 +17,7 @@ import { useRegistryRevision } from '../utils/ontologyClient';
 import { CoreEntityPanel } from './CoreEntityPanel';
 import { AiSuggestionsPanel } from './AiSuggestionsPanel';
 import { TagSearchPanel } from './TagSearchPanel';
+import { TagCarrierPanel } from './TagCarrierPanel';
 import { EntitySlashMenu } from './EntitySlashMenu';
 import { CharacterDialogueModal } from './CharacterDialogueModal';
 import {
@@ -5919,6 +5920,9 @@ export const EditorView: React.FC<EditorViewProps> = ({
             )}
             {rightPanelTab === 'entities' && (
               <TagSearchPanel bookId={book.id} onOpenParagraph={handleOpenTaggedParagraph} />
+            )}
+            {rightPanelTab === 'entities' && (
+              <TagCarrierPanel book={book} readOnly={isReader} onApply={onUpdateBook} />
             )}
             {rightPanelTab === 'entities' && (
               <CoreEntityPanel

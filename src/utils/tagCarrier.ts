@@ -141,8 +141,16 @@ export function parseTagCarrier(raw: unknown): TagCarrier | null {
   return c as TagCarrier;
 }
 
+/** Що саме поставлено на абзац: відбиток тексту й точні рядки тегів — для відкату. */
+export interface PlacedTags {
+  h: string;
+  tags: string[];
+}
+
 export interface CarrierApplyResult<B> {
   book: B;
+  /** Рівно те, що додано, — вхід для `revertTagCarrier`. */
+  placed: PlacedTags[];
   /** Абзаців, куди повернулися теги. */
   matched: number;
   /** Тегів, поставлених усього. */
@@ -189,6 +197,7 @@ export function applyTagCarrier<B extends CarrierBook>(book: B, carrier: TagCarr
   let tagsPlaced = 0;
   let unmatched = 0;
   let skippedByLimit = 0;
+  const placed: PlacedTags[] = [];
 
   for (const chapter of carrier.chapters) {
     for (const section of chapter.sections) {
@@ -233,6 +242,7 @@ export function applyTagCarrier<B extends CarrierBook>(book: B, carrier: TagCarr
         }
         if (!add.length) continue;
         blocks[slot.paraIdx] = `${add.join(' ')} ${original}`;
+        placed.push({ h: paragraph.h, tags: add });
         matched += 1;
         tagsPlaced += add.length;
       }
@@ -248,5 +258,77 @@ export function applyTagCarrier<B extends CarrierBook>(book: B, carrier: TagCarr
     });
   });
 
-  return { book: clone, matched, tagsPlaced, unmatched, skippedByLimit };
+  return { book: clone, placed, matched, tagsPlaced, unmatched, skippedByLimit };
+}
+
+export interface CarrierRevertResult<B> {
+  book: B;
+  /** Абзаців, з яких теги прибрано. */
+  reverted: number;
+  tagsRemoved: number;
+  /** Абзаців, яких уже не знайдено в тому вигляді, як їх залишило повернення. */
+  skipped: number;
+}
+
+/**
+ * Скасовує `applyTagCarrier`: прибирає рівно ті теги, що були поставлені, і
+ * лише там, де абзац досі починається з них.
+ *
+ * ЧОМУ НЕ «ВІДНОВИТИ КНИГУ, ЯКОЮ ВОНА БУЛА». Між поверненням і скасуванням
+ * автор міг писати далі; відновлення цілої книги стерло б ці правки. Тут
+ * чіпається лише початок кількох абзаців, а решта тексту лишається як є.
+ *
+ * ЧОМУ ТЕГ, ЩО ВЖЕ СТОЯВ, НЕ ПОСТРАЖДАЄ. Відкат працює за списком того, що
+ * `applyTagCarrier` справді додав (`placed`), а не за вмістом файла: тег, який
+ * був в абзаці до повернення, у цей список не потрапляв і не прибирається.
+ *
+ * Абзац, який автор змінив після повернення (інший відбиток чи тег уже не на
+ * початку), пропускається й рахується в `skipped`, а не руйнується навмання.
+ */
+export function revertTagCarrier<B extends CarrierBook>(book: B, placed: readonly PlacedTags[]): CarrierRevertResult<B> {
+  const clone = structuredClone(book) as B;
+  const blocksOf = new Map<string, string[]>();
+  const slots = new Map<string, Array<{ key: string; idx: number; used: boolean }>>();
+  (clone.chapters ?? []).forEach((chapter, ci) => {
+    (chapter.sections ?? []).forEach((section, si) => {
+      const key = `${ci}:${si}`;
+      const blocks = splitParagraphs(section.content);
+      blocksOf.set(key, blocks);
+      blocks.forEach((block, idx) => {
+        const h = paragraphKey(block);
+        if (!h) return;
+        const list = slots.get(h) ?? [];
+        list.push({ key, idx, used: false });
+        slots.set(h, list);
+      });
+    });
+  });
+
+  let reverted = 0;
+  let tagsRemoved = 0;
+  let skipped = 0;
+  const changed = new Set<string>();
+  for (const entry of placed) {
+    const prefix = `${entry.tags.join(' ')} `;
+    const slot = (slots.get(entry.h) ?? []).find((c) => !c.used && blocksOf.get(c.key)![c.idx].startsWith(prefix));
+    if (!slot) {
+      skipped += 1;
+      continue;
+    }
+    slot.used = true;
+    const blocks = blocksOf.get(slot.key)!;
+    blocks[slot.idx] = blocks[slot.idx].slice(prefix.length);
+    changed.add(slot.key);
+    reverted += 1;
+    tagsRemoved += entry.tags.length;
+  }
+
+  // Як і при повороті, переписуємо лише розділи, де щось змінилось.
+  (clone.chapters ?? []).forEach((chapter, ci) => {
+    (chapter.sections ?? []).forEach((section, si) => {
+      const key = `${ci}:${si}`;
+      if (changed.has(key)) section.content = blocksOf.get(key)!.join('\n\n');
+    });
+  });
+  return { book: clone, reverted, tagsRemoved, skipped };
 }

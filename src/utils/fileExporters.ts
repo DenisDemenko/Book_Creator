@@ -15,6 +15,8 @@ import {
 } from 'docx';
 import { Book } from '../types';
 import { stripEntityTags } from './coreEntities';
+import { buildTagCarrier } from './tagCarrier';
+import { addCarrierToDocx, addCarrierToEpub } from './tagCarrierFormats';
 
 /**
  * Знімає службові теги ядра (постановка 23.09.2026: «теги не включаємо
@@ -334,7 +336,26 @@ export async function exportBookToDocx(book: Book, options?: { isEnglish?: boole
     ]
   });
 
-  const blob = await Packer.toBlob(doc);
+  let blob = await Packer.toBlob(doc);
+  /*
+   * Носій тегів (`layoutConfig.embedTags`): теги в DOCX знято, як і скрізь, але
+   * карта «абзац → теги» лягає окремою частиною пакета, якої Word не показує.
+   * Лише для української версії: теги стоять в українському тексті, а в
+   * перекладі абзаци інші, і їхні відбитки не збіглися б. Збій вкладення не
+   * зупиняє завантаження: файл без носія краще, ніж без файла.
+   */
+  if (!isEn && book.layoutConfig?.embedTags) {
+    try {
+      // Через ArrayBuffer, а не Blob: JSZip читає Blob лише там, де є FileReader,
+      // а ArrayBuffer — у кожному середовищі. Збій тут тихий (див. нижче), тож
+      // залежність від середовища лишилась би непоміченою.
+      const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+      await addCarrierToDocx(zip, buildTagCarrier(book));
+      blob = await zip.generateAsync({ type: 'blob', mimeType: blob.type, compression: 'DEFLATE' });
+    } catch (err) {
+      console.warn('Носій тегів у DOCX не вкладено:', err);
+    }
+  }
   const safeFilename = `${title.replace(/[^\p{L}\p{N}_-]+/gu, '_')}${isEn ? '_English' : ''}.docx`;
   
   // Trigger browser download
@@ -598,6 +619,15 @@ nav#toc a {
   </spine>
 </package>`;
   zip.file('OEBPS/content.opf', contentOpf);
+
+  // Носій тегів (`layoutConfig.embedTags`) — поруч з OPF, у маніфесті, але поза spine.
+  if (!isEn && book.layoutConfig?.embedTags) {
+    try {
+      await addCarrierToEpub(zip, buildTagCarrier(book));
+    } catch (err) {
+      console.warn('Носій тегів в EPUB не вкладено:', err);
+    }
+  }
 
   // Generate EPUB binary archive
   const epubBlob = await zip.generateAsync({

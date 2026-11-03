@@ -17,6 +17,7 @@ import {
   TAG_CARRIER_MAX_PARAGRAPHS,
   applyTagCarrier,
   buildTagCarrier,
+  revertTagCarrier,
   paragraphKey,
   parseTagCarrier,
   splitParagraphs,
@@ -206,6 +207,64 @@ console.log('\nРозбір чужого JSON:');
   t('не об\'єкт — ні', parseTagCarrier('рядок') === null && parseTagCarrier(null) === null && parseTagCarrier(42) === null);
   t('межа носія задана', TAG_CARRIER_MAX_PARAGRAPHS > 0);
 }
+
+console.log('\nСкасування повернення:');
+{
+  const carrier = buildTagCarrier(tagged);
+  const base = stripped(tagged);
+  const applied = applyTagCarrier(base, carrier);
+  t('повернення залишає список поставленого', applied.placed.length === 3 && applied.placed.every((p) => p.tags.length > 0), String(applied.placed.length));
+
+  const undone = revertTagCarrier(applied.book, applied.placed);
+  t('усі три абзаци скасовані', undone.reverted === 3 && undone.skipped === 0, `${undone.reverted}/${undone.skipped}`);
+  t('прибрано чотири теги', undone.tagsRemoved === 4, String(undone.tagsRemoved));
+  t('книга збігається з тією, що була ДО повернення, байт у байт', JSON.stringify(contents(undone.book)) === JSON.stringify(contents(base)));
+  t('книгу-вхід не змінено', JSON.stringify(contents(applied.book)) === JSON.stringify(contents(tagged)));
+
+  const twice = revertTagCarrier(undone.book, applied.placed);
+  t('повторне скасування нічого не чіпає', twice.reverted === 0 && twice.skipped === 3, `${twice.reverted}/${twice.skipped}`);
+}
+
+{
+  // Автор писав далі: у іншому абзаці — нове речення, в одному з тегованих — теж.
+  const carrier = buildTagCarrier(tagged);
+  const applied = applyTagCarrier(stripped(tagged), carrier);
+  const edited = structuredClone(applied.book);
+  const sec = edited.chapters![0].sections![0];
+  sec.content = sec.content!.replace('Звичайний абзац без жодних тегів.', 'Звичайний абзац без жодних тегів. Нове речення автора.');
+  const undone = revertTagCarrier(edited, applied.placed);
+  t('правка в абзаці без тегів пережила скасування', undone.book.chapters![0].sections![0].content!.includes('Нове речення автора.'));
+  t('теги в цьому розділі все одно прибрані', !/\[\/(emotion|character|location):/.test(undone.book.chapters![0].sections![0].content!));
+
+  const edited2 = structuredClone(applied.book);
+  const s2 = edited2.chapters![0].sections![0];
+  s2.content = s2.content!.replace('Олена відчула холод у грудях.', 'Олена відчула холод у грудях і заплакала.');
+  const undone2 = revertTagCarrier(edited2, applied.placed);
+  t('абзац, змінений після повернення, пропущений, а не зруйнований', undone2.skipped >= 1, String(undone2.skipped));
+  t('його теги лишились на місці', undone2.book.chapters![0].sections![0].content!.startsWith('[/emotion:страх]'));
+  t('решта абзаців скасовано', undone2.reverted === 2, String(undone2.reverted));
+}
+
+{
+  // Тег, що ВЖЕ стояв до повернення, у відкат не потрапляє.
+  const carrier = buildTagCarrier(tagged);
+  const base = stripped(tagged);
+  base.chapters![0].sections![0].content = base.chapters![0].sections![0].content!.replace(
+    'Олена відчула холод у грудях.',
+    '[/emotion:страх] Олена відчула холод у грудях.'
+  );
+  const applied = applyTagCarrier(base, carrier);
+  const undone = revertTagCarrier(applied.book, applied.placed);
+  t('тег, що стояв раніше, пережив і повернення, і скасування', undone.book.chapters![0].sections![0].content!.startsWith('[/emotion:страх] Олена'));
+  t('а поставлений повернення — прибраний', !undone.book.chapters![0].sections![0].content!.includes('[/character:Олена]'));
+  t('книга після скасування збігається з тією, що була до повернення', JSON.stringify(contents(undone.book)) === JSON.stringify(contents(base)));
+}
+
+{
+  const none = revertTagCarrier(stripped(tagged), []);
+  t('порожній список — нічого не змінюється', none.reverted === 0 && JSON.stringify(contents(none.book)) === JSON.stringify(contents(stripped(tagged))));
+}
+
 
 // ── Сам PDF ────────────────────────────────────────────────────────────────
 

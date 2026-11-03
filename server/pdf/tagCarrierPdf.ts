@@ -31,8 +31,10 @@ import {
   PDFString,
   decodePDFRawStream,
 } from 'pdf-lib';
+import JSZip from 'jszip';
 import { buildTagCarrier, parseTagCarrier, type TagCarrier } from '../../src/utils/tagCarrier';
-import type { PdfRenderRequest, PdfRenderResult } from './engines/types';
+import { addCarrierToEpub, addCarrierToHtml } from '../../src/utils/tagCarrierFormats';
+import type { PdfCompanion, PdfRenderRequest, PdfRenderResult } from './engines/types';
 
 /** Ім'я вкладеного файла. Фіксоване: за ним носій і впізнається. */
 export const TAG_CARRIER_FILENAME = 'nova-tags.json';
@@ -104,50 +106,74 @@ export async function readTagCarrier(pdf: Uint8Array): Promise<TagCarrier | null
   }
 }
 
+/** Носій у супутній формат, зроблений рушієм: EPUB — у пакет, HTML — у `<head>`. */
+async function embedInCompanion(c: PdfCompanion, carrier: TagCarrier): Promise<PdfCompanion> {
+  if (c.kind === 'epub') {
+    const zip = await JSZip.loadAsync(c.bytes);
+    await addCarrierToEpub(zip, carrier);
+    const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE', mimeType: 'application/epub+zip' });
+    return { ...c, bytes };
+  }
+  if (c.kind === 'html') {
+    const html = new TextDecoder('utf-8').decode(c.bytes);
+    return { ...c, bytes: new TextEncoder().encode(addCarrierToHtml(html, carrier)) };
+  }
+  return c;
+}
+
 /**
- * Вкладає в готовий PDF носій тегів сутностей, якщо автор цього попросив
- * (`spec.pdfExport.embedTags`).
+ * Вкладає носій тегів сутностей у готові файли, якщо автор цього попросив
+ * (`spec.pdfExport.embedTags`): у сам PDF і в супутні EPUB та HTML.
  *
- * Робиться ТУТ, а не в рушії, бо вкладення — над готовим PDF і не залежить
- * від того, чим він зверстаний: Nova, Chromium, Pandoc і DesignCraft
- * отримують його однаково. Збій носія PDF не валить: файл уже готовий і
+ * Робиться ТУТ, а не в рушії, бо вкладення — над готовими файлами і не залежить
+ * від того, чим вони зверстані: Nova, Chromium, Pandoc і DesignCraft
+ * отримують його однаково. Збій носія файл не валить: він уже готовий і
  * правильний, а втрата вкладення — привід сказати про це словами, не віддати
  * автору помилку замість книги (та сама політика, що й для супутніх форматів).
+ *
+ * СТАНДАРТ ДІЄ ЛИШЕ НА PDF. PDF/X-4 і PDF/A-2b обмежують саме PDF; EPUB і HTML
+ * поруч із ним — окремі файли, і стандарт PDF до них не стосується.
  */
 export async function attachTagCarrier(rendered: PdfRenderResult, request: PdfRenderRequest): Promise<PdfRenderResult> {
   const exp = (request.spec as { pdfExport?: { embedTags?: boolean; standard?: string } } | undefined)?.pdfExport;
   if (!exp?.embedTags) return rendered;
 
-  if (exp.standard && exp.standard !== 'none') {
-    return {
-      ...rendered,
-      notesUk: [
-        ...rendered.notesUk,
-        `Носій тегів не вкладено: обрано стандарт PDF/${exp.standard === 'x4' ? 'X-4' : 'A-2b'}, а файл для друку чи архіву не повинен нести чужих даних.`,
-      ],
-    };
-  }
-
   const carrier = buildTagCarrier(request.book);
   if (!carrier.chapters.length) {
     return { ...rendered, notesUk: [...rendered.notesUk, 'Носій тегів не вкладено: у книзі немає розмічених абзаців.'] };
   }
-  try {
-    const bytes = await embedTagCarrier(rendered.bytes, carrier);
-    const paragraphs = carrier.chapters.reduce((a, c) => a + c.sections.reduce((x, s) => x + s.paragraphs.length, 0), 0);
-    return {
-      ...rendered,
-      bytes,
-      notesUk: [...rendered.notesUk, `Носій тегів вкладено: ${paragraphs} абзаців із тегами, невидимо читачеві.`],
-    };
-  } catch (err) {
-    return {
-      ...rendered,
-      notesUk: [...rendered.notesUk, `Носій тегів не вкладено: ${(err as Error).message}`],
-    };
-  }
-}
+  const paragraphs = carrier.chapters.reduce((a, c) => a + c.sections.reduce((x, s) => x + s.paragraphs.length, 0), 0);
+  const notes: string[] = [];
+  let bytes = rendered.bytes;
 
-/**
- * Зверстати обраним рушієм. Тихого відкоту на інший рушій немає.
- */
+  if (exp.standard && exp.standard !== 'none') {
+    notes.push(
+      `Носій тегів у PDF не вкладено: обрано стандарт PDF/${exp.standard === 'x4' ? 'X-4' : 'A-2b'}, а файл для друку чи архіву не повинен нести чужих даних.`
+    );
+  } else {
+    try {
+      bytes = await embedTagCarrier(rendered.bytes, carrier);
+      notes.push(`Носій тегів вкладено в PDF: ${paragraphs} абзаців із тегами, невидимо читачеві.`);
+    } catch (err) {
+      notes.push(`Носій тегів у PDF не вкладено: ${(err as Error).message}`);
+    }
+  }
+
+  let companions = rendered.companions;
+  if (companions?.length) {
+    companions = await Promise.all(
+      companions.map(async (c) => {
+        try {
+          const out = await embedInCompanion(c, carrier);
+          if (out !== c) notes.push(`Носій тегів вкладено в супутній ${c.kind.toUpperCase()}.`);
+          return out;
+        } catch (err) {
+          notes.push(`Носій тегів у супутній ${c.kind.toUpperCase()} не вкладено: ${(err as Error).message}`);
+          return c;
+        }
+      })
+    );
+  }
+
+  return { ...rendered, bytes, ...(companions ? { companions } : {}), notesUk: [...rendered.notesUk, ...notes] };
+}
