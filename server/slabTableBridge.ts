@@ -46,7 +46,7 @@ export async function tableBridge(
   body?: unknown,
   deps: { fetch?: typeof fetch; settings?: BridgeSettings; actorUid?: string } = {},
 ) {
-  if (!/^\/(state|slabs|costs|production|resin-textures|leg-settings|leg-designs|leg-plates)(\/[a-zA-Z0-9-]+)?$/.test(path))
+  if (!/^\/(state|facade-state|slabs|costs|production|resin-textures|leg-settings|leg-designs|leg-plates)(\/[a-zA-Z0-9-]+)?$/.test(path))
     throw new Error("Некоректний маршрут конструктора.");
   const settings = deps.settings ?? (await readBridgeSettings());
   const response = await (deps.fetch ?? fetch)(
@@ -149,6 +149,11 @@ export function registerSlabTableRoutes(app: Express) {
           });
       }
     };
+  app.get(
+    "/api/admin/slab-tables/facade-state",
+    requireSlabInventory,
+    proxy("GET", () => "/facade-state"),
+  );
   app.get(
     "/api/admin/slab-tables/state",
     requireSlabInventory,

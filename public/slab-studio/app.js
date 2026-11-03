@@ -1,7 +1,10 @@
 "use strict";
 (async () => {
   const bridge = window.SlabBridge;
-  const mode = new URLSearchParams(location.search).get("mode");
+  const query = new URLSearchParams(location.search);
+  const mode = query.get("mode");
+  const facadeInventory = ["admin", "inventory"].includes(mode) && query.get("category") === "cabinet_facade";
+  const stockPath = facadeInventory ? "/cabinets/state" : "/tables/state";
   const admin = mode === "admin";
   const inventory = admin || mode === "inventory";
   const $ = (id) => document.getElementById(id),
@@ -25,7 +28,7 @@
     num = (n, d = 1) =>
       new Intl.NumberFormat("uk-UA", { maximumFractionDigits: d }).format(n),
     clone = (x) => JSON.parse(JSON.stringify(x));
-  let remote = await bridge.request("GET", "/tables/state");
+  let remote = await bridge.request("GET", stockPath);
   $("resinTextureControls").hidden = !remote.capabilities?.resinTextures;
   if (remote.theme) {
     for (const [key, value] of Object.entries(remote.theme.tokens || {}))
@@ -43,7 +46,7 @@
     orders: [],
   };
   async function reloadRemote() {
-    remote = await bridge.request("GET", "/tables/state");
+    remote = await bridge.request("GET", stockPath);
     db.slabs = remote.slabs;
     db.costs = remote.costs;
     db.resinTextures = remote.resinTextures || [];
@@ -1485,7 +1488,7 @@
   $("newSlab").onclick = () => {
     contourEditor.reset();
     $("slabNumber").value =
-      "SL-" + String(db.slabs.length + 1).padStart(3, "0");
+      (facadeInventory ? "FT-" : "SL-") + String(db.slabs.length + 1).padStart(3, "0");
     $("slabDialog").showModal();
     contourEditor.draw();
   };
@@ -1516,6 +1519,7 @@
     try {
       await bridge.request("POST", "/tables/admin/slabs", {
         ...data,
+        ...(facadeInventory ? { category: "cabinet_facade" } : {}),
         number,
         species,
         t: Number($("slabThickness").value),
@@ -1882,7 +1886,14 @@
   renderLibrary();
   renderDesign();
   renderOrders();
-  view(location.hash.slice(1) || (inventory ? "inventory" : "builder"));
+  if (facadeInventory) {
+    document.title = "Для фасадів тумб — склад слебів";
+    document.body.dataset.slabCategory = "cabinet_facade";
+    for (const button of document.querySelectorAll("[data-view]")) if (button.dataset.view !== "inventory") button.hidden = true;
+    const heading = document.querySelector("#inventory h1, #inventory h2");
+    if (heading) heading.textContent = "Для фасадів тумб";
+  }
+  view(facadeInventory ? "inventory" : location.hash.slice(1) || (inventory ? "inventory" : "builder"));
 })().catch((e) => {
   document.querySelector("main").innerHTML =
     '<div class="panel" style="margin:40px"><h1>Сервіс тимчасово недоступний</h1><p id="bootError"></p><button onclick="location.reload()">Повторити</button></div>';

@@ -31,7 +31,7 @@ const ADMIN_PANEL = read('src/components/AdminPanelView.tsx');
 // ---------------------------------------------------------------------------
 console.log('Реєстр вузлів:');
 {
-  t('вузлів дев’ятнадцять — зі спільним краудфандингом', ADMIN_NODES.length === 19, String(ADMIN_NODES.length));
+  t('вузлів двадцять — з фасадними слебами', ADMIN_NODES.length === 20, String(ADMIN_NODES.length));
 
   const ids = ADMIN_NODES.map((n) => n.id);
   t('усі id унікальні', new Set(ids).size === ids.length, ids.join(', '));
@@ -42,7 +42,7 @@ console.log('Реєстр вузлів:');
   const top = ADMIN_NODES.filter((n) => n.slot === 'top');
   const left = ADMIN_NODES.filter((n) => n.slot === 'left');
   const right = ADMIN_NODES.filter((n) => n.slot === 'right');
-  t('карта розкладена 3 / 8 / 8', top.length === 3 && left.length === 8 && right.length === 8,
+  t('карта розкладена 3 / 8 / 9', top.length === 3 && left.length === 8 && right.length === 9,
     `${top.length} / ${left.length} / ${right.length}`);
 
   const danger = ADMIN_NODES.filter((n) => n.tone === 'danger');
@@ -79,9 +79,9 @@ console.log('\nДії вузлів відповідають тому, що ст�
   }
 
   const viewNodes = ADMIN_NODES.filter((n) => n.action.kind === 'view');
-  const handled = new Set(['api-keys', 'core-ai', 'moderation', 'products', 'price-management', 'procurement', 'quality', 'slab-tables', 'crowdfunding']);
+  const handled = new Set(['api-keys', 'core-ai', 'moderation', 'products', 'price-management', 'procurement', 'quality', 'slab-tables', 'cabinet-facades', 'crowdfunding']);
   const unknownViews = viewNodes.filter((n) => !handled.has((n.action as { view: string }).view));
-  t('усі самостійні сторінки — з відомих восьми', unknownViews.length === 0, unknownViews.map((n) => n.id).join(', '));
+  t('усі самостійні сторінки — з відомого переліку', unknownViews.length === 0, unknownViews.map((n) => n.id).join(', '));
 
   for (const view of handled) {
     t(`сторінка «${view}» має обробник на екрані`, ADMIN_OS.includes(`'${view}'`));
