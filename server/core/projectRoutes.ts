@@ -22,6 +22,9 @@ import { JobRejectedError } from './jobs/types';
 import type { JobQueue } from './jobs/queue';
 import { AI_MENTIONS_JOB_KIND, MENTION_SUGGESTION, RELATION_SUGGESTION, publicSuggestion } from './ai/mentions';
 import { JEV_TAG_THRESHOLD, runJevTagging, type JevTagParagraph } from './ai/jevTags';
+import { TAG_SEARCH_DEFAULT_LIMIT, buildTagHits } from './tagSearch';
+import { entityBySlug } from '../../src/utils/coreEntities';
+import { paragraphExcerpt } from './search/text';
 import { hybridSearch, type SearchDeps, type SearchRequest } from './search/service';
 import { buildStoryGraph, evidenceRefs } from './storyGraph';
 import { AI_PROFILE_JOB_KIND, PROFILE_FACT, buildCharacterProfile, studioAppearanceText, studioCanon, type StudioCharacterLike } from './characterProfile';
@@ -630,6 +633,50 @@ export function registerProjectRoutes(app: Express, deps: ProjectRoutesDeps): vo
       tags: run.decisions.filter((d) => d.accepted),
       skipped: run.decisions.filter((d) => !d.accepted),
     });
+  }));
+
+  /**
+   * Пошук абзаців за тегом сутності (постановка власника 03.11.2026): усі
+   * абзаци книги з заданим тегом, із главою, розділом і адресою в редакторі.
+   *
+   * Тег перевіряється реєстром 118: `/вигадане` дає 404, а не порожній
+   * список. Порожній список означає «такого тегу в книзі немає», і плутати ці
+   * дві відповіді не можна — автор інакше думатиме, що текст не розмічений,
+   * коли насправді він помилився в назві тегу.
+   *
+   * Jev тут не питається: теги вже проставлені, і платити за модель на
+   * кожен пошук означало б щоразу трохи інший список на тому самому тексті.
+   */
+  app.get('/api/projects/:id/tags/:slug/paragraphs', withRepo(async (repo, req, res) => {
+    const slug = String(req.params.slug || '').replace(/^\/+/, '').toLowerCase();
+    const entityType = entityBySlug(slug);
+    if (!entityType) {
+      res.status(404).json({ error: `Тегу /${slug} немає в реєстрі сутностей.`, kind: 'unknown_tag' });
+      return;
+    }
+    if (req.projectAccess!.effective.restricted) {
+      // Та сама межа, що й у картці сутності: в уривках — текст чужих сцен.
+      res.json({ tag: entityType.tag, nameUk: entityType.nameUk, hits: [], total: 0, entitiesFound: 0, restricted: true });
+      return;
+    }
+    const limitRaw = Number(req.query.limit);
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(1000, Math.floor(limitRaw)) : TAG_SEARCH_DEFAULT_LIMIT;
+
+    const entities = await repo.listEntities(req.params.id, slug);
+    const mentionLists = await Promise.all(entities.map((e) => repo.listMentionsByEntity(req.params.id, e.id)));
+    const [paragraphs, documents] = await Promise.all([
+      repo.listAllParagraphs(req.params.id),
+      repo.listDocuments(req.params.id),
+    ]);
+    const result = buildTagHits({
+      entities: entities.map((e) => ({ id: e.id, name: e.name, status: e.status })),
+      mentions: mentionLists.flat(),
+      paragraphs,
+      documents,
+      excerpt: (text) => paragraphExcerpt(text, 220),
+      limit,
+    });
+    res.json({ tag: entityType.tag, nameUk: entityType.nameUk, color: entityType.color, limit, ...result });
   }));
 
   const loadSuggestion = async (repo: CoreRepository, req: Request, res: Response): Promise<FindingRow | null> => {

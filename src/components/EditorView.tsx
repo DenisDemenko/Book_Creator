@@ -16,6 +16,7 @@ import { entityTagKey } from './manuscriptEditor/EntityTagPlugin';
 import { useRegistryRevision } from '../utils/ontologyClient';
 import { CoreEntityPanel } from './CoreEntityPanel';
 import { AiSuggestionsPanel } from './AiSuggestionsPanel';
+import { TagSearchPanel } from './TagSearchPanel';
 import { EntitySlashMenu } from './EntitySlashMenu';
 import { CharacterDialogueModal } from './CharacterDialogueModal';
 import {
@@ -1477,6 +1478,50 @@ export const EditorView: React.FC<EditorViewProps> = ({
     });
     return found;
   };
+
+  /**
+   * Перехід із пошуку за тегом (постановка власника 03.11.2026) до самого
+   * абзаца.
+   *
+   * Якщо розділ уже відкритий — стаємо на абзац одразу. Якщо ні, спершу
+   * перемикаємо розділ і лише потім шукаємо блок: канва нового розділу
+   * будується не в тому ж такті, і `findBlockByPid` на старому документі
+   * повернув би або нічого, або чужий абзац. Той самий прийом уже діє для
+   * міток глав (`pendingTagFocus`).
+   */
+  const [pendingParagraphFocus, setPendingParagraphFocus] = useState<string | null>(null);
+
+  const focusParagraphByPid = (pid: string): boolean => {
+    const block = findBlockByPid(pid);
+    if (!uaEditor || !block) return false;
+    uaEditor
+      .chain()
+      .focus()
+      .setTextSelection({ from: block.pos, to: block.pos + block.text.length })
+      .scrollIntoView()
+      .run();
+    return true;
+  };
+
+  const handleOpenTaggedParagraph = (chapterId: string | null, sectionId: string, editorPid: string) => {
+    if (sectionId === activeSection?.id) {
+      focusParagraphByPid(editorPid);
+      return;
+    }
+    setPendingParagraphFocus(editorPid);
+    if (chapterId) onSelectSection(chapterId, sectionId);
+  };
+
+  useEffect(() => {
+    if (!pendingParagraphFocus) return;
+    const pid = pendingParagraphFocus;
+    const timer = window.setTimeout(() => {
+      focusParagraphByPid(pid);
+      setPendingParagraphFocus(null);
+    }, 180);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingParagraphFocus, activeSection?.id]);
 
   const handleCanInsertSuggestionTag = (pid: string, tag: string): true | string => {
     if (!uaEditor) return 'Редактор ще не відкрито.';
@@ -5871,6 +5916,9 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 canInsertTag={handleCanInsertSuggestionTag}
                 onInsertTag={handleInsertSuggestionTag}
               />
+            )}
+            {rightPanelTab === 'entities' && (
+              <TagSearchPanel bookId={book.id} onOpenParagraph={handleOpenTaggedParagraph} />
             )}
             {rightPanelTab === 'entities' && (
               <CoreEntityPanel
