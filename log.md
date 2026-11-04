@@ -121,7 +121,7 @@ remote перевірити можна, запушити — ні**.
 
 # Що не запушено (для наступної сесії)
 
-04.11 #527: Studio PR37 — CI OK, чекає API. Marketplace PR39 злито; Railway Dockerfile validation. Виправлення PR40; межі #527.
+04.11 #527: CAD опубліковано: Marketplace PR39/40 (e4dcc8e), Studio PR37 (59b066d). CI та live 10 hashes/guards OK; межі #527.
 
 04.11.2026, #526: розгортання GrabFusion підготовлено, **НЕ запушено**. Studio: гілка `claude/grabfusion-deploy` (від `38c7fa3`, worktree `.claude/worktrees/grabfusion-deploy`) — `DEPLOY.md`, `.env.example`, `railway.json`, скрипти `container-smoke.sh` і `post-deploy-check.sh`. Маркетплейс: гілка `claude/grabfusion-proxy-merge` (від `ea94dd8`, коміт `9e52bb6`, worktree `D:/Rama/fl-proxy`). **Порядок:** `railway login` → сервіс `grabfusion` у `comfortable-caring` з томом → `GRABFUSION_ORIGIN` у Vercel + Redeploy → `scripts/post-deploy-check.sh`. Поки це не зроблено, `www.fusionlab.in.ua/grabfisionstidio` дає 404.
 

@@ -9,6 +9,8 @@
 
 Уточнення: Studio CI успішні на 8438867; Marketplace PR39 злито, але Railway Dockerfile validation заблокував API. PR40 — Docker compatibility та повний image/runtime smoke; початковий image smoke вже пройшов. Executor unavailable; зміни продовжені через GitHub. Не виконано production-приймання: чекає успішного API deploy, потім Studio PR37. Деталі #527 та PR.
 
+**Фінал:** Marketplace PR39/40 та Studio PR37 опубліковані; Railway/Vercel успішні. Повний Docker/CAD, функціональні CI і live verifier 41850086098 (10 hashes/guards) пройшли; PR41 зберігає розширене покриття. Не виконувалися production-admin login/AutoCAD desktop і комерційні мутації — відповідно немає доступу/не потрібні. Локальне середовище недоступне, власний lock можна прибрати після відновлення та звірки task. Інших функціональних залишків немає.
+
 ## Сесія 04.11.2026 #02 — запис #500 (Codex)
 
 Прийнято чистий master 0989a4b; синхронізовано геометрію царг столів із Marketplace для виробничих PDF. Перевірено build/tsc і PDF-контракти. Власник підтвердив опцію царг і раніше дозволив публікацію.
