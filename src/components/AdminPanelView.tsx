@@ -50,6 +50,7 @@ import {
 import type { AdminUserRow, UserRole } from '../types';
 import { ALL_ROLES, getRoleInfo } from '../utils/rbac';
 import { renderPdfFirstPageToPng } from '../utils/pdfCover';
+import { parseExternalId } from './adminOs/externalId';
 
 export type AdminTab = 'users' | 'roles' | 'costs' | 'business' | 'ai' | 'expenses' | 'bridge' | 'crm' | 'git' | 'payouts' | 'moderation';
 
@@ -417,17 +418,16 @@ const MarketplaceBridgePanel: React.FC = () => {
   };
 
   /**
-   * `externalId` мосту — це `${bookId}:${format}` (див. bridgeExternalId у
-   * server/marketplaceBridge.ts). Розбираємо з КІНЦЯ: формат завжди одне
-   * слово без двокрапки, а от ідентифікатор книги колись може її містити.
+   * Обкладинку з файлу приймає лише звичайна книга (`bookId:digital|print`).
+   * Тестове видання рушієм, курс і виріб мають інші externalId — раніше їх
+   * розбирало «з кінця по двокрапці» й шило обкладинку не туди.
    */
-  const parseExternalId = (externalId: string): { bookId: string; format: 'digital' | 'print' } => {
-    const at = externalId.lastIndexOf(':');
-    const format = at >= 0 ? externalId.slice(at + 1) : 'digital';
-    return {
-      bookId: at >= 0 ? externalId.slice(0, at) : externalId,
-      format: format === 'print' ? 'print' : 'digital',
-    };
+  const parseBookRow = (externalId: string): { bookId: string; format: 'digital' | 'print' } => {
+    const parsed = parseExternalId(externalId);
+    if ((parsed.kind !== 'digital' && parsed.kind !== 'print') || parsed.engineId) {
+      throw new Error('Обкладинку з файлу можна надіслати лише для звичайної книги, не для курсу, виробу чи тестового видання.');
+    }
+    return { bookId: parsed.id, format: parsed.kind };
   };
 
   /**
@@ -443,7 +443,7 @@ const MarketplaceBridgePanel: React.FC = () => {
     setBusy(true);
     setMessage(null);
     try {
-      const { bookId, format } = parseExternalId(row.externalId);
+      const { bookId, format } = parseBookRow(row.externalId);
       const imageBase64 = await renderPdfFirstPageToPng(file);
       const res = await fetch('/api/admin/marketplace-bridge/cover', {
         method: 'POST',
@@ -895,6 +895,21 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ tab: controlledT
     return data;
   }, []);
 
+  // Скільки записів чекає рішення модерації — для бейджа на вкладці.
+  const [pendingModeration, setPendingModeration] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/admin/moderation/summary', { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (alive && typeof data?.pending === 'number') setPendingModeration(data.pending);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [tab]);
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -1051,6 +1066,15 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ tab: controlledT
             >
               <Icon className="w-3.5 h-3.5" />
               {label}
+              {id === 'moderation' && pendingModeration > 0 && (
+                <span
+                  className="min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center"
+                  title={`Чекає рішення: ${pendingModeration}`}
+                  aria-label={`Чекає рішення: ${pendingModeration}`}
+                >
+                  {pendingModeration}
+                </span>
+              )}
             </button>
           ))}
         </div>

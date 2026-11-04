@@ -3,8 +3,9 @@
  * (docs/tech-spec-course-wizard-2026.md, Рішення 1: курс — окрема сутність).
  *
  * Курс НЕ живе всередині книги: ремісничий курс (напр. «Fusion для
- * мебелярів») рукопису не має. Наявний Book.courseConfig («курс із книги»)
- * лишається недоторканим — це інший, паралельний сценарій.
+ * мебелярів») рукопису не має. Окремої «моделі курсу з книги» в коді немає
+ * (колишній Book.courseConfig прибрано з опису під час аудиту курсів, етап 4):
+ * єдине джерело курсів — ця таблиця.
  *
  * Повна структура (модулі, уроки, завдання, навички) лежить одним JSON у
  * колонці payload — як у books/express_drafts. Окремі таблиці на кожен
@@ -13,6 +14,8 @@
 
 import { randomUUID } from 'node:crypto';
 import { getDb, unavailableMessage } from './db';
+import { COURSE_CURRENCY, normalizeGraduateSelling, type GraduateSelling } from '../src/utils/coursePublishRules';
+import { normalizeOrigin, reconcileOrigin, type CourseOrigin } from './courseOrigin';
 
 function requireDb() {
   const db = getDb();
@@ -78,9 +81,20 @@ export interface Course {
   outcomes: string[];
   highlights: string[];
   coverUrl?: string;
+  /** Застарілий вільний текст категорії — лишається запасним шляхом для старих курсів. */
   category?: string;
+  /** Slug категорії вітрини (`GET /bridge/categories`) — має перевагу над `category`. */
+  categorySlug?: string;
+  /** Ціна в копійках. Не задана — курс не подати (див. coursePublishRules). */
   priceMinor?: number;
+  /** Явне «Безкоштовний»: лише з ним ціна 0 допустима. */
+  free?: boolean;
+  /** Завжди UAH: вітрина приймає оплату лише в гривнях. */
   currency?: string;
+  /** Коли студенти можуть продавати власні роботи, зроблені під час курсу. Не задано = після завершення. */
+  graduateSelling?: GraduateSelling;
+  /** Звідки курс узявся (чернетка за фото) і що в ньому ще не правив автор. Виставляє лише сервер. */
+  origin?: CourseOrigin;
   skills: CourseSkill[];
   modules: CourseModuleV2[];
   createdAt: string;
@@ -121,8 +135,14 @@ function toCourse(row: Row): Course {
     highlights: data.highlights ?? [],
     coverUrl: data.coverUrl,
     category: data.category,
+    categorySlug: data.categorySlug,
     priceMinor: data.priceMinor,
-    currency: data.currency,
+    free: data.free === true ? true : undefined,
+    // Старі курси могли мати «USD» чи «грн» з вільного поля — читаємо як UAH,
+    // бо інакше вітрина й не продасть.
+    currency: COURSE_CURRENCY,
+    graduateSelling: normalizeGraduateSelling(data.graduateSelling),
+    origin: normalizeOrigin(data.origin),
     skills: data.skills ?? [],
     modules: data.modules ?? [],
     createdAt: row.created_at,
@@ -150,8 +170,12 @@ export function createCourse(
     highlights: input.highlights ?? [],
     coverUrl: input.coverUrl,
     category: input.category,
+    categorySlug: input.categorySlug,
     priceMinor: input.priceMinor,
-    currency: input.currency,
+    free: input.free === true ? true : undefined,
+    currency: COURSE_CURRENCY,
+    graduateSelling: normalizeGraduateSelling(input.graduateSelling),
+    origin: normalizeOrigin(input.origin),
     skills: input.skills ?? [],
     modules: input.modules ?? [],
     createdAt: now,
@@ -226,6 +250,18 @@ export function updateCourse(id: string, patch: Partial<Course>): Course | undef
   }
   if (patch.status !== undefined) {
     next.status = STATUSES.includes(patch.status) ? patch.status : current.status;
+  }
+  // Валюта не вибирається: кошик і LiqPay рахують лише гривні.
+  next.currency = COURSE_CURRENCY;
+  next.graduateSelling = normalizeGraduateSelling(next.graduateSelling);
+  next.free = next.free === true ? true : undefined;
+  // Походження не приймається від клієнта: береться збережене, а поля, які автор
+  // змінив цією правкою, перестають бути «написаними ШІ».
+  next.origin = reconcileOrigin(current.origin, current.modules, next.modules);
+  // Редактор шле стерту ціну як null (undefined випав би з JSON і стара ціна
+  // лишилась би): null — «ціну не задано».
+  if (next.priceMinor === null || (next.priceMinor !== undefined && !Number.isFinite(Number(next.priceMinor)))) {
+    next.priceMinor = undefined;
   }
 
   db.prepare(

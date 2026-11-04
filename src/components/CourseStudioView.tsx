@@ -30,7 +30,8 @@ async function api<T>(path: string): Promise<T> {
 /**
  * Additive shell around the existing Course Studio.
  *
- * The original editor is preserved in CourseStudioLegacy.tsx byte-for-byte.
+ * The course editor lives in CourseStudioLegacy.tsx (since 27.10.2026 it also
+ * carries the storefront rules: UAH price, «free» flag, category, moderation).
  * Educational design is a sibling workspace, not a replacement of course
  * authoring: CourseV2 remains the single source of truth and design choices
  * are stored separately by CourseEducationalDesignPanel.

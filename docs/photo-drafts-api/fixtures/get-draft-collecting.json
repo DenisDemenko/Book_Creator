@@ -1,0 +1,103 @@
+{
+  "draft": {
+    "draftId": "pd_7f3a9c2e41b0",
+    "kind": "course",
+    "status": "collecting",
+    "revision": 7,
+    "title": "Ложка з вишні за один вечір",
+    "craft": "різьблення по дереву",
+    "audience": "дорослі початківці",
+    "level": "beginner",
+    "bookId": null,
+    "photos": [
+      {
+        "photoId": "ph_01a1",
+        "clientId": "c-2026-10-28-01",
+        "status": "described",
+        "order": 1,
+        "takenAt": "2026-10-28T10:01:00.000Z",
+        "imageUrl": "/api/external/v1/photo-drafts/pd_7f3a9c2e41b0/photos/ph_01a1/image",
+        "description": "Заготовка з вишні 25×5 см на верстаку, олівцем розмічено контур ложки.",
+        "tags": [
+          "вишня",
+          "розмітка",
+          "олівець"
+        ],
+        "error": null,
+        "createdAt": "2026-10-28T10:01:05.000Z",
+        "updatedAt": "2026-10-28T10:01:20.000Z"
+      },
+      {
+        "photoId": "ph_02a1",
+        "clientId": "c-2026-10-28-02",
+        "status": "described",
+        "order": 2,
+        "takenAt": "2026-10-28T10:02:00.000Z",
+        "imageUrl": "/api/external/v1/photo-drafts/pd_7f3a9c2e41b0/photos/ph_02a1/image",
+        "description": "Ніж-косяк вибирає матеріал по контуру, рух від себе; заготовка затиснута струбциною.",
+        "tags": [
+          "ніж-косяк",
+          "струбцина",
+          "вирізання"
+        ],
+        "error": null,
+        "createdAt": "2026-10-28T10:02:05.000Z",
+        "updatedAt": "2026-10-28T10:02:20.000Z"
+      },
+      {
+        "photoId": "ph_03a1",
+        "clientId": "c-2026-10-28-03",
+        "status": "described",
+        "order": 3,
+        "takenAt": "2026-10-28T10:03:00.000Z",
+        "imageUrl": "/api/external/v1/photo-drafts/pd_7f3a9c2e41b0/photos/ph_03a1/image",
+        "description": "Ложкорізом вибирається чаша ложки, стружка дрібна, волокна йдуть уздовж.",
+        "tags": [
+          "ложкоріз",
+          "чаша"
+        ],
+        "error": null,
+        "createdAt": "2026-10-28T10:03:05.000Z",
+        "updatedAt": "2026-10-28T10:03:20.000Z"
+      },
+      {
+        "photoId": "ph_04a1",
+        "clientId": "c-2026-10-28-04",
+        "status": "processing",
+        "order": 4,
+        "takenAt": "2026-10-28T10:04:00.000Z",
+        "imageUrl": "/api/external/v1/photo-drafts/pd_7f3a9c2e41b0/photos/ph_04a1/image",
+        "description": null,
+        "tags": [],
+        "error": null,
+        "createdAt": "2026-10-28T10:04:05.000Z",
+        "updatedAt": "2026-10-28T10:04:20.000Z"
+      }
+    ],
+    "notes": [
+      {
+        "noteId": "n-1",
+        "photoIds": [
+          "ph_01a1"
+        ],
+        "text": "Беремо сиру вишню — її легше різати. Контур малюємо від руки, ширина чаші 4 см.",
+        "updatedAt": "2026-10-28T10:01:40.000Z"
+      },
+      {
+        "noteId": "n-2",
+        "photoIds": [
+          "ph_02a1",
+          "ph_03a1"
+        ],
+        "text": "Спершу грубо по контуру, потім чаша. Ріжемо завжди від себе 👍",
+        "updatedAt": "2026-10-28T10:03:40.000Z"
+      }
+    ],
+    "structure": null,
+    "assumptions": [],
+    "job": null,
+    "submitted": null,
+    "createdAt": "2026-10-28T10:00:00.000Z",
+    "updatedAt": "2026-10-28T10:04:05.000Z"
+  }
+}

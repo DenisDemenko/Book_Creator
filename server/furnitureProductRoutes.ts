@@ -13,11 +13,16 @@
 
 import type { Express } from 'express';
 import { requireAdmin } from './auth';
+import { DATA_DIR } from './db';
+import { createKitFileStore } from './kitFiles';
+import { registerKitFileRoutes, serialKitFiles } from './kitFileRoutes';
+import path from 'node:path';
 import {
   MarketplaceBridgeError,
   attachProductMediaToMarketplace,
   clearProductMedia,
   publishProductToMarketplace,
+  cleanCategorySlug,
   type BridgeSettings,
   type PublishProductAttributes,
 } from './marketplaceBridge';
@@ -40,6 +45,9 @@ import {
   type FurnitureProduct,
   type FurnitureVariant,
 } from '../src/components/adminOs/furnitureProduct';
+
+import { kitCost, kitIssues, normalizeKit } from '../src/components/adminOs/kitSpec';
+import { kitSafetyLines, kitSafetyPublic } from '../src/components/adminOs/kitSafety';
 
 const DRAFTS_KEY = 'furniture_product_drafts';
 
@@ -176,11 +184,13 @@ function serverPublishIssues(p: FurnitureProduct): string[] {
   // перевірки, що й у редакторі. Дубль SKU, який пройшов би тут, означав
   // би дві позиції замовлення з однаковим артикулом і різними цінами.
   issues.push(...variantIssues(p));
+  // Набір (K1/K2): той самий бар'єр, що й у редакторі, — сервер не довіряє клієнтові.
+  if (p.kit?.enabled) issues.push(...kitIssues(normalizeKit(p.kit) ?? p.kit).errors.map((m) => `Набір: ${m}`));
   return issues;
 }
 
 /** Картка виробу → контракт мосту. Обкладинку (фото) передає частина Г. */
-function toBridgeAttributes(p: FurnitureProduct): PublishProductAttributes {
+export function toBridgeAttributes(p: FurnitureProduct): PublishProductAttributes {
   return {
     category: p.category,
     subcategory: p.subcategory,
@@ -206,6 +216,8 @@ function toBridgeAttributes(p: FurnitureProduct): PublishProductAttributes {
     phoneFit: p.phoneFit,
     // Вітрина пише «від N» лише тоді, коли ціни видимих варіантів різні.
     variantPriceRange: hasVariantPriceRange(p) || undefined,
+    // Вік, попередження й матеріали набору (K2). Документи відповідності — приватні, не їдуть.
+    safety: kitSafetyPublic(p.kit),
   };
 }
 
@@ -340,7 +352,11 @@ export async function uploadProductMedia(
   return { uploaded, failed };
 }
 
+const kitFileStore = createKitFileStore(process.env.KIT_FILES_DIR || path.join(DATA_DIR, 'kit-files'));
+
 export function registerFurnitureProductRoutes(app: Express): void {
+  registerKitFileRoutes(app, { auth: requireAdmin, readDrafts, writeDrafts, store: kitFileStore });
+
   app.get('/api/admin/furniture-products', requireAdmin, async (_req, res) => {
     const drafts = await readDrafts();
     res.json({ products: drafts });
@@ -351,13 +367,39 @@ export function registerFurnitureProductRoutes(app: Express): void {
     if (!product || typeof product !== 'object' || !product.id) {
       return res.status(400).json({ error: 'Некоректна картка виробу.' });
     }
-    const drafts = await readDrafts();
-    const idx = drafts.findIndex((d) => d.id === product.id);
-    const clean: FurnitureProduct = { ...product, updatedAt: new Date().toISOString() };
-    if (idx >= 0) drafts[idx] = clean;
-    else drafts.unshift(clean);
-    await writeDrafts(drafts);
+    const clean = await serialKitFiles(product.id, async () => {
+      const drafts = await readDrafts();
+      const idx = drafts.findIndex((d) => d.id === product.id);
+      const clean: FurnitureProduct = { ...product, updatedAt: new Date().toISOString() };
+      // Специфікацію набору (K1) приймаємо лише в нормалізованому вигляді: межі, унікальні id рядків.
+      if (product.kit !== undefined) {
+        // Список файлів (K4) — лише зі сховища: тіло запиту не може додати «файл», якого немає на диску.
+        const storedFiles = idx >= 0 ? drafts[idx].kit?.files ?? [] : [];
+        const kit = normalizeKit(product.kit && typeof product.kit === 'object' ? { ...product.kit, files: storedFiles } : product.kit);
+        if (kit) clean.kit = kit;
+        else delete clean.kit;
+      }
+      if (idx >= 0) drafts[idx] = clean;
+      else drafts.unshift(clean);
+      await writeDrafts(drafts);
+      return clean;
+    });
     res.json({ product: clean });
+  });
+
+  /** Собівартість набору за збереженою специфікацією (K1): ті самі цифри, що в редакторі; джерело для K3 і K5. */
+  app.get('/api/admin/furniture-products/:id/kit-cost', requireAdmin, async (req, res) => {
+    const product = (await readDrafts()).find((d) => d.id === req.params.id);
+    if (!product) return res.status(404).json({ error: 'Чорнетку виробу не знайдено.' });
+    if (!product.kit?.enabled) return res.status(404).json({ error: 'Цей виріб не є набором.' });
+    res.json({
+      kit: product.kit,
+      cost: kitCost(product.kit),
+      issues: kitIssues(product.kit),
+      // Для вітрини й для розділу «Безпека» інструкції (K3/K5): одне джерело з публікацією.
+      safety: kitSafetyPublic(product.kit) ?? null,
+      safetyLines: kitSafetyLines(product.kit),
+    });
   });
 
   app.delete('/api/admin/furniture-products/:id', requireAdmin, async (req, res) => {
@@ -367,6 +409,8 @@ export function registerFurnitureProductRoutes(app: Express): void {
       return res.status(404).json({ error: 'Чорнетку виробу не знайдено.' });
     }
     await writeDrafts(next);
+    // Файли виготовлення (K4) прибираємо разом із карткою; збій диска не має ламати видалення.
+    await kitFileStore.removeProduct(req.params.id).catch((e) => console.error('[kit-files] cleanup', e));
     res.json({ ok: true });
   });
 
@@ -412,6 +456,7 @@ export function registerFurnitureProductRoutes(app: Express): void {
         attributes: toBridgeAttributes(product),
         variants: toBridgeVariants(product.variants),
         sellerSlug,
+        categorySlug: cleanCategorySlug(product.marketplaceCategory),
       });
       setPublishProgress(id, {
         done: 1,

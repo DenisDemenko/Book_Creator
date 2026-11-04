@@ -1,0 +1,88 @@
+{
+  "draft": {
+    "draftId": "pd_8b2d4f6a1c3e",
+    "kind": "manuscript",
+    "status": "submitted",
+    "revision": 8,
+    "title": "Розділ 1. Млин",
+    "craft": null,
+    "audience": null,
+    "level": null,
+    "bookId": null,
+    "newBookTitle": "Долина тиші",
+    "instructionMode": null,
+    "modelCode": null,
+    "photos": [
+      {
+        "photoId": "ph_m101",
+        "clientId": "c-2026-10-28-m1",
+        "status": "described",
+        "order": 1,
+        "takenAt": "2026-10-28T11:01:00.000Z",
+        "imageUrl": "/api/external/v1/photo-drafts/pd_8b2d4f6a1c3e/photos/ph_m101/image",
+        "description": null,
+        "tags": [],
+        "error": null,
+        "text": "Вітер ліг на ніч, і вся долина завмерла, ніби прислухаючись.\n\nУ млині ще горіло світло.",
+        "textEdited": false,
+        "createdAt": "2026-10-28T11:01:05.000Z",
+        "updatedAt": "2026-10-28T11:01:20.000Z"
+      },
+      {
+        "photoId": "ph_m201",
+        "clientId": "c-2026-10-28-m2",
+        "status": "described",
+        "order": 2,
+        "takenAt": "2026-10-28T11:02:00.000Z",
+        "imageUrl": "/api/external/v1/photo-drafts/pd_8b2d4f6a1c3e/photos/ph_m201/image",
+        "description": null,
+        "tags": [],
+        "error": null,
+        "text": "Старий Іван сидів за столом і перебирав листи, які не наважувався спалити.",
+        "textEdited": true,
+        "createdAt": "2026-10-28T11:02:05.000Z",
+        "updatedAt": "2026-10-28T11:02:20.000Z"
+      },
+      {
+        "photoId": "ph_m301",
+        "clientId": "c-2026-10-28-m3",
+        "status": "described",
+        "order": 3,
+        "takenAt": "2026-10-28T11:03:00.000Z",
+        "imageUrl": "/api/external/v1/photo-drafts/pd_8b2d4f6a1c3e/photos/ph_m301/image",
+        "description": null,
+        "tags": [],
+        "error": null,
+        "text": "Уранці він пішов до річки й більше не повернувся.",
+        "textEdited": false,
+        "createdAt": "2026-10-28T11:03:05.000Z",
+        "updatedAt": "2026-10-28T11:03:20.000Z"
+      }
+    ],
+    "notes": [
+      {
+        "noteId": "n-m1",
+        "photoIds": [
+          "ph_m101"
+        ],
+        "text": "Рукопис від руки, ім'я героя — Іван, місце дії — Млин",
+        "updatedAt": "2026-10-28T11:00:40.000Z"
+      }
+    ],
+    "structure": null,
+    "assumptions": [],
+    "job": null,
+    "submitted": {
+      "kind": "inbox",
+      "id": "scn-m-1a2b",
+      "studioUrl": "/media?tab=inbox"
+    },
+    "createdAt": "2026-10-28T11:00:00.000Z",
+    "updatedAt": "2026-10-28T11:03:20.000Z"
+  },
+  "target": {
+    "kind": "inbox",
+    "id": "scn-m-1a2b",
+    "studioUrl": "/media?tab=inbox"
+  }
+}

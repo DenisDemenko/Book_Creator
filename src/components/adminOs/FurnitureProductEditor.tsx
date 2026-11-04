@@ -68,6 +68,8 @@ import {
   type FurnitureVariant,
   type FurnitureWoodTone,
 } from './furnitureProduct';
+import { KitSpecEditor } from './KitSpecEditor';
+import { kitCost } from './kitSpec';
 
 // ---------------------------------------------------------------------------
 // Дві теми — та сама структура, різні класи Tailwind.
@@ -376,6 +378,22 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
   useEffect(() => {
     setProduct(initial ? { ...blankFurnitureProduct(), ...initial } : blankFurnitureProduct());
   }, [initial]);
+
+  // Категорії вітрини — справжній перелік із маркетплейсу; без нього
+  // (міст не налаштований) поле просто порожнє, публікація лишається можливою.
+  const [storefrontCategories, setStorefrontCategories] = useState<Array<{ slug: string; name: string }>>([]);
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/admin/marketplace-bridge/categories', { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (alive && Array.isArray(data?.categories)) setStorefrontCategories(data.categories);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const saveDraft = useCallback(async () => {
     setBusy(true);
@@ -810,6 +828,15 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
                       ))}
                     </select>
                   </div>
+                  <div>
+                    <Label>Категорія у вітрині</Label>
+                    <select className={`w-full rounded-xl px-3 py-2.5 text-xs outline-none ${t.select}`} value={product.marketplaceCategory || ''} onChange={(e) => patch({ marketplaceCategory: e.target.value })}>
+                      <option value="">Без категорії</option>
+                      {storefrontCategories.map((c) => (
+                        <option key={c.slug} value={c.slug}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
@@ -1030,6 +1057,35 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
                   ))}
                 </datalist>
               </div>
+            </Section>
+
+            {/*
+              Набір (K1): специфікація й собівартість дитячого конструктора. Поле `kit`
+              лежить у тій самій картці; вимкнений набір нічого не змінює для звичайних виробів.
+            */}
+            <Section
+              t={t}
+              icon={<Package className="w-4 h-4" />}
+              title="Набір-конструктор: специфікація й собівартість"
+              sub="Деталі з кількістю, пакування, робота й рекомендована ціна — одне джерело для інструкції та коробки"
+              right={
+                product.kit?.enabled ? (
+                  <span className={`text-[10px] font-mono px-2.5 py-1 rounded border ${t.badgeOk}`}>
+                    {kitCost(product.kit).totalUah.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} грн
+                  </span>
+                ) : undefined
+              }
+            >
+              <KitSpecEditor
+                kit={product.kit}
+                onChange={(kit) => patch({ kit })}
+                priceUah={product.priceUah}
+                productName={product.name}
+                productSku={product.sku}
+                productId={product.id}
+                onApplyPrice={(price) => patch(price)}
+                t={t}
+              />
             </Section>
 
             <Section t={t} icon={<Sparkles className="w-4 h-4" />} title="Опис товару та контент" sub="Маркетинговий текст, концепція виробу та слоти" right={<span className={`text-[10px] font-mono px-2.5 py-1 rounded border ${t.badge}`}>WYSIWYG / Markdown</span>}>

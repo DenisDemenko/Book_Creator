@@ -1,0 +1,19 @@
+{
+  "photo": {
+    "photoId": "ph_m201",
+    "clientId": "c-2026-10-28-m2",
+    "status": "described",
+    "order": 2,
+    "takenAt": "2026-10-28T11:02:00.000Z",
+    "imageUrl": "/api/external/v1/photo-drafts/pd_8b2d4f6a1c3e/photos/ph_m201/image",
+    "description": null,
+    "tags": [],
+    "error": null,
+    "text": "Старий Іван сидів за столом і перебирав листи, які не наважувався спалити.",
+    "textEdited": true,
+    "createdAt": "2026-10-28T11:02:05.000Z",
+    "updatedAt": "2026-10-28T11:02:20.000Z"
+  },
+  "revision": 7,
+  "duplicate": false
+}

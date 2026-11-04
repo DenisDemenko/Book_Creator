@@ -203,6 +203,11 @@ export interface PublishBookInput {
   coverUrl?: string;
   highlights?: string[];
   sellerSlug?: string;
+  /**
+   * Slug категорії маркетплейсу з `listBridgeCategories()`. undefined — не
+   * чіпати поточну; '' — зняти категорію; невідомий slug приймач відхиляє.
+   */
+  categorySlug?: string;
   /** Непорожнє — лише для тестового видання нестандартним рушієм PDF. */
   engineId?: string;
 }
@@ -400,6 +405,55 @@ export interface BridgeBookRow {
   publishedAt: string | null;
   hasFile: boolean;
   fileName: string | null;
+  /** Категорія лістингу у вітрині (старий приймач цих полів не віддає). */
+  categorySlug?: string | null;
+  categoryName?: string | null;
+}
+
+/**
+ * Ціна 0 — це не «забули вписати», а окреме рішення: книгу роздають, і
+ * кожен її забере безкоштовно. Порожнє поле, NaN чи кома в ціні на клієнті
+ * дають 0 так само легко, тож сервер вимагає явного прапорця `free: true`,
+ * а не виводить намір із нуля.
+ */
+export function assertFreePriceConfirmed(priceMinor: number, freeConfirmed: unknown, what: string): void {
+  if (priceMinor === 0 && freeConfirmed !== true) {
+    throw new MarketplaceBridgeError(
+      `${what}: ціна 0 — це безкоштовна роздача. Якщо так і задумано, позначте «Безкоштовна»; інакше вкажіть ціну.`,
+      'rejected',
+      400
+    );
+  }
+  if (priceMinor > 0 && freeConfirmed === true) {
+    throw new MarketplaceBridgeError(
+      `${what}: позначено «Безкоштовна», але ціна ${(priceMinor / 100).toFixed(2)} — приберіть прапорець або обнуліть ціну.`,
+      'rejected',
+      400
+    );
+  }
+}
+
+/** Slug категорії з тіла запиту: undefined — не чіпати, '' — зняти, інакше обрізаний рядок. */
+export function cleanCategorySlug(raw: unknown): string | undefined {
+  return typeof raw === 'string' ? raw.trim().slice(0, 80) : undefined;
+}
+
+/** Переваги з тіла запиту: лише непорожні рядки, не більше десяти по 200 символів. */
+export function cleanHighlights(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out = raw
+    .filter((x): x is string => typeof x === 'string')
+    .map((x) => x.trim().slice(0, 200))
+    .filter(Boolean)
+    .slice(0, 10);
+  return out.length ? out : undefined;
+}
+
+/** Категорія вітрини, яку можна обрати при публікації. */
+export interface BridgeCategoryRow {
+  slug: string;
+  name: string;
+  listingCount: number;
 }
 
 /**
@@ -621,6 +675,184 @@ export async function decideBridgeSellerApplication(
   }
 }
 
+// ─── Модерація STEAM-проєктів (команди й паспорти) ───────────────────────────
+//
+// Та сама схема, що й у заявок продавців: черга живе в базі маркетплейсу,
+// рішення власник ухвалює в панелі Студії. Правил тут немає — схвалення,
+// відмова й «повернути із зауваженнями» виконує маркетплейс (статус +
+// сповіщення заявнику), Студія лише передає намір і показує повну картку.
+
+export type BridgeTeamStatus = 'pending' | 'changes_requested' | 'published' | 'rejected';
+
+export interface BridgeTeamSummary {
+  id: string;
+  name: string;
+  direction: string | null;
+  description: string;
+  status: BridgeTeamStatus;
+  /** Остання примітка модератора (для «з зауваженнями» і «відхилено»). */
+  note: string | null;
+  memberCount: number;
+  /** Скільки разів заявник надсилав команду знову після зауважень. */
+  resubmissions: number;
+  createdAt: string;
+  submittedAt: string;
+  ownerName: string;
+  ownerEmail: string;
+  /** Шлях до фото відносно API маркетплейсу; Студія додає адресу мосту. */
+  photoPath: string | null;
+  hasPassport: boolean;
+}
+
+export interface BridgeTeamModelVersion {
+  id: string;
+  modelId: string;
+  version: number;
+  title: string;
+  filename: string;
+  format: string;
+  sizeBytes: number;
+  units: string;
+  notes: string[];
+  createdAt: string;
+  previewable: boolean;
+}
+
+export interface BridgeTeamPassport {
+  title: string;
+  description: string;
+  details: string;
+  status: string;
+  revision: number;
+  updatedAt: string;
+  versions: BridgeTeamModelVersion[];
+}
+
+export interface BridgeTeamDetail extends BridgeTeamSummary {
+  details: string | null;
+  members: { id: string; role: string; status: string; displayName: string; email: string }[];
+  media: { id: string; kind: string; filename: string; mimeType: string; sizeBytes: number; path: string }[];
+  passport: BridgeTeamPassport | null;
+}
+
+export type BridgeTeamDecision = 'approve' | 'reject' | 'request-changes';
+
+type BridgeDeps = { fetch?: typeof fetch; settings?: BridgeSettings };
+
+/** Спільний виклик для команд: ключ, таймаут і однакові повідомлення про відмову. */
+async function bridgeTeamsCall(
+  path: string,
+  init: { method?: 'GET' | 'POST'; body?: unknown },
+  what: string,
+  deps: BridgeDeps
+): Promise<string> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+
+  let response: Response;
+  try {
+    response = await doFetch(`${settings.url}${path}`, {
+      method: init.method ?? 'GET',
+      headers: {
+        'x-bridge-key': settings.key,
+        ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      },
+      ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  }
+
+  const text = await response.text().catch(() => '');
+  if (response.status === 401 || response.status === 403) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401
+    );
+  }
+  if (!response.ok) {
+    // 404/409/400 від маркетплейсу — це змістовна відмова («вже опубліковано»,
+    // «напишіть зауваження»): віддаємо її авторові рішення з тим самим статусом.
+    const status = response.status >= 400 && response.status < 500 ? response.status : 502;
+    throw new MarketplaceBridgeError(`${what}: ${describeRejection(response.status, text)}`, 'rejected', status);
+  }
+  return text;
+}
+
+const TEAM_STATUSES: readonly string[] = ['pending', 'changes_requested', 'published', 'rejected'];
+
+export async function listBridgeTeams(
+  status: BridgeTeamStatus | '' = '',
+  deps: BridgeDeps = {}
+): Promise<{ count: number; teams: BridgeTeamSummary[] }> {
+  const query = TEAM_STATUSES.includes(status) ? `?status=${status}` : '';
+  const text = await bridgeTeamsCall(`/bridge/teams${query}`, {}, 'Маркетплейс не віддав команди', deps);
+  try {
+    const body = JSON.parse(text) as { teams?: BridgeTeamSummary[] };
+    const teams = Array.isArray(body?.teams) ? body.teams : [];
+    return { count: teams.length, teams };
+  } catch {
+    return { count: 0, teams: [] };
+  }
+}
+
+export async function getBridgeTeam(id: string, deps: BridgeDeps = {}): Promise<BridgeTeamDetail> {
+  const text = await bridgeTeamsCall(
+    `/bridge/teams/${encodeURIComponent(id)}`,
+    {},
+    'Маркетплейс не віддав команду',
+    deps
+  );
+  try {
+    return JSON.parse(text) as BridgeTeamDetail;
+  } catch {
+    throw new MarketplaceBridgeError('Маркетплейс повернув нечитабельну картку команди.', 'rejected', 502);
+  }
+}
+
+/** Рішення про команду. Для `reject` і `request-changes` потрібен текст — перевіряємо до виклику. */
+export async function decideBridgeTeam(
+  id: string,
+  decision: BridgeTeamDecision,
+  text?: string,
+  deps: BridgeDeps = {}
+): Promise<{ id: string; status: string }> {
+  const note = (text ?? '').trim();
+  if (decision === 'request-changes' && !note) {
+    throw new MarketplaceBridgeError(
+      'Напишіть зауваження: без них заявник не знатиме, що виправляти.',
+      'rejected',
+      400
+    );
+  }
+  if (decision === 'reject' && !note) {
+    throw new MarketplaceBridgeError('Потрібна причина відхилення.', 'rejected', 400);
+  }
+  const body =
+    decision === 'approve' ? {} : decision === 'reject' ? { reason: note } : { note };
+  const raw = await bridgeTeamsCall(
+    `/bridge/teams/${encodeURIComponent(id)}/${decision}`,
+    { method: 'POST', body },
+    'Маркетплейс відхилив рішення',
+    deps
+  );
+  const fallback =
+    decision === 'approve' ? 'published' : decision === 'reject' ? 'rejected' : 'changes_requested';
+  try {
+    const parsed = JSON.parse(raw) as { id?: string; status?: string };
+    return { id: parsed?.id ?? id, status: parsed?.status ?? fallback };
+  } catch {
+    return { id, status: fallback };
+  }
+}
+
 export async function listBridgeBooks(
   deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
 ): Promise<BridgeBookRow[]> {
@@ -663,6 +895,372 @@ export async function listBridgeBooks(
     return Array.isArray(body?.books) ? body.books : [];
   } catch {
     return [];
+  }
+}
+
+/**
+ * Категорії, які насправді існують у вітрині. Студія показує саме їх у
+ * списку вибору: вільний текст категорії приймач не розпізнає, а похідну
+ * «Безкоштовні товари» (за ціною 0) не віддає взагалі.
+ */
+export async function listBridgeCategories(
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<BridgeCategoryRow[]> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+
+  let response: Response;
+  try {
+    response = await doFetch(`${settings.url}/bridge/categories`, {
+      headers: { 'x-bridge-key': settings.key },
+      signal: AbortSignal.timeout(20000),
+    });
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  }
+
+  const text = await response.text().catch(() => '');
+  if (response.status === 401 || response.status === 403) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401
+    );
+  }
+  // Старий приймач без /bridge/categories: порожній список, не помилка —
+  // публікація без категорії лишається можливою.
+  if (response.status === 404) return [];
+  if (!response.ok) {
+    throw new MarketplaceBridgeError(
+      `Маркетплейс не віддав категорії: ${describeRejection(response.status, text)}`,
+      'rejected',
+      502
+    );
+  }
+
+  try {
+    const body = JSON.parse(text) as { categories?: BridgeCategoryRow[] };
+    return Array.isArray(body?.categories)
+      ? body.categories.filter((c) => c && typeof c.slug === 'string' && typeof c.name === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Можливість приймача, що відкриває повний платний зміст курсу (див. `GET /bridge/categories`). */
+export const COURSE_CONTENT_V2 = 'course-content-v2';
+
+/**
+ * Чи вміє вітрина ховати платний зміст курсу за білим списком.
+ *
+ * Старий приймач зберігав `modules` як є й прибирав з публічної відповіді лише
+ * посилання на відео: опис уроку, фото й завдання з критеріями потрапили б у
+ * відкритий каталог. Тому Студія шле повний зміст лише тоді, коли приймач сам
+ * заявив `course-content-v2`; у решті випадків — у т.ч. коли запит не вдався —
+ * лишається безпечний обсяг (програма + відео). Помилка тут не зупиняє
+ * публікацію, а лише звужує її.
+ */
+export async function bridgeSupportsCourseContent(
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<boolean> {
+  return (await bridgeCapabilities(deps)).includes(COURSE_CONTENT_V2);
+}
+
+/**
+ * Що приймач заявив про себе в `GET /bridge/categories`. Будь-яка помилка —
+ * порожній перелік: Студія тоді просто користується безпечним мінімумом.
+ */
+export async function bridgeCapabilities(
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<string[]> {
+  try {
+    const settings = deps.settings ?? (await readBridgeSettings());
+    const doFetch = deps.fetch ?? fetch;
+    const response = await doFetch(`${settings.url}/bridge/categories`, {
+      headers: { 'x-bridge-key': settings.key },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) return [];
+    const body = JSON.parse(await response.text()) as { capabilities?: unknown };
+    return Array.isArray(body?.capabilities)
+      ? body.capabilities.filter((item): item is string => typeof item === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Приймач уміє `POST /bridge/courses/:id/media` і розкриває `media:<id>` у змісті. */
+export const COURSE_MEDIA_V1 = 'course-media-v1';
+
+export async function bridgeSupportsCourseMedia(
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<boolean> {
+  return (await bridgeCapabilities(deps)).includes(COURSE_MEDIA_V1);
+}
+
+/** Роль фото курсу у вітрині: публічна обкладинка чи платне фото уроку. */
+export type CourseMediaRole = 'cover' | 'lesson_photo';
+
+/**
+ * Надіслати вітрині одне фото курсу (multipart, як фото виробу).
+ *
+ * `lesson_photo` обовʼязково з `sourceKey` (id активу медіатеки): повторне
+ * надсилання того самого ключа ЗАМІНЮЄ файл на місці, тож повторна публікація
+ * не множить фото. Фото уроку вітрина віддає лише покупцю.
+ */
+export async function attachCourseMediaToMarketplace(
+  input: {
+    bookId: string;
+    role: CourseMediaRole;
+    sourceKey?: string;
+    filename: string;
+    mimeType: string;
+    bytes: Uint8Array;
+    /** Порядковий номер у курсі (для обкладинки — 0). */
+    position?: number;
+  },
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<{ attached: boolean; role: CourseMediaRole; replaced: number; media?: unknown; externalId: string }> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+  const externalId = courseExternalId(input.bookId);
+
+  const form = new FormData();
+  form.append(
+    'file',
+    new Blob([input.bytes as unknown as BlobPart], { type: input.mimeType }),
+    input.filename
+  );
+  form.append('role', input.role);
+  if (input.sourceKey) form.append('sourceKey', input.sourceKey);
+  form.append('position', String(Math.max(0, Math.trunc(input.position ?? 0))));
+
+  let response: Response;
+  try {
+    response = await doFetch(`${settings.url}/bridge/courses/${encodeURIComponent(externalId)}/media`, {
+      method: 'POST',
+      headers: { 'x-bridge-key': settings.key },
+      body: form,
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  }
+
+  const text = await response.text().catch(() => '');
+  if (response.status === 401 || response.status === 403) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401
+    );
+  }
+  if (response.status === 404) {
+    const routeMissing = /Cannot\s+(POST|PUT|PATCH|GET)/i.test(text);
+    throw new MarketplaceBridgeError(
+      routeMissing
+        ? 'Маркетплейс не має маршруту для фото курсу: його API старіший за міст. Потрібен деплой приймача.'
+        : 'Курсу немає в каталозі — спершу опублікуйте його, потім надсилайте фото.',
+      'rejected',
+      404,
+      text.slice(0, 400)
+    );
+  }
+  if (!response.ok) {
+    throw new MarketplaceBridgeError(
+      `Маркетплейс відхилив фото курсу: ${describeRejection(response.status, text)}`,
+      'rejected',
+      502,
+      text.slice(0, 400)
+    );
+  }
+
+  let body: any = undefined;
+  try {
+    body = text ? JSON.parse(text) : undefined;
+  } catch {
+    body = undefined;
+  }
+  return {
+    attached: Boolean(body?.attached ?? true),
+    role: (body?.role as CourseMediaRole) || input.role,
+    replaced: Number(body?.replaced ?? 0),
+    media: body?.media,
+    externalId,
+  };
+}
+
+/**
+ * Лишити у вітрині тільки ті фото уроків, що ще є у змісті (`keep` — їхні
+ * `sourceKey`); решта видаляється. Порожній `keep` прибирає всі. Обкладинку не
+ * чіпає.
+ */
+export async function pruneCourseMediaOnMarketplace(
+  bookId: string,
+  keep: string[],
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<{ pruned: number }> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+  const externalId = courseExternalId(bookId);
+
+  let response: Response;
+  try {
+    response = await doFetch(
+      `${settings.url}/bridge/courses/${encodeURIComponent(externalId)}/media/prune`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-bridge-key': settings.key },
+        body: JSON.stringify({ keep }),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      }
+    );
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  }
+
+  const text = await response.text().catch(() => '');
+  if (response.status === 401 || response.status === 403) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401
+    );
+  }
+  if (!response.ok) {
+    throw new MarketplaceBridgeError(
+      `Маркетплейс не прибрав застарілі фото курсу: ${describeRejection(response.status, text)}`,
+      'rejected',
+      502,
+      text.slice(0, 400)
+    );
+  }
+  let body: any = undefined;
+  try {
+    body = text ? JSON.parse(text) : undefined;
+  } catch {
+    body = undefined;
+  }
+  return { pruned: Number(body?.pruned ?? 0) };
+}
+
+/** Показники курсу з погляду автора (`GET /bridge/courses/:externalId/graduate-stats`). */
+export interface GraduateCourseStatsView {
+  course: { slug: string; title: string; graduateSelling: string };
+  /** Скільки учнів купили курс і скільки пройшли його повністю. */
+  students: number;
+  completed: number;
+  /** Скільки випускників уже створили роботи. */
+  sellers: number;
+  works: { total: number; draft: number; pending: number; published: number };
+  sales: { units: number; revenueMinor: number; commissionMinor: number };
+  /** Бонус автору — частка комісії магазину; виплачує адмін вручну. */
+  bonus: {
+    sharePercent: number;
+    accruedMinor: number;
+    pendingMinor: number;
+    paidMinor: number;
+    dueMinor: number;
+  };
+}
+
+const num = (value: unknown): number => (Number.isFinite(Number(value)) ? Number(value) : 0);
+
+/**
+ * Показники продажу робіт випускників курсу — для автора курсу в Студії.
+ *
+ * `null` — курсу на вітрині ще немає (404): це звичайний стан до першої
+ * публікації, а не збій. Усе інше — помилка мосту, як у решті викликів.
+ * Читання тільки з маркетплейсу: Студія нічого не нараховує й не виплачує.
+ */
+export async function fetchGraduateStats(
+  courseId: string,
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<GraduateCourseStatsView | null> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+
+  let response: Response;
+  try {
+    response = await doFetch(
+      `${settings.url}/bridge/courses/${encodeURIComponent(courseExternalId(courseId))}/graduate-stats`,
+      { headers: { 'x-bridge-key': settings.key }, signal: AbortSignal.timeout(15000) }
+    );
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  }
+
+  const text = await response.text().catch(() => '');
+  if (response.status === 404) return null;
+  if (response.status === 401 || response.status === 403) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401
+    );
+  }
+  if (!response.ok) {
+    throw new MarketplaceBridgeError(
+      `Маркетплейс не віддав показники курсу: ${describeRejection(response.status, text)}`,
+      'rejected',
+      502
+    );
+  }
+
+  try {
+    const body = JSON.parse(text) as any;
+    return {
+      course: {
+        slug: String(body?.course?.slug ?? ''),
+        title: String(body?.course?.title ?? ''),
+        graduateSelling: String(body?.course?.graduateSelling ?? 'off'),
+      },
+      students: num(body?.students),
+      completed: num(body?.completed),
+      sellers: num(body?.sellers),
+      works: {
+        total: num(body?.works?.total),
+        draft: num(body?.works?.draft),
+        pending: num(body?.works?.pending),
+        published: num(body?.works?.published),
+      },
+      sales: {
+        units: num(body?.sales?.units),
+        revenueMinor: num(body?.sales?.revenueMinor),
+        commissionMinor: num(body?.sales?.commissionMinor),
+      },
+      bonus: {
+        sharePercent: num(body?.bonus?.sharePercent),
+        accruedMinor: num(body?.bonus?.accruedMinor),
+        pendingMinor: num(body?.bonus?.pendingMinor),
+        paidMinor: num(body?.bonus?.paidMinor),
+        dueMinor: num(body?.bonus?.dueMinor),
+      },
+    };
+  } catch {
+    throw new MarketplaceBridgeError('Маркетплейс віддав показники в незрозумілому вигляді.', 'rejected', 502);
   }
 }
 
@@ -1048,6 +1646,7 @@ export async function publishBookToMarketplace(
     coverUrl: input.coverUrl,
     highlights: input.highlights,
     sellerSlug: input.sellerSlug,
+    categorySlug: input.categorySlug,
   };
 
   const controller = new AbortController();
@@ -1121,11 +1720,15 @@ export async function publishBookToMarketplace(
  * `introVideoUrl`) — Nova не перевіряє й не розрізняє провайдера
  * (YouTube чи Vimeo — вибір автора курсу, просто рядок URL), а вітрина
  * ховає його з публічної відповіді каталогу й показує лише покупцю
- * (`stripPaidCourseContent` + `Entitlement`, те саме, що вже захищає
- * платні файли). Досі свідомо НЕ передається решта платного матеріалу —
- * опис/мета уроку, тексти завдань і критерії прийняття: цей контент,
- * як і файли книг, лишається за окремим кроком (за взірцем
- * `attachBookFileToMarketplace`), не за карткою.
+ * (білий список `toPublicCurriculum` + `Entitlement`, те саме, що вже захищає
+ * платні файли).
+ *
+ * Етап 3 аудиту курсів: тепер передається і решта змісту — опис уроку, фото,
+ * завдання з критеріями, обкладинка й підсумкове завдання модуля — разом зі
+ * стабільними id модулів і уроків. Безпечно це робить вітрина: публічний
+ * каталог будується за БІЛИМ списком полів, а платне є лише у вигляді
+ * бібліотеки покупця. Збирає payload `buildCoursePublishInput`
+ * (courseMarketplacePayload.ts) — єдиний для погодження й адмінського шляху.
  */
 export interface PublishCourseSkill {
   name: string;
@@ -1134,24 +1737,45 @@ export interface PublishCourseSkill {
   whyItMatters?: string;
 }
 
-export interface PublishCourseModuleLesson {
+/** Практичне завдання уроку чи підсумкове завдання модуля — платний зміст. */
+export interface PublishCourseAssignment {
   title: string;
+  brief?: string;
+  steps?: string[];
+  deliverable?: string;
+  acceptanceCriteria?: string[];
+  estimateMin?: number;
+}
+
+export interface PublishCourseModuleLesson {
+  /** Стабільний id уроку в Студії: за ним вітрина тримає прогрес покупця, тож він переживає зміну порядку уроків. */
+  id?: string;
+  title: string;
+  /** Публічне: мета й теми уроку — частина програми, яку покупець читає до оплати. */
+  goal?: string;
+  topics?: string[];
   durationMin?: number;
   /**
-   * Посилання на відео уроку — YouTube чи Vimeo, на вибір автора курсу;
-   * Nova не парсить і не валідує провайдера, просто передає рядок далі.
-   * Платний контент: вітрина ховає його з публічного каталогу й показує
-   * лише покупцю з активним `Entitlement` (`stripPaidCourseContent`
-   * у Fusion Lab).
+   * Далі — платний зміст. Вітрина показує його лише покупцю з активним
+   * `Entitlement`: публічний каталог будується за білим списком
+   * (`toPublicCurriculum` у Fusion Lab), тож нове поле тут не потрапить на
+   * публічну сторінку, навіть якщо про нього забути.
    */
+  description?: string;
+  /** Посилання на відео — YouTube чи Vimeo, на вибір автора; Nova провайдера не розрізняє. */
   videoUrl?: string;
+  photoUrls?: string[];
+  assignment?: PublishCourseAssignment;
 }
 
 export interface PublishCourseModule {
+  id?: string;
   title: string;
   summary?: string;
-  /** Оглядове відео модуля — той самий провайдер-агностичний рядок, що й `PublishCourseModuleLesson.videoUrl`. */
+  /** Платне: обкладинка модуля, оглядове відео й підсумкове завдання. */
+  coverPhotoUrl?: string;
   introVideoUrl?: string;
+  finalAssignment?: PublishCourseAssignment;
   lessons: PublishCourseModuleLesson[];
 }
 
@@ -1172,15 +1796,21 @@ export interface PublishCourseInput {
   sellerSlug?: string;
   moduleCount?: number;
   lessonCount?: number;
-  /** Категорія курсу для фільтрів/навігації вітрини. */
+  /** Категорія курсу для фільтрів/навігації вітрини (вільний текст — лише для старих приймачів). */
   category?: string;
+  /** Slug категорії з `listBridgeCategories()` — має перевагу над `category`. */
+  categorySlug?: string;
+  /** Ім'я автора курсу: продавець лишається платформою, викладач показується на картці. */
+  instructorName?: string;
+  /** Коли студенти курсу можуть продавати власні роботи (рішення автора курсу). */
+  graduateSelling?: 'off' | 'after_completion' | 'anytime';
   /** Кому підходить курс — рядки «Аудиторія» зі студії. */
   audience?: string[];
   /** Що покупець уміє після курсу — рядки «Результати навчання». */
   outcomes?: string[];
   /** Навички курсу — лише назва/рівень/«навіщо», без «як розвивати» й вправ. */
   skills?: PublishCourseSkill[];
-  /** Скелет програми: назви модулів і уроків із тривалістю — без опису/відео/завдань уроку. */
+  /** Програма курсу: публічна частина (назви, мета, теми, тривалість) і платна (відео, текст, фото, завдання) — розділяє вітрина. */
   modules?: PublishCourseModule[];
 }
 
@@ -1218,6 +1848,9 @@ export async function publishCourseToMarketplace(
     moduleCount: input.moduleCount,
     lessonCount: input.lessonCount,
     category: input.category,
+    categorySlug: input.categorySlug,
+    instructorName: input.instructorName,
+    graduateSelling: input.graduateSelling,
     audience: input.audience,
     outcomes: input.outcomes,
     skills: input.skills,
@@ -1326,6 +1959,19 @@ export interface PublishProductAttributes {
    * варіантів і які з них видимі.
    */
   variantPriceRange?: boolean;
+  /**
+   * Вік і безпека набору (K2): вікова група, попередження для покупця, матеріали.
+   * Є лише в наборів; документи відповідності сюди не потрапляють. Приймач на боці
+   * вітрини мусить зберігати поле в `attributes` лістингу (перевірити при G2).
+   */
+  safety?: {
+    ageMinYears: number;
+    ageLabel: string;
+    smallParts: boolean;
+    warnings: string[];
+    materials: string[];
+    materialsNote: string;
+  };
 }
 
 /**
@@ -1372,6 +2018,8 @@ export interface PublishProductInput {
    */
   variants?: PublishProductVariant[];
   sellerSlug?: string;
+  /** Slug категорії з `listBridgeCategories()`. */
+  categorySlug?: string;
 }
 
 export interface PublishProductResult {
@@ -1417,6 +2065,7 @@ export async function publishProductToMarketplace(
     // запиту (задача #225).
     variants: input.variants?.length ? input.variants : undefined,
     sellerSlug: input.sellerSlug,
+    categorySlug: input.categorySlug,
   };
 
   const controller = new AbortController();

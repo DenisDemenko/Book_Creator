@@ -34,6 +34,20 @@ export interface ExternalApiToken {
   createdAt: string;
   lastUsedAt: string | null;
   revokedAt: string | null;
+  /**
+   * Область дії. `null` — повний доступ зовнішнього API (WriterScan, DesignCraft,
+   * агент). `photo-drafts` — лише чернетки за фото й `GET /me` (GrabFusion):
+   * витік такого токена не відкриває книги автора.
+   */
+  scope: ExternalTokenScope | null;
+}
+
+/** Відомі області токена. Невідома область у базі трактується як «нічого не дозволено». */
+export const EXTERNAL_TOKEN_SCOPES = ['photo-drafts'] as const;
+export type ExternalTokenScope = (typeof EXTERNAL_TOKEN_SCOPES)[number];
+
+export function parseTokenScope(value: unknown): ExternalTokenScope | null {
+  return (EXTERNAL_TOKEN_SCOPES as readonly string[]).includes(String(value)) ? (value as ExternalTokenScope) : null;
 }
 
 /**
@@ -63,6 +77,12 @@ export interface ExternalScan {
   modelId: string | null;
   error: string | null;
   tokenId: string | null;
+  /** Пакет сторінок рукопису з GrabFusion (id чернетки); у звичайного скану `null`. */
+  batchId: string | null;
+  /** Номер сторінки в пакеті, з 1. */
+  batchOrder: number | null;
+  /** Назва нової книги, коли пакет надіслано без існуючої книги (тоді `bookId` порожній). */
+  batchBookTitle: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -106,8 +126,10 @@ async function loadJson(): Promise<JsonShape> {
     const raw = await fs.readFile(path.join(DATA_DIR, JSON_FILE), 'utf8');
     const parsed = JSON.parse(raw) as Partial<JsonShape>;
     jsonCache = {
-      tokens: Array.isArray(parsed.tokens) ? parsed.tokens : [],
-      scans: Array.isArray(parsed.scans) ? parsed.scans : [],
+      tokens: Array.isArray(parsed.tokens) ? parsed.tokens.map((t) => ({ ...t, scope: t.scope ?? null })) : [],
+      scans: Array.isArray(parsed.scans)
+        ? parsed.scans.map((s) => ({ ...s, batchId: s.batchId ?? null, batchOrder: s.batchOrder ?? null, batchBookTitle: s.batchBookTitle ?? null }))
+        : [],
     };
   } catch {
     jsonCache = { tokens: [], scans: [] };
@@ -151,6 +173,7 @@ function rowToToken(row: any): ExternalApiToken {
     createdAt: String(row.created_at),
     lastUsedAt: row.last_used_at ? String(row.last_used_at) : null,
     revokedAt: row.revoked_at ? String(row.revoked_at) : null,
+    scope: row.scope ? ((parseTokenScope(row.scope) ?? row.scope) as ExternalTokenScope) : null,
   };
 }
 
@@ -161,6 +184,7 @@ function rowToToken(row: any): ExternalApiToken {
 export async function createToken(params: {
   userId: string;
   name: string;
+  scope?: ExternalTokenScope | null;
   now?: () => Date;
 }): Promise<{ record: ExternalApiToken; token: string }> {
   const userId = String(params.userId || '').trim();
@@ -175,6 +199,7 @@ export async function createToken(params: {
     createdAt: (params.now?.() ?? new Date()).toISOString(),
     lastUsedAt: null,
     revokedAt: null,
+    scope: params.scope ?? null,
   };
 
   if (useJson()) {
@@ -185,10 +210,10 @@ export async function createToken(params: {
   }
   getDb()!
     .prepare(
-      `INSERT INTO external_api_tokens (id, user_id, name, token_hash, prefix, created_at, last_used_at, revoked_at)
-       VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)`
+      `INSERT INTO external_api_tokens (id, user_id, name, token_hash, prefix, created_at, last_used_at, revoked_at, scope)
+       VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?)`
     )
-    .run(record.id, record.userId, record.name, record.tokenHash, record.prefix, record.createdAt);
+    .run(record.id, record.userId, record.name, record.tokenHash, record.prefix, record.createdAt, record.scope);
   return { record, token };
 }
 
@@ -263,6 +288,7 @@ export function publicToken(t: ExternalApiToken) {
     createdAt: t.createdAt,
     lastUsedAt: t.lastUsedAt,
     revokedAt: t.revokedAt,
+    scope: t.scope ?? null,
   };
 }
 
@@ -286,6 +312,9 @@ function rowToScan(row: any): ExternalScan {
     modelId: row.model_id ? String(row.model_id) : null,
     error: row.error ? String(row.error) : null,
     tokenId: row.token_id ? String(row.token_id) : null,
+    batchId: row.batch_id ? String(row.batch_id) : null,
+    batchOrder: Number.isFinite(Number(row.batch_order)) && row.batch_order !== null ? Number(row.batch_order) : null,
+    batchBookTitle: row.batch_book_title ? String(row.batch_book_title) : null,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };
@@ -297,6 +326,7 @@ export async function createScan(params: {
   assetId: string;
   imageUrl: string;
   tokenId?: string | null;
+  batch?: { id: string; order: number; bookTitle?: string | null };
   now?: () => Date;
 }): Promise<ExternalScan> {
   const at = (params.now?.() ?? new Date()).toISOString();
@@ -315,6 +345,9 @@ export async function createScan(params: {
     modelId: null,
     error: null,
     tokenId: params.tokenId ? String(params.tokenId) : null,
+    batchId: params.batch?.id ?? null,
+    batchOrder: params.batch ? params.batch.order : null,
+    batchBookTitle: params.batch?.bookTitle ? String(params.batch.bookTitle) : null,
     createdAt: at,
     updatedAt: at,
   };
@@ -328,10 +361,11 @@ export async function createScan(params: {
     .prepare(
       `INSERT INTO external_scans
          (id, owner_id, book_id, asset_id, image_url, status, recognized_text, text,
-          chapter_id, chapter_title, section_title, model_id, error, token_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, '', '', NULL, NULL, NULL, NULL, NULL, ?, ?, ?)`
+          chapter_id, chapter_title, section_title, model_id, error, token_id, created_at, updated_at,
+          batch_id, batch_order, batch_book_title)
+       VALUES (?, ?, ?, ?, ?, ?, '', '', NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?)`
     )
-    .run(scan.id, scan.ownerId, scan.bookId, scan.assetId, scan.imageUrl, scan.status, scan.tokenId, at, at);
+    .run(scan.id, scan.ownerId, scan.bookId, scan.assetId, scan.imageUrl, scan.status, scan.tokenId, at, at, scan.batchId, scan.batchOrder, scan.batchBookTitle);
   return scan;
 }
 

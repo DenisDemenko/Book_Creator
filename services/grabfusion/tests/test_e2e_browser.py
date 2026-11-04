@@ -1,0 +1,379 @@
+"""Наскрізна перевірка сторінки в справжньому Chromium (Playwright) на моку Studio.
+
+Пропускається, якщо Playwright або браузера немає. Знімки екранів — у GRABFUSION_SHOTS, якщо задано.
+"""
+from __future__ import annotations
+
+import os
+import socket
+import threading
+import time
+from io import BytesIO
+
+import pytest
+import uvicorn
+from PIL import Image
+
+pw = pytest.importorskip("playwright.sync_api")
+
+from grabfusion.app import create_app  # noqa: E402
+from grabfusion.mock_server import PREFIX, create_app as create_mock  # noqa: E402
+from grabfusion.sessions import SessionStore  # noqa: E402
+from grabfusion.settings import Settings  # noqa: E402
+
+
+def _serve(app):
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    srv = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    t = threading.Thread(target=srv.run, daemon=True)
+    t.start()
+    for _ in range(100):
+        if srv.started:
+            break
+        time.sleep(0.05)
+    return srv, t, f"http://127.0.0.1:{port}"
+
+
+@pytest.fixture(scope="module")
+def stack():
+    mock = create_mock()
+    msrv, mt, murl = _serve(mock)
+    app = create_app(Settings(studio_url=murl + PREFIX), store=SessionStore(":memory:"))
+    asrv, at, aurl = _serve(app)
+    yield aurl, mock
+    for srv, t in ((asrv, at), (msrv, mt)):
+        srv.should_exit = True
+        t.join(timeout=5)
+
+
+@pytest.fixture(scope="module")
+def stack3():
+    """Стаціонарний мок із швидким опитуванням: чернетка справді проходить усі етапи."""
+    mock = create_mock(stateful=True, poll_interval_ms=300)
+    msrv, mt, murl = _serve(mock)
+    app = create_app(Settings(studio_url=murl + PREFIX), store=SessionStore(":memory:"))
+    asrv, at, aurl = _serve(app)
+    yield aurl, murl
+    for srv, t in ((asrv, at), (msrv, mt)):
+        srv.should_exit = True
+        t.join(timeout=5)
+
+
+@pytest.fixture(scope="module")
+def browser_page():
+    with pw.sync_playwright() as p:
+        try:
+            b = p.chromium.launch()
+        except Exception as e:  # pragma: no cover
+            pytest.skip(f"Chromium недоступний: {e}")
+        ctx = b.new_context(viewport={"width": 390, "height": 800}, is_mobile=True, has_touch=True)
+        page = ctx.new_page()
+        yield ctx, page
+        b.close()
+
+
+def _jpeg(path, size=(3000, 2000)):
+    Image.new("RGB", size, (40, 130, 100)).save(path, "JPEG")
+    return str(path)
+
+
+def _posts(mock):
+    return [c for c in mock.state.calls if c[0] == "POST /photo-drafts/:draftId/photos"]
+
+
+def _wait(cond, timeout=10.0):
+    end = time.time() + timeout
+    while time.time() < end:
+        if cond():
+            return
+        time.sleep(0.1)
+    raise AssertionError("умова не виконалась за " + str(timeout) + " с")
+
+
+def _shot(page, name):
+    d = os.environ.get("GRABFUSION_SHOTS")
+    if d:
+        os.makedirs(d, exist_ok=True)
+        page.screenshot(path=os.path.join(d, name + ".png"), full_page=True)
+
+
+def test_full_flow(stack, browser_page, tmp_path):
+    url, mock = stack
+    ctx, page = browser_page
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(url)
+
+    # 1. підключення: неправильний код → повідомлення, правильний → список
+    page.wait_for_selector("#code")
+    _shot(page, "1-pair")
+    page.fill("#code", "BAD")
+    page.click("button[type=submit]")
+    page.wait_for_selector("#pair-err:not(:empty)")
+    assert "невірний" in page.inner_text("#pair-err")
+    page.fill("#code", "GF-OK")
+    page.click("button[type=submit]")
+    page.wait_for_selector("#btn-new")
+    _shot(page, "2-list")
+    assert page.locator("[data-draft]").count() >= 1
+
+    # 2. нова чернетка
+    page.click("#btn-new")
+    page.fill("#f-title", "Ложка з вишні")
+    page.click("button[type=submit]")
+    page.wait_for_selector("#lbl-cam")
+    assert "Ложка" in page.inner_text("#title") or page.inner_text("#title")
+
+    # 3. фото з галереї → картка кадру з'являється, у мок пішов POST
+    before = len(_posts(mock))
+    page.set_input_files("#file-gal", _jpeg(tmp_path / "a.jpg"))
+    page.wait_for_selector("[data-photo]")
+    _wait(lambda: len(_posts(mock)) == before + 1)
+    page.wait_for_function("document.querySelectorAll('[data-queued]').length === 0")
+    _shot(page, "3-draft")
+
+    # 4. ліміт символів: 500 ок, 501 — червоний лічильник
+    ta = page.locator("[data-photo] textarea").first
+    ta.fill("я" * 500)
+    assert "500 / 500" in page.locator("[data-photo] .counter").first.inner_text()
+    assert "over" not in (page.locator("[data-photo] .counter").first.get_attribute("class") or "")
+    ta.fill("я" * 501)
+    assert "over" in page.locator("[data-photo] .counter").first.get_attribute("class")
+    ta.fill("👍" * 500)  # емодзі — по одному символу
+    assert "500 / 500" in page.locator("[data-photo] .counter").first.inner_text()
+    ta.blur()
+
+    # 5. без звʼязку: фото стає в чергу, а після відновлення звʼязку надсилається само
+    ctx.set_offline(True)
+    page.wait_for_function("!navigator.onLine")
+    n_before = len(_posts(mock))
+    page.set_input_files("#file-gal", _jpeg(tmp_path / "b.jpg"))
+    page.wait_for_selector("[data-queued]")
+    assert "без звʼязку" in page.inner_text("#net").lower()
+    assert "у черзі" in page.locator("[data-queued] .badge").first.inner_text()
+    _shot(page, "4-queued-offline")
+    assert len(_posts(mock)) == n_before
+    ctx.set_offline(False)
+    _wait(lambda: len(_posts(mock)) == n_before + 1, 15)
+    page.wait_for_function("document.querySelectorAll('[data-queued]').length === 0", timeout=15000)
+
+    # 6. порядок: кнопка ↓ відправляє PATCH з photoOrder
+    page.locator("[data-photo] button[title='Нижче']").first.click()
+    _wait(lambda: any(c[0] == "PATCH /photo-drafts/:draftId" for c in mock.state.calls))
+
+    # 7. «Зберегти чернетку» повертає до списку з повідомленням
+    page.locator("[data-photo] textarea").first.fill("останній штрих")
+    page.click("#btn-save")
+    page.wait_for_selector("#btn-new")
+    assert "збережено" in page.inner_text("#toast").lower()
+
+    # 8. вихід
+    page.click("#btn-logout")
+    page.wait_for_selector("#code")
+    assert not errors, errors
+
+
+def test_stage3_structure_write_validate_submit(stack3, browser_page, tmp_path):
+    url, studio_url = stack3
+    ctx, page = browser_page
+    ctx.clear_cookies()
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(url)
+    page.wait_for_selector("#code")
+    page.fill("#code", "GF-OK")
+    page.click("button[type=submit]")
+    page.wait_for_selector("#btn-new")
+    page.click("#btn-new")
+    page.fill("#f-title", "Ложка з вишні")
+    page.click("button[type=submit]")
+    page.wait_for_selector("#lbl-cam")
+
+    # без кадрів кнопка «Розкласти» неактивна
+    assert page.locator("#btn-structure").is_disabled()
+    page.set_input_files("#file-gal", [_jpeg(tmp_path / "1.jpg"), _jpeg(tmp_path / "2.jpg", (1200, 900))])
+    page.wait_for_function("document.querySelectorAll('[data-photo]').length === 2 && document.querySelectorAll('[data-queued]').length === 0", timeout=15000)
+    page.wait_for_function("!document.querySelector('#btn-structure').disabled", timeout=15000)
+    # кадри з сервера (через проксі) мають реально завантажитись, а не лишитись сірими
+    page.wait_for_function(
+        "[...document.querySelectorAll('[data-photo] img')].length >= 2 && "
+        "[...document.querySelectorAll('[data-photo] img')].every(i => i.complete && i.naturalWidth > 0)",
+        timeout=15000,
+    )
+    _shot(page, "s3-1-before-structure")
+
+    # прохід 2
+    page.click("#btn-structure")
+    page.wait_for_selector("#structure", timeout=15000)
+    assert page.locator("[data-module]").count() == 2
+    assert page.locator("[data-lesson]").count() == 3
+    assert page.locator("[data-assumption]").count() == 1
+    _shot(page, "s3-2-structure")
+
+    # передчасна відправка неможлива — але кнопки «Відправити» ще й немає; пишемо курс
+    assert page.locator("#btn-submit").count() == 0
+    page.click("#btn-write")
+    page.wait_for_function("document.querySelectorAll('[data-module] .badge.described').length === 2", timeout=20000)
+    page.wait_for_selector("#btn-submit:not([disabled])", timeout=10000)
+    _shot(page, "s3-3-written")
+
+    # блокер: відкрите припущення
+    page.click("#btn-submit")
+    page.wait_for_selector("#blockers")
+    assert page.locator("[data-blocker='open_assumptions']").count() == 1
+    _shot(page, "s3-4-blocked")
+
+    # правка уроку знімає позначку «ШІ» з поля
+    title = page.locator("[data-lesson] input[data-field=title]").first
+    assert page.locator("[data-lesson]").first.locator(".badge.ai").count() >= 1
+    title.fill("Моя назва уроку")
+    title.blur()
+    page.wait_for_function("document.querySelector('[data-lesson] input[data-field=title]').value === 'Моя назва уроку'")
+    page.wait_for_function("[...document.querySelectorAll('[data-lesson]')][0].querySelectorAll('label .badge.ai').length === 2")
+    first = page.locator("[data-lesson]").first
+    assert first.locator("label:has(+ input[data-field=title]) .badge.ai").count() == 0
+
+    # підтверджуємо припущення й відправляємо
+    page.click("[data-assumption] [data-act=confirm]")
+    page.wait_for_function("document.querySelector('[data-assumption] .badge.described')")
+    page.click("#btn-submit")
+    page.wait_for_selector("#submitted")
+    href = page.get_attribute("#open-studio", "href")
+    assert "/courses/crs_sim" in href and href.startswith("http")
+    _shot(page, "s3-5-submitted")
+    assert not errors, errors
+
+
+def test_stage5_instruction_mode(stack3, browser_page, tmp_path):
+    url, _ = stack3
+    ctx, page = browser_page
+    ctx.clear_cookies()
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(url)
+    page.wait_for_selector("#code")
+    page.fill("#code", "GF-OK")
+    page.click("button[type=submit]")
+    page.wait_for_selector("#btn-new")
+    page.click("#btn-new")
+    page.select_option("#f-kind", "instruction")
+    page.select_option("#f-mode", "operation")
+    page.fill("#f-model", "TB-100")
+    page.fill("#f-title", "Полиця Нордик")
+    page.click("button[type=submit]")
+    page.wait_for_selector("#instruction-meta")
+    assert page.input_value("#i-mode") == "operation" and page.input_value("#i-model") == "TB-100"
+
+    # зміна режиму й коду зберігається на сервері (перечитуємо після перезавантаження)
+    page.select_option("#i-mode", "assembly")
+    page.fill("#i-model", "TB-200")
+    page.locator("#i-model").blur()
+    time.sleep(0.5)
+    page.reload()
+    page.wait_for_selector("[data-draft]")
+    page.locator("[data-draft] button").first.click()
+    page.wait_for_selector("#instruction-meta")
+    assert page.input_value("#i-mode") == "assembly" and page.input_value("#i-model") == "TB-200"
+
+    page.set_input_files("#file-gal", [_jpeg(tmp_path / f"{i}.jpg", (1200, 900)) for i in range(3)])
+    page.wait_for_function("document.querySelectorAll('[data-photo]').length === 3 && document.querySelectorAll('[data-queued]').length === 0", timeout=15000)
+    page.wait_for_function("!document.querySelector('#btn-structure').disabled", timeout=15000)
+    assert page.inner_text("#btn-structure") == "Розкласти на кроки"
+    page.click("#btn-structure")
+    page.wait_for_selector("#structure", timeout=15000)
+    assert "Кроки інструкції" in page.inner_text("#structure h3")
+    assert page.locator("[data-lesson]").count() == 3
+    assert page.locator("[data-lesson] .frame-chip").count() == 3
+    assert page.locator("[data-nofram]").count() == 0
+    _shot(page, "s5-1-steps")
+
+    # кадр першого кроку — в останній: у першого кроку кадрів не лишається
+    sel = page.locator("[data-lesson]").first.locator("select.move")
+    sel.select_option(index=2)
+    page.wait_for_selector("[data-nofram]")
+    assert page.locator("[data-lesson] .frame-chip").count() == 3
+    assert page.locator("[data-lesson]").last.locator(".frame-chip").count() == 2
+    _shot(page, "s5-2-moved")
+
+    # пишемо кроки, додаємо технічні рядки чипами
+    page.click("#btn-write")
+    page.wait_for_function("document.querySelectorAll('[data-module] .badge.described').length === 2", timeout=20000)
+    body = page.locator("[data-lesson]").first.locator("textarea[data-field=body]")
+    chip = page.locator("[data-lesson]").first.locator("button[data-key='Деталі']")
+    assert chip.inner_text().startswith("+")
+    chip.click()
+    assert "**Деталі:** " in body.input_value()
+    assert chip.inner_text().startswith("✓")
+    body.type("шуруп 4×30")
+    body.blur()
+    time.sleep(0.5)
+    page.wait_for_function("document.querySelector('[data-lesson] textarea[data-field=body]').value.includes('шуруп 4×30')")
+    _shot(page, "s5-3-lines")
+
+    page.click("[data-assumption] [data-act=confirm]")
+    page.wait_for_function("document.querySelector('[data-assumption] .badge.described')")
+    page.click("#btn-submit")
+    page.wait_for_selector("#submitted")
+    assert "24 годин" in page.inner_text("#submitted")
+    assert "/express/exp_sim" in page.get_attribute("#open-studio", "href")
+    assert not errors, errors
+
+
+def test_stage6_manuscript_pages(stack3, browser_page, tmp_path):
+    url, _ = stack3
+    ctx, page = browser_page
+    ctx.clear_cookies()
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(url)
+    page.wait_for_selector("#code")
+    page.fill("#code", "GF-OK")
+    page.click("button[type=submit]")
+    page.wait_for_selector("#btn-new")
+    page.click("#btn-new")
+    page.select_option("#f-kind", "manuscript")
+    page.fill("#f-newbook", "Долина тиші")
+    page.fill("#f-title", "Розділ 1. Млин")
+    page.click("button[type=submit]")
+    page.wait_for_selector("#ms-meta")
+    assert page.input_value("#ms-title") == "Розділ 1. Млин"
+    assert page.input_value("#ms-booktype") == "new" and page.input_value("#ms-book") == "Долина тиші"
+    assert page.locator("#btn-submit").is_disabled()
+
+    # дві сторінки з підказкою → дослівний текст (мок підставляє підказку в текст)
+    page.fill("#ms-hint", "герой — Іван")
+    page.set_input_files("#file-gal", [_jpeg(tmp_path / "p1.jpg", (1400, 1000)), _jpeg(tmp_path / "p2.jpg", (1400, 1000))])
+    page.wait_for_function("document.querySelectorAll('[data-page]').length === 2 && document.querySelectorAll('[data-queued]').length === 0", timeout=15000)
+    page.wait_for_function("[...document.querySelectorAll('[data-page] textarea')].every(t => t.value.includes('Іван'))", timeout=15000)
+    assert page.locator("[data-page] .badge.described").count() == 2
+    _shot(page, "s6-1-pages")
+
+    # третя сторінка без тексту → блокер empty_page, потім правка вручну
+    page.fill("#ms-hint", "порожня")
+    page.set_input_files("#file-gal", _jpeg(tmp_path / "p3.jpg", (1400, 1000)))
+    page.wait_for_function("document.querySelectorAll('[data-page]').length === 3 && document.querySelectorAll('[data-queued]').length === 0", timeout=15000)
+    page.wait_for_function("document.querySelectorAll('[data-page] .badge.failed').length === 1", timeout=15000)
+    page.wait_for_selector("#btn-submit:not([disabled])")
+    page.click("#btn-submit")
+    page.wait_for_selector("#blockers")
+    assert page.locator("[data-blocker='empty_page']").count() == 1
+    _shot(page, "s6-2-blocked")
+    third = page.locator("[data-page]").nth(2).locator("textarea")
+    third.fill("Введено вручну: «Тиша».")
+    third.blur()
+    page.wait_for_function("[...document.querySelectorAll('[data-page]')][2].innerText.includes('правлено')", timeout=10000)
+    assert page.locator("[data-page] .badge.failed").count() == 0
+
+    # порядок сторінок
+    page.locator("[data-page]").first.locator("button[title='Нижче']").click()
+    page.wait_for_function("document.querySelector('[data-page] textarea').value.includes('Сторінка 2:')", timeout=10000)
+
+    # відправка: пакет у «Вхідних», книга нова → підказка про «Вставити главу»
+    page.click("#btn-submit")
+    page.wait_for_selector("#submitted")
+    assert "Вставити главу" in page.inner_text("#submitted")
+    assert page.get_attribute("#open-studio", "href").endswith("/media?tab=inbox")
+    _shot(page, "s6-3-submitted")
+    assert not errors, errors

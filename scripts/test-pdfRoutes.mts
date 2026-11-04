@@ -55,11 +55,11 @@ const book = {
 };
 
 // --- підміна мережі --------------------------------------------------------
-const calls: Array<{ url: string; method: string }> = [];
+const calls: Array<{ url: string; method: string; body?: string }> = [];
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (url: string, init: any = {}) => {
   const u = String(url);
-  calls.push({ url: u, method: init?.method || 'GET' });
+  calls.push({ url: u, method: init?.method || 'GET', body: typeof init?.body === 'string' ? init.body : undefined });
   if (u.includes('/file')) {
     return { ok: true, status: 201, text: async () => JSON.stringify({ attached: true, replaced: 0, media: { id: 'm1' } }) };
   }
@@ -229,6 +229,56 @@ console.log('\nПовний конвеєр:');
 
   const noId = await call('/api/admin/pdf/publish', { book: { title: 'Без id' }, priceMinor: 100, coverBase64: COVER });
   t('без id книги → 400', noId.status === 400, String(noId.status));
+}
+
+console.log('\nБезкоштовна книга, категорія, рушій без позначки «тест»:');
+{
+  // Нуль без прапорця — відмова ДО будь-якого виклику мосту.
+  calls.length = 0;
+  const silentZero = await call('/api/admin/pdf/publish', {
+    book, coverBase64: COVER, editions: [{ format: 'digital', priceMinor: 0 }],
+  });
+  t('ціна 0 без «free» → 400, а не тиха роздача', silentZero.status === 400, String(silentZero.status));
+  t('відмова називає прапорець «Безкоштовна»', /Безкоштовна/.test(String(silentZero.data?.error)), String(silentZero.data?.error));
+  t('міст не зачеплено', calls.length === 0, String(calls.length));
+
+  // З прапорцем — публікується, уривок для безкоштовної не додається навіть без sample:false.
+  calls.length = 0;
+  const freeBook = await call('/api/admin/pdf/publish', {
+    book, coverBase64: COVER, categorySlug: 'knyhy',
+    editions: [{ format: 'digital', priceMinor: 0, free: true }],
+  });
+  const freeEd = freeBook.data?.editions?.[0];
+  t('безкоштовна з прапорцем → 200', freeBook.status === 200, JSON.stringify(freeBook.data)?.slice(0, 160));
+  t('для безкоштовної уривок не робиться', freeEd?.sample == null, JSON.stringify(freeEd?.sample));
+  const bookPost = calls.find((c) => c.url.endsWith('/bridge/books') && c.method === 'POST');
+  const sent = bookPost?.body ? JSON.parse(bookPost.body) : {};
+  t('у мост їде priceMinor 0', sent.priceMinor === 0, String(sent.priceMinor));
+  t('категорія їде в мост', sent.categorySlug === 'knyhy', String(sent.categorySlug));
+
+  // Друкована безкоштовною не буває.
+  const freePrint = await call('/api/admin/pdf/publish', {
+    book, coverBase64: COVER, editions: [{ format: 'print', priceMinor: 0, free: true, trimId: '6x9' }],
+  });
+  t('друкована за 0 → 400', freePrint.status === 400, String(freePrint.status));
+
+  // Суперечність: прапорець є, а ціна ні.
+  const contradiction = await call('/api/admin/pdf/publish', {
+    book, coverBase64: COVER, editions: [{ format: 'digital', priceMinor: 15000, free: true }],
+  });
+  t('«Безкоштовна» при ціні 150 грн → 400', contradiction.status === 400, String(contradiction.status));
+
+  // Рушій без позначки: недоступний chromium відмовить, але ДО мосту/з поясненням — а головне,
+  // з clean externalId не отримує суфікса. Перевіряємо nova + clean (рушій за замовчуванням).
+  calls.length = 0;
+  const cleanNova = await call('/api/admin/pdf/publish', {
+    book, coverBase64: COVER, sample: false,
+    editions: [{ format: 'digital', priceMinor: 15000, engineId: 'nova', clean: true }],
+  });
+  const cleanPost = calls.find((c) => c.url.endsWith('/bridge/books') && c.method === 'POST');
+  const cleanSent = cleanPost?.body ? JSON.parse(cleanPost.body) : {};
+  t('clean: externalId без суфікса рушія', cleanNova.status === 200 && cleanSent.externalId === 'book-1:digital', String(cleanSent.externalId));
+  t('clean: назва без «тест рушія»', !/тест рушія/.test(String(cleanSent.title)), String(cleanSent.title));
 }
 
 // GET-запит: перелік рушіїв читається, а не надсилається. Окремий помічник,

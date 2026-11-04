@@ -1,0 +1,16 @@
+{
+  "error": "Курс ще не готовий до відправки.",
+  "kind": "submit_blocked",
+  "blockers": [
+    {
+      "kind": "open_assumptions",
+      "message": "Підтвердіть припущення: «На фото 4, ймовірно, лляна олія…».",
+      "assumptionId": "as-1"
+    },
+    {
+      "kind": "module_not_written",
+      "message": "Модуль «Різьблення ложки» ще без тексту — натисніть «Написати курс».",
+      "moduleId": "m-2"
+    }
+  ]
+}

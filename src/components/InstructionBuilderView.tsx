@@ -7,6 +7,7 @@ import {
   ExternalLink,
   ListOrdered,
   Loader2,
+  Lock,
   Plus,
   Printer,
   Search,
@@ -279,7 +280,9 @@ const StringListEditor: React.FC<{
   placeholder: string;
   addLabel: string;
   onChange: (items: string[]) => void;
-}> = ({ items, placeholder, addLabel, onChange }) => (
+  /** K3: рядки зі специфікації набору — лише для читання (їх оновлює специфікація). */
+  locked?: string[];
+}> = ({ items, placeholder, addLabel, onChange, locked }) => (
   <div className={cardCls + ' space-y-2'}>
     {items.map((value, i) => (
       <div key={i} className="flex items-center gap-2">
@@ -288,16 +291,23 @@ const StringListEditor: React.FC<{
           value={value}
           onChange={(e) => onChange(items.map((v, idx) => (idx === i ? e.target.value : v)))}
           placeholder={placeholder}
-          className={inputCls + ' flex-1'}
+          disabled={!!value && !!locked?.includes(value)}
+          className={inputCls + ' flex-1 disabled:opacity-70'}
         />
-        <button
-          type="button"
-          onClick={() => onChange(items.length > 1 ? items.filter((_, idx) => idx !== i) : [''])}
-          className={deleteBtnCls}
-          title="Видалити пункт"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
+        {value && locked?.includes(value) ? (
+          <span className="p-1.5 text-emerald-500 shrink-0" title="Рядок зі специфікації набору: змінюйте вік і попередження в картці набору" data-spec-locked>
+            <Lock className="h-3.5 w-3.5" />
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => onChange(items.length > 1 ? items.filter((_, idx) => idx !== i) : [''])}
+            className={deleteBtnCls}
+            title="Видалити пункт"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
     ))}
     <button type="button" onClick={() => onChange([...items, ''])} className={addBtnCls}>
@@ -321,10 +331,16 @@ export const InstructionBuilderView: React.FC<{
    * за тим самим шаблоном, що й onCourseCreated.
    */
   onInstructionBookCreated?: (payload: InstructionBookCreationPayload) => void;
-}> = ({ onChangeTrack, onInstructionBookCreated, initialInstruction }) => {
+  /**
+   * K3: режим «інструкція набору». Документ живе в картці набору (а не в localStorage):
+   * кожна зміна йде в `onChange`, «Нова» й вибір напряму вимкнені, рядки комплектації й
+   * безпеки зі специфікації заблоковані (їх оновлює специфікація).
+   */
+  kitBinding?: { onChange: (doc: Instruction) => void; onClose: () => void };
+}> = ({ onChangeTrack, onInstructionBookCreated, initialInstruction, kitBinding }) => {
   const [doc, setDoc] = useState<Instruction>(() => initialInstruction ?? loadInstructionDraft() ?? createEmptyInstruction('assembly'));
   const [section, setSection] = useState<InstructionSectionKey>('overview');
-  const [showTypeDialog, setShowTypeDialog] = useState<boolean>(() => !initialInstruction && !loadInstructionDraft());
+  const [showTypeDialog, setShowTypeDialog] = useState<boolean>(() => !kitBinding && !initialInstruction && !loadInstructionDraft());
   const [showPreview, setShowPreview] = useState(true);
   const [kbQuery, setKbQuery] = useState('');
   const [kbDraft, setKbDraft] = useState({ title: '', link: '', excerpt: '' });
@@ -339,7 +355,8 @@ export const InstructionBuilderView: React.FC<{
       firstRender.current = false;
       return;
     }
-    saveInstructionDraft(doc);
+    if (kitBinding) kitBinding.onChange(doc);
+    else saveInstructionDraft(doc);
   }, [doc]);
 
   const type = useMemo(() => findInstructionType(doc.docType), [doc.docType]);
@@ -475,17 +492,25 @@ export const InstructionBuilderView: React.FC<{
           </div>
           <h1 className="mt-2 text-2xl font-bold text-slate-100">{type.docBadge}</h1>
         </div>
-        {onChangeTrack && (
-          <button onClick={onChangeTrack} className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2 text-xs font-semibold text-slate-300 transition-colors hover:bg-white/[0.06]">
-            <ArrowLeft className="h-3.5 w-3.5" /> До вибору напряму
+        {kitBinding ? (
+          <button onClick={kitBinding.onClose} data-kit-instruction-close className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2 text-xs font-semibold text-slate-300 transition-colors hover:bg-white/[0.06]">
+            <ArrowLeft className="h-3.5 w-3.5" /> До картки набору
           </button>
+        ) : (
+          onChangeTrack && (
+            <button onClick={onChangeTrack} className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2 text-xs font-semibold text-slate-300 transition-colors hover:bg-white/[0.06]">
+              <ArrowLeft className="h-3.5 w-3.5" /> До вибору напряму
+            </button>
+          )
         )}
       </header>
 
       <div className="mb-4 flex flex-wrap items-center gap-2 print:hidden">
-        <button type="button" onClick={startNew} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/[0.06] transition-colors">
-          Нова
-        </button>
+        {!kitBinding && (
+          <button type="button" onClick={startNew} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/[0.06] transition-colors">
+            Нова
+          </button>
+        )}
         <button type="button" onClick={exportJson} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/[0.06] transition-colors">
           <Download className="h-3.5 w-3.5" /> Експорт
         </button>
@@ -512,7 +537,7 @@ export const InstructionBuilderView: React.FC<{
           {showPreview ? 'Сховати прев’ю' : 'Попередній перегляд'}
         </button>
         <span className="ml-auto inline-flex items-center gap-1.5 text-[11px] text-slate-500">
-          <Cloud className="h-3.5 w-3.5" /> Збережено локально
+          <Cloud className="h-3.5 w-3.5" /> {kitBinding ? 'Зберігається в картці набору — натисніть «Зберегти» в картці виробу' : 'Збережено локально'}
         </span>
         {createBookError && (
           <span className="w-full text-[11px] font-semibold text-amber-400">{createBookError}</span>
@@ -619,23 +644,29 @@ export const InstructionBuilderView: React.FC<{
 
           {section === 'materials' && (
             <div className={cardCls}>
+              {doc.materials.some((m) => m.specLineId) && (
+                <p className="mb-3 flex items-start gap-1.5 rounded-lg border border-emerald-600/40 p-2.5 text-[11px] text-emerald-200" data-spec-materials-note>
+                  <Lock className="mt-0.5 h-3 w-3 shrink-0" /> Рядки з позначкою зі специфікації оновлюються автоматично: деталі, кількість і коди змінюють у картці набору. Власні рядки можна додавати нижче.
+                </p>
+              )}
               <div className="space-y-2">
                 {doc.materials.map((m, i) => (
                   <div key={m.id} className="grid grid-cols-[70px_1fr_90px_auto] gap-2 items-end">
-                    {i === 0 ? labeled('Код', <input value={m.code} onChange={(e) => patch({ materials: doc.materials.map((x) => (x.id === m.id ? { ...x, code: e.target.value } : x)) })} className={inputCls} />) : (
-                      <input value={m.code} onChange={(e) => patch({ materials: doc.materials.map((x) => (x.id === m.id ? { ...x, code: e.target.value } : x)) })} className={inputCls} />
+                    {i === 0 ? labeled('Код', <input value={m.code} onChange={(e) => patch({ materials: doc.materials.map((x) => (x.id === m.id ? { ...x, code: e.target.value } : x)) })} className={inputCls} disabled={!!m.specLineId} />) : (
+                      <input value={m.code} onChange={(e) => patch({ materials: doc.materials.map((x) => (x.id === m.id ? { ...x, code: e.target.value } : x)) })} className={inputCls} disabled={!!m.specLineId} />
                     )}
-                    {i === 0 ? labeled(type.materialsColumnLabel, <input value={m.name} onChange={(e) => patch({ materials: doc.materials.map((x) => (x.id === m.id ? { ...x, name: e.target.value } : x)) })} placeholder={type.materialsPlaceholder} className={inputCls} />) : (
-                      <input value={m.name} onChange={(e) => patch({ materials: doc.materials.map((x) => (x.id === m.id ? { ...x, name: e.target.value } : x)) })} placeholder={type.materialsPlaceholder} className={inputCls} />
+                    {i === 0 ? labeled(type.materialsColumnLabel, <input value={m.name} onChange={(e) => patch({ materials: doc.materials.map((x) => (x.id === m.id ? { ...x, name: e.target.value } : x)) })} placeholder={type.materialsPlaceholder} className={inputCls} disabled={!!m.specLineId} />) : (
+                      <input value={m.name} onChange={(e) => patch({ materials: doc.materials.map((x) => (x.id === m.id ? { ...x, name: e.target.value } : x)) })} placeholder={type.materialsPlaceholder} className={inputCls} disabled={!!m.specLineId} />
                     )}
-                    {i === 0 ? labeled('Кількість', <input type="number" value={m.qty} onChange={(e) => patch({ materials: doc.materials.map((x) => (x.id === m.id ? { ...x, qty: e.target.value } : x)) })} className={inputCls} />) : (
-                      <input type="number" value={m.qty} onChange={(e) => patch({ materials: doc.materials.map((x) => (x.id === m.id ? { ...x, qty: e.target.value } : x)) })} className={inputCls} />
+                    {i === 0 ? labeled('Кількість', <input type={m.specLineId ? 'text' : 'number'} value={m.qty} onChange={(e) => patch({ materials: doc.materials.map((x) => (x.id === m.id ? { ...x, qty: e.target.value } : x)) })} className={inputCls} disabled={!!m.specLineId} />) : (
+                      <input type={m.specLineId ? 'text' : 'number'} value={m.qty} onChange={(e) => patch({ materials: doc.materials.map((x) => (x.id === m.id ? { ...x, qty: e.target.value } : x)) })} className={inputCls} disabled={!!m.specLineId} />
                     )}
                     <button
                       type="button"
+                      disabled={!!m.specLineId}
                       onClick={() => patch({ materials: doc.materials.length > 1 ? doc.materials.filter((x) => x.id !== m.id) : doc.materials })}
-                      className={deleteBtnCls}
-                      title="Видалити рядок"
+                      className={deleteBtnCls + ' disabled:opacity-30 disabled:cursor-not-allowed'}
+                      title={m.specLineId ? 'Рядок зі специфікації набору: змініть або приберіть деталь у картці набору' : 'Видалити рядок'}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -657,7 +688,7 @@ export const InstructionBuilderView: React.FC<{
           )}
 
           {section === 'warnings' && (
-            <StringListEditor items={doc.warnings} placeholder={type.warningPlaceholder} addLabel="Додати пункт" onChange={(warnings) => patch({ warnings })} />
+            <StringListEditor items={doc.warnings} placeholder={type.warningPlaceholder} addLabel="Додати пункт" onChange={(warnings) => patch({ warnings })} locked={doc.kitSource?.specWarnings} />
           )}
 
           {doc.sourceBased && <p className="rounded-lg border border-cyan-600/40 p-3 text-xs text-cyan-200">Інструкція створена за джерелами. Під кожним кроком збережено його походження; непідтверджені параметри потрібно уточнити. Додаткове ШІ-поглиблення під час перенесення вимкнене.</p>}

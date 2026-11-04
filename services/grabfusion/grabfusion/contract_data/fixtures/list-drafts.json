@@ -1,0 +1,20 @@
+{
+  "drafts": [
+    {
+      "draftId": "pd_7f3a9c2e41b0",
+      "kind": "course",
+      "status": "collecting",
+      "title": "Ложка з вишні за один вечір",
+      "photoCount": 4,
+      "updatedAt": "2026-10-28T10:04:05.000Z"
+    },
+    {
+      "draftId": "pd_19c0d77a5e21",
+      "kind": "instruction",
+      "status": "structured",
+      "title": "Складання полиці «Хвиля»",
+      "photoCount": 12,
+      "updatedAt": "2026-10-27T16:20:00.000Z"
+    }
+  ]
+}

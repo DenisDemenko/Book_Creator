@@ -584,5 +584,240 @@ console.log('\nЗаявки продавця (погодження перене�
   t('відповідь без тіла → рішення все одно повертається', bare.status === 'approved', bare.status);
 }
 
+console.log('\nМодерація STEAM-проєктів (команди й паспорти):');
+{
+  const seen: { url: string; method?: string; key?: string; body?: string }[] = [];
+  const mkJson = (status: number, body: unknown) => (async (url: string, init: any = {}) => {
+    seen.push({ url: String(url), method: init.method, key: init.headers?.['x-bridge-key'], body: init.body });
+    return { status, ok: status >= 200 && status < 300, text: async () => JSON.stringify(body) };
+  }) as never;
+
+  const queue = await bridge.listBridgeTeams('pending', {
+    fetch: mkJson(200, { count: 1, teams: [{ id: 't1', name: 'Лабіринт', status: 'pending', ownerEmail: 'o@x.ua' }] }),
+    settings,
+  });
+  t('GET /bridge/teams?status=pending із ключем',
+    seen[0]?.url === 'https://api.fusionlab.in.ua/bridge/teams?status=pending' && seen[0]?.key === 'secret-key',
+    String(seen[0]?.url));
+  t('черга команд прочитана', queue.count === 1 && queue.teams[0]?.name === 'Лабіринт');
+
+  await bridge.listBridgeTeams('' as any, { fetch: mkJson(200, { teams: [] }), settings });
+  t('порожній фільтр → без параметра', seen[1]?.url === 'https://api.fusionlab.in.ua/bridge/teams', String(seen[1]?.url));
+  await bridge.listBridgeTeams('bogus' as any, { fetch: mkJson(200, { teams: [] }), settings });
+  t('невідомий статус не потрапляє в адресу', seen[2]?.url === 'https://api.fusionlab.in.ua/bridge/teams', String(seen[2]?.url));
+
+  const detail = await bridge.getBridgeTeam('t 1', {
+    fetch: mkJson(200, { id: 't1', name: 'Лабіринт', details: 'Опис', passport: { title: 'П', versions: [] }, members: [], media: [] }),
+    settings,
+  });
+  t('картка команди читається за екранованим id',
+    seen[3]?.url === 'https://api.fusionlab.in.ua/bridge/teams/t%201' && detail.passport?.title === 'П', String(seen[3]?.url));
+
+  const approved = await bridge.decideBridgeTeam('t1', 'approve', undefined, {
+    fetch: mkJson(201, { id: 't1', status: 'published' }),
+    settings,
+  });
+  t('схвалення — POST /approve', seen[4]?.url.endsWith('/bridge/teams/t1/approve') && seen[4]?.method === 'POST');
+  t('статус схвалення', approved.status === 'published', approved.status);
+
+  await bridge.decideBridgeTeam('t1', 'request-changes', '  Додайте схему  ', {
+    fetch: mkJson(201, { id: 't1', status: 'changes_requested' }),
+    settings,
+  });
+  t('«із зауваженнями» везе note без зайвих пробілів',
+    seen[5]?.url.endsWith('/bridge/teams/t1/request-changes') && JSON.parse(String(seen[5]?.body)).note === 'Додайте схему',
+    String(seen[5]?.body));
+
+  await bridge.decideBridgeTeam('t1', 'reject', 'Не за темою', {
+    fetch: mkJson(201, { id: 't1', status: 'rejected' }),
+    settings,
+  });
+  t('відхилення везе reason', JSON.parse(String(seen[6]?.body)).reason === 'Не за темою', String(seen[6]?.body));
+
+  const before = seen.length;
+  let noNote: any = null;
+  try { await bridge.decideBridgeTeam('t1', 'request-changes', '   ', { fetch: mkJson(201, {}), settings }); }
+  catch (e) { noNote = e; }
+  t('без тексту зауважень запит навіть не йде в мережу',
+    noNote?.status === 400 && seen.length === before, String(noNote?.message));
+  let noReason: any = null;
+  try { await bridge.decideBridgeTeam('t1', 'reject', '', { fetch: mkJson(201, {}), settings }); }
+  catch (e) { noReason = e; }
+  t('без причини відхилення теж зупиняється', noReason?.status === 400 && seen.length === before);
+
+  let unauthorized: any = null;
+  try { await bridge.listBridgeTeams('pending', { fetch: mkJson(401, { message: 'Невірний ключ' }), settings }); }
+  catch (e) { unauthorized = e; }
+  t('401 → помилка про ключ', unauthorized?.kind === 'unauthorized');
+
+  let conflict: any = null;
+  try {
+    await bridge.decideBridgeTeam('t1', 'request-changes', 'x', {
+      fetch: mkJson(409, { message: 'Повернути із зауваженнями можна лише команду, що чекає на модерацію' }),
+      settings,
+    });
+  } catch (e) { conflict = e; }
+  t('409 від маркетплейсу → змістовна відмова зі статусом 409, а не «успіх»',
+    conflict?.kind === 'rejected' && conflict?.status === 409 && String(conflict?.message).includes('чекає на модерацію'),
+    String(conflict?.message));
+
+  let gone: any = null;
+  try { await bridge.getBridgeTeam('nope', { fetch: mkJson(404, { message: 'Команду не знайдено' }), settings }); }
+  catch (e) { gone = e; }
+  t('404 → «Команду не знайдено»', gone?.status === 404 && String(gone?.message).includes('Команду не знайдено'));
+
+  const garbage = await bridge.listBridgeTeams('pending', { fetch: mkJson(200, { unexpected: 1 }), settings });
+  t('несподіване тіло → порожня черга', garbage.count === 0 && garbage.teams.length === 0);
+}
+
+console.log('\nКатегорії вітрини:');
+{
+  const capture = (status: number, body: unknown) => {
+    const calls: Array<{ url: string; body?: any }> = [];
+    return {
+      calls,
+      fetch: (async (url: string, init: any = {}) => {
+        calls.push({ url: String(url), body: init.body ? JSON.parse(init.body) : undefined });
+        return { status, ok: status < 400, text: async () => JSON.stringify(body) };
+      }) as never,
+    };
+  };
+
+  const cats = capture(200, { categories: [
+    { slug: 'knyhy', name: 'Книги', listingCount: 2 },
+    { slug: 5, name: 'зламана' },
+  ] });
+  const list = await bridge.listBridgeCategories({ fetch: cats.fetch, settings });
+  t('перелік категорій читається, зламані рядки відкинуто', list.length === 1 && list[0].slug === 'knyhy');
+  t('запит іде на /bridge/categories', cats.calls[0].url.endsWith('/bridge/categories'));
+
+  const old = capture(404, { message: 'Cannot GET' });
+  const none = await bridge.listBridgeCategories({ fetch: old.fetch, settings });
+  t('старий приймач без /bridge/categories → порожній список, не помилка', Array.isArray(none) && none.length === 0);
+
+  const denied = capture(401, {});
+  let e401: any = null;
+  try { await bridge.listBridgeCategories({ fetch: denied.fetch, settings }); } catch (e) { e401 = e; }
+  t('401 → «unauthorized»', e401?.kind === 'unauthorized');
+
+  const book = capture(201, { created: true, listing: { slug: 'x' } });
+  await bridge.publishBookToMarketplace(
+    { bookId: 'b1', format: 'digital', title: 'T', priceMinor: 100, categorySlug: 'knyhy' },
+    { fetch: book.fetch, settings });
+  t('categorySlug їде в тілі книги', book.calls[0].body.categorySlug === 'knyhy');
+
+  const course = capture(201, { created: true, listing: { slug: 'c' } });
+  await bridge.publishCourseToMarketplace(
+    { bookId: 'b1', title: 'C', priceMinor: 100, categorySlug: 'chpu', category: 'ЧПУ' },
+    { fetch: course.fetch, settings });
+  t('categorySlug їде в тілі курсу', course.calls[0].body.categorySlug === 'chpu');
+
+  const product = capture(201, { created: true, listing: { slug: 'p' } });
+  await bridge.publishProductToMarketplace(
+    { sku: 'S-1', title: 'P', priceMinor: 100, categorySlug: 'chpu' },
+    { fetch: product.fetch, settings });
+  t('categorySlug їде в тілі виробу', product.calls[0].body.categorySlug === 'chpu');
+
+  t('cleanCategorySlug: undefined лишається undefined, порожній — порожнім',
+    bridge.cleanCategorySlug(undefined) === undefined && bridge.cleanCategorySlug('  ') === '' && bridge.cleanCategorySlug(' chpu ') === 'chpu');
+  const hl = bridge.cleanHighlights(['  a ', '', 5, 'b'.repeat(300)]) || [];
+  t('cleanHighlights: лише непорожні рядки, ≤200 символів', hl.length === 2 && hl[0] === 'a' && hl[1].length === 200);
+  t('cleanHighlights: не масив → undefined', bridge.cleanHighlights('x') === undefined && bridge.cleanHighlights([]) === undefined);
+}
+
+console.log('\nБезкоштовна книга — лише з явним прапорцем:');
+{
+  const run = (price: number, free: unknown) => {
+    try { bridge.assertFreePriceConfirmed(price, free, 'Тест'); return null; } catch (e: any) { return e; }
+  };
+  const silent = run(0, undefined);
+  t('ціна 0 без прапорця → відмова 400', silent?.status === 400 && /Безкоштовна/.test(silent.message));
+  t('ціна 0 з прапорцем → дозволено', run(0, true) === null);
+  t('ціна 0 з free:"true" (не булеве) → відмова', run(0, 'true')?.status === 400);
+  t('платна ціна без прапорця → дозволено', run(15000, undefined) === null);
+  t('платна ціна з прапорцем → відмова (суперечність)', run(15000, true)?.status === 400);
+}
+
+console.log('\nЦіна з поля вводу:');
+{
+  const price = await import('../src/components/adminOs/priceInput');
+  t('150 → 15000 коп.', price.parsePriceMinor('150') === 15000);
+  t('«99,50» з комою → 9950', price.parsePriceMinor('99,50') === 9950);
+  t('«1 250» із пробілом → 125000', price.parsePriceMinor('1 250') === 125000);
+  t('порожнє поле → null, а не 0', price.parsePriceMinor('') === null);
+  t('«abc» → null', price.parsePriceMinor('abc') === null);
+  t('«1,5,0» → null', price.parsePriceMinor('1,5,0') === null);
+  t('від’ємне → null', price.parsePriceMinor('-5') === null);
+  const zero = price.resolvePrice('0', false, 'книги');
+  t('нуль без «Безкоштовна» → помилка', zero.ok === false && /Безкоштовна/.test((zero as any).error));
+  const free = price.resolvePrice('', true, 'книги');
+  t('«Безкоштовна» → 0 із free:true, навіть при порожньому полі', free.ok === true && (free as any).minor === 0 && (free as any).free === true);
+  const bad = price.resolvePrice('abc', false, 'книги');
+  t('сміття без прапорця → помилка, не 0', bad.ok === false);
+}
+
+console.log('\nПоказники продажу робіт випускників для автора курсу:');
+{
+  const seen: { url: string; key?: string }[] = [];
+  const mkJson = (status: number, body: unknown) => (async (url: string, init: any = {}) => {
+    seen.push({ url: String(url), key: init.headers?.['x-bridge-key'] });
+    return { status, ok: status >= 200 && status < 300, text: async () => JSON.stringify(body) };
+  }) as never;
+  const settings = { url: 'https://market.test', key: 'k' } as never;
+
+  const full = await bridge.fetchGraduateStats('BK-7', {
+    fetch: mkJson(200, {
+      course: { slug: 'epoxy', title: 'Епоксидна смола', graduateSelling: 'anytime' },
+      students: 12, completed: 5, sellers: 3,
+      works: { total: 4, draft: 1, pending: 1, published: 2 },
+      sales: { units: 6, revenueMinor: 60000, commissionMinor: 12000 },
+      bonus: { sharePercent: 25, accruedMinor: 2000, pendingMinor: 1000, paidMinor: 500, dueMinor: 1500 },
+    }),
+    settings,
+  });
+  t('запит іде за externalId курсу (BK-7:course) з ключем мосту',
+    seen[0]?.url === 'https://market.test/bridge/courses/BK-7%3Acourse/graduate-stats' && seen[0]?.key === 'k', seen[0]?.url);
+  t('учні, пройшли, продавці прочитано', full?.students === 12 && full?.completed === 5 && full?.sellers === 3);
+  t('роботи й продажі прочитано', full?.works.published === 2 && full?.sales.units === 6 && full?.sales.revenueMinor === 60000);
+  t('бонус: нараховано, очікує, виплачено, до виплати', full?.bonus.accruedMinor === 2000 && full?.bonus.pendingMinor === 1000 && full?.bonus.paidMinor === 500 && full?.bonus.dueMinor === 1500);
+
+  const partial = await bridge.fetchGraduateStats('BK-7', { fetch: mkJson(200, { students: 'abc' }), settings });
+  t('сміття в числах стає нулем, а не NaN', partial?.students === 0 && partial?.bonus.dueMinor === 0);
+
+  const none = await bridge.fetchGraduateStats('BK-7', { fetch: mkJson(404, { message: 'no' }), settings });
+  t('404 — курсу ще немає на вітрині: null, не помилка', none === null);
+
+  let unauthorized = '';
+  try { await bridge.fetchGraduateStats('BK-7', { fetch: mkJson(401, {}), settings }); } catch (e: any) { unauthorized = e.kind; }
+  t('401 — помилка «unauthorized»', unauthorized === 'unauthorized', unauthorized);
+
+  let rejected = '';
+  try { await bridge.fetchGraduateStats('BK-7', { fetch: mkJson(500, { message: 'boom' }), settings }); } catch (e: any) { rejected = e.kind; }
+  t('500 — помилка «rejected»', rejected === 'rejected', rejected);
+
+  let unreachable = '';
+  try {
+    await bridge.fetchGraduateStats('BK-7', { fetch: (async () => { throw new Error('down'); }) as never, settings });
+  } catch (e: any) { unreachable = e.kind; }
+  t('мережа лежить — «unreachable»', unreachable === 'unreachable', unreachable);
+}
+
+console.log('\nРозбір externalId лістингів:');
+{
+  const { parseExternalId } = await import('../src/components/adminOs/externalId');
+  const a = parseExternalId('BK-1:digital');
+  t('книга digital', a.kind === 'digital' && a.id === 'BK-1' && !a.engineId);
+  const b = parseExternalId('BK-1:print');
+  t('книга print', b.kind === 'print' && b.id === 'BK-1');
+  const c = parseExternalId('BK-1:digital:chromium');
+  t('тест рушієм: формат digital, рушій chromium, id без хвоста', c.kind === 'digital' && c.id === 'BK-1' && c.engineId === 'chromium');
+  const d = parseExternalId('BK-1:course');
+  t('курс', d.kind === 'course' && d.id === 'BK-1');
+  const e = parseExternalId('product:BK-ORG-LED-2084');
+  t('виріб: kind product, id = SKU', e.kind === 'product' && e.id === 'BK-ORG-LED-2084');
+  const f = parseExternalId('a:b:digital');
+  t('bookId із двокрапкою не ламається', f.kind === 'digital' && f.id === 'a:b');
+}
+
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);
 if (fail > 0) process.exit(1);

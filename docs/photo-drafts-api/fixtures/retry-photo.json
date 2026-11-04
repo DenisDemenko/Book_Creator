@@ -1,0 +1,17 @@
+{
+  "photo": {
+    "photoId": "ph_05a1",
+    "clientId": "c-2026-10-28-05",
+    "status": "processing",
+    "order": 5,
+    "takenAt": "2026-10-28T10:05:00.000Z",
+    "imageUrl": "/api/external/v1/photo-drafts/pd_7f3a9c2e41b0/photos/ph_05a1/image",
+    "description": null,
+    "tags": [],
+    "error": null,
+    "createdAt": "2026-10-28T10:05:05.000Z",
+    "updatedAt": "2026-10-28T10:05:20.000Z"
+  },
+  "revision": 9,
+  "duplicate": false
+}

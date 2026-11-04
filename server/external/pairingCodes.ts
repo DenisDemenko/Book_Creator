@@ -34,12 +34,14 @@ export interface PairingIssue {
 }
 
 export type PairingRedeem =
-  | { ok: true; userId: string; name: string }
+  | { ok: true; userId: string; name: string; scope: string | null }
   | { ok: false; reason: 'invalid' | 'expired' | 'locked' };
 
 interface PendingCode {
   userId: string;
   name: string;
+  /** Область майбутнього токена (`photo-drafts` для GrabFusion); null — повний доступ. */
+  scope: string | null;
   expiresAt: number;
 }
 
@@ -63,7 +65,7 @@ export class PairingCodeStore {
   ) {}
 
   /** Новий код для автора. Попередній невикористаний код цього автора стає недійсним. */
-  issue(userId: string, name = 'DesignCraft (локально)'): PairingIssue {
+  issue(userId: string, name = 'DesignCraft (локально)', scope: string | null = null): PairingIssue {
     this.sweep();
     for (const [code, pending] of this.codes) if (pending.userId === userId) this.codes.delete(code);
     let code = '';
@@ -71,7 +73,7 @@ export class PairingCodeStore {
       code = Array.from({ length: PAIRING_CODE_LENGTH }, () => PAIRING_ALPHABET[this.random(PAIRING_ALPHABET.length)]).join('');
     } while (this.codes.has(code));
     const expiresAt = this.now() + PAIRING_TTL_MS;
-    this.codes.set(code, { userId, name: String(name || '').slice(0, 80) || 'DesignCraft (локально)', expiresAt });
+    this.codes.set(code, { userId, name: String(name || '').slice(0, 80) || 'DesignCraft (локально)', scope, expiresAt });
     return { code, display: formatPairingCode(code), expiresAt: new Date(expiresAt).toISOString() };
   }
 
@@ -90,7 +92,7 @@ export class PairingCodeStore {
       this.recordFailure(key);
       return { ok: false, reason: 'expired' };
     }
-    return { ok: true, userId: pending.userId, name: pending.name };
+    return { ok: true, userId: pending.userId, name: pending.name, scope: pending.scope };
   }
 
   private recent(key: string): number {

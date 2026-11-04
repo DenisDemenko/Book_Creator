@@ -1,0 +1,17 @@
+{
+  "photo": {
+    "photoId": "ph_04a1",
+    "clientId": "c-2026-10-28-04",
+    "status": "processing",
+    "order": 4,
+    "takenAt": "2026-10-28T10:04:00.000Z",
+    "imageUrl": "/api/external/v1/photo-drafts/pd_7f3a9c2e41b0/photos/ph_04a1/image",
+    "description": null,
+    "tags": [],
+    "error": null,
+    "createdAt": "2026-10-28T10:04:05.000Z",
+    "updatedAt": "2026-10-28T10:04:20.000Z"
+  },
+  "revision": 7,
+  "duplicate": false
+}

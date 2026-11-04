@@ -526,6 +526,18 @@ export interface CourseModuleV2 {
   skillIds: string[];
 }
 
+/** Звідки курс узявся: чернетка за фото (GrabFusion). Виставляє лише сервер. */
+export interface CourseOriginV2 {
+  kind: 'photo-draft';
+  draftId: string;
+  createdAt: string;
+  photoCount: number;
+  /** lessonId → поля, які написав ШІ й автор ще не правив (`description` — текст уроку). */
+  aiFields: Record<string, Array<'title' | 'goal' | 'description' | 'topics'>>;
+  /** Витрати ШІ на чернетку, $ з журналу витрат. */
+  ai?: { calls: number; costUsd: number };
+}
+
 export interface CourseV2 {
   id: string;
   ownerId: string;
@@ -538,9 +550,20 @@ export interface CourseV2 {
   outcomes: string[];
   highlights: string[];
   coverUrl?: string;
+  /** Застарілий вільний текст; новий вибір — `categorySlug`. */
   category?: string;
+  /** Slug категорії вітрини; '' — свідомо без категорії. */
+  categorySlug?: string;
+  /** Ціна в копійках; редактор вводить її в гривнях. */
   priceMinor?: number;
+  /** Явне «Безкоштовний» — лише з ним ціна 0 допустима. */
+  free?: boolean;
+  /** Завжди UAH (сервер виставляє сам). */
   currency?: string;
+  /** Коли студенти можуть продавати власні роботи, зроблені під час курсу. */
+  graduateSelling?: 'off' | 'after_completion' | 'anytime';
+  /** Створено за фото: показується позначкою в редакторі; змінити з клієнта не можна. */
+  origin?: CourseOriginV2;
   skills: CourseSkillV2[];
   modules: CourseModuleV2[];
   createdAt: string;
@@ -571,6 +594,8 @@ export interface InstructionMaterialRow {
   code: string;
   name: string;
   qty: string;
+  /** K3: рядок узято зі специфікації набору (id деталі). Оновлюється з неї; ручні рядки поля не мають. */
+  specLineId?: string;
 }
 
 /** Один крок послідовності дій — розділ «Кроки складання» та еквіваленти. */
@@ -610,6 +635,11 @@ export interface InstructionWarranty {
 }
 
 export interface Instruction {
+  /**
+   * K3: інструкція набору. `specWarnings` — рядки розділу «Безпека», узяті зі специфікації
+   * (вік, попередження); вони оновлюються з неї, решта рядків — ручні й не чіпаються.
+   */
+  kitSource?: { specWarnings: string[]; syncedAt: string };
   sourceBased?: boolean;
   docType: InstructionDocType;
   title: string;

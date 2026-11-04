@@ -669,7 +669,8 @@ CREATE TABLE IF NOT EXISTS external_api_tokens (
   prefix        TEXT NOT NULL,
   created_at    TEXT NOT NULL,
   last_used_at  TEXT,
-  revoked_at    TEXT
+  revoked_at    TEXT,
+  scope         TEXT                  -- NULL = повний доступ; 'photo-drafts' = лише чернетки за фото (GrabFusion)
 );
 CREATE INDEX IF NOT EXISTS idx_external_api_tokens_user ON external_api_tokens(user_id, created_at DESC);
 
@@ -693,9 +694,28 @@ CREATE TABLE IF NOT EXISTS external_scans (
   error            TEXT,
   token_id         TEXT,
   created_at       TEXT NOT NULL,
-  updated_at       TEXT NOT NULL
+  updated_at       TEXT NOT NULL,
+  batch_id         TEXT,                -- пакет сторінок рукопису (GrabFusion, kind manuscript): id чернетки
+  batch_order      INTEGER,             -- номер сторінки в пакеті, з 1
+  batch_book_title TEXT                 -- назва нової книги, коли пакет без book_id
 );
 CREATE INDEX IF NOT EXISTS idx_external_scans_owner ON external_scans(owner_id, status, created_at DESC);
+
+-- Чернетки за фото (GrabFusion, docs/photo-drafts-api.md). Уся чернетка —
+-- один JSON у payload: кадри, описи, структура, припущення змінюються разом
+-- і завжди читаються цілком, тож розкладати їх по таблицях немає сенсу.
+-- status/revision винесено в колонки для переліку й лічильників.
+CREATE TABLE IF NOT EXISTS photo_drafts (
+  id          TEXT PRIMARY KEY,
+  owner_id    TEXT NOT NULL,
+  kind        TEXT NOT NULL,           -- course | instruction | book
+  status      TEXT NOT NULL,           -- collecting | structured | written | submitted | discarded
+  revision    INTEGER NOT NULL DEFAULT 1,
+  payload     TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_photo_drafts_owner ON photo_drafts(owner_id, updated_at DESC);
 
 -- РЎР°РјРѕСЃС‚С–Р№РЅС– РЅР°РІС‡Р°Р»СЊРЅС– РєСѓСЂСЃРё (docs/tech-spec-course-wizard-2026.md).
 -- РљСѓСЂСЃ РЅРµ РїСЂРёРІРјСЏР·Р°РЅРёР№ РґРѕ РєРЅРёРіРё: СЂРµРјС–СЃРЅРёС‡С– РєСѓСЂСЃРё Р±СѓРІР°СЋС‚СЊ Р±РµР· СЂСѓРєРѕРїРёСЃСѓ.
@@ -721,10 +741,11 @@ CREATE TABLE IF NOT EXISTS moderation (
   item_id      TEXT NOT NULL,                   -- id у Студії (book.id / course.id)
   title        TEXT NOT NULL,
   author_id    TEXT NOT NULL,
-  status       TEXT NOT NULL DEFAULT 'pending', -- pending | approved | rejected
+  status       TEXT NOT NULL DEFAULT 'pending', -- pending | approved | rejected | changes_requested
   reason       TEXT,
   created_at   TEXT NOT NULL,
-  decided_at   TEXT
+  decided_at   TEXT,
+  snapshot     TEXT                             -- JSON твору на момент подання (що саме погоджується)
 );
 CREATE INDEX IF NOT EXISTS idx_moderation_status ON moderation(status, created_at);
 
@@ -1032,6 +1053,30 @@ function migrateExpressDraftRevision(instance: Database): void {
   }
 }
 
+/** Область дії токена (GrabFusion, #515): старі бази не мають колонки `scope`. NULL = повний доступ, як і раніше. */
+function migrateExternalTokenScope(instance: Database): void {
+  try {
+    const cols = instance.prepare('PRAGMA table_info(external_api_tokens)').all() as { name: string }[];
+    if (!cols.some((c) => c.name === 'scope')) {
+      instance.exec('ALTER TABLE external_api_tokens ADD COLUMN scope TEXT');
+    }
+  } catch (err) {
+    console.warn('[db] Не вдалося перевірити/додати колонку external_api_tokens.scope:', err);
+  }
+}
+
+/** Пакети сторінок рукопису (GrabFusion, A5): старі бази не мають колонок `batch_*`. */
+function migrateExternalScanBatch(instance: Database): void {
+  try {
+    const cols = new Set((instance.prepare('PRAGMA table_info(external_scans)').all() as { name: string }[]).map((c) => c.name));
+    for (const [name, type] of [['batch_id', 'TEXT'], ['batch_order', 'INTEGER'], ['batch_book_title', 'TEXT']] as const) {
+      if (!cols.has(name)) instance.exec(`ALTER TABLE external_scans ADD COLUMN ${name} ${type}`);
+    }
+  } catch (err) {
+    console.warn('[db] Не вдалося перевірити/додати колонки external_scans.batch_*:', err);
+  }
+}
+
 function migrateUsageLogColumns(instance: Database): void {
   try {
     const cols = instance.prepare('PRAGMA table_info(usage_log)').all() as { name: string }[];
@@ -1091,6 +1136,22 @@ function migrateMediaAssetColumns(instance: Database): void {
     instance.exec('CREATE INDEX IF NOT EXISTS idx_media_assets_root ON media_assets(root_id)');
   } catch (err) {
     console.warn('[db] Не вдалося перевірити/додати колонки паспорта media_assets:', err);
+  }
+}
+
+/**
+ * Знімок твору в черзі модерації з'явився пізніше за саму таблицю: адмін
+ * погоджує те, що автор подав, а не живий стан, який той міг змінити далі.
+ * Старі записи лишаються без знімка (NULL) — для них діє живий стан.
+ */
+function migrateModerationSnapshot(instance: Database): void {
+  try {
+    const cols = instance.prepare('PRAGMA table_info(moderation)').all() as { name: string }[];
+    if (!cols.some((c) => c.name === 'snapshot')) {
+      instance.exec('ALTER TABLE moderation ADD COLUMN snapshot TEXT');
+    }
+  } catch (err) {
+    console.warn('[db] Не вдалося перевірити/додати колонку moderation.snapshot:', err);
   }
 }
 
@@ -1292,7 +1353,10 @@ export async function initDb(): Promise<boolean> {
     migrateUsageLogColumns(instance);
     migrateUsersColumns(instance);
     migrateSupportMessageColumns(instance);
+    migrateModerationSnapshot(instance);
     migrateMediaAssetColumns(instance);
+    migrateExternalTokenScope(instance);
+    migrateExternalScanBatch(instance);
     seedEmotionDictionary(instance);
     seedCoreEntityRegistry(instance);
     db = instance;

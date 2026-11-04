@@ -35,7 +35,10 @@ import {
   StoredPayment,
 } from './store';
 import { listBooks } from './bookStore';
-import { listAllCourses } from './courseStore';
+import { listAllCourses, getCourse, updateCourse } from './courseStore';
+import { courseSubmitProblems } from '../src/utils/coursePublishRules';
+import { buildCoursePublishInput } from './courseMarketplacePayload';
+import { syncCourseMedia } from './courseMediaSync';
 import { CHAT_USAGE_CONTEXT } from './chatRoutes';
 import { CHAT_MODELS, ENGINE_LABELS, engineConfigured, normalizeModelId } from './chatProviders';
 import {
@@ -68,9 +71,16 @@ import {
   readBridgeSettings,
   testBridgeConnection,
   listBridgeBooks,
+  listBridgeCategories,
+  assertFreePriceConfirmed,
+  cleanCategorySlug,
+  cleanHighlights,
   listBridgePayouts,
   listBridgeSellerApplications,
   decideBridgeSellerApplication,
+  listBridgeTeams,
+  getBridgeTeam,
+  decideBridgeTeam,
   unpublishByExternalId,
   bridgeTestBook,
   bridgeTestBookContent,
@@ -78,6 +88,8 @@ import {
   unpublishBookFromMarketplace,
   publishBookToMarketplace,
   publishCourseToMarketplace,
+  bridgeSupportsCourseContent,
+  bridgeSupportsCourseMedia,
   assertStorefrontCover,
   MarketplaceBridgeError,
 } from './marketplaceBridge';
@@ -1207,6 +1219,16 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
+  /** Категорії вітрини для списку вибору при публікації. */
+  app.get('/api/admin/marketplace-bridge/categories', requireAdmin, async (_req, res) => {
+    try {
+      res.json({ categories: await listBridgeCategories() });
+    } catch (err: any) {
+      const status = err instanceof MarketplaceBridgeError ? err.status : 502;
+      res.status(status).json({ error: err?.message || 'Не вдалося прочитати категорії.', kind: err?.kind });
+    }
+  });
+
   /**
    * Леджер виплат із маркетплейсу — читання в тому напрямі, якого міст досі
    * не мав: Студія вміла лише відправляти (книги, курси, вироби). Показуємо
@@ -1283,6 +1305,65 @@ export function registerAdminRoutes(app: Express): void {
     } catch (err: any) {
       const status = err instanceof MarketplaceBridgeError ? err.status : 502;
       res.status(status).json({ error: err?.message || 'Маркетплейс не прийняв рішення.', kind: err?.kind });
+    }
+  });
+
+  /**
+   * Модерація STEAM-проєктів: команди з паспортами. Черга й рішення живуть у
+   * маркетплейсі (там статус і сповіщення заявнику), панель Студії — єдине
+   * місце, де власник їх розбирає. Повна картка віддається окремим запитом,
+   * щоб черга не тягла десятки кілобайтів описів і паспортів.
+   */
+  const teamError = (res: any, err: any, fallback: string) => {
+    const status = err instanceof MarketplaceBridgeError ? err.status : 502;
+    res.status(status).json({ error: err?.message || fallback, kind: err?.kind });
+  };
+
+  app.get('/api/admin/marketplace-bridge/teams', requireAdmin, async (req, res) => {
+    try {
+      const status = String(req.query.status || '') as any;
+      const queue = await listBridgeTeams(status);
+      const base = (await readBridgeSettingsView()).url;
+      res.json({
+        ...queue,
+        teams: queue.teams.map((team) => ({
+          ...team,
+          photoUrl: team.photoPath && base ? `${base}${team.photoPath}` : null,
+        })),
+      });
+    } catch (err: any) {
+      teamError(res, err, 'Не вдалося прочитати команди.');
+    }
+  });
+
+  app.get('/api/admin/marketplace-bridge/teams/:id', requireAdmin, async (req, res) => {
+    try {
+      const team = await getBridgeTeam(String(req.params.id || '').trim());
+      const base = (await readBridgeSettingsView()).url;
+      res.json({
+        ...team,
+        photoUrl: team.photoPath && base ? `${base}${team.photoPath}` : null,
+        media: (team.media || []).map((asset) => ({ ...asset, url: base ? `${base}${asset.path}` : null })),
+      });
+    } catch (err: any) {
+      teamError(res, err, 'Не вдалося прочитати команду.');
+    }
+  });
+
+  app.post('/api/admin/marketplace-bridge/teams/:id/:decision', requireAdmin, async (req, res) => {
+    const id = String(req.params.id || '').trim();
+    const decision = String(req.params.decision || '').trim();
+    if (!id) return res.status(400).json({ error: 'Не вказано команду.', kind: 'bad_input' });
+    if (decision !== 'approve' && decision !== 'reject' && decision !== 'request-changes') {
+      return res
+        .status(400)
+        .json({ error: 'Рішення буває approve, reject або request-changes.', kind: 'bad_input' });
+    }
+    try {
+      const text = String(decision === 'request-changes' ? req.body?.note : req.body?.reason || '').trim();
+      res.json(await decideBridgeTeam(id, decision, text));
+    } catch (err: any) {
+      teamError(res, err, 'Маркетплейс не прийняв рішення.');
     }
   });
 
@@ -1365,7 +1446,9 @@ export function registerAdminRoutes(app: Express): void {
   });
 
   app.post('/api/admin/marketplace-bridge/publish', requireAdmin, async (req, res) => {
-    const { bookId, title, subtitle, summary, description, coverUrl, highlights, sellerSlug, formats } = req.body || {};
+    const { bookId, title, subtitle, summary, description, coverUrl, sellerSlug, formats } = req.body || {};
+    const highlights = cleanHighlights(req.body?.highlights);
+    const categorySlug = cleanCategorySlug(req.body?.categorySlug);
     if (!bookId || !title) {
       return res.status(400).json({ error: 'Потрібні bookId і title.', kind: 'bad_input' });
     }
@@ -1389,9 +1472,10 @@ export function registerAdminRoutes(app: Express): void {
         if (!Number.isFinite(priceMinor) || priceMinor < 0) {
           return res.status(400).json({ error: `Некоректна ціна для формату «${format}».`, kind: 'bad_input' });
         }
+        assertFreePriceConfirmed(Math.round(priceMinor), entry?.free, `Формат «${format}»`);
         results.push(
           await publishBookToMarketplace(
-            { bookId, format, title, subtitle, summary, description, priceMinor, coverUrl, highlights, sellerSlug },
+            { bookId, format, title, subtitle, summary, description, priceMinor, coverUrl, highlights, sellerSlug, categorySlug },
             { settings }
           )
         );
@@ -1408,67 +1492,52 @@ export function registerAdminRoutes(app: Express): void {
   });
 
   /**
-   * Публікація КУРСУ у вітрину — ручний адмінський дублікат реального
-   * шляху модерації (moderationRoutes.ts), для паритету з книжковим
-   * `/publish` вище. Приймач `/bridge/courses` на боці Fusion Lab
-   * підтверджений і реалізований (log.md #137–#138); поля `skills`/
-   * `modules` тут приходять сирими з тіла запиту й ідуть далі без
-   * перетворень, включно з `videoUrl`/`introVideoUrl`, якщо їх передали.
+   * Адмінська публікація КУРСУ у вітрину без черги модерації.
+   *
+   * Раніше тут були сирі `skills`/`modules` з тіла запиту, що йшли у вітрину
+   * без перетворень: це був другий, непомітний вихід платного змісту (відео,
+   * завдань) повз правила погодження. Тепер маршрут бере курс ЗІ СХОВИЩА за
+   * `courseId` і проходить рівно ті самі перевірки та збирач, що й погодження
+   * модерації: `courseSubmitProblems`, обкладинка, підтверджена безкоштовність,
+   * `buildCoursePublishInput`. Тіло запиту не може підмінити ні ціну, ні
+   * програму, ні перелік навичок.
    */
   app.post('/api/admin/marketplace-bridge/publish-course', requireAdmin, async (req, res) => {
-    const {
-      bookId,
-      title,
-      subtitle,
-      summary,
-      description,
-      currency,
-      coverUrl,
-      highlights,
-      sellerSlug,
-      priceMinor,
-      moduleCount,
-      lessonCount,
-      category,
-      audience,
-      outcomes,
-      skills,
-      modules,
-    } = req.body || {};
-    if (!bookId || !title) {
-      return res.status(400).json({ error: 'Потрібні bookId і title.', kind: 'bad_input' });
+    const courseId = String(req.body?.courseId ?? req.body?.bookId ?? '').trim();
+    if (!courseId) {
+      return res.status(400).json({ error: 'Потрібен courseId — id курсу в Студії.', kind: 'bad_input' });
     }
-    const price = Number(priceMinor);
-    if (!Number.isFinite(price) || price < 0) {
-      return res.status(400).json({ error: 'Некоректна ціна курсу.', kind: 'bad_input' });
+    const course = getCourse(courseId);
+    if (!course) {
+      return res.status(404).json({ error: 'Курс не знайдено.', kind: 'not_found' });
     }
 
     try {
+      const problems = courseSubmitProblems(course);
+      if (problems.length > 0) {
+        return res.status(400).json({
+          error: `Курс не можна опублікувати: ${problems.join(' ')}`,
+          problems,
+          kind: 'not_ready',
+        });
+      }
+      const priceMinor = course.free === true ? 0 : Math.round(Number(course.priceMinor));
+      assertFreePriceConfirmed(priceMinor, course.free === true, `Курс «${course.title}»`);
+      assertStorefrontCover(course.coverUrl, `Курс «${course.title}»`);
       const settings = await readBridgeSettings();
-      assertStorefrontCover(coverUrl, `Курс «${title}»`);
+      const richContent = await bridgeSupportsCourseContent({ settings });
+      const photoUpload = richContent && (await bridgeSupportsCourseMedia({ settings }));
       const result = await publishCourseToMarketplace(
-        {
-          bookId,
-          title,
-          subtitle,
-          summary,
-          description,
-          priceMinor: price,
-          currency,
-          coverUrl,
-          highlights,
-          sellerSlug,
-          moduleCount,
-          lessonCount,
-          category,
-          audience,
-          outcomes,
-          skills,
-          modules,
-        },
+        buildCoursePublishInput(course, process.env.BRIDGE_SELLER_SLUG || 'fusion-lab', {
+          richContent,
+          photoUpload,
+          instructorName: (await findUserById(course.ownerId))?.name,
+        }),
         { settings }
       );
-      res.json({ published: result });
+      const media = await syncCourseMedia(course, { photoUpload, settings });
+      updateCourse(course.id, { status: 'published' });
+      res.json({ published: result, contentMode: richContent ? 'full' : 'programme', media });
     } catch (err: any) {
       const status = err instanceof MarketplaceBridgeError ? err.status : 500;
       res.status(status).json({

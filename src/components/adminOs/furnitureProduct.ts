@@ -10,6 +10,8 @@
  * (коли дійде до мосту) читали ОДНУ форму, а не три копії з розбіжностями.
  */
 
+import { kitIssues, type KitSpec } from './kitSpec';
+
 export type FurnitureProductStatus = 'draft' | 'published' | 'archived';
 
 /** Вид медіа-файла картки: фото (типово) чи коротке відео виробу. */
@@ -188,6 +190,12 @@ export interface FurnitureProduct {
   name: string;
   category: string;
   subcategory: string;
+  /**
+   * Slug категорії ВІТРИНИ (з `/api/admin/marketplace-bridge/categories`).
+   * Не плутати з `category`/`subcategory` вище — то атрибути картки. Порожньо
+   * — виріб публікується без категорії вітрини (або зберігає поточну).
+   */
+  marketplaceCategory?: string;
   /** Поточна ціна, гривень цілими (копійки множимо на 100 під час публікації). */
   priceUah: number;
   /** Базова ціна / до знижки. */
@@ -255,6 +263,11 @@ export interface FurnitureProduct {
    * або слаг не повернувся (старий запис до цього поля).
    */
   slug?: string | null;
+  /**
+   * Специфікація дитячого набору (K1): виріб із цим полем і `kit.enabled` — набір.
+   * Поле необовʼязкове: старі картки його не мають. Нормалізується на сервері (`normalizeKit`).
+   */
+  kit?: KitSpec;
   updatedAt: string;
 }
 
@@ -602,5 +615,7 @@ export function furniturePublishIssues(p: FurnitureProduct): string[] {
   // Варіанти (#225): кожен — окремий артикул, і відмова тут означає, що
   // вітрина не знає, що саме продає.
   issues.push(...variantIssues(p));
+  // Набір (K1/K2): без деталей, віку й попереджень він не публікується.
+  if (p.kit?.enabled) issues.push(...kitIssues(p.kit).errors.map((m) => `Набір: ${m}`));
   return issues;
 }

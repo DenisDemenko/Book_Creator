@@ -1,0 +1,201 @@
+{
+  "draft": {
+    "draftId": "pd_19c0d77a5e21",
+    "kind": "instruction",
+    "status": "submitted",
+    "revision": 17,
+    "title": "Складання полиці «Хвиля»",
+    "craft": "різьблення по дереву",
+    "audience": "дорослі початківці",
+    "level": "beginner",
+    "bookId": null,
+    "instructionMode": "assembly",
+    "modelCode": "ПОЛ-120",
+    "photos": [
+      {
+        "photoId": "ph_01a1",
+        "clientId": "c-2026-10-28-01",
+        "status": "described",
+        "order": 1,
+        "takenAt": "2026-10-28T10:01:00.000Z",
+        "imageUrl": "/api/external/v1/photo-drafts/pd_19c0d77a5e21/photos/ph_01a1/image",
+        "description": "Заготовка з вишні 25×5 см на верстаку, олівцем розмічено контур ложки.",
+        "tags": [
+          "вишня",
+          "розмітка",
+          "олівець"
+        ],
+        "error": null,
+        "createdAt": "2026-10-28T10:01:05.000Z",
+        "updatedAt": "2026-10-28T10:01:20.000Z"
+      },
+      {
+        "photoId": "ph_02a1",
+        "clientId": "c-2026-10-28-02",
+        "status": "described",
+        "order": 2,
+        "takenAt": "2026-10-28T10:02:00.000Z",
+        "imageUrl": "/api/external/v1/photo-drafts/pd_19c0d77a5e21/photos/ph_02a1/image",
+        "description": "Ніж-косяк вибирає матеріал по контуру, рух від себе; заготовка затиснута струбциною.",
+        "tags": [
+          "ніж-косяк",
+          "струбцина",
+          "вирізання"
+        ],
+        "error": null,
+        "createdAt": "2026-10-28T10:02:05.000Z",
+        "updatedAt": "2026-10-28T10:02:20.000Z"
+      },
+      {
+        "photoId": "ph_03a1",
+        "clientId": "c-2026-10-28-03",
+        "status": "described",
+        "order": 3,
+        "takenAt": "2026-10-28T10:03:00.000Z",
+        "imageUrl": "/api/external/v1/photo-drafts/pd_19c0d77a5e21/photos/ph_03a1/image",
+        "description": "Ложкорізом вибирається чаша ложки, стружка дрібна, волокна йдуть уздовж.",
+        "tags": [
+          "ложкоріз",
+          "чаша"
+        ],
+        "error": null,
+        "createdAt": "2026-10-28T10:03:05.000Z",
+        "updatedAt": "2026-10-28T10:03:20.000Z"
+      },
+      {
+        "photoId": "ph_04a1",
+        "clientId": "c-2026-10-28-04",
+        "status": "described",
+        "order": 4,
+        "takenAt": "2026-10-28T10:04:00.000Z",
+        "imageUrl": "/api/external/v1/photo-drafts/pd_19c0d77a5e21/photos/ph_04a1/image",
+        "description": "Готова ложка після шліфування, змащена олією.",
+        "tags": [
+          "олія",
+          "шліфування"
+        ],
+        "error": null,
+        "createdAt": "2026-10-28T10:04:05.000Z",
+        "updatedAt": "2026-10-28T10:04:20.000Z"
+      }
+    ],
+    "notes": [
+      {
+        "noteId": "n-1",
+        "photoIds": [
+          "ph_01a1"
+        ],
+        "text": "Беремо сиру вишню — її легше різати. Контур малюємо від руки, ширина чаші 4 см.",
+        "updatedAt": "2026-10-28T10:01:40.000Z"
+      },
+      {
+        "noteId": "n-2",
+        "photoIds": [
+          "ph_02a1",
+          "ph_03a1"
+        ],
+        "text": "Спершу грубо по контуру, потім чаша. Ріжемо завжди від себе 👍",
+        "updatedAt": "2026-10-28T10:03:40.000Z"
+      }
+    ],
+    "structure": {
+      "modules": [
+        {
+          "moduleId": "m-1",
+          "title": "Підготовка заготовки",
+          "summary": "Вибір деревини й розмітка контуру.",
+          "written": true,
+          "lessons": [
+            {
+              "lessonId": "l-1",
+              "title": "Вибираємо вишню й розмічаємо контур",
+              "goal": "Підготувати заготовку з розміченим контуром",
+              "photoIds": [
+                "ph_01a1"
+              ],
+              "body": "## Вибираємо вишню й розмічаємо контур\n\nКрок за кроком: що робимо, чим і на що звернути увагу. Кадри уроку показують кожен рух.",
+              "topics": [
+                "вибір деревини",
+                "розмітка"
+              ],
+              "aiFields": [
+                "body",
+                "goal",
+                "title",
+                "topics"
+              ]
+            }
+          ]
+        },
+        {
+          "moduleId": "m-2",
+          "title": "Різьблення ложки",
+          "summary": "Грубе вирізання, чаша, оздоблення.",
+          "written": true,
+          "lessons": [
+            {
+              "lessonId": "l-2",
+              "title": "Вирізаємо по контуру",
+              "goal": null,
+              "photoIds": [
+                "ph_02a1"
+              ],
+              "body": "## Вирізаємо по контуру\n\nКрок за кроком: що робимо, чим і на що звернути увагу. Кадри уроку показують кожен рух.",
+              "topics": [
+                "ніж-косяк",
+                "безпека"
+              ],
+              "aiFields": [
+                "body",
+                "title",
+                "topics"
+              ]
+            },
+            {
+              "lessonId": "l-3",
+              "title": "Чаша й оздоблення",
+              "goal": null,
+              "photoIds": [
+                "ph_03a1",
+                "ph_04a1"
+              ],
+              "body": "## Чаша й оздоблення\n\nКрок за кроком: що робимо, чим і на що звернути увагу. Кадри уроку показують кожен рух.",
+              "topics": [
+                "ложкоріз",
+                "олія"
+              ],
+              "aiFields": [
+                "body",
+                "title",
+                "topics"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "assumptions": [
+      {
+        "assumptionId": "as-1",
+        "text": "На фото 4, ймовірно, лляна олія — підтвердіть або вкажіть іншу.",
+        "status": "confirmed",
+        "moduleId": "m-2",
+        "lessonId": "l-3",
+        "photoId": "ph_04a1"
+      }
+    ],
+    "job": null,
+    "submitted": {
+      "kind": "express",
+      "id": "exp_a81f3d",
+      "studioUrl": "/express/exp_a81f3d"
+    },
+    "createdAt": "2026-10-28T10:00:00.000Z",
+    "updatedAt": "2026-10-28T10:21:00.000Z"
+  },
+  "target": {
+    "kind": "express",
+    "id": "exp_a81f3d",
+    "studioUrl": "/express/exp_a81f3d"
+  }
+}

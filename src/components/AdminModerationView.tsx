@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Ban, CheckCircle2, RefreshCw } from 'lucide-react';
 import { AdminSellerApplications } from './AdminSellerApplications';
+import { AdminTeamModeration } from './AdminTeamModeration';
+import { AdminCourseReview } from './AdminCourseReview';
 
 /**
  * «Модерація» — окремий розділ адмінпанелі.
@@ -17,6 +19,10 @@ import { AdminSellerApplications } from './AdminSellerApplications';
  * З 28.09.2026 тут же — черга заявок продавця з маркетплейсу: власник просив,
  * щоб ПОГОДЖЕННЯ були в Студії, а не на сторінці адміна маркетплейсу. Це інший
  * предмет (люди, а не публікації), тому окремий блок і окремий компонент.
+ *
+ * З 27.10.2026 тут же — «Модерація STEAM проектів» (команди й паспорти з
+ * маркетплейсу), AdminTeamModeration: повна картка перед рішенням і повернення
+ * із зауваженнями.
  */
 
 type ModerationRow = {
@@ -25,7 +31,7 @@ type ModerationRow = {
   itemId: string;
   title: string;
   authorId: string;
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'rejected' | 'changes_requested';
   reason?: string;
   createdAt: string;
   decidedAt?: string;
@@ -40,8 +46,12 @@ const ITEM_TYPE_LABELS: Record<string, string> = {
 
 export const AdminModerationView: React.FC = () => {
   const [rows, setRows] = useState<ModerationRow[] | null>(null);
-  const [status, setStatus] = useState<'pending' | 'approved' | 'rejected' | ''>('pending');
+  const [status, setStatus] = useState<'pending' | 'approved' | 'rejected' | 'changes_requested' | ''>('pending');
+  /** Курс, чию повну картку відкрито: курси погоджують лише після перегляду. */
+  const [reviewId, setReviewId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  /** Скільки записів у кожному статусі — число біля кнопки фільтра. */
+  const [counts, setCounts] = useState<Record<string, number>>({});
   const [message, setMessage] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
 
   const load = useCallback(async () => {
@@ -62,6 +72,19 @@ export const AdminModerationView: React.FC = () => {
     void load();
   }, [load]);
 
+  const loadCounts = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/moderation/summary', { credentials: 'same-origin' });
+      if (res.ok) setCounts((await res.json()).counts ?? {});
+    } catch {
+      // лічильник — підказка; без нього черга працює
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCounts();
+  }, [loadCounts, rows]);
+
   const decide = async (id: string, decision: 'approve' | 'reject') => {
     setBusyId(id);
     setMessage(null);
@@ -79,7 +102,10 @@ export const AdminModerationView: React.FC = () => {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || `Не вдалося (HTTP ${res.status}).`);
-      setMessage({ tone: 'ok', text: decision === 'approve' ? 'Погоджено — лістинг опубліковано.' : 'Відхилено.' });
+      const mailed = data?.notification?.sent
+        ? ' Автору надіслано лист.'
+        : data?.notification ? ` Лист автору не надіслано (${data.notification.reason || 'невідомо'}) — повідомте його самі.` : '';
+      setMessage({ tone: 'ok', text: (decision === 'approve' ? 'Погоджено — лістинг опубліковано.' : 'Відхилено.') + mailed });
       void load();
     } catch (err: any) {
       setMessage({ tone: 'err', text: err?.message || 'Помилка.' });
@@ -91,6 +117,7 @@ export const AdminModerationView: React.FC = () => {
   return (
     <div className="space-y-4">
     <AdminSellerApplications />
+    <AdminTeamModeration />
     <div className="rounded-2xl bg-slate-900/60 border border-white/[0.06] p-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
@@ -100,7 +127,7 @@ export const AdminModerationView: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-1.5">
-          {(['pending', 'approved', 'rejected', ''] as const).map((s) => (
+          {(['pending', 'changes_requested', 'approved', 'rejected', ''] as const).map((s) => (
             <button
               key={s || 'all'}
               onClick={() => setStatus(s)}
@@ -108,7 +135,11 @@ export const AdminModerationView: React.FC = () => {
                 status === s ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400 hover:text-slate-200'
               }`}
             >
-              {s === 'pending' ? 'Очікує' : s === 'approved' ? 'Погоджено' : s === 'rejected' ? 'Відхилено' : 'Усі'}
+              {s === 'pending' ? 'Очікує' : s === 'changes_requested' ? 'З зауваженнями' : s === 'approved' ? 'Погоджено' : s === 'rejected' ? 'Відхилено' : 'Усі'}
+              {(() => {
+                const n = s ? counts[s] : Object.values(counts).reduce((a, b) => a + b, 0);
+                return n ? <span className={`ml-1 ${s === 'pending' && status !== s ? 'text-amber-300' : 'opacity-70'}`}>({n})</span> : null;
+              })()}
             </button>
           ))}
           <button onClick={() => void load()} className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400" title="Оновити">
@@ -130,7 +161,8 @@ export const AdminModerationView: React.FC = () => {
           <p className="text-xs text-slate-500">Черга порожня.</p>
         ) : (
           rows.map((row) => (
-            <div key={row.id} className="flex items-center gap-3 rounded-xl bg-slate-950/50 border border-slate-800 p-3">
+            <div key={row.id}>
+            <div className="flex items-center gap-3 rounded-xl bg-slate-950/50 border border-slate-800 p-3">
               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 bg-slate-800 text-slate-300 border-slate-700">
                 {ITEM_TYPE_LABELS[row.itemType] ?? row.itemType}
               </span>
@@ -141,7 +173,18 @@ export const AdminModerationView: React.FC = () => {
               {row.status === 'rejected' && row.reason && (
                 <p className="text-[10px] text-rose-300 max-w-[180px] truncate" title={row.reason}>Причина: {row.reason}</p>
               )}
-              {row.status === 'pending' && (
+              {row.status === 'changes_requested' && row.reason && (
+                <p className="text-[10px] text-amber-300 max-w-[180px] truncate" title={row.reason}>Зауваження: {row.reason}</p>
+              )}
+              {row.status === 'pending' && row.itemType === 'course' && (
+                <button
+                  onClick={() => setReviewId(reviewId === row.id ? null : row.id)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-[11px] font-semibold shrink-0"
+                >
+                  {reviewId === row.id ? 'Згорнути' : 'Переглянути й вирішити'}
+                </button>
+              )}
+              {row.status === 'pending' && row.itemType !== 'course' && (
                 <div className="flex items-center gap-1.5 shrink-0">
                   <button
                     onClick={() => void decide(row.id, 'approve')}
@@ -159,6 +202,18 @@ export const AdminModerationView: React.FC = () => {
                   </button>
                 </div>
               )}
+            </div>
+            {reviewId === row.id && (
+              <AdminCourseReview
+                entryId={row.id}
+                onClose={() => setReviewId(null)}
+                onDecided={(text) => {
+                  setReviewId(null);
+                  setMessage({ tone: 'ok', text });
+                  void load();
+                }}
+              />
+            )}
             </div>
           ))
         )}

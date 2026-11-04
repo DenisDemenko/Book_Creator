@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, Ban, CheckCircle2, Info, Package, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { FurnitureProductEditor } from './adminOs/FurnitureProductEditor';
 import type { FurnitureProduct } from './adminOs/furnitureProduct';
+import { KIND_LABELS, parseExternalId } from './adminOs/externalId';
 
 /**
  * «Управління товарами» — що зараз стоїть у вітрині маркетплейсу.
@@ -27,29 +28,12 @@ interface ShelfRow {
   publishedAt: string | null;
   hasFile: boolean;
   fileName: string | null;
+  categorySlug?: string | null;
+  categoryName?: string | null;
 }
-
-/**
- * `externalId` мосту — це `${bookId}:${format}` (див. bridgeExternalId у
- * server/marketplaceBridge.ts). Розбираємо з КІНЦЯ: формат — завжди одне слово
- * без двокрапки, а от ідентифікатор книги колись може її містити.
- */
-function parseExternalId(externalId: string): { bookId: string; format: 'digital' | 'print' } {
-  const at = externalId.lastIndexOf(':');
-  const raw = at >= 0 ? externalId.slice(at + 1) : 'digital';
-  return {
-    bookId: at >= 0 ? externalId.slice(0, at) : externalId,
-    format: raw === 'print' ? 'print' : 'digital',
-  };
-}
-
-const FORMAT_LABELS: Record<'digital' | 'print', string> = {
-  digital: 'Електронний',
-  print: 'Друкований',
-};
 
 const money = (priceMinor: number) =>
-  priceMinor > 0 ? `${(priceMinor / 100).toLocaleString('uk-UA', { maximumFractionDigits: 2 })} ₴` : '—';
+  priceMinor > 0 ? `${(priceMinor / 100).toLocaleString('uk-UA', { maximumFractionDigits: 2 })} ₴` : 'Безкоштовно';
 
 export const AdminProductsView: React.FC = () => {
   const [rows, setRows] = useState<ShelfRow[] | null>(null);
@@ -274,7 +258,7 @@ export const AdminProductsView: React.FC = () => {
         {rows && rows.length > 0 && (
           <div className="space-y-2">
             {rows.map((row) => {
-              const { bookId, format } = parseExternalId(row.externalId);
+              const { kind, id: bookId, engineId } = parseExternalId(row.externalId);
               const waiting = confirming === row.externalId;
               return (
                 <div
@@ -282,13 +266,15 @@ export const AdminProductsView: React.FC = () => {
                   className="flex items-center gap-3 rounded-xl bg-slate-950/50 border border-slate-800 p-3 flex-wrap"
                 >
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 bg-slate-800 text-slate-300 border-slate-700">
-                    {FORMAT_LABELS[format]}
+                    {KIND_LABELS[kind]}
                   </span>
                   <div className="flex-1 min-w-[180px]">
                     <p className="text-xs font-semibold text-slate-200 truncate">{row.title}</p>
                     <p className="text-[10px] text-slate-500 font-mono truncate">
                       {bookId}
+                      {engineId ? ` · рушій ${engineId}` : ''}
                       {row.slug ? ` · ${row.slug}` : ''}
+                      {row.categoryName ? ` · ${row.categoryName}` : ''}
                     </p>
                   </div>
                   <span className="text-[11px] tabular-nums text-slate-300 shrink-0">{money(row.priceMinor)}</span>
