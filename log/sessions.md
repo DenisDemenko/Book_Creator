@@ -7,6 +7,8 @@
 **Не зроблено і чому:** живі кошики/платежі/AI не змінювалися; не потрібні для завдання. AutoCAD desktop і справжній admin login не доступні; перевірені independent readers, локальний HTTP і Chromium. Повний Docker API перевищує локальний диск; Alpine-конвертер перевірений окремо. На момент коміту CI/публікація очікуються; Marketplace API перед Studio. CNC-пази/boolean union не входять у форматний експорт.
 
 
+Уточнення: Studio CI успішні на 8438867; Marketplace PR39 злито, але Railway Dockerfile validation заблокував API. PR40 — Docker compatibility та повний image/runtime smoke; початковий image smoke вже пройшов. Executor unavailable; зміни продовжені через GitHub. Не виконано production-приймання: чекає успішного API deploy, потім Studio PR37. Деталі #527 та PR.
+
 ## Сесія 04.11.2026 #02 — запис #500 (Codex)
 
 Прийнято чистий master 0989a4b; синхронізовано геометрію царг столів із Marketplace для виробничих PDF. Перевірено build/tsc і PDF-контракти. Власник підтвердив опцію царг і раніше дозволив публікацію.
