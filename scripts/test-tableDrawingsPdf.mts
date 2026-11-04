@@ -175,3 +175,12 @@ if (cli) {
 } else {
   console.log('✓ креслення: специфікація, замовник, скрипт DesignCraft (справжній запуск пропущено: немає DESIGNCRAFT_DRAWINGS_PATH)');
 }
+
+const apronOrder = order() as any;
+apronOrder.legSet = {scheme:'straight',height:75,thickness:6,material:'oak',apron:{height:6,thickness:2.4}};
+apronOrder.quote.legs = {...apronOrder.quote.legs,scheme:'straight',schemeName:'Прямі квадратні',columnDims:null,slats:null,apron:{height:6,thickness:2.4},legLength:63};
+assert(specLines(apronOrder).some(line=>line.includes('ЦАРГИ')&&line.includes('60 мм')&&line.includes('24 мм')));
+const apronBase = context.TableProduction.legsOf(apronOrder).base;
+assert.equal(apronBase.parts.filter((p:any)=>p.id.startsWith('apron.')).length,4);
+assert.equal(apronBase.legLength,63);
+console.log('✓ PDF apron specification and shared four-board geometry agree with the order');

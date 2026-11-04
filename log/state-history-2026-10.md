@@ -642,3 +642,6 @@ production), і на 0.9.0 — однакові. Увага наступній �
 немає.
 
 #491: код 70a6223 + HEAD (службовий запис стану); feat/table-ai-refinements готова до дозволеного push у Book_Creator. Команда: git push origin feat/table-ai-refinements. Спочатку Studio, потім Marketplace feat/table-ai-creative-workspace. CI/деплой перевіряти за PR; живий OpenAI не запускався. Старі нотатки #490 нижче — історичні, PR #26/#33 вже опубліковані.
+
+
+03.11.2026 #498 (Codex): фасадні слеби підготовлено в `feat/cabinet-facade-slabs`; код закомічено як `7332d91`, feature-гілка публікується за прямим дозволом власника. Companion Marketplace PR33 `dece232`. Порядок: API/міграція Marketplace, потім Studio. Після деплою перевірити окремий каталог, блок адміна й HTTP-захист. CI/production ще не підтверджено; фінальний стан — у HANDOFF/PR.

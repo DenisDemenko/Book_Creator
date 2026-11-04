@@ -576,10 +576,32 @@
     return { legVolume, plateVolume, wood, plate, work, total: wood + plate + work };
   }
 
-  function layout(p, design) {
-    const known = SCHEMES.find((s) => s.id === p.scheme);
-    return known ? build(p.scheme, p) : buildFromSvg(design, p);
+  const APRON_SCHEMES = ["straight", "tapered", "splayed", "turned"];
+  function withApron(p, makeBase) {
+    if (!p.apron) return makeBase(p);
+    const a = p.apron;
+    if (!APRON_SCHEMES.includes(p.scheme) || !Number.isFinite(a.height) || a.height < 2.5 || a.height > 20 || !Number.isFinite(a.thickness) || a.thickness < 1.6 || a.thickness > 6)
+      throw Error("Царги: оберіть чотири окремі дерев’яні ніжки, висоту 25–200 мм та товщину 16–60 мм.");
+    if (legLength(p) - a.height < 15) throw Error("Під царгами має залишитися щонайменше 150 мм ніжки. Зменште висоту царг або збільште висоту столу.");
+    const base = makeBase({ ...p, height: p.height - a.height });
+    const xs = base.mounts.map(m => m.x), ys = base.mounts.map(m => m.y);
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    const w = Math.max(...xs) - Math.min(...xs) + Math.min(...base.mounts.map(m => m.a));
+    const d = Math.max(...ys) - Math.min(...ys) + Math.min(...base.mounts.map(m => m.b));
+    const t = a.thickness, z = p.height - p.t;
+    if (Math.min(w, d) < 2 * t + 4) throw Error("Рама царг не вміщується між опорами. Зменште товщину царг або відступ ніжок.");
+    for (const sign of [-1, 1]) {
+      const y = cy + sign * (d - t) / 2, x = cx + sign * (w - t) / 2;
+      base.parts.push({ id: "apron.long." + sign, role: "rail", type: "rect", bottom: [cx, y, z - a.height], top: [cx, y, z], bs: [w, t], ts: [w, t], yaw: 0 });
+      base.parts.push({ id: "apron.side." + sign, role: "rail", type: "rect", bottom: [x, cy, z - a.height], top: [x, cy, z], bs: [t, d - 2 * t], ts: [t, d - 2 * t], yaw: 0 });
+    }
+    return base;
   }
 
-  root.TableLegs = { SCHEMES, build, buildFromSvg, layout, plates, vertices, outline, volume, cost, legLength, hull, PLATE_MIN_CM, PLATE_MAX_CM, plateSide, DEFAULT_INSET_CM, MAX_INSET_CM, DIMS_SCHEMES, LEG_MIN_CM, LEG_MAX_CM, defaultDims, ringSize, slatsOf, slatCount, SLAT_MIN_CM, SLAT_MAX_CM, SLAT_R_MIN_CM, SLAT_R_MAX_CM, holeInsetMm, HOLE_INSET_MIN_MM, HOLE_INSET_MAX_MM, COLUMN_MIN_CM, COLUMN_MAX_CM, columnTopMax, defaultColumn, footprint };
+  function layout(p, design) {
+    const known = SCHEMES.find((s) => s.id === p.scheme);
+    return withApron(p, input => known ? build(input.scheme, input) : buildFromSvg(design, input));
+  }
+
+  root.TableLegs = { APRON_SCHEMES, SCHEMES, build, buildFromSvg, layout, plates, vertices, outline, volume, cost, legLength, hull, PLATE_MIN_CM, PLATE_MAX_CM, plateSide, DEFAULT_INSET_CM, MAX_INSET_CM, DIMS_SCHEMES, LEG_MIN_CM, LEG_MAX_CM, defaultDims, ringSize, slatsOf, slatCount, SLAT_MIN_CM, SLAT_MAX_CM, SLAT_R_MIN_CM, SLAT_R_MAX_CM, holeInsetMm, HOLE_INSET_MIN_MM, HOLE_INSET_MAX_MM, COLUMN_MIN_CM, COLUMN_MAX_CM, columnTopMax, defaultColumn, footprint };
 })(typeof window !== "undefined" ? window : globalThis);

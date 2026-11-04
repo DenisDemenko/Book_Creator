@@ -150,6 +150,7 @@ export function specLines(o: DrawingsOrder): string[] {
     lines.push('', 'НІЖКИ', `Схема: ${legs.schemeName} · ${legs.material?.name || ''} · стіл ${num(legs.height * 10, 0)} мм, довжина ніжки ${num(legs.legLength * 10, 0)} мм`);
     if (legs.legDims) lines.push(`Ніжка: верх ${num(legs.legDims.topW * 10, 0)} × ${num(legs.legDims.topD * 10, 0)} → низ ${num(legs.legDims.footW * 10, 0)} × ${num(legs.legDims.footD * 10, 0)} мм`);
     if (legs.columnDims) lines.push(`Колона: верхнє коло Ø${num(legs.columnDims.top * 10, 0)} → нижнє Ø${num(legs.columnDims.foot * 10, 0)} мм`);
+    if (legs.apron) lines.push(`ЦАРГИ: 4 шт. · висота ${num(legs.apron.height * 10, 0)} мм · товщина ${num(legs.apron.thickness * 10, 0)} мм · дерево ${legs.material?.name || ''}`);
     if (legs.slats) lines.push(`Рейки: товщина ${num(legs.slats.thick * 10, 0)} мм, скруглення ${num(legs.slats.radius * 10, 0)} мм, ${legs.slatCount ?? '—'} на колоні`);
     lines.push(`Відступ від краю стільниці: ${num(legs.inset * 10, 0)} мм`);
     if (legs.plate)

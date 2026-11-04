@@ -89,7 +89,7 @@
       shape: o.shape, l: o.l, w: o.w, t: o.t,
       corner: (Number(o.cornerMm) || 0) / 10,
       scheme: set.scheme, height: q.height, thickness: q.thickness,
-      plateT: q.plateThicknessCm, inset: q.inset,
+      plateT: q.plateThicknessCm, inset: q.inset, apron: q.apron || undefined,
       legDims: q.legDims || undefined, columnDims: q.columnDims || undefined, slats: q.slats || undefined,
       plateCm: Math.max(TL.plateSide(plateSpec.widthCm), TL.plateSide(plateSpec.depthCm)),
     };
@@ -271,7 +271,9 @@
   function partGroups(base) {
     const { TL } = deps();
     const groups = new Map();
-    for (const p of base.parts) {
+    for (const original of base.parts) {
+      // Flatten a horizontal apron board along its grain for the cutting sheet.
+      const p = original.id.startsWith("apron.") ? { ...original, bottom: [0,0,0], top: [0,0,Math.max(...original.bs)], bs: [original.top[2]-original.bottom[2], Math.min(...original.bs)], ts: [original.top[2]-original.bottom[2], Math.min(...original.bs)], yaw: 0 } : original;
       const L = partLength(p);
       const key = [p.type, p.role, ...p.bs, ...p.ts, p.rr || 0, L.toFixed(2), p.svg || ""].map((v) => (typeof v === "number" ? Math.round(v * 100) / 100 : v)).join("|");
       const g = groups.get(key) || { part: p, length: L, qty: 0, ids: [] };
@@ -508,7 +510,7 @@
     rows.push(["Епоксидна смола", `колір ${o.color}`, 1, "", "", o.quote ? `${n(o.quote.litres)} л · ${n(o.quote.kg)} кг` : ""]);
     if (lg && !lg.custom) {
       const { TL } = deps();
-      for (const g of partGroups(lg.base)) rows.push(["Деталь ніжки", g.name, g.qty, `${n(g.part.bs[0] * MM)}→${n(g.part.ts[0] * MM)} × ${n(g.part.bs[1] * MM)}→${n(g.part.ts[1] * MM)} × ${n(g.length * MM)}`, n(g.volume * g.qty), g.part.rr ? `скруглення ${n(g.part.rr * MM)} мм` : ""]);
+      for (const g of partGroups(lg.base)) rows.push([g.part.id.startsWith("apron.") ? "Царга" : "Деталь ніжки", g.name, g.qty, `${n(g.part.bs[0] * MM)}→${n(g.part.ts[0] * MM)} × ${n(g.part.bs[1] * MM)}→${n(g.part.ts[1] * MM)} × ${n(g.length * MM)}`, n(g.volume * g.qty), g.part.rr ? `скруглення ${n(g.part.rr * MM)} мм` : ""]);
       rows.push(["Пластина", lg.q.plate.name, lg.plates.length, `${n(lg.plates[0].w * MM)} × ${n(lg.plates[0].d * MM)} × ${n(lg.input.plateT * MM)}`, n(lg.plates[0].volume * lg.plates.length), `4 отвори Ø${n(lg.q.plate.holeDiameterMm)} мм, відступ ${n(lg.plates[0].holeInsetMm)} мм`]);
       void TL;
     }
