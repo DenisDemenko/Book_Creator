@@ -58,7 +58,7 @@ import { PLANS, PLAN_ORDER, priceFor, resolveSubscription, getActiveTaxRegime, s
 import { upsertSubscription } from './store';
 import { getDb, isAvailable } from './db';
 import { CreditWallet, WalletError } from './creditWallet';
-import { syncCredits } from './creditGate';
+import { jevCreditsPerMillionTokens, syncCredits } from './creditGate';
 import { imageCostTable, videoCostTable } from './creditCatalog';
 import { DEFAULT_PRICING_CONFIG } from './taxPricing';
 import { TAX_REGIMES, TAX_REGIME_IDS, getPricingConfig, isTaxRegimeId, priceBreakdown, monthlyPriceUah } from './taxPricing';
@@ -479,6 +479,8 @@ export function registerAdminRoutes(app: Express): void {
     return {
       config: getPricingConfig(),
       defaults: DEFAULT_PRICING_CONFIG,
+      /** Тариф Jev, що діє зараз (балів за 1 млн токенів): фіксований або за собівартістю. */
+      jevEffective: jevCreditsPerMillionTokens(),
       taxPricing: taxPricingPayload(),
       plans: PLAN_ORDER.map((id) => ({
         id,

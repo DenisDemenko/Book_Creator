@@ -8,7 +8,7 @@ interface PricingConfig {
   fxUahPerUsd: number;
   textBudgetUah: number;
   freeCredits: number;
-  jevCreditsPerMillionTokens: number;
+  jevCreditsPerMillionTokens: number | null;
   planCredits: { start: number; pro: number; ultra: number; team: number };
 }
 
@@ -23,6 +23,8 @@ interface PlanRow {
 interface Overview {
   config: PricingConfig;
   defaults: PricingConfig;
+  /** Тариф Jev, що діє зараз, балів за 1 млн токенів. */
+  jevEffective?: number;
   plans: PlanRow[];
   images: ImageRow[];
   videos: VideoRow[];
@@ -91,7 +93,7 @@ export const AdminCreditsPanel: React.FC = () => {
 
   if (!data || !form) return <div className="text-xs text-slate-400">{error || 'Завантаження даних про бали…'}</div>;
 
-  const field = (label: string, key: keyof Omit<PricingConfig, 'planCredits'>, hint?: string, step = 1) => (
+  const field = (label: string, key: keyof Omit<PricingConfig, 'planCredits' | 'jevCreditsPerMillionTokens'>, hint?: string, step = 1) => (
     <label className="flex flex-col gap-1 text-[11px] text-slate-400">
       <span>{label}</span>
       <input
@@ -145,7 +147,19 @@ export const AdminCreditsPanel: React.FC = () => {
             {field('Курс, ₴ за $', 'fxUahPerUsd', 'для цін і ліміту тексту', 0.1)}
             {field('Ліміт тексту, ₴/період', 'textBudgetUah', 'на кожну платну підписку')}
             {field('Пробні бали', 'freeCredits', 'зареєстрований без підписки, одноразово')}
-            {field('Jev: балів за 1 млн токенів', 'jevCreditsPerMillionTokens', 'кнопка «Проставити теги автоматично»; 0 — безкоштовно')}
+            <label className="flex flex-col gap-1 text-[11px] text-slate-400" data-jev-tariff-field>
+              <span>Jev: балів за 1 млн токенів</span>
+              <input
+                type="number" step={1} min={0}
+                value={form.jevCreditsPerMillionTokens ?? ''}
+                placeholder={data.jevEffective !== undefined ? String(data.jevEffective) : ''}
+                onChange={(e) => setForm({ ...form, jevCreditsPerMillionTokens: e.target.value === '' ? null : Number(e.target.value) })}
+                className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-100"
+              />
+              <span className="text-slate-500">
+                порожньо = за собівартістю Jev ($0,042 за 1 млн вхідних токенів) і маржею; зараз діє {data.jevEffective ?? '—'}; число — фіксований тариф, 0 — безкоштовно
+              </span>
+            </label>
             {(['start', 'pro', 'ultra', 'team'] as const).map((p) => (
               <label key={p} className="flex flex-col gap-1 text-[11px] text-slate-400">
                 <span>Бали {p}/міс</span>

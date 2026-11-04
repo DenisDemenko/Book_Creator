@@ -16,6 +16,7 @@
 import { getDb, isAvailable } from './db';
 import { CreditWallet, WalletError, type CreditBalance } from './creditWallet';
 import { creditsForCostUsd } from './creditPricing';
+import { JEV_USD_PER_MTOK } from './ai/adapters/jev';
 import { priceForImage, priceForVideo } from './pricing';
 import { resolveVideoParams } from './videoGeneration';
 import { PLANS, resolveSubscription, type PlanId } from './subscriptions';
@@ -208,7 +209,10 @@ export async function creditStatus(
 
 /** Тариф у балах за 1 млн токенів Jev — з адмінського конфігу цін. */
 export function jevCreditsPerMillionTokens(): number {
-  return getPricingConfig().jevCreditsPerMillionTokens;
+  const fixed = getPricingConfig().jevCreditsPerMillionTokens;
+  if (fixed !== null && fixed !== undefined) return fixed;
+  // Типово — за собівартістю Jev і маржею платформи, як для зображень: ціна Jev береться з адаптера, а не вгадується.
+  return creditsForCostUsd(JEV_USD_PER_MTOK);
 }
 
 /**

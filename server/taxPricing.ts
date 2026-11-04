@@ -93,10 +93,13 @@ export interface PricingConfig {
   /** Пробні бали зареєстрованого користувача без підписки, одноразово. */
   freeCredits: number;
   /**
-   * Скільки балів списується за 1 млн вхідних токенів Jev (кнопка «Проставити теги
-   * автоматично»). Постановка власника 03.11.2026: 4000. 0 — Jev безкоштовний.
+   * Скільки балів списується за 1 млн вхідних токенів Jev (кнопка «Проставити теги автоматично»).
+   * `null` (типово) — за собівартістю Jev і маржею платформи, тією самою формулою, що й для зображень:
+   * $0,042 за 1 млн токенів (docs.typesafe.ai/models, вихідні токени безкоштовні) ÷ собівартість бала
+   * ($0,001 × (1 − 30%)) = 60 балів. Число — фіксований тариф (0 — Jev безкоштовний).
+   * Перше значення 4000, задане 03.11.2026, виявилось у ≈ 67 разів вищим за собівартість (запис #525).
    */
-  jevCreditsPerMillionTokens: number;
+  jevCreditsPerMillionTokens: number | null;
   /** Бали на місяць за планом. */
   planCredits: { start: number; pro: number; ultra: number; team: number };
 }
@@ -108,7 +111,7 @@ export const DEFAULT_PRICING_CONFIG: PricingConfig = {
   fxUahPerUsd: 48,
   textBudgetUah: 200,
   freeCredits: 300,
-  jevCreditsPerMillionTokens: 4000,
+  jevCreditsPerMillionTokens: null,
   planCredits: { start: 2_000, pro: 5_000, ultra: 25_000, team: 50_000 },
 };
 
@@ -136,7 +139,10 @@ export function mergePricingConfig(base: PricingConfig, patch: unknown): Pricing
   num('fxUahPerUsd', 1, 500);
   num('textBudgetUah', 0, 100_000);
   num('freeCredits', 0, 1_000_000, true);
-  num('jevCreditsPerMillionTokens', 0, 10_000_000, true);
+  if (p.jevCreditsPerMillionTokens !== undefined) {
+    if (p.jevCreditsPerMillionTokens === null || p.jevCreditsPerMillionTokens === '') next.jevCreditsPerMillionTokens = null;
+    else num('jevCreditsPerMillionTokens', 0, 10_000_000, true);
+  }
   if (p.planCredits !== undefined) {
     for (const plan of ['start', 'pro', 'ultra', 'team'] as const) {
       if (p.planCredits?.[plan] === undefined) continue;
