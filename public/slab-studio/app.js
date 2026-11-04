@@ -44,6 +44,7 @@
     resinTextures: remote.resinTextures || [],
     cart: [],
     orders: [],
+    cabinetOrders: [],
   };
   async function reloadRemote() {
     remote = await bridge.request("GET", stockPath);
@@ -51,7 +52,7 @@
     db.costs = remote.costs;
     db.resinTextures = remote.resinTextures || [];
     if (admin)
-      db.orders = await bridge.request("GET", "/tables/admin/production");
+      [db.orders, db.cabinetOrders] = await Promise.all([bridge.request("GET", "/tables/admin/production"), bridge.request("GET", "/cabinets/admin/production")]);
   }
   let design = {
       shape: "oval",
@@ -1277,7 +1278,7 @@
     $("refreshOrders").textContent = "Оновлюємо…";
     $("ordersError").hidden = true;
     try {
-      db.orders = await bridge.request("GET", "/tables/admin/production");
+      [db.orders, db.cabinetOrders] = await Promise.all([bridge.request("GET", "/tables/admin/production"), bridge.request("GET", "/cabinets/admin/production")]);
       renderOrders();
     } catch (error) {
       $("ordersError").textContent = error.message || "Не вдалося завантажити замовлення.";
@@ -1313,7 +1314,7 @@
     $("orderStages").innerHTML = stageTabs
       .map(
         ([key, label]) =>
-          `<button type="button" role="tab" class="${orderStage === key ? "active" : ""}" data-order-stage="${key}" aria-selected="${orderStage === key}">${label} · ${db.orders.filter((o) => key === "all" || stageOf(o) === key).length}</button>`,
+          `<button type="button" role="tab" class="${orderStage === key ? "active" : ""}" data-order-stage="${key}" aria-selected="${orderStage === key}">${label} · ${(db.orders.filter((o) => key === "all" || stageOf(o) === key).length + (["all", "in_cart"].includes(key) ? db.cabinetOrders.length : 0))}</button>`,
       )
       .join("");
     $$("[data-order-stage]").forEach((b) => (b.onclick = () => {
@@ -1323,7 +1324,7 @@
     const filters = [["all", "Усі"], ["unpaid", "Очікують оплати"], ["queued", "До прийняття"], ["making", "У роботі"], ["ready", "Готові"], ["payment_review", "Перевірка платежу"]];
     const inStage = db.orders.filter((o) => orderStage === "all" || stageOf(o) === orderStage);
     $("orderFilters").innerHTML = filters.map(([key, label]) =>
-      `<button type="button" class="${orderFilter === key ? "active" : ""}" data-order-filter="${key}" aria-pressed="${orderFilter === key}">${label} · ${inStage.filter(o => orderMatches(o, key)).length}</button>`).join("");
+      `<button type="button" class="${orderFilter === key ? "active" : ""}" data-order-filter="${key}" aria-pressed="${orderFilter === key}">${label} · ${inStage.filter(o => orderMatches(o, key)).length + (["all", "in_cart"].includes(orderStage) && ["all", "unpaid"].includes(key) ? db.cabinetOrders.length : 0)}</button>`).join("");
     $$("[data-order-filter]").forEach(b => b.onclick = () => {
       orderFilter = b.dataset.orderFilter;
       renderOrders();
@@ -1333,10 +1334,13 @@
       ? orders
           .map(
             (o) =>
-              `<article class="order-card" data-order-id="${esc(o.id)}"><div class="order-image">${orderImage(o)}</div><div class="order-details"><span class="badge">${esc(statusNames[o.status] || o.status)}</span><h2 style="margin-top:12px">${shapeNames[o.shape]} стіл ${num(o.l)} × ${num(o.w)}</h2><p>#${esc(o.number)}<br>${o.buyer ? `Покупець: ${esc(o.buyer.displayName || "Без імені")} · ${esc(o.buyer.email)}<br>` : ""}Слеби: ${o.slabs.map((s) => esc(s.number)).join(", ")}<br>Товщина ${num(o.t)} см · епоксидка ${num(o.quote.litres, 2)} л · ${num(o.quote.kg, 2)} кг (щільність ${num(o.costs?.density ?? 0, 2)}, запас ${num(o.costs?.waste ?? 0, 0)}%, вільна площа ${num(o.quote.resin, 3)} м²)<br>${o.quote.legs ? `Ніжки: ${esc(o.quote.legs.schemeName)} · ${esc(o.quote.legs.material.name)} · стіл ${num(o.quote.legs.height, 1)} см, ніжки ${num(o.quote.legs.thickness, 1)} см (довжина ${num(o.quote.legs.legLength, 1)} см)<br>Кріплення: ${o.quote.legs.mounts.length} × пластина «${esc(o.quote.legs.plate.name)}» ${num(o.quote.legs.mounts[0].w, 1)} × ${num(o.quote.legs.mounts[0].d, 1)} × ${num(o.quote.legs.plateThicknessCm, 1)} см, по 4 отвори Ø${num(o.quote.legs.plate.holeDiameterMm, 1)} мм<br>` : ""}1. Передоплата 50%: ${money(o.depositMinor / 100)} · ${o.paidAt ? o.paymentMode === "demo" ? "ДЕМО · реальні кошти не зараховано" : o.paymentMode === "sandbox" ? "ТЕСТ LIQPAY · реальні кошти не зараховано" : "підтверджено банком" : "не підтверджена"}<br>2. Залишок 50%: ${money((o.balanceMinor ?? o.totalMinor - o.depositMinor) / 100)} · ${o.balancePaidAt ? o.balancePaymentMode === "demo" ? "ДЕМО · реальні кошти не зараховано" : o.balancePaymentMode === "sandbox" ? "ТЕСТ LIQPAY · реальні кошти не зараховано" : "підтверджено банком" : o.status === "ready" ? "очікуємо від покупця" : "сплачується після виготовлення"}</p>${stageOf(o) === "paid_full" ? `<p class="hint">Оплачено 100%${o.status === "ready" ? " — стіл можна відправляти." : "."}</p>` : o.status === "ready" && o.paidAt ? '<p class="hint">Стіл готовий. Відправляйте після оплати залишку покупцем.</p>' : ""}${["cart", "pending"].includes(o.status) ? '<p class="hint">Прийняття в роботу стане доступним після передоплати 50%.</p>' : ""}<div class="order-actions">${o.paidAt && ["queued", "making"].includes(o.status) ? `<button class="primary" data-next="${o.id}" data-status="${o.status === "queued" ? "making" : "ready"}">${o.status === "queued" ? "Прийняти в роботу" : "Позначити готовим"}</button>` : ""}<button class="text-btn" data-spec="${o.id}">Специфікація ↓</button>${productionButtons(o)}</div>${o.paidAt ? "" : '<p class="hint">PDF-креслення можна скласти вже зараз, поки замовлення в кошику. Файли SVG, DXF і OBJ для виробництва зʼявляться після передоплати 50%.</p>'}</div><div class="order-price">${money(o.totalMinor / 100)}</div></article>`,
+              `<article class="order-card" data-order-id="${esc(o.id)}"><div class="order-image">${orderImage(o)}</div><div class="order-details"><span class="badge">${esc(statusNames[o.status] || o.status)}</span><h2 style="margin-top:12px">${shapeNames[o.shape]} стіл ${num(o.l)} × ${num(o.w)}</h2><p>#${esc(o.number)}<br>${o.buyer ? `Покупець: ${esc(o.buyer.displayName || "Без імені")} · ${esc(o.buyer.email)}<br>` : ""}Слеби: ${o.slabs.map((s) => esc(s.number)).join(", ")}<br>Товщина ${num(o.t)} см · епоксидка ${num(o.quote.litres, 2)} л · ${num(o.quote.kg, 2)} кг (щільність ${num(o.costs?.density ?? 0, 2)}, запас ${num(o.costs?.waste ?? 0, 0)}%, вільна площа ${num(o.quote.resin, 3)} м²)<br>${o.quote.legs ? `Ніжки: ${esc(o.quote.legs.schemeName)} · ${esc(o.quote.legs.material.name)} · стіл ${num(o.quote.legs.height, 1)} см, ніжки ${num(o.quote.legs.thickness, 1)} см (довжина ${num(o.quote.legs.legLength, 1)} см)<br>Кріплення: ${o.quote.legs.mounts.length} × пластина «${esc(o.quote.legs.plate.name)}» ${num(o.quote.legs.mounts[0].w, 1)} × ${num(o.quote.legs.mounts[0].d, 1)} × ${num(o.quote.legs.plateThicknessCm, 1)} см, по 4 отвори Ø${num(o.quote.legs.plate.holeDiameterMm, 1)} мм<br>` : ""}1. Передоплата 50%: ${money(o.depositMinor / 100)} · ${o.paidAt ? o.paymentMode === "demo" ? "ДЕМО · реальні кошти не зараховано" : o.paymentMode === "sandbox" ? "ТЕСТ LIQPAY · реальні кошти не зараховано" : "підтверджено банком" : "не підтверджена"}<br>2. Залишок 50%: ${money((o.balanceMinor ?? o.totalMinor - o.depositMinor) / 100)} · ${o.balancePaidAt ? o.balancePaymentMode === "demo" ? "ДЕМО · реальні кошти не зараховано" : o.balancePaymentMode === "sandbox" ? "ТЕСТ LIQPAY · реальні кошти не зараховано" : "підтверджено банком" : o.status === "ready" ? "очікуємо від покупця" : "сплачується після виготовлення"}</p>${stageOf(o) === "paid_full" ? `<p class="hint">Оплачено 100%${o.status === "ready" ? " — стіл можна відправляти." : "."}</p>` : o.status === "ready" && o.paidAt ? '<p class="hint">Стіл готовий. Відправляйте після оплати залишку покупцем.</p>' : ""}${["cart", "pending"].includes(o.status) ? '<p class="hint">Прийняття в роботу стане доступним після передоплати 50%.</p>' : ""}<div class="order-actions">${o.paidAt && ["queued", "making"].includes(o.status) ? `<button class="primary" data-next="${o.id}" data-status="${o.status === "queued" ? "making" : "ready"}">${o.status === "queued" ? "Прийняти в роботу" : "Позначити готовим"}</button>` : ""}<button class="text-btn" data-spec="${o.id}">Специфікація ↓</button>${productionButtons(o)}</div>${o.paidAt ? "" : '<p class="hint">PDF-креслення можна скласти вже зараз, поки замовлення в кошику. Адміністратор може експортувати DXF, DWG, OBJ і STL незалежно від оплати.</p>'}</div><div class="order-price">${money(o.totalMinor / 100)}</div></article>`,
           )
           .join("")
-      : '<div class="empty-panel"><h2>Замовлень поки немає</h2><p>Стіл з’явиться тут після додавання покупцем у кошик. Для початку виробництва потрібна передоплата 50%.</p></div>';
+      : '<div class="empty-panel"><h2>Замовлень столів поки немає</h2><p>Стіл з’явиться тут після додавання покупцем у кошик. Для початку виробництва потрібна передоплата 50%.</p></div>';
+    const showCabinets = ['all', 'in_cart'].includes(orderStage) && ['all', 'unpaid'].includes(orderFilter);
+    if (showCabinets && db.cabinetOrders.length) $('ordersList').insertAdjacentHTML('afterbegin', `<section class="cabinet-inquiries"><h2>Тумби · кошик для прорахунку</h2><p class="hint">Ціна узгоджується окремо. Слеб до погодження не резервується.</p>${db.cabinetOrders.map(o => `<article class="order-card" data-order-id="${esc(o.id)}"><div class="order-details"><span class="badge">Прорахунок · неоплачене</span><h3>Тумба ${num(o.design.width)} × ${num(o.design.height)} × ${num(o.design.depth)} мм</h3><p>#${esc(o.number)}<br>${esc(o.buyer?.displayName || 'Без імені')} · ${esc(o.buyer?.email || '')}<br>Фасади: ${o.design.facadeCount} · зазор ${num(o.design.gap)} мм<br>Матеріал: ${esc(({wood:'Масив дерева',chipboard:'ДСП',panel:'Панельний фасад',woodEpoxy:'Дерево та епоксидка'})[o.design.facadeMaterial] || o.design.facadeMaterial)}</p>${cadButtons(o, 'cabinet')}</div></article>`).join('')}</section>`);
+    $$('[data-cad]').forEach(button => button.onclick = () => void downloadCad(button));
     $$("[data-next]").forEach(
       (b) =>
         (b.onclick = async () => {
@@ -1393,17 +1397,23 @@
           )),
     );
   }
-  // The production files of an order, made on this page from the same geometry the buyer saw: after the deposit.
-  // The PDF drawings are there as soon as the table is in the buyer's cart; the files for production wait for the deposit.
+  // Administrator-only saved snapshots, available before and after payment.
+  const cadButtons = (o, subject) => `<span class="order-files" role="group" aria-label="Експорт збереженої моделі">${[['obj', 'OBJ'], ['dxf', 'DXF Autodesk'], ['dwg', 'DWG Autodesk'], ['stl', 'STL'], ['all', 'Усі CAD-файли (ZIP)']].map(([kind, label]) => `<button class="text-btn" data-cad="${esc(o.id)}" data-subject="${subject}" data-kind="${kind}">${label} ↓</button>`).join('')}</span><p class="hint">Масштаб 1:1, мм. Збірна модель з окремих деталей. Перед виготовленням перевірте пази, отвори й фрезеровані ручки.</p>`;
   const productionButtons = (o) =>
     `<span class="order-files" role="group" aria-label="Креслення і файли для виробництва">` +
     `<label class="order-template">Шаблон дизайну PDF <select data-template aria-label="Шаблон дизайну креслень PDF" title="${esc(templatesError)}">${templateOptions()}</select>${templatesError ? `<small class="order-template-note">${esc(templatesError)}</small>` : ""}</label>` +
-    `<button class="text-btn" data-prod="${esc(o.id)}" data-kind="pdf">Креслення PDF ↓</button>` +
-    (o.paidAt
-      ? `<button class="text-btn" data-prod="${esc(o.id)}" data-kind="all">Файли виробництва (zip) ↓</button>` +
-        [["svg", "SVG"], ["dxf", "DXF"], ["obj", "OBJ"]].map(([k, t]) => `<button class="text-btn" data-prod="${esc(o.id)}" data-kind="${k}">${t} ↓</button>`).join("")
-      : "") +
-    "</span>";
+    `<button class="text-btn" data-prod="${esc(o.id)}" data-kind="pdf">Креслення PDF ↓</button><button class="text-btn" data-prod="${esc(o.id)}" data-kind="svg">SVG ↓</button></span>` + cadButtons(o, 'table') + (!o.quote?.legs && o.legs !== 'none' ? '<p class="hint">У цьому замовленні збережено лише тип каталожних ніжок без їх геометрії: експорт містить стільницю. Ніжки потрібно додати в CAD окремо.</p>' : '');
+  async function downloadCad(button) {
+    const label = button.textContent; button.disabled = true; button.textContent = 'Готуємо файл…';
+    $('ordersError').hidden = true;
+    try {
+      const subject = button.dataset.subject === 'cabinet' ? 'cabinets' : 'tables';
+      const file = await bridge.request('GET', `/${subject}/admin/production/${button.dataset.cad}/export/${button.dataset.kind}`);
+      const bytes = Uint8Array.from(atob(file.base64), c => c.charCodeAt(0));
+      download(file.filename, bytes, file.type); toast('Файл підготовлено: ' + file.filename);
+    } catch (error) { $('ordersError').textContent = error.message || 'Не вдалося підготувати файл.'; $('ordersError').hidden = false; }
+    finally { button.disabled = false; button.textContent = label; }
+  }
   // The design templates of the PDF drawings: the design themes of the books, fetched once from the Studio server.
   // The ids the server knows (the design themes of the books): the picker works from them even when the list from the
   // server cannot be read, and says why.

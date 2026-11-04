@@ -36,7 +36,7 @@ window.SlabBridge = (() => {
             reject(
               Error("API не відповідає. Перевірте з’єднання та повторіть дію."),
             );
-          }, 30000);
+          }, /\/export\//.test(path) ? 180000 : 30000);
         pending.set(id, { resolve, reject, timer });
         parent.postMessage(
           { type: "slab:request", id, method, path, body },

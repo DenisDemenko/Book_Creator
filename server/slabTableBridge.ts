@@ -46,7 +46,7 @@ export async function tableBridge(
   body?: unknown,
   deps: { fetch?: typeof fetch; settings?: BridgeSettings; actorUid?: string } = {},
 ) {
-  if (!/^\/(state|facade-state|slabs|costs|production|resin-textures|leg-settings|leg-designs|leg-plates)(\/[a-zA-Z0-9-]+)?$/.test(path))
+  if (!/^\/cad\/(table|cabinet)\/[a-fA-F0-9-]+\/(obj|stl|dxf|dwg|all)$/.test(path) && !/^\/(state|facade-state|cabinet-production|slabs|costs|production|resin-textures|leg-settings|leg-designs|leg-plates)(\/[a-zA-Z0-9-]+)?$/.test(path))
     throw new Error("Некоректний маршрут конструктора.");
   const settings = deps.settings ?? (await readBridgeSettings());
   const response = await (deps.fetch ?? fetch)(
@@ -54,7 +54,7 @@ export async function tableBridge(
     {
       method,
       redirect: "error",
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(path.startsWith("/cad/") ? 170000 : 20000),
       headers: {
         "x-bridge-key": settings.key,
         "Content-Type": "application/json",
@@ -219,6 +219,8 @@ export function registerSlabTableRoutes(app: Express) {
     requireAdmin,
     proxy("GET", () => "/production"),
   );
+  app.get('/api/admin/slab-tables/cabinet-production', requireAdmin, proxy('GET', () => '/cabinet-production'));
+  app.get('/api/admin/slab-tables/cad/:subject/:id/:format', requireAdmin, proxy('GET', r => `/cad/${r.params.subject}/${r.params.id}/${r.params.format}`));
   // The design templates to choose from before the export: the same design themes as the books.
   app.get("/api/admin/slab-tables/drawings-templates", requireAdmin, (_req, res) => {
     res.json({ templates: listDrawingsTemplates() });
