@@ -484,3 +484,5 @@ Studio feat/table-ai-refinements: refinementImage PNG за мостом, піс�
 
 ## Приймання й передача — CAD, Codex 04.11.2026 #03
 Прийнято чистий e2dceb6, створено власний lock. Після роботи origin/master оновився до 55e7563 (GrabFusion/курси/Jev): code-only коміт перебазовано без конфліктів, чужі записи збережено. Початковий локальний #501 не публікувався, замінений вільним #527. Гілка feat/admin-furniture-cad-export, код 6e1ea3e. Дозвіл власника на commit/push/PR/публікацію чинний. Міст і UI CAD admin-only, snapshot cart у Marketplace 7208885. Перевірки/межі #527; браузерні завантаження/помилки пройшли. CI/PR/deploy поки очікуються: публікувати Marketplace API перед Studio. Власний lock прибрати після завершення.
+
+CAD: код 6e1ea3e та журнал ae359e0 запушено; Studio PR37 відкрито, Marketplace PR39 відкрито. CI ще тривають, merge/deploy не підтверджено. Дозвіл власника чинний; API перед Studio UI.
