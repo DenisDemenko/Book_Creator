@@ -15,7 +15,8 @@ export function SlabInventoryPanel({ inventoryOnly = false, category = 'table' }
       if (m?.type !== "slab:request" || typeof m.id !== "string") return;
       const target = e.source as Window;
       try {
-        const suffix =
+        const cad = /^\/(tables|cabinets)\/admin\/production\/([a-fA-F0-9-]+)\/export\/(obj|stl|dxf|dwg|all)$/.exec(String(m.path));
+        const suffix = cad ? `/cad/${cad[1] === "tables" ? "table" : "cabinet"}/${cad[2]}/${cad[3]}` : m.path === "/cabinets/admin/production" ? "/cabinet-production" :
           m.path === "/cabinets/state" && category === 'cabinet_facade'
             ? "/facade-state"
             : m.path === "/tables/state" && category === 'table'
@@ -24,7 +25,7 @@ export function SlabInventoryPanel({ inventoryOnly = false, category = 'table' }
         const allowed =
           /^(GET \/(?:state|facade-state)|POST \/(slabs|leg-designs|leg-plates)|DELETE \/(slabs|leg-designs|leg-plates)\/[a-zA-Z0-9-]+|PATCH \/(leg-designs|leg-plates)\/[a-zA-Z0-9-]+)$/.test(
             `${m.method} ${suffix}`,
-          ) || (!inventoryOnly && /^(GET \/production|POST \/resin-textures|PUT \/(costs|leg-settings)|PATCH \/resin-textures\/[a-zA-Z0-9-]+|DELETE \/resin-textures\/[a-zA-Z0-9-]+|PATCH \/production\/[a-zA-Z0-9-]+)$/.test(
+          ) || (!inventoryOnly && /^(GET \/cad\/(table|cabinet)\/[a-fA-F0-9-]+\/(obj|stl|dxf|dwg|all)|GET \/cabinet-production|GET \/production|POST \/resin-textures|PUT \/(costs|leg-settings)|PATCH \/resin-textures\/[a-zA-Z0-9-]+|DELETE \/resin-textures\/[a-zA-Z0-9-]+|PATCH \/production\/[a-zA-Z0-9-]+)$/.test(
             `${m.method} ${suffix}`,
           ));
         if (!allowed)
@@ -68,7 +69,7 @@ export function SlabInventoryPanel({ inventoryOnly = false, category = 'table' }
           ? 'Для фасадів тумб: завантажте фото слеба, задайте масштаб лінійкою та підтвердьте замкнутий контур. Один слеб підбирається на всю ширину полотна. Пропил між фасадами — 4 мм; мінімальний зазор епоксидних фасадів — 4 мм.'
           : inventoryOnly
           ? "Спільний склад слебів: фото, реальні розміри та перевірені векторні контури."
-          : "Склад слебів і текстури смоли (можна завантажувати, перейменовувати та замінювати зображення). У вкладці «Виробництво» — замовлення покупців за етапами оплати: у кошику, передоплата 50% отримана, оплачено 100%. Після передоплати 50% натисніть «Прийняти в роботу»; залишок 50% покупець сплачує, коли стіл виготовлено, до відправлення. Тарифи публікуються з «Управління цінами»."}
+          : "Склад слебів і текстури смоли (можна завантажувати, перейменовувати та замінювати зображення). У вкладці «Виробництво» — кошики тумб для прорахунку та замовлення столів; DXF, DWG, OBJ і STL доступні адміністратору незалежно від оплати. Замовлення покупців за етапами оплати: у кошику, передоплата 50% отримана, оплачено 100%. Після передоплати 50% натисніть «Прийняти в роботу»; залишок 50% покупець сплачує, коли стіл виготовлено, до відправлення. Тарифи публікуються з «Управління цінами»."}
       </p>
       {ready ? (
         <iframe
