@@ -56,6 +56,7 @@ import {
   ChevronDown, 
   ChevronUp,
   ChevronRight, 
+  ChevronLeft, 
   Sparkles, 
   Check, 
   X, 
@@ -391,7 +392,12 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
   // Panel toggles for responsive / landscape layout
   const [showLeftTree, setShowLeftTree] = usePersistentState<boolean>('nova_editor_showLeftTree', false);
-  const [showRightPanel, setShowRightPanel] = usePersistentState<boolean>('nova_editor_showRightPanel', true);
+  // Права панель на старті ЗГОРНУТА (постановка власника 04.11.2026) — щоразу, коли відкривають
+  // розділ «Книга і текст», а не лише вперше: тому стан не зберігається між відкриттями. Розгортає її
+  // стрілка на правому краї (`data-right-panel-expand`), згортає зворотна стрілка в шапці панелі
+  // (`data-right-panel-collapse`); кнопка «Персонажі» на панелі інструментів робить те саме.
+  // Дії, чий результат показує ця панель (покращити/перевірити текст тощо), розгортають її самі.
+  const [showRightPanel, setShowRightPanel] = useState<boolean>(false);
 
   // Вільні панелі: учасники сцени та англійський переклад можуть бути
   // відкріплені від правої колонки і перетягуватися по полю (DraggablePanel).
@@ -4015,6 +4021,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
     if (!textToProcess.trim()) return;
 
     setIsGeneratingAi(true);
+    setShowRightPanel(true);
     setRightPanelTab('workAi');
     setRightPanelSubTab('diff');
 
@@ -4091,6 +4098,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
   const handleRunSpellcheck = async () => {
     if (!activeSection?.content) return;
     setIsCheckingGrammar(true);
+    setShowRightPanel(true);
     setRightPanelTab('workAi');
     setRightPanelSubTab('spellcheck');
     try {
@@ -4129,6 +4137,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
     if (!fragment) return;
     setIsSimulatingReader(true);
     setReaderResponseError(null);
+    setShowRightPanel(true);
     setRightPanelTab('workAi');
     setRightPanelSubTab('reader');
     try {
@@ -4165,6 +4174,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
     if (!activeChapter) return;
     setIsAnalyzingChapterMetrics(true);
     setChapterMetricsError(null);
+    setShowRightPanel(true);
     setRightPanelTab('workAi');
     setRightPanelSubTab('metrics');
     try {
@@ -4205,6 +4215,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
     setIsAnalyzingOpeningStrength(true);
     setOpeningStrengthError(null);
+    setShowRightPanel(true);
     setRightPanelTab('workAi');
     setRightPanelSubTab('metrics');
     try {
@@ -5852,8 +5863,10 @@ export const EditorView: React.FC<EditorViewProps> = ({
             title="Змінити ширину панелі"
           />
           
-          {/* Tab Headers: 3 кореневі вкладки */}
-          <div data-tour="editor__5" className="flex border-b border-slate-800 bg-slate-950/80 p-2 gap-1 overflow-x-auto no-scrollbar shrink-0">
+          {/* Шапка: вкладки (прокручуються) і, поза прокруткою, стрілка «Згорнути» — інакше на вузькій панелі
+              вона поїхала б за правий край разом із вкладками. */}
+          <div data-tour="editor__5" className="flex items-center border-b border-slate-800 bg-slate-950/80 shrink-0">
+          <div className="flex min-w-0 flex-1 p-2 gap-1 overflow-x-auto no-scrollbar">
             <button
               onClick={() => setRightPanelTab('scene')}
               data-right-tab="scene"
@@ -5916,11 +5929,16 @@ export const EditorView: React.FC<EditorViewProps> = ({
               <span>{t('coreEntities.rootTab')}</span>
             </button>
 
+          </div>
             <button
               onClick={() => setShowRightPanel(false)}
-              className="lg:hidden p-1 text-slate-400 hover:text-white"
+              data-right-panel-collapse
+              className="mr-2 shrink-0 rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white"
+              title={t('editor.rightPanelCollapse')}
+              aria-label={t('editor.rightPanelCollapse')}
+              aria-expanded={true}
             >
-              <X className="w-4 h-4" />
+              <ChevronRight className="w-4 h-4" />
             </button>
           </div>
 
@@ -6963,6 +6981,23 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
           </div>
         </aside>
+      )}
+
+      {/* Згорнута права панель: стрілка на правому краї розгортає її (див. showRightPanel вище). */}
+      {!showRightPanel && (
+        <button
+          type="button"
+          onClick={() => setShowRightPanel(true)}
+          data-right-panel-expand
+          data-tour="editor__5"
+          style={sunVars as React.CSSProperties}
+          className="absolute right-0 top-1/2 z-30 flex h-24 w-6 -translate-y-1/2 items-center justify-center rounded-l-xl border border-r-0 border-slate-800 bg-slate-950/90 backdrop-blur-xl [color:var(--sun-acc)] shadow-lg transition-colors hover:[background-color:var(--sun-acc-20)] hover:[color:var(--sun-soft)]"
+          title={t('editor.rightPanelExpand')}
+          aria-label={t('editor.rightPanelExpand')}
+          aria-expanded={false}
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </button>
       )}
 
       {/* CHARACTER EDIT MODAL */}
