@@ -9,12 +9,13 @@ import type {WizardDraft} from '../utils/expressDraftSession';
 import {technicalProposalToInstruction} from '../utils/technicalInstructionDraft';
 import {createEmptyInstruction,saveInstructionDraft} from '../utils/instructionDraft';
 import type {Instruction} from '../types';
+import {TECHNICAL_DRAFT_STORAGE_KEY} from '../utils/studioEntry';
 interface Payload{sourceMaterials?:WizardSource[];technical?:TechnicalSettings}
 const initial:Payload={technical:{mode:'assembly',title:'',modelCode:'',goal:''},sourceMaterials:[]};
 export const TechnicalInstructionWizard:React.FC<{
  onChangeTrack?:()=>void;onInstructionBookCreated?:(payload:InstructionBookCreationPayload)=>void;
 }>=({onChangeTrack,onInstructionBookCreated})=>{
- const {session,view,loading,error,setError}=useWizardDraft('nova_technical_instruction_draft','technical_instruction',initial);
+ const {session,view,loading,error,setError}=useWizardDraft(TECHNICAL_DRAFT_STORAGE_KEY,'technical_instruction',initial);
  const [working,setWorking]=useState(false);
  const [sourceBusy,setSourceBusy]=useState(false);
  const [reviewed,setReviewed]=useState(false);

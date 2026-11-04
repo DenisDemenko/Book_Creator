@@ -237,10 +237,42 @@ await flush();
 d = await get(id);
 t('retry повторює розпізнавання, а не опис', retry.status === 202 && d.photos[1].status === 'described' && d.photos[1].text === 'Старий Іван сидів за столом.' && seen.describe === 0);
 recognizeImpl = async () => ({ text: '', modelId: 'test-vision' });
+const recognizedBeforeEmpty = seen.recognize.length;
 await addPage(id, 3);
 await flush();
 d = await get(id);
 t('порожня сторінка — described з порожнім текстом', d.photos[2].status === 'described' && d.photos[2].text === '');
+t('справді порожню сторінку розпізнавали рівно двічі', seen.recognize.length - recognizedBeforeEmpty === 2, String(seen.recognize.length - recognizedBeforeEmpty));
+
+console.log('\nПорожня відповідь моделі — тимчасовий збій (04.11.2026)');
+{
+  // окрема чернетка: ревізія основної далі порівнюється з наперед відомим числом
+  const mx = await call('POST', PD, { token: grab, body: { kind: 'manuscript', title: 'Збій розпізнавання', newBookTitle: 'Збій' } });
+  const mid = mx.data.draft.draftId;
+  let calls = 0;
+  recognizeImpl = async () => {
+    calls += 1;
+    return { text: calls === 1 ? '' : 'Текст зʼявився з другої спроби.', modelId: 'test-vision' };
+  };
+  const before = seen.recognize.length;
+  await addPage(mid, 1);
+  await flush();
+  const pg = (await get(mid)).photos[0];
+  t('перша відповідь порожня, друга з текстом — сторінка отримала текст', pg.status === 'described' && pg.text === 'Текст зʼявився з другої спроби.', JSON.stringify(pg.text));
+  t('друга спроба зроблена рівно одна', seen.recognize.length - before === 2 && calls === 2, String(seen.recognize.length - before));
+  t('помилки в сторінки нема', pg.error === null);
+  let n = 0;
+  recognizeImpl = async () => {
+    n += 1;
+    if (n === 1) return { text: '', modelId: 'test-vision' };
+    throw new Error('429 Too Many Requests');
+  };
+  await addPage(mid, 2);
+  await flush();
+  const pg2 = (await get(mid)).photos[1];
+  t('порожньо, а друга спроба впала — failed з причиною, «повторити» доступне', pg2.status === 'failed' && !!pg2.error, String(pg2.error));
+  recognizeImpl = async () => ({ text: '', modelId: 'test-vision' }); // далі йдуть тести зі звичайною порожньою відповіддю
+}
 
 console.log('\nПравка тексту сторінки');
 const ph = (n: number) => d.photos[n].photoId as string;
@@ -290,7 +322,7 @@ const since = new Date(Date.now() - 3600_000).toISOString();
 const msN = await draftStore.countPhotosSince('u-a', since, 'manuscript');
 const otherN = await draftStore.countPhotosSince('u-a', since, 'other');
 const allN = await draftStore.countPhotosSince('u-a', since);
-t('лічильники рукопису й решти не змішуються', msN === 4 && otherN === 1 && allN === msN + otherN, `${msN}/${otherN}/${allN}`);
+t('лічильники рукопису й решти не змішуються (4 сторінки основної чернетки + 2 з блоку про порожню відповідь)', msN === 6 && otherN === 1 && allN === msN + otherN, `${msN}/${otherN}/${allN}`);
 
 console.log('\nВідправка в «Вхідні» пакетом');
 const blocked = await call('POST', `${PD}/${id}/submit`, { token: grab });

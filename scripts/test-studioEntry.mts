@@ -15,7 +15,10 @@ import {
   parseProjectEntry,
   STUDIO_ENTRY_PARAMS,
   studioEntrySection,
+  parseExpressDraftPath,
+  TECHNICAL_DRAFT_STORAGE_KEY,
 } from '../src/utils/studioEntry.ts';
+import fs from 'node:fs';
 import { buildAppPath, parseAppPath } from '../src/utils/appRoutes.ts';
 
 let pass = 0;
@@ -73,6 +76,25 @@ t('create=book із задумом — майстер', eq(parseStudioEntry('?cr
 console.log('\nПошук розділу:');
 t('за слагом', studioEntrySection('visuals')?.tab === 'illustrations');
 t('невідомий — undefined', studioEntrySection('story-graph') === undefined);
+
+console.log('\nПосилання GrabFusion на інструкцію: /express/<id> (04.11.2026):');
+{
+  const id = '5f918eea-15a8-426b-b00e-15445441afbe';
+  t('розбирає /express/<uuid>', eq(parseExpressDraftPath(`/express/${id}`), { draftId: id }));
+  t('і з префіксом /studio, і з кінцевою скісною', eq(parseExpressDraftPath(`/studio/express/${id}/`), { draftId: id }));
+  t('без id чи зі зламаним id — null', parseExpressDraftPath('/express/') === null && parseExpressDraftPath('/express') === null && parseExpressDraftPath('/express/abc') === null);
+  t('глибший шлях, підйом і чужі адреси — null', parseExpressDraftPath(`/express/${id}/x`) === null && parseExpressDraftPath('/express/../projects/b/editor') === null && parseExpressDraftPath('/projects/BK-1/express') === null);
+  t('символи поза [A-Za-z0-9-] відхиляються', parseExpressDraftPath('/express/5f918eea_15a8%2f..') === null);
+  t('порожній і нерядковий вхід не падають', parseExpressDraftPath('') === null);
+
+  // Ключ сховища — спільний із майстром: розходження дало б посилання, що відкриває порожній майстер.
+  const read = (rel: string) => fs.readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const wizard = read('../src/components/TechnicalInstructionWizard.tsx');
+  t('майстер інструкцій бере чернетку з того самого ключа', wizard.includes('useWizardDraft(TECHNICAL_DRAFT_STORAGE_KEY,') && TECHNICAL_DRAFT_STORAGE_KEY === 'nova_technical_instruction_draft');
+  const app = read('../src/App.tsx');
+  t('App кладе id у сховище й веде в майстер інструкцій', app.includes('INITIAL_EXPRESS_DRAFT') && app.includes("track: 'technical_instruction'") && app.includes('localStorage.setItem(TECHNICAL_DRAFT_STORAGE_KEY, pendingEntry.draftId)'));
+  t('адресу з /express/<id> прибирають після входу', app.includes("replace(/\\/express\\/[^/]+\\/?$/, '/')"));
+}
 
 console.log(`\nПідсумок: ${pass} пройшло, ${fail} впало`);
 if (fail > 0) process.exit(1);

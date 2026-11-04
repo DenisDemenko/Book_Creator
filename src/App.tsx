@@ -111,6 +111,8 @@ import { parseAppPath, buildAppPath, isCorePageTab, type GraphStudioTab } from '
 import { GraphStudioPage } from './components/graphStudio/GraphStudioPage';
 import {
   STUDIO_ENTRY_PARAMS,
+  INITIAL_EXPRESS_DRAFT,
+  TECHNICAL_DRAFT_STORAGE_KEY,
   parseStudioEntry,
   parseProjectEntry,
   type ProjectEntry,
@@ -454,7 +456,12 @@ export default function App() {
     // Т6.3: проєкт і замовлення з «Відкрити у Студії» — до розбору розділу.
     const project = parseProjectEntry(window.location.search);
     if (project) setProjectEntry(project);
-    const intent = parseStudioEntry(window.location.search);
+    // `/express/<id>` — посилання GrabFusion на надіслану інструкцію: відкриваємо майстер інструкцій із цією чернеткою.
+    const intent =
+      parseStudioEntry(window.location.search) ??
+      (INITIAL_EXPRESS_DRAFT
+        ? ({ tab: 'express', track: 'technical_instruction', draftId: INITIAL_EXPRESS_DRAFT.draftId } as StudioEntryIntent)
+        : null);
     if (!intent) {
       if (project) {
         const url = new URL(window.location.href);
@@ -468,6 +475,7 @@ export default function App() {
     // лишаться в історії, і кнопка «назад» відкриє те саме вдруге.
     const url = new URL(window.location.href);
     for (const key of STUDIO_ENTRY_PARAMS) url.searchParams.delete(key);
+    if (intent.draftId) url.pathname = url.pathname.replace(/\/express\/[^/]+\/?$/, '/');
     window.history.replaceState({}, '', url.toString());
   }, []);
 
@@ -483,6 +491,14 @@ export default function App() {
     if (!canAccessTab(role, pendingEntry.tab)) return;
     setCurrentTab(pendingEntry.tab);
     setEntryIdea(pendingEntry.idea ?? null);
+    // Чернетка з GrabFusion: майстер бере її зі сховища браузера (див. TECHNICAL_DRAFT_STORAGE_KEY).
+    if (pendingEntry.draftId) {
+      try {
+        window.localStorage.setItem(TECHNICAL_DRAFT_STORAGE_KEY, pendingEntry.draftId);
+      } catch {
+        /* без сховища майстер відкриється порожнім — як і раніше */
+      }
+    }
     // Обидві кнопки блоку NOVA STUDIO обіцяють книгу («Створити книгу за
     // 5 хвилин» і «Створити план книги»), тож розвилку «що створюємо?»
     // проходимо за людину: вона вже сказала, що саме. Гілку все одно можна

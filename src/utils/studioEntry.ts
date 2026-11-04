@@ -56,6 +56,11 @@ export interface StudioEntryIntent {
   track?: ExpressTrackId;
   tab: NavigationTab;
   /**
+   * Чернетка майстра інструкцій, що приїхала з GrabFusion (`/express/<id>`). Майстер бере чернетку
+   * лише зі сховища браузера, тож вхід кладе туди цей id (`TECHNICAL_DRAFT_STORAGE_KEY`).
+   */
+  draftId?: string;
+  /**
    * Задум книги з маркетплейсу — лише для експрес-майстра: у нього поле
    * «Зерно» і є тим одним реченням, з якого починається план.
    */
@@ -92,6 +97,31 @@ export function parseProjectEntry(search: string): ProjectEntry | null {
   const orderId = (params.get('order') ?? '').trim();
   return ENTRY_ID_RE.test(orderId) ? { projectId, orderId } : { projectId };
 }
+
+/**
+ * Ключ сховища, з якого майстер «Інструкція з фото й техдокументації» бере чернетку
+ * (`TechnicalInstructionWizard` → `useWizardDraft`). Тест порівнює обидва місця: розходження дало б
+ * посилання, що відкриває порожній майстер.
+ */
+export const TECHNICAL_DRAFT_STORAGE_KEY = 'nova_technical_instruction_draft';
+
+/**
+ * Адреса `/express/<id>` (із префіксом `/studio` чи без): так GrabFusion посилає викладача на експрес-чернетку
+ * інструкції (`photo-drafts` → `submit` → `studioUrl`, контракт 1.3.0). До 04.11.2026 такого маршруту в
+ * застосунку не було: перехід вів на дашборд книги, і автор не бачив надісланого. Чернетки живуть 24 години,
+ * id — UUID чи схожий рядок із літер, цифр і дефісів.
+ */
+export function parseExpressDraftPath(pathname: string): { draftId: string } | null {
+  const m = /^(?:\/studio)?\/express\/([A-Za-z0-9][A-Za-z0-9-]{7,63})\/?$/.exec(pathname || '');
+  return m ? { draftId: m[1] } : null;
+}
+
+/**
+ * Адреса, з якою відкрили сторінку, фіксується тут, на імпорті модуля: до того, як маршрутизатор Студії
+ * встигне замінити невідомий шлях на сторінку книги.
+ */
+export const INITIAL_EXPRESS_DRAFT: { draftId: string } | null =
+  typeof window !== 'undefined' ? parseExpressDraftPath(window.location.pathname) : null;
 
 export function studioEntrySection(slug: string): StudioEntrySection | undefined {
   const key = slug.trim().toLowerCase();

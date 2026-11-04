@@ -408,17 +408,27 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
           // Рукопис: не опис сцени, а дослівний текст сторінки; нотатка — підказка до розбору почерку.
           if (!deps.recognize) throw new Error('Розпізнавання сторінок не налаштовано на сервері.');
           const hint = (context.notes ?? []).map((n) => n.trim()).filter(Boolean).join('\n');
-          const result = await deps.recognize({
-            mimeType,
-            base64,
-            ownerId,
-            bookId: current.bookId ?? '',
-            note: hint || null,
-            draftId,
-            req,
-          });
-          const text = [...cleanOcrText(result.text)].slice(0, PHOTO_DRAFT_LIMITS.maxPageTextChars).join('');
-          patch = { status: 'described', description: null, tags: [], text, modelId: result.modelId || null, error: null };
+          const recognizeOnce = async () => {
+            const result = await deps.recognize!({
+              mimeType,
+              base64,
+              ownerId,
+              bookId: current.bookId ?? '',
+              note: hint || null,
+              draftId,
+              req,
+            });
+            return { result, text: [...cleanOcrText(result.text)].slice(0, PHOTO_DRAFT_LIMITS.maxPageTextChars).join('') };
+          };
+          let attempt = await recognizeOnce();
+          // Порожня відповідь моделі — або справді порожня сторінка, або збій: на живому прогоні 04.11.2026 модель
+          // повернула порожнє для чіткого друкованого аркуша, і сторінка стала `described` без тексту й без «повторити».
+          // Одна друга спроба коштує копійки, а справді порожня сторінка лишається такою (блокер `empty_page` на `submit`).
+          if (!attempt.text.trim()) {
+            console.warn('[photoDrafts] порожнє розпізнавання сторінки — друга спроба');
+            attempt = await recognizeOnce();
+          }
+          patch = { status: 'described', description: null, tags: [], text: attempt.text, modelId: attempt.result.modelId || null, error: null };
         } else {
           const result = await deps.describe({ ownerId, draftId, mimeType, base64, context, req });
           patch = { status: 'described', description: result.description, tags: result.tags, modelId: result.modelId || null, error: null };
