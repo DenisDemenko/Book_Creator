@@ -158,6 +158,10 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   const locale = lang === 'en' ? 'en-US' : 'uk-UA';
 
   const activeRoleInfo = getRoleInfo(currentRole);
+  // Перемикач ролей — інструмент адміністратора, а не спосіб для звичайного
+  // користувача змінити клієнтські права. Перевіряємо роль автентифікованого
+  // профілю, а не `currentRole`, бо остання є лише локальним станом інтерфейсу.
+  const canSwitchRole = authUser?.role === 'admin';
   const roleName = (info: ReturnType<typeof getRoleInfo>) => (lang === 'en' ? info.nameEn : info.nameUk);
 
   const handleCopyId = () => {
@@ -605,7 +609,8 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
               )}
             </div>
 
-            {/* Active Role Selector Widget */}
+            {/* Active Role Selector Widget — лише для справжнього адміністратора. */}
+            {canSwitchRole && (
             <div className="relative" ref={dropdownRef}>
               <button
                 id="role-switcher-btn"
@@ -679,6 +684,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                 </div>
               )}
             </div>
+            )}
 
             {/* Settings Modal Toggle */}
             <button
