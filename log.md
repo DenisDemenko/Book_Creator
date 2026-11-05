@@ -123,7 +123,7 @@ remote перевірити можна, запушити — ні**.
 
 04.11 #527: CAD опубліковано: Marketplace PR39/40 (e4dcc8e), Studio PR37 (59b066d). CI та live 10 hashes/guards OK; межі #527.
 
-04.11.2026, #526: розгортання GrabFusion підготовлено, **НЕ запушено**. Studio: гілка `claude/grabfusion-deploy` (від `38c7fa3`, worktree `.claude/worktrees/grabfusion-deploy`) — `DEPLOY.md`, `.env.example`, `railway.json`, скрипти `container-smoke.sh` і `post-deploy-check.sh`. Маркетплейс: гілка `claude/grabfusion-proxy-merge` (від `ea94dd8`, коміт `9e52bb6`, worktree `D:/Rama/fl-proxy`). **Порядок:** `railway login` → сервіс `grabfusion` у `comfortable-caring` з томом → `GRABFUSION_ORIGIN` у Vercel + Redeploy → `scripts/post-deploy-check.sh`. Поки це не зроблено, `www.fusionlab.in.ua/grabfisionstidio` дає 404.
+05.11.2026, #526: GrabFusion — **запушено** (Studio `55e7563`; маркетплейс `9e52bb6` і порожній коміт `ff3baed` від DenisDemenko — `9e52bb6` Vercel заблокував через автора). Сервіс `grabfusion` на Railway **працює** (`https://grabfusion-production.up.railway.app`, розгорнуто `railway up` без GitHub: оновлення — повторний `railway up`). **Лишилось:** `GRABFUSION_ORIGIN` у Vercel + Redeploy; поки не задано, `www.fusionlab.in.ua/grabfisionstidio` дає 404. Деталі — запис #526.
 
 04.11.2026, #525: Студія `master` — **запушено** (`38c7fa3`): тариф Jev типово 60 балів за 1 млн токенів (собівартість $0,042 + маржа), а не 4000. **Після деплою перевірити:** в адмінці панель балів і цін, поле «Jev: балів за 1 млн токенів» порожнє, «зараз діє» — 60; якщо там лишився збережений 4000 — стерти й зберегти. Суміжних репозиторіїв не зачіпає.
 
@@ -184,7 +184,7 @@ remote перевірити можна, запушити — ні**.
 | # | Назва | Статус | Файл |
 |---:|---|---|---|
 | 527 | CAD-експорт DXF/DWG/OBJ/STL передзамовлень столів і тумб | 🚧 У роботі | [301-350.md](log/301-350.md) |
-| 526 | Підготовка розгортання GrabFusion: образ, Railway-конфіг, правило проксі й перевірки | ✅ Підготовлено й перевірено локально; розгортання не виконано | [301-350.md](log/301-350.md) |
+| 526 | Підготовка розгортання GrabFusion: образ, Railway-конфіг, правило проксі й перевірки | ✅ Підготовлено; сервіс на Railway розгорнуто 05.11; у Vercel `GRABFUSION_ORIGIN` ще не задано | [301-350.md](log/301-350.md) |
 | 525 | Тариф Jev: за собівартістю Jev і маржею платформи, а не 4000 балів за 1 млн токенів | ✅ Код і тести; живого списання й деплою не було | [301-350.md](log/301-350.md) |
 | 524 | Злиття гілки GrabFusion (курси, продаж робіт випускників, GrabFusion A0–A5, трек K) у master | ✅ Злито й перевірено тестами; живого прогону злитого коду й деплою не було | [301-350.md](log/301-350.md) |
 | 523 | Трек K4 — файли для виготовлення набору: креслення, DXF, STL з версіями, приватні, привʼязка до деталей | ✅ Реалізовано, очікує коміту | [301-350.md](log/301-350.md) |

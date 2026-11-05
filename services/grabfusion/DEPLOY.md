@@ -42,6 +42,8 @@
 2. Settings → **Root Directory**: `services/grabfusion` (збірка піде за `Dockerfile`). Окремий `railway.json` у цій теці задає
    перевірку живості `/healthz` і **Watch Paths** `/services/grabfusion/**`, щоб пуші Studio не перезбирали GrabFusion, а
    поведінка не залежала від того, чий `railway.json` — цей чи корінний від Studio — підхопить Railway.
+   Без GitHub: `railway up` із теки `services/grabfusion` (так розгорнуто 05.11.2026: сервіс `grabfusion` у `comfortable-caring`, домен
+   `https://grabfusion-production.up.railway.app`); оновлення тоді — повторний `railway up`, автодеплою немає.
 3. **Variables:** `GRABFUSION_BASE_PATH=/grabfisionstidio`, `GRABFUSION_COOKIE_SECURE=1`,
    `GRABFUSION_MARKET_URL=https://fusionlab.in.ua`, `GRABFUSION_SESSION_DB=/data/sessions.sqlite3`,
    `GRABFUSION_STUDIO_URL=https://<публічний-домен-Studio>/api/external/v1`

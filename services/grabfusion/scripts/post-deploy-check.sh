@@ -2,7 +2,7 @@
 # Перевірка GrabFusion ПІСЛЯ розгортання. Лише читання, без облікових даних і без запису в Studio.
 #
 #   scripts/post-deploy-check.sh https://www.fusionlab.in.ua/grabfisionstidio     # через маркетплейс
-#   scripts/post-deploy-check.sh https://<домен-railway>                          # сервіс напряму (префікс не потрібен)
+#   scripts/post-deploy-check.sh https://<домен-railway>/grabfisionstidio         # сервіс напряму (префікс він сам зрізає)
 #   scripts/post-deploy-check.sh <URL> --with-studio                              # + один запит коду до справжньої Studio
 #
 # --with-studio надсилає у Studio ОДИН завідомо хибний код підключення (`BAD`). Це перевіряє, що GRABFUSION_STUDIO_URL
