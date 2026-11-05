@@ -379,3 +379,13 @@ Marketplace live SHA досі fdcec27, Studio live SHA досі 62e3a14.
 для test TokenVerifier/NestJS/PostgreSQL; не видавати за production.
 Наступне: отримати дозвіл на merge #6/#23 і production, виконати та звірити.
 Журнал/HANDOFF доставляються тільки feature-гілкою, окремо від коду.
+
+## Приймання і зміна — 05.11.2026, Codex #01, запис #510
+
+- Прочитано AGENTS.md/HANDOFF.md; `tmp/session.lock` на початку був відсутній. Гілка `fix/book-studio-integrity-2026-10-16`, базовий HEAD `deff4081a7a4baa95a506ee741059df1abb0f0c2`.
+- Завдання: прибрати кнопку вибору ролі в шапці Studio для всіх, окрім адміністратора. `src/components/HeaderNav.tsx` тепер рендерить `role-switcher-btn` лише коли `authUser.role === 'admin'`; локальний `currentRole` не є доказом доступу.
+- Перевірено: `npm run lint` (`tsc --noEmit`) exit 0, `git diff --check` exit 0, статичний контракт guard/button пройшов. Додатковий SSR writer/admin не стартував через системний `uv_os_get_passwd: ENOMEM`; браузер, production і повний `npm test` не перевірялися.
+- Після прямої вказівки власника код закомічено як `368edf6d0430685d7332973e941d651297fa9dba` і запушено в `Book_Creator/fix/book-studio-integrity-2026-10-16`; `git ls-remote` підтвердив точний SHA. `origin` (`FusionLabPush`) не використовувався; `bookcreator` і `production` ведуть на той самий `Book_Creator`, другий push був `Everything up-to-date`.
+- Не зроблено: злиття в `master` і deploy — не запитувалися. Інші елементи матриці ролей на сторінці «Старт» не змінювалися, бо власник вказав конкретну кнопку зі скриншота.
+- До сесії вже існували незареєстровані `BK-2084-CYBER-test.zip`, `Claude outputs/`, `acceptance/`; їх не чіпати й не змішувати з цією роботою.
+- Наступний крок: за потреби вручну відкрити Studio під writer і admin після деплою; writer не має бачити кнопку, admin має бачити її та відкривати список ролей.
