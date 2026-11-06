@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, PDFName, PDFDict, PDFString } from 'pdf-lib';
 import {
   PAGE,
+  brandTableDrawingsPdf,
   buildDrawingsScript,
   customerOf,
   drawingsFileName,
@@ -184,3 +185,13 @@ const apronBase = context.TableProduction.legsOf(apronOrder).base;
 assert.equal(apronBase.parts.filter((p:any)=>p.id.startsWith('apron.')).length,4);
 assert.equal(apronBase.legLength,63);
 console.log('✓ PDF apron specification and shared four-board geometry agree with the order');
+
+// The real final PDF postprocessor, independent of a locally installed CAD engine.
+const rawPdf=await PDFDocument.create();rawPdf.addPage([PAGE.w,PAGE.h]);rawPdf.addPage([PAGE.w,PAGE.h]);
+const branded=await PDFDocument.load(await brandTableDrawingsPdf(await rawPdf.save()));
+for(const page of branded.getPages()){
+  const annots=page.node.Annots()!;assert.equal(annots.size(),1);
+  assert.equal(annots.lookup(0,PDFDict).lookup(PDFName.of('A'),PDFDict).lookup(PDFName.of('URI'),PDFString).decodeText(),'https://fusion.in.ua');
+  assert(page.node.Resources().lookup(PDFName.of('Font'),PDFDict).keys().length>0,'embedded Cyrillic branding font on every page');
+}
+console.log('✓ table PDF: final protected credit and active fusion.in.ua link on every page');

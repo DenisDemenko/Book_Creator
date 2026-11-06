@@ -4,7 +4,7 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import express from 'express';
-import {PDFDocument} from 'pdf-lib';
+import {PDFDocument,PDFName,PDFDict,PDFString} from 'pdf-lib';
 import {toBase64,fromBase64,renderEditableDocument,validateEditableDocument} from '../shared/wardrobeDocument.mjs';
 declare global{interface Window{fixtureBook:any;fixtureDownloads:Blob[];fixtureOpened:string;fixtureCreated:boolean;readFixturePdf:(blob:Blob)=>Promise<string>;}}
 const temp=await mkdtemp(path.join(tmpdir(),'wardrobe-books-'));process.env.DATA_DIR=temp;process.env.DATABASE_PATH=path.join(temp,'studio.db');
@@ -33,6 +33,8 @@ try{
   const saved=await getBook(id);assert.deepEqual((saved!.book.wardrobeDocument as any).design,payload.design);
   const edited=structuredClone(fixtureDoc);edited.edits['p1-t1']={text:'Відредагований текст клієнта'};edited.pageOrder=['p2','p1','p3'];edited.notes.p1='Примітка майстра: перевірити отвори.';
   const rendered=await renderEditableDocument(edited);assert.equal((await PDFDocument.load(rendered)).getPageCount(),4);assert.equal(fixtureDoc.pages[0].blocks[0].text,'Документація шафи');
+  for(const page of (await PDFDocument.load(rendered)).getPages()){const annots=page.node.Annots()!;assert.equal(annots.lookup(annots.size()-1,PDFDict).lookup(PDFName.of('A'),PDFDict).lookup(PDFName.of('URI'),PDFString).decodeText(),'https://fusion.in.ua');}
+
   for(const invalid of [{...edited,pageOrder:['p1','p1','p3']},{...edited,edits:{missing:{text:'x'}}},{...edited,notes:{bad:'x'}},{...edited,font:'AAAA'}])assert.throws(()=>validateEditableDocument(invalid));
   await assert.rejects(()=>renderEditableDocument({...edited,edits:{'p1-t1':{text:'😀'}}}),/символ/);
   const bad=structuredClone(payload);bad.document.pages[0].blocks[0].x=-1;assert.equal((await send('/api/wardrobe/documents',{...bad,id:'WD-'+randomUUID()})).status,400);
@@ -54,7 +56,7 @@ try{
       await input('#wd-p1-t1','Текст PDF змінений клієнтом');await click('Нижче ↓');await input('textarea','Примітка клієнта: перевірити присадки.');assert.equal(await page.evaluate(()=>window.fixtureBook.wardrobeDocument.dirty),true);
       await click('Зберегти в Книгах');await page.waitForFunction(()=>document.querySelector('[role=status]')?.textContent.includes('Збережено на сервері'));
       assert.equal(((await getBook(id))!.book.wardrobeDocument as any).document.edits['p1-t1'].text,'Текст PDF змінений клієнтом');
-      await click('Завантажити PDF');await page.waitForFunction(()=>window.fixtureDownloads.length>0);const bytes=Uint8Array.from(await page.evaluate(async()=>Array.from(new Uint8Array(await window.fixtureDownloads.at(-1).arrayBuffer()))));assert.equal((await PDFDocument.load(bytes)).getPageCount(),4);const text=await page.evaluate(()=>window.readFixturePdf(window.fixtureDownloads.at(-1)));assert(text.includes('Текст PDF змінений клієнтом'));assert(!text.includes('Документація шафи'));assert(text.includes('Примітка клієнта: перевірити присадки.'));assert.equal(((await getBook(id))!.book.wardrobeDocument as any).document.pageOrder[0],'p2');
+      await click('Завантажити PDF');await page.waitForFunction(()=>window.fixtureDownloads.length>0);const bytes=Uint8Array.from(await page.evaluate(async()=>Array.from(new Uint8Array(await window.fixtureDownloads.at(-1).arrayBuffer()))));assert.equal((await PDFDocument.load(bytes)).getPageCount(),4);const text=await page.evaluate(()=>window.readFixturePdf(window.fixtureDownloads.at(-1)));assert(text.includes('Текст PDF змінений клієнтом'));assert.equal(text.split('Документ створено Fusion Lab Studio').length-1,4);assert.equal(await page.$$eval('input',inputs=>inputs.filter(i=>i.value==='Документ створено Fusion Lab Studio').length),0);assert(!text.includes('Документація шафи'));assert(text.includes('Примітка клієнта: перевірити присадки.'));assert.equal(((await getBook(id))!.book.wardrobeDocument as any).document.pageOrder[0],'p2');
       if(process.env.WARDROBE_ARTIFACTS){await mkdir(process.env.WARDROBE_ARTIFACTS,{recursive:true});await page.screenshot({path:path.join(process.env.WARDROBE_ARTIFACTS,'editor-text.png'),fullPage:true});}await page.reload();await page.waitForFunction(()=>document.querySelector('nav[aria-label="Аркуші PDF"]'));await page.$$eval('nav[aria-label="Аркуші PDF"] button',buttons=>buttons.find(b=>b.textContent.includes('Схема'))?.click());await page.waitForSelector('#wd-p1-t1');assert.equal(await page.$eval('#wd-p1-t1',(e:any)=>e.value),'Текст PDF змінений клієнтом');
       const current=await getBook(id);await saveBook({book:{...current!.book,title:'Новіша серверна версія'},ownerId:'owner',expectedRevision:current!.revision});await input('#wd-p1-t1','Застаріла локальна правка');await click('Зберегти в Книгах');await page.waitForFunction(()=>document.querySelector('[role=alert]')?.textContent.includes('іншому місці'));
       assert.equal((await getBook(id))!.book.title,'Новіша серверна версія');

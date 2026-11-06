@@ -1,5 +1,6 @@
 import {PDFDocument,rgb} from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
+import {stampFusionPdfHeader} from './fusion-pdf-branding.mjs';
 export function toBase64(bytes){let s='';for(let i=0;i<bytes.length;i+=32768)s+=String.fromCharCode(...bytes.subarray(i,i+32768));return btoa(s);}
 export function fromBase64(s){return Uint8Array.from(atob(s),c=>c.charCodeAt(0));}
 export function validateEditableDocument(d){
@@ -52,5 +53,6 @@ export async function renderEditableDocument(data,{onlyPage}={}){
     supported(d.notes[id].replace(/[\r\n]/g,''));
     for(const paragraph of d.notes[id].split('\n')){let row='';for(const char of paragraph){const next=row+char;if(font.widthOfTextAtSize(next,10)>770){p.drawText(row,{x:28,y,size:10,font});y-=16;row=char;}else row=next;if(y<50){p=pdf.addPage([841.89,595.28]);noteNumber++;noteFooter();y=540;}}p.drawText(row,{x:28,y,size:10,font});y-=18;}
   }
-  pdf.setTitle(d.title);pdf.setAuthor('Fusion Lab');return pdf.save();
+  stampFusionPdfHeader(pdf,font);
+  pdf.setTitle(d.title);pdf.setAuthor('Fusion Lab Studio');return pdf.save();
 }
