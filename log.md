@@ -121,7 +121,7 @@ remote перевірити можна, запушити — ні**.
 
 # Що не запушено (для наступної сесії)
 
-06.11 #528: код 8b894b0/346027e у feat/wardrobe-book-documents запушено, PR38. Локальні перевірки пройшли; CI/PR/deploy ще не підтверджені. Studio перед Marketplace.
+06.11 #528: код до 487b66e запушено, усі CI OK (PR38). Доповнення шапки 5b01c92 готове до push із журналом; нові CI/merge/deploy очікуються. Studio перед Marketplace.
 
 04.11 #527: CAD опубліковано: Marketplace PR39/40 (e4dcc8e), Studio PR37 (59b066d). CI та live 10 hashes/guards OK; межі #527.
 
@@ -734,4 +734,4 @@ remote перевірити можна, запушити — ні**.
 
 ## Журнал сесій · 06.11.2026 #01 · PDF шафи в Книгах
 
-Codex: #528 — приватне збереження PDF/джерела, текстовий редактор, примітки, порядок і навігація; суміжний Marketplace. Локальні HTTP/SQLite, TypeScript, build і PDF-readback пройшли. **Не зроблено і чому:** CI/Chromium та новий production очікують опублікування перевірюваних гілок; Firebase production-login поза тестовою ідентичністю не використовувався. Наступне: CI обох PR, Studio перед Marketplace, hashes/guards на основному домені.
+Codex: #528 — приватне збереження PDF/джерела, текстовий редактор, примітки, порядок і навігація; суміжний Marketplace. Локальні HTTP/SQLite, TypeScript, build і PDF-readback пройшли. **Не зроблено і чому:** Chromium попереднього SHA пройшов; нова шапка потребує актуального CI та production. Firebase production-login не виконувався. Наступне: CI обох PR, Studio перед Marketplace, hashes/guards на основному домені.
