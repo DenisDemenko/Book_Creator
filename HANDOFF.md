@@ -496,3 +496,5 @@ Studio PR37: усі CI на 8438867 успішні (Gate B, Voice, handoff), п�
 
 ## Приймання — 06.11.2026, Codex, wardrobe-book-documents
 Прийнято чистий Book_Creator/master 828f96c; origin DenisDemenko/Book_Creator, власна гілка feat/wardrobe-book-documents, старого lock немає. Історичну передачу CAD звірено; її production-докази не повторюються й не є доказом цього завдання. Нове завдання: PDF шафи в Книгах, перегляд, редагування тексту, примітки/порядок сторінок, повернення до конструктора та навігація. Дозвіл власника на зміни/commit/push/публікацію з поточної розмови чинний. Серверне приймання в адмінці не виконане.
+
+Код #528: 8b894b0daa559523ff978be17632e1008d76db45 у feat/wardrobe-book-documents, Marketplace 3ca3af9162e7e4df4fd7c331706b0762e30dac95 у feat/wardrobe-studio-documents. Локальні перевірки записані в #528. Push/CI/deploy на момент цього запису ще не підтверджені; Studio перед Marketplace. Власний session.lock належить wardrobe-book-documents.
