@@ -11,7 +11,7 @@ const snapshot=(d:WardrobePdfData)=>({edits:structuredClone(d.edits),notes:{...d
 export default function WardrobeDocumentEditor({book,onUpdateBook}:Props){
   const [source,setSource]=useState<WardrobeBookDocument>(book.wardrobeDocument!),[baseBook,setBaseBook]=useState(book),[revision,setRevision]=useState<number|null>(null),[privateReady,setPrivateReady]=useState(false);
   const [pageId,setPageId]=useState(source.document.pageOrder[0]),[search,setSearch]=useState(''),[textSearch,setTextSearch]=useState(''),[selected,setSelected]=useState(''),[blockPage,setBlockPage]=useState(0);
-  const [status,setStatus]=useState('Читаємо збережений документ…'),[error,setError]=useState(''),[busy,setBusy]=useState(false),[previewError,setPreviewError]=useState(''),[zoom,setZoom]=useState(100);
+  const [status,setStatus]=useState('Читаємо збережений документ…'),[error,setError]=useState(''),[busy,setBusy]=useState(false),[previewError,setPreviewError]=useState(''),[zoom,setZoom]=useState(100),[paintedPage,setPaintedPage]=useState('');
   const [undo,setUndo]=useState<ReturnType<typeof snapshot>[]>([]),[redo,setRedo]=useState<ReturnType<typeof snapshot>[]>([]);
   const canvas=useRef<HTMLCanvasElement>(null),renderTask=useRef<any>(null),originalUrl=useRef<string|null>(null);
   const d=source.document,pagesById=useMemo(()=>new Map(d.pages.map(p=>[p.id,p])),[d.pages]),active=pagesById.get(pageId)||d.pages[0],locked=revision===null||busy;
@@ -26,7 +26,7 @@ export default function WardrobeDocumentEditor({book,onUpdateBook}:Props){
     try{setPreviewError('');const bytes=await renderEditableDocument(d,{onlyPage:active.id});if(cancelled)return;
       const lib=await import('pdfjs-dist');if(!lib.GlobalWorkerOptions.workerSrc)lib.GlobalWorkerOptions.workerSrc=(await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default;
       task=lib.getDocument({data:bytes});pdf=await task.promise;if(cancelled)return;const p=await pdf.getPage(1),view=p.getViewport({scale:1.25*zoom/100}),c=canvas.current;if(!c)return;
-      renderTask.current?.cancel();c.width=view.width;c.height=view.height;renderTask.current=p.render({canvas:c,canvasContext:c.getContext('2d')!,viewport:view});await renderTask.current.promise;
+      renderTask.current?.cancel();c.width=view.width;c.height=view.height;renderTask.current=p.render({canvas:c,canvasContext:c.getContext('2d')!,viewport:view});await renderTask.current.promise;if(!cancelled){c.dataset.pageId=active.id;setPaintedPage(active.id);}
     }catch(e){if(!cancelled)setPreviewError(e instanceof Error?e.message:'Не вдалося показати PDF.');}
   },450);return()=>{cancelled=true;clearTimeout(timer);renderTask.current?.cancel();void task?.destroy()?.catch(()=>{});};
   },[d,active.id,zoom,privateReady]);
@@ -68,8 +68,8 @@ export default function WardrobeDocumentEditor({book,onUpdateBook}:Props){
       </nav>
       <div className="min-w-0"><div className="mb-2 flex flex-wrap items-center gap-2"><button className={cls} onClick={()=>setPageId(d.pageOrder[Math.max(0,d.pageOrder.indexOf(active.id)-1)])}>←</button><span>{d.pageOrder.indexOf(active.id)+1} / {d.pages.length}</span><button className={cls} onClick={()=>setPageId(d.pageOrder[Math.min(d.pages.length-1,d.pageOrder.indexOf(active.id)+1)])}>→</button><label>Масштаб <select className={cls} value={zoom} onChange={e=>setZoom(Number(e.target.value))}>{[50,75,100,125,150,200].map(n=><option key={n}>{n}</option>)}</select></label></div>
         {previewError&&<p role="alert" className="text-rose-300">{previewError}</p>}
-        <div className="overflow-auto rounded-lg bg-slate-700 p-2"><div className="relative bg-white" style={{width:841.89*1.25*zoom/100,maxWidth:'none'}}><canvas ref={canvas} aria-label={'PDF: '+active.title} className="block w-full"/>
-          <div className="absolute inset-0">{active.blocks.filter(b=>b.role!=='page-number'&&!b.links).map(b=><button key={b.id} tabIndex={-1} aria-label={'Редагувати: '+(d.edits[b.id]?.text??b.text)} title={d.edits[b.id]?.text??b.text} className={'absolute border border-transparent hover:border-blue-500 hover:bg-blue-300/20 '+(selected===b.id?'border-blue-600':'')} style={{left:b.x/841.89*100+'%',top:(595.28-b.y-b.size)/595.28*100+'%',width:b.maxWidth/841.89*100+'%',height:(b.size+3)/595.28*100+'%'}} onClick={()=>selectBlock(b.id)}/>)}</div></div></div>
+        <div className="overflow-auto rounded-lg bg-slate-700 p-2"><div className="relative bg-white" style={{width:841.89*1.25*zoom/100,maxWidth:'none'}}><canvas ref={canvas} aria-label={'PDF: '+active.title} className="block w-full" style={{visibility:paintedPage===active.id?'visible':'hidden'}}/>
+          <div className={paintedPage===active.id?'absolute inset-0':'hidden'}>{active.blocks.filter(b=>b.role!=='page-number'&&!b.links).map(b=><button key={b.id} tabIndex={-1} aria-label={'Редагувати: '+(d.edits[b.id]?.text??b.text)} title={d.edits[b.id]?.text??b.text} className={'absolute border border-transparent hover:border-blue-500 hover:bg-blue-300/20 '+(selected===b.id?'border-blue-600':'')} style={{left:b.x/841.89*100+'%',top:(595.28-b.y-b.size)/595.28*100+'%',width:b.maxWidth/841.89*100+'%',height:(b.size+3)/595.28*100+'%'}} onClick={()=>selectBlock(b.id)}/>)}</div></div></div>
       </div>
       <aside className="rounded-xl border border-slate-700 p-3"><h2 className="font-bold">Текст PDF</h2><p className="my-1 text-xs text-slate-400">Виберіть напис на аркуші або знайдіть його нижче. Номери сторінок і посилання оновлюються автоматично. Шрифт зменшується, якщо рядок не вміщується в межах блока.</p>
         <input className={cls+' my-2 w-full'} aria-label="Пошук текстових блоків" value={textSearch} onChange={e=>{setTextSearch(e.target.value);setBlockPage(0);}} placeholder="Знайти напис"/>

@@ -31,6 +31,7 @@ export function registerWardrobeDocumentRoutes(app:Express,auth:RequestHandler=r
       const author=req.principal!.name||'Автор',title=document.title.slice(0,200);
       const book=existing?.book||buildStarterBook({bookId:id,title,author,role:req.principal!.role as any});
       const next={...book,title,updatedAt:new Date().toISOString(),wardrobeDocument:{version:1,requestId,sourceHash,design,document,originalPdf,renderedPdf:originalPdf,renderedPageCount:original.getPageCount(),dirty:false}};
+      if(JSON.stringify(next).length>12000000)throw Error('Документ завеликий для Книг. Завантажте PDF на пристрій.');
       const saved=await saveBook({book:next,ownerId:req.principal!.id,expectedRevision,mergeKey:`wardrobe:${requestId}:${sourceHash}`,beforeWrite:async()=>{
         const current=await getBook(id);if(current&&current.ownerId!==req.principal!.id)throw Object.assign(Error('Документ не знайдено.'),{status:404});
       }});
