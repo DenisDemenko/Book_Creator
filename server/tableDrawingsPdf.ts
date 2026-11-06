@@ -19,6 +19,10 @@ import { existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
+import { PDFDocument } from 'pdf-lib';
+import { FONT_DIR } from './pdf/pdfRenderer';
+import fontkit from '@pdf-lib/fontkit';
+import { stampFusionPdfHeader } from '../shared/fusion-pdf-branding.mjs';
 import { cmd, serializeScript, type DesigncraftCommand } from './pdf/designcraft/commands';
 import { buildDesigncraftStyleCommands } from './pdf/designcraft/styleCommands';
 import { getBookDesignTheme, isBookDesignThemeId, listBookDesignThemes, type BookDesignThemeId } from './pdf/designcraft/themes';
@@ -288,10 +292,20 @@ export async function renderDrawingsPdf(order: DrawingsOrder, opts: { cli?: stri
     try { report = JSON.parse(r.stdout); } catch { /* нижче */ }
     if (r.code !== 0 || report.failedIndex !== undefined && report.failedIndex !== null)
       throw new DrawingsError(`DesignCraft: ${report.failedCommand ? report.failedCommand + ': ' : ''}${report.error || r.stderr.slice(0, 300) || 'невідома помилка'}`);
-    return await fs.readFile(out);
+    return brandTableDrawingsPdf(await fs.readFile(out));
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
 }
 
 export const drawingsFileName = (order: DrawingsOrder) => `stil-${String(order.number).replace(/[^A-Za-z0-9_-]/g, '_')}-kreslennya.pdf`;
+
+/** Final export layer: the credit is never a user-editable DesignCraft frame. */
+export async function brandTableDrawingsPdf(bytes: Uint8Array): Promise<Buffer> {
+  const pdf = await PDFDocument.load(bytes);
+  pdf.registerFontkit(fontkit);
+  const font = await pdf.embedFont(await fs.readFile(path.join(FONT_DIR, 'DejaVuSerif.ttf')), { subset: false });
+  stampFusionPdfHeader(pdf, font);
+  pdf.setAuthor('Fusion Lab Studio');
+  return Buffer.from(await pdf.save());
+}

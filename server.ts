@@ -3,6 +3,7 @@ import { registerTableAiBillingRoutes } from './server/tableAiBilling';
 import { registerGeoHomeRoutes } from './server/geohome/routes';
 import { registerFundingRoutes } from './server/fundingBridge';
 import { registerSlabTableRoutes } from './server/slabTableBridge';
+import { registerWardrobeDocumentRoutes } from './server/wardrobeDocumentRoutes';
 import { subscribeGroupUpdates } from "./server/core/labyrinth/groupRealtime";
 import { registerTeamRoleRoutes } from './server/core/collaboration/teamRoles';
 import { fetchTeamRoleSnapshot } from './server/marketplaceBridge';
@@ -783,6 +784,7 @@ registerGitCommandRoutes(app);
     generateText: generateAiText as never,
   });
   registerBookRoutes(app, storedBookOps);
+  registerWardrobeDocumentRoutes(app);
   // API сторінок семантичного ядра (Т0.8): /api/projects/:id/* — лише з правом
   // на книгу (власник, прийняте запрошення, адміністратор).
   // Якість живих персонажів (Т2.8 В3): прогони набору на справжніх моделях — лише адміністратор.

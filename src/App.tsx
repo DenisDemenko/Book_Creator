@@ -185,7 +185,13 @@ const INITIAL_LOG_ENTRIES: AuditLogEntry[] = [
   }
 ];
 
-export default function App() {
+const WardrobeBookEntry=React.lazy(()=>import('./components/pdf/WardrobeBookEntry').then(m=>({default:m.WardrobeBookEntry})));
+export default function App(){
+  const initialEntry=useRef(parseAppPath(window.location.pathname,API_BASE)),route=initialEntry.current;
+  if(route?.tab==='pdf-editor'&&/^WD-[a-f0-9-]{36}$/i.test(route.projectId))return <React.Suspense fallback={<p>Завантажуємо документ…</p>}><WardrobeBookEntry documentId={route.projectId}/></React.Suspense>;
+  return <StudioApp/>;
+}
+function StudioApp() {
   const creativeBibleRef = useRef(parseCreativeBiblePath(window.location.pathname, API_BASE));
   const creativeWorkspaceIdRef = useRef(parseCreativeWorkspacePath(window.location.pathname, API_BASE));
   const creativeAccessIdRef = useRef(parseCreativeAccessPath(window.location.pathname, API_BASE));
@@ -1738,7 +1744,7 @@ export default function App() {
     setActiveChapterId(nextBook.chapters[0]?.id || '');
     setActiveSectionId(nextBook.chapters[0]?.sections[0]?.id || '');
     setHasUnsavedChanges(false);
-    setCurrentTab('editor');
+    setCurrentTab(nextBook.wardrobeDocument?'pdf-editor':'editor');
   };
 
   // Manual save trigger
@@ -2558,6 +2564,7 @@ export default function App() {
 
         {currentTab === 'pdf-editor' && (
           <PdfEditorView
+            userId={auth.user?.id}
             book={book}
             onUpdateBook={handleUpdateBook}
             onSaveBook={handleManualSave}

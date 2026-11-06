@@ -307,6 +307,9 @@ const serverRevisions = new Map<string, number>();
  * консоль, бо він означає, що книгу правлять ще десь.
  */
 async function mirrorBookToServer(book: Book): Promise<void> {
+  // The technical-document editor explicitly saves with the revision it read.
+  // Its local drafts must never enter the legacy retry/adopt-revision path.
+  if(book.wardrobeDocument)return;
   const id = book.id;
   if (!id) return;
   // Т6.2: книга з обмеженим доступом — лише частина чужої книги; серверна

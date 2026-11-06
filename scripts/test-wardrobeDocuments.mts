@@ -1,0 +1,70 @@
+import assert from 'node:assert/strict';
+import {mkdtemp,readFile,writeFile,rm,mkdir,readdir} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {randomUUID} from 'node:crypto';
+import express from 'express';
+import {PDFDocument,PDFName,PDFDict,PDFString} from 'pdf-lib';
+import {toBase64,fromBase64,renderEditableDocument,validateEditableDocument} from '../shared/wardrobeDocument.mjs';
+declare global{interface Window{fixtureBook:any;fixtureDownloads:Blob[];fixtureOpened:string;fixtureCreated:boolean;readFixturePdf:(blob:Blob)=>Promise<string>;}}
+const temp=await mkdtemp(path.join(tmpdir(),'wardrobe-books-'));process.env.DATA_DIR=temp;process.env.DATABASE_PATH=path.join(temp,'studio.db');
+const db=await import('../server/db');await db.initDb();
+const {getBook,saveBook}=await import('../server/bookStore');
+const {registerWardrobeDocumentRoutes}=await import('../server/wardrobeDocumentRoutes');
+const {registerBookRoutes}=await import('../server/bookRoutes');
+const font=toBase64(await readFile('server/pdf/fonts/DejaVuSerif.ttf')),background=await PDFDocument.create();
+for(let i=0;i<3;i++)background.addPage([841.89,595.28]).drawRectangle({x:28,y:100,width:200,height:300});
+const fixtureDoc:any={schema:'fusionlab.wardrobe.pdf',version:1,title:'Шафа клієнта',createdAt:new Date().toISOString(),font,backgroundPdf:toBase64(await background.save()),pages:[1,2,3].map(i=>({id:'p'+i,title:i===1?'Схема':i===2?'Петлі на фасаді':'Фрезерована ручка',blocks:[{id:`p${i}-t1`,text:i===1?'Документація шафи':i===2?'Петлі Häfele 311.04.005':'Ручка — початковий текст',x:28,y:540,size:16,maxWidth:770,color:[.1,.1,.1]},{id:`p${i}-t2`,text:`${i} / 3`,role:'page-number',x:750,y:18,size:8,maxWidth:60,color:[0,0,0]}]})),pageOrder:['p1','p2','p3'],edits:{},notes:{}};
+validateEditableDocument(fixtureDoc);
+const originalPdf=toBase64(await renderEditableDocument(fixtureDoc)),id='WD-'+randomUUID(),requestId='WD-'+randomUUID(),payload={id,requestId,design:{height:2400,depth:600,thickness:18,modules:[{width:800,enabled:true}]},document:fixtureDoc,originalPdf};
+const app=express();app.use(express.json({limit:'12mb'}));app.use((req,_res,next)=>{const who=req.get('X-Fixture-User')||'owner';req.principal=who==='guest'?{id:null,role:'guest',isGuest:true} as any:{id:who,name:who,role:'writer',isGuest:false} as any;next();});
+registerWardrobeDocumentRoutes(app);registerBookRoutes(app,{buildArtifacts:async()=>({}),publishStored:async()=>({})});
+const server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server.once('listening',r));const address=server.address() as any,base=`http://127.0.0.1:${address.port}`;
+const send=(uri:string,body?:unknown,user='owner',extra:Record<string,string>={})=>fetch(base+uri,{method:body?'POST':'GET',headers:{'X-Fixture-User':user,'Content-Type':'application/json','X-Wardrobe-Client':'marketplace-v1',...extra},body:body?JSON.stringify(body):undefined});
+try{
+  assert.equal((await send('/api/wardrobe/documents',payload,'guest')).status,401);
+  assert.equal((await send('/api/wardrobe/documents',payload,'owner',{'X-Wardrobe-Client':''})).status,403);
+  const initial=await send('/api/wardrobe/documents',payload);assert.equal(initial.status,200);assert.equal((await initial.json()).revision,1);
+  assert.equal((await (await send('/api/wardrobe/documents',payload)).json()).revision,1);
+  assert.equal((await send('/api/wardrobe/documents',{...payload,design:{height:2000}})).status,409);
+  assert.equal((await send('/api/wardrobe/documents',payload,'other')).status,404);
+  assert.equal((await send('/api/books/'+id,undefined,'other')).status,404);
+  assert.equal((await (await send('/api/wardrobe/documents',undefined,'other')).json()).documents.length,0);
+  const saved=await getBook(id);assert.deepEqual((saved!.book.wardrobeDocument as any).design,payload.design);
+  const edited=structuredClone(fixtureDoc);edited.edits['p1-t1']={text:'Відредагований текст клієнта'};edited.pageOrder=['p2','p1','p3'];edited.notes.p1='Примітка майстра: перевірити отвори.';
+  const rendered=await renderEditableDocument(edited);assert.equal((await PDFDocument.load(rendered)).getPageCount(),4);assert.equal(fixtureDoc.pages[0].blocks[0].text,'Документація шафи');
+  for(const page of (await PDFDocument.load(rendered)).getPages()){const annots=page.node.Annots()!;assert.equal(annots.lookup(annots.size()-1,PDFDict).lookup(PDFName.of('A'),PDFDict).lookup(PDFName.of('URI'),PDFString).decodeText(),'https://fusion.in.ua');}
+
+  for(const invalid of [{...edited,pageOrder:['p1','p1','p3']},{...edited,edits:{missing:{text:'x'}}},{...edited,notes:{bad:'x'}},{...edited,font:'AAAA'}])assert.throws(()=>validateEditableDocument(invalid));
+  await assert.rejects(()=>renderEditableDocument({...edited,edits:{'p1-t1':{text:'😀'}}}),/символ/);
+  const bad=structuredClone(payload);bad.document.pages[0].blocks[0].x=-1;assert.equal((await send('/api/wardrobe/documents',{...bad,id:'WD-'+randomUUID()})).status,400);
+  const next=await send('/api/wardrobe/documents',{...payload,requestId:'WD-'+randomUUID(),expectedRevision:1});assert.equal(next.status,200);
+  assert.equal((await send('/api/wardrobe/documents',{...payload,requestId:'WD-'+randomUUID(),expectedRevision:1})).status,409);
+  const concurrentId='WD-'+randomUUID(),concurrent={...payload,id:concurrentId,requestId:'WD-'+randomUUID()};
+  const concurrentResults=await Promise.all([send('/api/wardrobe/documents',concurrent),send('/api/wardrobe/documents',concurrent)]);assert(concurrentResults.every(r=>r.status===200));assert.equal((await getBook(concurrentId))!.revision,1);
+  if(process.argv.includes('--browser')){
+    const {build}=await import('esbuild'),{default:puppeteer}=await import('puppeteer-core');
+    const result=await build({stdin:{contents:`import React,{useState,useEffect}from'react';import{createRoot}from'react-dom/client';import Editor from'./src/components/pdf/WardrobeDocumentEditor';import{WardrobeBookEntry}from'./src/components/pdf/WardrobeBookEntry';import{StudioBookDocuments}from'./src/components/StudioBookDocuments';import{saveBook}from'./src/utils/storage';function Host(){const[b,setB]=useState(null);useEffect(()=>{fetch('/api/books/${id}').then(r=>r.json()).then(s=>{s.book.wardrobeDocument.cloudRevision=s.revision;setB(s.book);});},[]);if(!b)return <p>Loading</p>;window.fixtureBook=b;return location.pathname==='/library'?<StudioBookDocuments books={[]} userId='owner' opening={null} onOpen={id=>window.fixtureOpened=id} onCreate={()=>window.fixtureCreated=true}/>:<Editor book={b} onUpdateBook={book=>{setB(book);void saveBook(book);}}/>;}window.readFixturePdf=async blob=>{const lib=await import('pdfjs-dist');lib.GlobalWorkerOptions.workerSrc='/pdf.worker.min.mjs';const task=lib.getDocument({data:new Uint8Array(await blob.arrayBuffer())}),pdf=await task.promise;let text='';for(let i=1;i<=pdf.numPages;i++)text+=(await(await pdf.getPage(i)).getTextContent()).items.map(x=>x.str||'').join(' ');await task.destroy();return text;};createRoot(document.getElementById('root')).render(location.pathname==='/entry'?<WardrobeBookEntry documentId='${id}'/>:<Host/>);`,loader:'tsx',resolveDir:process.cwd()},bundle:true,write:false,format:'esm',jsx:'automatic',define:{'import.meta.env.BASE_URL':JSON.stringify('/')},plugins:[{name:'worker-url',setup(b){b.onResolve({filter:/hooks\/useAuth$/},()=>({path:'auth',namespace:'auth-fixture'}));b.onResolve({filter:/AuthScreen$/},()=>({path:'screen',namespace:'auth-fixture'}));b.onLoad({filter:/.*/,namespace:'auth-fixture'},a=>({resolveDir:process.cwd(),loader:'tsx',contents:a.path==='auth'?"const user={id:'owner',name:'owner'};export const useAuth=()=>({user,loading:false,isGuest:false});":"import React from'react';export const AuthScreen=()=> <p>Вхід</p>;"}));b.onResolve({filter:/pdf\.worker\.min\.mjs\?url$/},()=>({path:'worker',namespace:'fixture'}));b.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:"export default '/pdf.worker.min.mjs'"}));}}]});
+    const css=(await Promise.all((await readdir('dist/assets')).filter(n=>n.endsWith('.css')).map(n=>readFile('dist/assets/'+n,'utf8')))).join('\n');app.get('/style.css',(_req,res)=>res.type('css').send(css));
+    app.get(['/','/library','/entry'],(_req,res)=>res.type('html').send('<link rel="stylesheet" href="/style.css"><style>body{margin:0;background:#111827;color:white}input,textarea,select{font:16px sans-serif}button,a{margin:3px;padding:8px}canvas{max-width:100%}</style><div id="root"></div><script type="module" src="/host.js"></script>'));
+    app.get('/host.js',(_req,res)=>res.type('js').send(result.outputFiles[0].text));app.get('/pdf.worker.min.mjs',async(_req,res)=>res.type('js').send(await readFile('node_modules/pdfjs-dist/build/pdf.worker.min.mjs','utf8')));
+    const browser=await puppeteer.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/google-chrome',headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
+    try{const page=await browser.newPage(),errors:string[]=[];page.on('pageerror',e=>errors.push(String(e)));await page.setViewport({width:1440,height:1000});await page.evaluateOnNewDocument(()=>{window.fixtureDownloads=[];const original=URL.createObjectURL;URL.createObjectURL=function(blob){if(blob instanceof Blob&&blob.type==='application/pdf')window.fixtureDownloads.push(blob);return original.call(this,blob);};HTMLAnchorElement.prototype.click=function(){};});
+      await page.goto(base);await page.waitForSelector('#wd-p1-t1');await page.waitForFunction(()=>(document.querySelector('canvas') as HTMLCanvasElement)?.dataset.pageId==='p1');
+      const input=(selector:string,value:string)=>page.$eval(selector,(el:any,v)=>{const setter=Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value')!.set!;setter.call(el,v);el.dispatchEvent(new Event('input',{bubbles:true}));},value);
+      const click=(label:string)=>page.$$eval('button',(buttons,label)=>{const b=buttons.find(b=>b.textContent===label);if(!b)throw Error('Missing '+label);b.click();},label);
+      await input('#wd-p1-t1','Текст PDF змінений клієнтом');await click('Нижче ↓');await input('textarea','Примітка клієнта: перевірити присадки.');assert.equal(await page.evaluate(()=>window.fixtureBook.wardrobeDocument.dirty),true);
+      await click('Зберегти в Книгах');await page.waitForFunction(()=>document.querySelector('[role=status]')?.textContent.includes('Збережено на сервері'));
+      assert.equal(((await getBook(id))!.book.wardrobeDocument as any).document.edits['p1-t1'].text,'Текст PDF змінений клієнтом');
+      await click('Завантажити PDF');await page.waitForFunction(()=>window.fixtureDownloads.length>0);const bytes=Uint8Array.from(await page.evaluate(async()=>Array.from(new Uint8Array(await window.fixtureDownloads.at(-1).arrayBuffer()))));assert.equal((await PDFDocument.load(bytes)).getPageCount(),4);const text=await page.evaluate(()=>window.readFixturePdf(window.fixtureDownloads.at(-1)));assert(text.includes('Текст PDF змінений клієнтом'));assert.equal(text.split('Документ створено Fusion Lab Studio').length-1,4);assert.equal(await page.$$eval('input',inputs=>inputs.filter(i=>i.value==='Документ створено Fusion Lab Studio').length),0);assert(!text.includes('Документація шафи'));assert(text.includes('Примітка клієнта: перевірити присадки.'));assert.equal(((await getBook(id))!.book.wardrobeDocument as any).document.pageOrder[0],'p2');
+      if(process.env.WARDROBE_ARTIFACTS){await mkdir(process.env.WARDROBE_ARTIFACTS,{recursive:true});await page.screenshot({path:path.join(process.env.WARDROBE_ARTIFACTS,'editor-text.png'),fullPage:true});}await page.reload();await page.waitForFunction(()=>document.querySelector('nav[aria-label="Аркуші PDF"]'));await page.$$eval('nav[aria-label="Аркуші PDF"] button',buttons=>buttons.find(b=>b.textContent.includes('Схема'))?.click());await page.waitForSelector('#wd-p1-t1');assert.equal(await page.$eval('#wd-p1-t1',(e:any)=>e.value),'Текст PDF змінений клієнтом');
+      const current=await getBook(id);await saveBook({book:{...current!.book,title:'Новіша серверна версія'},ownerId:'owner',expectedRevision:current!.revision});await input('#wd-p1-t1','Застаріла локальна правка');await click('Зберегти в Книгах');await page.waitForFunction(()=>document.querySelector('[role=alert]')?.textContent.includes('іншому місці'));
+      assert.equal((await getBook(id))!.book.title,'Новіша серверна версія');
+      const context=await browser.createBrowserContext(),entryPage=await context.newPage();await entryPage.goto(base+'/entry');await entryPage.waitForSelector('[data-wardrobe-document]');await entryPage.waitForFunction(()=>document.querySelector('canvas')?.dataset.pageId==='p2');await context.close();
+      await page.goto(base+'/library');await page.waitForSelector('[data-book-documents]');await page.waitForFunction(()=>document.querySelector('[data-book-documents]')?.textContent.includes('PDF · 4 аркушів'));await input('[aria-label="Знайти книгу або PDF"]','неіснуючий запис');await page.waitForFunction(()=>document.body.textContent.includes('нічого не знайдено'));await input('[aria-label="Знайти книгу або PDF"]','Шафа');
+      await page.setViewport({width:390,height:844});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert.deepEqual(errors,[]);
+      if(process.env.WARDROBE_ARTIFACTS){await mkdir(process.env.WARDROBE_ARTIFACTS,{recursive:true});await writeFile(path.join(process.env.WARDROBE_ARTIFACTS,'edited-document.pdf'),bytes);await page.screenshot({path:path.join(process.env.WARDROBE_ARTIFACTS,'books-mobile.png'),fullPage:true});}
+    }finally{await browser.close();}
+  }
+  console.log('Wardrobe Books: private real HTTP/SQLite storage, source PDF/project, retries/races, ownership, revisions, portable text editing, notes and page order passed'+(process.argv.includes('--browser')?'; real editor canvas/download/reload/conflict and library navigation in Chromium passed.':'.'));
+}finally{await new Promise<void>(r=>server.close(()=>r()));db.closeDb();await rm(temp,{recursive:true,force:true});}

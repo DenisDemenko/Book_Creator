@@ -1,0 +1,28 @@
+name: Wardrobe documents
+on:
+  pull_request:
+  push:
+    branches: [master]
+jobs:
+  documents:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: node --import tsx scripts/test-wardrobeDocuments.mts --browser
+        env:
+          CHROMIUM_PATH: /usr/bin/google-chrome
+          WARDROBE_ARTIFACTS: ${{ runner.temp }}/wardrobe-documents
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wardrobe-documents
+          path: ${{ runner.temp }}/wardrobe-documents
+          if-no-files-found: ignore
