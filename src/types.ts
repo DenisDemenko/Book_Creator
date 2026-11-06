@@ -879,6 +879,7 @@ export interface HeroArcState {
 }
 
 export interface Book {
+  wardrobeDocument?: import('./types/wardrobeDocument').WardrobeBookDocument;
   storyWorld?: StoryWorld;
   storyLocations?: StoryLocation[];
   wizardContext?: { entryMode: string; framework: string; canonicalSourceBookId?: string;

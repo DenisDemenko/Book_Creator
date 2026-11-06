@@ -26,6 +26,7 @@ import type { AuthUser, Book, NavigationTab, WriterMasteryState, SkillCategory }
 import { SKILL_CATEGORIES, SKILL_TASKS, INITIAL_MASTERY_STATE } from '../data/skillsData';
 import { useLanguage } from '../i18n/LanguageContext';
 import { listBooks, loadBook, saveMeta, META_ACTIVE_BOOK, type BookSummary } from '../utils/storage';
+import {StudioBookDocuments} from './StudioBookDocuments';
 
 interface DashboardViewProps {
   book: Book;
@@ -43,6 +44,7 @@ interface DashboardViewProps {
 }
 
 interface ServerBookSummary {
+  ownerId?:string|null;
   id: string;
   title: string;
   updatedAt: string;
@@ -197,7 +199,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     try {
       // Якщо на пристрої вже є своя копія — ніколи не замінюємо її мовчки.
       const local = await loadBook(bookId);
-      if (local && !window.confirm(
+      if (local && (!local.wardrobeDocument||local.wardrobeDocument.dirty) && !window.confirm(
         'На цьому пристрої вже збережена копія цієї книги. Завантажити серверну версію замість локальної? Якщо маєте незбережені локальні правки, натисніть «Скасувати».'
       )) return;
 
@@ -279,7 +281,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const bookProgressPct = Math.min(100, Math.round((totalWords / BOOK_WORDS_MILESTONE) * 100));
 
   const quickLinks: { tab: NavigationTab; icon: React.ComponentType<{ className?: string }>; labelKey: string }[] = [
-    { tab: 'editor', icon: BookOpen, labelKey: 'dashboard.quickBook' },
+    { tab: book.wardrobeDocument?'pdf-editor':'editor', icon: BookOpen, labelKey: 'dashboard.quickBook' },
     { tab: 'courses', icon: GraduationCap, labelKey: 'dashboard.quickCourses' },
     { tab: 'mastery', icon: Trophy, labelKey: 'dashboard.quickMastery' },
     { tab: 'ai-studio', icon: Wand2, labelKey: 'dashboard.quickAi' },
@@ -299,6 +301,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
+      <StudioBookDocuments books={serverBooks.filter(b=>b.ownerId===authUser?.id)} userId={authUser?.id??null} opening={openingBookId} onOpen={id=>void handleOpenCloudBook(id)} onCreate={()=>setCreateChooserOpen(true)}/>
       {/* Швидке повернення до книги з іншого пристрою. Чужі книги сервер не віддає. */}
       <section data-testid="existing-book-entry" className="nova-glass-dark rounded-2xl p-5 border border-cyan-500/30">
         <div className="flex items-center gap-2 mb-2">

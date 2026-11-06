@@ -1738,7 +1738,7 @@ export default function App() {
     setActiveChapterId(nextBook.chapters[0]?.id || '');
     setActiveSectionId(nextBook.chapters[0]?.sections[0]?.id || '');
     setHasUnsavedChanges(false);
-    setCurrentTab('editor');
+    setCurrentTab(nextBook.wardrobeDocument?'pdf-editor':'editor');
   };
 
   // Manual save trigger
@@ -2558,6 +2558,7 @@ export default function App() {
 
         {currentTab === 'pdf-editor' && (
           <PdfEditorView
+            userId={auth.user?.id}
             book={book}
             onUpdateBook={handleUpdateBook}
             onSaveBook={handleManualSave}

@@ -29,6 +29,7 @@ import { LabyrinthError } from './core/labyrinth/model';
 import { getCoreJobQueue, getCoreRepository } from './core';
 import { scheduleCoreSync } from './core/sync';
 import { registerBookSyncRoutes } from './bookSyncRoutes';
+import {validateEditableDocument} from '../shared/wardrobeDocument.mjs';
 import {
   BookRevisionConflict,
   getBook,
@@ -136,6 +137,10 @@ export function registerBookRoutes(app: Express, deps: BookRoutesDeps): void {
       }
       if (String(book.id || '') !== req.params.id) {
         return res.status(400).json({ error: 'id у тілі не збігається з адресою.', kind: 'bad_input' });
+      }
+      if(book.wardrobeDocument){
+        try{const d=book.wardrobeDocument;validateEditableDocument(d.document);if(d.version!==1||!d.design||typeof d.design!=='object'||typeof d.originalPdf!=='string'||d.originalPdf.length>8000000||(d.renderedPdf!==undefined&&(typeof d.renderedPdf!=='string'||d.renderedPdf.length>8000000))||JSON.stringify(book).length>12000000)throw Error();}
+        catch{return res.status(400).json({error:'Некоректні дані PDF документа.'});}
       }
 
       const existing = await getBook(req.params.id);

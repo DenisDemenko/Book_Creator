@@ -5,9 +5,11 @@ import { AuthoritativePdfPreview } from './pdf/AuthoritativePdfPreview';
 import { PublicationTemplatePanel } from './publication/PublicationTemplatePanel';
 import { DesignCraftEditorPanel } from './publication/DesignCraftEditorPanel';
 import { useLanguage } from '../i18n/LanguageContext';
+const WardrobeDocumentEditor=React.lazy(()=>import('./pdf/WardrobeDocumentEditor'));
 
 interface PdfEditorViewProps {
   book: Book;
+  userId?:string|null;
   onUpdateBook: (updatedBook: Book, logAction?: string, logDetails?: string) => void;
   onSaveBook?: () => void;
 }
@@ -21,6 +23,7 @@ interface PdfEditorViewProps {
  */
 export const PdfEditorView: React.FC<PdfEditorViewProps> = (props) => {
   const { t } = useLanguage();
+  if(props.book.wardrobeDocument)return <React.Suspense fallback={<p>Відкриваємо PDF документа…</p>}><WardrobeDocumentEditor key={props.book.id+':'+(props.userId||'guest')} book={props.book} onUpdateBook={props.onUpdateBook}/></React.Suspense>;
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-slate-900" data-publication-layout>
       <header className="mx-4 mt-4 lg:mx-6">
