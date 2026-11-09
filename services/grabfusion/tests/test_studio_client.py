@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 
 import httpx
 import pytest
@@ -110,6 +111,39 @@ def test_retry_delete_photo_discard(client):
     assert client.retry_photo("pd_x", "ph_01a1").photo
     assert client.delete_photo("pd_x", "ph_01a1").draftId
     assert client.discard_draft("pd_x").draftId
+
+
+def test_ai_options_typed(client):
+    o = client.ai_options("pd_x")
+    assert o.pass_name == "structure" and o.moduleId is None
+    assert o.defaultModelId and o.models and o.balance == 270 and o.unlimited is False
+    ok = next(m for m in o.models if m.usable and m.credits)
+    assert ok.credits.expected > 0 and ok.credits.max >= ok.credits.expected
+    closed = next(m for m in o.models if not m.usable)
+    assert closed.credits is None and closed.note and closed.status == "no_key"
+
+
+def test_model_id_and_query_reach_studio():
+    seen: list[tuple[str, str, bytes]] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append((req.method, req.url.query.decode(), req.content))
+        if req.method == "GET":
+            return httpx.Response(200, json=contract.load_fixture("ai-options"))
+        name = "structure-running" if req.url.path.endswith("/structure") else "generate-running"
+        return httpx.Response(202, json=contract.load_fixture(name))
+
+    c = StudioClient("http://studio/api/external/v1", "nst_t", transport=httpx.MockTransport(handler))
+    c.ai_options("pd_1", pass_name="generate", module_id="m-1")
+    c.structure("pd_1", replace=True, model_id="claude-sonnet-5")
+    c.generate_module("pd_1", "m-1", model_id="gpt-5.5")
+    c.structure("pd_1")
+    c.generate_module("pd_1", "m-1")
+    assert seen[0][1] == "pass=generate&moduleId=m-1"
+    assert json.loads(seen[1][2]) == {"replace": True, "modelId": "claude-sonnet-5"}
+    assert json.loads(seen[2][2]) == {"modelId": "gpt-5.5"}
+    assert seen[3][2] == b"" and seen[4][2] == b""  # без вибору — тіла немає, як до 1.4.0
+    c.close()
 
 
 def test_structure_generate_return_running_job(client):

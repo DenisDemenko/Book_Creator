@@ -20,6 +20,7 @@
  */
 
 import type { Request, Response, NextFunction } from 'express';
+import { isCreditBilledContext } from './creditBilledContext';
 import { getSubscription, upsertSubscription, listUsageSince, getAppSetting, setAppSetting, type StoredSubscription } from './store';
 import {
   DEFAULT_TAX_REGIME,
@@ -448,7 +449,7 @@ export async function checkChatQuota(
 
   const records = await listUsageSince(sub.currentPeriodStart);
   const usedUsd = records
-    .filter((r) => r.userId === userId && r.kind === 'text' && r.success)
+    .filter((r) => r.userId === userId && r.kind === 'text' && r.success && !isCreditBilledContext(r.context))
     .reduce((sum, r) => sum + (r.costUsd || 0), 0);
   const remaining = Math.max(0, def.chatQuotaUsd - usedUsd);
 

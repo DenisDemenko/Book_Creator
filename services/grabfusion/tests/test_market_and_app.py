@@ -39,6 +39,6 @@ def test_settings_from_env_strips_slash():
 def test_app_health_and_config_have_no_token_fields():
     from grabfusion.sessions import SessionStore
     c = TestClient(create_app(Settings(), store=SessionStore(":memory:")))
-    assert c.get("/healthz").json()["contractVersion"] == "1.3.0"
+    assert c.get("/healthz").json()["contractVersion"] == "1.4.0"
     cfg = c.get("/api/config").json()
     assert set(cfg) == {"studioUrl", "marketUrl", "contractVersion"}

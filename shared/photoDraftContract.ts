@@ -20,7 +20,7 @@
  */
 
 /** Версія контракту. Мінорна — додавання; мажорна — ламка зміна. */
-export const PHOTO_DRAFT_CONTRACT_VERSION = '1.3.0';
+export const PHOTO_DRAFT_CONTRACT_VERSION = '1.4.0';
 
 /** Префікс маршрутів. Автентифікація — `Authorization: Bearer nst_…`. */
 export const PHOTO_DRAFT_API_BASE = '/api/external/v1';
@@ -366,6 +366,50 @@ export interface SubmitResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Вибір моделі для проходів 2–3 (з 1.4.0)
+// ---------------------------------------------------------------------------
+
+/**
+ * Стан моделі за перевіркою Studio. Обрати можна `ok` і `busy`; решта — лише пояснення, чому
+ * моделі немає в списку: ключ не введено в адмінці, провайдер його відхилив, на ключі немає коштів,
+ * провайдер не знає моделі, або її ціну в адмінці не звірено (бали порахувати не можна).
+ */
+export const PASS_MODEL_STATUSES = ['ok', 'busy', 'no_key', 'key_rejected', 'no_funds', 'model_missing', 'price_unknown'] as const;
+export type PassModelStatus = (typeof PASS_MODEL_STATUSES)[number];
+
+/** Проходи ШІ, за які списуються бали: розкласти кадри / написати текст модуля. */
+export const AI_PASSES = ['structure', 'generate'] as const;
+export type AiPass = (typeof AI_PASSES)[number];
+
+export interface PassModelOption {
+  modelId: string;
+  label: string;
+  provider: string;
+  status: PassModelStatus;
+  /** true — модель можна обрати: ключ дійсний, провайдер відповідає, ціну відомо. */
+  usable: boolean;
+  /** Пояснення людською мовою, коли `status` не `ok`; інакше null. */
+  note: string | null;
+  /** Бали за цей прохід: очікувано й верхня межа резерву; null — ціну моделі не звірено. */
+  credits: { expected: number; max: number } | null;
+}
+
+export interface AiOptionsResponse {
+  pass: AiPass;
+  /** Для `generate` — модуль, для якого пораховано вартість; для `structure` — null. */
+  moduleId: string | null;
+  /** Модель, яку Studio візьме, якщо `modelId` не передати; null — немає жодної придатної. */
+  defaultModelId: string | null;
+  models: PassModelOption[];
+  /** Доступні бали гаманця автора; null — без обліку (`unlimited: true`). */
+  balance: number | null;
+  /** true — бали за прохід не списуються (адміністратор або облік вимкнено). */
+  unlimited: boolean;
+  /** Коли Studio востаннє перевіряла ключі моделей (ISO 8601). */
+  checkedAt: string;
+}
+
+// ---------------------------------------------------------------------------
 // Тіла запитів
 // ---------------------------------------------------------------------------
 
@@ -412,6 +456,14 @@ export interface PutNoteRequest {
 export interface StructureRequest {
   /** true — розкласти заново, коли структура вже є; правки викладача в ній буде втрачено. */
   replace?: boolean;
+  /** З 1.4.0: модель із `GET …/ai-options`; без неї — `defaultModelId`. Недоступна → `400 bad_input`. */
+  modelId?: string;
+}
+
+/** Тіло `POST …/modules/:moduleId/generate` необовʼязкове (з 1.4.0). */
+export interface GenerateRequest {
+  /** Модель із `GET …/ai-options?pass=generate`; без неї — `defaultModelId`. Недоступна → `400 bad_input`. */
+  modelId?: string;
 }
 
 export interface PatchLesson {
@@ -483,6 +535,7 @@ export const PHOTO_DRAFT_ROUTES: readonly PhotoDraftRoute[] = [
   { method: 'PUT', path: '/photo-drafts/:draftId/photos/:photoId/text', status: 200, fixture: 'put-photo-text', response: 'PhotoResponse', stage: 5 },
   { method: 'POST', path: '/photo-drafts/:draftId/structure', status: 202, fixture: 'structure-running', response: 'DraftResponse', stage: 3 },
   { method: 'POST', path: '/photo-drafts/:draftId/modules/:moduleId/generate', status: 202, fixture: 'generate-running', response: 'DraftResponse', stage: 3 },
+  { method: 'GET', path: '/photo-drafts/:draftId/ai-options', status: 200, fixture: 'ai-options', response: 'AiOptionsResponse', stage: 3 },
   { method: 'POST', path: '/photo-drafts/:draftId/submit', status: 201, fixture: 'submit-course', response: 'SubmitResponse', stage: 3 },
 ] as const;
 

@@ -104,6 +104,7 @@ import { registerPhotoDraftRoutes } from './server/external/photoDraftRoutes';
 import { describePhotoWithCoreVision } from './server/external/photoDraftDescriber';
 import { aiUsageForDraft, createCourseDraft, createExpressInstruction, createInboxScans } from './server/external/photoDraftSinks';
 import { writeWithCoreText } from './server/external/photoDraftWriter';
+import { passModels } from './server/external/photoDraftAiModels';
 import { checkAndRecordStorageUpload } from './server/mediaStorage';
 import { registerGitHistoryRoutes } from './server/gitHistoryRoutes';
 import { registerGitCommandRoutes } from './server/gitCommandRoutes';
@@ -604,6 +605,7 @@ async function startServer() {
       checkAndRecordStorageUpload(userId, email, role, bytes, bookId ?? undefined, filename),
     checkAiBudget: ({ userId, role }) => checkChatQuota(userId, role, 'GrabFusion (опис кадрів)'),
     writeText: writeWithCoreText,
+    passModels,
     sinks: { createCourse: createCourseDraft, createExpress: createExpressInstruction, createInboxScans },
     aiUsage: aiUsageForDraft,
   });

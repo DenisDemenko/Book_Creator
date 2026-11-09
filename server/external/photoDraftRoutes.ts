@@ -31,6 +31,7 @@ import { getBook } from '../bookStore';
 import { readAsset, saveAsset } from '../media/mediaLibraryStore';
 import { decodeScanImage, requireExternalToken, type RecognizeParams } from './externalApiRoutes';
 import { cleanOcrText } from './scanOcrPrompt';
+import { creditBilledLabel } from '../creditBilledContext';
 import {
   DraftChangeError,
   countOpenDrafts,
@@ -55,7 +56,11 @@ import {
   type DraftLesson,
   type DraftModule,
   type DraftPhoto,
+  type AiOptionsResponse,
+  type AiPass,
   type DraftStructure,
+  type PassModelOption,
+  type PassModelStatus,
   type PhotoDraft,
   type PhotoDraftInstructionMode,
   type PhotoDraftKind,
@@ -78,9 +83,12 @@ import {
   placePhotos,
   structureSystemInstruction,
 } from './photoDraftPasses';
+import { estimateGeneratePass, estimateStructurePass, type PassTokenEstimate } from './photoDraftEstimate';
 import { toCourseInput, toExpressPayload, toInboxItems, toManuscriptItems, type CourseInput, type InboxItem } from './photoDraftMapping';
 
 const BASE = '/api/external/v1/photo-drafts';
+/** Стеля виходу моделі в проходах 2–3 і основа оцінки резерву балів. */
+const PASS_MAX_TOKENS = 8192;
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
 export interface DescribePhotoParams {
@@ -102,6 +110,56 @@ export interface WriteTextParams {
   maxTokens: number;
   label: string;
   req: Request;
+  /** З 1.4.0: модель, яку обрав автор (з `GET …/ai-options`). Без неї — привʼязка адміна до модуля. */
+  modelId?: string;
+  /** true — бали за прохід уже зарезервовано: грошовий ліміт тексту не перевіряти. */
+  creditBilled?: boolean;
+}
+
+/** Результат текстового проходу; `costUsd` — фактична собівартість для списання балів. */
+export interface WriteTextResult {
+  text: string;
+  modelId: string;
+  costUsd?: number;
+}
+
+/** Одна модель у відповіді `GET …/ai-options` до того, як до неї додано бали. */
+export interface PassModelProbe {
+  modelId: string;
+  label: string;
+  provider: string;
+  status: PassModelStatus;
+  usable: boolean;
+  note: string | null;
+}
+
+/** Вартість проходу в балах і доларах: очікувана й верхня межа резерву. */
+export interface PassQuote {
+  expectedCredits: number;
+  maxCredits: number;
+  expectedUsd: number;
+  maxUsd: number;
+}
+
+/** Резерв балів під один прохід: списати за фактом або повернути. */
+export interface PassCharge {
+  reservedCredits: number;
+  settleUsd: (actualUsd: number) => void;
+  release: (reason: string) => void;
+}
+
+/**
+ * Вибір моделі й облік балів для проходів 2–3 (з 1.4.0, журнал #530). У продукті —
+ * photoDraftAiModels.passModels. Без нього маршрути працюють як до 1.4.0: модель адміна, ліміт тарифу.
+ */
+export interface PassModels {
+  list: (ownerId: string) => Promise<{ models: PassModelProbe[]; defaultModelId: string | null; checkedAt: string }>;
+  /** `null` — ціну моделі не звірено. */
+  quote: (modelId: string, est: PassTokenEstimate) => PassQuote | null;
+  /** Баланс автора; `unlimited` — бали не списуються. */
+  balance: (req: Request) => Promise<{ unlimited: boolean; balance: number | null }>;
+  /** Резервує бали ДО запуску. Бракує — кидає помилку з `kind: 'credits'`; `null` — гейт не діє. */
+  begin: (req: Request, quote: PassQuote) => Promise<PassCharge | null>;
 }
 
 /** Куди лягає відправлена чернетка (у продукті — photoDraftSinks.ts). */
@@ -136,7 +194,9 @@ export interface PhotoDraftDeps {
   /** Ліміт ШІ-витрат тарифу викладача (у продукті — checkChatQuota). */
   checkAiBudget?: (p: { userId: string; role: string }) => Promise<{ allowed: boolean; reasonUk?: string }>;
   /** Проходи 2–3. Немає — маршрути structure/generate відповідають 503. */
-  writeText?: (p: WriteTextParams) => Promise<{ text: string; modelId: string }>;
+  writeText?: (p: WriteTextParams) => Promise<WriteTextResult>;
+  /** Вибір моделі й бали за проходи 2–3. Немає — як до 1.4.0. */
+  passModels?: PassModels;
   /** Відправка. Немає — submit відповідає 503. */
   sinks?: PhotoDraftSinks;
   /** Витрати ШІ на чернетку з журналу витрат (у продукті — photoDraftSinks.aiUsageForDraft). */
@@ -148,6 +208,11 @@ export interface PhotoDraftDeps {
 // ---------------------------------------------------------------------------
 // Допоміжне
 // ---------------------------------------------------------------------------
+
+/** Підпис виклику в журналі витрат: оплачений балами позначається, щоб не рахуватись у грошовий ліміт чату. */
+function passLabel(label: string, creditBilled: boolean): string {
+  return creditBilled ? creditBilledLabel(label) : label;
+}
 
 function fail(res: Response, status: number, kind: string, error: string): void {
   res.status(status).json({ error, kind });
@@ -995,40 +1060,90 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
 
   // ── Проходи 2–3 і відправка (етап 3, A2) ────────────────────────────────
 
-  /** Дві фонові роботи ШІ мають спільні перевірки: власник, стан, одна робота за раз, бюджет. */
+  /** Стан, у якому прохід ШІ взагалі можна запускати; кидає DraftChangeError. */
+  const assertJobStartable = (d: StoredDraft, check: (d: StoredDraft) => void) => {
+    assertEditable(d);
+    if (d.kind === 'manuscript') {
+      throw new DraftChangeError(409, 'wrong_status', 'У рукописі немає проходів «Розкласти» й «Написати»: сторінки лише розпізнаються й правляться вручну.');
+    }
+    if (d.job?.status === 'running' && !jobIsStale(d.job, now().getTime())) {
+      throw new DraftChangeError(409, 'job_running', 'Зачекайте: ШІ ще працює над цією чернеткою.');
+    }
+    check(d);
+  };
+
+  /** Помилка гаманця «бракує балів» без імпорту creditGate: той самий `kind: 'credits'`, що в зображень. */
+  const isCreditsError = (err: unknown): err is Error => (err as { kind?: unknown })?.kind === 'credits';
+
+  /** Дві фонові роботи ШІ мають спільні перевірки: власник, стан, одна робота за раз, модель, бали або бюджет. */
   const startJob = async (
     req: Request,
     res: Response,
     kind: 'structure' | 'generate',
     moduleId: string | null,
-    check: (d: StoredDraft) => void
+    check: (d: StoredDraft) => void,
+    estimate: (d: StoredDraft) => PassTokenEstimate
   ) => {
     if (!deps.writeText) return fail(res, 503, 'server_error', 'Прохід ШІ не налаштовано на сервері.');
     const ownerId = owner(req);
     const draftId = String(req.params.draftId);
-    if (!(await getDraft(draftId, ownerId))) return fail(res, 404, 'draft_not_found', 'Чернетку не знайдено.');
-    const budget = await budgetBlock(req);
+    const before = await getDraft(draftId, ownerId);
+    if (!before) return fail(res, 404, 'draft_not_found', 'Чернетку не знайдено.');
+
+    // Модель і бали (1.4.0). Стан перевіряємо ДО резерву, щоб не резервувати те, що однаково відмовлять.
+    let charge: PassCharge | null = null;
+    let modelId: string | undefined;
+    if (deps.passModels) {
+      const requested = req.body?.modelId;
+      if (requested !== undefined && (typeof requested !== 'string' || requested.length > 200)) {
+        return fail(res, 400, 'bad_input', 'modelId — рядок до 200 символів.');
+      }
+      try {
+        assertJobStartable(before, check);
+      } catch (err) {
+        return sendChangeError(res, err, kind);
+      }
+      const listing = await deps.passModels.list(ownerId);
+      modelId = (typeof requested === 'string' && requested.trim()) || listing.defaultModelId || undefined;
+      if (!modelId) return fail(res, 503, 'server_error', 'У Studio немає жодної моделі ШІ з дійсним ключем. Зверніться до адміністратора.');
+      const picked = listing.models.find((m) => m.modelId === modelId);
+      if (!picked) return fail(res, 400, 'bad_input', 'Невідома модель. Оберіть одну з тих, що повертає GET …/ai-options.');
+      if (!picked.usable) return fail(res, 400, 'bad_input', `Модель «${picked.label}» недоступна: ${picked.note || 'перевірка не пройшла'}`);
+      const quote = deps.passModels.quote(modelId, estimate(before));
+      if (!quote) return fail(res, 400, 'bad_input', `Ціну моделі «${picked.label}» в адмінці не звірено — оберіть іншу.`);
+      try {
+        charge = await deps.passModels.begin(req, quote);
+      } catch (err) {
+        if (isCreditsError(err)) return fail(res, 402, 'ai_budget_exceeded', err.message);
+        throw err;
+      }
+    }
+
+    // Оплачено балами — грошовий ліміт тексту не чіпаємо; без балів (адмін, гейт вимкнено) — як було.
+    const budget = charge ? null : await budgetBlock(req);
     if (budget) return fail(res, 402, 'ai_budget_exceeded', budget);
     const startedAt = now().toISOString();
-    const started = await mutateDraft(
-      draftId,
-      ownerId,
-      (d) => {
-        assertEditable(d);
-        if (d.kind === 'manuscript') {
-          throw new DraftChangeError(409, 'wrong_status', 'У рукописі немає проходів «Розкласти» й «Написати»: сторінки лише розпізнаються дослівно.');
-        }
-        if (d.job?.status === 'running' && !jobIsStale(d.job, now().getTime())) {
-          throw new DraftChangeError(409, 'job_running', 'Зачекайте: ШІ ще працює над цією чернеткою.');
-        }
-        check(d);
-        d.job = { kind, status: 'running', moduleId, error: null, startedAt };
-        return JSON.parse(JSON.stringify(d)) as StoredDraft;
-      },
-      { byTeacher: true, now }
-    );
-    if (!started) return fail(res, 404, 'draft_not_found', 'Чернетку не знайдено.');
-    return { ownerId, draftId, startedAt, snapshot: started.result, draft: started.draft };
+    let started;
+    try {
+      started = await mutateDraft(
+        draftId,
+        ownerId,
+        (d) => {
+          assertJobStartable(d, check);
+          d.job = { kind, status: 'running', moduleId, error: null, startedAt };
+          return JSON.parse(JSON.stringify(d)) as StoredDraft;
+        },
+        { byTeacher: true, now }
+      );
+    } catch (err) {
+      charge?.release('Прохід не запущено');
+      throw err;
+    }
+    if (!started) {
+      charge?.release('Чернетку не знайдено');
+      return fail(res, 404, 'draft_not_found', 'Чернетку не знайдено.');
+    }
+    return { ownerId, draftId, startedAt, snapshot: started.result, draft: started.draft, charge, modelId };
   };
 
   /** Фоновий кінець роботи: застосувати результат, якщо робота ще «та сама»; ревізію не змінює. */
@@ -1063,6 +1178,57 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
     });
   };
 
+  /**
+   * Які моделі можна обрати для проходу і скільки це коштує в балах (з 1.4.0). Дані не змінює:
+   * ключі перевіряються пробним запитом (кеш у photoDraftAiModels), вартість — за розміром цієї чернетки.
+   */
+  app.get(`${BASE}/:draftId/ai-options`, auth, requirePermission('canUseAi'), async (req, res) => {
+    try {
+      if (!deps.passModels) return fail(res, 503, 'server_error', 'Вибір моделі не налаштовано на сервері.');
+      const ownerId = owner(req);
+      const d = await getDraft(String(req.params.draftId), ownerId);
+      if (!d) return fail(res, 404, 'draft_not_found', 'Чернетку не знайдено.');
+      if (d.kind === 'manuscript') {
+        return fail(res, 409, 'wrong_status', 'У рукописі немає проходів «Розкласти» й «Написати»: моделі обирати нема для чого.');
+      }
+      const passParam = req.query.pass === undefined ? 'structure' : String(req.query.pass);
+      if (passParam !== 'structure' && passParam !== 'generate') {
+        return fail(res, 400, 'bad_input', 'pass — `structure` або `generate`.');
+      }
+      const pass: AiPass = passParam;
+      let moduleId: string | null = null;
+      let est: PassTokenEstimate;
+      if (pass === 'structure') {
+        est = estimateStructurePass(structureSystemInstruction(d.kind, d.instructionMode), buildStructurePrompt(d), d.photos.length, PASS_MAX_TOKENS);
+      } else {
+        moduleId = String(req.query.moduleId ?? '');
+        const m = d.structure?.modules.find((x) => x.moduleId === moduleId);
+        if (!m) return fail(res, 404, 'module_not_found', 'Модуля немає в структурі.');
+        est = estimateGeneratePass(generateSystemInstruction(d.kind, d.instructionMode), buildGeneratePrompt(d, m), m.lessons.length, PASS_MAX_TOKENS);
+      }
+      const [listing, bal] = await Promise.all([deps.passModels.list(ownerId), deps.passModels.balance(req)]);
+      const models: PassModelOption[] = listing.models.map((m) => {
+        const quote = m.usable ? deps.passModels!.quote(m.modelId, est) : null;
+        // Придатна, але без ціни — бали порахувати не можна, тож обирати її не пропонуємо.
+        if (m.usable && !quote) return { ...m, status: 'price_unknown', usable: false, note: 'Ціну моделі в адмінці не звірено — бали порахувати не можна.', credits: null };
+        return { ...m, credits: quote ? { expected: quote.expectedCredits, max: quote.maxCredits } : null };
+      });
+      const defaultModelId = models.some((m) => m.modelId === listing.defaultModelId && m.usable) ? listing.defaultModelId : (models.find((m) => m.usable)?.modelId ?? null);
+      const body: AiOptionsResponse = {
+        pass,
+        moduleId,
+        defaultModelId,
+        models,
+        balance: bal.unlimited ? null : bal.balance,
+        unlimited: bal.unlimited,
+        checkedAt: listing.checkedAt,
+      };
+      res.json(body);
+    } catch (err) {
+      sendChangeError(res, err, 'ai-options');
+    }
+  });
+
   app.post(`${BASE}/:draftId/structure`, auth, requirePermission('canUseAi'), async (req, res) => {
     try {
       const replace = req.body?.replace === true;
@@ -1078,20 +1244,30 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
             'Структура вже є. Щоб розкласти заново, передайте { "replace": true } — правки викладача в ній буде втрачено.'
           );
         }
-      });
+      }, (d) => estimateStructurePass(structureSystemInstruction(d.kind, d.instructionMode), buildStructurePrompt(d), d.photos.length, PASS_MAX_TOKENS));
       if (!begun) return;
-      const { ownerId, draftId, startedAt, snapshot, draft } = begun;
+      const { ownerId, draftId, startedAt, snapshot, draft, charge, modelId } = begun;
       finishJob(ownerId, draftId, startedAt, 'structure', async () => {
-        const out = await deps.writeText!({
-          ownerId,
-          draftId,
-          system: structureSystemInstruction(snapshot.kind, snapshot.instructionMode),
-          prompt: buildStructurePrompt(snapshot),
-          maxTokens: 8192,
-          label: 'Структура за фото (GrabFusion)',
-          req,
-        });
-        const parsed = parseStructureResult(out.text, snapshot.photos, { maxLessons: snapshot.kind === 'instruction' ? INSTRUCTION_MAX_STEPS : undefined });
+        let parsed: ReturnType<typeof parseStructureResult>;
+        try {
+          const out = await deps.writeText!({
+            ownerId,
+            draftId,
+            system: structureSystemInstruction(snapshot.kind, snapshot.instructionMode),
+            prompt: buildStructurePrompt(snapshot),
+            maxTokens: PASS_MAX_TOKENS,
+            label: passLabel('Структура за фото (GrabFusion)', !!charge),
+            req,
+            modelId,
+            creditBilled: !!charge,
+          });
+          parsed = parseStructureResult(out.text, snapshot.photos, { maxLessons: snapshot.kind === 'instruction' ? INSTRUCTION_MAX_STEPS : undefined });
+          // Списуємо лише коли результат придатний: модель, що повернула сміття, авторові не рахується.
+          charge?.settleUsd(out.costUsd ?? 0);
+        } catch (err) {
+          charge?.release('Прохід «Розкласти» не дав результату');
+          throw err;
+        }
         return (d) => {
           const modules = parsed.modules;
           placePhotos(modules, d.photos);
@@ -1116,21 +1292,38 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
         if (!d.structure.modules.some((m) => m.moduleId === moduleId)) {
           throw new DraftChangeError(404, 'module_not_found', 'Модуля немає в структурі.');
         }
+      }, (d) => {
+        const m = d.structure?.modules.find((x) => x.moduleId === moduleId);
+        return estimateGeneratePass(
+          generateSystemInstruction(d.kind, d.instructionMode),
+          m ? buildGeneratePrompt(d, m) : '',
+          m?.lessons.length ?? 1,
+          PASS_MAX_TOKENS
+        );
       });
       if (!begun) return;
-      const { ownerId, draftId, startedAt, snapshot, draft } = begun;
+      const { ownerId, draftId, startedAt, snapshot, draft, charge, modelId } = begun;
       const module = snapshot.structure!.modules.find((m) => m.moduleId === moduleId)!;
       finishJob(ownerId, draftId, startedAt, 'generate', async () => {
-        const out = await deps.writeText!({
-          ownerId,
-          draftId,
-          system: generateSystemInstruction(snapshot.kind, snapshot.instructionMode),
-          prompt: buildGeneratePrompt(snapshot, module),
-          maxTokens: 8192,
-          label: 'Текст модуля за фото (GrabFusion)',
-          req,
-        });
-        const parsed = parseGenerateResult(out.text, module);
+        let parsed: ReturnType<typeof parseGenerateResult>;
+        try {
+          const out = await deps.writeText!({
+            ownerId,
+            draftId,
+            system: generateSystemInstruction(snapshot.kind, snapshot.instructionMode),
+            prompt: buildGeneratePrompt(snapshot, module),
+            maxTokens: PASS_MAX_TOKENS,
+            label: passLabel('Текст модуля за фото (GrabFusion)', !!charge),
+            req,
+            modelId,
+            creditBilled: !!charge,
+          });
+          parsed = parseGenerateResult(out.text, module);
+          charge?.settleUsd(out.costUsd ?? 0);
+        } catch (err) {
+          charge?.release('Прохід «Написати» не дав результату');
+          throw err;
+        }
         return (d) => {
           const target = d.structure?.modules.find((m) => m.moduleId === moduleId);
           if (!target) {

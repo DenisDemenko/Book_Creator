@@ -380,7 +380,7 @@ t('фікстура put-photo-text відповідає схемі', conforms('P
 t('фікстура submit-manuscript відповідає схемі', conforms('SubmitResponse', fx('submit-manuscript')) === '', conforms('SubmitResponse', fx('submit-manuscript')));
 t('фікстура limits відповідає схемі й версії', conforms('LimitsResponse', fx('limits')) === '' && fx('limits').contractVersion === contract.PHOTO_DRAFT_CONTRACT_VERSION);
 t('усі відповіді сервера відповідають схемі контракту', errs.length === 0, errs.slice(0, 4).join(' | '));
-t('версія контракту 1.3.0', contract.PHOTO_DRAFT_CONTRACT_VERSION === '1.3.0');
+t('версія контракту не нижча за 1.3.0 (рукопис зʼявився в ній)', /^1\.([3-9]|\d{2,})\.\d+$/.test(contract.PHOTO_DRAFT_CONTRACT_VERSION), contract.PHOTO_DRAFT_CONTRACT_VERSION);
 t('вид manuscript у переліку, маршрут PUT text описано', (contract.PHOTO_DRAFT_KINDS as readonly string[]).includes('manuscript') && contract.PHOTO_DRAFT_ROUTES.some((r) => r.method === 'PUT' && r.path.endsWith('/text')));
 
 server.close();

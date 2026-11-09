@@ -1,5 +1,5 @@
 {
-  "contractVersion": "1.3.0",
+  "contractVersion": "1.4.0",
   "limits": {
     "maxNoteChars": 500,
     "maxImageBytes": 10485760,

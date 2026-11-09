@@ -77,25 +77,28 @@ export async function platformKeyFor(engine: string): Promise<string | undefined
 export async function resolveEngineKey(
   userId: string | undefined | null,
   engine: string,
-  label = 'ai'
+  label = 'ai',
+  /** true — не писати рядок у лог: перевірка доступних моделей питає про ключі всіх рушіїв на кожне відкриття екрана. */
+  quiet = false
 ): Promise<string | undefined> {
+  const log = quiet ? () => undefined : logKeySource;
   const platform = await platformKeyFor(engine);
   if (platform) {
-    logKeySource(label, engine, 'платформний («Ключі API»)', platform);
+    log(label, engine, 'платформний («Ключі API»)', platform);
     return platform;
   }
   if (!userId) {
-    logKeySource(label, engine, 'змінна оточення сервера', undefined);
+    log(label, engine, 'змінна оточення сервера', undefined);
     return undefined;
   }
   try {
     const stored = await getUserApiKey(userId, engine);
     if (!stored?.encryptedKey) {
-      logKeySource(label, engine, 'змінна оточення сервера', undefined);
+      log(label, engine, 'змінна оточення сервера', undefined);
       return undefined;
     }
     const plain = decryptApiKey(stored.encryptedKey).trim();
-    logKeySource(label, engine, plain ? 'власний ключ користувача' : 'змінна оточення сервера', plain);
+    log(label, engine, plain ? 'власний ключ користувача' : 'змінна оточення сервера', plain);
     return plain || undefined;
   } catch (err) {
     console.warn(`[${label}] ключ користувача не розшифрувався, пробуємо серверний:`, err);

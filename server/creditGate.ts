@@ -117,7 +117,7 @@ function lowBalanceError(credits: number, have: number): ImageCreditsError {
 }
 
 /** Резервує бали під одну генерацію. Кидає ImageCreditsError, якщо запускати не можна (провайдера не викликано). */
-async function beginCharge(req: any, costUsd: number, kind: 'img' | 'vid'): Promise<ImageCreditJob | null> {
+async function beginCharge(req: any, costUsd: number, kind: 'img' | 'vid' | 'txt'): Promise<ImageCreditJob | null> {
   const userId = gatedUserId(req);
   if (!userId) return null;
   const credits = creditsOrThrow(costUsd);
@@ -166,6 +166,16 @@ export async function beginImage(req: any, engineId: string, modelId: string, si
 }
 
 /** Вартість відео в USD за фактично нормалізованими параметрами. */
+/**
+ * Резерв балів під текстовий прохід чернетки за фото (журнал #530): `maxCostUsd` — верхня оцінка
+ * собівартості, фактична сума списується після відповіді моделі (не більше за резерв). Рішення
+ * власника 09.11.2026: проходи 2–3 GrabFusion оплачуються балами за тарифом моделі з адмінки, а не
+ * грошовим лімітом тексту. `null` — гейт не діє (адмін, гість, бали вимкнено, гаманець недоступний).
+ */
+export async function beginTextCharge(req: any, maxCostUsd: number): Promise<ImageCreditJob | null> {
+  return beginCharge(req, maxCostUsd, 'txt');
+}
+
 export function videoCostUsd(engineId?: string, resolution?: string, durationSec?: number): { costUsd: number; params: ReturnType<typeof resolveVideoParams> } {
   const params = resolveVideoParams(engineId, resolution, durationSec);
   return { costUsd: priceForVideo(params.engine.id, params.modelId, params.resolution, params.durationSec), params };

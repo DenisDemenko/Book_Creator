@@ -54,6 +54,8 @@ const enums: [string, readonly string[]][] = [
   ['TargetKind', c.SUBMIT_TARGET_KINDS],
   ['ErrorKind', c.PHOTO_DRAFT_ERROR_KINDS],
   ['BlockerKind', c.SUBMIT_BLOCKER_KINDS],
+  ['PassModelStatus', c.PASS_MODEL_STATUSES],
+  ['AiPass', c.AI_PASSES],
 ];
 for (const [def, values] of enums) {
   t(`${def} збігається`, same(defs[def]?.enum ?? [], values), `схема: ${JSON.stringify(defs[def]?.enum)}`);

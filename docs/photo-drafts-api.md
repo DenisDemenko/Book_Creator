@@ -1,4 +1,4 @@
-# API «чернеток за фото» (Studio ↔ GrabFusion), контракт 1.3.0
+# API «чернеток за фото» (Studio ↔ GrabFusion), контракт 1.4.0
 
 Крок A0 плану `docs/proposals/GRABFUSION_PHOTO_COURSE_APP_2026-10-28.md`. Цей опис, типи
 `shared/photoDraftContract.ts`, схема `docs/photo-drafts-api/schema.json` (JSON Schema draft-07) і
@@ -96,6 +96,7 @@ B (Python-сервіс GrabFusion). Їхню узгодженість перев
 | `PUT /photo-drafts/:draftId/photos/:photoId/text` | 5 | 200 | `put-photo-text` |
 | `POST /photo-drafts/:draftId/structure` | 3 | 202 | `structure-running` |
 | `POST /photo-drafts/:draftId/modules/:moduleId/generate` | 3 | 202 | `generate-running` |
+| `GET /photo-drafts/:draftId/ai-options` | 3 | 200 | `ai-options` |
 | `POST /photo-drafts/:draftId/submit` | 3 | 201 | `submit-course`, `submit-instruction`, `submit-book`, `submit-manuscript` |
 
 Подробиці:
@@ -142,17 +143,33 @@ B (Python-сервіс GrabFusion). Їхню узгодженість перев
 - **`POST …/structure`** (прохід 2) — розкласти кадри на модулі й уроки. Тіло необовʼязкове:
   `{ "replace": true }`. Відповідь `202 { draft }` з `job: { kind: "structure", status: "running" }`;
   після завершення `job` стає `null`, а `status` — `structured`. Поки триває робота, інші довгі
-  запити → `409 job_running`. Кадри ще описуються або їх немає → `409 wrong_status`. Структура вже
+  запити → `409 job_running`. Модель — `{ "modelId": "…" }` із `GET …/ai-options` (з 1.4.0; без неї —
+  `defaultModelId`; недоступна → `400 bad_input`). Бали за прохід резервуються ДО запуску: не вистачає
+  → `402 ai_budget_exceeded`; списується фактична вартість, збій повертає резерв.
+  Кадри ще описуються або їх немає → `409 wrong_status`. Структура вже
   є → `409 wrong_status`, доки не передано `replace: true` (тоді її й припущення буде замінено, а
   правки викладача в ній втрачено). ШІ повертає й `assumptions` (усі `open`); якщо в чернетки не
   було назви, ШІ пропонує її. Кадр, якого модель не розмістила, сервер кладе до уроку попереднього
   за порядком кадру: кожен кадр завжди в рівно одному уроці. Кадри, додані чи прибрані під час
   роботи, враховуються при її завершенні.
 - **`POST …/modules/:moduleId/generate`** (прохід 3) — написати текст одного модуля (`404
-  module_not_found`; без структури `409 wrong_status`). ШІ пише `body`, а за потреби й `goal` та
+  module_not_found`; без структури `409 wrong_status`). Тіло необовʼязкове: `{ "modelId": "…" }`, правила
+  й оплата ті самі, що для `structure` (з 1.4.0). ШІ пише `body`, а за потреби й `goal` та
   `topics` лише в тих полях, які викладач не правив (поле, яке він змінив, лишається його, а `aiFields`
   показує, що саме від ШІ). Може додати нові `open`-припущення. Коли написано всі модулі, `status`
   стає `written`; стерти текст уроку через PATCH — значить повернути модуль у «не написано».
+- **`GET …/ai-options`** (з 1.4.0) — які моделі можна обрати для проходів 2–3 і скільки це коштуватиме в
+  балах. Запит `?pass=structure` (типово) або `?pass=generate&moduleId=…` (`404 module_not_found`,
+  якщо модуля немає). Відповідь `{ pass, moduleId, defaultModelId, models[], balance, unlimited,
+  checkedAt }`. Кожна модель — `{ modelId, label, provider, status, usable, note, credits }`: Studio
+  звіряє ключі, які адміністратор ввів у «Ключах API» (або змінну оточення), і одним дешевим запитом
+  перевіряє, що ключ дійсний і на ньому є кошти (результат у кеші 5 хв, `checkedAt` — коли). `usable`
+  — модель можна обрати (`ok` або `busy`: перевантажена зараз, Studio спробує запасну); `note` — пояснення,
+  чому не `ok` (`no_key`, `key_rejected`, `no_funds`, `model_missing`, `price_unknown`). `credits` —
+  `{ expected, max }`: очікувані бали й верхня межа резерву, порахована за тарифом моделі з
+  адмінки та розміром цієї чернетки; `null` — ціну моделі не звірено. `balance` — доступні бали
+  автора; `unlimited: true` (`balance: null`) — бали не списуються (адміністратор, облік вимкнено).
+  Дані не змінюються, роль без дозволу на ШІ → `403 forbidden`.
 - **`POST …/submit`** — перевірка якості, потім створення результату. Відповідь
   `201 { draft, target }`. Якщо щось заважає — `400 submit_blocked` з переліком `blockers[]`
   (`no_photos`, `photos_processing`, `photos_failed`, `no_structure`, `module_not_written`,
@@ -213,7 +230,7 @@ AI-чернеткою). Скани у «Вхідних» (`GET /api/scans/inbox`
 | `too_many_drafts` | 409 | Понад `maxOpenDrafts` |
 | `rate_limited` | 429 | Понад `photosPerHour` |
 | `quota_exceeded` | 402 | Вичерпано сховище тарифу |
-| `ai_budget_exceeded` | 402 | Вичерпано ліміт ШІ-витрат тарифу викладача (прохід ШІ оплачується з його тарифу) |
+| `ai_budget_exceeded` | 402 | Вичерпано ліміт ШІ-витрат тарифу викладача або (з 1.4.0, проходи 2–3) бракує балів для проходу |
 | `draft_not_found` | 404 | Чернетки немає або вона чужа |
 | `photo_not_found` | 404 | Кадру немає в цій чернетці |
 | `note_not_found` | 404 | Опису немає |
@@ -245,6 +262,7 @@ B просить A коментарем у документі плану.
 
 | Версія | Дата | Зміна |
 |---|---|---|
+| 1.4.0 | 2026-11-09 | Вибір моделі й бали за проходи 2–3: новий `GET …/ai-options`, необовʼязкове `modelId` у `POST …/structure` і `…/generate` (нове необовʼязкове тіло), бали резервуються до запуску й списуються за фактичною вартістю; нових `kind` помилок немає (недоступна модель → `bad_input`, бракує балів → `ai_budget_exceeded`) |
 | 1.3.0 | 2026-10-28 | A5: `kind: manuscript` («Набір книги»): сторінки розпізнаються дослівно (`photo.text`, `textEdited`), нові `newBookTitle`, `PUT …/photos/:photoId/text`, `note` у тілі додавання фото, `bookId` у PATCH рукопису, межі `maxManuscriptPages` / `manuscriptPagesPerHour` / `maxPageTextChars`, блокер `empty_page`; відправка — пакетом у «Вхідні» (`batchId` / `batchOrder` / `batchBookTitle`). Лише додавання |
 | 1.2.0 | 2026-10-28 | A4: для `kind: instruction` — `instructionMode` (`assembly` / `operation`) і `modelCode` у чернетці, при створенні й у PATCH; відправка інструкції дає готову пропозицію кроків у майстрі технічних інструкцій. Лише додавання |
 | 1.1.0 | 2026-10-28 | A2: `POST …/structure` приймає необовʼязкове `{ replace }`; описано поведінку проходів 2–3, відправки (курс / експрес-чернетка / «Вхідні»), завислих робіт. Лише додавання |

@@ -203,6 +203,48 @@ class Limits:
 
 
 @dataclass
+class PassCredits:
+    expected: int
+    max: int
+
+
+@dataclass
+class PassModelOption:
+    """Модель для проходів 2–3 (контракт 1.4.0). `usable` — її можна обрати; `credits` — бали за прохід."""
+    modelId: str
+    label: str
+    provider: str
+    status: str  # ok | busy | no_key | key_rejected | no_funds | model_missing | price_unknown
+    usable: bool
+    note: str | None = None
+    credits: PassCredits | None = None
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "PassModelOption":
+        cr = d.get("credits")
+        return _build(cls, d, credits=PassCredits(int(cr["expected"]), int(cr["max"])) if cr else None)
+
+
+@dataclass
+class AiOptions:
+    """Відповідь `GET …/ai-options`: що можна обрати й скільки це коштує в балах."""
+    pass_name: str  # у JSON — "pass"
+    moduleId: str | None
+    defaultModelId: str | None
+    models: list[PassModelOption]
+    balance: int | None
+    unlimited: bool
+    checkedAt: str
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "AiOptions":
+        return cls(
+            pass_name=d["pass"], moduleId=d.get("moduleId"), defaultModelId=d.get("defaultModelId"),
+            models=[PassModelOption.from_dict(m) for m in d.get("models", [])],
+            balance=d.get("balance"), unlimited=bool(d.get("unlimited")), checkedAt=d.get("checkedAt", ""))
+
+
+@dataclass
 class PhotoResult:
     photo: Photo
     revision: int

@@ -63,6 +63,7 @@ ROUTES: list[Route] = [
     _r("PUT", "/photo-drafts/:draftId/photos/:photoId/text", 200, "put-photo-text"),
     _r("POST", "/photo-drafts/:draftId/structure", 202, "structure-running"),
     _r("POST", "/photo-drafts/:draftId/modules/:moduleId/generate", 202, "generate-running"),
+    _r("GET", "/photo-drafts/:draftId/ai-options", 200, "ai-options"),
     _r("POST", "/photo-drafts/:draftId/submit", 201, "submit-course"),
 ]
 
@@ -198,6 +199,9 @@ def create_app(*, stateful: bool = False, poll_interval_ms: int | None = None) -
                 bad = _check_photo_body(body, limits)
                 if bad:
                     return bad
+            if route.name.endswith("/ai-options"):
+                params = {**params, "q_pass": request.query_params.get("pass", "structure"),
+                          "q_moduleId": request.query_params.get("moduleId", "")}
             res = sim.handle(route.name, params, body)
             if res is not None:
                 app.state.calls.append((route.name, "sim"))

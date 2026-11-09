@@ -1,4 +1,4 @@
-"""Клієнт API Studio `/api/external/v1/photo-drafts*` (контракт 1.3.0).
+"""Клієнт API Studio `/api/external/v1/photo-drafts*` (контракт 1.4.0).
 
 Синхронний (httpx). Токен тримає сервер GrabFusion. Розгалужуватись слід лише за `StudioError.kind`.
 """
@@ -10,7 +10,7 @@ from typing import Any, Callable
 import httpx
 
 from .errors import StudioError
-from .models import (Draft, DraftSummary, Limits, Note, NoteResult, Photo, PhotoResult,
+from .models import (AiOptions, Draft, DraftSummary, Limits, Note, NoteResult, Photo, PhotoResult,
                      SubmitResult, Target)
 
 _UNSET: Any = object()
@@ -42,8 +42,8 @@ class StudioClient:
         self.close()
 
     # --- низький рівень -------------------------------------------------
-    def _request(self, method: str, path: str, *, json: Any = None) -> Any:
-        resp = self._http.request(method, path, json=json)
+    def _request(self, method: str, path: str, *, json: Any = None, params: dict[str, str] | None = None) -> Any:
+        resp = self._http.request(method, path, json=json, params=params)
         return self._parse(resp)
 
     @staticmethod
@@ -56,9 +56,9 @@ class StudioClient:
             raise StudioError.from_response(resp.status_code, body)
         return body
 
-    def raw(self, method: str, path: str, *, json: Any = None) -> Any:
+    def raw(self, method: str, path: str, *, json: Any = None, params: dict[str, str] | None = None) -> Any:
         """Сире тіло відповіді (для проксі: не губить поля, яких ще не знає модель)."""
-        return self._request(method, path, json=json)
+        return self._request(method, path, json=json, params=params)
 
     # --- межі -----------------------------------------------------------
     def limits(self, *, refresh: bool = False) -> Limits:
@@ -147,13 +147,19 @@ class StudioClient:
         return Draft.from_dict(self._request("DELETE", f"/photo-drafts/{draft_id}/notes/{note_id}")["draft"])
 
     # --- проходи ШІ і відправка ----------------------------------------
-    def structure(self, draft_id: str, *, replace: bool = False) -> Draft:
-        body = {"replace": True} if replace else None
-        return Draft.from_dict(self._request("POST", f"/photo-drafts/{draft_id}/structure", json=body)["draft"])
+    def ai_options(self, draft_id: str, *, pass_name: str = "structure", module_id: str | None = None) -> AiOptions:
+        """Які моделі можна обрати для проходу й скільки це коштує в балах (з 1.4.0)."""
+        params = {"pass": pass_name, **({"moduleId": module_id} if module_id else {})}
+        return AiOptions.from_dict(self._request("GET", f"/photo-drafts/{draft_id}/ai-options", params=params))
 
-    def generate_module(self, draft_id: str, module_id: str) -> Draft:
+    def structure(self, draft_id: str, *, replace: bool = False, model_id: str | None = None) -> Draft:
+        body: dict[str, Any] = {**({"replace": True} if replace else {}), **({"modelId": model_id} if model_id else {})}
+        return Draft.from_dict(self._request("POST", f"/photo-drafts/{draft_id}/structure", json=body or None)["draft"])
+
+    def generate_module(self, draft_id: str, module_id: str, *, model_id: str | None = None) -> Draft:
+        body = {"modelId": model_id} if model_id else None
         return Draft.from_dict(
-            self._request("POST", f"/photo-drafts/{draft_id}/modules/{module_id}/generate")["draft"])
+            self._request("POST", f"/photo-drafts/{draft_id}/modules/{module_id}/generate", json=body)["draft"])
 
     def submit(self, draft_id: str) -> SubmitResult:
         d = self._request("POST", f"/photo-drafts/{draft_id}/submit")

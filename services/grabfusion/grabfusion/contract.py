@@ -1,4 +1,4 @@
-"""Контракт Studio ↔ GrabFusion (1.3.0): схема, фікстури, межі, перевірка відповідей.
+"""Контракт Studio ↔ GrabFusion (1.4.0): схема, фікстури, межі, перевірка відповідей.
 
 Єдине джерело — docs/photo-drafts-api* у репозиторії Studio. Тут лежить знімок;
 оновлюється скриптом `scripts/sync_contract.py`.
@@ -74,6 +74,7 @@ FIXTURE_DEFINITIONS: dict[str, str] = {
     "add-photo": "PhotoResponse",
     "retry-photo": "PhotoResponse",
     "put-photo-text": "PhotoResponse",
+    "ai-options": "AiOptionsResponse",
     "put-note": "NoteResponse",
     "submit-course": "SubmitResponse",
     "submit-instruction": "SubmitResponse",

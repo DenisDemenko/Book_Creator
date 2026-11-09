@@ -8,6 +8,7 @@ const state = {
   view: 'boot', limits: null, drafts: [], draft: null, queue: [], user: null,
   online: navigator.onLine, urls: new Map(), editing: false, needsRender: false,
   studioOrigin: '', hint: '', writing: false, blockers: null, target: null, photosOpen: true,
+  ai: null, // вибір моделі ШІ й бали за прохід (контракт 1.4.0), див. loadAi
 };
 let pollTimer = null, flushing = false, flushTimer = null;
 
@@ -363,17 +364,145 @@ function confirmBtn(label, confirmLabel, fn, props) {
   return b;
 }
 
+/* ---------- вибір моделі ШІ й бали за прохід (контракт 1.4.0) ----------
+   Studio сама перевіряє ключі, які адмін ввів у «Ключах API», і рахує бали за тарифом моделі з адмінки.
+   Тут — лише показ: що можна обрати, скільки це коштує й чи вистачить балів. Рішення (резерв, списання) ухвалює Studio. */
+const AI_MODEL_KEY = 'gf_ai_model';
+const AI_REFRESH_MS = 4 * 60 * 1000; // Studio кешує перевірку ключів на 5 хв
+let aiSeq = 0;
+function aiPlan(d) {
+  const plan = [];
+  const words = d.kind === 'instruction' ? { s: 'Розкласти на кроки', w: 'Написати кроки' } : { s: 'Розкласти на уроки', w: 'Написати уроки' };
+  const left = d.structure ? d.structure.modules.filter((m) => !m.written).map((m) => m.moduleId) : [];
+  if (!d.structure || d.status === 'collecting') plan.push({ id: 'structure', label: words.s, pass: 'structure', moduleIds: [] });
+  else {
+    if (d.status !== 'written' && left.length) plan.push({ id: 'generate', label: words.w, pass: 'generate', moduleIds: left });
+    plan.push({ id: 'restructure', label: 'Розкласти заново', pass: 'structure', moduleIds: [], secondary: true });
+  }
+  return plan;
+}
+const aiKey = (d, plan) => [d.draftId, d.photos.length, plan.map((p) => p.id + ':' + p.moduleIds.join(',')).join(';')].join('|');
+const aiStored = () => { try { return localStorage.getItem(AI_MODEL_KEY) || ''; } catch (e) { return ''; } };
+const aiRemember = (id) => { try { localStorage.setItem(AI_MODEL_KEY, id); } catch (e) { /* без сховища — не критично */ } };
+
+/* Бали за позицію плану для моделі: сума по модулях; null, якщо ціну хоч одного не звірено. */
+function aiCost(ai, itemId, modelId) {
+  const parts = (ai.costs[itemId] || []).map((m) => m[modelId]);
+  if (!parts.length || parts.some((c) => !c)) return null;
+  return { expected: parts.reduce((a, c) => a + c.expected, 0), max: parts.reduce((a, c) => a + c.max, 0) };
+}
+
+async function loadAi(d) {
+  const plan = aiPlan(d), key = aiKey(d, plan), seq = ++aiSeq;
+  const prev = state.ai && state.ai.key === key ? state.ai : null;
+  state.ai = prev ? { ...prev, loading: true } : { key, status: 'loading', loading: true, models: [], costs: {}, modelId: '', balance: null, unlimited: false, at: 0 };
+  try {
+    const jobs = plan.flatMap((it) => (it.pass === 'structure' ? [''] : it.moduleIds).map((mid) => ({
+      it, path: `/drafts/${d.draftId}/ai-options?pass=${it.pass}` + (mid ? '&moduleId=' + encodeURIComponent(mid) : '') })));
+    const replies = await Promise.all(jobs.map((j) => api('GET', j.path)));
+    if (seq !== aiSeq) return;
+    const first = replies[0];
+    const costs = {};
+    replies.forEach((r, i) => {
+      const map = {}; for (const m of r.models) map[m.modelId] = m.credits;
+      (costs[jobs[i].it.id] = costs[jobs[i].it.id] || []).push(map);
+    });
+    const usable = first.models.filter((m) => m.usable);
+    const keep = state.ai && state.ai.modelId, saved = aiStored();
+    const modelId = [keep, saved, first.defaultModelId].find((id) => id && usable.some((m) => m.modelId === id)) || (usable[0] && usable[0].modelId) || '';
+    state.ai = { key, status: 'ready', loading: false, models: first.models, costs, modelId, balance: first.balance, unlimited: first.unlimited, at: Date.now() };
+  } catch (e) {
+    if (seq !== aiSeq) return;
+    state.ai = { key, status: 'error', loading: false, models: [], costs: {}, modelId: '', balance: null, unlimited: false, at: Date.now(), message: e.message };
+  }
+  if (state.view === 'draft') render();
+}
+/* Викликається з перемальовування: зайвих запитів нема, поки ключ плану той самий і дані свіжі. */
+function ensureAi(d) {
+  const plan = aiPlan(d), key = aiKey(d, plan), ai = state.ai;
+  if (d.job && d.job.status === 'running') return;
+  if (ai && ai.key === key && (ai.loading || Date.now() - ai.at < AI_REFRESH_MS)) return;
+  loadAi(d);
+}
+/* Чому запуск заблоковано (текст для людини) або '' — можна запускати. Поки перевірка триває — теж блок. */
+function aiBlock(d) {
+  const plan = aiPlan(d).filter((p) => !p.secondary);
+  if (!plan.length) return '';
+  const ai = state.ai;
+  if (!ai || ai.key !== aiKey(d, aiPlan(d)) || ai.status === 'loading') return 'Перевіряю доступні моделі ШІ…';
+  if (ai.status === 'error') return ''; // Studio сама вирішить: запуск піде на її типовій моделі
+  const usable = ai.models.filter((m) => m.usable);
+  if (!usable.length) return 'Жодна модель ШІ зараз недоступна.';
+  const c = aiCost(ai, plan[0].id, ai.modelId);
+  if (!ai.unlimited && c && ai.balance != null && ai.balance < c.max) return `Не вистачає балів: потрібно до ${c.max}, на балансі ${ai.balance}.`;
+  return '';
+}
+const aiBody = (extra) => {
+  const ai = state.ai;
+  const body = { ...(extra || {}), ...(ai && ai.status === 'ready' && ai.modelId ? { modelId: ai.modelId } : {}) };
+  return Object.keys(body).length ? body : undefined;
+};
+const plural = (n, one, few, many) => { const a = Math.abs(n) % 100, b = a % 10; return a > 10 && a < 20 ? many : b === 1 ? one : b > 1 && b < 5 ? few : many; };
+const credits = (n) => `${n} ${plural(n, 'бал', 'бали', 'балів')}`;
+
+function viewAiPicker(d) {
+  const plan = aiPlan(d), main = plan.find((p) => !p.secondary);
+  if (!main) return null;
+  const ai = state.ai, box = h('div', { class: 'ai-pick', id: 'ai-pick' });
+  if (!ai || ai.key !== aiKey(d, plan) || (ai.status === 'loading')) { box.append(h('p', { class: 'muted', id: 'ai-loading', text: 'Перевіряю доступні моделі ШІ…' })); return box; }
+  if (ai.status === 'error') {
+    box.append(h('p', { class: 'muted', id: 'ai-error', text: 'Не вдалося перевірити моделі ШІ — запуск піде на типовій моделі Studio.' }),
+      h('button', { class: 'small', id: 'btn-ai-retry', text: 'Перевірити ще раз', onclick: () => loadAi(state.draft) }));
+    return box;
+  }
+  const usable = ai.models.filter((m) => m.usable);
+  if (!usable.length) {
+    const why = [...new Set(ai.models.map((m) => m.note).filter(Boolean))];
+    box.append(h('p', { class: 'err', id: 'ai-none', text: 'Жодна модель ШІ зараз недоступна — запуск неможливий.' }),
+      why.length ? h('p', { class: 'muted', text: why.slice(0, 3).join(' ') }) : null,
+      h('p', { class: 'muted', text: 'Зверніться до адміністратора Studio: у розділі «Ключі API» потрібен дійсний ключ із коштами.' }),
+      h('button', { class: 'small', id: 'btn-ai-retry', text: 'Перевірити ще раз', onclick: () => loadAi(state.draft) }));
+    return box;
+  }
+  const sel = h('select', { id: 'ai-model', 'aria-label': 'Модель ШІ' });
+  for (const m of usable) {
+    const c = aiCost(ai, main.id, m.modelId);
+    sel.append(h('option', { value: m.modelId, text: m.label + (c ? ` — ≈ ${credits(c.expected)}` : '') + (m.status === 'busy' ? ' (зайнята)' : '') }));
+  }
+  sel.value = ai.modelId;
+  sel.addEventListener('change', () => { ai.modelId = sel.value; aiRemember(sel.value); render(); });
+  box.append(h('label', { for: 'ai-model', text: 'Модель ШІ' }), sel);
+  const chosen = usable.find((m) => m.modelId === ai.modelId);
+  const c = aiCost(ai, main.id, ai.modelId);
+  if (c) {
+    // Адміністратор бали не витрачає, але вартість бачить: так її можна звірити з тарифами адмінки.
+    box.append(h('p', { class: 'ai-cost', id: 'ai-cost' },
+      main.label + ': ', h('strong', { text: '≈ ' + credits(c.expected) }),
+      ai.unlimited ? ' — для вашого облікового запису бали не списуються'
+        : (c.max > c.expected ? ` (резерв до ${c.max}, зайве повернеться)` : '') + (ai.balance != null ? ` · на балансі ${ai.balance}` : '')));
+  } else if (ai.unlimited) box.append(h('p', { class: 'ai-cost', id: 'ai-cost', text: 'Для вашого облікового запису бали за цей прохід не списуються.' }));
+  const low = !ai.unlimited && c && ai.balance != null && ai.balance < c.max;
+  if (low) box.append(h('p', { class: 'err', id: 'ai-low', text: `Не вистачає балів: потрібно до ${c.max}, на балансі ${ai.balance}. Поповніть підпискою у Studio.` }));
+  if (chosen && chosen.status === 'busy') box.append(h('p', { class: 'muted', id: 'ai-busy', text: (chosen.note || 'Модель зараз перевантажена.') + (usable.length > 1 ? ' Можна обрати іншу.' : '') }));
+  const again = plan.find((p) => p.secondary), ac = again && aiCost(ai, again.id, ai.modelId);
+  if (ac) box.append(h('p', { class: 'muted', id: 'ai-cost-again', text: `${again.label}: ≈ ${credits(ac.expected)}` }));
+  return box;
+}
+
 function viewActions(d, mine) {
   const box = h('div', { class: 'card', id: 'actions' });
   const job = d.job;
   const running = !!(job && job.status === 'running');
   const photosBusy = d.photos.some((p) => p.status === 'processing');
   const unsent = mine.length > 0;
-  const lock = running || state.writing || photosBusy || unsent || !d.photos.length;
+  ensureAi(d);
+  const aiWhy = !running && d.photos.length ? aiBlock(d) : '';
+  const lock = running || state.writing || photosBusy || unsent || !d.photos.length || !!aiWhy;
   if (running) box.append(h('p', { class: 'row', id: 'job-banner' }, h('span', { class: 'badge processing', text: 'працює' }), h('span', { text: (JOB_TEXT[job.kind] || 'ШІ працює…') + (job.moduleId ? ' ' + moduleTitle(d, job.moduleId) : '') })));
   if (job && job.status === 'failed') box.append(h('p', { class: 'err', id: 'job-error', text: job.error || 'Фонова робота не вдалася. Спробуйте ще раз.' }));
   if (!d.photos.length) box.append(h('p', { class: 'muted', text: 'Спершу додайте кадри.' }));
   else if (photosBusy || unsent) box.append(h('p', { class: 'muted', text: unsent ? 'Дочекайтесь, поки всі кадри надішлються.' : 'Кадри ще описуються…' }));
+  if (!running && d.photos.length) { const pick = viewAiPicker(d); if (pick) box.append(pick); }
   const row = h('div', { class: 'row' });
   const mods = d.structure ? d.structure.modules : [];
   const left = mods.filter((m) => !m.written);
@@ -417,8 +546,9 @@ async function runJob(startFn) {
 async function doStructure(replace) {
   const id = state.draft.draftId;
   state.writing = true; render();
-  try { await runJob(() => api('POST', `/drafts/${id}/structure`, replace ? { replace: true } : undefined)); }
-  finally { state.writing = false; render(); }
+  const body = aiBody(replace ? { replace: true } : undefined);
+  try { await runJob(() => api('POST', `/drafts/${id}/structure`, body)); }
+  finally { state.writing = false; state.ai = null; render(); }
 }
 async function writeModules(ids) {
   if (state.writing) return;
@@ -426,9 +556,10 @@ async function writeModules(ids) {
   try {
     for (const mid of ids) {
       const id = state.draft.draftId;
-      if (!(await runJob(() => api('POST', `/drafts/${id}/modules/${mid}/generate`)))) break;
+      const body = aiBody();
+      if (!(await runJob(() => api('POST', `/drafts/${id}/modules/${mid}/generate`, body)))) break;
     }
-  } finally { state.writing = false; render(); }
+  } finally { state.writing = false; state.ai = null; render(); }
 }
 async function doSubmit() {
   state.blockers = null;

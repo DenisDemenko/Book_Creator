@@ -216,6 +216,28 @@ def test_stage3_proxy_structure_generate_submit_against_sim(sim_url):
     assert c.post(f"/api/drafts/{did}/modules/zzz/generate").json()["kind"] in {"job_running", "module_not_found"}
 
 
+def test_ai_options_and_model_choice_proxy_against_sim(sim_url):
+    c = TestClient(create_app(Settings(studio_url=sim_url + PREFIX), store=SessionStore(":memory:")))
+    assert c.get("/api/drafts/pd_x/ai-options").status_code == 401  # без сесії
+    c.post("/api/pair", json={"code": "ok"})
+    did = c.post("/api/drafts", json={"kind": "instruction", "title": "Т"}).json()["draft"]["draftId"]
+    c.post(f"/api/drafts/{did}/photos", data={"clientId": "a"}, files={"file": ("p.jpg", jpeg(), "image/jpeg")})
+    c.get(f"/api/drafts/{did}")
+    o = c.get(f"/api/drafts/{did}/ai-options").json()
+    contract.validate("AiOptionsResponse", o)
+    assert o["pass"] == "structure" and o["defaultModelId"] and any(m["usable"] for m in o["models"])
+    assert c.get(f"/api/drafts/{did}/ai-options?pass=generate&moduleId=zzz").json()["kind"] == "module_not_found"
+    bad = c.post(f"/api/drafts/{did}/structure", json={"modelId": "nope"})
+    assert bad.status_code == 400 and bad.json()["kind"] == "bad_input"
+    ok = c.post(f"/api/drafts/{did}/structure", json={"modelId": o["defaultModelId"]})
+    assert ok.status_code == 202 and ok.json()["draft"]["job"]["status"] == "running"
+    for _ in range(4):
+        d = c.get(f"/api/drafts/{did}").json()["draft"]
+    mid = d["structure"]["modules"][0]["moduleId"]
+    assert c.post(f"/api/drafts/{did}/modules/{mid}/generate", json={"modelId": "nope"}).json()["kind"] == "bad_input"
+    assert c.post(f"/api/drafts/{did}/modules/{mid}/generate", json={"modelId": o["defaultModelId"]}).status_code == 202
+
+
 def test_page_text_proxy_against_sim(sim_url):
     c = TestClient(create_app(Settings(studio_url=sim_url + PREFIX), store=SessionStore(":memory:")))
     c.post("/api/pair", json={"code": "ok"})

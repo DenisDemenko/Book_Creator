@@ -258,3 +258,47 @@ def test_stateful_mock_serves_back_the_uploaded_image(api):
     pid = r["photo"]["photoId"]
     resp = api.client.get(PREFIX + f"/photo-drafts/{did}/photos/{pid}/image", headers=H)
     assert resp.status_code == 200 and Image.open(io.BytesIO(resp.content)).size == (64, 48)
+
+
+def test_ai_options_scale_with_draft_and_follow_schema(api):
+    small, big = _new(api, photos=2), _new(api, photos=12)
+    a = api.call("GET", f"/photo-drafts/{small}/ai-options", expect=200, schema="AiOptionsResponse")
+    b = api.call("GET", f"/photo-drafts/{big}/ai-options", expect=200, schema="AiOptionsResponse")
+    pick = lambda o: next(m for m in o["models"] if m["usable"] and m["credits"])["credits"]["expected"]  # noqa: E731
+    assert pick(b) > pick(a) and a["pass"] == "structure" and a["moduleId"] is None
+    assert api.call("GET", f"/photo-drafts/{small}/ai-options?pass=bogus", expect=400)["kind"] == "bad_input"
+    assert api.call("GET", f"/photo-drafts/{small}/ai-options?pass=generate&moduleId=m-9", expect=404)["kind"] == "module_not_found"
+
+
+def test_ai_options_for_generate_after_structure(api):
+    did = _new(api, title="Ложка")
+    api.call("POST", f"/photo-drafts/{did}/structure", expect=202)
+    for _ in range(5):
+        d = api.draft(did)
+        if not d["job"]:
+            break
+    mid = d["structure"]["modules"][0]["moduleId"]
+    o = api.call("GET", f"/photo-drafts/{did}/ai-options?pass=generate&moduleId={mid}", expect=200, schema="AiOptionsResponse")
+    assert o["pass"] == "generate" and o["moduleId"] == mid
+
+
+def test_ai_options_unavailable_for_manuscript(api):
+    did = _new(api, kind="manuscript", photos=1, title="Гл", newBookTitle="К")
+    assert api.call("GET", f"/photo-drafts/{did}/ai-options", expect=409)["kind"] == "wrong_status"
+
+
+def test_structure_and_generate_validate_model_id(api):
+    did = _new(api, title="Ложка")
+    assert api.call("POST", f"/photo-drafts/{did}/structure", {"modelId": 5}, expect=400)["kind"] == "bad_input"
+    assert api.call("POST", f"/photo-drafts/{did}/structure", {"modelId": "nope"}, expect=400)["kind"] == "bad_input"
+    closed = next(m for m in contract.load_fixture("ai-options")["models"] if not m["usable"])
+    err = api.call("POST", f"/photo-drafts/{did}/structure", {"modelId": closed["modelId"]}, expect=400)
+    assert closed["note"] in err["error"]
+    api.call("POST", f"/photo-drafts/{did}/structure", {"modelId": "claude-sonnet-5"}, expect=202, schema="DraftResponse")
+    for _ in range(5):
+        d = api.draft(did)
+        if not d["job"]:
+            break
+    mid = d["structure"]["modules"][0]["moduleId"]
+    assert api.call("POST", f"/photo-drafts/{did}/modules/{mid}/generate", {"modelId": "nope"}, expect=400)["kind"] == "bad_input"
+    api.call("POST", f"/photo-drafts/{did}/modules/{mid}/generate", {"modelId": "claude-sonnet-5"}, expect=202, schema="DraftResponse")

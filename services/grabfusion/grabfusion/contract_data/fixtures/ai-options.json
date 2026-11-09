@@ -1,0 +1,43 @@
+{
+  "pass": "structure",
+  "moduleId": null,
+  "defaultModelId": "claude-sonnet-5",
+  "models": [
+    {
+      "modelId": "gemini-3.7-flash",
+      "label": "Gemini 3.7 Flash",
+      "provider": "Google",
+      "status": "busy",
+      "usable": true,
+      "note": "Модель зараз перевантажена — Studio спробує запасну.",
+      "credits": {
+        "expected": 9,
+        "max": 14
+      }
+    },
+    {
+      "modelId": "claude-sonnet-5",
+      "label": "Claude Sonnet 5",
+      "provider": "Anthropic",
+      "status": "ok",
+      "usable": true,
+      "note": null,
+      "credits": {
+        "expected": 31,
+        "max": 47
+      }
+    },
+    {
+      "modelId": "gpt-5.5",
+      "label": "GPT-5.5",
+      "provider": "OpenAI",
+      "status": "no_key",
+      "usable": false,
+      "note": "Ключ не введено в адмінці Studio.",
+      "credits": null
+    }
+  ],
+  "balance": 270,
+  "unlimited": false,
+  "checkedAt": "2026-11-09T16:00:00.000Z"
+}

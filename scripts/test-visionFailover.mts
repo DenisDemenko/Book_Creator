@@ -97,6 +97,22 @@ const upstream = (status: number, msg = 'x') => new providers.ChatProviderError(
   t('кожна спроба має ліміт часу, а Gemini — thinkingLevel low', h.calls[0].generation.timeoutMs === 30_000 && h.calls[0].generation.thinkingLevel === 'low');
   t('повтори головної вимкнено, коли є запасні', h.calls[0].generation.transientRetries === 0);
 }
+// Текстові проходи чернеток (журнал #530): без вимоги зору, зі своїми лімітами й тегом логу.
+{
+  const h = harness({ 'gemini-3.7-flash': [timeout()] }, { supportsVision: () => false });
+  const out = await h.run({ requireVision: false, logTag: 'photo-pass', fallbackModels: ['fb-1'], timeoutMs: 75_000, lastTimeoutMs: 170_000, baseGeneration: { temperature: 0.4, maxTokens: 8192 } });
+  t('requireVision=false: модель без зору — не відмова й не відсів із запасних', out.modelId === 'fb-1' && h.calls.length === 2);
+  t('ліміт часу: перша — ранній, остання — повний', h.calls[0].generation.timeoutMs === 75_000 && h.calls[1].generation.timeoutMs === 170_000, JSON.stringify(h.calls.map((c) => c.generation.timeoutMs)));
+  t('температура й стеля токенів ідуть у кожну спробу', h.calls.every((c) => c.generation.temperature === 0.4 && c.generation.maxTokens === 8192));
+  t('тег у логу текстового проходу', h.warns.length > 0 && h.warns.every((w) => w.startsWith('[photo-pass]')), h.warns.join(' | '));
+  t('повертає токени — з них списуються бали', out.inputTokens === 1 && out.outputTokens === 1);
+}
+{
+  const h = harness({}, { supportsVision: () => false });
+  let thrown: any;
+  await h.run().catch((e) => (thrown = e));
+  t('за замовчуванням (зір) модель без зору й надалі відмовляє', /не бачить/.test(thrown?.message || '') && h.calls.length === 0, String(thrown?.message));
+}
 {
   const h = harness({ 'gemini-3.7-flash': [timeout()] });
   const out = await h.run();

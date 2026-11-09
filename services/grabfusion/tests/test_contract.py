@@ -14,8 +14,8 @@ def test_every_fixture_matches_schema(name):
 
 
 def test_version_and_fixture_count():
-    assert contract.contract_version() == "1.3.0"
-    assert len(contract.fixture_names()) == 28
+    assert contract.contract_version() == "1.4.0"
+    assert len(contract.fixture_names()) == 29
 
 
 def test_schema_rejects_broken_draft():
@@ -48,8 +48,8 @@ def test_all_non_error_fixtures_are_served_by_the_mock():
     assert non_error == served
 
 
-def test_route_table_covers_all_16_routes():
-    assert len(ROUTES) == 16
+def test_route_table_covers_all_17_routes():
+    assert len(ROUTES) == 17
 
 
 def test_note_chars_are_code_points():

@@ -12,7 +12,7 @@ from dataclasses import asdict
 from typing import Any, Callable
 
 import httpx
-from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
 
 from . import contract
@@ -161,9 +161,17 @@ def build_router(deps: Deps) -> APIRouter:
         body = await _json_body(request, optional=True)
         return call(s, lambda c: c.raw("POST", f"/photo-drafts/{draft_id}/structure", json=body or None))
 
+    @router.get("/drafts/{draft_id}/ai-options")
+    def ai_options(draft_id: str, pass_name: str = Query("structure", alias="pass"),
+                   moduleId: str | None = Query(None), s: Session = Depends(current)) -> Any:
+        params = {"pass": pass_name, **({"moduleId": moduleId} if moduleId else {})}
+        return call(s, lambda c: c.raw("GET", f"/photo-drafts/{draft_id}/ai-options", params=params))
+
     @router.post("/drafts/{draft_id}/modules/{module_id}/generate", status_code=202)
-    def generate(draft_id: str, module_id: str, s: Session = Depends(current)) -> Any:
-        return call(s, lambda c: c.raw("POST", f"/photo-drafts/{draft_id}/modules/{module_id}/generate"))
+    async def generate(draft_id: str, module_id: str, request: Request, s: Session = Depends(current)) -> Any:
+        body = await _json_body(request, optional=True)
+        return call(s, lambda c: c.raw("POST", f"/photo-drafts/{draft_id}/modules/{module_id}/generate",
+                                       json=body or None))
 
     @router.post("/drafts/{draft_id}/submit", status_code=201)
     def submit(draft_id: str, s: Session = Depends(current)) -> Any:

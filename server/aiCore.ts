@@ -36,6 +36,7 @@ import {
   ChatProviderError,
   PROVIDERS,
   resolveEngine as resolveChatEngine,
+  normalizeModelId,
   type EngineId as ChatEngineId,
   type GenerationOptions,
   type ImageAttachment,
@@ -71,6 +72,37 @@ export const geminiClient: GoogleGenAI | null = geminiApiKey
       httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
     })
   : null;
+
+/**
+ * Клієнти SDK за ключем, що прийшов у виклик (платформний ключ з «Ключів API» чи власний).
+ * Єдиний `geminiClient` вище бачить лише GEMINI_API_KEY із середовища, тож JSON-режим
+ * мовчки ігнорував ключ, який виклик уже розв'язав через resolveEngineKey (журнал #530).
+ */
+const geminiClientsByKey = new Map<string, GoogleGenAI>();
+const GEMINI_KEYED_CLIENTS_MAX = 8;
+
+function geminiSdkFor(apiKey?: string): GoogleGenAI | null {
+  const key = apiKey?.trim();
+  if (!key || key === geminiApiKey) return geminiClient;
+  let client = geminiClientsByKey.get(key);
+  if (!client) {
+    if (geminiClientsByKey.size >= GEMINI_KEYED_CLIENTS_MAX) {
+      const oldest = geminiClientsByKey.keys().next().value;
+      if (oldest !== undefined) geminiClientsByKey.delete(oldest);
+    }
+    client = new GoogleGenAI({ apiKey: key, httpOptions: { headers: { 'User-Agent': 'aistudio-build' } } });
+    geminiClientsByKey.set(key, client);
+  }
+  return client;
+}
+
+/** Відмова саме ключа (а не моделі чи мережі): 401/403 або текст провайдера про недійсний ключ. */
+function isKeyRejection(err: unknown): boolean {
+  const e = err as { status?: unknown; message?: unknown };
+  const status = Number(e?.status ?? 0);
+  if (status === 401 || status === 403) return true;
+  return /API_KEY_INVALID|api key not valid|invalid api key|api key expired/i.test(String(e?.message ?? ''));
+}
 
 export type AiTextEngine = ChatEngineId;
 export { resolveChatEngine as resolveTextEngine };
@@ -261,28 +293,48 @@ async function dispatchGeminiSdk(
   prompt: string,
   systemInstruction: string | undefined,
   json: boolean,
-  opts?: GenerationOptions
+  opts?: GenerationOptions,
+  target?: { apiKey?: string; modelId?: string; countThinking?: boolean }
 ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
-  if (!geminiClient) {
+  const model = target?.modelId?.trim() ? normalizeModelId(target.modelId) : GEMINI_MODEL;
+  const client = geminiSdkFor(target?.apiKey);
+  if (!client) {
     throw new Error('GEMINI_API_KEY is not configured on server.');
   }
-  const response = await geminiClient.models.generateContent({
-    model: GEMINI_MODEL,
-    contents: prompt,
-    config: {
-      systemInstruction:
-        systemInstruction || 'Ти — професійний український літературний редактор, сценарист та видавничий експерт.',
-      responseMimeType: json ? 'application/json' : undefined,
-      temperature: opts?.temperature ?? 0.7,
-      ...(opts?.maxTokens ? { maxOutputTokens: opts.maxTokens } : {}),
-      ...(opts?.signal ? { abortSignal: opts.signal } : {}),
-    },
-  });
+  const call = (sdk: GoogleGenAI) =>
+    sdk.models.generateContent({
+      model,
+      contents: prompt,
+      config: {
+        systemInstruction:
+          systemInstruction || 'Ти — професійний український літературний редактор, сценарист та видавничий експерт.',
+        responseMimeType: json ? 'application/json' : undefined,
+        temperature: opts?.temperature ?? 0.7,
+        ...(opts?.maxTokens ? { maxOutputTokens: opts.maxTokens } : {}),
+        ...(opts?.signal ? { abortSignal: opts.signal } : {}),
+      },
+    });
+  let response;
+  try {
+    response = await call(client);
+  } catch (err) {
+    // Ключ із запиту відхилено, а серверний ключ у середовищі є: до цієї правки саме він і
+    // працював, тож не відбираємо в викликів, які трималися на ньому. Причину лишаємо в логу.
+    if (client !== geminiClient && geminiClient && isKeyRejection(err)) {
+      console.warn(`[aiCore] ключ Gemini з запиту відхилено (${String((err as Error)?.message ?? err).slice(0, 120)}) — пробую серверний`);
+      response = await call(geminiClient);
+    } else {
+      throw err;
+    }
+  }
   const usage = response.usageMetadata;
   return {
     text: response.text || '',
     inputTokens: usage?.promptTokenCount || 0,
-    outputTokens: usage?.candidatesTokenCount || 0,
+    // Токени міркування Gemini 3.x тарифікуються як вихід, але в candidatesTokenCount їх немає:
+    // для викликів, оплачених балами (target.countThinking), без них собівартість занижувалась би в рази.
+    // Решта викликів лишається як була — їхній облік цією правкою не змінюється.
+    outputTokens: (usage?.candidatesTokenCount || 0) + (target?.countThinking ? usage?.thoughtsTokenCount || 0 : 0),
   };
 }
 
@@ -297,6 +349,13 @@ interface GenerateTextParams {
   json?: boolean;
   apiKeyOverride?: string;
   images?: ImageAttachment[];
+  /**
+   * true — грошовий ліміт тексту (checkChatQuota) не перевіряти: виклик уже оплачено балами за
+   * тарифом (проходи 2–3 чернеток за фото, журнал #530). Запис у журнал витрат лишається.
+   */
+  skipBudgetCheck?: boolean;
+  /** true — у `outputTokens` Gemini (JSON-режим) входять токени міркування: вони тарифікуються як вихід. */
+  countThinkingTokens?: boolean;
   req: any;
   label: string;
   bookId?: string;
@@ -422,7 +481,7 @@ export async function generateText(
   // вичерпано — відмова ДО виклику провайдера. Без користувача (внутрішні
   // виклики) і для адміна перевірка пропускається всередині checkChatQuota.
   const budgetPrincipal = p.req?.principal;
-  if (budgetPrincipal?.id && !budgetPrincipal.isGuest) {
+  if (budgetPrincipal?.id && !budgetPrincipal.isGuest && !p.skipBudgetCheck) {
     const budget = await checkChatQuota(String(budgetPrincipal.id), budgetPrincipal.role || 'writer');
     if (!budget.allowed) throw new ChatProviderError(402, budget.reasonUk || 'Вичерпано ліміт текстових AI-витрат.');
   }
@@ -437,7 +496,7 @@ export async function generateText(
         const opts: GenerationOptions | undefined =
           g || signal ? { temperature: g?.temperature, maxTokens: g?.maxTokens, thinkingLevel: g?.thinkingLevel, signal } : undefined;
         return p.engine === 'gemini' && p.json
-          ? dispatchGeminiSdk(p.prompt, systemInstruction, true, opts)
+          ? dispatchGeminiSdk(p.prompt, systemInstruction, true, opts, { apiKey: p.apiKeyOverride, modelId: p.modelId, countThinking: p.countThinkingTokens })
           : dispatch(p.engine, modelId, p.prompt, systemInstruction || '', p.apiKeyOverride, p.images, p.json, opts);
       });
       await logTextUsage(ctx, modelId, p.engine, result.inputTokens, result.outputTokens, true);
@@ -454,6 +513,11 @@ export async function generateText(
         // у бізнес-аналітиці й спотворював би статистику надійності.
         await logTextUsage(ctx, modelId, p.engine, 0, 0, false);
         if(p.privateContent)throw new Error('Приватний AI-виклик не завершено.');
+        // Людське повідомлення нижче ховає, ЩО саме сказав провайдер; для відмови ключа це
+        // єдиний слід у логах (журнал #530: «ключ недійсний» без жодного слова про причину).
+        if (isKeyRejection(err) || /not configured/i.test(String((err as Error)?.message ?? ''))) {
+          console.warn(`[aiCore] ${p.label}: ${p.engine}/${modelId} — ${String((err as Error)?.message ?? err).slice(0, 200)}`);
+        }
         throw humanizeAiError(err, p.engine);
       }
       console.warn(

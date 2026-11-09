@@ -169,10 +169,12 @@ class Sim:
             return 200, {"draft": copy.deepcopy(d)}
         if method == "PUT" and name.endswith("/text"):
             return self._put_text(d, params["photoId"], body)
+        if method == "GET" and name.endswith("/ai-options"):
+            return self._ai_options(d, params.get("q_pass", "structure"), params.get("q_moduleId", ""))
         if method == "POST" and name.endswith("/structure"):
             return self._structure(d, body)
         if method == "POST" and name.endswith("/generate"):
-            return self._generate(d, params["moduleId"])
+            return self._generate(d, params["moduleId"], body)
         if method == "POST" and name.endswith("/submit"):
             return self._submit(d)
         return None
@@ -368,9 +370,47 @@ class Sim:
         self._bump(d)
         return 200, {"note": copy.deepcopy(n), "revision": d["revision"]}
 
+    @staticmethod
+    def _check_model(body: Any) -> Result | None:
+        """modelId із тіла проходу: рядок із придатних моделей фікстури `ai-options`."""
+        if not isinstance(body, dict) or body.get("modelId") is None:
+            return None
+        wanted = body["modelId"]
+        if not isinstance(wanted, str):
+            return _err(400, "bad_input", "modelId — рядок.")
+        models = {m["modelId"]: m for m in contract.load_fixture("ai-options")["models"]}
+        if wanted not in models:
+            return _err(400, "bad_input", "Невідома модель. Оберіть одну з GET …/ai-options.")
+        if not models[wanted]["usable"]:
+            return _err(400, "bad_input", f"Модель «{models[wanted]['label']}» недоступна: {models[wanted]['note']}")
+        return None
+
+    def _ai_options(self, d: dict[str, Any], pass_name: str, module_id: str) -> Result:
+        if d["kind"] == "manuscript":
+            return _err(409, "wrong_status", "Для рукопису проходів 2–3 немає.")
+        if pass_name not in {"structure", "generate"}:
+            return _err(400, "bad_input", "pass — structure або generate.")
+        weight = len(d["photos"])
+        if pass_name == "generate":
+            mod = next((m for m in (d["structure"] or {"modules": []})["modules"] if m["moduleId"] == module_id), None)
+            if mod is None:
+                return _err(404, "module_not_found", "Модуля немає в структурі.")
+            weight = len(mod["lessons"]) * 3
+        fx = contract.load_fixture("ai-options")
+        fx["pass"], fx["moduleId"] = pass_name, (module_id or None) if pass_name == "generate" else None
+        scale = max(1.0, weight / 4)
+        for m in fx["models"]:
+            if m["credits"]:
+                m["credits"] = {"expected": int(m["credits"]["expected"] * scale + 0.999),
+                                "max": int(m["credits"]["max"] * scale + 0.999)}
+        return 200, fx
+
     def _structure(self, d: dict[str, Any], body: Any) -> Result:
         if d["kind"] == "manuscript":
             return _err(409, "wrong_status", "Для рукопису проходів 2–3 немає.")
+        bad = self._check_model(body)
+        if bad:
+            return bad
         if d["job"] and d["job"]["status"] == "running":
             return _err(409, "job_running", "Уже виконується фонова робота.")
         if not d["photos"] or any(p["status"] == "processing" for p in d["photos"]):
@@ -383,7 +423,10 @@ class Sim:
         self.ticks[d["draftId"]] = STRUCTURE_TICKS
         return 202, {"draft": copy.deepcopy(d)}
 
-    def _generate(self, d: dict[str, Any], module_id: str) -> Result:
+    def _generate(self, d: dict[str, Any], module_id: str, body: Any = None) -> Result:
+        bad = self._check_model(body)
+        if bad:
+            return bad
         if d["job"] and d["job"]["status"] == "running":
             return _err(409, "job_running", "Уже виконується фонова робота.")
         if not d["structure"]:

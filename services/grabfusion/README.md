@@ -3,7 +3,7 @@
 Живе в репозиторії Studio: `services/grabfusion/` (окремий Python-проєкт, зі Studio повʼязаний лише контрактом).
 
 Python-сервіс для швидкого створення курсів, інструкцій і наборів книг із фото. Сервер Studio (частина A)
-віддає API `/api/external/v1/photo-drafts*`; контракт — **1.3.0**
+віддає API `/api/external/v1/photo-drafts*`; контракт — **1.4.0**
 (`grabfusion/contract_data/photo-drafts-api.md`, `schema.json`, `fixtures/`).
 
 Стан: **B0** (каркас, клієнти, мок на фікстурах) і **B1 = етап 2 «Застосунок, MVP»**: підключення кодом, зйомка,

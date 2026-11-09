@@ -78,7 +78,25 @@ export interface VisionFailoverArgs {
   /** Усе, що generateText приймає, окрім моделі, ключа й `generation` (їх веде ця функція). */
   params: Omit<GenerateParams, 'engine' | 'modelId' | 'apiKeyOverride' | 'generation'>;
   timeoutMs?: number;
+  /** Ліміт для ОСТАННЬОЇ моделі ланцюга (її повтори не обриваємо так рано, як перших). За замовчуванням — `timeoutMs`. */
+  lastTimeoutMs?: number;
   fallbackModels?: string[];
+  /**
+   * false — текстовий прохід без зображень (проходи 2–3 чернеток): моделі не мусять «бачити», а в
+   * журналі й помилках не йдеться про зір. За замовчуванням true — як для розпізнавання сторінок.
+   */
+  requireVision?: boolean;
+  /** Тег у рядках логу: `vision` для зору, інший — для текстових проходів. */
+  logTag?: string;
+  /** Температура й ліміт вихідних токенів — для кожної спроби ланцюга. */
+  baseGeneration?: { temperature?: number; maxTokens?: number };
+}
+
+export interface FailoverResult {
+  text: string;
+  modelId: string;
+  inputTokens: number;
+  outputTokens: number;
 }
 
 export interface VisionFailoverDeps {
@@ -102,10 +120,11 @@ const realDeps: VisionFailoverDeps = {
 export async function generateVisionWithFailover(
   args: VisionFailoverArgs,
   deps: VisionFailoverDeps = realDeps
-): Promise<{ text: string; modelId: string }> {
+): Promise<FailoverResult> {
   const { primaryModelId, ownerId, keyLabel, params } = args;
   const timeoutMs = args.timeoutMs ?? visionTimeoutMs();
-  if (!deps.supportsVision(primaryModelId)) {
+  const requireVision = args.requireVision !== false;
+  if (requireVision && !deps.supportsVision(primaryModelId)) {
     throw new Error(
       `Модель «${primaryModelId}», привʼязана до модуля «Текст за фото», не бачить зображень — оберіть модель із зором в «Ядрі AI».`
     );
@@ -119,7 +138,7 @@ export async function generateVisionWithFailover(
   const chain: Array<{ modelId: string; engine: ReturnType<typeof resolveEngine>; userKey?: string }> = [];
   for (const modelId of [primaryModelId, ...(args.fallbackModels ?? visionFallbackModels())]) {
     if (chain.some((c) => c.modelId === modelId)) continue;
-    if (chain.length > 0 && !deps.supportsVision(modelId)) continue;
+    if (chain.length > 0 && requireVision && !deps.supportsVision(modelId)) continue;
     const engine = resolveEngine(modelId);
     const userKey = await deps.resolveKey(ownerId, engine, keyLabel);
     if (chain.length > 0 && !userKey && !deps.engineReady(engine)) continue;
@@ -133,7 +152,7 @@ export async function generateVisionWithFailover(
     const started = deps.now();
     if (!isLast && (cooldownUntil.get(modelId) ?? 0) > started) continue;
     // Перевантажену модель не добиваємо повторами, якщо є до кого перейти; остання (або єдина) повторює як завжди.
-    const generation = { timeoutMs, ...(isLast ? {} : { transientRetries: 0 }) };
+    const generation = { ...args.baseGeneration, timeoutMs: isLast ? (args.lastTimeoutMs ?? timeoutMs) : timeoutMs, ...(isLast ? {} : { transientRetries: 0 }) };
     try {
       let result;
       try {
@@ -150,14 +169,14 @@ export async function generateVisionWithFailover(
         result = await deps.generate({ ...params, engine, modelId, apiKeyOverride: userKey, generation });
       }
       cooldownUntil.delete(modelId);
-      if (i > 0) deps.warn(`[vision] ${params.label}: відповіла запасна модель ${modelId} за ${deps.now() - started} мс`);
-      return { text: result.text, modelId };
+      if (i > 0) deps.warn(`[${args.logTag ?? 'vision'}] ${params.label}: відповіла запасна модель ${modelId} за ${deps.now() - started} мс`);
+      return { text: result.text, modelId, inputTokens: result.inputTokens, outputTokens: result.outputTokens };
     } catch (err) {
       lastErr = err;
       if (isLast || !shouldFailOver(err)) throw err;
       cooldownUntil.set(modelId, deps.now() + VISION_COOLDOWN_MS);
       deps.warn(
-        `[vision] ${params.label}: ${modelId} не відповіла за ${deps.now() - started} мс (${String((err as Error)?.message ?? err).slice(0, 120)}) — пробую ${chain[i + 1].modelId}`
+        `[${args.logTag ?? 'vision'}] ${params.label}: ${modelId} не відповіла за ${deps.now() - started} мс (${String((err as Error)?.message ?? err).slice(0, 120)}) — пробую ${chain[i + 1].modelId}`
       );
     }
   }
