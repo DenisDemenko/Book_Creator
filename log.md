@@ -121,7 +121,7 @@ remote перевірити можна, запушити — ні**.
 
 # Що не запушено (для наступної сесії)
 
-09.11 #529: **не закомічено** — worktree `D:\Rama\gf-studio-local`, гілка `claude/scan-vision-failover`.
+09.11 #529: `eed6770`, не запушено — `claude/scan-vision-failover`; після пуша `[vision]` у логах.
 
 06.11 #528: опубліковано Studio PR38 (31eaf85), Marketplace PR50 (b6d4291). CI/Chromium і live assets/guards/PDF OK. Функціональних незапушених змін немає; межі й докази #528.
 
