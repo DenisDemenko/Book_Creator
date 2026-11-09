@@ -96,5 +96,8 @@ export function buildBookFromInstructionPayload(payload: InstructionBookCreation
   if (opts.designThemeId) {
     book.layoutConfig = applyBookDesignTheme(book.layoutConfig, opts.designThemeId as BookDesignThemeId);
   }
+  // Теги блоків і позначки ШІ в PDF не друкуються (запис #534), а їдуть прихованим вкладенням `nova-tags.json` —
+  // його читає скрипт чи інший ШІ. Для книги з інструкції це типово увімкнено; у «Верстка» автор може вимкнути.
+  book.layoutConfig = { ...book.layoutConfig, embedTags: true };
   return { book, chapterId, sections };
 }

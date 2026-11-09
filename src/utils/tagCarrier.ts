@@ -49,6 +49,12 @@ export interface CarrierParagraph {
   /** Відбиток видимого тексту (див. `paragraphKey`). */
   h: string;
   tags: CarrierTag[];
+  /**
+   * Абзац написав або запропонував ШІ (стояв усередині `[AI-DRAFT]` чи `[AI-GENERATED]`). Самі маркери у видимий
+   * текст не потрапляють: вони лишаються тут, як прихована службова ознака для скрипта чи іншого ШІ. Додаткове
+   * поле: старіші читачі носія його ігнорують, тож версія формату не змінюється.
+   */
+  ai?: true;
 }
 
 export interface CarrierSection {
@@ -99,9 +105,28 @@ export function paragraphKey(block: string): string {
   return visible ? blockHash(visible) : '';
 }
 
+const AI_OPEN_RE = /\[(?:AI-DRAFT|AI-GENERATED:[^\]\r\n]*)\]/g;
+const AI_CLOSE_RE = /\[\/(?:AI-DRAFT|AI-GENERATED)\]/g;
+
+/**
+ * Для кожного абзацу: чи він усередині тексту від ШІ. Маркери ШІ стоять окремими абзацами навколо блока
+ * (`[AI-DRAFT]` … `[/AI-DRAFT]`), тож стан тягнеться від абзацу до абзацу; абзац, у якому маркер відкривається
+ * сам, теж рахується.
+ */
+export function aiBlockFlags(blocks: readonly string[]): boolean[] {
+  let depth = 0;
+  return blocks.map((block) => {
+    const opens = (block.match(AI_OPEN_RE) ?? []).length;
+    const closes = (block.match(AI_CLOSE_RE) ?? []).length;
+    const ai = depth > 0 || opens > 0;
+    depth = Math.max(0, depth + opens - closes);
+    return ai;
+  });
+}
+
 const normTitle = (v: string | undefined) => String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 
-/** Збирає носій із книги: лише абзаци, у яких справді є теги. */
+/** Збирає носій із книги: лише абзаци, у яких є теги сутностей або які написав ШІ. */
 export function buildTagCarrier(book: CarrierBook): TagCarrier {
   const chapters: CarrierChapter[] = [];
   let count = 0;
@@ -109,14 +134,17 @@ export function buildTagCarrier(book: CarrierBook): TagCarrier {
     const sections: CarrierSection[] = [];
     for (const section of chapter.sections ?? []) {
       const paragraphs: CarrierParagraph[] = [];
-      splitParagraphs(section.content).forEach((block, n) => {
+      const blocks = splitParagraphs(section.content);
+      const aiFlags = aiBlockFlags(blocks);
+      blocks.forEach((block, n) => {
         if (count >= TAG_CARRIER_MAX_PARAGRAPHS) return;
         const tags = parseEntityTagsInSource(block)
           .filter((t) => t.entity)
           .map((t) => ({ slug: t.slug, value: t.value }));
         const h = paragraphKey(block);
-        if (!tags.length || !h) return;
-        paragraphs.push({ n, h, tags });
+        const ai = aiFlags[n];
+        if (!h || (!tags.length && !ai)) return;
+        paragraphs.push({ n, h, tags, ...(ai ? { ai: true as const } : {}) });
         count += 1;
       });
       if (paragraphs.length) sections.push({ title: String(section.title ?? ''), paragraphs });
@@ -203,6 +231,8 @@ export function applyTagCarrier<B extends CarrierBook>(book: B, carrier: TagCarr
     for (const section of chapter.sections) {
       const wantTitle = normTitle(section.title);
       for (const paragraph of section.paragraphs) {
+        // Абзац лише з ознакою ШІ (без тегів) повертати нічого: ознака ШІ існує в носії для скриптів, а не для імпорту.
+        if (!paragraph.tags?.length) continue;
         const candidates = (index.get(paragraph.h) ?? []).filter((s) => !s.used);
         /*
          * Порядок вибору: той самий розділ і те саме місце в ньому → той самий

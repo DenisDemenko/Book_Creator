@@ -30,6 +30,7 @@ import { loadImageBytes } from '../media/imageBytes';
 import { collectImageMarkerIds, splitImageMarkers } from '../../src/utils/imageMarkers';
 import { hasTableMarkers, replaceTableBlocks } from '../../src/utils/tableMarkers';
 import { entityTagRegexp, removeFormattedEntityTags } from '../../src/utils/coreEntities';
+import { stripAiTextMarkers } from '../../shared/aiTextOrigin';
 import type { PaginationResult } from '../../src/utils/canonicalPageMap';
 import {
   buildNovaSemanticPagination,
@@ -75,7 +76,8 @@ function flattenTableMarkersToPlainText(content: string): string {
 }
 
 export function toParagraphs(content: string): string[] {
-  const plain = flattenTableMarkersToPlainText(removeFormattedEntityTags(String(content ?? '')))
+  // Маркери ШІ ([AI-DRAFT] тощо) — службова розмітка, не текст книги (запис #534); прямі виклики Nova минають registry.
+  const plain = flattenTableMarkersToPlainText(removeFormattedEntityTags(stripAiTextMarkers(String(content ?? ''))))
     // Теги сутностей ядра — службова розмітка, а не текст автора: у
     // надрукованій книзі вони не мають лишитись (постановка власника, п. 6).
     // Знімаються ДО розбору HTML і таблиць, бо `[/character:…]` міг стояти

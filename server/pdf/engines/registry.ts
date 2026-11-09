@@ -19,6 +19,7 @@ import {
   type PdfRenderResult,
 } from './types';
 import { attachTagCarrier } from '../tagCarrierPdf';
+import { withoutAiMarkers } from '../visibleBook';
 
 /** Рушії в порядку показу автору. */
 const ENGINES: Partial<Record<PdfEngineId, PdfEngine>> = {
@@ -164,7 +165,8 @@ export async function renderWithEngine(
         }
       : request;
 
-  const rendered = await attachTagCarrier(await engine.render(effectiveRequest), effectiveRequest);
+  // Рушій верстає ВИДИМИЙ текст без маркерів ШІ; носій (прихований) будується з оригіналу, тож ознака ШІ не губиться.
+  const rendered = await attachTagCarrier(await engine.render(withoutAiMarkers(effectiveRequest)), effectiveRequest);
 
   // Physical page parity is available for EVERY engine because pageCount is
   // read from the PDF that was actually produced. Never substitute browser

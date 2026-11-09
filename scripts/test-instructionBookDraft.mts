@@ -85,7 +85,7 @@ console.log('\nbuildInstructionBookSections — заповнений докум�
   t('комплектація: порожній рядок відфільтровано', plain(materials?.content) === '— Стільниця — 1');
 
   const tools = byTitle(assemblyType.sections.tools.heading);
-  t('інструменти: порожній рядок відфільтровано, дефіс-буллет', plain(tools?.content) === '— Шуруповерт\n— Рулетка');
+  t('інструменти: порожній рядок відфільтровано, дефіс-буллет', plain(tools?.content) === '— Шуруповерт\n\n— Рулетка');
 
   const warnings = byTitle(assemblyType.sections.warnings.heading);
   t('безпека: буллет із попереджувальним символом', plain(warnings?.content) === '⚠ Не переносити в одиночку');
@@ -101,7 +101,7 @@ console.log('\nbuildInstructionBookSections — заповнений докум�
   t('фінальна перевірка: чекбокс-буллет', plain(finalCheck?.content) === '☐ Стіл не хитається');
 
   const issues = byTitle(assemblyType.sections.troubleshooting.heading);
-  t('типові помилки: проблема жирним, причина й дія окремими рядками', issues?.content === '**Стіл хитається**\nПричина: Не затягнуті гвинти\nДія: Затягнути шестигранником');
+  t('типові помилки: проблема жирним, причина й дія окремими абзацами', issues?.content === '**Стіл хитається**\n\nПричина: Не затягнуті гвинти\n\nДія: Затягнути шестигранником');
 
   const warranty = byTitle(assemblyType.sections.warranty.heading);
   t('гарантія: порожні поля (notes) не додають зайвого рядка', warranty?.content === 'Термін / періодичність: 12 місяців\n\nВідповідальна особа: Виробник');
@@ -192,17 +192,21 @@ console.log('\nТеги блоків інструкції (ставить код
   t('кожен крок несе свій тег step із номером і назвою', stepVals.includes('1. Розпакування') && stepVals.includes('2. Монтаж ніжок'));
   t('службові рядки кроку: component, tool, safety-rule, requirement, source', ['component', 'tool', 'safety-rule', 'requirement', 'source'].every((slug) => valuesOf(steps, slug).length > 0));
   t('значення службових тегів — вміст рядка', valuesOf(steps, 'component')[0] === 'Коробка' && valuesOf(steps, 'tool')[0] === 'Ніж' && valuesOf(steps, 'safety-rule')[0] === 'Ріжте від себе' && valuesOf(steps, 'requirement')[0] === 'Усі деталі на столі');
+  const extraParas = steps.split(/\n{2,}/).filter((para) => /^(Компоненти\/матеріали кроку|Інструменти\/ресурси|Критерій виконання|Джерела): /.test(para));
+  t('службові рядки кроку — окремі абзаци (4 з 4), без переносу всередині', extraParas.length === 4 && extraParas.every((para) => !para.includes('\n')));
+  t('кожен службовий абзац кроку несе тег кроку', extraParas.every((para) => parseEntityTagsInSource(para).some((tg) => tg.slug === 'step')));
   t('кадр кроку — image із підписом', valuesOf(steps, 'image').join() === 'Розпакування, кадр 1');
   t('обидва абзаци опису й доповнення ШІ несуть тег кроку', steps.split('\n\n').filter((para) => /Дістати деталі|Перелічити їх|розкладіть деталі/.test(para)).every((para) => para.includes('[/step:1. Розпакування]')));
   t('в абзаці не більше тегів, ніж дозволяє реєстр', sections.every((x) => x.content.split(/\n{2,}/).every((para) => parseEntityTagsInSource(para).length <= MAX_ENTITIES_PER_PARAGRAPH)));
   t('читач тегів не бачить: після зняття не лишається жодного [/…:', sections.every((x) => !/\[\/[a-z0-9-]+:/.test(stripEntityTags(x.content))));
   t('значення тегів без дужок, довжина в межах', sections.every((x) => parseEntityTagsInSource(x.content).every((tg) => !/[\[\]]/.test(tg.value) && tg.value.length <= 80)));
 
-  // Великі списки ріжуться на абзаци: інакше 30 рядків дали б 30 тегів в одному абзаці.
+  // Кожен пункт списку — окремий абзац: PDF склеює рядки одного абзацу в суцільний текст (запис #534).
   const big = filledDoc();
   big.materials = Array.from({ length: 30 }, (_, i) => ({ id: `m${i}`, code: `K${i}`, name: `Деталь ${i + 1}`, qty: '1' }));
   const bigMaterials = buildInstructionBookSections(big, assemblyType).find((x) => x.title === assemblyType.sections.materials.heading)!.content;
-  t('30 деталей — 30 тегів component, але абзаци по 10', parseEntityTagsInSource(bigMaterials).length === 30 && bigMaterials.split(/\n{2,}/).length === 3 && bigMaterials.split(/\n{2,}/).every((para) => para.split('\n').length <= 10));
+  const bigParas = bigMaterials.split(/\n{2,}/);
+  t('30 деталей — 30 абзаців, у кожному один пункт і один тег component', parseEntityTagsInSource(bigMaterials).length === 30 && bigParas.length === 30 && bigParas.every((para) => !para.includes('\n') && parseEntityTagsInSource(para).length === 1));
   const longWarn = filledDoc();
   longWarn.warnings = ['Не ' + 'дуже '.repeat(40) + 'обережно [важливо]'];
   const warnVals = valuesOf(buildInstructionBookSections(longWarn, assemblyType).find((x) => x.title === assemblyType.sections.warnings.heading)!.content, 'safety-rule');

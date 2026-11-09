@@ -73,22 +73,18 @@ function tagParagraphs(text: string, tag: string): string {
     .join('\n\n');
 }
 
-/** Не більше цього числа тегів в одному абзаці (MAX_ENTITIES_PER_PARAGRAPH = 12 у реєстрі) — з запасом. */
-const TAGGED_LINES_PER_PARAGRAPH = 10;
-
 /**
- * Список рядків; з `slug` кожен рядок несе свій тег, а великий список ріжеться на абзаци по 10 рядків, щоб
- * не перевищити межу тегів на абзац. Без `slug` — звичайний список, як було.
+ * Список рядків. КОЖЕН ПУНКТ — окремий абзац (порожній рядок між ними), а не рядок усередині одного: рушії PDF
+ * зводять одинарний перенос у пропуск (Nova — `toParagraphs`, Markdown — так само), і список склеювався б в один
+ * суцільний абзац (запис #534, знімок власника). Заодно кожен тег стоїть при своєму пункті й не впирається в межу
+ * реєстру на кількість тегів в абзаці. З `slug` пункт несе свій тег.
  */
 function listBlock(lines: string[], bullet = '— ', slug?: string): string {
-  const items = lines
+  return lines
     .map((l) => l.trim())
     .filter(Boolean)
-    .map((l) => `${bullet}${l}${slug ? ` ${tagOf(slug, l)}` : ''}`);
-  if (!slug) return items.join('\n');
-  const chunks: string[] = [];
-  for (let i = 0; i < items.length; i += TAGGED_LINES_PER_PARAGRAPH) chunks.push(items.slice(i, i + TAGGED_LINES_PER_PARAGRAPH).join('\n'));
-  return chunks.join('\n\n');
+    .map((l) => `${bullet}${l}${slug ? ` ${tagOf(slug, l)}` : ''}`)
+    .join('\n\n');
 }
 
 
@@ -175,7 +171,7 @@ export function buildInstructionBookSections(
       }
       const stepImages = images.filter((im) => im.stepIndex === i);
       if (stepImages.length) parts.push(stepImages.map((im) => `[IMG: ${im.id} "${im.caption}" wrap=none] ${tagOf('image', im.caption)} ${stepTag}`).join('\n\n'));
-      // Службові рядки кроку лежать одним абзацом, тож кожен рядок несе свій тип (до 12 тегів на абзац).
+      // Службові рядки кроку — окремі абзаци (інакше PDF склеює їх в один, див. listBlock), кожен несе свій тип і крок.
       const extra: string[] = [];
       if (s.components.trim()) extra.push(`Компоненти/матеріали кроку: ${s.components.trim()} ${tagOf('component', s.components)}`);
       if (s.toolsResources.trim()) extra.push(`Інструменти/ресурси: ${s.toolsResources.trim()} ${tagOf('tool', s.toolsResources)}`);
@@ -185,7 +181,7 @@ export function buildInstructionBookSections(
         const names = s.sourceIds.map((id) => doc.knowledgeBase.find((k) => k.id === id)?.title || id);
         extra.push('Джерела: ' + names.join('; ') + ' ' + names.slice(0, 4).map((n) => tagOf('source', n)).join(' '));
       }
-      if (extra.length) parts.push(extra.join('\n') + ` ${stepTag}`);
+      if (extra.length) parts.push(extra.map((line) => `${line} ${stepTag}`).join('\n\n'));
       const elaboration = elaborations?.[i]?.trim();
       if (elaboration) parts.push(`[AI-DRAFT]\n\n${tagParagraphs(elaboration, stepTag)}\n\n[/AI-DRAFT]`);
       return s.aiGenerated ? aiDraftText(parts.join('\n\n')) : parts.join('\n\n');
@@ -204,7 +200,7 @@ export function buildInstructionBookSections(
       const parts = [`**${r.issue.trim() || 'Відхилення'}**`];
       if (r.cause.trim()) parts.push(`Причина: ${r.cause.trim()}`);
       if (r.action.trim()) parts.push(`Дія: ${r.action.trim()}`);
-      return parts.join('\n');
+      return parts.join('\n\n');
     });
     sections.push({ title: type.sections.troubleshooting.heading, content: blocks.join('\n\n') });
   }
@@ -230,11 +226,6 @@ export function buildInstructionBookSections(
               k.excerpt.trim() ? `: ${k.excerpt.trim()}` : ''
             } ${tagOf('source', k.title)}`
         )
-        .reduce<string[]>((chunks, line, i) => {
-          if (i % TAGGED_LINES_PER_PARAGRAPH === 0) chunks.push(line);
-          else chunks[chunks.length - 1] += `\n${line}`;
-          return chunks;
-        }, [])
         .join('\n\n'),
     });
   }

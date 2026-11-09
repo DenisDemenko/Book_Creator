@@ -262,7 +262,11 @@ export function buildDesigncraftRtf(
       continue;
     }
 
-    for (const sourceLine of block.split('\n').map((v) => v.trim()).filter(Boolean)) {
+    for (const rawLine of block.split('\n').map((v) => v.trim()).filter(Boolean)) {
+      // Підзаголовок рукопису (`### 1. Крок` в інструкції): стилів нижче Heading 2 у DesignCraft немає, тож це жирний
+      // рядок тіла, а не буквальні решітки в надрукованому тексті (запис #534; Nova і Markdown-рушії решітки знімають).
+      const sub = /^#{3,6}\s+(.+)$/.exec(rawLine);
+      const sourceLine = sub ? `**${sub[1].trim()}**` : rawLine;
       const semantic = semanticOfLine(sourceLine, theme);
       const entity = semantic.style === 'Body' ? 'body' : semanticEntity(semantic.style);
       const custom = customOf(entity);
