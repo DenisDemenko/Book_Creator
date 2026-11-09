@@ -15,6 +15,8 @@ import {
   meaningfulInstructionSteps,
 } from '../src/utils/instructionBookDraft.ts';
 import { imageMarkerRegexp } from '../src/utils/imageMarkers.ts';
+import { MAX_ENTITIES_PER_PARAGRAPH, isRegisteredEntityType, parseEntityTagsInSource, stripEntityTags } from '../src/utils/coreEntities.ts';
+import { manuscriptTagIndex } from '../src/utils/manuscriptTagIndex.ts';
 import { createEmptyInstruction, createEmptyStep } from '../src/utils/instructionDraft.ts';
 import { findInstructionType } from '../src/data/instructionTypes.ts';
 import type { Instruction } from '../src/types.ts';
@@ -23,6 +25,11 @@ let pass = 0, fail = 0;
 const t = (n: string, c: boolean, e = '') => { c ? pass++ : fail++; console.log(`${c ? '  ✓' : '  ✗'} ${n}${e ? ' — ' + e : ''}`); };
 
 const assemblyType = findInstructionType('assembly');
+/** Текст, яким його побачить читач: без службових тегів і без хвостових пропусків від них. */
+const plain = (x: string | undefined) => stripEntityTags(x ?? '').replace(/[ 	]+$/gm, '');
+
+/** Лише теги сутностей знято, маркери [AI-DRAFT] і розмітка лишились (stripEntityTags знімає й їх). */
+const noTags = (x: string) => x.replace(/ ?\[\/[a-z0-9-]+:[^\]\n]*\]/g, '');
 
 function filledDoc(): Instruction {
   const d = createEmptyInstruction('assembly');
@@ -75,13 +82,13 @@ console.log('\nbuildInstructionBookSections — заповнений докум�
   t('усі змістовні розділи присутні (7: опис/комплектація/інструменти/безпека/кроки/перевірка/помилки/гарантія/база — 9 мінус 0 порожніх)', sections.length === 9);
 
   const materials = byTitle(assemblyType.sections.materials.heading);
-  t('комплектація: порожній рядок відфільтровано', materials?.content === '— Стільниця — 1');
+  t('комплектація: порожній рядок відфільтровано', plain(materials?.content) === '— Стільниця — 1');
 
   const tools = byTitle(assemblyType.sections.tools.heading);
-  t('інструменти: порожній рядок відфільтровано, дефіс-буллет', tools?.content === '— Шуруповерт\n— Рулетка');
+  t('інструменти: порожній рядок відфільтровано, дефіс-буллет', plain(tools?.content) === '— Шуруповерт\n— Рулетка');
 
   const warnings = byTitle(assemblyType.sections.warnings.heading);
-  t('безпека: буллет із попереджувальним символом', warnings?.content === '⚠ Не переносити в одиночку');
+  t('безпека: буллет із попереджувальним символом', plain(warnings?.content) === '⚠ Не переносити в одиночку');
 
   const steps = byTitle(assemblyType.sections.steps.heading);
   t('кроки: рівно 2 блоки (порожній крок вилучено)', (steps?.content.match(/^### \d/gm) || []).length === 2);
@@ -91,7 +98,7 @@ console.log('\nbuildInstructionBookSections — заповнений докум�
   t('без переданих elaborations — жодного [AI-DRAFT] у тексті', !steps!.content.includes('[AI-DRAFT]'));
 
   const finalCheck = byTitle(assemblyType.sections.finalCheck.heading);
-  t('фінальна перевірка: чекбокс-буллет', finalCheck?.content === '☐ Стіл не хитається');
+  t('фінальна перевірка: чекбокс-буллет', plain(finalCheck?.content) === '☐ Стіл не хитається');
 
   const issues = byTitle(assemblyType.sections.troubleshooting.heading);
   t('типові помилки: проблема жирним, причина й дія окремими рядками', issues?.content === '**Стіл хитається**\nПричина: Не затягнуті гвинти\nДія: Затягнути шестигранником');
@@ -100,7 +107,7 @@ console.log('\nbuildInstructionBookSections — заповнений докум�
   t('гарантія: порожні поля (notes) не додають зайвого рядка', warranty?.content === 'Термін / періодичність: 12 місяців\n\nВідповідальна особа: Виробник');
 
   const kb = byTitle(assemblyType.sections.knowledgeBase.heading);
-  t('база знань: назва + посилання + витяг', kb?.content === '— Відео складання — https://example.com: Покроковий відеоурок');
+  t('база знань: назва + посилання + витяг', plain(kb?.content) === '— Відео складання — https://example.com: Покроковий відеоурок');
 }
 
 console.log('\nbuildInstructionBookSections — гарантія повністю порожня не створює розділ:');
@@ -117,7 +124,7 @@ console.log('\nbuildInstructionBookSections — з поглибленнями Ш
   const sections = buildInstructionBookSections(doc, assemblyType, ['Перший абзац.\n\nДругий абзац.', 'Поглиблення другого кроку.']);
   const steps = sections.find((s) => s.title === assemblyType.sections.steps.heading)!;
   t('обидва кроки отримали [AI-DRAFT]', (steps.content.match(/\[AI-DRAFT\]/g) || []).length === 2);
-  t('AI-DRAFT відкривається і закривається парою маркерів', steps.content.includes('[AI-DRAFT]\n\nПерший абзац.\n\nДругий абзац.\n\n[/AI-DRAFT]'));
+  t('AI-DRAFT відкривається і закривається парою маркерів', noTags(steps.content).includes('[AI-DRAFT]\n\nПерший абзац.\n\nДругий абзац.\n\n[/AI-DRAFT]'));
 }
 
 console.log('\nbuildInstructionBookSections — часткова відповідь ШІ (елаборацій менше, ніж кроків):');
@@ -155,8 +162,56 @@ console.log('\nКадри кроків (фото з телефона):');
   t('id маркерів збігаються з id ілюстрацій, по порядку', markers.map((m) => m[1]).join() === illustrations.map((i) => i.id).join());
   t('маркер стоїть у блоці свого кроку, до наступного заголовка', steps.content.indexOf(illustrations[0].id) > steps.content.indexOf('### 1.') && steps.content.indexOf(illustrations[0].id) < steps.content.indexOf('### 2.'));
   t('режим обтікання — без обтікання', markers.every((m) => m[3] === 'none'));
-  const plain = buildInstructionBookSections(filledDoc(), assemblyType).map((s) => s.content).join('\n');
-  t('без кадрів у книзі немає маркерів, а ілюстрацій — порожній список', !plain.includes('[IMG:') && buildInstructionBookIllustrations(filledDoc()).length === 0);
+  const plainAll = buildInstructionBookSections(filledDoc(), assemblyType).map((s) => s.content).join('\n');
+  t('без кадрів у книзі немає маркерів, а ілюстрацій — порожній список', !plainAll.includes('[IMG:') && buildInstructionBookIllustrations(filledDoc()).length === 0);
+}
+
+console.log('\nТеги блоків інструкції (ставить код, не модель):');
+{
+  const doc = filledDoc();
+  doc.steps[0] = {
+    ...doc.steps[0], id: 's1', title: 'Розпакування', description: 'Дістати деталі з коробки.\n\nПерелічити їх за списком.', components: 'Коробка', toolsResources: 'Ніж',
+    warning: 'Ріжте від себе', successCriterion: 'Усі деталі на столі', sourceIds: ['k1'], images: [{ assetId: 'a1', url: '/api/media/file/a1', caption: 'Розпакування, кадр 1' }],
+  };
+  const sections = buildInstructionBookSections(doc, assemblyType, ['Додатково: розкладіть деталі за номерами.']);
+  const by = (h: string) => sections.find((x) => x.title === h)!;
+  const tagsOf = (text: string) => parseEntityTagsInSource(text).map((x) => x.tag.replace(/^\//, ''));
+  const valuesOf = (text: string, slug: string) => parseEntityTagsInSource(text).filter((x) => x.tag.replace(/^\//, '') === slug).map((x) => x.value);
+
+  t('усі типи тегів є в реєстрі сутностей', sections.every((x) => tagsOf(x.content).every((slug) => isRegisteredEntityType(slug))));
+  t('огляд — instruction з назвою виробу', valuesOf(by(assemblyType.sections.overview.heading).content, 'instruction')[0] === 'Стіл письмовий');
+  t('комплектація — component на кожен непорожній рядок', valuesOf(by(assemblyType.sections.materials.heading).content, 'component').join() === 'Стільниця — 1');
+  t('інструменти — tool на кожен рядок', valuesOf(by(assemblyType.sections.tools.heading).content, 'tool').join() === 'Шуруповерт,Рулетка');
+  t('безпека — safety-rule (застереження використання)', valuesOf(by(assemblyType.sections.warnings.heading).content, 'safety-rule').join() === 'Не переносити в одиночку');
+  t('фінальна перевірка — requirement', valuesOf(by(assemblyType.sections.finalCheck.heading).content, 'requirement').join() === 'Стіл не хитається');
+  t('база знань — source', valuesOf(by(assemblyType.sections.knowledgeBase.heading).content, 'source')[0] === 'Відео складання');
+  t('типові помилки й гарантія без тегів (тип неоднозначний — це робота Jev)', tagsOf(by(assemblyType.sections.troubleshooting.heading).content).length === 0 && tagsOf(by(assemblyType.sections.warranty.heading).content).length === 0);
+
+  const steps = by(assemblyType.sections.steps.heading).content;
+  const stepVals = valuesOf(steps, 'step');
+  t('кожен крок несе свій тег step із номером і назвою', stepVals.includes('1. Розпакування') && stepVals.includes('2. Монтаж ніжок'));
+  t('службові рядки кроку: component, tool, safety-rule, requirement, source', ['component', 'tool', 'safety-rule', 'requirement', 'source'].every((slug) => valuesOf(steps, slug).length > 0));
+  t('значення службових тегів — вміст рядка', valuesOf(steps, 'component')[0] === 'Коробка' && valuesOf(steps, 'tool')[0] === 'Ніж' && valuesOf(steps, 'safety-rule')[0] === 'Ріжте від себе' && valuesOf(steps, 'requirement')[0] === 'Усі деталі на столі');
+  t('кадр кроку — image із підписом', valuesOf(steps, 'image').join() === 'Розпакування, кадр 1');
+  t('обидва абзаци опису й доповнення ШІ несуть тег кроку', steps.split('\n\n').filter((para) => /Дістати деталі|Перелічити їх|розкладіть деталі/.test(para)).every((para) => para.includes('[/step:1. Розпакування]')));
+  t('в абзаці не більше тегів, ніж дозволяє реєстр', sections.every((x) => x.content.split(/\n{2,}/).every((para) => parseEntityTagsInSource(para).length <= MAX_ENTITIES_PER_PARAGRAPH)));
+  t('читач тегів не бачить: після зняття не лишається жодного [/…:', sections.every((x) => !/\[\/[a-z0-9-]+:/.test(stripEntityTags(x.content))));
+  t('значення тегів без дужок, довжина в межах', sections.every((x) => parseEntityTagsInSource(x.content).every((tg) => !/[\[\]]/.test(tg.value) && tg.value.length <= 80)));
+
+  // Великі списки ріжуться на абзаци: інакше 30 рядків дали б 30 тегів в одному абзаці.
+  const big = filledDoc();
+  big.materials = Array.from({ length: 30 }, (_, i) => ({ id: `m${i}`, code: `K${i}`, name: `Деталь ${i + 1}`, qty: '1' }));
+  const bigMaterials = buildInstructionBookSections(big, assemblyType).find((x) => x.title === assemblyType.sections.materials.heading)!.content;
+  t('30 деталей — 30 тегів component, але абзаци по 10', parseEntityTagsInSource(bigMaterials).length === 30 && bigMaterials.split(/\n{2,}/).length === 3 && bigMaterials.split(/\n{2,}/).every((para) => para.split('\n').length <= 10));
+  const longWarn = filledDoc();
+  longWarn.warnings = ['Не ' + 'дуже '.repeat(40) + 'обережно [важливо]'];
+  const warnVals = valuesOf(buildInstructionBookSections(longWarn, assemblyType).find((x) => x.title === assemblyType.sections.warnings.heading)!.content, 'safety-rule');
+  t('довге застереження: значення тега обрізано, дужки прибрано', warnVals.length === 1 && warnVals[0].length <= 80 && !/[\[\]]/.test(warnVals[0]));
+
+  // Індекс тегів рукопису бачить абзаци кроків із типом.
+  const index = manuscriptTagIndex({ chapters: [{ id: 'c', sections: sections.map((x, i) => ({ id: `s${i}`, content: x.content })) }] });
+  t('індекс тегів: абзаци кроку мають тег step', index.some((row) => row.tags.some((tg) => tg === '/step:1. Розпакування')));
+  t('індекс тегів: текст рядка без службових тегів', index.every((row) => !row.text.includes('[/')));
 }
 
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);

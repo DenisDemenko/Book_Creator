@@ -79,6 +79,7 @@ import { useAuth } from './hooks/useAuth';
 import { useTheme } from './hooks/useTheme';
 import { useRealtimeSync } from './hooks/useRealtimeSync';
 import { estimatePageCount, calculateWordCount } from './utils/helpers';
+import { buildBookFromInstructionPayload } from './utils/instructionBook';
 import { appendTextToChapterEnd } from './utils/bookText';
 import { canAccessTab, canOpenAdminPanel, getDefaultTabForRole, getRoleInfo } from './utils/rbac';
 import { diffSectionChange, applySectionPatch, type SectionPatch } from './utils/bookDiff';
@@ -1542,78 +1543,16 @@ function StudioApp() {
   };
 
   const handleInstructionBookCreated = (payload: InstructionBookCreationPayload) => {
-    const now = Date.now();
-    const bookId = `BK-${now.toString(36).toUpperCase()}`;
-    const title = payload.title.trim() || 'Нова інструкція';
+    // Складання книги — спільна утиліта (instructionBook.ts): те саме потрібне PDF-верстці з конструктора.
     const author = auth.user?.name?.trim() || 'Олександр Радченко';
-    const initialSnapshot: BookVersionSnapshot = {
-      id: `snap-init-${now}`,
-      bookId,
-      versionNumber: 'v1.0.0',
-      revisionNumber: 1,
-      timestamp: new Date().toISOString(),
+    const { book: newBook, chapterId, sections } = buildBookFromInstructionPayload(payload, {
+      now: Date.now(),
       author,
-      authorName: author,
       authorRole: currentRole,
-      label: 'Ініціалізація та старт проекту',
-      comment: 'Книга створена з майстра «Інструкція» — з поглибленнями кроків від ШІ.',
-      note: 'Книга створена з майстра «Інструкція» — з поглибленнями кроків від ШІ.',
-      tags: ['Створення', 'Інструкція', 'Express Wizard'],
-      wordCount: 0,
-      chapterCount: 1,
-      pageCount: 1,
-    };
-    const chapterId = `chap-${now}-1`;
-    const sectionDrafts = payload.sections.length ? payload.sections : [{ title: 'Розділ', content: '' }];
-    const sections = sectionDrafts.map((s, i) => ({
-      id: `sec-${now}-${i + 1}`,
-      chapterId,
-      title: s.title,
-      order: i + 1,
-      content: s.content,
-      wordCount: calculateWordCount(s.content),
-      lastModified: new Date().toISOString(),
-    }));
-    const newBook: Book = withoutDemoContent(
-      {
-        ...initialBookData,
-        id: bookId,
-        title,
-        author,
-        genre: '',
-        version: 'v1.0.0',
-        revisionNumber: 1,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        versionHistory: [initialSnapshot],
-        status: 'draft',
-        visualBible: { ...initialBookData.visualBible, id: `vb-${now}`, bookId },
-        chapters: [
-          {
-            id: chapterId,
-            bookId,
-            title,
-            order: 1,
-            sections,
-          },
-        ],
-      },
-      { title, author }
-    );
-
-    // Кадри кроків: `withoutDemoContent` обнуляє альбом, тож додаємо їх після. id збігаються з маркерами [IMG: …] у тексті кроків.
-    if (payload.illustrations?.length) {
-      newBook.illustrations = payload.illustrations.map((il) => ({
-        id: il.id,
-        chapterId,
-        url: il.url,
-        caption: il.caption,
-        aspectRatio: '16:9',
-        style: 'Медіатека',
-        source: 'upload' as const,
-        createdAt: new Date().toISOString(),
-      }));
-    }
+      designThemeId: payload.designThemeId,
+    });
+    const bookId = newBook.id;
+    const title = newBook.title;
 
     setBook(newBook);
     setActiveChapterId(chapterId);

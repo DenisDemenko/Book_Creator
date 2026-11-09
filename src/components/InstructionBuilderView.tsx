@@ -21,7 +21,9 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { PlayCircle } from 'lucide-react';
-import type { Instruction, InstructionDocType } from '../types';
+import type { Book, Instruction, InstructionDocType, InstructionPdfLayout } from '../types';
+import { buildBookFromInstructionPayload } from '../utils/instructionBook';
+import { applyInstructionPdfLayout, buildInstructionPdfLayout, instructionPdfTemplateByKey, instructionPdfTemplates, templateKeyForLayout } from '../utils/instructionPdf';
 import {
   INSTRUCTION_SECTION_ORDER,
   INSTRUCTION_TYPES,
@@ -43,17 +45,13 @@ import {
   buildInstructionBookTitle,
   buildInstructionBookIllustrations,
   meaningfulInstructionSteps,
+  type InstructionBookCreationPayload,
   type InstructionBookIllustrationDraft,
   type InstructionBookSectionDraft,
 } from '../utils/instructionBookDraft';
 
 /** Результат «Створити книгу» — саме це чекає App.tsx для складання нового Book. */
-export interface InstructionBookCreationPayload {
-  title: string;
-  sections: InstructionBookSectionDraft[];
-  /** Кадри кроків: лягають в альбом книги, а в тексті стоять маркерами `[IMG: id …]`. */
-  illustrations?: InstructionBookIllustrationDraft[];
-}
+export type { InstructionBookCreationPayload };
 
 /**
  * Конструктор інструкцій — реалізація напряму «Інструкція» експрес-майстра
@@ -134,7 +132,168 @@ const InstructionPrintRoot: React.FC<{ doc: Instruction; type: InstructionTypeCo
   );
 };
 
-/** Вибір, що саме зробити з готовим документом: верстка за шаблонами Studio чи швидкий друк. */
+interface PdfEngineOption {
+  id: string;
+  label: string;
+  available: boolean;
+  reasonUk?: string;
+}
+
+/**
+ * Верстка PDF з інструкції за обраним шаблоном і рушієм. PDF будується з ТІЄЇ САМОЇ книги, яку дає «Створити
+ * книгу» (кадри, абзаци з тегами), через той самий серверний маршрут, що й PDF-перегляд автора; вибір (шаблон + рушій)
+ * лишається в документі інструкції.
+ */
+const PdfLayoutPanel: React.FC<{
+  saved: InstructionPdfLayout | undefined;
+  buildBook: (layout: InstructionPdfLayout) => Book;
+  onSaved: (layout: InstructionPdfLayout) => void;
+  fileName: string;
+}> = ({ saved, buildBook, onSaved, fileName }) => {
+  const templates = useMemo(() => instructionPdfTemplates(), []);
+  const [templateKey, setTemplateKey] = useState(() => templateKeyForLayout(saved));
+  const [engineId, setEngineId] = useState(saved?.engineId ?? '');
+  const [engines, setEngines] = useState<PdfEngineOption[]>([]);
+  const [enginesError, setEnginesError] = useState<string | null>(null);
+  const [state, setState] = useState<{ status: 'idle' | 'loading' | 'done' | 'error'; url?: string; pages?: number; engine?: string; note?: string; error?: string }>({ status: 'idle' });
+  const urlRef = useRef<string | null>(null);
+  const [savedNote, setSavedNote] = useState<InstructionPdfLayout | undefined>(saved);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(apiPath('/api/pdf/engines'), { credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) throw new Error('Не вдалося отримати перелік PDF-рушіїв.');
+        return res.json();
+      })
+      .then((payload) => {
+        if (cancelled) return;
+        const list: PdfEngineOption[] = (Array.isArray(payload?.engines) ? payload.engines : []).map((e: any) => ({
+          id: String(e.id || ''),
+          label: String(e.label || e.id || ''),
+          available: e.available !== false,
+          reasonUk: e.reasonUk ? String(e.reasonUk) : undefined,
+        }));
+        setEngines(list);
+        setEngineId((current) => {
+          const usable = (id: string) => list.some((e) => e.id === id && e.available);
+          if (current && usable(current)) return current;
+          const def = typeof payload?.defaultEngineId === 'string' ? payload.defaultEngineId : '';
+          return usable(def) ? def : list.find((e) => e.available)?.id ?? '';
+        });
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setEnginesError(e instanceof Error ? e.message : 'Не вдалося отримати перелік PDF-рушіїв.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    },
+    []
+  );
+
+  const template = instructionPdfTemplateByKey(templateKey);
+  const engine = engines.find((e) => e.id === engineId);
+
+  const render = async () => {
+    if (!engineId) return;
+    const layout = buildInstructionPdfLayout(templateKey, engineId);
+    setState({ status: 'loading' });
+    try {
+      const res = await fetch(apiPath('/api/pdf/author-preview'), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ book: buildBook(layout), engineId, format: 'preview', kind: 'book' }),
+      });
+      if (!res.ok) {
+        let message = `PDF: HTTP ${res.status}`;
+        try {
+          const body = await res.json();
+          if (body?.error) message = String(body.error);
+        } catch {
+          /* лишаємо HTTP-код */
+        }
+        throw new Error(message);
+      }
+      const blob = await res.blob();
+      if (blob.type && blob.type !== 'application/pdf') throw new Error('Сервер повернув не PDF-файл.');
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+      const url = URL.createObjectURL(blob);
+      urlRef.current = url;
+      let note = '';
+      try {
+        note = decodeURIComponent(res.headers.get('X-Pdf-Note') || '');
+      } catch {
+        /* без примітки */
+      }
+      setState({ status: 'done', url, pages: Number(res.headers.get('X-Pdf-Pages') || 0) || undefined, engine: res.headers.get('X-Pdf-Engine') || engineId, note });
+      // Верстка лягає в сам документ інструкції — лише після того, як PDF справді зібрано.
+      onSaved(layout);
+      setSavedNote(layout);
+    } catch (e) {
+      setState({ status: 'error', error: e instanceof Error ? e.message : 'Не вдалося створити PDF.' });
+    }
+  };
+
+  const selCls = 'w-full rounded-lg border border-slate-700 bg-slate-950/70 px-2.5 py-2 text-xs text-slate-200 focus:outline-hidden focus:border-violet-400';
+  return (
+    <div className="rounded-xl border border-sky-400/30 bg-sky-500/10 p-3" data-pdf-layout>
+      <p className="text-sm font-semibold text-sky-200">Верстка PDF за шаблоном книги</p>
+      <p className="mt-1 text-xs text-slate-300">Оберіть існуючий шаблон верстки й рушій — PDF збирається з цієї інструкції (з кадрами), а вибір зберігається в документі.</p>
+      <label className="mt-3 block text-[11px] font-semibold text-slate-400">
+        Шаблон верстки
+        <select value={templateKey} onChange={(e) => setTemplateKey(e.target.value)} className={selCls + ' mt-1'} data-pdf-template>
+          <optgroup label="Для інструкцій">
+            {templates.filter((t) => t.group === 'instruction').map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+          </optgroup>
+          <optgroup label="Шаблони книги">
+            {templates.filter((t) => t.group === 'book').map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+          </optgroup>
+        </select>
+      </label>
+      {template && <p className="mt-1 text-[11px] text-slate-400" data-pdf-template-note>{template.description}</p>}
+      <label className="mt-3 block text-[11px] font-semibold text-slate-400">
+        Рушій верстки
+        <select value={engineId} onChange={(e) => setEngineId(e.target.value)} className={selCls + ' mt-1'} data-pdf-engine disabled={engines.length === 0}>
+          {engines.length === 0 && <option value="">{enginesError ? 'Рушії недоступні' : 'Завантажуємо…'}</option>}
+          {engines.map((e) => <option key={e.id} value={e.id} disabled={!e.available}>{e.label}{e.available ? '' : ' — недоступний'}</option>)}
+        </select>
+      </label>
+      {enginesError && <p className="mt-1 text-[11px] text-rose-300" role="alert">{enginesError}</p>}
+      {engine && !engine.available && engine.reasonUk && <p className="mt-1 text-[11px] text-amber-300">{engine.reasonUk}</p>}
+      <button
+        type="button"
+        data-pdf-render
+        onClick={() => void render()}
+        disabled={!engineId || state.status === 'loading'}
+        className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-sky-500 px-3 py-2 text-xs font-bold text-slate-950 transition-colors hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {state.status === 'loading' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Printer className="h-3.5 w-3.5" />}
+        {state.status === 'loading' ? 'Верстаємо…' : 'Створити PDF'}
+      </button>
+      {state.status === 'error' && <p className="mt-2 text-xs font-semibold text-rose-300" role="alert" data-pdf-error>{state.error}</p>}
+      {state.status === 'done' && state.url && (
+        <div className="mt-2 space-y-1" data-pdf-done>
+          <p className="text-xs font-semibold text-emerald-300">PDF готовий{state.pages ? ` · ${state.pages} стор.` : ''}{state.engine ? ` · рушій ${state.engine}` : ''}</p>
+          {state.note && <p className="text-[11px] text-slate-400">{state.note}</p>}
+          <div className="flex flex-wrap gap-2">
+            <a href={state.url} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-emerald-400/40 px-2.5 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/10">Відкрити PDF</a>
+            <a href={state.url} download={fileName} className="rounded-lg border border-slate-600 px-2.5 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/[0.06]">Завантажити</a>
+          </div>
+        </div>
+      )}
+      {savedNote && <p className="mt-2 text-[11px] text-slate-500" data-pdf-saved>Верстку збережено в документі: {instructionPdfTemplateByKey(savedNote.templateKey)?.label ?? savedNote.templateKey} · {savedNote.engineId}</p>}
+    </div>
+  );
+};
+
+/** Вибір, що саме зробити з готовим документом: верстка за шаблонами Studio, PDF за шаблоном і рушієм чи швидкий друк. */
 const PdfChoiceDialog: React.FC<{
   canLayout: boolean;
   layoutBlockedReason: string | null;
@@ -142,17 +301,19 @@ const PdfChoiceDialog: React.FC<{
   onLayout: () => void;
   onQuickPrint: () => void;
   onClose: () => void;
-}> = ({ canLayout, layoutBlockedReason, busy, onLayout, onQuickPrint, onClose }) => (
+  layoutPanel: React.ReactNode;
+}> = ({ canLayout, layoutBlockedReason, busy, onLayout, onQuickPrint, onClose, layoutPanel }) => (
   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 print:hidden" role="dialog" aria-modal="true" aria-label="Підготувати PDF" data-pdf-choice>
-    <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl">
+    <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl">
       <div className="flex items-start justify-between gap-3">
         <h2 className="text-base font-bold text-slate-100">Підготувати PDF</h2>
         <button type="button" onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:text-slate-200" aria-label="Закрити"><X className="h-4 w-4" /></button>
       </div>
       <div className="mt-4 space-y-3">
+        {layoutPanel}
         <div className="rounded-xl border border-violet-400/30 bg-violet-500/10 p-3">
-          <p className="text-sm font-semibold text-violet-200">Верстка за шаблонами Studio</p>
-          <p className="mt-1 text-xs text-slate-300">Інструкція стає новою книгою в «Книга &amp; Текст»: там можна правити текст, а PDF верстається за шаблонами Studio. Кадри кроків лягають в альбом книги.</p>
+          <p className="text-sm font-semibold text-violet-200">Редагувати в «Книга &amp; Текст»</p>
+          <p className="mt-1 text-xs text-slate-300">Інструкція стає новою книгою: текст і кадри вже на місці, абзаци з тегами блоків (інструмент, деталь, застереження, крок…). Там можна правити текст і верстати PDF за шаблонами Studio.</p>
           {!canLayout && layoutBlockedReason && <p className="mt-2 text-xs font-semibold text-amber-300" data-pdf-choice-blocked>{layoutBlockedReason}</p>}
           <button
             type="button"
@@ -500,12 +661,25 @@ export const InstructionBuilderView: React.FC<{
   };
 
   const printDoc = () => window.print();
-  /** Чому верстку за шаблонами зараз не запустити (null — можна). */
-  const layoutBlockedReason: string | null = !onInstructionBookCreated
-    ? 'У цьому режимі перенесення в книгу недоступне.'
-    : doc.sourceBased && doc.steps.some((st) => st.needsVerification)
-      ? 'Спершу перевірте й підтвердьте всі позначені кроки (галочка «перевірено за джерелами» біля кожного).'
-      : null;
+
+  /** Книга з поточного документа для PDF-верстки: ті самі розділи (з тегами) і кадри, що дає «Створити книгу», але без запиту до ШІ й без запису. */
+  const buildPdfBook = (layout: InstructionPdfLayout): Book =>
+    applyInstructionPdfLayout(
+      buildBookFromInstructionPayload(
+        {
+          title: buildInstructionBookTitle(doc, type),
+          sections: buildInstructionBookSections(doc, type),
+          illustrations: buildInstructionBookIllustrations(doc),
+        },
+        { now: Date.now(), author: '', authorRole: 'writer', designThemeId: layout.designThemeId }
+      ).book,
+      layout
+    );
+  /**
+   * Чому верстку за шаблонами зараз не запустити (null — можна). Вимоги «підтвердити кожен крок за джерелами»
+   * більше немає (власник, 09.11.2026): текст від ШІ й так лягає в книгу з позначкою [AI-DRAFT], а автор правит його там.
+   */
+  const layoutBlockedReason: string | null = !onInstructionBookCreated ? 'У цьому режимі перенесення в книгу недоступне.' : null;
 
   const kbResults = kbQuery.trim()
     ? doc.knowledgeBase.filter((k) => k.title.toLowerCase().includes(kbQuery.trim().toLowerCase()))
@@ -537,10 +711,6 @@ export const InstructionBuilderView: React.FC<{
    */
   const createBook = async () => {
     setCreateBookError(null);
-    if (doc.sourceBased && doc.steps.some(s => s.needsVerification)) {
-      setCreateBookError('Уточніть і підтвердьте всі позначені кроки перед створенням книги.');
-      return;
-    }
     setIsCreatingBook(true);
     const steps = meaningfulInstructionSteps(doc);
     let elaborations: string[] | undefined;
@@ -576,7 +746,7 @@ export const InstructionBuilderView: React.FC<{
     const title = buildInstructionBookTitle(doc, type);
     const illustrations: InstructionBookIllustrationDraft[] = buildInstructionBookIllustrations(doc);
     setIsCreatingBook(false);
-    onInstructionBookCreated?.({ title, sections, ...(illustrations.length ? { illustrations } : {}) });
+    onInstructionBookCreated?.({ title, sections, ...(illustrations.length ? { illustrations } : {}), ...(doc.pdfLayout ? { designThemeId: doc.pdfLayout.designThemeId } : {}) });
   };
 
   return (
@@ -618,7 +788,7 @@ export const InstructionBuilderView: React.FC<{
           <button
             type="button"
             onClick={createBook}
-            disabled={isCreatingBook || (doc.sourceBased && doc.steps.some(s => s.needsVerification))}
+            disabled={isCreatingBook}
             title="Перенести документ у нову книгу «Книга & Текст»; ШІ поглибить кожен крок (позначиться як AI-чернетка)."
             className="inline-flex items-center gap-1.5 rounded-xl bg-violet-500 hover:bg-violet-400 disabled:opacity-60 disabled:cursor-wait px-3 py-2 text-xs font-bold text-white transition-colors"
           >
@@ -842,8 +1012,6 @@ export const InstructionBuilderView: React.FC<{
                     </div>
                   )}
                   {s.sourceIds?.length > 0 && <p className="text-xs text-cyan-200">Джерела: {s.sourceIds.map(id=>doc.knowledgeBase.find(k=>k.id===id)?.title??id).join(', ')}</p>}
-                  {doc.sourceBased && <label className="flex items-center gap-2 text-xs text-amber-200"><input type="checkbox" checked={!s.needsVerification}
-                    onChange={e=>patch({steps:doc.steps.map(x=>x.id===s.id?{...x,needsVerification:!e.target.checked}:x)})}/> Параметри й послідовність цього кроку перевірено за джерелами</label>}
                   {labeled('Критерій правильного виконання', (
                     <input value={s.successCriterion} onChange={(e) => patch({ steps: doc.steps.map((x) => (x.id === s.id ? { ...x, successCriterion: e.target.value } : x)) })} placeholder="Вкажіть ознаку правильного виконання." className={inputCls} />
                   ))}
@@ -1003,6 +1171,14 @@ export const InstructionBuilderView: React.FC<{
           canLayout={!layoutBlockedReason}
           layoutBlockedReason={layoutBlockedReason}
           busy={isCreatingBook}
+          layoutPanel={
+            <PdfLayoutPanel
+              saved={doc.pdfLayout}
+              buildBook={buildPdfBook}
+              onSaved={(layout) => patch({ pdfLayout: layout })}
+              fileName={`${buildInstructionBookTitle(doc, type).replace(/[^\p{L}\p{N}_-]+/gu, '_').slice(0, 60) || 'instruction'}.pdf`}
+            />
+          }
           onLayout={() => { setShowPdfChoice(false); void createBook(); }}
           onQuickPrint={() => { setShowPdfChoice(false); setTimeout(printDoc, 60); }}
           onClose={() => setShowPdfChoice(false)}

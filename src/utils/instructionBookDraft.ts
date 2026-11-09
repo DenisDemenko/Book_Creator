@@ -21,6 +21,7 @@ import { aiDraftText } from '../../shared/aiTextOrigin';
  */
 
 import type { Instruction } from '../types';
+import { buildEntityTag } from './coreEntities';
 import type { InstructionTypeConfig } from '../data/instructionTypes';
 
 /** Ілюстрація майбутньої книги — кадр кроку інструкції; id збігається з маркером `[IMG: …]` у тексті кроку. */
@@ -30,6 +31,16 @@ export interface InstructionBookIllustrationDraft {
   caption: string;
 }
 
+/** Що «Створити книгу» передає в App (і що PDF-верстка просто з конструктора складає в книгу — instructionBook.ts). */
+export interface InstructionBookCreationPayload {
+  title: string;
+  sections: InstructionBookSectionDraft[];
+  /** Кадри кроків: лягають в альбом книги, а в тексті стоять маркерами `[IMG: id …]`. */
+  illustrations?: InstructionBookIllustrationDraft[];
+  /** Шаблон верстки (`BookDesignThemeId`), обраний у документі інструкції. */
+  designThemeId?: string;
+}
+
 export interface InstructionBookSectionDraft {
   /** Заголовок розділу книги (стає title нового Section). */
   title: string;
@@ -37,13 +48,49 @@ export interface InstructionBookSectionDraft {
   content: string;
 }
 
-function listBlock(lines: string[], bullet = '— '): string {
-  return lines
+/**
+ * ТЕГИ БЛОКІВ ІНСТРУКЦІЇ (запит власника 09.11.2026: текст і картинки мають потрапляти в «Книга & Текст» уже з тегами).
+ * Група G реєстру сутностей («Технічні інструкції та послідовності дій») має рівно ті типи, що є в документі:
+ * instruction, step, tool, component, safety-rule, requirement, а `source` і `image` — з груп I і D. Вміст
+ * кожного блока точно відомий (розділ «Безпека» — це правила безпеки), тож теги ставить код, а не модель: без
+ * запиту до Jev, без балів і без здогадів. Що не має однозначного типу (типові помилки, гарантія) лишається
+ * без тега — його можна доповнити кнопкою «Проставити теги автоматично» (Jev) у редакторі.
+ *
+ * Тег — службова мітка `[/тип:значення]` у кінці абзацу: у виданій книзі її немає (stripEntityTags знімає її
+ * на експорті), а індекс тегів і Jev бачать абзац із типом.
+ */
+export const INSTRUCTION_TAG_VALUE_MAX = 80;
+
+function tagOf(slug: string, text: string): string {
+  return buildEntityTag(slug, text.replace(/\s+/g, ' ').trim().slice(0, INSTRUCTION_TAG_VALUE_MAX));
+}
+
+/** Дописує тег у кінець КОЖНОГО абзацу тексту (абзаци розділені порожнім рядком). */
+function tagParagraphs(text: string, tag: string): string {
+  return text
+    .split(/\n{2,}/)
+    .map((p) => (p.trim() ? `${p.trimEnd()} ${tag}` : p))
+    .join('\n\n');
+}
+
+/** Не більше цього числа тегів в одному абзаці (MAX_ENTITIES_PER_PARAGRAPH = 12 у реєстрі) — з запасом. */
+const TAGGED_LINES_PER_PARAGRAPH = 10;
+
+/**
+ * Список рядків; з `slug` кожен рядок несе свій тег, а великий список ріжеться на абзаци по 10 рядків, щоб
+ * не перевищити межу тегів на абзац. Без `slug` — звичайний список, як було.
+ */
+function listBlock(lines: string[], bullet = '— ', slug?: string): string {
+  const items = lines
     .map((l) => l.trim())
     .filter(Boolean)
-    .map((l) => `${bullet}${l}`)
-    .join('\n');
+    .map((l) => `${bullet}${l}${slug ? ` ${tagOf(slug, l)}` : ''}`);
+  if (!slug) return items.join('\n');
+  const chunks: string[] = [];
+  for (let i = 0; i < items.length; i += TAGGED_LINES_PER_PARAGRAPH) chunks.push(items.slice(i, i + TAGGED_LINES_PER_PARAGRAPH).join('\n'));
+  return chunks.join('\n\n');
 }
+
 
 /**
  * Кадри кроків, що потраплять у книгу: ті самі кроки, що й у розділі «Кроки» (змістовні), по порядку.
@@ -93,46 +140,54 @@ export function buildInstructionBookSections(
   const metaLine =
     `Код: ${doc.modelCode.trim() || '—'} · Орієнтовний час: ${doc.estimatedTime.trim() || '—'} · ` +
     `Рівень: ${doc.skillLevel.trim() || '—'} · Виконавців: ${doc.executorsCount.trim() || '—'}`;
-  const overviewParas = [metaLine];
-  if (doc.description.trim()) overviewParas.push(doc.description.trim());
+  const overviewParas = [`${metaLine} ${tagOf('instruction', buildInstructionBookTitle(doc, type))}`];
+  if (doc.description.trim()) overviewParas.push(tagParagraphs(doc.description.trim(), tagOf('instruction', buildInstructionBookTitle(doc, type))));
   sections.push({ title: type.sections.overview.heading, content: overviewParas.join('\n\n') });
 
   const materials = doc.materials.filter((m) => m.name.trim());
   if (materials.length) {
     sections.push({
       title: type.sections.materials.heading,
-      content: listBlock(materials.map((m) => `${m.name.trim()}${m.qty.trim() ? ` — ${m.qty.trim()}` : ''}`)),
+      content: listBlock(materials.map((m) => `${m.name.trim()}${m.qty.trim() ? ` — ${m.qty.trim()}` : ''}`), '— ', 'component'),
     });
   }
 
   const tools = doc.tools.filter((t) => t.trim());
   if (tools.length) {
-    sections.push({ title: type.sections.tools.heading, content: listBlock(tools) });
+    sections.push({ title: type.sections.tools.heading, content: listBlock(tools, '— ', 'tool') });
   }
 
   const warnings = doc.warnings.filter((w) => w.trim());
   if (warnings.length) {
-    sections.push({ title: type.sections.warnings.heading, content: listBlock(warnings, '⚠ ') });
+    sections.push({ title: type.sections.warnings.heading, content: listBlock(warnings, '⚠ ', 'safety-rule') });
   }
 
   const steps = doc.steps.filter((s) => s.title.trim() || s.description.trim());
   if (steps.length) {
     const images = stepImageEntries(doc);
     const blocks = steps.map((s, i) => {
-      const parts: string[] = [`### ${i + 1}. ${s.title.trim() || `${type.stepPrefix} ${i + 1}`}`];
-      if (s.description.trim()) parts.push(s.aiGenerated ? '[AI-DRAFT]\n\n' + s.description.trim() + '\n\n[/AI-DRAFT]' : s.description.trim());
+      const stepName = `${i + 1}. ${s.title.trim() || `${type.stepPrefix} ${i + 1}`}`;
+      const stepTag = tagOf('step', stepName);
+      const parts: string[] = [`### ${stepName} ${stepTag}`];
+      if (s.description.trim()) {
+        const body = tagParagraphs(s.description.trim(), stepTag);
+        parts.push(s.aiGenerated ? '[AI-DRAFT]\n\n' + body + '\n\n[/AI-DRAFT]' : body);
+      }
       const stepImages = images.filter((im) => im.stepIndex === i);
-      if (stepImages.length) parts.push(stepImages.map((im) => `[IMG: ${im.id} "${im.caption}" wrap=none]`).join('\n\n'));
+      if (stepImages.length) parts.push(stepImages.map((im) => `[IMG: ${im.id} "${im.caption}" wrap=none] ${tagOf('image', im.caption)} ${stepTag}`).join('\n\n'));
+      // Службові рядки кроку лежать одним абзацом, тож кожен рядок несе свій тип (до 12 тегів на абзац).
       const extra: string[] = [];
-      if (s.components.trim()) extra.push(`Компоненти/матеріали кроку: ${s.components.trim()}`);
-      if (s.toolsResources.trim()) extra.push(`Інструменти/ресурси: ${s.toolsResources.trim()}`);
-      if (s.warning.trim()) extra.push(`⚠ ${s.warning.trim()}`);
-      if (s.successCriterion.trim()) extra.push(`Критерій виконання: ${s.successCriterion.trim()}`);
-      if (s.sourceIds?.length) extra.push('Джерела: ' + s.sourceIds.map(id => doc.knowledgeBase.find(k => k.id === id)?.title || id).join('; '));
-      if (s.needsVerification) extra.push('Потребує перевірки перед використанням.');
-      if (extra.length) parts.push(extra.join('\n'));
+      if (s.components.trim()) extra.push(`Компоненти/матеріали кроку: ${s.components.trim()} ${tagOf('component', s.components)}`);
+      if (s.toolsResources.trim()) extra.push(`Інструменти/ресурси: ${s.toolsResources.trim()} ${tagOf('tool', s.toolsResources)}`);
+      if (s.warning.trim()) extra.push(`⚠ ${s.warning.trim()} ${tagOf('safety-rule', s.warning)}`);
+      if (s.successCriterion.trim()) extra.push(`Критерій виконання: ${s.successCriterion.trim()} ${tagOf('requirement', s.successCriterion)}`);
+      if (s.sourceIds?.length) {
+        const names = s.sourceIds.map((id) => doc.knowledgeBase.find((k) => k.id === id)?.title || id);
+        extra.push('Джерела: ' + names.join('; ') + ' ' + names.slice(0, 4).map((n) => tagOf('source', n)).join(' '));
+      }
+      if (extra.length) parts.push(extra.join('\n') + ` ${stepTag}`);
       const elaboration = elaborations?.[i]?.trim();
-      if (elaboration) parts.push(`[AI-DRAFT]\n\n${elaboration}\n\n[/AI-DRAFT]`);
+      if (elaboration) parts.push(`[AI-DRAFT]\n\n${tagParagraphs(elaboration, stepTag)}\n\n[/AI-DRAFT]`);
       return s.aiGenerated ? aiDraftText(parts.join('\n\n')) : parts.join('\n\n');
     });
     sections.push({ title: type.sections.steps.heading, content: blocks.join('\n\n') });
@@ -140,7 +195,7 @@ export function buildInstructionBookSections(
 
   const finalChecks = doc.finalChecks.filter((c) => c.trim());
   if (finalChecks.length) {
-    sections.push({ title: type.sections.finalCheck.heading, content: listBlock(finalChecks, '☐ ') });
+    sections.push({ title: type.sections.finalCheck.heading, content: listBlock(finalChecks, '☐ ', 'requirement') });
   }
 
   const issues = doc.troubleshooting.filter((r) => r.issue.trim() || r.cause.trim() || r.action.trim());
@@ -168,14 +223,19 @@ export function buildInstructionBookSections(
   if (kb.length) {
     sections.push({
       title: type.sections.knowledgeBase.heading,
-      content: listBlock(
-        kb.map(
+      content: kb
+        .map(
           (k) =>
-            `${k.title.trim()}${k.link.trim() ? ` — ${k.link.trim()}` : ''}${
+            `— ${k.title.trim()}${k.link.trim() ? ` — ${k.link.trim()}` : ''}${
               k.excerpt.trim() ? `: ${k.excerpt.trim()}` : ''
-            }`
+            } ${tagOf('source', k.title)}`
         )
-      ),
+        .reduce<string[]>((chunks, line, i) => {
+          if (i % TAGGED_LINES_PER_PARAGRAPH === 0) chunks.push(line);
+          else chunks[chunks.length - 1] += `\n${line}`;
+          return chunks;
+        }, [])
+        .join('\n\n'),
     });
   }
 

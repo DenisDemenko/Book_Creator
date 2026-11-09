@@ -646,7 +646,25 @@ export interface InstructionWarranty {
   notes: string;
 }
 
+/**
+ * Верстка PDF, обрана для інструкції (src/utils/instructionPdf.ts): шаблон і рушій. Зберігається в самому документі —
+ * наступне відкриття діалогу «Друкувати / PDF» і книга, створена з цього документа, беруть її звідти.
+ */
+export interface InstructionPdfLayout {
+  /** Рушій PDF (`GET /api/pdf/engines`): nova | designcraft | chromium | pandoc. */
+  engineId: string;
+  /** Ключ вибору в діалозі: `edu:<id>` (навчальний шаблон для інструкцій) чи `book:<id>` (шаблон книги). */
+  templateKey: string;
+  /** Шаблон книги, який реально отримує рушій (`layoutConfig.bookDesignThemeId`). */
+  designThemeId: string;
+  /** Навчальний шаблон, якщо обрано його: рушій бере базовий `designThemeId`, а сам id лишається для рушіїв, що його читають. */
+  educationalTemplateId?: string;
+  updatedAt: string;
+}
+
 export interface Instruction {
+  /** Верстка PDF, обрана автором для цього документа; немає — діалог пропонує типову. */
+  pdfLayout?: InstructionPdfLayout;
   /**
    * K3: інструкція набору. `specWarnings` — рядки розділу «Безпека», узяті зі специфікації
    * (вік, попередження); вони оновлюються з неї, решта рядків — ручні й не чіпаються.
